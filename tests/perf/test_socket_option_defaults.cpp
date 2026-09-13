@@ -134,7 +134,7 @@ TEST(SocketOptionDefaults, AcceptorLegConfigPassThrough) {
     lcfg.ssl_cfg = fixpp::tls::SslCtxConfig{};
 
     asio_listener listener{ioc.get_executor(), std::move(lcfg)};
-    EXPECT_GT(listener.bound_endpoint().port, 0u);
+    EXPECT_GT(listener.bound_endpoint().port, 0U);
 }
 
 }  // namespace

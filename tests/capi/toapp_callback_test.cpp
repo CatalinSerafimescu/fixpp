@@ -139,7 +139,7 @@ TEST(ToappCallback, SendVerdictTransmits) {
     LoopbackPair pair;
     ASSERT_NE(pair.open("ACC-SEND", "INI-SEND", "INI-SEND", "ACC-SEND", a_send_cb, nullptr, b_cb,
                         &b_received),
-              0u)
+              0U)
         << "loopback pair setup failed";
 
     const auto payload = make_app_payload("SENDIT");
@@ -171,7 +171,7 @@ TEST(ToappCallback, VetoVerdictSuppresses) {
     LoopbackPair pair;
     ASSERT_NE(pair.open("ACC-VETO", "INI-VETO", "INI-VETO", "ACC-VETO", a_send_cb, nullptr, b_cb,
                         &b_received),
-              0u)
+              0U)
         << "loopback pair setup failed";
 
     const auto payload = make_app_payload("VETOME");
@@ -200,7 +200,7 @@ TEST(ToappCallback, ErrorVerdictTerminalClose) {
     };
 
     LoopbackPair pair;
-    ASSERT_NE(pair.open("ACC-ERR", "INI-ERR", "INI-ERR", "ACC-ERR", a_send_cb, nullptr), 0u)
+    ASSERT_NE(pair.open("ACC-ERR", "INI-ERR", "INI-ERR", "ACC-ERR", a_send_cb, nullptr), 0U)
         << "loopback pair setup failed";
 
     const auto payload = make_app_payload("ERRIT");
@@ -224,7 +224,7 @@ TEST(ToappCallback, OutOfRangeVerdictTreatedAsError) {
     };
 
     LoopbackPair pair;
-    ASSERT_NE(pair.open("ACC-OOR", "INI-OOR", "INI-OOR", "ACC-OOR", a_send_cb, nullptr), 0u)
+    ASSERT_NE(pair.open("ACC-OOR", "INI-OOR", "INI-OOR", "ACC-OOR", a_send_cb, nullptr), 0U)
         << "loopback pair setup failed";
 
     const auto payload = make_app_payload("OORIT");
@@ -268,7 +268,7 @@ TEST(ToappCallback, FramedViewFramingTagReadable) {
 
     LoopbackPair pair;
     ASSERT_NE(pair.open("ACC-FRAMED", "INI-FRAMED", "INI-FRAMED", "ACC-FRAMED", a_send_cb, &ctx),
-              0u)
+              0U)
         << "loopback pair setup failed";
 
     const auto payload = make_app_payload("FRAMED");

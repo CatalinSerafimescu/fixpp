@@ -43,7 +43,7 @@ inline unsigned current_pid() noexcept {
 
 namespace {
 
-constexpr std::size_t kArenaSize = 256u * 1024u;
+constexpr std::size_t kArenaSize = 256U * 1024U;
 
 struct Arena {
     std::array<std::byte, kArenaSize> buf{};

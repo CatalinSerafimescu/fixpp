@@ -51,6 +51,7 @@
 #include <fixpp/transport/transport_factory.hpp>
 #include <memory>
 #include <mutex>
+#include <ranges>
 #include <span>
 #include <string>
 #include <vector>
@@ -130,7 +131,7 @@ const char* get_fixture_dir() {
 
 // Reserve a free loopback port so we can register the acceptor + initiator with
 // the same port before start() (mirrors engine_lifecycle_test.cpp).
-static uint16_t reserve_free_port(asio::io_context& ioc) {
+uint16_t reserve_free_port(asio::io_context& ioc) {
     asio::ip::tcp::acceptor a{ioc};
     asio::ip::tcp::endpoint ep{asio::ip::make_address("127.0.0.1"), 0};
     a.open(ep.protocol());
@@ -159,14 +160,14 @@ public:
         auto fv = msg.get(35);
         std::string mt = fv ? std::string(fv->as_string()) : "<none>";
         {
-            std::lock_guard<std::mutex> lk(mu);
-            records.push_back({id, std::move(mt)});
+            std::scoped_lock lk(mu);
+            records.push_back({.session_id = id, .msg_type = std::move(mt)});
         }
         return {};
     }
 
     int count_for(const SessionId& id) const {
-        std::lock_guard<std::mutex> lk(mu);
+        std::scoped_lock lk(mu);
         int n = 0;
         for (const auto& r : records)
             if (r.session_id == id) ++n;
@@ -174,16 +175,16 @@ public:
     }
 
     std::string last_msg_type_for(const SessionId& id) const {
-        std::lock_guard<std::mutex> lk(mu);
-        for (auto it = records.rbegin(); it != records.rend(); ++it)
-            if (it->session_id == id) return it->msg_type;
+        std::scoped_lock lk(mu);
+        for (const auto& record : std::views::reverse(records))
+            if (record.session_id == id) return record.msg_type;
         return {};
     }
 };
 
 // ── Opaque payload builders ───────────────────────────────────────────────────
 
-static std::vector<std::byte> make_nos_payload() {
+std::vector<std::byte> make_nos_payload() {
     // NewOrderSingle body fields. MsgType (35=D) MUST be included in the
     // payload so the receiver's frame-scanner extracts it for fromApp dispatch.
     // Session::send_impl writes 8=/9=/34=/49=/52=/56= then appends app_payload;
@@ -200,7 +201,7 @@ static std::vector<std::byte> make_nos_payload() {
     return v;
 }
 
-static std::vector<std::byte> make_exec_report_payload() {
+std::vector<std::byte> make_exec_report_payload() {
     // ExecutionReport body fields. MsgType (35=8) included for the same reason.
     static const char k[] =
         "35=8\x01"
@@ -295,7 +296,8 @@ TEST(G2EnablementWitness, OpaqueRoundTripViaEngineLoopback) {
     // ── Start engine and wait for both sessions to reach Active ──────────────
     ASSERT_TRUE(engine.start().has_value()) << "engine.start() failed";
 
-    bool acc_active = false, ini_active = false;
+    bool acc_active = false;
+    bool ini_active = false;
     auto deadline_logon = std::chrono::steady_clock::now() + 5s;
     while (std::chrono::steady_clock::now() < deadline_logon && (!acc_active || !ini_active)) {
         ioc.run_for(100ms);

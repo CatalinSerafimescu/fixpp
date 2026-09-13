@@ -104,7 +104,7 @@ TEST(StoreFifoFair, TwoCoroutinesInboundOutboundBothSucceed) {
     auto verify_fut = asio::co_spawn(
         verify_pool.get_executor(),
         [&store]() -> asio::awaitable<void> {
-            byte_collecting_visitor iv, ov;
+            byte_collecting_visitor iv, ov;  // NOLINT(readability-isolate-declaration)
             auto ri = co_await store.retrieve(1, 0, direction_t::inbound, iv);
             EXPECT_TRUE(ri.has_value()) << "inbound retrieve failed";
             EXPECT_EQ(iv.entries().size(), static_cast<std::size_t>(kFrames));
@@ -243,7 +243,7 @@ TEST(StoreFifoFair, HighConcurrencyMutexGuardsStore) {
     auto vfut = asio::co_spawn(
         vpool.get_executor(),
         [store]() -> asio::awaitable<void> {
-            byte_collecting_visitor iv, ov;
+            byte_collecting_visitor iv, ov;  // NOLINT(readability-isolate-declaration)
             auto ri = co_await store->retrieve(1, 0, direction_t::inbound, iv);
             EXPECT_TRUE(ri.has_value());
             EXPECT_EQ(iv.entries().size(), static_cast<std::size_t>(kFrames));

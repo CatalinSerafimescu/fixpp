@@ -56,10 +56,10 @@ TEST(ReadbackJsonl, EscapesQuoteBackslashAndControlByte) {
         Stream s(path);
         ASSERT_TRUE(s.ok());
         s.readback("D", 1, "fixpp-to-peer", 0, false,
-                   {{"58", std::string("quote\" back\\slash \x01 ctrl")}}, {});
+                   {{.path = "58", .value = std::string("quote\" back\\slash \x01 ctrl")}}, {});
     }
     auto const lines = read_lines(path);
-    ASSERT_EQ(lines.size(), 1u);
+    ASSERT_EQ(lines.size(), 1U);
     // `"` -> \", `\` -> \\, byte < 0x20 -> \u00xx LOWER hex — no other escape
     // spelling is permitted (contract table: "No optional escaping").
     EXPECT_NE(lines[0].find("\"value\":\"quote\\\" back\\\\slash \\u0001 ctrl\""),
@@ -71,10 +71,11 @@ TEST(ReadbackJsonl, MultiByteUtf8IsEmittedLiterally) {
     std::string const path = testing::TempDir() + "escape_utf8.jsonl";
     {
         Stream s(path);
-        s.readback("D", 1, "fixpp-to-peer", 0, false, {{"58", "e\xcc\x81 utf8 multi-byte"}}, {});
+        s.readback("D", 1, "fixpp-to-peer", 0, false,
+                   {{.path = "58", .value = "e\xcc\x81 utf8 multi-byte"}}, {});
     }
     auto const lines = read_lines(path);
-    ASSERT_EQ(lines.size(), 1u);
+    ASSERT_EQ(lines.size(), 1U);
     // Valid multi-byte UTF-8 is NOT escaped as \uXXXX — literal bytes, `value` key.
     EXPECT_NE(lines[0].find("\"value\":\"e\xcc\x81 utf8 multi-byte\""), std::string::npos)
         << lines[0];
@@ -85,10 +86,11 @@ TEST(ReadbackJsonl, NonUtf8BytesRouteToValueB64) {
     std::string const path = testing::TempDir() + "escape_nonutf8.jsonl";
     {
         Stream s(path);
-        s.readback("D", 1, "fixpp-to-peer", 0, false, {{"355", std::string("\xff\xfe", 2)}}, {});
+        s.readback("D", 1, "fixpp-to-peer", 0, false,
+                   {{.path = "355", .value = std::string("\xff\xfe", 2)}}, {});
     }
     auto const lines = read_lines(path);
-    ASSERT_EQ(lines.size(), 1u);
+    ASSERT_EQ(lines.size(), 1U);
     // 0xff 0xfe is not valid UTF-8 in any position -> value_b64, no `value` key
     // for that entry. base64("\xff\xfe") == "//4=".
     EXPECT_NE(lines[0].find("{\"path\":\"355\",\"value_b64\":\"//4=\"}"), std::string::npos)
@@ -104,24 +106,27 @@ TEST(ReadbackJsonl, CanonicalSortRemovesWalkOrderForFieldsAndTypedReads) {
         // Deliberately scrambled, INCLUDING a numeric-vs-lexicographic trap
         // (9 before 55: a lexicographic-string sort would put "453" before
         // "55" before "9"; the contract's numeric tuple sort must not).
-        s.readback(
-            "D", 7, "fixpp-to-peer", 0, false,
-            {
-                {"453[1].448", "second"},
-                {"453[0].802[0].523", "nested"},
-                {"453[0].448", "first"},
-                {"55", "AAPL"},
-                {"9", "ignored-order"},
-                {"453", "2"},
-            },
-            {
-                {"60", "UTCTIMESTAMP", canonical_typed_value("UTCTIMESTAMP", "20260101-00:00:00")},
-                {"9", "SEQNUM", "1"},
-                {"44", "PRICE", canonical_typed_value("PRICE", "190.500")},
-            });
+        s.readback("D", 7, "fixpp-to-peer", 0, false,
+                   {
+                       {.path = "453[1].448", .value = "second"},
+                       {.path = "453[0].802[0].523", .value = "nested"},
+                       {.path = "453[0].448", .value = "first"},
+                       {.path = "55", .value = "AAPL"},
+                       {.path = "9", .value = "ignored-order"},
+                       {.path = "453", .value = "2"},
+                   },
+                   {
+                       {.path = "60",
+                        .fix_type = "UTCTIMESTAMP",
+                        .value = canonical_typed_value("UTCTIMESTAMP", "20260101-00:00:00")},
+                       {.path = "9", .fix_type = "SEQNUM", .value = "1"},
+                       {.path = "44",
+                        .fix_type = "PRICE",
+                        .value = canonical_typed_value("PRICE", "190.500")},
+                   });
     }
     auto const lines = read_lines(path);
-    ASSERT_EQ(lines.size(), 1u);
+    ASSERT_EQ(lines.size(), 1U);
     // Asserts the EXACT byte string in canonical (numeric-tuple, ascending)
     // order — deleting the sort call in render_fields()/render_typed()
     // changes this byte string (manually verified: emit_fixpp_fixture.cpp
@@ -153,10 +158,13 @@ TEST(ReadbackJsonl, GroupCountAndInstancesBothPresent) {
     {
         Stream s(path);
         s.readback("D", 7, "fixpp-to-peer", 0, false,
-                   {{"453", "2"}, {"453[0].448", "first"}, {"453[1].448", "second"}}, {});
+                   {{.path = "453", .value = "2"},
+                    {.path = "453[0].448", .value = "first"},
+                    {.path = "453[1].448", .value = "second"}},
+                   {});
     }
     auto const lines = read_lines(path);
-    ASSERT_EQ(lines.size(), 1u);
+    ASSERT_EQ(lines.size(), 1U);
     EXPECT_NE(lines[0].find("{\"path\":\"453\",\"value\":\"2\"}"), std::string::npos) << lines[0];
     EXPECT_NE(lines[0].find("{\"path\":\"453[0].448\",\"value\":\"first\"}"), std::string::npos)
         << lines[0];
@@ -173,7 +181,7 @@ TEST(ReadbackJsonl, HelloFollowsSection1aNotSection1) {
         s.hello("run-1", "cell-1", "normal", "abc", "validation-on", true, "sha256:dict-d");
     }
     auto const lines = read_lines(path);
-    ASSERT_EQ(lines.size(), 1u);
+    ASSERT_EQ(lines.size(), 1U);
     EXPECT_EQ(
         lines[0],
         "{\"type\":\"hello\",\"run_id\":\"run-1\",\"cell_id\":\"cell-1\",\"config\":\"normal\","
@@ -193,14 +201,14 @@ TEST(ReadbackJsonl, TerminalWrittenExactlyOnce) {
     std::string const path = testing::TempDir() + "terminal_once.jsonl";
     {
         Stream s(path);
-        s.readback("D", 1, "fixpp-to-peer", 0, false, {{"1", "x"}}, {});
+        s.readback("D", 1, "fixpp-to-peer", 0, false, {{.path = "1", .value = "x"}}, {});
         s.terminal("completed", "run-1", "cell-1", "normal", "abc");
         // A second call (e.g. a graceful-then-forced double teardown) must
         // not overwrite the first disposition.
         s.terminal("aborted", "run-1", "cell-1", "normal", "abc");
     }
     auto const lines = read_lines(path);
-    ASSERT_EQ(lines.size(), 2u);
+    ASSERT_EQ(lines.size(), 2U);
     EXPECT_NE(lines[1].find("\"terminal_state\":\"completed\""), std::string::npos) << lines[1];
     EXPECT_NE(lines[1].find("\"sent_count\":0"), std::string::npos) << lines[1];
     EXPECT_NE(lines[1].find("\"readback_count\":1"), std::string::npos) << lines[1];
@@ -215,7 +223,7 @@ TEST(ReadbackJsonl, DispositionAcceptedCarriesNoRejectObject) {
         s.disposition("D", 7, kDirectionPeerToFixpp, 0, "accepted");
     }
     auto const lines = read_lines(path);
-    ASSERT_EQ(lines.size(), 1u);
+    ASSERT_EQ(lines.size(), 1U);
     EXPECT_EQ(lines[0],
               "{\"type\":\"disposition\",\"msg_type\":\"D\",\"seq_num\":7,"
               "\"direction\":\"peer-to-fixpp\",\"occurrence\":0,\"disposition\":\"accepted\"}");
@@ -234,7 +242,7 @@ TEST(ReadbackJsonl, DispositionRejectedCarries45_373_371_58WhenAllPresent) {
         s.disposition("D", 7, kDirectionPeerToFixpp, 0, "rejected", reject);
     }
     auto const lines = read_lines(path);
-    ASSERT_EQ(lines.size(), 1u);
+    ASSERT_EQ(lines.size(), 1U);
     EXPECT_EQ(lines[0],
               "{\"type\":\"disposition\",\"msg_type\":\"D\",\"seq_num\":7,"
               "\"direction\":\"peer-to-fixpp\",\"occurrence\":0,\"disposition\":\"rejected\","
@@ -254,7 +262,7 @@ TEST(ReadbackJsonl, DispositionRejectedOmitsRefTagAndTextWhenTheRejectDidnt) {
         s.disposition("D", 3, kDirectionPeerToFixpp, 1, "rejected", reject);
     }
     auto const lines = read_lines(path);
-    ASSERT_EQ(lines.size(), 1u);
+    ASSERT_EQ(lines.size(), 1U);
     EXPECT_EQ(lines[0],
               "{\"type\":\"disposition\",\"msg_type\":\"D\",\"seq_num\":3,"
               "\"direction\":\"peer-to-fixpp\",\"occurrence\":1,\"disposition\":\"rejected\","

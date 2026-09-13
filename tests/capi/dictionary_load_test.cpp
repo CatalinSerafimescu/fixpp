@@ -147,7 +147,7 @@ TEST(DictLoadFromXml, MissingFileReturnsConfigInvalid) {
     // fixpp_strerror must return a non-empty description (not "" or nullptr)
     const char* msg = fixpp_strerror(err);
     EXPECT_NE(msg, nullptr);
-    EXPECT_GT(std::string_view{msg}.size(), 0u);
+    EXPECT_GT(std::string_view{msg}.size(), 0U);
 }
 
 // ── Negative: syntactically malformed XML → FIXPP_ERR_CAPI_CONFIG_INVALID ─────
@@ -167,7 +167,7 @@ TEST(DictLoadFromXml, MalformedXmlReturnsConfigInvalid) {
     EXPECT_EQ(d, nullptr);
     const char* msg = fixpp_strerror(err);
     EXPECT_NE(msg, nullptr);
-    EXPECT_GT(std::string_view{msg}.size(), 0u);
+    EXPECT_GT(std::string_view{msg}.size(), 0U);
 
     std::filesystem::remove(tmp);
 }

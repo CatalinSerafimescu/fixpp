@@ -209,7 +209,7 @@ ClassSide parse_class_side(const std::string& path) {
     std::function<const std::set<int>&(int)> closure = [&](int gid) -> const std::set<int>& {
         auto cached = cache.find(gid);
         if (cached != cache.end()) return cached->second;
-        if (in_progress.count(gid))
+        if (in_progress.contains(gid))
             throw std::runtime_error("class-side group cycle at G_" + std::to_string(gid));
         auto bit = group_body.find(gid);
         if (bit == group_body.end())
@@ -299,7 +299,7 @@ ManifestSide parse_manifest_projected(const std::string& path) {
     std::function<const std::set<int>&(int)> closure = [&](int gid) -> const std::set<int>& {
         auto cached = cache.find(gid);
         if (cached != cache.end()) return cached->second;
-        if (in_progress.count(gid))
+        if (in_progress.contains(gid))
             throw std::runtime_error("manifest-side group cycle at " + std::to_string(gid));
         in_progress.insert(gid);
         std::set<int> result;
@@ -307,7 +307,7 @@ ManifestSide parse_manifest_projected(const std::string& path) {
         if (mit != member_tags.end()) {
             result = mit->second;
             for (int t : mit->second) {
-                if (member_tags.count(t)) {
+                if (member_tags.contains(t)) {
                     const std::set<int>& sub = closure(t);
                     result.insert(sub.begin(), sub.end());
                 }
@@ -322,7 +322,7 @@ ManifestSide parse_manifest_projected(const std::string& path) {
     for (auto& [msg, tags] : top_level) {
         std::set<int> reach = tags;
         for (int t : tags) {
-            if (member_tags.count(t)) {
+            if (member_tags.contains(t)) {
                 const std::set<int>& sub = closure(t);
                 reach.insert(sub.begin(), sub.end());
             }
@@ -368,11 +368,10 @@ TEST(VlatestManifestClassConsistency, MessageSetExact181) {
     EXPECT_EQ(s.ms.msg_types.size(), 181U)
         << "manifest-side (projected Manifest.txt) message count";
 
-    std::vector<std::string> only_class, only_manifest;
-    std::set_difference(s.cs.msg_types.begin(), s.cs.msg_types.end(), s.ms.msg_types.begin(),
-                        s.ms.msg_types.end(), std::back_inserter(only_class));
-    std::set_difference(s.ms.msg_types.begin(), s.ms.msg_types.end(), s.cs.msg_types.begin(),
-                        s.cs.msg_types.end(), std::back_inserter(only_manifest));
+    std::vector<std::string> only_class;
+    std::vector<std::string> only_manifest;
+    std::ranges::set_difference(s.cs.msg_types, s.ms.msg_types, std::back_inserter(only_class));
+    std::ranges::set_difference(s.ms.msg_types, s.cs.msg_types, std::back_inserter(only_manifest));
 
     auto join = [](const std::vector<std::string>& v) {
         std::ostringstream oss;
@@ -397,10 +396,10 @@ TEST(VlatestManifestClassConsistency, PerMessageReachableFieldSetExact) {
         const std::set<int>& a = s.cs.reachable.at(mt);
         const std::set<int>& b = s.ms.reachable.at(mt);
         if (a == b) continue;
-        std::vector<int> only_class, only_manifest;
-        std::set_difference(a.begin(), a.end(), b.begin(), b.end(), std::back_inserter(only_class));
-        std::set_difference(b.begin(), b.end(), a.begin(), a.end(),
-                            std::back_inserter(only_manifest));
+        std::vector<int> only_class;
+        std::vector<int> only_manifest;
+        std::ranges::set_difference(a, b, std::back_inserter(only_class));
+        std::ranges::set_difference(b, a, std::back_inserter(only_manifest));
         std::ostringstream oss;
         oss << "msg_type=" << mt << " class-only=[" << describe_tags(only_class)
             << "] manifest-only=[" << describe_tags(only_manifest) << "]";

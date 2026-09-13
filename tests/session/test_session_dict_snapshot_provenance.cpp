@@ -205,7 +205,7 @@ struct ProvenanceFixture {
         (void)fut.get();
     }
 
-    bool has_reject_with_reason(int reason) const {
+    [[nodiscard]] bool has_reject_with_reason(int reason) const {
         for (auto const& frame : transport.sent_frames()) {
             if (extract_field(frame, 35) == "3") {
                 auto r373 = extract_field(frame, 373);

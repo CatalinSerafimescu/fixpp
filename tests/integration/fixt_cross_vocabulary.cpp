@@ -60,10 +60,10 @@ using MV = fixpp::wire::MessageView<fixpp::wire::access_mode::Index>;
 // FIXT.1.1 session. The DefaultApplVerID was negotiated at Logon time as
 // FIX.5.0SP2 (ApplVerID wire value "9" → application_version::v50sp2).
 constexpr version_profile kSessionProfile{
-    session_version::vt11,        // FIXT.1.1 session layer
-    application_version::v50sp2,  // DefaultApplVerID negotiated at Logon
-    true,                         // per-message ApplVerID(1128) allowed
-    0                             // _reserved
+    .session = session_version::vt11,             // FIXT.1.1 session layer
+    .default_appl = application_version::v50sp2,  // DefaultApplVerID negotiated at Logon
+    .has_per_message_override = true,             // per-message ApplVerID(1128) allowed
+    ._reserved = 0                                // _reserved
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -187,8 +187,10 @@ TEST(FixtCrossVocabulary, UnknownDefaultProfileResolutionDecision) {
     // Profile with Unknown DefaultApplVerID + absent ApplVerID(1128) →
     // dict_unresolved_application_version (AC-D6 propagation path).
     // Verified at the resolve_application_version level (PURE function).
-    version_profile const unknown_default{session_version::vt11, application_version::Unknown, true,
-                                          0};
+    version_profile const unknown_default{.session = session_version::vt11,
+                                          .default_appl = application_version::Unknown,
+                                          .has_per_message_override = true,
+                                          ._reserved = 0};
     auto res = resolve_application_version(unknown_default, "");
     ASSERT_FALSE(res.has_value());
     EXPECT_EQ(res.error(), error::dict_unresolved_application_version)

@@ -197,10 +197,11 @@ std::vector<CorpusEntry> load_corpus() {
 TEST(StoreCorpusReplay, MemoryStoreRoundTrip) {
     asio::thread_pool pool{1};
     auto corpus = load_corpus();
-    ASSERT_GT(corpus.size(), 0u) << "corpus must be non-empty";
+    ASSERT_GT(corpus.size(), 0U) << "corpus must be non-empty";
 
     // Separate inbound and outbound entries
-    std::vector<CorpusEntry*> inbound_entries, outbound_entries;
+    std::vector<CorpusEntry*> inbound_entries;
+    std::vector<CorpusEntry*> outbound_entries;
     for (auto& e : corpus) {
         if (e.dir == direction_t::inbound)
             inbound_entries.push_back(&e);
@@ -252,12 +253,13 @@ TEST(StoreCorpusReplay, MemoryStoreRoundTrip) {
 TEST(StoreCorpusReplay, FileStoreRoundTrip) {
     asio::thread_pool pool{2};
     auto corpus = load_corpus();
-    ASSERT_GT(corpus.size(), 0u) << "corpus must be non-empty";
+    ASSERT_GT(corpus.size(), 0U) << "corpus must be non-empty";
 
     auto base_dir = fs::temp_directory_path() / "fixpp_test_corpus_replay";
     fs::create_directories(base_dir);
 
-    std::vector<CorpusEntry*> inbound_entries, outbound_entries;
+    std::vector<CorpusEntry*> inbound_entries;
+    std::vector<CorpusEntry*> outbound_entries;
     for (auto& e : corpus) {
         if (e.dir == direction_t::inbound)
             inbound_entries.push_back(&e);

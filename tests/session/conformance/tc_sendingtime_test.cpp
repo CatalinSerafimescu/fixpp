@@ -59,10 +59,12 @@ namespace {
 // ── Frame builders ────────────────────────────────────────────────────────────
 
 // Build a frame with an explicit SendingTime value.
-static std::vector<std::byte> make_frame_with_sending_time(
-    std::string_view begin_string, std::string_view msg_type, std::uint32_t seq,
-    std::string_view sender, std::string_view target, std::string_view sending_time,
-    std::string_view extra_body = {}) {
+std::vector<std::byte> make_frame_with_sending_time(std::string_view begin_string,
+                                                    std::string_view msg_type, std::uint32_t seq,
+                                                    std::string_view sender,
+                                                    std::string_view target,
+                                                    std::string_view sending_time,
+                                                    std::string_view extra_body = {}) {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -94,7 +96,7 @@ static std::vector<std::byte> make_frame_with_sending_time(
     return frame;
 }
 
-static std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag_wanted) {
+std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag_wanted) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = std::to_string(tag_wanted) + "=";
     auto pos = wire.find(needle);

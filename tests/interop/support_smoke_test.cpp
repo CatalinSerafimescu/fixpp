@@ -35,7 +35,7 @@ const char* kGolden =
 
 TEST(InteropSupportSmoke, GoldenParseRoundtrip) {
     auto frames = parse_golden(kGolden);
-    ASSERT_EQ(frames.size(), 2u);
+    ASSERT_EQ(frames.size(), 2U);
     EXPECT_EQ(frames[0].dir, '>');
     EXPECT_EQ(frames[1].dir, '<');
     // The \x01 escape decoded to a real SOH byte (0x01).
@@ -139,9 +139,9 @@ static AdminScenarioDescriptor make_valid_descriptor() {
     d.induction = AdminInduction::inbound_silence;
     d.self_deadline_ms = std::chrono::milliseconds{10000};
     d.round_trips = {
-        {"US1-1", "[FIX-SL §4.5.5]"},
-        {"US1-2", "[FIX-SL §4.5.1]"},
-        {"US1-3", "[FIX-SL §4.5.5]"},
+        {.ac_ref = "US1-1", .spec_ref = "[FIX-SL §4.5.5]"},
+        {.ac_ref = "US1-2", .spec_ref = "[FIX-SL §4.5.1]"},
+        {.ac_ref = "US1-3", .spec_ref = "[FIX-SL §4.5.5]"},
     };
     d.acceptance_ids = {"US1-1", "US1-2", "US1-3"};
     return d;

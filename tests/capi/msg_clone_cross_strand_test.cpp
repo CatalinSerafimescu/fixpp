@@ -72,7 +72,7 @@ struct CloneSlot {
 
 // The recv callback: clones the inbound message and deposits the clone.
 // Runs on the session strand (dispatch window).
-static void clone_recv_cb(const fixpp_msg_t* msg, void* userdata) {
+void clone_recv_cb(const fixpp_msg_t* msg, void* userdata) {
     auto* slot = static_cast<CloneSlot*>(userdata);
     fixpp_msg_t* clone = nullptr;
     fixpp_error_t rc = fixpp_msg_clone(msg, &clone);
@@ -119,7 +119,7 @@ TEST(MsgCloneCrossStrand, CloneOnDispatchWindowReadOnDrainThread) {
         acc_id = ae->sessions_[0]->id;
     }
     uint16_t port = wait_for_bound_port(acc_eng, acc_id);
-    ASSERT_NE(port, 0u) << "acceptor did not bind a port";
+    ASSERT_NE(port, 0U) << "acceptor did not bind a port";
 
     // Initiator session
     {

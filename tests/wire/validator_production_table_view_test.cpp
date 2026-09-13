@@ -160,7 +160,7 @@ MessageView<access_mode::Index> parse_index(std::vector<std::byte> const& buf,
 // no longer depends on test/support/mock_dict_table.hpp being included first.
 
 TEST(ValidatorProductionTableView, InstantiatesFromProductionTableView) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto dict = load_tiny_dict(&mr);
     auto tv = dict.as_table_view();
@@ -184,7 +184,7 @@ TEST(ValidatorProductionTableView, InstantiatesFromProductionTableView) {
 // with wire_required_field_missing — a false rejection of a valid real-dict
 // group (e.g. any FIX44 message carrying a NoPartyIDs(453) Parties group).
 TEST(ValidatorProductionTableView, GroupDelimiterFromWireNotTagSortedMember) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto dict = load_group_dict(&mr);
     auto tv = dict.as_table_view();
@@ -224,7 +224,7 @@ TEST(ValidatorProductionTableView, GroupDelimiterFromWireNotTagSortedMember) {
 // all-unknown-tags frame; this frame's body fields are otherwise-known tags,
 // per the brief.
 TEST(ValidatorProductionTableView, UnknownMsgTypeRejectsLikePreHoistFieldValidFor) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto dict = load_tiny_dict(&mr);
     auto tv_direct = dict.as_table_view();  // separate copy for the direct assertion below
@@ -282,7 +282,7 @@ TEST(ValidatorProductionTableView, UnknownMsgTypeRejectsLikePreHoistFieldValidFo
 // This test is RED before T009a's remap and GREEN after.
 
 TEST(ValidatorProductionTableView, FloatGarbageValueRemappedToWireOutOfRange) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto dict = load_tiny_dict(&mr);
     auto tv = dict.as_table_view();

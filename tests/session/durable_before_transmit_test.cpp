@@ -211,7 +211,7 @@ public:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store(
         seqnum_t /*seq*/, std::span<const std::byte> /*frame*/, direction_t dir) noexcept override {
         if (dir == direction_t::outbound) {
-            order_.push_back("store_out");
+            order_.emplace_back("store_out");
         }
         co_return fixpp::core::expected_t<void>{};
     }
@@ -277,7 +277,7 @@ TEST_F(DurableBeforeTransmitTest, OutboundStoreBeforeTransportSend) {
     cfg.executor_override = ioc.get_executor();
     cfg.store_factory = std::make_unique<RecordingStoreFactory>(order);
     cfg.transport_send = [&order](std::span<const std::byte> /*frame*/) {
-        order.push_back("transport_send");
+        order.emplace_back("transport_send");
     };
     // RC#C (gate-b/r1): bilateral_lenient — test exercises I-3 ordering, not reset.
     cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
@@ -374,7 +374,7 @@ TEST_F(DurableBeforeTransmitTest, OutboundStoreBeforeTransportSend) {
     std::size_t pair_count = 0;
     for (std::size_t i = 0; i < order.size(); ++i) {
         if (order[i] == "transport_send") {
-            ASSERT_GT(i, 0u) << "I-3 outbound: transport_send at position " << i
+            ASSERT_GT(i, 0U) << "I-3 outbound: transport_send at position " << i
                              << " has no preceding entry (must be store_out)";
             EXPECT_EQ(order[i - 1], "store_out")
                 << "I-3 outbound: transport_send at position " << i
@@ -382,7 +382,7 @@ TEST_F(DurableBeforeTransmitTest, OutboundStoreBeforeTransportSend) {
             ++pair_count;
         }
     }
-    EXPECT_GE(pair_count, 1u) << "Expected at least one store_out → transport_send pair "
+    EXPECT_GE(pair_count, 1U) << "Expected at least one store_out → transport_send pair "
                                  "(outbound Logout emission via close(graceful))";
 
     // Also assert the literal full element sequence is exactly the expected
@@ -390,8 +390,8 @@ TEST_F(DurableBeforeTransmitTest, OutboundStoreBeforeTransportSend) {
     // strongest form of the I-3 outbound assertion.
     std::vector<std::string> expected;
     for (std::size_t i = 0; i < pair_count; ++i) {
-        expected.push_back("store_out");
-        expected.push_back("transport_send");
+        expected.emplace_back("store_out");
+        expected.emplace_back("transport_send");
     }
     EXPECT_EQ(order, expected)
         << "I-3 outbound: shared call-order vector must be exactly alternating "

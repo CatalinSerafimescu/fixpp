@@ -104,7 +104,7 @@ namespace {
 
 // Current wall-clock UTC as a FIX UTCTimestamp "YYYYMMDD-HH:MM:SS.mmm".
 // Required by the 038 acceptor first-Logon SendingTime(52) MaxLatency guard.
-static std::string utc_now_fix_timestamp() {
+std::string utc_now_fix_timestamp() {
     std::array<char, 32> buf{};
     auto r = fixpp::core::utc_time_to_fix_string(std::chrono::system_clock::now(),
                                                  fixpp::core::fix_time_precision::millis,
@@ -113,8 +113,8 @@ static std::string utc_now_fix_timestamp() {
 }
 
 // Build a FIX Logon frame as bytes.
-static std::vector<std::byte> make_logon_bytes(std::string_view begin_str, std::string_view sender,
-                                               std::string_view target, int seq = 1) {
+std::vector<std::byte> make_logon_bytes(std::string_view begin_str, std::string_view sender,
+                                        std::string_view target, int seq = 1) {
     auto field = [](int tag, std::string_view v) -> std::string {
         return std::to_string(tag) + "=" + std::string(v) + "\x01";
     };
@@ -133,7 +133,7 @@ static std::vector<std::byte> make_logon_bytes(std::string_view begin_str, std::
     msg += body;
     unsigned int cs = 0;
     for (unsigned char c : msg) cs += c;
-    cs &= 0xFFu;
+    cs &= 0xFFU;
     char csbuf[5];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     msg += "10=" + std::string(csbuf) + "\x01";
@@ -187,7 +187,7 @@ private:
 };
 
 // ── Build a base acceptor SessionConfig ──────────────────────────────────────
-static fixpp::session::SessionConfig make_acceptor_cfg(
+fixpp::session::SessionConfig make_acceptor_cfg(
     asio::any_io_executor exec, fixpp::session::SecurityProfile::kind profile_kind,
     fixpp::session::CompIdAuthorizationPolicy authz = {}) {
     fixpp::session::SessionConfig cfg;
@@ -210,7 +210,7 @@ static fixpp::session::SessionConfig make_acceptor_cfg(
 // The sentinel CN="SENTINEL-MUST-NOT-STICK" is distinct from the empty default;
 // if the D-10 guard is absent, the sentinel sticks in live_peer_id_ → assertion FAILS.
 // [advisor: sentinel must be non-empty to discriminate — empty hr{} self-heals]
-static fixpp::transport::handshake_result make_sentinel_hr() {
+fixpp::transport::handshake_result make_sentinel_hr() {
     fixpp::transport::handshake_result hr{};
     hr.peer_id.subject_dn = "CN=SENTINEL-MUST-NOT-STICK";
     return hr;
@@ -218,7 +218,7 @@ static fixpp::transport::handshake_result make_sentinel_hr() {
 
 // Helper: does recent_events() contain any event of type T?
 template <typename T>
-static bool has_event(const fixpp::session::Session& sess) {
+bool has_event(const fixpp::session::Session& sess) {
     auto events = sess.recent_events();
     return std::ranges::any_of(events,
                                [](const auto& ev) { return std::holds_alternative<T>(ev); });

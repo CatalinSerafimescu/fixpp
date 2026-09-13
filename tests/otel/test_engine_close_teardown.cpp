@@ -239,7 +239,7 @@ TEST(EngineCloseTeardown, E2_LoggerShutdownFlushesSinks) {
     auto spy_sink = std::make_unique<SpySink>(flush_count);
 
     fixpp::log::LoggerConfig lcfg;
-    lcfg.capacity = 128u;
+    lcfg.capacity = 128U;
     lcfg.drain_timeout = std::chrono::milliseconds{500};
 
     std::pmr::vector<std::unique_ptr<fixpp::log::Sink>> sinks{};
@@ -281,7 +281,7 @@ TEST(EngineCloseTeardown, E2_EngineTeardownHonorsDrainTimeout) {
     auto slow_sink = std::make_unique<SlowFlushSink>(k_flush_delay);
 
     fixpp::log::LoggerConfig lcfg;
-    lcfg.capacity = 128u;
+    lcfg.capacity = 128U;
     lcfg.drain_timeout = k_drain_timeout;
 
     std::pmr::vector<std::unique_ptr<fixpp::log::Sink>> sinks{};
@@ -318,7 +318,7 @@ TEST(EngineCloseTeardown, E2_EngineTeardownHonorsDrainTimeout) {
 
     // (b) drain timed out → timeout_drop_count() must have incremented.
     // This fails under the old hardcoded shutdown(5000ms) which would NOT time out.
-    EXPECT_GT(logger->timeout_drop_count(), 0u)
+    EXPECT_GT(logger->timeout_drop_count(), 0U)
         << "Logger::timeout_drop_count() must be > 0 after a drain that timed out "
         << "(drain_timeout=" << k_drain_timeout.count() << "ms, flush took "
         << k_flush_delay.count() << "ms); a hardcoded longer timeout would NOT trigger this";

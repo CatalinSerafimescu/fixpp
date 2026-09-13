@@ -143,7 +143,8 @@ TEST_P(ReceivedResetAcceptor, Received141AdvancesInboundToTwoNoResend) {
     {
         bool reset_event_seen = false;
         for (const auto& ev : s->recent_events()) {
-            if (auto* r = std::get_if<fixpp::session::session_event_sequence_numbers_reset>(&ev)) {
+            if (const auto* r =
+                    std::get_if<fixpp::session::session_event_sequence_numbers_reset>(&ev)) {
                 EXPECT_TRUE(r->by_peer_request)
                     << "received-141 cell: by_peer_request must be true (peer sent 141=Y)";
                 reset_event_seen = true;

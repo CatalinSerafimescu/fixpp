@@ -127,12 +127,13 @@ inline void expect_idle_cadence_or_skip(const std::string& gpath) {
     const auto frames = fixpp::interop::parse_golden(capture_text);
     const auto is_heartbeat = [](const auto& f) {
         const std::string_view w{reinterpret_cast<const char*>(f.bytes.data()), f.bytes.size()};
-        return w.find(
-                   "\x01"
-                   "35=0"
-                   "\x01") != std::string_view::npos;
+        return w.contains(
+            "\x01"
+            "35=0"
+            "\x01");
     };
-    int out_hb = 0, in_hb = 0;
+    int out_hb = 0;
+    int in_hb = 0;
     for (const auto& f : frames) {
         if (!is_heartbeat(f)) continue;
         if (f.dir == '>') {
@@ -183,8 +184,8 @@ TEST(IdleCadenceGateBite, DroppedHeartbeatCausesGateBite) {
     auto expected_frames = parse_golden(expected_text);
     auto actual_frames = parse_golden(actual_text);
 
-    ASSERT_EQ(expected_frames.size(), 3u);
-    ASSERT_EQ(actual_frames.size(), 2u);
+    ASSERT_EQ(expected_frames.size(), 3U);
+    ASSERT_EQ(actual_frames.size(), 2U);
 
     // Under admin_profile_excluded_tags() == {52, 10}:
     //   - tag 52 (SendingTime) is excluded → equal regardless of value.
@@ -261,8 +262,10 @@ TEST_P(HappyIdleHeartbeatCadence, BothDirectionsAtNegotiatedCadence) {
     desc.induction = fixpp::interop::AdminInduction::idle_observation;
     desc.self_deadline_ms = std::chrono::milliseconds{10000};  // FR-010: 10 s
     desc.round_trips = {
-        {"US2-1", "[FIX-SL §4.5.1]"},  // ≥3 Heartbeats per direction, no TestRequest
-        {"US2-2", "[FIX-SL §4.5.1]"},  // inter-HB interval matches 108=1s, session Active
+        {.ac_ref = "US2-1",
+         .spec_ref = "[FIX-SL §4.5.1]"},  // ≥3 Heartbeats per direction, no TestRequest
+        {.ac_ref = "US2-2",
+         .spec_ref = "[FIX-SL §4.5.1]"},  // inter-HB interval matches 108=1s, session Active
     };
     desc.acceptance_ids = {"US2-1", "US2-2"};
 

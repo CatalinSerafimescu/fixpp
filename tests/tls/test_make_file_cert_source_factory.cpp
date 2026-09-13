@@ -48,9 +48,7 @@ static_assert(noexcept(file_cert_source::make_file_cert_source(file_cert_source:
 #define FIXPP_TLS_FIXTURE_DIR ""
 #endif
 
-static std::string fixture(const char* name) {
-    return std::string(FIXPP_TLS_FIXTURE_DIR) + "/" + name;
-}
+std::string fixture(const char* name) { return std::string(FIXPP_TLS_FIXTURE_DIR) + "/" + name; }
 
 // ── (a) No exception escapes the factory ─────────────────────────────────────
 TEST(FileCertSourceFactory, ReturnsExpectedNotThrows) {
@@ -156,7 +154,7 @@ TEST(FileCertSourceFactory, SuccessReturnsUsableSharedPtr) {
     ASSERT_TRUE(trust.has_value())
         << "load_trust_anchors must not error when ca_bundle loaded at construction";
     // At least the CA cert should be present.
-    EXPECT_GE(trust->size(), 1u) << "Loaded ca_bundle_path must yield at least one trust anchor";
+    EXPECT_GE(trust->size(), 1U) << "Loaded ca_bundle_path must yield at least one trust anchor";
 }
 
 // ── (d) Success — ECDSA P-256 leaf (exercises certificate.cpp EC branch) ─────

@@ -82,7 +82,7 @@ GateResult run_gate(const std::string& fixture_name, const std::string& extra_de
     oss << ifs.rdbuf();
     std::remove(tmp_path);
 
-    return {exit_code, oss.str()};
+    return {.exit_code = exit_code, .stderr_out = oss.str()};
 }
 
 }  // namespace
@@ -99,12 +99,12 @@ TEST_F(SyncNoStdMutexCiGate, ViolationFixtureFiresPerSpelling) {
         const char* spelling;
     };
     static constexpr Row kTable[] = {
-        {"FX_MUTEX", "std::mutex"},
-        {"FX_RECURSIVE_MUTEX", "std::recursive_mutex"},
-        {"FX_TIMED_MUTEX", "std::timed_mutex"},
-        {"FX_RECURSIVE_TIMED_MUTEX", "std::recursive_timed_mutex"},
-        {"FX_SHARED_MUTEX", "std::shared_mutex"},
-        {"FX_SHARED_TIMED_MUTEX", "std::shared_timed_mutex"},
+        {.macro = "FX_MUTEX", .spelling = "std::mutex"},
+        {.macro = "FX_RECURSIVE_MUTEX", .spelling = "std::recursive_mutex"},
+        {.macro = "FX_TIMED_MUTEX", .spelling = "std::timed_mutex"},
+        {.macro = "FX_RECURSIVE_TIMED_MUTEX", .spelling = "std::recursive_timed_mutex"},
+        {.macro = "FX_SHARED_MUTEX", .spelling = "std::shared_mutex"},
+        {.macro = "FX_SHARED_TIMED_MUTEX", .spelling = "std::shared_timed_mutex"},
     };
 
     for (const auto& row : kTable) {

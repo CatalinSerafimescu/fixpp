@@ -103,7 +103,7 @@ TEST(GroupMembershipCloneIdentity, CloneTrailingFieldAbsentFromLastInstance) {
 
     ASSERT_EQ(fixpp_engine_start(acceptor_engine), FIXPP_ERR_OK);
     std::uint16_t port = wait_for_bound_port(acceptor_engine, acc_id);
-    ASSERT_NE(port, 0u) << "acceptor did not bind";
+    ASSERT_NE(port, 0U) << "acceptor did not bind";
 
     // Initiator session.
     fixpp_session_config_t* ini_cfg =
@@ -217,7 +217,7 @@ TEST(GroupMembershipCloneIdentity, CloneInteriorTruncationMatchesSource) {
 
     ASSERT_EQ(fixpp_engine_start(acceptor_engine), FIXPP_ERR_OK);
     std::uint16_t port = wait_for_bound_port(acceptor_engine, acc_id);
-    ASSERT_NE(port, 0u) << "acceptor did not bind";
+    ASSERT_NE(port, 0U) << "acceptor did not bind";
 
     fixpp_session_config_t* ini_cfg =
         make_session_cfg_fix44("INI-066CI", "ACC-066CI", FIXPP_ROLE_INITIATOR);

@@ -40,7 +40,6 @@ namespace {
 using fixpp::session::direction_t;
 using fixpp::session::FileStore;
 using fixpp::session::FileStoreFactory;
-using fixpp::session::FileStorePolicy;
 using fixpp::store_test::byte_collecting_visitor;
 using fixpp::store_test::make_store_script;
 using fixpp::store_test::unique_store_dir;
@@ -136,7 +135,7 @@ TEST(FileStoreTornWrite, TruncateMidRecordCleansUp) {
             << "frame " << i << " byte mismatch after torn-write recovery";
     }
 
-    minted2.value().reset();
+    minted2.value() = nullptr;
     fixpp::store_test::remove_store_dir(dir);
 }
 
@@ -199,7 +198,7 @@ TEST(FileStoreTornWrite, StaleResetTmpIsUnlinked) {
 
     EXPECT_EQ(visitor.entries().size(), static_cast<std::size_t>(3));
 
-    minted2.value().reset();
+    minted2.value() = nullptr;
     fixpp::store_test::remove_store_dir(dir);
 }
 
@@ -359,11 +358,11 @@ TEST(FileStoreTornWrite, OversizedLenInHeaderDoesNotTerminate) {
             },
             asio::use_future);
         fut.get();
-        EXPECT_EQ(vis.seqs.size(), 1u) << "expected 1 surviving frame";
-        if (!vis.seqs.empty()) EXPECT_EQ(vis.seqs[0], 1u);
+        EXPECT_EQ(vis.seqs.size(), 1U) << "expected 1 surviving frame";
+        if (!vis.seqs.empty()) EXPECT_EQ(vis.seqs[0], 1U);
     }
 
-    if (minted2.has_value()) minted2.value().reset();
+    if (minted2.has_value()) minted2.value() = nullptr;
     fixpp::store_test::remove_store_dir(dir);
 }
 #endif  // !_WIN32 (test uses fopen/fwrite; Windows variant is out of scope for Tier-1)

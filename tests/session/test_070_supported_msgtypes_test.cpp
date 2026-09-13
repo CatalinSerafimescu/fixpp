@@ -41,8 +41,8 @@ fixpp::core::expected_t<std::span<std::byte>> build(std::span<std::byte> out,
 // (a) exact contiguous group in configuration order, delimiter 372 first.
 TEST(SupportedMsgTypes, EmitsContiguousGroupInOrder) {
     std::array<std::byte, 512> buf{};
-    std::vector<supported_msg_type> types{{msg_direction::send, "D"},
-                                          {msg_direction::receive, "8"}};
+    std::vector<supported_msg_type> types{{.direction = msg_direction::send, .msg_type = "D"},
+                                          {.direction = msg_direction::receive, .msg_type = "8"}};
     auto r = build(std::span<std::byte>{buf.data(), buf.size()}, types);
     ASSERT_TRUE(r.has_value());
     const std::string w = wire_of(*r);
@@ -70,7 +70,7 @@ TEST(SupportedMsgTypes, OverflowFailsClosed) {
     std::array<std::byte, 256> buf{};  // fits the base Logon; 64 members (~1.3 KB) do not
     std::vector<supported_msg_type> many;
     for (int i = 0; i < 64; ++i) {
-        many.push_back({msg_direction::send, "NEWORDERSINGLE"});
+        many.push_back({.direction = msg_direction::send, .msg_type = "NEWORDERSINGLE"});
     }
     auto r = build(std::span<std::byte>{buf.data(), buf.size()}, many);
     EXPECT_FALSE(r.has_value()) << "oversized group must fail closed, not emit a partial frame";
@@ -80,7 +80,8 @@ TEST(SupportedMsgTypes, OverflowFailsClosed) {
 // the design premise otherwise) must fail closed, never launder to '385=R'.
 TEST(SupportedMsgTypes, OffEnumDirectionFailsClosed) {
     std::array<std::byte, 512> buf{};
-    std::vector<supported_msg_type> bad{{static_cast<msg_direction>(2), "D"}};
+    std::vector<supported_msg_type> bad{
+        {.direction = static_cast<msg_direction>(2), .msg_type = "D"}};
     auto r = build(std::span<std::byte>{buf.data(), buf.size()}, bad);
     ASSERT_FALSE(r.has_value()) << "off-enum MsgDirection must fail closed, not emit 385=R";
     EXPECT_EQ(r.error(), fixpp::core::error::invalid_session_config);

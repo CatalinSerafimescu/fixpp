@@ -62,7 +62,7 @@ TEST(StoreSeqnumOutOfOrder, SkipAheadRejected) {
             // Verify initial state: next_seqnum outbound = 1
             auto ns = co_await store.next_seqnum(direction_t::outbound, false);
             EXPECT_TRUE(ns.has_value());
-            EXPECT_EQ(*ns, 1u) << "fresh store must have next_seqnum == 1";
+            EXPECT_EQ(*ns, 1U) << "fresh store must have next_seqnum == 1";
 
             // Attempt to store seq=5 while next is 1 → should fail
             auto frame5 = make_test_frame(5, direction_t::outbound);
@@ -75,13 +75,13 @@ TEST(StoreSeqnumOutOfOrder, SkipAheadRejected) {
             // Verify entry-array unchanged: next_seqnum still 1
             auto ns2 = co_await store.next_seqnum(direction_t::outbound, false);
             EXPECT_TRUE(ns2.has_value());
-            EXPECT_EQ(*ns2, 1u) << "next_seqnum must remain 1 after rejected out-of-order store";
+            EXPECT_EQ(*ns2, 1U) << "next_seqnum must remain 1 after rejected out-of-order store";
 
             // Verify no frames were stored
             byte_collecting_visitor vis;
             auto rr = co_await store.retrieve(1, 0, direction_t::outbound, vis);
             EXPECT_TRUE(rr.has_value());
-            EXPECT_EQ(vis.entries().size(), 0u)
+            EXPECT_EQ(vis.entries().size(), 0U)
                 << "no frames must be stored after rejected out-of-order store";
         },
         asio::use_future);
@@ -133,7 +133,7 @@ TEST(StoreSeqnumOutOfOrder, MutexReleasedAfterRejection_NextStoreSucceeds) {
             // next_seqnum must advance
             auto ns = co_await store.next_seqnum(direction_t::outbound, false);
             EXPECT_TRUE(ns.has_value());
-            EXPECT_EQ(*ns, 2u) << "next_seqnum must be 2 after storing seq=1";
+            EXPECT_EQ(*ns, 2U) << "next_seqnum must be 2 after storing seq=1";
         },
         asio::use_future);
     fut.get();
@@ -163,11 +163,11 @@ TEST(StoreSeqnumOutOfOrder, OutOfOrderInboundDoesNotAffectOutbound) {
 
             // Outbound counter is still at 2 (1 was stored)
             auto ns_out = co_await store.next_seqnum(direction_t::outbound, false);
-            EXPECT_EQ(*ns_out, 2u);
+            EXPECT_EQ(*ns_out, 2U);
 
             // Inbound counter is still at 1 (nothing was stored)
             auto ns_in = co_await store.next_seqnum(direction_t::inbound, false);
-            EXPECT_EQ(*ns_in, 1u);
+            EXPECT_EQ(*ns_in, 1U);
         },
         asio::use_future);
     fut.get();
@@ -241,7 +241,7 @@ TEST(StoreSeqnumOutOfOrder, ConcurrentOutOfOrderAndValidStore) {
     // so store.reset() is race-free.
     pool.stop();
     pool.join();
-    store.reset();
+    store = nullptr;
 
     EXPECT_TRUE(got_success.load()) << "Valid store(seq=1) must succeed";
     EXPECT_TRUE(got_out_of_order.load())

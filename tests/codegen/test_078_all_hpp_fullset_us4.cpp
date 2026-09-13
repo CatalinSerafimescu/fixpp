@@ -145,7 +145,7 @@ std::optional<std::string_view> scan_slice_for_tag(std::span<const std::byte> sl
                 ok = false;
                 break;
             }
-            parsed_tag = static_cast<std::uint16_t>(parsed_tag * 10 + (c - '0'));
+            parsed_tag = static_cast<std::uint16_t>((parsed_tag * 10) + (c - '0'));
         }
         if (ok && parsed_tag == tag) {
             return sv.substr(eq + 1, value_end - (eq + 1));
@@ -280,7 +280,7 @@ TEST(AllHppFullsetUS4, TradeCaptureReport_GroupBearing_ByteIdenticalToEstablishe
     // Nested depth (FR-012 read-side counterpart): NoSides(552) entry-level
     // readback through the group headers all.hpp pulled in transitively.
     auto side_slices = mv.offsets().group_slices(552);
-    ASSERT_EQ(side_slices.size(), 1u) << "NoSides(552) must carry exactly 1 entry";
+    ASSERT_EQ(side_slices.size(), 1U) << "NoSides(552) must carry exactly 1 entry";
     std::span<const std::byte> const entry0{side_slices[0].data, side_slices[0].len};
     auto side_val = scan_slice_for_tag(entry0, 54);
     ASSERT_TRUE(side_val.has_value()) << "Side(54) not found in NoSides entry";

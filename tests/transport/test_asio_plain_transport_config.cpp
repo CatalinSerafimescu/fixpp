@@ -202,7 +202,7 @@ TEST(AsioPlainTransportConfig, TcpKeepaliveApplied) {
 // discriminating power is CHECKED IN THE CELL (oracle != default) rather than
 // assumed, so a host where the two coincide skips instead of passing vacuously.
 // ─────────────────────────────────────────────────────────────────────────────
-static constexpr int kRequestedBufBytes = 256 * 1024;
+constexpr int kRequestedBufBytes = 256 * 1024;
 
 TEST(AsioPlainTransportConfig, LingerAndBufferSizeKnobsApplied) {
     asio::io_context ioc;
@@ -230,9 +230,12 @@ TEST(AsioPlainTransportConfig, LingerAndBufferSizeKnobsApplied) {
     bool done{false};
     bool linger_on{false};
     int linger_secs{-1};
-    int def_rcv{0}, def_snd{0};    // plain socket, no option
-    int orc_rcv{0}, orc_snd{0};    // plain socket, the SAME setsockopt
-    int recv_buf{0}, send_buf{0};  // the transport
+    int def_rcv{0};
+    int def_snd{0};  // plain socket, no option
+    int orc_rcv{0};
+    int orc_snd{0};  // plain socket, the SAME setsockopt
+    int recv_buf{0};
+    int send_buf{0};  // the transport
 
     asio::co_spawn(
         ioc.get_executor(),
@@ -537,7 +540,7 @@ TEST(AsioPlainTransportConfig, CloseIsPromptNoTlsCloseNotify) {
     EXPECT_FALSE(first_byte_at_peer.has_value())
         << "plain transport close() must emit NO bytes (0 bytes before EOF); "
            "got first_byte=0x"
-        << (first_byte_at_peer ? static_cast<unsigned>(*first_byte_at_peer) : 0u)
+        << (first_byte_at_peer ? static_cast<unsigned>(*first_byte_at_peer) : 0U)
         << " — TLS close-notify=0x15, TLS handshake=0x16 are both forbidden";
 
     // Peer saw a clean EOF (socket was closed, not just cancelled).

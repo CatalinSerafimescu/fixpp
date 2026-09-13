@@ -44,7 +44,7 @@ namespace {
 class MockFsyncState {
 public:
     std::atomic<bool> fsync_called{false};
-    std::thread::id fsync_thread_id{};
+    std::thread::id fsync_thread_id;
     std::atomic<int> fsync_call_count{0};
 
     int mock_fsync(int /*fd*/) {
@@ -81,8 +81,8 @@ TEST_F(FileSinkFsyncTest, FlushCallsFsyncOnDrainThread) {
     fixpp::log::FileSinkConfig cfg;
     cfg.directory = tmpdir_;
     cfg.base_name = "fsync_test";
-    cfg.max_file_bytes = 256u * 1024u * 1024u;  // 256 MiB — won't rotate
-    cfg.max_keep_count = 8u;
+    cfg.max_file_bytes = 256U * 1024U * 1024U;  // 256 MiB — won't rotate
+    cfg.max_keep_count = 8U;
     cfg.async_fsync = true;
     // Inject mock fsync function.
     cfg.fsync_fn = [mock](int fd) -> int { return mock->mock_fsync(fd); };
@@ -92,7 +92,7 @@ TEST_F(FileSinkFsyncTest, FlushCallsFsyncOnDrainThread) {
     sinks.push_back(std::unique_ptr<fixpp::log::Sink>(file_sink_raw));
 
     fixpp::log::LoggerConfig lcfg;
-    lcfg.capacity = 64u;
+    lcfg.capacity = 64U;
 
     auto logger = std::make_unique<fixpp::log::Logger>(std::move(lcfg), std::move(sinks));
 
@@ -106,7 +106,7 @@ TEST_F(FileSinkFsyncTest, FlushCallsFsyncOnDrainThread) {
 
     for (int i = 0; i < 5; ++i) {
         logger->enqueue(fixpp::log::Level::info, fixpp::log::cat::session, fmt_id, zeroed_trace_id,
-                        0u, ts, {fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(i))});
+                        0U, ts, {fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(i))});
     }
 
     // ── Shutdown triggers flush(drain_timeout) on the drain thread ────────────
@@ -149,8 +149,8 @@ TEST_F(FileSinkFsyncTest, ProducerDoesNotBlockOnFsync) {
     fixpp::log::FileSinkConfig cfg;
     cfg.directory = tmpdir_;
     cfg.base_name = "no_block_test";
-    cfg.max_file_bytes = 256u * 1024u * 1024u;
-    cfg.max_keep_count = 8u;
+    cfg.max_file_bytes = 256U * 1024U * 1024U;
+    cfg.max_keep_count = 8U;
     cfg.async_fsync = true;
     // Slow fsync: 50ms per call.
     cfg.fsync_fn = [mock](int fd) -> int {
@@ -163,7 +163,7 @@ TEST_F(FileSinkFsyncTest, ProducerDoesNotBlockOnFsync) {
     sinks.push_back(std::unique_ptr<fixpp::log::Sink>(file_sink_raw));
 
     fixpp::log::LoggerConfig lcfg;
-    lcfg.capacity = 64u;
+    lcfg.capacity = 64U;
 
     auto logger = std::make_unique<fixpp::log::Logger>(std::move(lcfg), std::move(sinks));
 
@@ -177,7 +177,7 @@ TEST_F(FileSinkFsyncTest, ProducerDoesNotBlockOnFsync) {
 
     for (int i = 0; i < k_records; ++i) {
         logger->enqueue(fixpp::log::Level::info, fixpp::log::cat::session, fmt_id, zeroed_trace_id,
-                        0u, ts, {fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(i))});
+                        0U, ts, {fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(i))});
     }
 
     auto t1 = std::chrono::steady_clock::now();
@@ -224,8 +224,8 @@ TEST_F(FileSinkFsyncTest, FlushDeadlineBounded) {
     fixpp::log::FileSinkConfig cfg;
     cfg.directory = tmpdir_;
     cfg.base_name = "deadline_test";
-    cfg.max_file_bytes = 256u * 1024u * 1024u;
-    cfg.max_keep_count = 8u;
+    cfg.max_file_bytes = 256U * 1024U * 1024U;
+    cfg.max_keep_count = 8U;
     cfg.async_fsync = true;
     // Inject a very slow fsync (500ms) so any synchronous implementation hangs.
     cfg.fsync_fn = [k_fsync_sleep_ms, &fsync_entered, &fsync_returned](int) -> int {
@@ -391,8 +391,8 @@ TEST_F(FileSinkFsyncTest, CloseJoinsWorkerAndPreventsReusedFdWrite) {
     fixpp::log::FileSinkConfig cfg;
     cfg.directory = tmpdir_;
     cfg.base_name = "lifetime_test";
-    cfg.max_file_bytes = 256u * 1024u * 1024u;
-    cfg.max_keep_count = 8u;
+    cfg.max_file_bytes = 256U * 1024U * 1024U;
+    cfg.max_keep_count = 8U;
     cfg.async_fsync = true;
     cfg.fsync_fn = stalling_fsync;
 
@@ -456,7 +456,7 @@ TEST_F(FileSinkFsyncTest, CloseJoinsWorkerAndPreventsReusedFdWrite) {
 
     // Release the stalling fsync (so the worker can finish and let the test end).
     {
-        std::lock_guard<std::mutex> lk(release_mu);
+        std::scoped_lock lk(release_mu);
         released.store(true);
     }
     release_cv.notify_all();
@@ -487,8 +487,8 @@ TEST_F(FileSinkFsyncTest, CloseJoinsWorkerAndPreventsReusedFdWrite) {
         fixpp::log::FileSinkConfig cfg2;
         cfg2.directory = tmpdir_;
         cfg2.base_name = "lifetime_test";
-        cfg2.max_file_bytes = 256u * 1024u * 1024u;
-        cfg2.max_keep_count = 8u;
+        cfg2.max_file_bytes = 256U * 1024U * 1024U;
+        cfg2.max_keep_count = 8U;
         cfg2.async_fsync = false;  // don't trigger more fsync calls
         fixpp::log::FileSink sink2{std::move(cfg2)};
         (void)sink2.open();

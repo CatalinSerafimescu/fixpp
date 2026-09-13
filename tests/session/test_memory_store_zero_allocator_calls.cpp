@@ -38,7 +38,6 @@ using fixpp::session::capacity_policy;
 using fixpp::session::direction_t;
 using fixpp::session::MemoryStore;
 using fixpp::session::seqnum_t;
-using fixpp::store_test::make_test_frame;
 
 // ── Tracking PMR resource ────────────────────────────────────────────────────
 //

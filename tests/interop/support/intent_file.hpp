@@ -108,12 +108,13 @@ inline std::vector<Message> parse_intent_bytes(std::string const& raw) {
                                  messages.back().originator != originator ||
                                  messages.back().msg_type != msg_type;
         if (new_message) {
-            messages.push_back(Message{step_id, originator, msg_type, {}});
+            messages.push_back(Message{
+                .step_id = step_id, .originator = originator, .msg_type = msg_type, .fields = {}});
         }
         // An empty path is the zero-field marker (§ file header) — no field
         // entry is added, but the message itself was already started above.
         if (!path.empty()) {
-            messages.back().fields.push_back(FieldEntry{path, value});
+            messages.back().fields.push_back(FieldEntry{.path = path, .value = value});
         }
     }
     return messages;

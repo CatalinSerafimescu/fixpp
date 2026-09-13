@@ -76,10 +76,9 @@ namespace fixpp::session::test {
 namespace {
 
 // Build a minimal FIX frame with a given MsgType and MsgSeqNum.
-static std::vector<std::byte> make_frame(std::string_view begin_string, std::string_view msg_type,
-                                         std::uint32_t seq, std::string_view sender,
-                                         std::string_view target,
-                                         std::string_view extra_fields = {}) {
+std::vector<std::byte> make_frame(std::string_view begin_string, std::string_view msg_type,
+                                  std::uint32_t seq, std::string_view sender,
+                                  std::string_view target, std::string_view extra_fields = {}) {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -112,23 +111,22 @@ static std::vector<std::byte> make_frame(std::string_view begin_string, std::str
     return frame;
 }
 
-static std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
-                                               std::string_view sender, std::string_view target,
-                                               int heartbt = 30) {
+std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
+                                        std::string_view sender, std::string_view target,
+                                        int heartbt = 30) {
     std::string extra;
     extra += "98=0\x01";
     extra += "108=" + std::to_string(heartbt) + "\x01";
     return make_frame(begin_string, "A", seq, sender, target, extra);
 }
 
-static std::vector<std::byte> make_heartbeat_frame(std::string_view begin_string, std::uint32_t seq,
-                                                   std::string_view sender,
-                                                   std::string_view target) {
+std::vector<std::byte> make_heartbeat_frame(std::string_view begin_string, std::uint32_t seq,
+                                            std::string_view sender, std::string_view target) {
     return make_frame(begin_string, "0", seq, sender, target);
 }
 
 // Extract a field value from a raw FIX wire frame.
-static std::string extract_field(std::span<const std::byte> frame, int tag) {
+std::string extract_field(std::span<const std::byte> frame, int tag) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = std::to_string(tag) + "=";
     auto pos = wire.find(needle);
@@ -144,17 +142,15 @@ static std::string extract_field(std::span<const std::byte> frame, int tag) {
 }
 
 // Check whether a frame contains a given tag=value pair.
-static bool frame_has_field(std::span<const std::byte> frame, int tag, std::string_view value) {
+bool frame_has_field(std::span<const std::byte> frame, int tag, std::string_view value) {
     return extract_field(frame, tag) == value;
 }
 
 // Check that a frame is a ResendRequest (MsgType=2).
-static bool is_resend_request(std::span<const std::byte> frame) {
-    return frame_has_field(frame, 35, "2");
-}
+bool is_resend_request(std::span<const std::byte> frame) { return frame_has_field(frame, 35, "2"); }
 
 // Check that a frame is a Logout (MsgType=5).
-static bool is_logout(std::span<const std::byte> frame) { return frame_has_field(frame, 35, "5"); }
+bool is_logout(std::span<const std::byte> frame) { return frame_has_field(frame, 35, "5"); }
 
 }  // namespace
 

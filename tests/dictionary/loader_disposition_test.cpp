@@ -300,11 +300,16 @@ struct DictFile {
 };
 
 std::vector<DictFile> const kAllTen{
-    {"FIX40", "FIX40.xml", false},       {"FIX41", "FIX41.xml", false},
-    {"FIX42", "FIX42.xml", false},       {"FIX43", "FIX43.xml", false},
-    {"FIX44", "FIX44.xml", false},       {"FIX50", "FIX50.xml", false},
-    {"FIX50SP1", "FIX50SP1.xml", false}, {"FIX50SP2", "FIX50SP2.xml", false},
-    {"FIXT11", "FIXT11.xml", false},     {"Orchestra FIX Latest", "OrchestraFIXLatest.xml", true},
+    {.label = "FIX40", .filename = "FIX40.xml", .is_orchestra = false},
+    {.label = "FIX41", .filename = "FIX41.xml", .is_orchestra = false},
+    {.label = "FIX42", .filename = "FIX42.xml", .is_orchestra = false},
+    {.label = "FIX43", .filename = "FIX43.xml", .is_orchestra = false},
+    {.label = "FIX44", .filename = "FIX44.xml", .is_orchestra = false},
+    {.label = "FIX50", .filename = "FIX50.xml", .is_orchestra = false},
+    {.label = "FIX50SP1", .filename = "FIX50SP1.xml", .is_orchestra = false},
+    {.label = "FIX50SP2", .filename = "FIX50SP2.xml", .is_orchestra = false},
+    {.label = "FIXT11", .filename = "FIXT11.xml", .is_orchestra = false},
+    {.label = "Orchestra FIX Latest", .filename = "OrchestraFIXLatest.xml", .is_orchestra = true},
 };
 
 // ── fixpp#264 fixture: a COMPLETE dictionary whose deepest group context has an
@@ -479,7 +484,7 @@ inline constexpr std::uint16_t kDeepLeafDelim = 9001;
 // the diagnostic NAMES the offending group (FR-006 / C-6.1).
 // ============================================================================
 TEST(LoaderDisposition, UnresolvableGroupRejectedUnderFailClosedDefault) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
 
     bool threw = false;
@@ -511,7 +516,7 @@ TEST(LoaderDisposition, UnresolvableGroupRejectedUnderFailClosedDefault) {
 // FR-023a).
 // ============================================================================
 TEST(LoaderDisposition, UnresolvableGroupSkippedUnderTolerantOptIn) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
 
     auto dict = fixpp::dict::XmlLoader{}.load_from_string(kUnresolvableGroupXml, &mr,
@@ -543,7 +548,7 @@ TEST(LoaderDisposition, UnresolvableGroupSkippedUnderTolerantOptIn) {
 // ============================================================================
 TEST(LoaderDisposition, AllTenShippedDictionariesLoadUnderFailClosedDefault) {
     for (auto const& d : kAllTen) {
-        std::vector<std::byte> buf(64u * 1024u * 1024u);
+        std::vector<std::byte> buf(64U * 1024U * 1024U);
         std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
         auto const path = d.is_orchestra
                               ? std::filesystem::path{FIXPP_ORCHESTRA_DATA_DIR} / d.filename
@@ -551,10 +556,10 @@ TEST(LoaderDisposition, AllTenShippedDictionariesLoadUnderFailClosedDefault) {
         try {
             if (d.is_orchestra) {
                 auto dict = fixpp::dict::OrchestraLoader{}.load(path, &mr);
-                EXPECT_GT(dict.messages().size(), 0u) << d.label;
+                EXPECT_GT(dict.messages().size(), 0U) << d.label;
             } else {
                 auto dict = fixpp::dict::XmlLoader{}.load(path, &mr);
-                EXPECT_GT(dict.messages().size(), 0u) << d.label;
+                EXPECT_GT(dict.messages().size(), 0U) << d.label;
             }
         } catch (std::exception const& e) {
             ADD_FAILURE() << "C-7.1 / W-6: " << d.label
@@ -571,7 +576,7 @@ TEST(LoaderDisposition, AllTenShippedDictionariesLoadUnderFailClosedDefault) {
 // disposition the six real survivors take (tags 384/627 in FIX50/SP1/SP2).
 // ============================================================================
 TEST(LoaderDisposition, DeclaredGroupWithZeroContextsDoesNotFailClosed) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
 
     // Default policy — this must NOT throw.
@@ -594,7 +599,7 @@ TEST(LoaderDisposition, DeclaredGroupWithZeroContextsDoesNotFailClosed) {
 // an unresolvable group.
 // ============================================================================
 TEST(LoaderDisposition, OrchestraRejectionIsOrchestraParseError) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
 
     bool caught_derived = false;
@@ -616,7 +621,7 @@ TEST(LoaderDisposition, OrchestraRejectionIsOrchestraParseError) {
 
     // And the tolerant opt-in is the SAME option with the SAME semantics on
     // this loader (C-6.4).
-    std::vector<std::byte> buf2(2u * 1024u * 1024u);
+    std::vector<std::byte> buf2(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr2{buf2.data(), buf2.size()};
     EXPECT_NO_THROW({
         auto d = fixpp::dict::OrchestraLoader{}.load_from_string(kOrchestraUnresolvableXml, &mr2,
@@ -632,7 +637,7 @@ TEST(LoaderDisposition, OrchestraRejectionIsOrchestraParseError) {
 // check would reject every dictionary with a scalar-reused group tag.
 // ============================================================================
 TEST(LoaderDisposition, ScalarReuseOfGroupTagIsNotACompletenessViolation) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
 
     // V2 uses tag 600 as a scalar. The load must succeed under the default.
@@ -688,7 +693,7 @@ TEST(LoaderDisposition, FindIncompleteGroupContextDetectsMissingRecord) {
     ASSERT_TRUE(bad.has_value())
         << "a registered context (NoGood/600, with member FieldA/610) that has no delimiter "
            "record must be detected as the FR-023 / C-3.4 violation it is.";
-    EXPECT_EQ(bad->first, 0u);
+    EXPECT_EQ(bad->first, 0U);
     EXPECT_EQ(bad->second, 600);
 }
 
@@ -731,7 +736,7 @@ TEST(LoaderDisposition, FindIncompleteGroupContextDetectsMissingRecordIntTyped) 
            "the NumInGroup-typed case above — the sweep's candidate source is structural "
            "(caller-supplied group tags), not FieldRef.type. RED before the Gate B r1 F1 fix "
            "(proven: bad.has_value() == false, see the fix's commit message for the transcript).";
-    EXPECT_EQ(bad->first, 0u);
+    EXPECT_EQ(bad->first, 0U);
     EXPECT_EQ(bad->second, 600);
 }
 
@@ -757,7 +762,7 @@ TEST(LoaderDisposition, FindIncompleteGroupContextDetectsMissingRecordIntTyped) 
 TEST(LoaderDisposition, ContextWithoutDelimiterRecordRejectedAtFinalize) {
     ForceIncompleteGroupContextGuard const guard;
 
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
 
     bool threw = false;
@@ -795,7 +800,7 @@ TEST(LoaderDisposition, ContextWithoutDelimiterRecordRejectedAtFinalize) {
 TEST(LoaderDisposition, ContextWithoutDelimiterRecordRejectedAtFinalizeOrchestra) {
     ForceIncompleteGroupContextGuard const guard;
 
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
 
     bool caught_derived = false;
@@ -833,7 +838,7 @@ TEST(LoaderDisposition, ContextWithoutDelimiterRecordRejectedAtFinalizeOrchestra
 TEST(LoaderDisposition, ContextWithoutDelimiterRecordRejectedAtFinalizeIntTyped) {
     ForceIncompleteGroupContextGuard const guard;
 
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
 
     bool threw = false;
@@ -866,7 +871,7 @@ TEST(LoaderDisposition, ContextWithoutDelimiterRecordRejectedAtFinalizeIntTyped)
 TEST(LoaderDisposition, ContextWithoutDelimiterRecordRejectedAtFinalizeIntTypedOrchestra) {
     ForceIncompleteGroupContextGuard const guard;
 
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
 
     bool caught_derived = false;
@@ -905,7 +910,7 @@ TEST(LoaderDisposition, ContextWithoutDelimiterRecordRejectedAtFinalizeIntTypedO
 // NumInGroup-typed case.
 // ============================================================================
 TEST(LoaderDisposition, IntTypedScalarReuseOfGroupTagIsNotACompletenessViolation) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
 
     // The load itself is the assertion under test: if the widened sweep's
@@ -970,7 +975,7 @@ TEST(LoaderDisposition, AllShippedContextsHaveADelimiterRecord) {
             // non-zero delimiter".
             continue;
         }
-        std::vector<std::byte> buf(64u * 1024u * 1024u);
+        std::vector<std::byte> buf(64U * 1024U * 1024U);
         std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
         auto dict = fixpp::dict::XmlLoader{}.load(
             std::filesystem::path{FIXPP_DICT_DATA_DIR} / d.filename, &mr);
@@ -1000,7 +1005,7 @@ TEST(LoaderDisposition, AllShippedContextsHaveADelimiterRecord) {
                 }
             }
         }
-        EXPECT_EQ(zero, 0u) << "FR-023 / C-3.4: " << d.label << " has " << zero << " of " << checked
+        EXPECT_EQ(zero, 0U) << "FR-023 / C-3.4: " << d.label << " has " << zero << " of " << checked
                             << " registered top-level contexts resolving delimiter 0, i.e. with "
                                "no Entity-2 record. finalize() should have rejected the load.";
     }
@@ -1009,7 +1014,7 @@ TEST(LoaderDisposition, AllShippedContextsHaveADelimiterRecord) {
 // FR-023a — the tolerant twin. A tolerantly-skipped group is skipped, not
 // half-registered: it must not appear in the consumer's enumeration at all.
 TEST(LoaderDisposition, ContextWithoutDelimiterRecordTolerantModeSkipsGroup) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto dict = fixpp::dict::XmlLoader{}.load_from_string(kUnresolvableGroupXml, &mr,
                                                           unresolved_group_policy::tolerant);
@@ -1055,7 +1060,7 @@ TEST(LoaderDisposition, ContextWithoutDelimiterRecordTolerantModeSkipsGroup) {
 // which go RED when the check is neutered.
 // ============================================================================
 TEST(LoaderDisposition, DeepAncestorChainLoadsAndResolvesDelimiter) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
 
     auto const xml = make_deep_nesting_xml();
@@ -1190,7 +1195,7 @@ TEST(LoaderDisposition, CyclicAncestorRelationIsAViolationNotATruncatedKey) {
 // `AllShippedContextsHaveADelimiterRecord`).
 // ============================================================================
 TEST(LoaderDisposition, ContextsCollidingPastTheClampAreRejectedAtLoad) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
 
     auto const xml = make_clamp_collision_xml();
@@ -1236,7 +1241,7 @@ TEST(LoaderDisposition, ContextsCollidingPastTheClampAreRejectedAtLoad) {
 // so nothing proved its type or its message were right.
 // ============================================================================
 TEST(LoaderDisposition, ContextsCollidingPastTheClampAreRejectedAtLoadOrchestra) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
 
     bool caught_derived = false;
@@ -1293,18 +1298,20 @@ TEST(LoaderDisposition, BenignDuplicateCaptureIsKeptNotRejected) {
     fixpp::dict::detail::DelimCapture cap;
     // TWO captures, same context, same chain, same delimiter — the header/body
     // duplicate. Not a collision: nothing is being lost by keeping one.
-    cap.out.push_back({fixpp::dict::detail::make_group_ctx_delim(chain, 9000, 9001), chain});
-    cap.out.push_back({fixpp::dict::detail::make_group_ctx_delim(chain, 9000, 9001), chain});
+    cap.out.push_back(
+        {.rec = fixpp::dict::detail::make_group_ctx_delim(chain, 9000, 9001), .full_path = chain});
+    cap.out.push_back(
+        {.rec = fixpp::dict::detail::make_group_ctx_delim(chain, 9000, 9001), .full_path = chain});
 
     auto const clash = fixpp::dict::detail::flush_group_ctx_delims(h, cap);
     ASSERT_FALSE(clash.has_value())
         << "a duplicate capture of the SAME context with the SAME ancestor chain is the benign "
            "case the key-dedup exists for. Reporting it as a collision would reject valid "
            "dictionaries — a spurious HIT, which the fires-correctly test cannot detect.";
-    ASSERT_EQ(h.per_msg_group_ctx_delim_offsets_.size(), 1u);
-    EXPECT_EQ(h.per_msg_group_ctx_delim_offsets_[0].count, 1u)
+    ASSERT_EQ(h.per_msg_group_ctx_delim_offsets_.size(), 1U);
+    EXPECT_EQ(h.per_msg_group_ctx_delim_offsets_[0].count, 1U)
         << "the duplicate must be collapsed to ONE record, not stored twice.";
-    ASSERT_EQ(h.group_ctx_delim_pool_.size(), 1u);
+    ASSERT_EQ(h.group_ctx_delim_pool_.size(), 1U);
     EXPECT_EQ(h.group_ctx_delim_pool_[0].delimiter, 9001);
 }
 

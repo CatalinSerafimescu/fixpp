@@ -9,5 +9,5 @@ TEST(CoreSmoke, Compiles) { SUCCEED(); }
 
 TEST(CoreSmoke, VersionStringNonEmpty) {
     ASSERT_NE(nullptr, fixpp::core::FIXPP_VERSION);
-    ASSERT_GT(std::char_traits<char>::length(fixpp::core::FIXPP_VERSION), 0u);
+    ASSERT_GT(std::char_traits<char>::length(fixpp::core::FIXPP_VERSION), 0U);
 }

@@ -123,7 +123,7 @@ constexpr std::string_view kValidationTestFix42Xml = R"xml(
 /// typed fields for validation-gate witnesses (T012/T013).
 [[nodiscard]] inline std::shared_ptr<const fixpp::dict::Dictionary>
 make_validation_test_dictionary() {
-    constexpr std::size_t kBufSize = 128u * 1024u;
+    constexpr std::size_t kBufSize = 128U * 1024U;
     auto buf = std::make_unique<std::array<std::byte, kBufSize>>();
     auto* mr = new std::pmr::monotonic_buffer_resource{buf->data(), buf->size()};
 
@@ -204,7 +204,7 @@ constexpr std::string_view kValidationTestFix42XmlRequiredOrderQty = R"xml(
 /// NewOrderSingle).
 [[nodiscard]] inline std::shared_ptr<const fixpp::dict::Dictionary>
 make_validation_test_dictionary_required_order_qty() {
-    constexpr std::size_t kBufSize = 128u * 1024u;
+    constexpr std::size_t kBufSize = 128U * 1024U;
     auto buf = std::make_unique<std::array<std::byte, kBufSize>>();
     auto* mr = new std::pmr::monotonic_buffer_resource{buf->data(), buf->size()};
 

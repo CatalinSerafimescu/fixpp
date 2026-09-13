@@ -132,8 +132,8 @@ TEST(GroupEntryRead, OneLevelScalarAndDecimalReadExactValues) {
         std::string_view qty;
     };
     expected const exp[2] = {
-        {"CLORD-0", "ORDID-0", '1', "100.5"},
-        {"CLORD-1", "ORDID-1", '2', "200.25"},
+        {.cl_ord_id = "CLORD-0", .order_id = "ORDID-0", .side = '1', .qty = "100.5"},
+        {.cl_ord_id = "CLORD-1", .order_id = "ORDID-1", .side = '2', .qty = "200.25"},
     };
 
     for (std::size_t i = 0; i < 2; ++i) {

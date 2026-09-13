@@ -138,11 +138,9 @@ TEST(Completeness067, ExactSetEqualityOverBuilderRegistryKeys) {
     // Set-equality, not subset: report BOTH a missing key and an extra key
     // explicitly so a partial-implementation regression is diagnosable.
     std::vector<std::string> missing;
-    std::set_difference(expected.begin(), expected.end(), actual.begin(), actual.end(),
-                        std::back_inserter(missing));
+    std::ranges::set_difference(expected, actual, std::back_inserter(missing));
     std::vector<std::string> extra;
-    std::set_difference(actual.begin(), actual.end(), expected.begin(), expected.end(),
-                        std::back_inserter(extra));
+    std::ranges::set_difference(actual, expected, std::back_inserter(extra));
 
     auto join = [](std::vector<std::string> const& v) {
         std::string s;

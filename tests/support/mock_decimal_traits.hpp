@@ -59,7 +59,7 @@ struct decimal_traits<test::mock_pod> {
                                                  std::pmr::memory_resource* /*mr*/) noexcept {
         if (test::has(fail_mask, test::mock_fail::from_chars))
             return std::unexpected{error::decimal_invalid_input};
-        return test::mock_pod{1, 0};  // constant valid value
+        return test::mock_pod{.mantissa = 1, .exponent = 0};  // constant valid value
     }
 
     static expected_t<std::size_t> to_chars(test::mock_pod const& /*v*/,
@@ -74,12 +74,12 @@ struct decimal_traits<test::mock_pod> {
     static expected_t<test::mock_pod> from_pod(pod_decimal pd) noexcept {
         if (test::has(fail_mask, test::mock_fail::from_pod))
             return std::unexpected{error::decimal_precision_loss};
-        return test::mock_pod{pd.mantissa, pd.exponent};
+        return test::mock_pod{.mantissa = pd.mantissa, .exponent = pd.exponent};
     }
 
     static expected_t<pod_decimal> to_pod(test::mock_pod const& v) noexcept {
         if (test::has(fail_mask, test::mock_fail::to_pod)) return std::unexpected{to_pod_error};
-        return pod_decimal{v.mantissa, v.exponent};
+        return pod_decimal{.mantissa = v.mantissa, .exponent = v.exponent};
     }
 
     static std::strong_ordering compare(test::mock_pod const& a, test::mock_pod const& b) noexcept {

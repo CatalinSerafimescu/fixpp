@@ -114,7 +114,7 @@ public:
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Build a minimal SessionConfig for an acceptor (no auto-connect at open()).
-static SessionConfig make_cfg(SecurityProfile::kind k) {
+SessionConfig make_cfg(SecurityProfile::kind k) {
     SessionConfig cfg;
     cfg.sender_comp_id = "TW";
     cfg.target_comp_id = "ISLD";

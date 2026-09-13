@@ -63,7 +63,7 @@ using fixpp_test_support::kRuntimeDicts;
 using fixpp_test_support::Variant;
 
 bool contains(std::span<std::uint16_t const> members, std::uint16_t tag) {
-    return std::find(members.begin(), members.end(), tag) != members.end();
+    return std::ranges::find(members, tag) != members.end();
 }
 
 Dictionary load(std::filesystem::path const& path, std::pmr::memory_resource* mr) {
@@ -174,13 +174,13 @@ std::vector<CollisionCase> derive_cases_for_dict(std::string_view fname) {
         }
 
         cases.push_back(CollisionCase{
-            fname,
-            no_tag,
-            present->example_context.msg_type,
-            present->example_context.path,
-            absent->example_context.msg_type,
-            absent->example_context.path,
-            discriminator,
+            .dict_file = fname,
+            .no_tag = no_tag,
+            .msg_type_present = present->example_context.msg_type,
+            .path_present = present->example_context.path,
+            .msg_type_absent = absent->example_context.msg_type,
+            .path_absent = absent->example_context.path,
+            .discriminator_tag = discriminator,
         });
     }
     return cases;
@@ -247,7 +247,7 @@ INSTANTIATE_TEST_SUITE_P(PerCensusedCollision, CollisionMembershipGuards,
                          ::testing::ValuesIn(collision_cases()),
                          [](::testing::TestParamInfo<CollisionCase> const& info) {
                              std::string name{info.param.dict_file};
-                             name.erase(std::remove(name.begin(), name.end(), '.'), name.end());
+                             name.erase(std::ranges::remove(name, '.').begin(), name.end());
                              name += "_tag" + std::to_string(info.param.no_tag);
                              return name;
                          });
@@ -297,7 +297,7 @@ TEST(CollisionMembershipGuards, CoversEveryCensusedCollisionExactly) {
     // count fail.
     // 082 moved FIX40/41/42 out of this list and into `expected_per_dict`, leaving
     // a one-element loop behind. Written directly now.
-    EXPECT_EQ(actual_per_dict["FIXT11.xml"], 0u)
+    EXPECT_EQ(actual_per_dict["FIXT11.xml"], 0U)
         << "FIXT11.xml must contribute zero collision cases (benign same-membership reuse for "
            "FIXT.1.1)";
 }

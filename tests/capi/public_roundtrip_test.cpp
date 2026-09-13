@@ -168,7 +168,7 @@ TEST(PublicRoundtrip, AcceptorBoundEndpointNullSession) {
     // *port_out is defensively zeroed before check_session (mirrors is_established).
     uint16_t port = 99;
     EXPECT_EQ(fixpp_session_acceptor_bound_endpoint(nullptr, &port), FIXPP_ERR_NULL_HANDLE);
-    EXPECT_EQ(port, 0u);  // defensive zero written before check_session returns
+    EXPECT_EQ(port, 0U);  // defensive zero written before check_session returns
 }
 
 TEST(PublicRoundtrip, AcceptorBoundEndpointNullPortOut) {
@@ -276,7 +276,7 @@ TEST(PublicRoundtrip, TwoEngineLoopbackExchangesAppMessage) {
 
     // Poll the OS-assigned bound port via the new public API (SC-001)
     uint16_t bound_port = poll_bound_port(acc_session);
-    ASSERT_NE(bound_port, 0u) << "Acceptor did not bind within 3s deadline";
+    ASSERT_NE(bound_port, 0U) << "Acceptor did not bind within 3s deadline";
 
     // ── Initiator engine ──────────────────────────────────────────────────────
     fixpp_dict_t* ini_dict = nullptr;

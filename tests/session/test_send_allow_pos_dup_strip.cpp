@@ -86,7 +86,8 @@ public:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store(
         seqnum_t seq, std::span<const std::byte> frame, direction_t dir) noexcept override {
         if (dir == direction_t::outbound) {
-            outbound_records.push_back({seq, std::vector<std::byte>(frame.begin(), frame.end())});
+            outbound_records.push_back(
+                {.seq = seq, .frame = std::vector<std::byte>(frame.begin(), frame.end())});
             // Track next_out_ so next_seqnum(outbound, false) correctly returns
             // the value AFTER the highest stored seq (for the ResendRequest path
             // which uses this to compute our_last = next_seqnum - 1).
@@ -144,7 +145,7 @@ static std::vector<std::byte> make_fix_frame(std::string_view body_str) {
     std::string full = hdr + std::string(body_str);
     unsigned int cs = 0;
     for (unsigned char c : full) cs += c;
-    cs &= 0xFFu;
+    cs &= 0xFFU;
     char csbuf[4];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     full += "10=" + std::string(csbuf) + "\x01";
@@ -711,48 +712,48 @@ class MalformedField131Test : public AllowPosDupStripTest,
 // Note: do NOT add a "no final SOH" case — the 020 floor rejects it in send_impl
 //       (that measures the floor, not the 022 scanner).
 static const MalformedCase kMalformedCases[] = {
-    {"MissingEquals",
-     "35=D\x01"
-     "11BROKEN\x01"
-     "43=Y\x01",
-     sizeof("35=D\x01"
-            "11BROKEN\x01"
-            "43=Y\x01") -
-         1},
-    {"EmptyTag",
-     "35=D\x01"
-     "=bad\x01"
-     "122=x\x01",
-     sizeof("35=D\x01"
-            "=bad\x01"
-            "122=x\x01") -
-         1},
-    {"NonDigitTag",
-     "35=D\x01"
-     "4a=x\x01"
-     "43=Y\x01",
-     sizeof("35=D\x01"
-            "4a=x\x01"
-            "43=Y\x01") -
-         1},
-    {"EmptyField",
-     "35=D\x01"
-     "\x01"
-     "43=Y\x01",
-     sizeof("35=D\x01"
-            "\x01"
-            "43=Y\x01") -
-         1},
+    {.name = "MissingEquals",
+     .payload = "35=D\x01"
+                "11BROKEN\x01"
+                "43=Y\x01",
+     .payload_len = sizeof("35=D\x01"
+                           "11BROKEN\x01"
+                           "43=Y\x01") -
+                    1},
+    {.name = "EmptyTag",
+     .payload = "35=D\x01"
+                "=bad\x01"
+                "122=x\x01",
+     .payload_len = sizeof("35=D\x01"
+                           "=bad\x01"
+                           "122=x\x01") -
+                    1},
+    {.name = "NonDigitTag",
+     .payload = "35=D\x01"
+                "4a=x\x01"
+                "43=Y\x01",
+     .payload_len = sizeof("35=D\x01"
+                           "4a=x\x01"
+                           "43=Y\x01") -
+                    1},
+    {.name = "EmptyField",
+     .payload = "35=D\x01"
+                "\x01"
+                "43=Y\x01",
+     .payload_len = sizeof("35=D\x01"
+                           "\x01"
+                           "43=Y\x01") -
+                    1},
     // Empty VALUE: tag present + '=' present but zero-length value ("58=\x01").
     // Distinct from EmptyField (zero-length field). Scanner check (d) → 131.
-    {"EmptyValue",
-     "35=D\x01"
-     "58=\x01"
-     "43=Y\x01",
-     sizeof("35=D\x01"
-            "58=\x01"
-            "43=Y\x01") -
-         1},
+    {.name = "EmptyValue",
+     .payload = "35=D\x01"
+                "58=\x01"
+                "43=Y\x01",
+     .payload_len = sizeof("35=D\x01"
+                           "58=\x01"
+                           "43=Y\x01") -
+                    1},
 };
 
 INSTANTIATE_TEST_SUITE_P(AllMalformedCases, MalformedField131Test,

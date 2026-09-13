@@ -195,5 +195,5 @@ TEST(ReconnectPolicyWitness, FinitePolicyHonoredViaSessionConfig) {
 
     fixpp::session::SessionConfig copy = cfg;  // exercises copy-constructibility
     ASSERT_TRUE(copy.reconnect_policy.has_value());
-    EXPECT_EQ(copy.reconnect_policy->max_attempts, 5u);
+    EXPECT_EQ(copy.reconnect_policy->max_attempts, 5U);
 }

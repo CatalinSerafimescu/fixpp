@@ -23,6 +23,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -51,13 +52,12 @@ std::vector<std::filesystem::path> list_archived(std::filesystem::path const& di
     for (auto const& entry : std::filesystem::directory_iterator(dir)) {
         auto fname = entry.path().filename().string();
         if (fname == live) continue;
-        if (fname.size() > prefix.size() + suffix.size() &&
-            fname.substr(0, prefix.size()) == prefix &&
+        if (fname.size() > prefix.size() + suffix.size() && fname.starts_with(prefix) &&
             fname.substr(fname.size() - suffix.size()) == suffix) {
             result.push_back(entry.path());
         }
     }
-    std::sort(result.begin(), result.end());
+    std::ranges::sort(result);
     return result;
 }
 
@@ -90,8 +90,8 @@ protected:
 
 TEST_F(FileSinkRotationTest, RotationPastMaxFileBytesDeletesOldestArchived) {
     // Use a tiny max_file_bytes so rotation triggers quickly.
-    constexpr std::uint64_t k_max_bytes = 64u;  // 64 bytes → rotates after 1-2 lines
-    constexpr std::uint32_t k_max_keep = 3u;    // keep at most 3 archived files
+    constexpr std::uint64_t k_max_bytes = 64U;  // 64 bytes → rotates after 1-2 lines
+    constexpr std::uint32_t k_max_keep = 3U;    // keep at most 3 archived files
     constexpr int k_num_records = 60;           // emit enough to trigger many rotations
 
     // Build FileSinkConfig
@@ -125,7 +125,7 @@ TEST_F(FileSinkRotationTest, RotationPastMaxFileBytesDeletesOldestArchived) {
     sinks.push_back(std::unique_ptr<fixpp::log::Sink>(file_sink_raw));
 
     fixpp::log::LoggerConfig lcfg;
-    lcfg.capacity = 1024u;
+    lcfg.capacity = 1024U;
 
     auto logger = std::make_unique<fixpp::log::Logger>(std::move(lcfg), std::move(sinks));
 
@@ -137,7 +137,7 @@ TEST_F(FileSinkRotationTest, RotationPastMaxFileBytesDeletesOldestArchived) {
 
     for (int i = 0; i < k_num_records; ++i) {
         logger->enqueue(fixpp::log::Level::info, fixpp::log::cat::session, fmt_id, zeroed_trace_id,
-                        0u, ts, {fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(i))});
+                        0U, ts, {fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(i))});
     }
 
     // Drain + shutdown
@@ -147,7 +147,7 @@ TEST_F(FileSinkRotationTest, RotationPastMaxFileBytesDeletesOldestArchived) {
     // ── Verification ──────────────────────────────────────────────────────────
 
     // 1. rotation_count() > 0 (at least one rotation must have occurred).
-    EXPECT_GT(file_sink_raw->rotation_count(), 0u)
+    EXPECT_GT(file_sink_raw->rotation_count(), 0U)
         << "At least one rotation must have occurred given 60 records and 64-byte limit";
 
     // 2. Archived file count ≤ max_keep_count.
@@ -167,7 +167,7 @@ TEST_F(FileSinkRotationTest, RotationPastMaxFileBytesDeletesOldestArchived) {
         // Each archived file was the live file at some point; its size is
         // bounded by max_file_bytes + 1 record. We allow up to 4× for safety
         // (format overhead with timestamps/level strings).
-        EXPECT_LE(sz, k_max_bytes * 4u) << "Archived file " << p.filename() << " size=" << sz
+        EXPECT_LE(sz, k_max_bytes * 4U) << "Archived file " << p.filename() << " size=" << sz
                                         << " exceeds 4× max_file_bytes=" << k_max_bytes;
     }
 
@@ -181,7 +181,7 @@ TEST_F(FileSinkRotationTest, RotationPastMaxFileBytesDeletesOldestArchived) {
     for (auto const& p : archived) {
         total_archived_bytes += get_file_size(p);
     }
-    EXPECT_LE(total_archived_bytes, static_cast<std::uint64_t>(k_max_keep) * k_max_bytes * 4u)
+    EXPECT_LE(total_archived_bytes, static_cast<std::uint64_t>(k_max_keep) * k_max_bytes * 4U)
         << "Total archived bytes exceeds keep_count × max_file_bytes × 4 bound";
 
     // 5. The live file exists and its size is ≥ 0 (may be empty if drain just rotated).
@@ -198,7 +198,7 @@ TEST_F(FileSinkRotationTest, RotationPastMaxFileBytesDeletesOldestArchived) {
     //    For our tiny 64-byte limit this is typically ≤ a few records.
 
     // Confirm drop_count == 0 (no overflow; ring=1024 >> 60 records).
-    EXPECT_EQ(logger->drop_count(), 0u)
+    EXPECT_EQ(logger->drop_count(), 0U)
         << "No records should be dropped with ring capacity >> record count";
 }
 
@@ -212,8 +212,8 @@ TEST_F(FileSinkRotationTest, RotationPastMaxFileBytesDeletesOldestArchived) {
 //   record). The archived file's size equals bytes_written() at rotation trigger,
 //   which may exceed max_file_bytes by at most the size of the trigger record.
 TEST_F(FileSinkRotationTest, ArchivedFileSizeBoundedByMaxPlusOneRecord) {
-    constexpr std::uint64_t k_max_bytes = 100u;
-    constexpr std::uint32_t k_max_keep = 4u;
+    constexpr std::uint64_t k_max_bytes = 100U;
+    constexpr std::uint32_t k_max_keep = 4U;
 
     fixpp::log::FileSinkConfig cfg;
     cfg.directory = tmpdir_;
@@ -231,8 +231,8 @@ TEST_F(FileSinkRotationTest, ArchivedFileSizeBoundedByMaxPlusOneRecord) {
     rec.level = fixpp::log::Level::info;
     rec.category = fixpp::log::cat::session;
     rec.format_id = static_cast<std::uint32_t>(fixpp::log::detail::crc32_str("msg {}"));
-    rec.arg_count = 1u;
-    rec.args[0] = fixpp::log::ArgValue::from_u64(42u);
+    rec.arg_count = 1U;
+    rec.args[0] = fixpp::log::ArgValue::from_u64(42U);
     rec.timestamp =
         fixpp::core::utc_time_point{std::chrono::system_clock::now().time_since_epoch()};
 
@@ -247,7 +247,7 @@ TEST_F(FileSinkRotationTest, ArchivedFileSizeBoundedByMaxPlusOneRecord) {
     sink.close();
 
     // Verify at least one rotation occurred.
-    EXPECT_GT(sink.rotation_count(), 0u)
+    EXPECT_GT(sink.rotation_count(), 0U)
         << "At least one rotation must have occurred with " << k_emit << " records and "
         << k_max_bytes << "-byte limit";
 
@@ -261,10 +261,10 @@ TEST_F(FileSinkRotationTest, ArchivedFileSizeBoundedByMaxPlusOneRecord) {
     // A generous upper bound on one serialised line:
     //   timestamp(~20)+space+level(~7)+space+category+body = well under 512 bytes.
     // We use 512 as the generous upper bound.
-    constexpr std::uint64_t k_max_line_bytes = 512u;
+    constexpr std::uint64_t k_max_line_bytes = 512U;
 
     auto archived = list_archived(tmpdir_, "precise");
-    ASSERT_GT(archived.size(), 0u) << "Archived files must exist after rotations";
+    ASSERT_GT(archived.size(), 0U) << "Archived files must exist after rotations";
 
     for (auto const& p : archived) {
         auto sz = get_file_size(p);

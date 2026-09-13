@@ -223,7 +223,7 @@ protected:
 
     // Whether any captured frame has MsgType == mt (reuses shared extract_field).
     [[nodiscard]] bool any_msg_type(std::string_view mt) const {
-        for (auto& f : captured_frames) {
+        for (const auto& f : captured_frames) {
             if (test_support::extract_field(f, 35) == mt) return true;
         }
         return false;

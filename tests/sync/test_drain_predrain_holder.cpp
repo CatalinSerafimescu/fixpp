@@ -42,7 +42,6 @@
 
 namespace {
 
-using fixpp::core::error;
 using fixpp::sync::async_lock_guard;
 using fixpp::sync::async_mutex;
 using fixpp::sync::expected_t;
@@ -156,7 +155,7 @@ TEST(DrainPredrainHolder, HolderSplicesWaitersWhenUnlocking) {
                 asio::use_future));
         }
 
-        co_await yield_n(N * 2 + 2);
+        co_await yield_n((N * 2) + 2);
 
         // Start drain (concurrently with the holder still held).
         auto fd = asio::co_spawn(
@@ -176,7 +175,7 @@ TEST(DrainPredrainHolder, HolderSplicesWaitersWhenUnlocking) {
         // #289 batch 19 -- coroutine-side; see the comment at
         // HolderUnlocksWhileDrainYields for the mechanism.
         if (!co_await fixpp::test_support::yield_window_then_ready(
-                fd, N * 4 + 8, "DrainPredrainHolder::HolderSplicesWaitersWhenUnlocking/drain")) {
+                fd, (N * 4) + 8, "DrainPredrainHolder::HolderSplicesWaitersWhenUnlocking/drain")) {
             co_return;
         }
         fd.get();
@@ -259,7 +258,7 @@ TEST(DrainPredrainHolder, StressMultipleHolders) {
 
             // #289 batch 19 -- coroutine-side; see HolderUnlocksWhileDrainYields.
             if (!co_await fixpp::test_support::yield_window_then_ready(
-                    fd, N * 4 + 8, "DrainPredrainHolder::StressMultipleHolders/drain")) {
+                    fd, (N * 4) + 8, "DrainPredrainHolder::StressMultipleHolders/drain")) {
                 co_return;
             }
             fd.get();

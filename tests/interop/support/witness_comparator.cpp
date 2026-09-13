@@ -88,7 +88,7 @@ public:
                 } else if (esc == 'u' && i_ + 5 < s_.size()) {
                     std::uint32_t code = 0;
                     for (int k = 0; k < 4; ++k) {
-                        code = code * 16 + hex_digit(s_[i_ + 2 + k]);
+                        code = (code * 16) + hex_digit(s_[i_ + 2 + k]);
                     }
                     i_ += 6;
                     // Combine a UTF-16 surrogate pair when present.
@@ -96,7 +96,7 @@ public:
                         s_[i_ + 1] == 'u') {
                         std::uint32_t low = 0;
                         for (int k = 0; k < 4; ++k) {
-                            low = low * 16 + hex_digit(s_[i_ + 2 + k]);
+                            low = (low * 16) + hex_digit(s_[i_ + 2 + k]);
                         }
                         if (low >= 0xDC00 && low <= 0xDFFF) {
                             code = 0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00);
@@ -724,7 +724,9 @@ std::vector<WitnessRow> compare_streams(std::vector<ParsedRecord> const& stream_
     for (auto const* stream : {&stream_a, &stream_b}) {
         for (ParsedRecord const& rec : *stream) {
             if (rec.kind == ParsedRecord::Kind::Readback) {
-                Key const key{rec.seq_num, rec.direction, rec.occurrence};
+                Key const key{.seq_num = rec.seq_num,
+                              .direction = rec.direction,
+                              .occurrence = rec.occurrence};
                 auto const [it, inserted] = readback_by_key.emplace(key, &rec);
                 if (!inserted) {
                     readback_duplicate_reason[key] =
@@ -760,8 +762,9 @@ std::vector<WitnessRow> compare_streams(std::vector<ParsedRecord> const& stream_
             row.direction = sent.direction;
             row.occurrence = sent.occurrence;
 
-            auto const it =
-                readback_by_key.find(Key{sent.seq_num, sent.direction, sent.occurrence});
+            auto const it = readback_by_key.find(Key{.seq_num = sent.seq_num,
+                                                     .direction = sent.direction,
+                                                     .occurrence = sent.occurrence});
             if (it == readback_by_key.end()) {
                 // FR-016c: "No readback record ⇒ fail, never pass and never
                 // skip." An empty field set must not compare equal to an
@@ -778,8 +781,10 @@ std::vector<WitnessRow> compare_streams(std::vector<ParsedRecord> const& stream_
             // correct readback record to compare against -- fail loudly
             // rather than silently comparing against whichever one won the
             // emplace race above.
-            if (auto const dup_it = readback_duplicate_reason.find(
-                    Key{sent.seq_num, sent.direction, sent.occurrence});
+            if (auto const dup_it =
+                    readback_duplicate_reason.find(Key{.seq_num = sent.seq_num,
+                                                       .direction = sent.direction,
+                                                       .occurrence = sent.occurrence});
                 dup_it != readback_duplicate_reason.end()) {
                 row.verdict = "fail";
                 row.mismatch.push_back(Mismatch{.path = "",
@@ -875,9 +880,8 @@ std::vector<WitnessRow> compare_streams(std::vector<ParsedRecord> const& stream_
                 }
             }
             for (FieldEntry const& fe : readback.fields) {
-                bool const declared =
-                    std::any_of(sent.fields.begin(), sent.fields.end(),
-                                [&](FieldEntry const& s) { return s.path == fe.path; });
+                bool const declared = std::ranges::any_of(
+                    sent.fields, [&](FieldEntry const& s) { return s.path == fe.path; });
                 if (!declared) {
                     mismatches.push_back(Mismatch{.path = fe.path,
                                                   .cls = "spurious",
@@ -908,10 +912,10 @@ std::string render_mismatch_array(std::vector<Mismatch> const& mismatches) {
             out += ",";
         }
         first = false;
-        out += "{\"path\":\"" + json_escape(m.path) + "\"";
-        out += ",\"cls\":\"" + json_escape(m.cls) + "\"";
-        out += ",\"sent_value\":\"" + json_escape(m.sent_value) + "\"";
-        out += ",\"readback_value\":\"" + json_escape(m.readback_value) + "\"";
+        out += R"({"path":")" + json_escape(m.path) + "\"";
+        out += R"(,"cls":")" + json_escape(m.cls) + "\"";
+        out += R"(,"sent_value":")" + json_escape(m.sent_value) + "\"";
+        out += R"(,"readback_value":")" + json_escape(m.readback_value) + "\"";
         out += "}";
     }
     out += "]";
@@ -931,20 +935,20 @@ bool write_witness_rows(std::string const& path, std::vector<WitnessRow> const& 
         return false;
     }
     for (WitnessRow const& row : rows) {
-        std::string line = "{\"witness_id\":\"" + json_escape(row.witness_id) + "\"";
-        line += ",\"run_id\":\"" + json_escape(row.run_id) + "\"";
+        std::string line = R"({"witness_id":")" + json_escape(row.witness_id) + "\"";
+        line += R"(,"run_id":")" + json_escape(row.run_id) + "\"";
         line += ",\"authoritative\":";
         line += row.authoritative ? "true" : "false";
-        line += ",\"combo_id\":\"" + json_escape(row.combo_id) + "\"";
-        line += ",\"cell_id\":\"" + json_escape(row.cell_id) + "\"";
-        line += ",\"config\":\"" + json_escape(row.config) + "\"";
-        line += ",\"arm\":\"" + json_escape(row.arm) + "\"";
-        line += ",\"kind\":\"" + json_escape(row.kind) + "\"";
-        line += ",\"script_step_id\":\"" + json_escape(row.script_step_id) + "\"";
-        line += ",\"msg_type\":\"" + json_escape(row.msg_type) + "\"";
-        line += ",\"direction\":\"" + json_escape(row.direction) + "\"";
+        line += R"(,"combo_id":")" + json_escape(row.combo_id) + "\"";
+        line += R"(,"cell_id":")" + json_escape(row.cell_id) + "\"";
+        line += R"(,"config":")" + json_escape(row.config) + "\"";
+        line += R"(,"arm":")" + json_escape(row.arm) + "\"";
+        line += R"(,"kind":")" + json_escape(row.kind) + "\"";
+        line += R"(,"script_step_id":")" + json_escape(row.script_step_id) + "\"";
+        line += R"(,"msg_type":")" + json_escape(row.msg_type) + "\"";
+        line += R"(,"direction":")" + json_escape(row.direction) + "\"";
         line += ",\"occurrence\":" + std::to_string(row.occurrence);
-        line += ",\"verdict\":\"" + json_escape(row.verdict) + "\"";
+        line += R"(,"verdict":")" + json_escape(row.verdict) + "\"";
         line += ",\"mismatch\":" + render_mismatch_array(row.mismatch);
         line += "}";
         out << line << '\n';

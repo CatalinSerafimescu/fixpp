@@ -65,7 +65,7 @@ void assert_golden_match(std::string_view golden_relpath, std::span<const std::b
     ASSERT_EQ(expected.size(), 1U);
 
     std::vector<GoldenFrame> actual{
-        GoldenFrame{'>', std::vector<std::byte>{body.begin(), body.end()}}};
+        GoldenFrame{.dir = '>', .bytes = std::vector<std::byte>{body.begin(), body.end()}}};
     auto diff = diff_transcripts(expected, actual, shape_oracle_profile());
     EXPECT_TRUE(static_cast<bool>(diff)) << "golden diff mismatch: " << diff.detail;
 }

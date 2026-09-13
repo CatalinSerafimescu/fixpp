@@ -105,14 +105,13 @@ public:
 
 // ── Frame-building helpers (mirror test_recovery_*.cpp pattern) ───────────────
 
-static std::string field(int tag, std::string_view val) {
+std::string field(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
-static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
-                                             std::string_view msg_type, std::uint32_t seq,
-                                             std::string_view sender, std::string_view target,
-                                             std::string_view extra = {}) {
+std::vector<std::byte> make_fix_frame(std::string_view begin_string, std::string_view msg_type,
+                                      std::uint32_t seq, std::string_view sender,
+                                      std::string_view target, std::string_view extra = {}) {
     std::string body;
     body += field(35, msg_type);
     body += field(34, std::to_string(seq));
@@ -138,8 +137,8 @@ static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
     return frame;
 }
 
-static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
-                                         std::string_view t, int hbt = 30) {
+std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
+                                  std::string_view t, int hbt = 30) {
     std::string extra;
     extra += field(98, "0");
     extra += field(108, std::to_string(hbt));
@@ -148,8 +147,8 @@ static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq,
 
 // make_logon_with_789: Logon frame carrying NextExpectedMsgSeqNum(789).
 // make_app_frame_posdup: app frame (35=D) with PossDupFlag(43)=Y + OrigSendingTime(122).
-static std::vector<std::byte> make_app_frame_posdup(std::string_view bs, std::uint32_t seq,
-                                                    std::string_view s, std::string_view t) {
+std::vector<std::byte> make_app_frame_posdup(std::string_view bs, std::uint32_t seq,
+                                             std::string_view s, std::string_view t) {
     std::string extra;
     extra += field(43, "Y");
     extra += field(97, "N");  // PossResend=N
@@ -158,9 +157,9 @@ static std::vector<std::byte> make_app_frame_posdup(std::string_view bs, std::ui
     return make_fix_frame(bs, "D", seq, s, t, extra);
 }
 
-static std::vector<std::byte> make_logon_with_789(std::string_view bs, std::uint32_t seq,
-                                                  std::string_view s, std::string_view t,
-                                                  std::uint32_t next_expected, int hbt = 30) {
+std::vector<std::byte> make_logon_with_789(std::string_view bs, std::uint32_t seq,
+                                           std::string_view s, std::string_view t,
+                                           std::uint32_t next_expected, int hbt = 30) {
     std::string extra;
     extra += field(98, "0");
     extra += field(108, std::to_string(hbt));
@@ -168,10 +167,9 @@ static std::vector<std::byte> make_logon_with_789(std::string_view bs, std::uint
     return make_fix_frame(bs, "A", seq, s, t, extra);
 }
 
-static std::vector<std::byte> make_resend_request(std::string_view bs, std::uint32_t seq,
-                                                  std::string_view s, std::string_view t,
-                                                  std::uint32_t begin_seqno,
-                                                  std::uint32_t end_seqno) {
+std::vector<std::byte> make_resend_request(std::string_view bs, std::uint32_t seq,
+                                           std::string_view s, std::string_view t,
+                                           std::uint32_t begin_seqno, std::uint32_t end_seqno) {
     std::string extra;
     extra += field(7, std::to_string(begin_seqno));
     extra += field(16, std::to_string(end_seqno));
@@ -179,9 +177,9 @@ static std::vector<std::byte> make_resend_request(std::string_view bs, std::uint
 }
 
 // make_seq_reset_gapfill: SequenceReset-GapFill for admin fills during resend.
-static std::vector<std::byte> make_seq_reset_gapfill(std::string_view bs, std::uint32_t seq,
-                                                     std::string_view s, std::string_view t,
-                                                     std::uint32_t new_seqno) {
+std::vector<std::byte> make_seq_reset_gapfill(std::string_view bs, std::uint32_t seq,
+                                              std::string_view s, std::string_view t,
+                                              std::uint32_t new_seqno) {
     std::string extra;
     extra += field(43, "Y");
     extra += field(123, "Y");  // GapFillFlag=Y
@@ -202,7 +200,7 @@ struct OutboundCapture {
 
 using fixpp::test_support::extract_tag;
 
-static bool frame_is_gapfill(const std::vector<std::byte>& frame) {
+bool frame_is_gapfill(const std::vector<std::byte>& frame) {
     return extract_tag(frame, 35) == "4" && extract_tag(frame, 123) == "Y";
 }
 
@@ -389,9 +387,8 @@ struct Fixture {
     void clear_capture() { capture.frames.clear(); }
 };
 
-static std::unique_ptr<Fixture> make_acceptor(std::shared_ptr<MessageStoreFactory> store_factory,
-                                              std::uint32_t peer_logon_seq = 1,
-                                              bool enable_789 = false) {
+std::unique_ptr<Fixture> make_acceptor(std::shared_ptr<MessageStoreFactory> store_factory,
+                                       std::uint32_t peer_logon_seq = 1, bool enable_789 = false) {
     auto fix = std::make_unique<Fixture>();
 
     fix->cfg.role = fixpp::session::session_role::acceptor;
@@ -440,8 +437,8 @@ static std::unique_ptr<Fixture> make_acceptor(std::shared_ptr<MessageStoreFactor
 // (which transitions the session to LogonSent). The outbound capture holds
 // exactly the Logon frame after open().
 
-static std::unique_ptr<Fixture> make_initiator(std::shared_ptr<MessageStoreFactory> store_factory,
-                                               bool enable_789 = false) {
+std::unique_ptr<Fixture> make_initiator(std::shared_ptr<MessageStoreFactory> store_factory,
+                                        bool enable_789 = false) {
     auto fix = std::make_unique<Fixture>();
 
     fix->cfg.role = fixpp::session::session_role::initiator;
@@ -496,7 +493,7 @@ TEST(WalkExtraction, TwoValueEnd_ExplicitEndBeyondStore) {
     fix->feed(make_resend_request("FIX.4.4", 2, "CLI", "SRV", 10, 20));
 
     const auto& frames = fix->capture.frames;
-    auto gf_it = std::find_if(frames.begin(), frames.end(), frame_is_gapfill);
+    auto gf_it = std::ranges::find_if(frames, frame_is_gapfill);
     ASSERT_NE(gf_it, frames.end()) << "Expected a SequenceReset-GapFill response";
 
     // NewSeqNo(36) MUST be rr_end+1 = 21, NOT eff_end+1 = 6.
@@ -529,7 +526,7 @@ TEST(WalkExtraction, TwoValueEnd_EndSeqNo0_EmptyStore) {
     fix->feed(make_resend_request("FIX.4.4", 2, "CLI", "SRV", 1, 0));
 
     const auto& frames = fix->capture.frames;
-    auto gf_it = std::find_if(frames.begin(), frames.end(), frame_is_gapfill);
+    auto gf_it = std::ranges::find_if(frames, frame_is_gapfill);
     ASSERT_NE(gf_it, frames.end()) << "Expected a SequenceReset-GapFill response";
 
     const std::string new_seqno = extract_tag(*gf_it, 36);
@@ -571,7 +568,7 @@ TEST(WalkExtraction, SingleImplementation) {
         int n = 0;
         std::string line;
         while (std::getline(ifs, line)) {
-            if (line.find(needle) != std::string::npos) ++n;
+            if (line.contains(needle)) ++n;
         }
         return n;
     };
@@ -721,9 +718,8 @@ TEST(Honor, Acceptor_XltN_ResendsExactRange_AfterReply_NoResendRequest) {
     }
 
     // Find the reply Logon frame (35=A).
-    auto reply_it = std::find_if(frames.begin(), frames.end(), [](const std::vector<std::byte>& f) {
-        return extract_tag(f, 35) == "A";
-    });
+    auto reply_it = std::ranges::find_if(
+        frames, [](const std::vector<std::byte>& f) { return extract_tag(f, 35) == "A"; });
     ASSERT_NE(reply_it, frames.end()) << "Expected reply Logon (35=A) in outbound capture";
     const std::size_t reply_idx = static_cast<std::size_t>(reply_it - frames.begin());
 
@@ -1017,7 +1013,7 @@ TEST(WalkExtraction, TwoValueEnd_ExplicitEndBeyondStore_789Caller) {
     ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
 
     const auto& frames = fix->capture.frames;
-    auto gf_it = std::find_if(frames.begin(), frames.end(), frame_is_gapfill);
+    auto gf_it = std::ranges::find_if(frames, frame_is_gapfill);
     ASSERT_NE(gf_it, frames.end()) << "Expected a SequenceReset-GapFill after 789 honor";
 
     // NewSeqNo must be peek_outbound()=9, NOT our_last+1=3.
@@ -1067,7 +1063,7 @@ TEST(WalkExtraction, TwoValueEnd_EndSeqNo0_EmptyStore_789Caller) {
     ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
 
     const auto& frames = fix->capture.frames;
-    auto gf_it = std::find_if(frames.begin(), frames.end(), frame_is_gapfill);
+    auto gf_it = std::ranges::find_if(frames, frame_is_gapfill);
     ASSERT_NE(gf_it, frames.end()) << "Expected a SequenceReset-GapFill (empty store)";
 
     const std::string new_seqno = extract_tag(*gf_it, 36);
@@ -1288,7 +1284,8 @@ TEST(BehindSide, Bidirectional_BothGaps_RecoverNoDoubleRecovery) {
     }
 
     // We should have emitted our resend [3,4] (ahead-side, from T014 honor path).
-    bool found3 = false, found4 = false;
+    bool found3 = false;
+    bool found4 = false;
     for (const auto& f : fix->capture.frames) {
         if (extract_tag(f, 34) == "3" && extract_tag(f, 43) == "Y") found3 = true;
         if (extract_tag(f, 34) == "4" && extract_tag(f, 43) == "Y") found4 = true;
@@ -1786,13 +1783,12 @@ TEST(DefaultOff, ByteIdenticalLogon_InboundIgnored) {
 //   Assert NO [1,N-1] full-history replay (no PossDup/GapFill flood).
 
 // Helper: is this frame a Logout (35=5)?
-static bool frame_is_logout(const std::vector<std::byte>& f) { return extract_tag(f, 35) == "5"; }
+bool frame_is_logout(const std::vector<std::byte>& f) { return extract_tag(f, 35) == "5"; }
 
 // Helper: make a Logon frame with a raw (possibly malformed) 789 value.
-static std::vector<std::byte> make_logon_with_raw_789(std::string_view bs, std::uint32_t seq,
-                                                      std::string_view s, std::string_view t,
-                                                      std::string_view raw_789_value,
-                                                      int hbt = 30) {
+std::vector<std::byte> make_logon_with_raw_789(std::string_view bs, std::uint32_t seq,
+                                               std::string_view s, std::string_view t,
+                                               std::string_view raw_789_value, int hbt = 30) {
     std::string extra;
     extra += field(98, "0");
     extra += field(108, std::to_string(hbt));
@@ -1913,9 +1909,9 @@ TEST(Honor, XgtN_LogoutTextThenDisconnect) {
         // onLogon is never fired and the FSM ring shows no Active visit.
         {
             auto hist = fix->session->fsm_visit_history();
-            bool active_seen = std::any_of(
-                hist.begin(), hist.end(),
-                [](fixpp::session::fsm_state s) { return s == fixpp::session::fsm_state::Active; });
+            bool active_seen = std::ranges::any_of(hist, [](fixpp::session::fsm_state s) {
+                return s == fixpp::session::fsm_state::Active;
+            });
             EXPECT_FALSE(active_seen)
                 << "Honor_XgtN initiator: Active must NEVER appear in fsm_visit_history() "
                    "on the X>N integrity path (C6 — MUST NOT advance to established as in-sync)";
@@ -2051,10 +2047,9 @@ TEST(Honor, Invalid789_LogoutThenDisconnect) {
             // [gate-b/r1 FQ-1 C6/C8 witness] — Active must NEVER have been entered.
             {
                 auto hist = fix->session->fsm_visit_history();
-                bool active_seen =
-                    std::any_of(hist.begin(), hist.end(), [](fixpp::session::fsm_state s) {
-                        return s == fixpp::session::fsm_state::Active;
-                    });
+                bool active_seen = std::ranges::any_of(hist, [](fixpp::session::fsm_state s) {
+                    return s == fixpp::session::fsm_state::Active;
+                });
                 EXPECT_FALSE(active_seen)
                     << "Honor_Invalid789 initiator [" << label
                     << "]: "

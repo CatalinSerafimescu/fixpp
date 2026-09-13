@@ -54,7 +54,6 @@ using fixpp::log::Level;
 using fixpp::log::Logger;
 using fixpp::log::LoggerConfig;
 using fixpp::log::Record;
-using fixpp::log::cat::session;
 
 // ── CaptureSink: collects emitted records in order ────────────────────────────
 
@@ -63,7 +62,7 @@ public:
     [[nodiscard]] fixpp::core::expected_t<void> open() override { return {}; }
 
     void emit(Record const& rec) noexcept override {
-        std::lock_guard lk{mu_};
+        std::scoped_lock lk{mu_};
         records_.push_back(rec);
     }
 
@@ -72,14 +71,14 @@ public:
 
     // Copy-out the captured records (under lock).
     [[nodiscard]] std::vector<Record> drain() {
-        std::lock_guard lk{mu_};
+        std::scoped_lock lk{mu_};
         auto out = records_;
         records_.clear();
         return out;
     }
 
     [[nodiscard]] std::size_t count() const {
-        std::lock_guard lk{mu_};
+        std::scoped_lock lk{mu_};
         return records_.size();
     }
 
@@ -121,7 +120,7 @@ bool wait_for_records(CaptureSink* sink, std::size_t n,
 
 // Helper: convert std::array<std::byte,16> to std::array<std::uint8_t,16>
 // for comparison with Record::trace_id (same bit pattern, different element type).
-static std::array<std::uint8_t, 16> to_u8(std::array<std::byte, 16> const& b) {
+std::array<std::uint8_t, 16> to_u8(std::array<std::byte, 16> const& b) {
     return reinterpret_cast<std::array<std::uint8_t, 16> const&>(b);
 }
 
@@ -139,13 +138,13 @@ TEST(TraceCorrelation, SlogCarriesSessionTrace) {
 
     // (a) Emit via FIXPP_SLOG — caller passes tc explicitly, no co_await.
     FIXPP_SLOG(logger.get(), info, tc, fixpp::log::cat::session, "slog test {}",
-               ArgValue::from_u64(1u));
+               ArgValue::from_u64(1U));
 
     // Wait for the drain thread to deliver the record.
     ASSERT_TRUE(wait_for_records(sink_ptr, 1)) << "record not delivered within 2 s";
 
     auto records = sink_ptr->drain();
-    ASSERT_EQ(records.size(), 1u);
+    ASSERT_EQ(records.size(), 1U);
 
     // Assert trace_id == 0xAA...
     // Record::trace_id is std::array<std::uint8_t,16>; convert for comparison.
@@ -178,12 +177,12 @@ TEST(TraceCorrelation, ElogCarriesEngineTrace) {
 
     // (b) Emit via FIXPP_ELOG — reads engine.engine_trace_context() internally.
     FIXPP_ELOG(logger.get(), info, engine, fixpp::log::cat::control, "elog test {}",
-               ArgValue::from_u64(2u));
+               ArgValue::from_u64(2U));
 
     ASSERT_TRUE(wait_for_records(sink_ptr, 1)) << "record not delivered within 2 s";
 
     auto records = sink_ptr->drain();
-    ASSERT_EQ(records.size(), 1u);
+    ASSERT_EQ(records.size(), 1U);
 
     // Record::trace_id is std::array<std::uint8_t,16>; convert std::byte for cmp.
     std::array<std::byte, 16> expected_trace_bytes;
@@ -210,12 +209,12 @@ TEST(TraceCorrelation, Log0AllZeros) {
 
     // (c) FIXPP_LOG0 — context-free; trace_id and span_id must be all-zeros.
     FIXPP_LOG0(logger.get(), info, fixpp::log::cat::session, "log0 test {}",
-               ArgValue::from_u64(3u));
+               ArgValue::from_u64(3U));
 
     ASSERT_TRUE(wait_for_records(sink_ptr, 1)) << "record not delivered within 2 s";
 
     auto records = sink_ptr->drain();
-    ASSERT_EQ(records.size(), 1u);
+    ASSERT_EQ(records.size(), 1U);
 
     // trace_id: all-zeros (Record::trace_id is std::array<std::uint8_t,16>)
     std::array<std::uint8_t, 16> zero_trace{};
@@ -250,7 +249,7 @@ TEST(TraceCorrelation, SlogTimestampIsWallClock) {
     ASSERT_TRUE(wait_for_records(sink_ptr, 1)) << "record not delivered within 2 s";
 
     auto records = sink_ptr->drain();
-    ASSERT_EQ(records.size(), 1u);
+    ASSERT_EQ(records.size(), 1U);
 
     // SLOG timestamp must be a real wall-clock time (between before and after),
     // not zero and not a future/past sentinel.
@@ -297,12 +296,12 @@ TEST(TraceCorrelation, ElogTimestampFromMockClock) {
     auto const expected_ts = mock_clk->now();
 
     FIXPP_ELOG(logger.get(), info, engine, fixpp::log::cat::control, "clock test {}",
-               ArgValue::from_u64(4u));
+               ArgValue::from_u64(4U));
 
     ASSERT_TRUE(wait_for_records(sink_ptr, 1)) << "record not delivered within 2 s";
 
     auto records = sink_ptr->drain();
-    ASSERT_EQ(records.size(), 1u);
+    ASSERT_EQ(records.size(), 1U);
 
     // The record timestamp must equal mock.now() — not system_clock::now().
     // [E1 remediation]: FIXPP_ELOG reads engine.clock()->now() for the timestamp.

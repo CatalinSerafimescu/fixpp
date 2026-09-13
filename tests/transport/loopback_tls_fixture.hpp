@@ -92,10 +92,12 @@ public:
     LoopbackTlsFixture& operator=(LoopbackTlsFixture&&) = delete;
 
     // Port the server is listening on (OS-assigned).
-    std::uint16_t bound_port() const noexcept { return bound_port_; }
+    [[nodiscard]] std::uint16_t bound_port() const noexcept { return bound_port_; }
 
     // Endpoint clients should connect to.
-    Endpoint server_endpoint() const noexcept { return Endpoint{"127.0.0.1", bound_port_, 0}; }
+    [[nodiscard]] Endpoint server_endpoint() const noexcept {
+        return Endpoint{"127.0.0.1", bound_port_, 0};
+    }
 
     // Mint a fresh client Transport using the cached SSL_CTX (FR-026).
     // The returned Transport is in state fresh; caller drives async_connect.
@@ -108,7 +110,7 @@ public:
     }
 
     // SslCtxConfig for async_handshake calls (same config for both sides).
-    tls::SslCtxConfig const& ssl_cfg() const noexcept { return ssl_cfg_; }
+    [[nodiscard]] tls::SslCtxConfig const& ssl_cfg() const noexcept { return ssl_cfg_; }
 
     // The underlying listener (for tests that need direct access).
     asio_listener& listener() noexcept { return *listener_; }

@@ -184,14 +184,16 @@ inline ProbeResult probe_counterparty(std::string_view counterparty,
     // NOLINTNEXTLINE(concurrency-mt-unsafe)
     const char* port_env = std::getenv(port_var.c_str());
     if (port_env == nullptr || *port_env == '\0') {
-        return {false, std::string{counterparty} + " unavailable: " + port_var +
-                           " not set (parent harness did not lease a port)"};
+        return {.available = false,
+                .reason = std::string{counterparty} + " unavailable: " + port_var +
+                          " not set (parent harness did not lease a port)"};
     }
     char* port_end = nullptr;
     long port = std::strtol(port_env, &port_end, 10);
     if (port_end == port_env || *port_end != '\0' || port <= 0 || port > 65535) {
-        return {false, std::string{counterparty} + " unavailable: " + port_var + "='" + port_env +
-                           "' is not a valid TCP port"};
+        return {.available = false,
+                .reason = std::string{counterparty} + " unavailable: " + port_var + "='" +
+                          port_env + "' is not a valid TCP port"};
     }
 
     const std::string host_var = "INTEROP_" + token + "_HOST";
@@ -200,10 +202,11 @@ inline ProbeResult probe_counterparty(std::string_view counterparty,
     std::string host = (host_env != nullptr && *host_env != '\0') ? host_env : "127.0.0.1";
 
     if (!tcp_port_connectable(host, static_cast<std::uint16_t>(port), timeout)) {
-        return {false, std::string{counterparty} + " unavailable: nothing listening at " + host +
-                           ":" + std::to_string(port)};
+        return {.available = false,
+                .reason = std::string{counterparty} + " unavailable: nothing listening at " + host +
+                          ":" + std::to_string(port)};
     }
-    return {true, {}};
+    return {.available = true, .reason = {}};
 }
 
 }  // namespace fixpp::interop

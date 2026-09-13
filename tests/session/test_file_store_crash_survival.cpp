@@ -185,7 +185,7 @@ TEST(FileStoreCrashSurvival, CommitPerMessage100Frames) {
     }
 
     // Cleanup
-    minted.value().reset();
+    minted.value() = nullptr;
     fixpp::store_test::remove_store_dir(dir);
 }
 
@@ -246,7 +246,7 @@ TEST(FileStoreCrashSurvival, SecondOpenerReturnsFailed) {
         << "expected store_factory_failed due to advisory lock contention";
 
     // Release first store before removing the directory
-    minted1.value().reset();
+    minted1.value() = nullptr;
     fixpp::store_test::remove_store_dir(dir);
 }
 
@@ -303,7 +303,7 @@ TEST(FileStoreCrashSurvival, CommitBatchedReturnsSuccess) {
     EXPECT_GE(visitor.entries().size(), static_cast<std::size_t>(1));
     EXPECT_LE(visitor.entries().size(), static_cast<std::size_t>(kFrames));
 
-    minted.value().reset();
+    minted.value() = nullptr;
     fixpp::store_test::remove_store_dir(dir);
 }
 

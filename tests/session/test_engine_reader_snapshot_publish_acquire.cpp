@@ -103,9 +103,9 @@ constexpr auto kRunWindow = 500ms;
 // FIX protocol implementation or TLS on the peer side.
 // The port is passed by reference and set before the coroutine suspends so the
 // main thread can read it after binding.
-static asio::awaitable<void> run_raw_acceptor(asio::io_context& ioc, uint16_t& bound_port,
-                                              std::atomic<bool>& port_ready,
-                                              std::chrono::milliseconds hold_window) {
+asio::awaitable<void> run_raw_acceptor(asio::io_context& ioc, uint16_t& bound_port,
+                                       std::atomic<bool>& port_ready,
+                                       std::chrono::milliseconds hold_window) {
     asio::ip::tcp::acceptor acceptor{ioc};
     asio::ip::tcp::endpoint ep{asio::ip::make_address("127.0.0.1"), 0};
     acceptor.open(ep.protocol());

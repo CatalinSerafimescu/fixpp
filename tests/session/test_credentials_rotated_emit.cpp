@@ -108,12 +108,12 @@ namespace {
 // ─────────────────────────────────────────────────────────────────────────────
 // FIX frame helpers (copied from test_reconnect_live_happy_path.cpp pattern)
 // ─────────────────────────────────────────────────────────────────────────────
-static std::string fix_field(int tag, std::string_view val) {
+std::string fix_field(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
-static std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
-                                               std::string_view sender, std::string_view target) {
+std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
+                                        std::string_view sender, std::string_view target) {
     std::string body;
     body += fix_field(35, "A");
     body += fix_field(34, std::to_string(seq));
@@ -275,7 +275,7 @@ public:
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: build a permissive ReconnectPolicy (zero delay, max 3 attempts).
 // ─────────────────────────────────────────────────────────────────────────────
-static fixpp::transport::ReconnectPolicy make_fast_policy(std::uint32_t max_attempts = 3) {
+fixpp::transport::ReconnectPolicy make_fast_policy(std::uint32_t max_attempts = 3) {
     fixpp::transport::ReconnectPolicy p;
     p.max_attempts = max_attempts;
     p.schedule = std::pmr::vector<std::chrono::milliseconds>{std::pmr::get_default_resource()};
@@ -287,7 +287,7 @@ static fixpp::transport::ReconnectPolicy make_fast_policy(std::uint32_t max_atte
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: build a known fingerprint value for testing
 // ─────────────────────────────────────────────────────────────────────────────
-static std::array<std::byte, 32> make_sha(std::uint8_t fill) {
+std::array<std::byte, 32> make_sha(std::uint8_t fill) {
     std::array<std::byte, 32> a{};
     for (auto& b : a) b = std::byte{fill};
     return a;
@@ -351,7 +351,7 @@ TEST_F(CredentialsRotatedEmitTest, FirstLoadEmitsNoEvent) {
     (void)fut.get();  // may fail due to null session_ handoff; that's OK
 
     // FR-009 SPEC-FIXED: first-ever load is NOT a rotation → no event.
-    EXPECT_EQ(events.size(), 0u)
+    EXPECT_EQ(events.size(), 0U)
         << "First-ever load must NOT emit credentials_rotated (FR-009 SPEC-FIXED).";
 }
 
@@ -401,7 +401,7 @@ TEST_F(CredentialsRotatedEmitTest, RotationEmitBeforeMakeWithRealFingerprints) {
             return;
         }
         (void)fut.get();
-        ASSERT_EQ(init_events.size(), 0u) << "Precondition: first load must emit no event.";
+        ASSERT_EQ(init_events.size(), 0U) << "Precondition: first load must emit no event.";
 
         // After the first attempt, fsm_init's last_active_source_ == source_a.
         // We'll re-use this FSM's state. But since ReconnectFsm is not copy/movable
@@ -443,7 +443,7 @@ TEST_F(CredentialsRotatedEmitTest, RotationEmitBeforeMakeWithRealFingerprints) {
             return;
         }
         (void)fut.get();
-        EXPECT_EQ(events.size(), 0u) << "Precondition: first load emits no event.";
+        EXPECT_EQ(events.size(), 0U) << "Precondition: first load emits no event.";
         factory->factory_make_count = 0;  // reset for next attempt
         factory->make_sequence = -1;
         event_order = -1;
@@ -469,7 +469,7 @@ TEST_F(CredentialsRotatedEmitTest, RotationEmitBeforeMakeWithRealFingerprints) {
     // ── Assertions ────────────────────────────────────────────────────────────
 
     // (a) Exactly one credentials_rotated emitted.
-    ASSERT_EQ(events.size(), 1u) << "Expected exactly one credentials_rotated event. "
+    ASSERT_EQ(events.size(), 1U) << "Expected exactly one credentials_rotated event. "
                                  << "RED: stub does not emit.";
 
     // (b) new_sha256 == sha_b (the REAL fingerprint of source_b's leaf).
@@ -530,7 +530,7 @@ TEST_F(CredentialsRotatedEmitTest, NoOpRotationStillEmits) {
             return;
         }
         (void)fut.get();
-        ASSERT_EQ(events.size(), 0u) << "Precondition: first load emits no event.";
+        ASSERT_EQ(events.size(), 0U) << "Precondition: first load emits no event.";
     }
 
     // Stage source_c2 (different ptr, SAME sha — fingerprint no-op).
@@ -549,7 +549,7 @@ TEST_F(CredentialsRotatedEmitTest, NoOpRotationStillEmits) {
         (void)fut.get();
     }
 
-    ASSERT_EQ(events.size(), 1u)
+    ASSERT_EQ(events.size(), 1U)
         << "No-op rotation (old_sha == new_sha) must still emit credentials_rotated "
         << "(FR-011). RED: no emit site exists.";
 
@@ -753,7 +753,7 @@ TEST_F(CredentialsRotatedEmitTest, LiveTlsRotationEmitRealFingerprint) {
             return;
         }
         (void)prime_fut.get();
-        ASSERT_EQ(captured_events.size(), 0u)
+        ASSERT_EQ(captured_events.size(), 0U)
             << "First load (source_a) must emit no event (FR-009 SPEC-FIXED).";
     }
 
@@ -808,7 +808,7 @@ TEST_F(CredentialsRotatedEmitTest, LiveTlsRotationEmitRealFingerprint) {
     }
 
     // ── Assert: exactly one credentials_rotated emitted with real fingerprint
-    ASSERT_EQ(captured_events.size(), 1u) << "Expected exactly one credentials_rotated event. "
+    ASSERT_EQ(captured_events.size(), 1U) << "Expected exactly one credentials_rotated event. "
                                           << "RED: no emit site exists in 013 stub.";
 
     EXPECT_EQ(captured_events[0].new_sha256, expected_sha)
@@ -1002,7 +1002,7 @@ TEST_F(CredentialsRotatedEmitTest, NonThrowingCallback_BehaviourUnchanged) {
             return;
         }
         (void)fut.get();
-        ASSERT_EQ(events.size(), 0u) << "Precondition: first load emits no event";
+        ASSERT_EQ(events.size(), 0U) << "Precondition: first load emits no event";
     }
 
     // Stage source_b.
@@ -1022,7 +1022,7 @@ TEST_F(CredentialsRotatedEmitTest, NonThrowingCallback_BehaviourUnchanged) {
     }
 
     // Non-throwing callback must emit exactly one event (INV-9 — transparent).
-    ASSERT_EQ(events.size(), 1u)
+    ASSERT_EQ(events.size(), 1U)
         << "Non-throwing callback must emit exactly one credentials_rotated event "
         << "(INV-9 transparency: try/catch must not suppress non-throwing callbacks)";
 

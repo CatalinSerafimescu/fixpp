@@ -168,7 +168,10 @@ TEST(RenderApplVerId, RoundTrip_AllValues) {
     using fixpp::dict::session_version;
     using fixpp::dict::version_profile;
 
-    const version_profile kProfile{session_version::vt11, application_version::v50sp2, true, 0};
+    const version_profile kProfile{.session = session_version::vt11,
+                                   .default_appl = application_version::v50sp2,
+                                   .has_per_message_override = true,
+                                   ._reserved = 0};
 
     constexpr application_version kAll[] = {
         application_version::v40,    application_version::v41,    application_version::v42,
@@ -214,7 +217,7 @@ namespace {
     std::string needle = "\x01";
     needle += tag_num;
     needle += "=";
-    return frame.find(needle) != std::string_view::npos;
+    return frame.contains(needle);
 }
 
 // W4 baseline: the exact FIX.4.4 Logon produced by build_logon with:
@@ -499,7 +502,7 @@ constexpr std::string_view kMinimalFix50sp2Xml = R"xml(
 )xml";
 
 [[nodiscard]] std::shared_ptr<const fixpp::dict::Dictionary> make_dict(std::string_view xml) {
-    constexpr std::size_t kBufSize = 64u * 1024u;
+    constexpr std::size_t kBufSize = 64U * 1024U;
     auto buf = std::make_unique<std::array<std::byte, kBufSize>>();
     auto* mr = new std::pmr::monotonic_buffer_resource{buf->data(), buf->size()};
     fixpp::dict::Dictionary d = fixpp::dict::XmlLoader{}.load_from_string(xml, mr);
@@ -614,7 +617,7 @@ constexpr std::string_view kMinimalFix50sp2Xml = R"xml(
 [[nodiscard]] bool wire_has_tag(std::span<const std::byte> frame, int tag) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = "\x01" + std::to_string(tag) + "=";
-    return wire.find(needle) != std::string::npos;
+    return wire.contains(needle);
 }
 
 // Run a coroutine synchronously.

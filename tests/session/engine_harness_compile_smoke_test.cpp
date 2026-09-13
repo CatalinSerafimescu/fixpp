@@ -66,9 +66,12 @@ TEST(EngineHarnessCompileSmoke, BuildSkipsWhenFixtureDirAbsent) {
 
 TEST(EngineHarnessCompileSmoke, SessionIdTypesCompile) {
     // Verify that SessionId construction and comparison compile correctly.
-    fixpp::session::SessionId id1{"FIX.4.2", "SENDER", "TARGET"};
-    fixpp::session::SessionId id2{"FIX.4.2", "SENDER", "TARGET"};
-    fixpp::session::SessionId id3{"FIX.4.2", "OTHER", "TARGET"};
+    fixpp::session::SessionId id1{
+        .begin_string = "FIX.4.2", .sender_comp_id = "SENDER", .target_comp_id = "TARGET"};
+    fixpp::session::SessionId id2{
+        .begin_string = "FIX.4.2", .sender_comp_id = "SENDER", .target_comp_id = "TARGET"};
+    fixpp::session::SessionId id3{
+        .begin_string = "FIX.4.2", .sender_comp_id = "OTHER", .target_comp_id = "TARGET"};
 
     EXPECT_EQ(id1, id2);
     EXPECT_NE(id1, id3);

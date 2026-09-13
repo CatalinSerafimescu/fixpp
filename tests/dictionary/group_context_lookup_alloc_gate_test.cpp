@@ -109,7 +109,6 @@ void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
 
 namespace {
 
-using fixpp::dict::table_view;
 using fixpp::wire::group_context;
 
 // The context-aware group_member_fn_t is shared across tests — see

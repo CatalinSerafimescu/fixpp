@@ -114,7 +114,7 @@ protected:
         fixpp::store_test::remove_store_dir(dir_);
     }
 
-    FileStore::Config make_config(FileStorePolicy policy = {}) const {
+    [[nodiscard]] FileStore::Config make_config(FileStorePolicy policy = {}) const {
         FileStore::Config cfg;
         cfg.directory = dir_;
         cfg.sender_comp_id = "SENDER";
@@ -188,7 +188,7 @@ public:
         co_return visit_result::cont;
     }
 
-    fixpp::core::error abort_error() const noexcept override {
+    [[nodiscard]] fixpp::core::error abort_error() const noexcept override {
         return fixpp::core::error::store_io_failure;
     }
 
@@ -319,7 +319,7 @@ TEST_F(FileStoreConcurrentTsanTest, ResetRace_vs_LogicalGap_Discriminating) {
                 ++count;
                 co_return visit_result::cont;
             }
-            fixpp::core::error abort_error() const noexcept override {
+            [[nodiscard]] fixpp::core::error abort_error() const noexcept override {
                 return fixpp::core::error::store_io_failure;
             }
             int count = 0;
@@ -341,7 +341,7 @@ TEST_F(FileStoreConcurrentTsanTest, ResetRace_vs_LogicalGap_Discriminating) {
             << "Logical gap must return store_seqnum_gap (57), got: "
             << static_cast<int>(result.error());
 
-        store2.reset();
+        store2 = nullptr;
         fixpp::store_test::remove_store_dir(dir2);
     }
 
@@ -406,7 +406,7 @@ TEST_F(FileStoreConcurrentTsanTest, ConcurrentStoreRetrieveReset_TSanClean) {
             ++frames_seen;
             co_return visit_result::cont;
         }
-        fixpp::core::error abort_error() const noexcept override {
+        [[nodiscard]] fixpp::core::error abort_error() const noexcept override {
             return fixpp::core::error::store_io_failure;
         }
         std::atomic<int> frames_seen{0};
@@ -423,7 +423,7 @@ TEST_F(FileStoreConcurrentTsanTest, ConcurrentStoreRetrieveReset_TSanClean) {
     auto reset_fut = asio::co_spawn(
         strand_exec_,
         [&store]() mutable -> asio::awaitable<bool> {
-            auto r = co_await store->reset();
+            auto r = co_await (*store).reset();
             co_return r.has_value();
         },
         asio::use_future);

@@ -66,7 +66,7 @@ using fixpp::sync::test::yield_n;
 // ─────────────────────────────────────────────────────────────────────────────
 
 struct LinkLoadRaceCtx {
-    std::atomic<std::thread::id> t1_tid{};
+    std::atomic<std::thread::id> t1_tid;
     std::atomic<bool> t1_already_parked{false};
     std::atomic<bool> release_already_fired{false};
     std::binary_semaphore t1_parked{0};
@@ -228,7 +228,7 @@ TEST(AsyncMutexAbaInterleave, PopPreLinkLoadReuseRaceIsDataRace) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 struct PreCasAbaCtx {
-    std::atomic<std::thread::id> t1_tid{};
+    std::atomic<std::thread::id> t1_tid;
     std::atomic<bool> t1_already_parked{false};
     std::binary_semaphore t1_parked{0};
     std::binary_semaphore t1_release{0};

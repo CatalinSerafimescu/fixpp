@@ -113,7 +113,6 @@ namespace {
 using fixpp::wire::access_mode;
 using fixpp::wire::frame_view;
 using fixpp::wire::Framer;
-using fixpp::wire::MessageView;
 using fixpp::wire::Parser;
 using fixpp::wire::pmr_carry_buffer;
 using fixpp_test::required_scope_oracle::build_quickfix_oracle;
@@ -129,21 +128,30 @@ using fixpp_test::required_scope_oracle::GroupContextKey;
 // MarketDataSnapshotFullRefresh(W) but 279 in
 // MarketDataIncrementalRefresh(X); confirmed by direct inspection).
 std::map<GroupContextKey, std::uint16_t> const kDelimTags{
-    {{"B", {}, 33}, 58},       // News: LinesOfText -> Text(58)
-    {{"C", {}, 33}, 58},       // Email: LinesOfText -> Text(58)
-    {{"E", {}, 73}, 11},       // NewOrderList: NoOrders -> ClOrdID(11)
-    {{"N", {}, 73}, 11},       // ListStatus: NoOrders -> ClOrdID(11)
-    {{"R", {}, 146}, 55},      // QuoteRequest: NoRelatedSym -> Symbol(55)
-    {{"V", {}, 146}, 55},      // MarketDataRequest: NoRelatedSym -> Symbol(55)
-    {{"V", {}, 267}, 269},     // MarketDataRequest: NoMDEntryTypes -> MDEntryType(269)
-    {{"W", {}, 268}, 269},     // MarketDataSnapshotFullRefresh: NoMDEntries -> MDEntryType(269)
-    {{"X", {}, 268}, 279},     // MarketDataIncrementalRefresh: NoMDEntries -> MDUpdateAction(279)
-    {{"Z", {}, 295}, 55},      // QuoteCancel: NoQuoteEntries -> Symbol(55)
-    {{"i", {}, 296}, 302},     // MassQuote: NoQuoteSets -> QuoteSetID(302)
-    {{"l", {}, 420}, 12},      // BidResponse: NoBidComponents -> Commission(12)
-    {{"m", {}, 428}, 55},      // ListStrikePrice: NoStrikes -> Symbol(55)
-    {{"i", {296}, 295}, 299},  // MassQuote: NoQuoteSets->NoQuoteEntries -> QuoteEntryID(299)
-    {{"J", {}, 78}, 79},       // Allocation: NoAllocs -> AllocAccount(79) (NEGATIVE CONTROL)
+    {{.msg_type = "B", .path = {}, .no_tag = 33}, 58},   // News: LinesOfText -> Text(58)
+    {{.msg_type = "C", .path = {}, .no_tag = 33}, 58},   // Email: LinesOfText -> Text(58)
+    {{.msg_type = "E", .path = {}, .no_tag = 73}, 11},   // NewOrderList: NoOrders -> ClOrdID(11)
+    {{.msg_type = "N", .path = {}, .no_tag = 73}, 11},   // ListStatus: NoOrders -> ClOrdID(11)
+    {{.msg_type = "R", .path = {}, .no_tag = 146}, 55},  // QuoteRequest: NoRelatedSym -> Symbol(55)
+    {{.msg_type = "V", .path = {}, .no_tag = 146},
+     55},  // MarketDataRequest: NoRelatedSym -> Symbol(55)
+    {{.msg_type = "V", .path = {}, .no_tag = 267},
+     269},  // MarketDataRequest: NoMDEntryTypes -> MDEntryType(269)
+    {{.msg_type = "W", .path = {}, .no_tag = 268},
+     269},  // MarketDataSnapshotFullRefresh: NoMDEntries -> MDEntryType(269)
+    {{.msg_type = "X", .path = {}, .no_tag = 268},
+     279},  // MarketDataIncrementalRefresh: NoMDEntries -> MDUpdateAction(279)
+    {{.msg_type = "Z", .path = {}, .no_tag = 295},
+     55},  // QuoteCancel: NoQuoteEntries -> Symbol(55)
+    {{.msg_type = "i", .path = {}, .no_tag = 296},
+     302},  // MassQuote: NoQuoteSets -> QuoteSetID(302)
+    {{.msg_type = "l", .path = {}, .no_tag = 420},
+     12},  // BidResponse: NoBidComponents -> Commission(12)
+    {{.msg_type = "m", .path = {}, .no_tag = 428}, 55},  // ListStrikePrice: NoStrikes -> Symbol(55)
+    {{.msg_type = "i", .path = {296}, .no_tag = 295},
+     299},  // MassQuote: NoQuoteSets->NoQuoteEntries -> QuoteEntryID(299)
+    {{.msg_type = "J", .path = {}, .no_tag = 78},
+     79},  // Allocation: NoAllocs -> AllocAccount(79) (NEGATIVE CONTROL)
 };
 
 std::vector<std::uint16_t> const kHeaderTags{8, 9, 10, 34, 35, 49, 52, 56};
@@ -213,7 +221,7 @@ std::string other_required_fields(fixpp::dict::table_view const& tv, DictOracle 
     std::string out;
     for (auto tag : tv.required_fields(msg_type)) {
         if (exclude.contains(tag)) continue;
-        if (std::find(kHeaderTags.begin(), kHeaderTags.end(), tag) != kHeaderTags.end()) continue;
+        if (std::ranges::find(kHeaderTags, tag) != kHeaderTags.end()) continue;
         if (oracle.group_tags.contains(tag)) {
             out += field(tag, "0");
             continue;
@@ -316,7 +324,7 @@ std::vector<std::byte> build_nested_frame(fixpp::dict::table_view const& tv,
     // (delimiter + required-member set, omission-aware) exactly like the
     // top-level cases so this collapses to the original shape once #210
     // lands and delim295 becomes 299 again.
-    GroupContextKey const key296{"i", {}, 296};
+    GroupContextKey const key296{.msg_type = "i", .path = {}, .no_tag = 296};
     std::uint16_t const delim296 = tv.group_first_field("i", std::span<std::uint16_t const>{}, 296);
     if (delim296 == 0) {
         throw std::runtime_error(
@@ -330,7 +338,7 @@ std::vector<std::byte> build_nested_frame(fixpp::dict::table_view const& tv,
     }
 
     std::vector<std::uint16_t> const path296{296};
-    GroupContextKey const key295{"i", path296, 295};
+    GroupContextKey const key295{.msg_type = "i", .path = path296, .no_tag = 295};
     std::uint16_t const delim295 = tv.group_first_field("i", std::span{path296}, 295);
     if (delim295 == 0) {
         throw std::runtime_error(
@@ -342,7 +350,7 @@ std::vector<std::byte> build_nested_frame(fixpp::dict::table_view const& tv,
     body += field(296, "1");
     body += field(delim296, pick_filler_value(tv, delim296));  // opens 296's instance
     body += field(295, "1");  // 295 present as a member of 296's instance, ONE sub-instance
-    body += build_group_instance(tv, oracle, delim295, req295, omit_299 ? 299u : 0u);
+    body += build_group_instance(tv, oracle, delim295, req295, omit_299 ? 299U : 0U);
     // 296's own OTHER required members (everything in req296 besides 295,
     // already emitted above, and delim296, already the opener) -- generic
     // filler, needed on the baseline (omit_299==false) arm; see this
@@ -426,7 +434,7 @@ TEST(GroupRequiredMemberValidation, KDelimTagsAgreesWithRuntimeGroupFirstField) 
 // (baseline discriminator); a group OUTSIDE the set never rejects via this
 // mechanism (negative control).
 TEST(GroupRequiredMemberValidation, ExactlyTheOracleDerivedFourteenPairsRejectOnOmission) {
-    constexpr std::size_t kBufSize = 4u * 1024u * 1024u;
+    constexpr std::size_t kBufSize = 4U * 1024U * 1024U;
     auto storage = std::make_unique<std::array<std::byte, kBufSize>>();
     std::pmr::monotonic_buffer_resource mr{storage->data(), storage->size()};
     std::string const path = std::string(FIXPP_DICT_DATA_DIR) + "/FIX42.xml";
@@ -450,10 +458,10 @@ TEST(GroupRequiredMemberValidation, ExactlyTheOracleDerivedFourteenPairsRejectOn
             EXPECT_EQ(key.no_tag, 295);
         }
     }
-    ASSERT_EQ(top_level_cases.size(), 13u)
+    ASSERT_EQ(top_level_cases.size(), 13U)
         << "oracle-derived top-level required-member context count drifted from the pinned 13 "
            "(contracts/group-detection.md K9) -- re-derive, don't silently update this pin";
-    ASSERT_EQ(nested_count, 1u)
+    ASSERT_EQ(nested_count, 1U)
         << "oracle-derived NESTED required-member context count drifted from the pinned 1 "
            "(MassQuote NoQuoteSets(296)->NoQuoteEntries(295)) -- re-derive";
 
@@ -533,7 +541,7 @@ TEST(GroupRequiredMemberValidation, ExactlyTheOracleDerivedFourteenPairsRejectOn
         }
         ++cases_checked;
     }
-    EXPECT_EQ(cases_checked, 13u);
+    EXPECT_EQ(cases_checked, 13U);
 
     // ── The 14th case: NESTED descent (MassQuote NoQuoteSets(296)->
     // NoQuoteEntries(295), omitting 295's own required member 299) ─────────
@@ -561,11 +569,11 @@ TEST(GroupRequiredMemberValidation, ExactlyTheOracleDerivedFourteenPairsRejectOn
                "(299) must be REJECTED via nested descent -- RED pre-T023";
         if (!r.has_value()) {
             EXPECT_EQ(r.error(), fixpp::core::error::wire_required_field_missing);
-            EXPECT_EQ(ref_tag, 299u) << "wrong ref_tag -- rejected for the WRONG reason";
+            EXPECT_EQ(ref_tag, 299U) << "wrong ref_tag -- rejected for the WRONG reason";
         }
     }
 
-    EXPECT_EQ(cases_checked + 1u, 14u)
+    EXPECT_EQ(cases_checked + 1U, 14U)
         << "total case count (13 top-level + 1 nested) drifted from the pinned 14";
 
     // ── Negative control (both-directions completeness): Allocation(J)'s
@@ -577,7 +585,7 @@ TEST(GroupRequiredMemberValidation, ExactlyTheOracleDerivedFourteenPairsRejectOn
     // gates on a non-empty `req_members`). ──────────────
     {
         SCOPED_TRACE("negative control: msg_type=J no_tag=78 (empty required-member set)");
-        GroupContextKey const key78{"J", {}, 78};
+        GroupContextKey const key78{.msg_type = "J", .path = {}, .no_tag = 78};
         ASSERT_FALSE(oracle.group_required.contains(key78))
             << "Allocation(J) NoAllocs(78) unexpectedly has a non-empty required-member set in "
                "the oracle -- this negative control's premise no longer holds, pick a different "

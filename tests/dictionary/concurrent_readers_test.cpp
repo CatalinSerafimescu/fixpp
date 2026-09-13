@@ -111,13 +111,13 @@ TEST(ConcurrentReaders, MessagesSpanStable) {
 
     // Capture the span in the main thread; d must outlive the reader thread.
     auto const msgs = d.messages();
-    ASSERT_GT(msgs.size(), 0u) << "FIX44.xml must declare at least one message.";
+    ASSERT_GT(msgs.size(), 0U) << "FIX44.xml must declare at least one message.";
 
     std::string result;
 
     std::thread reader{[&msgs, &result]() {
-        for (std::size_t i = 0; i < msgs.size(); ++i) {
-            result += msgs[i].msg_type;
+        for (const auto& msg : msgs) {
+            result += msg.msg_type;
         }
     }};
 

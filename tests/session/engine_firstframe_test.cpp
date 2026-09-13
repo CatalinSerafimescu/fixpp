@@ -97,10 +97,9 @@ namespace {
 //   from real I/O, not a literal.)
 // GREEN (T012): accept loop accepts, bounds the handshake, closes the non-TLS
 //   peer → our read sees eof → `closed=true`.
-static asio::awaitable<void> probe_closed_within_window(asio::io_context& ioc, uint16_t port,
-                                                        std::string payload,
-                                                        std::atomic<bool>& closed,
-                                                        std::atomic<bool>& done) {
+asio::awaitable<void> probe_closed_within_window(asio::io_context& ioc, uint16_t port,
+                                                 std::string payload, std::atomic<bool>& closed,
+                                                 std::atomic<bool>& done) {
     // [gate-b/r1 FQ-1] s and timed_out are shared-owned and captured BY VALUE
     // in the timer handler below (not by reference to a frame local). Once
     // self_deadline.async_wait() has queued a handler for the io_context's
@@ -169,9 +168,11 @@ struct PostHandshakeProbe {
     std::chrono::milliseconds elapsed{0};  // written before `done` is released
 };
 
-static asio::awaitable<void> probe_post_handshake(
-    asio::io_context& ioc, fixpp::transport::test::LoopbackTlsFixture& fixture, uint16_t port,
-    std::string payload, std::chrono::milliseconds self_deadline_after, PostHandshakeProbe& out) {
+asio::awaitable<void> probe_post_handshake(asio::io_context& ioc,
+                                           fixpp::transport::test::LoopbackTlsFixture& fixture,
+                                           uint16_t port, std::string payload,
+                                           std::chrono::milliseconds self_deadline_after,
+                                           PostHandshakeProbe& out) {
     // make_client() throws when the fixture cannot mint a TLS client; catch it
     // here so a detached coroutine cannot terminate the process, and still
     // release `done` so the test reports a clean RED instead of hanging.
@@ -246,7 +247,7 @@ static asio::awaitable<void> probe_post_handshake(
 // the deliberate price of a payload that is agnostic to whether production
 // rejects at >= or at > (see issue #233 / production budget-vs-FR-014
 // "exceeds" mismatch), so this test needs no change when that is corrected.
-static std::string make_carried_over_budget_payload(std::size_t total_bytes) {
+std::string make_carried_over_budget_payload(std::size_t total_bytes) {
     // Split literal: "\x01" is a maximal-munch hex escape, so "…\x019=…" would
     // be read as the single byte 0x19 followed by '='.
     std::string p =

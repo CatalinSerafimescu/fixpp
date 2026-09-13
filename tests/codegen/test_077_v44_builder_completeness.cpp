@@ -85,11 +85,10 @@ TEST(BuilderCompleteness077V44, DefTableMatchesRawXmlWalk) {
     std::set<std::string> const table = def_msgtypes(kEntries);
     EXPECT_EQ(table.size(), 83U) << "committed .def table entry count";
 
-    std::vector<std::string> only_expected, only_table;
-    std::set_difference(expected.begin(), expected.end(), table.begin(), table.end(),
-                        std::back_inserter(only_expected));
-    std::set_difference(table.begin(), table.end(), expected.begin(), expected.end(),
-                        std::back_inserter(only_table));
+    std::vector<std::string> only_expected;
+    std::vector<std::string> only_table;
+    std::ranges::set_difference(expected, table, std::back_inserter(only_expected));
+    std::ranges::set_difference(table, expected, std::back_inserter(only_table));
     EXPECT_TRUE(only_expected.empty())
         << "msg_types in raw-XML walk but NOT in .def table (table is stale)";
     EXPECT_TRUE(only_table.empty())
@@ -136,8 +135,8 @@ TEST(BuilderCompleteness077V44, BuildFnSignaturesMatchRawXmlWalk) {
 
     std::set<std::string> translated_msgtypes;
     for (auto const& ident : build_idents) {
-        auto const it = std::find_if(kMsgtypeToIdent.begin(), kMsgtypeToIdent.end(),
-                                     [&](auto const& p) { return p.second == ident; });
+        auto const it =
+            std::ranges::find_if(kMsgtypeToIdent, [&](auto const& p) { return p.second == ident; });
         ASSERT_NE(it, kMsgtypeToIdent.end())
             << "build_" << ident << "( found in " << FIXPP_CODEGEN_V44_BUILDERS_HPP
             << " has no matching entry in the .def table -- an emitted builder outside the raw-XML "

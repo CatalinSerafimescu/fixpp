@@ -54,8 +54,7 @@ namespace fixpp_test::required_scope_oracle {
 inline constexpr std::array<std::uint16_t, 8> kHeaderTrailerTags{8, 9, 34, 35, 49, 52, 56, 10};
 
 inline bool is_header_trailer_tag(std::uint16_t tag) {
-    return std::find(kHeaderTrailerTags.begin(), kHeaderTrailerTags.end(), tag) !=
-           kHeaderTrailerTags.end();
+    return std::ranges::find(kHeaderTrailerTags, tag) != kHeaderTrailerTags.end();
 }
 
 // One (msg_type, outer-to-inner ancestor no_tag path, this group's own
@@ -149,8 +148,9 @@ inline void qfix_walk(pugi::xml_node parent,
                 msg_required.insert(tag);
             }
             if (!group_path.empty()) {
-                GroupContextKey key{
-                    msg_type, {group_path.begin(), group_path.end() - 1}, group_path.back()};
+                GroupContextKey key{.msg_type = msg_type,
+                                    .path = {group_path.begin(), group_path.end() - 1},
+                                    .no_tag = group_path.back()};
                 oracle.group_members[key].insert(tag);
                 oracle.group_delims.try_emplace(key, tag);
                 if (own_req && group_scope_and) {
@@ -178,8 +178,9 @@ inline void qfix_walk(pugi::xml_node parent,
                 msg_required.insert(no_tag);
             }
             if (!group_path.empty()) {
-                GroupContextKey key{
-                    msg_type, {group_path.begin(), group_path.end() - 1}, group_path.back()};
+                GroupContextKey key{.msg_type = msg_type,
+                                    .path = {group_path.begin(), group_path.end() - 1},
+                                    .no_tag = group_path.back()};
                 oracle.group_members[key].insert(no_tag);
                 oracle.group_delims.try_emplace(key, no_tag);
                 if (own_req && group_scope_and) {
@@ -284,8 +285,9 @@ inline void orch_walk(pugi::xml_node parent,
                 msg_required.insert(tag);
             }
             if (!group_path.empty()) {
-                GroupContextKey key{
-                    msg_type, {group_path.begin(), group_path.end() - 1}, group_path.back()};
+                GroupContextKey key{.msg_type = msg_type,
+                                    .path = {group_path.begin(), group_path.end() - 1},
+                                    .no_tag = group_path.back()};
                 oracle.group_members[key].insert(tag);
                 oracle.group_delims.try_emplace(key, tag);
                 if (own_req && group_scope_and) {
@@ -315,8 +317,9 @@ inline void orch_walk(pugi::xml_node parent,
                 msg_required.insert(no_tag);
             }
             if (!group_path.empty()) {
-                GroupContextKey key{
-                    msg_type, {group_path.begin(), group_path.end() - 1}, group_path.back()};
+                GroupContextKey key{.msg_type = msg_type,
+                                    .path = {group_path.begin(), group_path.end() - 1},
+                                    .no_tag = group_path.back()};
                 oracle.group_members[key].insert(no_tag);
                 oracle.group_delims.try_emplace(key, no_tag);
                 if (own_req && group_scope_and) {

@@ -61,7 +61,7 @@ protected:
 
     void do_deallocate(void*, std::size_t, std::size_t) noexcept override {}
 
-    bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override {
+    [[nodiscard]] bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override {
         return this == &other;
     }
 };
@@ -161,7 +161,7 @@ public:
         co_return fixpp::core::expected_t<visit_result>{visit_result::cont};
     }
 
-    int call_count() const noexcept { return call_count_; }
+    [[nodiscard]] int call_count() const noexcept { return call_count_; }
 
 private:
     std::pmr::memory_resource* mr_;

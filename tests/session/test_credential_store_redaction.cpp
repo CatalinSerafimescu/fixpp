@@ -48,7 +48,7 @@ std::array<std::byte, N - 1> make_buf(const char (&src)[N]) {
 
 // Returns true iff every byte in [begin, end) equals '*' (0x2A).
 bool all_stars(const std::byte* begin, const std::byte* end) {
-    for (auto p = begin; p != end; ++p) {
+    for (const auto* p = begin; p != end; ++p) {
         if (*p != std::byte{0x2A}) return false;
     }
     return true;
@@ -109,7 +109,7 @@ TEST(Masker_SameLength_FieldAnchored_unit, A_MasksGenuineField_StarRun) {
     for (std::size_t i = 5; i < 11; ++i) {
         if (buf[i] == std::byte{0x2A}) ++star_count;
     }
-    EXPECT_EQ(star_count, 6u) << "must have exactly 6 stars (same length as 'secret')";
+    EXPECT_EQ(star_count, 6U) << "must have exactly 6 stars (same length as 'secret')";
 }
 
 TEST(Masker_SameLength_FieldAnchored_unit, B_FrameSizeUnchanged_NoByteOutsideValueModified) {
@@ -404,7 +404,7 @@ constexpr std::string_view kFix50sp2Xml = R"xml(
 )xml";
 
 [[nodiscard]] std::shared_ptr<const fixpp::dict::Dictionary> make_fix50sp2_dict() {
-    constexpr std::size_t kBufSize = 64u * 1024u;
+    constexpr std::size_t kBufSize = 64U * 1024U;
     auto buf = std::make_unique<std::array<std::byte, kBufSize>>();
     auto* mr = new std::pmr::monotonic_buffer_resource{buf->data(), buf->size()};
     fixpp::dict::Dictionary d = fixpp::dict::XmlLoader{}.load_from_string(kFix50sp2Xml, mr);
@@ -547,7 +547,7 @@ struct CapturingMemStoreFactory final : public MessageStoreFactory {
         std::ifstream f(entry.path(), std::ios::binary);
         if (!f) continue;
         std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-        if (content.find(needle) != std::string::npos) return true;
+        if (content.contains(needle)) return true;
     }
     return false;
 }
@@ -589,7 +589,7 @@ struct CapturingMemStoreFactory final : public MessageStoreFactory {
 
 TEST(CredentialStoreRedaction, T005_Persisted_LogonPassword_AbsentFromStoreFile_MaskPresent) {
     constexpr std::string_view kSentinel = "s3cr3t-T005-sentinel";
-    static_assert(kSentinel.size() == 20u, "sentinel length");
+    static_assert(kSentinel.size() == 20U, "sentinel length");
 
     asio::thread_pool pool{2};
     // Single per-session strand over the 2-thread pool: all session interaction
@@ -671,7 +671,7 @@ TEST(CredentialStoreRedaction, T005_Persisted_LogonPassword_AbsentFromStoreFile_
 
 TEST(CredentialStoreRedaction, T005_Acceptor_ReplyLogon_PasswordMaskedInStore) {
     constexpr std::string_view kAcceptorPwd = "acpt-T005-sentinel";
-    static_assert(kAcceptorPwd.size() == 18u, "sentinel length");
+    static_assert(kAcceptorPwd.size() == 18U, "sentinel length");
 
     asio::thread_pool pool{2};
     // Single per-session strand over the 2-thread pool: all session interaction
@@ -767,7 +767,7 @@ TEST(CredentialStoreRedaction, T005_Acceptor_ReplyLogon_PasswordMaskedInStore) {
 
 TEST(CredentialStoreRedaction, T005_InMemoryStore_CredentialedLogon_AlsoMasked) {
     constexpr std::string_view kSentinel = "mem-T005-sentinel";
-    static_assert(kSentinel.size() == 17u, "sentinel length");
+    static_assert(kSentinel.size() == 17U, "sentinel length");
 
     asio::thread_pool pool{2};
     // Single per-session strand over the 2-thread pool: all session interaction
@@ -815,7 +815,7 @@ TEST(CredentialStoreRedaction, T005_InMemoryStore_CredentialedLogon_AlsoMasked) 
         asio::co_spawn(sx, store->retrieve(1, 0, direction_t::outbound, visitor), asio::use_future)
             .get();
     ASSERT_TRUE(ret_r.has_value()) << "retrieve() must succeed";
-    ASSERT_EQ(visitor.entries().size(), 1u) << "Exactly one outbound frame must be stored";
+    ASSERT_EQ(visitor.entries().size(), 1U) << "Exactly one outbound frame must be stored";
 
     const auto& stored_bytes = visitor.entries()[0].bytes;
     std::string stored_str(reinterpret_cast<const char*>(stored_bytes.data()), stored_bytes.size());
@@ -849,7 +849,7 @@ TEST(CredentialStoreRedaction, T005_InMemoryStore_CredentialedLogon_AlsoMasked) 
 
 TEST(CredentialStoreRedaction, T008_Wire_LogonPassword_UnmaskedOnTransmit) {
     constexpr std::string_view kSentinel = "wire-T008-sentinel";
-    static_assert(kSentinel.size() == 18u, "sentinel length");
+    static_assert(kSentinel.size() == 18U, "sentinel length");
 
     // For wire-only test, use io_context + run_for to keep things simple.
     // No FileStore I/O: no pool hang risk.
@@ -963,7 +963,7 @@ TEST(CredentialStoreRedaction, T009_CredentialFreeLogon_StoredByteIdenticalToWir
         asio::co_spawn(sx, store->retrieve(1, 0, direction_t::outbound, visitor), asio::use_future)
             .get();
     ASSERT_TRUE(ret_r.has_value()) << "retrieve() must succeed";
-    ASSERT_EQ(visitor.entries().size(), 1u) << "Exactly one outbound frame stored";
+    ASSERT_EQ(visitor.entries().size(), 1U) << "Exactly one outbound frame stored";
 
     const auto& stored_bytes = visitor.entries()[0].bytes;
 
@@ -1086,7 +1086,7 @@ TEST(CredentialStoreRedaction, T009_NonLogon_WithGenuine554_StoredUnchanged) {
         asio::co_spawn(sx, store->retrieve(2, 0, direction_t::outbound, visitor), asio::use_future)
             .get();
     ASSERT_TRUE(ret_r.has_value()) << "retrieve() must succeed";
-    ASSERT_EQ(visitor.entries().size(), 1u) << "Exactly one frame starting at seq 2";
+    ASSERT_EQ(visitor.entries().size(), 1U) << "Exactly one frame starting at seq 2";
 
     const auto& stored_bytes = visitor.entries()[0].bytes;
     std::string stored_str(reinterpret_cast<const char*>(stored_bytes.data()), stored_bytes.size());
@@ -1260,7 +1260,7 @@ TEST(CredentialStoreRedaction, T010_OverBound_SmallBoundSeam_SkipStoreButTransmi
     over += "34=2\x01";  // SOH here is the field-boundary preceding 554
     over += "554=" + std::string(kSentinel) + "\x01";
     over += "58=" + std::string(280, 'X') + "\x01";  // padding → total well over 256
-    ASSERT_GT(over.size(), 256u) << "test invariant: frame must exceed the 256 mask bound";
+    ASSERT_GT(over.size(), 256U) << "test invariant: frame must exceed the 256 mask bound";
 
     std::vector<std::byte> over_bytes;
     over_bytes.reserve(over.size());
@@ -1336,7 +1336,7 @@ TEST(NoHeap, StorePath_NoNewAllocation) {
     auto frame = make_fixt_logon("INITR", "ACCEPTR", 1, "9", /*username=*/"alice",
                                  /*password=*/"s3cr3t-T011-sentinel");
     const std::size_t n = frame.size();
-    ASSERT_LE(n, 256u) << "test invariant: a normal credentialed Logon fits the mask bound";
+    ASSERT_LE(n, 256U) << "test invariant: a normal credentialed Logon fits the mask bound";
 
     // The coroutine-frame copy buffer store_then_emit uses (kMaxMaskableLogonBytes).
     std::array<std::byte, 256> mask_buf{};

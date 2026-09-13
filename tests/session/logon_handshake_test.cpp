@@ -374,7 +374,7 @@ TEST_F(LogonHandshakeTest, BuildLogonProducesValidFrame) {
     );
     ASSERT_TRUE(result.has_value()) << "build_logon() returned error; T021 not yet wired";
 
-    EXPECT_GT(result->size(), 0u) << "build_logon() returned empty span";
+    EXPECT_GT(result->size(), 0U) << "build_logon() returned empty span";
 
     // Check BeginString(8)=FIX.4.2.
     auto begin_str = extract_field(*result, 8);
@@ -557,7 +557,7 @@ TEST_F(LogonHandshakeTest, InitiatorOpenStillReachesLogonSentAndEmitsLogon) {
         << "got state=" << static_cast<int>(sess.state());
 
     // FR-004: outbound Logon (35=A) MUST be emitted by open() on the initiator path.
-    ASSERT_GE(captured.size(), 1u) << "Initiator open() must emit at least one outbound frame";
+    ASSERT_GE(captured.size(), 1U) << "Initiator open() must emit at least one outbound frame";
     bool found_logon = false;
     for (const auto& frame : captured) {
         // Use the file-local extract_field (returns std::string; "" on miss).
@@ -692,8 +692,8 @@ TEST_F(LogonHandshakeTest, StampSendingTimeFormatsCorrectly) {
     auto result = fixpp::session::stamp_sending_time(now, fixpp::core::fix_time_precision::millis,
                                                      std::span<char>{buf});
     ASSERT_TRUE(result.has_value()) << "stamp_sending_time() returned error; T022 not yet wired";
-    EXPECT_GE(result->size(), 17u) << "SendingTime too short (need ≥17 chars for seconds)";
-    EXPECT_LE(result->size(), 27u) << "SendingTime too long (max nanos = 27 chars)";
+    EXPECT_GE(result->size(), 17U) << "SendingTime too short (need ≥17 chars for seconds)";
+    EXPECT_LE(result->size(), 27U) << "SendingTime too long (max nanos = 27 chars)";
 
     // Round-trip: parse back and compare.
     auto parse_result =

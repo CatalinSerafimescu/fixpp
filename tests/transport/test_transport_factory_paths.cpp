@@ -62,7 +62,6 @@ using fixpp::transport::asio_tls_transport_factory;
 using fixpp::transport::Endpoint;
 using fixpp::transport::make_asio_tls_transport_factory;
 using fixpp::transport::TlsTransport;
-using fixpp::transport::Transport;
 using fixpp::transport::TransportFactory;
 
 std::string fixture_path(const char* leaf) {

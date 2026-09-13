@@ -235,7 +235,7 @@ TEST(FileStoreCompIDValidation, ValidCompIDSucceeds) {
     EXPECT_TRUE(result.has_value()) << "valid CompIDs should succeed; got error: "
                                     << (result.has_value() ? 0 : static_cast<int>(result.error()));
 
-    if (result.has_value()) result.value().reset();
+    if (result.has_value()) result.value() = nullptr;
     fixpp::store_test::remove_store_dir(dir);
 }
 

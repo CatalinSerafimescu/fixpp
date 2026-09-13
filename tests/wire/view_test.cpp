@@ -51,7 +51,7 @@ TEST(WireView, BytesAndEmpty) {
 
     View def{};
     EXPECT_TRUE(def.empty());
-    EXPECT_EQ(def.bytes().size(), 0u);
+    EXPECT_EQ(def.bytes().size(), 0U);
 }
 
 TEST(WireView, DefaultTokenNeverTraps) {

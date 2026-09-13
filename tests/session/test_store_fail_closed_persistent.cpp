@@ -136,23 +136,23 @@ using fixpp::test_support::extract_tag;
 bool is_msg_type(std::span<const std::byte> frame, std::string_view type) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = "35=" + std::string(type) + "\x01";
-    return wire.find(needle) != std::string::npos;
+    return wire.contains(needle);
 }
 
 // SequenceReset{GapFillFlag=Y, NewSeqNo=<new_seqno>}
 bool is_gapfill_to(const std::vector<std::byte>& frame, std::uint32_t new_seqno) {
     if (!is_msg_type(frame, "4")) return false;
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
-    if (wire.find("123=Y\x01") == std::string::npos) return false;
-    return wire.find("36=" + std::to_string(new_seqno) + "\x01") != std::string::npos;
+    if (!wire.contains("123=Y\x01")) return false;
+    return wire.contains("36=" + std::to_string(new_seqno) + "\x01");
 }
 
 // Frame carries PossDupFlag(43)=Y and has the given MsgSeqNum(34) — a real
 // application-message replay (as opposed to an administrative gap-fill).
 bool is_replay_with_poss_dup(const std::vector<std::byte>& frame, std::uint32_t seq) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
-    if (wire.find("43=Y\x01") == std::string::npos) return false;
-    return wire.find("34=" + std::to_string(seq) + "\x01") != std::string::npos;
+    if (!wire.contains("43=Y\x01")) return false;
+    return wire.contains("34=" + std::to_string(seq) + "\x01");
 }
 
 // ── Fixture ───────────────────────────────────────────────────────────────────

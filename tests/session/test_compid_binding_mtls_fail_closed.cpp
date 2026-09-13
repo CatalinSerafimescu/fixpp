@@ -74,14 +74,13 @@ using namespace std::chrono_literals;
 
 namespace {
 
-static std::string field(int tag, std::string_view val) {
+std::string field(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
-static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
-                                             std::string_view msg_type, std::uint32_t seq,
-                                             std::string_view sender, std::string_view target,
-                                             std::string_view extra = {}) {
+std::vector<std::byte> make_fix_frame(std::string_view begin_string, std::string_view msg_type,
+                                      std::uint32_t seq, std::string_view sender,
+                                      std::string_view target, std::string_view extra = {}) {
     std::string body;
     body += field(35, msg_type);
     body += field(34, std::to_string(seq));
@@ -107,18 +106,17 @@ static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
     return frame;
 }
 
-static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq,
-                                         std::string_view sender, std::string_view target,
-                                         int hbt = 30) {
+std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view sender,
+                                  std::string_view target, int hbt = 30) {
     std::string extra;
     extra += field(98, "0");
     extra += field(108, std::to_string(hbt));
     return make_fix_frame(bs, "A", seq, sender, target, extra);
 }
 
-static bool has_compid_auth_failed_event(const fixpp::session::Session& sess) {
+bool has_compid_auth_failed_event(const fixpp::session::Session& sess) {
     auto events = sess.recent_events();
-    return std::any_of(events.begin(), events.end(), [](const fixpp::session::SessionEvent& ev) {
+    return std::ranges::any_of(events, [](const fixpp::session::SessionEvent& ev) {
         return std::holds_alternative<fixpp::session::session_event_compid_authorization_failed>(
             ev);
     });

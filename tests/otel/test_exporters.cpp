@@ -72,7 +72,7 @@ public:
 
     opentelemetry::sdk::common::ExportResult Export(
         const sdk_metrics::ResourceMetrics& data) noexcept override {
-        std::lock_guard<std::mutex> lock(mu_);
+        std::scoped_lock lock(mu_);
         received_.push_back(data);
         return opentelemetry::sdk::common::ExportResult::kSuccess;
     }
@@ -87,7 +87,7 @@ public:
 
     // Test accessor.
     std::vector<sdk_metrics::ResourceMetrics> get_received() const {
-        std::lock_guard<std::mutex> lock(mu_);
+        std::scoped_lock lock(mu_);
         return received_;
     }
 

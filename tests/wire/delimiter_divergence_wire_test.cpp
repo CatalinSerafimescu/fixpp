@@ -548,132 +548,140 @@ TEST(DelimiterDivergenceWire, NamedCountTagSubsetAccepts) {
 
     std::vector<Case> const cases{
         // 1677 NoPartyRiskLimits, PartyRiskLimitsReport(CM), true delim 1671.
-        {1677, "1677 NoPartyRiskLimits (CM)",
-         "35=CM\x01"
-         "34=1\x01"
-         "49=SENDER\x01"
-         "52=20240101-00:00:00\x01"
-         "56=TARGET\x01"
-         "1667=RPT1\x01"
-         "1677=2\x01"
-         "1671=1\x01"
-         "1691=PD1\x01"
-         "1671=1\x01"
-         "1691=PD2\x01"},
+        {.tag = 1677,
+         .name = "1677 NoPartyRiskLimits (CM)",
+         .body = "35=CM\x01"
+                 "34=1\x01"
+                 "49=SENDER\x01"
+                 "52=20240101-00:00:00\x01"
+                 "56=TARGET\x01"
+                 "1667=RPT1\x01"
+                 "1677=2\x01"
+                 "1671=1\x01"
+                 "1691=PD1\x01"
+                 "1671=1\x01"
+                 "1691=PD2\x01"},
         // 1772 NoPartyEntitlements, PartyEntitlementsReport(CV), true delim 1671.
-        {1772, "1772 NoPartyEntitlements (CV)",
-         "35=CV\x01"
-         "34=1\x01"
-         "49=SENDER\x01"
-         "52=20240101-00:00:00\x01"
-         "56=TARGET\x01"
-         "1771=RPT2\x01"
-         "1772=2\x01"
-         "1671=1\x01"
-         "1691=PD1\x01"
-         "1671=1\x01"
-         "1691=PD2\x01"},
+        {.tag = 1772,
+         .name = "1772 NoPartyEntitlements (CV)",
+         .body = "35=CV\x01"
+                 "34=1\x01"
+                 "49=SENDER\x01"
+                 "52=20240101-00:00:00\x01"
+                 "56=TARGET\x01"
+                 "1771=RPT2\x01"
+                 "1772=2\x01"
+                 "1671=1\x01"
+                 "1691=PD1\x01"
+                 "1671=1\x01"
+                 "1691=PD2\x01"},
         // 40204 NoPhysicalSettlTerms, IOI(6), path {}, true delim 40209.
-        {40204, "40204 NoPhysicalSettlTerms (IOI)",
-         "35=6\x01"
-         "34=1\x01"
-         "49=SENDER\x01"
-         "52=20240101-00:00:00\x01"
-         "56=TARGET\x01"
-         "23=IOI1\x01"
-         "28=N\x01"
-         "54=1\x01"
-         "27=S\x01"
-         "40204=2\x01"
-         "40209=0\x01"
-         "40209=0\x01"},
+        {.tag = 40204,
+         .name = "40204 NoPhysicalSettlTerms (IOI)",
+         .body = "35=6\x01"
+                 "34=1\x01"
+                 "49=SENDER\x01"
+                 "52=20240101-00:00:00\x01"
+                 "56=TARGET\x01"
+                 "23=IOI1\x01"
+                 "28=N\x01"
+                 "54=1\x01"
+                 "27=S\x01"
+                 "40204=2\x01"
+                 "40209=0\x01"
+                 "40209=0\x01"},
         // 41599 NoLegPhysicalSettlTerms, IOI(6), path {555}, true delim 41604.
         // Nested inside ONE instance of NoLegs(555), opened with its own
         // true delimiter LegSymbol(600).
-        {41599, "41599 NoLegPhysicalSettlTerms (IOI/NoLegs)",
-         "35=6\x01"
-         "34=1\x01"
-         "49=SENDER\x01"
-         "52=20240101-00:00:00\x01"
-         "56=TARGET\x01"
-         "23=IOI1\x01"
-         "28=N\x01"
-         "54=1\x01"
-         "27=S\x01"
-         "555=1\x01"
-         "600=LEGSYM1\x01"
-         "41599=2\x01"
-         "41604=0\x01"
-         "41604=0\x01"},
+        {.tag = 41599,
+         .name = "41599 NoLegPhysicalSettlTerms (IOI/NoLegs)",
+         .body = "35=6\x01"
+                 "34=1\x01"
+                 "49=SENDER\x01"
+                 "52=20240101-00:00:00\x01"
+                 "56=TARGET\x01"
+                 "23=IOI1\x01"
+                 "28=N\x01"
+                 "54=1\x01"
+                 "27=S\x01"
+                 "555=1\x01"
+                 "600=LEGSYM1\x01"
+                 "41599=2\x01"
+                 "41604=0\x01"
+                 "41604=0\x01"},
         // 42060 NoUnderlyingPhysicalSettlTerms, IOI(6), path {711}, true
         // delim 42065. Nested inside ONE instance of NoUnderlyings(711),
         // opened with its own true delimiter UnderlyingSymbol(311).
-        {42060, "42060 NoUnderlyingPhysicalSettlTerms (IOI/NoUnderlyings)",
-         "35=6\x01"
-         "34=1\x01"
-         "49=SENDER\x01"
-         "52=20240101-00:00:00\x01"
-         "56=TARGET\x01"
-         "23=IOI1\x01"
-         "28=N\x01"
-         "54=1\x01"
-         "27=S\x01"
-         "711=1\x01"
-         "311=UND1\x01"
-         "42060=2\x01"
-         "42065=0\x01"
-         "42065=0\x01"},
+        {.tag = 42060,
+         .name = "42060 NoUnderlyingPhysicalSettlTerms (IOI/NoUnderlyings)",
+         .body = "35=6\x01"
+                 "34=1\x01"
+                 "49=SENDER\x01"
+                 "52=20240101-00:00:00\x01"
+                 "56=TARGET\x01"
+                 "23=IOI1\x01"
+                 "28=N\x01"
+                 "54=1\x01"
+                 "27=S\x01"
+                 "711=1\x01"
+                 "311=UND1\x01"
+                 "42060=2\x01"
+                 "42065=0\x01"
+                 "42065=0\x01"},
         // 1499 NoAsgnReqs, StreamAssignmentRequest(CC), true delim 453
         // (NoPartyIDs). Currently UNREGISTERED (spec.md Baseline: "1499->
         // 453"; Parties' own first child is a group, not a scalar, so the
         // pre-fix one-level scan resolves nothing).
-        {1499, "1499 NoAsgnReqs (CC)",
-         "35=CC\x01"
-         "34=1\x01"
-         "49=SENDER\x01"
-         "52=20240101-00:00:00\x01"
-         "56=TARGET\x01"
-         "1497=SR1\x01"
-         "1498=1\x01"
-         "1499=2\x01"
-         "453=1\x01"
-         "448=PARTY1\x01"
-         "453=1\x01"
-         "448=PARTY2\x01"},
+        {.tag = 1499,
+         .name = "1499 NoAsgnReqs (CC)",
+         .body = "35=CC\x01"
+                 "34=1\x01"
+                 "49=SENDER\x01"
+                 "52=20240101-00:00:00\x01"
+                 "56=TARGET\x01"
+                 "1497=SR1\x01"
+                 "1498=1\x01"
+                 "1499=2\x01"
+                 "453=1\x01"
+                 "448=PARTY1\x01"
+                 "453=1\x01"
+                 "448=PARTY2\x01"},
         // 1669 NoRiskLimits, PartyRiskLimitsReport(CM), path {1677}, true
         // delim 1529 (NoRiskLimitTypes). Currently UNREGISTERED (spec.md
         // Baseline: "1669->1529"). Nested inside ONE instance of the
         // OUTER group 1677, which is itself one of the five wrong-
         // delimiter contexts above — see the file comment on why this
         // fixture has two preconditions.
-        {1669, "1669 NoRiskLimits (CM, nested under 1677)",
-         "35=CM\x01"
-         "34=1\x01"
-         "49=SENDER\x01"
-         "52=20240101-00:00:00\x01"
-         "56=TARGET\x01"
-         "1667=RPT1\x01"
-         "1677=1\x01"
-         "1671=0\x01"
-         "1669=2\x01"
-         "1529=0\x01"
-         "1529=0\x01"},
+        {.tag = 1669,
+         .name = "1669 NoRiskLimits (CM, nested under 1677)",
+         .body = "35=CM\x01"
+                 "34=1\x01"
+                 "49=SENDER\x01"
+                 "52=20240101-00:00:00\x01"
+                 "56=TARGET\x01"
+                 "1667=RPT1\x01"
+                 "1677=1\x01"
+                 "1671=0\x01"
+                 "1669=2\x01"
+                 "1529=0\x01"
+                 "1529=0\x01"},
         // 1919 NoPriceMovements, SecurityList(y), path {146}, true delim
         // 1920 (NoPriceMovementValues). Currently UNREGISTERED (spec.md
         // Baseline: "1919->1920"). Nested inside ONE instance of
         // NoRelatedSym(146), opened with its own (already-correct)
         // delimiter Symbol(55).
-        {1919, "1919 NoPriceMovements (SecurityList, nested under 146)",
-         "35=y\x01"
-         "34=1\x01"
-         "49=SENDER\x01"
-         "52=20240101-00:00:00\x01"
-         "56=TARGET\x01"
-         "146=1\x01"
-         "55=SYM1\x01"
-         "1919=2\x01"
-         "1920=0\x01"
-         "1920=0\x01"},
+        {.tag = 1919,
+         .name = "1919 NoPriceMovements (SecurityList, nested under 146)",
+         .body = "35=y\x01"
+                 "34=1\x01"
+                 "49=SENDER\x01"
+                 "52=20240101-00:00:00\x01"
+                 "56=TARGET\x01"
+                 "146=1\x01"
+                 "55=SYM1\x01"
+                 "1919=2\x01"
+                 "1920=0\x01"
+                 "1920=0\x01"},
     };
 
     for (auto const& c : cases) {

@@ -63,9 +63,9 @@ using namespace std::chrono_literals;
 
 namespace {
 
-static bool has_authz_failed_event(const fixpp::session::Session& s) {
+bool has_authz_failed_event(const fixpp::session::Session& s) {
     auto evs = s.recent_events();
-    return std::any_of(evs.begin(), evs.end(), [](const fixpp::session::SessionEvent& ev) {
+    return std::ranges::any_of(evs, [](const fixpp::session::SessionEvent& ev) {
         return std::holds_alternative<fixpp::session::session_event_compid_authorization_failed>(
             ev);
     });
@@ -73,7 +73,7 @@ static bool has_authz_failed_event(const fixpp::session::Session& s) {
 
 // Build a fresh SendingTime(52) string so the Q3 guard (038/041 T019) admits
 // this frame when the engine has a real clock.
-static std::string utc_now_fix_timestamp() {
+std::string utc_now_fix_timestamp() {
     std::array<char, 32> buf{};
     auto r = fixpp::core::utc_time_to_fix_string(std::chrono::system_clock::now(),
                                                  fixpp::core::fix_time_precision::millis,
@@ -82,8 +82,8 @@ static std::string utc_now_fix_timestamp() {
 }
 
 // Build a valid FIX Logon frame.
-static std::vector<std::byte> make_logon_frame(std::string_view begin_str, std::string_view sender,
-                                               std::string_view target) {
+std::vector<std::byte> make_logon_frame(std::string_view begin_str, std::string_view sender,
+                                        std::string_view target) {
     auto field = [](int tag, std::string_view v) -> std::string {
         return std::to_string(tag) + "=" + std::string(v) + "\x01";
     };
@@ -101,7 +101,7 @@ static std::vector<std::byte> make_logon_frame(std::string_view begin_str, std::
     msg += body;
     unsigned int cs = 0;
     for (unsigned char c : msg) cs += c;
-    cs &= 0xFFu;
+    cs &= 0xFFU;
     char csbuf[5];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     msg += "10=" + std::string(csbuf) + "\x01";
@@ -112,10 +112,10 @@ static std::vector<std::byte> make_logon_frame(std::string_view begin_str, std::
 }
 
 // Standalone TLS test-initiator that sends a Logon and then waits.
-static asio::awaitable<void> run_test_initiator(asio::io_context& ioc,
-                                                fixpp::transport::test::LoopbackTlsFixture& fixture,
-                                                uint16_t acceptor_port, std::string sender,
-                                                std::string target) {
+asio::awaitable<void> run_test_initiator(asio::io_context& ioc,
+                                         fixpp::transport::test::LoopbackTlsFixture& fixture,
+                                         uint16_t acceptor_port, std::string sender,
+                                         std::string target) {
     co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
     try {
         auto client = fixture.make_client(ioc.get_executor());
@@ -218,7 +218,7 @@ TEST(EngineAcceptorFailClosedTest, OffListIdentityFailsClosed) {
     ioc.restart();
 
     uint16_t bound_port = engine.acceptor_bound_endpoint(acc_id).port;
-    ASSERT_NE(bound_port, 0u) << "acceptor listener did not bind";
+    ASSERT_NE(bound_port, 0U) << "acceptor listener did not bind";
 
     fixpp::transport::test::LoopbackTlsFixture fixture{std::string(fixture_dir),
                                                        ioc.get_executor()};
@@ -340,7 +340,7 @@ TEST(EngineAcceptorFailClosedTest, AbsentIdentityNeverAdmits) {
     ioc.restart();
 
     uint16_t bound_port = engine.acceptor_bound_endpoint(acc_id).port;
-    ASSERT_NE(bound_port, 0u) << "acceptor listener did not bind";
+    ASSERT_NE(bound_port, 0U) << "acceptor listener did not bind";
 
     fixpp::transport::test::LoopbackTlsFixture fixture{std::string(fixture_dir),
                                                        ioc.get_executor()};

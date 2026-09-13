@@ -182,7 +182,7 @@ bool wait_until(asio::io_context& ioc, Pred pred, std::chrono::milliseconds budg
     return true;
 }
 
-static std::vector<std::byte> make_app_payload() {
+std::vector<std::byte> make_app_payload() {
     // Include 35=D so the built frame is parseable and toApp can inspect MsgType.
     static const char kPayload[] =
         "35=D\x01"
@@ -296,7 +296,8 @@ TEST(ApplicationEngineSend, SendFromForeignThreadCrossesWire) {
     ecfg.clock = make_mock_clock(ioc);  // needed for 52= SendingTime stamp in send_impl
     fixpp::session::Engine engine{ioc.get_executor(), std::move(ecfg)};
 
-    SessionId acc_id, ini_id;
+    SessionId acc_id;
+    SessionId ini_id;
     ASSERT_TRUE(setup_engine(ioc, engine, fac, reserve_free_port(ioc), acc_id, ini_id));
 
     // Foreign thread: call co_spawn (thread-safe post) and return immediately.
@@ -380,7 +381,8 @@ TEST(ApplicationEngineSend, ReentrantSendFromToAppNoDeadlock) {
     ecfg.clock = make_mock_clock(ioc);
     fixpp::session::Engine engine{ioc.get_executor(), std::move(ecfg)};
 
-    SessionId acc_id, ini_id;
+    SessionId acc_id;
+    SessionId ini_id;
     ASSERT_TRUE(setup_engine(ioc, engine, fac, reserve_free_port(ioc), acc_id, ini_id));
 
     // Wire re-entrant hook: when toApp fires for the first message, issue another
@@ -466,7 +468,8 @@ TEST(ApplicationEngineSend, ReentrantSendFromFromAppNoDeadlock) {
     ecfg.clock = make_mock_clock(ioc);
     fixpp::session::Engine engine{ioc.get_executor(), std::move(ecfg)};
 
-    SessionId acc_id, ini_id;
+    SessionId acc_id;
+    SessionId ini_id;
     ASSERT_TRUE(setup_engine(ioc, engine, fac, reserve_free_port(ioc), acc_id, ini_id));
 
     // Wire fromApp hook: when the acceptor's fromApp fires (inbound app msg from
@@ -563,7 +566,8 @@ TEST(ApplicationEngineSend, SendDrainRaceNoUAF) {
     }());
     fixpp::session::Engine& engine = *engine_ptr;
 
-    SessionId acc_id, ini_id;
+    SessionId acc_id;
+    SessionId ini_id;
     ASSERT_TRUE(setup_engine(ioc, engine, fac, reserve_free_port(ioc), acc_id, ini_id));
 
     // Cancellation signal bound to the Engine::send coroutine.

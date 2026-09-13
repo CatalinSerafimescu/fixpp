@@ -511,7 +511,7 @@ TEST(LoadLogger, T008_OtlpSinkCountAndOrder) {
     // engine_executor not needed: no Session/clock construction at resolve phase
     opts.resource = std::pmr::get_default_resource();
 
-    fixpp::config::SourceLoc loc{1, 1};
+    fixpp::config::SourceLoc loc{.line = 1, .col = 1};
 
     fixpp::config::detail::resolve_engine_logger(
         *logger_tbl_ptr, "logger", loc,
@@ -637,7 +637,7 @@ TEST(LoadLogger, T008_OtlpSinkResolvedNegative) {
     using RC = fixpp::config::reason_class;
     bool found = false;
     for (const auto& d : result.error()) {
-        if (d.reason == RC::missing_required && d.key_path.find("endpoint") != std::string::npos) {
+        if (d.reason == RC::missing_required && d.key_path.contains("endpoint")) {
             found = true;
             break;
         }
@@ -852,7 +852,7 @@ TEST(LoadLogger, T026_LoggerLevelScalarsWhiteBox) {
     opts.resource = std::pmr::get_default_resource();
 
     fixpp::config::detail::resolve_engine_logger(
-        *logger_tbl, "logger", fixpp::config::SourceLoc{1, 1},
+        *logger_tbl, "logger", fixpp::config::SourceLoc{.line = 1, .col = 1},
         std::filesystem::temp_directory_path(), opts, pending, acc,
         /*is_engine=*/true, /*session_index=*/0);
 

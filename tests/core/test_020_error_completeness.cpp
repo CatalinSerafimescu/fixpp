@@ -27,18 +27,18 @@ TEST(Error020Completeness, ExactSetEquality) {
     const std::set<std::uint8_t> named_020_slots = {
         static_cast<std::uint8_t>(error::app_payload_malformed),
     };
-    EXPECT_EQ(named_020_slots, (std::set<std::uint8_t>{131u}))
+    EXPECT_EQ(named_020_slots, (std::set<std::uint8_t>{131U}))
         << "020 must add EXACTLY app_payload_malformed at slot 131";
 
     // Slot 130 is the pre-020 boundary (019's app_callback_threw).
-    EXPECT_EQ(static_cast<std::uint8_t>(error::app_callback_threw), 130u);
+    EXPECT_EQ(static_cast<std::uint8_t>(error::app_callback_threw), 130U);
 
     // Message-table boundary: slot 131 carries the 020 message; slot 132 is the
     // forward "unknown" boundary (no enumerator added beyond 020).
     EXPECT_NE(fixpp::core::error_message(error::app_payload_malformed),
               std::string_view{"unknown error"})
         << "slot 131 (app_payload_malformed) must carry a real message";
-    EXPECT_EQ(fixpp::core::error_message(static_cast<error>(132u)),
+    EXPECT_EQ(fixpp::core::error_message(static_cast<error>(132U)),
               std::string_view{"unknown error"})
         << "slot 132 must be unknown — nothing added beyond the 020 boundary";
 }

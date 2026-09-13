@@ -48,7 +48,7 @@ using fixpp::sync::test::yield_n;
 // zero observed overlap; every coroutine completes exactly once.
 TEST(SeamArm64WeakMemory, MultiThreadedContentionMutualExclusion) {
     constexpr int N = 4'000;
-    const unsigned T = std::max(2u, std::thread::hardware_concurrency());
+    const unsigned T = std::max(2U, std::thread::hardware_concurrency());
 
     std::atomic<int> in_critical{0};
     std::atomic<int> overlap{0};

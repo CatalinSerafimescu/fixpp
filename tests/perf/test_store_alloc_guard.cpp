@@ -59,6 +59,7 @@
 #include <memory_resource>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 // mallocnesia replaces these weak no-ops with its interceptor scope markers.
@@ -79,7 +80,6 @@ using fixpp::session::direction_t;
 using fixpp::session::FileStore;
 using fixpp::session::FileStoreFactory;
 using fixpp::session::MemoryStore;
-using fixpp::session::seqnum_min;
 using fixpp::session::seqnum_t;
 using fixpp::session::visit_result;
 
@@ -101,8 +101,7 @@ inline std::vector<std::byte> make_frame(seqnum_t seq) {
     if (raw.size() < 200) raw.append(200 - raw.size(), 'X');
 
     std::vector<std::byte> result(raw.size());
-    std::transform(raw.begin(), raw.end(), result.begin(),
-                   [](char c) { return static_cast<std::byte>(c); });
+    std::ranges::transform(raw, result.begin(), [](char c) { return static_cast<std::byte>(c); });
     return result;
 }
 
@@ -314,7 +313,7 @@ TEST(StoreAllocGuard, Mallocnesia_ZeroGlobalHeapFileStoreRetrieveSteadyState) {
     auto fut_store = asio::co_spawn(
         pool.get_executor(),
         [&store, &frames]() -> asio::awaitable<void> {
-            for (int i = 0; i < static_cast<int>(frames.size()); ++i) {
+            for (int i = 0; std::cmp_less(i, frames.size()); ++i) {
                 auto r = co_await store.store(
                     static_cast<seqnum_t>(i + 1),
                     std::span<const std::byte>(frames[static_cast<std::size_t>(i)]),
@@ -375,7 +374,7 @@ TEST(StoreAllocGuard, Mallocnesia_ZeroGlobalHeapFileStoreRetrieveSteadyState) {
     // contract stated in support/temp_dir.hpp -- the one this change is about. It is
     // invisible on this test (it is POSIX-only, and POSIX permits unlink-while-open),
     // which is exactly why the contract has to be honoured rather than observed.
-    minted.value().reset();
+    minted.value() = nullptr;
     fixpp::test_support::remove_temp_dir(dir);
 }
 #endif  // !_WIN32}

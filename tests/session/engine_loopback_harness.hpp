@@ -87,11 +87,11 @@ public:
     // (port 0 in reconnect_endpoint → OS assigns). The endpoint is readable
     // once the executor has run at least one step after start().
     // Call engine().acceptor_bound_endpoint(acceptor_id()) for the same value.
-    fixpp::transport::Endpoint server_endpoint() const noexcept {
+    [[nodiscard]] fixpp::transport::Endpoint server_endpoint() const noexcept {
         return engine_->acceptor_bound_endpoint(acceptor_id_);
     }
-    fixpp::session::SessionId acceptor_id() const noexcept { return acceptor_id_; }
-    fixpp::session::SessionId initiator_id() const noexcept { return initiator_id_; }
+    [[nodiscard]] fixpp::session::SessionId acceptor_id() const noexcept { return acceptor_id_; }
+    [[nodiscard]] fixpp::session::SessionId initiator_id() const noexcept { return initiator_id_; }
 
     std::future<void> spawn_stop(asio::io_context& ioc) {
         return asio::co_spawn(ioc, engine_->stop(), asio::use_future);

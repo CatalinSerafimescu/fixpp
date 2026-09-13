@@ -114,9 +114,7 @@ using fixpp::tls::file_cert_source;
 using fixpp::tls::local_credentials;
 using fixpp::tls::software_key_ref;
 
-static std::string fixture(const char* name) {
-    return std::string(FIXPP_TLS_FIXTURE_DIR) + "/" + name;
-}
+std::string fixture(const char* name) { return std::string(FIXPP_TLS_FIXTURE_DIR) + "/" + name; }
 
 // ── Minimal Session + session_executor fixture ────────────────────────────────
 // Session is valid for cancellable_dispatch without open() — session_arena()

@@ -38,12 +38,12 @@ TEST(CapiVersion, CApiVersionIsExactly_1_5_0) {
 
 // Composite macro: (MAJOR<<16)|(MINOR<<8)|PATCH
 TEST(CapiVersion, CompositeMacroValue) {
-    constexpr uint32_t expected = (static_cast<uint32_t>(FIXPP_C_ABI_VERSION_MAJOR) << 16u) |
-                                  (static_cast<uint32_t>(FIXPP_C_ABI_VERSION_MINOR) << 8u) |
+    constexpr uint32_t expected = (static_cast<uint32_t>(FIXPP_C_ABI_VERSION_MAJOR) << 16U) |
+                                  (static_cast<uint32_t>(FIXPP_C_ABI_VERSION_MINOR) << 8U) |
                                   static_cast<uint32_t>(FIXPP_C_ABI_VERSION_PATCH);
     EXPECT_EQ(static_cast<uint32_t>(FIXPP_C_ABI_VERSION), expected);
     // Exact numeric value for MAJOR=1, MINOR=5, PATCH=0 (the 0->1 GA freeze)
-    EXPECT_EQ(static_cast<uint32_t>(FIXPP_C_ABI_VERSION), uint32_t{(1u << 16u) | (5u << 8u) | 0u});
+    EXPECT_EQ(static_cast<uint32_t>(FIXPP_C_ABI_VERSION), uint32_t{(1U << 16U) | (5U << 8U) | 0U});
 }
 
 // ── Library version accessors ─────────────────────────────────────────────────

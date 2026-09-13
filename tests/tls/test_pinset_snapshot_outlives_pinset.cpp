@@ -73,12 +73,12 @@ TEST(PinsetSnapshotOutlivesPinset, PositiveSnapshotValidAfterDrop) {
 
         snap = ps.snapshot();
         ASSERT_NE(snap, nullptr);
-        ASSERT_EQ(snap->size(), 2u);
+        ASSERT_EQ(snap->size(), 2U);
     }
     // Pinset is destroyed here — arena is NOT.
 
     // Reading from the snapshot must be safe (MR still alive).
-    EXPECT_EQ(snap->size(), 2u);
+    EXPECT_EQ(snap->size(), 2U);
     EXPECT_EQ((*snap)[0].sha256, kFp1);
     EXPECT_EQ((*snap)[0].subject_dn, "CN=first");
     EXPECT_EQ((*snap)[1].sha256, kFp2);

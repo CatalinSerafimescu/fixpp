@@ -102,7 +102,7 @@ using fixpp::sync::detail::async_mutex_seam_phase;
 // ─────────────────────────────────────────────────────────────────────────────
 
 struct LivelockCtx {
-    std::atomic<std::thread::id> a_tid{};
+    std::atomic<std::thread::id> a_tid;
 
     std::atomic<bool> parked1_done{false};
     std::binary_semaphore parked1{0};

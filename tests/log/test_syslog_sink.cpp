@@ -32,7 +32,7 @@ fixpp::log::Record make_record(fixpp::log::Level level, std::uint32_t fmt_id) {
     rec.level = level;
     rec.category = fixpp::log::cat::session;
     rec.format_id = fmt_id;
-    rec.arg_count = 0u;
+    rec.arg_count = 0U;
     rec.timestamp =
         fixpp::core::utc_time_point{std::chrono::system_clock::now().time_since_epoch()};
     return rec;

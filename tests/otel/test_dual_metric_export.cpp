@@ -95,7 +95,7 @@ public:
 
     opentelemetry::sdk::common::ExportResult Export(
         const sdk_metrics::ResourceMetrics& data) noexcept override {
-        std::lock_guard<std::mutex> lock(mu_);
+        std::scoped_lock lock(mu_);
         received_.push_back(data);
         return opentelemetry::sdk::common::ExportResult::kSuccess;
     }
@@ -110,7 +110,7 @@ public:
 
     // Test accessor: returns a copy of all received batches.
     std::vector<sdk_metrics::ResourceMetrics> get_received() const {
-        std::lock_guard<std::mutex> lock(mu_);
+        std::scoped_lock lock(mu_);
         return received_;
     }
 
@@ -168,7 +168,7 @@ static void set_nonblocking(socket_t s, bool on) {
     ::fcntl(s, F_SETFL, on ? (flags | O_NONBLOCK) : (flags & ~O_NONBLOCK));
 }
 static int wait_writable(socket_t s, int timeout_ms) {
-    pollfd pfd{s, POLLOUT, 0};
+    pollfd pfd{.fd = s, .events = POLLOUT, .revents = 0};
     return ::poll(&pfd, 1, timeout_ms);
 }
 static int socket_error(socket_t s) {
@@ -246,7 +246,7 @@ static int64_t scrape_counter_value(const std::string& body, std::string_view me
         std::string_view line{body.data() + pos, eol - pos};
         // Skip comment lines.
         if (!line.empty() && line[0] != '#') {
-            if (line.substr(0, metric_name.size()) == metric_name) {
+            if (line.starts_with(metric_name)) {
                 // Find the last space-separated token = the value.
                 size_t space = line.rfind(' ');
                 if (space != std::string_view::npos) {

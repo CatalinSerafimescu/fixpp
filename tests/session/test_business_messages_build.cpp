@@ -119,7 +119,7 @@ bool body_contains_tag(std::span<const std::byte> body, std::string_view tag_str
 
     for (std::size_t i = 0; i + token.size() <= body.size(); ++i) {
         // Must be at start or after SOH
-        bool at_boundary = (i == 0) || (static_cast<unsigned char>(body[i - 1]) == 0x01u);
+        bool at_boundary = (i == 0) || (static_cast<unsigned char>(body[i - 1]) == 0x01U);
         if (!at_boundary) continue;
         bool match = true;
         for (std::size_t j = 0; j < token.size(); ++j) {
@@ -139,7 +139,7 @@ std::string_view extract_field_value(std::span<const std::byte> body, std::strin
     std::string token{tag_str};
     token += '=';
     for (std::size_t i = 0; i + token.size() <= body.size(); ++i) {
-        bool at_boundary = (i == 0) || (static_cast<unsigned char>(body[i - 1]) == 0x01u);
+        bool at_boundary = (i == 0) || (static_cast<unsigned char>(body[i - 1]) == 0x01U);
         if (!at_boundary) continue;
         bool match = true;
         for (std::size_t j = 0; j < token.size(); ++j) {
@@ -151,7 +151,7 @@ std::string_view extract_field_value(std::span<const std::byte> body, std::strin
         if (match) {
             std::size_t val_start = i + token.size();
             std::size_t val_end = val_start;
-            while (val_end < body.size() && static_cast<unsigned char>(body[val_end]) != 0x01u) {
+            while (val_end < body.size() && static_cast<unsigned char>(body[val_end]) != 0x01U) {
                 ++val_end;
             }
             return std::string_view{reinterpret_cast<const char*>(body.data() + val_start),
@@ -758,8 +758,7 @@ TEST(BusinessMessagesBuild, Builder_ScratchOverflow_PerFieldGuards) {
                                                               '1', qty, px, "20240101-10:00:00");
         EXPECT_FALSE(r.has_value()) << "NOS cl_ord_id len=" << len
                                     << " must overflow the internal body cap and fail-closed";
-        EXPECT_TRUE(
-            std::all_of(out.begin(), out.end(), [](std::byte b) { return b == std::byte{0xCDU}; }))
+        EXPECT_TRUE(std::ranges::all_of(out, [](std::byte b) { return b == std::byte{0xCDU}; }))
             << "NOS overflow must not write to out (INV-4 atomicity), len=" << len;
     }
     // Under-cap large field: succeeds, proving the boundary above is real.
@@ -780,8 +779,7 @@ TEST(BusinessMessagesBuild, Builder_ScratchOverflow_PerFieldGuards) {
                                                               'F', '2', "S", '1', zero, qty, px);
         EXPECT_FALSE(r.has_value()) << "ExecRpt order_id len=" << len
                                     << " must overflow the internal body cap and fail-closed";
-        EXPECT_TRUE(
-            std::all_of(out.begin(), out.end(), [](std::byte b) { return b == std::byte{0xCDU}; }))
+        EXPECT_TRUE(std::ranges::all_of(out, [](std::byte b) { return b == std::byte{0xCDU}; }))
             << "ExecRpt overflow must not write to out (INV-4 atomicity), len=" << len;
     }
     // Under-cap large field: succeeds, proving the boundary above is real.

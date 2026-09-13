@@ -91,7 +91,7 @@ namespace {
 
 // Extract a field value from a SOH-delimited FIX frame.
 // Returns the raw string value for the tag, or "" if not found.
-static std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag_wanted) {
+std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag_wanted) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = std::to_string(tag_wanted) + "=";
     auto pos = wire.find(needle);
@@ -106,15 +106,14 @@ static std::string extract_field(std::span<const std::byte> frame, std::uint32_t
     return wire.substr(pos, end - pos);
 }
 
-static bool has_field(std::span<const std::byte> frame, std::uint32_t tag) {
+bool has_field(std::span<const std::byte> frame, std::uint32_t tag) {
     return !extract_field(frame, tag).empty();
 }
 
 // Build a minimal FIX frame with BeginString/BodyLength/checksum.
-static std::vector<std::byte> make_frame(std::string_view begin_string, std::string_view msg_type,
-                                         std::uint32_t seq, std::string_view sender,
-                                         std::string_view target,
-                                         std::string_view extra_fields = {}) {
+std::vector<std::byte> make_frame(std::string_view begin_string, std::string_view msg_type,
+                                  std::uint32_t seq, std::string_view sender,
+                                  std::string_view target, std::string_view extra_fields = {}) {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -134,7 +133,7 @@ static std::vector<std::byte> make_frame(std::string_view begin_string, std::str
     for (unsigned char c : full) {
         cs += c;
     }
-    cs &= 0xFFu;
+    cs &= 0xFFU;
     char csbuf[8];
     std::snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     full += "10=" + std::string(csbuf) + "\x01";
@@ -147,9 +146,9 @@ static std::vector<std::byte> make_frame(std::string_view begin_string, std::str
     return result;
 }
 
-static std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
-                                               std::string_view sender, std::string_view target,
-                                               int heartbt = 30) {
+std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
+                                        std::string_view sender, std::string_view target,
+                                        int heartbt = 30) {
     // Build extra fields without "\x01108=" (hex escape extends through digits).
     std::string extra;
     extra += "98=0\x01";
@@ -160,8 +159,8 @@ static std::vector<std::byte> make_logon_frame(std::string_view begin_string, st
 // ── FSM-fixture helpers (pattern from seqnum_gap_fatal_test.cpp) ──────────────
 
 // Drive `co_spawn(ioc, coro, use_future)` with a readiness-checked window (#289).
-static fixpp::core::expected_t<void> run_coro_result(
-    asio::io_context& ioc, asio::awaitable<fixpp::core::expected_t<void>> coro) {
+fixpp::core::expected_t<void> run_coro_result(asio::io_context& ioc,
+                                              asio::awaitable<fixpp::core::expected_t<void>> coro) {
     auto fut = asio::co_spawn(ioc, std::move(coro), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms, "run_coro_result")) {
         // No Clock here on purpose: `run_coro_result` is a free helper declared ABOVE the
@@ -256,7 +255,7 @@ TEST(HbTrBuilders, BuildHeartbeatCarriesTestReqID) {
 
     ASSERT_TRUE(result.has_value()) << "build_heartbeat must succeed";
     auto frame = *result;
-    ASSERT_GT(frame.size(), 0u);
+    ASSERT_GT(frame.size(), 0U);
 
     // MsgType must be 0 (Heartbeat).
     EXPECT_EQ(extract_field(frame, 35), "0");
@@ -298,7 +297,7 @@ TEST(HbTrBuilders, BuildTestRequestCarriesTestReqID) {
 
     ASSERT_TRUE(result.has_value()) << "build_test_request must succeed";
     auto frame = *result;
-    ASSERT_GT(frame.size(), 0u);
+    ASSERT_GT(frame.size(), 0U);
 
     // MsgType must be 1 (TestRequest).
     EXPECT_EQ(extract_field(frame, 35), "1");
@@ -537,8 +536,8 @@ TEST_F(HbTrTest, InboundHeartbeatEmitsNoEcho) {
     int outbound_hb = 0;
     for (const auto& f : outbound) {
         std::string_view sv{reinterpret_cast<const char*>(f.data()), f.size()};
-        if (sv.find("\x01"
-                    "35=0\x01") != std::string_view::npos) {
+        if (sv.contains("\x01"
+                        "35=0\x01")) {
             ++outbound_hb;
         }
     }

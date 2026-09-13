@@ -47,6 +47,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "support/minimal_dictionary.hpp"
@@ -72,7 +73,6 @@
 // (#324).
 
 using namespace std::chrono_literals;
-using fixpp::core::error;
 using fixpp::core::expected_t;
 using fixpp::session::Application;
 using fixpp::session::SessionId;
@@ -84,10 +84,9 @@ namespace {
 
 // ── Frame builder helpers ──────────────────────────────────────────────────────
 
-static std::vector<std::byte> make_raw_frame(std::string_view begin_string,
-                                             std::string_view msg_type, std::uint32_t seq,
-                                             std::string_view sender, std::string_view target,
-                                             std::string extra_body = {}) {
+std::vector<std::byte> make_raw_frame(std::string_view begin_string, std::string_view msg_type,
+                                      std::uint32_t seq, std::string_view sender,
+                                      std::string_view target, std::string extra_body = {}) {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -119,24 +118,22 @@ static std::vector<std::byte> make_raw_frame(std::string_view begin_string,
     return frame;
 }
 
-static std::vector<std::byte> make_logon_frame(std::string_view begin_string = "FIX.4.2",
-                                               std::uint32_t seq = 1,
-                                               std::string_view sender = "TW",
-                                               std::string_view target = "ISLD", int heartbt = 0) {
+std::vector<std::byte> make_logon_frame(std::string_view begin_string = "FIX.4.2",
+                                        std::uint32_t seq = 1, std::string_view sender = "TW",
+                                        std::string_view target = "ISLD", int heartbt = 0) {
     std::string extra = std::string("98=0\x01") + "108=" + std::to_string(heartbt) + "\x01";
     return make_raw_frame(begin_string, "A", seq, sender, target, extra);
 }
 
-static std::vector<std::byte> make_logout_frame(std::uint32_t seq = 2,
-                                                std::string_view sender = "TW",
-                                                std::string_view target = "ISLD") {
+std::vector<std::byte> make_logout_frame(std::uint32_t seq = 2, std::string_view sender = "TW",
+                                         std::string_view target = "ISLD") {
     return make_raw_frame("FIX.4.2", "5", seq, sender, target);
 }
 
-static std::vector<std::byte> make_sequence_reset_frame(std::uint32_t seq, std::uint32_t new_seqno,
-                                                        bool gap_fill = false,
-                                                        std::string_view sender = "TW",
-                                                        std::string_view target = "ISLD") {
+std::vector<std::byte> make_sequence_reset_frame(std::uint32_t seq, std::uint32_t new_seqno,
+                                                 bool gap_fill = false,
+                                                 std::string_view sender = "TW",
+                                                 std::string_view target = "ISLD") {
     std::string extra = "36=" + std::to_string(new_seqno) + "\x01";
     if (gap_fill) {
         extra += "123=Y\x01";
@@ -166,25 +163,25 @@ public:
     bool throw_on_logout = false;
 
     void onCreate(const SessionId& id) override {
-        lifecycle_calls.push_back({"onCreate", id.sender_comp_id});
+        lifecycle_calls.push_back({.which = "onCreate", .session_sender = id.sender_comp_id});
     }
 
     void onLogon(const SessionId& id) override {
-        lifecycle_calls.push_back({"onLogon", id.sender_comp_id});
+        lifecycle_calls.push_back({.which = "onLogon", .session_sender = id.sender_comp_id});
     }
 
     void onLogout(const SessionId& id) override {
         if (throw_on_logout) {
             throw std::runtime_error("test throw from onLogout");
         }
-        lifecycle_calls.push_back({"onLogout", id.sender_comp_id});
+        lifecycle_calls.push_back({.which = "onLogout", .session_sender = id.sender_comp_id});
     }
 
     expected_t<void> fromAdmin(const MessageView<access_mode::Index>& msg,
                                const SessionId& /*id*/) override {
         auto mt_fv = msg.get(35);
         std::string mt = mt_fv ? std::string(mt_fv->as_string()) : "<none>";
-        inbound_calls.push_back({"fromAdmin", mt});
+        inbound_calls.push_back({.which = "fromAdmin", .msg_type = mt});
         return {};
     }
 
@@ -192,7 +189,7 @@ public:
                              const SessionId& /*id*/) override {
         auto mt_fv = msg.get(35);
         std::string mt = mt_fv ? std::string(mt_fv->as_string()) : "<none>";
-        inbound_calls.push_back({"fromApp", mt});
+        inbound_calls.push_back({.which = "fromApp", .msg_type = mt});
         return {};
     }
 };
@@ -284,7 +281,7 @@ TEST(ApplicationLifecycle, OnCreateFiresOnceBeforeLogon) {
     }
     ASSERT_TRUE(fut.get().has_value()) << "open() failed";
 
-    ASSERT_EQ(app->lifecycle_calls.size(), 1u) << "onCreate must fire exactly once after open()";
+    ASSERT_EQ(app->lifecycle_calls.size(), 1U) << "onCreate must fire exactly once after open()";
     EXPECT_EQ(app->lifecycle_calls[0].which, "onCreate");
     EXPECT_EQ(app->lifecycle_calls[0].session_sender, "ISLD");
 
@@ -312,7 +309,7 @@ TEST(ApplicationLifecycle, OnLogonFiresOnceAtActive) {
     for (auto& c : app->lifecycle_calls) {
         if (c.which == "onLogon") ++logon_count;
     }
-    EXPECT_EQ(logon_count, 1u) << "onLogon must fire exactly once at Active";
+    EXPECT_EQ(logon_count, 1U) << "onLogon must fire exactly once at Active";
 }
 
 // ── Test 3: onCreate → onLogon order ─────────────────────────────────────────
@@ -327,8 +324,9 @@ TEST(ApplicationLifecycle, OnCreateBeforeOnLogon) {
     f.open_to_active(sess);
 
     // Find positions of onCreate and onLogon.
-    int create_pos = -1, logon_pos = -1;
-    for (int i = 0; i < static_cast<int>(app->lifecycle_calls.size()); ++i) {
+    int create_pos = -1;
+    int logon_pos = -1;
+    for (int i = 0; std::cmp_less(i, app->lifecycle_calls.size()); ++i) {
         if (app->lifecycle_calls[i].which == "onCreate") create_pos = i;
         if (app->lifecycle_calls[i].which == "onLogon") logon_pos = i;
     }
@@ -386,7 +384,7 @@ TEST(ApplicationLifecycle, OnLogoutFiresOnce_GracefulClose) {
     for (auto& c : app->lifecycle_calls) {
         if (c.which == "onLogout") ++logout_count;
     }
-    EXPECT_EQ(logout_count, 1u) << "onLogout must fire exactly once on graceful close";
+    EXPECT_EQ(logout_count, 1U) << "onLogout must fire exactly once on graceful close";
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected);
 }
 
@@ -418,7 +416,7 @@ TEST(ApplicationLifecycle, OnLogoutFiresOnce_TerminalClose) {
     for (auto& c : app->lifecycle_calls) {
         if (c.which == "onLogout") ++logout_count;
     }
-    EXPECT_EQ(logout_count, 1u) << "onLogout must fire exactly once on terminal close";
+    EXPECT_EQ(logout_count, 1U) << "onLogout must fire exactly once on terminal close";
 }
 
 // ── Test 6: onLogout fires exactly once when a callback throws ────────────────
@@ -486,7 +484,7 @@ TEST(ApplicationLifecycle, FromAdminFiresForInboundLogout) {
     for (auto& c : app->inbound_calls) {
         if (c.which == "fromAdmin" && c.msg_type == "5") ++from_admin_logout_count;
     }
-    EXPECT_EQ(from_admin_logout_count, 1u)
+    EXPECT_EQ(from_admin_logout_count, 1U)
         << "fromAdmin must fire exactly once for inbound Logout(35=5)";
 }
 
@@ -510,7 +508,7 @@ TEST(ApplicationLifecycle, FromAdminFiresForInboundSequenceReset) {
     for (auto& c : app->inbound_calls) {
         if (c.which == "fromAdmin" && c.msg_type == "4") ++from_admin_sr_count;
     }
-    EXPECT_EQ(from_admin_sr_count, 1u)
+    EXPECT_EQ(from_admin_sr_count, 1U)
         << "fromAdmin must fire exactly once for inbound SequenceReset(35=4)";
 }
 
@@ -535,14 +533,14 @@ TEST(ApplicationLifecycle, InboundLogout_FiresBothFromAdminAndOnLogout) {
     for (auto& c : app->inbound_calls) {
         if (c.which == "fromAdmin" && c.msg_type == "5") ++from_admin_logout;
     }
-    EXPECT_EQ(from_admin_logout, 1u) << "fromAdmin must fire for inbound Logout";
+    EXPECT_EQ(from_admin_logout, 1U) << "fromAdmin must fire for inbound Logout";
 
     // onLogout must fire once (leaving Active).
     std::size_t on_logout_count = 0;
     for (auto& c : app->lifecycle_calls) {
         if (c.which == "onLogout") ++on_logout_count;
     }
-    EXPECT_EQ(on_logout_count, 1u) << "onLogout must fire when leaving Active";
+    EXPECT_EQ(on_logout_count, 1U) << "onLogout must fire when leaving Active";
 }
 
 }  // namespace

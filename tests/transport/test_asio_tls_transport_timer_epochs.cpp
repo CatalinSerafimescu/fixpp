@@ -50,7 +50,6 @@ namespace {
 
 using namespace std::chrono_literals;
 using fixpp::transport::asio_tls_transport;
-using fixpp::transport::Transport;
 using fixpp::transport::test::LoopbackTlsFixture;
 
 #ifndef FIXPP_TLS_FIXTURE_DIR
@@ -118,7 +117,7 @@ TEST(AsioTlsTransportTimerEpochs, T4ConnectEpochRetiredAfterConnect) {
 
     ASSERT_FALSE(timed_out) << "test timed out";
     ASSERT_TRUE(connect_ok) << "async_connect must succeed for T4's construction";
-    EXPECT_EQ(epoch_after_connect, 2u)
+    EXPECT_EQ(epoch_after_connect, 2U)
         << "T4 (SC-014): connect epoch must be retired (advanced past the armed "
            "value 1) by the time async_connect returns — arm (0->1) then retire "
            "(1->2); got "
@@ -191,7 +190,7 @@ TEST(AsioTlsTransportTimerEpochs, T5HandshakeEpochRetiredAfterHandshake) {
 
     ASSERT_FALSE(timed_out) << "test timed out";
     ASSERT_TRUE(handshake_ok) << "async_handshake must succeed for T5's construction";
-    EXPECT_EQ(epoch_after_handshake, 2u)
+    EXPECT_EQ(epoch_after_handshake, 2U)
         << "T5 (SC-014): handshake epoch must be retired (advanced past the "
            "armed value 1) by the time async_handshake returns — arm (0->1) "
            "then retire (1->2); got "

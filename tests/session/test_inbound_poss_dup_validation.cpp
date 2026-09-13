@@ -42,7 +42,7 @@ protected:
     };
     [[nodiscard]] RejectFields find_last_reject() const {
         RejectFields r;
-        for (auto& f : captured_frames) {
+        for (const auto& f : captured_frames) {
             if (extract_field(f, 35) == "3") {
                 r.ref_tag_id = std::string(extract_field(f, 371).value_or(""));
                 r.reason = std::string(extract_field(f, 373).value_or(""));

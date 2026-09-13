@@ -109,7 +109,7 @@ TEST(CapiErrorBlock, StrerrorNonEmptyForNewCodes) {
     for (fixpp_error_t code : codes) {
         const char* s = fixpp_strerror(code);
         ASSERT_NE(s, nullptr);
-        EXPECT_GT(std::strlen(s), 0u) << "code " << code << " has an empty strerror";
+        EXPECT_GT(std::strlen(s), 0U) << "code " << code << " has an empty strerror";
         // Must NOT fall through to the generic "unknown error".
         EXPECT_STRNE(s, "unknown error") << "code " << code << " missing a strerror entry";
         // Stable pointer (static storage): same address on a second call.
@@ -236,7 +236,7 @@ TEST(CapiErrorBlock, T022_Arm3_AppPayloadMalformed) {
     ASSERT_EQ(fixpp_engine_start(B), FIXPP_ERR_OK);
 
     std::uint16_t port = wait_for_bound_port(B, acc_id);
-    ASSERT_NE(port, 0u) << "acceptor did not bind";
+    ASSERT_NE(port, 0U) << "acceptor did not bind";
 
     fixpp_session_config_t* ini = make_session_cfg("INI-MALF5", "ACC-MALF5", FIXPP_ROLE_INITIATOR);
     set_loopback_endpoint(ini, "127.0.0.1", port);
@@ -277,7 +277,7 @@ TEST(CapiErrorBlock, T022_Arm4_AppDoNotSend) {
     ASSERT_EQ(fixpp_engine_start(B), FIXPP_ERR_OK);
 
     std::uint16_t port = wait_for_bound_port(B, acc_id);
-    ASSERT_NE(port, 0u) << "acceptor did not bind";
+    ASSERT_NE(port, 0U) << "acceptor did not bind";
 
     fixpp_session_config_t* ini = make_session_cfg("INI-VETO5", "ACC-VETO5", FIXPP_ROLE_INITIATOR);
     set_loopback_endpoint(ini, "127.0.0.1", port);
@@ -318,7 +318,7 @@ TEST(CapiErrorBlock, T022_Arm5_AppCallbackThrew) {
     ASSERT_EQ(fixpp_engine_start(B), FIXPP_ERR_OK);
 
     std::uint16_t port = wait_for_bound_port(B, acc_id);
-    ASSERT_NE(port, 0u) << "acceptor did not bind";
+    ASSERT_NE(port, 0U) << "acceptor did not bind";
 
     fixpp_session_config_t* ini = make_session_cfg("INI-CBT5", "ACC-CBT5", FIXPP_ROLE_INITIATOR);
     set_loopback_endpoint(ini, "127.0.0.1", port);

@@ -95,7 +95,7 @@ TEST(Application019CompileSmoke, SubclassCompiles) {
 
 TEST(Application019CompileSmoke, DefaultApplicationCompiles) {
     DefaultApplication app;
-    SessionId id{"FIX.4.4", "SENDER", "TARGET"};
+    SessionId id{.begin_string = "FIX.4.4", .sender_comp_id = "SENDER", .target_comp_id = "TARGET"};
 
     // Calling the default virtuals must not crash and must return the correct
     // default values (no-op for void, accept {} for expected_t<void>).

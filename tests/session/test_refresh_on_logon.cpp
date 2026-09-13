@@ -115,16 +115,15 @@ namespace {
 
 // ── Frame-building helpers ────────────────────────────────────────────────────
 
-static std::string field(int tag, std::string_view val) {
+std::string field(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
 using fixpp::test_support::extract_tag;
 
-static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
-                                             std::string_view msg_type, std::uint32_t seq,
-                                             std::string_view sender, std::string_view target,
-                                             std::string_view extra = {}) {
+std::vector<std::byte> make_fix_frame(std::string_view begin_string, std::string_view msg_type,
+                                      std::uint32_t seq, std::string_view sender,
+                                      std::string_view target, std::string_view extra = {}) {
     std::string body;
     body += field(35, msg_type);
     body += field(34, std::to_string(seq));
@@ -150,8 +149,8 @@ static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
     return frame;
 }
 
-static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
-                                         std::string_view t, int hbt = 30) {
+std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
+                                  std::string_view t, int hbt = 30) {
     std::string extra;
     extra += field(98, "0");
     extra += field(108, std::to_string(hbt));
@@ -159,9 +158,8 @@ static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq,
 }
 
 // make_logon_reset: build a Logon with 141=Y (ResetSeqNumFlag). Mirrors 029 harness.
-static std::vector<std::byte> make_logon_reset(std::string_view bs, std::uint32_t seq,
-                                               std::string_view s, std::string_view t,
-                                               int hbt = 30) {
+std::vector<std::byte> make_logon_reset(std::string_view bs, std::uint32_t seq, std::string_view s,
+                                        std::string_view t, int hbt = 30) {
     std::string extra;
     extra += field(98, "0");
     extra += field(108, std::to_string(hbt));
@@ -189,7 +187,6 @@ using fixpp::session::MessageStore;
 using fixpp::session::MessageStoreFactory;
 using fixpp::session::retrieve_visitor;
 using fixpp::session::seqnum_t;
-using fixpp::session::visit_result;
 
 class FaultStore final : public MessageStore {
 public:
@@ -296,7 +293,7 @@ private:
 // inside a value, and avoids leaving 9= / 10= stale after strip.
 using TagValue = std::pair<int, std::string>;
 
-static std::vector<TagValue> parse_fix_fields(const std::vector<std::byte>& frame) {
+std::vector<TagValue> parse_fix_fields(const std::vector<std::byte>& frame) {
     const auto* data = reinterpret_cast<const char*>(frame.data());
     std::string sv(data, frame.size());
     std::vector<TagValue> result;
@@ -320,15 +317,16 @@ static std::vector<TagValue> parse_fix_fields(const std::vector<std::byte>& fram
 // — derived/volatile fields whose values shift when any other field changes).
 // Returns true iff both sets have the same tags (excluding ignored) in the same
 // order with the same values.
-static bool fields_equal_except(const std::vector<TagValue>& a, const std::vector<TagValue>& b,
-                                std::initializer_list<int> exclude) {
+bool fields_equal_except(const std::vector<TagValue>& a, const std::vector<TagValue>& b,
+                         std::initializer_list<int> exclude) {
     auto keep = [&](const TagValue& tv) {
         for (int t : exclude) {
             if (tv.first == t) return false;
         }
         return true;
     };
-    std::vector<TagValue> fa, fb;
+    std::vector<TagValue> fa;
+    std::vector<TagValue> fb;
     for (const auto& tv : a) {
         if (keep(tv)) fa.push_back(tv);
     }
@@ -422,7 +420,7 @@ struct ReconnectInitiatorFixture {
 // persistent: true (default) for persistent store; false for W4 (non-persistent no-op).
 // policy: bilateral_lenient (default) for W1-W4; bilateral_strict for W5a/W5b.
 // fail_on_nth_call: 0 (default) for normal stores; 3 for W7 (fail 2nd-logon re-read).
-static ReconnectInitiatorFixture make_reconnect_initiator(
+ReconnectInitiatorFixture make_reconnect_initiator(
     seqnum_t seeded_in, seqnum_t seeded_out, bool refresh_on_logon = true, bool persistent = true,
     fixpp::session::reset_seqnum_policy policy =
         fixpp::session::reset_seqnum_policy::bilateral_lenient,
@@ -504,7 +502,7 @@ struct AcceptorFixture {
     FaultStore* store{nullptr};
 };
 
-static AcceptorFixture make_acceptor_notconnected(
+AcceptorFixture make_acceptor_notconnected(
     std::shared_ptr<MessageStoreFactory> store_factory, bool refresh_on_logon,
     fixpp::session::reset_seqnum_policy policy =
         fixpp::session::reset_seqnum_policy::bilateral_lenient) {
@@ -1108,7 +1106,8 @@ TEST(RefreshOnLogon, W5a_BilateralStrict_KnobOn_SuppressRehydrate) {
     const auto off_fields = parse_fix_fields(off_raw);
 
     // Direct 34 assertion: both must carry the same MsgSeqNum.
-    std::string on_34, off_34;
+    std::string on_34;
+    std::string off_34;
     for (const auto& tv : on_fields) {
         if (tv.first == 34) {
             on_34 = tv.second;
@@ -1128,7 +1127,8 @@ TEST(RefreshOnLogon, W5a_BilateralStrict_KnobOn_SuppressRehydrate) {
         << ". Mismatch means the knob influenced the strict 2nd Logon outbound seqnum.";
 
     // Direct 141 assertion: bilateral_strict always emits 141=Y; both must agree.
-    std::string on_141, off_141;
+    std::string on_141;
+    std::string off_141;
     for (const auto& tv : on_fields) {
         if (tv.first == 141) {
             on_141 = tv.second;
@@ -1190,7 +1190,7 @@ TEST(RefreshOnLogon, W5b_BilateralStrict_KnobOff_L029_3_Gap_Witness) {
         << store->call_count;
 
     // The cold Logon is already in fix.capture.frames.back() (emitted during open()).
-    ASSERT_GE(fix.capture.frames.size(), 1u)
+    ASSERT_GE(fix.capture.frames.size(), 1U)
         << "W5b: cold Logon must have been emitted during open()";
     const auto& cold_logon = fix.capture.frames.back();
 

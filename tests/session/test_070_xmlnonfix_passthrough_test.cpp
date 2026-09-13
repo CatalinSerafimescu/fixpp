@@ -77,7 +77,7 @@ std::shared_ptr<const fixpp::dict::Dictionary> load_fix44_dictionary() {
     std::string xml((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     // Oversized initial arena; monotonic_buffer_resource grows via the default
     // upstream if exceeded. Co-owned by the shared_ptr deleter.
-    constexpr std::size_t kBufSize = 4u * 1024u * 1024u;
+    constexpr std::size_t kBufSize = 4U * 1024U * 1024U;
     auto buf = std::make_unique<std::vector<std::byte>>(kBufSize);
     auto* mr = new std::pmr::monotonic_buffer_resource{buf->data(), buf->size()};
     fixpp::dict::Dictionary d = fixpp::dict::XmlLoader{}.load_from_string(xml, mr);
@@ -237,11 +237,10 @@ struct Fixture {
         (void)fut.get();
     }
 
-    bool any_reject_emitted() const {
+    [[nodiscard]] bool any_reject_emitted() const {
         for (const auto& f : captured_frames) {
             std::string w(reinterpret_cast<const char*>(f.data()), f.size());
-            if (w.find("35=3\x01") != std::string::npos ||
-                w.find("35=j\x01") != std::string::npos) {
+            if (w.contains("35=3\x01") || w.contains("35=j\x01")) {
                 return true;
             }
         }

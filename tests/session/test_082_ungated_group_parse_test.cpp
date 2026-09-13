@@ -145,7 +145,7 @@ public:
 // exactly (PMR-buffer-in-shared_ptr-deleter pattern), parameterized by
 // filename since this test needs three distinct dictionaries.
 std::shared_ptr<const fixpp::dict::Dictionary> load_real_dictionary(std::string_view filename) {
-    constexpr std::size_t kBufSize = 4u * 1024u * 1024u;
+    constexpr std::size_t kBufSize = 4U * 1024U * 1024U;
     auto buf = std::make_unique<std::array<std::byte, kBufSize>>();
     auto* mr = new std::pmr::monotonic_buffer_resource{buf->data(), buf->size()};
     std::string const path = std::string(FIXPP_DICT_DATA_DIR) + "/" + std::string(filename);
@@ -283,9 +283,9 @@ struct VersionCase {
 };
 
 std::vector<VersionCase> const kVersions{
-    {"FIX40", "FIX40.xml", "FIX.4.0"},
-    {"FIX41", "FIX41.xml", "FIX.4.1"},
-    {"FIX42", "FIX42.xml", "FIX.4.2"},
+    {.label = "FIX40", .dict_filename = "FIX40.xml", .begin_string = "FIX.4.0"},
+    {.label = "FIX41", .dict_filename = "FIX41.xml", .begin_string = "FIX.4.1"},
+    {.label = "FIX42", .dict_filename = "FIX42.xml", .begin_string = "FIX.4.2"},
 };
 
 }  // namespace
@@ -347,7 +347,7 @@ TEST(UngatedGroupParse, AllocationNoOrdersGroupScopedNotFlatAcrossFix40Fix41Fix4
         // (INT-typed group-count field filtered out before the structural
         // predicate is ever consulted), so group_slices(73) returns EMPTY
         // (count == 0), not 2.
-        EXPECT_EQ(count, 2u)
+        EXPECT_EQ(count, 2U)
             << v.label
             << ": NoOrders(73)=2 must yield exactly 2 group instances "
                "(group-scoped resolution) -- RED pre-T023 (group unregistered -> empty span)";

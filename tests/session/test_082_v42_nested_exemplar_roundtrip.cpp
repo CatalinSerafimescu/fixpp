@@ -133,7 +133,7 @@ TEST(V42NestedExemplar082, BuildMatchesQuickFixGoldenAndRoundTripsBothGroupLevel
     ASSERT_EQ(expected.size(), 1U) << "golden must hold exactly one frame";
 
     std::vector<GoldenFrame> const actual{
-        GoldenFrame{'>', std::vector<std::byte>{body.begin(), body.end()}}};
+        GoldenFrame{.dir = '>', .bytes = std::vector<std::byte>{body.begin(), body.end()}}};
     auto const diff = diff_transcripts(expected, actual, shape_oracle_profile());
     EXPECT_TRUE(static_cast<bool>(diff))
         << "v42 MassQuote build diverged from the QuickFIX-authored golden: " << diff.detail;

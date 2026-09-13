@@ -28,6 +28,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <asio/io_context.hpp>
 #include <fixpp/config/config_bundle.hpp>
 #include <fixpp/config/load_diagnostic.hpp>
@@ -86,7 +87,7 @@ static fixpp::config::LoadResult full_load(const std::filesystem::path& path) {
 static bool has_diag(const std::vector<fixpp::config::LoadDiagnostic>& diags,
                      fixpp::config::reason_class expected_reason,
                      std::string_view expected_key_path) {
-    return std::any_of(diags.begin(), diags.end(), [&](const fixpp::config::LoadDiagnostic& d) {
+    return std::ranges::any_of(diags, [&](const fixpp::config::LoadDiagnostic& d) {
         return d.reason == expected_reason && d.key_path == expected_key_path;
     });
 }
@@ -1050,7 +1051,7 @@ on_overflow = "discard"
 struct ThrowingResource : std::pmr::memory_resource {
     void* do_allocate(std::size_t, std::size_t) override { throw std::bad_alloc{}; }
     void do_deallocate(void*, std::size_t, std::size_t) override {}
-    bool do_is_equal(const std::pmr::memory_resource& o) const noexcept override {
+    [[nodiscard]] bool do_is_equal(const std::pmr::memory_resource& o) const noexcept override {
         return this == &o;
     }
 };
@@ -1912,81 +1913,81 @@ TEST(GateBR2_WrongTypeClass, AllRemainingOptionalFieldsRejectWrongType) {
     };
     std::vector<Case> cases = {
         // file-sink numerics — STRING where integer expected
-        {R"(
+        {.toml = R"(
 [logger]
   [[logger.sinks]]
   kind           = "file"
   directory      = "/tmp"
   max_file_bytes = "big"
 )",
-         "logger.sinks[0].max_file_bytes"},
-        {R"(
+         .key_path = "logger.sinks[0].max_file_bytes"},
+        {.toml = R"(
 [logger]
   [[logger.sinks]]
   kind           = "file"
   directory      = "/tmp"
   max_keep_count = "many"
 )",
-         "logger.sinks[0].max_keep_count"},
+         .key_path = "logger.sinks[0].max_keep_count"},
         // logger-level scalars
-        {R"(
+        {.toml = R"(
 [logger]
 capacity = "huge"
   [[logger.sinks]]
   kind      = "file"
   directory = "/tmp"
 )",
-         "logger.capacity"},
-        {R"(
+         .key_path = "logger.capacity"},
+        {.toml = R"(
 [logger]
 drain_timeout = 5000
   [[logger.sinks]]
   kind      = "file"
   directory = "/tmp"
 )",
-         "logger.drain_timeout"},
-        {R"(
+         .key_path = "logger.drain_timeout"},
+        {.toml = R"(
 [logger]
 drain_cpu_affinity = "two"
   [[logger.sinks]]
   kind      = "file"
   directory = "/tmp"
 )",
-         "logger.drain_cpu_affinity"},
+         .key_path = "logger.drain_cpu_affinity"},
 #ifdef FIXPP_CONFIG_HAS_OTLP
-        {R"(
+        {.toml = R"(
 [logger]
   [[logger.sinks]]
   kind     = "otlp"
   endpoint = "https://collector:4317/v1/logs"
   use_grpc = "yes"
 )",
-         "logger.sinks[0].use_grpc"},
-        {R"(
+         .key_path = "logger.sinks[0].use_grpc"},
+        {.toml = R"(
 [logger]
   [[logger.sinks]]
   kind             = "otlp"
   endpoint         = "https://collector:4317/v1/logs"
   max_export_batch = "lots"
 )",
-         "logger.sinks[0].max_export_batch"},
-        {R"(
+         .key_path = "logger.sinks[0].max_export_batch"},
+        {.toml = R"(
 [logger]
   [[logger.sinks]]
   kind               = "otlp"
   endpoint           = "https://collector:4317/v1/logs"
   max_export_retries = "few"
 )",
-         "logger.sinks[0].max_export_retries"},
+         .key_path = "logger.sinks[0].max_export_retries"},
 #endif  // FIXPP_CONFIG_HAS_OTLP
 #ifdef FIXPP_HAS_SYSLOG
-        {R"(
+        {.toml = R"(
 [logger]
   [[logger.sinks]]
   kind  = "syslog"
   ident = 123
 )",
-         "logger.sinks[0].ident"},
+         .key_path = "logger.sinks[0].ident"},
 #endif  // FIXPP_HAS_SYSLOG
     };
 

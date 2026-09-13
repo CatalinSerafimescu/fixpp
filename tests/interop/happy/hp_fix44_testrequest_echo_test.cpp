@@ -147,9 +147,9 @@ TEST_P(HappyTestRequestEcho, BidirectionalTestRequestEcho) {
     desc.induction = fixpp::interop::AdminInduction::inbound_silence;
     desc.self_deadline_ms = std::chrono::milliseconds{10000};  // FR-010: 10 s
     desc.round_trips = {
-        {"US1-1", "[FIX-SL §4.5.5]"},  // fixpp TestRequest → peer Heartbeat
-        {"US1-2", "[FIX-SL §4.5.1]"},  // peer TestRequest → fixpp Heartbeat
-        {"US1-3", "[FIX-SL §4.5.5]"},  // golden 112 echo correlation
+        {.ac_ref = "US1-1", .spec_ref = "[FIX-SL §4.5.5]"},  // fixpp TestRequest → peer Heartbeat
+        {.ac_ref = "US1-2", .spec_ref = "[FIX-SL §4.5.1]"},  // peer TestRequest → fixpp Heartbeat
+        {.ac_ref = "US1-3", .spec_ref = "[FIX-SL §4.5.5]"},  // golden 112 echo correlation
     };
     desc.acceptance_ids = {"US1-1", "US1-2", "US1-3"};
 

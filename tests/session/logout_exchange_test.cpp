@@ -77,10 +77,9 @@ namespace {
 
 // ── Frame builder helpers ──────────────────────────────────────────────────────
 
-static std::vector<std::byte> make_raw_frame(std::string_view begin_string,
-                                             std::string_view msg_type, std::uint32_t seq,
-                                             std::string_view sender, std::string_view target,
-                                             std::string_view extra_fields = {}) {
+std::vector<std::byte> make_raw_frame(std::string_view begin_string, std::string_view msg_type,
+                                      std::uint32_t seq, std::string_view sender,
+                                      std::string_view target, std::string_view extra_fields = {}) {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -100,7 +99,7 @@ static std::vector<std::byte> make_raw_frame(std::string_view begin_string,
     for (unsigned char c : full) {
         cs += c;
     }
-    cs &= 0xFFu;
+    cs &= 0xFFU;
     char csbuf[8];
     std::snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     full += "10=" + std::string(csbuf) + "\x01";
@@ -113,22 +112,22 @@ static std::vector<std::byte> make_raw_frame(std::string_view begin_string,
     return result;
 }
 
-static std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
-                                               std::string_view sender, std::string_view target,
-                                               int heartbt = 30) {
+std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
+                                        std::string_view sender, std::string_view target,
+                                        int heartbt = 30) {
     std::string extra;
     extra += "98=0\x01";
     extra += "108=" + std::to_string(heartbt) + "\x01";
     return make_raw_frame(begin_string, "A", seq, sender, target, extra);
 }
 
-static std::vector<std::byte> make_logout_frame(std::string_view begin_string, std::uint32_t seq,
-                                                std::string_view sender, std::string_view target) {
+std::vector<std::byte> make_logout_frame(std::string_view begin_string, std::uint32_t seq,
+                                         std::string_view sender, std::string_view target) {
     return make_raw_frame(begin_string, "5", seq, sender, target);
 }
 
 // Extract tag value from a FIX frame (SOH-delimited).
-static std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag) {
+std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = std::to_string(tag) + "=";
     auto pos = wire.find(needle);
@@ -327,7 +326,7 @@ TEST_F(LogoutExchangeTest, FeedInboundSpansTheArenaCopyNotTheCallersBuffer) {
     cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess(engine, cfg);
-    quiesce_on_exit quiesce{ioc, *clock};
+    quiesce_on_exit quiesce{.ioc = ioc, .clock = *clock};
     ASSERT_TRUE(drive_to_active_initiator(sess));
 
     std::future<fixpp::core::expected_t<void>> fut;
@@ -364,7 +363,7 @@ TEST_F(LogoutExchangeTest, GracefulBothDirections) {
     cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess(engine, cfg);
-    quiesce_on_exit quiesce{ioc, *clock};
+    quiesce_on_exit quiesce{.ioc = ioc, .clock = *clock};
     ASSERT_TRUE(drive_to_active_initiator(sess));
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
@@ -377,7 +376,7 @@ TEST_F(LogoutExchangeTest, GracefulBothDirections) {
 
     // There must be at least two outbound frames: Logon(from open) + Logout(from close).
     // T011 (US2): open() emits Logon as sent(0); Logout from close() is sent(1).
-    ASSERT_GE(td.sent_count(), 2u) << "Expected Logon(from open) + Logout(from close) frames";
+    ASSERT_GE(td.sent_count(), 2U) << "Expected Logon(from open) + Logout(from close) frames";
     EXPECT_EQ(extract_field(td.sent(td.sent_count() - 1), 35), "5")
         << "Last outbound frame after close() should be Logout(35=5)";
 
@@ -412,7 +411,7 @@ TEST_F(LogoutExchangeTest, NeverConfirmedForceDisconnect) {
     cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess(engine, cfg);
-    quiesce_on_exit quiesce{ioc, *clock};
+    quiesce_on_exit quiesce{.ioc = ioc, .clock = *clock};
     ASSERT_TRUE(drive_to_active_initiator(sess));
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
@@ -471,7 +470,7 @@ TEST_F(LogoutExchangeTest, ConfigurableTimeoutHonored) {
     cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess(engine, cfg);
-    quiesce_on_exit quiesce{ioc, *clock};
+    quiesce_on_exit quiesce{.ioc = ioc, .clock = *clock};
     ASSERT_TRUE(drive_to_active_initiator(sess));
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
@@ -492,7 +491,7 @@ TEST_F(LogoutExchangeTest, ConfigurableTimeoutHonored) {
         ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss << "ConfigurableTimeoutHonored/stage";
         return;
     }
-    ASSERT_GE(td.sent_count(), 1u) << "Logout frame must have been emitted.";
+    ASSERT_GE(td.sent_count(), 1U) << "Logout frame must have been emitted.";
 
     // Advance clock by 300 ms — past the 200 ms configured timeout but only
     // 15% of the formerly-hardcoded 2000 ms. If hardcoded: still LogoutSent.
@@ -521,7 +520,7 @@ TEST_F(LogoutExchangeTest, NotConnectedInboundLogoutDisconnects) {
     // the same "pre-Active Logout → Disconnected" matrix column as NotConnected.)
     auto cfg3 = make_cfg();
     Session sess3(engine, cfg3);
-    quiesce_on_exit quiesce{ioc, *clock};
+    quiesce_on_exit quiesce{.ioc = ioc, .clock = *clock};
 
     auto r3 = open_session(sess3);
     ASSERT_TRUE(r3.has_value()) << kPumpBudgetMiss
@@ -568,7 +567,7 @@ TEST_F(LogoutExchangeTest, LogonReceivedInboundLogoutDisconnects) {
     cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess2(engine, cfg);
-    quiesce_on_exit quiesce{ioc, *clock};
+    quiesce_on_exit quiesce{.ioc = ioc, .clock = *clock};
 
     auto r = open_session(sess);
     ASSERT_TRUE(r.has_value()) << kPumpBudgetMiss
@@ -589,7 +588,7 @@ TEST_F(LogoutExchangeTest, LogonReceivedInboundLogoutDisconnects) {
     EXPECT_EQ(sess2.state(), fsm_state::Disconnected) << "Active + inbound Logout → Disconnected";
 
     // The engine should have emitted a confirming Logout back.
-    EXPECT_GE(td.sent_count(), 1u) << "Active + inbound Logout should emit outbound Logout";
+    EXPECT_GE(td.sent_count(), 1U) << "Active + inbound Logout should emit outbound Logout";
     if (td.sent_count() >= 1) {
         EXPECT_EQ(extract_field(td.sent(td.sent_count() - 1), 35), "5")
             << "Outbound confirming frame should be Logout(35=5)";
@@ -603,7 +602,7 @@ TEST_F(LogoutExchangeTest, LogoutSentInboundLogoutDisconnects) {
     cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess(engine, cfg);
-    quiesce_on_exit quiesce{ioc, *clock};
+    quiesce_on_exit quiesce{.ioc = ioc, .clock = *clock};
     ASSERT_TRUE(drive_to_active_initiator(sess));
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
@@ -643,7 +642,7 @@ TEST_F(LogoutExchangeTest, ActiveInboundLogoutEmitsConfirmAndDisconnects) {
     cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess(engine, cfg);
-    quiesce_on_exit quiesce{ioc, *clock};
+    quiesce_on_exit quiesce{.ioc = ioc, .clock = *clock};
     ASSERT_TRUE(drive_to_active_initiator(sess));
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
@@ -654,7 +653,7 @@ TEST_F(LogoutExchangeTest, ActiveInboundLogoutEmitsConfirmAndDisconnects) {
     EXPECT_TRUE(ir->has_value());
 
     EXPECT_EQ(sess.state(), fsm_state::Disconnected);
-    ASSERT_GE(td.sent_count(), 1u) << "Should emit confirming Logout";
+    ASSERT_GE(td.sent_count(), 1U) << "Should emit confirming Logout";
     EXPECT_EQ(extract_field(td.sent(td.sent_count() - 1), 35), "5");
 }
 
@@ -664,7 +663,7 @@ TEST_F(LogoutExchangeTest, ActiveInboundLogout_SeqnumOverflow_SurfacesError) {
     cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess(engine, cfg);
-    quiesce_on_exit quiesce{ioc, *clock};
+    quiesce_on_exit quiesce{.ioc = ioc, .clock = *clock};
     ASSERT_TRUE(drive_to_active_initiator(sess));
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
@@ -699,7 +698,7 @@ TEST_F(LogoutExchangeTest, DisconnectedInboundLogoutIgnored) {
     cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess(engine, cfg);
-    quiesce_on_exit quiesce{ioc, *clock};
+    quiesce_on_exit quiesce{.ioc = ioc, .clock = *clock};
     ASSERT_TRUE(drive_to_active_initiator(sess));
 
     // Force disconnect via terminal close.
@@ -730,7 +729,7 @@ TEST_F(LogoutExchangeTest, InitiateLogoutFromActive) {
     cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
     Session sess(engine, cfg);
-    quiesce_on_exit quiesce{ioc, *clock};
+    quiesce_on_exit quiesce{.ioc = ioc, .clock = *clock};
     ASSERT_TRUE(drive_to_active_initiator(sess));
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
@@ -755,7 +754,7 @@ TEST_F(LogoutExchangeTest, InitiateLogoutFromActive) {
     // sent(0) = Logon (from open), sent(1) = Logout (from close).
     // The LogoutSent assertion that used to sit here is now the staging barrier above:
     // same claim, made at the point where it also removes the race.
-    ASSERT_GE(td.sent_count(), 2u) << "Logout frame must be emitted on graceful close";
+    ASSERT_GE(td.sent_count(), 2U) << "Logout frame must be emitted on graceful close";
     EXPECT_EQ(extract_field(td.sent(td.sent_count() - 1), 35), "5")
         << "Emitted frame must be Logout(35=5)";
 
@@ -856,7 +855,7 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
         // Declared after `sess` and `logon_ack`, before the first pump: on
         // every exit path this destructs first, draining `ioc` while `sess`,
         // `clock`, `ioc`, cfg, transport, and the file pool are still alive.
-        fixpp::test_support::quiesce_on_exit quiesce{ioc, *clock};
+        fixpp::test_support::quiesce_on_exit quiesce{.ioc = ioc, .clock = *clock};
 
         // Drive to Active: open() → LogonSent → inbound Logon-ack → Active.
         {

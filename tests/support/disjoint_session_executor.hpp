@@ -82,7 +82,7 @@ private:
     asio::io_context ioc_;
     asio::executor_work_guard<asio::io_context::executor_type> work_;
     std::thread thread_;
-    fixpp::core::session_executor se_{};
+    fixpp::core::session_executor se_;
     bool valid_{false};
 };
 

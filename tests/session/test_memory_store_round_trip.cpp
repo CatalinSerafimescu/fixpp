@@ -28,7 +28,6 @@ using fixpp::session::direction_t;
 using fixpp::session::MemoryStore;
 using fixpp::store_test::byte_collecting_visitor;
 using fixpp::store_test::make_store_script;
-using fixpp::store_test::run_on_pool;
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -136,10 +135,10 @@ TEST(MemoryStoreRoundTrip, NextSeqnumStartsAtOne) {
             auto store = make_store();
             auto r = co_await store.next_seqnum(direction_t::inbound, false);
             EXPECT_TRUE(r.has_value());
-            EXPECT_EQ(*r, 1u);
+            EXPECT_EQ(*r, 1U);
             auto r2 = co_await store.next_seqnum(direction_t::outbound, false);
             EXPECT_TRUE(r2.has_value());
-            EXPECT_EQ(*r2, 1u);
+            EXPECT_EQ(*r2, 1U);
         },
         asio::use_future);
     fut.get();
@@ -155,11 +154,11 @@ TEST(MemoryStoreRoundTrip, NextSeqnumIncrements) {
             // First call (increment=true) returns 1 and advances to 2
             auto r1 = co_await store.next_seqnum(direction_t::outbound, true);
             EXPECT_TRUE(r1.has_value());
-            EXPECT_EQ(*r1, 1u);
+            EXPECT_EQ(*r1, 1U);
             // Second read (increment=false) should be 2
             auto r2 = co_await store.next_seqnum(direction_t::outbound, false);
             EXPECT_TRUE(r2.has_value());
-            EXPECT_EQ(*r2, 2u);
+            EXPECT_EQ(*r2, 2U);
         },
         asio::use_future);
     fut.get();
@@ -182,7 +181,7 @@ TEST(MemoryStoreRoundTrip, ResetClearsAndRewinds) {
             // After reset, next_seqnum should be 1 again
             auto ns = co_await store.next_seqnum(direction_t::outbound, false);
             EXPECT_TRUE(ns.has_value());
-            EXPECT_EQ(*ns, 1u);
+            EXPECT_EQ(*ns, 1U);
         },
         asio::use_future);
     fut.get();

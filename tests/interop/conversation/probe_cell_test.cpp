@@ -91,7 +91,7 @@ public:
 
     template <typename F>
     void write_or_defer(F&& write_call) {
-        std::lock_guard<std::mutex> lk(hello_mu);
+        std::scoped_lock lk(hello_mu);
         if (hello_written) {
             write_call();
         } else {
@@ -100,7 +100,7 @@ public:
     }
 
     void mark_hello_written() {
-        std::lock_guard<std::mutex> lk(hello_mu);
+        std::scoped_lock lk(hello_mu);
         for (auto& fn : pending_before_hello) fn();
         pending_before_hello.clear();
         hello_written = true;

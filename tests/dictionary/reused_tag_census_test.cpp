@@ -69,9 +69,7 @@ namespace {
 
 using fixpp::dict::Dictionary;
 using fixpp_test_support::census_for;
-using fixpp_test_support::DictCensus;
 using fixpp_test_support::kRuntimeDicts;
-using fixpp_test_support::Variant;
 
 // Bounded pugixml scan (T016 question 2): collect, for every raw
 // `<group name="...">` declaration site anywhere in the document, the
@@ -88,7 +86,7 @@ void walk_groups(pugi::xml_node const& node, Dictionary const& dict, DelimiterSc
     for (auto const& child : node.children()) {
         std::string_view const child_name = child.name();
         if (child_name == "group") {
-            auto const group_field_name = child.attribute("name").value();
+            const auto* const group_field_name = child.attribute("name").value();
             auto const no_tag_opt = dict.field_by_name(group_field_name);
             // First <field> child = the wire delimiter for this declaration site.
             std::optional<std::uint16_t> delim_tag;
@@ -286,10 +284,10 @@ TEST(ReusedTagCensus, AllNineRuntimeDictsCensused) {
         if (dc.name == "FIX44.xml") {
             auto const it295 = dc.per_tag.find(295);
             if (it295 != dc.per_tag.end() && it295->second.size() >= 2) {
-                bool has_quote_entry_variant = false, has_quote_cxl_variant = false;
+                bool has_quote_entry_variant = false;
+                bool has_quote_cxl_variant = false;
                 for (auto const& v : it295->second) {
-                    bool const has299 =
-                        std::find(v.members.begin(), v.members.end(), 299) != v.members.end();
+                    bool const has299 = std::ranges::find(v.members, 299) != v.members.end();
                     if (has299)
                         has_quote_entry_variant = true;
                     else

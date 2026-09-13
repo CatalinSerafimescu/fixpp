@@ -138,7 +138,7 @@ TEST(MessageRead, DestroyedHandleReturnsInvalidHandle) {
     // A handle with tag_ == FIXPP_HANDLE_TAG_DEAD
     fixpp_msg dead{};
     dead.tag_ = FIXPP_HANDLE_TAG_DEAD;
-    auto* p = reinterpret_cast<const fixpp_msg_t*>(&dead);
+    const auto* p = reinterpret_cast<const fixpp_msg_t*>(&dead);
 
     const char* out = nullptr;
     size_t len = 0;
@@ -150,7 +150,7 @@ TEST(MessageRead, OutboundFlavorGetStringReturnsInvalidHandle) {
     fixpp_msg outbound_ish{};
     outbound_ish.flavour = FixppMsgFlavour::outbound;
     outbound_ish.view = nullptr;
-    auto* p = reinterpret_cast<const fixpp_msg_t*>(&outbound_ish);
+    const auto* p = reinterpret_cast<const fixpp_msg_t*>(&outbound_ish);
 
     const char* out = nullptr;
     size_t len = 0;

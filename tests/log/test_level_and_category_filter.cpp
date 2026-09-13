@@ -65,7 +65,7 @@ TEST(LogFilter, LevelAndCategoryFilterCombine) {
     sinks.push_back(std::unique_ptr<fixpp::log::Sink>(capture_raw));
 
     fixpp::log::LoggerConfig cfg;
-    cfg.capacity = 64u;  // small ring, large enough for this test
+    cfg.capacity = 64U;  // small ring, large enough for this test
     cfg.on_overflow = fixpp::log::overflow_policy::drop_newest;
 
     auto logger = std::make_unique<fixpp::log::Logger>(std::move(cfg), std::move(sinks));
@@ -87,10 +87,10 @@ TEST(LogFilter, LevelAndCategoryFilterCombine) {
 
     // Record A: cat::session, level=info → should reach the sink.
     logger->enqueue(fixpp::log::Level::info, fixpp::log::cat::session, fmt_session, zeroed_trace_id,
-                    0u, ts, {});
+                    0U, ts, {});
 
     // Record B: cat::wire (disabled) → should be filtered; filter_count++.
-    logger->enqueue(fixpp::log::Level::info, fixpp::log::cat::wire, fmt_wire, zeroed_trace_id, 0u,
+    logger->enqueue(fixpp::log::Level::info, fixpp::log::cat::wire, fmt_wire, zeroed_trace_id, 0U,
                     ts, {});
 
     // Shut down the logger so all in-flight records are processed.
@@ -99,18 +99,18 @@ TEST(LogFilter, LevelAndCategoryFilterCombine) {
     // ── Assertions ───────────────────────────────────────────────────────────
 
     // Exactly 1 record reached the sink.
-    EXPECT_EQ(capture_raw->records.size(), 1u)
+    EXPECT_EQ(capture_raw->records.size(), 1U)
         << "Exactly 1 record should reach the sink (record A via cat::session)";
 
     // No overflow drops.
-    EXPECT_EQ(logger->drop_count(), 0u) << "drop_count() must be 0 — no ring overflow occurred";
+    EXPECT_EQ(logger->drop_count(), 0U) << "drop_count() must be 0 — no ring overflow occurred";
 
     // Exactly 1 filtered record (record B via cat::wire).
-    EXPECT_EQ(logger->filter_count(), 1u)
+    EXPECT_EQ(logger->filter_count(), 1U)
         << "filter_count() must be 1 — exactly one record was category-filtered";
 
     // The record that reached the sink is record A (fmt_session).
-    ASSERT_GE(capture_raw->records.size(), 1u);
+    ASSERT_GE(capture_raw->records.size(), 1U);
     EXPECT_EQ(capture_raw->records[0].format_id, fmt_session)
         << "The record that reached the sink must be record A (cat::session)";
 
@@ -118,7 +118,7 @@ TEST(LogFilter, LevelAndCategoryFilterCombine) {
         << "Captured record must have category == cat::session";
 
     // filter_count and drop_count are SEPARATE (contracts/log-core.md).
-    EXPECT_EQ(logger->timeout_drop_count(), 0u) << "timeout_drop_count() must be 0";
+    EXPECT_EQ(logger->timeout_drop_count(), 0U) << "timeout_drop_count() must be 0";
 }
 
 // ── Verify category re-enable works ─────────────────────────────────────────
@@ -129,7 +129,7 @@ TEST(LogFilter, CategoryReEnable) {
     sinks.push_back(std::unique_ptr<fixpp::log::Sink>(capture_raw));
 
     fixpp::log::LoggerConfig cfg;
-    cfg.capacity = 64u;
+    cfg.capacity = 64U;
 
     auto logger = std::make_unique<fixpp::log::Logger>(std::move(cfg), std::move(sinks));
 
@@ -143,21 +143,21 @@ TEST(LogFilter, CategoryReEnable) {
     constexpr auto fmt_id = static_cast<std::uint32_t>(fixpp::log::detail::crc32_str("msg {}"));
 
     // Enqueue with cat::tls disabled → filtered.
-    logger->enqueue(fixpp::log::Level::info, fixpp::log::cat::tls, fmt_id, zeroed_trace_id, 0u, ts,
-                    {fixpp::log::ArgValue::from_u64(1u)});
+    logger->enqueue(fixpp::log::Level::info, fixpp::log::cat::tls, fmt_id, zeroed_trace_id, 0U, ts,
+                    {fixpp::log::ArgValue::from_u64(1U)});
 
     // Re-enable cat::tls.
     logger->set_category_enabled(fixpp::log::cat::tls, true);
     EXPECT_TRUE(logger->is_category_enabled(fixpp::log::cat::tls));
 
     // Enqueue again with cat::tls enabled → should reach sink.
-    logger->enqueue(fixpp::log::Level::info, fixpp::log::cat::tls, fmt_id, zeroed_trace_id, 0u, ts,
-                    {fixpp::log::ArgValue::from_u64(2u)});
+    logger->enqueue(fixpp::log::Level::info, fixpp::log::cat::tls, fmt_id, zeroed_trace_id, 0U, ts,
+                    {fixpp::log::ArgValue::from_u64(2U)});
 
     (void)logger->shutdown(std::chrono::seconds{5});
 
     // 1 filtered, 1 captured.
-    EXPECT_EQ(logger->filter_count(), 1u);
-    EXPECT_EQ(capture_raw->records.size(), 1u);
-    EXPECT_EQ(logger->drop_count(), 0u);
+    EXPECT_EQ(logger->filter_count(), 1U);
+    EXPECT_EQ(capture_raw->records.size(), 1U);
+    EXPECT_EQ(logger->drop_count(), 0U);
 }

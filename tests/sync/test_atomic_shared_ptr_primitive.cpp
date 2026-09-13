@@ -24,11 +24,11 @@ using AtomicIntPtr = fixpp::sync::atomic_shared_ptr<int>;
 
 // ── Helper: shared-ownership equivalence (mirrors harness) ───────────────────
 
-static bool same_owner(const std::shared_ptr<int>& a, const std::shared_ptr<int>& b) noexcept {
+bool same_owner(const std::shared_ptr<int>& a, const std::shared_ptr<int>& b) noexcept {
     return !a.owner_before(b) && !b.owner_before(a);
 }
 
-static bool equivalent(const std::shared_ptr<int>& a, const std::shared_ptr<int>& b) noexcept {
+bool equivalent(const std::shared_ptr<int>& a, const std::shared_ptr<int>& b) noexcept {
     return a.get() == b.get() && same_owner(a, b);
 }
 

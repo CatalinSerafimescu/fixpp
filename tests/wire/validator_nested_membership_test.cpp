@@ -327,7 +327,7 @@ constexpr std::string_view kReusedTagDivergentDelimXml =
 // source the delimiter from Entity 2 per context, so the assert below now
 // passes on merit rather than enshrining the bug.
 TEST(ValidatorNestedMembership, PerContextDelimiterResidual_L063_3b) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource dict_mr{buf.data(), buf.size()};
     auto dict = fixpp::dict::XmlLoader{}.load_from_string(kReusedTagDivergentDelimXml, &dict_mr);
     auto tv = dict.as_table_view();

@@ -139,9 +139,9 @@ constexpr std::size_t kInboundParseArena = 16384;
 bool slice_has_tag(fixpp::wire::group_slice const& s, std::uint16_t tag) {
     std::string_view sv{reinterpret_cast<char const*>(s.data), s.len};
     std::string const needle = std::to_string(tag) + "=";
-    if (sv.size() >= needle.size() && sv.substr(0, needle.size()) == needle) return true;
+    if (sv.size() >= needle.size() && sv.starts_with(needle)) return true;
     std::string const soh_needle = std::string("\x01") + needle;
-    return sv.find(soh_needle) != std::string_view::npos;
+    return sv.contains(soh_needle);
 }
 
 // One parse+read pass, mirroring parse_and_dispatch_'s exact arena shape.

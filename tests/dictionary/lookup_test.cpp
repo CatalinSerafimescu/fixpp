@@ -114,7 +114,7 @@ class DictionaryLookupFixture : public ::testing::TestWithParam<VersionParam> {
 protected:
     void SetUp() override {
         // 4 MiB arena; no heap allocations expected during Dictionary::load.
-        buf_.resize(4u * 1024u * 1024u);
+        buf_.resize(4U * 1024U * 1024U);
         mr_ = std::make_unique<std::pmr::monotonic_buffer_resource>(buf_.data(), buf_.size());
 
         auto const xml_path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / GetParam().filename;
@@ -123,7 +123,7 @@ protected:
         dict_ = std::make_unique<fixpp::dict::Dictionary>(loader.load(xml_path, mr_.get()));
     }
 
-    fixpp::dict::Dictionary const& dict() const { return *dict_; }
+    [[nodiscard]] fixpp::dict::Dictionary const& dict() const { return *dict_; }
 
 private:
     std::vector<std::byte> buf_;
@@ -172,14 +172,12 @@ TEST_P(DictionaryLookupFixture, MessagesIsBytewiseSorted) {
 
     auto bytewise_less = [](fixpp::dict::MessageEntry const& a,
                             fixpp::dict::MessageEntry const& b) {
-        return std::lexicographical_compare(
-            a.msg_type.begin(), a.msg_type.end(), b.msg_type.begin(), b.msg_type.end(),
-            [](char x, char y) {
-                return static_cast<unsigned char>(x) < static_cast<unsigned char>(y);
-            });
+        return std::ranges::lexicographical_compare(a.msg_type, b.msg_type, [](char x, char y) {
+            return static_cast<unsigned char>(x) < static_cast<unsigned char>(y);
+        });
     };
 
-    EXPECT_TRUE(std::is_sorted(msgs.begin(), msgs.end(), bytewise_less))
+    EXPECT_TRUE(std::ranges::is_sorted(msgs, bytewise_less))
         << "messages() span is not bytewise-sorted in " << GetParam().filename;
 }
 
@@ -234,11 +232,11 @@ TEST_P(DictionaryLookupFixture, FieldRefAndFieldAgreement) {
     }
 
     // Absent tag: 9999 is never declared in any real dictionary
-    auto const absent_fr = dict().field_ref(logon_type, 9999u);
+    auto const absent_fr = dict().field_ref(logon_type, 9999U);
     EXPECT_EQ(absent_fr.rule, field_presence::NotDeclared)
         << "field_ref for absent tag must return NotDeclared for " << GetParam().filename;
 
-    auto const absent_opt = dict().field(logon_type, 9999u);
+    auto const absent_opt = dict().field(logon_type, 9999U);
     EXPECT_FALSE(absent_opt.has_value())
         << "field() for absent tag must be nullopt for " << GetParam().filename;
 }
@@ -299,7 +297,7 @@ TEST_P(DictionaryLookupFixture, ComponentParties) {
         // (component_id is 0-based; parent_component_id is 1-based).
         auto const sag = dict().component("SecAltIDGrp");
         ASSERT_TRUE(sag.has_value()) << "SecAltIDGrp must be declared in " << p.filename;
-        EXPECT_EQ(sag->parent_component_id, static_cast<std::uint16_t>(ins->component_id + 1u))
+        EXPECT_EQ(sag->parent_component_id, static_cast<std::uint16_t>(ins->component_id + 1U))
             << "SecAltIDGrp is nested inside Instrument; "
                "parent_component_id must equal Instrument's 1-based id in "
             << p.filename;
@@ -310,7 +308,7 @@ TEST_P(DictionaryLookupFixture, ComponentParties) {
         << "Unknown component must return nullopt for " << p.filename;
 
     // group() with dummy no_tag must be nullopt
-    EXPECT_FALSE(dict().group(9999u).has_value())
+    EXPECT_FALSE(dict().group(9999U).has_value())
         << "group(9999) must return nullopt for " << p.filename;
 
     // R1 (F1.2): GroupRef payload must be non-zero for declared groups.
@@ -374,7 +372,7 @@ TEST_P(DictionaryLookupFixture, GroupDelimiterTags) {
     }
 
     // group_fields() on a non-existent no_tag must return empty span.
-    EXPECT_TRUE(dict().group_fields(9999u).empty())
+    EXPECT_TRUE(dict().group_fields(9999U).empty())
         << "group_fields(9999) must return empty span in " << GetParam().filename;
 }
 
@@ -429,8 +427,8 @@ TEST_P(DictionaryLookupFixture, RequiredFieldsAndLengthPairs) {
         bool has_sender = false;
         bool has_target = false;
         for (auto const tag : logon_required) {
-            if (tag == 49u) has_sender = true;
-            if (tag == 56u) has_target = true;
+            if (tag == 49U) has_sender = true;
+            if (tag == 56U) has_target = true;
         }
         EXPECT_TRUE(has_sender) << "Logon required_fields() must contain SenderCompID (49) in "
                                 << p.filename;
@@ -447,7 +445,7 @@ TEST_P(DictionaryLookupFixture, RequiredFieldsAndLengthPairs) {
     // every FIX version that declares both. FIXT11 is session-only and may
     // omit RawData; tolerate that. This covers length_pair_data_tag_impl's
     // walk-and-match path.
-    auto const raw_data_tag = dict().length_pair_data_tag(95u);
+    auto const raw_data_tag = dict().length_pair_data_tag(95U);
     if (p.expected_version != fixpp::dict::session_version::vt11) {
         EXPECT_EQ(raw_data_tag, std::uint16_t{96})
             << "length_pair_data_tag(95) must return 96 (RawData) in " << p.filename;
@@ -483,19 +481,19 @@ TEST(DictionaryNoexcept, AllPublicAccessorsAreNoexcept) {
     using D = fixpp::dict::Dictionary const&;
 
     static_assert(noexcept(std::declval<D>().which_session_version()));
-    static_assert(noexcept(std::declval<D>().field_ref({}, 0u)));
+    static_assert(noexcept(std::declval<D>().field_ref({}, 0U)));
     static_assert(noexcept(std::declval<D>().required_fields({})));
-    static_assert(noexcept(std::declval<D>().field_valid_for({}, 0u)));
-    static_assert(noexcept(std::declval<D>().group_first_field(0u)));
-    static_assert(noexcept(std::declval<D>().length_pair_data_tag(0u)));
-    static_assert(noexcept(std::declval<D>().field({}, 0u)));
+    static_assert(noexcept(std::declval<D>().field_valid_for({}, 0U)));
+    static_assert(noexcept(std::declval<D>().group_first_field(0U)));
+    static_assert(noexcept(std::declval<D>().length_pair_data_tag(0U)));
+    static_assert(noexcept(std::declval<D>().field({}, 0U)));
     static_assert(noexcept(std::declval<D>().field_by_name({})));
     static_assert(noexcept(std::declval<D>().component({})));
-    static_assert(noexcept(std::declval<D>().group(0u)));
+    static_assert(noexcept(std::declval<D>().group(0U)));
     static_assert(noexcept(std::declval<D>().messages()));
     // R6: new component_fields / group_fields accessors must be noexcept.
     static_assert(noexcept(std::declval<D>().component_fields({})));
-    static_assert(noexcept(std::declval<D>().group_fields(0u)));
+    static_assert(noexcept(std::declval<D>().group_fields(0U)));
 
     SUCCEED();  // All static_asserts above already enforce the property.
 }
@@ -503,7 +501,7 @@ TEST(DictionaryNoexcept, AllPublicAccessorsAreNoexcept) {
 TEST(DictionaryAccessors, SmallLoadedDictionaryCoversMissAndEmptyPaths) {
     auto dict = load_small_dictionary();
 
-    EXPECT_EQ(dict.group_first_field(9999u), std::uint16_t{0});
+    EXPECT_EQ(dict.group_first_field(9999U), std::uint16_t{0});
 
     auto const empty_component = dict.component("Empty");
     ASSERT_TRUE(empty_component.has_value());
@@ -511,13 +509,13 @@ TEST(DictionaryAccessors, SmallLoadedDictionaryCoversMissAndEmptyPaths) {
     EXPECT_TRUE(dict.component_fields("Empty").empty());
     EXPECT_TRUE(dict.component_fields("MissingComponent").empty());
 
-    auto const empty_group = dict.group(453u);
+    auto const empty_group = dict.group(453U);
     ASSERT_TRUE(empty_group.has_value());
     EXPECT_EQ(empty_group->field_count, std::uint16_t{0});
-    EXPECT_TRUE(dict.group_fields(453u).empty());
-    EXPECT_EQ(dict.group_first_field(454u), std::uint16_t{0});
-    EXPECT_TRUE(dict.group_fields(454u).empty());
-    EXPECT_TRUE(dict.group_fields(9999u).empty());
+    EXPECT_TRUE(dict.group_fields(453U).empty());
+    EXPECT_EQ(dict.group_first_field(454U), std::uint16_t{0});
+    EXPECT_TRUE(dict.group_fields(454U).empty());
+    EXPECT_TRUE(dict.group_fields(9999U).empty());
 
     auto const present_msg_fields = dict.message_fields("D");
     ASSERT_EQ(present_msg_fields.size(), std::size_t{4});
@@ -527,12 +525,12 @@ TEST(DictionaryAccessors, SmallLoadedDictionaryCoversMissAndEmptyPaths) {
     EXPECT_EQ(present_msg_fields[3].tag, std::uint16_t{555});
     EXPECT_TRUE(dict.message_fields("Z").empty());
 
-    EXPECT_EQ(dict.field_name(11u), "ClOrdID");
-    EXPECT_TRUE(dict.field_name(9999u).empty());
+    EXPECT_EQ(dict.field_name(11U), "ClOrdID");
+    EXPECT_TRUE(dict.field_name(9999U).empty());
 
-    EXPECT_TRUE(dict.field_valid_for("D", 11u));
-    EXPECT_FALSE(dict.field_valid_for("D", 9999u));
-    EXPECT_EQ(dict.length_pair_data_tag(35u), std::uint16_t{0});
+    EXPECT_TRUE(dict.field_valid_for("D", 11U));
+    EXPECT_FALSE(dict.field_valid_for("D", 9999U));
+    EXPECT_EQ(dict.length_pair_data_tag(35U), std::uint16_t{0});
 }
 
 TEST(DictionaryAccessors, MovedFromDictionaryUsesNullHandleFallbacks) {
@@ -541,20 +539,20 @@ TEST(DictionaryAccessors, MovedFromDictionaryUsesNullHandleFallbacks) {
     (void)null_dict;
 
     EXPECT_EQ(dict.which_session_version(), fixpp::dict::session_version::Unknown);
-    EXPECT_EQ(dict.field_ref("D", 11u).rule, fixpp::dict::field_presence::NotDeclared);
+    EXPECT_EQ(dict.field_ref("D", 11U).rule, fixpp::dict::field_presence::NotDeclared);
     EXPECT_TRUE(dict.required_fields("D").empty());
-    EXPECT_FALSE(dict.field_valid_for("D", 11u));
-    EXPECT_EQ(dict.group_first_field(9999u), std::uint16_t{0});
-    EXPECT_EQ(dict.length_pair_data_tag(95u), std::uint16_t{0});
-    EXPECT_FALSE(dict.field("D", 11u).has_value());
+    EXPECT_FALSE(dict.field_valid_for("D", 11U));
+    EXPECT_EQ(dict.group_first_field(9999U), std::uint16_t{0});
+    EXPECT_EQ(dict.length_pair_data_tag(95U), std::uint16_t{0});
+    EXPECT_FALSE(dict.field("D", 11U).has_value());
     EXPECT_FALSE(dict.field_by_name("ClOrdID").has_value());
     EXPECT_FALSE(dict.component("Instrument").has_value());
-    EXPECT_FALSE(dict.group(9999u).has_value());
+    EXPECT_FALSE(dict.group(9999U).has_value());
     EXPECT_TRUE(dict.messages().empty());
     EXPECT_TRUE(dict.component_fields("Instrument").empty());
-    EXPECT_TRUE(dict.group_fields(9999u).empty());
+    EXPECT_TRUE(dict.group_fields(9999U).empty());
     EXPECT_TRUE(dict.message_fields("D").empty());
-    EXPECT_TRUE(dict.field_name(11u).empty());
+    EXPECT_TRUE(dict.field_name(11U).empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -570,7 +568,7 @@ INSTANTIATE_TEST_SUITE_P(
             .expected_version = fixpp::dict::session_version::v42,
             .required_msg_types = {"D", "8", "A", "0", "3"},
             .forbidden_msg_types = {},        // no cross-version assertions for 4.2
-            .required_group_no_tags = {78u},  // NoAllocs (78) present in 4.2
+            .required_group_no_tags = {78U},  // NoAllocs (78) present in 4.2
                                               // NoPartyIDs(453) added in 4.3 — omit
                                               // NoLegs(555) added in 4.4 — omit
             .has_clordid = true,
@@ -585,7 +583,7 @@ INSTANTIATE_TEST_SUITE_P(
             .expected_version = fixpp::dict::session_version::v44,
             .required_msg_types = {"D", "8", "A", "0", "3"},
             .forbidden_msg_types = {},
-            .required_group_no_tags = {453u, 78u, 555u},  // NoPartyIDs, NoAllocs, NoLegs
+            .required_group_no_tags = {453U, 78U, 555U},  // NoPartyIDs, NoAllocs, NoLegs
             .has_clordid = true,
             .parties_expected = std::optional<bool>{true},
             .has_instrument = true,
@@ -596,7 +594,7 @@ INSTANTIATE_TEST_SUITE_P(
             .expected_version = fixpp::dict::session_version::v50sp2,
             .required_msg_types = {"D", "8", "V", "W"},
             .forbidden_msg_types = {},
-            .required_group_no_tags = {453u, 78u, 555u},
+            .required_group_no_tags = {453U, 78U, 555U},
             .has_clordid = true,
             .parties_expected = std::optional<bool>{true},
             .has_instrument = true,
@@ -607,7 +605,7 @@ INSTANTIATE_TEST_SUITE_P(
             .expected_version = fixpp::dict::session_version::vt11,
             .required_msg_types = {"A", "5", "0", "1", "2", "3", "4"},
             .forbidden_msg_types = {"D"},      // no NewOrderSingle in session-only dict
-            .required_group_no_tags = {627u},  // NoHops
+            .required_group_no_tags = {627U},  // NoHops
             .has_clordid = false,              // no application fields in FIXT11
             // R5 fix: FIXT11 only declares HopGrp and MsgTypeGrp components;
             // no Parties (verified against dictionaries/FIXT11.xml's `<components>` block: only
@@ -654,7 +652,7 @@ INSTANTIATE_TEST_SUITE_P(
             .expected_version = fixpp::dict::session_version::v43,
             .required_msg_types = {"0", "A", "D", "8", "W"},  // Parties/Instrument/MDIR era
             .forbidden_msg_types = {},
-            .required_group_no_tags = {453u},  // NoPartyIDs — introduced in 4.3
+            .required_group_no_tags = {453U},  // NoPartyIDs — introduced in 4.3
             .has_clordid = true,
             .parties_expected = std::optional<bool>{true},
             .has_instrument = true,
@@ -667,7 +665,7 @@ INSTANTIATE_TEST_SUITE_P(
             .expected_version = fixpp::dict::session_version::v50,
             .required_msg_types = {"D", "8", "W"},
             .forbidden_msg_types = {"A", "0"},  // session split → FIXT.1.1
-            .required_group_no_tags = {453u},
+            .required_group_no_tags = {453U},
             .has_clordid = true,
             .parties_expected = std::optional<bool>{true},
             .has_instrument = true,
@@ -678,7 +676,7 @@ INSTANTIATE_TEST_SUITE_P(
             .expected_version = fixpp::dict::session_version::v50sp1,
             .required_msg_types = {"D", "8", "W"},
             .forbidden_msg_types = {"A", "0"},
-            .required_group_no_tags = {453u},
+            .required_group_no_tags = {453U},
             .has_clordid = true,
             .parties_expected = std::optional<bool>{true},
             .has_instrument = true,

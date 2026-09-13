@@ -58,7 +58,6 @@ using fixpp::dict::table_view;
 using fixpp::wire::access_mode;
 using fixpp::wire::dictionary_driven_validator;
 using fixpp::wire::group_slice;
-using fixpp::wire::MessageView;
 using fixpp::wire::Parser;
 
 // ── Shared wire-frame helpers (mirrors consume_group_nested_delim_test.cpp) ──
@@ -473,7 +472,7 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Leg3Valid
 // structural.
 // ============================================================================
 TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_PopulatedContextStore) {
-    std::vector<std::byte> dict_buf(2u * 1024u * 1024u);
+    std::vector<std::byte> dict_buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource dict_mr{dict_buf.data(), dict_buf.size()};
     auto dict = fixpp::dict::XmlLoader{}.load_from_string(kNestedDelimContextXml, &dict_mr);
     auto tv = dict.as_table_view();
@@ -852,7 +851,7 @@ std::vector<std::byte> make_divergent_frame() {
 }  // namespace
 
 TEST(TypedReadSplitAgreement, OutOfScopeWireProbesUnchanged) {
-    std::vector<std::byte> dict_buf(2u * 1024u * 1024u);
+    std::vector<std::byte> dict_buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource dict_mr{dict_buf.data(), dict_buf.size()};
     auto dict = fixpp::dict::XmlLoader{}.load_from_string(kDivergentDelimXml, &dict_mr);
     auto tv = dict.as_table_view();
@@ -894,8 +893,8 @@ TEST(TypedReadSplitAgreement, OutOfScopeWireProbesUnchanged) {
     //     identical decisions at every entry.
     std::vector<std::uint16_t> ctx_sorted(ctx_members.begin(), ctx_members.end());
     std::vector<std::uint16_t> bare_sorted(bare_members.begin(), bare_members.end());
-    std::sort(ctx_sorted.begin(), ctx_sorted.end());
-    std::sort(bare_sorted.begin(), bare_sorted.end());
+    std::ranges::sort(ctx_sorted);
+    std::ranges::sort(bare_sorted);
     ASSERT_EQ(ctx_sorted, bare_sorted)
         << "exclusion 2: this context must not be POLLUTED or newly registering — a member-set "
            "delta would move the extent independently of the delimiter, and that movement is "
@@ -906,7 +905,7 @@ TEST(TypedReadSplitAgreement, OutOfScopeWireProbesUnchanged) {
     //     GLOBAL first field (201) to E's member set. It is already a declared
     //     member, so the injection was provably a no-op on this fixture — the
     //     precise statement of "divergent but not polluted".
-    ASSERT_NE(std::find(ctx_sorted.begin(), ctx_sorted.end(), std::uint16_t{201}), ctx_sorted.end())
+    ASSERT_NE(std::ranges::find(ctx_sorted, std::uint16_t{201}), ctx_sorted.end())
         << "exclusion 2: the global first field must already be a declared member of E's group, "
            "so the removed injection cannot have changed this member set.";
     // (d) "every nested context the extent walk descends through" is EMPTY:
@@ -1126,7 +1125,7 @@ constexpr std::string_view kTwoGroupDivergentXml =
     R"(</messages></fix>)";
 
 TEST(TypedReadSplitAgreement, MaterializingADivergentGroupDoesNotMoveAnotherGroupsSlices) {
-    std::vector<std::byte> dict_buf(2u * 1024u * 1024u);
+    std::vector<std::byte> dict_buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource dict_mr{dict_buf.data(), dict_buf.size()};
     auto dict = fixpp::dict::XmlLoader{}.load_from_string(kTwoGroupDivergentXml, &dict_mr);
     auto tv = dict.as_table_view();

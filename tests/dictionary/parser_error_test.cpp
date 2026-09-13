@@ -21,7 +21,7 @@
 namespace {
 
 // Each test allocates its own monotonic buffer so PMR state never leaks.
-constexpr std::size_t kBufSize = 64u * 1024u;
+constexpr std::size_t kBufSize = 64U * 1024U;
 
 // Helper: assert that load_from_string with `xml` throws dict::xml_parse_error,
 // has code() == fixpp::core::error::dict_xml_parse_failed, and that what()

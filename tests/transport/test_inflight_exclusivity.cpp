@@ -266,7 +266,8 @@ TEST(InflightExclusivity, ReadOverlapReturnImmediately) {
 
     auto strand = asio::make_strand(ioc.get_executor());
 
-    std::byte buf_a{0}, buf_b{0};
+    std::byte buf_a{0};
+    std::byte buf_b{0};
 
     // Coroutine A: read (server doesn't write → suspends).
     asio::co_spawn(

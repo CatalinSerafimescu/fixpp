@@ -77,7 +77,10 @@ using MV = fixpp::wire::MessageView<fixpp::wire::access_mode::Index>;
 TEST(VlatestDispatchExclusion076, SharedMsgTypeResolvesToV50sp2NotVlatest) {
     std::pmr::monotonic_buffer_resource arena;
     MV mv;
-    version_profile const profile{session_version::vt11, application_version::v50sp2, true, 0};
+    version_profile const profile{.session = session_version::vt11,
+                                  .default_appl = application_version::v50sp2,
+                                  .has_per_message_override = true,
+                                  ._reserved = 0};
 
     auto r = fixpp::dict::dispatch::dispatch_application(mv, "D", application_version::v50sp2,
                                                          profile, &arena);
@@ -105,7 +108,10 @@ TEST(VlatestDispatchExclusion076, FixLatestOnlyMsgTypeHitsFailLoudDefault) {
     // "EC".."ES" (SettlementStatusRequest..TradingSessionStatusAck).
     std::pmr::monotonic_buffer_resource arena;
     MV mv;
-    version_profile const profile{session_version::vt11, application_version::v50sp2, true, 0};
+    version_profile const profile{.session = session_version::vt11,
+                                  .default_appl = application_version::v50sp2,
+                                  .has_per_message_override = true,
+                                  ._reserved = 0};
 
     auto r = fixpp::dict::dispatch::dispatch_application(mv, "EC", application_version::v50sp2,
                                                          profile, &arena);

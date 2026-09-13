@@ -67,14 +67,13 @@ using namespace std::chrono_literals;
 
 namespace {
 
-static std::string field(int tag, std::string_view val) {
+std::string field(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
-static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
-                                             std::string_view msg_type, std::uint32_t seq,
-                                             std::string_view sender, std::string_view target,
-                                             std::string_view extra = {}) {
+std::vector<std::byte> make_fix_frame(std::string_view begin_string, std::string_view msg_type,
+                                      std::uint32_t seq, std::string_view sender,
+                                      std::string_view target, std::string_view extra = {}) {
     std::string body;
     body += field(35, msg_type);
     body += field(34, std::to_string(seq));
@@ -101,9 +100,8 @@ static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
 }
 
 // make_logon with optional ResetSeqNumFlag(141)=Y
-static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
-                                         std::string_view t, int hbt = 30,
-                                         bool reset_seqnum = false) {
+std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
+                                  std::string_view t, int hbt = 30, bool reset_seqnum = false) {
     std::string extra;
     extra += field(98, "0");
     extra += field(108, std::to_string(hbt));
@@ -118,9 +116,9 @@ struct OutboundCapture {
     }
 };
 
-static bool has_session_reset_event(const fixpp::session::Session& sess) {
+bool has_session_reset_event(const fixpp::session::Session& sess) {
     auto events = sess.recent_events();
-    return std::any_of(events.begin(), events.end(), [](const fixpp::session::SessionEvent& ev) {
+    return std::ranges::any_of(events, [](const fixpp::session::SessionEvent& ev) {
         return std::holds_alternative<fixpp::session::session_event_sequence_numbers_reset>(ev);
     });
 }
@@ -128,12 +126,12 @@ static bool has_session_reset_event(const fixpp::session::Session& sess) {
 // frame_has_141Y: check whether a raw FIX frame contains "141=Y\x01".
 // Used to verify that the outbound reply Logon echoes ResetSeqNumFlag(141)=Y.
 // (RC#C-2 gate-b/r2 false-pass closure — outbound-frame assertion.)
-static bool frame_has_141Y(const std::vector<std::byte>& frame) {
+bool frame_has_141Y(const std::vector<std::byte>& frame) {
     static constexpr std::string_view needle = "141=Y\x01";
     if (frame.size() < needle.size()) return false;
     const auto* data = reinterpret_cast<const char*>(frame.data());
     std::string_view sv(data, frame.size());
-    return sv.find(needle) != std::string_view::npos;
+    return sv.contains(needle);
 }
 
 }  // namespace
@@ -357,12 +355,13 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Initiator_PeerConfirms141Y) 
     std::size_t reset_events = 0;
     bool by_peer_request_correct = false;
     for (const auto& ev : events) {
-        if (auto* r = std::get_if<fixpp::session::session_event_sequence_numbers_reset>(&ev)) {
+        if (const auto* r =
+                std::get_if<fixpp::session::session_event_sequence_numbers_reset>(&ev)) {
             ++reset_events;
             by_peer_request_correct = !r->by_peer_request;  // must be false (we initiated)
         }
     }
-    EXPECT_EQ(reset_events, 1u)
+    EXPECT_EQ(reset_events, 1U)
         << "bilateral_strict initiator confirm: exactly one sequence_numbers_reset event.";
     EXPECT_TRUE(by_peer_request_correct)
         << "FR-018: bilateral_strict initiator-confirm → by_peer_request must be false "
@@ -704,7 +703,8 @@ TEST_F(ResetSeqnumPolicyMatrixTest, Unilateral_Acceptor_PeerSends141Y_NoOurFlag)
     auto events = sess.recent_events();
     bool found = false;
     for (const auto& ev : events) {
-        if (auto* r = std::get_if<fixpp::session::session_event_sequence_numbers_reset>(&ev)) {
+        if (const auto* r =
+                std::get_if<fixpp::session::session_event_sequence_numbers_reset>(&ev)) {
             EXPECT_TRUE(r->by_peer_request)
                 << "unilateral: by_peer_request must be true when peer sent 141=Y.";
             found = true;

@@ -26,7 +26,7 @@ static const std::set<error> k017_expected_set = {
 };
 
 // Last pre-017 enumerator (015 boundary): slot 121.
-static const std::uint8_t k_slot_before_017 = 121u;
+static const std::uint8_t k_slot_before_017 = 121U;
 
 // Expected slot for each 017 enumerator.
 struct SlotCase {
@@ -36,13 +36,15 @@ struct SlotCase {
 };
 
 static const SlotCase k017_slots[] = {
-    {error::log_queue_overflow, 122, "log_queue_overflow"},
-    {error::log_sink_open_failed, 123, "log_sink_open_failed"},
-    {error::log_sink_write_failed, 124, "log_sink_write_failed"},
-    {error::log_sink_flush_failed, 125, "log_sink_flush_failed"},
-    {error::log_drain_timeout, 126, "log_drain_timeout"},
-    {error::otel_export_failed, 127, "otel_export_failed"},
-    {error::otel_provider_init_failed, 128, "otel_provider_init_failed"},
+    {.e = error::log_queue_overflow, .expected_slot = 122, .name = "log_queue_overflow"},
+    {.e = error::log_sink_open_failed, .expected_slot = 123, .name = "log_sink_open_failed"},
+    {.e = error::log_sink_write_failed, .expected_slot = 124, .name = "log_sink_write_failed"},
+    {.e = error::log_sink_flush_failed, .expected_slot = 125, .name = "log_sink_flush_failed"},
+    {.e = error::log_drain_timeout, .expected_slot = 126, .name = "log_drain_timeout"},
+    {.e = error::otel_export_failed, .expected_slot = 127, .name = "otel_export_failed"},
+    {.e = error::otel_provider_init_failed,
+     .expected_slot = 128,
+     .name = "otel_provider_init_failed"},
 };
 
 // ── Exact-set equality (MISSING + UNEXPECTED diff) ──────────────────────────
@@ -58,7 +60,7 @@ TEST(Error017Completeness, ExactSetEquality) {
     for (error e : k017_expected_set) {
         named_slots.insert(static_cast<std::uint8_t>(e));
     }
-    const std::set<std::uint8_t> expected_slots = {122u, 123u, 124u, 125u, 126u, 127u, 128u};
+    const std::set<std::uint8_t> expected_slots = {122U, 123U, 124U, 125U, 126U, 127U, 128U};
     EXPECT_EQ(named_slots, expected_slots)
         << "the 7 named 017 enumerators must occupy exactly slots 122-128 "
            "(no alias, none outside the block)";
@@ -79,7 +81,7 @@ TEST(Error017Completeness, ExactSetEquality) {
     // (app_payload_malformed=131) — the boundary moved 128→130→131. The 019/020
     // error-completeness tests (tests/core/test_0{19,20}_error_completeness.cpp)
     // pin those slots exactly. [const §X.4] append-only review + abidiff gate govern.
-    EXPECT_EQ(fixpp::core::error_message(static_cast<error>(132u)),
+    EXPECT_EQ(fixpp::core::error_message(static_cast<error>(132U)),
               std::string_view{"unknown error"})
         << "slot 132 carries a message — a message-bearing enumerator was added "
            "beyond the 020 boundary (slot 131) (see [const §X.4] append-only review)";
@@ -125,5 +127,5 @@ TEST(Error017Completeness, ToStringNonEmpty) {
 TEST(Error017Completeness, AppendOnlySlot121Unchanged) {
     // [const §X.4] non-renumbering contract: slot 121 must remain
     // session_unknown_acceptor_session.
-    EXPECT_EQ(static_cast<std::uint8_t>(error::session_unknown_acceptor_session), 121u);
+    EXPECT_EQ(static_cast<std::uint8_t>(error::session_unknown_acceptor_session), 121U);
 }

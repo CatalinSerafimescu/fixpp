@@ -387,7 +387,7 @@ Dictionary load_appl_ver_id_store_only_dict(std::pmr::memory_resource* mr) {
 }
 
 TEST(ValidatorTypeCheck, ValidateFieldStoreOnlyApplVerIdOutOfDomainRejected) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto dict = load_appl_ver_id_store_only_dict(&mr);
     auto tv = dict.as_table_view();
@@ -402,7 +402,7 @@ TEST(ValidatorTypeCheck, ValidateFieldStoreOnlyApplVerIdOutOfDomainRejected) {
 }
 
 TEST(ValidatorTypeCheck, ValidateFieldStoreOnlyApplVerIdInDomainAccepted) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto dict = load_appl_ver_id_store_only_dict(&mr);
     auto tv = dict.as_table_view();

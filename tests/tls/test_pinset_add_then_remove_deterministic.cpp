@@ -50,9 +50,9 @@ TEST(PinsetDeterministic, MonotonicSnapshotPublication) {
     {
         auto snap = ps.snapshot();
         ASSERT_NE(snap, nullptr);
-        EXPECT_EQ(snap->size(), 0u) << "initial snapshot must be empty";
+        EXPECT_EQ(snap->size(), 0U) << "initial snapshot must be empty";
     }
-    EXPECT_EQ(ps.size(), 0u);
+    EXPECT_EQ(ps.size(), 0U);
 
     // (2) add succeeds.
     auto add_r = ps.add(make_cert(kFp, "CN=rotate-me"));
@@ -62,7 +62,7 @@ TEST(PinsetDeterministic, MonotonicSnapshotPublication) {
     {
         auto snap = ps.snapshot();
         ASSERT_NE(snap, nullptr);
-        ASSERT_EQ(snap->size(), 1u) << "post-add snapshot must contain exactly 1 pin";
+        ASSERT_EQ(snap->size(), 1U) << "post-add snapshot must contain exactly 1 pin";
         EXPECT_EQ((*snap)[0].sha256, kFp);
         EXPECT_EQ((*snap)[0].subject_dn, "CN=rotate-me");
     }
@@ -75,9 +75,9 @@ TEST(PinsetDeterministic, MonotonicSnapshotPublication) {
     {
         auto snap = ps.snapshot();
         ASSERT_NE(snap, nullptr);
-        EXPECT_EQ(snap->size(), 0u) << "post-remove snapshot must be empty";
+        EXPECT_EQ(snap->size(), 0U) << "post-remove snapshot must be empty";
     }
-    EXPECT_EQ(ps.size(), 0u);
+    EXPECT_EQ(ps.size(), 0U);
     EXPECT_FALSE(ps.find(kFp).found());
 }
 
@@ -90,18 +90,18 @@ TEST(PinsetDeterministic, SnapshotImmutableAfterRemove) {
     // Capture snapshot before remove.
     auto pre_snap = ps.snapshot();
     ASSERT_NE(pre_snap, nullptr);
-    ASSERT_EQ(pre_snap->size(), 1u);
+    ASSERT_EQ(pre_snap->size(), 1U);
 
     // Now remove.
     ASSERT_TRUE(ps.remove(kFp).has_value());
 
     // The pre-remove snapshot is unchanged (immutable per [2g §6.2]).
-    EXPECT_EQ(pre_snap->size(), 1u) << "pre-remove snapshot must not be mutated";
+    EXPECT_EQ(pre_snap->size(), 1U) << "pre-remove snapshot must not be mutated";
     EXPECT_EQ((*pre_snap)[0].sha256, kFp);
 
     // The live snapshot is updated.
     auto post_snap = ps.snapshot();
-    EXPECT_EQ(post_snap->size(), 0u);
+    EXPECT_EQ(post_snap->size(), 0U);
 }
 
 // ── SAN entries are PMR-copied into the pin on add() ────────────────────────
@@ -121,7 +121,7 @@ TEST(PinsetDeterministic, AddWithSanCopiesIntoSnapshotOwnedStorage) {
     ASSERT_TRUE(ps.add(cert).has_value());
 
     auto snap = ps.snapshot();
-    ASSERT_EQ(snap->size(), 1u);
+    ASSERT_EQ(snap->size(), 1U);
     auto const& p = (*snap)[0];
     EXPECT_EQ(p.sha256, kFp);
     ASSERT_EQ(p.san_dns.size(), dns_sans.size());

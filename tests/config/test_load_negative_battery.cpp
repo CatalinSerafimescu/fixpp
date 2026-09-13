@@ -77,7 +77,7 @@ fixpp::config::LoadResult load(const std::filesystem::path& path) {
 
 bool has_diag(const std::vector<fixpp::config::LoadDiagnostic>& diags,
               fixpp::config::reason_class expected_reason, std::string_view expected_key_path) {
-    return std::any_of(diags.begin(), diags.end(), [&](const fixpp::config::LoadDiagnostic& d) {
+    return std::ranges::any_of(diags, [&](const fixpp::config::LoadDiagnostic& d) {
         return d.reason == expected_reason && d.key_path == expected_key_path;
     });
 }
@@ -108,9 +108,8 @@ TEST(LoadNegativeBattery, T018_ParseError) {
     EXPECT_TRUE(found) << "expected a parse_error diagnostic with key_path=\"\"";
 
     // Location must be populated (line>0) — the parse failure has a source region.
-    auto it = std::find_if(diags.begin(), diags.end(), [](const fixpp::config::LoadDiagnostic& d) {
-        return d.reason == RC::parse_error;
-    });
+    auto it = std::ranges::find_if(
+        diags, [](const fixpp::config::LoadDiagnostic& d) { return d.reason == RC::parse_error; });
     ASSERT_NE(it, diags.end());
     EXPECT_GT(it->location.line, std::uint32_t{0})
         << "parse_error diagnostic must carry source location (line>0)";
@@ -513,7 +512,7 @@ TEST(LoadNegativeBattery, T019_CollectAll_ExactSet) {
     // Report missing diagnostics (present in expected, absent in actual).
     std::vector<KRP> missing_diags;
     for (const auto& e : expected) {
-        if (actual.find(e) == actual.end()) {
+        if (!actual.contains(e)) {
             missing_diags.push_back(e);
         }
     }
@@ -522,7 +521,7 @@ TEST(LoadNegativeBattery, T019_CollectAll_ExactSet) {
     // Report unexpected diagnostics (present in actual, absent in expected).
     std::vector<KRP> extra_diags;
     for (const auto& a : actual) {
-        if (expected.find(a) == expected.end()) {
+        if (!expected.contains(a)) {
             extra_diags.push_back(a);
         }
     }
@@ -1073,11 +1072,11 @@ TEST(LoadNegativeBattery, Cov_CompidAuthNotArray) {
     ASSERT_FALSE(result.has_value());
     using RC = fixpp::config::reason_class;
     // The key_path is built as kp(key_prefix, "compid_authorization_policy.PARTNER_A")
-    bool found = std::any_of(
-        result.error().begin(), result.error().end(), [](const fixpp::config::LoadDiagnostic& d) {
-            return d.reason == RC::malformed_value &&
-                   d.key_path.find("compid_authorization_policy") != std::string::npos;
-        });
+    bool found = std::any_of(result.error().begin(), result.error().end(),
+                             [](const fixpp::config::LoadDiagnostic& d) {
+                                 return d.reason == RC::malformed_value &&
+                                        d.key_path.contains("compid_authorization_policy");
+                             });
     EXPECT_TRUE(found)
         << "expected malformed_value for compid_authorization_policy non-array value";
 }
@@ -1612,7 +1611,7 @@ TEST(LoadNegativeBattery, T021_PasswordRedaction_SecretAbsent) {
 
     // Find the password diagnostic.
     using RC = fixpp::config::reason_class;
-    auto it = std::find_if(diags.begin(), diags.end(), [](const fixpp::config::LoadDiagnostic& d) {
+    auto it = std::ranges::find_if(diags, [](const fixpp::config::LoadDiagnostic& d) {
         return d.key_path == "session[0].password";
     });
     ASSERT_NE(it, diags.end()) << "expected a diagnostic at key_path=\"session[0].password\"";

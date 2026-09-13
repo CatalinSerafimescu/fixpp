@@ -248,8 +248,8 @@ protected:
     }
 
     // Find nth frame (0-based) with matching MsgType, or nullptr.
-    const std::vector<std::byte>* find_frame_with_type(std::string_view msg_type,
-                                                       std::size_t skip = 0) const {
+    [[nodiscard]] const std::vector<std::byte>* find_frame_with_type(std::string_view msg_type,
+                                                                     std::size_t skip = 0) const {
         std::size_t count = 0;
         for (const auto& f : captured_frames) {
             auto mt = extract_msg_type(f);
@@ -491,7 +491,8 @@ TEST_F(AdminDistinctNowTest, Reject_DistinctNow_TwoRejectsHaveDistinctSendingTim
 TEST_F(AdminDistinctNowTest, Logout_DistinctNow_TwoLogoutsHaveDistinctSendingTime) {
     // FR-007: Logout builder stamps SendingTime from effective_clock.now().
     // Session 1: emit Logout(35=5) at t=0.
-    std::vector<std::vector<std::byte>> captured1, captured2;
+    std::vector<std::vector<std::byte>> captured1;
+    std::vector<std::vector<std::byte>> captured2;
 
     {
         SessionConfig cfg1 = make_cfg(30);
@@ -529,7 +530,8 @@ TEST_F(AdminDistinctNowTest, Logout_DistinctNow_TwoLogoutsHaveDistinctSendingTim
     }
 
     // Find Logout frames from each session.
-    std::string st1, st2;
+    std::string st1;
+    std::string st2;
     for (const auto& f : captured1) {
         if (extract_msg_type(f) == "5") {
             st1 = extract_sending_time(f);
@@ -556,7 +558,8 @@ TEST_F(AdminDistinctNowTest, Logout_DistinctNow_TwoLogoutsHaveDistinctSendingTim
 // Their SendingTime values must differ.
 TEST_F(AdminDistinctNowTest, Logon_DistinctNow_TwoInitiatorLogonsHaveDistinctSendingTime) {
     // FR-007: Logon builder (open() initiator path) stamps SendingTime from clock.
-    std::string st1, st2;
+    std::string st1;
+    std::string st2;
 
     {
         std::vector<std::vector<std::byte>> cap1;

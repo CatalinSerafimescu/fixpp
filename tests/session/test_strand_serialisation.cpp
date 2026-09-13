@@ -35,7 +35,6 @@ namespace {
 using fixpp::core::EngineConfig;
 using fixpp::session::Session;
 using fixpp::session::SessionConfig;
-using fixpp::session::threading_mode;
 using fixpp::testsupport::fsm_label;
 using fixpp::testsupport::observation_log;
 using fixpp::testsupport::observed_callback;
@@ -48,7 +47,7 @@ EngineConfig make_engine(asio::any_io_executor ex) {
 
 // Shared minimal dictionary for all open_session calls — T050 requires a
 // non-null dictionary at Session::open (FR-018 / I-13 / seam 13).
-static std::shared_ptr<const fixpp::dict::Dictionary> g_dict =
+std::shared_ptr<const fixpp::dict::Dictionary> g_dict =
     fixpp::test_support::make_minimal_dictionary();
 
 void open_session(Session& s, asio::thread_pool& pool) {
@@ -120,7 +119,8 @@ TEST(SeamStrandSerialisation, CrossSessionConcurrentSamEngineExecutor) {
     open_session(a, pool);
     open_session(b, pool);
 
-    observation_log la, lb;
+    observation_log la;
+    observation_log lb;
     std::atomic<bool> a_inside{false};
     std::atomic<bool> overlap_across{false};
     std::atomic<int> done{0};

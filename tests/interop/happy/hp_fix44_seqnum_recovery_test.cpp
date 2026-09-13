@@ -156,9 +156,11 @@ TEST_P(HappySeqnumRecoveryInbound, GapInductionResendRequestAndReturn) {
     desc.induction = fixpp::interop::AdminInduction::withhold_frame;
     desc.self_deadline_ms = std::chrono::milliseconds{30000};  // FR-010: 30 s
     desc.round_trips = {
-        {"US3-1", "[FIX-SL §4.5.3]"},  // fixpp detects gap, emits ResendRequest(7/16)
-        {"US3-2", "[FIX-SL §4.8.5]"},  // QFJ replies with GapFill/replay; fixpp applies
-        {"US3-4", "[FIX-SL §4.8.2]"},  // both peers at Active, no prefix loss
+        {.ac_ref = "US3-1",
+         .spec_ref = "[FIX-SL §4.5.3]"},  // fixpp detects gap, emits ResendRequest(7/16)
+        {.ac_ref = "US3-2",
+         .spec_ref = "[FIX-SL §4.8.5]"},  // QFJ replies with GapFill/replay; fixpp applies
+        {.ac_ref = "US3-4", .spec_ref = "[FIX-SL §4.8.2]"},  // both peers at Active, no prefix loss
     };
     desc.acceptance_ids = {"US3-1", "US3-2", "US3-4"};
 

@@ -75,7 +75,7 @@ std::vector<std::byte> frame_from_body(std::string_view begin_string, const std:
 bool any_frame_contains(const OutboundCapture& cap, std::string_view needle) {
     for (const auto& f : cap.frames) {
         std::string wire(reinterpret_cast<const char*>(f.data()), f.size());
-        if (wire.find(std::string(needle)) != std::string::npos) {
+        if (wire.contains(std::string(needle))) {
             return true;
         }
     }
@@ -87,7 +87,7 @@ bool any_frame_contains(const OutboundCapture& cap, std::string_view needle) {
 // witness can't be satisfied by the token appearing in some unrelated frame.)
 bool frame_has(const std::vector<std::byte>& f, std::string_view needle) {
     std::string wire(reinterpret_cast<const char*>(f.data()), f.size());
-    return wire.find(std::string(needle)) != std::string::npos;
+    return wire.contains(std::string(needle));
 }
 
 using FixTcCoverageGaps = ParityAcceptorFixture;

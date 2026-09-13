@@ -71,7 +71,7 @@ namespace {
 
 // Build a decimal_t from a decimal string literal via parse (same pattern as
 // test_business_messages_build.cpp::make_decimal).
-static decimal_t make_dec(std::string_view sv, std::pmr::memory_resource* mr) {
+decimal_t make_dec(std::string_view sv, std::pmr::memory_resource* mr) {
     std::vector<std::byte> bytes;
     bytes.reserve(sv.size());
     for (char c : sv) bytes.push_back(static_cast<std::byte>(c));
@@ -125,9 +125,9 @@ public:
     std::array<std::byte, 256> cap_arena_buf{};
     std::pmr::monotonic_buffer_resource cap_arena{cap_arena_buf.data(), cap_arena_buf.size(),
                                                   std::pmr::null_memory_resource()};
-    decimal_t cap_avg_px{};
-    decimal_t cap_cum_qty{};
-    decimal_t cap_leaves_qty{};
+    decimal_t cap_avg_px;
+    decimal_t cap_cum_qty;
+    decimal_t cap_leaves_qty;
 
     // fromApp: respond to NewOrderSingle (acceptor) or capture ExecRpt (initiator).
     fixpp::core::expected_t<void> fromApp(const MessageView<access_mode::Index>& msg,
@@ -135,7 +135,7 @@ public:
         // Initiator-side: capture an inbound ExecutionReport (35=8).
         if (msg.msg_type() == "8") {
             fixpp::v44::ExecutionReport er{msg};
-            std::lock_guard<std::mutex> lk{cap_mu};
+            std::scoped_lock lk{cap_mu};
             if (auto r = er.exec_type()) cap_exec_type = *r;
             if (auto r = er.ord_status()) cap_ord_status = *r;
             if (auto r = er.symbol()) cap_symbol = std::string{*r};
@@ -355,7 +355,7 @@ TEST_P(BusinessMessageInterop, NosExecRptRoundTrip) {
             << "No ExecutionReport received from counterparty within 5s";
 
         if (responding_app->er_received.load(std::memory_order_acquire)) {
-            std::lock_guard<std::mutex> lk{responding_app->cap_mu};
+            std::scoped_lock lk{responding_app->cap_mu};
             // Fidelity assertions (FR-010/013; data-model D5; INV-3).
             EXPECT_EQ(responding_app->cap_exec_type, 'F')
                 << "ExecType must be 'F' (Trade / fully-filled)";

@@ -154,7 +154,7 @@ public:
         return {};
     }
 
-    int write_count() const noexcept { return write_count_; }
+    [[nodiscard]] int write_count() const noexcept { return write_count_; }
 
 private:
     asio::any_io_executor exec_;
@@ -205,7 +205,7 @@ public:
         return {};
     }
 
-    int write_count() const noexcept { return write_count_.load(); }
+    [[nodiscard]] int write_count() const noexcept { return write_count_.load(); }
 
 private:
     asio::any_io_executor exec_;
@@ -281,8 +281,8 @@ public:
         return {};
     }
 
-    int concurrent_excess() const noexcept { return concurrent_excess_.load(); }
-    int total_starts() const noexcept { return total_starts_.load(); }
+    [[nodiscard]] int concurrent_excess() const noexcept { return concurrent_excess_.load(); }
+    [[nodiscard]] int total_starts() const noexcept { return total_starts_.load(); }
 
 private:
     asio::any_io_executor exec_;
@@ -340,7 +340,7 @@ static std::vector<std::byte> make_peer_logon(std::string_view begin_string, std
     msg += body;
     unsigned int cs = 0;
     for (unsigned char c : msg) cs += c;
-    cs &= 0xFFu;
+    cs &= 0xFFU;
     char buf[5];
     snprintf(buf, sizeof(buf), "%03u", cs);
     msg += "10=" + std::string(buf) + "\x01";
@@ -368,7 +368,7 @@ static std::vector<std::byte> make_peer_heartbeat(std::string_view begin_string,
     msg += body;
     unsigned int cs = 0;
     for (unsigned char c : msg) cs += c;
-    cs &= 0xFFu;
+    cs &= 0xFFU;
     char buf[5];
     snprintf(buf, sizeof(buf), "%03u", cs);
     msg += "10=" + std::string(buf) + "\x01";
@@ -401,7 +401,7 @@ static std::vector<std::byte> make_peer_test_request(std::string_view begin_stri
     msg += body;
     unsigned int cs = 0;
     for (unsigned char c : msg) cs += c;
-    cs &= 0xFFu;
+    cs &= 0xFFU;
     char buf[5];
     snprintf(buf, sizeof(buf), "%03u", cs);
     msg += "10=" + std::string(buf) + "\x01";
@@ -494,7 +494,7 @@ TEST(LiveOutboundSerializedTest, TestRequestReplyWriteErrorDisconnectsSession) {
     // needed by this test (heartbeat_interval is disabled by
     // make_acceptor_cfg); this one exists solely for the guard.
     auto teardown_clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
-    fixpp::test_support::quiesce_on_exit teardown_guard{ioc, *teardown_clock};
+    fixpp::test_support::quiesce_on_exit teardown_guard{.ioc = ioc, .clock = *teardown_clock};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s)) << "open() timed out";
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
@@ -705,7 +705,7 @@ TEST(LiveOutboundSerializedTest, ReplayTransmitErrorForcesDisconnect) {
         msg += body;
         unsigned int cs = 0;
         for (unsigned char c : msg) cs += c;
-        cs &= 0xFFu;
+        cs &= 0xFFU;
         char buf[5];
         snprintf(buf, sizeof(buf), "%03u", cs);
         msg += "10=" + std::string(buf) + "\x01";
@@ -749,7 +749,7 @@ TEST(LiveOutboundSerializedTest, LivenessHeartbeatWriteErrorStopsLoop) {
     fixpp::session::Session sess{eng, cfg};
     // gate-b/r1 P1-1: declared AFTER `sess` (destructs before it), reusing
     // this test's real clock so its liveness-loop sleep is also cancelled.
-    fixpp::test_support::quiesce_on_exit teardown_guard{ioc, *clock};
+    fixpp::test_support::quiesce_on_exit teardown_guard{.ioc = ioc, .clock = *clock};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s)) << "open() timed out";
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
@@ -801,7 +801,7 @@ TEST(LiveOutboundSerializedTest, CloseCancelsBlockedPublicSend) {
     // gate-b/r1 P1-1: declared AFTER `sess` (destructs before it). No real
     // clock is otherwise needed by this test; this one exists for the guard.
     auto teardown_clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
-    fixpp::test_support::quiesce_on_exit teardown_guard{ioc, *teardown_clock};
+    fixpp::test_support::quiesce_on_exit teardown_guard{.ioc = ioc, .clock = *teardown_clock};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s)) << "open() timed out";
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
@@ -884,7 +884,7 @@ TEST(LiveOutboundSerializedTest, GracefulCloseCancelsBlockedPublicSend) {
     // gate-b/r1 P1-1: declared AFTER `sess` (destructs before it). No real
     // clock is otherwise needed by this test; this one exists for the guard.
     auto teardown_clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
-    fixpp::test_support::quiesce_on_exit teardown_guard{ioc, *teardown_clock};
+    fixpp::test_support::quiesce_on_exit teardown_guard{.ioc = ioc, .clock = *teardown_clock};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s)) << "open() timed out";
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
@@ -987,7 +987,7 @@ TEST(LiveOutboundSerializedTest, CloseBeforeLivenessStartsDoesNotLeaveQueuedUaf)
     // still quiesces the liveness sleep before `sess`'s unique_ptr destructor
     // runs. No transport is tracked here — the ControlledWriteTransport below
     // is never armed/blocked in this test, so it isn't a hang source.
-    fixpp::test_support::quiesce_on_exit teardown_guard{ioc, *clock};
+    fixpp::test_support::quiesce_on_exit teardown_guard{.ioc = ioc, .clock = *clock};
     auto open_fut = asio::co_spawn(ioc, sess->open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s)) << "open() timed out";
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
@@ -1143,7 +1143,7 @@ TEST(LiveOutboundSerializedTest, CallerCancelledMidCloseDoesNotWedgeSecondClose)
     // gate-b/r1 P1-1: declared AFTER `sess` (destructs before it). No real
     // clock is otherwise needed by this test; this one exists for the guard.
     auto teardown_clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
-    fixpp::test_support::quiesce_on_exit teardown_guard{ioc, *teardown_clock};
+    fixpp::test_support::quiesce_on_exit teardown_guard{.ioc = ioc, .clock = *teardown_clock};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s)) << "open() timed out";
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";

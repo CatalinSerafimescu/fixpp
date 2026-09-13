@@ -165,7 +165,7 @@ TEST(NestedGroupMembershipCapiRed, TrailingMemberAbsentFromLastNestedInstance) {
 
     ASSERT_EQ(fixpp_engine_start(acceptor_engine), FIXPP_ERR_OK);
     std::uint16_t port = wait_for_bound_port(acceptor_engine, acc_id);
-    ASSERT_NE(port, 0u) << "acceptor did not bind";
+    ASSERT_NE(port, 0U) << "acceptor did not bind";
 
     // Initiator session.
     fixpp_session_config_t* ini_cfg =

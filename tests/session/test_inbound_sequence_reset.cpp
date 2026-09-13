@@ -125,7 +125,7 @@ struct OutboundCapture {
 bool any_frame_contains(const OutboundCapture& cap, std::string_view needle) {
     for (const auto& f : cap.frames) {
         std::string wire(reinterpret_cast<const char*>(f.data()), f.size());
-        if (wire.find(std::string(needle)) != std::string::npos) return true;
+        if (wire.contains(std::string(needle))) return true;
     }
     return false;
 }
@@ -134,9 +134,7 @@ bool any_frame_contains(const OutboundCapture& cap, std::string_view needle) {
 bool any_reject_value_incorrect(const OutboundCapture& cap) {
     for (const auto& f : cap.frames) {
         std::string wire(reinterpret_cast<const char*>(f.data()), f.size());
-        if (wire.find("35=3\x01") != std::string::npos &&
-            wire.find("373=5\x01") != std::string::npos)
-            return true;
+        if (wire.contains("35=3\x01") && wire.contains("373=5\x01")) return true;
     }
     return false;
 }

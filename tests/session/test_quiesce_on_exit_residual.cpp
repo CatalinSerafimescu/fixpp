@@ -152,7 +152,7 @@ TEST(QuiesceOnExitResidualWitness, SilentWhenIocDrainsNormally) {
     asio::io_context ioc;
     auto clock = make_mock_clock(ioc);
 
-    quiesce_on_exit quiesce{ioc, *clock, 1ms};
+    quiesce_on_exit quiesce{.ioc = ioc, .clock = *clock, .budget = 1ms};
 }
 
 // gate-b/r1 P1-4 (Art. VII §4): the two-argument {ioc, clock} aggregate
@@ -167,7 +167,7 @@ TEST(QuiesceOnExitResidualWitness, DefaultBudgetIsFiveSeconds) {
     asio::io_context ioc;
     auto clock = make_mock_clock(ioc);
 
-    quiesce_on_exit quiesce{ioc, *clock};
+    quiesce_on_exit quiesce{.ioc = ioc, .clock = *clock};
     EXPECT_EQ(quiesce.budget, 5s);
 }
 
@@ -195,7 +195,7 @@ TEST(QuiesceOnExitResidualWitness, ClosesTransportBeforeDraining) {
     ioc.run_for(10ms);  // let the write actually start blocking on the timer
     ioc.restart();
 
-    quiesce_on_exit quiesce{ioc, *clock, 50ms};
+    quiesce_on_exit quiesce{.ioc = ioc, .clock = *clock, .budget = 50ms};
     quiesce.transport = &transport;
 }
 
@@ -274,11 +274,11 @@ TEST(QuiesceOnExitResidualWitness, ZeroBudgetOnEmptyContextIsNotResidual) {
     asio::io_context ioc;
     auto clock = make_mock_clock(ioc);
 
-    ASSERT_EQ(ioc.poll(), 0u) << "context is not empty at entry, so this test would no "
+    ASSERT_EQ(ioc.poll(), 0U) << "context is not empty at entry, so this test would no "
                                  "longer isolate the deadline artefact";
     ioc.restart();
 
-    quiesce_on_exit quiesce{ioc, *clock, 0ms};
+    quiesce_on_exit quiesce{.ioc = ioc, .clock = *clock, .budget = 0ms};
     // ~quiesce runs here and must add NO failure.
 }
 
@@ -291,7 +291,7 @@ TEST(QuiesceOnExitResidualWitness, ZeroBudgetOnEmptyContextIsNotResidual) {
 TEST(DrainOrReportWitness, ZeroBudgetOnEmptyContextIsNotResidual) {
     asio::io_context ioc;
 
-    ASSERT_EQ(ioc.poll(), 0u) << "context is not empty at entry, so this test would no "
+    ASSERT_EQ(ioc.poll(), 0U) << "context is not empty at entry, so this test would no "
                                  "longer isolate the deadline artefact";
     ioc.restart();
 
@@ -321,7 +321,7 @@ TEST(QuiesceOnExitResidualWitness, ZeroBudgetProbeCanNowResumeACoroutine) {
         asio::co_spawn(ioc, record_resumption(&resumed), asio::detached);
 
         EXPECT_FALSE(resumed) << "nothing may have run before the guard";
-        quiesce_on_exit quiesce{ioc, *clock, 0ms};
+        quiesce_on_exit quiesce{.ioc = ioc, .clock = *clock, .budget = 0ms};
         // ~quiesce: run_for(0ms) resumes nothing, then poll_one() dispatches the
         // co_spawn's initial handler and the coroutine runs to completion — which
         // also drains the work count, so this path stays silent.
@@ -862,7 +862,7 @@ TEST(CancelAndDrainOrReportWitness, ZeroBudgetOnEmptyContextIsNotResidual) {
     asio::io_context ioc;
     auto clock = make_mock_clock(ioc);
 
-    ASSERT_EQ(ioc.poll(), 0u) << "context is not empty at entry, so this test would no "
+    ASSERT_EQ(ioc.poll(), 0U) << "context is not empty at entry, so this test would no "
                                  "longer isolate the deadline artefact";
     ioc.restart();
 

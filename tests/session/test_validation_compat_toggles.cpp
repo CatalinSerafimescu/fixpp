@@ -96,8 +96,8 @@ public:
 using fixpp::test_support::extract_tag;
 
 // count_frames_with_msgtype: returns the number of captured frames whose 35= equals mt.
-static int count_frames_with_msgtype(const std::vector<std::vector<std::byte>>& frames,
-                                     std::string_view mt) {
+int count_frames_with_msgtype(const std::vector<std::vector<std::byte>>& frames,
+                              std::string_view mt) {
     int n = 0;
     for (const auto& f : frames) {
         if (extract_tag(f, 35) == mt) ++n;
@@ -107,14 +107,13 @@ static int count_frames_with_msgtype(const std::vector<std::vector<std::byte>>& 
 
 // ── Frame-building helpers ────────────────────────────────────────────────────
 
-static std::string field(int tag, std::string_view val) {
+std::string field(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
-static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
-                                             std::string_view msg_type, std::uint32_t seq,
-                                             std::string_view sender, std::string_view target,
-                                             std::string_view extra = {}) {
+std::vector<std::byte> make_fix_frame(std::string_view begin_string, std::string_view msg_type,
+                                      std::uint32_t seq, std::string_view sender,
+                                      std::string_view target, std::string_view extra = {}) {
     std::string body;
     body += field(35, msg_type);
     body += field(34, std::to_string(seq));
@@ -140,8 +139,8 @@ static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
     return frame;
 }
 
-static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
-                                         std::string_view t, int hbt = 30) {
+std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
+                                  std::string_view t, int hbt = 30) {
     std::string extra;
     extra += field(98, "0");
     extra += field(108, std::to_string(hbt));
@@ -164,7 +163,6 @@ using fixpp::session::MessageStore;
 using fixpp::session::MessageStoreFactory;
 using fixpp::session::retrieve_visitor;
 using fixpp::session::seqnum_t;
-using fixpp::session::visit_result;
 
 class NullStore final : public MessageStore {
 public:
@@ -247,7 +245,7 @@ struct Fixture {
     void clear_capture() { capture.frames.clear(); }
 };
 
-static std::unique_ptr<Fixture> make_acceptor(
+std::unique_ptr<Fixture> make_acceptor(
     std::shared_ptr<MessageStoreFactory> store_factory = std::make_shared<NullStoreFactory>(),
     std::uint32_t peer_logon_seq = 1, std::shared_ptr<fixpp::session::Application> app = nullptr) {
     auto fix = std::make_unique<Fixture>();
@@ -308,7 +306,7 @@ static std::unique_ptr<Fixture> make_acceptor(
     return fix;
 }
 
-static std::unique_ptr<Fixture> make_initiator(
+std::unique_ptr<Fixture> make_initiator(
     std::shared_ptr<MessageStoreFactory> store_factory = std::make_shared<NullStoreFactory>(),
     std::shared_ptr<fixpp::session::Application> app = nullptr) {
     auto fix = std::make_unique<Fixture>();
@@ -667,7 +665,7 @@ TEST(ValidationCompatToggles, CompID_KnobOff_LogonTimeMismatchStillRefused) {
 // After construction the session is Active and next_inbound == 2 (the peer's
 // Logon at seq=1 was accepted and advanced the counter).
 
-static std::unique_ptr<Fixture> make_acceptor_seqval_off(
+std::unique_ptr<Fixture> make_acceptor_seqval_off(
     std::shared_ptr<fixpp::session::Application> app = nullptr) {
     auto fix = std::make_unique<Fixture>();
     fix->cfg.role = fixpp::session::session_role::acceptor;
@@ -1020,9 +1018,9 @@ TEST(ValidationCompatToggles, Seq_KnobOff_LogonTimeTooHighStillRefused) {
 //   reset_mode (GapFillFlag not set):  make_seq_reset_frame(bs, seq, new_seqno, "SND", "TGT")
 //   gapfill_mode (123=Y):              make_seq_reset_frame(bs, seq, new_seqno, "SND", "TGT", true)
 
-static std::vector<std::byte> make_seq_reset_frame(std::string_view bs, std::uint32_t seq,
-                                                   std::uint32_t new_seqno, std::string_view sender,
-                                                   std::string_view target, bool gap_fill = false) {
+std::vector<std::byte> make_seq_reset_frame(std::string_view bs, std::uint32_t seq,
+                                            std::uint32_t new_seqno, std::string_view sender,
+                                            std::string_view target, bool gap_fill = false) {
     std::string extra;
     extra += field(36, std::to_string(new_seqno));
     if (gap_fill) {

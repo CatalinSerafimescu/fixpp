@@ -87,21 +87,20 @@ public:
     void do_deallocate(void* p, std::size_t bytes, std::size_t align) override {
         std::pmr::get_default_resource()->deallocate(p, bytes, align);
     }
-    bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override {
+    [[nodiscard]] bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override {
         return this == &other;
     }
 };
 
 namespace {
 
-static std::string field_str(int tag, std::string_view val) {
+std::string field_str(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
-static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
-                                             std::string_view msg_type, std::uint32_t seq,
-                                             std::string_view sender, std::string_view target,
-                                             std::string_view extra = {}) {
+std::vector<std::byte> make_fix_frame(std::string_view begin_string, std::string_view msg_type,
+                                      std::uint32_t seq, std::string_view sender,
+                                      std::string_view target, std::string_view extra = {}) {
     std::string body;
     body += field_str(35, msg_type);
     body += field_str(34, std::to_string(seq));
@@ -127,22 +126,22 @@ static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
     return out;
 }
 
-static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
-                                         std::string_view t, int hbt = 30) {
+std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
+                                  std::string_view t, int hbt = 30) {
     std::string extra;
     extra += field_str(98, "0");
     extra += field_str(108, std::to_string(hbt));
     return make_fix_frame(bs, "A", seq, s, t, extra);
 }
 
-static std::vector<std::byte> make_heartbeat(std::string_view bs, std::uint32_t seq,
-                                             std::string_view s, std::string_view t) {
+std::vector<std::byte> make_heartbeat(std::string_view bs, std::uint32_t seq, std::string_view s,
+                                      std::string_view t) {
     return make_fix_frame(bs, "0", seq, s, t);
 }
 
-static bool is_msg_type(std::span<const std::byte> frame, std::string_view type) {
+bool is_msg_type(std::span<const std::byte> frame, std::string_view type) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
-    return wire.find("35=" + std::string(type) + "\x01") != std::string::npos;
+    return wire.contains("35=" + std::string(type) + "\x01");
 }
 
 }  // namespace
@@ -264,7 +263,7 @@ TEST_F(SessionRecoveryAllocGuardTest, HeartbeatSteadyState_DualGate) {
         << "window must be zero. [const §VIII.5]. Run with LD_PRELOAD to activate.";
 
     // counting_resource gate: zero PMR allocations (all-arena path).
-    EXPECT_EQ(pmr_allocs_in_window, 0u)
+    EXPECT_EQ(pmr_allocs_in_window, 0U)
         << "counting_resource gate: PMR allocs in Heartbeat steady-state window "
         << "must be zero. [const §VIII.5].";
 
@@ -320,7 +319,7 @@ TEST_F(SessionRecoveryAllocGuardTest, AwaitingResendTransition_DualGate) {
     bool found_resend = false;
     for (const auto& f : outbound_frames) {
         std::string wire(reinterpret_cast<const char*>(f.data()), f.size());
-        if (wire.find("35=2\x01") != std::string::npos) {
+        if (wire.contains("35=2\x01")) {
             found_resend = true;
             break;
         }

@@ -98,7 +98,7 @@ namespace {
 
 // Current wall-clock UTC as a FIX UTCTimestamp "YYYYMMDD-HH:MM:SS.mmm".
 // Required by the 038 acceptor first-Logon SendingTime(52) MaxLatency guard.
-static std::string utc_now_fix_timestamp() {
+std::string utc_now_fix_timestamp() {
     std::array<char, 32> buf{};
     auto r = fixpp::core::utc_time_to_fix_string(std::chrono::system_clock::now(),
                                                  fixpp::core::fix_time_precision::millis,
@@ -109,14 +109,14 @@ static std::string utc_now_fix_timestamp() {
 // Build a complete FIX frame from begin_string + a body string.
 // The body must already contain all body fields (35=, 34=, 49=, 52=, 56=, etc.).
 // Calculates BodyLength(9=) and CheckSum(10=) automatically.
-static std::vector<std::byte> make_fix_frame(std::string_view begin_str, std::string const& body) {
+std::vector<std::byte> make_fix_frame(std::string_view begin_str, std::string const& body) {
     std::string msg;
     msg += "8=" + std::string(begin_str) + "\x01";
     msg += "9=" + std::to_string(body.size()) + "\x01";
     msg += body;
     unsigned int cs = 0;
     for (unsigned char c : msg) cs += c;
-    cs &= 0xFFu;
+    cs &= 0xFFU;
     char csbuf[5];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     msg += "10=" + std::string(csbuf) + "\x01";
@@ -128,9 +128,8 @@ static std::vector<std::byte> make_fix_frame(std::string_view begin_str, std::st
 }
 
 // Build a valid FIX Logon frame. EncryptMethod(98)=0 (plaintext-safe per FR-009).
-static std::vector<std::byte> make_plain_logon_frame(std::string_view begin_str,
-                                                     std::string_view sender,
-                                                     std::string_view target) {
+std::vector<std::byte> make_plain_logon_frame(std::string_view begin_str, std::string_view sender,
+                                              std::string_view target) {
     auto field = [](int tag, std::string_view v) -> std::string {
         return std::to_string(tag) + "=" + std::string(v) + "\x01";
     };
@@ -147,9 +146,8 @@ static std::vector<std::byte> make_plain_logon_frame(std::string_view begin_str,
 
 // Build a valid FIX Logout frame (35=5).
 // seq MUST advance past the Logon's 34=1 (use 34=2 for the first Logout).
-static std::vector<std::byte> make_plain_logout_frame(std::string_view begin_str,
-                                                      std::string_view sender,
-                                                      std::string_view target, int seq) {
+std::vector<std::byte> make_plain_logout_frame(std::string_view begin_str, std::string_view sender,
+                                               std::string_view target, int seq) {
     auto field = [](int tag, std::string_view v) -> std::string {
         return std::to_string(tag) + "=" + std::string(v) + "\x01";
     };
@@ -171,8 +169,8 @@ std::atomic<bool> g_first_byte_captured{false};
 // Standalone plaintext initiator coroutine (Logon-only).
 // Connects to the acceptor's bound port via a raw TCP socket (no TLS),
 // sends a FIX Logon frame, waits for the acceptor reply (up to 5s), then exits.
-static asio::awaitable<void> run_plain_initiator(asio::io_context& ioc, uint16_t acceptor_port,
-                                                 std::string sender, std::string target) {
+asio::awaitable<void> run_plain_initiator(asio::io_context& ioc, uint16_t acceptor_port,
+                                          std::string sender, std::string target) {
     co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
     try {
         asio::ip::tcp::socket sock{ioc};
@@ -215,10 +213,8 @@ static asio::awaitable<void> run_plain_initiator(asio::io_context& ioc, uint16_t
 // then sends a Logout (34=2, fresh 52=) and waits 300ms before closing.
 // The Logout MsgSeqNum MUST advance past the Logon's 34=1 so the acceptor's
 // check_inbound sees an in-sequence frame (not a gap). [SC-001 / FR-009]
-static asio::awaitable<void> run_plain_initiator_with_logout(asio::io_context& ioc,
-                                                             uint16_t acceptor_port,
-                                                             std::string sender,
-                                                             std::string target) {
+asio::awaitable<void> run_plain_initiator_with_logout(asio::io_context& ioc, uint16_t acceptor_port,
+                                                      std::string sender, std::string target) {
     co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
     try {
         asio::ip::tcp::socket sock{ioc};
@@ -307,7 +303,7 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogon) {
     ioc.restart();
 
     uint16_t bound_port = engine.acceptor_bound_endpoint(acc_id).port;
-    ASSERT_NE(bound_port, 0u) << "acceptor did not bind (port=0)";
+    ASSERT_NE(bound_port, 0U) << "acceptor did not bind (port=0)";
 
     // Watchdog: fires at 5s from the point the session is attempted.
     // Protects BOTH the establish phase (run_for(500ms)) AND the cleanup phase
@@ -439,7 +435,7 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogonLogout) {
     ioc.restart();
 
     uint16_t bound_port = engine.acceptor_bound_endpoint(acc_id).port;
-    ASSERT_NE(bound_port, 0u) << "acceptor did not bind (port=0)";
+    ASSERT_NE(bound_port, 0U) << "acceptor did not bind (port=0)";
 
     // Watchdog: 6s budget covers the full Logon+Logout exchange + cleanup.
     std::atomic<bool> watchdog_fired{false};
@@ -473,7 +469,8 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogonLogout) {
     // so the session strand is idle — no concurrent writes to recent_events_.
     bool logout_seqreset_event_found = false;
     for (const auto& ev : acc_session->recent_events()) {
-        if (auto* sr = std::get_if<fixpp::session::session_event_sequence_numbers_reset>(&ev)) {
+        if (const auto* sr =
+                std::get_if<fixpp::session::session_event_sequence_numbers_reset>(&ev)) {
             if (!sr->by_peer_request) {
                 logout_seqreset_event_found = true;
             }

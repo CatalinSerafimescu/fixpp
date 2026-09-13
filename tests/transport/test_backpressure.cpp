@@ -36,7 +36,7 @@ using fixpp::transport::test::mock_transport;
 using fixpp::transport::test::Script;
 
 // Helper — synchronous std::byte construction.
-constexpr std::byte b(unsigned v) { return static_cast<std::byte>(v & 0xFFu); }
+constexpr std::byte b(unsigned v) { return static_cast<std::byte>(v & 0xFFU); }
 
 // ════════════════════════════════════════════════════════════════════════════
 // Cell A — 10³ sequential outbound writes through a mock with write_latency:
@@ -113,8 +113,8 @@ TEST(Backpressure, PartialWriteReturnsWriteShort) {
     // "wrote those bytes, then surfaced short". The FSM's recovery path
     // ([FIX-SL §4.5.2] ResendRequest) re-sends starting from the durable
     // store; 2h does NOT roll back the captured prefix.
-    EXPECT_EQ(mt.outbound_bytes_seen().size(), 32u);
-    EXPECT_EQ(mt.async_writes_observed(), 1u);
+    EXPECT_EQ(mt.outbound_bytes_seen().size(), 32U);
+    EXPECT_EQ(mt.async_writes_observed(), 1U);
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -142,7 +142,7 @@ TEST(Backpressure, SingleWriteSucceeds) {
 
     ASSERT_TRUE(result.has_value());
     EXPECT_EQ(*result, frame.size());
-    EXPECT_EQ(mt.async_writes_observed(), 1u);
+    EXPECT_EQ(mt.async_writes_observed(), 1U);
 }
 
 // ════════════════════════════════════════════════════════════════════════════

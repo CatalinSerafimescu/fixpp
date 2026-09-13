@@ -134,7 +134,7 @@ constexpr std::string_view kDivergentNestedXml = R"xml(
 // message_write_test.cpp's PMR/shared_ptr pattern.
 fixpp_session_config_t* make_cfg_with_dict(std::string_view xml, const char* sender,
                                            const char* target) {
-    constexpr std::size_t kBufSize = 256u * 1024u;
+    constexpr std::size_t kBufSize = 256U * 1024U;
     auto buf = std::make_unique<std::array<std::byte, kBufSize>>();
     auto* mr = new std::pmr::monotonic_buffer_resource{buf->data(), buf->size()};
     Dictionary d = XmlLoader{}.load_from_string(xml, mr);
@@ -165,7 +165,7 @@ fixpp_session_config_t* make_cfg_with_dict(std::string_view xml, const char* sen
 // Same, from a shipped dictionary FILE (W-12 runs on the real FIX44).
 fixpp_session_config_t* make_cfg_from_file(const char* filename, const char* begin_string,
                                            const char* sender, const char* target) {
-    constexpr std::size_t kArena = 64u * 1024u * 1024u;
+    constexpr std::size_t kArena = 64U * 1024U * 1024U;
     auto* storage = new std::byte[kArena];
     auto* mr = new std::pmr::monotonic_buffer_resource{storage, kArena};
     Dictionary d = XmlLoader{}.load(std::filesystem::path{FIXPP_DICT_DATA_DIR} / filename, mr);
@@ -263,11 +263,16 @@ struct DictFile {
 };
 
 std::vector<DictFile> const kAllTen{
-    {"FIX40", "FIX40.xml", false},       {"FIX41", "FIX41.xml", false},
-    {"FIX42", "FIX42.xml", false},       {"FIX43", "FIX43.xml", false},
-    {"FIX44", "FIX44.xml", false},       {"FIX50", "FIX50.xml", false},
-    {"FIX50SP1", "FIX50SP1.xml", false}, {"FIX50SP2", "FIX50SP2.xml", false},
-    {"FIXT11", "FIXT11.xml", false},     {"Orchestra FIX Latest", "OrchestraFIXLatest.xml", true},
+    {.label = "FIX40", .filename = "FIX40.xml", .is_orchestra = false},
+    {.label = "FIX41", .filename = "FIX41.xml", .is_orchestra = false},
+    {.label = "FIX42", .filename = "FIX42.xml", .is_orchestra = false},
+    {.label = "FIX43", .filename = "FIX43.xml", .is_orchestra = false},
+    {.label = "FIX44", .filename = "FIX44.xml", .is_orchestra = false},
+    {.label = "FIX50", .filename = "FIX50.xml", .is_orchestra = false},
+    {.label = "FIX50SP1", .filename = "FIX50SP1.xml", .is_orchestra = false},
+    {.label = "FIX50SP2", .filename = "FIX50SP2.xml", .is_orchestra = false},
+    {.label = "FIXT11", .filename = "FIXT11.xml", .is_orchestra = false},
+    {.label = "Orchestra FIX Latest", .filename = "OrchestraFIXLatest.xml", .is_orchestra = true},
 };
 
 }  // namespace
@@ -282,7 +287,7 @@ TEST(CapiGroupDelimiterCtx, ConstructionAcceptsIffValidationAccepts) {
     // first-seen value. Without this the case would pass on a fixture where a
     // fall-through to the global is unobservable, and witness nothing.
     {
-        constexpr std::size_t kBufSize = 256u * 1024u;
+        constexpr std::size_t kBufSize = 256U * 1024U;
         auto buf = std::make_unique<std::array<std::byte, kBufSize>>();
         std::pmr::monotonic_buffer_resource mr{buf->data(), buf->size()};
         auto const dict = XmlLoader{}.load_from_string(kDivergentNestedXml, &mr);
@@ -333,7 +338,7 @@ TEST(CapiGroupDelimiterCtx, CommitDoesNotRebuildTableViewPerMessage) {
 
     // The session builds exactly one view at open. (Constructing the fixture
     // dictionary itself does not call as_table_view, so this is attributable.)
-    EXPECT_EQ(after_open, 1u)
+    EXPECT_EQ(after_open, 1U)
         << "C-9.2a: fixpp_session_open must build the session's table_view exactly ONCE.";
 
     constexpr int kMessages = 5;
@@ -561,7 +566,7 @@ TEST(CapiGroupDelimiterCtx, DisclosedDelimiterMoveRejectsOldOrder) {
 
     // Fixture pin: this really is a disclosed MOVE — global says 32, AX says 17.
     {
-        constexpr std::size_t kArena = 64u * 1024u * 1024u;
+        constexpr std::size_t kArena = 64U * 1024U * 1024U;
         auto storage = std::make_unique<std::byte[]>(kArena);
         std::pmr::monotonic_buffer_resource mr{storage.get(), kArena};
         auto const dict =
@@ -606,7 +611,7 @@ TEST(CapiGroupDelimiterCtx, DisclosedDelimiterMoveRejectsOldOrder) {
 TEST(CapiGroupDelimiterCtx, GroupBeginStillAcceptsEveryRegisteredGroup) {
     std::size_t total_groups = 0;
     for (auto const& d : kAllTen) {
-        constexpr std::size_t kArena = 64u * 1024u * 1024u;
+        constexpr std::size_t kArena = 64U * 1024U * 1024U;
         auto storage = std::make_unique<std::byte[]>(kArena);
         std::pmr::monotonic_buffer_resource mr{storage.get(), kArena};
         auto const path = d.is_orchestra
@@ -629,7 +634,7 @@ TEST(CapiGroupDelimiterCtx, GroupBeginStillAcceptsEveryRegisteredGroup) {
                 }
             }
             for (auto const g : nig) {
-                if (has_members.count(g) != 0) {
+                if (has_members.contains(g)) {
                     real_groups.insert(g);
                 }
             }
@@ -645,7 +650,7 @@ TEST(CapiGroupDelimiterCtx, GroupBeginStillAcceptsEveryRegisteredGroup) {
         }
     }
     // Non-vacuity: an empty sweep would pass silently.
-    EXPECT_GT(total_groups, 1000u)
+    EXPECT_GT(total_groups, 1000U)
         << "W-13 censused only " << total_groups
         << " groups across all ten dictionaries — far too few; the sweep is not reaching them.";
 }

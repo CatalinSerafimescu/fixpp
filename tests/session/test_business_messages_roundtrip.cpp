@@ -157,7 +157,7 @@ const char* get_fixture_dir() {
     return (env && env[0] != '\0') ? env : kDir;
 }
 
-static uint16_t reserve_free_port(asio::io_context& ioc) {
+uint16_t reserve_free_port(asio::io_context& ioc) {
     asio::ip::tcp::acceptor a{ioc};
     asio::ip::tcp::endpoint ep{asio::ip::make_address("127.0.0.1"), 0};
     a.open(ep.protocol());
@@ -167,8 +167,7 @@ static uint16_t reserve_free_port(asio::io_context& ioc) {
     return port;
 }
 
-static std::shared_ptr<fixpp::transport::TransportFactory> make_tls_factory(
-    const char* fixture_dir) {
+std::shared_ptr<fixpp::transport::TransportFactory> make_tls_factory(const char* fixture_dir) {
     fixpp::tls::file_cert_source::Config cs_cfg;
     cs_cfg.leaf_path = std::string(fixture_dir) + "/leaf_rsa2048.pem";
     cs_cfg.private_key_path = std::string(fixture_dir) + "/leaf_rsa2048.key";
@@ -190,11 +189,10 @@ static std::shared_ptr<fixpp::transport::TransportFactory> make_tls_factory(
 // ── Frame helpers ─────────────────────────────────────────────────────────────
 
 // Build a raw inbound FIX frame (for INV-5 inbound path).
-static std::vector<std::byte> make_inbound_app_frame(std::string_view msg_type,
-                                                     std::string_view sender,
-                                                     std::string_view target, uint32_t seq,
-                                                     std::string_view begin_string = "FIX.4.2",
-                                                     std::string extra_body = {}) {
+std::vector<std::byte> make_inbound_app_frame(std::string_view msg_type, std::string_view sender,
+                                              std::string_view target, uint32_t seq,
+                                              std::string_view begin_string = "FIX.4.2",
+                                              std::string extra_body = {}) {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -221,9 +219,9 @@ static std::vector<std::byte> make_inbound_app_frame(std::string_view msg_type,
 }
 
 // Build a Logon frame (for advancing sessions to Active in OutboundFixture).
-static std::vector<std::byte> make_logon_frame(std::string_view begin_string = "FIX.4.2",
-                                               uint32_t seq = 1, std::string_view sender = "TW",
-                                               std::string_view target = "ISLD") {
+std::vector<std::byte> make_logon_frame(std::string_view begin_string = "FIX.4.2", uint32_t seq = 1,
+                                        std::string_view sender = "TW",
+                                        std::string_view target = "ISLD") {
     return make_inbound_app_frame("A", sender, target, seq, begin_string,
                                   "98=0\x01"
                                   "108=30\x01");
@@ -239,7 +237,7 @@ struct FixField {
     std::string value;
 };
 
-static std::vector<FixField> parse_fix_frame(std::span<const std::byte> frame) {
+std::vector<FixField> parse_fix_frame(std::span<const std::byte> frame) {
     std::vector<FixField> fields;
     std::string_view sv{reinterpret_cast<const char*>(frame.data()), frame.size()};
     std::size_t pos = 0;
@@ -252,7 +250,7 @@ static std::vector<FixField> parse_fix_frame(std::span<const std::byte> frame) {
             int tag = 0;
             auto [p, ec] = std::from_chars(fld.data(), fld.data() + eq, tag);
             (void)ec;
-            fields.push_back({tag, std::string(fld.substr(eq + 1))});
+            fields.push_back({.tag = tag, .value = std::string(fld.substr(eq + 1))});
         }
         pos = soh + 1;
     }
@@ -260,7 +258,7 @@ static std::vector<FixField> parse_fix_frame(std::span<const std::byte> frame) {
 }
 
 // Recompute FIX checksum (mod 256, over all bytes through last field before 10=).
-static unsigned int compute_checksum(std::span<const std::byte> frame) {
+unsigned int compute_checksum(std::span<const std::byte> frame) {
     unsigned int cs = 0;
     // Sum all bytes EXCEPT the "10=CCC\x01" trailer (the last 7 bytes).
     // The spec says checksum covers 8=…10=xxx\x01 body; we mirror send_impl:
@@ -412,7 +410,7 @@ TEST(BusinessMessagesRoundtrip,
 
     // Parse the frame into fields.
     auto fields = parse_fix_frame(frame_bytes);
-    ASSERT_GE(fields.size(), 3u) << "frame must have at least 3 fields";
+    ASSERT_GE(fields.size(), 3U) << "frame must have at least 3 fields";
 
     // (a) Field 1 must be tag 8 (BeginString).
     EXPECT_EQ(fields[0].tag, 8) << "field-1 must be BeginString(8); got tag " << fields[0].tag;

@@ -41,7 +41,10 @@ using fixpp::dict::application_version;
 using fixpp::dict::session_version;
 using fixpp::dict::version_profile;
 
-constexpr version_profile kProfileV44{session_version::v44, application_version::v44, false, 0};
+constexpr version_profile kProfileV44{.session = session_version::v44,
+                                      .default_appl = application_version::v44,
+                                      .has_per_message_override = false,
+                                      ._reserved = 0};
 
 TEST(ReifyMembershipIdentity, GroupMembershipSurvivesSourceDestruction) {
     // The handle's OWN memory resource — must OUTLIVE the inner scope below

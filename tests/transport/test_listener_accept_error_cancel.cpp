@@ -29,7 +29,6 @@ using namespace std::chrono_literals;
 using fixpp::core::error;
 using fixpp::transport::asio_listener;
 using fixpp::transport::Endpoint;
-using fixpp::transport::Listener;
 using fixpp::transport::make_asio_listener;
 
 fixpp::tls::SslCtxConfig stub_ssl_cfg() { return fixpp::tls::SslCtxConfig{}; }

@@ -54,7 +54,6 @@ namespace {
 
 using fixpp::core::cancellable_dispatch;
 using fixpp::core::EngineConfig;
-using fixpp::core::error;
 using fixpp::core::expected_t;
 using fixpp::core::make_session_executor;
 using fixpp::session::Session;

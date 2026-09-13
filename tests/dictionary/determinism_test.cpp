@@ -42,8 +42,8 @@ std::string field_ref_bytes(fixpp::dict::Dictionary const& d, std::string_view m
         out.push_back(static_cast<char>(static_cast<std::uint8_t>(fr.type)));
         out.push_back(static_cast<char>(static_cast<std::uint8_t>(fr.rule)));
         // Include tag bytes so a mis-ordering of tag values is also caught.
-        out.push_back(static_cast<char>(static_cast<std::uint8_t>(tag & 0xFFu)));
-        out.push_back(static_cast<char>(static_cast<std::uint8_t>(tag >> 8u)));
+        out.push_back(static_cast<char>(static_cast<std::uint8_t>(tag & 0xFFU)));
+        out.push_back(static_cast<char>(static_cast<std::uint8_t>(tag >> 8U)));
     }
     return out;
 }

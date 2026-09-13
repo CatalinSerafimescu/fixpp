@@ -42,16 +42,26 @@ static_assert(
                                                         std::declval<std::string_view>())),
                    fixpp::core::expected_t<application_version>>);
 
-constexpr version_profile kFixt{session_version::vt11, application_version::v50sp2, true, 0};
-constexpr version_profile kUnknownDefault{session_version::vt11, application_version::Unknown, true,
-                                          0};
+constexpr version_profile kFixt{.session = session_version::vt11,
+                                .default_appl = application_version::v50sp2,
+                                .has_per_message_override = true,
+                                ._reserved = 0};
+constexpr version_profile kUnknownDefault{.session = session_version::vt11,
+                                          .default_appl = application_version::Unknown,
+                                          .has_per_message_override = true,
+                                          ._reserved = 0};
 
 TEST(VersionProfileAcVp1, ReservedZeroOnEmit) {
     // AC-VP5 — _reserved zero on emit, ignored on read in v1.0.
-    version_profile p{session_version::v44, application_version::v44, false, 0};
+    version_profile p{.session = session_version::v44,
+                      .default_appl = application_version::v44,
+                      .has_per_message_override = false,
+                      ._reserved = 0};
     EXPECT_EQ(p._reserved, 0);
-    resolved_message_version r{resolved_message_version::kind::application, session_version::v44,
-                               application_version::v44, 0};
+    resolved_message_version r{.k = resolved_message_version::kind::application,
+                               .session = session_version::v44,
+                               .application = application_version::v44,
+                               ._reserved = 0};
     EXPECT_EQ(r._reserved, 0);
 }
 
@@ -62,10 +72,14 @@ TEST(VersionProfileAcVp3, FullWireToCppMap) {
         application_version expect;
     };
     constexpr Case cases[] = {
-        {"2", application_version::v40},    {"3", application_version::v41},
-        {"4", application_version::v42},    {"5", application_version::v43},
-        {"6", application_version::v44},    {"7", application_version::v50},
-        {"8", application_version::v50sp1}, {"9", application_version::v50sp2},
+        {.wire = "2", .expect = application_version::v40},
+        {.wire = "3", .expect = application_version::v41},
+        {.wire = "4", .expect = application_version::v42},
+        {.wire = "5", .expect = application_version::v43},
+        {.wire = "6", .expect = application_version::v44},
+        {.wire = "7", .expect = application_version::v50},
+        {.wire = "8", .expect = application_version::v50sp1},
+        {.wire = "9", .expect = application_version::v50sp2},
     };
     for (auto const& c : cases) {
         auto got = resolve_application_version(kFixt, c.wire);

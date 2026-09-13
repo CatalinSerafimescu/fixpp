@@ -63,7 +63,7 @@ TEST(SeamResultWriteRace, EveryAcquireReceivesWellFormedResult) {
     // publish arbitration this test targets — a DIFFERENT, already-covered
     // seam (test_pool_exhaustion_reuse.cpp, T020-T022).
     constexpr int N = 256;
-    const unsigned T = std::max(2u, std::thread::hardware_concurrency());
+    const unsigned T = std::max(2U, std::thread::hardware_concurrency());
 
     std::atomic<int> in_critical{0};
     std::atomic<int> overlap{0};

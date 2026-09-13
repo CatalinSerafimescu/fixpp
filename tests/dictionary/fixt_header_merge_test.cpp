@@ -151,7 +151,8 @@ std::set<ExpectedEntry> walk_fixt11_framing_set() {
         if (tag == 0) {
             return;
         }
-        out.insert(ExpectedEntry{tag, field_type_from_data_type(xml_type_to_data_type(type_str))});
+        out.insert(ExpectedEntry{
+            .tag = tag, .type = field_type_from_data_type(xml_type_to_data_type(type_str))});
     };
 
     for (auto const& section : {fix.child("header"), fix.child("trailer")}) {
@@ -176,7 +177,7 @@ std::set<ExpectedEntry> walk_fixt11_framing_set() {
 std::set<ExpectedEntry> baked_framing_set() {
     std::set<ExpectedEntry> out;
     for (auto const& e : fixpp::dict::detail::kFixtFramingTable) {
-        out.insert(ExpectedEntry{e.tag, e.type});
+        out.insert(ExpectedEntry{.tag = e.tag, .type = e.type});
     }
     return out;
 }

@@ -235,7 +235,7 @@ protected:
     }
 
     // Count outbound frames of a given MsgType captured AFTER drive_to_active.
-    std::size_t count_admin_frames_with_type(std::string_view msg_type) const {
+    [[nodiscard]] std::size_t count_admin_frames_with_type(std::string_view msg_type) const {
         std::size_t n = 0;
         for (const auto& f : captured_frames) {
             if (extract_msg_type(f) == msg_type) ++n;

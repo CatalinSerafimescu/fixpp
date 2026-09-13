@@ -71,10 +71,7 @@ using fixpp::session::direction_t;
 using fixpp::session::MessageStore;
 using fixpp::session::MessageStoreFactory;
 using fixpp::session::retrieve_visitor;
-using fixpp::session::seqnum_max;
-using fixpp::session::seqnum_min;
 using fixpp::session::seqnum_t;
-using fixpp::session::visit_result;
 using fixpp::session::test_support::extract_field;
 
 namespace fixpp::session::test {
@@ -137,7 +134,7 @@ static std::vector<std::byte> build_frame(const std::string& body_str,
     std::string full = hdr + body_str;
     unsigned int cs = 0;
     for (unsigned char c : full) cs += c;
-    cs &= 0xFFu;
+    cs &= 0xFFU;
     char csbuf[4];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     full += "10=" + std::string(csbuf) + "\x01";
@@ -384,7 +381,7 @@ protected:
     }
 
     // Extract 34= from the first Reject(35=3) in captured frames.
-    std::optional<seqnum_t> reject_seq_num() const {
+    [[nodiscard]] std::optional<seqnum_t> reject_seq_num() const {
         for (const auto& f : captured_frames_) {
             auto sp = std::span<const std::byte>(f);
             auto mt = extract_field(sp, 35);

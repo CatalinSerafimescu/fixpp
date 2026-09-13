@@ -158,7 +158,7 @@ TEST(BuilderCompleteness077C4, OrdinalVariantsAreStructurallyDistinctAndBareName
             // so skip the multi-MB build_<Msg>/registry tail without invoking
             // the regex (~558 matches instead of ~1M). Mirrors the idiom in
             // test_077_builder_dedup_count.cpp.
-            if (line.rfind("struct G_", 0) != 0) {
+            if (!line.starts_with("struct G_")) {
                 continue;
             }
             std::smatch m;

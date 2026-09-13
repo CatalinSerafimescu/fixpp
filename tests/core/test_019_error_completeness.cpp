@@ -25,7 +25,7 @@ static const std::set<error> k019_expected_set = {
 };
 
 // Last pre-019 enumerator (017 boundary): slot 128.
-static const std::uint8_t k_slot_before_019 = 128u;
+static const std::uint8_t k_slot_before_019 = 128U;
 
 // Expected slot for each 019 enumerator.
 struct SlotCase {
@@ -35,8 +35,8 @@ struct SlotCase {
 };
 
 static const SlotCase k019_slots[] = {
-    {error::app_do_not_send, 129, "app_do_not_send"},
-    {error::app_callback_threw, 130, "app_callback_threw"},
+    {.e = error::app_do_not_send, .expected_slot = 129, .name = "app_do_not_send"},
+    {.e = error::app_callback_threw, .expected_slot = 130, .name = "app_callback_threw"},
 };
 
 // ── Exact-set equality (MISSING + UNEXPECTED diff) ──────────────────────────
@@ -49,7 +49,7 @@ TEST(Error019Completeness, ExactSetEquality) {
     for (error e : k019_expected_set) {
         named_slots.insert(static_cast<std::uint8_t>(e));
     }
-    const std::set<std::uint8_t> expected_slots = {129u, 130u};
+    const std::set<std::uint8_t> expected_slots = {129U, 130U};
     EXPECT_EQ(named_slots, expected_slots)
         << "the 2 named 019 enumerators must occupy exactly slots 129-130 "
            "(no alias, none outside the block)";
@@ -60,7 +60,7 @@ TEST(Error019Completeness, ExactSetEquality) {
     // 132. The 020 exact-SET completeness of slot 131 is owned by the 020
     // completeness gate (test_020_*); here we only assert the 019 block did not
     // grow and that nothing exists beyond 020's 131. [const §X.4] append-only.
-    EXPECT_EQ(fixpp::core::error_message(static_cast<error>(132u)),
+    EXPECT_EQ(fixpp::core::error_message(static_cast<error>(132U)),
               std::string_view{"unknown error"})
         << "slot 132 carries a message — a message-bearing enumerator was added "
            "beyond the 020 boundary (slot 131); see [const §X.4] append-only review";
@@ -105,5 +105,5 @@ TEST(Error019Completeness, ToStringNonEmpty) {
 TEST(Error019Completeness, AppendOnlySlot128Unchanged) {
     // [const §X.4] non-renumbering contract: slot 128 must remain
     // otel_provider_init_failed (017's last slot).
-    EXPECT_EQ(static_cast<std::uint8_t>(error::otel_provider_init_failed), 128u);
+    EXPECT_EQ(static_cast<std::uint8_t>(error::otel_provider_init_failed), 128U);
 }

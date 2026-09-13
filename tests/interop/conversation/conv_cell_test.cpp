@@ -186,23 +186,27 @@ std::vector<rb::TypedEntry> typed_reads_for(std::string const& mt,
                                               std::pmr::null_memory_resource()};
     auto push_sv = [&](int tag, fixpp::core::expected_t<std::string_view> r) {
         if (r.has_value())
-            out.push_back({std::to_string(tag), conv::fix_type_for_tag(tag),
-                           typed_val(tag, std::string(*r))});
+            out.push_back({.path = std::to_string(tag),
+                           .fix_type = conv::fix_type_for_tag(tag),
+                           .value = typed_val(tag, std::string(*r))});
     };
     auto push_char = [&](int tag, fixpp::core::expected_t<char> r) {
         if (r.has_value())
-            out.push_back({std::to_string(tag), conv::fix_type_for_tag(tag),
-                           typed_val(tag, std::string(1, *r))});
+            out.push_back({.path = std::to_string(tag),
+                           .fix_type = conv::fix_type_for_tag(tag),
+                           .value = typed_val(tag, std::string(1, *r))});
     };
     auto push_int = [&](int tag, fixpp::core::expected_t<std::int32_t> r) {
         if (r.has_value())
-            out.push_back({std::to_string(tag), conv::fix_type_for_tag(tag),
-                           typed_val(tag, std::to_string(*r))});
+            out.push_back({.path = std::to_string(tag),
+                           .fix_type = conv::fix_type_for_tag(tag),
+                           .value = typed_val(tag, std::to_string(*r))});
     };
     auto push_dec = [&](int tag, fixpp::core::expected_t<fixpp::decimal_t> r) {
         if (r.has_value())
-            out.push_back(
-                {std::to_string(tag), conv::fix_type_for_tag(tag), typed_val(tag, dec_to_str(*r))});
+            out.push_back({.path = std::to_string(tag),
+                           .fix_type = conv::fix_type_for_tag(tag),
+                           .value = typed_val(tag, dec_to_str(*r))});
     };
 
     if (mt == "8") {  // ExecutionReport: B-02, B-06
@@ -354,7 +358,7 @@ public:
 
     template <typename F>
     void write_or_defer(F&& write_call) {
-        std::lock_guard<std::mutex> lk(hello_mu);
+        std::scoped_lock lk(hello_mu);
         if (hello_written) {
             write_call();
         } else {
@@ -363,7 +367,7 @@ public:
     }
 
     void mark_hello_written() {
-        std::lock_guard<std::mutex> lk(hello_mu);
+        std::scoped_lock lk(hello_mu);
         for (auto& fn : pending_before_hello) {
             fn();
         }
@@ -372,14 +376,15 @@ public:
     }
 
     long long next_occurrence(long long seq, std::string const& dir) {
-        std::lock_guard<std::mutex> lk(occ_mu);
+        std::scoped_lock lk(occ_mu);
         return occurrences[{seq, dir}]++;
     }
 
     // Called synchronously right before Engine::send() for a fixpp-originated
     // message — the call site IS the builder-input capture (C-8).
     void arm_pending_sent(std::string step_id, std::vector<rb::FieldEntry> fields) {
-        pending_sent = PendingSent{std::move(step_id), std::move(fields)};
+        pending_sent =
+            PendingSent{.script_step_id = std::move(step_id), .fields = std::move(fields)};
     }
 
     fixpp::core::expected_t<void> toApp(MessageView<access_mode::Index> const& msg,
@@ -422,7 +427,7 @@ public:
             // the peer's declared intent (FR-007/SC-002).
             std::string const step_id = peer_step_id_for_stage(stage);
             if (!step_id.empty()) {
-                typed_captures.push_back(TypedCapture{step_id, typed});
+                typed_captures.push_back(TypedCapture{.step_id = step_id, .entries = typed});
             }
             long long const occ = next_occurrence(seq, std::string(rb::kDirectionPeerToFixpp));
             // data-model §13/T061a: the disposition ordinal is the SAME
@@ -468,19 +473,20 @@ public:
             if (decl.step_id == "B-08") {
                 int const n = self->id_mint_counter.fetch_add(1) + 1;
                 self->last_b08_order_id = "FXORD" + std::to_string(n);
-                build_fields.push_back({"37", self->last_b08_order_id});
-                build_fields.push_back({"17", "FXEXC" + std::to_string(n)});
+                build_fields.push_back({.path = "37", .value = self->last_b08_order_id});
+                build_fields.push_back({.path = "17", .value = "FXEXC" + std::to_string(n)});
             } else if (decl.step_id == "B-10") {
-                build_fields.push_back({"37", self->last_b08_order_id});
+                build_fields.push_back({.path = "37", .value = self->last_b08_order_id});
             } else if (decl.step_id == "B-12") {
                 int const n = self->id_mint_counter.fetch_add(1) + 1;
-                build_fields.push_back({"37", "FXORD" + std::to_string(n)});
-                build_fields.push_back({"17", "FXEXC" + std::to_string(n)});
+                build_fields.push_back({.path = "37", .value = "FXORD" + std::to_string(n)});
+                build_fields.push_back({.path = "17", .value = "FXEXC" + std::to_string(n)});
             }
 
             std::vector<rb::FieldEntry> sent_fields;
             sent_fields.reserve(build_fields.size());
-            for (auto const& f : build_fields) sent_fields.push_back({f.path, f.value});
+            for (auto const& f : build_fields)
+                sent_fields.push_back({.path = f.path, .value = f.value});
             self->arm_pending_sent(decl.step_id, std::move(sent_fields));
 
             std::array<std::byte, 2048> buf{};
@@ -578,8 +584,8 @@ std::string describe_a_resend_rejection(std::string const& run_dir) {
     std::ifstream f(run_dir + "/counterparty-transcript.txt");
     std::string line;
     while (std::getline(f, line)) {
-        if (line.find("35=3") != std::string::npos &&
-            line.find("Tag specified out of required order, field=43") != std::string::npos) {
+        if (line.contains("35=3") &&
+            line.contains("Tag specified out of required order, field=43")) {
             return "peer rejected fixpp's B-01 replay with Reject(35=3) 373=14 "
                    "(\"Tag specified out of required order\") field=43 -- "
                    "PossDupFlag(43)/OrigSendingTime(122) landed after a body field instead "
@@ -765,8 +771,9 @@ TEST(Conversation, Cell) {
                 auto seq_r = co_await sess->seqnum_mgr_test_access().assign_outbound();
                 if (!seq_r.has_value()) co_return std::unexpected(seq_r.error());
                 std::array<std::byte, 512> buf{};
-                std::vector<intent::FieldEntry> const reject_fields = {{"112", "TR-ADMIN-0002"},
-                                                                       {"55", "OUT-OF-CONTEXT"}};
+                std::vector<intent::FieldEntry> const reject_fields = {
+                    {.path = "112", .value = "TR-ADMIN-0002"},
+                    {.path = "55", .value = "OUT-OF-CONTEXT"}};
                 auto frame_r =
                     conv::build_frame_via_writer(buf, "1", *seq_r, sender_id, target_id,
                                                  begin_string, now_utc_ms(), reject_fields);
@@ -811,9 +818,8 @@ TEST(Conversation, Cell) {
         std::string reject_line;
         bool peer_rejected = false;
         while (std::getline(reject_transcript, reject_line)) {
-            if (reject_line.find("35=3") != std::string::npos &&
-                reject_line.find("372=1") != std::string::npos &&
-                reject_line.find("373=2") != std::string::npos) {
+            if (reject_line.contains("35=3") && reject_line.contains("372=1") &&
+                reject_line.contains("373=2")) {
                 peer_rejected = true;
                 break;
             }
@@ -835,12 +841,12 @@ TEST(Conversation, Cell) {
         intent::Message const& decl = it->second;
         std::vector<rb::FieldEntry> sent_fields;
         sent_fields.reserve(decl.fields.size());
-        for (auto const& f : decl.fields) sent_fields.push_back({f.path, f.value});
+        for (auto const& f : decl.fields) sent_fields.push_back({.path = f.path, .value = f.value});
         // The peer's readback genuinely reports the NoXxx COUNT field (it is
         // on the wire) -- the sent record must carry it too, or FR-006 sees
         // a `spurious` mismatch on every group-bearing step (B-01).
         for (auto const& f : conv::derive_group_count_fields(decl.fields)) {
-            sent_fields.push_back({f.path, f.value});
+            sent_fields.push_back({.path = f.path, .value = f.value});
         }
         app->arm_pending_sent(step_id, std::move(sent_fields));
 
@@ -914,7 +920,7 @@ TEST(Conversation, Cell) {
 
         std::vector<rb::FieldEntry> sent_fields;
         sent_fields.reserve(decl.fields.size());
-        for (auto const& f : decl.fields) sent_fields.push_back({f.path, f.value});
+        for (auto const& f : decl.fields) sent_fields.push_back({.path = f.path, .value = f.value});
         long long const seq_ll = static_cast<long long>(static_cast<std::uint32_t>(assigned_seq));
         long long const occ = app->next_occurrence(seq_ll, std::string(rb::kDirectionFixppToPeer));
         stream.sent(decl.msg_type, seq_ll, rb::kDirectionFixppToPeer, occ, "B-05",
@@ -989,9 +995,10 @@ TEST(Conversation, Cell) {
             intent::Message const& decl = it->second;
             std::vector<rb::FieldEntry> sent_fields;
             sent_fields.reserve(decl.fields.size());
-            for (auto const& f : decl.fields) sent_fields.push_back({f.path, f.value});
+            for (auto const& f : decl.fields)
+                sent_fields.push_back({.path = f.path, .value = f.value});
             for (auto const& f : conv::derive_group_count_fields(decl.fields)) {
-                sent_fields.push_back({f.path, f.value});
+                sent_fields.push_back({.path = f.path, .value = f.value});
             }
             long long const seq = app->b01_seq.load();
             long long const occ = app->next_occurrence(seq, std::string(rb::kDirectionFixppToPeer));
@@ -1033,8 +1040,8 @@ TEST(Conversation, Cell) {
                 r.direction != std::string(rb::kDirectionFixppToPeer)) {
                 continue;
             }
-            auto fe = std::find_if(r.fields.begin(), r.fields.end(),
-                                   [](rb::FieldEntry const& f) { return f.path == "355"; });
+            auto fe = std::ranges::find_if(r.fields,
+                                           [](rb::FieldEntry const& f) { return f.path == "355"; });
             if (fe == r.fields.end()) continue;
             found_355 = true;
             EXPECT_EQ(fe->value, expected_bytes)
@@ -1073,7 +1080,7 @@ TEST(Conversation, Cell) {
     // C1/C2 -- 12 keys. On C3/C4, B-01 additionally declares occurrence 1
     // (A-RESEND's replay, "declared_inapplicable" excludes it on C1/C2 only)
     // -- 13 keys. Derived from census.yaml, not an independent literal.
-    std::size_t const expected_rows = qfj_combo_probe ? 13u : 12u;
+    std::size_t const expected_rows = qfj_combo_probe ? 13U : 12U;
     std::string const known_cause_tail = qfj_combo_probe ? [&] {
         std::string const c = describe_a_resend_rejection(run_dir);
         return c.empty() ? std::string() : (" -- " + c);
@@ -1148,7 +1155,7 @@ TEST(Conversation, Cell) {
         auto it = intent_index.find({cap.step_id, "peer"});
         ASSERT_NE(it, intent_index.end())
             << "T054: no peer intent entry declared for step " << cap.step_id;
-        EXPECT_GT(cap.entries.size(), 0u)
+        EXPECT_GT(cap.entries.size(), 0U)
             << "T054: zero typed fields captured for step " << cap.step_id;
         for (auto const& te : cap.entries) {
             auto declared =

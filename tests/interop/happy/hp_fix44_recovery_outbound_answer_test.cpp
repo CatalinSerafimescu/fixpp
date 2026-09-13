@@ -126,14 +126,14 @@ void expect_app_replay_or_skip(const std::string& gpath) {
     for (const auto& f : frames) {
         if (f.dir != '>') continue;  // fixpp→peer only
         const std::string_view w{reinterpret_cast<const char*>(f.bytes.data()), f.bytes.size()};
-        const bool is_nos = w.find(
-                                "\x01"
-                                "35=D"
-                                "\x01") != std::string_view::npos;
-        const bool poss_dup = w.find(
-                                  "\x01"
-                                  "43=Y"
-                                  "\x01") != std::string_view::npos;
+        const bool is_nos = w.contains(
+            "\x01"
+            "35=D"
+            "\x01");
+        const bool poss_dup = w.contains(
+            "\x01"
+            "43=Y"
+            "\x01");
         if (is_nos && poss_dup) ++replayed_nos;
     }
     EXPECT_GE(replayed_nos, 1)
@@ -225,8 +225,10 @@ TEST_P(HappyRecoveryOutboundAnswer, FixppAnswersResendRequestAndPeerResyncs) {
     desc.induction = fixpp::interop::AdminInduction::qfj_restart_resend;
     desc.self_deadline_ms = std::chrono::milliseconds{30000};  // FR-010: 30 s
     desc.round_trips = {
-        {"US3-3", "[FIX-SL §4.8.2]"},  // QFJ issues ResendRequest; fixpp answers correctly
-        {"US3-4", "[FIX-SL §4.8.6]"},  // both peers at Active, QFJ resynced, no data loss
+        {.ac_ref = "US3-3",
+         .spec_ref = "[FIX-SL §4.8.2]"},  // QFJ issues ResendRequest; fixpp answers correctly
+        {.ac_ref = "US3-4",
+         .spec_ref = "[FIX-SL §4.8.6]"},  // both peers at Active, QFJ resynced, no data loss
     };
     desc.acceptance_ids = {"US3-3", "US3-4"};
 

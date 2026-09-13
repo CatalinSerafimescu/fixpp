@@ -310,7 +310,7 @@ TEST(RequiredScopeCensus, MessageLevelMatchesTableViewAndIrAcrossAllTenDicts) {
         total_messages += checked;
     }
     std::cout << "  total messages censused across all 10 dicts: " << total_messages << "\n";
-    EXPECT_GT(total_messages, 0u);
+    EXPECT_GT(total_messages, 0U);
 }
 
 // Contract 1a's text (contracts/census-and-agreement.md) names only "except
@@ -385,7 +385,7 @@ TEST(RequiredScopeCensus, PerGroupContextStoreMatchesWalkerExceptL0661GroupBlind
     std::cout << "  total group contexts censused: " << total_contexts << "\n";
     std::cout << "  RC5: maximum per-group DIRECT required-member count observed = "
               << max_required_count << " (" << max_context_label << ")\n";
-    EXPECT_GT(total_contexts, 0u);
+    EXPECT_GT(total_contexts, 0U);
 
     // RC5 (Contract 1a): pins the shipped small-count assumption so the
     // dynamic-width per-instance check (T004) cannot silently regress to a
@@ -393,7 +393,7 @@ TEST(RequiredScopeCensus, PerGroupContextStoreMatchesWalkerExceptL0661GroupBlind
     // by this same census (FIX43.xml msg=N no_tag=73); if a future dictionary
     // refresh changes it, update this pin deliberately (not silently) — the
     // point is to KNOW.
-    EXPECT_EQ(max_required_count, 6u) << "shipped maximum per-group required-member count changed "
+    EXPECT_EQ(max_required_count, 6U) << "shipped maximum per-group required-member count changed "
                                          "from the measured baseline (6) — "
                                          "re-examine whether the dynamic-width check "
                                          "(validator.hpp consume_group) still covers it "
@@ -440,7 +440,7 @@ TEST(RequiredScopeCensus, PerGroupContextStoreIsPopulatedForFormerlyGroupBlindDi
         auto const dict = load_actual(dc, &mr);
         auto const tv = dict.as_table_view();
 
-        ASSERT_GT(oracle.group_members.size(), 0u)
+        ASSERT_GT(oracle.group_members.size(), 0U)
             << dc.label
             << ": independent oracle found zero real groups — either the walker "
                "regressed or this dict no longer declares groups";
@@ -464,7 +464,7 @@ TEST(RequiredScopeCensus, PerGroupContextStoreIsPopulatedForFormerlyGroupBlindDi
             ++checked;
         }
         // The whole point of #196: these three used to register ZERO contexts.
-        EXPECT_GT(checked, 0u) << dc.label << ": no group contexts checked at all";
+        EXPECT_GT(checked, 0U) << dc.label << ": no group contexts checked at all";
         std::cout << "  " << dc.label << ": " << checked << " group context(s), " << non_empty
                   << " with a non-empty required-member set\n";
     }
@@ -526,7 +526,7 @@ TEST(RequiredScopeCensus, BareStoreIsAValidPerContextVariantExceptL0661GroupBlin
         total_no_tags += checked_here;
     }
     std::cout << "  total no_tags censused: " << total_no_tags << "\n";
-    EXPECT_GT(total_no_tags, 0u);
+    EXPECT_GT(total_no_tags, 0U);
 }
 
 // ============================================================================
@@ -561,7 +561,7 @@ TEST(RequiredScopeCensus, Fix42BareStoreRegistersAllEighteenGroupTags) {
     auto const dict = fixpp::dict::XmlLoader{}.load(path, &mr);
     auto const tv = dict.as_table_view();
 
-    ASSERT_EQ(oracle.group_tags.size(), 18u)
+    ASSERT_EQ(oracle.group_tags.size(), 18U)
         << "FIX42 oracle group-tag count drifted from the pinned 18 -- re-derive, don't silently "
            "update this pin";
 
@@ -581,7 +581,8 @@ TEST(RequiredScopeCensus, Fix40AndFix41BareStoreRegisterAllGroupTags) {
         char const* filename;
         std::size_t expected_count;
     };
-    std::vector<Case> const kCases{{"FIX40.xml", 4}, {"FIX41.xml", 7}};
+    std::vector<Case> const kCases{{.filename = "FIX40.xml", .expected_count = 4},
+                                   {.filename = "FIX41.xml", .expected_count = 7}};
 
     for (auto const& c : kCases) {
         auto storage = std::make_unique<std::byte[]>(kArenaBytes);
@@ -681,10 +682,10 @@ TEST(RequiredScopeCensus, Fix42Tag146PerContextMemberSetsMatchOracle) {
         ++contexts_checked;
     }
 
-    ASSERT_EQ(contexts_checked, 6u)
+    ASSERT_EQ(contexts_checked, 6U)
         << "oracle found a different number of FIX42 tag-146 occurrences than the pinned 6 -- "
            "re-derive, don't silently update this pin";
-    ASSERT_EQ(distinct_variants.size(), 4u)
+    ASSERT_EQ(distinct_variants.size(), 4U)
         << "oracle found a different number of distinct tag-146 member-set variants than the "
            "pinned 4 -- re-derive, don't silently update this pin";
 
@@ -693,7 +694,7 @@ TEST(RequiredScopeCensus, Fix42Tag146PerContextMemberSetsMatchOracle) {
         sizes.push_back(v.size());
     }
     std::ranges::sort(sizes);
-    EXPECT_EQ(sizes, (std::vector<std::size_t>{19u, 20u, 22u, 31u}))
+    EXPECT_EQ(sizes, (std::vector<std::size_t>{19U, 20U, 22U, 31U}))
         << "distinct tag-146 variant sizes drifted from the pinned {19,20,22,31} "
            "({News,Email}=19, MarketDataRequest=20, "
            "{SecurityDefinitionRequest,SecurityDefinition}=22, QuoteRequest=31)";
@@ -750,7 +751,8 @@ TEST(RequiredScopeCensus, Fix42Tag146PerContextMemberSetsMatchOracle) {
            "[]) -- the GroupContextKey{msg_type, {}, 146} lookup below no longer holds; widen "
            "this scan to walk the found node's ancestor chain and resolve a non-empty path";
 
-    GroupContextKey const first_seen_key{first_seen_msg_type, {}, 146};
+    GroupContextKey const first_seen_key{
+        .msg_type = first_seen_msg_type, .path = {}, .no_tag = 146};
     auto const oit = oracle.group_members.find(first_seen_key);
     ASSERT_NE(oit, oracle.group_members.end())
         << "oracle has no group_members entry for the scan-derived first-seen key (msg_type="
@@ -765,7 +767,7 @@ TEST(RequiredScopeCensus, Fix42Tag146PerContextMemberSetsMatchOracle) {
     EXPECT_EQ(first_seen_msg_type, "B")
         << "scan-derived first-seen msg_type for tag 146 drifted from the pinned 'B' (News) -- "
            "re-verify the dictionary's message order didn't change";
-    ASSERT_EQ(first_seen_variant.size(), 19u)
+    ASSERT_EQ(first_seen_variant.size(), 19U)
         << "FIX42 News(B) tag-146 member count drifted from the derived 19";
 
     auto const bare_actual = to_set(tv.group_member_tags(146));
@@ -814,12 +816,30 @@ TEST(RequiredScopeCensus, SixUnchangedDictionariesBareStoreExactSet) {
         std::size_t expected_count;
     };
     std::vector<Case> const kCases{
-        {"FIX44.xml", "FIX44.xml", false, 59},
-        {"FIX50.xml", "FIX50.xml", false, 67},
-        {"FIX50SP1.xml", "FIX50SP1.xml", false, 97},
-        {"FIX50SP2.xml", "FIX50SP2.xml", false, 505},  // #208 retired -- see banner above
-        {"FIXT11.xml", "FIXT11.xml", false, 1},
-        {"OrchestraFIXLatest.xml", "OrchestraFIXLatest.xml", true, 524},
+        {.label = "FIX44.xml",
+         .filename = "FIX44.xml",
+         .is_orchestra = false,
+         .expected_count = 59},
+        {.label = "FIX50.xml",
+         .filename = "FIX50.xml",
+         .is_orchestra = false,
+         .expected_count = 67},
+        {.label = "FIX50SP1.xml",
+         .filename = "FIX50SP1.xml",
+         .is_orchestra = false,
+         .expected_count = 97},
+        {.label = "FIX50SP2.xml",
+         .filename = "FIX50SP2.xml",
+         .is_orchestra = false,
+         .expected_count = 505},  // #208 retired -- see banner above
+        {.label = "FIXT11.xml",
+         .filename = "FIXT11.xml",
+         .is_orchestra = false,
+         .expected_count = 1},
+        {.label = "OrchestraFIXLatest.xml",
+         .filename = "OrchestraFIXLatest.xml",
+         .is_orchestra = true,
+         .expected_count = 524},
     };
 
     for (auto const& c : kCases) {
@@ -1015,7 +1035,7 @@ TEST(RequiredScopeCensus, Fix43RegisteredSetDeltaIsExactlyPlusOneTag576) {
     auto const dict = fixpp::dict::XmlLoader{}.load(path, &mr);
     auto const tv = dict.as_table_view();
 
-    ASSERT_EQ(oracle.group_tags.size(), 34u)
+    ASSERT_EQ(oracle.group_tags.size(), 34U)
         << "FIX43 oracle struct-set drifted from the pinned 34 -- re-derive, don't silently update";
 
     // T004's pre-change baseline (33 tags), derived here as oracle.group_tags
@@ -1023,7 +1043,7 @@ TEST(RequiredScopeCensus, Fix43RegisteredSetDeltaIsExactlyPlusOneTag576) {
     // 34-tag output rather than a second hand-copied literal.
     auto baseline_before = oracle.group_tags;
     baseline_before.erase(576);
-    ASSERT_EQ(baseline_before.size(), 33u)
+    ASSERT_EQ(baseline_before.size(), 33U)
         << "derived T004 baseline drifted from the pinned 33 -- re-derive";
 
     auto const actual = bare_registered_group_tags(tv);

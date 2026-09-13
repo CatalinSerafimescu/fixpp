@@ -74,10 +74,9 @@ namespace {
 
 // ── Frame builder helpers ──────────────────────────────────────────────────────
 
-static std::vector<std::byte> make_raw_frame(std::string_view begin_string,
-                                             std::string_view msg_type, std::uint32_t seq,
-                                             std::string_view sender, std::string_view target,
-                                             std::string extra_body = {}) {
+std::vector<std::byte> make_raw_frame(std::string_view begin_string, std::string_view msg_type,
+                                      std::uint32_t seq, std::string_view sender,
+                                      std::string_view target, std::string extra_body = {}) {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -109,10 +108,9 @@ static std::vector<std::byte> make_raw_frame(std::string_view begin_string,
     return frame;
 }
 
-static std::vector<std::byte> make_logon_frame(std::string_view begin_string = "FIX.4.2",
-                                               std::uint32_t seq = 1,
-                                               std::string_view sender = "TW",
-                                               std::string_view target = "ISLD", int heartbt = 30) {
+std::vector<std::byte> make_logon_frame(std::string_view begin_string = "FIX.4.2",
+                                        std::uint32_t seq = 1, std::string_view sender = "TW",
+                                        std::string_view target = "ISLD", int heartbt = 30) {
     std::string extra =
         "98=0\x01"
         "108=" +
@@ -121,7 +119,7 @@ static std::vector<std::byte> make_logon_frame(std::string_view begin_string = "
 }
 
 // Minimal app payload (35=D, NewOrderSingle-like opaque bytes).
-static std::vector<std::byte> make_app_payload() {
+std::vector<std::byte> make_app_payload() {
     // 020-g2 T010: the send path now validates that the payload leads with 35=.
     // Updated to include 35=D so existing 019 tests continue to pass after
     // the opaque-payload validation lands.
@@ -288,7 +286,7 @@ TEST(ApplicationOutbound, SendCrossesWireAfterToApp) {
         << "send() should succeed; error = " << static_cast<int>(result.error());
 
     // toApp must have fired once
-    ASSERT_EQ(app->to_app_calls.size(), 1u) << "toApp must fire exactly once";
+    ASSERT_EQ(app->to_app_calls.size(), 1U) << "toApp must fire exactly once";
 
     // Wire must have one new frame (the app message)
     EXPECT_GT(f.captured_frames.size(), frames_before) << "frame must cross wire";
@@ -334,7 +332,7 @@ TEST(ApplicationOutbound, ToAppVetoBlocksTransmit) {
         << "session must stay Active after toApp veto";
 
     // toApp must have fired once
-    ASSERT_EQ(app->to_app_calls.size(), 1u) << "toApp must fire before the veto";
+    ASSERT_EQ(app->to_app_calls.size(), 1U) << "toApp must fire before the veto";
 }
 
 // ── Test 3: toApp returning another error → send aborts, result is that error ──
@@ -389,7 +387,7 @@ TEST(ApplicationOutbound, ToAdminFiresOnAdminEmit) {
     Session sess(f.engine_cfg, cfg);
 
     // Before drive-to-Active: no toAdmin calls yet.
-    ASSERT_EQ(app->to_admin_calls.size(), 0u);
+    ASSERT_EQ(app->to_admin_calls.size(), 0U);
 
     // Drive to Active: session emits a Logon reply (acceptor role).
     f.open_to_active(sess);
@@ -409,7 +407,7 @@ TEST(ApplicationOutbound, ToAdminFiresOnAdminEmit) {
     bool logon_on_wire = false;
     for (const auto& frame : f.captured_frames) {
         std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
-        if (wire.find("35=A") != std::string::npos) {
+        if (wire.contains("35=A")) {
             logon_on_wire = true;
         }
     }
@@ -485,7 +483,8 @@ TEST(ApplicationOutbound, EnginesSendWithUnknownIdReturnsInvalidArgument) {
     fixpp::session::Engine engine(ioc.get_executor(), std::move(ecfg));
 
     // Unknown SessionId
-    fixpp::session::SessionId unknown_id{"FIX.4.2", "NOBODY", "NOBODY"};
+    fixpp::session::SessionId unknown_id{
+        .begin_string = "FIX.4.2", .sender_comp_id = "NOBODY", .target_comp_id = "NOBODY"};
     auto payload = make_app_payload();
 
     auto fut = asio::co_spawn(ioc, engine.send(unknown_id, std::span<const std::byte>(payload)),
@@ -504,7 +503,7 @@ TEST(ApplicationOutbound, EnginesSendWithUnknownIdReturnsInvalidArgument) {
         << "error must be session_invalid_argument (119)";
 
     // Must not have called toApp
-    EXPECT_EQ(app->to_app_calls.size(), 0u) << "toApp must NOT fire for unknown id";
+    EXPECT_EQ(app->to_app_calls.size(), 0U) << "toApp must NOT fire for unknown id";
 
     // Clean up engine (stop + drain ioc)
     auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);

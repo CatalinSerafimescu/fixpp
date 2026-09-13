@@ -86,7 +86,7 @@ TEST(DrainOnStrandCancelDuringReap, OnCancelWinsWhenCancelPrecedesDrain) {
                                    }),
                                asio::detached);
             }
-            co_await yield_n(N * 2 + 4);
+            co_await yield_n((N * 2) + 4);
 
             // SYNCHRONOUS emit BEFORE the drain: on_cancel CASes waiter[0]→cancelled
             // and schedules its resume; the later reap's CAS on it must FAIL.
@@ -101,7 +101,7 @@ TEST(DrainOnStrandCancelDuringReap, OnCancelWinsWhenCancelPrecedesDrain) {
                     drain_done.store(true, std::memory_order_release);
                 },
                 asio::detached);
-            co_await yield_n(N * 2 + 6);
+            co_await yield_n((N * 2) + 6);
 
             holder = expected_t<async_lock_guard>{};  // release → drain finalizes
         };
@@ -177,7 +177,7 @@ TEST(DrainOnStrandCancelDuringReap, PostDrainCancelIsBenignNoDoubleResume) {
                                    }),
                                asio::detached);
             }
-            co_await yield_n(N * 2 + 4);
+            co_await yield_n((N * 2) + 4);
 
             // Drain while holding → reaps all N (reap wins the CAS). Holder still held.
             asio::co_spawn(
@@ -188,7 +188,7 @@ TEST(DrainOnStrandCancelDuringReap, PostDrainCancelIsBenignNoDoubleResume) {
                     drain_done.store(true, std::memory_order_release);
                 },
                 asio::detached);
-            co_await yield_n(N * 2 + 6);  // let the drain reap all waiters
+            co_await yield_n((N * 2) + 6);  // let the drain reap all waiters
 
             // LATER cancel on each (now-reaped → cancelled) waiter: CAS fails, no-op.
             // A double-resume here would push completed > N → ASan UAF.

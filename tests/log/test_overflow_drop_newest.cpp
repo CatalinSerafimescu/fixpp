@@ -74,7 +74,7 @@ TEST(LogOverflow, DropNewestPreservesOldest) {
     sinks.push_back(std::move(pausing_sink_ptr));
 
     fixpp::log::LoggerConfig cfg;
-    cfg.capacity = 1u;  // one-slot ring (smallest possible)
+    cfg.capacity = 1U;  // one-slot ring (smallest possible)
     cfg.on_overflow = fixpp::log::overflow_policy::drop_newest;
 
     auto logger = std::make_unique<fixpp::log::Logger>(std::move(cfg), std::move(sinks));
@@ -97,7 +97,7 @@ TEST(LogOverflow, DropNewestPreservesOldest) {
 
     // Enqueue record #0 (the "oldest").
     logger->enqueue(fixpp::log::Level::info, fixpp::log::cat::session, k_first_fmt_id,
-                    zeroed_trace_id, 0u, ts, {fixpp::log::ArgValue::from_u64(0u)});
+                    zeroed_trace_id, 0U, ts, {fixpp::log::ArgValue::from_u64(0U)});
 
     // Give the drain thread a brief moment to pick up the first record and
     // enter the blocking emit().  Without this, the drain might not have
@@ -135,7 +135,7 @@ TEST(LogOverflow, DropNewestPreservesOldest) {
     // We loop and count drops ourselves vs. what the logger reports.
     for (int i = 1; i < k_total_emits; ++i) {
         logger->enqueue(fixpp::log::Level::info, fixpp::log::cat::session, k_later_fmt_id,
-                        zeroed_trace_id, 0u, ts,
+                        zeroed_trace_id, 0U, ts,
                         {fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(i))});
     }
 
@@ -187,10 +187,10 @@ TEST(LogOverflow, DropNewestPreservesOldest) {
         << "Total accounting: drop_count + captured must equal total emits";
 
     // At least some were dropped (capacity=1, 100 emits → at least 98 drops).
-    EXPECT_GE(total_drops, 1u) << "At least one record must have been dropped";
+    EXPECT_GE(total_drops, 1U) << "At least one record must have been dropped";
 
     // The drain processed at least one record.
-    ASSERT_GE(total_captured, 1u) << "At least one record must have been processed";
+    ASSERT_GE(total_captured, 1U) << "At least one record must have been processed";
 
     // ── OLDEST-retained proof ────────────────────────────────────────────────
     // The FIRST record captured by the sink must be the OLDEST one we enqueued
@@ -279,7 +279,7 @@ TEST(LogOverflow, ExactDropCount99WithPausedDrain) {
     sinks.push_back(std::move(exact_sink_ptr));
 
     fixpp::log::LoggerConfig cfg;
-    cfg.capacity = 1u;
+    cfg.capacity = 1U;
     cfg.on_overflow = fixpp::log::overflow_policy::drop_newest;
 
     auto logger = std::make_unique<fixpp::log::Logger>(std::move(cfg), std::move(sinks));
@@ -296,7 +296,7 @@ TEST(LogOverflow, ExactDropCount99WithPausedDrain) {
     // Enqueue all 100 records quickly.
     for (int i = 0; i < k_total_emits; ++i) {
         auto fid = (i == 0) ? k_first_fmt_id : k_later_fmt_id;
-        logger->enqueue(fixpp::log::Level::info, fixpp::log::cat::session, fid, zeroed_trace_id, 0u,
+        logger->enqueue(fixpp::log::Level::info, fixpp::log::cat::session, fid, zeroed_trace_id, 0U,
                         ts, {fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(i))});
     }
 
@@ -333,7 +333,7 @@ TEST(LogOverflow, ExactDropCount99WithPausedDrain) {
         << "drop_count + captured must equal k_total_emits";
 
     // Exact drop count == 99 (1 record retained, 99 dropped).
-    EXPECT_EQ(total_drops, 99u)
+    EXPECT_EQ(total_drops, 99U)
         << "With capacity=1 and drain fully paused, 99 of 100 records must be dropped";
 
     // Exactly 1 record captured.

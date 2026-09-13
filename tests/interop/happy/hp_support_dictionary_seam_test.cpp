@@ -146,7 +146,7 @@ TEST(HpSupportDictionarySeam, DigestMatchesIndependentSha256) {
     std::string const path = fixpp::interop::hp::production_fix44_dict_path();
     std::string const expected = independent_sha256_hex(path);
 
-    ASSERT_EQ(prod.dictionary_digest.size(), 64u);
+    ASSERT_EQ(prod.dictionary_digest.size(), 64U);
     EXPECT_EQ(prod.dictionary_digest, expected);
 }
 

@@ -210,7 +210,7 @@ std::vector<std::byte> make_heartbeat_frame(std::string_view begin_string, std::
     std::string full = hdr + body;
     unsigned int cs = 0;
     for (unsigned char c : full) {
-        cs += static_cast<unsigned char>(c);
+        cs += c;
     }
     cs &= 0xFFU;
     char csbuf[4];

@@ -51,7 +51,6 @@
 
 namespace {
 
-using fixpp::core::error;
 using fixpp::sync::async_lock_guard;
 using fixpp::sync::async_mutex;
 using fixpp::sync::expected_t;
@@ -111,7 +110,7 @@ TEST(DrainImmediateDestroyAfterReap, AllCallbacksCompletedBeforeDrainReturns) {
         }
 
         // Yield to let waiters queue in state_.
-        co_await yield_n(N * 2 + 4);
+        co_await yield_n((N * 2) + 4);
 
         // Release holder so drain's quiescence loop doesn't spin on
         // active_holders_count_ > 0.
@@ -217,7 +216,7 @@ TEST(DrainImmediateDestroyAfterReap, RepeatedDestroyIsClean) {
                     },
                     asio::use_future));
             }
-            co_await yield_n(N * 2 + 4);
+            co_await yield_n((N * 2) + 4);
             holder = expected_t<async_lock_guard>{};
             auto d = co_await mtx_ptr->cancel_and_drain();
             drain_ok = d.has_value();

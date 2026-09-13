@@ -46,7 +46,6 @@ namespace {
 
 using fixpp::core::error;
 using fixpp::wire::access_mode;
-using fixpp::wire::OffsetTable;
 using fixpp::wire::Parser;
 
 std::vector<std::byte> make_raw_frame(std::string const& body) {

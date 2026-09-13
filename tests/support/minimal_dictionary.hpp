@@ -66,7 +66,7 @@ constexpr std::string_view kMinimalFix42Xml = R"xml(
 // internal allocations.
 [[nodiscard]] inline std::shared_ptr<const fixpp::dict::Dictionary> make_minimal_dictionary() {
     // Allocate a PMR buffer on the heap; co-own it via the shared_ptr deleter.
-    constexpr std::size_t kBufSize = 64u * 1024u;
+    constexpr std::size_t kBufSize = 64U * 1024U;
     auto buf = std::make_unique<std::array<std::byte, kBufSize>>();
     auto* mr = new std::pmr::monotonic_buffer_resource{buf->data(), buf->size()};
 

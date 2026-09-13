@@ -71,7 +71,7 @@ fixpp::config::LoadResult load_path(const std::filesystem::path& p) {
 // Diagnostic search helper.
 bool has_diag_hp(const std::vector<fixpp::config::LoadDiagnostic>& diags,
                  fixpp::config::reason_class expected_reason, std::string_view expected_key_path) {
-    return std::any_of(diags.begin(), diags.end(), [&](const fixpp::config::LoadDiagnostic& d) {
+    return std::ranges::any_of(diags, [&](const fixpp::config::LoadDiagnostic& d) {
         return d.reason == expected_reason && d.key_path == expected_key_path;
     });
 }

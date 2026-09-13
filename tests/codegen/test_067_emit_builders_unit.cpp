@@ -270,8 +270,7 @@ TEST(Group067Census, N3DedupCollapseCensus) {
     std::vector<std::string> collapsed;
     for (auto const& m : root.child("messages").children("message")) {
         std::string const msg_type{m.attribute("msgtype").as_string("")};
-        bool const is_official =
-            std::find(kOfficial33.begin(), kOfficial33.end(), msg_type) != kOfficial33.end();
+        bool const is_official = std::ranges::find(kOfficial33, msg_type) != kOfficial33.end();
         if (!is_official) {
             continue;
         }
@@ -291,7 +290,7 @@ TEST(Group067Census, N3DedupCollapseCensus) {
     std::size_t visited = 0;
     for (auto const& m : root.child("messages").children("message")) {
         std::string const msg_type{m.attribute("msgtype").as_string("")};
-        if (std::find(kOfficial33.begin(), kOfficial33.end(), msg_type) != kOfficial33.end()) {
+        if (std::ranges::find(kOfficial33, msg_type) != kOfficial33.end()) {
             ++visited;
         }
     }
@@ -354,7 +353,7 @@ TEST(Group067Census, CensusWalkDetectsSyntheticCrossLevelCollapse) {
 
     auto const it = levels_by_tag.find(55);
     ASSERT_NE(it, levels_by_tag.end()) << "Symbol(55) not observed at all — walk did not descend";
-    EXPECT_GE(it->second.size(), 2u)
+    EXPECT_GE(it->second.size(), 2U)
         << "census_walk failed to detect Symbol(55) at both top-level (0) and NoOrders(73) — "
            "the N3 'clean' result on the real FIX44.xml census above would be a false negative "
            "if this failed";
@@ -713,9 +712,8 @@ VersionIR build_dedup_soundness_ir() {
             ir.group_tags.push_back(entry.no_tag);
         }
     }
-    std::sort(ir.group_tags.begin(), ir.group_tags.end());
-    ir.group_tags.erase(std::unique(ir.group_tags.begin(), ir.group_tags.end()),
-                        ir.group_tags.end());
+    std::ranges::sort(ir.group_tags);
+    ir.group_tags.erase(std::ranges::unique(ir.group_tags).begin(), ir.group_tags.end());
     return ir;
 }
 
@@ -762,13 +760,13 @@ TEST(Group077DedupSoundness, CollapsesByteIdenticalSignaturesToOneStruct) {
     EXPECT_NE(out.find("struct G_9002Args"), std::string::npos)
         << "no_tag 9002's two occurrences share a byte-identical signature — expected ONE "
            "bare groups::G_9002Args (G1b)";
-    EXPECT_EQ(count_occurrences(out, "struct G_9002Args"), 1u)
+    EXPECT_EQ(count_occurrences(out, "struct G_9002Args"), 1U)
         << "the shared plan must be emitted EXACTLY ONCE, not once per referencing message";
     EXPECT_EQ(out.find("G_9002_1Args"), std::string::npos)
         << "identical signatures must NOT be spuriously ordinaled";
     EXPECT_EQ(out.find("G_9002_2Args"), std::string::npos)
         << "identical signatures must NOT be spuriously ordinaled";
-    EXPECT_GE(count_occurrences(out, "groups::G_9002Args"), 2u)
+    EXPECT_GE(count_occurrences(out, "groups::G_9002Args"), 2U)
         << "both ZDEDUP9002A and ZDEDUP9002B must reference the SAME shared plan by "
            "qualified name";
 }

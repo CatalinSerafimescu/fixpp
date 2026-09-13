@@ -290,7 +290,7 @@ TEST_F(EnumGoldenManifestTest, CorpusHasThirteenRows) {
     // Sanity precondition for every other test here: T006's rebase (row 6
     // swapped to MessageEncoding(347), row 13 added as the DV-5
     // characterization row) makes this 13, not FR-018's original 12.
-    ASSERT_EQ(golden_.rows.size(), 13u);
+    ASSERT_EQ(golden_.rows.size(), 13U);
 }
 
 TEST_F(EnumGoldenManifestTest, DictionarySha1Fix44Matches) {

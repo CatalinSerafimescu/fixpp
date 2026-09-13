@@ -44,16 +44,19 @@ TEST(SessionIdTest, HashConsistentForEqualObjects) {
 }
 TEST(SessionIdTest, HashDistributedAcrossAllThreeFields) {
     std::hash<SessionId> h;
-    std::unordered_set<std::size_t> buckets{h({"FIX.4.4", "S", "T"}), h({"FIX.5.0", "S", "T"}),
-                                            h({"FIX.4.4", "X", "T"}), h({"FIX.4.4", "S", "Y"})};
-    EXPECT_EQ(buckets.size(), 4u);
+    std::unordered_set<std::size_t> buckets{
+        h({.begin_string = "FIX.4.4", .sender_comp_id = "S", .target_comp_id = "T"}),
+        h({.begin_string = "FIX.5.0", .sender_comp_id = "S", .target_comp_id = "T"}),
+        h({.begin_string = "FIX.4.4", .sender_comp_id = "X", .target_comp_id = "T"}),
+        h({.begin_string = "FIX.4.4", .sender_comp_id = "S", .target_comp_id = "Y"})};
+    EXPECT_EQ(buckets.size(), 4U);
 }
 TEST(SessionIdTest, UsableAsUnorderedMapKey) {
     std::unordered_map<SessionId, int> m;
-    m[{"FIX.4.4", "A", "B"}] = 1;
-    m[{"FIX.4.4", "C", "D"}] = 2;
+    m[{.begin_string = "FIX.4.4", .sender_comp_id = "A", .target_comp_id = "B"}] = 1;
+    m[{.begin_string = "FIX.4.4", .sender_comp_id = "C", .target_comp_id = "D"}] = 2;
     EXPECT_EQ(m.at({"FIX.4.4", "A", "B"}), 1);
-    EXPECT_EQ(m.size(), 2u);
+    EXPECT_EQ(m.size(), 2U);
 }
 
 // from_config round-trip.

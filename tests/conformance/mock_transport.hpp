@@ -95,8 +95,8 @@ inline std::vector<frame> make_handshake_script(std::string_view label) {
     std::string client_hello = "ClientHello:" + std::string(label);
     std::string server_hello = "ServerHello:" + std::string(label);
     return {
-        {direction::send, to_bytes(client_hello)},
-        {direction::recv, to_bytes(server_hello)},
+        {.dir = direction::send, .bytes = to_bytes(client_hello)},
+        {.dir = direction::recv, .bytes = to_bytes(server_hello)},
     };
 }
 

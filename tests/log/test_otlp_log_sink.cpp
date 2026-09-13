@@ -102,7 +102,7 @@ public:
                 }
             }
 
-            std::lock_guard<std::mutex> lk(mu_);
+            std::scoped_lock lk(mu_);
             records_.push_back(cap);
         }
         return opentelemetry::sdk::common::ExportResult::kSuccess;
@@ -116,7 +116,7 @@ public:
     }
 
     [[nodiscard]] std::vector<CapturedRecord> records() const {
-        std::lock_guard<std::mutex> lk(mu_);
+        std::scoped_lock lk(mu_);
         return records_;
     }
 
@@ -175,7 +175,7 @@ fixpp::log::Record make_record_42() {
 
     // Arg: u64(42) — fills the {} placeholder → body resolves to "msg 42"
     rec.arg_count = 1;
-    rec.args[0] = fixpp::log::ArgValue::from_u64(42u);
+    rec.args[0] = fixpp::log::ArgValue::from_u64(42U);
 
     return rec;
 }
@@ -226,7 +226,7 @@ TEST(OtlpLogSink, TS10_RecordFieldMapping) {
     // --- Assertions ---
 
     auto records = capturing->records();
-    ASSERT_EQ(records.size(), 1u) << "Expected exactly one captured record";
+    ASSERT_EQ(records.size(), 1U) << "Expected exactly one captured record";
 
     const auto& cap = records[0];
 
@@ -284,7 +284,7 @@ TEST(OtlpLogSink, TS10_ExactlyOnceExport) {
     sink.flush(std::chrono::milliseconds{2000});
 
     auto records = capturing->records();
-    EXPECT_EQ(records.size(), 3u) << "Expected all 3 records to be exported after flush";
+    EXPECT_EQ(records.size(), 3U) << "Expected all 3 records to be exported after flush";
 
     // No double-write: each record appears exactly once.
     // (records.size() == 3, already asserted above).

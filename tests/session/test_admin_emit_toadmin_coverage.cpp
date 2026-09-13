@@ -180,7 +180,6 @@ using fixpp::session::MessageStore;
 using fixpp::session::MessageStoreFactory;
 using fixpp::session::retrieve_visitor;
 using fixpp::session::seqnum_t;
-using fixpp::session::visit_result;
 
 class ObservableStore final : public MessageStore {
 public:
@@ -289,11 +288,11 @@ std::vector<std::byte> build_frame(std::string_view msg_type, std::uint32_t seq,
 }
 
 // Valid sending time matching the mock clock (2024-01-01 00:00:00.000 UTC).
-static constexpr std::string_view kGoodSendingTime = "20240101-00:00:00.000";
+constexpr std::string_view kGoodSendingTime = "20240101-00:00:00.000";
 // Stale sending time (epoch — always > 120 s stale vs 2024 clock).
-static constexpr std::string_view kStaleSendingTime = "19700101-00:00:00.000";
+constexpr std::string_view kStaleSendingTime = "19700101-00:00:00.000";
 // Future sending time (2030) — used in ArmD: 122 > 52.
-static constexpr std::string_view kFutureSendingTime = "20300101-00:00:00.000";
+constexpr std::string_view kFutureSendingTime = "20300101-00:00:00.000";
 
 std::vector<std::byte> build_logon(std::string_view sender, std::string_view target,
                                    std::string_view sending_time, std::uint32_t seq = 1,
@@ -351,7 +350,7 @@ std::vector<std::byte> build_possdup_heartbeat(std::uint32_t seq, std::string_vi
 
 // ── Extract helpers ───────────────────────────────────────────────────────────
 
-static std::string extract_field_str(std::span<const std::byte> frame, int tag) {
+std::string extract_field_str(std::span<const std::byte> frame, int tag) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = std::to_string(tag) + "=";
     auto pos = wire.find(needle);
@@ -362,7 +361,7 @@ static std::string extract_field_str(std::span<const std::byte> frame, int tag) 
     return wire.substr(pos, end - pos);
 }
 
-static std::string extract_msg_type(std::span<const std::byte> frame) {
+std::string extract_msg_type(std::span<const std::byte> frame) {
     return extract_field_str(frame, 35);
 }
 
@@ -370,9 +369,8 @@ static std::string extract_msg_type(std::span<const std::byte> frame) {
 // FQ-3: tightens per-type presence checks to the provocation window so a stale
 // same-type frame from an earlier handshake cannot mask a missing in-window emit.
 // Anchor: opus_pr120_1_triage.md FQ-3.
-static std::size_t count_frames_with_type_in_window(
-    const std::vector<std::vector<std::byte>>& frames, std::string_view msg_type,
-    std::size_t start) {
+std::size_t count_frames_with_type_in_window(const std::vector<std::vector<std::byte>>& frames,
+                                             std::string_view msg_type, std::size_t start) {
     std::size_t n = 0;
     for (std::size_t i = start; i < frames.size(); ++i) {
         if (extract_msg_type(frames[i]) == msg_type) ++n;
@@ -383,8 +381,8 @@ static std::size_t count_frames_with_type_in_window(
 // Count engine-originated ADMINISTRATIVE frames (FIX admin set A/0/1/2/3/4/5)
 // emitted in [start, end) of the capture window. 35=j is an APP frame → excluded.
 // Used by C3/SC-001 exact-count cross-check: admin frames on wire must equal toAdmin_delta.
-static std::size_t count_admin_frames_in_window(const std::vector<std::vector<std::byte>>& frames,
-                                                std::size_t start) {
+std::size_t count_admin_frames_in_window(const std::vector<std::vector<std::byte>>& frames,
+                                         std::size_t start) {
     static constexpr std::string_view kAdminSet[] = {"A", "0", "1", "2", "3", "4", "5"};
     std::size_t n = 0;
     for (std::size_t i = start; i < frames.size(); ++i) {
@@ -400,8 +398,8 @@ static std::size_t count_admin_frames_in_window(const std::vector<std::vector<st
 }
 
 // Check whether any captured frame is 35=3 AND 373=<reason>.
-static bool any_reject_with_reason(const std::vector<std::vector<std::byte>>& frames,
-                                   std::string_view reason) {
+bool any_reject_with_reason(const std::vector<std::vector<std::byte>>& frames,
+                            std::string_view reason) {
     for (const auto& f : frames) {
         if (extract_msg_type(f) == "3" && extract_field_str(f, 373) == reason) return true;
     }
@@ -600,7 +598,7 @@ protected:
     }
 
     // Shorthand for the durable inbound counter after the last persist write.
-    seqnum_t store_persisted_inbound_seqnum() const {
+    [[nodiscard]] seqnum_t store_persisted_inbound_seqnum() const {
         return store_factory->last_store ? store_factory->last_store->durable_inbound : 0;
     }
 };
@@ -746,7 +744,7 @@ TEST_F(AdminEmitToAdminCoverageTest, EmitSessionReject_FromAdminVeto) {
 
     // Wire: at least one 35=3 (Reject) must have been emitted in the window (FQ-3: windowed).
     const auto reject_count = count_frames_with_type_in_window(captured_frames, "3", frames_before);
-    EXPECT_GE(reject_count, 1u) << "Reject(35=3) must appear in window after fromAdmin veto "
+    EXPECT_GE(reject_count, 1U) << "Reject(35=3) must appear in window after fromAdmin veto "
                                 << "(frames_before=" << frames_before
                                 << " total_now=" << captured_frames.size() << ")";
 
@@ -809,7 +807,7 @@ TEST_F(AdminEmitNoAppCoverageTest, EmitSessionReject_NoAppUnknownType_NoOp) {
     (void)feed_sync(sess, app_frame);
 
     // Wire: a Reject(35=3) must be emitted in the provocation window (FQ-3: windowed).
-    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "3", frames_before), 1u)
+    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "3", frames_before), 1U)
         << "No-app path must emit exactly one Reject(35=3) in the provocation window";
 
     // Session should still be Active (no disconnect from no-app unknown-type).
@@ -894,7 +892,7 @@ TEST_F(AdminEmitNoAppCoverageTest, Logout_Guard3_NoApp_ByteIdentical) {
     (void)feed_sync(sess, stale_logon);
 
     // Wire: exactly one Logout(35=5) in the provocation window (FQ-3: windowed).
-    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "5", frames_before), 1u)
+    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "5", frames_before), 1U)
         << "No-app Guard-3 must emit exactly one Logout(35=5) in the window";
 
     // Session must have disconnected.
@@ -970,9 +968,9 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_Q3SendingTimeAccuracy) {
     (void)feed_sync(sess, stale_hb);
 
     // Wire: one Reject + one Logout in the provocation window (FQ-3: windowed).
-    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "3", frames_before), 1u)
+    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "3", frames_before), 1U)
         << "Q3 must emit exactly one Reject(35=3) in the window";
-    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "5", frames_before), 1u)
+    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "5", frames_before), 1U)
         << "Q3 must emit exactly one Logout(35=5) in the window";
 
     // Session must disconnect.
@@ -1025,7 +1023,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_SequenceResetVeto) {
     (void)feed_sync(sess, sr);
 
     // Wire: Reject(35=3) must appear in the window (FQ-3: windowed).
-    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "3", frames_before), 1u)
+    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "3", frames_before), 1U)
         << "SeqReset fromAdmin veto must emit exactly one Reject(35=3) in the window";
 
     // Discriminator: 373=3 (not 373=5) confirms this is the fromAdmin-veto path,
@@ -1081,7 +1079,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021ArmC_Malformed122) {
     (void)feed_sync(sess, frame);
 
     // Wire: Reject(35=3) must appear in the window (FQ-3: windowed).
-    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "3", frames_before), 1u)
+    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "3", frames_before), 1U)
         << "021 Arm C must emit exactly one Reject(35=3) in the window";
 
     // Session must survive (Arm C does not disconnect).
@@ -1130,7 +1128,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021RC1_Malformed122) {
     (void)feed_sync(sess, frame);
 
     // Wire: Reject(35=3) must appear in the window (FQ-3: windowed).
-    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "3", frames_before), 1u)
+    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "3", frames_before), 1U)
         << "021 RC#1 must emit exactly one Reject(35=3) in the window";
 
     // Session must survive.
@@ -1177,9 +1175,9 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_021ArmD) {
     (void)feed_sync(sess, frame);
 
     // Wire: Reject + Logout in the provocation window (FQ-3: windowed).
-    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "3", frames_before), 1u)
+    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "3", frames_before), 1U)
         << "021 Arm D must emit exactly one Reject(35=3) in the window";
-    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "5", frames_before), 1u)
+    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "5", frames_before), 1U)
         << "021 Arm D must emit exactly one Logout(35=5) in the window";
 
     // Session must disconnect.
@@ -1239,9 +1237,9 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_LogoutVeto) {
     (void)feed_sync(sess, lo);
 
     // Wire: confirming Logout AND veto Reject in the window (FQ-3: windowed).
-    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "5", frames_before), 1u)
+    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "5", frames_before), 1U)
         << "Logout path must emit exactly one confirming Logout(35=5) in the window";
-    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "3", frames_before), 1u)
+    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "3", frames_before), 1U)
         << "Logout fromAdmin veto must emit exactly one Reject(35=3) in the window";
 
     // Session disconnects regardless.
@@ -1305,7 +1303,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Reject_SeqResetNewSeqNoTooLow) {
     (void)feed_sync(sess, sr);
 
     // Wire: Reject(35=3) must appear in the window (FQ-3: windowed).
-    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "3", frames_before), 1u)
+    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "3", frames_before), 1U)
         << "NewSeqNo too-low must emit exactly one Reject(35=3) in the window";
 
     // Discriminator: 373=5 (ValueIsIncorrect) — MUST not be 373=3.
@@ -1364,7 +1362,7 @@ TEST_F(AdminEmitToAdminCoverageTest, Logout_Guard3LogonAckSendingTime) {
 
     // Wire: exactly one Logout(35=5) in the provocation window (FQ-3: windowed).
     const auto logout_count = count_frames_with_type_in_window(captured_frames, "5", frames_before);
-    EXPECT_EQ(logout_count, 1u)
+    EXPECT_EQ(logout_count, 1U)
         << "Logout(35=5) must appear in window after Guard-3 SendingTime failure "
         << "(frames_before=" << frames_before << " total_now=" << captured_frames.size() << ")";
 
@@ -1706,7 +1704,7 @@ TEST_F(AdminEmitBMRCoverageTest, BMR_ToApp_Observed) {
         << "(delta=" << toAdmin_delta << "; expected 0)";
 
     // Non-veto path: exactly one 35=j in the provocation window (FQ-3: windowed).
-    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "j", frames_before), 1u)
+    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "j", frames_before), 1U)
         << "Non-veto path: one BMR(35=j) must appear in the window";
 
     // Session stays Active after a BMR emit.
@@ -1772,7 +1770,7 @@ TEST_F(AdminEmitBMRCoverageTest, BMR_VetoSuppressed_PersistStillFires) {
         << "toApp must fire once even on the veto path (before veto decision)";
 
     // 35=j must NOT be in the window (suppressed by veto; FQ-3: windowed).
-    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "j", frames_before), 0u)
+    EXPECT_EQ(count_frames_with_type_in_window(captured_frames, "j", frames_before), 0U)
         << "Veto: BMR(35=j) must be suppressed (not emitted) in the window";
 
     // Session must remain Active (veto is not a fatal outcome).

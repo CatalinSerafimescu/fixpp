@@ -265,7 +265,7 @@ constexpr std::string_view kMinimalFix50sp2XmlCreds = R"xml(
 
 // Same as in establishment test — make a shared dict.
 [[nodiscard]] std::shared_ptr<const fixpp::dict::Dictionary> make_dict_creds(std::string_view xml) {
-    constexpr std::size_t kBufSize = 64u * 1024u;
+    constexpr std::size_t kBufSize = 64U * 1024U;
     auto buf = std::make_unique<std::array<std::byte, kBufSize>>();
     auto* mr = new std::pmr::monotonic_buffer_resource{buf->data(), buf->size()};
     fixpp::dict::Dictionary d = fixpp::dict::XmlLoader{}.load_from_string(xml, mr);
@@ -342,7 +342,7 @@ constexpr std::string_view kMinimalFix50sp2XmlCreds = R"xml(
     std::string needle = "\x01";
     needle += tag_num;
     needle += "=";
-    return wire.find(needle) != std::string_view::npos;
+    return wire.contains(needle);
 }
 
 // Run a coroutine synchronously on an io_context.

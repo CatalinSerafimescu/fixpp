@@ -137,7 +137,7 @@ TEST_F(SessionSpansTest, SessionSpanAndParseChildBothOK) {
     session_span->End();
 
     auto spans = get_spans();
-    ASSERT_EQ(spans.size(), 2u);
+    ASSERT_EQ(spans.size(), 2U);
 
     sdk_trace::SpanData* session_data = nullptr;
     sdk_trace::SpanData* parse_data = nullptr;
@@ -204,7 +204,7 @@ TEST_F(SessionSpansTest, ParseChildOnDifferentThreadParentsCorrectly) {
     session_span->End();
 
     auto spans = get_spans();
-    ASSERT_EQ(spans.size(), 2u);
+    ASSERT_EQ(spans.size(), 2U);
 
     sdk_trace::SpanData* session_data = nullptr;
     sdk_trace::SpanData* parse_data = nullptr;
@@ -252,7 +252,7 @@ TEST_F(SessionSpansTest, ParseSpanRaiiSetsLatencyAndStatus) {
     }
 
     auto spans = get_spans();
-    ASSERT_EQ(spans.size(), 2u);
+    ASSERT_EQ(spans.size(), 2U);
 
     sdk_trace::SpanData* parse_data = nullptr;
     sdk_trace::SpanData* session_data = nullptr;

@@ -65,7 +65,7 @@ public:
         return std::span<const Certificate>{};
     }
 
-    int id() const noexcept { return id_; }
+    [[nodiscard]] int id() const noexcept { return id_; }
 
 private:
     int id_;
@@ -126,7 +126,7 @@ TEST(TransportFactoryCertSourcePublishAcquire, ReaderNeverSeesTornPointer) {
                     ASSERT_LT(id, kSourceCount)
                         << "cert_source_snapshot() returned an out-of-range id=" << id
                         << " — possible torn pointer (corrupted object identity)";
-                    observed_ids.fetch_or(1u << static_cast<unsigned>(id),
+                    observed_ids.fetch_or(1U << static_cast<unsigned>(id),
                                           std::memory_order_release);
                 }
                 any_reader_started.store(1, std::memory_order_release);

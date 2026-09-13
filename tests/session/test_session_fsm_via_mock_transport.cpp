@@ -62,8 +62,8 @@ TEST(SessionFsmViaMockTransport, MockTransportConsumableFromSessionTU) {
 
     EXPECT_FALSE(mt.is_handshaken());
     EXPECT_FALSE(mt.is_closed());
-    EXPECT_EQ(mt.async_writes_observed(), 0u);
-    EXPECT_EQ(mt.bytes_read_so_far(), 0u);
+    EXPECT_EQ(mt.async_writes_observed(), 0U);
+    EXPECT_EQ(mt.bytes_read_so_far(), 0U);
 }
 
 // ════════════════════════════════════════════════════════════════════════════

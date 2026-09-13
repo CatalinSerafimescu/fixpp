@@ -245,9 +245,9 @@ namespace {
 using fixpp::test_support::extract_tag;
 
 // ── Build a minimal Logon frame for feeding into a session ────────────────────
-static std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
-                                               std::string_view sender, std::string_view target,
-                                               int heartbt = 1) {
+std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
+                                        std::string_view sender, std::string_view target,
+                                        int heartbt = 1) {
     std::string body;
     body += "35=A\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -265,7 +265,7 @@ static std::vector<std::byte> make_logon_frame(std::string_view begin_string, st
     for (unsigned char c : full) {
         cs += c;
     }
-    cs &= 0xFFu;
+    cs &= 0xFFU;
     char csbuf[8];
     std::snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     full += "10=" + std::string(csbuf) + "\x01";
@@ -321,7 +321,7 @@ static std::vector<std::byte> make_logon_frame(std::string_view begin_string, st
 // must stamp the clock the SESSION reads, not the wall clock. Not hoisted here —
 // that is #315's class of work and would inflate this review target — but recorded
 // so the census does not have to be rediscovered.
-static std::string fix_sending_time(fixpp::core::utc_time_point tp) {
+std::string fix_sending_time(fixpp::core::utc_time_point tp) {
     char buf[32];
     auto r = fixpp::core::utc_time_to_fix_string(tp, fixpp::core::fix_time_precision::millis, buf);
     // A formatting failure here would silently produce an empty 52= and surface as
@@ -333,10 +333,9 @@ static std::string fix_sending_time(fixpp::core::utc_time_point tp) {
     return std::string(r->data(), r->size());
 }
 
-static std::vector<std::byte> make_heartbeat(std::string_view bs, std::uint32_t seq,
-                                             std::string_view sender, std::string_view target,
-                                             std::string_view tr_id,
-                                             std::string_view sending_time) {
+std::vector<std::byte> make_heartbeat(std::string_view bs, std::uint32_t seq,
+                                      std::string_view sender, std::string_view target,
+                                      std::string_view tr_id, std::string_view sending_time) {
     std::string body;
     body += "35=0\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -354,7 +353,7 @@ static std::vector<std::byte> make_heartbeat(std::string_view bs, std::uint32_t 
     for (unsigned char c : full) {
         cs += c;
     }
-    cs &= 0xFFu;
+    cs &= 0xFFU;
     char csbuf[8];
     std::snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     full += "10=" + std::string(csbuf) + "\x01";
@@ -381,7 +380,7 @@ struct CaptureTransport {
     std::vector<std::string> test_req_ids;
 
     void capture(std::span<const std::byte> frame) {
-        std::lock_guard<std::mutex> lock{mtx};
+        std::scoped_lock lock{mtx};
         frames.emplace_back(frame.begin(), frame.end());
         // Classify here, under the lock this function already takes, rather than in
         // every reader. Same predicate as the old `collect_test_req_ids` body, so
@@ -400,12 +399,12 @@ struct CaptureTransport {
     // O(corpus) COPY, no rescan. Kept as the analysis surface; the hot path is
     // `await_test_req_ids` / `test_req_id_count` below.
     std::vector<std::string> collect_test_req_ids() {
-        std::lock_guard<std::mutex> lock{mtx};
+        std::scoped_lock lock{mtx};
         return test_req_ids;
     }
 
     std::size_t test_req_id_count() {
-        std::lock_guard<std::mutex> lock{mtx};
+        std::scoped_lock lock{mtx};
         return test_req_ids.size();
     }
 
@@ -415,7 +414,7 @@ struct CaptureTransport {
     // 40.7 s and the curve was still superlinear (2x N -> 3.3x time). Replacing
     // these two loop-body calls took it to 11.5 s and 2x N -> ~2.1x time.
     std::string latest_test_req_id() {
-        std::lock_guard<std::mutex> lock{mtx};
+        std::scoped_lock lock{mtx};
         // The callers reach here only after an `await_test_req_ids` returned true,
         // so the corpus is non-empty by construction — the same property the
         // `collect_test_req_ids().back()` this replaces relied on. Reported rather
@@ -488,7 +487,7 @@ struct CaptureTransport {
 // Both are rejected now. The emitter builds the id from an integer, so canonical
 // spelling is a property of the SUT this parser is entitled to require — and
 // requiring it is what stops the parser from laundering a corpus into validity.
-static std::uint32_t parse_tr_id(std::string_view s) {
+std::uint32_t parse_tr_id(std::string_view s) {
     if (s.size() < 3) {
         return 0;
     }
@@ -504,10 +503,10 @@ static std::uint32_t parse_tr_id(std::string_view s) {
             return 0;
         }
         const auto d = static_cast<std::uint32_t>(s[i] - '0');
-        if (v > (UINT32_MAX - d) / 10u) {
+        if (v > (UINT32_MAX - d) / 10U) {
             return 0;  // would wrap; a wrapped value is indistinguishable from a small one
         }
-        v = v * 10u + d;
+        v = (v * 10U) + d;
     }
     return v;
 }
@@ -528,7 +527,7 @@ static std::uint32_t parse_tr_id(std::string_view s) {
 // not a defect unique to either copy. An empty corpus is a collapse, not a
 // pass: the first line of the function rejects it directly, so no caller has
 // to pin the size for this oracle to be sound.
-static bool check_contiguous(const std::vector<std::string>& ids) {
+bool check_contiguous(const std::vector<std::string>& ids) {
     if (ids.empty()) {
         return false;  // an empty corpus is a COLLAPSE, not a pass (#309)
     }
@@ -1104,10 +1103,16 @@ TEST(CrossSessionTestReqIDParser, RejectsNonCanonicalAndOverflowCorpora) {
         std::uint32_t want;
     };
     const Case cases[] = {
-        {"TR1", 1},  {"TR10", 10}, {"TR4294967295", 4294967295u},
-        {"TR0", 0},  {"TR01", 0},  {"TR", 0},
-        {"TRx", 0},  {"XR1", 0},   {"TR1x", 0},
-        {"TR1 ", 0},
+        {.input = "TR1", .want = 1},
+        {.input = "TR10", .want = 10},
+        {.input = "TR4294967295", .want = 4294967295U},
+        {.input = "TR0", .want = 0},
+        {.input = "TR01", .want = 0},
+        {.input = "TR", .want = 0},
+        {.input = "TRx", .want = 0},
+        {.input = "XR1", .want = 0},
+        {.input = "TR1x", .want = 0},
+        {.input = "TR1 ", .want = 0},
     };
     for (const auto& c : cases) {
         EXPECT_EQ(parse_tr_id(c.input), c.want) << "input: " << c.input;
@@ -1295,7 +1300,7 @@ TEST(CrossSessionTestReqID, CrossSessionDisjoint) {
     // ASSERT_* performs — and so that it can release them while they are still
     // owned. (`frames` is declared above `ioc` — see there — so it is destroyed
     // after BOTH this guard and `ioc`.)
-    quiesce_or_release_on_exit quiesce{ioc_owner, *clock, {&sA, &sB}};
+    quiesce_or_release_on_exit quiesce{.ioc = ioc_owner, .clock = *clock, .fixtures = {&sA, &sB}};
 
     // Open both sessions (initiator path: each emits a Logon immediately).
     auto fut_open_a = asio::co_spawn(ioc, sA->session->open(), asio::use_future);
@@ -1762,7 +1767,7 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
     // The loop's paired wait is the opposite case and does share one; see it.
     ASSERT_TRUE(sA.transport.await_test_req_ids(1, std::chrono::steady_clock::now() + kWaitBudget))
         << kWaitBudgetMiss << "waiting for session A's first TestRequest";
-    ASSERT_EQ(sA.transport.collect_test_req_ids().size(), 1u)
+    ASSERT_EQ(sA.transport.collect_test_req_ids().size(), 1U)
         << "session A emitted more than one TestRequest before its first Heartbeat";
     ASSERT_TRUE(sB.transport.collect_test_req_ids().empty())
         << "session B emitted a TestRequest before its clock was ever advanced; the "
@@ -1778,7 +1783,7 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
     clock_b->advance(std::chrono::milliseconds{1500});
     ASSERT_TRUE(sB.transport.await_test_req_ids(1, std::chrono::steady_clock::now() + kWaitBudget))
         << kWaitBudgetMiss << "waiting for session B's first TestRequest";
-    ASSERT_EQ(sB.transport.collect_test_req_ids().size(), 1u)
+    ASSERT_EQ(sB.transport.collect_test_req_ids().size(), 1U)
         << "session B emitted more than one TestRequest before its first Heartbeat";
     {
         const std::string latest_b = sB.transport.collect_test_req_ids().back();
@@ -2265,7 +2270,10 @@ TEST(CrossSessionTeardown, QuiescedPathDestroysTheFixtures) {
         // Nothing spawned and a real budget, so the guard drains and takes the
         // quiesced branch.
         ioc_owner->destructions = &ioc_destructions;
-        quiesce_or_release_on_exit guard{ioc_owner, *clock, {&sA}, std::chrono::seconds{1}};
+        quiesce_or_release_on_exit guard{.ioc = ioc_owner,
+                                         .clock = *clock,
+                                         .fixtures = {&sA},
+                                         .budget = std::chrono::seconds{1}};
 
         clock.reset();
     }
@@ -2316,13 +2324,14 @@ TEST(CrossSessionTeardown, ZeroBudgetOnAnEmptyContextIsNotResidual) {
     // the deadline artefact" must not leave that premise unchecked: if the clock ctor
     // ever starts posting, this test would pass for the wrong reason — `poll_one()`
     // draining that one handler — and would stop being a pin on anything.
-    ASSERT_EQ(ioc.poll(), 0u) << "the context is not empty at entry, so a residual "
+    ASSERT_EQ(ioc.poll(), 0U) << "the context is not empty at entry, so a residual "
                                  "report below would no longer isolate the deadline artefact";
     ioc.restart();
 
     // The context provably holds no work, so the ONLY thing that can make the guard
     // report a residual is the deadline artefact its poll_one() probe exists to close.
-    quiesce_or_release_on_exit guard{ioc_owner, *clock, {}, std::chrono::milliseconds{0}};
+    quiesce_or_release_on_exit guard{
+        .ioc = ioc_owner, .clock = *clock, .fixtures = {}, .budget = std::chrono::milliseconds{0}};
     // ~guard runs here and must add no failure.
 }
 

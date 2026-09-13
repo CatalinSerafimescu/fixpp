@@ -41,17 +41,13 @@ namespace {
 
 using fixpp::core::error;
 using fixpp::core::expected_t;
-using fixpp::tls::cert_source;
 using fixpp::tls::file_cert_source;
-using fixpp::tls::local_credentials;
 
 #ifndef FIXPP_TLS_FIXTURE_DIR
 #define FIXPP_TLS_FIXTURE_DIR ""
 #endif
 
-static std::string fixture(const char* name) {
-    return std::string(FIXPP_TLS_FIXTURE_DIR) + "/" + name;
-}
+std::string fixture(const char* name) { return std::string(FIXPP_TLS_FIXTURE_DIR) + "/" + name; }
 
 // ── FactoryNeverThrows ────────────────────────────────────────────────────────
 // Primary contract: factory make_file_cert_source must NEVER throw.

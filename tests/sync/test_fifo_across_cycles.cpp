@@ -156,7 +156,7 @@ TEST(SeamFifoAcrossCycles, ResidualExhaustedBeforeLaterArrival) {
     ASSERT_TRUE(pump_until(
         ioc, [&] { return granted_order.size() >= 1; }, 48))
         << "cycle 1: W1 must be granted";
-    ASSERT_EQ(granted_order.size(), 1u);
+    ASSERT_EQ(granted_order.size(), 1U);
     EXPECT_EQ(granted_order[0], 1)
         << "cycle 1 must grant W1 (holder's uncontended-then-drained slot)";
 
@@ -165,7 +165,7 @@ TEST(SeamFifoAcrossCycles, ResidualExhaustedBeforeLaterArrival) {
     // exists in next_drain_head_.
     auto f4 = asio::co_spawn(ioc, make_waiter(4), asio::use_future);
     for (int i = 0; i < 48 && granted_order.size() < 2; ++i) ioc.poll_one();
-    ASSERT_EQ(granted_order.size(), 1u)
+    ASSERT_EQ(granted_order.size(), 1U)
         << "setup: W4 must park without being granted while W1 still holds";
 
     // Cycle 2: release W1 -> residual [W2, W3] is non-empty -> MUST grant
@@ -175,7 +175,7 @@ TEST(SeamFifoAcrossCycles, ResidualExhaustedBeforeLaterArrival) {
     ASSERT_TRUE(pump_until(
         ioc, [&] { return granted_order.size() >= 2; }, 48))
         << "cycle 2: someone must be granted";
-    ASSERT_EQ(granted_order.size(), 2u);
+    ASSERT_EQ(granted_order.size(), 2U);
     EXPECT_EQ(granted_order[1], 2)
         << "FIFO-across-cycles violation: the cycle-1 residual (W2) must be "
            "granted before W4, even though W4 has already parked by now";
@@ -185,7 +185,7 @@ TEST(SeamFifoAcrossCycles, ResidualExhaustedBeforeLaterArrival) {
     ASSERT_TRUE(pump_until(
         ioc, [&] { return granted_order.size() >= 3; }, 48))
         << "cycle 3: someone must be granted";
-    ASSERT_EQ(granted_order.size(), 3u);
+    ASSERT_EQ(granted_order.size(), 3U);
     EXPECT_EQ(granted_order[2], 3) << "residual must exhaust W3 before the fresh-arrival W4";
 
     // Cycle 4: release W3 -> residual now empty -> falls through to the
@@ -194,7 +194,7 @@ TEST(SeamFifoAcrossCycles, ResidualExhaustedBeforeLaterArrival) {
     ASSERT_TRUE(pump_until(
         ioc, [&] { return granted_order.size() >= 4; }, 48))
         << "cycle 4: W4 must finally be granted";
-    ASSERT_EQ(granted_order.size(), 4u);
+    ASSERT_EQ(granted_order.size(), 4U);
     EXPECT_EQ(granted_order[3], 4);
 
     // Drain everyone and confirm clean completion (no hang, no terminate).
@@ -270,7 +270,7 @@ TEST(SeamFifoAcrossCycles, RepeatedScenarioIsDeterministic) {
 
         auto f4 = asio::co_spawn(ioc, make_waiter(4), asio::use_future);
         for (int i = 0; i < 48 && granted_order.size() < 2; ++i) ioc.poll_one();
-        ASSERT_EQ(granted_order.size(), 1u);
+        ASSERT_EQ(granted_order.size(), 1U);
 
         release_w[1] = true;
         ASSERT_TRUE(pump_until(ioc, [&] { return granted_order.size() >= 2; }, 48));

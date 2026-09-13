@@ -63,7 +63,7 @@ fixpp::config::LoadResult load(std::string_view fixture_name) {
 
 bool has_diag(const std::vector<fixpp::config::LoadDiagnostic>& diags,
               fixpp::config::reason_class expected_reason, std::string_view expected_key_path) {
-    return std::any_of(diags.begin(), diags.end(), [&](const fixpp::config::LoadDiagnostic& d) {
+    return std::ranges::any_of(diags, [&](const fixpp::config::LoadDiagnostic& d) {
         return d.reason == expected_reason && d.key_path == expected_key_path;
     });
 }

@@ -204,7 +204,7 @@ TEST(SessionTableViewReuse, OpenWalksTheDictionaryExactlyOnce) {
     Session sess{fix.engine, cfg};
     fix.run_open(sess);
 
-    EXPECT_EQ(fixpp::dict::detail::as_table_view_call_count(), 1u)
+    EXPECT_EQ(fixpp::dict::detail::as_table_view_call_count(), 1U)
         << "fixpp#215 item 1: open() must walk the Dictionary ONCE and share the result with "
            "the validator, not walk it once per consumer. This reads 2 on the unfixed tree.";
 }
@@ -244,7 +244,7 @@ TEST(SessionTableViewReuse, OpenAdoptsAConfigSuppliedSnapshotAndWalksZeroTimes) 
 
     fix.run_open(sess);
 
-    EXPECT_EQ(fixpp::dict::detail::as_table_view_call_count(), 0u)
+    EXPECT_EQ(fixpp::dict::detail::as_table_view_call_count(), 0U)
         << "fixpp#215 item 1: a config that already carries a snapshot must make open() walk the "
            "Dictionary ZERO further times. This reads 1 on the unfixed tree, where SessionConfig "
            "had no field to carry a snapshot and open() always built its own.";
@@ -291,7 +291,7 @@ public:
         if (leg_count >= 1) {
             std::string_view last{reinterpret_cast<char const*>(slices[leg_count - 1].data),
                                   slices[leg_count - 1].len};
-            last_leg_has_trailing_tag60 = last.find("60=") != std::string_view::npos;
+            last_leg_has_trailing_tag60 = last.contains("60=");
         }
         return {};
     }
@@ -387,7 +387,7 @@ TEST(SessionTableViewReuse, AdoptedSnapshotDrivesGroupBoundaries) {
     ASSERT_EQ(app->from_app_calls, 1)
         << "a config-supplied snapshot must reach fromApp for a well-formed group-bearing "
            "ExecutionReport";
-    EXPECT_EQ(app->leg_count, 2u)
+    EXPECT_EQ(app->leg_count, 2U)
         << "the CONFIG-SUPPLIED snapshot must drive dictionary-backed group boundaries: "
            "NoLegs(555)=2 must resolve to exactly 2 membership-bounded leg slices. A "
            "dictionary-free Parser() ctor cannot produce this at all.";

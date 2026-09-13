@@ -79,7 +79,8 @@ public:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store(
         seqnum_t seq, std::span<const std::byte> frame, direction_t dir) noexcept override {
         if (dir == direction_t::outbound) {
-            outbound_records.push_back({seq, std::vector<std::byte>(frame.begin(), frame.end())});
+            outbound_records.push_back(
+                {.seq = seq, .frame = std::vector<std::byte>(frame.begin(), frame.end())});
             if (seq + 1U > next_out_) next_out_ = seq + 1U;
         }
         co_return fixpp::core::expected_t<void>{};
@@ -134,7 +135,7 @@ static std::vector<std::byte> make_fix44_frame(std::string_view body_str) {
     std::string full = hdr + std::string(body_str);
     unsigned int cs = 0;
     for (unsigned char c : full) cs += c;
-    cs &= 0xFFu;
+    cs &= 0xFFU;
     char csbuf[4];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     full += "10=" + std::string(csbuf) + "\x01";
@@ -177,7 +178,7 @@ static std::vector<std::byte> make_fix44_frame_with_time(std::string_view msg_ty
     std::string full = hdr + body;
     unsigned int cs = 0;
     for (unsigned char c : full) cs += c;
-    cs &= 0xFFu;
+    cs &= 0xFFU;
     char csbuf[4];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     full += "10=" + std::string(csbuf) + "\x01";
@@ -282,7 +283,7 @@ protected:
 
     // Return the value of field 52 from the FIRST captured frame (after any drive_to_active flush).
     // Returns nullopt if not present.
-    std::optional<std::string> first_frame_tag52() const {
+    [[nodiscard]] std::optional<std::string> first_frame_tag52() const {
         if (captured_frames.empty()) return std::nullopt;
         const auto& frame = captured_frames.front();
         auto field = extract_field(std::span<const std::byte>(frame), 52);
@@ -291,7 +292,7 @@ protected:
     }
 
     // Return the value of field 52 from the LAST captured frame.
-    std::optional<std::string> last_frame_tag52() const {
+    [[nodiscard]] std::optional<std::string> last_frame_tag52() const {
         if (captured_frames.empty()) return std::nullopt;
         const auto& frame = captured_frames.back();
         auto field = extract_field(std::span<const std::byte>(frame), 52);
@@ -344,7 +345,7 @@ TEST_F(SendingTimePrecisionTest, SendingTimePrecision_Nanos_Emits27Char52) {
 
         auto tag52 = extract_field(std::span<const std::byte>(frame), 52);
         ASSERT_TRUE(tag52.has_value()) << "Logon reply must contain tag 52 (SendingTime)";
-        EXPECT_EQ(tag52->size(), 27u)
+        EXPECT_EQ(tag52->size(), 27U)
             << "nanos config must emit 27-char SendingTime; got '" << *tag52
             << "' (len=" << tag52->size() << "); [contract C5 / SC-001 / data-model E6]";
         break;
@@ -391,7 +392,7 @@ TEST_F(SendingTimePrecisionTest, SendingTimePrecision_Micros_Emits24Char52) {
 
         auto tag52 = extract_field(std::span<const std::byte>(frame), 52);
         ASSERT_TRUE(tag52.has_value()) << "Logon reply must contain tag 52 (SendingTime)";
-        EXPECT_EQ(tag52->size(), 24u) << "micros config must emit 24-char SendingTime; got '"
+        EXPECT_EQ(tag52->size(), 24U) << "micros config must emit 24-char SendingTime; got '"
                                       << *tag52 << "' (len=" << tag52->size() << "); [AC US1.2]";
         break;
     }
@@ -444,7 +445,7 @@ TEST_F(SendingTimePrecisionTest, SendingTimePrecision_DefaultMillis_ByteIdentica
 
         // Exact byte-identity with the pre-feature millis output.
         // Mock clock → 2024-01-01T00:00:00.123456789Z → millis = .123
-        EXPECT_EQ(tag52->size(), 21u)
+        EXPECT_EQ(tag52->size(), 21U)
             << "default millis must emit 21-char SendingTime; [FR-003 / SC-002 / I-NST-1]";
         EXPECT_EQ(*tag52, "20240101-00:00:00.123")
             << "default millis output must be byte-identical to pre-feature golden "
@@ -484,7 +485,7 @@ TEST_F(SendingTimePrecisionTest, InboundNanos52_ParsedNotRejected) {
     // seq=2 (Logon was seq=1). Mock clock UTC ≈ 2024-01-01T00:00:00.123Z, so
     // the nanos 52= is ~0 divergence from the clock → within MaxLatency (120 s default).
     const std::string_view nanos_ts = "20240101-00:00:00.123456789";
-    ASSERT_EQ(nanos_ts.size(), 27u) << "sanity: nanos_ts must be 27 chars";
+    ASSERT_EQ(nanos_ts.size(), 27U) << "sanity: nanos_ts must be 27 chars";
 
     auto hb_frame = make_fix44_frame_with_time("0", 2, "TW", "ISLD", nanos_ts);
     auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(hb_frame), asio::use_future);
@@ -509,7 +510,7 @@ TEST_F(SendingTimePrecisionTest, InboundNanos52_ParsedNotRejected) {
         auto tag35 = extract_field(std::span<const std::byte>(frame), 35);
         if (!tag35 || *tag35 != "3") continue;
         std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
-        if (wire.find("371=52\x01") != std::string::npos) {
+        if (wire.contains("371=52\x01")) {
             found_reject_52 = true;
             break;
         }
@@ -656,7 +657,7 @@ TEST_F(SendingTimePrecisionTest, OrigSendingTime122_PreservedVerbatim_OnResend) 
     ASSERT_TRUE(tag52_opt.has_value()) << "app frame must contain tag 52 (SendingTime)";
     const std::string original_52 = std::string(*tag52_opt);
     // The original_52 is the nanos-stamped value at T0.
-    ASSERT_EQ(original_52.size(), 27u)
+    ASSERT_EQ(original_52.size(), 27U)
         << "nanos config must emit 27-char 52=; got '" << original_52 << "'";
 
     // Capture the seqnum of the app message (tag 34) so we can request it.
@@ -710,7 +711,7 @@ TEST_F(SendingTimePrecisionTest, OrigSendingTime122_PreservedVerbatim_OnResend) 
     for (const auto& frame : captured_frames) {
         std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
         // build_replay_frame always adds 43=Y on the replayed app message.
-        if (wire.find("43=Y\x01") == std::string::npos) continue;
+        if (!wire.contains("43=Y\x01")) continue;
         found_replay_frame = true;
 
         auto tag122 = extract_field(std::span<const std::byte>(frame), 122);
@@ -815,7 +816,7 @@ TEST(SendingTimePrecisionNoHeap, SendingTimePrecision_NoHeapOnFormatParse) {
         auto secs_result =
             utc_time_to_fix_string(tp, fix_time_precision::seconds, std::span<char>{buf});
         ASSERT_TRUE(secs_result.has_value());
-        ASSERT_EQ(secs_result->size(), 17u);
+        ASSERT_EQ(secs_result->size(), 17U);
 
         // Stack buffer for the width-N test strings (max = 17 + 1 + 9 = 27 chars).
         std::array<char, 28> wbuf{};

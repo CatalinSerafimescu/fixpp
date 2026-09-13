@@ -144,10 +144,10 @@ struct VersionParam {
 
 // The four wire versions from SC-005.
 constexpr VersionParam kVersions[] = {
-    {"FIX.4.2", "FIX.4.2"},
-    {"FIX.4.4", "FIX.4.4"},
-    {"FIX.5.0SP2", "FIX.5.0SP2"},
-    {"FIXT.1.1", "FIXT.1.1"},
+    {.label = "FIX.4.2", .tag8_value = "FIX.4.2"},
+    {.label = "FIX.4.4", .tag8_value = "FIX.4.4"},
+    {.label = "FIX.5.0SP2", .tag8_value = "FIX.5.0SP2"},
+    {.label = "FIXT.1.1", .tag8_value = "FIXT.1.1"},
 };
 
 // ── Parameterized test fixture ────────────────────────────────────────────────

@@ -214,7 +214,7 @@ inline std::vector<fixpp::interop::intent::FieldEntry> derive_group_count_fields
         for (auto const& [no_tag, count] : by_tag) {
             std::string const path =
                 prefix.empty() ? std::to_string(no_tag) : prefix + "." + std::to_string(no_tag);
-            out.push_back({path, std::to_string(count)});
+            out.push_back({.path = path, .value = std::to_string(count)});
         }
     }
     return out;

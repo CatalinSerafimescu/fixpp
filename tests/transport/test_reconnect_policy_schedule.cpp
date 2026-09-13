@@ -44,7 +44,7 @@ using ms = std::chrono::milliseconds;
 TEST(ReconnectPolicy, DefaultsMaterialisesV02ExponentialSchedule) {
     const auto p = ReconnectPolicy::defaults();
 
-    ASSERT_EQ(p.schedule.size(), 10u);
+    ASSERT_EQ(p.schedule.size(), 10U);
     EXPECT_EQ(p.schedule[0], 100ms);
     EXPECT_EQ(p.schedule[1], 200ms);
     EXPECT_EQ(p.schedule[2], 400ms);
@@ -57,7 +57,7 @@ TEST(ReconnectPolicy, DefaultsMaterialisesV02ExponentialSchedule) {
     EXPECT_EQ(p.schedule[9], 30000ms);
 
     EXPECT_DOUBLE_EQ(p.jitter, 0.10);
-    EXPECT_EQ(p.max_attempts, 10u);
+    EXPECT_EQ(p.max_attempts, 10U);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -66,10 +66,10 @@ TEST(ReconnectPolicy, DefaultsMaterialisesV02ExponentialSchedule) {
 TEST(ReconnectPolicy, DefaultsQuickFixCompatSingleFixed30sNoJitterNoCap) {
     const auto p = ReconnectPolicy::defaults_quickfix_compat();
 
-    ASSERT_EQ(p.schedule.size(), 1u);
+    ASSERT_EQ(p.schedule.size(), 1U);
     EXPECT_EQ(p.schedule[0], 30000ms);
     EXPECT_DOUBLE_EQ(p.jitter, 0.0);
-    EXPECT_EQ(p.max_attempts, 0u);  // 0 = UNBOUNDED per FR-019.
+    EXPECT_EQ(p.max_attempts, 0U);  // 0 = UNBOUNDED per FR-019.
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -130,7 +130,7 @@ TEST(ReconnectPolicy, PlateauAtLastClampsBeyondScheduleSize) {
 // Plateau also holds for defaults_quickfix_compat (size=1; every attempt → 30s).
 TEST(ReconnectPolicy, QuickFixCompatEveryAttemptYields30s) {
     auto p = ReconnectPolicy::defaults_quickfix_compat();  // jitter=0.0
-    for (std::uint32_t n : {0u, 1u, 10u, 1000u}) {
+    for (std::uint32_t n : {0U, 1U, 10U, 1000U}) {
         EXPECT_EQ(p.delay_for_attempt(n), 30000ms) << "attempt " << n;
     }
 }
@@ -206,7 +206,7 @@ TEST(ReconnectPolicy, DefaultsAllocatesScheduleAgainstProvidedMr) {
     std::pmr::monotonic_buffer_resource mr{1024};
     auto p = ReconnectPolicy::defaults(&mr);
 
-    ASSERT_EQ(p.schedule.size(), 10u);
+    ASSERT_EQ(p.schedule.size(), 10U);
     EXPECT_EQ(p.schedule.get_allocator().resource(), &mr);
 }
 
@@ -214,7 +214,7 @@ TEST(ReconnectPolicy, QuickFixCompatAllocatesAgainstProvidedMr) {
     std::pmr::monotonic_buffer_resource mr{256};
     auto p = ReconnectPolicy::defaults_quickfix_compat(&mr);
 
-    ASSERT_EQ(p.schedule.size(), 1u);
+    ASSERT_EQ(p.schedule.size(), 1U);
     EXPECT_EQ(p.schedule.get_allocator().resource(), &mr);
 }
 

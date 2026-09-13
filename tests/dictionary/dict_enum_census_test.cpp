@@ -154,8 +154,9 @@ void scan_orchestra_space_codes(std::filesystem::path const& xml_path, std::stri
         std::string const cs_name = cs.attribute("name").value();
         for (auto const& code : cs.children("fixr:code")) {
             std::string_view const value = code.attribute("value").value();
-            if (value.find(' ') != std::string_view::npos) {
-                out.insert(SpaceCode{label, cs_name, std::string{value}});
+            if (value.contains(' ')) {
+                out.insert(SpaceCode{
+                    .dict_label = label, .field_name = cs_name, .code = std::string{value}});
             }
         }
     }
@@ -221,7 +222,7 @@ TEST(DictEnumCensus, SC010_EveryMessageTypeCoveredByMsgTypeCodesetOrCodesetEmpty
                           : "codeset has " + std::to_string(msgtype_codes.size()) + " code(s)")
                   << "\n";
 
-        EXPECT_EQ(missing, 0u)
+        EXPECT_EQ(missing, 0U)
             << label << ": " << missing
             << " declared message type(s) NOT present in the MsgType(35) "
             << "codeset while that codeset is non-empty — those message types would be REJECTED "
@@ -312,15 +313,15 @@ TEST(DictEnumCensus, SC011_ZeroDuplicateZeroMissingEnumZeroMissingDescription) {
         total_missing_description += missing_desc_here;
     }
 
-    EXPECT_EQ(total_duplicate_codes, 0u)
+    EXPECT_EQ(total_duplicate_codes, 0U)
         << "duplicate <value enum=...> codes found within a single field across the nine shipped "
            "QuickFIX dictionaries — QuickFIX tolerates this (union semantics, T013 rule 1), but a "
            "regression in OUR vendored data should be caught, not silently deduped away.";
-    EXPECT_EQ(total_missing_enum, 0u)
+    EXPECT_EQ(total_missing_enum, 0U)
         << "a <value> element missing its enum attribute in a shipped QuickFIX dictionary would "
            "make the LOADER ITSELF throw (T013 rule 2, fail-closed) — this leg exists as a direct, "
            "loader-independent confirmation.";
-    EXPECT_EQ(total_missing_description, 0u)
+    EXPECT_EQ(total_missing_description, 0U)
         << "a <value> element missing its description attribute across the nine shipped QuickFIX "
            "dictionaries — legal per T013 rule 3, but a regression in OUR vendored data should be "
            "caught, not silently accepted as diagnostics-only noise.";
@@ -351,8 +352,9 @@ TEST(DictEnumCensus, SC011_SpaceBearingCodesAreExactlyTheTwoSettlLocationPlaceho
         ASSERT_FALSE(raw_fields.empty()) << fname << ": raw <fields> scan found nothing";
         for (auto const& rf : raw_fields) {
             for (auto const& rv : rf.values) {
-                if (rv.code.find(' ') != std::string::npos) {
-                    found.insert(SpaceCode{std::string{fname}, rf.name, rv.code});
+                if (rv.code.contains(' ')) {
+                    found.insert(SpaceCode{
+                        .dict_label = std::string{fname}, .field_name = rf.name, .code = rv.code});
                 }
             }
         }
@@ -365,8 +367,10 @@ TEST(DictEnumCensus, SC011_SpaceBearingCodesAreExactlyTheTwoSettlLocationPlaceho
     }
 
     std::set<SpaceCode> const expected{
-        SpaceCode{"FIX41.xml", "SettlLocation", "ISO Country Code"},
-        SpaceCode{"FIX42.xml", "SettlLocation", "ISO Country Code"},
+        SpaceCode{
+            .dict_label = "FIX41.xml", .field_name = "SettlLocation", .code = "ISO Country Code"},
+        SpaceCode{
+            .dict_label = "FIX42.xml", .field_name = "SettlLocation", .code = "ISO Country Code"},
     };
 
     std::cout
@@ -471,7 +475,7 @@ TEST(DictEnumCensus, SC011_StoreOnlyEnumBackedTagsAreNeverMultiValueTyped) {
 
     std::cout << "  total store-only enum-backed tags across the nine: " << total_store_only
               << "\n";
-    EXPECT_GT(total_store_only, 0u)
+    EXPECT_GT(total_store_only, 0U)
         << "expected at least one store-only enum-backed tag (e.g. MsgType(35), EncryptMethod(98)) "
            "— "
            "if this is zero, either the dictionary set changed or the reachability walk above no "

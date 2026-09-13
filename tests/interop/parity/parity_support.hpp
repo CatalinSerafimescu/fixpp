@@ -116,7 +116,7 @@ inline std::vector<std::byte> make_sequence_reset(std::string_view bs, std::uint
 
 inline bool frame_is_msg_type(std::span<const std::byte> frame, std::string_view type) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
-    return wire.find("35=" + std::string(type) + "\x01") != std::string::npos;
+    return wire.contains("35=" + std::string(type) + "\x01");
 }
 
 // Outbound capture with an optional fail-injection: once fail_writes is set, the

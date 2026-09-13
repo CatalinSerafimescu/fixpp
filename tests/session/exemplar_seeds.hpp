@@ -49,22 +49,35 @@ struct NewOrderListOrderSeed {
 // ── E (NewOrderList) seed — matches tests/session/golden/new_order_list.fix ──
 // order 1 (ORD1): carries the nested 453->802 party chain.
 inline constexpr std::array<NewOrderListPartySubIdSeed, 1> kNewOrderListOrd1Subs{{
-    NewOrderListPartySubIdSeed{"SUB1", 1},
+    NewOrderListPartySubIdSeed{.party_sub_id = "SUB1", .party_sub_id_type = 1},
 }};
 
 inline constexpr std::array<NewOrderListPartySeed, 1> kNewOrderListOrd1Parties{{
-    NewOrderListPartySeed{"PARTY1", 'D', 1,
-                          std::span<const NewOrderListPartySubIdSeed>{kNewOrderListOrd1Subs}},
+    NewOrderListPartySeed{
+        .party_id = "PARTY1",
+        .party_id_source = 'D',
+        .party_role = 1,
+        .sub_ids = std::span<const NewOrderListPartySubIdSeed>{kNewOrderListOrd1Subs}},
 }};
 
 // order 2 (ORD2): NoPartyIDs=0 (present-but-empty) -> empty parties span.
 inline constexpr std::array<NewOrderListPartySeed, 0> kNewOrderListOrd2Parties{};
 
 inline constexpr std::array<NewOrderListOrderSeed, 2> kNewOrderListOrders{{
-    NewOrderListOrderSeed{"ORD1", 1, '1', "MSFT", "150.75",
-                          std::span<const NewOrderListPartySeed>{kNewOrderListOrd1Parties}},
-    NewOrderListOrderSeed{"ORD2", 2, '2', "IBM", "50",
-                          std::span<const NewOrderListPartySeed>{kNewOrderListOrd2Parties}},
+    NewOrderListOrderSeed{
+        .cl_ord_id = "ORD1",
+        .list_seq_no = 1,
+        .side = '1',
+        .symbol = "MSFT",
+        .order_qty = "150.75",
+        .parties = std::span<const NewOrderListPartySeed>{kNewOrderListOrd1Parties}},
+    NewOrderListOrderSeed{
+        .cl_ord_id = "ORD2",
+        .list_seq_no = 2,
+        .side = '2',
+        .symbol = "IBM",
+        .order_qty = "50",
+        .parties = std::span<const NewOrderListPartySeed>{kNewOrderListOrd2Parties}},
 }};
 
 struct NewOrderListSeed {
@@ -111,12 +124,15 @@ struct AllocationReportPartySeed {
 };
 
 inline constexpr std::array<AllocationReportPartySubIdSeed, 1> kAllocationReportSubs{{
-    AllocationReportPartySubIdSeed{"SUB1", 1},
+    AllocationReportPartySubIdSeed{.party_sub_id = "SUB1", .party_sub_id_type = 1},
 }};
 
 inline constexpr std::array<AllocationReportPartySeed, 1> kAllocationReportParties{{
     AllocationReportPartySeed{
-        "PARTY1", 'D', 1, std::span<const AllocationReportPartySubIdSeed>{kAllocationReportSubs}},
+        .party_id = "PARTY1",
+        .party_id_source = 'D',
+        .party_role = 1,
+        .sub_ids = std::span<const AllocationReportPartySubIdSeed>{kAllocationReportSubs}},
 }};
 
 struct AllocationReportSeed {

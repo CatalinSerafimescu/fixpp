@@ -17,7 +17,7 @@
 
 namespace {
 
-constexpr std::size_t kBufSize = 4u * 1024u * 1024u;  // 4 MiB
+constexpr std::size_t kBufSize = 4U * 1024U * 1024U;  // 4 MiB
 
 }  // namespace
 
@@ -30,8 +30,8 @@ TEST(PmrAllocation, EveryByteFromMr) {
     auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX44.xml";
     auto dict = fixpp::dict::XmlLoader{}.load(path, &tracker);
 
-    EXPECT_GT(tracker.allocate_calls(), 0u);
-    EXPECT_GT(tracker.total_bytes_allocated(), 0u);
+    EXPECT_GT(tracker.allocate_calls(), 0U);
+    EXPECT_GT(tracker.total_bytes_allocated(), 0U);
 }
 
 // Move discipline: std::move(Dictionary) must not trigger any new PMR allocation.
@@ -62,8 +62,8 @@ TEST(PmrAllocation, LoadFromStringAlsoRoutesThroughMr) {
 
     auto dict = fixpp::dict::XmlLoader{}.load_from_string(text, &tracker);
 
-    EXPECT_GT(tracker.allocate_calls(), 0u);
-    EXPECT_GT(tracker.total_bytes_allocated(), 0u);
+    EXPECT_GT(tracker.allocate_calls(), 0U);
+    EXPECT_GT(tracker.total_bytes_allocated(), 0U);
 }
 
 // NFR-002-2: zero global-operator-new during load*.
@@ -87,5 +87,5 @@ TEST(PmrAllocation, NoGlobalNewSmoke) {
     // Structural proxy: PMR allocate_calls ≥ 1 demonstrates the metadata
     // storage is routed through mr; global-new strict assertion is deferred
     // to the replacement-new TU in the sanitizer build.
-    EXPECT_GE(tracker.allocate_calls(), 1u);
+    EXPECT_GE(tracker.allocate_calls(), 1U);
 }

@@ -149,9 +149,11 @@ TEST_P(HappyRejectInvalidAdmin, RejectInvalidAdminSurvives) {
     desc.induction = fixpp::interop::AdminInduction::proxy_corrupt;
     desc.self_deadline_ms = std::chrono::milliseconds{10000};  // FR-010: 10 s
     desc.round_trips = {
-        {"US4-1",
-         "[FIX-SL §4.5.4]"},  // fixpp emits Reject(35=3,45,373[,371]); session stays Active
-        {"US4-2", "[FIX-SL §4.5.4]"},  // subsequent heartbeats flow (non-fatal reject)
+        {.ac_ref = "US4-1",
+         .spec_ref =
+             "[FIX-SL §4.5.4]"},  // fixpp emits Reject(35=3,45,373[,371]); session stays Active
+        {.ac_ref = "US4-2",
+         .spec_ref = "[FIX-SL §4.5.4]"},  // subsequent heartbeats flow (non-fatal reject)
     };
     desc.acceptance_ids = {"US4-1", "US4-2"};
 

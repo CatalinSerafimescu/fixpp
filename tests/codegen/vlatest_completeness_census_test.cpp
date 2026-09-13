@@ -165,7 +165,7 @@ std::optional<std::string> token_for_tag(const Dict& d, int tag) {
     const std::string& raw = it->second;
     auto cs = d.codeset_base.find(raw);
     const std::string& eff = (cs != d.codeset_base.end()) ? cs->second : raw;
-    if (non_derivable_datatype_quirks().count(eff)) return std::nullopt;
+    if (non_derivable_datatype_quirks().contains(eff)) return std::nullopt;
     return camel_to_snake(eff);
 }
 
@@ -333,17 +333,18 @@ TEST(VlatestCompletenessCensus, StructuralKeyExactSetEquality) {
     EXPECT_EQ(actual_msgs.size(), 181U) << "raw-XML walk message count";
     EXPECT_EQ(c.expected.msg_types.size(), 181U) << "manifest message count";
 
-    std::vector<std::string> only_actual_msg, only_expected_msg;
-    std::set_difference(actual_msgs.begin(), actual_msgs.end(), c.expected.msg_types.begin(),
-                        c.expected.msg_types.end(), std::back_inserter(only_actual_msg));
-    std::set_difference(c.expected.msg_types.begin(), c.expected.msg_types.end(),
-                        actual_msgs.begin(), actual_msgs.end(),
-                        std::back_inserter(only_expected_msg));
+    std::vector<std::string> only_actual_msg;
+    std::vector<std::string> only_expected_msg;
+    std::ranges::set_difference(actual_msgs, c.expected.msg_types,
+                                std::back_inserter(only_actual_msg));
+    std::ranges::set_difference(c.expected.msg_types, actual_msgs,
+                                std::back_inserter(only_expected_msg));
     EXPECT_TRUE(only_actual_msg.empty()) << "msg_types in raw-XML walk but NOT in manifest";
     EXPECT_TRUE(only_expected_msg.empty()) << "msg_types in manifest but NOT in raw-XML walk";
 
     using Tup = std::tuple<std::string, std::string, int, std::string>;
-    std::set<Tup> actual_tuples, expected_tuples;
+    std::set<Tup> actual_tuples;
+    std::set<Tup> expected_tuples;
     for (const auto& [key, rule] : c.actual.occ) {
         actual_tuples.emplace(std::get<0>(key), std::get<1>(key), std::get<2>(key), rule);
     }
@@ -351,11 +352,10 @@ TEST(VlatestCompletenessCensus, StructuralKeyExactSetEquality) {
         expected_tuples.emplace(std::get<0>(key), std::get<1>(key), std::get<2>(key), rule);
     }
 
-    std::vector<Tup> only_actual, only_expected;
-    std::set_difference(actual_tuples.begin(), actual_tuples.end(), expected_tuples.begin(),
-                        expected_tuples.end(), std::back_inserter(only_actual));
-    std::set_difference(expected_tuples.begin(), expected_tuples.end(), actual_tuples.begin(),
-                        actual_tuples.end(), std::back_inserter(only_expected));
+    std::vector<Tup> only_actual;
+    std::vector<Tup> only_expected;
+    std::ranges::set_difference(actual_tuples, expected_tuples, std::back_inserter(only_actual));
+    std::ranges::set_difference(expected_tuples, actual_tuples, std::back_inserter(only_expected));
 
     EXPECT_TRUE(only_actual.empty())
         << describe(only_actual, "in raw-XML walk but NOT in manifest");

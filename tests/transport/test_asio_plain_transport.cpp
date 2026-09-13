@@ -149,10 +149,10 @@ TEST(AsioPlainTransport, ConnectReadWriteCycle) {
     ASSERT_FALSE(timed_out) << "test timed out — loopback I/O did not complete";
     ASSERT_TRUE(write_result.has_value())
         << "client async_write failed: " << static_cast<int>(write_result.error());
-    EXPECT_EQ(*write_result, 4u);
+    EXPECT_EQ(*write_result, 4U);
     ASSERT_TRUE(read_result.has_value())
         << "server async_read_some failed: " << static_cast<int>(read_result.error());
-    EXPECT_EQ(*read_result, 4u);
+    EXPECT_EQ(*read_result, 4U);
 }
 
 // ── Test 2: No TLS ClientHello — first received byte is 0x38, not 0x16 ────────
@@ -530,7 +530,7 @@ TEST(AsioPlainTransport, MakeAcceptedReturnsConnectedTransport) {
         << "client write failed: " << static_cast<int>(write_result.error());
     ASSERT_TRUE(read_result.has_value())
         << "server read via make_accepted failed: " << static_cast<int>(read_result.error());
-    EXPECT_EQ(*read_result, 2u);
+    EXPECT_EQ(*read_result, 2U);
 }
 
 // ── Test 7: T3 (SC-014, 088) — connect epoch retired after a real connect ─────
@@ -603,7 +603,7 @@ TEST(AsioPlainTransport, TimerEpochRetiredAfterConnect) {
 
     ASSERT_FALSE(timed_out) << "test timed out";
     ASSERT_TRUE(connect_ok) << "async_connect must succeed for T3's construction";
-    EXPECT_EQ(epoch_after_connect, 2u)
+    EXPECT_EQ(epoch_after_connect, 2U)
         << "T3 (SC-014): connect epoch must be retired (advanced past the armed "
            "value 1) by the time async_connect returns — arm (0->1) then retire "
            "(1->2); got "

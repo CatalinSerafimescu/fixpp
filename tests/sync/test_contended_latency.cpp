@@ -25,7 +25,7 @@ namespace {
 using fixpp::sync::async_mutex;
 
 // Runs all co_spawned tasks to completion.
-static void run_ctx(asio::io_context& ioc) { ioc.run(); }
+void run_ctx(asio::io_context& ioc) { ioc.run(); }
 
 TEST(SeamContendedLatency, SecondAcquirerSuspends) {
     // Two coroutines race for the same mutex.  The first one holds it while the
@@ -35,7 +35,8 @@ TEST(SeamContendedLatency, SecondAcquirerSuspends) {
 
     std::atomic<int> in_critical{0};
     int overlap_detected = 0;
-    int first_done = 0, second_done = 0;
+    int first_done = 0;
+    int second_done = 0;
 
     asio::io_context ioc;
     async_mutex mtx;

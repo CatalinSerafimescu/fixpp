@@ -79,7 +79,7 @@ using namespace std::chrono_literals;
 namespace {
 
 // Minimal mock clock (no steady-timer; just a clock interface).
-static std::shared_ptr<fixpp::core::mock_clock> make_mock_clock(asio::io_context& ioc) {
+std::shared_ptr<fixpp::core::mock_clock> make_mock_clock(asio::io_context& ioc) {
     using namespace std::chrono;
     auto utc = system_clock::time_point{} + seconds{1704067200};
     auto stp = fixpp::core::steady_time_point{} + seconds{0};
@@ -88,8 +88,8 @@ static std::shared_ptr<fixpp::core::mock_clock> make_mock_clock(asio::io_context
 
 // Register a minimal acceptor session on `engine`.  The session uses a no-op
 // transport_send (no live TLS needed for this test).  Returns the SessionId.
-static fixpp::session::SessionId register_dummy_session(fixpp::session::Engine& engine,
-                                                        asio::io_context& ioc) {
+fixpp::session::SessionId register_dummy_session(fixpp::session::Engine& engine,
+                                                 asio::io_context& ioc) {
     fixpp::session::SessionConfig cfg;
     cfg.sender_comp_id = "ACCEPTOR";
     cfg.target_comp_id = "INITIATOR";
@@ -141,7 +141,7 @@ static fixpp::session::SessionId register_dummy_session(fixpp::session::Engine& 
 // not hold for that Engine: construction accepts a null clock and `start()` is what rejects
 // it. Pre-existing; reported, not changed here.)
 // A bare `*clock` would separately bind `::clock` from <ctime>.
-static void stop_engine(fixpp::session::Engine& engine, asio::io_context& ioc) {
+void stop_engine(fixpp::session::Engine& engine, asio::io_context& ioc) {
     auto fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
     if (!fixpp::test_support::pump_until_ready(ioc, fut, 5s)) {
         fixpp::test_support::drain_or_report(ioc, "engine_clock_gate:stop_engine");

@@ -60,7 +60,7 @@ private:
     void do_deallocate(void* p, std::size_t bytes, std::size_t alignment) override {
         std::pmr::new_delete_resource()->deallocate(p, bytes, alignment);
     }
-    bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override {
+    [[nodiscard]] bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override {
         return this == &other;
     }
 };
@@ -105,7 +105,7 @@ TEST(TlsHandshakeAllocGuard, FindAndSnapshotZeroPMRAllocAfterWarmup) {
     }
 
     std::size_t hot_allocs = counter.bytes_allocated - allocs_before;
-    EXPECT_EQ(hot_allocs, 0u) << "find/snapshot must not allocate via PMR after warm-up (FR-007)";
+    EXPECT_EQ(hot_allocs, 0U) << "find/snapshot must not allocate via PMR after warm-up (FR-007)";
 }
 
 // ── GlobalMallocGate: mallocnesia ─────────────────────────────────────────────

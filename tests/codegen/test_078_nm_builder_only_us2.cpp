@@ -62,5 +62,5 @@ TEST(NmBuilderOnlyUS2, BuildNewOrderSingleViaBuilderOnlyLink) {
     std::array<std::byte, 256> out{};
     auto built = fixpp::v44::build_NewOrderSingle(std::span<std::byte>{out}, args);
     ASSERT_TRUE(built.has_value()) << "build_NewOrderSingle failed";
-    EXPECT_GT(built->size(), 0u) << "build_NewOrderSingle produced an empty frame";
+    EXPECT_GT(built->size(), 0U) << "build_NewOrderSingle produced an empty frame";
 }

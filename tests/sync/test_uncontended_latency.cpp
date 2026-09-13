@@ -21,7 +21,6 @@
 
 namespace {
 
-using fixpp::sync::async_lock_guard;
 using fixpp::sync::async_mutex;
 
 // ── Helper: run a coroutine synchronously on a single-threaded io_context ──

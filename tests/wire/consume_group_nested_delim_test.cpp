@@ -347,7 +347,7 @@ TEST(ConsumeGroupNestedDelim, NestedFailureAtDelimiterPositionPropagatesFailClos
 // t)`) must resolve through `group_ctx_`, not the bare fallback.
 // ============================================================================
 TEST(ConsumeGroupNestedDelim, NestedDelimiterDescendsOnPopulatedContextStore) {
-    std::vector<std::byte> dict_buf(2u * 1024u * 1024u);
+    std::vector<std::byte> dict_buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource dict_mr{dict_buf.data(), dict_buf.size()};
     auto dict = fixpp::dict::XmlLoader{}.load_from_string(kNestedDelimContextXml, &dict_mr);
     auto tv = dict.as_table_view();

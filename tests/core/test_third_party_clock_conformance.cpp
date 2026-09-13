@@ -36,10 +36,10 @@ namespace ts = fixpp::testsupport;
 class tp_clock final : public fixpp::core::Clock {
 public:
     explicit tp_clock(asio::any_io_executor ex) : ex_(std::move(ex)) {}
-    fixpp::core::utc_time_point now() const noexcept override {
+    [[nodiscard]] fixpp::core::utc_time_point now() const noexcept override {
         return std::chrono::system_clock::now();
     }
-    fixpp::core::steady_time_point steady_now() const noexcept override {
+    [[nodiscard]] fixpp::core::steady_time_point steady_now() const noexcept override {
         return std::chrono::steady_clock::now();
     }
     asio::awaitable<void> sleep_until(fixpp::core::steady_time_point dl) override {

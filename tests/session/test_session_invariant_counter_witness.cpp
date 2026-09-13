@@ -93,13 +93,13 @@ namespace {
 
 // ── FIX frame helpers ─────────────────────────────────────────────────────────
 
-static std::string field(int tag, std::string_view val) {
+std::string field(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
-static std::vector<std::byte> make_logon_frame(std::string_view bs, std::uint32_t seq,
-                                               std::string_view sender, std::string_view target,
-                                               int hbt = 30) {
+std::vector<std::byte> make_logon_frame(std::string_view bs, std::uint32_t seq,
+                                        std::string_view sender, std::string_view target,
+                                        int hbt = 30) {
     std::string body;
     body += field(35, "A");
     body += field(34, std::to_string(seq));
@@ -127,7 +127,7 @@ static std::vector<std::byte> make_logon_frame(std::string_view bs, std::uint32_
 }
 
 // Count session_event_peer_identity_bound events in recent_events().
-static std::size_t count_bound_events(const fixpp::session::Session& sess) {
+std::size_t count_bound_events(const fixpp::session::Session& sess) {
     auto events = sess.recent_events();
     return static_cast<std::size_t>(
         std::count_if(events.begin(), events.end(), [](const fixpp::session::SessionEvent& ev) {
@@ -229,7 +229,7 @@ TEST_F(InvariantCounterWitnessTest, Acceptor_AuthorizeCalledExactlyOnce_PerLogon
 
         // Invariant 1: exactly one bound event per accepted Logon.
         const std::size_t bound_count = count_bound_events(sess);
-        EXPECT_EQ(bound_count, 1u)
+        EXPECT_EQ(bound_count, 1U)
             << "Session " << i << ": exactly 1 session_event_peer_identity_bound expected. "
             << "RED (T036 not landed): counter = " << bound_count << " (expected 1).";
 
@@ -286,7 +286,7 @@ TEST_F(InvariantCounterWitnessTest, Initiator_AuthorizeCalledExactlyOnce_PerLogo
 
         // Initiator invariant: exactly one bound event per Logon-ack processed.
         const std::size_t bound_count = count_bound_events(sess);
-        EXPECT_EQ(bound_count, 1u)
+        EXPECT_EQ(bound_count, 1U)
             << "Initiator session " << i << ": exactly 1 session_event_peer_identity_bound "
             << "expected on LogonSent→Active path. "
             << "RED (T036 initiator not landed): counter = " << bound_count << " (expected 1).";
@@ -309,7 +309,7 @@ TEST(CompidPolicyStructural, AuthorizeIsConstNoexcept) {
     policy.add_binding("TEST-CN", "TESTCOMP");
 
     const auto& const_policy = policy;
-    EXPECT_EQ(const_policy.binding_count(), 1u);
+    EXPECT_EQ(const_policy.binding_count(), 1U);
 
     fixpp::tls::peer_identity pid;
     pid.subject_dn = "CN=TEST-CN,O=Test,C=US";
@@ -324,7 +324,7 @@ TEST(CompidPolicyStructural, AuthorizeIsConstNoexcept) {
     {
         [[maybe_unused]] auto auth_result = const_policy.authorize(pid, "TESTCOMP");
     }
-    EXPECT_EQ(const_policy.binding_count(), 1u) << "authorize() must not modify binding_count().";
+    EXPECT_EQ(const_policy.binding_count(), 1U) << "authorize() must not modify binding_count().";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -354,7 +354,9 @@ public:
         : inner_{std::move(inner)} {}
 
     // Number of times load_credentials() has been called.
-    std::size_t load_count() const noexcept { return count_.load(std::memory_order_relaxed); }
+    [[nodiscard]] std::size_t load_count() const noexcept {
+        return count_.load(std::memory_order_relaxed);
+    }
 
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<fixpp::tls::local_credentials>>
     load_credentials() override {
@@ -415,7 +417,7 @@ TEST(LoadCredentialsCounterWitness, LoadCredentialsCalledExactlyOncePerHandshake
     ssl_cfg.clock = nullptr;  // skip expiry
     ssl_cfg.caps = fixpp::tls::CertSourceCaps{};
 
-    EXPECT_EQ(counting->load_count(), 0u) << "No load before factory construction";
+    EXPECT_EQ(counting->load_count(), 0U) << "No load before factory construction";
 
     auto factory_result = fixpp::transport::make_asio_tls_transport_factory(
         fixpp::transport::Transport::Config{}, ssl_cfg);
@@ -423,7 +425,7 @@ TEST(LoadCredentialsCounterWitness, LoadCredentialsCalledExactlyOncePerHandshake
     auto factory = std::move(*factory_result);
 
     // Factory construction calls load_credentials() exactly once.
-    EXPECT_EQ(counting->load_count(), 1u)
+    EXPECT_EQ(counting->load_count(), 1U)
         << "load_credentials() must be called EXACTLY ONCE at factory construction. "
            "FR-013a / I-3 invariant.";
 
@@ -433,7 +435,7 @@ TEST(LoadCredentialsCounterWitness, LoadCredentialsCalledExactlyOncePerHandshake
     fixpp::transport::test::LoopbackTlsFixture loopback_fixture{fdir, ioc.get_executor()};
     auto server_ep = loopback_fixture.server_endpoint();
     auto& listener = loopback_fixture.listener();
-    auto& server_ssl_cfg = loopback_fixture.ssl_cfg();
+    const auto& server_ssl_cfg = loopback_fixture.ssl_cfg();
 
     // ── Drive N=2 loopback handshakes and assert count stays at 1 ───────────
     // Each iteration: server accepts + handshakes concurrently with client
@@ -495,7 +497,7 @@ TEST(LoadCredentialsCounterWitness, LoadCredentialsCalledExactlyOncePerHandshake
 
         // KEY ASSERTION: count must STILL be 1 after each handshake.
         // make() + async_handshake() must NOT call load_credentials().
-        EXPECT_EQ(counting->load_count(), 1u)
+        EXPECT_EQ(counting->load_count(), 1U)
             << "After handshake " << (i + 1)
             << ": load_credentials() count must remain at 1 "
                "(FR-013a / I-3: loaded once at factory construction, "

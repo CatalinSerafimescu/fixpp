@@ -163,8 +163,7 @@ TEST(BuilderCompletenessMutationWitness, DropOneMessageMakesCensusDetectItRed) {
         << "registry-vs-raw-XML-walk comparison did NOT go RED for the drop";
 
     std::vector<std::string> missing;
-    std::set_difference(expected.begin(), expected.end(), dropped_registry.begin(),
-                        dropped_registry.end(), std::back_inserter(missing));
+    std::ranges::set_difference(expected, dropped_registry, std::back_inserter(missing));
     ASSERT_EQ(missing.size(), 1U) << "expected exactly one message missing, got " << missing.size();
     EXPECT_EQ(missing.front(), "D");
     std::cerr << "[builder_completeness_mutation_witness] RED CONFIRMED: registry-array leg "

@@ -98,38 +98,38 @@ BuiltParams build_params_from_seed(std::pmr::memory_resource* mr) {
 
     BuiltParams built;
     built.ord1_subs.push_back(NewOrderListPartySubId{
-        seed.orders[0].parties[0].sub_ids[0].party_sub_id,
-        seed.orders[0].parties[0].sub_ids[0].party_sub_id_type,
+        .party_sub_id = seed.orders[0].parties[0].sub_ids[0].party_sub_id,
+        .party_sub_id_type = seed.orders[0].parties[0].sub_ids[0].party_sub_id_type,
     });
     built.ord1_parties.push_back(NewOrderListParty{
-        seed.orders[0].parties[0].party_id,
-        seed.orders[0].parties[0].party_id_source,
-        seed.orders[0].parties[0].party_role,
-        std::span<const NewOrderListPartySubId>{built.ord1_subs},
+        .party_id = seed.orders[0].parties[0].party_id,
+        .party_id_source = seed.orders[0].parties[0].party_id_source,
+        .party_role = seed.orders[0].parties[0].party_role,
+        .sub_ids = std::span<const NewOrderListPartySubId>{built.ord1_subs},
     });
 
     built.orders.push_back(NewOrderListOrder{
-        seed.orders[0].cl_ord_id,
-        seed.orders[0].list_seq_no,
-        seed.orders[0].side,
-        seed.orders[0].symbol,
-        make_decimal(seed.orders[0].order_qty, mr),
-        std::span<const NewOrderListParty>{built.ord1_parties},
+        .cl_ord_id = seed.orders[0].cl_ord_id,
+        .list_seq_no = seed.orders[0].list_seq_no,
+        .side = seed.orders[0].side,
+        .symbol = seed.orders[0].symbol,
+        .order_qty = make_decimal(seed.orders[0].order_qty, mr),
+        .parties = std::span<const NewOrderListParty>{built.ord1_parties},
     });
     built.orders.push_back(NewOrderListOrder{
-        seed.orders[1].cl_ord_id,
-        seed.orders[1].list_seq_no,
-        seed.orders[1].side,
-        seed.orders[1].symbol,
-        make_decimal(seed.orders[1].order_qty, mr),
-        std::span<const NewOrderListParty>{built.ord2_parties},  // empty
+        .cl_ord_id = seed.orders[1].cl_ord_id,
+        .list_seq_no = seed.orders[1].list_seq_no,
+        .side = seed.orders[1].side,
+        .symbol = seed.orders[1].symbol,
+        .order_qty = make_decimal(seed.orders[1].order_qty, mr),
+        .parties = std::span<const NewOrderListParty>{built.ord2_parties},  // empty
     });
 
     built.params = NewOrderListParams{
-        seed.list_id,
-        seed.bid_type,
-        seed.tot_no_orders,
-        std::span<const NewOrderListOrder>{built.orders},
+        .list_id = seed.list_id,
+        .bid_type = seed.bid_type,
+        .tot_no_orders = seed.tot_no_orders,
+        .orders = std::span<const NewOrderListOrder>{built.orders},
     };
     return built;
 }
@@ -156,7 +156,7 @@ TEST(ExemplarRoundtripE, BuildMatchesGoldenAndRoundTripsThreeLevel) {
     ASSERT_EQ(expected.size(), 1U);
 
     std::vector<GoldenFrame> actual{
-        GoldenFrame{'>', std::vector<std::byte>{body.begin(), body.end()}}};
+        GoldenFrame{.dir = '>', .bytes = std::vector<std::byte>{body.begin(), body.end()}}};
     auto diff = diff_transcripts(expected, actual, shape_oracle_profile());
     EXPECT_TRUE(static_cast<bool>(diff)) << "golden diff mismatch: " << diff.detail;
 
@@ -307,7 +307,7 @@ TEST(ExemplarRoundtrip9, BuildMatchesGoldenAndRoundTrips) {
     ASSERT_EQ(expected.size(), 1U);
 
     std::vector<GoldenFrame> actual{
-        GoldenFrame{'>', std::vector<std::byte>{body.begin(), body.end()}}};
+        GoldenFrame{.dir = '>', .bytes = std::vector<std::byte>{body.begin(), body.end()}}};
     auto diff = diff_transcripts(expected, actual, shape_oracle_profile());
     EXPECT_TRUE(static_cast<bool>(diff)) << "golden diff mismatch: " << diff.detail;
 
@@ -382,28 +382,28 @@ BuiltAllocationReportParams build_allocation_report_params_from_seed(
 
     BuiltAllocationReportParams built;
     built.subs.push_back(AllocationReportPartySubId{
-        seed.parties[0].sub_ids[0].party_sub_id,
-        seed.parties[0].sub_ids[0].party_sub_id_type,
+        .party_sub_id = seed.parties[0].sub_ids[0].party_sub_id,
+        .party_sub_id_type = seed.parties[0].sub_ids[0].party_sub_id_type,
     });
     built.parties.push_back(AllocationReportParty{
-        seed.parties[0].party_id,
-        seed.parties[0].party_id_source,
-        seed.parties[0].party_role,
-        std::span<const AllocationReportPartySubId>{built.subs},
+        .party_id = seed.parties[0].party_id,
+        .party_id_source = seed.parties[0].party_id_source,
+        .party_role = seed.parties[0].party_role,
+        .sub_ids = std::span<const AllocationReportPartySubId>{built.subs},
     });
 
     built.params = AllocationReportParams{
-        seed.alloc_report_id,
-        seed.alloc_trans_type,
-        seed.alloc_report_type,
-        seed.alloc_status,
-        seed.alloc_no_orders_type,
-        seed.side,
-        make_decimal(seed.quantity, mr),
-        make_decimal(seed.avg_px, mr),
-        seed.trade_date,
-        seed.symbol,
-        std::span<const AllocationReportParty>{built.parties},
+        .alloc_report_id = seed.alloc_report_id,
+        .alloc_trans_type = seed.alloc_trans_type,
+        .alloc_report_type = seed.alloc_report_type,
+        .alloc_status = seed.alloc_status,
+        .alloc_no_orders_type = seed.alloc_no_orders_type,
+        .side = seed.side,
+        .quantity = make_decimal(seed.quantity, mr),
+        .avg_px = make_decimal(seed.avg_px, mr),
+        .trade_date = seed.trade_date,
+        .symbol = seed.symbol,
+        .parties = std::span<const AllocationReportParty>{built.parties},
     };
     return built;
 }
@@ -427,7 +427,7 @@ TEST(ExemplarRoundtripAS, BuildMatchesGoldenAndRoundTripsTwoLevel) {
     ASSERT_EQ(expected.size(), 1U);
 
     std::vector<GoldenFrame> actual{
-        GoldenFrame{'>', std::vector<std::byte>{body.begin(), body.end()}}};
+        GoldenFrame{.dir = '>', .bytes = std::vector<std::byte>{body.begin(), body.end()}}};
     auto diff = diff_transcripts(expected, actual, shape_oracle_profile());
     EXPECT_TRUE(static_cast<bool>(diff)) << "golden diff mismatch: " << diff.detail;
 
@@ -557,7 +557,7 @@ TEST(ExemplarRoundtripD, BuildMatchesGoldenAndRoundTrips) {
     ASSERT_EQ(expected.size(), 1U);
 
     std::vector<GoldenFrame> actual{
-        GoldenFrame{'>', std::vector<std::byte>{body.begin(), body.end()}}};
+        GoldenFrame{.dir = '>', .bytes = std::vector<std::byte>{body.begin(), body.end()}}};
     auto diff = diff_transcripts(expected, actual, shape_oracle_profile());
     EXPECT_TRUE(static_cast<bool>(diff)) << "golden diff mismatch: " << diff.detail;
 
@@ -643,7 +643,7 @@ TEST(ExemplarRoundtrip8, BuildMatchesGoldenAndRoundTrips) {
     ASSERT_EQ(expected.size(), 1U);
 
     std::vector<GoldenFrame> actual{
-        GoldenFrame{'>', std::vector<std::byte>{body.begin(), body.end()}}};
+        GoldenFrame{.dir = '>', .bytes = std::vector<std::byte>{body.begin(), body.end()}}};
     auto diff = diff_transcripts(expected, actual, shape_oracle_profile());
     EXPECT_TRUE(static_cast<bool>(diff)) << "golden diff mismatch: " << diff.detail;
 
@@ -755,7 +755,7 @@ TEST(ExemplarRoundtripAS, OrderMutationDetectsSubEntryReorder) {
     ASSERT_EQ(mutated_expected.size(), 1U);
 
     std::vector<GoldenFrame> actual{
-        GoldenFrame{'>', std::vector<std::byte>{body.begin(), body.end()}}};
+        GoldenFrame{.dir = '>', .bytes = std::vector<std::byte>{body.begin(), body.end()}}};
     auto diff = diff_transcripts(mutated_expected, actual, shape_oracle_profile());
     EXPECT_FALSE(static_cast<bool>(diff))
         << "golden diff should have detected the sub-entry reorder mutation but reported match";

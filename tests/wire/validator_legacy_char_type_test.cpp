@@ -116,7 +116,7 @@ MessageView<access_mode::Index> parse_index(std::vector<std::byte> const& buf,
 // Loads a real shipped dictionary and returns its table_view — the same
 // production path (Dictionary::as_table_view()) the parity gate uses.
 fixpp::dict::table_view load_shipped_table_view(char const* filename) {
-    std::vector<std::byte> buf(8u * 1024u * 1024u);
+    std::vector<std::byte> buf(8U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / filename;
     auto dict = fixpp::dict::XmlLoader{}.load(path, &mr);

@@ -184,11 +184,10 @@ static void expect_builder_sets_equal(const fs::path& a_root, const fs::path& b_
     auto a_set = collect_builder_tier_set(a_root);
     auto b_set = collect_builder_tier_set(b_root);
 
-    std::vector<std::string> only_in_a, only_in_b;
-    std::set_difference(a_set.begin(), a_set.end(), b_set.begin(), b_set.end(),
-                        std::back_inserter(only_in_a));
-    std::set_difference(b_set.begin(), b_set.end(), a_set.begin(), a_set.end(),
-                        std::back_inserter(only_in_b));
+    std::vector<std::string> only_in_a;
+    std::vector<std::string> only_in_b;
+    std::ranges::set_difference(a_set, b_set, std::back_inserter(only_in_a));
+    std::ranges::set_difference(b_set, a_set, std::back_inserter(only_in_b));
     for (auto const& rel : only_in_a)
         ADD_FAILURE() << context << ": file present under " << a_root << " but missing under "
                       << b_root << ": " << rel;
@@ -207,7 +206,7 @@ static void expect_builder_sets_equal(const fs::path& a_root, const fs::path& b_
                                  << " — codegen output shape may have changed.";
 
     for (auto const& rel : a_set) {
-        if (!b_set.count(rel)) continue;  // already reported above
+        if (!b_set.contains(rel)) continue;  // already reported above
         expect_bytes_equal(read_file_binary(a_root / rel), read_file_binary(b_root / rel),
                            context + ": " + rel + " not byte-identical");
     }
@@ -957,7 +956,7 @@ TEST_F(DeterminismTest, OfficialModeBuildersStructuralShape) {
     constexpr std::size_t kExpectedOfficialMsgCount = 33;
     constexpr std::size_t kExpectedOfficialGroupPlanCount = 54;
     constexpr std::size_t kExpectedOfficialFileCount =
-        kExpectedOfficialMsgCount * 5 + kExpectedOfficialGroupPlanCount + 3;
+        (kExpectedOfficialMsgCount * 5) + kExpectedOfficialGroupPlanCount + 3;
     auto const built_set = collect_builder_tier_set(run.path / "v44");
     EXPECT_EQ(built_set.size(), kExpectedOfficialFileCount)
         << "SC-003 violated: `--families official` v44 builder-tier file-set shape changed "
@@ -1000,7 +999,7 @@ TEST_F(DeterminismTest, V42OfficialModeBuildersStructuralShape) {
     constexpr std::size_t kExpectedV42OfficialMsgCount = 25;
     constexpr std::size_t kExpectedV42OfficialGroupPlanCount = 19;
     constexpr std::size_t kExpectedV42OfficialFileCount =
-        kExpectedV42OfficialMsgCount * 5 + kExpectedV42OfficialGroupPlanCount + 3;
+        (kExpectedV42OfficialMsgCount * 5) + kExpectedV42OfficialGroupPlanCount + 3;
 
     auto const built_set = collect_builder_tier_set(run.path / "v42");
     EXPECT_EQ(built_set.size(), kExpectedV42OfficialFileCount)

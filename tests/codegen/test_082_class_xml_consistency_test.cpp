@@ -126,10 +126,10 @@ struct VersionCase {
 };
 
 constexpr std::array<VersionCase, 4> kCases{{
-    {"v42", "FIX42.xml", 46, 18},
-    {"v44", "FIX44.xml", 93, 59},
-    {"v50sp2", "FIX50SP2.xml", 156, 505},
-    {"vt11", "FIXT11.xml", 8, 1},
+    {.ns = "v42", .xml = "FIX42.xml", .expect_messages = 46, .expect_groups = 18},
+    {.ns = "v44", .xml = "FIX44.xml", .expect_messages = 93, .expect_groups = 59},
+    {.ns = "v50sp2", .xml = "FIX50SP2.xml", .expect_messages = 156, .expect_groups = 505},
+    {.ns = "vt11", .xml = "FIXT11.xml", .expect_messages = 8, .expect_groups = 1},
 }};
 
 [[nodiscard]] std::string read_file(std::filesystem::path const& p) {
@@ -165,7 +165,7 @@ constexpr std::array<VersionCase, 4> kCases{{
     }
     std::uint32_t v = 0;
     while (pos < s.size() && s[pos] >= '0' && s[pos] <= '9') {
-        v = v * 10U + static_cast<std::uint32_t>(s[pos] - '0');
+        v = (v * 10U) + static_cast<std::uint32_t>(s[pos] - '0');
         if (v > 0xFFFFU) {
             return false;
         }

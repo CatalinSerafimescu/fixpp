@@ -152,7 +152,7 @@ TEST(PinsetRotationContract, EmptySnapshotNonNull) {
     Pinset ps;
     auto snap = ps.snapshot();
     EXPECT_NE(snap, nullptr);
-    EXPECT_EQ(snap->size(), 0u);
+    EXPECT_EQ(snap->size(), 0U);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

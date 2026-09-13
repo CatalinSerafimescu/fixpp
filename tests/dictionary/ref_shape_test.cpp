@@ -43,9 +43,9 @@ static_assert(
 // RefShape — runtime re-assertion of sizes, alignment, and type traits
 // ---------------------------------------------------------------------------
 
-TEST(RefShape, FieldRefSize) { EXPECT_EQ(sizeof(fixpp::dict::FieldRef), 16u); }
+TEST(RefShape, FieldRefSize) { EXPECT_EQ(sizeof(fixpp::dict::FieldRef), 16U); }
 
-TEST(RefShape, FieldRefAlignment) { EXPECT_EQ(alignof(fixpp::dict::FieldRef), 2u); }
+TEST(RefShape, FieldRefAlignment) { EXPECT_EQ(alignof(fixpp::dict::FieldRef), 2U); }
 
 TEST(RefShape, FieldRefIsStandardLayout) {
     EXPECT_TRUE(std::is_standard_layout_v<fixpp::dict::FieldRef>);
@@ -55,7 +55,7 @@ TEST(RefShape, FieldRefIsTriviallyCopyable) {
     EXPECT_TRUE(std::is_trivially_copyable_v<fixpp::dict::FieldRef>);
 }
 
-TEST(RefShape, ComponentRefSize) { EXPECT_EQ(sizeof(fixpp::dict::ComponentRef), 12u); }
+TEST(RefShape, ComponentRefSize) { EXPECT_EQ(sizeof(fixpp::dict::ComponentRef), 12U); }
 
 TEST(RefShape, ComponentRefIsStandardLayout) {
     EXPECT_TRUE(std::is_standard_layout_v<fixpp::dict::ComponentRef>);
@@ -65,7 +65,7 @@ TEST(RefShape, ComponentRefIsTriviallyCopyable) {
     EXPECT_TRUE(std::is_trivially_copyable_v<fixpp::dict::ComponentRef>);
 }
 
-TEST(RefShape, GroupRefSize) { EXPECT_EQ(sizeof(fixpp::dict::GroupRef), 12u); }
+TEST(RefShape, GroupRefSize) { EXPECT_EQ(sizeof(fixpp::dict::GroupRef), 12U); }
 
 TEST(RefShape, GroupRefIsStandardLayout) {
     EXPECT_TRUE(std::is_standard_layout_v<fixpp::dict::GroupRef>);
@@ -81,17 +81,17 @@ TEST(RefShape, GroupRefIsTriviallyCopyable) {
 
 TEST(ReservedDiscipline, FieldRefReservedIsZeroOnValueInit) {
     fixpp::dict::FieldRef fr{};
-    EXPECT_EQ(fr._reserved, 0u);
+    EXPECT_EQ(fr._reserved, 0U);
 }
 
 TEST(ReservedDiscipline, ComponentRefReservedIsZeroOnValueInit) {
     fixpp::dict::ComponentRef cr{};
-    EXPECT_EQ(cr._reserved, 0u);
+    EXPECT_EQ(cr._reserved, 0U);
 }
 
 TEST(ReservedDiscipline, GroupRefReservedIsZeroOnValueInit) {
     fixpp::dict::GroupRef gr{};
-    EXPECT_EQ(gr._reserved, 0u);
+    EXPECT_EQ(gr._reserved, 0U);
 }
 
 // ---------------------------------------------------------------------------

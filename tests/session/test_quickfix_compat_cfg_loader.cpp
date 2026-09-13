@@ -152,11 +152,11 @@ TEST(CfgLoaderHappyPath, ParsesDirectoryAndRoundTripsFrame) {
         << "retrieve() failed with error: "
         << (retrieve_ec.has_value() ? 0 : static_cast<int>(retrieve_ec.error()));
 
-    ASSERT_EQ(visitor.frames.size(), 1u) << "Expected exactly 1 retrieved frame";
+    ASSERT_EQ(visitor.frames.size(), 1U) << "Expected exactly 1 retrieved frame";
     EXPECT_EQ(visitor.frames[0], frame_bytes) << "Round-trip frame mismatch: byte content differs";
 
     pool.join();
-    store_result.value().reset();
+    store_result.value() = nullptr;
     fixpp::store_test::remove_store_dir(scratch);
 }
 

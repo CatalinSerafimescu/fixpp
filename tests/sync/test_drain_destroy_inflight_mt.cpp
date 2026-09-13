@@ -69,7 +69,6 @@
 namespace {
 
 using fixpp::core::error;
-using fixpp::sync::async_lock_guard;
 using fixpp::sync::async_mutex;
 using fixpp::sync::expected_t;
 

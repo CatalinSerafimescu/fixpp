@@ -233,7 +233,7 @@ MessageView<access_mode::Index> parse_index(std::vector<std::byte> const& buf,
 // table owns copies of the code bytes, so this legally outlives the
 // Dictionary going out of scope at the end of this function).
 fixpp::dict::table_view load_shipped_table_view(char const* filename) {
-    std::vector<std::byte> buf(8u * 1024u * 1024u);
+    std::vector<std::byte> buf(8U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / filename;
     auto dict = fixpp::dict::XmlLoader{}.load(path, &mr);
@@ -366,19 +366,19 @@ struct RowSpec {
 };
 
 constexpr std::array<RowSpec, 13> kRowSpecs{{
-    {1, "FIX44.xml", &row1_frame},
-    {2, "FIX44.xml", &row2_frame},
-    {3, "FIX44.xml", &row3_frame},
-    {4, "FIX44.xml", &row4_frame},
-    {5, "FIX44.xml", &row5_frame},
-    {6, "FIX44.xml", &row6_frame},
-    {7, "FIX44.xml", &row7_frame},
-    {8, "FIX44.xml", &row8_frame},
-    {9, "FIX44.xml", &row9_frame},
-    {10, "FIX44.xml", &row10_frame},
-    {11, "FIX44.xml", &row11_frame},
-    {12, "FIX41.xml", &row12_frame},
-    {13, "FIX44.xml", &row13_frame},
+    {.id = 1, .dict_file = "FIX44.xml", .build_frame = &row1_frame},
+    {.id = 2, .dict_file = "FIX44.xml", .build_frame = &row2_frame},
+    {.id = 3, .dict_file = "FIX44.xml", .build_frame = &row3_frame},
+    {.id = 4, .dict_file = "FIX44.xml", .build_frame = &row4_frame},
+    {.id = 5, .dict_file = "FIX44.xml", .build_frame = &row5_frame},
+    {.id = 6, .dict_file = "FIX44.xml", .build_frame = &row6_frame},
+    {.id = 7, .dict_file = "FIX44.xml", .build_frame = &row7_frame},
+    {.id = 8, .dict_file = "FIX44.xml", .build_frame = &row8_frame},
+    {.id = 9, .dict_file = "FIX44.xml", .build_frame = &row9_frame},
+    {.id = 10, .dict_file = "FIX44.xml", .build_frame = &row10_frame},
+    {.id = 11, .dict_file = "FIX44.xml", .build_frame = &row11_frame},
+    {.id = 12, .dict_file = "FIX41.xml", .build_frame = &row12_frame},
+    {.id = 13, .dict_file = "FIX44.xml", .build_frame = &row13_frame},
 }};
 
 struct FixppOutcome {
@@ -431,7 +431,7 @@ namespace {
 // stdout only, matching contracts/enum-domain.md C-6.
 TEST(EnumGoldenParity, MatchesQuickFixOnAssertedRowsAndRecordsDivergences) {
     auto rows = parse_golden_csv(FIXPP_GOLDEN_CSV_PATH);
-    ASSERT_EQ(rows.size(), 13u)
+    ASSERT_EQ(rows.size(), 13U)
         << "golden.csv row count drifted from the T031-pinned 13-row corpus";
     ASSERT_EQ(kRowSpecs.size(), rows.size());
 
@@ -439,8 +439,8 @@ TEST(EnumGoldenParity, MatchesQuickFixOnAssertedRowsAndRecordsDivergences) {
 
     for (auto const& row : rows) {
         SCOPED_TRACE(testing::Message() << "row " << row.id << " (" << row.note << ")");
-        auto const it = std::find_if(kRowSpecs.begin(), kRowSpecs.end(),
-                                     [&](RowSpec const& s) { return s.id == row.id; });
+        const auto* const it =
+            std::ranges::find_if(kRowSpecs, [&](RowSpec const& s) { return s.id == row.id; });
         ASSERT_NE(it, kRowSpecs.end()) << "no RowSpec for golden row id " << row.id;
 
         FixppOutcome const outcome = run_row(*it);

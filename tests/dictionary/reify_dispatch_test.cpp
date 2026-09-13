@@ -155,7 +155,10 @@ TEST(ReifyDispatchFixt, SevenAdminMsgTypesAllHit) {
     // read is FixtAdminReify.DiscriminatingHeaderField below.)
     std::pmr::monotonic_buffer_resource arena;
     MV mv;
-    version_profile const fixt_profile{session_version::vt11, application_version::v50sp2, true, 0};
+    version_profile const fixt_profile{.session = session_version::vt11,
+                                       .default_appl = application_version::v50sp2,
+                                       .has_per_message_override = true,
+                                       ._reserved = 0};
     constexpr char kAdminTypes[] = {'0', '1', '2', '3', '4', '5', 'A'};
     for (char mt : kAdminTypes) {
         auto r = fixpp::dict::dispatch::dispatch_fixt(mv, mt, fixt_profile, &arena);
@@ -174,7 +177,10 @@ TEST(ReifyDispatchFixt, SevenAdminMsgTypesAllHit) {
 TEST(ReifyDispatchFixt, SevenAdminMsgTypesFullHandle) {
     std::pmr::monotonic_buffer_resource arena;
     MV mv;
-    version_profile const fixt_profile{session_version::vt11, application_version::v50sp2, true, 0};
+    version_profile const fixt_profile{.session = session_version::vt11,
+                                       .default_appl = application_version::v50sp2,
+                                       .has_per_message_override = true,
+                                       ._reserved = 0};
     constexpr char kAdminTypes[] = {'0', '1', '2', '3', '4', '5', 'A'};
     for (char mt : kAdminTypes) {
         auto r = fixpp::dict::dispatch::dispatch_fixt(mv, mt, fixt_profile, &arena);
@@ -194,7 +200,10 @@ TEST(ReifyDispatchFixt, NonAdminMsgTypeHitsDefault) {
     // dict_reify_unknown_msg_type from the fail-loud default arm.
     std::pmr::monotonic_buffer_resource arena;
     MV mv;
-    version_profile const fixt_profile{session_version::vt11, application_version::v50sp2, true, 0};
+    version_profile const fixt_profile{.session = session_version::vt11,
+                                       .default_appl = application_version::v50sp2,
+                                       .has_per_message_override = true,
+                                       ._reserved = 0};
     // 'D' (NewOrderSingle) is application, not FIXT admin.
     auto r = fixpp::dict::dispatch::dispatch_fixt(mv, 'D', fixt_profile, &arena);
     ASSERT_FALSE(r.has_value());
@@ -217,19 +226,30 @@ TEST(ReifyDispatchApplication, MustIncludeSubsetAllHit) {
         const char* label;
     };
     constexpr Case kCases[] = {
-        {application_version::v42, "D", "v42 NewOrderSingle"},
-        {application_version::v44, "D", "v44 NewOrderSingle"},
-        {application_version::v50sp2, "D", "v50sp2 NewOrderSingle"},
-        {application_version::v44, "8", "v44 ExecutionReport"},
-        {application_version::v50sp2, "8", "v50sp2 ExecutionReport"},
-        {application_version::v50sp2, "W", "v50sp2 MarketDataSnapshotFullRefresh"},
-        {application_version::v50sp2, "F", "v50sp2 OrderCancelRequest"},
-        {application_version::v44, "A", "v44 Logon (app, not FIXT admin)"},
+        {.version = application_version::v42, .msg_type = "D", .label = "v42 NewOrderSingle"},
+        {.version = application_version::v44, .msg_type = "D", .label = "v44 NewOrderSingle"},
+        {.version = application_version::v50sp2, .msg_type = "D", .label = "v50sp2 NewOrderSingle"},
+        {.version = application_version::v44, .msg_type = "8", .label = "v44 ExecutionReport"},
+        {.version = application_version::v50sp2,
+         .msg_type = "8",
+         .label = "v50sp2 ExecutionReport"},
+        {.version = application_version::v50sp2,
+         .msg_type = "W",
+         .label = "v50sp2 MarketDataSnapshotFullRefresh"},
+        {.version = application_version::v50sp2,
+         .msg_type = "F",
+         .label = "v50sp2 OrderCancelRequest"},
+        {.version = application_version::v44,
+         .msg_type = "A",
+         .label = "v44 Logon (app, not FIXT admin)"},
     };
 
     std::pmr::monotonic_buffer_resource arena;
     MV mv;
-    version_profile const profile{session_version::vt11, application_version::v50sp2, true, 0};
+    version_profile const profile{.session = session_version::vt11,
+                                  .default_appl = application_version::v50sp2,
+                                  .has_per_message_override = true,
+                                  ._reserved = 0};
 
     for (auto const& c : kCases) {
         auto r =
@@ -250,18 +270,29 @@ TEST(ReifyDispatchApplication, MustIncludeSubsetFullHandles) {
         const char* label;
     };
     constexpr Case kCases[] = {
-        {application_version::v42, "D", "v42 NewOrderSingle"},
-        {application_version::v44, "D", "v44 NewOrderSingle"},
-        {application_version::v50sp2, "D", "v50sp2 NewOrderSingle"},
-        {application_version::v44, "8", "v44 ExecutionReport"},
-        {application_version::v50sp2, "8", "v50sp2 ExecutionReport"},
-        {application_version::v50sp2, "W", "v50sp2 MarketDataSnapshotFullRefresh"},
-        {application_version::v50sp2, "F", "v50sp2 OrderCancelRequest"},
-        {application_version::v44, "A", "v44 Logon (app, not FIXT admin)"},
+        {.version = application_version::v42, .msg_type = "D", .label = "v42 NewOrderSingle"},
+        {.version = application_version::v44, .msg_type = "D", .label = "v44 NewOrderSingle"},
+        {.version = application_version::v50sp2, .msg_type = "D", .label = "v50sp2 NewOrderSingle"},
+        {.version = application_version::v44, .msg_type = "8", .label = "v44 ExecutionReport"},
+        {.version = application_version::v50sp2,
+         .msg_type = "8",
+         .label = "v50sp2 ExecutionReport"},
+        {.version = application_version::v50sp2,
+         .msg_type = "W",
+         .label = "v50sp2 MarketDataSnapshotFullRefresh"},
+        {.version = application_version::v50sp2,
+         .msg_type = "F",
+         .label = "v50sp2 OrderCancelRequest"},
+        {.version = application_version::v44,
+         .msg_type = "A",
+         .label = "v44 Logon (app, not FIXT admin)"},
     };
     std::pmr::monotonic_buffer_resource arena;
     MV mv;
-    version_profile const profile{session_version::vt11, application_version::v50sp2, true, 0};
+    version_profile const profile{.session = session_version::vt11,
+                                  .default_appl = application_version::v50sp2,
+                                  .has_per_message_override = true,
+                                  ._reserved = 0};
     for (auto const& c : kCases) {
         auto r =
             fixpp::dict::dispatch::dispatch_application(mv, c.msg_type, c.version, profile, &arena);
@@ -282,7 +313,10 @@ TEST(ReifyDispatchApplication, RuntimeXmlOnlyVersionHitsOuterDefault) {
     // No FIX43.xml dependency — synthetic fixture with a hand-built MV.
     std::pmr::monotonic_buffer_resource arena;
     MV mv;
-    version_profile const profile{session_version::v43, application_version::v43, false, 0};
+    version_profile const profile{.session = session_version::v43,
+                                  .default_appl = application_version::v43,
+                                  .has_per_message_override = false,
+                                  ._reserved = 0};
 
     constexpr application_version kRuntimeOnlyVersions[] = {
         application_version::v40, application_version::v41,    application_version::v43,
@@ -307,8 +341,10 @@ TEST(ReifyDispatchApplicationResolution, UnknownDefaultPropagates) {
     // dict_unresolved_application_version from resolve_application_version,
     // NOT dict_reify_unknown_msg_type (the v1.0 misdiagnosis sentinel
     // fall-through is CLOSED per RC#1).
-    version_profile const unknown_default{session_version::vt11, application_version::Unknown, true,
-                                          0};
+    version_profile const unknown_default{.session = session_version::vt11,
+                                          .default_appl = application_version::Unknown,
+                                          .has_per_message_override = true,
+                                          ._reserved = 0};
     auto r = resolve_application_version(unknown_default, "");
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error(), error::dict_unresolved_application_version)
@@ -325,8 +361,10 @@ TEST(ReifyDispatchApplicationResolution, UnknownDefaultPropagation_ViaReify) {
     // and end-to-end on a REAL frame in the T014 reify() error-contract witness.
     std::pmr::monotonic_buffer_resource arena;
     MV mv;
-    version_profile const unknown_default{session_version::vt11, application_version::Unknown, true,
-                                          0};
+    version_profile const unknown_default{.session = session_version::vt11,
+                                          .default_appl = application_version::Unknown,
+                                          .has_per_message_override = true,
+                                          ._reserved = 0};
     auto r = fixpp::dict::reify(mv, unknown_default, &arena);
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error(), error::dict_reify_unknown_msg_type)
@@ -340,7 +378,10 @@ TEST(ReifyDispatchApplicationResolution, BadApplVerIdYieldsUnknownApplVerId) {
     // AC-D7: resolve_application_version("x", profile) → dict_unknown_appl_ver_id.
     // Not the outer dispatch default (dict_reify_unknown_msg_type) — distinct
     // error for "parse failure" vs "no codegen owner for resolved version".
-    version_profile const profile{session_version::vt11, application_version::v50sp2, true, 0};
+    version_profile const profile{.session = session_version::vt11,
+                                  .default_appl = application_version::v50sp2,
+                                  .has_per_message_override = true,
+                                  ._reserved = 0};
     for (std::string_view bad : {"0", "1", "A", "x", "10", "99"}) {
         auto r = resolve_application_version(profile, bad);
         ASSERT_FALSE(r.has_value()) << "bad ApplVerID=" << bad;
@@ -360,7 +401,10 @@ TEST(ReifyDispatchApplication, UnknownMsgTypeInKnownVersionHitsInnerDefault) {
     // We use '!' as a clearly invalid MsgType that no version emits.
     std::pmr::monotonic_buffer_resource arena;
     MV mv;
-    version_profile const profile{session_version::vt11, application_version::v50sp2, true, 0};
+    version_profile const profile{.session = session_version::vt11,
+                                  .default_appl = application_version::v50sp2,
+                                  .has_per_message_override = true,
+                                  ._reserved = 0};
 
     for (application_version av :
          {application_version::v42, application_version::v44, application_version::v50sp2}) {
@@ -379,10 +423,18 @@ TEST(ReifyDispatchApplication, UnknownMsgTypeInKnownVersionHitsInnerDefault) {
 // turns each RED (SC-003). FR-001/003/004/005/014; SC-001/002/003.
 // ═════════════════════════════════════════════════════════════════════════════
 
-constexpr version_profile kProfileV42{session_version::v42, application_version::v42, false, 0};
-constexpr version_profile kProfileV44{session_version::v44, application_version::v44, false, 0};
-constexpr version_profile kProfileV50sp2{session_version::v50sp2, application_version::v50sp2,
-                                         false, 0};
+constexpr version_profile kProfileV42{.session = session_version::v42,
+                                      .default_appl = application_version::v42,
+                                      .has_per_message_override = false,
+                                      ._reserved = 0};
+constexpr version_profile kProfileV44{.session = session_version::v44,
+                                      .default_appl = application_version::v44,
+                                      .has_per_message_override = false,
+                                      ._reserved = 0};
+constexpr version_profile kProfileV50sp2{.session = session_version::v50sp2,
+                                         .default_appl = application_version::v50sp2,
+                                         .has_per_message_override = false,
+                                         ._reserved = 0};
 
 TEST(ReifyRoundTrip, V44NewOrderSingleClOrdId) {
     ReifyFixture f{fixpp::test_support::make_nos_frame()};
@@ -454,7 +506,7 @@ TEST(ReifyRoundTrip, HandleSurvivesSourceBufferReuse) {
     auto r = fixpp::dict::reify(mv, kProfileV44, &mr);
     ASSERT_TRUE(r.has_value());
     // Clobber the source frame buffer; the handle's own bytes_ must be intact.
-    std::fill(frame.begin(), frame.end(), std::byte{'X'});
+    std::ranges::fill(frame, std::byte{'X'});
     auto clord = r->field_value(11);
     ASSERT_TRUE(clord.has_value());
     EXPECT_EQ(clord->as_string(), "ORD1")
@@ -504,8 +556,10 @@ TEST(ReifyRoundTrip, ApplVerIdInFrameDrivesResolution) {
     ReifyFixture f{fixpp::test_support::make_fixt_app_applverid_frame()};
     ASSERT_TRUE(f.ok());
     std::pmr::monotonic_buffer_resource mr;
-    version_profile const fixt_unknown_default{session_version::vt11, application_version::Unknown,
-                                               true, 0};
+    version_profile const fixt_unknown_default{.session = session_version::vt11,
+                                               .default_appl = application_version::Unknown,
+                                               .has_per_message_override = true,
+                                               ._reserved = 0};
     auto r = fixpp::dict::reify(f.view(), fixt_unknown_default, &mr);
     ASSERT_TRUE(r.has_value());
     EXPECT_EQ(r->version().application, application_version::v50sp2)
@@ -601,8 +655,10 @@ TEST(ReifyErrorContract, UnresolvedApplicationVersion) {
     ReifyFixture f{fixpp::test_support::make_nos_frame()};
     ASSERT_TRUE(f.ok());
     std::pmr::monotonic_buffer_resource mr;
-    version_profile const unknown_default{session_version::vt11, application_version::Unknown,
-                                          false, 0};
+    version_profile const unknown_default{.session = session_version::vt11,
+                                          .default_appl = application_version::Unknown,
+                                          .has_per_message_override = false,
+                                          ._reserved = 0};
     auto r = fixpp::dict::reify(f.view(), unknown_default, &mr);
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error(), error::dict_unresolved_application_version);
@@ -615,7 +671,10 @@ TEST(ReifyErrorContract, BadApplVerIdYieldsUnknownApplVerId) {
                               "56=T\x01" + "11=ORD1\x01")};
     ASSERT_TRUE(f.ok());
     std::pmr::monotonic_buffer_resource mr;
-    version_profile const fixt{session_version::vt11, application_version::v50sp2, true, 0};
+    version_profile const fixt{.session = session_version::vt11,
+                               .default_appl = application_version::v50sp2,
+                               .has_per_message_override = true,
+                               ._reserved = 0};
     auto r = fixpp::dict::reify(f.view(), fixt, &mr);
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error(), error::dict_unknown_appl_ver_id);
@@ -631,7 +690,10 @@ TEST(FixtAdminReify, DiscriminatingHeaderField) {
     ReifyFixture f{fixpp::test_support::make_fixt_admin_frame()};
     ASSERT_TRUE(f.ok());
     std::pmr::monotonic_buffer_resource mr;
-    version_profile const fixt_profile{session_version::vt11, application_version::v50sp2, true, 0};
+    version_profile const fixt_profile{.session = session_version::vt11,
+                                       .default_appl = application_version::v50sp2,
+                                       .has_per_message_override = true,
+                                       ._reserved = 0};
     auto r = fixpp::dict::reify(f.view(), fixt_profile, &mr);
     ASSERT_TRUE(r.has_value()) << "FR-002: FIXT-admin frame must reify to a live handle";
     EXPECT_EQ(r->version().k, resolved_message_version::kind::session_admin);

@@ -249,7 +249,7 @@ TEST(LoadAny, OrchestraTolerantPolicyReachesTheConcreteLoader) {
     // actually loaded (the policy reached the loader rather than the facade
     // swallowing it) and the offending group was left UNREGISTERED, not
     // half-registered.
-    EXPECT_GT(dict.messages().size(), 0u)
+    EXPECT_GT(dict.messages().size(), 0U)
         << "FR-006a: V1Msg must still load with the unresolvable group skipped.";
     EXPECT_EQ(dict.group_first_field(700), 0)
         << "FR-023a: the skipped group must be left unregistered, not half-registered";
@@ -272,7 +272,7 @@ TEST(LoadAny, DefaultPolicyStaysFailClosed) {
 TEST(LoadAny, TolerantPolicyReachesTheConcreteLoader) {
     auto const path =
         write_temp_xml("load_any_test_unresolvable_tolerant.xml", kUnresolvableGroupXml);
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
 
     auto dict = fixpp::dict::load_any(path, &mr, fixpp::dict::unresolved_group_policy::tolerant);

@@ -67,7 +67,7 @@ TEST(SeamMockClockDeterminism, IdenticalSeedAndAdvanceYieldIdenticalOrder) {
     EXPECT_EQ(a.steady_after, b.steady_after);
     EXPECT_EQ(a.utc_after, b.utc_after);
     // #1(10) then #3(20) then #2(30),#4(30) in registration order.
-    ASSERT_EQ(a.wake_order.size(), 4u);
+    ASSERT_EQ(a.wake_order.size(), 4U);
     EXPECT_EQ(a.wake_order.front(), 1);
     EXPECT_EQ(a.wake_order[1], 3);
 }

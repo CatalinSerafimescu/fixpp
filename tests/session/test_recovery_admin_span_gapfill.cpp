@@ -61,14 +61,13 @@ using namespace std::chrono_literals;
 
 namespace {
 
-static std::string field(int tag, std::string_view val) {
+std::string field(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
-static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
-                                             std::string_view msg_type, std::uint32_t seq,
-                                             std::string_view sender, std::string_view target,
-                                             std::string_view extra = {}) {
+std::vector<std::byte> make_fix_frame(std::string_view begin_string, std::string_view msg_type,
+                                      std::uint32_t seq, std::string_view sender,
+                                      std::string_view target, std::string_view extra = {}) {
     std::string body;
     body += field(35, msg_type);
     body += field(34, std::to_string(seq));
@@ -94,8 +93,8 @@ static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
     return frame;
 }
 
-static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
-                                         std::string_view t, int hbt = 30) {
+std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
+                                  std::string_view t, int hbt = 30) {
     std::string extra;
     extra += field(98, "0");
     extra += field(108, std::to_string(hbt));
@@ -103,10 +102,9 @@ static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq,
 }
 
 // ResendRequest(2) with BeginSeqNo(7) and EndSeqNo(16).
-static std::vector<std::byte> make_resend_request(std::string_view bs, std::uint32_t seq,
-                                                  std::string_view s, std::string_view t,
-                                                  std::uint32_t begin_seqno,
-                                                  std::uint32_t end_seqno) {
+std::vector<std::byte> make_resend_request(std::string_view bs, std::uint32_t seq,
+                                           std::string_view s, std::string_view t,
+                                           std::uint32_t begin_seqno, std::uint32_t end_seqno) {
     std::string extra;
     extra += field(7, std::to_string(begin_seqno));
     extra += field(16, std::to_string(end_seqno));
@@ -120,22 +118,21 @@ struct OutboundCapture {
     }
 };
 
-static bool is_msg_type(std::span<const std::byte> frame, std::string_view type) {
+bool is_msg_type(std::span<const std::byte> frame, std::string_view type) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = "35=" + std::string(type) + "\x01";
-    return wire.find(needle) != std::string::npos;
+    return wire.contains(needle);
 }
 
 // SequenceReset (MsgType=4) with GapFillFlag(123)=Y and given NewSeqNo(36).
-static bool is_sequence_reset_gapfill(std::span<const std::byte> frame,
-                                      std::uint32_t expected_new_seqno) {
+bool is_sequence_reset_gapfill(std::span<const std::byte> frame, std::uint32_t expected_new_seqno) {
     if (!is_msg_type(frame, "4")) return false;
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     // GapFillFlag(123)=Y
-    if (wire.find("123=Y\x01") == std::string::npos) return false;
+    if (!wire.contains("123=Y\x01")) return false;
     // NewSeqNo(36)=<expected_new_seqno>
     std::string ns = "36=" + std::to_string(expected_new_seqno) + "\x01";
-    return wire.find(ns) != std::string::npos;
+    return wire.contains(ns);
 }
 
 }  // namespace
@@ -402,7 +399,7 @@ TEST_F(RecoveryAdminSpanGapfillTest, EndSeqNoZeroMeansThrough) {
     for (const auto& frame : capture.frames) {
         if (is_msg_type(frame, "4")) {
             std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
-            if (wire.find("123=Y\x01") != std::string::npos) {
+            if (wire.contains("123=Y\x01")) {
                 found_any_gapfill = true;
                 break;
             }
@@ -434,7 +431,7 @@ TEST_F(RecoveryAdminSpanGapfillTest, SingleAdminSpanEmitsExactlyOneGapFill) {
     // At most 1 SequenceReset for a contiguous admin span per D-3.
     // RED: count == 0 (stub emits nothing); EXPECT_LE(0, 1) would pass but
     // the meaningful RED assertion is that we emit exactly the correct count.
-    EXPECT_EQ(seq_reset_count, 1u)
+    EXPECT_EQ(seq_reset_count, 1U)
         << "Admin span [2..5] must collapse to exactly 1 SequenceReset-GapFill. "
         << "RED: stub emits 0 → count=0 ≠ 1, FAILS RED per T015 design.";
 }

@@ -92,7 +92,7 @@ fixpp::dict::Dictionary load_test_dictionary(std::pmr::memory_resource* mr) {
 // ── T007-1: field_valid_for agrees with source Dictionary ───────────────────
 
 TEST(TableViewTest, FieldValidForAgreesWithDictionary) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto dict = load_test_dictionary(&mr);
     auto tv = dict.as_table_view();
@@ -125,7 +125,7 @@ TEST(TableViewTest, FieldValidForAgreesWithDictionary) {
 // ── T007-2: required_fields agrees with source Dictionary ───────────────────
 
 TEST(TableViewTest, RequiredFieldsAgreesWithDictionary) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto dict = load_test_dictionary(&mr);
     auto tv = dict.as_table_view();
@@ -133,7 +133,10 @@ TEST(TableViewTest, RequiredFieldsAgreesWithDictionary) {
     // Logon required: 49, 56, 98, 108.
     auto logon_req = tv.required_fields("A");
     ASSERT_FALSE(logon_req.empty()) << "Logon required_fields must not be empty";
-    bool has_49 = false, has_56 = false, has_98 = false, has_108 = false;
+    bool has_49 = false;
+    bool has_56 = false;
+    bool has_98 = false;
+    bool has_108 = false;
     for (auto t : logon_req) {
         if (t == 49) has_49 = true;
         if (t == 56) has_56 = true;
@@ -148,7 +151,10 @@ TEST(TableViewTest, RequiredFieldsAgreesWithDictionary) {
     // NewOrderSingle required: 11, 21, 54, 55.
     auto nos_req = tv.required_fields("D");
     ASSERT_FALSE(nos_req.empty()) << "NewOrderSingle required_fields must not be empty";
-    bool has_11 = false, has_21 = false, has_54 = false, has_55 = false;
+    bool has_11 = false;
+    bool has_21 = false;
+    bool has_54 = false;
+    bool has_55 = false;
     for (auto t : nos_req) {
         if (t == 11) has_11 = true;
         if (t == 21) has_21 = true;
@@ -175,7 +181,7 @@ TEST(TableViewTest, RequiredFieldsAgreesWithDictionary) {
 // ── T007-3: group_first_field agrees with source Dictionary ─────────────────
 
 TEST(TableViewTest, GroupFirstFieldAgreesWithDictionary) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto dict = load_test_dictionary(&mr);
     auto tv = dict.as_table_view();
@@ -197,7 +203,7 @@ TEST(TableViewTest, GroupFirstFieldAgreesWithDictionary) {
 // contains() is false for every tag (the [FIX 2] valid_tag_set_view
 // encapsulation's nullptr-equivalent state).
 TEST(TableViewTest, ValidTagsForAgreesWithFieldValidFor) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto dict = load_test_dictionary(&mr);
     auto tv = dict.as_table_view();
@@ -224,7 +230,7 @@ TEST(TableViewTest, ValidTagsForAgreesWithFieldValidFor) {
 // ── T007-4: group_member_tags agrees with source Dictionary ─────────────────
 
 TEST(TableViewTest, GroupMemberTagsAgreesWithDictionary) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto dict = load_test_dictionary(&mr);
     auto tv = dict.as_table_view();
@@ -342,7 +348,7 @@ TEST(TableViewTest, GroupFirstFieldExactReportsAContextMissInsteadOfMaskingIt) {
 // ── T007-5: field_type_of agrees with source Dictionary field_data_type ──────
 
 TEST(TableViewTest, FieldTypeOfAgreesWithDictionary) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto dict = load_test_dictionary(&mr);
     auto tv = dict.as_table_view();
@@ -425,7 +431,7 @@ fixpp::dict::Dictionary load_test_dictionary_with_side_enum(std::pmr::memory_res
 }
 
 TEST(TableViewTest, EnumValidRealDomainCheck) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto dict = load_test_dictionary_with_side_enum(&mr);
     auto tv = dict.as_table_view();
@@ -445,7 +451,7 @@ TEST(TableViewTest, EnumValidAbsentTagAcceptFloor) {
     // FR-003: a tag absent from the enum store (or with an empty codeset)
     // must accept regardless of value — the anti-reject-everything floor.
     // ClOrdID(11) carries no <value> children in this fixture.
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto dict = load_test_dictionary_with_side_enum(&mr);
     auto tv = dict.as_table_view();
@@ -463,7 +469,7 @@ TEST(TableViewTest, SpansRemainingValidAfterDictionaryDestroyed) {
     // Build the table_view, then destroy the dictionary; spans must still work.
     fixpp::dict::table_view tv;
     {
-        std::vector<std::byte> buf(2u * 1024u * 1024u);
+        std::vector<std::byte> buf(2U * 1024U * 1024U);
         std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
         auto dict = load_test_dictionary(&mr);
         tv = dict.as_table_view();
@@ -479,7 +485,7 @@ TEST(TableViewTest, SpansRemainingValidAfterDictionaryDestroyed) {
 // ── T007-8: full FIX44 dictionary as_table_view() round-trip ────────────────
 
 TEST(TableViewTest, FullFix44DictionaryTableView) {
-    std::vector<std::byte> buf(4u * 1024u * 1024u);
+    std::vector<std::byte> buf(4U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto const xml_path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX44.xml";
     auto dict = fixpp::dict::XmlLoader{}.load(xml_path, &mr);

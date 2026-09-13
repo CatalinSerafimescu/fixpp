@@ -48,7 +48,7 @@ class throw_on_nth_resource final : public std::pmr::memory_resource {
 public:
     explicit throw_on_nth_resource(std::size_t throw_on) : throw_on_{throw_on} {}
 
-    std::size_t alloc_count() const noexcept { return count_; }
+    [[nodiscard]] std::size_t alloc_count() const noexcept { return count_; }
 
 protected:
     void* do_allocate(std::size_t bytes, std::size_t align) override {
@@ -63,7 +63,7 @@ protected:
         std::pmr::new_delete_resource()->deallocate(p, bytes, align);
     }
 
-    bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override {
+    [[nodiscard]] bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override {
         return this == &other;
     }
 
@@ -304,7 +304,7 @@ TEST(VerifyPeerPmrOomMultiSan, NoThrowSucceedsNormally) {
     EXPECT_TRUE(result.has_value())
         << "multi-SAN cert: verify_peer must succeed when PMR does not exhaust";
     if (result.has_value()) {
-        EXPECT_EQ(result->san_dns_names_owned.size(), 3u)
+        EXPECT_EQ(result->san_dns_names_owned.size(), 3U)
             << "multi-SAN peer_identity must have 3 SAN-DNS entries";
     }
 }

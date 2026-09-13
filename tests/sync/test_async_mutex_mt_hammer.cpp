@@ -229,7 +229,8 @@ TEST(SeamAsyncMutexMtHammer, RealContentionNoLostWakeupNoDoubleGrant) {
         std::atomic<bool> double_grant_detected{false};
 
         auto make_coro = [&](unsigned worker_id) -> asio::awaitable<void> {
-            std::mt19937 rng(static_cast<unsigned>(rep) * 1'000'003u + worker_id * 7919u + 12345u);
+            std::mt19937 rng((static_cast<unsigned>(rep) * 1'000'003U) + (worker_id * 7919U) +
+                             12345U);
 
             for (unsigned cycle = 0; cycle < kCycles; ++cycle) {
                 co_await jitter(rng);  // pre-lock jitter (arrival-order diversity)
@@ -295,7 +296,7 @@ TEST(SeamAsyncMutexMtHammer, RealContentionNoLostWakeupNoDoubleGrant) {
             }
         }  // `mtx` destructs here — trips std::terminate() if not fully drained.
 
-        ASSERT_EQ(lock_failures.load(), 0u) << "rep=" << rep << ": unexpected async_lock() failure";
+        ASSERT_EQ(lock_failures.load(), 0U) << "rep=" << rep << ": unexpected async_lock() failure";
         ASSERT_FALSE(double_grant_detected.load())
             << "rep=" << rep << ": double-grant detected (oracle 3, identity CAS)";
         ASSERT_LE(peak_holders.load(), 1)

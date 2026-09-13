@@ -69,7 +69,7 @@ namespace {
 fixpp_session_config_t* make_session_cfg_real_fix42(char const* sender, char const* target,
                                                     fixpp_session_role role) {
     using namespace fixpp::dict;
-    constexpr std::size_t kBufSize = 8u * 1024u * 1024u;
+    constexpr std::size_t kBufSize = 8U * 1024U * 1024U;
     auto buf = std::make_unique<std::array<std::byte, kBufSize>>();
     auto* mr = new std::pmr::monotonic_buffer_resource{buf->data(), buf->size()};
 
@@ -183,7 +183,7 @@ TEST(GroupDetectionCrossPath, WriteGroupBeginMatchesBareStoreRegisteredSetBothDi
     // Independently loaded Dictionary (own PMR arena), NOT sharing the
     // engine's dict instance -- pure measurement, no engine-internal
     // reach-through.
-    constexpr std::size_t kBufSize = 8u * 1024u * 1024u;
+    constexpr std::size_t kBufSize = 8U * 1024U * 1024U;
     auto buf2 = std::make_unique<std::array<std::byte, kBufSize>>();
     std::pmr::monotonic_buffer_resource mr2{buf2->data(), buf2->size()};
     std::string const path = std::string(FIXPP_DICT_DATA_DIR) + "/FIX42.xml";
@@ -195,7 +195,7 @@ TEST(GroupDetectionCrossPath, WriteGroupBeginMatchesBareStoreRegisteredSetBothDi
     // (contracts/group-detection.md C2) -- if this count drifted, the
     // exact-set comparison below would be checking against a stale fixture,
     // not this feature's regression.
-    EXPECT_EQ(write_succeeds.size(), 18u)
+    EXPECT_EQ(write_succeeds.size(), 18U)
         << "C-ABI write-path fixpp_msg_group_begin succeeded for a tag count other than the "
            "pinned 18 (FIX42 real group tags) -- the write-family predicate itself may have "
            "regressed, independent of the 082 read-side predicate swap";

@@ -41,7 +41,6 @@ using fixpp::tls::Certificate;
 using fixpp::tls::pin_fingerprint;
 using fixpp::tls::pin_snapshot;
 using fixpp::tls::Pinset;
-using fixpp::tls::test::direction;
 using fixpp::tls::test::make_handshake_script;
 using fixpp::tls::test::MockTransport;
 
@@ -83,7 +82,7 @@ TEST(FixsRotation, CrossHandshakeAtomicity) {
     // Step 1: capture snapshot at handshake start.
     auto snap1 = ps.snapshot();
     ASSERT_NE(snap1, nullptr);
-    ASSERT_EQ(snap1->size(), 1u);
+    ASSERT_EQ(snap1->size(), 1U);
 
     // Step 2: verify old cert against captured snapshot.
     EXPECT_TRUE(handshake_verify(snap1, kOld))
@@ -106,7 +105,7 @@ TEST(FixsRotation, CrossHandshakeAtomicity) {
     ASSERT_TRUE(ps.remove(kOld).has_value());
 
     // The snap1 captured above is UNAFFECTED by the rotation.
-    EXPECT_EQ(snap1->size(), 1u) << "snap1 must be immutable after rotation";
+    EXPECT_EQ(snap1->size(), 1U) << "snap1 must be immutable after rotation";
     EXPECT_TRUE(handshake_verify(snap1, kOld))
         << "snap1 still sees OLD (immutable snapshot invariant)";
 
@@ -114,7 +113,7 @@ TEST(FixsRotation, CrossHandshakeAtomicity) {
     // Fresh snapshot for the next handshake.
     auto snap2 = ps.snapshot();
     ASSERT_NE(snap2, nullptr);
-    ASSERT_EQ(snap2->size(), 1u);
+    ASSERT_EQ(snap2->size(), 1U);
 
     // snap1 and snap2 must be DIFFERENT objects (rotation replaced the pointer).
     EXPECT_NE(snap1.get(), snap2.get()) << "rotation must have published a new snapshot pointer";

@@ -71,7 +71,6 @@
 // (#324).
 
 using namespace std::chrono_literals;
-using fixpp::core::error;
 using fixpp::core::expected_t;
 using fixpp::session::Application;
 using fixpp::session::SessionId;
@@ -83,10 +82,9 @@ namespace {
 
 // ── Frame builder helpers ──────────────────────────────────────────────────────
 
-static std::vector<std::byte> make_raw_frame(std::string_view begin_string,
-                                             std::string_view msg_type, std::uint32_t seq,
-                                             std::string_view sender, std::string_view target,
-                                             std::string extra_body = {}) {
+std::vector<std::byte> make_raw_frame(std::string_view begin_string, std::string_view msg_type,
+                                      std::uint32_t seq, std::string_view sender,
+                                      std::string_view target, std::string extra_body = {}) {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -114,21 +112,20 @@ static std::vector<std::byte> make_raw_frame(std::string_view begin_string,
     return frame;
 }
 
-static std::vector<std::byte> make_logon_frame(std::string_view begin_string = "FIX.4.2",
-                                               std::uint32_t seq = 1,
-                                               std::string_view sender = "TW",
-                                               std::string_view target = "ISLD", int heartbt = 0) {
+std::vector<std::byte> make_logon_frame(std::string_view begin_string = "FIX.4.2",
+                                        std::uint32_t seq = 1, std::string_view sender = "TW",
+                                        std::string_view target = "ISLD", int heartbt = 0) {
     std::string extra = std::string("98=0\x01") + "108=" + std::to_string(heartbt) + "\x01";
     return make_raw_frame(begin_string, "A", seq, sender, target, extra);
 }
 
-static std::vector<std::byte> make_app_frame(std::uint32_t seq = 2, std::string_view sender = "TW",
-                                             std::string_view target = "ISLD") {
+std::vector<std::byte> make_app_frame(std::uint32_t seq = 2, std::string_view sender = "TW",
+                                      std::string_view target = "ISLD") {
     // 35=D (NewOrderSingle-like) — classified as application, not admin.
     return make_raw_frame("FIX.4.2", "D", seq, sender, target);
 }
 
-static std::vector<std::byte> make_app_payload() {
+std::vector<std::byte> make_app_payload() {
     // Opaque application bytes for Engine::send. Must lead with a 35= MsgType
     // field (FR-016 / 020 send-path validation) and carry no session tags.
     static const char kPayload[] =

@@ -314,7 +314,7 @@ TEST(FirstFrameStop, StopReturnsPromptlyAndReclaimsAcceptSlot) {
     // connected. Nothing on this path sleeps on the Clock, so a non-zero here
     // would mean the counter is not specific to the first-frame deadline and
     // the >= 1 wait below would be satisfiable without the read.
-    ASSERT_EQ(clock->sleeps_observed(), 0u)
+    ASSERT_EQ(clock->sleeps_observed(), 0U)
         << "T2b [#237 barrier, zero arm]: the engine slept on its Clock before any client "
            "connected, so `sleeps_observed() >= 1` no longer means the accept loop reached "
            "read_first_frame_bounded. Find the other sleeper before trusting the barrier.";
@@ -349,7 +349,7 @@ TEST(FirstFrameStop, StopReturnsPromptlyAndReclaimsAcceptSlot) {
             ioc.restart();
         }
     }
-    ASSERT_GE(clock->sleeps_observed(), 1u)
+    ASSERT_GE(clock->sleeps_observed(), 1U)
         << "T2b [#237 barrier, positive arm]: the accept loop never armed the first-frame "
            "deadline within the budget, so it never entered read_first_frame_bounded and "
            "everything below would be asserted about a slot held somewhere else — the exact "
@@ -372,7 +372,7 @@ TEST(FirstFrameStop, StopReturnsPromptlyAndReclaimsAcceptSlot) {
 
     std::size_t handlers = 0;
     while (!stop_done) {
-        ASSERT_GT(ioc.run_one(), 0u)
+        ASSERT_GT(ioc.run_one(), 0U)
             << "T2b: io_context ran out of work before Engine::stop() completed — a "
             << "broken cell (mis-wired harness), not a RED proof.";
         ++handlers;
@@ -533,7 +533,7 @@ TEST(FirstFrameStop, StopIsPromptWhileAcceptedHandshakeIsInFlight) {
     // engine happens to sleep on, and would be a decoration rather than a
     // barrier. That is why the arm lives in THIS cell — it is the only one in
     // the file whose peer, by construction, can never produce a first frame.
-    EXPECT_EQ(clock->sleeps_observed(), 0u)
+    EXPECT_EQ(clock->sleeps_observed(), 0U)
         << "[#237 barrier, absence arm]: the Clock was slept on during a run whose peer never "
            "sent a ClientHello, so the accept loop cannot have reached read_first_frame_bounded "
            "— something ELSE sleeps on the engine Clock, and the sibling cell's "
@@ -559,7 +559,7 @@ TEST(FirstFrameStop, StopIsPromptWhileAcceptedHandshakeIsInFlight) {
     // refuted mechanism is worse than none.
     std::size_t handlers = 0;
     while (!stop_done) {
-        ASSERT_GT(ioc.run_one(), 0u)
+        ASSERT_GT(ioc.run_one(), 0U)
             << "#357: io_context ran out of work before Engine::stop() completed — a "
             << "broken cell (mis-wired harness), not a RED proof.";
         ++handlers;

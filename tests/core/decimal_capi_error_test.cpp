@@ -38,13 +38,13 @@ TEST(DecimalCAPIErrorPaths, ParseEmptyInput) {
 // ── fixpp_decimal_format null guards ─────────────────────────────────────────
 
 TEST(DecimalCAPIErrorPaths, FormatNullDst) {
-    fixpp_decimal_t d{1, 0, {}};
+    fixpp_decimal_t d{.mantissa = 1, .exponent = 0, ._reserved = {}};
     size_t written = 0;
     EXPECT_EQ(fixpp_decimal_format(d, nullptr, 0, &written), FIXPP_ERR_DECIMAL_INVALID);
 }
 
 TEST(DecimalCAPIErrorPaths, FormatNullWritten) {
-    fixpp_decimal_t d{1, 0, {}};
+    fixpp_decimal_t d{.mantissa = 1, .exponent = 0, ._reserved = {}};
     char buf[16]{};
     EXPECT_EQ(fixpp_decimal_format(d, buf, sizeof(buf), nullptr), FIXPP_ERR_DECIMAL_INVALID);
 }
@@ -52,8 +52,9 @@ TEST(DecimalCAPIErrorPaths, FormatNullWritten) {
 // ── fixpp_decimal_format error propagation (exercises map_error) ─────────────
 
 TEST(DecimalCAPIErrorPaths, FormatBufferTooSmallCallsMapError) {
-    fixpp_decimal_t d{123456789, -5, {}};  // "1234.56789" — 10 chars + NUL
-    char buf[4]{};                         // way too small
+    fixpp_decimal_t d{
+        .mantissa = 123456789, .exponent = -5, ._reserved = {}};  // "1234.56789" — 10 chars + NUL
+    char buf[4]{};                                                // way too small
     size_t written = 0;
     EXPECT_EQ(fixpp_decimal_format(d, buf, sizeof(buf), &written), FIXPP_ERR_BUFFER_TOO_SMALL);
 }
@@ -64,14 +65,18 @@ TEST(DecimalCAPIErrorPaths, FormatBufferTooSmallCallsMapError) {
 // C-ABI is routed through decimal_traits<pod_decimal>::from_pod() per 2a §5.2.
 
 TEST(DecimalCAPIErrorPaths, FormatPositiveExponentRejected) {
-    fixpp_decimal_t d{1, 1, {}};  // exponent = +1 — out of canonical domain [-38, 0]
+    fixpp_decimal_t d{.mantissa = 1,
+                      .exponent = 1,
+                      ._reserved = {}};  // exponent = +1 — out of canonical domain [-38, 0]
     char buf[64]{};
     size_t written = 0;
     EXPECT_EQ(fixpp_decimal_format(d, buf, sizeof(buf), &written), FIXPP_ERR_DECIMAL_INVALID);
 }
 
 TEST(DecimalCAPIErrorPaths, FormatExponentBelowMinus38Rejected) {
-    fixpp_decimal_t d{1, -39, {}};  // exponent = -39 — out of canonical domain
+    fixpp_decimal_t d{.mantissa = 1,
+                      .exponent = -39,
+                      ._reserved = {}};  // exponent = -39 — out of canonical domain
     char buf[64]{};
     size_t written = 0;
     EXPECT_EQ(fixpp_decimal_format(d, buf, sizeof(buf), &written), FIXPP_ERR_DECIMAL_INVALID);
@@ -82,32 +87,32 @@ TEST(DecimalCAPIErrorPaths, FormatExponentBelowMinus38Rejected) {
 // operand fails canonical-domain validation (exponent outside [-38, 0]).
 
 TEST(DecimalCAPIErrorPaths, BareCompareReturnsZeroWhenLeftOperandOutOfDomain) {
-    fixpp_decimal_t bad{1, 5, {}};
-    fixpp_decimal_t good{1, 0, {}};
+    fixpp_decimal_t bad{.mantissa = 1, .exponent = 5, ._reserved = {}};
+    fixpp_decimal_t good{.mantissa = 1, .exponent = 0, ._reserved = {}};
     EXPECT_EQ(fixpp_decimal_compare(bad, good), 0);
 }
 
 TEST(DecimalCAPIErrorPaths, BareCompareReturnsZeroWhenRightOperandOutOfDomain) {
-    fixpp_decimal_t good{1, 0, {}};
-    fixpp_decimal_t bad{1, 5, {}};
+    fixpp_decimal_t good{.mantissa = 1, .exponent = 0, ._reserved = {}};
+    fixpp_decimal_t bad{.mantissa = 1, .exponent = 5, ._reserved = {}};
     EXPECT_EQ(fixpp_decimal_compare(good, bad), 0);
 }
 
 TEST(DecimalCAPIErrorPaths, BareCompareReturnsZeroWhenBothOperandsOutOfDomain) {
-    fixpp_decimal_t bad_a{1, 5, {}};
-    fixpp_decimal_t bad_b{2, 5, {}};
+    fixpp_decimal_t bad_a{.mantissa = 1, .exponent = 5, ._reserved = {}};
+    fixpp_decimal_t bad_b{.mantissa = 2, .exponent = 5, ._reserved = {}};
     EXPECT_EQ(fixpp_decimal_compare(bad_a, bad_b), 0);
 }
 
 TEST(DecimalCAPIErrorPaths, BareEqualReturnsZeroWhenLeftOperandOutOfDomain) {
-    fixpp_decimal_t bad{1, 5, {}};
-    fixpp_decimal_t good{1, 0, {}};
+    fixpp_decimal_t bad{.mantissa = 1, .exponent = 5, ._reserved = {}};
+    fixpp_decimal_t good{.mantissa = 1, .exponent = 0, ._reserved = {}};
     EXPECT_EQ(fixpp_decimal_equal(bad, good), 0);
 }
 
 TEST(DecimalCAPIErrorPaths, BareEqualReturnsZeroWhenRightOperandOutOfDomain) {
-    fixpp_decimal_t good{1, 0, {}};
-    fixpp_decimal_t bad{1, 5, {}};
+    fixpp_decimal_t good{.mantissa = 1, .exponent = 0, ._reserved = {}};
+    fixpp_decimal_t bad{.mantissa = 1, .exponent = 5, ._reserved = {}};
     EXPECT_EQ(fixpp_decimal_equal(good, bad), 0);
 }
 

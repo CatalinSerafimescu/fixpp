@@ -84,7 +84,9 @@ public:
     explicit CountingResource(std::pmr::memory_resource* upstream = std::pmr::new_delete_resource())
         : upstream_{upstream} {}
 
-    std::uint64_t alloc_count() const noexcept { return count_.load(std::memory_order_relaxed); }
+    [[nodiscard]] std::uint64_t alloc_count() const noexcept {
+        return count_.load(std::memory_order_relaxed);
+    }
     void reset() noexcept { count_.store(0, std::memory_order_relaxed); }
 
 private:
@@ -95,7 +97,7 @@ private:
     void do_deallocate(void* p, std::size_t bytes, std::size_t align) override {
         upstream_->deallocate(p, bytes, align);
     }
-    bool do_is_equal(std::pmr::memory_resource const& other) const noexcept override {
+    [[nodiscard]] bool do_is_equal(std::pmr::memory_resource const& other) const noexcept override {
         return this == &other;
     }
 
@@ -167,26 +169,26 @@ TEST(LogZeroAlloc, CompileTimeCutoffInfoDebugNotEmitted) {
     sinks.push_back(std::unique_ptr<fixpp::log::Sink>(sink_raw));
 
     fixpp::log::LoggerConfig cfg;
-    cfg.capacity = 256u;
+    cfg.capacity = 256U;
     cfg.on_overflow = fixpp::log::overflow_policy::drop_newest;
 
     auto logger = std::make_unique<fixpp::log::Logger>(std::move(cfg), std::move(sinks));
 
     // Emit debug and info — they should be silently compiled out.
-    emit_debug(logger.get(), 0u);
-    emit_info(logger.get(), 1u);
+    emit_debug(logger.get(), 0U);
+    emit_info(logger.get(), 1U);
 
     // Emit one warn — this SHOULD reach the sink.
-    emit_warn(logger.get(), 2u);
+    emit_warn(logger.get(), 2U);
 
     (void)logger->shutdown(std::chrono::seconds{5});
 
     // Only the warn record should have reached the sink.
-    EXPECT_EQ(sink_raw->emit_count.load(), 1u)
+    EXPECT_EQ(sink_raw->emit_count.load(), 1U)
         << "Only 1 record (warn) should reach the sink; "
            "debug and info are compiled out by FIXPP_LOG_MIN_LEVEL=3";
 
-    EXPECT_EQ(logger->drop_count(), 0u) << "No overflow drops should occur";
+    EXPECT_EQ(logger->drop_count(), 0U) << "No overflow drops should occur";
 }
 
 // ── TS-1b: dual-gate zero-alloc ──────────────────────────────────────────
@@ -221,7 +223,7 @@ TEST(LogZeroAlloc, DualGateZeroAllocEnqueuePath) {
     sinks.push_back(std::unique_ptr<fixpp::log::Sink>(sink_raw));
 
     fixpp::log::LoggerConfig cfg;
-    cfg.capacity = 1024u;
+    cfg.capacity = 1024U;
     cfg.on_overflow = fixpp::log::overflow_policy::drop_newest;
     cfg.ring_resource = &counting_res;
 
@@ -230,7 +232,7 @@ TEST(LogZeroAlloc, DualGateZeroAllocEnqueuePath) {
     // ── Warm-up ────────────────────────────────────────────────────────────
     // One enqueue before the guard window to prime any lazy per-thread
     // state (e.g. thread-local caches, first-time initialisation paths).
-    emit_warn(logger.get(), 0u);
+    emit_warn(logger.get(), 0U);
     // Let the drain consume the warm-up record.
     std::this_thread::sleep_for(std::chrono::milliseconds{10});
 
@@ -245,13 +247,13 @@ TEST(LogZeroAlloc, DualGateZeroAllocEnqueuePath) {
 
     // Fill levels to test: 10%, 50%, 95% of 1024 = 102, 512, 972 records.
     // The drain RUNS so these are non-overflow enqueues.
-    constexpr std::uint64_t kCapacity = 1024u;
+    constexpr std::uint64_t kCapacity = 1024U;
     constexpr std::uint64_t k10pct = kCapacity / 10;          // 102
     constexpr std::uint64_t k50pct = kCapacity / 2;           // 512
     constexpr std::uint64_t k95pct = (kCapacity * 95) / 100;  // 972
 
     for (std::uint64_t i = 0; i < k95pct; ++i) {
-        emit_warn(logger.get(), i + 1u);
+        emit_warn(logger.get(), i + 1U);
     }
 
     guard_end();  // Gate B2 assertion (null-safe no-op if not under LD_PRELOAD)
@@ -259,7 +261,7 @@ TEST(LogZeroAlloc, DualGateZeroAllocEnqueuePath) {
     // ── Assertions ─────────────────────────────────────────────────────────
 
     // Gate B1: PMR counter must be 0 inside the guard window.
-    EXPECT_EQ(counting_res.alloc_count(), 0u)
+    EXPECT_EQ(counting_res.alloc_count(), 0U)
         << "Zero PMR-routed allocations must occur on the enqueue path "
            "(Gate B1 — counting_resource gate). "
            "If this fails, an ArgValue ctor or format-deferral path "
@@ -272,7 +274,7 @@ TEST(LogZeroAlloc, DualGateZeroAllocEnqueuePath) {
 
     // At least k10pct records must have been delivered (drain runs during test).
     // The exact count depends on drain rate; we just verify no PMR allocs occurred.
-    EXPECT_GT(sink_raw->emit_count.load(), 0u)
+    EXPECT_GT(sink_raw->emit_count.load(), 0U)
         << "At least some records must have been delivered (drain runs during test)";
 }
 

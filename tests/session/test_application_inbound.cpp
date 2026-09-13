@@ -73,10 +73,9 @@ namespace {
 
 // ── Frame builder helpers ──────────────────────────────────────────────────────
 
-static std::vector<std::byte> make_raw_frame(std::string_view begin_string,
-                                             std::string_view msg_type, std::uint32_t seq,
-                                             std::string_view sender, std::string_view target,
-                                             std::string extra_body = {}) {
+std::vector<std::byte> make_raw_frame(std::string_view begin_string, std::string_view msg_type,
+                                      std::uint32_t seq, std::string_view sender,
+                                      std::string_view target, std::string extra_body = {}) {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -108,10 +107,9 @@ static std::vector<std::byte> make_raw_frame(std::string_view begin_string,
     return frame;
 }
 
-static std::vector<std::byte> make_logon_frame(std::string_view begin_string = "FIX.4.2",
-                                               std::uint32_t seq = 1,
-                                               std::string_view sender = "TW",
-                                               std::string_view target = "ISLD", int heartbt = 30) {
+std::vector<std::byte> make_logon_frame(std::string_view begin_string = "FIX.4.2",
+                                        std::uint32_t seq = 1, std::string_view sender = "TW",
+                                        std::string_view target = "ISLD", int heartbt = 30) {
     std::string extra =
         "98=0\x01"
         "108=" +
@@ -120,7 +118,7 @@ static std::vector<std::byte> make_logon_frame(std::string_view begin_string = "
 }
 
 // Extract a field value from a SOH-delimited FIX frame.
-static std::string extract_field_value(std::span<const std::byte> frame, std::uint32_t tag) {
+std::string extract_field_value(std::span<const std::byte> frame, std::uint32_t tag) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = std::to_string(tag) + "=";
     auto pos = wire.find(needle);
@@ -151,7 +149,8 @@ public:
                                const SessionId& id) override {
         auto mt_fv = msg.get(35);
         std::string mt = mt_fv ? std::string(mt_fv->as_string()) : "<none>";
-        calls.push_back({"fromAdmin", mt, id.sender_comp_id});
+        calls.push_back(
+            {.which = "fromAdmin", .msg_type = mt, .session_sender = id.sender_comp_id});
         if (from_admin_reject) {
             return std::unexpected(from_admin_reject_code);
         }
@@ -162,7 +161,7 @@ public:
                              const SessionId& id) override {
         auto mt_fv = msg.get(35);
         std::string mt = mt_fv ? std::string(mt_fv->as_string()) : "<none>";
-        calls.push_back({"fromApp", mt, id.sender_comp_id});
+        calls.push_back({.which = "fromApp", .msg_type = mt, .session_sender = id.sender_comp_id});
         return {};
     }
 };
@@ -261,7 +260,7 @@ TEST(ApplicationInbound, FromAppFiresOnce_AppFrame) {
     auto app_frame = make_raw_frame("FIX.4.2", "D", 2, "TW", "ISLD");
     f.feed(sess, app_frame);
 
-    ASSERT_EQ(app->calls.size(), 1u) << "fromApp must fire exactly once";
+    ASSERT_EQ(app->calls.size(), 1U) << "fromApp must fire exactly once";
     EXPECT_EQ(app->calls[0].which, "fromApp");
     EXPECT_EQ(app->calls[0].msg_type, "D") << "MsgType(35) must be D";
     EXPECT_EQ(app->calls[0].session_sender, "ISLD") << "SessionId.sender_comp_id must be ISLD";
@@ -290,8 +289,8 @@ TEST(ApplicationInbound, FromAdminFiresOnce_AdminFrame) {
         if (c.which == "fromAdmin") ++admin_count;
         if (c.which == "fromApp") ++app_count;
     }
-    EXPECT_EQ(admin_count, 1u) << "fromAdmin must fire exactly once for admin frame";
-    EXPECT_EQ(app_count, 0u) << "fromApp must NOT fire for admin frame";
+    EXPECT_EQ(admin_count, 1U) << "fromAdmin must fire exactly once for admin frame";
+    EXPECT_EQ(app_count, 0U) << "fromApp must NOT fire for admin frame";
     if (!app->calls.empty()) {
         EXPECT_EQ(app->calls.back().which, "fromAdmin");
     }
@@ -354,7 +353,7 @@ TEST(ApplicationInbound, Ordering_TwoAppFrames_ABeforeB) {
     for (auto& c : app->calls) {
         if (c.which == "fromApp") app_calls.push_back(c.which);
     }
-    ASSERT_EQ(app_calls.size(), 2u) << "fromApp must fire twice (once per frame)";
+    ASSERT_EQ(app_calls.size(), 2U) << "fromApp must fire twice (once per frame)";
     // Both calls should be fromApp (not fromAdmin) — order is verified by
     // the fact that we feed them sequentially on the same strand.
 }

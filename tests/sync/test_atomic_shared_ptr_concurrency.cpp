@@ -43,7 +43,7 @@ using Clock = std::chrono::steady_clock;
 
 // ── Helper: read a positive int from an env var or return fallback ─────────────
 
-static int read_env_int(const char* key, int fallback) {
+int read_env_int(const char* key, int fallback) {
     const char* val = std::getenv(key);
     if (val == nullptr || *val == '\0') {
         return fallback;
@@ -58,11 +58,11 @@ static int read_env_int(const char* key, int fallback) {
 
 // ── Helper: shared-ownership equivalence (mirrors harness) ───────────────────
 
-static bool same_owner(const std::shared_ptr<int>& a, const std::shared_ptr<int>& b) noexcept {
+bool same_owner(const std::shared_ptr<int>& a, const std::shared_ptr<int>& b) noexcept {
     return !a.owner_before(b) && !b.owner_before(a);
 }
 
-static bool equivalent(const std::shared_ptr<int>& a, const std::shared_ptr<int>& b) noexcept {
+bool equivalent(const std::shared_ptr<int>& a, const std::shared_ptr<int>& b) noexcept {
     return a.get() == b.get() && same_owner(a, b);
 }
 
@@ -303,7 +303,7 @@ TEST(AtomicSharedPtrRefcountIntegrity, WeakPtrExpiresAfterStore) {
 
     for (int t = 0; t < kThreadCount; ++t) {
         workers.emplace_back([&, t]() {
-            std::mt19937 rng(static_cast<std::uint32_t>(1234 + t * 19));
+            std::mt19937 rng(static_cast<std::uint32_t>(1234 + (t * 19)));
             std::uniform_int_distribution<int> op_dist(0, 3);
             std::uniform_int_distribution<int> val_dist(1, 1000000);
             for (int i = 0; i < kIters; ++i) {
@@ -359,7 +359,7 @@ TEST(AtomicSharedPtrContentionStress, NoTornReadUnderContention) {
 
     for (int t = 0; t < kThreadCount; ++t) {
         workers.emplace_back([&, t]() {
-            std::mt19937 rng(static_cast<std::uint32_t>(4321 + t * 7));
+            std::mt19937 rng(static_cast<std::uint32_t>(4321 + (t * 7)));
             std::uniform_int_distribution<int> op_dist(0, 3);
             std::uniform_int_distribution<int> val_dist(1, 1'000'000);
             for (int i = 0; i < kIters; ++i) {
@@ -599,7 +599,7 @@ TEST(AtomicSharedPtrLinearizability, SpotCheck) {
     // otherwise be rounded up to — which is what keeps it from being a timing
     // assertion in disguise (issue #327).
     const long long shortest_stagger_ns =
-        std::min_element(ops.begin(), ops.end(), [](const Op& a, const Op& b) {
+        std::ranges::min_element(ops, [](const Op& a, const Op& b) {
             return a.stagger_ns < b.stagger_ns;
         })->stagger_ns;
     EXPECT_LT(shortest_stagger_ns, 1'000'000)
@@ -653,14 +653,14 @@ TEST(AtomicSharedPtrLinearizability, SpotCheck) {
 
     std::array<int, 6> order{0, 1, 2, 3, 4, 5};
     bool found_linearization = false;
-    std::sort(order.begin(), order.end());
+    std::ranges::sort(order);
     do {
         if (!consistent_with_constraints(order)) continue;
         if (replay_and_check(order)) {
             found_linearization = true;
             break;
         }
-    } while (std::next_permutation(order.begin(), order.end()));
+    } while (std::ranges::next_permutation(order).found);
 
     EXPECT_TRUE(found_linearization)
         << "No valid linearization found — atomicity or ordering contract is broken";
@@ -681,7 +681,7 @@ TEST(AtomicSharedPtrAllocatorPressure, NoMemoryErrorsUnderHighAlloc) {
 
     for (int t = 0; t < kThreadCount; ++t) {
         workers.emplace_back([&, t]() {
-            std::mt19937 rng(static_cast<std::uint32_t>(6543 + t * 29));
+            std::mt19937 rng(static_cast<std::uint32_t>(6543 + (t * 29)));
             std::uniform_int_distribution<int> op_dist(0, 4);
             std::uniform_int_distribution<int> val_dist(1, 1'000'000);
             for (int i = 0; i < kIters; ++i) {
@@ -779,7 +779,7 @@ TEST(AtomicSharedPtrRandomizedStress, BoundedMixedOpNoErrors) {
 
     for (int t = 0; t < kThreadCount; ++t) {
         workers.emplace_back([&, t]() {
-            std::mt19937 rng(static_cast<std::uint32_t>(9001 + t * 7));
+            std::mt19937 rng(static_cast<std::uint32_t>(9001 + (t * 7)));
             std::uniform_int_distribution<int> op_dist(0, 3);
             std::uniform_int_distribution<int> val_dist(1, 50'000'000);
 

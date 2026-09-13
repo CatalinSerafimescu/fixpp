@@ -113,7 +113,7 @@ TEST(LogBlockOverflow, BlockModeRawThreadBlocks10ms) {
     sinks.push_back(std::unique_ptr<fixpp::log::Sink>(sink_raw));
 
     fixpp::log::LoggerConfig cfg;
-    cfg.capacity = 1u;  // smallest possible ring — will fill after 1 enqueue
+    cfg.capacity = 1U;  // smallest possible ring — will fill after 1 enqueue
     cfg.on_overflow = fixpp::log::overflow_policy::block;
 
     auto logger = std::make_unique<fixpp::log::Logger>(std::move(cfg), std::move(sinks));
@@ -129,7 +129,7 @@ TEST(LogBlockOverflow, BlockModeRawThreadBlocks10ms) {
     // Enqueue record #0 — fills the ring; the drain picks it up and blocks in
     // TimedBlockSink::emit() for 50 ms (read_sequence_ advances AFTER emit()).
     logger->enqueue(fixpp::log::Level::info, fixpp::log::cat::session, fmt_first, zeroed_trace_id,
-                    0u, ts, {fixpp::log::ArgValue::from_u64(0u)});
+                    0U, ts, {fixpp::log::ArgValue::from_u64(0U)});
 
     // Wait until the drain has entered emit() for record #0.
     // This ensures the ring slot is NOT yet freed (read_sequence_ not yet advanced).
@@ -155,7 +155,7 @@ TEST(LogBlockOverflow, BlockModeRawThreadBlocks10ms) {
         producer_at_the_door.store(true, std::memory_order_release);
         // This enqueue MUST block until the drain advances read_sequence_.
         logger->enqueue(fixpp::log::Level::info, fixpp::log::cat::session, fmt_second,
-                        zeroed_trace_id, 0u, ts, {fixpp::log::ArgValue::from_u64(1u)});
+                        zeroed_trace_id, 0U, ts, {fixpp::log::ArgValue::from_u64(1U)});
         enqueue_end = std::chrono::steady_clock::now();
         producer_done.store(true, std::memory_order_release);
     });
@@ -221,13 +221,13 @@ TEST(LogBlockOverflow, BlockModeRawThreadBlocks10ms) {
         << blocked_for.count() << " ms)";
 
     // Both records were eventually delivered (no drops in block mode).
-    EXPECT_EQ(logger->drop_count(), 0u)
+    EXPECT_EQ(logger->drop_count(), 0U)
         << "drop_count must be 0 — block mode must not drop records";
 
-    EXPECT_EQ(sink_raw->captured.size(), 2u) << "Both records must have been delivered to the sink";
+    EXPECT_EQ(sink_raw->captured.size(), 2U) << "Both records must have been delivered to the sink";
 
     // Record ordering: record #0 (fmt_first) before record #1 (fmt_second).
-    ASSERT_GE(sink_raw->captured.size(), 2u);
+    ASSERT_GE(sink_raw->captured.size(), 2U);
     EXPECT_EQ(sink_raw->captured[0].format_id, fmt_first)
         << "First delivered record must be record #0";
     EXPECT_EQ(sink_raw->captured[1].format_id, fmt_second)

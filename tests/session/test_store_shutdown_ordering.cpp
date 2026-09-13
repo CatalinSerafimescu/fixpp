@@ -99,7 +99,7 @@ TEST(StoreShutdownOrdering, HundredSequentialStoresAllSucceed) {
     // store destroyed after pool.stop() — correct ordering
     pool.stop();
     pool.join();
-    store.reset();  // explicit destroy AFTER pool stops
+    store = nullptr;  // explicit destroy AFTER pool stops
 }
 
 // ── Test 2: Concurrent stores from multiple coroutines, store outlives them ──
@@ -148,7 +148,7 @@ TEST(StoreShutdownOrdering, StoreOutlivesAllCoroutines) {
     pool.join();
 
     // Destroy store AFTER pool joins — correct shutdown ordering
-    store.reset();
+    store = nullptr;
 
     // If we reach here without TSan/ASan complaints, the test passes.
 }
@@ -179,13 +179,13 @@ TEST(StoreShutdownOrdering, ResetDuringOperationalPeriodIsClean) {
             }
 
             // Trigger reset
-            auto r = co_await store->reset();
+            auto r = co_await (*store).reset();
             EXPECT_TRUE(r.has_value()) << "reset() failed";
 
             // Verify counter is back to 1
             auto ns = co_await store->next_seqnum(direction_t::outbound, false);
             EXPECT_TRUE(ns.has_value());
-            EXPECT_EQ(*ns, 1u);
+            EXPECT_EQ(*ns, 1U);
         },
         asio::use_future);
     fut.get();
@@ -193,7 +193,7 @@ TEST(StoreShutdownOrdering, ResetDuringOperationalPeriodIsClean) {
     // Destroy in correct order
     pool.stop();
     pool.join();
-    store.reset();
+    store = nullptr;
 }
 
 // ── Test 4: Concurrent read (retrieve) + write (store) ───────────────────────
@@ -264,7 +264,7 @@ TEST(StoreShutdownOrdering, ConcurrentReadWriteNoDataRace) {
             auto r = co_await store->retrieve(1, 10, direction_t::outbound, vis);
             EXPECT_TRUE(r.has_value()) << "concurrent retrieve failed";
             // Must see at least frames 1..10
-            EXPECT_EQ(vis.seqs.size(), 10u);
+            EXPECT_EQ(vis.seqs.size(), 10U);
         },
         asio::use_future);
 
@@ -273,7 +273,7 @@ TEST(StoreShutdownOrdering, ConcurrentReadWriteNoDataRace) {
 
     pool.stop();
     pool.join();
-    store.reset();
+    store = nullptr;
 }
 
 // ── Test 5: RC#1 regression — unbounded retrieve UAF under concurrent append ──
@@ -363,7 +363,7 @@ TEST(StoreShutdownOrdering, UnboundedRetrieveUAFUnderConcurrentAppend) {
 
     pool.stop();
     pool.join();
-    store.reset();
+    store = nullptr;
     // If we reach here without ASan/MSan flags, the RC#1 fix holds.
 }
 
@@ -495,7 +495,7 @@ TEST(StoreShutdownOrdering, FileStoreOffloadDrainBeforePoolJoin) {
     // after we begin teardown.
     pool.stop();
     pool.join();
-    store.reset();  // explicit destroy AFTER pool stops (validates no UAF)
+    store = nullptr;  // explicit destroy AFTER pool stops (validates no UAF)
 
     std::filesystem::remove_all(dir);
     // Reaching here under ASan+TSan without flags confirms the C5 contract.

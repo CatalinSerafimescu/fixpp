@@ -91,7 +91,7 @@ void assert_golden_match(std::string_view golden_relpath, std::span<const std::b
     ASSERT_EQ(expected.size(), 1U);
 
     std::vector<GoldenFrame> actual{
-        GoldenFrame{'>', std::vector<std::byte>{body.begin(), body.end()}}};
+        GoldenFrame{.dir = '>', .bytes = std::vector<std::byte>{body.begin(), body.end()}}};
     auto diff = diff_transcripts(expected, actual, shape_oracle_profile());
     EXPECT_TRUE(static_cast<bool>(diff)) << "golden diff mismatch: " << diff.detail;
 }
@@ -232,39 +232,41 @@ TEST(BuilderShapeOracle067, NewOrderListGrouped) {
     // ── Hand params (fixpp::session::NewOrderListParams) ──
     std::vector<fixpp::session::NewOrderListPartySubId> hand_ord1_subs;
     hand_ord1_subs.push_back(fixpp::session::NewOrderListPartySubId{
-        seed.orders[0].parties[0].sub_ids[0].party_sub_id,
-        seed.orders[0].parties[0].sub_ids[0].party_sub_id_type,
+        .party_sub_id = seed.orders[0].parties[0].sub_ids[0].party_sub_id,
+        .party_sub_id_type = seed.orders[0].parties[0].sub_ids[0].party_sub_id_type,
     });
     std::vector<fixpp::session::NewOrderListParty> hand_ord1_parties;
     hand_ord1_parties.push_back(fixpp::session::NewOrderListParty{
-        seed.orders[0].parties[0].party_id,
-        seed.orders[0].parties[0].party_id_source,
-        seed.orders[0].parties[0].party_role,
-        std::span<const fixpp::session::NewOrderListPartySubId>{hand_ord1_subs},
+        .party_id = seed.orders[0].parties[0].party_id,
+        .party_id_source = seed.orders[0].parties[0].party_id_source,
+        .party_role = seed.orders[0].parties[0].party_role,
+        .sub_ids = std::span<const fixpp::session::NewOrderListPartySubId>{hand_ord1_subs},
     });
     std::vector<fixpp::session::NewOrderListParty> hand_ord2_parties;  // empty -> NoPartyIDs=0
 
     std::vector<fixpp::session::NewOrderListOrder> hand_orders;
     hand_orders.push_back(fixpp::session::NewOrderListOrder{
-        seed.orders[0].cl_ord_id,
-        seed.orders[0].list_seq_no,
-        seed.orders[0].side,
-        seed.orders[0].symbol,
-        make_decimal(seed.orders[0].order_qty, &arena),
-        std::span<const fixpp::session::NewOrderListParty>{hand_ord1_parties},
+        .cl_ord_id = seed.orders[0].cl_ord_id,
+        .list_seq_no = seed.orders[0].list_seq_no,
+        .side = seed.orders[0].side,
+        .symbol = seed.orders[0].symbol,
+        .order_qty = make_decimal(seed.orders[0].order_qty, &arena),
+        .parties = std::span<const fixpp::session::NewOrderListParty>{hand_ord1_parties},
     });
     hand_orders.push_back(fixpp::session::NewOrderListOrder{
-        seed.orders[1].cl_ord_id,
-        seed.orders[1].list_seq_no,
-        seed.orders[1].side,
-        seed.orders[1].symbol,
-        make_decimal(seed.orders[1].order_qty, &arena),
-        std::span<const fixpp::session::NewOrderListParty>{hand_ord2_parties},
+        .cl_ord_id = seed.orders[1].cl_ord_id,
+        .list_seq_no = seed.orders[1].list_seq_no,
+        .side = seed.orders[1].side,
+        .symbol = seed.orders[1].symbol,
+        .order_qty = make_decimal(seed.orders[1].order_qty, &arena),
+        .parties = std::span<const fixpp::session::NewOrderListParty>{hand_ord2_parties},
     });
 
     fixpp::session::NewOrderListParams hand_params{
-        seed.list_id, seed.bid_type, seed.tot_no_orders,
-        std::span<const fixpp::session::NewOrderListOrder>{hand_orders}};
+        .list_id = seed.list_id,
+        .bid_type = seed.bid_type,
+        .tot_no_orders = seed.tot_no_orders,
+        .orders = std::span<const fixpp::session::NewOrderListOrder>{hand_orders}};
 
     std::array<std::byte, 4096> hand_out{};
     auto hand_r = fixpp::session::build_new_order_list(std::span<std::byte>{hand_out}, hand_params);
@@ -343,15 +345,15 @@ TEST(BuilderShapeOracle067, AllocationReportGrouped) {
     // ── Hand params (fixpp::session::AllocationReportParams) ──
     std::vector<fixpp::session::AllocationReportPartySubId> hand_subs;
     hand_subs.push_back(fixpp::session::AllocationReportPartySubId{
-        seed.parties[0].sub_ids[0].party_sub_id,
-        seed.parties[0].sub_ids[0].party_sub_id_type,
+        .party_sub_id = seed.parties[0].sub_ids[0].party_sub_id,
+        .party_sub_id_type = seed.parties[0].sub_ids[0].party_sub_id_type,
     });
     std::vector<fixpp::session::AllocationReportParty> hand_parties;
     hand_parties.push_back(fixpp::session::AllocationReportParty{
-        seed.parties[0].party_id,
-        seed.parties[0].party_id_source,
-        seed.parties[0].party_role,
-        std::span<const fixpp::session::AllocationReportPartySubId>{hand_subs},
+        .party_id = seed.parties[0].party_id,
+        .party_id_source = seed.parties[0].party_id_source,
+        .party_role = seed.parties[0].party_role,
+        .sub_ids = std::span<const fixpp::session::AllocationReportPartySubId>{hand_subs},
     });
 
     fixpp::session::AllocationReportParams hand_params{};

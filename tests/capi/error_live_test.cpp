@@ -80,7 +80,7 @@ TEST(CapiErrorLive, MalformedPayloadReturnsUnknownNoTransmit) {
     ASSERT_EQ(fixpp_engine_start(B), FIXPP_ERR_OK);
 
     std::uint16_t port = wait_for_bound_port(B, acc_id);
-    ASSERT_NE(port, 0u) << "acceptor did not bind";
+    ASSERT_NE(port, 0U) << "acceptor did not bind";
 
     fixpp_session_config_t* ini = make_session_cfg("INIT-MALF", "ACC-MALF", FIXPP_ROLE_INITIATOR);
     set_loopback_endpoint(ini, "127.0.0.1", port);
@@ -153,7 +153,7 @@ TEST(CapiErrorLive, SeqnumOverflowReturnsStoreRuntimeNoTransmit) {
     ASSERT_EQ(fixpp_engine_start(B), FIXPP_ERR_OK);
 
     std::uint16_t port = wait_for_bound_port(B, acc_id);
-    ASSERT_NE(port, 0u) << "acceptor did not bind";
+    ASSERT_NE(port, 0U) << "acceptor did not bind";
 
     fixpp_session_config_t* ini = make_session_cfg("INIT-SEQOV", "ACC-SEQOV", FIXPP_ROLE_INITIATOR);
     set_loopback_endpoint(ini, "127.0.0.1", port);

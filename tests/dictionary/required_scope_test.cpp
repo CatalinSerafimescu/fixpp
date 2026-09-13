@@ -32,7 +32,7 @@ fixpp::dict::Dictionary load_dict(char const* file, std::pmr::memory_resource* m
 }
 
 bool contains(std::span<std::uint16_t const> s, std::uint16_t t) {
-    return std::find(s.begin(), s.end(), t) != s.end();
+    return std::ranges::find(s, t) != s.end();
 }
 
 // FIX44 PositionReport(AP): UnderlyingSettlPrice(732) / UnderlyingSettlPriceType
@@ -133,8 +133,7 @@ TEST(RequiredScope, Fix42IntTypedGroupCountFieldNowResolvesInContextStore) {
     // NoAllocs(78) on Allocation(J): FieldRef.type is STILL Int (not NumInGroup).
     // 082 deliberately does NOT change FieldRef::type (research.md D-4).
     auto const j_fields = d42.message_fields("J");
-    auto const it =
-        std::find_if(j_fields.begin(), j_fields.end(), [](auto const& fr) { return fr.tag == 78; });
+    auto const it = std::ranges::find_if(j_fields, [](auto const& fr) { return fr.tag == 78; });
     ASSERT_NE(it, j_fields.end()) << "NoAllocs(78) must appear in J's field expansion";
     EXPECT_EQ(it->type, fixpp::dict::field_data_type::Int)
         << "FIX42 NoAllocs(78) must REMAIN INT-typed — 082 changes the detection predicate, not "

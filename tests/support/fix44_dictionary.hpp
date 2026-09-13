@@ -48,7 +48,7 @@ namespace fixpp::test_support {
 // loaded into a heap-allocated 4 MiB PMR monotonic buffer co-owned via the
 // shared_ptr's deleter (mirrors make_minimal_dictionary()).
 [[nodiscard]] inline std::shared_ptr<const fixpp::dict::Dictionary> make_fix44_dictionary() {
-    constexpr std::size_t kBufSize = 4u * 1024u * 1024u;
+    constexpr std::size_t kBufSize = 4U * 1024U * 1024U;
     auto buf = std::make_unique<std::array<std::byte, kBufSize>>();
     auto* mr = new std::pmr::monotonic_buffer_resource{buf->data(), buf->size()};
 

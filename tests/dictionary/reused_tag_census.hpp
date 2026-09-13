@@ -110,7 +110,7 @@ inline DictCensus census_for(Dictionary const& dict, std::string name,
             if (members.empty()) {
                 continue;  // not a real group in this message
             }
-            std::sort(members.begin(), members.end());
+            std::ranges::sort(members);
 
             std::vector<std::uint16_t> path;
             std::uint16_t cur = fr.group_no_tag;
@@ -119,7 +119,7 @@ inline DictCensus census_for(Dictionary const& dict, std::string name,
                 auto const pit = immediate_parent.find(cur);
                 cur = (pit != immediate_parent.end()) ? pit->second : std::uint16_t{0};
             }
-            std::reverse(path.begin(), path.end());
+            std::ranges::reverse(path);
 
             auto const ctx_key = std::make_tuple(std::string{mt}, path, no_tag);
             if (seen_contexts.insert(ctx_key).second) {
@@ -136,7 +136,10 @@ inline DictCensus census_for(Dictionary const& dict, std::string name,
                 }
             }
             if (!matched) {
-                variants.push_back(Variant{members, GroupContext{std::string{mt}, path}, 1});
+                variants.push_back(Variant{
+                    .members = members,
+                    .example_context = GroupContext{.msg_type = std::string{mt}, .path = path},
+                    .context_count = 1});
             }
         }
     }

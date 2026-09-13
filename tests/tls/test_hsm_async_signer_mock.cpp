@@ -30,7 +30,6 @@
 
 namespace {
 
-using fixpp::core::error;
 using fixpp::core::expected_t;
 using fixpp::tls::async_signer_ref;
 using fixpp::tls::sign_request;
@@ -76,7 +75,7 @@ TEST(HsmAsyncSignerMock, SignCallbackRunsOnDifferentExecutor) {
 
     // Drive the sign call from session_ioc.
     std::vector<std::byte> tbs_data = {std::byte{0xDE}, std::byte{0xAD}};
-    sign_request req{std::span{tbs_data}, 0 /* NID placeholder */};
+    sign_request req{.tbs = std::span{tbs_data}, .sig_alg = 0 /* NID placeholder */};
 
     auto future = asio::co_spawn(
         session_ioc,

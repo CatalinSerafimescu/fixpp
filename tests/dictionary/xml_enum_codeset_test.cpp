@@ -52,8 +52,6 @@
 
 namespace {
 
-using fixpp::dict::Dictionary;
-
 constexpr std::size_t kArenaBytes = 32UZ * 1024UZ * 1024UZ;
 
 // (dictionary file name, expected enum-backed-field count, expected
@@ -67,15 +65,15 @@ struct ExpectedCensusRow {
 };
 
 constexpr std::array<ExpectedCensusRow, 9> kExpectedCensus{{
-    {"FIX40.xml", 39, 235},
-    {"FIX41.xml", 53, 342},
-    {"FIX42.xml", 104, 629},
-    {"FIX43.xml", 159, 1198},
-    {"FIX44.xml", 245, 1708},
-    {"FIX50.xml", 290, 2326},
-    {"FIX50SP1.xml", 327, 2640},
-    {"FIX50SP2.xml", 668, 5565},
-    {"FIXT11.xml", 9, 56},
+    {.file = "FIX40.xml", .enum_backed_fields = 39, .total_codes = 235},
+    {.file = "FIX41.xml", .enum_backed_fields = 53, .total_codes = 342},
+    {.file = "FIX42.xml", .enum_backed_fields = 104, .total_codes = 629},
+    {.file = "FIX43.xml", .enum_backed_fields = 159, .total_codes = 1198},
+    {.file = "FIX44.xml", .enum_backed_fields = 245, .total_codes = 1708},
+    {.file = "FIX50.xml", .enum_backed_fields = 290, .total_codes = 2326},
+    {.file = "FIX50SP1.xml", .enum_backed_fields = 327, .total_codes = 2640},
+    {.file = "FIX50SP2.xml", .enum_backed_fields = 668, .total_codes = 5565},
+    {.file = "FIXT11.xml", .enum_backed_fields = 9, .total_codes = 56},
 }};
 
 // Raw pugixml scan of a QuickFIX-XML `<fields>` section: how many `<field>`
@@ -125,29 +123,29 @@ TEST(XmlEnumCodeset, Fix44SideEnumValuesReturnsCodesWithDescriptions) {
     auto dict = fixpp::dict::XmlLoader{}.load(path, &mr);
 
     auto const codes = dict.enum_values(std::uint16_t{54});
-    ASSERT_EQ(codes.size(), 16u) << "FIX44 Side(54) declares 16 codes in the shipped dictionary";
+    ASSERT_EQ(codes.size(), 16U) << "FIX44 Side(54) declares 16 codes in the shipped dictionary";
 
     struct Expected {
         std::string_view value;
         std::string_view description;
     };
     constexpr std::array<Expected, 16> kExpected{{
-        {"1", "BUY"},
-        {"2", "SELL"},
-        {"3", "BUY_MINUS"},
-        {"4", "SELL_PLUS"},
-        {"5", "SELL_SHORT"},
-        {"6", "SELL_SHORT_EXEMPT"},
-        {"7", "UNDISCLOSED"},
-        {"8", "CROSS"},
-        {"9", "CROSS_SHORT"},
-        {"A", "CROSS_SHORT_EXEMPT"},
-        {"B", "AS_DEFINED"},
-        {"C", "OPPOSITE"},
-        {"D", "SUBSCRIBE"},
-        {"E", "REDEEM"},
-        {"F", "LEND"},
-        {"G", "BORROW"},
+        {.value = "1", .description = "BUY"},
+        {.value = "2", .description = "SELL"},
+        {.value = "3", .description = "BUY_MINUS"},
+        {.value = "4", .description = "SELL_PLUS"},
+        {.value = "5", .description = "SELL_SHORT"},
+        {.value = "6", .description = "SELL_SHORT_EXEMPT"},
+        {.value = "7", .description = "UNDISCLOSED"},
+        {.value = "8", .description = "CROSS"},
+        {.value = "9", .description = "CROSS_SHORT"},
+        {.value = "A", .description = "CROSS_SHORT_EXEMPT"},
+        {.value = "B", .description = "AS_DEFINED"},
+        {.value = "C", .description = "OPPOSITE"},
+        {.value = "D", .description = "SUBSCRIBE"},
+        {.value = "E", .description = "REDEEM"},
+        {.value = "F", .description = "LEND"},
+        {.value = "G", .description = "BORROW"},
     }};
 
     for (std::size_t i = 0; i < kExpected.size(); ++i) {

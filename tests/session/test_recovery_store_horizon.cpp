@@ -67,14 +67,13 @@ using namespace std::chrono_literals;
 
 namespace {
 
-static std::string field(int tag, std::string_view val) {
+std::string field(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
-static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
-                                             std::string_view msg_type, std::uint32_t seq,
-                                             std::string_view sender, std::string_view target,
-                                             std::string_view extra = {}) {
+std::vector<std::byte> make_fix_frame(std::string_view begin_string, std::string_view msg_type,
+                                      std::uint32_t seq, std::string_view sender,
+                                      std::string_view target, std::string_view extra = {}) {
     std::string body;
     body += field(35, msg_type);
     body += field(34, std::to_string(seq));
@@ -100,18 +99,17 @@ static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
     return frame;
 }
 
-static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
-                                         std::string_view t, int hbt = 30) {
+std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
+                                  std::string_view t, int hbt = 30) {
     std::string extra;
     extra += field(98, "0");
     extra += field(108, std::to_string(hbt));
     return make_fix_frame(bs, "A", seq, s, t, extra);
 }
 
-static std::vector<std::byte> make_resend_request(std::string_view bs, std::uint32_t seq,
-                                                  std::string_view s, std::string_view t,
-                                                  std::uint32_t begin_seqno,
-                                                  std::uint32_t end_seqno) {
+std::vector<std::byte> make_resend_request(std::string_view bs, std::uint32_t seq,
+                                           std::string_view s, std::string_view t,
+                                           std::uint32_t begin_seqno, std::uint32_t end_seqno) {
     std::string extra;
     extra += field(7, std::to_string(begin_seqno));
     extra += field(16, std::to_string(end_seqno));
@@ -202,25 +200,25 @@ public:
     }
 };
 
-static bool is_msg_type(std::span<const std::byte> frame, std::string_view type) {
+bool is_msg_type(std::span<const std::byte> frame, std::string_view type) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = "35=" + std::string(type) + "\x01";
-    return wire.find(needle) != std::string::npos;
+    return wire.contains(needle);
 }
 
 // SequenceReset{GapFillFlag=Y, NewSeqNo=<expected>}
-static bool is_gapfill_to(std::span<const std::byte> frame, std::uint32_t new_seqno) {
+bool is_gapfill_to(std::span<const std::byte> frame, std::uint32_t new_seqno) {
     if (!is_msg_type(frame, "4")) return false;
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
-    if (wire.find("123=Y\x01") == std::string::npos) return false;
-    return wire.find("36=" + std::to_string(new_seqno) + "\x01") != std::string::npos;
+    if (!wire.contains("123=Y\x01")) return false;
+    return wire.contains("36=" + std::to_string(new_seqno) + "\x01");
 }
 
 // Frame carries PossDupFlag(43)=Y and has given MsgSeqNum(34).
-static bool is_replay_with_poss_dup(std::span<const std::byte> frame, std::uint32_t seq) {
+bool is_replay_with_poss_dup(std::span<const std::byte> frame, std::uint32_t seq) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
-    if (wire.find("43=Y\x01") == std::string::npos) return false;
-    return wire.find("34=" + std::to_string(seq) + "\x01") != std::string::npos;
+    if (!wire.contains("43=Y\x01")) return false;
+    return wire.contains("34=" + std::to_string(seq) + "\x01");
 }
 
 // ── gap #5 support: an Application that counts toApp and ALWAYS vetoes ─────────
@@ -388,7 +386,7 @@ TEST_F(RecoveryStoreHorizonTest, ReplayFramesCarryOrigSendingTime) {
     bool found_orig_sending_time = false;
     for (const auto& frame : capture.frames) {
         std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
-        if (wire.find("43=Y\x01") != std::string::npos && wire.find("122=") != std::string::npos) {
+        if (wire.contains("43=Y\x01") && wire.contains("122=")) {
             found_orig_sending_time = true;
             break;
         }
@@ -498,7 +496,7 @@ TEST_F(RecoveryStoreHorizonTest, LargeAppFrameReplayed_NotGapFilled) {
     // Build a large frame at seq=7 (store horizon aligns with test).
     constexpr seqnum_t kLargeSeq = 7;
     auto big_frame = make_large_app_frame(kLargeSeq);
-    ASSERT_GT(big_frame.size(), 1024u)
+    ASSERT_GT(big_frame.size(), 1024U)
         << "Test prerequisite: large frame must exceed old 1024B capture limit.";
 
     auto cfg = make_acceptor_cfg();
@@ -518,8 +516,7 @@ TEST_F(RecoveryStoreHorizonTest, LargeAppFrameReplayed_NotGapFilled) {
         if (is_replay_with_poss_dup(frame, kLargeSeq)) {
             found_replay = true;
         }
-        if (wire.find("35=4\x01") != std::string::npos &&
-            wire.find("123=Y\x01") != std::string::npos) {
+        if (wire.contains("35=4\x01") && wire.contains("123=Y\x01")) {
             found_gapfill = true;
         }
     }

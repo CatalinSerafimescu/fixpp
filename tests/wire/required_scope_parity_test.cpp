@@ -186,8 +186,9 @@ GoldenGroupRows load_golden_groups(std::string const& csv_path) {
             ADD_FAILURE() << "malformed golden_groups.csv data row (expected 5 fields): " << line;
             continue;
         }
-        GroupContextKey key{fields[1], parse_path_list(fields[2]),
-                            static_cast<std::uint16_t>(std::stoul(fields[3]))};
+        GroupContextKey key{.msg_type = fields[1],
+                            .path = parse_path_list(fields[2]),
+                            .no_tag = static_cast<std::uint16_t>(std::stoul(fields[3]))};
         rows[fields[0]].emplace(std::move(key), parse_tag_list(fields[4]));
     }
     return rows;
@@ -240,9 +241,15 @@ std::vector<KnownSupersetContext> const kKnownSupersetContexts{
     // `QuotSetGrp` has `NoQuoteSets required="N"` (not "Y"), so the whole
     // subtree is optional either way and the quirk never manifests there —
     // no 4th context.
-    {"FIX44", GroupContextKey{"i", {}, 296}, {295}},
-    {"FIX50", GroupContextKey{"i", {}, 296}, {295}},
-    {"FIX50SP1", GroupContextKey{"i", {}, 296}, {295}},
+    {.dict = "FIX44",
+     .key = GroupContextKey{.msg_type = "i", .path = {}, .no_tag = 296},
+     .extra_tags = {295}},
+    {.dict = "FIX50",
+     .key = GroupContextKey{.msg_type = "i", .path = {}, .no_tag = 296},
+     .extra_tags = {295}},
+    {.dict = "FIX50SP1",
+     .key = GroupContextKey{.msg_type = "i", .path = {}, .no_tag = 296},
+     .extra_tags = {295}},
 };
 
 std::set<std::uint16_t> const* find_known_superset_extra(std::string const& dict,
@@ -286,9 +293,15 @@ struct DictCase {
 };
 
 std::vector<DictCase> const kQuickfixDicts{
-    {"FIX40", "FIX40.xml"},       {"FIX41", "FIX41.xml"},       {"FIX42", "FIX42.xml"},
-    {"FIX43", "FIX43.xml"},       {"FIX44", "FIX44.xml"},       {"FIX50", "FIX50.xml"},
-    {"FIX50SP1", "FIX50SP1.xml"}, {"FIX50SP2", "FIX50SP2.xml"}, {"FIXT11", "FIXT11.xml"},
+    {.label = "FIX40", .filename = "FIX40.xml"},
+    {.label = "FIX41", .filename = "FIX41.xml"},
+    {.label = "FIX42", .filename = "FIX42.xml"},
+    {.label = "FIX43", .filename = "FIX43.xml"},
+    {.label = "FIX44", .filename = "FIX44.xml"},
+    {.label = "FIX50", .filename = "FIX50.xml"},
+    {.label = "FIX50SP1", .filename = "FIX50SP1.xml"},
+    {.label = "FIX50SP2", .filename = "FIX50SP2.xml"},
+    {.label = "FIXT11", .filename = "FIXT11.xml"},
 };
 
 }  // namespace
@@ -354,7 +367,7 @@ TEST(RequiredScopeParity, QuickFixGoldenMatchesOracleAcrossNineDicts) {
     }
 
     std::cout << "  total messages checked across 9 QuickFIX dicts: " << total_messages << "\n";
-    EXPECT_GT(total_messages, 0u);
+    EXPECT_GT(total_messages, 0U);
 }
 
 // ============================================================================
@@ -557,7 +570,7 @@ TEST(RequiredScopeParity, QuickFixGroupGoldenMatchesOracleAcrossNineDicts) {
               << "\n";
     std::cout << "  named stricter-superset carve-out contexts exercised: " << carve_out_hits
               << " (expect " << kKnownSupersetContexts.size() << ")\n";
-    EXPECT_GT(total_contexts, 0u);
+    EXPECT_GT(total_contexts, 0U);
     // The carve-out itself stays a real pin: if a declared context vanishes
     // (dictionary edit, oracle rework, etc.), or MORE contexts than declared
     // start hitting the carve-out lookup, that is itself a finding to

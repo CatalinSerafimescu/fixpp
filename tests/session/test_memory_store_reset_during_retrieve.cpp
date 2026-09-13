@@ -167,7 +167,7 @@ public:
         co_return visit_result::cont;
     }
 
-    fixpp::core::error abort_error() const noexcept override {
+    [[nodiscard]] fixpp::core::error abort_error() const noexcept override {
         return fixpp::core::error::store_io_failure;
     }
 
@@ -220,7 +220,7 @@ void MemoryStoreResetDuringRetrieveTest::run_mid_traversal_reset(capacity_policy
 
     // Frame 1 was visited before the reset — it must carry the ORIGINAL bytes.
     ASSERT_GE(visitor.frames_seen, 1);
-    EXPECT_EQ(visitor.first_seq, 1u);
+    EXPECT_EQ(visitor.first_seq, 1U);
     EXPECT_EQ(visitor.first_bytes, orig1)
         << "frame 1 (visited before reset) must carry its original bytes";
 

@@ -26,8 +26,9 @@ struct ParsedFrame {
 };
 
 DiffResult mismatch(char dir, std::size_t frame_index, std::string tag_or_structure) {
-    return {DiffStatus::mismatch, "mismatch:" + std::string(1, dir) + ":" +
-                                      std::to_string(frame_index) + ":" + tag_or_structure};
+    return {.status = DiffStatus::mismatch,
+            .detail = "mismatch:" + std::string(1, dir) + ":" + std::to_string(frame_index) + ":" +
+                      tag_or_structure};
 }
 
 bool is_digit(std::byte value) {
@@ -89,7 +90,8 @@ ParsedFrame split_fields(std::span<const std::byte> bytes) {
             return parsed;
         }
 
-        parsed.fields.push_back(Field{tag, std::vector<std::byte>{equal_it + 1, field_end_it}});
+        parsed.fields.push_back(
+            Field{.tag = tag, .value = std::vector<std::byte>{equal_it + 1, field_end_it}});
         field_begin = field_end + 1;
     }
 
@@ -156,9 +158,10 @@ std::vector<GoldenFrame> parse_golden(std::string_view text) {
         }
 
         if (!line.empty() && line.size() >= 2 && is_valid_dir(line[0]) && line[1] == ' ') {
-            frames.push_back(GoldenFrame{line[0], decode_frame_bytes(line.substr(2))});
+            frames.push_back(
+                GoldenFrame{.dir = line[0], .bytes = decode_frame_bytes(line.substr(2))});
         } else if (!line.empty()) {
-            frames.push_back(GoldenFrame{'?', decode_frame_bytes(line)});
+            frames.push_back(GoldenFrame{.dir = '?', .bytes = decode_frame_bytes(line)});
         }
 
         if (line_end == text.size()) {

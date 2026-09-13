@@ -269,7 +269,7 @@ TEST(FirstFrameTotalCancelTls, LegA_JoinedHelper_CancellationAttributable) {
     int turns = 0;
     while (!result.has_value()) {
         ++turns;
-        ASSERT_GT(ioc.run_one(), 0u) << "io_context ran out of work before the read completed — "
+        ASSERT_GT(ioc.run_one(), 0U) << "io_context ran out of work before the read completed — "
                                      << "a broken cell (mis-wired watchdog/timers), not a RED "
                                      << "proof (D-6.13b).";
     }
@@ -358,7 +358,7 @@ TEST(FirstFrameTotalCancelTls, LegB_DirectRead_ExactCancelled) {
     int turns = 0;
     while (!result.has_value()) {
         ++turns;
-        ASSERT_GT(ioc.run_one(), 0u) << "io_context ran out of work before the read completed — "
+        ASSERT_GT(ioc.run_one(), 0U) << "io_context ran out of work before the read completed — "
                                      << "a broken cell (mis-wired watchdog/timers), not a RED "
                                      << "proof (D-6.13b).";
     }

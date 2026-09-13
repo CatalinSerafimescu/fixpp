@@ -46,7 +46,6 @@
 
 namespace {
 
-using fixpp::dict::table_view;
 using fixpp::wire::group_context;
 
 // The context-aware group_member_fn_t is shared across tests — see
@@ -74,7 +73,7 @@ TEST(DefectAGroupContext, MassQuote295ResolvesToQuotEntryGrpNotQuotCxlEntriesGrp
     std::vector<std::uint16_t> const member_vec{members.begin(), members.end()};
 
     auto const contains = [&](std::uint16_t tag) {
-        return std::find(member_vec.begin(), member_vec.end(), tag) != member_vec.end();
+        return std::ranges::find(member_vec, tag) != member_vec.end();
     };
 
     EXPECT_TRUE(contains(299)) << "295 in MassQuote context must include QuoteEntryID(299) "

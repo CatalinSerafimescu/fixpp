@@ -116,8 +116,8 @@ struct run_for_residual_measurement {
     std::size_t handlers_dispatched{};
     std::size_t residual_handlers{};
     std::chrono::steady_clock::duration elapsed{};
-    std::source_location location{};
-    std::string phase{};
+    std::source_location location;
+    std::string phase;
 };
 
 // Predicate form. `ready` is polled after every dispatched handler, exactly

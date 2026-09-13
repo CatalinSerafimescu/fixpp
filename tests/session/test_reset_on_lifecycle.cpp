@@ -102,7 +102,7 @@ static std::vector<std::byte> make_fix44_frame(std::string_view body_str) {
     std::string full = hdr + std::string(body_str);
     unsigned int cs = 0;
     for (unsigned char c : full) cs += c;
-    cs &= 0xFFu;
+    cs &= 0xFFU;
     char csbuf[4];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     full += "10=" + std::string(csbuf) + "\x01";
@@ -156,7 +156,7 @@ public:
         return delegate_->next_seqnum(dir, increment);
     }
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override {
-        return delegate_->reset();
+        return (*delegate_).reset();
     }
 
 private:
@@ -381,14 +381,14 @@ protected:
     }
 
     // Helper: check whether any captured frame has MsgType == mt.
-    bool any_msg_type(std::string_view mt) const {
+    [[nodiscard]] bool any_msg_type(std::string_view mt) const {
         for (const auto& f : captured_frames) {
             if (extract_field(std::span<const std::byte>(f), 35) == mt) return true;
         }
         return false;
     }
 
-    bool any_resend_request() const { return any_msg_type("2"); }
+    [[nodiscard]] bool any_resend_request() const { return any_msg_type("2"); }
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -746,7 +746,7 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogon_Acceptor_ResetsIdempotentWith141) {
     ASSERT_TRUE(r.has_value()) << "open() failed";
 
     // The store starts with reset_call_count()==0.
-    ASSERT_EQ(factory->store->reset_call_count(), 0u)
+    ASSERT_EQ(factory->store->reset_call_count(), 0U)
         << "StoreDouble must start at reset_call_count==0";
 
     // Feed Logon carrying 141=Y (both knob + peer-141 fire; must collapse to 1 reset).
@@ -755,7 +755,7 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogon_Acceptor_ResetsIdempotentWith141) {
 
     // C5.1: exactly one store reset observable (knob-driven arm; 013-only arm mutually excluded).
     // RED: without trigger, no store reset fires → count==0.
-    EXPECT_EQ(factory->store->reset_call_count(), 1u)
+    EXPECT_EQ(factory->store->reset_call_count(), 1U)
         << "ResetOnLogon_Acceptor_ResetsIdempotentWith141 RED (C5.1): "
            "exactly one store_.reset() must fire for (reset_on_logon=true + 141=Y); "
            "got "
@@ -934,7 +934,7 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogout_LocalInitiated_Resets) {
 
     // C3.1: teardown reset must have fired exactly once.
     // RED: reset_call_count() stays at calls_before (teardown not wired).
-    EXPECT_EQ(factory->store->reset_call_count(), calls_before + 1u)
+    EXPECT_EQ(factory->store->reset_call_count(), calls_before + 1U)
         << "ResetOnLogout_LocalInitiated_Resets RED (C3.1): "
            "exactly one store_.reset() must fire on graceful Logout teardown "
            "when reset_on_logout=true; got count=="
@@ -1007,7 +1007,7 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogout_PeerInitiated_Resets) {
 
     // C3.1: teardown reset must have fired (via close(terminal) reaching the
     // teardown-reset block with logout_seen_=true and reset_on_logout=true).
-    EXPECT_EQ(factory->store->reset_call_count(), calls_before + 1u)
+    EXPECT_EQ(factory->store->reset_call_count(), calls_before + 1U)
         << "ResetOnLogout_PeerInitiated_Resets (C3.1): "
            "store_.reset() must fire on peer-initiated Logout teardown "
            "when reset_on_logout=true (via close(terminal) mirroring read-pump EOF); "
@@ -1059,7 +1059,7 @@ TEST_F(ResetOnLifecycleTest, ResetOnDisconnect_AbnormalDrop_Resets) {
 
     // C4.1/C4.2: teardown reset must fire on abnormal drop.
     // RED: count stays at calls_before.
-    EXPECT_EQ(factory->store->reset_call_count(), calls_before + 1u)
+    EXPECT_EQ(factory->store->reset_call_count(), calls_before + 1U)
         << "ResetOnDisconnect_AbnormalDrop_Resets RED (C4.1/C4.2): "
            "store_.reset() must fire on terminal close (abnormal drop) "
            "when reset_on_disconnect=true; got count=="
@@ -1114,7 +1114,7 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogout_Off_Preserves) {
     ASSERT_EQ(sess.state(), fsm_state::Disconnected);
 
     // C3.2: reset_call_count must be 0 (no store reset fired).
-    EXPECT_EQ(factory->store->reset_call_count(), 0u)
+    EXPECT_EQ(factory->store->reset_call_count(), 0U)
         << "ResetOnLogout_Off_Preserves (C3.2): "
            "reset_call_count must remain 0 when reset_on_logout=false; "
            "got "
@@ -1161,7 +1161,7 @@ TEST_F(ResetOnLifecycleTest, ResetOnDisconnect_Off_Preserves) {
     ASSERT_EQ(sess.state(), fsm_state::Disconnected);
 
     // C4.3: no store reset fired.
-    EXPECT_EQ(factory->store->reset_call_count(), 0u)
+    EXPECT_EQ(factory->store->reset_call_count(), 0U)
         << "ResetOnDisconnect_Off_Preserves (C4.3): "
            "reset_call_count must remain 0 when reset_on_disconnect=false; "
            "got "
@@ -1213,7 +1213,7 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogoutAndDisconnect_DoubleTrigger_OneStoreRe
 
     // C5.1: exactly ONE store reset must fire (single-fire guard collapses double trigger).
     // RED: count==0 (teardown not wired).
-    EXPECT_EQ(factory->store->reset_call_count(), 1u)
+    EXPECT_EQ(factory->store->reset_call_count(), 1U)
         << "ResetOnLogoutAndDisconnect_DoubleTrigger_OneStoreReset RED (C5.1): "
            "exactly one store_.reset() must fire even when both reset_on_logout "
            "AND reset_on_disconnect are true (single-fire guard); "
@@ -1257,7 +1257,7 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogout_BothRoles_Resets) {
 
         ASSERT_EQ(sess.state(), fsm_state::Disconnected);
 
-        EXPECT_EQ(factory->store->reset_call_count(), 1u)
+        EXPECT_EQ(factory->store->reset_call_count(), 1U)
             << "ResetOnLogout_BothRoles_Resets initiator arm RED (C5.2): "
                "store_.reset() must fire on initiator graceful Logout "
                "when reset_on_logout=true; got count=="
@@ -1298,7 +1298,7 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogout_BothRoles_Resets) {
         // [contracts/reset-knobs.md C3.1; plan.md teardown design]
         terminal_close_sync(sess);
 
-        EXPECT_EQ(factory->store->reset_call_count(), 1u)
+        EXPECT_EQ(factory->store->reset_call_count(), 1U)
             << "ResetOnLogout_BothRoles_Resets acceptor arm (C5.2): "
                "store_.reset() must fire on acceptor peer-initiated Logout "
                "when reset_on_logout=true (via close(terminal) mirroring read-pump EOF); "
@@ -1341,7 +1341,7 @@ TEST_F(ResetOnLifecycleTest, ResetOnDisconnect_BothRoles_Resets) {
 
         ASSERT_EQ(sess.state(), fsm_state::Disconnected);
 
-        EXPECT_EQ(factory->store->reset_call_count(), 1u)
+        EXPECT_EQ(factory->store->reset_call_count(), 1U)
             << "ResetOnDisconnect_BothRoles_Resets initiator arm RED (C5.2): "
                "store_.reset() must fire on initiator terminal close "
                "when reset_on_disconnect=true; got count=="
@@ -1372,7 +1372,7 @@ TEST_F(ResetOnLifecycleTest, ResetOnDisconnect_BothRoles_Resets) {
 
         ASSERT_EQ(sess.state(), fsm_state::Disconnected);
 
-        EXPECT_EQ(factory->store->reset_call_count(), 1u)
+        EXPECT_EQ(factory->store->reset_call_count(), 1U)
             << "ResetOnDisconnect_BothRoles_Resets acceptor arm RED (C5.2): "
                "store_.reset() must fire on acceptor terminal close "
                "when reset_on_disconnect=true; got count=="
@@ -1549,7 +1549,7 @@ TEST_F(ResetOnLifecycleTest, ResetKnobs_NoHeapOnResetPath) {
         }
         if (alloc_guard_end) alloc_guard_end();
 
-        ASSERT_EQ(factory->store->reset_call_count(), 1u)
+        ASSERT_EQ(factory->store->reset_call_count(), 1U)
             << "ResetKnobs_NoHeapOnResetPath [window A]: reset must have fired on "
                "open() (reset_on_logon=true); count must be 1";
 
@@ -1579,7 +1579,7 @@ TEST_F(ResetOnLifecycleTest, ResetKnobs_NoHeapOnResetPath) {
             auto r = open_sync(sess_b);
             ASSERT_TRUE(r.has_value())
                 << "ResetKnobs_NoHeapOnResetPath [window B]: open() must succeed";
-            ASSERT_EQ(factory->store->reset_call_count(), 1u)
+            ASSERT_EQ(factory->store->reset_call_count(), 1U)
                 << "ResetKnobs_NoHeapOnResetPath [window B]: logon reset must have fired";
         }
 
@@ -1608,7 +1608,7 @@ TEST_F(ResetOnLifecycleTest, ResetKnobs_NoHeapOnResetPath) {
 
         // Verify the teardown reset fired (reset_on_disconnect=true; teardown_reset_done_ guard).
         // Total resets: 1 from open() + 1 from close() = 2.
-        EXPECT_EQ(factory->store->reset_call_count(), 2u)
+        EXPECT_EQ(factory->store->reset_call_count(), 2U)
             << "ResetKnobs_NoHeapOnResetPath [window B]: exactly 2 store resets expected "
                "(1 from open/reset_on_logon + 1 from close/reset_on_disconnect); "
                "got "
@@ -1806,7 +1806,7 @@ TEST_F(ResetOnLifecycleTest, Received141_PersistentStore_InvH1_StoreEqualsManage
     const seqnum_t mgr_in = sess.seqnum_mgr_test_access().next_inbound_unsafe();
 
     // Assert the store value directly (not via the manager as proxy).
-    EXPECT_EQ(store_in, static_cast<seqnum_t>(2u))
+    EXPECT_EQ(store_in, static_cast<seqnum_t>(2U))
         << "T007 (029 INV-H1 / FR-005) RED: store.current_next_inbound() must be 2 "
            "after received-141 persist-to-2; got "
         << store_in << " (fix not yet applied → store stuck at 1 after reset)";
@@ -1847,7 +1847,7 @@ TEST_F(ResetOnLifecycleTest, Received141_PersistentStore_ResetFailure_Disconnect
     // seed on a received-141 path anyway, but seeding after open() is the safe
     // general pattern — see T014). Then inject a reset failure.
     // seed_inbound() is NOT counted as a reset() — reset_call_count() stays 0 here.
-    constexpr seqnum_t N = 37u;
+    constexpr seqnum_t N = 37U;
     factory->store->seed_inbound(N);
     factory->store->fail_next_reset();
 
@@ -1860,7 +1860,7 @@ TEST_F(ResetOnLifecycleTest, Received141_PersistentStore_ResetFailure_Disconnect
            "(fatal-when-persistent)";
 
     // (i) The reset was attempted exactly once (then short-circuited).
-    EXPECT_EQ(factory->store->reset_call_count(), 1u)
+    EXPECT_EQ(factory->store->reset_call_count(), 1U)
         << "T008: store.reset() must have been attempted exactly once; "
            "got "
         << factory->store->reset_call_count();
@@ -2008,7 +2008,7 @@ TEST_F(ResetOnLifecycleTest, Initiator_Received141Ack_PersistentStore_StoreEqual
 
     const seqnum_t store_in = factory->store->current_next_inbound();
     const seqnum_t mgr_in = sess.seqnum_mgr_test_access().next_inbound_unsafe();
-    EXPECT_EQ(store_in, static_cast<seqnum_t>(2u))
+    EXPECT_EQ(store_in, static_cast<seqnum_t>(2U))
         << "T013 (FR-005/009) RED: initiator store.current_next_inbound() must be 2 "
            "after received-141 persist-to-2; got "
         << store_in;
@@ -2043,7 +2043,7 @@ TEST_F(ResetOnLifecycleTest, Initiator_Received141Ack_PersistentStore_ResetFailu
     // peer's ack at 34=1 passes check_inbound (in-sequence against manager=1), the
     // received-141 reset block runs, fails fatally, and the store retains N=37.
     // seed_inbound() is NOT counted as a reset() — reset_call_count() stays 0 here.
-    constexpr seqnum_t N = 37u;
+    constexpr seqnum_t N = 37U;
     factory->store->seed_inbound(N);
     factory->store->fail_next_reset();
 
@@ -2057,7 +2057,7 @@ TEST_F(ResetOnLifecycleTest, Initiator_Received141Ack_PersistentStore_ResetFailu
         << "T014 (FR-010): initiator persistent received-141 reset failure must Disconnect";
 
     // (i) The reset was attempted exactly once (then short-circuited).
-    EXPECT_EQ(factory->store->reset_call_count(), 1u)
+    EXPECT_EQ(factory->store->reset_call_count(), 1U)
         << "T014: store.reset() must have been attempted exactly once";
 
     // (ii) persist-to-2 NOT reached: store retains last-good value N=37.

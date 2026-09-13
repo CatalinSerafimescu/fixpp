@@ -42,11 +42,10 @@
 
 namespace {
 
-using fixpp::sync::async_lock_guard;
 using fixpp::sync::async_mutex;
 using fixpp::sync::expected_t;
 
-static asio::awaitable<void> yield_n(int n) {
+asio::awaitable<void> yield_n(int n) {
     auto ex = co_await asio::this_coro::executor;
     for (int i = 0; i < n; ++i) co_await asio::post(ex, asio::use_awaitable);
 }

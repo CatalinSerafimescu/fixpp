@@ -112,11 +112,10 @@ inline bool is_canonical_header_or_trailer_tag(
         89,  // Signature
         10,  // CheckSum
     };
-    if (std::find(kUnionHeaderTags.begin(), kUnionHeaderTags.end(), tag) !=
-        kUnionHeaderTags.end()) {
+    if (std::ranges::find(kUnionHeaderTags, tag) != kUnionHeaderTags.end()) {
         return true;
     }
-    if (std::find(kTrailerTags.begin(), kTrailerTags.end(), tag) != kTrailerTags.end()) {
+    if (std::ranges::find(kTrailerTags, tag) != kTrailerTags.end()) {
         return true;
     }
     // Third term of the canonical partition: the dictionary's <header> block
@@ -242,7 +241,7 @@ inline std::string canonical_typed_value(std::string const& fix_type, std::strin
     bool const numeric = fix_type == "PRICE" || fix_type == "QTY" || fix_type == "AMT" ||
                          fix_type == "FLOAT" || fix_type == "PRICEOFFSET" ||
                          fix_type == "PERCENTAGE";
-    if (numeric && raw.find('.') != std::string::npos) {
+    if (numeric && raw.contains('.')) {
         std::string trimmed = raw;
         while (!trimmed.empty() && trimmed.back() == '0') {
             trimmed.pop_back();
@@ -313,7 +312,7 @@ inline std::vector<long long> path_tuple(std::string const& path) {
     bool in_number = false;
     for (char const ch : path) {
         if (ch >= '0' && ch <= '9') {
-            current = current * 10 + (ch - '0');
+            current = (current * 10) + (ch - '0');
             in_number = true;
         } else {
             if (in_number) {
@@ -332,7 +331,7 @@ inline std::vector<long long> path_tuple(std::string const& path) {
 inline bool path_less(std::string const& lhs, std::string const& rhs) {
     std::vector<long long> const a = path_tuple(lhs);
     std::vector<long long> const b = path_tuple(rhs);
-    return std::lexicographical_compare(a.begin(), a.end(), b.begin(), b.end());
+    return std::ranges::lexicographical_compare(a, b);
 }
 
 // ── the stream writer ───────────────────────────────────────────────────────
@@ -379,15 +378,15 @@ public:
     void hello(std::string const& run_id, std::string const& cell_id, std::string const& config,
                std::string const& script_digest, std::string const& arm, bool has_validator,
                std::string const& dictionary_digest) {
-        std::string line = "{\"type\":\"hello\"";
-        line += ",\"run_id\":\"" + json_escape(run_id) + "\"";
-        line += ",\"cell_id\":\"" + json_escape(cell_id) + "\"";
-        line += ",\"config\":\"" + json_escape(config) + "\"";
-        line += ",\"script_digest\":\"" + json_escape(script_digest) + "\"";
-        line += ",\"arm\":\"" + json_escape(arm) + "\"";
+        std::string line = R"({"type":"hello")";
+        line += R"(,"run_id":")" + json_escape(run_id) + "\"";
+        line += R"(,"cell_id":")" + json_escape(cell_id) + "\"";
+        line += R"(,"config":")" + json_escape(config) + "\"";
+        line += R"(,"script_digest":")" + json_escape(script_digest) + "\"";
+        line += R"(,"arm":")" + json_escape(arm) + "\"";
         line += ",\"has_validator\":";
         line += has_validator ? "true" : "false";
-        line += ",\"dictionary_digest\":\"" + json_escape(dictionary_digest) + "\"";
+        line += R"(,"dictionary_digest":")" + json_escape(dictionary_digest) + "\"";
         line += "}";
         write_line(line);
     }
@@ -397,12 +396,12 @@ public:
     void sent(std::string const& msg_type, long long seq_num, std::string const& direction,
               long long occurrence, std::string const& script_step_id,
               std::vector<FieldEntry> fields) {
-        std::string line = "{\"type\":\"sent\"";
-        line += ",\"msg_type\":\"" + json_escape(msg_type) + "\"";
+        std::string line = R"({"type":"sent")";
+        line += R"(,"msg_type":")" + json_escape(msg_type) + "\"";
         line += ",\"seq_num\":" + std::to_string(seq_num);
-        line += ",\"direction\":\"" + json_escape(direction) + "\"";
+        line += R"(,"direction":")" + json_escape(direction) + "\"";
         line += ",\"occurrence\":" + std::to_string(occurrence);
-        line += ",\"script_step_id\":\"" + json_escape(script_step_id) + "\"";
+        line += R"(,"script_step_id":")" + json_escape(script_step_id) + "\"";
         line += ",\"fields\":" + render_fields(std::move(fields));
         line += "}";
         write_line(line);
@@ -415,10 +414,10 @@ public:
     void readback(std::string const& msg_type, long long seq_num, std::string const& direction,
                   long long occurrence, bool poss_dup, std::vector<FieldEntry> fields,
                   std::vector<TypedEntry> typed_reads) {
-        std::string line = "{\"type\":\"readback\"";
-        line += ",\"msg_type\":\"" + json_escape(msg_type) + "\"";
+        std::string line = R"({"type":"readback")";
+        line += R"(,"msg_type":")" + json_escape(msg_type) + "\"";
         line += ",\"seq_num\":" + std::to_string(seq_num);
-        line += ",\"direction\":\"" + json_escape(direction) + "\"";
+        line += R"(,"direction":")" + json_escape(direction) + "\"";
         line += ",\"occurrence\":" + std::to_string(occurrence);
         line += ",\"poss_dup\":";
         line += poss_dup ? "true" : "false";
@@ -440,12 +439,12 @@ public:
     void disposition(std::string const& msg_type, long long seq_num, std::string const& direction,
                      long long occurrence, std::string const& disp,
                      std::optional<RejectInfo> const& reject = std::nullopt) {
-        std::string line = "{\"type\":\"disposition\"";
-        line += ",\"msg_type\":\"" + json_escape(msg_type) + "\"";
+        std::string line = R"({"type":"disposition")";
+        line += R"(,"msg_type":")" + json_escape(msg_type) + "\"";
         line += ",\"seq_num\":" + std::to_string(seq_num);
-        line += ",\"direction\":\"" + json_escape(direction) + "\"";
+        line += R"(,"direction":")" + json_escape(direction) + "\"";
         line += ",\"occurrence\":" + std::to_string(occurrence);
-        line += ",\"disposition\":\"" + json_escape(disp) + "\"";
+        line += R"(,"disposition":")" + json_escape(disp) + "\"";
         if (reject.has_value()) {
             line += ",\"reject\":{";
             line += "\"ref_seq_num\":" + std::to_string(reject->ref_seq_num);
@@ -454,7 +453,7 @@ public:
                 line += ",\"ref_tag\":" + std::to_string(*reject->ref_tag);
             }
             if (reject->text.has_value()) {
-                line += ",\"text\":\"" + json_escape(*reject->text) + "\"";
+                line += R"(,"text":")" + json_escape(*reject->text) + "\"";
             }
             line += "}";
         }
@@ -472,12 +471,12 @@ public:
             return;
         }
         terminal_written_ = true;
-        std::string line = "{\"type\":\"terminal\"";
-        line += ",\"run_id\":\"" + json_escape(run_id) + "\"";
-        line += ",\"cell_id\":\"" + json_escape(cell_id) + "\"";
-        line += ",\"config\":\"" + json_escape(config) + "\"";
-        line += ",\"script_digest\":\"" + json_escape(script_digest) + "\"";
-        line += ",\"terminal_state\":\"" + json_escape(terminal_state) + "\"";
+        std::string line = R"({"type":"terminal")";
+        line += R"(,"run_id":")" + json_escape(run_id) + "\"";
+        line += R"(,"cell_id":")" + json_escape(cell_id) + "\"";
+        line += R"(,"config":")" + json_escape(config) + "\"";
+        line += R"(,"script_digest":")" + json_escape(script_digest) + "\"";
+        line += R"(,"terminal_state":")" + json_escape(terminal_state) + "\"";
         line += ",\"sent_count\":" + std::to_string(sent_count_);
         line += ",\"readback_count\":" + std::to_string(readback_count_);
         line += "}";
@@ -491,13 +490,13 @@ private:
     // one of the two ways this rule goes vacuous).
     static std::string render_value(std::string const& raw) {
         if (is_valid_utf8(raw)) {
-            return "\"value\":\"" + json_escape(raw) + "\"";
+            return R"("value":")" + json_escape(raw) + "\"";
         }
-        return "\"value_b64\":\"" + base64_encode(raw) + "\"";
+        return R"("value_b64":")" + base64_encode(raw) + "\"";
     }
 
     static std::string render_fields(std::vector<FieldEntry> fields) {
-        std::sort(fields.begin(), fields.end(), [](FieldEntry const& a, FieldEntry const& b) {
+        std::ranges::sort(fields, [](FieldEntry const& a, FieldEntry const& b) {
             return path_less(a.path, b.path);
         });
         std::string out = "[";
@@ -508,14 +507,14 @@ private:
             }
             first = false;
             out +=
-                "{\"path\":\"" + json_escape(entry.path) + "\"," + render_value(entry.value) + "}";
+                R"({"path":")" + json_escape(entry.path) + "\"," + render_value(entry.value) + "}";
         }
         out += "]";
         return out;
     }
 
     static std::string render_typed(std::vector<TypedEntry> entries) {
-        std::sort(entries.begin(), entries.end(), [](TypedEntry const& a, TypedEntry const& b) {
+        std::ranges::sort(entries, [](TypedEntry const& a, TypedEntry const& b) {
             return path_less(a.path, b.path);
         });
         std::string out = "[";
@@ -525,8 +524,8 @@ private:
                 out += ",";
             }
             first = false;
-            out += "{\"path\":\"" + json_escape(entry.path) + "\"";
-            out += ",\"fix_type\":\"" + json_escape(entry.fix_type) + "\"";
+            out += R"({"path":")" + json_escape(entry.path) + "\"";
+            out += R"(,"fix_type":")" + json_escape(entry.fix_type) + "\"";
             out += "," + render_value(entry.value) + "}";
         }
         out += "]";
@@ -534,7 +533,7 @@ private:
     }
 
     void write_line(std::string const& line) {
-        std::lock_guard<std::mutex> const guard(mutex_);
+        std::scoped_lock const guard(mutex_);
         out_ << line << '\n';
         out_.flush();
     }

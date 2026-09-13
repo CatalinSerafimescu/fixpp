@@ -86,7 +86,7 @@ std::vector<pod_decimal> make_value_pool(std::mt19937_64& rng) {
     // Cartesian cross of boundary mantissas × representative exponents.
     for (auto m : mantissas) {
         for (auto e : exponents) {
-            pool.push_back(pod_decimal{m, static_cast<std::int8_t>(e)});
+            pool.push_back(pod_decimal{.mantissa = m, .exponent = static_cast<std::int8_t>(e)});
         }
     }
 
@@ -96,8 +96,8 @@ std::vector<pod_decimal> make_value_pool(std::mt19937_64& rng) {
     std::uniform_int_distribution<std::int64_t> mantissa_dist(INT64_MIN + 1, INT64_MAX);
     std::uniform_int_distribution<int> exponent_dist(-128, 127);
     while (pool.size() < kPoolFillSize) {
-        pool.push_back(
-            pod_decimal{mantissa_dist(rng), static_cast<std::int8_t>(exponent_dist(rng))});
+        pool.push_back(pod_decimal{.mantissa = mantissa_dist(rng),
+                                   .exponent = static_cast<std::int8_t>(exponent_dist(rng))});
     }
 
     return pool;
@@ -132,9 +132,12 @@ TEST(DecimalCompareDiffOracle, CorpusMatchesReference) {
 // which never generate INT64_MIN, per T003's brief).
 TEST(DecimalCompareDiffOracle, SentinelPairsMatchReference) {
     std::vector<pod_decimal> const values = {
-        pod_decimal_invalid,          pod_decimal{0, 0},
-        pod_decimal{1, -38},          pod_decimal{INT64_MAX, 0},
-        pod_decimal{-INT64_MAX, -38}, pod_decimal{INT64_MIN + 1, -38},
+        pod_decimal_invalid,
+        pod_decimal{.mantissa = 0, .exponent = 0},
+        pod_decimal{.mantissa = 1, .exponent = -38},
+        pod_decimal{.mantissa = INT64_MAX, .exponent = 0},
+        pod_decimal{.mantissa = -INT64_MAX, .exponent = -38},
+        pod_decimal{.mantissa = INT64_MIN + 1, .exponent = -38},
     };
     for (auto const& a : values) {
         for (auto const& b : values) {
@@ -303,19 +306,25 @@ void expect_order(pod_decimal const& a, pod_decimal const& b, std::strong_orderi
 // magnitude at different (mantissa, exponent) representations must compare
 // equal, in both argument orders, for both signs.
 TEST(DecimalCompareDiffOracle, WitnessCanonicalizationEquality) {
-    expect_order(pod_decimal{100, -2}, pod_decimal{1, 0}, std::strong_ordering::equal,
+    expect_order(pod_decimal{.mantissa = 100, .exponent = -2},
+                 pod_decimal{.mantissa = 1, .exponent = 0}, std::strong_ordering::equal,
                  "100e-2 vs 1e0");
-    expect_order(pod_decimal{1, 0}, pod_decimal{100, -2}, std::strong_ordering::equal,
+    expect_order(pod_decimal{.mantissa = 1, .exponent = 0},
+                 pod_decimal{.mantissa = 100, .exponent = -2}, std::strong_ordering::equal,
                  "1e0 vs 100e-2 (reversed)");
 
-    expect_order(pod_decimal{1000, -3}, pod_decimal{10, -1}, std::strong_ordering::equal,
+    expect_order(pod_decimal{.mantissa = 1000, .exponent = -3},
+                 pod_decimal{.mantissa = 10, .exponent = -1}, std::strong_ordering::equal,
                  "1000e-3 vs 10e-1");
-    expect_order(pod_decimal{10, -1}, pod_decimal{1000, -3}, std::strong_ordering::equal,
+    expect_order(pod_decimal{.mantissa = 10, .exponent = -1},
+                 pod_decimal{.mantissa = 1000, .exponent = -3}, std::strong_ordering::equal,
                  "10e-1 vs 1000e-3 (reversed)");
 
-    expect_order(pod_decimal{-100, -2}, pod_decimal{-1, 0}, std::strong_ordering::equal,
+    expect_order(pod_decimal{.mantissa = -100, .exponent = -2},
+                 pod_decimal{.mantissa = -1, .exponent = 0}, std::strong_ordering::equal,
                  "-100e-2 vs -1e0");
-    expect_order(pod_decimal{-1, 0}, pod_decimal{-100, -2}, std::strong_ordering::equal,
+    expect_order(pod_decimal{.mantissa = -1, .exponent = 0},
+                 pod_decimal{.mantissa = -100, .exponent = -2}, std::strong_ordering::equal,
                  "-1e0 vs -100e-2 (reversed)");
 }
 
@@ -338,8 +347,8 @@ TEST(DecimalCompareDiffOracle, WitnessCanonicalizationEquality) {
 // NOT "restore" this witness to `-17`/`2^63` — that would silently make it
 // non-discriminating again.
 TEST(DecimalCompareDiffOracle, WitnessHiLimbCrosses2Pow64) {
-    pod_decimal const big99{99, 0};
-    pod_decimal const scaled_max{INT64_MAX, -18};
+    pod_decimal const big99{.mantissa = 99, .exponent = 0};
+    pod_decimal const scaled_max{.mantissa = INT64_MAX, .exponent = -18};
 
     // 99 > INT64_MAX * 10^-18 (~9.223) once the hi-limb is honored.
     expect_order(big99, scaled_max, std::strong_ordering::greater, "99e0 vs INT64_MAX e-18");
@@ -347,8 +356,8 @@ TEST(DecimalCompareDiffOracle, WitnessHiLimbCrosses2Pow64) {
                  "INT64_MAX e-18 vs 99e0 (reversed)");
 
     // Negated pair: sign flip reverses the ordering.
-    pod_decimal const neg_big99{-99, 0};
-    pod_decimal const neg_scaled_max{-INT64_MAX, -18};
+    pod_decimal const neg_big99{.mantissa = -99, .exponent = 0};
+    pod_decimal const neg_scaled_max{.mantissa = -INT64_MAX, .exponent = -18};
     expect_order(neg_big99, neg_scaled_max, std::strong_ordering::less, "-99e0 vs -INT64_MAX e-18");
     expect_order(neg_scaled_max, neg_big99, std::strong_ordering::greater,
                  "-INT64_MAX e-18 vs -99e0 (reversed)");
@@ -367,13 +376,13 @@ TEST(DecimalCompareDiffOracle, WitnessKBoundary) {
     // k = 18 — multiply arm (hi == 0 for these small mantissas; distinct
     // from row 2's hi != 0 witness).
     {
-        pod_decimal const a{5, 0};
-        pod_decimal const b{7, -18};
+        pod_decimal const a{.mantissa = 5, .exponent = 0};
+        pod_decimal const b{.mantissa = 7, .exponent = -18};
         expect_order(a, b, std::strong_ordering::greater, "k=18: 5e0 vs 7e-18");
         expect_order(b, a, std::strong_ordering::less, "k=18: 7e-18 vs 5e0 (reversed)");
 
-        pod_decimal const na{-5, 0};
-        pod_decimal const nb{-7, -18};
+        pod_decimal const na{.mantissa = -5, .exponent = 0};
+        pod_decimal const nb{.mantissa = -7, .exponent = -18};
         expect_order(na, nb, std::strong_ordering::less, "k=18: -5e0 vs -7e-18");
         expect_order(nb, na, std::strong_ordering::greater, "k=18: -7e-18 vs -5e0 (reversed)");
     }
@@ -390,15 +399,15 @@ TEST(DecimalCompareDiffOracle, WitnessKBoundary) {
     // fragility this directed cell removes. (The mutant-7 memory-safety kill
     // itself is delivered by the ASan lane, not by this assertion.)
     {
-        pod_decimal const a{1, 0};
-        pod_decimal const b{INT64_MAX, -19};
+        pod_decimal const a{.mantissa = 1, .exponent = 0};
+        pod_decimal const b{.mantissa = INT64_MAX, .exponent = -19};
         // value_a = 1; value_b = INT64_MAX * 10^-19 = 9223372036854775807e-19
         // ~= 0.9223372036854775807 < 1, so a is greater.
         expect_order(a, b, std::strong_ordering::greater, "k=19: 1e0 vs INT64_MAX e-19");
         expect_order(b, a, std::strong_ordering::less, "k=19: INT64_MAX e-19 vs 1e0 (reversed)");
 
-        pod_decimal const na{-1, 0};
-        pod_decimal const nb{-INT64_MAX, -19};
+        pod_decimal const na{.mantissa = -1, .exponent = 0};
+        pod_decimal const nb{.mantissa = -INT64_MAX, .exponent = -19};
         // Negated: -1 < -0.9223... , so na is less.
         expect_order(na, nb, std::strong_ordering::less, "k=19: -1e0 vs -INT64_MAX e-19");
         expect_order(nb, na, std::strong_ordering::greater,
@@ -408,13 +417,13 @@ TEST(DecimalCompareDiffOracle, WitnessKBoundary) {
     // k = 20 — dominance arm (k >= 19), the guard alone decides even though
     // `other`'s raw mantissa is INT64_MAX (astronomically larger digit-wise).
     {
-        pod_decimal const a{1, 0};
-        pod_decimal const b{INT64_MAX, -20};
+        pod_decimal const a{.mantissa = 1, .exponent = 0};
+        pod_decimal const b{.mantissa = INT64_MAX, .exponent = -20};
         expect_order(a, b, std::strong_ordering::greater, "k=20: 1e0 vs INT64_MAX e-20");
         expect_order(b, a, std::strong_ordering::less, "k=20: INT64_MAX e-20 vs 1e0 (reversed)");
 
-        pod_decimal const na{-1, 0};
-        pod_decimal const nb{-INT64_MAX, -20};
+        pod_decimal const na{.mantissa = -1, .exponent = 0};
+        pod_decimal const nb{.mantissa = -INT64_MAX, .exponent = -20};
         expect_order(na, nb, std::strong_ordering::less, "k=20: -1e0 vs -INT64_MAX e-20");
         expect_order(nb, na, std::strong_ordering::greater,
                      "k=20: -INT64_MAX e-20 vs -1e0 (reversed)");
@@ -422,13 +431,13 @@ TEST(DecimalCompareDiffOracle, WitnessKBoundary) {
 
     // k = 38 — full canonical-domain span (exponents 0 and -38).
     {
-        pod_decimal const a{1, 0};
-        pod_decimal const b{INT64_MAX, -38};
+        pod_decimal const a{.mantissa = 1, .exponent = 0};
+        pod_decimal const b{.mantissa = INT64_MAX, .exponent = -38};
         expect_order(a, b, std::strong_ordering::greater, "k=38: 1e0 vs INT64_MAX e-38");
         expect_order(b, a, std::strong_ordering::less, "k=38: INT64_MAX e-38 vs 1e0 (reversed)");
 
-        pod_decimal const na{-1, 0};
-        pod_decimal const nb{-INT64_MAX, -38};
+        pod_decimal const na{.mantissa = -1, .exponent = 0};
+        pod_decimal const nb{.mantissa = -INT64_MAX, .exponent = -38};
         expect_order(na, nb, std::strong_ordering::less, "k=38: -1e0 vs -INT64_MAX e-38");
         expect_order(nb, na, std::strong_ordering::greater,
                      "k=38: -INT64_MAX e-38 vs -1e0 (reversed)");
@@ -442,21 +451,27 @@ TEST(DecimalCompareDiffOracle, WitnessKBoundary) {
 // The other two pairs genuinely reach the raw-mantissa zero filter (equal
 // exponents fail first, then both/one-operand-zero is decided there).
 TEST(DecimalCompareDiffOracle, WitnessZeroFilterOrderingAndSign) {
-    expect_order(pod_decimal{0, -38}, pod_decimal{0, 0}, std::strong_ordering::equal,
+    expect_order(pod_decimal{.mantissa = 0, .exponent = -38},
+                 pod_decimal{.mantissa = 0, .exponent = 0}, std::strong_ordering::equal,
                  "0e-38 vs 0e0");
-    expect_order(pod_decimal{0, 0}, pod_decimal{0, -38}, std::strong_ordering::equal,
+    expect_order(pod_decimal{.mantissa = 0, .exponent = 0},
+                 pod_decimal{.mantissa = 0, .exponent = -38}, std::strong_ordering::equal,
                  "0e0 vs 0e-38 (reversed)");
 
     // Sign-filter short-circuit (see comment above) — 0 > any negative value.
-    expect_order(pod_decimal{0, -5}, pod_decimal{-1, 0}, std::strong_ordering::greater,
+    expect_order(pod_decimal{.mantissa = 0, .exponent = -5},
+                 pod_decimal{.mantissa = -1, .exponent = 0}, std::strong_ordering::greater,
                  "0e-5 vs -1e0");
-    expect_order(pod_decimal{-1, 0}, pod_decimal{0, -5}, std::strong_ordering::less,
+    expect_order(pod_decimal{.mantissa = -1, .exponent = 0},
+                 pod_decimal{.mantissa = 0, .exponent = -5}, std::strong_ordering::less,
                  "-1e0 vs 0e-5 (reversed)");
 
     // Genuine zero-filter path — 0 < any positive value.
-    expect_order(pod_decimal{0, 3}, pod_decimal{1, -38}, std::strong_ordering::less,
+    expect_order(pod_decimal{.mantissa = 0, .exponent = 3},
+                 pod_decimal{.mantissa = 1, .exponent = -38}, std::strong_ordering::less,
                  "0e3 vs 1e-38");
-    expect_order(pod_decimal{1, -38}, pod_decimal{0, 3}, std::strong_ordering::greater,
+    expect_order(pod_decimal{.mantissa = 1, .exponent = -38},
+                 pod_decimal{.mantissa = 0, .exponent = 3}, std::strong_ordering::greater,
                  "1e-38 vs 0e3 (reversed)");
 }
 
@@ -469,32 +484,40 @@ TEST(DecimalCompareDiffOracle, WitnessZeroFilterOrderingAndSign) {
 // different exponents force the negate-then-scale-then-flip path.
 TEST(DecimalCompareDiffOracle, WitnessExtremes) {
     // Sign-mismatch extremes (trivial via Step 1, kept as a regression pin).
-    expect_order(pod_decimal{INT64_MAX, 0}, pod_decimal{INT64_MIN + 1, -38},
+    expect_order(pod_decimal{.mantissa = INT64_MAX, .exponent = 0},
+                 pod_decimal{.mantissa = INT64_MIN + 1, .exponent = -38},
                  std::strong_ordering::greater, "INT64_MAX e0 vs (INT64_MIN+1) e-38");
-    expect_order(pod_decimal{INT64_MIN + 1, -38}, pod_decimal{INT64_MAX, 0},
-                 std::strong_ordering::less, "(INT64_MIN+1) e-38 vs INT64_MAX e0 (reversed)");
+    expect_order(pod_decimal{.mantissa = INT64_MIN + 1, .exponent = -38},
+                 pod_decimal{.mantissa = INT64_MAX, .exponent = 0}, std::strong_ordering::less,
+                 "(INT64_MIN+1) e-38 vs INT64_MAX e0 (reversed)");
 
     // Same-sign (both negative), different magnitudes-at-scale: huge negative
     // at exponent 0 vs tiny negative at exponent -38.
-    expect_order(pod_decimal{INT64_MIN + 1, 0}, pod_decimal{-1, -38}, std::strong_ordering::less,
+    expect_order(pod_decimal{.mantissa = INT64_MIN + 1, .exponent = 0},
+                 pod_decimal{.mantissa = -1, .exponent = -38}, std::strong_ordering::less,
                  "(INT64_MIN+1) e0 vs -1e-38");
-    expect_order(pod_decimal{-1, -38}, pod_decimal{INT64_MIN + 1, 0}, std::strong_ordering::greater,
-                 "-1e-38 vs (INT64_MIN+1) e0 (reversed)");
+    expect_order(pod_decimal{.mantissa = -1, .exponent = -38},
+                 pod_decimal{.mantissa = INT64_MIN + 1, .exponent = 0},
+                 std::strong_ordering::greater, "-1e-38 vs (INT64_MIN+1) e0 (reversed)");
 
     // Same-sign (both negative), SAME magnitude, different exponent: proves
     // negation of the extreme value is applied consistently and the guard
     // dominance still yields the mathematically-correct ordering.
-    expect_order(pod_decimal{INT64_MIN + 1, 0}, pod_decimal{INT64_MIN + 1, -38},
+    expect_order(pod_decimal{.mantissa = INT64_MIN + 1, .exponent = 0},
+                 pod_decimal{.mantissa = INT64_MIN + 1, .exponent = -38},
                  std::strong_ordering::less, "(INT64_MIN+1) e0 vs (INT64_MIN+1) e-38");
-    expect_order(pod_decimal{INT64_MIN + 1, -38}, pod_decimal{INT64_MIN + 1, 0},
+    expect_order(pod_decimal{.mantissa = INT64_MIN + 1, .exponent = -38},
+                 pod_decimal{.mantissa = INT64_MIN + 1, .exponent = 0},
                  std::strong_ordering::greater,
                  "(INT64_MIN+1) e-38 vs (INT64_MIN+1) e0 (reversed)");
 
     // Same-sign (both positive), SAME magnitude, different exponent.
-    expect_order(pod_decimal{INT64_MAX, -38}, pod_decimal{INT64_MAX, 0}, std::strong_ordering::less,
+    expect_order(pod_decimal{.mantissa = INT64_MAX, .exponent = -38},
+                 pod_decimal{.mantissa = INT64_MAX, .exponent = 0}, std::strong_ordering::less,
                  "INT64_MAX e-38 vs INT64_MAX e0");
-    expect_order(pod_decimal{INT64_MAX, 0}, pod_decimal{INT64_MAX, -38},
-                 std::strong_ordering::greater, "INT64_MAX e0 vs INT64_MAX e-38 (reversed)");
+    expect_order(pod_decimal{.mantissa = INT64_MAX, .exponent = 0},
+                 pod_decimal{.mantissa = INT64_MAX, .exponent = -38}, std::strong_ordering::greater,
+                 "INT64_MAX e0 vs INT64_MAX e-38 (reversed)");
 }
 
 // Row 6 — sentinel pairs (regression — the sentinel-handling path is
@@ -502,33 +525,40 @@ TEST(DecimalCompareDiffOracle, WitnessExtremes) {
 TEST(DecimalCompareDiffOracle, WitnessSentinelPairs) {
     expect_order(pod_decimal_invalid, pod_decimal_invalid, std::strong_ordering::equal,
                  "invalid vs invalid");
-    expect_order(pod_decimal_invalid, pod_decimal{INT64_MAX, 0}, std::strong_ordering::greater,
-                 "invalid vs INT64_MAX e0");
-    expect_order(pod_decimal{INT64_MAX, 0}, pod_decimal_invalid, std::strong_ordering::less,
-                 "INT64_MAX e0 vs invalid (reversed)");
-    expect_order(pod_decimal_invalid, pod_decimal{INT64_MIN + 1, -38},
+    expect_order(pod_decimal_invalid, pod_decimal{.mantissa = INT64_MAX, .exponent = 0},
+                 std::strong_ordering::greater, "invalid vs INT64_MAX e0");
+    expect_order(pod_decimal{.mantissa = INT64_MAX, .exponent = 0}, pod_decimal_invalid,
+                 std::strong_ordering::less, "INT64_MAX e0 vs invalid (reversed)");
+    expect_order(pod_decimal_invalid, pod_decimal{.mantissa = INT64_MIN + 1, .exponent = -38},
                  std::strong_ordering::greater, "invalid vs (INT64_MIN+1) e-38");
-    expect_order(pod_decimal{0, 0}, pod_decimal_invalid, std::strong_ordering::less,
-                 "0e0 vs invalid");
+    expect_order(pod_decimal{.mantissa = 0, .exponent = 0}, pod_decimal_invalid,
+                 std::strong_ordering::less, "0e0 vs invalid");
 }
 
 // Row 7 — out-of-domain int8 exponents: proves totality holds beyond the
 // canonical [-38, 0] domain (int8 exponent field spans [-128, 127]).
 TEST(DecimalCompareDiffOracle, WitnessOutOfDomainExponents) {
-    expect_order(pod_decimal{5, 7}, pod_decimal{5, 0}, std::strong_ordering::greater, "5e7 vs 5e0");
-    expect_order(pod_decimal{5, 0}, pod_decimal{5, 7}, std::strong_ordering::less,
+    expect_order(pod_decimal{.mantissa = 5, .exponent = 7},
+                 pod_decimal{.mantissa = 5, .exponent = 0}, std::strong_ordering::greater,
+                 "5e7 vs 5e0");
+    expect_order(pod_decimal{.mantissa = 5, .exponent = 0},
+                 pod_decimal{.mantissa = 5, .exponent = 7}, std::strong_ordering::less,
                  "5e0 vs 5e7 (reversed)");
 
     // delta = 127 - (-128) = 255 > 38 (out-of-domain, but `k` computed in
     // `int` cannot overflow at this magnitude — totality preserved).
-    expect_order(pod_decimal{1, 127}, pod_decimal{1, -128}, std::strong_ordering::greater,
+    expect_order(pod_decimal{.mantissa = 1, .exponent = 127},
+                 pod_decimal{.mantissa = 1, .exponent = -128}, std::strong_ordering::greater,
                  "1e127 vs 1e-128");
-    expect_order(pod_decimal{1, -128}, pod_decimal{1, 127}, std::strong_ordering::less,
+    expect_order(pod_decimal{.mantissa = 1, .exponent = -128},
+                 pod_decimal{.mantissa = 1, .exponent = 127}, std::strong_ordering::less,
                  "1e-128 vs 1e127 (reversed)");
 
-    expect_order(pod_decimal{-1, 127}, pod_decimal{-1, -128}, std::strong_ordering::less,
+    expect_order(pod_decimal{.mantissa = -1, .exponent = 127},
+                 pod_decimal{.mantissa = -1, .exponent = -128}, std::strong_ordering::less,
                  "-1e127 vs -1e-128");
-    expect_order(pod_decimal{-1, -128}, pod_decimal{-1, 127}, std::strong_ordering::greater,
+    expect_order(pod_decimal{.mantissa = -1, .exponent = -128},
+                 pod_decimal{.mantissa = -1, .exponent = 127}, std::strong_ordering::greater,
                  "-1e-128 vs -1e127 (reversed)");
 }
 
@@ -580,7 +610,7 @@ TEST(DecimalCompareDiffOracle, PropertyTransitivity) {
         sample.push_back(pool[idx_dist(rng)]);
     }
 
-    std::sort(sample.begin(), sample.end(), [](pod_decimal const& x, pod_decimal const& y) {
+    std::ranges::sort(sample, [](pod_decimal const& x, pod_decimal const& y) {
         return decimal_traits<pod_decimal>::compare(x, y) == std::strong_ordering::less;
     });
 

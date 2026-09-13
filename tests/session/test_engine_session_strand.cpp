@@ -191,8 +191,7 @@ const char* get_fixture_dir() {
 }
 
 // Build a shared TLS factory (mtls_ca profile, leaf_rsa2048 cert).
-static std::shared_ptr<fixpp::transport::TransportFactory> make_tls_factory(
-    const char* fixture_dir) {
+std::shared_ptr<fixpp::transport::TransportFactory> make_tls_factory(const char* fixture_dir) {
     fixpp::tls::file_cert_source::Config cs_cfg;
     cs_cfg.leaf_path = std::string(fixture_dir) + "/leaf_rsa2048.pem";
     cs_cfg.private_key_path = std::string(fixture_dir) + "/leaf_rsa2048.key";
@@ -212,7 +211,7 @@ static std::shared_ptr<fixpp::transport::TransportFactory> make_tls_factory(
 }
 
 // Build a mock clock (same pattern as test_application_engine_send.cpp).
-static std::shared_ptr<fixpp::core::mock_clock> make_mock_clock(asio::io_context& ioc) {
+std::shared_ptr<fixpp::core::mock_clock> make_mock_clock(asio::io_context& ioc) {
     using namespace std::chrono;
     auto utc = system_clock::time_point{} + seconds{1704067200};
     auto stp = fixpp::core::steady_time_point{} + seconds{0};
@@ -224,7 +223,7 @@ static std::shared_ptr<fixpp::core::mock_clock> make_mock_clock(asio::io_context
 //   - acceptor: `reconnect_endpoint.port = port` → listens on that specific port.
 //   - initiator: `reconnect_endpoint.port = port` → connects to that port.
 // Same pattern as test_application_engine_send.cpp:make_session_cfg.
-static fixpp::session::SessionConfig make_session_cfg(
+fixpp::session::SessionConfig make_session_cfg(
     std::shared_ptr<fixpp::transport::TransportFactory> fac, const char* sender, const char* target,
     fixpp::session::session_role role, const char* peer_compid, asio::any_io_executor exec,
     uint16_t port) {
@@ -248,7 +247,7 @@ static fixpp::session::SessionConfig make_session_cfg(
 }
 
 // Reserve a free loopback port by binding a temporary acceptor to port 0.
-static uint16_t reserve_free_port(asio::io_context& ioc) {
+uint16_t reserve_free_port(asio::io_context& ioc) {
     asio::ip::tcp::acceptor a{ioc};
     asio::ip::tcp::endpoint ep{asio::ip::make_address("127.0.0.1"), 0};
     a.open(ep.protocol());
@@ -263,7 +262,7 @@ static uint16_t reserve_free_port(asio::io_context& ioc) {
 // Returns pred() at exit.
 // MUST NOT be called while other threads are in ioc.run() — restart() is UB then.
 // Use wait_until_observed() instead when worker threads own the ioc.
-static bool wait_pred(asio::io_context& ioc, auto pred, std::chrono::milliseconds budget) {
+bool wait_pred(asio::io_context& ioc, auto pred, std::chrono::milliseconds budget) {
     auto end = std::chrono::steady_clock::now() + budget;
     while (!pred() && std::chrono::steady_clock::now() < end) {
         ioc.run_for(50ms);
@@ -337,9 +336,9 @@ using fixpp::test_support::wait_until_observed;
 
 // Wait for both sessions to reach fsm_state::Active via lookup + state() check.
 // Safer than counting onLogon callbacks because it directly observes the FSM state.
-static bool wait_both_active(asio::io_context& ioc, fixpp::session::Engine& engine,
-                             const SessionId& acc_id, const SessionId& ini_id,
-                             std::chrono::milliseconds budget) {
+bool wait_both_active(asio::io_context& ioc, fixpp::session::Engine& engine,
+                      const SessionId& acc_id, const SessionId& ini_id,
+                      std::chrono::milliseconds budget) {
     return wait_pred(
         ioc,
         [&]() -> bool {
@@ -355,7 +354,7 @@ static bool wait_both_active(asio::io_context& ioc, fixpp::session::Engine& engi
 // Stop the engine safely: co_spawn stop() and drain ioc until complete.
 // Hard deadline of 10s. ioc.restart() is called first to ensure the ioc
 // is in a runnable state even if ioc.stop() was called earlier.
-static void stop_engine_sync(asio::io_context& ioc, fixpp::session::Engine& eng) {
+void stop_engine_sync(asio::io_context& ioc, fixpp::session::Engine& eng) {
     if (eng.stopped()) return;
     ioc.restart();
     auto sf = asio::co_spawn(ioc.get_executor(), eng.stop(), asio::use_future);
@@ -1397,7 +1396,7 @@ TEST(EngineSessionStrand, V12b_StopBeforePublish_WithLiveTransport) {
         fixpp::transport::ReconnectPolicy fast_policy;
         fast_policy.schedule =
             std::pmr::vector<std::chrono::milliseconds>{std::pmr::get_default_resource()};
-        fast_policy.schedule.push_back(std::chrono::milliseconds{100});
+        fast_policy.schedule.emplace_back(100);
         fast_policy.jitter = 0.0;
         fast_policy.max_attempts = 0;  // unbounded
         ini_cfg.reconnect_policy = std::move(fast_policy);

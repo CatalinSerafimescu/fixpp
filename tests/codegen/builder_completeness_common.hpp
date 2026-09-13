@@ -115,7 +115,7 @@ inline std::set<std::string> legacy_expected_msgtypes(std::string const& xml_pat
     for (pugi::xml_node m : root.child("messages").children("message")) {
         std::string const msg_type{m.attribute("msgtype").as_string("")};
         std::string const msgcat{m.attribute("msgcat").as_string("")};
-        bool is_app;
+        bool is_app = false;
         if (msgcat == "app") {
             is_app = true;
         } else if (msgcat == "admin") {
@@ -124,7 +124,7 @@ inline std::set<std::string> legacy_expected_msgtypes(std::string const& xml_pat
             throw std::runtime_error(xml_path + ": <message msgtype=\"" + msg_type +
                                      "\"> missing or unrecognized msgcat attribute");
         }
-        if (is_app && !exclude.count(msg_type)) {
+        if (is_app && !exclude.contains(msg_type)) {
             out.insert(msg_type);
         }
     }
@@ -249,9 +249,8 @@ inline std::set<std::string> parse_build_fn_identifiers(std::string const& versi
             continue;
         }
         std::string const fname = entry.path().filename().string();
-        bool const is_builder_file =
-            (fname.size() > 12 && fname.compare(fname.size() - 12, 12, ".builder.inl") == 0) ||
-            (fname.size() > 12 && fname.compare(fname.size() - 12, 12, ".builder.cpp") == 0);
+        bool const is_builder_file = (fname.size() > 12 && fname.ends_with(".builder.inl")) ||
+                                     (fname.size() > 12 && fname.ends_with(".builder.cpp"));
         if (!is_builder_file) {
             continue;
         }

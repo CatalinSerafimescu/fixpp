@@ -135,7 +135,7 @@ static fixpp_session_config_t* make_session_cfg_app_dict(const char* sender, con
     using namespace fixpp::dict;
     // Build the richer dictionary using the same PMR/shared_ptr pattern as
     // make_minimal_dictionary() in tests/support/minimal_dictionary.hpp.
-    constexpr std::size_t kBufSize = 128u * 1024u;
+    constexpr std::size_t kBufSize = 128U * 1024U;
     auto buf = std::make_unique<std::array<std::byte, kBufSize>>();
     auto* mr = new std::pmr::monotonic_buffer_resource{buf->data(), buf->size()};
     Dictionary d = XmlLoader{}.load_from_string(kFix42WithNewOrderSingleXml, mr);
@@ -174,7 +174,7 @@ static fixpp_session_config_t* make_session_cfg_app_dict(const char* sender, con
 static bool span_has_field(const uint8_t* buf, size_t len, uint16_t tag, std::string_view value) {
     std::string needle = std::to_string(tag) + "=" + std::string(value) + "\x01";
     std::string_view haystack{reinterpret_cast<const char*>(buf), len};
-    return haystack.find(needle) != std::string_view::npos;
+    return haystack.contains(needle);
 }
 
 // Check that the span does NOT contain a field with the given tag at a
@@ -185,7 +185,7 @@ static bool span_lacks_tag(const uint8_t* buf, size_t len, uint16_t tag) {
     // Check for the tag at the start or after a SOH
     if (haystack.starts_with(pattern)) return false;
     std::string soh_pattern = "\x01" + pattern;
-    return haystack.find(soh_pattern) == std::string_view::npos;
+    return !haystack.contains(soh_pattern);
 }
 
 // ── Infrastructure for live round-trip tests ─────────────────────────────────
@@ -638,7 +638,7 @@ TEST(MessageWrite, CommitSendImmediateDestroyNoUAF) {
     size_t payload_len = 0;
     ASSERT_EQ(fixpp_msg_commit(msg, &payload, &payload_len), FIXPP_ERR_OK);
     ASSERT_NE(payload, nullptr);
-    ASSERT_GT(payload_len, 0u);
+    ASSERT_GT(payload_len, 0U);
 
     // Send from the CALLER THREAD (initiator_send blocks on fut.get()).
     // Heartbeat ("0") is an ADMIN message routed by the engine; the recv_cb here
@@ -679,7 +679,7 @@ TEST(MessageWrite, RoundTripCommitPayloadFormatAndPeerReceive) {
     size_t payload_len = 0;
     ASSERT_EQ(fixpp_msg_commit(msg, &payload, &payload_len), FIXPP_ERR_OK);
     ASSERT_NE(payload, nullptr);
-    ASSERT_GT(payload_len, 0u);
+    ASSERT_GT(payload_len, 0U);
 
     // Payload must contain 35=0\x01 (MsgType Heartbeat) — ALWAYS first
     ASSERT_TRUE(span_has_field(payload, payload_len, 35, "0"))
@@ -697,7 +697,7 @@ TEST(MessageWrite, RoundTripCommitPayloadFormatAndPeerReceive) {
         << "committed payload must contain 112=ROUNDTRIP_STR\\x01";
 
     // Payload must NOT contain framing tags at field boundaries
-    for (uint16_t t : {8u, 9u, 34u, 49u, 52u, 56u, 10u}) {
+    for (uint16_t t : {8U, 9U, 34U, 49U, 52U, 56U, 10U}) {
         EXPECT_TRUE(span_lacks_tag(payload, payload_len, static_cast<uint16_t>(t)))
             << "framing tag " << t << " must not appear in committed payload";
     }
@@ -821,8 +821,9 @@ TEST(MessageWrite, SetDoubleFixedNotationAndFailClosed) {
     };
     // 1e10 → "1e+10" under %g; 0.00001 → "1e-05" under %g. Both must be plain fixed.
     for (const Case& c :
-         {Case{1e10, "10000000000"}, Case{0.00001, "0.00001"}, Case{-1234.5, "-1234.5"},
-          Case{2.5, "2.5"}, Case{-0.0, "0"}}) {  // -0.0 canonicalised to "0", not "-0"
+         {Case{.value = 1e10, .expect = "10000000000"}, Case{.value = 0.00001, .expect = "0.00001"},
+          Case{.value = -1234.5, .expect = "-1234.5"}, Case{.value = 2.5, .expect = "2.5"},
+          Case{.value = -0.0, .expect = "0"}}) {  // -0.0 canonicalised to "0", not "-0"
         fixpp_msg_t* msg = nullptr;
         ASSERT_EQ(fixpp_msg_create_outbound(sess, "D", 1, &msg), FIXPP_ERR_OK);
         ASSERT_EQ(fixpp_msg_set_double(msg, 38, c.value), FIXPP_ERR_OK) << c.expect;
@@ -945,7 +946,7 @@ TEST(MessageWrite, SC001_CreateOutboundRoundTripPeerReceivesAppMsg) {
         acc_id = ae->sessions_[0]->id;
     }
     uint16_t port = wait_for_bound_port(acc_eng, acc_id);
-    ASSERT_NE(port, 0u) << "acceptor did not bind";
+    ASSERT_NE(port, 0U) << "acceptor did not bind";
 
     // Initiator session with richer dict
     {
@@ -975,7 +976,7 @@ TEST(MessageWrite, SC001_CreateOutboundRoundTripPeerReceivesAppMsg) {
     size_t payload_len = 0;
     ASSERT_EQ(fixpp_msg_commit(msg, &payload, &payload_len), FIXPP_ERR_OK);
     ASSERT_NE(payload, nullptr);
-    ASSERT_GT(payload_len, 0u);
+    ASSERT_GT(payload_len, 0U);
 
     // Verify payload format: must start with 35=D, must contain 11=ORD001 + 58=SC001_WITNESS,
     // must NOT contain framing tags.
@@ -990,7 +991,7 @@ TEST(MessageWrite, SC001_CreateOutboundRoundTripPeerReceivesAppMsg) {
         << "committed payload must contain 11=ORD001\\x01";
     EXPECT_TRUE(span_has_field(payload, payload_len, 58, "SC001_WITNESS"))
         << "committed payload must contain 58=SC001_WITNESS\\x01";
-    for (uint16_t t : {8u, 9u, 34u, 49u, 52u, 56u, 10u}) {
+    for (uint16_t t : {8U, 9U, 34U, 49U, 52U, 56U, 10U}) {
         EXPECT_TRUE(span_lacks_tag(payload, payload_len, static_cast<uint16_t>(t)))
             << "framing tag " << t << " must not appear in committed payload";
     }
@@ -1143,7 +1144,7 @@ TEST(MessageWrite, ZeroGlobalHeapSetCommitGuard) {
     EXPECT_EQ(rc_restr, FIXPP_ERR_OK) << "re-set_string(tag 11) after remove failed";
     EXPECT_EQ(rc_commit, FIXPP_ERR_OK) << "commit failed";
     EXPECT_NE(payload, nullptr) << "committed payload must not be null";
-    EXPECT_GT(payload_len, 0u) << "committed payload must be non-empty";
+    EXPECT_GT(payload_len, 0U) << "committed payload must be non-empty";
 
     // ── Cleanup OUTSIDE the window ─────────────────────────────────────────────
     EXPECT_EQ(fixpp_msg_destroy(msg), FIXPP_ERR_OK);
@@ -1651,7 +1652,7 @@ TEST(MessageWrite, GroupEndNullGuards) {
 
 namespace {
 
-static std::vector<std::byte> make_raw_frame_for_write_test(std::string const& body) {
+std::vector<std::byte> make_raw_frame_for_write_test(std::string const& body) {
     std::string nine = "9=" + std::to_string(body.size()) + "\x01";
     std::string full = "8=FIX.4.4\x01" + nine + body + "10=000\x01";
     std::vector<std::byte> out(full.size());

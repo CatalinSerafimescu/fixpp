@@ -110,10 +110,10 @@ long count_group_structs(std::string const& dir, bool& saw_groups_namespace, lon
         in.seekg(0);
         std::string line;
         while (std::getline(in, line)) {
-            if (line.rfind("struct G_", 0) == 0) {
+            if (line.starts_with("struct G_")) {
                 ++count;
             }
-            if (line.find("namespace fixpp::vlatest::groups") != std::string::npos) {
+            if (line.contains("namespace fixpp::vlatest::groups")) {
                 saw_groups_namespace = true;
             }
         }

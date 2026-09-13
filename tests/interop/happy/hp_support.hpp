@@ -267,7 +267,7 @@ inline ProductionDictionary production_dictionary_and_digest() {
     // (same pattern as witness_comparator.cpp's make_fix44_decimal_resolver).
     auto dict = std::make_shared<fixpp::dict::Dictionary>(
         fixpp::dict::XmlLoader{}.load_from_string(xml_text, std::pmr::get_default_resource()));
-    return ProductionDictionary{std::move(dict), std::move(hex)};
+    return ProductionDictionary{.dictionary = std::move(dict), .dictionary_digest = std::move(hex)};
 }
 
 // Drive a registered session to Active (logon complete) within `deadline`.

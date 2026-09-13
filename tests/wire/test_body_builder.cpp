@@ -132,7 +132,7 @@ void fill_sentinel(std::span<std::byte> s) {
 }
 
 bool all_sentinel(std::span<const std::byte> s) {
-    return std::all_of(s.begin(), s.end(), [](std::byte b) { return b == std::byte{0xABU}; });
+    return std::ranges::all_of(s, [](std::byte b) { return b == std::byte{0xABU}; });
 }
 
 }  // namespace

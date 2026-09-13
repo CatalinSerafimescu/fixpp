@@ -205,7 +205,9 @@ TEST(MessageFieldIteration, WireOrderDiscriminating) {
     ASSERT_EQ(fixpp_msg_field_count(h.ptr(), &count), FIXPP_ERR_OK);
     ASSERT_EQ(count, 7U) << "8,9,35,49,56,34,10 → 7 entries";
 
-    fixpp_msg_field_t f0{}, f2{}, f3{};
+    fixpp_msg_field_t f0{};
+    fixpp_msg_field_t f2{};
+    fixpp_msg_field_t f3{};
     ASSERT_EQ(fixpp_msg_field_at(h.ptr(), 0, &f0), FIXPP_ERR_OK);
     ASSERT_EQ(fixpp_msg_field_at(h.ptr(), 2, &f2), FIXPP_ERR_OK);
     ASSERT_EQ(fixpp_msg_field_at(h.ptr(), 3, &f3), FIXPP_ERR_OK);
@@ -328,7 +330,8 @@ TEST(MessageFieldIteration, SupersetOnRepeatingGroup) {
 
     // Collect tag-448 occurrences.
     int tag448_count = 0;
-    std::string first448_val, second448_val;
+    std::string first448_val;
+    std::string second448_val;
     for (size_t i = 0; i < count; ++i) {
         fixpp_msg_field_t f{};
         ASSERT_EQ(fixpp_msg_field_at(h.ptr(), i, &f), FIXPP_ERR_OK);

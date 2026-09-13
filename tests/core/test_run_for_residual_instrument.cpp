@@ -95,8 +95,8 @@ TEST(RunForResidualInstrument, ZeroCellNoFollowOnWork) {
 
     EXPECT_FALSE(m.ready_at_entry);
     EXPECT_TRUE(m.ready_observed);
-    EXPECT_EQ(m.residual_handlers, 0u);
-    EXPECT_EQ(m.handlers_dispatched, 1u);
+    EXPECT_EQ(m.residual_handlers, 0U);
+    EXPECT_EQ(m.handlers_dispatched, 1U);
     // The transition happens on the very first dispatched handler, far
     // (~200ms) from the deadline: not inconclusive.
     EXPECT_FALSE(m.near_deadline_inconclusive);
@@ -124,7 +124,7 @@ TEST(RunForResidualInstrument, NeverReadyCellIsDistinguishableFromZeroResidual) 
 
     EXPECT_FALSE(m.ready_at_entry);
     EXPECT_FALSE(m.ready_observed);
-    EXPECT_EQ(m.handlers_dispatched, 0u);
+    EXPECT_EQ(m.handlers_dispatched, 0U);
     EXPECT_TRUE(m.stopped_due_to_exhausted_work);
 }
 
@@ -315,7 +315,7 @@ TEST(RunForResidualInstrument, NonExclusiveDriverSkipsMeasurement) {
     EXPECT_TRUE(m.skipped_non_exclusive_driver);
     EXPECT_FALSE(m.ready_observed);
     EXPECT_FALSE(m.ready_at_entry);
-    EXPECT_EQ(m.handlers_dispatched, 0u);
+    EXPECT_EQ(m.handlers_dispatched, 0U);
 }
 
 }  // namespace
