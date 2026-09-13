@@ -106,6 +106,7 @@ bool parse_int64(std::string_view sv, int64_t& out) noexcept {
 bool parse_double(std::string_view sv, double& out) noexcept {
     if (sv.empty()) return false;
     const char* first = sv.data();
+    // cppcheck-suppress unreadVariable  -- read only in the std::from_chars configuration
     const char* last = sv.data() + sv.size();
 #if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
     auto [ptr, ec] = std::from_chars(first, last, out);
@@ -332,6 +333,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_get_msg_type(const fixpp_msg_t* msg,
 
     auto sv = view->msg_type();
     if (sv.empty()) return FIXPP_ERR_TAG_NOT_FOUND;
+    // cppcheck-suppress autoVariables  -- sv aliases the view's storage, not a local
     *value_out = sv.data();
     *len_out = sv.size();
     return FIXPP_ERR_OK;

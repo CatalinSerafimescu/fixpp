@@ -574,6 +574,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_int(fixpp_msg_t* msg, uint16_t tag,
 static fixpp_error_t serialise_double_fixed(double value, char* buf, std::size_t buf_size,
                                             std::size_t* out_len) {
     if (!std::isfinite(value)) return FIXPP_ERR_DECIMAL_INVALID;
+    // cppcheck-suppress duplicateConditionalAssign  -- canonicalises -0.0
     if (value == 0.0) value = 0.0;  // canonicalise -0.0 → +0.0 (else to_chars emits "-0")
     auto [ptr, ec] = std::to_chars(buf, buf + buf_size, value, std::chars_format::fixed);
     if (ec != std::errc{}) return FIXPP_ERR_DECIMAL_INVALID;  // too large for buf → unrepresentable

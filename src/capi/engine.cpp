@@ -344,7 +344,7 @@ void fixpp_engine_destroy(fixpp_engine_t* engine) {
         // loop covers the discriminating path (b) where close was NOT called.
         // Invariant: token expiry happens-before arena teardown on every path (E-9).
         // [data-model E-9 / feedback_cabi_handle_destroy_needs_tombstone]
-        for (auto& s : engine->sessions_) {
+        for (const auto& s : engine->sessions_) {
             if (s) {
                 s->liveness_.reset();
             }

@@ -1227,6 +1227,7 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
             });
     } catch (const asio::system_error& e) {
         if (e.code() != asio::error::operation_aborted) {
+            // cppcheck-suppress throwInNoexceptFunction  -- terminate is the documented outcome
             throw;  // Only operation_aborted is handled; anything else is unexpected
                     // and propagates (noexcept coroutine → terminate). Consistent
                     // with next_seqnum()/reset().
@@ -1480,6 +1481,7 @@ asio::awaitable<fixpp::core::expected_t<seqnum_t>> FileStore::next_seqnum(direct
                 });
         } catch (const asio::system_error& e) {
             if (e.code() != asio::error::operation_aborted) {
+                // cppcheck-suppress throwInNoexceptFunction  -- terminate is the documented outcome
                 throw;  // Only operation_aborted is handled; anything else propagates.
             }
             g_catch_fired.fetch_add(1, std::memory_order_relaxed);
@@ -1771,6 +1773,7 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
         }
     } catch (const asio::system_error& e) {
         if (e.code() != asio::error::operation_aborted) {
+            // cppcheck-suppress throwInNoexceptFunction  -- terminate is the documented outcome
             throw;  // Unexpected (OOM, etc.) — propagate.
         }
         // operation_aborted: post-dates linearisation per C3 (§6.1.4 / contracts C3).

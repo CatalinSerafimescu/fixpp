@@ -1457,6 +1457,7 @@ asio::awaitable<void> Engine::stop() {
     }
     if (engine_cfg_.meter) {
         engine_cfg_.meter->shutdown();
+        // cppcheck-suppress missingReturn  -- void; misread #if block
     }
 #endif  // FIXPP_BUILD_OTEL
 }
@@ -1560,6 +1561,7 @@ asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
             }
 
             // Capture strong keepalive before any co_await (UAF guard).
+            // cppcheck-suppress derefInvalidIteratorRedundantCheck  -- end() is checked above
             std::shared_ptr<Session> kl = it->second.session;
 
             // Session null (loop not yet published) → reject on the control strand.
@@ -1579,6 +1581,7 @@ asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
             // ── Step C: hop to session_strand for toApp + Session::send ──
             // Non-blocking post onto the session strand — distinct from the
             // control strand, so no deadlock even for re-entrant sends. [C-2]
+            // cppcheck-suppress nullPointerRedundantCheck  -- null is checked above
             auto strand_exec = kl->executor().underlying();
             core::expected_t<void> send_result = co_await asio::co_spawn(
                 strand_exec,

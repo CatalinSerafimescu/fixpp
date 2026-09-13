@@ -306,8 +306,11 @@ void OffsetTable::build(frame_view const& frame) noexcept {
                 if (std::uint16_t const dt = data_tag_for(static_cast<std::uint16_t>(tag));
                     dt != 0) {
                     std::uint32_t dlen = 0;
+                    // cppcheck-suppress-begin knownConditionTrueFalse  -- false only where size_t
+                    // is 64-bit
                     auto const cap =
                         static_cast<std::uint32_t>(n > 0xFFFFFFFFULL ? 0xFFFFFFFFULL : n);
+                    // cppcheck-suppress-end knownConditionTrueFalse
                     for (std::size_t k = val_start; k < val_start + val_len; ++k) {
                         auto const c = static_cast<unsigned char>(buf[k]);
                         if (c < '0' || c > '9') {
@@ -911,8 +914,10 @@ OffsetTable* OffsetTable::build_nested_subview(
         // missed site would silently take C-8.4's dict-free fallback on nested
         // splits only -- the "context seeded lazily on ONE path leaves sibling
         // paths default" shape, invisible to any root-level test.
+        // cppcheck-suppress-begin legacyUninitvar  -- placement new initialises table
         // NOLINTNEXTLINE(cppcoreguidelines-owning-memory)
         auto* table = ::new (mem) OffsetTable(fv, mr, opaque_dict, group_member_fn, group_delim_fn);
+        // cppcheck-suppress-end legacyUninitvar
         // 063 T008: seed the new sub-table's stored context VERBATIM (no
         // further push — see nested_group_slices()'s doc comment).
         table->set_group_context(ctx);

@@ -197,9 +197,11 @@ struct logon_credentials {
         std::size_t val_start = 0;  // index of first value byte (just past '=')
 
         // Check frame-start occurrence (only valid when pos == 0).
+        // cppcheck-suppress-begin containerOutOfBounds  -- guarded by n >= kStartLen
         bool has_start_match = (pos == 0) && (n >= kStartLen) && (frame[0] == kStart[0]) &&
                                (frame[1] == kStart[1]) && (frame[2] == kStart[2]) &&
                                (frame[3] == kStart[3]);
+        // cppcheck-suppress-end containerOutOfBounds
 
         // Search for mid-frame occurrence '\x01554='.
         std::size_t mid_pos = std::string_view::npos;

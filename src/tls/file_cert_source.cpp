@@ -83,6 +83,7 @@ using EvpKeyPtr = std::unique_ptr<EVP_PKEY, EvpKeyDeleter>;
 // Passed as the 4th arg to PEM_read_bio_PrivateKey / PEM_read_bio_X509 via
 // the standard OpenSSL pem_password_cb signature.
 // `userdata` points to a std::string containing the password.
+// cppcheck-suppress constParameterCallback  -- OpenSSL pem_password_cb signature
 int pem_passwd_cb(char* buf, int size, int /*rwflag*/, void* userdata) {
     if (userdata == nullptr || buf == nullptr || size <= 0) {
         return 0;

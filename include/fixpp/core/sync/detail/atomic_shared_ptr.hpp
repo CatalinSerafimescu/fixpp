@@ -71,12 +71,15 @@ public:
     static constexpr bool is_always_lock_free = false;
 
     atomic_shared_ptr() noexcept = default;
+    // cppcheck-suppress-begin noExplicitConstructor  -- implicit by design, mirrors
+    // std::atomic<std::shared_ptr<T>>
     constexpr atomic_shared_ptr(std::nullptr_t) noexcept : value_(nullptr) {}
 
     // Implicit by design — mirrors std::atomic<std::shared_ptr<T>> so the
     // fallback is a true drop-in for the native alias.
     // NOLINTNEXTLINE(google-explicit-constructor,hicpp-explicit-conversions)
     atomic_shared_ptr(value_type desired) noexcept : value_(std::move(desired)) {}
+    // cppcheck-suppress-end noExplicitConstructor
 
     atomic_shared_ptr(const atomic_shared_ptr&) = delete;
     atomic_shared_ptr& operator=(const atomic_shared_ptr&) = delete;
