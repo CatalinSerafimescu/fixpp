@@ -38,6 +38,66 @@ function(fixpp_maybe_werror target)
   endif()
 endfunction()
 
+# ── #417: FIXPP_WERROR reaches every first-party compiled target ─────────────
+#
+#   fixpp_apply_werror_to_all_targets()   — call DEFERRED from the top-level
+#                                           CMakeLists.txt (see below)
+#
+# `fixpp_maybe_werror` used to have no call sites, so FIXPP_WERROR=ON (set by
+# every preset inheriting `_base`) turned no warning into an error anywhere.
+# A per-target call list would repeat that failure the next time a target is
+# added without it, so the targets are ENUMERATED from the buildsystem instead:
+# every directory's BUILDSYSTEM_TARGETS, recursively from the source root.
+#
+# ⚠️ CALL IT DEFERRED — `cmake_language(DEFER DIRECTORY ${CMAKE_SOURCE_DIR}
+# CALL ...)` — for the reason `fixpp_assert_every_fuzz_harness_replays` gives:
+# BUILDSYSTEM_TARGETS holds only the targets defined so far, so an inline call
+# would silently skip everything declared after it.
+#
+# ⚠️ OPT-OUT IS PER TARGET AND CARRIES A REASON. Set the target property
+# FIXPP_WERROR_EXEMPT to the reason. The deliberate case is a negative-compile
+# probe (a WILL_FAIL test whose passing state is "the build failed"): a blanket
+# -Werror would let ANY stray warning fail that build, so the probe would stay
+# green after the diagnostic it witnesses was gone.
+#
+# ⚠️ AN EMPTY ENUMERATION IS AN INSTRUMENT FAILURE: if the walk ever finds no
+# compiled target, FIXPP_WERROR is inert again with nothing saying so.
+function(fixpp_apply_werror_to_all_targets)
+  if(NOT FIXPP_WERROR)
+    return()
+  endif()
+
+  set(_dirs "${CMAKE_SOURCE_DIR}")
+  set(_applied 0)
+  set(_exempt "")
+  while(_dirs)
+    list(POP_FRONT _dirs _dir)
+    get_property(_subdirs DIRECTORY "${_dir}" PROPERTY SUBDIRECTORIES)
+    list(APPEND _dirs ${_subdirs})
+    get_property(_targets DIRECTORY "${_dir}" PROPERTY BUILDSYSTEM_TARGETS)
+    foreach(_tgt IN LISTS _targets)
+      get_target_property(_type ${_tgt} TYPE)
+      if(NOT _type MATCHES "^(EXECUTABLE|STATIC_LIBRARY|SHARED_LIBRARY|MODULE_LIBRARY|OBJECT_LIBRARY)$")
+        continue()
+      endif()
+      get_target_property(_reason ${_tgt} FIXPP_WERROR_EXEMPT)
+      if(_reason)
+        list(APPEND _exempt "${_tgt}")
+        continue()
+      endif()
+      fixpp_maybe_werror(${_tgt})
+      math(EXPR _applied "${_applied} + 1")
+    endforeach()
+  endwhile()
+
+  if(_applied EQUAL 0)
+    message(FATAL_ERROR
+      "FIXPP_WERROR=ON but no compiled target was enumerated, so no warning would fail "
+      "a build. The target walk is broken, not the tree (#417).")
+  endif()
+  message(STATUS "fixpp: FIXPP_WERROR applied to ${_applied} target(s); exempt: ${_exempt}")
+endfunction()
+
 # ── Fuzz corpus replay registration (#213) ───────────────────────────────────
 #
 #   fixpp_add_fuzz_replay(<test-name> <fuzz-target> <input-dir>)

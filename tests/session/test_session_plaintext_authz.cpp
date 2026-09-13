@@ -92,8 +92,10 @@
 // every unsuppressed selection site (T019/T020). This test file legitimately
 // selects the value at multiple points (it IS the plaintext-authz test suite),
 // so suppress file-wide per the fixpp-internal-code pragma idiom. [043 T020]
+#if defined(__clang__) || defined(__GNUC__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
 #include <fixpp/session/security_profile.hpp>
 
 #include "support/pump_until_ready.hpp"
@@ -538,4 +540,6 @@ TEST(PlaintextAuthzTest, CheckCompIdRejectsMismatchOnPlaintext) {
         (void)close_fut.get();
     }
 }
+#if defined(__clang__) || defined(__GNUC__)
 #pragma clang diagnostic pop  // -Wdeprecated-declarations (insecure_plain_tcp, 043 T020)
+#endif

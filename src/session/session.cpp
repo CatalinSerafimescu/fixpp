@@ -1334,10 +1334,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         } else if (k == SK::one_way_ca) {
             // one_way_ca is deprecated in the TLS layer but still supported
             // for legacy interop (session layer retains it per [const §XII.5]).
+#if defined(__clang__) || defined(__GNUC__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
             tls_profile = TK::one_way_ca;
+#if defined(__clang__) || defined(__GNUC__)
 #pragma clang diagnostic pop
+#endif
         }
         // insecure_plain_tcp: tls_profile stays unset; no SslCtxConfig arm.
         reconnect_fsm_.set_tls_profile(tls_profile);

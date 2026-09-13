@@ -49,8 +49,10 @@
 //          NFR-017; [[feedback_single_threaded_harness_masks_strand_races]];
 //          engine.cpp run_connect_loop step 4 (its `publish_entry` call).
 
+#if defined(__clang__) || defined(__GNUC__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
 
 #include <gtest/gtest.h>
 
@@ -180,11 +182,15 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
     sc.begin_string = "FIX.4.2";
     sc.sender_comp_id = "SNAP_SENDER";
     sc.target_comp_id = "SNAP_TARGET";
+#if defined(__clang__) || defined(__GNUC__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
     sc.security_profile =
         fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::insecure_plain_tcp};
+#if defined(__clang__) || defined(__GNUC__)
 #pragma clang diagnostic pop
+#endif
     sc.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", bound_port};
     // Unlimited reconnect attempts so the loop stays alive for the whole window.
     fixpp::transport::ReconnectPolicy policy;
@@ -393,4 +399,6 @@ TEST(EngineReaderSnapshotPublishAcquire, PendingAcceptDoesNotWedgeBoundedDrain) 
         << "promptly instead of leaving it suspended forever";
 }
 
+#if defined(__clang__) || defined(__GNUC__)
 #pragma clang diagnostic pop
+#endif

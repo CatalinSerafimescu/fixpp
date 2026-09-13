@@ -66,8 +66,10 @@ core::expected_t<SslCtxConfig> make_ssl_ctx_config(SecurityProfile profile,
     }
 
     // Profile-specific validation per [2g §4.5.1] 4-row table.
+#if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
     switch (profile) {
         case SecurityProfile::mtls_pinned:
             if (!pinset) {
@@ -93,7 +95,9 @@ core::expected_t<SslCtxConfig> make_ssl_ctx_config(SecurityProfile profile,
             // Already rejected above; unreachable.
             return std::unexpected{E::tls_invalid_security_profile};
     }
+#if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop
+#endif
 
     // Build the config.
     SslCtxConfig cfg;

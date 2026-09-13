@@ -200,7 +200,7 @@ if(_need_bootstrap_configure)
     -DFIXPP_BUILD_FUZZ=OFF
     -DFIXPP_BUILD_PYTHON=OFF
     -DFIXPP_BUILD_CODEGEN_TOOL=ON
-    -DFIXPP_WERROR=OFF
+    -DFIXPP_WERROR=${FIXPP_WERROR}
     # Bootstrap guard — prevents the nested configure from re-entering Codegen.cmake
     -DFIXPP_CODEGEN_BOOTSTRAP_RUNNING=ON
     # 046 T014: forward the OTel toggle so the bootstrap sub-configure

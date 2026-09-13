@@ -129,8 +129,10 @@ public:
 
 // The insecure_plain_tcp enumerator is [[deprecated]] (loud-insecure friction,
 // SC-005 / D-9); fixpp-internal/test selection wraps the construction site.
+#if defined(__clang__) || defined(__GNUC__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
 
 TEST(PlaintextReconnectTest, PlaintextReconnectSkipsHandshakeAndLeavesPeerIdNullopt) {
     asio::io_context ioc;
@@ -196,4 +198,6 @@ TEST(PlaintextReconnectTest, PlaintextReconnectSkipsHandshakeAndLeavesPeerIdNull
            "(D-10 #2; install_reconnected_transport's guard)";
 }
 
+#if defined(__clang__) || defined(__GNUC__)
 #pragma clang diagnostic pop  // -Wdeprecated-declarations (insecure_plain_tcp)
+#endif
