@@ -538,6 +538,8 @@ TEST(DictionaryAccessors, MovedFromDictionaryUsesNullHandleFallbacks) {
     auto null_dict = std::move(dict);
     (void)null_dict;
 
+    // The moved-from state is what this test checks.
+    // NOLINTNEXTLINE(bugprone-use-after-move,hicpp-invalid-access-moved)
     EXPECT_EQ(dict.which_session_version(), fixpp::dict::session_version::Unknown);
     EXPECT_EQ(dict.field_ref("D", 11U).rule, fixpp::dict::field_presence::NotDeclared);
     EXPECT_TRUE(dict.required_fields("D").empty());

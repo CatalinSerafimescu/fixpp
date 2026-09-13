@@ -47,6 +47,8 @@ TEST(SeamGuardDestructiveMove, MoveConstructFromEngagedDisengagesSource) {
 
             async_lock_guard g2 = std::move(g1);
             second_owns = g2.owns_lock();
+            // The moved-from state is what this test checks.
+            // NOLINTNEXTLINE(bugprone-use-after-move,hicpp-invalid-access-moved)
             first_owns_after = g1.owns_lock();
             // g2 destructor releases the lock
         },
@@ -90,7 +92,9 @@ TEST(SeamGuardDestructiveMove, MoveAssignToEngagedUnlocksFirst) {
             //  2. Take ownership of mtx2 (previously owned by g2).
             g1 = std::move(g2);
 
-            EXPECT_TRUE(g1.owns_lock());   // now owns mtx2
+            EXPECT_TRUE(g1.owns_lock());  // now owns mtx2
+            // The moved-from state is what this test checks.
+            // NOLINTNEXTLINE(bugprone-use-after-move,hicpp-invalid-access-moved)
             EXPECT_FALSE(g2.owns_lock());  // g2 disengaged
 
             // mtx1 must now be free (acquirable again).

@@ -472,7 +472,7 @@ TEST(LiveOutboundSerializedTest, WriteErrorPropagatesAsFsmDisconnected) {
     EXPECT_GE(raw_ptr->write_count(), 1)
         << "The transport's async_write must have been called at least once.";
 
-    raw_ptr->close();
+    (void)raw_ptr->close();
 }
 
 TEST(LiveOutboundSerializedTest, TestRequestReplyWriteErrorDisconnectsSession) {
@@ -529,7 +529,7 @@ TEST(LiveOutboundSerializedTest, TestRequestReplyWriteErrorDisconnectsSession) {
     EXPECT_EQ(raw_ptr->write_count(), 2)
         << "exactly the reply-Logon and the failing Heartbeat reply should have written";
 
-    raw_ptr->close();
+    (void)raw_ptr->close();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -623,7 +623,7 @@ TEST(LiveOutboundSerializedTest, ConcurrentWritesNotSubmittedGenuineSecondEmit) 
     ioc.restart();
 
     // Close the transport to unblock any pending reads.
-    raw_ptr->close();
+    (void)raw_ptr->close();
     ioc.run_for(200ms);
     ioc.restart();
 
@@ -783,7 +783,7 @@ TEST(LiveOutboundSerializedTest, LivenessHeartbeatWriteErrorStopsLoop) {
     EXPECT_EQ(raw_ptr->write_count(), writes_after_failure)
         << "liveness loop must stop retrying writes after a live write failure";
 
-    raw_ptr->close();
+    (void)raw_ptr->close();
 }
 
 TEST(LiveOutboundSerializedTest, CloseCancelsBlockedPublicSend) {
@@ -839,7 +839,7 @@ TEST(LiveOutboundSerializedTest, CloseCancelsBlockedPublicSend) {
     EXPECT_EQ(send_fut.wait_for(0ms), std::future_status::ready)
         << "blocked send() must resolve once close() tears down the live transport";
 
-    raw_ptr->close();
+    (void)raw_ptr->close();
     if (!fixpp::test_support::run_window_then_ready(ioc, close_fut, 100ms,
                                                     "CloseCancelsBlockedPublicSend/close")) {
         // TRANSPORT-AWARE, and NOT because a clock-parked frame can exist here -- it
@@ -920,7 +920,7 @@ TEST(LiveOutboundSerializedTest, GracefulCloseCancelsBlockedPublicSend) {
     if (!close_ready) {
         // Cleanup for the unfixed behavior: force-release the parked write so the
         // test fails fast instead of leaving the runner wedged.
-        raw_ptr->close();
+        (void)raw_ptr->close();
         EXPECT_TRUE(fixpp::test_support::pump_until_ready(ioc, close_fut, 1s))
             << "cleanup pump for close_fut did not complete";
     }
@@ -1086,7 +1086,7 @@ TEST(LiveOutboundSerializedTest, StopDuringLivenessWriteNoCrash) {
     // close() must drain liveness_done_ (cancel + wait for liveness to exit) and
     // write_gate_ before returning. If either drain deadlocks, the test hangs.
     // If the Session is destroyed with a held mutex, the destructor crashes.
-    raw_ptr->close();
+    (void)raw_ptr->close();
 
     auto close_fut =
         asio::co_spawn(ioc, sess.close(fixpp::session::close_mode::terminal), asio::use_future);
@@ -1197,7 +1197,7 @@ TEST(LiveOutboundSerializedTest, CallerCancelledMidCloseDoesNotWedgeSecondClose)
     EXPECT_TRUE(r2.has_value() || r2.error() == fixpp::core::error::session_already_closed)
         << "second close() must observe a completed first close (ok or already-closed)";
 
-    raw_ptr->close();
+    (void)raw_ptr->close();
     ioc.run_for(100ms);
     ioc.restart();
 }

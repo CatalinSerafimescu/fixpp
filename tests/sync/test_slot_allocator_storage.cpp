@@ -61,7 +61,7 @@ TEST(SyncSlotAllocatorStorage, Case1InlineBufferAllocate) {
 
     // A second allocate (without intervening deallocate) must throw bad_alloc
     // (used_inline_ == true; only one inline allocation at a time).
-    EXPECT_THROW(alloc.allocate(1), std::bad_alloc);
+    EXPECT_THROW((void)alloc.allocate(1), std::bad_alloc);
 
     // deallocate resets used_inline_ → next allocate succeeds.
     alloc.deallocate(p, 32);
@@ -77,7 +77,7 @@ TEST(SyncSlotAllocatorStorage, Case1InlineBufferOverSizeThrows) {
     slot_allocator alloc{&awaiter, nullptr};
 
     // allocate(33) exceeds the 32-byte inline capacity → std::bad_alloc.
-    EXPECT_THROW(alloc.allocate(33), std::bad_alloc);
+    EXPECT_THROW((void)alloc.allocate(33), std::bad_alloc);
 
     // allocate(0) edge case: 0 <= 32, should return the inline buffer.
     // (zero-size allocations are valid in the Allocator concept.)
@@ -129,7 +129,7 @@ TEST(SyncSlotAllocatorStorage, Case3PmrExhaustionThrows) {
     slot_allocator alloc{&awaiter, &tiny_mr};
 
     // Requesting 64 bytes from an 8-byte resource → std::bad_alloc.
-    EXPECT_THROW(alloc.allocate(64), std::bad_alloc);
+    EXPECT_THROW((void)alloc.allocate(64), std::bad_alloc);
 }
 
 TEST(SyncSlotAllocatorStorage, EqualityOperator) {

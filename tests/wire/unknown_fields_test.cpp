@@ -24,6 +24,7 @@
 #include <fixpp/wire/parser.hpp>
 #include <fixpp/wire/unknown_fields.hpp>
 
+#include "support/expired_parser_parse.hpp"
 #include "support/frame_view_factory.hpp"
 #include "support/mock_dict_table.hpp"
 
@@ -127,10 +128,7 @@ TEST(WireUnknownFields, UnknownFieldsRemainUsableAfterTemporaryParserDies) {
     ASSERT_TRUE(fv.has_value());
 
     std::pmr::monotonic_buffer_resource arena;
-    auto mv = [&]() {
-        Parser<access_mode::Index> parser{dict};
-        return parser.parse(*fv, &arena);
-    }();
+    auto mv = fixpp::wire::test::parse_with_expired_parser(dict, *fv, &arena);
     ASSERT_TRUE(mv.has_value());
 
     auto uf = mv->unknown_fields();

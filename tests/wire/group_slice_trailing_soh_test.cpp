@@ -31,6 +31,7 @@
 #include <string_view>
 #include <vector>
 
+#include "support/expired_parser_parse.hpp"
 #include "support/frame_view_factory.hpp"
 #include "support/mock_dict_table.hpp"
 
@@ -235,10 +236,7 @@ TEST(GroupSliceTrailingSoh, OversizedCountPerInstanceCapPreserved) {
 
     std::pmr::monotonic_buffer_resource arena;
     OffsetTable::Config tight_cfg{.max_offset_entries = 4096, .max_group_entries_per_instance = 3};
-    auto mv = [&]() {
-        Parser<access_mode::Index> parser{dict};
-        return parser.parse(*fv, &arena, tight_cfg);
-    }();
+    auto mv = fixpp::wire::test::parse_with_expired_parser(dict, *fv, &arena, tight_cfg);
     ASSERT_TRUE(mv.has_value());
 
     auto g = mv->offsets().group(453);

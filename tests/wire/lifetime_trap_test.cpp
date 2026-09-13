@@ -122,7 +122,7 @@ TEST(WireLifetimeTrapDeath, ParserViewTrapsAfterArenaRecycle) {
     framer.recycle_pool();
 
     // After recycling: any bytes() call must abort (use-after-buffer-reuse).
-    EXPECT_DEATH(mv.bytes(), "") << "must trap after pool recycle";
+    EXPECT_DEATH((void)mv.bytes(), "") << "must trap after pool recycle";
 }
 #else
 TEST(WireLifetimeTrap, ReleaseStripsTokenNoTrapMachinery) {

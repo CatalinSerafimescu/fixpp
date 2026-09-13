@@ -773,9 +773,11 @@ TEST(NestedGroupRead, Depth3TypedPushedContextResolvesGrandchildMemberNotBareFal
     fixpp::v44::MassQuote mq{*mv_exp};
     auto sets = mq.quote_sets();
     ASSERT_EQ(sets.size(), 1U);
-    auto entries = sets[0].quote_entries();
+    auto mass_quote_set0 = sets[0];  // named: quote_entries() borrows from it
+    auto entries = mass_quote_set0.quote_entries();
     ASSERT_EQ(entries.size(), 1U);
-    auto legs = entries[0].legs();
+    auto mass_quote_entry0 = entries[0];  // named: legs() borrows from it
+    auto legs = mass_quote_entry0.legs();
     ASSERT_EQ(legs.size(), 1U);
     auto leg = legs[0];
 

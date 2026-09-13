@@ -172,13 +172,13 @@ TEST(GroupEntryGenerationTrapDeath, GenerationTokenTrapOnStaleEntryRead) {
     // After recycling: the one-level entry's own scalar read must trap. A
     // bug that silently reads under a default {} token (pool_id==0, which
     // NEVER traps) would make this EXPECT_DEATH fail to observe a death.
-    EXPECT_DEATH(quote_set0.quote_set_valid_until_time(), "")
+    EXPECT_DEATH((void)quote_set0.quote_set_valid_until_time(), "")
         << "one-level entry scalar read must trap after pool recycle (INV-G6)";
 
     // The nested entry's own scalar read must ALSO trap — proving the
     // nested descent's entry_context threads the SAME live token, not a
     // default one.
-    EXPECT_DEATH(nested_entry.bid_px(&arena), "")
+    EXPECT_DEATH((void)nested_entry.bid_px(&arena), "")
         << "nested entry scalar read must trap after pool recycle (INV-G6)";
 
     // A WARM re-descent (exact nested_cache_ hit on (slice_data, no_tag),

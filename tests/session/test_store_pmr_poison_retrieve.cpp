@@ -90,7 +90,7 @@ public:
         // co_return, so the throw propagates up through the coroutine machinery.
         // T043 wraps the visitor call in try/catch(...) at retrieve()'s level.
         try {
-            mr_->allocate(1024, 8);  // throws
+            (void)mr_->allocate(1024, 8);  // throws
         } catch (std::bad_alloc const&) {
             // Re-throw to let retrieve()'s T043 catch block handle it.
             // This simulates the visitor code throwing on PMR failure.
@@ -153,7 +153,7 @@ public:
         if (call_count_ >= 2) {
             // Second call: trigger PMR poison
             try {
-                mr_->allocate(1024, 8);
+                (void)mr_->allocate(1024, 8);
             } catch (std::bad_alloc const&) {
                 throw;
             }

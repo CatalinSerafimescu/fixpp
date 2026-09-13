@@ -24,6 +24,7 @@
 
 #include "support/context_group_delim_fn.hpp"
 #include "support/context_group_member_fn.hpp"
+#include "support/expired_parser_parse.hpp"
 #include "support/frame_view_factory.hpp"
 #include "support/mock_dict_table.hpp"
 
@@ -32,7 +33,6 @@ namespace {
 using fixpp::core::error;
 using fixpp::wire::access_mode;
 using fixpp::wire::OffsetTable;
-using fixpp::wire::Parser;
 
 // Co-located shape invariant ([2b §4.4]) — the cutover-load-bearing layout.
 static_assert(sizeof(OffsetTable::entry) == 12);
@@ -169,10 +169,7 @@ TEST(WireOffsetTable, GroupBoundedUnderDefaultCap) {
     ASSERT_TRUE(fv.has_value());
 
     std::pmr::monotonic_buffer_resource arena;
-    auto mv = [&]() {
-        Parser<access_mode::Index> parser{dict};
-        return parser.parse(*fv, &arena);
-    }();
+    auto mv = fixpp::wire::test::parse_with_expired_parser(dict, *fv, &arena);
     ASSERT_TRUE(mv.has_value());
     auto const& t = mv->offsets();
 
@@ -212,10 +209,7 @@ TEST(WireOffsetTable, DoSCapPerInstanceAllowsAggregateOverCap) {
 
     std::pmr::monotonic_buffer_resource arena;
     OffsetTable::Config tight_cfg{.max_offset_entries = 4096, .max_group_entries_per_instance = 3};
-    auto mv = [&]() {
-        Parser<access_mode::Index> parser{dict};
-        return parser.parse(*fv, &arena, tight_cfg);
-    }();
+    auto mv = fixpp::wire::test::parse_with_expired_parser(dict, *fv, &arena, tight_cfg);
     ASSERT_TRUE(mv.has_value());
 
     auto const& table = mv->offsets();
@@ -251,10 +245,7 @@ TEST(WireOffsetTable, DoSCapPerInstanceRejectsOversizedSingleInstance) {
 
     std::pmr::monotonic_buffer_resource arena;
     OffsetTable::Config tight_cfg{.max_offset_entries = 4096, .max_group_entries_per_instance = 3};
-    auto mv = [&]() {
-        Parser<access_mode::Index> parser{dict};
-        return parser.parse(*fv, &arena, tight_cfg);
-    }();
+    auto mv = fixpp::wire::test::parse_with_expired_parser(dict, *fv, &arena, tight_cfg);
     ASSERT_TRUE(mv.has_value());
 
     auto g = mv->offsets().group(453);
@@ -432,10 +423,7 @@ TEST(WireOffsetTable, TrailingFieldNotCountedIntoLastInstance) {
     {
         std::pmr::monotonic_buffer_resource arena;
         OffsetTable::Config cfg{.max_offset_entries = 4096, .max_group_entries_per_instance = 4};
-        auto mv = [&]() {
-            Parser<access_mode::Index> parser{dict};
-            return parser.parse(*fv, &arena, cfg);
-        }();
+        auto mv = fixpp::wire::test::parse_with_expired_parser(dict, *fv, &arena, cfg);
         ASSERT_TRUE(mv.has_value());
 
         auto g = mv->offsets().group(453);
@@ -451,10 +439,7 @@ TEST(WireOffsetTable, TrailingFieldNotCountedIntoLastInstance) {
     {
         std::pmr::monotonic_buffer_resource arena;
         OffsetTable::Config cfg{.max_offset_entries = 4096, .max_group_entries_per_instance = 3};
-        auto mv = [&]() {
-            Parser<access_mode::Index> parser{dict};
-            return parser.parse(*fv, &arena, cfg);
-        }();
+        auto mv = fixpp::wire::test::parse_with_expired_parser(dict, *fv, &arena, cfg);
         ASSERT_TRUE(mv.has_value());
 
         auto g = mv->offsets().group(453);
@@ -492,10 +477,7 @@ TEST(WireOffsetTable, GroupSliceStartsAtTagEquals) {
         .add_group_member(453, 447);
 
     std::pmr::monotonic_buffer_resource arena;
-    auto mv = [&]() {
-        Parser<access_mode::Index> parser{dict};
-        return parser.parse(*fv, &arena);
-    }();
+    auto mv = fixpp::wire::test::parse_with_expired_parser(dict, *fv, &arena);
     ASSERT_TRUE(mv.has_value());
     auto const& t = mv->offsets();
 
@@ -537,10 +519,7 @@ TEST(WireOffsetTable, GroupExtentExcludesTrailingTopLevelFields) {
     ASSERT_TRUE(fv.has_value());
 
     std::pmr::monotonic_buffer_resource arena;
-    auto mv = [&]() {
-        Parser<access_mode::Index> parser{dict};
-        return parser.parse(*fv, &arena);
-    }();
+    auto mv = fixpp::wire::test::parse_with_expired_parser(dict, *fv, &arena);
     ASSERT_TRUE(mv.has_value());
 
     auto const& t = mv->offsets();
@@ -622,10 +601,7 @@ TEST(WireOffsetTable, TwoTopLevelGroupsSpanStableAcrossReads) {
     ASSERT_TRUE(fv.has_value());
 
     std::pmr::monotonic_buffer_resource arena;
-    auto mv = [&]() {
-        Parser<access_mode::Index> parser{dict};
-        return parser.parse(*fv, &arena);
-    }();
+    auto mv = fixpp::wire::test::parse_with_expired_parser(dict, *fv, &arena);
     ASSERT_TRUE(mv.has_value());
     auto const& t = mv->offsets();
 
@@ -694,10 +670,7 @@ TEST(WireOffsetTable, GroupExtentSupportsMoreThanThirtyTwoDistinctMembers) {
     ASSERT_TRUE(fv.has_value());
 
     std::pmr::monotonic_buffer_resource arena;
-    auto mv = [&]() {
-        Parser<access_mode::Index> parser{dict};
-        return parser.parse(*fv, &arena);
-    }();
+    auto mv = fixpp::wire::test::parse_with_expired_parser(dict, *fv, &arena);
     ASSERT_TRUE(mv.has_value());
 
     auto g = mv->offsets().group(9000);
