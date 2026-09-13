@@ -17,10 +17,15 @@
 #include <unistd.h>  // not used directly on Windows; FileStoreFactory owns all fd I/O
 #endif
 
+// clang-format off
+// <exception> must precede asio: asio/detail/impl/posix_thread.ipp calls std::terminate
+// without including it, and libc++ does not provide it transitively. clang-format's
+// IncludeBlocks: Regroup would sort it below asio again, hence the off/on guard.
+#include <exception>
 #include <asio/thread_pool.hpp>
+// clang-format on
 #include <climits>
 #include <cstring>
-#include <exception>
 #include <filesystem>
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/file_store.hpp>
