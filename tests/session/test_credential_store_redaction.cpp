@@ -725,7 +725,9 @@ TEST(CredentialStoreRedaction, T005_Acceptor_ReplyLogon_PasswordMaskedInStore) {
         // the Session destructs. Without close(), the detached loop outlives the
         // stack session — UAF visible under ASan.
         // [feedback_executor_compat_dispatch_guard_outlives_stack_session]
-        asio::co_spawn(sx, acceptor.close(fixpp::session::close_mode::terminal), asio::use_future)
+        // Teardown; call alone (not its result) drains the detached liveness loop.
+        (void)asio::co_spawn(sx, acceptor.close(fixpp::session::close_mode::terminal),
+                             asio::use_future)
             .get();
     }
     // Session destructs — FileStore flushed, liveness loop drained.
@@ -1106,7 +1108,9 @@ TEST(CredentialStoreRedaction, T009_NonLogon_WithGenuine554_StoredUnchanged) {
     // Session destructs. Without close(), the detached loop outlives the stack
     // session — UAF visible under ASan.
     // [feedback_executor_compat_dispatch_guard_outlives_stack_session]
-    asio::co_spawn(sx, initiator.close(fixpp::session::close_mode::terminal), asio::use_future)
+    // Teardown; call alone (not its result) drains the detached liveness loop.
+    (void)asio::co_spawn(sx, initiator.close(fixpp::session::close_mode::terminal),
+                         asio::use_future)
         .get();
     pool.join();  // drain+join workers before executor-holding locals destruct (teardown-race fix)
 }

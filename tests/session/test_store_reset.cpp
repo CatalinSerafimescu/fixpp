@@ -68,12 +68,14 @@ TEST(StoreResetMemory, HappyPathClearsAndRewinds) {
             auto outbound_script = make_store_script(7, direction_t::outbound);
 
             for (const auto& step : inbound_script) {
-                co_await store.store(step.seq, std::span<const std::byte>(step.frame_bytes),
-                                     step.dir);
+                auto st_r = co_await store.store(
+                    step.seq, std::span<const std::byte>(step.frame_bytes), step.dir);
+                EXPECT_TRUE(st_r.has_value()) << "setup store must succeed";
             }
             for (const auto& step : outbound_script) {
-                co_await store.store(step.seq, std::span<const std::byte>(step.frame_bytes),
-                                     step.dir);
+                auto st_r = co_await store.store(
+                    step.seq, std::span<const std::byte>(step.frame_bytes), step.dir);
+                EXPECT_TRUE(st_r.has_value()) << "setup store must succeed";
             }
 
             // Verify counters are advanced before reset
@@ -130,7 +132,9 @@ TEST(StoreResetMemory, DoubleResetIsIdempotent) {
             auto store = make_memory_store();
             auto script = make_store_script(3, direction_t::inbound);
             for (const auto& s : script) {
-                co_await store.store(s.seq, std::span<const std::byte>(s.frame_bytes), s.dir);
+                // Only the post-reset counter is asserted below; a failed
+                // pre-reset store is not otherwise observable in this test.
+                (void)co_await store.store(s.seq, std::span<const std::byte>(s.frame_bytes), s.dir);
             }
             auto r1 = co_await store.reset();
             EXPECT_TRUE(r1.has_value());
@@ -175,8 +179,9 @@ TEST(StoreResetFile, HappyPathClearsAndRewinds) {
             // Store 5 outbound frames
             auto script = make_store_script(5, direction_t::outbound);
             for (const auto& step : script) {
-                co_await store.store(step.seq, std::span<const std::byte>(step.frame_bytes),
-                                     step.dir);
+                auto st_r = co_await store.store(
+                    step.seq, std::span<const std::byte>(step.frame_bytes), step.dir);
+                EXPECT_TRUE(st_r.has_value()) << "setup store must succeed";
             }
 
             // Check counter before reset
@@ -221,10 +226,13 @@ TEST(StoreResetFile, AfterResetNewOpenSeesCounterOne) {
 
                 auto script = make_store_script(3, direction_t::outbound);
                 for (const auto& step : script) {
-                    co_await store.store(step.seq, std::span<const std::byte>(step.frame_bytes),
-                                         step.dir);
+                    // Only the post-reset+reopen counter is asserted below; a failed
+                    // pre-reset store is not otherwise observable in this test.
+                    (void)co_await store.store(
+                        step.seq, std::span<const std::byte>(step.frame_bytes), step.dir);
                 }
-                co_await store.reset();
+                auto reset_r = co_await store.reset();
+                EXPECT_TRUE(reset_r.has_value()) << "reset() must succeed";
                 // store goes out of scope = file released
             }
 

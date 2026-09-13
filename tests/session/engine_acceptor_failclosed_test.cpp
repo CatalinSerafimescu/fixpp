@@ -130,7 +130,9 @@ asio::awaitable<void> run_test_initiator(asio::io_context& ioc,
         if (!hs_r.has_value()) co_return;
 
         auto logon_bytes = make_logon_frame("FIX.4.2", sender, target);
-        co_await client->async_write(std::span<const std::byte>{logon_bytes});
+        // Fire-and-forget: the test asserts on the acceptor session's resulting
+        // state, not on whether this write itself succeeded.
+        (void)co_await client->async_write(std::span<const std::byte>{logon_bytes});
 
         // Wait briefly then close.
         asio::steady_timer t{ioc};

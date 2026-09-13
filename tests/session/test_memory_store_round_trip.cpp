@@ -173,8 +173,10 @@ TEST(MemoryStoreRoundTrip, ResetClearsAndRewinds) {
             auto store = make_store();
             auto script = make_store_script(5, direction_t::outbound);
             for (const auto& step : script) {
-                co_await store.store(step.seq, std::span<const std::byte>(step.frame_bytes),
-                                     step.dir);
+                // Only the counter-rewind half is asserted below; frame content is
+                // not re-checked after reset(), so a failed pre-store is not observable.
+                (void)co_await store.store(step.seq, std::span<const std::byte>(step.frame_bytes),
+                                           step.dir);
             }
             auto rr = co_await store.reset();
             EXPECT_TRUE(rr.has_value());

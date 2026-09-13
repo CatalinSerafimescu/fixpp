@@ -447,7 +447,7 @@ TEST(FixtCredentials, W6a_ConfiguredCreds_EmittedOnOutboundLogon) {
         init_frame_out.assign(f.begin(), f.end());
     };
     fixpp::session::Session initiator(s.engine, init_cfg, &s.registry);
-    run_sync_creds(s, [&] { return initiator.open(); });
+    ASSERT_TRUE(run_sync_creds(s, [&] { return initiator.open(); }).has_value());
 
     ASSERT_FALSE(init_frame_out.empty()) << "Initiator must emit a Logon";
     std::string wire = span_to_str(init_frame_out);
@@ -489,7 +489,7 @@ TEST(FixtCredentials, W6b_NoCreds_553and554Absent_EstablishmentUnaffected) {
         acpt_frame_out.assign(f.begin(), f.end());
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
-    run_sync_creds(s, [&] { return acceptor.open(); });
+    ASSERT_TRUE(run_sync_creds(s, [&] { return acceptor.open(); }).has_value());
 
     // Initiator: NO credentials configured.
     auto init_cfg = s.make_initiator_cfg(application_version::v50sp2);
@@ -499,7 +499,7 @@ TEST(FixtCredentials, W6b_NoCreds_553and554Absent_EstablishmentUnaffected) {
         init_frame_out.assign(f.begin(), f.end());
     };
     fixpp::session::Session initiator(s.engine, init_cfg, &s.registry);
-    run_sync_creds(s, [&] { return initiator.open(); });
+    ASSERT_TRUE(run_sync_creds(s, [&] { return initiator.open(); }).has_value());
 
     ASSERT_FALSE(init_frame_out.empty()) << "Initiator must emit a Logon";
     std::string init_wire = span_to_str(init_frame_out);
@@ -568,7 +568,7 @@ TEST(FixtCredentials, W6c_InboundCreds_SurfacedToAuthorizeLogon) {
         acpt_out.assign(f.begin(), f.end());
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
-    run_sync_creds(s, [&] { return acceptor.open(); });
+    ASSERT_TRUE(run_sync_creds(s, [&] { return acceptor.open(); }).has_value());
 
     // Build an inbound FIXT Logon WITH 553/554.
     auto logon =
@@ -627,7 +627,7 @@ TEST(FixtCredentials, W6d_CredentialFreeLogon_ReachesActive) {
         acpt_out.assign(f.begin(), f.end());
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
-    run_sync_creds(s, [&] { return acceptor.open(); });
+    ASSERT_TRUE(run_sync_creds(s, [&] { return acceptor.open(); }).has_value());
 
     // Logon WITHOUT 553/554.
     auto logon = make_fixt_logon_frame_with_creds("FIXT.1.1", 1, "TW", "ISLD", 30, "9");
@@ -788,7 +788,7 @@ TEST(FixtCredentials, FQ2_ThrowingLogonValidator_SessionDisconnectsNoTerminate) 
         acpt_out.assign(f.begin(), f.end());
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
-    run_sync_creds(s, [&] { return acceptor.open(); });
+    ASSERT_TRUE(run_sync_creds(s, [&] { return acceptor.open(); }).has_value());
 
     // Send a credentialed inbound FIXT Logon to trigger authorize_logon.
     auto logon = make_fixt_logon_frame_with_creds("FIXT.1.1", 1, "TW", "ISLD", 30, "9",

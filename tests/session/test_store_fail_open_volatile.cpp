@@ -228,7 +228,9 @@ TEST_F(StoreFailOpenVolatileTest, VolatileCapacityExhaustion_DoesNotDisconnect_T
         << "the un-retained frame must still be transmitted on the volatile-store path "
            "(logged-then-proceed, byte-identical to main)";
 
-    asio::co_spawn(sx_, sess->close(fixpp::session::close_mode::terminal), asio::use_future).get();
+    // Teardown; call alone (not its result) drains the detached liveness loop.
+    (void)asio::co_spawn(sx_, sess->close(fixpp::session::close_mode::terminal), asio::use_future)
+        .get();
 }
 
 }  // namespace

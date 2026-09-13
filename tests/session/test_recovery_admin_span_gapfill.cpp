@@ -202,7 +202,7 @@ protected:
         auto r = run_open(s);
         if (!r.has_value()) return false;
         auto logon = make_logon("FIX.4.2", 1, "TW", "ISLD");
-        feed(s, logon);
+        if (!feed(s, logon).has_value()) return false;
         return s.state() == fixpp::session::fsm_state::Active;
     }
 };
@@ -317,7 +317,7 @@ TEST_F(RecoveryGapfillNearCapacityTest, LargeCompId_GapFillOverflow_IsFailClosed
     // Step 2: peer sends Logon with reversed CompIDs (sender=kTarget, target=kSender).
     // With S=T=80 and nanos, the acceptor's reply Logon ≈ 244 bytes < 256 → Active.
     auto peer_logon = make_logon("FIX.4.2", 1, kTarget, kSender);
-    feed(sess, peer_logon);
+    ASSERT_TRUE(feed(sess, peer_logon).has_value());
 
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active)
         << "Precondition: session MUST reach Active (Logon ≈ 244 bytes fits 256-byte buffer). "
@@ -362,7 +362,7 @@ TEST_F(RecoveryAdminSpanGapfillTest, AllAdminSpanCollapsesToSingleGapFill) {
     // Since our outbound store only has admin msgs in [2..12],
     // we must collapse to SequenceReset{NewSeqNo=13, GapFillFlag=Y}.
     auto rr = make_resend_request("FIX.4.2", 2, "TW", "ISLD", 2, 12);
-    feed(sess, rr);
+    (void)feed(sess, rr);  // outcome checked below via emitted frames
 
     // Check outbound for SequenceReset-GapFill with NewSeqNo=13.
     bool found_gapfill = false;
@@ -392,7 +392,7 @@ TEST_F(RecoveryAdminSpanGapfillTest, EndSeqNoZeroMeansThrough) {
 
     // Peer asks ResendRequest[2..0] meaning "all from 2 through current max".
     auto rr = make_resend_request("FIX.4.2", 2, "TW", "ISLD", 2, 0);
-    feed(sess, rr);
+    (void)feed(sess, rr);  // outcome checked below via emitted frames
 
     // Any SequenceReset-GapFill with GapFillFlag=Y is sufficient to pass.
     bool found_any_gapfill = false;
@@ -422,7 +422,7 @@ TEST_F(RecoveryAdminSpanGapfillTest, SingleAdminSpanEmitsExactlyOneGapFill) {
     ASSERT_TRUE(drive_to_active(sess));
 
     auto rr = make_resend_request("FIX.4.2", 2, "TW", "ISLD", 2, 5);
-    feed(sess, rr);
+    (void)feed(sess, rr);  // outcome checked below via emitted frames
 
     std::size_t seq_reset_count = 0;
     for (const auto& frame : capture.frames) {

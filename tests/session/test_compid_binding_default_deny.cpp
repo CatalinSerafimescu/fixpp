@@ -234,7 +234,7 @@ TEST_F(CompidBindingDefaultDenyTest, Acceptor_EmptyPolicy_RejectsLogon) {
 
     // Peer (initiator) sends Logon.
     auto logon = make_logon("FIX.4.2", 1, "TW", "ISLD");
-    feed(sess, logon);
+    (void)feed(sess, logon);  // outcome checked below via state
 
     // The session MUST NOT reach Active (default-deny FAIL-CLOSED).
     EXPECT_NE(sess.state(), fixpp::session::fsm_state::Active)
@@ -296,7 +296,7 @@ TEST_F(CompidBindingDefaultDenyTest, Initiator_EmptyPolicy_RejectsLogonAck) {
 
     // Peer (acceptor) sends Logon-ack.
     auto logon_ack = make_logon("FIX.4.2", 1, "ISLD", "TW");
-    feed(sess, logon_ack);
+    (void)feed(sess, logon_ack);  // outcome checked below via state
 
     // Empty policy → authorize() rejects peer's TargetCompID → Disconnected.
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)

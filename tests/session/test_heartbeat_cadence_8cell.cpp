@@ -180,7 +180,7 @@ struct HeartbeatCadenceFixture {
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "drive_to_active/logon";
             return false;
         }
-        f2.get();
+        if (!f2.get().has_value()) return false;
         return s.state() == fixpp::session::fsm_state::Active;
     }
 
@@ -314,7 +314,7 @@ TEST(HeartbeatCadence8Cell, CellD_Strand_TestReqIdMismatchDetected) {
                       << "CellD_Strand_TestReqIdMismatchDetected";
         return;
     }
-    fut.get();
+    (void)fut.get();  // outcome checked below via state
 
     // Session must disconnect (session_testreqid_mismatch=118).
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
@@ -341,7 +341,7 @@ TEST(HeartbeatCadence8Cell, CellD_Direct_TestReqIdMismatchDetected) {
                       << "CellD_Direct_TestReqIdMismatchDetected";
         return;
     }
-    fut.get();
+    (void)fut.get();  // outcome checked below via state
 
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
         << "Cell D (direct): Heartbeat wrong TestReqID → Disconnected. "

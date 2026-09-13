@@ -730,9 +730,9 @@ TEST(FixtLogonEstablishment, W1_FullRoundTrip_BothActive_NegotiatedV50sp2) {
     fixpp::session::Session initiator(s.engine, init_cfg, reg);
 
     // Open acceptor (enters NotConnected waiting state)
-    run_sync(s, [&] { return acceptor.open(); });
+    ASSERT_TRUE(run_sync(s, [&] { return acceptor.open(); }).has_value());
     // Open initiator (emits own Logon → LogonSent)
-    run_sync(s, [&] { return initiator.open(); });
+    ASSERT_TRUE(run_sync(s, [&] { return initiator.open(); }).has_value());
 
     ASSERT_FALSE(init_frame_out.empty()) << "Initiator should have emitted a Logon";
 
@@ -809,7 +809,7 @@ TEST(FixtLogonEstablishment, InitiatorAbsent1137Ack_ReachesActive_NegotiatedUnkn
     };
     fixpp::session::Session initiator(s.engine, init_cfg, reg);
 
-    run_sync(s, [&] { return initiator.open(); });
+    ASSERT_TRUE(run_sync(s, [&] { return initiator.open(); }).has_value());
     ASSERT_FALSE(init_frame_out.empty()) << "Initiator should have emitted a Logon";
 
     // Synthetic acceptor Logon-ack (ISLD→TW) WITHOUT 1137 (empty default_appl_ver_id).
@@ -855,7 +855,7 @@ TEST(FixtLogonEstablishment, W2_Missing1137_AcceptorRejectsWithRTM_NotActive) {
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
 
-    run_sync(s, [&] { return acceptor.open(); });
+    ASSERT_TRUE(run_sync(s, [&] { return acceptor.open(); }).has_value());
 
     // Build FIXT Logon WITHOUT 1137 (empty default_appl_ver_id).
     // Peer: TW sends to ISLD.
@@ -928,7 +928,7 @@ TEST(FixtLogonEstablishment, W3_Unserviceable1137_AcceptorRejectsWithVII_NotActi
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
 
-    run_sync(s, [&] { return acceptor.open(); });
+    ASSERT_TRUE(run_sync(s, [&] { return acceptor.open(); }).has_value());
 
     // Peer (TW) sends FIXT Logon with 1137=8 (v50sp1) — present but absent
     // from registry {v44, v50sp2} → unserviceable → 373=5 path fires.
@@ -1000,7 +1000,7 @@ TEST(FixtLogonEstablishment, W5_VersionGeneral_V44_NegotiatesCorrectly) {
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
 
-    run_sync(s, [&] { return acceptor.open(); });
+    ASSERT_TRUE(run_sync(s, [&] { return acceptor.open(); }).has_value());
 
     // Peer (TW) sends FIXT Logon with 1137=6 (v44 wire value).
     auto logon_v44 = make_fixt_logon_frame("FIXT.1.1", 1, "TW", "ISLD", 30, "6");
@@ -1029,7 +1029,7 @@ TEST(FixtLogonEstablishment, W5_VersionGeneral_V50sp2_NegotiatesCorrectly) {
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
 
-    run_sync(s, [&] { return acceptor.open(); });
+    ASSERT_TRUE(run_sync(s, [&] { return acceptor.open(); }).has_value());
 
     // Peer (TW) sends FIXT Logon with 1137=9 (v50sp2 wire value).
     auto logon_v50sp2 = make_fixt_logon_frame("FIXT.1.1", 1, "TW", "ISLD", 30, "9");
@@ -1089,7 +1089,7 @@ TEST(FixtLogonEstablishment, W8_1128Tolerance_DeliveredDictFree_StaysActive) {
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
 
-    run_sync(s, [&] { return acceptor.open(); });
+    ASSERT_TRUE(run_sync(s, [&] { return acceptor.open(); }).has_value());
 
     // Step 1: Complete FIXT handshake to reach Active.
     // Feed a valid FIXT Logon with 1137=9 (v50sp2).
@@ -1279,7 +1279,7 @@ TEST(FixtLogonEstablishment, W_Missing1137_ToAdminObserved_RequiredTagMissing_Di
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
 
-    run_sync(s, [&] { return acceptor.open(); });
+    ASSERT_TRUE(run_sync(s, [&] { return acceptor.open(); }).has_value());
 
     // Feed a FIXT Logon WITHOUT 1137 (empty default_appl_ver_id).
     auto logon_no_1137 = make_fixt_logon_frame("FIXT.1.1", 1, "TW", "ISLD", 30, "");
@@ -1349,7 +1349,7 @@ TEST(FixtLogonEstablishment, W_Unserviceable1137_ToAdminObserved_ValueIsIncorrec
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
 
-    run_sync(s, [&] { return acceptor.open(); });
+    ASSERT_TRUE(run_sync(s, [&] { return acceptor.open(); }).has_value());
 
     // Peer sends FIXT Logon with 1137=8 (v50sp1) — present but absent from
     // registry {v44, v50sp2} → unserviceable → 373=5 path + toAdmin fires.
@@ -1429,7 +1429,7 @@ TEST(FixtLogonEstablishment, W_StaleSendingTime_Beats1137Gate_Reject52_No1137) {
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
 
-    run_sync(s, [&] { return acceptor.open(); });
+    ASSERT_TRUE(run_sync(s, [&] { return acceptor.open(); }).has_value());
 
     // Build a FIXT Logon with:
     //   - stale 52 (2020-01-01, 4 years before the clock's UTC) → 52 guard fires

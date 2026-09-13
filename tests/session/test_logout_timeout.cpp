@@ -207,7 +207,7 @@ protected:
                          std::string_view our_target) {
         if (!run_open(s).has_value()) return false;
         auto logon = make_logon("FIX.4.2", 1, our_target, our_sender);
-        feed(s, logon);
+        if (!feed(s, logon).has_value()) return false;
         return s.state() == fixpp::session::fsm_state::Active;
     }
 };
@@ -224,7 +224,7 @@ TEST_F(LogoutTimeoutTest, Existing005_Acceptor_PeerLogout_EchoesAndDisconnects) 
     ASSERT_TRUE(drive_to_active(sess, "ISLD", "TW"));
 
     auto peer_logout = make_logout("FIX.4.2", 2, "TW", "ISLD");
-    feed(sess, peer_logout);
+    (void)feed(sess, peer_logout);  // outcome checked below via state/events
 
     // Pre-existing 005 behavior: already GREEN.
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
@@ -315,7 +315,7 @@ TEST_F(LogoutTimeoutTest, ConfigurableTimeoutField_WiredInto013RecoveryFsm) {
 
     // Trigger peer Logout → session echoes + 013 should arm timeout timer.
     auto peer_logout = make_logout("FIX.4.2", 2, "TW", "ISLD");
-    feed(sess, peer_logout);
+    (void)feed(sess, peer_logout);  // outcome checked below via state/events
 
     // The session has Disconnected (005 behavior). 013-new: drive_logout
     // should have surfaced a SessionEvent with the timeout disposition.
@@ -360,7 +360,7 @@ TEST_F(LogoutTimeoutTest, Acceptor_TimeoutFires_SurfacesLogoutTimeoutEvent) {
 
     // Peer sends Logout; acceptor echoes + should arm 300ms timeout.
     auto peer_logout = make_logout("FIX.4.2", 2, "TW", "ISLD");
-    feed(sess, peer_logout);
+    (void)feed(sess, peer_logout);  // outcome checked below via state/events
 
     // Advance clock past the 300ms timeout (peer doesn't TCP-close).
     // #289 batch 19 -- ESCALATION ROW, DISPOSITIONED: KIND G (vestigial).
@@ -409,7 +409,7 @@ TEST_F(LogoutTimeoutTest, Initiator_DriveLogout_EmitsNoEvent_ConfirmStubSymmetry
     ASSERT_TRUE(drive_to_active(sess, "ISLD", "TW"));
 
     auto peer_logout = make_logout("FIX.4.2", 2, "TW", "ISLD");
-    feed(sess, peer_logout);
+    (void)feed(sess, peer_logout);  // outcome checked below via state/events
 
     auto events = sess.recent_events();
     std::size_t total_events =

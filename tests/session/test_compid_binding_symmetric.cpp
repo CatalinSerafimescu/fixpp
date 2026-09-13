@@ -215,7 +215,7 @@ TEST_F(CompidBindingSymmetricTest, CellA_Acceptor_PeerClientCert_BindsSenderComp
 
     // Peer (TW initiator) sends Logon with SenderCompID(49)="TW".
     auto logon = make_logon_frame("FIX.4.2", 1, "TW", "ISLD");
-    feed(sess, logon);
+    ASSERT_TRUE(feed(sess, logon).has_value());
 
     // Cell A: MUST reach Active (SAN-DNS matches binding → TW authorized).
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active)
@@ -274,7 +274,7 @@ TEST_F(CompidBindingSymmetricTest, CellB_Initiator_PeerServerCert_BindsTargetCom
 
     // Peer (ISLD acceptor) sends Logon-ack: SenderCompID=ISLD, TargetCompID=TW.
     auto logon_ack = make_logon_frame("FIX.4.2", 1, "ISLD", "TW");
-    feed(sess, logon_ack);
+    ASSERT_TRUE(feed(sess, logon_ack).has_value());
 
     // Cell B: MUST reach Active (CN matches binding → ISLD authorized for initiator).
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active)
@@ -323,7 +323,7 @@ TEST_F(CompidBindingSymmetricTest, CellC_Acceptor_WrongCompId_Rejected) {
     fixpp::test_support::inject_live_identity(sess, std::move(pid));
 
     auto logon = make_logon_frame("FIX.4.2", 1, "TW", "ISLD");
-    feed(sess, logon);
+    (void)feed(sess, logon);  // outcome checked below via state
 
     // STRANGER not in policy → Disconnected.
     EXPECT_NE(sess.state(), fixpp::session::fsm_state::Active)

@@ -237,7 +237,7 @@ protected:
         }
         // Peer (TARGET→SENDER) sends Logon seq=1.
         auto logon = make_logon_frame("FIX.4.2", 1, "TARGET", "SENDER", heartbt_sec);
-        feed_sync(s, logon);
+        if (!feed_sync(s, logon).has_value()) return false;
         return s.state() == fsm_state::Active;
     }
 };
@@ -355,7 +355,7 @@ TEST_F(HbTrTest, HeartBtIntZeroDisablesTimers) {
 
     // Feed a Logon-ack that negotiates HeartBtInt=0.
     auto logon_zero = make_logon_frame("FIX.4.2", 1, "TARGET", "SENDER", 0);
-    feed_sync(session, logon_zero);
+    ASSERT_TRUE(feed_sync(session, logon_zero).has_value());
     ASSERT_EQ(session.state(), fsm_state::Active)
         << "Session must reach Active even with HeartBtInt=0";
 

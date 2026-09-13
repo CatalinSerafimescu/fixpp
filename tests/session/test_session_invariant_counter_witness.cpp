@@ -225,7 +225,7 @@ TEST_F(InvariantCounterWitnessTest, Acceptor_AuthorizeCalledExactlyOnce_PerLogon
         fixpp::test_support::inject_live_identity(sess, std::move(pid));
 
         auto logon = make_logon_frame("FIX.4.2", 1, "TW", "ISLD");
-        feed(sess, logon);
+        ASSERT_TRUE(feed(sess, logon).has_value());
 
         // Invariant 1: exactly one bound event per accepted Logon.
         const std::size_t bound_count = count_bound_events(sess);
@@ -282,7 +282,7 @@ TEST_F(InvariantCounterWitnessTest, Initiator_AuthorizeCalledExactlyOnce_PerLogo
         fixpp::test_support::inject_live_identity(sess, std::move(pid));
 
         auto logon_ack = make_logon_frame("FIX.4.2", 1, "ISLD", "TW");
-        feed(sess, logon_ack);
+        ASSERT_TRUE(feed(sess, logon_ack).has_value());
 
         // Initiator invariant: exactly one bound event per Logon-ack processed.
         const std::size_t bound_count = count_bound_events(sess);

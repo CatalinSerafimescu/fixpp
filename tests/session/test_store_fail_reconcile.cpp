@@ -334,7 +334,9 @@ TEST_F(StoreFailReconcileTest, VariantA_PlainPersistent_CleanResumeAtK) {
         << "post-reconnect inbound sequencing must remain unaffected (reconcile is "
            "outbound-only; no reset ran on this variant)";
 
-    asio::co_spawn(sx_, sess->close(fixpp::session::close_mode::terminal), asio::use_future).get();
+    // Teardown; call alone (not its result) drains the detached liveness loop.
+    (void)asio::co_spawn(sx_, sess->close(fixpp::session::close_mode::terminal), asio::use_future)
+        .get();
 }
 
 TEST_F(StoreFailReconcileTest, VariantB_ResetOnLogon_ReconnectLogonAtOneWellFormed) {
@@ -416,7 +418,9 @@ TEST_F(StoreFailReconcileTest, VariantB_ResetOnLogon_ReconnectLogonAtOneWellForm
         << "reset_on_logon's durable reset overrides BOTH counters to {1,1}; "
            "inbound sequencing after reconnect must be 1, not the pre-reset value";
 
-    asio::co_spawn(sx_, sess->close(fixpp::session::close_mode::terminal), asio::use_future).get();
+    // Teardown; call alone (not its result) drains the detached liveness loop.
+    (void)asio::co_spawn(sx_, sess->close(fixpp::session::close_mode::terminal), asio::use_future)
+        .get();
 }
 
 TEST_F(StoreFailReconcileTest, VariantC_BilateralStrictDefault_RegressionGuardNotClean) {
@@ -516,7 +520,9 @@ TEST_F(StoreFailReconcileTest, VariantC_BilateralStrictDefault_RegressionGuardNo
         << "post-reconnect inbound sequencing must remain unaffected (no reset "
            "runs under bilateral_strict without a reset knob)";
 
-    asio::co_spawn(sx_, sess->close(fixpp::session::close_mode::terminal), asio::use_future).get();
+    // Teardown; call alone (not its result) drains the detached liveness loop.
+    (void)asio::co_spawn(sx_, sess->close(fixpp::session::close_mode::terminal), asio::use_future)
+        .get();
 }
 
 }  // namespace

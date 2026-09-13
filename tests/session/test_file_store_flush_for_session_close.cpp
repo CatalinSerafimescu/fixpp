@@ -156,7 +156,9 @@ TEST(FileStoreFlushForSessionClose, GracefulCloseFlushes32FramesBatch64) {
 
         // Open: mints the FileStore, stashes A1 hook as close_flush_hook_a1_
         Session session{engine, cfg};
-        asio::co_spawn(pool.get_executor(), session.open(), asio::use_future).get();
+        ASSERT_TRUE(asio::co_spawn(pool.get_executor(), session.open(), asio::use_future)
+                        .get()
+                        .has_value());
 
         // Graceful close: must invoke flush_for_session_close() via A1 hook
         // then proceed to phase 2 root cancellation.
@@ -317,7 +319,8 @@ TEST(FileStoreFlushForSessionClose, SessionWithMemoryStoreGracefulCloseSucceeds)
     cfg.store_factory = std::make_unique<MemoryStoreFactory>(mcfg);
 
     Session session{engine, cfg};
-    asio::co_spawn(pool.get_executor(), session.open(), asio::use_future).get();
+    ASSERT_TRUE(
+        asio::co_spawn(pool.get_executor(), session.open(), asio::use_future).get().has_value());
 
     // close(graceful) with null A1 hook must still succeed
     auto result =
@@ -415,7 +418,8 @@ TEST(FileStoreFlushForSessionClose, A1HookInvokedBySessionCloseGraceful) {
     cfg.store_factory = std::move(factory_up);
 
     Session session{engine, cfg};
-    asio::co_spawn(pool.get_executor(), session.open(), asio::use_future).get();
+    ASSERT_TRUE(
+        asio::co_spawn(pool.get_executor(), session.open(), asio::use_future).get().has_value());
 
     // The tracking_store is now owned by the session
     tracking_store* ts = raw_factory->last_store;
@@ -455,7 +459,8 @@ TEST(FileStoreFlushForSessionClose, A1HookNotInvokedBySessionCloseTerminal) {
     cfg.store_factory = std::move(factory_up);
 
     Session session{engine, cfg};
-    asio::co_spawn(pool.get_executor(), session.open(), asio::use_future).get();
+    ASSERT_TRUE(
+        asio::co_spawn(pool.get_executor(), session.open(), asio::use_future).get().has_value());
 
     tracking_store* ts = raw_factory->last_store;
     ASSERT_NE(ts, nullptr);

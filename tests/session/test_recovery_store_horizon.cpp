@@ -307,7 +307,7 @@ protected:
         auto r = run_open(s);
         if (!r.has_value()) return false;
         auto logon = make_logon("FIX.4.2", 1, "TW", "ISLD");
-        feed(s, logon);
+        if (!feed(s, logon).has_value()) return false;
         return s.state() == fixpp::session::fsm_state::Active;
     }
 };
@@ -328,7 +328,7 @@ TEST_F(RecoveryStoreHorizonTest, PreHorizonGapCollapsedToGapFill) {
 
     // Peer asks for [2..12]; our store horizon is 7 (seqs 2..6 missing/purged).
     auto rr = make_resend_request("FIX.4.2", 2, "TW", "ISLD", 2, 12);
-    feed(sess, rr);
+    (void)feed(sess, rr);  // outcome checked below via emitted frames
 
     // A pre-horizon GapFill to seq 7 must appear before any replays.
     bool found_prehorizon_gapfill = false;
@@ -355,7 +355,7 @@ TEST_F(RecoveryStoreHorizonTest, AvailableRangeReplaysCarryPossDupFlag) {
     ASSERT_TRUE(drive_to_active(sess));
 
     auto rr = make_resend_request("FIX.4.2", 2, "TW", "ISLD", 2, 8);
-    feed(sess, rr);
+    (void)feed(sess, rr);  // outcome checked below via emitted frames
 
     // At least one replay frame in the [7..8] horizon range with PossDupFlag=Y.
     bool found_replay = false;
@@ -380,7 +380,7 @@ TEST_F(RecoveryStoreHorizonTest, ReplayFramesCarryOrigSendingTime) {
     ASSERT_TRUE(drive_to_active(sess));
 
     auto rr = make_resend_request("FIX.4.2", 2, "TW", "ISLD", 2, 8);
-    feed(sess, rr);
+    (void)feed(sess, rr);  // outcome checked below via emitted frames
 
     // Any replay frame must carry OrigSendingTime (tag 122).
     bool found_orig_sending_time = false;
@@ -506,7 +506,7 @@ TEST_F(RecoveryStoreHorizonTest, LargeAppFrameReplayed_NotGapFilled) {
 
     // Peer asks to resend [7..7].
     auto rr = make_resend_request("FIX.4.2", 2, "TW", "ISLD", 7, 7);
-    feed(sess, rr);
+    (void)feed(sess, rr);  // outcome checked below via emitted frames
 
     // Find the replay frame (43=Y + seq=7).
     bool found_replay = false;
@@ -561,7 +561,7 @@ TEST_F(RecoveryStoreHorizonTest, ResendBypassesToApp_DoNotSendInertOnReplay) {
     // wholly inside the store horizon, so the reply is a pure app replay with no
     // pre-horizon GapFill to muddy the toApp accounting.
     auto rr = make_resend_request("FIX.4.2", 2, "TW", "ISLD", 7, 7);
-    feed(sess, rr);
+    (void)feed(sess, rr);  // outcome checked below via emitted frames
 
     // PROOF-OF-WIRING (so the toApp==0 below is not vacuous): the same Application
     // IS registered and IS consulted on the ADMIN path — establishment + the resend

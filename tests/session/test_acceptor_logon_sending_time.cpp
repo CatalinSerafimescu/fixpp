@@ -412,7 +412,7 @@ TEST_F(AcceptorLogonSendingTimeTest, Cell1_StalePast_RejectNoLogout) {
     captured_frames_.clear();
 
     auto logon = make_logon_with_time(kStalePast);
-    feed(sess, logon);
+    (void)feed(sess, logon);  // outcome checked below via captured frames/state
 
     assert_reject_no_logout("Cell1");
     assert_disconnected(sess, "Cell1");
@@ -433,7 +433,7 @@ TEST_F(AcceptorLogonSendingTimeTest, Cell2_StaleFuture_RejectNoLogout) {
     captured_frames_.clear();
 
     auto logon = make_logon_with_time(kStaleFuture);
-    feed(sess, logon);
+    (void)feed(sess, logon);  // outcome checked below via captured frames/state
 
     assert_reject_no_logout("Cell2");
     assert_disconnected(sess, "Cell2");
@@ -453,7 +453,7 @@ TEST_F(AcceptorLogonSendingTimeTest, Cell3_Malformed52_RejectNoLogout) {
     captured_frames_.clear();
 
     auto logon = make_logon_with_time(kMalformed);
-    feed(sess, logon);
+    (void)feed(sess, logon);  // outcome checked below via captured frames/state
 
     assert_reject_no_logout("Cell3");
     assert_disconnected(sess, "Cell3");
@@ -473,7 +473,7 @@ TEST_F(AcceptorLogonSendingTimeTest, Cell4_Absent52_RejectReason10_NoLogout) {
     captured_frames_.clear();
 
     auto logon = make_logon_absent_sending_time();
-    feed(sess, logon);
+    (void)feed(sess, logon);  // outcome checked below via captured frames/state
 
     assert_reject_no_logout("Cell4");
     assert_disconnected(sess, "Cell4");
@@ -493,7 +493,7 @@ TEST_F(AcceptorLogonSendingTimeTest, Cell5_Empty52_RejectReason10_NoLogout) {
     captured_frames_.clear();
 
     auto logon = make_logon_empty_sending_time();
-    feed(sess, logon);
+    (void)feed(sess, logon);  // outcome checked below via captured frames/state
 
     assert_reject_no_logout("Cell5");
     assert_disconnected(sess, "Cell5");
@@ -601,7 +601,7 @@ TEST_F(AcceptorLogonSendingTimeTest, Cell8_BuildRejectOverflow_FailClosed_NoFram
     body += "98=0\x01";
     body += "108=30\x01";
     auto logon = build_frame(body);
-    feed(sess, logon);
+    (void)feed(sess, logon);  // outcome checked below via captured frames/state
 
     // FAIL CLOSED: Disconnected, and NO frame emitted (build_reject overflowed → the
     // `if (rj_r)` guard skipped the emit; the unconditional Disconnected still fired).
@@ -631,7 +631,7 @@ TEST_F(AcceptorLogonSendingTimeTest, Cell9_PersistentStore_InboundNotAdvanced) {
 
     // Feed stale logon at the expected inbound seq.
     auto logon = make_logon_with_time(kStalePast, /*seq=*/kSeedIn);
-    feed(sess, logon);
+    (void)feed(sess, logon);  // outcome checked below via captured frames/state
 
     assert_disconnected(sess, "Cell9");
     assert_reject_no_logout("Cell9", kSeedIn);  // inbound 34 = kSeedIn
@@ -672,7 +672,7 @@ TEST_F(AcceptorLogonSendingTimeTest, Cell10_Stale52WithExtra1137Field_RejectsOn5
 
     // Stale 52 + an extra 1137 field appended (inert on FIX.4.4; must not deflect the guard).
     auto logon = make_logon_with_time(kStalePast, 1, "1137=BADVER\x01");
-    feed(sess, logon);
+    (void)feed(sess, logon);  // outcome checked below via captured frames/state
 
     assert_reject_no_logout("Cell10");
     assert_disconnected(sess, "Cell10");
@@ -704,7 +704,7 @@ TEST_F(AcceptorLogonSendingTimeTest, Cell11_BadStalePlusBadCreds_52Wins) {
     captured_frames_.clear();
 
     auto logon = make_logon_with_time(kStalePast);
-    feed(sess, logon);
+    (void)feed(sess, logon);  // outcome checked below via captured frames/state
 
     // 52 guard fires first → Reject(371=52) + Disconnected.
     assert_reject_no_logout("Cell11");
@@ -734,7 +734,7 @@ TEST_F(AcceptorLogonSendingTimeTest, Cell12_BadStalePlusTooHighSeq_52Wins) {
 
     // seq=999 is too-high (expected 1); stale 52. 52 guard fires before check_inbound.
     auto logon = make_logon_with_time(kStalePast, /*seq=*/999);
-    feed(sess, logon);
+    (void)feed(sess, logon);  // outcome checked below via captured frames/state
 
     assert_reject_no_logout("Cell12", 999);  // inbound 34 = 999 (too-high seq)
     assert_disconnected(sess, "Cell12");
@@ -805,7 +805,7 @@ TEST_F(AcceptorLogonSendingTimeTest, Cell14_PersistentReconnect_RejectCarriesHyd
     captured_frames_.clear();
 
     auto logon = make_logon_with_time(kStalePast, /*seq=*/kSeedIn);
-    feed(sess, logon);
+    (void)feed(sess, logon);  // outcome checked below via captured frames/state
 
     assert_disconnected(sess, "Cell14");
     assert_reject_no_logout("Cell14");

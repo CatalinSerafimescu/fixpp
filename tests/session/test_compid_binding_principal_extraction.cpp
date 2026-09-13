@@ -330,7 +330,7 @@ TEST_F(CompidPrincipalExtractionSessionTest, CnExtraction_EmitsBoundEvent_WithCn
     fixpp::test_support::inject_live_identity(sess, make_cn_only_identity("TW-PROD-01"));
 
     auto logon = make_logon_frame("FIX.4.2", 1, "TW", "ISLD");
-    feed(sess, logon);
+    ASSERT_TRUE(feed(sess, logon).has_value());
 
     // Session must reach Active.
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active)

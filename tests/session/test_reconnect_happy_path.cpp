@@ -211,7 +211,7 @@ protected:
         auto r = run_open(s);
         if (!r.has_value()) return false;
         auto logon = make_logon("FIX.4.2", 1, "TW", "ISLD");
-        feed(s, logon);
+        if (!feed(s, logon).has_value()) return false;
         return s.state() == fixpp::session::fsm_state::Active;
     }
 };
@@ -231,7 +231,7 @@ TEST_F(ReconnectHappyPathTest, TooHighInboundSeqEntersAwaitingResend) {
     // After Logon(seq=1) consumed, next expected = 2.
     // Inject Heartbeat with seq=5 (gap [2..4]).
     auto hb = make_heartbeat("FIX.4.2", 5, "TW", "ISLD");
-    feed(sess, hb);
+    (void)feed(sess, hb);  // outcome checked below via emitted frames
 
     // The session's reconnect FSM should now be in AwaitingResend.
     // The ReconnectFsm is embedded inside session; we cannot access it directly
@@ -267,13 +267,13 @@ TEST_F(ReconnectHappyPathTest, GapCloseRestoresActiveState) {
 
     // Inject gap message (seq=5 when expected=2).
     auto hb_gap = make_heartbeat("FIX.4.2", 5, "TW", "ISLD");
-    feed(sess, hb_gap);
+    (void)feed(sess, hb_gap);  // outcome checked below via state
 
     // Inject fill messages seq=2, 3, 4 (PossDupFlag=Y would be set in real
     // replay but the key is the sequence numbers).
     for (std::uint32_t seq = 2; seq <= 4; ++seq) {
         auto hb_fill = make_heartbeat("FIX.4.2", seq, "TW", "ISLD");
-        feed(sess, hb_fill);
+        (void)feed(sess, hb_fill);  // outcome checked below via state
     }
 
     // After gap fills, session should be Active (not Disconnected).

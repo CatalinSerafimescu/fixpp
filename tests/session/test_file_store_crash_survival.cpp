@@ -87,8 +87,10 @@ FileStore::Config make_file_config(const fs::path& dir, asio::any_io_executor ex
         child_pool.get_executor(),
         [&store, &script]() -> asio::awaitable<void> {
             for (const auto& step : script) {
-                co_await store.store(step.seq, std::span<const std::byte>(step.frame_bytes),
-                                     step.dir);
+                // Verified cross-process by the parent's retrieve()+byte-compare below,
+                // not observable from this soon-to-_Exit() child.
+                (void)co_await store.store(step.seq, std::span<const std::byte>(step.frame_bytes),
+                                           step.dir);
             }
         },
         asio::use_future);

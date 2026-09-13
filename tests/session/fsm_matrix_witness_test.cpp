@@ -295,7 +295,7 @@ protected:
         if (s.state() != fsm_state::LogonSent) return false;
         // Peer sends Logon (sender=TARGET, target=SENDER) seq=1 with 108=30.
         auto peer_logon = build_logon(kTarget, kSender);
-        feed_sync(s, peer_logon);
+        if (!feed_sync(s, peer_logon).has_value()) return false;
         return s.state() == fsm_state::Active;
     }
 
@@ -304,7 +304,7 @@ protected:
         if (!open_sync(s).has_value()) return false;
         if (s.state() != fsm_state::NotConnected) return false;
         auto peer_logon = build_logon(kTarget, kSender);
-        feed_sync(s, peer_logon);
+        if (!feed_sync(s, peer_logon).has_value()) return false;
         return s.state() == fsm_state::Active;
     }
 

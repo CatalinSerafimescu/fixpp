@@ -267,7 +267,7 @@ TEST_F(SeqnumGapFatalTest, NoResendRequestEmittedOnTooHighGap) {
 
     // Too-high gap.
     auto hb = make_heartbeat_frame("FIX.4.2", 99, "TW", "ISLD");
-    feed_sync(sess, hb);
+    (void)feed_sync(sess, hb);  // outcome checked below via state, not the return value
 
     // 013 FR-009: session stays Active (AwaitingResend) after too-high gap.
     // (Pre-013: must be Disconnected or LogoutSent; amended per 013 T006a.)
@@ -292,7 +292,7 @@ TEST_F(SeqnumGapFatalTest, ActiveTooLowBecomesSessionFatal) {
     // In Active: next expected = 2. Send Heartbeat at seq=1 (too low).
     // 013: too-low Heartbeat is silently ignored; session stays Active.
     auto hb = make_heartbeat_frame("FIX.4.2", 1, "TW", "ISLD");
-    feed_sync(sess, hb);
+    (void)feed_sync(sess, hb);  // outcome checked below via state, not the return value
 
     const auto st = sess.state();
     EXPECT_EQ(st, fsm_state::Active)
@@ -334,7 +334,7 @@ TEST_F(SeqnumGapFatalTest, LogonSentTooHighBecomesSessionFatal) {
     // on whether the initiator's LogonSent FSM mutation is wired yet.
     // Both paths produce Disconnected per the data-model matrix.
     auto hb = make_heartbeat_frame("FIX.4.2", 99, "ISLD", "TW");
-    feed_sync(sess, hb);
+    (void)feed_sync(sess, hb);  // outcome checked below via state, not the return value
 
     EXPECT_EQ(sess.state(), fsm_state::Disconnected)
         << "LogonSent (or NotConnected) + unexpected Heartbeat must transition "

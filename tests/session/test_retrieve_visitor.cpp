@@ -230,8 +230,10 @@ TEST(RetrieveVisitor, VisitorStopHaltsIteration) {
             // Store 5 frames
             for (int i = 1; i <= 5; ++i) {
                 auto frame = make_test_frame(static_cast<seqnum_t>(i), direction_t::outbound);
-                co_await store.store(static_cast<seqnum_t>(i), std::span<const std::byte>(frame),
-                                     direction_t::outbound);
+                auto st_r =
+                    co_await store.store(static_cast<seqnum_t>(i),
+                                         std::span<const std::byte>(frame), direction_t::outbound);
+                EXPECT_TRUE(st_r.has_value()) << "setup store must succeed";
             }
 
             // Visitor stops after frame 3
@@ -276,8 +278,10 @@ TEST(RetrieveVisitor, VisitorAbortReturnsStoreVisitorAborted) {
             // Store 5 frames
             for (int i = 1; i <= 5; ++i) {
                 auto frame = make_test_frame(static_cast<seqnum_t>(i), direction_t::inbound);
-                co_await store.store(static_cast<seqnum_t>(i), std::span<const std::byte>(frame),
-                                     direction_t::inbound);
+                auto st_r =
+                    co_await store.store(static_cast<seqnum_t>(i),
+                                         std::span<const std::byte>(frame), direction_t::inbound);
+                EXPECT_TRUE(st_r.has_value()) << "setup store must succeed";
             }
 
             abort_at_visitor vis{3};

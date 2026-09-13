@@ -213,7 +213,7 @@ protected:
     bool drive_to_active(fixpp::session::Session& s) {
         if (!run_open(s).has_value()) return false;
         auto logon = make_logon("FIX.4.2", 1, "TW", "ISLD");
-        feed(s, logon);
+        if (!feed(s, logon).has_value()) return false;
         return s.state() == fixpp::session::fsm_state::Active;
     }
 };
@@ -239,7 +239,7 @@ TEST_F(SessionRecoveryAllocGuardTest, HeartbeatSteadyState_DualGate) {
 
     // Warm up (primes asio per-thread recycler outside the guard window).
     auto warmup_hb = make_heartbeat("FIX.4.2", 2, "TW", "ISLD");
-    for (int i = 0; i < 10; ++i) feed(sess, warmup_hb);
+    for (int i = 0; i < 10; ++i) (void)feed(sess, warmup_hb);  // priming only
     outbound_frames.clear();
     pmr.alloc_count = 0;
 
@@ -249,7 +249,9 @@ TEST_F(SessionRecoveryAllocGuardTest, HeartbeatSteadyState_DualGate) {
 
     for (int i = 0; i < kIter; ++i) {
         auto hb = make_heartbeat("FIX.4.2", static_cast<std::uint32_t>(3 + i), "TW", "ISLD");
-        feed(sess, hb);
+        // Inside the alloc-measured window; behavior is checked below via
+        // outbound_frames, not via feed's own result.
+        (void)feed(sess, hb);
     }
 
     long global_alloc_count = alloc_guard_count ? alloc_guard_count() : 0L;
@@ -291,7 +293,7 @@ TEST_F(SessionRecoveryAllocGuardTest, AwaitingResendTransition_DualGate) {
 
     // Warm up.
     auto warmup_hb = make_heartbeat("FIX.4.2", 2, "TW", "ISLD");
-    feed(sess, warmup_hb);
+    (void)feed(sess, warmup_hb);  // priming only; not measured or asserted
     outbound_frames.clear();
     pmr.alloc_count = 0;
 
@@ -301,7 +303,9 @@ TEST_F(SessionRecoveryAllocGuardTest, AwaitingResendTransition_DualGate) {
 
     // Feed heartbeat with too-high seqnum (gap [3..4] → expected 3, got 5).
     auto gap_hb = make_fix_frame("FIX.4.2", "0", 5, "TW", "ISLD");
-    feed(sess, gap_hb);
+    // Inside the alloc-measured window; outcome is checked below via the
+    // emitted ResendRequest, not via feed's own result.
+    (void)feed(sess, gap_hb);
 
     long global_alloc_count = alloc_guard_count ? alloc_guard_count() : 0L;
     std::size_t pmr_allocs_in_window = pmr.alloc_count - pre_pmr_count;

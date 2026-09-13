@@ -209,7 +209,8 @@ TEST(AsioPlainTransport, NoTlsClientHelloFirstByte) {
 
             // 0x38 = '8' — start of FIX BeginString "8=FIX..."
             const std::byte fix_first{0x38};
-            co_await client.async_write(std::span<const std::byte>{&fix_first, 1});
+            auto wr = co_await client.async_write(std::span<const std::byte>{&fix_first, 1});
+            if (!wr) co_return;
             exchange_done = true;
             watchdog.cancel();
         },

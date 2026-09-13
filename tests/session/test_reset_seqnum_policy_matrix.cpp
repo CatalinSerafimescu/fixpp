@@ -216,7 +216,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Acceptor_PeerSends141Y) {
 
     // Peer (initiator) sends Logon with ResetSeqNumFlag(141)=Y.
     auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
-    feed(sess, logon_with_reset);
+    ASSERT_TRUE(feed(sess, logon_with_reset).has_value());
 
     // After successful 141=Y exchange: emits sequence_numbers_reset{by_peer_request=true}.
     EXPECT_TRUE(has_session_reset_event(sess))
@@ -257,7 +257,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Initiator_PeerOmits141Y) {
 
     // Peer sends Logon WITHOUT 141=Y; bilateral_strict should reject.
     auto logon_no_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/false);
-    feed(sess, logon_no_reset);
+    (void)feed(sess, logon_no_reset);  // outcome checked below via state
 
     // In bilateral_strict: when we have sent 141=Y (our open sends Logon with 141=Y)
     // but peer's response lacks it → session_seqnum_reset_mismatch + disconnect.
@@ -289,7 +289,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralLenient_Acceptor_PeerSends141Y) {
     ASSERT_TRUE(run_open(sess).has_value());
 
     auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
-    feed(sess, logon_with_reset);
+    ASSERT_TRUE(feed(sess, logon_with_reset).has_value());
 
     EXPECT_TRUE(has_session_reset_event(sess))
         << "bilateral_lenient acceptor: peer 141=Y must emit "
@@ -313,7 +313,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralLenient_Acceptor_PeerOmits141Y) {
 
     // Peer sends Logon WITHOUT 141=Y; bilateral_lenient should accept anyway.
     auto logon_no_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/false);
-    feed(sess, logon_no_reset);
+    ASSERT_TRUE(feed(sess, logon_no_reset).has_value());
 
     // bilateral_lenient: peer omits 141=Y → accept normally (no rejection).
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active)
@@ -343,7 +343,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Initiator_PeerConfirms141Y) 
 
     // Peer (acceptor, ISLD→TW) sends Logon-ack WITH 141=Y — mutual reset.
     auto logon_ack_with_reset = make_logon("FIX.4.2", 1, "ISLD", "TW", 30, /*reset=*/true);
-    feed(sess, logon_ack_with_reset);
+    ASSERT_TRUE(feed(sess, logon_ack_with_reset).has_value());
 
     // (a) Session reaches Active after bilateral confirmation.
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active)
@@ -422,7 +422,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, Unilateral_Acceptor_PeerSends141Y) {
     ASSERT_TRUE(run_open(sess).has_value());
 
     auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
-    feed(sess, logon_with_reset);
+    ASSERT_TRUE(feed(sess, logon_with_reset).has_value());
 
     EXPECT_TRUE(has_session_reset_event(sess))
         << "unilateral acceptor: peer 141=Y must emit sequence_numbers_reset event. "
@@ -457,7 +457,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Acceptor_ReplyContains141Y) 
     ASSERT_TRUE(run_open(sess).has_value());
 
     auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
-    feed(sess, logon_with_reset);
+    ASSERT_TRUE(feed(sess, logon_with_reset).has_value());
 
     // At least one outbound frame must have been captured (the reply Logon).
     ASSERT_FALSE(capture.frames.empty())
@@ -482,7 +482,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralLenient_Acceptor_ReplyContains141Y)
     ASSERT_TRUE(run_open(sess).has_value());
 
     auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
-    feed(sess, logon_with_reset);
+    ASSERT_TRUE(feed(sess, logon_with_reset).has_value());
 
     // At least one outbound frame must have been captured (the reply Logon).
     ASSERT_FALSE(capture.frames.empty())
@@ -510,7 +510,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, Unilateral_Acceptor_ReplyDoesNotContain141Y)
     ASSERT_TRUE(run_open(sess).has_value());
 
     auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
-    feed(sess, logon_with_reset);
+    ASSERT_TRUE(feed(sess, logon_with_reset).has_value());
 
     // unilateral: outbound 141 is config-driven, NOT mirror-driven (FR-017:149).
     // The reply Logon must NOT echo 141=Y just because the peer sent it.
@@ -558,7 +558,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Acceptor_CountersResetToOne)
     sess.seqnum_mgr_test_access().set_counters_for_test(1, 10);
 
     auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
-    feed(sess, logon_with_reset);
+    ASSERT_TRUE(feed(sess, logon_with_reset).has_value());
 
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
 
@@ -586,7 +586,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralLenient_Acceptor_CountersResetToOne
     sess.seqnum_mgr_test_access().set_counters_for_test(1, 10);
 
     auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
-    feed(sess, logon_with_reset);
+    ASSERT_TRUE(feed(sess, logon_with_reset).has_value());
 
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
 
@@ -612,7 +612,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Initiator_CountersResetToOne
 
     // Peer (acceptor) acks with Logon seq=1 + 141=Y (mutual reset confirm).
     auto logon_ack_with_reset = make_logon("FIX.4.2", 1, "ISLD", "TW", 30, /*reset=*/true);
-    feed(sess, logon_ack_with_reset);
+    ASSERT_TRUE(feed(sess, logon_ack_with_reset).has_value());
 
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
 
@@ -666,7 +666,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, Unilateral_Acceptor_CountersResetToOne) {
     sess.seqnum_mgr_test_access().set_counters_for_test(1, 10);
 
     auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
-    feed(sess, logon_with_reset);
+    ASSERT_TRUE(feed(sess, logon_with_reset).has_value());
 
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
 
@@ -697,7 +697,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, Unilateral_Acceptor_PeerSends141Y_NoOurFlag)
 
     // Peer sends 141=Y; we honour it (unilateral).
     auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, true);
-    feed(sess, logon_with_reset);
+    ASSERT_TRUE(feed(sess, logon_with_reset).has_value());
 
     // Emits sequence_numbers_reset event (by_peer_request=true).
     auto events = sess.recent_events();
@@ -743,7 +743,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest,
 
     // Peer Logon-ack echoes 141=Y at seq=1.
     auto logon_ack_reset = make_logon("FIX.4.2", 1, "ISLD", "TW", 30, /*reset=*/true);
-    feed(sess, logon_ack_reset);
+    ASSERT_TRUE(feed(sess, logon_ack_reset).has_value());
 
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active)
         << "W2: session must reach Active after peer 141=Y ack";
@@ -807,7 +807,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest,
     // Peer spontaneously sends Logon-ack WITH 141=Y at seq=1.
     // bilateral_lenient accepts this without requiring we sent 141=Y.
     auto logon_ack_reset = make_logon("FIX.4.2", 1, "ISLD", "TW", 30, /*reset=*/true);
-    feed(sess, logon_ack_reset);
+    ASSERT_TRUE(feed(sess, logon_ack_reset).has_value());
 
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active)
         << "T011 W3: session must reach Active after peer-spontaneous 141=Y";
@@ -874,7 +874,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest,
 
     // Peer spontaneously sends Logon at seq=1 WITH 141=Y (bilateral_lenient accepts it).
     auto logon_ack_reset = make_logon("FIX.4.2", 1, "ISLD", "TW", 30, /*reset=*/true);
-    feed(sess, logon_ack_reset);
+    ASSERT_TRUE(feed(sess, logon_ack_reset).has_value());
 
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active)
         << "T012 W7: session must reach Active after peer-spontaneous 141=Y";

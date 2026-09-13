@@ -291,7 +291,7 @@ TEST_F(TcSeqnumTest, Tc2c_MsgSeqNumTooLow) {
     // Send a Heartbeat with seq=1 (too low; no PossDupFlag).
     // 013 FR-009 / T020-A: too-low Heartbeat is silently ignored → stays Active.
     auto hb = make_heartbeat_frame("FIX.4.2", 1, "TW", "ISLD");
-    feed_sync(sess, hb);
+    (void)feed_sync(sess, hb);  // outcome checked below via state, not the return value
 
     // With 013, too-low Heartbeat → Active (not fatal).
     // The general [FIX-SL §4.1] fatal rule still applies to non-Heartbeat
@@ -354,7 +354,7 @@ TEST_F(TcSeqnumTest, Tc2r_UnregisteredMsgType) {
 
     // Send a message with a completely unregistered MsgType (e.g., "XYZ").
     auto unknown = make_unknown_msgtype_frame("FIX.4.2", 2, "TW", "ISLD", "XYZ");
-    feed_sync(sess, unknown);
+    (void)feed_sync(sess, unknown);  // outcome checked below via state, not the return value
 
     const auto st = sess.state();
     EXPECT_NE(st, fixpp::session::fsm_state::Disconnected)

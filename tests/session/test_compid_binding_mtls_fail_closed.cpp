@@ -198,7 +198,7 @@ TEST_F(MtlsFailClosedTest, Acceptor_MtlsCa_NoPeerIdentity_FailsClosed) {
 
     // Peer sends Logon — no peer_identity is available (no test seam, no real TLS).
     auto logon = make_logon("FIX.4.2", 1, "TW", "ISLD");
-    feed(sess, logon);
+    (void)feed(sess, logon);  // outcome checked below via state
 
     // mTLS + no peer_identity → fail CLOSED.
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
@@ -239,7 +239,7 @@ TEST_F(MtlsFailClosedTest, Initiator_MtlsCa_NoPeerIdentity_FailsClosed) {
 
     // Peer (acceptor) sends Logon-ack.
     auto logon_ack = make_logon("FIX.4.2", 1, "ISLD", "TW");
-    feed(sess, logon_ack);
+    (void)feed(sess, logon_ack);  // outcome checked below via state
 
     // mTLS + no peer_identity → fail CLOSED on the initiator path too.
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
@@ -276,7 +276,7 @@ TEST_F(MtlsFailClosedTest, Acceptor_OneWayCa_NoPeerIdentity_Accepts) {
     ASSERT_TRUE(run_open(sess).has_value());
 
     auto logon = make_logon("FIX.4.2", 1, "TW", "ISLD");
-    feed(sess, logon);
+    ASSERT_TRUE(feed(sess, logon).has_value());  // one_way_ca: gate skipped, must succeed
 
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active)
         << "one_way_ca profile: no client cert → CompID gate skipped → Active.";

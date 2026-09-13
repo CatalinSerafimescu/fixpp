@@ -322,7 +322,8 @@ TEST_F(FileStoreCancellationTest, Store_CancelAtMutexAcquire_YieldsStoreCancelle
     // 0 state change: only seq=1 committed; B's syscall probe must NOT have fired.
     CountingVisitor vis;
     spawn_on_strand([store_sp, &vis]() mutable -> asio::awaitable<void> {
-        co_await store_sp->retrieve(1, 0, direction_t::outbound, vis);
+        auto ret_r = co_await store_sp->retrieve(1, 0, direction_t::outbound, vis);
+        EXPECT_TRUE(ret_r.has_value()) << "retrieve must succeed";
     }).get();
     EXPECT_EQ(vis.count, 1U) << "Only seq=1 should be stored; B was cancelled at mutex";
 
@@ -420,7 +421,9 @@ TEST_F(FileStoreCancellationTest, Reset_CancelAtMutexAcquire_YieldsStoreCancelle
     fixpp::session::install_store_offload_probe(nullptr);
     const auto frame1 = make_frame(1);
     spawn_on_strand([store_sp, frame1]() mutable -> asio::awaitable<void> {
-        co_await store_sp->store(1, std::span<const std::byte>(frame1), direction_t::outbound);
+        auto pre_r =
+            co_await store_sp->store(1, std::span<const std::byte>(frame1), direction_t::outbound);
+        EXPECT_TRUE(pre_r.has_value()) << "pre-store setup must succeed";
     }).get();
 
     // Re-arm hold_probe for op A.
@@ -482,7 +485,8 @@ TEST_F(FileStoreCancellationTest, Reset_CancelAtMutexAcquire_YieldsStoreCancelle
     // 0 state change: both frames still exist (reset was cancelled before renaming).
     CountingVisitor vis;
     spawn_on_strand([store_sp, &vis]() mutable -> asio::awaitable<void> {
-        co_await store_sp->retrieve(1, 0, direction_t::outbound, vis);
+        auto ret_r = co_await store_sp->retrieve(1, 0, direction_t::outbound, vis);
+        EXPECT_TRUE(ret_r.has_value()) << "retrieve must succeed";
     }).get();
     EXPECT_EQ(vis.count, 2U) << "Both frames must still exist; reset was cancelled at mutex";
 }
@@ -555,7 +559,8 @@ TEST_F(FileStoreCancellationTest, Store_CancelMidSyscall_DurableNotCancelled) {
 
         CountingVisitor vis;
         spawn_on_strand([store_sp, &vis]() mutable -> asio::awaitable<void> {
-            co_await store_sp->retrieve(1, 0, direction_t::outbound, vis);
+            auto ret_r = co_await store_sp->retrieve(1, 0, direction_t::outbound, vis);
+            EXPECT_TRUE(ret_r.has_value()) << "retrieve must succeed";
         }).get();
         EXPECT_EQ(vis.count, 1U) << "Frame seq=1 must be durable after successful store";
     }
@@ -625,7 +630,9 @@ TEST_F(FileStoreCancellationTest, Reset_CancelMidSyscall_DurableNotCancelled) {
     // Pre-store a frame so reset() has state to clear.
     const auto frame1 = make_frame(1);
     spawn_on_strand([store_sp, frame1]() mutable -> asio::awaitable<void> {
-        co_await store_sp->store(1, std::span<const std::byte>(frame1), direction_t::outbound);
+        auto pre_r =
+            co_await store_sp->store(1, std::span<const std::byte>(frame1), direction_t::outbound);
+        EXPECT_TRUE(pre_r.has_value()) << "pre-store setup must succeed";
     }).get();
 
     reset_probe();

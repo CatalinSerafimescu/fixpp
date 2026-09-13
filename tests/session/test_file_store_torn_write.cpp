@@ -158,8 +158,9 @@ TEST(FileStoreTornWrite, StaleResetTmpIsUnlinked) {
             pool.get_executor(),
             [&store, &script]() -> asio::awaitable<void> {
                 for (const auto& step : script) {
-                    co_await store.store(step.seq, std::span<const std::byte>(step.frame_bytes),
-                                         step.dir);
+                    auto st_r = co_await store.store(
+                        step.seq, std::span<const std::byte>(step.frame_bytes), step.dir);
+                    EXPECT_TRUE(st_r.has_value()) << "setup store must succeed";
                 }
             },
             asio::use_future);
@@ -222,8 +223,9 @@ TEST(FileStoreTornWriteWindows, SetEndOfFileTruncation) {
             pool.get_executor(),
             [&store, &script]() -> asio::awaitable<void> {
                 for (const auto& step : script) {
-                    co_await store.store(step.seq, std::span<const std::byte>(step.frame_bytes),
-                                         step.dir);
+                    auto st_r = co_await store.store(
+                        step.seq, std::span<const std::byte>(step.frame_bytes), step.dir);
+                    EXPECT_TRUE(st_r.has_value()) << "setup store must succeed";
                 }
             },
             asio::use_future);

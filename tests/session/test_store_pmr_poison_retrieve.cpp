@@ -178,8 +178,10 @@ TEST(StorePmrPoisonRetrieve, PmrPoisonOnSecondFrameReturnsStoreVisitorAborted) {
             // Store 3 frames
             for (int i = 1; i <= 3; ++i) {
                 auto frame = make_test_frame(static_cast<seqnum_t>(i), direction_t::inbound);
-                co_await store.store(static_cast<seqnum_t>(i), std::span<const std::byte>(frame),
-                                     direction_t::inbound);
+                auto st_r =
+                    co_await store.store(static_cast<seqnum_t>(i),
+                                         std::span<const std::byte>(frame), direction_t::inbound);
+                EXPECT_TRUE(st_r.has_value()) << "setup store must succeed";
             }
 
             poison_memory_resource poison;

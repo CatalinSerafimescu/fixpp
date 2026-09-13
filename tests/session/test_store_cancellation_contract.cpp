@@ -227,7 +227,8 @@ TEST(StoreCancellationContract, CancelledBeforeLinearisationYieldsStoreCancelled
             }
         } cv;
         run_on_pool(pool, [&store, &cv]() -> asio::awaitable<void> {
-            co_await store->retrieve(1, 0, direction_t::outbound, cv);
+            auto ret_r = co_await store->retrieve(1, 0, direction_t::outbound, cv);
+            EXPECT_TRUE(ret_r.has_value()) << "retrieve must succeed";
         });
         EXPECT_EQ(cv.count, 1U) << "Only seq=1 should be in the store; seq=2 was cancelled";
     } else {

@@ -340,7 +340,9 @@ TEST_F(StoreFailClosedPersistentTest,
     EXPECT_EQ(restart_seq, k) << "restart must recover the durable outbound counter at k=" << k
                               << " (the failed store never advanced it); got " << restart_seq;
 
-    asio::co_spawn(sx_, sess2.close(fixpp::session::close_mode::terminal), asio::use_future).get();
+    // Teardown; call alone (not its result) drains the detached liveness loop.
+    (void)asio::co_spawn(sx_, sess2.close(fixpp::session::close_mode::terminal), asio::use_future)
+        .get();
 }
 
 }  // namespace

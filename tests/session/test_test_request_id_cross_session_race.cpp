@@ -1862,12 +1862,12 @@ TEST(CrossSessionTestReqID, ConcurrentSessionsTSanStress) {
     {
         auto fa = asio::co_spawn(ex_a, sA.session->close(fixpp::session::close_mode::terminal),
                                  asio::use_future);
-        fa.get();
+        (void)fa.get();  // teardown; the call, not its result, cancels the liveness loop
     }
     {
         auto fb = asio::co_spawn(ex_b, sB.session->close(fixpp::session::close_mode::terminal),
                                  asio::use_future);
-        fb.get();
+        (void)fb.get();  // teardown; the call, not its result, cancels the liveness loop
     }
 
     pool.join();

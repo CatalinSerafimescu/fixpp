@@ -123,8 +123,10 @@ TEST(StoreShutdownOrdering, StoreOutlivesAllCoroutines) {
         [store]() -> asio::awaitable<void> {
             for (int i = 1; i <= kPerDir; ++i) {
                 auto frame = make_test_frame(static_cast<seqnum_t>(i), direction_t::inbound);
-                co_await store->store(static_cast<seqnum_t>(i), std::span<const std::byte>(frame),
-                                      direction_t::inbound);
+                // TSan-only test; correctness of stored content is not asserted.
+                (void)co_await store->store(static_cast<seqnum_t>(i),
+                                            std::span<const std::byte>(frame),
+                                            direction_t::inbound);
             }
         },
         asio::use_future);
@@ -134,8 +136,10 @@ TEST(StoreShutdownOrdering, StoreOutlivesAllCoroutines) {
         [store]() -> asio::awaitable<void> {
             for (int i = 1; i <= kPerDir; ++i) {
                 auto frame = make_test_frame(static_cast<seqnum_t>(i), direction_t::outbound);
-                co_await store->store(static_cast<seqnum_t>(i), std::span<const std::byte>(frame),
-                                      direction_t::outbound);
+                // TSan-only test; correctness of stored content is not asserted.
+                (void)co_await store->store(static_cast<seqnum_t>(i),
+                                            std::span<const std::byte>(frame),
+                                            direction_t::outbound);
             }
         },
         asio::use_future);
@@ -174,8 +178,11 @@ TEST(StoreShutdownOrdering, ResetDuringOperationalPeriodIsClean) {
             // Store 50 frames
             for (int i = 1; i <= 50; ++i) {
                 auto frame = make_test_frame(static_cast<seqnum_t>(i), direction_t::outbound);
-                co_await store->store(static_cast<seqnum_t>(i), std::span<const std::byte>(frame),
-                                      direction_t::outbound);
+                // Only the post-reset counter is asserted below; a failed
+                // pre-reset store is not otherwise observable in this test.
+                (void)co_await store->store(static_cast<seqnum_t>(i),
+                                            std::span<const std::byte>(frame),
+                                            direction_t::outbound);
             }
 
             // Trigger reset
@@ -218,8 +225,10 @@ TEST(StoreShutdownOrdering, ConcurrentReadWriteNoDataRace) {
             [store]() -> asio::awaitable<void> {
                 for (int i = 1; i <= 10; ++i) {
                     auto frame = make_test_frame(static_cast<seqnum_t>(i), direction_t::outbound);
-                    co_await store->store(static_cast<seqnum_t>(i),
-                                          std::span<const std::byte>(frame), direction_t::outbound);
+                    auto st_r = co_await store->store(static_cast<seqnum_t>(i),
+                                                      std::span<const std::byte>(frame),
+                                                      direction_t::outbound);
+                    EXPECT_TRUE(st_r.has_value()) << "setup store must succeed";
                 }
             },
             asio::use_future);
@@ -238,8 +247,11 @@ TEST(StoreShutdownOrdering, ConcurrentReadWriteNoDataRace) {
         [store, &writer_done]() -> asio::awaitable<void> {
             for (int i = 11; i <= 30; ++i) {
                 auto frame = make_test_frame(static_cast<seqnum_t>(i), direction_t::outbound);
-                co_await store->store(static_cast<seqnum_t>(i), std::span<const std::byte>(frame),
-                                      direction_t::outbound);
+                // Only frames 1..10 are read back below; this writer's own
+                // per-call success is not otherwise observable in this test.
+                (void)co_await store->store(static_cast<seqnum_t>(i),
+                                            std::span<const std::byte>(frame),
+                                            direction_t::outbound);
             }
             writer_done.store(true, std::memory_order_release);
         },
@@ -306,7 +318,9 @@ TEST(StoreShutdownOrdering, UnboundedRetrieveUAFUnderConcurrentAppend) {
             setup.get_executor(),
             [store]() -> asio::awaitable<void> {
                 auto frame = make_test_frame(static_cast<seqnum_t>(1), direction_t::outbound);
-                co_await store->store(1, std::span<const std::byte>(frame), direction_t::outbound);
+                // ASan/UAF-only test; the reader below tolerates either outcome.
+                (void)co_await store->store(1, std::span<const std::byte>(frame),
+                                            direction_t::outbound);
             },
             asio::use_future);
         pre.get();
@@ -320,8 +334,10 @@ TEST(StoreShutdownOrdering, UnboundedRetrieveUAFUnderConcurrentAppend) {
         [store]() -> asio::awaitable<void> {
             for (int i = 2; i <= 200; ++i) {
                 auto frame = make_test_frame(static_cast<seqnum_t>(i), direction_t::outbound);
-                co_await store->store(static_cast<seqnum_t>(i), std::span<const std::byte>(frame),
-                                      direction_t::outbound);
+                // ASan/UAF-only test; we only care that no memory corruption occurs.
+                (void)co_await store->store(static_cast<seqnum_t>(i),
+                                            std::span<const std::byte>(frame),
+                                            direction_t::outbound);
             }
         },
         asio::use_future);

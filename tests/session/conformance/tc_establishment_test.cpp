@@ -352,7 +352,9 @@ TEST(TcEstablishment, Scenario1c_InvalidSenderCompID) {
 
     // SenderCompID "WT" ≠ expected "TW".
     auto frame = make_logon_frame("FIX.4.2", 1, "WT", "ISLD", 30);
-    h.feed_frame(sess, std::span<const std::byte>{frame});
+    // Rejection is expressed via the state transition below, not the
+    // return value (on_inbound_frame returns success on this refusal path).
+    (void)h.feed_frame(sess, std::span<const std::byte>{frame});
 
     const auto s = sess.state();
     EXPECT_NE(s, fsm_state::Active) << "1c_InvalidSenderCompID: must not enter Active";
@@ -375,7 +377,9 @@ TEST(TcEstablishment, Scenario1c_InvalidTargetCompID) {
 
     // TargetCompID "DLSI" ≠ expected "ISLD".
     auto frame = make_logon_frame("FIX.4.2", 1, "TW", "DLSI", 30);
-    h.feed_frame(sess, std::span<const std::byte>{frame});
+    // Rejection is expressed via the state transition below, not the
+    // return value (on_inbound_frame returns success on this refusal path).
+    (void)h.feed_frame(sess, std::span<const std::byte>{frame});
 
     const auto s = sess.state();
     EXPECT_NE(s, fsm_state::Active) << "1c_InvalidTargetCompID: must not enter Active";
@@ -398,7 +402,9 @@ TEST(TcEstablishment, Scenario1d_WrongBeginString) {
     ASSERT_TRUE(h.open_session(sess).has_value());
 
     auto frame = make_logon_frame("FIX.3.9", 1, "TW", "ISLD", 30);
-    h.feed_frame(sess, std::span<const std::byte>{frame});
+    // Rejection is expressed via the state transition below, not the
+    // return value (on_inbound_frame returns success on this refusal path).
+    (void)h.feed_frame(sess, std::span<const std::byte>{frame});
 
     const auto s = sess.state();
     EXPECT_NE(s, fsm_state::Active) << "1d_WrongBeginString: must not enter Active";
@@ -420,7 +426,9 @@ TEST(TcEstablishment, Scenario1e_NotLogonMessage) {
     ASSERT_TRUE(h.open_session(sess).has_value());
 
     auto frame = make_heartbeat_frame("FIX.4.2", 1, "TW", "ISLD");
-    h.feed_frame(sess, std::span<const std::byte>{frame});
+    // Rejection is expressed via the state transition below, not the
+    // return value (on_inbound_frame returns success on this refusal path).
+    (void)h.feed_frame(sess, std::span<const std::byte>{frame});
 
     const auto s = sess.state();
     EXPECT_NE(s, fsm_state::Active) << "1e_NotLogonMessage: must not enter Active";
@@ -445,7 +453,9 @@ TEST(TcEstablishment, Scenario2i_BeginStringValueUnexpected) {
 
     // Step 2: post-logon Heartbeat with BeginString=FIX.4.1 (wrong version).
     auto bad = make_heartbeat_frame("FIX.4.1", 2, "TW", "ISLD");
-    h.feed_frame(sess, std::span<const std::byte>{bad});
+    // Rejection is expressed via the state transition below, not the
+    // return value (on_inbound_frame returns success on this refusal path).
+    (void)h.feed_frame(sess, std::span<const std::byte>{bad});
 
     // The session must disconnect (no longer Active) on unexpected BeginString.
     const auto s = sess.state();
@@ -471,7 +481,9 @@ TEST(TcEstablishment, Scenario2k_CompIDDoesNotMatchProfile) {
     // Step 2: duplicate Logon with wrong SenderCompID ("WT" ≠ "TW").
     // This exercises the Active-state CompID violation path.
     auto bad = make_logon_frame("FIX.4.2", 2, "WT" /* wrong */, "ISLD", 30);
-    h.feed_frame(sess, std::span<const std::byte>{bad});
+    // Rejection is expressed via the state transition below, not the
+    // return value (on_inbound_frame returns success on this refusal path).
+    (void)h.feed_frame(sess, std::span<const std::byte>{bad});
 
     // The session should not remain Active.
     const auto s = sess.state();
