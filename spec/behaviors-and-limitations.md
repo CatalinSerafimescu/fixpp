@@ -714,7 +714,8 @@ forward-boundary now at slot 132; exact-SET ownership of 131 by the 020 complete
   but unparseable → same Arm C disposition (`Reject 371=122/373=1`, session survives —
   an unusable `122` is treated identically to an absent one); `122 > 52` strict →
   `Reject(35=3)` `371=122`, `373=10` (SendingTimeAccuracyProblem) + `Logout` +
-  `Disconnected` (Arm D). `122 == 52` is accepted. Validation runs AFTER the too-high arm
+  `Disconnected` (Arm D). At the expected seqnum each of these Rejects consumes it (B-423-1,
+  fixpp#423). `122 == 52` is accepted. Validation runs AFTER the too-high arm
   (a forward-gap `43=Y` still issues `ResendRequest`, matching QuickFIX-cpp v1.16.0 +
   QuickFIX-J 3.0.1) and BEFORE the too-low/at-expected disposition. `SequenceReset(35=4)+43=Y`
   is exempt from the `122` requirement (Arm E — routed to the existing reset/gap-fill path).
@@ -1504,7 +1505,7 @@ admin-frames-on-wire` + per-site throw + BMR veto-persist cells.)*
 
 ## 041-validation-gate-wiring (2026-06-16)
 
-**B-041-1 — Opt-in dictionary-driven inbound validation is now wired into the live session path (default OFF), resolving the B-004-1 / B-005-7 unwired-validator gap under strict mode.** A new per-session flag `SessionConfig::validate_inbound_messages` (default `false`) enables the previously-dead `wire::dictionary_driven_validator` on the inbound path. When enabled, every inbound message processed in the `NotConnected`/`LogonSent`/`LogonReceived`/`Active` FSM states (including the establishing Logon) is validated against the session dictionary **before that arm's sequence-number gate** — and, in the Logon-bearing arms, **before `interpret_logon()`** (validate-first) — for: standard-header field order, undefined tags, required-field presence, field-value type conformance, and repeating-group structure. A violation emits `Reject(35=3)` with `SessionRejectReason ∈ {14 header-out-of-order, 2 unexpected-tag, 1 required-missing/group-structure, 5 type-nonconformant, 6 Float precision-loss (see L-041-3)}` and does not advance seqnum. The `LogoutSent`/`Disconnected` drain states are excluded, and the existing `Reject(35=3)`/`Logout(35=5)` no-reject-loop exemption is preserved. At default (flag `false`) the validator is never constructed and the early `MessageView` parse never runs — byte-identical to the prior release (FR-002/SC-005, witnessed by `has_validator_for_test()==false`). *(041 FR-001..FR-006/FR-009..FR-011, SC-001..SC-003/SC-005; `[2b §6.5]`; `[FIX50SP2 §2.1]` for 373; supersedes the "UNWIRED / [RATIFY]" status of B-004-1 / B-005-7 under opt-in; `include/fixpp/dict/{field_type,table_view}.hpp`, `Dictionary::as_table_view()`, `src/session/session.cpp` `on_inbound_frame`; witnesses `tests/session/test_validate_gate_{inbound,logon_arm,default_off}.cpp`.)*
+**B-041-1 — Opt-in dictionary-driven inbound validation is now wired into the live session path (default OFF), resolving the B-004-1 / B-005-7 unwired-validator gap under strict mode.** A new per-session flag `SessionConfig::validate_inbound_messages` (default `false`) enables the previously-dead `wire::dictionary_driven_validator` on the inbound path. When enabled, every inbound message processed in the `NotConnected`/`LogonSent`/`LogonReceived`/`Active` FSM states (including the establishing Logon) is validated against the session dictionary **before that arm's sequence-number gate** — and, in the Logon-bearing arms, **before `interpret_logon()`** (validate-first) — for: standard-header field order, undefined tags, required-field presence, field-value type conformance, and repeating-group structure. A violation emits `Reject(35=3)` with `SessionRejectReason ∈ {14 header-out-of-order, 2 unexpected-tag, 1 required-missing/group-structure, 5 type-nonconformant, 6 Float precision-loss (see L-041-3)}`. In `LogonReceived`/`Active` a rejected message at the expected inbound seqnum consumes it and any other does not (B-423-1; fixpp#423 supersedes this row's earlier "does not advance seqnum"). The `LogoutSent`/`Disconnected` drain states are excluded, and the existing `Reject(35=3)`/`Logout(35=5)` no-reject-loop exemption is preserved. At default (flag `false`) the validator is never constructed and the early `MessageView` parse never runs — byte-identical to the prior release (FR-002/SC-005, witnessed by `has_validator_for_test()==false`). *(041 FR-001..FR-006/FR-009..FR-011, SC-001..SC-003/SC-005; `[2b §6.5]`; `[FIX50SP2 §2.1]` for 373; supersedes the "UNWIRED / [RATIFY]" status of B-004-1 / B-005-7 under opt-in; `include/fixpp/dict/{field_type,table_view}.hpp`, `Dictionary::as_table_view()`, `src/session/session.cpp` `on_inbound_frame`; witnesses `tests/session/test_validate_gate_{inbound,logon_arm,default_off}.cpp`.)*
 
 **B-041-2 — The Engine clock-config gate is now wired: `Engine::start()` returns `expected_t<void>` and rejects a null time source with `clock_not_set`, resolving B-007-2.** `Engine::start()` changed from `void` to `[[nodiscard]] core::expected_t<void>` and calls `validate_engine_config()` at entry, returning `clock_not_set` (`core::error` slot 54) before any session loop is spawned when `EngineConfig::clock == nullptr`. The gate is unconditional (not configurable — FR-008): a null clock is always invalid. Zero production callers existed (no C-ABI wrapper), so the only public-API impact is the return-type change. A valid clock starts and operates unchanged (FR-009). Note: activating a real engine clock also activates the session-level `SendingTime(52)` MaxLatency guard that is inert under a null clock — test frame builders feeding live sessions must stamp `52` (the 038 pattern). *(041 FR-007/FR-008, SC-004; `[2d §4.4]`; supersedes B-007-2 "UNWIRED" status; `include/fixpp/session/engine.hpp`, `src/session/engine.cpp`; witness `tests/session/test_engine_clock_gate.cpp`.)*
 
@@ -3154,6 +3155,42 @@ Evidence: issues #346, #348, #349; new issue #351.
 ### Limitations
 
 - **L-422-1 — the header-class tag set is fixed in the engine; the session's dictionary is not consulted.** A custom dictionary whose header declares a field outside that set gets no reordering for it, so a strict peer can still reject that field when the caller places it after a body field. *(fixpp#422; `is_send_header_tag`.)*
+
+## fixpp#423 — an in-sequence rejected message consumes its MsgSeqNum (2026-09-14)
+
+### Behaviors
+
+- **B-423-1 — In `LogonReceived`/`Active`, an inbound message answered with `Reject(35=3)` at the expected inbound MsgSeqNum consumes that number. The expected inbound seqnum advances by one and the advance is persisted, as for a delivered message.**
+  - **Which Rejects:** every one issued before the sequence-number check:
+    - the 041 dictionary validation gate (B-041-1);
+    - the SendingTime accuracy check (B-021-2);
+    - 021's PossDup checks: a missing or unparseable `OrigSendingTime(122)` (Arm C) and `122 > 52` (Arm D).
+
+    This includes the SendingTime Reject and Arm D, which then Logout and disconnect. Rejects issued after the sequence-number check already consumed the number (thorny C-102, `qfj-557-generatereject-advances-seqnum_test.cpp`).
+  - **Not consumed:**
+    - a rejected message at any other number;
+    - a rejected Logon(35=A) or SequenceReset(35=4), which both QuickFIX engines' `generateReject` also exclude;
+    - anything rejected by the validate gates of the establishment arms (`NotConnected`, `LogonSent`).
+  - **If persisting the advance fails,** the session disconnects before the Reject is sent.
+  - **Before #423** none of these Rejects consumed the number, so the peer's next message looked like a gap. fixpp sent a ResendRequest, rejected the replay again, and stopped delivering application messages. Measured live against QuickFIX-cpp on 2026-09-11: one ResendRequest, two Rejects for the same seq, zero `fromApp` deliveries over a 35 s window.
+  - **Sources:**
+    - FIX Session Layer 2020 §4.5.4: "Rejected messages must be logged and NextNumIn incremented by 1".
+    - FIX Session Test Cases 2020, cases 2f, 2g and 14a–h: "Increment NextNumIn".
+  - **Supersedes:**
+    - 041 contract C-3's and FR-003's "does not advance seqnum state";
+    - 021 FR-004's at-expected "MUST NOT advance … matches QuickFIX".
+
+    The parity claim was false: QuickFIX-J and QuickFIX-cpp both increment at the expected number.
+  - **Rejected alternative:** "no advance, QuickFIX parity".
+
+  *(fixpp#423, owner ruling 2026-09-14; `src/session/session.cpp` `consume_rejected_seqnum_`; witnesses `tests/session/test_validate_gate_inbound.cpp` `InSequenceReject_ConsumesSeqnum`, `RejectNotConsumed_OutOfSequenceLogonSequenceReset`; `tests/session/test_inbound_poss_dup_validation.cpp` `AtExpected_ArmC_ConsumesSeqnum`, `AtExpected_UnparseableOrigSendingTime_ConsumesSeqnum`, `AtExpected_ArmD`; `tests/session/conformance/tc_sendingtime_test.cpp` `Fix44_2o_SendingTimeValueOutOfRange`; `tests/session/test_persistent_seqnum_hydrate.cpp` `RejectedInSequence_AdvanceIsPersisted`, `RejectedInSequence_PersistFailure_Fatal`.)*
+- **B-423-2 — During a resend (AwaitingResend), a replayed message rejected at the expected number is consumed too.**
+  - Recovery moves on to the next number and does not ask for the rejected message again.
+  - If that was the last missing number, the resend ends.
+  - The rejected message is not delivered to the application.
+  - Before #423 the session kept expecting that number until the peer replayed a corrected copy.
+
+  *(fixpp#423; `close_filled_resend_gap_`; witnesses `tests/interop/parity/fix_tc_coverage_gaps_test.cpp` `RejectResentMessage_DuringResend_RejectsAndContinues`, `RejectedResentFrame_FillingTheGap_EndsAwaitingResend`.)*
 
 ## 089-quickfix-interop-conversation — committed evidence provenance (2026-09-12)
 

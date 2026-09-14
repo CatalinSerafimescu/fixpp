@@ -65,3 +65,9 @@ From `specs/015-runtime-engine/research.md` R3 — the half that does not rot:
 ⚠️ That same R3 `Decision` is **superseded in part** — it places the pump on the engine executor and
 as a separately `co_spawn`ed coroutine; neither is true. See
 [`engine-accept-path`](./engine-accept-path.md).
+
+⚠️ **A rejected message is not "unprocessed".** Before fixpp#423 the Rejects issued ahead of the
+sequence-number check (041's validate gate, SendingTime accuracy, 021's PossDup arms) left the
+MsgSeqNum unconsumed. The peer's next message then looked like a gap, and the session stalled. An
+in-sequence rejected message now consumes its number (FIX-SL 2020 §4.5.4). The decision and the
+rejected "QuickFIX parity" alternative are on [`session`](./session.md); the behaviour is B-423-1.

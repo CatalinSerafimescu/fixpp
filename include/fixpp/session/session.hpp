@@ -845,6 +845,12 @@ private:
     persist_inbound_advance_() noexcept;
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
     persist_outbound_advance_() noexcept;
+    // consume_rejected_seqnum_(): fixpp#423 — an in-sequence message answered by a
+    //   Reject before the seqnum gate consumes its MsgSeqNum (advance + persist).
+    // close_filled_resend_gap_(): exit AwaitingResend once next_inbound passes the gap end.
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> consume_rejected_seqnum_(
+        seqnum_t seq, std::string_view msg_type) noexcept;
+    void close_filled_resend_gap_() noexcept;
 
     // ── 013 FR-035 — SessionEvent ring-buffer (capacity kSessionEventRingCapacity=16) ──
     // Stores the most recent ≤16 SessionEvent values emitted via emit_event().

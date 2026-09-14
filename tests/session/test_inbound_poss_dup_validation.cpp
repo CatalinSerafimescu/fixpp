@@ -9,7 +9,8 @@
 //   2. ArmD_OrigSendingTimeAfter52     — 43=Y, 122 > 52 strict → Reject 373=10 + Logout + Disc.
 //   3. Boundary_122Equals52Accepted    — 122 == 52 → not Arm D; session survives (INV-4)
 //   4. ArmE_SeqResetExempt             — 35=4 + 43=Y, no 122 → NOT rejected (Arm E)
-//   5. AtExpected_ArmC_NoAdvance (AS4) — 34==expected, 43=Y, no 122 → Arm C + seqnum NOT adv.
+//   5. AtExpected_ArmC_ConsumesSeqnum (AS4) — 34==expected, 43=Y, no 122 → Arm C + seqnum
+//      consumed (fixpp#423; 5b: same for an unparseable 122)
 //   6. AtExpected_ArmD (AS5)           — 34==expected, 43=Y, 122 > 52 → Arm D
 //   7. TooHigh_EngineParity_Pin        — too-high seq, 43=Y, no 122 → ResendRequest(35=2), Active
 //
@@ -196,13 +197,14 @@ TEST_F(PossDupValidationTest, ArmE_SeqResetExempt) {
     EXPECT_FALSE(any_logout()) << "Arm E: SequenceReset(35=4) must not emit Logout";
 }
 
-// ── Test 5: At-expected AS4 — 34==expected, 43=Y, no 122 → Arm C + NO seqnum advance ──
+// ── Test 5: At-expected AS4 — 34==expected, 43=Y, no 122 → Arm C + seqnum consumed ──
 //
-// contracts C1 row 5 + C3 at-expected pin; data-model D2b.
-// Stage-1 validation is seqnum-independent: fires at-expected too.
-// QFJ Session.java:1843: verify-returns-false → expected NOT incremented.
+// contracts C1 row 5; data-model D2b. Stage-1 validation is seqnum-independent: fires
+// at-expected too. Erratum fixpp#423 (owner ruling 2026-09-14) inverts this test's old
+// "NO advance" pin: FIX Session Test Cases 2020 case 2g — "Send Reject ... 2. Increment
+// NextNumIn." — and QFJ's generateReject increments at the expected seqnum.
 
-TEST_F(PossDupValidationTest, AtExpected_ArmC_NoAdvance) {
+TEST_F(PossDupValidationTest, AtExpected_ArmC_ConsumesSeqnum) {
     auto cfg = make_cfg();
     Session sess(engine, cfg);
     drive_to_active(sess);
@@ -224,11 +226,37 @@ TEST_F(PossDupValidationTest, AtExpected_ArmC_NoAdvance) {
     EXPECT_EQ(rj.ref_tag_id, "122") << "AS4: Reject must carry 371=122";
     EXPECT_EQ(rj.reason, "1") << "AS4: Reject must carry 373=1";
 
-    // CRITICAL: seqnum must NOT advance (verify-returns-false per QFJ:1843).
+    // CRITICAL: the rejected message consumes its seqnum (fixpp#423).
     const auto expected_after = sess.seqnum_mgr_test_access().next_inbound_unsafe();
-    EXPECT_EQ(expected_after, expected_before)
-        << "AS4: expected inbound seqnum must NOT advance when Arm C fires at-expected "
+    EXPECT_EQ(expected_after, expected_before + 1U)
+        << "AS4: expected inbound seqnum must advance by one when Arm C fires at-expected "
         << "(was " << expected_before << ", got " << expected_after << ")";
+}
+
+// ── Test 5b: at-expected, 122 present but unparseable → Arm C disposition + consumed ──
+//
+// gate-b/r1 RC#1 routes an unusable 122 to Arm C; fixpp#423 consumes it the same way.
+
+TEST_F(PossDupValidationTest, AtExpected_UnparseableOrigSendingTime_ConsumesSeqnum) {
+    auto cfg = make_cfg();
+    Session sess(engine, cfg);
+    drive_to_active(sess);
+    ASSERT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(),
+              static_cast<fixpp::session::seqnum_t>(2));
+
+    auto frame = make_frame("D", /*seq=*/2, "TW", "ISLD",
+                            "43=Y\x01"
+                            "122=not-a-time\x01");
+    feed(sess, frame);
+
+    EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active) << "RC#1: must stay Active";
+    ASSERT_TRUE(any_reject()) << "RC#1: must emit Reject(35=3)";
+    auto rj = find_last_reject();
+    EXPECT_EQ(rj.ref_tag_id, "122") << "RC#1: Reject must carry 371=122";
+    EXPECT_EQ(rj.reason, "1") << "RC#1: Reject must carry 373=1";
+    EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(),
+              static_cast<fixpp::session::seqnum_t>(3))
+        << "RC#1: the at-expected rejected message must consume its seqnum (fixpp#423)";
 }
 
 // ── Test 6: At-expected AS5 — 34==expected, 43=Y, 122 > 52 → Arm D ──────────
@@ -259,6 +287,12 @@ TEST_F(PossDupValidationTest, AtExpected_ArmD) {
 
     // Logout emitted before disconnect.
     EXPECT_TRUE(any_logout()) << "AS5: Arm D must emit Logout before disconnecting";
+
+    // fixpp#423: consumed even though the session disconnects (Test Cases 2020 case 2f),
+    // so a reconnect does not ResendRequest the rejected message.
+    EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(),
+              static_cast<fixpp::session::seqnum_t>(3))
+        << "AS5: the at-expected rejected message must consume its seqnum (fixpp#423)";
 }
 
 // ── Test 7: Too-high engine-parity pin ─────────────────────────────────────────

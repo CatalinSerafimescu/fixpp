@@ -1237,6 +1237,49 @@ TEST(PersistentSeqnumHydrate, InboundPersistFailure_Fatal_LowerBound_FirstWrite)
            "check_inbound advanced in-memory but durable stays at last successful persist";
 }
 
+// ── fixpp#423 — an in-sequence rejected message's advance is PERSISTED ─────────
+//
+// An at-expected 43=Y message without OrigSendingTime(122) is rejected (021 Arm C,
+// before check_inbound) and consumes its seqnum. The durable counter must move with
+// the in-memory one, or a restart hydrates the old value and ResendRequests the
+// rejected message, the stall #423 closes. Pre-#423 (RED): durable_inbound stays 2.
+TEST(PersistentSeqnumHydrate, RejectedInSequence_AdvanceIsPersisted) {
+    auto factory = std::make_shared<FaultStoreFactory>(/*in=*/1, /*out=*/1);
+    auto fix = make_acceptor(factory);
+    FaultStore* store = factory->last_store;
+    ASSERT_NE(store, nullptr);
+    ASSERT_EQ(store->durable_inbound, fixpp::session::seqnum_t{2})
+        << "precondition: the Logon at seq=1 was persisted";
+
+    fix->feed(make_fix_frame("FIX.4.4", "D", 2, "CLI", "SRV", field(43, "Y")));
+
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "Arm C survives the Reject";
+    EXPECT_EQ(store->durable_inbound, fixpp::session::seqnum_t{3})
+        << "fixpp#423: the consumed seqnum must reach the store";
+}
+
+// fixpp#423 — a failed persist of that advance is fatal, as at every other persist site
+// (D-3 / SC-006): the session disconnects before any Reject goes out.
+TEST(PersistentSeqnumHydrate, RejectedInSequence_PersistFailure_Fatal) {
+    // Write 1 persists the Logon; write 2 is the rejected message's advance.
+    auto factory = std::make_shared<FaultStoreFactory>(/*in=*/1, /*out=*/1,
+                                                       /*fail_on_nth_call=*/0,
+                                                       /*fail_on_nth_write=*/2);
+    auto fix = make_acceptor(factory);
+    FaultStore* store = factory->last_store;
+    ASSERT_NE(store, nullptr);
+    const std::size_t before = fix->capture.frames.size();
+
+    fix->feed(make_fix_frame("FIX.4.4", "D", 2, "CLI", "SRV", field(43, "Y")));
+
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+        << "fixpp#423: a failed persist of the consumed seqnum must disconnect";
+    EXPECT_EQ(store->durable_inbound, fixpp::session::seqnum_t{2})
+        << "the durable counter stays at the last successful persist";
+    EXPECT_EQ(fix->capture.frames.size(), before) << "no Reject after the failed persist";
+}
+
 // W6(b): failure on a LATER write (after 2 successful persists).
 // fail_on_nth_write=3: fail on the 3rd inbound write (2 succeed first).
 // After 2 successful persists (Logon seq=1 + msg seq=2), durable=3.

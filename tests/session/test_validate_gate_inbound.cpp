@@ -14,7 +14,8 @@
 //  W4: type-nonconformant (Int field with non-numeric value) → Reject(35=3, 373=5)
 //  W5: Float/decimal precision-loss      → Reject(35=3, 373=6)
 //  W6: conformant message               → dispatched (no Reject emitted)
-//  W7: seqnum NOT advanced on reject     → C-3 (validate before seqnum gate)
+//  W7: an in-sequence reject consumes its seqnum; W7b: out of sequence, Logon and
+//      SequenceReset do not → fixpp#423 (supersedes C-3's "not advanced")
 //
 // 075 T020a (FR-006 RefTagID delivery): W2/W3/W4 additionally assert
 // RefTagID(371) on the emitted Reject frame, proving the offending tag
@@ -253,6 +254,15 @@ struct ValidateGateFixture {
         return false;
     }
 
+    [[nodiscard]] bool has_msg_type(std::string_view msg_type) const {
+        for (auto const& frame : transport.sent_frames()) {
+            if (extract_field(frame, 35) == msg_type) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // 075 T020a (FR-006): returns the RefTagID(371) of the first Reject(35=3)
     // frame with the given SessionRejectReason(373), or -1 when no matching
     // reject frame carries a 371 (either no matching reject, or 371 omitted).
@@ -440,34 +450,77 @@ TEST(ValidateGateInbound, ConformantMessage_NoReject) {
     EXPECT_FALSE(fix.has_any_reject()) << "W6: conformant message must NOT produce a Reject";
 }
 
-// ── W7: seqnum NOT advanced on validate reject (C-3) ─────────────────────────
+// ── W7: an in-sequence validate reject consumes its seqnum (fixpp#423) ───────
 //
-// Feed two frames: first a dict-invalid message (undefined tag → Reject 373=2),
-// then a well-formed Heartbeat at the SAME seqnum (seq=2). The second must be
-// accepted — proving the seqnum gate did NOT advance on the first (rejected) frame.
-TEST(ValidateGateInbound, SeqnumNotAdvancedOnReject) {
+// Erratum fixpp#423 (owner ruling 2026-09-14) supersedes 041 C-3's "seqnum NOT
+// advanced": FIX-SL 2020 §4.5.4, "Rejected messages must be logged and NextNumIn
+// incremented by 1". Feed a dict-invalid Heartbeat at the expected seq=2, then a
+// conformant Heartbeat at seq=3. Had seq=2 not been consumed, seq=3 would be too
+// high and draw a ResendRequest(35=2), the stall #423 measured live.
+//
+// ⚠️ The follow-up frame must be at seq=3, not seq=2: once seq=2 is consumed a
+// Heartbeat at seq=2 is too low and silently dropped, which also emits no Reject.
+TEST(ValidateGateInbound, InSequenceReject_ConsumesSeqnum) {
     ValidateGateFixture fix;
     auto cfg = fix.make_cfg_with_validation();
     Session sess{fix.engine, cfg};
     fix.open_to_active(sess);
 
-    // Feed invalid frame at seq=2 — should produce Reject, seqnum NOT advanced.
     auto bad_frame = make_raw_frame("FIX.4.2", "0", 2, "TW", "ISLD",
                                     "44=99.99\x01");  // Price not valid for Heartbeat
     fix.feed(sess, bad_frame);
+    ASSERT_TRUE(fix.has_reject_with_reason(2)) << "W7 setup: expected Reject(373=2) on bad frame";
 
-    EXPECT_TRUE(fix.has_reject_with_reason(2)) << "W7 setup: expected Reject(373=2) on bad frame";
-
-    // Now feed a well-formed Heartbeat at the SAME seqnum=2 — should be accepted
-    // (the session should still expect seq=2, proving seqnum was not consumed).
-    fix.transport.reset();
-    auto good_frame = make_heartbeat_frame(2);
+    auto good_frame = make_heartbeat_frame(3);
     fix.feed(sess, good_frame);
 
-    EXPECT_FALSE(fix.has_any_reject())
-        << "W7: after validate-reject, a conformant frame at the same seqnum must be accepted "
-           "(seqnum was not advanced by the rejected frame)";
+    EXPECT_FALSE(fix.has_msg_type("2"))
+        << "W7: seq=3 after an in-sequence validate-reject at seq=2 must be in sequence, "
+           "not a gap (fixpp#423)";
+    EXPECT_FALSE(fix.has_any_reject()) << "W7: the conformant seq=3 must be accepted";
     EXPECT_EQ(sess.state(), fsm_state::Active) << "W7: session should remain Active";
+}
+
+// ── W7b: a validate reject that is NOT consumed (fixpp#423) ──────────────────
+//
+// Three cases keep the expected seqnum at 2: a rejected frame at another seqnum (5),
+// and a rejected Logon or SequenceReset at the expected one (both QuickFIX engines'
+// generateReject exclude those two types). A conformant Heartbeat at seq=3 afterwards
+// is then too high and must draw a ResendRequest(35=2); a wrongly consumed seq=2
+// would make it in sequence and silent.
+TEST(ValidateGateInbound, RejectNotConsumed_OutOfSequenceLogonSequenceReset) {
+    struct Case {
+        const char* name;
+        const char* msg_type;
+        std::uint32_t seq;
+        const char* body;
+    };
+    const std::array<Case, 3> cases{{
+        {"out of sequence", "0", 5, "44=99.99\x01"},
+        {"Logon", "A", 2,
+         "98=0\x01"
+         "108=30\x01"
+         "9999=X\x01"},
+        {"SequenceReset", "4", 2,
+         "36=9\x01"
+         "9999=X\x01"},
+    }};
+    for (const Case& c : cases) {
+        SCOPED_TRACE(c.name);
+        ValidateGateFixture fix;
+        auto cfg = fix.make_cfg_with_validation();
+        Session sess{fix.engine, cfg};
+        fix.open_to_active(sess);
+
+        auto bad_frame = make_raw_frame("FIX.4.2", c.msg_type, c.seq, "TW", "ISLD", c.body);
+        fix.feed(sess, bad_frame);
+        EXPECT_TRUE(fix.has_any_reject()) << "W7b setup: the frame must be validate-rejected";
+
+        auto probe = make_heartbeat_frame(3);
+        fix.feed(sess, probe);
+        EXPECT_TRUE(fix.has_msg_type("2"))
+            << "W7b: the rejected frame must not consume seq=2, so seq=3 is a gap";
+    }
 }
 
 // ── W8: arena-bypass — high-field-count frame with a violation NOT silently dispatched
@@ -493,8 +546,8 @@ TEST(ValidateGateInbound, SeqnumNotAdvancedOnReject) {
 //   and fits in 16 KiB; 400 is chosen for robust margin above the 256-entry knee.
 //
 // Threshold-independent discrimination (part b):
-//   After the validate-Reject (seqnum NOT advanced, W7-proven), feed a conformant
-//   NOS at the SAME seqnum=2.  A conformant message must be dispatched without
+//   After the validate-Reject (which consumed seq=2, W7-proven), feed a conformant
+//   Heartbeat at the next seqnum=3.  A conformant message must be dispatched without
 //   Reject, proving: (1) the 16 KiB arena is sufficient for the validate path even
 //   on conformant messages, (2) the Reject was triggered by the undefined tags, not
 //   by some universal large-message policy.  This assertion passes regardless of
@@ -553,8 +606,8 @@ TEST(ValidateGateInbound, ManyFieldsBypassArena_Rejected_NotBypassed) {
 
     // ── (b) Threshold-independent discrimination: conformant Heartbeat at same seqnum ──
     //
-    // The validate-Reject does NOT advance the inbound seqnum (C-3 / W7).  Feed a
-    // conformant Heartbeat(35=0) at the SAME seq=2 to prove: (i) the session remains
+    // The in-sequence validate-Reject consumed seq=2 (fixpp#423 / W7).  Feed a
+    // conformant Heartbeat(35=0) at the next seq=3 to prove: (i) the session remains
     // Active, (ii) the conformant message is dispatched without a Reject, and (iii)
     // the shared kInboundParseArena is sufficient for conformant messages.  A Heartbeat
     // is used (not NOS) because it is an admin message that routes through fromAdmin —
@@ -564,8 +617,11 @@ TEST(ValidateGateInbound, ManyFieldsBypassArena_Rejected_NotBypassed) {
     // or 16 KiB arena, because it only requires that a small conformant frame routes
     // through the arena without exhaustion and gets dispatched.
     fix.transport.reset();
-    auto conformant_frame = make_heartbeat_frame(2);  // seq=2, admin message, no Application needed
+    auto conformant_frame = make_heartbeat_frame(3);  // seq=3, admin message, no Application needed
     fix.feed(sess, conformant_frame);
+
+    // A too-low seq is dropped without a Reject, so first pin that seq=3 was in sequence.
+    EXPECT_FALSE(fix.has_msg_type("2")) << "W8b: seq=3 must be in sequence (no ResendRequest)";
 
     EXPECT_FALSE(fix.has_any_reject())
         << "W8b: conformant Heartbeat at the same seqnum must be dispatched without Reject "

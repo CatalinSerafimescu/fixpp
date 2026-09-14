@@ -479,6 +479,10 @@ TEST(TCSendingTime, Fix44_2o_SendingTimeValueOutOfRange) {
     EXPECT_TRUE(found_reject) << "2o fix44: stale established SendingTime must emit Reject";
     EXPECT_TRUE(found_logout) << "2o fix44: stale established SendingTime must emit Logout";
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected);
+    // fixpp#423: the stale Heartbeat was the expected seq=2, so it is consumed
+    // (FIX-SL 2020 §4.5.4) and a reconnect does not ResendRequest it.
+    EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(), seqnum_t{3})
+        << "2o fix44: the rejected in-sequence message must consume its seqnum";
 }
 
 TEST(TCSendingTime, Fix44_2o_SendingTimeValueOutOfRange_SeqnumOverflow_SurfacesError) {
