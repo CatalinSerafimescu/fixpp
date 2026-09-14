@@ -676,18 +676,15 @@ TEST_F(SendingTimePrecisionTest, OrigSendingTime122_PreservedVerbatim_OnResend) 
 
     // Verify the distinguishing postcondition: the advanced-clock stamp would be
     // a different value. We compute it directly to make the reasoning explicit.
-    {
-        std::array<char, 32> stamp_buf{};
-        using namespace std::chrono;
-        const auto advanced_utc = clock->now();
-        auto stamp_r = fixpp::core::utc_time_to_fix_string(
-            advanced_utc, fixpp::core::fix_time_precision::nanos, std::span<char>{stamp_buf});
-        ASSERT_TRUE(stamp_r.has_value());
-        const std::string advanced_stamp(stamp_r->data(), stamp_r->size());
-        ASSERT_NE(advanced_stamp, original_52)
-            << "sanity: advanced-clock stamp must differ from original_52 "
-               "(otherwise the test cannot distinguish re-stamp from byte-copy)";
-    }
+    // fixpp#420: this is also the value the replay's own SendingTime(52) must carry.
+    std::array<char, 32> stamp_buf{};
+    auto stamp_r = fixpp::core::utc_time_to_fix_string(
+        clock->now(), fixpp::core::fix_time_precision::nanos, std::span<char>{stamp_buf});
+    ASSERT_TRUE(stamp_r.has_value());
+    const std::string advanced_stamp(stamp_r->data(), stamp_r->size());
+    ASSERT_NE(advanced_stamp, original_52)
+        << "sanity: advanced-clock stamp must differ from original_52 "
+           "(otherwise the test cannot distinguish re-stamp from byte-copy)";
 
     // ── Step 5: feed ResendRequest for the app message ───────────────────────
     // Peer inbound seqnum is 2 (Logon was seq=1; ResendRequest is next).
@@ -721,6 +718,12 @@ TEST_F(SendingTimePrecisionTest, OrigSendingTime122_PreservedVerbatim_OnResend) 
             << "122= must be the STORED ORIGINAL 52= bytes (NOT re-stamped at the "
                "advanced-clock time); stored='"
             << original_52 << "' got='" << *tag122 << "'; [FR-006 / I-NST-4 / Gate A RC#1]";
+        // fixpp#420: the replay's OWN SendingTime(52) is the time of retransmission,
+        // at the configured precision -- the split that makes 122 meaningful.
+        auto tag52 = extract_field(std::span<const std::byte>(frame), 52);
+        ASSERT_TRUE(tag52.has_value()) << "replayed frame must carry 52= (SendingTime)";
+        EXPECT_EQ(*tag52, advanced_stamp)
+            << "52= must be restamped at retransmission (fixpp#420), not copied from the store";
         break;
     }
     // No SUCCEED() escape: the test MUST find a replayed 43=Y frame.

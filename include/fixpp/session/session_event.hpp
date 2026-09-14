@@ -34,6 +34,7 @@
 
 #include "fixpp/core/error.hpp"                           // for error::code (master enum)
 #include "fixpp/session/compid_authorization_policy.hpp"  // for bound_principal::source
+#include "fixpp/session/seqnum.hpp"                       // for seqnum_t
 
 namespace fixpp::session {
 
@@ -112,6 +113,19 @@ struct session_event_sequence_numbers_reset {
     bool by_peer_request;
 };
 
+// fixpp#424 (D4a) — emitted when a stored application message inside a
+// ResendRequest range cannot be rebuilt as a replay (e.g. the replay frame
+// overflows its buffer, or the stored frame has no SendingTime(52) and no clock
+// is available to supply one). The slot is folded into the surrounding
+// SequenceReset-GapFill run instead of being skipped, so the peer's gap still
+// closes [FIX-SL §4.8.3/§4.8.5]; this event is the record that a business
+// message was gap-filled rather than retransmitted. `code` is the error the
+// replay build returned. All fields by-value.
+struct session_event_resend_slot_gap_filled {
+    seqnum_t seq;             // MsgSeqNum of the stored message that was gap-filled
+    fixpp::core::error code;  // why the replay frame could not be built
+};
+
 // SessionEvent — NEW 013-introduced public variant union. 5 initial
 // alternatives; future features APPEND alternatives append-only (consumer-side
 // std::visit fall-throughs are responsible for tolerating future variants).
@@ -119,6 +133,6 @@ struct session_event_sequence_numbers_reset {
 using SessionEvent =
     std::variant<session_event_peer_identity_bound, session_event_compid_authorization_failed,
                  session_event_tls_validation_failed, session_event_credentials_rotated,
-                 session_event_sequence_numbers_reset>;
+                 session_event_sequence_numbers_reset, session_event_resend_slot_gap_filled>;
 
 }  // namespace fixpp::session
