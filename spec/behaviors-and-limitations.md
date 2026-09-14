@@ -773,9 +773,11 @@ forward-boundary now at slot 132; exact-SET ownership of 131 by the 020 complete
   by default; the auto-resend path always re-adds them independently.** `SessionConfig::allow_pos_dup`
   (default `false`, QuickFIX-J `AllowPosDup` config-key parity) governs the plain `Session::send`
   path: `false` (default) STRIPS any caller-supplied `43`/`122` from the opaque application payload
-  before framing; `true` RETAINS them verbatim (operator opt-in for callers that manage their own
-  duplicate flags). The strip is a no-heap, boundary-anchored field excision behind a 022-owned
+  before framing; `true` RETAINS their values verbatim (operator opt-in for callers that manage their own
+  duplicate flags); since fixpp#422 they go out inside the standard header, not where the caller
+  placed them (B-422-1). The strip is a no-heap, boundary-anchored field excision behind a 022-owned
   per-field scanner that validates every post-`35=` field is `<non-empty digit-only tag>=<value>\x01`
+  (since fixpp#421 the tag must also have no leading zero and be at most 65535, B-421-1)
   and fails the send CLOSED (`app_payload_malformed=131`, no seqnum consumed, no transmit) on the
   FIRST malformed field — a missing `=`, an empty/non-digit tag, or an empty field (cases the 020
   denylist floor admits). Only complete, SOH-boundary-anchored `43=…\x01`/`122=…\x01` fields are
@@ -3127,8 +3129,7 @@ Evidence: issues #346, #348, #349; new issue #351.
 
 ### Limitations
 
-- **L-419-1 — header-class tags supplied by the caller in the `Session::send()` payload, including `allow_pos_dup=true`'s retained `43`/`122`, are still emitted wherever the caller placed them; a strict peer rejects them if they follow a body field.** `send_impl` forbids only `8/9/34/49/52/56/10` in the opaque payload; anything else (`43`, `122`, `97`, `115`, `128`, `50`, `57`, `1128`, …) is copied verbatim after the generated header. Unrelated to #419's fix (which only reorders the ENGINE's own resend-answer emission) and is the documented `allow_pos_dup=true` "retain verbatim" contract (B-022-1) working as specified. → **fixpp#422**.
-- **L-419-2 — a stored frame's tag, if it exceeds 65535 or carries a leading zero, can alias to a different tag (including 52/43/10) when replayed.** `build_replay_frame`'s tag scanner accumulates an unbounded `uint32_t` and the wire writer truncates to `uint16_t`; `send_impl`'s own scanner (T008) does not reject an out-of-range or leading-zero tag before it is stored. Pre-existing since 013; not introduced or fixed by #419 — #419's first-`52`-wins pre-scan does fix the half of this where a *stored* `122` used to be poisoned by a later-occurring aliased `52`. → **fixpp#421**.
+- *L-419-1 and L-419-2 were resolved on 2026-09-14 by fixpp#422 and fixpp#421 and moved to `spec/behaviors-and-limitations-closed.md`; see B-422-1, B-421-1 and B-421-2 in `## fixpp#421 / fixpp#422`.*
 
 ## fixpp#420 / fixpp#424 — a replay restamps SendingTime(52); an unbuildable replay is gap-filled (2026-09-14)
 
@@ -3141,6 +3142,18 @@ Evidence: issues #346, #348, #349; new issue #351.
 ### Limitations
 
 - **L-424-1 — a stored frame too large to capture still aborts the resend answer and disconnects (`dispatch_aborted`) instead of being gap-filled.** The owner kept this deliberately (fixpp#424 D5, 2026-09-14): the store holds a business message the engine cannot retransmit, and a GapFill would tell the peer that message never mattered. The disconnect makes the condition loud. **Status: deferred, may be reopened.** *(fixpp#424 D5; `replay_outbound_range_`'s `cv.truncated` branch.)*
+
+## fixpp#421 / fixpp#422 — send() rejects a non-canonical payload tag; header-class payload fields go out inside the header (2026-09-14)
+
+### Behaviors
+
+- **B-421-1 — `Session::send` rejects a payload field whose tag is empty, contains a non-digit, has a leading zero, or exceeds 65535, with `app_payload_malformed` (131); no MsgSeqNum is consumed and nothing is transmitted.** Before #421 any digit-only tag was accepted and stored as written: a peer reads `052=` as `52`, and the resend replay wrote `65588=` as `52=`, because the wire writer takes a 16-bit tag. `65535` itself is accepted. *(fixpp#421; `src/session/session.cpp` `parse_outbound_tag`, `send_impl`; witnesses `tests/session/test_resend_answer_field_order.cpp` `Send_AliasingTag_RejectedWithoutConsumingASeqNum`, `Send_TagWithANonDigitBelowZero_Rejected`.)*
+- **B-421-2 — a stored application message carrying a digit-only tag that is empty, has a leading zero, or exceeds 65535 is not replayed; its slot is gap-filled (B-424-2) with `session_event_resend_slot_gap_filled{code = wire_tag_out_of_range}`.** Before #421 the tag was replayed as a different one (`65588` and `4294967348` as `52`, `052` as `52`, an empty tag as `0`). `Session::send` no longer stores such a frame (B-421-1), so this takes a store written by an older build or a custom `MessageStore`. A clock-less Session replaying such a frame with no stored `52` reports `wire_tag_out_of_range` too, not `wire_required_field_missing`. A stored field with no `=` or with a non-digit tag is still dropped from the replay, as before. Supersedes 040 FR-008's "justified exclusion" of this scanner. *(fixpp#421; `build_replay_frame`; witnesses `Replay_StoredTagAbove65535_SlotIsGapFilled`, `Replay_StoredTagWrappingUint32_SlotIsGapFilled`, `Replay_StoredTagWithLeadingZero_SlotIsGapFilled`, `Replay_StoredEmptyTag_SlotIsGapFilled`, `Replay_StoredTagAbove65535_NoClockAndNo52_ReportsTheTag`, `Replay_MalformedStoredFields_DroppedNotGapFilled`.)*
+- **B-422-1 — `Session::send` emits the payload's header-class fields directly after `TargetCompID(56)`, in the caller's order, followed by its other fields in the caller's order.** Header-class means the `<header>` of `dictionaries/FIXT11.xml` plus `OnBehalfOfSendingTime(370)`, which QuickFIX-J's `Message.isHeaderField` also counts. Before #422 such a field went out wherever the caller placed it, and a strict peer rejects a header field that follows a body field. Measured 2026-09-14 against QuickFIX-J 3.0.1 with `UseDataDictionary=Y`: a NewOrderSingle carrying `50=` after its body fields drew `35=3 … 58=Tag specified out of required order, field=50|371=50|373=14` from `origin/main`, and was accepted with the fix. With `allow_pos_dup=true` a caller's `43`/`122` move the same way (B-022-1). Rejected alternative: failing such a send with `app_payload_malformed`. *(fixpp#422, owner decision 2026-09-14; `src/session/session.cpp` `is_send_header_tag`, `send_impl` T009; witnesses `Send_HeaderTagsAfterBody_GoOutInsideTheHeader_AllowPosDup`, `Send_HeaderTagsAfterBody_GoOutInsideTheHeader_DefaultStrip`.)*
+
+### Limitations
+
+- **L-422-1 — the header-class tag set is fixed in the engine; the session's dictionary is not consulted.** A custom dictionary whose header declares a field outside that set gets no reordering for it, so a strict peer can still reject that field when the caller places it after a body field. *(fixpp#422; `is_send_header_tag`.)*
 
 ## 089-quickfix-interop-conversation — committed evidence provenance (2026-09-12)
 

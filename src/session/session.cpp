@@ -56,7 +56,8 @@
 #include <fixpp/session/session_event.hpp>  // 013 T036: SessionEvent variants
 #include <fixpp/session/session_fsm.hpp>    // 005 US1: fsm_state enum (T023–T025)
 #include <fixpp/transport/transport_factory.hpp>  // cfg_.transport_factory_override deref (reconnect_fsm.hpp now fwd-decls it per [const §XV.9])
-#include <fixpp/wire/writer.hpp>  // 013 FR-010: replay-frame re-serialization
+#include <fixpp/wire/tag_scan.hpp>  // fixpp#421: accumulate_tag_digit (send + replay scanners)
+#include <fixpp/wire/writer.hpp>    // 013 FR-010: replay-frame re-serialization
 // 014 T015: handshake_result full definition needed for install_reconnected_transport.
 // session.cpp is in the session layer; transport is an allowed dependency ([arch §5]).
 #include <fixpp/transport/tls_transport.hpp>
@@ -1678,6 +1679,22 @@ namespace {
 using fixpp::session::detail::FrameHeader;
 using fixpp::session::detail::scan_frame_header;
 
+// fixpp#421: the tag of an outbound field — non-empty, ASCII digits, no leading
+// zero, at most 65535 — or nullopt. Stricter than the inbound scanners, which
+// accept zero padding (wire/tag_scan.hpp): an outbound tag is written as is, so a
+// non-canonical one is read as a different tag ("052" and "65588" both as 52).
+[[nodiscard]] std::optional<std::uint16_t> parse_outbound_tag(std::string_view digits) noexcept {
+    if (digits.empty() || digits.front() == '0') return std::nullopt;
+    std::uint32_t tag = 0;
+    for (const char c : digits) {
+        const auto u = static_cast<unsigned char>(c);
+        if (u < '0' || u > '9' || !fixpp::wire::accumulate_tag_digit(tag, u)) {
+            return std::nullopt;
+        }
+    }
+    return static_cast<std::uint16_t>(tag);
+}
+
 // Parse a decimal seqnum from a string_view. Returns 0 if invalid.
 // Zero is never a valid FIX seqnum (seqnum_min=1), so 0 signals parse failure.
 // No heap, no library, stack-only. (I-7 no-alloc hot path.)
@@ -1804,43 +1821,47 @@ struct SendingTimeStamp {
     const std::byte SOH{0x01};
     const std::byte EQ{static_cast<std::byte>('=')};
     const std::size_t n = stored.size();
-    // 040 US3 (FR-008) — JUSTIFIED EXCLUSION from the inbound forged-tag-overflow
-    // guard: this scanner parses STORED OWN-OUTBOUND frames (the `stored` span —
-    // our own previously-sent messages replayed during resend), NOT received
-    // inbound bytes. There is no forged-tag aliasing vector here (an attacker who
-    // can rewrite our own message store has already won). The unguarded accumulate
-    // is intentional — do NOT "harden" it as a missed inbound scanner (it is site 6
-    // in the 040 census; the 5 live-inbound scanners use fixpp::wire::accumulate_tag_digit).
+    // Erratum fixpp#421 (supersedes 040 US3 FR-008's "justified exclusion" of this
+    // scanner): the stored frame need not have passed `send_impl`'s tag checks — an
+    // older build or a custom MessageStore wrote it — so a tag above 65535 or with a
+    // leading zero would alias (65588 → 52 through append_raw's uint16, 052 → 52).
+    // Such a frame is not rebuilt: build_replay_frame fails and the slot is gap-filled.
 
     // Parses one "<tag>=<value>" field at stored[i..], advancing `i` past it
-    // (including the terminating SOH). On a malformed field (no '=', non-digit
-    // tag) `i` is advanced to the next SOH and `.ok` is false. Shared by the
-    // pre-scan pass and the write loop below so the two never diverge.
+    // (including the terminating SOH). A field with no '=' or a non-digit tag is
+    // `malformed` and skipped; a digit-only tag that parse_outbound_tag rejects is
+    // `bad_tag`. Shared by the pre-scan pass and the write loop below so the two
+    // never diverge.
+    enum class FieldStatus : std::uint8_t { ok, malformed, bad_tag };
     struct FieldScan {
-        bool ok;
-        std::uint32_t tag;
+        FieldStatus status;
+        std::uint16_t tag;
         std::span<const std::byte> value;
     };
     const auto scan_field = [&](std::size_t& i) -> FieldScan {
-        std::uint32_t tag = 0;
-        bool tag_ok = true;
+        const std::size_t tag_start = i;
+        bool digits = true;
         while (i < n && stored[i] != EQ && stored[i] != SOH) {
-            auto c = static_cast<unsigned char>(stored[i]);
-            if (c < '0' || c > '9') tag_ok = false;
-            tag = (tag * 10U) + static_cast<std::uint32_t>(c - '0');
+            const auto c = static_cast<unsigned char>(stored[i]);
+            if (c < '0' || c > '9') digits = false;
             ++i;
         }
-        if (i >= n || stored[i] != EQ || !tag_ok) {
+        const auto tag = parse_outbound_tag(
+            {reinterpret_cast<const char*>(stored.data() + tag_start), i - tag_start});
+        if (i >= n || stored[i] != EQ || !tag) {
+            const FieldStatus status = (i < n && stored[i] == EQ && digits)
+                                           ? FieldStatus::bad_tag
+                                           : FieldStatus::malformed;
             while (i < n && stored[i] != SOH) ++i;
             if (i < n) ++i;
-            return {.ok = false, .tag = 0, .value = {}};
+            return {.status = status, .tag = 0, .value = {}};
         }
         ++i;  // skip '='
         const std::size_t vstart = i;
         while (i < n && stored[i] != SOH) ++i;
         std::span<const std::byte> val{stored.data() + vstart, i - vstart};
         if (i < n) ++i;  // skip SOH
-        return {.ok = true, .tag = tag, .value = val};
+        return {.status = FieldStatus::ok, .tag = *tag, .value = val};
     };
 
     const auto as_bytes = [](std::string_view sv) {
@@ -1863,7 +1884,10 @@ struct SendingTimeStamp {
         std::size_t i = 0;
         while (i < n) {
             auto fr = scan_field(i);
-            if (!fr.ok) continue;
+            if (fr.status == FieldStatus::bad_tag) {  // before a missing 52 can be reported
+                return std::unexpected(fixpp::core::error::wire_tag_out_of_range);
+            }
+            if (fr.status != FieldStatus::ok) continue;
             if (fr.tag == 52) {
                 stored_has_52 = true;
                 orig_sending_time = std::string_view{reinterpret_cast<const char*>(fr.value.data()),
@@ -1902,7 +1926,10 @@ struct SendingTimeStamp {
     std::size_t i = 0;
     while (i < n) {
         auto fr = scan_field(i);
-        if (!fr.ok) continue;
+        if (fr.status == FieldStatus::bad_tag) {
+            return std::unexpected(fixpp::core::error::wire_tag_out_of_range);
+        }
+        if (fr.status != FieldStatus::ok) continue;
         if (fr.tag == 9 || fr.tag == 10 || fr.tag == 43 || fr.tag == 122)
             continue;  // 9/10 recomputed; 43/122 re-inserted below (037 FR-004 dedup)
         if (fr.tag == 52) fr.value = as_bytes(sending_time);  // #420 restamp
@@ -4464,6 +4491,21 @@ static bool has_boundary_token(std::string_view sv, std::string_view tok) noexce
     return false;
 }
 
+// fixpp#422: is `tag` a StandardHeader field? send_impl moves such a field ahead
+// of the payload's body fields; a strict peer (QuickFIX-J UseDataDictionary=Y)
+// rejects a header field that follows a body field (373=14). The set is the
+// <header> of dictionaries/FIXT11.xml (a superset of FIX44.xml's) plus
+// OnBehalfOfSendingTime(370), which QuickFIX-J's Message.isHeaderField counts.
+// Unlike build_replay_frame's kReplayHeaderTags, which only needs to be a SUBSET
+// of the real header, this set must be a SUPERSET: a header tag missing here
+// stays behind the body.
+static bool is_send_header_tag(std::uint32_t tag) noexcept {
+    static constexpr std::array<std::uint32_t, 34> kSendHeaderTags = {
+        8,   9,   34,  35,  43,  49,  50,  52,  56,  57,  90,  91,  97,  115, 116,  122,  128,
+        129, 142, 143, 144, 145, 212, 213, 347, 369, 370, 627, 628, 629, 630, 1128, 1129, 1156};
+    return std::ranges::find(kSendHeaderTags, tag) != kSendHeaderTags.end();
+}
+
 asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
     std::span<const std::byte> app_payload, bool& disconnect_required) {
     using fixpp::core::error;
@@ -4533,16 +4575,17 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
     // Anchors: research.md D2/D5/D6; data-model.md §2 (INV-1..5); contracts §C2.1–C2.6.
     //
     // T008 — Scanner: walk every post-35= field and validate it is
-    //   <non-empty digit-only tag>=<value>\x01
+    //   <non-empty digit-only tag, no leading zero, <= 65535>=<value>\x01
     // On the FIRST malformed field → return app_payload_malformed=131, no seqnum,
     // no transmit. The 020 floor guarantees trailing SOH so every interior field IS
     // SOH-terminated; there is no run-off-the-end case.
     //
-    // T009 — Excision (only over a fully-validated payload):
-    //   allow_pos_dup==false (default): copy the leading 35= field + all surviving
-    //     post-35= fields (those whose tag is NOT 43 or 122) into strip_buf in
-    //     original order; rebind app_payload to that buffer.
-    //   allow_pos_dup==true: passthrough verbatim (scanner runs but no copy made).
+    // T009 — Excision + header partition (only over a fully-validated payload):
+    //   copy the leading 35= field, then the header-class post-35= fields
+    //   (is_send_header_tag), then the remaining fields, each group in original
+    //   order, into strip_buf; rebind app_payload to that buffer (fixpp#422).
+    //   allow_pos_dup==false (default) skips 43 and 122; allow_pos_dup==true keeps
+    //   their values verbatim, at their header position.
     //   INV-1: 35= (field 0) never touched.
     //   INV-2: only complete, boundary-anchored 43=..\x01 / 122=..\x01 removed.
     //   INV-3: stripped payload remains 35=-leading SOH-delimited.
@@ -4588,14 +4631,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
                     co_return std::unexpected(error::app_payload_malformed);
                 }
 
-                // (c) Tag (before '=') must be non-empty and all ASCII digits.
-                if (eq == 0) {
+                // (c) Tag (before '=') must be a canonical FIX tag (parse_outbound_tag).
+                if (!parse_outbound_tag(field_sv.substr(0, eq))) {
                     co_return std::unexpected(error::app_payload_malformed);
-                }
-                for (std::size_t i = 0; i < eq; ++i) {
-                    if (field_sv[i] < '0' || field_sv[i] > '9') {
-                        co_return std::unexpected(error::app_payload_malformed);
-                    }
                 }
 
                 // (d) Value (after '=', before SOH) must be non-empty.
@@ -4607,9 +4645,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
             }
         }
 
-        // --- T009: Excision pass --------------------------------------------
-        // Only when allow_pos_dup==false; only over a scanner-validated payload.
-        if (!cfg_.allow_pos_dup) {
+        // --- T009: Excision + header partition pass (fixpp#422) -------------
+        // Only over a scanner-validated payload.
+        {
             // Lambda: append bytes into strip_buf; returns false on overflow.
             const auto wstrip = [&](std::string_view sv) -> bool {
                 if (strip_len + sv.size() > strip_buf.size()) return false;
@@ -4622,40 +4660,40 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
                 co_return std::unexpected(error::wire_frame_too_large);
             }
 
-            // Copy each subsequent field, skipping tag 43 and tag 122.
-            std::size_t pos = lead_soh + 1;
-            while (pos < pv.size()) {
-                const std::size_t soh = pv.find('\x01', pos);
-                // soh guaranteed to exist (scanner validated entire payload above).
-                std::string_view field_sv = pv.substr(pos, soh - pos);
+            // Pass 1 copies the header-class fields, pass 2 the rest, each in the
+            // caller's order, so no header field follows a body field on the wire.
+            for (const bool header_pass : {true, false}) {
+                std::size_t pos = lead_soh + 1;
+                while (pos < pv.size()) {
+                    const std::size_t soh = pv.find('\x01', pos);
+                    // soh guaranteed to exist (scanner validated entire payload above).
+                    std::string_view field_sv = pv.substr(pos, soh - pos);
 
-                // Identify tag number (bytes before '=').
-                const std::size_t eq = field_sv.find('=');
-                // eq != npos and eq > 0 are guaranteed by the scanner pass above.
-                std::string_view tag_sv = field_sv.substr(0, eq);
+                    // The scanner above accepted every tag, so the fallback never applies.
+                    const std::uint16_t tag =
+                        parse_outbound_tag(field_sv.substr(0, field_sv.find('='))).value_or(0);
 
-                // INV-2: excise ONLY complete boundary-anchored 43 or 122 fields.
-                // A literal "43=" inside another field's value never reaches this
-                // branch because the scanner identified ONLY true tag-delimited fields.
-                const bool is_43 = (tag_sv == "43");
-                const bool is_122 = (tag_sv == "122");
+                    // INV-2: excise ONLY complete boundary-anchored 43 or 122 fields.
+                    // A literal "43=" inside another field's value never reaches this
+                    // branch because the scanner identified ONLY true tag-delimited fields.
+                    const bool excised = !cfg_.allow_pos_dup && (tag == 43 || tag == 122);
 
-                if (!is_43 && !is_122) {
-                    // Copy surviving field (including its terminating SOH).
-                    if (!wstrip(pv.substr(pos, soh - pos + 1))) {
-                        co_return std::unexpected(error::wire_frame_too_large);
+                    if (!excised && is_send_header_tag(tag) == header_pass) {
+                        // Copy the field (including its terminating SOH).
+                        if (!wstrip(pv.substr(pos, soh - pos + 1))) {
+                            co_return std::unexpected(error::wire_frame_too_large);
+                        }
                     }
-                }
 
-                pos = soh + 1;
+                    pos = soh + 1;
+                }
             }
 
-            // Rebind app_payload to the stripped buffer — the existing framing below
+            // Rebind app_payload to the rebuilt buffer — the existing framing below
             // consumes it unchanged (INV-3; contracts §C2.6).
             // strip_buf is alive at send_impl scope until co_return.
             app_payload = std::span<const std::byte>(strip_buf.data(), strip_len);
         }
-        // allow_pos_dup==true: app_payload unchanged (passthrough verbatim).
     }
 
     // ── T009: Correct framing — MsgType(35) at wire field-3, digit-only BodyLength

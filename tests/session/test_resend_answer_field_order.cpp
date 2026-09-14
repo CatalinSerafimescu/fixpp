@@ -101,8 +101,8 @@ constexpr auto kWindow = 200ms;
 
 // ── Field-order witness scanner ──────────────────────────────────────────────
 
-// FIX standard-header tags, per QuickFIX-J 3.0.1's `quickfix.Message.
-// isHeaderField(int)` — the exact switch the strict peer applies before
+// Header tags as QuickFIX-J 3.0.1's `quickfix.Message.isHeaderField(int)` counts
+// them (not the whole FIX standard header) — the exact switch the strict peer applies before
 // SessionRejectReason=14 is even reached. Verified 2026-09-11 by
 // disassembling `quickfixj-base-3.0.1.jar` with `javap -p -c`
 // (~/.m2/repository/org/quickfixj/quickfixj-base/3.0.1/) — this worktree has
@@ -136,6 +136,7 @@ struct OrderCheckResult {
     std::string reason;
     std::size_t count_43 = 0;
     std::size_t count_122 = 0;
+    std::vector<std::uint32_t> tags;  // every tag scanned, in wire order
 };
 
 // Walks `frame` field-by-field using fixpp::wire::accumulate_tag_digit (the
@@ -169,6 +170,7 @@ OrderCheckResult check_resend_answer_field_order(std::span<const std::byte> fram
         ++i;  // skip '='
         while (i < n && frame[i] != std::byte{0x01}) ++i;
         if (i < n) ++i;  // skip SOH
+        r.tags.push_back(tag);
 
         if (field_index < kWitnessPreamble.size() && tag != kWitnessPreamble[field_index]) {
             r.reason = "preamble out of order: field #" + std::to_string(field_index) + " is tag " +
@@ -483,6 +485,20 @@ protected:
         (void)feed_result(sess, frame);
     }
 
+    // Session::send's result for `payload_str`.
+    fixpp::core::expected_t<void> send_payload(Session& sess, std::string_view payload_str,
+                                               const char* label) {
+        auto payload = to_payload(payload_str);
+        auto fut =
+            asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow, label)) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, label);
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << label;
+            return {};  // the ADD_FAILURE above already fails the test
+        }
+        return fut.get();
+    }
+
     // Sends a minimal bodyless NewOrderSingle via the public API (so the store
     // records it and the outbound seqnum advances normally), returns the
     // assigned MsgSeqNum(34), and clears captured_frames. Shared by the
@@ -490,16 +506,11 @@ protected:
     // record's bytes in place (CapturingStore::outbound_records) to feed a
     // hand-crafted stored frame through the real resend-reply path.
     seqnum_t send_and_capture_seq(Session& sess, const char* label) {
-        auto payload = to_payload("35=D\x01");
-        auto fut =
-            asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
-        if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow, label)) {
-            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, label);
-            ADD_FAILURE() << fixpp::test_support::kWindowMiss << label;
+        EXPECT_TRUE(send_payload(sess, "35=D\x01", label).has_value()) << label;
+        if (captured_frames.empty()) {
+            ADD_FAILURE() << "no frame was sent: " << label;
             return 0;
         }
-        EXPECT_TRUE(fut.get().has_value()) << label;
-        EXPECT_FALSE(captured_frames.empty()) << label;
         const auto tag34_opt =
             extract_field(std::span<const std::byte>(captured_frames.back()), 34);
         EXPECT_TRUE(tag34_opt.has_value()) << label;
@@ -1518,6 +1529,234 @@ TEST_F(ResendAnswerReplayTest, Replay_OlderThanPeerMaxLatency_AcceptedByAFixppPe
         EXPECT_FALSE(mt == "3" || mt == "5")
             << "the peer must not Reject or Logout the replay; it sent: " << wire;
     }
+}
+
+// ── fixpp#421 / fixpp#422: the send() payload's tags ─────────────────────────
+
+namespace {
+
+class SendPayloadTagTest : public ResendAnswerReplayTest {
+protected:
+    // Sends a NewOrderSingle whose header-class fields follow body fields, then
+    // checks the transmitted frame against `expected_tags`, and that its replay
+    // is still in order.
+    void expect_header_moved(bool allow_pos_dup, const std::vector<std::uint32_t>& expected_tags) {
+        auto cfg = make_cfg();
+        cfg.allow_pos_dup = allow_pos_dup;
+        Session sess(engine, cfg);
+        drive_to_active(sess);
+
+        const auto r = send_payload(sess,
+                                    "35=D\x01"
+                                    "11=ORD\x01"
+                                    "43=Y\x01"
+                                    "54=1\x01"
+                                    "122=20231231-23:59:00.000\x01"
+                                    "115=OBO\x01"
+                                    "55=AAPL\x01"
+                                    "627=1\x01"
+                                    "628=HOP\x01"
+                                    "629=20231231-23:59:30.000\x01"
+                                    "38=100\x01",
+                                    "expect_header_moved/send");
+        ASSERT_TRUE(r.has_value());
+        ASSERT_EQ(captured_frames.size(), 1U);
+        const auto frame = captured_frames.back();
+        const auto check = check_resend_answer_field_order(frame);
+        EXPECT_TRUE(check.ok) << check.reason;
+        EXPECT_EQ(check.tags, expected_tags);
+        if (allow_pos_dup) {
+            EXPECT_EQ(extract_field(std::span<const std::byte>(frame), 122),
+                      "20231231-23:59:00.000")
+                << "B-022-1: allow_pos_dup=true keeps the caller's 122 value verbatim";
+        }
+
+        const auto seq = std::stoul(std::string(extract_field(frame, 34).value_or("0")));
+        captured_frames.clear();
+        feed(sess, make_resend_request(seq, seq, /*inbound_seq=*/2, "TW", "ISLD"));
+        std::size_t replays = 0;
+        for (const auto& f : captured_frames) {
+            if (extract_field(std::span<const std::byte>(f), 35) != "D") continue;
+            ++replays;
+            const auto rc = check_resend_answer_field_order(f);
+            EXPECT_TRUE(rc.ok) << rc.reason;
+            EXPECT_EQ(rc.count_43, 1U);
+            EXPECT_EQ(rc.count_122, 1U);
+        }
+        EXPECT_EQ(replays, 1U);
+    }
+};
+
+}  // namespace
+
+// fixpp#421: "65588=" reaches Writer::append_raw's uint16 tag as 52 on replay,
+// and a peer reads "052=" as 52; the 32-bit wrap of the unbounded accumulator
+// (4294967348 = 2^32 + 52) is the same alias. None of them may be stored. The
+// rejected sends consume no MsgSeqNum, so the accepted one after them is 2 (the
+// Logon reply holds 1); 65535, the largest tag, is accepted.
+TEST_F(SendPayloadTagTest, Send_AliasingTag_RejectedWithoutConsumingASeqNum) {
+    Session sess(engine, make_cfg());
+    drive_to_active(sess);
+
+    for (const std::string_view bad : {std::string_view{"35=D\x01"
+                                                        "11=X\x01"
+                                                        "65588=Z\x01"},
+                                       std::string_view{"35=D\x01"
+                                                        "4294967348=Z\x01"},
+                                       std::string_view{"35=D\x01"
+                                                        "052=Z\x01"},
+                                       std::string_view{"35=D\x01"
+                                                        "0011=X\x01"},
+                                       std::string_view{"35=D\x01"
+                                                        "0=Z\x01"}}) {
+        SCOPED_TRACE(std::string(bad));
+        const auto r = send_payload(sess, bad, "Send_AliasingTag/bad");
+        ASSERT_FALSE(r.has_value());
+        EXPECT_EQ(r.error(), fixpp::core::error::app_payload_malformed);
+        EXPECT_TRUE(captured_frames.empty()) << "a rejected payload must not be transmitted";
+    }
+
+    const auto ok = send_payload(sess,
+                                 "35=D\x01"
+                                 "65535=Z\x01",
+                                 "Send_AliasingTag/65535");
+    ASSERT_TRUE(ok.has_value());
+    ASSERT_EQ(captured_frames.size(), 1U);
+    EXPECT_EQ(extract_field(std::span<const std::byte>(captured_frames.back()), 34), "2");
+    EXPECT_EQ(extract_field(std::span<const std::byte>(captured_frames.back()), 65535), "Z");
+}
+
+// A tag byte below '0' ('-') is not a digit either.
+TEST_F(SendPayloadTagTest, Send_TagWithANonDigitBelowZero_Rejected) {
+    Session sess(engine, make_cfg());
+    drive_to_active(sess);
+
+    const auto r = send_payload(sess,
+                                "35=D\x01"
+                                "1-2=X\x01",
+                                "Send_TagWithANonDigitBelowZero/send");
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), fixpp::core::error::app_payload_malformed);
+    EXPECT_TRUE(captured_frames.empty());
+}
+
+// fixpp#422: header-class tags placed after body fields go out right after 56,
+// in the caller's order, and the body keeps its order. The NoHops group stays
+// contiguous. A strict peer (QuickFIX-J UseDataDictionary=Y) rejects a header
+// field after a body field with 373=14.
+TEST_F(SendPayloadTagTest, Send_HeaderTagsAfterBody_GoOutInsideTheHeader_AllowPosDup) {
+    expect_header_moved(/*allow_pos_dup=*/true, {8, 9, 35, 34, 49, 52, 56, 43, 122, 115, 627, 628,
+                                                 629, 11, 54, 55, 38, 10});
+}
+
+TEST_F(SendPayloadTagTest, Send_HeaderTagsAfterBody_GoOutInsideTheHeader_DefaultStrip) {
+    expect_header_moved(/*allow_pos_dup=*/false,
+                        {8, 9, 35, 34, 49, 52, 56, 115, 627, 628, 629, 11, 54, 55, 38, 10});
+}
+
+// fixpp#421: a stored frame that did not pass send_impl's tag checks (an older
+// build, a custom MessageStore) is not rebuilt with an aliased tag; the slot is
+// gap-filled (#424 D4a) with wire_tag_out_of_range.
+namespace {
+
+class AliasingStoredTagTest : public ResendAnswerReplayTest {
+protected:
+    void expect_gap_filled(std::string_view sending_time_field, std::string_view body,
+                           const char* label) {
+        auto factory = std::make_shared<CapturingStoreFactory>();
+        auto cfg = make_cfg(factory);
+        Session sess(engine, cfg);
+        drive_to_active(sess);
+
+        const seqnum_t app_seq = send_and_capture_seq(sess, label);
+        ASSERT_NE(factory->last_store, nullptr);
+        ASSERT_FALSE(factory->last_store->outbound_records.empty());
+        factory->last_store->outbound_records.back().frame =
+            to_payload(stored_frame(app_seq, sending_time_field, body));
+
+        feed(sess, make_resend_request(app_seq, app_seq, /*inbound_seq=*/2, "TW", "ISLD"));
+
+        expect_slot_gap_filled(captured_frames, sess, app_seq,
+                               fixpp::core::error::wire_tag_out_of_range);
+    }
+};
+
+}  // namespace
+
+TEST_F(AliasingStoredTagTest, Replay_StoredTagAbove65535_SlotIsGapFilled) {
+    expect_gap_filled("52=20260614-12:00:00.000\x01",
+                      "11=ORD\x01"
+                      "65588=Z\x01",
+                      "Replay_StoredTagAbove65535/send");
+}
+
+TEST_F(AliasingStoredTagTest, Replay_StoredTagWrappingUint32_SlotIsGapFilled) {
+    expect_gap_filled("52=20260614-12:00:00.000\x01",
+                      "11=ORD\x01"
+                      "4294967348=Z\x01",
+                      "Replay_StoredTagWrappingUint32/send");
+}
+
+// A clock-less Session with no stored 52 cannot build the replay either; the
+// bad tag, not the missing 52, is what the event must report.
+TEST_F(AliasingStoredTagTest, Replay_StoredTagAbove65535_NoClockAndNo52_ReportsTheTag) {
+    engine.clock = nullptr;  // the fixture's `clock` stays alive for the pump helpers
+    expect_gap_filled("",
+                      "11=ORD\x01"
+                      "65588=Z\x01",
+                      "Replay_StoredTagAbove65535_NoClockAndNo52/send");
+}
+
+// A malformed stored field, unlike a bad tag, is dropped and the message is
+// still replayed: a digit tag with no '=', a tag with a byte below '0', and an
+// unterminated last field with no '='.
+TEST_F(AliasingStoredTagTest, Replay_MalformedStoredFields_DroppedNotGapFilled) {
+    auto factory = std::make_shared<CapturingStoreFactory>();
+    auto cfg = make_cfg(factory);
+    Session sess(engine, cfg);
+    drive_to_active(sess);
+
+    const seqnum_t app_seq = send_and_capture_seq(sess, "Replay_MalformedStoredFields/send");
+    ASSERT_NE(factory->last_store, nullptr);
+    ASSERT_FALSE(factory->last_store->outbound_records.empty());
+    factory->last_store->outbound_records.back().frame =
+        to_payload(stored_frame(app_seq, "52=20260614-12:00:00.000\x01",
+                                "11=ORD\x01"
+                                "123\x01"
+                                "4-=V\x01"
+                                "55"));
+
+    feed(sess, make_resend_request(app_seq, app_seq, /*inbound_seq=*/2, "TW", "ISLD"));
+
+    std::size_t replays = 0;
+    for (const auto& f : captured_frames) {
+        const std::span<const std::byte> fs(f);
+        if (extract_field(fs, 35) != "D") continue;
+        ++replays;
+        const auto check = check_resend_answer_field_order(f);
+        EXPECT_TRUE(check.ok) << check.reason;
+        EXPECT_EQ(extract_field(fs, 11), "ORD");
+        EXPECT_EQ(std::ranges::count(check.tags, 123U), 0);
+        EXPECT_EQ(std::ranges::count(check.tags, 55U), 0);
+    }
+    EXPECT_EQ(replays, 1U) << "a malformed field is dropped, not a reason to gap-fill";
+}
+
+// An empty tag was replayed as "0=" before fixpp#421.
+TEST_F(AliasingStoredTagTest, Replay_StoredEmptyTag_SlotIsGapFilled) {
+    expect_gap_filled("52=20260614-12:00:00.000\x01",
+                      "11=ORD\x01"
+                      "=Z\x01",
+                      "Replay_StoredEmptyTag/send");
+}
+
+// The leading-zero field precedes the real 52, so the SendingTime pre-scan
+// walks past it too.
+TEST_F(AliasingStoredTagTest, Replay_StoredTagWithLeadingZero_SlotIsGapFilled) {
+    expect_gap_filled(
+        "052=20260614-11:00:00.000\x01"
+        "52=20260614-12:00:00.000\x01",
+        "11=ORD\x01", "Replay_StoredTagWithLeadingZero/send");
 }
 
 }  // namespace fixpp::session::test
