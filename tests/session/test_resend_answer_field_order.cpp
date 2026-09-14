@@ -101,8 +101,8 @@ constexpr auto kWindow = 200ms;
 
 // ── Field-order witness scanner ──────────────────────────────────────────────
 
-// FIX standard-header tags, per QuickFIX-J 3.0.1's `quickfix.Message.
-// isHeaderField(int)` — the exact switch the strict peer applies before
+// Header tags as QuickFIX-J 3.0.1's `quickfix.Message.isHeaderField(int)` counts
+// them (not the whole FIX standard header) — the exact switch the strict peer applies before
 // SessionRejectReason=14 is even reached. Verified 2026-09-11 by
 // disassembling `quickfixj-base-3.0.1.jar` with `javap -p -c`
 // (~/.m2/repository/org/quickfixj/quickfixj-base/3.0.1/) — this worktree has
