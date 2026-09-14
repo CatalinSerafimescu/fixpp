@@ -65,7 +65,7 @@ The authority is therefore split three ways, and knowing the split is most of th
 | The state machine | `include/fixpp/session/session_fsm.hpp`. ⚠️ **The state set is not reproduced here** — `B-005-2` pins it to the `[FIX-SL §4.10]` set, and a copied enum is what rots |
 | Establishment, Logon, the FSM's origin | `specs/005-session-establishment-fsm/` |
 | Sequence numbers, persistence, hydration | `SeqnumManager`; `specs/029-persistent-seqnum-hydrate/` |
-| PossDup / OrigSendingTime / PossResend | `specs/021-…`, `specs/022-…` |
+| PossDup / OrigSendingTime / PossResend | `specs/021-…`, `specs/022-…`. ⚠️ **021 FR-004's at-expected "MUST NOT advance … matches QuickFIX" is SUPERSEDED by fixpp#423** (B-423-1); see the rejected alternative below. |
 | Resend answers (replay + GapFill) — how `build_replay_frame` / `build_sequence_reset_gapfill` build the wire frame | `specs/013-session-reconnect-binding/spec.md` FR-010; `specs/037-resend-reply-possdup-tags/` (43/122 emission). ⚠️ **037's `spec.md` Assumptions section, `research.md` D-3, `plan.md`, `data-model.md`, `contracts/resend-reply-wire.md`, and `checklists/wire-conformance.md` CHK010 all describe placing `43`/`122` AFTER the body as "order-safe" / "field order is unconstrained for interop" — FALSE, superseded by fixpp#419: a strict peer (QuickFIX-J `UseDataDictionary=Y`) rejects it (373=14). The bundle is a point-in-time record, left as-is; do not trust its field-order claims. See `spec/behaviors-and-limitations.md` `## fixpp#419` for current behaviour.** ⚠️ **037 FR-006 / SC-003 ("replayed application frames MUST be byte-identical to prior behavior") are also SUPERSEDED, by fixpp#420: a replay restamps `SendingTime(52)`. 013 FR-010's "byte-for-byte" clause governs `122` only and still holds.** See `## fixpp#420 / fixpp#424` in the same file. |
 | Reset & refresh on Logon | `specs/024-reset-refresh-on-logon/`, `specs/025-refresh-on-logon/` |
 | NextExpectedMsgSeqNum | `specs/027-next-expected-msgseqnum/` |
@@ -122,6 +122,18 @@ The authority is therefore split three ways, and knowing the split is most of th
 - **Widening `Writer::append_raw` to a 32-bit tag that rejects values above 65535** (fixpp#421). It
   would add an error arm to every literal-tag caller to protect the one runtime-tag caller, the replay,
   which now narrows by type instead.
+- **Leaving an in-sequence rejected message's MsgSeqNum unconsumed, "for QuickFIX parity"** (fixpp#423,
+  owner ruling 2026-09-14).
+  - **Who chose it:** 041 (contract C-3) and 021 (FR-004, at the expected number). 016's thorny
+    C-102 witness chose the opposite for the Rejects after the seqnum gate.
+  - **Why it was wrong:** the parity claim was false, since both QuickFIX engines' `generateReject`
+    increment at the expected number. FIX-SL 2020 §4.5.4 also says NextNumIn *must* be incremented.
+  - **What it did live:** the session stalled.
+  - **Still not consumed:** a Logon or SequenceReset, a message at any other number, and the
+    establishment arms (`consume_rejected_seqnum_`).
+  - ⚠️ **041's `contracts/validation-gate.md` C-3 and `spec.md` (Clarifications, FR-003, edge cases),
+    and 021's `spec.md` FR-004, still say "does not advance". They are point-in-time records, left
+    as-is. See B-423-1.**
 
 ## ⚠️ Limitations an integrator must know before trusting this family
 

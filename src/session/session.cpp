@@ -754,6 +754,36 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::persist_inbound_advance_
     co_return fixpp::core::expected_t<void>{};
 }
 
+// fixpp#423 — a message answered by a session Reject is received, so an in-sequence one
+// consumes its MsgSeqNum (FIX-SL 2020 §4.5.4: "Rejected messages must be logged and
+// NextNumIn incremented by 1"). Called at each Reject that runs BEFORE Guard (4)'s
+// check_inbound; the Rejects after it are already counted (thorny C-102, qfj-557).
+// check_inbound refuses any other number, so an out-of-sequence message stays
+// unconsumed. Logon and SequenceReset are excluded, as both QuickFIX engines'
+// generateReject exclude them. Erratum fixpp#423 (owner ruling 2026-09-14) supersedes
+// 041 contract C-3's and 021 FR-004's "does not advance".
+asio::awaitable<fixpp::core::expected_t<void>> Session::consume_rejected_seqnum_(
+    seqnum_t seq, std::string_view msg_type) noexcept {
+    if (msg_type == "A" || msg_type == "4") {
+        co_return fixpp::core::expected_t<void>{};
+    }
+    if (!co_await seqnum_mgr_.check_inbound(seq)) {
+        co_return fixpp::core::expected_t<void>{};
+    }
+    close_filled_resend_gap_();
+    co_return co_await persist_inbound_advance_();
+}
+
+// Exit AwaitingResend once the inbound counter has passed the requested gap's end.
+// reconnect_fsm_ owns AwaitingResend state per data-model §E-1 / T023 Fix1.
+void Session::close_filled_resend_gap_() noexcept {
+    if (reconnect_fsm_.is_awaiting_resend() &&
+        reconnect_fsm_.current_resend_state().outstanding_end > 0 &&
+        seqnum_mgr_.next_inbound_unsafe() > reconnect_fsm_.current_resend_state().outstanding_end) {
+        reconnect_fsm_.exit_awaiting_resend();
+    }
+}
+
 // 032 T009 — durable outbound advance (C3 / FR-007).
 // Mirrors persist_inbound_advance_() for the 032 initiator outbound-restore path.
 // Skips when store_is_persistent_==false (INV-H4 / C3.5).
@@ -2916,14 +2946,18 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
 
             // ── 041-validation-gate-wiring T014: dictionary-driven validate gate ─
             // Runs after scan_frame_header (hdr.msg_type available for 3/5 exemption)
-            // and BEFORE check_inbound (C-3: seqnum NOT advanced on validate failure).
-            // No-reject-loop: 35=3 and 35=5 exempt (FR-004). [041 T014; data-model E-4]
+            // and BEFORE check_inbound. Erratum fixpp#423: an in-sequence rejected message
+            // consumes its MsgSeqNum; 041 C-3's "seqnum NOT advanced" holds only out of
+            // sequence. No-reject-loop: 35=3 and 35=5 exempt (FR-004). [041 T014; data-model E-4]
             // Arena: kInboundParseArena (16384) matches the dispatch arena. [FIX-1/FIX-2]
             if (cfg_.validate_inbound_messages && validator_) {
                 if (hdr.msg_type != "3" && hdr.msg_type != "5") {
                     if (auto rej = validate_inbound_(frame, hdr)) {
-                        co_return co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num),
-                                                                hdr.msg_type, rej->reason,
+                        const seqnum_t rej_seq = parse_seqnum(hdr.msg_seq_num);
+                        if (auto c = co_await consume_rejected_seqnum_(rej_seq, hdr.msg_type); !c) {
+                            co_return c;
+                        }
+                        co_return co_await emit_session_reject_(rej_seq, hdr.msg_type, rej->reason,
                                                                 rej->ref_tag_id);
                     }
                 }
@@ -2975,13 +3009,17 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
 
                 if (!sending_time_ok) {
                     // Q3 established-session path: Reject(reason=10, refTag=52) → Logout →
-                    // Disconnect.
+                    // Disconnect. fixpp#423: an in-sequence message still consumes its
+                    // MsgSeqNum, so a reconnect does not ask for it again.
+                    const seqnum_t ref_seq = parse_seqnum(hdr.msg_seq_num);
+                    if (auto c = co_await consume_rejected_seqnum_(ref_seq, hdr.msg_type); !c) {
+                        co_return c;
+                    }
                     const auto st52 =
                         stamp_sending_time(*effective_clock_, cfg_.sending_time_precision);
                     // Step 1: emit Reject(35=3, RefTagID=52, reason=10).
                     {
                         std::array<std::byte, 512> rj_buf{};
-                        const seqnum_t ref_seq = parse_seqnum(hdr.msg_seq_num);
                         const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
                         auto rj_result = fixpp::session::build_reject(
                             std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
@@ -3063,7 +3101,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         co_return std::unexpected(cb_r.error());
                     }
                     if (!cb_r) {
-                        // fromAdmin reject → emit session Reject(35=3).
+                        // fromAdmin reject → emit session Reject(35=3). Not consumed
+                        // (fixpp#423): consume_rejected_seqnum_ excludes SequenceReset.
                         // Best-effort: proceed even if assign or emit fails
                         // (session still applies the SequenceReset below — co_return ok).
                         const seqnum_t rj_ref = parse_seqnum(hdr.msg_seq_num);
@@ -3180,8 +3219,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // 021 T008 Stage-1 — PossDup OrigSendingTime validation (Arms C/D/E).
                 // Runs for any 43=Y non-SequenceReset frame, AFTER the too-high arm
                 // (forward gaps still ResendRequest per engine parity — user decision
-                // 2026-06-04) and BEFORE check_inbound, so at-expected/too-low malformed
-                // dups are rejected without advancing the sequence number.
+                // 2026-06-04) and BEFORE check_inbound. Erratum fixpp#423: an at-expected
+                // rejected dup consumes its MsgSeqNum (Arms C/D and RC#1 below); 021 FR-004's
+                // "MUST NOT advance" holds only for a too-low one.
                 // data-model.md §1 Stage 1 rows 0–4; contracts/session-possdup.md C1.
                 // Arm E (row 0): 35=4 (SequenceReset) is exempt — guard below.
                 if (hdr.poss_dup_flag == "Y" && hdr.msg_type != "4") {
@@ -3189,11 +3229,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         // Arm C (row 2): OrigSendingTime(122) absent → Reject(35=3),
                         // 371=122 (RefTagID=OrigSendingTime), 373=1 (RequiredTagMissing).
                         // Session survives (no disconnect). data-model INV-3; research D4.
+                        const seqnum_t rj_ref_c = parse_seqnum(hdr.msg_seq_num);
+                        if (auto c = co_await consume_rejected_seqnum_(rj_ref_c, hdr.msg_type);
+                            !c) {
+                            co_return c;
+                        }
                         const auto st52_c =
                             effective_clock_
                                 ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
                                 : SendingTimeStamp{};
-                        const seqnum_t rj_ref_c = parse_seqnum(hdr.msg_seq_num);
                         const seqnum_t rj_seq_c = seqnum_mgr_.peek_outbound();
                         std::array<std::byte, 512> rj_buf_c{};
                         auto rj_r_c = fixpp::session::build_reject(
@@ -3218,7 +3262,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             auto emit_r = co_await store_then_emit(rj_seq_c, *rj_r_c);
                             (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
                         }
-                        // Arm C: survive — do NOT disconnect, do NOT advance seqnum.
+                        // Arm C: survive — do NOT disconnect.
                         co_return fixpp::core::expected_t<void>{};
                     }
                     // Arm D (row 3): parse 122 and 52; if BOTH parse and t122 > t52 (strict)
@@ -3240,11 +3284,16 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         if (!parse_122) {
                             // 122 is non-empty (Arm C's empty-check above already handled empty),
                             // so it is present but malformed — treat as RequiredTagMissing.
+                            const seqnum_t rj_ref_rc1 = parse_seqnum(hdr.msg_seq_num);
+                            if (auto c =
+                                    co_await consume_rejected_seqnum_(rj_ref_rc1, hdr.msg_type);
+                                !c) {
+                                co_return c;
+                            }
                             const auto st52_rc1 =
                                 effective_clock_ ? stamp_sending_time(*effective_clock_,
                                                                       cfg_.sending_time_precision)
                                                  : SendingTimeStamp{};
-                            const seqnum_t rj_ref_rc1 = parse_seqnum(hdr.msg_seq_num);
                             const seqnum_t rj_seq_rc1 = seqnum_mgr_.peek_outbound();
                             std::array<std::byte, 512> rj_buf_rc1{};
                             auto rj_r_rc1 = fixpp::session::build_reject(
@@ -3276,6 +3325,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             hdr.sending_time.data(), hdr.sending_time.size()});
                         if (parse_122 && parse_52 && *parse_122 > *parse_52) {
                             // Arm D — strict 122 > 52.
+                            const seqnum_t rj_ref = parse_seqnum(hdr.msg_seq_num);
+                            if (auto c = co_await consume_rejected_seqnum_(rj_ref, hdr.msg_type);
+                                !c) {
+                                co_return c;
+                            }
                             const auto st52_d =
                                 effective_clock_ ? stamp_sending_time(*effective_clock_,
                                                                       cfg_.sending_time_precision)
@@ -3283,7 +3337,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             // Step 1: emit Reject(35=3, 371=122, 373=10).
                             {
                                 std::array<std::byte, 512> rj_buf{};
-                                const seqnum_t rj_ref = parse_seqnum(hdr.msg_seq_num);
                                 const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
                                 auto rj_result = fixpp::session::build_reject(
                                     std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
@@ -3422,13 +3475,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 }
 
                 // Gap close check: if we filled through the gap endpoint, exit AwaitingResend.
-                // reconnect_fsm_ owns AwaitingResend state per data-model §E-1 / T023 Fix1.
-                if (reconnect_fsm_.is_awaiting_resend() &&
-                    reconnect_fsm_.current_resend_state().outstanding_end > 0 &&
-                    seqnum_mgr_.next_inbound_unsafe() >
-                        reconnect_fsm_.current_resend_state().outstanding_end) {
-                    reconnect_fsm_.exit_awaiting_resend();
-                }
+                close_filled_resend_gap_();
             }
 
             // ── Inbound SequenceReset(35=4) — GapFill mode (GapFillFlag = Y) ─
@@ -3653,6 +3700,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         }
                         // fromAdmin reject → session Reject(35=3). (INV-4; D4)
                         // Disconnected-on-failure for assign_outbound + store_then_emit.
+                        // fixpp#423: Guard (4) consumed the seqnum; persist it before this
+                        // early return, as the delivering path does.
+                        if (auto p_r = co_await persist_inbound_advance_(); !p_r) {
+                            co_return p_r;
+                        }
                         co_return co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num),
                                                                 hdr.msg_type);
                     }
@@ -3816,6 +3868,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             // Reject(reason=session_msg_type_invalid_for_state=3).
                             // SessionRejectReason 3 = unsupported message type per [FIX-SL §4.5.4].
                             // Disconnected-on-failure for assign_outbound + store_then_emit.
+                            // fixpp#423: Guard (4) consumed the seqnum; persist it before this
+                            // early return, as the delivering path does.
+                            if (auto p_r = co_await persist_inbound_advance_(); !p_r) {
+                                co_return p_r;
+                            }
                             co_return co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num),
                                                                     hdr.msg_type);
                         }
@@ -3959,7 +4016,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // ── 041-validation-gate-wiring T014: validate-first gate ──────────────
             // Run BEFORE interpret_logon: a dict-invalid Logon-ack produces a Reject
             // rather than a silent Disconnect (C-2 validate-first ordering, FR-003).
-            // No-reject-loop: 35=3 and 35=5 exempt. C-3: seqnum NOT advanced.
+            // No-reject-loop: 35=3 and 35=5 exempt. C-3: seqnum NOT advanced (fixpp#423
+            // consumes only in LogonReceived/Active; establishment arms are its Logon row).
             // Arena: kInboundParseArena (16384) matches the dispatch arena. [FIX-1/FIX-2]
             // [041 T014; data-model E-4; contracts/validation-gate.md C-2/C-3]
             if (cfg_.validate_inbound_messages && validator_) {

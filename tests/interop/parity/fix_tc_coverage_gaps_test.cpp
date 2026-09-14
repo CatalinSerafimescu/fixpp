@@ -358,25 +358,50 @@ TEST_F(FixTcCoverageGaps, RejectResentMessage_DuringResend_RejectsAndContinues) 
     EXPECT_TRUE(frame_has(rj, "45=2\x01"))
         << "Reject RefSeqNum(45) must be the bad resent frame's seq (2)";
 
-    // (b) The session does NOT abort recovery: it stays Active (not Disconnected),
-    // and the rejected frame did NOT fill the gap (seqnum not advanced — strictly
-    // in-order; fixpp will not skip the still-missing seqnum).
+    // (b) The session does NOT abort recovery: it stays Active (not Disconnected).
+    // Erratum fixpp#423 (owner ruling 2026-09-14): the rejected frame is at the
+    // expected seqnum, so it consumes it (FIX-SL 2020 §4.5.4, "Rejected messages must
+    // be logged and NextNumIn incremented by 1"). This test used to pin the opposite.
     EXPECT_EQ(s.state(), fixpp::session::fsm_state::Active)
         << "RejectResentMessage: a bad resent frame must not tear the session down";
-    EXPECT_EQ(next_inbound(s), 2U)
-        << "the rejected resent frame must not advance past the still-missing seqnum";
+    EXPECT_EQ(next_inbound(s), 3U)
+        << "the rejected resent frame at the expected seqnum must consume it (fixpp#423)";
 
-    // (c) Recovery CONTINUES: a corrected re-send of the same seqnum (43=Y, 122
-    // present) is accepted and the gap progresses — the earlier Reject did not
-    // poison the resend window.
+    // (c) Recovery CONTINUES: the next resent frame (seq=3, 43=Y, 122 present) is
+    // accepted and the gap progresses — the earlier Reject did not poison the
+    // resend window.
     const std::size_t after_reject = capture.frames.size();
-    (void)feed(s, make_fix_frame("FIX.4.2", "0", /*seq=*/2, "TW", "ISLD",
+    (void)feed(s, make_fix_frame("FIX.4.2", "0", /*seq=*/3, "TW", "ISLD",
                                  "43=Y\x01"
                                  "122=20240101-00:00:00.000\x01"));
-    EXPECT_EQ(next_inbound(s), 3U)
-        << "a corrected resent frame is accepted after the Reject — recovery continues";
+    EXPECT_EQ(next_inbound(s), 4U)
+        << "the next resent frame is accepted after the Reject — recovery continues";
     EXPECT_EQ(capture.frames.size(), after_reject)
         << "the accepted resent frame is silent (no Reject, no admin emit)";
+}
+
+// ── fixpp#423 — a rejected resent frame that fills the gap ends AwaitingResend ──
+//
+// Gap [2..2]: the peer's seq=3 draws ResendRequest(2..). The replayed seq=2 is
+// malformed (43=Y, no 122), rejected, and consumed, so next-expected passes the gap
+// end. AwaitingResend must then close: a later too-high Heartbeat (seq=5) draws a
+// SECOND ResendRequest. Were the session still awaiting, that Heartbeat would be
+// dropped silently and the session would stall on the gap it already closed.
+TEST_F(FixTcCoverageGaps, RejectedResentFrame_FillingTheGap_EndsAwaitingResend) {
+    fixpp::session::Session s{engine, make_acceptor_cfg()};
+    ASSERT_TRUE(drive_to_active(s));
+    ASSERT_EQ(next_inbound(s), 2U) << "precondition: next-expected-inbound = 2";
+
+    (void)feed(s, make_fix_frame("FIX.4.2", "0", /*seq=*/3, "TW", "ISLD"));
+    ASSERT_EQ(capture.count_msg_type("2"), 1U) << "precondition: one ResendRequest for [2..2]";
+
+    (void)feed(s, make_fix_frame("FIX.4.2", "0", /*seq=*/2, "TW", "ISLD", "43=Y\x01"));
+    ASSERT_EQ(next_inbound(s), 3U) << "the rejected resent seq=2 is consumed";
+
+    (void)feed(s, make_fix_frame("FIX.4.2", "0", /*seq=*/5, "TW", "ISLD"));
+    EXPECT_EQ(capture.count_msg_type("2"), 2U)
+        << "the gap closed on the rejected frame, so a new gap must draw a new ResendRequest";
+    EXPECT_EQ(s.state(), fixpp::session::fsm_state::Active);
 }
 
 // ── gap #3 / FIX-TC 20_SimultaneousResendRequest (QFJ testSimultaneousResend… ──

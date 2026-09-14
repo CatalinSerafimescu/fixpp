@@ -33,6 +33,7 @@
 #include <cstdint>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
+#include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/session/application.hpp>
 #include <fixpp/session/direction.hpp>
 #include <fixpp/session/message_store.hpp>
@@ -42,6 +43,7 @@
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -52,6 +54,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/validation_test_dictionary.hpp"
 
 using namespace std::chrono_literals;
 
@@ -95,6 +98,21 @@ public:
     void onLogon(const fixpp::session::SessionId& /*id*/) override { ++on_logon_count; }
 };
 
+// VetoHeartbeatApp: fromAdmin rejects every inbound Heartbeat(35=0) and accepts the
+// rest (so the Logon still establishes). Drives the post-Guard-4 fromAdmin-veto Reject.
+class VetoHeartbeatApp final : public fixpp::session::Application {
+public:
+    fixpp::core::expected_t<void> fromAdmin(
+        const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg,
+        const fixpp::session::SessionId& /*id*/) override {
+        auto mt = msg.get(35);
+        if (mt && mt->as_string() == "0") {
+            return std::unexpected(fixpp::core::error::app_do_not_send);
+        }
+        return {};
+    }
+};
+
 // ── Frame-building helpers (mirror test_next_expected_msgseqnum.cpp) ──────────
 
 std::string field(int tag, std::string_view val) {
@@ -103,12 +121,13 @@ std::string field(int tag, std::string_view val) {
 
 std::vector<std::byte> make_fix_frame(std::string_view begin_string, std::string_view msg_type,
                                       std::uint32_t seq, std::string_view sender,
-                                      std::string_view target, std::string_view extra = {}) {
+                                      std::string_view target, std::string_view extra = {},
+                                      std::string_view sending_time = "20240101-00:00:00.000") {
     std::string body;
     body += field(35, msg_type);
     body += field(34, std::to_string(seq));
     body += field(49, sender);
-    body += field(52, "20240101-00:00:00.000");
+    body += field(52, sending_time);
     body += field(56, target);
     if (!extra.empty()) body += std::string(extra);
 
@@ -403,7 +422,8 @@ struct Fixture {
 std::unique_ptr<Fixture> make_acceptor(std::shared_ptr<MessageStoreFactory> store_factory,
                                        std::uint32_t peer_logon_seq = 1, bool enable_789 = false,
                                        bool reset_on_logon = false,
-                                       std::shared_ptr<fixpp::session::Application> app = nullptr) {
+                                       std::shared_ptr<fixpp::session::Application> app = nullptr,
+                                       const std::function<void(Fixture&)>& tweak = {}) {
     auto fix = std::make_unique<Fixture>();
 
     fix->cfg.role = fixpp::session::session_role::acceptor;
@@ -421,6 +441,9 @@ std::unique_ptr<Fixture> make_acceptor(std::shared_ptr<MessageStoreFactory> stor
     fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
     if (app) {
         fix->eng.application = std::move(app);
+    }
+    if (tweak) {
+        tweak(*fix);
     }
 
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
@@ -457,7 +480,7 @@ std::unique_ptr<Fixture> make_acceptor(std::shared_ptr<MessageStoreFactory> stor
     (void)open_fut.get();
 
     // Feed peer Logon to reach Active.
-    fix->feed(make_logon("FIX.4.4", peer_logon_seq, "CLI", "SRV"));
+    fix->feed(make_logon(fix->cfg.begin_string, peer_logon_seq, "CLI", "SRV"));
 
     EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
         << "make_acceptor: session must be Active after Logon";
@@ -1235,6 +1258,113 @@ TEST(PersistentSeqnumHydrate, InboundPersistFailure_Fatal_LowerBound_FirstWrite)
     EXPECT_EQ(store->durable_inbound, fixpp::session::seqnum_t{1})
         << "W6(a): after first-write failure, durable_inbound must stay at lower bound (1); "
            "check_inbound advanced in-memory but durable stays at last successful persist";
+}
+
+// ── fixpp#423 — an in-sequence rejected message's advance is PERSISTED ─────────
+//
+// A message rejected at the expected seqnum consumes it, and the durable counter must
+// move with the in-memory one, or a restart hydrates the old value and ResendRequests
+// the rejected message, the stall #423 closes. Cases: 021 Arm C (before check_inbound),
+// and the two Rejects after Guard (4) that returned before the common persist (a
+// fromAdmin veto; an application message with no Application registered).
+// Pre-#423 (RED): durable_inbound stays 2 in every case.
+TEST(PersistentSeqnumHydrate, RejectedInSequence_AdvanceIsPersisted) {
+    struct Case {
+        const char* site;
+        std::shared_ptr<fixpp::session::Application> app;
+        std::vector<std::byte> frame;
+    };
+    const std::vector<Case> cases = {
+        {"021 Arm C (122 missing)", nullptr,
+         make_fix_frame("FIX.4.4", "D", 2, "CLI", "SRV", field(43, "Y"))},
+        {"after Guard (4): fromAdmin veto", std::make_shared<VetoHeartbeatApp>(),
+         make_fix_frame("FIX.4.4", "0", 2, "CLI", "SRV")},
+        {"after Guard (4): no Application", nullptr,
+         make_fix_frame("FIX.4.4", "D", 2, "CLI", "SRV")},
+    };
+    for (const Case& c : cases) {
+        SCOPED_TRACE(c.site);
+        auto factory = std::make_shared<FaultStoreFactory>(/*in=*/1, /*out=*/1);
+        auto fix = make_acceptor(factory, 1, false, false, c.app);
+        FaultStore* store = factory->last_store;
+        ASSERT_NE(store, nullptr);
+        EXPECT_EQ(store->durable_inbound, fixpp::session::seqnum_t{2})
+            << "precondition: the Logon at seq=1 was persisted";
+        const std::size_t before = fix->capture.frames.size();
+
+        fix->feed(c.frame);
+
+        EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+            << "the session survives the Reject";
+        EXPECT_GT(fix->capture.frames.size(), before) << "a Reject was sent";
+        EXPECT_EQ(store->durable_inbound, fixpp::session::seqnum_t{3})
+            << "fixpp#423: the consumed seqnum must reach the store";
+    }
+}
+
+// fixpp#423 — a failed persist of that advance is fatal, as at every other persist site
+// (D-3 / SC-006): the session disconnects before any Reject goes out. One case per
+// consume_rejected_seqnum_ call site, since each propagates the failure on its own.
+TEST(PersistentSeqnumHydrate, RejectedInSequence_PersistFailure_Fatal) {
+    const auto with_clock = [](Fixture& f) {
+        using namespace std::chrono;
+        f.eng.clock = std::make_shared<fixpp::core::mock_clock>(
+            system_clock::time_point{} + seconds{1704067200},  // 2024-01-01, the frames' 52
+            fixpp::core::steady_time_point{}, f.ioc.get_executor());
+        // No liveness loop: with one, every 5 s feed window runs to its end.
+        f.cfg.heartbeat_interval = seconds{0};
+    };
+    const auto with_validation = [](Fixture& f) {
+        f.cfg.begin_string = "FIX.4.2";
+        f.cfg.dictionary = fixpp::test_support::make_validation_test_dictionary();
+        f.cfg.validate_inbound_messages = true;
+    };
+    struct Case {
+        const char* site;
+        std::function<void(Fixture&)> tweak;
+        std::vector<std::byte> frame;
+    };
+    const std::vector<Case> cases = {
+        {"021 Arm C (122 missing)",
+         {},
+         make_fix_frame("FIX.4.4", "D", 2, "CLI", "SRV", field(43, "Y"))},
+        {"021 RC#1 (122 unparseable)",
+         {},
+         make_fix_frame("FIX.4.4", "D", 2, "CLI", "SRV", field(43, "Y") + field(122, "bad"))},
+        {"021 Arm D (122 > 52)",
+         {},
+         make_fix_frame("FIX.4.4", "D", 2, "CLI", "SRV",
+                        field(43, "Y") + field(122, "20240101-00:00:01.000"))},
+        {"Guard-3 stale SendingTime", with_clock,
+         make_fix_frame("FIX.4.4", "0", 2, "CLI", "SRV", {}, "20231231-23:55:00.000")},
+        {"041 validate gate", with_validation,
+         make_fix_frame("FIX.4.2", "0", 2, "CLI", "SRV", field(44, "99.99"))},
+        {"after Guard (4): fromAdmin veto",
+         [](Fixture& f) { f.eng.application = std::make_shared<VetoHeartbeatApp>(); },
+         make_fix_frame("FIX.4.4", "0", 2, "CLI", "SRV")},
+        {"after Guard (4): no Application", {}, make_fix_frame("FIX.4.4", "D", 2, "CLI", "SRV")},
+    };
+    for (const Case& c : cases) {
+        SCOPED_TRACE(c.site);
+        // Write 1 persists the Logon; write 2 is the rejected message's advance.
+        auto factory = std::make_shared<FaultStoreFactory>(/*in=*/1, /*out=*/1,
+                                                           /*fail_on_nth_call=*/0,
+                                                           /*fail_on_nth_write=*/2);
+        auto fix = make_acceptor(factory, 1, false, false, nullptr, c.tweak);
+        FaultStore* store = factory->last_store;
+        ASSERT_NE(store, nullptr);
+        EXPECT_EQ(store->durable_inbound, fixpp::session::seqnum_t{2})
+            << "precondition: the Logon at seq=1 was persisted";
+        const std::size_t before = fix->capture.frames.size();
+
+        fix->feed(c.frame);
+
+        EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+            << "fixpp#423: a failed persist of the consumed seqnum must disconnect";
+        EXPECT_EQ(store->durable_inbound, fixpp::session::seqnum_t{2})
+            << "the durable counter stays at the last successful persist";
+        EXPECT_EQ(fix->capture.frames.size(), before) << "no Reject after the failed persist";
+    }
 }
 
 // W6(b): failure on a LATER write (after 2 successful persists).
