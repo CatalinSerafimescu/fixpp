@@ -114,13 +114,11 @@ struct session_event_sequence_numbers_reset {
 };
 
 // fixpp#424 (D4a) — emitted when a stored application message inside a
-// ResendRequest range cannot be rebuilt as a replay (e.g. the replay frame
-// overflows its buffer, or the stored frame has no SendingTime(52) and no clock
-// is available to supply one). The slot is folded into the surrounding
-// SequenceReset-GapFill run instead of being skipped, so the peer's gap still
-// closes [FIX-SL §4.8.3/§4.8.5]; this event is the record that a business
-// message was gap-filled rather than retransmitted. `code` is the error the
-// replay build returned. All fields by-value.
+// ResendRequest range cannot be rebuilt as a replay (`code` says why). The slot
+// is folded into the surrounding SequenceReset-GapFill run instead of being
+// skipped, so the peer's gap still closes [FIX-SL §4.8.3/§4.8.5]; this event is
+// the record that a business message was gap-filled rather than retransmitted.
+// All fields by-value.
 struct session_event_resend_slot_gap_filled {
     seqnum_t seq;             // MsgSeqNum of the stored message that was gap-filled
     fixpp::core::error code;  // why the replay frame could not be built

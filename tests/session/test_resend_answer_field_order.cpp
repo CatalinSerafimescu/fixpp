@@ -85,6 +85,7 @@
 #include <vector>
 
 #include "session/support/frame_field_extract.hpp"  // via -I tests/
+#include "session/support/possdup_test_support.hpp"  // CountingApplication
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -368,10 +369,9 @@ std::vector<std::byte> make_peer_logon_44(std::uint32_t seq, std::string_view se
     return make_fix_frame(body);
 }
 
-std::vector<std::byte> make_resend_request(seqnum_t begin_seqno, seqnum_t end_seqno,
-                                           std::uint32_t inbound_seq, std::string_view sender,
-                                           std::string_view target,
-                                           std::string_view sending_time = "20240101-00:00:00.000") {
+std::vector<std::byte> make_resend_request(
+    seqnum_t begin_seqno, seqnum_t end_seqno, std::uint32_t inbound_seq, std::string_view sender,
+    std::string_view target, std::string_view sending_time = "20240101-00:00:00.000") {
     std::string body;
     body += "35=2\x01";
     body += "34=" + std::to_string(inbound_seq) + "\x01";
@@ -456,7 +456,9 @@ protected:
         captured_frames.clear();  // discard open()/logon-ack frames
     }
 
-    void feed(Session& sess, const std::vector<std::byte>& frame) {
+    // Returns on_inbound_frame's result; callers that only need the side
+    // effects ignore it.
+    fixpp::core::expected_t<void> feed(Session& sess, const std::vector<std::byte>& frame) {
         auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
                                                         "ResendAnswerReplayTest::feed/frame")) {
@@ -464,9 +466,9 @@ protected:
                                                             "ResendAnswerReplayTest::feed/frame");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss
                           << "ResendAnswerReplayTest::feed/frame";
-            return;
+            return {};  // the ADD_FAILURE above already fails the test
         }
-        (void)fut.get();
+        return fut.get();
     }
 
     // Sends a minimal bodyless NewOrderSingle via the public API (so the store
@@ -853,6 +855,32 @@ TEST_F(ResendAnswerReplayTest, Replay_MalformedStoredField_SkippedInBothScans) {
     EXPECT_EQ(replay_matches, 1U);
 }
 
+namespace {
+
+// The SendingTime the replay tests' clock reads 10 s after the fixture's T0.
+constexpr std::string_view kResendStamp = "20240101-00:00:10.000";
+
+// A stored NewOrderSingle whose header carries `sending_time_field` (e.g.
+// "52=...\x01", or "" for none) followed by `body`.
+std::string stored_frame(seqnum_t app_seq, std::string_view sending_time_field,
+                         std::string_view body) {
+    std::string stored;
+    stored += "8=FIX.4.4\x01";
+    stored += "35=D\x01";
+    stored += "34=" + std::to_string(app_seq) + "\x01";
+    stored += "49=ISLD\x01";
+    stored += sending_time_field;
+    stored += "56=TW\x01";
+    stored += body;
+    return stored;
+}
+
+std::string stored_frame_without_52(seqnum_t app_seq) {
+    return stored_frame(app_seq, "", "11=ORD-NO52\x01");
+}
+
+}  // namespace
+
 // ── build_replay_frame: no stored SendingTime(52) ────────────────────────────
 //
 // fixpp#424 ruling (2026-09-14): the message is still replayed -- the peer
@@ -875,18 +903,12 @@ TEST_F(ResendAnswerReplayTest, Replay_NoStoredSendingTime_Emits52And122FromTheRe
 
     ASSERT_NE(factory->last_store, nullptr);
     ASSERT_FALSE(factory->last_store->outbound_records.empty());
-    std::string stored;
-    stored += "8=FIX.4.4\x01";
-    stored += "35=D\x01";
-    stored += "34=" + std::to_string(app_seq) + "\x01";
-    stored += "49=ISLD\x01";
-    stored += "56=TW\x01";
-    stored += "11=ORD-NO52\x01";
-    factory->last_store->outbound_records.back().frame = to_payload(stored);
+    factory->last_store->outbound_records.back().frame =
+        to_payload(stored_frame_without_52(app_seq));
 
     clock->advance(std::chrono::seconds{10});  // well inside the RR's own 120 s MaxLatency
-    auto rr = make_resend_request(app_seq, app_seq, /*inbound_seq=*/2, "TW", "ISLD");
-    feed(sess, rr);
+    feed(sess,
+         make_resend_request(app_seq, app_seq, /*inbound_seq=*/2, "TW", "ISLD", kResendStamp));
 
     std::size_t replay_matches = 0;
     for (const auto& f : captured_frames) {
@@ -902,7 +924,7 @@ TEST_F(ResendAnswerReplayTest, Replay_NoStoredSendingTime_Emits52And122FromTheRe
 
         const auto st = extract_field(fs, 52);
         ASSERT_TRUE(st.has_value()) << "SendingTime(52) must be emitted though the store had none";
-        EXPECT_EQ(*st, "20240101-00:00:10.000") << "52 := the retransmission stamp";
+        EXPECT_EQ(*st, kResendStamp) << "52 := the retransmission stamp";
         const auto ost = extract_field(fs, 122);
         ASSERT_TRUE(ost.has_value()) << "OrigSendingTime(122) must be present (count_122==1)";
         EXPECT_EQ(*ost, *st) << "122 := the new 52 when the stored frame has none (#424)";
@@ -910,22 +932,17 @@ TEST_F(ResendAnswerReplayTest, Replay_NoStoredSendingTime_Emits52And122FromTheRe
     EXPECT_EQ(replay_matches, 1U);
 }
 
-// ── build_replay_frame: a pathological stored SendingTime(52) replays intact ─
+// ── build_replay_frame: a long stored SendingTime(52) replays intact ─────────
 //
 // The replay buffer (Session::replay_outbound_range_'s kRpBufSize) is the
-// capture buffer (CaptureVisitor::kCapBufSize) plus a fixed headroom. Before
-// fixpp#420, OrigSendingTime(122) duplicated the stored 52 while 52 was copied
-// too, so a long stored 52 overflowed that headroom and the slot was skipped.
-// After #420 the stored 52 MOVES to 122 and 52 is replaced by the
-// retransmission stamp, so growth is bounded by the replay tags themselves
-// (43=Y, the 122 tag bytes, and the fixed-width new 52), independent of any
-// stored value -- a frame that fits the capture buffer can no longer overflow
-// the replay buffer. These tests pin that the frames which overflowed before
-// now replay, at both 43/122 insertion sites. fixpp#424's fold is witnessed
-// separately below, through its one remaining trigger.
+// capture buffer (CaptureVisitor::kCapBufSize) plus a fixed headroom, which
+// must hold what a replay adds to a capturable frame. Before fixpp#420 the
+// stored 52 was copied AND duplicated into OrigSendingTime(122), so a long
+// stored 52 counted twice, exceeded that headroom, and the slot was skipped.
+// After #420 the stored value moves to 122 and 52 carries the fixed-width
+// retransmission stamp. These tests pin that such frames replay, at both
+// 43/122 insertion sites.
 namespace {
-
-constexpr std::string_view kResendStamp = "20240101-00:00:10.000";
 
 void expect_replayed_intact(const std::vector<std::vector<std::byte>>& captured_frames,
                             const Session& sess, seqnum_t app_seq,
@@ -959,24 +976,18 @@ TEST_F(ResendAnswerReplayTest, Replay_LongStoredSendingTime_ReplaysIntact_AtBody
     Session sess(engine, cfg);
     drive_to_active(sess);
 
-    const seqnum_t app_seq =
-        send_and_capture_seq(sess, "Replay_LongStoredSendingTime_ReplaysIntact_AtBodyInsertion/send");
+    const seqnum_t app_seq = send_and_capture_seq(
+        sess, "Replay_LongStoredSendingTime_ReplaysIntact_AtBodyInsertion/send");
 
     ASSERT_NE(factory->last_store, nullptr);
     ASSERT_FALSE(factory->last_store->outbound_records.empty());
     const std::string huge_sending_time(3900, 'S');
-    std::string stored;
-    stored += "8=FIX.4.4\x01";
-    stored += "35=D\x01";
-    stored += "34=" + std::to_string(app_seq) + "\x01";
-    stored += "49=ISLD\x01";
-    stored += "52=" + huge_sending_time + "\x01";
-    stored += "56=TW\x01";
-    stored += "11=X\x01";
-    factory->last_store->outbound_records.back().frame = to_payload(stored);
+    factory->last_store->outbound_records.back().frame =
+        to_payload(stored_frame(app_seq, "52=" + huge_sending_time + "\x01", "11=X\x01"));
 
     clock->advance(std::chrono::seconds{10});
-    feed(sess, make_resend_request(app_seq, app_seq, /*inbound_seq=*/2, "TW", "ISLD", kResendStamp));
+    feed(sess,
+         make_resend_request(app_seq, app_seq, /*inbound_seq=*/2, "TW", "ISLD", kResendStamp));
 
     expect_replayed_intact(captured_frames, sess, app_seq, huge_sending_time);
 }
@@ -995,17 +1006,12 @@ TEST_F(ResendAnswerReplayTest, Replay_LongStoredSendingTime_ReplaysIntact_InNoBo
     ASSERT_NE(factory->last_store, nullptr);
     ASSERT_FALSE(factory->last_store->outbound_records.empty());
     const std::string huge_sending_time(3900, 'S');
-    std::string stored;
-    stored += "8=FIX.4.4\x01";
-    stored += "35=D\x01";
-    stored += "34=" + std::to_string(app_seq) + "\x01";
-    stored += "49=ISLD\x01";
-    stored += "52=" + huge_sending_time + "\x01";
-    stored += "56=TW\x01";
-    factory->last_store->outbound_records.back().frame = to_payload(stored);
+    factory->last_store->outbound_records.back().frame =
+        to_payload(stored_frame(app_seq, "52=" + huge_sending_time + "\x01", ""));
 
     clock->advance(std::chrono::seconds{10});
-    feed(sess, make_resend_request(app_seq, app_seq, /*inbound_seq=*/2, "TW", "ISLD", kResendStamp));
+    feed(sess,
+         make_resend_request(app_seq, app_seq, /*inbound_seq=*/2, "TW", "ISLD", kResendStamp));
 
     expect_replayed_intact(captured_frames, sess, app_seq, huge_sending_time);
 }
@@ -1021,8 +1027,8 @@ TEST_F(ResendAnswerReplayTest, Replay_LongStoredSendingTime_ReplaysIntact_InNoBo
 // Trigger: a Session with no clock (engine.clock == nullptr, so there is no
 // retransmission stamp) replaying a stored frame that carries no
 // SendingTime(52) -- there is then no value for 52 or 122 and the build returns
-// wire_required_field_missing. The replay-buffer overflow that used to reach
-// this fold is structurally gone after #420 (see the block above).
+// wire_required_field_missing. A long stored 52 no longer reaches this fold
+// (see the block above).
 namespace {
 
 void expect_slot_gap_filled(const std::vector<std::vector<std::byte>>& captured_frames,
@@ -1036,7 +1042,8 @@ void expect_slot_gap_filled(const std::vector<std::vector<std::byte>>& captured_
         if (mt != "4") continue;
         const auto check = check_resend_answer_field_order(f);
         EXPECT_TRUE(check.ok) << check.reason;
-        EXPECT_TRUE(extract_field(fs, 123) == "Y") << "must be a GapFill, not a SequenceReset-Reset";
+        EXPECT_TRUE(extract_field(fs, 123) == "Y")
+            << "must be a GapFill, not a SequenceReset-Reset";
         const auto seq = std::stoul(std::string(extract_field(fs, 34).value_or("0")));
         const auto new_seq = std::stoul(std::string(extract_field(fs, 36).value_or("0")));
         if (seq <= app_seq && app_seq < new_seq) ++covering_gapfills;
@@ -1055,18 +1062,6 @@ void expect_slot_gap_filled(const std::vector<std::vector<std::byte>>& captured_
     EXPECT_EQ(events, 1U) << "#424 D4a: a gap-filled business message must be recorded";
 }
 
-// A stored NewOrderSingle with no SendingTime(52).
-std::string stored_frame_without_52(seqnum_t app_seq) {
-    std::string stored;
-    stored += "8=FIX.4.4\x01";
-    stored += "35=D\x01";
-    stored += "34=" + std::to_string(app_seq) + "\x01";
-    stored += "49=ISLD\x01";
-    stored += "56=TW\x01";
-    stored += "11=ORD-NO52\x01";
-    return stored;
-}
-
 }  // namespace
 
 TEST_F(ResendAnswerReplayTest, Replay_NoClockAndNoStoredSendingTime_SlotIsGapFilled) {
@@ -1081,7 +1076,8 @@ TEST_F(ResendAnswerReplayTest, Replay_NoClockAndNoStoredSendingTime_SlotIsGapFil
 
     ASSERT_NE(factory->last_store, nullptr);
     ASSERT_FALSE(factory->last_store->outbound_records.empty());
-    factory->last_store->outbound_records.back().frame = to_payload(stored_frame_without_52(app_seq));
+    factory->last_store->outbound_records.back().frame =
+        to_payload(stored_frame_without_52(app_seq));
 
     feed(sess, make_resend_request(app_seq, app_seq, /*inbound_seq=*/2, "TW", "ISLD"));
 
@@ -1107,7 +1103,8 @@ TEST_F(ResendAnswerReplayTest, Replay_UnbuildableSlot_JoinsTheSurroundingGapFill
 
     ASSERT_NE(factory->last_store, nullptr);
     ASSERT_FALSE(factory->last_store->outbound_records.empty());
-    factory->last_store->outbound_records.back().frame = to_payload(stored_frame_without_52(app_seq));
+    factory->last_store->outbound_records.back().frame =
+        to_payload(stored_frame_without_52(app_seq));
 
     feed(sess, make_resend_request(1, app_seq, /*inbound_seq=*/2, "TW", "ISLD"));
 
@@ -1116,7 +1113,8 @@ TEST_F(ResendAnswerReplayTest, Replay_UnbuildableSlot_JoinsTheSurroundingGapFill
     for (const auto& f : captured_frames) {
         const std::span<const std::byte> fs(f);
         if (extract_field(fs, 35) != "4") continue;
-        gapfills.emplace_back(extract_field(fs, 34).value_or(""), extract_field(fs, 36).value_or(""));
+        gapfills.emplace_back(extract_field(fs, 34).value_or(""),
+                              extract_field(fs, 36).value_or(""));
     }
     ASSERT_EQ(gapfills.size(), 1U) << "#424 D4a: one GapFill run, not one per slot";
     EXPECT_EQ(gapfills[0].first, "1");
@@ -1148,15 +1146,7 @@ TEST_F(ResendAnswerReplayTest, Replay_GapFlushBeforeAReplay_ToAdminThrow_AbortsW
     ASSERT_EQ(app_seq, 2U) << "precondition: the stored Logon reply occupies seq 1";
 
     app->armed = true;
-    const auto rr = make_resend_request(1, app_seq, /*inbound_seq=*/2, "TW", "ISLD");
-    auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(rr), asio::use_future);
-    const char* label = "Replay_GapFlushBeforeAReplay_ToAdminThrow/resend";
-    if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow, label)) {
-        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, label);
-        ADD_FAILURE() << fixpp::test_support::kWindowMiss << label;
-        return;
-    }
-    const auto r = fut.get();
+    const auto r = feed(sess, make_resend_request(1, app_seq, /*inbound_seq=*/2, "TW", "ISLD"));
     ASSERT_FALSE(r.has_value()) << "a toAdmin throw on the gap flush must fail the resend answer";
     EXPECT_EQ(r.error(), fixpp::core::error::app_callback_threw);
     for (const auto& f : captured_frames) {
@@ -1180,16 +1170,7 @@ TEST_F(ResendAnswerReplayTest, Replay_OlderThanPeerMaxLatency_AcceptedByAFixppPe
     // Counts app deliveries, so "accepted" means delivered to fromApp -- not merely
     // "not rejected". Without an Application the peer would answer any app
     // message with Reject(373=3), which says nothing about the latency guard.
-    struct CountingApp final : Application {
-        int from_app = 0;
-        fixpp::core::expected_t<void> fromApp(
-            const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
-            const SessionId& /*id*/) override {
-            ++from_app;
-            return {};
-        }
-    };
-    auto app = std::make_shared<CountingApp>();
+    auto app = std::make_shared<CountingApplication>();
     engine.application = app;
 
     Session sess(engine, make_cfg());
@@ -1236,11 +1217,11 @@ TEST_F(ResendAnswerReplayTest, Replay_OlderThanPeerMaxLatency_AcceptedByAFixppPe
     EXPECT_TRUE(extract_field(rs, 52) == "20240101-00:05:00.000") << "52 := retransmission time";
     EXPECT_TRUE(extract_field(rs, 122) == "20240101-00:00:00.000") << "122 := the stored 52";
 
-    const int delivered_before = app->from_app;
+    const int delivered_before = app->from_app_calls;
     feed(peer, *replay);
     EXPECT_EQ(peer.state(), fsm_state::Active)
         << "the peer's MaxLatency guard must accept a restamped replay of an old message";
-    EXPECT_EQ(app->from_app, delivered_before + 1)
+    EXPECT_EQ(app->from_app_calls, delivered_before + 1)
         << "the replay must be delivered to the peer's application exactly once";
     for (const auto& f : peer_frames) {
         const auto mt = extract_field(std::span<const std::byte>(f), 35);

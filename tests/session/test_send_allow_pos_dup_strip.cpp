@@ -170,12 +170,9 @@ static std::vector<std::byte> make_peer_logon_44(std::uint32_t seq, std::string_
 }
 
 // Build a ResendRequest (35=2) peer frame.
-static std::vector<std::byte> make_resend_request(seqnum_t begin_seqno, seqnum_t end_seqno,
-                                                  std::uint32_t inbound_seq,
-                                                  std::string_view sender,
-                                                  std::string_view target,
-                                                  std::string_view sending_time =
-                                                      "20240101-00:00:00.000") {
+static std::vector<std::byte> make_resend_request(
+    seqnum_t begin_seqno, seqnum_t end_seqno, std::uint32_t inbound_seq, std::string_view sender,
+    std::string_view target, std::string_view sending_time = "20240101-00:00:00.000") {
     std::string body;
     body += "35=2\x01";
     body += "34=" + std::to_string(inbound_seq) + "\x01";
@@ -1175,15 +1172,16 @@ TEST_F(AllowPosDupStripTest, Cell3_DefaultPath_ReplayByteIdentical) {
     // Field order: 43/122 at the standard-header/body boundary (fixpp#419); 52 is
     // the retransmission time and 122 the stored original (fixpp#420).
     // [037 FR-006; INV-4; reordered fixpp#419; restamped fixpp#420]
-    const auto oracle = make_fix_frame("35=D\x01"
-                                       "34=2\x01"
-                                       "49=ISLD\x01"
-                                       "52=20240101-00:00:10.000\x01"
-                                       "56=TW\x01"
-                                       "43=Y\x01"
-                                       "122=20240101-00:00:00.000\x01"
-                                       "11=ORDXXX\x01"
-                                       "54=1\x01");
+    const auto oracle = make_fix_frame(
+        "35=D\x01"
+        "34=2\x01"
+        "49=ISLD\x01"
+        "52=20240101-00:00:10.000\x01"
+        "56=TW\x01"
+        "43=Y\x01"
+        "122=20240101-00:00:00.000\x01"
+        "11=ORDXXX\x01"
+        "54=1\x01");
 
     // FR-006/INV-4: byte-for-byte identity with the oracle (no stored 43/122 to
     // skip on this path, so the 037 skip widening is inert here).
