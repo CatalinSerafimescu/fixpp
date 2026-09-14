@@ -109,6 +109,19 @@ The authority is therefore split three ways, and knowing the split is most of th
   and the stamp is late only by as long as that one write blocks.
 - **Gap-filling a frame too large to capture** (fixpp#424 D5). Rejected *for now*: it stays a loud
   disconnect (`L-424-1`), deferred, and may be reopened.
+- **Rejecting a `send()` payload whose header-class field follows a body field** (fixpp#422, owner
+  decision 2026-09-14). The field is moved into the header instead; a reject would also have broken
+  callers that append `43`/`122` under `allow_pos_dup=true`.
+- **One header-tag table for both the send partition and the replay's insertion point** (fixpp#422).
+  They pull in opposite directions: the send table (`is_send_header_tag`) must be a SUPERSET of any
+  real header, or a header field stays behind the body; the replay's `kReplayHeaderTags` only needs to
+  be a SUBSET (B-419-1). Reading the set from the session's dictionary was not taken either (L-422-1).
+- **Putting the canonical outbound-tag rule in `wire/tag_scan.hpp`** (fixpp#421). That header serves
+  the inbound scanners, which accept zero padding by design; the outbound rule
+  (`parse_outbound_tag`) stays in `session.cpp`.
+- **Widening `Writer::append_raw` to a 32-bit tag that rejects values above 65535** (fixpp#421). It
+  would add an error arm to every literal-tag caller to protect the one runtime-tag caller, the replay,
+  which now narrows by type instead.
 
 ## ⚠️ Limitations an integrator must know before trusting this family
 

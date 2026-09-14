@@ -254,3 +254,21 @@ All in `tests/session/test_fixt_logon_establishment.cpp`.
 
 <!-- #419 untracked-52 note — closed: RESOLVED 2026-09-14 by #420 (a replay restamps SendingTime) -->
 - **(Was the last bullet of `## fixpp#419`'s Limitations; it had no row id.) "Not addressed by #419, tracked separately: the replayed frame's own `SendingTime(52)` is copied byte-for-byte from the stored value, never restamped to the retransmission time. → fixpp#420." RESOLVED 2026-09-14 by fixpp#420.** A replay now carries `52` = the retransmission time and `122` = the stored `52`. **Fixed: see B-420-1** in the live file (`spec/behaviors-and-limitations.md`, `## fixpp#420 / fixpp#424`). *(fixpp#420.)*
+
+<!-- L-419-1 — closed: RESOLVED 2026-09-14 by #422 (header-class payload fields go out inside the header) -->
+- **L-419-1 — header-class tags in the `Session::send()` payload were emitted wherever the caller placed them — RESOLVED 2026-09-14 by fixpp#422.** Fixed: see B-422-1 in the live file (`spec/behaviors-and-limitations.md`, `## fixpp#421 / fixpp#422`). *(fixpp#422.)*
+
+  <details><summary>Original row as it stood before resolution (fixpp#419)</summary>
+
+  **L-419-1 — header-class tags supplied by the caller in the `Session::send()` payload, including `allow_pos_dup=true`'s retained `43`/`122`, are still emitted wherever the caller placed them; a strict peer rejects them if they follow a body field.** `send_impl` forbids only `8/9/34/49/52/56/10` in the opaque payload; anything else (`43`, `122`, `97`, `115`, `128`, `50`, `57`, `1128`, …) is copied verbatim after the generated header. Unrelated to #419's fix (which only reorders the ENGINE's own resend-answer emission) and is the documented `allow_pos_dup=true` "retain verbatim" contract (B-022-1) working as specified. → **fixpp#422**.
+
+  </details>
+
+<!-- L-419-2 — closed: RESOLVED 2026-09-14 by #421 (send rejects, and a replay fails closed on, a non-canonical tag) -->
+- **L-419-2 — a stored frame's tag above 65535 or with a leading zero could alias to a different tag when replayed — RESOLVED 2026-09-14 by fixpp#421.** Fixed: see B-421-1 and B-421-2 in the live file (`spec/behaviors-and-limitations.md`, `## fixpp#421 / fixpp#422`). *(fixpp#421.)*
+
+  <details><summary>Original row as it stood before resolution (fixpp#419)</summary>
+
+  **L-419-2 — a stored frame's tag, if it exceeds 65535 or carries a leading zero, can alias to a different tag (including 52/43/10) when replayed.** `build_replay_frame`'s tag scanner accumulates an unbounded `uint32_t` and the wire writer truncates to `uint16_t`; `send_impl`'s own scanner (T008) does not reject an out-of-range or leading-zero tag before it is stored. Pre-existing since 013; not introduced or fixed by #419 — #419's first-`52`-wins pre-scan does fix the half of this where a *stored* `122` used to be poisoned by a later-occurring aliased `52`. → **fixpp#421**.
+
+  </details>
