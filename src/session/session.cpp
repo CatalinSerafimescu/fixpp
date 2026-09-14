@@ -1884,6 +1884,9 @@ struct SendingTimeStamp {
         std::size_t i = 0;
         while (i < n) {
             auto fr = scan_field(i);
+            if (fr.status == FieldStatus::bad_tag) {  // before a missing 52 can be reported
+                return std::unexpected(fixpp::core::error::wire_tag_out_of_range);
+            }
             if (fr.status != FieldStatus::ok) continue;
             if (fr.tag == 52) {
                 stored_has_52 = true;

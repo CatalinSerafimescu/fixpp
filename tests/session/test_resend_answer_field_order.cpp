@@ -1626,6 +1626,20 @@ TEST_F(SendPayloadTagTest, Send_AliasingTag_RejectedWithoutConsumingASeqNum) {
     EXPECT_EQ(extract_field(std::span<const std::byte>(captured_frames.back()), 65535), "Z");
 }
 
+// A tag byte below '0' ('-') is not a digit either.
+TEST_F(SendPayloadTagTest, Send_TagWithANonDigitBelowZero_Rejected) {
+    Session sess(engine, make_cfg());
+    drive_to_active(sess);
+
+    const auto r = send_payload(sess,
+                                "35=D\x01"
+                                "1-2=X\x01",
+                                "Send_TagWithANonDigitBelowZero/send");
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), fixpp::core::error::app_payload_malformed);
+    EXPECT_TRUE(captured_frames.empty());
+}
+
 // fixpp#422: header-class tags placed after body fields go out right after 56,
 // in the caller's order, and the body keeps its order. The NoHops group stays
 // contiguous. A strict peer (QuickFIX-J UseDataDictionary=Y) rejects a header
@@ -1681,6 +1695,51 @@ TEST_F(AliasingStoredTagTest, Replay_StoredTagWrappingUint32_SlotIsGapFilled) {
                       "11=ORD\x01"
                       "4294967348=Z\x01",
                       "Replay_StoredTagWrappingUint32/send");
+}
+
+// A clock-less Session with no stored 52 cannot build the replay either; the
+// bad tag, not the missing 52, is what the event must report.
+TEST_F(AliasingStoredTagTest, Replay_StoredTagAbove65535_NoClockAndNo52_ReportsTheTag) {
+    engine.clock = nullptr;  // the fixture's `clock` stays alive for the pump helpers
+    expect_gap_filled("",
+                      "11=ORD\x01"
+                      "65588=Z\x01",
+                      "Replay_StoredTagAbove65535_NoClockAndNo52/send");
+}
+
+// A malformed stored field, unlike a bad tag, is dropped and the message is
+// still replayed: a digit tag with no '=', a tag with a byte below '0', and an
+// unterminated last field with no '='.
+TEST_F(AliasingStoredTagTest, Replay_MalformedStoredFields_DroppedNotGapFilled) {
+    auto factory = std::make_shared<CapturingStoreFactory>();
+    auto cfg = make_cfg(factory);
+    Session sess(engine, cfg);
+    drive_to_active(sess);
+
+    const seqnum_t app_seq = send_and_capture_seq(sess, "Replay_MalformedStoredFields/send");
+    ASSERT_NE(factory->last_store, nullptr);
+    ASSERT_FALSE(factory->last_store->outbound_records.empty());
+    factory->last_store->outbound_records.back().frame =
+        to_payload(stored_frame(app_seq, "52=20260614-12:00:00.000\x01",
+                                "11=ORD\x01"
+                                "123\x01"
+                                "4-=V\x01"
+                                "55"));
+
+    feed(sess, make_resend_request(app_seq, app_seq, /*inbound_seq=*/2, "TW", "ISLD"));
+
+    std::size_t replays = 0;
+    for (const auto& f : captured_frames) {
+        const std::span<const std::byte> fs(f);
+        if (extract_field(fs, 35) != "D") continue;
+        ++replays;
+        const auto check = check_resend_answer_field_order(f);
+        EXPECT_TRUE(check.ok) << check.reason;
+        EXPECT_EQ(extract_field(fs, 11), "ORD");
+        EXPECT_EQ(std::ranges::count(check.tags, 123U), 0);
+        EXPECT_EQ(std::ranges::count(check.tags, 55U), 0);
+    }
+    EXPECT_EQ(replays, 1U) << "a malformed field is dropped, not a reason to gap-fill";
 }
 
 // An empty tag was replayed as "0=" before fixpp#421.
