@@ -1755,6 +1755,22 @@ struct SendingTimeStamp {
 // and does NOT advance the live outbound counter (resend semantics). Stack-only;
 // the 9=/10= source fields are skipped (the Writer rebuilds them on commit).
 //
+// fixpp#420 (ruling 2026-09-14) — SendingTime(52) is RESTAMPED to
+// `resend_sending_time`, the time of retransmission; 122 keeps the stored 52.
+// FIX-SL 2020 §4.8.4: the retransmitting processor "must modify ... SendingTime(52)
+// set to the current sending time • OrigSendingTime(122) set to the SendingTime(52)
+// from the original message". FR-010's "the store is the authority" governs where
+// 122 comes from, not 52. Copying the stored 52 made every replay older than the
+// peer's MaxLatency fail its latency check (QuickFIX-J CheckLatency=Y/120 s, and
+// fixpp's own inbound guard). An empty `resend_sending_time` (clock-less Session)
+// keeps the stored 52, so this never emits an empty 52=.
+// fixpp#424 — a stored frame with no 52: emit 52 = the new stamp and 122 = that
+// same value (StandardHeader: "If data is not available set to same value as
+// SendingTime"), never an empty 122=. An EMPTY stored 52 is not available either:
+// restamped in place like every stored 52, nothing inserted, and 122 (which
+// follows the first stored 52) takes the new stamp. A failure is returned,
+// never a partial frame; replay_outbound_range_ gap-fills an unbuildable slot (D4a).
+//
 // #419 supersedes 037's tail placement (43/122 appended after the full stored
 // body, groups included): 43 and 122 are standard-header fields and MUST
 // precede every body field, or a peer validating field order (QuickFIX-J with
@@ -1782,7 +1798,8 @@ struct SendingTimeStamp {
 // and strictly worse here: it would need a dictionary or a private,
 // FIXT-scoped table, for no behavioural gain. Keep S as it is.
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_replay_frame(
-    std::span<std::byte> out, std::span<const std::byte> stored) noexcept {
+    std::span<std::byte> out, std::span<const std::byte> stored,
+    std::string_view resend_sending_time) noexcept {
     fixpp::wire::Writer w(out, ::fixpp::detail::arena_upstream());
     const std::byte SOH{0x01};
     const std::byte EQ{static_cast<std::byte>('=')};
@@ -1826,18 +1843,8 @@ struct SendingTimeStamp {
         return {.ok = true, .tag = tag, .value = val};
     };
 
-    // Emits PossDupFlag(43)=Y + OrigSendingTime(122)=<orig_sending_time>. Shared
-    // by the header/body-boundary insertion point and the degenerate no-body
-    // fallback below, so the two emit sites cannot silently diverge.
-    const auto append_possdup = [&](std::string_view ost_val) -> fixpp::core::expected_t<void> {
-        std::byte y[] = {static_cast<std::byte>('Y')};
-        if (auto r = w.append_raw(43, std::span<const std::byte>{y}); !r) {
-            return std::unexpected(r.error());
-        }
-        std::span<const std::byte> ost{reinterpret_cast<const std::byte*>(ost_val.data()),
-                                       ost_val.size()};
-        if (auto r = w.append_raw(122, ost); !r) return std::unexpected(r.error());
-        return {};
+    const auto as_bytes = [](std::string_view sv) {
+        return std::span<const std::byte>{reinterpret_cast<const std::byte*>(sv.data()), sv.size()};
     };
 
     // Pre-scan pass: capture SendingTime(52) BEFORE the write loop runs, so
@@ -1851,18 +1858,44 @@ struct SendingTimeStamp {
     // not by the frame's total size (it degenerates to a full scan only if
     // 52 is absent, which `send_impl` cannot produce).
     std::string_view orig_sending_time;
+    bool stored_has_52 = false;  // separate from emptiness: an empty 52 is still restamped in place
     {
         std::size_t i = 0;
         while (i < n) {
             auto fr = scan_field(i);
             if (!fr.ok) continue;
             if (fr.tag == 52) {
+                stored_has_52 = true;
                 orig_sending_time = std::string_view{reinterpret_cast<const char*>(fr.value.data()),
                                                      fr.value.size()};
                 break;
             }
         }
     }
+
+    // #420: 52 := the retransmission stamp (stored 52 when there is none).
+    // #424: 122 := the stored 52, or the new 52 when the store has none.
+    const std::string_view sending_time =
+        resend_sending_time.empty() ? orig_sending_time : resend_sending_time;
+    if (sending_time.empty()) {
+        return std::unexpected(fixpp::core::error::wire_required_field_missing);
+    }
+
+    // Emits PossDupFlag(43)=Y + OrigSendingTime(122), preceded by SendingTime(52)
+    // when the stored frame has none to restamp (#424). Shared by the
+    // header/body-boundary insertion point and the degenerate no-body fallback
+    // below, so the two emit sites cannot silently diverge.
+    const auto append_possdup = [&]() -> fixpp::core::expected_t<void> {
+        if (!stored_has_52) {
+            if (auto r = w.append_raw(52, as_bytes(sending_time)); !r) {
+                return std::unexpected(r.error());
+            }
+        }
+        if (auto r = w.append_raw(43, as_bytes("Y")); !r) return std::unexpected(r.error());
+        const std::string_view orig = orig_sending_time.empty() ? sending_time : orig_sending_time;
+        if (auto r = w.append_raw(122, as_bytes(orig)); !r) return std::unexpected(r.error());
+        return {};
+    };
 
     constexpr std::array<std::uint32_t, 6> kReplayHeaderTags = {8, 34, 35, 49, 52, 56};
     bool inserted_pd = false;
@@ -1872,6 +1905,7 @@ struct SendingTimeStamp {
         if (!fr.ok) continue;
         if (fr.tag == 9 || fr.tag == 10 || fr.tag == 43 || fr.tag == 122)
             continue;  // 9/10 recomputed; 43/122 re-inserted below (037 FR-004 dedup)
+        if (fr.tag == 52) fr.value = as_bytes(sending_time);  // #420 restamp
 
         // #419: insert PossDupFlag(43)=Y + OrigSendingTime(122) at the
         // header/body boundary — before the first tag NOT in the header set —
@@ -1881,7 +1915,7 @@ struct SendingTimeStamp {
         // header field, never once the insertion point has been passed.
         if (!inserted_pd &&
             std::ranges::find(kReplayHeaderTags, fr.tag) == kReplayHeaderTags.end()) {
-            if (auto r = append_possdup(orig_sending_time); !r) return std::unexpected(r.error());
+            if (auto r = append_possdup(); !r) return std::unexpected(r.error());
             inserted_pd = true;
         }
         if (auto r = w.append_raw(fr.tag, fr.value); !r) return std::unexpected(r.error());
@@ -1895,7 +1929,7 @@ struct SendingTimeStamp {
     // see tests/session/test_resend_answer_field_order.cpp
     // Replay_NoBodyFallback_StillCarries43And122.
     if (!inserted_pd) {
-        if (auto r = append_possdup(orig_sending_time); !r) return std::unexpected(r.error());
+        if (auto r = append_possdup(); !r) return std::unexpected(r.error());
     }
     auto committed = std::move(w).commit();
     if (!committed) return std::unexpected(committed.error());
@@ -5440,10 +5474,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::replay_outbound_range_(
                mt == "A";
     };
 
-    // FIX-3 (gate-b/r1): set when emit_gapfill_async detects a toAdmin throw.
-    bool gapfill_callback_threw = false;
-    const auto emit_gapfill_async = [&](seqnum_t at_seq,
-                                        seqnum_t new_seqno) -> asio::awaitable<bool> {
+    const auto emit_gapfill_async =
+        [&](seqnum_t at_seq, seqnum_t new_seqno) -> asio::awaitable<fixpp::core::expected_t<void>> {
         std::array<std::byte, 256> gf_buf{};
         auto gf = fixpp::session::build_sequence_reset_gapfill(
             std::span<std::byte>{gf_buf.data(), gf_buf.size()}, at_seq, cfg_.sender_comp_id,
@@ -5454,15 +5486,17 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::replay_outbound_range_(
             // arm): an outbound admin frame that cannot be constructed must NOT report success.
             // Silent success here would leave the peer's ResendRequest silently unfilled
             // (data-loss).
-            co_return false;
+            co_return std::unexpected(fixpp::core::error::dispatch_aborted);
         }
         // 019 T014: toAdmin before SequenceReset-GapFill. [FR-008/010]
         // FIX-3 (gate-b/r1): throw → terminal-close + app_callback_threw.
         if (!fire_to_admin_(*gf)) {
-            gapfill_callback_threw = true;
-            co_return false;
+            co_return std::unexpected(fixpp::core::error::app_callback_threw);
         }
-        co_return co_await transmit_async(*gf);
+        if (!co_await transmit_async(*gf)) {
+            co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+        }
+        co_return fixpp::core::expected_t<void>{};
     };
 
     // Resolve the effective end: through-current or clamped to our last stored
@@ -5484,17 +5518,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::replay_outbound_range_(
     if (!store_ || our_last == 0 || begin > eff_end) {
         const seqnum_t new_seq_no =
             end_is_through_current ? seqnum_mgr_.peek_outbound() : (requested_end + 1U);
-        if (!co_await emit_gapfill_async(begin > 0 ? begin : 1U, new_seq_no)) {
-            if (gapfill_callback_threw) {
-                co_return std::unexpected(fixpp::core::error::app_callback_threw);
-            }
-            co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+        if (auto g = co_await emit_gapfill_async(begin > 0 ? begin : 1U, new_seq_no); !g) {
+            co_return std::unexpected(g.error());
         }
         co_return fixpp::core::expected_t<void>{};
     }
 
-    // Per-slot store-walk over [begin, eff_end]. Accumulate absent/admin runs
-    // into one GapFill; flush before each replay.
+    // Per-slot store-walk over [begin, eff_end]. Accumulate absent, admin and
+    // unbuildable (fixpp#424) runs into one GapFill; flush before each replay.
     static constexpr std::size_t kRpBufSize =
         CaptureVisitor::kCapBufSize + 256;  // capture + replay-tag overhead
     bool gap_open = false;
@@ -5513,35 +5544,44 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::replay_outbound_range_(
             !is_admin_type(
                 scan_frame_header(std::span<const std::byte>{cv.buf.data(), cv.len}).msg_type);
         if (app_present) {
-            if (gap_open) {
-                if (!co_await emit_gapfill_async(gap_start, k)) {
-                    if (gapfill_callback_threw) {
-                        co_return std::unexpected(fixpp::core::error::app_callback_threw);
-                    }
-                    co_return std::unexpected(fixpp::core::error::dispatch_aborted);
-                }
-                gap_open = false;
-            }
+            // #420: stamped per replayed message — SendingTime(52) is the time
+            // this frame is sent, not the time the resend answer started.
+            const auto st52_rp = effective_clock_ ? stamp_sending_time(*effective_clock_,
+                                                                       cfg_.sending_time_precision)
+                                                  : SendingTimeStamp{};
             std::array<std::byte, kRpBufSize> rp_buf{};
             auto rp = build_replay_frame(std::span<std::byte>{rp_buf.data(), rp_buf.size()},
-                                         std::span<const std::byte>{cv.buf.data(), cv.len});
-            if (rp && !co_await transmit_async(*rp)) {
-                co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+                                         std::span<const std::byte>{cv.buf.data(), cv.len},
+                                         st52_rp.value);
+            if (rp) {
+                // Built first, flushed second: an unbuildable slot must be able
+                // to join the open gap run below instead of splitting it.
+                if (gap_open) {
+                    if (auto g = co_await emit_gapfill_async(gap_start, k); !g) {
+                        co_return std::unexpected(g.error());
+                    }
+                    gap_open = false;
+                }
+                if (!co_await transmit_async(*rp)) {
+                    co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+                }
+                continue;
             }
-        } else {
-            // Absent slot or admin message → fold into a GapFill run.
-            if (!gap_open) {
-                gap_open = true;
-                gap_start = k;
-            }
+            // fixpp#424 (D4a): an unbuildable replay is gap-filled, not skipped —
+            // a skipped number leaves the peer's gap open [FIX-SL §4.8.3]. Rejected:
+            // failing the whole resend (leaves the gap open too). A frame too large
+            // to CAPTURE stays loud (the cv.truncated disconnect above, D5).
+            emit_event(session_event_resend_slot_gap_filled{.seq = k, .code = rp.error()});
+        }
+        // Absent slot, admin message, or unbuildable replay → fold into a GapFill run.
+        if (!gap_open) {
+            gap_open = true;
+            gap_start = k;
         }
     }
     if (gap_open) {
-        if (!co_await emit_gapfill_async(gap_start, eff_end + 1U)) {
-            if (gapfill_callback_threw) {
-                co_return std::unexpected(fixpp::core::error::app_callback_threw);
-            }
-            co_return std::unexpected(fixpp::core::error::dispatch_aborted);
+        if (auto g = co_await emit_gapfill_async(gap_start, eff_end + 1U); !g) {
+            co_return std::unexpected(g.error());
         }
     }
     // Remain in Active after responding to ResendRequest / 789 honor.

@@ -66,7 +66,7 @@ The authority is therefore split three ways, and knowing the split is most of th
 | Establishment, Logon, the FSM's origin | `specs/005-session-establishment-fsm/` |
 | Sequence numbers, persistence, hydration | `SeqnumManager`; `specs/029-persistent-seqnum-hydrate/` |
 | PossDup / OrigSendingTime / PossResend | `specs/021-…`, `specs/022-…` |
-| Resend answers (replay + GapFill) — how `build_replay_frame` / `build_sequence_reset_gapfill` build the wire frame | `specs/013-session-reconnect-binding/spec.md` FR-010; `specs/037-resend-reply-possdup-tags/` (43/122 emission). ⚠️ **037's `spec.md` Assumptions section, `research.md` D-3, `plan.md`, `data-model.md`, `contracts/resend-reply-wire.md`, and `checklists/wire-conformance.md` CHK010 all describe placing `43`/`122` AFTER the body as "order-safe" / "field order is unconstrained for interop" — FALSE, superseded by fixpp#419: a strict peer (QuickFIX-J `UseDataDictionary=Y`) rejects it (373=14). The bundle is a point-in-time record, left as-is; do not trust its field-order claims. See `spec/behaviors-and-limitations.md` `## fixpp#419` for current behaviour.** |
+| Resend answers (replay + GapFill) — how `build_replay_frame` / `build_sequence_reset_gapfill` build the wire frame | `specs/013-session-reconnect-binding/spec.md` FR-010; `specs/037-resend-reply-possdup-tags/` (43/122 emission). ⚠️ **037's `spec.md` Assumptions section, `research.md` D-3, `plan.md`, `data-model.md`, `contracts/resend-reply-wire.md`, and `checklists/wire-conformance.md` CHK010 all describe placing `43`/`122` AFTER the body as "order-safe" / "field order is unconstrained for interop" — FALSE, superseded by fixpp#419: a strict peer (QuickFIX-J `UseDataDictionary=Y`) rejects it (373=14). The bundle is a point-in-time record, left as-is; do not trust its field-order claims. See `spec/behaviors-and-limitations.md` `## fixpp#419` for current behaviour.** ⚠️ **037 FR-006 / SC-003 ("replayed application frames MUST be byte-identical to prior behavior") are also SUPERSEDED, by fixpp#420: a replay restamps `SendingTime(52)`. 013 FR-010's "byte-for-byte" clause governs `122` only and still holds.** See `## fixpp#420 / fixpp#424` in the same file. |
 | Reset & refresh on Logon | `specs/024-reset-refresh-on-logon/`, `specs/025-refresh-on-logon/` |
 | NextExpectedMsgSeqNum | `specs/027-next-expected-msgseqnum/` |
 | FIXT / FIX50SP2, version serviceability | `specs/033-fixt-fix50sp2-session/`, `specs/042-fixt-version-serviceability-guard/` |
@@ -90,6 +90,25 @@ The authority is therefore split three ways, and knowing the split is most of th
   error or an unbounded wait.
 - **A bare outbound-sequence field.** Deleted in favour of `SeqnumManager` so two writers could not
   diverge — see [`graceful-logout`](./graceful-logout.md).
+- **Keeping the stored `SendingTime(52)` on a replay** (fixpp#420, owner ruling 2026-09-14). The
+  obvious reading of "the store is the authority" (013 FR-010), but that clause governs `122`. FIX-SL
+  2020 §4.8.4 wants `52` restamped. A peer also rejects an unrestamped replay once it is older than
+  the peer's MaxLatency, and that check covers PossDup frames in both QuickFIX engines.
+- **Four answers to a stored message whose replay cannot be built** (fixpp#424, owner ruling
+  2026-09-14). The chosen one gap-fills the slot and records a
+  `session_event_resend_slot_gap_filled` (D4a). Rejected:
+  - skipping the slot silently, the pre-#424 behaviour, which leaves the peer's gap open;
+  - failing the whole resend (option b), which also leaves the gap open;
+  - QuickFIX-cpp's behaviour of abandoning the rest of the range;
+  - both QuickFIX engines' `FieldNotFound` on a stored frame with no `52`. fixpp instead replays it with
+    `122` := the new `52`, which is what the StandardHeader says to do when the data is unavailable.
+- **Rebuilding a replay after the GapFill flush that precedes it** (fixpp#420 review, 2026-09-14).
+  The replay is stamped and built before an open gap run is flushed, so that an unbuildable slot can
+  join that run. A flush that blocks on the transport therefore leaves the replay's `52` older than
+  its send time. Rebuilding after the flush was declined for #420: it costs a second build per replay,
+  and the stamp is late only by as long as that one write blocks.
+- **Gap-filling a frame too large to capture** (fixpp#424 D5). Rejected *for now*: it stays a loud
+  disconnect (`L-424-1`), deferred, and may be reopened.
 
 ## ⚠️ Limitations an integrator must know before trusting this family
 

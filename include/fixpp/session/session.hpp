@@ -1221,8 +1221,10 @@ private:
     // ResendRequest-reply walk (session.cpp's `replay_outbound_range_` body). Replays stored
     // outbound app messages in [begin, requested_end] (or through current when
     // end_is_through_current=true) with PossDupFlag(43)=Y+OrigSendingTime(122)
-    // at their original MsgSeqNum; collapses admin/absent runs into
-    // SequenceReset-GapFill(123=Y). Transmit-only (does NOT advance the live
+    // at their original MsgSeqNum and SendingTime(52) restamped (fixpp#420); collapses
+    // admin/absent runs — and any stored app message whose replay frame cannot be
+    // built, which also emits session_event_resend_slot_gap_filled (fixpp#424) —
+    // into SequenceReset-GapFill(123=Y). Transmit-only (does NOT advance the live
     // outbound counter, not re-stored). [const §VIII.5]: fixed stack buffers.
     //
     // TWO-VALUE END MODEL (data-model I-NEX-3, research D-5, contracts C3):

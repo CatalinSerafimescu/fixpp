@@ -170,15 +170,14 @@ static std::vector<std::byte> make_peer_logon_44(std::uint32_t seq, std::string_
 }
 
 // Build a ResendRequest (35=2) peer frame.
-static std::vector<std::byte> make_resend_request(seqnum_t begin_seqno, seqnum_t end_seqno,
-                                                  std::uint32_t inbound_seq,
-                                                  std::string_view sender,
-                                                  std::string_view target) {
+static std::vector<std::byte> make_resend_request(
+    seqnum_t begin_seqno, seqnum_t end_seqno, std::uint32_t inbound_seq, std::string_view sender,
+    std::string_view target, std::string_view sending_time = "20240101-00:00:00.000") {
     std::string body;
     body += "35=2\x01";
     body += "34=" + std::to_string(inbound_seq) + "\x01";
     body += "49=" + std::string(sender) + "\x01";
-    body += "52=20240101-00:00:00.000\x01";
+    body += "52=" + std::string(sending_time) + "\x01";
     body += "56=" + std::string(target) + "\x01";
     body += "7=" + std::to_string(static_cast<std::uint32_t>(begin_seqno)) + "\x01";
     body += "16=" + std::to_string(static_cast<std::uint32_t>(end_seqno)) + "\x01";
@@ -1146,7 +1145,13 @@ TEST_F(AllowPosDupStripTest, Cell3_DefaultPath_ReplayByteIdentical) {
 
     captured_frames.clear();
 
-    auto rr = make_resend_request(app_seq, app_seq, /*inbound_seq=*/2, "TW", "ISLD");
+    // fixpp#420: advance the clock before the ResendRequest, so the replay's own
+    // SendingTime(52) (restamped) and its OrigSendingTime(122) (the stored 52) differ.
+    // With no advance both are the fixture's T0 and this oracle could not tell a
+    // restamp from a byte-copy -- which is how #420 went unnoticed.
+    clock->advance(std::chrono::seconds{10});
+    auto rr = make_resend_request(app_seq, app_seq, /*inbound_seq=*/2, "TW", "ISLD",
+                                  "20240101-00:00:10.000");
     feed(sess, rr);
 
     // Find the replayed frame.
@@ -1159,51 +1164,30 @@ TEST_F(AllowPosDupStripTest, Cell3_DefaultPath_ReplayByteIdentical) {
     }
     ASSERT_NE(replayed, nullptr) << "Cell3: expected a replayed frame after ResendRequest";
 
-    // T003 byte oracle: captured empirically from a pre-T015 build on 2026-06-14;
-    // REORDERED 2026-09-11 for fixpp#419 (43/122 move from after-the-body to the
-    // standard-header/body boundary — see build_replay_frame, src/session/session.cpp).
-    // Deterministic because:
-    //   - mock_clock stamps fixed UTC 2024-01-01T00:00:00.000 (1704067200 epoch s)
+    // Byte oracle, derived from the field sequence (make_fix_frame computes 9= and
+    // 10=) rather than hand-kept hex. Deterministic because:
+    //   - mock_clock is fixed at UTC 2024-01-01T00:00:00.000, advanced 10 s above
     //   - seqnum 2 (Logon=1 → this app send=2); ResendRequest arrives as inbound seq 2
     //   - fixed session params: sender=ISLD, target=TW, BeginString=FIX.4.4
-    // Wire content: 8=FIX.4.4\x01 9=95\x01 35=D\x01 34=2\x01 49=ISLD\x01
-    //               52=20240101-00:00:00.000\x01 56=TW\x01
-    //               43=Y\x01 122=20240101-00:00:00.000\x01 11=ORDXXX\x01 54=1\x01
-    //               10=223\x01
-    // #419: 9=/10= are UNCHANGED by the reorder — moving 43/122 earlier is a pure
-    // permutation of the same field bytes (same total byte count → same BodyLength;
-    // CheckSum is an order-independent byte-sum mod 256 → same value).
-    // [037 FR-006; INV-4; T003 oracle frozen 2026-06-14; reordered fixpp#419]
-    static const unsigned char kOracle[] = {
-        0x38, 0x3D, 0x46, 0x49, 0x58, 0x2E, 0x34, 0x2E, 0x34, 0x01,  // 8=FIX.4.4 SOH
-        0x39, 0x3D, 0x39, 0x35, 0x01,                                // 9=95 SOH
-        0x33, 0x35, 0x3D, 0x44, 0x01,                                // 35=D SOH
-        0x33, 0x34, 0x3D, 0x32, 0x01,                                // 34=2 SOH
-        0x34, 0x39, 0x3D, 0x49, 0x53, 0x4C, 0x44, 0x01,              // 49=ISLD SOH
-        0x35, 0x32, 0x3D, 0x32, 0x30, 0x32, 0x34, 0x30, 0x31, 0x30,  // 52=20240101
-        0x31, 0x2D, 0x30, 0x30, 0x3A, 0x30, 0x30, 0x3A, 0x30, 0x30,  // -00:00:00
-        0x2E, 0x30, 0x30, 0x30, 0x01,                                // .000 SOH
-        0x35, 0x36, 0x3D, 0x54, 0x57, 0x01,                          // 56=TW SOH
-        0x34, 0x33, 0x3D, 0x59, 0x01,                                // 43=Y SOH
-        0x31, 0x32, 0x32, 0x3D, 0x32, 0x30, 0x32, 0x34, 0x30, 0x31,  // 122=20240101
-        0x30, 0x31, 0x2D, 0x30, 0x30, 0x3A, 0x30, 0x30, 0x3A, 0x30,  // 01-00:00:0
-        0x30, 0x2E, 0x30, 0x30, 0x30, 0x01,                          // 0.000 SOH
-        0x31, 0x31, 0x3D, 0x4F, 0x52, 0x44, 0x58, 0x58, 0x58, 0x01,  // 11=ORDXXX SOH
-        0x35, 0x34, 0x3D, 0x31, 0x01,                                // 54=1 SOH
-        0x31, 0x30, 0x3D, 0x32, 0x32, 0x33, 0x01,                    // 10=223 SOH
-    };
-    static constexpr std::size_t kOracleLen = sizeof(kOracle);
+    // Field order: 43/122 at the standard-header/body boundary (fixpp#419); 52 is
+    // the retransmission time and 122 the stored original (fixpp#420).
+    // [037 FR-006; INV-4; reordered fixpp#419; restamped fixpp#420]
+    const auto oracle = make_fix_frame(
+        "35=D\x01"
+        "34=2\x01"
+        "49=ISLD\x01"
+        "52=20240101-00:00:10.000\x01"
+        "56=TW\x01"
+        "43=Y\x01"
+        "122=20240101-00:00:00.000\x01"
+        "11=ORDXXX\x01"
+        "54=1\x01");
 
-    // FR-006/INV-4: byte-for-byte identity with the pre-T015 oracle.
-    // After T015 the skip widening is INERT on this path (no stored 43/122 to skip)
-    // so the output is unchanged — this is the non-regression guard.
-    ASSERT_EQ(replayed->size(), kOracleLen)
-        << "Cell3: replayed frame size must match oracle [037 INV-4]";
-    for (std::size_t idx = 0; idx < kOracleLen; ++idx) {
-        EXPECT_EQ(static_cast<unsigned char>((*replayed)[idx]), kOracle[idx])
-            << "Cell3: byte mismatch at index " << idx << " [037 FR-006; INV-4]";
-        if (static_cast<unsigned char>((*replayed)[idx]) != kOracle[idx]) break;
-    }
+    // FR-006/INV-4: byte-for-byte identity with the oracle (no stored 43/122 to
+    // skip on this path, so the 037 skip widening is inert here).
+    const std::string_view got(reinterpret_cast<const char*>(replayed->data()), replayed->size());
+    const std::string_view want(reinterpret_cast<const char*>(oracle.data()), oracle.size());
+    EXPECT_EQ(got, want) << "Cell3: replayed frame must match the oracle [037 FR-006; INV-4]";
 }
 
 }  // namespace fixpp::session::test
