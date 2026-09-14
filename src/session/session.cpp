@@ -1766,8 +1766,10 @@ struct SendingTimeStamp {
 // keeps the stored 52, so this never emits an empty 52=.
 // fixpp#424 — a stored frame with no 52: emit 52 = the new stamp and 122 = that
 // same value (StandardHeader: "If data is not available set to same value as
-// SendingTime"), never an empty 122=. A failure is returned, never a partial
-// frame; replay_outbound_range_ gap-fills an unbuildable slot (D4a).
+// SendingTime"), never an empty 122=. A stored 52 that is present but EMPTY is
+// data that is not available too: the loop restamps it in place and 122 takes the
+// new stamp, so the frame still carries exactly one 52. A failure is returned,
+// never a partial frame; replay_outbound_range_ gap-fills an unbuildable slot (D4a).
 //
 // #419 supersedes 037's tail placement (43/122 appended after the full stored
 // body, groups included): 43 and 122 are standard-header fields and MUST
@@ -1856,12 +1858,14 @@ struct SendingTimeStamp {
     // not by the frame's total size (it degenerates to a full scan only if
     // 52 is absent, which `send_impl` cannot produce).
     std::string_view orig_sending_time;
+    bool stored_has_52 = false;  // separate from emptiness: an empty 52 is still restamped in place
     {
         std::size_t i = 0;
         while (i < n) {
             auto fr = scan_field(i);
             if (!fr.ok) continue;
             if (fr.tag == 52) {
+                stored_has_52 = true;
                 orig_sending_time = std::string_view{reinterpret_cast<const char*>(fr.value.data()),
                                                      fr.value.size()};
                 break;
@@ -1882,7 +1886,7 @@ struct SendingTimeStamp {
     // header/body-boundary insertion point and the degenerate no-body fallback
     // below, so the two emit sites cannot silently diverge.
     const auto append_possdup = [&]() -> fixpp::core::expected_t<void> {
-        if (orig_sending_time.empty()) {
+        if (!stored_has_52) {
             if (auto r = w.append_raw(52, as_bytes(sending_time)); !r) {
                 return std::unexpected(r.error());
             }

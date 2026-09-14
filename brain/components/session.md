@@ -102,6 +102,11 @@ The authority is therefore split three ways, and knowing the split is most of th
   - QuickFIX-cpp's behaviour of abandoning the rest of the range;
   - both QuickFIX engines' `FieldNotFound` on a stored frame with no `52`. fixpp instead replays it with
     `122` := the new `52`, which is what the StandardHeader says to do when the data is unavailable.
+- **Rebuilding a replay after the GapFill flush that precedes it** (fixpp#420 review, 2026-09-14).
+  The replay is stamped and built before an open gap run is flushed, so that an unbuildable slot can
+  join that run. A flush that blocks on the transport therefore leaves the replay's `52` older than
+  its send time. Rebuilding after the flush was declined for #420: it costs a second build per replay,
+  and the stamp is late only by as long as that one write blocks.
 - **Gap-filling a frame too large to capture** (fixpp#424 D5). Rejected *for now*: it stays a loud
   disconnect (`L-424-1`), deferred, and may be reopened.
 
