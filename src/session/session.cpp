@@ -3011,9 +3011,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // Q3 established-session path: Reject(reason=10, refTag=52) → Logout →
                     // Disconnect. fixpp#423: an in-sequence message still consumes its
                     // MsgSeqNum, so a reconnect does not ask for it again.
-                    if (auto c = co_await consume_rejected_seqnum_(parse_seqnum(hdr.msg_seq_num),
-                                                                   hdr.msg_type);
-                        !c) {
+                    const seqnum_t ref_seq = parse_seqnum(hdr.msg_seq_num);
+                    if (auto c = co_await consume_rejected_seqnum_(ref_seq, hdr.msg_type); !c) {
                         co_return c;
                     }
                     const auto st52 =
@@ -3021,7 +3020,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // Step 1: emit Reject(35=3, RefTagID=52, reason=10).
                     {
                         std::array<std::byte, 512> rj_buf{};
-                        const seqnum_t ref_seq = parse_seqnum(hdr.msg_seq_num);
                         const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
                         auto rj_result = fixpp::session::build_reject(
                             std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
@@ -3103,7 +3101,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         co_return std::unexpected(cb_r.error());
                     }
                     if (!cb_r) {
-                        // fromAdmin reject → emit session Reject(35=3).
+                        // fromAdmin reject → emit session Reject(35=3). Not consumed
+                        // (fixpp#423): consume_rejected_seqnum_ excludes SequenceReset.
                         // Best-effort: proceed even if assign or emit fails
                         // (session still applies the SequenceReset below — co_return ok).
                         const seqnum_t rj_ref = parse_seqnum(hdr.msg_seq_num);
@@ -3230,8 +3229,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         // Arm C (row 2): OrigSendingTime(122) absent → Reject(35=3),
                         // 371=122 (RefTagID=OrigSendingTime), 373=1 (RequiredTagMissing).
                         // Session survives (no disconnect). data-model INV-3; research D4.
-                        if (auto c = co_await consume_rejected_seqnum_(
-                                parse_seqnum(hdr.msg_seq_num), hdr.msg_type);
+                        const seqnum_t rj_ref_c = parse_seqnum(hdr.msg_seq_num);
+                        if (auto c = co_await consume_rejected_seqnum_(rj_ref_c, hdr.msg_type);
                             !c) {
                             co_return c;
                         }
@@ -3239,7 +3238,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             effective_clock_
                                 ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
                                 : SendingTimeStamp{};
-                        const seqnum_t rj_ref_c = parse_seqnum(hdr.msg_seq_num);
                         const seqnum_t rj_seq_c = seqnum_mgr_.peek_outbound();
                         std::array<std::byte, 512> rj_buf_c{};
                         auto rj_r_c = fixpp::session::build_reject(
@@ -3286,8 +3284,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         if (!parse_122) {
                             // 122 is non-empty (Arm C's empty-check above already handled empty),
                             // so it is present but malformed — treat as RequiredTagMissing.
-                            if (auto c = co_await consume_rejected_seqnum_(
-                                    parse_seqnum(hdr.msg_seq_num), hdr.msg_type);
+                            const seqnum_t rj_ref_rc1 = parse_seqnum(hdr.msg_seq_num);
+                            if (auto c =
+                                    co_await consume_rejected_seqnum_(rj_ref_rc1, hdr.msg_type);
                                 !c) {
                                 co_return c;
                             }
@@ -3295,7 +3294,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                 effective_clock_ ? stamp_sending_time(*effective_clock_,
                                                                       cfg_.sending_time_precision)
                                                  : SendingTimeStamp{};
-                            const seqnum_t rj_ref_rc1 = parse_seqnum(hdr.msg_seq_num);
                             const seqnum_t rj_seq_rc1 = seqnum_mgr_.peek_outbound();
                             std::array<std::byte, 512> rj_buf_rc1{};
                             auto rj_r_rc1 = fixpp::session::build_reject(
@@ -3327,8 +3325,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             hdr.sending_time.data(), hdr.sending_time.size()});
                         if (parse_122 && parse_52 && *parse_122 > *parse_52) {
                             // Arm D — strict 122 > 52.
-                            if (auto c = co_await consume_rejected_seqnum_(
-                                    parse_seqnum(hdr.msg_seq_num), hdr.msg_type);
+                            const seqnum_t rj_ref = parse_seqnum(hdr.msg_seq_num);
+                            if (auto c = co_await consume_rejected_seqnum_(rj_ref, hdr.msg_type);
                                 !c) {
                                 co_return c;
                             }
@@ -3339,7 +3337,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             // Step 1: emit Reject(35=3, 371=122, 373=10).
                             {
                                 std::array<std::byte, 512> rj_buf{};
-                                const seqnum_t rj_ref = parse_seqnum(hdr.msg_seq_num);
                                 const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
                                 auto rj_result = fixpp::session::build_reject(
                                     std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
