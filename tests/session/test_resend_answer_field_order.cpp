@@ -136,6 +136,7 @@ struct OrderCheckResult {
     std::string reason;
     std::size_t count_43 = 0;
     std::size_t count_122 = 0;
+    std::vector<std::uint32_t> tags;  // every tag scanned, in wire order
 };
 
 // Walks `frame` field-by-field using fixpp::wire::accumulate_tag_digit (the
@@ -169,6 +170,7 @@ OrderCheckResult check_resend_answer_field_order(std::span<const std::byte> fram
         ++i;  // skip '='
         while (i < n && frame[i] != std::byte{0x01}) ++i;
         if (i < n) ++i;  // skip SOH
+        r.tags.push_back(tag);
 
         if (field_index < kWitnessPreamble.size() && tag != kWitnessPreamble[field_index]) {
             r.reason = "preamble out of order: field #" + std::to_string(field_index) + " is tag " +
@@ -483,6 +485,20 @@ protected:
         (void)feed_result(sess, frame);
     }
 
+    // Session::send's result for `payload_str`.
+    fixpp::core::expected_t<void> send_payload(Session& sess, std::string_view payload_str,
+                                               const char* label) {
+        auto payload = to_payload(payload_str);
+        auto fut =
+            asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow, label)) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, label);
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << label;
+            return {};  // the ADD_FAILURE above already fails the test
+        }
+        return fut.get();
+    }
+
     // Sends a minimal bodyless NewOrderSingle via the public API (so the store
     // records it and the outbound seqnum advances normally), returns the
     // assigned MsgSeqNum(34), and clears captured_frames. Shared by the
@@ -490,16 +506,11 @@ protected:
     // record's bytes in place (CapturingStore::outbound_records) to feed a
     // hand-crafted stored frame through the real resend-reply path.
     seqnum_t send_and_capture_seq(Session& sess, const char* label) {
-        auto payload = to_payload("35=D\x01");
-        auto fut =
-            asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
-        if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow, label)) {
-            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, label);
-            ADD_FAILURE() << fixpp::test_support::kWindowMiss << label;
+        EXPECT_TRUE(send_payload(sess, "35=D\x01", label).has_value()) << label;
+        if (captured_frames.empty()) {
+            ADD_FAILURE() << "no frame was sent: " << label;
             return 0;
         }
-        EXPECT_TRUE(fut.get().has_value()) << label;
-        EXPECT_FALSE(captured_frames.empty()) << label;
         const auto tag34_opt =
             extract_field(std::span<const std::byte>(captured_frames.back()), 34);
         EXPECT_TRUE(tag34_opt.has_value()) << label;
@@ -1524,41 +1535,8 @@ TEST_F(ResendAnswerReplayTest, Replay_OlderThanPeerMaxLatency_AcceptedByAFixppPe
 
 namespace {
 
-// Every tag of `frame`, in wire order.
-std::vector<std::uint32_t> tags_of(std::span<const std::byte> frame) {
-    std::vector<std::uint32_t> tags;
-    std::uint32_t tag = 0;
-    bool in_tag = true;
-    for (const auto b : frame) {
-        const auto c = static_cast<char>(b);
-        if (in_tag && c == '=') {
-            tags.push_back(tag);
-            tag = 0;
-            in_tag = false;
-        } else if (in_tag) {
-            tag = (tag * 10U) + static_cast<std::uint32_t>(c - '0');
-        } else if (c == '\x01') {
-            in_tag = true;
-        }
-    }
-    return tags;
-}
-
 class SendPayloadTagTest : public ResendAnswerReplayTest {
 protected:
-    fixpp::core::expected_t<void> send_payload(Session& sess, std::string_view payload_str,
-                                               const char* label) {
-        auto payload = to_payload(payload_str);
-        auto fut =
-            asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
-        if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow, label)) {
-            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, label);
-            ADD_FAILURE() << fixpp::test_support::kWindowMiss << label;
-            return {};  // the ADD_FAILURE above already fails the test
-        }
-        return fut.get();
-    }
-
     // Sends a NewOrderSingle whose header-class fields follow body fields, then
     // checks the transmitted frame against `expected_tags`, and that its replay
     // is still in order.
@@ -1586,7 +1564,7 @@ protected:
         const auto frame = captured_frames.back();
         const auto check = check_resend_answer_field_order(frame);
         EXPECT_TRUE(check.ok) << check.reason;
-        EXPECT_EQ(tags_of(frame), expected_tags);
+        EXPECT_EQ(check.tags, expected_tags);
         if (allow_pos_dup) {
             EXPECT_EQ(extract_field(std::span<const std::byte>(frame), 122),
                       "20231231-23:59:00.000")
@@ -1703,6 +1681,14 @@ TEST_F(AliasingStoredTagTest, Replay_StoredTagWrappingUint32_SlotIsGapFilled) {
                       "11=ORD\x01"
                       "4294967348=Z\x01",
                       "Replay_StoredTagWrappingUint32/send");
+}
+
+// An empty tag was replayed as "0=" before fixpp#421.
+TEST_F(AliasingStoredTagTest, Replay_StoredEmptyTag_SlotIsGapFilled) {
+    expect_gap_filled("52=20260614-12:00:00.000\x01",
+                      "11=ORD\x01"
+                      "=Z\x01",
+                      "Replay_StoredEmptyTag/send");
 }
 
 // The leading-zero field precedes the real 52, so the SendingTime pre-scan

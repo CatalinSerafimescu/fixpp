@@ -1679,6 +1679,22 @@ namespace {
 using fixpp::session::detail::FrameHeader;
 using fixpp::session::detail::scan_frame_header;
 
+// fixpp#421: the tag of an outbound field — non-empty, ASCII digits, no leading
+// zero, at most 65535 — or nullopt. Stricter than the inbound scanners, which
+// accept zero padding (wire/tag_scan.hpp): an outbound tag is written as is, so a
+// non-canonical one is read as a different tag ("052" and "65588" both as 52).
+[[nodiscard]] std::optional<std::uint16_t> parse_outbound_tag(std::string_view digits) noexcept {
+    if (digits.empty() || digits.front() == '0') return std::nullopt;
+    std::uint32_t tag = 0;
+    for (const char c : digits) {
+        const auto u = static_cast<unsigned char>(c);
+        if (u < '0' || u > '9' || !fixpp::wire::accumulate_tag_digit(tag, u)) {
+            return std::nullopt;
+        }
+    }
+    return static_cast<std::uint16_t>(tag);
+}
+
 // Parse a decimal seqnum from a string_view. Returns 0 if invalid.
 // Zero is never a valid FIX seqnum (seqnum_min=1), so 0 signals parse failure.
 // No heap, no library, stack-only. (I-7 no-alloc hot path.)
@@ -1812,42 +1828,40 @@ struct SendingTimeStamp {
     // Such a frame is not rebuilt: build_replay_frame fails and the slot is gap-filled.
 
     // Parses one "<tag>=<value>" field at stored[i..], advancing `i` past it
-    // (including the terminating SOH). On a malformed field (no '=', non-digit
-    // tag) `i` is advanced to the next SOH and `.ok` is false; on a digit-only tag
-    // that would alias, `.aliased` is also true. Shared by the pre-scan pass and
-    // the write loop below so the two never diverge.
+    // (including the terminating SOH). A field with no '=' or a non-digit tag is
+    // `malformed` and skipped; a digit-only tag that parse_outbound_tag rejects is
+    // `bad_tag`. Shared by the pre-scan pass and the write loop below so the two
+    // never diverge.
+    enum class FieldStatus : std::uint8_t { ok, malformed, bad_tag };
     struct FieldScan {
-        bool ok;
-        bool aliased;
-        std::uint32_t tag;
+        FieldStatus status;
+        std::uint16_t tag;
         std::span<const std::byte> value;
     };
     const auto scan_field = [&](std::size_t& i) -> FieldScan {
-        std::uint32_t tag = 0;
-        bool tag_ok = true;
-        const bool leading_zero = i < n && stored[i] == std::byte{'0'};
-        bool overflow = false;
+        const std::size_t tag_start = i;
+        bool digits = true;
         while (i < n && stored[i] != EQ && stored[i] != SOH) {
-            auto c = static_cast<unsigned char>(stored[i]);
-            if (c < '0' || c > '9') {
-                tag_ok = false;
-            } else if (!overflow && !fixpp::wire::accumulate_tag_digit(tag, c)) {
-                overflow = true;
-            }
+            const auto c = static_cast<unsigned char>(stored[i]);
+            if (c < '0' || c > '9') digits = false;
             ++i;
         }
-        if (i >= n || stored[i] != EQ || !tag_ok || leading_zero || overflow) {
-            const bool aliased = i < n && stored[i] == EQ && tag_ok;
+        const auto tag = parse_outbound_tag(
+            {reinterpret_cast<const char*>(stored.data() + tag_start), i - tag_start});
+        if (i >= n || stored[i] != EQ || !tag) {
+            const FieldStatus status = (i < n && stored[i] == EQ && digits)
+                                           ? FieldStatus::bad_tag
+                                           : FieldStatus::malformed;
             while (i < n && stored[i] != SOH) ++i;
             if (i < n) ++i;
-            return {.ok = false, .aliased = aliased, .tag = 0, .value = {}};
+            return {.status = status, .tag = 0, .value = {}};
         }
         ++i;  // skip '='
         const std::size_t vstart = i;
         while (i < n && stored[i] != SOH) ++i;
         std::span<const std::byte> val{stored.data() + vstart, i - vstart};
         if (i < n) ++i;  // skip SOH
-        return {.ok = true, .aliased = false, .tag = tag, .value = val};
+        return {.status = FieldStatus::ok, .tag = *tag, .value = val};
     };
 
     const auto as_bytes = [](std::string_view sv) {
@@ -1870,7 +1884,7 @@ struct SendingTimeStamp {
         std::size_t i = 0;
         while (i < n) {
             auto fr = scan_field(i);
-            if (!fr.ok) continue;
+            if (fr.status != FieldStatus::ok) continue;
             if (fr.tag == 52) {
                 stored_has_52 = true;
                 orig_sending_time = std::string_view{reinterpret_cast<const char*>(fr.value.data()),
@@ -1909,8 +1923,10 @@ struct SendingTimeStamp {
     std::size_t i = 0;
     while (i < n) {
         auto fr = scan_field(i);
-        if (fr.aliased) return std::unexpected(fixpp::core::error::wire_tag_out_of_range);
-        if (!fr.ok) continue;
+        if (fr.status == FieldStatus::bad_tag) {
+            return std::unexpected(fixpp::core::error::wire_tag_out_of_range);
+        }
+        if (fr.status != FieldStatus::ok) continue;
         if (fr.tag == 9 || fr.tag == 10 || fr.tag == 43 || fr.tag == 122)
             continue;  // 9/10 recomputed; 43/122 re-inserted below (037 FR-004 dedup)
         if (fr.tag == 52) fr.value = as_bytes(sending_time);  // #420 restamp
@@ -4612,22 +4628,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
                     co_return std::unexpected(error::app_payload_malformed);
                 }
 
-                // (c) Tag (before '=') must be non-empty, all ASCII digits, free of
-                //     leading zeros and at most 65535. fixpp#421: "052=" or "65588="
-                //     is stored as written and a peer or the resend replay reads it
-                //     as a different tag (52 here); `Writer::append_raw` takes a
-                //     uint16 tag.
-                if (eq == 0 || field_sv[0] == '0') {
+                // (c) Tag (before '=') must be a canonical FIX tag (parse_outbound_tag).
+                if (!parse_outbound_tag(field_sv.substr(0, eq))) {
                     co_return std::unexpected(error::app_payload_malformed);
-                }
-                {
-                    std::uint32_t tag = 0;
-                    for (std::size_t i = 0; i < eq; ++i) {
-                        const auto c = static_cast<unsigned char>(field_sv[i]);
-                        if (c < '0' || c > '9' || !fixpp::wire::accumulate_tag_digit(tag, c)) {
-                            co_return std::unexpected(error::app_payload_malformed);
-                        }
-                    }
                 }
 
                 // (d) Value (after '=', before SOH) must be non-empty.
@@ -4663,12 +4666,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
                     // soh guaranteed to exist (scanner validated entire payload above).
                     std::string_view field_sv = pv.substr(pos, soh - pos);
 
-                    // Tag number (bytes before '='): the scanner guarantees non-empty,
-                    // digit-only and <= 65535, so this cannot overflow.
-                    std::uint32_t tag = 0;
-                    for (char c : field_sv.substr(0, field_sv.find('='))) {
-                        tag = (tag * 10U) + static_cast<std::uint32_t>(c - '0');
-                    }
+                    // The scanner above accepted every tag, so the fallback never applies.
+                    const std::uint16_t tag =
+                        parse_outbound_tag(field_sv.substr(0, field_sv.find('='))).value_or(0);
 
                     // INV-2: excise ONLY complete boundary-anchored 43 or 122 fields.
                     // A literal "43=" inside another field's value never reaches this
