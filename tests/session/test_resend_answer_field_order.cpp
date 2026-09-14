@@ -77,6 +77,7 @@
 #include <fixpp/wire/tag_scan.hpp>
 #include <memory>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -1120,6 +1121,48 @@ TEST_F(ResendAnswerReplayTest, Replay_UnbuildableSlot_JoinsTheSurroundingGapFill
     ASSERT_EQ(gapfills.size(), 1U) << "#424 D4a: one GapFill run, not one per slot";
     EXPECT_EQ(gapfills[0].first, "1");
     EXPECT_EQ(gapfills[0].second, std::to_string(app_seq + 1U));
+}
+
+// ── fixpp#424 loop order: a failed gap flush still aborts before the replay ─
+//
+// The open gap run is flushed AFTER the replay frame is built, so that an
+// unbuildable slot can join the run. A toAdmin throw on that flush must still
+// end the resend answer with app_callback_threw, and the replay already built
+// must not be transmitted after the failed flush. Range [1, app_seq]: seq 1 is
+// the stored Logon reply, so the run is open when app_seq is replayed.
+TEST_F(ResendAnswerReplayTest, Replay_GapFlushBeforeAReplay_ToAdminThrow_AbortsWithoutReplaying) {
+    struct ThrowingToAdmin final : Application {
+        bool armed = false;
+        void toAdmin(const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
+                     const SessionId& /*id*/) override {
+            if (armed) throw std::runtime_error("toAdmin throw on the resend GapFill");
+        }
+    };
+    auto app = std::make_shared<ThrowingToAdmin>();
+    engine.application = app;
+    Session sess(engine, make_cfg());
+    drive_to_active(sess);
+
+    const seqnum_t app_seq =
+        send_and_capture_seq(sess, "Replay_GapFlushBeforeAReplay_ToAdminThrow/send");
+    ASSERT_EQ(app_seq, 2U) << "precondition: the stored Logon reply occupies seq 1";
+
+    app->armed = true;
+    const auto rr = make_resend_request(1, app_seq, /*inbound_seq=*/2, "TW", "ISLD");
+    auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(rr), asio::use_future);
+    const char* label = "Replay_GapFlushBeforeAReplay_ToAdminThrow/resend";
+    if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow, label)) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, label);
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << label;
+        return;
+    }
+    const auto r = fut.get();
+    ASSERT_FALSE(r.has_value()) << "a toAdmin throw on the gap flush must fail the resend answer";
+    EXPECT_EQ(r.error(), fixpp::core::error::app_callback_threw);
+    for (const auto& f : captured_frames) {
+        EXPECT_FALSE(extract_field(std::span<const std::byte>(f), 35) == "D")
+            << "the replay must not be sent after a failed gap flush";
+    }
 }
 
 // ── fixpp#420: a replay older than the peer's MaxLatency is still accepted ──
