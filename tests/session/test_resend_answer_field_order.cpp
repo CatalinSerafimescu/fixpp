@@ -914,6 +914,11 @@ TEST_F(ResendAnswerReplayTest, Replay_NoStoredSendingTime_Emits52And122FromTheRe
     factory->last_store->outbound_records.back().frame =
         to_payload(stored_frame_without_52(app_seq));
 
+    // #289 batch 19 -- ESCALATION ROW, DISPOSITIONED: KIND A (time stamp).
+    // What reads this advance is the replay's synchronous `now()` stamp inside the
+    // `feed` of the ResendRequest below, on this thread; the oracle compares 52/122
+    // with that stamp. No assertion here waits on a timer firing.
+    // ⚠️ RE-DERIVE if an assertion ever reads a frame emitted by a timer.
     clock->advance(std::chrono::seconds{10});  // well inside the RR's own 120 s MaxLatency
     feed(sess,
          make_resend_request(app_seq, app_seq, /*inbound_seq=*/2, "TW", "ISLD", kResendStamp));
@@ -994,6 +999,11 @@ TEST_F(ResendAnswerReplayTest, Replay_LongStoredSendingTime_ReplaysIntact_AtBody
     factory->last_store->outbound_records.back().frame =
         to_payload(stored_frame(app_seq, "52=" + huge_sending_time + "\x01", "11=X\x01"));
 
+    // #289 batch 19 -- ESCALATION ROW, DISPOSITIONED: KIND A (time stamp).
+    // What reads this advance is the replay's synchronous `now()` stamp inside the
+    // `feed` of the ResendRequest below, on this thread; the oracle compares 52/122
+    // with that stamp. No assertion here waits on a timer firing.
+    // ⚠️ RE-DERIVE if an assertion ever reads a frame emitted by a timer.
     clock->advance(std::chrono::seconds{10});
     feed(sess,
          make_resend_request(app_seq, app_seq, /*inbound_seq=*/2, "TW", "ISLD", kResendStamp));
@@ -1018,6 +1028,11 @@ TEST_F(ResendAnswerReplayTest, Replay_LongStoredSendingTime_ReplaysIntact_InNoBo
     factory->last_store->outbound_records.back().frame =
         to_payload(stored_frame(app_seq, "52=" + huge_sending_time + "\x01", ""));
 
+    // #289 batch 19 -- ESCALATION ROW, DISPOSITIONED: KIND A (time stamp).
+    // What reads this advance is the replay's synchronous `now()` stamp inside the
+    // `feed` of the ResendRequest below, on this thread; the oracle compares 52/122
+    // with that stamp. No assertion here waits on a timer firing.
+    // ⚠️ RE-DERIVE if an assertion ever reads a frame emitted by a timer.
     clock->advance(std::chrono::seconds{10});
     feed(sess,
          make_resend_request(app_seq, app_seq, /*inbound_seq=*/2, "TW", "ISLD", kResendStamp));
@@ -1184,6 +1199,11 @@ TEST_F(ResendAnswerReplayTest, Replay_EmptyStoredSendingTime_CarriesExactlyOne52
     factory->last_store->outbound_records.back().frame =
         to_payload(stored_frame(app_seq, "52=\x01", "11=X\x01"));
 
+    // #289 batch 19 -- ESCALATION ROW, DISPOSITIONED: KIND A (time stamp).
+    // What reads this advance is the replay's synchronous `now()` stamp inside the
+    // `feed` of the ResendRequest below, on this thread; the oracle compares 52/122
+    // with that stamp. No assertion here waits on a timer firing.
+    // ⚠️ RE-DERIVE if an assertion ever reads a frame emitted by a timer.
     clock->advance(std::chrono::seconds{10});
     feed(sess,
          make_resend_request(app_seq, app_seq, /*inbound_seq=*/2, "TW", "ISLD", kResendStamp));
