@@ -98,6 +98,21 @@ public:
     void onLogon(const fixpp::session::SessionId& /*id*/) override { ++on_logon_count; }
 };
 
+// VetoHeartbeatApp: fromAdmin rejects every inbound Heartbeat(35=0) and accepts the
+// rest (so the Logon still establishes). Drives the post-Guard-4 fromAdmin-veto Reject.
+class VetoHeartbeatApp final : public fixpp::session::Application {
+public:
+    fixpp::core::expected_t<void> fromAdmin(
+        const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg,
+        const fixpp::session::SessionId& /*id*/) override {
+        auto mt = msg.get(35);
+        if (mt && mt->as_string() == "0") {
+            return std::unexpected(fixpp::core::error::app_do_not_send);
+        }
+        return {};
+    }
+};
+
 // ── Frame-building helpers (mirror test_next_expected_msgseqnum.cpp) ──────────
 
 std::string field(int tag, std::string_view val) {
@@ -1247,24 +1262,44 @@ TEST(PersistentSeqnumHydrate, InboundPersistFailure_Fatal_LowerBound_FirstWrite)
 
 // ── fixpp#423 — an in-sequence rejected message's advance is PERSISTED ─────────
 //
-// An at-expected 43=Y message without OrigSendingTime(122) is rejected (021 Arm C,
-// before check_inbound) and consumes its seqnum. The durable counter must move with
-// the in-memory one, or a restart hydrates the old value and ResendRequests the
-// rejected message, the stall #423 closes. Pre-#423 (RED): durable_inbound stays 2.
+// A message rejected at the expected seqnum consumes it, and the durable counter must
+// move with the in-memory one, or a restart hydrates the old value and ResendRequests
+// the rejected message, the stall #423 closes. Cases: 021 Arm C (before check_inbound),
+// and the two Rejects after Guard (4) that returned before the common persist (a
+// fromAdmin veto; an application message with no Application registered).
+// Pre-#423 (RED): durable_inbound stays 2 in every case.
 TEST(PersistentSeqnumHydrate, RejectedInSequence_AdvanceIsPersisted) {
-    auto factory = std::make_shared<FaultStoreFactory>(/*in=*/1, /*out=*/1);
-    auto fix = make_acceptor(factory);
-    FaultStore* store = factory->last_store;
-    ASSERT_NE(store, nullptr);
-    ASSERT_EQ(store->durable_inbound, fixpp::session::seqnum_t{2})
-        << "precondition: the Logon at seq=1 was persisted";
+    struct Case {
+        const char* site;
+        std::shared_ptr<fixpp::session::Application> app;
+        std::vector<std::byte> frame;
+    };
+    const std::vector<Case> cases = {
+        {"021 Arm C (122 missing)", nullptr,
+         make_fix_frame("FIX.4.4", "D", 2, "CLI", "SRV", field(43, "Y"))},
+        {"after Guard (4): fromAdmin veto", std::make_shared<VetoHeartbeatApp>(),
+         make_fix_frame("FIX.4.4", "0", 2, "CLI", "SRV")},
+        {"after Guard (4): no Application", nullptr,
+         make_fix_frame("FIX.4.4", "D", 2, "CLI", "SRV")},
+    };
+    for (const Case& c : cases) {
+        SCOPED_TRACE(c.site);
+        auto factory = std::make_shared<FaultStoreFactory>(/*in=*/1, /*out=*/1);
+        auto fix = make_acceptor(factory, 1, false, false, c.app);
+        FaultStore* store = factory->last_store;
+        ASSERT_NE(store, nullptr);
+        EXPECT_EQ(store->durable_inbound, fixpp::session::seqnum_t{2})
+            << "precondition: the Logon at seq=1 was persisted";
+        const std::size_t before = fix->capture.frames.size();
 
-    fix->feed(make_fix_frame("FIX.4.4", "D", 2, "CLI", "SRV", field(43, "Y")));
+        fix->feed(c.frame);
 
-    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
-        << "Arm C survives the Reject";
-    EXPECT_EQ(store->durable_inbound, fixpp::session::seqnum_t{3})
-        << "fixpp#423: the consumed seqnum must reach the store";
+        EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+            << "the session survives the Reject";
+        EXPECT_GT(fix->capture.frames.size(), before) << "a Reject was sent";
+        EXPECT_EQ(store->durable_inbound, fixpp::session::seqnum_t{3})
+            << "fixpp#423: the consumed seqnum must reach the store";
+    }
 }
 
 // fixpp#423 — a failed persist of that advance is fatal, as at every other persist site
@@ -1304,6 +1339,10 @@ TEST(PersistentSeqnumHydrate, RejectedInSequence_PersistFailure_Fatal) {
          make_fix_frame("FIX.4.4", "0", 2, "CLI", "SRV", {}, "20231231-23:55:00.000")},
         {"041 validate gate", with_validation,
          make_fix_frame("FIX.4.2", "0", 2, "CLI", "SRV", field(44, "99.99"))},
+        {"after Guard (4): fromAdmin veto",
+         [](Fixture& f) { f.eng.application = std::make_shared<VetoHeartbeatApp>(); },
+         make_fix_frame("FIX.4.4", "0", 2, "CLI", "SRV")},
+        {"after Guard (4): no Application", {}, make_fix_frame("FIX.4.4", "D", 2, "CLI", "SRV")},
     };
     for (const Case& c : cases) {
         SCOPED_TRACE(c.site);

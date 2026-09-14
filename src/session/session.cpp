@@ -3700,6 +3700,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         }
                         // fromAdmin reject → session Reject(35=3). (INV-4; D4)
                         // Disconnected-on-failure for assign_outbound + store_then_emit.
+                        // fixpp#423: Guard (4) consumed the seqnum; persist it before this
+                        // early return, as the delivering path does.
+                        if (auto p_r = co_await persist_inbound_advance_(); !p_r) {
+                            co_return p_r;
+                        }
                         co_return co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num),
                                                                 hdr.msg_type);
                     }
@@ -3863,6 +3868,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             // Reject(reason=session_msg_type_invalid_for_state=3).
                             // SessionRejectReason 3 = unsupported message type per [FIX-SL §4.5.4].
                             // Disconnected-on-failure for assign_outbound + store_then_emit.
+                            // fixpp#423: Guard (4) consumed the seqnum; persist it before this
+                            // early return, as the delivering path does.
+                            if (auto p_r = co_await persist_inbound_advance_(); !p_r) {
+                                co_return p_r;
+                            }
                             co_return co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num),
                                                                     hdr.msg_type);
                         }
