@@ -464,9 +464,8 @@ protected:
         captured_frames.clear();  // discard open()/logon-ack frames
     }
 
-    // Returns on_inbound_frame's result; callers that only need the side
-    // effects ignore it.
-    fixpp::core::expected_t<void> feed(Session& sess, const std::vector<std::byte>& frame) {
+    // Returns on_inbound_frame's result, for the tests that assert it.
+    fixpp::core::expected_t<void> feed_result(Session& sess, const std::vector<std::byte>& frame) {
         auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
                                                         "ResendAnswerReplayTest::feed/frame")) {
@@ -477,6 +476,11 @@ protected:
             return {};  // the ADD_FAILURE above already fails the test
         }
         return fut.get();
+    }
+
+    // For the tests that need only the side effects.
+    void feed(Session& sess, const std::vector<std::byte>& frame) {
+        (void)feed_result(sess, frame);
     }
 
     // Sends a minimal bodyless NewOrderSingle via the public API (so the store
@@ -1173,7 +1177,8 @@ TEST_F(ResendAnswerReplayTest, Replay_GapFlushBeforeAReplay_ToAdminThrow_AbortsW
     ASSERT_EQ(app_seq, 2U) << "precondition: the stored Logon reply occupies seq 1";
 
     app->armed = true;
-    const auto r = feed(sess, make_resend_request(1, app_seq, /*inbound_seq=*/2, "TW", "ISLD"));
+    const auto r =
+        feed_result(sess, make_resend_request(1, app_seq, /*inbound_seq=*/2, "TW", "ISLD"));
     ASSERT_FALSE(r.has_value()) << "a toAdmin throw on the gap flush must fail the resend answer";
     EXPECT_EQ(r.error(), fixpp::core::error::app_callback_threw);
     for (const auto& f : captured_frames) {
@@ -1395,7 +1400,7 @@ TEST_F(ResendAnswerReplayTest, ResendAnswer_WriteFails_Aborts_AtEachTransmitSite
 
         armed = true;
         const auto r =
-            feed(sess, make_resend_request(c.begin, c.end, /*inbound_seq=*/2, "TW", "ISLD"));
+            feed_result(sess, make_resend_request(c.begin, c.end, /*inbound_seq=*/2, "TW", "ISLD"));
         armed = false;
         EXPECT_EQ(attempts, 1) << "the named transmit site must attempt its write once";
         // EXPECT, not ASSERT: an ASSERT would end the test at the first failing case
@@ -1424,7 +1429,7 @@ TEST_F(ResendAnswerReplayTest, NothingToReplay_BeginSeqNoZero_GapFillStartsAtOne
     Session sess(engine, cfg);
     drive_to_active(sess);
 
-    const auto r = feed(sess, make_resend_request(0, 0, /*inbound_seq=*/2, "TW", "ISLD"));
+    const auto r = feed_result(sess, make_resend_request(0, 0, /*inbound_seq=*/2, "TW", "ISLD"));
     EXPECT_TRUE(r.has_value());
 
     std::size_t gapfills = 0;
