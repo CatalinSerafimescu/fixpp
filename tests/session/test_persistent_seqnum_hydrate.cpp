@@ -1276,6 +1276,8 @@ TEST(PersistentSeqnumHydrate, RejectedInSequence_PersistFailure_Fatal) {
         f.eng.clock = std::make_shared<fixpp::core::mock_clock>(
             system_clock::time_point{} + seconds{1704067200},  // 2024-01-01, the frames' 52
             fixpp::core::steady_time_point{}, f.ioc.get_executor());
+        // No liveness loop: with one, every 5 s feed window runs to its end.
+        f.cfg.heartbeat_interval = seconds{0};
     };
     const auto with_validation = [](Fixture& f) {
         f.cfg.begin_string = "FIX.4.2";
@@ -1323,13 +1325,6 @@ TEST(PersistentSeqnumHydrate, RejectedInSequence_PersistFailure_Fatal) {
         EXPECT_EQ(store->durable_inbound, fixpp::session::seqnum_t{2})
             << "the durable counter stays at the last successful persist";
         EXPECT_EQ(fix->capture.frames.size(), before) << "no Reject after the failed persist";
-
-        if (fix->eng.clock) {
-            // A clock parks the liveness loop on a sleep only the clock can release, which
-            // ~Fixture's plain drain cannot do.
-            fixpp::test_support::cancel_and_drain_or_report(
-                fix->ioc, *fix->eng.clock, "RejectedInSequence_PersistFailure_Fatal");
-        }
     }
 }
 
