@@ -19,8 +19,8 @@
 //     census is a POLICY exclusion (issue #196 / L-063-1: FIX 4.2 types
 //     NumInGroup as legacy INT, so emit_builders would materialize zero
 //     typed groups for it and silently omit required='Y' groups -- see
-//     tools/codegen/fixpp-codegen/main.cpp's since-removed driver-level `if (ir.ns != "v42")` skip). This test
-//     asserts BOTH numbers (39 real app messages, 0 builder-completeness
+//     tools/codegen/fixpp-codegen/main.cpp's since-removed driver-level `if (ir.ns != "v42")`
+//     skip). This test asserts BOTH numbers (39 real app messages, 0 builder-completeness
 //     expectation) so the distinction is pinned, not conflated.
 //
 // C4 (structural-key safety pin): a future dictionary bump that introduces
@@ -40,8 +40,6 @@
 // Anchors: specs/077-builder-args-dedup/tasks.md T026;
 //          contracts/builder-completeness.md C3c/C4; research.md R2/R3/R4.
 
-#include "builder_completeness_common.hpp"
-
 #include <gtest/gtest.h>
 
 #include <filesystem>
@@ -50,6 +48,8 @@
 #include <set>
 #include <sstream>
 #include <string>
+
+#include "builder_completeness_common.hpp"
 
 #ifndef FIXPP_DICT_DATA_DIR
 #error "FIXPP_DICT_DATA_DIR must be set by CMake target_compile_definitions"
@@ -68,7 +68,8 @@
 // (078-precompiled-builder-libs: Builders.hpp -> all.hpp).
 TEST(BuilderCompleteness077Vt11V42, Vt11ExpectedEmptyNoFileEmitted) {
     using namespace fixpp_test::builder_completeness;
-    std::set<std::string> const expected = legacy_expected_msgtypes(std::string(FIXPP_DICT_DATA_DIR) + "/FIXT11.xml");
+    std::set<std::string> const expected =
+        legacy_expected_msgtypes(std::string(FIXPP_DICT_DATA_DIR) + "/FIXT11.xml");
     EXPECT_TRUE(expected.empty()) << "vt11 raw-XML walk should have zero application messages";
     EXPECT_FALSE(std::filesystem::exists(FIXPP_CODEGEN_VT11_BUILDERS_HPP))
         << "vt11 is admin-only; no all.hpp should be emitted for it";
@@ -157,7 +158,7 @@ TEST(BuilderCompleteness077C4, OrdinalVariantsAreStructurallyDistinctAndBareName
             // so skip the multi-MB build_<Msg>/registry tail without invoking
             // the regex (~558 matches instead of ~1M). Mirrors the idiom in
             // test_077_builder_dedup_count.cpp.
-            if (line.rfind("struct G_", 0) != 0) {
+            if (!line.starts_with("struct G_")) {
                 continue;
             }
             std::smatch m;
@@ -180,7 +181,8 @@ TEST(BuilderCompleteness077C4, OrdinalVariantsAreStructurallyDistinctAndBareName
     // "Args").
     static std::regex const kBareRe(R"(^G_(\d+)Args$)");
     static std::regex const kOrdRe(R"(^G_(\d+)_(\d+)Args$)");
-    std::map<std::string, std::set<std::string>> bare_by_no_tag;      // no_tag -> {struct name} (0 or 1)
+    std::map<std::string, std::set<std::string>>
+        bare_by_no_tag;  // no_tag -> {struct name} (0 or 1)
     std::map<std::string, std::vector<std::string>> ordinals_by_no_tag;  // no_tag -> {struct names}
     for (auto const& [name, body] : body_by_name) {
         std::smatch m;
@@ -202,15 +204,17 @@ TEST(BuilderCompleteness077C4, OrdinalVariantsAreStructurallyDistinctAndBareName
     // Ordinaled variants of the same no_tag must be textually DISTINCT
     // bodies (the ordinal split is real, not spurious duplication).
     for (auto const& [no_tag, names] : ordinals_by_no_tag) {
-        ASSERT_GE(names.size(), 2U) << "no_tag=" << no_tag << " has a lone ordinal variant (should be >= 2)";
+        ASSERT_GE(names.size(), 2U)
+            << "no_tag=" << no_tag << " has a lone ordinal variant (should be >= 2)";
         for (std::size_t i = 0; i < names.size(); ++i) {
             for (std::size_t j = i + 1; j < names.size(); ++j) {
                 EXPECT_NE(body_by_name.at(names[i]), body_by_name.at(names[j]))
-                    << "no_tag=" << no_tag << " ordinal variants " << names[i] << " and " << names[j]
-                    << " have byte-identical bodies -- spurious ordinal split";
+                    << "no_tag=" << no_tag << " ordinal variants " << names[i] << " and "
+                    << names[j] << " have byte-identical bodies -- spurious ordinal split";
             }
         }
     }
 
-    EXPECT_GT(ordinals_by_no_tag.size(), 0U) << "sanity: v50sp2 should have at least one multi-signature no_tag";
+    EXPECT_GT(ordinals_by_no_tag.size(), 0U)
+        << "sanity: v50sp2 should have at least one multi-signature no_tag";
 }

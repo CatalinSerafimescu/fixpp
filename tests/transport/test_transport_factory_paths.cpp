@@ -51,19 +51,18 @@ namespace {
 using namespace std::chrono_literals;
 using fixpp::core::error;
 using fixpp::core::expected_t;
-using fixpp::tls::Certificate;
-using fixpp::tls::SecurityProfile;
-using fixpp::tls::SslCtxConfig;
 using fixpp::tls::async_signer_ref;
 using fixpp::tls::cert_source;
+using fixpp::tls::Certificate;
 using fixpp::tls::file_cert_source;
 using fixpp::tls::local_credentials;
-using fixpp::transport::Endpoint;
-using fixpp::transport::TlsTransport;
-using fixpp::transport::Transport;
-using fixpp::transport::TransportFactory;
+using fixpp::tls::SecurityProfile;
+using fixpp::tls::SslCtxConfig;
 using fixpp::transport::asio_tls_transport_factory;
+using fixpp::transport::Endpoint;
 using fixpp::transport::make_asio_tls_transport_factory;
+using fixpp::transport::TlsTransport;
+using fixpp::transport::TransportFactory;
 
 std::string fixture_path(const char* leaf) {
     return std::string(FIXPP_TLS_FIXTURE_DIR) + "/" + leaf;
@@ -121,9 +120,9 @@ public:
                 creds.leaf = Certificate{};
                 break;
             case mode::async_signer:
-                creds.signer = async_signer_ref{
-                    [](fixpp::tls::sign_request const&)
-                        -> asio::awaitable<expected_t<fixpp::tls::sign_response>> {
+                creds.signer =
+                    async_signer_ref{[](fixpp::tls::sign_request const&)
+                                         -> asio::awaitable<expected_t<fixpp::tls::sign_response>> {
                         co_return expected_t<fixpp::tls::sign_response>{
                             std::unexpect, error::tls_sign_callback_unavailable};
                     }};
@@ -187,8 +186,8 @@ TEST(TransportFactoryPaths, FactoryConstructionRejectsNullCertSource) {
 }
 
 TEST(TransportFactoryPaths, FactoryConstructionMapsCredentialLoadFailure) {
-    auto factory_result =
-        make_asio_tls_transport_factory({}, make_fixture_ssl_cfg(std::make_shared<failing_load_cert_source>()));
+    auto factory_result = make_asio_tls_transport_factory(
+        {}, make_fixture_ssl_cfg(std::make_shared<failing_load_cert_source>()));
 
     ASSERT_FALSE(factory_result.has_value());
     EXPECT_EQ(factory_result.error(), error::transport_factory_failed);
@@ -222,20 +221,24 @@ TEST(TransportFactoryPaths, MakeAcceptedAdoptsRealAcceptedSocketAndHandshakes) {
     auto server_factory_result = make_asio_tls_transport_factory({}, server_cfg);
     auto client_factory_result = make_asio_tls_transport_factory({}, client_cfg);
 
-    ASSERT_TRUE(server_factory_result.has_value()) << static_cast<int>(server_factory_result.error());
-    ASSERT_TRUE(client_factory_result.has_value()) << static_cast<int>(client_factory_result.error());
+    ASSERT_TRUE(server_factory_result.has_value())
+        << static_cast<int>(server_factory_result.error());
+    ASSERT_TRUE(client_factory_result.has_value())
+        << static_cast<int>(client_factory_result.error());
 
     auto* server_factory = expect_concrete_factory(server_factory_result->get());
     ASSERT_NE(server_factory, nullptr);
 
     asio::io_context ioc;
-    asio::ip::tcp::acceptor acceptor{
-        ioc, asio::ip::tcp::endpoint{asio::ip::address_v4::loopback(), 0}};
+    asio::ip::tcp::acceptor acceptor{ioc,
+                                     asio::ip::tcp::endpoint{asio::ip::address_v4::loopback(), 0}};
     const auto port = acceptor.local_endpoint().port();
 
     auto accepted_future = acceptor.async_accept(asio::use_future);
-    auto client_transport_result = (*client_factory_result)->make(ioc.get_executor(), client_cfg, nullptr);
-    ASSERT_TRUE(client_transport_result.has_value()) << static_cast<int>(client_transport_result.error());
+    auto client_transport_result =
+        (*client_factory_result)->make(ioc.get_executor(), client_cfg, nullptr);
+    ASSERT_TRUE(client_transport_result.has_value())
+        << static_cast<int>(client_transport_result.error());
 
     auto client_transport = std::move(*client_transport_result);
 
@@ -252,8 +255,8 @@ TEST(TransportFactoryPaths, MakeAcceptedAdoptsRealAcceptedSocketAndHandshakes) {
     // Keep the future so we can bounded-wait on it after run_for.
     auto client_future = asio::co_spawn(
         ioc.get_executor(),
-        [client_moved = std::move(client_transport),
-         &client_handshake, &client_cfg, port]() mutable -> asio::awaitable<void> {
+        [client_moved = std::move(client_transport), &client_handshake, &client_cfg,
+         port]() mutable -> asio::awaitable<void> {
             auto connected = co_await client_moved->async_connect(Endpoint{"127.0.0.1", port, 0});
             if (!connected.has_value()) {
                 co_return;
@@ -288,8 +291,10 @@ TEST(TransportFactoryPaths, MakeAcceptedAdoptsRealAcceptedSocketAndHandshakes) {
     }
     auto accepted_socket = accepted_future.get();
 
-    auto server_transport_result = server_factory->make_accepted(std::move(accepted_socket), nullptr);
-    ASSERT_TRUE(server_transport_result.has_value()) << static_cast<int>(server_transport_result.error());
+    auto server_transport_result =
+        server_factory->make_accepted(std::move(accepted_socket), nullptr);
+    ASSERT_TRUE(server_transport_result.has_value())
+        << static_cast<int>(server_transport_result.error());
     ASSERT_NE(server_transport_result->get(), nullptr);
 
     auto* server_tls = dynamic_cast<TlsTransport*>(server_transport_result->get());

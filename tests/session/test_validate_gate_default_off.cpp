@@ -82,10 +82,9 @@ namespace {
 
 // ── Frame builder helpers (identical to test_validate_gate_inbound.cpp) ────────
 
-static std::vector<std::byte> make_raw_frame(std::string_view begin_string,
-                                             std::string_view msg_type, std::uint32_t seq,
-                                             std::string_view sender, std::string_view target,
-                                             std::string extra_body = {}) {
+std::vector<std::byte> make_raw_frame(std::string_view begin_string, std::string_view msg_type,
+                                      std::uint32_t seq, std::string_view sender,
+                                      std::string_view target, std::string extra_body = {}) {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -113,17 +112,16 @@ static std::vector<std::byte> make_raw_frame(std::string_view begin_string,
     return frame;
 }
 
-static std::vector<std::byte> make_logon_frame(std::string_view begin_string = "FIX.4.2",
-                                               std::uint32_t seq = 1,
-                                               std::string_view sender = "TW",
-                                               std::string_view target = "ISLD", int heartbt = 30) {
+std::vector<std::byte> make_logon_frame(std::string_view begin_string = "FIX.4.2",
+                                        std::uint32_t seq = 1, std::string_view sender = "TW",
+                                        std::string_view target = "ISLD", int heartbt = 30) {
     std::string extra;
     extra += "98=0\x01";
     extra += "108=" + std::to_string(heartbt) + "\x01";
     return make_raw_frame(begin_string, "A", seq, sender, target, extra);
 }
 
-static std::vector<std::byte> make_heartbeat_frame(std::uint32_t seq = 2) {
+std::vector<std::byte> make_heartbeat_frame(std::uint32_t seq = 2) {
     return make_raw_frame("FIX.4.2", "0", seq, "TW", "ISLD");
 }
 
@@ -215,7 +213,7 @@ struct ValidateDefaultOffFixture {
         return wire.substr(pos, end - pos);
     }
 
-    bool has_any_reject() const {
+    [[nodiscard]] bool has_any_reject() const {
         for (auto const& f : transport.sent_frames()) {
             if (extract_field(f, 35) == "3") return true;
         }
@@ -251,7 +249,8 @@ TEST(ValidateGateDefaultOff, T016_ValidatorNotConstructed_SC005) {
     ASSERT_TRUE(fut.get().has_value()) << "open() must succeed";
 
     // Direct structural assertion: no validator constructed.
-    // [SC-005; FR-002; 041 T016; open()'s validate_inbound_messages guard; session.hpp FIXPP_TEST_HOOKS]
+    // [SC-005; FR-002; 041 T016; open()'s validate_inbound_messages guard; session.hpp
+    // FIXPP_TEST_HOOKS]
     EXPECT_FALSE(sess.has_validator_for_test())
         << "T016/SC-005: validator_ must be null when validate_inbound_messages==false "
            "(flag gates construction in open(); dict IS set in this config, "
@@ -341,8 +340,8 @@ TEST(ValidateGateDefaultOff, T015_UndefinedTag_Accepted) {
 }
 
 // Helper: check if a specific Reject reason (373=N) was emitted.
-static std::string extract_field_from_transport(std::span<const std::byte> frame,
-                                                std::uint32_t tag_wanted) {
+std::string extract_field_from_transport(std::span<const std::byte> frame,
+                                         std::uint32_t tag_wanted) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = std::to_string(tag_wanted) + "=";
     auto pos = wire.find(needle);

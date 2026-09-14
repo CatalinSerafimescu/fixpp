@@ -62,9 +62,9 @@ namespace fixpp::session::test {
 
 namespace {
 
-static std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
-                                               std::string_view sender, std::string_view target,
-                                               int heartbt = 30) {
+std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
+                                        std::string_view sender, std::string_view target,
+                                        int heartbt = 30) {
     std::string body;
     body += "35=A\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -83,7 +83,7 @@ static std::vector<std::byte> make_logon_frame(std::string_view begin_string, st
     for (unsigned char c : full) {
         cs += c;
     }
-    cs &= 0xFFu;
+    cs &= 0xFFU;
     char csbuf[8];
     std::snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     full += "10=" + std::string(csbuf) + "\x01";
@@ -95,7 +95,7 @@ static std::vector<std::byte> make_logon_frame(std::string_view begin_string, st
     return result;
 }
 
-static std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag) {
+std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = std::to_string(tag) + "=";
     auto pos = wire.find(needle);
@@ -303,7 +303,7 @@ TEST_F(CancellationTwoPhaseTest, CloseIdempotent) {
             ++logout_count;
         }
     }
-    EXPECT_LE(logout_count, 1u)
+    EXPECT_LE(logout_count, 1U)
         << "Idempotent close: at most one Logout frame emitted (no duplicate)";
 
     // Session must be Disconnected at the end.
@@ -359,7 +359,7 @@ TEST_F(CancellationTwoPhaseTest, ChildCancellationStateIsolatesLogout) {
 
     // Phase-1 should have emitted Logout by now; root should NOT have fired yet
     // (phase-2 comes after phase-1 resolves).
-    EXPECT_GE(td.sent_count(), 1u) << "Logout should be emitted in phase 1";
+    EXPECT_GE(td.sent_count(), 1U) << "Logout should be emitted in phase 1";
 
     // Advance clock past timeout (force-disconnect). Phase-1 times out,
     // run_logout_phase1 returns session_logout_timeout, then phase-2

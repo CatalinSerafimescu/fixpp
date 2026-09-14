@@ -38,7 +38,7 @@ using fixpp::core::error;
 using fixpp::session::Session;
 using fixpp::session::SessionConfig;
 
-static std::shared_ptr<fixpp::core::mock_clock> make_clock(asio::any_io_executor ex) {
+std::shared_ptr<fixpp::core::mock_clock> make_clock(asio::any_io_executor ex) {
     return std::make_shared<fixpp::core::mock_clock>(
         fixpp::core::utc_time_point{}, fixpp::core::steady_time_point{}, std::move(ex));
 }
@@ -153,7 +153,8 @@ TEST(SessionOpenValidationArms, DirectExecutorWithSpinLockRejected) {
 }
 
 // Out-of-range backpressure_mode (FFI/SWIG bypass) → invalid_session_config
-// (open()'s T048 backpressure_mode range guard — the I-14 defence-in-depth backstop on the closed enum).
+// (open()'s T048 backpressure_mode range guard — the I-14 defence-in-depth backstop on the closed
+// enum).
 TEST(SessionOpenValidationArms, OutOfRangeBackpressureModeRejected) {
     asio::io_context ioc;
     EngineConfig engine;

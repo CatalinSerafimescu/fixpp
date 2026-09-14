@@ -194,8 +194,8 @@ TEST(NestedGroupSlicesFailLoud, PresentNestedGroup_ArenaExhausted_ReportsFailLou
     // not some other, unexpected state landing on a false empty.
     auto const* sub = nested_cache_access_for_testing::resolve(offsets, slice.data, kInnerNoTag);
     if (sub != nullptr) {
-        bool const ctor_oom =
-            !sub->build_status() && sub->build_status().error() == fixpp::core::error::out_of_memory;
+        bool const ctor_oom = !sub->build_status() &&
+                              sub->build_status().error() == fixpp::core::error::out_of_memory;
         bool const slices_throw = sub->group_slices_status(kInnerNoTag).alloc_failed;
         EXPECT_TRUE(ctor_oom || slices_throw)
             << "sub-table built non-null but neither build_status()==out_of_memory nor "

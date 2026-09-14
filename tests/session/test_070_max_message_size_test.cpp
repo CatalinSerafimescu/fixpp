@@ -216,9 +216,11 @@ TEST_F(MaxMsgSizeTest, InboundOverLimitDisconnects_LogonPreEstablishmentExempt) 
     fixpp::session::Session sess(engine, cfg);
     ASSERT_TRUE(open_sync(sess).has_value());
     auto logon = make_logon_frame("FIX.4.4", 1, "TW", "ISLD", 30, std::nullopt);
-    ASSERT_GT(logon.size(), hb.size() - 1) << "Logon must exceed the negotiated limit to prove exemption";
+    ASSERT_GT(logon.size(), hb.size() - 1)
+        << "Logon must exceed the negotiated limit to prove exemption";
     feed_sync(sess, std::span<const std::byte>{logon});
-    ASSERT_EQ(sess.state(), fsm_state::Active) << "oversized-vs-negotiated Logon establishes pre-Active";
+    ASSERT_EQ(sess.state(), fsm_state::Active)
+        << "oversized-vs-negotiated Logon establishes pre-Active";
     feed_sync(sess, std::span<const std::byte>{hb});
     EXPECT_EQ(sess.state(), fsm_state::Disconnected) << "post-Active frame > N must disconnect";
 }
@@ -241,7 +243,8 @@ TEST_F(MaxMsgSizeTest, PeerAdvertised383Captured) {
     auto cfg = make_acceptor_cfg(std::nullopt);  // our advertise off; only capturing the peer's
     fixpp::session::Session sess(engine, cfg);
     ASSERT_TRUE(open_sync(sess).has_value());
-    auto logon = make_logon_frame("FIX.4.4", 1, "TW", "ISLD", 30, std::optional<std::uint32_t>{777});
+    auto logon =
+        make_logon_frame("FIX.4.4", 1, "TW", "ISLD", 30, std::optional<std::uint32_t>{777});
     feed_sync(sess, std::span<const std::byte>{logon});
     ASSERT_EQ(sess.state(), fsm_state::Active);
     ASSERT_TRUE(sess.peer_max_message_size().has_value());

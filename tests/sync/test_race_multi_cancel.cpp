@@ -297,7 +297,8 @@ TEST(SeamRaceMultiCancel, NewAcquireSucceedsAfterAllCancelled) {
             ioc_b, make_waiter(i), asio::bind_cancellation_slot(sigs[i].slot(), asio::use_future)));
     }
     for (int i = 0; i < 32; ++i) ioc_b.poll_one();
-    ASSERT_EQ(total.load(std::memory_order_acquire), 0) << "setup: a waiter resolved before parking";
+    ASSERT_EQ(total.load(std::memory_order_acquire), 0)
+        << "setup: a waiter resolved before parking";
 
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
     std::thread thread_a([&] { ioc_a.run(); });

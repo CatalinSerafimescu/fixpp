@@ -75,13 +75,13 @@ namespace {
 
 // ── FIX frame helpers ─────────────────────────────────────────────────────────
 
-static std::string field(int tag, std::string_view val) {
+std::string field(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
-static std::vector<std::byte> make_logon_frame(std::string_view bs, std::uint32_t seq,
-                                               std::string_view sender, std::string_view target,
-                                               int hbt = 30) {
+std::vector<std::byte> make_logon_frame(std::string_view bs, std::uint32_t seq,
+                                        std::string_view sender, std::string_view target,
+                                        int hbt = 30) {
     std::string body;
     body += field(35, "A");
     body += field(34, std::to_string(seq));
@@ -110,7 +110,7 @@ static std::vector<std::byte> make_logon_frame(std::string_view bs, std::uint32_
 
 // ── peer_identity factory helpers ─────────────────────────────────────────────
 
-static fixpp::tls::peer_identity make_cn_only_identity(std::string_view cn_value) {
+fixpp::tls::peer_identity make_cn_only_identity(std::string_view cn_value) {
     // Subject DN contains CN=<value>; no SANs.
     fixpp::tls::peer_identity pid;
     pid.subject_dn = "CN=" + std::string(cn_value) + ",O=Acme,C=US";
@@ -118,7 +118,7 @@ static fixpp::tls::peer_identity make_cn_only_identity(std::string_view cn_value
     return pid;
 }
 
-static fixpp::tls::peer_identity make_san_dns_identity(std::string_view san_dns) {
+fixpp::tls::peer_identity make_san_dns_identity(std::string_view san_dns) {
     // Empty subject_dn (no CN); SAN-DNS populated.
     fixpp::tls::peer_identity pid;
     pid.subject_dn = "";  // no CN
@@ -126,7 +126,7 @@ static fixpp::tls::peer_identity make_san_dns_identity(std::string_view san_dns)
     return pid;
 }
 
-static fixpp::tls::peer_identity make_san_uri_identity(std::string_view san_uri) {
+fixpp::tls::peer_identity make_san_uri_identity(std::string_view san_uri) {
     // Empty subject_dn; no SAN-DNS; SAN-URI populated.
     fixpp::tls::peer_identity pid;
     pid.subject_dn = "";
@@ -135,7 +135,7 @@ static fixpp::tls::peer_identity make_san_uri_identity(std::string_view san_uri)
     return pid;
 }
 
-static fixpp::tls::peer_identity make_fingerprint_only_identity(std::array<std::byte, 32> fp) {
+fixpp::tls::peer_identity make_fingerprint_only_identity(std::array<std::byte, 32> fp) {
     // No CN, no SANs — only the raw SHA-256 fingerprint.
     fixpp::tls::peer_identity pid;
     pid.subject_dn = "";
@@ -144,20 +144,20 @@ static fixpp::tls::peer_identity make_fingerprint_only_identity(std::array<std::
 }
 
 // Lower-case hex encode 32 bytes to a 64-char string (mirrors extract_principal).
-static std::string fingerprint_to_hex(const std::array<std::byte, 32>& fp) {
+std::string fingerprint_to_hex(const std::array<std::byte, 32>& fp) {
     static constexpr char kHex[] = "0123456789abcdef";
     std::string out(64, '\0');
     for (std::size_t i = 0; i < 32; ++i) {
         const auto b = static_cast<unsigned char>(fp[i]);
-        out[2 * i] = kHex[b >> 4u];
-        out[2 * i + 1] = kHex[b & 0xFu];
+        out[2 * i] = kHex[b >> 4U];
+        out[(2 * i) + 1] = kHex[b & 0xFU];
     }
     return out;
 }
 
 // ── Event helpers ─────────────────────────────────────────────────────────────
 
-static const fixpp::session::session_event_peer_identity_bound* find_peer_identity_bound_event(
+const fixpp::session::session_event_peer_identity_bound* find_peer_identity_bound_event(
     const fixpp::session::Session& sess) {
     auto events = sess.recent_events();
     for (const auto& ev : events) {
@@ -330,7 +330,7 @@ TEST_F(CompidPrincipalExtractionSessionTest, CnExtraction_EmitsBoundEvent_WithCn
     fixpp::test_support::inject_live_identity(sess, make_cn_only_identity("TW-PROD-01"));
 
     auto logon = make_logon_frame("FIX.4.2", 1, "TW", "ISLD");
-    feed(sess, logon);
+    ASSERT_TRUE(feed(sess, logon).has_value());
 
     // Session must reach Active.
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active)

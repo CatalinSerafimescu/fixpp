@@ -44,7 +44,8 @@ TEST(SeamCrossStrandAcquire, TwoStrandsNoOverlap) {
 
     std::atomic<int> in_critical{0};
     int overlap = 0;
-    bool first_done = false, second_done = false;
+    bool first_done = false;
+    bool second_done = false;
 
     // Coroutine on strand1: acquires and holds while yielding.
     auto coro1 = [&]() -> asio::awaitable<void> {

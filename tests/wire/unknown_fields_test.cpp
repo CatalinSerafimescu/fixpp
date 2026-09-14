@@ -24,6 +24,7 @@
 #include <fixpp/wire/parser.hpp>
 #include <fixpp/wire/unknown_fields.hpp>
 
+#include "support/expired_parser_parse.hpp"
 #include "support/frame_view_factory.hpp"
 #include "support/mock_dict_table.hpp"
 
@@ -54,9 +55,9 @@ TEST(WireUnknownFields, DocumentOrderRoundTripNoMaterialization) {
 
     // Value slices, in document order (tag, ptr-into-buf, len).
     std::vector<unknown_fields_view::kv> items{
-        {5000, buf.data() + 5, 5},   // "alpha"
-        {5001, buf.data() + 16, 4},  // "beta"
-        {5000, buf.data() + 26, 5},  // "gamma" (repeat tag, kept in order)
+        {.tag = 5000, .data = buf.data() + 5, .len = 5},   // "alpha"
+        {.tag = 5001, .data = buf.data() + 16, .len = 4},  // "beta"
+        {.tag = 5000, .data = buf.data() + 26, .len = 5},  // "gamma" (repeat tag, kept in order)
     };
     unknown_fields_view uf{std::span<unknown_fields_view::kv const>{items.data(), items.size()},
                            {}};
@@ -127,10 +128,7 @@ TEST(WireUnknownFields, UnknownFieldsRemainUsableAfterTemporaryParserDies) {
     ASSERT_TRUE(fv.has_value());
 
     std::pmr::monotonic_buffer_resource arena;
-    auto mv = [&]() {
-        Parser<access_mode::Index> parser{dict};
-        return parser.parse(*fv, &arena);
-    }();
+    auto mv = fixpp::wire::test::parse_with_expired_parser(dict, *fv, &arena);
     ASSERT_TRUE(mv.has_value());
 
     auto uf = mv->unknown_fields();
@@ -162,7 +160,9 @@ TEST(WireUnknownFields, EmptyDictAllTagsUnknown) {
     // 35 (MsgType) and 34 (MsgSeqNum) are not in the empty dict → unknown.
     // Framing tags 8, 9, 10 must NOT appear.
     auto uf = mv->unknown_fields();
-    bool has_35 = false, has_34 = false, has_framing = false;
+    bool has_35 = false;
+    bool has_34 = false;
+    bool has_framing = false;
     for (auto it = uf.begin(); !(it == uf.end()); ++it) {
         auto tag = (*it).tag;
         if (tag == 35) {

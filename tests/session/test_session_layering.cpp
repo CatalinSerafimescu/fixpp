@@ -177,7 +177,7 @@ TEST(SessionLayering, CApiHeadersHaveNoSessionTypeReferences) {
             std::string line;
             bool hit = false;
             while (std::getline(ifs, line)) {
-                if (line.find("fixpp::session") != std::string::npos) {
+                if (line.contains("fixpp::session")) {
                     hit = true;
                     break;
                 }

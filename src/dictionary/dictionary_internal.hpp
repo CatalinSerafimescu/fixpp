@@ -302,15 +302,13 @@ inline void capture_first_emission(DelimCapture* cap, std::uint16_t tag) noexcep
 // build-time `groups_` / `group_index_by_no_tag_` — NOT from
 // `dict_metadata_handle::groups_` / `group_first_field_impl()` (the
 // handle-side table), which is not filled until `LoaderState::finalize()`'s /
-// `OrchestraLoaderState::finalize()`'s "Emit groups" block. That re-point was tried and reverted: at
-// sweep time the handle-side table is EMPTY, so every tag reads "not a
-// group", the sweep reports no violation, and FR-023 silently stops
-// enforcing — three `LoaderDisposition` tests went RED on that change. The
-// loader-side `groups_` table, by contrast, IS final at sweep time: both
-// loaders finish their first-seen `first_field_tag` projection immediately
-// before calling this sweep (xml_loader.cpp's 083 T028/T029 projection loop,
-// orchestra_loader.cpp's 083 T030 projection loop), so there was never an ordering problem to
-// solve — only the wrong table being read.
+// `OrchestraLoaderState::finalize()`'s "Emit groups" block. That re-point was tried and reverted:
+// at sweep time the handle-side table is EMPTY, so every tag reads "not a group", the sweep reports
+// no violation, and FR-023 silently stops enforcing — three `LoaderDisposition` tests went RED on
+// that change. The loader-side `groups_` table, by contrast, IS final at sweep time: both loaders
+// finish their first-seen `first_field_tag` projection immediately before calling this sweep
+// (xml_loader.cpp's 083 T028/T029 projection loop, orchestra_loader.cpp's 083 T030 projection
+// loop), so there was never an ordering problem to solve — only the wrong table being read.
 //
 // The `first_field_tag != 0` filter is load-bearing: dropping it would widen
 // the sweep past its consumer and manufacture false load rejections on the
@@ -619,9 +617,10 @@ void reset_as_table_view_call_count() noexcept;
 //
 #ifdef FIXPP_TEST_HOOKS
 // Gate B r2: declaration gated to the repo's house pattern (capi_internal.hpp's
-// FIXPP_TEST_HOOKS-gated seams, file_store.cpp's flush-ran witness counter). The DEFINITION stays unconditional in dictionary.cpp —
-// that is what lets a test TU defining this macro link against the library, which is compiled
-// WITHOUT it. Gating the declaration is what makes a production caller unable to NAME it.
+// FIXPP_TEST_HOOKS-gated seams, file_store.cpp's flush-ran witness counter). The DEFINITION stays
+// unconditional in dictionary.cpp — that is what lets a test TU defining this macro link against
+// the library, which is compiled WITHOUT it. Gating the declaration is what makes a production
+// caller unable to NAME it.
 void set_force_incomplete_group_context_for_testing(bool enable) noexcept;
 #endif  // FIXPP_TEST_HOOKS
 
@@ -713,8 +712,7 @@ find_incomplete_group_context(dict_metadata_handle const& h,
                               : MsgFieldsRun{};
         auto const offender = find_context_without_delim_record(
             std::span<FieldRef const>{h.fields_.data() + frun.start, frun.count},
-            std::span<GroupCtxDelim const>{h.group_ctx_delim_pool_.data() + drun.start,
-                                           drun.count},
+            std::span<GroupCtxDelim const>{h.group_ctx_delim_pool_.data() + drun.start, drun.count},
             structural_group_tags);
         if (offender != 0) {
             return std::pair{i, offender};

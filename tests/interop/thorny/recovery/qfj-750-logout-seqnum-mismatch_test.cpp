@@ -48,7 +48,8 @@ TEST_F(ThornyRecoveryFixture, Qfj750_LogoutTooHighSeqnumRecoversGapNotDisconnect
     // The FIX-SL §4.5.3 sequence-gap rule takes precedence over the logout: fixpp
     // recovers the gap (ResendRequest) rather than special-casing the Logout to
     // disconnect (the QFJ-750 divergence).
-    (void)feed(s, fixpp::interop::parity::make_fix_frame("FIX.4.2", "5", /*seq=*/999, "TW", "ISLD"));
+    (void)feed(s,
+               fixpp::interop::parity::make_fix_frame("FIX.4.2", "5", /*seq=*/999, "TW", "ISLD"));
 
     EXPECT_EQ(s.state(), fixpp::session::fsm_state::Active)
         << "too-high Logout must trigger gap recovery (AwaitingResend on Active), "

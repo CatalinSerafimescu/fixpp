@@ -31,13 +31,12 @@
 // interface at all. SC-002 therefore proves the generated headers were INSTALLED
 // and are REACHABLE; it is structurally incapable of failing on a broken
 // per-version install interface, and must not be cited for the latter.
-#include <fixpp/dict/dictionary.hpp>
-#include <fixpp/dict/xml_loader.hpp>
-#include <fixpp/wire/parser.hpp>
-#include <fixpp/v44/Messages.hpp>
-
 #include <cstdio>
 #include <cstring>
+#include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/xml_loader.hpp>
+#include <fixpp/v44/Messages.hpp>
+#include <fixpp/wire/parser.hpp>
 #include <memory_resource>
 #include <span>
 #include <string>
@@ -49,8 +48,8 @@ namespace {
 // cannot #include that gtest-based header (external consumers don't link
 // GTest), so the minimal frame-assembly logic is duplicated here.
 std::vector<std::byte> make_frame(std::string_view begin_string, std::string_view body) {
-    std::string pre = "8=" + std::string(begin_string) + "\x01" + "9=" +
-                       std::to_string(body.size()) + "\x01" + std::string(body);
+    std::string pre = "8=" + std::string(begin_string) + "\x01" +
+                      "9=" + std::to_string(body.size()) + "\x01" + std::string(body);
     unsigned sum = 0;
     for (unsigned char c : pre) sum += c;
     char checksum[16]{};
@@ -77,15 +76,21 @@ int main(int argc, char** argv) {
     // Same NewOrderSingle (D) body as tests/session/golden/new_order_single.fix
     // / tests/session/exemplar_seeds.hpp::kNewOrderSingleSeed.
     std::string_view body =
-        "35=D\x01" "11=ORD-001\x01" "38=100\x01" "40=2\x01" "44=190.5\x01"
-        "54=1\x01" "55=MSFT\x01" "60=20240101-10:00:00\x01";
+        "35=D\x01"
+        "11=ORD-001\x01"
+        "38=100\x01"
+        "40=2\x01"
+        "44=190.5\x01"
+        "54=1\x01"
+        "55=MSFT\x01"
+        "60=20240101-10:00:00\x01";
     std::vector<std::byte> buf = make_frame("FIX.4.4", body);
 
     fixpp::wire::pmr_carry_buffer carry{buf.size(), &arena};
     fixpp::wire::Framer fr{};
     fixpp::wire::frame_view fvs[1]{};
     auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()}, carry,
-                           std::span<fixpp::wire::frame_view>{fvs, 1});
+                          std::span<fixpp::wire::frame_view>{fvs, 1});
     if (!framed.has_value() || framed->empty()) {
         std::fprintf(stderr, "FAIL: Framer::feed produced no frame\n");
         return 1;
@@ -113,7 +118,7 @@ int main(int argc, char** argv) {
     std::printf(
         "PASS: fixpp::v44::NewOrderSingle flyweight constructed from installed "
         "headers, cl_ord_id=%.*s symbol=%.*s\n",
-        static_cast<int>(cl_ord_id->size()), cl_ord_id->data(),
-        static_cast<int>(symbol->size()), symbol->data());
+        static_cast<int>(cl_ord_id->size()), cl_ord_id->data(), static_cast<int>(symbol->size()),
+        symbol->data());
     return 0;
 }

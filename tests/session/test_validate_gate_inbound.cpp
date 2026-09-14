@@ -76,10 +76,9 @@ namespace {
 // ── Frame builder helpers ──────────────────────────────────────────────────────
 
 // Build a minimal SOH-delimited FIX frame with correct BodyLength(9) + CheckSum(10).
-static std::vector<std::byte> make_raw_frame(std::string_view begin_string,
-                                             std::string_view msg_type, std::uint32_t seq,
-                                             std::string_view sender, std::string_view target,
-                                             std::string extra_body = {}) {
+std::vector<std::byte> make_raw_frame(std::string_view begin_string, std::string_view msg_type,
+                                      std::uint32_t seq, std::string_view sender,
+                                      std::string_view target, std::string extra_body = {}) {
     // Build body first (everything after the 8= header), excluding 8=, 9=.
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
@@ -113,10 +112,9 @@ static std::vector<std::byte> make_raw_frame(std::string_view begin_string,
 }
 
 // Build a Logon(35=A) frame (for reaching Active state).
-static std::vector<std::byte> make_logon_frame(std::string_view begin_string = "FIX.4.2",
-                                               std::uint32_t seq = 1,
-                                               std::string_view sender = "TW",
-                                               std::string_view target = "ISLD", int heartbt = 30) {
+std::vector<std::byte> make_logon_frame(std::string_view begin_string = "FIX.4.2",
+                                        std::uint32_t seq = 1, std::string_view sender = "TW",
+                                        std::string_view target = "ISLD", int heartbt = 30) {
     std::string extra;
     extra += "98=0\x01";
     extra += "108=" + std::to_string(heartbt) + "\x01";
@@ -124,12 +122,12 @@ static std::vector<std::byte> make_logon_frame(std::string_view begin_string = "
 }
 
 // Build a Heartbeat(35=0) frame — well-formed per the test dictionary.
-static std::vector<std::byte> make_heartbeat_frame(std::uint32_t seq = 2) {
+std::vector<std::byte> make_heartbeat_frame(std::uint32_t seq = 2) {
     return make_raw_frame("FIX.4.2", "0", seq, "TW", "ISLD");
 }
 
 // Build a NewOrderSingle(35=D) frame — base well-formed.
-static std::vector<std::byte> make_nos_frame(std::uint32_t seq = 2, std::string extra_body = {}) {
+std::vector<std::byte> make_nos_frame(std::uint32_t seq = 2, std::string extra_body = {}) {
     std::string body;
     body += "11=ORD001\x01";                 // ClOrdID required
     body += "54=1\x01";                      // Side required (1 char = valid CHAR)
@@ -141,7 +139,7 @@ static std::vector<std::byte> make_nos_frame(std::uint32_t seq = 2, std::string 
 }
 
 // Extract a field value from a SOH-delimited FIX frame by tag number.
-static std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag_wanted) {
+std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag_wanted) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = std::to_string(tag_wanted) + "=";
     auto pos = wire.find(needle);
@@ -234,7 +232,7 @@ struct ValidateGateFixture {
     }
 
     // Check if any emitted frame is a Reject (35=3) with the given reason (373=N).
-    bool has_reject_with_reason(int reason) const {
+    [[nodiscard]] bool has_reject_with_reason(int reason) const {
         for (auto const& frame : transport.sent_frames()) {
             if (extract_field(frame, 35) == "3") {
                 auto r373 = extract_field(frame, 373);
@@ -246,7 +244,7 @@ struct ValidateGateFixture {
         return false;
     }
 
-    bool has_any_reject() const {
+    [[nodiscard]] bool has_any_reject() const {
         for (auto const& frame : transport.sent_frames()) {
             if (extract_field(frame, 35) == "3") {
                 return true;
@@ -258,7 +256,7 @@ struct ValidateGateFixture {
     // 075 T020a (FR-006): returns the RefTagID(371) of the first Reject(35=3)
     // frame with the given SessionRejectReason(373), or -1 when no matching
     // reject frame carries a 371 (either no matching reject, or 371 omitted).
-    int reject_ref_tag_id(int reason) const {
+    [[nodiscard]] int reject_ref_tag_id(int reason) const {
         for (auto const& frame : transport.sent_frames()) {
             if (extract_field(frame, 35) == "3") {
                 auto r373 = extract_field(frame, 373);

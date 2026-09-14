@@ -59,16 +59,15 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <fixpp/log/level.hpp>
+#include <fixpp/log/logger.hpp>
+#include <fixpp/log/record.hpp>
+#include <fixpp/log/sink.hpp>
 #include <initializer_list>
 #include <memory_resource>
 #include <numeric>
 #include <thread>
 #include <vector>
-
-#include <fixpp/log/level.hpp>
-#include <fixpp/log/logger.hpp>
-#include <fixpp/log/record.hpp>
-#include <fixpp/log/sink.hpp>
 
 // ── mallocnesia guard markers ─────────────────────────────────────────────────
 // Weak DECLARATIONS (no body) so the LD_PRELOAD strong symbols take precedence
@@ -83,12 +82,10 @@ __attribute__((weak)) void alloc_guard_end();
 
 namespace {
 
-inline void guard_start() noexcept
-{
+inline void guard_start() noexcept {
     if (alloc_guard_start != nullptr) alloc_guard_start();
 }
-inline void guard_end() noexcept
-{
+inline void guard_end() noexcept {
     if (alloc_guard_end != nullptr) alloc_guard_end();
 }
 
@@ -97,13 +94,11 @@ inline void guard_end() noexcept
 // A Sink that the drain thread runs through. When paused_, emit() spins
 // (yield-loop) rather than returning immediately — this causes the drain
 // thread to block, allowing the ring to fill up before measurement.
-class PausingSink final : public fixpp::log::Sink
-{
+class PausingSink final : public fixpp::log::Sink {
 public:
     [[nodiscard]] fixpp::core::expected_t<void> open() override { return {}; }
 
-    void emit(fixpp::log::Record const&) noexcept override
-    {
+    void emit(fixpp::log::Record const&) noexcept override {
         // If paused, spin-yield until unpaused.
         while (paused_.load(std::memory_order_acquire)) {
             std::this_thread::yield();
@@ -113,7 +108,7 @@ public:
     void flush(std::chrono::milliseconds) noexcept override {}
     void close() noexcept override { paused_.store(false, std::memory_order_release); }
 
-    void pause()   noexcept { paused_.store(true,  std::memory_order_release); }
+    void pause() noexcept { paused_.store(true, std::memory_order_release); }
     void unpause() noexcept { paused_.store(false, std::memory_order_release); }
 
 private:
@@ -121,8 +116,7 @@ private:
 };
 
 // ── Percentile helper ─────────────────────────────────────────────────────────
-double percentile(std::vector<double>& samples, double pct)
-{
+double percentile(std::vector<double>& samples, double pct) {
     if (samples.empty()) return 0.0;
     std::sort(samples.begin(), samples.end());
     auto idx = static_cast<std::size_t>(pct * static_cast<double>(samples.size()));
@@ -131,14 +125,14 @@ double percentile(std::vector<double>& samples, double pct)
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-static constexpr std::uint32_t k_capacity   = 65536u;
+static constexpr std::uint32_t k_capacity = 65536u;
 static constexpr std::uint32_t k_num_threads = 4u;
-static constexpr std::uint32_t k_total       = 10'000'000u;
-static constexpr std::uint32_t k_per_thread  = k_total / k_num_threads;  // 2.5M
+static constexpr std::uint32_t k_total = 10'000'000u;
+static constexpr std::uint32_t k_per_thread = k_total / k_num_threads;  // 2.5M
 
 // Fixed format ID (compile-time CRC32 of a string literal).
-static constexpr auto k_fmt_id = static_cast<std::uint32_t>(
-    fixpp::log::detail::crc32_str("spike {} {} {} {}"));
+static constexpr auto k_fmt_id =
+    static_cast<std::uint32_t>(fixpp::log::detail::crc32_str("spike {} {} {} {}"));
 
 static constexpr std::array<std::uint8_t, 16> k_zero_trace{};
 
@@ -150,15 +144,14 @@ static constexpr std::array<std::uint8_t, 16> k_zero_trace{};
 // For Criterion A: the mallocnesia guard is armed during the per-sample
 // enqueue loop on each producer thread, AFTER all allocations for the
 // measurement infrastructure (vectors, threads) have been done.
-std::pair<double, double> run_spike(double fill_pct, bool criterion_a_arm)
-{
+std::pair<double, double> run_spike(double fill_pct, bool criterion_a_arm) {
     // Create the pausing sink (raw ptr captured by Impl).
     auto sink_owned = std::make_unique<PausingSink>();
     PausingSink* sink_ptr = sink_owned.get();
 
     // Build logger.
     fixpp::log::LoggerConfig cfg;
-    cfg.capacity    = k_capacity;
+    cfg.capacity = k_capacity;
     cfg.on_overflow = fixpp::log::overflow_policy::drop_newest;
 
     std::pmr::vector<std::unique_ptr<fixpp::log::Sink>> sinks{};
@@ -176,26 +169,18 @@ std::pair<double, double> run_spike(double fill_pct, bool criterion_a_arm)
     // Pre-fill the ring to fill_pct occupancy by pausing the drain.
     sink_ptr->pause();
     {
-        auto target_fill = static_cast<std::uint32_t>(
-            static_cast<double>(k_capacity) * fill_pct);
+        auto target_fill = static_cast<std::uint32_t>(static_cast<double>(k_capacity) * fill_pct);
         if (target_fill == 0) target_fill = 1;
         if (target_fill > k_capacity - 1u) target_fill = k_capacity - 1u;
 
-        auto const ts = fixpp::core::utc_time_point{
-            std::chrono::system_clock::now().time_since_epoch()};
+        auto const ts =
+            fixpp::core::utc_time_point{std::chrono::system_clock::now().time_since_epoch()};
 
         for (std::uint32_t i = 0u; i < target_fill; ++i) {
             logger->enqueue(
-                fixpp::log::Level::info,
-                fixpp::log::cat::session,
-                k_fmt_id,
-                k_zero_trace,
-                0u,
-                ts,
-                {fixpp::log::ArgValue::from_u64(i),
-                 fixpp::log::ArgValue::from_u64(i + 1),
-                 fixpp::log::ArgValue::from_u64(i + 2),
-                 fixpp::log::ArgValue::from_u64(i + 3)});
+                fixpp::log::Level::info, fixpp::log::cat::session, k_fmt_id, k_zero_trace, 0u, ts,
+                {fixpp::log::ArgValue::from_u64(i), fixpp::log::ArgValue::from_u64(i + 1),
+                 fixpp::log::ArgValue::from_u64(i + 2), fixpp::log::ArgValue::from_u64(i + 3)});
         }
         // Reset drop count from pre-fill (those aren't measured).
         logger->reset_drop_count();
@@ -209,8 +194,8 @@ std::pair<double, double> run_spike(double fill_pct, bool criterion_a_arm)
     for (std::uint32_t t = 0u; t < k_num_threads; ++t) {
         threads.emplace_back([&, t]() {
             auto& samples = per_thread_samples[t];
-            auto const ts = fixpp::core::utc_time_point{
-                std::chrono::system_clock::now().time_since_epoch()};
+            auto const ts =
+                fixpp::core::utc_time_point{std::chrono::system_clock::now().time_since_epoch()};
 
             start_gate.arrive_and_wait();
 
@@ -224,12 +209,8 @@ std::pair<double, double> run_spike(double fill_pct, bool criterion_a_arm)
             for (std::uint32_t i = 0u; i < k_per_thread; ++i) {
                 auto const t0 = std::chrono::steady_clock::now();
                 logger->enqueue(
-                    fixpp::log::Level::info,
-                    fixpp::log::cat::session,
-                    k_fmt_id,
-                    k_zero_trace,
-                    static_cast<std::uint64_t>(t),
-                    ts,
+                    fixpp::log::Level::info, fixpp::log::cat::session, k_fmt_id, k_zero_trace,
+                    static_cast<std::uint64_t>(t), ts,
                     {fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(i)),
                      fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(t)),
                      fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(i + 1)),
@@ -267,7 +248,7 @@ std::pair<double, double> run_spike(double fill_pct, bool criterion_a_arm)
         all_samples.insert(all_samples.end(), v.begin(), v.end());
     }
 
-    double const p99  = percentile(all_samples, 0.99);
+    double const p99 = percentile(all_samples, 0.99);
     double const p999 = percentile(all_samples, 0.999);
 
     // Explicit shutdown before destruction.
@@ -282,11 +263,10 @@ std::pair<double, double> run_spike(double fill_pct, bool criterion_a_arm)
 // Runs the three fill-rate scenarios and prints the results in a format
 // suitable for copy-paste into the .specify/decisions/017-log-otel-verify.md
 // disposition record.
-int main()
-{
+int main() {
     std::printf("=== TS-13 Own MPSC Ring Spike ===\n");
-    std::printf("Config: %u producers × %u records = %u total | capacity=%u\n\n",
-                k_num_threads, k_per_thread, k_total, k_capacity);
+    std::printf("Config: %u producers × %u records = %u total | capacity=%u\n\n", k_num_threads,
+                k_per_thread, k_total, k_capacity);
 
     static constexpr std::array<double, 3> k_fill_rates{0.10, 0.50, 0.95};
     static constexpr std::array<const char*, 3> k_labels{"10%", "50%", "95%"};
@@ -294,7 +274,8 @@ int main()
     // Warm-up run (not measured): prime OS thread scheduler + ring atomics.
     {
         auto [_p99, _p999] = run_spike(0.10, false);
-        (void)_p99; (void)_p999;
+        (void)_p99;
+        (void)_p999;
     }
 
     std::array<double, 3> p99s{};
@@ -304,19 +285,19 @@ int main()
         // Only arm Criterion A on the 50% fill run (non-overflow path).
         bool const arm_a = (k_fill_rates[i] < 0.90);
         auto [p99, p999] = run_spike(k_fill_rates[i], arm_a);
-        p99s[i]  = p99;
+        p99s[i] = p99;
         p999s[i] = p999;
 
-        std::printf("Fill %s: p99=%.1f ns  p999=%.1f ns  [Criterion-A armed: %s]\n",
-                    k_labels[i], p99, p999,
-                    arm_a ? "YES (mallocnesia)" : "NO (overflow path)");
+        std::printf("Fill %s: p99=%.1f ns  p999=%.1f ns  [Criterion-A armed: %s]\n", k_labels[i],
+                    p99, p999, arm_a ? "YES (mallocnesia)" : "NO (overflow path)");
     }
 
     std::printf("\n--- Criterion A summary ---\n");
     std::printf("  If run WITHOUT LD_PRELOAD: guards are null-checked no-ops; ");
     std::printf("zero-alloc not verified by this run.\n");
-    std::printf("  Run: LD_PRELOAD=tools/mallocnesia/libmallocnesia.so "
-                "MALLOCNESIA_MAX_ALLOCS=0 ./log_spike\n");
+    std::printf(
+        "  Run: LD_PRELOAD=tools/mallocnesia/libmallocnesia.so "
+        "MALLOCNESIA_MAX_ALLOCS=0 ./log_spike\n");
     std::printf("  Expected: process exits 0 (zero allocs on producer path).\n\n");
 
     std::printf("--- Criterion B note (WSL2 debug) ---\n");
@@ -345,15 +326,14 @@ int main()
 // quill 11.x includes (available only when the conan dep is present).
 #include <quill/Backend.h>
 #include <quill/Frontend.h>
-#include <quill/Logger.h>
 #include <quill/LogMacros.h>
+#include <quill/Logger.h>
 #include <quill/sinks/NullSink.h>
 
 namespace quill_spike {
 
 // Run quill at 50% fill with 4 producers.  Reports p99 for Criterion-B comparison.
-void run_quill_comparison()
-{
+void run_quill_comparison() {
     // Start quill backend.
     quill::BackendOptions backend_opts;
     backend_opts.cpu_affinity = static_cast<uint16_t>(-1);
@@ -400,10 +380,9 @@ void run_quill_comparison()
     // Collect and report.
     std::vector<double> all_samples;
     all_samples.reserve(k_total);
-    for (auto& v : per_thread)
-        all_samples.insert(all_samples.end(), v.begin(), v.end());
+    for (auto& v : per_thread) all_samples.insert(all_samples.end(), v.begin(), v.end());
 
-    double const p99  = percentile(all_samples, 0.99);
+    double const p99 = percentile(all_samples, 0.99);
     double const p999 = percentile(all_samples, 0.999);
     std::printf("Quill 11.x (50%% fill proxy): p99=%.1f ns  p999=%.1f ns\n", p99, p999);
     std::printf("Criterion B: p99 <= 50 ns? %s\n", p99 <= 50.0 ? "PASS" : "FAIL (see WSL2 note)");

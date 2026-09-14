@@ -83,8 +83,8 @@
 #include <vector>
 
 #include "_fixtures_/store_temp_dir.hpp"
-#include "sync/sync_test_support.hpp"
 #include "support/wait_until.hpp"
+#include "sync/sync_test_support.hpp"
 
 namespace {
 
@@ -105,18 +105,18 @@ namespace fs = std::filesystem;
 // The pattern mirrors test_file_store_offload_thread.cpp.
 
 #ifdef FIXPP_TEST_HOOKS
-static std::atomic<bool> g_probe_entered{false};
+std::atomic<bool> g_probe_entered{false};
 // arm (a) determinism: hold probe holds the offload open until g_arm_a_release is set.
 // This ensures the mutex is held by A when we emit cancel for B — no SUCCEED() escape.
-static std::atomic<bool> g_arm_a_release{false};
+std::atomic<bool> g_arm_a_release{false};
 
-static void reset_probe() noexcept {
+void reset_probe() noexcept {
     g_probe_entered.store(false, std::memory_order_relaxed);
     g_arm_a_release.store(false, std::memory_order_relaxed);
 }
 
 // Plain probe: record that the lambda was entered on a pool thread.
-static void plain_probe(std::thread::id) noexcept {
+void plain_probe(std::thread::id) noexcept {
     g_probe_entered.store(true, std::memory_order_release);
 }
 
@@ -124,17 +124,16 @@ static void plain_probe(std::thread::id) noexcept {
 // Runs on a file pool thread (separate from the ioc session driver) — spinning
 // here does NOT block the ioc or the controller coroutine.
 // Bounded spin (max 10 s) prevents a deadlock from becoming a hang.
-static void hold_probe(std::thread::id) noexcept {
+void hold_probe(std::thread::id) noexcept {
     g_probe_entered.store(true, std::memory_order_release);
     // Result deliberately discarded: the bound is a safety valve, and on a miss
     // the test FAILs on the subsequent assertions rather than hanging here.
     (void)fixpp::test_support::wait_until_observed(
-        [] { return g_arm_a_release.load(std::memory_order_acquire); },
-        std::chrono::seconds{10});
+        [] { return g_arm_a_release.load(std::memory_order_acquire); }, std::chrono::seconds{10});
 }
 
 // Slow probe: brief sleep (arm (b) no-wedge cell only).
-static void slow_probe(std::thread::id) noexcept {
+void slow_probe(std::thread::id) noexcept {
     g_probe_entered.store(true, std::memory_order_release);
     std::this_thread::sleep_for(std::chrono::milliseconds{10});
 }
@@ -249,8 +248,8 @@ TEST_F(FileStoreCancellationTest, Store_CancelAtMutexAcquire_YieldsStoreCancelle
     fixpp::session::read_and_reset_catch_fired();
 
     // Store opened on fixture strand; file_io_executor = pool_.
-    auto store =
-        open_store("SNDR1", "TGTA", FileStorePolicy{FileStorePolicy::kind::commit_per_message});
+    auto store = open_store("SNDR1", "TGTA",
+                            FileStorePolicy{.which = FileStorePolicy::kind::commit_per_message});
     ASSERT_TRUE(store != nullptr);
     auto store_sp = std::shared_ptr<FileStore>(std::move(store));
 
@@ -258,7 +257,8 @@ TEST_F(FileStoreCancellationTest, Store_CancelAtMutexAcquire_YieldsStoreCancelle
     const auto frame2 = make_frame(2);
 
     // Results captured into optionals; controller fills them on the ioc thread.
-    std::optional<fixpp::core::expected_t<void>> rA, rB;
+    std::optional<fixpp::core::expected_t<void>> rA;
+    std::optional<fixpp::core::expected_t<void>> rB;
     asio::cancellation_signal sig;
 
     // Single-threaded session driver — all coroutines run co-operatively here.
@@ -322,9 +322,10 @@ TEST_F(FileStoreCancellationTest, Store_CancelAtMutexAcquire_YieldsStoreCancelle
     // 0 state change: only seq=1 committed; B's syscall probe must NOT have fired.
     CountingVisitor vis;
     spawn_on_strand([store_sp, &vis]() mutable -> asio::awaitable<void> {
-        co_await store_sp->retrieve(1, 0, direction_t::outbound, vis);
+        auto ret_r = co_await store_sp->retrieve(1, 0, direction_t::outbound, vis);
+        EXPECT_TRUE(ret_r.has_value()) << "retrieve must succeed";
     }).get();
-    EXPECT_EQ(vis.count, 1u) << "Only seq=1 should be stored; B was cancelled at mutex";
+    EXPECT_EQ(vis.count, 1U) << "Only seq=1 should be stored; B was cancelled at mutex";
 
     // T012 catch must NOT have fired on the arm-(a) path (cancel before any offload).
     EXPECT_EQ(fixpp::session::read_and_reset_catch_fired(), 0)
@@ -343,7 +344,8 @@ TEST_F(FileStoreCancellationTest,
     ASSERT_TRUE(store != nullptr);
     auto store_sp = std::shared_ptr<FileStore>(std::move(store));
 
-    std::optional<fixpp::core::expected_t<seqnum_t>> rA, rB;
+    std::optional<fixpp::core::expected_t<seqnum_t>> rA;
+    std::optional<fixpp::core::expected_t<seqnum_t>> rB;
     asio::cancellation_signal sig;
 
     asio::io_context ioc;
@@ -385,7 +387,7 @@ TEST_F(FileStoreCancellationTest,
     ASSERT_TRUE(rB.has_value()) << "Op B result not set";
 
     ASSERT_TRUE(rA->has_value()) << "next_seqnum(true) A must succeed";
-    EXPECT_EQ(**rA, 1u) << "first increment returns seqnum 1";
+    EXPECT_EQ(**rA, 1U) << "first increment returns seqnum 1";
 
     EXPECT_EQ(fixpp::session::read_and_reset_catch_fired(), 0)
         << "T012 catch fired unexpectedly during arm (a)";
@@ -401,7 +403,7 @@ TEST_F(FileStoreCancellationTest,
             co_return co_await store_sp->next_seqnum(direction_t::outbound, false);
         }).get();
     ASSERT_TRUE(rC.has_value());
-    EXPECT_EQ(*rC, 2u) << "Counter must be 2 after only A's increment (B cancelled)";
+    EXPECT_EQ(*rC, 2U) << "Counter must be 2 after only A's increment (B cancelled)";
 }
 
 TEST_F(FileStoreCancellationTest, Reset_CancelAtMutexAcquire_YieldsStoreCancelled_NoStateChange) {
@@ -419,7 +421,9 @@ TEST_F(FileStoreCancellationTest, Reset_CancelAtMutexAcquire_YieldsStoreCancelle
     fixpp::session::install_store_offload_probe(nullptr);
     const auto frame1 = make_frame(1);
     spawn_on_strand([store_sp, frame1]() mutable -> asio::awaitable<void> {
-        co_await store_sp->store(1, std::span<const std::byte>(frame1), direction_t::outbound);
+        auto pre_r =
+            co_await store_sp->store(1, std::span<const std::byte>(frame1), direction_t::outbound);
+        EXPECT_TRUE(pre_r.has_value()) << "pre-store setup must succeed";
     }).get();
 
     // Re-arm hold_probe for op A.
@@ -428,7 +432,8 @@ TEST_F(FileStoreCancellationTest, Reset_CancelAtMutexAcquire_YieldsStoreCancelle
 
     const auto frame2 = make_frame(2);
 
-    std::optional<fixpp::core::expected_t<void>> rA, rB;
+    std::optional<fixpp::core::expected_t<void>> rA;
+    std::optional<fixpp::core::expected_t<void>> rB;
     asio::cancellation_signal sig;
 
     asio::io_context ioc;
@@ -451,7 +456,7 @@ TEST_F(FileStoreCancellationTest, Reset_CancelAtMutexAcquire_YieldsStoreCancelle
 
         // Spawn B = reset() with cancel slot. B parks at async_lock (A holds mutex).
         asio::co_spawn(
-            ioc, [&]() -> asio::awaitable<void> { rB = co_await store_sp->reset(); },
+            ioc, [&]() -> asio::awaitable<void> { rB = co_await (*store_sp).reset(); },
             asio::bind_cancellation_slot(sig.slot(), asio::detached));
 
         co_await yield_n(6);
@@ -480,9 +485,10 @@ TEST_F(FileStoreCancellationTest, Reset_CancelAtMutexAcquire_YieldsStoreCancelle
     // 0 state change: both frames still exist (reset was cancelled before renaming).
     CountingVisitor vis;
     spawn_on_strand([store_sp, &vis]() mutable -> asio::awaitable<void> {
-        co_await store_sp->retrieve(1, 0, direction_t::outbound, vis);
+        auto ret_r = co_await store_sp->retrieve(1, 0, direction_t::outbound, vis);
+        EXPECT_TRUE(ret_r.has_value()) << "retrieve must succeed";
     }).get();
-    EXPECT_EQ(vis.count, 2u) << "Both frames must still exist; reset was cancelled at mutex";
+    EXPECT_EQ(vis.count, 2U) << "Both frames must still exist; reset was cancelled at mutex";
 }
 
 #endif  // FIXPP_TEST_HOOKS (arm (a))
@@ -509,8 +515,8 @@ TEST_F(FileStoreCancellationTest, Reset_CancelAtMutexAcquire_YieldsStoreCancelle
 #ifdef FIXPP_TEST_HOOKS
 
 TEST_F(FileStoreCancellationTest, Store_CancelMidSyscall_DurableNotCancelled) {
-    auto store =
-        open_store("SNDR4", "TGTD", FileStorePolicy{FileStorePolicy::kind::commit_per_message});
+    auto store = open_store("SNDR4", "TGTD",
+                            FileStorePolicy{.which = FileStorePolicy::kind::commit_per_message});
     ASSERT_TRUE(store != nullptr);
     auto store_sp = std::shared_ptr<FileStore>(std::move(store));
 
@@ -553,9 +559,10 @@ TEST_F(FileStoreCancellationTest, Store_CancelMidSyscall_DurableNotCancelled) {
 
         CountingVisitor vis;
         spawn_on_strand([store_sp, &vis]() mutable -> asio::awaitable<void> {
-            co_await store_sp->retrieve(1, 0, direction_t::outbound, vis);
+            auto ret_r = co_await store_sp->retrieve(1, 0, direction_t::outbound, vis);
+            EXPECT_TRUE(ret_r.has_value()) << "retrieve must succeed";
         }).get();
-        EXPECT_EQ(vis.count, 1u) << "Frame seq=1 must be durable after successful store";
+        EXPECT_EQ(vis.count, 1U) << "Frame seq=1 must be durable after successful store";
     }
 
     // b.3: T012 catch must NOT have fired (co_spawn filters total; catch is unreachable).
@@ -598,7 +605,7 @@ TEST_F(FileStoreCancellationTest, NextSeqnum_CancelMidSyscall_DurableNotCancelle
     // b.2: If durable success — probe was entered and counter advanced to 2.
     if (result.has_value()) {
         EXPECT_TRUE(g_probe_entered.load(std::memory_order_acquire));
-        EXPECT_EQ(*result, 1u) << "next_seqnum returns old value (seqnum_min=1) before increment";
+        EXPECT_EQ(*result, 1U) << "next_seqnum returns old value (seqnum_min=1) before increment";
 
         auto fut2 = spawn_on_strand(
             [store_sp]() mutable -> asio::awaitable<fixpp::core::expected_t<seqnum_t>> {
@@ -606,7 +613,7 @@ TEST_F(FileStoreCancellationTest, NextSeqnum_CancelMidSyscall_DurableNotCancelle
             });
         const auto r2 = fut2.get();
         ASSERT_TRUE(r2.has_value());
-        EXPECT_EQ(*r2, 2u) << "Counter must be 2 after one increment";
+        EXPECT_EQ(*r2, 2U) << "Counter must be 2 after one increment";
     }
 
     // b.3: T012 catch must NOT have fired.
@@ -623,7 +630,9 @@ TEST_F(FileStoreCancellationTest, Reset_CancelMidSyscall_DurableNotCancelled) {
     // Pre-store a frame so reset() has state to clear.
     const auto frame1 = make_frame(1);
     spawn_on_strand([store_sp, frame1]() mutable -> asio::awaitable<void> {
-        co_await store_sp->store(1, std::span<const std::byte>(frame1), direction_t::outbound);
+        auto pre_r =
+            co_await store_sp->store(1, std::span<const std::byte>(frame1), direction_t::outbound);
+        EXPECT_TRUE(pre_r.has_value()) << "pre-store setup must succeed";
     }).get();
 
     reset_probe();
@@ -635,7 +644,7 @@ TEST_F(FileStoreCancellationTest, Reset_CancelMidSyscall_DurableNotCancelled) {
 
     auto fut = spawn_on_strand(asio::bind_cancellation_slot(
         sig.slot(), [store_sp]() mutable -> asio::awaitable<fixpp::core::expected_t<void>> {
-            co_return co_await store_sp->reset();
+            co_return co_await (*store_sp).reset();
         }));
 
     ASSERT_EQ(fut.wait_for(std::chrono::seconds{10}), std::future_status::ready)
@@ -662,7 +671,7 @@ TEST_F(FileStoreCancellationTest, Reset_CancelMidSyscall_DurableNotCancelled) {
             });
         const auto r2 = fut2.get();
         ASSERT_TRUE(r2.has_value());
-        EXPECT_EQ(*r2, 1u) << "Outbound counter must be 1 after reset";
+        EXPECT_EQ(*r2, 1U) << "Outbound counter must be 1 after reset";
     }
 
     // b.3: T012 catch must NOT have fired.
@@ -681,8 +690,8 @@ TEST_F(FileStoreCancellationTest, Reset_CancelMidSyscall_DurableNotCancelled) {
 // teardown. [[feedback_asio_cospawn_total_cancellation_default]]
 
 TEST_F(FileStoreCancellationTest, CoSpawn_TerminalOnly_DoesNotSwallowTotal_NoWedge) {
-    auto store =
-        open_store("SNDR7", "TGTG", FileStorePolicy{FileStorePolicy::kind::commit_per_message});
+    auto store = open_store("SNDR7", "TGTG",
+                            FileStorePolicy{.which = FileStorePolicy::kind::commit_per_message});
     ASSERT_TRUE(store != nullptr);
     auto store_sp = std::shared_ptr<FileStore>(std::move(store));
 
@@ -744,12 +753,12 @@ TEST_F(FileStoreCancellationTest, CoSpawn_TerminalOnly_DoesNotSwallowTotal_NoWed
 // (bug)" from "store poisoned (correct)" — a store() returning success while the
 // counter at 99 means the bug is present; store_io_failure means poisoned.
 
-static bool force_reopen_fail() noexcept { return false; }
+bool force_reopen_fail() noexcept { return false; }
 
 TEST_F(FileStoreCancellationTest,
        Reset_PostRenameReopenFail_PoisonsStore_NoSilentLossAfterRestart) {
     auto store = open_store("SNDR_PA1", "TGT_PA1",
-                            FileStorePolicy{FileStorePolicy::kind::commit_per_message});
+                            FileStorePolicy{.which = FileStorePolicy::kind::commit_per_message});
     ASSERT_TRUE(store != nullptr);
     auto store_sp = std::shared_ptr<FileStore>(std::move(store));
 
@@ -771,7 +780,7 @@ TEST_F(FileStoreCancellationTest,
     // reset() — rename+dir-fsync succeed, then reopen is forced to fail.
     auto r_reset =
         spawn_on_strand([store_sp]() mutable -> asio::awaitable<fixpp::core::expected_t<void>> {
-            co_return co_await store_sp->reset();
+            co_return co_await (*store_sp).reset();
         }).get();
 
     // reset() must return store_io_failure (post-rename failure — not a pre-rename failure).
@@ -842,7 +851,7 @@ TEST_F(FileStoreCancellationTest,
     // co_await. The catch body must commit (impl_ updated + durable success returned).
     auto r_reset =
         spawn_on_strand([store_sp]() mutable -> asio::awaitable<fixpp::core::expected_t<void>> {
-            co_return co_await store_sp->reset();
+            co_return co_await (*store_sp).reset();
         }).get();
 
     // C3: reset() must return durable success — the rename was committed on disk.

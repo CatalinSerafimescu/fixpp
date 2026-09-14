@@ -68,7 +68,7 @@ std::shared_ptr<fixpp::transport::TransportFactory> make_tls_factory(const std::
     cs_cfg.private_key_path = dir + "/leaf_rsa2048.key";
     cs_cfg.ca_bundle_path = dir + "/ca.pem";
     auto cs = fixpp::tls::file_cert_source::make_file_cert_source(cs_cfg,
-                                                                 std::pmr::new_delete_resource());
+                                                                  std::pmr::new_delete_resource());
     if (!cs) {
         return nullptr;
     }
@@ -195,5 +195,5 @@ TEST(ReconnectPolicyWitness, FinitePolicyHonoredViaSessionConfig) {
 
     fixpp::session::SessionConfig copy = cfg;  // exercises copy-constructibility
     ASSERT_TRUE(copy.reconnect_policy.has_value());
-    EXPECT_EQ(copy.reconnect_policy->max_attempts, 5u);
+    EXPECT_EQ(copy.reconnect_policy->max_attempts, 5U);
 }

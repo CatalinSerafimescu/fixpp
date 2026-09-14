@@ -136,8 +136,7 @@ struct group_ctx_equal {
                                  std::uint16_t a_no_tag, std::string_view b_mt,
                                  std::span<std::uint16_t const> b_path,
                                  std::uint16_t b_no_tag) noexcept {
-        return a_no_tag == b_no_tag && a_mt == b_mt &&
-               std::equal(a_path.begin(), a_path.end(), b_path.begin(), b_path.end());
+        return a_no_tag == b_no_tag && a_mt == b_mt && std::ranges::equal(a_path, b_path);
     }
     [[nodiscard]] bool operator()(group_ctx_key const& a, group_ctx_key const& b) const noexcept {
         return eq(a.msg_type, {a.parent_path.data(), a.depth}, a.no_tag, b.msg_type,
@@ -182,7 +181,7 @@ struct group_ctx_equal {
            "group context lookup with an UNCLAMPED ancestor path: the store keys on the "
            "outermost kMaxGroupContextDepth entries, so an over-long span misses every record "
            "rather than matching the clamped one. Clamp before querying.");
-    return group_ctx_query{msg_type, parent_path, no_tag};
+    return group_ctx_query{.msg_type = msg_type, .parent_path = parent_path, .no_tag = no_tag};
 }
 
 // Per-context group payload: the delimiter tag + the full member-tag list
@@ -605,7 +604,7 @@ public:
         std::size_t start = 0;
         while (start <= sv.size()) {
             std::string_view const token = next_token(sv, start);
-            bool declared;
+            bool declared = false;
             if (domain.all_single_char) {
                 // Same fast path per token. A multi-char token cannot exist as
                 // a declared code in an all-single-char set (guard: size != 1
@@ -708,8 +707,9 @@ public:
         // empty string, were it ever inserted) permanently clears the
         // fast-path flag so the byte-exact `codes` fallback drives the check.
         if (value.size() == 1) {
-            domain.single_char_mask[static_cast<std::size_t>(static_cast<unsigned char>(value[0])) >>
-                                    6U] |=
+            domain
+                .single_char_mask[static_cast<std::size_t>(static_cast<unsigned char>(value[0])) >>
+                                  6U] |=
                 (std::uint64_t{1}
                  << (static_cast<std::size_t>(static_cast<unsigned char>(value[0])) & 63U));
         } else {

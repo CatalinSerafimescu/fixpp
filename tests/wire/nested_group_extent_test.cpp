@@ -46,7 +46,6 @@ namespace {
 
 using fixpp::core::error;
 using fixpp::wire::access_mode;
-using fixpp::wire::OffsetTable;
 using fixpp::wire::Parser;
 
 std::vector<std::byte> make_raw_frame(std::string const& body) {
@@ -88,9 +87,9 @@ TEST(NestedGroupExtent, MultiEntryNestedExtentGuard) {
         .add_valid("D", 523)
         .add_valid("D", 524)
         .set_group_first(453, 448)
-        .add_group_member(453, 802)   // nested count field — transitively under 453
-        .add_group_member(453, 523)   // nested delim — transitively under 453
-        .add_group_member(453, 524)   // nested member — transitively under 453
+        .add_group_member(453, 802)  // nested count field — transitively under 453
+        .add_group_member(453, 523)  // nested delim — transitively under 453
+        .add_group_member(453, 524)  // nested member — transitively under 453
         .set_group_first(802, 523)
         .add_group_member(802, 524);
 
@@ -121,16 +120,20 @@ TEST(NestedGroupExtent, MultiEntryNestedExtentGuard) {
     auto const& outer0 = outer_slices[0];
 
     fixpp::wire::group_context const ctx{.msg_type = "D"};
-    auto nested_slices = mv->offsets().nested_group_slices(
-        outer0.data, outer0.len, /*nested_no_tag=*/802, &dict, &dict_group_member, fv->token(), ctx).slices;
+    auto nested_slices = mv->offsets()
+                             .nested_group_slices(outer0.data, outer0.len, /*nested_no_tag=*/802,
+                                                  &dict, &dict_group_member, fv->token(), ctx)
+                             .slices;
     ASSERT_EQ(nested_slices.size(), 2U)
         << "INV-B: the nested group's full 2-entry extent must be enclosed by the outer";
 
-    auto e0_field = fixpp::wire::get({nested_slices[0].data, nested_slices[0].len}, 524, fv->token());
+    auto e0_field =
+        fixpp::wire::get({nested_slices[0].data, nested_slices[0].len}, 524, fv->token());
     ASSERT_TRUE(e0_field.has_value());
     EXPECT_EQ(e0_field->as_string(), "V0");
 
-    auto e1_field = fixpp::wire::get({nested_slices[1].data, nested_slices[1].len}, 524, fv->token());
+    auto e1_field =
+        fixpp::wire::get({nested_slices[1].data, nested_slices[1].len}, 524, fv->token());
     ASSERT_TRUE(e1_field.has_value());
     EXPECT_EQ(e1_field->as_string(), "V1");
 }
@@ -177,8 +180,10 @@ TEST(NestedGroupExtent, SingleEntryNestedNoOverConsumption) {
     auto const& outer0 = outer_slices[0];
 
     fixpp::wire::group_context const ctx{.msg_type = "D"};
-    auto nested_slices = mv->offsets().nested_group_slices(
-        outer0.data, outer0.len, 802, &dict, &dict_group_member, fv->token(), ctx).slices;
+    auto nested_slices = mv->offsets()
+                             .nested_group_slices(outer0.data, outer0.len, 802, &dict,
+                                                  &dict_group_member, fv->token(), ctx)
+                             .slices;
     ASSERT_EQ(nested_slices.size(), 1U);
     auto field = fixpp::wire::get({nested_slices[0].data, nested_slices[0].len}, 524, fv->token());
     ASSERT_TRUE(field.has_value());
@@ -228,8 +233,10 @@ TEST(NestedGroupExtent, CountOfZeroNestedConsumesNoExtent) {
     EXPECT_EQ(f->as_string(), "DIRECT");
 
     fixpp::wire::group_context const ctx{.msg_type = "D"};
-    auto nested_slices = mv->offsets().nested_group_slices(
-        outer0.data, outer0.len, 802, &dict, &dict_group_member, fv->token(), ctx).slices;
+    auto nested_slices = mv->offsets()
+                             .nested_group_slices(outer0.data, outer0.len, 802, &dict,
+                                                  &dict_group_member, fv->token(), ctx)
+                             .slices;
     EXPECT_TRUE(nested_slices.empty()) << "802=0 must yield zero nested instances";
 }
 
@@ -263,8 +270,9 @@ TEST(NestedGroupExtent, FlatNonNestedGroupUnchanged) {
     auto slices = mv->offsets().group_slices(453);
     ASSERT_EQ(slices.size(), 1U);
     std::string_view sv{reinterpret_cast<char const*>(slices[0].data), slices[0].len};
-    EXPECT_EQ(sv, "448=PA\x01"
-                  "447=D");
+    EXPECT_EQ(sv,
+              "448=PA\x01"
+              "447=D");
 }
 
 // (d) multiple occurrences of the SAME group (no_tag 802, SAME membership,
@@ -317,8 +325,10 @@ TEST(NestedGroupExtent, MultipleOccurrencesOfSameGroupNoCollision) {
 
     fixpp::wire::group_context const ctx{.msg_type = "D"};
 
-    auto nested0 = mv->offsets().nested_group_slices(outer_slices[0].data, outer_slices[0].len, 802,
-                                                      &dict, &dict_group_member, fv->token(), ctx).slices;
+    auto nested0 = mv->offsets()
+                       .nested_group_slices(outer_slices[0].data, outer_slices[0].len, 802, &dict,
+                                            &dict_group_member, fv->token(), ctx)
+                       .slices;
     ASSERT_EQ(nested0.size(), 2U);
     auto v00 = fixpp::wire::get({nested0[0].data, nested0[0].len}, 524, fv->token());
     ASSERT_TRUE(v00.has_value());
@@ -327,8 +337,10 @@ TEST(NestedGroupExtent, MultipleOccurrencesOfSameGroupNoCollision) {
     ASSERT_TRUE(v01.has_value());
     EXPECT_EQ(v01->as_string(), "V01");
 
-    auto nested1 = mv->offsets().nested_group_slices(outer_slices[1].data, outer_slices[1].len, 802,
-                                                      &dict, &dict_group_member, fv->token(), ctx).slices;
+    auto nested1 = mv->offsets()
+                       .nested_group_slices(outer_slices[1].data, outer_slices[1].len, 802, &dict,
+                                            &dict_group_member, fv->token(), ctx)
+                       .slices;
     ASSERT_EQ(nested1.size(), 2U);
     auto v10 = fixpp::wire::get({nested1[0].data, nested1[0].len}, 524, fv->token());
     ASSERT_TRUE(v10.has_value());
@@ -401,8 +413,10 @@ TEST(NestedGroupExtent, BenignSameMembershipReuseAcrossContexts) {
     // nested_group_slices doc) — i.e. path=[453], depth=1 (we are inside a
     // 453-instance), NOT the bare root context.
     fixpp::wire::group_context const ctx_d{.msg_type = "D", .parent_path = {453}, .depth = 1};
-    auto nested_d = mv_d->offsets().nested_group_slices(outer_d[0].data, outer_d[0].len, 802, &dict,
-                                                        &dict_group_member, fv_d->token(), ctx_d).slices;
+    auto nested_d = mv_d->offsets()
+                        .nested_group_slices(outer_d[0].data, outer_d[0].len, 802, &dict,
+                                             &dict_group_member, fv_d->token(), ctx_d)
+                        .slices;
     ASSERT_EQ(nested_d.size(), 2U) << "context (\"D\",[453],802) must resolve its own membership";
     auto d0 = fixpp::wire::get({nested_d[0].data, nested_d[0].len}, 524, fv_d->token());
     ASSERT_TRUE(d0.has_value());
@@ -431,8 +445,10 @@ TEST(NestedGroupExtent, BenignSameMembershipReuseAcrossContexts) {
     auto outer_8 = mv_8->offsets().group_slices(460);
     ASSERT_EQ(outer_8.size(), 1U);
     fixpp::wire::group_context const ctx_8{.msg_type = "8", .parent_path = {460}, .depth = 1};
-    auto nested_8 = mv_8->offsets().nested_group_slices(outer_8[0].data, outer_8[0].len, 802, &dict,
-                                                        &dict_group_member, fv_8->token(), ctx_8).slices;
+    auto nested_8 = mv_8->offsets()
+                        .nested_group_slices(outer_8[0].data, outer_8[0].len, 802, &dict,
+                                             &dict_group_member, fv_8->token(), ctx_8)
+                        .slices;
     ASSERT_EQ(nested_8.size(), 2U) << "context (\"8\",[460],802) must resolve its own membership";
     auto e0 = fixpp::wire::get({nested_8[0].data, nested_8[0].len}, 524, fv_8->token());
     ASSERT_TRUE(e0.has_value());
@@ -461,7 +477,9 @@ TEST(NestedGroupExtent, DepthOverflowReturnsGroupTooLarge) {
 
     std::string body = "35=D\x01";
     for (int i = 0; i < 17; ++i) {
-        body += "900=1\x01" "901=X\x01";
+        body +=
+            "900=1\x01"
+            "901=X\x01";
     }
     auto buf = make_raw_frame(body);
     auto fv = fixpp::wire::test::make_frame_view(buf);
@@ -477,7 +495,8 @@ TEST(NestedGroupExtent, DepthOverflowReturnsGroupTooLarge) {
     EXPECT_EQ(g.error(), error::wire_group_too_large);
 
     auto slices = mv->offsets().group_slices(900);
-    EXPECT_TRUE(slices.empty()) << "group_slices() must degrade to empty, not crash/UB, on overflow";
+    EXPECT_TRUE(slices.empty())
+        << "group_slices() must degrade to empty, not crash/UB, on overflow";
 }
 
 // Negative control: exactly 16 repeats (one fewer than the overflow trigger)
@@ -493,7 +512,9 @@ TEST(NestedGroupExtent, DepthSixteenNoOverflow) {
 
     std::string body = "35=D\x01";
     for (int i = 0; i < 16; ++i) {
-        body += "900=1\x01" "901=X\x01";
+        body +=
+            "900=1\x01"
+            "901=X\x01";
     }
     auto buf = make_raw_frame(body);
     auto fv = fixpp::wire::test::make_frame_view(buf);

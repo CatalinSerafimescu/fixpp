@@ -35,7 +35,6 @@
 namespace {
 
 using fixpp::core::error;
-using fixpp::sync::async_lock_guard;
 using fixpp::sync::async_mutex;
 using fixpp::sync::expected_t;
 
@@ -70,7 +69,7 @@ TEST(SeamDrainLatchHolderLifecycle, DrainWaitsForPreDrainHolderToRelease) {
         EXPECT_TRUE(g.has_value());
 
         // Yield to let waiters park and drain to be called.
-        co_await yield_n(N * 4 + 8);
+        co_await yield_n((N * 4) + 8);
 
         // Now release. drain must notice active_holders_count_ == 0.
         holder_released.store(true, std::memory_order_release);
@@ -230,7 +229,7 @@ TEST(SeamDrainLatchHolderLifecycle, TwoConcurrentDrainersWithPreDrainHolder) {
     auto holder_coro = [&]() -> asio::awaitable<void> {
         auto g = co_await mtx.async_lock();
         EXPECT_TRUE(g.has_value());
-        co_await yield_n(N * 4 + 8);  // hold past drainer start + reap
+        co_await yield_n((N * 4) + 8);  // hold past drainer start + reap
         // Guard dtor → unlock() (draining_ == true → short-circuit).
     };
 
@@ -245,7 +244,7 @@ TEST(SeamDrainLatchHolderLifecycle, TwoConcurrentDrainersWithPreDrainHolder) {
     };
 
     auto make_drainer = [&](int stagger) -> asio::awaitable<void> {
-        co_await yield_n(N * 2 + stagger);
+        co_await yield_n((N * 2) + stagger);
         auto d = co_await mtx.cancel_and_drain();
         if (d.has_value()) drain_success.fetch_add(1, std::memory_order_acq_rel);
     };

@@ -84,7 +84,6 @@ namespace {
 using fixpp::sync::async_lock_guard;
 using fixpp::sync::async_mutex;
 using fixpp::sync::detail::async_mutex_seam_phase;
-using fixpp::sync::detail::waiter_phase;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared seam-hook plumbing — same idiom as
@@ -93,7 +92,7 @@ using fixpp::sync::detail::waiter_phase;
 
 struct ChainWalkCtx {
     async_mutex_seam_phase target_phase;
-    std::atomic<std::thread::id> t1_tid{};
+    std::atomic<std::thread::id> t1_tid;
     std::atomic<bool> t1_already_parked{false};
     std::binary_semaphore t1_parked{0};
     std::binary_semaphore t1_release{0};
@@ -204,7 +203,7 @@ TEST(AsyncMutexChainWalkCasLoss, FifoWalkCancelWinsGrantCasLoss) {
     // the only slow-path record ever allocated (bump allocator index 0), so
     // the free list was empty before this push; a "skip the release"
     // mutation leaves the head at the empty sentinel, not 0.
-    EXPECT_EQ(mtx.test_seam_free_list_head_slot_index(), 0u)
+    EXPECT_EQ(mtx.test_seam_free_list_head_slot_index(), 0U)
         << "W1's waiter_record was not released (pushed to the free list) by "
            "unlock()'s cancelled-branch fallthrough after the CAS loss";
 }
@@ -330,7 +329,7 @@ TEST(AsyncMutexChainWalkCasLoss, ResidualWalkCancelWinsGrantCasLoss) {
     // LAST push (LIFO), so it is always the head regardless of W1's timing.
     // A "skip the release" mutation on W2 leaves the head at whatever it was
     // before (0, from W1's earlier push), never 1.
-    EXPECT_EQ(mtx.test_seam_free_list_head_slot_index(), 1u)
+    EXPECT_EQ(mtx.test_seam_free_list_head_slot_index(), 1U)
         << "W2's waiter_record was not released (pushed to the free list) by "
            "unlock()'s cancelled-branch fallthrough after the residual-walk "
            "CAS loss";

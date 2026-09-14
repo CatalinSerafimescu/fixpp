@@ -110,7 +110,7 @@ MessageView<access_mode::Index> parse_index(std::vector<std::byte> const& buf,
 // only the pmr arena backing `buf` must outlive the *loader call*, which it
 // does (declared in this function, alive through `as_table_view()`).
 fixpp::dict::table_view load_shipped_table_view(char const* filename) {
-    std::vector<std::byte> buf(8u * 1024u * 1024u);
+    std::vector<std::byte> buf(8U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / filename;
     auto dict = fixpp::dict::XmlLoader{}.load(path, &mr);
@@ -189,7 +189,7 @@ TEST(ValidatorEnumDomain, Side54InDomainAccepts) {
                                                    std::pmr::null_memory_resource()};
     auto result = v.validate(mv, &scratch_mr, nullptr);
     EXPECT_TRUE(result.has_value()) << "Side(54)=1 is a declared code and must accept; slot "
-                                     << (result.has_value() ? -1 : static_cast<int>(result.error()));
+                                    << (result.has_value() ? -1 : static_cast<int>(result.error()));
 }
 
 // ── T022: ClOrdID(11) declares ZERO codes -> accept regardless of content ──
@@ -263,7 +263,8 @@ TEST(ValidatorEnumDomain, PossDupFlag43HeaderFieldOutOfDomainRejectsReason5) {
     EXPECT_EQ(result.error(), error::wire_field_value_out_of_range)
         << "got slot " << static_cast<int>(result.error());
     EXPECT_EQ(wire_error_to_session_reject_reason(result.error()), 5);
-    EXPECT_EQ(ref_tag, 43) << "FR-006: RefTagID must name the offending header tag (PossDupFlag/43)";
+    EXPECT_EQ(ref_tag, 43)
+        << "FR-006: RefTagID must name the offending header tag (PossDupFlag/43)";
 }
 
 // ═══ T022a: the empty-value witness (FR-008, DV-1/DV-2) ════════════════════
@@ -334,7 +335,7 @@ TEST(ValidatorEnumDomain, GroupMemberOutOfDomainRejectsReason5) {
     dictionary_driven_validator v{std::move(tv)};
 
     auto body = nos_prefix() + "54=1\x01";
-    body += "453=1\x01";  // NoPartyIDs=1
+    body += "453=1\x01";     // NoPartyIDs=1
     body += "448=PID1\x01";  // PartyID (delimiter)
     body += "447=D\x01";     // PartyIDSource -- valid
     body += "452=9999\x01";  // PartyRole -- out-of-domain (valid set is 1-38)
@@ -380,9 +381,8 @@ TEST(ValidatorEnumDomain, GroupMemberInDomainAccepts) {
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
     auto result = v.validate(mv, &scratch_mr, nullptr);
-    EXPECT_TRUE(result.has_value())
-        << "a fully in-domain group must accept; slot "
-        << (result.has_value() ? -1 : static_cast<int>(result.error()));
+    EXPECT_TRUE(result.has_value()) << "a fully in-domain group must accept; slot "
+                                    << (result.has_value() ? -1 : static_cast<int>(result.error()));
 }
 
 // Depth-2: NoPartyIDs(453) -> NoPartySubIDs(802) -> PartySubIDType(803)
@@ -395,10 +395,10 @@ TEST(ValidatorEnumDomain, NestedGroupMemberOutOfDomainRejectsReason5) {
     body += "453=1\x01";
     body += "448=PID1\x01";
     body += "447=D\x01";
-    body += "452=1\x01";      // PartyRole -- valid
-    body += "802=1\x01";      // NoPartySubIDs=1 (nested group)
-    body += "523=SUB1\x01";   // PartySubID (nested delimiter)
-    body += "803=999\x01";    // PartySubIDType -- out-of-domain (valid set is 1-26)
+    body += "452=1\x01";     // PartyRole -- valid
+    body += "802=1\x01";     // NoPartySubIDs=1 (nested group)
+    body += "523=SUB1\x01";  // PartySubID (nested delimiter)
+    body += "803=999\x01";   // PartySubIDType -- out-of-domain (valid set is 1-26)
     auto frame = make_fix44_frame(body);
     std::array<std::byte, 4096> stack{};
     std::pmr::monotonic_buffer_resource arena;
@@ -440,9 +440,8 @@ TEST(ValidatorEnumDomain, NestedGroupMemberInDomainAccepts) {
     std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                    std::pmr::null_memory_resource()};
     auto result = v.validate(mv, &scratch_mr, nullptr);
-    EXPECT_TRUE(result.has_value())
-        << "a fully in-domain depth-2 nested group must accept; slot "
-        << (result.has_value() ? -1 : static_cast<int>(result.error()));
+    EXPECT_TRUE(result.has_value()) << "a fully in-domain depth-2 nested group must accept; slot "
+                                    << (result.has_value() ? -1 : static_cast<int>(result.error()));
 }
 
 // ═══ T020a: Step-3 group-structure failure -- RefTagID = the group's own

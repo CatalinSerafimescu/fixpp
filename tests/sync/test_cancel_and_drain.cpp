@@ -66,7 +66,7 @@ TEST(SeamCancelAndDrain, EightWaitersAllAbortedOnDrain) {
         auto g = co_await mtx.async_lock();
         EXPECT_TRUE(g.has_value());
         // Hold long enough for the drainer to set draining_ and reap.
-        co_await yield_n(N * 4 + 8);
+        co_await yield_n((N * 4) + 8);
         // Guard destructor calls unlock() (draining_ == true → short-circuit).
     };
 

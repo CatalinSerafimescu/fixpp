@@ -33,10 +33,9 @@
 #include <thread>
 #include <vector>
 
+#include "capi_loopback_support.hpp"
 #include "fix/c_api/engine.h"
 #include "fix/c_api/session.h"
-
-#include "capi_loopback_support.hpp"
 
 using namespace std::chrono_literals;
 using namespace fixpp::capi_test;
@@ -52,8 +51,7 @@ TEST(CapiLifecycle, NeverStartedDestroyDoesNotAbort) {
     ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &eng), FIXPP_ERR_OK);
     ASSERT_NE(eng, nullptr);
 
-    fixpp_session_config_t* sc =
-        make_session_cfg("INIT-NS", "ACC-NS", FIXPP_ROLE_INITIATOR);
+    fixpp_session_config_t* sc = make_session_cfg("INIT-NS", "ACC-NS", FIXPP_ROLE_INITIATOR);
     fixpp_session_t* sess = nullptr;
     ASSERT_EQ(fixpp_session_open(eng, sc, &sess), FIXPP_ERR_OK);
     ASSERT_NE(sess, nullptr);
@@ -65,13 +63,12 @@ TEST(CapiLifecycle, NeverStartedDestroyDoesNotAbort) {
 
 // ── T015: double-destroy of the SAME pointer is a no-op (not UAF) ────────────
 //
-// [2i §4.2.1] / contracts/lifecycle-surface.md's `fixpp_engine_destroy` bullet: "NULL / double-destroy →
-// no-op". The first destroy tombstones the shell (tag_=DEAD) and DOES NOT free
-// it; the second destroy reads the DEAD tag and returns immediately with no
-// UAF/double-free. Without the tombstone, the second call would dereference freed
-// storage → detectable as UAF under ASan. Mutation-test: revert the tag_ write in
-// fixpp_engine_destroy (replace tombstone with delete) → this test goes RED under
-// ASan. NULL-destroy is also covered for completeness.
+// [2i §4.2.1] / contracts/lifecycle-surface.md's `fixpp_engine_destroy` bullet: "NULL /
+// double-destroy → no-op". The first destroy tombstones the shell (tag_=DEAD) and DOES NOT free it;
+// the second destroy reads the DEAD tag and returns immediately with no UAF/double-free. Without
+// the tombstone, the second call would dereference freed storage → detectable as UAF under ASan.
+// Mutation-test: revert the tag_ write in fixpp_engine_destroy (replace tombstone with delete) →
+// this test goes RED under ASan. NULL-destroy is also covered for completeness.
 TEST(CapiLifecycle, DestroyIsIdempotentSamePointer) {
     fixpp_engine_destroy(nullptr);  // NULL → no-op, no crash.
 
@@ -88,10 +85,10 @@ TEST(CapiLifecycle, DestroyIsIdempotentSamePointer) {
 
 // ── T015: post-engine-destroy session handle → FIXPP_ERR_INVALID_HANDLE ───────
 //
-// [2i §4.2.1] / contracts/lifecycle-surface.md's "Handle discipline" bullet: "dead/corrupted handle →
-// FIXPP_ERR_INVALID_HANDLE". After fixpp_engine_destroy (WITHOUT closing the
-// session first), any call on a stale session handle must return INVALID_HANDLE,
-// not UAF/UB.  UAF-safety here rests on two complementary mechanisms:
+// [2i §4.2.1] / contracts/lifecycle-surface.md's "Handle discipline" bullet: "dead/corrupted handle
+// → FIXPP_ERR_INVALID_HANDLE". After fixpp_engine_destroy (WITHOUT closing the session first), any
+// call on a stale session handle must return INVALID_HANDLE, not UAF/UB.  UAF-safety here rests on
+// two complementary mechanisms:
 //   1. Shell retention: the fixpp_engine object is never freed (s_dead_shells
 //      keeps it reachable), so sessions_ (and the session handle pointers into
 //      it) remain valid memory after destroy.
@@ -106,8 +103,7 @@ TEST(CapiLifecycle, PostEngineDestroySessionHandleIsInvalidHandle) {
     fixpp_engine_t* eng = nullptr;
     ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &eng), FIXPP_ERR_OK);
 
-    fixpp_session_config_t* sc =
-        make_session_cfg("INIT-PDQ", "ACC-PDQ", FIXPP_ROLE_INITIATOR);
+    fixpp_session_config_t* sc = make_session_cfg("INIT-PDQ", "ACC-PDQ", FIXPP_ROLE_INITIATOR);
     fixpp_session_t* sess = nullptr;
     ASSERT_EQ(fixpp_session_open(eng, sc, &sess), FIXPP_ERR_OK);
     ASSERT_NE(sess, nullptr);
@@ -131,8 +127,7 @@ TEST(CapiLifecycle, SessionOpenAfterStartRejected) {
     ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &eng), FIXPP_ERR_OK);
 
     // One acceptor so start() has something to bind; port 0 = OS-assigned.
-    fixpp_session_config_t* acc =
-        make_session_cfg("ACC-FR4", "INIT-FR4", FIXPP_ROLE_ACCEPTOR);
+    fixpp_session_config_t* acc = make_session_cfg("ACC-FR4", "INIT-FR4", FIXPP_ROLE_ACCEPTOR);
     set_loopback_endpoint(acc, "127.0.0.1", 0);
     fixpp_session_t* acc_h = nullptr;
     ASSERT_EQ(fixpp_session_open(eng, acc, &acc_h), FIXPP_ERR_OK);
@@ -141,8 +136,7 @@ TEST(CapiLifecycle, SessionOpenAfterStartRejected) {
 
     // Now a post-start open must be rejected (the registry is read on session
     // strands without a mutex; a late register would race).
-    fixpp_session_config_t* late =
-        make_session_cfg("INIT-LATE", "ACC-LATE", FIXPP_ROLE_INITIATOR);
+    fixpp_session_config_t* late = make_session_cfg("INIT-LATE", "ACC-LATE", FIXPP_ROLE_INITIATOR);
     fixpp_session_t* late_h = nullptr;
     EXPECT_EQ(fixpp_session_open(eng, late, &late_h), FIXPP_ERR_CAPI_CONFIG_INVALID);
     EXPECT_EQ(late_h, nullptr);
@@ -159,8 +153,7 @@ TEST(CapiLifecycle, RegisterCallbackAfterStartRejected) {
     fixpp_engine_t* eng = nullptr;
     ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &eng), FIXPP_ERR_OK);
 
-    fixpp_session_config_t* acc =
-        make_session_cfg("ACC-FR11", "INIT-FR11", FIXPP_ROLE_ACCEPTOR);
+    fixpp_session_config_t* acc = make_session_cfg("ACC-FR11", "INIT-FR11", FIXPP_ROLE_ACCEPTOR);
     set_loopback_endpoint(acc, "127.0.0.1", 0);
     fixpp_session_t* acc_h = nullptr;
     ASSERT_EQ(fixpp_session_open(eng, acc, &acc_h), FIXPP_ERR_OK);
@@ -169,8 +162,7 @@ TEST(CapiLifecycle, RegisterCallbackAfterStartRejected) {
     ASSERT_EQ(fixpp_engine_start(eng), FIXPP_ERR_OK);
 
     auto cb = [](const fixpp_msg_t*, void*) {};
-    EXPECT_EQ(fixpp_session_register_callback(acc_h, cb, nullptr),
-              FIXPP_ERR_CAPI_CONFIG_INVALID);
+    EXPECT_EQ(fixpp_session_register_callback(acc_h, cb, nullptr), FIXPP_ERR_CAPI_CONFIG_INVALID);
 
     fixpp_engine_destroy(eng);
 }
@@ -186,8 +178,7 @@ TEST(CapiLifecycle, NullAndDeadHandleCodes) {
 
     // NULL engine handle.
     fixpp_session_t* s = nullptr;
-    fixpp_session_config_t* sc =
-        make_session_cfg("INIT-NH", "ACC-NH", FIXPP_ROLE_INITIATOR);
+    fixpp_session_config_t* sc = make_session_cfg("INIT-NH", "ACC-NH", FIXPP_ROLE_INITIATOR);
     EXPECT_EQ(fixpp_session_open(nullptr, sc, &s), FIXPP_ERR_NULL_HANDLE);
     fixpp_session_config_destroy(sc);  // not consumed on failure
     EXPECT_EQ(fixpp_engine_start(nullptr), FIXPP_ERR_NULL_HANDLE);
@@ -199,8 +190,7 @@ TEST(CapiLifecycle, NullAndDeadHandleCodes) {
     ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &B), FIXPP_ERR_OK);
     ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &A), FIXPP_ERR_OK);
 
-    fixpp_session_config_t* acc =
-        make_session_cfg("ACC-DEAD", "INIT-DEAD", FIXPP_ROLE_ACCEPTOR);
+    fixpp_session_config_t* acc = make_session_cfg("ACC-DEAD", "INIT-DEAD", FIXPP_ROLE_ACCEPTOR);
     set_loopback_endpoint(acc, "127.0.0.1", 0);
     auto acc_id = session_id_of(acc);
     fixpp_session_t* acc_h = nullptr;
@@ -208,10 +198,9 @@ TEST(CapiLifecycle, NullAndDeadHandleCodes) {
     ASSERT_EQ(fixpp_engine_start(B), FIXPP_ERR_OK);
 
     std::uint16_t port = wait_for_bound_port(B, acc_id);
-    ASSERT_NE(port, 0u) << "acceptor did not bind";
+    ASSERT_NE(port, 0U) << "acceptor did not bind";
 
-    fixpp_session_config_t* ini =
-        make_session_cfg("INIT-DEAD", "ACC-DEAD", FIXPP_ROLE_INITIATOR);
+    fixpp_session_config_t* ini = make_session_cfg("INIT-DEAD", "ACC-DEAD", FIXPP_ROLE_INITIATOR);
     set_loopback_endpoint(ini, "127.0.0.1", port);
     fixpp_session_t* ini_h = nullptr;
     ASSERT_EQ(fixpp_session_open(A, ini, &ini_h), FIXPP_ERR_OK);
@@ -236,8 +225,7 @@ TEST(CapiLifecycle, EstablishedSessionHappyPath) {
     ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &B), FIXPP_ERR_OK);
     ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &A), FIXPP_ERR_OK);
 
-    fixpp_session_config_t* acc =
-        make_session_cfg("ACC-HP", "INIT-HP", FIXPP_ROLE_ACCEPTOR);
+    fixpp_session_config_t* acc = make_session_cfg("ACC-HP", "INIT-HP", FIXPP_ROLE_ACCEPTOR);
     set_loopback_endpoint(acc, "127.0.0.1", 0);
     auto acc_id = session_id_of(acc);
     fixpp_session_t* acc_h = nullptr;
@@ -245,10 +233,9 @@ TEST(CapiLifecycle, EstablishedSessionHappyPath) {
     ASSERT_EQ(fixpp_engine_start(B), FIXPP_ERR_OK);
 
     std::uint16_t port = wait_for_bound_port(B, acc_id);
-    ASSERT_NE(port, 0u) << "acceptor did not bind";
+    ASSERT_NE(port, 0U) << "acceptor did not bind";
 
-    fixpp_session_config_t* ini =
-        make_session_cfg("INIT-HP", "ACC-HP", FIXPP_ROLE_INITIATOR);
+    fixpp_session_config_t* ini = make_session_cfg("INIT-HP", "ACC-HP", FIXPP_ROLE_INITIATOR);
     set_loopback_endpoint(ini, "127.0.0.1", port);
     fixpp_session_t* ini_h = nullptr;
     ASSERT_EQ(fixpp_session_open(A, ini, &ini_h), FIXPP_ERR_OK);
@@ -282,8 +269,7 @@ TEST(CapiLifecycle, Sc007CloseBreaksBlockedIdleReadPromptly) {
     ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &B), FIXPP_ERR_OK);
     ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &A), FIXPP_ERR_OK);
 
-    fixpp_session_config_t* acc =
-        make_session_cfg("ACC-S7", "INIT-S7", FIXPP_ROLE_ACCEPTOR);
+    fixpp_session_config_t* acc = make_session_cfg("ACC-S7", "INIT-S7", FIXPP_ROLE_ACCEPTOR);
     set_loopback_endpoint(acc, "127.0.0.1", 0);
     auto acc_id = session_id_of(acc);
     fixpp_session_t* acc_h = nullptr;
@@ -291,10 +277,9 @@ TEST(CapiLifecycle, Sc007CloseBreaksBlockedIdleReadPromptly) {
     ASSERT_EQ(fixpp_engine_start(B), FIXPP_ERR_OK);
 
     std::uint16_t port = wait_for_bound_port(B, acc_id);
-    ASSERT_NE(port, 0u);
+    ASSERT_NE(port, 0U);
 
-    fixpp_session_config_t* ini =
-        make_session_cfg("INIT-S7", "ACC-S7", FIXPP_ROLE_INITIATOR);
+    fixpp_session_config_t* ini = make_session_cfg("INIT-S7", "ACC-S7", FIXPP_ROLE_INITIATOR);
     set_loopback_endpoint(ini, "127.0.0.1", port);
     fixpp_session_t* ini_h = nullptr;
     ASSERT_EQ(fixpp_session_open(A, ini, &ini_h), FIXPP_ERR_OK);
@@ -310,10 +295,10 @@ TEST(CapiLifecycle, Sc007CloseBreaksBlockedIdleReadPromptly) {
     // Prompt-teardown witness: a cancellation-driven close returns in well under
     // 1s on loopback. The idle read would otherwise never complete; if close did
     // not actively cancel/close the transport, this would block far longer.
-    EXPECT_LT(elapsed, 1s)
-        << "close did not break the blocked idle read promptly (SC-007a) — "
-           "elapsed="
-        << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() << "ms";
+    EXPECT_LT(elapsed, 1s) << "close did not break the blocked idle read promptly (SC-007a) — "
+                              "elapsed="
+                           << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count()
+                           << "ms";
 
     fixpp_engine_destroy(A);
     fixpp_engine_destroy(B);
@@ -348,8 +333,7 @@ TEST(CapiLifecycle, Sc007SendAfterTeardownIsTerminalNotUb) {
     ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &B), FIXPP_ERR_OK);
     ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &A), FIXPP_ERR_OK);
 
-    fixpp_session_config_t* acc =
-        make_session_cfg("ACC-S7B", "INIT-S7B", FIXPP_ROLE_ACCEPTOR);
+    fixpp_session_config_t* acc = make_session_cfg("ACC-S7B", "INIT-S7B", FIXPP_ROLE_ACCEPTOR);
     set_loopback_endpoint(acc, "127.0.0.1", 0);
     auto acc_id = session_id_of(acc);
     fixpp_session_t* acc_h = nullptr;
@@ -357,10 +341,9 @@ TEST(CapiLifecycle, Sc007SendAfterTeardownIsTerminalNotUb) {
     ASSERT_EQ(fixpp_engine_start(B), FIXPP_ERR_OK);
 
     std::uint16_t port = wait_for_bound_port(B, acc_id);
-    ASSERT_NE(port, 0u);
+    ASSERT_NE(port, 0U);
 
-    fixpp_session_config_t* ini =
-        make_session_cfg("INIT-S7B", "ACC-S7B", FIXPP_ROLE_INITIATOR);
+    fixpp_session_config_t* ini = make_session_cfg("INIT-S7B", "ACC-S7B", FIXPP_ROLE_INITIATOR);
     set_loopback_endpoint(ini, "127.0.0.1", port);
     fixpp_session_t* ini_h = nullptr;
     ASSERT_EQ(fixpp_session_open(A, ini, &ini_h), FIXPP_ERR_OK);
@@ -377,8 +360,7 @@ TEST(CapiLifecycle, Sc007SendAfterTeardownIsTerminalNotUb) {
 
     // A send on the now-dead handle returns the clean terminal code on THIS thread
     // — no abort, no UB (the safe, C-ABI-expressible core of the teardown contract).
-    EXPECT_EQ(fixpp_session_send(ini_h, payload.data(), payload.size()),
-              FIXPP_ERR_INVALID_HANDLE)
+    EXPECT_EQ(fixpp_session_send(ini_h, payload.data(), payload.size()), FIXPP_ERR_INVALID_HANDLE)
         << "send after teardown must return a clean terminal code (SC-007b rescoped; "
            "the live in-flight-cancel race is L-050-y)";
 
@@ -390,8 +372,8 @@ TEST(CapiLifecycle, Sc007SendAfterTeardownIsTerminalNotUb) {
 //
 // fixpp_session_send is THREAD_SAFE; the design explicitly models send racing
 // a concurrent close as a defined lifecycle outcome (data-model.md's E-6 /
-// contracts/send-and-receive.md's `FIXPP_ERR_THREAD_SESSION_LIFECYCLE` clause: "send raced a concurrent close() drain →
-// session_already_closed → FIXPP_ERR_THREAD_SESSION_LIFECYCLE"). Without
+// contracts/send-and-receive.md's `FIXPP_ERR_THREAD_SESSION_LIFECYCLE` clause: "send raced a
+// concurrent close() drain → session_already_closed → FIXPP_ERR_THREAD_SESSION_LIFECYCLE"). Without
 // `std::atomic<bool> valid` (Q2 fix), the read in check_session (valid load)
 // and the write in fixpp_session_close (valid store) form a C++ data race →
 // undefined behavior under TSan. Mutation-test: revert valid to `bool` in
@@ -408,8 +390,7 @@ TEST(CapiLifecycle, ConcurrentSendAndCloseNoDataRace) {
     ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &B), FIXPP_ERR_OK);
     ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &A), FIXPP_ERR_OK);
 
-    fixpp_session_config_t* acc =
-        make_session_cfg("ACC-RACE", "INIT-RACE", FIXPP_ROLE_ACCEPTOR);
+    fixpp_session_config_t* acc = make_session_cfg("ACC-RACE", "INIT-RACE", FIXPP_ROLE_ACCEPTOR);
     set_loopback_endpoint(acc, "127.0.0.1", 0);
     auto acc_id = session_id_of(acc);
     fixpp_session_t* acc_h = nullptr;
@@ -417,10 +398,9 @@ TEST(CapiLifecycle, ConcurrentSendAndCloseNoDataRace) {
     ASSERT_EQ(fixpp_engine_start(B), FIXPP_ERR_OK);
 
     std::uint16_t port = wait_for_bound_port(B, acc_id);
-    ASSERT_NE(port, 0u) << "acceptor did not bind";
+    ASSERT_NE(port, 0U) << "acceptor did not bind";
 
-    fixpp_session_config_t* ini =
-        make_session_cfg("INIT-RACE", "ACC-RACE", FIXPP_ROLE_INITIATOR);
+    fixpp_session_config_t* ini = make_session_cfg("INIT-RACE", "ACC-RACE", FIXPP_ROLE_INITIATOR);
     set_loopback_endpoint(ini, "127.0.0.1", port);
     fixpp_session_t* ini_h = nullptr;
     ASSERT_EQ(fixpp_session_open(A, ini, &ini_h), FIXPP_ERR_OK);
@@ -513,7 +493,8 @@ TEST(CapiLifecycle, EngineStateReclaimedOnDestroy) {
         // baseline+1 → this assertion fails → RED.
         EXPECT_EQ(fixpp_capi::detail::live_state_count(), baseline)
             << "EngineState must be reclaimed by fixpp_engine_destroy (L-050-z fix; "
-               "iteration " << i << ")";
+               "iteration "
+            << i << ")";
     }
     // Final check: the live count is back to baseline after all N cycles.
     EXPECT_EQ(fixpp_capi::detail::live_state_count(), baseline)

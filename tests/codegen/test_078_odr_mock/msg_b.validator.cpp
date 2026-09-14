@@ -1,4 +1,5 @@
 #include "msg_b.hpp"
+
 #include "traits.hpp"
 
 // 078 R2a probe — external-linkage validate_ def for MsgB, sharing MsgA's
@@ -14,4 +15,4 @@ bool validate_MsgB(MsgBArgs const& args) {
     return args.group.value >= writer_traits<GroupArgs>::required_count();
 }
 
-} // namespace test078_mock
+}  // namespace test078_mock

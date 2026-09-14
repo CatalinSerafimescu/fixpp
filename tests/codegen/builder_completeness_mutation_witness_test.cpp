@@ -42,8 +42,6 @@
 //          contracts/builder-completeness.md C3b;
 //          tests/codegen/determinism_test.cpp (subprocess/TempDir pattern).
 
-#include "builder_completeness_common.hpp"
-
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -54,6 +52,8 @@
 #include <set>
 #include <string>
 #include <vector>
+
+#include "builder_completeness_common.hpp"
 
 #ifdef _WIN32
 #include <process.h>
@@ -149,22 +149,25 @@ TEST(BuilderCompletenessMutationWitness, DropOneMessageMakesCensusDetectItRed) {
     std::string const dropped_version_dir = (out.path / "v44").string();
 
     using namespace fixpp_test::builder_completeness;
-    std::set<std::string> const expected =
-        legacy_expected_msgtypes(std::string(FIXPP_DICT_DATA_DIR) + "/FIX44.xml", {"BE", "BF", "BW", "BX", "BY"});
-    ASSERT_EQ(expected.count("D"), 1U) << "sanity: \"D\" (NewOrderSingle) must be in the raw-XML in-scope set";
+    std::set<std::string> const expected = legacy_expected_msgtypes(
+        std::string(FIXPP_DICT_DATA_DIR) + "/FIX44.xml", {"BE", "BF", "BW", "BX", "BY"});
+    ASSERT_EQ(expected.count("D"), 1U)
+        << "sanity: \"D\" (NewOrderSingle) must be in the raw-XML in-scope set";
 
     // Leg 1: registry-array parse (mirrors
     // BuilderCompleteness077V44.RegistryExactSetEqualsRawXmlWalk).
     std::set<std::string> const dropped_registry = parse_registry_msgtypes(dropped_all_hpp);
-    EXPECT_EQ(dropped_registry.count("D"), 0U) << "the drop seam did not remove \"D\" from builder_registry";
-    EXPECT_NE(dropped_registry, expected) << "registry-vs-raw-XML-walk comparison did NOT go RED for the drop";
+    EXPECT_EQ(dropped_registry.count("D"), 0U)
+        << "the drop seam did not remove \"D\" from builder_registry";
+    EXPECT_NE(dropped_registry, expected)
+        << "registry-vs-raw-XML-walk comparison did NOT go RED for the drop";
 
     std::vector<std::string> missing;
-    std::set_difference(expected.begin(), expected.end(), dropped_registry.begin(), dropped_registry.end(),
-                         std::back_inserter(missing));
+    std::ranges::set_difference(expected, dropped_registry, std::back_inserter(missing));
     ASSERT_EQ(missing.size(), 1U) << "expected exactly one message missing, got " << missing.size();
     EXPECT_EQ(missing.front(), "D");
-    std::cerr << "[builder_completeness_mutation_witness] RED CONFIRMED: registry-array leg detected missing "
+    std::cerr << "[builder_completeness_mutation_witness] RED CONFIRMED: registry-array leg "
+                 "detected missing "
                  "msg_type=\""
               << missing.front() << "\" (expected.size()=" << expected.size()
               << ", dropped_registry.size()=" << dropped_registry.size() << ")\n";
@@ -172,12 +175,15 @@ TEST(BuilderCompletenessMutationWitness, DropOneMessageMakesCensusDetectItRed) {
     // Leg 2: independent build_<Msg>( signature scan (mirrors
     // BuilderCompleteness077V44.BuildFnSignaturesMatchRawXmlWalk) -- also
     // catches the drop, via a differently-shaped parse than leg 1.
-    std::set<std::string> const dropped_build_idents = parse_build_fn_identifiers(dropped_version_dir);
+    std::set<std::string> const dropped_build_idents =
+        parse_build_fn_identifiers(dropped_version_dir);
     EXPECT_EQ(dropped_build_idents.count("NewOrderSingle"), 0U)
         << "the drop seam did not remove build_NewOrderSingle( from the header";
     EXPECT_EQ(dropped_build_idents.size(), expected.size() - 1)
         << "build_<Msg>( signature count should be exactly one less than the raw-XML walk count";
-    std::cerr << "[builder_completeness_mutation_witness] RED CONFIRMED: build_<Msg>( signature-scan leg detected "
+    std::cerr << "[builder_completeness_mutation_witness] RED CONFIRMED: build_<Msg>( "
+                 "signature-scan leg detected "
                  "missing build_NewOrderSingle( (expected.size()="
-              << expected.size() << ", dropped_build_idents.size()=" << dropped_build_idents.size() << ")\n";
+              << expected.size() << ", dropped_build_idents.size()=" << dropped_build_idents.size()
+              << ")\n";
 }

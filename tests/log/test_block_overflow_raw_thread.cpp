@@ -49,16 +49,15 @@
 
 #include <atomic>
 #include <chrono>
+#include <fixpp/log/level.hpp>
+#include <fixpp/log/logger.hpp>
+#include <fixpp/log/record.hpp>
+#include <fixpp/log/sink.hpp>
 #include <memory_resource>
 #include <thread>
 #include <vector>
 
 #include "../support/wait_until.hpp"
-
-#include <fixpp/log/level.hpp>
-#include <fixpp/log/logger.hpp>
-#include <fixpp/log/record.hpp>
-#include <fixpp/log/sink.hpp>
 
 namespace {
 
@@ -67,18 +66,18 @@ namespace {
 // stays full for exactly as long as the test needs, with no interval to lose.
 class TimedBlockSink final : public fixpp::log::Sink {
 public:
-    std::vector<fixpp::log::Record>  captured;
-    std::atomic<int>                 emit_count{0};
-    std::atomic<bool>                first_emit_started{false};
-    std::atomic<bool>                release_first_emit{false};
+    std::vector<fixpp::log::Record> captured;
+    std::atomic<int> emit_count{0};
+    std::atomic<bool> first_emit_started{false};
+    std::atomic<bool> release_first_emit{false};
 
     // ⚠️ A HANG GUARD, NOT PART OF THE MEASUREMENT. The test releases the drain
     // explicitly; this bound only stops a defect elsewhere from parking the
     // drain forever with no ctest timeout verdict to explain it. It is set far
     // above any interval the test waits, so a run that reaches it has already
     // failed for a different reason — `release_timed_out` says which.
-    std::chrono::seconds             release_cap{10};
-    std::atomic<bool>                release_timed_out{false};
+    std::chrono::seconds release_cap{10};
+    std::atomic<bool> release_timed_out{false};
 
     [[nodiscard]] fixpp::core::expected_t<void> open() override { return {}; }
 
@@ -105,8 +104,7 @@ public:
 
 // ── T016 / TS-3 ─────────────────────────────────────────────────────────────
 
-TEST(LogBlockOverflow, BlockModeRawThreadBlocks10ms)
-{
+TEST(LogBlockOverflow, BlockModeRawThreadBlocks10ms) {
     // Arrange: capacity=1 ring + block mode + a first-emit sink that parks the
     // drain until this test releases it.
     auto* sink_raw = new TimedBlockSink{};
@@ -115,34 +113,30 @@ TEST(LogBlockOverflow, BlockModeRawThreadBlocks10ms)
     sinks.push_back(std::unique_ptr<fixpp::log::Sink>(sink_raw));
 
     fixpp::log::LoggerConfig cfg;
-    cfg.capacity    = 1u;  // smallest possible ring — will fill after 1 enqueue
+    cfg.capacity = 1U;  // smallest possible ring — will fill after 1 enqueue
     cfg.on_overflow = fixpp::log::overflow_policy::block;
 
     auto logger = std::make_unique<fixpp::log::Logger>(std::move(cfg), std::move(sinks));
 
     std::array<std::uint8_t, 16> zeroed_trace_id{};
-    auto ts = fixpp::core::utc_time_point{
-        std::chrono::system_clock::now().time_since_epoch()};
+    auto ts = fixpp::core::utc_time_point{std::chrono::system_clock::now().time_since_epoch()};
 
-    constexpr auto fmt_first  =
+    constexpr auto fmt_first =
         static_cast<std::uint32_t>(fixpp::log::detail::crc32_str("block test first"));
     constexpr auto fmt_second =
         static_cast<std::uint32_t>(fixpp::log::detail::crc32_str("block test second"));
 
     // Enqueue record #0 — fills the ring; the drain picks it up and blocks in
     // TimedBlockSink::emit() for 50 ms (read_sequence_ advances AFTER emit()).
-    logger->enqueue(fixpp::log::Level::info,
-                    fixpp::log::cat::session,
-                    fmt_first,
-                    zeroed_trace_id, 0u, ts,
-                    {fixpp::log::ArgValue::from_u64(0u)});
+    logger->enqueue(fixpp::log::Level::info, fixpp::log::cat::session, fmt_first, zeroed_trace_id,
+                    0U, ts, {fixpp::log::ArgValue::from_u64(0U)});
 
     // Wait until the drain has entered emit() for record #0.
     // This ensures the ring slot is NOT yet freed (read_sequence_ not yet advanced).
     {
         auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{1};
-        while (!sink_raw->first_emit_started.load(std::memory_order_acquire)
-               && std::chrono::steady_clock::now() < deadline) {
+        while (!sink_raw->first_emit_started.load(std::memory_order_acquire) &&
+               std::chrono::steady_clock::now() < deadline) {
             std::this_thread::yield();
         }
     }
@@ -160,11 +154,8 @@ TEST(LogBlockOverflow, BlockModeRawThreadBlocks10ms)
         enqueue_start = std::chrono::steady_clock::now();
         producer_at_the_door.store(true, std::memory_order_release);
         // This enqueue MUST block until the drain advances read_sequence_.
-        logger->enqueue(fixpp::log::Level::info,
-                        fixpp::log::cat::session,
-                        fmt_second,
-                        zeroed_trace_id, 0u, ts,
-                        {fixpp::log::ArgValue::from_u64(1u)});
+        logger->enqueue(fixpp::log::Level::info, fixpp::log::cat::session, fmt_second,
+                        zeroed_trace_id, 0U, ts, {fixpp::log::ArgValue::from_u64(1U)});
         enqueue_end = std::chrono::steady_clock::now();
         producer_done.store(true, std::memory_order_release);
     });
@@ -218,23 +209,25 @@ TEST(LogBlockOverflow, BlockModeRawThreadBlocks10ms)
            "broken contract.)";
 
     // The producer must have blocked for at least 10 ms.
-    auto blocked_for = std::chrono::duration_cast<std::chrono::milliseconds>(
-        enqueue_end - enqueue_start);
+    auto blocked_for =
+        std::chrono::duration_cast<std::chrono::milliseconds>(enqueue_end - enqueue_start);
 
     EXPECT_GE(blocked_for.count(), 10)
         << "Producer thread must have blocked >= 10 ms while the ring was full "
-           "(observation window=" << kObserveBlocked.count() << " ms, "
-           "actual block=" << blocked_for.count() << " ms)";
+           "(observation window="
+        << kObserveBlocked.count()
+        << " ms, "
+           "actual block="
+        << blocked_for.count() << " ms)";
 
     // Both records were eventually delivered (no drops in block mode).
-    EXPECT_EQ(logger->drop_count(), 0u)
+    EXPECT_EQ(logger->drop_count(), 0U)
         << "drop_count must be 0 — block mode must not drop records";
 
-    EXPECT_EQ(sink_raw->captured.size(), 2u)
-        << "Both records must have been delivered to the sink";
+    EXPECT_EQ(sink_raw->captured.size(), 2U) << "Both records must have been delivered to the sink";
 
     // Record ordering: record #0 (fmt_first) before record #1 (fmt_second).
-    ASSERT_GE(sink_raw->captured.size(), 2u);
+    ASSERT_GE(sink_raw->captured.size(), 2U);
     EXPECT_EQ(sink_raw->captured[0].format_id, fmt_first)
         << "First delivered record must be record #0";
     EXPECT_EQ(sink_raw->captured[1].format_id, fmt_second)

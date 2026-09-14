@@ -41,17 +41,13 @@ namespace {
 
 using fixpp::core::error;
 using fixpp::core::expected_t;
-using fixpp::tls::cert_source;
 using fixpp::tls::file_cert_source;
-using fixpp::tls::local_credentials;
 
 #ifndef FIXPP_TLS_FIXTURE_DIR
 #define FIXPP_TLS_FIXTURE_DIR ""
 #endif
 
-static std::string fixture(const char* name) {
-    return std::string(FIXPP_TLS_FIXTURE_DIR) + "/" + name;
-}
+std::string fixture(const char* name) { return std::string(FIXPP_TLS_FIXTURE_DIR) + "/" + name; }
 
 // ── FactoryNeverThrows ────────────────────────────────────────────────────────
 // Primary contract: factory make_file_cert_source must NEVER throw.
@@ -233,8 +229,8 @@ TEST(FileCertSourcePmrFail, ParseCertificateDerPmrExhaustionSurfacesCertParseFai
 //
 // The existing ParseCertificateDerPmrExhaustionSurfacesCertParseFailed test
 // uses a 1-byte arena that fires on the FIRST PMR allocation (subject DN copy
-// at `parse_certificate_der`'s "Subject DN" copy in certificate.cpp), so execution never reaches the SAN block and the
-// GENERAL_NAMES* leak on the SAN code-path was silently undetected.
+// at `parse_certificate_der`'s "Subject DN" copy in certificate.cpp), so execution never reaches
+// the SAN block and the GENERAL_NAMES* leak on the SAN code-path was silently undetected.
 //
 // This test uses leaf_san_64.pem (64 DNS SANs, long hostnames ~70 bytes each)
 // with a medium arena (512 bytes) that is large enough to complete the subject

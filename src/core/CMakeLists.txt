@@ -17,7 +17,9 @@ target_include_directories(fixpp_core PUBLIC
 # core has no internal project dependencies — it is the leaf [arch §2.2].
 # The asio-dependent fixpp::core threading impls do NOT live in this leaf
 # target: system_clock_source.cpp is compiled into fixpp_session; the
-# test-only mock_clock.cpp is a test-support lib (built only with tests).
-if(FIXPP_BUILD_TESTS)
+# test-only mock_clock.cpp is a test-support lib, built whenever something links
+# it: the tests, and also bench/session and tests/fuzz, which link fixpp_mock_clock
+# and otherwise fail with `cannot find -lfixpp_mock_clock` under FIXPP_BUILD_TESTS=OFF.
+if(FIXPP_BUILD_TESTS OR FIXPP_BUILD_BENCH OR FIXPP_BUILD_FUZZ)
   add_subdirectory(test)   # fixpp_mock_clock — test-only deterministic Clock
 endif()

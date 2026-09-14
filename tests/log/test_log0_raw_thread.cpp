@@ -21,17 +21,16 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <fixpp/log/level.hpp>
+#include <fixpp/log/logger.hpp>
+#include <fixpp/log/record.hpp>
+#include <fixpp/log/sink.hpp>
 #include <memory_resource>
 #include <mutex>
 #include <thread>
 #include <vector>
 
 #include "support/wait_until.hpp"
-
-#include <fixpp/log/level.hpp>
-#include <fixpp/log/logger.hpp>
-#include <fixpp/log/record.hpp>
-#include <fixpp/log/sink.hpp>
 
 namespace {
 
@@ -48,7 +47,7 @@ public:
     [[nodiscard]] fixpp::core::expected_t<void> open() override { return {}; }
 
     void emit(Record const& rec) noexcept override {
-        std::lock_guard lk{mu_};
+        std::scoped_lock lk{mu_};
         records_.push_back(rec);
         count_.fetch_add(1, std::memory_order_release);
     }
@@ -61,7 +60,7 @@ public:
     }
 
     [[nodiscard]] Record get(std::size_t idx) const {
-        std::lock_guard lk{mu_};
+        std::scoped_lock lk{mu_};
         return records_.at(idx);
     }
 
@@ -75,13 +74,12 @@ private:
 
 TEST(Log0RawThread, ZeroedTraceNoUB) {
     // Construct logger with a CaptureSink.
-    auto  sink = std::make_unique<CaptureSink>();
+    auto sink = std::make_unique<CaptureSink>();
     auto* sink_ptr = sink.get();
 
     LoggerConfig cfg;
-    cfg.capacity = 1024u;
-    std::pmr::vector<std::unique_ptr<fixpp::log::Sink>> sinks(
-        std::pmr::get_default_resource());
+    cfg.capacity = 1024U;
+    std::pmr::vector<std::unique_ptr<fixpp::log::Sink>> sinks(std::pmr::get_default_resource());
     sinks.push_back(std::move(sink));
     Logger logger(std::move(cfg), std::move(sinks));
 
@@ -90,15 +88,16 @@ TEST(Log0RawThread, ZeroedTraceNoUB) {
     // ASan obligation DEFERRED to Phase-6 verify (rebuilding OTel under ASan is
     // out of scope for this slice; documented per task brief T032).
     std::thread raw_thread{[&logger]() {
-        FIXPP_LOG0(&logger, info, fixpp::log::cat::session,
-                   "from raw thread {}", ArgValue::from_u64(42u));
+        FIXPP_LOG0(&logger, info, fixpp::log::cat::session, "from raw thread {}",
+                   ArgValue::from_u64(42U));
     }};
     raw_thread.join();
 
     // Wait for the drain thread to deliver the record (max 2 s).
     // Result discarded: the ASSERT_GE below is the oracle.
-    (void)fixpp::test_support::wait_until_observed([&sink_ptr] { return sink_ptr->count() >= 1u; }, std::chrono::seconds{2});
-    ASSERT_GE(sink_ptr->count(), 1u) << "FIXPP_LOG0 record not delivered within 2 s";
+    (void)fixpp::test_support::wait_until_observed([&sink_ptr] { return sink_ptr->count() >= 1U; },
+                                                   std::chrono::seconds{2});
+    ASSERT_GE(sink_ptr->count(), 1U) << "FIXPP_LOG0 record not delivered within 2 s";
 
     auto rec = sink_ptr->get(0);
 

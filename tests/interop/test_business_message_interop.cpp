@@ -35,6 +35,12 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <fixpp/core/decimal_alias.hpp>
+#include <fixpp/session/application.hpp>
+#include <fixpp/session/business_messages.hpp>
+#include <fixpp/session/engine.hpp>
+#include <fixpp/session/session.hpp>
+#include <fixpp/session/session_fsm.hpp>
 #include <memory>
 #include <memory_resource>
 #include <mutex>
@@ -43,13 +49,6 @@
 #include <string>
 #include <tuple>
 #include <vector>
-
-#include <fixpp/core/decimal_alias.hpp>
-#include <fixpp/session/application.hpp>
-#include <fixpp/session/business_messages.hpp>
-#include <fixpp/session/engine.hpp>
-#include <fixpp/session/session.hpp>
-#include <fixpp/session/session_fsm.hpp>
 
 // Generated FIX 4.4 read flyweights (codegen 003 — research.md D2/D8).
 #include <fixpp/v44/Messages.hpp>
@@ -61,10 +60,10 @@ using fixpp::decimal_t;
 using fixpp::interop::Counterparty;
 using fixpp::interop::Role;
 using fixpp::session::Application;
-using fixpp::session::SessionId;
 using fixpp::session::fsm_state;
-using fixpp::wire::MessageView;
+using fixpp::session::SessionId;
 using fixpp::wire::access_mode;
+using fixpp::wire::MessageView;
 
 namespace {
 
@@ -72,7 +71,7 @@ namespace {
 
 // Build a decimal_t from a decimal string literal via parse (same pattern as
 // test_business_messages_build.cpp::make_decimal).
-static decimal_t make_dec(std::string_view sv, std::pmr::memory_resource* mr) {
+decimal_t make_dec(std::string_view sv, std::pmr::memory_resource* mr) {
     std::vector<std::byte> bytes;
     bytes.reserve(sv.size());
     for (char c : sv) bytes.push_back(static_cast<std::byte>(c));
@@ -124,27 +123,25 @@ public:
     char cap_side{'\0'};
     std::string cap_symbol;
     std::array<std::byte, 256> cap_arena_buf{};
-    std::pmr::monotonic_buffer_resource cap_arena{
-        cap_arena_buf.data(), cap_arena_buf.size(), std::pmr::null_memory_resource()};
-    decimal_t cap_avg_px{};
-    decimal_t cap_cum_qty{};
-    decimal_t cap_leaves_qty{};
+    std::pmr::monotonic_buffer_resource cap_arena{cap_arena_buf.data(), cap_arena_buf.size(),
+                                                  std::pmr::null_memory_resource()};
+    decimal_t cap_avg_px;
+    decimal_t cap_cum_qty;
+    decimal_t cap_leaves_qty;
 
     // fromApp: respond to NewOrderSingle (acceptor) or capture ExecRpt (initiator).
-    fixpp::core::expected_t<void> fromApp(
-        const MessageView<access_mode::Index>& msg,
-        const SessionId& /*id*/) override
-    {
+    fixpp::core::expected_t<void> fromApp(const MessageView<access_mode::Index>& msg,
+                                          const SessionId& /*id*/) override {
         // Initiator-side: capture an inbound ExecutionReport (35=8).
         if (msg.msg_type() == "8") {
             fixpp::v44::ExecutionReport er{msg};
-            std::lock_guard<std::mutex> lk{cap_mu};
-            if (auto r = er.exec_type())  cap_exec_type = *r;
+            std::scoped_lock lk{cap_mu};
+            if (auto r = er.exec_type()) cap_exec_type = *r;
             if (auto r = er.ord_status()) cap_ord_status = *r;
-            if (auto r = er.symbol())     cap_symbol = std::string{*r};
-            if (auto r = er.side())       cap_side = *r;
-            if (auto r = er.avg_px(&cap_arena))     cap_avg_px = *r;
-            if (auto r = er.cum_qty(&cap_arena))    cap_cum_qty = *r;
+            if (auto r = er.symbol()) cap_symbol = std::string{*r};
+            if (auto r = er.side()) cap_side = *r;
+            if (auto r = er.avg_px(&cap_arena)) cap_avg_px = *r;
+            if (auto r = er.cum_qty(&cap_arena)) cap_cum_qty = *r;
             if (auto r = er.leaves_qty(&cap_arena)) cap_leaves_qty = *r;
             er_received.store(true, std::memory_order_release);
             return {};
@@ -164,13 +161,13 @@ public:
         // Use a small stack arena for decimal parsing inside fromApp.
         std::array<std::byte, 256> arena_buf{};
         std::pmr::monotonic_buffer_resource arena{arena_buf.data(), arena_buf.size(),
-                                                   std::pmr::null_memory_resource()};
+                                                  std::pmr::null_memory_resource()};
 
         auto cl_ord_id_r = nos.cl_ord_id();
-        auto symbol_r    = nos.symbol();
-        auto side_r      = nos.side();
+        auto symbol_r = nos.symbol();
+        auto side_r = nos.side();
         auto order_qty_r = nos.order_qty(&arena);
-        auto price_r     = nos.price(&arena);
+        auto price_r = nos.price(&arena);
 
         if (!cl_ord_id_r || !symbol_r || !side_r || !order_qty_r || !price_r) {
             // Malformed NOS — reject so the engine can emit BusinessMessageReject.
@@ -181,26 +178,25 @@ public:
         std::string symbol_str{*symbol_r};
         char side_char = *side_r;
         decimal_t order_qty_val = *order_qty_r;
-        decimal_t price_val     = *price_r;
+        decimal_t price_val = *price_r;
 
         // Generate fresh IDs for the reply.
         static std::atomic<int> id_counter{0};
         int seq = ++id_counter;
         std::string order_id_str = "ORD" + std::to_string(seq);
-        std::string exec_id_str  = "EXC" + std::to_string(seq);
+        std::string exec_id_str = "EXC" + std::to_string(seq);
 
         // Off-strand: build and send the ExecRpt.
         auto* eng = engine;
-        auto sid  = acceptor_id;
-        auto* er_sent_ptr  = &er_sent;
-        auto* send_ok_ptr  = &send_ok;
+        auto sid = acceptor_id;
+        auto* er_sent_ptr = &er_sent;
+        auto* send_ok_ptr = &send_ok;
         auto ex = exec;
 
-        asio::post(exec, [eng, sid, symbol_str = std::move(symbol_str),
-                           side_char, order_qty_val, price_val,
-                           order_id_str = std::move(order_id_str),
-                           exec_id_str  = std::move(exec_id_str),
-                           er_sent_ptr, send_ok_ptr, ex]() mutable {
+        asio::post(exec, [eng, sid, symbol_str = std::move(symbol_str), side_char, order_qty_val,
+                          price_val, order_id_str = std::move(order_id_str),
+                          exec_id_str = std::move(exec_id_str), er_sent_ptr, send_ok_ptr,
+                          ex]() mutable {
             std::array<std::byte, 512> out_buf{};
             std::span<std::byte> out{out_buf};
 
@@ -208,12 +204,11 @@ public:
             // CumQty=OrderQty, AvgPx=Price (research.md D5).
             std::array<std::byte, 64> arena_b{};
             std::pmr::monotonic_buffer_resource ar{arena_b.data(), arena_b.size(),
-                                                    std::pmr::null_memory_resource()};
+                                                   std::pmr::null_memory_resource()};
             auto zero = make_dec("0", &ar);
 
             auto body = fixpp::session::build_execution_report(
-                out,
-                order_id_str, exec_id_str,
+                out, order_id_str, exec_id_str,
                 'F',  // ExecType = Trade (FIX 4.4 fill value)
                 '2',  // OrdStatus = Filled
                 symbol_str, side_char,
@@ -226,10 +221,9 @@ public:
                 return;
             }
 
-            asio::co_spawn(ex,
-                eng->send(sid, *body),
-                [er_sent_ptr, send_ok_ptr](std::exception_ptr ep,
-                                            fixpp::core::expected_t<void> r) {
+            asio::co_spawn(
+                ex, eng->send(sid, *body),
+                [er_sent_ptr, send_ok_ptr](std::exception_ptr ep, fixpp::core::expected_t<void> r) {
                     if (!ep) {
                         if (r.has_value()) {
                             send_ok_ptr->store(true, std::memory_order_release);
@@ -247,8 +241,7 @@ public:
 
 // Value-parameterized over (Counterparty, Role). The same test body covers all
 // 4 cells: QFj_init, QFj_acc, QFcpp_init, QFcpp_acc.
-class BusinessMessageInterop
-    : public ::testing::TestWithParam<std::tuple<Counterparty, Role>> {};
+class BusinessMessageInterop : public ::testing::TestWithParam<std::tuple<Counterparty, Role>> {};
 
 TEST_P(BusinessMessageInterop, NosExecRptRoundTrip) {
     const auto [counterparty, role] = GetParam();
@@ -279,14 +272,14 @@ TEST_P(BusinessMessageInterop, NosExecRptRoundTrip) {
 
     fixpp::interop::InteropEngineFixture fx{std::move(ecfg)};
 
-    auto cfg = hp::make_session_config(role, "FIX.4.4", factory,
-                                        fx.ioc().get_executor(), *endpoint);
+    auto cfg =
+        hp::make_session_config(role, "FIX.4.4", factory, fx.ioc().get_executor(), *endpoint);
     const auto id = SessionId::from_config(cfg);
 
     // Wire up the responding app's back-reference BEFORE registering.
-    responding_app->engine      = &fx.engine();
+    responding_app->engine = &fx.engine();
     responding_app->acceptor_id = id;
-    responding_app->exec        = fx.ioc().get_executor();
+    responding_app->exec = fx.ioc().get_executor();
 
     ASSERT_TRUE(fx.engine().register_session(std::move(cfg)).has_value())
         << "register_session failed";
@@ -296,8 +289,7 @@ TEST_P(BusinessMessageInterop, NosExecRptRoundTrip) {
     // ── Logon: drive to Active ───────────────────────────────────────────────
     const auto reached = hp::drive_to_active(fx, id, 5s);
     EXPECT_EQ(reached, fsm_state::Active)
-        << "session did not reach Active against "
-        << hp::counterparty_token(counterparty)
+        << "session did not reach Active against " << hp::counterparty_token(counterparty)
         << "; state=" << static_cast<int>(reached);
     if (reached != fsm_state::Active) {
         hp::expect_graceful_stop(fx);
@@ -324,31 +316,27 @@ TEST_P(BusinessMessageInterop, NosExecRptRoundTrip) {
         // Build the NOS payload.
         std::array<std::byte, 512> nos_buf{};
         std::array<std::byte, 64> dec_arena_buf{};
-        std::pmr::monotonic_buffer_resource dec_arena{
-            dec_arena_buf.data(), dec_arena_buf.size(), std::pmr::null_memory_resource()};
+        std::pmr::monotonic_buffer_resource dec_arena{dec_arena_buf.data(), dec_arena_buf.size(),
+                                                      std::pmr::null_memory_resource()};
 
         auto order_qty = make_dec("100", &dec_arena);
-        auto price     = make_dec("190.5", &dec_arena);
+        auto price = make_dec("190.5", &dec_arena);
 
         // TransactTime: use a static UTC timestamp (test-only; the counterparty
         // accepts any well-formed UTCTimestamp).
         static constexpr std::string_view kTransactTime = "20240101-00:00:00.000";
 
-        auto nos_body = fixpp::session::build_new_order_single(
-            nos_buf, "CLORD001", "AAPL", '1', order_qty, price, kTransactTime);
+        auto nos_body = fixpp::session::build_new_order_single(nos_buf, "CLORD001", "AAPL", '1',
+                                                               order_qty, price, kTransactTime);
         ASSERT_TRUE(nos_body.has_value())
-            << "build_new_order_single failed; error="
-            << static_cast<int>(nos_body.error());
+            << "build_new_order_single failed; error=" << static_cast<int>(nos_body.error());
 
         // Send the NOS via Engine::send (any-thread path).
         {
-            auto send_fut = asio::co_spawn(
-                fx.ioc().get_executor(),
-                fx.engine().send(id, *nos_body),
-                asio::use_future);
+            auto send_fut = asio::co_spawn(fx.ioc().get_executor(), fx.engine().send(id, *nos_body),
+                                           asio::use_future);
             fx.run_until(
-                [&send_fut]{ return send_fut.wait_for(0ms) == std::future_status::ready; },
-                3s);
+                [&send_fut] { return send_fut.wait_for(0ms) == std::future_status::ready; }, 3s);
             ASSERT_TRUE(send_fut.wait_for(0ms) == std::future_status::ready)
                 << "Engine::send(NOS) did not complete within 3s";
             auto res = send_fut.get();
@@ -358,7 +346,7 @@ TEST_P(BusinessMessageInterop, NosExecRptRoundTrip) {
 
         // Wait for the ExecRpt to arrive in fromApp.
         fx.run_until(
-            [&responding_app]{
+            [&responding_app] {
                 return responding_app->er_received.load(std::memory_order_acquire);
             },
             5s);
@@ -367,31 +355,26 @@ TEST_P(BusinessMessageInterop, NosExecRptRoundTrip) {
             << "No ExecutionReport received from counterparty within 5s";
 
         if (responding_app->er_received.load(std::memory_order_acquire)) {
-            std::lock_guard<std::mutex> lk{responding_app->cap_mu};
+            std::scoped_lock lk{responding_app->cap_mu};
             // Fidelity assertions (FR-010/013; data-model D5; INV-3).
             EXPECT_EQ(responding_app->cap_exec_type, 'F')
                 << "ExecType must be 'F' (Trade / fully-filled)";
-            EXPECT_EQ(responding_app->cap_ord_status, '2')
-                << "OrdStatus must be '2' (Filled)";
-            EXPECT_EQ(responding_app->cap_symbol, "AAPL")
-                << "Symbol must echo the order's Symbol";
-            EXPECT_EQ(responding_app->cap_side, '1')
-                << "Side must echo the order's Side";
+            EXPECT_EQ(responding_app->cap_ord_status, '2') << "OrdStatus must be '2' (Filled)";
+            EXPECT_EQ(responding_app->cap_symbol, "AAPL") << "Symbol must echo the order's Symbol";
+            EXPECT_EQ(responding_app->cap_side, '1') << "Side must echo the order's Side";
 
             // Decimal value-equality (INV-3): 190.5 == 190.50, etc.
             std::array<std::byte, 64> cmp_arena_buf{};
             std::pmr::monotonic_buffer_resource cmp_arena{
-                cmp_arena_buf.data(), cmp_arena_buf.size(),
-                std::pmr::null_memory_resource()};
-            auto expected_qty  = make_dec("100",   &cmp_arena);
-            auto expected_px   = make_dec("190.5", &cmp_arena);
-            auto expected_zero = make_dec("0",     &cmp_arena);
+                cmp_arena_buf.data(), cmp_arena_buf.size(), std::pmr::null_memory_resource()};
+            auto expected_qty = make_dec("100", &cmp_arena);
+            auto expected_px = make_dec("190.5", &cmp_arena);
+            auto expected_zero = make_dec("0", &cmp_arena);
             // CumQty == OrderQty (fully-filled).
             EXPECT_EQ(responding_app->cap_cum_qty, expected_qty)
                 << "CumQty must equal OrderQty (100)";
             // AvgPx == Price.
-            EXPECT_EQ(responding_app->cap_avg_px, expected_px)
-                << "AvgPx must equal Price (190.5)";
+            EXPECT_EQ(responding_app->cap_avg_px, expected_px) << "AvgPx must equal Price (190.5)";
             // LeavesQty == 0.
             EXPECT_EQ(responding_app->cap_leaves_qty, expected_zero)
                 << "LeavesQty must be 0 (fully filled)";
@@ -401,7 +384,7 @@ TEST_P(BusinessMessageInterop, NosExecRptRoundTrip) {
         // inbound ExecRpt + Logout) before teardown. fixpp tears down the instant
         // er_received flips, which can race a buffered QuickFIX-J transcript write
         // and capture a short golden; a brief wall-clock settle makes it stable.
-        fx.run_until([]{ return false; }, 500ms);
+        fx.run_until([] { return false; }, 500ms);
         hp::expect_graceful_stop(fx);
 
     } else {
@@ -414,7 +397,7 @@ TEST_P(BusinessMessageInterop, NosExecRptRoundTrip) {
         // Wait up to 10 s for the counterparty to send a NOS and for us to
         // reply with an ExecRpt.
         fx.run_until(
-            [&responding_app]{
+            [&responding_app] {
                 return responding_app->er_sent.load(std::memory_order_acquire) >= 1;
             },
             10s);
@@ -438,16 +421,15 @@ TEST_P(BusinessMessageInterop, NosExecRptRoundTrip) {
 
         // Settle: let the counterparty flush its buffered transcript tail (the
         // inbound ExecRpt + Logout) before teardown — see the initiator branch.
-        fx.run_until([]{ return false; }, 500ms);
+        fx.run_until([] { return false; }, 500ms);
         hp::expect_graceful_stop(fx);
     }
 }
 
 INSTANTIATE_TEST_SUITE_P(
     Fix44, BusinessMessageInterop,
-    ::testing::Combine(
-        ::testing::Values(Counterparty::quickfix_j, Counterparty::quickfix_cpp),
-        ::testing::Values(Role::fixpp_initiator, Role::fixpp_acceptor)),
+    ::testing::Combine(::testing::Values(Counterparty::quickfix_j, Counterparty::quickfix_cpp),
+                       ::testing::Values(Role::fixpp_initiator, Role::fixpp_acceptor)),
     fixpp::interop::hp::cell_name);
 
 }  // namespace

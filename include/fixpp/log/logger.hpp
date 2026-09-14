@@ -331,17 +331,17 @@ inline void enqueue_record(Logger* logger, Level level, Category category, std::
 // [2k §4.3] / contracts/log-core.md LOG-003.
 // T031(d): with a mock clock injected via EngineConfig::clock, the delivered
 // record's timestamp equals mock.now() — exercising FR-006 routing.
-#define FIXPP_ELOG(logger_ptr, lvl, engine_ref, cat, fmt, ...)                                    \
-    do {                                                                                          \
-        if constexpr (static_cast<int>(::fixpp::log::Level::lvl) >= FIXPP_LOG_MIN_LEVEL) {        \
-            auto const _elog_tc = (engine_ref).engine_trace_context();                            \
-            auto const _elog_ts = (engine_ref).clock()                                            \
-                                      ? (engine_ref).clock()->now()                               \
-                                      : std::chrono::time_point_cast<std::chrono::nanoseconds>(   \
-                                            std::chrono::system_clock::now());                    \
-            ::fixpp::log::detail::enqueue_record(                                                 \
-                (logger_ptr), ::fixpp::log::Level::lvl, (cat), FIXPP_FORMAT_ID(fmt),              \
-                reinterpret_cast<std::array<std::uint8_t, 16> const&>(_elog_tc.trace_id),         \
-                std::bit_cast<std::uint64_t>(_elog_tc.span_id), _elog_ts, {__VA_ARGS__});         \
-        }                                                                                         \
+#define FIXPP_ELOG(logger_ptr, lvl, engine_ref, cat, fmt, ...)                                  \
+    do {                                                                                        \
+        if constexpr (static_cast<int>(::fixpp::log::Level::lvl) >= FIXPP_LOG_MIN_LEVEL) {      \
+            auto const _elog_tc = (engine_ref).engine_trace_context();                          \
+            auto const _elog_ts = (engine_ref).clock()                                          \
+                                      ? (engine_ref).clock()->now()                             \
+                                      : std::chrono::time_point_cast<std::chrono::nanoseconds>( \
+                                            std::chrono::system_clock::now());                  \
+            ::fixpp::log::detail::enqueue_record(                                               \
+                (logger_ptr), ::fixpp::log::Level::lvl, (cat), FIXPP_FORMAT_ID(fmt),            \
+                reinterpret_cast<std::array<std::uint8_t, 16> const&>(_elog_tc.trace_id),       \
+                std::bit_cast<std::uint64_t>(_elog_tc.span_id), _elog_ts, {__VA_ARGS__});       \
+        }                                                                                       \
     } while (false)

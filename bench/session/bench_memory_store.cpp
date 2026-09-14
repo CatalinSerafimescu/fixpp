@@ -103,8 +103,8 @@ void BM_MemoryStore_Store_200B(benchmark::State& state) {
 
     for (auto _ : state) {
         run_coro([&]() -> asio::awaitable<void> {
-            auto result = co_await store.store(seq, std::span<const std::byte>(frame),
-                                               direction_t::outbound);
+            auto result =
+                co_await store.store(seq, std::span<const std::byte>(frame), direction_t::outbound);
             benchmark::DoNotOptimize(result.has_value());
         });
         ++seq;
@@ -129,8 +129,8 @@ void BM_MemoryStore_Store_1KiB(benchmark::State& state) {
 
     for (auto _ : state) {
         run_coro([&]() -> asio::awaitable<void> {
-            auto result = co_await store.store(seq, std::span<const std::byte>(frame),
-                                               direction_t::outbound);
+            auto result =
+                co_await store.store(seq, std::span<const std::byte>(frame), direction_t::outbound);
             benchmark::DoNotOptimize(result.has_value());
         });
         ++seq;

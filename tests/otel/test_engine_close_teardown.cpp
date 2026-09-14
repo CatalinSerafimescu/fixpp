@@ -31,12 +31,12 @@
 #endif
 
 // OTel headers first to avoid include ordering issues with asio macros.
-#include <opentelemetry/version.h>
-#include <opentelemetry/trace/noop.h>
-#include <opentelemetry/metrics/noop.h>
-#include <opentelemetry/trace/tracer_provider.h>
-#include <opentelemetry/metrics/meter_provider.h>
 #include <opentelemetry/common/key_value_iterable.h>
+#include <opentelemetry/metrics/meter_provider.h>
+#include <opentelemetry/metrics/noop.h>
+#include <opentelemetry/trace/noop.h>
+#include <opentelemetry/trace/tracer_provider.h>
+#include <opentelemetry/version.h>
 
 // OTel SDK headers for building real SDK providers in the spy factory.
 #include <gtest/gtest.h>
@@ -78,8 +78,7 @@ public:
     explicit CountingSpanExporter(std::shared_ptr<std::atomic<int>> counter)
         : counter_(std::move(counter)) {}
 
-    std::unique_ptr<opentelemetry::sdk::trace::Recordable>
-    MakeRecordable() noexcept override {
+    std::unique_ptr<opentelemetry::sdk::trace::Recordable> MakeRecordable() noexcept override {
         return std::make_unique<opentelemetry::sdk::trace::SpanData>();
     }
 
@@ -121,8 +120,7 @@ private:
 // Used to verify drain_timeout is observed (not a hardcoded longer value).
 class SlowFlushSink final : public fixpp::log::Sink {
 public:
-    explicit SlowFlushSink(std::chrono::milliseconds flush_delay)
-        : flush_delay_(flush_delay) {}
+    explicit SlowFlushSink(std::chrono::milliseconds flush_delay) : flush_delay_(flush_delay) {}
 
     [[nodiscard]] fixpp::core::expected_t<void> open() override { return {}; }
     void emit(fixpp::log::Record const&) noexcept override {}
@@ -167,13 +165,12 @@ TEST(EngineCloseTeardown, E2_ProviderShutdownCalled) {
         auto cnt = tracer_exporter_shutdown_count;
         tracer_cfg.tracer_factory_for_test = [cnt]() {
             auto exporter = std::make_unique<CountingSpanExporter>(cnt);
-            auto processor = opentelemetry::sdk::trace::SimpleSpanProcessorFactory::Create(
-                std::move(exporter));
+            auto processor =
+                opentelemetry::sdk::trace::SimpleSpanProcessorFactory::Create(std::move(exporter));
             auto resource = opentelemetry::sdk::resource::Resource::Create({});
             auto sdk_provider = opentelemetry::sdk::trace::TracerProviderFactory::Create(
                 std::move(processor), resource);
-            return std::shared_ptr<opentelemetry::trace::TracerProvider>(
-                sdk_provider.release());
+            return std::shared_ptr<opentelemetry::trace::TracerProvider>(sdk_provider.release());
         };
     }
     auto tracer_provider = std::make_shared<fixpp::otel::TracerProvider>(tracer_cfg);
@@ -186,17 +183,16 @@ TEST(EngineCloseTeardown, E2_ProviderShutdownCalled) {
         auto sdk_provider = opentelemetry::sdk::metrics::MeterProviderFactory::Create(
             std::make_unique<opentelemetry::sdk::metrics::ViewRegistry>(),
             opentelemetry::sdk::resource::Resource::Create({}));
-        return std::shared_ptr<opentelemetry::metrics::MeterProvider>(
-            sdk_provider.release());
+        return std::shared_ptr<opentelemetry::metrics::MeterProvider>(sdk_provider.release());
     };
     auto meter_provider = std::make_shared<fixpp::otel::MeterProvider>(meter_cfg);
 
     asio::io_context ioc;
     fixpp::core::EngineConfig eng_cfg;
     eng_cfg.executor = ioc.get_executor();
-    eng_cfg.clock    = make_mock_clock(ioc.get_executor());
-    eng_cfg.tracer   = tracer_provider;
-    eng_cfg.meter    = meter_provider;
+    eng_cfg.clock = make_mock_clock(ioc.get_executor());
+    eng_cfg.tracer = tracer_provider;
+    eng_cfg.meter = meter_provider;
 
     fixpp::session::Engine engine{ioc.get_executor(), std::move(eng_cfg)};
     ASSERT_TRUE(engine.start().has_value()) << "engine.start() failed";
@@ -220,7 +216,7 @@ TEST(EngineCloseTeardown, E2_NullProviders_NoCrash) {
     asio::io_context ioc;
     fixpp::core::EngineConfig eng_cfg;
     eng_cfg.executor = ioc.get_executor();
-    eng_cfg.clock    = make_mock_clock(ioc.get_executor());
+    eng_cfg.clock = make_mock_clock(ioc.get_executor());
 
     fixpp::session::Engine engine{ioc.get_executor(), std::move(eng_cfg)};
     ASSERT_TRUE(engine.start().has_value()) << "engine.start() failed";
@@ -240,10 +236,10 @@ TEST(EngineCloseTeardown, E2_NullProviders_NoCrash) {
 
 TEST(EngineCloseTeardown, E2_LoggerShutdownFlushesSinks) {
     auto flush_count = std::make_shared<std::atomic<int>>(0);
-    auto spy_sink    = std::make_unique<SpySink>(flush_count);
+    auto spy_sink = std::make_unique<SpySink>(flush_count);
 
     fixpp::log::LoggerConfig lcfg;
-    lcfg.capacity     = 128u;
+    lcfg.capacity = 128U;
     lcfg.drain_timeout = std::chrono::milliseconds{500};
 
     std::pmr::vector<std::unique_ptr<fixpp::log::Sink>> sinks{};
@@ -252,8 +248,7 @@ TEST(EngineCloseTeardown, E2_LoggerShutdownFlushesSinks) {
     fixpp::log::Logger logger{lcfg, std::move(sinks)};
     (void)logger.shutdown(std::chrono::milliseconds{1000});
 
-    EXPECT_GE(flush_count->load(), 1)
-        << "Logger::shutdown() must call flush() on its sinks";
+    EXPECT_GE(flush_count->load(), 1) << "Logger::shutdown() must call flush() on its sinks";
 }
 
 // ── E2: Engine teardown honors LoggerConfig::drain_timeout (RC#2) ────────────
@@ -277,16 +272,16 @@ TEST(EngineCloseTeardown, E2_EngineTeardownHonorsDrainTimeout) {
     // drain_timeout = 50 ms; SlowFlushSink blocks for 800 ms.
     // Under correct impl: flush times out at ~50ms → stop() is well under 800ms.
     // Under old hardcode (5000ms): flush completes in 800ms → stop() takes ~800ms.
-    constexpr auto k_drain_timeout  = std::chrono::milliseconds{50};
-    constexpr auto k_flush_delay    = std::chrono::milliseconds{800};
+    constexpr auto k_drain_timeout = std::chrono::milliseconds{50};
+    constexpr auto k_flush_delay = std::chrono::milliseconds{800};
     // stop() must return well under k_flush_delay; allow 3× k_drain_timeout +
     // generous OS scheduling margin.
-    constexpr auto k_max_stop_ms    = std::chrono::milliseconds{400};
+    constexpr auto k_max_stop_ms = std::chrono::milliseconds{400};
 
     auto slow_sink = std::make_unique<SlowFlushSink>(k_flush_delay);
 
     fixpp::log::LoggerConfig lcfg;
-    lcfg.capacity      = 128u;
+    lcfg.capacity = 128U;
     lcfg.drain_timeout = k_drain_timeout;
 
     std::pmr::vector<std::unique_ptr<fixpp::log::Sink>> sinks{};
@@ -297,15 +292,15 @@ TEST(EngineCloseTeardown, E2_EngineTeardownHonorsDrainTimeout) {
     asio::io_context ioc;
     fixpp::core::EngineConfig eng_cfg;
     eng_cfg.executor = ioc.get_executor();
-    eng_cfg.clock    = make_mock_clock(ioc.get_executor());
-    eng_cfg.logger   = logger;
+    eng_cfg.clock = make_mock_clock(ioc.get_executor());
+    eng_cfg.logger = logger;
 
     fixpp::session::Engine engine{ioc.get_executor(), std::move(eng_cfg)};
     ASSERT_TRUE(engine.start().has_value()) << "engine.start() failed";
 
     // Time Engine::stop() — it must return bounded by drain_timeout, not
     // blocked for the full k_flush_delay.
-    auto t0  = std::chrono::steady_clock::now();
+    auto t0 = std::chrono::steady_clock::now();
     auto fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
     if (!fixpp::test_support::run_to_exhaustion_or_report(
             ioc, fut, "EngineCloseTeardown::E2_EngineTeardownHonorsDrainTimeout")) {
@@ -317,17 +312,14 @@ TEST(EngineCloseTeardown, E2_EngineTeardownHonorsDrainTimeout) {
 
     // (a) stop() must return well under k_flush_delay (bounded by drain_timeout).
     EXPECT_LT(stop_elapsed.count(), k_max_stop_ms.count())
-        << "Engine::stop() took " << stop_elapsed.count()
-        << "ms — should return within ~" << k_max_stop_ms.count()
-        << "ms (drain_timeout=" << k_drain_timeout.count()
-        << "ms); a hardcoded 5000ms path would block for ~"
-        << k_flush_delay.count() << "ms";
+        << "Engine::stop() took " << stop_elapsed.count() << "ms — should return within ~"
+        << k_max_stop_ms.count() << "ms (drain_timeout=" << k_drain_timeout.count()
+        << "ms); a hardcoded 5000ms path would block for ~" << k_flush_delay.count() << "ms";
 
     // (b) drain timed out → timeout_drop_count() must have incremented.
     // This fails under the old hardcoded shutdown(5000ms) which would NOT time out.
-    EXPECT_GT(logger->timeout_drop_count(), 0u)
+    EXPECT_GT(logger->timeout_drop_count(), 0U)
         << "Logger::timeout_drop_count() must be > 0 after a drain that timed out "
-        << "(drain_timeout=" << k_drain_timeout.count()
-        << "ms, flush took " << k_flush_delay.count()
-        << "ms); a hardcoded longer timeout would NOT trigger this";
+        << "(drain_timeout=" << k_drain_timeout.count() << "ms, flush took "
+        << k_flush_delay.count() << "ms); a hardcoded longer timeout would NOT trigger this";
 }

@@ -120,10 +120,10 @@ public:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store(
         seqnum_t seq, std::span<const std::byte> /*frame*/, direction_t dir) noexcept override {
         if (dir == direction_t::outbound) {
-            log_.push_back("store_out");
+            log_.emplace_back("store_out");
             seqs_.push_back(seq);
         } else {
-            log_.push_back("store_in");
+            log_.emplace_back("store_in");
         }
         co_return fixpp::core::expected_t<void>{};
     }
@@ -353,8 +353,8 @@ TEST_F(SendPathTest, Fix44_Active_Send_IncrementsSeqnum_And_StampsFields) {
     auto cfg = make_cfg("FIX.4.4");
     cfg.store_factory = std::make_unique<OrderingStoreFactory>(call_log, store_seqs);
     cfg.transport_send = [&](std::span<const std::byte> frame) {
-        call_log.push_back("transport_send");  // also in shared log for ordering check
-        transport_log.push_back("transport_send");
+        call_log.emplace_back("transport_send");  // also in shared log for ordering check
+        transport_log.emplace_back("transport_send");
         transport_frames.emplace_back(frame.begin(), frame.end());
     };
 
@@ -679,7 +679,7 @@ public:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store(
         seqnum_t /*seq*/, std::span<const std::byte> /*frame*/, direction_t dir) noexcept override {
         if (dir == direction_t::outbound && throw_flag_ && *throw_flag_) {
-            log_.push_back("store_throw");
+            log_.emplace_back("store_throw");
             throw asio::system_error(asio::error::operation_aborted);
         }
         co_return fixpp::core::expected_t<void>{};
@@ -869,11 +869,11 @@ TEST_F(SendPathTest, Send_TwoSends_SeqnumManagerCounterMatchesFrameSeqnums) {
         << "[F3 drift; spec.md FR-001(a)]";
 
     // Also verify that the frame seqnums match the manager's assignments.
-    ASSERT_GE(transport_frames.size(), 2u) << "Expected at least 2 transport frames";
-    ASSERT_GE(store_seqs.size(), 2u) << "Expected at least 2 store seqnum records";
+    ASSERT_GE(transport_frames.size(), 2U) << "Expected at least 2 transport frames";
+    ASSERT_GE(store_seqs.size(), 2U) << "Expected at least 2 store seqnum records";
     const std::size_t n = transport_frames.size();
     const std::size_t m = store_seqs.size();
-    for (std::size_t i = 1; i <= 2u; ++i) {
+    for (std::size_t i = 1; i <= 2U; ++i) {
         const auto& frame = transport_frames[n - i];
         const seqnum_t store_seq = store_seqs[m - i];
         const auto frame_span = std::span<const std::byte>(frame);
@@ -898,8 +898,8 @@ TEST_F(SendPathTest, Send_TwoSends_SeqnumManagerCounterMatchesFrameSeqnums) {
 // of the Logon's seqnum.
 //
 // Fix: unify all outbound seqnum advance through SeqnumManager.
-// Anchors: 005 contracts/session.hpp's send() decl (I-3); 005 data-model.md E3; 009 spec.md FR-001(a).
-// [gate-b/r1-red: F-01 absolute seqnum integrity post-logon]
+// Anchors: 005 contracts/session.hpp's send() decl (I-3); 005 data-model.md E3; 009 spec.md
+// FR-001(a). [gate-b/r1-red: F-01 absolute seqnum integrity post-logon]
 TEST_F(SendPathTest, AbsoluteSeqnumIntegrity_AfterLogon_FirstSend_IsTwo) {
     std::vector<std::vector<std::byte>> outbound_frames;
 
@@ -913,7 +913,7 @@ TEST_F(SendPathTest, AbsoluteSeqnumIntegrity_AfterLogon_FirstSend_IsTwo) {
 
     // Capture frame count before the user send — outbound_frames[0] is the Logon.
     const std::size_t logon_frame_idx = 0;
-    ASSERT_GE(outbound_frames.size(), 1u) << "open() must have emitted the initiator Logon";
+    ASSERT_GE(outbound_frames.size(), 1U) << "open() must have emitted the initiator Logon";
 
     // Verify Logon is at seq=1 (our baseline).
     const auto logon_span = std::span<const std::byte>(outbound_frames[logon_frame_idx]);
@@ -937,7 +937,7 @@ TEST_F(SendPathTest, AbsoluteSeqnumIntegrity_AfterLogon_FirstSend_IsTwo) {
     }
 
     // The frame emitted by Session::send is the last outbound frame.
-    ASSERT_GE(outbound_frames.size(), 2u) << "Session::send must emit a frame";
+    ASSERT_GE(outbound_frames.size(), 2U) << "Session::send must emit a frame";
     const auto send_span = std::span<const std::byte>(outbound_frames.back());
     const auto send_34 = extract_field(send_span, 34);
     ASSERT_TRUE(send_34.has_value()) << "Session::send frame must carry tag 34";
@@ -993,7 +993,7 @@ TEST_F(SendPathTest, AbsoluteSeqnumIntegrity_OpenSendSend_OnWireIsOneTwoThree) {
     }
 
     // outbound_frames: [Logon(34=1), send1(34=2), send2(34=3)]
-    ASSERT_GE(outbound_frames.size(), 3u)
+    ASSERT_GE(outbound_frames.size(), 3U)
         << "Expected Logon + 2 sends = at least 3 outbound frames";
 
     const auto get_34 = [&](std::size_t idx) -> std::string {
@@ -1015,8 +1015,8 @@ TEST_F(SendPathTest, AbsoluteSeqnumIntegrity_OpenSendSend_OnWireIsOneTwoThree) {
 //   (b) leave session in Disconnected state.
 //
 // Bug: store_then_emit catches transport throw in catch(...) and returns
-// expected_t<void>{} unconditionally (pre-live_write_serialized_ live-write path). The transport error
-// is silently swallowed. Callers see ok; state stays Active.
+// expected_t<void>{} unconditionally (pre-live_write_serialized_ live-write path). The transport
+// error is silently swallowed. Callers see ok; state stays Active.
 //
 // Anchors: 009 spec.md US1 AC3; 005 data-model.md I-3.
 // [gate-b/r1-red: F-02/F-03 transport failure surface]
@@ -1157,7 +1157,8 @@ TEST_F(SendPathTest, AdminEmit_HeartbeatReply_SeqnumOverflow_DoesNotEmit_Reaches
     //     must be surfaced, not silently discarded with (void)assign_r.
     EXPECT_FALSE(inbound_result.has_value())
         << "on_inbound_frame must return an error when assign_outbound() overflows; "
-        << "got ok (bug: (void)assign_r in on_inbound_frame's TestRequest branch discards overflow). "
+        << "got ok (bug: (void)assign_r in on_inbound_frame's TestRequest branch discards "
+           "overflow). "
         << "[gate-b/r2-red: RC#G F-10; data-model.md E3]";
 
     // (b) Session must be Disconnected after session-fatal overflow.

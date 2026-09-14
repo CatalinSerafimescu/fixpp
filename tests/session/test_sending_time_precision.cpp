@@ -45,7 +45,7 @@
 #include <string_view>
 #include <vector>
 
-#include "session/support/frame_field_extract.hpp"   // via -I tests/
+#include "session/support/frame_field_extract.hpp"  // via -I tests/
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -79,7 +79,8 @@ public:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store(
         seqnum_t seq, std::span<const std::byte> frame, direction_t dir) noexcept override {
         if (dir == direction_t::outbound) {
-            outbound_records.push_back({seq, std::vector<std::byte>(frame.begin(), frame.end())});
+            outbound_records.push_back(
+                {.seq = seq, .frame = std::vector<std::byte>(frame.begin(), frame.end())});
             if (seq + 1U > next_out_) next_out_ = seq + 1U;
         }
         co_return fixpp::core::expected_t<void>{};
@@ -90,8 +91,8 @@ public:
         if (dir == direction_t::outbound) {
             for (auto& rec : outbound_records) {
                 if (rec.seq >= from && rec.seq <= to) {
-                    auto r = co_await visitor.on_frame(
-                        rec.seq, std::span<const std::byte>(rec.frame));
+                    auto r =
+                        co_await visitor.on_frame(rec.seq, std::span<const std::byte>(rec.frame));
                     if (!r || *r == visit_result::stop) break;
                 }
             }
@@ -134,7 +135,7 @@ static std::vector<std::byte> make_fix44_frame(std::string_view body_str) {
     std::string full = hdr + std::string(body_str);
     unsigned int cs = 0;
     for (unsigned char c : full) cs += c;
-    cs &= 0xFFu;
+    cs &= 0xFFU;
     char csbuf[4];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     full += "10=" + std::string(csbuf) + "\x01";
@@ -159,11 +160,10 @@ static std::vector<std::byte> make_peer_logon(std::uint32_t seq = 1) {
 
 // Build a FIX 4.4 frame with a caller-supplied 52= value (for inbound frames).
 static std::vector<std::byte> make_fix44_frame_with_time(std::string_view msg_type,
-                                                          std::uint32_t seq,
-                                                          std::string_view sender,
-                                                          std::string_view target,
-                                                          std::string_view sending_time,
-                                                          std::string extra_fields = {}) {
+                                                         std::uint32_t seq, std::string_view sender,
+                                                         std::string_view target,
+                                                         std::string_view sending_time,
+                                                         std::string extra_fields = {}) {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -178,7 +178,7 @@ static std::vector<std::byte> make_fix44_frame_with_time(std::string_view msg_ty
     std::string full = hdr + body;
     unsigned int cs = 0;
     for (unsigned char c : full) cs += c;
-    cs &= 0xFFu;
+    cs &= 0xFFU;
     char csbuf[4];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     full += "10=" + std::string(csbuf) + "\x01";
@@ -190,11 +190,10 @@ static std::vector<std::byte> make_fix44_frame_with_time(std::string_view msg_ty
 }
 
 // Build a ResendRequest(35=2) inbound peer frame.
-static std::vector<std::byte> make_resend_request_44(std::uint32_t seq,
-                                                      std::string_view sender,
-                                                      std::string_view target,
-                                                      std::uint32_t begin_seqno,
-                                                      std::uint32_t end_seqno) {
+static std::vector<std::byte> make_resend_request_44(std::uint32_t seq, std::string_view sender,
+                                                     std::string_view target,
+                                                     std::uint32_t begin_seqno,
+                                                     std::uint32_t end_seqno) {
     std::string extra;
     extra += "7=" + std::to_string(begin_seqno) + "\x01";
     extra += "16=" + std::to_string(end_seqno) + "\x01";
@@ -222,8 +221,8 @@ protected:
         // millis form: "20240101-00:00:00.123" (21 chars)
         // micros form: "20240101-00:00:00.123456" (24 chars)
         // nanos  form: "20240101-00:00:00.123456789" (27 chars)
-        const auto utc =
-            time_point_cast<system_clock::duration>(system_clock::time_point{seconds{1704067200}} + nanoseconds{123456789});
+        const auto utc = time_point_cast<system_clock::duration>(
+            system_clock::time_point{seconds{1704067200}} + nanoseconds{123456789});
         const auto stp = fixpp::core::steady_time_point{} + seconds{0};
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
         engine.clock = clock;
@@ -284,7 +283,7 @@ protected:
 
     // Return the value of field 52 from the FIRST captured frame (after any drive_to_active flush).
     // Returns nullopt if not present.
-    std::optional<std::string> first_frame_tag52() const {
+    [[nodiscard]] std::optional<std::string> first_frame_tag52() const {
         if (captured_frames.empty()) return std::nullopt;
         const auto& frame = captured_frames.front();
         auto field = extract_field(std::span<const std::byte>(frame), 52);
@@ -293,7 +292,7 @@ protected:
     }
 
     // Return the value of field 52 from the LAST captured frame.
-    std::optional<std::string> last_frame_tag52() const {
+    [[nodiscard]] std::optional<std::string> last_frame_tag52() const {
         if (captured_frames.empty()) return std::nullopt;
         const auto& frame = captured_frames.back();
         auto field = extract_field(std::span<const std::byte>(frame), 52);
@@ -345,11 +344,10 @@ TEST_F(SendingTimePrecisionTest, SendingTimePrecision_Nanos_Emits27Char52) {
         found_logon_reply = true;
 
         auto tag52 = extract_field(std::span<const std::byte>(frame), 52);
-        ASSERT_TRUE(tag52.has_value())
-            << "Logon reply must contain tag 52 (SendingTime)";
-        EXPECT_EQ(tag52->size(), 27u)
-            << "nanos config must emit 27-char SendingTime; got '" << *tag52 << "' (len="
-            << tag52->size() << "); [contract C5 / SC-001 / data-model E6]";
+        ASSERT_TRUE(tag52.has_value()) << "Logon reply must contain tag 52 (SendingTime)";
+        EXPECT_EQ(tag52->size(), 27U)
+            << "nanos config must emit 27-char SendingTime; got '" << *tag52
+            << "' (len=" << tag52->size() << "); [contract C5 / SC-001 / data-model E6]";
         break;
     }
     EXPECT_TRUE(found_logon_reply) << "did not find a Logon reply (35=A) in captured frames";
@@ -393,11 +391,9 @@ TEST_F(SendingTimePrecisionTest, SendingTimePrecision_Micros_Emits24Char52) {
         found_logon_reply = true;
 
         auto tag52 = extract_field(std::span<const std::byte>(frame), 52);
-        ASSERT_TRUE(tag52.has_value())
-            << "Logon reply must contain tag 52 (SendingTime)";
-        EXPECT_EQ(tag52->size(), 24u)
-            << "micros config must emit 24-char SendingTime; got '" << *tag52 << "' (len="
-            << tag52->size() << "); [AC US1.2]";
+        ASSERT_TRUE(tag52.has_value()) << "Logon reply must contain tag 52 (SendingTime)";
+        EXPECT_EQ(tag52->size(), 24U) << "micros config must emit 24-char SendingTime; got '"
+                                      << *tag52 << "' (len=" << tag52->size() << "); [AC US1.2]";
         break;
     }
     EXPECT_TRUE(found_logon_reply) << "did not find a Logon reply (35=A) in captured frames";
@@ -445,17 +441,16 @@ TEST_F(SendingTimePrecisionTest, SendingTimePrecision_DefaultMillis_ByteIdentica
         found_logon_reply = true;
 
         auto tag52 = extract_field(std::span<const std::byte>(frame), 52);
-        ASSERT_TRUE(tag52.has_value())
-            << "Logon reply must contain tag 52 (SendingTime)";
+        ASSERT_TRUE(tag52.has_value()) << "Logon reply must contain tag 52 (SendingTime)";
 
         // Exact byte-identity with the pre-feature millis output.
         // Mock clock → 2024-01-01T00:00:00.123456789Z → millis = .123
-        EXPECT_EQ(tag52->size(), 21u)
+        EXPECT_EQ(tag52->size(), 21U)
             << "default millis must emit 21-char SendingTime; [FR-003 / SC-002 / I-NST-1]";
         EXPECT_EQ(*tag52, "20240101-00:00:00.123")
             << "default millis output must be byte-identical to pre-feature golden "
-               "'20240101-00:00:00.123'; got '" << *tag52
-            << "'; [FR-003 / SC-002 / I-NST-1]";
+               "'20240101-00:00:00.123'; got '"
+            << *tag52 << "'; [FR-003 / SC-002 / I-NST-1]";
         break;
     }
     EXPECT_TRUE(found_logon_reply) << "did not find a Logon reply (35=A) in captured frames";
@@ -490,7 +485,7 @@ TEST_F(SendingTimePrecisionTest, InboundNanos52_ParsedNotRejected) {
     // seq=2 (Logon was seq=1). Mock clock UTC ≈ 2024-01-01T00:00:00.123Z, so
     // the nanos 52= is ~0 divergence from the clock → within MaxLatency (120 s default).
     const std::string_view nanos_ts = "20240101-00:00:00.123456789";
-    ASSERT_EQ(nanos_ts.size(), 27u) << "sanity: nanos_ts must be 27 chars";
+    ASSERT_EQ(nanos_ts.size(), 27U) << "sanity: nanos_ts must be 27 chars";
 
     auto hb_frame = make_fix44_frame_with_time("0", 2, "TW", "ISLD", nanos_ts);
     auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(hb_frame), asio::use_future);
@@ -515,7 +510,7 @@ TEST_F(SendingTimePrecisionTest, InboundNanos52_ParsedNotRejected) {
         auto tag35 = extract_field(std::span<const std::byte>(frame), 35);
         if (!tag35 || *tag35 != "3") continue;
         std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
-        if (wire.find("371=52\x01") != std::string::npos) {
+        if (wire.contains("371=52\x01")) {
             found_reject_52 = true;
             break;
         }
@@ -634,13 +629,17 @@ TEST_F(SendingTimePrecisionTest, OrigSendingTime122_PreservedVerbatim_OnResend) 
     // ── Step 3: send an app message at clock T0 ──────────────────────────────
     // Mock clock UTC at T0: 2024-01-01T00:00:00.123456789Z (from SetUp).
     // The nanos stamp will be "20240101-00:00:00.123456789".
-    const char kAppPayload[] = "35=D\x01" "11=ORD001\x01" "54=1\x01" "55=AAPL\x01";
+    const char kAppPayload[] =
+        "35=D\x01"
+        "11=ORD001\x01"
+        "54=1\x01"
+        "55=AAPL\x01";
     std::vector<std::byte> payload;
     for (char c : std::string_view{kAppPayload, sizeof(kAppPayload) - 1})
         payload.push_back(static_cast<std::byte>(c));
 
-    auto fut_send = asio::co_spawn(
-        ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut_send =
+        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut_send, kWindow,
                                                     "OrigSendingTime122_PreservedVerbatim/send")) {
         fixpp::test_support::cancel_and_drain_or_report(
@@ -658,7 +657,7 @@ TEST_F(SendingTimePrecisionTest, OrigSendingTime122_PreservedVerbatim_OnResend) 
     ASSERT_TRUE(tag52_opt.has_value()) << "app frame must contain tag 52 (SendingTime)";
     const std::string original_52 = std::string(*tag52_opt);
     // The original_52 is the nanos-stamped value at T0.
-    ASSERT_EQ(original_52.size(), 27u)
+    ASSERT_EQ(original_52.size(), 27U)
         << "nanos config must emit 27-char 52=; got '" << original_52 << "'";
 
     // Capture the seqnum of the app message (tag 34) so we can request it.
@@ -682,8 +681,7 @@ TEST_F(SendingTimePrecisionTest, OrigSendingTime122_PreservedVerbatim_OnResend) 
         using namespace std::chrono;
         const auto advanced_utc = clock->now();
         auto stamp_r = fixpp::core::utc_time_to_fix_string(
-            advanced_utc, fixpp::core::fix_time_precision::nanos,
-            std::span<char>{stamp_buf});
+            advanced_utc, fixpp::core::fix_time_precision::nanos, std::span<char>{stamp_buf});
         ASSERT_TRUE(stamp_r.has_value());
         const std::string advanced_stamp(stamp_r->data(), stamp_r->size());
         ASSERT_NE(advanced_stamp, original_52)
@@ -713,7 +711,7 @@ TEST_F(SendingTimePrecisionTest, OrigSendingTime122_PreservedVerbatim_OnResend) 
     for (const auto& frame : captured_frames) {
         std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
         // build_replay_frame always adds 43=Y on the replayed app message.
-        if (wire.find("43=Y\x01") == std::string::npos) continue;
+        if (!wire.contains("43=Y\x01")) continue;
         found_replay_frame = true;
 
         auto tag122 = extract_field(std::span<const std::byte>(frame), 122);
@@ -721,14 +719,15 @@ TEST_F(SendingTimePrecisionTest, OrigSendingTime122_PreservedVerbatim_OnResend) 
             << "replayed frame with 43=Y must carry 122= (OrigSendingTime); [I-NST-4]";
         EXPECT_EQ(*tag122, original_52)
             << "122= must be the STORED ORIGINAL 52= bytes (NOT re-stamped at the "
-               "advanced-clock time); stored='" << original_52
-            << "' got='" << *tag122 << "'; [FR-006 / I-NST-4 / Gate A RC#1]";
+               "advanced-clock time); stored='"
+            << original_52 << "' got='" << *tag122 << "'; [FR-006 / I-NST-4 / Gate A RC#1]";
         break;
     }
     // No SUCCEED() escape: the test MUST find a replayed 43=Y frame.
     // build_replay_frame fires for app messages (35=D is not admin).
     ASSERT_TRUE(found_replay_frame)
-        << "ResendRequest for a stored app message (35=D, seq=" << app_seq << ") must "
+        << "ResendRequest for a stored app message (35=D, seq=" << app_seq
+        << ") must "
            "produce a replayed frame with 43=Y + 122=; [build_replay_frame / I-NST-4]";
 }
 
@@ -764,14 +763,15 @@ TEST_F(SendingTimePrecisionTest, OrigSendingTime122_PreservedVerbatim_OnResend) 
 
 TEST(SendingTimePrecisionNoHeap, SendingTimePrecision_NoHeapOnFormatParse) {
     using namespace std::chrono;
+    using ::fixpp::core::fix_string_to_utc_time;
     using ::fixpp::core::fix_time_precision;
     using ::fixpp::core::utc_time_to_fix_string;
-    using ::fixpp::core::fix_string_to_utc_time;
 
     // A concrete time point with a non-zero nanosecond remainder so the
     // nanos path exercises the full 9-digit branch.
     // 2024-01-01T12:34:56.123456789Z
-    const auto tp = time_point_cast<system_clock::duration>(system_clock::time_point{seconds{1704109696}} + nanoseconds{123456789});
+    const auto tp = time_point_cast<system_clock::duration>(
+        system_clock::time_point{seconds{1704109696}} + nanoseconds{123456789});
 
     // Buffer large enough for all precisions (nanos = 27 chars; 32 is safe).
     std::array<char, 32> buf{};
@@ -792,17 +792,17 @@ TEST(SendingTimePrecisionNoHeap, SendingTimePrecision_NoHeapOnFormatParse) {
         // Post-condition: the format must succeed and return a non-empty span.
         // Under mallocnesia, a heap alloc here aborts via the interceptor.
         ASSERT_TRUE(result.has_value())
-            << "utc_time_to_fix_string must succeed at precision "
-            << static_cast<int>(prec);
+            << "utc_time_to_fix_string must succeed at precision " << static_cast<int>(prec);
         ASSERT_FALSE(result->empty()) << "formatted span must not be empty";
     }
 
     // Parse the nanos form (27 chars) — exercises the lenient-parse path.
     {
-        auto nanos_result = utc_time_to_fix_string(
-            tp, fix_time_precision::nanos, std::span<char>{buf});
+        auto nanos_result =
+            utc_time_to_fix_string(tp, fix_time_precision::nanos, std::span<char>{buf});
         ASSERT_TRUE(nanos_result.has_value());
-        const auto as_bytes_span = std::span<const char>{nanos_result->data(), nanos_result->size()};
+        const auto as_bytes_span =
+            std::span<const char>{nanos_result->data(), nanos_result->size()};
         auto parse_result = fix_string_to_utc_time(as_bytes_span);
         ASSERT_TRUE(parse_result.has_value())
             << "fix_string_to_utc_time must accept the nanos form (27 chars)";
@@ -813,10 +813,10 @@ TEST(SendingTimePrecisionNoHeap, SendingTimePrecision_NoHeapOnFormatParse) {
     // Build each test string on the stack (no std::string heap).
     {
         // Use the seconds base from the nanos format result (first 17 chars).
-        auto secs_result = utc_time_to_fix_string(
-            tp, fix_time_precision::seconds, std::span<char>{buf});
+        auto secs_result =
+            utc_time_to_fix_string(tp, fix_time_precision::seconds, std::span<char>{buf});
         ASSERT_TRUE(secs_result.has_value());
-        ASSERT_EQ(secs_result->size(), 17u);
+        ASSERT_EQ(secs_result->size(), 17U);
 
         // Stack buffer for the width-N test strings (max = 17 + 1 + 9 = 27 chars).
         std::array<char, 28> wbuf{};
@@ -829,18 +829,18 @@ TEST(SendingTimePrecisionNoHeap, SendingTimePrecision_NoHeapOnFormatParse) {
             for (int d = 0; d < n; ++d) wbuf[18 + d] = static_cast<char>('1' + (d % 9));
             const auto span = std::span<const char>{wbuf.data(), static_cast<std::size_t>(18 + n)};
             auto r = fix_string_to_utc_time(span);
-            ASSERT_TRUE(r.has_value())
-                << "fix_string_to_utc_time must accept width-" << n
-                << " fraction (lenient parse, FR-004/SC-003)";
+            ASSERT_TRUE(r.has_value()) << "fix_string_to_utc_time must accept width-" << n
+                                       << " fraction (lenient parse, FR-004/SC-003)";
         }
     }
 
     // Also parse the bare 17-char (seconds, no dot) form.
     {
-        auto secs_result = utc_time_to_fix_string(
-            tp, fix_time_precision::seconds, std::span<char>{buf});
+        auto secs_result =
+            utc_time_to_fix_string(tp, fix_time_precision::seconds, std::span<char>{buf});
         ASSERT_TRUE(secs_result.has_value());
-        auto r = fix_string_to_utc_time(std::span<const char>{secs_result->data(), secs_result->size()});
+        auto r =
+            fix_string_to_utc_time(std::span<const char>{secs_result->data(), secs_result->size()});
         ASSERT_TRUE(r.has_value())
             << "fix_string_to_utc_time must accept bare 17-char seconds form";
     }
@@ -855,6 +855,7 @@ TEST(SendingTimePrecisionNoHeap, SendingTimePrecision_NoHeapOnFormatParse) {
     EXPECT_EQ(heap_allocs, 0L)
         << "utc_time_to_fix_string + fix_string_to_utc_time must not touch "
            "the global heap at any precision or parse width; "
-           "heap_allocs=" << heap_allocs
+           "heap_allocs="
+        << heap_allocs
         << "; [plan §VIII.5 / I-NST-5 / [[feedback_tracking_pmr_resource_false_pass]]]";
 }

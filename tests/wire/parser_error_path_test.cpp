@@ -272,8 +272,8 @@ TEST(ParserErrorPath, GetDecimalInvalidValueReturnsDecimalError) {
 
 // ── field_iterator Iter malformed-stop: non-digit tag char ───────────────────
 // advance() reads tag digits; a non-digit-non-EQ-non-SOH char before '='
-// triggers `done_=true; return;` in field_iterator::advance()'s non-digit tag-char guard. Iteration must set done_
-// and the cur_ field must NOT have been updated to reflect the garbage tag.
+// triggers `done_=true; return;` in field_iterator::advance()'s non-digit tag-char guard. Iteration
+// must set done_ and the cur_ field must NOT have been updated to reflect the garbage tag.
 //
 // Note on operator== semantics: both done_=true AND pos_==end.pos_ must hold
 // for the iterator to compare equal to end(). When done_ fires mid-buffer,

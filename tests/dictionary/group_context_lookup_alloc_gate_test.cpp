@@ -109,7 +109,6 @@ void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
 
 namespace {
 
-using fixpp::dict::table_view;
 using fixpp::wire::group_context;
 
 // The context-aware group_member_fn_t is shared across tests — see
@@ -167,8 +166,9 @@ TEST(GroupContextLookupAllocGate, RepeatedLookupsZeroAlloc) {
             // Correctness must hold on EVERY iteration, not just the
             // sanity check above — fail loudly inside the loop rather than
             // silently accumulating a wrong-but-fast result.
-            ADD_FAILURE() << "iteration " << i << ": group_member_fn/group_member_tags "
-                                                    "resolved incorrectly inside the alloc window";
+            ADD_FAILURE() << "iteration " << i
+                          << ": group_member_fn/group_member_tags "
+                             "resolved incorrectly inside the alloc window";
             break;
         }
     }
@@ -177,8 +177,9 @@ TEST(GroupContextLookupAllocGate, RepeatedLookupsZeroAlloc) {
 
 #if !FIXPP_SANITIZER_REPLACES_NEW
     EXPECT_EQ(g_alloc_count.load(std::memory_order_relaxed), 0)
-        << kIterations << " repeated group_member_fn/group_member_tags lookups must not "
-                          "allocate (group_member_fn_t takes no memory_resource — a pure "
-                          "unordered_map lookup over already-built storage, [pin#3-noalloc])";
+        << kIterations
+        << " repeated group_member_fn/group_member_tags lookups must not "
+           "allocate (group_member_fn_t takes no memory_resource — a pure "
+           "unordered_map lookup over already-built storage, [pin#3-noalloc])";
 #endif
 }

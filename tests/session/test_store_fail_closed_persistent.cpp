@@ -51,9 +51,9 @@
 #include <vector>
 
 #include "_fixtures_/store_temp_dir.hpp"
+#include "support/extract_tag.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
-#include "support/extract_tag.hpp"
 
 using namespace std::chrono_literals;
 
@@ -122,8 +122,9 @@ std::vector<std::byte> make_resend_request(std::string_view bs, std::uint32_t se
 // (header + MsgSeqNum) around this opaque body (mirrors
 // test_application_outbound.cpp's make_app_payload).
 std::vector<std::byte> make_app_payload(std::string_view clordid) {
-    std::string body = "35=D\x01" + std::string(field(11, clordid)) + "54=1\x01"
-                                                                       "55=AAPL\x01";
+    std::string body = "35=D\x01" + std::string(field(11, clordid)) +
+                       "54=1\x01"
+                       "55=AAPL\x01";
     std::vector<std::byte> v;
     v.reserve(body.size());
     for (char c : body) v.push_back(static_cast<std::byte>(c));
@@ -135,23 +136,23 @@ using fixpp::test_support::extract_tag;
 bool is_msg_type(std::span<const std::byte> frame, std::string_view type) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = "35=" + std::string(type) + "\x01";
-    return wire.find(needle) != std::string::npos;
+    return wire.contains(needle);
 }
 
 // SequenceReset{GapFillFlag=Y, NewSeqNo=<new_seqno>}
 bool is_gapfill_to(const std::vector<std::byte>& frame, std::uint32_t new_seqno) {
     if (!is_msg_type(frame, "4")) return false;
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
-    if (wire.find("123=Y\x01") == std::string::npos) return false;
-    return wire.find("36=" + std::to_string(new_seqno) + "\x01") != std::string::npos;
+    if (!wire.contains("123=Y\x01")) return false;
+    return wire.contains("36=" + std::to_string(new_seqno) + "\x01");
 }
 
 // Frame carries PossDupFlag(43)=Y and has the given MsgSeqNum(34) — a real
 // application-message replay (as opposed to an administrative gap-fill).
 bool is_replay_with_poss_dup(const std::vector<std::byte>& frame, std::uint32_t seq) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
-    if (wire.find("43=Y\x01") == std::string::npos) return false;
-    return wire.find("34=" + std::to_string(seq) + "\x01") != std::string::npos;
+    if (!wire.contains("43=Y\x01")) return false;
+    return wire.contains("34=" + std::to_string(seq) + "\x01");
 }
 
 // ── Fixture ───────────────────────────────────────────────────────────────────
@@ -221,7 +222,9 @@ TEST_F(StoreFailClosedPersistentTest,
        W1_PersistentRetainFailure_CascadeRedGreenDispositionCurrentlyFails) {
     std::vector<std::vector<std::byte>> wire;
     auto cfg = make_initiator_cfg();
-    cfg.transport_send = [&](std::span<const std::byte> f) { wire.emplace_back(f.begin(), f.end()); };
+    cfg.transport_send = [&](std::span<const std::byte> f) {
+        wire.emplace_back(f.begin(), f.end());
+    };
 
     auto sess = std::make_unique<Session>(engine_, cfg);
 
@@ -262,7 +265,9 @@ TEST_F(StoreFailClosedPersistentTest,
     // (feedback_fail_placeholder_red_test).
     ASSERT_GE(fixpp::session::read_and_reset_store_pwrite_fail_count(), 1)
         << "the FileStore pwrite fault-injection seam (T003/T004) must have fired for "
-           "message k=" << k << "; a RED result below would be a miswired-seam false "
+           "message k="
+        << k
+        << "; a RED result below would be a miswired-seam false "
            "positive, not the cascade";
 
     // Step 3 (fail-closed scenario): the persistent retain failure at message k
@@ -274,29 +279,29 @@ TEST_F(StoreFailClosedPersistentTest,
     // doc — it cannot be asserted here because it is the exact behaviour the fix
     // removes, so it cannot co-exist GREEN with the post-conditions below.)
     auto payload_after = make_app_payload("ORD-AFTER");
-    auto after_r = asio::co_spawn(
-                       sx_, sess->send(std::span<const std::byte>(payload_after)),
-                       asio::use_future)
-                       .get();
+    auto after_r =
+        asio::co_spawn(sx_, sess->send(std::span<const std::byte>(payload_after)), asio::use_future)
+            .get();
     EXPECT_FALSE(after_r.has_value())
         << "after a fail-closed retain failure the session is Disconnected; a further "
            "send() must be refused, not silently accepted";
 
     // ── Post-conditions (each RED without the T006/T007 fix — verified by
     //    reverting the disposition change; see the verify doc) ──
-    EXPECT_FALSE(k_r.has_value())
-        << "send() for message k=" << k << " must fail closed on a persistent retain "
-           "failure, not silently succeed";
+    EXPECT_FALSE(k_r.has_value()) << "send() for message k=" << k
+                                  << " must fail closed on a persistent retain "
+                                     "failure, not silently succeed";
     EXPECT_EQ(sess->state(), fsm_state::Disconnected)
         << "the session must transition to Disconnected at the first persistent retain "
-           "failure (message k=" << k << ")";
+           "failure (message k="
+        << k << ")";
     bool frame_k_transmitted = false;
     for (const auto& frame : wire) {
         if (extract_tag(frame, 34) == std::to_string(k)) frame_k_transmitted = true;
     }
-    EXPECT_FALSE(frame_k_transmitted)
-        << "FR-002: frame k=" << k << " must NOT be transmitted on a retain failure "
-           "(retain-before-transmit ordering)";
+    EXPECT_FALSE(frame_k_transmitted) << "FR-002: frame k=" << k
+                                      << " must NOT be transmitted on a retain failure "
+                                         "(retain-before-transmit ordering)";
 
     // Release the FileStore's advisory lock before "restarting".
     auto close_r =
@@ -332,11 +337,12 @@ TEST_F(StoreFailClosedPersistentTest,
     // agree — no restart desync (the defect this feature eliminates). RED
     // without the fix: the failed frame k was transmitted and the durable
     // counter desynced below the peer's last-seen.
-    EXPECT_EQ(restart_seq, k)
-        << "restart must recover the durable outbound counter at k=" << k
-        << " (the failed store never advanced it); got " << restart_seq;
+    EXPECT_EQ(restart_seq, k) << "restart must recover the durable outbound counter at k=" << k
+                              << " (the failed store never advanced it); got " << restart_seq;
 
-    asio::co_spawn(sx_, sess2.close(fixpp::session::close_mode::terminal), asio::use_future).get();
+    // Teardown; call alone (not its result) drains the detached liveness loop.
+    (void)asio::co_spawn(sx_, sess2.close(fixpp::session::close_mode::terminal), asio::use_future)
+        .get();
 }
 
 }  // namespace

@@ -111,7 +111,7 @@ TEST(SyncTsanClean, FractionCancelMidWait) {
     auto holder_coro = [&]() -> asio::awaitable<void> {
         auto g = co_await mtx.async_lock();
         EXPECT_TRUE(g.has_value());
-        co_await yield_n(N * 6 + 16);
+        co_await yield_n((N * 6) + 16);
         // guard released
     };
 
@@ -130,7 +130,7 @@ TEST(SyncTsanClean, FractionCancelMidWait) {
     // Spawn all waiters; track which ones need cancellation.
     // Cancel-waiters are spawned with bind_cancellation_slot.
     // Signals are stored externally (lifetime tied to ioc.run() block).
-    std::vector<asio::cancellation_signal> signals(N / 4 + 1);
+    std::vector<asio::cancellation_signal> signals((N / 4) + 1);
     std::vector<std::future<void>> futs;
     futs.reserve(N);
 
@@ -154,7 +154,7 @@ TEST(SyncTsanClean, FractionCancelMidWait) {
         ioc,
         [&]() -> asio::awaitable<void> {
             // Let all waiters park on the LIFO.
-            co_await yield_n(N * 3 + 4);
+            co_await yield_n((N * 3) + 4);
             for (int j = 0; j < sig_idx; ++j) signals[j].emit(asio::cancellation_type::total);
         },
         asio::detached);

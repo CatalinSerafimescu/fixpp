@@ -73,8 +73,7 @@ struct store_step {
     }
 
     std::vector<std::byte> result(raw.size());
-    std::transform(raw.begin(), raw.end(), result.begin(),
-                   [](char c) { return static_cast<std::byte>(c); });
+    std::ranges::transform(raw, result.begin(), [](char c) { return static_cast<std::byte>(c); });
     return result;
 }
 
@@ -86,7 +85,8 @@ struct store_step {
     steps.reserve(count);
     for (std::size_t i = 0; i < count; ++i) {
         auto seq = static_cast<fixpp::session::seqnum_t>(i + 1);
-        steps.push_back({seq, dir, make_test_frame(seq, dir, extra_bytes)});
+        steps.push_back(
+            {.seq = seq, .dir = dir, .frame_bytes = make_test_frame(seq, dir, extra_bytes)});
     }
     return steps;
 }
@@ -106,7 +106,8 @@ public:
         fixpp::session::seqnum_t seq,
         std::span<const std::byte> frame [[clang::lifetimebound]]) noexcept override {
         // Deep-copy the frame bytes immediately (span lifetime bound)
-        entries_.push_back({seq, std::vector<std::byte>(frame.begin(), frame.end())});
+        entries_.push_back(
+            {.seq = seq, .bytes = std::vector<std::byte>(frame.begin(), frame.end())});
         co_return fixpp::core::expected_t<fixpp::session::visit_result>{
             fixpp::session::visit_result::cont};
     }

@@ -36,12 +36,11 @@
 #include <thread>
 #include <vector>
 
+#include "capi_internal.hpp"
+#include "capi_loopback_support.hpp"
 #include "fix/c_api/engine.h"
 #include "fix/c_api/message.h"
 #include "fix/c_api/session.h"
-
-#include "capi_internal.hpp"
-#include "capi_loopback_support.hpp"
 
 using namespace std::chrono_literals;
 using namespace fixpp::capi_test;
@@ -73,7 +72,7 @@ struct CloneSlot {
 
 // The recv callback: clones the inbound message and deposits the clone.
 // Runs on the session strand (dispatch window).
-static void clone_recv_cb(const fixpp_msg_t* msg, void* userdata) {
+void clone_recv_cb(const fixpp_msg_t* msg, void* userdata) {
     auto* slot = static_cast<CloneSlot*>(userdata);
     fixpp_msg_t* clone = nullptr;
     fixpp_error_t rc = fixpp_msg_clone(msg, &clone);
@@ -120,7 +119,7 @@ TEST(MsgCloneCrossStrand, CloneOnDispatchWindowReadOnDrainThread) {
         acc_id = ae->sessions_[0]->id;
     }
     uint16_t port = wait_for_bound_port(acc_eng, acc_id);
-    ASSERT_NE(port, 0u) << "acceptor did not bind a port";
+    ASSERT_NE(port, 0U) << "acceptor did not bind a port";
 
     // Initiator session
     {
@@ -220,15 +219,13 @@ TEST(MsgCloneCrossStrand, CloneNullAndDeadHandleGuards) {
     inbound_shell.tag_ = FIXPP_HANDLE_TAG_MSG;
     inbound_shell.flavour = FixppMsgFlavour::inbound;
     inbound_shell.view = nullptr;
-    EXPECT_EQ(
-        fixpp_msg_clone(reinterpret_cast<const fixpp_msg_t*>(&inbound_shell), nullptr),
-        FIXPP_ERR_NULL_HANDLE);
+    EXPECT_EQ(fixpp_msg_clone(reinterpret_cast<const fixpp_msg_t*>(&inbound_shell), nullptr),
+              FIXPP_ERR_NULL_HANDLE);
 
     // Dead handle (tag_ = FIXPP_HANDLE_TAG_DEAD) → INVALID_HANDLE
     fixpp_msg dead_shell{};
     dead_shell.tag_ = FIXPP_HANDLE_TAG_DEAD;
-    EXPECT_EQ(
-        fixpp_msg_clone(reinterpret_cast<const fixpp_msg_t*>(&dead_shell), &clone),
-        FIXPP_ERR_INVALID_HANDLE);
+    EXPECT_EQ(fixpp_msg_clone(reinterpret_cast<const fixpp_msg_t*>(&dead_shell), &clone),
+              FIXPP_ERR_INVALID_HANDLE);
     EXPECT_EQ(clone, nullptr);
 }

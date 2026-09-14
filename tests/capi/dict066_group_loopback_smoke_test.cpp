@@ -27,13 +27,11 @@
 #include <thread>
 #include <vector>
 
+#include "capi_dict066_loopback_support.hpp"
+#include "capi_loopback_support.hpp"
 #include "fix/c_api/engine.h"
 #include "fix/c_api/message.h"
 #include "fix/c_api/session.h"
-
-#include "capi_dict066_loopback_support.hpp"
-#include "capi_loopback_support.hpp"
-
 #include "support/fix44_group_frame_bodies.hpp"
 #include "support/wait_until.hpp"
 
@@ -50,7 +48,8 @@ TEST(GroupScaffoldCapiSmoke, TwoLegsTrailingPayloadDeliveredToCallback) {
     ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &initiator_engine), FIXPP_ERR_OK);
 
     // Acceptor session: registers the receive callback.
-    fixpp_session_config_t* acc_cfg = make_session_cfg_fix44("ACC-066", "INI-066", FIXPP_ROLE_ACCEPTOR);
+    fixpp_session_config_t* acc_cfg =
+        make_session_cfg_fix44("ACC-066", "INI-066", FIXPP_ROLE_ACCEPTOR);
     set_loopback_endpoint(acc_cfg, "127.0.0.1", 0);
     auto acc_id = session_id_of(acc_cfg);
     fixpp_session_t* acc_h = nullptr;
@@ -69,7 +68,8 @@ TEST(GroupScaffoldCapiSmoke, TwoLegsTrailingPayloadDeliveredToCallback) {
         fixpp_error_t rc = fixpp_msg_get_msg_type(inbound, &out, &len);
         EXPECT_EQ(rc, FIXPP_ERR_OK);
         if (rc == FIXPP_ERR_OK) {
-            EXPECT_EQ(std::string_view(out, len), "8") << "delivered message must be ExecutionReport";
+            EXPECT_EQ(std::string_view(out, len), "8")
+                << "delivered message must be ExecutionReport";
         }
         c->fired.store(true, std::memory_order_release);
     };
@@ -77,7 +77,7 @@ TEST(GroupScaffoldCapiSmoke, TwoLegsTrailingPayloadDeliveredToCallback) {
 
     ASSERT_EQ(fixpp_engine_start(acceptor_engine), FIXPP_ERR_OK);
     std::uint16_t port = wait_for_bound_port(acceptor_engine, acc_id);
-    ASSERT_NE(port, 0u) << "acceptor did not bind";
+    ASSERT_NE(port, 0U) << "acceptor did not bind";
 
     // Initiator session.
     fixpp_session_config_t* ini_cfg =
@@ -97,7 +97,8 @@ TEST(GroupScaffoldCapiSmoke, TwoLegsTrailingPayloadDeliveredToCallback) {
     auto payload = fixpp_test_support::make_execution_report_app_payload(suffix);
     ASSERT_EQ(fixpp_session_send(ini_h, payload.data(), payload.size()), FIXPP_ERR_OK);
 
-    (void)fixpp::test_support::wait_for_flag(ctx.fired, 5s);  // the ASSERT_TRUE(ctx.fired) below is the oracle
+    (void)fixpp::test_support::wait_for_flag(ctx.fired,
+                                             5s);  // the ASSERT_TRUE(ctx.fired) below is the oracle
 
     EXPECT_TRUE(ctx.fired.load()) << "the group-bearing ExecutionReport must reach the acceptor's "
                                      "registered receive callback";

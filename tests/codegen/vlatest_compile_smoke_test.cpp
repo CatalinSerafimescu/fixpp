@@ -66,8 +66,7 @@ TEST(VlatestCompileSmoke076, FourReadTierHeadersCarryRealSymbols) {
     static_assert(!std::is_void_v<MsgFwdDecl>);
 
     EXPECT_EQ(fixpp::vlatest::owning_Heartbeat::msg_type_v, "0");
-    EXPECT_EQ(fixpp::vlatest::owning_Heartbeat::which(),
-              fixpp::dict::application_version::v50sp2);
+    EXPECT_EQ(fixpp::vlatest::owning_Heartbeat::which(), fixpp::dict::application_version::v50sp2);
     EXPECT_GT(fixpp::vlatest::validator::Heartbeat_rules.size(), 0U);
     EXPECT_EQ(fixpp::vlatest::fields::Heartbeat_fields[4].tag, 35)
         << "MsgType(35) must be present in the generated Heartbeat field table";
@@ -93,10 +92,13 @@ TEST(VlatestCompileSmoke076, BuildersHeaderEmittedDeduped) {
         << "fixpp::vlatest::all.hpp must be emitted -- 077 re-enables "
            "the typed builder tier via structural-plan dedup "
            "(specs/077-builder-args-dedup/tasks.md T014).";
-    auto const messages_dir = std::filesystem::path(FIXPP_CODEGEN_VLATEST_BUILDERS_HPP).parent_path() / "messages";
-    ASSERT_TRUE(std::filesystem::exists(messages_dir)) << "fixpp::vlatest::messages/ set must be emitted alongside "
-                                                            "all.hpp (078-precompiled-builder-libs Entity 2/3/4).";
-    EXPECT_GT(std::distance(std::filesystem::directory_iterator(messages_dir), std::filesystem::directory_iterator{}),
+    auto const messages_dir =
+        std::filesystem::path(FIXPP_CODEGEN_VLATEST_BUILDERS_HPP).parent_path() / "messages";
+    ASSERT_TRUE(std::filesystem::exists(messages_dir))
+        << "fixpp::vlatest::messages/ set must be emitted alongside "
+           "all.hpp (078-precompiled-builder-libs Entity 2/3/4).";
+    EXPECT_GT(std::distance(std::filesystem::directory_iterator(messages_dir),
+                            std::filesystem::directory_iterator{}),
               0)
         << "fixpp::vlatest::messages/ must be non-empty.";
 }

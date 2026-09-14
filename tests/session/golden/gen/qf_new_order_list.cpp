@@ -1,8 +1,9 @@
 // QuickFIX-cpp golden-authoring generator for E (NewOrderList) — 061-slim T017.
 // OFFLINE TOOLING, not checked in.
-#include <iostream>
-#include <quickfix/fix44/NewOrderList.h>
 #include <quickfix/Session.h>
+#include <quickfix/fix44/NewOrderList.h>
+
+#include <iostream>
 
 int main() {
     FIX44::NewOrderList list;

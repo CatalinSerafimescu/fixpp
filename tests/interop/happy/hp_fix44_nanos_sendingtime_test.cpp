@@ -72,13 +72,12 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
-#include <string>
-#include <tuple>
-
 #include <fixpp/core/fix_time.hpp>
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <string>
+#include <tuple>
 
 #include "hp_support.hpp"
 
@@ -136,8 +135,8 @@ TEST_P(NanosSendingTimeInitiator, LogonAcceptedWithNanos52) {
     const auto reached = hp::drive_to_active(fx, id, 5s);
     EXPECT_EQ(reached, fsm_state::Active)
         << "session did not reach Active (logon with nanos sending_time_precision) "
-           "against " << hp::counterparty_token(counterparty)
-        << "; reached state=" << static_cast<int>(reached)
+           "against "
+        << hp::counterparty_token(counterparty) << "; reached state=" << static_cast<int>(reached)
         << "; [C7.1 / SC-001 / contract sendingtime-precision.md]";
 
     // ── In-process witness (b): outbound seqnum >= 2 after Active ─────────────
@@ -162,12 +161,11 @@ TEST_P(NanosSendingTimeInitiator, LogonAcceptedWithNanos52) {
     hp::expect_graceful_stop(fx);
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    Fix44, NanosSendingTimeInitiator,
-    ::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
-    [](const ::testing::TestParamInfo<Counterparty>& info) {
-        return (info.param == Counterparty::quickfix_cpp) ? "QFcpp" : "QFj";
-    });
+INSTANTIATE_TEST_SUITE_P(Fix44, NanosSendingTimeInitiator,
+                         ::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
+                         [](const ::testing::TestParamInfo<Counterparty>& info) {
+                             return (info.param == Counterparty::quickfix_cpp) ? "QFcpp" : "QFj";
+                         });
 
 // ── T019 — NanosSendingTimeAcceptor (C7.2 / SC-003 / SC-004) ─────────────────
 //
@@ -227,8 +225,7 @@ TEST_P(NanosSendingTimeAcceptor, AcceptsNanos52WithoutReject) {
     EXPECT_EQ(reached, fsm_state::Active)
         << "acceptor did not reach Active on peer nanos 52= Logon (C7.2 violated) "
            "— check lenient parser accepts 27-char timestamp; counterparty="
-        << hp::counterparty_token(counterparty)
-        << "; reached state=" << static_cast<int>(reached)
+        << hp::counterparty_token(counterparty) << "; reached state=" << static_cast<int>(reached)
         << "; [SC-003 / C7.2 / I-NST-3 / FR-007/SC-004]";
 
     auto s = fx.engine().lookup(id);
@@ -261,11 +258,10 @@ TEST_P(NanosSendingTimeAcceptor, AcceptsNanos52WithoutReject) {
     hp::expect_graceful_stop(fx);
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    Fix44, NanosSendingTimeAcceptor,
-    ::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
-    [](const ::testing::TestParamInfo<Counterparty>& info) {
-        return (info.param == Counterparty::quickfix_cpp) ? "QFcpp" : "QFj";
-    });
+INSTANTIATE_TEST_SUITE_P(Fix44, NanosSendingTimeAcceptor,
+                         ::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
+                         [](const ::testing::TestParamInfo<Counterparty>& info) {
+                             return (info.param == Counterparty::quickfix_cpp) ? "QFcpp" : "QFj";
+                         });
 
 }  // namespace

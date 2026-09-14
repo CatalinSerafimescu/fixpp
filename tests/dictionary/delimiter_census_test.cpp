@@ -84,7 +84,6 @@ namespace {
 
 using fixpp::dict::Dictionary;
 using fixpp::dict::field_data_type;
-using fixpp::dict::table_view;
 using fixpp_test::required_scope_oracle::build_orchestra_oracle;
 using fixpp_test::required_scope_oracle::build_quickfix_oracle;
 using fixpp_test::required_scope_oracle::DictOracle;
@@ -117,7 +116,8 @@ std::filesystem::path dict_path(DictCase const& dc) {
 }
 
 DictOracle build_oracle(DictCase const& dc) {
-    return dc.is_orchestra ? build_orchestra_oracle(dict_path(dc)) : build_quickfix_oracle(dict_path(dc));
+    return dc.is_orchestra ? build_orchestra_oracle(dict_path(dc))
+                           : build_quickfix_oracle(dict_path(dc));
 }
 
 Dictionary load_actual(DictCase const& dc, std::pmr::memory_resource* mr) {
@@ -256,8 +256,10 @@ DictCensus census_one(DictCase const& dc) {
         // EXPECT_NE rather than assumed.
         auto const dit = oracle.group_delims.find(key);
         EXPECT_NE(dit, oracle.group_delims.end())
-            << dc.label << ": oracle.group_delims missing an entry group_members has (walker bug) — "
-               "msg=" << key.msg_type << " no_tag=" << key.no_tag;
+            << dc.label
+            << ": oracle.group_delims missing an entry group_members has (walker bug) — "
+               "msg="
+            << key.msg_type << " no_tag=" << key.no_tag;
         if (dit == oracle.group_delims.end()) {
             continue;  // ASSERT_ is unusable in a non-void function; guard manually.
         }
@@ -273,10 +275,12 @@ DictCensus census_one(DictCase const& dc) {
         // `wrong_delim`).
         std::vector<std::uint16_t> child_path = key.path;
         child_path.push_back(key.no_tag);
-        GroupContextKey const child_key{key.msg_type, child_path, expected_delim};
+        GroupContextKey const child_key{
+            .msg_type = key.msg_type, .path = child_path, .no_tag = expected_delim};
         bool const nested_delim = oracle.group_members.contains(child_key);
 
-        auto const ctx_members = tv.group_member_tags(key.msg_type, std::span{key.path}, key.no_tag);
+        auto const ctx_members =
+            tv.group_member_tags(key.msg_type, std::span{key.path}, key.no_tag);
         auto const bare_members = tv.group_member_tags(key.no_tag);
         bool const registered = ctx_members.data() != bare_members.data();
 
@@ -368,11 +372,12 @@ void print_census_table(std::vector<DictCensus> const& all) {
                  "unreg_checked  int_typed_oos  int_typed_reg  empty_members_oos\n";
     DictCensus total{.label = "TOTAL"};
     for (auto const& c : all) {
-        std::cout << "  " << c.label << std::string(std::max<std::size_t>(1, 22 - c.label.size()), ' ')
-                  << c.contexts << "  " << c.wrong_delimiter << "  " << c.wrong_delimiter_nested << "  "
-                  << c.nested_delim_total << "  " << c.polluted << "  " << c.unregistered_in_checked_set
-                  << "  " << c.int_typed_out_of_checked_set << "  " << c.int_typed_registered << "  "
-                  << c.empty_members_out_of_checked_set << "\n";
+        std::cout << "  " << c.label
+                  << std::string(std::max<std::size_t>(1, 22 - c.label.size()), ' ') << c.contexts
+                  << "  " << c.wrong_delimiter << "  " << c.wrong_delimiter_nested << "  "
+                  << c.nested_delim_total << "  " << c.polluted << "  "
+                  << c.unregistered_in_checked_set << "  " << c.int_typed_out_of_checked_set << "  "
+                  << c.int_typed_registered << "  " << c.empty_members_out_of_checked_set << "\n";
         total.contexts += c.contexts;
         total.wrong_delimiter += c.wrong_delimiter;
         total.wrong_delimiter_nested += c.wrong_delimiter_nested;
@@ -385,15 +390,18 @@ void print_census_table(std::vector<DictCensus> const& all) {
         total.int_typed_registered += c.int_typed_registered;
         total.empty_members_out_of_checked_set += c.empty_members_out_of_checked_set;
     }
-    std::cout << "  " << total.label << std::string(std::max<std::size_t>(1, 22 - total.label.size()), ' ')
-              << total.contexts << "  " << total.wrong_delimiter << "  " << total.wrong_delimiter_nested
-              << "  " << total.nested_delim_total << "  " << total.polluted << "  "
-              << total.unregistered_in_checked_set << "  " << total.int_typed_out_of_checked_set << "  "
-              << total.int_typed_registered << "  " << total.empty_members_out_of_checked_set << "\n";
-    std::cout << "  nested_delim_total registered/unregistered split: "
-              << total.nested_delim_total_registered << " / " << total.nested_delim_total_unregistered
-              << " (SC-016 asserts 262 over this UNCONDITIONED population — not asserted here, T012 "
-                 "measurement only)\n";
+    std::cout << "  " << total.label
+              << std::string(std::max<std::size_t>(1, 22 - total.label.size()), ' ')
+              << total.contexts << "  " << total.wrong_delimiter << "  "
+              << total.wrong_delimiter_nested << "  " << total.nested_delim_total << "  "
+              << total.polluted << "  " << total.unregistered_in_checked_set << "  "
+              << total.int_typed_out_of_checked_set << "  " << total.int_typed_registered << "  "
+              << total.empty_members_out_of_checked_set << "\n";
+    std::cout
+        << "  nested_delim_total registered/unregistered split: "
+        << total.nested_delim_total_registered << " / " << total.nested_delim_total_unregistered
+        << " (SC-016 asserts 262 over this UNCONDITIONED population — not asserted here, T012 "
+           "measurement only)\n";
     std::cout << "  spec.md Baseline for comparison: total contexts wrong=335 (232 nested) "
                  "polluted=52 unregistered=30\n";
 }
@@ -451,7 +459,7 @@ TEST(DelimiterCensus, RegisteredGroupCountMatchesCodegenFix50Sp2) {
     }
     std::cout << "\n  spec.md target: 502 -> 505\n";
 
-    EXPECT_EQ(registered, 505u)
+    EXPECT_EQ(registered, 505U)
         << "FIX50SP2 registered-group count did not reach the post-fix target of 505 "
            "(spec.md SC-005/FR-017/W-7) — the pre-fix measured value is 502; the three groups "
            "named in spec.md (count tags 1499, 1669, 1919) resolve no delimiter and never "
@@ -492,18 +500,20 @@ TEST(DelimiterCensus, NoChangeDictionariesUnchanged) {
     std::cout << "\n=== 083 T006 SC-008: no-change dictionaries (FIX40/FIX41/FIXT11 only) ===\n";
     for (auto const& dc : no_change_dicts) {
         auto const c = census_one(dc);
-        std::cout << "  " << c.label << ": contexts=" << c.contexts << " wrong=" << c.wrong_delimiter
-                  << " polluted=" << c.polluted
+        std::cout << "  " << c.label << ": contexts=" << c.contexts
+                  << " wrong=" << c.wrong_delimiter << " polluted=" << c.polluted
                   << " unregistered_in_checked_set=" << c.unregistered_in_checked_set << "\n";
-        EXPECT_EQ(c.wrong_delimiter, 0u) << c.label << ": SC-008 violated — wrong-delimiter count changed";
-        EXPECT_EQ(c.polluted, 0u) << c.label << ": SC-008 violated — polluted-member-set count changed";
+        EXPECT_EQ(c.wrong_delimiter, 0U)
+            << c.label << ": SC-008 violated — wrong-delimiter count changed";
+        EXPECT_EQ(c.polluted, 0U) << c.label
+                                  << ": SC-008 violated — polluted-member-set count changed";
         // T012 re-point: the `unregistered` leg now checks
         // unregistered_in_checked_set only — L-066-1/#196's INT-typed
         // exclusions land in int_typed_out_of_checked_set instead and must not
         // fail this SC-008 pin. (082 empties that bucket, so the distinction no
         // longer changes this leg's outcome; it is kept because the split is what
         // makes the exact-55 pin below attributable.)
-        EXPECT_EQ(c.unregistered_in_checked_set, 0u)
+        EXPECT_EQ(c.unregistered_in_checked_set, 0U)
             << c.label << ": SC-008 violated — unregistered-in-checked-set count changed";
     }
 }
@@ -530,12 +540,12 @@ TEST(DelimiterCensus, RedCountsReconcileWithSpecBaseline) {
     // The pin's whole value is that it covers every shipped dictionary with no
     // exclusion list and no per-dictionary exemption; a later "just skip this
     // one" would otherwise be a one-line edit that no test notices.
-    ASSERT_EQ(all.size(), 10u)
+    ASSERT_EQ(all.size(), 10U)
         << "FR-012 / FR-016: the delimiter census must run over ALL TEN shipped dictionaries "
            "with no carve-out, exclusion list or per-dictionary exemption. Observed "
         << all.size() << ".";
     for (auto const& c : all) {
-        EXPECT_GT(c.contexts, 0u)
+        EXPECT_GT(c.contexts, 0U)
             << c.label
             << ": censused zero contexts — a dictionary present in the list but contributing "
                "nothing is an exemption by accident, which FR-016 forbids as firmly as an "
@@ -545,19 +555,20 @@ TEST(DelimiterCensus, RedCountsReconcileWithSpecBaseline) {
     print_census_table(all);
 
     for (auto const& c : all) {
-        EXPECT_EQ(c.wrong_delimiter, 0u) << c.label << ": " << c.wrong_delimiter
-                                          << " context(s) with a wrong delimiter (post-fix target: 0, "
-                                             "FR-001/FR-002)";
-        EXPECT_EQ(c.polluted, 0u) << c.label << ": " << c.polluted
-                                   << " context(s) with a polluted member set (post-fix target: 0, "
-                                      "FR-010/FR-015)";
+        EXPECT_EQ(c.wrong_delimiter, 0U)
+            << c.label << ": " << c.wrong_delimiter
+            << " context(s) with a wrong delimiter (post-fix target: 0, "
+               "FR-001/FR-002)";
+        EXPECT_EQ(c.polluted, 0U) << c.label << ": " << c.polluted
+                                  << " context(s) with a polluted member set (post-fix target: 0, "
+                                     "FR-010/FR-015)";
         // T012 re-point: this leg checks unregistered_in_checked_set only.
         // int_typed_out_of_checked_set (L-066-1/#196) was out of 083's scope and
         // this pin was written never to require it to be zero. 082 makes it zero
         // anyway; the requirement now lives in the dedicated pin below, which
         // asserts BOTH that emptiness and where the 55 contexts went. Left split
         // here so a future regression is attributed to the right bucket.
-        EXPECT_EQ(c.unregistered_in_checked_set, 0u)
+        EXPECT_EQ(c.unregistered_in_checked_set, 0U)
             << c.label << ": " << c.unregistered_in_checked_set
             << " unregistered-in-checked-set context(s) (post-fix target: 0, FR-006/FR-023)";
     }
@@ -620,23 +631,25 @@ TEST(DelimiterCensus, IntTypedCountTagContextsAreExactlyFiftyFiveAndNowRegistere
         } else if (c.label == "FIX43") {
             expected = 1;
         }
-        EXPECT_EQ(c.int_typed_out_of_checked_set, 0u)
+        EXPECT_EQ(c.int_typed_out_of_checked_set, 0U)
             << c.label << ": " << c.int_typed_out_of_checked_set
             << " INT-typed count-tag context(s) still OUT of the checked set — 082/#196 makes"
                " detection structural, so this bucket must be empty on every dictionary";
         EXPECT_EQ(c.int_typed_registered, expected)
-            << c.label << ": int_typed_registered (L-066-1/#196) drifted from its pinned "
-                           "per-dictionary count — this is the SAME population the pre-082 pin held "
-                           "as out-of-checked-set, now required to be registered. Update these "
-                           "constants deliberately only if the cause is confirmed, never to match an "
-                           "unexplained observation; a drop toward 0 means the datatype gate is back";
+            << c.label
+            << ": int_typed_registered (L-066-1/#196) drifted from its pinned "
+               "per-dictionary count — this is the SAME population the pre-082 pin held "
+               "as out-of-checked-set, now required to be registered. Update these "
+               "constants deliberately only if the cause is confirmed, never to match an "
+               "unexplained observation; a drop toward 0 means the datatype gate is back";
     }
-    EXPECT_EQ(total_out, 0u) << "int_typed_out_of_checked_set must total 0 post-082 — see the "
+    EXPECT_EQ(total_out, 0U) << "int_typed_out_of_checked_set must total 0 post-082 — see the "
                                 "per-dictionary breakdown above";
     // Non-vacuity for the zeros above: the population still has to be FOUND.
-    EXPECT_EQ(total_registered, 55u)
+    EXPECT_EQ(total_registered, 55U)
         << "int_typed_registered total drifted from its pinned 55 (L-066-1/#196). 55 is the count "
-           "the pre-082 tripwire pinned in the out-of-checked-set bucket; structural detection moves "
+           "the pre-082 tripwire pinned in the out-of-checked-set bucket; structural detection "
+           "moves "
            "it here rather than dissolving it, so this is the assertion that keeps the zeros above "
            "from being vacuous";
 }

@@ -68,12 +68,11 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
-#include <string>
-#include <tuple>
-
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <string>
+#include <tuple>
 
 #include "hp_support.hpp"
 
@@ -129,8 +128,7 @@ TEST_P(ResetOnLogonInitiator, LogonAcceptedAndResyncs) {
     const auto reached = hp::drive_to_active(fx, id, 5s);
     EXPECT_EQ(reached, fsm_state::Active)
         << "session did not reach Active (logon with reset_on_logon=true) against "
-        << hp::counterparty_token(counterparty)
-        << "; reached state=" << static_cast<int>(reached);
+        << hp::counterparty_token(counterparty) << "; reached state=" << static_cast<int>(reached);
 
     // ── In-process witness (b): outbound seqnum >= 2 after Active ───────────
     // The Logon was sent (consuming seqnum 1); peek_outbound() >= 2 proves
@@ -148,20 +146,19 @@ TEST_P(ResetOnLogonInitiator, LogonAcceptedAndResyncs) {
     // The golden assertion (141=Y + 34=1 verbatim, admin profile {52,10}) is
     // performed by the parent gate against the proxy capture. Golden file:
     //   happy/golden/RL-<cp>-init-fix44-reset-on-logon.fix
-    const std::string cp_part   = (counterparty == Counterparty::quickfix_cpp) ? "QFcpp" : "QFj";
-    const std::string cell_id   = "RL-" + cp_part + "-init-fix44-reset-on-logon";
+    const std::string cp_part = (counterparty == Counterparty::quickfix_cpp) ? "QFcpp" : "QFj";
+    const std::string cell_id = "RL-" + cp_part + "-init-fix44-reset-on-logon";
     hp::diff_golden_or_skip(cell_id, hp::admin_golden_path(cell_id));
 
     // ── Graceful stop (Logout) ────────────────────────────────────────────────
     hp::expect_graceful_stop(fx);
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    Fix44, ResetOnLogonInitiator,
-    ::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
-    [](const ::testing::TestParamInfo<Counterparty>& info) {
-        return (info.param == Counterparty::quickfix_cpp) ? "QFcpp" : "QFj";
-    });
+INSTANTIATE_TEST_SUITE_P(Fix44, ResetOnLogonInitiator,
+                         ::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
+                         [](const ::testing::TestParamInfo<Counterparty>& info) {
+                             return (info.param == Counterparty::quickfix_cpp) ? "QFcpp" : "QFj";
+                         });
 
 // ── T017 — reset_on_logon_acceptor (C6.2) ─────────────────────────────────────
 //
@@ -223,8 +220,7 @@ TEST_P(ResetOnLogonAcceptor, AdmitsFresh34eq1AndResyncsFrom1) {
     EXPECT_EQ(reached, fsm_state::Active)
         << "acceptor did not reach Active on peer 141=Y + 34=1 Logon (C6.2 violated) "
         << "— check reset_on_logon pre-check_inbound placement; counterparty="
-        << hp::counterparty_token(counterparty)
-        << "; reached state=" << static_cast<int>(reached);
+        << hp::counterparty_token(counterparty) << "; reached state=" << static_cast<int>(reached);
 
     auto s = fx.engine().lookup(id);
     ASSERT_NE(s, nullptr) << "session not established";
@@ -254,11 +250,10 @@ TEST_P(ResetOnLogonAcceptor, AdmitsFresh34eq1AndResyncsFrom1) {
     hp::expect_graceful_stop(fx);
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    Fix44, ResetOnLogonAcceptor,
-    ::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
-    [](const ::testing::TestParamInfo<Counterparty>& info) {
-        return (info.param == Counterparty::quickfix_cpp) ? "QFcpp" : "QFj";
-    });
+INSTANTIATE_TEST_SUITE_P(Fix44, ResetOnLogonAcceptor,
+                         ::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
+                         [](const ::testing::TestParamInfo<Counterparty>& info) {
+                             return (info.param == Counterparty::quickfix_cpp) ? "QFcpp" : "QFj";
+                         });
 
 }  // namespace

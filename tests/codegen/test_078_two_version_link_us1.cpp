@@ -54,7 +54,7 @@ TEST(TwoVersionLinkUS1, BothVersionsResolveFromOwnLibNoCollision) {
 
     std::string const v44_body(reinterpret_cast<char const*>(v44_built->data()), v44_built->size());
     std::string const v50sp2_body(reinterpret_cast<char const*>(v50sp2_built->data()),
-                                   v50sp2_built->size());
+                                  v50sp2_built->size());
 
     // Each version's own inputs (distinct ClOrdID/Symbol/Side) must show up
     // in its own body only -- a collision (e.g. one version's build_

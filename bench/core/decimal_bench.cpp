@@ -28,7 +28,7 @@ static void BM_decimal_parse(benchmark::State& state) {
     for (std::size_t i = 0; i < kParseLen; ++i) src[i] = static_cast<std::byte>(kParseInput[i]);
     for (auto _ : state) {
         auto r = decimal_traits<pod_decimal>::from_chars(std::span<const std::byte>{src},
-                                                        std::pmr::null_memory_resource());
+                                                         std::pmr::null_memory_resource());
         benchmark::DoNotOptimize(r);
     }
     state.SetItemsProcessed(state.iterations());

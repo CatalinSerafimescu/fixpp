@@ -122,10 +122,12 @@ TEST(SendingTimeCheck, FarFutureSendingTime) {
 // ── Frame builders for integration tests ─────────────────────────────────────
 
 // Build a FIX frame with an explicit SendingTime value.
-static std::vector<std::byte> make_frame_with_sending_time(
-    std::string_view begin_string, std::string_view msg_type, std::uint32_t seq,
-    std::string_view sender, std::string_view target, std::string_view sending_time,
-    std::string_view extra_body = {}) {
+std::vector<std::byte> make_frame_with_sending_time(std::string_view begin_string,
+                                                    std::string_view msg_type, std::uint32_t seq,
+                                                    std::string_view sender,
+                                                    std::string_view target,
+                                                    std::string_view sending_time,
+                                                    std::string_view extra_body = {}) {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -157,7 +159,7 @@ static std::vector<std::byte> make_frame_with_sending_time(
     return frame;
 }
 
-static std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag_wanted) {
+std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag_wanted) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = std::to_string(tag_wanted) + "=";
     auto pos = wire.find(needle);
@@ -472,9 +474,11 @@ TEST(SendingTimeIntegration, StaleLogonSendingTimeTriggersLogoutOnlyNoReject) {
 // Anchors: spec.md FR-007 + FR-008; opus_pr81_1_triage.md RC#5; tasks.md T015.
 
 // Build a FIX frame with tag 52 ABSENT (no SendingTime field at all).
-static std::vector<std::byte> make_frame_missing_sending_time(
-    std::string_view begin_string, std::string_view msg_type, std::uint32_t seq,
-    std::string_view sender, std::string_view target, std::string_view extra_body = {}) {
+std::vector<std::byte> make_frame_missing_sending_time(std::string_view begin_string,
+                                                       std::string_view msg_type, std::uint32_t seq,
+                                                       std::string_view sender,
+                                                       std::string_view target,
+                                                       std::string_view extra_body = {}) {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -509,10 +513,10 @@ static std::vector<std::byte> make_frame_missing_sending_time(
 // Helper: assert Reject(35=3, 371=52, 373=10) + Logout(35=5) in outbound frames
 // and session state == Disconnected.
 // Verifies the ordering guarantee: Reject is emitted before Logout.
-static void assert_reject_then_logout_then_disconnected(const TransportDouble& transport,
-                                                        std::size_t before,
-                                                        const fixpp::session::Session& sess,
-                                                        const char* context) {
+void assert_reject_then_logout_then_disconnected(const TransportDouble& transport,
+                                                 std::size_t before,
+                                                 const fixpp::session::Session& sess,
+                                                 const char* context) {
     bool found_reject = false;
     bool found_logout = false;
     int reject_pos = -1;

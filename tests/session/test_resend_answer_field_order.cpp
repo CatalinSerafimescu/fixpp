@@ -242,8 +242,8 @@ TEST(ResendAnswerFieldOrder, GapFill_NoHeaderTagAfterBody) {
 
     const auto check = check_resend_answer_field_order(*result);
     EXPECT_TRUE(check.ok) << check.reason;
-    EXPECT_EQ(check.count_43, 1u) << "GapFill must carry PossDupFlag(43) exactly once";
-    EXPECT_EQ(check.count_122, 1u) << "GapFill must carry OrigSendingTime(122) exactly once";
+    EXPECT_EQ(check.count_43, 1U) << "GapFill must carry PossDupFlag(43) exactly once";
+    EXPECT_EQ(check.count_122, 1U) << "GapFill must carry OrigSendingTime(122) exactly once";
 }
 
 // ── Cell 2: build_replay_frame (stored NewOrderSingle w/ repeating group) ────
@@ -277,7 +277,8 @@ public:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store(
         seqnum_t seq, std::span<const std::byte> frame, direction_t dir) noexcept override {
         if (dir == direction_t::outbound) {
-            outbound_records.push_back({seq, std::vector<std::byte>(frame.begin(), frame.end())});
+            outbound_records.push_back(
+                {.seq = seq, .frame = std::vector<std::byte>(frame.begin(), frame.end())});
             if (seq + 1U > next_out_) next_out_ = seq + 1U;
         }
         co_return fixpp::core::expected_t<void>{};
@@ -339,7 +340,7 @@ std::vector<std::byte> make_fix_frame(std::string_view body_str) {
     std::string full = hdr + std::string(body_str);
     unsigned int cs = 0;
     for (unsigned char c : full) cs += c;
-    cs &= 0xFFu;
+    cs &= 0xFFU;
     char csbuf[4];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     full += "10=" + std::string(csbuf) + "\x01";
@@ -452,9 +453,9 @@ protected:
     void feed(Session& sess, const std::vector<std::byte>& frame) {
         auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, kWindow,
-                                                         "ResendAnswerReplayTest::feed/frame")) {
+                                                        "ResendAnswerReplayTest::feed/frame")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
-                                                             "ResendAnswerReplayTest::feed/frame");
+                                                            "ResendAnswerReplayTest::feed/frame");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss
                           << "ResendAnswerReplayTest::feed/frame";
             return;
@@ -525,9 +526,9 @@ TEST_F(ResendAnswerReplayTest, Replay_NoHeaderTagAfterBody_WithNestedRepeatingGr
     auto fut_send =
         asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut_send, kWindow,
-                                                     "Replay_NoHeaderTagAfterBody/send")) {
+                                                    "Replay_NoHeaderTagAfterBody/send")) {
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
-                                                         "Replay_NoHeaderTagAfterBody/send");
+                                                        "Replay_NoHeaderTagAfterBody/send");
         ADD_FAILURE() << fixpp::test_support::kWindowMiss << "Replay_NoHeaderTagAfterBody/send";
         return;
     }
@@ -541,7 +542,7 @@ TEST_F(ResendAnswerReplayTest, Replay_NoHeaderTagAfterBody_WithNestedRepeatingGr
         ASSERT_TRUE(original_check.ok)
             << "precondition: the original (non-replayed) send must itself be well-ordered; got: "
             << original_check.reason;
-        ASSERT_EQ(original_check.count_43, 0u)
+        ASSERT_EQ(original_check.count_43, 0U)
             << "precondition: the original send must not carry PossDupFlag(43)";
     }
 
@@ -583,15 +584,15 @@ TEST_F(ResendAnswerReplayTest, Replay_NoHeaderTagAfterBody_WithNestedRepeatingGr
 
         const auto check = check_resend_answer_field_order(f);
         EXPECT_TRUE(check.ok) << check.reason;
-        EXPECT_EQ(check.count_43, 1u) << "replayed frame must carry PossDupFlag(43) exactly once";
-        EXPECT_EQ(check.count_122, 1u)
+        EXPECT_EQ(check.count_43, 1U) << "replayed frame must carry PossDupFlag(43) exactly once";
+        EXPECT_EQ(check.count_122, 1U)
             << "replayed frame must carry OrigSendingTime(122) exactly once";
     }
-    EXPECT_EQ(replay_matches, 1u) << "ResendRequest for the stored NewOrderSingle (seq=" << app_seq
+    EXPECT_EQ(replay_matches, 1U) << "ResendRequest for the stored NewOrderSingle (seq=" << app_seq
                                   << ", ClOrdID=" << kClOrdId
                                   << ") must produce EXACTLY ONE replayed frame identified by "
                                   << "35=D + 34==seq + 11==ClOrdID";
-    EXPECT_EQ(gapfill_matches, 0u)
+    EXPECT_EQ(gapfill_matches, 0U)
         << "a single present, non-admin slot must be replayed, not gap-filled";
 }
 
@@ -645,10 +646,10 @@ TEST_F(ResendAnswerReplayTest, GapFillOnly_IsNotMistakenForTheAppReplay) {
             ++replay_matches;
         }
     }
-    EXPECT_EQ(gapfill_matches, 1u)
+    EXPECT_EQ(gapfill_matches, 1U)
         << "sanity: force_empty_retrieve must actually produce a GapFill, or this "
            "cell proves nothing";
-    EXPECT_EQ(replay_matches, 0u)
+    EXPECT_EQ(replay_matches, 0U)
         << "no 35=D frame identified as the app replay may appear when the store "
            "could not retrieve it — a GapFill must not be mistaken for the replay";
 }
@@ -697,11 +698,11 @@ TEST_F(ResendAnswerReplayTest, Replay_NoBodyFallback_StillCarries43And122) {
 
         const auto check = check_resend_answer_field_order(f);
         EXPECT_TRUE(check.ok) << check.reason;
-        EXPECT_EQ(check.count_43, 1u) << "fallback-path replay must carry PossDupFlag(43) once";
-        EXPECT_EQ(check.count_122, 1u)
+        EXPECT_EQ(check.count_43, 1U) << "fallback-path replay must carry PossDupFlag(43) once";
+        EXPECT_EQ(check.count_122, 1U)
             << "fallback-path replay must carry OrigSendingTime(122) once";
     }
-    EXPECT_EQ(replay_matches, 1u) << "ResendRequest for the bodyless stored frame (seq=" << app_seq
+    EXPECT_EQ(replay_matches, 1U) << "ResendRequest for the bodyless stored frame (seq=" << app_seq
                                   << ") must produce exactly one replayed frame";
 }
 
@@ -748,7 +749,7 @@ TEST(ResendAnswerFieldOrder, GapFill_AppendFailureBranches43And122ArePinned) {
 
     const std::size_t body_length = pos_after_123 - body_start;
     const std::size_t actual_digits = std::to_string(body_length).size();
-    ASSERT_LE(actual_digits, 6u) << "body exceeds the 6-digit BodyLength placeholder reservation";
+    ASSERT_LE(actual_digits, 6U) << "body exceeds the 6-digit BodyLength placeholder reservation";
     const std::size_t gap = 6 - actual_digits;  // over-reservation memmove'd away at commit()
     const std::size_t minimal_success_size = (pos_after_123 - gap) + 7;  // trailer "10=NNN\x01"
 
@@ -834,8 +835,8 @@ TEST_F(ResendAnswerReplayTest, Replay_MalformedStoredField_SkippedInBothScans) {
 
         const auto check = check_resend_answer_field_order(f);
         EXPECT_TRUE(check.ok) << check.reason;
-        EXPECT_EQ(check.count_43, 1u);
-        EXPECT_EQ(check.count_122, 1u);
+        EXPECT_EQ(check.count_43, 1U);
+        EXPECT_EQ(check.count_122, 1U);
         EXPECT_EQ(extract_field(fs, 11), "ORD-MALFORMED")
             << "the well-formed body field after the malformed one must still be replayed";
 
@@ -843,7 +844,7 @@ TEST_F(ResendAnswerReplayTest, Replay_MalformedStoredField_SkippedInBothScans) {
         EXPECT_EQ(f_sv.find("SENTINEL_MALFORMED_VALUE"), std::string_view::npos)
             << "a malformed stored field must be dropped, not copied into the replay";
     }
-    EXPECT_EQ(replay_matches, 1u);
+    EXPECT_EQ(replay_matches, 1U);
 }
 
 // ── build_replay_frame: no stored SendingTime(52) ────────────────────────────
@@ -895,8 +896,8 @@ TEST_F(ResendAnswerReplayTest, Replay_NoStoredSendingTime_Emits122PresentButEmpt
 
         const auto check = check_resend_answer_field_order(f);
         EXPECT_TRUE(check.ok) << check.reason;
-        EXPECT_EQ(check.count_43, 1u);
-        EXPECT_EQ(check.count_122, 1u);
+        EXPECT_EQ(check.count_43, 1U);
+        EXPECT_EQ(check.count_122, 1U);
 
         const auto ost = extract_field(fs, 122);
         ASSERT_TRUE(ost.has_value()) << "OrigSendingTime(122) must be present (count_122==1)";
@@ -904,7 +905,7 @@ TEST_F(ResendAnswerReplayTest, Replay_NoStoredSendingTime_Emits122PresentButEmpt
             << "FINDING: with no stored SendingTime(52), OrigSendingTime(122) is emitted "
                "present but EMPTY rather than omitted -- see the TEST_F comment above";
     }
-    EXPECT_EQ(replay_matches, 1u);
+    EXPECT_EQ(replay_matches, 1U);
 }
 
 namespace {

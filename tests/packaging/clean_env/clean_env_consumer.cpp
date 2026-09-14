@@ -10,10 +10,9 @@
 // #includes headers would link even if every archive were missing, and this
 // witness would then pass on a package that ships no libraries at all.
 
+#include <cstdio>
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/wire/framer.hpp>
-
-#include <cstdio>
 #include <memory_resource>
 #include <span>
 
@@ -33,7 +32,8 @@ int main() {
         return 1;
     }
 
-    std::printf("PASS: configured, linked and ran against the installed package "
-                "with no producer toolchain\n");
+    std::printf(
+        "PASS: configured, linked and ran against the installed package "
+        "with no producer toolchain\n");
     return 0;
 }

@@ -26,12 +26,11 @@
 #include <cstdint>
 
 #include "capi_internal.hpp"  // CapiApplication, fixpp_msg, SessionSlot, fixpp_msg_t
-
 #include "support/alloc_guard_markers.hpp"
 
 using fixpp::session::SessionId;
-using fixpp::wire::MessageView;
 using fixpp::wire::access_mode;
+using fixpp::wire::MessageView;
 
 namespace {
 
@@ -39,9 +38,7 @@ namespace {
 // through userdata — it does NOT dereference the inbound handle, so the measured
 // path is purely the trampoline's framing + dispatch (the user callback's own
 // allocations, if any, are the user's concern, not the §VIII.5 trampoline gate).
-void counting_cb(const fixpp_msg_t* /*inbound*/, void* ud) {
-    ++*static_cast<std::uint64_t*>(ud);
-}
+void counting_cb(const fixpp_msg_t* /*inbound*/, void* ud) { ++*static_cast<std::uint64_t*>(ud); }
 
 }  // namespace
 

@@ -56,8 +56,8 @@
 // RED before T014: cmake/Codegen.cmake currently deletes
 // vlatest/Builders.hpp unconditionally on every ON configure that does not
 // otherwise trigger a full regen (076 Gate B P2 leftover, cmake/
-// Codegen.cmake's ON-branch file(REMOVE .../vlatest/Builders.hpp)) -- so the file is ABSENT and this test fails to
-// even open it. T014 removes that unconditional delete + wires a proper
+// Codegen.cmake's ON-branch file(REMOVE .../vlatest/Builders.hpp)) -- so the file is ABSENT and
+// this test fails to even open it. T014 removes that unconditional delete + wires a proper
 // regen-guard marker, making this GREEN.
 //
 // Anchors: specs/077-builder-args-dedup/tasks.md T013;
@@ -96,8 +96,7 @@ std::string const kGroupsDir =
 // `groups/` directory. Returns -1 if the directory cannot be read
 // (distinguishes "absent/unreadable" from "found zero"). `file_size` is the
 // summed byte size of all per-plan headers.
-long count_group_structs(std::string const& dir, bool& saw_groups_namespace,
-                          long& file_size) {
+long count_group_structs(std::string const& dir, bool& saw_groups_namespace, long& file_size) {
     std::error_code ec;
     if (!std::filesystem::is_directory(dir, ec)) return -1;
     long count = 0;
@@ -111,10 +110,10 @@ long count_group_structs(std::string const& dir, bool& saw_groups_namespace,
         in.seekg(0);
         std::string line;
         while (std::getline(in, line)) {
-            if (line.rfind("struct G_", 0) == 0) {
+            if (line.starts_with("struct G_")) {
                 ++count;
             }
-            if (line.find("namespace fixpp::vlatest::groups") != std::string::npos) {
+            if (line.contains("namespace fixpp::vlatest::groups")) {
                 saw_groups_namespace = true;
             }
         }
@@ -128,16 +127,15 @@ TEST(BuilderDedupCount077, VlatestStructCountIs577) {
     bool saw_groups_namespace = false;
     long file_size = 0;
     long const count = count_group_structs(kGroupsDir, saw_groups_namespace, file_size);
-    ASSERT_GE(count, 0)
-        << "fixpp::vlatest per-plan groups/ dir not found/readable at " << kGroupsDir
-        << " -- expected the deduped emitter (FIXPP_CODEGEN_FIX_LATEST=ON) to have "
-           "emitted it and cmake/Codegen.cmake to have kept it (T014); 078 SC-001 "
-           "fix moved the G_...Args structs from the umbrella groups.hpp into "
-           "one-per-file per-plan headers under groups/.";
-    EXPECT_EQ(count, 577)
-        << "vlatest dedup plan count changed -- investigate before re-pinning "
-           "(.specify/decisions/077-builder-args-dedup-verify.md; 081 D-4/E-4 "
-           "re-pinned 576 -> 577 for the tag-33 gated-required plan fork).";
+    ASSERT_GE(count, 0) << "fixpp::vlatest per-plan groups/ dir not found/readable at "
+                        << kGroupsDir
+                        << " -- expected the deduped emitter (FIXPP_CODEGEN_FIX_LATEST=ON) to have "
+                           "emitted it and cmake/Codegen.cmake to have kept it (T014); 078 SC-001 "
+                           "fix moved the G_...Args structs from the umbrella groups.hpp into "
+                           "one-per-file per-plan headers under groups/.";
+    EXPECT_EQ(count, 577) << "vlatest dedup plan count changed -- investigate before re-pinning "
+                             "(.specify/decisions/077-builder-args-dedup-verify.md; 081 D-4/E-4 "
+                             "re-pinned 576 -> 577 for the tag-33 gated-required plan fork).";
     EXPECT_TRUE(saw_groups_namespace)
         << "namespace fixpp::vlatest::groups not found in any per-plan header under " << kGroupsDir;
 
@@ -145,9 +143,10 @@ TEST(BuilderDedupCount077, VlatestStructCountIs577) {
     // rules out an empty/truncated write (too small) and the pre-dedup ~137 MB
     // uncompilable shape (too large), without pinning a tight byte count the
     // emitter's own formatting could drift on.
-    EXPECT_GT(file_size, 1L * 1024 * 1024)
-        << "groups/ per-plan headers suspiciously small (" << file_size << " bytes total) -- possibly truncated";
+    EXPECT_GT(file_size, 1L * 1024 * 1024) << "groups/ per-plan headers suspiciously small ("
+                                           << file_size << " bytes total) -- possibly truncated";
     EXPECT_LT(file_size, 150L * 1024 * 1024)
-        << "groups/ per-plan headers suspiciously large (" << file_size << " bytes total) -- dedup may not "
+        << "groups/ per-plan headers suspiciously large (" << file_size
+        << " bytes total) -- dedup may not "
            "be collapsing shared plans (SC-002)";
 }

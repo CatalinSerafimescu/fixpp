@@ -19,7 +19,7 @@ static_assert(std::is_same_v<fixpp::decimal_t, decimal<pod_decimal>>,
 // The link error case is tested by tests/link/decimal_alias_mismatch_test.cmake.
 TEST(DecimalAlias, SentinelLinksPositiveCase) {
     // Accessing the lock forces the linker to resolve the sentinel symbol.
-    auto* lock = fixpp::detail::fixpp_decimal_alias_lock;
+    const auto* lock = fixpp::detail::fixpp_decimal_alias_lock;
     EXPECT_NE(lock, nullptr);
 }
 

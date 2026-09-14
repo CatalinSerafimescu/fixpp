@@ -10,9 +10,9 @@
 #include <version>
 
 // Force macros are mutually exclusive to avoid ambiguous behavior.
-#if defined(FIXPP_FORCE_ATOMIC_SHARED_PTR_FALLBACK) && \
-    defined(FIXPP_FORCE_ATOMIC_SHARED_PTR_NATIVE)
-#error "FIXPP_FORCE_ATOMIC_SHARED_PTR_FALLBACK and FIXPP_FORCE_ATOMIC_SHARED_PTR_NATIVE cannot both be defined."
+#if defined(FIXPP_FORCE_ATOMIC_SHARED_PTR_FALLBACK) && defined(FIXPP_FORCE_ATOMIC_SHARED_PTR_NATIVE)
+#error \
+    "FIXPP_FORCE_ATOMIC_SHARED_PTR_FALLBACK and FIXPP_FORCE_ATOMIC_SHARED_PTR_NATIVE cannot both be defined."
 #endif
 
 // Conservative feature detection for the std atomic-shared-ptr primitive (P0718):
@@ -20,11 +20,14 @@
 // - libstdc++ and MSVC-STL: native only when macro level is known-good.
 // - unknown: fallback by default.
 #ifndef FIXPP_HAS_STD_ATOMIC_SHARED_PTR
-#if defined(FIXPP_FORCE_ATOMIC_SHARED_PTR_FALLBACK)
+#ifdef FIXPP_FORCE_ATOMIC_SHARED_PTR_FALLBACK
+// #elifdef is C++23-only; this public header keeps the portable spelling.
+// NOLINTBEGIN(readability-use-concise-preprocessor-directives)
 #define FIXPP_HAS_STD_ATOMIC_SHARED_PTR 0
 #elif defined(FIXPP_FORCE_ATOMIC_SHARED_PTR_NATIVE)
 #define FIXPP_HAS_STD_ATOMIC_SHARED_PTR 1
 #elif defined(_LIBCPP_VERSION)
+// NOLINTEND(readability-use-concise-preprocessor-directives)
 #define FIXPP_HAS_STD_ATOMIC_SHARED_PTR 0
 #elif defined(__GLIBCXX__) && defined(__cpp_lib_atomic_shared_ptr) && \
     (__cpp_lib_atomic_shared_ptr >= 201711L)

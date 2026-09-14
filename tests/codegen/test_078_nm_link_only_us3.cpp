@@ -39,8 +39,8 @@
 #include <cstddef>
 #include <fixpp/core/decimal_alias.hpp>
 #include <fixpp/v44/messages/ExecutionReport.hpp>
-#include <fixpp/v44/messages/News.hpp>
 #include <fixpp/v44/messages/NewOrderSingle.hpp>
+#include <fixpp/v44/messages/News.hpp>
 #include <memory_resource>
 #include <span>
 
@@ -54,7 +54,7 @@ TEST(NmLinkOnlyUS3, CallsExactlyThreeOfV44Builders) {
     std::array<std::byte, 256> nos_out{};
     auto nos_built = fixpp::v44::build_NewOrderSingle(std::span<std::byte>{nos_out}, nos_args);
     ASSERT_TRUE(nos_built.has_value()) << "build_NewOrderSingle failed";
-    EXPECT_GT(nos_built->size(), 0u);
+    EXPECT_GT(nos_built->size(), 0U);
 
     fixpp::v44::ExecutionReportArgs er_args{};
     er_args.cl_ord_id = "US3-ER-1";
@@ -64,7 +64,7 @@ TEST(NmLinkOnlyUS3, CallsExactlyThreeOfV44Builders) {
     std::array<std::byte, 256> er_out{};
     auto er_built = fixpp::v44::build_ExecutionReport(std::span<std::byte>{er_out}, er_args);
     ASSERT_TRUE(er_built.has_value()) << "build_ExecutionReport failed";
-    EXPECT_GT(er_built->size(), 0u);
+    EXPECT_GT(er_built->size(), 0U);
 
     std::array<fixpp::v44::groups::G_33Args, 1> lines{fixpp::v44::groups::G_33Args{}};
     lines[0].text = "US3 news body";
@@ -74,5 +74,5 @@ TEST(NmLinkOnlyUS3, CallsExactlyThreeOfV44Builders) {
     std::array<std::byte, 256> news_out{};
     auto news_built = fixpp::v44::build_News(std::span<std::byte>{news_out}, news_args);
     ASSERT_TRUE(news_built.has_value()) << "build_News failed";
-    EXPECT_GT(news_built->size(), 0u);
+    EXPECT_GT(news_built->size(), 0U);
 }

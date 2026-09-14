@@ -12,7 +12,6 @@
 #include <gtest/gtest.h>
 
 #include <fixpp/session/session_config.hpp>
-
 #include <memory>
 #include <type_traits>
 
@@ -32,10 +31,9 @@ namespace {
 
 // Static assertion: logger_override and tracer_override MUST exist as
 // std::shared_ptr members (compile-time — confirmed by the type checks below).
-static_assert(
-    std::is_same_v<decltype(fixpp::session::SessionConfig::logger_override),
-                   std::shared_ptr<fixpp::log::Logger>>,
-    "SessionConfig::logger_override must be std::shared_ptr<fixpp::log::Logger>");
+static_assert(std::is_same_v<decltype(fixpp::session::SessionConfig::logger_override),
+                             std::shared_ptr<fixpp::log::Logger>>,
+              "SessionConfig::logger_override must be std::shared_ptr<fixpp::log::Logger>");
 
 static_assert(
     std::is_same_v<decltype(fixpp::session::SessionConfig::tracer_override),
@@ -54,15 +52,13 @@ static_assert(std::is_copy_constructible_v<fixpp::session::SessionConfig>,
 template <class T, class = void>
 struct has_log_sink_override : std::false_type {};
 template <class T>
-struct has_log_sink_override<
-    T, std::void_t<decltype(std::declval<T&>().log_sink_override)>>
+struct has_log_sink_override<T, std::void_t<decltype(std::declval<T&>().log_sink_override)>>
     : std::true_type {};
 
 template <class T, class = void>
 struct has_logger_override : std::false_type {};
 template <class T>
-struct has_logger_override<
-    T, std::void_t<decltype(std::declval<T&>().logger_override)>>
+struct has_logger_override<T, std::void_t<decltype(std::declval<T&>().logger_override)>>
     : std::true_type {};
 
 // T012 removal contract (contracts/adjacent-amendments.md item 4): the field is

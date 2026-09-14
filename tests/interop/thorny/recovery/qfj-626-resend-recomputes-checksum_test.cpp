@@ -82,12 +82,10 @@ namespace {
 
 // Build a FIX frame with deliberately WRONG BodyLength(9) and CheckSum(10).
 // The body itself is correct; only 9= and 10= are poisoned.
-static std::vector<std::byte> make_frame_with_wrong_9_10(std::string_view begin_string,
-                                                          std::string_view msg_type,
-                                                          std::uint32_t seq,
-                                                          std::string_view sender,
-                                                          std::string_view target,
-                                                          std::string_view extra = {}) {
+std::vector<std::byte> make_frame_with_wrong_9_10(std::string_view begin_string,
+                                                  std::string_view msg_type, std::uint32_t seq,
+                                                  std::string_view sender, std::string_view target,
+                                                  std::string_view extra = {}) {
     using namespace fixpp::interop::parity;
     std::string body;
     body += field(35, msg_type);
@@ -113,7 +111,7 @@ static std::vector<std::byte> make_frame_with_wrong_9_10(std::string_view begin_
     poisoned_msg += body;
     char wrong_cs_buf[5];
     std::snprintf(wrong_cs_buf, sizeof(wrong_cs_buf), "%03u",
-                  static_cast<unsigned int>((correct_cs + 7U) & 0xFFU));  // wrong checksum
+                  ((correct_cs + 7U) & 0xFFU));  // wrong checksum
     poisoned_msg += "10=" + std::string(wrong_cs_buf) + "\x01";
 
     std::vector<std::byte> frame;
@@ -191,7 +189,7 @@ using fixpp::test_support::extract_tag;
 // Compute the correct BodyLength for a FIX message body (fields after 9= up to
 // and including the SOH before 10=). Per FIX spec: body = bytes from first
 // field after BodyLength(9) to and including the delimiter before CheckSum(10).
-static std::string compute_correct_body_length(std::span<const std::byte> frame) {
+std::string compute_correct_body_length(std::span<const std::byte> frame) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     // Body starts after the second SOH (end of tag 9 field).
     auto pos9 = wire.find("9=");
@@ -208,7 +206,7 @@ static std::string compute_correct_body_length(std::span<const std::byte> frame)
 
 // Compute the correct CheckSum for a FIX message (sum of all bytes before 10=,
 // modulo 256, formatted as 3 digits).
-static std::string compute_correct_checksum(std::span<const std::byte> frame) {
+std::string compute_correct_checksum(std::span<const std::byte> frame) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     auto pos10 = wire.rfind("10=");
     if (pos10 == std::string::npos) return {};
@@ -270,8 +268,7 @@ protected:
         return fut.get();
     }
 
-    fixpp::core::expected_t<void> feed(fixpp::session::Session& s,
-                                       std::span<const std::byte> frm) {
+    fixpp::core::expected_t<void> feed(fixpp::session::Session& s, std::span<const std::byte> frm) {
         auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frm), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 100ms, "Qfj626Fixture::feed")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "Qfj626Fixture::feed");
@@ -305,12 +302,13 @@ TEST_F(Qfj626Fixture, ResendReplay_RecomputesBodyLengthAndChecksum) {
     bool found_replay = false;
     for (const auto& frame : capture.frames) {
         std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
-        if (wire.find("35=D\x01") == std::string::npos) continue;
-        if (wire.find("43=Y\x01") == std::string::npos) continue;
+        if (!wire.contains("35=D\x01")) continue;
+        if (!wire.contains("43=Y\x01")) continue;
         found_replay = true;
 
         // Assert PossDupFlag(43)=Y present (precondition check).
-        EXPECT_NE(wire.find("43=Y\x01"), std::string::npos) << "replay must carry PossDupFlag(43)=Y";
+        EXPECT_NE(wire.find("43=Y\x01"), std::string::npos)
+            << "replay must carry PossDupFlag(43)=Y";
         // Assert OrigSendingTime(122) present.
         EXPECT_NE(wire.find("122="), std::string::npos) << "replay must carry OrigSendingTime(122)";
 

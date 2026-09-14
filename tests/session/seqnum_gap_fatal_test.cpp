@@ -76,10 +76,9 @@ namespace fixpp::session::test {
 namespace {
 
 // Build a minimal FIX frame with a given MsgType and MsgSeqNum.
-static std::vector<std::byte> make_frame(std::string_view begin_string, std::string_view msg_type,
-                                         std::uint32_t seq, std::string_view sender,
-                                         std::string_view target,
-                                         std::string_view extra_fields = {}) {
+std::vector<std::byte> make_frame(std::string_view begin_string, std::string_view msg_type,
+                                  std::uint32_t seq, std::string_view sender,
+                                  std::string_view target, std::string_view extra_fields = {}) {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -112,23 +111,22 @@ static std::vector<std::byte> make_frame(std::string_view begin_string, std::str
     return frame;
 }
 
-static std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
-                                               std::string_view sender, std::string_view target,
-                                               int heartbt = 30) {
+std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
+                                        std::string_view sender, std::string_view target,
+                                        int heartbt = 30) {
     std::string extra;
     extra += "98=0\x01";
     extra += "108=" + std::to_string(heartbt) + "\x01";
     return make_frame(begin_string, "A", seq, sender, target, extra);
 }
 
-static std::vector<std::byte> make_heartbeat_frame(std::string_view begin_string, std::uint32_t seq,
-                                                   std::string_view sender,
-                                                   std::string_view target) {
+std::vector<std::byte> make_heartbeat_frame(std::string_view begin_string, std::uint32_t seq,
+                                            std::string_view sender, std::string_view target) {
     return make_frame(begin_string, "0", seq, sender, target);
 }
 
 // Extract a field value from a raw FIX wire frame.
-static std::string extract_field(std::span<const std::byte> frame, int tag) {
+std::string extract_field(std::span<const std::byte> frame, int tag) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = std::to_string(tag) + "=";
     auto pos = wire.find(needle);
@@ -144,17 +142,15 @@ static std::string extract_field(std::span<const std::byte> frame, int tag) {
 }
 
 // Check whether a frame contains a given tag=value pair.
-static bool frame_has_field(std::span<const std::byte> frame, int tag, std::string_view value) {
+bool frame_has_field(std::span<const std::byte> frame, int tag, std::string_view value) {
     return extract_field(frame, tag) == value;
 }
 
 // Check that a frame is a ResendRequest (MsgType=2).
-static bool is_resend_request(std::span<const std::byte> frame) {
-    return frame_has_field(frame, 35, "2");
-}
+bool is_resend_request(std::span<const std::byte> frame) { return frame_has_field(frame, 35, "2"); }
 
 // Check that a frame is a Logout (MsgType=5).
-static bool is_logout(std::span<const std::byte> frame) { return frame_has_field(frame, 35, "5"); }
+bool is_logout(std::span<const std::byte> frame) { return frame_has_field(frame, 35, "5"); }
 
 }  // namespace
 
@@ -271,7 +267,7 @@ TEST_F(SeqnumGapFatalTest, NoResendRequestEmittedOnTooHighGap) {
 
     // Too-high gap.
     auto hb = make_heartbeat_frame("FIX.4.2", 99, "TW", "ISLD");
-    feed_sync(sess, hb);
+    (void)feed_sync(sess, hb);  // outcome checked below via state, not the return value
 
     // 013 FR-009: session stays Active (AwaitingResend) after too-high gap.
     // (Pre-013: must be Disconnected or LogoutSent; amended per 013 T006a.)
@@ -296,7 +292,7 @@ TEST_F(SeqnumGapFatalTest, ActiveTooLowBecomesSessionFatal) {
     // In Active: next expected = 2. Send Heartbeat at seq=1 (too low).
     // 013: too-low Heartbeat is silently ignored; session stays Active.
     auto hb = make_heartbeat_frame("FIX.4.2", 1, "TW", "ISLD");
-    feed_sync(sess, hb);
+    (void)feed_sync(sess, hb);  // outcome checked below via state, not the return value
 
     const auto st = sess.state();
     EXPECT_EQ(st, fsm_state::Active)
@@ -338,7 +334,7 @@ TEST_F(SeqnumGapFatalTest, LogonSentTooHighBecomesSessionFatal) {
     // on whether the initiator's LogonSent FSM mutation is wired yet.
     // Both paths produce Disconnected per the data-model matrix.
     auto hb = make_heartbeat_frame("FIX.4.2", 99, "ISLD", "TW");
-    feed_sync(sess, hb);
+    (void)feed_sync(sess, hb);  // outcome checked below via state, not the return value
 
     EXPECT_EQ(sess.state(), fsm_state::Disconnected)
         << "LogonSent (or NotConnected) + unexpected Heartbeat must transition "

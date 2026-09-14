@@ -36,9 +36,10 @@
 //          precedent); tests/session/test_067_builder_failclosed.cpp (T013
 //          disposition precedent, wire_required_field_missing);
 //          tests/session/test_067_completeness.cpp (set-equality diagnostic
-//          precedent, ExactSetEqualityOverBuilderRegistryKeys); include/fixpp/wire/builder_validate.hpp
-//          (validate_required, wire_required_field_missing at its scalar and group-empty checks);
-//          src/capi/message_read.cpp's scan_slice_for_tag (precedent).
+//          precedent, ExactSetEqualityOverBuilderRegistryKeys);
+//          include/fixpp/wire/builder_validate.hpp (validate_required, wire_required_field_missing
+//          at its scalar and group-empty checks); src/capi/message_read.cpp's scan_slice_for_tag
+//          (precedent).
 
 #include <gtest/gtest.h>
 
@@ -49,8 +50,8 @@
 #include <fixpp/core/decimal_alias.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/dict/dictionary.hpp>
-#include <fixpp/v44/all.hpp>  // GENERATED (Phase 3b) -- build_<Msg>/validate_<Msg>/<Msg>Args/builder_registry
 #include <fixpp/v44/Messages.hpp>
+#include <fixpp/v44/all.hpp>  // GENERATED (Phase 3b) -- build_<Msg>/validate_<Msg>/<Msg>Args/builder_registry
 #include <memory_resource>
 #include <optional>
 #include <set>
@@ -117,7 +118,7 @@ std::optional<std::string_view> scan_slice_for_tag(std::span<const std::byte> sl
                 ok = false;
                 break;
             }
-            parsed_tag = static_cast<std::uint16_t>(parsed_tag * 10 + (c - '0'));
+            parsed_tag = static_cast<std::uint16_t>((parsed_tag * 10) + (c - '0'));
         }
         if (ok && parsed_tag == tag) {
             return sv.substr(eq + 1, value_end - (eq + 1));
@@ -420,7 +421,7 @@ TEST_F(AllFamiliesRoundtrip069, TradeCaptureReport) {
     // Nested depth (C3): NoSides(552) entry-level readback, not just top-level
     // scalars -- Side(54)/OrderID(37) both required per FIX44.xml.
     auto side_slices = mv.offsets().group_slices(552);
-    ASSERT_EQ(side_slices.size(), 1u) << "NoSides(552) must carry exactly 1 entry";
+    ASSERT_EQ(side_slices.size(), 1U) << "NoSides(552) must carry exactly 1 entry";
     std::span<const std::byte> const entry0{side_slices[0].data, side_slices[0].len};
     auto side_val = scan_slice_for_tag(entry0, 54);
     ASSERT_TRUE(side_val.has_value()) << "Side(54) not found in NoSides entry";
@@ -1914,11 +1915,9 @@ TEST_F(AllFamiliesRoundtrip069, CoverageSetEqualityOverAllEmittedBuilders) {
         emitted.insert(std::string{entry.msg_type});
 
     std::vector<std::string> missing;
-    std::set_difference(emitted.begin(), emitted.end(), seeded.begin(), seeded.end(),
-                        std::back_inserter(missing));
+    std::ranges::set_difference(emitted, seeded, std::back_inserter(missing));
     std::vector<std::string> extra;
-    std::set_difference(seeded.begin(), seeded.end(), emitted.begin(), emitted.end(),
-                        std::back_inserter(extra));
+    std::ranges::set_difference(seeded, emitted, std::back_inserter(extra));
 
     auto join = [](std::vector<std::string> const& v) {
         std::string s;
@@ -1933,16 +1932,16 @@ TEST_F(AllFamiliesRoundtrip069, CoverageSetEqualityOverAllEmittedBuilders) {
     EXPECT_TRUE(extra.empty())
         << "harness seeds MsgTypes NOT in builder_registry (stale/typo row): " << join(extra);
     EXPECT_EQ(seeded, emitted);
-    EXPECT_EQ(fixpp::v44::builder_registry.size(), 83u);
+    EXPECT_EQ(fixpp::v44::builder_registry.size(), 83U);
 }
 
 // ── T013 [US2] new-family required-field fail-closed witnesses ──────────
 // Disposition: fixpp::core::error::wire_required_field_missing (the SAME
 // enum test_067_builder_failclosed.cpp's RequiredGroupZero_ValidateRejects
-// asserts -- validate_required's required-scalar check (missing scalar) and its required-group-empty check (empty
-// required group) both return it). Each witness seeds every OTHER required
-// field and omits EXACTLY the one under test, so the reject is attributable
-// to that field (feedback_witness_asserts_named_postcondition_not_proxy (d)).
+// asserts -- validate_required's required-scalar check (missing scalar) and its
+// required-group-empty check (empty required group) both return it). Each witness seeds every OTHER
+// required field and omits EXACTLY the one under test, so the reject is attributable to that field
+// (feedback_witness_asserts_named_postcondition_not_proxy (d)).
 
 // Nested: TradeCaptureReport(AE)'s TrdCapRptSideGrp/NoSides is REQUIRED
 // (dictionaries/FIX44.xml's TrdCapRptSideGrp component) with a required entry field Side(54)

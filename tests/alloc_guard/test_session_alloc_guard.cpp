@@ -130,7 +130,7 @@ TEST(SessionAllocGuard, SeqnumPathNoGlobalHeapAlloc) {
     EXPECT_EQ(checked_count, kCorpus);
 
     // Drain async_mutex before dtor (terminate-precondition).
-    run_sync(ioc, mgr.drain());
+    ASSERT_TRUE(run_sync(ioc, mgr.drain()).has_value());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -593,8 +593,8 @@ private:
     //            so the caller can block reaching Active (C2.6; research D2).
     //   logged — teardown / 013-only received-141: store failure is swallowed
     //            and logged (I-07 logged-then-proceed) and the method co_returns
-    //            success (matching session.cpp's existing store_->reset() logged-then-proceed pattern; C2.6
-    //            zero-regression clause; data-model §"Durable reset helper").
+    //            success (matching session.cpp's existing store_->reset() logged-then-proceed
+    //            pattern; C2.6 zero-regression clause; data-model §"Durable reset helper").
     // Logic lives in session.cpp to keep this enum include-free ([const §XV.9]).
     // [024 data-model §"Durable reset helper"; C2.6; research D2]
     enum class reset_disposition : std::uint8_t { fatal = 0, logged = 1 };
@@ -613,8 +613,9 @@ private:
     // posture mismatch (or malformed 464). Emits a Logout(35=5) carrying reason_text
     // (fire toAdmin → assign_outbound → store_then_emit), then transitions to
     // Disconnected — the session never reaches Active. Mirrors the Logon-time
-    // Logout+disconnect disposition (session.cpp's 070-fix44-closeout S-029 posture-mismatch call site).
-    // Called from both the acceptor inbound-Logon and the initiator inbound-Logon-ack paths. [FR-002; D-F]
+    // Logout+disconnect disposition (session.cpp's 070-fix44-closeout S-029 posture-mismatch call
+    // site). Called from both the acceptor inbound-Logon and the initiator inbound-Logon-ack paths.
+    // [FR-002; D-F]
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> refuse_logon_with_logout_(
         std::string_view reason_text) noexcept;
 
@@ -1030,12 +1031,11 @@ private:
     // 014 T015 — live peer identity from the most recent successful reconnect
     // handshake. Stored by install_reconnected_transport (step 8) and consumed
     // by arm (1-live) in the LogonSent→Active Logon-ack authorization
-    // guard (session.cpp's arm (1-live) authorize block), which reset()s it after authorizing. Nullopt
-    // until the first successful reconnect; each successful reconnect overwrites
-    // it and the guard reset()s it on consume, so a stale identity from a prior
-    // session is never re-authorized. [data-model §E-2; contracts C2; FR-006]
-    // peer_identity is transitively available via session_config.hpp →
-    // compid_authorization_policy.hpp → peer_identity.hpp.
+    // guard (session.cpp's arm (1-live) authorize block), which reset()s it after authorizing.
+    // Nullopt until the first successful reconnect; each successful reconnect overwrites it and the
+    // guard reset()s it on consume, so a stale identity from a prior session is never
+    // re-authorized. [data-model §E-2; contracts C2; FR-006] peer_identity is transitively
+    // available via session_config.hpp → compid_authorization_policy.hpp → peer_identity.hpp.
     std::optional<fixpp::tls::peer_identity> live_peer_id_;
 
     // Outbound seqnum is managed exclusively by seqnum_mgr_ (RC#A gate-b/r1-green).
@@ -1207,7 +1207,8 @@ private:
     //   - write_gate_ acquire cancelled (operation_aborted from cancel_and_drain)
     //   - async_write returns !has_value() (any transport error)
     // NEVER holds the gate across any read — guards write-submit→complete only.
-    // [transport.hpp In-flight exclusivity; FQ-A D-6; feedback_async_mutex_us3_asio_cancel_and_subagent_seams]
+    // [transport.hpp In-flight exclusivity; FQ-A D-6;
+    // feedback_async_mutex_us3_asio_cancel_and_subagent_seams]
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> live_write_serialized_(
         std::span<const std::byte> frame) noexcept;
 
@@ -1217,8 +1218,8 @@ private:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> run_logout_phase1() noexcept;
 
     // 027 T005 — replay_outbound_range_: extracted from the inline
-    // ResendRequest-reply walk (session.cpp's `replay_outbound_range_` body). Replays stored outbound
-    // app messages in [begin, requested_end] (or through current when
+    // ResendRequest-reply walk (session.cpp's `replay_outbound_range_` body). Replays stored
+    // outbound app messages in [begin, requested_end] (or through current when
     // end_is_through_current=true) with PossDupFlag(43)=Y+OrigSendingTime(122)
     // at their original MsgSeqNum; collapses admin/absent runs into
     // SequenceReset-GapFill(123=Y). Transmit-only (does NOT advance the live

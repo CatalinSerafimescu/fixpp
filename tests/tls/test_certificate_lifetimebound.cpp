@@ -62,7 +62,7 @@ TEST(CertificateLifetimeBound, CertificateViewAccessors) {
     EXPECT_EQ(cert.x509_version(), 3);
     EXPECT_EQ(cert.alg(), signature_algorithm::ecdsa);
     EXPECT_EQ(cert.curve(), ecdsa_curve::p256);
-    EXPECT_EQ(cert.rsa_key_bits(), 0u);
+    EXPECT_EQ(cert.rsa_key_bits(), 0U);
     // not_before/not_after default to epoch (equal); the important thing is
     // the accessors compile and are callable — no lifetime issue.
     EXPECT_EQ(cert.not_before(), std::chrono::system_clock::time_point{});
@@ -91,7 +91,7 @@ TEST(CertificateLifetimeBound, PeerIdentityViewAccessors) {
     // subject_dn_view() is [[clang::lifetimebound]] on *this — OK when called
     // on a live object.
     EXPECT_EQ(id.subject_dn_view(), "CN=peer");
-    EXPECT_EQ(id.san_dns_names().size(), 1u);
+    EXPECT_EQ(id.san_dns_names().size(), 1U);
     EXPECT_TRUE(id.san_uris().empty());
 }
 

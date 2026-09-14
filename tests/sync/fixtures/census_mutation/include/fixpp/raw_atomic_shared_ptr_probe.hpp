@@ -9,6 +9,6 @@
 
 namespace fixpp::census_probe {
 struct Regrowth {
-  std::atomic<std::shared_ptr<int>> reintroduced_raw_slot_;
+    std::atomic<std::shared_ptr<int>> reintroduced_raw_slot_;
 };
 }  // namespace fixpp::census_probe

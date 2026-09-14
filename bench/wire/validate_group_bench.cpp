@@ -52,17 +52,16 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
-#include <memory_resource>
-#include <string>
-#include <string_view>
-#include <vector>
-
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/table_view.hpp>
 #include <fixpp/dict/xml_loader.hpp>
 #include <fixpp/wire/framer.hpp>
 #include <fixpp/wire/parser.hpp>
 #include <fixpp/wire/validator.hpp>
+#include <memory_resource>
+#include <string>
+#include <string_view>
+#include <vector>
 
 namespace {
 
@@ -93,7 +92,9 @@ constexpr std::size_t kScratchArena = 1024;
     std::string pre = std::string("8=FIX.4.4\x01") + "9=" + std::to_string(body.size()) + "\x01";
     pre.append(body);
     unsigned sum = 0;
-    for (unsigned char c : pre) { sum += c; }
+    for (unsigned char c : pre) {
+        sum += c;
+    }
     sum %= 256U;
     char chk[8]{};
     std::snprintf(chk, sizeof(chk), "10=%03u\x01", sum);
@@ -123,10 +124,10 @@ constexpr std::size_t kScratchArena = 1024;
 //     FIX44 requires the Instrument component (Symbol(55)) on this message.
 [[nodiscard]] std::string snapshot_body() {
     std::string s = header('W');
-    s += "55=IBM\x01";     // Instrument/Symbol (required component)
-    s += "268=2\x01";      // NoMDEntries
-    s += "269=0\x01";      // instance 1 — MDEntryType=Bid (the delimiter here)
-    s += "269=1\x01";      // instance 2 — MDEntryType=Offer
+    s += "55=IBM\x01";  // Instrument/Symbol (required component)
+    s += "268=2\x01";   // NoMDEntries
+    s += "269=0\x01";   // instance 1 — MDEntryType=Bid (the delimiter here)
+    s += "269=1\x01";   // instance 2 — MDEntryType=Offer
     return s;
 }
 
@@ -134,10 +135,10 @@ constexpr std::size_t kScratchArena = 1024;
 //     MDUpdateAction(279). Divergent context: pre-083 this frame REJECTED.
 [[nodiscard]] std::string incremental_body() {
     std::string s = header('X');
-    s += "268=2\x01";      // NoMDEntries
-    s += "279=0\x01";      // instance 1 — MDUpdateAction=New (the delimiter here)
-    s += "269=0\x01";      // MDEntryType (optional member)
-    s += "279=1\x01";      // instance 2 — MDUpdateAction=Change
+    s += "268=2\x01";  // NoMDEntries
+    s += "279=0\x01";  // instance 1 — MDUpdateAction=New (the delimiter here)
+    s += "269=0\x01";  // MDEntryType (optional member)
+    s += "279=1\x01";  // instance 2 — MDUpdateAction=Change
     s += "269=1\x01";
     return s;
 }
@@ -201,7 +202,7 @@ void run_validate_bench(benchmark::State& state, std::string const& body, char c
         std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                        std::pmr::null_memory_resource()};
         std::uint16_t ref_tag = 0;
-        auto const r = validator.validate(mv, &scratch_mr, &ref_tag);
+        auto r = validator.validate(mv, &scratch_mr, &ref_tag);
         benchmark::DoNotOptimize(r);
     }
     state.SetItemsProcessed(state.iterations());

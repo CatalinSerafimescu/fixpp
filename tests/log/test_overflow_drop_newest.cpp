@@ -26,14 +26,13 @@
 #include <atomic>
 #include <chrono>
 #include <cstring>
-#include <memory_resource>
-#include <thread>
-#include <vector>
-
 #include <fixpp/log/level.hpp>
 #include <fixpp/log/logger.hpp>
 #include <fixpp/log/record.hpp>
 #include <fixpp/log/sink.hpp>
+#include <memory_resource>
+#include <thread>
+#include <vector>
 
 namespace {
 
@@ -43,7 +42,7 @@ namespace {
 // Used to pause the drain thread so the ring fills up.
 class PausingSink final : public fixpp::log::Sink {
 public:
-    std::atomic<bool>               resume{false};
+    std::atomic<bool> resume{false};
     std::vector<fixpp::log::Record> captured;
 
     [[nodiscard]] fixpp::core::expected_t<void> open() override { return {}; }
@@ -64,19 +63,18 @@ public:
 
 // ── T015 / TS-2 ────────────────────────────────────────────────────────────
 
-TEST(LogOverflow, DropNewestPreservesOldest)
-{
+TEST(LogOverflow, DropNewestPreservesOldest) {
     // Arrange: Logger with capacity=1 (one slot ring) and a single PausingSink.
     // The drain thread will block inside PausingSink::emit() until we set resume.
     auto* pausing_sink_raw = new PausingSink{};
     // We retain a raw pointer for observation; Logger owns via unique_ptr.
-    auto  pausing_sink_ptr = std::unique_ptr<fixpp::log::Sink>(pausing_sink_raw);
+    auto pausing_sink_ptr = std::unique_ptr<fixpp::log::Sink>(pausing_sink_raw);
 
     std::pmr::vector<std::unique_ptr<fixpp::log::Sink>> sinks{};
     sinks.push_back(std::move(pausing_sink_ptr));
 
     fixpp::log::LoggerConfig cfg;
-    cfg.capacity    = 1u;  // one-slot ring (smallest possible)
+    cfg.capacity = 1U;  // one-slot ring (smallest possible)
     cfg.on_overflow = fixpp::log::overflow_policy::drop_newest;
 
     auto logger = std::make_unique<fixpp::log::Logger>(std::move(cfg), std::move(sinks));
@@ -85,7 +83,7 @@ TEST(LogOverflow, DropNewestPreservesOldest)
     // The drain starts to process it but blocks in PausingSink::emit().
     // While it's blocked, we enqueue 99 more records — all must be dropped.
 
-    constexpr int    k_total_emits = 100;
+    constexpr int k_total_emits = 100;
     constexpr std::uint32_t k_first_fmt_id =
         static_cast<std::uint32_t>(fixpp::log::detail::crc32_str("record {}"));
     constexpr std::uint32_t k_later_fmt_id =
@@ -98,13 +96,8 @@ TEST(LogOverflow, DropNewestPreservesOldest)
     auto ts = fixpp::core::utc_time_point{std::chrono::system_clock::now().time_since_epoch()};
 
     // Enqueue record #0 (the "oldest").
-    logger->enqueue(fixpp::log::Level::info,
-                    fixpp::log::cat::session,
-                    k_first_fmt_id,
-                    zeroed_trace_id,
-                    0u,
-                    ts,
-                    {fixpp::log::ArgValue::from_u64(0u)});
+    logger->enqueue(fixpp::log::Level::info, fixpp::log::cat::session, k_first_fmt_id,
+                    zeroed_trace_id, 0U, ts, {fixpp::log::ArgValue::from_u64(0U)});
 
     // Give the drain thread a brief moment to pick up the first record and
     // enter the blocking emit().  Without this, the drain might not have
@@ -141,12 +134,8 @@ TEST(LogOverflow, DropNewestPreservesOldest)
     // the drain has locked slot 0).
     // We loop and count drops ourselves vs. what the logger reports.
     for (int i = 1; i < k_total_emits; ++i) {
-        logger->enqueue(fixpp::log::Level::info,
-                        fixpp::log::cat::session,
-                        k_later_fmt_id,
-                        zeroed_trace_id,
-                        0u,
-                        ts,
+        logger->enqueue(fixpp::log::Level::info, fixpp::log::cat::session, k_later_fmt_id,
+                        zeroed_trace_id, 0U, ts,
                         {fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(i))});
     }
 
@@ -190,21 +179,18 @@ TEST(LogOverflow, DropNewestPreservesOldest)
 
     // ── Assertions ──────────────────────────────────────────────────────────
 
-    auto const total_drops    = logger->drop_count();
+    auto const total_drops = logger->drop_count();
     auto const total_captured = pausing_sink_raw->captured.size();
 
     // Total accounting: all k_total_emits records must be accounted for.
-    EXPECT_EQ(total_drops + total_captured,
-              static_cast<std::uint64_t>(k_total_emits))
+    EXPECT_EQ(total_drops + total_captured, static_cast<std::uint64_t>(k_total_emits))
         << "Total accounting: drop_count + captured must equal total emits";
 
     // At least some were dropped (capacity=1, 100 emits → at least 98 drops).
-    EXPECT_GE(total_drops, 1u)
-        << "At least one record must have been dropped";
+    EXPECT_GE(total_drops, 1U) << "At least one record must have been dropped";
 
     // The drain processed at least one record.
-    ASSERT_GE(total_captured, 1u)
-        << "At least one record must have been processed";
+    ASSERT_GE(total_captured, 1U) << "At least one record must have been processed";
 
     // ── OLDEST-retained proof ────────────────────────────────────────────────
     // The FIRST record captured by the sink must be the OLDEST one we enqueued
@@ -263,13 +249,12 @@ TEST(LogOverflow, DropNewestPreservesOldest)
 // (The trade-off is slightly lower throughput; acceptable for correctness.)
 //
 // This test is a simpler variant that validates drop_count exactly.
-TEST(LogOverflow, ExactDropCount99WithPausedDrain)
-{
+TEST(LogOverflow, ExactDropCount99WithPausedDrain) {
     // PausingSink2: blocks emit() BEFORE advancing any state.
     // The drain will NOT call read_sequence_++ until emit() returns.
     struct ExactPausingSink final : public fixpp::log::Sink {
-        std::atomic<bool>               may_proceed{false};
-        std::atomic<int>                emit_count{0};
+        std::atomic<bool> may_proceed{false};
+        std::atomic<int> emit_count{0};
         std::vector<fixpp::log::Record> captured;
 
         [[nodiscard]] fixpp::core::expected_t<void> open() override { return {}; }
@@ -288,13 +273,13 @@ TEST(LogOverflow, ExactDropCount99WithPausedDrain)
     };
 
     auto* exact_sink_raw = new ExactPausingSink{};
-    auto  exact_sink_ptr = std::unique_ptr<fixpp::log::Sink>(exact_sink_raw);
+    auto exact_sink_ptr = std::unique_ptr<fixpp::log::Sink>(exact_sink_raw);
 
     std::pmr::vector<std::unique_ptr<fixpp::log::Sink>> sinks{};
     sinks.push_back(std::move(exact_sink_ptr));
 
     fixpp::log::LoggerConfig cfg;
-    cfg.capacity    = 1u;
+    cfg.capacity = 1U;
     cfg.on_overflow = fixpp::log::overflow_policy::drop_newest;
 
     auto logger = std::make_unique<fixpp::log::Logger>(std::move(cfg), std::move(sinks));
@@ -311,13 +296,8 @@ TEST(LogOverflow, ExactDropCount99WithPausedDrain)
     // Enqueue all 100 records quickly.
     for (int i = 0; i < k_total_emits; ++i) {
         auto fid = (i == 0) ? k_first_fmt_id : k_later_fmt_id;
-        logger->enqueue(fixpp::log::Level::info,
-                        fixpp::log::cat::session,
-                        fid,
-                        zeroed_trace_id,
-                        0u,
-                        ts,
-                        {fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(i))});
+        logger->enqueue(fixpp::log::Level::info, fixpp::log::cat::session, fid, zeroed_trace_id, 0U,
+                        ts, {fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(i))});
     }
 
     // Wait briefly for the drain thread to pick up (and block on) the first record.
@@ -343,7 +323,7 @@ TEST(LogOverflow, ExactDropCount99WithPausedDrain)
     // Shut down.
     (void)logger->shutdown(std::chrono::seconds{5});
 
-    auto const total_drops    = logger->drop_count();
+    auto const total_drops = logger->drop_count();
     auto const total_captured = static_cast<int>(exact_sink_raw->captured.size());
 
     // ── Assertions ──────────────────────────────────────────────────────────
@@ -353,12 +333,11 @@ TEST(LogOverflow, ExactDropCount99WithPausedDrain)
         << "drop_count + captured must equal k_total_emits";
 
     // Exact drop count == 99 (1 record retained, 99 dropped).
-    EXPECT_EQ(total_drops, 99u)
+    EXPECT_EQ(total_drops, 99U)
         << "With capacity=1 and drain fully paused, 99 of 100 records must be dropped";
 
     // Exactly 1 record captured.
-    EXPECT_EQ(total_captured, 1)
-        << "Exactly 1 record must have been processed";
+    EXPECT_EQ(total_captured, 1) << "Exactly 1 record must have been processed";
 
     // The retained record is the OLDEST one (record #0, format_id==k_first_fmt_id).
     ASSERT_GE(total_captured, 1);

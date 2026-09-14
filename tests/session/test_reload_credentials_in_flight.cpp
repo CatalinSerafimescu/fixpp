@@ -119,9 +119,9 @@ struct mock_cert_source final : public fixpp::tls::cert_source {
 // ─────────────────────────────────────────────────────────────────────────────
 class mock_transport_factory final : public fixpp::transport::TransportFactory {
 public:
-    fixpp::sync::atomic_shared_ptr<fixpp::tls::cert_source> cert_source_slot_{};
+    fixpp::sync::atomic_shared_ptr<fixpp::tls::cert_source> cert_source_slot_;
     std::atomic<int> reload_call_count{0};
-    std::shared_ptr<fixpp::tls::cert_source> last_reloaded_source{};
+    std::shared_ptr<fixpp::tls::cert_source> last_reloaded_source;
 
     [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::transport::Transport>> make(
         asio::any_io_executor /*exec*/, fixpp::tls::SslCtxConfig /*ssl_cfg*/,

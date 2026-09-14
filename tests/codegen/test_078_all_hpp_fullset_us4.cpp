@@ -71,10 +71,6 @@
 // tests/session/test_069_all_families_roundtrip.cpp (Leg B literal-input
 // oracle).
 
-#include <fixpp/v44/all.hpp>  // GENERATED -- build_<Msg>/validate_<Msg>/builder_registry (FR-008/FR-012)
-
-#include "builder_completeness_common.hpp"
-
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -82,6 +78,7 @@
 #include <cstddef>
 #include <fixpp/core/decimal_alias.hpp>
 #include <fixpp/dict/dictionary.hpp>
+#include <fixpp/v44/all.hpp>  // GENERATED -- build_<Msg>/validate_<Msg>/builder_registry (FR-008/FR-012)
 #include <iterator>
 #include <memory_resource>
 #include <optional>
@@ -92,6 +89,7 @@
 #include <utility>
 #include <vector>
 
+#include "builder_completeness_common.hpp"
 #include "support/app_message_read_scaffold.hpp"
 
 #ifndef FIXPP_DICT_DATA_DIR
@@ -130,7 +128,8 @@ std::vector<Entry> const kEntries = {
 // TU-local scan_slice_for_tag, not exported, so replicated here at test
 // scope): walks a bounded {data,len} group-instance slice for `<tag>=<value>`
 // delimited by '=' and SOH, avoiding a bare substring-match false positive.
-std::optional<std::string_view> scan_slice_for_tag(std::span<const std::byte> slice, std::uint16_t tag) {
+std::optional<std::string_view> scan_slice_for_tag(std::span<const std::byte> slice,
+                                                   std::uint16_t tag) {
     std::string_view sv{reinterpret_cast<char const*>(slice.data()), slice.size()};
     std::size_t pos = 0;
     while (pos < sv.size()) {
@@ -146,7 +145,7 @@ std::optional<std::string_view> scan_slice_for_tag(std::span<const std::byte> sl
                 ok = false;
                 break;
             }
-            parsed_tag = static_cast<std::uint16_t>(parsed_tag * 10 + (c - '0'));
+            parsed_tag = static_cast<std::uint16_t>((parsed_tag * 10) + (c - '0'));
         }
         if (ok && parsed_tag == tag) {
             return sv.substr(eq + 1, value_end - (eq + 1));
@@ -281,7 +280,7 @@ TEST(AllHppFullsetUS4, TradeCaptureReport_GroupBearing_ByteIdenticalToEstablishe
     // Nested depth (FR-012 read-side counterpart): NoSides(552) entry-level
     // readback through the group headers all.hpp pulled in transitively.
     auto side_slices = mv.offsets().group_slices(552);
-    ASSERT_EQ(side_slices.size(), 1u) << "NoSides(552) must carry exactly 1 entry";
+    ASSERT_EQ(side_slices.size(), 1U) << "NoSides(552) must carry exactly 1 entry";
     std::span<const std::byte> const entry0{side_slices[0].data, side_slices[0].len};
     auto side_val = scan_slice_for_tag(entry0, 54);
     ASSERT_TRUE(side_val.has_value()) << "Side(54) not found in NoSides entry";

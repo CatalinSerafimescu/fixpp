@@ -27,7 +27,6 @@
 
 #include <cstddef>
 #include <cstdint>
-
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
@@ -57,14 +56,13 @@ TEST(ScalarAsGroup, SymbolTagQueriedAsGroupIsNotASpuriousInstance) {
     bool slices_nonempty = true;
     std::size_t slice_count = 999;
 
-    f.app->on_from_app =
-        [&](const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg) {
-            const auto& offsets = msg.offsets();
-            tag_present = static_cast<bool>(offsets.find(55));
-            auto slices = offsets.group_slices(55);
-            slice_count = slices.size();
-            slices_nonempty = !slices.empty();
-        };
+    f.app->on_from_app = [&](const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg) {
+        const auto& offsets = msg.offsets();
+        tag_present = static_cast<bool>(offsets.find(55));
+        auto slices = offsets.group_slices(55);
+        slice_count = slices.size();
+        slices_nonempty = !slices.empty();
+    };
 
     auto suffix = fixpp_test_support::execution_report_two_legs_trailing_suffix();
     auto frame = fixpp_test_support::make_execution_report_frame(suffix, /*seq=*/2, "TW", "ISLD");

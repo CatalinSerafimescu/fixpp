@@ -68,9 +68,9 @@ struct ParsedRecord {
 [[nodiscard]] std::vector<ParsedRecord> parse_stream(std::string const& path);
 
 struct Mismatch {
-    std::string path;   // field path per contract § Canonical form; empty for
-                         // the whole-record "no readback" case (FR-016c)
-    std::string cls;     // "value_mismatch" | "missing" | "spurious" (FR-006)
+    std::string path;  // field path per contract § Canonical form; empty for
+                       // the whole-record "no readback" case (FR-016c)
+    std::string cls;   // "value_mismatch" | "missing" | "spurious" (FR-006)
     std::string sent_value;
     std::string readback_value;
 };
@@ -89,10 +89,10 @@ struct WitnessIdentity {
 
 struct WitnessRow {
     std::string witness_id;  // derived: cell_id + ":" + script_step_id + ":"
-                              // + direction + ":" + occurrence (data-model.md
-                              // §4: "stable and derivable from the
-                              // conversation script" — script_step_id is that
-                              // derivation's input)
+                             // + direction + ":" + occurrence (data-model.md
+                             // §4: "stable and derivable from the
+                             // conversation script" — script_step_id is that
+                             // derivation's input)
     std::string run_id;
     bool authoritative = false;
     std::string combo_id;
@@ -105,8 +105,8 @@ struct WitnessRow {
     std::string direction;
     long long occurrence = 0;
     std::string verdict;  // "pass" | "fail" — this comparator never emits
-                           // "skip" (data-model.md §4: "skip may not be
-                           // produced by a missing record")
+                          // "skip" (data-model.md §4: "skip may not be
+                          // produced by a missing record")
     std::vector<Mismatch> mismatch;
 };
 
@@ -139,9 +139,9 @@ using DecimalTagResolver = std::function<bool(std::uint16_t tag)>;
 // (see DecimalTagResolver above) — required, not defaulted: a comparator
 // with no dictionary behind it has no basis for guessing.
 [[nodiscard]] std::vector<WitnessRow> compare_streams(std::vector<ParsedRecord> const& stream_a,
-                                                       std::vector<ParsedRecord> const& stream_b,
-                                                       WitnessIdentity const& identity,
-                                                       DecimalTagResolver const& is_decimal_tag);
+                                                      std::vector<ParsedRecord> const& stream_b,
+                                                      WitnessIdentity const& identity,
+                                                      DecimalTagResolver const& is_decimal_tag);
 
 // The comparator→promotion hand-off (data-model.md §4, pinned `a7923892`):
 // `rows` — the FULL result of one compare_streams() call, not a filtered

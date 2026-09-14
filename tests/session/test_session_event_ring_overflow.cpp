@@ -29,7 +29,6 @@
 
 using fixpp::core::error;
 using fixpp::session::kSessionEventRingCapacity;
-using fixpp::session::session_event_sequence_numbers_reset;
 using fixpp::session::session_event_tls_validation_failed;
 using fixpp::session::SessionEvent;
 using fixpp::transport::ListenerEvents;
@@ -212,7 +211,7 @@ TEST(ListenerEventsRingOverflow, EmitWithStringsRetainsLastSixteen) {
 // ─────────────────────────────────────────────────────────────────────────────
 TEST(ListenerEventsRingOverflow, RingCapacityConstantIs16) {
     // Verify the constant is exactly 16 per FR-035 v1.0 contract.
-    EXPECT_EQ(kSessionEventRingCapacity, 16u) << "FR-035 v1.0 contract: ring capacity must be 16";
+    EXPECT_EQ(kSessionEventRingCapacity, 16U) << "FR-035 v1.0 contract: ring capacity must be 16";
 }
 
 }  // namespace

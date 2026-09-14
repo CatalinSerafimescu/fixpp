@@ -32,10 +32,10 @@
 #include <fixpp/otel/session_spans.hpp>
 
 // OTel SDK — in-memory exporter for span capture.
-#include <opentelemetry/exporters/memory/in_memory_span_exporter_factory.h>
 #include <opentelemetry/exporters/memory/in_memory_span_data.h>
-#include <opentelemetry/sdk/trace/tracer_provider_factory.h>
+#include <opentelemetry/exporters/memory/in_memory_span_exporter_factory.h>
 #include <opentelemetry/sdk/trace/simple_processor_factory.h>
+#include <opentelemetry/sdk/trace/tracer_provider_factory.h>
 
 // OTel span data inspection.
 #include <opentelemetry/sdk/trace/span_data.h>
@@ -43,8 +43,8 @@
 
 // OTel attribute access — OwnedAttributeValue is nostd::variant; get_if lives
 // in the nostd namespace.
-#include <opentelemetry/sdk/common/attribute_utils.h>
 #include <opentelemetry/nostd/variant.h>
+#include <opentelemetry/sdk/common/attribute_utils.h>
 
 // Complete metric instrument types (needed for CreateUInt64Counter return type).
 #include <opentelemetry/metrics/sync_instruments.h>
@@ -65,22 +65,17 @@ class SessionSpansTest : public ::testing::Test {
 protected:
     void SetUp() override {
         data_ = std::make_shared<opentelemetry::exporter::memory::InMemorySpanData>(200);
-        auto exporter =
-            opentelemetry::exporter::memory::InMemorySpanExporterFactory::Create(data_);
-        auto processor =
-            sdk_trace::SimpleSpanProcessorFactory::Create(std::move(exporter));
+        auto exporter = opentelemetry::exporter::memory::InMemorySpanExporterFactory::Create(data_);
+        auto processor = sdk_trace::SimpleSpanProcessorFactory::Create(std::move(exporter));
         auto resource = opentelemetry::sdk::resource::Resource::GetDefault();
-        sdk_provider_ = sdk_trace::TracerProviderFactory::Create(
-            std::move(processor), resource);
+        sdk_provider_ = sdk_trace::TracerProviderFactory::Create(std::move(processor), resource);
     }
 
     opentelemetry::nostd::shared_ptr<opentelemetry::trace::Tracer> get_tracer() {
         return sdk_provider_->GetTracer("fixpp.session");
     }
 
-    std::vector<std::unique_ptr<sdk_trace::SpanData>> get_spans() {
-        return data_->GetSpans();
-    }
+    std::vector<std::unique_ptr<sdk_trace::SpanData>> get_spans() { return data_->GetSpans(); }
 
     // Helper: extract the int64_t latency_ns from a SpanData's attributes.
     // Returns -1 if not found or wrong type.
@@ -131,8 +126,8 @@ TEST_F(SessionSpansTest, SessionSpanAndParseChildBothOK) {
 
     const auto latency_ns = std::max(
         INT64_C(1),
-        std::chrono::duration_cast<std::chrono::nanoseconds>(
-            std::chrono::steady_clock::now() - t0).count());
+        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0)
+            .count());
 
     parse_span->SetAttribute("latency_ns", latency_ns);
     parse_span->SetStatus(opentelemetry::trace::StatusCode::kOk);
@@ -142,20 +137,20 @@ TEST_F(SessionSpansTest, SessionSpanAndParseChildBothOK) {
     session_span->End();
 
     auto spans = get_spans();
-    ASSERT_EQ(spans.size(), 2u);
+    ASSERT_EQ(spans.size(), 2U);
 
     sdk_trace::SpanData* session_data = nullptr;
-    sdk_trace::SpanData* parse_data   = nullptr;
+    sdk_trace::SpanData* parse_data = nullptr;
     for (auto& s : spans) {
         if (s->GetName() == "fixpp.session.lifecycle") session_data = s.get();
-        if (s->GetName() == "fixpp.session.parse")     parse_data   = s.get();
+        if (s->GetName() == "fixpp.session.parse") parse_data = s.get();
     }
     ASSERT_NE(session_data, nullptr) << "session lifecycle span not found";
-    ASSERT_NE(parse_data,   nullptr) << "parse span not found";
+    ASSERT_NE(parse_data, nullptr) << "parse span not found";
 
     // Both OK.
     EXPECT_EQ(session_data->GetStatus(), opentelemetry::trace::StatusCode::kOk);
-    EXPECT_EQ(parse_data->GetStatus(),   opentelemetry::trace::StatusCode::kOk);
+    EXPECT_EQ(parse_data->GetStatus(), opentelemetry::trace::StatusCode::kOk);
 
     // Parent span_id of parse == span_id of session lifecycle.
     EXPECT_EQ(parse_data->GetParentSpanId(), session_data->GetSpanId())
@@ -194,10 +189,10 @@ TEST_F(SessionSpansTest, ParseChildOnDifferentThreadParentsCorrectly) {
             // Deliberate sub-granularity sleep — see the file header (issue #327).
             std::this_thread::sleep_for(std::chrono::microseconds(10));
 
-            const auto ns = std::max(
-                INT64_C(1),
-                std::chrono::duration_cast<std::chrono::nanoseconds>(
-                    std::chrono::steady_clock::now() - t0).count());
+            const auto ns =
+                std::max(INT64_C(1), std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                         std::chrono::steady_clock::now() - t0)
+                                         .count());
             ps->SetAttribute("latency_ns", ns);
             ps->SetStatus(opentelemetry::trace::StatusCode::kOk);
             ps->End();
@@ -209,16 +204,16 @@ TEST_F(SessionSpansTest, ParseChildOnDifferentThreadParentsCorrectly) {
     session_span->End();
 
     auto spans = get_spans();
-    ASSERT_EQ(spans.size(), 2u);
+    ASSERT_EQ(spans.size(), 2U);
 
     sdk_trace::SpanData* session_data = nullptr;
-    sdk_trace::SpanData* parse_data   = nullptr;
+    sdk_trace::SpanData* parse_data = nullptr;
     for (auto& s : spans) {
         if (s->GetName() == "fixpp.session.lifecycle") session_data = s.get();
-        if (s->GetName() == "fixpp.session.parse")     parse_data   = s.get();
+        if (s->GetName() == "fixpp.session.parse") parse_data = s.get();
     }
     ASSERT_NE(session_data, nullptr);
-    ASSERT_NE(parse_data,   nullptr);
+    ASSERT_NE(parse_data, nullptr);
 
     // Cross-thread: parent_span_id must still equal session span_id.
     EXPECT_EQ(parse_data->GetParentSpanId(), session_data->GetSpanId())
@@ -257,15 +252,15 @@ TEST_F(SessionSpansTest, ParseSpanRaiiSetsLatencyAndStatus) {
     }
 
     auto spans = get_spans();
-    ASSERT_EQ(spans.size(), 2u);
+    ASSERT_EQ(spans.size(), 2U);
 
-    sdk_trace::SpanData* parse_data   = nullptr;
+    sdk_trace::SpanData* parse_data = nullptr;
     sdk_trace::SpanData* session_data = nullptr;
     for (auto& s : spans) {
-        if (s->GetName() == "fixpp.session.parse")     parse_data   = s.get();
+        if (s->GetName() == "fixpp.session.parse") parse_data = s.get();
         if (s->GetName() == "fixpp.session.lifecycle") session_data = s.get();
     }
-    ASSERT_NE(parse_data,   nullptr) << "parse span missing from in-memory exporter";
+    ASSERT_NE(parse_data, nullptr) << "parse span missing from in-memory exporter";
     ASSERT_NE(session_data, nullptr) << "session span missing from in-memory exporter";
 
     // Parent linkage via ParseSpan's explicit-SpanContext parent.
@@ -380,9 +375,7 @@ TEST(TracerProviderE3Negative, InitFailureFallsBackToNoopAndSurfacesError) {
     fixpp::otel::OtelConfig cfg{};
     cfg.resource.service_name = "test-negative";
     // Inject a factory that throws — drives the catch(...)→Noop arm.
-    cfg.tracer_factory_for_test = []()
-        -> std::shared_ptr<opentelemetry::trace::TracerProvider>
-    {
+    cfg.tracer_factory_for_test = []() -> std::shared_ptr<opentelemetry::trace::TracerProvider> {
         throw std::runtime_error("simulated TracerProvider init failure");
     };
 
@@ -392,8 +385,7 @@ TEST(TracerProviderE3Negative, InitFailureFallsBackToNoopAndSurfacesError) {
     // (2) init_status() must carry otel_provider_init_failed.
     ASSERT_FALSE(provider.init_status().has_value())
         << "init_status must be an error after factory throw";
-    EXPECT_EQ(provider.init_status().error(),
-              fixpp::core::error::otel_provider_init_failed)
+    EXPECT_EQ(provider.init_status().error(), fixpp::core::error::otel_provider_init_failed)
         << "init_status error must be otel_provider_init_failed";
 
     // (3) get_tracer() returns non-null; span ops are silent (no-op provider).
@@ -416,9 +408,7 @@ TEST(MeterProviderE3Negative, InitFailureFallsBackToNoopAndSurfacesError) {
     fixpp::otel::OtelConfig cfg{};
     cfg.resource.service_name = "test-negative";
     // Inject a factory that throws — drives the catch(...)→Noop arm.
-    cfg.meter_factory_for_test = []()
-        -> std::shared_ptr<opentelemetry::metrics::MeterProvider>
-    {
+    cfg.meter_factory_for_test = []() -> std::shared_ptr<opentelemetry::metrics::MeterProvider> {
         throw std::runtime_error("simulated MeterProvider init failure");
     };
 
@@ -428,8 +418,7 @@ TEST(MeterProviderE3Negative, InitFailureFallsBackToNoopAndSurfacesError) {
     // (2) init_status() must carry otel_provider_init_failed.
     ASSERT_FALSE(provider.init_status().has_value())
         << "init_status must be an error after factory throw";
-    EXPECT_EQ(provider.init_status().error(),
-              fixpp::core::error::otel_provider_init_failed)
+    EXPECT_EQ(provider.init_status().error(), fixpp::core::error::otel_provider_init_failed)
         << "init_status error must be otel_provider_init_failed";
 
     // (3) get_meter() returns non-null; counter ops are silent (no-op provider).

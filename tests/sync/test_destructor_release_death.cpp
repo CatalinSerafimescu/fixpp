@@ -38,7 +38,6 @@
 namespace {
 
 using fixpp::core::error;
-using fixpp::sync::async_lock_guard;
 using fixpp::sync::async_mutex;
 using fixpp::sync::expected_t;
 
@@ -76,7 +75,7 @@ inline void install_guard_terminate_marker() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Trigger: holder acquires, waiter parks, mutex is destroyed → terminate.
-static void destroy_with_live_waiter() {
+void destroy_with_live_waiter() {
     install_guard_terminate_marker();
     auto* mtx = new async_mutex{};
     asio::io_context ioc;
@@ -112,7 +111,7 @@ static void destroy_with_live_waiter() {
 }
 
 // Trigger: holder acquires and never unlocks; mutex destroyed → terminate.
-static void destroy_while_held() {
+void destroy_while_held() {
     install_guard_terminate_marker();
     auto* mtx = new async_mutex{};
     asio::io_context ioc;
@@ -191,7 +190,7 @@ TEST(SeamDestructorReleaseDeath, DestroyWhileHeldTerminates) {
 // holder's manual unlock() then walks the LIFO, drops the cancelled node,
 // and restores state_ == not_locked / next_drain_head_ == nullptr -- the
 // CURRENT guard reads only those two and sees a "fully drained" mutex.
-static void cancel_delivered_then_destroy() {
+void cancel_delivered_then_destroy() {
     install_guard_terminate_marker();
     auto* mtx = new async_mutex{};
     asio::io_context ioc;
@@ -258,7 +257,7 @@ static void cancel_delivered_then_destroy() {
 // runner's tail dereferencing freed `this` afterward -- nondeterministic
 // on this non-ASan debug lane; this construction avoids that entirely by
 // never letting the posted runner run at all).
-static void grant_delivered_then_destroy() {
+void grant_delivered_then_destroy() {
     install_guard_terminate_marker();
     auto* mtx = new async_mutex{};
     asio::io_context ioc;
@@ -318,7 +317,7 @@ static void grant_delivered_then_destroy() {
 // observed at destroy time together with `state_ == not_locked`: the
 // residual term is always masked by the held/granted state_ term in this
 // shape.
-static void grant_with_tail_then_destroy() {
+void grant_with_tail_then_destroy() {
     install_guard_terminate_marker();
     auto* mtx = new async_mutex{};
     asio::io_context ioc;
@@ -405,7 +404,7 @@ TEST(SeamDestructorReleaseDeath, ProperlyDrainedMutexDoesNotTerminate) {
     auto holder_coro = [&]() -> asio::awaitable<void> {
         auto g = co_await mtx->async_lock();
         EXPECT_TRUE(g.has_value());
-        co_await yield_n(N * 4 + 8);
+        co_await yield_n((N * 4) + 8);
         // Guard dtor → unlock() (draining_ == true → short-circuit).
     };
 

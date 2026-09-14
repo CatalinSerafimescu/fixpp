@@ -6,11 +6,12 @@
 // Dictionary::as_table_view(), and assert that FIX44 tag 295 (NoQuoteEntries)
 // resolves — IN MASSQUOTE CONTEXT (msg_type "i", nested one level under
 // NoQuoteSets(296) via the QuotSetGrp/QuotEntryGrp component chain,
-// dictionaries/FIX44.xml's MassQuote message / QuotSetGrp / QuotEntryGrp components) — to QuotEntryGrp's members
-// {299 QuoteEntryID, 132 BidPx, 133 OfferPx}, NOT the globally-first-declared
-// QuotCxlEntriesGrp variant (dictionaries/FIX44.xml's QuotCxlEntriesGrp component, which resolves 295's
-// members via Instrument/FinancingDetails/UndInstrmtGrp/InstrmtLegGrp
-// components and carries NONE of QuoteEntryID/BidPx/OfferPx directly).
+// dictionaries/FIX44.xml's MassQuote message / QuotSetGrp / QuotEntryGrp components) — to
+// QuotEntryGrp's members {299 QuoteEntryID, 132 BidPx, 133 OfferPx}, NOT the
+// globally-first-declared QuotCxlEntriesGrp variant (dictionaries/FIX44.xml's QuotCxlEntriesGrp
+// component, which resolves 295's members via
+// Instrument/FinancingDetails/UndInstrmtGrp/InstrmtLegGrp components and carries NONE of
+// QuoteEntryID/BidPx/OfferPx directly).
 //
 // Mutation-proven RED on the pre-fix bare-no_tag-keyed store (SC-003): before
 // 063 T011-T015, Dictionary::as_table_view() populates ONLY the legacy
@@ -45,7 +46,6 @@
 
 namespace {
 
-using fixpp::dict::table_view;
 using fixpp::wire::group_context;
 
 // The context-aware group_member_fn_t is shared across tests — see
@@ -73,7 +73,7 @@ TEST(DefectAGroupContext, MassQuote295ResolvesToQuotEntryGrpNotQuotCxlEntriesGrp
     std::vector<std::uint16_t> const member_vec{members.begin(), members.end()};
 
     auto const contains = [&](std::uint16_t tag) {
-        return std::find(member_vec.begin(), member_vec.end(), tag) != member_vec.end();
+        return std::ranges::find(member_vec, tag) != member_vec.end();
     };
 
     EXPECT_TRUE(contains(299)) << "295 in MassQuote context must include QuoteEntryID(299) "

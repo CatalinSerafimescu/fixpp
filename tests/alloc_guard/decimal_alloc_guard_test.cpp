@@ -14,7 +14,6 @@
 #include "fixpp/core/decimal.hpp"
 
 using fixpp::core::decimal;
-using fixpp::core::decimal_traits;
 using fixpp::core::pod_decimal;
 
 // The alloc-guard interceptor watches for malloc/free between

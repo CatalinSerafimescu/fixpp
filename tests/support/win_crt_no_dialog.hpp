@@ -16,6 +16,7 @@
 
 #ifdef _WIN32
 #include <crtdbg.h>
+
 #include <cstdlib>
 
 namespace fixpp_test_detail {

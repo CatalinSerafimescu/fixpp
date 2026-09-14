@@ -42,28 +42,42 @@ struct NewOrderListOrderSeed {
     std::int64_t list_seq_no;
     char side;
     std::string_view symbol;
-    std::string_view order_qty;  // raw ASCII decimal literal
+    std::string_view order_qty;                      // raw ASCII decimal literal
     std::span<const NewOrderListPartySeed> parties;  // empty -> NoPartyIDs=0
 };
 
 // ── E (NewOrderList) seed — matches tests/session/golden/new_order_list.fix ──
 // order 1 (ORD1): carries the nested 453->802 party chain.
 inline constexpr std::array<NewOrderListPartySubIdSeed, 1> kNewOrderListOrd1Subs{{
-    NewOrderListPartySubIdSeed{"SUB1", 1},
+    NewOrderListPartySubIdSeed{.party_sub_id = "SUB1", .party_sub_id_type = 1},
 }};
 
 inline constexpr std::array<NewOrderListPartySeed, 1> kNewOrderListOrd1Parties{{
-    NewOrderListPartySeed{"PARTY1", 'D', 1, std::span<const NewOrderListPartySubIdSeed>{kNewOrderListOrd1Subs}},
+    NewOrderListPartySeed{
+        .party_id = "PARTY1",
+        .party_id_source = 'D',
+        .party_role = 1,
+        .sub_ids = std::span<const NewOrderListPartySubIdSeed>{kNewOrderListOrd1Subs}},
 }};
 
 // order 2 (ORD2): NoPartyIDs=0 (present-but-empty) -> empty parties span.
 inline constexpr std::array<NewOrderListPartySeed, 0> kNewOrderListOrd2Parties{};
 
 inline constexpr std::array<NewOrderListOrderSeed, 2> kNewOrderListOrders{{
-    NewOrderListOrderSeed{"ORD1", 1, '1', "MSFT", "150.75",
-                          std::span<const NewOrderListPartySeed>{kNewOrderListOrd1Parties}},
-    NewOrderListOrderSeed{"ORD2", 2, '2', "IBM", "50",
-                          std::span<const NewOrderListPartySeed>{kNewOrderListOrd2Parties}},
+    NewOrderListOrderSeed{
+        .cl_ord_id = "ORD1",
+        .list_seq_no = 1,
+        .side = '1',
+        .symbol = "MSFT",
+        .order_qty = "150.75",
+        .parties = std::span<const NewOrderListPartySeed>{kNewOrderListOrd1Parties}},
+    NewOrderListOrderSeed{
+        .cl_ord_id = "ORD2",
+        .list_seq_no = 2,
+        .side = '2',
+        .symbol = "IBM",
+        .order_qty = "50",
+        .parties = std::span<const NewOrderListPartySeed>{kNewOrderListOrd2Parties}},
 }};
 
 struct NewOrderListSeed {
@@ -110,25 +124,28 @@ struct AllocationReportPartySeed {
 };
 
 inline constexpr std::array<AllocationReportPartySubIdSeed, 1> kAllocationReportSubs{{
-    AllocationReportPartySubIdSeed{"SUB1", 1},
+    AllocationReportPartySubIdSeed{.party_sub_id = "SUB1", .party_sub_id_type = 1},
 }};
 
 inline constexpr std::array<AllocationReportPartySeed, 1> kAllocationReportParties{{
-    AllocationReportPartySeed{"PARTY1", 'D', 1,
-                              std::span<const AllocationReportPartySubIdSeed>{kAllocationReportSubs}},
+    AllocationReportPartySeed{
+        .party_id = "PARTY1",
+        .party_id_source = 'D',
+        .party_role = 1,
+        .sub_ids = std::span<const AllocationReportPartySubIdSeed>{kAllocationReportSubs}},
 }};
 
 struct AllocationReportSeed {
     std::string_view msg_type = "AS";
     std::string_view begin_string = "FIX.4.4";
     std::string_view alloc_report_id = "ALLOCRPT1";
-    char alloc_trans_type = '0';       // New
-    std::int64_t alloc_report_type = 9;  // Accept
-    std::int64_t alloc_status = 0;       // Accepted
+    char alloc_trans_type = '0';            // New
+    std::int64_t alloc_report_type = 9;     // Accept
+    std::int64_t alloc_status = 0;          // Accepted
     std::int64_t alloc_no_orders_type = 0;  // NotSpecified (data-model §3.1 AS note)
-    char side = '1';                   // Buy
-    std::string_view quantity = "1000";  // raw ASCII decimal literal
-    std::string_view avg_px = "25.5";    // raw ASCII decimal literal
+    char side = '1';                        // Buy
+    std::string_view quantity = "1000";     // raw ASCII decimal literal
+    std::string_view avg_px = "25.5";       // raw ASCII decimal literal
     std::string_view trade_date = "20240101";
     std::string_view symbol = "MSFT";
     std::span<const AllocationReportPartySeed> parties =
@@ -146,7 +163,7 @@ struct NewOrderSingleSeed {
     std::string_view begin_string = "FIX.4.4";
     std::string_view cl_ord_id = "ORD-001";
     std::string_view symbol = "MSFT";
-    char side = '1';  // Buy
+    char side = '1';                     // Buy
     std::string_view order_qty = "100";  // raw ASCII decimal literal
     std::string_view price = "190.5";    // raw ASCII decimal literal
     std::string_view transact_time = "20240101-10:00:00";

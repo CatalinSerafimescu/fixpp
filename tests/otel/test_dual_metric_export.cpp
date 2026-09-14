@@ -34,13 +34,13 @@
 // auto-link winsock rather than making this target name ws2_32 in CMake.
 #pragma comment(lib, "ws2_32.lib")
 #else
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <arpa/inet.h>
-#include <unistd.h>
 #include <fcntl.h>
+#include <netinet/in.h>
 #include <poll.h>
+#include <sys/socket.h>
+#include <sys/types.h>
+#include <unistd.h>
 #endif
 
 #include <gtest/gtest.h>
@@ -48,12 +48,12 @@
 #include <fixpp/otel/exporters.hpp>
 
 // SDK — mock push exporter implementation needs these types.
-#include <opentelemetry/sdk/metrics/push_metric_exporter.h>
-#include <opentelemetry/sdk/metrics/export/metric_producer.h>
+#include <opentelemetry/sdk/common/exporter_utils.h>
 #include <opentelemetry/sdk/metrics/data/metric_data.h>
 #include <opentelemetry/sdk/metrics/data/point_data.h>
+#include <opentelemetry/sdk/metrics/export/metric_producer.h>
 #include <opentelemetry/sdk/metrics/instruments.h>
-#include <opentelemetry/sdk/common/exporter_utils.h>
+#include <opentelemetry/sdk/metrics/push_metric_exporter.h>
 
 // SDK — MetricReader (for mock wrapping in PeriodicExportingMetricReader).
 #include <opentelemetry/sdk/metrics/export/periodic_exporting_metric_reader_factory.h>
@@ -93,9 +93,9 @@ class MockPushExporter final : public sdk_metrics::PushMetricExporter {
 public:
     MockPushExporter() = default;
 
-    opentelemetry::sdk::common::ExportResult
-    Export(const sdk_metrics::ResourceMetrics& data) noexcept override {
-        std::lock_guard<std::mutex> lock(mu_);
+    opentelemetry::sdk::common::ExportResult Export(
+        const sdk_metrics::ResourceMetrics& data) noexcept override {
+        std::scoped_lock lock(mu_);
         received_.push_back(data);
         return opentelemetry::sdk::common::ExportResult::kSuccess;
     }
@@ -106,11 +106,11 @@ public:
     }
 
     bool ForceFlush(std::chrono::microseconds) noexcept override { return true; }
-    bool Shutdown(std::chrono::microseconds)   noexcept override { return true; }
+    bool Shutdown(std::chrono::microseconds) noexcept override { return true; }
 
     // Test accessor: returns a copy of all received batches.
     std::vector<sdk_metrics::ResourceMetrics> get_received() const {
-        std::lock_guard<std::mutex> lock(mu_);
+        std::scoped_lock lock(mu_);
         return received_;
     }
 
@@ -168,7 +168,7 @@ static void set_nonblocking(socket_t s, bool on) {
     ::fcntl(s, F_SETFL, on ? (flags | O_NONBLOCK) : (flags & ~O_NONBLOCK));
 }
 static int wait_writable(socket_t s, int timeout_ms) {
-    pollfd pfd{s, POLLOUT, 0};
+    pollfd pfd{.fd = s, .events = POLLOUT, .revents = 0};
     return ::poll(&pfd, 1, timeout_ms);
 }
 static int socket_error(socket_t s) {
@@ -190,18 +190,23 @@ static std::string http_get(uint16_t port, const char* path) {
     set_nonblocking(fd, true);
 
     sockaddr_in addr{};
-    addr.sin_family      = AF_INET;
-    addr.sin_port        = htons(port);
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
     addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 
-    ::connect(fd, reinterpret_cast<const sockaddr*>(&addr),
-              static_cast<int>(sizeof(addr)));
+    ::connect(fd, reinterpret_cast<const sockaddr*>(&addr), static_cast<int>(sizeof(addr)));
 
     // Wait up to 2 s for the connection to succeed.
-    if (wait_writable(fd, 2000) <= 0) { close_socket(fd); return {}; }
+    if (wait_writable(fd, 2000) <= 0) {
+        close_socket(fd);
+        return {};
+    }
 
     // Check SO_ERROR for a connection failure (ECONNREFUSED etc.).
-    if (socket_error(fd) != 0) { close_socket(fd); return {}; }
+    if (socket_error(fd) != 0) {
+        close_socket(fd);
+        return {};
+    }
 
     // Restore blocking mode for send/recv.
     set_nonblocking(fd, false);
@@ -232,8 +237,7 @@ static std::string http_get(uint16_t port, const char* path) {
 // Searches for lines matching  <metric_name>{...} <value>  or  <metric_name> <value>
 // and returns the int64 value of the last matching line, or -1 if not found.
 // We look for any line starting with the metric name (ignoring # comment lines).
-static int64_t scrape_counter_value(const std::string& body,
-                                    std::string_view   metric_name) {
+static int64_t scrape_counter_value(const std::string& body, std::string_view metric_name) {
     int64_t val = -1;
     size_t pos = 0;
     while (pos < body.size()) {
@@ -242,13 +246,14 @@ static int64_t scrape_counter_value(const std::string& body,
         std::string_view line{body.data() + pos, eol - pos};
         // Skip comment lines.
         if (!line.empty() && line[0] != '#') {
-            if (line.substr(0, metric_name.size()) == metric_name) {
+            if (line.starts_with(metric_name)) {
                 // Find the last space-separated token = the value.
                 size_t space = line.rfind(' ');
                 if (space != std::string_view::npos) {
                     try {
                         val = std::stoll(std::string{line.substr(space + 1)});
-                    } catch (...) {}
+                    } catch (...) {
+                    }
                 }
             }
         }
@@ -271,26 +276,21 @@ static int64_t scrape_counter_value(const std::string& body,
 // hold on Windows, where the MSVC lane observed two batches and read 6.
 // Within a single batch the points are summed, which IS correct: those are the
 // same counter under different attribute sets.
-static int64_t latest_counter_in_export(
-    const std::vector<sdk_metrics::ResourceMetrics>& batches,
-    std::string_view                                  metric_name)
-{
+static int64_t latest_counter_in_export(const std::vector<sdk_metrics::ResourceMetrics>& batches,
+                                        std::string_view metric_name) {
     int64_t latest = -1;
 
     for (const auto& rm : batches) {
         int64_t batch_total = 0;
-        bool    in_batch    = false;
+        bool in_batch = false;
 
         for (const auto& scope_m : rm.scope_metric_data_) {
             for (const auto& md : scope_m.metric_data_) {
-                if (std::string_view{md.instrument_descriptor.name_} != metric_name)
-                    continue;
+                if (std::string_view{md.instrument_descriptor.name_} != metric_name) continue;
                 for (const auto& pda : md.point_data_attr_) {
-                    if (const auto* sp =
-                            opentelemetry::nostd::get_if<sdk_metrics::SumPointData>(
-                                &pda.point_data)) {
-                        if (const auto* iv =
-                                opentelemetry::nostd::get_if<int64_t>(&sp->value_)) {
+                    if (const auto* sp = opentelemetry::nostd::get_if<sdk_metrics::SumPointData>(
+                            &pda.point_data)) {
+                        if (const auto* iv = opentelemetry::nostd::get_if<int64_t>(&sp->value_)) {
                             batch_total += *iv;
                             in_batch = true;
                         }
@@ -318,13 +318,11 @@ TEST(DualMetricExport, CounterVisibleOnBothExportersInOneCycle) {
     // long interval so only ForceFlush() (not the background timer) triggers Export().
     sdk_metrics::PeriodicExportingMetricReaderOptions reader_opts;
     reader_opts.export_interval_millis = std::chrono::milliseconds{300'000};  // 5 min
-    reader_opts.export_timeout_millis  = std::chrono::milliseconds{5'000};
+    reader_opts.export_timeout_millis = std::chrono::milliseconds{5'000};
 
-    auto mock_reader_up =
-        opentelemetry::sdk::metrics::PeriodicExportingMetricReaderFactory::Create(
-            std::move(mock_up), reader_opts);
-    auto mock_reader =
-        std::shared_ptr<sdk_metrics::MetricReader>(mock_reader_up.release());
+    auto mock_reader_up = opentelemetry::sdk::metrics::PeriodicExportingMetricReaderFactory::Create(
+        std::move(mock_up), reader_opts);
+    auto mock_reader = std::shared_ptr<sdk_metrics::MetricReader>(mock_reader_up.release());
 
     // Build the dual-export MeterProvider:
     //   Reader 1: real Prometheus (civetweb embedded HTTP server on :9464)
@@ -334,18 +332,17 @@ TEST(DualMetricExport, CounterVisibleOnBothExportersInOneCycle) {
     prom_cfg.port = kPort;
 
     auto mp = fixpp::otel::OtelDualExportBuilder{}
-                .with_prometheus(prom_cfg)
-                .with_otlp_reader(mock_reader)
-                .build();
+                  .with_prometheus(prom_cfg)
+                  .with_otlp_reader(mock_reader)
+                  .build();
 
     // Obtain the SDK MeterProvider pointer for ForceFlush.
     auto* sdk_mp = dynamic_cast<opentelemetry::sdk::metrics::MeterProvider*>(mp.get());
     ASSERT_NE(sdk_mp, nullptr) << "OtelDualExportBuilder must return sdk MeterProvider";
 
     // Create a uint64 counter and add 3 (the FR-017 invariant value).
-    auto meter   = mp->GetMeter("fixpp.test");
-    auto counter = meter->CreateUInt64Counter("fixpp.test.counter",
-                                              "TS-11 dual export counter");
+    auto meter = mp->GetMeter("fixpp.test");
+    auto counter = meter->CreateUInt64Counter("fixpp.test.counter", "TS-11 dual export counter");
     ASSERT_NE(counter.get(), nullptr) << "CreateUInt64Counter returned null";
 
     counter->Add(3);
@@ -368,9 +365,9 @@ TEST(DualMetricExport, CounterVisibleOnBothExportersInOneCycle) {
     // (SDK appends _total suffix for monotonic sum; attributes may appear).
 
     const std::string body = http_get(kPort, "/metrics");
-    ASSERT_FALSE(body.empty())
-        << "GET http://127.0.0.1:" << kPort << "/metrics returned empty body; "
-        << "is the Prometheus exporter listening?";
+    ASSERT_FALSE(body.empty()) << "GET http://127.0.0.1:" << kPort
+                               << "/metrics returned empty body; "
+                               << "is the Prometheus exporter listening?";
 
     // Look for the counter (SDK appends _total for cumulative sums).
     int64_t prom_val = scrape_counter_value(body, kMetricName);
@@ -378,8 +375,7 @@ TEST(DualMetricExport, CounterVisibleOnBothExportersInOneCycle) {
         // Fallback: try without _total suffix (some SDK versions differ).
         prom_val = scrape_counter_value(body, "fixpp_test_counter");
     }
-    EXPECT_EQ(prom_val, 3)
-        << "Prometheus scrape did not find counter==3; body:\n" << body;
+    EXPECT_EQ(prom_val, 3) << "Prometheus scrape did not find counter==3; body:\n" << body;
 
     // ── ASSERTION (b): mock OTLP capture ─────────────────────────────────────
     //
@@ -387,14 +383,12 @@ TEST(DualMetricExport, CounterVisibleOnBothExportersInOneCycle) {
     // counter with value == 3.
 
     const auto batches = raw_mock->get_received();
-    ASSERT_FALSE(batches.empty())
-        << "MockPushExporter received no batches after ForceFlush; "
-        << "PeriodicExportingMetricReader did not call Export()";
+    ASSERT_FALSE(batches.empty()) << "MockPushExporter received no batches after ForceFlush; "
+                                  << "PeriodicExportingMetricReader did not call Export()";
 
     int64_t otlp_val = latest_counter_in_export(batches, "fixpp.test.counter");
-    EXPECT_EQ(otlp_val, 3)
-        << "Mock OTLP exporter did not capture counter==3 in " << batches.size()
-        << " batch(es)";
+    EXPECT_EQ(otlp_val, 3) << "Mock OTLP exporter did not capture counter==3 in " << batches.size()
+                           << " batch(es)";
 
     // Shutdown cleanly (stops the civetweb server + mock reader thread).
     sdk_mp->Shutdown();

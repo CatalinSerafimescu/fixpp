@@ -98,15 +98,15 @@ TEST_F(SeqnumManagerTest, InboundIncrementByOne) {
     // check_inbound(1) → ok, counter advances to 2.
     auto r1 = run_sync(ioc, mgr.check_inbound(1));
     EXPECT_TRUE(r1.has_value()) << "check_inbound(1) should succeed";
-    EXPECT_EQ(mgr.next_inbound_unsafe(), 2u);
+    EXPECT_EQ(mgr.next_inbound_unsafe(), 2U);
 
     // check_inbound(2) → ok, counter advances to 3.
     auto r2 = run_sync(ioc, mgr.check_inbound(2));
     EXPECT_TRUE(r2.has_value()) << "check_inbound(2) should succeed";
-    EXPECT_EQ(mgr.next_inbound_unsafe(), 3u);
+    EXPECT_EQ(mgr.next_inbound_unsafe(), 3U);
 
     // Drain before destruction.
-    run_sync(ioc, mgr.drain());
+    ASSERT_TRUE(run_sync(ioc, mgr.drain()).has_value());
 }
 
 // ── T2: Outbound increment-by-one ────────────────────────────────────────────
@@ -118,16 +118,16 @@ TEST_F(SeqnumManagerTest, OutboundAssignSequential) {
     // First assign returns 1.
     auto r1 = run_sync(ioc, mgr.assign_outbound());
     ASSERT_TRUE(r1.has_value()) << "assign_outbound() #1 should succeed";
-    EXPECT_EQ(*r1, 1u);
-    EXPECT_EQ(mgr.next_outbound_unsafe(), 2u);
+    EXPECT_EQ(*r1, 1U);
+    EXPECT_EQ(mgr.next_outbound_unsafe(), 2U);
 
     // Second assign returns 2.
     auto r2 = run_sync(ioc, mgr.assign_outbound());
     ASSERT_TRUE(r2.has_value()) << "assign_outbound() #2 should succeed";
-    EXPECT_EQ(*r2, 2u);
-    EXPECT_EQ(mgr.next_outbound_unsafe(), 3u);
+    EXPECT_EQ(*r2, 2U);
+    EXPECT_EQ(mgr.next_outbound_unsafe(), 3U);
 
-    run_sync(ioc, mgr.drain());
+    ASSERT_TRUE(run_sync(ioc, mgr.drain()).has_value());
 }
 
 // ── T3: Too-low inbound (no PossDup) → session_seqnum_too_low ───────────────
@@ -140,7 +140,7 @@ TEST_F(SeqnumManagerTest, TooLowInboundIsSessionFatal) {
         auto r = run_sync(ioc, mgr.check_inbound(s));
         ASSERT_TRUE(r.has_value()) << "setup: check_inbound(" << s << ") should succeed";
     }
-    ASSERT_EQ(mgr.next_inbound_unsafe(), 5u);
+    ASSERT_EQ(mgr.next_inbound_unsafe(), 5U);
 
     // seq=3 is too low (expected 5).
     auto r = run_sync(ioc, mgr.check_inbound(3));
@@ -149,9 +149,9 @@ TEST_F(SeqnumManagerTest, TooLowInboundIsSessionFatal) {
         << "Expected session_seqnum_too_low (slot 69)";
 
     // Counter must NOT advance on error (I-2).
-    EXPECT_EQ(mgr.next_inbound_unsafe(), 5u) << "Counter must not advance on too-low error";
+    EXPECT_EQ(mgr.next_inbound_unsafe(), 5U) << "Counter must not advance on too-low error";
 
-    run_sync(ioc, mgr.drain());
+    ASSERT_TRUE(run_sync(ioc, mgr.drain()).has_value());
 }
 
 // ── T4: Too-high inbound → session_seqnum_too_high (slot 120) ─────────────────
@@ -176,9 +176,9 @@ TEST_F(SeqnumManagerTest, TooHighInboundIsSessionFatal) {
            "a semantic misnomer for this error path)";
 
     // Counter must NOT advance on error.
-    EXPECT_EQ(mgr.next_inbound_unsafe(), 1u) << "Counter must not advance on too-high error";
+    EXPECT_EQ(mgr.next_inbound_unsafe(), 1U) << "Counter must not advance on too-high error";
 
-    run_sync(ioc, mgr.drain());
+    ASSERT_TRUE(run_sync(ioc, mgr.drain()).has_value());
 }
 
 // ── T5: seqnum_max outbound overflow → store_seqnum_overflow, NO wrap ────────
@@ -217,7 +217,7 @@ TEST_F(SeqnumManagerTest, OutboundOverflowAtSeqnumMax) {
     // Counter must NOT wrap (stays at seqnum_max).
     EXPECT_EQ(mgr.next_outbound_unsafe(), seqnum_max) << "Counter must not wrap past seqnum_max";
 
-    run_sync(ioc, mgr.drain());
+    ASSERT_TRUE(run_sync(ioc, mgr.drain()).has_value());
 #else
     GTEST_SKIP() << "FIXPP_TEST_HOOKS not defined; overflow test requires test counter seeding";
 #endif
@@ -229,21 +229,21 @@ TEST_F(SeqnumManagerTest, TooLowDoesNotCorruptCounterSubsequentInSeqOk) {
     SeqnumManager mgr;
 
     // Advance to 3.
-    run_sync(ioc, mgr.check_inbound(1));
-    run_sync(ioc, mgr.check_inbound(2));
-    ASSERT_EQ(mgr.next_inbound_unsafe(), 3u);
+    ASSERT_TRUE(run_sync(ioc, mgr.check_inbound(1)).has_value());
+    ASSERT_TRUE(run_sync(ioc, mgr.check_inbound(2)).has_value());
+    ASSERT_EQ(mgr.next_inbound_unsafe(), 3U);
 
     // Too-low attempt: returns error, counter stays at 3.
     auto err = run_sync(ioc, mgr.check_inbound(1));
     EXPECT_FALSE(err.has_value());
-    EXPECT_EQ(mgr.next_inbound_unsafe(), 3u);
+    EXPECT_EQ(mgr.next_inbound_unsafe(), 3U);
 
     // In-seq attempt (3) still succeeds.
     auto ok = run_sync(ioc, mgr.check_inbound(3));
     EXPECT_TRUE(ok.has_value()) << "In-seq after error must still succeed";
-    EXPECT_EQ(mgr.next_inbound_unsafe(), 4u);
+    EXPECT_EQ(mgr.next_inbound_unsafe(), 4U);
 
-    run_sync(ioc, mgr.drain());
+    ASSERT_TRUE(run_sync(ioc, mgr.drain()).has_value());
 }
 
 // ── T7: Long-run drift check — 100 in/out pairs ──────────────────────────────
@@ -267,7 +267,7 @@ TEST_F(SeqnumManagerTest, LongRunZeroDrift) {
     EXPECT_EQ(mgr.next_inbound_unsafe(), static_cast<seqnum_t>(N + 1));
     EXPECT_EQ(mgr.next_outbound_unsafe(), static_cast<seqnum_t>(N + 1));
 
-    run_sync(ioc, mgr.drain());
+    ASSERT_TRUE(run_sync(ioc, mgr.drain()).has_value());
 }
 
 // ── Drained-mutex paths (check_inbound / assign_outbound — session_already_closed)
@@ -279,7 +279,7 @@ TEST_F(SeqnumManagerTest, LongRunZeroDrift) {
 
 TEST_F(SeqnumManagerTest, CheckInboundAfterDrainReturnsSessionAlreadyClosed) {
     SeqnumManager mgr;
-    run_sync(ioc, mgr.drain());
+    ASSERT_TRUE(run_sync(ioc, mgr.drain()).has_value());
 
     auto r = run_sync(ioc, mgr.check_inbound(seqnum_min));
     ASSERT_FALSE(r.has_value());
@@ -288,7 +288,7 @@ TEST_F(SeqnumManagerTest, CheckInboundAfterDrainReturnsSessionAlreadyClosed) {
 
 TEST_F(SeqnumManagerTest, AssignOutboundAfterDrainReturnsSessionAlreadyClosed) {
     SeqnumManager mgr;
-    run_sync(ioc, mgr.drain());
+    ASSERT_TRUE(run_sync(ioc, mgr.drain()).has_value());
 
     auto r = run_sync(ioc, mgr.assign_outbound());
     ASSERT_FALSE(r.has_value());
@@ -303,7 +303,7 @@ TEST_F(SeqnumManagerTest, AssignOutboundAfterDrainReturnsSessionAlreadyClosed) {
 // after-drain witnesses above.
 TEST_F(SeqnumManagerTest, SetNextOutboundAfterDrainReturnsSessionAlreadyClosed) {
     SeqnumManager mgr;
-    run_sync(ioc, mgr.drain());
+    ASSERT_TRUE(run_sync(ioc, mgr.drain()).has_value());
 
     auto r = run_sync(ioc, mgr.set_next_outbound(42));
     ASSERT_FALSE(r.has_value());

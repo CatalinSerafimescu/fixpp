@@ -22,7 +22,7 @@
 
 namespace {
 
-constexpr std::size_t kArenaSize = 64u * 1024u;
+constexpr std::size_t kArenaSize = 64U * 1024U;
 
 struct Arena {
     std::array<std::byte, kArenaSize> buf{};
@@ -44,20 +44,19 @@ struct Arena {
 TEST(XmlLoaderEnum, DuplicateEnumValueIsDedupedNotAnError) {
     Arena a;
     fixpp::dict::XmlLoader loader;
-    constexpr std::string_view kXml =
-        R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
-        R"(<fields>)"
-        R"(<field number='1' name='Account' type='STRING'>)"
-        R"(<value enum='X' description='First'/>)"
-        R"(<value enum='Y' description='Second'/>)"
-        R"(<value enum='X' description='DuplicateIgnored'/>)"
-        R"(</field>)"
-        R"(</fields><messages/></fix>)";
+    constexpr std::string_view kXml = R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+                                      R"(<fields>)"
+                                      R"(<field number='1' name='Account' type='STRING'>)"
+                                      R"(<value enum='X' description='First'/>)"
+                                      R"(<value enum='Y' description='Second'/>)"
+                                      R"(<value enum='X' description='DuplicateIgnored'/>)"
+                                      R"(</field>)"
+                                      R"(</fields><messages/></fix>)";
 
     auto d = loader.load_from_string(kXml, &a.mr);
 
     auto const codes = d.enum_values(std::uint16_t{1});
-    ASSERT_EQ(codes.size(), 2u) << "duplicate <value enum='X'> must be deduped, not appended";
+    ASSERT_EQ(codes.size(), 2U) << "duplicate <value enum='X'> must be deduped, not appended";
     EXPECT_EQ(codes[0].value, "X");
     EXPECT_EQ(codes[0].description, "First")
         << "first occurrence's description must win over the duplicate's";
@@ -75,13 +74,12 @@ TEST(XmlLoaderEnum, DuplicateEnumValueIsDedupedNotAnError) {
 TEST(XmlLoaderEnum, ValueMissingEnumAttributeThrowsXmlParseError) {
     Arena a;
     fixpp::dict::XmlLoader loader;
-    constexpr std::string_view kXml =
-        R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
-        R"(<fields>)"
-        R"(<field number='1' name='Account' type='STRING'>)"
-        R"(<value description='NoEnumAttribute'/>)"
-        R"(</field>)"
-        R"(</fields><messages/></fix>)";
+    constexpr std::string_view kXml = R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+                                      R"(<fields>)"
+                                      R"(<field number='1' name='Account' type='STRING'>)"
+                                      R"(<value description='NoEnumAttribute'/>)"
+                                      R"(</field>)"
+                                      R"(</fields><messages/></fix>)";
 
     try {
         (void)loader.load_from_string(kXml, &a.mr);
@@ -102,18 +100,17 @@ TEST(XmlLoaderEnum, ValueMissingEnumAttributeThrowsXmlParseError) {
 TEST(XmlLoaderEnum, ValueMissingDescriptionIsLegalAndEmpty) {
     Arena a;
     fixpp::dict::XmlLoader loader;
-    constexpr std::string_view kXml =
-        R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
-        R"(<fields>)"
-        R"(<field number='1' name='Account' type='STRING'>)"
-        R"(<value enum='X'/>)"
-        R"(</field>)"
-        R"(</fields><messages/></fix>)";
+    constexpr std::string_view kXml = R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+                                      R"(<fields>)"
+                                      R"(<field number='1' name='Account' type='STRING'>)"
+                                      R"(<value enum='X'/>)"
+                                      R"(</field>)"
+                                      R"(</fields><messages/></fix>)";
 
     auto d = loader.load_from_string(kXml, &a.mr);
 
     auto const codes = d.enum_values(std::uint16_t{1});
-    ASSERT_EQ(codes.size(), 1u);
+    ASSERT_EQ(codes.size(), 1U);
     EXPECT_EQ(codes[0].value, "X");
     EXPECT_TRUE(codes[0].description.empty())
         << "missing description must yield an empty view, not fail the load";

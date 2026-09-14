@@ -60,9 +60,9 @@
 > seam block in `dictionary.cpp`.
 >
 > The Gate B triage (`research/reviews/opus_pr262_1_triage.md`) cites
-> `table_view.hpp:584/:638/:685/:709` and `private:` at `:725`; those are **stale by exactly 7
-> lines** — `b9f52145` added a net +7 to that file after the triage was written. Current values are
-> given in §2 and are the ones to trust. Do not "correct" them back.
+> `table_view.hpp` by line number (four sites plus its `private:`); those numbers were **stale by
+> exactly 7 lines** — `b9f52145` added a net +7 to that file after the triage was written. Use the
+> anchors in §2, not the triage's numbers.
 >
 > **v0.4 anchor note — the *plausible twin* class has now bitten this document three times.** Round 2
 > fixed the `validate_inbound_messages` guard's wrong pairing; v0.3's log fixed the round-2 review's wrong pairing on `config.cpp`'s FR-011 comment; round 3 found

@@ -23,6 +23,7 @@
 // §XV.9 guard: table_view.hpp and field_type.hpp have deliberately minimal
 // include graphs (no mutex, no heavy asio) — see their file headers.
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -291,12 +292,8 @@ public:
         }
         auto const member_tags = dict_.group_member_tags(ctx.msg_type, parent_path, no_tag);
         auto const is_member = [&](std::uint16_t tag) noexcept {
-            for (auto const m : member_tags) {
-                if (m == tag) {
-                    return true;
-                }
-            }
-            return false;
+            return std::ranges::any_of(member_tags,
+                                       [tag](std::uint16_t const m) { return m == tag; });
         };
         // Child context = this level + this group's own no_tag, used ONLY to
         // recurse into nested children. `pushed` clamps at K=16 (child.depth

@@ -36,7 +36,7 @@
 // (libc++ Tier-2 lane) does not need the SDK installed. Default to 1 (ON) if
 // the macro is not defined so a cmake-less build stays backward-compatible.
 #ifndef FIXPP_BUILD_OTEL
-#  define FIXPP_BUILD_OTEL 1
+#define FIXPP_BUILD_OTEL 1
 #endif
 #if FIXPP_BUILD_OTEL
 #include <fixpp/otel/providers.hpp>
@@ -288,7 +288,7 @@ std::shared_ptr<Session> Engine::lookup(SessionId const& id) const {
         ~LeasedHandle() noexcept { counter->fetch_sub(1, std::memory_order_release); }
     };
     std::atomic<std::uint64_t>* lease_ctr_ptr = &lease_counter_;  // mutable (debug-only)
-    lease_ctr_ptr->fetch_add(1, std::memory_order_relaxed);  // new handle issued
+    lease_ctr_ptr->fetch_add(1, std::memory_order_relaxed);       // new handle issued
 
     auto leased = std::make_shared<LeasedHandle>(raw_handle, lease_ctr_ptr);
     // Return an aliasing shared_ptr<Session> that SHARES the LeasedHandle's control
@@ -364,7 +364,6 @@ namespace {
 // FirstFrameIds + scan_first_frame_ids are now defined in scan_first_frame_ids.hpp
 // (040 US2 Phase 4: moved from anonymous namespace to enable direct unit testing).
 // Bring them into scope for all callers in this TU via using declarations.
-using fixpp::session::detail::FirstFrameIds;
 using fixpp::session::detail::scan_first_frame_ids;
 
 // read_first_frame_bounded is now defined in read_first_frame_bounded.hpp
@@ -612,14 +611,20 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
     fixpp::tls::SslCtxConfig ssl_cfg;
     if (!is_plaintext) {
         auto k = entry.config.security_profile.k;
+        // The engine must still map the deprecated-but-supported legacy profile.
+#if defined(__clang__) || defined(__GNUC__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
         if (k == sk::mtls_pinned)
             ssl_cfg.profile = fixpp::tls::SecurityProfile::mtls_pinned;
         else if (k == sk::one_way_ca)
-            // The engine must still map the deprecated-but-supported legacy profile.
-            // NOLINTNEXTLINE(clang-diagnostic-deprecated-declarations)
             ssl_cfg.profile = fixpp::tls::SecurityProfile::one_way_ca;
         else  // mtls_ca (default for TLS acceptors)
             ssl_cfg.profile = fixpp::tls::SecurityProfile::mtls_ca;
+#if defined(__clang__) || defined(__GNUC__)
+#pragma clang diagnostic pop
+#endif
 
         if (entry.config.transport_factory_override)
             ssl_cfg.cs = entry.config.transport_factory_override->cert_source_snapshot();
@@ -773,14 +778,16 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
             // dynamic_cast to TlsTransport to call async_handshake.
             auto* tls_transport = dynamic_cast<fixpp::transport::TlsTransport*>(transport.get());
             if (!tls_transport) {
-                transport->close();
+                // Rejecting a pre-session connection: nothing consumes a close error.
+                (void)transport->close();
                 continue;  // not a TLS transport — config error; re-accept
             }
 
             {
                 auto hs_r = co_await tls_transport->async_handshake(ssl_cfg);
                 if (!hs_r.has_value()) {
-                    transport->close();
+                    // Rejecting a pre-session connection: nothing consumes a close error.
+                    (void)transport->close();
                     continue;  // handshake failure → reclaim slot, re-accept
                 }
                 hr = std::move(*hs_r);
@@ -802,7 +809,8 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         constexpr std::size_t kFirstFrameMaxBytes = 4096;
         // Contract P3 (contracts/read_first_frame_bounded.md): 1 <= max_bytes <
         // SIZE_MAX — the upper bound keeps max_bytes + 1 representable
-        // (read_first_frame_bounded's two `max_bytes + 1` computations both wrap at SIZE_MAX otherwise).
+        // (read_first_frame_bounded's two `max_bytes + 1` computations both wrap at SIZE_MAX
+        // otherwise).
         static_assert(kFirstFrameMaxBytes >= 1 && kFirstFrameMaxBytes < SIZE_MAX);
         constexpr auto kFirstFrameDeadline = std::chrono::milliseconds{5000};
 
@@ -821,10 +829,10 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
             // (step 3) before anything the engine owns is torn down — the same
             // ordering the accept loop already relies on for listeners_.
             auto read_r = co_await read_first_frame_bounded(
-                *transport, frame_buf, *engine_cfg.clock, kFirstFrameDeadline,
-                kFirstFrameMaxBytes);
+                *transport, frame_buf, *engine_cfg.clock, kFirstFrameDeadline, kFirstFrameMaxBytes);
             if (!read_r.has_value()) {
-                transport->close();
+                // Rejecting a pre-session connection: nothing consumes a close error.
+                (void)transport->close();
                 continue;  // timeout / over-budget / read-error → reclaim
             }
             first_frame_len = *read_r;
@@ -839,7 +847,8 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         // Step 4: parse CompIDs for reversed-CompID registry resolution.
         auto ids = scan_first_frame_ids(first_frame);
         if (ids.begin_string.empty() || ids.sender_comp_id.empty() || ids.target_comp_id.empty()) {
-            transport->close();
+            // Rejecting a pre-session connection: nothing consumes a close error.
+            (void)transport->close();
             continue;  // malformed first frame → reclaim
         }
 
@@ -852,7 +861,8 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
             // No registry match — unknown acceptor session (slot 121).
             // Per data-model C1 step 6 and engine.hpp lookup() contract:
             // close the transport and construct NO session. [FQ-2 / gate-b/r1]
-            transport->close();
+            // Rejecting a pre-session connection: nothing consumes a close error.
+            (void)transport->close();
             continue;
         }
 
@@ -869,7 +879,8 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         {
             auto res = co_await local_session->open();
             if (!res.has_value()) {
-                transport->close();
+                // Rejecting a pre-session connection: nothing consumes a close error.
+                (void)transport->close();
                 co_return;
             }
         }
@@ -1038,7 +1049,8 @@ asio::awaitable<void> run_connect_loop(fixpp::core::EngineConfig const& engine_c
     // to the session strand. Auto-satisfied because:
     //   - The loop runs on *entry.session_strand (T010 — co_spawn on strand).
     //   - drive_reconnect() → drive_reconnect_attempt() → co_await this_coro::executor
-    //     = the session strand (`ReconnectFsm::drive_reconnect_attempt`) → factory_->make(exec, ...) uses it.
+    //     = the session strand (`ReconnectFsm::drive_reconnect_attempt`) → factory_->make(exec,
+    //     ...) uses it.
     //   - The factory-path ctor stores exec as socket_'s executor.
     // This assert fires if reconnect_fsm.cpp regresses to bare exec_ (R8 lynchpin).
     // session_strand is invariantly emplaced in start() before the loop spawns (T005).
@@ -1457,6 +1469,7 @@ asio::awaitable<void> Engine::stop() {
     }
     if (engine_cfg_.meter) {
         engine_cfg_.meter->shutdown();
+        // cppcheck-suppress missingReturn  -- void; misread #if block
     }
 #endif  // FIXPP_BUILD_OTEL
 }
@@ -1520,7 +1533,7 @@ asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
     // object alive even after Engine destruction so the guard's decrement is
     // always safe — the decrement never touches `this`.
     // [gate-b/r2 P1; spec.md FR-012/R7; Engine::stop()'s send_counter_ drain contract]
-    auto sc = send_counter_;   // shared_ptr copy — keepalive on counter object
+    auto sc = send_counter_;  // shared_ptr copy — keepalive on counter object
     sc->fetch_add(1, std::memory_order_seq_cst);
     counter_guard send_guard{sc};
 
@@ -1560,13 +1573,14 @@ asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
             }
 
             // Capture strong keepalive before any co_await (UAF guard).
+            // cppcheck-suppress derefInvalidIteratorRedundantCheck  -- end() is checked above
             std::shared_ptr<Session> kl = it->second.session;
 
             // Session null (loop not yet published) → reject on the control strand.
             // NOTE: kl->state() (fsm_state_) is single-writer on the per-session
-            // strand (`state()`'s single-writer-per-session-strand contract); reading it here (control strand) would be a
-            // data race under MT. The Active check is moved entirely into Step C
-            // (session-strand lambda) where fsm_state_ is owned.
+            // strand (`state()`'s single-writer-per-session-strand contract); reading it here
+            // (control strand) would be a data race under MT. The Active check is moved entirely
+            // into Step C (session-strand lambda) where fsm_state_ is owned.
             // [#1 gate-b/r1: data race fix — spec.md §C-1/C-0/D0]
             if (!kl) {
                 co_return std::unexpected(core::error::session_invalid_state_for_send);
@@ -1579,6 +1593,7 @@ asio::awaitable<core::expected_t<void>> Engine::send(SessionId const& id,
             // ── Step C: hop to session_strand for toApp + Session::send ──
             // Non-blocking post onto the session strand — distinct from the
             // control strand, so no deadlock even for re-entrant sends. [C-2]
+            // cppcheck-suppress nullPointerRedundantCheck  -- null is checked above
             auto strand_exec = kl->executor().underlying();
             core::expected_t<void> send_result = co_await asio::co_spawn(
                 strand_exec,

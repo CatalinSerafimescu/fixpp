@@ -25,8 +25,9 @@
 // FIX42 message_order(302,311,312,...) places it second, and fixpp's independently
 // derived G_296_2Args required set is {302, 311, 304} — two independent sources
 // agreeing, which is the whole point of using a reference engine here.
-#include <quickfix/fix42/MassQuote.h>
 #include <quickfix/Message.h>
+#include <quickfix/fix42/MassQuote.h>
+
 #include <iostream>
 #include <string>
 
@@ -36,7 +37,7 @@ int main() {
 
     FIX42::MassQuote::NoQuoteSets set1;
     set1.set(FIX::QuoteSetID("QS1"));
-    set1.set(FIX::UnderlyingSymbol("AAPL"));   // FIX42 requires 311 (FIX44 does not)
+    set1.set(FIX::UnderlyingSymbol("AAPL"));  // FIX42 requires 311 (FIX44 does not)
     set1.set(FIX::TotQuoteEntries(1));
 
     FIX42::MassQuote::NoQuoteSets::NoQuoteEntries e1;
@@ -57,12 +58,20 @@ int main() {
         std::string f = s.substr(i, j - i);
         size_t eq = f.find('=');
         std::string tag = f.substr(0, eq);
-        if (tag != "8" && tag != "9" && tag != "10") { body += f; body += '\001'; }
+        if (tag != "8" && tag != "9" && tag != "10") {
+            body += f;
+            body += '\001';
+        }
         i = j + 1;
     }
     // Print with \x01 escaped, prefixed for parse_golden.
     std::cout << "> ";
-    for (char c : body) { if (c == '\001') std::cout << "\\x01"; else std::cout << c; }
+    for (char c : body) {
+        if (c == '\001')
+            std::cout << "\\x01";
+        else
+            std::cout << c;
+    }
     std::cout << "\n";
     return 0;
 }

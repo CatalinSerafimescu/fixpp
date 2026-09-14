@@ -135,9 +135,9 @@ static void expect_bytes_equal(const std::string& actual, const std::string& exp
     };
     ADD_FAILURE() << context << "\n  byte content differs: actual " << actual.size()
                   << " B, expected " << expected.size() << " B; first difference at byte offset "
-                  << off << (off == n ? " (one is a prefix of the other)" : "")
-                  << "\n  actual  [" << off << "]:" << window(actual, off)
-                  << "\n  expected[" << off << "]:" << window(expected, off);
+                  << off << (off == n ? " (one is a prefix of the other)" : "") << "\n  actual  ["
+                  << off << "]:" << window(actual, off) << "\n  expected[" << off
+                  << "]:" << window(expected, off);
 }
 
 // ── 078-precompiled-builder-libs T008 (R6/FR-010): builder-tier file SET ─────
@@ -184,11 +184,10 @@ static void expect_builder_sets_equal(const fs::path& a_root, const fs::path& b_
     auto a_set = collect_builder_tier_set(a_root);
     auto b_set = collect_builder_tier_set(b_root);
 
-    std::vector<std::string> only_in_a, only_in_b;
-    std::set_difference(a_set.begin(), a_set.end(), b_set.begin(), b_set.end(),
-                        std::back_inserter(only_in_a));
-    std::set_difference(b_set.begin(), b_set.end(), a_set.begin(), a_set.end(),
-                        std::back_inserter(only_in_b));
+    std::vector<std::string> only_in_a;
+    std::vector<std::string> only_in_b;
+    std::ranges::set_difference(a_set, b_set, std::back_inserter(only_in_a));
+    std::ranges::set_difference(b_set, a_set, std::back_inserter(only_in_b));
     for (auto const& rel : only_in_a)
         ADD_FAILURE() << context << ": file present under " << a_root << " but missing under "
                       << b_root << ": " << rel;
@@ -196,8 +195,8 @@ static void expect_builder_sets_equal(const fs::path& a_root, const fs::path& b_
         ADD_FAILURE() << context << ": file present under " << b_root << " but missing under "
                       << a_root << ": " << rel;
     EXPECT_EQ(a_set.size(), b_set.size())
-        << context << ": builder-tier file COUNT differs (" << a_root << "=" << a_set.size()
-        << ", " << b_root << "=" << b_set.size() << ")";
+        << context << ": builder-tier file COUNT differs (" << a_root << "=" << a_set.size() << ", "
+        << b_root << "=" << b_set.size() << ")";
 
     // Degenerate-walk guard: both sides empty (e.g. a wrong/missing messages/
     // dir on both roots) would satisfy set-equality vacuously — fail loud
@@ -207,7 +206,7 @@ static void expect_builder_sets_equal(const fs::path& a_root, const fs::path& b_
                                  << " — codegen output shape may have changed.";
 
     for (auto const& rel : a_set) {
-        if (!b_set.count(rel)) continue;  // already reported above
+        if (!b_set.contains(rel)) continue;  // already reported above
         expect_bytes_equal(read_file_binary(a_root / rel), read_file_binary(b_root / rel),
                            context + ": " + rel + " not byte-identical");
     }
@@ -327,7 +326,8 @@ static int run_codegen_v42_official(const fs::path& out_dir) {
 
 // 076-fix-latest-typed-codegen T017/T018: invoke the tool over ONLY the FIX
 // Latest Orchestra XML. It lives under dictionaries/orchestra/ (Codegen.cmake
-// 's `_orchestra_xml` path variable), not directly under kDictDir like the 4 legacy XMLs in kXmls. Each
+// 's `_orchestra_xml` path variable), not directly under kDictDir like the 4 legacy XMLs in kXmls.
+// Each
 // --xml/--out pair is an independent job (main.cpp's job loop), so a
 // single-job invocation still emits the full vlatest tier.
 static int run_codegen_vlatest_only(const fs::path& out_dir) {
@@ -415,7 +415,8 @@ protected:
         // 076 T017/T018 prerequisites.
         ASSERT_TRUE(fs::exists(fs::path(kDictDir) / "orchestra" / "OrchestraFIXLatest.xml"))
             << "Orchestra XML not found under " << kDictDir << "/orchestra";
-        ASSERT_TRUE(fs::exists(kVlatestGoldenDir)) << "076 golden dir not found: " << kVlatestGoldenDir;
+        ASSERT_TRUE(fs::exists(kVlatestGoldenDir))
+            << "076 golden dir not found: " << kVlatestGoldenDir;
         ASSERT_TRUE(fs::exists(fs::path(kVlatestGoldenDir) / kVlatestGoldenFile))
             << "076 golden not found: " << kVlatestGoldenFile;
         // 078-precompiled-builder-libs T007/T008 prerequisites: the golden
@@ -580,13 +581,12 @@ TEST_F(DeterminismTest, GeneratedMatchesGolden) {
         std::string gen_bytes = read_file_binary(generated);
         std::string golden_bytes = read_file_binary(golden);
 
-        expect_bytes_equal(gen_bytes, golden_bytes,
-                           "Golden mismatch for " + std::string(kVersions[i]) +
-                               " Messages.hpp\n  generated: " + generated.string() +
-                               "\n  golden:    " + golden.string() + "\n  Regenerate: " + kBin +
-                               " --xml " + (fs::path(kDictDir) / kXmls[i]).string() +
-                               " --out <dir> && cp <dir>/" + kVersions[i] + "/Messages.hpp " +
-                               golden.string());
+        expect_bytes_equal(
+            gen_bytes, golden_bytes,
+            "Golden mismatch for " + std::string(kVersions[i]) + " Messages.hpp\n  generated: " +
+                generated.string() + "\n  golden:    " + golden.string() +
+                "\n  Regenerate: " + kBin + " --xml " + (fs::path(kDictDir) / kXmls[i]).string() +
+                " --out <dir> && cp <dir>/" + kVersions[i] + "/Messages.hpp " + golden.string());
     }
 }
 
@@ -692,7 +692,7 @@ TEST_F(DeterminismTest, VlatestByteIdenticalAcrossRuns) {
         if (!ec && e1.is_regular_file()) ++file_count;
     }
     EXPECT_GE(file_count, 5U) << "Vlatest run produced suspiciously few files (" << file_count
-                               << ") — codegen output shape may have changed.";
+                              << ") — codegen output shape may have changed.";
 }
 
 // ── 076-fix-latest-typed-codegen T018 [US3]: V-7 additive OFF/ON byte-diff ──
@@ -776,9 +776,9 @@ TEST_F(DeterminismTest, AdditiveOffOnByteDiff) {
         fs::path on_counterpart = on_run.path / rel;
         EXPECT_TRUE(fs::exists(on_counterpart)) << "V-7: legacy file missing from ON-run: " << rel;
         if (!fs::exists(on_counterpart)) continue;
-        expect_bytes_equal(read_file_binary(e.path()), read_file_binary(on_counterpart),
-                           "V-7 additivity violated: " + rel.string() +
-                               " differs between OFF-run and ON-run.");
+        expect_bytes_equal(
+            read_file_binary(e.path()), read_file_binary(on_counterpart),
+            "V-7 additivity violated: " + rel.string() + " differs between OFF-run and ON-run.");
         ++compared;
     }
     // Sanity bound: v42/v50sp2/vt11 emit 5 artifacts each, v44 emits 5
@@ -789,7 +789,7 @@ TEST_F(DeterminismTest, AdditiveOffOnByteDiff) {
     // emitter-shape change, while still catching a degenerate walk that
     // silently compares nothing.
     EXPECT_GE(compared, 20U) << "V-7 walk compared suspiciously few files (" << compared
-                              << ") — codegen output shape may have changed.";
+                             << ") — codegen output shape may have changed.";
 }
 
 // ── 076-fix-latest-typed-codegen T021 [Polish]: V-5 fail-closed on unknown ──
@@ -869,13 +869,12 @@ TEST_F(DeterminismTest, BuildersOffPathNoStaleVlatestOthersUnaffected) {
     ASSERT_EQ(rc, 0) << "OFF-path codegen run failed (exit " << rc << ")";
 
     // FR-012: no vlatest/ dir at all when the option is OFF -- the
-    // conditional OFF-clean (cmake/Codegen.cmake's `if(NOT FIXPP_CODEGEN_FIX_LATEST)` REMOVE_RECURSE block) mirrored at the
-    // tool-invocation level: an OFF configure simply never adds the
-    // orchestra --xml job, so no vlatest/all.hpp (or any other vlatest/*
-    // builder-tier artifact) is ever written to begin with. `all.hpp` is the
-    // 078 builder-tier aggregator (FR-008, replaces Builders.hpp) -- its
-    // presence is the split-era discriminator for "this version's builder
-    // tier emitted".
+    // conditional OFF-clean (cmake/Codegen.cmake's `if(NOT FIXPP_CODEGEN_FIX_LATEST)`
+    // REMOVE_RECURSE block) mirrored at the tool-invocation level: an OFF configure simply never
+    // adds the orchestra --xml job, so no vlatest/all.hpp (or any other vlatest/* builder-tier
+    // artifact) is ever written to begin with. `all.hpp` is the 078 builder-tier aggregator
+    // (FR-008, replaces Builders.hpp) -- its presence is the split-era discriminator for "this
+    // version's builder tier emitted".
     EXPECT_FALSE(fs::exists(off_run.path / "vlatest"))
         << "FR-012 violated: OFF-path job produced a vlatest/ dir -- a stale "
            "vlatest/all.hpp could live here.";
@@ -957,14 +956,14 @@ TEST_F(DeterminismTest, OfficialModeBuildersStructuralShape) {
     constexpr std::size_t kExpectedOfficialMsgCount = 33;
     constexpr std::size_t kExpectedOfficialGroupPlanCount = 54;
     constexpr std::size_t kExpectedOfficialFileCount =
-        kExpectedOfficialMsgCount * 5 + kExpectedOfficialGroupPlanCount + 3;
+        (kExpectedOfficialMsgCount * 5) + kExpectedOfficialGroupPlanCount + 3;
     auto const built_set = collect_builder_tier_set(run.path / "v44");
     EXPECT_EQ(built_set.size(), kExpectedOfficialFileCount)
         << "SC-003 violated: `--families official` v44 builder-tier file-set shape changed "
            "(expected "
         << kExpectedOfficialMsgCount << " messages x 5 files + " << kExpectedOfficialGroupPlanCount
-        << " group-plan headers + 3 shared = "
-        << kExpectedOfficialFileCount << ", got " << built_set.size() << ")";
+        << " group-plan headers + 3 shared = " << kExpectedOfficialFileCount << ", got "
+        << built_set.size() << ")";
 
     // (ii) builder_registry cardinality — the `all.hpp` aggregate array's
     // declared size (`::std::array<builder_registry_entry, N>`).
@@ -1000,18 +999,18 @@ TEST_F(DeterminismTest, V42OfficialModeBuildersStructuralShape) {
     constexpr std::size_t kExpectedV42OfficialMsgCount = 25;
     constexpr std::size_t kExpectedV42OfficialGroupPlanCount = 19;
     constexpr std::size_t kExpectedV42OfficialFileCount =
-        kExpectedV42OfficialMsgCount * 5 + kExpectedV42OfficialGroupPlanCount + 3;
+        (kExpectedV42OfficialMsgCount * 5) + kExpectedV42OfficialGroupPlanCount + 3;
 
     auto const built_set = collect_builder_tier_set(run.path / "v42");
     EXPECT_EQ(built_set.size(), kExpectedV42OfficialFileCount)
         << "`--families official` v42 builder-tier file-set shape changed (expected "
         << kExpectedV42OfficialMsgCount << " messages x 5 files + "
-        << kExpectedV42OfficialGroupPlanCount << " group-plan headers + 3 shared = "
-        << kExpectedV42OfficialFileCount << ", got " << built_set.size()
+        << kExpectedV42OfficialGroupPlanCount
+        << " group-plan headers + 3 shared = " << kExpectedV42OfficialFileCount << ", got "
+        << built_set.size()
         << ") -- re-derive with contracts/builder_plan_census.py, do not re-baseline";
 
-    EXPECT_EQ(parse_registry_array_size(run.path / "v42" / "all.hpp"),
-              kExpectedV42OfficialMsgCount)
+    EXPECT_EQ(parse_registry_array_size(run.path / "v42" / "all.hpp"), kExpectedV42OfficialMsgCount)
         << "`--families official` v42/all.hpp builder_registry array size != "
         << kExpectedV42OfficialMsgCount;
 }

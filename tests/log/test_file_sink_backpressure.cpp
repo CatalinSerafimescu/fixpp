@@ -46,6 +46,11 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <fixpp/log/file_sink.hpp>
+#include <fixpp/log/level.hpp>
+#include <fixpp/log/logger.hpp>
+#include <fixpp/log/record.hpp>
+#include <fixpp/log/sink.hpp>
 #include <fstream>
 #include <functional>
 #include <memory_resource>
@@ -54,12 +59,6 @@
 #include <thread>
 #include <utility>
 #include <vector>
-
-#include <fixpp/log/file_sink.hpp>
-#include <fixpp/log/level.hpp>
-#include <fixpp/log/logger.hpp>
-#include <fixpp/log/record.hpp>
-#include <fixpp/log/sink.hpp>
 
 #include "support/temp_dir.hpp"  // fixpp::test_support::unique_temp_dir (#404)
 
@@ -77,9 +76,9 @@ namespace {
 // parser validates every field and reports the first thing that is wrong.
 
 struct ParsedLine {
-    bool          ok{false};
+    bool ok{false};
     std::uint64_t payload{0};
-    std::string   why;  // non-empty iff !ok
+    std::string why;  // non-empty iff !ok
 };
 
 bool all_digits(std::string_view s) noexcept {
@@ -140,9 +139,9 @@ ParsedLine parse_line(std::string const& line) {
 
 // One log file's worth of parsed records, in the order they appear in the file.
 struct FileRecords {
-    std::filesystem::path      path;
+    std::filesystem::path path;
     std::vector<std::uint64_t> payloads;
-    std::vector<std::string>   malformed;  // "<file>:<lineno>: <why>: <line>"
+    std::vector<std::string> malformed;  // "<file>:<lineno>: <why>: <line>"
 };
 
 // Read every *.log in `dir` -- the live file AND the archives.
@@ -154,7 +153,7 @@ struct FileRecords {
 // wrong. Ordering is asserted from CONTENT instead (see the test body).
 std::vector<FileRecords> read_all_logs(std::filesystem::path const& dir) {
     std::vector<FileRecords> out;
-    std::error_code          ec;
+    std::error_code ec;
     for (auto const& entry : std::filesystem::directory_iterator(dir, ec)) {
         if (ec) break;
         if (entry.path().extension() != ".log") continue;
@@ -163,8 +162,8 @@ std::vector<FileRecords> read_all_logs(std::filesystem::path const& dir) {
         fr.path = entry.path();
 
         std::ifstream in{entry.path(), std::ios::binary};
-        std::string   line;
-        int           lineno = 0;
+        std::string line;
+        int lineno = 0;
         while (std::getline(in, line)) {
             ++lineno;
             // A blank line is NOT nothing. std::getline yields no trailing empty
@@ -174,17 +173,16 @@ std::vector<FileRecords> read_all_logs(std::filesystem::path const& dir) {
             // write this test exists to detect. Skipping it would count a
             // corrupted run as clean.
             if (line.empty()) {
-                fr.malformed.push_back(fr.path.filename().string() + ":" +
-                                       std::to_string(lineno) + ": blank line (lost payload?)");
+                fr.malformed.push_back(fr.path.filename().string() + ":" + std::to_string(lineno) +
+                                       ": blank line (lost payload?)");
                 continue;
             }
             auto parsed = parse_line(line);
             if (parsed.ok) {
                 fr.payloads.push_back(parsed.payload);
             } else {
-                fr.malformed.push_back(fr.path.filename().string() + ":" +
-                                       std::to_string(lineno) + ": " + parsed.why + ": [" + line +
-                                       "]");
+                fr.malformed.push_back(fr.path.filename().string() + ":" + std::to_string(lineno) +
+                                       ": " + parsed.why + ": [" + line + "]");
             }
         }
         out.push_back(std::move(fr));
@@ -196,9 +194,7 @@ std::vector<FileRecords> read_all_logs(std::filesystem::path const& dir) {
 
 class FileSinkBackpressureTest : public ::testing::Test {
 protected:
-    void SetUp() override {
-        tmpdir_ = fixpp::test_support::unique_temp_dir("log_backpressure");
-    }
+    void SetUp() override { tmpdir_ = fixpp::test_support::unique_temp_dir("log_backpressure"); }
 
     void TearDown() override {
         // CONTRACT (see support/temp_dir.hpp): every FileSink over tmpdir_ must
@@ -217,8 +213,7 @@ protected:
 
         for (std::uint64_t i = 0; i < count; ++i) {
             logger.enqueue(fixpp::log::Level::info, fixpp::log::cat::session, fmt_id,
-                           zeroed_trace_id, 0u, ts,
-                           {fixpp::log::ArgValue::from_u64(first + i)});
+                           zeroed_trace_id, 0U, ts, {fixpp::log::ArgValue::from_u64(first + i)});
         }
     }
 
@@ -228,7 +223,7 @@ protected:
     // without a data race, and this test has to observe rotation progress WHILE
     // the drain is running. Filesystem state carries no such hazard.
     [[nodiscard]] std::size_t log_file_count() const {
-        std::size_t     n = 0;
+        std::size_t n = 0;
         std::error_code ec;
         for (auto const& e : std::filesystem::directory_iterator(tmpdir_, ec)) {
             if (ec) break;
@@ -252,10 +247,10 @@ TEST_F(FileSinkBackpressureTest, RealFileSinkDropsAccountablyUnderRotationStorm)
     // fires every few records on the drain thread. Deliberately not 1 byte:
     // one record per file would make the within-file ordering assertion below
     // vacuous, and it multiplies rotate()'s O(archives) directory scan.
-    cfg.max_file_bytes = 200u;
+    cfg.max_file_bytes = 200U;
     // Retain EVERY archive. Pruning would delete records the accounting below
     // expects to read back, turning a clean drop into an apparent loss.
-    cfg.max_keep_count = 1000000u;
+    cfg.max_keep_count = 1000000U;
     // Production default. Each rotate() therefore also stops and restarts the
     // owned fsync worker, which is part of the real drain-side cost.
     cfg.async_fsync = true;
@@ -265,8 +260,8 @@ TEST_F(FileSinkBackpressureTest, RealFileSinkDropsAccountablyUnderRotationStorm)
     sinks.push_back(std::unique_ptr<fixpp::log::Sink>(sink_raw));
 
     fixpp::log::LoggerConfig lcfg;
-    lcfg.capacity      = 64u;  // power of 2, far smaller than any chunk below
-    lcfg.on_overflow   = fixpp::log::overflow_policy::drop_newest;
+    lcfg.capacity = 64U;  // power of 2, far smaller than any chunk below
+    lcfg.on_overflow = fixpp::log::overflow_policy::drop_newest;
     lcfg.drain_timeout = std::chrono::seconds{60};
 
     auto logger = std::make_unique<fixpp::log::Logger>(std::move(lcfg), std::move(sinks));
@@ -281,7 +276,7 @@ TEST_F(FileSinkBackpressureTest, RealFileSinkDropsAccountablyUnderRotationStorm)
     // Checked HERE, immediately after construction, and not later: the same
     // counter is also bumped on the emit path, where a genuine write failure is
     // the subject of other arms rather than a setup error.
-    ASSERT_EQ(logger->sink_error_count(0), 0u)
+    ASSERT_EQ(logger->sink_error_count(0), 0U)
         << "the FileSink failed to open, so the Logger silently disabled it and this run "
         << "exercises no sink at all";
 
@@ -318,9 +313,9 @@ TEST_F(FileSinkBackpressureTest, RealFileSinkDropsAccountablyUnderRotationStorm)
     // drain never runs fails loudly instead of producing forever.
     constexpr std::uint64_t k_max_records = 400000;
 
-    std::uint64_t produced                 = 0;
-    std::uint64_t drops_at_first_rotation  = 0;
-    bool          rotation_seen            = false;
+    std::uint64_t produced = 0;
+    std::uint64_t drops_at_first_rotation = 0;
+    bool rotation_seen = false;
 
     while (produced < k_max_records) {
         burst(*logger, produced, k_chunk);
@@ -352,7 +347,7 @@ TEST_F(FileSinkBackpressureTest, RealFileSinkDropsAccountablyUnderRotationStorm)
                 std::this_thread::yield();
             }
             if (log_file_count() > 1) {
-                rotation_seen           = true;
+                rotation_seen = true;
                 drops_at_first_rotation = logger->drop_count();
             }
             continue;
@@ -394,8 +389,8 @@ TEST_F(FileSinkBackpressureTest, RealFileSinkDropsAccountablyUnderRotationStorm)
     auto const drops = logger->drop_count();
     EXPECT_GT(drops, drops_at_first_rotation)
         << "the ring stopped overflowing after the first rotation completed (drops were "
-        << drops_at_first_rotation << " then and " << drops << " after producing "
-        << produced << " records), so the accounting below has no overflow to account for. "
+        << drops_at_first_rotation << " then and " << drops << " after producing " << produced
+        << " records), so the accounting below has no overflow to account for. "
         << "This is the producer outrunning the ring, not a statement about the sink";
 
     // A drain timeout here is a real outcome, not a test bug: it is reported
@@ -420,8 +415,8 @@ TEST_F(FileSinkBackpressureTest, RealFileSinkDropsAccountablyUnderRotationStorm)
     // claim that must hold on a timed-out run is made from the FILESYSTEM
     // instead, which carries no such hazard, and the equality branch this feeds
     // already requires a clean shutdown for an independent reason.
-    bool const          rotations_valid = shutdown_result.has_value();
-    std::uint64_t const rotations       = rotations_valid ? sink_raw->rotation_count() : 0;
+    bool const rotations_valid = shutdown_result.has_value();
+    std::uint64_t const rotations = rotations_valid ? sink_raw->rotation_count() : 0;
 
     // Destroy the logger BEFORE reading: ~Logger closes the sink, which fcloses
     // the live file. Reading it while still open would race the stdio buffer.
@@ -434,12 +429,12 @@ TEST_F(FileSinkBackpressureTest, RealFileSinkDropsAccountablyUnderRotationStorm)
     // an independent instrument, not a restatement -- and it is checked only
     // when it is safe to read (see rotations_valid above).
     if (rotations_valid) {
-        EXPECT_GT(rotations, 0u)
+        EXPECT_GT(rotations, 0U)
             << "the sink reports no rotation although an archive appeared on disk — the two "
                "instruments disagree";
     }
 
-    EXPECT_EQ(filtered, 0u) << "no category filter is configured; a nonzero filter_count means "
+    EXPECT_EQ(filtered, 0U) << "no category filter is configured; a nonzero filter_count means "
                                "records went missing down a path this accounting does not model";
 
     auto const files = read_all_logs(tmpdir_);
@@ -484,8 +479,9 @@ TEST_F(FileSinkBackpressureTest, RealFileSinkDropsAccountablyUnderRotationStorm)
     std::ranges::sort(ranges);
     for (std::size_t i = 1; i < ranges.size(); ++i) {
         EXPECT_GT(ranges[i].first, ranges[i - 1].second)
-            << "payload ranges [" << ranges[i - 1].first << ".." << ranges[i - 1].second << "] and ["
-            << ranges[i].first << ".." << ranges[i].second << "] overlap — records from one file "
+            << "payload ranges [" << ranges[i - 1].first << ".." << ranges[i - 1].second
+            << "] and [" << ranges[i].first << ".." << ranges[i].second
+            << "] overlap — records from one file "
             << "were interleaved into another";
     }
 
@@ -546,7 +542,7 @@ TEST_F(FileSinkBackpressureTest, RealFileSinkDropsAccountablyUnderRotationStorm)
     // Guard the subtraction: read_all_logs returns empty if open() ever failed,
     // and an unsigned underflow would print SIZE_MAX in the diagnosis below --
     // nonsense in exactly the message someone reads when something went wrong.
-    auto const archives = files.empty() ? 0u : files.size() - 1;  // minus the live file
+    auto const archives = files.empty() ? 0U : files.size() - 1;  // minus the live file
     if (rotations_valid && archives == rotations) {
         // shutdown_result.has_value() is what makes the EQUALITY sound: a clean
         // shutdown means the ring was fully drained, so every enqueued record
@@ -557,8 +553,9 @@ TEST_F(FileSinkBackpressureTest, RealFileSinkDropsAccountablyUnderRotationStorm)
             << ") != " << produced;
     } else {
         GTEST_LOG_(WARNING) << "accounting equality not checked this run: archives=" << archives
-                            << " rotations=" << (rotations_valid ? std::to_string(rotations)
-                                                                 : std::string{"<unread: timeout>"})
+                            << " rotations="
+                            << (rotations_valid ? std::to_string(rotations)
+                                                : std::string{"<unread: timeout>"})
                             << " shutdown_ok=" << rotations_valid
                             << " — a sink-side loss path may have fired (see comment above)";
     }
@@ -582,11 +579,11 @@ TEST_F(FileSinkBackpressureTest, EveryRecordSurvivesWhenTheRingCannotFill) {
     constexpr std::uint64_t k_control_records = 4000;
 
     fixpp::log::FileSinkConfig cfg;
-    cfg.directory      = tmpdir_;
-    cfg.base_name      = "calibration";
-    cfg.max_file_bytes = 256u * 1024u * 1024u;  // no rotation
-    cfg.max_keep_count = 8u;
-    cfg.async_fsync    = true;
+    cfg.directory = tmpdir_;
+    cfg.base_name = "calibration";
+    cfg.max_file_bytes = 256U * 1024U * 1024U;  // no rotation
+    cfg.max_keep_count = 8U;
+    cfg.async_fsync = true;
 
     std::pmr::vector<std::unique_ptr<fixpp::log::Sink>> sinks{};
     sinks.push_back(std::make_unique<fixpp::log::FileSink>(std::move(cfg)));
@@ -595,16 +592,16 @@ TEST_F(FileSinkBackpressureTest, EveryRecordSurvivesWhenTheRingCannotFill) {
     // Power of 2 (LoggerConfig::capacity requires it) and strictly greater than
     // the burst, so the ring cannot fill however slow the drain is. This is a
     // structural guarantee, not a race the drain has to win.
-    static_assert(k_control_records < 8192u, "control ring must exceed the burst");
-    lcfg.capacity      = 8192u;
-    lcfg.on_overflow   = fixpp::log::overflow_policy::drop_newest;
+    static_assert(k_control_records < 8192U, "control ring must exceed the burst");
+    lcfg.capacity = 8192U;
+    lcfg.on_overflow = fixpp::log::overflow_policy::drop_newest;
     lcfg.drain_timeout = std::chrono::seconds{60};
 
     auto logger = std::make_unique<fixpp::log::Logger>(std::move(lcfg), std::move(sinks));
 
     // Same setup guard as the storm test: a sink that failed to open is
     // DESTROYED by the Logger ctor and the run would witness nothing.
-    ASSERT_EQ(logger->sink_error_count(0), 0u)
+    ASSERT_EQ(logger->sink_error_count(0), 0U)
         << "the FileSink failed to open, so the Logger silently disabled it and this run "
         << "exercises no sink at all";
 
@@ -612,16 +609,17 @@ TEST_F(FileSinkBackpressureTest, EveryRecordSurvivesWhenTheRingCannotFill) {
     auto const shutdown_result = logger->shutdown(std::chrono::seconds{60});
     EXPECT_TRUE(shutdown_result.has_value()) << "the control run must drain fully";
 
-    auto const drops    = logger->drop_count();
+    auto const drops = logger->drop_count();
     auto const timeouts = logger->timeout_drop_count();
     logger.reset();
 
-    EXPECT_EQ(drops, 0u) << "the ring has more slots than the burst has records — a drop here means "
-                            "drop accounting fires when the ring is not full";
-    EXPECT_EQ(timeouts, 0u) << "the control run timed out draining";
+    EXPECT_EQ(drops, 0U)
+        << "the ring has more slots than the burst has records — a drop here means "
+           "drop accounting fires when the ring is not full";
+    EXPECT_EQ(timeouts, 0U) << "the control run timed out draining";
 
     auto const files = read_all_logs(tmpdir_);
-    ASSERT_EQ(files.size(), 1u) << "the control run must not rotate";
+    ASSERT_EQ(files.size(), 1U) << "the control run must not rotate";
 
     EXPECT_TRUE(files.front().malformed.empty())
         << files.front().malformed.size() << " malformed line(s) in the control run. First: "

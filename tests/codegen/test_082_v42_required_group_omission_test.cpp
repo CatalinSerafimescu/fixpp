@@ -22,10 +22,10 @@
 //
 // ── EVERY CASE CARRIES A POSITIVE CONTROL, AND IT IS LOAD-BEARING ────────────
 // `validate_required` returns `wire_required_field_missing` for BOTH a missing
-// required scalar AND an empty required group (`validate_required`'s two `wire_required_field_missing` returns —
-// the same enum value from two different causes). So "it rejected" proves nothing on
-// its own: a case that forgot a required scalar would reject for the wrong reason and
-// read as a pass. Each case therefore asserts the OK direction first — same Args,
+// required scalar AND an empty required group (`validate_required`'s two
+// `wire_required_field_missing` returns — the same enum value from two different causes). So "it
+// rejected" proves nothing on its own: a case that forgot a required scalar would reject for the
+// wrong reason and read as a pass. Each case therefore asserts the OK direction first — same Args,
 // group POPULATED, must validate clean — and only then that clearing the span
 // rejects. The pair is the assertion; neither half alone is evidence.
 //
@@ -45,15 +45,14 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/core/decimal_alias.hpp>
+#include <fixpp/core/error.hpp>
+#include <fixpp/v42/all.hpp>  // GENERATED — Args + validate_<Msg> + writer_traits
 #include <memory_resource>
 #include <set>
 #include <span>
 #include <string_view>
 #include <utility>
-
-#include <fixpp/core/decimal_alias.hpp>
-#include <fixpp/core/error.hpp>
-#include <fixpp/v42/all.hpp>  // GENERATED — Args + validate_<Msg> + writer_traits
 
 // Thin per-message `validate` overloads so the shared assertion helper below can
 // dispatch by ADL on the Args type. Declared BEFORE the helper deliberately —
@@ -106,16 +105,18 @@ void expect_required_group_omission_rejected(Args full, ClearFn clear, char cons
     // required SCALAR this fixture forgot — same error enum, wrong reason.
     auto const ok = validate(full);
     EXPECT_TRUE(ok.has_value())
-        << label << ": baseline Args (required group POPULATED) must validate clean; if this "
-                    "fails the omission assertion below proves nothing (error="
+        << label
+        << ": baseline Args (required group POPULATED) must validate clean; if this "
+           "fails the omission assertion below proves nothing (error="
         << (ok.has_value() ? 0 : static_cast<int>(ok.error())) << ")";
 
     Args omitted = full;
     clear(omitted);
     auto const bad = validate(omitted);
     EXPECT_FALSE(bad.has_value())
-        << label << ": omitting a required='Y' repeating group MUST be rejected -- this is the "
-                    "silent-omission hole issue #196 exists to close (Article VI)";
+        << label
+        << ": omitting a required='Y' repeating group MUST be rejected -- this is the "
+           "silent-omission hole issue #196 exists to close (Article VI)";
     if (!bad.has_value()) {
         EXPECT_EQ(bad.error(), ::fixpp::core::error::wire_required_field_missing) << label;
     }
@@ -124,7 +125,7 @@ void expect_required_group_omission_rejected(Args full, ClearFn clear, char cons
 }  // namespace
 
 class V42RequiredGroupOmission : public ::testing::Test {
-  protected:
+protected:
     std::pmr::monotonic_buffer_resource arena_{1U << 16};
     std::pmr::memory_resource* mr() { return &arena_; }
 };
@@ -250,8 +251,7 @@ TEST_F(V42RequiredGroupOmission, MarketDataSnapshotFullRefresh_NoMDEntries_268) 
     full.symbol = "AAPL";
     full.md_entries = std::span<const g::G_268_1Args>{entries};
     expect_required_group_omission_rejected(
-        full, [](auto& a) { a.md_entries = {}; },
-        "MarketDataSnapshotFullRefresh/268 NoMDEntries");
+        full, [](auto& a) { a.md_entries = {}; }, "MarketDataSnapshotFullRefresh/268 NoMDEntries");
 }
 
 // ── 9. MassQuote (i) / NoQuoteSets(296) — the top-level half ─────────────────
@@ -387,9 +387,20 @@ TEST_F(V42RequiredGroupOmission, AllFourteenDerivedPairsAreCovered) {
     // while reading as completeness coverage. Deducing the extent is what makes the
     // count assertion below able to fail.
     static constexpr auto kCovered = std::to_array<std::pair<std::string_view, std::uint16_t>>({
-        {"l", 420}, {"C", 33},  {"N", 73},  {"m", 428}, {"X", 268},
-        {"V", 146}, {"V", 267}, {"W", 268}, {"i", 296}, {"i", 295},
-        {"E", 73},  {"B", 33},  {"Z", 295}, {"R", 146},
+        {"l", 420},
+        {"C", 33},
+        {"N", 73},
+        {"m", 428},
+        {"X", 268},
+        {"V", 146},
+        {"V", 267},
+        {"W", 268},
+        {"i", 296},
+        {"i", 295},
+        {"E", 73},
+        {"B", 33},
+        {"Z", 295},
+        {"R", 146},
     });
     EXPECT_EQ(kCovered.size(), kCaseCount)
         << "the 14 raw-XML-derived required='Y' group pairs for FIX42 -- 13 top-level plus "
@@ -406,7 +417,8 @@ TEST_F(V42RequiredGroupOmission, AllFourteenDerivedPairsAreCovered) {
     for (auto const& [mt, tag] : kCovered) {
         msgs.insert(mt);
     }
-    EXPECT_EQ(msgs.size(), 12U) << "14 pairs span exactly 12 messages (V and i contribute two each)";
+    EXPECT_EQ(msgs.size(), 12U)
+        << "14 pairs span exactly 12 messages (V and i contribute two each)";
 
     // Bind the table to the TEST BODIES above. Without this, deleting a whole
     // TEST_F leaves every assertion in this cell green — the table would still list

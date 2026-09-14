@@ -40,7 +40,6 @@ namespace {
 using fixpp::session::direction_t;
 using fixpp::session::FileStore;
 using fixpp::session::FileStoreFactory;
-using fixpp::session::FileStorePolicy;
 using fixpp::store_test::byte_collecting_visitor;
 using fixpp::store_test::make_store_script;
 using fixpp::store_test::unique_store_dir;
@@ -136,7 +135,7 @@ TEST(FileStoreTornWrite, TruncateMidRecordCleansUp) {
             << "frame " << i << " byte mismatch after torn-write recovery";
     }
 
-    minted2.value().reset();
+    minted2.value() = nullptr;
     fixpp::store_test::remove_store_dir(dir);
 }
 
@@ -159,8 +158,9 @@ TEST(FileStoreTornWrite, StaleResetTmpIsUnlinked) {
             pool.get_executor(),
             [&store, &script]() -> asio::awaitable<void> {
                 for (const auto& step : script) {
-                    co_await store.store(step.seq, std::span<const std::byte>(step.frame_bytes),
-                                         step.dir);
+                    auto st_r = co_await store.store(
+                        step.seq, std::span<const std::byte>(step.frame_bytes), step.dir);
+                    EXPECT_TRUE(st_r.has_value()) << "setup store must succeed";
                 }
             },
             asio::use_future);
@@ -199,7 +199,7 @@ TEST(FileStoreTornWrite, StaleResetTmpIsUnlinked) {
 
     EXPECT_EQ(visitor.entries().size(), static_cast<std::size_t>(3));
 
-    minted2.value().reset();
+    minted2.value() = nullptr;
     fixpp::store_test::remove_store_dir(dir);
 }
 
@@ -223,8 +223,9 @@ TEST(FileStoreTornWriteWindows, SetEndOfFileTruncation) {
             pool.get_executor(),
             [&store, &script]() -> asio::awaitable<void> {
                 for (const auto& step : script) {
-                    co_await store.store(step.seq, std::span<const std::byte>(step.frame_bytes),
-                                         step.dir);
+                    auto st_r = co_await store.store(
+                        step.seq, std::span<const std::byte>(step.frame_bytes), step.dir);
+                    EXPECT_TRUE(st_r.has_value()) << "setup store must succeed";
                 }
             },
             asio::use_future);
@@ -359,11 +360,11 @@ TEST(FileStoreTornWrite, OversizedLenInHeaderDoesNotTerminate) {
             },
             asio::use_future);
         fut.get();
-        EXPECT_EQ(vis.seqs.size(), 1u) << "expected 1 surviving frame";
-        if (!vis.seqs.empty()) EXPECT_EQ(vis.seqs[0], 1u);
+        EXPECT_EQ(vis.seqs.size(), 1U) << "expected 1 surviving frame";
+        if (!vis.seqs.empty()) EXPECT_EQ(vis.seqs[0], 1U);
     }
 
-    if (minted2.has_value()) minted2.value().reset();
+    if (minted2.has_value()) minted2.value() = nullptr;
     fixpp::store_test::remove_store_dir(dir);
 }
 #endif  // !_WIN32 (test uses fopen/fwrite; Windows variant is out of scope for Tier-1)

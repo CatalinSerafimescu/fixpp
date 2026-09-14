@@ -81,10 +81,9 @@ namespace {
 
 // Build a minimal SOH-delimited FIX frame for the given body fields.
 // Computes BodyLength(9) and CheckSum(10) correctly.
-static std::vector<std::byte> make_raw_frame(std::string_view begin_string,
-                                             std::string_view msg_type, std::uint32_t seq,
-                                             std::string_view sender, std::string_view target,
-                                             std::string extra_body = {}) {
+std::vector<std::byte> make_raw_frame(std::string_view begin_string, std::string_view msg_type,
+                                      std::uint32_t seq, std::string_view sender,
+                                      std::string_view target, std::string extra_body = {}) {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -116,10 +115,9 @@ static std::vector<std::byte> make_raw_frame(std::string_view begin_string,
     return frame;
 }
 
-static std::vector<std::byte> make_logon_frame(std::string_view begin_string = "FIX.4.2",
-                                               std::uint32_t seq = 1,
-                                               std::string_view sender = "TW",
-                                               std::string_view target = "ISLD", int heartbt = 30) {
+std::vector<std::byte> make_logon_frame(std::string_view begin_string = "FIX.4.2",
+                                        std::uint32_t seq = 1, std::string_view sender = "TW",
+                                        std::string_view target = "ISLD", int heartbt = 30) {
     std::string extra;
     extra += "98=0\x01";
     extra += "108=" + std::to_string(heartbt) + "\x01";
@@ -127,7 +125,7 @@ static std::vector<std::byte> make_logon_frame(std::string_view begin_string = "
 }
 
 // Extract a field value from a SOH-delimited FIX frame.
-static std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag_wanted) {
+std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag_wanted) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = std::to_string(tag_wanted) + "=";
     auto pos = wire.find(needle);
@@ -223,9 +221,12 @@ struct RejectFixture {
 
     void feed(Session& sess, std::span<const std::byte> frame) {
         auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
-        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms, "session_reject:RejectFixture::feed")) {
-            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "session_reject:RejectFixture::feed");
-            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "session_reject:RejectFixture::feed";
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms,
+                                                        "session_reject:RejectFixture::feed")) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "session_reject:RejectFixture::feed");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                          << "session_reject:RejectFixture::feed";
             return;
         }
         (void)fut.get();

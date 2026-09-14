@@ -63,8 +63,8 @@ using fixpp::core::error;
 using fixpp::core::expected_t;
 using fixpp::session::Application;
 using fixpp::session::SessionId;
-using fixpp::wire::MessageView;
 using fixpp::wire::access_mode;
+using fixpp::wire::MessageView;
 
 namespace fixpp::session::test {
 // The #289 window every migrated site in this file uses. File-scope rather than a
@@ -77,10 +77,9 @@ namespace {
 
 // ── Frame helpers ─────────────────────────────────────────────────────────────
 
-static std::vector<std::byte> make_raw_frame(std::string_view begin_string,
-                                             std::string_view msg_type, std::uint32_t seq,
-                                             std::string_view sender, std::string_view target,
-                                             std::string extra_body = {}) {
+std::vector<std::byte> make_raw_frame(std::string_view begin_string, std::string_view msg_type,
+                                      std::uint32_t seq, std::string_view sender,
+                                      std::string_view target, std::string extra_body = {}) {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -106,33 +105,32 @@ static std::vector<std::byte> make_raw_frame(std::string_view begin_string,
     return frame;
 }
 
-static std::vector<std::byte> make_logon_frame(std::string_view begin_string = "FIX.4.2",
-                                               std::uint32_t seq = 1,
-                                               std::string_view sender = "TW",
-                                               std::string_view target = "ISLD",
-                                               int heartbt = 0) {
+std::vector<std::byte> make_logon_frame(std::string_view begin_string = "FIX.4.2",
+                                        std::uint32_t seq = 1, std::string_view sender = "TW",
+                                        std::string_view target = "ISLD", int heartbt = 0) {
     std::string extra = std::string("98=0\x01") + "108=" + std::to_string(heartbt) + "\x01";
     return make_raw_frame(begin_string, "A", seq, sender, target, extra);
 }
 
-static std::vector<std::byte> make_app_frame(std::uint32_t seq = 2,
-                                             std::string_view sender = "TW",
-                                             std::string_view target = "ISLD") {
+std::vector<std::byte> make_app_frame(std::uint32_t seq = 2, std::string_view sender = "TW",
+                                      std::string_view target = "ISLD") {
     return make_raw_frame("FIX.4.2", "D", seq, sender, target);
 }
 
-static std::vector<std::byte> make_heartbeat_frame(std::uint32_t seq = 2,
-                                                   std::string_view sender = "TW",
-                                                   std::string_view target = "ISLD") {
+std::vector<std::byte> make_heartbeat_frame(std::uint32_t seq = 2, std::string_view sender = "TW",
+                                            std::string_view target = "ISLD") {
     return make_raw_frame("FIX.4.2", "0", seq, sender, target);
 }
 
-static std::vector<std::byte> make_app_payload() {
+std::vector<std::byte> make_app_payload() {
     // Must lead with a 35= MsgType field (FR-016 / 020 send-path validation).
-    static const char kPayload[] = "35=D\x01" "11=ORD001\x01" "54=1\x01" "55=AAPL\x01";
+    static const char kPayload[] =
+        "35=D\x01"
+        "11=ORD001\x01"
+        "54=1\x01"
+        "55=AAPL\x01";
     std::vector<std::byte> v;
-    for (const char* p = kPayload; *p; ++p)
-        v.push_back(static_cast<std::byte>(*p));
+    for (const char* p = kPayload; *p; ++p) v.push_back(static_cast<std::byte>(*p));
     return v;
 }
 
@@ -249,8 +247,7 @@ struct ThrowFixture {
 // Throws from fromApp.
 class ThrowingFromApp : public Application {
 public:
-    expected_t<void> fromApp(const MessageView<access_mode::Index>&,
-                             const SessionId&) override {
+    expected_t<void> fromApp(const MessageView<access_mode::Index>&, const SessionId&) override {
         throw std::runtime_error("test throw from fromApp");
     }
 };
@@ -258,8 +255,7 @@ public:
 // Throws from fromAdmin.
 class ThrowingFromAdmin : public Application {
 public:
-    expected_t<void> fromAdmin(const MessageView<access_mode::Index>&,
-                               const SessionId&) override {
+    expected_t<void> fromAdmin(const MessageView<access_mode::Index>&, const SessionId&) override {
         throw std::runtime_error("test throw from fromAdmin");
     }
 };
@@ -267,8 +263,7 @@ public:
 // Throws from toApp.
 class ThrowingToApp : public Application {
 public:
-    expected_t<void> toApp(const MessageView<access_mode::Index>&,
-                           const SessionId&) override {
+    expected_t<void> toApp(const MessageView<access_mode::Index>&, const SessionId&) override {
         throw std::runtime_error("test throw from toApp");
     }
 };
@@ -298,9 +293,7 @@ public:
 // Throws from onLogon.
 class ThrowingOnLogon : public Application {
 public:
-    void onLogon(const SessionId&) override {
-        throw std::runtime_error("test throw from onLogon");
-    }
+    void onLogon(const SessionId&) override { throw std::runtime_error("test throw from onLogon"); }
 };
 
 // Throws from onLogout.
@@ -394,7 +387,8 @@ TEST(ApplicationThrow, ToAppThrowTerminatesSession) {
 
     // Call Session::send — toApp will throw inside send_impl.
     auto payload = make_app_payload();
-    auto fut = asio::co_spawn(f.ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut =
+        asio::co_spawn(f.ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, kWindow,
                                                     "ToAppThrowTerminatesSession/send")) {
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
@@ -405,8 +399,7 @@ TEST(ApplicationThrow, ToAppThrowTerminatesSession) {
     auto result = fut.get();
     // Result is unexpected(app_callback_threw) because the throw is caught
     // inside invoke_callback_safe and returned; Session::send_impl propagates it.
-    EXPECT_FALSE(result.has_value())
-        << "send() must return error when toApp throws";
+    EXPECT_FALSE(result.has_value()) << "send() must return error when toApp throws";
     if (!result.has_value()) {
         EXPECT_EQ(result.error(), error::app_callback_threw)
             << "error must be app_callback_threw (130)";
@@ -613,7 +606,7 @@ public:
 
 // Helper: open an acceptor session to Active.
 // The acceptor reply Logon triggers toAdmin call #1.
-static void open_acceptor_to_active(ThrowFixture& f, Session& sess) {
+void open_acceptor_to_active(ThrowFixture& f, Session& sess) {
     auto fut = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(
             f.ioc, fut, kWindow, "ApplicationThrow::open_acceptor_to_active/open")) {
@@ -639,9 +632,8 @@ static void open_acceptor_to_active(ThrowFixture& f, Session& sess) {
 }
 
 // Helper: build a Logout frame for feed-to-session.
-static std::vector<std::byte> make_logout_frame(std::uint32_t seq = 2,
-                                                std::string_view sender = "TW",
-                                                std::string_view target = "ISLD") {
+std::vector<std::byte> make_logout_frame(std::uint32_t seq = 2, std::string_view sender = "TW",
+                                         std::string_view target = "ISLD") {
     return make_raw_frame("FIX.4.2", "5", seq, sender, target);
 }
 
@@ -681,7 +673,8 @@ TEST(ApplicationThrow, ToAdminConfirmingLogoutThrowTerminatesSession) {
     f.run(300);
 
     // toAdmin must have been called exactly twice (Logon + confirming Logout).
-    EXPECT_EQ(app->call_count, 2) << "toAdmin must be called exactly twice (Logon + confirming Logout)";
+    EXPECT_EQ(app->call_count, 2)
+        << "toAdmin must be called exactly twice (Logon + confirming Logout)";
 
     // Session must be terminal-closed (not Active) — FIX-3 ensured this.
     ThrowFixture::verify_terminal_closed(sess);
@@ -730,8 +723,8 @@ TEST(ApplicationThrow, ToAdminGracefulCloseLogoutThrowTerminatesSession) {
 // a Heartbeat reply echoing the TestReqID → toAdmin fires. With ThrowingToAdminAtN(2)
 // and the acceptor path (call #1 = Logon reply), the reply fires toAdmin call #2 →
 // throw. FIX-3: terminal-close + app_callback_threw. Pre-fix: continued with discard.
-// (An inbound Heartbeat is NOT answered — data-model.md's Active-row Heartbeat cell — so the TestRequest is
-// the emit trigger here.)
+// (An inbound Heartbeat is NOT answered — data-model.md's Active-row Heartbeat cell — so the
+// TestRequest is the emit trigger here.)
 
 TEST(ApplicationThrow, ToAdminTestRequestReplyThrowTerminatesSession) {
     auto app = std::make_shared<ThrowingToAdminAtN>(2);

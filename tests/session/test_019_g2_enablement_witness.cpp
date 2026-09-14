@@ -51,6 +51,7 @@
 #include <fixpp/transport/transport_factory.hpp>
 #include <memory>
 #include <mutex>
+#include <ranges>
 #include <span>
 #include <string>
 #include <vector>
@@ -111,8 +112,8 @@ using namespace std::chrono_literals;
 using fixpp::core::expected_t;
 using fixpp::session::Application;
 using fixpp::session::SessionId;
-using fixpp::wire::MessageView;
 using fixpp::wire::access_mode;
+using fixpp::wire::MessageView;
 
 namespace {
 
@@ -130,7 +131,7 @@ const char* get_fixture_dir() {
 
 // Reserve a free loopback port so we can register the acceptor + initiator with
 // the same port before start() (mirrors engine_lifecycle_test.cpp).
-static uint16_t reserve_free_port(asio::io_context& ioc) {
+uint16_t reserve_free_port(asio::io_context& ioc) {
     asio::ip::tcp::acceptor a{ioc};
     asio::ip::tcp::endpoint ep{asio::ip::make_address("127.0.0.1"), 0};
     a.open(ep.protocol());
@@ -159,14 +160,14 @@ public:
         auto fv = msg.get(35);
         std::string mt = fv ? std::string(fv->as_string()) : "<none>";
         {
-            std::lock_guard<std::mutex> lk(mu);
-            records.push_back({id, std::move(mt)});
+            std::scoped_lock lk(mu);
+            records.push_back({.session_id = id, .msg_type = std::move(mt)});
         }
         return {};
     }
 
     int count_for(const SessionId& id) const {
-        std::lock_guard<std::mutex> lk(mu);
+        std::scoped_lock lk(mu);
         int n = 0;
         for (const auto& r : records)
             if (r.session_id == id) ++n;
@@ -174,31 +175,41 @@ public:
     }
 
     std::string last_msg_type_for(const SessionId& id) const {
-        std::lock_guard<std::mutex> lk(mu);
-        for (auto it = records.rbegin(); it != records.rend(); ++it)
-            if (it->session_id == id) return it->msg_type;
+        std::scoped_lock lk(mu);
+        for (const auto& record : std::views::reverse(records))
+            if (record.session_id == id) return record.msg_type;
         return {};
     }
 };
 
 // ── Opaque payload builders ───────────────────────────────────────────────────
 
-static std::vector<std::byte> make_nos_payload() {
+std::vector<std::byte> make_nos_payload() {
     // NewOrderSingle body fields. MsgType (35=D) MUST be included in the
     // payload so the receiver's frame-scanner extracts it for fromApp dispatch.
     // Session::send_impl writes 8=/9=/34=/49=/52=/56= then appends app_payload;
     // it does NOT stamp 35=. The payload must carry it. [send_impl]
     static const char k[] =
-        "35=D\x01""11=ORD001\x01""54=1\x01""55=AAPL\x01""40=2\x01""44=100.0\x01";
+        "35=D\x01"
+        "11=ORD001\x01"
+        "54=1\x01"
+        "55=AAPL\x01"
+        "40=2\x01"
+        "44=100.0\x01";
     std::vector<std::byte> v;
     for (const char* p = k; *p; ++p) v.push_back(static_cast<std::byte>(*p));
     return v;
 }
 
-static std::vector<std::byte> make_exec_report_payload() {
+std::vector<std::byte> make_exec_report_payload() {
     // ExecutionReport body fields. MsgType (35=8) included for the same reason.
     static const char k[] =
-        "35=8\x01""17=EXEC001\x01""37=ORD001\x01""39=2\x01""150=2\x01""151=0\x01";
+        "35=8\x01"
+        "17=EXEC001\x01"
+        "37=ORD001\x01"
+        "39=2\x01"
+        "150=2\x01"
+        "151=0\x01";
     std::vector<std::byte> v;
     for (const char* p = k; *p; ++p) v.push_back(static_cast<std::byte>(*p));
     return v;
@@ -249,8 +260,8 @@ TEST(G2EnablementWitness, OpaqueRoundTripViaEngineLoopback) {
 
     // ── Register acceptor + initiator ─────────────────────────────────────────
     // The leaf cert CN is "fixpp-leaf-rsa2048" (loopback fixture convention).
-    auto make_cfg = [&](const char* sender, const char* target,
-                        fixpp::session::session_role role, const char* peer_compid) {
+    auto make_cfg = [&](const char* sender, const char* target, fixpp::session::session_role role,
+                        const char* peer_compid) {
         fixpp::session::SessionConfig c;
         c.sender_comp_id = sender;
         c.target_comp_id = target;
@@ -270,10 +281,10 @@ TEST(G2EnablementWitness, OpaqueRoundTripViaEngineLoopback) {
         return c;
     };
 
-    auto acc_cfg = make_cfg("ACCEPTOR", "INITIATOR",
-                            fixpp::session::session_role::acceptor, "INITIATOR");
-    auto ini_cfg = make_cfg("INITIATOR", "ACCEPTOR",
-                            fixpp::session::session_role::initiator, "ACCEPTOR");
+    auto acc_cfg =
+        make_cfg("ACCEPTOR", "INITIATOR", fixpp::session::session_role::acceptor, "INITIATOR");
+    auto ini_cfg =
+        make_cfg("INITIATOR", "ACCEPTOR", fixpp::session::session_role::initiator, "ACCEPTOR");
     const auto acc_id = SessionId::from_config(acc_cfg);
     const auto ini_id = SessionId::from_config(ini_cfg);
 
@@ -285,10 +296,10 @@ TEST(G2EnablementWitness, OpaqueRoundTripViaEngineLoopback) {
     // ── Start engine and wait for both sessions to reach Active ──────────────
     ASSERT_TRUE(engine.start().has_value()) << "engine.start() failed";
 
-    bool acc_active = false, ini_active = false;
+    bool acc_active = false;
+    bool ini_active = false;
     auto deadline_logon = std::chrono::steady_clock::now() + 5s;
-    while (std::chrono::steady_clock::now() < deadline_logon &&
-           (!acc_active || !ini_active)) {
+    while (std::chrono::steady_clock::now() < deadline_logon && (!acc_active || !ini_active)) {
         ioc.run_for(100ms);
         ioc.restart();
         auto acc_s = engine.lookup(acc_id);
@@ -304,8 +315,8 @@ TEST(G2EnablementWitness, OpaqueRoundTripViaEngineLoopback) {
     // fromApp on the ACCEPTOR session must fire with MsgType "D".
     {
         auto nos = make_nos_payload();
-        auto send_fut = asio::co_spawn(
-            ioc, engine.send(ini_id, std::span<const std::byte>(nos)), asio::use_future);
+        auto send_fut = asio::co_spawn(ioc, engine.send(ini_id, std::span<const std::byte>(nos)),
+                                       asio::use_future);
 
         // Drive until acceptor's fromApp fires with "D" (bounded 3s).
         auto dl = std::chrono::steady_clock::now() + 3s;
@@ -373,8 +384,8 @@ TEST(G2EnablementWitness, OpaqueRoundTripViaEngineLoopback) {
     // fromApp on the INITIATOR session must fire with MsgType "8".
     {
         auto er = make_exec_report_payload();
-        auto send_fut = asio::co_spawn(
-            ioc, engine.send(acc_id, std::span<const std::byte>(er)), asio::use_future);
+        auto send_fut = asio::co_spawn(ioc, engine.send(acc_id, std::span<const std::byte>(er)),
+                                       asio::use_future);
 
         // Drive until initiator's fromApp fires with "8" (bounded 3s).
         auto dl = std::chrono::steady_clock::now() + 3s;

@@ -22,16 +22,15 @@
 
 #include <atomic>
 #include <chrono>
-#include <functional>
-#include <memory_resource>
-#include <thread>
-#include <vector>
-
 #include <fixpp/core/error.hpp>
 #include <fixpp/log/level.hpp>
 #include <fixpp/log/logger.hpp>
 #include <fixpp/log/record.hpp>
 #include <fixpp/log/sink.hpp>
+#include <functional>
+#include <memory_resource>
+#include <thread>
+#include <vector>
 
 namespace {
 
@@ -42,8 +41,8 @@ namespace {
 class SlowFlushSink final : public fixpp::log::Sink {
 public:
     std::chrono::milliseconds flush_delay{200};
-    std::atomic<int>          flush_call_count{0};
-    std::atomic<int>          emit_count{0};
+    std::atomic<int> flush_call_count{0};
+    std::atomic<int> emit_count{0};
 
     [[nodiscard]] fixpp::core::expected_t<void> open() override { return {}; }
 
@@ -63,9 +62,9 @@ public:
 // A sink whose flush() returns immediately.
 class FastSink final : public fixpp::log::Sink {
 public:
-    std::atomic<int>                  emit_count{0};
-    std::atomic<int>                  flush_count{0};
-    std::vector<fixpp::log::Record>   records;
+    std::atomic<int> emit_count{0};
+    std::atomic<int> flush_count{0};
+    std::vector<fixpp::log::Record> records;
 
     [[nodiscard]] fixpp::core::expected_t<void> open() override { return {}; }
     void emit(fixpp::log::Record const& rec) noexcept override {
@@ -87,8 +86,7 @@ public:
 //   - Returns unexpected(log_drain_timeout).
 //   - timeout_drop_count() == 1.
 //   - drop_count() unchanged (still 0).
-TEST(LogShutdown, TimeoutBumpsTimeoutDropCountNotDropCount)
-{
+TEST(LogShutdown, TimeoutBumpsTimeoutDropCountNotDropCount) {
     auto* slow_sink_raw = new SlowFlushSink{};
     slow_sink_raw->flush_delay = std::chrono::milliseconds{200};
 
@@ -96,7 +94,7 @@ TEST(LogShutdown, TimeoutBumpsTimeoutDropCountNotDropCount)
     sinks.push_back(std::unique_ptr<fixpp::log::Sink>(slow_sink_raw));
 
     fixpp::log::LoggerConfig cfg;
-    cfg.capacity    = 64u;
+    cfg.capacity = 64U;
     cfg.on_overflow = fixpp::log::overflow_policy::drop_newest;
     // config_.drain_timeout is used by the drain thread's own flush call.
     // Set it long so the drain thread doesn't bail early on its own.
@@ -106,19 +104,15 @@ TEST(LogShutdown, TimeoutBumpsTimeoutDropCountNotDropCount)
 
     // Enqueue one record to give the drain something to do.
     std::array<std::uint8_t, 16> zeroed{};
-    auto ts = fixpp::core::utc_time_point{
-        std::chrono::system_clock::now().time_since_epoch()};
+    auto ts = fixpp::core::utc_time_point{std::chrono::system_clock::now().time_since_epoch()};
     constexpr auto fmt_id =
         static_cast<std::uint32_t>(fixpp::log::detail::crc32_str("shutdown timeout test {}"));
-    logger->enqueue(fixpp::log::Level::warn, fixpp::log::cat::session,
-                    fmt_id, zeroed, 0u, ts,
-                    {fixpp::log::ArgValue::from_u64(42u)});
+    logger->enqueue(fixpp::log::Level::warn, fixpp::log::cat::session, fmt_id, zeroed, 0U, ts,
+                    {fixpp::log::ArgValue::from_u64(42U)});
 
     // Sanity: no drops yet.
-    EXPECT_EQ(logger->drop_count(), 0u)
-        << "No drops before shutdown";
-    EXPECT_EQ(logger->timeout_drop_count(), 0u)
-        << "No timeout drops before shutdown";
+    EXPECT_EQ(logger->drop_count(), 0U) << "No drops before shutdown";
+    EXPECT_EQ(logger->timeout_drop_count(), 0U) << "No timeout drops before shutdown";
 
     // shutdown() with a short timeout — should time out.
     auto result = logger->shutdown(std::chrono::milliseconds{50});
@@ -126,17 +120,16 @@ TEST(LogShutdown, TimeoutBumpsTimeoutDropCountNotDropCount)
     // ── Assertions ──────────────────────────────────────────────────────────
 
     // Must return unexpected(log_drain_timeout).
-    EXPECT_FALSE(result.has_value())
-        << "shutdown() must return unexpected on timeout";
+    EXPECT_FALSE(result.has_value()) << "shutdown() must return unexpected on timeout";
     EXPECT_EQ(result.error(), fixpp::core::error::log_drain_timeout)
         << "Error code must be log_drain_timeout (slot 126)";
 
     // timeout_drop_count must have been incremented by exactly 1.
-    EXPECT_EQ(logger->timeout_drop_count(), 1u)
+    EXPECT_EQ(logger->timeout_drop_count(), 1U)
         << "timeout_drop_count() must be 1 after a drain timeout";
 
     // drop_count must NOT have been incremented (separate counter).
-    EXPECT_EQ(logger->drop_count(), 0u)
+    EXPECT_EQ(logger->drop_count(), 0U)
         << "drop_count() must NOT be incremented on a drain timeout "
            "(it is a separate counter from timeout_drop_count)";
 
@@ -152,29 +145,26 @@ TEST(LogShutdown, TimeoutBumpsTimeoutDropCountNotDropCount)
 //   - Returns ok (no timeout).
 //   - timeout_drop_count() == 0.
 //   - Records were delivered.
-TEST(LogShutdown, SuccessReturnsOk)
-{
+TEST(LogShutdown, SuccessReturnsOk) {
     auto* fast_sink_raw = new FastSink{};
 
     std::pmr::vector<std::unique_ptr<fixpp::log::Sink>> sinks{};
     sinks.push_back(std::unique_ptr<fixpp::log::Sink>(fast_sink_raw));
 
     fixpp::log::LoggerConfig cfg;
-    cfg.capacity    = 64u;
+    cfg.capacity = 64U;
     cfg.on_overflow = fixpp::log::overflow_policy::drop_newest;
 
     auto logger = std::make_unique<fixpp::log::Logger>(std::move(cfg), std::move(sinks));
 
     std::array<std::uint8_t, 16> zeroed{};
-    auto ts = fixpp::core::utc_time_point{
-        std::chrono::system_clock::now().time_since_epoch()};
+    auto ts = fixpp::core::utc_time_point{std::chrono::system_clock::now().time_since_epoch()};
     constexpr auto fmt_id =
         static_cast<std::uint32_t>(fixpp::log::detail::crc32_str("shutdown success test {}"));
 
     // Enqueue a few records.
-    for (std::uint64_t i = 0; i < 5u; ++i) {
-        logger->enqueue(fixpp::log::Level::warn, fixpp::log::cat::session,
-                        fmt_id, zeroed, 0u, ts,
+    for (std::uint64_t i = 0; i < 5U; ++i) {
+        logger->enqueue(fixpp::log::Level::warn, fixpp::log::cat::session, fmt_id, zeroed, 0U, ts,
                         {fixpp::log::ArgValue::from_u64(i)});
     }
 
@@ -183,13 +173,12 @@ TEST(LogShutdown, SuccessReturnsOk)
 
     EXPECT_TRUE(result.has_value())
         << "shutdown() must return ok when drain completes within timeout";
-    EXPECT_EQ(logger->timeout_drop_count(), 0u)
+    EXPECT_EQ(logger->timeout_drop_count(), 0U)
         << "timeout_drop_count() must be 0 on successful shutdown";
-    EXPECT_EQ(logger->drop_count(), 0u)
-        << "drop_count() must be 0 (no overflow)";
+    EXPECT_EQ(logger->drop_count(), 0U) << "drop_count() must be 0 (no overflow)";
 
     // All records should have been delivered.
-    EXPECT_EQ(fast_sink_raw->emit_count.load(), 5u)
+    EXPECT_EQ(fast_sink_raw->emit_count.load(), 5U)
         << "All 5 records must have been delivered before shutdown returned";
 }
 
@@ -197,49 +186,45 @@ TEST(LogShutdown, SuccessReturnsOk)
 //
 // async_flush(on_done) enqueues a sentinel; the drain invokes on_done()
 // after processing all preceding records.
-TEST(LogShutdown, AsyncFlushPostsCompletion)
-{
+TEST(LogShutdown, AsyncFlushPostsCompletion) {
     auto* fast_sink_raw = new FastSink{};
 
     std::pmr::vector<std::unique_ptr<fixpp::log::Sink>> sinks{};
     sinks.push_back(std::unique_ptr<fixpp::log::Sink>(fast_sink_raw));
 
     fixpp::log::LoggerConfig cfg;
-    cfg.capacity    = 128u;
+    cfg.capacity = 128U;
     cfg.on_overflow = fixpp::log::overflow_policy::drop_newest;
 
     auto logger = std::make_unique<fixpp::log::Logger>(std::move(cfg), std::move(sinks));
 
     std::array<std::uint8_t, 16> zeroed{};
-    auto ts = fixpp::core::utc_time_point{
-        std::chrono::system_clock::now().time_since_epoch()};
+    auto ts = fixpp::core::utc_time_point{std::chrono::system_clock::now().time_since_epoch()};
     constexpr auto fmt_id =
         static_cast<std::uint32_t>(fixpp::log::detail::crc32_str("async flush test {}"));
 
     // Enqueue 3 records before the flush sentinel.
-    for (std::uint64_t i = 0; i < 3u; ++i) {
-        logger->enqueue(fixpp::log::Level::warn, fixpp::log::cat::session,
-                        fmt_id, zeroed, 0u, ts,
+    for (std::uint64_t i = 0; i < 3U; ++i) {
+        logger->enqueue(fixpp::log::Level::warn, fixpp::log::cat::session, fmt_id, zeroed, 0U, ts,
                         {fixpp::log::ArgValue::from_u64(i)});
     }
 
     // async_flush: the completion fires AFTER the 3 records are consumed.
     std::atomic<bool> flush_done{false};
-    std::atomic<int>  emit_count_at_flush{-1};
+    std::atomic<int> emit_count_at_flush{-1};
 
     logger->async_flush([&]() {
         // Capture how many records have been emitted at the time of the callback.
-        emit_count_at_flush.store(
-            fast_sink_raw->emit_count.load(std::memory_order_relaxed),
-            std::memory_order_relaxed);
+        emit_count_at_flush.store(fast_sink_raw->emit_count.load(std::memory_order_relaxed),
+                                  std::memory_order_relaxed);
         flush_done.store(true, std::memory_order_release);
     });
 
     // Wait for the completion to fire (drain thread; max 2 seconds).
     {
         auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
-        while (!flush_done.load(std::memory_order_acquire)
-               && std::chrono::steady_clock::now() < deadline) {
+        while (!flush_done.load(std::memory_order_acquire) &&
+               std::chrono::steady_clock::now() < deadline) {
             std::this_thread::yield();
         }
     }
@@ -259,15 +244,14 @@ TEST(LogShutdown, AsyncFlushPostsCompletion)
 // ── T027-d: idempotent shutdown ──────────────────────────────────────────
 //
 // Calling shutdown() twice must be safe (idempotent after first call).
-TEST(LogShutdown, ShutdownIsIdempotent)
-{
+TEST(LogShutdown, ShutdownIsIdempotent) {
     auto* fast_sink_raw = new FastSink{};
 
     std::pmr::vector<std::unique_ptr<fixpp::log::Sink>> sinks{};
     sinks.push_back(std::unique_ptr<fixpp::log::Sink>(fast_sink_raw));
 
     fixpp::log::LoggerConfig cfg;
-    cfg.capacity = 64u;
+    cfg.capacity = 64U;
 
     auto logger = std::make_unique<fixpp::log::Logger>(std::move(cfg), std::move(sinks));
 

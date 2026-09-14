@@ -37,7 +37,7 @@ namespace {
 
 struct QfKey {
     std::string_view name;
-    int              source_line; // SessionSettings.h line number
+    int source_line;  // SessionSettings.h line number
 };
 
 // All session-establishment const char[] keys from SessionSettings.h (36–239).
@@ -45,147 +45,147 @@ struct QfKey {
 // clang-format off
 const std::vector<QfKey> kQfAllKeys = {
     // ── Session identity ──────────────────────────────────────────────────────
-    { "BeginString",                      36  }, // SessionSettings.h:36
-    { "SenderCompID",                     37  }, // SessionSettings.h:37
-    { "TargetCompID",                     38  }, // SessionSettings.h:38
-    { "SessionQualifier",                 39  }, // SessionSettings.h:39
-    { "DefaultApplVerID",                 40  }, // SessionSettings.h:40
-    { "ConnectionType",                   41  }, // SessionSettings.h:41
+    { .name="BeginString",                      .source_line=36  }, // SessionSettings.h:36
+    { .name="SenderCompID",                     .source_line=37  }, // SessionSettings.h:37
+    { .name="TargetCompID",                     .source_line=38  }, // SessionSettings.h:38
+    { .name="SessionQualifier",                 .source_line=39  }, // SessionSettings.h:39
+    { .name="DefaultApplVerID",                 .source_line=40  }, // SessionSettings.h:40
+    { .name="ConnectionType",                   .source_line=41  }, // SessionSettings.h:41
 
     // ── Protocol flags ────────────────────────────────────────────────────────
-    { "UseDataDictionary",                42  }, // SessionSettings.h:42
-    { "SendResetSeqNumFlag",              43  }, // SessionSettings.h:43
-    { "SendRedundantResendRequests",      44  }, // SessionSettings.h:44
-    { "SendNextExpectedMsgSeqNum",        45  }, // SessionSettings.h:45
+    { .name="UseDataDictionary",                .source_line=42  }, // SessionSettings.h:42
+    { .name="SendResetSeqNumFlag",              .source_line=43  }, // SessionSettings.h:43
+    { .name="SendRedundantResendRequests",      .source_line=44  }, // SessionSettings.h:44
+    { .name="SendNextExpectedMsgSeqNum",        .source_line=45  }, // SessionSettings.h:45
 
     // ── Dictionary paths ──────────────────────────────────────────────────────
-    { "DataDictionary",                   46  }, // SessionSettings.h:46
-    { "TransportDataDictionary",          47  }, // SessionSettings.h:47
-    { "AppDataDictionary",                48  }, // SessionSettings.h:48
+    { .name="DataDictionary",                   .source_line=46  }, // SessionSettings.h:46
+    { .name="TransportDataDictionary",          .source_line=47  }, // SessionSettings.h:47
+    { .name="AppDataDictionary",                .source_line=48  }, // SessionSettings.h:48
 
     // ── Time / clock ──────────────────────────────────────────────────────────
-    { "UseLocalTime",                     49  }, // SessionSettings.h:49
-    { "StartTime",                        50  }, // SessionSettings.h:50
-    { "EndTime",                          51  }, // SessionSettings.h:51
-    { "StartDay",                         52  }, // SessionSettings.h:52
-    { "EndDay",                           53  }, // SessionSettings.h:53
-    { "NonStopSession",                   54  }, // SessionSettings.h:54
-    { "LogonTime",                        55  }, // SessionSettings.h:55
-    { "LogoutTime",                       56  }, // SessionSettings.h:56
-    { "LogonDay",                         57  }, // SessionSettings.h:57
-    { "LogoutDay",                        58  }, // SessionSettings.h:58
+    { .name="UseLocalTime",                     .source_line=49  }, // SessionSettings.h:49
+    { .name="StartTime",                        .source_line=50  }, // SessionSettings.h:50
+    { .name="EndTime",                          .source_line=51  }, // SessionSettings.h:51
+    { .name="StartDay",                         .source_line=52  }, // SessionSettings.h:52
+    { .name="EndDay",                           .source_line=53  }, // SessionSettings.h:53
+    { .name="NonStopSession",                   .source_line=54  }, // SessionSettings.h:54
+    { .name="LogonTime",                        .source_line=55  }, // SessionSettings.h:55
+    { .name="LogoutTime",                       .source_line=56  }, // SessionSettings.h:56
+    { .name="LogonDay",                         .source_line=57  }, // SessionSettings.h:57
+    { .name="LogoutDay",                        .source_line=58  }, // SessionSettings.h:58
 
     // ── Validation ────────────────────────────────────────────────────────────
-    { "CheckCompID",                      59  }, // SessionSettings.h:59
-    { "CheckLatency",                     60  }, // SessionSettings.h:60
-    { "MaxLatency",                       61  }, // SessionSettings.h:61
-    { "HeartBtInt",                       62  }, // SessionSettings.h:62
+    { .name="CheckCompID",                      .source_line=59  }, // SessionSettings.h:59
+    { .name="CheckLatency",                     .source_line=60  }, // SessionSettings.h:60
+    { .name="MaxLatency",                       .source_line=61  }, // SessionSettings.h:61
+    { .name="HeartBtInt",                       .source_line=62  }, // SessionSettings.h:62
 
     // ── Socket / network ─────────────────────────────────────────────────────
-    { "SocketAcceptPort",                 63  }, // SessionSettings.h:63
-    { "SocketReuseAddress",               64  }, // SessionSettings.h:64
-    { "SocketConnectHost",                65  }, // SessionSettings.h:65
-    { "SocketConnectPort",                66  }, // SessionSettings.h:66
-    { "SocketConnectSourceHost",          67  }, // SessionSettings.h:67
-    { "SocketConnectSourcePort",          68  }, // SessionSettings.h:68
-    { "SocketNodelay",                    69  }, // SessionSettings.h:69
-    { "SocketSendBufferSize",             70  }, // SessionSettings.h:70
-    { "SocketReceiveBufferSize",          71  }, // SessionSettings.h:71
-    { "HostSelectionPolicy",              72  }, // SessionSettings.h:72
-    { "HostSelectionPolicyPriorityStartOverInterval", 73 }, // SessionSettings.h:73
-    { "ReconnectInterval",                74  }, // SessionSettings.h:74
+    { .name="SocketAcceptPort",                 .source_line=63  }, // SessionSettings.h:63
+    { .name="SocketReuseAddress",               .source_line=64  }, // SessionSettings.h:64
+    { .name="SocketConnectHost",                .source_line=65  }, // SessionSettings.h:65
+    { .name="SocketConnectPort",                .source_line=66  }, // SessionSettings.h:66
+    { .name="SocketConnectSourceHost",          .source_line=67  }, // SessionSettings.h:67
+    { .name="SocketConnectSourcePort",          .source_line=68  }, // SessionSettings.h:68
+    { .name="SocketNodelay",                    .source_line=69  }, // SessionSettings.h:69
+    { .name="SocketSendBufferSize",             .source_line=70  }, // SessionSettings.h:70
+    { .name="SocketReceiveBufferSize",          .source_line=71  }, // SessionSettings.h:71
+    { .name="HostSelectionPolicy",              .source_line=72  }, // SessionSettings.h:72
+    { .name="HostSelectionPolicyPriorityStartOverInterval", .source_line=73 }, // SessionSettings.h:73
+    { .name="ReconnectInterval",                .source_line=74  }, // SessionSettings.h:74
 
     // ── Wire validation flags ─────────────────────────────────────────────────
-    { "ValidateLengthAndChecksum",        75  }, // SessionSettings.h:75
-    { "ValidateFieldsOutOfOrder",         76  }, // SessionSettings.h:76
-    { "ValidateFieldsHaveValues",         77  }, // SessionSettings.h:77
-    { "ValidateUserDefinedFields",        78  }, // SessionSettings.h:78
-    { "AllowUnknownMsgFields",            79  }, // SessionSettings.h:79
-    { "PreserveMessageFieldsOrder",       80  }, // SessionSettings.h:80
+    { .name="ValidateLengthAndChecksum",        .source_line=75  }, // SessionSettings.h:75
+    { .name="ValidateFieldsOutOfOrder",         .source_line=76  }, // SessionSettings.h:76
+    { .name="ValidateFieldsHaveValues",         .source_line=77  }, // SessionSettings.h:77
+    { .name="ValidateUserDefinedFields",        .source_line=78  }, // SessionSettings.h:78
+    { .name="AllowUnknownMsgFields",            .source_line=79  }, // SessionSettings.h:79
+    { .name="PreserveMessageFieldsOrder",       .source_line=80  }, // SessionSettings.h:80
 
     // ── Timeouts ─────────────────────────────────────────────────────────────
-    { "LogonTimeout",                     81  }, // SessionSettings.h:81
-    { "LogoutTimeout",                    82  }, // SessionSettings.h:82
+    { .name="LogonTimeout",                     .source_line=81  }, // SessionSettings.h:81
+    { .name="LogoutTimeout",                    .source_line=82  }, // SessionSettings.h:82
 
     // ── Store backends ────────────────────────────────────────────────────────
-    { "FileStorePath",                    83  }, // SessionSettings.h:83
-    { "MySQLStoreUseConnectionPool",      84  }, // SessionSettings.h:84
-    { "MySQLStoreDatabase",               85  }, // SessionSettings.h:85
-    { "MySQLStoreUser",                   86  }, // SessionSettings.h:86
-    { "MySQLStorePassword",               87  }, // SessionSettings.h:87
-    { "MySQLStoreHost",                   88  }, // SessionSettings.h:88
-    { "MySQLStorePort",                   89  }, // SessionSettings.h:89
-    { "PostgreSQLStoreUseConnectionPool", 90  }, // SessionSettings.h:90
-    { "PostgreSQLStoreDatabase",          91  }, // SessionSettings.h:91
-    { "PostgreSQLStoreUser",              92  }, // SessionSettings.h:92
-    { "PostgreSQLStorePassword",          93  }, // SessionSettings.h:93
-    { "PostgreSQLStoreHost",              94  }, // SessionSettings.h:94
-    { "PostgreSQLStorePort",              95  }, // SessionSettings.h:95
-    { "OdbcStoreUser",                    96  }, // SessionSettings.h:96
-    { "OdbcStorePassword",                97  }, // SessionSettings.h:97
-    { "OdbcStoreConnectionString",        98  }, // SessionSettings.h:98
+    { .name="FileStorePath",                    .source_line=83  }, // SessionSettings.h:83
+    { .name="MySQLStoreUseConnectionPool",      .source_line=84  }, // SessionSettings.h:84
+    { .name="MySQLStoreDatabase",               .source_line=85  }, // SessionSettings.h:85
+    { .name="MySQLStoreUser",                   .source_line=86  }, // SessionSettings.h:86
+    { .name="MySQLStorePassword",               .source_line=87  }, // SessionSettings.h:87
+    { .name="MySQLStoreHost",                   .source_line=88  }, // SessionSettings.h:88
+    { .name="MySQLStorePort",                   .source_line=89  }, // SessionSettings.h:89
+    { .name="PostgreSQLStoreUseConnectionPool", .source_line=90  }, // SessionSettings.h:90
+    { .name="PostgreSQLStoreDatabase",          .source_line=91  }, // SessionSettings.h:91
+    { .name="PostgreSQLStoreUser",              .source_line=92  }, // SessionSettings.h:92
+    { .name="PostgreSQLStorePassword",          .source_line=93  }, // SessionSettings.h:93
+    { .name="PostgreSQLStoreHost",              .source_line=94  }, // SessionSettings.h:94
+    { .name="PostgreSQLStorePort",              .source_line=95  }, // SessionSettings.h:95
+    { .name="OdbcStoreUser",                    .source_line=96  }, // SessionSettings.h:96
+    { .name="OdbcStorePassword",                .source_line=97  }, // SessionSettings.h:97
+    { .name="OdbcStoreConnectionString",        .source_line=98  }, // SessionSettings.h:98
 
     // ── Log sinks ─────────────────────────────────────────────────────────────
-    { "FileLogPath",                      99  }, // SessionSettings.h:99
-    { "FileLogBackupPath",                100 }, // SessionSettings.h:100
-    { "ScreenLogShowIncoming",            101 }, // SessionSettings.h:101
-    { "ScreenLogShowOutgoing",            102 }, // SessionSettings.h:102
-    { "ScreenLogShowEvents",              103 }, // SessionSettings.h:103
-    { "MySQLLogUseConnectionPool",        104 }, // SessionSettings.h:104
-    { "MySQLLogDatabase",                 105 }, // SessionSettings.h:105
-    { "MySQLLogUser",                     106 }, // SessionSettings.h:106
-    { "MySQLLogPassword",                 107 }, // SessionSettings.h:107
-    { "MySQLLogHost",                     108 }, // SessionSettings.h:108
-    { "MySQLLogPort",                     109 }, // SessionSettings.h:109
-    { "MySQLLogIncomingTable",            110 }, // SessionSettings.h:110
-    { "MySQLLogOutgoingTable",            111 }, // SessionSettings.h:111
-    { "MySQLLogEventTable",               112 }, // SessionSettings.h:112
-    { "PostgreSQLLogUseConnectionPool",   113 }, // SessionSettings.h:113
-    { "PostgreSQLLogDatabase",            114 }, // SessionSettings.h:114
-    { "PostgreSQLLogUser",                115 }, // SessionSettings.h:115
-    { "PostgreSQLLogPassword",            116 }, // SessionSettings.h:116
-    { "PostgreSQLLogHost",                117 }, // SessionSettings.h:117
-    { "PostgreSQLLogPort",                118 }, // SessionSettings.h:118
-    { "PostgreSQLLogIncomingTable",       119 }, // SessionSettings.h:119
-    { "PostgreSQLLogOutgoingTable",       120 }, // SessionSettings.h:120
-    { "PostgreSQLLogEventTable",          121 }, // SessionSettings.h:121
-    { "OdbcLogUser",                      122 }, // SessionSettings.h:122
-    { "OdbcLogPassword",                  123 }, // SessionSettings.h:123
-    { "OdbcLogConnectionString",          124 }, // SessionSettings.h:124
-    { "OdbcLogIncomingTable",             125 }, // SessionSettings.h:125
-    { "OdbcLogOutgoingTable",             126 }, // SessionSettings.h:126
-    { "OdbcLogEventTable",                127 }, // SessionSettings.h:127
+    { .name="FileLogPath",                      .source_line=99  }, // SessionSettings.h:99
+    { .name="FileLogBackupPath",                .source_line=100 }, // SessionSettings.h:100
+    { .name="ScreenLogShowIncoming",            .source_line=101 }, // SessionSettings.h:101
+    { .name="ScreenLogShowOutgoing",            .source_line=102 }, // SessionSettings.h:102
+    { .name="ScreenLogShowEvents",              .source_line=103 }, // SessionSettings.h:103
+    { .name="MySQLLogUseConnectionPool",        .source_line=104 }, // SessionSettings.h:104
+    { .name="MySQLLogDatabase",                 .source_line=105 }, // SessionSettings.h:105
+    { .name="MySQLLogUser",                     .source_line=106 }, // SessionSettings.h:106
+    { .name="MySQLLogPassword",                 .source_line=107 }, // SessionSettings.h:107
+    { .name="MySQLLogHost",                     .source_line=108 }, // SessionSettings.h:108
+    { .name="MySQLLogPort",                     .source_line=109 }, // SessionSettings.h:109
+    { .name="MySQLLogIncomingTable",            .source_line=110 }, // SessionSettings.h:110
+    { .name="MySQLLogOutgoingTable",            .source_line=111 }, // SessionSettings.h:111
+    { .name="MySQLLogEventTable",               .source_line=112 }, // SessionSettings.h:112
+    { .name="PostgreSQLLogUseConnectionPool",   .source_line=113 }, // SessionSettings.h:113
+    { .name="PostgreSQLLogDatabase",            .source_line=114 }, // SessionSettings.h:114
+    { .name="PostgreSQLLogUser",                .source_line=115 }, // SessionSettings.h:115
+    { .name="PostgreSQLLogPassword",            .source_line=116 }, // SessionSettings.h:116
+    { .name="PostgreSQLLogHost",                .source_line=117 }, // SessionSettings.h:117
+    { .name="PostgreSQLLogPort",                .source_line=118 }, // SessionSettings.h:118
+    { .name="PostgreSQLLogIncomingTable",       .source_line=119 }, // SessionSettings.h:119
+    { .name="PostgreSQLLogOutgoingTable",       .source_line=120 }, // SessionSettings.h:120
+    { .name="PostgreSQLLogEventTable",          .source_line=121 }, // SessionSettings.h:121
+    { .name="OdbcLogUser",                      .source_line=122 }, // SessionSettings.h:122
+    { .name="OdbcLogPassword",                  .source_line=123 }, // SessionSettings.h:123
+    { .name="OdbcLogConnectionString",          .source_line=124 }, // SessionSettings.h:124
+    { .name="OdbcLogIncomingTable",             .source_line=125 }, // SessionSettings.h:125
+    { .name="OdbcLogOutgoingTable",             .source_line=126 }, // SessionSettings.h:126
+    { .name="OdbcLogEventTable",                .source_line=127 }, // SessionSettings.h:127
 
     // ── Reset / refresh ───────────────────────────────────────────────────────
-    { "ResetOnLogon",                     128 }, // SessionSettings.h:128
-    { "ResetOnLogout",                    129 }, // SessionSettings.h:129
-    { "ResetOnDisconnect",                130 }, // SessionSettings.h:130
-    { "RefreshOnLogon",                   131 }, // SessionSettings.h:131
+    { .name="ResetOnLogon",                     .source_line=128 }, // SessionSettings.h:128
+    { .name="ResetOnLogout",                    .source_line=129 }, // SessionSettings.h:129
+    { .name="ResetOnDisconnect",                .source_line=130 }, // SessionSettings.h:130
+    { .name="RefreshOnLogon",                   .source_line=131 }, // SessionSettings.h:131
 
     // ── Timestamp ─────────────────────────────────────────────────────────────
-    { "MillisecondsInTimeStamp",          132 }, // SessionSettings.h:132
-    { "TimestampPrecision",               133 }, // SessionSettings.h:133
+    { .name="MillisecondsInTimeStamp",          .source_line=132 }, // SessionSettings.h:132
+    { .name="TimestampPrecision",               .source_line=133 }, // SessionSettings.h:133
 
     // ── HTTP ─────────────────────────────────────────────────────────────────
-    { "HttpAcceptPort",                   134 }, // SessionSettings.h:134
+    { .name="HttpAcceptPort",                   .source_line=134 }, // SessionSettings.h:134
 
     // ── Persistence ──────────────────────────────────────────────────────────
-    { "PersistMessages",                  135 }, // SessionSettings.h:135
+    { .name="PersistMessages",                  .source_line=135 }, // SessionSettings.h:135
 
     // ── TLS / SSL ─────────────────────────────────────────────────────────────
-    { "ServerCertificateFile",            136 }, // SessionSettings.h:136
-    { "ServerCertificateKeyFile",         137 }, // SessionSettings.h:137
-    { "ClientCertificateFile",            138 }, // SessionSettings.h:138
-    { "ClientCertificateKeyFile",         139 }, // SessionSettings.h:139
-    { "CertificationAuthoritiesFile",     140 }, // SessionSettings.h:140
-    { "CertificationAuthoritiesDirectory",141 }, // SessionSettings.h:141
-    { "CertificateRevocationListFile",    142 }, // SessionSettings.h:142
-    { "CertificateRevocationListDirectory",143}, // SessionSettings.h:143
-    { "CertificateVerifyLevel",           144 }, // SessionSettings.h:144
-    { "AllowedRemoteAddresses",           145 }, // SessionSettings.h:145
-    { "SSLProtocol",                      190 }, // SessionSettings.h:190
-    { "SSLCipherSuite",                   223 }, // SessionSettings.h:223
-    { "TLSCipherSuites",                  239 }, // SessionSettings.h:239
+    { .name="ServerCertificateFile",            .source_line=136 }, // SessionSettings.h:136
+    { .name="ServerCertificateKeyFile",         .source_line=137 }, // SessionSettings.h:137
+    { .name="ClientCertificateFile",            .source_line=138 }, // SessionSettings.h:138
+    { .name="ClientCertificateKeyFile",         .source_line=139 }, // SessionSettings.h:139
+    { .name="CertificationAuthoritiesFile",     .source_line=140 }, // SessionSettings.h:140
+    { .name="CertificationAuthoritiesDirectory",.source_line=141 }, // SessionSettings.h:141
+    { .name="CertificateRevocationListFile",    .source_line=142 }, // SessionSettings.h:142
+    { .name="CertificateRevocationListDirectory",.source_line=143}, // SessionSettings.h:143
+    { .name="CertificateVerifyLevel",           .source_line=144 }, // SessionSettings.h:144
+    { .name="AllowedRemoteAddresses",           .source_line=145 }, // SessionSettings.h:145
+    { .name="SSLProtocol",                      .source_line=190 }, // SessionSettings.h:190
+    { .name="SSLCipherSuite",                   .source_line=223 }, // SessionSettings.h:223
+    { .name="TLSCipherSuites",                  .source_line=239 }, // SessionSettings.h:239
 };
 // clang-format on
 
@@ -219,7 +219,7 @@ enum class Disposition {
 
 struct ParityRow {
     std::string_view qf_key;
-    Disposition      disposition;
+    Disposition disposition;
     // For Mapped rows: the concrete 044 loader key accepted by scalar_mappers.cpp
     // or selector_resolver.cpp.  Empty for all non-Mapped dispositions.
     std::string_view key_044;
@@ -233,322 +233,322 @@ struct ParityRow {
 // clang-format off
 const std::vector<ParityRow> kParity = {
     // ── Session identity ──────────────────────────────────────────────────────
-    { "BeginString",     Disposition::Mapped,      "begin_string",
-      "scalar_mappers.cpp, map_scalars — SessionConfig::begin_string" },
-    { "SenderCompID",    Disposition::Mapped,      "sender_comp_id",
-      "scalar_mappers.cpp, map_scalars — SessionConfig::sender_comp_id" },
-    { "TargetCompID",    Disposition::Mapped,      "target_comp_id",
-      "scalar_mappers.cpp, map_scalars — SessionConfig::target_comp_id" },
-    { "SessionQualifier",Disposition::Gap,         "",
-      "No 044 equivalent; fixpp sessions are uniquely identified by "
+    { .qf_key="BeginString",     .disposition=Disposition::Mapped,      .key_044="begin_string",
+      .notes="scalar_mappers.cpp, map_scalars — SessionConfig::begin_string" },
+    { .qf_key="SenderCompID",    .disposition=Disposition::Mapped,      .key_044="sender_comp_id",
+      .notes="scalar_mappers.cpp, map_scalars — SessionConfig::sender_comp_id" },
+    { .qf_key="TargetCompID",    .disposition=Disposition::Mapped,      .key_044="target_comp_id",
+      .notes="scalar_mappers.cpp, map_scalars — SessionConfig::target_comp_id" },
+    { .qf_key="SessionQualifier",.disposition=Disposition::Gap,         .key_044="",
+      .notes="No 044 equivalent; fixpp sessions are uniquely identified by "
       "sender_comp_id + target_comp_id + begin_string. The QF qualifier "
       "disambiguates multiple sessions to the same counterparty — a use case "
       "not yet addressed in the v1.0 session model." },
-    { "DefaultApplVerID",Disposition::Mapped,      "default_appl_ver_id",
-      "scalar_mappers.cpp, map_scalars — SessionConfig::default_appl_ver_id "
+    { .qf_key="DefaultApplVerID",.disposition=Disposition::Mapped,      .key_044="default_appl_ver_id",
+      .notes="scalar_mappers.cpp, map_scalars — SessionConfig::default_appl_ver_id "
       "(required for FIXT.1.1; omitted for FIX 4.x)" },
-    { "ConnectionType",  Disposition::Mapped,      "role",
-      "scalar_mappers.cpp, map_scalars — SessionConfig::role "
+    { .qf_key="ConnectionType",  .disposition=Disposition::Mapped,      .key_044="role",
+      .notes="scalar_mappers.cpp, map_scalars — SessionConfig::role "
       "(\"initiator\"/\"acceptor\" ↔ QF ConnectionType)" },
 
     // ── Protocol flags ────────────────────────────────────────────────────────
-    { "UseDataDictionary", Disposition::OutOfScope_DdValidationFlags, "",
-      "044 always uses the DataDictionary when the 'dictionary' selector is "
+    { .qf_key="UseDataDictionary", .disposition=Disposition::OutOfScope_DdValidationFlags, .key_044="",
+      .notes="044 always uses the DataDictionary when the 'dictionary' selector is "
       "present; there is no separate enable/disable toggle — 'dictionary' "
       "present ↔ enabled, absent ↔ disabled." },
-    { "SendResetSeqNumFlag", Disposition::Mapped,  "reset_seqnum_policy",
-      "scalar_mappers.cpp, map_scalars — reset_seqnum_policy enum controls the "
+    { .qf_key="SendResetSeqNumFlag", .disposition=Disposition::Mapped,  .key_044="reset_seqnum_policy",
+      .notes="scalar_mappers.cpp, map_scalars — reset_seqnum_policy enum controls the "
       "ResetSeqNumFlag (141) handshake strategy; 'bilateral_strict' / "
       "'bilateral_lenient' / 'unilateral' span the QF yes/no space." },
-    { "SendRedundantResendRequests", Disposition::Gap, "",
-      "No 044 equivalent. QF allows suppressing duplicate ResendRequest re-sends "
+    { .qf_key="SendRedundantResendRequests", .disposition=Disposition::Gap, .key_044="",
+      .notes="No 044 equivalent. QF allows suppressing duplicate ResendRequest re-sends "
       "when the peer has not advanced. fixpp does not expose this knob in v1.0." },
-    { "SendNextExpectedMsgSeqNum", Disposition::Mapped, "enable_next_expected_msg_seq_num",
-      "scalar_mappers.cpp, map_scalars — SessionConfig::enable_next_expected_msg_seq_num; "
+    { .qf_key="SendNextExpectedMsgSeqNum", .disposition=Disposition::Mapped, .key_044="enable_next_expected_msg_seq_num",
+      .notes="scalar_mappers.cpp, map_scalars — SessionConfig::enable_next_expected_msg_seq_num; "
       "controls 789/NextExpectedMsgSeqNum in Logon (FIX 5.0+)" },
 
     // ── Dictionary paths ──────────────────────────────────────────────────────
-    { "DataDictionary",           Disposition::Mapped, "dictionary",
-      "selector_resolver.cpp, resolve_engine_dictionary — 'dictionary' selector, kind=\"path\"; "
+    { .qf_key="DataDictionary",           .disposition=Disposition::Mapped, .key_044="dictionary",
+      .notes="selector_resolver.cpp, resolve_engine_dictionary — 'dictionary' selector, kind=\"path\"; "
       "the DataDictionary= path maps to [dictionary] kind=\"path\" path=\"…\". "
       "By-version resolution is deferred (OQ-1 option A)." },
-    { "TransportDataDictionary",  Disposition::OutOfScope_DdValidationFlags, "",
-      "FIXT.1.1 transport dictionary separate from the app dictionary. "
+    { .qf_key="TransportDataDictionary",  .disposition=Disposition::OutOfScope_DdValidationFlags, .key_044="",
+      .notes="FIXT.1.1 transport dictionary separate from the app dictionary. "
       "044 step-1 does not distinguish transport vs. app dictionaries — "
       "the single 'dictionary' selector covers the combined role. "
       "Deferred to step-2 if per-layer dicts are needed." },
-    { "AppDataDictionary",        Disposition::OutOfScope_DdValidationFlags, "",
-      "FIXT.1.1 per-ApplVerID app dictionary. Same rationale as "
+    { .qf_key="AppDataDictionary",        .disposition=Disposition::OutOfScope_DdValidationFlags, .key_044="",
+      .notes="FIXT.1.1 per-ApplVerID app dictionary. Same rationale as "
       "TransportDataDictionary above." },
 
     // ── Time / clock (scheduling — out of scope) ──────────────────────────────
-    { "UseLocalTime",    Disposition::OutOfScope_Schedule, "",
-      "Session scheduling: whether StartTime/EndTime are in local time. "
+    { .qf_key="UseLocalTime",    .disposition=Disposition::OutOfScope_Schedule, .key_044="",
+      .notes="Session scheduling: whether StartTime/EndTime are in local time. "
       "Not applicable — 044 has no session-schedule window." },
-    { "StartTime",       Disposition::OutOfScope_Schedule, "",
-      "Session scheduling: UTC time-of-day the session window opens. "
+    { .qf_key="StartTime",       .disposition=Disposition::OutOfScope_Schedule, .key_044="",
+      .notes="Session scheduling: UTC time-of-day the session window opens. "
       "444 step-1 has no session-schedule concept." },
-    { "EndTime",         Disposition::OutOfScope_Schedule, "",
-      "Session scheduling: UTC time-of-day the session window closes." },
-    { "StartDay",        Disposition::OutOfScope_Schedule, "",
-      "Session scheduling: day-of-week the session window starts." },
-    { "EndDay",          Disposition::OutOfScope_Schedule, "",
-      "Session scheduling: day-of-week the session window ends." },
-    { "NonStopSession",  Disposition::OutOfScope_Schedule, "",
-      "Session scheduling: disables the time-window gate (always active). "
+    { .qf_key="EndTime",         .disposition=Disposition::OutOfScope_Schedule, .key_044="",
+      .notes="Session scheduling: UTC time-of-day the session window closes." },
+    { .qf_key="StartDay",        .disposition=Disposition::OutOfScope_Schedule, .key_044="",
+      .notes="Session scheduling: day-of-week the session window starts." },
+    { .qf_key="EndDay",          .disposition=Disposition::OutOfScope_Schedule, .key_044="",
+      .notes="Session scheduling: day-of-week the session window ends." },
+    { .qf_key="NonStopSession",  .disposition=Disposition::OutOfScope_Schedule, .key_044="",
+      .notes="Session scheduling: disables the time-window gate (always active). "
       "044 sessions are non-stop by default; no toggle needed." },
-    { "LogonTime",       Disposition::OutOfScope_Schedule, "",
-      "Session scheduling: sub-window for Logon initiation." },
-    { "LogoutTime",      Disposition::OutOfScope_Schedule, "",
-      "Session scheduling: sub-window for Logout." },
-    { "LogonDay",        Disposition::OutOfScope_Schedule, "",
-      "Session scheduling: day-of-week the Logon window applies." },
-    { "LogoutDay",       Disposition::OutOfScope_Schedule, "",
-      "Session scheduling: day-of-week the Logout window applies." },
+    { .qf_key="LogonTime",       .disposition=Disposition::OutOfScope_Schedule, .key_044="",
+      .notes="Session scheduling: sub-window for Logon initiation." },
+    { .qf_key="LogoutTime",      .disposition=Disposition::OutOfScope_Schedule, .key_044="",
+      .notes="Session scheduling: sub-window for Logout." },
+    { .qf_key="LogonDay",        .disposition=Disposition::OutOfScope_Schedule, .key_044="",
+      .notes="Session scheduling: day-of-week the Logon window applies." },
+    { .qf_key="LogoutDay",       .disposition=Disposition::OutOfScope_Schedule, .key_044="",
+      .notes="Session scheduling: day-of-week the Logout window applies." },
 
     // ── Validation ────────────────────────────────────────────────────────────
-    { "CheckCompID",      Disposition::Mapped,     "check_comp_id",
-      "scalar_mappers.cpp, map_scalars — SessionConfig::check_comp_id" },
-    { "CheckLatency",     Disposition::Gap,        "",
-      "No 044 equivalent for the boolean enable/disable of latency checking; "
+    { .qf_key="CheckCompID",      .disposition=Disposition::Mapped,     .key_044="check_comp_id",
+      .notes="scalar_mappers.cpp, map_scalars — SessionConfig::check_comp_id" },
+    { .qf_key="CheckLatency",     .disposition=Disposition::Gap,        .key_044="",
+      .notes="No 044 equivalent for the boolean enable/disable of latency checking; "
       "fixpp uses 'sending_time_threshold' (a Duration) which when set implicitly "
       "enables the check. The QF boolean has no direct mapping." },
-    { "MaxLatency",       Disposition::Mapped,     "sending_time_threshold",
-      "scalar_mappers.cpp, map_scalars — SessionConfig::sending_time_threshold "
+    { .qf_key="MaxLatency",       .disposition=Disposition::Mapped,     .key_044="sending_time_threshold",
+      .notes="scalar_mappers.cpp, map_scalars — SessionConfig::sending_time_threshold "
       "(a Duration; when set, enables the SendingTime latency guard). "
       "NOTE: the semantics differ slightly — QF MaxLatency is an integer "
       "(seconds); 044 sending_time_threshold is a duration string (e.g. \"120s\"). "
       "No loss of behavior; the guard fires equivalently." },
-    { "HeartBtInt",       Disposition::Mapped,     "heartbeat_interval",
-      "scalar_mappers.cpp, map_scalars — SessionConfig::heartbeat_interval" },
+    { .qf_key="HeartBtInt",       .disposition=Disposition::Mapped,     .key_044="heartbeat_interval",
+      .notes="scalar_mappers.cpp, map_scalars — SessionConfig::heartbeat_interval" },
 
     // ── Socket / network ─────────────────────────────────────────────────────
-    { "SocketAcceptPort",     Disposition::OutOfScope_ServerInfra, "",
-      "Acceptor bind port: engine/infra level, not per-session TOML. "
+    { .qf_key="SocketAcceptPort",     .disposition=Disposition::OutOfScope_ServerInfra, .key_044="",
+      .notes="Acceptor bind port: engine/infra level, not per-session TOML. "
       "fixpp acceptors are configured at the network layer independently." },
-    { "SocketReuseAddress",   Disposition::OutOfScope_SocketTuning, "",
-      "OS socket option: SO_REUSEADDR. Engine/infra knob; no per-session TOML." },
-    { "SocketConnectHost",    Disposition::Mapped,  "transport.host",
-      "scalar_mappers.cpp, map_structured_members — reconnect_endpoint.host; "
+    { .qf_key="SocketReuseAddress",   .disposition=Disposition::OutOfScope_SocketTuning, .key_044="",
+      .notes="OS socket option: SO_REUSEADDR. Engine/infra knob; no per-session TOML." },
+    { .qf_key="SocketConnectHost",    .disposition=Disposition::Mapped,  .key_044="transport.host",
+      .notes="scalar_mappers.cpp, map_structured_members — reconnect_endpoint.host; "
       "maps to 'transport.host' in the [transport] selector table." },
-    { "SocketConnectPort",    Disposition::Mapped,  "transport.port",
-      "scalar_mappers.cpp, map_structured_members — reconnect_endpoint.port; "
+    { .qf_key="SocketConnectPort",    .disposition=Disposition::Mapped,  .key_044="transport.port",
+      .notes="scalar_mappers.cpp, map_structured_members — reconnect_endpoint.port; "
       "maps to 'transport.port' in the [transport] selector table." },
-    { "SocketConnectSourceHost", Disposition::OutOfScope_SocketTuning, "",
-      "OS-level bind-before-connect source address; no per-session TOML." },
-    { "SocketConnectSourcePort", Disposition::OutOfScope_SocketTuning, "",
-      "OS-level bind-before-connect source port; no per-session TOML." },
-    { "SocketNodelay",        Disposition::OutOfScope_SocketTuning, "",
-      "TCP_NODELAY socket option; engine/infra tuning, not per-session TOML." },
-    { "SocketSendBufferSize", Disposition::OutOfScope_SocketTuning, "",
-      "SO_SNDBUF socket option; engine/infra tuning, not per-session TOML." },
-    { "SocketReceiveBufferSize", Disposition::OutOfScope_SocketTuning, "",
-      "SO_RCVBUF socket option; engine/infra tuning, not per-session TOML." },
-    { "HostSelectionPolicy",  Disposition::OutOfScope_ServerInfra, "",
-      "Multi-host failover policy (ROUND_ROBIN / RANDOM / PRIORITY); "
+    { .qf_key="SocketConnectSourceHost", .disposition=Disposition::OutOfScope_SocketTuning, .key_044="",
+      .notes="OS-level bind-before-connect source address; no per-session TOML." },
+    { .qf_key="SocketConnectSourcePort", .disposition=Disposition::OutOfScope_SocketTuning, .key_044="",
+      .notes="OS-level bind-before-connect source port; no per-session TOML." },
+    { .qf_key="SocketNodelay",        .disposition=Disposition::OutOfScope_SocketTuning, .key_044="",
+      .notes="TCP_NODELAY socket option; engine/infra tuning, not per-session TOML." },
+    { .qf_key="SocketSendBufferSize", .disposition=Disposition::OutOfScope_SocketTuning, .key_044="",
+      .notes="SO_SNDBUF socket option; engine/infra tuning, not per-session TOML." },
+    { .qf_key="SocketReceiveBufferSize", .disposition=Disposition::OutOfScope_SocketTuning, .key_044="",
+      .notes="SO_RCVBUF socket option; engine/infra tuning, not per-session TOML." },
+    { .qf_key="HostSelectionPolicy",  .disposition=Disposition::OutOfScope_ServerInfra, .key_044="",
+      .notes="Multi-host failover policy (ROUND_ROBIN / RANDOM / PRIORITY); "
       "fixpp v1.0 has a single reconnect endpoint per session. "
       "Multi-host failover is not yet modeled." },
-    { "HostSelectionPolicyPriorityStartOverInterval", Disposition::OutOfScope_ServerInfra, "",
-      "Companion to HostSelectionPolicy (priority restart interval); "
+    { .qf_key="HostSelectionPolicyPriorityStartOverInterval", .disposition=Disposition::OutOfScope_ServerInfra, .key_044="",
+      .notes="Companion to HostSelectionPolicy (priority restart interval); "
       "same rationale." },
-    { "ReconnectInterval",    Disposition::Deferred, "",
-      "Reconnect retry interval. fixpp v1.0 reconnect policy has its own "
+    { .qf_key="ReconnectInterval",    .disposition=Disposition::Deferred, .key_044="",
+      .notes="Reconnect retry interval. fixpp v1.0 reconnect policy has its own "
       "reconnect_policy selector with similar semantics; an explicit integer "
       "key is not yet wired. Deferred to step-2." },
 
     // ── Wire validation flags ─────────────────────────────────────────────────
-    { "ValidateLengthAndChecksum", Disposition::Gap, "",
-      "No 044 equivalent for disabling the framer checksum/length validation; "
+    { .qf_key="ValidateLengthAndChecksum", .disposition=Disposition::Gap, .key_044="",
+      .notes="No 044 equivalent for disabling the framer checksum/length validation; "
       "fixpp always validates the FIX framing length and checksum (fail-closed)." },
-    { "ValidateFieldsOutOfOrder",  Disposition::OutOfScope_DdValidationFlags, "",
-      "DataDictionary-level validation flag (passed to DD constructor). "
+    { .qf_key="ValidateFieldsOutOfOrder",  .disposition=Disposition::OutOfScope_DdValidationFlags, .key_044="",
+      .notes="DataDictionary-level validation flag (passed to DD constructor). "
       "044 validate_inbound_messages enables DD-driven validation globally; "
       "per-flag DD construction options are not exposed in step 1." },
-    { "ValidateFieldsHaveValues",  Disposition::OutOfScope_DdValidationFlags, "",
-      "DataDictionary-level validation flag; same rationale as above." },
-    { "ValidateUserDefinedFields", Disposition::OutOfScope_DdValidationFlags, "",
-      "DataDictionary-level validation flag; same rationale as above." },
-    { "AllowUnknownMsgFields",     Disposition::OutOfScope_DdValidationFlags, "",
-      "DataDictionary-level validation flag; same rationale as above." },
-    { "PreserveMessageFieldsOrder",Disposition::OutOfScope_DdValidationFlags, "",
-      "DataDictionary flag for preserving field order in output; "
+    { .qf_key="ValidateFieldsHaveValues",  .disposition=Disposition::OutOfScope_DdValidationFlags, .key_044="",
+      .notes="DataDictionary-level validation flag; same rationale as above." },
+    { .qf_key="ValidateUserDefinedFields", .disposition=Disposition::OutOfScope_DdValidationFlags, .key_044="",
+      .notes="DataDictionary-level validation flag; same rationale as above." },
+    { .qf_key="AllowUnknownMsgFields",     .disposition=Disposition::OutOfScope_DdValidationFlags, .key_044="",
+      .notes="DataDictionary-level validation flag; same rationale as above." },
+    { .qf_key="PreserveMessageFieldsOrder",.disposition=Disposition::OutOfScope_DdValidationFlags, .key_044="",
+      .notes="DataDictionary flag for preserving field order in output; "
       "no equivalent in 044 step-1." },
 
     // ── Timeouts ─────────────────────────────────────────────────────────────
-    { "LogonTimeout",     Disposition::Gap, "",
-      "No exact 044 equivalent; fixpp drives Logon retry/timeout via the "
+    { .qf_key="LogonTimeout",     .disposition=Disposition::Gap, .key_044="",
+      .notes="No exact 044 equivalent; fixpp drives Logon retry/timeout via the "
       "reconnect_policy timers, not a named LogonTimeout scalar." },
-    { "LogoutTimeout",    Disposition::Mapped, "logout_disconnect_timeout_ms",
-      "scalar_mappers.cpp, map_scalars — SessionConfig::logout_disconnect_timeout_ms "
+    { .qf_key="LogoutTimeout",    .disposition=Disposition::Mapped, .key_044="logout_disconnect_timeout_ms",
+      .notes="scalar_mappers.cpp, map_scalars — SessionConfig::logout_disconnect_timeout_ms "
       "(integer ms; QF LogoutTimeout is integer seconds — different units, "
       "same semantic: how long to wait for peer Logout ACK before hard-close)." },
 
     // ── Store backends ────────────────────────────────────────────────────────
-    { "FileStorePath",                    Disposition::Mapped, "store.directory",
-      "selector_resolver.cpp, resolve_engine_store — 'store' selector, kind=\"file\"; "
+    { .qf_key="FileStorePath",                    .disposition=Disposition::Mapped, .key_044="store.directory",
+      .notes="selector_resolver.cpp, resolve_engine_store — 'store' selector, kind=\"file\"; "
       "FileStorePath= maps to [store] kind=\"file\" directory=\"…\"." },
-    { "MySQLStoreUseConnectionPool",      Disposition::OutOfScope_DbStoreBackend, "",
-      "MySQL store backend; 044 step-1 stores: {file, memory} only. "
+    { .qf_key="MySQLStoreUseConnectionPool",      .disposition=Disposition::OutOfScope_DbStoreBackend, .key_044="",
+      .notes="MySQL store backend; 044 step-1 stores: {file, memory} only. "
       "MySQL adapter is out-of-scope." },
-    { "MySQLStoreDatabase",               Disposition::OutOfScope_DbStoreBackend, "",
-      "MySQL store backend; same rationale." },
-    { "MySQLStoreUser",                   Disposition::OutOfScope_DbStoreBackend, "",
-      "MySQL store backend; same rationale." },
-    { "MySQLStorePassword",               Disposition::OutOfScope_DbStoreBackend, "",
-      "MySQL store backend; same rationale." },
-    { "MySQLStoreHost",                   Disposition::OutOfScope_DbStoreBackend, "",
-      "MySQL store backend; same rationale." },
-    { "MySQLStorePort",                   Disposition::OutOfScope_DbStoreBackend, "",
-      "MySQL store backend; same rationale." },
-    { "PostgreSQLStoreUseConnectionPool", Disposition::OutOfScope_DbStoreBackend, "",
-      "PostgreSQL store backend; 044 step-1 stores: {file, memory} only." },
-    { "PostgreSQLStoreDatabase",          Disposition::OutOfScope_DbStoreBackend, "",
-      "PostgreSQL store backend; same rationale." },
-    { "PostgreSQLStoreUser",              Disposition::OutOfScope_DbStoreBackend, "",
-      "PostgreSQL store backend; same rationale." },
-    { "PostgreSQLStorePassword",          Disposition::OutOfScope_DbStoreBackend, "",
-      "PostgreSQL store backend; same rationale." },
-    { "PostgreSQLStoreHost",              Disposition::OutOfScope_DbStoreBackend, "",
-      "PostgreSQL store backend; same rationale." },
-    { "PostgreSQLStorePort",              Disposition::OutOfScope_DbStoreBackend, "",
-      "PostgreSQL store backend; same rationale." },
-    { "OdbcStoreUser",                    Disposition::OutOfScope_DbStoreBackend, "",
-      "ODBC store backend; 044 step-1 stores: {file, memory} only." },
-    { "OdbcStorePassword",                Disposition::OutOfScope_DbStoreBackend, "",
-      "ODBC store backend; same rationale." },
-    { "OdbcStoreConnectionString",        Disposition::OutOfScope_DbStoreBackend, "",
-      "ODBC store backend; same rationale." },
+    { .qf_key="MySQLStoreDatabase",               .disposition=Disposition::OutOfScope_DbStoreBackend, .key_044="",
+      .notes="MySQL store backend; same rationale." },
+    { .qf_key="MySQLStoreUser",                   .disposition=Disposition::OutOfScope_DbStoreBackend, .key_044="",
+      .notes="MySQL store backend; same rationale." },
+    { .qf_key="MySQLStorePassword",               .disposition=Disposition::OutOfScope_DbStoreBackend, .key_044="",
+      .notes="MySQL store backend; same rationale." },
+    { .qf_key="MySQLStoreHost",                   .disposition=Disposition::OutOfScope_DbStoreBackend, .key_044="",
+      .notes="MySQL store backend; same rationale." },
+    { .qf_key="MySQLStorePort",                   .disposition=Disposition::OutOfScope_DbStoreBackend, .key_044="",
+      .notes="MySQL store backend; same rationale." },
+    { .qf_key="PostgreSQLStoreUseConnectionPool", .disposition=Disposition::OutOfScope_DbStoreBackend, .key_044="",
+      .notes="PostgreSQL store backend; 044 step-1 stores: {file, memory} only." },
+    { .qf_key="PostgreSQLStoreDatabase",          .disposition=Disposition::OutOfScope_DbStoreBackend, .key_044="",
+      .notes="PostgreSQL store backend; same rationale." },
+    { .qf_key="PostgreSQLStoreUser",              .disposition=Disposition::OutOfScope_DbStoreBackend, .key_044="",
+      .notes="PostgreSQL store backend; same rationale." },
+    { .qf_key="PostgreSQLStorePassword",          .disposition=Disposition::OutOfScope_DbStoreBackend, .key_044="",
+      .notes="PostgreSQL store backend; same rationale." },
+    { .qf_key="PostgreSQLStoreHost",              .disposition=Disposition::OutOfScope_DbStoreBackend, .key_044="",
+      .notes="PostgreSQL store backend; same rationale." },
+    { .qf_key="PostgreSQLStorePort",              .disposition=Disposition::OutOfScope_DbStoreBackend, .key_044="",
+      .notes="PostgreSQL store backend; same rationale." },
+    { .qf_key="OdbcStoreUser",                    .disposition=Disposition::OutOfScope_DbStoreBackend, .key_044="",
+      .notes="ODBC store backend; 044 step-1 stores: {file, memory} only." },
+    { .qf_key="OdbcStorePassword",                .disposition=Disposition::OutOfScope_DbStoreBackend, .key_044="",
+      .notes="ODBC store backend; same rationale." },
+    { .qf_key="OdbcStoreConnectionString",        .disposition=Disposition::OutOfScope_DbStoreBackend, .key_044="",
+      .notes="ODBC store backend; same rationale." },
 
     // ── Log sinks ─────────────────────────────────────────────────────────────
-    { "FileLogPath",                    Disposition::OutOfScope_LogSink, "",
-      "File log sink; observability = 044 step-2 (FR-009). "
+    { .qf_key="FileLogPath",                    .disposition=Disposition::OutOfScope_LogSink, .key_044="",
+      .notes="File log sink; observability = 044 step-2 (FR-009). "
       "Out-of-scope for step-1 config loader." },
-    { "FileLogBackupPath",              Disposition::OutOfScope_LogSink, "",
-      "File log sink (backup path); same rationale." },
-    { "ScreenLogShowIncoming",          Disposition::OutOfScope_LogSink, "",
-      "Screen/console log sink; same rationale." },
-    { "ScreenLogShowOutgoing",          Disposition::OutOfScope_LogSink, "",
-      "Screen/console log sink; same rationale." },
-    { "ScreenLogShowEvents",            Disposition::OutOfScope_LogSink, "",
-      "Screen/console log sink; same rationale." },
-    { "MySQLLogUseConnectionPool",      Disposition::OutOfScope_LogSink, "",
-      "MySQL log sink; same rationale." },
-    { "MySQLLogDatabase",               Disposition::OutOfScope_LogSink, "",
-      "MySQL log sink; same rationale." },
-    { "MySQLLogUser",                   Disposition::OutOfScope_LogSink, "",
-      "MySQL log sink; same rationale." },
-    { "MySQLLogPassword",               Disposition::OutOfScope_LogSink, "",
-      "MySQL log sink; same rationale." },
-    { "MySQLLogHost",                   Disposition::OutOfScope_LogSink, "",
-      "MySQL log sink; same rationale." },
-    { "MySQLLogPort",                   Disposition::OutOfScope_LogSink, "",
-      "MySQL log sink; same rationale." },
-    { "MySQLLogIncomingTable",          Disposition::OutOfScope_LogSink, "",
-      "MySQL log sink; same rationale." },
-    { "MySQLLogOutgoingTable",          Disposition::OutOfScope_LogSink, "",
-      "MySQL log sink; same rationale." },
-    { "MySQLLogEventTable",             Disposition::OutOfScope_LogSink, "",
-      "MySQL log sink; same rationale." },
-    { "PostgreSQLLogUseConnectionPool", Disposition::OutOfScope_LogSink, "",
-      "PostgreSQL log sink; same rationale." },
-    { "PostgreSQLLogDatabase",          Disposition::OutOfScope_LogSink, "",
-      "PostgreSQL log sink; same rationale." },
-    { "PostgreSQLLogUser",              Disposition::OutOfScope_LogSink, "",
-      "PostgreSQL log sink; same rationale." },
-    { "PostgreSQLLogPassword",          Disposition::OutOfScope_LogSink, "",
-      "PostgreSQL log sink; same rationale." },
-    { "PostgreSQLLogHost",              Disposition::OutOfScope_LogSink, "",
-      "PostgreSQL log sink; same rationale." },
-    { "PostgreSQLLogPort",              Disposition::OutOfScope_LogSink, "",
-      "PostgreSQL log sink; same rationale." },
-    { "PostgreSQLLogIncomingTable",     Disposition::OutOfScope_LogSink, "",
-      "PostgreSQL log sink; same rationale." },
-    { "PostgreSQLLogOutgoingTable",     Disposition::OutOfScope_LogSink, "",
-      "PostgreSQL log sink; same rationale." },
-    { "PostgreSQLLogEventTable",        Disposition::OutOfScope_LogSink, "",
-      "PostgreSQL log sink; same rationale." },
-    { "OdbcLogUser",                    Disposition::OutOfScope_LogSink, "",
-      "ODBC log sink; same rationale." },
-    { "OdbcLogPassword",                Disposition::OutOfScope_LogSink, "",
-      "ODBC log sink; same rationale." },
-    { "OdbcLogConnectionString",        Disposition::OutOfScope_LogSink, "",
-      "ODBC log sink; same rationale." },
-    { "OdbcLogIncomingTable",           Disposition::OutOfScope_LogSink, "",
-      "ODBC log sink; same rationale." },
-    { "OdbcLogOutgoingTable",           Disposition::OutOfScope_LogSink, "",
-      "ODBC log sink; same rationale." },
-    { "OdbcLogEventTable",              Disposition::OutOfScope_LogSink, "",
-      "ODBC log sink; same rationale." },
+    { .qf_key="FileLogBackupPath",              .disposition=Disposition::OutOfScope_LogSink, .key_044="",
+      .notes="File log sink (backup path); same rationale." },
+    { .qf_key="ScreenLogShowIncoming",          .disposition=Disposition::OutOfScope_LogSink, .key_044="",
+      .notes="Screen/console log sink; same rationale." },
+    { .qf_key="ScreenLogShowOutgoing",          .disposition=Disposition::OutOfScope_LogSink, .key_044="",
+      .notes="Screen/console log sink; same rationale." },
+    { .qf_key="ScreenLogShowEvents",            .disposition=Disposition::OutOfScope_LogSink, .key_044="",
+      .notes="Screen/console log sink; same rationale." },
+    { .qf_key="MySQLLogUseConnectionPool",      .disposition=Disposition::OutOfScope_LogSink, .key_044="",
+      .notes="MySQL log sink; same rationale." },
+    { .qf_key="MySQLLogDatabase",               .disposition=Disposition::OutOfScope_LogSink, .key_044="",
+      .notes="MySQL log sink; same rationale." },
+    { .qf_key="MySQLLogUser",                   .disposition=Disposition::OutOfScope_LogSink, .key_044="",
+      .notes="MySQL log sink; same rationale." },
+    { .qf_key="MySQLLogPassword",               .disposition=Disposition::OutOfScope_LogSink, .key_044="",
+      .notes="MySQL log sink; same rationale." },
+    { .qf_key="MySQLLogHost",                   .disposition=Disposition::OutOfScope_LogSink, .key_044="",
+      .notes="MySQL log sink; same rationale." },
+    { .qf_key="MySQLLogPort",                   .disposition=Disposition::OutOfScope_LogSink, .key_044="",
+      .notes="MySQL log sink; same rationale." },
+    { .qf_key="MySQLLogIncomingTable",          .disposition=Disposition::OutOfScope_LogSink, .key_044="",
+      .notes="MySQL log sink; same rationale." },
+    { .qf_key="MySQLLogOutgoingTable",          .disposition=Disposition::OutOfScope_LogSink, .key_044="",
+      .notes="MySQL log sink; same rationale." },
+    { .qf_key="MySQLLogEventTable",             .disposition=Disposition::OutOfScope_LogSink, .key_044="",
+      .notes="MySQL log sink; same rationale." },
+    { .qf_key="PostgreSQLLogUseConnectionPool", .disposition=Disposition::OutOfScope_LogSink, .key_044="",
+      .notes="PostgreSQL log sink; same rationale." },
+    { .qf_key="PostgreSQLLogDatabase",          .disposition=Disposition::OutOfScope_LogSink, .key_044="",
+      .notes="PostgreSQL log sink; same rationale." },
+    { .qf_key="PostgreSQLLogUser",              .disposition=Disposition::OutOfScope_LogSink, .key_044="",
+      .notes="PostgreSQL log sink; same rationale." },
+    { .qf_key="PostgreSQLLogPassword",          .disposition=Disposition::OutOfScope_LogSink, .key_044="",
+      .notes="PostgreSQL log sink; same rationale." },
+    { .qf_key="PostgreSQLLogHost",              .disposition=Disposition::OutOfScope_LogSink, .key_044="",
+      .notes="PostgreSQL log sink; same rationale." },
+    { .qf_key="PostgreSQLLogPort",              .disposition=Disposition::OutOfScope_LogSink, .key_044="",
+      .notes="PostgreSQL log sink; same rationale." },
+    { .qf_key="PostgreSQLLogIncomingTable",     .disposition=Disposition::OutOfScope_LogSink, .key_044="",
+      .notes="PostgreSQL log sink; same rationale." },
+    { .qf_key="PostgreSQLLogOutgoingTable",     .disposition=Disposition::OutOfScope_LogSink, .key_044="",
+      .notes="PostgreSQL log sink; same rationale." },
+    { .qf_key="PostgreSQLLogEventTable",        .disposition=Disposition::OutOfScope_LogSink, .key_044="",
+      .notes="PostgreSQL log sink; same rationale." },
+    { .qf_key="OdbcLogUser",                    .disposition=Disposition::OutOfScope_LogSink, .key_044="",
+      .notes="ODBC log sink; same rationale." },
+    { .qf_key="OdbcLogPassword",                .disposition=Disposition::OutOfScope_LogSink, .key_044="",
+      .notes="ODBC log sink; same rationale." },
+    { .qf_key="OdbcLogConnectionString",        .disposition=Disposition::OutOfScope_LogSink, .key_044="",
+      .notes="ODBC log sink; same rationale." },
+    { .qf_key="OdbcLogIncomingTable",           .disposition=Disposition::OutOfScope_LogSink, .key_044="",
+      .notes="ODBC log sink; same rationale." },
+    { .qf_key="OdbcLogOutgoingTable",           .disposition=Disposition::OutOfScope_LogSink, .key_044="",
+      .notes="ODBC log sink; same rationale." },
+    { .qf_key="OdbcLogEventTable",              .disposition=Disposition::OutOfScope_LogSink, .key_044="",
+      .notes="ODBC log sink; same rationale." },
 
     // ── Reset / refresh ───────────────────────────────────────────────────────
-    { "ResetOnLogon",      Disposition::Mapped, "reset_on_logon",
-      "scalar_mappers.cpp, map_scalars — SessionConfig::reset_on_logon" },
-    { "ResetOnLogout",     Disposition::Mapped, "reset_on_logout",
-      "scalar_mappers.cpp, map_scalars — SessionConfig::reset_on_logout" },
-    { "ResetOnDisconnect", Disposition::Mapped, "reset_on_disconnect",
-      "scalar_mappers.cpp, map_scalars — SessionConfig::reset_on_disconnect" },
-    { "RefreshOnLogon",    Disposition::Mapped, "refresh_on_logon",
-      "scalar_mappers.cpp, map_scalars — SessionConfig::refresh_on_logon" },
+    { .qf_key="ResetOnLogon",      .disposition=Disposition::Mapped, .key_044="reset_on_logon",
+      .notes="scalar_mappers.cpp, map_scalars — SessionConfig::reset_on_logon" },
+    { .qf_key="ResetOnLogout",     .disposition=Disposition::Mapped, .key_044="reset_on_logout",
+      .notes="scalar_mappers.cpp, map_scalars — SessionConfig::reset_on_logout" },
+    { .qf_key="ResetOnDisconnect", .disposition=Disposition::Mapped, .key_044="reset_on_disconnect",
+      .notes="scalar_mappers.cpp, map_scalars — SessionConfig::reset_on_disconnect" },
+    { .qf_key="RefreshOnLogon",    .disposition=Disposition::Mapped, .key_044="refresh_on_logon",
+      .notes="scalar_mappers.cpp, map_scalars — SessionConfig::refresh_on_logon" },
 
     // ── Timestamp ─────────────────────────────────────────────────────────────
-    { "MillisecondsInTimeStamp", Disposition::Mapped, "sending_time_precision",
-      "scalar_mappers.cpp, map_scalars — SessionConfig::sending_time_precision "
+    { .qf_key="MillisecondsInTimeStamp", .disposition=Disposition::Mapped, .key_044="sending_time_precision",
+      .notes="scalar_mappers.cpp, map_scalars — SessionConfig::sending_time_precision "
       "(QF MillisecondsInTimeStamp=Y ↔ precision=\"millis\"; "
       "044 additionally supports \"micros\" and \"nanos\")." },
-    { "TimestampPrecision",      Disposition::Mapped, "sending_time_precision",
-      "scalar_mappers.cpp, map_scalars — Same 044 key as MillisecondsInTimeStamp; "
+    { .qf_key="TimestampPrecision",      .disposition=Disposition::Mapped, .key_044="sending_time_precision",
+      .notes="scalar_mappers.cpp, map_scalars — Same 044 key as MillisecondsInTimeStamp; "
       "TimestampPrecision is the QF successor key (integer: 0=seconds, "
       "3=millis, 6=micros, 9=nanos) — both map to sending_time_precision." },
 
     // ── HTTP ─────────────────────────────────────────────────────────────────
-    { "HttpAcceptPort",    Disposition::OutOfScope_Http, "",
-      "HTTP management interface (QuickFIX monitoring port); "
+    { .qf_key="HttpAcceptPort",    .disposition=Disposition::OutOfScope_Http, .key_044="",
+      .notes="HTTP management interface (QuickFIX monitoring port); "
       "engine-infra, not per-session TOML. Out-of-scope." },
 
     // ── Persistence ──────────────────────────────────────────────────────────
-    { "PersistMessages",   Disposition::Mapped, "store",
-      "Indirectly: 'store=memory' implies non-persistent (yields_persistent_store()=false), "
+    { .qf_key="PersistMessages",   .disposition=Disposition::Mapped, .key_044="store",
+      .notes="Indirectly: 'store=memory' implies non-persistent (yields_persistent_store()=false), "
       "mirroring QF PersistMessages=N. 'store=file' gives persistence. "
       "selector_resolver.cpp, resolve_engine_store's store.directory branch." },
 
     // ── TLS / SSL ─────────────────────────────────────────────────────────────
-    { "ServerCertificateFile",             Disposition::Mapped_TlsViaSelectors, "cert_source.cert_file",
-      "selector_resolver.cpp, resolve_engine_cert_source — cert_source selector, kind=\"file\", "
+    { .qf_key="ServerCertificateFile",             .disposition=Disposition::Mapped_TlsViaSelectors, .key_044="cert_source.cert_file",
+      .notes="selector_resolver.cpp, resolve_engine_cert_source — cert_source selector, kind=\"file\", "
       "cert_file= path (the server-side leaf certificate)." },
-    { "ServerCertificateKeyFile",          Disposition::Mapped_TlsViaSelectors, "cert_source.key_file",
-      "selector_resolver.cpp, resolve_engine_cert_source — cert_source selector, key_file= path." },
-    { "ClientCertificateFile",             Disposition::Mapped_TlsViaSelectors, "cert_source.cert_file",
-      "selector_resolver.cpp, resolve_engine_cert_source — same cert_source cert_file; QF uses "
+    { .qf_key="ServerCertificateKeyFile",          .disposition=Disposition::Mapped_TlsViaSelectors, .key_044="cert_source.key_file",
+      .notes="selector_resolver.cpp, resolve_engine_cert_source — cert_source selector, key_file= path." },
+    { .qf_key="ClientCertificateFile",             .disposition=Disposition::Mapped_TlsViaSelectors, .key_044="cert_source.cert_file",
+      .notes="selector_resolver.cpp, resolve_engine_cert_source — same cert_source cert_file; QF uses "
       "separate server/client keys, 044 uses a single role-independent cert_source "
       "(the role is determined by security_profile.kind)." },
-    { "ClientCertificateKeyFile",          Disposition::Mapped_TlsViaSelectors, "cert_source.key_file",
-      "selector_resolver.cpp, resolve_engine_cert_source — same cert_source key_file." },
-    { "CertificationAuthoritiesFile",      Disposition::Mapped_TlsViaSelectors, "cert_source.ca_file",
-      "selector_resolver.cpp, resolve_engine_cert_source — cert_source selector, ca_file= path." },
-    { "CertificationAuthoritiesDirectory", Disposition::OutOfScope_SocketTuning, "",
-      "No 044 equivalent; 044 cert_source accepts a single CA bundle file. "
+    { .qf_key="ClientCertificateKeyFile",          .disposition=Disposition::Mapped_TlsViaSelectors, .key_044="cert_source.key_file",
+      .notes="selector_resolver.cpp, resolve_engine_cert_source — same cert_source key_file." },
+    { .qf_key="CertificationAuthoritiesFile",      .disposition=Disposition::Mapped_TlsViaSelectors, .key_044="cert_source.ca_file",
+      .notes="selector_resolver.cpp, resolve_engine_cert_source — cert_source selector, ca_file= path." },
+    { .qf_key="CertificationAuthoritiesDirectory", .disposition=Disposition::OutOfScope_SocketTuning, .key_044="",
+      .notes="No 044 equivalent; 044 cert_source accepts a single CA bundle file. "
       "A CA directory is not supported in step-1." },
-    { "CertificateRevocationListFile",     Disposition::Gap, "",
-      "No 044 equivalent; fixpp does not currently support CRL-based revocation "
+    { .qf_key="CertificateRevocationListFile",     .disposition=Disposition::Gap, .key_044="",
+      .notes="No 044 equivalent; fixpp does not currently support CRL-based revocation "
       "checking in step-1 (OCSP / CRL not wired)." },
-    { "CertificateRevocationListDirectory",Disposition::Gap, "",
-      "No 044 equivalent; same rationale as CertificateRevocationListFile." },
-    { "CertificateVerifyLevel",            Disposition::Mapped_TlsViaSelectors, "security_profile.kind",
-      "selector_resolver.cpp, parse_security_profile — security_profile.kind encodes the "
+    { .qf_key="CertificateRevocationListDirectory",.disposition=Disposition::Gap, .key_044="",
+      .notes="No 044 equivalent; same rationale as CertificateRevocationListFile." },
+    { .qf_key="CertificateVerifyLevel",            .disposition=Disposition::Mapped_TlsViaSelectors, .key_044="security_profile.kind",
+      .notes="selector_resolver.cpp, parse_security_profile — security_profile.kind encodes the "
       "verification strategy: "
       "mtls_ca=mutual TLS with CA verification (CertificateVerifyLevel=2), "
       "one_way_ca=server-auth only (CertificateVerifyLevel=1), "
       "insecure_plain_tcp=no TLS (CertificateVerifyLevel=0)." },
-    { "AllowedRemoteAddresses",            Disposition::Gap, "",
-      "No 044 equivalent; fixpp does not expose a per-session IP allowlist in v1.0." },
-    { "SSLProtocol",                       Disposition::Gap, "",
-      "No 044 equivalent; fixpp defers TLS protocol selection to the "
+    { .qf_key="AllowedRemoteAddresses",            .disposition=Disposition::Gap, .key_044="",
+      .notes="No 044 equivalent; fixpp does not expose a per-session IP allowlist in v1.0." },
+    { .qf_key="SSLProtocol",                       .disposition=Disposition::Gap, .key_044="",
+      .notes="No 044 equivalent; fixpp defers TLS protocol selection to the "
       "system OpenSSL defaults. An explicit protocol string is not configurable "
       "via TOML in step-1." },
-    { "SSLCipherSuite",                    Disposition::Gap, "",
-      "No 044 equivalent; cipher suite selection is not exposed in step-1 TOML." },
-    { "TLSCipherSuites",                   Disposition::Gap, "",
-      "No 044 equivalent; TLS 1.3 cipher suite selection is not exposed in step-1 TOML." },
+    { .qf_key="SSLCipherSuite",                    .disposition=Disposition::Gap, .key_044="",
+      .notes="No 044 equivalent; cipher suite selection is not exposed in step-1 TOML." },
+    { .qf_key="TLSCipherSuites",                   .disposition=Disposition::Gap, .key_044="",
+      .notes="No 044 equivalent; TLS 1.3 cipher suite selection is not exposed in step-1 TOML." },
 };
 // clang-format on
 
@@ -609,7 +609,7 @@ const std::set<std::string_view> kLoaderAccepted044Keys = {
     "dictionary.path",
 };
 
-} // anonymous namespace
+}  // anonymous namespace
 
 // ── T030 tests ───────────────────────────────────────────────────────────────
 
@@ -629,14 +629,14 @@ TEST(QuickFixParityTable, CoverageExact) {
     // Collect missing and extra with explicit diff (not subset assertion).
     std::vector<std::string_view> missing;
     for (const auto& k : oracle) {
-        if (!covered.count(k)) {
+        if (!covered.contains(k)) {
             missing.push_back(k);
         }
     }
 
     std::vector<std::string_view> extra;
     for (const auto& k : covered) {
-        if (!oracle.count(k)) {
+        if (!oracle.contains(k)) {
             extra.push_back(k);
         }
     }
@@ -662,8 +662,7 @@ TEST(QuickFixParityTable, CoverageExact) {
 // Test 2: every row has a non-empty notes field.
 TEST(QuickFixParityTable, AllRowsHaveNotes) {
     for (const auto& row : kParity) {
-        EXPECT_FALSE(row.notes.empty())
-            << "Row for QF key '" << row.qf_key << "' has empty notes";
+        EXPECT_FALSE(row.notes.empty()) << "Row for QF key '" << row.qf_key << "' has empty notes";
     }
 }
 
@@ -672,17 +671,15 @@ TEST(QuickFixParityTable, AllRowsHaveNotes) {
 //         mistyped 044 keys.
 TEST(QuickFixParityTable, MappedKeysExistInLoader) {
     for (const auto& row : kParity) {
-        bool is_mapped = (row.disposition == Disposition::Mapped
-                          || row.disposition == Disposition::Mapped_TlsViaSelectors);
+        bool is_mapped = (row.disposition == Disposition::Mapped ||
+                          row.disposition == Disposition::Mapped_TlsViaSelectors);
         if (!is_mapped) {
             continue;
         }
         EXPECT_FALSE(row.key_044.empty())
-            << "Row for QF key '" << row.qf_key
-            << "' is Mapped but has empty key_044";
+            << "Row for QF key '" << row.qf_key << "' is Mapped but has empty key_044";
         EXPECT_TRUE(kLoaderAccepted044Keys.count(row.key_044))
-            << "Row for QF key '" << row.qf_key
-            << "' claims 044 key '" << row.key_044
+            << "Row for QF key '" << row.qf_key << "' claims 044 key '" << row.key_044
             << "' which is NOT in kLoaderAccepted044Keys";
     }
 }
@@ -690,29 +687,26 @@ TEST(QuickFixParityTable, MappedKeysExistInLoader) {
 // Test 4: non-Mapped rows have empty key_044 (no phantom mapping).
 TEST(QuickFixParityTable, NonMappedRowsHaveNoKey044) {
     for (const auto& row : kParity) {
-        bool is_mapped = (row.disposition == Disposition::Mapped
-                          || row.disposition == Disposition::Mapped_TlsViaSelectors);
+        bool is_mapped = (row.disposition == Disposition::Mapped ||
+                          row.disposition == Disposition::Mapped_TlsViaSelectors);
         if (is_mapped) {
             continue;
         }
-        EXPECT_TRUE(row.key_044.empty())
-            << "Non-Mapped row for QF key '" << row.qf_key
-            << "' unexpectedly has key_044 = '" << row.key_044 << "'";
+        EXPECT_TRUE(row.key_044.empty()) << "Non-Mapped row for QF key '" << row.qf_key
+                                         << "' unexpectedly has key_044 = '" << row.key_044 << "'";
     }
 }
 
 // Test 5: schedule keys are all classified as OutOfScope_Schedule.
 TEST(QuickFixParityTable, ScheduleKeysAreOutOfScope) {
     const std::set<std::string_view> schedule_keys = {
-        "StartTime", "EndTime", "StartDay", "EndDay",
-        "NonStopSession", "UseLocalTime",
-        "LogonTime", "LogoutTime", "LogonDay", "LogoutDay",
+        "StartTime",    "EndTime",   "StartDay",   "EndDay",   "NonStopSession",
+        "UseLocalTime", "LogonTime", "LogoutTime", "LogonDay", "LogoutDay",
     };
     for (const auto& row : kParity) {
-        if (schedule_keys.count(row.qf_key)) {
+        if (schedule_keys.contains(row.qf_key)) {
             EXPECT_EQ(row.disposition, Disposition::OutOfScope_Schedule)
-                << "Schedule key '" << row.qf_key
-                << "' must be OutOfScope_Schedule";
+                << "Schedule key '" << row.qf_key << "' must be OutOfScope_Schedule";
         }
     }
 }
@@ -732,7 +726,6 @@ TEST(QuickFixParityTable, GapRowCount) {
     //   CertificateRevocationListFile, CertificateRevocationListDirectory,
     //   AllowedRemoteAddresses, SSLProtocol, SSLCipherSuite, TLSCipherSuites
     // Total: 11 gaps.
-    EXPECT_EQ(gaps, 11)
-        << "Unexpected number of Gap rows; update the count when gaps are "
-           "resolved or new ones are identified";
+    EXPECT_EQ(gaps, 11) << "Unexpected number of Gap rows; update the count when gaps are "
+                           "resolved or new ones are identified";
 }

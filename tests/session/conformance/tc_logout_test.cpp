@@ -65,9 +65,9 @@ namespace {
 
 // ── Frame builder helpers ──────────────────────────────────────────────────────
 
-static std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
-                                               std::string_view sender, std::string_view target,
-                                               int heartbt = 30) {
+std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
+                                        std::string_view sender, std::string_view target,
+                                        int heartbt = 30) {
     std::string body;
     body += "35=A\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -98,8 +98,8 @@ static std::vector<std::byte> make_logon_frame(std::string_view begin_string, st
     return frame;
 }
 
-static std::vector<std::byte> make_logout_frame(std::string_view begin_string, std::uint32_t seq,
-                                                std::string_view sender, std::string_view target) {
+std::vector<std::byte> make_logout_frame(std::string_view begin_string, std::uint32_t seq,
+                                         std::string_view sender, std::string_view target) {
     std::string body;
     body += "35=5\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -129,7 +129,7 @@ static std::vector<std::byte> make_logout_frame(std::string_view begin_string, s
 }
 
 // Extract a field value from a SOH-delimited FIX frame.
-static std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag_wanted) {
+std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag_wanted) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = std::to_string(tag_wanted) + "=";
     auto pos = wire.find(needle);
@@ -296,7 +296,7 @@ TEST(TC009Logout, Fix42_13b_UnsolicitedLogoutMessage) {
 
     // Oracle step: E:Logout (server echoes confirming Logout).
     // The last outbound frame on the transport must be Logout(35=5).
-    ASSERT_GE(f.transport.sent_count(), 1u)
+    ASSERT_GE(f.transport.sent_count(), 1U)
         << "Server must emit a confirming Logout (E:Logout in oracle)";
     {
         const auto last = f.transport.sent(f.transport.sent_count() - 1);
@@ -325,7 +325,7 @@ TEST(TC009Logout, Fix44_13b_UnsolicitedLogoutMessage) {
     auto peer_logout = make_logout_frame("FIX.4.4", 2, "TW", "ISLD");
     f.feed(sess, peer_logout);
 
-    ASSERT_GE(f.transport.sent_count(), 1u) << "Server must emit confirming Logout";
+    ASSERT_GE(f.transport.sent_count(), 1U) << "Server must emit confirming Logout";
     {
         const auto last = f.transport.sent(f.transport.sent_count() - 1);
         EXPECT_EQ(extract_field(last, 35), "5") << "Confirming Logout must have MsgType=5";
@@ -381,7 +381,7 @@ TEST(TC009Logout, GracefulLogoutTimeout) {
         return;
     }
 
-    EXPECT_GE(f.transport.sent_count(), 1u) << "Graceful close must emit Logout";
+    EXPECT_GE(f.transport.sent_count(), 1U) << "Graceful close must emit Logout";
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::LogoutSent)
         << "After emitting Logout, FSM should be LogoutSent";
 
@@ -432,7 +432,7 @@ TEST(TC009Logout, GracefulLogoutBothDirections) {
         return;
     }
 
-    ASSERT_GE(f.transport.sent_count(), 1u);
+    ASSERT_GE(f.transport.sent_count(), 1U);
     {
         const auto last = f.transport.sent(f.transport.sent_count() - 1);
         EXPECT_EQ(extract_field(last, 35), "5");

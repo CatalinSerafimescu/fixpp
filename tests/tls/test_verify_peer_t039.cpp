@@ -61,8 +61,8 @@ public:
 class fixed_clock final : public fixpp::core::Clock {
 public:
     explicit fixed_clock(std::chrono::system_clock::time_point t) : t_{t} {}
-    fixpp::core::utc_time_point now() const noexcept override { return t_; }
-    fixpp::core::steady_time_point steady_now() const noexcept override {
+    [[nodiscard]] fixpp::core::utc_time_point now() const noexcept override { return t_; }
+    [[nodiscard]] fixpp::core::steady_time_point steady_now() const noexcept override {
         return std::chrono::steady_clock::now();
     }
     asio::awaitable<void> sleep_until(fixpp::core::steady_time_point) override { co_return; }
@@ -73,7 +73,7 @@ private:
 };
 
 // Default DER buffer (small — within cap).
-static std::array<std::byte, 512> g_der{};
+std::array<std::byte, 512> g_der{};
 
 SslCtxConfig make_mtls_ca(std::chrono::system_clock::time_point now) {
     SslCtxConfig cfg;
@@ -101,7 +101,7 @@ Certificate make_valid(std::chrono::system_clock::time_point now) {
 TEST(VerifyPeerT039, Step1DerTooLarge) {
     auto now = std::chrono::system_clock::now();
     auto cfg = make_mtls_ca(now);
-    std::vector<std::byte> big(16 * 1024 + 1);
+    std::vector<std::byte> big((16 * 1024) + 1);
     Certificate c = make_valid(now);
     c.raw_der_ = std::span<const std::byte>{big};
 
@@ -283,7 +283,7 @@ TEST(VerifyPeerT039, DerBeforeRsaLow) {
     auto now = std::chrono::system_clock::now();
     auto cfg = make_mtls_ca(now);
 
-    std::vector<std::byte> big(16 * 1024 + 1);
+    std::vector<std::byte> big((16 * 1024) + 1);
     Certificate c = make_valid(now);
     c.raw_der_ = std::span<const std::byte>{big};
     c.alg_ = signature_algorithm::rsa_pss;

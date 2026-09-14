@@ -42,7 +42,7 @@ std::span<const std::byte> as_bytes(std::string_view s) {
 // See validator_enum_domain_test.cpp for the outliving-Dictionary rationale
 // (as_table_view() owns copies of the code bytes).
 table_view load_shipped_table_view(char const* filename) {
-    std::vector<std::byte> buf(8u * 1024u * 1024u);
+    std::vector<std::byte> buf(8U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / filename;
     auto dict = fixpp::dict::XmlLoader{}.load(path, &mr);
@@ -72,7 +72,7 @@ TEST(ValidatorEnumMultivalue, ExecInst18OneUndeclaredTokenRejects) {
     dictionary_driven_validator v{std::move(tv)};
 
     auto rc = v.validate_field(18, as_bytes("1 ZZ 6"));
-    ASSERT_FALSE(rc.has_value()) << "ExecInst(18)=\"1 ZZ 6\" -- \"ZZ\" is not a declared code";
+    ASSERT_FALSE(rc.has_value()) << R"(ExecInst(18)="1 ZZ 6" -- "ZZ" is not a declared code)";
     EXPECT_EQ(rc.error(), fixpp::core::error::wire_field_value_out_of_range)
         << "got slot " << static_cast<int>(rc.error());
 }
@@ -158,15 +158,15 @@ TEST(ValidatorEnumMultivalue, FullMultiValueCensusTableDriven) {
     // there); FIX50SP2 has 9 -- 1035 is MULTIPLESTRINGVALUE there but
     // declares ZERO <value> children (measured), so it is excluded.
     std::vector<CensusEntry> const census = {
-        {"FIX44.xml", {18, 276, 277, 286, 291, 292, 529, 546}},
-        {"FIX50.xml", {18, 276, 277, 286, 291, 292, 529, 546, 1031, 1035}},
-        {"FIX50SP1.xml", {18, 276, 277, 286, 291, 292, 529, 546, 1031, 1035}},
-        {"FIX50SP2.xml", {18, 276, 277, 286, 291, 292, 529, 546, 1031}},
+        {.file = "FIX44.xml", .tags = {18, 276, 277, 286, 291, 292, 529, 546}},
+        {.file = "FIX50.xml", .tags = {18, 276, 277, 286, 291, 292, 529, 546, 1031, 1035}},
+        {.file = "FIX50SP1.xml", .tags = {18, 276, 277, 286, 291, 292, 529, 546, 1031, 1035}},
+        {.file = "FIX50SP2.xml", .tags = {18, 276, 277, 286, 291, 292, 529, 546, 1031}},
     };
 
     for (auto const& entry : census) {
         SCOPED_TRACE(entry.file);
-        std::vector<std::byte> buf(16u * 1024u * 1024u);
+        std::vector<std::byte> buf(16U * 1024U * 1024U);
         std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
         auto const path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / entry.file;
         auto dict = fixpp::dict::XmlLoader{}.load(path, &mr);
@@ -176,8 +176,8 @@ TEST(ValidatorEnumMultivalue, FullMultiValueCensusTableDriven) {
         std::vector<std::pair<std::uint16_t, std::vector<std::string>>> codes_by_tag;
         for (auto const tag : entry.tags) {
             auto const ev = dict.enum_values(tag);
-            ASSERT_GE(ev.size(), 2u) << "tag " << tag << " in " << entry.file
-                                      << " must declare >=2 codes (measured census)";
+            ASSERT_GE(ev.size(), 2U) << "tag " << tag << " in " << entry.file
+                                     << " must declare >=2 codes (measured census)";
             std::vector<std::string> codes;
             codes.reserve(ev.size());
             for (auto const& e : ev) {

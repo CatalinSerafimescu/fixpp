@@ -67,14 +67,13 @@ using namespace std::chrono_literals;
 
 namespace {
 
-static std::string field(int tag, std::string_view val) {
+std::string field(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
-static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
-                                             std::string_view msg_type, std::uint32_t seq,
-                                             std::string_view sender, std::string_view target,
-                                             std::string_view extra = {}) {
+std::vector<std::byte> make_fix_frame(std::string_view begin_string, std::string_view msg_type,
+                                      std::uint32_t seq, std::string_view sender,
+                                      std::string_view target, std::string_view extra = {}) {
     std::string body;
     body += field(35, msg_type);
     body += field(34, std::to_string(seq));
@@ -101,9 +100,8 @@ static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
 }
 
 // make_logon with optional ResetSeqNumFlag(141)=Y
-static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
-                                         std::string_view t, int hbt = 30,
-                                         bool reset_seqnum = false) {
+std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
+                                  std::string_view t, int hbt = 30, bool reset_seqnum = false) {
     std::string extra;
     extra += field(98, "0");
     extra += field(108, std::to_string(hbt));
@@ -118,9 +116,9 @@ struct OutboundCapture {
     }
 };
 
-static bool has_session_reset_event(const fixpp::session::Session& sess) {
+bool has_session_reset_event(const fixpp::session::Session& sess) {
     auto events = sess.recent_events();
-    return std::any_of(events.begin(), events.end(), [](const fixpp::session::SessionEvent& ev) {
+    return std::ranges::any_of(events, [](const fixpp::session::SessionEvent& ev) {
         return std::holds_alternative<fixpp::session::session_event_sequence_numbers_reset>(ev);
     });
 }
@@ -128,12 +126,12 @@ static bool has_session_reset_event(const fixpp::session::Session& sess) {
 // frame_has_141Y: check whether a raw FIX frame contains "141=Y\x01".
 // Used to verify that the outbound reply Logon echoes ResetSeqNumFlag(141)=Y.
 // (RC#C-2 gate-b/r2 false-pass closure — outbound-frame assertion.)
-static bool frame_has_141Y(const std::vector<std::byte>& frame) {
+bool frame_has_141Y(const std::vector<std::byte>& frame) {
     static constexpr std::string_view needle = "141=Y\x01";
     if (frame.size() < needle.size()) return false;
     const auto* data = reinterpret_cast<const char*>(frame.data());
     std::string_view sv(data, frame.size());
-    return sv.find(needle) != std::string_view::npos;
+    return sv.contains(needle);
 }
 
 }  // namespace
@@ -218,7 +216,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Acceptor_PeerSends141Y) {
 
     // Peer (initiator) sends Logon with ResetSeqNumFlag(141)=Y.
     auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
-    feed(sess, logon_with_reset);
+    ASSERT_TRUE(feed(sess, logon_with_reset).has_value());
 
     // After successful 141=Y exchange: emits sequence_numbers_reset{by_peer_request=true}.
     EXPECT_TRUE(has_session_reset_event(sess))
@@ -259,7 +257,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Initiator_PeerOmits141Y) {
 
     // Peer sends Logon WITHOUT 141=Y; bilateral_strict should reject.
     auto logon_no_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/false);
-    feed(sess, logon_no_reset);
+    (void)feed(sess, logon_no_reset);  // outcome checked below via state
 
     // In bilateral_strict: when we have sent 141=Y (our open sends Logon with 141=Y)
     // but peer's response lacks it → session_seqnum_reset_mismatch + disconnect.
@@ -291,7 +289,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralLenient_Acceptor_PeerSends141Y) {
     ASSERT_TRUE(run_open(sess).has_value());
 
     auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
-    feed(sess, logon_with_reset);
+    ASSERT_TRUE(feed(sess, logon_with_reset).has_value());
 
     EXPECT_TRUE(has_session_reset_event(sess))
         << "bilateral_lenient acceptor: peer 141=Y must emit "
@@ -315,7 +313,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralLenient_Acceptor_PeerOmits141Y) {
 
     // Peer sends Logon WITHOUT 141=Y; bilateral_lenient should accept anyway.
     auto logon_no_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/false);
-    feed(sess, logon_no_reset);
+    ASSERT_TRUE(feed(sess, logon_no_reset).has_value());
 
     // bilateral_lenient: peer omits 141=Y → accept normally (no rejection).
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active)
@@ -345,7 +343,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Initiator_PeerConfirms141Y) 
 
     // Peer (acceptor, ISLD→TW) sends Logon-ack WITH 141=Y — mutual reset.
     auto logon_ack_with_reset = make_logon("FIX.4.2", 1, "ISLD", "TW", 30, /*reset=*/true);
-    feed(sess, logon_ack_with_reset);
+    ASSERT_TRUE(feed(sess, logon_ack_with_reset).has_value());
 
     // (a) Session reaches Active after bilateral confirmation.
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active)
@@ -357,12 +355,13 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Initiator_PeerConfirms141Y) 
     std::size_t reset_events = 0;
     bool by_peer_request_correct = false;
     for (const auto& ev : events) {
-        if (auto* r = std::get_if<fixpp::session::session_event_sequence_numbers_reset>(&ev)) {
+        if (const auto* r =
+                std::get_if<fixpp::session::session_event_sequence_numbers_reset>(&ev)) {
             ++reset_events;
             by_peer_request_correct = !r->by_peer_request;  // must be false (we initiated)
         }
     }
-    EXPECT_EQ(reset_events, 1u)
+    EXPECT_EQ(reset_events, 1U)
         << "bilateral_strict initiator confirm: exactly one sequence_numbers_reset event.";
     EXPECT_TRUE(by_peer_request_correct)
         << "FR-018: bilateral_strict initiator-confirm → by_peer_request must be false "
@@ -423,7 +422,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, Unilateral_Acceptor_PeerSends141Y) {
     ASSERT_TRUE(run_open(sess).has_value());
 
     auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
-    feed(sess, logon_with_reset);
+    ASSERT_TRUE(feed(sess, logon_with_reset).has_value());
 
     EXPECT_TRUE(has_session_reset_event(sess))
         << "unilateral acceptor: peer 141=Y must emit sequence_numbers_reset event. "
@@ -458,7 +457,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Acceptor_ReplyContains141Y) 
     ASSERT_TRUE(run_open(sess).has_value());
 
     auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
-    feed(sess, logon_with_reset);
+    ASSERT_TRUE(feed(sess, logon_with_reset).has_value());
 
     // At least one outbound frame must have been captured (the reply Logon).
     ASSERT_FALSE(capture.frames.empty())
@@ -483,7 +482,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralLenient_Acceptor_ReplyContains141Y)
     ASSERT_TRUE(run_open(sess).has_value());
 
     auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
-    feed(sess, logon_with_reset);
+    ASSERT_TRUE(feed(sess, logon_with_reset).has_value());
 
     // At least one outbound frame must have been captured (the reply Logon).
     ASSERT_FALSE(capture.frames.empty())
@@ -511,7 +510,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, Unilateral_Acceptor_ReplyDoesNotContain141Y)
     ASSERT_TRUE(run_open(sess).has_value());
 
     auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
-    feed(sess, logon_with_reset);
+    ASSERT_TRUE(feed(sess, logon_with_reset).has_value());
 
     // unilateral: outbound 141 is config-driven, NOT mirror-driven (FR-017:149).
     // The reply Logon must NOT echo 141=Y just because the peer sent it.
@@ -559,7 +558,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Acceptor_CountersResetToOne)
     sess.seqnum_mgr_test_access().set_counters_for_test(1, 10);
 
     auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
-    feed(sess, logon_with_reset);
+    ASSERT_TRUE(feed(sess, logon_with_reset).has_value());
 
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
 
@@ -587,7 +586,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralLenient_Acceptor_CountersResetToOne
     sess.seqnum_mgr_test_access().set_counters_for_test(1, 10);
 
     auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
-    feed(sess, logon_with_reset);
+    ASSERT_TRUE(feed(sess, logon_with_reset).has_value());
 
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
 
@@ -613,7 +612,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Initiator_CountersResetToOne
 
     // Peer (acceptor) acks with Logon seq=1 + 141=Y (mutual reset confirm).
     auto logon_ack_with_reset = make_logon("FIX.4.2", 1, "ISLD", "TW", 30, /*reset=*/true);
-    feed(sess, logon_ack_with_reset);
+    ASSERT_TRUE(feed(sess, logon_ack_with_reset).has_value());
 
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
 
@@ -651,9 +650,8 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Initiator_CountersResetToOne
                        "[032 contract C4, FR-006, SC-006]";
             }
         }
-        EXPECT_TRUE(found)
-            << "T013 W4b: sequence_numbers_reset event must be emitted on the "
-               "peer_ack_sent_reset_flag arm (bilateral_strict initiator).";
+        EXPECT_TRUE(found) << "T013 W4b: sequence_numbers_reset event must be emitted on the "
+                              "peer_ack_sent_reset_flag arm (bilateral_strict initiator).";
     }
 }
 
@@ -668,7 +666,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest, Unilateral_Acceptor_CountersResetToOne) {
     sess.seqnum_mgr_test_access().set_counters_for_test(1, 10);
 
     auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
-    feed(sess, logon_with_reset);
+    ASSERT_TRUE(feed(sess, logon_with_reset).has_value());
 
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
 
@@ -699,13 +697,14 @@ TEST_F(ResetSeqnumPolicyMatrixTest, Unilateral_Acceptor_PeerSends141Y_NoOurFlag)
 
     // Peer sends 141=Y; we honour it (unilateral).
     auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, true);
-    feed(sess, logon_with_reset);
+    ASSERT_TRUE(feed(sess, logon_with_reset).has_value());
 
     // Emits sequence_numbers_reset event (by_peer_request=true).
     auto events = sess.recent_events();
     bool found = false;
     for (const auto& ev : events) {
-        if (auto* r = std::get_if<fixpp::session::session_event_sequence_numbers_reset>(&ev)) {
+        if (const auto* r =
+                std::get_if<fixpp::session::session_event_sequence_numbers_reset>(&ev)) {
             EXPECT_TRUE(r->by_peer_request)
                 << "unilateral: by_peer_request must be true when peer sent 141=Y.";
             found = true;
@@ -744,7 +743,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest,
 
     // Peer Logon-ack echoes 141=Y at seq=1.
     auto logon_ack_reset = make_logon("FIX.4.2", 1, "ISLD", "TW", 30, /*reset=*/true);
-    feed(sess, logon_ack_reset);
+    ASSERT_TRUE(feed(sess, logon_ack_reset).has_value());
 
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active)
         << "W2: session must reach Active after peer 141=Y ack";
@@ -766,8 +765,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest,
                    "[FR-006, SC-006, C4]";
         }
     }
-    EXPECT_TRUE(found)
-        << "W2 (T003): sequence_numbers_reset event must be emitted on this arm";
+    EXPECT_TRUE(found) << "W2 (T003): sequence_numbers_reset event must be emitted on this arm";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -809,7 +807,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest,
     // Peer spontaneously sends Logon-ack WITH 141=Y at seq=1.
     // bilateral_lenient accepts this without requiring we sent 141=Y.
     auto logon_ack_reset = make_logon("FIX.4.2", 1, "ISLD", "TW", 30, /*reset=*/true);
-    feed(sess, logon_ack_reset);
+    ASSERT_TRUE(feed(sess, logon_ack_reset).has_value());
 
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active)
         << "T011 W3: session must reach Active after peer-spontaneous 141=Y";
@@ -838,9 +836,8 @@ TEST_F(ResetSeqnumPolicyMatrixTest,
                    "must be true. [032 contract C4, FR-006, SC-004]";
         }
     }
-    EXPECT_TRUE(found)
-        << "T011 W3: sequence_numbers_reset event must be emitted on the "
-           "peer_ack_sent_reset_flag arm.";
+    EXPECT_TRUE(found) << "T011 W3: sequence_numbers_reset event must be emitted on the "
+                          "peer_ack_sent_reset_flag arm.";
 }
 #endif  // FIXPP_TEST_HOOKS
 
@@ -877,7 +874,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest,
 
     // Peer spontaneously sends Logon at seq=1 WITH 141=Y (bilateral_lenient accepts it).
     auto logon_ack_reset = make_logon("FIX.4.2", 1, "ISLD", "TW", 30, /*reset=*/true);
-    feed(sess, logon_ack_reset);
+    ASSERT_TRUE(feed(sess, logon_ack_reset).has_value());
 
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active)
         << "T012 W7: session must reach Active after peer-spontaneous 141=Y";
@@ -905,8 +902,7 @@ TEST_F(ResetSeqnumPolicyMatrixTest,
     // Without #ifdef FIXPP_TEST_HOOKS we assert indirectly via the event label;
     // under FIXPP_TEST_HOOKS we also check the counter directly.
 #ifdef FIXPP_TEST_HOOKS
-    EXPECT_EQ(sess.seqnum_mgr_test_access().next_outbound_unsafe(),
-              fixpp::session::seqnum_t{1})
+    EXPECT_EQ(sess.seqnum_mgr_test_access().next_outbound_unsafe(), fixpp::session::seqnum_t{1})
         << "T012 W7 counter assertion: fresh no-knob peer-spontaneous-at-seq-1 "
            "(latch=false) — outbound MUST stay 1 after the reset; restore_before_send "
            "alone would wrongly set it to 2. [032 contract C1, FR-005, W7]";

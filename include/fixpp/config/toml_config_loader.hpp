@@ -11,12 +11,10 @@
 // It is a PRIVATE implementation detail of the fixpp_config_toml target.
 #pragma once
 
-#include <filesystem>
-#include <memory_resource>
-
 #include <asio/any_io_executor.hpp>
-
+#include <filesystem>
 #include <fixpp/config/config_bundle.hpp>
+#include <memory_resource>
 
 namespace fixpp::config {
 
@@ -28,16 +26,17 @@ struct LoadOptions {
     // because the loader builds executor-dependent objects: system_clock_source
     // (non-copyable/non-movable ctor requires executor — system_clock_source.hpp's ctor)
     // and the TLS TransportFactory whose SslCtxConfig::clock is REQUIRED
-    // (tls/security_profile.hpp's null-clock validation row). The SAME instance is set on EngineConfig::executor
-    // by the host after load; the loader does NOT populate that field (DECISION-1).
+    // (tls/security_profile.hpp's null-clock validation row). The SAME instance is set on
+    // EngineConfig::executor by the host after load; the loader does NOT populate that field
+    // (DECISION-1).
     asio::any_io_executor engine_executor;
 
     // Cold-path load-time arena for load-time object construction:
     // XmlLoader::load(path, mr) (mr != nullptr precondition; xml_loader.hpp's `load` declaration)
-    // and make_file_cert_source(cfg, mr) (file_cert_source.hpp's `make_file_cert_source` declaration).
-    // NOT a session/message hot-path arena — distinct from SessionConfig::message_arena
-    // and related hot-path resources (those remain host-supplied AFTER load, step-2).
-    // Defaults to the process-wide default resource.
+    // and make_file_cert_source(cfg, mr) (file_cert_source.hpp's `make_file_cert_source`
+    // declaration). NOT a session/message hot-path arena — distinct from
+    // SessionConfig::message_arena and related hot-path resources (those remain host-supplied AFTER
+    // load, step-2). Defaults to the process-wide default resource.
     std::pmr::memory_resource* resource = std::pmr::get_default_resource();
 };
 

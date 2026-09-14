@@ -26,8 +26,9 @@ auto fmt(pod_decimal v) {
         error err{};
         std::string str;
     };
-    if (!r.has_value()) return result_t{false, r.error(), {}};
-    return result_t{true, {}, std::string(reinterpret_cast<const char*>(buf.data()), *r)};
+    if (!r.has_value()) return result_t{.ok = false, .err = r.error(), .str = {}};
+    return result_t{
+        .ok = true, .err = {}, .str = std::string(reinterpret_cast<const char*>(buf.data()), *r)};
 }
 
 }  // namespace
@@ -42,7 +43,7 @@ TEST(DecimalFormat, SentinelInvalid) {
 // AC-S2: mantissa == 0 → "0" regardless of exponent
 TEST(DecimalFormat, ZeroMantissaAnyExponent) {
     for (std::int8_t exp = 0; exp >= -10; --exp) {
-        auto r = fmt(pod_decimal{0, exp});
+        auto r = fmt(pod_decimal{.mantissa = 0, .exponent = exp});
         ASSERT_TRUE(r.ok) << "exp=" << static_cast<int>(exp);
         EXPECT_EQ(r.str, "0") << "exp=" << static_cast<int>(exp);
     }
@@ -50,20 +51,20 @@ TEST(DecimalFormat, ZeroMantissaAnyExponent) {
 
 // AC-S3: exponent outside [-38, 0] → decimal_invalid_input before formatting
 TEST(DecimalFormat, ExponentPositive) {
-    auto r = fmt(pod_decimal{1, 1});
+    auto r = fmt(pod_decimal{.mantissa = 1, .exponent = 1});
     ASSERT_FALSE(r.ok);
     EXPECT_EQ(r.err, error::decimal_invalid_input);
 }
 
 TEST(DecimalFormat, ExponentBelowMinus38) {
-    auto r = fmt(pod_decimal{1, -39});
+    auto r = fmt(pod_decimal{.mantissa = 1, .exponent = -39});
     ASSERT_FALSE(r.ok);
     EXPECT_EQ(r.err, error::decimal_invalid_input);
 }
 
 // AC-S4: trailing zero stripping — {150, -2} → "1.5" not "1.50"
 TEST(DecimalFormat, TrailingZeroStripped) {
-    auto r = fmt(pod_decimal{150, -2});
+    auto r = fmt(pod_decimal{.mantissa = 150, .exponent = -2});
     ASSERT_TRUE(r.ok);
     EXPECT_EQ(r.str, "1.5");
 }
@@ -75,48 +76,49 @@ TEST(DecimalFormat, WorstCaseBound) {
     // sign(1) + "0." + 19 zeros (38 - 19 = 19 leading zeros) + 19 mantissa digits
     // Actually worst case is sign + "0." + 19 fractional zeros + 19 mantissa digits
     // = 1 + 2 + 19 + 19 = 41 bytes
-    auto r = fmt(pod_decimal{-9223372036854775807LL, -38});
+    auto r = fmt(pod_decimal{.mantissa = -9223372036854775807LL, .exponent = -38});
     ASSERT_TRUE(r.ok);
-    EXPECT_LE(r.str.size(), 41u);
+    EXPECT_LE(r.str.size(), 41U);
 }
 
 // AC-S6: buffer too small → decimal_buffer_too_small
 TEST(DecimalFormat, BufferTooSmall) {
     std::array<std::byte, 1> tiny{};
-    auto r =
-        decimal_traits<pod_decimal>::to_chars(pod_decimal{12345, -2}, std::span<std::byte>{tiny});
+    auto r = decimal_traits<pod_decimal>::to_chars(pod_decimal{.mantissa = 12345, .exponent = -2},
+                                                   std::span<std::byte>{tiny});
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error(), error::decimal_buffer_too_small);
 }
 
 TEST(DecimalFormat, ZeroMantissaEmptyBufferTooSmall) {
     std::span<std::byte> empty{};
-    auto r = decimal_traits<pod_decimal>::to_chars(pod_decimal{0, 0}, empty);
+    auto r =
+        decimal_traits<pod_decimal>::to_chars(pod_decimal{.mantissa = 0, .exponent = 0}, empty);
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error(), error::decimal_buffer_too_small);
 }
 
 // Additional positive cases
 TEST(DecimalFormat, SimpleInteger) {
-    auto r = fmt(pod_decimal{42, 0});
+    auto r = fmt(pod_decimal{.mantissa = 42, .exponent = 0});
     ASSERT_TRUE(r.ok);
     EXPECT_EQ(r.str, "42");
 }
 
 TEST(DecimalFormat, NegativeDecimal) {
-    auto r = fmt(pod_decimal{-125, -2});
+    auto r = fmt(pod_decimal{.mantissa = -125, .exponent = -2});
     ASSERT_TRUE(r.ok);
     EXPECT_EQ(r.str, "-1.25");
 }
 
 TEST(DecimalFormat, FractionalOnly) {
-    auto r = fmt(pod_decimal{5, -1});
+    auto r = fmt(pod_decimal{.mantissa = 5, .exponent = -1});
     ASSERT_TRUE(r.ok);
     EXPECT_EQ(r.str, "0.5");
 }
 
 TEST(DecimalFormat, FIX50SP2_1_5) {
-    auto r = fmt(pod_decimal{15, -1});
+    auto r = fmt(pod_decimal{.mantissa = 15, .exponent = -1});
     ASSERT_TRUE(r.ok);
     EXPECT_EQ(r.str, "1.5");
 }

@@ -49,8 +49,10 @@
 //          NFR-017; [[feedback_single_threaded_harness_masks_strand_races]];
 //          engine.cpp run_connect_loop step 4 (its `publish_entry` call).
 
+#if defined(__clang__) || defined(__GNUC__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
 
 #include <gtest/gtest.h>
 
@@ -84,8 +86,8 @@
 
 using namespace std::chrono_literals;
 using fixpp::session::Engine;
-using fixpp::session::SessionId;
 using fixpp::session::SessionConfig;
+using fixpp::session::SessionId;
 
 namespace {
 
@@ -103,12 +105,9 @@ constexpr auto kRunWindow = 500ms;
 // FIX protocol implementation or TLS on the peer side.
 // The port is passed by reference and set before the coroutine suspends so the
 // main thread can read it after binding.
-static asio::awaitable<void> run_raw_acceptor(
-    asio::io_context& ioc,
-    uint16_t& bound_port,
-    std::atomic<bool>& port_ready,
-    std::chrono::milliseconds hold_window)
-{
+asio::awaitable<void> run_raw_acceptor(asio::io_context& ioc, uint16_t& bound_port,
+                                       std::atomic<bool>& port_ready,
+                                       std::chrono::milliseconds hold_window) {
     asio::ip::tcp::acceptor acceptor{ioc};
     asio::ip::tcp::endpoint ep{asio::ip::make_address("127.0.0.1"), 0};
     acceptor.open(ep.protocol());
@@ -183,11 +182,15 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
     sc.begin_string = "FIX.4.2";
     sc.sender_comp_id = "SNAP_SENDER";
     sc.target_comp_id = "SNAP_TARGET";
+#if defined(__clang__) || defined(__GNUC__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
     sc.security_profile =
         fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::insecure_plain_tcp};
+#if defined(__clang__) || defined(__GNUC__)
 #pragma clang diagnostic pop
+#endif
     sc.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", bound_port};
     // Unlimited reconnect attempts so the loop stays alive for the whole window.
     fixpp::transport::ReconnectPolicy policy;
@@ -273,17 +276,21 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
     // ── Let the io_context run, witnessed concurrently by the reader ────────
     // Spawn the raw acceptor coroutine.  Hold window = kRunWindow so the socket
     // stays alive for the whole test.
-    asio::co_spawn(ioc, [&]() -> asio::awaitable<void> {
-        asio::error_code ec;
-        // Accept one connection and hold for the window.
-        auto sock = co_await raw_acc.async_accept(asio::redirect_error(asio::use_awaitable, ec));
-        if (!ec) {
-            asio::steady_timer timer{ioc};
-            timer.expires_after(kRunWindow);
-            co_await timer.async_wait(asio::redirect_error(asio::use_awaitable, ec));
-            sock.close(ec);
-        }
-    }, asio::detached);
+    asio::co_spawn(
+        ioc,
+        [&]() -> asio::awaitable<void> {
+            asio::error_code ec;
+            // Accept one connection and hold for the window.
+            auto sock =
+                co_await raw_acc.async_accept(asio::redirect_error(asio::use_awaitable, ec));
+            if (!ec) {
+                asio::steady_timer timer{ioc};
+                timer.expires_after(kRunWindow);
+                co_await timer.async_wait(asio::redirect_error(asio::use_awaitable, ec));
+                sock.close(ec);
+            }
+        },
+        asio::detached);
 
     std::thread ioc_thread([&] {
         ioc.run_for(kRunWindow);
@@ -339,8 +346,8 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
         << "Expected at least one non-null lookup() result — the connect loop should have "
            "called publish_entry (reader_snapshot_ release-store) before the 500ms window "
            "expired.  If this fails, the test window is too short or the loopback connect "
-           "is failing.  null_reads=" << null_reads
-        << " nonnull_reads=" << nonnull_reads;
+           "is failing.  null_reads="
+        << null_reads << " nonnull_reads=" << nonnull_reads;
 
     // Destroy Engine after stop() — strict assert(stopped()) is satisfied.
     engine.reset();
@@ -392,4 +399,6 @@ TEST(EngineReaderSnapshotPublishAcquire, PendingAcceptDoesNotWedgeBoundedDrain) 
         << "promptly instead of leaving it suspended forever";
 }
 
+#if defined(__clang__) || defined(__GNUC__)
 #pragma clang diagnostic pop
+#endif

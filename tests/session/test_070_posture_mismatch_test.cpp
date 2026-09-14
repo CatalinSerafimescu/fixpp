@@ -94,7 +94,7 @@ public:
         return delegate_->next_seqnum(dir, increment);
     }
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override {
-        return delegate_->reset();
+        return (*delegate_).reset();
     }
 
 private:
@@ -263,7 +263,7 @@ protected:
 TEST_F(PostureTest, ProductionRefusesTestPeer) {
     EXPECT_EQ(run(fixpp::session::session_posture::production, std::string_view{"Y"}),
               fsm_state::Disconnected);
-    ASSERT_EQ(captured_frames.size(), 1u)
+    ASSERT_EQ(captured_frames.size(), 1U)
         << "exactly one outbound frame (the refusal Logout) — no partial/extra emit";
     const auto& lo = captured_frames.front();
     EXPECT_EQ(extract_field(lo, 35), "5") << "refusal disposition must be Logout(35=5)";
@@ -300,10 +300,10 @@ TEST_F(PostureTest, ProductionRefusesMalformed464) {
 }
 
 // Gate B PR #189 FQ-4 — initiator-role posture-mismatch witness. The initiator
-// arm (session.cpp's should_refuse_posture initiator call) fires on the peer's inbound Logon-ack; it was
-// completely uncovered before this change. Same discriminating assertions as
-// (a) above: exactly one NEW outbound frame (the refusal Logout) with the
-// named 35=5/58=<text> shape, plus Disconnected.
+// arm (session.cpp's should_refuse_posture initiator call) fires on the peer's inbound Logon-ack;
+// it was completely uncovered before this change. Same discriminating assertions as (a) above:
+// exactly one NEW outbound frame (the refusal Logout) with the named 35=5/58=<text> shape, plus
+// Disconnected.
 TEST_F(PostureTest, InitiatorRefusesPostureMismatchedLogonAck) {
     auto cfg = make_initiator_cfg(fixpp::session::session_posture::production);
     fixpp::session::Session sess(engine, cfg);
@@ -344,7 +344,7 @@ TEST_F(PostureTest, AcceptorRefusalUsesDurableOutboundSeq) {
     feed_sync(sess, std::span<const std::byte>{frame});
 
     EXPECT_EQ(sess.state(), fsm_state::Disconnected);
-    ASSERT_EQ(captured_frames.size(), 1u);
+    ASSERT_EQ(captured_frames.size(), 1U);
     const auto& lo = captured_frames.front();
     EXPECT_EQ(extract_field(lo, 35), "5") << "refusal disposition must be Logout(35=5)";
     EXPECT_EQ(extract_field(lo, 34), std::to_string(kDurableNextOutbound))
@@ -374,7 +374,7 @@ TEST_F(PostureTest, RefusalSurvivesNullClock) {
     feed_sync(sess, std::span<const std::byte>{frame});
 
     EXPECT_EQ(sess.state(), fsm_state::Disconnected);
-    ASSERT_EQ(captured_frames.size(), 1u)
+    ASSERT_EQ(captured_frames.size(), 1U)
         << "exactly one outbound frame (the refusal Logout) — no crash, no partial emit";
     const auto& lo = captured_frames.front();
     EXPECT_EQ(extract_field(lo, 35), "5") << "refusal disposition must be Logout(35=5)";

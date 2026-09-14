@@ -12,12 +12,11 @@
 
 #include <gtest/gtest.h>
 
-#include "fix/c_api/dict.h"    // fixpp_dict_destroy (F1 negative tests)
+#include "capi_loopback_support.hpp"  // make_test_dict_handle / destroy_test_dict_handle (L-050-1)
+#include "fix/c_api/dict.h"           // fixpp_dict_destroy (F1 negative tests)
 #include "fix/c_api/engine.h"
 #include "fix/c_api/session.h"
 #include "fix/c_api/version.h"  // FIXPP_C_ABI_VERSION_MAJOR/MINOR (R2-F1 counter-test)
-
-#include "capi_loopback_support.hpp"  // make_test_dict_handle / destroy_test_dict_handle (L-050-1)
 
 using namespace fixpp::capi_test;  // NOLINT(google-build-using-namespace) — test scope
 
@@ -116,7 +115,7 @@ TEST(CapiConfigBuilders, RoleMapsBothEnumsAndRejectsOutOfRange) {
 TEST(CapiConfigBuilders, HeartbeatSecondsSucceeds) {
     fixpp_session_config_t* cfg = nullptr;
     ASSERT_EQ(fixpp_session_config_create(&cfg), FIXPP_ERR_OK);
-    EXPECT_EQ(fixpp_session_config_set_heartbeat_seconds(cfg, 0), FIXPP_ERR_OK);   // 0 is accepted
+    EXPECT_EQ(fixpp_session_config_set_heartbeat_seconds(cfg, 0), FIXPP_ERR_OK);  // 0 is accepted
     EXPECT_EQ(fixpp_session_config_set_heartbeat_seconds(cfg, 30), FIXPP_ERR_OK);
     fixpp_session_config_destroy(cfg);
 }
@@ -190,13 +189,13 @@ TEST(CapiConfigBuilders, DictionaryRejectsDestroyedHandle) {
 TEST(CapiConfigBuilders, DictionaryRejectsTypeMismatchedHandle) {
     fixpp_session_config_t* cfg = nullptr;
     ASSERT_EQ(fixpp_session_config_create(&cfg), FIXPP_ERR_OK);
-    fixpp_dict_t* h = make_test_dict_handle();          // real DICT handle, dict!=null
+    fixpp_dict_t* h = make_test_dict_handle();  // real DICT handle, dict!=null
     reinterpret_cast<fixpp_dict*>(h)->tag_ = FIXPP_HANDLE_TAG_ENGINE;  // corrupt tag
     EXPECT_EQ(fixpp_session_config_set_dictionary(cfg, h), FIXPP_ERR_INVALID_HANDLE);
     // Restore the DICT tag before destroy — after gate-b/r2 fixpp_dict_destroy has a
     // positive DICT-tag gate and would no-op (and leak) if tag_==ENGINE at call time.
     reinterpret_cast<fixpp_dict*>(h)->tag_ = FIXPP_HANDLE_TAG_DICT;
-    fixpp_dict_destroy(h);   // dict.reset() + DEAD tag + retain shell
+    fixpp_dict_destroy(h);  // dict.reset() + DEAD tag + retain shell
     fixpp_session_config_destroy(cfg);
 }
 
@@ -212,8 +211,7 @@ TEST(CapiDictDestroy, WrongTypeEngineHandleIsNoOpSafe) {
     ASSERT_EQ(fixpp_engine_config_create(&ec), FIXPP_ERR_OK);
     ASSERT_EQ(fixpp_engine_config_set_realtime_clock(ec), FIXPP_ERR_OK);
     fixpp_engine_t* eng = nullptr;
-    ASSERT_EQ(fixpp_engine_create(ec, FIXPP_C_ABI_VERSION_MAJOR, FIXPP_C_ABI_VERSION_MINOR,
-                                  &eng),
+    ASSERT_EQ(fixpp_engine_create(ec, FIXPP_C_ABI_VERSION_MAJOR, FIXPP_C_ABI_VERSION_MINOR, &eng),
               FIXPP_ERR_OK);
     ASSERT_NE(eng, nullptr);
 

@@ -92,7 +92,7 @@ fixpp::dict::Dictionary load_test_dictionary(std::pmr::memory_resource* mr) {
 // ── T007-1: field_valid_for agrees with source Dictionary ───────────────────
 
 TEST(TableViewTest, FieldValidForAgreesWithDictionary) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto dict = load_test_dictionary(&mr);
     auto tv = dict.as_table_view();
@@ -125,7 +125,7 @@ TEST(TableViewTest, FieldValidForAgreesWithDictionary) {
 // ── T007-2: required_fields agrees with source Dictionary ───────────────────
 
 TEST(TableViewTest, RequiredFieldsAgreesWithDictionary) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto dict = load_test_dictionary(&mr);
     auto tv = dict.as_table_view();
@@ -133,7 +133,10 @@ TEST(TableViewTest, RequiredFieldsAgreesWithDictionary) {
     // Logon required: 49, 56, 98, 108.
     auto logon_req = tv.required_fields("A");
     ASSERT_FALSE(logon_req.empty()) << "Logon required_fields must not be empty";
-    bool has_49 = false, has_56 = false, has_98 = false, has_108 = false;
+    bool has_49 = false;
+    bool has_56 = false;
+    bool has_98 = false;
+    bool has_108 = false;
     for (auto t : logon_req) {
         if (t == 49) has_49 = true;
         if (t == 56) has_56 = true;
@@ -148,7 +151,10 @@ TEST(TableViewTest, RequiredFieldsAgreesWithDictionary) {
     // NewOrderSingle required: 11, 21, 54, 55.
     auto nos_req = tv.required_fields("D");
     ASSERT_FALSE(nos_req.empty()) << "NewOrderSingle required_fields must not be empty";
-    bool has_11 = false, has_21 = false, has_54 = false, has_55 = false;
+    bool has_11 = false;
+    bool has_21 = false;
+    bool has_54 = false;
+    bool has_55 = false;
     for (auto t : nos_req) {
         if (t == 11) has_11 = true;
         if (t == 21) has_21 = true;
@@ -175,7 +181,7 @@ TEST(TableViewTest, RequiredFieldsAgreesWithDictionary) {
 // ── T007-3: group_first_field agrees with source Dictionary ─────────────────
 
 TEST(TableViewTest, GroupFirstFieldAgreesWithDictionary) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto dict = load_test_dictionary(&mr);
     auto tv = dict.as_table_view();
@@ -197,7 +203,7 @@ TEST(TableViewTest, GroupFirstFieldAgreesWithDictionary) {
 // contains() is false for every tag (the [FIX 2] valid_tag_set_view
 // encapsulation's nullptr-equivalent state).
 TEST(TableViewTest, ValidTagsForAgreesWithFieldValidFor) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto dict = load_test_dictionary(&mr);
     auto tv = dict.as_table_view();
@@ -205,8 +211,10 @@ TEST(TableViewTest, ValidTagsForAgreesWithFieldValidFor) {
     // Known msg_type: view must agree with field_valid_for for both a
     // declared tag and an undeclared one.
     auto const logon_view = tv.valid_tags_for("A");
-    EXPECT_TRUE(logon_view.contains(49)) << "SenderCompID(49) must be in Logon's valid_tags_for view";
-    EXPECT_TRUE(logon_view.contains(98)) << "EncryptMethod(98) must be in Logon's valid_tags_for view";
+    EXPECT_TRUE(logon_view.contains(49))
+        << "SenderCompID(49) must be in Logon's valid_tags_for view";
+    EXPECT_TRUE(logon_view.contains(98))
+        << "EncryptMethod(98) must be in Logon's valid_tags_for view";
     EXPECT_FALSE(logon_view.contains(11))
         << "ClOrdID(11) is not declared for Logon; must NOT be in the view";
     EXPECT_FALSE(logon_view.contains(9999)) << "unknown tag must NOT be in the view";
@@ -222,7 +230,7 @@ TEST(TableViewTest, ValidTagsForAgreesWithFieldValidFor) {
 // ── T007-4: group_member_tags agrees with source Dictionary ─────────────────
 
 TEST(TableViewTest, GroupMemberTagsAgreesWithDictionary) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto dict = load_test_dictionary(&mr);
     auto tv = dict.as_table_view();
@@ -266,7 +274,8 @@ TEST(TableViewTest, GroupContextOnlyRegistrationFoundThroughContextAccessor) {
         << "context-only registration must be visible through the 3-arg accessor "
            "(the bit gate must not have suppressed it)";
     auto const members = tv.group_member_tags("D", parent_path, 802);
-    ASSERT_FALSE(members.empty()) << "context-only members must be visible through the 3-arg accessor";
+    ASSERT_FALSE(members.empty())
+        << "context-only members must be visible through the 3-arg accessor";
     bool has_524 = false;
     for (auto t : members) {
         if (t == 524) has_524 = true;
@@ -339,7 +348,7 @@ TEST(TableViewTest, GroupFirstFieldExactReportsAContextMissInsteadOfMaskingIt) {
 // ── T007-5: field_type_of agrees with source Dictionary field_data_type ──────
 
 TEST(TableViewTest, FieldTypeOfAgreesWithDictionary) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto dict = load_test_dictionary(&mr);
     auto tv = dict.as_table_view();
@@ -422,7 +431,7 @@ fixpp::dict::Dictionary load_test_dictionary_with_side_enum(std::pmr::memory_res
 }
 
 TEST(TableViewTest, EnumValidRealDomainCheck) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto dict = load_test_dictionary_with_side_enum(&mr);
     auto tv = dict.as_table_view();
@@ -442,7 +451,7 @@ TEST(TableViewTest, EnumValidAbsentTagAcceptFloor) {
     // FR-003: a tag absent from the enum store (or with an empty codeset)
     // must accept regardless of value — the anti-reject-everything floor.
     // ClOrdID(11) carries no <value> children in this fixture.
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto dict = load_test_dictionary_with_side_enum(&mr);
     auto tv = dict.as_table_view();
@@ -460,7 +469,7 @@ TEST(TableViewTest, SpansRemainingValidAfterDictionaryDestroyed) {
     // Build the table_view, then destroy the dictionary; spans must still work.
     fixpp::dict::table_view tv;
     {
-        std::vector<std::byte> buf(2u * 1024u * 1024u);
+        std::vector<std::byte> buf(2U * 1024U * 1024U);
         std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
         auto dict = load_test_dictionary(&mr);
         tv = dict.as_table_view();
@@ -476,7 +485,7 @@ TEST(TableViewTest, SpansRemainingValidAfterDictionaryDestroyed) {
 // ── T007-8: full FIX44 dictionary as_table_view() round-trip ────────────────
 
 TEST(TableViewTest, FullFix44DictionaryTableView) {
-    std::vector<std::byte> buf(4u * 1024u * 1024u);
+    std::vector<std::byte> buf(4U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto const xml_path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX44.xml";
     auto dict = fixpp::dict::XmlLoader{}.load(xml_path, &mr);
@@ -552,15 +561,14 @@ TEST(TableViewTest, Fix44ValidationSurfaceForProxyCorruptCell) {
 
     // (a) Legit QFJ Logon(35=A) admin fields — all must validate, or the live
     //     Logon would be rejected before the cell ever induces the corrupt frame.
-    for (std::uint16_t tag : {std::uint16_t{34}, std::uint16_t{49}, std::uint16_t{56},
-                              std::uint16_t{52}, std::uint16_t{98}, std::uint16_t{108},
-                              std::uint16_t{141}}) {
+    for (std::uint16_t tag :
+         {std::uint16_t{34}, std::uint16_t{49}, std::uint16_t{56}, std::uint16_t{52},
+          std::uint16_t{98}, std::uint16_t{108}, std::uint16_t{141}}) {
         EXPECT_TRUE(tv.field_valid_for("A", tag))
             << "Logon(35=A) tag " << tag << " must validate (else the live Logon is rejected)";
     }
     // Legit TestRequest(35=1) carries only TestReqID(112).
-    EXPECT_TRUE(tv.field_valid_for("1", 112))
-        << "TestReqID(112) must be valid on TestRequest";
+    EXPECT_TRUE(tv.field_valid_for("1", 112)) << "TestReqID(112) must be valid on TestRequest";
     // (b) The induction: Symbol(55) must be out-of-context on TestRequest.
     EXPECT_FALSE(tv.field_valid_for("1", 55))
         << "Symbol(55) must be out-of-context on TestRequest(35=1) for the "

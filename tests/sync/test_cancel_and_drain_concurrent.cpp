@@ -71,7 +71,7 @@ TEST(SeamCancelAndDrainConcurrent, MultipleDrainersSerialised) {
     auto holder_coro = [&]() -> asio::awaitable<void> {
         auto g = co_await mtx.async_lock();
         EXPECT_TRUE(g.has_value());
-        co_await yield_n(N * 4 + D + 8);  // hold past drainer start + reap
+        co_await yield_n((N * 4) + D + 8);  // hold past drainer start + reap
         // Guard dtor → unlock() (draining_ == true → short-circuit).
     };
 
@@ -87,7 +87,7 @@ TEST(SeamCancelAndDrainConcurrent, MultipleDrainersSerialised) {
     };
 
     auto make_drainer = [&](int i) -> asio::awaitable<void> {
-        co_await yield_n(N * 2 + i);  // let holder + waiters settle; stagger
+        co_await yield_n((N * 2) + i);  // let holder + waiters settle; stagger
         auto d = co_await mtx.cancel_and_drain();
         if (d.has_value())
             drain_success_count.fetch_add(1, std::memory_order_acq_rel);

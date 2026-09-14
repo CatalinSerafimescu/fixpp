@@ -26,7 +26,7 @@
 #include "fix/c_api/session.h"  // fixpp_session_config_{create,destroy,set_dictionary}
 
 #ifndef FIXPP_DICT_DIR
-#  error "FIXPP_DICT_DIR must be set by CMake (target_compile_definitions)"
+#error "FIXPP_DICT_DIR must be set by CMake (target_compile_definitions)"
 #endif
 
 // ── Positive: load each bundled dictionary ────────────────────────────────────
@@ -147,15 +147,14 @@ TEST(DictLoadFromXml, MissingFileReturnsConfigInvalid) {
     // fixpp_strerror must return a non-empty description (not "" or nullptr)
     const char* msg = fixpp_strerror(err);
     EXPECT_NE(msg, nullptr);
-    EXPECT_GT(std::string_view{msg}.size(), 0u);
+    EXPECT_GT(std::string_view{msg}.size(), 0U);
 }
 
 // ── Negative: syntactically malformed XML → FIXPP_ERR_CAPI_CONFIG_INVALID ─────
 
 TEST(DictLoadFromXml, MalformedXmlReturnsConfigInvalid) {
     // Write garbage to a temp file; XmlLoader::load throws xml_parse_error.
-    auto tmp = std::filesystem::temp_directory_path() /
-               "fixpp_dict_load_malformed_test.xml";
+    auto tmp = std::filesystem::temp_directory_path() / "fixpp_dict_load_malformed_test.xml";
     {
         std::ofstream f(tmp);
         ASSERT_TRUE(f.is_open()) << "could not create temp file " << tmp;
@@ -168,7 +167,7 @@ TEST(DictLoadFromXml, MalformedXmlReturnsConfigInvalid) {
     EXPECT_EQ(d, nullptr);
     const char* msg = fixpp_strerror(err);
     EXPECT_NE(msg, nullptr);
-    EXPECT_GT(std::string_view{msg}.size(), 0u);
+    EXPECT_GT(std::string_view{msg}.size(), 0U);
 
     std::filesystem::remove(tmp);
 }

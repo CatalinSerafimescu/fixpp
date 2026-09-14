@@ -28,18 +28,11 @@
 
 #include <gtest/gtest.h>
 
-#include <chrono>
-#include <cstddef>
-#include <functional>
-#include <memory>
-#include <span>
-#include <string>
-#include <vector>
-
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
-
+#include <chrono>
+#include <cstddef>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
@@ -47,6 +40,11 @@
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <functional>
+#include <memory>
+#include <span>
+#include <string>
+#include <vector>
 
 #include "support/fix44_dictionary.hpp"
 #include "support/fix44_group_frame_bodies.hpp"
@@ -139,7 +137,8 @@ struct GroupDispatchFixture {
 
         auto logon = make_peer_logon_frame();
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
-        if (!fixpp::test_support::run_window_then_ready(ioc, fut2, std::chrono::milliseconds{200})) {
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut2,
+                                                        std::chrono::milliseconds{200})) {
             fixpp::test_support::cancel_and_drain_or_report(
                 ioc, *clock, "GroupDispatchFixture::open_to_active/logon");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss
@@ -155,8 +154,8 @@ struct GroupDispatchFixture {
     void feed(Session& sess, std::span<const std::byte> frame, int ms = 200) {
         auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, std::chrono::milliseconds{ms})) {
-            fixpp::test_support::cancel_and_drain_or_report(
-                ioc, *clock, "GroupDispatchFixture::feed");
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "GroupDispatchFixture::feed");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "GroupDispatchFixture::feed";
             return;
         }

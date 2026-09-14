@@ -7,4 +7,4 @@ namespace test078_mock {
 
 void build_MsgB(MsgBArgs const& args) { (void)args; }
 
-} // namespace test078_mock
+}  // namespace test078_mock

@@ -300,7 +300,7 @@ TEST(RoundTrip, ExhaustiveCoverageExactEquality) {
     std::size_t er_tag_count = 0;
     for (auto const& entry : msgs) {
         std::size_t per_msg = 0;
-        for (std::uint32_t t = 0; t < 65536u; ++t) {
+        for (std::uint32_t t = 0; t < 65536U; ++t) {
             auto const fr = d.field_ref(entry.msg_type, static_cast<std::uint16_t>(t));
             if (fr.rule != fixpp::dict::field_presence::NotDeclared) {
                 actual_pairs.emplace(std::string{entry.msg_type}, static_cast<std::uint16_t>(t));
@@ -323,21 +323,21 @@ TEST(RoundTrip, ExhaustiveCoverageExactEquality) {
 
     // Report first mismatch if sizes differ.
     for (auto const& p : expected_pairs) {
-        if (!actual_pairs.count(p)) {
+        if (!actual_pairs.contains(p)) {
             ADD_FAILURE() << "Expected pair missing in Dictionary: "
                           << "msg_type=\"" << p.first << "\" tag=" << p.second;
         }
     }
     for (auto const& p : actual_pairs) {
-        if (!expected_pairs.count(p)) {
+        if (!expected_pairs.contains(p)) {
             ADD_FAILURE() << "Extra pair in Dictionary not in XML: "
                           << "msg_type=\"" << p.first << "\" tag=" << p.second;
         }
     }
 
     // ---- Secondary: heuristic floors for loud failure on catastrophic regressions ----
-    EXPECT_GT(total_pairs, 200u)
+    EXPECT_GT(total_pairs, 200U)
         << "Distinct (msg_type, tag) coverage too low — suspect under-iteration";
-    EXPECT_GT(nos_tag_count, 30u) << "NewOrderSingle has too few declared tags — under-iteration?";
-    EXPECT_GT(er_tag_count, 50u) << "ExecutionReport has too few declared tags — under-iteration?";
+    EXPECT_GT(nos_tag_count, 30U) << "NewOrderSingle has too few declared tags — under-iteration?";
+    EXPECT_GT(er_tag_count, 50U) << "ExecutionReport has too few declared tags — under-iteration?";
 }

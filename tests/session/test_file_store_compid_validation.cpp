@@ -17,8 +17,13 @@
 #include <unistd.h>  // not used directly on Windows; FileStoreFactory owns all fd I/O
 #endif
 
+// clang-format off
+// <exception> must precede asio: asio/detail/impl/posix_thread.ipp calls std::terminate
+// without including it, and libc++ does not provide it transitively. clang-format's
+// IncludeBlocks: Regroup would sort it below asio again, hence the off/on guard.
 #include <exception>
 #include <asio/thread_pool.hpp>
+// clang-format on
 #include <climits>
 #include <cstring>
 #include <filesystem>
@@ -235,7 +240,7 @@ TEST(FileStoreCompIDValidation, ValidCompIDSucceeds) {
     EXPECT_TRUE(result.has_value()) << "valid CompIDs should succeed; got error: "
                                     << (result.has_value() ? 0 : static_cast<int>(result.error()));
 
-    if (result.has_value()) result.value().reset();
+    if (result.has_value()) result.value() = nullptr;
     fixpp::store_test::remove_store_dir(dir);
 }
 

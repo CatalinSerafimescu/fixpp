@@ -12,15 +12,14 @@
 // \internal — physically installed but excluded from the supported API /
 // Doxygen stability surface ([arch §9.1]); not new public API (FR-015).
 
-#include <atomic>    // std::memory_order
-#include <cstddef>   // std::size_t
-#include <memory>    // std::shared_ptr
-#include <utility>   // std::move
+#include <atomic>   // std::memory_order
+#include <cstddef>  // std::size_t
+#include <memory>   // std::shared_ptr
+#include <utility>  // std::move
 
 #include "fixpp/core/sync/detail/atomic_shared_ptr_detect.hpp"
 
-#if FIXPP_HAS_STD_ATOMIC_SHARED_PTR == 1 && \
-    !defined(FIXPP_FORCE_ATOMIC_SHARED_PTR_FALLBACK)
+#if FIXPP_HAS_STD_ATOMIC_SHARED_PTR == 1 && !defined(FIXPP_FORCE_ATOMIC_SHARED_PTR_FALLBACK)
 #define FIXPP_ATOMIC_SHARED_PTR_NATIVE_ACTIVE 1
 #else
 #define FIXPP_ATOMIC_SHARED_PTR_NATIVE_ACTIVE 0
@@ -41,17 +40,17 @@ namespace fixpp::sync::detail {
 // shard-lock failure is unrecoverable and proceeding without the lock would be
 // a data race (spec Clarifications 2026-06-21 / contract C-5).
 class shard_guard {
- public:
-  explicit shard_guard(const void* self) noexcept;
-  ~shard_guard();
+public:
+    explicit shard_guard(const void* self) noexcept;
+    ~shard_guard();
 
-  shard_guard(const shard_guard&) = delete;
-  shard_guard& operator=(const shard_guard&) = delete;
-  shard_guard(shard_guard&&) = delete;
-  shard_guard& operator=(shard_guard&&) = delete;
+    shard_guard(const shard_guard&) = delete;
+    shard_guard& operator=(const shard_guard&) = delete;
+    shard_guard(shard_guard&&) = delete;
+    shard_guard& operator=(shard_guard&&) = delete;
 
- private:
-  std::size_t shard_index_;
+private:
+    std::size_t shard_index_;
 };
 
 }  // namespace fixpp::sync::detail
@@ -67,130 +66,126 @@ using atomic_shared_ptr = std::atomic<std::shared_ptr<T>>;
 
 template <class T>
 class atomic_shared_ptr {
- public:
-  using value_type = std::shared_ptr<T>;
-  static constexpr bool is_always_lock_free = false;
+public:
+    using value_type = std::shared_ptr<T>;
+    static constexpr bool is_always_lock_free = false;
 
-  atomic_shared_ptr() noexcept = default;
-  constexpr atomic_shared_ptr(std::nullptr_t) noexcept : value_(nullptr) {}
+    atomic_shared_ptr() noexcept = default;
+    // cppcheck-suppress-begin noExplicitConstructor  -- implicit by design, mirrors
+    // std::atomic<std::shared_ptr<T>>
+    constexpr atomic_shared_ptr(std::nullptr_t) noexcept : value_(nullptr) {}
 
-  // Implicit by design — mirrors std::atomic<std::shared_ptr<T>> so the
-  // fallback is a true drop-in for the native alias.
-  // NOLINTNEXTLINE(google-explicit-constructor,hicpp-explicit-conversions)
-  atomic_shared_ptr(value_type desired) noexcept : value_(std::move(desired)) {}
+    // Implicit by design — mirrors std::atomic<std::shared_ptr<T>> so the
+    // fallback is a true drop-in for the native alias.
+    // NOLINTNEXTLINE(google-explicit-constructor,hicpp-explicit-conversions)
+    atomic_shared_ptr(value_type desired) noexcept : value_(std::move(desired)) {}
+    // cppcheck-suppress-end noExplicitConstructor
 
-  atomic_shared_ptr(const atomic_shared_ptr&) = delete;
-  atomic_shared_ptr& operator=(const atomic_shared_ptr&) = delete;
+    atomic_shared_ptr(const atomic_shared_ptr&) = delete;
+    atomic_shared_ptr& operator=(const atomic_shared_ptr&) = delete;
 
-  // void return + implicit conversion mirror std::atomic's operator= and
-  // operator T; required for drop-in parity (locked harness design).
-  // NOLINTNEXTLINE(misc-unconventional-assign-operator,cppcoreguidelines-c-copy-assignment-signature)
-  void operator=(value_type desired) noexcept {
-    store(std::move(desired), std::memory_order_seq_cst);
-  }
-
-  // NOLINTNEXTLINE(google-explicit-constructor,hicpp-explicit-conversions)
-  operator value_type() const noexcept { return load(std::memory_order_seq_cst); }
-
-  bool is_lock_free() const noexcept { return false; }
-
-  // wait/notify_one/notify_all are intentionally omitted in this v1 fallback.
-  // Mutex synchronization provides at least acquire/release semantics for all
-  // operations; stronger memory_order values are accepted for API compatibility.
-  void store(value_type desired,
-             std::memory_order = std::memory_order_seq_cst) noexcept {
-    // Hold the displaced pointee in a local and let it destruct AFTER the shard
-    // lock is released — matches std::atomic<std::shared_ptr> (which deletes the
-    // old value past the update) and avoids a re-entrant deadlock if the
-    // pointee's destructor touches a same-shard atomic_shared_ptr (the shard
-    // mutex is non-recursive). Gate B P1.
-    value_type previous;
-    {
-      detail::shard_guard guard(this);
-      previous = std::move(value_);
-      value_ = std::move(desired);
+    // void return + implicit conversion mirror std::atomic's operator= and
+    // operator T; required for drop-in parity (locked harness design).
+    // NOLINTNEXTLINE(misc-unconventional-assign-operator,cppcoreguidelines-c-copy-assignment-signature)
+    void operator=(value_type desired) noexcept {
+        store(std::move(desired), std::memory_order_seq_cst);
     }
-  }
 
-  value_type load(std::memory_order = std::memory_order_seq_cst) const noexcept {
-    detail::shard_guard guard(this);
-    return value_;
-  }
+    // NOLINTNEXTLINE(google-explicit-constructor,hicpp-explicit-conversions)
+    operator value_type() const noexcept { return load(std::memory_order_seq_cst); }
 
-  value_type exchange(
-      value_type desired,
-      std::memory_order = std::memory_order_seq_cst) noexcept {
-    detail::shard_guard guard(this);
-    value_.swap(desired);
-    return desired;
-  }
+    bool is_lock_free() const noexcept { return false; }
 
-  bool compare_exchange_weak(value_type& expected, value_type desired,
-                             std::memory_order success,
-                             std::memory_order failure) noexcept {
-    return compare_exchange_strong(expected, std::move(desired), success, failure);
-  }
-
-  bool compare_exchange_weak(
-      value_type& expected, value_type desired,
-      std::memory_order order = std::memory_order_seq_cst) noexcept {
-    return compare_exchange_weak(expected, std::move(desired), order,
-                                 failure_order(order));
-  }
-
-  bool compare_exchange_strong(value_type& expected, value_type desired,
-                               std::memory_order /*success*/,
-                               std::memory_order /*failure*/) noexcept {
-    // Same deferred-destruction discipline as store() (Gate B P1): the pointee
-    // displaced under the lock (the old value_ on success, or the old `expected`
-    // on failure) is moved into `displaced` and destructs only after the shard
-    // guard is released. The success path's `value_ = desired` and the failure
-    // path's `expected = value_` then run with no destructor under the lock.
-    value_type displaced;
-    bool matched = false;
-    {
-      detail::shard_guard guard(this);
-      if (equivalent(expected, value_)) {
-        displaced = std::move(value_);
-        value_ = std::move(desired);
-        matched = true;
-      } else {
-        displaced = std::move(expected);
-        expected = value_;
-        matched = false;
-      }
+    // wait/notify_one/notify_all are intentionally omitted in this v1 fallback.
+    // Mutex synchronization provides at least acquire/release semantics for all
+    // operations; stronger memory_order values are accepted for API compatibility.
+    void store(value_type desired, std::memory_order = std::memory_order_seq_cst) noexcept {
+        // Hold the displaced pointee in a local and let it destruct AFTER the shard
+        // lock is released — matches std::atomic<std::shared_ptr> (which deletes the
+        // old value past the update) and avoids a re-entrant deadlock if the
+        // pointee's destructor touches a same-shard atomic_shared_ptr (the shard
+        // mutex is non-recursive). Gate B P1.
+        value_type previous;
+        {
+            detail::shard_guard guard(this);
+            previous = std::move(value_);
+            value_ = std::move(desired);
+        }
     }
-    return matched;
-  }
 
-  bool compare_exchange_strong(
-      value_type& expected, value_type desired,
-      std::memory_order order = std::memory_order_seq_cst) noexcept {
-    return compare_exchange_strong(expected, std::move(desired), order,
-                                   failure_order(order));
-  }
-
- private:
-  static bool same_owner(const value_type& a, const value_type& b) noexcept {
-    return !a.owner_before(b) && !b.owner_before(a);
-  }
-
-  static bool equivalent(const value_type& lhs, const value_type& rhs) noexcept {
-    return lhs.get() == rhs.get() && same_owner(lhs, rhs);
-  }
-
-  static std::memory_order failure_order(std::memory_order order) noexcept {
-    switch (order) {
-      case std::memory_order_release:
-        return std::memory_order_relaxed;
-      case std::memory_order_acq_rel:
-        return std::memory_order_acquire;
-      default:
-        return order;
+    value_type load(std::memory_order = std::memory_order_seq_cst) const noexcept {
+        detail::shard_guard guard(this);
+        return value_;
     }
-  }
 
-  mutable value_type value_{};
+    value_type exchange(value_type desired,
+                        std::memory_order = std::memory_order_seq_cst) noexcept {
+        detail::shard_guard guard(this);
+        value_.swap(desired);
+        return desired;
+    }
+
+    bool compare_exchange_weak(value_type& expected, value_type desired, std::memory_order success,
+                               std::memory_order failure) noexcept {
+        return compare_exchange_strong(expected, std::move(desired), success, failure);
+    }
+
+    bool compare_exchange_weak(value_type& expected, value_type desired,
+                               std::memory_order order = std::memory_order_seq_cst) noexcept {
+        return compare_exchange_weak(expected, std::move(desired), order, failure_order(order));
+    }
+
+    bool compare_exchange_strong(value_type& expected, value_type desired,
+                                 std::memory_order /*success*/,
+                                 std::memory_order /*failure*/) noexcept {
+        // Same deferred-destruction discipline as store() (Gate B P1): the pointee
+        // displaced under the lock (the old value_ on success, or the old `expected`
+        // on failure) is moved into `displaced` and destructs only after the shard
+        // guard is released. The success path's `value_ = desired` and the failure
+        // path's `expected = value_` then run with no destructor under the lock.
+        value_type displaced;
+        bool matched = false;
+        {
+            detail::shard_guard guard(this);
+            if (equivalent(expected, value_)) {
+                displaced = std::move(value_);
+                value_ = std::move(desired);
+                matched = true;
+            } else {
+                displaced = std::move(expected);
+                expected = value_;
+                matched = false;
+            }
+        }
+        return matched;
+    }
+
+    bool compare_exchange_strong(value_type& expected, value_type desired,
+                                 std::memory_order order = std::memory_order_seq_cst) noexcept {
+        return compare_exchange_strong(expected, std::move(desired), order, failure_order(order));
+    }
+
+private:
+    static bool same_owner(const value_type& a, const value_type& b) noexcept {
+        return !a.owner_before(b) && !b.owner_before(a);
+    }
+
+    static bool equivalent(const value_type& lhs, const value_type& rhs) noexcept {
+        return lhs.get() == rhs.get() && same_owner(lhs, rhs);
+    }
+
+    static std::memory_order failure_order(std::memory_order order) noexcept {
+        switch (order) {
+            case std::memory_order_release:
+                return std::memory_order_relaxed;
+            case std::memory_order_acq_rel:
+                return std::memory_order_acquire;
+            default:
+                return order;
+        }
+    }
+
+    mutable value_type value_{};
 };
 
 #endif

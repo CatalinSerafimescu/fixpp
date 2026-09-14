@@ -77,7 +77,7 @@ using fixpp::transport::TlsTransport;
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-static std::string g_fixture_dir;
+std::string g_fixture_dir;
 
 // Build a file_cert_source from the given leaf/key files and the standard ca.pem.
 std::shared_ptr<fixpp::tls::cert_source> make_client_cs(std::string const& leaf_pem,
@@ -260,10 +260,10 @@ TEST(TlsValidationFailedTaxonomy, ExpiredCertEmitsEvent) {
 
     // Server needs a clock so verify_peer evaluates expiry.
     struct RealClock final : fixpp::core::Clock {
-        fixpp::core::utc_time_point now() const noexcept override {
+        [[nodiscard]] fixpp::core::utc_time_point now() const noexcept override {
             return std::chrono::system_clock::now();
         }
-        fixpp::core::steady_time_point steady_now() const noexcept override {
+        [[nodiscard]] fixpp::core::steady_time_point steady_now() const noexcept override {
             return std::chrono::steady_clock::now();
         }
         asio::awaitable<void> sleep_until(fixpp::core::steady_time_point) override { co_return; }

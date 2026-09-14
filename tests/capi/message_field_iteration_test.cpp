@@ -28,22 +28,22 @@
 #include <vector>
 
 // C-ABI under test
-#include "fix/c_api/message.h"
 #include "fix/c_api/error.h"
+#include "fix/c_api/message.h"
 
 // Engine-internal concrete fixpp_msg definition (test-only access)
 #include "capi_internal.hpp"
 
 // Wire surface
-#include <fixpp/wire/parser.hpp>
 #include <fixpp/dict/table_view.hpp>
+#include <fixpp/wire/parser.hpp>
 
 // Test support
 #include "support/alloc_guard_markers.hpp"
 #include "support/frame_view_factory.hpp"
 
-using fixpp::wire::MessageView;
 using fixpp::wire::access_mode;
+using fixpp::wire::MessageView;
 using fixpp::wire::Parser;
 
 namespace {
@@ -62,9 +62,7 @@ std::vector<std::byte> make_raw_frame(std::string const& body) {
 // Inbound-flavour: view != nullptr, accumulator == nullptr.
 struct InboundHandle {
     fixpp_msg msg{};
-    const fixpp_msg_t* ptr() const noexcept {
-        return reinterpret_cast<const fixpp_msg_t*>(&msg);
-    }
+    const fixpp_msg_t* ptr() const noexcept { return reinterpret_cast<const fixpp_msg_t*>(&msg); }
 };
 
 // Minimal dictionary: 453=NoPartyIDs, delimiter=448, member=447.
@@ -93,7 +91,9 @@ TEST(MessageFieldIteration, NullHandleReturnsNullHandle) {
 }
 
 TEST(MessageFieldIteration, NullOutputPointerReturnsNullHandle) {
-    auto buf = make_raw_frame("35=D\x01" "49=SENDER\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "49=SENDER\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;
@@ -138,7 +138,9 @@ TEST(MessageFieldIteration, MsgTagButNullViewReturnsInvalidHandle) {
 // that catches this; mutation-revert (DEAD-only) causes the test to go RED.
 TEST(MessageFieldIteration, TypeMismatchedHandleReturnsInvalidHandle) {
     // Build a real view so that view != nullptr (discriminates from view-null check).
-    auto buf = make_raw_frame("35=D\x01" "49=SENDER\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "49=SENDER\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;
@@ -146,7 +148,7 @@ TEST(MessageFieldIteration, TypeMismatchedHandleReturnsInvalidHandle) {
 
     fixpp_msg bad{};
     bad.tag_ = FIXPP_HANDLE_TAG_ENGINE;  // wrong type, non-DEAD
-    bad.view = &mv;                       // non-null: DEAD-only guard would sail past
+    bad.view = &mv;                      // non-null: DEAD-only guard would sail past
     const auto* p = reinterpret_cast<const fixpp_msg_t*>(&bad);
 
     size_t count = 0;
@@ -157,7 +159,9 @@ TEST(MessageFieldIteration, TypeMismatchedHandleReturnsInvalidHandle) {
 }
 
 TEST(MessageFieldIteration, IndexOutOfRange) {
-    auto buf = make_raw_frame("35=D\x01" "49=SENDER\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "49=SENDER\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;
@@ -184,7 +188,11 @@ TEST(MessageFieldIteration, IndexOutOfRange) {
 // A sorted implementation would return: [0]=8,[1]=9,[2]=10,[3]=34,[4]=35,[5]=49,[6]=56
 // so entries[2].tag==10 (not 35).  Asserting [2]==35 and [3]==49 discriminates.
 TEST(MessageFieldIteration, WireOrderDiscriminating) {
-    auto buf = make_raw_frame("35=D\x01" "49=SENDER\x01" "56=TARGET\x01" "34=42\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "49=SENDER\x01"
+        "56=TARGET\x01"
+        "34=42\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;
@@ -197,12 +205,14 @@ TEST(MessageFieldIteration, WireOrderDiscriminating) {
     ASSERT_EQ(fixpp_msg_field_count(h.ptr(), &count), FIXPP_ERR_OK);
     ASSERT_EQ(count, 7U) << "8,9,35,49,56,34,10 → 7 entries";
 
-    fixpp_msg_field_t f0{}, f2{}, f3{};
+    fixpp_msg_field_t f0{};
+    fixpp_msg_field_t f2{};
+    fixpp_msg_field_t f3{};
     ASSERT_EQ(fixpp_msg_field_at(h.ptr(), 0, &f0), FIXPP_ERR_OK);
     ASSERT_EQ(fixpp_msg_field_at(h.ptr(), 2, &f2), FIXPP_ERR_OK);
     ASSERT_EQ(fixpp_msg_field_at(h.ptr(), 3, &f3), FIXPP_ERR_OK);
 
-    EXPECT_EQ(f0.tag, 8U)  << "index 0 must be tag 8 (BeginString)";
+    EXPECT_EQ(f0.tag, 8U) << "index 0 must be tag 8 (BeginString)";
     EXPECT_EQ(f2.tag, 35U) << "index 2 must be tag 35 (MsgType) — sorted impl returns 10";
     EXPECT_EQ(f3.tag, 49U) << "index 3 must be tag 49 (SenderCompID) — sorted impl returns 34";
 }
@@ -213,7 +223,10 @@ TEST(MessageFieldIteration, WireOrderDiscriminating) {
 // If offset pointed to the tag= prefix, the string "49=MYSENDER" would be
 // returned instead of "MYSENDER" — this test catches the off-by-one.
 TEST(MessageFieldIteration, ValueMatchesGetString) {
-    auto buf = make_raw_frame("35=D\x01" "49=MYSENDER\x01" "56=MYTARGET\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "49=MYSENDER\x01"
+        "56=MYTARGET\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;
@@ -255,7 +268,10 @@ TEST(MessageFieldIteration, ValueMatchesGetString) {
 
 // ── Value aliasing: field.value must lie within the wire buffer ────────────────
 TEST(MessageFieldIteration, ValueAliasesWireBuffer) {
-    auto buf = make_raw_frame("35=D\x01" "49=SENDER\x01" "56=TARGET\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "49=SENDER\x01"
+        "56=TARGET\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;
@@ -268,13 +284,13 @@ TEST(MessageFieldIteration, ValueAliasesWireBuffer) {
     ASSERT_EQ(fixpp_msg_field_count(h.ptr(), &count), FIXPP_ERR_OK);
 
     const auto* buf_start = reinterpret_cast<const uint8_t*>(buf.data());
-    const auto* buf_end   = buf_start + buf.size();
+    const auto* buf_end = buf_start + buf.size();
     for (size_t i = 0; i < count; ++i) {
         fixpp_msg_field_t f{};
         ASSERT_EQ(fixpp_msg_field_at(h.ptr(), i, &f), FIXPP_ERR_OK);
         ASSERT_NE(f.value, nullptr) << "field " << i << " value must not be null";
         EXPECT_GE(f.value, buf_start) << "field " << i << " must alias wire buffer";
-        EXPECT_LT(f.value, buf_end)   << "field " << i << " must alias wire buffer";
+        EXPECT_LT(f.value, buf_end) << "field " << i << " must alias wire buffer";
     }
 }
 
@@ -288,11 +304,14 @@ TEST(MessageFieldIteration, ValueAliasesWireBuffer) {
 TEST(MessageFieldIteration, SupersetOnRepeatingGroup) {
     auto dict = make_group_dict();
     auto buf = make_raw_frame(
-        "35=D\x01" "49=SENDER\x01"
-        "453=2\x01" "448=PA\x01" "447=D\x01"
-                    "448=PB\x01" "447=E\x01"
-        "34=42\x01"
-    );
+        "35=D\x01"
+        "49=SENDER\x01"
+        "453=2\x01"
+        "448=PA\x01"
+        "447=D\x01"
+        "448=PB\x01"
+        "447=E\x01"
+        "34=42\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;
@@ -311,19 +330,22 @@ TEST(MessageFieldIteration, SupersetOnRepeatingGroup) {
 
     // Collect tag-448 occurrences.
     int tag448_count = 0;
-    std::string first448_val, second448_val;
+    std::string first448_val;
+    std::string second448_val;
     for (size_t i = 0; i < count; ++i) {
         fixpp_msg_field_t f{};
         ASSERT_EQ(fixpp_msg_field_at(h.ptr(), i, &f), FIXPP_ERR_OK);
         if (f.tag == 448) {
             ++tag448_count;
             std::string val(reinterpret_cast<const char*>(f.value), f.len);
-            if (tag448_count == 1) first448_val = val;
-            else if (tag448_count == 2) second448_val = val;
+            if (tag448_count == 1)
+                first448_val = val;
+            else if (tag448_count == 2)
+                second448_val = val;
         }
     }
     EXPECT_EQ(tag448_count, 2) << "tag 448 must appear twice (superset)";
-    EXPECT_EQ(first448_val, "PA")  << "first 448 entry must be PA (wire order)";
+    EXPECT_EQ(first448_val, "PA") << "first 448 entry must be PA (wire order)";
     EXPECT_EQ(second448_val, "PB") << "second 448 entry must be PB (wire order)";
 
     // FR-007: scalar getter is a strict subset — only returns the first occurrence.
@@ -340,7 +362,11 @@ TEST(MessageFieldIteration, SupersetOnRepeatingGroup) {
 // (capi_message_field_iteration_mallocnesia).  The in-process marker test here is a
 // complementary discriminator for runs without the preload.
 TEST(MessageFieldIteration, ZeroGlobalHeapAllocGuard) {
-    auto buf = make_raw_frame("35=D\x01" "49=SENDER\x01" "56=TARGET\x01" "34=42\x01");
+    auto buf = make_raw_frame(
+        "35=D\x01"
+        "49=SENDER\x01"
+        "56=TARGET\x01"
+        "34=42\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
     std::pmr::monotonic_buffer_resource arena;
@@ -392,7 +418,10 @@ TEST(MessageFieldIteration, CloneFieldIterationCrossThread) {
     // ── Nested scope: holds the source objects.  Clone is created here, then the
     //    scope exits, destroying buf / arena / mv / h — all source backing.
     {
-        auto buf = make_raw_frame("35=D\x01" "49=SENDER\x01" "56=TARGET\x01");
+        auto buf = make_raw_frame(
+            "35=D\x01"
+            "49=SENDER\x01"
+            "56=TARGET\x01");
         auto fv = fixpp::wire::test::make_frame_view(buf);
         ASSERT_TRUE(fv.has_value());
         std::pmr::monotonic_buffer_resource arena;
@@ -428,8 +457,8 @@ TEST(MessageFieldIteration, CloneFieldIterationCrossThread) {
 
     // Frame: 8=FIX.4.4, 9=..., 35=D, 49=SENDER, 56=TARGET, 10=000 → 6 entries.
     EXPECT_EQ(thread_count, 6U);
-    EXPECT_EQ(thread_tag0, 8U);               // BeginString is first in wire order
-    EXPECT_EQ(thread_tag0_val, "FIX.4.4");    // value of tag 8
+    EXPECT_EQ(thread_tag0, 8U);             // BeginString is first in wire order
+    EXPECT_EQ(thread_tag0_val, "FIX.4.4");  // value of tag 8
 
     fixpp_msg_destroy(clone);
 }

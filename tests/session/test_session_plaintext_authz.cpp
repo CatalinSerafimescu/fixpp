@@ -27,7 +27,8 @@
 //     (sentinel CN="SENTINEL-MUST-NOT-STICK") on an insecure_plain_tcp session →
 //     live_peer_id_has_value_for_test() == false. The D-10 #3 guard must suppress
 //     assignment. Single-mutation discriminating: drop the guard → sentinel sticks
-//     → live_peer_id_has_value_for_test()==true → FAIL (RED). [D-10; attach_accepted_transport's guard]
+//     → live_peer_id_has_value_for_test()==true → FAIL (RED). [D-10; attach_accepted_transport's
+//     guard]
 //
 //   Cell 2b (TLS positive control: sentinel DOES stick on one_way_ca):
 //     Same sentinel on a one_way_ca session → live_peer_id_has_value_for_test()==true.
@@ -59,13 +60,13 @@
 // live_peer_id_has_value_for_test() in session.hpp.
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/redirect_error.hpp>
 #include <asio/steady_timer.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <fixpp/core/engine_config.hpp>
@@ -91,8 +92,10 @@
 // every unsuppressed selection site (T019/T020). This test file legitimately
 // selects the value at multiple points (it IS the plaintext-authz test suite),
 // so suppress file-wide per the fixpp-internal-code pragma idiom. [043 T020]
+#if defined(__clang__) || defined(__GNUC__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
 #include <fixpp/session/security_profile.hpp>
 
 #include "support/pump_until_ready.hpp"
@@ -103,19 +106,17 @@ namespace {
 
 // Current wall-clock UTC as a FIX UTCTimestamp "YYYYMMDD-HH:MM:SS.mmm".
 // Required by the 038 acceptor first-Logon SendingTime(52) MaxLatency guard.
-static std::string utc_now_fix_timestamp() {
+std::string utc_now_fix_timestamp() {
     std::array<char, 32> buf{};
     auto r = fixpp::core::utc_time_to_fix_string(std::chrono::system_clock::now(),
-                                                  fixpp::core::fix_time_precision::millis,
-                                                  std::span<char>{buf});
+                                                 fixpp::core::fix_time_precision::millis,
+                                                 std::span<char>{buf});
     return r ? std::string{r->data(), r->size()} : std::string{};
 }
 
 // Build a FIX Logon frame as bytes.
-static std::vector<std::byte> make_logon_bytes(std::string_view begin_str,
-                                                std::string_view sender,
-                                                std::string_view target,
-                                                int seq = 1) {
+std::vector<std::byte> make_logon_bytes(std::string_view begin_str, std::string_view sender,
+                                        std::string_view target, int seq = 1) {
     auto field = [](int tag, std::string_view v) -> std::string {
         return std::to_string(tag) + "=" + std::string(v) + "\x01";
     };
@@ -125,7 +126,7 @@ static std::vector<std::byte> make_logon_bytes(std::string_view begin_str,
     body += field(49, sender);
     body += field(52, utc_now_fix_timestamp());
     body += field(56, target);
-    body += field(98, "0");   // EncryptMethod=0 (None — per FR-009)
+    body += field(98, "0");  // EncryptMethod=0 (None — per FR-009)
     body += field(108, "30");
 
     std::string msg;
@@ -134,7 +135,7 @@ static std::vector<std::byte> make_logon_bytes(std::string_view begin_str,
     msg += body;
     unsigned int cs = 0;
     for (unsigned char c : msg) cs += c;
-    cs &= 0xFFu;
+    cs &= 0xFFU;
     char csbuf[5];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     msg += "10=" + std::string(csbuf) + "\x01";
@@ -188,9 +189,8 @@ private:
 };
 
 // ── Build a base acceptor SessionConfig ──────────────────────────────────────
-static fixpp::session::SessionConfig make_acceptor_cfg(
-    asio::any_io_executor exec,
-    fixpp::session::SecurityProfile::kind profile_kind,
+fixpp::session::SessionConfig make_acceptor_cfg(
+    asio::any_io_executor exec, fixpp::session::SecurityProfile::kind profile_kind,
     fixpp::session::CompIdAuthorizationPolicy authz = {}) {
     fixpp::session::SessionConfig cfg;
     cfg.sender_comp_id = "ACCEPTOR";
@@ -212,7 +212,7 @@ static fixpp::session::SessionConfig make_acceptor_cfg(
 // The sentinel CN="SENTINEL-MUST-NOT-STICK" is distinct from the empty default;
 // if the D-10 guard is absent, the sentinel sticks in live_peer_id_ → assertion FAILS.
 // [advisor: sentinel must be non-empty to discriminate — empty hr{} self-heals]
-static fixpp::transport::handshake_result make_sentinel_hr() {
+fixpp::transport::handshake_result make_sentinel_hr() {
     fixpp::transport::handshake_result hr{};
     hr.peer_id.subject_dn = "CN=SENTINEL-MUST-NOT-STICK";
     return hr;
@@ -220,11 +220,10 @@ static fixpp::transport::handshake_result make_sentinel_hr() {
 
 // Helper: does recent_events() contain any event of type T?
 template <typename T>
-static bool has_event(const fixpp::session::Session& sess) {
+bool has_event(const fixpp::session::Session& sess) {
     auto events = sess.recent_events();
-    return std::ranges::any_of(events, [](const auto& ev) {
-        return std::holds_alternative<T>(ev);
-    });
+    return std::ranges::any_of(events,
+                               [](const auto& ev) { return std::holds_alternative<T>(ev); });
 }
 
 }  // namespace
@@ -260,8 +259,7 @@ TEST(PlaintextAuthzTest, AuthorizeNotCalledOnPlaintext) {
     authz.add_binding("SENTINEL-MUST-NOT-STICK", "INITIATOR");
 
     auto cfg = make_acceptor_cfg(ioc.get_executor(),
-                                  fixpp::session::SecurityProfile::kind::insecure_plain_tcp,
-                                  authz);
+                                 fixpp::session::SecurityProfile::kind::insecure_plain_tcp, authz);
 
     fixpp::session::Session sess{eng, cfg};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
@@ -293,14 +291,12 @@ TEST(PlaintextAuthzTest, AuthorizeNotCalledOnPlaintext) {
     // SC-004 / D-10: authorize() must NOT have been called. No peer_identity_bound
     // AND no compid_authorization_failed in recent_events() — both are exclusively
     // emitted through the authorize() code path (on_inbound_frame).
-    EXPECT_FALSE(
-        has_event<fixpp::session::session_event_peer_identity_bound>(sess))
+    EXPECT_FALSE(has_event<fixpp::session::session_event_peer_identity_bound>(sess))
         << "Cell 1 (SC-004): no session_event_peer_identity_bound expected on "
            "insecure_plain_tcp — this event is emitted only on authorize() success. "
            "Composite mutation: remove D-10 guard (cell 2a catches this) AND remove "
            "the is_mtls check (cell 1b positive control catches this independently).";
-    EXPECT_FALSE(
-        has_event<fixpp::session::session_event_compid_authorization_failed>(sess))
+    EXPECT_FALSE(has_event<fixpp::session::session_event_compid_authorization_failed>(sess))
         << "Cell 1 (SC-004): no session_event_compid_authorization_failed expected on "
            "insecure_plain_tcp — this event is emitted only on authorize() invocation "
            "(failure path or fail-closed mTLS+no-peer-id arm).";
@@ -335,9 +331,8 @@ TEST(PlaintextAuthzTest, AuthorizeCalledOnMtlsPositiveControl) {
     fixpp::session::CompIdAuthorizationPolicy authz;
     authz.add_binding("SENTINEL-MUST-NOT-STICK", "INITIATOR");
 
-    auto cfg = make_acceptor_cfg(ioc.get_executor(),
-                                  fixpp::session::SecurityProfile::kind::mtls_ca,
-                                  authz);
+    auto cfg = make_acceptor_cfg(ioc.get_executor(), fixpp::session::SecurityProfile::kind::mtls_ca,
+                                 authz);
 
     fixpp::session::Session sess{eng, cfg};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
@@ -367,8 +362,7 @@ TEST(PlaintextAuthzTest, AuthorizeCalledOnMtlsPositiveControl) {
     }
 
     // Positive control: peer_identity_bound must be present (authorize() succeeded).
-    EXPECT_TRUE(
-        has_event<fixpp::session::session_event_peer_identity_bound>(sess))
+    EXPECT_TRUE(has_event<fixpp::session::session_event_peer_identity_bound>(sess))
         << "Cell 1b (positive control): on mtls_ca with a live peer_id matching the policy, "
            "session_event_peer_identity_bound must be emitted after Logon. "
            "This validates that the event-based observable used in Cell 1 is meaningful.";
@@ -401,7 +395,7 @@ TEST(PlaintextAuthzTest, LivePeerIdNulloptOnAcceptedHandoff) {
     eng.clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
 
     auto cfg = make_acceptor_cfg(ioc.get_executor(),
-                                  fixpp::session::SecurityProfile::kind::insecure_plain_tcp);
+                                 fixpp::session::SecurityProfile::kind::insecure_plain_tcp);
 
     fixpp::session::Session sess{eng, cfg};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
@@ -452,8 +446,8 @@ TEST(PlaintextAuthzTest, LivePeerIdSetOnTlsPositiveControl) {
     eng.executor = ioc.get_executor();
     eng.clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
 
-    auto cfg = make_acceptor_cfg(ioc.get_executor(),
-                                  fixpp::session::SecurityProfile::kind::one_way_ca);
+    auto cfg =
+        make_acceptor_cfg(ioc.get_executor(), fixpp::session::SecurityProfile::kind::one_way_ca);
 
     fixpp::session::Session sess{eng, cfg};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
@@ -500,7 +494,7 @@ TEST(PlaintextAuthzTest, CheckCompIdRejectsMismatchOnPlaintext) {
 
     // cfg_.target_comp_id = "INITIATOR" — peer must send SenderCompID(49)="INITIATOR"
     auto cfg = make_acceptor_cfg(ioc.get_executor(),
-                                  fixpp::session::SecurityProfile::kind::insecure_plain_tcp);
+                                 fixpp::session::SecurityProfile::kind::insecure_plain_tcp);
 
     fixpp::session::Session sess{eng, cfg};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
@@ -546,4 +540,6 @@ TEST(PlaintextAuthzTest, CheckCompIdRejectsMismatchOnPlaintext) {
         (void)close_fut.get();
     }
 }
+#if defined(__clang__) || defined(__GNUC__)
 #pragma clang diagnostic pop  // -Wdeprecated-declarations (insecure_plain_tcp, 043 T020)
+#endif

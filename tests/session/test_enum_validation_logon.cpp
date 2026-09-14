@@ -73,10 +73,10 @@ namespace {
 // ── Frame builder ────────────────────────────────────────────────────────────
 
 // Build a Logon(35=A) frame on FIX.4.4 with a caller-chosen EncryptMethod(98).
-static std::vector<std::byte> make_fix44_logon_frame(std::uint32_t msg_seq_num,
-                                                      std::string_view sender_comp_id,
-                                                      std::string_view target_comp_id,
-                                                      int heartbt_int, int encrypt_method) {
+std::vector<std::byte> make_fix44_logon_frame(std::uint32_t msg_seq_num,
+                                              std::string_view sender_comp_id,
+                                              std::string_view target_comp_id, int heartbt_int,
+                                              int encrypt_method) {
     std::string body;
     body += "35=A\x01";
     body += "34=" + std::to_string(msg_seq_num) + "\x01";
@@ -110,7 +110,7 @@ static std::vector<std::byte> make_fix44_logon_frame(std::uint32_t msg_seq_num,
 
 // ── Wire-scraping helpers (mirrors test_validate_gate_inbound.cpp) ──────────
 
-static std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag_wanted) {
+std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag_wanted) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = std::to_string(tag_wanted) + "=";
     auto pos = wire.find(needle);
@@ -191,7 +191,7 @@ protected:
         return fut.get();
     }
 
-    bool has_reject_with_reason(int reason) const {
+    [[nodiscard]] bool has_reject_with_reason(int reason) const {
         for (auto const& frame : transport.sent_frames()) {
             if (extract_field(frame, 35) == "3") {
                 auto r373 = extract_field(frame, 373);
@@ -206,7 +206,7 @@ protected:
     // Returns the RefTagID(371) of the first Reject(35=3) frame with the given
     // SessionRejectReason(373), or -1 when absent (no matching reject, or 371
     // omitted). Mirrors test_validate_gate_inbound.cpp's reject_ref_tag_id().
-    int reject_ref_tag_id(int reason) const {
+    [[nodiscard]] int reject_ref_tag_id(int reason) const {
         for (auto const& frame : transport.sent_frames()) {
             if (extract_field(frame, 35) == "3") {
                 auto r373 = extract_field(frame, 373);

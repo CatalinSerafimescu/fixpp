@@ -40,21 +40,18 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/table_view.hpp>
+#include <fixpp/wire/parser.hpp>
 #include <memory_resource>
 #include <new>
 #include <optional>
 #include <span>
 #include <vector>
 
-#include "fix/c_api/message.h"
-#include "fix/c_api/error.h"
-
 #include "capi_internal.hpp"  // engine-internal fixpp_msg (test-only access)
-
-#include <fixpp/dict/dictionary.hpp>
-#include <fixpp/dict/table_view.hpp>
-#include <fixpp/wire/parser.hpp>
-
+#include "fix/c_api/error.h"
+#include "fix/c_api/message.h"
 #include "support/fix44_dictionary.hpp"
 #include "support/fix44_group_frame_bodies.hpp"
 
@@ -170,9 +167,9 @@ TEST(CloneMembershipCopyOom, TableViewCopyOomYieldsCapiConfigInvalid) {
     fixpp::wire::pmr_carry_buffer carry_free{frame_bytes.size(), &parse_arena_free};
     fixpp::wire::Framer framer_free{};
     fixpp::wire::frame_view fvs_free[1]{};
-    auto framed_free = framer_free.feed(
-        std::span<const std::byte>{frame_bytes.data(), frame_bytes.size()}, carry_free,
-        std::span<fixpp::wire::frame_view>{fvs_free, 1});
+    auto framed_free =
+        framer_free.feed(std::span<const std::byte>{frame_bytes.data(), frame_bytes.size()},
+                         carry_free, std::span<fixpp::wire::frame_view>{fvs_free, 1});
     ASSERT_TRUE(framed_free.has_value());
     ASSERT_FALSE(framed_free->empty());
     fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser_free{};
@@ -196,9 +193,9 @@ TEST(CloneMembershipCopyOom, TableViewCopyOomYieldsCapiConfigInvalid) {
     fixpp::wire::pmr_carry_buffer carry_dict{frame_bytes.size(), &parse_arena_dict};
     fixpp::wire::Framer framer_dict{};
     fixpp::wire::frame_view fvs_dict[1]{};
-    auto framed_dict = framer_dict.feed(
-        std::span<const std::byte>{frame_bytes.data(), frame_bytes.size()}, carry_dict,
-        std::span<fixpp::wire::frame_view>{fvs_dict, 1});
+    auto framed_dict =
+        framer_dict.feed(std::span<const std::byte>{frame_bytes.data(), frame_bytes.size()},
+                         carry_dict, std::span<fixpp::wire::frame_view>{fvs_dict, 1});
     ASSERT_TRUE(framed_dict.has_value());
     ASSERT_FALSE(framed_dict->empty());
     fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser_dict{tv};

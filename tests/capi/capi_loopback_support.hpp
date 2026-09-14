@@ -32,11 +32,9 @@
 #include <thread>
 #include <vector>
 
+#include "capi_internal.hpp"  // fixpp_session_config, fixpp_dict, fixpp_engine internals
 #include "fix/c_api/engine.h"
 #include "fix/c_api/session.h"
-
-#include "capi_internal.hpp"  // fixpp_session_config, fixpp_dict, fixpp_engine internals
-
 #include "fixpp/session/session_config.hpp"  // SessionId::from_config
 #include "fixpp/transport/endpoint.hpp"
 #include "support/minimal_dictionary.hpp"
@@ -53,9 +51,7 @@ inline fixpp_dict_t* make_test_dict_handle() {
     return reinterpret_cast<fixpp_dict_t*>(d);
 }
 
-inline void destroy_test_dict_handle(fixpp_dict_t* h) {
-    delete reinterpret_cast<fixpp_dict*>(h);
-}
+inline void destroy_test_dict_handle(fixpp_dict_t* h) { delete reinterpret_cast<fixpp_dict*>(h); }
 
 // L-050-5: set the session config's reconnect_endpoint (the engine repurposes it
 // as the acceptor bind endpoint / the initiator peer endpoint) + the initial
@@ -110,9 +106,9 @@ inline std::uint16_t wait_for_bound_port(
 // Poll fixpp_session_is_established(session) until true or the deadline elapses.
 // Returns true if it became established. The owning engine's worker drives the
 // handshake; this is a passive poll on the caller thread.
-inline bool wait_for_established(
-    fixpp_session_t* session,
-    std::chrono::milliseconds deadline = std::chrono::milliseconds{4000}) {
+inline bool wait_for_established(fixpp_session_t* session,
+                                 std::chrono::milliseconds deadline = std::chrono::milliseconds{
+                                     4000}) {
     return fixpp::test_support::wait_until_observed(
         [&] {
             bool est = false;
@@ -163,9 +159,9 @@ inline fixpp_session_config_t* make_session_cfg(const char* sender, const char* 
     EXPECT_EQ(fixpp_session_config_set_begin_string(sc, "FIX.4.2"), FIXPP_ERR_OK);
     EXPECT_EQ(fixpp_session_config_set_role(sc, role), FIXPP_ERR_OK);
     EXPECT_EQ(fixpp_session_config_set_heartbeat_seconds(sc, 30), FIXPP_ERR_OK);
-    EXPECT_EQ(fixpp_session_config_set_security(sc, FIXPP_SECURITY_INSECURE_PLAIN_TCP, nullptr,
-                                                nullptr),
-              FIXPP_ERR_OK);
+    EXPECT_EQ(
+        fixpp_session_config_set_security(sc, FIXPP_SECURITY_INSECURE_PLAIN_TCP, nullptr, nullptr),
+        FIXPP_ERR_OK);
     // Initiator resets to seq 1 on logon so a fresh pair logs on cleanly.
     EXPECT_EQ(fixpp_session_config_set_reset_on_logon(sc, role == FIXPP_ROLE_INITIATOR),
               FIXPP_ERR_OK);

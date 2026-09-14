@@ -3,20 +3,17 @@
 //
 // fixpp#215 item 1, Option C (`.specify/215-dictionary-view.md` §3).
 
-#include <fixpp/dict/dictionary_snapshot.hpp>
-
 #include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/dictionary_snapshot.hpp>
 #include <utility>
 
 namespace fixpp::dict {
 
-dictionary_snapshot::dictionary_snapshot(detail::snapshot_key, std::shared_ptr<const Dictionary> src,
-                                          table_view tv)
+dictionary_snapshot::dictionary_snapshot(detail::snapshot_key,
+                                         std::shared_ptr<const Dictionary> src, table_view tv)
     : source_(std::move(src)), view_(std::move(tv)) {}
 
-table_view const& dictionary_snapshot::view() const noexcept {
-    return view_;
-}
+table_view const& dictionary_snapshot::view() const noexcept { return view_; }
 
 std::shared_ptr<const Dictionary> const& dictionary_snapshot::source() const noexcept {
     return source_;
@@ -29,7 +26,7 @@ std::shared_ptr<const dictionary_snapshot> make_dictionary_snapshot(
     if (!dict) {
         return nullptr;  // null dict -> null return
     }
-    auto tv = dict->as_table_view();  // SEQUENCED: walk first, ...
+    auto tv = dict->as_table_view();                     // SEQUENCED: walk first, ...
     return std::make_shared<const dictionary_snapshot>(  // ... then hand over ownership
         detail::snapshot_key{}, std::move(dict), std::move(tv));
 }
@@ -43,6 +40,9 @@ std::shared_ptr<const table_view> shared_dictionary_view(
         return nullptr;
     }
     table_view const* p = &snap->view();
+    // Spelled out on purpose: tools/check_dictionary_snapshot_exclusivity.sh (G2)
+    // counts this exact constructor spelling; a braced return hides the site.
+    // NOLINTNEXTLINE(modernize-return-braced-init-list)
     return std::shared_ptr<const table_view>(std::move(snap), p);  // aliasing ctor
 }
 

@@ -696,8 +696,8 @@ void LoaderState::expand_field_list(
                 delim_cap->path.pop_back();
                 if (captured != 0) {
                     delim_cap->out.push_back(detail::CapturedDelim{
-                        detail::make_group_ctx_delim(delim_cap->path, no_tag, captured),
-                        delim_cap->path});
+                        .rec = detail::make_group_ctx_delim(delim_cap->path, no_tag, captured),
+                        .full_path = delim_cap->path});
                 }
                 // 083 T036 (FR-006 / C-6.1): `captured == 0` means this
                 // <group> emitted no first member at all, so its delimiter is
@@ -1041,8 +1041,8 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
     // anywhere later in finalize().
     //
     // "First-seen" is the pool's own order, which is `messages_` order — sorted
-    // bytewise by msg_type (the research.md D-6 std::sort above) — so the projection is deterministic across
-    // runs and platforms. Which message wins no longer matters for CORRECTNESS
+    // bytewise by msg_type (the research.md D-6 std::sort above) — so the projection is
+    // deterministic across runs and platforms. Which message wins no longer matters for CORRECTNESS
     // (per-context resolution reads Entity 2 directly); the global survives
     // only as an is-this-tag-a-group predicate and as this guard's input.
     for (auto const& rec : h.group_ctx_delim_pool_) {
@@ -1077,9 +1077,9 @@ detail::dict_metadata_handle_ptr LoaderState::finalize() {
     // `as_table_view()` (`group_first_field(t) != 0`) rather than
     // `fr.type == NumInGroup` — this loader-side `groups_` table IS final at
     // this point (the first-seen projection above just completed), unlike the
-    // handle-side `h.groups_`, which is not filled until its own reserve/push_back loop further down. See the
-    // doc comment on `find_context_without_delim_record`
-    // (dictionary_internal.hpp) for the exact set definition.
+    // handle-side `h.groups_`, which is not filled until its own reserve/push_back loop further
+    // down. See the doc comment on `find_context_without_delim_record` (dictionary_internal.hpp)
+    // for the exact set definition.
     std::vector<std::uint16_t> structural_group_tags;
     structural_group_tags.reserve(group_index_by_no_tag_.size());
     for (auto const& [tag, idx] : group_index_by_no_tag_) {

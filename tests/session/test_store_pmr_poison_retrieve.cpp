@@ -61,7 +61,7 @@ protected:
 
     void do_deallocate(void*, std::size_t, std::size_t) noexcept override {}
 
-    bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override {
+    [[nodiscard]] bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override {
         return this == &other;
     }
 };
@@ -90,7 +90,7 @@ public:
         // co_return, so the throw propagates up through the coroutine machinery.
         // T043 wraps the visitor call in try/catch(...) at retrieve()'s level.
         try {
-            mr_->allocate(1024, 8);  // throws
+            (void)mr_->allocate(1024, 8);  // throws
         } catch (std::bad_alloc const&) {
             // Re-throw to let retrieve()'s T043 catch block handle it.
             // This simulates the visitor code throwing on PMR failure.
@@ -153,7 +153,7 @@ public:
         if (call_count_ >= 2) {
             // Second call: trigger PMR poison
             try {
-                mr_->allocate(1024, 8);
+                (void)mr_->allocate(1024, 8);
             } catch (std::bad_alloc const&) {
                 throw;
             }
@@ -161,7 +161,7 @@ public:
         co_return fixpp::core::expected_t<visit_result>{visit_result::cont};
     }
 
-    int call_count() const noexcept { return call_count_; }
+    [[nodiscard]] int call_count() const noexcept { return call_count_; }
 
 private:
     std::pmr::memory_resource* mr_;
@@ -178,8 +178,10 @@ TEST(StorePmrPoisonRetrieve, PmrPoisonOnSecondFrameReturnsStoreVisitorAborted) {
             // Store 3 frames
             for (int i = 1; i <= 3; ++i) {
                 auto frame = make_test_frame(static_cast<seqnum_t>(i), direction_t::inbound);
-                co_await store.store(static_cast<seqnum_t>(i), std::span<const std::byte>(frame),
-                                     direction_t::inbound);
+                auto st_r =
+                    co_await store.store(static_cast<seqnum_t>(i),
+                                         std::span<const std::byte>(frame), direction_t::inbound);
+                EXPECT_TRUE(st_r.has_value()) << "setup store must succeed";
             }
 
             poison_memory_resource poison;

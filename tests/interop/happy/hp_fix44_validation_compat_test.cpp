@@ -73,18 +73,17 @@
 
 #include <atomic>
 #include <chrono>
-#include <memory>
-#include <string>
-#include <tuple>
-
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/session/application.hpp>
 #include <fixpp/session/engine.hpp>
+#include <fixpp/session/seqnum.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
-#include <fixpp/session/seqnum.hpp>
 #include <fixpp/wire/parser.hpp>
+#include <memory>
+#include <string>
+#include <tuple>
 
 #include "hp_support.hpp"
 
@@ -127,8 +126,7 @@ public:
 
 // ── Local param-name formatter ───────────────────────────────────────────────
 std::string validation_compat_name(
-    const ::testing::TestParamInfo<std::tuple<Counterparty, Role>>& info)
-{
+    const ::testing::TestParamInfo<std::tuple<Counterparty, Role>>& info) {
     const auto [cp, role] = info.param;
     std::string n = (cp == Counterparty::quickfix_cpp) ? "QFcpp" : "QFj";
     n += (role == Role::fixpp_initiator) ? "_init" : "_acc";
@@ -156,8 +154,7 @@ std::string validation_compat_name(
 
 class ValidationCompat_CompID : public ::testing::TestWithParam<std::tuple<Counterparty, Role>> {};
 
-TEST_P(ValidationCompat_CompID, AcceptsWithKnobOff)
-{
+TEST_P(ValidationCompat_CompID, AcceptsWithKnobOff) {
     const auto [counterparty, role] = GetParam();
     namespace hp = fixpp::interop::hp;
 
@@ -184,8 +181,8 @@ TEST_P(ValidationCompat_CompID, AcceptsWithKnobOff)
     ecfg.application = tracking_app;
 
     fixpp::interop::InteropEngineFixture fx{std::move(ecfg)};
-    auto cfg = hp::make_session_config(role, "FIX.4.4", factory, fx.ioc().get_executor(),
-                                       *endpoint);
+    auto cfg =
+        hp::make_session_config(role, "FIX.4.4", factory, fx.ioc().get_executor(), *endpoint);
 
     // ── B1 knob under test: check_comp_id=false ───────────────────────────────
     // With the knob off, fixpp does NOT disconnect on a steady-state CompID mismatch
@@ -205,8 +202,8 @@ TEST_P(ValidationCompat_CompID, AcceptsWithKnobOff)
     const auto reached = hp::drive_to_active(fx, id, 5s);
     EXPECT_EQ(reached, fsm_state::Active)
         << "ValidationCompat_CompID: session did not reach Active against "
-        << hp::counterparty_token(counterparty)
-        << " (" << (role == Role::fixpp_initiator ? "initiator" : "acceptor") << ")"
+        << hp::counterparty_token(counterparty) << " ("
+        << (role == Role::fixpp_initiator ? "initiator" : "acceptor") << ")"
         << "; check_comp_id=false must not break establishment";
     if (reached != fsm_state::Active) {
         hp::expect_graceful_stop(fx);
@@ -247,9 +244,8 @@ TEST_P(ValidationCompat_CompID, AcceptsWithKnobOff)
     //     window; with the short 10 s window and a business-message-sending harness
     //     this will also cover fromApp. If zero frames arrive the cell is
     //     mis-configured (harness not sending) — the assertion makes this visible.
-    const int total_inbound_compid =
-        tracking_app->from_app_calls.load(std::memory_order_acquire) +
-        tracking_app->from_admin_calls.load(std::memory_order_acquire);
+    const int total_inbound_compid = tracking_app->from_app_calls.load(std::memory_order_acquire) +
+                                     tracking_app->from_admin_calls.load(std::memory_order_acquire);
     EXPECT_GE(total_inbound_compid, 1)
         << "ValidationCompat_CompID B1(b): live counterparty present but no fromApp"
            "/fromAdmin delivery observed after 10 s; check_comp_id=false must accept"
@@ -268,17 +264,15 @@ TEST_P(ValidationCompat_CompID, AcceptsWithKnobOff)
 
     // ── Graceful stop within watchdog ──────────────────────────────────────────
     const auto elapsed = fx.stop_within(kStopWatchdog);
-    EXPECT_LT(elapsed, kStopWatchdog)
-        << "Engine::stop() took " << elapsed.count() << " ms (watchdog "
-        << kStopWatchdog.count() << " ms)";
+    EXPECT_LT(elapsed, kStopWatchdog) << "Engine::stop() took " << elapsed.count()
+                                      << " ms (watchdog " << kStopWatchdog.count() << " ms)";
     EXPECT_TRUE(fx.stopped()) << "engine did not reach stopped() after Logout";
 }
 
 INSTANTIATE_TEST_SUITE_P(
     AllCounterparties, ValidationCompat_CompID,
-    ::testing::Combine(
-        ::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
-        ::testing::Values(Role::fixpp_initiator, Role::fixpp_acceptor)),
+    ::testing::Combine(::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
+                       ::testing::Values(Role::fixpp_initiator, Role::fixpp_acceptor)),
     validation_compat_name);
 
 // ── Cell group: ValidationCompat_Seqnum ──────────────────────────────────────
@@ -309,8 +303,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 class ValidationCompat_Seqnum : public ::testing::TestWithParam<std::tuple<Counterparty, Role>> {};
 
-TEST_P(ValidationCompat_Seqnum, ToleratesOutOfOrderWithKnobOff)
-{
+TEST_P(ValidationCompat_Seqnum, ToleratesOutOfOrderWithKnobOff) {
     const auto [counterparty, role] = GetParam();
     namespace hp = fixpp::interop::hp;
 
@@ -336,8 +329,8 @@ TEST_P(ValidationCompat_Seqnum, ToleratesOutOfOrderWithKnobOff)
     ecfg.application = tracking_app;
 
     fixpp::interop::InteropEngineFixture fx{std::move(ecfg)};
-    auto cfg = hp::make_session_config(role, "FIX.4.4", factory, fx.ioc().get_executor(),
-                                       *endpoint);
+    auto cfg =
+        hp::make_session_config(role, "FIX.4.4", factory, fx.ioc().get_executor(), *endpoint);
 
     // ── B1 knob under test: validate_sequence_numbers=false ──────────────────
     // With the knob off, fixpp delivers out-of-order (too-high / too-low) frames
@@ -357,8 +350,8 @@ TEST_P(ValidationCompat_Seqnum, ToleratesOutOfOrderWithKnobOff)
     const auto reached = hp::drive_to_active(fx, id, 5s);
     EXPECT_EQ(reached, fsm_state::Active)
         << "ValidationCompat_Seqnum: session did not reach Active against "
-        << hp::counterparty_token(counterparty)
-        << " (" << (role == Role::fixpp_initiator ? "initiator" : "acceptor") << ")"
+        << hp::counterparty_token(counterparty) << " ("
+        << (role == Role::fixpp_initiator ? "initiator" : "acceptor") << ")"
         << "; validate_sequence_numbers=false must not break establishment";
     if (reached != fsm_state::Active) {
         hp::expect_graceful_stop(fx);
@@ -440,17 +433,15 @@ TEST_P(ValidationCompat_Seqnum, ToleratesOutOfOrderWithKnobOff)
 
     // ── Graceful stop within watchdog ──────────────────────────────────────────
     const auto elapsed = fx.stop_within(kStopWatchdog);
-    EXPECT_LT(elapsed, kStopWatchdog)
-        << "Engine::stop() took " << elapsed.count() << " ms (watchdog "
-        << kStopWatchdog.count() << " ms)";
+    EXPECT_LT(elapsed, kStopWatchdog) << "Engine::stop() took " << elapsed.count()
+                                      << " ms (watchdog " << kStopWatchdog.count() << " ms)";
     EXPECT_TRUE(fx.stopped()) << "engine did not reach stopped() after Logout";
 }
 
 INSTANTIATE_TEST_SUITE_P(
     AllCounterparties, ValidationCompat_Seqnum,
-    ::testing::Combine(
-        ::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
-        ::testing::Values(Role::fixpp_initiator, Role::fixpp_acceptor)),
+    ::testing::Combine(::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
+                       ::testing::Values(Role::fixpp_initiator, Role::fixpp_acceptor)),
     validation_compat_name);
 
 }  // namespace

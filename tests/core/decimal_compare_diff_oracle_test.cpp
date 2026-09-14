@@ -22,12 +22,12 @@
 #include <utility>
 #include <vector>
 
-#include "fixpp/core/decimal.hpp"
 #include "decimal_reference_compare.hpp"
+#include "fixpp/core/decimal.hpp"
 
+using fixpp::core::decimal_traits;
 using fixpp::core::pod_decimal;
 using fixpp::core::pod_decimal_invalid;
-using fixpp::core::decimal_traits;
 
 namespace {
 
@@ -39,8 +39,8 @@ namespace {
 // R4). Fixed seed => the corpus is reproducible across runs/CI.
 // ─────────────────────────────────────────────────────────────────────────
 constexpr std::uint64_t kSeed = 42;
-constexpr std::size_t kPoolFillSize = 3000;   // uniform-random fill beyond the boundary set
-constexpr std::size_t kPairCount = 8000;      // random pairs drawn from the pool
+constexpr std::size_t kPoolFillSize = 3000;  // uniform-random fill beyond the boundary set
+constexpr std::size_t kPairCount = 8000;     // random pairs drawn from the pool
 
 // Builds a value pool biased toward digit-count boundaries (10^d - 1 and 10^d
 // for d = 0..18, and the ±INT64_MAX / ±(INT64_MIN+1) extremes), crossed with a
@@ -55,8 +55,8 @@ std::vector<pod_decimal> make_value_pool(std::mt19937_64& rng) {
     // Representative exponents: canonical domain samples + out-of-domain int8
     // extremes/mid-values, to exercise totality beyond [-38, 0].
     std::vector<int> const exponents = {
-        -38, -19, -18, -10, -5, -1, 0,              // canonical domain
-        1, 5, 10, 50, 100, -50, -100, -127, 127, -128  // out-of-domain int8
+        -38, -19, -18, -10, -5,  -1,  0,                     // canonical domain
+        1,   5,   10,  50,  100, -50, -100, -127, 127, -128  // out-of-domain int8
     };
 
     // Digit-count boundary mantissas: 10^d and 10^d - 1 for d = 0..18, both
@@ -86,7 +86,7 @@ std::vector<pod_decimal> make_value_pool(std::mt19937_64& rng) {
     // Cartesian cross of boundary mantissas × representative exponents.
     for (auto m : mantissas) {
         for (auto e : exponents) {
-            pool.push_back(pod_decimal{m, static_cast<std::int8_t>(e)});
+            pool.push_back(pod_decimal{.mantissa = m, .exponent = static_cast<std::int8_t>(e)});
         }
     }
 
@@ -96,7 +96,8 @@ std::vector<pod_decimal> make_value_pool(std::mt19937_64& rng) {
     std::uniform_int_distribution<std::int64_t> mantissa_dist(INT64_MIN + 1, INT64_MAX);
     std::uniform_int_distribution<int> exponent_dist(-128, 127);
     while (pool.size() < kPoolFillSize) {
-        pool.push_back(pod_decimal{mantissa_dist(rng), static_cast<std::int8_t>(exponent_dist(rng))});
+        pool.push_back(pod_decimal{.mantissa = mantissa_dist(rng),
+                                   .exponent = static_cast<std::int8_t>(exponent_dist(rng))});
     }
 
     return pool;
@@ -132,11 +133,11 @@ TEST(DecimalCompareDiffOracle, CorpusMatchesReference) {
 TEST(DecimalCompareDiffOracle, SentinelPairsMatchReference) {
     std::vector<pod_decimal> const values = {
         pod_decimal_invalid,
-        pod_decimal{0, 0},
-        pod_decimal{1, -38},
-        pod_decimal{INT64_MAX, 0},
-        pod_decimal{-INT64_MAX, -38},
-        pod_decimal{INT64_MIN + 1, -38},
+        pod_decimal{.mantissa = 0, .exponent = 0},
+        pod_decimal{.mantissa = 1, .exponent = -38},
+        pod_decimal{.mantissa = INT64_MAX, .exponent = 0},
+        pod_decimal{.mantissa = -INT64_MAX, .exponent = -38},
+        pod_decimal{.mantissa = INT64_MIN + 1, .exponent = -38},
     };
     for (auto const& a : values) {
         for (auto const& b : values) {
@@ -182,7 +183,7 @@ std::strong_ordering invert_order(std::strong_ordering o) noexcept {
 // Asserts both the concrete expected ordering (primary) and agreement with
 // the frozen reference oracle (secondary diagnostic).
 void expect_order(pod_decimal const& a, pod_decimal const& b, std::strong_ordering expected,
-                   char const* label) {
+                  char const* label) {
     auto const production = decimal_traits<pod_decimal>::compare(a, b);
     auto const reference = reference_compare(a, b);
     EXPECT_EQ(production, expected)
@@ -206,15 +207,37 @@ void expect_order(pod_decimal const& a, pod_decimal const& b, std::strong_orderi
 // build/linux-clang-asan (global-buffer-overflow) in addition to (or instead
 // of) a clean GoogleTest assertion failure under build/linux-clang-debug.
 //
-// | # | Mutant (edit)                                              | Outcome | Detection mode (debug / asan)                                    |
+// | # | Mutant (edit)                                              | Outcome | Detection mode
+// (debug / asan)                                    |
 // |---|--------------------------------------------------------------|---------|-------------------------------------------------------------------|
-// | 1 | drop `hi != 0`: `(hi != 0 || lo > other)` -> `(lo > other)`   | KILLED  | clean assert-fail: CorpusMatchesReference, WitnessHiLimbCrosses2Pow64, PropertyTransitivity. No OOB (in-bounds edit). |
-// | 2 | guard `k >= 19` -> `k >= 21`                                  | KILLED  | debug: clean assert-fail (CorpusMatchesReference, PropertyTransitivity) — WitnessKBoundary itself did NOT fail (its k=20 cell's `mag_scaled=1` happened to still compare `greater` against the OOB-read `kPow10[20]` garbage value — a "lucky" non-discriminating cell for THIS guard value). asan: CONFIRMED global-buffer-overflow at decimal.cpp's compare() kPow10[k] read (kPow10[19]/[20] OOB read, k in [19,20] now falls to the multiply arm). |
-// | 3 | guard `k >= 19` -> `k >= 40`                                  | KILLED  | debug: clean assert-fail (CorpusMatchesReference, PropertyTransitivity). asan: CONFIRMED global-buffer-overflow at decimal.cpp's compare() kPow10[k] read (k in [19,39] falls to the multiply arm, kPow10[k] OOB for k>18). |
-// | 4 | `a_scales = ae > be` -> `ae < be`                             | KILLED  | debug: clean assert-fail (CorpusMatchesReference, WitnessCanonicalizationEquality, WitnessHiLimbCrosses2Pow64, WitnessKBoundary, WitnessExtremes, WitnessOutOfDomainExponents, PropertyTransitivity — 7/9 witnesses). asan: CONFIRMED global-buffer-overflow at decimal.cpp's compare() kPow10[k] read (k becomes negative for every diff-exponent pair -> kPow10[negative index], OOB before the array start). |
-// | 5 | `kPow10[k]` -> `kPow10[k - 1]` (stays in [0,17], no OOB since k>=1 in the else branch) | KILLED | clean assert-fail: CorpusMatchesReference, WitnessCanonicalizationEquality. No OOB (in-bounds edit). |
-// | 6 | end sign-flip: `return a_neg ? invert(mag_cmp) : mag_cmp;` -> `return mag_cmp;` | KILLED | clean assert-fail: CorpusMatchesReference, WitnessHiLimbCrosses2Pow64, WitnessKBoundary, WitnessExtremes (the named target witness), WitnessOutOfDomainExponents, PropertyTransitivity. No OOB (in-bounds edit). |
-// | 7 | guard `k >= 19` -> `k >= 20` (tasks.md/R1's "accepted no-kill")| **KILLED — result-equivalent but OOB read at kPow10[19] (memory-safety)** | debug: clean assert-fail (CorpusMatchesReference, PropertyTransitivity) — WitnessKBoundary's new k=19 cell is NOT a killer here (its comparison reads uninitialized/garbage past `kPow10`'s end under mutant 7, a UB coin-flip; see note below). asan: CONFIRMED `global-buffer-overflow` at decimal.cpp's compare() kPow10[k] read (`kPow10[19]`, one past the last valid index 18) — see re-measurement note below. |
+// | 1 | drop `hi != 0`: `(hi != 0 || lo > other)` -> `(lo > other)`   | KILLED  | clean
+// assert-fail: CorpusMatchesReference, WitnessHiLimbCrosses2Pow64, PropertyTransitivity. No OOB
+// (in-bounds edit). | | 2 | guard `k >= 19` -> `k >= 21`                                  | KILLED
+// | debug: clean assert-fail (CorpusMatchesReference, PropertyTransitivity) — WitnessKBoundary
+// itself did NOT fail (its k=20 cell's `mag_scaled=1` happened to still compare `greater` against
+// the OOB-read `kPow10[20]` garbage value — a "lucky" non-discriminating cell for THIS guard
+// value). asan: CONFIRMED global-buffer-overflow at decimal.cpp's compare() kPow10[k] read
+// (kPow10[19]/[20] OOB read, k in [19,20] now falls to the multiply arm). | | 3 | guard `k >= 19`
+// -> `k >= 40`                                  | KILLED  | debug: clean assert-fail
+// (CorpusMatchesReference, PropertyTransitivity). asan: CONFIRMED global-buffer-overflow at
+// decimal.cpp's compare() kPow10[k] read (k in [19,39] falls to the multiply arm, kPow10[k] OOB for
+// k>18). | | 4 | `a_scales = ae > be` -> `ae < be`                             | KILLED  | debug:
+// clean assert-fail (CorpusMatchesReference, WitnessCanonicalizationEquality,
+// WitnessHiLimbCrosses2Pow64, WitnessKBoundary, WitnessExtremes, WitnessOutOfDomainExponents,
+// PropertyTransitivity — 7/9 witnesses). asan: CONFIRMED global-buffer-overflow at decimal.cpp's
+// compare() kPow10[k] read (k becomes negative for every diff-exponent pair -> kPow10[negative
+// index], OOB before the array start). | | 5 | `kPow10[k]` -> `kPow10[k - 1]` (stays in [0,17], no
+// OOB since k>=1 in the else branch) | KILLED | clean assert-fail: CorpusMatchesReference,
+// WitnessCanonicalizationEquality. No OOB (in-bounds edit). | | 6 | end sign-flip: `return a_neg ?
+// invert(mag_cmp) : mag_cmp;` -> `return mag_cmp;` | KILLED | clean assert-fail:
+// CorpusMatchesReference, WitnessHiLimbCrosses2Pow64, WitnessKBoundary, WitnessExtremes (the named
+// target witness), WitnessOutOfDomainExponents, PropertyTransitivity. No OOB (in-bounds edit). | |
+// 7 | guard `k >= 19` -> `k >= 20` (tasks.md/R1's "accepted no-kill")| **KILLED — result-equivalent
+// but OOB read at kPow10[19] (memory-safety)** | debug: clean assert-fail (CorpusMatchesReference,
+// PropertyTransitivity) — WitnessKBoundary's new k=19 cell is NOT a killer here (its comparison
+// reads uninitialized/garbage past `kPow10`'s end under mutant 7, a UB coin-flip; see note below).
+// asan: CONFIRMED `global-buffer-overflow` at decimal.cpp's compare() kPow10[k] read (`kPow10[19]`,
+// one past the last valid index 18) — see re-measurement note below. |
 //
 // **Mutant 7 finding, corrected (follow-up to the original T009 pass — the
 // prior version of this note mis-stated the mechanism as "wrong answers";
@@ -283,15 +306,25 @@ void expect_order(pod_decimal const& a, pod_decimal const& b, std::strong_orderi
 // magnitude at different (mantissa, exponent) representations must compare
 // equal, in both argument orders, for both signs.
 TEST(DecimalCompareDiffOracle, WitnessCanonicalizationEquality) {
-    expect_order(pod_decimal{100, -2}, pod_decimal{1, 0}, std::strong_ordering::equal, "100e-2 vs 1e0");
-    expect_order(pod_decimal{1, 0}, pod_decimal{100, -2}, std::strong_ordering::equal, "1e0 vs 100e-2 (reversed)");
+    expect_order(pod_decimal{.mantissa = 100, .exponent = -2},
+                 pod_decimal{.mantissa = 1, .exponent = 0}, std::strong_ordering::equal,
+                 "100e-2 vs 1e0");
+    expect_order(pod_decimal{.mantissa = 1, .exponent = 0},
+                 pod_decimal{.mantissa = 100, .exponent = -2}, std::strong_ordering::equal,
+                 "1e0 vs 100e-2 (reversed)");
 
-    expect_order(pod_decimal{1000, -3}, pod_decimal{10, -1}, std::strong_ordering::equal, "1000e-3 vs 10e-1");
-    expect_order(pod_decimal{10, -1}, pod_decimal{1000, -3}, std::strong_ordering::equal,
+    expect_order(pod_decimal{.mantissa = 1000, .exponent = -3},
+                 pod_decimal{.mantissa = 10, .exponent = -1}, std::strong_ordering::equal,
+                 "1000e-3 vs 10e-1");
+    expect_order(pod_decimal{.mantissa = 10, .exponent = -1},
+                 pod_decimal{.mantissa = 1000, .exponent = -3}, std::strong_ordering::equal,
                  "10e-1 vs 1000e-3 (reversed)");
 
-    expect_order(pod_decimal{-100, -2}, pod_decimal{-1, 0}, std::strong_ordering::equal, "-100e-2 vs -1e0");
-    expect_order(pod_decimal{-1, 0}, pod_decimal{-100, -2}, std::strong_ordering::equal,
+    expect_order(pod_decimal{.mantissa = -100, .exponent = -2},
+                 pod_decimal{.mantissa = -1, .exponent = 0}, std::strong_ordering::equal,
+                 "-100e-2 vs -1e0");
+    expect_order(pod_decimal{.mantissa = -1, .exponent = 0},
+                 pod_decimal{.mantissa = -100, .exponent = -2}, std::strong_ordering::equal,
                  "-1e0 vs -100e-2 (reversed)");
 }
 
@@ -314,16 +347,17 @@ TEST(DecimalCompareDiffOracle, WitnessCanonicalizationEquality) {
 // NOT "restore" this witness to `-17`/`2^63` — that would silently make it
 // non-discriminating again.
 TEST(DecimalCompareDiffOracle, WitnessHiLimbCrosses2Pow64) {
-    pod_decimal const big99{99, 0};
-    pod_decimal const scaled_max{INT64_MAX, -18};
+    pod_decimal const big99{.mantissa = 99, .exponent = 0};
+    pod_decimal const scaled_max{.mantissa = INT64_MAX, .exponent = -18};
 
     // 99 > INT64_MAX * 10^-18 (~9.223) once the hi-limb is honored.
     expect_order(big99, scaled_max, std::strong_ordering::greater, "99e0 vs INT64_MAX e-18");
-    expect_order(scaled_max, big99, std::strong_ordering::less, "INT64_MAX e-18 vs 99e0 (reversed)");
+    expect_order(scaled_max, big99, std::strong_ordering::less,
+                 "INT64_MAX e-18 vs 99e0 (reversed)");
 
     // Negated pair: sign flip reverses the ordering.
-    pod_decimal const neg_big99{-99, 0};
-    pod_decimal const neg_scaled_max{-INT64_MAX, -18};
+    pod_decimal const neg_big99{.mantissa = -99, .exponent = 0};
+    pod_decimal const neg_scaled_max{.mantissa = -INT64_MAX, .exponent = -18};
     expect_order(neg_big99, neg_scaled_max, std::strong_ordering::less, "-99e0 vs -INT64_MAX e-18");
     expect_order(neg_scaled_max, neg_big99, std::strong_ordering::greater,
                  "-INT64_MAX e-18 vs -99e0 (reversed)");
@@ -342,13 +376,13 @@ TEST(DecimalCompareDiffOracle, WitnessKBoundary) {
     // k = 18 — multiply arm (hi == 0 for these small mantissas; distinct
     // from row 2's hi != 0 witness).
     {
-        pod_decimal const a{5, 0};
-        pod_decimal const b{7, -18};
+        pod_decimal const a{.mantissa = 5, .exponent = 0};
+        pod_decimal const b{.mantissa = 7, .exponent = -18};
         expect_order(a, b, std::strong_ordering::greater, "k=18: 5e0 vs 7e-18");
         expect_order(b, a, std::strong_ordering::less, "k=18: 7e-18 vs 5e0 (reversed)");
 
-        pod_decimal const na{-5, 0};
-        pod_decimal const nb{-7, -18};
+        pod_decimal const na{.mantissa = -5, .exponent = 0};
+        pod_decimal const nb{.mantissa = -7, .exponent = -18};
         expect_order(na, nb, std::strong_ordering::less, "k=18: -5e0 vs -7e-18");
         expect_order(nb, na, std::strong_ordering::greater, "k=18: -7e-18 vs -5e0 (reversed)");
     }
@@ -365,45 +399,48 @@ TEST(DecimalCompareDiffOracle, WitnessKBoundary) {
     // fragility this directed cell removes. (The mutant-7 memory-safety kill
     // itself is delivered by the ASan lane, not by this assertion.)
     {
-        pod_decimal const a{1, 0};
-        pod_decimal const b{INT64_MAX, -19};
+        pod_decimal const a{.mantissa = 1, .exponent = 0};
+        pod_decimal const b{.mantissa = INT64_MAX, .exponent = -19};
         // value_a = 1; value_b = INT64_MAX * 10^-19 = 9223372036854775807e-19
         // ~= 0.9223372036854775807 < 1, so a is greater.
         expect_order(a, b, std::strong_ordering::greater, "k=19: 1e0 vs INT64_MAX e-19");
         expect_order(b, a, std::strong_ordering::less, "k=19: INT64_MAX e-19 vs 1e0 (reversed)");
 
-        pod_decimal const na{-1, 0};
-        pod_decimal const nb{-INT64_MAX, -19};
+        pod_decimal const na{.mantissa = -1, .exponent = 0};
+        pod_decimal const nb{.mantissa = -INT64_MAX, .exponent = -19};
         // Negated: -1 < -0.9223... , so na is less.
         expect_order(na, nb, std::strong_ordering::less, "k=19: -1e0 vs -INT64_MAX e-19");
-        expect_order(nb, na, std::strong_ordering::greater, "k=19: -INT64_MAX e-19 vs -1e0 (reversed)");
+        expect_order(nb, na, std::strong_ordering::greater,
+                     "k=19: -INT64_MAX e-19 vs -1e0 (reversed)");
     }
 
     // k = 20 — dominance arm (k >= 19), the guard alone decides even though
     // `other`'s raw mantissa is INT64_MAX (astronomically larger digit-wise).
     {
-        pod_decimal const a{1, 0};
-        pod_decimal const b{INT64_MAX, -20};
+        pod_decimal const a{.mantissa = 1, .exponent = 0};
+        pod_decimal const b{.mantissa = INT64_MAX, .exponent = -20};
         expect_order(a, b, std::strong_ordering::greater, "k=20: 1e0 vs INT64_MAX e-20");
         expect_order(b, a, std::strong_ordering::less, "k=20: INT64_MAX e-20 vs 1e0 (reversed)");
 
-        pod_decimal const na{-1, 0};
-        pod_decimal const nb{-INT64_MAX, -20};
+        pod_decimal const na{.mantissa = -1, .exponent = 0};
+        pod_decimal const nb{.mantissa = -INT64_MAX, .exponent = -20};
         expect_order(na, nb, std::strong_ordering::less, "k=20: -1e0 vs -INT64_MAX e-20");
-        expect_order(nb, na, std::strong_ordering::greater, "k=20: -INT64_MAX e-20 vs -1e0 (reversed)");
+        expect_order(nb, na, std::strong_ordering::greater,
+                     "k=20: -INT64_MAX e-20 vs -1e0 (reversed)");
     }
 
     // k = 38 — full canonical-domain span (exponents 0 and -38).
     {
-        pod_decimal const a{1, 0};
-        pod_decimal const b{INT64_MAX, -38};
+        pod_decimal const a{.mantissa = 1, .exponent = 0};
+        pod_decimal const b{.mantissa = INT64_MAX, .exponent = -38};
         expect_order(a, b, std::strong_ordering::greater, "k=38: 1e0 vs INT64_MAX e-38");
         expect_order(b, a, std::strong_ordering::less, "k=38: INT64_MAX e-38 vs 1e0 (reversed)");
 
-        pod_decimal const na{-1, 0};
-        pod_decimal const nb{-INT64_MAX, -38};
+        pod_decimal const na{.mantissa = -1, .exponent = 0};
+        pod_decimal const nb{.mantissa = -INT64_MAX, .exponent = -38};
         expect_order(na, nb, std::strong_ordering::less, "k=38: -1e0 vs -INT64_MAX e-38");
-        expect_order(nb, na, std::strong_ordering::greater, "k=38: -INT64_MAX e-38 vs -1e0 (reversed)");
+        expect_order(nb, na, std::strong_ordering::greater,
+                     "k=38: -INT64_MAX e-38 vs -1e0 (reversed)");
     }
 }
 
@@ -414,16 +451,28 @@ TEST(DecimalCompareDiffOracle, WitnessKBoundary) {
 // The other two pairs genuinely reach the raw-mantissa zero filter (equal
 // exponents fail first, then both/one-operand-zero is decided there).
 TEST(DecimalCompareDiffOracle, WitnessZeroFilterOrderingAndSign) {
-    expect_order(pod_decimal{0, -38}, pod_decimal{0, 0}, std::strong_ordering::equal, "0e-38 vs 0e0");
-    expect_order(pod_decimal{0, 0}, pod_decimal{0, -38}, std::strong_ordering::equal, "0e0 vs 0e-38 (reversed)");
+    expect_order(pod_decimal{.mantissa = 0, .exponent = -38},
+                 pod_decimal{.mantissa = 0, .exponent = 0}, std::strong_ordering::equal,
+                 "0e-38 vs 0e0");
+    expect_order(pod_decimal{.mantissa = 0, .exponent = 0},
+                 pod_decimal{.mantissa = 0, .exponent = -38}, std::strong_ordering::equal,
+                 "0e0 vs 0e-38 (reversed)");
 
     // Sign-filter short-circuit (see comment above) — 0 > any negative value.
-    expect_order(pod_decimal{0, -5}, pod_decimal{-1, 0}, std::strong_ordering::greater, "0e-5 vs -1e0");
-    expect_order(pod_decimal{-1, 0}, pod_decimal{0, -5}, std::strong_ordering::less, "-1e0 vs 0e-5 (reversed)");
+    expect_order(pod_decimal{.mantissa = 0, .exponent = -5},
+                 pod_decimal{.mantissa = -1, .exponent = 0}, std::strong_ordering::greater,
+                 "0e-5 vs -1e0");
+    expect_order(pod_decimal{.mantissa = -1, .exponent = 0},
+                 pod_decimal{.mantissa = 0, .exponent = -5}, std::strong_ordering::less,
+                 "-1e0 vs 0e-5 (reversed)");
 
     // Genuine zero-filter path — 0 < any positive value.
-    expect_order(pod_decimal{0, 3}, pod_decimal{1, -38}, std::strong_ordering::less, "0e3 vs 1e-38");
-    expect_order(pod_decimal{1, -38}, pod_decimal{0, 3}, std::strong_ordering::greater, "1e-38 vs 0e3 (reversed)");
+    expect_order(pod_decimal{.mantissa = 0, .exponent = 3},
+                 pod_decimal{.mantissa = 1, .exponent = -38}, std::strong_ordering::less,
+                 "0e3 vs 1e-38");
+    expect_order(pod_decimal{.mantissa = 1, .exponent = -38},
+                 pod_decimal{.mantissa = 0, .exponent = 3}, std::strong_ordering::greater,
+                 "1e-38 vs 0e3 (reversed)");
 }
 
 // Row 5 — extremes: +/-INT64_MAX and +/-(INT64_MIN+1) at exponent 0 and -38,
@@ -435,30 +484,39 @@ TEST(DecimalCompareDiffOracle, WitnessZeroFilterOrderingAndSign) {
 // different exponents force the negate-then-scale-then-flip path.
 TEST(DecimalCompareDiffOracle, WitnessExtremes) {
     // Sign-mismatch extremes (trivial via Step 1, kept as a regression pin).
-    expect_order(pod_decimal{INT64_MAX, 0}, pod_decimal{INT64_MIN + 1, -38}, std::strong_ordering::greater,
-                 "INT64_MAX e0 vs (INT64_MIN+1) e-38");
-    expect_order(pod_decimal{INT64_MIN + 1, -38}, pod_decimal{INT64_MAX, 0}, std::strong_ordering::less,
+    expect_order(pod_decimal{.mantissa = INT64_MAX, .exponent = 0},
+                 pod_decimal{.mantissa = INT64_MIN + 1, .exponent = -38},
+                 std::strong_ordering::greater, "INT64_MAX e0 vs (INT64_MIN+1) e-38");
+    expect_order(pod_decimal{.mantissa = INT64_MIN + 1, .exponent = -38},
+                 pod_decimal{.mantissa = INT64_MAX, .exponent = 0}, std::strong_ordering::less,
                  "(INT64_MIN+1) e-38 vs INT64_MAX e0 (reversed)");
 
     // Same-sign (both negative), different magnitudes-at-scale: huge negative
     // at exponent 0 vs tiny negative at exponent -38.
-    expect_order(pod_decimal{INT64_MIN + 1, 0}, pod_decimal{-1, -38}, std::strong_ordering::less,
+    expect_order(pod_decimal{.mantissa = INT64_MIN + 1, .exponent = 0},
+                 pod_decimal{.mantissa = -1, .exponent = -38}, std::strong_ordering::less,
                  "(INT64_MIN+1) e0 vs -1e-38");
-    expect_order(pod_decimal{-1, -38}, pod_decimal{INT64_MIN + 1, 0}, std::strong_ordering::greater,
-                 "-1e-38 vs (INT64_MIN+1) e0 (reversed)");
+    expect_order(pod_decimal{.mantissa = -1, .exponent = -38},
+                 pod_decimal{.mantissa = INT64_MIN + 1, .exponent = 0},
+                 std::strong_ordering::greater, "-1e-38 vs (INT64_MIN+1) e0 (reversed)");
 
     // Same-sign (both negative), SAME magnitude, different exponent: proves
     // negation of the extreme value is applied consistently and the guard
     // dominance still yields the mathematically-correct ordering.
-    expect_order(pod_decimal{INT64_MIN + 1, 0}, pod_decimal{INT64_MIN + 1, -38}, std::strong_ordering::less,
-                 "(INT64_MIN+1) e0 vs (INT64_MIN+1) e-38");
-    expect_order(pod_decimal{INT64_MIN + 1, -38}, pod_decimal{INT64_MIN + 1, 0}, std::strong_ordering::greater,
+    expect_order(pod_decimal{.mantissa = INT64_MIN + 1, .exponent = 0},
+                 pod_decimal{.mantissa = INT64_MIN + 1, .exponent = -38},
+                 std::strong_ordering::less, "(INT64_MIN+1) e0 vs (INT64_MIN+1) e-38");
+    expect_order(pod_decimal{.mantissa = INT64_MIN + 1, .exponent = -38},
+                 pod_decimal{.mantissa = INT64_MIN + 1, .exponent = 0},
+                 std::strong_ordering::greater,
                  "(INT64_MIN+1) e-38 vs (INT64_MIN+1) e0 (reversed)");
 
     // Same-sign (both positive), SAME magnitude, different exponent.
-    expect_order(pod_decimal{INT64_MAX, -38}, pod_decimal{INT64_MAX, 0}, std::strong_ordering::less,
+    expect_order(pod_decimal{.mantissa = INT64_MAX, .exponent = -38},
+                 pod_decimal{.mantissa = INT64_MAX, .exponent = 0}, std::strong_ordering::less,
                  "INT64_MAX e-38 vs INT64_MAX e0");
-    expect_order(pod_decimal{INT64_MAX, 0}, pod_decimal{INT64_MAX, -38}, std::strong_ordering::greater,
+    expect_order(pod_decimal{.mantissa = INT64_MAX, .exponent = 0},
+                 pod_decimal{.mantissa = INT64_MAX, .exponent = -38}, std::strong_ordering::greater,
                  "INT64_MAX e0 vs INT64_MAX e-38 (reversed)");
 }
 
@@ -467,31 +525,40 @@ TEST(DecimalCompareDiffOracle, WitnessExtremes) {
 TEST(DecimalCompareDiffOracle, WitnessSentinelPairs) {
     expect_order(pod_decimal_invalid, pod_decimal_invalid, std::strong_ordering::equal,
                  "invalid vs invalid");
-    expect_order(pod_decimal_invalid, pod_decimal{INT64_MAX, 0}, std::strong_ordering::greater,
-                 "invalid vs INT64_MAX e0");
-    expect_order(pod_decimal{INT64_MAX, 0}, pod_decimal_invalid, std::strong_ordering::less,
-                 "INT64_MAX e0 vs invalid (reversed)");
-    expect_order(pod_decimal_invalid, pod_decimal{INT64_MIN + 1, -38}, std::strong_ordering::greater,
-                 "invalid vs (INT64_MIN+1) e-38");
-    expect_order(pod_decimal{0, 0}, pod_decimal_invalid, std::strong_ordering::less, "0e0 vs invalid");
+    expect_order(pod_decimal_invalid, pod_decimal{.mantissa = INT64_MAX, .exponent = 0},
+                 std::strong_ordering::greater, "invalid vs INT64_MAX e0");
+    expect_order(pod_decimal{.mantissa = INT64_MAX, .exponent = 0}, pod_decimal_invalid,
+                 std::strong_ordering::less, "INT64_MAX e0 vs invalid (reversed)");
+    expect_order(pod_decimal_invalid, pod_decimal{.mantissa = INT64_MIN + 1, .exponent = -38},
+                 std::strong_ordering::greater, "invalid vs (INT64_MIN+1) e-38");
+    expect_order(pod_decimal{.mantissa = 0, .exponent = 0}, pod_decimal_invalid,
+                 std::strong_ordering::less, "0e0 vs invalid");
 }
 
 // Row 7 — out-of-domain int8 exponents: proves totality holds beyond the
 // canonical [-38, 0] domain (int8 exponent field spans [-128, 127]).
 TEST(DecimalCompareDiffOracle, WitnessOutOfDomainExponents) {
-    expect_order(pod_decimal{5, 7}, pod_decimal{5, 0}, std::strong_ordering::greater, "5e7 vs 5e0");
-    expect_order(pod_decimal{5, 0}, pod_decimal{5, 7}, std::strong_ordering::less, "5e0 vs 5e7 (reversed)");
+    expect_order(pod_decimal{.mantissa = 5, .exponent = 7},
+                 pod_decimal{.mantissa = 5, .exponent = 0}, std::strong_ordering::greater,
+                 "5e7 vs 5e0");
+    expect_order(pod_decimal{.mantissa = 5, .exponent = 0},
+                 pod_decimal{.mantissa = 5, .exponent = 7}, std::strong_ordering::less,
+                 "5e0 vs 5e7 (reversed)");
 
     // delta = 127 - (-128) = 255 > 38 (out-of-domain, but `k` computed in
     // `int` cannot overflow at this magnitude — totality preserved).
-    expect_order(pod_decimal{1, 127}, pod_decimal{1, -128}, std::strong_ordering::greater,
+    expect_order(pod_decimal{.mantissa = 1, .exponent = 127},
+                 pod_decimal{.mantissa = 1, .exponent = -128}, std::strong_ordering::greater,
                  "1e127 vs 1e-128");
-    expect_order(pod_decimal{1, -128}, pod_decimal{1, 127}, std::strong_ordering::less,
+    expect_order(pod_decimal{.mantissa = 1, .exponent = -128},
+                 pod_decimal{.mantissa = 1, .exponent = 127}, std::strong_ordering::less,
                  "1e-128 vs 1e127 (reversed)");
 
-    expect_order(pod_decimal{-1, 127}, pod_decimal{-1, -128}, std::strong_ordering::less,
+    expect_order(pod_decimal{.mantissa = -1, .exponent = 127},
+                 pod_decimal{.mantissa = -1, .exponent = -128}, std::strong_ordering::less,
                  "-1e127 vs -1e-128");
-    expect_order(pod_decimal{-1, -128}, pod_decimal{-1, 127}, std::strong_ordering::greater,
+    expect_order(pod_decimal{.mantissa = -1, .exponent = -128},
+                 pod_decimal{.mantissa = -1, .exponent = 127}, std::strong_ordering::greater,
                  "-1e-128 vs -1e127 (reversed)");
 }
 
@@ -543,7 +610,7 @@ TEST(DecimalCompareDiffOracle, PropertyTransitivity) {
         sample.push_back(pool[idx_dist(rng)]);
     }
 
-    std::sort(sample.begin(), sample.end(), [](pod_decimal const& x, pod_decimal const& y) {
+    std::ranges::sort(sample, [](pod_decimal const& x, pod_decimal const& y) {
         return decimal_traits<pod_decimal>::compare(x, y) == std::strong_ordering::less;
     });
 

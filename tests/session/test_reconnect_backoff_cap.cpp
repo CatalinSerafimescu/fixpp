@@ -61,7 +61,9 @@
 #include <vector>
 
 // mock_transport is test-only; gate with the required define.
+#ifndef FIXPP_ALLOW_MOCK_TRANSPORT  // the test target defines it on the command line
 #define FIXPP_ALLOW_MOCK_TRANSPORT
+#endif
 #include <fixpp/transport/test/mock_transport.hpp>
 
 // minimal_dictionary for session open

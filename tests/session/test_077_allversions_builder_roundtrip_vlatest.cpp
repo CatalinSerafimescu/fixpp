@@ -32,8 +32,8 @@
 #include <fixpp/core/decimal_alias.hpp>
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/orchestra_loader.hpp>
-#include <fixpp/vlatest/all.hpp>  // GENERATED (077) -- build_<Msg>/<Msg>Args
 #include <fixpp/vlatest/Messages.hpp>
+#include <fixpp/vlatest/all.hpp>  // GENERATED (077) -- build_<Msg>/<Msg>Args
 #include <memory_resource>
 #include <optional>
 #include <span>
@@ -60,7 +60,7 @@ fixpp::dict::Dictionary load_dict(std::pmr::memory_resource* mr) {
 }
 
 void expect_text(IndexView const& mv, std::uint16_t tag, std::string_view expected,
-                  char const* label) {
+                 char const* label) {
     SCOPED_TRACE(label);
     auto fv = mv.get(tag);
     ASSERT_TRUE(fv.has_value()) << "tag " << tag << " not found in parsed frame";
@@ -68,7 +68,7 @@ void expect_text(IndexView const& mv, std::uint16_t tag, std::string_view expect
 }
 
 void expect_decimal(IndexView const& mv, std::uint16_t tag, std::string_view expected_ascii,
-                     std::pmr::memory_resource* mr, char const* label) {
+                    std::pmr::memory_resource* mr, char const* label) {
     SCOPED_TRACE(label);
     auto got = mv.get_decimal(tag, mr);
     ASSERT_TRUE(got.has_value()) << "tag " << tag << " not found/decodable in parsed frame";
@@ -218,7 +218,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, DerivativeSecurityList) {
     ASSERT_FALSE(::testing::Test::HasFailure())
         << "dict-aware parse of built DerivativeSecurityList frame failed (see ADD_FAILURE above)";
     expect_text(mv, 60, "DerivativeSecurityList_transact_time", "transact_time");
-    expect_text(mv, 241, "DerivativeSecurityList_underlying_coupon_payment_date", "underlying_coupon_payment_date");
+    expect_text(mv, 241, "DerivativeSecurityList_underlying_coupon_payment_date",
+                "underlying_coupon_payment_date");
     expect_text(mv, 244, "244", "underlying_repurchase_term");
     expect_decimal(mv, 245, "10.5", &read_arena, "underlying_repurchase_rate");
     expect_decimal(mv, 246, "10.5", &read_arena, "underlying_factor");
@@ -264,7 +265,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, MultilegOrderCancelReplace) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built MultilegOrderCancelReplace frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built MultilegOrderCancelReplace frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 1, "MultilegOrderCancelReplace_account", "account");
     expect_text(mv, 11, "MultilegOrderCancelReplace_cl_ord_id", "cl_ord_id");
     expect_decimal(mv, 12, "10.5", &read_arena, "commission");
@@ -288,7 +290,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, TradeCaptureReportRequest) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built TradeCaptureReportRequest frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built TradeCaptureReportRequest frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 11, "TradeCaptureReportRequest_cl_ord_id", "cl_ord_id");
     expect_text(mv, 17, "TradeCaptureReportRequest_exec_id", "exec_id");
     expect_text(mv, 54, "1", "side");
@@ -472,7 +475,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, PositionMaintenanceRequest) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built PositionMaintenanceRequest frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built PositionMaintenanceRequest frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 1, "PositionMaintenanceRequest_account", "account");
     expect_text(mv, 15, "PositionMaintenanceRequest_currency", "currency");
     expect_text(mv, 201, "201", "put_or_call");
@@ -496,7 +500,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, PositionMaintenanceReport) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built PositionMaintenanceReport frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built PositionMaintenanceReport frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 1, "PositionMaintenanceReport_account", "account");
     expect_text(mv, 15, "PositionMaintenanceReport_currency", "currency");
     expect_text(mv, 201, "201", "put_or_call");
@@ -592,7 +597,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, TradeCaptureReportRequestAck) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built TradeCaptureReportRequestAck frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built TradeCaptureReportRequestAck frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 22, "TradeCaptureReportRequestAck_security_id_source", "security_id_source");
     expect_text(mv, 48, "TradeCaptureReportRequestAck_security_id", "security_id");
     expect_text(mv, 201, "201", "put_or_call");
@@ -707,7 +713,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, SettlementInstructionRequest) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built SettlementInstructionRequest frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built SettlementInstructionRequest frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 54, "1", "side");
     expect_text(mv, 60, "SettlementInstructionRequest_transact_time", "transact_time");
     expect_text(mv, 79, "SettlementInstructionRequest_alloc_account", "alloc_account");
@@ -892,8 +899,10 @@ TEST_F(AllVersionsRoundtrip077Vlatest, NetworkCounterpartySystemStatusRequest) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built NetworkCounterpartySystemStatusRequest frame failed (see ADD_FAILURE above)";
-    expect_text(mv, 933, "NetworkCounterpartySystemStatusRequest_network_request_id", "network_request_id");
+        << "dict-aware parse of built NetworkCounterpartySystemStatusRequest frame failed (see "
+           "ADD_FAILURE above)";
+    expect_text(mv, 933, "NetworkCounterpartySystemStatusRequest_network_request_id",
+                "network_request_id");
     expect_text(mv, 935, "935", "network_request_type");
 }
 
@@ -908,9 +917,12 @@ TEST_F(AllVersionsRoundtrip077Vlatest, NetworkCounterpartySystemStatusResponse) 
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built NetworkCounterpartySystemStatusResponse frame failed (see ADD_FAILURE above)";
-    expect_text(mv, 932, "NetworkCounterpartySystemStatusResponse_network_response_id", "network_response_id");
-    expect_text(mv, 933, "NetworkCounterpartySystemStatusResponse_network_request_id", "network_request_id");
+        << "dict-aware parse of built NetworkCounterpartySystemStatusResponse frame failed (see "
+           "ADD_FAILURE above)";
+    expect_text(mv, 932, "NetworkCounterpartySystemStatusResponse_network_response_id",
+                "network_response_id");
+    expect_text(mv, 933, "NetworkCounterpartySystemStatusResponse_network_request_id",
+                "network_request_id");
     expect_text(mv, 937, "937", "network_status_response_type");
 }
 
@@ -1006,7 +1018,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, TradingSessionListRequest) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built TradingSessionListRequest frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built TradingSessionListRequest frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 207, "TradingSessionListRequest_security_exchange", "security_exchange");
     expect_text(mv, 263, "1", "subscription_request_type");
     expect_text(mv, 335, "TradingSessionListRequest_trad_ses_req_id", "trad_ses_req_id");
@@ -1049,7 +1062,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, SecurityListUpdateReport) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built SecurityListUpdateReport frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built SecurityListUpdateReport frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 60, "SecurityListUpdateReport_transact_time", "transact_time");
     expect_text(mv, 292, "1", "corporate_action");
     expect_text(mv, 320, "SecurityListUpdateReport_security_req_id", "security_req_id");
@@ -1095,7 +1109,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, AllocationInstructionAlert) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built AllocationInstructionAlert frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built AllocationInstructionAlert frame failed (see ADD_FAILURE "
+           "above)";
     expect_decimal(mv, 6, "10.5", &read_arena, "avg_px");
     expect_text(mv, 15, "AllocationInstructionAlert_currency", "currency");
     expect_text(mv, 22, "AllocationInstructionAlert_security_id_source", "security_id_source");
@@ -1167,7 +1182,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, SecurityDefinitionUpdateReport) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built SecurityDefinitionUpdateReport frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built SecurityDefinitionUpdateReport frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 15, "SecurityDefinitionUpdateReport_currency", "currency");
     expect_text(mv, 22, "SecurityDefinitionUpdateReport_security_id_source", "security_id_source");
     expect_text(mv, 201, "201", "put_or_call");
@@ -1189,7 +1205,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, SettlementObligationReport) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built SettlementObligationReport frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built SettlementObligationReport frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 58, "SettlementObligationReport_text", "text");
     expect_text(mv, 60, "SettlementObligationReport_transact_time", "transact_time");
     expect_text(mv, 1153, "1153", "settlement_cycle_no");
@@ -1201,7 +1218,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, DerivativeSecurityListUpdateReport) {
     std::pmr::monotonic_buffer_resource arena{4096};
     fixpp::vlatest::DerivativeSecurityListUpdateReportArgs args{};
     args.transact_time = "DerivativeSecurityListUpdateReport_transact_time";
-    args.underlying_coupon_payment_date = "DerivativeSecurityListUpdateReport_underlying_coupon_payment_date";
+    args.underlying_coupon_payment_date =
+        "DerivativeSecurityListUpdateReport_underlying_coupon_payment_date";
     args.underlying_repurchase_term = 244;
     args.underlying_repurchase_rate = make_decimal("10.5", &arena);
     args.underlying_factor = make_decimal("10.5", &arena);
@@ -1212,9 +1230,11 @@ TEST_F(AllVersionsRoundtrip077Vlatest, DerivativeSecurityListUpdateReport) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built DerivativeSecurityListUpdateReport frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built DerivativeSecurityListUpdateReport frame failed (see "
+           "ADD_FAILURE above)";
     expect_text(mv, 60, "DerivativeSecurityListUpdateReport_transact_time", "transact_time");
-    expect_text(mv, 241, "DerivativeSecurityListUpdateReport_underlying_coupon_payment_date", "underlying_coupon_payment_date");
+    expect_text(mv, 241, "DerivativeSecurityListUpdateReport_underlying_coupon_payment_date",
+                "underlying_coupon_payment_date");
     expect_text(mv, 244, "244", "underlying_repurchase_term");
     expect_decimal(mv, 245, "10.5", &read_arena, "underlying_repurchase_rate");
     expect_decimal(mv, 246, "10.5", &read_arena, "underlying_factor");
@@ -1234,7 +1254,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, TradingSessionListUpdateReport) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built TradingSessionListUpdateReport frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built TradingSessionListUpdateReport frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 335, "TradingSessionListUpdateReport_trad_ses_req_id", "trad_ses_req_id");
     expect_text(mv, 1180, "TradingSessionListUpdateReport_appl_id", "appl_id");
     expect_text(mv, 1181, "1181", "appl_seq_num");
@@ -1298,7 +1319,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, MarketDefinitionUpdateReport) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built MarketDefinitionUpdateReport frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built MarketDefinitionUpdateReport frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 15, "MarketDefinitionUpdateReport_currency", "currency");
     expect_text(mv, 58, "MarketDefinitionUpdateReport_text", "text");
     expect_text(mv, 423, "423", "price_type");
@@ -1318,7 +1340,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, ApplicationMessageRequest) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built ApplicationMessageRequest frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built ApplicationMessageRequest frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 58, "ApplicationMessageRequest_text", "text");
     expect_text(mv, 355, "ApplicationMessageRequest_encoded_text", "encoded_text");
     expect_text(mv, 1347, "1347", "appl_req_type");
@@ -1336,7 +1359,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, ApplicationMessageRequestAck) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built ApplicationMessageRequestAck frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built ApplicationMessageRequestAck frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 58, "ApplicationMessageRequestAck_text", "text");
     expect_text(mv, 355, "ApplicationMessageRequestAck_encoded_text", "encoded_text");
     expect_text(mv, 1347, "1347", "appl_req_type");
@@ -1354,7 +1378,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, ApplicationMessageReport) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built ApplicationMessageReport frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built ApplicationMessageReport frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 58, "ApplicationMessageReport_text", "text");
     expect_text(mv, 355, "ApplicationMessageReport_encoded_text", "encoded_text");
     expect_text(mv, 1426, "1426", "appl_report_type");
@@ -1486,7 +1511,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, StreamAssignmentReportACK) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built StreamAssignmentReportACK frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built StreamAssignmentReportACK frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 58, "StreamAssignmentReportACK_text", "text");
     expect_text(mv, 355, "StreamAssignmentReportACK_encoded_text", "encoded_text");
     expect_text(mv, 1502, "1502", "stream_asgn_rej_reason");
@@ -1548,7 +1574,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, MarginRequirementInquiry) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built MarginRequirementInquiry frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built MarginRequirementInquiry frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 22, "MarginRequirementInquiry_security_id_source", "security_id_source");
     expect_text(mv, 48, "MarginRequirementInquiry_security_id", "security_id");
     expect_text(mv, 201, "201", "put_or_call");
@@ -1572,7 +1599,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, MarginRequirementInquiryAck) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built MarginRequirementInquiryAck frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built MarginRequirementInquiryAck frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 22, "MarginRequirementInquiryAck_security_id_source", "security_id_source");
     expect_text(mv, 48, "MarginRequirementInquiryAck_security_id", "security_id");
     expect_text(mv, 201, "201", "put_or_call");
@@ -1619,7 +1647,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, PartyDetailsListUpdateReport) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built PartyDetailsListUpdateReport frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built PartyDetailsListUpdateReport frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 58, "PartyDetailsListUpdateReport_text", "text");
     expect_text(mv, 60, "PartyDetailsListUpdateReport_transact_time", "transact_time");
     expect_text(mv, 893, "Y", "last_fragment");
@@ -1684,9 +1713,11 @@ TEST_F(AllVersionsRoundtrip077Vlatest, SecurityMassStatusRequest) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built SecurityMassStatusRequest frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built SecurityMassStatusRequest frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 263, "1", "subscription_request_type");
-    expect_text(mv, 324, "SecurityMassStatusRequest_security_status_req_id", "security_status_req_id");
+    expect_text(mv, 324, "SecurityMassStatusRequest_security_status_req_id",
+                "security_status_req_id");
     expect_text(mv, 336, "SecurityMassStatusRequest_trading_session_id", "trading_session_id");
     expect_text(mv, 1543, "1543", "instrument_scope_product");
     expect_text(mv, 1553, "1553", "instrument_scope_put_or_call");
@@ -1754,7 +1785,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, PartyRiskLimitsUpdateReport) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built PartyRiskLimitsUpdateReport frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built PartyRiskLimitsUpdateReport frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 58, "PartyRiskLimitsUpdateReport_text", "text");
     expect_text(mv, 60, "PartyRiskLimitsUpdateReport_transact_time", "transact_time");
     expect_text(mv, 893, "Y", "last_fragment");
@@ -1773,7 +1805,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, PartyRiskLimitsDefinitionRequest) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built PartyRiskLimitsDefinitionRequest frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built PartyRiskLimitsDefinitionRequest frame failed (see "
+           "ADD_FAILURE above)";
     expect_text(mv, 58, "PartyRiskLimitsDefinitionRequest_text", "text");
     expect_text(mv, 355, "PartyRiskLimitsDefinitionRequest_encoded_text", "encoded_text");
 }
@@ -1790,7 +1823,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, PartyRiskLimitsDefinitionRequestAck) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built PartyRiskLimitsDefinitionRequestAck frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built PartyRiskLimitsDefinitionRequestAck frame failed (see "
+           "ADD_FAILURE above)";
     expect_text(mv, 58, "PartyRiskLimitsDefinitionRequestAck_text", "text");
     expect_text(mv, 355, "PartyRiskLimitsDefinitionRequestAck_encoded_text", "encoded_text");
     expect_text(mv, 1761, "1761", "risk_limit_request_result");
@@ -1809,7 +1843,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, PartyEntitlementsRequest) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built PartyEntitlementsRequest frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built PartyEntitlementsRequest frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 58, "PartyEntitlementsRequest_text", "text");
     expect_text(mv, 263, "1", "subscription_request_type");
     expect_text(mv, 355, "PartyEntitlementsRequest_encoded_text", "encoded_text");
@@ -1868,7 +1903,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, PartyDetailsDefinitionRequest) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built PartyDetailsDefinitionRequest frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built PartyDetailsDefinitionRequest frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 58, "PartyDetailsDefinitionRequest_text", "text");
     expect_text(mv, 355, "PartyDetailsDefinitionRequest_encoded_text", "encoded_text");
 }
@@ -1885,7 +1921,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, PartyDetailsDefinitionRequestAck) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built PartyDetailsDefinitionRequestAck frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built PartyDetailsDefinitionRequestAck frame failed (see "
+           "ADD_FAILURE above)";
     expect_text(mv, 58, "PartyDetailsDefinitionRequestAck_text", "text");
     expect_text(mv, 355, "PartyDetailsDefinitionRequestAck_encoded_text", "encoded_text");
     expect_text(mv, 1877, "1877", "party_detail_request_result");
@@ -1906,7 +1943,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, PartyEntitlementsUpdateReport) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built PartyEntitlementsUpdateReport frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built PartyEntitlementsUpdateReport frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 58, "PartyEntitlementsUpdateReport_text", "text");
     expect_text(mv, 60, "PartyEntitlementsUpdateReport_transact_time", "transact_time");
     expect_text(mv, 893, "Y", "last_fragment");
@@ -1949,7 +1987,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, PartyEntitlementsDefinitionRequest) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built PartyEntitlementsDefinitionRequest frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built PartyEntitlementsDefinitionRequest frame failed (see "
+           "ADD_FAILURE above)";
     expect_text(mv, 58, "PartyEntitlementsDefinitionRequest_text", "text");
     expect_text(mv, 355, "PartyEntitlementsDefinitionRequest_encoded_text", "encoded_text");
 }
@@ -1966,7 +2005,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, PartyEntitlementsDefinitionRequestAck) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built PartyEntitlementsDefinitionRequestAck frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built PartyEntitlementsDefinitionRequestAck frame failed (see "
+           "ADD_FAILURE above)";
     expect_text(mv, 58, "PartyEntitlementsDefinitionRequestAck_text", "text");
     expect_text(mv, 355, "PartyEntitlementsDefinitionRequestAck_encoded_text", "encoded_text");
     expect_text(mv, 1881, "1881", "entitlement_request_result");
@@ -2029,7 +2069,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, PartyRiskLimitsReportAck) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built PartyRiskLimitsReportAck frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built PartyRiskLimitsReportAck frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 58, "PartyRiskLimitsReportAck_text", "text");
     expect_text(mv, 60, "PartyRiskLimitsReportAck_transact_time", "transact_time");
     expect_text(mv, 2316, "2316", "risk_limit_report_status");
@@ -2051,7 +2092,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, PartyRiskLimitCheckRequest) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built PartyRiskLimitCheckRequest frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built PartyRiskLimitCheckRequest frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 15, "PartyRiskLimitCheckRequest_currency", "currency");
     expect_text(mv, 22, "PartyRiskLimitCheckRequest_security_id_source", "security_id_source");
     expect_text(mv, 54, "1", "side");
@@ -2075,7 +2117,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, PartyRiskLimitCheckRequestAck) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built PartyRiskLimitCheckRequestAck frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built PartyRiskLimitCheckRequestAck frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 15, "PartyRiskLimitCheckRequestAck_currency", "currency");
     expect_text(mv, 22, "PartyRiskLimitCheckRequestAck_security_id_source", "security_id_source");
     expect_text(mv, 54, "1", "side");
@@ -2192,7 +2235,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, PositionTransferInstruction) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built PositionTransferInstruction frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built PositionTransferInstruction frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 15, "PositionTransferInstruction_currency", "currency");
     expect_text(mv, 22, "PositionTransferInstruction_security_id_source", "security_id_source");
     expect_text(mv, 201, "201", "put_or_call");
@@ -2213,7 +2257,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, PositionTransferInstructionAck) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built PositionTransferInstructionAck frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built PositionTransferInstructionAck frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 58, "PositionTransferInstructionAck_text", "text");
     expect_text(mv, 60, "PositionTransferInstructionAck_transact_time", "transact_time");
     expect_text(mv, 2439, "2439", "transfer_trans_type");
@@ -2259,7 +2304,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, MarketDataStatisticsRequest) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built MarketDataStatisticsRequest frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built MarketDataStatisticsRequest frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 22, "MarketDataStatisticsRequest_security_id_source", "security_id_source");
     expect_text(mv, 48, "MarketDataStatisticsRequest_security_id", "security_id");
     expect_text(mv, 201, "201", "put_or_call");
@@ -2283,7 +2329,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, MarketDataStatisticsReport) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built MarketDataStatisticsReport frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built MarketDataStatisticsReport frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 15, "MarketDataStatisticsReport_currency", "currency");
     expect_text(mv, 22, "MarketDataStatisticsReport_security_id_source", "security_id_source");
     expect_text(mv, 201, "201", "put_or_call");
@@ -2390,7 +2437,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, AllocationInstructionAlertRequest) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built AllocationInstructionAlertRequest frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built AllocationInstructionAlertRequest frame failed (see "
+           "ADD_FAILURE above)";
     expect_text(mv, 75, "AllocationInstructionAlertRequest_trade_date", "trade_date");
     expect_text(mv, 1730, "AllocationInstructionAlertRequest_alloc_group_id", "alloc_group_id");
 }
@@ -2406,9 +2454,11 @@ TEST_F(AllVersionsRoundtrip077Vlatest, AllocationInstructionAlertRequestAck) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built AllocationInstructionAlertRequestAck frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built AllocationInstructionAlertRequestAck frame failed (see "
+           "ADD_FAILURE above)";
     expect_text(mv, 1328, "AllocationInstructionAlertRequestAck_reject_text", "reject_text");
-    expect_text(mv, 1665, "AllocationInstructionAlertRequestAck_encoded_reject_text", "encoded_reject_text");
+    expect_text(mv, 1665, "AllocationInstructionAlertRequestAck_encoded_reject_text",
+                "encoded_reject_text");
     expect_text(mv, 2768, "2768", "alloc_request_status");
 }
 
@@ -2600,7 +2650,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, SettlementStatusRequestAck) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built SettlementStatusRequestAck frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built SettlementStatusRequestAck frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 1328, "SettlementStatusRequestAck_reject_text", "reject_text");
     expect_text(mv, 1665, "SettlementStatusRequestAck_encoded_reject_text", "encoded_reject_text");
     expect_text(mv, 2966, "2966", "settl_status_request_status");
@@ -2641,7 +2692,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, SettlementStatusReportAck) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built SettlementStatusReportAck frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built SettlementStatusReportAck frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 1328, "SettlementStatusReportAck_reject_text", "reject_text");
     expect_text(mv, 1665, "SettlementStatusReportAck_encoded_reject_text", "encoded_reject_text");
     expect_text(mv, 2973, "2973", "settl_status_report_status");
@@ -2651,7 +2703,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, SecurityRiskMetricsReport) {
     std::pmr::monotonic_buffer_resource arena{4096};
     fixpp::vlatest::SecurityRiskMetricsReportArgs args{};
     args.transact_time = "SecurityRiskMetricsReport_transact_time";
-    args.underlying_coupon_payment_date = "SecurityRiskMetricsReport_underlying_coupon_payment_date";
+    args.underlying_coupon_payment_date =
+        "SecurityRiskMetricsReport_underlying_coupon_payment_date";
     args.underlying_repurchase_term = 244;
     args.underlying_repurchase_rate = make_decimal("10.5", &arena);
     args.underlying_factor = make_decimal("10.5", &arena);
@@ -2662,9 +2715,11 @@ TEST_F(AllVersionsRoundtrip077Vlatest, SecurityRiskMetricsReport) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built SecurityRiskMetricsReport frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built SecurityRiskMetricsReport frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 60, "SecurityRiskMetricsReport_transact_time", "transact_time");
-    expect_text(mv, 241, "SecurityRiskMetricsReport_underlying_coupon_payment_date", "underlying_coupon_payment_date");
+    expect_text(mv, 241, "SecurityRiskMetricsReport_underlying_coupon_payment_date",
+                "underlying_coupon_payment_date");
     expect_text(mv, 244, "244", "underlying_repurchase_term");
     expect_decimal(mv, 245, "10.5", &read_arena, "underlying_repurchase_rate");
     expect_decimal(mv, 246, "10.5", &read_arena, "underlying_factor");
@@ -2702,7 +2757,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, AlgoCertificateRequestAck) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built AlgoCertificateRequestAck frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built AlgoCertificateRequestAck frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 1328, "AlgoCertificateRequestAck_reject_text", "reject_text");
     expect_text(mv, 1665, "AlgoCertificateRequestAck_encoded_reject_text", "encoded_reject_text");
     expect_text(mv, 3017, "3017", "algo_certificate_request_status");
@@ -2740,7 +2796,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, AlgoCertificateReportAck) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built AlgoCertificateReportAck frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built AlgoCertificateReportAck frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 1328, "AlgoCertificateReportAck_reject_text", "reject_text");
     expect_text(mv, 1665, "AlgoCertificateReportAck_encoded_reject_text", "encoded_reject_text");
     expect_text(mv, 3021, "3021", "algo_certificate_report_status");
@@ -2758,7 +2815,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, TestSuiteDefinitionRequest) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built TestSuiteDefinitionRequest frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built TestSuiteDefinitionRequest frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 58, "TestSuiteDefinitionRequest_text", "text");
     expect_text(mv, 60, "TestSuiteDefinitionRequest_transact_time", "transact_time");
     expect_text(mv, 3064, "3064", "test_suite_request_trans_type");
@@ -2775,9 +2833,11 @@ TEST_F(AllVersionsRoundtrip077Vlatest, TestSuiteDefinitionRequestAck) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built TestSuiteDefinitionRequestAck frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built TestSuiteDefinitionRequestAck frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 1328, "TestSuiteDefinitionRequestAck_reject_text", "reject_text");
-    expect_text(mv, 1665, "TestSuiteDefinitionRequestAck_encoded_reject_text", "encoded_reject_text");
+    expect_text(mv, 1665, "TestSuiteDefinitionRequestAck_encoded_reject_text",
+                "encoded_reject_text");
     expect_text(mv, 3065, "3065", "test_suite_request_status");
 }
 
@@ -2924,7 +2984,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, OrderCancelReplaceRequest) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built OrderCancelReplaceRequest frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built OrderCancelReplaceRequest frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 1, "OrderCancelReplaceRequest_account", "account");
     expect_text(mv, 11, "OrderCancelReplaceRequest_cl_ord_id", "cl_ord_id");
     expect_decimal(mv, 12, "10.5", &read_arena, "commission");
@@ -3062,7 +3123,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, AllocationInstructionAck) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built AllocationInstructionAck frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built AllocationInstructionAck frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 22, "AllocationInstructionAck_security_id_source", "security_id_source");
     expect_text(mv, 48, "AllocationInstructionAck_security_id", "security_id");
     expect_text(mv, 87, "87", "alloc_status");
@@ -3199,7 +3261,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, MarketDataSnapshotFullRefresh) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built MarketDataSnapshotFullRefresh frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built MarketDataSnapshotFullRefresh frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 22, "MarketDataSnapshotFullRefresh_security_id_source", "security_id_source");
     expect_text(mv, 48, "MarketDataSnapshotFullRefresh_security_id", "security_id");
     expect_text(mv, 201, "201", "put_or_call");
@@ -3221,7 +3284,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, MarketDataIncrementalRefresh) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built MarketDataIncrementalRefresh frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built MarketDataIncrementalRefresh frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 75, "MarketDataIncrementalRefresh_trade_date", "trade_date");
     expect_text(mv, 262, "MarketDataIncrementalRefresh_md_req_id", "md_req_id");
     expect_text(mv, 813, "813", "appl_queue_depth");
@@ -3323,7 +3387,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, SecurityDefinitionRequest) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built SecurityDefinitionRequest frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built SecurityDefinitionRequest frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 15, "SecurityDefinitionRequest_currency", "currency");
     expect_text(mv, 22, "SecurityDefinitionRequest_security_id_source", "security_id_source");
     expect_text(mv, 201, "201", "put_or_call");
@@ -3417,7 +3482,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, TradingSessionStatusRequest) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built TradingSessionStatusRequest frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built TradingSessionStatusRequest frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 207, "TradingSessionStatusRequest_security_exchange", "security_exchange");
     expect_text(mv, 263, "1", "subscription_request_type");
     expect_text(mv, 335, "TradingSessionStatusRequest_trad_ses_req_id", "trad_ses_req_id");
@@ -3561,7 +3627,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, RegistrationInstructions) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built RegistrationInstructions frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built RegistrationInstructions frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 1, "RegistrationInstructions_account", "account");
     expect_text(mv, 11, "RegistrationInstructions_cl_ord_id", "cl_ord_id");
     expect_text(mv, 495, "495", "tax_advantage_type");
@@ -3584,7 +3651,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, RegistrationInstructionsResponse) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built RegistrationInstructionsResponse frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built RegistrationInstructionsResponse frame failed (see "
+           "ADD_FAILURE above)";
     expect_text(mv, 1, "RegistrationInstructionsResponse_account", "account");
     expect_text(mv, 11, "RegistrationInstructionsResponse_cl_ord_id", "cl_ord_id");
     expect_text(mv, 506, "1", "regist_status");
@@ -3680,7 +3748,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, CrossOrderCancelReplaceRequest) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built CrossOrderCancelReplaceRequest frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built CrossOrderCancelReplaceRequest frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 15, "CrossOrderCancelReplaceRequest_currency", "currency");
     expect_text(mv, 18, "1", "exec_inst");
     expect_text(mv, 21, "1", "handl_inst");
@@ -3815,7 +3884,8 @@ TEST_F(AllVersionsRoundtrip077Vlatest, DerivativeSecurityListRequest) {
     std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
     auto const mv = parse_dict(frame, *tv_, &read_arena);
     ASSERT_FALSE(::testing::Test::HasFailure())
-        << "dict-aware parse of built DerivativeSecurityListRequest frame failed (see ADD_FAILURE above)";
+        << "dict-aware parse of built DerivativeSecurityListRequest frame failed (see ADD_FAILURE "
+           "above)";
     expect_text(mv, 15, "DerivativeSecurityListRequest_currency", "currency");
     expect_text(mv, 58, "DerivativeSecurityListRequest_text", "text");
     expect_text(mv, 244, "244", "underlying_repurchase_term");

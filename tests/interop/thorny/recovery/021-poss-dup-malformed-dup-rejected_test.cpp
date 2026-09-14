@@ -37,12 +37,11 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
-#include <string>
-#include <tuple>
-
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <string>
+#include <tuple>
 
 #include "happy/hp_support.hpp"
 #include "support/scenario_descriptor.hpp"
@@ -60,8 +59,7 @@ namespace {
 // Mutating any INCLUDED tag must cause diff_transcripts() to bite.
 // NEVER mutate 52, 122, 10 (canonicalized → false non-biting pass).
 
-TEST(MalformedDupRejectedGateBite, MutatedTag371RefTagIDCausesGateBite)
-{
+TEST(MalformedDupRejectedGateBite, MutatedTag371RefTagIDCausesGateBite) {
     // Synthetic Reject(35=3) with RefTagID(371)=122 (the missing OrigSendingTime tag).
     // Tag 371 is COMPARED under {52,122,10} — mutation must bite.
     const char* expected_text =
@@ -75,7 +73,7 @@ TEST(MalformedDupRejectedGateBite, MutatedTag371RefTagIDCausesGateBite)
         "\\x0152=20260603-10:00:00.000\\x0110=001\\x01\n";
 
     const auto expected_frames = fixpp::interop::parse_golden(expected_text);
-    const auto actual_frames   = fixpp::interop::parse_golden(actual_text);
+    const auto actual_frames = fixpp::interop::parse_golden(actual_text);
 
     ASSERT_EQ(expected_frames.size(), actual_frames.size());
 
@@ -90,8 +88,7 @@ TEST(MalformedDupRejectedGateBite, MutatedTag371RefTagIDCausesGateBite)
         << "detail should mention tag 371; got: " << result.detail;
 }
 
-TEST(MalformedDupRejectedGateBite, MutatedTag373SessionRejectReasonCausesGateBite)
-{
+TEST(MalformedDupRejectedGateBite, MutatedTag373SessionRejectReasonCausesGateBite) {
     // Tag 373 (SessionRejectReason) is COMPARED under {52,122,10}.
     // Arm C requires 373=1 (RequiredTagMissing); mutation to 2 must bite.
     const char* expected_text =
@@ -105,7 +102,7 @@ TEST(MalformedDupRejectedGateBite, MutatedTag373SessionRejectReasonCausesGateBit
         "\\x0152=20260603-10:00:00.000\\x0110=001\\x01\n";
 
     const auto expected_frames = fixpp::interop::parse_golden(expected_text);
-    const auto actual_frames   = fixpp::interop::parse_golden(actual_text);
+    const auto actual_frames = fixpp::interop::parse_golden(actual_text);
 
     ASSERT_EQ(expected_frames.size(), actual_frames.size());
 
@@ -132,8 +129,7 @@ TEST(MalformedDupRejectedGateBite, MutatedTag373SessionRejectReasonCausesGateBit
 // Golden assertion: diff using poss_dup profile {52,122,10}; tags 371/373/43/35
 // compared verbatim (gate-biting per SC-004). Golden captured at first paired run.
 
-class MalformedDupRejected
-    : public ::testing::TestWithParam<std::tuple<Counterparty, Role>> {};
+class MalformedDupRejected : public ::testing::TestWithParam<std::tuple<Counterparty, Role>> {};
 
 TEST_P(MalformedDupRejected, MissingOrigSendingTimeTriggersRejectAndSessionSurvives) {
     const auto [counterparty, role] = GetParam();
@@ -154,8 +150,8 @@ TEST_P(MalformedDupRejected, MissingOrigSendingTimeTriggersRejectAndSessionSurvi
         << "cell endpoint unresolved (parent harness did not lease a port)";
 
     fixpp::interop::InteropEngineFixture fx;
-    auto cfg = hp::make_session_config(role, "FIX.4.4", factory,
-                                       fx.ioc().get_executor(), *endpoint);
+    auto cfg =
+        hp::make_session_config(role, "FIX.4.4", factory, fx.ioc().get_executor(), *endpoint);
     const auto id = fixpp::session::SessionId::from_config(cfg);
     ASSERT_TRUE(fx.engine().register_session(std::move(cfg)).has_value())
         << "register_session failed";
@@ -165,8 +161,7 @@ TEST_P(MalformedDupRejected, MissingOrigSendingTimeTriggersRejectAndSessionSurvi
     // ── Drive to Active ────────────────────────────────────────────────────────
     const auto reached = hp::drive_to_active(fx, id, 5s);
     EXPECT_EQ(reached, fsm_state::Active)
-        << "session did not reach Active against "
-        << hp::counterparty_token(counterparty)
+        << "session did not reach Active against " << hp::counterparty_token(counterparty)
         << "; state=" << static_cast<int>(reached);
     if (reached != fsm_state::Active) {
         hp::expect_graceful_stop(fx);
@@ -202,9 +197,9 @@ TEST_P(MalformedDupRejected, MissingOrigSendingTimeTriggersRejectAndSessionSurvi
     // ── Golden assertion: poss_dup profile {52,122,10} ────────────────────────
     // Tags 35/43/371/373 compared verbatim (gate-biting). Golden captured at
     // first paired live run; absent → skip:golden-not-yet-captured.
-    const std::string cp_part   = (counterparty == Counterparty::quickfix_j) ? "QFj" : "QFcpp";
+    const std::string cp_part = (counterparty == Counterparty::quickfix_j) ? "QFj" : "QFcpp";
     const std::string role_part = (role == Role::fixpp_initiator) ? "init" : "acc";
-    const std::string cell_id   = "PD-" + cp_part + "-" + role_part + "-fix44-malformed-dup-rejected";
+    const std::string cell_id = "PD-" + cp_part + "-" + role_part + "-fix44-malformed-dup-rejected";
     hp::diff_golden_or_skip(cell_id, hp::admin_golden_path(cell_id),
                             fixpp::interop::poss_dup_profile_excluded_tags());
 
@@ -214,9 +209,8 @@ TEST_P(MalformedDupRejected, MissingOrigSendingTimeTriggersRejectAndSessionSurvi
 
 INSTANTIATE_TEST_SUITE_P(
     Fix44, MalformedDupRejected,
-    ::testing::Combine(
-        ::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
-        ::testing::Values(Role::fixpp_initiator, Role::fixpp_acceptor)),
+    ::testing::Combine(::testing::Values(Counterparty::quickfix_cpp, Counterparty::quickfix_j),
+                       ::testing::Values(Role::fixpp_initiator, Role::fixpp_acceptor)),
     fixpp::interop::hp::cell_name);
 
 }  // namespace

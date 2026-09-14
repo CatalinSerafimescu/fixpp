@@ -46,13 +46,11 @@
 #include <sstream>
 #include <string>
 
+#include "capi_internal.hpp"
+#include "capi_loopback_support.hpp"
 #include "fix/c_api/engine.h"
 #include "fix/c_api/message.h"
 #include "fix/c_api/session.h"
-
-#include "capi_internal.hpp"
-#include "capi_loopback_support.hpp"
-
 #include "fixpp/dict/dictionary.hpp"
 #include "fixpp/dict/table_view.hpp"
 #include "fixpp/dict/xml_loader.hpp"
@@ -69,9 +67,9 @@ namespace {
 // tests/support/fix44_dictionary.hpp / tests/dictionary/
 // required_scope_census_test.cpp.
 fixpp_session_config_t* make_session_cfg_real_fix42(char const* sender, char const* target,
-                                                     fixpp_session_role role) {
+                                                    fixpp_session_role role) {
     using namespace fixpp::dict;
-    constexpr std::size_t kBufSize = 8u * 1024u * 1024u;
+    constexpr std::size_t kBufSize = 8U * 1024U * 1024U;
     auto buf = std::make_unique<std::array<std::byte, kBufSize>>();
     auto* mr = new std::pmr::monotonic_buffer_resource{buf->data(), buf->size()};
 
@@ -79,12 +77,11 @@ fixpp_session_config_t* make_session_cfg_real_fix42(char const* sender, char con
     Dictionary d = XmlLoader{}.load(path, mr);
     auto* raw_dict = new Dictionary{std::move(d)};
     auto* raw_buf = buf.release();
-    auto dict_ptr = std::shared_ptr<const Dictionary>{
-        raw_dict, [mr, raw_buf](const Dictionary* p) {
-            delete p;
-            delete mr;
-            delete raw_buf;
-        }};
+    auto dict_ptr = std::shared_ptr<const Dictionary>{raw_dict, [mr, raw_buf](const Dictionary* p) {
+                                                          delete p;
+                                                          delete mr;
+                                                          delete raw_buf;
+                                                      }};
 
     auto* fd = new fixpp_dict{dict_ptr};
     auto* dict_handle = reinterpret_cast<fixpp_dict_t*>(fd);
@@ -95,9 +92,9 @@ fixpp_session_config_t* make_session_cfg_real_fix42(char const* sender, char con
     EXPECT_EQ(fixpp_session_config_set_begin_string(sc, "FIX.4.2"), FIXPP_ERR_OK);
     EXPECT_EQ(fixpp_session_config_set_role(sc, role), FIXPP_ERR_OK);
     EXPECT_EQ(fixpp_session_config_set_heartbeat_seconds(sc, 30), FIXPP_ERR_OK);
-    EXPECT_EQ(fixpp_session_config_set_security(sc, FIXPP_SECURITY_INSECURE_PLAIN_TCP, nullptr,
-                                                nullptr),
-              FIXPP_ERR_OK);
+    EXPECT_EQ(
+        fixpp_session_config_set_security(sc, FIXPP_SECURITY_INSECURE_PLAIN_TCP, nullptr, nullptr),
+        FIXPP_ERR_OK);
     EXPECT_EQ(fixpp_session_config_set_reset_on_logon(sc, role == FIXPP_ROLE_INITIATOR),
               FIXPP_ERR_OK);
     EXPECT_EQ(fixpp_session_config_set_dictionary(sc, dict_handle), FIXPP_ERR_OK);
@@ -126,7 +123,8 @@ std::set<std::uint16_t> bare_registered_group_tags(fixpp::dict::table_view const
     return tags;
 }
 
-std::string describe_diff(std::set<std::uint16_t> const& expected, std::set<std::uint16_t> const& actual) {
+std::string describe_diff(std::set<std::uint16_t> const& expected,
+                          std::set<std::uint16_t> const& actual) {
     std::ostringstream oss;
     oss << "missing-from-actual{";
     for (auto t : expected) {
@@ -185,7 +183,7 @@ TEST(GroupDetectionCrossPath, WriteGroupBeginMatchesBareStoreRegisteredSetBothDi
     // Independently loaded Dictionary (own PMR arena), NOT sharing the
     // engine's dict instance -- pure measurement, no engine-internal
     // reach-through.
-    constexpr std::size_t kBufSize = 8u * 1024u * 1024u;
+    constexpr std::size_t kBufSize = 8U * 1024U * 1024U;
     auto buf2 = std::make_unique<std::array<std::byte, kBufSize>>();
     std::pmr::monotonic_buffer_resource mr2{buf2->data(), buf2->size()};
     std::string const path = std::string(FIXPP_DICT_DATA_DIR) + "/FIX42.xml";
@@ -197,7 +195,7 @@ TEST(GroupDetectionCrossPath, WriteGroupBeginMatchesBareStoreRegisteredSetBothDi
     // (contracts/group-detection.md C2) -- if this count drifted, the
     // exact-set comparison below would be checking against a stale fixture,
     // not this feature's regression.
-    EXPECT_EQ(write_succeeds.size(), 18u)
+    EXPECT_EQ(write_succeeds.size(), 18U)
         << "C-ABI write-path fixpp_msg_group_begin succeeded for a tag count other than the "
            "pinned 18 (FIX42 real group tags) -- the write-family predicate itself may have "
            "regressed, independent of the 082 read-side predicate swap";
@@ -208,7 +206,8 @@ TEST(GroupDetectionCrossPath, WriteGroupBeginMatchesBareStoreRegisteredSetBothDi
     // both tiers onto Dictionary::group_first_field.
     EXPECT_EQ(write_succeeds, bare_registered)
         << "C-ABI write-path group_begin success set vs as_table_view() bare-store registered "
-           "set: " << describe_diff(write_succeeds, bare_registered)
+           "set: "
+        << describe_diff(write_succeeds, bare_registered)
         << " -- a divergent second structural realization (K6b) is exactly what this pin exists "
            "to catch; RED pre-T023, expected GREEN post-T023";
 

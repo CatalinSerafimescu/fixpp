@@ -36,6 +36,7 @@
 #include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 
+#include <array>
 #include <asio/any_io_executor.hpp>
 #include <asio/bind_cancellation_slot.hpp>
 #include <asio/cancellation_signal.hpp>
@@ -49,7 +50,6 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -154,7 +154,7 @@ public:
         return {};
     }
 
-    int write_count() const noexcept { return write_count_; }
+    [[nodiscard]] int write_count() const noexcept { return write_count_; }
 
 private:
     asio::any_io_executor exec_;
@@ -205,7 +205,7 @@ public:
         return {};
     }
 
-    int write_count() const noexcept { return write_count_.load(); }
+    [[nodiscard]] int write_count() const noexcept { return write_count_.load(); }
 
 private:
     asio::any_io_executor exec_;
@@ -281,8 +281,8 @@ public:
         return {};
     }
 
-    int concurrent_excess() const noexcept { return concurrent_excess_.load(); }
-    int total_starts() const noexcept { return total_starts_.load(); }
+    [[nodiscard]] int concurrent_excess() const noexcept { return concurrent_excess_.load(); }
+    [[nodiscard]] int total_starts() const noexcept { return total_starts_.load(); }
 
 private:
     asio::any_io_executor exec_;
@@ -340,7 +340,7 @@ static std::vector<std::byte> make_peer_logon(std::string_view begin_string, std
     msg += body;
     unsigned int cs = 0;
     for (unsigned char c : msg) cs += c;
-    cs &= 0xFFu;
+    cs &= 0xFFU;
     char buf[5];
     snprintf(buf, sizeof(buf), "%03u", cs);
     msg += "10=" + std::string(buf) + "\x01";
@@ -368,7 +368,7 @@ static std::vector<std::byte> make_peer_heartbeat(std::string_view begin_string,
     msg += body;
     unsigned int cs = 0;
     for (unsigned char c : msg) cs += c;
-    cs &= 0xFFu;
+    cs &= 0xFFU;
     char buf[5];
     snprintf(buf, sizeof(buf), "%03u", cs);
     msg += "10=" + std::string(buf) + "\x01";
@@ -381,8 +381,8 @@ static std::vector<std::byte> make_peer_heartbeat(std::string_view begin_string,
 
 // Inbound TestRequest(35=1) with a TestReqID(112). The session replies with a
 // Heartbeat echoing the 112 — the correct outbound-emit trigger (an inbound
-// Heartbeat is never answered; data-model.md's Active-row Heartbeat cell). Used to drive the live-write
-// path that the retired Heartbeat-echo used to drive.
+// Heartbeat is never answered; data-model.md's Active-row Heartbeat cell). Used to drive the
+// live-write path that the retired Heartbeat-echo used to drive.
 static std::vector<std::byte> make_peer_test_request(std::string_view begin_string,
                                                      std::uint32_t seq, std::string_view sender,
                                                      std::string_view target,
@@ -401,7 +401,7 @@ static std::vector<std::byte> make_peer_test_request(std::string_view begin_stri
     msg += body;
     unsigned int cs = 0;
     for (unsigned char c : msg) cs += c;
-    cs &= 0xFFu;
+    cs &= 0xFFU;
     char buf[5];
     snprintf(buf, sizeof(buf), "%03u", cs);
     msg += "10=" + std::string(buf) + "\x01";
@@ -472,7 +472,7 @@ TEST(LiveOutboundSerializedTest, WriteErrorPropagatesAsFsmDisconnected) {
     EXPECT_GE(raw_ptr->write_count(), 1)
         << "The transport's async_write must have been called at least once.";
 
-    raw_ptr->close();
+    (void)raw_ptr->close();
 }
 
 TEST(LiveOutboundSerializedTest, TestRequestReplyWriteErrorDisconnectsSession) {
@@ -494,10 +494,9 @@ TEST(LiveOutboundSerializedTest, TestRequestReplyWriteErrorDisconnectsSession) {
     // needed by this test (heartbeat_interval is disabled by
     // make_acceptor_cfg); this one exists solely for the guard.
     auto teardown_clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
-    fixpp::test_support::quiesce_on_exit teardown_guard{ioc, *teardown_clock};
+    fixpp::test_support::quiesce_on_exit teardown_guard{.ioc = ioc, .clock = *teardown_clock};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s))
-        << "open() timed out";
+    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s)) << "open() timed out";
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
 
     auto raw_transport = std::make_unique<FailNthWriteTransport>(ioc.get_executor(), 2);
@@ -530,7 +529,7 @@ TEST(LiveOutboundSerializedTest, TestRequestReplyWriteErrorDisconnectsSession) {
     EXPECT_EQ(raw_ptr->write_count(), 2)
         << "exactly the reply-Logon and the failing Heartbeat reply should have written";
 
-    raw_ptr->close();
+    (void)raw_ptr->close();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -624,7 +623,7 @@ TEST(LiveOutboundSerializedTest, ConcurrentWritesNotSubmittedGenuineSecondEmit) 
     ioc.restart();
 
     // Close the transport to unblock any pending reads.
-    raw_ptr->close();
+    (void)raw_ptr->close();
     ioc.run_for(200ms);
     ioc.restart();
 
@@ -706,7 +705,7 @@ TEST(LiveOutboundSerializedTest, ReplayTransmitErrorForcesDisconnect) {
         msg += body;
         unsigned int cs = 0;
         for (unsigned char c : msg) cs += c;
-        cs &= 0xFFu;
+        cs &= 0xFFU;
         char buf[5];
         snprintf(buf, sizeof(buf), "%03u", cs);
         msg += "10=" + std::string(buf) + "\x01";
@@ -750,10 +749,9 @@ TEST(LiveOutboundSerializedTest, LivenessHeartbeatWriteErrorStopsLoop) {
     fixpp::session::Session sess{eng, cfg};
     // gate-b/r1 P1-1: declared AFTER `sess` (destructs before it), reusing
     // this test's real clock so its liveness-loop sleep is also cancelled.
-    fixpp::test_support::quiesce_on_exit teardown_guard{ioc, *clock};
+    fixpp::test_support::quiesce_on_exit teardown_guard{.ioc = ioc, .clock = *clock};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s))
-        << "open() timed out";
+    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s)) << "open() timed out";
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
 
     auto raw_transport = std::make_unique<FailNthWriteTransport>(ioc.get_executor(), 2);
@@ -785,7 +783,7 @@ TEST(LiveOutboundSerializedTest, LivenessHeartbeatWriteErrorStopsLoop) {
     EXPECT_EQ(raw_ptr->write_count(), writes_after_failure)
         << "liveness loop must stop retrying writes after a live write failure";
 
-    raw_ptr->close();
+    (void)raw_ptr->close();
 }
 
 TEST(LiveOutboundSerializedTest, CloseCancelsBlockedPublicSend) {
@@ -803,10 +801,9 @@ TEST(LiveOutboundSerializedTest, CloseCancelsBlockedPublicSend) {
     // gate-b/r1 P1-1: declared AFTER `sess` (destructs before it). No real
     // clock is otherwise needed by this test; this one exists for the guard.
     auto teardown_clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
-    fixpp::test_support::quiesce_on_exit teardown_guard{ioc, *teardown_clock};
+    fixpp::test_support::quiesce_on_exit teardown_guard{.ioc = ioc, .clock = *teardown_clock};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s))
-        << "open() timed out";
+    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s)) << "open() timed out";
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
 
     auto raw_transport = std::make_unique<ControlledWriteTransport>(ioc.get_executor());
@@ -842,7 +839,7 @@ TEST(LiveOutboundSerializedTest, CloseCancelsBlockedPublicSend) {
     EXPECT_EQ(send_fut.wait_for(0ms), std::future_status::ready)
         << "blocked send() must resolve once close() tears down the live transport";
 
-    raw_ptr->close();
+    (void)raw_ptr->close();
     if (!fixpp::test_support::run_window_then_ready(ioc, close_fut, 100ms,
                                                     "CloseCancelsBlockedPublicSend/close")) {
         // TRANSPORT-AWARE, and NOT because a clock-parked frame can exist here -- it
@@ -887,10 +884,9 @@ TEST(LiveOutboundSerializedTest, GracefulCloseCancelsBlockedPublicSend) {
     // gate-b/r1 P1-1: declared AFTER `sess` (destructs before it). No real
     // clock is otherwise needed by this test; this one exists for the guard.
     auto teardown_clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
-    fixpp::test_support::quiesce_on_exit teardown_guard{ioc, *teardown_clock};
+    fixpp::test_support::quiesce_on_exit teardown_guard{.ioc = ioc, .clock = *teardown_clock};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s))
-        << "open() timed out";
+    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s)) << "open() timed out";
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
 
     auto raw_transport = std::make_unique<ControlledWriteTransport>(ioc.get_executor());
@@ -924,7 +920,7 @@ TEST(LiveOutboundSerializedTest, GracefulCloseCancelsBlockedPublicSend) {
     if (!close_ready) {
         // Cleanup for the unfixed behavior: force-release the parked write so the
         // test fails fast instead of leaving the runner wedged.
-        raw_ptr->close();
+        (void)raw_ptr->close();
         EXPECT_TRUE(fixpp::test_support::pump_until_ready(ioc, close_fut, 1s))
             << "cleanup pump for close_fut did not complete";
     }
@@ -991,10 +987,9 @@ TEST(LiveOutboundSerializedTest, CloseBeforeLivenessStartsDoesNotLeaveQueuedUaf)
     // still quiesces the liveness sleep before `sess`'s unique_ptr destructor
     // runs. No transport is tracked here — the ControlledWriteTransport below
     // is never armed/blocked in this test, so it isn't a hang source.
-    fixpp::test_support::quiesce_on_exit teardown_guard{ioc, *clock};
+    fixpp::test_support::quiesce_on_exit teardown_guard{.ioc = ioc, .clock = *clock};
     auto open_fut = asio::co_spawn(ioc, sess->open(), asio::use_future);
-    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s))
-        << "open() timed out";
+    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s)) << "open() timed out";
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
 
     auto raw_transport = std::make_unique<ControlledWriteTransport>(ioc.get_executor());
@@ -1027,8 +1022,7 @@ TEST(LiveOutboundSerializedTest, CloseBeforeLivenessStartsDoesNotLeaveQueuedUaf)
         },
         asio::use_future);
 
-    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, close_fut, 1s))
-        << "close() timed out";
+    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, close_fut, 1s)) << "close() timed out";
     ASSERT_EQ(close_fut.wait_for(0ms), std::future_status::ready)
         << "close() must complete in the same executor turn even when liveness "
         << "has not started yet";
@@ -1092,7 +1086,7 @@ TEST(LiveOutboundSerializedTest, StopDuringLivenessWriteNoCrash) {
     // close() must drain liveness_done_ (cancel + wait for liveness to exit) and
     // write_gate_ before returning. If either drain deadlocks, the test hangs.
     // If the Session is destroyed with a held mutex, the destructor crashes.
-    raw_ptr->close();
+    (void)raw_ptr->close();
 
     auto close_fut =
         asio::co_spawn(ioc, sess.close(fixpp::session::close_mode::terminal), asio::use_future);
@@ -1149,10 +1143,9 @@ TEST(LiveOutboundSerializedTest, CallerCancelledMidCloseDoesNotWedgeSecondClose)
     // gate-b/r1 P1-1: declared AFTER `sess` (destructs before it). No real
     // clock is otherwise needed by this test; this one exists for the guard.
     auto teardown_clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
-    fixpp::test_support::quiesce_on_exit teardown_guard{ioc, *teardown_clock};
+    fixpp::test_support::quiesce_on_exit teardown_guard{.ioc = ioc, .clock = *teardown_clock};
     auto open_fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s))
-        << "open() timed out";
+    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, open_fut, 2s)) << "open() timed out";
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
 
     auto raw_transport = std::make_unique<ControlledWriteTransport>(ioc.get_executor());
@@ -1187,13 +1180,11 @@ TEST(LiveOutboundSerializedTest, CallerCancelledMidCloseDoesNotWedgeSecondClose)
     sig.emit(asio::cancellation_type::total);  // cancel the caller mid-close
 
     // second close (terminal, un-cancelled) — the Engine::stop() post-join drain analogue.
-    auto close2 = asio::co_spawn(ioc, sess.close(fixpp::session::close_mode::terminal),
-                                 asio::use_future);
+    auto close2 =
+        asio::co_spawn(ioc, sess.close(fixpp::session::close_mode::terminal), asio::use_future);
 
-    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, close1, 3s))
-        << "first close timed out";
-    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, close2, 3s))
-        << "second close timed out";
+    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, close1, 3s)) << "first close timed out";
+    ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, close2, 3s)) << "second close timed out";
 
     EXPECT_EQ(close1.wait_for(0ms), std::future_status::ready)
         << "the caller-cancelled close(graceful) must still complete";
@@ -1206,7 +1197,7 @@ TEST(LiveOutboundSerializedTest, CallerCancelledMidCloseDoesNotWedgeSecondClose)
     EXPECT_TRUE(r2.has_value() || r2.error() == fixpp::core::error::session_already_closed)
         << "second close() must observe a completed first close (ok or already-closed)";
 
-    raw_ptr->close();
+    (void)raw_ptr->close();
     ioc.run_for(100ms);
     ioc.restart();
 }
@@ -1249,8 +1240,8 @@ TEST(LiveOutboundSerializedTest, BudgetMissQuiescesBeforeSessionTeardown) {
             fixpp::transport::handshake_result hr{};
             sess.attach_accepted_transport(std::move(raw_transport), std::move(hr));
 
-            auto& logon = frames.emplace_back(
-                make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR"));
+            auto& logon =
+                frames.emplace_back(make_peer_logon("FIX.4.4", 1, "INITIATOR", "ACCEPTOR"));
             auto logon_fut = asio::co_spawn(
                 ioc, sess.on_inbound_frame(std::span<const std::byte>{logon}), asio::use_future);
             ASSERT_TRUE(fixpp::test_support::pump_until_ready(ioc, logon_fut, 2s))

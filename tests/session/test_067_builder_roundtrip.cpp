@@ -36,8 +36,8 @@
 #include <cstdint>
 #include <fixpp/core/decimal_alias.hpp>
 #include <fixpp/dict/dictionary.hpp>
-#include <fixpp/v44/all.hpp>  // GENERATED (Phase 3b) — build_<Msg>/<Msg>Args/registry
 #include <fixpp/v44/Messages.hpp>
+#include <fixpp/v44/all.hpp>  // GENERATED (Phase 3b) — build_<Msg>/<Msg>Args/registry
 #include <memory_resource>
 #include <optional>
 #include <span>
@@ -65,7 +65,7 @@ void expect_eq_field(fixpp::core::expected_t<T> got, U const& want, char const* 
 }
 
 void expect_eq_decimal(fixpp::core::expected_t<decimal_t> got, std::string_view want_ascii,
-                        std::pmr::memory_resource* mr, char const* label) {
+                       std::pmr::memory_resource* mr, char const* label) {
     SCOPED_TRACE(label);
     ASSERT_TRUE(got.has_value());
     EXPECT_EQ(*got, make_decimal(want_ascii, mr));
@@ -76,13 +76,27 @@ void expect_eq_decimal(fixpp::core::expected_t<decimal_t> got, std::string_view 
 // TOP-LEVEL tags appear in non-decreasing byte-position order (G3
 // tag-ascending regime). `tags_ascending` MUST already be tag-sorted by the
 // caller (asserting a caller mistake here would be tautological).
-void assert_body_structure(std::string const& body, std::vector<std::uint16_t> const& tags_ascending) {
+void assert_body_structure(std::string const& body,
+                           std::vector<std::uint16_t> const& tags_ascending) {
     auto const soh = std::count(body.begin(), body.end(), '\x01');
     auto const eq = std::count(body.begin(), body.end(), '=');
     EXPECT_EQ(soh, eq) << "SOH count must equal '=' count (each field terminated exactly once)";
 
     static constexpr std::array<std::string_view, 7> kFramingNeedles = {
-        "\x01" "8=", "\x01" "9=", "\x01" "10=", "\x01" "34=", "\x01" "49=", "\x01" "52=", "\x01" "56="};
+        "\x01"
+        "8=",
+        "\x01"
+        "9=",
+        "\x01"
+        "10=",
+        "\x01"
+        "34=",
+        "\x01"
+        "49=",
+        "\x01"
+        "52=",
+        "\x01"
+        "56="};
     for (auto needle : kFramingNeedles) {
         EXPECT_EQ(body.find(needle), std::string::npos) << "framing tag leaked into body";
     }
@@ -353,7 +367,7 @@ TEST(BuilderRoundtrip067, OrderMassCancelRequest) {
     expect_eq_field(fw.symbol(), seed.symbol, "symbol");
     expect_eq_field(fw.transact_time(), seed.transact_time, "transact_time");
     expect_eq_field(fw.mass_cancel_request_type(), seed.mass_cancel_request_type,
-                     "mass_cancel_request_type");
+                    "mass_cancel_request_type");
 }
 
 TEST(BuilderRoundtrip067, OrderMassCancelReport) {
@@ -386,7 +400,7 @@ TEST(BuilderRoundtrip067, OrderMassCancelReport) {
     expect_eq_field(fw.side(), seed.side, "side");
     expect_eq_field(fw.symbol(), seed.symbol, "symbol");
     expect_eq_field(fw.mass_cancel_request_type(), seed.mass_cancel_request_type,
-                     "mass_cancel_request_type");
+                    "mass_cancel_request_type");
     expect_eq_field(fw.mass_cancel_response(), seed.mass_cancel_response, "mass_cancel_response");
 }
 
@@ -539,7 +553,7 @@ TEST(BuilderRoundtrip067, MarketDataRequest) {
 
     expect_eq_field(fw.md_req_id(), seed.md_req_id, "md_req_id");
     expect_eq_field(fw.subscription_request_type(), seed.subscription_request_type,
-                     "subscription_request_type");
+                    "subscription_request_type");
     expect_eq_field(fw.market_depth(), seed.market_depth, "market_depth");
     expect_eq_field(fw.aggregated_book(), seed.aggregated_book, "aggregated_book");
 }
@@ -595,7 +609,8 @@ TEST(BuilderRoundtrip067, SecurityDefinitionRequest) {
 
     expect_eq_field(fw.symbol(), seed.symbol, "symbol");
     expect_eq_field(fw.security_req_id(), seed.security_req_id, "security_req_id");
-    expect_eq_field(fw.security_request_type(), seed.security_request_type, "security_request_type");
+    expect_eq_field(fw.security_request_type(), seed.security_request_type,
+                    "security_request_type");
 }
 
 TEST(BuilderRoundtrip067, SecurityDefinition) {
@@ -625,7 +640,7 @@ TEST(BuilderRoundtrip067, SecurityDefinition) {
     expect_eq_field(fw.security_req_id(), seed.security_req_id, "security_req_id");
     expect_eq_field(fw.security_response_id(), seed.security_response_id, "security_response_id");
     expect_eq_field(fw.security_response_type(), seed.security_response_type,
-                     "security_response_type");
+                    "security_response_type");
 }
 
 TEST(BuilderRoundtrip067, SecurityStatusRequest) {
@@ -652,9 +667,9 @@ TEST(BuilderRoundtrip067, SecurityStatusRequest) {
 
     expect_eq_field(fw.symbol(), seed.symbol, "symbol");
     expect_eq_field(fw.security_status_req_id(), seed.security_status_req_id,
-                     "security_status_req_id");
+                    "security_status_req_id");
     expect_eq_field(fw.subscription_request_type(), seed.subscription_request_type,
-                     "subscription_request_type");
+                    "subscription_request_type");
 }
 
 TEST(BuilderRoundtrip067, SecurityStatus) {
@@ -682,10 +697,11 @@ TEST(BuilderRoundtrip067, SecurityStatus) {
 
     expect_eq_field(fw.symbol(), seed.symbol, "symbol");
     expect_eq_field(fw.security_status_req_id(), seed.security_status_req_id,
-                     "security_status_req_id");
+                    "security_status_req_id");
     expect_eq_field(fw.security_trading_status(), seed.security_trading_status,
-                     "security_trading_status");
-    expect_eq_field(fw.unsolicited_indicator(), seed.unsolicited_indicator, "unsolicited_indicator");
+                    "security_trading_status");
+    expect_eq_field(fw.unsolicited_indicator(), seed.unsolicited_indicator,
+                    "unsolicited_indicator");
 }
 
 TEST(BuilderRoundtrip067, TradingSessionStatusRequest) {
@@ -713,7 +729,7 @@ TEST(BuilderRoundtrip067, TradingSessionStatusRequest) {
     expect_eq_field(fw.trad_ses_req_id(), seed.trad_ses_req_id, "trad_ses_req_id");
     expect_eq_field(fw.trading_session_id(), seed.trading_session_id, "trading_session_id");
     expect_eq_field(fw.subscription_request_type(), seed.subscription_request_type,
-                     "subscription_request_type");
+                    "subscription_request_type");
 }
 
 TEST(BuilderRoundtrip067, TradingSessionStatus) {
@@ -740,7 +756,8 @@ TEST(BuilderRoundtrip067, TradingSessionStatus) {
 
     expect_eq_field(fw.trading_session_id(), seed.trading_session_id, "trading_session_id");
     expect_eq_field(fw.trad_ses_status(), seed.trad_ses_status, "trad_ses_status");
-    expect_eq_field(fw.unsolicited_indicator(), seed.unsolicited_indicator, "unsolicited_indicator");
+    expect_eq_field(fw.unsolicited_indicator(), seed.unsolicited_indicator,
+                    "unsolicited_indicator");
 }
 
 TEST(BuilderRoundtrip067, MassQuoteAcknowledgement) {
@@ -850,7 +867,7 @@ TEST(BuilderRoundtrip067, QuoteRequestReject) {
 
     expect_eq_field(fw.quote_req_id(), seed.quote_req_id, "quote_req_id");
     expect_eq_field(fw.quote_request_reject_reason(), seed.quote_request_reject_reason,
-                     "quote_request_reject_reason");
+                    "quote_request_reject_reason");
 }
 
 TEST(BuilderRoundtrip067, QuoteCancel) {
@@ -984,8 +1001,7 @@ TEST(BuilderRoundtrip067, NewOrderListGrouped) {
     party_args.party_id = seed.order.party.party_id;
     party_args.party_id_source = seed.order.party.party_id_source;
     party_args.party_role = seed.order.party.party_role;
-    party_args.party_sub_i_ds = std::optional<
-        std::span<const fixpp::v44::groups::G_802Args>>{
+    party_args.party_sub_i_ds = std::optional<std::span<const fixpp::v44::groups::G_802Args>>{
         std::span<const fixpp::v44::groups::G_802Args>{subs}};
     std::array<fixpp::v44::groups::G_453Args, 1> parties{party_args};
 
@@ -1030,23 +1046,23 @@ TEST(BuilderRoundtrip067, NewOrderListGrouped) {
     expect_eq_field(order0.side(), seed.order.side, "order.side");
     expect_eq_field(order0.symbol(), seed.order.symbol, "order.symbol");
     expect_eq_decimal(order0.order_qty(&read_arena), seed.order.order_qty, &read_arena,
-                       "order.order_qty");
+                      "order.order_qty");
 
     auto parties_r = order0.party_i_ds();
     ASSERT_EQ(parties_r.size(), 1U);
     auto party0 = parties_r[0];
     expect_eq_field(party0.party_id(), seed.order.party.party_id, "order.party.party_id");
     expect_eq_field(party0.party_id_source(), seed.order.party.party_id_source,
-                     "order.party.party_id_source");
+                    "order.party.party_id_source");
     expect_eq_field(party0.party_role(), seed.order.party.party_role, "order.party.party_role");
 
     auto subs_r = party0.party_sub_i_ds();
     ASSERT_EQ(subs_r.size(), 1U);
     auto sub0 = subs_r[0];
     expect_eq_field(sub0.party_sub_id(), seed.order.party.sub.party_sub_id,
-                     "order.party.sub.party_sub_id");
+                    "order.party.sub.party_sub_id");
     expect_eq_field(sub0.party_sub_id_type(), seed.order.party.sub.party_sub_id_type,
-                     "order.party.sub.party_sub_id_type");
+                    "order.party.sub.party_sub_id_type");
 }
 
 TEST(BuilderRoundtrip067, AllocationReportGrouped) {
@@ -1063,9 +1079,8 @@ TEST(BuilderRoundtrip067, AllocationReportGrouped) {
     party_args.party_id = seed.party.party_id;
     party_args.party_id_source = seed.party.party_id_source;
     party_args.party_role = seed.party.party_role;
-    party_args.party_sub_i_ds =
-        std::optional<std::span<const fixpp::v44::groups::G_802Args>>{
-            std::span<const fixpp::v44::groups::G_802Args>{subs}};
+    party_args.party_sub_i_ds = std::optional<std::span<const fixpp::v44::groups::G_802Args>>{
+        std::span<const fixpp::v44::groups::G_802Args>{subs}};
     std::array<fixpp::v44::groups::G_453Args, 1> parties{party_args};
 
     fixpp::v44::AllocationReportArgs args{};
@@ -1116,7 +1131,7 @@ TEST(BuilderRoundtrip067, AllocationReportGrouped) {
     auto sub0 = subs_r[0];
     expect_eq_field(sub0.party_sub_id(), seed.party.sub.party_sub_id, "party.sub.party_sub_id");
     expect_eq_field(sub0.party_sub_id_type(), seed.party.sub.party_sub_id_type,
-                     "party.sub.party_sub_id_type");
+                    "party.sub.party_sub_id_type");
 }
 
 TEST(BuilderRoundtrip067, MarketDataSnapshotFullRefreshGrouped) {
@@ -1133,8 +1148,7 @@ TEST(BuilderRoundtrip067, MarketDataSnapshotFullRefreshGrouped) {
     fixpp::v44::MarketDataSnapshotFullRefreshArgs args{};
     args.symbol = seed.symbol;
     args.md_req_id = seed.md_req_id;
-    args.md_entries =
-        std::span<const fixpp::v44::groups::G_268_1Args>{entries};  // REQUIRED
+    args.md_entries = std::span<const fixpp::v44::groups::G_268_1Args>{entries};  // REQUIRED
 
     std::array<std::byte, 2048> out{};
     auto built = fixpp::v44::build_MarketDataSnapshotFullRefresh(std::span<std::byte>{out}, args);
@@ -1143,7 +1157,9 @@ TEST(BuilderRoundtrip067, MarketDataSnapshotFullRefreshGrouped) {
     assert_body_structure(body, {55, 262, 268});
     // RC#1 delimiter pin: W's NoMDEntries(268) delimiter is MDEntryType(269),
     // NOT MDUpdateAction(279) (X's delimiter — see the X test below).
-    EXPECT_NE(body.find("\x01" "269="), std::string::npos)
+    EXPECT_NE(body.find("\x01"
+                        "269="),
+              std::string::npos)
         << "W entry must open on MDEntryType(269)";
 
     std::pmr::monotonic_buffer_resource read_arena{8192};
@@ -1161,9 +1177,9 @@ TEST(BuilderRoundtrip067, MarketDataSnapshotFullRefreshGrouped) {
     auto entry0 = entries_r[0];
     expect_eq_field(entry0.md_entry_type(), seed.entry.md_entry_type, "entry.md_entry_type");
     expect_eq_decimal(entry0.md_entry_px(&read_arena), seed.entry.md_entry_px, &read_arena,
-                       "entry.md_entry_px");
+                      "entry.md_entry_px");
     expect_eq_decimal(entry0.md_entry_size(&read_arena), seed.entry.md_entry_size, &read_arena,
-                       "entry.md_entry_size");
+                      "entry.md_entry_size");
 }
 
 TEST(BuilderRoundtrip067, MarketDataIncrementalRefreshGrouped) {
@@ -1179,8 +1195,7 @@ TEST(BuilderRoundtrip067, MarketDataIncrementalRefreshGrouped) {
 
     fixpp::v44::MarketDataIncrementalRefreshArgs args{};
     args.md_req_id = seed.md_req_id;
-    args.md_entries =
-        std::span<const fixpp::v44::groups::G_268_2Args>{entries};  // REQUIRED
+    args.md_entries = std::span<const fixpp::v44::groups::G_268_2Args>{entries};  // REQUIRED
 
     std::array<std::byte, 2048> out{};
     auto built = fixpp::v44::build_MarketDataIncrementalRefresh(std::span<std::byte>{out}, args);
@@ -1192,8 +1207,12 @@ TEST(BuilderRoundtrip067, MarketDataIncrementalRefreshGrouped) {
     // discriminating assertion: 279 must appear STRICTLY BEFORE 269 in the
     // entry (a version-wide/tag-sorted plan would wrongly put 269 first,
     // since 269 < 279).
-    auto const pos279 = body.find("\x01" "279=");
-    auto const pos269 = body.find("\x01" "269=");
+    auto const pos279 = body.find(
+        "\x01"
+        "279=");
+    auto const pos269 = body.find(
+        "\x01"
+        "269=");
     ASSERT_NE(pos279, std::string::npos) << "X entry must contain MDUpdateAction(279)";
     ASSERT_NE(pos269, std::string::npos) << "X entry must contain MDEntryType(269)";
     EXPECT_LT(pos279, pos269)
@@ -1212,10 +1231,11 @@ TEST(BuilderRoundtrip067, MarketDataIncrementalRefreshGrouped) {
     auto entries_r = fw.md_entries();
     ASSERT_EQ(entries_r.size(), 1U);
     auto entry0 = entries_r[0];
-    expect_eq_field(entry0.md_update_action(), seed.entry.md_update_action, "entry.md_update_action");
+    expect_eq_field(entry0.md_update_action(), seed.entry.md_update_action,
+                    "entry.md_update_action");
     expect_eq_field(entry0.md_entry_type(), seed.entry.md_entry_type, "entry.md_entry_type");
     expect_eq_decimal(entry0.md_entry_px(&read_arena), seed.entry.md_entry_px, &read_arena,
-                       "entry.md_entry_px");
+                      "entry.md_entry_px");
 }
 
 TEST(BuilderRoundtrip067, MassQuoteGrouped) {
@@ -1232,8 +1252,7 @@ TEST(BuilderRoundtrip067, MassQuoteGrouped) {
     fixpp::v44::groups::G_296_2Args set_args{};
     set_args.quote_set_id = seed.set.quote_set_id;
     set_args.tot_no_quote_entries = seed.set.tot_no_quote_entries;
-    set_args.quote_entries =
-        std::span<const fixpp::v44::groups::G_295_3Args>{entries};  // REQUIRED
+    set_args.quote_entries = std::span<const fixpp::v44::groups::G_295_3Args>{entries};  // REQUIRED
     std::array<fixpp::v44::groups::G_296_2Args, 1> sets{set_args};
 
     fixpp::v44::MassQuoteArgs args{};
@@ -1247,8 +1266,14 @@ TEST(BuilderRoundtrip067, MassQuoteGrouped) {
     assert_body_structure(body, {117, 296});
     // Nested-depth insurance: outer set delimiter QuoteSetID(302), nested
     // entry delimiter QuoteEntryID(299) — both present.
-    EXPECT_NE(body.find("\x01" "302="), std::string::npos) << "outer set delimiter QuoteSetID(302)";
-    EXPECT_NE(body.find("\x01" "299="), std::string::npos) << "nested entry delimiter QuoteEntryID(299)";
+    EXPECT_NE(body.find("\x01"
+                        "302="),
+              std::string::npos)
+        << "outer set delimiter QuoteSetID(302)";
+    EXPECT_NE(body.find("\x01"
+                        "299="),
+              std::string::npos)
+        << "nested entry delimiter QuoteEntryID(299)";
 
     std::pmr::monotonic_buffer_resource read_arena{8192};
     fixpp::dict::Dictionary dict = fixpp_test_support::load_fix44(&read_arena);
@@ -1264,14 +1289,15 @@ TEST(BuilderRoundtrip067, MassQuoteGrouped) {
     auto set0 = sets_r[0];
     expect_eq_field(set0.quote_set_id(), seed.set.quote_set_id, "set.quote_set_id");
     expect_eq_field(set0.tot_no_quote_entries(), seed.set.tot_no_quote_entries,
-                     "set.tot_no_quote_entries");
+                    "set.tot_no_quote_entries");
 
     auto entries_r = set0.quote_entries();
     ASSERT_EQ(entries_r.size(), 1U);
     auto entry0 = entries_r[0];
-    expect_eq_field(entry0.quote_entry_id(), seed.set.entry.quote_entry_id, "set.entry.quote_entry_id");
+    expect_eq_field(entry0.quote_entry_id(), seed.set.entry.quote_entry_id,
+                    "set.entry.quote_entry_id");
     expect_eq_decimal(entry0.bid_px(&read_arena), seed.set.entry.bid_px, &read_arena,
-                       "set.entry.bid_px");
+                      "set.entry.bid_px");
     expect_eq_decimal(entry0.offer_px(&read_arena), seed.set.entry.offer_px, &read_arena,
-                       "set.entry.offer_px");
+                      "set.entry.offer_px");
 }

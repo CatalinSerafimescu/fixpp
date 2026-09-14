@@ -45,7 +45,6 @@
 // [041-validation-gate-wiring; const §VIII.5; data-model E-4; SC-005]
 
 #include <gtest/gtest.h>
-#include "../support/msvc_debug_arena_skip.hpp"
 
 #include <array>
 #include <atomic>
@@ -63,6 +62,7 @@
 #include <string_view>
 #include <vector>
 
+#include "../support/msvc_debug_arena_skip.hpp"
 #include "support/validation_test_dictionary.hpp"
 
 // mallocnesia provides these markers at runtime. They are weak UNDEFINED
@@ -210,7 +210,7 @@ std::vector<std::byte> make_heartbeat_frame(std::string_view begin_string, std::
     std::string full = hdr + body;
     unsigned int cs = 0;
     for (unsigned char c : full) {
-        cs += static_cast<unsigned char>(c);
+        cs += c;
     }
     cs &= 0xFFU;
     char csbuf[4];
@@ -362,15 +362,15 @@ TEST(ValidateGateAllocGuard, LongMsgTypeNoGlobalHeapAlloc) {
     // all as valid for kLongMsgType, otherwise the unexpected-tag check fires.
     fixpp::dict::table_view tv;
     // Framing tags — always present in every FIX frame (8, 9, 35, 10).
-    tv.add_valid(kLongMsgType, 8);    // BeginString
-    tv.add_valid(kLongMsgType, 9);    // BodyLength
-    tv.add_valid(kLongMsgType, 10);   // CheckSum
-    tv.add_valid(kLongMsgType, 35);   // MsgType
+    tv.add_valid(kLongMsgType, 8);   // BeginString
+    tv.add_valid(kLongMsgType, 9);   // BodyLength
+    tv.add_valid(kLongMsgType, 10);  // CheckSum
+    tv.add_valid(kLongMsgType, 35);  // MsgType
     // Required header fields for kLongMsgType.
-    tv.add_required(kLongMsgType, 34);   // MsgSeqNum
-    tv.add_required(kLongMsgType, 49);   // SenderCompID
-    tv.add_required(kLongMsgType, 52);   // SendingTime
-    tv.add_required(kLongMsgType, 56);   // TargetCompID
+    tv.add_required(kLongMsgType, 34);  // MsgSeqNum
+    tv.add_required(kLongMsgType, 49);  // SenderCompID
+    tv.add_required(kLongMsgType, 52);  // SendingTime
+    tv.add_required(kLongMsgType, 56);  // TargetCompID
 
     fixpp::wire::dictionary_driven_validator validator{tv};
 
@@ -392,7 +392,9 @@ TEST(ValidateGateAllocGuard, LongMsgTypeNoGlobalHeapAlloc) {
 
     std::string full = hdr + body;
     unsigned int cs = 0;
-    for (unsigned char c : full) { cs += c; }
+    for (unsigned char c : full) {
+        cs += c;
+    }
     cs &= 0xFFU;
     char csbuf[4];
     std::snprintf(csbuf, sizeof(csbuf), "%03u", cs);
@@ -400,7 +402,9 @@ TEST(ValidateGateAllocGuard, LongMsgTypeNoGlobalHeapAlloc) {
 
     std::vector<std::byte> frame_bytes;
     frame_bytes.reserve(full.size());
-    for (char c : full) { frame_bytes.push_back(static_cast<std::byte>(c)); }
+    for (char c : full) {
+        frame_bytes.push_back(static_cast<std::byte>(c));
+    }
     ASSERT_FALSE(frame_bytes.empty());
 
     // ── Helper lambda: one parse→validate round ───────────────────────────────
@@ -415,9 +419,9 @@ TEST(ValidateGateAllocGuard, LongMsgTypeNoGlobalHeapAlloc) {
 
         Framer vg_framer;
         std::array<fixpp::wire::frame_view, 1> vg_out{};
-        auto vg_feed = vg_framer.feed(
-            std::span<const std::byte>{frame_bytes.data(), frame_bytes.size()},
-            vg_carry, std::span<fixpp::wire::frame_view>{vg_out});
+        auto vg_feed =
+            vg_framer.feed(std::span<const std::byte>{frame_bytes.data(), frame_bytes.size()},
+                           vg_carry, std::span<fixpp::wire::frame_view>{vg_out});
         if (!vg_feed || vg_feed->empty()) {
             return false;
         }
@@ -437,8 +441,7 @@ TEST(ValidateGateAllocGuard, LongMsgTypeNoGlobalHeapAlloc) {
 
     // ── Warm-up pass (before markers, may allocate) ───────────────────────────
     bool warmup_ok = run_long_validate();
-    ASSERT_TRUE(warmup_ok)
-        << "warm-up parse+validate failed for long-MsgType frame";
+    ASSERT_TRUE(warmup_ok) << "warm-up parse+validate failed for long-MsgType frame";
 
     // ── Measured window ────────────────────────────────────────────────────────
     // PRIMARY gate: TU-local operator-new counter (g_arming / g_new_count).

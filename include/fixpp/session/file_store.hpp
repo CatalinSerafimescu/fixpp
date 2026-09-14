@@ -110,8 +110,9 @@ public:
         std::size_t max_frame_bytes = std::size_t{256} * 1024;
 
         // Executor for the file-I/O work (§4.3.2).
-        // REQUIRED at construction per [2e §4.3.2]'s required-at-construction decision. FileStoreFactory::make()
-        // resolves this with Config-supplied-wins logic (FR-024 / research D-7).
+        // REQUIRED at construction per [2e §4.3.2]'s required-at-construction decision.
+        // FileStoreFactory::make() resolves this with Config-supplied-wins logic (FR-024 / research
+        // D-7).
         //
         // CALLER OBLIGATION for direct (non-Session) FileStore use (FR-007 / C5):
         //   When FileStore is driven directly — outside Engine/Session ownership —

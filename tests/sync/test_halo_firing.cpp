@@ -43,7 +43,7 @@ static_assert(sizeof(async_mutex_awaiter) <= 96,
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(SyncHaloFiring, AwaiterSizeBudget) {
-    EXPECT_LE(sizeof(async_mutex_awaiter), 96u)
+    EXPECT_LE(sizeof(async_mutex_awaiter), 96U)
         << "async_mutex_awaiter exceeds the 96 B HALO-eligibility budget "
            "(§1.1/§6.4); the contended embedded-path cannot be HALO-eligible "
            "with the current struct layout.";

@@ -25,10 +25,9 @@
 //          contracts/generated-builder.md G5.
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/core/error.hpp>
 #include <optional>
 #include <span>
-
-#include <fixpp/core/error.hpp>
 
 namespace fixpp::wire {
 

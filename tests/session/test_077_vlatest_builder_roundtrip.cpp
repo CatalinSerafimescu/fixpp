@@ -53,8 +53,8 @@
 #include <fixpp/core/decimal_alias.hpp>
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/orchestra_loader.hpp>
-#include <fixpp/vlatest/all.hpp>  // GENERATED (077) -- build_<Msg>/<Msg>Args/groups::G_...Args
 #include <fixpp/vlatest/Messages.hpp>
+#include <fixpp/vlatest/all.hpp>  // GENERATED (077) -- build_<Msg>/<Msg>Args/groups::G_...Args
 #include <memory_resource>
 #include <optional>
 #include <span>
@@ -86,7 +86,7 @@ fixpp::dict::Dictionary load_vlatest(std::pmr::memory_resource* mr) {
 // TU-local scan_slice_for_tag -- duplicated here since this is a standalone
 // executable, not joined to that TU).
 std::optional<std::string_view> scan_slice_for_tag(std::span<const std::byte> slice,
-                                                    std::uint16_t tag) {
+                                                   std::uint16_t tag) {
     std::string_view sv{reinterpret_cast<char const*>(slice.data()), slice.size()};
     std::size_t pos = 0;
     while (pos < sv.size()) {
@@ -102,7 +102,7 @@ std::optional<std::string_view> scan_slice_for_tag(std::span<const std::byte> sl
                 ok = false;
                 break;
             }
-            parsed_tag = static_cast<std::uint16_t>(parsed_tag * 10 + (c - '0'));
+            parsed_tag = static_cast<std::uint16_t>((parsed_tag * 10) + (c - '0'));
         }
         if (ok && parsed_tag == tag) {
             return sv.substr(eq + 1, value_end - (eq + 1));
@@ -228,7 +228,7 @@ TEST_F(VlatestBuilderRoundtrip077, TradeCaptureReportInstrumentLegsUnderlyings) 
 
     // ── NoSides(552) entry-level readback ────────────────────────────────────
     auto side_slices = mv.offsets().group_slices(552);
-    ASSERT_EQ(side_slices.size(), 1u) << "NoSides(552) must carry exactly 1 entry";
+    ASSERT_EQ(side_slices.size(), 1U) << "NoSides(552) must carry exactly 1 entry";
     std::span<const std::byte> const side_entry0{side_slices[0].data, side_slices[0].len};
     auto side_val = scan_slice_for_tag(side_entry0, 54);
     ASSERT_TRUE(side_val.has_value()) << "Side(54) not found in NoSides entry";
@@ -239,7 +239,7 @@ TEST_F(VlatestBuilderRoundtrip077, TradeCaptureReportInstrumentLegsUnderlyings) 
 
     // ── NoLegs(555) entry-level readback ─────────────────────────────────────
     auto leg_slices = mv.offsets().group_slices(555);
-    ASSERT_EQ(leg_slices.size(), 1u) << "NoLegs(555) must carry exactly 1 entry";
+    ASSERT_EQ(leg_slices.size(), 1U) << "NoLegs(555) must carry exactly 1 entry";
     std::span<const std::byte> const leg_entry0{leg_slices[0].data, leg_slices[0].len};
     auto leg_symbol = scan_slice_for_tag(leg_entry0, 600);
     ASSERT_TRUE(leg_symbol.has_value()) << "LegSymbol(600) not found in NoLegs entry";
@@ -250,11 +250,12 @@ TEST_F(VlatestBuilderRoundtrip077, TradeCaptureReportInstrumentLegsUnderlyings) 
 
     // ── NoUnderlyings(711) entry-level readback ──────────────────────────────
     auto underlying_slices = mv.offsets().group_slices(711);
-    ASSERT_EQ(underlying_slices.size(), 1u) << "NoUnderlyings(711) must carry exactly 1 entry";
+    ASSERT_EQ(underlying_slices.size(), 1U) << "NoUnderlyings(711) must carry exactly 1 entry";
     std::span<const std::byte> const underlying_entry0{underlying_slices[0].data,
-                                                        underlying_slices[0].len};
+                                                       underlying_slices[0].len};
     auto underlying_symbol = scan_slice_for_tag(underlying_entry0, 311);
-    ASSERT_TRUE(underlying_symbol.has_value()) << "UnderlyingSymbol(311) not found in NoUnderlyings entry";
+    ASSERT_TRUE(underlying_symbol.has_value())
+        << "UnderlyingSymbol(311) not found in NoUnderlyings entry";
     EXPECT_EQ(*underlying_symbol, "AE_underlying_symbol");
     auto underlying_security_id = scan_slice_for_tag(underlying_entry0, 309);
     ASSERT_TRUE(underlying_security_id.has_value())

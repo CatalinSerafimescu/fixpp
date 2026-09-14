@@ -88,14 +88,13 @@ using namespace std::chrono_literals;
 
 namespace {
 
-static std::string field_str(int tag, std::string_view val) {
+std::string field_str(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
-static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
-                                             std::string_view msg_type, std::uint32_t seq,
-                                             std::string_view sender, std::string_view target,
-                                             std::string_view extra = {}) {
+std::vector<std::byte> make_fix_frame(std::string_view begin_string, std::string_view msg_type,
+                                      std::uint32_t seq, std::string_view sender,
+                                      std::string_view target, std::string_view extra = {}) {
     std::string body;
     body += field_str(35, msg_type);
     body += field_str(34, std::to_string(seq));
@@ -121,17 +120,16 @@ static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
     return frame;
 }
 
-static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
-                                         std::string_view t, int hbt = 30) {
+std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
+                                  std::string_view t, int hbt = 30) {
     std::string extra;
     extra += field_str(98, "0");
     extra += field_str(108, std::to_string(hbt));
     return make_fix_frame(bs, "A", seq, s, t, extra);
 }
 
-static std::vector<std::byte> make_logout(std::string_view bs, std::uint32_t seq,
-                                          std::string_view s, std::string_view t,
-                                          std::string_view text = {}) {
+std::vector<std::byte> make_logout(std::string_view bs, std::uint32_t seq, std::string_view s,
+                                   std::string_view t, std::string_view text = {}) {
     std::string extra;
     if (!text.empty()) extra += field_str(58, text);
     return make_fix_frame(bs, "5", seq, s, t, extra);
@@ -209,7 +207,7 @@ protected:
                          std::string_view our_target) {
         if (!run_open(s).has_value()) return false;
         auto logon = make_logon("FIX.4.2", 1, our_target, our_sender);
-        feed(s, logon);
+        if (!feed(s, logon).has_value()) return false;
         return s.state() == fixpp::session::fsm_state::Active;
     }
 };
@@ -226,7 +224,7 @@ TEST_F(LogoutTimeoutTest, Existing005_Acceptor_PeerLogout_EchoesAndDisconnects) 
     ASSERT_TRUE(drive_to_active(sess, "ISLD", "TW"));
 
     auto peer_logout = make_logout("FIX.4.2", 2, "TW", "ISLD");
-    feed(sess, peer_logout);
+    (void)feed(sess, peer_logout);  // outcome checked below via state/events
 
     // Pre-existing 005 behavior: already GREEN.
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
@@ -277,7 +275,7 @@ TEST_F(LogoutTimeoutTest, DriveLogoutStub_EmitsNoLogoutFrame) {
     // the transport_send won't fire. This cell confirms the stub is
     // completely empty (no side effects at all).
     // The 013 impl will emit via the session's store_then_emit path.
-    EXPECT_EQ(capture.frames.size(), 0u)
+    EXPECT_EQ(capture.frames.size(), 0U)
         << "drive_logout stub must not emit any frames directly "
         << "(the 013 impl will use the session's store_then_emit). "
         << "This confirms the stub shape is correct for RED phase.";
@@ -317,7 +315,7 @@ TEST_F(LogoutTimeoutTest, ConfigurableTimeoutField_WiredInto013RecoveryFsm) {
 
     // Trigger peer Logout → session echoes + 013 should arm timeout timer.
     auto peer_logout = make_logout("FIX.4.2", 2, "TW", "ISLD");
-    feed(sess, peer_logout);
+    (void)feed(sess, peer_logout);  // outcome checked below via state/events
 
     // The session has Disconnected (005 behavior). 013-new: drive_logout
     // should have surfaced a SessionEvent with the timeout disposition.
@@ -338,7 +336,7 @@ TEST_F(LogoutTimeoutTest, ConfigurableTimeoutField_WiredInto013RecoveryFsm) {
     //   other events via emit_event().
     // For the RED cell: we assert total_events > 0 expecting the logout to
     // surface via recent_events(). The stub emits 0 events → FAILS RED.
-    EXPECT_GT(total_events, 0u)
+    EXPECT_GT(total_events, 0U)
         << "013-new: drive_logout must emit at least one SessionEvent into "
         << "recent_events() when the logout exchange completes or times out. "
         << "RED: stub emits no events → total_events=0 → FAILS RED per T019 design.";
@@ -362,7 +360,7 @@ TEST_F(LogoutTimeoutTest, Acceptor_TimeoutFires_SurfacesLogoutTimeoutEvent) {
 
     // Peer sends Logout; acceptor echoes + should arm 300ms timeout.
     auto peer_logout = make_logout("FIX.4.2", 2, "TW", "ISLD");
-    feed(sess, peer_logout);
+    (void)feed(sess, peer_logout);  // outcome checked below via state/events
 
     // Advance clock past the 300ms timeout (peer doesn't TCP-close).
     // #289 batch 19 -- ESCALATION ROW, DISPOSITIONED: KIND G (vestigial).
@@ -389,7 +387,7 @@ TEST_F(LogoutTimeoutTest, Acceptor_TimeoutFires_SurfacesLogoutTimeoutEvent) {
     std::size_t total_events =
         static_cast<std::size_t>(std::distance(events.begin(), events.end()));
 
-    EXPECT_GT(total_events, 0u)
+    EXPECT_GT(total_events, 0U)
         << "013-new: after logout timeout (300ms), drive_logout must surface a "
         << "SessionEvent (timeout notification) via recent_events(). "
         << "RED: stub emits no events → FAILS RED per T019 design.";
@@ -411,7 +409,7 @@ TEST_F(LogoutTimeoutTest, Initiator_DriveLogout_EmitsNoEvent_ConfirmStubSymmetry
     ASSERT_TRUE(drive_to_active(sess, "ISLD", "TW"));
 
     auto peer_logout = make_logout("FIX.4.2", 2, "TW", "ISLD");
-    feed(sess, peer_logout);
+    (void)feed(sess, peer_logout);  // outcome checked below via state/events
 
     auto events = sess.recent_events();
     std::size_t total_events =
@@ -420,7 +418,7 @@ TEST_F(LogoutTimeoutTest, Initiator_DriveLogout_EmitsNoEvent_ConfirmStubSymmetry
     // Symmetry check: both initiator and acceptor paths must emit events.
     // RED: stub emits 0 events for both → FAILS RED per T019 /
     // [[feedback_half_restructure_symmetric_api]].
-    EXPECT_GT(total_events, 0u)
+    EXPECT_GT(total_events, 0U)
         << "Symmetric cell: initiator drive_logout path must also emit SessionEvent. "
         << "RED: stub emits 0 events (symmetrically no-op) → FAILS RED per T019.";
 }

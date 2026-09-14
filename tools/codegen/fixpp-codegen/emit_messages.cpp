@@ -272,12 +272,11 @@ void emit_group_class(TemplateWriter& w, VersionIR const& ir, MemberMap const& m
             // view's STORED context must push the nested group's own no_tag, so a
             // further descent (a depth-3 grandchild) resolves membership under the
             // full path [...parent, child] — reconciling the typed path UP to the
-            // already-correct C-ABI cursor (fixpp_group_get_nested_group's group_ctx.pushed()). The push
-            // happens exactly once, here at mint; group_view::operator[] stays a
-            // verbatim base_ctx_ copy (pushing there too would double-push).
-            // 073 T010: `r` is the status-bearing `nested_slices_result`
-            // (contracts/nested_slices_result.md) — `r.alloc_failed` is
-            // threaded into the returned group_view so a typed caller can
+            // already-correct C-ABI cursor (fixpp_group_get_nested_group's group_ctx.pushed()). The
+            // push happens exactly once, here at mint; group_view::operator[] stays a verbatim
+            // base_ctx_ copy (pushing there too would double-push). 073 T010: `r` is the
+            // status-bearing `nested_slices_result` (contracts/nested_slices_result.md) —
+            // `r.alloc_failed` is threaded into the returned group_view so a typed caller can
             // distinguish a legitimately-empty group from a failed sub-view
             // allocation (D4).
             w.raw(

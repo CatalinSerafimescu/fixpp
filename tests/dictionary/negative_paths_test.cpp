@@ -43,7 +43,7 @@ inline unsigned current_pid() noexcept {
 
 namespace {
 
-constexpr std::size_t kArenaSize = 256u * 1024u;
+constexpr std::size_t kArenaSize = 256U * 1024U;
 
 struct Arena {
     std::array<std::byte, kArenaSize> buf{};
@@ -442,8 +442,9 @@ TEST(NegativePaths, RejectsGroupWithoutMatchingNoFieldDeclaration) {
 TEST(NegativePaths, LoadRejectsMalformedXmlFileWithPugixmlDescription) {
     auto* mr = std::pmr::new_delete_resource();
     // Per-process-unique filename avoids clobber under sharded/parallel reruns.
-    auto const path = std::filesystem::temp_directory_path() /
-                      ("fixpp_dictionary_malformed_input_" + std::to_string(current_pid()) + ".xml");
+    auto const path =
+        std::filesystem::temp_directory_path() /
+        ("fixpp_dictionary_malformed_input_" + std::to_string(current_pid()) + ".xml");
     // RAII guard: remove the temp file on every exit path (throw or return).
     struct FileGuard {
         std::filesystem::path const& p;

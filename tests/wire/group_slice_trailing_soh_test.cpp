@@ -31,6 +31,7 @@
 #include <string_view>
 #include <vector>
 
+#include "support/expired_parser_parse.hpp"
 #include "support/frame_view_factory.hpp"
 #include "support/mock_dict_table.hpp"
 
@@ -106,8 +107,9 @@ TEST(GroupSliceTrailingSoh, WholeFrameParseUnchanged) {
     auto slices = mv->offsets().group_slices(453);
     ASSERT_EQ(slices.size(), 1U);
     std::string_view sv{reinterpret_cast<char const*>(slices[0].data), slices[0].len};
-    EXPECT_EQ(sv, "448=PA\x01"
-                  "447=D");
+    EXPECT_EQ(sv,
+              "448=PA\x01"
+              "447=D");
 }
 
 // RC1 witness: the outer entry's LAST field is a counted Length+Data field
@@ -180,22 +182,24 @@ TEST(GroupSliceTrailingSoh, NestedSliceBuildCountedLastField) {
     // 063 T008: the new context arg — carried but unused in Phase 2 (the
     // predicate ignores it); a plausible root context is enough.
     fixpp::wire::group_context const test_ctx{.msg_type = "D"};
-    auto inner_slices = mv->offsets().nested_group_slices(
-        outer0.data, outer0.len, /*nested_no_tag=*/802, &dict, &dict_group_member, fv->token(),
-        test_ctx).slices;
+    auto inner_slices = mv->offsets()
+                            .nested_group_slices(outer0.data, outer0.len, /*nested_no_tag=*/802,
+                                                 &dict, &dict_group_member, fv->token(), test_ctx)
+                            .slices;
     ASSERT_EQ(inner_slices.size(), 1U)
         << "nested sub-view build over a counted-last-field, frame-tail entry must succeed";
 
     auto const& inner0 = inner_slices[0];
-    auto delim_field =
-        fixpp::wire::get({inner0.data, inner0.len}, /*tag=*/523, fv->token());
+    auto delim_field = fixpp::wire::get({inner0.data, inner0.len}, /*tag=*/523, fv->token());
     ASSERT_TRUE(delim_field.has_value());
     EXPECT_EQ(delim_field->as_string(), "Q");
 
     // A second call with the SAME (slice, no_tag) key must be served from
     // the cache and return the same content (build-once / fetch-cached).
-    auto inner_slices_again = mv->offsets().nested_group_slices(
-        outer0.data, outer0.len, 802, &dict, &dict_group_member, fv->token(), test_ctx).slices;
+    auto inner_slices_again = mv->offsets()
+                                  .nested_group_slices(outer0.data, outer0.len, 802, &dict,
+                                                       &dict_group_member, fv->token(), test_ctx)
+                                  .slices;
     ASSERT_EQ(inner_slices_again.size(), 1U);
     EXPECT_EQ(inner_slices_again[0].data, inner0.data);
     EXPECT_EQ(inner_slices_again[0].len, inner0.len);
@@ -232,10 +236,7 @@ TEST(GroupSliceTrailingSoh, OversizedCountPerInstanceCapPreserved) {
 
     std::pmr::monotonic_buffer_resource arena;
     OffsetTable::Config tight_cfg{.max_offset_entries = 4096, .max_group_entries_per_instance = 3};
-    auto mv = [&]() {
-        Parser<access_mode::Index> parser{dict};
-        return parser.parse(*fv, &arena, tight_cfg);
-    }();
+    auto mv = fixpp::wire::test::parse_with_expired_parser(dict, *fv, &arena, tight_cfg);
     ASSERT_TRUE(mv.has_value());
 
     auto g = mv->offsets().group(453);

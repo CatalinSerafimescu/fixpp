@@ -41,17 +41,16 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
-#include <memory_resource>
-#include <new>
-#include <optional>
-#include <span>
-#include <vector>
-
 #include <fixpp/core/error.hpp>
 #include <fixpp/dict/reify.hpp>
 #include <fixpp/dict/table_view.hpp>
 #include <fixpp/dict/version_profile.hpp>
 #include <fixpp/wire/message_view_contract.hpp>
+#include <memory_resource>
+#include <new>
+#include <optional>
+#include <span>
+#include <vector>
 
 #include "support/fix44_dictionary.hpp"
 #include "support/fix44_group_frame_bodies.hpp"
@@ -128,7 +127,10 @@ using fixpp::dict::owning_message_handle;
 using fixpp::dict::session_version;
 using fixpp::dict::version_profile;
 
-constexpr version_profile kProfileV44{session_version::v44, application_version::v44, false, 0};
+constexpr version_profile kProfileV44{.session = session_version::v44,
+                                      .default_appl = application_version::v44,
+                                      .has_per_message_override = false,
+                                      ._reserved = 0};
 
 // Parses the shared execution-report frame, either dict-backed (tv != nullptr)
 // or dict-free (tv == nullptr), and calls fixpp::dict::reify(). The parse
@@ -183,8 +185,7 @@ TEST(ReifyMembershipCopyOom, TableViewCopyOomYieldsDictReifyOom) {
     std::pmr::monotonic_buffer_resource handle_mr_free;
     g_alloc_count.store(0);
     g_fail_at.store(-1);
-    auto r_free =
-        reify_execution_report(frame_bytes, nullptr, &parse_arena_free, &handle_mr_free);
+    auto r_free = reify_execution_report(frame_bytes, nullptr, &parse_arena_free, &handle_mr_free);
     long const t_free = g_alloc_count.load();
     ASSERT_TRUE(r_free.has_value()) << "calibration: dict-free reify() must succeed";
 
@@ -192,8 +193,7 @@ TEST(ReifyMembershipCopyOom, TableViewCopyOomYieldsDictReifyOom) {
     std::pmr::monotonic_buffer_resource handle_mr_dict;
     g_alloc_count.store(0);
     g_fail_at.store(-1);
-    auto r_dict =
-        reify_execution_report(frame_bytes, &tv, &parse_arena_dict, &handle_mr_dict);
+    auto r_dict = reify_execution_report(frame_bytes, &tv, &parse_arena_dict, &handle_mr_dict);
     long const t_dict = g_alloc_count.load();
     ASSERT_TRUE(r_dict.has_value()) << "calibration: dict-backed reify() must succeed";
 

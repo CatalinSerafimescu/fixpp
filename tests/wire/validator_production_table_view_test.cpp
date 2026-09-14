@@ -85,29 +85,30 @@ fixpp::dict::Dictionary load_tiny_dict(std::pmr::memory_resource* mr) {
 // Mirrors real dicts (e.g. FIX44 NoPartyIDs(453): delimiter PartyID(448) but
 // lowest member PartyIDSource(447)).
 fixpp::dict::Dictionary load_group_dict(std::pmr::memory_resource* mr) {
-    constexpr std::string_view kXml = R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
-                                      R"(<fields>)"
-                                      R"(<field number='8'  name='BeginString' type='STRING'/>)"
-                                      R"(<field number='9'  name='BodyLength'  type='LENGTH'/>)"
-                                      R"(<field number='10' name='CheckSum'    type='STRING'/>)"
-                                      R"(<field number='35' name='MsgType'     type='STRING'/>)"
-                                      R"(<field number='100' name='NoThings'   type='NUMINGROUP'/>)"
-                                      R"(<field number='150' name='ThingB'     type='INT'/>)"
-                                      R"(<field number='200' name='ThingA'     type='STRING'/>)"
-                                      R"(</fields>)"
-                                      R"(<messages>)"
-                                      R"(<message name='Things' msgtype='U' msgcat='app'>)"
-                                      R"(  <field name='BeginString'   required='N'/>)"
-                                      R"(  <field name='BodyLength'    required='N'/>)"
-                                      R"(  <field name='CheckSum'      required='N'/>)"
-                                      R"(  <field name='MsgType' required='N'/>)"
-                                      R"(  <group name='NoThings' required='N'>)"
-                                      R"(    <field name='ThingA' required='N'/>)"  // 200 = delimiter
-                                      R"(    <field name='ThingB' required='N'/>)"  // 150
-                                      R"(  </group>)"
-                                      R"(</message>)"
-                                      R"(</messages>)"
-                                      R"(</fix>)";
+    constexpr std::string_view kXml =
+        R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+        R"(<fields>)"
+        R"(<field number='8'  name='BeginString' type='STRING'/>)"
+        R"(<field number='9'  name='BodyLength'  type='LENGTH'/>)"
+        R"(<field number='10' name='CheckSum'    type='STRING'/>)"
+        R"(<field number='35' name='MsgType'     type='STRING'/>)"
+        R"(<field number='100' name='NoThings'   type='NUMINGROUP'/>)"
+        R"(<field number='150' name='ThingB'     type='INT'/>)"
+        R"(<field number='200' name='ThingA'     type='STRING'/>)"
+        R"(</fields>)"
+        R"(<messages>)"
+        R"(<message name='Things' msgtype='U' msgcat='app'>)"
+        R"(  <field name='BeginString'   required='N'/>)"
+        R"(  <field name='BodyLength'    required='N'/>)"
+        R"(  <field name='CheckSum'      required='N'/>)"
+        R"(  <field name='MsgType' required='N'/>)"
+        R"(  <group name='NoThings' required='N'>)"
+        R"(    <field name='ThingA' required='N'/>)"  // 200 = delimiter
+        R"(    <field name='ThingB' required='N'/>)"  // 150
+        R"(  </group>)"
+        R"(</message>)"
+        R"(</messages>)"
+        R"(</fix>)";
     return fixpp::dict::XmlLoader{}.load_from_string(kXml, mr);
 }
 
@@ -159,7 +160,7 @@ MessageView<access_mode::Index> parse_index(std::vector<std::byte> const& buf,
 // no longer depends on test/support/mock_dict_table.hpp being included first.
 
 TEST(ValidatorProductionTableView, InstantiatesFromProductionTableView) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto dict = load_tiny_dict(&mr);
     auto tv = dict.as_table_view();
@@ -183,7 +184,7 @@ TEST(ValidatorProductionTableView, InstantiatesFromProductionTableView) {
 // with wire_required_field_missing — a false rejection of a valid real-dict
 // group (e.g. any FIX44 message carrying a NoPartyIDs(453) Parties group).
 TEST(ValidatorProductionTableView, GroupDelimiterFromWireNotTagSortedMember) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto dict = load_group_dict(&mr);
     auto tv = dict.as_table_view();
@@ -223,7 +224,7 @@ TEST(ValidatorProductionTableView, GroupDelimiterFromWireNotTagSortedMember) {
 // all-unknown-tags frame; this frame's body fields are otherwise-known tags,
 // per the brief.
 TEST(ValidatorProductionTableView, UnknownMsgTypeRejectsLikePreHoistFieldValidFor) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto dict = load_tiny_dict(&mr);
     auto tv_direct = dict.as_table_view();  // separate copy for the direct assertion below
@@ -281,7 +282,7 @@ TEST(ValidatorProductionTableView, UnknownMsgTypeRejectsLikePreHoistFieldValidFo
 // This test is RED before T009a's remap and GREEN after.
 
 TEST(ValidatorProductionTableView, FloatGarbageValueRemappedToWireOutOfRange) {
-    std::vector<std::byte> buf(2u * 1024u * 1024u);
+    std::vector<std::byte> buf(2U * 1024U * 1024U);
     std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
     auto dict = load_tiny_dict(&mr);
     auto tv = dict.as_table_view();

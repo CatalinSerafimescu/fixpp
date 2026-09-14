@@ -8,12 +8,6 @@
 //   - one OTLP metric through OtelDualExportBuilder
 //   - one span through fixpp::otel::TracerProvider (expected to be discarded)
 
-#include <fixpp/log/file_sink.hpp>
-#include <fixpp/log/logger.hpp>
-#include <fixpp/log/otlp_log_sink.hpp>
-#include <fixpp/otel/exporters.hpp>
-#include <fixpp/otel/providers.hpp>
-
 #include <opentelemetry/metrics/sync_instruments.h>
 #include <opentelemetry/sdk/metrics/meter_provider.h>
 #include <opentelemetry/trace/span.h>
@@ -21,6 +15,11 @@
 
 #include <chrono>
 #include <filesystem>
+#include <fixpp/log/file_sink.hpp>
+#include <fixpp/log/logger.hpp>
+#include <fixpp/log/otlp_log_sink.hpp>
+#include <fixpp/otel/exporters.hpp>
+#include <fixpp/otel/providers.hpp>
 #include <iostream>
 #include <memory_resource>
 #include <string>
@@ -35,8 +34,7 @@ struct Args {
 
 Args parse_args(int argc, char** argv) {
     if (argc != 3) {
-        throw std::runtime_error(
-            "usage: otel_smoke <log-dir> <otlp-http-base-url>");
+        throw std::runtime_error("usage: otel_smoke <log-dir> <otlp-http-base-url>");
     }
     return Args{
         .log_dir = argv[1],
@@ -59,8 +57,7 @@ std::unique_ptr<fixpp::log::Logger> make_logger(std::filesystem::path const& log
     otlp_cfg.max_export_batch = 16;
     otlp_cfg.max_export_retries = 1;
 
-    std::pmr::vector<std::unique_ptr<fixpp::log::Sink>> sinks{
-        std::pmr::get_default_resource()};
+    std::pmr::vector<std::unique_ptr<fixpp::log::Sink>> sinks{std::pmr::get_default_resource()};
     sinks.push_back(std::make_unique<fixpp::log::FileSink>(file_cfg));
     sinks.push_back(std::make_unique<fixpp::log::OtlpLogSink>(otlp_cfg));
 
@@ -85,15 +82,13 @@ void emit_metric(std::string const& otlp_http_base) {
     metric_cfg.export_timeout = std::chrono::milliseconds{5'000};
 
     auto meter_provider = fixpp::otel::OtelDualExportBuilder{}.with_otlp(metric_cfg).build();
-    auto* sdk_mp =
-        dynamic_cast<opentelemetry::sdk::metrics::MeterProvider*>(meter_provider.get());
+    auto* sdk_mp = dynamic_cast<opentelemetry::sdk::metrics::MeterProvider*>(meter_provider.get());
     if (sdk_mp == nullptr) {
         throw std::runtime_error("metric provider is not an SDK MeterProvider");
     }
 
     auto meter = meter_provider->GetMeter("fixpp.otel.smoke");
-    auto counter = meter->CreateUInt64Counter("fixpp.smoke.counter",
-                                              "fixpp OTel smoke counter");
+    auto counter = meter->CreateUInt64Counter("fixpp.smoke.counter", "fixpp OTel smoke counter");
     counter->Add(3);
 
     if (!sdk_mp->ForceFlush(std::chrono::microseconds{10'000'000})) {

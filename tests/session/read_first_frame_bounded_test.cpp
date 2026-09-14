@@ -353,8 +353,8 @@ TEST(ReadFirstFrameBounded, B2) {
         std::vector<std::byte>(stream.begin(), stream.begin() + 1000),
         std::vector<std::byte>(stream.begin() + 1000, stream.end()),
     };
-    ASSERT_EQ(s.inbound_chunks[0].size(), 1000u);
-    ASSERT_EQ(s.inbound_chunks[1].size(), 3097u);
+    ASSERT_EQ(s.inbound_chunks[0].size(), 1000U);
+    ASSERT_EQ(s.inbound_chunks[1].size(), 3097U);
 
     asio::io_context ioc;
     // Frozen (#377): never advanced, so the deadline cannot fire and cannot
@@ -430,9 +430,8 @@ TEST(ReadFirstFrameBounded, B5) {
     mock_transport mt{ioc.get_executor(), std::move(s)};
     std::vector<std::byte> buf;
 
-    auto fut = asio::co_spawn(
-        ioc, read_first_frame_bounded(mt, buf, clock, kDeadline, kMaxBytes),
-        asio::use_future);
+    auto fut = asio::co_spawn(ioc, read_first_frame_bounded(mt, buf, clock, kDeadline, kMaxBytes),
+                              asio::use_future);
     if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, fut, "ReadFirstFrameBounded::B5")) {
         return;
     }
@@ -641,12 +640,12 @@ TEST(ReadFirstFrameBounded, T1) {
             EXPECT_EQ(**result, kLogonLen)
                 << "T1 (SC-005/SC-006): the admitted frame's exact length.";
         }
-        EXPECT_EQ(mt.async_reads_observed(), 1u)
+        EXPECT_EQ(mt.async_reads_observed(), 1U)
             << "T1: expected exactly one read (the whole frame arrives in it) — a second read "
             << "would mean framer.feed found nothing on the first and this cell is not exercising "
             << "the frame-found race D-6.2 describes.";
 
-        EXPECT_EQ(mt.cancels_observed(), 0u)
+        EXPECT_EQ(mt.cancels_observed(), 0U)
             << "T1 (SC-005/SC-006) [S5 proxy — research.md D-6.2/N3, not the full postcondition: "
             << "this observes that no cancel() RAN, which is narrower than 'no handler armed by "
             << "this call is outstanding on return']: expected zero cancel() calls after the "
@@ -787,7 +786,7 @@ TEST(ReadFirstFrameBounded, B4) {
                "read was never issued. The deadline is a termination bound and must not compete "
                "— see the derivation above this cell before touching any assertion.";
     }
-    EXPECT_EQ(mt.async_reads_observed(), 2u)
+    EXPECT_EQ(mt.async_reads_observed(), 2U)
         << "B4 (SC-003) [mechanism pin]: expected exactly two reads (4096 then the room-clamped 1) "
            "— "
         << "the step-5 budget decision, not an earlier framer-level reject.";
@@ -874,7 +873,7 @@ TEST(ReadFirstFrameBounded, B6) {
     Script s;
     s.inbound_chunks.reserve(payload.size());
     for (std::byte b : payload) s.inbound_chunks.push_back({b});
-    ASSERT_EQ(s.inbound_chunks.size(), 201u);
+    ASSERT_EQ(s.inbound_chunks.size(), 201U);
     s.read_latency = std::chrono::milliseconds{7};
 
     asio::io_context ioc;
@@ -1109,7 +1108,7 @@ TEST(ReadFirstFrameBounded, T2a) {
     ASSERT_FALSE(result.has_value())
         << "T2a: the helper completed before cancellation was ever emitted — the "
         << "barrier cannot certify suspension inside the join.";
-    EXPECT_GE(mt.async_reads_observed(), 1u)
+    EXPECT_GE(mt.async_reads_observed(), 1U)
         << "T2a (mechanism 4): no read was initiated before cancellation — the read "
         << "arm never became genuinely in-flight, so this cell would not exercise "
         << "D-2's join at all.";
@@ -1120,7 +1119,7 @@ TEST(ReadFirstFrameBounded, T2a) {
     // note above this cell. It kills the bare-deadline-arm mutant, and it does
     // so without comparing any elapsed time to any constant.
     while (!result.has_value()) {
-        ASSERT_GT(ioc.run_one_for(kJoinWatchdog), 0u)
+        ASSERT_GT(ioc.run_one_for(kJoinWatchdog), 0U)
             << "T2a (SC-015/FR-015): the join did not retire. The clock here is a FROZEN "
             << "mock_clock, so the deadline cannot fire and the ONLY way out of the join is "
             << "for the group's cancel to reach the deadline arm and abort its sleep. That "
@@ -1173,7 +1172,7 @@ TEST(ReadFirstFrameBounded, CovSharedClockSweep) {
     // 2048 keeps make_logon_of_length's 4-digit-BodyLength precondition satisfied
     // (the same reason the other cells use kMaxBytes-scale lengths).
     std::vector<std::byte> const payload = make_logon_of_length(2048);
-    ASSERT_EQ(payload.size(), 2048u) << "CovSharedClockSweep: fixture did not build a frame.";
+    ASSERT_EQ(payload.size(), 2048U) << "CovSharedClockSweep: fixture did not build a frame.";
     Script s;
     s.inbound_chunks.emplace_back(payload.begin(), payload.begin() + 8);
     s.inbound_chunks.emplace_back(payload.begin() + 8, payload.end());
@@ -1191,7 +1190,7 @@ TEST(ReadFirstFrameBounded, CovSharedClockSweep) {
     // Drive until the helper is genuinely suspended inside the join with a read in
     // flight — a sweep before that would not exercise the deadline arm at all.
     for (int i = 0; i < 10'000 && mt.async_reads_observed() == 0; ++i) ioc.poll();
-    ASSERT_GE(mt.async_reads_observed(), 1u)
+    ASSERT_GE(mt.async_reads_observed(), 1U)
         << "CovSharedClockSweep: no read was ever initiated — the sweep below would land "
            "before the deadline arm existed, making this cell vacuous.";
 
@@ -1284,9 +1283,8 @@ TEST(ReadFirstFrameBounded, CovFramerErrorPropagates) {
 //
 // Construction: an empty Script (no inbound_bytes, no inbound_chunks) makes
 // every async_read_some hit the mock's exhaustion path immediately
-// (mock_transport::async_read_some's exhaustion check, read_cursor_ >= inbound_bytes.size() == 0 ==>
-// transport_read_eof) with no latency, so the deadline arm (500ms) cannot
-// win the join.
+// (mock_transport::async_read_some's exhaustion check, read_cursor_ >= inbound_bytes.size() == 0
+// ==> transport_read_eof) with no latency, so the deadline arm (500ms) cannot win the join.
 TEST(ReadFirstFrameBounded, CovReadErrorPropagates) {
     constexpr std::size_t kMaxBytes = 4096;
     constexpr auto kDeadline = std::chrono::milliseconds{500};
@@ -1313,7 +1311,8 @@ TEST(ReadFirstFrameBounded, CovReadErrorPropagates) {
         << describe(result);
     EXPECT_EQ(result.error(), error::transport_read_eof)
         << "coverage cell: expected the read arm's error to PROPAGATE VERBATIM "
-           "(read_first_frame_bounded's read-error propagation; contracts/read_first_frame_bounded.md), got "
+           "(read_first_frame_bounded's read-error propagation; "
+           "contracts/read_first_frame_bounded.md), got "
         << describe(result);
     EXPECT_NE(result.error(), error::transport_read_cancelled)
         << "coverage cell: mapping every read error to a cancellation-attributable "

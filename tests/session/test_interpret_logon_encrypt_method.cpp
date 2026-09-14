@@ -150,8 +150,8 @@ TEST(InterpretLogonEncryptMethod, NonZeroThenZeroEncryptMethodRejected) {
     body += "49=TW\x01";
     body += "52=20240101-00:00:00.000\x01";
     body += "56=ISLD\x01";
-    body += "98=2\x01";   // real non-zero EncryptMethod (legit first)
-    body += "98=0\x01";   // forged zero after (forged "self-heal")
+    body += "98=2\x01";  // real non-zero EncryptMethod (legit first)
+    body += "98=0\x01";  // forged zero after (forged "self-heal")
     body += "108=30\x01";
     auto result = interpret(body);
     ASSERT_FALSE(result.has_value())

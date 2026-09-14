@@ -86,7 +86,8 @@ public:
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store(
         seqnum_t seq, std::span<const std::byte> frame, direction_t dir) noexcept override {
         if (dir == direction_t::outbound) {
-            outbound_records.push_back({seq, std::vector<std::byte>(frame.begin(), frame.end())});
+            outbound_records.push_back(
+                {.seq = seq, .frame = std::vector<std::byte>(frame.begin(), frame.end())});
             // Track next_out_ so next_seqnum(outbound, false) correctly returns
             // the value AFTER the highest stored seq (for the ResendRequest path
             // which uses this to compute our_last = next_seqnum - 1).
@@ -144,7 +145,7 @@ static std::vector<std::byte> make_fix_frame(std::string_view body_str) {
     std::string full = hdr + std::string(body_str);
     unsigned int cs = 0;
     for (unsigned char c : full) cs += c;
-    cs &= 0xFFu;
+    cs &= 0xFFU;
     char csbuf[4];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     full += "10=" + std::string(csbuf) + "\x01";
@@ -711,48 +712,48 @@ class MalformedField131Test : public AllowPosDupStripTest,
 // Note: do NOT add a "no final SOH" case — the 020 floor rejects it in send_impl
 //       (that measures the floor, not the 022 scanner).
 static const MalformedCase kMalformedCases[] = {
-    {"MissingEquals",
-     "35=D\x01"
-     "11BROKEN\x01"
-     "43=Y\x01",
-     sizeof("35=D\x01"
-            "11BROKEN\x01"
-            "43=Y\x01") -
-         1},
-    {"EmptyTag",
-     "35=D\x01"
-     "=bad\x01"
-     "122=x\x01",
-     sizeof("35=D\x01"
-            "=bad\x01"
-            "122=x\x01") -
-         1},
-    {"NonDigitTag",
-     "35=D\x01"
-     "4a=x\x01"
-     "43=Y\x01",
-     sizeof("35=D\x01"
-            "4a=x\x01"
-            "43=Y\x01") -
-         1},
-    {"EmptyField",
-     "35=D\x01"
-     "\x01"
-     "43=Y\x01",
-     sizeof("35=D\x01"
-            "\x01"
-            "43=Y\x01") -
-         1},
+    {.name = "MissingEquals",
+     .payload = "35=D\x01"
+                "11BROKEN\x01"
+                "43=Y\x01",
+     .payload_len = sizeof("35=D\x01"
+                           "11BROKEN\x01"
+                           "43=Y\x01") -
+                    1},
+    {.name = "EmptyTag",
+     .payload = "35=D\x01"
+                "=bad\x01"
+                "122=x\x01",
+     .payload_len = sizeof("35=D\x01"
+                           "=bad\x01"
+                           "122=x\x01") -
+                    1},
+    {.name = "NonDigitTag",
+     .payload = "35=D\x01"
+                "4a=x\x01"
+                "43=Y\x01",
+     .payload_len = sizeof("35=D\x01"
+                           "4a=x\x01"
+                           "43=Y\x01") -
+                    1},
+    {.name = "EmptyField",
+     .payload = "35=D\x01"
+                "\x01"
+                "43=Y\x01",
+     .payload_len = sizeof("35=D\x01"
+                           "\x01"
+                           "43=Y\x01") -
+                    1},
     // Empty VALUE: tag present + '=' present but zero-length value ("58=\x01").
     // Distinct from EmptyField (zero-length field). Scanner check (d) → 131.
-    {"EmptyValue",
-     "35=D\x01"
-     "58=\x01"
-     "43=Y\x01",
-     sizeof("35=D\x01"
-            "58=\x01"
-            "43=Y\x01") -
-         1},
+    {.name = "EmptyValue",
+     .payload = "35=D\x01"
+                "58=\x01"
+                "43=Y\x01",
+     .payload_len = sizeof("35=D\x01"
+                           "58=\x01"
+                           "43=Y\x01") -
+                    1},
 };
 
 INSTANTIATE_TEST_SUITE_P(AllMalformedCases, MalformedField131Test,
@@ -1015,7 +1016,8 @@ TEST_F(AllowPosDupStripTest, W8_NoHeap_Scaffold_SendSucceeds_NoPmrAllocDuringSen
 // Today RED: copy loop copies stored 43+122, then unconditional append re-adds → count==2.
 // After T015 (skip widening): stored 43+122 skipped, unconditional append adds exactly one → GREEN.
 //
-// [037 FR-004; FR-005; INV-3; contracts C-4; anti-pattern feedback_witness_asserts_named_postcondition_not_proxy]
+// [037 FR-004; FR-005; INV-3; contracts C-4; anti-pattern
+// feedback_witness_asserts_named_postcondition_not_proxy]
 TEST_F(AllowPosDupStripTest, Cell2_RetainCase_ReplayDedups43And122) {
     auto cfg = make_cfg(/*allow_pos_dup=*/true);
     Session sess(engine, cfg);
@@ -1174,21 +1176,21 @@ TEST_F(AllowPosDupStripTest, Cell3_DefaultPath_ReplayByteIdentical) {
     // [037 FR-006; INV-4; T003 oracle frozen 2026-06-14; reordered fixpp#419]
     static const unsigned char kOracle[] = {
         0x38, 0x3D, 0x46, 0x49, 0x58, 0x2E, 0x34, 0x2E, 0x34, 0x01,  // 8=FIX.4.4 SOH
-        0x39, 0x3D, 0x39, 0x35, 0x01,                                  // 9=95 SOH
-        0x33, 0x35, 0x3D, 0x44, 0x01,                                  // 35=D SOH
-        0x33, 0x34, 0x3D, 0x32, 0x01,                                  // 34=2 SOH
-        0x34, 0x39, 0x3D, 0x49, 0x53, 0x4C, 0x44, 0x01,               // 49=ISLD SOH
-        0x35, 0x32, 0x3D, 0x32, 0x30, 0x32, 0x34, 0x30, 0x31, 0x30,   // 52=20240101
-        0x31, 0x2D, 0x30, 0x30, 0x3A, 0x30, 0x30, 0x3A, 0x30, 0x30,   // -00:00:00
-        0x2E, 0x30, 0x30, 0x30, 0x01,                                  // .000 SOH
-        0x35, 0x36, 0x3D, 0x54, 0x57, 0x01,                            // 56=TW SOH
-        0x34, 0x33, 0x3D, 0x59, 0x01,                                  // 43=Y SOH
-        0x31, 0x32, 0x32, 0x3D, 0x32, 0x30, 0x32, 0x34, 0x30, 0x31,   // 122=20240101
-        0x30, 0x31, 0x2D, 0x30, 0x30, 0x3A, 0x30, 0x30, 0x3A, 0x30,   // 01-00:00:0
-        0x30, 0x2E, 0x30, 0x30, 0x30, 0x01,                            // 0.000 SOH
-        0x31, 0x31, 0x3D, 0x4F, 0x52, 0x44, 0x58, 0x58, 0x58, 0x01,   // 11=ORDXXX SOH
-        0x35, 0x34, 0x3D, 0x31, 0x01,                                  // 54=1 SOH
-        0x31, 0x30, 0x3D, 0x32, 0x32, 0x33, 0x01,                      // 10=223 SOH
+        0x39, 0x3D, 0x39, 0x35, 0x01,                                // 9=95 SOH
+        0x33, 0x35, 0x3D, 0x44, 0x01,                                // 35=D SOH
+        0x33, 0x34, 0x3D, 0x32, 0x01,                                // 34=2 SOH
+        0x34, 0x39, 0x3D, 0x49, 0x53, 0x4C, 0x44, 0x01,              // 49=ISLD SOH
+        0x35, 0x32, 0x3D, 0x32, 0x30, 0x32, 0x34, 0x30, 0x31, 0x30,  // 52=20240101
+        0x31, 0x2D, 0x30, 0x30, 0x3A, 0x30, 0x30, 0x3A, 0x30, 0x30,  // -00:00:00
+        0x2E, 0x30, 0x30, 0x30, 0x01,                                // .000 SOH
+        0x35, 0x36, 0x3D, 0x54, 0x57, 0x01,                          // 56=TW SOH
+        0x34, 0x33, 0x3D, 0x59, 0x01,                                // 43=Y SOH
+        0x31, 0x32, 0x32, 0x3D, 0x32, 0x30, 0x32, 0x34, 0x30, 0x31,  // 122=20240101
+        0x30, 0x31, 0x2D, 0x30, 0x30, 0x3A, 0x30, 0x30, 0x3A, 0x30,  // 01-00:00:0
+        0x30, 0x2E, 0x30, 0x30, 0x30, 0x01,                          // 0.000 SOH
+        0x31, 0x31, 0x3D, 0x4F, 0x52, 0x44, 0x58, 0x58, 0x58, 0x01,  // 11=ORDXXX SOH
+        0x35, 0x34, 0x3D, 0x31, 0x01,                                // 54=1 SOH
+        0x31, 0x30, 0x3D, 0x32, 0x32, 0x33, 0x01,                    // 10=223 SOH
     };
     static constexpr std::size_t kOracleLen = sizeof(kOracle);
 

@@ -54,9 +54,9 @@ namespace {
 
 // ── Frame builder helpers ──────────────────────────────────────────────────────
 
-static std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
-                                               std::string_view sender, std::string_view target,
-                                               int heartbt = 30) {
+std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
+                                        std::string_view sender, std::string_view target,
+                                        int heartbt = 30) {
     std::string body;
     body += "35=A\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -87,9 +87,8 @@ static std::vector<std::byte> make_logon_frame(std::string_view begin_string, st
     return frame;
 }
 
-static std::vector<std::byte> make_heartbeat_frame(std::string_view begin_string, std::uint32_t seq,
-                                                   std::string_view sender,
-                                                   std::string_view target) {
+std::vector<std::byte> make_heartbeat_frame(std::string_view begin_string, std::uint32_t seq,
+                                            std::string_view sender, std::string_view target) {
     std::string body;
     body += "35=0\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -119,10 +118,9 @@ static std::vector<std::byte> make_heartbeat_frame(std::string_view begin_string
 }
 
 // Build a frame with an unknown MsgType (for 2q/2r).
-static std::vector<std::byte> make_unknown_msgtype_frame(std::string_view begin_string,
-                                                         std::uint32_t seq, std::string_view sender,
-                                                         std::string_view target,
-                                                         std::string_view msg_type) {
+std::vector<std::byte> make_unknown_msgtype_frame(std::string_view begin_string, std::uint32_t seq,
+                                                  std::string_view sender, std::string_view target,
+                                                  std::string_view msg_type) {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -293,7 +291,7 @@ TEST_F(TcSeqnumTest, Tc2c_MsgSeqNumTooLow) {
     // Send a Heartbeat with seq=1 (too low; no PossDupFlag).
     // 013 FR-009 / T020-A: too-low Heartbeat is silently ignored → stays Active.
     auto hb = make_heartbeat_frame("FIX.4.2", 1, "TW", "ISLD");
-    feed_sync(sess, hb);
+    (void)feed_sync(sess, hb);  // outcome checked below via state, not the return value
 
     // With 013, too-low Heartbeat → Active (not fatal).
     // The general [FIX-SL §4.1] fatal rule still applies to non-Heartbeat
@@ -356,7 +354,7 @@ TEST_F(TcSeqnumTest, Tc2r_UnregisteredMsgType) {
 
     // Send a message with a completely unregistered MsgType (e.g., "XYZ").
     auto unknown = make_unknown_msgtype_frame("FIX.4.2", 2, "TW", "ISLD", "XYZ");
-    feed_sync(sess, unknown);
+    (void)feed_sync(sess, unknown);  // outcome checked below via state, not the return value
 
     const auto st = sess.state();
     EXPECT_NE(st, fixpp::session::fsm_state::Disconnected)

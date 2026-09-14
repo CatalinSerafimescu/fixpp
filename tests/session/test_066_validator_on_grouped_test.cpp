@@ -31,14 +31,13 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
-#include <string>
-#include <string_view>
-
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
 #include <fixpp/wire/parser.hpp>
 #include <fixpp/wire/view.hpp>
+#include <string>
+#include <string_view>
 
 #include "support/fix44_group_frame_bodies.hpp"
 #include "support/group_dispatch_fixture.hpp"
@@ -53,11 +52,11 @@ namespace {
 bool slice_has_tag(fixpp::wire::group_slice const& s, std::uint16_t tag) {
     std::string_view sv{reinterpret_cast<char const*>(s.data), s.len};
     std::string const needle = std::to_string(tag) + "=";
-    if (sv.size() >= needle.size() && sv.substr(0, needle.size()) == needle) {
+    if (sv.size() >= needle.size() && sv.starts_with(needle)) {
         return true;
     }
     std::string const soh_needle = std::string("\x01") + needle;
-    return sv.find(soh_needle) != std::string_view::npos;
+    return sv.contains(soh_needle);
 }
 
 TEST(ValidatorOnGrouped, TrailingFieldAbsentFromLastInstanceWithValidatorEnabled) {
@@ -74,18 +73,17 @@ TEST(ValidatorOnGrouped, TrailingFieldAbsentFromLastInstanceWithValidatorEnabled
     bool leg1_has_symbol = false;
     bool last_has_trailing = true;  // default true: an un-run callback must not silently pass
 
-    f.app->on_from_app =
-        [&](const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg) {
-            auto slices = msg.offsets().group_slices(555);
-            count = slices.size();
-            if (count >= 1) {
-                leg0_has_symbol = slice_has_tag(slices[0], 600);
-                last_has_trailing = slice_has_tag(slices[count - 1], 60);
-            }
-            if (count >= 2) {
-                leg1_has_symbol = slice_has_tag(slices[1], 600);
-            }
-        };
+    f.app->on_from_app = [&](const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg) {
+        auto slices = msg.offsets().group_slices(555);
+        count = slices.size();
+        if (count >= 1) {
+            leg0_has_symbol = slice_has_tag(slices[0], 600);
+            last_has_trailing = slice_has_tag(slices[count - 1], 60);
+        }
+        if (count >= 2) {
+            leg1_has_symbol = slice_has_tag(slices[1], 600);
+        }
+    };
 
     auto suffix = fixpp_test_support::execution_report_two_legs_trailing_suffix();
     auto frame = fixpp_test_support::make_execution_report_frame(suffix, /*seq=*/2, "TW", "ISLD");

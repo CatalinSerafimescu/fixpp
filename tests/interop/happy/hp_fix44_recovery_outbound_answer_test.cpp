@@ -51,28 +51,25 @@
 #include <gtest/gtest.h>
 
 #include <array>
-#include <chrono>
-#include <cstdlib>
-#include <fstream>
-#include <future>
-#include <memory_resource>
-#include <sstream>
-#include <string>
-#include <string_view>
-#include <tuple>
-#include <vector>
-
 #include <asio/co_spawn.hpp>
 #include <asio/use_future.hpp>
-
-#include <memory>
-
+#include <chrono>
+#include <cstdlib>
 #include <fixpp/core/decimal_alias.hpp>
 #include <fixpp/session/business_messages.hpp>
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/memory_store_factory.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <fstream>
+#include <future>
+#include <memory>
+#include <memory_resource>
+#include <sstream>
+#include <string>
+#include <string_view>
+#include <tuple>
+#include <vector>
 
 #include "hp_support.hpp"
 #include "support/scenario_descriptor.hpp"
@@ -114,8 +111,8 @@ void expect_app_replay_or_skip(const std::string& gpath) {
     const std::string capture_path = gpath.substr(0, gpath.size() - 4) + "-capture.fix";
     std::ifstream cfile{capture_path};
     if (!cfile) {
-        GTEST_SKIP() << "skip:golden-not-yet-captured (capture sidecar absent: "
-                     << capture_path << ")";
+        GTEST_SKIP() << "skip:golden-not-yet-captured (capture sidecar absent: " << capture_path
+                     << ")";
     }
     std::stringstream css;
     css << cfile.rdbuf();
@@ -129,8 +126,14 @@ void expect_app_replay_or_skip(const std::string& gpath) {
     for (const auto& f : frames) {
         if (f.dir != '>') continue;  // fixpp→peer only
         const std::string_view w{reinterpret_cast<const char*>(f.bytes.data()), f.bytes.size()};
-        const bool is_nos = w.find("\x01" "35=D" "\x01") != std::string_view::npos;
-        const bool poss_dup = w.find("\x01" "43=Y" "\x01") != std::string_view::npos;
+        const bool is_nos = w.contains(
+            "\x01"
+            "35=D"
+            "\x01");
+        const bool poss_dup = w.contains(
+            "\x01"
+            "43=Y"
+            "\x01");
         if (is_nos && poss_dup) ++replayed_nos;
     }
     EXPECT_GE(replayed_nos, 1)
@@ -148,8 +151,7 @@ void expect_app_replay_or_skip(const std::string& gpath) {
 // yield a false non-biting "pass" (SC-004 rule).
 // [feedback_fail_placeholder_red_test]: real DiffResult assertion, not SUCCEED().
 
-TEST(RecoveryOutboundGateBite, MutatedTag16EndSeqNoCausesGateBite)
-{
+TEST(RecoveryOutboundGateBite, MutatedTag16EndSeqNoCausesGateBite) {
     // Synthetic QFJ ResendRequest (35=2) with EndSeqNo(16) — a COMPARED tag
     // under the {52,10} admin profile.  A mutation must make the gate bite.
     const char* expected_text =
@@ -167,8 +169,7 @@ TEST(RecoveryOutboundGateBite, MutatedTag16EndSeqNoCausesGateBite)
     fixpp::interop::hp::expect_gate_bite_on_tag(expected_text, actual_text, "16");
 }
 
-TEST(RecoveryOutboundGateBite, MutatedTag123GapFillFlagInAnswerCausesGateBite)
-{
+TEST(RecoveryOutboundGateBite, MutatedTag123GapFillFlagInAnswerCausesGateBite) {
     // Synthetic fixpp SequenceReset-GapFill (35=4) reply with GapFillFlag(123=Y).
     // Tag 123 is a COMPARED tag under {52,10} — mutation must make the gate bite.
     const char* expected_text =
@@ -210,22 +211,24 @@ TEST_P(HappyRecoveryOutboundAnswer, FixppAnswersResendRequestAndPeerResyncs) {
     namespace hp = fixpp::interop::hp;
 
     // ── AdminScenarioDescriptor validation (rule 7 + rule 8) ────────────────
-    const std::string cp_part   = (counterparty == Counterparty::quickfix_j) ? "QFj" : "QFcpp";
+    const std::string cp_part = (counterparty == Counterparty::quickfix_j) ? "QFj" : "QFcpp";
     const std::string role_part = (role == Role::fixpp_initiator) ? "init" : "acc";
-    const std::string cell_id   = "HP-" + cp_part + "-" + role_part + "-fix44-recovery-outbound";
+    const std::string cell_id = "HP-" + cp_part + "-" + role_part + "-fix44-recovery-outbound";
 
     fixpp::interop::AdminScenarioDescriptor desc;
-    desc.cell_id       = cell_id;
+    desc.cell_id = cell_id;
     desc.scenario_group = fixpp::interop::AdminScenarioGroup::recovery_outbound;
-    desc.role          = role;
-    desc.counterparty  = counterparty;
-    desc.spec_ref      = "[FIX-SL §4.8.2/§4.8.5/§4.8.6]";
-    desc.golden_ref    = "happy/golden/" + cell_id + ".fix";
-    desc.induction     = fixpp::interop::AdminInduction::qfj_restart_resend;
+    desc.role = role;
+    desc.counterparty = counterparty;
+    desc.spec_ref = "[FIX-SL §4.8.2/§4.8.5/§4.8.6]";
+    desc.golden_ref = "happy/golden/" + cell_id + ".fix";
+    desc.induction = fixpp::interop::AdminInduction::qfj_restart_resend;
     desc.self_deadline_ms = std::chrono::milliseconds{30000};  // FR-010: 30 s
-    desc.round_trips   = {
-        {"US3-3", "[FIX-SL §4.8.2]"},  // QFJ issues ResendRequest; fixpp answers correctly
-        {"US3-4", "[FIX-SL §4.8.6]"},  // both peers at Active, QFJ resynced, no data loss
+    desc.round_trips = {
+        {.ac_ref = "US3-3",
+         .spec_ref = "[FIX-SL §4.8.2]"},  // QFJ issues ResendRequest; fixpp answers correctly
+        {.ac_ref = "US3-4",
+         .spec_ref = "[FIX-SL §4.8.6]"},  // both peers at Active, QFJ resynced, no data loss
     };
     desc.acceptance_ids = {"US3-3", "US3-4"};
 
@@ -256,8 +259,8 @@ TEST_P(HappyRecoveryOutboundAnswer, FixppAnswersResendRequestAndPeerResyncs) {
         << "cell endpoint unresolved (parent harness did not lease a port)";
 
     fixpp::interop::InteropEngineFixture fx;
-    auto cfg = hp::make_session_config(role, "FIX.4.4", factory, fx.ioc().get_executor(),
-                                       *endpoint);
+    auto cfg =
+        hp::make_session_config(role, "FIX.4.4", factory, fx.ioc().get_executor(), *endpoint);
     // 9.H app-replay: give fixpp a persistent outbound store so it can REPLAY the
     // stored NewOrderSingle (35=D, 43=Y) in answer to QFJ's ResendRequest, rather
     // than collapse it to a SequenceReset-GapFill (a storeless session cannot
@@ -276,8 +279,7 @@ TEST_P(HappyRecoveryOutboundAnswer, FixppAnswersResendRequestAndPeerResyncs) {
     // ── Drive to Active (logon) — 5 s budget ─────────────────────────────
     const auto reached = hp::drive_to_active(fx, id, 5s);
     EXPECT_EQ(reached, fsm_state::Active)
-        << "session did not reach Active (logon) against "
-        << hp::counterparty_token(counterparty)
+        << "session did not reach Active (logon) against " << hp::counterparty_token(counterparty)
         << "; reached state=" << static_cast<int>(reached);
 
     auto s = fx.engine().lookup(id);
@@ -285,8 +287,8 @@ TEST_P(HappyRecoveryOutboundAnswer, FixppAnswersResendRequestAndPeerResyncs) {
 
     // ── In-process witness (b) baseline: inbound seqnum after Logon ────────
     // 9.H app-replay: the OUTBOUND counter is NOT a valid witness for a resend
-    // reply (src/session/session.cpp's `build_replay_frame` — replay frames reuse the original seqnum and
-    // are transmit-only, never advancing peek_outbound()). We witness that fixpp
+    // reply (src/session/session.cpp's `build_replay_frame` — replay frames reuse the original
+    // seqnum and are transmit-only, never advancing peek_outbound()). We witness that fixpp
     // RECEIVED+processed QFJ's ResendRequest (inbound advances); the REPLAY itself
     // (35=D carrying 43=Y) is proven ON THE WIRE by the golden below.
     const auto inbound_after_logon = s->seqnum_mgr_test_access().next_inbound_unsafe();
@@ -306,15 +308,15 @@ TEST_P(HappyRecoveryOutboundAnswer, FixppAnswersResendRequestAndPeerResyncs) {
     {
         std::array<std::byte, 512> nos_buf{};
         std::array<std::byte, 64> dec_arena_buf{};
-        std::pmr::monotonic_buffer_resource dec_arena{
-            dec_arena_buf.data(), dec_arena_buf.size(), std::pmr::null_memory_resource()};
+        std::pmr::monotonic_buffer_resource dec_arena{dec_arena_buf.data(), dec_arena_buf.size(),
+                                                      std::pmr::null_memory_resource()};
         const auto order_qty = make_dec("100", &dec_arena);
         const auto price = make_dec("190.5", &dec_arena);
         // Deterministic TransactTime: not in the golden exclusion profile, so a
         // live value would drift the capture — pin it (cf. the PD injector).
         static constexpr std::string_view kTransactTime = "20240101-00:00:00.000";
-        auto nos_body = fixpp::session::build_new_order_single(
-            nos_buf, "RO-CLORD-1", "FIXPP", '1', order_qty, price, kTransactTime);
+        auto nos_body = fixpp::session::build_new_order_single(nos_buf, "RO-CLORD-1", "FIXPP", '1',
+                                                               order_qty, price, kTransactTime);
         ASSERT_TRUE(nos_body.has_value())
             << "build_new_order_single failed; error=" << static_cast<int>(nos_body.error());
         auto send_fut = asio::co_spawn(fx.ioc().get_executor(), fx.engine().send(id, *nos_body),

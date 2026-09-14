@@ -50,19 +50,17 @@ protected:
         data_ = std::make_shared<opentelemetry::exporter::memory::InMemorySpanData>(500);
 
         // Build a real SDK TracerProvider backed by the in-memory exporter.
-        auto make_sdk_provider = [this]()
-            -> std::shared_ptr<opentelemetry::trace::TracerProvider>
-        {
+        auto make_sdk_provider = [this]() -> std::shared_ptr<opentelemetry::trace::TracerProvider> {
             auto exporter =
                 opentelemetry::exporter::memory::InMemorySpanExporterFactory::Create(data_);
             auto processor = sdk_trace::SimpleSpanProcessorFactory::Create(std::move(exporter));
-            auto resource   = opentelemetry::sdk::resource::Resource::GetDefault();
+            auto resource = opentelemetry::sdk::resource::Resource::GetDefault();
             return sdk_trace::TracerProviderFactory::Create(std::move(processor), resource);
         };
 
         fixpp::otel::OtelConfig cfg{};
-        cfg.resource.service_name    = "test";
-        cfg.tracer_factory_for_test  = make_sdk_provider;
+        cfg.resource.service_name = "test";
+        cfg.tracer_factory_for_test = make_sdk_provider;
 
         provider_ = std::make_unique<fixpp::otel::TracerProvider>(cfg);
         ASSERT_TRUE(provider_->init_status().has_value())
@@ -70,15 +68,11 @@ protected:
     }
 
     // Return all spans that have been recorded and ended so far.
-    std::vector<std::unique_ptr<sdk_trace::SpanData>> get_spans() {
-        return data_->GetSpans();
-    }
+    std::vector<std::unique_ptr<sdk_trace::SpanData>> get_spans() { return data_->GetSpans(); }
 
     // Find a span by name in a vector of SpanData.
     static sdk_trace::SpanData* find_span(
-        const std::vector<std::unique_ptr<sdk_trace::SpanData>>& spans,
-        const std::string& name)
-    {
+        const std::vector<std::unique_ptr<sdk_trace::SpanData>>& spans, const std::string& name) {
         for (const auto& s : spans) {
             if (s->GetName() == name) return s.get();
         }
@@ -132,7 +126,10 @@ TEST_F(SessionSpansFullTest, SessionTraceContextNonZero) {
     // The SDK assigns a real trace_id — all-zero would mean a noop span.
     bool all_zero = true;
     for (auto b : tc.trace_id) {
-        if (b != std::byte{0}) { all_zero = false; break; }
+        if (b != std::byte{0}) {
+            all_zero = false;
+            break;
+        }
     }
     EXPECT_FALSE(all_zero) << "session_trace_context() must return a non-zero trace_id";
 }
@@ -147,7 +144,7 @@ TEST_F(SessionSpansFullTest, ToSpanContextNonZeroBranch) {
     // Build a non-zero parent trace_context (any non-zero bytes suffice).
     fixpp::otel::trace_context parent{};
     for (int i = 0; i < 16; ++i) parent.trace_id[i] = static_cast<std::byte>(i + 1);
-    for (int i = 0; i < 8;  ++i) parent.span_id[i]  = static_cast<std::byte>(i + 0x10);
+    for (int i = 0; i < 8; ++i) parent.span_id[i] = static_cast<std::byte>(i + 0x10);
     parent.flags = 0x01U;  // sampled
 
     {
@@ -169,8 +166,8 @@ TEST_F(SessionSpansFullTest, ToSpanContextNonZeroBranch) {
 
     for (int i = 0; i < 8; ++i) {
         EXPECT_EQ(actual_buf[i], static_cast<uint8_t>(parent.span_id[i]))
-            << "GetParentSpanId() byte[" << i << "] does not match parent.span_id["
-            << i << "]; to_span_context must preserve span_id bytes";
+            << "GetParentSpanId() byte[" << i << "] does not match parent.span_id[" << i
+            << "]; to_span_context must preserve span_id bytes";
     }
 }
 
@@ -184,7 +181,7 @@ TEST_F(SessionSpansFullTest, ToSpanContextNonZeroBranch) {
 TEST_F(SessionSpansFullTest, TraceContextRoundTrip) {
     fixpp::otel::trace_context parent{};
     for (int i = 0; i < 16; ++i) parent.trace_id[i] = static_cast<std::byte>(0xAB);
-    for (int i = 0; i < 8;  ++i) parent.span_id[i]  = static_cast<std::byte>(0xCD);
+    for (int i = 0; i < 8; ++i) parent.span_id[i] = static_cast<std::byte>(0xCD);
     parent.flags = 0x01U;  // sampled
 
     fixpp::otel::SessionSpans ss{*provider_, "SENDER", "TARGET", parent};
@@ -301,8 +298,14 @@ TEST_F(SessionSpansFullTest, ChildSpansParentedToSessionSpan) {
     // Capture the session span_id before creating children.
     auto session_sc = ss.session_span()->GetContext();
 
-    { auto s = ss.make_store_span();    (void)s; }
-    { auto d = ss.make_dispatch_span(); (void)d; }
+    {
+        auto s = ss.make_store_span();
+        (void)s;
+    }
+    {
+        auto d = ss.make_dispatch_span();
+        (void)d;
+    }
 
     // End the session span (dtor).
     // Destroy ss to emit the lifecycle span.
@@ -313,16 +316,18 @@ TEST_F(SessionSpansFullTest, ChildSpansParentedToSessionSpan) {
     auto session_span_id = session_sc.span_id();
 
     // Destroy ss to end the lifecycle span.
-    { auto moved_ss = std::move(ss); }
+    {
+        auto moved_ss = std::move(ss);
+    }
 
     auto spans = get_spans();
-    auto* store_data    = find_span(spans, "fixpp.session.store");
+    auto* store_data = find_span(spans, "fixpp.session.store");
     auto* dispatch_data = find_span(spans, "fixpp.session.dispatch");
-    auto* lifecycle     = find_span(spans, "fixpp.session.lifecycle");
+    auto* lifecycle = find_span(spans, "fixpp.session.lifecycle");
 
-    ASSERT_NE(store_data,    nullptr);
+    ASSERT_NE(store_data, nullptr);
     ASSERT_NE(dispatch_data, nullptr);
-    ASSERT_NE(lifecycle,     nullptr);
+    ASSERT_NE(lifecycle, nullptr);
 
     EXPECT_EQ(store_data->GetParentSpanId(), lifecycle->GetSpanId())
         << "StoreSpan must be parented to the lifecycle span";

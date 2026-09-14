@@ -3,8 +3,8 @@
 // C4, family class A-014 BusinessMessageReject: flat, ref-tag echo).
 // OFFLINE TOOLING, not checked in to the main build (see gen/README.md).
 //
-// Required='Y' fields (dictionaries/FIX44.xml's BusinessMessageReject message declaration): RefMsgType(372),
-// BusinessRejectReason(380).
+// Required='Y' fields (dictionaries/FIX44.xml's BusinessMessageReject message declaration):
+// RefMsgType(372), BusinessRejectReason(380).
 #include <quickfix/fix44/BusinessMessageReject.h>
 
 #include <iostream>

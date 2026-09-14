@@ -176,10 +176,12 @@ public:
     fixpp::session::Session& session() noexcept { return *session_; }
 
     // The server endpoint (127.0.0.1:bound_port).
-    fixpp::transport::Endpoint server_endpoint() const noexcept { return server_endpoint_; }
+    [[nodiscard]] fixpp::transport::Endpoint server_endpoint() const noexcept {
+        return server_endpoint_;
+    }
 
     // The shared TransportFactory (asio_tls_transport_factory, FR-026 cached).
-    std::shared_ptr<fixpp::transport::TransportFactory> factory() const noexcept {
+    [[nodiscard]] std::shared_ptr<fixpp::transport::TransportFactory> factory() const noexcept {
         return session_factory_;
     }
 
@@ -202,7 +204,7 @@ private:
     std::unique_ptr<fixpp::transport::test::LoopbackTlsFixture> transport_fixture_;
     std::shared_ptr<fixpp::transport::TransportFactory> session_factory_;
     std::unique_ptr<fixpp::session::Session> session_;
-    fixpp::transport::Endpoint server_endpoint_{};
+    fixpp::transport::Endpoint server_endpoint_;
 };
 
 }  // namespace fixpp::test_support

@@ -28,7 +28,7 @@ TEST(DecimalCABILayout, ReservedIgnoredOnRead) {
     d.mantissa = 12345;
     d.exponent = -2;
     // Set garbage _reserved bytes
-    for (int i = 0; i < 7; ++i) d._reserved[i] = static_cast<int8_t>(0xFF);
+    for (signed char& i : d._reserved) i = static_cast<int8_t>(0xFF);
 
     char buf[64]{};
     size_t written = 0;
@@ -66,8 +66,8 @@ TEST(DecimalCABILayout, NonZeroReservedTolerated) {
 // ── Gate B P1 #3 — direct coverage for the _checked siblings (AC-C6) ────────
 
 TEST(DecimalCABIChecked, CompareCheckedInDomainReturnsOrdering) {
-    fixpp_decimal_t a{2, -1, {}};  // 0.2
-    fixpp_decimal_t b{1, -1, {}};  // 0.1
+    fixpp_decimal_t a{.mantissa = 2, .exponent = -1, ._reserved = {}};  // 0.2
+    fixpp_decimal_t b{.mantissa = 1, .exponent = -1, ._reserved = {}};  // 0.1
     int ord = 99;
     EXPECT_EQ(fixpp_decimal_compare_checked(a, b, &ord), FIXPP_ERR_OK);
     EXPECT_EQ(ord, 1);  // 0.2 > 0.1
@@ -80,9 +80,9 @@ TEST(DecimalCABIChecked, CompareCheckedInDomainReturnsOrdering) {
 }
 
 TEST(DecimalCABIChecked, CompareCheckedRejectsOutOfDomain) {
-    fixpp_decimal_t good{1, 0, {}};
-    fixpp_decimal_t bad_positive_exp{1, 1, {}};
-    fixpp_decimal_t bad_too_negative{1, -39, {}};
+    fixpp_decimal_t good{.mantissa = 1, .exponent = 0, ._reserved = {}};
+    fixpp_decimal_t bad_positive_exp{.mantissa = 1, .exponent = 1, ._reserved = {}};
+    fixpp_decimal_t bad_too_negative{.mantissa = 1, .exponent = -39, ._reserved = {}};
     int ord = 99;
 
     EXPECT_EQ(fixpp_decimal_compare_checked(bad_positive_exp, good, &ord),
@@ -99,14 +99,14 @@ TEST(DecimalCABIChecked, CompareCheckedRejectsOutOfDomain) {
 }
 
 TEST(DecimalCABIChecked, CompareCheckedRejectsNullOut) {
-    fixpp_decimal_t a{1, 0, {}};
+    fixpp_decimal_t a{.mantissa = 1, .exponent = 0, ._reserved = {}};
     EXPECT_EQ(fixpp_decimal_compare_checked(a, a, nullptr), FIXPP_ERR_DECIMAL_INVALID);
 }
 
 TEST(DecimalCABIChecked, EqualCheckedInDomain) {
-    fixpp_decimal_t a{10, -1, {}};  // 1.0
-    fixpp_decimal_t b{1, 0, {}};    // 1
-    fixpp_decimal_t c{2, 0, {}};    // 2
+    fixpp_decimal_t a{.mantissa = 10, .exponent = -1, ._reserved = {}};  // 1.0
+    fixpp_decimal_t b{.mantissa = 1, .exponent = 0, ._reserved = {}};    // 1
+    fixpp_decimal_t c{.mantissa = 2, .exponent = 0, ._reserved = {}};    // 2
     int eq = 99;
 
     EXPECT_EQ(fixpp_decimal_equal_checked(a, b, &eq), FIXPP_ERR_OK);
@@ -117,15 +117,15 @@ TEST(DecimalCABIChecked, EqualCheckedInDomain) {
 }
 
 TEST(DecimalCABIChecked, EqualCheckedRejectsOutOfDomain) {
-    fixpp_decimal_t good{1, 0, {}};
-    fixpp_decimal_t bad{1, 1, {}};
+    fixpp_decimal_t good{.mantissa = 1, .exponent = 0, ._reserved = {}};
+    fixpp_decimal_t bad{.mantissa = 1, .exponent = 1, ._reserved = {}};
     int eq = 99;
     EXPECT_EQ(fixpp_decimal_equal_checked(good, bad, &eq), FIXPP_ERR_DECIMAL_INVALID);
     EXPECT_EQ(eq, 99);
 }
 
 TEST(DecimalCABIChecked, EqualCheckedRejectsNullOut) {
-    fixpp_decimal_t a{1, 0, {}};
+    fixpp_decimal_t a{.mantissa = 1, .exponent = 0, ._reserved = {}};
     EXPECT_EQ(fixpp_decimal_equal_checked(a, a, nullptr), FIXPP_ERR_DECIMAL_INVALID);
 }
 
@@ -147,7 +147,7 @@ TEST(DecimalCABIChecked, EqualCheckedRejectsNullOut) {
 
 TEST(DecimalCABIChecked, CompareCheckedSentinelInDomainReturnsOkZero) {
     fixpp_decimal_t sentinel = FIXPP_DECIMAL_INVALID;  // {INT64_MIN, 0} — valid exponent
-    fixpp_decimal_t good{1, 0, {}};
+    fixpp_decimal_t good{.mantissa = 1, .exponent = 0, ._reserved = {}};
     int ord = 99;
 
     // sentinel as LEFT operand
@@ -165,7 +165,7 @@ TEST(DecimalCABIChecked, CompareCheckedSentinelInDomainReturnsOkZero) {
 
 TEST(DecimalCABIChecked, EqualCheckedSentinelInDomainReturnsOkZero) {
     fixpp_decimal_t sentinel = FIXPP_DECIMAL_INVALID;  // {INT64_MIN, 0} — valid exponent
-    fixpp_decimal_t good{1, 0, {}};
+    fixpp_decimal_t good{.mantissa = 1, .exponent = 0, ._reserved = {}};
     int eq = 99;
 
     EXPECT_EQ(fixpp_decimal_equal_checked(sentinel, good, &eq), FIXPP_ERR_OK);

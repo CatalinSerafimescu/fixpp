@@ -22,6 +22,8 @@
 // declaration walk over group_no_tag context only, not full member order) —
 // deliberately not reusing the group_order walk, so a bug in one does not
 // mask a bug in the other.
+#include <gtest/gtest.h>
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -30,7 +32,6 @@
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/xml_loader.hpp>
 #include <fstream>
-#include <gtest/gtest.h>
 #include <ios>
 #include <memory_resource>
 #include <pugixml.hpp>
@@ -55,8 +56,8 @@ using fixpp::codegen::VersionIR;
 
 // The exact-set of 33 OFFICIAL distinct MsgTypes (research.md R6).
 constexpr std::array<std::string_view, 33> kOfficial33 = {
-    "D", "E", "F", "G", "H", "8", "9", "q", "r", "AF", "AC", "t", "u", "V", "W", "X",
-    "Y", "c", "d", "e", "f", "g", "h", "i", "b", "S", "R", "AG", "Z", "a", "J", "P", "AS"};
+    "D", "E", "F", "G", "H", "8", "9", "q", "r", "AF", "AC", "t", "u", "V", "W", "X", "Y",
+    "c", "d", "e", "f", "g", "h", "i", "b", "S", "R",  "AG", "Z", "a", "J", "P", "AS"};
 
 VersionIR const& fix44_ir() {
     static VersionIR const ir = [] {
@@ -218,10 +219,10 @@ ComponentIndex build_component_index(pugi::xml_node const& root) {
 // new enclosing context) WITHOUT the append_run tag-sort+dedup step that
 // collapses same-tag multi-level entries in the shipped Dictionary.
 // NOLINTNEXTLINE(misc-no-recursion)
-void census_walk(pugi::xml_node const& node, std::uint16_t enclosing_group_no_tag,
-                  ComponentIndex const& comps, fixpp::dict::Dictionary const& dict,
-                  std::unordered_map<std::uint16_t, std::unordered_set<std::uint16_t>>&
-                      levels_by_tag) {
+void census_walk(
+    pugi::xml_node const& node, std::uint16_t enclosing_group_no_tag, ComponentIndex const& comps,
+    fixpp::dict::Dictionary const& dict,
+    std::unordered_map<std::uint16_t, std::unordered_set<std::uint16_t>>& levels_by_tag) {
     for (auto const& child : node.children()) {
         std::string_view const tn{child.name()};
         if (tn == "field") {
@@ -269,8 +270,7 @@ TEST(Group067Census, N3DedupCollapseCensus) {
     std::vector<std::string> collapsed;
     for (auto const& m : root.child("messages").children("message")) {
         std::string const msg_type{m.attribute("msgtype").as_string("")};
-        bool const is_official =
-            std::find(kOfficial33.begin(), kOfficial33.end(), msg_type) != kOfficial33.end();
+        bool const is_official = std::ranges::find(kOfficial33, msg_type) != kOfficial33.end();
         if (!is_official) {
             continue;
         }
@@ -290,7 +290,7 @@ TEST(Group067Census, N3DedupCollapseCensus) {
     std::size_t visited = 0;
     for (auto const& m : root.child("messages").children("message")) {
         std::string const msg_type{m.attribute("msgtype").as_string("")};
-        if (std::find(kOfficial33.begin(), kOfficial33.end(), msg_type) != kOfficial33.end()) {
+        if (std::ranges::find(kOfficial33, msg_type) != kOfficial33.end()) {
             ++visited;
         }
     }
@@ -307,8 +307,7 @@ TEST(Group067Census, N3DedupCollapseCensus) {
         detail += s;
         detail += ' ';
     }
-    EXPECT_TRUE(collapsed.empty())
-        << "N3 census found cross-level tag collapse(s) in: " << detail;
+    EXPECT_TRUE(collapsed.empty()) << "N3 census found cross-level tag collapse(s) in: " << detail;
 }
 
 // Discriminating-witness proof that `census_walk` actually detects a
@@ -354,7 +353,7 @@ TEST(Group067Census, CensusWalkDetectsSyntheticCrossLevelCollapse) {
 
     auto const it = levels_by_tag.find(55);
     ASSERT_NE(it, levels_by_tag.end()) << "Symbol(55) not observed at all — walk did not descend";
-    EXPECT_GE(it->second.size(), 2u)
+    EXPECT_GE(it->second.size(), 2U)
         << "census_walk failed to detect Symbol(55) at both top-level (0) and NoOrders(73) — "
            "the N3 'clean' result on the real FIX44.xml census above would be a false negative "
            "if this failed";
@@ -433,9 +432,9 @@ std::size_t find_tag_token(std::string const& text, int tag, std::size_t from = 
         }
         bool const boundary_before =
             (pos == 0) || (std::isdigit(static_cast<unsigned char>(text[pos - 1])) == 0);
-        bool const boundary_after = (pos + needle.size() >= text.size()) ||
-                                     (std::isdigit(static_cast<unsigned char>(
-                                          text[pos + needle.size()])) == 0);
+        bool const boundary_after =
+            (pos + needle.size() >= text.size()) ||
+            (std::isdigit(static_cast<unsigned char>(text[pos + needle.size()])) == 0);
         if (boundary_before && boundary_after) {
             return pos;
         }
@@ -499,8 +498,9 @@ TEST(Group067EmitBuilders, TopLevelEmissionOrderTagAscending) {
     auto const files =
         fixpp::codegen::emit_builders(fix44_ir(), fixpp::codegen::CoverageMode::Official);
     std::string const region = builder_body(files, "NewOrderSingle");
-    ASSERT_FALSE(region.empty()) << "no NewOrderSingle builder region found in emit_builders() output "
-                                     "(empty until Phase 3b lands T016/T017)";
+    ASSERT_FALSE(region.empty())
+        << "no NewOrderSingle builder region found in emit_builders() output "
+           "(empty until Phase 3b lands T016/T017)";
 
     static constexpr std::array<int, 7> kAscendingTags = {11, 38, 40, 44, 54, 55, 60};
     std::size_t last_pos = 0;
@@ -521,7 +521,8 @@ TEST(Group067EmitBuilders, GroupEntryOrderIsDeclarationOrderNotTagSorted) {
     auto const files =
         fixpp::codegen::emit_builders(fix44_ir(), fixpp::codegen::CoverageMode::Official);
     std::string const region = builder_body(files, "NewOrderList");
-    ASSERT_FALSE(region.empty()) << "no NewOrderList builder region found in emit_builders() output";
+    ASSERT_FALSE(region.empty())
+        << "no NewOrderList builder region found in emit_builders() output";
 
     // Scope to AFTER the NoOrders(73) group tag is first mentioned, so the
     // 55/54 search targets the group-entry emission, not any top-level
@@ -534,8 +535,9 @@ TEST(Group067EmitBuilders, GroupEntryOrderIsDeclarationOrderNotTagSorted) {
     auto const pos54 = find_tag_token(entry_region, 54);
     ASSERT_NE(pos55, std::string::npos) << "Symbol(55) not found in NoOrders entry region";
     ASSERT_NE(pos54, std::string::npos) << "Side(54) not found in NoOrders entry region";
-    EXPECT_LT(pos55, pos54) << "Symbol(55) must precede Side(54) in the NoOrders entry (declaration "
-                                "order) — tag-sort would wrongly invert this to 54, 55";
+    EXPECT_LT(pos55, pos54)
+        << "Symbol(55) must precede Side(54) in the NoOrders entry (declaration "
+           "order) — tag-sort would wrongly invert this to 54, 55";
 }
 
 // T014(c): header/framing exclusion set {8,9,10,34,35,49,52,56} — the
@@ -544,8 +546,8 @@ TEST(Group067EmitBuilders, GroupEntryOrderIsDeclarationOrderNotTagSorted) {
 // builder that DID emit e.g. `field(8, ...)` would violate body_builder's
 // own INV-2 framing-tag reject unconditionally.
 TEST(Group067EmitBuilders, HeaderFramingTagsNeverPassedToFieldCall) {
-    std::string const out =
-        concat_all(fixpp::codegen::emit_builders(fix44_ir(), fixpp::codegen::CoverageMode::Official));
+    std::string const out = concat_all(
+        fixpp::codegen::emit_builders(fix44_ir(), fixpp::codegen::CoverageMode::Official));
     ASSERT_FALSE(out.empty()) << "emit_builders() output is empty (Phase 3b not landed yet)";
 
     for (int tag : {8, 9, 10, 34, 35, 49, 52, 56}) {
@@ -569,7 +571,8 @@ TEST(Group067EmitBuilders, HeaderTrailerFieldsExcludedFromBodyOnlyArgs) {
         fixpp::codegen::emit_builders(fix44_ir(), fixpp::codegen::CoverageMode::Official);
     ASSERT_FALSE(files.empty()) << "emit_builders() output is empty (Phase 3b not landed yet)";
     std::string const region = builder_body(files, "NewOrderSingle");
-    ASSERT_FALSE(region.empty()) << "no NewOrderSingle builder region found in emit_builders() output";
+    ASSERT_FALSE(region.empty())
+        << "no NewOrderSingle builder region found in emit_builders() output";
 
     for (int tag : {89, 91, 93}) {
         std::string const needle = "field(" + std::to_string(tag) + ",";
@@ -589,8 +592,8 @@ TEST(Group067EmitBuilders, HeaderTrailerFieldsExcludedFromBodyOnlyArgs) {
 // both to the same (wrong-for-one) delimiter. Call shape verbatim from
 // data-model.md §1.2 ("bb.group_begin(no_tag, delimiter_tag)").
 TEST(Group067EmitBuilders, RC1PerMessagePlannerDistinctDelimiterWvsX) {
-    std::string const out =
-        concat_all(fixpp::codegen::emit_builders(fix44_ir(), fixpp::codegen::CoverageMode::Official));
+    std::string const out = concat_all(
+        fixpp::codegen::emit_builders(fix44_ir(), fixpp::codegen::CoverageMode::Official));
     ASSERT_FALSE(out.empty()) << "emit_builders() output is empty (Phase 3b not landed yet)";
     std::string const collapsed = collapse_whitespace(out);
 
@@ -662,11 +665,11 @@ MessageIR make_synth_group_message(std::string msg_type, std::uint16_t no_tag,
                                         fixpp::dict::field_data_type::NumInGroup,
                                         fixpp::dict::field_presence::Required,
                                         /*group_no_tag=*/0));
-    m.fields.push_back(make_synth_field(
-        member_tag, "SynthField" + std::to_string(member_tag), fixpp::dict::field_data_type::String,
-        member_required ? fixpp::dict::field_presence::Required
-                        : fixpp::dict::field_presence::Optional,
-        /*group_no_tag=*/no_tag));
+    m.fields.push_back(make_synth_field(member_tag, "SynthField" + std::to_string(member_tag),
+                                        fixpp::dict::field_data_type::String,
+                                        member_required ? fixpp::dict::field_presence::Required
+                                                        : fixpp::dict::field_presence::Optional,
+                                        /*group_no_tag=*/no_tag));
 
     GroupOrderEntry g;
     g.no_tag = no_tag;
@@ -709,9 +712,8 @@ VersionIR build_dedup_soundness_ir() {
             ir.group_tags.push_back(entry.no_tag);
         }
     }
-    std::sort(ir.group_tags.begin(), ir.group_tags.end());
-    ir.group_tags.erase(std::unique(ir.group_tags.begin(), ir.group_tags.end()),
-                        ir.group_tags.end());
+    std::ranges::sort(ir.group_tags);
+    ir.group_tags.erase(std::ranges::unique(ir.group_tags).begin(), ir.group_tags.end());
     return ir;
 }
 
@@ -733,8 +735,8 @@ std::size_t count_occurrences(std::string const& text, std::string const& needle
 }  // namespace
 
 TEST(Group077DedupSoundness, DiscriminatesDistinctSignaturesUnderSameNoTag) {
-    std::string const out =
-        concat_all(fixpp::codegen::emit_builders(dedup_soundness_ir(), fixpp::codegen::CoverageMode::All));
+    std::string const out = concat_all(
+        fixpp::codegen::emit_builders(dedup_soundness_ir(), fixpp::codegen::CoverageMode::All));
 
     EXPECT_NE(out.find("struct G_9001_1Args"), std::string::npos)
         << "no_tag 9001 has TWO distinct recursive signatures (member 9101 required vs "
@@ -752,26 +754,26 @@ TEST(Group077DedupSoundness, DiscriminatesDistinctSignaturesUnderSameNoTag) {
 }
 
 TEST(Group077DedupSoundness, CollapsesByteIdenticalSignaturesToOneStruct) {
-    std::string const out =
-        concat_all(fixpp::codegen::emit_builders(dedup_soundness_ir(), fixpp::codegen::CoverageMode::All));
+    std::string const out = concat_all(
+        fixpp::codegen::emit_builders(dedup_soundness_ir(), fixpp::codegen::CoverageMode::All));
 
     EXPECT_NE(out.find("struct G_9002Args"), std::string::npos)
         << "no_tag 9002's two occurrences share a byte-identical signature — expected ONE "
            "bare groups::G_9002Args (G1b)";
-    EXPECT_EQ(count_occurrences(out, "struct G_9002Args"), 1u)
+    EXPECT_EQ(count_occurrences(out, "struct G_9002Args"), 1U)
         << "the shared plan must be emitted EXACTLY ONCE, not once per referencing message";
     EXPECT_EQ(out.find("G_9002_1Args"), std::string::npos)
         << "identical signatures must NOT be spuriously ordinaled";
     EXPECT_EQ(out.find("G_9002_2Args"), std::string::npos)
         << "identical signatures must NOT be spuriously ordinaled";
-    EXPECT_GE(count_occurrences(out, "groups::G_9002Args"), 2u)
+    EXPECT_GE(count_occurrences(out, "groups::G_9002Args"), 2U)
         << "both ZDEDUP9002A and ZDEDUP9002B must reference the SAME shared plan by "
            "qualified name";
 }
 
 TEST(Group077DedupSoundness, KeepsDifferentNoTagsSeparateDespiteIdenticalBodies) {
-    std::string const out =
-        concat_all(fixpp::codegen::emit_builders(dedup_soundness_ir(), fixpp::codegen::CoverageMode::All));
+    std::string const out = concat_all(
+        fixpp::codegen::emit_builders(dedup_soundness_ir(), fixpp::codegen::CoverageMode::All));
 
     EXPECT_NE(out.find("struct G_9003Args"), std::string::npos)
         << "no_tag 9003's sole occurrence must emit a bare groups::G_9003Args";

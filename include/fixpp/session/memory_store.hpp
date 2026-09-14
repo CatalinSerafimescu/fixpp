@@ -502,11 +502,11 @@ private:
     std::pmr::vector<Entry>& entries_for(direction_t dir) noexcept {
         return (dir == direction_t::inbound) ? inbound_entries_ : outbound_entries_;
     }
-    const std::pmr::vector<Entry>& entries_for(direction_t dir) const noexcept {
+    [[nodiscard]] const std::pmr::vector<Entry>& entries_for(direction_t dir) const noexcept {
         return (dir == direction_t::inbound) ? inbound_entries_ : outbound_entries_;
     }
 
-    seqnum_t next_seq_for(direction_t dir) const noexcept {
+    [[nodiscard]] seqnum_t next_seq_for(direction_t dir) const noexcept {
         return (dir == direction_t::inbound) ? next_inbound_ : next_outbound_;
     }
 

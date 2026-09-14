@@ -70,7 +70,7 @@ TEST(PinsetSingleThread, AddTwoPinsRemoveOne) {
     Pinset ps;
     ASSERT_TRUE(ps.add(make_cert(kFp1)).has_value());
     ASSERT_TRUE(ps.add(make_cert(kFp2)).has_value());
-    EXPECT_EQ(ps.size(), 2u);
+    EXPECT_EQ(ps.size(), 2U);
 
     // Remove first
     auto r = ps.remove(kFp1);
@@ -80,7 +80,7 @@ TEST(PinsetSingleThread, AddTwoPinsRemoveOne) {
     EXPECT_FALSE(ps.find(kFp1).found());
     // kFp2 still present
     EXPECT_TRUE(ps.find(kFp2).found());
-    EXPECT_EQ(ps.size(), 1u);
+    EXPECT_EQ(ps.size(), 1U);
 }
 
 // ── DuplicateAdd ─────────────────────────────────────────────────────────────
@@ -93,7 +93,7 @@ TEST(PinsetSingleThread, DuplicateAdd) {
     EXPECT_EQ(r2.error(), error::tls_pin_already_present);
 
     // Size unchanged
-    EXPECT_EQ(ps.size(), 1u);
+    EXPECT_EQ(ps.size(), 1U);
 }
 
 // ── RemoveAbsent ─────────────────────────────────────────────────────────────
@@ -106,7 +106,7 @@ TEST(PinsetSingleThread, RemoveAbsent) {
     EXPECT_EQ(r.error(), error::tls_pin_not_found);
 
     // Existing pin unaffected
-    EXPECT_EQ(ps.size(), 1u);
+    EXPECT_EQ(ps.size(), 1U);
     EXPECT_TRUE(ps.find(kFp1).found());
 }
 

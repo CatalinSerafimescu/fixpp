@@ -77,7 +77,7 @@ std::shared_ptr<const fixpp::dict::Dictionary> load_fix44_dictionary() {
     std::string xml((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     // Oversized initial arena; monotonic_buffer_resource grows via the default
     // upstream if exceeded. Co-owned by the shared_ptr deleter.
-    constexpr std::size_t kBufSize = 4u * 1024u * 1024u;
+    constexpr std::size_t kBufSize = 4U * 1024U * 1024U;
     auto buf = std::make_unique<std::vector<std::byte>>(kBufSize);
     auto* mr = new std::pmr::monotonic_buffer_resource{buf->data(), buf->size()};
     fixpp::dict::Dictionary d = fixpp::dict::XmlLoader{}.load_from_string(xml, mr);
@@ -140,8 +140,14 @@ std::string finalize(std::string body) {
 }
 
 std::vector<std::byte> make_logon_frame() {
-    std::string body = "35=A\x01" "34=1\x01" "49=TW\x01" "52=20240101-00:00:00.000\x01"
-                       "56=ISLD\x01" "98=0\x01" "108=30\x01";
+    std::string body =
+        "35=A\x01"
+        "34=1\x01"
+        "49=TW\x01"
+        "52=20240101-00:00:00.000\x01"
+        "56=ISLD\x01"
+        "98=0\x01"
+        "108=30\x01";
     return to_frame(finalize(body));
 }
 
@@ -149,7 +155,10 @@ std::vector<std::byte> make_logon_frame() {
 std::vector<std::byte> make_xmlnonfix_frame(std::uint32_t seq, std::string_view xml) {
     std::string body = "35=n\x01";
     body += "34=" + std::to_string(seq) + "\x01";
-    body += "49=TW\x01" "52=20240101-00:00:00.000\x01" "56=ISLD\x01";
+    body +=
+        "49=TW\x01"
+        "52=20240101-00:00:00.000\x01"
+        "56=ISLD\x01";
     body += "212=" + std::to_string(xml.size()) + "\x01";
     body += "213=";
     body.append(xml.data(), xml.size());  // raw bytes incl. embedded SOH
@@ -220,17 +229,18 @@ struct Fixture {
         auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, std::chrono::milliseconds{200},
                                                         "XmlNonFixPassthrough::feed")) {
-            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "XmlNonFixPassthrough::feed");
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "XmlNonFixPassthrough::feed");
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "XmlNonFixPassthrough::feed";
             return;
         }
         (void)fut.get();
     }
 
-    bool any_reject_emitted() const {
+    [[nodiscard]] bool any_reject_emitted() const {
         for (const auto& f : captured_frames) {
             std::string w(reinterpret_cast<const char*>(f.data()), f.size());
-            if (w.find("35=3\x01") != std::string::npos || w.find("35=j\x01") != std::string::npos) {
+            if (w.contains("35=3\x01") || w.contains("35=j\x01")) {
                 return true;
             }
         }

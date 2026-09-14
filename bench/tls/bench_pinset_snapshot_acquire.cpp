@@ -15,26 +15,26 @@
 // if the tuple is not detectable (ceiling=none → emit + skip assert).
 
 #include <benchmark/benchmark.h>
-#include <fixpp/tls/pinset.hpp>
-#include <fixpp/tls/certificate.hpp>
 
 #include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdlib>
+#include <fixpp/tls/certificate.hpp>
+#include <fixpp/tls/pinset.hpp>
 #include <iostream>
 #include <string>
 
 namespace {
 
 using fixpp::tls::Certificate;
-using fixpp::tls::Pinset;
 using fixpp::tls::pin_fingerprint;
+using fixpp::tls::Pinset;
 
 Certificate make_cert(pin_fingerprint const& fp, std::string_view dn) {
     Certificate c{};
-    c.sha256_       = fp;
-    c.subject_dn_   = dn;
+    c.sha256_ = fp;
+    c.subject_dn_ = dn;
     c.x509_version_ = 3;
     return c;
 }

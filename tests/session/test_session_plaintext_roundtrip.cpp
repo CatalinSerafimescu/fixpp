@@ -23,9 +23,9 @@
 
 #include <algorithm>
 #include <asio/co_spawn.hpp>
+#include <asio/connect.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
-#include <asio/connect.hpp>
 #include <asio/ip/tcp.hpp>
 #include <asio/redirect_error.hpp>
 #include <asio/steady_timer.hpp>
@@ -88,8 +88,10 @@
 // every unsuppressed selection site (T019/T020). This test file legitimately
 // selects the value (it IS the plaintext round-trip test), so suppress file-wide
 // per the fixpp-internal-code pragma idiom. [043 T020]
+#if defined(__clang__) || defined(__GNUC__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
 #include <fixpp/session/security_profile.hpp>
 
 using namespace std::chrono_literals;
@@ -98,26 +100,25 @@ namespace {
 
 // Current wall-clock UTC as a FIX UTCTimestamp "YYYYMMDD-HH:MM:SS.mmm".
 // Required by the 038 acceptor first-Logon SendingTime(52) MaxLatency guard.
-static std::string utc_now_fix_timestamp() {
+std::string utc_now_fix_timestamp() {
     std::array<char, 32> buf{};
     auto r = fixpp::core::utc_time_to_fix_string(std::chrono::system_clock::now(),
-                                                  fixpp::core::fix_time_precision::millis,
-                                                  std::span<char>{buf});
+                                                 fixpp::core::fix_time_precision::millis,
+                                                 std::span<char>{buf});
     return r ? std::string{r->data(), r->size()} : std::string{};
 }
 
 // Build a complete FIX frame from begin_string + a body string.
 // The body must already contain all body fields (35=, 34=, 49=, 52=, 56=, etc.).
 // Calculates BodyLength(9=) and CheckSum(10=) automatically.
-static std::vector<std::byte> make_fix_frame(std::string_view begin_str,
-                                              std::string const& body) {
+std::vector<std::byte> make_fix_frame(std::string_view begin_str, std::string const& body) {
     std::string msg;
     msg += "8=" + std::string(begin_str) + "\x01";
     msg += "9=" + std::to_string(body.size()) + "\x01";
     msg += body;
     unsigned int cs = 0;
     for (unsigned char c : msg) cs += c;
-    cs &= 0xFFu;
+    cs &= 0xFFU;
     char csbuf[5];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     msg += "10=" + std::string(csbuf) + "\x01";
@@ -129,34 +130,31 @@ static std::vector<std::byte> make_fix_frame(std::string_view begin_str,
 }
 
 // Build a valid FIX Logon frame. EncryptMethod(98)=0 (plaintext-safe per FR-009).
-static std::vector<std::byte> make_plain_logon_frame(std::string_view begin_str,
-                                                      std::string_view sender,
-                                                      std::string_view target) {
+std::vector<std::byte> make_plain_logon_frame(std::string_view begin_str, std::string_view sender,
+                                              std::string_view target) {
     auto field = [](int tag, std::string_view v) -> std::string {
         return std::to_string(tag) + "=" + std::string(v) + "\x01";
     };
     std::string body;
-    body += field(35, "A");   // MsgType = Logon
-    body += field(34, "1");   // MsgSeqNum
+    body += field(35, "A");  // MsgType = Logon
+    body += field(34, "1");  // MsgSeqNum
     body += field(49, sender);
     body += field(52, utc_now_fix_timestamp());  // SendingTime (038 guard)
     body += field(56, target);
     body += field(98, "0");    // EncryptMethod = none
-    body += field(108, "30"); // HeartBtInt
+    body += field(108, "30");  // HeartBtInt
     return make_fix_frame(begin_str, body);
 }
 
 // Build a valid FIX Logout frame (35=5).
 // seq MUST advance past the Logon's 34=1 (use 34=2 for the first Logout).
-static std::vector<std::byte> make_plain_logout_frame(std::string_view begin_str,
-                                                       std::string_view sender,
-                                                       std::string_view target,
-                                                       int seq) {
+std::vector<std::byte> make_plain_logout_frame(std::string_view begin_str, std::string_view sender,
+                                               std::string_view target, int seq) {
     auto field = [](int tag, std::string_view v) -> std::string {
         return std::to_string(tag) + "=" + std::string(v) + "\x01";
     };
     std::string body;
-    body += field(35, "5");   // MsgType = Logout
+    body += field(35, "5");  // MsgType = Logout
     body += field(34, std::to_string(seq));
     body += field(49, sender);
     body += field(52, utc_now_fix_timestamp());  // fresh SendingTime (038 MaxLatency guard)
@@ -168,26 +166,23 @@ static std::vector<std::byte> make_plain_logout_frame(std::string_view begin_str
 // (TLS record type 0x16 = Handshake; TLS record type 0x15 = Alert).
 // If the first byte is 0x38 ('8' — the start of "8=FIX.4.2") the wire is plaintext.
 std::atomic<std::byte> g_first_byte_sent{std::byte{0}};
-std::atomic<bool>      g_first_byte_captured{false};
+std::atomic<bool> g_first_byte_captured{false};
 
 // Standalone plaintext initiator coroutine (Logon-only).
 // Connects to the acceptor's bound port via a raw TCP socket (no TLS),
 // sends a FIX Logon frame, waits for the acceptor reply (up to 5s), then exits.
-static asio::awaitable<void> run_plain_initiator(asio::io_context& ioc,
-                                                  uint16_t acceptor_port,
-                                                  std::string sender,
-                                                  std::string target) {
+asio::awaitable<void> run_plain_initiator(asio::io_context& ioc, uint16_t acceptor_port,
+                                          std::string sender, std::string target) {
     co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
     try {
         asio::ip::tcp::socket sock{ioc};
         asio::ip::tcp::resolver resolver{ioc};
 
-        auto eps = co_await resolver.async_resolve(
-            "127.0.0.1", std::to_string(acceptor_port), asio::use_awaitable);
+        auto eps = co_await resolver.async_resolve("127.0.0.1", std::to_string(acceptor_port),
+                                                   asio::use_awaitable);
 
         asio::error_code ec;
-        co_await asio::async_connect(sock, eps,
-                                     asio::redirect_error(asio::use_awaitable, ec));
+        co_await asio::async_connect(sock, eps, asio::redirect_error(asio::use_awaitable, ec));
         if (ec) co_return;
 
         // Build and send a Logon frame.
@@ -220,21 +215,18 @@ static asio::awaitable<void> run_plain_initiator(asio::io_context& ioc,
 // then sends a Logout (34=2, fresh 52=) and waits 300ms before closing.
 // The Logout MsgSeqNum MUST advance past the Logon's 34=1 so the acceptor's
 // check_inbound sees an in-sequence frame (not a gap). [SC-001 / FR-009]
-static asio::awaitable<void> run_plain_initiator_with_logout(asio::io_context& ioc,
-                                                              uint16_t acceptor_port,
-                                                              std::string sender,
-                                                              std::string target) {
+asio::awaitable<void> run_plain_initiator_with_logout(asio::io_context& ioc, uint16_t acceptor_port,
+                                                      std::string sender, std::string target) {
     co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
     try {
         asio::ip::tcp::socket sock{ioc};
         asio::ip::tcp::resolver resolver{ioc};
 
-        auto eps = co_await resolver.async_resolve(
-            "127.0.0.1", std::to_string(acceptor_port), asio::use_awaitable);
+        auto eps = co_await resolver.async_resolve("127.0.0.1", std::to_string(acceptor_port),
+                                                   asio::use_awaitable);
 
         asio::error_code ec;
-        co_await asio::async_connect(sock, eps,
-                                     asio::redirect_error(asio::use_awaitable, ec));
+        co_await asio::async_connect(sock, eps, asio::redirect_error(asio::use_awaitable, ec));
         if (ec) co_return;
 
         // Send Logon (34=1).
@@ -313,7 +305,7 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogon) {
     ioc.restart();
 
     uint16_t bound_port = engine.acceptor_bound_endpoint(acc_id).port;
-    ASSERT_NE(bound_port, 0u) << "acceptor did not bind (port=0)";
+    ASSERT_NE(bound_port, 0U) << "acceptor did not bind (port=0)";
 
     // Watchdog: fires at 5s from the point the session is attempted.
     // Protects BOTH the establish phase (run_for(500ms)) AND the cleanup phase
@@ -328,11 +320,10 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogon) {
     });
 
     // Spawn the standalone plaintext initiator.
-    asio::co_spawn(
-        ioc,
-        run_plain_initiator(ioc, bound_port,
-                            /*sender=*/"PLAIN-INITIATOR", /*target=*/"PLAIN-ACCEPTOR"),
-        asio::detached);
+    asio::co_spawn(ioc,
+                   run_plain_initiator(ioc, bound_port,
+                                       /*sender=*/"PLAIN-INITIATOR", /*target=*/"PLAIN-ACCEPTOR"),
+                   asio::detached);
 
     // Run for 500ms to allow accept→(no handshake)→attach→Logon-admit.
     // The initiator connects and sends the Logon immediately; the full exchange
@@ -344,14 +335,11 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogon) {
 
     // Capture state while the initiator is still connected (Active window).
     auto acc_session = engine.lookup(acc_id);
-    const bool established =
-        (acc_session != nullptr) &&
-        (acc_session->state() == fixpp::session::fsm_state::Active ||
-         acc_session->state() == fixpp::session::fsm_state::LogonReceived);
+    const bool established = (acc_session != nullptr) &&
+                             (acc_session->state() == fixpp::session::fsm_state::Active ||
+                              acc_session->state() == fixpp::session::fsm_state::LogonReceived);
     const std::string state_str =
-        (acc_session != nullptr)
-            ? std::to_string(static_cast<int>(acc_session->state()))
-            : "null";
+        (acc_session != nullptr) ? std::to_string(static_cast<int>(acc_session->state())) : "null";
 
     // Stop cleanly. Use run_for(2s) — watchdog is still armed.
     // engine.stop() with logout_disconnect_timeout_ms=500 takes ≤1.5s; 2s is ample.
@@ -377,12 +365,13 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogon) {
 
     // Assert no watchdog fired during establish or cleanup.
     ASSERT_FALSE(watchdog_fired.load()) << "watchdog fired: plaintext round-trip did not complete "
-                                         "within 5s — potential hang in accept/handshake path";
+                                           "within 5s — potential hang in accept/handshake path";
 
     // SC-001 core assertion: acceptor reached established state.
     EXPECT_TRUE(established)
         << "SC-001: plaintext acceptor must reach Active (or LogonReceived) after "
-           "the initiator sends a valid Logon. state=" << state_str
+           "the initiator sends a valid Logon. state="
+        << state_str
         << ". Exercises all three E-7 acceptor sites (profile-map arm, "
            "plaintext accept-factory, post-accept handshake skip).";
 
@@ -391,12 +380,13 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogon) {
     // This confirms no TLS ClientHello was emitted (SC-001 / FR-011).
     ASSERT_TRUE(g_first_byte_captured.load())
         << "No bytes were captured — the initiator may not have connected";
-    const auto first_byte = static_cast<unsigned char>(
-        g_first_byte_sent.load(std::memory_order_acquire));
+    const auto first_byte =
+        static_cast<unsigned char>(g_first_byte_sent.load(std::memory_order_acquire));
     EXPECT_EQ(first_byte, static_cast<unsigned char>('8'))
         << "SC-001: first byte on the wire must be '8' (=0x38, start of '8=FIX.x.y\\x01'), "
            "not 0x16 (TLS Handshake) or 0x15 (TLS Alert). "
-           "first_byte=0x" << std::hex << static_cast<unsigned>(first_byte);
+           "first_byte=0x"
+        << std::hex << static_cast<unsigned>(first_byte);
 }
 
 // ── T042: SC-001 — full Logon → Logout round trip over plaintext ──────────────
@@ -447,7 +437,7 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogonLogout) {
     ioc.restart();
 
     uint16_t bound_port = engine.acceptor_bound_endpoint(acc_id).port;
-    ASSERT_NE(bound_port, 0u) << "acceptor did not bind (port=0)";
+    ASSERT_NE(bound_port, 0U) << "acceptor did not bind (port=0)";
 
     // Watchdog: 6s budget covers the full Logon+Logout exchange + cleanup.
     std::atomic<bool> watchdog_fired{false};
@@ -458,12 +448,11 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogonLogout) {
     });
 
     // Spawn the Logon+Logout initiator.
-    asio::co_spawn(
-        ioc,
-        run_plain_initiator_with_logout(ioc, bound_port,
-                                        /*sender=*/"PLAIN-INITIATOR",
-                                        /*target=*/"PLAIN-ACCEPTOR"),
-        asio::detached);
+    asio::co_spawn(ioc,
+                   run_plain_initiator_with_logout(ioc, bound_port,
+                                                   /*sender=*/"PLAIN-INITIATOR",
+                                                   /*target=*/"PLAIN-ACCEPTOR"),
+                   asio::detached);
 
     // Run for 700ms: 200ms (Logon exchange) + 300ms (Logout exchange) + 200ms margin.
     // After this point the initiator has sent Logon + Logout; the acceptor should have
@@ -482,7 +471,8 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogonLogout) {
     // so the session strand is idle — no concurrent writes to recent_events_.
     bool logout_seqreset_event_found = false;
     for (const auto& ev : acc_session->recent_events()) {
-        if (auto* sr = std::get_if<fixpp::session::session_event_sequence_numbers_reset>(&ev)) {
+        if (const auto* sr =
+                std::get_if<fixpp::session::session_event_sequence_numbers_reset>(&ev)) {
             if (!sr->by_peer_request) {
                 logout_seqreset_event_found = true;
             }
@@ -521,4 +511,6 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogonLogout) {
            "Absence means the Logout was NOT processed via the Active→Logout transition "
            "(possibly the session disconnected for another reason before Logout).";
 }
+#if defined(__clang__) || defined(__GNUC__)
 #pragma clang diagnostic pop  // -Wdeprecated-declarations (insecure_plain_tcp, 043 T020)
+#endif

@@ -40,7 +40,7 @@ using fixpp::session::Session;
 using fixpp::session::SessionConfig;
 
 // Helper: create a minimal mock_clock bound to the given executor.
-static std::shared_ptr<fixpp::core::mock_clock> make_clock(asio::any_io_executor ex) {
+std::shared_ptr<fixpp::core::mock_clock> make_clock(asio::any_io_executor ex) {
     return std::make_shared<fixpp::core::mock_clock>(
         fixpp::core::utc_time_point{}, fixpp::core::steady_time_point{}, std::move(ex));
 }
@@ -50,8 +50,7 @@ static std::shared_ptr<fixpp::core::mock_clock> make_clock(asio::any_io_executor
 // that covers both legal values. If a third enumerator were added to
 // backpressure_mode without updating this switch, the macro's static_assert
 // would fire at compile time.
-[[maybe_unused]] static void check_switch_covers_both_legal_values(
-    SessionConfig::backpressure_mode m) {
+[[maybe_unused]] void check_switch_covers_both_legal_values(SessionConfig::backpressure_mode m) {
     // Macro verifies the enum has exactly 2 values (block + disconnect_and_recover).
     FIXPP_ASSERT_BACKPRESSURE_SWITCH_EXHAUSTIVE(SessionConfig::backpressure_mode);
     switch (m) {

@@ -48,10 +48,14 @@
 //          data-model.md E-3 / E-4 / E-6; [const §XII.5 v0.3]; tasks.md T021/T022/T023.
 
 // SecurityProfile::kind::insecure_plain_tcp carries [[deprecated]]; suppress file-wide.
+#if defined(__clang__) || defined(__GNUC__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
 #include <fixpp/session/security_profile.hpp>
+#if defined(__clang__) || defined(__GNUC__)
 #pragma clang diagnostic pop
+#endif
 
 #include <gtest/gtest.h>
 
@@ -109,13 +113,12 @@ public:
     std::atomic<int> make_count_{0};
 };
 
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Build helpers.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Build a minimal SessionConfig for an acceptor (no auto-connect at open()).
-static SessionConfig make_cfg(SecurityProfile::kind k) {
+SessionConfig make_cfg(SecurityProfile::kind k) {
     SessionConfig cfg;
     cfg.sender_comp_id = "TW";
     cfg.target_comp_id = "ISLD";
@@ -124,10 +127,14 @@ static SessionConfig make_cfg(SecurityProfile::kind k) {
     cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
     cfg.heartbeat_interval = std::chrono::seconds{0};
 
+#if defined(__clang__) || defined(__GNUC__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
     cfg.security_profile = SecurityProfile{k};
+#if defined(__clang__) || defined(__GNUC__)
 #pragma clang diagnostic pop
+#endif
 
     cfg.transport_send = [](std::span<const std::byte>) {};
     return cfg;
@@ -146,10 +153,14 @@ TEST(PlaintextFactoryMismatch, Cell_a_PlaintextProfileWithTlsOverrideRejects) {
     eng.executor = ioc.get_executor();
     eng.clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
 
+#if defined(__clang__) || defined(__GNUC__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
     auto cfg = make_cfg(SecurityProfile::kind::insecure_plain_tcp);
+#if defined(__clang__) || defined(__GNUC__)
 #pragma clang diagnostic pop
+#endif
 
     // TLS-kind override (MinimalTlsFactory defaults kind() → tls).
     cfg.transport_factory_override = std::make_shared<MinimalTlsFactory>();
@@ -170,7 +181,8 @@ TEST(PlaintextFactoryMismatch, Cell_a_PlaintextProfileWithTlsOverrideRejects) {
            "[RED before T023: open() returns has_value()==true]";
     EXPECT_EQ(val.error(), error::invalid_session_config)
         << "Cell (a): expected error::invalid_session_config (slot 53); "
-           "got error=" << static_cast<int>(val.error());
+           "got error="
+        << static_cast<int>(val.error());
 
     // FQ-5 (gate-b/r2): failed open() must NOT leave the session observable as open.
     // The T023 reject was originally AFTER state_=lifecycle::open (bug); post-fix
@@ -194,7 +206,8 @@ TEST(PlaintextFactoryMismatch, Cell_a_PlaintextProfileWithTlsOverrideRejects) {
     EXPECT_EQ(close_r_a.error(), error::session_already_closed)
         << "Cell (a) FQ-5: close() must return session_already_closed (state==never_opened), "
            "not run teardown (which would indicate state==open was leaked). "
-           "Got error=" << static_cast<int>(close_r_a.error());
+           "Got error="
+        << static_cast<int>(close_r_a.error());
 }
 
 // Cell (b): TLS profile (mtls_ca) + explicit plaintext factory override.
@@ -209,8 +222,8 @@ TEST(PlaintextFactoryMismatch, Cell_b_TlsProfileWithPlaintextOverrideRejects) {
     auto cfg = make_cfg(SecurityProfile::kind::mtls_ca);
 
     // Plaintext factory as session override (kind()==plaintext, mismatches mtls_ca).
-    auto plain_r = fixpp::transport::make_asio_plain_transport_factory(
-        fixpp::transport::Transport::Config{});
+    auto plain_r =
+        fixpp::transport::make_asio_plain_transport_factory(fixpp::transport::Transport::Config{});
     ASSERT_TRUE(plain_r.has_value()) << "make_asio_plain_transport_factory failed";
     cfg.transport_factory_override = std::move(*plain_r);
     cfg.executor_override = ioc.get_executor();
@@ -230,7 +243,8 @@ TEST(PlaintextFactoryMismatch, Cell_b_TlsProfileWithPlaintextOverrideRejects) {
            "[RED before T023: open() returns has_value()==true]";
     EXPECT_EQ(val.error(), error::invalid_session_config)
         << "Cell (b): expected error::invalid_session_config; "
-           "got error=" << static_cast<int>(val.error());
+           "got error="
+        << static_cast<int>(val.error());
 
     // FQ-5 (gate-b/r2): failed open() must NOT leave the session observable as open.
     EXPECT_FALSE(s.is_open())
@@ -248,7 +262,8 @@ TEST(PlaintextFactoryMismatch, Cell_b_TlsProfileWithPlaintextOverrideRejects) {
         << "Cell (b) FQ-5: close() on a never-opened session must return an error";
     EXPECT_EQ(close_r_b.error(), error::session_already_closed)
         << "Cell (b) FQ-5: close() must return session_already_closed (state==never_opened). "
-           "Got error=" << static_cast<int>(close_r_b.error());
+           "Got error="
+        << static_cast<int>(close_r_b.error());
 }
 
 // Cell (c): TLS profile + NO session override + plaintext engine-default factory.
@@ -272,8 +287,8 @@ TEST(PlaintextFactoryMismatch, Cell_c_TlsProfileWithPlaintextEngineDefaultReject
 
     // Plaintext factory as ENGINE default (not session override).
     // TLS session with no override → effective factory = engine default = plaintext.
-    auto plain_r = fixpp::transport::make_asio_plain_transport_factory(
-        fixpp::transport::Transport::Config{});
+    auto plain_r =
+        fixpp::transport::make_asio_plain_transport_factory(fixpp::transport::Transport::Config{});
     ASSERT_TRUE(plain_r.has_value()) << "make_asio_plain_transport_factory failed";
     eng.default_transport_factory = std::move(*plain_r);
 
@@ -299,7 +314,8 @@ TEST(PlaintextFactoryMismatch, Cell_c_TlsProfileWithPlaintextEngineDefaultReject
            "[RED before T023: open() returns has_value()==true]";
     EXPECT_EQ(val.error(), error::invalid_session_config)
         << "Cell (c): expected error::invalid_session_config (the effective-factory "
-           "mismatch reject); got error=" << static_cast<int>(val.error());
+           "mismatch reject); got error="
+        << static_cast<int>(val.error());
 
     // FQ-5 (gate-b/r2): failed open() must NOT leave the session observable as open.
     // Cell (c) is the effective-factory case — the original T023 reject was AFTER
@@ -321,7 +337,8 @@ TEST(PlaintextFactoryMismatch, Cell_c_TlsProfileWithPlaintextEngineDefaultReject
         << "Cell (c) FQ-5: close() on a never-opened session must return an error";
     EXPECT_EQ(close_r_c.error(), error::session_already_closed)
         << "Cell (c) FQ-5: close() must return session_already_closed (state==never_opened). "
-           "Got error=" << static_cast<int>(close_r_c.error());
+           "Got error="
+        << static_cast<int>(close_r_c.error());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -336,10 +353,14 @@ TEST(PlaintextFactoryMismatch, Cell_d_PlaintextProfileNoOverrideOpens) {
     eng.executor = ioc.get_executor();
     eng.clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
 
+#if defined(__clang__) || defined(__GNUC__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
     auto cfg = make_cfg(SecurityProfile::kind::insecure_plain_tcp);
+#if defined(__clang__) || defined(__GNUC__)
 #pragma clang diagnostic pop
+#endif
     cfg.executor_override = ioc.get_executor();
     // No transport_factory_override → auto-derive.
 
@@ -354,7 +375,8 @@ TEST(PlaintextFactoryMismatch, Cell_d_PlaintextProfileNoOverrideOpens) {
     EXPECT_TRUE(val.has_value())
         << "Cell (d) SC-003/US3 AC4: insecure_plain_tcp with no override must succeed "
            "(auto-derive plaintext factory; kind()==plaintext matches profile). "
-           "Error=" << (val.has_value() ? 0 : static_cast<int>(val.error()));
+           "Error="
+        << (val.has_value() ? 0 : static_cast<int>(val.error()));
 
     if (val.has_value()) {
         ioc.restart();
@@ -391,7 +413,8 @@ TEST(PlaintextFactoryMismatch, Cell_e_TlsProfileWithTlsEngineDefaultOpens) {
     EXPECT_TRUE(val.has_value())
         << "Cell (e) SC-003/US3 AC4: one_way_ca + TLS engine-default must succeed "
            "(kind()==tls matches the TLS profile). "
-           "Error=" << (val.has_value() ? 0 : static_cast<int>(val.error()));
+           "Error="
+        << (val.has_value() ? 0 : static_cast<int>(val.error()));
 
     if (val.has_value()) {
         ioc.restart();
@@ -413,13 +436,17 @@ TEST(PlaintextFactoryMismatch, Cell_f_PlaintextProfileWithPlaintextOverrideOpens
     eng.executor = ioc.get_executor();
     eng.clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
 
+#if defined(__clang__) || defined(__GNUC__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
     auto cfg = make_cfg(SecurityProfile::kind::insecure_plain_tcp);
+#if defined(__clang__) || defined(__GNUC__)
 #pragma clang diagnostic pop
+#endif
 
-    auto plain_r = fixpp::transport::make_asio_plain_transport_factory(
-        fixpp::transport::Transport::Config{});
+    auto plain_r =
+        fixpp::transport::make_asio_plain_transport_factory(fixpp::transport::Transport::Config{});
     ASSERT_TRUE(plain_r.has_value()) << "make_asio_plain_transport_factory failed";
     cfg.transport_factory_override = std::move(*plain_r);
     cfg.executor_override = ioc.get_executor();
@@ -436,7 +463,8 @@ TEST(PlaintextFactoryMismatch, Cell_f_PlaintextProfileWithPlaintextOverrideOpens
     EXPECT_TRUE(val.has_value())
         << "Cell (f) SC-003/US3 AC4: insecure_plain_tcp + explicit plaintext factory "
            "override must succeed (kind()==plaintext matches). "
-           "Error=" << (val.has_value() ? 0 : static_cast<int>(val.error()));
+           "Error="
+        << (val.has_value() ? 0 : static_cast<int>(val.error()));
 
     if (val.has_value()) {
         ioc.restart();
@@ -492,16 +520,20 @@ TEST(PlaintextFactoryMintWitness, Cell_g_PlaintextNoOverrideAutoDeriveMint) {
     eng.clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
     // No engine default — auto-derive derives its own factory.
 
+#if defined(__clang__) || defined(__GNUC__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
     SessionConfig cfg;
     cfg.sender_comp_id = "TW";
     cfg.target_comp_id = "ISLD";
     cfg.begin_string = "FIX.4.2";
     cfg.role = fixpp::session::session_role::initiator;
-    cfg.engine_managed = true;   // defer connect to drive_reconnect()
+    cfg.engine_managed = true;  // defer connect to drive_reconnect()
     cfg.security_profile = SecurityProfile{SecurityProfile::kind::insecure_plain_tcp};
+#if defined(__clang__) || defined(__GNUC__)
 #pragma clang diagnostic pop
+#endif
     cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
     cfg.heartbeat_interval = std::chrono::seconds{0};
     cfg.executor_override = ioc.get_executor();

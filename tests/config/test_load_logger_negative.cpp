@@ -26,21 +26,19 @@
 #include "mappers.hpp"  // detail::resolve_engine_logger, construct_loggers_if_clean,
                         // DiagnosticAccumulator, PendingLoggerSet
 
-#include <asio/io_context.hpp>
+#include <gtest/gtest.h>
 
+#include <algorithm>
+#include <asio/io_context.hpp>
 #include <fixpp/config/config_bundle.hpp>
 #include <fixpp/config/load_diagnostic.hpp>
 #include <fixpp/config/toml_config_loader.hpp>
-#include <fixpp/log/file_sink.hpp>   // FileSink + current_path() — for E witness
+#include <fixpp/log/file_sink.hpp>  // FileSink + current_path() — for E witness
 #include <fixpp/log/logger.hpp>
 #include <fixpp/log/syslog_sink.hpp>  // defines FIXPP_HAS_SYSLOG when available
 
-#include <gtest/gtest.h>
-
-
-#include "support/temp_dir.hpp"  // fixpp::test_support::try_remove_temp_dir (#404)
-
 #include "../support/msvc_debug_arena_skip.hpp"
+#include "support/temp_dir.hpp"  // fixpp::test_support::try_remove_temp_dir (#404)
 
 #ifdef _WIN32
 #include <filesystem>
@@ -73,14 +71,12 @@ const int g_ensure_tmp_dir = [] {
 // Helpers
 // ---------------------------------------------------------------------------
 
-static std::filesystem::path neg_fixture(std::string_view name)
-{
+static std::filesystem::path neg_fixture(std::string_view name) {
     return std::filesystem::path{std::string{FIXPP_CONFIG_FIXTURE_DIR}} / name;
 }
 
 // Full-file load via the public API.
-static fixpp::config::LoadResult full_load(const std::filesystem::path& path)
-{
+static fixpp::config::LoadResult full_load(const std::filesystem::path& path) {
     asio::io_context ctx;
     fixpp::config::LoadOptions opts;
     opts.engine_executor = ctx.get_executor();
@@ -90,13 +86,10 @@ static fixpp::config::LoadResult full_load(const std::filesystem::path& path)
 // Check that `diags` contains a diagnostic matching both reason and key_path.
 static bool has_diag(const std::vector<fixpp::config::LoadDiagnostic>& diags,
                      fixpp::config::reason_class expected_reason,
-                     std::string_view            expected_key_path)
-{
-    return std::any_of(diags.begin(), diags.end(),
-                       [&](const fixpp::config::LoadDiagnostic& d) {
-                           return d.reason == expected_reason &&
-                                  d.key_path == expected_key_path;
-                       });
+                     std::string_view expected_key_path) {
+    return std::ranges::any_of(diags, [&](const fixpp::config::LoadDiagnostic& d) {
+        return d.reason == expected_reason && d.key_path == expected_key_path;
+    });
 }
 
 // Build a minimal [logger] toml::table inline (no file I/O) for white-box cells.
@@ -107,8 +100,7 @@ struct ParsedLogger {
     const toml::table* logger_tbl{nullptr};
 };
 
-static ParsedLogger parse_logger_inline(const std::string& logger_toml)
-{
+static ParsedLogger parse_logger_inline(const std::string& logger_toml) {
     ParsedLogger result;
     result.root = std::make_shared<toml::table>(toml::parse(logger_toml));
     if (const auto* n = result.root->get("logger"); n && n->is_table())
@@ -122,31 +114,25 @@ static ParsedLogger parse_logger_inline(const std::string& logger_toml)
 
 // ── unknown_enum: sink kind ──────────────────────────────────────────────────
 
-TEST(T014_NegBattery, UnknownSinkKind)
-{
+TEST(T014_NegBattery, UnknownSinkKind) {
     // Full-load path. The fixture has kind="kafka" in sinks[0].
     // → unknown_enum on "logger.sinks[0].kind"
     const auto result = full_load(neg_fixture("neg_logger_unknown_kind.toml"));
     ASSERT_FALSE(result.has_value());
     const auto& diags = result.error();
-    EXPECT_TRUE(has_diag(diags,
-                          fixpp::config::reason_class::unknown_enum,
-                          "logger.sinks[0].kind"))
+    EXPECT_TRUE(has_diag(diags, fixpp::config::reason_class::unknown_enum, "logger.sinks[0].kind"))
         << "Expected unknown_enum on logger.sinks[0].kind";
 }
 
 // ── unknown_enum: on_overflow token ─────────────────────────────────────────
 
-TEST(T014_NegBattery, UnknownOnOverflow)
-{
+TEST(T014_NegBattery, UnknownOnOverflow) {
     // Full-load path. The fixture has on_overflow="discard" (not a valid token).
     // → unknown_enum on "logger.on_overflow"
     const auto result = full_load(neg_fixture("neg_logger_unknown_on_overflow.toml"));
     ASSERT_FALSE(result.has_value());
     const auto& diags = result.error();
-    EXPECT_TRUE(has_diag(diags,
-                          fixpp::config::reason_class::unknown_enum,
-                          "logger.on_overflow"))
+    EXPECT_TRUE(has_diag(diags, fixpp::config::reason_class::unknown_enum, "logger.on_overflow"))
         << "Expected unknown_enum on logger.on_overflow";
 }
 
@@ -163,8 +149,7 @@ TEST(T014_NegBattery, UnknownOnOverflow)
 // probe the library's syslog mode at runtime and SKIP the facility cell when
 // syslog is unavailable (the facility parse is then unreachable).
 
-TEST(T014_NegBattery, UnknownSyslogFacility)
-{
+TEST(T014_NegBattery, UnknownSyslogFacility) {
     // Probe: resolve kind="syslog" with no facility field.
     // In syslog-available mode: succeeds (no error for absent optional facility).
     // In syslog-unavailable mode: invalid_or_contradictory_selector on sinks[0].kind.
@@ -222,152 +207,130 @@ TEST(T014_NegBattery, UnknownSyslogFacility)
     ASSERT_FALSE(acc.empty());
     const auto diags = std::move(acc).release();
 
-    EXPECT_TRUE(has_diag(diags,
-                          fixpp::config::reason_class::unknown_enum,
-                          "logger.sinks[0].facility"))
+    EXPECT_TRUE(
+        has_diag(diags, fixpp::config::reason_class::unknown_enum, "logger.sinks[0].facility"))
         << "Expected unknown_enum on logger.sinks[0].facility";
 }
 
 // ── missing_required: sinks absent ──────────────────────────────────────────
 
-TEST(T014_NegBattery, MissingSinks)
-{
+TEST(T014_NegBattery, MissingSinks) {
     // Full-load path. The fixture has no [[logger.sinks]] array at all.
     // → missing_required on "logger.sinks"
     const auto result = full_load(neg_fixture("neg_logger_missing_sinks.toml"));
     ASSERT_FALSE(result.has_value());
     const auto& diags = result.error();
-    EXPECT_TRUE(has_diag(diags,
-                          fixpp::config::reason_class::missing_required,
-                          "logger.sinks"))
+    EXPECT_TRUE(has_diag(diags, fixpp::config::reason_class::missing_required, "logger.sinks"))
         << "Expected missing_required on logger.sinks";
 }
 
 // ── missing_required: OTLP endpoint absent ───────────────────────────────────
 
 #ifdef FIXPP_CONFIG_HAS_OTLP
-TEST(T014_NegBattery, OtlpMissingEndpoint)
-{
+TEST(T014_NegBattery, OtlpMissingEndpoint) {
     // Full-load path. The fixture has kind="otlp" but no endpoint field.
     // → missing_required on "logger.sinks[0].endpoint"
     const auto result = full_load(neg_fixture("neg_logger_otlp_missing_endpoint.toml"));
     ASSERT_FALSE(result.has_value());
     const auto& diags = result.error();
-    EXPECT_TRUE(has_diag(diags,
-                          fixpp::config::reason_class::missing_required,
-                          "logger.sinks[0].endpoint"))
+    EXPECT_TRUE(
+        has_diag(diags, fixpp::config::reason_class::missing_required, "logger.sinks[0].endpoint"))
         << "Expected missing_required on logger.sinks[0].endpoint";
 }
 #endif  // FIXPP_CONFIG_HAS_OTLP
 
 // ── empty_required: sinks array present but empty ────────────────────────────
 
-TEST(T014_NegBattery, EmptySinks)
-{
+TEST(T014_NegBattery, EmptySinks) {
     // Full-load path. The fixture has sinks = [] (empty inline array).
     // → empty_required on "logger.sinks"
     const auto result = full_load(neg_fixture("neg_logger_empty_sinks.toml"));
     ASSERT_FALSE(result.has_value());
     const auto& diags = result.error();
-    EXPECT_TRUE(has_diag(diags,
-                          fixpp::config::reason_class::empty_required,
-                          "logger.sinks"))
+    EXPECT_TRUE(has_diag(diags, fixpp::config::reason_class::empty_required, "logger.sinks"))
         << "Expected empty_required on logger.sinks";
 }
 
 // ── empty_required: OTLP endpoint present but empty ──────────────────────────
 
 #ifdef FIXPP_CONFIG_HAS_OTLP
-TEST(T014_NegBattery, OtlpEmptyEndpoint)
-{
+TEST(T014_NegBattery, OtlpEmptyEndpoint) {
     // Full-load path. The fixture has endpoint = "" (present, empty string).
     // → empty_required on "logger.sinks[0].endpoint"
     const auto result = full_load(neg_fixture("neg_logger_otlp_empty_endpoint.toml"));
     ASSERT_FALSE(result.has_value());
     const auto& diags = result.error();
-    EXPECT_TRUE(has_diag(diags,
-                          fixpp::config::reason_class::empty_required,
-                          "logger.sinks[0].endpoint"))
+    EXPECT_TRUE(
+        has_diag(diags, fixpp::config::reason_class::empty_required, "logger.sinks[0].endpoint"))
         << "Expected empty_required on logger.sinks[0].endpoint";
 }
 #endif  // FIXPP_CONFIG_HAS_OTLP
 
 // ── out_of_range: capacity not a power of 2 ──────────────────────────────────
 
-TEST(T014_NegBattery, CapacityNotPow2)
-{
+TEST(T014_NegBattery, CapacityNotPow2) {
     // Full-load path. The fixture has capacity = 1000 (not a power of 2).
     // → out_of_range on "logger.capacity"
     const auto result = full_load(neg_fixture("neg_logger_capacity_not_pow2.toml"));
     ASSERT_FALSE(result.has_value());
     const auto& diags = result.error();
-    EXPECT_TRUE(has_diag(diags,
-                          fixpp::config::reason_class::out_of_range,
-                          "logger.capacity"))
+    EXPECT_TRUE(has_diag(diags, fixpp::config::reason_class::out_of_range, "logger.capacity"))
         << "Expected out_of_range on logger.capacity";
 }
 
 // ── out_of_range: max_file_bytes = 0 ─────────────────────────────────────────
 
-TEST(T014_NegBattery, ZeroMaxFileBytes)
-{
+TEST(T014_NegBattery, ZeroMaxFileBytes) {
     // Full-load path. The fixture has max_file_bytes = 0.
     // → out_of_range on "logger.sinks[0].max_file_bytes"
     const auto result = full_load(neg_fixture("neg_logger_zero_max_file_bytes.toml"));
     ASSERT_FALSE(result.has_value());
     const auto& diags = result.error();
-    EXPECT_TRUE(has_diag(diags,
-                          fixpp::config::reason_class::out_of_range,
-                          "logger.sinks[0].max_file_bytes"))
+    EXPECT_TRUE(has_diag(diags, fixpp::config::reason_class::out_of_range,
+                         "logger.sinks[0].max_file_bytes"))
         << "Expected out_of_range on logger.sinks[0].max_file_bytes";
 }
 
 // ── out_of_range: max_export_batch = 0 (OTLP) ───────────────────────────────
 
 #ifdef FIXPP_CONFIG_HAS_OTLP
-TEST(T014_NegBattery, OtlpZeroMaxExportBatch)
-{
+TEST(T014_NegBattery, OtlpZeroMaxExportBatch) {
     // Full-load path. The fixture has max_export_batch = 0.
     // → out_of_range on "logger.sinks[0].max_export_batch"
     const auto result = full_load(neg_fixture("neg_logger_otlp_zero_max_export_batch.toml"));
     ASSERT_FALSE(result.has_value());
     const auto& diags = result.error();
-    EXPECT_TRUE(has_diag(diags,
-                          fixpp::config::reason_class::out_of_range,
-                          "logger.sinks[0].max_export_batch"))
+    EXPECT_TRUE(has_diag(diags, fixpp::config::reason_class::out_of_range,
+                         "logger.sinks[0].max_export_batch"))
         << "Expected out_of_range on logger.sinks[0].max_export_batch";
 }
 #endif  // FIXPP_CONFIG_HAS_OTLP
 
 // ── malformed_value: unitless drain_timeout ───────────────────────────────────
 
-TEST(T014_NegBattery, UnitlessDrainTimeout)
-{
+TEST(T014_NegBattery, UnitlessDrainTimeout) {
     // Full-load path. The fixture has drain_timeout = "2000" (no unit suffix).
     // Per the 044 duration rule, a bare numeric string is malformed_value.
     // → malformed_value on "logger.drain_timeout"
     const auto result = full_load(neg_fixture("neg_logger_unitless_drain_timeout.toml"));
     ASSERT_FALSE(result.has_value());
     const auto& diags = result.error();
-    EXPECT_TRUE(has_diag(diags,
-                          fixpp::config::reason_class::malformed_value,
-                          "logger.drain_timeout"))
+    EXPECT_TRUE(
+        has_diag(diags, fixpp::config::reason_class::malformed_value, "logger.drain_timeout"))
         << "Expected malformed_value on logger.drain_timeout";
 }
 
 // ── malformed_value: unitless export_timeout (OTLP) ──────────────────────────
 
 #ifdef FIXPP_CONFIG_HAS_OTLP
-TEST(T014_NegBattery, OtlpUnitlessExportTimeout)
-{
+TEST(T014_NegBattery, OtlpUnitlessExportTimeout) {
     // Full-load path. The fixture has export_timeout = "500" (no unit suffix).
     // → malformed_value on "logger.sinks[0].export_timeout"
     const auto result = full_load(neg_fixture("neg_logger_unitless_export_timeout.toml"));
     ASSERT_FALSE(result.has_value());
     const auto& diags = result.error();
-    EXPECT_TRUE(has_diag(diags,
-                          fixpp::config::reason_class::malformed_value,
-                          "logger.sinks[0].export_timeout"))
+    EXPECT_TRUE(has_diag(diags, fixpp::config::reason_class::malformed_value,
+                         "logger.sinks[0].export_timeout"))
         << "Expected malformed_value on logger.sinks[0].export_timeout";
 }
 #endif  // FIXPP_CONFIG_HAS_OTLP
@@ -378,59 +341,49 @@ TEST(T014_NegBattery, OtlpUnitlessExportTimeout)
 // battery missed, with a discriminating (exact reason + key_path) witness.
 
 // missing_required: a [[logger.sinks]] entry with no "kind" field.
-TEST(T014_NegBattery, SinkMissingKind)
-{
+TEST(T014_NegBattery, SinkMissingKind) {
     const auto result = full_load(neg_fixture("neg_logger_sink_missing_kind.toml"));
     ASSERT_FALSE(result.has_value());
-    EXPECT_TRUE(has_diag(result.error(),
-                          fixpp::config::reason_class::missing_required,
-                          "logger.sinks[0].kind"))
+    EXPECT_TRUE(has_diag(result.error(), fixpp::config::reason_class::missing_required,
+                         "logger.sinks[0].kind"))
         << "Expected missing_required on logger.sinks[0].kind";
 }
 
 // empty_required: a [[logger.sinks]] entry with kind = "".
-TEST(T014_NegBattery, SinkEmptyKind)
-{
+TEST(T014_NegBattery, SinkEmptyKind) {
     const auto result = full_load(neg_fixture("neg_logger_sink_empty_kind.toml"));
     ASSERT_FALSE(result.has_value());
-    EXPECT_TRUE(has_diag(result.error(),
-                          fixpp::config::reason_class::empty_required,
-                          "logger.sinks[0].kind"))
+    EXPECT_TRUE(has_diag(result.error(), fixpp::config::reason_class::empty_required,
+                         "logger.sinks[0].kind"))
         << "Expected empty_required on logger.sinks[0].kind";
 }
 
 // out_of_range: capacity > uint32 max (the v<0||v>max arm, distinct from the
 // not-a-power-of-2 else branch that neg_logger_capacity_not_pow2 already covers).
-TEST(T014_NegBattery, CapacityOutOfRange)
-{
+TEST(T014_NegBattery, CapacityOutOfRange) {
     const auto result = full_load(neg_fixture("neg_logger_capacity_oor.toml"));
     ASSERT_FALSE(result.has_value());
-    EXPECT_TRUE(has_diag(result.error(),
-                          fixpp::config::reason_class::out_of_range,
-                          "logger.capacity"))
+    EXPECT_TRUE(
+        has_diag(result.error(), fixpp::config::reason_class::out_of_range, "logger.capacity"))
         << "Expected out_of_range on logger.capacity (value exceeds uint32)";
 }
 
 // malformed_value: a [logger].sinks array element that is not a TOML table.
-TEST(T014_NegBattery, SinkElementNotATable)
-{
+TEST(T014_NegBattery, SinkElementNotATable) {
     const auto result = full_load(neg_fixture("neg_logger_sink_not_table.toml"));
     ASSERT_FALSE(result.has_value());
-    EXPECT_TRUE(has_diag(result.error(),
-                          fixpp::config::reason_class::malformed_value,
-                          "logger.sinks[0]"))
+    EXPECT_TRUE(
+        has_diag(result.error(), fixpp::config::reason_class::malformed_value, "logger.sinks[0]"))
         << "Expected malformed_value on logger.sinks[0] (element is not a table)";
 }
 
 // out_of_range: capacity = -1 (the v<0 sub-branch, distinct from the >uint32-max
 // sub-branch covered by CapacityOutOfRange).
-TEST(T014_NegBattery, CapacityNegative)
-{
+TEST(T014_NegBattery, CapacityNegative) {
     const auto result = full_load(neg_fixture("neg_logger_capacity_negative.toml"));
     ASSERT_FALSE(result.has_value());
-    EXPECT_TRUE(has_diag(result.error(),
-                          fixpp::config::reason_class::out_of_range,
-                          "logger.capacity"))
+    EXPECT_TRUE(
+        has_diag(result.error(), fixpp::config::reason_class::out_of_range, "logger.capacity"))
         << "Expected out_of_range on logger.capacity (negative value)";
 }
 
@@ -441,13 +394,11 @@ TEST(T014_NegBattery, CapacityNegative)
 // currently reuses missing_required (fail-closed — it rejects); malformed_value
 // is a defensible alternative. This cell pins CURRENT behavior; the reason_class
 // is flagged for Gate B, not silently blessed.
-TEST(T014_NegBattery, SinkNonStringKind)
-{
+TEST(T014_NegBattery, SinkNonStringKind) {
     const auto result = full_load(neg_fixture("neg_logger_sink_nonstring_kind.toml"));
     ASSERT_FALSE(result.has_value());
-    EXPECT_TRUE(has_diag(result.error(),
-                          fixpp::config::reason_class::missing_required,
-                          "logger.sinks[0].kind"))
+    EXPECT_TRUE(has_diag(result.error(), fixpp::config::reason_class::missing_required,
+                         "logger.sinks[0].kind"))
         << "Expected missing_required on logger.sinks[0].kind (non-string kind)";
 }
 
@@ -457,13 +408,11 @@ TEST(T014_NegBattery, SinkNonStringKind)
 // NOTE (Gate B refinement candidate): same as SinkNonStringKind — E-4 specifies
 // absent/empty endpoint -> missing_required/empty_required but is silent on
 // wrong-type; current behavior reuses missing_required (fail-closed).
-TEST(T014_NegBattery, OtlpNonStringEndpoint)
-{
+TEST(T014_NegBattery, OtlpNonStringEndpoint) {
     const auto result = full_load(neg_fixture("neg_logger_otlp_nonstring_endpoint.toml"));
     ASSERT_FALSE(result.has_value());
-    EXPECT_TRUE(has_diag(result.error(),
-                          fixpp::config::reason_class::missing_required,
-                          "logger.sinks[0].endpoint"))
+    EXPECT_TRUE(has_diag(result.error(), fixpp::config::reason_class::missing_required,
+                         "logger.sinks[0].endpoint"))
         << "Expected missing_required on logger.sinks[0].endpoint (non-string endpoint)";
 }
 #endif  // FIXPP_CONFIG_HAS_OTLP
@@ -474,8 +423,7 @@ TEST(T014_NegBattery, OtlpNonStringEndpoint)
 // #ifdef bug that disabled syslog on every build is fixed). The cell below
 // asserts the available-branch accepts and the unavailable-branch rejects loudly.
 
-TEST(T014_NegBattery, SyslogBuildConditional)
-{
+TEST(T014_NegBattery, SyslogBuildConditional) {
     // Build-conditional symmetry (FR-013): kind="syslog" with no facility.
     //   - On a build WHERE syslog is available (FIXPP_HAS_SYSLOG): the sink
     //     resolves successfully (facility is optional) — NOT an error.
@@ -501,18 +449,16 @@ TEST(T014_NegBattery, SyslogBuildConditional)
 
 #ifdef FIXPP_HAS_SYSLOG
     // Syslog available → accepted; one sink parked, no diagnostic.
-    EXPECT_TRUE(acc.empty())
-        << "syslog is available on this build; kind=\"syslog\" (no facility) "
-           "must resolve successfully, not be rejected";
+    EXPECT_TRUE(acc.empty()) << "syslog is available on this build; kind=\"syslog\" (no facility) "
+                                "must resolve successfully, not be rejected";
     ASSERT_TRUE(pending.engine.has_value());
     EXPECT_EQ(pending.engine->sinks.size(), std::size_t{1});
 #else
     // Syslog unavailable → loud rejection (never silently skipped).
     ASSERT_FALSE(acc.empty());
     const auto diags = std::move(acc).release();
-    EXPECT_TRUE(has_diag(diags,
-                          fixpp::config::reason_class::invalid_or_contradictory_selector,
-                          "logger.sinks[0].kind"))
+    EXPECT_TRUE(has_diag(diags, fixpp::config::reason_class::invalid_or_contradictory_selector,
+                         "logger.sinks[0].kind"))
         << "Expected invalid_or_contradictory_selector on logger.sinks[0].kind "
            "(syslog unavailable on this build)";
 #endif
@@ -521,8 +467,7 @@ TEST(T014_NegBattery, SyslogBuildConditional)
 // ── invalid_or_contradictory_selector: otlp on non-OTLP build ───────────────
 
 #ifndef FIXPP_CONFIG_HAS_OTLP
-TEST(T014_NegBattery, OtlpUnavailableBuild)
-{
+TEST(T014_NegBattery, OtlpUnavailableBuild) {
     // Full-load path. On a build without OTel SDK, kind="otlp" must produce
     // invalid_or_contradictory_selector (FIXPP_CONFIG_HAS_OTLP not defined).
     // This test is only compiled on non-OTLP builds.
@@ -547,9 +492,8 @@ TEST(T014_NegBattery, OtlpUnavailableBuild)
 
     ASSERT_FALSE(acc.empty());
     const auto diags = std::move(acc).release();
-    EXPECT_TRUE(has_diag(diags,
-                          fixpp::config::reason_class::invalid_or_contradictory_selector,
-                          "logger.sinks[0].kind"))
+    EXPECT_TRUE(has_diag(diags, fixpp::config::reason_class::invalid_or_contradictory_selector,
+                         "logger.sinks[0].kind"))
         << "Expected invalid_or_contradictory_selector on logger.sinks[0].kind";
 }
 #endif  // !FIXPP_CONFIG_HAS_OTLP
@@ -557,12 +501,14 @@ TEST(T014_NegBattery, OtlpUnavailableBuild)
 // ── invalid_or_contradictory_selector: cert_source unreadable (T016) ─────────
 // T016: preflight must reject a cert_source path that does not exist.
 
-TEST(T014_NegBattery, OtlpCertSourceUnreadable)
-{
+TEST(T014_NegBattery, OtlpCertSourceUnreadable) {
 #ifdef FIXPP_CONFIG_HAS_OTLP
     // Ensure the path definitely does not exist.
     const std::string nonexistent = "/tmp/fixpp_test_nonexistent_cert_source_12345.pem";
-    { std::error_code ec; std::filesystem::remove(nonexistent, ec); }
+    {
+        std::error_code ec;
+        std::filesystem::remove(nonexistent, ec);
+    }
 
     const std::string toml_text = R"(
 [logger]
@@ -585,12 +531,10 @@ TEST(T014_NegBattery, OtlpCertSourceUnreadable)
         /*is_engine=*/true, /*session_index=*/0);
 
     // T016 preflight must have fired: unreadable cert_source → diagnostic.
-    ASSERT_FALSE(acc.empty())
-        << "Preflight must reject an unreadable cert_source path";
+    ASSERT_FALSE(acc.empty()) << "Preflight must reject an unreadable cert_source path";
     const auto diags = std::move(acc).release();
-    EXPECT_TRUE(has_diag(diags,
-                          fixpp::config::reason_class::invalid_or_contradictory_selector,
-                          "logger.sinks[0].cert_source"))
+    EXPECT_TRUE(has_diag(diags, fixpp::config::reason_class::invalid_or_contradictory_selector,
+                         "logger.sinks[0].cert_source"))
         << "Expected invalid_or_contradictory_selector on logger.sinks[0].cert_source";
 
     // Mutation discriminator: the readable-check diagnostic message contains "not readable".
@@ -619,19 +563,21 @@ TEST(T014_NegBattery, OtlpCertSourceUnreadable)
 // ── invalid_or_contradictory_selector: cert_source non-PEM (T016) ────────────
 // T016: preflight must reject a cert_source file that is readable but not PEM.
 
-TEST(T014_NegBattery, OtlpCertSourceNonPem)
-{
+TEST(T014_NegBattery, OtlpCertSourceNonPem) {
 #ifdef FIXPP_CONFIG_HAS_OTLP
     // Create a temp file containing non-PEM content.
-    const auto tmp_cert = std::filesystem::temp_directory_path() /
-                          "fixpp_test_non_pem_cert_source.txt";
+    const auto tmp_cert =
+        std::filesystem::temp_directory_path() / "fixpp_test_non_pem_cert_source.txt";
     {
         std::ofstream f(tmp_cert, std::ios::out | std::ios::trunc);
         f << "this is not a PEM file\n";
     }
     struct Cleanup {
         std::filesystem::path p;
-        ~Cleanup() { std::error_code ec; std::filesystem::remove(p, ec); }
+        ~Cleanup() {
+            std::error_code ec;
+            std::filesystem::remove(p, ec);
+        }
     } cleanup{tmp_cert};
 
     const std::string toml_text =
@@ -639,7 +585,8 @@ TEST(T014_NegBattery, OtlpCertSourceNonPem)
         "  [[logger.sinks]]\n"
         "  kind        = \"otlp\"\n"
         "  endpoint    = \"http://collector:4318/v1/logs\"\n"
-        "  cert_source = \"" + tmp_cert.generic_string() + "\"\n";
+        "  cert_source = \"" +
+        tmp_cert.generic_string() + "\"\n";
 
     auto parsed = parse_logger_inline(toml_text);
     ASSERT_NE(parsed.logger_tbl, nullptr);
@@ -658,9 +605,8 @@ TEST(T014_NegBattery, OtlpCertSourceNonPem)
     ASSERT_FALSE(acc.empty())
         << "Preflight must reject a cert_source that lacks the '-----BEGIN' PEM magic";
     const auto diags = std::move(acc).release();
-    EXPECT_TRUE(has_diag(diags,
-                          fixpp::config::reason_class::invalid_or_contradictory_selector,
-                          "logger.sinks[0].cert_source"))
+    EXPECT_TRUE(has_diag(diags, fixpp::config::reason_class::invalid_or_contradictory_selector,
+                         "logger.sinks[0].cert_source"))
         << "Expected invalid_or_contradictory_selector on logger.sinks[0].cert_source";
 
     // Mutation discriminator: the PEM-magic-check diagnostic message must mention "-----BEGIN".
@@ -681,11 +627,9 @@ TEST(T014_NegBattery, OtlpCertSourceNonPem)
 // ── invalid_or_contradictory_selector: file-sink dir does not exist (T016) ───
 // T016: preflight must reject a configured directory that does not exist.
 
-TEST(T014_NegBattery, FileSinkDirNotExist)
-{
+TEST(T014_NegBattery, FileSinkDirNotExist) {
     // Use a path that definitely does not exist (deep nested under a nonexistent parent).
-    const std::filesystem::path nonexistent_dir{
-        "/tmp/fixpp_test_nonexistent_dir_99999/nested"};
+    const std::filesystem::path nonexistent_dir{"/tmp/fixpp_test_nonexistent_dir_99999/nested"};
     // Ensure it's actually absent.
     ASSERT_FALSE(std::filesystem::exists(nonexistent_dir))
         << "Test precondition: directory must not exist";
@@ -710,12 +654,10 @@ TEST(T014_NegBattery, FileSinkDirNotExist)
         /*is_engine=*/true, /*session_index=*/0);
 
     // T016 preflight must have fired: nonexistent directory → diagnostic.
-    ASSERT_FALSE(acc.empty())
-        << "Preflight must reject a configured directory that does not exist";
+    ASSERT_FALSE(acc.empty()) << "Preflight must reject a configured directory that does not exist";
     const auto diags = std::move(acc).release();
-    EXPECT_TRUE(has_diag(diags,
-                          fixpp::config::reason_class::invalid_or_contradictory_selector,
-                          "logger.sinks[0].directory"))
+    EXPECT_TRUE(has_diag(diags, fixpp::config::reason_class::invalid_or_contradictory_selector,
+                         "logger.sinks[0].directory"))
         << "Expected invalid_or_contradictory_selector on logger.sinks[0].directory";
 
     // Zero-side-effects witness (discriminating): the load must NOT have created
@@ -731,8 +673,7 @@ TEST(T014_NegBattery, FileSinkDirNotExist)
 // ── invalid_or_contradictory_selector: file-sink dir not writable (T016) ─────
 // T016: preflight must reject a configured directory that exists but is not writable.
 
-TEST(T014_NegBattery, FileSinkDirNotWritable)
-{
+TEST(T014_NegBattery, FileSinkDirNotWritable) {
 #ifdef _WIN32
     // The file-sink directory-writability preflight is POSIX-only: std::filesystem
     // permission bits do not model Windows ACL write-access, and the runtime
@@ -742,8 +683,7 @@ TEST(T014_NegBattery, FileSinkDirNotWritable)
     GTEST_SKIP() << "FileSink directory-writability preflight is POSIX-only (L-045-1)";
 #else
     // Create a temp dir and make it read-only.
-    const auto ro_dir = std::filesystem::temp_directory_path() /
-                        "fixpp_test_ro_log_dir_t014";
+    const auto ro_dir = std::filesystem::temp_directory_path() / "fixpp_test_ro_log_dir_t014";
     std::error_code ec;
     std::filesystem::create_directories(ro_dir, ec);
     if (ec) {
@@ -751,10 +691,10 @@ TEST(T014_NegBattery, FileSinkDirNotWritable)
     }
     // Remove write permission from owner, group, and others.
     std::filesystem::permissions(ro_dir,
-        std::filesystem::perms::owner_write |
-        std::filesystem::perms::group_write |
-        std::filesystem::perms::others_write,
-        std::filesystem::perm_options::remove, ec);
+                                 std::filesystem::perms::owner_write |
+                                     std::filesystem::perms::group_write |
+                                     std::filesystem::perms::others_write,
+                                 std::filesystem::perm_options::remove, ec);
     if (ec) {
         GTEST_SKIP() << "Could not remove write permission from temp dir";
     }
@@ -762,9 +702,8 @@ TEST(T014_NegBattery, FileSinkDirNotWritable)
         std::filesystem::path p;
         ~Cleanup() {
             std::error_code e;
-            std::filesystem::permissions(p,
-                std::filesystem::perms::owner_all,
-                std::filesystem::perm_options::add, e);
+            std::filesystem::permissions(p, std::filesystem::perms::owner_all,
+                                         std::filesystem::perm_options::add, e);
             // Permissions restored FIRST (that is why this guard is hand-written),
             // then the shared noexcept removal — destructor, so never the throwing
             // variant (#404).
@@ -776,7 +715,8 @@ TEST(T014_NegBattery, FileSinkDirNotWritable)
         "[logger]\n"
         "  [[logger.sinks]]\n"
         "  kind      = \"file\"\n"
-        "  directory = \"" + ro_dir.generic_string() + "\"\n";
+        "  directory = \"" +
+        ro_dir.generic_string() + "\"\n";
 
     auto parsed = parse_logger_inline(toml_text);
     ASSERT_NE(parsed.logger_tbl, nullptr);
@@ -795,9 +735,8 @@ TEST(T014_NegBattery, FileSinkDirNotWritable)
     ASSERT_FALSE(acc.empty())
         << "Preflight must reject a configured directory that is not writable";
     const auto diags = std::move(acc).release();
-    EXPECT_TRUE(has_diag(diags,
-                          fixpp::config::reason_class::invalid_or_contradictory_selector,
-                          "logger.sinks[0].directory"))
+    EXPECT_TRUE(has_diag(diags, fixpp::config::reason_class::invalid_or_contradictory_selector,
+                         "logger.sinks[0].directory"))
         << "Expected invalid_or_contradictory_selector on logger.sinks[0].directory";
 
     // Mutation discriminator: removing the access(W_OK) check would leave acc empty
@@ -808,16 +747,14 @@ TEST(T014_NegBattery, FileSinkDirNotWritable)
 // ── recognized_not_yet_supported_step2: use_grpc = true ──────────────────────
 
 #ifdef FIXPP_CONFIG_HAS_OTLP
-TEST(T014_NegBattery, UseGrpcTrue)
-{
+TEST(T014_NegBattery, UseGrpcTrue) {
     // Full-load path. The fixture has use_grpc = true.
     // → recognized_not_yet_supported_step2 on "logger.sinks[0].use_grpc"
     const auto result = full_load(neg_fixture("neg_logger_use_grpc_true.toml"));
     ASSERT_FALSE(result.has_value());
     const auto& diags = result.error();
-    EXPECT_TRUE(has_diag(diags,
-                          fixpp::config::reason_class::recognized_not_yet_supported_step2,
-                          "logger.sinks[0].use_grpc"))
+    EXPECT_TRUE(has_diag(diags, fixpp::config::reason_class::recognized_not_yet_supported_step2,
+                         "logger.sinks[0].use_grpc"))
         << "Expected recognized_not_yet_supported_step2 on logger.sinks[0].use_grpc";
 }
 #endif  // FIXPP_CONFIG_HAS_OTLP
@@ -836,11 +773,10 @@ TEST(T014_NegBattery, UseGrpcTrue)
 // Additionally: assert that no file was created under a controlled temp dir
 // (side-effect-free on the non-construction path).
 
-TEST(T014_NegBattery, ZeroSideEffectsWhenAccumulatorNonEmpty)
-{
+TEST(T014_NegBattery, ZeroSideEffectsWhenAccumulatorNonEmpty) {
     // Create a temp dir for the file sink so we can assert nothing was written.
-    const auto log_dir = std::filesystem::temp_directory_path() /
-                         "fixpp_test_zero_side_effects_t014";
+    const auto log_dir =
+        std::filesystem::temp_directory_path() / "fixpp_test_zero_side_effects_t014";
     {
         std::error_code ec;
         std::filesystem::create_directories(log_dir, ec);
@@ -865,7 +801,8 @@ TEST(T014_NegBattery, ZeroSideEffectsWhenAccumulatorNonEmpty)
         "capacity = 65536\n"
         "  [[logger.sinks]]\n"
         "  kind      = \"file\"\n"
-        "  directory = \"" + log_dir.generic_string() + "\"\n";
+        "  directory = \"" +
+        log_dir.generic_string() + "\"\n";
 
     auto parsed = parse_logger_inline(toml_text);
     ASSERT_NE(parsed.logger_tbl, nullptr);
@@ -875,23 +812,21 @@ TEST(T014_NegBattery, ZeroSideEffectsWhenAccumulatorNonEmpty)
     fixpp::config::LoadOptions opts;
     opts.resource = std::pmr::get_default_resource();
 
-    fixpp::config::detail::resolve_engine_logger(
-        *parsed.logger_tbl, "logger", fixpp::config::SourceLoc{},
-        log_dir.parent_path(), opts, pending, acc,
-        /*is_engine=*/true, /*session_index=*/0);
+    fixpp::config::detail::resolve_engine_logger(*parsed.logger_tbl, "logger",
+                                                 fixpp::config::SourceLoc{}, log_dir.parent_path(),
+                                                 opts, pending, acc,
+                                                 /*is_engine=*/true, /*session_index=*/0);
 
     // Confirm the valid logger was parked and acc is still clean.
-    ASSERT_TRUE(acc.empty())
-        << "Valid logger fixture produced unexpected diagnostics";
-    ASSERT_TRUE(pending.engine.has_value())
-        << "Valid logger fixture did not park a PendingLogger";
+    ASSERT_TRUE(acc.empty()) << "Valid logger fixture produced unexpected diagnostics";
+    ASSERT_TRUE(pending.engine.has_value()) << "Valid logger fixture did not park a PendingLogger";
 
     // Step 2: Inject a synthetic establishment error (simulates a separate
     // failing field in the same config file, e.g. bad clock kind).
     acc.add(fixpp::config::LoadDiagnostic{
         .key_path = "clock",
-        .reason   = fixpp::config::reason_class::unknown_enum,
-        .message  = "synthetic error to make acc non-empty",
+        .reason = fixpp::config::reason_class::unknown_enum,
+        .message = "synthetic error to make acc non-empty",
     });
     ASSERT_EQ(acc.size(), std::size_t{1});
 
@@ -905,8 +840,7 @@ TEST(T014_NegBattery, ZeroSideEffectsWhenAccumulatorNonEmpty)
 
     // Assert: no file was created in the log directory.
     bool any_file_created = false;
-    for ([[maybe_unused]] const auto& entry :
-         std::filesystem::directory_iterator{log_dir}) {
+    for ([[maybe_unused]] const auto& entry : std::filesystem::directory_iterator{log_dir}) {
         any_file_created = true;
         break;
     }
@@ -935,21 +869,25 @@ TEST(T014_NegBattery, ZeroSideEffectsWhenAccumulatorNonEmpty)
 // would leave "secret" in the message → EXPECT_EQ(find("secret"), npos) goes RED.
 
 #ifdef FIXPP_CONFIG_HAS_OTLP
-TEST(T014a_Redaction, OtlpEndpointUserinfoRedacted)
-{
+TEST(T014a_Redaction, OtlpEndpointUserinfoRedacted) {
     // Credential endpoint + nonexistent cert_source so the preflight fires and
     // echoes the endpoint in the diagnostic message.
     const std::string cred_endpoint = "http://user:secret@collector:4318/v1/logs";
-    const std::string nonexistent_cert =
-        "/tmp/fixpp_test_nonexistent_cert_for_redaction_test.pem";
-    { std::error_code ec; std::filesystem::remove(nonexistent_cert, ec); }
+    const std::string nonexistent_cert = "/tmp/fixpp_test_nonexistent_cert_for_redaction_test.pem";
+    {
+        std::error_code ec;
+        std::filesystem::remove(nonexistent_cert, ec);
+    }
 
     const std::string toml_text =
         "[logger]\n"
         "  [[logger.sinks]]\n"
         "  kind        = \"otlp\"\n"
-        "  endpoint    = \"" + cred_endpoint + "\"\n"
-        "  cert_source = \"" + nonexistent_cert + "\"\n";
+        "  endpoint    = \"" +
+        cred_endpoint +
+        "\"\n"
+        "  cert_source = \"" +
+        nonexistent_cert + "\"\n";
 
     auto parsed = parse_logger_inline(toml_text);
     ASSERT_NE(parsed.logger_tbl, nullptr);
@@ -1000,19 +938,23 @@ TEST(T014a_Redaction, OtlpEndpointUserinfoRedacted)
 // must return it unchanged. This witnesses the no-op arm of the redactor so that
 // a future change that over-redacts (strips host or path) fails here.
 
-TEST(T014a_Redaction, OtlpEndpointNoUserinfoUnchanged)
-{
+TEST(T014a_Redaction, OtlpEndpointNoUserinfoUnchanged) {
     const std::string plain_endpoint = "http://collector:4318/v1/logs";
-    const std::string nonexistent_cert =
-        "/tmp/fixpp_test_nonexistent_cert_plain_endpoint.pem";
-    { std::error_code ec; std::filesystem::remove(nonexistent_cert, ec); }
+    const std::string nonexistent_cert = "/tmp/fixpp_test_nonexistent_cert_plain_endpoint.pem";
+    {
+        std::error_code ec;
+        std::filesystem::remove(nonexistent_cert, ec);
+    }
 
     const std::string toml_text =
         "[logger]\n"
         "  [[logger.sinks]]\n"
         "  kind        = \"otlp\"\n"
-        "  endpoint    = \"" + plain_endpoint + "\"\n"
-        "  cert_source = \"" + nonexistent_cert + "\"\n";
+        "  endpoint    = \"" +
+        plain_endpoint +
+        "\"\n"
+        "  cert_source = \"" +
+        nonexistent_cert + "\"\n";
 
     auto parsed = parse_logger_inline(toml_text);
     ASSERT_NE(parsed.logger_tbl, nullptr);
@@ -1056,8 +998,7 @@ TEST(T014a_Redaction, OtlpEndpointNoUserinfoUnchanged)
 // Two errors in distinct logger scalar fields (capacity not pow2 + on_overflow
 // unknown) accumulate independently without early return.
 
-TEST(T015_CollectAll, NIndependentErrors)
-{
+TEST(T015_CollectAll, NIndependentErrors) {
     // Inject 2 errors in the [logger] scalar layer:
     //   (1) capacity = 1000 → out_of_range on "logger.capacity"
     //   (2) on_overflow = "discard" → unknown_enum on "logger.on_overflow"
@@ -1084,16 +1025,11 @@ on_overflow = "discard"
         /*is_engine=*/true, /*session_index=*/0);
 
     const auto diags = std::move(acc).release();
-    ASSERT_GE(diags.size(), std::size_t{2})
-        << "Expected at least 2 diagnostics (collect-ALL)";
+    ASSERT_GE(diags.size(), std::size_t{2}) << "Expected at least 2 diagnostics (collect-ALL)";
 
-    EXPECT_TRUE(has_diag(diags,
-                          fixpp::config::reason_class::out_of_range,
-                          "logger.capacity"))
+    EXPECT_TRUE(has_diag(diags, fixpp::config::reason_class::out_of_range, "logger.capacity"))
         << "Missing out_of_range on logger.capacity";
-    EXPECT_TRUE(has_diag(diags,
-                          fixpp::config::reason_class::unknown_enum,
-                          "logger.on_overflow"))
+    EXPECT_TRUE(has_diag(diags, fixpp::config::reason_class::unknown_enum, "logger.on_overflow"))
         << "Missing unknown_enum on logger.on_overflow";
 }
 
@@ -1113,22 +1049,19 @@ on_overflow = "discard"
 // throw is caught and a diagnostic is returned (GREEN).
 
 struct ThrowingResource : std::pmr::memory_resource {
-    void* do_allocate(std::size_t, std::size_t) override {
-        throw std::bad_alloc{};
-    }
+    void* do_allocate(std::size_t, std::size_t) override { throw std::bad_alloc{}; }
     void do_deallocate(void*, std::size_t, std::size_t) override {}
-    bool do_is_equal(const std::pmr::memory_resource& o) const noexcept override {
+    [[nodiscard]] bool do_is_equal(const std::pmr::memory_resource& o) const noexcept override {
         return this == &o;
     }
 };
 
-TEST(GateBR1A_NoexceptBoundary, ThrowingResourceReturnsErrorNotTerminates)
-{
+TEST(GateBR1A_NoexceptBoundary, ThrowingResourceReturnsErrorNotTerminates) {
     FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     // We need a full config file. Write one to a temp file so load_toml_config
     // can parse it. The [logger] sinks.reserve() fires before any other throw.
-    const auto tmp = std::filesystem::temp_directory_path() /
-                     "fixpp_gateb_r1a_throwing_resource.toml";
+    const auto tmp =
+        std::filesystem::temp_directory_path() / "fixpp_gateb_r1a_throwing_resource.toml";
     {
         std::ofstream f(tmp);
         // Minimal valid structure + a [logger] with a file sink so the
@@ -1161,7 +1094,10 @@ kind = "insecure_plain_tcp"
     }
     struct Cleanup {
         std::filesystem::path p;
-        ~Cleanup() { std::error_code ec; std::filesystem::remove(p, ec); }
+        ~Cleanup() {
+            std::error_code ec;
+            std::filesystem::remove(p, ec);
+        }
     } cl{tmp};
 
     ThrowingResource throwing_mr;
@@ -1200,8 +1136,7 @@ kind = "insecure_plain_tcp"
 // Discriminating (session-0 is genuinely valid; the suppression is caused
 // solely by the whole-file guard, not by any defect in session-0's logger).
 
-TEST(T015_CollectAll, N2_SessionErrorSuppressesAllLoggers)
-{
+TEST(T015_CollectAll, N2_SessionErrorSuppressesAllLoggers) {
     // Session-0: valid logger with a file sink. directory = "." resolves against
     // the base_dir passed below (std::filesystem::temp_directory_path(), which is
     // guaranteed to exist + be a real directory) so the sink is genuinely valid on
@@ -1283,40 +1218,32 @@ capacity = 999
 // empty → result.has_value() becomes true → EXPECT_FALSE(result.has_value())
 // goes RED.  (Alternatively: assert exact key_path — wrong path also RED.)
 
-TEST(GateBR1B_NonTableLogger, RootScopeLoggerNotTable)
-{
+TEST(GateBR1B_NonTableLogger, RootScopeLoggerNotTable) {
     // logger = 123 at root must produce malformed_value on "logger".
     const auto result = full_load(neg_fixture("neg_logger_not_table_root.toml"));
-    ASSERT_FALSE(result.has_value())
-        << "root logger = 123 must produce diagnostics, not succeed";
-    EXPECT_TRUE(has_diag(result.error(),
-                          fixpp::config::reason_class::malformed_value,
-                          "logger"))
+    ASSERT_FALSE(result.has_value()) << "root logger = 123 must produce diagnostics, not succeed";
+    EXPECT_TRUE(has_diag(result.error(), fixpp::config::reason_class::malformed_value, "logger"))
         << "Expected malformed_value on \"logger\" for non-table root logger";
 }
 
-TEST(GateBR1B_NonTableLogger, SessionScopeLoggerNotTable)
-{
+TEST(GateBR1B_NonTableLogger, SessionScopeLoggerNotTable) {
     // session.logger = 456 (non-table) must produce malformed_value on "session[0].logger".
     const auto result = full_load(neg_fixture("neg_logger_not_table_session.toml"));
     ASSERT_FALSE(result.has_value())
         << "session logger = 456 must produce diagnostics, not succeed";
-    EXPECT_TRUE(has_diag(result.error(),
-                          fixpp::config::reason_class::malformed_value,
-                          "session[0].logger"))
+    EXPECT_TRUE(
+        has_diag(result.error(), fixpp::config::reason_class::malformed_value, "session[0].logger"))
         << "Expected malformed_value on \"session[0].logger\" for non-table session logger";
 }
 
-TEST(GateBR1B_NonTableLogger, DefaultScopeLoggerNotTable)
-{
+TEST(GateBR1B_NonTableLogger, DefaultScopeLoggerNotTable) {
     // [default].logger = 789 deep-merges into each session.
     // The merged session[0].logger = 789 (non-table) must produce malformed_value.
     const auto result = full_load(neg_fixture("neg_logger_not_table_default.toml"));
     ASSERT_FALSE(result.has_value())
         << "[default].logger = 789 must produce diagnostics (merges into session[0])";
-    EXPECT_TRUE(has_diag(result.error(),
-                          fixpp::config::reason_class::malformed_value,
-                          "session[0].logger"))
+    EXPECT_TRUE(
+        has_diag(result.error(), fixpp::config::reason_class::malformed_value, "session[0].logger"))
         << "Expected malformed_value on \"session[0].logger\" "
            "for [default].logger non-table inherited via deep-merge";
 }
@@ -1331,8 +1258,7 @@ TEST(GateBR1B_NonTableLogger, DefaultScopeLoggerNotTable)
 // Mutation: drop the else → cert_source=123 is accepted → acc stays empty
 // → ASSERT_FALSE(acc.empty()) goes RED. Discriminating.
 
-TEST(GateBR1B_WrongTypeOptionals, AsyncFsyncNotBoolean)
-{
+TEST(GateBR1B_WrongTypeOptionals, AsyncFsyncNotBoolean) {
     // async_fsync = "false" (string, not boolean) → malformed_value
     // Mutation: drop the else → accepted → acc empty after the right-type check.
     // Legit bool FIRST to confirm last-writer-wins doesn't hide the bad one.
@@ -1358,14 +1284,12 @@ TEST(GateBR1B_WrongTypeOptionals, AsyncFsyncNotBoolean)
 
     ASSERT_FALSE(acc.empty())
         << "async_fsync = \"false\" (string) must produce a malformed_value diagnostic";
-    EXPECT_TRUE(has_diag(std::move(acc).release(),
-                          fixpp::config::reason_class::malformed_value,
-                          "logger.sinks[0].async_fsync"))
+    EXPECT_TRUE(has_diag(std::move(acc).release(), fixpp::config::reason_class::malformed_value,
+                         "logger.sinks[0].async_fsync"))
         << "Expected malformed_value on logger.sinks[0].async_fsync";
 }
 
-TEST(GateBR1B_WrongTypeOptionals, BaseNameNotString)
-{
+TEST(GateBR1B_WrongTypeOptionals, BaseNameNotString) {
     // base_name = 123 (integer, not string) → malformed_value
     const std::string toml_text = R"(
 [logger]
@@ -1388,14 +1312,12 @@ TEST(GateBR1B_WrongTypeOptionals, BaseNameNotString)
 
     ASSERT_FALSE(acc.empty())
         << "base_name = 123 (integer) must produce a malformed_value diagnostic";
-    EXPECT_TRUE(has_diag(std::move(acc).release(),
-                          fixpp::config::reason_class::malformed_value,
-                          "logger.sinks[0].base_name"))
+    EXPECT_TRUE(has_diag(std::move(acc).release(), fixpp::config::reason_class::malformed_value,
+                         "logger.sinks[0].base_name"))
         << "Expected malformed_value on logger.sinks[0].base_name";
 }
 
-TEST(GateBR1B_WrongTypeOptionals, FileSinkDirectoryNotString)
-{
+TEST(GateBR1B_WrongTypeOptionals, FileSinkDirectoryNotString) {
     // Gate B r2 #1: directory = 123 (integer, not string) → malformed_value.
     // Pre-fix: directory=123 hit neither the is_string() branch nor the absent
     // branch, leaving cfg.directory = "." which (being writable) silently passed
@@ -1425,16 +1347,14 @@ TEST(GateBR1B_WrongTypeOptionals, FileSinkDirectoryNotString)
     ASSERT_FALSE(acc.empty())
         << "directory = 123 (integer) must produce a malformed_value diagnostic "
            "(silent default to \".\" = wrong-type selector accepted as CWD)";
-    EXPECT_TRUE(has_diag(std::move(acc).release(),
-                          fixpp::config::reason_class::malformed_value,
-                          "logger.sinks[0].directory"))
+    EXPECT_TRUE(has_diag(std::move(acc).release(), fixpp::config::reason_class::malformed_value,
+                         "logger.sinks[0].directory"))
         << "Expected malformed_value on logger.sinks[0].directory";
     EXPECT_FALSE(pending.engine.has_value())
         << "a sink with a wrong-type directory must not park a pending logger";
 }
 
-TEST(GateBR1B_WrongTypeOptionals, OnOverflowNotString)
-{
+TEST(GateBR1B_WrongTypeOptionals, OnOverflowNotString) {
     // on_overflow = true (boolean, not string) → malformed_value
     // The string path already handles unknown enum values. The wrong-type path
     // (n && !n->is_string() → i.e., n is present but not a string) is the gap.
@@ -1459,15 +1379,13 @@ on_overflow = true
 
     ASSERT_FALSE(acc.empty())
         << "on_overflow = true (boolean) must produce a malformed_value diagnostic";
-    EXPECT_TRUE(has_diag(std::move(acc).release(),
-                          fixpp::config::reason_class::malformed_value,
-                          "logger.on_overflow"))
+    EXPECT_TRUE(has_diag(std::move(acc).release(), fixpp::config::reason_class::malformed_value,
+                         "logger.on_overflow"))
         << "Expected malformed_value on logger.on_overflow";
 }
 
 #ifdef FIXPP_HAS_SYSLOG
-TEST(GateBR1B_WrongTypeOptionals, SyslogFacilityNotString)
-{
+TEST(GateBR1B_WrongTypeOptionals, SyslogFacilityNotString) {
     // facility = 3 (integer, not string) → malformed_value
     // The string path handles the facility name mapping. Wrong type is the gap.
     const std::string toml_text = R"(
@@ -1490,9 +1408,8 @@ TEST(GateBR1B_WrongTypeOptionals, SyslogFacilityNotString)
 
     ASSERT_FALSE(acc.empty())
         << "syslog facility = 3 (integer) must produce a malformed_value diagnostic";
-    EXPECT_TRUE(has_diag(std::move(acc).release(),
-                          fixpp::config::reason_class::malformed_value,
-                          "logger.sinks[0].facility"))
+    EXPECT_TRUE(has_diag(std::move(acc).release(), fixpp::config::reason_class::malformed_value,
+                         "logger.sinks[0].facility"))
         << "Expected malformed_value on logger.sinks[0].facility (syslog build)";
 }
 #endif  // FIXPP_HAS_SYSLOG
@@ -1510,8 +1427,7 @@ TEST(GateBR1B_WrongTypeOptionals, SyslogFacilityNotString)
 // UINT64_MAX/SIZE_MAX is assigned to cfg → acc stays empty → ASSERT_FALSE
 // goes RED.
 
-TEST(GateBR1D_NumericOutOfRange, NegativeMaxFileBytes)
-{
+TEST(GateBR1D_NumericOutOfRange, NegativeMaxFileBytes) {
     // max_file_bytes = -1 → without guard: cast to UINT64_MAX (18446744073709551615).
     const std::string toml_text = R"(
 [logger]
@@ -1534,14 +1450,12 @@ TEST(GateBR1D_NumericOutOfRange, NegativeMaxFileBytes)
 
     ASSERT_FALSE(acc.empty())
         << "max_file_bytes = -1 must produce out_of_range diagnostic (wraps to UINT64_MAX)";
-    EXPECT_TRUE(has_diag(std::move(acc).release(),
-                          fixpp::config::reason_class::out_of_range,
-                          "logger.sinks[0].max_file_bytes"))
+    EXPECT_TRUE(has_diag(std::move(acc).release(), fixpp::config::reason_class::out_of_range,
+                         "logger.sinks[0].max_file_bytes"))
         << "Expected out_of_range on logger.sinks[0].max_file_bytes";
 }
 
-TEST(GateBR1D_NumericOutOfRange, NegativeMaxKeepCount)
-{
+TEST(GateBR1D_NumericOutOfRange, NegativeMaxKeepCount) {
     // max_keep_count = -1 → without guard: cast to UINT32_MAX.
     const std::string toml_text = R"(
 [logger]
@@ -1564,15 +1478,13 @@ TEST(GateBR1D_NumericOutOfRange, NegativeMaxKeepCount)
 
     ASSERT_FALSE(acc.empty())
         << "max_keep_count = -1 must produce out_of_range diagnostic (wraps to UINT32_MAX)";
-    EXPECT_TRUE(has_diag(std::move(acc).release(),
-                          fixpp::config::reason_class::out_of_range,
-                          "logger.sinks[0].max_keep_count"))
+    EXPECT_TRUE(has_diag(std::move(acc).release(), fixpp::config::reason_class::out_of_range,
+                         "logger.sinks[0].max_keep_count"))
         << "Expected out_of_range on logger.sinks[0].max_keep_count";
 }
 
 #ifdef FIXPP_CONFIG_HAS_OTLP
-TEST(GateBR1D_NumericOutOfRange, NegativeMaxExportBatch)
-{
+TEST(GateBR1D_NumericOutOfRange, NegativeMaxExportBatch) {
     // max_export_batch = -1 → without guard: cast to SIZE_MAX.
     const std::string toml_text = R"(
 [logger]
@@ -1595,14 +1507,12 @@ TEST(GateBR1D_NumericOutOfRange, NegativeMaxExportBatch)
 
     ASSERT_FALSE(acc.empty())
         << "max_export_batch = -1 must produce out_of_range (wraps to SIZE_MAX)";
-    EXPECT_TRUE(has_diag(std::move(acc).release(),
-                          fixpp::config::reason_class::out_of_range,
-                          "logger.sinks[0].max_export_batch"))
+    EXPECT_TRUE(has_diag(std::move(acc).release(), fixpp::config::reason_class::out_of_range,
+                         "logger.sinks[0].max_export_batch"))
         << "Expected out_of_range on logger.sinks[0].max_export_batch";
 }
 
-TEST(GateBR1D_NumericOutOfRange, NegativeMaxExportRetries)
-{
+TEST(GateBR1D_NumericOutOfRange, NegativeMaxExportRetries) {
     // max_export_retries = -1 → without guard: cast to SIZE_MAX.
     const std::string toml_text = R"(
 [logger]
@@ -1625,15 +1535,13 @@ TEST(GateBR1D_NumericOutOfRange, NegativeMaxExportRetries)
 
     ASSERT_FALSE(acc.empty())
         << "max_export_retries = -1 must produce out_of_range (wraps to SIZE_MAX)";
-    EXPECT_TRUE(has_diag(std::move(acc).release(),
-                          fixpp::config::reason_class::out_of_range,
-                          "logger.sinks[0].max_export_retries"))
+    EXPECT_TRUE(has_diag(std::move(acc).release(), fixpp::config::reason_class::out_of_range,
+                         "logger.sinks[0].max_export_retries"))
         << "Expected out_of_range on logger.sinks[0].max_export_retries";
 }
 #endif  // FIXPP_CONFIG_HAS_OTLP
 
-TEST(GateBR1D_NumericOutOfRange, DrainCpuAffinityOverflow)
-{
+TEST(GateBR1D_NumericOutOfRange, DrainCpuAffinityOverflow) {
     // drain_cpu_affinity = 2147483648 (INT_MAX+1, overflows int)
     // Without guard: static_cast<int>(2147483648LL) = UB/implementation-defined.
     const std::string toml_text = R"(
@@ -1657,9 +1565,8 @@ drain_cpu_affinity = 2147483648
 
     ASSERT_FALSE(acc.empty())
         << "drain_cpu_affinity = 2147483648 (INT_MAX+1) must produce out_of_range";
-    EXPECT_TRUE(has_diag(std::move(acc).release(),
-                          fixpp::config::reason_class::out_of_range,
-                          "logger.drain_cpu_affinity"))
+    EXPECT_TRUE(has_diag(std::move(acc).release(), fixpp::config::reason_class::out_of_range,
+                         "logger.drain_cpu_affinity"))
         << "Expected out_of_range on logger.drain_cpu_affinity";
 }
 
@@ -1679,16 +1586,14 @@ drain_cpu_affinity = 2147483648
 //   Post-fix: cfg.directory=base_dir → file lands in base_dir → GREEN.
 //
 // Mutation discriminator: remove the `else if (!sink_tbl.get("directory"))` branch
-// in logger_resolver.cpp's `else if (!sink_tbl.get("directory"))` default-dir arm → cfg.directory stays "." → open() writes
-// to CWD → current_path().parent_path() != base_dir → assertion RED.
+// in logger_resolver.cpp's `else if (!sink_tbl.get("directory"))` default-dir arm → cfg.directory
+// stays "." → open() writes to CWD → current_path().parent_path() != base_dir → assertion RED.
 
-TEST(GateBR1E_DefaultDirBaseDir, DefaultDirectoryResolvesAgainstBaseDir)
-{
+TEST(GateBR1E_DefaultDirBaseDir, DefaultDirectoryResolvesAgainstBaseDir) {
     // Create two distinct dirs: base_dir (to be used as the config-file dir)
     // and CWD-sentinel (ensure CWD != base_dir so we can discriminate).
     // We must MAKE CWD something that is NOT base_dir for this test.
-    const auto base_dir = std::filesystem::temp_directory_path() /
-                          "fixpp_gateb_r1e_basedir";
+    const auto base_dir = std::filesystem::temp_directory_path() / "fixpp_gateb_r1e_basedir";
     {
         std::error_code ec;
         std::filesystem::create_directories(base_dir, ec);
@@ -1723,9 +1628,7 @@ capacity = 65536
     opts.resource = std::pmr::get_default_resource();
 
     fixpp::config::detail::resolve_engine_logger(
-        *parsed.logger_tbl, "logger", fixpp::config::SourceLoc{},
-        base_dir,
-        opts, pending, acc,
+        *parsed.logger_tbl, "logger", fixpp::config::SourceLoc{}, base_dir, opts, pending, acc,
         /*is_engine=*/true, /*session_index=*/0);
 
     ASSERT_TRUE(acc.empty())
@@ -1761,7 +1664,8 @@ capacity = 65536
     EXPECT_EQ(canonical_live_parent, std::filesystem::canonical(base_dir))
         << "Log file must land under base_dir (the config-file directory), not CWD.\n"
            "Pre-fix cfg.directory=\".\" (CWD-relative); post-fix cfg.directory=base_dir.\n"
-           "live=" << live << "\nbase_dir=" << base_dir;
+           "live="
+        << live << "\nbase_dir=" << base_dir;
 }
 
 // ---------------------------------------------------------------------------
@@ -1780,18 +1684,22 @@ capacity = 65536
 // max_file_bytes=0) → only max_file_bytes diagnostic is emitted, directory
 // diagnostic is absent → the EXPECT_TRUE(has_diag(…directory…)) goes RED.
 
-TEST(GateBR1C_SinkCollectAll, TwoIndependentFileSinkErrors)
-{
+TEST(GateBR1C_SinkCollectAll, TwoIndependentFileSinkErrors) {
     // File sink: max_file_bytes=0 (out_of_range) AND directory that does not exist.
     // Both must be reported in a single pass.
     const std::string nonexistent_dir = "/tmp/fixpp_test_nonexistent_for_collect_all_c";
-    { std::error_code ec; std::filesystem::remove_all(nonexistent_dir, ec); }
+    {
+        std::error_code ec;
+        std::filesystem::remove_all(nonexistent_dir, ec);
+    }
 
     const std::string toml_text =
         "[logger]\n"
         "  [[logger.sinks]]\n"
         "  kind           = \"file\"\n"
-        "  directory      = \"" + nonexistent_dir + "\"\n"
+        "  directory      = \"" +
+        nonexistent_dir +
+        "\"\n"
         "  max_file_bytes = 0\n";
 
     auto parsed = parse_logger_inline(toml_text);
@@ -1811,14 +1719,12 @@ TEST(GateBR1C_SinkCollectAll, TwoIndependentFileSinkErrors)
         << "Expected ≥2 diagnostics (collect-ALL): max_file_bytes=0 AND nonexistent directory. "
            "Pre-fix: early return on max_file_bytes=0 skips the directory check → 1 diagnostic.";
 
-    EXPECT_TRUE(has_diag(diags,
-                          fixpp::config::reason_class::out_of_range,
-                          "logger.sinks[0].max_file_bytes"))
+    EXPECT_TRUE(has_diag(diags, fixpp::config::reason_class::out_of_range,
+                         "logger.sinks[0].max_file_bytes"))
         << "Missing out_of_range on logger.sinks[0].max_file_bytes";
 
-    EXPECT_TRUE(has_diag(diags,
-                          fixpp::config::reason_class::invalid_or_contradictory_selector,
-                          "logger.sinks[0].directory"))
+    EXPECT_TRUE(has_diag(diags, fixpp::config::reason_class::invalid_or_contradictory_selector,
+                         "logger.sinks[0].directory"))
         << "Missing invalid_or_contradictory_selector on logger.sinks[0].directory "
            "(directory does not exist)";
 }
@@ -1827,8 +1733,7 @@ TEST(GateBR1C_SinkCollectAll, TwoIndependentFileSinkErrors)
 // CRITICAL: cert_source wrong type → silent plain-HTTP instead of TLS (fail-open).
 // Legit string cert_source FIRST (to rule out last-writer-wins pass), then the
 // wrong-type cert_source=123 in a separate call below.
-TEST(GateBR1B_WrongTypeOptionals, OtlpCertSourceNotString)
-{
+TEST(GateBR1B_WrongTypeOptionals, OtlpCertSourceNotString) {
     // cert_source = 123 (integer, not string) → malformed_value
     // Without the fix: cfg.cert_source stays "" → OTLP uses plain HTTP → security downgrade.
     // With the fix: malformed_value emitted → sink rejected → acc non-empty.
@@ -1855,14 +1760,12 @@ TEST(GateBR1B_WrongTypeOptionals, OtlpCertSourceNotString)
     ASSERT_FALSE(acc.empty())
         << "cert_source = 123 (integer) must produce a malformed_value diagnostic "
            "(silent default = plain HTTP = TLS fail-open security downgrade)";
-    EXPECT_TRUE(has_diag(std::move(acc).release(),
-                          fixpp::config::reason_class::malformed_value,
-                          "logger.sinks[0].cert_source"))
+    EXPECT_TRUE(has_diag(std::move(acc).release(), fixpp::config::reason_class::malformed_value,
+                         "logger.sinks[0].cert_source"))
         << "Expected malformed_value on logger.sinks[0].cert_source";
 }
 
-TEST(GateBR1B_WrongTypeOptionals, OtlpExportTimeoutNotString)
-{
+TEST(GateBR1B_WrongTypeOptionals, OtlpExportTimeoutNotString) {
     // export_timeout = 10 (integer, not a duration string) → malformed_value
     const std::string toml_text = R"(
 [logger]
@@ -1885,9 +1788,8 @@ TEST(GateBR1B_WrongTypeOptionals, OtlpExportTimeoutNotString)
 
     ASSERT_FALSE(acc.empty())
         << "export_timeout = 10 (integer) must produce a malformed_value diagnostic";
-    EXPECT_TRUE(has_diag(std::move(acc).release(),
-                          fixpp::config::reason_class::malformed_value,
-                          "logger.sinks[0].export_timeout"))
+    EXPECT_TRUE(has_diag(std::move(acc).release(), fixpp::config::reason_class::malformed_value,
+                         "logger.sinks[0].export_timeout"))
         << "Expected malformed_value on logger.sinks[0].export_timeout";
 }
 #endif  // FIXPP_CONFIG_HAS_OTLP
@@ -1922,29 +1824,31 @@ TEST(GateBR1B_WrongTypeOptionals, OtlpExportTimeoutNotString)
 // This test is the POSIX arm of the #ifndef _WIN32 guard witness:
 // it confirms that the guarded code still executes on POSIX after the fix.
 // (The FileSinkDirNotWritable test is the full behavioral witness on POSIX.)
-TEST(GateBR1F_Portability, PosixAccessCheckStillActiveOnPosix)
-{
+TEST(GateBR1F_Portability, PosixAccessCheckStillActiveOnPosix) {
     // Create a readable-but-not-writable directory.
-    const auto ro_dir = std::filesystem::temp_directory_path() /
-                        "fixpp_gateb_r1f_posix_portability_test";
+    const auto ro_dir =
+        std::filesystem::temp_directory_path() / "fixpp_gateb_r1f_posix_portability_test";
     {
         std::error_code ec;
         std::filesystem::create_directories(ro_dir, ec);
-        if (ec) { GTEST_SKIP() << "Could not create temp dir"; }
+        if (ec) {
+            GTEST_SKIP() << "Could not create temp dir";
+        }
         std::filesystem::permissions(ro_dir,
-            std::filesystem::perms::owner_write |
-            std::filesystem::perms::group_write |
-            std::filesystem::perms::others_write,
-            std::filesystem::perm_options::remove, ec);
-        if (ec) { GTEST_SKIP() << "Could not remove write permission"; }
+                                     std::filesystem::perms::owner_write |
+                                         std::filesystem::perms::group_write |
+                                         std::filesystem::perms::others_write,
+                                     std::filesystem::perm_options::remove, ec);
+        if (ec) {
+            GTEST_SKIP() << "Could not remove write permission";
+        }
     }
     struct Cleanup {
         std::filesystem::path p;
         ~Cleanup() {
             std::error_code e;
-            std::filesystem::permissions(p,
-                std::filesystem::perms::owner_all,
-                std::filesystem::perm_options::add, e);
+            std::filesystem::permissions(p, std::filesystem::perms::owner_all,
+                                         std::filesystem::perm_options::add, e);
             // Permissions restored FIRST (that is why this guard is hand-written),
             // then the shared noexcept removal — destructor, so never the throwing
             // variant (#404).
@@ -1956,7 +1860,8 @@ TEST(GateBR1F_Portability, PosixAccessCheckStillActiveOnPosix)
         "[logger]\n"
         "  [[logger.sinks]]\n"
         "  kind      = \"file\"\n"
-        "  directory = \"" + ro_dir.generic_string() + "\"\n";
+        "  directory = \"" +
+        ro_dir.generic_string() + "\"\n";
 
     auto parsed = parse_logger_inline(toml_text);
     ASSERT_NE(parsed.logger_tbl, nullptr);
@@ -1978,9 +1883,8 @@ TEST(GateBR1F_Portability, PosixAccessCheckStillActiveOnPosix)
         << "POSIX access(W_OK) preflight must reject a non-writable explicit directory "
            "(Gate B r1 F: the #ifndef _WIN32 guard must keep POSIX path active on Linux)";
     const auto diags = std::move(acc).release();
-    EXPECT_TRUE(has_diag(diags,
-                          fixpp::config::reason_class::invalid_or_contradictory_selector,
-                          "logger.sinks[0].directory"))
+    EXPECT_TRUE(has_diag(diags, fixpp::config::reason_class::invalid_or_contradictory_selector,
+                         "logger.sinks[0].directory"))
         << "Expected invalid_or_contradictory_selector on logger.sinks[0].directory";
 }
 #endif  // !_WIN32
@@ -2002,89 +1906,88 @@ TEST(GateBR1F_Portability, PosixAccessCheckStillActiveOnPosix)
 // kind/endpoint/sinks are intentionally NOT here: their wrong-type maps to
 // missing_required (required-field semantics) — a split Codex r1 #6 called
 // "defensible" and explicitly blessed; only silent OPTIONAL defaulting was the bug.
-TEST(GateBR2_WrongTypeClass, AllRemainingOptionalFieldsRejectWrongType)
-{
+TEST(GateBR2_WrongTypeClass, AllRemainingOptionalFieldsRejectWrongType) {
     struct Case {
         std::string toml;
         std::string key_path;
     };
     std::vector<Case> cases = {
         // file-sink numerics — STRING where integer expected
-        {R"(
+        {.toml = R"(
 [logger]
   [[logger.sinks]]
   kind           = "file"
   directory      = "/tmp"
   max_file_bytes = "big"
 )",
-         "logger.sinks[0].max_file_bytes"},
-        {R"(
+         .key_path = "logger.sinks[0].max_file_bytes"},
+        {.toml = R"(
 [logger]
   [[logger.sinks]]
   kind           = "file"
   directory      = "/tmp"
   max_keep_count = "many"
 )",
-         "logger.sinks[0].max_keep_count"},
+         .key_path = "logger.sinks[0].max_keep_count"},
         // logger-level scalars
-        {R"(
+        {.toml = R"(
 [logger]
 capacity = "huge"
   [[logger.sinks]]
   kind      = "file"
   directory = "/tmp"
 )",
-         "logger.capacity"},
-        {R"(
+         .key_path = "logger.capacity"},
+        {.toml = R"(
 [logger]
 drain_timeout = 5000
   [[logger.sinks]]
   kind      = "file"
   directory = "/tmp"
 )",
-         "logger.drain_timeout"},
-        {R"(
+         .key_path = "logger.drain_timeout"},
+        {.toml = R"(
 [logger]
 drain_cpu_affinity = "two"
   [[logger.sinks]]
   kind      = "file"
   directory = "/tmp"
 )",
-         "logger.drain_cpu_affinity"},
+         .key_path = "logger.drain_cpu_affinity"},
 #ifdef FIXPP_CONFIG_HAS_OTLP
-        {R"(
+        {.toml = R"(
 [logger]
   [[logger.sinks]]
   kind     = "otlp"
   endpoint = "https://collector:4317/v1/logs"
   use_grpc = "yes"
 )",
-         "logger.sinks[0].use_grpc"},
-        {R"(
+         .key_path = "logger.sinks[0].use_grpc"},
+        {.toml = R"(
 [logger]
   [[logger.sinks]]
   kind             = "otlp"
   endpoint         = "https://collector:4317/v1/logs"
   max_export_batch = "lots"
 )",
-         "logger.sinks[0].max_export_batch"},
-        {R"(
+         .key_path = "logger.sinks[0].max_export_batch"},
+        {.toml = R"(
 [logger]
   [[logger.sinks]]
   kind               = "otlp"
   endpoint           = "https://collector:4317/v1/logs"
   max_export_retries = "few"
 )",
-         "logger.sinks[0].max_export_retries"},
+         .key_path = "logger.sinks[0].max_export_retries"},
 #endif  // FIXPP_CONFIG_HAS_OTLP
 #ifdef FIXPP_HAS_SYSLOG
-        {R"(
+        {.toml = R"(
 [logger]
   [[logger.sinks]]
   kind  = "syslog"
   ident = 123
 )",
-         "logger.sinks[0].ident"},
+         .key_path = "logger.sinks[0].ident"},
 #endif  // FIXPP_HAS_SYSLOG
     };
 
@@ -2101,8 +2004,8 @@ drain_cpu_affinity = "two"
             std::filesystem::temp_directory_path(), opts, pending, acc,
             /*is_engine=*/true, /*session_index=*/0);
 
-        ASSERT_FALSE(acc.empty())
-            << "wrong-type field at " << c.key_path << " must produce a diagnostic";
+        ASSERT_FALSE(acc.empty()) << "wrong-type field at " << c.key_path
+                                  << " must produce a diagnostic";
         const auto diags = std::move(acc).release();
         EXPECT_TRUE(has_diag(diags, fixpp::config::reason_class::malformed_value, c.key_path))
             << "Expected malformed_value at " << c.key_path

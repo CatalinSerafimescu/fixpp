@@ -65,14 +65,13 @@ using namespace std::chrono_literals;
 
 namespace {
 
-static std::string field(int tag, std::string_view val) {
+std::string field(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
-static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
-                                             std::string_view msg_type, std::uint32_t seq,
-                                             std::string_view sender, std::string_view target,
-                                             std::string_view extra = {}) {
+std::vector<std::byte> make_fix_frame(std::string_view begin_string, std::string_view msg_type,
+                                      std::uint32_t seq, std::string_view sender,
+                                      std::string_view target, std::string_view extra = {}) {
     std::string body;
     body += field(35, msg_type);
     body += field(34, std::to_string(seq));
@@ -98,8 +97,8 @@ static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
     return frame;
 }
 
-static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
-                                         std::string_view t, int hbt = 5) {
+std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
+                                  std::string_view t, int hbt = 5) {
     std::string extra;
     extra += field(98, "0");
     extra += field(108, std::to_string(hbt));
@@ -107,9 +106,8 @@ static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq,
 }
 
 // Heartbeat with optional TestReqID(112).
-static std::vector<std::byte> make_heartbeat(std::string_view bs, std::uint32_t seq,
-                                             std::string_view s, std::string_view t,
-                                             std::string_view testreqid = {}) {
+std::vector<std::byte> make_heartbeat(std::string_view bs, std::uint32_t seq, std::string_view s,
+                                      std::string_view t, std::string_view testreqid = {}) {
     std::string extra;
     if (!testreqid.empty()) extra += field(112, testreqid);
     return make_fix_frame(bs, "0", seq, s, t, extra);
@@ -122,13 +120,13 @@ struct OutboundCapture {
     }
 };
 
-static bool is_msg_type(std::span<const std::byte> frame, std::string_view type) {
+bool is_msg_type(std::span<const std::byte> frame, std::string_view type) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
-    return wire.find("35=" + std::string(type) + "\x01") != std::string::npos;
+    return wire.contains("35=" + std::string(type) + "\x01");
 }
 
-static bool is_heartbeat(std::span<const std::byte> frame) { return is_msg_type(frame, "0"); }
-static bool is_test_request(std::span<const std::byte> frame) { return is_msg_type(frame, "1"); }
+bool is_heartbeat(std::span<const std::byte> frame) { return is_msg_type(frame, "0"); }
+bool is_test_request(std::span<const std::byte> frame) { return is_msg_type(frame, "1"); }
 
 }  // namespace
 
@@ -182,7 +180,7 @@ struct HeartbeatCadenceFixture {
             ADD_FAILURE() << fixpp::test_support::kWindowMiss << "drive_to_active/logon";
             return false;
         }
-        f2.get();
+        if (!f2.get().has_value()) return false;
         return s.state() == fixpp::session::fsm_state::Active;
     }
 
@@ -192,13 +190,13 @@ struct HeartbeatCadenceFixture {
         ioc.restart();
     }
 
-    bool saw_heartbeat() const {
+    [[nodiscard]] bool saw_heartbeat() const {
         for (const auto& f : capture.frames)
             if (is_heartbeat(f)) return true;
         return false;
     }
 
-    bool saw_test_request() const {
+    [[nodiscard]] bool saw_test_request() const {
         for (const auto& f : capture.frames)
             if (is_test_request(f)) return true;
         return false;
@@ -316,7 +314,7 @@ TEST(HeartbeatCadence8Cell, CellD_Strand_TestReqIdMismatchDetected) {
                       << "CellD_Strand_TestReqIdMismatchDetected";
         return;
     }
-    fut.get();
+    (void)fut.get();  // outcome checked below via state
 
     // Session must disconnect (session_testreqid_mismatch=118).
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
@@ -343,7 +341,7 @@ TEST(HeartbeatCadence8Cell, CellD_Direct_TestReqIdMismatchDetected) {
                       << "CellD_Direct_TestReqIdMismatchDetected";
         return;
     }
-    fut.get();
+    (void)fut.get();  // outcome checked below via state
 
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected)
         << "Cell D (direct): Heartbeat wrong TestReqID → Disconnected. "

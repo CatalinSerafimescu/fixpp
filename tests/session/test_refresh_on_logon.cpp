@@ -115,16 +115,15 @@ namespace {
 
 // ── Frame-building helpers ────────────────────────────────────────────────────
 
-static std::string field(int tag, std::string_view val) {
+std::string field(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
 using fixpp::test_support::extract_tag;
 
-static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
-                                             std::string_view msg_type, std::uint32_t seq,
-                                             std::string_view sender, std::string_view target,
-                                             std::string_view extra = {}) {
+std::vector<std::byte> make_fix_frame(std::string_view begin_string, std::string_view msg_type,
+                                      std::uint32_t seq, std::string_view sender,
+                                      std::string_view target, std::string_view extra = {}) {
     std::string body;
     body += field(35, msg_type);
     body += field(34, std::to_string(seq));
@@ -150,8 +149,8 @@ static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
     return frame;
 }
 
-static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq,
-                                         std::string_view s, std::string_view t, int hbt = 30) {
+std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
+                                  std::string_view t, int hbt = 30) {
     std::string extra;
     extra += field(98, "0");
     extra += field(108, std::to_string(hbt));
@@ -159,9 +158,8 @@ static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq,
 }
 
 // make_logon_reset: build a Logon with 141=Y (ResetSeqNumFlag). Mirrors 029 harness.
-static std::vector<std::byte> make_logon_reset(std::string_view bs, std::uint32_t seq,
-                                               std::string_view s, std::string_view t,
-                                               int hbt = 30) {
+std::vector<std::byte> make_logon_reset(std::string_view bs, std::uint32_t seq, std::string_view s,
+                                        std::string_view t, int hbt = 30) {
     std::string extra;
     extra += field(98, "0");
     extra += field(108, std::to_string(hbt));
@@ -189,7 +187,6 @@ using fixpp::session::MessageStore;
 using fixpp::session::MessageStoreFactory;
 using fixpp::session::retrieve_visitor;
 using fixpp::session::seqnum_t;
-using fixpp::session::visit_result;
 
 class FaultStore final : public MessageStore {
 public:
@@ -274,8 +271,8 @@ public:
         std::string_view /*sender*/, std::string_view /*target*/, std::pmr::memory_resource* /*mr*/,
         std::size_t /*max_store_memory_bytes*/,
         asio::any_io_executor /*file_io_executor*/) noexcept override {
-        auto store = std::make_unique<FaultStore>(seeded_inbound_, seeded_outbound_,
-                                                  fail_on_nth_call_);
+        auto store =
+            std::make_unique<FaultStore>(seeded_inbound_, seeded_outbound_, fail_on_nth_call_);
         last_store = store.get();
         return store;
     }
@@ -296,7 +293,7 @@ private:
 // inside a value, and avoids leaving 9= / 10= stale after strip.
 using TagValue = std::pair<int, std::string>;
 
-static std::vector<TagValue> parse_fix_fields(const std::vector<std::byte>& frame) {
+std::vector<TagValue> parse_fix_fields(const std::vector<std::byte>& frame) {
     const auto* data = reinterpret_cast<const char*>(frame.data());
     std::string sv(data, frame.size());
     std::vector<TagValue> result;
@@ -320,17 +317,22 @@ static std::vector<TagValue> parse_fix_fields(const std::vector<std::byte>& fram
 // — derived/volatile fields whose values shift when any other field changes).
 // Returns true iff both sets have the same tags (excluding ignored) in the same
 // order with the same values.
-static bool fields_equal_except(const std::vector<TagValue>& a, const std::vector<TagValue>& b,
-                                std::initializer_list<int> exclude) {
+bool fields_equal_except(const std::vector<TagValue>& a, const std::vector<TagValue>& b,
+                         std::initializer_list<int> exclude) {
     auto keep = [&](const TagValue& tv) {
         for (int t : exclude) {
             if (tv.first == t) return false;
         }
         return true;
     };
-    std::vector<TagValue> fa, fb;
-    for (const auto& tv : a) { if (keep(tv)) fa.push_back(tv); }
-    for (const auto& tv : b) { if (keep(tv)) fb.push_back(tv); }
+    std::vector<TagValue> fa;
+    std::vector<TagValue> fb;
+    for (const auto& tv : a) {
+        if (keep(tv)) fa.push_back(tv);
+    }
+    for (const auto& tv : b) {
+        if (keep(tv)) fb.push_back(tv);
+    }
     return fa == fb;
 }
 
@@ -410,7 +412,7 @@ struct Fixture {
 
 struct ReconnectInitiatorFixture {
     std::unique_ptr<Fixture> fix;
-    FaultStore* store{nullptr};           // pointer into the FaultStoreFactory's store
+    FaultStore* store{nullptr};                    // pointer into the FaultStoreFactory's store
     MockReconnectFactory* transport_fac{nullptr};  // owning ptr kept in cfg_ via shared_ptr
 };
 
@@ -418,9 +420,8 @@ struct ReconnectInitiatorFixture {
 // persistent: true (default) for persistent store; false for W4 (non-persistent no-op).
 // policy: bilateral_lenient (default) for W1-W4; bilateral_strict for W5a/W5b.
 // fail_on_nth_call: 0 (default) for normal stores; 3 for W7 (fail 2nd-logon re-read).
-static ReconnectInitiatorFixture make_reconnect_initiator(
-    seqnum_t seeded_in, seqnum_t seeded_out,
-    bool refresh_on_logon = true, bool persistent = true,
+ReconnectInitiatorFixture make_reconnect_initiator(
+    seqnum_t seeded_in, seqnum_t seeded_out, bool refresh_on_logon = true, bool persistent = true,
     fixpp::session::reset_seqnum_policy policy =
         fixpp::session::reset_seqnum_policy::bilateral_lenient,
     int fail_on_nth_call = 0) {
@@ -428,8 +429,8 @@ static ReconnectInitiatorFixture make_reconnect_initiator(
     result.fix = std::make_unique<Fixture>();
     auto& fix = *result.fix;
 
-    auto store_factory = std::make_shared<FaultStoreFactory>(seeded_in, seeded_out, persistent,
-                                                             fail_on_nth_call);
+    auto store_factory =
+        std::make_shared<FaultStoreFactory>(seeded_in, seeded_out, persistent, fail_on_nth_call);
     auto transport_factory = std::make_shared<MockReconnectFactory>();
     result.transport_fac = transport_factory.get();
 
@@ -501,7 +502,7 @@ struct AcceptorFixture {
     FaultStore* store{nullptr};
 };
 
-static AcceptorFixture make_acceptor_notconnected(
+AcceptorFixture make_acceptor_notconnected(
     std::shared_ptr<MessageStoreFactory> store_factory, bool refresh_on_logon,
     fixpp::session::reset_seqnum_policy policy =
         fixpp::session::reset_seqnum_policy::bilateral_lenient) {
@@ -591,7 +592,8 @@ TEST(RefreshOnLogon, W1_StoreAboveLive_RED) {
     // 2 reads (inbound read + outbound read).
     ASSERT_EQ(store->call_count, 2)
         << "W1 precondition: cold open must have issued exactly 2 store reads "
-           "(in+out); call_count=" << store->call_count;
+           "(in+out); call_count="
+        << store->call_count;
 
     // Manager after cold open: hydrated to {50, 60}; then Logon at seq=60
     // advances outbound to 61. Confirm the cold hydrate was applied.
@@ -623,8 +625,7 @@ TEST(RefreshOnLogon, W1_StoreAboveLive_RED) {
     // emit_initiator_logon_() runs with hydrated_=true already set.
     const int call_count_before = store->call_count;
 
-    auto reconnect_fut = asio::co_spawn(
-        fix.ioc, fix.session->drive_reconnect(), asio::use_future);
+    auto reconnect_fut = asio::co_spawn(fix.ioc, fix.session->drive_reconnect(), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(fix.ioc, reconnect_fut, 3s,
                                                     "W1_StoreAboveLive/reconnect")) {
         fixpp::test_support::drain_or_report(fix.ioc, "W1_StoreAboveLive/reconnect");
@@ -641,7 +642,8 @@ TEST(RefreshOnLogon, W1_StoreAboveLive_RED) {
         ASSERT_TRUE(rr.has_value())
             << "W1 vehicle: drive_reconnect() must succeed (mock transport connect+handshake). "
                "If this fails, ensure_hydrated_ was never reached and the RED witness is invalid. "
-               "error=" << (rr.has_value() ? "ok" : "failed");
+               "error="
+            << (rr.has_value() ? "ok" : "failed");
     }
 
     // Wait for any trailing asio work (EOF handling may transition Disconnected).
@@ -657,8 +659,8 @@ TEST(RefreshOnLogon, W1_StoreAboveLive_RED) {
         << "W1 RED: ensure_hydrated_ must re-read the store (in+out = 2 reads) "
            "on the 2nd logon when refresh_on_logon=true + bilateral_lenient. "
            "WITHOUT T004 (force param), the hydrated_ latch fires and no reads "
-           "occur. call_count before=" << call_count_before
-        << " expected after=" << (call_count_before + 2)
+           "occur. call_count before="
+        << call_count_before << " expected after=" << (call_count_before + 2)
         << " got=" << store->call_count;
 
     // W1 inbound post-condition: next_inbound must equal the store's seeded value (50).
@@ -675,8 +677,7 @@ TEST(RefreshOnLogon, W1_StoreAboveLive_RED) {
     // W1 outbound post-condition: after re-hydrate to out=60, the 2nd Logon emits at 60 →
     // peek_outbound()==61. Without re-hydrate: out=42 → Logon at 42 → peek_outbound()==43.
     // RED: 43 != 61. GREEN: 61 == 61.
-    EXPECT_EQ(fix.session->seqnum_mgr_test_access().peek_outbound(),
-              static_cast<seqnum_t>(61))
+    EXPECT_EQ(fix.session->seqnum_mgr_test_access().peek_outbound(), static_cast<seqnum_t>(61))
         << "W1 RED: after re-hydrate to out=60 + 2nd Logon emit, peek_outbound must be 61. "
            "WITHOUT T004: latch fires → out stays 42 → 2nd Logon at 42 → peek_outbound=43. "
            "Actual peek_outbound="
@@ -733,8 +734,7 @@ TEST(RefreshOnLogon, W2_StoreWinsDown_RED) {
     // Drive the 2nd logon via drive_reconnect() with the mock transport.
     const int call_count_before = store->call_count;
 
-    auto reconnect_fut = asio::co_spawn(
-        fix.ioc, fix.session->drive_reconnect(), asio::use_future);
+    auto reconnect_fut = asio::co_spawn(fix.ioc, fix.session->drive_reconnect(), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(fix.ioc, reconnect_fut, 3s,
                                                     "W2_StoreWinsDown/reconnect")) {
         fixpp::test_support::drain_or_report(fix.ioc, "W2_StoreWinsDown/reconnect");
@@ -748,7 +748,8 @@ TEST(RefreshOnLogon, W2_StoreWinsDown_RED) {
         ASSERT_TRUE(rr.has_value())
             << "W2 vehicle: drive_reconnect() must succeed (mock transport connect+handshake). "
                "If this fails, ensure_hydrated_ was never reached and the RED witness is invalid. "
-               "error=" << (rr.has_value() ? "ok" : "failed");
+               "error="
+            << (rr.has_value() ? "ok" : "failed");
     }
 
     fix.ioc.run_for(1s);
@@ -760,8 +761,8 @@ TEST(RefreshOnLogon, W2_StoreWinsDown_RED) {
     EXPECT_EQ(store->call_count, call_count_before + 2)
         << "W2 RED: ensure_hydrated_ must re-read the store on 2nd logon "
            "(store-wins DOWN path). WITHOUT T004, hydrated_ latch fires, no reads. "
-           "call_count before=" << call_count_before
-        << " expected after=" << (call_count_before + 2)
+           "call_count before="
+        << call_count_before << " expected after=" << (call_count_before + 2)
         << " got=" << store->call_count;
 
     // W2 inbound post-condition: next_inbound must equal the LOWER store value (5).
@@ -770,8 +771,7 @@ TEST(RefreshOnLogon, W2_StoreWinsDown_RED) {
     // The store-wins-DOWN semantic (INV-RoL-4) requires unconditional overwrite.
     // RED: hydrated_ latch fires → manager stays at 40 → 40 != 5.
     // GREEN: re-hydrated → manager = 5 (store-wins DOWN).
-    EXPECT_EQ(fix.session->seqnum_mgr_test_access().next_inbound_unsafe(),
-              static_cast<seqnum_t>(5))
+    EXPECT_EQ(fix.session->seqnum_mgr_test_access().next_inbound_unsafe(), static_cast<seqnum_t>(5))
         << "W2 RED: after 2nd logon with refresh_on_logon=true + bilateral_lenient, "
            "next_inbound must equal the store's LOWER seeded value (5). "
            "An advance-only implementation would also fail here — store-wins must "
@@ -783,8 +783,7 @@ TEST(RefreshOnLogon, W2_StoreWinsDown_RED) {
     // W2 outbound post-condition: after re-hydrate to out=6, the 2nd Logon emits at 6 →
     // peek_outbound()==7. Without re-hydrate: out=42 → 2nd Logon at 42 → peek_outbound()==43.
     // RED: 43 != 7. GREEN: 7 == 7.
-    EXPECT_EQ(fix.session->seqnum_mgr_test_access().peek_outbound(),
-              static_cast<seqnum_t>(7))
+    EXPECT_EQ(fix.session->seqnum_mgr_test_access().peek_outbound(), static_cast<seqnum_t>(7))
         << "W2 RED: after re-hydrate to out=6 (store-wins DOWN) + 2nd Logon emit, "
            "peek_outbound must be 7. WITHOUT T004: latch fires → out stays 42 → "
            "2nd Logon at 42 → peek_outbound=43. "
@@ -820,8 +819,7 @@ TEST(RefreshOnLogon, W3_KnobOff_NoReread) {
 
     // Cold open: 2 reads (inbound + outbound via ensure_hydrated_).
     ASSERT_EQ(store->call_count, 2)
-        << "W3 precondition: cold open must issue exactly 2 store reads; got "
-        << store->call_count;
+        << "W3 precondition: cold open must issue exactly 2 store reads; got " << store->call_count;
 
     // Confirm cold hydrate applied: manager={50,60}, then Logon at 60 → outbound=61.
     {
@@ -839,8 +837,7 @@ TEST(RefreshOnLogon, W3_KnobOff_NoReread) {
     const int call_count_before = store->call_count;  // snapshot N = 2
 
     // Drive 2nd logon via drive_reconnect() with mock transport.
-    auto reconnect_fut = asio::co_spawn(
-        fix.ioc, fix.session->drive_reconnect(), asio::use_future);
+    auto reconnect_fut = asio::co_spawn(fix.ioc, fix.session->drive_reconnect(), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(fix.ioc, reconnect_fut, 3s,
                                                     "W3_KnobOff_NoReread/reconnect")) {
         fixpp::test_support::drain_or_report(fix.ioc, "W3_KnobOff_NoReread/reconnect");
@@ -866,8 +863,8 @@ TEST(RefreshOnLogon, W3_KnobOff_NoReread) {
     // → ensure_hydrated_ exits at the first guard without any store->next_seqnum call.
     EXPECT_EQ(store->call_count, call_count_before)
         << "W3: refresh_on_logon=false must produce ZERO additional store reads on 2nd logon. "
-           "call_count before=" << call_count_before
-        << " got=" << store->call_count
+           "call_count before="
+        << call_count_before << " got=" << store->call_count
         << ". A non-zero delta means the knob-off guard is broken (INV-RoL-1).";
 
     // (b) Inbound counter retained at live value (40), NOT overwritten from store (50).
@@ -879,8 +876,7 @@ TEST(RefreshOnLogon, W3_KnobOff_NoReread) {
 
     // (c) Outbound counter: live=42 → 2nd Logon emits at 42 → peek_outbound=43.
     // A re-hydrate from store (out=60) would give peek=61; getting 43 confirms no re-read.
-    EXPECT_EQ(fix.session->seqnum_mgr_test_access().peek_outbound(),
-              static_cast<seqnum_t>(43))
+    EXPECT_EQ(fix.session->seqnum_mgr_test_access().peek_outbound(), static_cast<seqnum_t>(43))
         << "W3: knob-off must NOT re-hydrate; peek_outbound must be 43 (42+1 after 2nd Logon), "
            "not 61 (60+1 from store). Actual="
         << fix.session->seqnum_mgr_test_access().peek_outbound();
@@ -922,7 +918,8 @@ TEST(RefreshOnLogon, W4_NonPersistentStore_NoReread) {
     // ensure_hydrated_ returns without any store reads.
     ASSERT_EQ(store->call_count, 0)
         << "W4 precondition: non-persistent store → cold open must issue ZERO store reads; "
-           "got call_count=" << store->call_count
+           "got call_count="
+        << store->call_count
         << ". store_is_persistent_=false must trigger the !store_is_persistent_ skip (INV-RoL-2).";
 
     // Manager at construction-time defaults (seqnum_min=1): no hydration ran.
@@ -939,8 +936,7 @@ TEST(RefreshOnLogon, W4_NonPersistentStore_NoReread) {
     const int call_count_before = store->call_count;  // = 0
 
     // Drive 2nd logon via drive_reconnect() with mock transport.
-    auto reconnect_fut = asio::co_spawn(
-        fix.ioc, fix.session->drive_reconnect(), asio::use_future);
+    auto reconnect_fut = asio::co_spawn(fix.ioc, fix.session->drive_reconnect(), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(fix.ioc, reconnect_fut, 3s,
                                                     "W4_NonPersistentStore/reconnect")) {
         fixpp::test_support::drain_or_report(fix.ioc, "W4_NonPersistentStore/reconnect");
@@ -966,21 +962,19 @@ TEST(RefreshOnLogon, W4_NonPersistentStore_NoReread) {
     EXPECT_EQ(store->call_count, call_count_before)
         << "W4: non-persistent store (yields_persistent_store()==false) must produce "
            "ZERO store reads even when refresh_on_logon=true (force=true). "
-           "call_count before=" << call_count_before
-        << " got=" << store->call_count
+           "call_count before="
+        << call_count_before << " got=" << store->call_count
         << ". A non-zero delta means the !store_is_persistent_ skip (in ensure_hydrated_) "
            "is not firing under force (INV-RoL-2 violated).";
 
     // (b) The manager was never seeded from the store; counters reflect only the
     // post-2nd-Logon advance (outbound: 2 → Logon at 2 → peek=3).
     // next_inbound stays at 1 (seqnum_min, no hydration on either path).
-    EXPECT_EQ(fix.session->seqnum_mgr_test_access().next_inbound_unsafe(),
-              static_cast<seqnum_t>(1))
+    EXPECT_EQ(fix.session->seqnum_mgr_test_access().next_inbound_unsafe(), static_cast<seqnum_t>(1))
         << "W4: no hydration ran (non-persistent); next_inbound must stay at 1. Actual="
         << fix.session->seqnum_mgr_test_access().next_inbound_unsafe();
 
-    EXPECT_EQ(fix.session->seqnum_mgr_test_access().peek_outbound(),
-              static_cast<seqnum_t>(3))
+    EXPECT_EQ(fix.session->seqnum_mgr_test_access().peek_outbound(), static_cast<seqnum_t>(3))
         << "W4: 2nd Logon emits at seq=2 (no re-hydrate, outbound stayed at 2) → peek=3. "
            "Actual peek_outbound="
         << fix.session->seqnum_mgr_test_access().peek_outbound();
@@ -1033,8 +1027,8 @@ TEST(RefreshOnLogon, W5a_BilateralStrict_KnobOn_SuppressRehydrate) {
     const int call_count_before = store_on->call_count;  // = 2 after cold open
 
     // Drive 2nd logon (knob-ON, strict).
-    auto reconnect_fut_on = asio::co_spawn(
-        fix_on.ioc, fix_on.session->drive_reconnect(), asio::use_future);
+    auto reconnect_fut_on =
+        asio::co_spawn(fix_on.ioc, fix_on.session->drive_reconnect(), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(fix_on.ioc, reconnect_fut_on, 3s,
                                                     "W5a_KnobOn/reconnect")) {
         fixpp::test_support::drain_or_report(fix_on.ioc, "W5a_KnobOn/reconnect");
@@ -1043,8 +1037,7 @@ TEST(RefreshOnLogon, W5a_BilateralStrict_KnobOn_SuppressRehydrate) {
     }
     {
         auto rr = reconnect_fut_on.get();
-        ASSERT_TRUE(rr.has_value())
-            << "W5a vehicle (knob-on): drive_reconnect() must succeed";
+        ASSERT_TRUE(rr.has_value()) << "W5a vehicle (knob-on): drive_reconnect() must succeed";
     }
     fix_on.ioc.run_for(1s);
     fix_on.ioc.restart();
@@ -1076,8 +1069,8 @@ TEST(RefreshOnLogon, W5a_BilateralStrict_KnobOn_SuppressRehydrate) {
     fix_off.session->seqnum_mgr_test_access().set_counters_for_test(
         /*next_inbound=*/in_before, /*next_outbound=*/out_before);
 
-    auto reconnect_fut_off = asio::co_spawn(
-        fix_off.ioc, fix_off.session->drive_reconnect(), asio::use_future);
+    auto reconnect_fut_off =
+        asio::co_spawn(fix_off.ioc, fix_off.session->drive_reconnect(), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(fix_off.ioc, reconnect_fut_off, 3s,
                                                     "W5a_KnobOff/reconnect")) {
         fixpp::test_support::drain_or_report(fix_off.ioc, "W5a_KnobOff/reconnect");
@@ -1086,8 +1079,7 @@ TEST(RefreshOnLogon, W5a_BilateralStrict_KnobOn_SuppressRehydrate) {
     }
     {
         auto rr = reconnect_fut_off.get();
-        ASSERT_TRUE(rr.has_value())
-            << "W5a vehicle (knob-off): drive_reconnect() must succeed";
+        ASSERT_TRUE(rr.has_value()) << "W5a vehicle (knob-off): drive_reconnect() must succeed";
     }
     fix_off.ioc.run_for(1s);
     fix_off.ioc.restart();
@@ -1114,21 +1106,45 @@ TEST(RefreshOnLogon, W5a_BilateralStrict_KnobOn_SuppressRehydrate) {
     const auto off_fields = parse_fix_fields(off_raw);
 
     // Direct 34 assertion: both must carry the same MsgSeqNum.
-    std::string on_34, off_34;
-    for (const auto& tv : on_fields) { if (tv.first == 34) { on_34 = tv.second; break; } }
-    for (const auto& tv : off_fields) { if (tv.first == 34) { off_34 = tv.second; break; } }
+    std::string on_34;
+    std::string off_34;
+    for (const auto& tv : on_fields) {
+        if (tv.first == 34) {
+            on_34 = tv.second;
+            break;
+        }
+    }
+    for (const auto& tv : off_fields) {
+        if (tv.first == 34) {
+            off_34 = tv.second;
+            break;
+        }
+    }
     EXPECT_EQ(on_34, off_34)
         << "W5a(b)/34: knob-on and knob-off bilateral_strict 2nd-Logon must carry "
-           "the same MsgSeqNum(34). on_34=" << on_34 << " off_34=" << off_34
+           "the same MsgSeqNum(34). on_34="
+        << on_34 << " off_34=" << off_34
         << ". Mismatch means the knob influenced the strict 2nd Logon outbound seqnum.";
 
     // Direct 141 assertion: bilateral_strict always emits 141=Y; both must agree.
-    std::string on_141, off_141;
-    for (const auto& tv : on_fields) { if (tv.first == 141) { on_141 = tv.second; break; } }
-    for (const auto& tv : off_fields) { if (tv.first == 141) { off_141 = tv.second; break; } }
+    std::string on_141;
+    std::string off_141;
+    for (const auto& tv : on_fields) {
+        if (tv.first == 141) {
+            on_141 = tv.second;
+            break;
+        }
+    }
+    for (const auto& tv : off_fields) {
+        if (tv.first == 141) {
+            off_141 = tv.second;
+            break;
+        }
+    }
     EXPECT_EQ(on_141, off_141)
         << "W5a(b)/141: knob-on and knob-off bilateral_strict 2nd-Logon must carry "
-           "the same ResetSeqNumFlag(141). on_141=" << on_141 << " off_141=" << off_141
+           "the same ResetSeqNumFlag(141). on_141="
+        << on_141 << " off_141=" << off_141
         << ". Mismatch means the strict suppression gate differed between knob states.";
 
     // Full field equivalence (excluding 9, 10, 52).
@@ -1174,7 +1190,7 @@ TEST(RefreshOnLogon, W5b_BilateralStrict_KnobOff_L029_3_Gap_Witness) {
         << store->call_count;
 
     // The cold Logon is already in fix.capture.frames.back() (emitted during open()).
-    ASSERT_GE(fix.capture.frames.size(), 1u)
+    ASSERT_GE(fix.capture.frames.size(), 1U)
         << "W5b: cold Logon must have been emitted during open()";
     const auto& cold_logon = fix.capture.frames.back();
 
@@ -1186,8 +1202,8 @@ TEST(RefreshOnLogon, W5b_BilateralStrict_KnobOff_L029_3_Gap_Witness) {
     // (If this fails, the cold hydrate did not run — a regression in 029 behaviour.)
     EXPECT_NE(tag34, "1")
         << "W5b (L-029-3 gap witness): bilateral_strict cold open with store{out=42} "
-           "must emit 34=42 (cold seed ran). Got 34=" << tag34
-        << ". If 34==1, the cold hydrate regressed.";
+           "must emit 34=42 (cold seed ran). Got 34="
+        << tag34 << ". If 34==1, the cold hydrate regressed.";
 
     // Document 141 value AS-IS — bilateral_strict includes 141=Y.
     // NOTE: We do NOT assert this is well-formed (141=Y + 34=42 may be malformed per FIX spec
@@ -1274,8 +1290,7 @@ TEST(RefreshOnLogon, W6_Acceptor_KnobOn_PeerResetLogon_InboundSeedWithheld) {
     EXPECT_EQ(store->call_count, 3)
         << "W6(a): store must have been read at cold hydrate (2) + written by the 030 "
            "persist-to-2 (1). Expected call_count=3, got "
-        << store->call_count
-        << ". If call_count==0, ensure_hydrated_ did not run at all.";
+        << store->call_count << ". If call_count==0, ensure_hydrated_ did not run at all.";
     (void)store;  // used in all three assertions
 
     // (b) Session must reach Active: 141=Y + seq=1 accepted, no too-low fatal.
@@ -1283,7 +1298,8 @@ TEST(RefreshOnLogon, W6_Acceptor_KnobOn_PeerResetLogon_InboundSeedWithheld) {
         << "W6(b): acceptor must reach Active after reset-Logon(34=1,141=Y) with "
            "refresh_on_logon=true. If Disconnected, the inbound seed (37) leaked past "
            "the withhold guard → too-low fatal (RC-1 broken by the knob). "
-           "Actual state=" << static_cast<int>(fix.session->state());
+           "Actual state="
+        << static_cast<int>(fix.session->state());
 
     // (c) next_inbound must equal 2: the 141=Y reset rebased to 1, then 030 restored the
     // consumed seq-1 reset Logon's advance → 2 (the withheld store value 37 still did NOT
@@ -1292,7 +1308,8 @@ TEST(RefreshOnLogon, W6_Acceptor_KnobOn_PeerResetLogon_InboundSeedWithheld) {
         const seqnum_t ni = fix.session->seqnum_mgr_test_access().next_inbound_unsafe();
         EXPECT_EQ(ni, fixpp::session::seqnum_t{2})
             << "W6(c): next_inbound must be 2 after 141=Y reset + 030 restore (consumed seq-1 "
-               "reset Logon survives; store value 37 withheld; 030 FR-001). Actual next_inbound=" << ni;
+               "reset Logon survives; store value 37 withheld; 030 FR-001). Actual next_inbound="
+            << ni;
     }
 }
 
@@ -1346,10 +1363,8 @@ TEST(RefreshOnLogon, W7_KnobOn_StoreReadFailure_Disconnected) {
 
     // Snapshot the manager counters AFTER cold open (before 2nd logon attempt).
     // The 3rd read MUST NOT change these (no partial overwrite).
-    const seqnum_t snap_inbound =
-        fix.session->seqnum_mgr_test_access().next_inbound_unsafe();
-    const seqnum_t snap_outbound =
-        fix.session->seqnum_mgr_test_access().peek_outbound();
+    const seqnum_t snap_inbound = fix.session->seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t snap_outbound = fix.session->seqnum_mgr_test_access().peek_outbound();
 
     // Confirm cold-open snapshot matches expected values:
     //   next_inbound = 37 (seeded, not yet advanced — no inbound frames received)
@@ -1362,8 +1377,7 @@ TEST(RefreshOnLogon, W7_KnobOn_StoreReadFailure_Disconnected) {
     // Drive the 2nd logon: force=true → latch bypassed → call 3 fails → store error.
     // emit_initiator_logon_() returns unexpected(store_io_failure) →
     // drive_reconnect() propagates the error.
-    auto reconnect_fut = asio::co_spawn(
-        fix.ioc, fix.session->drive_reconnect(), asio::use_future);
+    auto reconnect_fut = asio::co_spawn(fix.ioc, fix.session->drive_reconnect(), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(fix.ioc, reconnect_fut, 3s,
                                                     "W7_StoreReadFailure/reconnect")) {
         fixpp::test_support::drain_or_report(fix.ioc, "W7_StoreReadFailure/reconnect");
@@ -1386,27 +1400,26 @@ TEST(RefreshOnLogon, W7_KnobOn_StoreReadFailure_Disconnected) {
     // (b) Session must be Disconnected after the store failure.
     EXPECT_EQ(fix.session->state(), fixpp::session::fsm_state::Disconnected)
         << "W7(b): session must be Disconnected after forced re-hydrate read failure. "
-           "Actual state=" << static_cast<int>(fix.session->state());
+           "Actual state="
+        << static_cast<int>(fix.session->state());
 
     // (c) Manager counters must be unchanged from the cold-open snapshot.
     // "No partial seed" (C2.5): a failed re-read must not partially overwrite the manager.
     // The key: a failed INBOUND read (call 3) must not have already modified the manager
     // before discovering the error. ensure_hydrated_ reads both before applying either.
-    const seqnum_t post_inbound =
-        fix.session->seqnum_mgr_test_access().next_inbound_unsafe();
-    const seqnum_t post_outbound =
-        fix.session->seqnum_mgr_test_access().peek_outbound();
+    const seqnum_t post_inbound = fix.session->seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t post_outbound = fix.session->seqnum_mgr_test_access().peek_outbound();
 
     EXPECT_EQ(post_inbound, snap_inbound)
         << "W7(c): next_inbound must be unchanged from cold-open snapshot after "
-           "failed 2nd-logon re-hydrate. Snapshot=" << snap_inbound
-        << " actual=" << post_inbound
+           "failed 2nd-logon re-hydrate. Snapshot="
+        << snap_inbound << " actual=" << post_inbound
         << ". Non-equal means the failed read partially overwrote the manager (C2.5 violated).";
 
     EXPECT_EQ(post_outbound, snap_outbound)
         << "W7(c): peek_outbound must be unchanged from cold-open snapshot after "
-           "failed 2nd-logon re-hydrate. Snapshot=" << snap_outbound
-        << " actual=" << post_outbound
+           "failed 2nd-logon re-hydrate. Snapshot="
+        << snap_outbound << " actual=" << post_outbound
         << ". Non-equal means the failed read partially overwrote the manager (C2.5 violated).";
 }
 
@@ -1454,9 +1467,8 @@ TEST(RefreshOnLogon, W8_NoHeap_RehydratePath) {
     for (int i = 0; i < kWarmup; ++i) {
         auto warm_fut = asio::co_spawn(
             fix.ioc,
-            fix.session->seqnum_mgr_test_access().hydrate(
-                static_cast<fixpp::session::seqnum_t>(5),
-                static_cast<fixpp::session::seqnum_t>(7)),
+            fix.session->seqnum_mgr_test_access().hydrate(static_cast<fixpp::session::seqnum_t>(5),
+                                                          static_cast<fixpp::session::seqnum_t>(7)),
             asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(fix.ioc, warm_fut, 500ms,
                                                         "W8_NoHeap/hydrate_warm")) {
@@ -1472,9 +1484,8 @@ TEST(RefreshOnLogon, W8_NoHeap_RehydratePath) {
 
     auto measured_fut = asio::co_spawn(
         fix.ioc,
-        fix.session->seqnum_mgr_test_access().hydrate(
-            static_cast<fixpp::session::seqnum_t>(5),
-            static_cast<fixpp::session::seqnum_t>(7)),
+        fix.session->seqnum_mgr_test_access().hydrate(static_cast<fixpp::session::seqnum_t>(5),
+                                                      static_cast<fixpp::session::seqnum_t>(7)),
         asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(fix.ioc, measured_fut, 500ms,
                                                     "W8_NoHeap/hydrate_measured")) {
@@ -1499,7 +1510,8 @@ TEST(RefreshOnLogon, W8_NoHeap_RehydratePath) {
     // The BINDING proof is the session_refresh_on_logon_mallocnesia ctest companion.
     EXPECT_EQ(heap_allocs, 0L)
         << "[const §VIII.5]: SeqnumManager::hydrate() (the re-hydrate apply step) must "
-           "not touch the global heap; heap_allocs=" << heap_allocs
+           "not touch the global heap; heap_allocs="
+        << heap_allocs
         << ". Run under LD_PRELOAD=tools/mallocnesia/libmallocnesia.so for the binding proof. "
            "[[feedback_tracking_pmr_resource_false_pass]]";
 }
@@ -1550,7 +1562,7 @@ TEST(ResetLatchLifecycle, StaleLatchOverwrittenOnReconnect_ByPeerRequestTrue) {
     cfg.executor_override = ioc.get_executor();
     cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     cfg.reset_on_logon = false;
-    cfg.reset_on_disconnect = true;   // sets any_reset_knob=true; does NOT reset at emit
+    cfg.reset_on_disconnect = true;  // sets any_reset_knob=true; does NOT reset at emit
     cfg.transport_factory_override = transport_factory;
     cfg.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", 19099};
     cfg.transport_send = [&capture](std::span<const std::byte> data) { capture(data); };
@@ -1603,7 +1615,8 @@ TEST(ResetLatchLifecycle, StaleLatchOverwrittenOnReconnect_ByPeerRequestTrue) {
         auto rr = fut.get();
         ASSERT_TRUE(rr.has_value())
             << "T005 vehicle: drive_reconnect() must succeed (mock transport). "
-               "If this fails, emit_initiator_logon_() was never reached and the witness is invalid.";
+               "If this fails, emit_initiator_logon_() was never reached and the witness is "
+               "invalid.";
     }
     ASSERT_EQ(session->state(), fixpp::session::fsm_state::LogonSent)
         << "T005 precondition: session in LogonSent after drive_reconnect()";
@@ -1614,7 +1627,8 @@ TEST(ResetLatchLifecycle, StaleLatchOverwrittenOnReconnect_ByPeerRequestTrue) {
     // With buggy conditional-set (latch=true stale): by_peer_request=false.
     {
         auto logon_with_reset = make_logon_reset("FIX.4.4", 2, "SRV", "CLI");
-        auto fut = asio::co_spawn(ioc, session->on_inbound_frame(logon_with_reset), asio::use_future);
+        auto fut =
+            asio::co_spawn(ioc, session->on_inbound_frame(logon_with_reset), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 500ms,
                                                         "ResetLatch/peer_logon_with_reset")) {
             fixpp::test_support::drain_or_report(ioc, "ResetLatch/peer_logon_with_reset");

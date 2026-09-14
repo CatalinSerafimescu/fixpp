@@ -72,7 +72,8 @@ std::vector<TagVal> collect_iter_fields(MessageView<access_mode::Iter>& mv,
     for (std::size_t steps = 0; steps < max_steps && !(it == en); ++steps) {
         auto const& f = *it;
         out.push_back(
-            {f.tag, std::string(reinterpret_cast<char const*>(f.value.data()), f.value.size())});
+            {.tag = f.tag,
+             .value = std::string(reinterpret_cast<char const*>(f.value.data()), f.value.size())});
         ++it;
     }
     return out;
@@ -178,7 +179,10 @@ TEST(ParserOverflow, ConformingFrame_AllFieldsYielded) {
     MessageView<access_mode::Iter> mv{*fv};
     auto fields = collect_iter_fields(mv);
 
-    bool found35 = false, found34 = false, found49 = false, found56 = false;
+    bool found35 = false;
+    bool found34 = false;
+    bool found49 = false;
+    bool found56 = false;
     for (auto const& f : fields) {
         if (f.tag == 35 && f.value == "A") {
             found35 = true;

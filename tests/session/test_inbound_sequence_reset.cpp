@@ -117,13 +117,15 @@ std::vector<std::byte> make_sequence_reset(std::string_view bs, std::uint32_t se
 
 struct OutboundCapture {
     std::vector<std::vector<std::byte>> frames;
-    void operator()(std::span<const std::byte> data) { frames.emplace_back(data.begin(), data.end()); }
+    void operator()(std::span<const std::byte> data) {
+        frames.emplace_back(data.begin(), data.end());
+    }
 };
 
 bool any_frame_contains(const OutboundCapture& cap, std::string_view needle) {
     for (const auto& f : cap.frames) {
         std::string wire(reinterpret_cast<const char*>(f.data()), f.size());
-        if (wire.find(std::string(needle)) != std::string::npos) return true;
+        if (wire.contains(std::string(needle))) return true;
     }
     return false;
 }
@@ -132,8 +134,7 @@ bool any_frame_contains(const OutboundCapture& cap, std::string_view needle) {
 bool any_reject_value_incorrect(const OutboundCapture& cap) {
     for (const auto& f : cap.frames) {
         std::string wire(reinterpret_cast<const char*>(f.data()), f.size());
-        if (wire.find("35=3\x01") != std::string::npos && wire.find("373=5\x01") != std::string::npos)
-            return true;
+        if (wire.contains("35=3\x01") && wire.contains("373=5\x01")) return true;
     }
     return false;
 }
@@ -181,7 +182,8 @@ protected:
         return fut.get();
     }
 
-    fixpp::core::expected_t<void> feed(fixpp::session::Session& s, std::span<const std::byte> frame) {
+    fixpp::core::expected_t<void> feed(fixpp::session::Session& s,
+                                       std::span<const std::byte> frame) {
         auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 100ms,
                                                         "InboundSequenceResetTest::feed")) {
@@ -230,7 +232,8 @@ TEST_F(InboundSequenceResetTest, ResetModeHardResetsAndBypassesOrdering) {
 
     // Reset whose OWN MsgSeqNum (50) is far above expected (2): Reset mode is
     // processed regardless of ordering — must NOT trigger ResendRequest/Disconnect.
-    auto sr = make_sequence_reset("FIX.4.2", 50, "TW", "ISLD", /*new_seqno=*/200, /*gap_fill=*/false);
+    auto sr =
+        make_sequence_reset("FIX.4.2", 50, "TW", "ISLD", /*new_seqno=*/200, /*gap_fill=*/false);
     (void)feed(s, sr);
 
     EXPECT_EQ(next_inbound(s), 200U)
@@ -254,7 +257,8 @@ TEST_F(InboundSequenceResetTest, NewSeqNoBelowExpectedRejects) {
 
     EXPECT_TRUE(any_reject_value_incorrect(capture))
         << "NewSeqNo(36) below expected must emit Reject(35=3, 373=5 ValueIsIncorrect).";
-    EXPECT_EQ(next_inbound(s), 2U) << "A below-expected NewSeqNo must NOT move the counter backward.";
+    EXPECT_EQ(next_inbound(s), 2U)
+        << "A below-expected NewSeqNo must NOT move the counter backward.";
 }
 
 // ── Arm 4: NewSeqNo == expected → no-op (no Reject, counter unchanged) ─────────

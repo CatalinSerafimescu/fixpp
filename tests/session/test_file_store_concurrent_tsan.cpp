@@ -114,7 +114,7 @@ protected:
         fixpp::store_test::remove_store_dir(dir_);
     }
 
-    FileStore::Config make_config(FileStorePolicy policy = {}) const {
+    [[nodiscard]] FileStore::Config make_config(FileStorePolicy policy = {}) const {
         FileStore::Config cfg;
         cfg.directory = dir_;
         cfg.sender_comp_id = "SENDER";
@@ -129,13 +129,11 @@ protected:
     std::shared_ptr<FileStore> open_store(FileStore::Config cfg) {
         auto fut = asio::co_spawn(
             strand_exec_,
-            [cfg = std::move(cfg)]() mutable
-                -> asio::awaitable<std::shared_ptr<FileStore>> {
+            [cfg = std::move(cfg)]() mutable -> asio::awaitable<std::shared_ptr<FileStore>> {
                 FileStoreFactory factory{cfg};
                 auto ms = factory.make("SENDER", "TARGET", nullptr, 1024 * 1024, nullptr);
                 if (!ms) co_return nullptr;
-                co_return std::shared_ptr<FileStore>(
-                    static_cast<FileStore*>(ms->release()));
+                co_return std::shared_ptr<FileStore>(static_cast<FileStore*>(ms->release()));
             },
             asio::use_future);
         if (fut.wait_for(std::chrono::seconds(10)) != std::future_status::ready) {
@@ -145,13 +143,11 @@ protected:
     }
 
     // Store one frame on strand_exec_. Returns true on success.
-    bool store_one(FileStore& store, seqnum_t seq,
-                   direction_t dir = direction_t::outbound) {
+    bool store_one(FileStore& store, seqnum_t seq, direction_t dir = direction_t::outbound) {
         auto frame = make_test_frame(seq, dir);
         auto fut = asio::co_spawn(
             strand_exec_,
-            [&store, seq, dir, frame = std::move(frame)]() mutable
-                -> asio::awaitable<bool> {
+            [&store, seq, dir, frame = std::move(frame)]() mutable -> asio::awaitable<bool> {
                 auto r = co_await store.store(seq, std::span<const std::byte>(frame), dir);
                 co_return r.has_value();
             },
@@ -192,7 +188,7 @@ public:
         co_return visit_result::cont;
     }
 
-    fixpp::core::error abort_error() const noexcept override {
+    [[nodiscard]] fixpp::core::error abort_error() const noexcept override {
         return fixpp::core::error::store_io_failure;
     }
 
@@ -230,8 +226,7 @@ TEST_F(FileStoreConcurrentTsanTest, MidWalkReset_GenerationGuard_FailsClean) {
     // Run retrieve() [1..2] on the strand.
     auto fut = asio::co_spawn(
         strand_exec_,
-        [&store, &visitor]() mutable
-            -> asio::awaitable<fixpp::core::expected_t<void>> {
+        [&store, &visitor]() mutable -> asio::awaitable<fixpp::core::expected_t<void>> {
             co_return co_await store->retrieve(1, 2, direction_t::outbound, visitor);
         },
         asio::use_future);
@@ -245,8 +240,7 @@ TEST_F(FileStoreConcurrentTsanTest, MidWalkReset_GenerationGuard_FailsClean) {
 
     // The walk MUST fail with store_io_failure (generation re-check).
     // (data-model §5: reset-race → store_io_failure, NOT store_seqnum_gap)
-    ASSERT_FALSE(result.has_value())
-        << "retrieve() should have failed when reset() ran mid-walk";
+    ASSERT_FALSE(result.has_value()) << "retrieve() should have failed when reset() ran mid-walk";
     EXPECT_EQ(result.error(), fixpp::core::error::store_io_failure)
         << "Expected store_io_failure (56) from generation re-check, got: "
         << static_cast<int>(result.error());
@@ -262,9 +256,9 @@ TEST_F(FileStoreConcurrentTsanTest, MidWalkReset_GenerationGuard_FailsClean) {
     // pread_count == 2 would mean the guard is absent and the stale pread
     // failed at EOF — the non-discriminating pre-T015 behaviour.
     int pread_count = fixpp::session::read_and_reset_retrieve_pread_count();
-    EXPECT_EQ(pread_count, 1)
-        << "Expected exactly 1 pread (guard fired before 2nd read); got "
-        << pread_count << ". Pre-T015 behaviour: stale pread fails at EOF (count=2).";
+    EXPECT_EQ(pread_count, 1) << "Expected exactly 1 pread (guard fired before 2nd read); got "
+                              << pread_count
+                              << ". Pre-T015 behaviour: stale pread fails at EOF (count=2).";
 }
 
 // ── Cell 2: ResetRace_vs_LogicalGap_Discriminating ───────────────────────────
@@ -289,8 +283,7 @@ TEST_F(FileStoreConcurrentTsanTest, ResetRace_vs_LogicalGap_Discriminating) {
 
         auto fut = asio::co_spawn(
             strand_exec_,
-            [&store, &visitor]() mutable
-                -> asio::awaitable<fixpp::core::expected_t<void>> {
+            [&store, &visitor]() mutable -> asio::awaitable<fixpp::core::expected_t<void>> {
                 co_return co_await store->retrieve(1, 2, direction_t::outbound, visitor);
             },
             asio::use_future);
@@ -326,7 +319,7 @@ TEST_F(FileStoreConcurrentTsanTest, ResetRace_vs_LogicalGap_Discriminating) {
                 ++count;
                 co_return visit_result::cont;
             }
-            fixpp::core::error abort_error() const noexcept override {
+            [[nodiscard]] fixpp::core::error abort_error() const noexcept override {
                 return fixpp::core::error::store_io_failure;
             }
             int count = 0;
@@ -334,8 +327,7 @@ TEST_F(FileStoreConcurrentTsanTest, ResetRace_vs_LogicalGap_Discriminating) {
 
         auto fut = asio::co_spawn(
             strand_exec_,
-            [&store2, &gap_visitor]() mutable
-                -> asio::awaitable<fixpp::core::expected_t<void>> {
+            [&store2, &gap_visitor]() mutable -> asio::awaitable<fixpp::core::expected_t<void>> {
                 // Request [1..2] but only seq 1 was stored — FR-017 gap.
                 co_return co_await store2->retrieve(1, 2, direction_t::outbound, gap_visitor);
             },
@@ -349,7 +341,7 @@ TEST_F(FileStoreConcurrentTsanTest, ResetRace_vs_LogicalGap_Discriminating) {
             << "Logical gap must return store_seqnum_gap (57), got: "
             << static_cast<int>(result.error());
 
-        store2.reset();
+        store2 = nullptr;
         fixpp::store_test::remove_store_dir(dir2);
     }
 
@@ -397,10 +389,9 @@ TEST_F(FileStoreConcurrentTsanTest, ConcurrentStoreRetrieveReset_TSanClean) {
         auto frame = make_test_frame(seq, direction_t::outbound);
         auto fut = asio::co_spawn(
             strand_exec_,
-            [&store, seq, frame = std::move(frame)]() mutable
-                -> asio::awaitable<bool> {
-                auto r = co_await store->store(
-                    seq, std::span<const std::byte>(frame), direction_t::outbound);
+            [&store, seq, frame = std::move(frame)]() mutable -> asio::awaitable<bool> {
+                auto r = co_await store->store(seq, std::span<const std::byte>(frame),
+                                               direction_t::outbound);
                 co_return r.has_value();
             },
             asio::use_future);
@@ -415,7 +406,7 @@ TEST_F(FileStoreConcurrentTsanTest, ConcurrentStoreRetrieveReset_TSanClean) {
             ++frames_seen;
             co_return visit_result::cont;
         }
-        fixpp::core::error abort_error() const noexcept override {
+        [[nodiscard]] fixpp::core::error abort_error() const noexcept override {
             return fixpp::core::error::store_io_failure;
         }
         std::atomic<int> frames_seen{0};
@@ -423,8 +414,7 @@ TEST_F(FileStoreConcurrentTsanTest, ConcurrentStoreRetrieveReset_TSanClean) {
 
     auto retr_fut = asio::co_spawn(
         strand_exec_,
-        [&store, &retr_visitor]() mutable
-            -> asio::awaitable<fixpp::core::expected_t<void>> {
+        [&store, &retr_visitor]() mutable -> asio::awaitable<fixpp::core::expected_t<void>> {
             co_return co_await store->retrieve(1, 3, direction_t::outbound, retr_visitor);
         },
         asio::use_future);
@@ -433,7 +423,7 @@ TEST_F(FileStoreConcurrentTsanTest, ConcurrentStoreRetrieveReset_TSanClean) {
     auto reset_fut = asio::co_spawn(
         strand_exec_,
         [&store]() mutable -> asio::awaitable<bool> {
-            auto r = co_await store->reset();
+            auto r = co_await (*store).reset();
             co_return r.has_value();
         },
         asio::use_future);

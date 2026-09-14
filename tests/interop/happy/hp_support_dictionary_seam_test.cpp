@@ -18,7 +18,6 @@
 //       compile-def fallback — proven by pointing it at a byte-modified copy
 //       and checking the digest tracks the copy, not the original.
 #include <gtest/gtest.h>
-
 #include <openssl/evp.h>
 
 #include <cstdio>
@@ -43,8 +42,7 @@ using fixpp::interop::hp::ProductionDictionary;
 // under test sees the change either way. The same split already exists in
 // `tests/session/test_file_store_crash_survival.cpp`, which uses the wide
 // `::_wputenv_s` for the same reason -- this is the house idiom, not a new one.
-inline void test_set_env(char const* name, char const* value)
-{
+inline void test_set_env(char const* name, char const* value) {
 #ifdef _WIN32
     ::_putenv_s(name, value);
 #else
@@ -53,8 +51,7 @@ inline void test_set_env(char const* name, char const* value)
 #endif
 }
 
-inline void test_unset_env(char const* name)
-{
+inline void test_unset_env(char const* name) {
 #ifdef _WIN32
     ::_putenv_s(name, "");  // empty value == delete, per the CRT contract
 #else
@@ -149,7 +146,7 @@ TEST(HpSupportDictionarySeam, DigestMatchesIndependentSha256) {
     std::string const path = fixpp::interop::hp::production_fix44_dict_path();
     std::string const expected = independent_sha256_hex(path);
 
-    ASSERT_EQ(prod.dictionary_digest.size(), 64u);
+    ASSERT_EQ(prod.dictionary_digest.size(), 64U);
     EXPECT_EQ(prod.dictionary_digest, expected);
 }
 

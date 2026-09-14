@@ -140,6 +140,8 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_include_directories(tls_cipher_banned_negative_compile PRIVATE
         "${CMAKE_SOURCE_DIR}/include")
     target_compile_features(tls_cipher_banned_negative_compile PRIVATE cxx_std_23)
+    set_property(TARGET tls_cipher_banned_negative_compile PROPERTY
+        FIXPP_WERROR_EXEMPT "negative-compile probe: its passing state is a failed build, so a blanket -Werror would let any stray warning keep it green (#417)")
     add_test(
         NAME tls_cipher_allow_list_negative_compile
         COMMAND cmake --build "${CMAKE_BINARY_DIR}" --target tls_cipher_banned_negative_compile
@@ -163,6 +165,8 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_features(tls_security_profile_deprecated_negative PRIVATE cxx_std_23)
     target_compile_options(tls_security_profile_deprecated_negative PRIVATE
         -Wdeprecated-declarations -Werror=deprecated-declarations)
+    set_property(TARGET tls_security_profile_deprecated_negative PROPERTY
+        FIXPP_WERROR_EXEMPT "negative-compile probe: its passing state is a failed build, so a blanket -Werror would let any stray warning keep it green (#417)")
     add_test(
         NAME tls_security_profile_deprecated_compile
         COMMAND cmake --build "${CMAKE_BINARY_DIR}" --target tls_security_profile_deprecated_negative

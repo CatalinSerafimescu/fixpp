@@ -41,13 +41,24 @@
 //   * Engine::stop() is co_awaited (drains all in-flight callbacks) BEFORE the
 //     Engine / store are destroyed.
 
+#include <hdr/hdr_histogram.h>
+
+#include <algorithm>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
 #include <asio/ip/tcp.hpp>
 #include <asio/post.hpp>
 #include <asio/use_future.hpp>
-
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <csignal>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <deque>
+#include <filesystem>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/system_clock_source.hpp>
 #include <fixpp/session/application.hpp>
@@ -62,21 +73,6 @@
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
 #include <fixpp/wire/parser.hpp>
-
-#include "support/minimal_dictionary.hpp"  // tests/support/ (via tests/ include dir)
-
-#include <hdr/hdr_histogram.h>
-
-#include <algorithm>
-#include <atomic>
-#include <chrono>
-#include <condition_variable>
-#include <csignal>
-#include <deque>
-#include <cstdint>
-#include <cstdio>
-#include <cstdlib>
-#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -88,6 +84,8 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+#include "support/minimal_dictionary.hpp"  // tests/support/ (via tests/ include dir)
 
 namespace {
 
@@ -116,29 +114,28 @@ struct Options {
     std::string role = "loopback";
     std::string host = "127.0.0.1";  // initiator dials this; acceptor binds 127.0.0.1
     int port = 0;                    // explicit shared port (required for acceptor/initiator)
-    int warmup_messages = 0;    // 0 = unset → workload default resolved in main()
-    int measured_messages = 0;  // 0 = unset → workload default resolved in main()
-    std::filesystem::path out;  // results directory (created if absent)
+    int warmup_messages = 0;         // 0 = unset → workload default resolved in main()
+    int measured_messages = 0;       // 0 = unset → workload default resolved in main()
+    std::filesystem::path out;       // results directory (created if absent)
 };
 
 // Single source of truth for the transport branch.
 bool want_tls(const Options& o) { return o.transport == "tls"; }
 
 [[noreturn]] void usage(const char* argv0, int code) {
-    std::cerr
-        << "usage: " << argv0 << " --workload <id> --out <dir>\n"
-        << "           [--transport plain|tls] [--warmup-msgs N] [--measured-msgs N]\n"
-        << "           [--begin-string FIX.4.4]\n"
-        << "           [--role loopback|acceptor|initiator] [--host IP] [--port N]\n"
-        << "  --transport plain (default) = 043 insecure_plain_tcp (apples-to-apples\n"
-        << "    with QF tls:off rows); tls = mtls_ca (TLS-overhead row). TLS needs\n"
-        << "    FIXPP_TLS_FIXTURE_DIR (compiled-in default = tests/tls/fixtures);\n"
-        << "    plaintext needs no certs.\n"
-        << "  --role loopback (default) = self-paired one-process rig. --role\n"
-        << "    acceptor/initiator = 2-process rig (separate processes); both then\n"
-        << "    REQUIRE --port (the shared loopback port); the initiator dials --host\n"
-        << "    (default 127.0.0.1). Acceptor runs until SIGTERM, printing READY once\n"
-        << "    started; initiator runs the workload, writes the bundle, exits.\n";
+    std::cerr << "usage: " << argv0 << " --workload <id> --out <dir>\n"
+              << "           [--transport plain|tls] [--warmup-msgs N] [--measured-msgs N]\n"
+              << "           [--begin-string FIX.4.4]\n"
+              << "           [--role loopback|acceptor|initiator] [--host IP] [--port N]\n"
+              << "  --transport plain (default) = 043 insecure_plain_tcp (apples-to-apples\n"
+              << "    with QF tls:off rows); tls = mtls_ca (TLS-overhead row). TLS needs\n"
+              << "    FIXPP_TLS_FIXTURE_DIR (compiled-in default = tests/tls/fixtures);\n"
+              << "    plaintext needs no certs.\n"
+              << "  --role loopback (default) = self-paired one-process rig. --role\n"
+              << "    acceptor/initiator = 2-process rig (separate processes); both then\n"
+              << "    REQUIRE --port (the shared loopback port); the initiator dials --host\n"
+              << "    (default 127.0.0.1). Acceptor runs until SIGTERM, printing READY once\n"
+              << "    started; initiator runs the workload, writes the bundle, exits.\n";
     std::exit(code);
 }
 
@@ -150,17 +147,30 @@ Options parse_args(int argc, char** argv) {
             if (i + 1 >= argc) usage(argv[0], 2);
             return argv[++i];
         };
-        if (a == "--workload") o.workload = next();
-        else if (a == "--transport") o.transport = next();
-        else if (a == "--out") o.out = next();
-        else if (a == "--warmup-msgs") o.warmup_messages = std::stoi(next());
-        else if (a == "--measured-msgs") o.measured_messages = std::stoi(next());
-        else if (a == "--begin-string") o.begin_string = next();
-        else if (a == "--role") o.role = next();
-        else if (a == "--host") o.host = next();
-        else if (a == "--port") o.port = std::stoi(next());
-        else if (a == "-h" || a == "--help") usage(argv[0], 0);
-        else { std::cerr << "unknown arg: " << a << "\n"; usage(argv[0], 2); }
+        if (a == "--workload")
+            o.workload = next();
+        else if (a == "--transport")
+            o.transport = next();
+        else if (a == "--out")
+            o.out = next();
+        else if (a == "--warmup-msgs")
+            o.warmup_messages = std::stoi(next());
+        else if (a == "--measured-msgs")
+            o.measured_messages = std::stoi(next());
+        else if (a == "--begin-string")
+            o.begin_string = next();
+        else if (a == "--role")
+            o.role = next();
+        else if (a == "--host")
+            o.host = next();
+        else if (a == "--port")
+            o.port = std::stoi(next());
+        else if (a == "-h" || a == "--help")
+            usage(argv[0], 0);
+        else {
+            std::cerr << "unknown arg: " << a << "\n";
+            usage(argv[0], 2);
+        }
     }
     // The acceptor process needs no --out (it owns no result bundle); the
     // initiator and the self-paired loopback both do.
@@ -210,8 +220,8 @@ std::shared_ptr<fixpp::transport::TransportFactory> make_tls_factory(const char*
     cs_cfg.leaf_path = std::string(dir) + "/leaf_rsa2048.pem";
     cs_cfg.private_key_path = std::string(dir) + "/leaf_rsa2048.key";
     cs_cfg.ca_bundle_path = std::string(dir) + "/ca.pem";
-    auto cs_r =
-        fixpp::tls::file_cert_source::make_file_cert_source(cs_cfg, std::pmr::new_delete_resource());
+    auto cs_r = fixpp::tls::file_cert_source::make_file_cert_source(
+        cs_cfg, std::pmr::new_delete_resource());
     if (!cs_r.has_value()) return nullptr;
     fixpp::tls::SslCtxConfig ssl;
     ssl.profile = fixpp::tls::SecurityProfile::mtls_ca;
@@ -231,20 +241,20 @@ std::shared_ptr<fixpp::transport::TransportFactory> make_tls_factory(const char*
 // the rest of the file keeps deprecation warnings active. Idiom mirrors the 043
 // tests' file-wide pragma (test_session_plaintext_roundtrip.cpp), portable to gcc.
 #if defined(__clang__)
-#  pragma clang diagnostic push
-#  pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #elif defined(__GNUC__)
-#  pragma GCC diagnostic push
-#  pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
 fixpp::session::SecurityProfile plain_profile() {
     return fixpp::session::SecurityProfile{
         fixpp::session::SecurityProfile::kind::insecure_plain_tcp};
 }
 #if defined(__clang__)
-#  pragma clang diagnostic pop
+#pragma clang diagnostic pop
 #elif defined(__GNUC__)
-#  pragma GCC diagnostic pop
+#pragma GCC diagnostic pop
 #endif
 
 // Build a raw app-message body (the session frames it: prepends 8=/9=/34=/49=/
@@ -269,7 +279,9 @@ std::string_view field_sv(const MessageView<access_mode::Index>& msg, std::uint1
 // wl-07 can carry a per-order correlation id (bench-nos-burst-<seq>); the depth-1
 // wl-04 path keeps the fixed "ORD-PERF".
 std::vector<std::byte> make_nos_payload(std::string_view clordid = "ORD-PERF") {
-    std::string s = "35=D\x01" "11=";
+    std::string s =
+        "35=D\x01"
+        "11=";
     s += clordid;
     s += "\x01"
          "54=1\x01"
@@ -308,7 +320,10 @@ std::vector<std::byte> make_nos_grouped_payload() {
 // parameterized: wl-07 echoes the inbound NOS's ClOrdID so the initiator can
 // correlate each ER to its order; depth-1 keeps the fixed "ORD-PERF".
 std::vector<std::byte> make_er_payload(std::string_view clordid = "ORD-PERF") {
-    std::string s = "35=8\x01" "37=EXEC-PERF\x01" "11=";
+    std::string s =
+        "35=8\x01"
+        "37=EXEC-PERF\x01"
+        "11=";
     s += clordid;
     s += "\x01"
          "17=E1\x01"
@@ -345,8 +360,8 @@ struct PerfApp : public Application {
     // accidental unfairness benchmark-readiness.md exists to prevent).
     std::mutex mtx;
     std::condition_variable cv;
-    std::uint64_t er_received = 0;     // guarded by mtx
-    long long last_er_recv_ns = 0;     // guarded by mtx; steady_clock ns of last ER
+    std::uint64_t er_received = 0;  // guarded by mtx
+    long long last_er_recv_ns = 0;  // guarded by mtx; steady_clock ns of last ER
 
     // Idle-liveness (wl-03): inter-heartbeat intervals observed on the INITIATOR
     // leg. Same cv-signalled discipline as the ER path (mirrors the QFcpp
@@ -360,8 +375,8 @@ struct PerfApp : public Application {
     // sent via engine.send() must round-trip as a peer auto-reply Heartbeat(35=0)
     // echoing 112. When spike_tr_id is set, the initiator's fromAdmin flips
     // spike_seen on the matching Heartbeat. Guarded by hb_mtx (reuses hb_cv).
-    std::string spike_tr_id;             // guarded by hb_mtx; empty = inactive
-    bool spike_seen = false;             // guarded by hb_mtx
+    std::string spike_tr_id;  // guarded by hb_mtx; empty = inactive
+    bool spike_seen = false;  // guarded by hb_mtx
 
     // wl-07 burst (depth>1): correlation_id → RTT µs (mirrors QFcpp responses_ /
     // sent_). When burst_active, fromApp(8)/fromAdmin(0) parse the correlation tag
@@ -527,13 +542,13 @@ void write_run_config_yaml(const std::filesystem::path& dir, const Options& o,
       << "engine: " << o.engine << "\n"
       << "begin_string: " << o.begin_string << "\n"
       << "persistence_mode: memory-store\n"
-      << "tls: " << (tls ? "on             # mtls_ca; vs QF tls:off (TLS-overhead row)"
-                         : "off            # plaintext both sides; matches QF tls:off rows")
+      << "tls: "
+      << (tls ? "on             # mtls_ca; vs QF tls:off (TLS-overhead row)"
+              : "off            # plaintext both sides; matches QF tls:off rows")
       << "\n"
       << "topology: homogeneous-self-pairing (fixpp-init <-> fixpp-acc, loopback)\n"
       << "security_profile: " << (tls ? "mtls_ca" : "insecure_plain_tcp") << "\n"
-      << mode_lines
-      << "warmup_messages: " << o.warmup_messages << "\n"
+      << mode_lines << "warmup_messages: " << o.warmup_messages << "\n"
       << "measured_messages: " << o.measured_messages << "\n"
       << "host_class: WSL2 (non-isolated, indicative only)\n"
       << "comparison_caveat: >\n";
@@ -551,15 +566,19 @@ void write_run_config_yaml(const std::filesystem::path& dir, const Options& o,
 // Transport-dependent stdout.log header fragments (keep both run paths in sync).
 const char* topology_line(const Options& o) {
     return want_tls(o)
-        ? "topology: homogeneous self-pairing (fixpp-init <-> fixpp-acc), loopback mTLS\n"
-        : "topology: homogeneous self-pairing (fixpp-init <-> fixpp-acc), loopback plaintext\n";
+               ? "topology: homogeneous self-pairing (fixpp-init <-> fixpp-acc), loopback mTLS\n"
+               : "topology: homogeneous self-pairing (fixpp-init <-> fixpp-acc), loopback "
+                 "plaintext\n";
 }
 const char* indicative_line(const Options& o) {
-    return want_tls(o)
-        ? "INDICATIVE: fixpp over mTLS vs QF tls:off plaintext (TLS-overhead row); WSL2 non-isolated.\n"
-        : "PLAINTEXT both sides — apples-to-apples vs QF tls:off; WSL2 non-isolated (indicative absolute).\n";
+    return want_tls(o) ? "INDICATIVE: fixpp over mTLS vs QF tls:off plaintext (TLS-overhead row); "
+                         "WSL2 non-isolated.\n"
+                       : "PLAINTEXT both sides — apples-to-apples vs QF tls:off; WSL2 non-isolated "
+                         "(indicative absolute).\n";
 }
-const char* sec_profile_str(const Options& o) { return want_tls(o) ? "mtls_ca" : "insecure_plain_tcp"; }
+const char* sec_profile_str(const Options& o) {
+    return want_tls(o) ? "mtls_ca" : "insecure_plain_tcp";
+}
 
 // Write the HdrHistogram percentile log (standard .hgrm; readable by hdr tools).
 void write_hgrm(const std::filesystem::path& dir, hdr_histogram* hist) {
@@ -622,8 +641,8 @@ struct LoopbackHarness {
             c.role = role;
             c.executor_override = ioc.get_executor();
             if (tls) {
-                c.security_profile = fixpp::session::SecurityProfile{
-                    fixpp::session::SecurityProfile::kind::mtls_ca};
+                c.security_profile =
+                    fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::mtls_ca};
                 c.compid_authorization_policy.add_binding("fixpp-leaf-rsa2048", peer);
                 c.transport_factory_override = factory;
             } else {
@@ -640,10 +659,10 @@ struct LoopbackHarness {
             c.transport_send = [](std::span<const std::byte>) {};
             return c;
         };
-        auto acc_cfg = make_cfg("FIXPP_ACC", "FIXPP_INIT",
-                                fixpp::session::session_role::acceptor, "FIXPP_INIT");
-        auto ini_cfg = make_cfg("FIXPP_INIT", "FIXPP_ACC",
-                                fixpp::session::session_role::initiator, "FIXPP_ACC");
+        auto acc_cfg = make_cfg("FIXPP_ACC", "FIXPP_INIT", fixpp::session::session_role::acceptor,
+                                "FIXPP_INIT");
+        auto ini_cfg = make_cfg("FIXPP_INIT", "FIXPP_ACC", fixpp::session::session_role::initiator,
+                                "FIXPP_ACC");
         acc_id = SessionId::from_config(acc_cfg);
         ini_id = SessionId::from_config(ini_cfg);
 
@@ -652,10 +671,9 @@ struct LoopbackHarness {
         app->initiator_id = ini_id;
         app->exec = ioc.get_executor();
 
-        const bool reg_start_ok =
-            engine->register_session(std::move(acc_cfg)).has_value() &&
-            engine->register_session(std::move(ini_cfg)).has_value() &&
-            engine->start().has_value();
+        const bool reg_start_ok = engine->register_session(std::move(acc_cfg)).has_value() &&
+                                  engine->register_session(std::move(ini_cfg)).has_value() &&
+                                  engine->start().has_value();
 
         if (reg_start_ok) {
             // Establishment — single-threaded drive (NO worker threads yet; an
@@ -713,8 +731,8 @@ struct LoopbackHarness {
             c.role = srole;
             c.executor_override = ioc.get_executor();
             if (tls) {
-                c.security_profile = fixpp::session::SecurityProfile{
-                    fixpp::session::SecurityProfile::kind::mtls_ca};
+                c.security_profile =
+                    fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::mtls_ca};
                 c.compid_authorization_policy.add_binding("fixpp-leaf-rsa2048", peer);
                 c.transport_factory_override = factory;
             } else {
@@ -736,9 +754,9 @@ struct LoopbackHarness {
         if (is_acc) {
             // Acceptor binds 127.0.0.1:port (reconnect_endpoint is repurposed as the
             // bind endpoint for an acceptor session — same as the self-paired path).
-            auto acc_cfg = make_cfg("FIXPP_ACC", "FIXPP_INIT",
-                                    fixpp::session::session_role::acceptor, "FIXPP_INIT",
-                                    "127.0.0.1");
+            auto acc_cfg =
+                make_cfg("FIXPP_ACC", "FIXPP_INIT", fixpp::session::session_role::acceptor,
+                         "FIXPP_INIT", "127.0.0.1");
             acc_id = SessionId::from_config(acc_cfg);
             app->acceptor_id = acc_id;
             // Route each ER reply to the receiving acceptor leg (`id`) — the
@@ -752,8 +770,7 @@ struct LoopbackHarness {
             reg_ok = engine->register_session(std::move(acc_cfg)).has_value();
         } else {
             auto ini_cfg = make_cfg("FIXPP_INIT", "FIXPP_ACC",
-                                    fixpp::session::session_role::initiator, "FIXPP_ACC",
-                                    o.host);
+                                    fixpp::session::session_role::initiator, "FIXPP_ACC", o.host);
             ini_id = SessionId::from_config(ini_cfg);
             app->initiator_id = ini_id;
             reg_ok = engine->register_session(std::move(ini_cfg)).has_value();
@@ -810,8 +827,8 @@ struct LoopbackHarness {
             c.role = role;
             c.executor_override = ioc.get_executor();
             if (tls) {
-                c.security_profile = fixpp::session::SecurityProfile{
-                    fixpp::session::SecurityProfile::kind::mtls_ca};
+                c.security_profile =
+                    fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::mtls_ca};
                 c.compid_authorization_policy.add_binding("fixpp-leaf-rsa2048", peer);
                 c.transport_factory_override = factory;
             } else {
@@ -842,7 +859,7 @@ struct LoopbackHarness {
         app->exec = ioc.get_executor();
 
         if (reg_ok && engine->start().has_value()) {
-            const int want = 2 * n_pairs;  // 2N logons (acc + ini per pair)
+            const int want = 2 * n_pairs;        // 2N logons (acc + ini per pair)
             auto deadline = Clock::now() + 30s;  // 64-session plaintext bring-up
             while (app->logon_count.load(std::memory_order_acquire) < want &&
                    Clock::now() < deadline) {
@@ -903,8 +920,8 @@ int run_acceptor(const Options& o) {
     // The launcher gates true readiness with an `ss` LISTEN probe (the listener
     // binds asynchronously inside the start()-spawned accept-loop coroutine); this
     // line just confirms register+start succeeded and is a human breadcrumb.
-    std::cout << "READY role=acceptor port=" << o.port << " transport=" << o.transport
-              << "\n" << std::flush;
+    std::cout << "READY role=acceptor port=" << o.port << " transport=" << o.transport << "\n"
+              << std::flush;
     while (g_acc_stop == 0) std::this_thread::sleep_for(20ms);
     h.teardown();
     std::cout << "[fixpp-perf] acceptor stopped (port " << o.port << ")\n";
@@ -935,8 +952,8 @@ int run_closed_loop(const Options& o) {
         return 1;
     }
 
-    const auto nos =
-        (o.workload == "wl-05-nos-er-medium-groups") ? make_nos_grouped_payload() : make_nos_payload();
+    const auto nos = (o.workload == "wl-05-nos-er-medium-groups") ? make_nos_grouped_payload()
+                                                                  : make_nos_payload();
 
     hdr_histogram* hist = nullptr;
     hdr_init(1, 60'000'000, 3, &hist);  // 1 µs .. 60 s, 3 sig figs
@@ -1001,19 +1018,17 @@ int run_closed_loop(const Options& o) {
     std::filesystem::create_directories(o.out);
     write_summary_json(o.out, o, r);
     write_run_config_yaml(o.out, o,
-        "outstanding_depth: 1\n"
-        "mps_note: depth-1 closed loop, so messages_per_second ~= 1/RTT "
-        "(response-rate bounded, not peak throughput); cv-signalled wait, "
-        "symmetric with the QFcpp runner\n");
+                          "outstanding_depth: 1\n"
+                          "mps_note: depth-1 closed loop, so messages_per_second ~= 1/RTT "
+                          "(response-rate bounded, not peak throughput); cv-signalled wait, "
+                          "symmetric with the QFcpp runner\n");
     write_hgrm(o.out, hist);
 
     std::ofstream log(o.out / "stdout.log");
     log << "fixpp perf driver — " << o.workload << " (engine=" << o.engine << ")\n"
-        << topology_line(o)
-        << "persistence_mode=memory-store\n"
-        << indicative_line(o)
-        << "begin_string=" << o.begin_string << " security_profile=" << sec_profile_str(o)
-        << " depth=1\n"
+        << topology_line(o) << "persistence_mode=memory-store\n"
+        << indicative_line(o) << "begin_string=" << o.begin_string
+        << " security_profile=" << sec_profile_str(o) << " depth=1\n"
         << "warmup_messages=" << o.warmup_messages << " (" << warmup_seconds << " s)\n"
         << "measured_messages=" << recorded << " (" << run_seconds << " s)\n"
         << "messages_per_second=" << r.messages_per_second << "\n"
@@ -1110,7 +1125,8 @@ int run_idle_heartbeat(const Options& o) {
 
     std::filesystem::create_directories(o.out);
     write_summary_json(o.out, o, r);
-    write_run_config_yaml(o.out, o,
+    write_run_config_yaml(
+        o.out, o,
         "heartbeat_interval_s: 1\n"
         "mps_note: idle-liveness; latency = inter-heartbeat interval (initiator "
         "side); messages_per_second = observed heartbeat cadence (~1/HeartBtInt)\n");
@@ -1118,11 +1134,9 @@ int run_idle_heartbeat(const Options& o) {
 
     std::ofstream log(o.out / "stdout.log");
     log << "fixpp perf driver — " << o.workload << " (engine=" << o.engine << ")\n"
-        << topology_line(o)
-        << "persistence_mode=memory-store\n"
-        << indicative_line(o)
-        << "begin_string=" << o.begin_string << " security_profile=" << sec_profile_str(o)
-        << " heartbeat_interval_s=1\n"
+        << topology_line(o) << "persistence_mode=memory-store\n"
+        << indicative_line(o) << "begin_string=" << o.begin_string
+        << " security_profile=" << sec_profile_str(o) << " heartbeat_interval_s=1\n"
         << "warmup_heartbeats=" << o.warmup_messages << " (" << warmup_seconds << " s)\n"
         << "measured_heartbeats=" << recorded << " (" << run_seconds << " s)\n"
         << "heartbeat_cadence_per_s=" << r.messages_per_second << "\n"
@@ -1183,7 +1197,8 @@ int run_logon_logout(const Options& o) {
             return 1;
         }
     }
-    const double warmup_seconds = std::chrono::duration<double>(Clock::now() - warmup_start).count();
+    const double warmup_seconds =
+        std::chrono::duration<double>(Clock::now() - warmup_start).count();
 
     int recorded = 0;
     const auto run_start = Clock::now();
@@ -1208,7 +1223,8 @@ int run_logon_logout(const Options& o) {
 
     std::filesystem::create_directories(o.out);
     write_summary_json(o.out, o, r);
-    write_run_config_yaml(o.out, o,
+    write_run_config_yaml(
+        o.out, o,
         "cycle: construct+connect+logon (establishment); teardown untimed\n"
         "establishment_poll_quantum_us: 200 (single-threaded drive; fixpp wl-01 is "
         "~200us-granular vs QFcpp cv-precise — INDICATIVE establishment-rate)\n"
@@ -1217,10 +1233,9 @@ int run_logon_logout(const Options& o) {
 
     std::ofstream log(o.out / "stdout.log");
     log << "fixpp perf driver — " << o.workload << " (engine=" << o.engine << ")\n"
-        << topology_line(o)
-        << "persistence_mode=memory-store\n"
-        << indicative_line(o)
-        << "begin_string=" << o.begin_string << " security_profile=" << sec_profile_str(o)
+        << topology_line(o) << "persistence_mode=memory-store\n"
+        << indicative_line(o) << "begin_string=" << o.begin_string
+        << " security_profile=" << sec_profile_str(o)
         << " cycle=logon/logout establishment_poll_us=200\n"
         << "warmup_cycles=" << o.warmup_messages << " (" << warmup_seconds << " s)\n"
         << "measured_cycles=" << recorded << " (" << run_seconds << " s)\n"
@@ -1230,8 +1245,8 @@ int run_logon_logout(const Options& o) {
         << "peak_rss_mb=" << r.peak_rss_mb << "\n";
 
     std::cout << "[fixpp-perf] " << o.workload << " cycles/s=" << r.messages_per_second
-              << " establishment_us p50=" << r.p50_us << " p99=" << r.p99_us << " p999="
-              << r.p999_us << " recorded=" << recorded << " → " << o.out << "\n";
+              << " establishment_us p50=" << r.p50_us << " p99=" << r.p99_us
+              << " p999=" << r.p999_us << " recorded=" << recorded << " → " << o.out << "\n";
 
     hdr_close(hist);
     return 0;
@@ -1282,8 +1297,7 @@ int run_burst(const Options& o) {
     for (auto& p : per_depth) hdr_init(1, 60'000'000, 3, &p);
 
     auto now_ns = [] {
-        return std::chrono::duration_cast<std::chrono::nanoseconds>(
-                   Clock::now().time_since_epoch())
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch())
             .count();
     };
 
@@ -1294,8 +1308,11 @@ int run_burst(const Options& o) {
         std::vector<std::byte> body;
         if (seq % 10 == 0) {  // 10% admin: TestRequest → Heartbeat echoing 112
             id = "bench-admin-" + std::to_string(seq);
-            body = to_bytes("35=1\x01" "112=" + id + "\x01");
-        } else {              // 90% app: NewOrderSingle → ER echoing 11
+            body = to_bytes(
+                "35=1\x01"
+                "112=" +
+                id + "\x01");
+        } else {  // 90% app: NewOrderSingle → ER echoing 11
             id = "bench-nos-burst-" + std::to_string(seq);
             body = make_nos_payload(id);
         }
@@ -1306,8 +1323,7 @@ int run_burst(const Options& o) {
             auto& stored = (h.app->burst_bodies[id] = std::move(body));  // keepalive
             body_span = std::span<const std::byte>(stored);
         }
-        asio::co_spawn(h.ioc.get_executor(),
-                       h.engine->send(h.ini_id, body_span), asio::detached);
+        asio::co_spawn(h.ioc.get_executor(), h.engine->send(h.ini_id, body_span), asio::detached);
         return id;
     };
 
@@ -1365,14 +1381,20 @@ int run_burst(const Options& o) {
             if (static_cast<int>(pending.size()) >= depth) {
                 const double rtt = wait_for(pending.front());
                 pending.pop_front();
-                if (rtt < 0) { stalled = true; break; }
+                if (rtt < 0) {
+                    stalled = true;
+                    break;
+                }
                 record(rtt);
             }
         }
         while (!pending.empty() && !stalled) {
             const double rtt = wait_for(pending.front());
             pending.pop_front();
-            if (rtt < 0) { stalled = true; break; }
+            if (rtt < 0) {
+                stalled = true;
+                break;
+            }
             record(rtt);
         }
     }
@@ -1397,7 +1419,8 @@ int run_burst(const Options& o) {
 
     std::filesystem::create_directories(o.out);
     write_summary_json(o.out, o, r);
-    write_run_config_yaml(o.out, o,
+    write_run_config_yaml(
+        o.out, o,
         "burst_queue_depths: \"1,8,64,256\"\n"
         "burst_mix: \"90/10 NOS/TestRequest (seq%10==0 -> TestRequest)\"\n"
         "coordinated_omission: not-corrected (symmetric with QFcpp; depth-N closed-loop)\n"
@@ -1407,11 +1430,9 @@ int run_burst(const Options& o) {
 
     std::ofstream log(o.out / "stdout.log");
     log << "fixpp perf driver — " << o.workload << " (engine=" << o.engine << ")\n"
-        << topology_line(o)
-        << "persistence_mode=memory-store\n"
-        << indicative_line(o)
-        << "begin_string=" << o.begin_string << " security_profile=" << sec_profile_str(o)
-        << " burst_queue_depths=1,8,64,256\n"
+        << topology_line(o) << "persistence_mode=memory-store\n"
+        << indicative_line(o) << "begin_string=" << o.begin_string
+        << " security_profile=" << sec_profile_str(o) << " burst_queue_depths=1,8,64,256\n"
         << "burst_mix=90/10 NOS/TestRequest; coordinated_omission=not-corrected\n"
         << "warmup_messages=" << r.warmup_messages << " (" << warmup_seconds << " s)\n"
         << "measured_messages=" << recorded << " (pooled; " << run_seconds << " s)\n"
@@ -1420,8 +1441,7 @@ int run_burst(const Options& o) {
         << "\n";
     log << "per_depth (shape sanity — p99 should rise with depth):\n";
     for (std::size_t di = 0; di < kND; ++di) {
-        log << "  depth=" << kDepths[di]
-            << " p50=" << hdr_value_at_percentile(per_depth[di], 50.0)
+        log << "  depth=" << kDepths[di] << " p50=" << hdr_value_at_percentile(per_depth[di], 50.0)
             << " p99=" << hdr_value_at_percentile(per_depth[di], 99.0)
             << " p999=" << hdr_value_at_percentile(per_depth[di], 99.9)
             << " count=" << per_depth[di]->total_count << "\n";
@@ -1431,9 +1451,9 @@ int run_burst(const Options& o) {
         << "sample_admin=35=1 112=bench-admin-<seq> -> 35=0 (Heartbeat echoes 112)\n"
         << (stalled ? "STATUS=STALLED (incomplete)\n" : "STATUS=OK\n");
 
-    std::cout << "[fixpp-perf] " << o.workload << " (depths 1/8/64/256 pooled) mps="
-              << r.messages_per_second << " p50=" << r.p50_us << "us p99=" << r.p99_us
-              << "us p999=" << r.p999_us << "us recorded=" << recorded
+    std::cout << "[fixpp-perf] " << o.workload
+              << " (depths 1/8/64/256 pooled) mps=" << r.messages_per_second << " p50=" << r.p50_us
+              << "us p99=" << r.p99_us << "us p999=" << r.p999_us << "us recorded=" << recorded
               << (stalled ? " [STALLED]" : "") << "\n";
     std::cout << "[fixpp-perf]   per-depth p99(us):";
     for (std::size_t di = 0; di < kND; ++di)
@@ -1466,8 +1486,8 @@ int run_many_sessions(const Options& o) {
         return 3;
     }
     if (!h.established) {
-        std::cerr << "sessions did not reach Active within 30s ("
-                  << h.app->logon_count.load() << "/" << (2 * kSessions) << " logons)\n";
+        std::cerr << "sessions did not reach Active within 30s (" << h.app->logon_count.load()
+                  << "/" << (2 * kSessions) << " logons)\n";
         h.teardown();
         return 1;
     }
@@ -1475,13 +1495,11 @@ int run_many_sessions(const Options& o) {
     h.app->many_active = true;   // route the ER reply to the receiving acceptor leg
 
     auto now_ns = [] {
-        return std::chrono::duration_cast<std::chrono::nanoseconds>(
-                   Clock::now().time_since_epoch())
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now().time_since_epoch())
             .count();
     };
     auto send_one = [&](int s, long long seq) -> std::string {
-        std::string id =
-            "bench-nos-mx08-s" + std::to_string(s) + "-" + std::to_string(seq);
+        std::string id = "bench-nos-mx08-s" + std::to_string(s) + "-" + std::to_string(seq);
         std::vector<std::byte> body = make_nos_payload(id);
         std::span<const std::byte> body_span;
         {
@@ -1527,7 +1545,10 @@ int run_many_sessions(const Options& o) {
     for (int i = 0; i < o.measured_messages && !stalled; ++i) {
         for (int s = 0; s < kSessions && !stalled; ++s) {
             const double rtt = wait_for(send_one(s, seq++));
-            if (rtt < 0) { stalled = true; break; }
+            if (rtt < 0) {
+                stalled = true;
+                break;
+            }
             hdr_record_value(hist, static_cast<int64_t>(rtt));
             ++recorded;
         }
@@ -1553,7 +1574,8 @@ int run_many_sessions(const Options& o) {
 
     std::filesystem::create_directories(o.out);
     write_summary_json(o.out, o, r);
-    write_run_config_yaml(o.out, o,
+    write_run_config_yaml(
+        o.out, o,
         "session_count: 32\n"
         "topology_note: \"32 self-paired pairs on ONE engine (shared-executor strand "
         "model); depth-1 serial round-robin, one message in flight (symmetric with "
@@ -1563,11 +1585,9 @@ int run_many_sessions(const Options& o) {
 
     std::ofstream log(o.out / "stdout.log");
     log << "fixpp perf driver — " << o.workload << " (engine=" << o.engine << ")\n"
-        << topology_line(o)
-        << "persistence_mode=memory-store\n"
-        << indicative_line(o)
-        << "begin_string=" << o.begin_string << " security_profile=" << sec_profile_str(o)
-        << " session_count=32\n"
+        << topology_line(o) << "persistence_mode=memory-store\n"
+        << indicative_line(o) << "begin_string=" << o.begin_string
+        << " security_profile=" << sec_profile_str(o) << " session_count=32\n"
         << "warmup_messages=" << r.warmup_messages << " (" << warmup_seconds << " s)\n"
         << "measured_messages=" << recorded << " (pooled across 32 sessions; " << run_seconds
         << " s)\n"
@@ -1578,10 +1598,11 @@ int run_many_sessions(const Options& o) {
         << "sample_app=35=D 11=bench-nos-mx08-s<sess>-<seq> -> 35=8 (ER echoes 11)\n"
         << (stalled ? "STATUS=STALLED (incomplete)\n" : "STATUS=OK\n");
 
-    std::cout << "[fixpp-perf] " << o.workload << " (32 sessions, depth-1 round-robin) mps="
-              << r.messages_per_second << " p50=" << r.p50_us << "us p99=" << r.p99_us
-              << "us p999=" << r.p999_us << "us recorded=" << recorded
-              << (stalled ? " [STALLED]" : "") << " → " << o.out << "\n";
+    std::cout << "[fixpp-perf] " << o.workload
+              << " (32 sessions, depth-1 round-robin) mps=" << r.messages_per_second
+              << " p50=" << r.p50_us << "us p99=" << r.p99_us << "us p999=" << r.p999_us
+              << "us recorded=" << recorded << (stalled ? " [STALLED]" : "") << " → " << o.out
+              << "\n";
     hdr_close(hist);
     return stalled ? 1 : 0;
 }
@@ -1594,8 +1615,9 @@ int run_many_sessions(const Options& o) {
 // Heartbeat(35=0) echoing 112 (the FR-006 path PR #136 PRESERVED), and (c) does
 // NOT tear the initiator session down (the mismatch→Disconnected arm is guarded
 // on a non-empty pending_test_req_id_, which an app-initiated TR leaves empty —
-// src/session/session.cpp's inbound-Heartbeat TestReqID-mismatch guard). The survival check is the seal against a false-GREEN where
-// the acceptor emits the Heartbeat but the initiator session is dying.
+// src/session/session.cpp's inbound-Heartbeat TestReqID-mismatch guard). The survival check is the
+// seal against a false-GREEN where the acceptor emits the Heartbeat but the initiator session is
+// dying.
 int run_wl07_spike(const Options& o) {
     const char* dir = fixture_dir();
     if (want_tls(o) && (dir == nullptr || dir[0] == '\0')) {
@@ -1620,7 +1642,10 @@ int run_wl07_spike(const Options& o) {
     }
     // Send one app-initiated TestRequest(35=1) from the initiator. Capture the
     // send result to distinguish a send-side reject from a no-echo.
-    const auto tr_body = to_bytes("35=1\x01" "112=" + spike_id + "\x01");
+    const auto tr_body = to_bytes(
+        "35=1\x01"
+        "112=" +
+        spike_id + "\x01");
     auto send_fut = asio::co_spawn(h.ioc.get_executor(),
                                    h.engine->send(h.ini_id, std::span<const std::byte>(tr_body)),
                                    asio::use_future);
@@ -1649,8 +1674,7 @@ int run_wl07_spike(const Options& o) {
     std::cout << "[fixpp-perf] wl-07-spike:"
               << " send_accepted=" << (send_r.has_value() ? "yes" : "NO(rejected)")
               << " testrequest_echo=" << (seen ? "GREEN" : "RED")
-              << " session_survived=" << (survived ? "GREEN" : (seen ? "RED" : "n/a"))
-              << " → "
+              << " session_survived=" << (survived ? "GREEN" : (seen ? "RED" : "n/a")) << " → "
               << (green ? "PASS — opaque send() of 35=1 works; wl-07 UNBLOCKED"
                         : "FAIL — escalate per wl-07-burst-design.md OPEN QUESTION #1")
               << "\n";

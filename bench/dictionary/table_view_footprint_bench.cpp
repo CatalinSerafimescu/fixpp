@@ -61,17 +61,16 @@
 // (T011's note: NOT 075's doing, not 075's to fix).
 // ─────────────────────────────────────────────────────────────────────────
 
-#include <fixpp/dict/dictionary.hpp>
-#include <fixpp/dict/table_view.hpp>
-#include <fixpp/dict/xml_loader.hpp>
+#include <benchmark/benchmark.h>
 
 #include <array>
 #include <cstddef>
 #include <filesystem>
+#include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/table_view.hpp>
+#include <fixpp/dict/xml_loader.hpp>
 #include <memory_resource>
 #include <string_view>
-
-#include <benchmark/benchmark.h>
 
 namespace {
 

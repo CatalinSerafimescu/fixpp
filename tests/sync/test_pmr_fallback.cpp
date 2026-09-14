@@ -70,7 +70,7 @@ TEST(SyncPmrFallback, ContendedAcquiresSucceedWithPmr) {
     auto holder_coro = [&]() -> asio::awaitable<void> {
         auto g = co_await mtx.async_lock();
         EXPECT_TRUE(g.has_value());
-        co_await yield_n(N * 4 + 8);
+        co_await yield_n((N * 4) + 8);
         // guard released
     };
 
@@ -240,7 +240,7 @@ struct throwing_resource final : std::pmr::memory_resource {
     void do_deallocate(void*, std::size_t, std::size_t) override {
         ADD_FAILURE() << "deallocate must never be called: allocate always throws";
     }
-    bool do_is_equal(std::pmr::memory_resource const& other) const noexcept override {
+    [[nodiscard]] bool do_is_equal(std::pmr::memory_resource const& other) const noexcept override {
         return this == &other;
     }
 };

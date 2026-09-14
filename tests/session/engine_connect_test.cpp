@@ -85,7 +85,7 @@ namespace {
 
 // Build a fresh SendingTime(52) string so the Q3 guard (038/041 T019) admits
 // this frame when the engine has a real clock.
-static std::string utc_now_fix_timestamp() {
+std::string utc_now_fix_timestamp() {
     std::array<char, 32> buf{};
     auto r = fixpp::core::utc_time_to_fix_string(std::chrono::system_clock::now(),
                                                  fixpp::core::fix_time_precision::millis,
@@ -95,9 +95,9 @@ static std::string utc_now_fix_timestamp() {
 
 // ── Frame builder helpers ─────────────────────────────────────────────────────
 
-static std::vector<std::byte> make_fix_frame(std::string_view begin_str, std::string_view msg_type,
-                                             int seq_num, std::string_view sender,
-                                             std::string_view target, std::string extra_body = "") {
+std::vector<std::byte> make_fix_frame(std::string_view begin_str, std::string_view msg_type,
+                                      int seq_num, std::string_view sender, std::string_view target,
+                                      std::string extra_body = "") {
     auto field = [](int tag, std::string_view v) -> std::string {
         return std::to_string(tag) + "=" + std::string(v) + "\x01";
     };
@@ -115,7 +115,7 @@ static std::vector<std::byte> make_fix_frame(std::string_view begin_str, std::st
     msg += body;
     unsigned int cs = 0;
     for (unsigned char c : msg) cs += c;
-    cs &= 0xFFu;
+    cs &= 0xFFU;
     char csbuf[5];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     msg += "10=" + std::string(csbuf) + "\x01";
@@ -127,24 +127,22 @@ static std::vector<std::byte> make_fix_frame(std::string_view begin_str, std::st
 }
 
 // Logon-ack frame (server sends seq=1 back to initiator).
-static std::vector<std::byte> make_logon_ack_frame(std::string_view begin_str,
-                                                   std::string_view sender,
-                                                   std::string_view target) {
+std::vector<std::byte> make_logon_ack_frame(std::string_view begin_str, std::string_view sender,
+                                            std::string_view target) {
     return make_fix_frame(begin_str, "A", 1, sender, target,
                           "98=0\x01"
                           "108=30\x01");
 }
 
 // Heartbeat frame.
-static std::vector<std::byte> make_heartbeat_frame(std::string_view begin_str, int seq_num,
-                                                   std::string_view sender,
-                                                   std::string_view target) {
+std::vector<std::byte> make_heartbeat_frame(std::string_view begin_str, int seq_num,
+                                            std::string_view sender, std::string_view target) {
     return make_fix_frame(begin_str, "0", seq_num, sender, target);
 }
 
 // ── Build-harness helper ─────────────────────────────────────────────────────
 // Returns the fixture_dir string or nullptr if absent.
-static const char* get_fixture_dir() {
+const char* get_fixture_dir() {
     const char* dir = std::getenv("FIXPP_TLS_FIXTURE_DIR");
 #ifdef FIXPP_TLS_FIXTURE_DIR
     static const char* kDir = FIXPP_TLS_FIXTURE_DIR;
@@ -170,10 +168,9 @@ static const char* get_fixture_dir() {
 //
 // Caller must ensure server_received_logon and fixture outlive this coroutine.
 
-static asio::awaitable<void> run_server_driver(fixpp::transport::test::LoopbackTlsFixture& fixture,
-                                               std::atomic<bool>& server_received_logon,
-                                               int n_heartbeats,
-                                               std::chrono::milliseconds deadline) {
+asio::awaitable<void> run_server_driver(fixpp::transport::test::LoopbackTlsFixture& fixture,
+                                        std::atomic<bool>& server_received_logon, int n_heartbeats,
+                                        std::chrono::milliseconds deadline) {
     co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
 
     auto executor = co_await asio::this_coro::executor;
@@ -322,7 +319,7 @@ TEST(EngineConnectTest, InitiatorConnectThenLogon) {
 
     // The server's bound port — the initiator's reconnect_endpoint.
     uint16_t server_port = fixture.bound_port();
-    ASSERT_NE(server_port, 0u) << "fixture listener did not bind";
+    ASSERT_NE(server_port, 0U) << "fixture listener did not bind";
 
     // ── Register ONE initiator in the engine ─────────────────────────────────
     // reconnect_endpoint targets the fixture's server listener port.

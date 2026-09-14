@@ -49,45 +49,45 @@ struct fixt_framing_entry {
 //
 //   tag   name                      FIXT11.xml type   -> field_type
 inline constexpr fixt_framing_entry kFixtFramingTable[] = {
-    {.tag = 8, .type = field_type::String},      // BeginString      STRING
-    {.tag = 9, .type = field_type::Length},      // BodyLength       LENGTH
-    {.tag = 10, .type = field_type::String},     // CheckSum         STRING   (trailer)
-    {.tag = 34, .type = field_type::Int},        // MsgSeqNum        SEQNUM
-    {.tag = 35, .type = field_type::String},     // MsgType          STRING
-    {.tag = 43, .type = field_type::Boolean},    // PossDupFlag      BOOLEAN
-    {.tag = 49, .type = field_type::String},     // SenderCompID     STRING
-    {.tag = 50, .type = field_type::String},     // SenderSubID      STRING
-    {.tag = 52, .type = field_type::String},     // SendingTime      UTCTIMESTAMP
-    {.tag = 56, .type = field_type::String},     // TargetCompID     STRING
-    {.tag = 57, .type = field_type::String},     // TargetSubID      STRING
-    {.tag = 89, .type = field_type::Data},       // Signature        DATA     (trailer)
-    {.tag = 90, .type = field_type::Length},     // SecureDataLen    LENGTH
-    {.tag = 91, .type = field_type::Data},       // SecureData       DATA
-    {.tag = 93, .type = field_type::Length},     // SignatureLength  LENGTH   (trailer)
-    {.tag = 97, .type = field_type::Boolean},    // PossResend       BOOLEAN
-    {.tag = 115, .type = field_type::String},    // OnBehalfOfCompID STRING
-    {.tag = 116, .type = field_type::String},    // OnBehalfOfSubID  STRING
-    {.tag = 122, .type = field_type::String},    // OrigSendingTime  UTCTIMESTAMP
-    {.tag = 128, .type = field_type::String},    // DeliverToCompID  STRING
-    {.tag = 129, .type = field_type::String},    // DeliverToSubID   STRING
-    {.tag = 142, .type = field_type::String},    // SenderLocationID STRING
-    {.tag = 143, .type = field_type::String},    // TargetLocationID STRING
-    {.tag = 144, .type = field_type::String},    // OnBehalfOfLocationID STRING
-    {.tag = 145, .type = field_type::String},    // DeliverToLocationID  STRING
-    {.tag = 212, .type = field_type::Length},    // XmlDataLen       LENGTH
-    {.tag = 213, .type = field_type::Data},      // XmlData          DATA
-    {.tag = 347, .type = field_type::String},    // MessageEncoding  STRING
-    {.tag = 369, .type = field_type::Int},       // LastMsgSeqNumProcessed SEQNUM
+    {.tag = 8, .type = field_type::String},    // BeginString      STRING
+    {.tag = 9, .type = field_type::Length},    // BodyLength       LENGTH
+    {.tag = 10, .type = field_type::String},   // CheckSum         STRING   (trailer)
+    {.tag = 34, .type = field_type::Int},      // MsgSeqNum        SEQNUM
+    {.tag = 35, .type = field_type::String},   // MsgType          STRING
+    {.tag = 43, .type = field_type::Boolean},  // PossDupFlag      BOOLEAN
+    {.tag = 49, .type = field_type::String},   // SenderCompID     STRING
+    {.tag = 50, .type = field_type::String},   // SenderSubID      STRING
+    {.tag = 52, .type = field_type::String},   // SendingTime      UTCTIMESTAMP
+    {.tag = 56, .type = field_type::String},   // TargetCompID     STRING
+    {.tag = 57, .type = field_type::String},   // TargetSubID      STRING
+    {.tag = 89, .type = field_type::Data},     // Signature        DATA     (trailer)
+    {.tag = 90, .type = field_type::Length},   // SecureDataLen    LENGTH
+    {.tag = 91, .type = field_type::Data},     // SecureData       DATA
+    {.tag = 93, .type = field_type::Length},   // SignatureLength  LENGTH   (trailer)
+    {.tag = 97, .type = field_type::Boolean},  // PossResend       BOOLEAN
+    {.tag = 115, .type = field_type::String},  // OnBehalfOfCompID STRING
+    {.tag = 116, .type = field_type::String},  // OnBehalfOfSubID  STRING
+    {.tag = 122, .type = field_type::String},  // OrigSendingTime  UTCTIMESTAMP
+    {.tag = 128, .type = field_type::String},  // DeliverToCompID  STRING
+    {.tag = 129, .type = field_type::String},  // DeliverToSubID   STRING
+    {.tag = 142, .type = field_type::String},  // SenderLocationID STRING
+    {.tag = 143, .type = field_type::String},  // TargetLocationID STRING
+    {.tag = 144, .type = field_type::String},  // OnBehalfOfLocationID STRING
+    {.tag = 145, .type = field_type::String},  // DeliverToLocationID  STRING
+    {.tag = 212, .type = field_type::Length},  // XmlDataLen       LENGTH
+    {.tag = 213, .type = field_type::Data},    // XmlData          DATA
+    {.tag = 347, .type = field_type::String},  // MessageEncoding  STRING
+    {.tag = 369, .type = field_type::Int},     // LastMsgSeqNumProcessed SEQNUM
     // Flat-recursed nested <header> NoHops group (dictionaries/FIXT11.xml's header NoHops group,
     // data-model.md E-1 disposition — accept-only, hop group not
     // structurally validated; SC-003 no-false-reject of routed FIXT traffic).
-    {.tag = 627, .type = field_type::Int},       // NoHops           NUMINGROUP
-    {.tag = 628, .type = field_type::String},    // HopCompID        STRING
-    {.tag = 629, .type = field_type::String},    // HopSendingTime   UTCTIMESTAMP
-    {.tag = 630, .type = field_type::Int},       // HopRefID         SEQNUM
-    {.tag = 1128, .type = field_type::String},   // ApplVerID        STRING
-    {.tag = 1129, .type = field_type::String},   // CstmApplVerID    STRING
-    {.tag = 1156, .type = field_type::Int},      // ApplExtID        INT
+    {.tag = 627, .type = field_type::Int},      // NoHops           NUMINGROUP
+    {.tag = 628, .type = field_type::String},   // HopCompID        STRING
+    {.tag = 629, .type = field_type::String},   // HopSendingTime   UTCTIMESTAMP
+    {.tag = 630, .type = field_type::Int},      // HopRefID         SEQNUM
+    {.tag = 1128, .type = field_type::String},  // ApplVerID        STRING
+    {.tag = 1129, .type = field_type::String},  // CstmApplVerID    STRING
+    {.tag = 1156, .type = field_type::Int},     // ApplExtID        INT
 };
 
 }  // namespace fixpp::dict::detail

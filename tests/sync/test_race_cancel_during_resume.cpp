@@ -146,7 +146,8 @@ TEST(SeamRaceCancelDuringResume, LateSignalIsNoOpWaiterKeepsLock) {
     // Wire the cancel signal into the waiter's cancellation state.
     auto fw = asio::co_spawn(ioc_b, waiter(),
                              asio::bind_cancellation_slot(cancel_sig.slot(), asio::use_future));
-    for (int i = 0; i < 16 && !waiter_resolved.load(std::memory_order_acquire); ++i) ioc_b.poll_one();
+    for (int i = 0; i < 16 && !waiter_resolved.load(std::memory_order_acquire); ++i)
+        ioc_b.poll_one();
     ASSERT_FALSE(waiter_resolved.load(std::memory_order_acquire))
         << "setup: waiter resolved before parking — the mutex was not held";
 

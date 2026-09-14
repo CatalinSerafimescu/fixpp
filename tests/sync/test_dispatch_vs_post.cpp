@@ -31,7 +31,7 @@ using fixpp::sync::async_mutex;
 using fixpp::sync::completion_policy;
 
 // Generic test body: N coroutines contend on `mtx`.
-static void run_contention_test(async_mutex& mtx, int N) {
+void run_contention_test(async_mutex& mtx, int N) {
     asio::io_context ioc;
     std::atomic<int> in_critical{0};
     int overlap = 0;

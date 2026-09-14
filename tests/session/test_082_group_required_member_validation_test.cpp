@@ -88,6 +88,12 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/core/error.hpp>
+#include <fixpp/dict/table_view.hpp>
+#include <fixpp/dict/xml_loader.hpp>
+#include <fixpp/wire/framer.hpp>
+#include <fixpp/wire/parser.hpp>
+#include <fixpp/wire/validator.hpp>
 #include <map>
 #include <memory>
 #include <memory_resource>
@@ -98,23 +104,15 @@
 #include <string>
 #include <vector>
 
-#include <fixpp/core/error.hpp>
-#include <fixpp/dict/table_view.hpp>
-#include <fixpp/dict/xml_loader.hpp>
-#include <fixpp/wire/framer.hpp>
-#include <fixpp/wire/parser.hpp>
-#include <fixpp/wire/validator.hpp>
-
-#include "dictionary/required_scope_oracle.hpp"  // T005's shared oracle -- no forked walker
+#include "dictionary/required_scope_oracle.hpp"   // T005's shared oracle -- no forked walker
 #include "support/app_message_read_scaffold.hpp"  // fixpp_test_support::make_frame
 
 namespace fixpp::session::test082 {
 namespace {
 
 using fixpp::wire::access_mode;
-using fixpp::wire::Framer;
 using fixpp::wire::frame_view;
-using fixpp::wire::MessageView;
+using fixpp::wire::Framer;
 using fixpp::wire::Parser;
 using fixpp::wire::pmr_carry_buffer;
 using fixpp_test::required_scope_oracle::build_quickfix_oracle;
@@ -130,21 +128,30 @@ using fixpp_test::required_scope_oracle::GroupContextKey;
 // MarketDataSnapshotFullRefresh(W) but 279 in
 // MarketDataIncrementalRefresh(X); confirmed by direct inspection).
 std::map<GroupContextKey, std::uint16_t> const kDelimTags{
-    {{"B", {}, 33}, 58},    // News: LinesOfText -> Text(58)
-    {{"C", {}, 33}, 58},    // Email: LinesOfText -> Text(58)
-    {{"E", {}, 73}, 11},    // NewOrderList: NoOrders -> ClOrdID(11)
-    {{"N", {}, 73}, 11},    // ListStatus: NoOrders -> ClOrdID(11)
-    {{"R", {}, 146}, 55},   // QuoteRequest: NoRelatedSym -> Symbol(55)
-    {{"V", {}, 146}, 55},   // MarketDataRequest: NoRelatedSym -> Symbol(55)
-    {{"V", {}, 267}, 269},  // MarketDataRequest: NoMDEntryTypes -> MDEntryType(269)
-    {{"W", {}, 268}, 269},  // MarketDataSnapshotFullRefresh: NoMDEntries -> MDEntryType(269)
-    {{"X", {}, 268}, 279},  // MarketDataIncrementalRefresh: NoMDEntries -> MDUpdateAction(279)
-    {{"Z", {}, 295}, 55},   // QuoteCancel: NoQuoteEntries -> Symbol(55)
-    {{"i", {}, 296}, 302},  // MassQuote: NoQuoteSets -> QuoteSetID(302)
-    {{"l", {}, 420}, 12},   // BidResponse: NoBidComponents -> Commission(12)
-    {{"m", {}, 428}, 55},   // ListStrikePrice: NoStrikes -> Symbol(55)
-    {{"i", {296}, 295}, 299},  // MassQuote: NoQuoteSets->NoQuoteEntries -> QuoteEntryID(299)
-    {{"J", {}, 78}, 79},    // Allocation: NoAllocs -> AllocAccount(79) (NEGATIVE CONTROL)
+    {{.msg_type = "B", .path = {}, .no_tag = 33}, 58},   // News: LinesOfText -> Text(58)
+    {{.msg_type = "C", .path = {}, .no_tag = 33}, 58},   // Email: LinesOfText -> Text(58)
+    {{.msg_type = "E", .path = {}, .no_tag = 73}, 11},   // NewOrderList: NoOrders -> ClOrdID(11)
+    {{.msg_type = "N", .path = {}, .no_tag = 73}, 11},   // ListStatus: NoOrders -> ClOrdID(11)
+    {{.msg_type = "R", .path = {}, .no_tag = 146}, 55},  // QuoteRequest: NoRelatedSym -> Symbol(55)
+    {{.msg_type = "V", .path = {}, .no_tag = 146},
+     55},  // MarketDataRequest: NoRelatedSym -> Symbol(55)
+    {{.msg_type = "V", .path = {}, .no_tag = 267},
+     269},  // MarketDataRequest: NoMDEntryTypes -> MDEntryType(269)
+    {{.msg_type = "W", .path = {}, .no_tag = 268},
+     269},  // MarketDataSnapshotFullRefresh: NoMDEntries -> MDEntryType(269)
+    {{.msg_type = "X", .path = {}, .no_tag = 268},
+     279},  // MarketDataIncrementalRefresh: NoMDEntries -> MDUpdateAction(279)
+    {{.msg_type = "Z", .path = {}, .no_tag = 295},
+     55},  // QuoteCancel: NoQuoteEntries -> Symbol(55)
+    {{.msg_type = "i", .path = {}, .no_tag = 296},
+     302},  // MassQuote: NoQuoteSets -> QuoteSetID(302)
+    {{.msg_type = "l", .path = {}, .no_tag = 420},
+     12},  // BidResponse: NoBidComponents -> Commission(12)
+    {{.msg_type = "m", .path = {}, .no_tag = 428}, 55},  // ListStrikePrice: NoStrikes -> Symbol(55)
+    {{.msg_type = "i", .path = {296}, .no_tag = 295},
+     299},  // MassQuote: NoQuoteSets->NoQuoteEntries -> QuoteEntryID(299)
+    {{.msg_type = "J", .path = {}, .no_tag = 78},
+     79},  // Allocation: NoAllocs -> AllocAccount(79) (NEGATIVE CONTROL)
 };
 
 std::vector<std::uint16_t> const kHeaderTags{8, 9, 10, 34, 35, 49, 52, 56};
@@ -180,12 +187,14 @@ std::string pick_filler_value(fixpp::dict::table_view const& tv, std::uint16_t t
             break;
     }
     for (auto const& c : candidates) {
-        std::span<std::byte const> const bytes{reinterpret_cast<std::byte const*>(c.data()), c.size()};
+        std::span<std::byte const> const bytes{reinterpret_cast<std::byte const*>(c.data()),
+                                               c.size()};
         if (tv.enum_valid(tag, bytes)) {
             return c;
         }
     }
-    throw std::runtime_error("pick_filler_value: no candidate accepted for tag " + std::to_string(tag));
+    throw std::runtime_error("pick_filler_value: no candidate accepted for tag " +
+                             std::to_string(tag));
 }
 
 std::string field(std::uint16_t tag, std::string const& value) {
@@ -207,11 +216,12 @@ std::string header_prefix(std::string const& msg_type, std::uint32_t seq) {
 // present-but-empty group -- structurally valid, consume_group returns
 // immediately without needing a delimiter).
 std::string other_required_fields(fixpp::dict::table_view const& tv, DictOracle const& oracle,
-                                  std::string const& msg_type, std::set<std::uint16_t> const& exclude) {
+                                  std::string const& msg_type,
+                                  std::set<std::uint16_t> const& exclude) {
     std::string out;
     for (auto tag : tv.required_fields(msg_type)) {
         if (exclude.contains(tag)) continue;
-        if (std::find(kHeaderTags.begin(), kHeaderTags.end(), tag) != kHeaderTags.end()) continue;
+        if (std::ranges::find(kHeaderTags, tag) != kHeaderTags.end()) continue;
         if (oracle.group_tags.contains(tag)) {
             out += field(tag, "0");
             continue;
@@ -235,7 +245,8 @@ std::string other_required_fields(fixpp::dict::table_view const& tv, DictOracle 
 // unreached for the i/296 top-level case because an earlier case
 // (msg_type=R, no_tag=146) aborted the whole TEST body first via ASSERT.
 std::string build_group_instance(fixpp::dict::table_view const& tv, DictOracle const& oracle,
-                                 std::uint16_t delim_tag, std::set<std::uint16_t> const& required_members,
+                                 std::uint16_t delim_tag,
+                                 std::set<std::uint16_t> const& required_members,
                                  std::uint16_t omitted_tag) {
     std::string out;
     if (delim_tag != omitted_tag) {
@@ -254,9 +265,9 @@ std::string build_group_instance(fixpp::dict::table_view const& tv, DictOracle c
 
 // TOP-LEVEL case frame: header + [no_tag=1, group instance] + other
 // required fields. `omitted_tag == 0` builds the "complete" baseline.
-std::vector<std::byte> build_top_level_frame(fixpp::dict::table_view const& tv, DictOracle const& oracle,
-                                             GroupContextKey const& key, std::uint16_t omitted_tag,
-                                             std::uint32_t seq) {
+std::vector<std::byte> build_top_level_frame(fixpp::dict::table_view const& tv,
+                                             DictOracle const& oracle, GroupContextKey const& key,
+                                             std::uint16_t omitted_tag, std::uint32_t seq) {
     // fixpp#210: build against the RUNTIME-resolved delimiter -- what
     // `consume_group` (`dict_.group_first_field(msg_type,
     // parent_path, no_tag)`) actually scans for -- NOT `kDelimTags`'s
@@ -270,8 +281,9 @@ std::vector<std::byte> build_top_level_frame(fixpp::dict::table_view const& tv, 
     // opening delimiter or the baseline can't parse at all.
     std::uint16_t const delim = tv.group_first_field(key.msg_type, std::span{key.path}, key.no_tag);
     if (delim == 0) {
-        throw std::runtime_error("build_top_level_frame: tv.group_first_field returned 0 for msg_type=" +
-                                 key.msg_type + " no_tag=" + std::to_string(key.no_tag));
+        throw std::runtime_error(
+            "build_top_level_frame: tv.group_first_field returned 0 for msg_type=" + key.msg_type +
+            " no_tag=" + std::to_string(key.no_tag));
     }
     auto const& required = oracle.group_required.at(key);
 
@@ -299,8 +311,9 @@ std::vector<std::byte> build_top_level_frame(fixpp::dict::table_view const& tv, 
 // required-member completeness check DOES run -- so 304/311 must actually
 // be present or the baseline itself falsely rejects (pre-existing gap,
 // previously unreached: see build_group_instance's comment above for why).
-std::vector<std::byte> build_nested_frame(fixpp::dict::table_view const& tv, DictOracle const& oracle,
-                                          bool omit_299, std::uint32_t seq) {
+std::vector<std::byte> build_nested_frame(fixpp::dict::table_view const& tv,
+                                          DictOracle const& oracle, bool omit_299,
+                                          std::uint32_t seq) {
     // fixpp#210: both delimiters below are RUNTIME-resolved (see
     // build_top_level_frame's comment) -- 296's own is unaffected by #210
     // (self-check confirms tv.group_first_field("i",{},296) == kDelimTags'
@@ -311,23 +324,25 @@ std::vector<std::byte> build_nested_frame(fixpp::dict::table_view const& tv, Dic
     // (delimiter + required-member set, omission-aware) exactly like the
     // top-level cases so this collapses to the original shape once #210
     // lands and delim295 becomes 299 again.
-    GroupContextKey const key296{"i", {}, 296};
-    std::uint16_t const delim296 =
-        tv.group_first_field("i", std::span<std::uint16_t const>{}, 296);
+    GroupContextKey const key296{.msg_type = "i", .path = {}, .no_tag = 296};
+    std::uint16_t const delim296 = tv.group_first_field("i", std::span<std::uint16_t const>{}, 296);
     if (delim296 == 0) {
-        throw std::runtime_error("build_nested_frame: tv.group_first_field returned 0 for (i, {}, 296)");
+        throw std::runtime_error(
+            "build_nested_frame: tv.group_first_field returned 0 for (i, {}, 296)");
     }
     auto const& req296 = oracle.group_required.at(key296);  // {295, 302, 304, 311}
     if (!req296.contains(295)) {
-        throw std::runtime_error("build_nested_frame: MassQuote NoQuoteSets(296) required-member "
-                                 "set no longer includes 295 -- oracle drift, re-derive");
+        throw std::runtime_error(
+            "build_nested_frame: MassQuote NoQuoteSets(296) required-member "
+            "set no longer includes 295 -- oracle drift, re-derive");
     }
 
     std::vector<std::uint16_t> const path296{296};
-    GroupContextKey const key295{"i", path296, 295};
+    GroupContextKey const key295{.msg_type = "i", .path = path296, .no_tag = 295};
     std::uint16_t const delim295 = tv.group_first_field("i", std::span{path296}, 295);
     if (delim295 == 0) {
-        throw std::runtime_error("build_nested_frame: tv.group_first_field returned 0 for (i, [296], 295)");
+        throw std::runtime_error(
+            "build_nested_frame: tv.group_first_field returned 0 for (i, [296], 295)");
     }
     auto const& req295 = oracle.group_required.at(key295);  // {299}
 
@@ -335,7 +350,7 @@ std::vector<std::byte> build_nested_frame(fixpp::dict::table_view const& tv, Dic
     body += field(296, "1");
     body += field(delim296, pick_filler_value(tv, delim296));  // opens 296's instance
     body += field(295, "1");  // 295 present as a member of 296's instance, ONE sub-instance
-    body += build_group_instance(tv, oracle, delim295, req295, omit_299 ? 299u : 0u);
+    body += build_group_instance(tv, oracle, delim295, req295, omit_299 ? 299U : 0U);
     // 296's own OTHER required members (everything in req296 besides 295,
     // already emitted above, and delim296, already the opener) -- generic
     // filler, needed on the baseline (omit_299==false) arm; see this
@@ -356,9 +371,9 @@ std::vector<std::byte> build_nested_frame(fixpp::dict::table_view const& tv, Dic
 // AdminGroupMessageFitsAdminArena construction exactly): Framer::feed then
 // Parser<Index>{tv}.parse -- no Session, no FSM, but the SAME wire-decode +
 // MessageView path Session::parse_and_dispatch_ uses.
-fixpp::core::expected_t<void> run_validate(fixpp::wire::dictionary_driven_validator const& validator,
-                                           fixpp::dict::table_view const& tv,
-                                           std::vector<std::byte> const& raw, std::uint16_t* ref_tag_out) {
+fixpp::core::expected_t<void> run_validate(
+    fixpp::wire::dictionary_driven_validator const& validator, fixpp::dict::table_view const& tv,
+    std::vector<std::byte> const& raw, std::uint16_t* ref_tag_out) {
     constexpr std::size_t kArena = 16384;
     std::array<std::byte, kArena> storage{};
     std::pmr::monotonic_buffer_resource pa_mr{storage.data(), storage.size()};
@@ -374,8 +389,9 @@ fixpp::core::expected_t<void> run_validate(fixpp::wire::dictionary_driven_valida
     Parser<access_mode::Index> parser{tv};
     auto mv_r = parser.parse(out[0], &pa_mr);
     if (!mv_r.has_value()) {
-        throw std::runtime_error("run_validate: Parser::parse failed -- construction bug, "
-                                 "not the assertion under test");
+        throw std::runtime_error(
+            "run_validate: Parser::parse failed -- construction bug, "
+            "not the assertion under test");
     }
     return validator.validate(*mv_r, &pa_mr, ref_tag_out);
 }
@@ -403,12 +419,11 @@ TEST(GroupRequiredMemberValidation, KDelimTagsAgreesWithRuntimeGroupFirstField) 
     auto const tv = dict.as_table_view();
 
     for (auto const& [key, expected_delim] : kDelimTags) {
-        auto const actual =
-            tv.group_first_field(key.msg_type, std::span{key.path}, key.no_tag);
+        auto const actual = tv.group_first_field(key.msg_type, std::span{key.path}, key.no_tag);
         EXPECT_EQ(actual, expected_delim)
-            << "msg_type=" << key.msg_type << " no_tag=" << key.no_tag
-            << ": kDelimTags says " << expected_delim << " but tv.group_first_field(...) returns "
-            << actual << " (dictionary-global first-seen: " << tv.group_first_field(key.no_tag)
+            << "msg_type=" << key.msg_type << " no_tag=" << key.no_tag << ": kDelimTags says "
+            << expected_delim << " but tv.group_first_field(...) returns " << actual
+            << " (dictionary-global first-seen: " << tv.group_first_field(key.no_tag)
             << ") -- fixpp#210 delimiter pollution, not a table drift";
     }
 }
@@ -419,7 +434,7 @@ TEST(GroupRequiredMemberValidation, KDelimTagsAgreesWithRuntimeGroupFirstField) 
 // (baseline discriminator); a group OUTSIDE the set never rejects via this
 // mechanism (negative control).
 TEST(GroupRequiredMemberValidation, ExactlyTheOracleDerivedFourteenPairsRejectOnOmission) {
-    constexpr std::size_t kBufSize = 4u * 1024u * 1024u;
+    constexpr std::size_t kBufSize = 4U * 1024U * 1024U;
     auto storage = std::make_unique<std::array<std::byte, kBufSize>>();
     std::pmr::monotonic_buffer_resource mr{storage->data(), storage->size()};
     std::string const path = std::string(FIXPP_DICT_DATA_DIR) + "/FIX42.xml";
@@ -443,10 +458,10 @@ TEST(GroupRequiredMemberValidation, ExactlyTheOracleDerivedFourteenPairsRejectOn
             EXPECT_EQ(key.no_tag, 295);
         }
     }
-    ASSERT_EQ(top_level_cases.size(), 13u)
+    ASSERT_EQ(top_level_cases.size(), 13U)
         << "oracle-derived top-level required-member context count drifted from the pinned 13 "
            "(contracts/group-detection.md K9) -- re-derive, don't silently update this pin";
-    ASSERT_EQ(nested_count, 1u)
+    ASSERT_EQ(nested_count, 1U)
         << "oracle-derived NESTED required-member context count drifted from the pinned 1 "
            "(MassQuote NoQuoteSets(296)->NoQuoteEntries(295)) -- re-derive";
 
@@ -454,7 +469,8 @@ TEST(GroupRequiredMemberValidation, ExactlyTheOracleDerivedFourteenPairsRejectOn
     std::size_t cases_checked = 0;
 
     for (auto const& key : top_level_cases) {
-        SCOPED_TRACE(::testing::Message() << "msg_type=" << key.msg_type << " no_tag=" << key.no_tag);
+        SCOPED_TRACE(::testing::Message()
+                     << "msg_type=" << key.msg_type << " no_tag=" << key.no_tag);
         auto const& required = oracle.group_required.at(key);
         // Deterministic choice: prefer a NON-delimiter required tag (so this
         // case exercises the seen_mask completeness check
@@ -489,7 +505,8 @@ TEST(GroupRequiredMemberValidation, ExactlyTheOracleDerivedFourteenPairsRejectOn
         // no well-formed frame can be constructed for this context until
         // #210 lands -- EXPECTED, excluded from cases_checked. A failure
         // for a DIFFERENT reason must be reported, not folded in here.
-        auto const complete_frame = build_top_level_frame(tv, oracle, key, /*omitted_tag=*/0, seq++);
+        auto const complete_frame =
+            build_top_level_frame(tv, oracle, key, /*omitted_tag=*/0, seq++);
         std::uint16_t baseline_ref = 0;
         auto const baseline_r = run_validate(validator, tv, complete_frame, &baseline_ref);
         if (!baseline_r.has_value()) {
@@ -510,8 +527,9 @@ TEST(GroupRequiredMemberValidation, ExactlyTheOracleDerivedFourteenPairsRejectOn
         std::uint16_t ref_tag = 0;
         auto const r = run_validate(validator, tv, omitted_frame, &ref_tag);
         EXPECT_FALSE(r.has_value())
-            << "msg_type=" << key.msg_type << " no_tag=" << key.no_tag << " omitted_tag="
-            << omitted_tag << ": omitting a required group member must be REJECTED -- RED "
+            << "msg_type=" << key.msg_type << " no_tag=" << key.no_tag
+            << " omitted_tag=" << omitted_tag
+            << ": omitting a required group member must be REJECTED -- RED "
                "pre-T023 (group structure check unreachable for FIX42 tags)";
         if (!r.has_value()) {
             EXPECT_EQ(r.error(), fixpp::core::error::wire_required_field_missing)
@@ -523,7 +541,7 @@ TEST(GroupRequiredMemberValidation, ExactlyTheOracleDerivedFourteenPairsRejectOn
         }
         ++cases_checked;
     }
-    EXPECT_EQ(cases_checked, 13u);
+    EXPECT_EQ(cases_checked, 13U);
 
     // ── The 14th case: NESTED descent (MassQuote NoQuoteSets(296)->
     // NoQuoteEntries(295), omitting 295's own required member 299) ─────────
@@ -551,11 +569,11 @@ TEST(GroupRequiredMemberValidation, ExactlyTheOracleDerivedFourteenPairsRejectOn
                "(299) must be REJECTED via nested descent -- RED pre-T023";
         if (!r.has_value()) {
             EXPECT_EQ(r.error(), fixpp::core::error::wire_required_field_missing);
-            EXPECT_EQ(ref_tag, 299u) << "wrong ref_tag -- rejected for the WRONG reason";
+            EXPECT_EQ(ref_tag, 299U) << "wrong ref_tag -- rejected for the WRONG reason";
         }
     }
 
-    EXPECT_EQ(cases_checked + 1u, 14u)
+    EXPECT_EQ(cases_checked + 1U, 14U)
         << "total case count (13 top-level + 1 nested) drifted from the pinned 14";
 
     // ── Negative control (both-directions completeness): Allocation(J)'s
@@ -567,7 +585,7 @@ TEST(GroupRequiredMemberValidation, ExactlyTheOracleDerivedFourteenPairsRejectOn
     // gates on a non-empty `req_members`). ──────────────
     {
         SCOPED_TRACE("negative control: msg_type=J no_tag=78 (empty required-member set)");
-        GroupContextKey const key78{"J", {}, 78};
+        GroupContextKey const key78{.msg_type = "J", .path = {}, .no_tag = 78};
         ASSERT_FALSE(oracle.group_required.contains(key78))
             << "Allocation(J) NoAllocs(78) unexpectedly has a non-empty required-member set in "
                "the oracle -- this negative control's premise no longer holds, pick a different "
@@ -579,7 +597,8 @@ TEST(GroupRequiredMemberValidation, ExactlyTheOracleDerivedFourteenPairsRejectOn
         body += field(70, pick_filler_value(tv, 70));  // AllocID
         body += field(71, pick_filler_value(tv, 71));  // AllocTransType
         body += field(78, "1");
-        body += field(delim_it->second, pick_filler_value(tv, delim_it->second));  // 79, delimiter only
+        body +=
+            field(delim_it->second, pick_filler_value(tv, delim_it->second));  // 79, delimiter only
         body += other_required_fields(tv, oracle, "J", {70, 71, 78});
         auto const frame = fixpp_test_support::make_frame("FIX.4.2", body);
 
@@ -587,7 +606,8 @@ TEST(GroupRequiredMemberValidation, ExactlyTheOracleDerivedFourteenPairsRejectOn
         auto const r = run_validate(validator, tv, frame, &ref_tag);
         EXPECT_TRUE(r.has_value())
             << "Allocation(J) NoAllocs(78), whose required-member set is EMPTY, unexpectedly "
-               "rejected (ref_tag=" << ref_tag << ", error=" << (r.has_value() ? -1 : static_cast<int>(r.error()))
+               "rejected (ref_tag="
+            << ref_tag << ", error=" << (r.has_value() ? -1 : static_cast<int>(r.error()))
             << ") -- the 14-pair set is not exact";
     }
 }

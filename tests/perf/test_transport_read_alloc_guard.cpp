@@ -63,7 +63,7 @@ public:
         std::pmr::new_delete_resource()->deallocate(p, sz, align);
     }
 
-    bool do_is_equal(std::pmr::memory_resource const& other) const noexcept override {
+    [[nodiscard]] bool do_is_equal(std::pmr::memory_resource const& other) const noexcept override {
         return this == &other;
     }
 };

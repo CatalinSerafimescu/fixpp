@@ -79,9 +79,9 @@ using fixpp::session::fsm_state;
 using fixpp::session::MessageStore;
 using fixpp::session::MessageStoreFactory;
 using fixpp::session::retrieve_visitor;
+using fixpp::session::seqnum_t;
 using fixpp::session::Session;
 using fixpp::session::session_role;
-using fixpp::session::seqnum_t;
 
 // ── Frame-building helpers (mirror test_store_fail_closed_persistent.cpp) ───
 
@@ -126,8 +126,9 @@ std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::s
 }
 
 std::vector<std::byte> make_app_payload(std::string_view clordid) {
-    std::string body = "35=D\x01" + std::string(field(11, clordid)) + "54=1\x01"
-                                                                       "55=AAPL\x01";
+    std::string body = "35=D\x01" + std::string(field(11, clordid)) +
+                       "54=1\x01"
+                       "55=AAPL\x01";
     std::vector<std::byte> v;
     v.reserve(body.size());
     for (char c : body) v.push_back(static_cast<std::byte>(c));
@@ -250,7 +251,9 @@ TEST_P(StoreFailReconcileBreadthTest, PersistentStore_FailsClosed_RegardlessOfEr
     cfg.store_factory = factory;
 
     std::vector<std::vector<std::byte>> wire;
-    cfg.transport_send = [&](std::span<const std::byte> f) { wire.emplace_back(f.begin(), f.end()); };
+    cfg.transport_send = [&](std::span<const std::byte> f) {
+        wire.emplace_back(f.begin(), f.end());
+    };
 
     Session sess(engine, cfg);
 
@@ -267,8 +270,8 @@ TEST_P(StoreFailReconcileBreadthTest, PersistentStore_FailsClosed_RegardlessOfEr
     ASSERT_EQ(sess.state(), fsm_state::LogonSent);
 
     auto peer_logon = make_logon("FIX.4.2", 1, "ACCEPTR", "INITR");
-    auto logon_r = asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>(peer_logon)),
-                                  asio::use_future);
+    auto logon_r = asio::co_spawn(
+        ioc, sess.on_inbound_frame(std::span<const std::byte>(peer_logon)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(
             ioc, logon_r, 200ms, "PersistentStore_FailsClosed_AnyErrorClass/logon-ack")) {
         fixpp::test_support::cancel_and_drain_or_report(
@@ -281,7 +284,8 @@ TEST_P(StoreFailReconcileBreadthTest, PersistentStore_FailsClosed_RegardlessOfEr
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     auto payload = make_app_payload("ORD1");
-    auto send_fut = asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto send_fut =
+        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, send_fut, 200ms,
                                                     "PersistentStore_FailsClosed_AnyErrorClass")) {
         fixpp::test_support::cancel_and_drain_or_report(
@@ -311,11 +315,13 @@ TEST_P(StoreFailReconcileBreadthTest, PersistentStore_FailsClosed_RegardlessOfEr
         // shape (a) normalize-to-io_failure (rejected by opus_pr163_1_triage.md).
         EXPECT_EQ(send_r.error(), injected_err)
             << "D2: Session::send must surface the store's own error code un-coerced for "
-               "class " << static_cast<int>(injected_err);
+               "class "
+            << static_cast<int>(injected_err);
     }
     EXPECT_EQ(sess.state(), fsm_state::Disconnected)
         << "FR-004 (currently RED pre-fix): the session must transition to Disconnected for "
-           "error class " << static_cast<int>(injected_err);
+           "error class "
+        << static_cast<int>(injected_err);
     bool failing_frame_transmitted = false;
     for (const auto& frame : wire) {
         if (extract_tag(frame, 34) == std::to_string(kFailAtSeq)) failing_frame_transmitted = true;
@@ -325,22 +331,22 @@ TEST_P(StoreFailReconcileBreadthTest, PersistentStore_FailsClosed_RegardlessOfEr
         << ") must NOT be transmitted for error class " << static_cast<int>(injected_err);
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    FR004ErrorClasses, StoreFailReconcileBreadthTest,
-    ::testing::Values(fixpp::core::error::store_io_failure,
-                      fixpp::core::error::store_seqnum_out_of_order,
-                      fixpp::core::error::store_capacity_exhausted),
-    [](const ::testing::TestParamInfo<fixpp::core::error>& info) -> std::string {
-        switch (info.param) {
-            case fixpp::core::error::store_io_failure:
-                return "store_io_failure";
-            case fixpp::core::error::store_seqnum_out_of_order:
-                return "store_seqnum_out_of_order";
-            case fixpp::core::error::store_capacity_exhausted:
-                return "store_capacity_exhausted";
-            default:
-                return "unknown";
-        }
-    });
+INSTANTIATE_TEST_SUITE_P(FR004ErrorClasses, StoreFailReconcileBreadthTest,
+                         ::testing::Values(fixpp::core::error::store_io_failure,
+                                           fixpp::core::error::store_seqnum_out_of_order,
+                                           fixpp::core::error::store_capacity_exhausted),
+                         [](const ::testing::TestParamInfo<fixpp::core::error>& info)
+                             -> std::string {
+                             switch (info.param) {
+                                 case fixpp::core::error::store_io_failure:
+                                     return "store_io_failure";
+                                 case fixpp::core::error::store_seqnum_out_of_order:
+                                     return "store_seqnum_out_of_order";
+                                 case fixpp::core::error::store_capacity_exhausted:
+                                     return "store_capacity_exhausted";
+                                 default:
+                                     return "unknown";
+                             }
+                         });
 
 }  // namespace

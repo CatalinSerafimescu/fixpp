@@ -58,17 +58,16 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
-#include <memory_resource>
-#include <span>
-#include <string>
-#include <string_view>
-#include <vector>
-
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/table_view.hpp>
 #include <fixpp/dict/xml_loader.hpp>
 #include <fixpp/wire/framer.hpp>
 #include <fixpp/wire/parser.hpp>
+#include <memory_resource>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
 
 namespace {
 
@@ -98,7 +97,9 @@ constexpr std::size_t kCarryArena = 512;
     std::string pre = std::string("8=FIX.4.2\x01") + "9=" + std::to_string(body.size()) + "\x01";
     pre.append(body);
     unsigned sum = 0;
-    for (unsigned char c : pre) { sum += c; }
+    for (unsigned char c : pre) {
+        sum += c;
+    }
     sum %= 256U;
     char chk[8]{};
     std::snprintf(chk, sizeof(chk), "10=%03u\x01", sum);
@@ -133,8 +134,12 @@ constexpr std::size_t kCarryArena = 512;
     // NOTE: each \x01 is closed by a quote. `"\x01270=..."` would parse the
     // whole run as ONE hex escape (\x01270) and overflow — C++ hex escapes are
     // greedy, unlike octal.
-    s += "269=0\x01" "270=10.5\x01" "271=100\x01";
-    s += "269=1\x01" "270=10.6\x01" "271=200\x01";
+    s += "269=0\x01"
+         "270=10.5\x01"
+         "271=100\x01";
+    s += "269=1\x01"
+         "270=10.6\x01"
+         "271=200\x01";
     return s;
 }
 
@@ -145,9 +150,13 @@ constexpr std::size_t kCarryArena = 512;
     std::string s = header('i');
     s += "117=QID-100\x01";
     s += "296=1\x01";
-    s += "302=QS1\x01" "311=AAPL\x01" "304=1\x01";
+    s += "302=QS1\x01"
+         "311=AAPL\x01"
+         "304=1\x01";
     s += "295=1\x01";
-    s += "299=QE1\x01" "132=10.5\x01" "133=10.75\x01";
+    s += "299=QE1\x01"
+         "132=10.5\x01"
+         "133=10.75\x01";
     return s;
 }
 
@@ -172,10 +181,11 @@ void run_parse_bench(benchmark::State& state, std::string const& body, std::stri
     // Symmetric check for the group-free row: is_group_tag() must be live
     // (group_bits_ non-empty) or the 'common path' claim is untested.
     if (expect_group == 0 && tv.group_first_field(268) == 0) {
-        state.SkipWithError((std::string(label) +
-                             ": FIX42 registered no groups at all, so group_bits_ is empty and this "
-                             "row measures the PRE-082 short-circuit, not the post-082 bit test.")
-                                .c_str());
+        state.SkipWithError(
+            (std::string(label) +
+             ": FIX42 registered no groups at all, so group_bits_ is empty and this "
+             "row measures the PRE-082 short-circuit, not the post-082 bit test.")
+                .c_str());
         return;
     }
 
@@ -187,7 +197,7 @@ void run_parse_bench(benchmark::State& state, std::string const& body, std::stri
     std::array<fixpp::wire::frame_view, 4> feed_out{};
     Framer framer{};
     auto const fed = framer.feed(std::span<const std::byte>{frame_bytes}, carry,
-                                std::span<fixpp::wire::frame_view>{feed_out});
+                                 std::span<fixpp::wire::frame_view>{feed_out});
     if (!fed || fed->empty()) {
         state.SkipWithError((std::string(label) + " fixture failed to frame").c_str());
         return;

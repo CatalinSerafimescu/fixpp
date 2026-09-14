@@ -39,10 +39,10 @@ public:
 
 class stub_clk3 final : public fixpp::core::Clock {
 public:
-    fixpp::core::utc_time_point now() const noexcept override {
+    [[nodiscard]] fixpp::core::utc_time_point now() const noexcept override {
         return std::chrono::system_clock::now();
     }
-    fixpp::core::steady_time_point steady_now() const noexcept override {
+    [[nodiscard]] fixpp::core::steady_time_point steady_now() const noexcept override {
         return std::chrono::steady_clock::now();
     }
     asio::awaitable<void> sleep_until(fixpp::core::steady_time_point) override { co_return; }
@@ -59,7 +59,7 @@ TEST(SecurityProfileEmptyPinset, EmptyPinsetReturnsPinEmptyAtOpen) {
     auto& pinset = *pinset_r;
 
     // Confirm the Pinset IS empty.
-    ASSERT_EQ(pinset->size(), 0u) << "Pinset must be empty for this test";
+    ASSERT_EQ(pinset->size(), 0U) << "Pinset must be empty for this test";
 
     auto result = make_ssl_ctx_config(SecurityProfile::mtls_pinned, std::make_shared<stub_cs3>(),
                                       std::make_shared<stub_clk3>(), pinset, nullptr);
@@ -91,7 +91,7 @@ TEST(SecurityProfileEmptyPinset, NonEmptyPinsetAccepted) {
     Certificate cert{};
     cert.sha256_[0] = std::byte{0x01};
     ASSERT_TRUE(pinset->add(cert).has_value());
-    ASSERT_EQ(pinset->size(), 1u);
+    ASSERT_EQ(pinset->size(), 1U);
 
     auto result = make_ssl_ctx_config(SecurityProfile::mtls_pinned, std::make_shared<stub_cs3>(),
                                       std::make_shared<stub_clk3>(), pinset, nullptr);

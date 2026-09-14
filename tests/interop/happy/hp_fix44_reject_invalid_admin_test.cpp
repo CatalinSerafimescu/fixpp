@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 //
-// tests/interop/happy/hp_fix44_reject_invalid_admin_test.cpp — 016 T012 [US1] / 018 T019+T021+SC-004.
+// tests/interop/happy/hp_fix44_reject_invalid_admin_test.cpp — 016 T012 [US1] / 018
+// T019+T021+SC-004.
 //
 // Happy-path interop cell:
 //   Logon -> invalid admin message -> Reject(35=3), over TLS, FIX 4.4.
@@ -45,16 +46,15 @@
 
 #include <chrono>
 #include <cstdlib>
-#include <memory>
-#include <memory_resource>
-#include <string>
-#include <tuple>
-
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/xml_loader.hpp>
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <memory>
+#include <memory_resource>
+#include <string>
+#include <tuple>
 
 #include "hp_support.hpp"
 #include "support/scenario_descriptor.hpp"
@@ -76,8 +76,7 @@ namespace {
 // yield a false non-biting "pass" (SC-004 rule).
 // [feedback_fail_placeholder_red_test]: real DiffResult assertion, not SUCCEED().
 
-TEST(SessionRejectGateBite, MutatedTag45RefSeqNumCausesGateBite)
-{
+TEST(SessionRejectGateBite, MutatedTag45RefSeqNumCausesGateBite) {
     // Synthetic Reject(35=3) with RefSeqNum(45=2) and SessionRejectReason(373=0).
     // The admin normalization profile {52,10} excludes ONLY SendingTime and CheckSum.
     // Tag 45 (RefSeqNum) is a COMPARED tag — a mutation must make the gate bite.
@@ -96,8 +95,7 @@ TEST(SessionRejectGateBite, MutatedTag45RefSeqNumCausesGateBite)
     fixpp::interop::hp::expect_gate_bite_on_tag(expected_text, actual_text, "45");
 }
 
-TEST(SessionRejectGateBite, MutatedTag373SessionRejectReasonCausesGateBite)
-{
+TEST(SessionRejectGateBite, MutatedTag373SessionRejectReasonCausesGateBite) {
     // Synthetic Reject(35=3) — mutate SessionRejectReason(373) which is a COMPARED tag.
     const char* expected_text =
         "> 8=FIX.4.4\\x0135=3\\x0149=FIXPP_INIT\\x0156=CPTY_ACC"
@@ -130,30 +128,32 @@ TEST(SessionRejectGateBite, MutatedTag373SessionRejectReasonCausesGateBite)
 // Self-deadline: 10 s (FR-010).
 // fixpp NEVER originates malformed bytes — the corruption is parent-proxy-injected.
 
-class HappyRejectInvalidAdmin
-    : public ::testing::TestWithParam<std::tuple<Counterparty, Role>> {};
+class HappyRejectInvalidAdmin : public ::testing::TestWithParam<std::tuple<Counterparty, Role>> {};
 
 TEST_P(HappyRejectInvalidAdmin, RejectInvalidAdminSurvives) {
     const auto [counterparty, role] = GetParam();
     namespace hp = fixpp::interop::hp;
 
     // ── AdminScenarioDescriptor validation (rule 7 + rule 8) ────────────────
-    const std::string cp_part   = (counterparty == Counterparty::quickfix_j) ? "QFj" : "QFcpp";
+    const std::string cp_part = (counterparty == Counterparty::quickfix_j) ? "QFj" : "QFcpp";
     const std::string role_part = (role == Role::fixpp_initiator) ? "init" : "acc";
-    const std::string cell_id   = "HP-" + cp_part + "-" + role_part + "-fix44-reject-invalid-admin";
+    const std::string cell_id = "HP-" + cp_part + "-" + role_part + "-fix44-reject-invalid-admin";
 
     fixpp::interop::AdminScenarioDescriptor desc;
-    desc.cell_id        = cell_id;
+    desc.cell_id = cell_id;
     desc.scenario_group = fixpp::interop::AdminScenarioGroup::session_reject;
-    desc.role           = role;
-    desc.counterparty   = counterparty;
-    desc.spec_ref       = "[FIX-SL §4.5.4]";
-    desc.golden_ref     = "happy/golden/" + cell_id + ".fix";
-    desc.induction      = fixpp::interop::AdminInduction::proxy_corrupt;
+    desc.role = role;
+    desc.counterparty = counterparty;
+    desc.spec_ref = "[FIX-SL §4.5.4]";
+    desc.golden_ref = "happy/golden/" + cell_id + ".fix";
+    desc.induction = fixpp::interop::AdminInduction::proxy_corrupt;
     desc.self_deadline_ms = std::chrono::milliseconds{10000};  // FR-010: 10 s
-    desc.round_trips    = {
-        {"US4-1", "[FIX-SL §4.5.4]"},  // fixpp emits Reject(35=3,45,373[,371]); session stays Active
-        {"US4-2", "[FIX-SL §4.5.4]"},  // subsequent heartbeats flow (non-fatal reject)
+    desc.round_trips = {
+        {.ac_ref = "US4-1",
+         .spec_ref =
+             "[FIX-SL §4.5.4]"},  // fixpp emits Reject(35=3,45,373[,371]); session stays Active
+        {.ac_ref = "US4-2",
+         .spec_ref = "[FIX-SL §4.5.4]"},  // subsequent heartbeats flow (non-fatal reject)
     };
     desc.acceptance_ids = {"US4-1", "US4-2"};
 
@@ -168,7 +168,8 @@ TEST_P(HappyRejectInvalidAdmin, RejectInvalidAdminSurvives) {
     // Skip for non-QFj counterparties.
     if (counterparty != Counterparty::quickfix_j) {
         GTEST_SKIP() << "skip:not-applicable (session_reject admin round-trip is QFj-only at G1; "
-                        "not configured for " << hp::counterparty_token(counterparty) << ")";
+                        "not configured for "
+                     << hp::counterparty_token(counterparty) << ")";
     }
 
     const char* dir = hp::tls_fixture_dir();
@@ -188,8 +189,8 @@ TEST_P(HappyRejectInvalidAdmin, RejectInvalidAdminSurvives) {
     std::pmr::monotonic_buffer_resource dict_mr;
 
     fixpp::interop::InteropEngineFixture fx;
-    auto cfg = hp::make_session_config(role, "FIX.4.4", factory, fx.ioc().get_executor(),
-                                       *endpoint);
+    auto cfg =
+        hp::make_session_config(role, "FIX.4.4", factory, fx.ioc().get_executor(), *endpoint);
 
     // ── Phase 9.H (proxy_corrupt C2): enable inbound dictionary validation ──
     // The counterparty induces one out-of-context Symbol(55)=BAD on a 35=1
@@ -217,8 +218,7 @@ TEST_P(HappyRejectInvalidAdmin, RejectInvalidAdminSurvives) {
     // ── Drive to Active (logon) — 5 s budget ─────────────────────────────
     const auto reached = hp::drive_to_active(fx, id, 5s);
     EXPECT_EQ(reached, fsm_state::Active)
-        << "session did not reach Active (logon) against "
-        << hp::counterparty_token(counterparty)
+        << "session did not reach Active (logon) against " << hp::counterparty_token(counterparty)
         << "; reached state=" << static_cast<int>(reached);
 
     auto s = fx.engine().lookup(id);

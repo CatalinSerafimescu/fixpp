@@ -231,10 +231,10 @@ TEST_P(AllowPosDupStripSend, StripDefaultSends43Free_CounterpartyAccepts) {
 
     // ── In-process witness (c): outbound seqnum advanced by one ───────────────
     const auto seqnum_after = s->seqnum_mgr_test_access().next_outbound_unsafe();
-    EXPECT_EQ(seqnum_after, seqnum_before + 1u)
+    EXPECT_EQ(seqnum_after, seqnum_before + 1U)
         << "outbound seqnum did not advance by one after the send; "
            "expected="
-        << (seqnum_before + 1u) << " got=" << seqnum_after;
+        << (seqnum_before + 1U) << " got=" << seqnum_after;
 
     // ── Golden assertion: admin profile {52,10} ───────────────────────────────
     // Tags 34/35 compared verbatim (gate-biting per SC-004). The golden is

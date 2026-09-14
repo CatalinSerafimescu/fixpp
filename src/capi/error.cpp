@@ -16,9 +16,9 @@
 
 #include "fix/c_api/error.h"
 
-#include "fixpp/core/error.hpp"
-
 #include <cstdint>
+
+#include "fixpp/core/error.hpp"
 
 namespace fixpp_capi::detail {
 
@@ -81,7 +81,8 @@ fixpp_error_t translate(error e) noexcept {
             return FIXPP_ERR_DECIMAL_PRECISION_LOSS;
 
         // ── sync (slots 43-46) ─────────────────────────────────────────────
-        case error::sync_lock_aborted:  // "Joins FIXPP_ERR_CANCELLED" (error.hpp's `sync_lock_aborted` comment)
+        case error::sync_lock_aborted:  // "Joins FIXPP_ERR_CANCELLED" (error.hpp's
+                                        // `sync_lock_aborted` comment)
             return FIXPP_ERR_CANCELLED;
         case error::sync_lock_alloc_failed:
         case error::sync_lock_outside_session:
@@ -92,7 +93,8 @@ fixpp_error_t translate(error e) noexcept {
         case error::executor_already_stopped:
         case error::executor_not_serialised:
             return FIXPP_ERR_THREAD_CONFIG;
-        case error::clock_sleeps_cancelled:  // "Joins CANCELLED" (error.hpp's `clock_sleeps_cancelled` comment)
+        case error::clock_sleeps_cancelled:  // "Joins CANCELLED" (error.hpp's
+                                             // `clock_sleeps_cancelled` comment)
             return FIXPP_ERR_CANCELLED;
         case error::strand_dispatch_failed_oom:
             return FIXPP_ERR_THREAD_RUNTIME;
@@ -102,10 +104,12 @@ fixpp_error_t translate(error e) noexcept {
         case error::invalid_session_config:
         case error::clock_not_set:
             return FIXPP_ERR_THREAD_CONFIG;
-        case error::dispatch_aborted:  // "Joins CANCELLED (reused)" (error.hpp's `dispatch_aborted` comment)
+        case error::dispatch_aborted:  // "Joins CANCELLED (reused)" (error.hpp's `dispatch_aborted`
+                                       // comment)
             return FIXPP_ERR_CANCELLED;
 
-        // ── store (slots 56-65) — grouped ← prose (error.hpp's FIXPP_ERR_STORE_RUNTIME/CANCELLED grouping) ──
+        // ── store (slots 56-65) — grouped ← prose (error.hpp's FIXPP_ERR_STORE_RUNTIME/CANCELLED
+        // grouping) ──
         case error::store_io_failure:
         case error::store_capacity_exhausted:
         case error::store_seqnum_overflow:
@@ -129,9 +133,9 @@ fixpp_error_t translate(error e) noexcept {
         // stay UNKNOWN by design (not C-reachable / no published code) — the
         // log/otel + remaining-session leg of L-049-2 is deferred-by-design.
         case error::session_invalid_state_for_send:
-            return FIXPP_ERR_SESSION_INVALID_STATE;       // 1401 (ordinal 77)
+            return FIXPP_ERR_SESSION_INVALID_STATE;  // 1401 (ordinal 77)
         case error::session_invalid_argument:
-            return FIXPP_ERR_SESSION_INVALID_ARGUMENT;    // 1400 (ordinal 119)
+            return FIXPP_ERR_SESSION_INVALID_ARGUMENT;  // 1400 (ordinal 119)
         case error::session_invalid_logon:
         case error::session_compid_mismatch:
         case error::session_begin_string_unsupported:
@@ -172,7 +176,8 @@ fixpp_error_t translate(error e) noexcept {
         case error::tls_load_cancelled:  // reused (error.hpp's `tls_load_cancelled` comment)
             return FIXPP_ERR_CANCELLED;
 
-        // ── transport (slots 94-115) — grouped ← prose (error.hpp's FIXPP_ERR_TRANSPORT_LIFECYCLE grouping) ─
+        // ── transport (slots 94-115) — grouped ← prose (error.hpp's FIXPP_ERR_TRANSPORT_LIFECYCLE
+        // grouping) ─
         case error::transport_resolve_failed:
         case error::transport_connect_refused:
         case error::transport_connect_timeout:
@@ -216,11 +221,11 @@ fixpp_error_t translate(error e) noexcept {
         // Reachable from pure C via the toApp send-callback hook (FR-022) +
         // the direct send path; mapped into the [1400,1499] block (D-6).
         case error::app_do_not_send:
-            return FIXPP_ERR_APP_DO_NOT_SEND;       // 1402 (ordinal 129)
+            return FIXPP_ERR_APP_DO_NOT_SEND;  // 1402 (ordinal 129)
         case error::app_callback_threw:
-            return FIXPP_ERR_APP_CALLBACK_THREW;    // 1403 (ordinal 130)
+            return FIXPP_ERR_APP_CALLBACK_THREW;  // 1403 (ordinal 130)
         case error::app_payload_malformed:
-            return FIXPP_ERR_APP_PAYLOAD_MALFORMED; // 1404 (ordinal 131)
+            return FIXPP_ERR_APP_PAYLOAD_MALFORMED;  // 1404 (ordinal 131)
     }
     // No default above → -Wswitch proves all 116 enumerators are handled.
     // Reached only for an out-of-range value cast into `error` (not a real
@@ -270,65 +275,113 @@ fixpp_error_t translate_for_consumer(fixpp_error_t code, std::uint16_t consumer_
 extern "C" const char* fixpp_strerror(fixpp_error_t code) {
     switch (code) {
         // cross-cutting
-        case FIXPP_ERR_OK:                       return "no error";
-        case FIXPP_ERR_CANCELLED:                return "operation cancelled";
-        case FIXPP_ERR_UNKNOWN:                  return "unknown error code";
-        case FIXPP_ERR_NULL_HANDLE:              return "null handle";
-        case FIXPP_ERR_INVALID_HANDLE:           return "invalid or destroyed handle";
-        case FIXPP_ERR_VERSION_MISMATCH:         return "C ABI major version mismatch";
-        case FIXPP_ERR_BUFFER_TOO_SMALL:         return "output buffer too small";
-        case FIXPP_ERR_TYPE_MISMATCH:            return "type mismatch";
-        case FIXPP_ERR_TAG_NOT_FOUND:            return "tag not found";
-        case FIXPP_ERR_INDEX_OUT_OF_RANGE:       return "index out of range";
-        case FIXPP_ERR_CAPI_CONFIG_INVALID:      return "C ABI configuration invalid";
+        case FIXPP_ERR_OK:
+            return "no error";
+        case FIXPP_ERR_CANCELLED:
+            return "operation cancelled";
+        case FIXPP_ERR_UNKNOWN:
+            return "unknown error code";
+        case FIXPP_ERR_NULL_HANDLE:
+            return "null handle";
+        case FIXPP_ERR_INVALID_HANDLE:
+            return "invalid or destroyed handle";
+        case FIXPP_ERR_VERSION_MISMATCH:
+            return "C ABI major version mismatch";
+        case FIXPP_ERR_BUFFER_TOO_SMALL:
+            return "output buffer too small";
+        case FIXPP_ERR_TYPE_MISMATCH:
+            return "type mismatch";
+        case FIXPP_ERR_TAG_NOT_FOUND:
+            return "tag not found";
+        case FIXPP_ERR_INDEX_OUT_OF_RANGE:
+            return "index out of range";
+        case FIXPP_ERR_CAPI_CONFIG_INVALID:
+            return "C ABI configuration invalid";
         // wire
-        case FIXPP_ERR_WIRE_INVALID_FRAME:       return "wire: invalid frame";
-        case FIXPP_ERR_WIRE_LIMIT_EXCEEDED:      return "wire: limit exceeded";
-        case FIXPP_ERR_WIRE_CONFORMANCE:         return "wire: conformance violation";
+        case FIXPP_ERR_WIRE_INVALID_FRAME:
+            return "wire: invalid frame";
+        case FIXPP_ERR_WIRE_LIMIT_EXCEEDED:
+            return "wire: limit exceeded";
+        case FIXPP_ERR_WIRE_CONFORMANCE:
+            return "wire: conformance violation";
         // dict
-        case FIXPP_ERR_DICT_CONFIG:              return "dictionary: configuration error";
-        case FIXPP_ERR_DICT_LIMIT_EXCEEDED:      return "dictionary: limit exceeded";
-        case FIXPP_ERR_DICT_OOM:                 return "dictionary: out of memory";
+        case FIXPP_ERR_DICT_CONFIG:
+            return "dictionary: configuration error";
+        case FIXPP_ERR_DICT_LIMIT_EXCEEDED:
+            return "dictionary: limit exceeded";
+        case FIXPP_ERR_DICT_OOM:
+            return "dictionary: out of memory";
         // threading
-        case FIXPP_ERR_THREAD_CONFIG:            return "threading: configuration error";
-        case FIXPP_ERR_THREAD_SESSION_LIFECYCLE: return "threading: session lifecycle error";
-        case FIXPP_ERR_THREAD_RUNTIME:           return "threading: runtime error";
+        case FIXPP_ERR_THREAD_CONFIG:
+            return "threading: configuration error";
+        case FIXPP_ERR_THREAD_SESSION_LIFECYCLE:
+            return "threading: session lifecycle error";
+        case FIXPP_ERR_THREAD_RUNTIME:
+            return "threading: runtime error";
         // store
-        case FIXPP_ERR_STORE_RUNTIME:            return "store: runtime error";
-        case FIXPP_ERR_STORE_CONSISTENCY:        return "store: consistency violation";
-        case FIXPP_ERR_STORE_CONFIG:             return "store: configuration error";
-        case FIXPP_ERR_STORE_VISITOR:            return "store: visitor aborted";
+        case FIXPP_ERR_STORE_RUNTIME:
+            return "store: runtime error";
+        case FIXPP_ERR_STORE_CONSISTENCY:
+            return "store: consistency violation";
+        case FIXPP_ERR_STORE_CONFIG:
+            return "store: configuration error";
+        case FIXPP_ERR_STORE_VISITOR:
+            return "store: visitor aborted";
         // sync
-        case FIXPP_ERR_SYNC_RUNTIME:             return "sync: runtime error";
+        case FIXPP_ERR_SYNC_RUNTIME:
+            return "sync: runtime error";
         // tls
-        case FIXPP_ERR_TLS_CONFIG:               return "TLS: configuration error";
-        case FIXPP_ERR_TLS_HANDSHAKE:            return "TLS: handshake failed";
-        case FIXPP_ERR_TLS_PINSET:               return "TLS: pinset error";
-        case FIXPP_ERR_TLS_RUNTIME:              return "TLS: runtime error";
+        case FIXPP_ERR_TLS_CONFIG:
+            return "TLS: configuration error";
+        case FIXPP_ERR_TLS_HANDSHAKE:
+            return "TLS: handshake failed";
+        case FIXPP_ERR_TLS_PINSET:
+            return "TLS: pinset error";
+        case FIXPP_ERR_TLS_RUNTIME:
+            return "TLS: runtime error";
         // transport
-        case FIXPP_ERR_TRANSPORT_LIFECYCLE:      return "transport: lifecycle error";
-        case FIXPP_ERR_TRANSPORT_IO:             return "transport: I/O error";
-        case FIXPP_ERR_TRANSPORT_HANDSHAKE:      return "transport: handshake error";
-        case FIXPP_ERR_TRANSPORT_CONFIG:         return "transport: configuration error";
+        case FIXPP_ERR_TRANSPORT_LIFECYCLE:
+            return "transport: lifecycle error";
+        case FIXPP_ERR_TRANSPORT_IO:
+            return "transport: I/O error";
+        case FIXPP_ERR_TRANSPORT_HANDSHAKE:
+            return "transport: handshake error";
+        case FIXPP_ERR_TRANSPORT_CONFIG:
+            return "transport: configuration error";
         // decimal
-        case FIXPP_ERR_DECIMAL_INVALID:          return "decimal: invalid value";
-        case FIXPP_ERR_DECIMAL_PRECISION_LOSS:   return "decimal: precision loss";
+        case FIXPP_ERR_DECIMAL_INVALID:
+            return "decimal: invalid value";
+        case FIXPP_ERR_DECIMAL_PRECISION_LOSS:
+            return "decimal: precision loss";
         // control-plane
-        case FIXPP_ERR_CTRL_CONFIG:              return "control-plane: configuration error";
-        case FIXPP_ERR_CTRL_RUNTIME:             return "control-plane: runtime error";
+        case FIXPP_ERR_CTRL_CONFIG:
+            return "control-plane: configuration error";
+        case FIXPP_ERR_CTRL_RUNTIME:
+            return "control-plane: runtime error";
         // bindings
-        case FIXPP_ERR_BINDING_PYTHON_CALLBACK_RAISED:   return "binding: Python callback raised";
-        case FIXPP_ERR_BINDING_SUBINTERPRETER:           return "binding: subinterpreter violation";
-        case FIXPP_ERR_BINDING_OBJECT_LIFETIME:          return "binding: object lifetime violation";
-        case FIXPP_ERR_BINDING_WHEEL_ABI_MISMATCH:       return "binding: wheel ABI mismatch";
-        case FIXPP_ERR_BINDING_CALLBACK_REENTRANT_CLOSE: return "binding: reentrant close from callback";
+        case FIXPP_ERR_BINDING_PYTHON_CALLBACK_RAISED:
+            return "binding: Python callback raised";
+        case FIXPP_ERR_BINDING_SUBINTERPRETER:
+            return "binding: subinterpreter violation";
+        case FIXPP_ERR_BINDING_OBJECT_LIFETIME:
+            return "binding: object lifetime violation";
+        case FIXPP_ERR_BINDING_WHEEL_ABI_MISMATCH:
+            return "binding: wheel ABI mismatch";
+        case FIXPP_ERR_BINDING_CALLBACK_REENTRANT_CLOSE:
+            return "binding: reentrant close from callback";
         // session/app + message-construction ([1400,1499], 051 [2i §4.3] amendment)
-        case FIXPP_ERR_SESSION_INVALID_ARGUMENT:  return "session: invalid argument";
-        case FIXPP_ERR_SESSION_INVALID_STATE:     return "session: invalid state for send";
-        case FIXPP_ERR_APP_DO_NOT_SEND:           return "application: toApp callback vetoed the send";
-        case FIXPP_ERR_APP_CALLBACK_THREW:        return "application: callback signalled an error";
-        case FIXPP_ERR_APP_PAYLOAD_MALFORMED:     return "application: payload malformed";
-        case FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN: return "message: framing tag forbidden in outbound accumulator";
+        case FIXPP_ERR_SESSION_INVALID_ARGUMENT:
+            return "session: invalid argument";
+        case FIXPP_ERR_SESSION_INVALID_STATE:
+            return "session: invalid state for send";
+        case FIXPP_ERR_APP_DO_NOT_SEND:
+            return "application: toApp callback vetoed the send";
+        case FIXPP_ERR_APP_CALLBACK_THREW:
+            return "application: callback signalled an error";
+        case FIXPP_ERR_APP_PAYLOAD_MALFORMED:
+            return "application: payload malformed";
+        case FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN:
+            return "message: framing tag forbidden in outbound accumulator";
         default:
             return "unknown error";
     }

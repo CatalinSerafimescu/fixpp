@@ -34,7 +34,6 @@
 
 namespace {
 
-using fixpp::core::error;
 using fixpp::sync::async_lock_guard;
 using fixpp::sync::async_mutex;
 using fixpp::sync::expected_t;
@@ -110,7 +109,7 @@ TEST(DrainReentrantDuringActive, SecondDrainerAwaitsFirstCompletion) {
             asio::use_future);
 
         // Yield so drains proceed; then release the holder.
-        co_await yield_n(N * 4 + 8);
+        co_await yield_n((N * 4) + 8);
         // DISCRIMINATOR (P2-1): the holder is STILL held here, so neither drain can
         // have finalized; the reentrant second drain MUST still be parked awaiting
         // draining_complete_. If it returned eagerly this REDs.

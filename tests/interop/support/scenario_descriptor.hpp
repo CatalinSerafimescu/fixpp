@@ -37,14 +37,7 @@ enum class CellDisposition : std::uint8_t {
 
 enum class ParityDisposition : std::uint8_t { covered, gap, not_applicable };
 
-enum class CorpusPriority : std::uint8_t {
-    p1,
-    p2,
-    p3,
-    watch_p1,
-    watch_p2,
-    watch_info
-};
+enum class CorpusPriority : std::uint8_t { p1, p2, p3, watch_p1, watch_p2, watch_info };
 
 enum class ProvenanceState : std::uint8_t { closed, open };
 
@@ -107,10 +100,7 @@ struct ParityRow {
     std::string citation;
 };
 
-inline bool has_spec_ref(const Scenario& s)
-{
-    return !s.spec_ref.empty();
-}
+inline bool has_spec_ref(const Scenario& s) { return !s.spec_ref.empty(); }
 
 // ---------------------------------------------------------------------------
 // 018-interop-live-admin G1 admin-descriptor extensions
@@ -138,11 +128,11 @@ enum class AdminScenarioGroup : std::uint8_t {
 //   recovery_outbound -> qfj_restart_resend (QFJ restart/reconnect at lower seqnum)
 //   session_reject    -> proxy_corrupt     (parent corrupts a frame in-flight)
 enum class AdminInduction : std::uint8_t {
-    inbound_silence,    // testrequest_echo
-    idle_observation,   // idle_cadence
-    withhold_frame,     // recovery_inbound
-    qfj_restart_resend, // recovery_outbound
-    proxy_corrupt,      // session_reject
+    inbound_silence,     // testrequest_echo
+    idle_observation,    // idle_cadence
+    withhold_frame,      // recovery_inbound
+    qfj_restart_resend,  // recovery_outbound
+    proxy_corrupt,       // session_reject
 };
 
 // One admin round-trip's acceptance coverage reference (e.g. "US1-1").
@@ -151,8 +141,8 @@ enum class AdminInduction : std::uint8_t {
 // AC subset for the (scenario_group, role) pair (exact-set equality, not
 // subset — feedback_completeness_gate_exact_set_not_subset).
 struct AdminRoundTripRef {
-    std::string ac_ref;   // e.g. "US1-1", "US3-2"
-    std::string spec_ref; // "[FIX-SL §...]"
+    std::string ac_ref;    // e.g. "US1-1", "US3-2"
+    std::string spec_ref;  // "[FIX-SL §...]"
 };
 
 // Per-cell G1 admin descriptor — carries the fields required by the
@@ -162,43 +152,51 @@ struct AdminRoundTripRef {
 // validation helper asserts that induction == expected_induction(group)
 // and acceptance_ids == union(round_trips[].ac_ref) == expected_ac_ids(group,role).
 struct AdminScenarioDescriptor {
-    std::string cell_id;                           // e.g. "HP-QFj-init-fix44-testreq-echo"
+    std::string cell_id;  // e.g. "HP-QFj-init-fix44-testreq-echo"
     AdminScenarioGroup scenario_group = AdminScenarioGroup::testrequest_echo;
-    Role role = Role::fixpp_initiator;             // both required per FR-005a / rule 1
+    Role role = Role::fixpp_initiator;  // both required per FR-005a / rule 1
     Counterparty counterparty = Counterparty::quickfix_j;
-    std::string spec_ref;                          // "[FIX-SL §...]" mandatory
-    std::string golden_ref;                        // "happy/golden/<cell_id>.fix"
-    std::vector<AdminRoundTripRef> round_trips;    // >=1; each carries ac_ref (E2)
-    std::set<std::string> acceptance_ids;          // rule 7 exact-set target
-    AdminInduction induction = AdminInduction::inbound_silence; // rule 8: fixed by group
-    std::chrono::milliseconds self_deadline_ms{0}; // FR-010 per-cell bound
+    std::string spec_ref;                                        // "[FIX-SL §...]" mandatory
+    std::string golden_ref;                                      // "happy/golden/<cell_id>.fix"
+    std::vector<AdminRoundTripRef> round_trips;                  // >=1; each carries ac_ref (E2)
+    std::set<std::string> acceptance_ids;                        // rule 7 exact-set target
+    AdminInduction induction = AdminInduction::inbound_silence;  // rule 8: fixed by group
+    std::chrono::milliseconds self_deadline_ms{0};               // FR-010 per-cell bound
 };
 
 // Returns the expected induction mechanism for a given scenario_group (rule 8 table).
-inline AdminInduction expected_induction(AdminScenarioGroup group)
-{
+inline AdminInduction expected_induction(AdminScenarioGroup group) {
     switch (group) {
-        case AdminScenarioGroup::testrequest_echo:  return AdminInduction::inbound_silence;
-        case AdminScenarioGroup::idle_cadence:      return AdminInduction::idle_observation;
-        case AdminScenarioGroup::recovery_inbound:  return AdminInduction::withhold_frame;
-        case AdminScenarioGroup::recovery_outbound: return AdminInduction::qfj_restart_resend;
-        case AdminScenarioGroup::session_reject:    return AdminInduction::proxy_corrupt;
+        case AdminScenarioGroup::testrequest_echo:
+            return AdminInduction::inbound_silence;
+        case AdminScenarioGroup::idle_cadence:
+            return AdminInduction::idle_observation;
+        case AdminScenarioGroup::recovery_inbound:
+            return AdminInduction::withhold_frame;
+        case AdminScenarioGroup::recovery_outbound:
+            return AdminInduction::qfj_restart_resend;
+        case AdminScenarioGroup::session_reject:
+            return AdminInduction::proxy_corrupt;
     }
-    return AdminInduction::inbound_silence; // unreachable
+    return AdminInduction::inbound_silence;  // unreachable
 }
 
 // Returns the expected acceptance_ids for a (scenario_group, role) pair (rule 8 table).
 // Both roles are required to independently cover every AC of their group (rule 7).
-inline std::set<std::string> expected_ac_ids(AdminScenarioGroup group, Role /*role*/)
-{
+inline std::set<std::string> expected_ac_ids(AdminScenarioGroup group, Role /*role*/) {
     // Per rule 7: each role independently covers every AC of its group.
     // The expected set is the SAME for both roles within a group.
     switch (group) {
-        case AdminScenarioGroup::testrequest_echo:  return {"US1-1", "US1-2", "US1-3"};
-        case AdminScenarioGroup::idle_cadence:      return {"US2-1", "US2-2"};
-        case AdminScenarioGroup::recovery_inbound:  return {"US3-1", "US3-2", "US3-4"};
-        case AdminScenarioGroup::recovery_outbound: return {"US3-3", "US3-4"};
-        case AdminScenarioGroup::session_reject:    return {"US4-1", "US4-2"};
+        case AdminScenarioGroup::testrequest_echo:
+            return {"US1-1", "US1-2", "US1-3"};
+        case AdminScenarioGroup::idle_cadence:
+            return {"US2-1", "US2-2"};
+        case AdminScenarioGroup::recovery_inbound:
+            return {"US3-1", "US3-2", "US3-4"};
+        case AdminScenarioGroup::recovery_outbound:
+            return {"US3-3", "US3-4"};
+        case AdminScenarioGroup::session_reject:
+            return {"US4-1", "US4-2"};
     }
     return {};
 }
@@ -206,8 +204,7 @@ inline std::set<std::string> expected_ac_ids(AdminScenarioGroup group, Role /*ro
 // Validates the descriptor's induction and acceptance_ids against the rule 8 table.
 // Returns an empty string on success; a human-readable error string on failure.
 // Cell drivers call this at fixture setup (rule 7 + rule 8 enforcement).
-inline std::string validate_admin_descriptor(const AdminScenarioDescriptor& d)
-{
+inline std::string validate_admin_descriptor(const AdminScenarioDescriptor& d) {
     // Rule 8: induction must match the group's required mechanism.
     const AdminInduction exp_ind = expected_induction(d.scenario_group);
     if (d.induction != exp_ind) {

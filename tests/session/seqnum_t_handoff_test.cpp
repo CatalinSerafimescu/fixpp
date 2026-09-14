@@ -29,14 +29,14 @@ namespace {
 static_assert(std::is_same_v<seqnum_t, std::uint32_t>,
               "seqnum_t must be std::uint32_t (D-1, [2e §4.7])");
 
-static_assert(seqnum_min == 1u, "seqnum_min must be 1 per [FIX-SL §4.1]");
+static_assert(seqnum_min == 1U, "seqnum_min must be 1 per [FIX-SL §4.1]");
 
 static_assert(seqnum_max == std::numeric_limits<std::uint32_t>::max(),
               "seqnum_max must be UINT32_MAX per data-model.md E4");
 
 // Overflow check: seqnum_max + 1 must wrap (checked purely at the type level;
 // the session-fatal no-wrap contract is enforced at runtime by store_seqnum_overflow).
-static_assert(static_cast<seqnum_t>(static_cast<std::uint64_t>(seqnum_max) + 1) == 0u,
+static_assert(static_cast<seqnum_t>(static_cast<std::uint64_t>(seqnum_max) + 1) == 0U,
               "seqnum_t wraps arithmetically; session-fatal guard is in the store");
 
 // ── Runtime checks ───────────────────────────────────────────────────────────
@@ -44,7 +44,7 @@ static_assert(static_cast<seqnum_t>(static_cast<std::uint64_t>(seqnum_max) + 1) 
 TEST(SeqnumTHandoff, TypeWidthIs32Bits) {
     // sizeof(seqnum_t) == 4 bytes: matches the [2e §4.7] width convention
     // (QuickFIX C++, fix8, QuickFIX/J are all 32-bit).
-    EXPECT_EQ(sizeof(seqnum_t), 4u);
+    EXPECT_EQ(sizeof(seqnum_t), 4U);
 }
 
 TEST(SeqnumTHandoff, MinIs1) {
@@ -66,7 +66,7 @@ TEST(SeqnumTHandoff, HeaderResolvesWithoutPlaceholderAnnotation) {
     // The purpose is to confirm the include chain resolves and the values
     // are byte-identical to what 008's consumers expected from the placeholder.
     seqnum_t s = seqnum_min;
-    EXPECT_EQ(s, 1u);
+    EXPECT_EQ(s, 1U);
     s = seqnum_max;
     EXPECT_EQ(s, std::numeric_limits<std::uint32_t>::max());
 }

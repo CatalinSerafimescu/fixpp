@@ -71,13 +71,12 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdlib>
-#include <memory_resource>
-#include <string>
-#include <string_view>
-
 #include <fixpp/core/pmr_arena_upstream.hpp>
 #include <fixpp/dict/table_view.hpp>
 #include <fixpp/wire/parser.hpp>
+#include <memory_resource>
+#include <string>
+#include <string_view>
 
 #include "support/app_message_read_scaffold.hpp"  // fixpp_test_support::make_frame
 #include "support/fix44_dictionary.hpp"
@@ -129,8 +128,8 @@ void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
 namespace {
 
 using fixpp::wire::access_mode;
-using fixpp::wire::Framer;
 using fixpp::wire::frame_view;
+using fixpp::wire::Framer;
 using fixpp::wire::Parser;
 using fixpp::wire::pmr_carry_buffer;
 
@@ -140,9 +139,9 @@ constexpr std::size_t kInboundParseArena = 16384;
 bool slice_has_tag(fixpp::wire::group_slice const& s, std::uint16_t tag) {
     std::string_view sv{reinterpret_cast<char const*>(s.data), s.len};
     std::string const needle = std::to_string(tag) + "=";
-    if (sv.size() >= needle.size() && sv.substr(0, needle.size()) == needle) return true;
+    if (sv.size() >= needle.size() && sv.starts_with(needle)) return true;
     std::string const soh_needle = std::string("\x01") + needle;
-    return sv.find(soh_needle) != std::string_view::npos;
+    return sv.contains(soh_needle);
 }
 
 // One parse+read pass, mirroring parse_and_dispatch_'s exact arena shape.

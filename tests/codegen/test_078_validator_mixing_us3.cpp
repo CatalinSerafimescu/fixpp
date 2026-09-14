@@ -56,12 +56,11 @@
 #include <fixpp/v44/messages/Email.hpp>  // force-inlined validate_ body
 #undef FIXPP_VALIDATORS_HEADER_ONLY_Email
 
-#include <fixpp/v44/messages/News.hpp>  // declaration only -- resolves from fixpp::validators::v44
-
 #include <gtest/gtest.h>
 
 #include <array>
 #include <fixpp/core/error.hpp>
+#include <fixpp/v44/messages/News.hpp>  // declaration only -- resolves from fixpp::validators::v44
 
 namespace {
 

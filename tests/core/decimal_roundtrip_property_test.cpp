@@ -28,18 +28,19 @@ RoundtripResult check_roundtrip(pod_decimal orig) {
     // Step 1: format orig → bytes
     std::array<std::byte, 64> buf{};
     auto fmt = decimal_traits<pod_decimal>::to_chars(orig, std::span<std::byte>{buf});
-    if (!fmt.has_value()) return {false, "to_chars failed on original"};
+    if (!fmt.has_value()) return {.ok = false, .msg = "to_chars failed on original"};
 
     // Step 2: parse bytes back
     auto parsed = decimal_traits<pod_decimal>::from_chars(
         std::span<const std::byte>{buf.data(), *fmt}, std::pmr::null_memory_resource());
-    if (!parsed.has_value()) return {false, "from_chars failed on re-encoded bytes"};
+    if (!parsed.has_value()) return {.ok = false, .msg = "from_chars failed on re-encoded bytes"};
 
     // Step 3: compare value-equal
     auto cmp = decimal_traits<pod_decimal>::compare(orig, *parsed);
-    if (cmp != std::strong_ordering::equal) return {false, "re-parsed value differs from original"};
+    if (cmp != std::strong_ordering::equal)
+        return {.ok = false, .msg = "re-parsed value differs from original"};
 
-    return {true, {}};
+    return {.ok = true, .msg = {}};
 }
 
 }  // namespace
@@ -70,7 +71,7 @@ TEST(DecimalRoundtrip, GeneratedSamples) {
         for (auto e : exp_steps) {
             for (int sign : {1, -1}) {
                 std::int64_t mantissa = sign * m;
-                pod_decimal v{mantissa, e};
+                pod_decimal v{.mantissa = mantissa, .exponent = e};
                 auto r = check_roundtrip(v);
                 EXPECT_TRUE(r.ok) << "mantissa=" << mantissa << " exp=" << (int)e
                                   << " reason: " << r.msg;
@@ -82,7 +83,8 @@ TEST(DecimalRoundtrip, GeneratedSamples) {
     // Fill remaining count to 10^4 with a simple stride
     for (std::int64_t m = 1; count < 10000; m += 97, ++count) {
         std::int8_t e = static_cast<std::int8_t>(-(m % 38));
-        auto r = check_roundtrip(pod_decimal{m % 9223372036854775806LL + 1, e});
+        auto r = check_roundtrip(
+            pod_decimal{.mantissa = (m % 9223372036854775806LL) + 1, .exponent = e});
         EXPECT_TRUE(r.ok) << r.msg;
     }
 done:;

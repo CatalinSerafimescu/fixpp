@@ -18,7 +18,6 @@
 //
 // Oracle: data-model Entity 4 (PMR accounting); spec AC-R7 / seam #7/#16.
 #include <gtest/gtest.h>
-#include "../support/msvc_debug_arena_skip.hpp"
 
 #include <array>
 #include <cstddef>
@@ -31,6 +30,8 @@
 #include <optional>
 #include <span>
 #include <vector>
+
+#include "../support/msvc_debug_arena_skip.hpp"
 
 // Generated headers (build-tree only).
 #include <fixpp/v44/Reify.hpp>

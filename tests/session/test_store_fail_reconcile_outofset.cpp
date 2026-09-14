@@ -81,9 +81,9 @@ using fixpp::session::fsm_state;
 using fixpp::session::MessageStore;
 using fixpp::session::MessageStoreFactory;
 using fixpp::session::retrieve_visitor;
+using fixpp::session::seqnum_t;
 using fixpp::session::Session;
 using fixpp::session::session_role;
-using fixpp::session::seqnum_t;
 
 // ── Frame-building helpers (mirror test_store_fail_reconcile_breadth.cpp) ───
 
@@ -128,8 +128,9 @@ std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::s
 }
 
 std::vector<std::byte> make_app_payload(std::string_view clordid) {
-    std::string body = "35=D\x01" + std::string(field(11, clordid)) + "54=1\x01"
-                                                                       "55=AAPL\x01";
+    std::string body = "35=D\x01" + std::string(field(11, clordid)) +
+                       "54=1\x01"
+                       "55=AAPL\x01";
     std::vector<std::byte> v;
     v.reserve(body.size());
     for (char c : body) v.push_back(static_cast<std::byte>(c));
@@ -251,7 +252,9 @@ TEST_P(StoreFailReconcileOutOfSetTest, PersistentStore_FailsClosed_ForOutOfSetEr
     cfg.store_factory = factory;
 
     std::vector<std::vector<std::byte>> wire;
-    cfg.transport_send = [&](std::span<const std::byte> f) { wire.emplace_back(f.begin(), f.end()); };
+    cfg.transport_send = [&](std::span<const std::byte> f) {
+        wire.emplace_back(f.begin(), f.end());
+    };
 
     Session sess(engine, cfg);
 
@@ -268,8 +271,8 @@ TEST_P(StoreFailReconcileOutOfSetTest, PersistentStore_FailsClosed_ForOutOfSetEr
     ASSERT_EQ(sess.state(), fsm_state::LogonSent);
 
     auto peer_logon = make_logon("FIX.4.2", 1, "ACCEPTR", "INITR");
-    auto logon_r = asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>(peer_logon)),
-                                  asio::use_future);
+    auto logon_r = asio::co_spawn(
+        ioc, sess.on_inbound_frame(std::span<const std::byte>(peer_logon)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(
             ioc, logon_r, 200ms, "PersistentStore_FailsClosed_OutOfSet/logon-ack")) {
         fixpp::test_support::cancel_and_drain_or_report(
@@ -282,7 +285,8 @@ TEST_P(StoreFailReconcileOutOfSetTest, PersistentStore_FailsClosed_ForOutOfSetEr
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     auto payload = make_app_payload("ORD1");
-    auto send_fut = asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto send_fut =
+        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, send_fut, 200ms,
                                                     "PersistentStore_FailsClosed_OutOfSet")) {
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -302,7 +306,8 @@ TEST_P(StoreFailReconcileOutOfSetTest, PersistentStore_FailsClosed_ForOutOfSetEr
     //    predicate lands them GREEN) — RC#1 / FQ-1. ──
     EXPECT_FALSE(send_r.has_value())
         << "RC#1 (currently RED pre-fix): a persistent-store retain failure of the "
-           "OUT-OF-SET class " << static_cast<int>(injected_err)
+           "OUT-OF-SET class "
+        << static_cast<int>(injected_err)
         << " must fail closed exactly as the three enumerated classes do";
     if (!send_r.has_value()) {
         EXPECT_EQ(send_r.error(), injected_err)
@@ -310,29 +315,31 @@ TEST_P(StoreFailReconcileOutOfSetTest, PersistentStore_FailsClosed_ForOutOfSetEr
     }
     EXPECT_EQ(sess.state(), fsm_state::Disconnected)
         << "RC#1 (currently RED pre-fix): the session must transition to Disconnected for "
-           "out-of-set error class " << static_cast<int>(injected_err);
+           "out-of-set error class "
+        << static_cast<int>(injected_err);
     bool failing_frame_transmitted = false;
     for (const auto& frame : wire) {
         if (extract_tag(frame, 34) == std::to_string(kFailAtSeq)) failing_frame_transmitted = true;
     }
     EXPECT_FALSE(failing_frame_transmitted)
         << "the failing frame (seq=" << kFailAtSeq
-        << ") must NOT be transmitted for out-of-set error class " << static_cast<int>(injected_err);
+        << ") must NOT be transmitted for out-of-set error class "
+        << static_cast<int>(injected_err);
 }
 
-INSTANTIATE_TEST_SUITE_P(
-    OutOfSetErrorClasses, StoreFailReconcileOutOfSetTest,
-    ::testing::Values(fixpp::core::error::store_seqnum_gap,
-                      fixpp::core::error::store_seqnum_invalid),
-    [](const ::testing::TestParamInfo<fixpp::core::error>& info) -> std::string {
-        switch (info.param) {
-            case fixpp::core::error::store_seqnum_gap:
-                return "store_seqnum_gap";
-            case fixpp::core::error::store_seqnum_invalid:
-                return "store_seqnum_invalid";
-            default:
-                return "unknown";
-        }
-    });
+INSTANTIATE_TEST_SUITE_P(OutOfSetErrorClasses, StoreFailReconcileOutOfSetTest,
+                         ::testing::Values(fixpp::core::error::store_seqnum_gap,
+                                           fixpp::core::error::store_seqnum_invalid),
+                         [](const ::testing::TestParamInfo<fixpp::core::error>& info)
+                             -> std::string {
+                             switch (info.param) {
+                                 case fixpp::core::error::store_seqnum_gap:
+                                     return "store_seqnum_gap";
+                                 case fixpp::core::error::store_seqnum_invalid:
+                                     return "store_seqnum_invalid";
+                                 default:
+                                     return "unknown";
+                             }
+                         });
 
 }  // namespace

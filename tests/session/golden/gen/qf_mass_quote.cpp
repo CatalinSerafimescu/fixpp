@@ -4,8 +4,9 @@
 // QuotEntryGrp NoQuoteEntries(295) delimiter QuoteEntryID(299), BOTH
 // Required at their own level).
 // OFFLINE TOOLING, not checked in / not compiled by the main build.
-#include <iostream>
 #include <quickfix/fix44/MassQuote.h>
+
+#include <iostream>
 
 int main() {
     FIX44::MassQuote mq(FIX::QuoteID("QID-100"));

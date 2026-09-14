@@ -161,8 +161,11 @@ TEST(ReifyTest, ReifyDefaultMessageViewNormalizesMissingMsgType) {
     // 057: an empty view has no MsgType(35) → the get<35>-absent branch returns
     // dict_reify_unknown_msg_type (FR-009 remap of the retired placeholder).
     std::pmr::monotonic_buffer_resource arena;
-    fixpp::dict::version_profile const profile{fixpp::dict::session_version::vt11,
-                                               fixpp::dict::application_version::v44, true, 0};
+    fixpp::dict::version_profile const profile{
+        .session = fixpp::dict::session_version::vt11,
+        .default_appl = fixpp::dict::application_version::v44,
+        .has_per_message_override = true,
+        ._reserved = 0};
     auto r = fixpp::dict::reify(MV{}, profile, &arena);
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error(), fixpp::core::error::dict_reify_unknown_msg_type);
@@ -171,8 +174,11 @@ TEST(ReifyTest, ReifyDefaultMessageViewNormalizesMissingMsgType) {
 TEST(ReifyTest, ReifyFixtAdminFrameReturnsSessionAdminHandle) {
     // 057: each FIXT.1.1 admin frame reifies to a LIVE handle {session_admin,
     // vt11, Unknown} (was the retired R6 placeholder stub exit).
-    fixpp::dict::version_profile const profile{fixpp::dict::session_version::vt11,
-                                               fixpp::dict::application_version::v50sp2, true, 0};
+    fixpp::dict::version_profile const profile{
+        .session = fixpp::dict::session_version::vt11,
+        .default_appl = fixpp::dict::application_version::v50sp2,
+        .has_per_message_override = true,
+        ._reserved = 0};
     for (char mt : {'0', '1', '2', '3', '4', '5', 'A'}) {
         auto frame = make_frame(
             "FIXT.1.1", std::string("35=") + mt + "\x01" + "34=1\x01" + "49=S\x01" + "56=T\x01");
@@ -195,8 +201,11 @@ TEST(ReifyTest, ReifyApplicationFrameUsesProfileDefaultWhen1128Absent) {
     auto buf = make_nos_frame();
     std::pmr::monotonic_buffer_resource arena;
     auto mv = parse_frame(buf, &arena);
-    fixpp::dict::version_profile const profile{fixpp::dict::session_version::vt11,
-                                               fixpp::dict::application_version::v44, true, 0};
+    fixpp::dict::version_profile const profile{
+        .session = fixpp::dict::session_version::vt11,
+        .default_appl = fixpp::dict::application_version::v44,
+        .has_per_message_override = true,
+        ._reserved = 0};
 
     auto r = fixpp::dict::reify(mv, profile, &arena);
     ASSERT_TRUE(r.has_value());
@@ -212,8 +221,11 @@ TEST(ReifyTest, ReifyApplicationFramePropagatesUnknownApplVerId) {
                             "56=T\x01");
     std::pmr::monotonic_buffer_resource arena;
     auto mv = parse_frame(frame, &arena);
-    fixpp::dict::version_profile const profile{fixpp::dict::session_version::vt11,
-                                               fixpp::dict::application_version::v44, true, 0};
+    fixpp::dict::version_profile const profile{
+        .session = fixpp::dict::session_version::vt11,
+        .default_appl = fixpp::dict::application_version::v44,
+        .has_per_message_override = true,
+        ._reserved = 0};
 
     auto r = fixpp::dict::reify(mv, profile, &arena);
     ASSERT_FALSE(r.has_value());
@@ -224,8 +236,11 @@ TEST(ReifyTest, ReifyApplicationFramePropagatesUnresolvedDefault) {
     auto buf = make_nos_frame();
     std::pmr::monotonic_buffer_resource arena;
     auto mv = parse_frame(buf, &arena);
-    fixpp::dict::version_profile const profile{fixpp::dict::session_version::vt11,
-                                               fixpp::dict::application_version::Unknown, true, 0};
+    fixpp::dict::version_profile const profile{
+        .session = fixpp::dict::session_version::vt11,
+        .default_appl = fixpp::dict::application_version::Unknown,
+        .has_per_message_override = true,
+        ._reserved = 0};
 
     auto r = fixpp::dict::reify(mv, profile, &arena);
     ASSERT_FALSE(r.has_value());
@@ -244,8 +259,11 @@ TEST(ReifyTest, ReifyMultiCharMsgTypeSkipsFixtAdminCheck) {
                             "56=T\x01");
     std::pmr::monotonic_buffer_resource arena;
     auto mv = parse_frame(frame, &arena);
-    fixpp::dict::version_profile const profile{fixpp::dict::session_version::vt11,
-                                               fixpp::dict::application_version::v44, true, 0};
+    fixpp::dict::version_profile const profile{
+        .session = fixpp::dict::session_version::vt11,
+        .default_appl = fixpp::dict::application_version::v44,
+        .has_per_message_override = true,
+        ._reserved = 0};
 
     auto r = fixpp::dict::reify(mv, profile, &arena);
     ASSERT_TRUE(r.has_value());

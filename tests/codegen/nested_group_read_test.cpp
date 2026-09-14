@@ -107,11 +107,10 @@ decimal_t parse_decimal(std::string_view sv, std::pmr::memory_resource* mr) {
 }
 
 // The group-membership predicate `Parser`'s dict-lvalue ctor installs
-// (`Parser`'s dict-lvalue ctor, its `group_member_fn_` initializer) — mirrors tests/wire/group_slice_trailing_soh_test.cpp
-// T008's own copy, needed here only to construct the Parser via the
-// dict-lvalue ctor (which builds this same predicate internally); no direct
-// call is required by this file, but the pattern is documented here for
-// readers cross-referencing T008.
+// (`Parser`'s dict-lvalue ctor, its `group_member_fn_` initializer) — mirrors
+// tests/wire/group_slice_trailing_soh_test.cpp T008's own copy, needed here only to construct the
+// Parser via the dict-lvalue ctor (which builds this same predicate internally); no direct call is
+// required by this file, but the pattern is documented here for readers cross-referencing T008.
 
 // Hand-built CORRECT MassQuote group membership (FIX44.xml component defs:
 // the QuotSetGrp component for NoQuoteSets(296); QuotEntryGrp for
@@ -535,9 +534,9 @@ TEST(NestedGroupRead, NestedQuoteEntriesPerInstancePrices) {
 //
 // Run under both the debug preset and ASan (per the phase-5 brief): the
 // `group_context::msg_type` is a `string_view` aliasing the parsed message's
-// wire buffer (specs/004-wire-codec/data-model.md's E4 Invariants note) and must outlive every nested entry read
-// below — a dangling-view lifetime bug here would be invisible in a plain
-// debug build but would fault under ASan.
+// wire buffer (specs/004-wire-codec/data-model.md's E4 Invariants note) and must outlive every
+// nested entry read below — a dangling-view lifetime bug here would be invisible in a plain debug
+// build but would fault under ASan.
 TEST(NestedGroupRead, RealDictionaryMassQuoteTwoQuoteEntriesPerInstancePrices) {
     std::string body =
         "35=i\x01"
@@ -688,10 +687,10 @@ TEST(NestedGroupRead, RealDictionaryMassQuote296RootContextSeededAtCtorNoCachePo
 // pushed-context DISCRIMINATION witness.
 //
 // The generated typed nested accessor re-wraps the parent membership context
-// UNPUSHED at the emitter view-mint (`emit_group_class`'s `child_ctx.group_ctx` construction), so a depth-3
-// grandchild-group (555) slice queries membership one level too short. This
-// witness makes that observable with a HAND-BUILT table_view whose grandchild
-// group 555 is registered DIVERGENTLY:
+// UNPUSHED at the emitter view-mint (`emit_group_class`'s `child_ctx.group_ctx` construction), so a
+// depth-3 grandchild-group (555) slice queries membership one level too short. This witness makes
+// that observable with a HAND-BUILT table_view whose grandchild group 555 is registered
+// DIVERGENTLY:
 //   - BARE store  add_group_member(555, 602)                      -> {602}
 //   - CONTEXT store add_group_member_ctx("i",[296,295],555, {602,603})
 // The wire leg carries a TRAILING member 603 (LegSecurityIDSource). Because the
@@ -774,9 +773,11 @@ TEST(NestedGroupRead, Depth3TypedPushedContextResolvesGrandchildMemberNotBareFal
     fixpp::v44::MassQuote mq{*mv_exp};
     auto sets = mq.quote_sets();
     ASSERT_EQ(sets.size(), 1U);
-    auto entries = sets[0].quote_entries();
+    auto mass_quote_set0 = sets[0];  // named: quote_entries() borrows from it
+    auto entries = mass_quote_set0.quote_entries();
     ASSERT_EQ(entries.size(), 1U);
-    auto legs = entries[0].legs();
+    auto mass_quote_entry0 = entries[0];  // named: legs() borrows from it
+    auto legs = mass_quote_entry0.legs();
     ASSERT_EQ(legs.size(), 1U);
     auto leg = legs[0];
 

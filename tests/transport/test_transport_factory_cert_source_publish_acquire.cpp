@@ -28,24 +28,23 @@
 #include <atomic>
 #include <bit>
 #include <chrono>
-#include <memory>
-#include <span>
-#include <thread>
-#include <vector>
-
 #include <fixpp/core/error.hpp>
 #include <fixpp/tls/cert_source.hpp>
 #include <fixpp/tls/security_profile.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <memory>
+#include <span>
+#include <thread>
+#include <vector>
 
 namespace {
 
+using fixpp::tls::cert_source;
 using fixpp::tls::Certificate;
 using fixpp::tls::SslCtxConfig;
-using fixpp::tls::cert_source;
-using fixpp::transport::Transport;
 using fixpp::transport::asio_tls_transport_factory;
+using fixpp::transport::Transport;
 
 // ── Minimal no-op cert_source stub ───────────────────────────────────────────
 // Does NOT need OpenSSL — just provides the abstract interface so we can
@@ -66,7 +65,7 @@ public:
         return std::span<const Certificate>{};
     }
 
-    int id() const noexcept { return id_; }
+    [[nodiscard]] int id() const noexcept { return id_; }
 
 private:
     int id_;
@@ -127,7 +126,7 @@ TEST(TransportFactoryCertSourcePublishAcquire, ReaderNeverSeesTornPointer) {
                     ASSERT_LT(id, kSourceCount)
                         << "cert_source_snapshot() returned an out-of-range id=" << id
                         << " — possible torn pointer (corrupted object identity)";
-                    observed_ids.fetch_or(1u << static_cast<unsigned>(id),
+                    observed_ids.fetch_or(1U << static_cast<unsigned>(id),
                                           std::memory_order_release);
                 }
                 any_reader_started.store(1, std::memory_order_release);
@@ -136,7 +135,8 @@ TEST(TransportFactoryCertSourcePublishAcquire, ReaderNeverSeesTornPointer) {
     }
 
     // Wait until at least one reader has started.
-    while (any_reader_started.load(std::memory_order_acquire) == 0) { /* spin */ }
+    while (any_reader_started.load(std::memory_order_acquire) == 0) { /* spin */
+    }
 
     // Writer: cycle through the source instances (release-store each one).
     for (int i = 0; i < kRounds; ++i) {

@@ -22,30 +22,27 @@
 #ifdef FIXPP_HAS_SYSLOG
 
 #include <chrono>
-
 #include <fixpp/log/level.hpp>
 #include <fixpp/log/record.hpp>
 
 namespace {
 
-fixpp::log::Record make_record(fixpp::log::Level level, std::uint32_t fmt_id)
-{
+fixpp::log::Record make_record(fixpp::log::Level level, std::uint32_t fmt_id) {
     fixpp::log::Record rec{};
-    rec.level      = level;
-    rec.category   = fixpp::log::cat::session;
-    rec.format_id  = fmt_id;
-    rec.arg_count  = 0u;
-    rec.timestamp  = fixpp::core::utc_time_point{
-        std::chrono::system_clock::now().time_since_epoch()};
+    rec.level = level;
+    rec.category = fixpp::log::cat::session;
+    rec.format_id = fmt_id;
+    rec.arg_count = 0U;
+    rec.timestamp =
+        fixpp::core::utc_time_point{std::chrono::system_clock::now().time_since_epoch()};
     return rec;
 }
 
 }  // namespace
 
-TEST(SyslogSinkTest, ConstructOpenEmitClose)
-{
+TEST(SyslogSinkTest, ConstructOpenEmitClose) {
     fixpp::log::SyslogSinkConfig cfg;
-    cfg.ident    = "fixpp_test";
+    cfg.ident = "fixpp_test";
     cfg.facility = LOG_LOCAL7;  // use LOCAL7 to avoid clobbering daemon log
 
     fixpp::log::SyslogSink sink{std::move(cfg)};
@@ -55,13 +52,13 @@ TEST(SyslogSinkTest, ConstructOpenEmitClose)
     EXPECT_TRUE(result.has_value()) << "SyslogSink::open() must succeed on POSIX";
 
     // emit() at each level must not crash.
-    constexpr auto fmt_id = static_cast<std::uint32_t>(
-        fixpp::log::detail::crc32_str("test message"));
+    constexpr auto fmt_id =
+        static_cast<std::uint32_t>(fixpp::log::detail::crc32_str("test message"));
 
     sink.emit(make_record(fixpp::log::Level::trace, fmt_id));
     sink.emit(make_record(fixpp::log::Level::debug, fmt_id));
-    sink.emit(make_record(fixpp::log::Level::info,  fmt_id));
-    sink.emit(make_record(fixpp::log::Level::warn,  fmt_id));
+    sink.emit(make_record(fixpp::log::Level::info, fmt_id));
+    sink.emit(make_record(fixpp::log::Level::warn, fmt_id));
     sink.emit(make_record(fixpp::log::Level::error, fmt_id));
     sink.emit(make_record(fixpp::log::Level::fatal, fmt_id));
 
@@ -77,8 +74,7 @@ TEST(SyslogSinkTest, ConstructOpenEmitClose)
 
 #else  // FIXPP_HAS_SYSLOG not defined (Windows)
 
-TEST(SyslogSinkTest, NotAvailableOnPlatform)
-{
+TEST(SyslogSinkTest, NotAvailableOnPlatform) {
     // On non-POSIX platforms, SyslogSink is not compiled.
     // This test documents the expected behaviour.
     SUCCEED() << "SyslogSink is POSIX-only; not compiled on this platform.";

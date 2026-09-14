@@ -27,18 +27,16 @@
 //
 // Anchors: spec.md D-8 ([default]-merge), plan.md SC-005, FR-018/FR-018a.
 
-#include <fixpp/config/toml_config_loader.hpp>
-#include <fixpp/config/config_bundle.hpp>
-#include <fixpp/config/load_diagnostic.hpp>
-#include <fixpp/session/session_config.hpp>
-
-#include <asio/io_context.hpp>
+#include <gtest/gtest.h>
 
 #include <algorithm>
+#include <asio/io_context.hpp>
 #include <chrono>
+#include <fixpp/config/config_bundle.hpp>
+#include <fixpp/config/load_diagnostic.hpp>
+#include <fixpp/config/toml_config_loader.hpp>
+#include <fixpp/session/session_config.hpp>
 #include <string>
-
-#include <gtest/gtest.h>
 
 #ifndef FIXPP_CONFIG_FIXTURE_DIR
 #error "FIXPP_CONFIG_FIXTURE_DIR must be set by CMake"
@@ -50,8 +48,7 @@ namespace {
 // Returns a LoadResult (std::expected<ConfigBundle, vector<LoadDiagnostic>>).
 // The io_context is created per-call; NEVER call ctx.run() (anti-hang rule).
 
-fixpp::config::LoadResult load(std::string_view fixture_name)
-{
+fixpp::config::LoadResult load(std::string_view fixture_name) {
     const std::filesystem::path p =
         std::filesystem::path{std::string{FIXPP_CONFIG_FIXTURE_DIR}} / fixture_name;
     asio::io_context ctx;
@@ -65,14 +62,10 @@ fixpp::config::LoadResult load(std::string_view fixture_name)
 // key_path (both must match — not a bypassable guard).
 
 bool has_diag(const std::vector<fixpp::config::LoadDiagnostic>& diags,
-              fixpp::config::reason_class                        expected_reason,
-              std::string_view                                   expected_key_path)
-{
-    return std::any_of(diags.begin(), diags.end(),
-        [&](const fixpp::config::LoadDiagnostic& d) {
-            return d.reason == expected_reason
-                && d.key_path == expected_key_path;
-        });
+              fixpp::config::reason_class expected_reason, std::string_view expected_key_path) {
+    return std::ranges::any_of(diags, [&](const fixpp::config::LoadDiagnostic& d) {
+        return d.reason == expected_reason && d.key_path == expected_key_path;
+    });
 }
 
 }  // namespace
@@ -96,20 +89,16 @@ bool has_diag(const std::vector<fixpp::config::LoadDiagnostic>& diags,
 //   (d) Shared scalars: sessions[0].reset_on_logon == true, check_comp_id == false
 //       (values match [default], NOT the SessionConfig defaults false/true)
 
-TEST(LoadMultisessionDefaults, T031_MultiSessionDefaults)
-{
+TEST(LoadMultisessionDefaults, T031_MultiSessionDefaults) {
     auto result = load("multisession_defaults.toml");
 
     // Load must succeed — a failure here is a fixture/impl bug, not expected.
-    ASSERT_TRUE(result.has_value())
-        << "load_toml_config failed; diagnostics: "
-        << [&]{
-            std::string s;
-            if (!result.has_value())
-                for (const auto& d : result.error())
-                    s += d.key_path + ": " + d.message + "\n";
-            return s;
-        }();
+    ASSERT_TRUE(result.has_value()) << "load_toml_config failed; diagnostics: " << [&] {
+        std::string s;
+        if (!result.has_value())
+            for (const auto& d : result.error()) s += d.key_path + ": " + d.message + "\n";
+        return s;
+    }();
 
     // (d) Exactly 3 sessions.
     ASSERT_EQ(result->sessions.size(), std::size_t{3})
@@ -154,22 +143,16 @@ TEST(LoadMultisessionDefaults, T031_MultiSessionDefaults)
 
     // ── (d) Shared scalars inherited identically by A and C ──────────────────
     // reset_on_logon=true in [default] (non-default vs struct default false).
-    EXPECT_TRUE(a.reset_on_logon)
-        << "session[0].reset_on_logon must inherit true from [default]";
-    EXPECT_TRUE(c.reset_on_logon)
-        << "session[2].reset_on_logon must inherit true from [default]";
+    EXPECT_TRUE(a.reset_on_logon) << "session[0].reset_on_logon must inherit true from [default]";
+    EXPECT_TRUE(c.reset_on_logon) << "session[2].reset_on_logon must inherit true from [default]";
 
     // check_comp_id=false in [default] (inverted from struct default true).
-    EXPECT_FALSE(a.check_comp_id)
-        << "session[0].check_comp_id must inherit false from [default]";
-    EXPECT_FALSE(c.check_comp_id)
-        << "session[2].check_comp_id must inherit false from [default]";
+    EXPECT_FALSE(a.check_comp_id) << "session[0].check_comp_id must inherit false from [default]";
+    EXPECT_FALSE(c.check_comp_id) << "session[2].check_comp_id must inherit false from [default]";
 
     // Session B also inherits the shared scalars (it only overrides heartbeat+logout).
-    EXPECT_TRUE(b.reset_on_logon)
-        << "session[1].reset_on_logon must inherit true from [default]";
-    EXPECT_FALSE(b.check_comp_id)
-        << "session[1].check_comp_id must inherit false from [default]";
+    EXPECT_TRUE(b.reset_on_logon) << "session[1].reset_on_logon must inherit true from [default]";
+    EXPECT_FALSE(b.check_comp_id) << "session[1].check_comp_id must inherit false from [default]";
 
     // ── Reconnect endpoints: each session has its own host/port ──────────────
     EXPECT_EQ(a.reconnect_endpoint.host, "fix-a.example.com");
@@ -192,8 +175,7 @@ TEST(LoadMultisessionDefaults, T031_MultiSessionDefaults)
 // Without this guard, a [default]-only typo would be silently inherited by every
 // session with no diagnostic — masking operator errors.
 
-TEST(LoadMultisessionDefaults, T031_DefaultTypoCrossScope)
-{
+TEST(LoadMultisessionDefaults, T031_DefaultTypoCrossScope) {
     auto result = load("neg_default_typo.toml");
 
     // Load must FAIL — a typo in [default] must be rejected.
@@ -202,8 +184,7 @@ TEST(LoadMultisessionDefaults, T031_DefaultTypoCrossScope)
            "cross-scope key recognition must flag unknown keys under [default]";
 
     const auto& diags = result.error();
-    ASSERT_FALSE(diags.empty())
-        << "expected at least one diagnostic for the typo in [default]";
+    ASSERT_FALSE(diags.empty()) << "expected at least one diagnostic for the typo in [default]";
 
     using RC = fixpp::config::reason_class;
 
@@ -213,11 +194,12 @@ TEST(LoadMultisessionDefaults, T031_DefaultTypoCrossScope)
     const bool found = has_diag(diags, RC::unknown_key, "default.heartbeat_intervall");
     EXPECT_TRUE(found)
         << "expected unknown_key diagnostic at key_path='default.heartbeat_intervall'; "
-           "got " << diags.size() << " diagnostic(s):\n"
-        << [&]{
-            std::string s;
-            for (const auto& d : diags)
-                s += "  key_path='" + d.key_path + "' message='" + d.message + "'\n";
-            return s;
-        }();
+           "got "
+        << diags.size() << " diagnostic(s):\n"
+        << [&] {
+               std::string s;
+               for (const auto& d : diags)
+                   s += "  key_path='" + d.key_path + "' message='" + d.message + "'\n";
+               return s;
+           }();
 }

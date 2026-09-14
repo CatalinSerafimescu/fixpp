@@ -43,7 +43,7 @@ using fixpp::wire::Writer;
 // Tags the Writer auto-computes; skip them when re-emitting via Writer.
 // tag=9 (BodyLength) is injected by the Writer after the 8= field.
 // tag=10 (CheckSum) is appended by commit().
-static bool is_auto_framing_tag(std::uint16_t tag) noexcept { return tag == 9 || tag == 10; }
+bool is_auto_framing_tag(std::uint16_t tag) noexcept { return tag == 9 || tag == 10; }
 
 // Build a single well-formed FIX 4.4 frame from the body fields (the span
 // between 9=...\x01 and 10=...\x01).
@@ -258,7 +258,7 @@ TEST(RoundTripProperty, ZeroCountGroupPreservedByteIdentical) {
     auto original = make_frame(
         "35=0\x01"
         "34=1\x01"
-        "627=0\x01"      // NoHops=0 — present-but-empty group
+        "627=0\x01"        // NoHops=0 — present-but-empty group
         "112=HELLO\x01");  // non-member field following the zero count
     std::vector<std::byte> scratch_buf;
     auto round_tripped = structural_round_trip(original, scratch_buf);

@@ -156,7 +156,9 @@ TEST(FileStoreFlushForSessionClose, GracefulCloseFlushes32FramesBatch64) {
 
         // Open: mints the FileStore, stashes A1 hook as close_flush_hook_a1_
         Session session{engine, cfg};
-        asio::co_spawn(pool.get_executor(), session.open(), asio::use_future).get();
+        ASSERT_TRUE(asio::co_spawn(pool.get_executor(), session.open(), asio::use_future)
+                        .get()
+                        .has_value());
 
         // Graceful close: must invoke flush_for_session_close() via A1 hook
         // then proceed to phase 2 root cancellation.
@@ -176,7 +178,7 @@ TEST(FileStoreFlushForSessionClose, GracefulCloseFlushes32FramesBatch64) {
     auto reminted = factory2.make("FLUSHSND", "FLUSHTGT", nullptr, 1ULL << 30, pool.get_executor());
     ASSERT_TRUE(reminted.has_value()) << "re-open failed after graceful close + session destruct";
 
-    reminted.value().reset();
+    reminted.value() = nullptr;
     fixpp::store_test::remove_store_dir(dir);
 }
 
@@ -190,7 +192,7 @@ TEST(FileStoreFlushForSessionClose, DirectFlushDrainsPendingBatchedFrames) {
 
     constexpr int kFrames = 32;
     constexpr std::size_t kBatch = 64;
-    ASSERT_LT(static_cast<std::size_t>(kFrames), kBatch - 1u)
+    ASSERT_LT(static_cast<std::size_t>(kFrames), kBatch - 1U)
         << "test invariant: kFrames must be within the commit_batched window";
 
     auto script = make_store_script(kFrames, direction_t::outbound);
@@ -272,7 +274,7 @@ TEST(FileStoreFlushForSessionClose, DirectFlushDrainsPendingBatchedFrames) {
             << "frame " << i << " not byte-identical after re-open";
     }
 
-    reminted.value().reset();
+    reminted.value() = nullptr;
     fixpp::store_test::remove_store_dir(dir);
 }
 
@@ -304,7 +306,7 @@ TEST(FileStoreFlushForSessionClose, SessionWithMemoryStoreGracefulCloseSucceeds)
     mcfg.max_frame_bytes = 4096;
 
     // Use a small cap that allows the default config through DoS check
-    constexpr std::size_t kSmallCap = 100 * 100 * 4096 + 1;  // just over product
+    constexpr std::size_t kSmallCap = (100 * 100 * 4096) + 1;  // just over product
 
     EngineConfig engine;
     engine.executor = pool.get_executor();
@@ -317,7 +319,8 @@ TEST(FileStoreFlushForSessionClose, SessionWithMemoryStoreGracefulCloseSucceeds)
     cfg.store_factory = std::make_unique<MemoryStoreFactory>(mcfg);
 
     Session session{engine, cfg};
-    asio::co_spawn(pool.get_executor(), session.open(), asio::use_future).get();
+    ASSERT_TRUE(
+        asio::co_spawn(pool.get_executor(), session.open(), asio::use_future).get().has_value());
 
     // close(graceful) with null A1 hook must still succeed
     auto result =
@@ -365,7 +368,7 @@ public:
 
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<fixpp::session::seqnum_t>> next_seqnum(
         fixpp::session::direction_t, bool) noexcept override {
-        co_return fixpp::core::expected_t<fixpp::session::seqnum_t>{1u};
+        co_return fixpp::core::expected_t<fixpp::session::seqnum_t>{1U};
     }
 
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override {
@@ -415,7 +418,8 @@ TEST(FileStoreFlushForSessionClose, A1HookInvokedBySessionCloseGraceful) {
     cfg.store_factory = std::move(factory_up);
 
     Session session{engine, cfg};
-    asio::co_spawn(pool.get_executor(), session.open(), asio::use_future).get();
+    ASSERT_TRUE(
+        asio::co_spawn(pool.get_executor(), session.open(), asio::use_future).get().has_value());
 
     // The tracking_store is now owned by the session
     tracking_store* ts = raw_factory->last_store;
@@ -455,7 +459,8 @@ TEST(FileStoreFlushForSessionClose, A1HookNotInvokedBySessionCloseTerminal) {
     cfg.store_factory = std::move(factory_up);
 
     Session session{engine, cfg};
-    asio::co_spawn(pool.get_executor(), session.open(), asio::use_future).get();
+    ASSERT_TRUE(
+        asio::co_spawn(pool.get_executor(), session.open(), asio::use_future).get().has_value());
 
     tracking_store* ts = raw_factory->last_store;
     ASSERT_NE(ts, nullptr);
@@ -506,7 +511,7 @@ TEST(FileStoreFlushForSessionClose, FlushDoesNotSurfaceStoreCancelled) {
     // base case (no frames stored). We primarily verify the non-cancellation
     // property.
 
-    minted.value().reset();
+    minted.value() = nullptr;
     fixpp::store_test::remove_store_dir(dir);
 }
 

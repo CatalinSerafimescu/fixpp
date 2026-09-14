@@ -71,7 +71,7 @@ fixpp::config::LoadResult load_path(const std::filesystem::path& p) {
 // Diagnostic search helper.
 bool has_diag_hp(const std::vector<fixpp::config::LoadDiagnostic>& diags,
                  fixpp::config::reason_class expected_reason, std::string_view expected_key_path) {
-    return std::any_of(diags.begin(), diags.end(), [&](const fixpp::config::LoadDiagnostic& d) {
+    return std::ranges::any_of(diags, [&](const fixpp::config::LoadDiagnostic& d) {
         return d.reason == expected_reason && d.key_path == expected_key_path;
     });
 }
@@ -411,7 +411,8 @@ TEST(LoadHappyPath, Cov_FixtApplVerIds) {
 
 // ── pos_multisession_profile_diverges.toml: per-session divergence scan ───────
 //    session[0] matches engine default (resolve_transport's match-engine-default continue)
-//    session[1] profile diverges but same cert → reuse engine cert (resolve_transport's cert-reuse arm)
+//    session[1] profile diverges but same cert → reuse engine cert (resolve_transport's cert-reuse
+//    arm)
 
 TEST(LoadHappyPath, Cov_MultisessionProfileDiverges) {
     auto result = load_fixture("pos_multisession_profile_diverges.toml");
@@ -624,8 +625,8 @@ namespace fixpp::config::detail {
 
 TEST(LoadHappyPath, Cov_DisplayValueNonCredential) {
     // A key that is NOT a credential: display_value must return the value
-    // verbatim (covers display_value's non-credential return in loader_internal.cpp and the False branch
-    // of "if (is_credential_key(key_path))").
+    // verbatim (covers display_value's non-credential return in loader_internal.cpp and the False
+    // branch of "if (is_credential_key(key_path))").
     std::string_view v = fixpp::config::detail::display_value("session[0].host", "fix.example.com");
     EXPECT_EQ(v, "fix.example.com")
         << "display_value must pass through the value for a non-credential key";

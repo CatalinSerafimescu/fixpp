@@ -58,7 +58,8 @@
 //
 // Cross-check confirmed: NO escalation required.
 //
-// Anchors: 005/data-model.md §E2 matrix; session_fsm.hpp's fsm_state enum + Event-alphabet comment; FR-006; SC-002.
+// Anchors: 005/data-model.md §E2 matrix; session_fsm.hpp's fsm_state enum + Event-alphabet comment;
+// FR-006; SC-002.
 
 #include <gtest/gtest.h>
 
@@ -234,7 +235,7 @@ protected:
     }
 
     // Count outbound frames of a given MsgType captured AFTER drive_to_active.
-    std::size_t count_admin_frames_with_type(std::string_view msg_type) const {
+    [[nodiscard]] std::size_t count_admin_frames_with_type(std::string_view msg_type) const {
         std::size_t n = 0;
         for (const auto& f : captured_frames) {
             if (extract_msg_type(f) == msg_type) ++n;
@@ -294,7 +295,7 @@ protected:
         if (s.state() != fsm_state::LogonSent) return false;
         // Peer sends Logon (sender=TARGET, target=SENDER) seq=1 with 108=30.
         auto peer_logon = build_logon(kTarget, kSender);
-        feed_sync(s, peer_logon);
+        if (!feed_sync(s, peer_logon).has_value()) return false;
         return s.state() == fsm_state::Active;
     }
 
@@ -303,7 +304,7 @@ protected:
         if (!open_sync(s).has_value()) return false;
         if (s.state() != fsm_state::NotConnected) return false;
         auto peer_logon = build_logon(kTarget, kSender);
-        feed_sync(s, peer_logon);
+        if (!feed_sync(s, peer_logon).has_value()) return false;
         return s.state() == fsm_state::Active;
     }
 
@@ -983,7 +984,8 @@ TEST_F(FsmMatrixWitness, Active_InvalidAppMsgType_SessionReject_StaysActive) {
     // Reject(35=3) was actually emitted via transport_send. The impl at
     // on_inbound_frame's Active-row non-session-admin MsgType Reject arm builds + emits
     // the Reject (binding behavior, distinct from the dup-Logon /
-    // OOSA spec-vs-impl gap tracked in the SC-002 row of .specify/decisions/010-session-cfg-lifetime-verify.md).
+    // OOSA spec-vs-impl gap tracked in the SC-002 row of
+    // .specify/decisions/010-session-cfg-lifetime-verify.md).
     EXPECT_EQ(count_admin_frames_with_type("3"), 1U)
         << "Active×InvalidAppMsgType: exactly 1 Reject(35=3) must be emitted "
            "(matrix Active row E12 — invalid MsgType for state)";

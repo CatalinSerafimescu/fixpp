@@ -205,7 +205,7 @@ struct ProvenanceFixture {
         (void)fut.get();
     }
 
-    bool has_reject_with_reason(int reason) const {
+    [[nodiscard]] bool has_reject_with_reason(int reason) const {
         for (auto const& frame : transport.sent_frames()) {
             if (extract_field(frame, 35) == "3") {
                 auto r373 = extract_field(frame, 373);
@@ -259,7 +259,8 @@ TEST(SessionDictSnapshotProvenance, MatchingSnapshotAcceptedAtOpen) {
     auto dict_a = fixpp::test_support::make_validation_test_dictionary();
 
     auto cfg = fix.make_cfg(dict_a);
-    cfg.dict_snapshot = fixpp::dict::make_dictionary_snapshot(dict_a);  // SAME shared_ptr as dictionary
+    cfg.dict_snapshot =
+        fixpp::dict::make_dictionary_snapshot(dict_a);  // SAME shared_ptr as dictionary
     ASSERT_NE(cfg.dict_snapshot, nullptr);
     ASSERT_EQ(cfg.dict_snapshot->source(), cfg.dictionary);
 

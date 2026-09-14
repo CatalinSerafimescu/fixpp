@@ -168,7 +168,10 @@ TEST(RenderApplVerId, RoundTrip_AllValues) {
     using fixpp::dict::session_version;
     using fixpp::dict::version_profile;
 
-    const version_profile kProfile{session_version::vt11, application_version::v50sp2, true, 0};
+    const version_profile kProfile{.session = session_version::vt11,
+                                   .default_appl = application_version::v50sp2,
+                                   .has_per_message_override = true,
+                                   ._reserved = 0};
 
     constexpr application_version kAll[] = {
         application_version::v40,    application_version::v41,    application_version::v42,
@@ -214,7 +217,7 @@ namespace {
     std::string needle = "\x01";
     needle += tag_num;
     needle += "=";
-    return frame.find(needle) != std::string_view::npos;
+    return frame.contains(needle);
 }
 
 // W4 baseline: the exact FIX.4.4 Logon produced by build_logon with:
@@ -499,7 +502,7 @@ constexpr std::string_view kMinimalFix50sp2Xml = R"xml(
 )xml";
 
 [[nodiscard]] std::shared_ptr<const fixpp::dict::Dictionary> make_dict(std::string_view xml) {
-    constexpr std::size_t kBufSize = 64u * 1024u;
+    constexpr std::size_t kBufSize = 64U * 1024U;
     auto buf = std::make_unique<std::array<std::byte, kBufSize>>();
     auto* mr = new std::pmr::monotonic_buffer_resource{buf->data(), buf->size()};
     fixpp::dict::Dictionary d = fixpp::dict::XmlLoader{}.load_from_string(xml, mr);
@@ -614,7 +617,7 @@ constexpr std::string_view kMinimalFix50sp2Xml = R"xml(
 [[nodiscard]] bool wire_has_tag(std::span<const std::byte> frame, int tag) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = "\x01" + std::to_string(tag) + "=";
-    return wire.find(needle) != std::string::npos;
+    return wire.contains(needle);
 }
 
 // Run a coroutine synchronously.
@@ -727,9 +730,9 @@ TEST(FixtLogonEstablishment, W1_FullRoundTrip_BothActive_NegotiatedV50sp2) {
     fixpp::session::Session initiator(s.engine, init_cfg, reg);
 
     // Open acceptor (enters NotConnected waiting state)
-    run_sync(s, [&] { return acceptor.open(); });
+    ASSERT_TRUE(run_sync(s, [&] { return acceptor.open(); }).has_value());
     // Open initiator (emits own Logon → LogonSent)
-    run_sync(s, [&] { return initiator.open(); });
+    ASSERT_TRUE(run_sync(s, [&] { return initiator.open(); }).has_value());
 
     ASSERT_FALSE(init_frame_out.empty()) << "Initiator should have emitted a Logon";
 
@@ -806,7 +809,7 @@ TEST(FixtLogonEstablishment, InitiatorAbsent1137Ack_ReachesActive_NegotiatedUnkn
     };
     fixpp::session::Session initiator(s.engine, init_cfg, reg);
 
-    run_sync(s, [&] { return initiator.open(); });
+    ASSERT_TRUE(run_sync(s, [&] { return initiator.open(); }).has_value());
     ASSERT_FALSE(init_frame_out.empty()) << "Initiator should have emitted a Logon";
 
     // Synthetic acceptor Logon-ack (ISLD→TW) WITHOUT 1137 (empty default_appl_ver_id).
@@ -823,7 +826,8 @@ TEST(FixtLogonEstablishment, InitiatorAbsent1137Ack_ReachesActive_NegotiatedUnkn
     ASSERT_EQ(initiator.state(), fsm_state::Active)
         << "Initiator must reach Active on a 1137-less ack (L-033-3 deferred-by-design)";
 
-    // The unnegotiated fallback (negotiated_version_profile()'s Unknown branch): no application version recorded.
+    // The unnegotiated fallback (negotiated_version_profile()'s Unknown branch): no application
+    // version recorded.
     auto profile = initiator.negotiated_version_profile();
     EXPECT_EQ(profile.default_appl, application_version::Unknown)
         << "Absent 1137-ack → negotiated_appl_version_ stays Unknown";
@@ -851,7 +855,7 @@ TEST(FixtLogonEstablishment, W2_Missing1137_AcceptorRejectsWithRTM_NotActive) {
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
 
-    run_sync(s, [&] { return acceptor.open(); });
+    ASSERT_TRUE(run_sync(s, [&] { return acceptor.open(); }).has_value());
 
     // Build FIXT Logon WITHOUT 1137 (empty default_appl_ver_id).
     // Peer: TW sends to ISLD.
@@ -924,7 +928,7 @@ TEST(FixtLogonEstablishment, W3_Unserviceable1137_AcceptorRejectsWithVII_NotActi
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
 
-    run_sync(s, [&] { return acceptor.open(); });
+    ASSERT_TRUE(run_sync(s, [&] { return acceptor.open(); }).has_value());
 
     // Peer (TW) sends FIXT Logon with 1137=8 (v50sp1) — present but absent
     // from registry {v44, v50sp2} → unserviceable → 373=5 path fires.
@@ -996,7 +1000,7 @@ TEST(FixtLogonEstablishment, W5_VersionGeneral_V44_NegotiatesCorrectly) {
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
 
-    run_sync(s, [&] { return acceptor.open(); });
+    ASSERT_TRUE(run_sync(s, [&] { return acceptor.open(); }).has_value());
 
     // Peer (TW) sends FIXT Logon with 1137=6 (v44 wire value).
     auto logon_v44 = make_fixt_logon_frame("FIXT.1.1", 1, "TW", "ISLD", 30, "6");
@@ -1025,7 +1029,7 @@ TEST(FixtLogonEstablishment, W5_VersionGeneral_V50sp2_NegotiatesCorrectly) {
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
 
-    run_sync(s, [&] { return acceptor.open(); });
+    ASSERT_TRUE(run_sync(s, [&] { return acceptor.open(); }).has_value());
 
     // Peer (TW) sends FIXT Logon with 1137=9 (v50sp2 wire value).
     auto logon_v50sp2 = make_fixt_logon_frame("FIXT.1.1", 1, "TW", "ISLD", 30, "9");
@@ -1085,7 +1089,7 @@ TEST(FixtLogonEstablishment, W8_1128Tolerance_DeliveredDictFree_StaysActive) {
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
 
-    run_sync(s, [&] { return acceptor.open(); });
+    ASSERT_TRUE(run_sync(s, [&] { return acceptor.open(); }).has_value());
 
     // Step 1: Complete FIXT handshake to reach Active.
     // Feed a valid FIXT Logon with 1137=9 (v50sp2).
@@ -1171,9 +1175,7 @@ TEST(FixtOpenValidation, FQ1a_MissingDefaultApplVerId_ReturnsInvalidConfig_NoLog
     auto cfg = s.make_initiator_cfg(application_version::v50sp2);
     // Explicitly clear default_appl_ver_id — isolates the missing-version arm.
     cfg.default_appl_ver_id = std::nullopt;
-    cfg.transport_send = [&](std::span<const std::byte> f) {
-        emitted.assign(f.begin(), f.end());
-    };
+    cfg.transport_send = [&](std::span<const std::byte> f) { emitted.assign(f.begin(), f.end()); };
 
     // Pass non-null registry so the registry arm does NOT fire.
     fixpp::session::Session sess(s.engine, cfg, &s.registry);
@@ -1183,12 +1185,10 @@ TEST(FixtOpenValidation, FQ1a_MissingDefaultApplVerId_ReturnsInvalidConfig_NoLog
     ASSERT_FALSE(result.has_value())
         << "open() must fail for FIXT.1.1 + unset default_appl_ver_id (FQ-1a)";
     EXPECT_EQ(result.error(), fixpp::core::error::invalid_session_config)
-        << "Error must be invalid_session_config, not: "
-        << static_cast<int>(result.error());
+        << "Error must be invalid_session_config, not: " << static_cast<int>(result.error());
 
     // No Logon must have been emitted.
-    EXPECT_TRUE(emitted.empty())
-        << "No frame must be emitted when open() rejects (FQ-1a)";
+    EXPECT_TRUE(emitted.empty()) << "No frame must be emitted when open() rejects (FQ-1a)";
 
     // Session must NOT be Active.
     EXPECT_NE(sess.state(), fsm_state::Active)
@@ -1203,9 +1203,7 @@ TEST(FixtOpenValidation, FQ1b_NullRegistry_ReturnsInvalidConfig) {
 
     std::vector<std::byte> emitted;
     auto cfg = s.make_acceptor_cfg(application_version::v50sp2);
-    cfg.transport_send = [&](std::span<const std::byte> f) {
-        emitted.assign(f.begin(), f.end());
-    };
+    cfg.transport_send = [&](std::span<const std::byte> f) { emitted.assign(f.begin(), f.end()); };
 
     // Omit 3rd argument → app_version_registry_ == nullptr (test-ctor path).
     fixpp::session::Session sess(s.engine, cfg /*, no registry */);
@@ -1215,12 +1213,10 @@ TEST(FixtOpenValidation, FQ1b_NullRegistry_ReturnsInvalidConfig) {
     ASSERT_FALSE(result.has_value())
         << "open() must fail for FIXT.1.1 acceptor with null registry (FQ-1b)";
     EXPECT_EQ(result.error(), fixpp::core::error::invalid_session_config)
-        << "Error must be invalid_session_config, not: "
-        << static_cast<int>(result.error());
+        << "Error must be invalid_session_config, not: " << static_cast<int>(result.error());
 
     // No frame emitted.
-    EXPECT_TRUE(emitted.empty())
-        << "No frame must be emitted when open() rejects (FQ-1b)";
+    EXPECT_TRUE(emitted.empty()) << "No frame must be emitted when open() rejects (FQ-1b)";
 
     // Not Active.
     EXPECT_NE(sess.state(), fsm_state::Active)
@@ -1229,11 +1225,11 @@ TEST(FixtOpenValidation, FQ1b_NullRegistry_ReturnsInvalidConfig) {
 
 // ── 038 T013 [US3] — FIXT DefaultApplVerID(1137) reject witnesses ────────────
 //
-// The existing acceptor 1137 reject arms (session.cpp's DefaultApplVerID(1137) gate: absent → Reject
-// 373=1; non-conformant → Reject 373=5, both RefTagID=1137, then Disconnected)
-// are fail-closed by code-read but had zero session-level negative witnesses with
-// toAdmin observation (W2/W3 cover wire shape + state only). These cells add the
-// missing toAdmin + gate-ordering witnesses.
+// The existing acceptor 1137 reject arms (session.cpp's DefaultApplVerID(1137) gate: absent →
+// Reject 373=1; non-conformant → Reject 373=5, both RefTagID=1137, then Disconnected) are
+// fail-closed by code-read but had zero session-level negative witnesses with toAdmin observation
+// (W2/W3 cover wire shape + state only). These cells add the missing toAdmin + gate-ordering
+// witnesses.
 //
 // (a) Absent 1137 → Reject(35=3, 371=1137, 373=1 RequiredTagMissing) + toAdmin
 //     observed + Disconnected.
@@ -1268,8 +1264,7 @@ public:
 // Reuses FixtSetup with a non-null registry (v50sp2); acceptor configured with
 // v50sp2. The peer's Logon omits 1137 → RequiredTagMissing path.
 // Characterizes existing behaviour — should be GREEN.
-TEST(FixtLogonEstablishment,
-     W_Missing1137_ToAdminObserved_RequiredTagMissing_Disconnected) {
+TEST(FixtLogonEstablishment, W_Missing1137_ToAdminObserved_RequiredTagMissing_Disconnected) {
     auto v50sp2_dict = make_dict(kMinimalFix50sp2Xml);
     FixtSetup s{{v50sp2_dict}};
 
@@ -1284,7 +1279,7 @@ TEST(FixtLogonEstablishment,
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
 
-    run_sync(s, [&] { return acceptor.open(); });
+    ASSERT_TRUE(run_sync(s, [&] { return acceptor.open(); }).has_value());
 
     // Feed a FIXT Logon WITHOUT 1137 (empty default_appl_ver_id).
     auto logon_no_1137 = make_fixt_logon_frame("FIXT.1.1", 1, "TW", "ISLD", 30, "");
@@ -1301,8 +1296,7 @@ TEST(FixtLogonEstablishment,
     // (b) A Reject(35=3) frame must have been emitted with 371=1137, 373=1.
     ASSERT_FALSE(acpt_frame_out.empty())
         << "Acceptor must emit a Reject frame when 1137 is missing";
-    std::string wire(reinterpret_cast<const char*>(acpt_frame_out.data()),
-                     acpt_frame_out.size());
+    std::string wire(reinterpret_cast<const char*>(acpt_frame_out.data()), acpt_frame_out.size());
     EXPECT_NE(wire.find("\x01"
                         "35=3\x01"),
               std::string::npos)
@@ -1327,8 +1321,7 @@ TEST(FixtLogonEstablishment,
 // (b) Non-conformant 1137 → Reject(371=1137, 373=5 ValueIsIncorrect) + toAdmin
 // observed + Disconnected. 373=5 DISCRIMINATES from (a)'s 373=1.
 // Registry has {v44, v50sp2}; peer advertises v50sp1 (1137=8) → absent → unserviceable.
-TEST(FixtLogonEstablishment,
-     W_Unserviceable1137_ToAdminObserved_ValueIsIncorrect_Disconnected) {
+TEST(FixtLogonEstablishment, W_Unserviceable1137_ToAdminObserved_ValueIsIncorrect_Disconnected) {
     // 042 rewrite (research.md D-2/D-2a): three-distinct-version registry shape
     // so own default is serviceable (open() succeeds) while peer's advertised
     // version is absent (drives the 373=5 ValueIsIncorrect path).
@@ -1356,7 +1349,7 @@ TEST(FixtLogonEstablishment,
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
 
-    run_sync(s, [&] { return acceptor.open(); });
+    ASSERT_TRUE(run_sync(s, [&] { return acceptor.open(); }).has_value());
 
     // Peer sends FIXT Logon with 1137=8 (v50sp1) — present but absent from
     // registry {v44, v50sp2} → unserviceable → 373=5 path + toAdmin fires.
@@ -1373,8 +1366,7 @@ TEST(FixtLogonEstablishment,
 
     ASSERT_FALSE(acpt_frame_out.empty())
         << "Acceptor must emit a Reject frame when 1137 is unserviceable";
-    std::string wire(reinterpret_cast<const char*>(acpt_frame_out.data()),
-                     acpt_frame_out.size());
+    std::string wire(reinterpret_cast<const char*>(acpt_frame_out.data()), acpt_frame_out.size());
     EXPECT_NE(wire.find("\x01"
                         "35=3\x01"),
               std::string::npos)
@@ -1415,13 +1407,13 @@ TEST(FixtLogonEstablishment,
 //   52 guard: gated on (effective_clock_ != nullptr) — TRUE here.
 //   Stale timestamp: "20200101-00:00:00.000" is 4 years before the clock's UTC →
 //   |52 - now| >> 120s default threshold → sending_time_ok = false → reject fires.
-// 1137 gate: session.cpp's DefaultApplVerID(1137) gate, unreachable on the 52-reject path (52 returns
+// 1137 gate: session.cpp's DefaultApplVerID(1137) gate, unreachable on the 52-reject path (52
+// returns
 //   Disconnected before reaching the 1137 block).
 //
 // Discriminating assertion: 371=52 present AND 371=1137 ABSENT on wire.
 // [[feedback_witness_asserts_named_postcondition_not_proxy]]: both clauses direct.
-TEST(FixtLogonEstablishment,
-     W_StaleSendingTime_Beats1137Gate_Reject52_No1137) {
+TEST(FixtLogonEstablishment, W_StaleSendingTime_Beats1137Gate_Reject52_No1137) {
     // Registry with v50sp2; acceptor configured v50sp2 (so 1137 gate is armed).
     // Only the 52 guard should fire — before the 1137 gate is reached.
     auto v50sp2_dict = make_dict(kMinimalFix50sp2Xml);
@@ -1437,7 +1429,7 @@ TEST(FixtLogonEstablishment,
     };
     fixpp::session::Session acceptor(s.engine, acpt_cfg, &s.registry);
 
-    run_sync(s, [&] { return acceptor.open(); });
+    ASSERT_TRUE(run_sync(s, [&] { return acceptor.open(); }).has_value());
 
     // Build a FIXT Logon with:
     //   - stale 52 (2020-01-01, 4 years before the clock's UTC) → 52 guard fires
@@ -1445,15 +1437,14 @@ TEST(FixtLogonEstablishment,
     //     but the 52 guard fires FIRST and returns Disconnected before reaching 1137.
     //
     // Sending time "20200101-00:00:00.000" is well outside the 120s default threshold.
-    auto logon_stale52_no_1137 = make_fixt_logon_frame(
-        "FIXT.1.1", 1, "TW", "ISLD", 30, "",  // missing 1137
-        "20200101-00:00:00.000"                  // stale 52 (2020 vs clock 2024)
-    );
+    auto logon_stale52_no_1137 =
+        make_fixt_logon_frame("FIXT.1.1", 1, "TW", "ISLD", 30, "",  // missing 1137
+                              "20200101-00:00:00.000"               // stale 52 (2020 vs clock 2024)
+        );
 
     auto r = run_sync(s, [&] {
         return acceptor.on_inbound_frame(
-            std::span<const std::byte>{logon_stale52_no_1137.data(),
-                                       logon_stale52_no_1137.size()});
+            std::span<const std::byte>{logon_stale52_no_1137.data(), logon_stale52_no_1137.size()});
     });
     (void)r;
 
@@ -1462,11 +1453,9 @@ TEST(FixtLogonEstablishment,
         << "Acceptor must NOT reach Active (stale 52 + missing 1137 → 52 guard fires)";
 
     // A frame must have been emitted.
-    ASSERT_FALSE(acpt_frame_out.empty())
-        << "Acceptor must emit a Reject frame (52 guard fires)";
+    ASSERT_FALSE(acpt_frame_out.empty()) << "Acceptor must emit a Reject frame (52 guard fires)";
 
-    std::string wire(reinterpret_cast<const char*>(acpt_frame_out.data()),
-                     acpt_frame_out.size());
+    std::string wire(reinterpret_cast<const char*>(acpt_frame_out.data()), acpt_frame_out.size());
 
     // Reject(35=3) emitted.
     EXPECT_NE(wire.find("\x01"
@@ -1540,8 +1529,7 @@ TEST(FixtLogonEstablishment, W1_042_AcceptorOpenFail_UnserviceableDefault) {
         << "got error code=" << static_cast<int>(result.error());
 
     // No frame must be emitted before the error is returned (FR-002 fail-closed).
-    EXPECT_TRUE(emitted.empty())
-        << "No frame must be emitted when open() rejects (W1/FR-002)";
+    EXPECT_TRUE(emitted.empty()) << "No frame must be emitted when open() rejects (W1/FR-002)";
 
     // Session must NOT reach Active state (FR-002 no observable state mutation).
     EXPECT_NE(acceptor.state(), fsm_state::Active)
@@ -1573,8 +1561,7 @@ TEST(FixtLogonEstablishment, W2_042_InitiatorOpenFail_UnserviceableDefault) {
         << "got error code=" << static_cast<int>(result.error());
 
     // No frame must be emitted before the error is returned (FR-002 fail-closed).
-    EXPECT_TRUE(emitted.empty())
-        << "No frame must be emitted when open() rejects (W2/FR-002)";
+    EXPECT_TRUE(emitted.empty()) << "No frame must be emitted when open() rejects (W2/FR-002)";
 
     // Session must NOT reach Active state (FR-002 no observable state mutation).
     EXPECT_NE(initiator.state(), fsm_state::Active)
@@ -1653,8 +1640,7 @@ TEST(FixtLogonEstablishment, W4_042_InboundNonDeadness_PeerUnserviceableSurvives
         << "Acceptor must emit a Reject frame for peer's unserviceable 1137. "
         << "[W4 non-deadness: if no frame, the inbound path is dead or bypassed]";
 
-    std::string wire(reinterpret_cast<const char*>(acpt_frame_out.data()),
-                     acpt_frame_out.size());
+    std::string wire(reinterpret_cast<const char*>(acpt_frame_out.data()), acpt_frame_out.size());
     EXPECT_NE(wire.find("\x01"
                         "35=3\x01"),
               std::string::npos)

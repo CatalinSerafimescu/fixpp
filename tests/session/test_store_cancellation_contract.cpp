@@ -77,7 +77,7 @@ TEST(StoreCancellationContract, StoreCompletionIsDurableAfterLinearisation) {
             byte_collecting_visitor vis;
             auto rr = co_await store.retrieve(1, 1, direction_t::outbound, vis);
             EXPECT_TRUE(rr.has_value());
-            EXPECT_EQ(vis.entries().size(), 1u);
+            EXPECT_EQ(vis.entries().size(), 1U);
         },
         asio::use_future);
     fut.get();
@@ -98,12 +98,12 @@ TEST(StoreCancellationContract, NextSeqnumIncrementDurableAfterCompletion) {
             // Increment counter
             auto r = co_await store.next_seqnum(direction_t::outbound, true);
             EXPECT_TRUE(r.has_value());
-            EXPECT_EQ(*r, 1u) << "first next_seqnum(true) must return 1";
+            EXPECT_EQ(*r, 1U) << "first next_seqnum(true) must return 1";
 
             // Read back to verify durable increment
             auto r2 = co_await store.next_seqnum(direction_t::outbound, false);
             EXPECT_TRUE(r2.has_value());
-            EXPECT_EQ(*r2, 2u) << "counter must be 2 after one increment";
+            EXPECT_EQ(*r2, 2U) << "counter must be 2 after one increment";
         },
         asio::use_future);
     fut.get();
@@ -134,7 +134,7 @@ TEST(StoreCancellationContract, ResetSucceedsAndClearsState) {
             // Counter must be back to 1
             auto ns = co_await store.next_seqnum(direction_t::inbound, false);
             EXPECT_TRUE(ns.has_value());
-            EXPECT_EQ(*ns, 1u) << "counter must be 1 after reset";
+            EXPECT_EQ(*ns, 1U) << "counter must be 1 after reset";
         },
         asio::use_future);
     fut.get();
@@ -227,9 +227,10 @@ TEST(StoreCancellationContract, CancelledBeforeLinearisationYieldsStoreCancelled
             }
         } cv;
         run_on_pool(pool, [&store, &cv]() -> asio::awaitable<void> {
-            co_await store->retrieve(1, 0, direction_t::outbound, cv);
+            auto ret_r = co_await store->retrieve(1, 0, direction_t::outbound, cv);
+            EXPECT_TRUE(ret_r.has_value()) << "retrieve must succeed";
         });
-        EXPECT_EQ(cv.count, 1u) << "Only seq=1 should be in the store; seq=2 was cancelled";
+        EXPECT_EQ(cv.count, 1U) << "Only seq=1 should be in the store; seq=2 was cancelled";
     } else {
         // Both succeeded — cancel arrived too late. Still a valid outcome.
         SUCCEED() << "Cancel arrived after B linearised (race) — both stores succeeded";

@@ -66,18 +66,17 @@ using fixpp::core::error;
 using fixpp::core::expected_t;
 using fixpp::session::Application;
 using fixpp::session::SessionId;
-using fixpp::wire::MessageView;
 using fixpp::wire::access_mode;
+using fixpp::wire::MessageView;
 
 namespace fixpp::session::test {
 namespace {
 
 // ── Frame builder helpers ──────────────────────────────────────────────────────
 
-static std::vector<std::byte> make_raw_frame(std::string_view begin_string,
-                                             std::string_view msg_type, std::uint32_t seq,
-                                             std::string_view sender, std::string_view target,
-                                             std::string extra_body = {}) {
+std::vector<std::byte> make_raw_frame(std::string_view begin_string, std::string_view msg_type,
+                                      std::uint32_t seq, std::string_view sender,
+                                      std::string_view target, std::string extra_body = {}) {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -109,21 +108,26 @@ static std::vector<std::byte> make_raw_frame(std::string_view begin_string,
     return frame;
 }
 
-static std::vector<std::byte> make_logon_frame(std::string_view begin_string = "FIX.4.2",
-                                               std::uint32_t seq = 1,
-                                               std::string_view sender = "TW",
-                                               std::string_view target = "ISLD",
-                                               int heartbt = 30) {
-    std::string extra = "98=0\x01" "108=" + std::to_string(heartbt) + "\x01";
+std::vector<std::byte> make_logon_frame(std::string_view begin_string = "FIX.4.2",
+                                        std::uint32_t seq = 1, std::string_view sender = "TW",
+                                        std::string_view target = "ISLD", int heartbt = 30) {
+    std::string extra =
+        "98=0\x01"
+        "108=" +
+        std::to_string(heartbt) + "\x01";
     return make_raw_frame(begin_string, "A", seq, sender, target, extra);
 }
 
 // Minimal app payload (35=D, NewOrderSingle-like opaque bytes).
-static std::vector<std::byte> make_app_payload() {
+std::vector<std::byte> make_app_payload() {
     // 020-g2 T010: the send path now validates that the payload leads with 35=.
     // Updated to include 35=D so existing 019 tests continue to pass after
     // the opaque-payload validation lands.
-    static const char kPayload[] = "35=D\x01" "11=ORD001\x01" "54=1\x01" "55=AAPL\x01";
+    static const char kPayload[] =
+        "35=D\x01"
+        "11=ORD001\x01"
+        "54=1\x01"
+        "55=AAPL\x01";
     std::vector<std::byte> v;
     for (char c : kPayload) {
         if (c == '\0') break;
@@ -269,7 +273,8 @@ TEST(ApplicationOutbound, SendCrossesWireAfterToApp) {
     // NOTE: Engine::send is tested in Test7 via a standalone session.
     // This test verifies the underlying Session::send path includes toApp.
     auto payload = make_app_payload();
-    auto fut = asio::co_spawn(f.ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut =
+        asio::co_spawn(f.ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 200ms)) {
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                         "SendCrossesWireAfterToApp/send");
@@ -277,10 +282,11 @@ TEST(ApplicationOutbound, SendCrossesWireAfterToApp) {
         return;
     }
     auto result = fut.get();
-    ASSERT_TRUE(result.has_value()) << "send() should succeed; error = " << static_cast<int>(result.error());
+    ASSERT_TRUE(result.has_value())
+        << "send() should succeed; error = " << static_cast<int>(result.error());
 
     // toApp must have fired once
-    ASSERT_EQ(app->to_app_calls.size(), 1u) << "toApp must fire exactly once";
+    ASSERT_EQ(app->to_app_calls.size(), 1U) << "toApp must fire exactly once";
 
     // Wire must have one new frame (the app message)
     EXPECT_GT(f.captured_frames.size(), frames_before) << "frame must cross wire";
@@ -304,7 +310,8 @@ TEST(ApplicationOutbound, ToAppVetoBlocksTransmit) {
     const std::size_t frames_before = f.captured_frames.size();
 
     auto payload = make_app_payload();
-    auto fut = asio::co_spawn(f.ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut =
+        asio::co_spawn(f.ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 200ms)) {
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                         "ToAppVetoBlocksTransmit/send");
@@ -315,8 +322,7 @@ TEST(ApplicationOutbound, ToAppVetoBlocksTransmit) {
 
     // Result must be unexpected(app_do_not_send)
     ASSERT_FALSE(result.has_value()) << "send() must return error on toApp veto";
-    EXPECT_EQ(result.error(), error::app_do_not_send)
-        << "error must be app_do_not_send (129)";
+    EXPECT_EQ(result.error(), error::app_do_not_send) << "error must be app_do_not_send (129)";
 
     // No new frame on wire
     EXPECT_EQ(f.captured_frames.size(), frames_before) << "vetoed send must NOT cross wire";
@@ -326,7 +332,7 @@ TEST(ApplicationOutbound, ToAppVetoBlocksTransmit) {
         << "session must stay Active after toApp veto";
 
     // toApp must have fired once
-    ASSERT_EQ(app->to_app_calls.size(), 1u) << "toApp must fire before the veto";
+    ASSERT_EQ(app->to_app_calls.size(), 1U) << "toApp must fire before the veto";
 }
 
 // ── Test 3: toApp returning another error → send aborts, result is that error ──
@@ -346,7 +352,8 @@ TEST(ApplicationOutbound, ToAppOtherErrorAbortsWithThatError) {
     const std::size_t frames_before = f.captured_frames.size();
 
     auto payload = make_app_payload();
-    auto fut = asio::co_spawn(f.ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut =
+        asio::co_spawn(f.ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 200ms)) {
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                         "ToAppOtherErrorAbortsWithThatError/send");
@@ -380,7 +387,7 @@ TEST(ApplicationOutbound, ToAdminFiresOnAdminEmit) {
     Session sess(f.engine_cfg, cfg);
 
     // Before drive-to-Active: no toAdmin calls yet.
-    ASSERT_EQ(app->to_admin_calls.size(), 0u);
+    ASSERT_EQ(app->to_admin_calls.size(), 0U);
 
     // Drive to Active: session emits a Logon reply (acceptor role).
     f.open_to_active(sess);
@@ -400,7 +407,7 @@ TEST(ApplicationOutbound, ToAdminFiresOnAdminEmit) {
     bool logon_on_wire = false;
     for (const auto& frame : f.captured_frames) {
         std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
-        if (wire.find("35=A") != std::string::npos) {
+        if (wire.contains("35=A")) {
             logon_on_wire = true;
         }
     }
@@ -431,7 +438,8 @@ TEST(ApplicationOutbound, SendOnNotEstablishedReturnsStateError) {
     ASSERT_NE(sess.state(), fixpp::session::fsm_state::Active);
 
     auto payload = make_app_payload();
-    auto fut = asio::co_spawn(f.ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut =
+        asio::co_spawn(f.ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 200ms)) {
         fixpp::test_support::cancel_and_drain_or_report(
             f.ioc, *f.clock, "SendOnNotEstablishedReturnsStateError/send");
@@ -446,13 +454,11 @@ TEST(ApplicationOutbound, SendOnNotEstablishedReturnsStateError) {
         << "error must be session_invalid_state_for_send (77)";
 
     // Nothing transmitted
-    EXPECT_TRUE(f.captured_frames.empty() ||
-                [&] {
-                    // There may be an outbound Logon frame (initiator case), but no
-                    // APP-payload frame. Count frames before and after.
-                    return true;
-                }())
-        << "app payload must not cross wire";
+    EXPECT_TRUE(f.captured_frames.empty() || [&] {
+        // There may be an outbound Logon frame (initiator case), but no
+        // APP-payload frame. Count frames before and after.
+        return true;
+    }()) << "app payload must not cross wire";
 }
 
 // ── Test 6: Engine::send with unknown SessionId → session_invalid_argument=119 ─
@@ -477,13 +483,12 @@ TEST(ApplicationOutbound, EnginesSendWithUnknownIdReturnsInvalidArgument) {
     fixpp::session::Engine engine(ioc.get_executor(), std::move(ecfg));
 
     // Unknown SessionId
-    fixpp::session::SessionId unknown_id{"FIX.4.2", "NOBODY", "NOBODY"};
+    fixpp::session::SessionId unknown_id{
+        .begin_string = "FIX.4.2", .sender_comp_id = "NOBODY", .target_comp_id = "NOBODY"};
     auto payload = make_app_payload();
 
-    auto fut = asio::co_spawn(
-        ioc,
-        engine.send(unknown_id, std::span<const std::byte>(payload)),
-        asio::use_future);
+    auto fut = asio::co_spawn(ioc, engine.send(unknown_id, std::span<const std::byte>(payload)),
+                              asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, 300ms)) {
         fixpp::test_support::cancel_and_drain_or_report(
             ioc, *clock, "EnginesSendWithUnknownIdReturnsInvalidArgument/send");
@@ -498,7 +503,7 @@ TEST(ApplicationOutbound, EnginesSendWithUnknownIdReturnsInvalidArgument) {
         << "error must be session_invalid_argument (119)";
 
     // Must not have called toApp
-    EXPECT_EQ(app->to_app_calls.size(), 0u) << "toApp must NOT fire for unknown id";
+    EXPECT_EQ(app->to_app_calls.size(), 0U) << "toApp must NOT fire for unknown id";
 
     // Clean up engine (stop + drain ioc)
     auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
@@ -555,10 +560,8 @@ TEST(ApplicationOutbound, EnginesSendOnRegisteredButNotEstablishedSession) {
     // Session registered but loop not started → session object is null in entry.
     // Engine::send should return session_invalid_state_for_send (77).
     auto payload = make_app_payload();
-    auto fut = asio::co_spawn(
-        ioc,
-        engine.send(id, std::span<const std::byte>(payload)),
-        asio::use_future);
+    auto fut =
+        asio::co_spawn(ioc, engine.send(id, std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, fut, 300ms)) {
         fixpp::test_support::cancel_and_drain_or_report(
             ioc, *clock, "EnginesSendOnRegisteredButNotEstablishedSession/send");
@@ -636,7 +639,8 @@ TEST(ApplicationOutbound, ReentrantSendFromCallbackDoesNotDeadlock) {
 
     // Send a payload — toApp fires, which enqueues a re-entrant work item.
     auto payload = make_app_payload();
-    auto fut = asio::co_spawn(f.ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto fut =
+        asio::co_spawn(f.ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 300ms)) {
         fixpp::test_support::cancel_and_drain_or_report(
             f.ioc, *f.clock, "ReentrantSendFromCallbackDoesNotDeadlock/send");

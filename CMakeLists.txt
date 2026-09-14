@@ -21,6 +21,9 @@ include(cmake/ProjectOptions.cmake)
 
 # ── CMake helpers & toolchain wiring ────────────────────────────────────────
 include(cmake/Helpers.cmake)
+# #417: FIXPP_WERROR reaches every first-party compiled target. Deferred so the
+# walk sees targets declared anywhere below; see cmake/Helpers.cmake.
+cmake_language(DEFER CALL fixpp_apply_werror_to_all_targets)
 include(cmake/Sanitizers.cmake)
 include(cmake/Coverage.cmake)
 include(cmake/fixpp_store_test.cmake)  # 008-message-store unified test helper

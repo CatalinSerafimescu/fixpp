@@ -144,7 +144,7 @@ TEST(XmlLoaderLoad, LoadFromStringEquivalent) {
     //    length_pair_data_tag. Uses the same probe-walk shape as
     //    `RoundTrip.ExhaustiveWalkVisitsEveryMessage`'s probe-walk.
     for (auto const& m_file : msgs_file) {
-        for (std::uint32_t t = 0; t < 65536u; ++t) {
+        for (std::uint32_t t = 0; t < 65536U; ++t) {
             auto const tag = static_cast<std::uint16_t>(t);
             auto const fr_file = d_file.field_ref(m_file.msg_type, tag);
             auto const fr_str = d_str.field_ref(m_file.msg_type, tag);

@@ -12,6 +12,8 @@
 
 #include "fix/c_api/session.h"
 
+#include <asio/co_spawn.hpp>
+#include <asio/use_future.hpp>
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
@@ -20,14 +22,10 @@
 #include <stdexcept>
 #include <utility>
 
-#include <asio/co_spawn.hpp>
-#include <asio/use_future.hpp>
-
 #include "capi_internal.hpp"
-
 #include "fixpp/core/error.hpp"
 #include "fixpp/dict/dictionary_snapshot.hpp"  // fixpp#215 item 1 (Option C)
-#include "fixpp/session/session.hpp"  // Session::close/executor/is_open, close_mode
+#include "fixpp/session/session.hpp"           // Session::close/executor/is_open, close_mode
 
 namespace {
 
@@ -38,6 +36,7 @@ using fixpp_capi::detail::translate_for_consumer;
 // its try block so the catch(...)→abort path (FR-008/FR-019) is witnessed. Always
 // false in production — the setter is FIXPP_TEST_HOOKS-gated (capi_internal.hpp),
 // so a production caller cannot flip it. Zero production overhead: one bool load.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables) -- FIXPP_TEST_HOOKS seam
 bool g_send_throw_hook = false;
 
 // Validate a non-owning session handle; resolves the owning engine. Returns the
@@ -136,7 +135,7 @@ fixpp_error_t fixpp_session_open(fixpp_engine_t* engine, fixpp_session_config_t*
         h->tv_ = fixpp::dict::shared_dictionary_view(std::move(snap));
         fixpp_session* raw = h.get();
         engine->sessions_.push_back(std::move(h));
-        delete cfg;  // builder CONSUMED on success (invalidated)
+        delete cfg;  // NOLINT(cppcoreguidelines-owning-memory) builder CONSUMED on success
         *out_session = raw;
         return FIXPP_ERR_OK;
     } catch (...) {
@@ -174,6 +173,7 @@ fixpp_error_t fixpp_session_acceptor_bound_endpoint(fixpp_session_t* session, ui
     fixpp_engine* e = session->engine;
     try {
         // check_session guarantees state_ non-null and engine_ has_value().
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access) -- check_session() above
         *port_out = e->state_->engine_->acceptor_bound_endpoint(session->id).port;
     } catch (...) {
         std::fputs(
@@ -194,6 +194,7 @@ fixpp_error_t fixpp_session_close(fixpp_session_t* session) {
     {
         // Scoped lease — released at the end of this block, before return.
         // state_ is guaranteed non-null here (check_session validated it above).
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access) -- check_session() above
         std::shared_ptr<fixpp::session::Session> sess = e->state_->engine_->lookup(session->id);
         if (sess == nullptr) {
             // lookup()==nullptr ⇒ the session was NEVER published into the registry
@@ -224,9 +225,9 @@ fixpp_error_t fixpp_session_close(fixpp_session_t* session) {
                 // wrapper destruction entirely — the strand's ref-counted impl is
                 // long-lived (Session is alive for the duration of close's .get()).
                 const asio::any_io_executor& close_exec = sess->executor().underlying();
-                auto fut = asio::co_spawn(close_exec,
-                                          sess->close(fixpp::session::close_mode::graceful),
-                                          asio::use_future);
+                auto fut =
+                    asio::co_spawn(close_exec, sess->close(fixpp::session::close_mode::graceful),
+                                   asio::use_future);
                 fixpp::core::expected_t<void> r = fut.get();
                 if (!r.has_value()) {
                     // Established-then-reaped idempotent close (issue #151): a session
@@ -306,6 +307,7 @@ fixpp_error_t fixpp_session_send(fixpp_session_t* session, const uint8_t* frame,
         // borrowed `frame` outlives the call because .get() blocks until send
         // completes, and the span is copied by value into the coroutine frame.
         // state_ is guaranteed non-null here (check_session validated it above).
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access) -- check_session() above
         auto fut = asio::co_spawn(e->state_->ioc_, e->state_->engine_->send(session->id, payload),
                                   asio::use_future);
         fixpp::core::expected_t<void> r = fut.get();

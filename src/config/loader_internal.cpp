@@ -139,6 +139,7 @@ ParsedDuration parse_duration_to_ms(std::string_view tok, std::string_view key_p
     }
 
     long long num = 0;
+    // NOLINTNEXTLINE(bugprone-suspicious-stringview-data-usage) -- bounded by tok.data() + num_end
     auto [ptr, ec] = std::from_chars(tok.data(), tok.data() + num_end, num);
     if (ec != std::errc{}) {
         acc.add(LoadDiagnostic{
@@ -167,7 +168,7 @@ ParsedDuration parse_duration_to_ms(std::string_view tok, std::string_view key_p
     } else if (unit == "s") {
         // #3 (Gate B r1): guard signed-multiply overflow before scaling.
         // from_chars yields values up to LLONG_MAX which overflows * 1000.
-        if (num > (std::numeric_limits<long long>::max)() / 1000LL) {
+        if (num > std::numeric_limits<long long>::max() / 1000LL) {
             acc.add(LoadDiagnostic{
                 .key_path = std::string{key_path},
                 .reason = reason_class::out_of_range,
@@ -178,7 +179,7 @@ ParsedDuration parse_duration_to_ms(std::string_view tok, std::string_view key_p
         }
         ms = num * 1000LL;
     } else if (unit == "m") {
-        if (num > (std::numeric_limits<long long>::max)() / 60000LL) {
+        if (num > std::numeric_limits<long long>::max() / 60000LL) {
             acc.add(LoadDiagnostic{
                 .key_path = std::string{key_path},
                 .reason = reason_class::out_of_range,
@@ -189,7 +190,7 @@ ParsedDuration parse_duration_to_ms(std::string_view tok, std::string_view key_p
         }
         ms = num * 60000LL;
     } else if (unit == "h") {
-        if (num > (std::numeric_limits<long long>::max)() / 3600000LL) {
+        if (num > std::numeric_limits<long long>::max() / 3600000LL) {
             acc.add(LoadDiagnostic{
                 .key_path = std::string{key_path},
                 .reason = reason_class::out_of_range,

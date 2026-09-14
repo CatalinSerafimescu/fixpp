@@ -584,7 +584,8 @@ struct OsFile {
         }
     }
 
-    [[nodiscard]] bool pwrite_all(const void* buf, std::size_t n, std::int64_t offset) const noexcept {
+    [[nodiscard]] bool pwrite_all(const void* buf, std::size_t n,
+                                  std::int64_t offset) const noexcept {
         const auto* p = static_cast<const char*>(buf);
         std::size_t remaining = n;
         std::int64_t off = offset;
@@ -690,12 +691,12 @@ struct FileStoreImpl {
     std::pmr::vector<std::byte> retrieve_scratch_;
 
     // 035: monotonic epoch bumped by reset() on the strand at/after the live-handle
-    // swap (`FileStore::reset()`'s "T015: bump epoch"); snapshotted by retrieve() under the mutex at
-    // index-snapshot time and re-checked before each per-frame pread in the walk.
-    // A mismatch means a reset() ran during a visitor.on_frame() suspension —
-    // retrieve() returns store_io_failure (clean-fail, never reads a swapped handle).
-    // Plain scalar — mutated strand-only (like every other impl_ field per Decision 3),
-    // so no atomic is needed. (data-model §1)
+    // swap (`FileStore::reset()`'s "T015: bump epoch"); snapshotted by retrieve() under the mutex
+    // at index-snapshot time and re-checked before each per-frame pread in the walk. A mismatch
+    // means a reset() ran during a visitor.on_frame() suspension — retrieve() returns
+    // store_io_failure (clean-fail, never reads a swapped handle). Plain scalar — mutated
+    // strand-only (like every other impl_ field per Decision 3), so no atomic is needed.
+    // (data-model §1)
     std::uint64_t generation_{0};
 
     // Per-direction frame index (rebuilt during open/restart scan).
@@ -705,7 +706,7 @@ struct FileStoreImpl {
 
     // ── Sentinel write ─────────────────────────────────────────────────────
 
-    bool write_sentinel(std::int64_t offset) const noexcept {
+    [[nodiscard]] bool write_sentinel(std::int64_t offset) const noexcept {
         RecordHeader hdr{};
         SentinelPayload pl{};
         pl.magic = kSentinelMagic;
@@ -739,7 +740,7 @@ struct FileStoreImpl {
 
     // ── Counter record write ───────────────────────────────────────────────
 
-    bool write_counter(std::int64_t offset, seqnum_t ni, seqnum_t no) const noexcept {
+    [[nodiscard]] bool write_counter(std::int64_t offset, seqnum_t ni, seqnum_t no) const noexcept {
         RecordHeader hdr{};
         CounterPayload pl{};
         pl.next_inbound = ni;
@@ -1179,8 +1180,7 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
                 // io_ok flip, which would leave the frame + counter on disk and
                 // desync the durable counter). Statics have static storage duration
                 // (not captured); reachable on the pool thread.
-                if (g_force_store_pwrite_fail_once.exchange(
-                        false, std::memory_order_relaxed)) {
+                if (g_force_store_pwrite_fail_once.exchange(false, std::memory_order_relaxed)) {
                     g_store_pwrite_fail_count.fetch_add(1, std::memory_order_relaxed);
                     return false;
                 }
@@ -1227,6 +1227,7 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::store(seqnum_t seq,
             });
     } catch (const asio::system_error& e) {
         if (e.code() != asio::error::operation_aborted) {
+            // cppcheck-suppress throwInNoexceptFunction  -- terminate is the documented outcome
             throw;  // Only operation_aborted is handled; anything else is unexpected
                     // and propagates (noexcept coroutine → terminate). Consistent
                     // with next_seqnum()/reset().
@@ -1480,6 +1481,7 @@ asio::awaitable<fixpp::core::expected_t<seqnum_t>> FileStore::next_seqnum(direct
                 });
         } catch (const asio::system_error& e) {
             if (e.code() != asio::error::operation_aborted) {
+                // cppcheck-suppress throwInNoexceptFunction  -- terminate is the documented outcome
                 throw;  // Only operation_aborted is handled; anything else propagates.
             }
             g_catch_fired.fetch_add(1, std::memory_order_relaxed);
@@ -1771,6 +1773,7 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
         }
     } catch (const asio::system_error& e) {
         if (e.code() != asio::error::operation_aborted) {
+            // cppcheck-suppress throwInNoexceptFunction  -- terminate is the documented outcome
             throw;  // Unexpected (OOM, etc.) — propagate.
         }
         // operation_aborted: post-dates linearisation per C3 (§6.1.4 / contracts C3).

@@ -133,7 +133,7 @@ namespace {
 // guard (inert under the prior null clock). Inbound frames feeding a live session
 // must carry a fresh 52 or the guard rejects them (reason=10). Mirrors the 038/US3
 // fix in engine_acceptor_test.cpp.
-static std::string utc_now_fix_timestamp() {
+std::string utc_now_fix_timestamp() {
     std::array<char, 32> buf{};
     auto r = fixpp::core::utc_time_to_fix_string(std::chrono::system_clock::now(),
                                                  fixpp::core::fix_time_precision::millis,
@@ -141,9 +141,9 @@ static std::string utc_now_fix_timestamp() {
     return r ? std::string{r->data(), r->size()} : std::string{};
 }
 
-static std::vector<std::byte> make_fix_frame(std::string_view begin_str, std::string_view msg_type,
-                                             int seq_num, std::string_view sender,
-                                             std::string_view target, std::string extra_body = "") {
+std::vector<std::byte> make_fix_frame(std::string_view begin_str, std::string_view msg_type,
+                                      int seq_num, std::string_view sender, std::string_view target,
+                                      std::string extra_body = "") {
     auto field = [](int tag, std::string_view v) -> std::string {
         return std::to_string(tag) + "=" + std::string(v) + "\x01";
     };
@@ -161,7 +161,7 @@ static std::vector<std::byte> make_fix_frame(std::string_view begin_str, std::st
     msg += body;
     unsigned int cs = 0;
     for (unsigned char c : msg) cs += c;
-    cs &= 0xFFu;
+    cs &= 0xFFU;
     char csbuf[5];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     msg += "10=" + std::string(csbuf) + "\x01";
@@ -172,16 +172,15 @@ static std::vector<std::byte> make_fix_frame(std::string_view begin_str, std::st
     return out;
 }
 
-static std::vector<std::byte> make_logon_frame(std::string_view begin_str, std::string_view sender,
-                                               std::string_view target) {
+std::vector<std::byte> make_logon_frame(std::string_view begin_str, std::string_view sender,
+                                        std::string_view target) {
     return make_fix_frame(begin_str, "A", 1, sender, target,
                           "98=0\x01"
                           "108=30\x01");
 }
 
-static std::vector<std::byte> make_heartbeat_frame(std::string_view begin_str, int seq_num,
-                                                   std::string_view sender,
-                                                   std::string_view target) {
+std::vector<std::byte> make_heartbeat_frame(std::string_view begin_str, int seq_num,
+                                            std::string_view sender, std::string_view target) {
     return make_fix_frame(begin_str, "0", seq_num, sender, target);
 }
 
@@ -196,7 +195,7 @@ struct ReadPumpHarness {
     std::unique_ptr<fixpp::transport::test::LoopbackTlsFixture> fixture;
 };
 
-static std::unique_ptr<ReadPumpHarness> build_harness(asio::io_context& ioc) {
+std::unique_ptr<ReadPumpHarness> build_harness(asio::io_context& ioc) {
     const char* dir = std::getenv("FIXPP_TLS_FIXTURE_DIR");
 #ifdef FIXPP_TLS_FIXTURE_DIR
     static const char* kDir = FIXPP_TLS_FIXTURE_DIR;
@@ -269,7 +268,7 @@ static std::unique_ptr<ReadPumpHarness> build_harness(asio::io_context& ioc) {
 // Sends a Logon and then the provided `extra_frames` before waiting for
 // `wait_after` then closing.  Self-deadline prevents infinite hang on stub.
 
-static asio::awaitable<void> run_client_with_extra_frames(
+asio::awaitable<void> run_client_with_extra_frames(
     asio::io_context& ioc, fixpp::transport::test::LoopbackTlsFixture& fixture,
     uint16_t acceptor_port, std::string sender, std::string target,
     std::vector<std::vector<std::byte>> extra_frames,
@@ -345,7 +344,7 @@ TEST(EngineReadPumpTest, InOrderExactlyOnce) {
     ioc.restart();
 
     uint16_t port = h->engine->acceptor_bound_endpoint(h->acc_id).port;
-    ASSERT_NE(port, 0u) << "acceptor listener did not bind";
+    ASSERT_NE(port, 0U) << "acceptor listener did not bind";
 
     // N = 2 Heartbeats with seqnums 2 and 3, sent as ONE concatenated write so
     // both frames deterministically arrive in a single read_some. This exercises
@@ -460,7 +459,7 @@ TEST(EngineReadPumpTest, OverCapacityFrameClosesSession) {
     ioc.restart();
 
     uint16_t port = h->engine->acceptor_bound_endpoint(h->acc_id).port;
-    ASSERT_NE(port, 0u) << "acceptor listener did not bind";
+    ASSERT_NE(port, 0U) << "acceptor listener did not bind";
 
     // Build an oversized frame: body is >64 KiB of repeated 'X'.
     // This clearly exceeds kReadPumpCarryCapacity (64 KiB), so the framer
@@ -551,7 +550,7 @@ TEST(EngineReadPumpTest, EofDisconnectsSession) {
     ioc.restart();
 
     uint16_t port = h->engine->acceptor_bound_endpoint(h->acc_id).port;
-    ASSERT_NE(port, 0u) << "acceptor listener did not bind";
+    ASSERT_NE(port, 0U) << "acceptor listener did not bind";
 
     // Client sends only the Logon and then immediately closes (EOF).
     asio::co_spawn(ioc,
@@ -697,7 +696,7 @@ TEST(EngineReadPumpTest, EngineStopDeliversCloseNotifyToPeer_Fixes348) {
     ioc.restart();
 
     uint16_t port = h->engine->acceptor_bound_endpoint(h->acc_id).port;
-    ASSERT_NE(port, 0u) << "acceptor listener did not bind";
+    ASSERT_NE(port, 0U) << "acceptor listener did not bind";
 
     HoldingClient hc;
     hc.transport = h->fixture->make_client(ioc.get_executor());
@@ -733,7 +732,7 @@ TEST(EngineReadPumpTest, SessionTerminalCloseDeliversCloseNotifyToPeer_Fixes348)
     ioc.restart();
 
     uint16_t port = h->engine->acceptor_bound_endpoint(h->acc_id).port;
-    ASSERT_NE(port, 0u) << "acceptor listener did not bind";
+    ASSERT_NE(port, 0U) << "acceptor listener did not bind";
 
     HoldingClient hc;
     hc.transport = h->fixture->make_client(ioc.get_executor());

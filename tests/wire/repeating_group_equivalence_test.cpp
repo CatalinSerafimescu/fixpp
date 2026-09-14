@@ -54,20 +54,21 @@ struct TestLeg {
         std::string_view raw{reinterpret_cast<char const*>(ctx_.span.data()), ctx_.span.size()};
         auto eq = raw.find('=');
         if (eq == std::string_view::npos) {
-            return {0, {}};
+            return {.tag = 0, .value = {}};
         }
         std::uint32_t tag_val = 0;
         for (std::size_t i = 0; i < eq; ++i) {
             char c = raw[i];
             if (c < '0' || c > '9') {
-                return {0, {}};
+                return {.tag = 0, .value = {}};
             }
             tag_val = (tag_val * 10U) + static_cast<std::uint32_t>(c - '0');
         }
         auto val_start = eq + 1;
         auto soh = raw.find('\x01', val_start);
         auto val_end = (soh == std::string_view::npos) ? raw.size() : soh;
-        return {static_cast<std::uint16_t>(tag_val), raw.substr(val_start, val_end - val_start)};
+        return {.tag = static_cast<std::uint16_t>(tag_val),
+                .value = raw.substr(val_start, val_end - val_start)};
     }
 };
 
@@ -103,8 +104,8 @@ TEST(WireRepeatingGroupEquivalence, IterAndIndexAgreeIncludingNested) {
     // Path A: operator[] random access.
     std::vector<std::string> via_index;
     via_index.reserve(gv.size());
-    for (std::size_t i = 0; i < gv.size(); ++i) {
-        via_index.emplace_back(gv[i].sv());
+    for (auto&& i : gv) {
+        via_index.emplace_back(i.sv());
     }
 
     // Path B: iter()/begin()..end() streaming (no sub-index build).
@@ -216,8 +217,7 @@ TEST(WireRepeatingGroupEquivalence, GeneratedFlyweightOperatorEqualsIter) {
     // Path A: operator[] random access — read BOTH scalar fields per entry.
     std::vector<std::string> via_index_cl_ord_id;
     std::vector<std::string> via_index_order_id;
-    for (std::size_t i = 0; i < orders.size(); ++i) {
-        auto entry = orders[i];
+    for (auto entry : orders) {
         auto cl = entry.cl_ord_id();
         ASSERT_TRUE(cl.has_value());
         via_index_cl_ord_id.emplace_back(*cl);

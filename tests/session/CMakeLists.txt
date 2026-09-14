@@ -2354,6 +2354,8 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_features(session_security_profile_insecure_plain_deprecated_negative PRIVATE cxx_std_23)
     target_compile_options(session_security_profile_insecure_plain_deprecated_negative PRIVATE
         -Wdeprecated-declarations -Werror=deprecated-declarations)
+    set_property(TARGET session_security_profile_insecure_plain_deprecated_negative PROPERTY
+        FIXPP_WERROR_EXEMPT "negative-compile probe: its passing state is a failed build, so a blanket -Werror would let any stray warning keep it green (#417)")
     add_test(
         NAME session_security_profile_insecure_plain_deprecated_negative_compile
         COMMAND cmake --build "${CMAKE_BINARY_DIR}"

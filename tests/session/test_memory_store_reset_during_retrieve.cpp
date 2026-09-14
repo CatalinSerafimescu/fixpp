@@ -148,10 +148,10 @@ public:
             // Drive reset() + two stores during the retrieve() walk suspension.
             auto rr = co_await store_->reset();
             reset_result = rr.has_value() ? 0 : static_cast<int>(rr.error());
-            auto s1 = co_await store_->store(
-                1, std::span<const std::byte>(new1_), direction_t::outbound);
-            auto s2 = co_await store_->store(
-                2, std::span<const std::byte>(new2_), direction_t::outbound);
+            auto s1 =
+                co_await store_->store(1, std::span<const std::byte>(new1_), direction_t::outbound);
+            auto s2 =
+                co_await store_->store(2, std::span<const std::byte>(new2_), direction_t::outbound);
             stores_ok = s1.has_value() && s2.has_value();
             // Read the SAME span AFTER the suspension. This is what witnesses the
             // materialisation: with the fix, `payload` points at retrieve()'s
@@ -167,7 +167,7 @@ public:
         co_return visit_result::cont;
     }
 
-    fixpp::core::error abort_error() const noexcept override {
+    [[nodiscard]] fixpp::core::error abort_error() const noexcept override {
         return fixpp::core::error::store_io_failure;
     }
 
@@ -220,7 +220,7 @@ void MemoryStoreResetDuringRetrieveTest::run_mid_traversal_reset(capacity_policy
 
     // Frame 1 was visited before the reset — it must carry the ORIGINAL bytes.
     ASSERT_GE(visitor.frames_seen, 1);
-    EXPECT_EQ(visitor.first_seq, 1u);
+    EXPECT_EQ(visitor.first_seq, 1U);
     EXPECT_EQ(visitor.first_bytes, orig1)
         << "frame 1 (visited before reset) must carry its original bytes";
 

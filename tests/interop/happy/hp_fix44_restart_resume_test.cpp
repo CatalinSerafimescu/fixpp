@@ -343,8 +343,7 @@ TEST_P(StandbyRehydrate_Initiator, RehydratesOnReconnect) {
     // Knob: refresh_on_logon=true (the 025 knob under test).
     // bilateral_lenient required: bilateral_strict suppresses re-hydrate (INV-RoL-3).
     cfg.refresh_on_logon = true;
-    cfg.reset_seqnum_policy_field =
-        fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     // enable_next_expected_msg_seq_num=true so the 789 behind-side tolerance covers
     // any peer-ahead inbound seqnum after the primary run (SC-004 / W5 / L-029-1).
     cfg.enable_next_expected_msg_seq_num = true;
@@ -360,8 +359,7 @@ TEST_P(StandbyRehydrate_Initiator, RehydratesOnReconnect) {
     // the Logon gate did NOT fatally disconnect.
     const auto reached = hp::drive_to_active(fx, id, 5s);
     EXPECT_EQ(reached, fsm_state::Active)
-        << "standby session did not reach Active against "
-        << hp::counterparty_token(counterparty)
+        << "standby session did not reach Active against " << hp::counterparty_token(counterparty)
         << "; refresh_on_logon=true + bilateral_lenient; counterparty must have"
            " a prior seqnum run (primary-advanced store) + PersistMessages=Y";
 
@@ -375,13 +373,15 @@ TEST_P(StandbyRehydrate_Initiator, RehydratesOnReconnect) {
     // counter and the Logon was sent at that resumed value.
     EXPECT_GE(mgr.peek_outbound(), kMinResumedSeqnum)
         << "standby outbound seqnum was not resumed from the primary-advanced store "
-           "(got " << mgr.peek_outbound() << "); expected >= " << kMinResumedSeqnum
+           "(got "
+        << mgr.peek_outbound() << "); expected >= " << kMinResumedSeqnum
         << " — refresh_on_logon re-hydrate must reload the persisted outbound counter";
 
     // Witness (c): inbound seqnum resumed from the primary-advanced store — > 1.
     EXPECT_GE(mgr.next_inbound_unsafe(), kMinResumedSeqnum)
         << "standby inbound seqnum was not resumed from the primary-advanced store "
-           "(got " << mgr.next_inbound_unsafe() << "); expected >= " << kMinResumedSeqnum
+           "(got "
+        << mgr.next_inbound_unsafe() << "); expected >= " << kMinResumedSeqnum
         << " — refresh_on_logon re-hydrate must reload the persisted inbound counter";
 
     // Graceful stop: Logout + disconnect within the watchdog.
@@ -391,8 +391,7 @@ TEST_P(StandbyRehydrate_Initiator, RehydratesOnReconnect) {
     EXPECT_TRUE(fx.stopped()) << "engine did not reach stopped() after Logout";
 }
 
-std::string standby_rehydrate_initiator_name(
-    const ::testing::TestParamInfo<Counterparty>& info) {
+std::string standby_rehydrate_initiator_name(const ::testing::TestParamInfo<Counterparty>& info) {
     return (info.param == Counterparty::quickfix_cpp) ? "QFcpp_standby" : "QFj_standby";
 }
 

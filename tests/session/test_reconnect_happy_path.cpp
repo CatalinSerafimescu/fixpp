@@ -85,14 +85,13 @@ namespace {
 
 // ── FIX frame builder helpers ─────────────────────────────────────────────────
 
-static std::string field(int tag, std::string_view val) {
+std::string field(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
-static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
-                                             std::string_view msg_type, std::uint32_t seq,
-                                             std::string_view sender, std::string_view target,
-                                             std::string_view extra = {}) {
+std::vector<std::byte> make_fix_frame(std::string_view begin_string, std::string_view msg_type,
+                                      std::uint32_t seq, std::string_view sender,
+                                      std::string_view target, std::string_view extra = {}) {
     std::string body;
     body += field(35, msg_type);
     body += field(34, std::to_string(seq));
@@ -118,16 +117,16 @@ static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
     return frame;
 }
 
-static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
-                                         std::string_view t, int hbt = 30) {
+std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
+                                  std::string_view t, int hbt = 30) {
     std::string extra;
     extra += field(98, "0");
     extra += field(108, std::to_string(hbt));
     return make_fix_frame(bs, "A", seq, s, t, extra);
 }
 
-static std::vector<std::byte> make_heartbeat(std::string_view bs, std::uint32_t seq,
-                                             std::string_view s, std::string_view t) {
+std::vector<std::byte> make_heartbeat(std::string_view bs, std::uint32_t seq, std::string_view s,
+                                      std::string_view t) {
     return make_fix_frame(bs, "0", seq, s, t);
 }
 
@@ -140,13 +139,13 @@ struct OutboundCapture {
 };
 
 // Check if a frame is of a given MsgType (tag 35).
-static bool is_msg_type(std::span<const std::byte> frame, std::string_view type) {
+bool is_msg_type(std::span<const std::byte> frame, std::string_view type) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = "35=" + std::string(type) + "\x01";
-    return wire.find(needle) != std::string::npos;
+    return wire.contains(needle);
 }
 
-static bool is_resend_request(std::span<const std::byte> frame) { return is_msg_type(frame, "2"); }
+bool is_resend_request(std::span<const std::byte> frame) { return is_msg_type(frame, "2"); }
 
 }  // namespace
 
@@ -212,7 +211,7 @@ protected:
         auto r = run_open(s);
         if (!r.has_value()) return false;
         auto logon = make_logon("FIX.4.2", 1, "TW", "ISLD");
-        feed(s, logon);
+        if (!feed(s, logon).has_value()) return false;
         return s.state() == fixpp::session::fsm_state::Active;
     }
 };
@@ -232,7 +231,7 @@ TEST_F(ReconnectHappyPathTest, TooHighInboundSeqEntersAwaitingResend) {
     // After Logon(seq=1) consumed, next expected = 2.
     // Inject Heartbeat with seq=5 (gap [2..4]).
     auto hb = make_heartbeat("FIX.4.2", 5, "TW", "ISLD");
-    feed(sess, hb);
+    (void)feed(sess, hb);  // outcome checked below via emitted frames
 
     // The session's reconnect FSM should now be in AwaitingResend.
     // The ReconnectFsm is embedded inside session; we cannot access it directly
@@ -268,13 +267,13 @@ TEST_F(ReconnectHappyPathTest, GapCloseRestoresActiveState) {
 
     // Inject gap message (seq=5 when expected=2).
     auto hb_gap = make_heartbeat("FIX.4.2", 5, "TW", "ISLD");
-    feed(sess, hb_gap);
+    (void)feed(sess, hb_gap);  // outcome checked below via state
 
     // Inject fill messages seq=2, 3, 4 (PossDupFlag=Y would be set in real
     // replay but the key is the sequence numbers).
     for (std::uint32_t seq = 2; seq <= 4; ++seq) {
         auto hb_fill = make_heartbeat("FIX.4.2", seq, "TW", "ISLD");
-        feed(sess, hb_fill);
+        (void)feed(sess, hb_fill);  // outcome checked below via state
     }
 
     // After gap fills, session should be Active (not Disconnected).
@@ -316,8 +315,8 @@ TEST_F(ReconnectHappyPathTest, ReconnectFsmAccessorsCompile) {
     // current_resend_state() is only valid when is_awaiting_resend() == true,
     // but we verify it doesn't crash on the default-constructed state.
     [[maybe_unused]] const auto& rs = fsm.current_resend_state();
-    EXPECT_EQ(rs.outstanding_begin, 0u);
-    EXPECT_EQ(rs.outstanding_end, 0u);
+    EXPECT_EQ(rs.outstanding_begin, 0U);
+    EXPECT_EQ(rs.outstanding_end, 0U);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

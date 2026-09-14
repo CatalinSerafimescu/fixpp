@@ -180,7 +180,7 @@ TEST(HostileInputHardening, TruthfulCountedDataWithEmbeddedSohRoundTrips) {
         "95=5\x01"
         "96=a\x01"
         "b\x01"
-        "c\x01"      // 96's value is the 5 bytes "a<SOH>b<SOH>c"
+        "c\x01"  // 96's value is the 5 bytes "a<SOH>b<SOH>c"
         "77=Z\x01");
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());

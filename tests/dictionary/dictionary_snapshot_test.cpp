@@ -46,17 +46,17 @@ static_assert(!std::is_copy_constructible_v<dictionary_snapshot> &&
 // A2 — the value ctor must stay unreachable. Pins the absence of a
 // two-argument constructor; independent of the passkey (would hold with no
 // passkey at all) — NOT the passkey boundary. See A5.
-static_assert(!std::is_constructible_v<dictionary_snapshot, std::shared_ptr<const Dictionary>,
-                                       table_view>);
+static_assert(
+    !std::is_constructible_v<dictionary_snapshot, std::shared_ptr<const Dictionary>, table_view>);
 
 // A3 — view() must expose const&, never a mutable reference or a copy.
-static_assert(std::same_as<decltype(std::declval<dictionary_snapshot const&>().view()),
-                           table_view const&>);
+static_assert(
+    std::same_as<decltype(std::declval<dictionary_snapshot const&>().view()), table_view const&>);
 
 // A4 — the factory must hand back a const snapshot, never a mutable one.
-static_assert(
-    std::same_as<decltype(make_dictionary_snapshot(std::declval<std::shared_ptr<const Dictionary>>())),
-                std::shared_ptr<const dictionary_snapshot>>);
+static_assert(std::same_as<
+              decltype(make_dictionary_snapshot(std::declval<std::shared_ptr<const Dictionary>>())),
+              std::shared_ptr<const dictionary_snapshot>>);
 
 // A5 — the passkey boundary itself: nobody outside the friend list may mint a
 // key. Access checking in is_*_constructible is performed as if in an
@@ -93,9 +93,9 @@ TEST(DictionarySnapshot, SharedDictionaryViewAliasesRatherThanCopies) {
     ASSERT_NE(alias, nullptr);
 
     // WHILE snap is alive — identity and shared control block:
-    EXPECT_EQ(alias.get(), &snap->view())       // points INTO the snapshot, not at a copy
+    EXPECT_EQ(alias.get(), &snap->view())  // points INTO the snapshot, not at a copy
         << "shared_dictionary_view must alias the snapshot's own table_view, not copy it";
-    EXPECT_FALSE(alias.owner_before(snap));     // same control block, both directions
+    EXPECT_FALSE(alias.owner_before(snap));  // same control block, both directions
     EXPECT_FALSE(snap.owner_before(alias));
 
     snap.reset();  // AFTER: lifetime

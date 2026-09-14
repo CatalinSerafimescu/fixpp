@@ -154,12 +154,12 @@ private:
     // before the underlying fd is closed — no fd-reuse race.
     enum class WorkerCmd : uint8_t { idle, fsync_requested, stop };
 
-    std::mutex              worker_mu_;
+    std::mutex worker_mu_;
     std::condition_variable worker_cv_;       // drain→worker: new cmd or stop
     std::condition_variable worker_done_cv_;  // worker→drain: fsync complete
-    WorkerCmd               worker_cmd_{WorkerCmd::idle};
-    bool                    worker_fsync_done_{false};
-    std::thread             fsync_worker_;
+    WorkerCmd worker_cmd_{WorkerCmd::idle};
+    bool worker_fsync_done_{false};
+    std::thread fsync_worker_;
 };
 
 // ── FileSinkFactory ────────────────────────────────────────────────────────────

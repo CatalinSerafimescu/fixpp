@@ -88,10 +88,10 @@ using fixpp::session::fsm_state;
 using fixpp::session::MessageStore;
 using fixpp::session::MessageStoreFactory;
 using fixpp::session::retrieve_visitor;
-using fixpp::session::Session;
-using fixpp::session::SessionId;
-using fixpp::session::session_role;
 using fixpp::session::seqnum_t;
+using fixpp::session::Session;
+using fixpp::session::session_role;
+using fixpp::session::SessionId;
 using fixpp::wire::access_mode;
 using fixpp::wire::MessageView;
 
@@ -138,8 +138,9 @@ std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::s
 }
 
 std::vector<std::byte> make_app_payload(std::string_view clordid) {
-    std::string body = "35=D\x01" + std::string(field(11, clordid)) + "54=1\x01"
-                                                                       "55=AAPL\x01";
+    std::string body = "35=D\x01" + std::string(field(11, clordid)) +
+                       "54=1\x01"
+                       "55=AAPL\x01";
     std::vector<std::byte> v;
     v.reserve(body.size());
     for (char c : body) v.push_back(static_cast<std::byte>(c));
@@ -155,8 +156,9 @@ class PlainPersistentStore final : public MessageStore {
 public:
     PlainPersistentStore() : MessageStore(flush_thunk_for<PlainPersistentStore>()) {}
 
-    [[nodiscard]] asio::awaitable<expected_t<void>> store(
-        seqnum_t /*seq*/, std::span<const std::byte> /*frame*/, direction_t /*dir*/) noexcept override {
+    [[nodiscard]] asio::awaitable<expected_t<void>> store(seqnum_t /*seq*/,
+                                                          std::span<const std::byte> /*frame*/,
+                                                          direction_t /*dir*/) noexcept override {
         co_return expected_t<void>{};
     }
 
@@ -213,7 +215,8 @@ public:
         return {};
     }
 
-    void toAdmin(const MessageView<access_mode::Index>& /*msg*/, const SessionId& /*id*/) override {}
+    void toAdmin(const MessageView<access_mode::Index>& /*msg*/, const SessionId& /*id*/) override {
+    }
 };
 
 // ── Fixture ───────────────────────────────────────────────────────────────
@@ -261,7 +264,9 @@ TEST_F(SendToAppStoreCollisionTest,
     cfg.store_factory = factory;
 
     std::vector<std::vector<std::byte>> wire;
-    cfg.transport_send = [&](std::span<const std::byte> f) { wire.emplace_back(f.begin(), f.end()); };
+    cfg.transport_send = [&](std::span<const std::byte> f) {
+        wire.emplace_back(f.begin(), f.end());
+    };
 
     Session sess(engine, cfg);
 
@@ -277,8 +282,8 @@ TEST_F(SendToAppStoreCollisionTest,
     ASSERT_EQ(sess.state(), fsm_state::LogonSent);
 
     auto peer_logon = make_logon("FIX.4.2", 1, "ACCEPTR", "INITR");
-    auto logon_r = asio::co_spawn(ioc, sess.on_inbound_frame(std::span<const std::byte>(peer_logon)),
-                                  asio::use_future);
+    auto logon_r = asio::co_spawn(
+        ioc, sess.on_inbound_frame(std::span<const std::byte>(peer_logon)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, logon_r, 200ms,
                                                     "ToAppStoreBlockValuedError/logon-ack")) {
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
@@ -293,7 +298,8 @@ TEST_F(SendToAppStoreCollisionTest,
     const seqnum_t outbound_before = sess.seqnum_mgr_test_access().peek_outbound();
 
     auto payload = make_app_payload("ORD1");
-    auto send_fut = asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
+    auto send_fut =
+        asio::co_spawn(ioc, sess.send(std::span<const std::byte>(payload)), asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(ioc, send_fut, 200ms,
                                                     "ToAppStoreBlockValuedError")) {
         fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "ToAppStoreBlockValuedError");

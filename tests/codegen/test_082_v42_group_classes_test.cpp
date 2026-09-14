@@ -84,10 +84,10 @@ std::regex const kGrpClassStart(R"(^    class G_(\d+) \{$)");
 std::regex const kGrpRefRe(R"(group_view<(?:::fixpp::v42::groups::)?G_(\d+)>)");
 
 struct ClassSide {
-    std::set<std::string> message_names;       // 0-indent class names
-    std::set<int> group_ids;                   // 4-indent G_<N> flyweight ids
+    std::set<std::string> message_names;              // 0-indent class names
+    std::set<int> group_ids;                          // 4-indent G_<N> flyweight ids
     std::map<std::string, std::string> message_body;  // message class name -> body text
-    std::map<int, std::string> group_body;             // G_<N> -> body text
+    std::map<int, std::string> group_body;            // G_<N> -> body text
 };
 
 ClassSide parse_v42_messages_hpp(std::string const& path) {
@@ -141,18 +141,18 @@ ClassSide parse_v42_messages_hpp(std::string const& path) {
 TEST(V42GroupClasses, EighteenGroupFlyweightsFortySixMessageClasses) {
     ClassSide const cs = parse_v42_messages_hpp(FIXPP_CODEGEN_V42_MESSAGES_HPP);
 
-    EXPECT_EQ(cs.message_names.size(), 46u)
+    EXPECT_EQ(cs.message_names.size(), 46U)
         << "v42/Messages.hpp message-class count drifted from the pinned 46 -- "
            "this pin is NOT expected to move across the 082 predicate swap "
            "(FR-016 byte-identity elsewhere; only the group-flyweight count "
            "should change here)";
 
-    EXPECT_EQ(cs.group_ids.size(), 18u)
+    EXPECT_EQ(cs.group_ids.size(), 18U)
         << "v42/Messages.hpp `class G_` flyweight count -- expected 18 "
            "(contracts/group-detection.md K5 / C2's FIX42 struct-set), got "
-           << cs.group_ids.size()
-           << ". RED until T023 (predicate swap) + T024/T025 (VersionIR::"
-              "group_tags plumbing) + T026 (regeneration) land.";
+        << cs.group_ids.size()
+        << ". RED until T023 (predicate swap) + T024/T025 (VersionIR::"
+           "group_tags plumbing) + T026 (regeneration) land.";
 }
 
 // T020 [US1]: MassQuote's NoQuoteSets(296) -> NoQuoteEntries(295) nesting is

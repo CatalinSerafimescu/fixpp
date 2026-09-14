@@ -2,8 +2,8 @@
 // tests/codegen/test_078_builder_inline_all_tus_us3.cpp
 //
 // 078-precompiled-builder-libs Gate B RC#3 [US3]: SAFE-path counter-test for
-// the inline-XOR-link contract (spec.md's "One-definition-rule at the link/inline boundary" Edge Case; FR-006/FR-007;
-// quickstart.md Scenario 4d). test_078_builder_mixing_us3.cpp force-inlines
+// the inline-XOR-link contract (spec.md's "One-definition-rule at the link/inline boundary" Edge
+// Case; FR-006/FR-007; quickstart.md Scenario 4d). test_078_builder_mixing_us3.cpp force-inlines
 // ONE message (NewOrderSingle) and links a DIFFERENT one (ExecutionReport)
 // -- it never puts the SAME message in both an inline form and a linked form
 // in one program, so it does not exercise the inline-XOR-link discipline
@@ -34,8 +34,8 @@
 // tools/codegen/fixpp-codegen/emit_builders.cpp and quickstart.md Scenario
 // 4d for the documented inline-XOR-link discipline.
 //
-// Anchors: specs/078-precompiled-builder-libs/spec.md's "One-definition-rule at the link/inline boundary" Edge Case,
-// FR-006/FR-007; quickstart.md Scenario 4d;
+// Anchors: specs/078-precompiled-builder-libs/spec.md's "One-definition-rule at the link/inline
+// boundary" Edge Case, FR-006/FR-007; quickstart.md Scenario 4d;
 // tests/codegen/test_078_builder_mixing_us3.cpp (mixed-message precedent,
 // does not cover same-message mixing);
 // tools/codegen/fixpp-codegen/emit_builders.cpp (emitter contract comment).
@@ -43,8 +43,6 @@
 #define FIXPP_BUILDERS_HEADER_ONLY_NewOrderSingle
 #include <fixpp/v44/messages/NewOrderSingle.hpp>
 #undef FIXPP_BUILDERS_HEADER_ONLY_NewOrderSingle
-
-#include "test_078_builder_inline_all_tus_us3_support.hpp"
 
 #include <gtest/gtest.h>
 
@@ -59,6 +57,7 @@
 #include <vector>
 
 #include "support/app_message_read_scaffold.hpp"
+#include "test_078_builder_inline_all_tus_us3_support.hpp"
 
 namespace {
 
@@ -88,8 +87,7 @@ TEST(BuilderInlineAllTUsUS3, SafePath_InlineInBothTUs_ByteIdenticalAndDictReadba
     // Leg A: force-inlined build_NewOrderSingle, THIS TU.
     std::array<std::byte, 1024> out_here{};
     auto built_here = fixpp::v44::build_NewOrderSingle(std::span<std::byte>{out_here}, args);
-    ASSERT_TRUE(built_here.has_value())
-        << "force-inlined build_NewOrderSingle (this TU) failed";
+    ASSERT_TRUE(built_here.has_value()) << "force-inlined build_NewOrderSingle (this TU) failed";
 
     // Leg B: force-inlined build_NewOrderSingle, the OTHER TU
     // (test_078_builder_inline_all_tus_us3_tu2.cpp) -- co-present in the same
@@ -98,8 +96,7 @@ TEST(BuilderInlineAllTUsUS3, SafePath_InlineInBothTUs_ByteIdenticalAndDictReadba
     std::array<std::byte, 1024> out_there{};
     auto built_there = fixpp_test_078_inline_all_tus::build_new_order_single_other_tu(
         std::span<std::byte>{out_there}, args);
-    ASSERT_TRUE(built_there.has_value())
-        << "force-inlined build_NewOrderSingle (other TU) failed";
+    ASSERT_TRUE(built_there.has_value()) << "force-inlined build_NewOrderSingle (other TU) failed";
 
     ASSERT_EQ(built_here->size(), built_there->size())
         << "both TUs force-inline the SAME message -- output length must match";

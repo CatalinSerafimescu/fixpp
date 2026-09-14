@@ -106,14 +106,6 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
-#include <memory_resource>
-#include <set>
-#include <span>
-#include <string>
-#include <string_view>
-#include <utility>
-#include <vector>
-
 #include <fixpp/core/decimal_alias.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/dict/dictionary.hpp>
@@ -122,13 +114,20 @@
 #include <fixpp/dict/xml_loader.hpp>
 #include <fixpp/wire/parser.hpp>
 #include <fixpp/wire/validator.hpp>
+#include <memory_resource>
+#include <set>
+#include <span>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 #include "support/frame_view_factory.hpp"
 
 namespace {
 
-using fixpp::core::error;
 using fixpp::decimal_t;
+using fixpp::core::error;
 using fixpp::dict::Dictionary;
 using fixpp::wire::access_mode;
 using fixpp::wire::dictionary_driven_validator;
@@ -205,9 +204,18 @@ decimal_t make_decimal(std::string_view sv, std::pmr::memory_resource* mr) {
 // (734) + header — NO NoUnderlyings(711) group present here.
 std::string fix44_ap_required_prefix() {
     return "35=AP\x01"
-           "34=1\x01" "49=SENDER\x01" "52=20240101-00:00:00\x01" "56=TARGET\x01"
-           "1=ACCT1\x01" "581=1\x01" "715=20240101\x01" "721=RPT1\x01" "728=0\x01"
-           "730=1.5\x01" "731=1\x01" "734=1.4\x01";
+           "34=1\x01"
+           "49=SENDER\x01"
+           "52=20240101-00:00:00\x01"
+           "56=TARGET\x01"
+           "1=ACCT1\x01"
+           "581=1\x01"
+           "715=20240101\x01"
+           "721=RPT1\x01"
+           "728=0\x01"
+           "730=1.5\x01"
+           "731=1\x01"
+           "734=1.4\x01";
 }
 
 // Same field values as fix44_ap_required_prefix(), as a typed Args (no
@@ -295,11 +303,13 @@ TEST(RequiredScopeTwoTier, V44PositionReport_OptionalGroupInstanceMissingRequire
     auto d44 = load_real_dict("FIX44.xml", &dict_mr);
     dictionary_driven_validator v{d44.as_table_view()};
 
-    auto buf = make_frame(
-        fix44_ap_required_prefix() +
-        "711=2\x01"
-        "311=SYMA\x01" "732=1.1\x01" "733=1\x01"
-        "311=SYMB\x01" "732=2.2\x01");
+    auto buf = make_frame(fix44_ap_required_prefix() +
+                          "711=2\x01"
+                          "311=SYMA\x01"
+                          "732=1.1\x01"
+                          "733=1\x01"
+                          "311=SYMB\x01"
+                          "732=2.2\x01");
     std::array<std::byte, 4096> stack{};
     std::pmr::monotonic_buffer_resource arena;
     auto mv = parse_index(buf, stack, arena);
@@ -348,10 +358,16 @@ TEST(RequiredScopeTwoTier, V44NewOrderList_RequiredGroupInstanceMissingRequired_
 
     auto buf = make_frame(
         "35=E\x01"
-        "34=1\x01" "49=SENDER\x01" "52=20240101-00:00:00\x01" "56=TARGET\x01"
-        "66=LIST1\x01" "68=1\x01" "394=1\x01"
+        "34=1\x01"
+        "49=SENDER\x01"
+        "52=20240101-00:00:00\x01"
+        "56=TARGET\x01"
+        "66=LIST1\x01"
+        "68=1\x01"
+        "394=1\x01"
         "73=1\x01"
-        "11=ORD1\x01" "67=1\x01");
+        "11=ORD1\x01"
+        "67=1\x01");
     std::array<std::byte, 4096> stack{};
     std::pmr::monotonic_buffer_resource arena;
     auto mv = parse_index(buf, stack, arena);
@@ -417,10 +433,17 @@ TEST(RequiredScopeTwoTier, V42NewOrderList_RequiredGroupInstanceMissingRequired_
     dictionary_driven_validator v{tv};
     auto buf = make_frame(
         "35=E\x01"
-        "34=1\x01" "49=SENDER\x01" "52=20240101-00:00:00\x01" "56=TARGET\x01"
-        "66=LIST1\x01" "68=1\x01" "394=1\x01"
+        "34=1\x01"
+        "49=SENDER\x01"
+        "52=20240101-00:00:00\x01"
+        "56=TARGET\x01"
+        "66=LIST1\x01"
+        "68=1\x01"
+        "394=1\x01"
         "73=1\x01"
-        "11=ORD1\x01" "67=1\x01" "55=SYM\x01");  // Side(54) omitted
+        "11=ORD1\x01"
+        "67=1\x01"
+        "55=SYM\x01");  // Side(54) omitted
     std::array<std::byte, 4096> stack{};
     std::pmr::monotonic_buffer_resource arena;
     auto mv = parse_index(buf, stack, arena);
@@ -465,11 +488,14 @@ TEST(RequiredScopeTwoTier, V44PositionReport_AllGroupInstancesComplete_BothTiers
     auto d44 = load_real_dict("FIX44.xml", &dict_mr);
     dictionary_driven_validator v{d44.as_table_view()};
 
-    auto buf = make_frame(
-        fix44_ap_required_prefix() +
-        "711=2\x01"
-        "311=SYMA\x01" "732=1.1\x01" "733=1\x01"
-        "311=SYMB\x01" "732=2.2\x01" "733=2\x01");
+    auto buf = make_frame(fix44_ap_required_prefix() +
+                          "711=2\x01"
+                          "311=SYMA\x01"
+                          "732=1.1\x01"
+                          "733=1\x01"
+                          "311=SYMB\x01"
+                          "732=2.2\x01"
+                          "733=2\x01");
     std::array<std::byte, 4096> stack{};
     std::pmr::monotonic_buffer_resource arena;
     auto mv = parse_index(buf, stack, arena);
@@ -521,15 +547,16 @@ TEST(RequiredScopeTwoTier, V50sp2TradeCaptureReport_DerivationTierAgrees) {
            "message-level required";
     // Both sides are exactly EMPTY (not merely 54-excluding): AE's own
     // top-level fields are all required='N' (dictionaries/FIX50SP2.xml's
-    // `TradeCaptureReport` message declaration; its sole message-level-required entity is the `Instrument`
-    // component, whose own direct fields are ALL required='N' too — see
-    // FIX50SP2.xml's `Instrument` component declaration), and `<group name='NoSides' required='N'>`
-    // itself (FIX50SP2.xml's `TrdCapRptSideGrp` component) is not required despite the enclosing
+    // `TradeCaptureReport` message declaration; its sole message-level-required entity is the
+    // `Instrument` component, whose own direct fields are ALL required='N' too — see FIX50SP2.xml's
+    // `Instrument` component declaration), and `<group name='NoSides' required='N'>` itself
+    // (FIX50SP2.xml's `TrdCapRptSideGrp` component) is not required despite the enclosing
     // `TrdCapRptSideGrp` component usage being required='Y' (so 552 is not
     // promoted the way vlatest's NoPartyIDs(453) is below). Asserted
     // directly so an accidental mis-load returning `{}` for an unrelated
     // reason cannot silently pass this as "agreement".
-    EXPECT_TRUE(runtime_set.empty()) << "unexpected runtime AE required set: " << runtime_set.size();
+    EXPECT_TRUE(runtime_set.empty())
+        << "unexpected runtime AE required set: " << runtime_set.size();
     EXPECT_TRUE(typed_set.empty()) << "unexpected typed AE required set: " << typed_set.size();
     EXPECT_EQ(runtime_set, typed_set)
         << "two-tier message-level required-set disagreement on TradeCaptureReport/AE "

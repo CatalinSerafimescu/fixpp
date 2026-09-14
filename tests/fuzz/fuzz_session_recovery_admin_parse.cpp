@@ -51,7 +51,6 @@
 //   target_include_directories(...PRIVATE "${CMAKE_SOURCE_DIR}/tests").
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
-
 #include "support/pump_until_ready.hpp"
 
 using namespace std::chrono_literals;
@@ -101,8 +100,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
     // Open the session.
     {
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 50ms,
-                                                        "fuzz_admin_parse/open")) {
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 50ms, "fuzz_admin_parse/open")) {
             // ⚠️ NO `ADD_FAILURE` AND NO `drain_or_report` HERE, DELIBERATELY -- both
             // report through gtest, and in a libFuzzer TU that is a FALSE GREEN.
             // MEASURED, not reasoned: a probe linking gtest into a libFuzzer target
@@ -172,7 +170,9 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
 
         // Build the full frame: header + body + 10=<cs>\x01.
         char full[512];
-        int hdr_len = snprintf(full, sizeof(full), "8=FIX.4.2\x01" "9=%zu\x01",
+        int hdr_len = snprintf(full, sizeof(full),
+                               "8=FIX.4.2\x01"
+                               "9=%zu\x01",
                                body_len);
         // Append body.
         memcpy(full + hdr_len, logon_base.data(), logon_base.size());
@@ -180,17 +180,14 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
         std::size_t body_end = static_cast<std::size_t>(hdr_len) + body_len;
         // Compute a rough checksum over everything so far.
         unsigned int cs = 0;
-        for (std::size_t i = 0; i < body_end; ++i)
-            cs += static_cast<unsigned char>(full[i]);
+        for (std::size_t i = 0; i < body_end; ++i) cs += static_cast<unsigned char>(full[i]);
         cs &= 0xFF;
-        int trailer_len = snprintf(full + body_end, sizeof(full) - body_end,
-                                   "10=%03u\x01", cs);
+        int trailer_len = snprintf(full + body_end, sizeof(full) - body_end, "10=%03u\x01", cs);
         const std::size_t total = body_end + static_cast<std::size_t>(trailer_len);
 
         auto buf = std::span<const std::byte>(reinterpret_cast<const std::byte*>(full), total);
         auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(buf), asio::use_future);
-        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 50ms,
-                                                        "fuzz_admin_parse/logon")) {
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 50ms, "fuzz_admin_parse/logon")) {
             // Same disposition as the two other sites; the rationale -- including why
             // `abort()` was rejected -- is stated once at `fuzz_admin_parse/open`.
             return 0;
@@ -211,8 +208,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
         if (len == 0) return;
         auto buf = std::span<const std::byte>(reinterpret_cast<const std::byte*>(p), len);
         auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(buf), asio::use_future);
-        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 50ms,
-                                                        "fuzz_admin_parse/feed")) {
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 50ms, "fuzz_admin_parse/feed")) {
             // Same disposition as the two sites above; the rationale is stated once
             // at `fuzz_admin_parse/open`. This one is inside a void lambda.
             return;

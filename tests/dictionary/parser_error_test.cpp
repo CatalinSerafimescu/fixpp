@@ -21,7 +21,7 @@
 namespace {
 
 // Each test allocates its own monotonic buffer so PMR state never leaks.
-constexpr std::size_t kBufSize = 64u * 1024u;
+constexpr std::size_t kBufSize = 64U * 1024U;
 
 // Helper: assert that load_from_string with `xml` throws dict::xml_parse_error,
 // has code() == fixpp::core::error::dict_xml_parse_failed, and that what()
@@ -112,8 +112,8 @@ TEST(ParserError, NonXmlGarbage) {
 
 // ---------------------------------------------------------------------------
 // TC-PE-06..09 — defensive structural checks in `<fix>` header parsing
-// (LoaderState::parse_version()'s defensive structural checks; complements AC-L4 which exercises the
-// resolve_version→Unknown path, not the from_chars-failure path).
+// (LoaderState::parse_version()'s defensive structural checks; complements AC-L4 which exercises
+// the resolve_version→Unknown path, not the from_chars-failure path).
 // ---------------------------------------------------------------------------
 
 // TC-PE-06: Root element is not <fix> — must throw xml_parse_error.

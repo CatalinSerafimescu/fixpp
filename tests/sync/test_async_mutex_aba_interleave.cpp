@@ -32,6 +32,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <asio/bind_cancellation_slot.hpp>
 #include <asio/cancellation_signal.hpp>
 #include <asio/co_spawn.hpp>
@@ -39,8 +40,6 @@
 #include <asio/post.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
-
-#include <array>
 #include <atomic>
 #include <chrono>
 #include <fixpp/core/sync/async_mutex.hpp>
@@ -67,7 +66,7 @@ using fixpp::sync::test::yield_n;
 // ─────────────────────────────────────────────────────────────────────────────
 
 struct LinkLoadRaceCtx {
-    std::atomic<std::thread::id> t1_tid{};
+    std::atomic<std::thread::id> t1_tid;
     std::atomic<bool> t1_already_parked{false};
     std::atomic<bool> release_already_fired{false};
     std::binary_semaphore t1_parked{0};
@@ -162,7 +161,7 @@ TEST(AsyncMutexAbaInterleave, PopPreLinkLoadReuseRaceIsDataRace) {
 
     auto fh = asio::co_spawn(ioc, holder(), asio::use_future);
     auto fwa = asio::co_spawn(ioc, waiter_a(),
-                               asio::bind_cancellation_slot(sig_wa.slot(), asio::use_future));
+                              asio::bind_cancellation_slot(sig_wa.slot(), asio::use_future));
     ioc.run();
     fh.get();
     fwa.get();
@@ -181,7 +180,7 @@ TEST(AsyncMutexAbaInterleave, PopPreLinkLoadReuseRaceIsDataRace) {
     std::thread thread_a([&] {
         ctx.t1_tid.store(std::this_thread::get_id(), std::memory_order_release);
         ioc_a.run();  // blocks through T1's whole lifecycle (asio tracks the
-                       // spawned coroutine as outstanding work until it completes).
+                      // spawned coroutine as outstanding work until it completes).
     });
 
     ctx.t1_parked.acquire();  // T1 has loaded free_head and is blocked pre-read.
@@ -229,7 +228,7 @@ TEST(AsyncMutexAbaInterleave, PopPreLinkLoadReuseRaceIsDataRace) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 struct PreCasAbaCtx {
-    std::atomic<std::thread::id> t1_tid{};
+    std::atomic<std::thread::id> t1_tid;
     std::atomic<bool> t1_already_parked{false};
     std::binary_semaphore t1_parked{0};
     std::binary_semaphore t1_release{0};
@@ -316,9 +315,9 @@ TEST(AsyncMutexAbaInterleave, PopPreCasAbaCorruptionDetected) {
 
     auto fh = asio::co_spawn(ioc, holder(), asio::use_future);
     auto fwa = asio::co_spawn(ioc, waiter_a(),
-                               asio::bind_cancellation_slot(sig_wa.slot(), asio::use_future));
+                              asio::bind_cancellation_slot(sig_wa.slot(), asio::use_future));
     auto fwb = asio::co_spawn(ioc, waiter_b(),
-                               asio::bind_cancellation_slot(sig_wb.slot(), asio::use_future));
+                              asio::bind_cancellation_slot(sig_wb.slot(), asio::use_future));
     ioc.run();
     fh.get();
     fwa.get();
@@ -374,7 +373,7 @@ TEST(AsyncMutexAbaInterleave, PopPreCasAbaCorruptionDetected) {
     };
 
     auto ft2a = asio::co_spawn(ioc, t2a_coro(),
-                                asio::bind_cancellation_slot(sig_t2a.slot(), asio::use_future));
+                               asio::bind_cancellation_slot(sig_t2a.slot(), asio::use_future));
     pump();  // T2a pops P (T1 has only READ it so far) and parks (contended).
 
     auto ft2b = asio::co_spawn(ioc, t2b_coro(), asio::use_future);

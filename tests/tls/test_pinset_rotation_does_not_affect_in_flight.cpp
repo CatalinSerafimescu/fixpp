@@ -56,7 +56,7 @@ TEST(PinsetRotation, InFlightSnapshotUnaffectedByRotation) {
     // Step 2: capture snapshot — simulates handshake-start snapshot acquisition.
     auto in_flight_snap = ps.snapshot();
     ASSERT_NE(in_flight_snap, nullptr);
-    ASSERT_EQ(in_flight_snap->size(), 1u);
+    ASSERT_EQ(in_flight_snap->size(), 1U);
 
     std::atomic<bool> rotation_done{false};
 
@@ -73,13 +73,13 @@ TEST(PinsetRotation, InFlightSnapshotUnaffectedByRotation) {
     ASSERT_TRUE(rotation_done.load());
 
     // Step 4: in-flight snapshot still sees OLD.
-    ASSERT_EQ(in_flight_snap->size(), 1u) << "in-flight snapshot must not be mutated by rotation";
+    ASSERT_EQ(in_flight_snap->size(), 1U) << "in-flight snapshot must not be mutated by rotation";
     EXPECT_EQ((*in_flight_snap)[0].sha256, kOld) << "in-flight snapshot must still contain OLD pin";
 
     // Step 5: fresh snapshot sees NEW, not OLD.
     auto fresh_snap = ps.snapshot();
     ASSERT_NE(fresh_snap, nullptr);
-    ASSERT_EQ(fresh_snap->size(), 1u) << "post-rotation snapshot must contain exactly 1 pin";
+    ASSERT_EQ(fresh_snap->size(), 1U) << "post-rotation snapshot must contain exactly 1 pin";
     EXPECT_EQ((*fresh_snap)[0].sha256, kNew) << "post-rotation snapshot must contain NEW pin";
 
     // find() also reflects the rotation.

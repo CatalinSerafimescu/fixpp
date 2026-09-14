@@ -26,8 +26,7 @@ namespace {
 bool any_reject_value_incorrect(const OutboundCapture& cap) {
     for (const auto& f : cap.frames) {
         std::string wire(reinterpret_cast<const char*>(f.data()), f.size());
-        if (wire.find("35=3\x01") != std::string::npos &&
-            wire.find("373=5\x01") != std::string::npos) {
+        if (wire.contains("35=3\x01") && wire.contains("373=5\x01")) {
             return true;
         }
     }
@@ -76,7 +75,8 @@ TEST_F(InboundSequenceResetArms, NewSeqNoBelowExpectedRejects) {
 
     EXPECT_TRUE(any_reject_value_incorrect(capture))
         << "NewSeqNo < expected must emit Reject(35=3, 373=5 ValueIsIncorrect)";
-    EXPECT_EQ(next_inbound(s), 2U) << "a below-expected NewSeqNo must not move the counter backward";
+    EXPECT_EQ(next_inbound(s), 2U)
+        << "a below-expected NewSeqNo must not move the counter backward";
 }
 
 }  // namespace

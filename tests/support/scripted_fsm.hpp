@@ -55,10 +55,10 @@ using fsm_script = std::vector<fsm_step>;
 // byte-stable ordering.
 [[nodiscard]] inline fsm_script make_default_script() {
     return fsm_script{
-        {fsm_label::logon},
-        {fsm_label::new_order_single},
-        {fsm_label::execution_report},
-        {fsm_label::logout},
+        {.label = fsm_label::logon},
+        {.label = fsm_label::new_order_single},
+        {.label = fsm_label::execution_report},
+        {.label = fsm_label::logout},
     };
 }
 
@@ -68,12 +68,12 @@ using fsm_script = std::vector<fsm_step>;
 [[nodiscard]] inline fsm_script make_heartbeat_script(int cycles,
                                                       std::chrono::nanoseconds interval) {
     fsm_script s;
-    s.push_back({fsm_label::logon});
+    s.push_back({.label = fsm_label::logon});
     for (int i = 0; i < cycles; ++i) {
-        s.push_back({fsm_label::advance_clock, interval, false});
-        s.push_back({fsm_label::heartbeat});
+        s.push_back({.label = fsm_label::advance_clock, .delta = interval, .terminal = false});
+        s.push_back({.label = fsm_label::heartbeat});
     }
-    s.push_back({fsm_label::logout});
+    s.push_back({.label = fsm_label::logout});
     return s;
 }
 
@@ -81,9 +81,11 @@ using fsm_script = std::vector<fsm_step>;
 // script (seam 15): cancellation is requested mid-flight via request_close.
 [[nodiscard]] inline fsm_script make_conformance_cancel_script(bool terminal) {
     return fsm_script{
-        {fsm_label::logon},
-        {fsm_label::new_order_single},
-        {fsm_label::request_close, std::chrono::nanoseconds{0}, terminal},
+        {.label = fsm_label::logon},
+        {.label = fsm_label::new_order_single},
+        {.label = fsm_label::request_close,
+         .delta = std::chrono::nanoseconds{0},
+         .terminal = terminal},
     };
 }
 
@@ -104,19 +106,20 @@ public:
     std::uint64_t on_enter(fsm_label l) {
         const bool was_inside = inside_.exchange(true, std::memory_order_acq_rel);
         const auto ord = next_.fetch_add(1, std::memory_order_acq_rel);
-        std::lock_guard<std::mutex> g(m_);
-        entries_.push_back(entry{l, ord, std::this_thread::get_id(), was_inside});
+        std::scoped_lock g(m_);
+        entries_.push_back(entry{
+            .label = l, .order = ord, .tid = std::this_thread::get_id(), .reentered = was_inside});
         return ord;
     }
     void on_leave() noexcept { inside_.store(false, std::memory_order_release); }
 
     [[nodiscard]] std::vector<entry> snapshot() const {
-        std::lock_guard<std::mutex> g(m_);
+        std::scoped_lock g(m_);
         return entries_;
     }
     // 2d-owned: strand serialisation holds iff NO entry was reentered.
     [[nodiscard]] bool strictly_serialised() const {
-        std::lock_guard<std::mutex> g(m_);
+        std::scoped_lock g(m_);
         for (const auto& e : entries_) {
             if (e.reentered) return false;
         }
@@ -124,7 +127,7 @@ public:
     }
     // determinism: the label order is stable across identically-driven runs.
     [[nodiscard]] std::vector<fsm_label> label_order() const {
-        std::lock_guard<std::mutex> g(m_);
+        std::scoped_lock g(m_);
         std::vector<fsm_label> v;
         v.reserve(entries_.size());
         for (const auto& e : entries_) {

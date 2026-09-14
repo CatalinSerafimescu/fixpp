@@ -96,7 +96,7 @@ public:
         }
     }
     template <class U>
-    expected_t<decimal<U>> to() const noexcept {
+    [[nodiscard]] expected_t<decimal<U>> to() const noexcept {
         static_assert(
             requires { decimal_traits<U>::from_pod; },
             "decimal::to<U>() requires decimal_traits<U> to be specialized. "

@@ -57,7 +57,7 @@
 #include <string_view>
 #include <vector>
 
-#include "session/support/frame_field_extract.hpp"   // via -I tests/
+#include "session/support/frame_field_extract.hpp"  // via -I tests/
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -102,7 +102,7 @@ static std::vector<std::byte> make_fix44_frame(std::string_view body_str) {
     std::string full = hdr + std::string(body_str);
     unsigned int cs = 0;
     for (unsigned char c : full) cs += c;
-    cs &= 0xFFu;
+    cs &= 0xFFU;
     char csbuf[4];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     full += "10=" + std::string(csbuf) + "\x01";
@@ -140,8 +140,7 @@ static std::vector<std::byte> make_peer_logon(std::uint32_t seq, bool reset_seqn
 class SharedStoreWrapper final : public MessageStore {
 public:
     explicit SharedStoreWrapper(std::shared_ptr<StoreDouble> delegate) noexcept
-        : MessageStore(flush_thunk_for<SharedStoreWrapper>()),
-          delegate_(std::move(delegate)) {}
+        : MessageStore(flush_thunk_for<SharedStoreWrapper>()), delegate_(std::move(delegate)) {}
 
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store(
         seqnum_t seq, std::span<const std::byte> frame, direction_t dir) noexcept override {
@@ -157,7 +156,7 @@ public:
         return delegate_->next_seqnum(dir, increment);
     }
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override {
-        return delegate_->reset();
+        return (*delegate_).reset();
     }
 
 private:
@@ -223,12 +222,9 @@ protected:
     //   policy: reset_seqnum_policy_field override
     //   reset_on_logout: US2 teardown knob (C3.1/C3.2)
     //   reset_on_disconnect: US2 teardown knob (C4.1/C4.2/C4.3)
-    SessionConfig make_cfg(
-        session_role role = session_role::initiator,
-        bool reset_on_logon = false,
-        reset_seqnum_policy policy = reset_seqnum_policy::bilateral_lenient,
-        bool reset_on_logout = false,
-        bool reset_on_disconnect = false) {
+    SessionConfig make_cfg(session_role role = session_role::initiator, bool reset_on_logon = false,
+                           reset_seqnum_policy policy = reset_seqnum_policy::bilateral_lenient,
+                           bool reset_on_logout = false, bool reset_on_disconnect = false) {
         SessionConfig cfg;
         cfg.sender_comp_id = "ISLD";
         cfg.target_comp_id = "TW";
@@ -264,8 +260,7 @@ protected:
     }
 
     // Feed an inbound frame synchronously.
-    fixpp::core::expected_t<void> feed_sync(Session& sess,
-                                            const std::vector<std::byte>& frame) {
+    fixpp::core::expected_t<void> feed_sync(Session& sess, const std::vector<std::byte>& frame) {
         auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms,
                                                         "ResetOnLifecycleTest::feed_sync")) {
@@ -343,8 +338,7 @@ protected:
     // Drive an acceptor session to Active by feeding a valid Logon from TW.
     // seq: the Logon seqnum the peer sends (usually 1 for a clean session).
     // reset_seqnum: whether the peer Logon carries 141=Y.
-    void drive_acceptor_to_active(Session& sess, std::uint32_t seq = 1,
-                                  bool reset_seqnum = false) {
+    void drive_acceptor_to_active(Session& sess, std::uint32_t seq = 1, bool reset_seqnum = false) {
         auto r = open_sync(sess);
         ASSERT_TRUE(r.has_value()) << "open() failed";
         auto logon = make_peer_logon(seq, reset_seqnum);
@@ -387,14 +381,14 @@ protected:
     }
 
     // Helper: check whether any captured frame has MsgType == mt.
-    bool any_msg_type(std::string_view mt) const {
+    [[nodiscard]] bool any_msg_type(std::string_view mt) const {
         for (const auto& f : captured_frames) {
             if (extract_field(std::span<const std::byte>(f), 35) == mt) return true;
         }
         return false;
     }
 
-    bool any_resend_request() const { return any_msg_type("2"); }
+    [[nodiscard]] bool any_resend_request() const { return any_msg_type("2"); }
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -440,10 +434,10 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogon_Initiator_ResetsAndEmits141) {
     // RED: without trigger, MsgSeqNum will be 5 (the seeded value).
     auto seq34 = extract_field(std::span<const std::byte>(logon_frame), 34);
     ASSERT_TRUE(seq34.has_value()) << "Outbound Logon must carry MsgSeqNum (tag 34)";
-    EXPECT_EQ(std::string(*seq34), "1")
-        << "ResetOnLogon_Initiator_ResetsAndEmits141 RED (C2.1): "
-           "MsgSeqNum must be 1 after reset_on_logon reset; "
-           "got " << *seq34 << " (reset trigger not yet wired)";
+    EXPECT_EQ(std::string(*seq34), "1") << "ResetOnLogon_Initiator_ResetsAndEmits141 RED (C2.1): "
+                                           "MsgSeqNum must be 1 after reset_on_logon reset; "
+                                           "got "
+                                        << *seq34 << " (reset trigger not yet wired)";
 
     // C2.6 / SC-004: 141=Y must be present in the outbound Logon.
     // RED: bilateral_lenient without a reset does not emit 141=Y.
@@ -463,7 +457,8 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogon_Initiator_ResetsAndEmits141) {
     EXPECT_EQ(post_outbound, static_cast<seqnum_t>(2))
         << "ResetOnLogon_Initiator_ResetsAndEmits141 RED (C2.1): "
            "post-open peek_outbound must be 2 (reset to 1, Logon consumed); "
-           "got " << post_outbound << " (reset trigger not yet wired)";
+           "got "
+        << post_outbound << " (reset trigger not yet wired)";
 }
 
 // ── Witness (2): ResetOnLogon_Off_No141Beyond013 ──────────────────────────────
@@ -729,7 +724,8 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogon_Acceptor_AdmitsFresh34eq1_LocalExpecte
     EXPECT_EQ(next_in, static_cast<seqnum_t>(2))
         << "ResetOnLogon_Acceptor_AdmitsFresh34eq1_LocalExpectedGt1 RED (SC-001): "
            "next_inbound must be 2 after reset (1) + Logon consumed (1); "
-           "got " << next_in << " (reset trigger not yet wired; still at 5+1=6)";
+           "got "
+        << next_in << " (reset trigger not yet wired; still at 5+1=6)";
 }
 
 // ── Witness (7): ResetOnLogon_Acceptor_ResetsIdempotentWith141 ────────────────
@@ -750,7 +746,7 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogon_Acceptor_ResetsIdempotentWith141) {
     ASSERT_TRUE(r.has_value()) << "open() failed";
 
     // The store starts with reset_call_count()==0.
-    ASSERT_EQ(factory->store->reset_call_count(), 0u)
+    ASSERT_EQ(factory->store->reset_call_count(), 0U)
         << "StoreDouble must start at reset_call_count==0";
 
     // Feed Logon carrying 141=Y (both knob + peer-141 fire; must collapse to 1 reset).
@@ -759,11 +755,11 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogon_Acceptor_ResetsIdempotentWith141) {
 
     // C5.1: exactly one store reset observable (knob-driven arm; 013-only arm mutually excluded).
     // RED: without trigger, no store reset fires → count==0.
-    EXPECT_EQ(factory->store->reset_call_count(), 1u)
+    EXPECT_EQ(factory->store->reset_call_count(), 1U)
         << "ResetOnLogon_Acceptor_ResetsIdempotentWith141 RED (C5.1): "
            "exactly one store_.reset() must fire for (reset_on_logon=true + 141=Y); "
-           "got " << factory->store->reset_call_count()
-           << " (acceptor reset not yet wired)";
+           "got "
+        << factory->store->reset_call_count() << " (acceptor reset not yet wired)";
 
     // Also check session reached Active.
     EXPECT_EQ(sess.state(), fsm_state::Active)
@@ -800,15 +796,14 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogon_BothRoles_Resets) {
         ASSERT_TRUE(r.has_value()) << "BothRoles_Resets initiator: open() failed";
 
         // Initiator Logon must carry MsgSeqNum=1 (post-reset) and 141=Y.
-        ASSERT_FALSE(captured_frames.empty())
-            << "BothRoles_Resets initiator: no outbound frame";
+        ASSERT_FALSE(captured_frames.empty()) << "BothRoles_Resets initiator: no outbound frame";
         const auto& logon = captured_frames.back();
 
         auto seq34 = extract_field(std::span<const std::byte>(logon), 34);
         EXPECT_EQ(std::string(seq34.value_or("missing")), "1")
             << "ResetOnLogon_BothRoles_Resets initiator RED (C5.2): "
                "MsgSeqNum must be 1 after reset; got "
-               << seq34.value_or("missing") << "; [C5.2/C2.1]";
+            << seq34.value_or("missing") << "; [C5.2/C2.1]";
 
         EXPECT_TRUE(frame_has_tag(logon, 141))
             << "ResetOnLogon_BothRoles_Resets initiator RED (C5.2): "
@@ -914,12 +909,10 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogon_DurableStoreFailure_BlocksActive) {
 //
 // RED: no teardown reset wired → count==0 and seeded counters unchanged.
 TEST_F(ResetOnLifecycleTest, ResetOnLogout_LocalInitiated_Resets) {
-    auto cfg = make_cfg(
-        session_role::initiator,
-        /*reset_on_logon=*/false,
-        reset_seqnum_policy::bilateral_lenient,
-        /*reset_on_logout=*/true,
-        /*reset_on_disconnect=*/false);
+    auto cfg = make_cfg(session_role::initiator,
+                        /*reset_on_logon=*/false, reset_seqnum_policy::bilateral_lenient,
+                        /*reset_on_logout=*/true,
+                        /*reset_on_disconnect=*/false);
     Session sess(engine, cfg);
 
     // Drive to Active first (with clean {1,1} seqnums so Logon exchange succeeds).
@@ -941,23 +934,24 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogout_LocalInitiated_Resets) {
 
     // C3.1: teardown reset must have fired exactly once.
     // RED: reset_call_count() stays at calls_before (teardown not wired).
-    EXPECT_EQ(factory->store->reset_call_count(), calls_before + 1u)
+    EXPECT_EQ(factory->store->reset_call_count(), calls_before + 1U)
         << "ResetOnLogout_LocalInitiated_Resets RED (C3.1): "
            "exactly one store_.reset() must fire on graceful Logout teardown "
            "when reset_on_logout=true; got count=="
-        << factory->store->reset_call_count()
-        << " (teardown trigger not yet wired — T014 pending)";
+        << factory->store->reset_call_count() << " (teardown trigger not yet wired — T014 pending)";
 
     // C3.1: live manager counters must be reset to 1.
     // After reset, peek_outbound()==1 (not yet used), next_inbound()==1.
     const seqnum_t out_after = sess.seqnum_mgr_test_access().peek_outbound();
-    const seqnum_t in_after  = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t in_after = sess.seqnum_mgr_test_access().next_inbound_unsafe();
     EXPECT_EQ(out_after, static_cast<seqnum_t>(1))
         << "ResetOnLogout_LocalInitiated_Resets RED (C3.1): "
-           "peek_outbound must be 1 after teardown reset; got " << out_after;
+           "peek_outbound must be 1 after teardown reset; got "
+        << out_after;
     EXPECT_EQ(in_after, static_cast<seqnum_t>(1))
         << "ResetOnLogout_LocalInitiated_Resets RED (C3.1): "
-           "next_inbound must be 1 after teardown reset; got " << in_after;
+           "next_inbound must be 1 after teardown reset; got "
+        << in_after;
 }
 
 // ── Witness (2): ResetOnLogout_PeerInitiated_Resets ──────────────────────────
@@ -973,12 +967,10 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogout_LocalInitiated_Resets) {
 //
 // RED: no teardown reset wired → count==0 and seeded counters unchanged.
 TEST_F(ResetOnLifecycleTest, ResetOnLogout_PeerInitiated_Resets) {
-    auto cfg = make_cfg(
-        session_role::initiator,
-        /*reset_on_logon=*/false,
-        reset_seqnum_policy::bilateral_lenient,
-        /*reset_on_logout=*/true,
-        /*reset_on_disconnect=*/false);
+    auto cfg = make_cfg(session_role::initiator,
+                        /*reset_on_logon=*/false, reset_seqnum_policy::bilateral_lenient,
+                        /*reset_on_logout=*/true,
+                        /*reset_on_disconnect=*/false);
     Session sess(engine, cfg);
 
     // Drive to Active first with clean seqnums.
@@ -1015,20 +1007,23 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogout_PeerInitiated_Resets) {
 
     // C3.1: teardown reset must have fired (via close(terminal) reaching the
     // teardown-reset block with logout_seen_=true and reset_on_logout=true).
-    EXPECT_EQ(factory->store->reset_call_count(), calls_before + 1u)
+    EXPECT_EQ(factory->store->reset_call_count(), calls_before + 1U)
         << "ResetOnLogout_PeerInitiated_Resets (C3.1): "
            "store_.reset() must fire on peer-initiated Logout teardown "
            "when reset_on_logout=true (via close(terminal) mirroring read-pump EOF); "
-           "got count==" << factory->store->reset_call_count();
+           "got count=="
+        << factory->store->reset_call_count();
 
     const seqnum_t out_after = sess.seqnum_mgr_test_access().peek_outbound();
-    const seqnum_t in_after  = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t in_after = sess.seqnum_mgr_test_access().next_inbound_unsafe();
     EXPECT_EQ(out_after, static_cast<seqnum_t>(1))
         << "ResetOnLogout_PeerInitiated_Resets (C3.1): "
-           "peek_outbound must be 1 after peer-Logout teardown reset; got " << out_after;
+           "peek_outbound must be 1 after peer-Logout teardown reset; got "
+        << out_after;
     EXPECT_EQ(in_after, static_cast<seqnum_t>(1))
         << "ResetOnLogout_PeerInitiated_Resets (C3.1): "
-           "next_inbound must be 1 after peer-Logout teardown reset; got " << in_after;
+           "next_inbound must be 1 after peer-Logout teardown reset; got "
+        << in_after;
 }
 
 // ── Witness (3): ResetOnDisconnect_AbnormalDrop_Resets ───────────────────────
@@ -1040,12 +1035,10 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogout_PeerInitiated_Resets) {
 //
 // RED: no teardown reset wired → count==0 and seeded counters unchanged.
 TEST_F(ResetOnLifecycleTest, ResetOnDisconnect_AbnormalDrop_Resets) {
-    auto cfg = make_cfg(
-        session_role::initiator,
-        /*reset_on_logon=*/false,
-        reset_seqnum_policy::bilateral_lenient,
-        /*reset_on_logout=*/false,
-        /*reset_on_disconnect=*/true);
+    auto cfg = make_cfg(session_role::initiator,
+                        /*reset_on_logon=*/false, reset_seqnum_policy::bilateral_lenient,
+                        /*reset_on_logout=*/false,
+                        /*reset_on_disconnect=*/true);
     Session sess(engine, cfg);
 
     // Drive to Active first with clean seqnums.
@@ -1066,23 +1059,24 @@ TEST_F(ResetOnLifecycleTest, ResetOnDisconnect_AbnormalDrop_Resets) {
 
     // C4.1/C4.2: teardown reset must fire on abnormal drop.
     // RED: count stays at calls_before.
-    EXPECT_EQ(factory->store->reset_call_count(), calls_before + 1u)
+    EXPECT_EQ(factory->store->reset_call_count(), calls_before + 1U)
         << "ResetOnDisconnect_AbnormalDrop_Resets RED (C4.1/C4.2): "
            "store_.reset() must fire on terminal close (abnormal drop) "
            "when reset_on_disconnect=true; got count=="
-        << factory->store->reset_call_count()
-        << " (teardown trigger not yet wired — T014 pending)";
+        << factory->store->reset_call_count() << " (teardown trigger not yet wired — T014 pending)";
 
     const seqnum_t out_after = sess.seqnum_mgr_test_access().peek_outbound();
-    const seqnum_t in_after  = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t in_after = sess.seqnum_mgr_test_access().next_inbound_unsafe();
     EXPECT_EQ(out_after, static_cast<seqnum_t>(1))
         << "ResetOnDisconnect_AbnormalDrop_Resets RED (C4.1): "
            "peek_outbound must be 1 after reset_on_disconnect teardown reset; "
-           "got " << out_after;
+           "got "
+        << out_after;
     EXPECT_EQ(in_after, static_cast<seqnum_t>(1))
         << "ResetOnDisconnect_AbnormalDrop_Resets RED (C4.1): "
            "next_inbound must be 1 after reset_on_disconnect teardown reset; "
-           "got " << in_after;
+           "got "
+        << in_after;
 }
 
 // ── Witness (4a): ResetOnLogout_Off_Preserves ────────────────────────────────
@@ -1094,12 +1088,10 @@ TEST_F(ResetOnLifecycleTest, ResetOnDisconnect_AbnormalDrop_Resets) {
 //
 // Expected: GREEN today (current behavior IS preservation — no teardown reset wired).
 TEST_F(ResetOnLifecycleTest, ResetOnLogout_Off_Preserves) {
-    auto cfg = make_cfg(
-        session_role::initiator,
-        /*reset_on_logon=*/false,
-        reset_seqnum_policy::bilateral_lenient,
-        /*reset_on_logout=*/false,
-        /*reset_on_disconnect=*/false);
+    auto cfg = make_cfg(session_role::initiator,
+                        /*reset_on_logon=*/false, reset_seqnum_policy::bilateral_lenient,
+                        /*reset_on_logout=*/false,
+                        /*reset_on_disconnect=*/false);
     Session sess(engine, cfg);
 
     // Drive to Active first with clean seqnums.
@@ -1122,17 +1114,19 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogout_Off_Preserves) {
     ASSERT_EQ(sess.state(), fsm_state::Disconnected);
 
     // C3.2: reset_call_count must be 0 (no store reset fired).
-    EXPECT_EQ(factory->store->reset_call_count(), 0u)
+    EXPECT_EQ(factory->store->reset_call_count(), 0U)
         << "ResetOnLogout_Off_Preserves (C3.2): "
            "reset_call_count must remain 0 when reset_on_logout=false; "
-           "got " << factory->store->reset_call_count();
+           "got "
+        << factory->store->reset_call_count();
 
     // C3.2: next_inbound preserved (not reset to 1).
     const seqnum_t in_after = sess.seqnum_mgr_test_access().next_inbound_unsafe();
     EXPECT_EQ(in_after, in_before)
         << "ResetOnLogout_Off_Preserves (C3.2): "
            "next_inbound must be preserved (unchanged) after Logout when reset_on_logout=false; "
-           "expected " << in_before << " got " << in_after;
+           "expected "
+        << in_before << " got " << in_after;
 }
 
 // ── Witness (4b): ResetOnDisconnect_Off_Preserves ────────────────────────────
@@ -1144,12 +1138,10 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogout_Off_Preserves) {
 //
 // Expected: GREEN today (current behavior IS preservation).
 TEST_F(ResetOnLifecycleTest, ResetOnDisconnect_Off_Preserves) {
-    auto cfg = make_cfg(
-        session_role::initiator,
-        /*reset_on_logon=*/false,
-        reset_seqnum_policy::bilateral_lenient,
-        /*reset_on_logout=*/false,
-        /*reset_on_disconnect=*/false);
+    auto cfg = make_cfg(session_role::initiator,
+                        /*reset_on_logon=*/false, reset_seqnum_policy::bilateral_lenient,
+                        /*reset_on_logout=*/false,
+                        /*reset_on_disconnect=*/false);
     Session sess(engine, cfg);
 
     // Drive to Active first with clean seqnums.
@@ -1169,10 +1161,11 @@ TEST_F(ResetOnLifecycleTest, ResetOnDisconnect_Off_Preserves) {
     ASSERT_EQ(sess.state(), fsm_state::Disconnected);
 
     // C4.3: no store reset fired.
-    EXPECT_EQ(factory->store->reset_call_count(), 0u)
+    EXPECT_EQ(factory->store->reset_call_count(), 0U)
         << "ResetOnDisconnect_Off_Preserves (C4.3): "
            "reset_call_count must remain 0 when reset_on_disconnect=false; "
-           "got " << factory->store->reset_call_count();
+           "got "
+        << factory->store->reset_call_count();
 
     // C4.3: next_inbound preserved.
     const seqnum_t in_after = sess.seqnum_mgr_test_access().next_inbound_unsafe();
@@ -1180,7 +1173,8 @@ TEST_F(ResetOnLifecycleTest, ResetOnDisconnect_Off_Preserves) {
         << "ResetOnDisconnect_Off_Preserves (C4.3): "
            "next_inbound must be preserved (unchanged) after abnormal close "
            "when reset_on_disconnect=false; "
-           "expected " << in_before << " got " << in_after;
+           "expected "
+        << in_before << " got " << in_after;
 }
 
 // ── Witness (5): ResetOnLogoutAndDisconnect_DoubleTrigger_OneStoreReset ───────
@@ -1196,12 +1190,10 @@ TEST_F(ResetOnLifecycleTest, ResetOnDisconnect_Off_Preserves) {
 // RED: no teardown reset wired → reset_call_count()==0 (not 1). After T014 wires
 //      it, the guard must prevent a count of 2.
 TEST_F(ResetOnLifecycleTest, ResetOnLogoutAndDisconnect_DoubleTrigger_OneStoreReset) {
-    auto cfg = make_cfg(
-        session_role::initiator,
-        /*reset_on_logon=*/false,
-        reset_seqnum_policy::bilateral_lenient,
-        /*reset_on_logout=*/true,
-        /*reset_on_disconnect=*/true);
+    auto cfg = make_cfg(session_role::initiator,
+                        /*reset_on_logon=*/false, reset_seqnum_policy::bilateral_lenient,
+                        /*reset_on_logout=*/true,
+                        /*reset_on_disconnect=*/true);
     Session sess(engine, cfg);
 
     // Drive to Active first with clean seqnums.
@@ -1221,11 +1213,12 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogoutAndDisconnect_DoubleTrigger_OneStoreRe
 
     // C5.1: exactly ONE store reset must fire (single-fire guard collapses double trigger).
     // RED: count==0 (teardown not wired).
-    EXPECT_EQ(factory->store->reset_call_count(), 1u)
+    EXPECT_EQ(factory->store->reset_call_count(), 1U)
         << "ResetOnLogoutAndDisconnect_DoubleTrigger_OneStoreReset RED (C5.1): "
            "exactly one store_.reset() must fire even when both reset_on_logout "
            "AND reset_on_disconnect are true (single-fire guard); "
-           "got count==" << factory->store->reset_call_count()
+           "got count=="
+        << factory->store->reset_call_count()
         << " (teardown not wired — T014 pending; expected RED=0 until then)";
 }
 
@@ -1246,33 +1239,29 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogout_BothRoles_Resets) {
         captured_frames.clear();
         factory = std::make_shared<StoreDoubleFactory>();
 
-        auto cfg = make_cfg(
-            session_role::initiator,
-            /*reset_on_logon=*/false,
-            reset_seqnum_policy::bilateral_lenient,
-            /*reset_on_logout=*/true,
-            /*reset_on_disconnect=*/false);
+        auto cfg = make_cfg(session_role::initiator,
+                            /*reset_on_logon=*/false, reset_seqnum_policy::bilateral_lenient,
+                            /*reset_on_logout=*/true,
+                            /*reset_on_disconnect=*/false);
         Session sess(engine, cfg);
 
         // Drive to Active first with clean seqnums.
         drive_initiator_to_active(sess);
-        ASSERT_EQ(sess.state(), fsm_state::Active)
-            << "BothRoles initiator: must reach Active";
+        ASSERT_EQ(sess.state(), fsm_state::Active) << "BothRoles initiator: must reach Active";
 
         // Seed non-1 AFTER reaching Active.
-        sess.seqnum_mgr_test_access().set_counters_for_test(
-            static_cast<seqnum_t>(6), static_cast<seqnum_t>(3));
+        sess.seqnum_mgr_test_access().set_counters_for_test(static_cast<seqnum_t>(6),
+                                                            static_cast<seqnum_t>(3));
 
         graceful_close_sync(sess);
 
         ASSERT_EQ(sess.state(), fsm_state::Disconnected);
 
-        EXPECT_EQ(factory->store->reset_call_count(), 1u)
+        EXPECT_EQ(factory->store->reset_call_count(), 1U)
             << "ResetOnLogout_BothRoles_Resets initiator arm RED (C5.2): "
                "store_.reset() must fire on initiator graceful Logout "
                "when reset_on_logout=true; got count=="
-            << factory->store->reset_call_count()
-            << " (teardown not wired — T014 pending)";
+            << factory->store->reset_call_count() << " (teardown not wired — T014 pending)";
     }
 
     // ── Acceptor arm ──
@@ -1281,22 +1270,19 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogout_BothRoles_Resets) {
         captured_frames.clear();
         factory = std::make_shared<StoreDoubleFactory>();
 
-        auto cfg = make_cfg(
-            session_role::acceptor,
-            /*reset_on_logon=*/false,
-            reset_seqnum_policy::bilateral_lenient,
-            /*reset_on_logout=*/true,
-            /*reset_on_disconnect=*/false);
+        auto cfg = make_cfg(session_role::acceptor,
+                            /*reset_on_logon=*/false, reset_seqnum_policy::bilateral_lenient,
+                            /*reset_on_logout=*/true,
+                            /*reset_on_disconnect=*/false);
         Session sess(engine, cfg);
 
         // Drive acceptor to Active with clean seqnums (seq=1 from peer).
         drive_acceptor_to_active(sess, /*seq=*/1, /*reset_seqnum=*/false);
-        ASSERT_EQ(sess.state(), fsm_state::Active)
-            << "BothRoles acceptor: must reach Active";
+        ASSERT_EQ(sess.state(), fsm_state::Active) << "BothRoles acceptor: must reach Active";
 
         // Seed non-1 inbound AFTER reaching Active.
-        sess.seqnum_mgr_test_access().set_counters_for_test(
-            static_cast<seqnum_t>(7), static_cast<seqnum_t>(2));
+        sess.seqnum_mgr_test_access().set_counters_for_test(static_cast<seqnum_t>(7),
+                                                            static_cast<seqnum_t>(2));
 
         // Feed peer Logout at seq=7 (matching seeded next_inbound).
         // Sets logout_seen_=true, emits confirming Logout, fsm_state→Disconnected.
@@ -1312,11 +1298,12 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogout_BothRoles_Resets) {
         // [contracts/reset-knobs.md C3.1; plan.md teardown design]
         terminal_close_sync(sess);
 
-        EXPECT_EQ(factory->store->reset_call_count(), 1u)
+        EXPECT_EQ(factory->store->reset_call_count(), 1U)
             << "ResetOnLogout_BothRoles_Resets acceptor arm (C5.2): "
                "store_.reset() must fire on acceptor peer-initiated Logout "
                "when reset_on_logout=true (via close(terminal) mirroring read-pump EOF); "
-               "got count==" << factory->store->reset_call_count();
+               "got count=="
+            << factory->store->reset_call_count();
     }
 }
 
@@ -1336,33 +1323,29 @@ TEST_F(ResetOnLifecycleTest, ResetOnDisconnect_BothRoles_Resets) {
         captured_frames.clear();
         factory = std::make_shared<StoreDoubleFactory>();
 
-        auto cfg = make_cfg(
-            session_role::initiator,
-            /*reset_on_logon=*/false,
-            reset_seqnum_policy::bilateral_lenient,
-            /*reset_on_logout=*/false,
-            /*reset_on_disconnect=*/true);
+        auto cfg = make_cfg(session_role::initiator,
+                            /*reset_on_logon=*/false, reset_seqnum_policy::bilateral_lenient,
+                            /*reset_on_logout=*/false,
+                            /*reset_on_disconnect=*/true);
         Session sess(engine, cfg);
 
         // Drive to Active first.
         drive_initiator_to_active(sess);
-        ASSERT_EQ(sess.state(), fsm_state::Active)
-            << "BothRoles initiator: must reach Active";
+        ASSERT_EQ(sess.state(), fsm_state::Active) << "BothRoles initiator: must reach Active";
 
         // Seed non-1 AFTER reaching Active.
-        sess.seqnum_mgr_test_access().set_counters_for_test(
-            static_cast<seqnum_t>(5), static_cast<seqnum_t>(3));
+        sess.seqnum_mgr_test_access().set_counters_for_test(static_cast<seqnum_t>(5),
+                                                            static_cast<seqnum_t>(3));
 
         terminal_close_sync(sess);
 
         ASSERT_EQ(sess.state(), fsm_state::Disconnected);
 
-        EXPECT_EQ(factory->store->reset_call_count(), 1u)
+        EXPECT_EQ(factory->store->reset_call_count(), 1U)
             << "ResetOnDisconnect_BothRoles_Resets initiator arm RED (C5.2): "
                "store_.reset() must fire on initiator terminal close "
                "when reset_on_disconnect=true; got count=="
-            << factory->store->reset_call_count()
-            << " (teardown not wired — T014 pending)";
+            << factory->store->reset_call_count() << " (teardown not wired — T014 pending)";
     }
 
     // ── Acceptor arm ──
@@ -1371,33 +1354,29 @@ TEST_F(ResetOnLifecycleTest, ResetOnDisconnect_BothRoles_Resets) {
         captured_frames.clear();
         factory = std::make_shared<StoreDoubleFactory>();
 
-        auto cfg = make_cfg(
-            session_role::acceptor,
-            /*reset_on_logon=*/false,
-            reset_seqnum_policy::bilateral_lenient,
-            /*reset_on_logout=*/false,
-            /*reset_on_disconnect=*/true);
+        auto cfg = make_cfg(session_role::acceptor,
+                            /*reset_on_logon=*/false, reset_seqnum_policy::bilateral_lenient,
+                            /*reset_on_logout=*/false,
+                            /*reset_on_disconnect=*/true);
         Session sess(engine, cfg);
 
         // Drive acceptor to Active with clean seqnums first.
         drive_acceptor_to_active(sess, /*seq=*/1, /*reset_seqnum=*/false);
-        ASSERT_EQ(sess.state(), fsm_state::Active)
-            << "BothRoles acceptor: must reach Active";
+        ASSERT_EQ(sess.state(), fsm_state::Active) << "BothRoles acceptor: must reach Active";
 
         // Seed non-1 AFTER reaching Active.
-        sess.seqnum_mgr_test_access().set_counters_for_test(
-            static_cast<seqnum_t>(8), static_cast<seqnum_t>(5));
+        sess.seqnum_mgr_test_access().set_counters_for_test(static_cast<seqnum_t>(8),
+                                                            static_cast<seqnum_t>(5));
 
         terminal_close_sync(sess);
 
         ASSERT_EQ(sess.state(), fsm_state::Disconnected);
 
-        EXPECT_EQ(factory->store->reset_call_count(), 1u)
+        EXPECT_EQ(factory->store->reset_call_count(), 1U)
             << "ResetOnDisconnect_BothRoles_Resets acceptor arm RED (C5.2): "
                "store_.reset() must fire on acceptor terminal close "
                "when reset_on_disconnect=true; got count=="
-            << factory->store->reset_call_count()
-            << " (teardown not wired — T014 pending)";
+            << factory->store->reset_call_count() << " (teardown not wired — T014 pending)";
     }
 }
 
@@ -1426,12 +1405,10 @@ TEST_F(ResetOnLifecycleTest, ResetOnDisconnect_BothRoles_Resets) {
 //
 // Expected: GREEN (T007 wired the predicate).
 TEST_F(ResetOnLifecycleTest, ResetOnLogout_NextInitiatorLogon_Emits141) {
-    auto cfg = make_cfg(
-        session_role::initiator,
-        /*reset_on_logon=*/false,
-        reset_seqnum_policy::bilateral_lenient,
-        /*reset_on_logout=*/true,
-        /*reset_on_disconnect=*/false);
+    auto cfg = make_cfg(session_role::initiator,
+                        /*reset_on_logon=*/false, reset_seqnum_policy::bilateral_lenient,
+                        /*reset_on_logout=*/true,
+                        /*reset_on_disconnect=*/false);
     Session sess(engine, cfg);
 
     // Seqnums are already {1,1} (fresh session, seqnum_min = 1).
@@ -1461,12 +1438,10 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogout_NextInitiatorLogon_Emits141) {
 //
 // Expected: GREEN (T007 wired the predicate).
 TEST_F(ResetOnLifecycleTest, ResetOnDisconnect_NextInitiatorLogon_Emits141) {
-    auto cfg = make_cfg(
-        session_role::initiator,
-        /*reset_on_logon=*/false,
-        reset_seqnum_policy::bilateral_lenient,
-        /*reset_on_logout=*/false,
-        /*reset_on_disconnect=*/true);
+    auto cfg = make_cfg(session_role::initiator,
+                        /*reset_on_logon=*/false, reset_seqnum_policy::bilateral_lenient,
+                        /*reset_on_logout=*/false,
+                        /*reset_on_disconnect=*/true);
     Session sess(engine, cfg);
 
     // Seqnums are {1,1} (fresh session).
@@ -1535,12 +1510,10 @@ TEST_F(ResetOnLifecycleTest, ResetKnobs_NoHeapOnResetPath) {
         captured_frames.clear();
         factory = std::make_shared<StoreDoubleFactory>();
 
-        auto cfg = make_cfg(
-            session_role::initiator,
-            /*reset_on_logon=*/false,
-            reset_seqnum_policy::bilateral_lenient,
-            /*reset_on_logout=*/false,
-            /*reset_on_disconnect=*/true);
+        auto cfg = make_cfg(session_role::initiator,
+                            /*reset_on_logon=*/false, reset_seqnum_policy::bilateral_lenient,
+                            /*reset_on_logout=*/false,
+                            /*reset_on_disconnect=*/true);
         Session sess(engine, cfg);
 
         // Drive to Active then terminal close (fires teardown reset via disconnect).
@@ -1561,12 +1534,10 @@ TEST_F(ResetOnLifecycleTest, ResetKnobs_NoHeapOnResetPath) {
         captured_frames.clear();
         factory = std::make_shared<StoreDoubleFactory>();
 
-        auto cfg_a = make_cfg(
-            session_role::initiator,
-            /*reset_on_logon=*/true,
-            reset_seqnum_policy::bilateral_lenient,
-            /*reset_on_logout=*/false,
-            /*reset_on_disconnect=*/false);
+        auto cfg_a = make_cfg(session_role::initiator,
+                              /*reset_on_logon=*/true, reset_seqnum_policy::bilateral_lenient,
+                              /*reset_on_logout=*/false,
+                              /*reset_on_disconnect=*/false);
         Session sess_a(engine, cfg_a);
 
         if (alloc_guard_start) alloc_guard_start();
@@ -1578,7 +1549,7 @@ TEST_F(ResetOnLifecycleTest, ResetKnobs_NoHeapOnResetPath) {
         }
         if (alloc_guard_end) alloc_guard_end();
 
-        ASSERT_EQ(factory->store->reset_call_count(), 1u)
+        ASSERT_EQ(factory->store->reset_call_count(), 1U)
             << "ResetKnobs_NoHeapOnResetPath [window A]: reset must have fired on "
                "open() (reset_on_logon=true); count must be 1";
 
@@ -1597,12 +1568,10 @@ TEST_F(ResetOnLifecycleTest, ResetKnobs_NoHeapOnResetPath) {
         captured_frames.clear();
         factory = std::make_shared<StoreDoubleFactory>();
 
-        auto cfg_b = make_cfg(
-            session_role::initiator,
-            /*reset_on_logon=*/true,
-            reset_seqnum_policy::bilateral_lenient,
-            /*reset_on_logout=*/false,
-            /*reset_on_disconnect=*/true);
+        auto cfg_b = make_cfg(session_role::initiator,
+                              /*reset_on_logon=*/true, reset_seqnum_policy::bilateral_lenient,
+                              /*reset_on_logout=*/false,
+                              /*reset_on_disconnect=*/true);
         Session sess_b(engine, cfg_b);
 
         // Structural prerequisite: open() succeeds (reset_on_logon=true fires the logon reset).
@@ -1610,7 +1579,7 @@ TEST_F(ResetOnLifecycleTest, ResetKnobs_NoHeapOnResetPath) {
             auto r = open_sync(sess_b);
             ASSERT_TRUE(r.has_value())
                 << "ResetKnobs_NoHeapOnResetPath [window B]: open() must succeed";
-            ASSERT_EQ(factory->store->reset_call_count(), 1u)
+            ASSERT_EQ(factory->store->reset_call_count(), 1U)
                 << "ResetKnobs_NoHeapOnResetPath [window B]: logon reset must have fired";
         }
 
@@ -1639,10 +1608,11 @@ TEST_F(ResetOnLifecycleTest, ResetKnobs_NoHeapOnResetPath) {
 
         // Verify the teardown reset fired (reset_on_disconnect=true; teardown_reset_done_ guard).
         // Total resets: 1 from open() + 1 from close() = 2.
-        EXPECT_EQ(factory->store->reset_call_count(), 2u)
+        EXPECT_EQ(factory->store->reset_call_count(), 2U)
             << "ResetKnobs_NoHeapOnResetPath [window B]: exactly 2 store resets expected "
                "(1 from open/reset_on_logon + 1 from close/reset_on_disconnect); "
-               "got " << factory->store->reset_call_count();
+               "got "
+            << factory->store->reset_call_count();
 
         // Seqnums reset to {1,1} after teardown.
         EXPECT_EQ(sess_b.seqnum_mgr_test_access().peek_outbound(), static_cast<seqnum_t>(1))
@@ -1696,8 +1666,8 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogon_Off_Received141_NextInboundIsTwo) {
     const seqnum_t next_in = sess.seqnum_mgr_test_access().next_inbound_unsafe();
     EXPECT_EQ(next_in, static_cast<seqnum_t>(2))
         << "T004 (FR-001/005) RED: next_inbound must be 2 after acceptor received-141 "
-           "(consumed seq-1 reset Logon); got " << next_in
-        << " (expected 2; fix not yet applied — reset clobbers the advance)";
+           "(consumed seq-1 reset Logon); got "
+        << next_in << " (expected 2; fix not yet applied — reset clobbers the advance)";
 }
 
 // ── Witness T005: Received141_PeerNextMsgSeq2_HarmCheck ──────────────────────
@@ -1748,7 +1718,8 @@ TEST_F(ResetOnLifecycleTest, Received141_PeerNextMsgSeq2_HarmCheck) {
     const seqnum_t next_in = sess.seqnum_mgr_test_access().next_inbound_unsafe();
     EXPECT_EQ(next_in, static_cast<seqnum_t>(3))
         << "T005 (FR-002) RED: next_inbound must be 3 after consuming seq-2 Heartbeat; "
-           "got " << next_in << " (indicates next_inbound was wrong before the Heartbeat)";
+           "got "
+        << next_in << " (indicates next_inbound was wrong before the Heartbeat)";
 }
 
 // ── Witness T006: Received141_AcceptorDiscriminatingTriple ────────────────────
@@ -1791,7 +1762,8 @@ TEST_F(ResetOnLifecycleTest, Received141_AcceptorDiscriminatingTriple) {
     const seqnum_t next_in = sess.seqnum_mgr_test_access().next_inbound_unsafe();
     EXPECT_EQ(next_in, static_cast<seqnum_t>(2))
         << "T006 (a) (FR-001/005) RED: next_inbound must be 2 after received-141; "
-           "got " << next_in << " (fix not yet applied)";
+           "got "
+        << next_in << " (fix not yet applied)";
 
     // (b) reply MsgSeqNum(34) == 1 (outbound counter starts at 1, unchanged).
     auto tag34 = extract_field(std::span<const std::byte>(*reply_frame), 34);
@@ -1802,9 +1774,10 @@ TEST_F(ResetOnLifecycleTest, Received141_AcceptorDiscriminatingTriple) {
     // (c) reply NextExpectedMsgSeqNum(789) == 2.
     auto tag789 = extract_field(std::span<const std::byte>(*reply_frame), 789);
     ASSERT_TRUE(tag789.has_value()) << "T006: reply Logon must carry tag 789 (027-on)";
-    EXPECT_EQ(std::string(*tag789), "2")
-        << "T006 (c) (027 I-NEX-1/E-OBO) RED: reply 789 must be 2 (next_inbound after reset+advance); "
-           "got " << *tag789 << " (fix not yet applied → 789 reads 1)";
+    EXPECT_EQ(std::string(*tag789), "2") << "T006 (c) (027 I-NEX-1/E-OBO) RED: reply 789 must be 2 "
+                                            "(next_inbound after reset+advance); "
+                                            "got "
+                                         << *tag789 << " (fix not yet applied → 789 reads 1)";
 }
 
 // ── Witness T007: Received141_PersistentStore_InvH1_StoreEqualsManagerTwo ─────
@@ -1830,18 +1803,18 @@ TEST_F(ResetOnLifecycleTest, Received141_PersistentStore_InvH1_StoreEqualsManage
     ASSERT_EQ(sess.state(), fsm_state::Active) << "session must reach Active";
 
     const seqnum_t store_in = factory->store->current_next_inbound();
-    const seqnum_t mgr_in   = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t mgr_in = sess.seqnum_mgr_test_access().next_inbound_unsafe();
 
     // Assert the store value directly (not via the manager as proxy).
-    EXPECT_EQ(store_in, static_cast<seqnum_t>(2u))
+    EXPECT_EQ(store_in, static_cast<seqnum_t>(2U))
         << "T007 (029 INV-H1 / FR-005) RED: store.current_next_inbound() must be 2 "
-           "after received-141 persist-to-2; got " << store_in
-        << " (fix not yet applied → store stuck at 1 after reset)";
+           "after received-141 persist-to-2; got "
+        << store_in << " (fix not yet applied → store stuck at 1 after reset)";
 
     // INV-H1 equality: store == manager (both 2 after fix; both 1 under bug).
-    EXPECT_EQ(store_in, mgr_in)
-        << "T007 (INV-H1): store.current_next_inbound() must equal "
-           "seqnum_mgr_.next_inbound_unsafe(); store=" << store_in << " mgr=" << mgr_in;
+    EXPECT_EQ(store_in, mgr_in) << "T007 (INV-H1): store.current_next_inbound() must equal "
+                                   "seqnum_mgr_.next_inbound_unsafe(); store="
+                                << store_in << " mgr=" << mgr_in;
 }
 
 // ── Witness T008: Received141_PersistentStore_ResetFailure_Disconnects_NoOverPersist
@@ -1874,7 +1847,7 @@ TEST_F(ResetOnLifecycleTest, Received141_PersistentStore_ResetFailure_Disconnect
     // seed on a received-141 path anyway, but seeding after open() is the safe
     // general pattern — see T014). Then inject a reset failure.
     // seed_inbound() is NOT counted as a reset() — reset_call_count() stays 0 here.
-    constexpr seqnum_t N = 37u;
+    constexpr seqnum_t N = 37U;
     factory->store->seed_inbound(N);
     factory->store->fail_next_reset();
 
@@ -1887,9 +1860,10 @@ TEST_F(ResetOnLifecycleTest, Received141_PersistentStore_ResetFailure_Disconnect
            "(fatal-when-persistent)";
 
     // (i) The reset was attempted exactly once (then short-circuited).
-    EXPECT_EQ(factory->store->reset_call_count(), 1u)
+    EXPECT_EQ(factory->store->reset_call_count(), 1U)
         << "T008: store.reset() must have been attempted exactly once; "
-           "got " << factory->store->reset_call_count();
+           "got "
+        << factory->store->reset_call_count();
 
     // (ii) Persist-to-2 must NOT have run: store retains its last-good value N=37.
     // Fix → store stays 37 (last-good lower bound; the failed reset did not corrupt it).
@@ -1897,7 +1871,8 @@ TEST_F(ResetOnLifecycleTest, Received141_PersistentStore_ResetFailure_Disconnect
     const seqnum_t store_in = factory->store->current_next_inbound();
     EXPECT_EQ(store_in, N)
         << "T008 (INV-H1/FR-010): store must retain last-good value N=37 after a failed "
-           "reset (persist-to-2 must not run); got " << store_in;
+           "reset (persist-to-2 must not run); got "
+        << store_in;
 }
 
 // ── Witness T009: Received141_GuardSkipsWhenNoConsumedReset ──────────────────
@@ -1951,8 +1926,8 @@ TEST_F(ResetOnLifecycleTest, Received141_GuardSkipsWhenNoConsumedReset) {
     const seqnum_t next_in = sess.seqnum_mgr_test_access().next_inbound_unsafe();
     EXPECT_EQ(next_in, static_cast<seqnum_t>(1))
         << "T009 (guard on logon_inbound_advanced): next_inbound must remain 1 "
-           "when behind-side tolerated (not consumed in-sequence); got " << next_in
-           << " (if 2: restore fired without logon_inbound_advanced — guard missing)";
+           "when behind-side tolerated (not consumed in-sequence); got "
+        << next_in << " (if 2: restore fired without logon_inbound_advanced — guard missing)";
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1988,7 +1963,8 @@ TEST_F(ResetOnLifecycleTest, Initiator_Received141Ack_NextInboundTwo_NoResend) {
     // FR-001/009: next_inbound must be 2 (consumed seq-1 reset-ack Logon).
     EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(), static_cast<seqnum_t>(2))
         << "T012 (FR-009/001) RED: initiator next_inbound must be 2 after received-141 "
-           "Logon-ack; got " << sess.seqnum_mgr_test_access().next_inbound_unsafe()
+           "Logon-ack; got "
+        << sess.seqnum_mgr_test_access().next_inbound_unsafe()
         << " (initiator arm fix not yet applied → reset clobbers the advance)";
 
     // FR-002: peer's next message at seq=2 accepted in-sequence, no ResendRequest.
@@ -2031,12 +2007,13 @@ TEST_F(ResetOnLifecycleTest, Initiator_Received141Ack_PersistentStore_StoreEqual
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     const seqnum_t store_in = factory->store->current_next_inbound();
-    const seqnum_t mgr_in   = sess.seqnum_mgr_test_access().next_inbound_unsafe();
-    EXPECT_EQ(store_in, static_cast<seqnum_t>(2u))
+    const seqnum_t mgr_in = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    EXPECT_EQ(store_in, static_cast<seqnum_t>(2U))
         << "T013 (FR-005/009) RED: initiator store.current_next_inbound() must be 2 "
-           "after received-141 persist-to-2; got " << store_in;
-    EXPECT_EQ(store_in, mgr_in)
-        << "T013 (INV-H1): store must equal manager; store=" << store_in << " mgr=" << mgr_in;
+           "after received-141 persist-to-2; got "
+        << store_in;
+    EXPECT_EQ(store_in, mgr_in) << "T013 (INV-H1): store must equal manager; store=" << store_in
+                                << " mgr=" << mgr_in;
 }
 
 // ── Witness T014: Initiator_Received141Ack_PersistentStore_ResetFailure_Disconnects ─
@@ -2066,7 +2043,7 @@ TEST_F(ResetOnLifecycleTest, Initiator_Received141Ack_PersistentStore_ResetFailu
     // peer's ack at 34=1 passes check_inbound (in-sequence against manager=1), the
     // received-141 reset block runs, fails fatally, and the store retains N=37.
     // seed_inbound() is NOT counted as a reset() — reset_call_count() stays 0 here.
-    constexpr seqnum_t N = 37u;
+    constexpr seqnum_t N = 37U;
     factory->store->seed_inbound(N);
     factory->store->fail_next_reset();
 
@@ -2080,7 +2057,7 @@ TEST_F(ResetOnLifecycleTest, Initiator_Received141Ack_PersistentStore_ResetFailu
         << "T014 (FR-010): initiator persistent received-141 reset failure must Disconnect";
 
     // (i) The reset was attempted exactly once (then short-circuited).
-    EXPECT_EQ(factory->store->reset_call_count(), 1u)
+    EXPECT_EQ(factory->store->reset_call_count(), 1U)
         << "T014: store.reset() must have been attempted exactly once";
 
     // (ii) persist-to-2 NOT reached: store retains last-good value N=37.
@@ -2088,7 +2065,8 @@ TEST_F(ResetOnLifecycleTest, Initiator_Received141Ack_PersistentStore_ResetFailu
     const seqnum_t store_in = factory->store->current_next_inbound();
     EXPECT_EQ(store_in, N)
         << "T014 (INV-H1/FR-010): store must retain last-good value N=37 after a failed "
-           "reset (persist-to-2 must not run); got " << store_in;
+           "reset (persist-to-2 must not run); got "
+        << store_in;
 }
 
 // ── Witness T016g: Initiator_Received141Ack_GuardSkipsWhenNoConsumedReset ─────
@@ -2122,8 +2100,8 @@ TEST_F(ResetOnLifecycleTest, Initiator_Received141Ack_GuardSkipsWhenNoConsumedRe
     const seqnum_t next_in = sess.seqnum_mgr_test_access().next_inbound_unsafe();
     EXPECT_EQ(next_in, static_cast<seqnum_t>(1))
         << "T016g (guard on logon_inbound_advanced_init): next_inbound must remain 1 when "
-           "behind-side tolerated (not consumed in-sequence); got " << next_in
-           << " (if 2: the initiator restore fired without the guard)";
+           "behind-side tolerated (not consumed in-sequence); got "
+        << next_in << " (if 2: the initiator restore fired without the guard)";
 }
 
 }  // namespace fixpp::session::test

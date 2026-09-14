@@ -377,8 +377,8 @@ TEST(SyncCoSpawnWorkGuard, DriverThatAlreadyExhaustedDrivesNothing) {
         std::thread worker([&ioc] { ioc.run(); });
         worker.join();
 
-        auto fut = asio::co_spawn(
-            ioc, []() -> asio::awaitable<void> { co_return; }, asio::use_future);
+        auto fut =
+            asio::co_spawn(ioc, []() -> asio::awaitable<void> { co_return; }, asio::use_future);
 
         EXPECT_FALSE(is_ready(fut))
             << "#289 clause S1: a thread that already ran this context to exhaustion is "
@@ -395,8 +395,8 @@ TEST(SyncCoSpawnWorkGuard, DriverThatAlreadyExhaustedDrivesNothing) {
     {
         asio::io_context ioc;
 
-        auto fut = asio::co_spawn(
-            ioc, []() -> asio::awaitable<void> { co_return; }, asio::use_future);
+        auto fut =
+            asio::co_spawn(ioc, []() -> asio::awaitable<void> { co_return; }, asio::use_future);
 
         std::thread worker([&ioc] { ioc.run(); });
         worker.join();
@@ -447,8 +447,8 @@ TEST(SyncCoSpawnWorkGuard, StoppedPoolLeavesTheFutureUnready) {
     {
         asio::thread_pool pool{1};
 
-        auto fut = asio::co_spawn(
-            pool, []() -> asio::awaitable<void> { co_return; }, asio::use_future);
+        auto fut =
+            asio::co_spawn(pool, []() -> asio::awaitable<void> { co_return; }, asio::use_future);
 
         pool.join();
 
@@ -464,8 +464,8 @@ TEST(SyncCoSpawnWorkGuard, StoppedPoolLeavesTheFutureUnready) {
         asio::thread_pool pool{1};
         pool.stop();
 
-        auto fut = asio::co_spawn(
-            pool, []() -> asio::awaitable<void> { co_return; }, asio::use_future);
+        auto fut =
+            asio::co_spawn(pool, []() -> asio::awaitable<void> { co_return; }, asio::use_future);
 
         pool.join();
 

@@ -134,7 +134,8 @@ using fixpp::decimal_t;
 // allocation is a hard failure (bad_alloc) in addition to being counted.
 class counting_resource final : public std::pmr::memory_resource {
 public:
-    explicit counting_resource(std::pmr::memory_resource* upstream) noexcept : upstream_(upstream) {}
+    explicit counting_resource(std::pmr::memory_resource* upstream) noexcept
+        : upstream_(upstream) {}
 
     [[nodiscard]] long long allocate_count() const noexcept {
         return count_.load(std::memory_order_relaxed);
@@ -159,9 +160,8 @@ private:
 // Build a well-formed FIX frame: "8=FIX.4.4<SOH> 9=<len><SOH> <body> 10=<chk><SOH>"
 // body must already begin with "35=X<SOH>" and contain SOH-delimited fields.
 std::vector<std::byte> make_frame(std::string_view body) {
-    std::string pre =
-        "8=FIX.4.4\x01" + std::string("9=") + std::to_string(body.size()) + "\x01" +
-        std::string(body);
+    std::string pre = "8=FIX.4.4\x01" + std::string("9=") + std::to_string(body.size()) + "\x01" +
+                      std::string(body);
     unsigned sum = 0;
     for (unsigned char c : pre) {
         sum += c;
@@ -188,9 +188,8 @@ MV parse_frame(std::vector<std::byte> const& buf, std::pmr::memory_resource* mr)
     fixpp::wire::pmr_carry_buffer carry{buf.size(), mr};
     fixpp::wire::Framer fr{};
     fixpp::wire::frame_view fvs[1]{};
-    auto framed = fr.feed(
-        std::span<const std::byte>{buf.data(), buf.size()}, carry,
-        std::span<fixpp::wire::frame_view>{fvs, 1});
+    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()}, carry,
+                          std::span<fixpp::wire::frame_view>{fvs, 1});
     EXPECT_TRUE(framed.has_value()) << "Framer::feed failed";
     EXPECT_FALSE(framed->empty()) << "Framer produced no frames";
     fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{
@@ -335,9 +334,8 @@ TEST(GroupEntryAllocGate, NestedFirstDescentBoundedRepeatZero) {
     fixpp::wire::pmr_carry_buffer carry{buf.size(), &counted};
     fixpp::wire::Framer fr{};
     fixpp::wire::frame_view fvs[1]{};
-    auto framed = fr.feed(
-        std::span<const std::byte>{buf.data(), buf.size()}, carry,
-        std::span<fixpp::wire::frame_view>{fvs, 1});
+    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()}, carry,
+                          std::span<fixpp::wire::frame_view>{fvs, 1});
     ASSERT_TRUE(framed.has_value());
     ASSERT_FALSE(framed->empty());
 
@@ -433,9 +431,8 @@ TEST(GroupEntryAllocGate, NestedMultiEntryWalkZeroAlloc) {
     fixpp::wire::pmr_carry_buffer carry{buf.size(), &backing};
     fixpp::wire::Framer fr{};
     fixpp::wire::frame_view fvs[1]{};
-    auto framed = fr.feed(
-        std::span<const std::byte>{buf.data(), buf.size()}, carry,
-        std::span<fixpp::wire::frame_view>{fvs, 1});
+    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()}, carry,
+                          std::span<fixpp::wire::frame_view>{fvs, 1});
     ASSERT_TRUE(framed.has_value());
     ASSERT_FALSE(framed->empty());
 

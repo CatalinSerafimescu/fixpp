@@ -33,13 +33,12 @@
 // target naming ws2_32 in CMake (matches this header's no-CMake-dependency design).
 #pragma comment(lib, "ws2_32.lib")
 #else
+#include <arpa/inet.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
-
-#include <arpa/inet.h>
-#include <fcntl.h>
 #endif
 
 #include <cerrno>
@@ -122,8 +121,8 @@ inline bool tcp_port_connectable(const std::string& host, std::uint16_t port,
         if (::select(0, nullptr, &wset, nullptr, &tv) > 0) {
             int so_error = 0;
             int len = sizeof(so_error);
-            if (::getsockopt(fd, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&so_error),
-                             &len) == 0 &&
+            if (::getsockopt(fd, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&so_error), &len) ==
+                    0 &&
                 so_error == 0) {
                 ok = true;
             }
@@ -176,8 +175,8 @@ inline bool tcp_port_connectable(const std::string& host, std::uint16_t port,
 // Probe a counterparty by its token (e.g. "quickfix-cpp"). Reads
 // INTEROP_<TOKEN>_PORT / INTEROP_<TOKEN>_HOST and verifies connectability.
 inline ProbeResult probe_counterparty(std::string_view counterparty,
-                                      std::chrono::milliseconds timeout =
-                                          std::chrono::milliseconds{500}) {
+                                      std::chrono::milliseconds timeout = std::chrono::milliseconds{
+                                          500}) {
     const std::string token = env_token(counterparty);
     const std::string port_var = "INTEROP_" + token + "_PORT";
     // getenv is mt-unsafe only against a concurrent setenv; the probe runs in
@@ -185,14 +184,16 @@ inline ProbeResult probe_counterparty(std::string_view counterparty,
     // NOLINTNEXTLINE(concurrency-mt-unsafe)
     const char* port_env = std::getenv(port_var.c_str());
     if (port_env == nullptr || *port_env == '\0') {
-        return {false, std::string{counterparty} + " unavailable: " + port_var +
-                           " not set (parent harness did not lease a port)"};
+        return {.available = false,
+                .reason = std::string{counterparty} + " unavailable: " + port_var +
+                          " not set (parent harness did not lease a port)"};
     }
     char* port_end = nullptr;
     long port = std::strtol(port_env, &port_end, 10);
     if (port_end == port_env || *port_end != '\0' || port <= 0 || port > 65535) {
-        return {false, std::string{counterparty} + " unavailable: " + port_var +
-                           "='" + port_env + "' is not a valid TCP port"};
+        return {.available = false,
+                .reason = std::string{counterparty} + " unavailable: " + port_var + "='" +
+                          port_env + "' is not a valid TCP port"};
     }
 
     const std::string host_var = "INTEROP_" + token + "_HOST";
@@ -201,10 +202,11 @@ inline ProbeResult probe_counterparty(std::string_view counterparty,
     std::string host = (host_env != nullptr && *host_env != '\0') ? host_env : "127.0.0.1";
 
     if (!tcp_port_connectable(host, static_cast<std::uint16_t>(port), timeout)) {
-        return {false, std::string{counterparty} + " unavailable: nothing listening at " +
-                           host + ":" + std::to_string(port)};
+        return {.available = false,
+                .reason = std::string{counterparty} + " unavailable: nothing listening at " + host +
+                          ":" + std::to_string(port)};
     }
-    return {true, {}};
+    return {.available = true, .reason = {}};
 }
 
 }  // namespace fixpp::interop
@@ -212,10 +214,10 @@ inline ProbeResult probe_counterparty(std::string_view counterparty,
 // Convenience: skip the current test (with reason) when the counterparty is absent.
 // Use at the top of a live-cell test body:
 //   INTEROP_REQUIRE_COUNTERPARTY("quickfix-cpp");
-#define INTEROP_REQUIRE_COUNTERPARTY(counterparty)                       \
-    do {                                                                 \
+#define INTEROP_REQUIRE_COUNTERPARTY(counterparty)                                              \
+    do {                                                                                        \
         ::fixpp::interop::ProbeResult _ip = ::fixpp::interop::probe_counterparty(counterparty); \
-        if (!_ip.available) {                                            \
-            GTEST_SKIP() << _ip.reason;                                  \
-        }                                                                \
+        if (!_ip.available) {                                                                   \
+            GTEST_SKIP() << _ip.reason;                                                         \
+        }                                                                                       \
     } while (0)

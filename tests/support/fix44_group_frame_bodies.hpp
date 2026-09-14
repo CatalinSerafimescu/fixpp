@@ -51,22 +51,22 @@ namespace fixpp_test_support {
 // ── (a) NoLegs x2, trailing TransactTime(60) AFTER the group ────────────────
 inline std::string execution_report_two_legs_trailing_suffix() {
     std::string b;
-    b += "37=ORDID-1\x01";  // OrderID (required)
-    b += "17=EXEC-1\x01";   // ExecID (required)
-    b += "150=0\x01";       // ExecType (required)
-    b += "39=0\x01";        // OrdStatus (required)
-    b += "55=AAPL\x01";     // Symbol (Instrument component, required)
-    b += "54=1\x01";        // Side (required)
-    b += "151=0\x01";       // LeavesQty (required)
-    b += "14=0\x01";        // CumQty (required)
-    b += "6=0\x01";         // AvgPx (required)
-    b += "555=2\x01";       // NoLegs = 2
-    b += "600=LEGA\x01";    // leg #1: LegSymbol
-    b += "624=1\x01";       // leg #1: LegSide
-    b += "687=100\x01";     // leg #1: LegQty
-    b += "600=LEGB\x01";    // leg #2: LegSymbol
-    b += "624=2\x01";       // leg #2: LegSide
-    b += "687=200\x01";     // leg #2: LegQty
+    b += "37=ORDID-1\x01";                // OrderID (required)
+    b += "17=EXEC-1\x01";                 // ExecID (required)
+    b += "150=0\x01";                     // ExecType (required)
+    b += "39=0\x01";                      // OrdStatus (required)
+    b += "55=AAPL\x01";                   // Symbol (Instrument component, required)
+    b += "54=1\x01";                      // Side (required)
+    b += "151=0\x01";                     // LeavesQty (required)
+    b += "14=0\x01";                      // CumQty (required)
+    b += "6=0\x01";                       // AvgPx (required)
+    b += "555=2\x01";                     // NoLegs = 2
+    b += "600=LEGA\x01";                  // leg #1: LegSymbol
+    b += "624=1\x01";                     // leg #1: LegSide
+    b += "687=100\x01";                   // leg #1: LegQty
+    b += "600=LEGB\x01";                  // leg #2: LegSymbol
+    b += "624=2\x01";                     // leg #2: LegSide
+    b += "687=200\x01";                   // leg #2: LegQty
     b += "60=20240101-00:00:00.000\x01";  // TRAILING outer field, AFTER the group
     return b;
 }
@@ -85,13 +85,13 @@ inline std::string execution_report_interior_undeclared_tag_suffix() {
     b += "14=0\x01";
     b += "6=0\x01";
     b += "555=2\x01";
-    b += "600=LEGA\x01";        // leg #1: LegSymbol (declared)
+    b += "600=LEGA\x01";         // leg #1: LegSymbol (declared)
     b += "9999=UNDECLARED\x01";  // undeclared tag, INTERIOR to leg #1
-    b += "624=1\x01";           // leg #1: LegSide (declared, AFTER the undeclared tag)
-    b += "687=100\x01";         // leg #1: LegQty (declared)
-    b += "600=LEGB\x01";        // leg #2: LegSymbol
-    b += "624=2\x01";           // leg #2: LegSide
-    b += "687=200\x01";         // leg #2: LegQty
+    b += "624=1\x01";            // leg #1: LegSide (declared, AFTER the undeclared tag)
+    b += "687=100\x01";          // leg #1: LegQty (declared)
+    b += "600=LEGB\x01";         // leg #2: LegSymbol
+    b += "624=2\x01";            // leg #2: LegSide
+    b += "687=200\x01";          // leg #2: LegQty
     b += "60=20240101-00:00:00.000\x01";
     return b;
 }
@@ -100,11 +100,9 @@ inline std::string execution_report_interior_undeclared_tag_suffix() {
 // dispatch harness. `sender`/`target` follow the SenderCompID(49)/
 // TargetCompID(56) convention of the existing session test fixtures
 // (test_application_outbound.cpp's make_raw_frame).
-inline std::vector<std::byte> make_execution_report_frame(std::string_view suffix,
-                                                           std::uint32_t seq,
-                                                           std::string_view sender,
-                                                           std::string_view target,
-                                                           std::string_view begin_string = "FIX.4.4") {
+inline std::vector<std::byte> make_execution_report_frame(
+    std::string_view suffix, std::uint32_t seq, std::string_view sender, std::string_view target,
+    std::string_view begin_string = "FIX.4.4") {
     std::string body = "35=8\x01";
     body += "34=" + std::to_string(seq) + "\x01";
     body += "49=" + std::string(sender) + "\x01";

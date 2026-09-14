@@ -9,8 +9,8 @@
 // satisfied by COPYING the real tests/support/minimal_dictionary.hpp into the
 // scratch project (see run_real_client_witness.cmake history). That smuggled a
 // private test-support header into the consumer project, violating
-// specs/084-packaging-cpack-export/spec.md's acceptance scenario 7 ("does not reach into ... its test-support
-// headers") and its FR-018a bullet (MUST — the packaged variant replaces the
+// specs/084-packaging-cpack-export/spec.md's acceptance scenario 7 ("does not reach into ... its
+// test-support headers") and its FR-018a bullet (MUST — the packaged variant replaces the
 // dictionary helper with a runtime load through the PUBLIC API of a dictionary
 // SHIPPED in the package).
 //

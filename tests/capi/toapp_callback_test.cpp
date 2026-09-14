@@ -36,12 +36,11 @@
 #include <thread>
 #include <vector>
 
+#include "capi_internal.hpp"  // fixpp_msg (check tag_/view directly)
+#include "capi_loopback_support.hpp"
 #include "fix/c_api/engine.h"
 #include "fix/c_api/message.h"
 #include "fix/c_api/session.h"
-
-#include "capi_internal.hpp"      // fixpp_msg (check tag_/view directly)
-#include "capi_loopback_support.hpp"
 #include "support/wait_until.hpp"
 
 using namespace std::chrono_literals;
@@ -68,9 +67,8 @@ struct LoopbackPair {
 
     // Open two established sessions with a custom toApp callback on the initiator.
     // Returns the bound port (0 on failure).
-    std::uint16_t open(const char* acc_sender, const char* acc_target,
-                       const char* ini_sender, const char* ini_target,
-                       fixpp_send_cb send_cb, void* send_ud,
+    std::uint16_t open(const char* acc_sender, const char* acc_target, const char* ini_sender,
+                       const char* ini_target, fixpp_send_cb send_cb, void* send_ud,
                        fixpp_recv_cb recv_cb_b = nullptr, void* recv_ud_b = nullptr) {
         if (make_engine_v4(&B) != FIXPP_ERR_OK) return 0;
         if (make_engine_v4(&A) != FIXPP_ERR_OK) return 0;
@@ -87,12 +85,12 @@ struct LoopbackPair {
         std::uint16_t port = wait_for_bound_port(B, acc_id);
         if (port == 0) return 0;
 
-        fixpp_session_config_t* ini = make_session_cfg(ini_sender, ini_target, FIXPP_ROLE_INITIATOR);
+        fixpp_session_config_t* ini =
+            make_session_cfg(ini_sender, ini_target, FIXPP_ROLE_INITIATOR);
         set_loopback_endpoint(ini, "127.0.0.1", port);
         if (fixpp_session_open(A, ini, &ini_h) != FIXPP_ERR_OK) return 0;
         // Register the toApp callback on the initiator's session.
-        if (fixpp_session_register_send_callback(ini_h, send_cb, send_ud) != FIXPP_ERR_OK)
-            return 0;
+        if (fixpp_session_register_send_callback(ini_h, send_cb, send_ud) != FIXPP_ERR_OK) return 0;
         if (fixpp_engine_start(A) != FIXPP_ERR_OK) return 0;
         if (!wait_for_established(ini_h)) return 0;
         if (!wait_for_established(acc_h)) return 0;
@@ -100,10 +98,22 @@ struct LoopbackPair {
     }
 
     void close_all() {
-        if (ini_h) { fixpp_session_close(ini_h); ini_h = nullptr; }
-        if (acc_h) { fixpp_session_close(acc_h); acc_h = nullptr; }
-        if (A) { fixpp_engine_destroy(A); A = nullptr; }
-        if (B) { fixpp_engine_destroy(B); B = nullptr; }
+        if (ini_h) {
+            fixpp_session_close(ini_h);
+            ini_h = nullptr;
+        }
+        if (acc_h) {
+            fixpp_session_close(acc_h);
+            acc_h = nullptr;
+        }
+        if (A) {
+            fixpp_engine_destroy(A);
+            A = nullptr;
+        }
+        if (B) {
+            fixpp_engine_destroy(B);
+            B = nullptr;
+        }
     }
 
     ~LoopbackPair() { close_all(); }
@@ -127,9 +137,10 @@ TEST(ToappCallback, SendVerdictTransmits) {
     };
 
     LoopbackPair pair;
-    ASSERT_NE(pair.open("ACC-SEND", "INI-SEND", "INI-SEND", "ACC-SEND",
-                        a_send_cb, nullptr, b_cb, &b_received),
-              0u) << "loopback pair setup failed";
+    ASSERT_NE(pair.open("ACC-SEND", "INI-SEND", "INI-SEND", "ACC-SEND", a_send_cb, nullptr, b_cb,
+                        &b_received),
+              0U)
+        << "loopback pair setup failed";
 
     const auto payload = make_app_payload("SENDIT");
     fixpp_error_t rc = fixpp_session_send(pair.ini_h, payload.data(), payload.size());
@@ -158,9 +169,10 @@ TEST(ToappCallback, VetoVerdictSuppresses) {
     };
 
     LoopbackPair pair;
-    ASSERT_NE(pair.open("ACC-VETO", "INI-VETO", "INI-VETO", "ACC-VETO",
-                        a_send_cb, nullptr, b_cb, &b_received),
-              0u) << "loopback pair setup failed";
+    ASSERT_NE(pair.open("ACC-VETO", "INI-VETO", "INI-VETO", "ACC-VETO", a_send_cb, nullptr, b_cb,
+                        &b_received),
+              0U)
+        << "loopback pair setup failed";
 
     const auto payload = make_app_payload("VETOME");
     fixpp_error_t rc = fixpp_session_send(pair.ini_h, payload.data(), payload.size());
@@ -188,9 +200,8 @@ TEST(ToappCallback, ErrorVerdictTerminalClose) {
     };
 
     LoopbackPair pair;
-    ASSERT_NE(pair.open("ACC-ERR", "INI-ERR", "INI-ERR", "ACC-ERR",
-                        a_send_cb, nullptr),
-              0u) << "loopback pair setup failed";
+    ASSERT_NE(pair.open("ACC-ERR", "INI-ERR", "INI-ERR", "ACC-ERR", a_send_cb, nullptr), 0U)
+        << "loopback pair setup failed";
 
     const auto payload = make_app_payload("ERRIT");
     fixpp_error_t rc = fixpp_session_send(pair.ini_h, payload.data(), payload.size());
@@ -213,9 +224,8 @@ TEST(ToappCallback, OutOfRangeVerdictTreatedAsError) {
     };
 
     LoopbackPair pair;
-    ASSERT_NE(pair.open("ACC-OOR", "INI-OOR", "INI-OOR", "ACC-OOR",
-                        a_send_cb, nullptr),
-              0u) << "loopback pair setup failed";
+    ASSERT_NE(pair.open("ACC-OOR", "INI-OOR", "INI-OOR", "ACC-OOR", a_send_cb, nullptr), 0U)
+        << "loopback pair setup failed";
 
     const auto payload = make_app_payload("OORIT");
     fixpp_error_t rc = fixpp_session_send(pair.ini_h, payload.data(), payload.size());
@@ -257,9 +267,9 @@ TEST(ToappCallback, FramedViewFramingTagReadable) {
     };
 
     LoopbackPair pair;
-    ASSERT_NE(pair.open("ACC-FRAMED", "INI-FRAMED", "INI-FRAMED", "ACC-FRAMED",
-                        a_send_cb, &ctx),
-              0u) << "loopback pair setup failed";
+    ASSERT_NE(pair.open("ACC-FRAMED", "INI-FRAMED", "INI-FRAMED", "ACC-FRAMED", a_send_cb, &ctx),
+              0U)
+        << "loopback pair setup failed";
 
     const auto payload = make_app_payload("FRAMED");
     fixpp_error_t rc = fixpp_session_send(pair.ini_h, payload.data(), payload.size());
@@ -269,8 +279,8 @@ TEST(ToappCallback, FramedViewFramingTagReadable) {
     // time it returns, the toApp callback has already run.
     EXPECT_TRUE(ctx.cb_called) << "toApp callback was not invoked";
     EXPECT_EQ(ctx.get_rc, FIXPP_ERR_OK)
-        << "fixpp_msg_get_string(tag=49) on framed toApp view returned error "
-        << ctx.get_rc << " (expected OK — framing tags are readable in toApp)";
+        << "fixpp_msg_get_string(tag=49) on framed toApp view returned error " << ctx.get_rc
+        << " (expected OK — framing tags are readable in toApp)";
     EXPECT_FALSE(ctx.sender_comp_id.empty())
         << "SenderCompID (tag 49) was empty in the framed toApp view";
     // The initiator's sender is "INI-FRAMED".

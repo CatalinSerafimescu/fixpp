@@ -385,7 +385,7 @@ TEST(SyncPoolExhaustionReuse, BoundedCounterPreventsWrapAndReissue) {
         pool_next_after_b = mtx.test_seam_waiter_pool_next();
         b_identity_before = mtx.test_seam_slot_attached_awaiter(0);
         setup_precondition_ok =
-            !b_result.has_value() && pool_next_after_b == 1u && b_identity_before != nullptr;
+            !b_result.has_value() && pool_next_after_b == 1U && b_identity_before != nullptr;
         if (!setup_precondition_ok) {
             // Setup did not reach the expected precondition; nothing further
             // to safely probe. Skip straight to teardown attempt.
@@ -393,7 +393,7 @@ TEST(SyncPoolExhaustionReuse, BoundedCounterPreventsWrapAndReissue) {
         }
 
         // Preset the counter to the u32 wrap boundary (research.md D-4).
-        mtx.test_seam_preset_waiter_pool_next(0xFFFFFFFFu);
+        mtx.test_seam_preset_waiter_pool_next(0xFFFFFFFFU);
 
         // Attempt C: pre-fix, fetch_add(1) returns 0xFFFFFFFF (>= capacity,
         // fails closed) but WRAPS the counter to 0 as a side effect.
@@ -467,18 +467,18 @@ TEST(SyncPoolExhaustionReuse, BoundedCounterPreventsWrapAndReissue) {
     // returned. `run()`'s own completion (not the io_context's outstanding
     // work count) is the signal we actually need.
     bool completed = fixpp::test_support::pump_until_ready(ioc, f, std::chrono::seconds(5),
-                                                             std::chrono::milliseconds(50));
+                                                           std::chrono::milliseconds(50));
     if (!completed) {
         ioc.stop();  // preserve existing failure-state behavior
     }
-    ASSERT_TRUE(completed)
-        << "test driver did not observe run() completion within the bounded "
-           "deadline — see captured diagnostics below";
+    ASSERT_TRUE(completed) << "test driver did not observe run() completion within the bounded "
+                              "deadline — see captured diagnostics below";
     f.get();
 
     ASSERT_TRUE(setup_precondition_ok)
         << "B must have parked and taken bump-allocator slot 0 before C/D ran "
-           "(pool_next_after_b=" << pool_next_after_b << ")";
+           "(pool_next_after_b="
+        << pool_next_after_b << ")";
 
     ASSERT_TRUE(c_result.has_value()) << "attempt C must resolve synchronously";
     EXPECT_FALSE(c_result->has_value());

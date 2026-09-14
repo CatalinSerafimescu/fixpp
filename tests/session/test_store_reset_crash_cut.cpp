@@ -56,9 +56,7 @@ namespace {
 using fixpp::session::direction_t;
 using fixpp::session::FileStore;
 using fixpp::session::FileStoreFactory;
-using fixpp::store_test::byte_collecting_visitor;
 using fixpp::store_test::make_store_script;
-using fixpp::store_test::make_test_frame;
 using fixpp::store_test::unique_store_dir;
 
 namespace fs = std::filesystem;

@@ -67,27 +67,26 @@ TEST(DrainOnStrandCancelDuringReap, OnCancelWinsWhenCancelPrecedesDrain) {
 
         auto main_coro = [&]() -> asio::awaitable<void> {
             auto ex = co_await asio::this_coro::executor;
-            auto holder = co_await mtx.async_lock();   // hold through the reap
+            auto holder = co_await mtx.async_lock();  // hold through the reap
             EXPECT_TRUE(holder.has_value());
 
             for (int i = 0; i < N; ++i) {
-                asio::co_spawn(
-                    ex,
-                    asio::bind_cancellation_slot(
-                        sigs[i].slot(),
-                        [&]() -> asio::awaitable<void> {
-                            auto r = co_await mtx.async_lock();
-                            if (r.has_value()) {
-                                granted.fetch_add(1, std::memory_order_relaxed);
-                                r->release()->unlock();
-                            } else if (r.error() == error::sync_lock_aborted) {
-                                aborted.fetch_add(1, std::memory_order_relaxed);
-                            }
-                            completed.fetch_add(1, std::memory_order_relaxed);
-                        }),
-                    asio::detached);
+                asio::co_spawn(ex,
+                               asio::bind_cancellation_slot(
+                                   sigs[i].slot(),
+                                   [&]() -> asio::awaitable<void> {
+                                       auto r = co_await mtx.async_lock();
+                                       if (r.has_value()) {
+                                           granted.fetch_add(1, std::memory_order_relaxed);
+                                           r->release()->unlock();
+                                       } else if (r.error() == error::sync_lock_aborted) {
+                                           aborted.fetch_add(1, std::memory_order_relaxed);
+                                       }
+                                       completed.fetch_add(1, std::memory_order_relaxed);
+                                   }),
+                               asio::detached);
             }
-            co_await yield_n(N * 2 + 4);
+            co_await yield_n((N * 2) + 4);
 
             // SYNCHRONOUS emit BEFORE the drain: on_cancel CASes waiter[0]→cancelled
             // and schedules its resume; the later reap's CAS on it must FAIL.
@@ -102,7 +101,7 @@ TEST(DrainOnStrandCancelDuringReap, OnCancelWinsWhenCancelPrecedesDrain) {
                     drain_done.store(true, std::memory_order_release);
                 },
                 asio::detached);
-            co_await yield_n(N * 2 + 6);
+            co_await yield_n((N * 2) + 6);
 
             holder = expected_t<async_lock_guard>{};  // release → drain finalizes
         };
@@ -163,23 +162,22 @@ TEST(DrainOnStrandCancelDuringReap, PostDrainCancelIsBenignNoDoubleResume) {
             EXPECT_TRUE(holder.has_value());
 
             for (int i = 0; i < N; ++i) {
-                asio::co_spawn(
-                    ex,
-                    asio::bind_cancellation_slot(
-                        sigs[i].slot(),
-                        [&]() -> asio::awaitable<void> {
-                            auto r = co_await mtx.async_lock();
-                            if (r.has_value()) {
-                                granted.fetch_add(1, std::memory_order_relaxed);
-                                r->release()->unlock();
-                            } else if (r.error() == error::sync_lock_aborted) {
-                                aborted.fetch_add(1, std::memory_order_relaxed);
-                            }
-                            completed.fetch_add(1, std::memory_order_relaxed);
-                        }),
-                    asio::detached);
+                asio::co_spawn(ex,
+                               asio::bind_cancellation_slot(
+                                   sigs[i].slot(),
+                                   [&]() -> asio::awaitable<void> {
+                                       auto r = co_await mtx.async_lock();
+                                       if (r.has_value()) {
+                                           granted.fetch_add(1, std::memory_order_relaxed);
+                                           r->release()->unlock();
+                                       } else if (r.error() == error::sync_lock_aborted) {
+                                           aborted.fetch_add(1, std::memory_order_relaxed);
+                                       }
+                                       completed.fetch_add(1, std::memory_order_relaxed);
+                                   }),
+                               asio::detached);
             }
-            co_await yield_n(N * 2 + 4);
+            co_await yield_n((N * 2) + 4);
 
             // Drain while holding → reaps all N (reap wins the CAS). Holder still held.
             asio::co_spawn(
@@ -190,7 +188,7 @@ TEST(DrainOnStrandCancelDuringReap, PostDrainCancelIsBenignNoDoubleResume) {
                     drain_done.store(true, std::memory_order_release);
                 },
                 asio::detached);
-            co_await yield_n(N * 2 + 6);  // let the drain reap all waiters
+            co_await yield_n((N * 2) + 6);  // let the drain reap all waiters
 
             // LATER cancel on each (now-reaped → cancelled) waiter: CAS fails, no-op.
             // A double-resume here would push completed > N → ASan UAF.
@@ -216,7 +214,8 @@ TEST(DrainOnStrandCancelDuringReap, PostDrainCancelIsBenignNoDoubleResume) {
         EXPECT_EQ(completed.load(), N)
             << "Rep " << rep << " not exactly-once (a later cancel double-resumed a reaped waiter)";
         EXPECT_EQ(granted.load(), 0) << "Rep " << rep << " a waiter was granted (holder held)";
-        EXPECT_EQ(aborted.load(), N) << "Rep " << rep << " not all waiters reaped sync_lock_aborted";
+        EXPECT_EQ(aborted.load(), N)
+            << "Rep " << rep << " not all waiters reaped sync_lock_aborted";
     }
 }
 

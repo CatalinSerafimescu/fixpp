@@ -121,6 +121,18 @@ WarningsAsErrors: "*"
 # surfaced during 011-tls-policy gate-b prep.
 HeaderFilterRegex: "include/fixpp/.*|include/fix/.*"
 
+# #413: the C-ABI headers are C (no `enum class`) and byte-frozen by
+# tools/capi_freeze.sha256 (0->1 GA), so neither a fix nor an inline NOLINT can land
+# there -- both change the frozen bytes. Their diagnostics are unactionable by design.
+# Generated headers under <build>/_codegen/include/fixpp/ also match the filter above;
+# they are fixpp-codegen output with byte-identity baselines, so a finding there is
+# fixed in the emitter (tools/codegen/), never in the output.
+# The /_codegen/ alternative does NOT hold for every TU: a tests/ TU that includes the
+# generated validators still reports diagnostics there, and so does the CLI
+# --exclude-header-filter. Re-check before trusting it: run clang-tidy on
+# tests/codegen/test_078_validator_mixing_us3.cpp and look for _codegen/ paths.
+ExcludeHeaderFilterRegex: "include/fix/c_api(\\.h|/.*)|/_codegen/"
+
 CheckOptions:
   - key: modernize-use-default-member-init.UseAssignment
     value: "true"

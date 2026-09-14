@@ -28,6 +28,8 @@
 
 #include <gtest/gtest.h>
 
+#include <asio/co_spawn.hpp>
+#include <asio/use_future.hpp>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -36,16 +38,11 @@
 #include <thread>
 #include <vector>
 
-#include <asio/co_spawn.hpp>
-#include <asio/use_future.hpp>
-
+#include "capi_internal.hpp"  // fixpp_msg + fixpp_engine internals; set_session_ever_established
 #include "fix/c_api/engine.h"
 #include "fix/c_api/session.h"
-
-#include "capi_internal.hpp"  // fixpp_msg + fixpp_engine internals; set_session_ever_established
-                              // (FIXPP_TEST_HOOKS-gated decl, used by the #151 reaped tests)
+// (FIXPP_TEST_HOOKS-gated decl, used by the #151 reaped tests)
 #include "capi_loopback_support.hpp"
-
 #include "fixpp/session/session.hpp"  // Session::is_drained_for_test (FIXPP_TEST_HOOKS)
 #include "support/wait_until.hpp"
 
@@ -91,8 +88,8 @@ namespace {
 struct DrainReplier {
     std::mutex m;
     std::condition_variable cv;
-    bool armed = false;          // a request to reply is pending
-    bool shutdown = false;       // tell the thread to exit
+    bool armed = false;                        // a request to reply is pending
+    bool shutdown = false;                     // tell the thread to exit
     fixpp_session_t* reply_session = nullptr;  // who to send the reply on
     std::vector<std::uint8_t> reply_payload;
     std::atomic<bool> reply_sent{false};
@@ -116,7 +113,7 @@ struct DrainReplier {
     }
     void arm(fixpp_session_t* s, std::vector<std::uint8_t> payload) {
         {
-            std::lock_guard<std::mutex> lk(m);
+            std::scoped_lock lk(m);
             reply_session = s;
             reply_payload = std::move(payload);
             armed = true;
@@ -125,7 +122,7 @@ struct DrainReplier {
     }
     void stop() {
         {
-            std::lock_guard<std::mutex> lk(m);
+            std::scoped_lock lk(m);
             shutdown = true;
         }
         cv.notify_one();
@@ -151,8 +148,7 @@ TEST(CapiSendRecv, TwoEngineRoundTripReplyFromDrainThread) {
     std::atomic<bool> a_got_reply{false};
 
     // ── Acceptor B session + on-strand receive callback ──────────────────────
-    fixpp_session_config_t* acc =
-        make_session_cfg("ACC-RT", "INIT-RT", FIXPP_ROLE_ACCEPTOR);
+    fixpp_session_config_t* acc = make_session_cfg("ACC-RT", "INIT-RT", FIXPP_ROLE_ACCEPTOR);
     set_loopback_endpoint(acc, "127.0.0.1", 0);
     auto acc_id = session_id_of(acc);
     fixpp_session_t* acc_h = nullptr;
@@ -164,7 +160,7 @@ TEST(CapiSendRecv, TwoEngineRoundTripReplyFromDrainThread) {
         DrainReplier* drain;
         fixpp_session_t* session;  // B's session to reply on
         std::atomic<bool> got_order{false};
-    } b_ctx{&b_drain, nullptr, {}};
+    } b_ctx{.drain = &b_drain, .session = nullptr, .got_order = {}};
     auto b_cb = [](const fixpp_msg_t* inbound, void* ud) {
         auto* ctx = static_cast<BCtx*>(ud);
         ASSERT_NE(inbound, nullptr);
@@ -176,11 +172,10 @@ TEST(CapiSendRecv, TwoEngineRoundTripReplyFromDrainThread) {
 
     ASSERT_EQ(fixpp_engine_start(B), FIXPP_ERR_OK);
     std::uint16_t port = wait_for_bound_port(B, acc_id);
-    ASSERT_NE(port, 0u) << "acceptor did not bind";
+    ASSERT_NE(port, 0U) << "acceptor did not bind";
 
     // ── Initiator A session + on-strand receive callback (sees B's reply) ─────
-    fixpp_session_config_t* ini =
-        make_session_cfg("INIT-RT", "ACC-RT", FIXPP_ROLE_INITIATOR);
+    fixpp_session_config_t* ini = make_session_cfg("INIT-RT", "ACC-RT", FIXPP_ROLE_INITIATOR);
     set_loopback_endpoint(ini, "127.0.0.1", port);
     fixpp_session_t* ini_h = nullptr;
     ASSERT_EQ(fixpp_session_open(A, ini, &ini_h), FIXPP_ERR_OK);
@@ -248,18 +243,16 @@ TEST(CapiSendRecv, NoCallbacksAfterClose) {
     ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &B), FIXPP_ERR_OK);
     ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &A), FIXPP_ERR_OK);
 
-    fixpp_session_config_t* acc =
-        make_session_cfg("ACC-NC", "INIT-NC", FIXPP_ROLE_ACCEPTOR);
+    fixpp_session_config_t* acc = make_session_cfg("ACC-NC", "INIT-NC", FIXPP_ROLE_ACCEPTOR);
     set_loopback_endpoint(acc, "127.0.0.1", 0);
     auto acc_id = session_id_of(acc);
     fixpp_session_t* acc_h = nullptr;
     ASSERT_EQ(fixpp_session_open(B, acc, &acc_h), FIXPP_ERR_OK);
     ASSERT_EQ(fixpp_engine_start(B), FIXPP_ERR_OK);
     std::uint16_t port = wait_for_bound_port(B, acc_id);
-    ASSERT_NE(port, 0u);
+    ASSERT_NE(port, 0U);
 
-    fixpp_session_config_t* ini =
-        make_session_cfg("INIT-NC", "ACC-NC", FIXPP_ROLE_INITIATOR);
+    fixpp_session_config_t* ini = make_session_cfg("INIT-NC", "ACC-NC", FIXPP_ROLE_INITIATOR);
     set_loopback_endpoint(ini, "127.0.0.1", port);
     fixpp_session_t* ini_h = nullptr;
     ASSERT_EQ(fixpp_session_open(A, ini, &ini_h), FIXPP_ERR_OK);
@@ -306,11 +299,11 @@ TEST(CapiSendRecv, NoCallbacksAfterClose) {
 // GCC exposes ASan via __SANITIZE_ADDRESS__ instead. (Matches the portable idiom in
 // tests/session/test_business_messages_build.cpp + tests/alloc_guard/.)
 #if defined(__has_feature)
-#  if __has_feature(address_sanitizer)
-#    define FIXPP_CAPI_TEST_ASAN 1
-#  endif
+#if __has_feature(address_sanitizer)
+#define FIXPP_CAPI_TEST_ASAN 1
+#endif
 #elif defined(__SANITIZE_ADDRESS__)
-#  define FIXPP_CAPI_TEST_ASAN 1
+#define FIXPP_CAPI_TEST_ASAN 1
 #endif
 
 #ifdef FIXPP_CAPI_TEST_ASAN
@@ -320,8 +313,7 @@ TEST(CapiSendRecv, InboundHandleUseAfterReturnCaughtUnderAsan) {
     ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &B), FIXPP_ERR_OK);
     ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &A), FIXPP_ERR_OK);
 
-    fixpp_session_config_t* acc =
-        make_session_cfg("ACC-UAF", "INIT-UAF", FIXPP_ROLE_ACCEPTOR);
+    fixpp_session_config_t* acc = make_session_cfg("ACC-UAF", "INIT-UAF", FIXPP_ROLE_ACCEPTOR);
     set_loopback_endpoint(acc, "127.0.0.1", 0);
     auto acc_id = session_id_of(acc);
     fixpp_session_t* acc_h = nullptr;
@@ -342,8 +334,7 @@ TEST(CapiSendRecv, InboundHandleUseAfterReturnCaughtUnderAsan) {
     std::uint16_t port = wait_for_bound_port(B, acc_id);
     ASSERT_NE(port, 0u);
 
-    fixpp_session_config_t* ini =
-        make_session_cfg("INIT-UAF", "ACC-UAF", FIXPP_ROLE_INITIATOR);
+    fixpp_session_config_t* ini = make_session_cfg("INIT-UAF", "ACC-UAF", FIXPP_ROLE_INITIATOR);
     set_loopback_endpoint(ini, "127.0.0.1", port);
     fixpp_session_t* ini_h = nullptr;
     ASSERT_EQ(fixpp_session_open(A, ini, &ini_h), FIXPP_ERR_OK);
@@ -390,18 +381,16 @@ TEST(CapiSendRecv, CloseReapedSessionIsIdempotentOk) {
     ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &B), FIXPP_ERR_OK);
     ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &A), FIXPP_ERR_OK);
 
-    fixpp_session_config_t* acc =
-        make_session_cfg("ACC-RP", "INIT-RP", FIXPP_ROLE_ACCEPTOR);
+    fixpp_session_config_t* acc = make_session_cfg("ACC-RP", "INIT-RP", FIXPP_ROLE_ACCEPTOR);
     set_loopback_endpoint(acc, "127.0.0.1", 0);
     auto acc_id = session_id_of(acc);
     fixpp_session_t* acc_h = nullptr;
     ASSERT_EQ(fixpp_session_open(B, acc, &acc_h), FIXPP_ERR_OK);
     ASSERT_EQ(fixpp_engine_start(B), FIXPP_ERR_OK);
     std::uint16_t port = wait_for_bound_port(B, acc_id);
-    ASSERT_NE(port, 0u);
+    ASSERT_NE(port, 0U);
 
-    fixpp_session_config_t* ini =
-        make_session_cfg("INIT-RP", "ACC-RP", FIXPP_ROLE_INITIATOR);
+    fixpp_session_config_t* ini = make_session_cfg("INIT-RP", "ACC-RP", FIXPP_ROLE_INITIATOR);
     set_loopback_endpoint(ini, "127.0.0.1", port);
     fixpp_session_t* ini_h = nullptr;
     ASSERT_EQ(fixpp_session_open(A, ini, &ini_h), FIXPP_ERR_OK);
@@ -438,21 +427,20 @@ TEST(CapiSendRecv, CloseReapedSessionIsIdempotentOk) {
 TEST(CapiSendRecv, CloseReapedNeverEstablishedIsLifecycle) {
     fixpp_engine_t* B = nullptr;
     fixpp_engine_t* A = nullptr;
-    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 4, &B), FIXPP_ERR_OK);  // minor=4: no downgrade
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 4, &B),
+              FIXPP_ERR_OK);  // minor=4: no downgrade
     ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), 1, 0, &A), FIXPP_ERR_OK);
 
-    fixpp_session_config_t* acc =
-        make_session_cfg("ACC-RN", "INIT-RN", FIXPP_ROLE_ACCEPTOR);
+    fixpp_session_config_t* acc = make_session_cfg("ACC-RN", "INIT-RN", FIXPP_ROLE_ACCEPTOR);
     set_loopback_endpoint(acc, "127.0.0.1", 0);
     auto acc_id = session_id_of(acc);
     fixpp_session_t* acc_h = nullptr;
     ASSERT_EQ(fixpp_session_open(B, acc, &acc_h), FIXPP_ERR_OK);
     ASSERT_EQ(fixpp_engine_start(B), FIXPP_ERR_OK);
     std::uint16_t port = wait_for_bound_port(B, acc_id);
-    ASSERT_NE(port, 0u);
+    ASSERT_NE(port, 0U);
 
-    fixpp_session_config_t* ini =
-        make_session_cfg("INIT-RN", "ACC-RN", FIXPP_ROLE_INITIATOR);
+    fixpp_session_config_t* ini = make_session_cfg("INIT-RN", "ACC-RN", FIXPP_ROLE_INITIATOR);
     set_loopback_endpoint(ini, "127.0.0.1", port);
     fixpp_session_t* ini_h = nullptr;
     ASSERT_EQ(fixpp_session_open(A, ini, &ini_h), FIXPP_ERR_OK);

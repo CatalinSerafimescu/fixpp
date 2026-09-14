@@ -22,9 +22,9 @@ static_assert(noexcept(decimal_traits<pod_decimal>::compare(pod_decimal{}, pod_d
 
 // AC-C1: {1,0}, {10,-1}, {100,-2} all compare equal (canonicalized value equality)
 TEST(DecimalCompare, ValueEqualityCanonical) {
-    pod_decimal a{1, 0};
-    pod_decimal b{10, -1};
-    pod_decimal c{100, -2};
+    pod_decimal a{.mantissa = 1, .exponent = 0};
+    pod_decimal b{.mantissa = 10, .exponent = -1};
+    pod_decimal c{.mantissa = 100, .exponent = -2};
 
     EXPECT_EQ(decimal_traits<pod_decimal>::compare(a, b), std::strong_ordering::equal);
     EXPECT_EQ(decimal_traits<pod_decimal>::compare(b, c), std::strong_ordering::equal);
@@ -47,11 +47,11 @@ TEST(DecimalCompare, InvalidGreaterThanFinite) {
 // that would overflow int128 if the comparison were done via multiplication.
 TEST(DecimalCompare, NoBigIntOverflow) {
     // INT64_MAX × 10^0 vs INT64_MAX × 10^0
-    pod_decimal big{INT64_MAX, 0};
+    pod_decimal big{.mantissa = INT64_MAX, .exponent = 0};
     EXPECT_EQ(decimal_traits<pod_decimal>::compare(big, big), std::strong_ordering::equal);
 
     // Different magnitudes
-    pod_decimal small{1, -38};
+    pod_decimal small{.mantissa = 1, .exponent = -38};
     EXPECT_EQ(decimal_traits<pod_decimal>::compare(big, small), std::strong_ordering::greater);
 }
 
@@ -72,8 +72,8 @@ TEST(DecimalCompare, NegativePositive) {
 
 TEST(DecimalCompare, BothNegativeCanonical) {
     // -10 × 10^-1 == -1 × 10^0
-    pod_decimal a{-10, -1};
-    pod_decimal b{-1, 0};
+    pod_decimal a{.mantissa = -10, .exponent = -1};
+    pod_decimal b{.mantissa = -1, .exponent = 0};
     EXPECT_EQ(decimal_traits<pod_decimal>::compare(a, b), std::strong_ordering::equal);
 }
 
@@ -105,8 +105,8 @@ TEST(DecimalCompare, NegativeSameBucketOrdersByMagnitude) {
     // |a| × 10^-38 with am = INT64_MAX (largest finite negative mantissa)
     // vs |b| = 1e18 × 10^-38. Both negative, same magnitude bucket (-19).
     // |a| > |b| ⇒ a < b numerically.
-    pod_decimal a{-INT64_MAX, -38};
-    pod_decimal b{-1000000000000000000LL, -38};
+    pod_decimal a{.mantissa = -INT64_MAX, .exponent = -38};
+    pod_decimal b{.mantissa = -1000000000000000000LL, .exponent = -38};
     EXPECT_EQ(decimal_traits<pod_decimal>::compare(a, b), std::strong_ordering::less);
     EXPECT_EQ(decimal_traits<pod_decimal>::compare(b, a), std::strong_ordering::greater);
 }
@@ -114,11 +114,11 @@ TEST(DecimalCompare, NegativeSameBucketOrdersByMagnitude) {
 // Companion oracle check: same magnitudes, opposite signs handled correctly.
 TEST(DecimalCompare, SameBucketCrossCheck) {
     // {2, -1} = 0.2; {19, -2} = 0.19; same magnitude bucket (-1)
-    pod_decimal pos_a{2, -1};
-    pod_decimal pos_b{19, -2};
+    pod_decimal pos_a{.mantissa = 2, .exponent = -1};
+    pod_decimal pos_b{.mantissa = 19, .exponent = -2};
     EXPECT_EQ(decimal_traits<pod_decimal>::compare(pos_a, pos_b), std::strong_ordering::greater);
-    pod_decimal neg_a{-2, -1};
-    pod_decimal neg_b{-19, -2};
+    pod_decimal neg_a{.mantissa = -2, .exponent = -1};
+    pod_decimal neg_b{.mantissa = -19, .exponent = -2};
     EXPECT_EQ(decimal_traits<pod_decimal>::compare(neg_a, neg_b), std::strong_ordering::less);
 }
 
@@ -160,8 +160,8 @@ TEST(DecimalCompare, R3SameRawExponentFastPath) {
 // decimal<pod_decimal> operator== and operator<=> rely on compare
 TEST(DecimalCompare, DecimalWrapperOperators) {
     using fixpp::core::decimal;
-    decimal<pod_decimal> x{pod_decimal{10, -1}};
-    decimal<pod_decimal> y{pod_decimal{1, 0}};
+    decimal<pod_decimal> x{pod_decimal{.mantissa = 10, .exponent = -1}};
+    decimal<pod_decimal> y{pod_decimal{.mantissa = 1, .exponent = 0}};
     EXPECT_EQ(x, y);
     EXPECT_EQ(x <=> y, std::strong_ordering::equal);
 }

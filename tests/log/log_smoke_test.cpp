@@ -22,14 +22,14 @@
 // ── ArgValue layout ──────────────────────────────────────────────────────────
 
 TEST(LogSlice3a, ArgValueSizeAndTriviality) {
-    EXPECT_EQ(sizeof(fixpp::log::ArgValue), 24u);
+    EXPECT_EQ(sizeof(fixpp::log::ArgValue), 24U);
     EXPECT_TRUE(std::is_trivially_copyable_v<fixpp::log::ArgValue>);
 }
 
 TEST(LogSlice3a, ArgValueFromU64) {
-    auto av = fixpp::log::ArgValue::from_u64(42u);
+    auto av = fixpp::log::ArgValue::from_u64(42U);
     EXPECT_EQ(av.kind, fixpp::log::ArgValue::Kind::u64);
-    EXPECT_EQ(av.u64, 42u);
+    EXPECT_EQ(av.u64, 42U);
 }
 
 TEST(LogSlice3a, ArgValueFromI64) {
@@ -53,7 +53,7 @@ TEST(LogSlice3a, ArgValueFromBool) {
 TEST(LogSlice3a, ArgValueFromInlineShort) {
     auto av = fixpp::log::ArgValue::from_inline("hello");
     EXPECT_EQ(av.kind, fixpp::log::ArgValue::Kind::inline_str);
-    EXPECT_EQ(av.inl.len, 5u);
+    EXPECT_EQ(av.inl.len, 5U);
     EXPECT_EQ(std::string_view(av.inl.data, av.inl.len), "hello");
 }
 
@@ -61,7 +61,7 @@ TEST(LogSlice3a, ArgValueFromInlineTruncates) {
     // 16-character string — must be silently truncated to 15 bytes.
     auto av = fixpp::log::ArgValue::from_inline("1234567890123456");
     EXPECT_EQ(av.kind, fixpp::log::ArgValue::Kind::inline_str);
-    EXPECT_EQ(av.inl.len, 15u);
+    EXPECT_EQ(av.inl.len, 15U);
 }
 
 TEST(LogSlice3a, ArgValueFromStatic) {
@@ -80,66 +80,66 @@ TEST(LogSlice3a, FIXPP_SLIT) {
 // ── Record layout ─────────────────────────────────────────────────────────────
 
 TEST(LogSlice3a, RecordSizeAlignTriviality) {
-    EXPECT_EQ(sizeof(fixpp::log::Record), 256u);
-    EXPECT_EQ(alignof(fixpp::log::Record), 64u);
+    EXPECT_EQ(sizeof(fixpp::log::Record), 256U);
+    EXPECT_EQ(alignof(fixpp::log::Record), 64U);
     EXPECT_TRUE(std::is_trivially_copyable_v<fixpp::log::Record>);
 }
 
 TEST(LogSlice3a, RecordDefaultConstruct) {
     // Default-constructed Record: trace_id/span_id zeroed; args default-init.
     fixpp::log::Record r{};
-    EXPECT_EQ(r.span_id, 0u);
+    EXPECT_EQ(r.span_id, 0U);
     for (auto b : r.trace_id) {
-        EXPECT_EQ(b, 0u);
+        EXPECT_EQ(b, 0U);
     }
-    EXPECT_EQ(r.arg_count, 0u);
+    EXPECT_EQ(r.arg_count, 0U);
 }
 
 // ── Level and Category constants ──────────────────────────────────────────────
 
 TEST(LogSlice3a, LevelValues) {
     using L = fixpp::log::Level;
-    EXPECT_EQ(static_cast<uint8_t>(L::trace), 0u);
-    EXPECT_EQ(static_cast<uint8_t>(L::debug), 1u);
-    EXPECT_EQ(static_cast<uint8_t>(L::info),  2u);
-    EXPECT_EQ(static_cast<uint8_t>(L::warn),  3u);
-    EXPECT_EQ(static_cast<uint8_t>(L::error), 4u);
-    EXPECT_EQ(static_cast<uint8_t>(L::fatal), 5u);
+    EXPECT_EQ(static_cast<uint8_t>(L::trace), 0U);
+    EXPECT_EQ(static_cast<uint8_t>(L::debug), 1U);
+    EXPECT_EQ(static_cast<uint8_t>(L::info), 2U);
+    EXPECT_EQ(static_cast<uint8_t>(L::warn), 3U);
+    EXPECT_EQ(static_cast<uint8_t>(L::error), 4U);
+    EXPECT_EQ(static_cast<uint8_t>(L::fatal), 5U);
 }
 
 TEST(LogSlice3a, BuiltinCategoryValues) {
     using namespace fixpp::log::cat;
-    EXPECT_EQ(session,   0x0001u);
-    EXPECT_EQ(wire,      0x0002u);
-    EXPECT_EQ(transport, 0x0003u);
-    EXPECT_EQ(tls,       0x0004u);
-    EXPECT_EQ(store,     0x0005u);
-    EXPECT_EQ(otel,      0x0006u);
-    EXPECT_EQ(control,   0x0007u);
-    EXPECT_EQ(user,      0x0008u);
+    EXPECT_EQ(session, 0x0001U);
+    EXPECT_EQ(wire, 0x0002U);
+    EXPECT_EQ(transport, 0x0003U);
+    EXPECT_EQ(tls, 0x0004U);
+    EXPECT_EQ(store, 0x0005U);
+    EXPECT_EQ(otel, 0x0006U);
+    EXPECT_EQ(control, 0x0007U);
+    EXPECT_EQ(user, 0x0008U);
 }
 
 TEST(LogSlice3a, CategoryBitIndexMapping) {
     // Built-in categories 1..8 occupy bit indices 1..8 (category & 63u).
     using namespace fixpp::log::cat;
-    EXPECT_EQ(session   & 63u, 1u);
-    EXPECT_EQ(wire      & 63u, 2u);
-    EXPECT_EQ(transport & 63u, 3u);
-    EXPECT_EQ(tls       & 63u, 4u);
-    EXPECT_EQ(store     & 63u, 5u);
-    EXPECT_EQ(otel      & 63u, 6u);
-    EXPECT_EQ(control   & 63u, 7u);
-    EXPECT_EQ(user      & 63u, 8u);
+    EXPECT_EQ(session & 63U, 1U);
+    EXPECT_EQ(wire & 63U, 2U);
+    EXPECT_EQ(transport & 63U, 3U);
+    EXPECT_EQ(tls & 63U, 4U);
+    EXPECT_EQ(store & 63U, 5U);
+    EXPECT_EQ(otel & 63U, 6U);
+    EXPECT_EQ(control & 63U, 7U);
+    EXPECT_EQ(user & 63U, 8U);
 }
 
 TEST(LogSlice3a, FIXPP_LOG_CATEGORY_DoesNotCollide) {
     // "network" should produce a CRC32 whose low-6-bits are not in 1..8.
     // If this compiles (no static_assert failure), the collision check passed.
     constexpr auto my_cat = FIXPP_LOG_CATEGORY("network");
-    EXPECT_NE(my_cat & 63u, 0u);  // non-zero bit index
+    EXPECT_NE(my_cat & 63U, 0U);  // non-zero bit index
     // Built-in range check: must NOT be in [1,8].
-    auto idx = my_cat & 63u;
-    bool collides = (idx >= 1u && idx <= 8u);
+    auto idx = my_cat & 63U;
+    bool collides = (idx >= 1U && idx <= 8U);
     EXPECT_FALSE(collides);
 }
 

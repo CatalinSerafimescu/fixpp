@@ -102,7 +102,7 @@ TEST(SyncAsanClean, CancelMidWaitNoUseAfterFree) {
     auto holder_coro = [&]() -> asio::awaitable<void> {
         auto g = co_await mtx.async_lock();
         EXPECT_TRUE(g.has_value());
-        co_await yield_n(N * 6 + 16);
+        co_await yield_n((N * 6) + 16);
     };
 
     auto waiter_body = [&]() -> asio::awaitable<void> {
@@ -116,7 +116,7 @@ TEST(SyncAsanClean, CancelMidWaitNoUseAfterFree) {
         completed_count.fetch_add(1, std::memory_order_acq_rel);
     };
 
-    std::vector<asio::cancellation_signal> signals(N / 4 + 1);
+    std::vector<asio::cancellation_signal> signals((N / 4) + 1);
     std::vector<std::future<void>> futs;
     futs.reserve(N);
 
@@ -137,7 +137,7 @@ TEST(SyncAsanClean, CancelMidWaitNoUseAfterFree) {
     asio::co_spawn(
         ioc,
         [&]() -> asio::awaitable<void> {
-            co_await yield_n(N * 3 + 4);
+            co_await yield_n((N * 3) + 4);
             for (int j = 0; j < sig_idx; ++j) signals[j].emit(asio::cancellation_type::total);
         },
         asio::detached);

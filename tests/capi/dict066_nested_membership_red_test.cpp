@@ -30,12 +30,11 @@
 #include <thread>
 #include <vector>
 
+#include "capi_dict066_loopback_support.hpp"
+#include "capi_loopback_support.hpp"
 #include "fix/c_api/engine.h"
 #include "fix/c_api/message.h"
 #include "fix/c_api/session.h"
-
-#include "capi_dict066_loopback_support.hpp"
-#include "capi_loopback_support.hpp"
 #include "support/wait_until.hpp"
 
 using namespace std::chrono_literals;
@@ -166,7 +165,7 @@ TEST(NestedGroupMembershipCapiRed, TrailingMemberAbsentFromLastNestedInstance) {
 
     ASSERT_EQ(fixpp_engine_start(acceptor_engine), FIXPP_ERR_OK);
     std::uint16_t port = wait_for_bound_port(acceptor_engine, acc_id);
-    ASSERT_NE(port, 0u) << "acceptor did not bind";
+    ASSERT_NE(port, 0U) << "acceptor did not bind";
 
     // Initiator session.
     fixpp_session_config_t* ini_cfg =
@@ -184,7 +183,8 @@ TEST(NestedGroupMembershipCapiRed, TrailingMemberAbsentFromLastNestedInstance) {
     auto payload = make_nested_membership_app_payload();
     ASSERT_EQ(fixpp_session_send(ini_h, payload.data(), payload.size()), FIXPP_ERR_OK);
 
-    (void)fixpp::test_support::wait_for_flag(ctx.fired, 5s);  // the ASSERT_TRUE(ctx.fired) below is the oracle
+    (void)fixpp::test_support::wait_for_flag(ctx.fired,
+                                             5s);  // the ASSERT_TRUE(ctx.fired) below is the oracle
 
     ASSERT_TRUE(ctx.fired.load()) << "the nested-group-bearing ExecutionReport must reach the "
                                      "acceptor's registered receive callback";
@@ -192,7 +192,8 @@ TEST(NestedGroupMembershipCapiRed, TrailingMemberAbsentFromLastNestedInstance) {
     // Non-discriminating sanity checks: outer group + genuine nested members.
     ASSERT_EQ(ctx.outer_rc, FIXPP_ERR_OK) << "NoLegs(555) must resolve as a group";
     EXPECT_EQ(ctx.outer_count, 1U) << "NoLegs(555)=1 must yield exactly 1 instance";
-    ASSERT_EQ(ctx.nested_rc, FIXPP_ERR_OK) << "NoLegSecurityAltID(604) must resolve as a nested group";
+    ASSERT_EQ(ctx.nested_rc, FIXPP_ERR_OK)
+        << "NoLegSecurityAltID(604) must resolve as a nested group";
     EXPECT_EQ(ctx.nested_count, 2U) << "NoLegSecurityAltID(604)=2 must yield exactly 2 instances";
 
     EXPECT_EQ(ctx.nested0_605_rc, FIXPP_ERR_OK);

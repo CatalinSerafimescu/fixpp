@@ -29,25 +29,21 @@
 
 #include <gtest/gtest.h>
 
+#include <asio/co_spawn.hpp>
+#include <asio/use_future.hpp>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <thread>
 #include <vector>
 
+#include "capi_internal.hpp"  // fixpp_engine internals (handle cast seam)
+#include "capi_loopback_support.hpp"
 #include "fix/c_api/engine.h"
 #include "fix/c_api/session.h"
-
-#include <asio/co_spawn.hpp>
-#include <asio/use_future.hpp>
-
-#include "capi_internal.hpp"  // fixpp_engine internals (handle cast seam)
-
 #include "fixpp/session/seqnum.hpp"          // seqnum_max
 #include "fixpp/session/seqnum_manager.hpp"  // set_counters_for_test (FIXPP_TEST_HOOKS)
 #include "fixpp/session/session.hpp"         // Session::seqnum_mgr_test_access()
-
-#include "capi_loopback_support.hpp"
 #include "support/wait_until.hpp"
 
 using namespace std::chrono_literals;
@@ -74,8 +70,7 @@ TEST(CapiErrorLive, MalformedPayloadReturnsUnknownNoTransmit) {
 
     CallbackCounter b_counter;
 
-    fixpp_session_config_t* acc =
-        make_session_cfg("ACC-MALF", "INIT-MALF", FIXPP_ROLE_ACCEPTOR);
+    fixpp_session_config_t* acc = make_session_cfg("ACC-MALF", "INIT-MALF", FIXPP_ROLE_ACCEPTOR);
     set_loopback_endpoint(acc, "127.0.0.1", 0);
     auto acc_id = session_id_of(acc);
     fixpp_session_t* acc_h = nullptr;
@@ -85,10 +80,9 @@ TEST(CapiErrorLive, MalformedPayloadReturnsUnknownNoTransmit) {
     ASSERT_EQ(fixpp_engine_start(B), FIXPP_ERR_OK);
 
     std::uint16_t port = wait_for_bound_port(B, acc_id);
-    ASSERT_NE(port, 0u) << "acceptor did not bind";
+    ASSERT_NE(port, 0U) << "acceptor did not bind";
 
-    fixpp_session_config_t* ini =
-        make_session_cfg("INIT-MALF", "ACC-MALF", FIXPP_ROLE_INITIATOR);
+    fixpp_session_config_t* ini = make_session_cfg("INIT-MALF", "ACC-MALF", FIXPP_ROLE_INITIATOR);
     set_loopback_endpoint(ini, "127.0.0.1", port);
     fixpp_session_t* ini_h = nullptr;
     ASSERT_EQ(fixpp_session_open(A, ini, &ini_h), FIXPP_ERR_OK);
@@ -100,7 +94,8 @@ TEST(CapiErrorLive, MalformedPayloadReturnsUnknownNoTransmit) {
     EXPECT_EQ(fixpp_session_send(ini_h, good_payload.data(), good_payload.size()), FIXPP_ERR_OK);
 
     // Wait for the good send to arrive (peer callback fires) — give it up to 3s.
-    (void)fixpp::test_support::wait_for_flag(b_counter.count, 3s);  // the ASSERT_GE below is the oracle
+    (void)fixpp::test_support::wait_for_flag(b_counter.count,
+                                             3s);  // the ASSERT_GE below is the oracle
     ASSERT_GE(b_counter.count.load(), 1) << "good send never delivered to peer callback";
     const int count_before_malformed = b_counter.count.load(std::memory_order_acquire);
 
@@ -108,7 +103,10 @@ TEST(CapiErrorLive, MalformedPayloadReturnsUnknownNoTransmit) {
     // Session::send_impl scans the app payload for session header/trailer tags
     // (8/9/34/49/52/56/10) at SOH boundaries and returns app_payload_malformed if found.
     // app_payload_malformed (131) → translate() → FIXPP_ERR_UNKNOWN (L-050-4 deferred).
-    std::string malformed_str = "35=D\x01" "34=INJECTED\x01" "55=TESTSYM\x01";
+    std::string malformed_str =
+        "35=D\x01"
+        "34=INJECTED\x01"
+        "55=TESTSYM\x01";
     std::vector<std::uint8_t> malformed_payload(malformed_str.begin(), malformed_str.end());
 
     const fixpp_error_t send_rc =
@@ -145,8 +143,7 @@ TEST(CapiErrorLive, SeqnumOverflowReturnsStoreRuntimeNoTransmit) {
 
     CallbackCounter b_counter;
 
-    fixpp_session_config_t* acc =
-        make_session_cfg("ACC-SEQOV", "INIT-SEQOV", FIXPP_ROLE_ACCEPTOR);
+    fixpp_session_config_t* acc = make_session_cfg("ACC-SEQOV", "INIT-SEQOV", FIXPP_ROLE_ACCEPTOR);
     set_loopback_endpoint(acc, "127.0.0.1", 0);
     auto acc_id = session_id_of(acc);
     fixpp_session_t* acc_h = nullptr;
@@ -156,10 +153,9 @@ TEST(CapiErrorLive, SeqnumOverflowReturnsStoreRuntimeNoTransmit) {
     ASSERT_EQ(fixpp_engine_start(B), FIXPP_ERR_OK);
 
     std::uint16_t port = wait_for_bound_port(B, acc_id);
-    ASSERT_NE(port, 0u) << "acceptor did not bind";
+    ASSERT_NE(port, 0U) << "acceptor did not bind";
 
-    fixpp_session_config_t* ini =
-        make_session_cfg("INIT-SEQOV", "ACC-SEQOV", FIXPP_ROLE_INITIATOR);
+    fixpp_session_config_t* ini = make_session_cfg("INIT-SEQOV", "ACC-SEQOV", FIXPP_ROLE_INITIATOR);
     set_loopback_endpoint(ini, "127.0.0.1", port);
     fixpp_session_t* ini_h = nullptr;
     ASSERT_EQ(fixpp_session_open(A, ini, &ini_h), FIXPP_ERR_OK);
@@ -173,8 +169,7 @@ TEST(CapiErrorLive, SeqnumOverflowReturnsStoreRuntimeNoTransmit) {
         auto* e_internal = reinterpret_cast<fixpp_engine*>(A);
         ASSERT_TRUE(e_internal->state_ != nullptr && e_internal->state_->engine_.has_value());
         const auto& id_ref = ini_h->id;  // SessionId of the initiator
-        std::shared_ptr<fixpp::session::Session> sess =
-            e_internal->state_->engine_->lookup(id_ref);
+        std::shared_ptr<fixpp::session::Session> sess = e_internal->state_->engine_->lookup(id_ref);
         ASSERT_NE(sess, nullptr) << "session lookup failed after establishment";
 
         // Post the seqnum seed to the session's executor (strand-confined) and
@@ -184,8 +179,9 @@ TEST(CapiErrorLive, SeqnumOverflowReturnsStoreRuntimeNoTransmit) {
         //
         // Spawn on the UNDERLYING executor (asio::any_io_executor strand), NOT on
         // the session_executor wrapper — mirroring the R1 fix in session.cpp and the
-        // engine.cpp's `kl->executor().underlying()` co_spawn precedent.  The wrapper's ~impl() is destroyed across the
-        // caller thread and the worker, causing a TSan race at any_executor.hpp:475.
+        // engine.cpp's `kl->executor().underlying()` co_spawn precedent.  The wrapper's ~impl() is
+        // destroyed across the caller thread and the worker, causing a TSan race at
+        // any_executor.hpp:475.
         auto seed_fn = [sess]() -> asio::awaitable<void> {
             auto& mgr = sess->seqnum_mgr_test_access();
             const fixpp::session::seqnum_t cur_inbound = mgr.next_inbound_unsafe();
@@ -216,8 +212,7 @@ TEST(CapiErrorLive, SeqnumOverflowReturnsStoreRuntimeNoTransmit) {
     // The next send must overflow (next_outbound == seqnum_max → assign_outbound fails
     // with store_seqnum_overflow=60 → translate→FIXPP_ERR_STORE_RUNTIME).
     const auto payload = make_app_payload("SEQOV");
-    const fixpp_error_t send_rc =
-        fixpp_session_send(ini_h, payload.data(), payload.size());
+    const fixpp_error_t send_rc = fixpp_session_send(ini_h, payload.data(), payload.size());
     EXPECT_EQ(send_rc, FIXPP_ERR_STORE_RUNTIME)
         << "seqnum_max overflow must return FIXPP_ERR_STORE_RUNTIME";
 

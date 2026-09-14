@@ -81,10 +81,9 @@ namespace {
 
 // ── Shared frame builders ──────────────────────────────────────────────────────
 
-static std::vector<std::byte> make_raw_logon_with_fields(std::string_view begin_string,
-                                                         std::string_view sender,
-                                                         std::string_view target, std::uint32_t seq,
-                                                         std::string extra_body) {
+std::vector<std::byte> make_raw_logon_with_fields(std::string_view begin_string,
+                                                  std::string_view sender, std::string_view target,
+                                                  std::uint32_t seq, std::string extra_body) {
     std::string body;
     body += "35=A\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -111,30 +110,29 @@ static std::vector<std::byte> make_raw_logon_with_fields(std::string_view begin_
 }
 
 // Normal valid Logon (35=A) with 98=0 and 108=30 (required by test dict).
-static std::vector<std::byte> make_valid_logon(std::string_view begin_string = "FIX.4.2",
-                                               std::uint32_t seq = 1,
-                                               std::string_view sender = "TW",
-                                               std::string_view target = "ISLD") {
+std::vector<std::byte> make_valid_logon(std::string_view begin_string = "FIX.4.2",
+                                        std::uint32_t seq = 1, std::string_view sender = "TW",
+                                        std::string_view target = "ISLD") {
     return make_raw_logon_with_fields(begin_string, sender, target, seq,
                                       "98=0\x01"
                                       "108=30\x01");
 }
 
 // Build a frame (any msg type) manually — allows arbitrary field ordering.
-static std::vector<std::byte> build_frame_raw(std::string raw_content) {
+std::vector<std::byte> build_frame_raw(std::string raw_content) {
     std::vector<std::byte> frame;
     for (char c : raw_content) frame.push_back(static_cast<std::byte>(c));
     return frame;
 }
 
 // Compute checksum of a string.
-static unsigned int compute_cs(std::string_view s) {
+unsigned int compute_cs(std::string_view s) {
     unsigned int cs = 0;
     for (unsigned char c : s) cs += c;
     return cs & 0xFFU;
 }
 
-static std::string cs_str(unsigned int cs) {
+std::string cs_str(unsigned int cs) {
     char buf[4];
     snprintf(buf, sizeof(buf), "%03u", cs);
     return buf;
@@ -142,10 +140,10 @@ static std::string cs_str(unsigned int cs) {
 
 // Build a Logon that has a dict-violating extra field (e.g. tag 44 = Price is
 // not defined for Logon(35=A) in the test dict → wire_unexpected_tag → reason=2).
-static std::vector<std::byte> make_dict_invalid_logon(std::string_view begin_string = "FIX.4.2",
-                                                      std::uint32_t seq = 1,
-                                                      std::string_view sender = "TW",
-                                                      std::string_view target = "ISLD") {
+std::vector<std::byte> make_dict_invalid_logon(std::string_view begin_string = "FIX.4.2",
+                                               std::uint32_t seq = 1,
+                                               std::string_view sender = "TW",
+                                               std::string_view target = "ISLD") {
     // Include tag 44 (Price) — not a valid field for Logon(35=A).
     return make_raw_logon_with_fields(begin_string, sender, target, seq,
                                       "98=0\x01"
@@ -154,10 +152,10 @@ static std::vector<std::byte> make_dict_invalid_logon(std::string_view begin_str
 }
 
 // Build a Logon WITHOUT 52 (SendingTime) — absent required field.
-static std::vector<std::byte> make_logon_no_sending_time(std::string_view begin_string = "FIX.4.2",
-                                                         std::uint32_t seq = 1,
-                                                         std::string_view sender = "TW",
-                                                         std::string_view target = "ISLD") {
+std::vector<std::byte> make_logon_no_sending_time(std::string_view begin_string = "FIX.4.2",
+                                                  std::uint32_t seq = 1,
+                                                  std::string_view sender = "TW",
+                                                  std::string_view target = "ISLD") {
     // Build body WITHOUT the 52= field.
     std::string body;
     body += "35=A\x01";
@@ -181,9 +179,10 @@ static std::vector<std::byte> make_logon_no_sending_time(std::string_view begin_
 }
 
 // Build a Logon with present-but-malformed 52 ("NOTATIME" instead of UTC).
-static std::vector<std::byte> make_logon_malformed_sending_time(
-    std::string_view begin_string = "FIX.4.2", std::uint32_t seq = 1,
-    std::string_view sender = "TW", std::string_view target = "ISLD") {
+std::vector<std::byte> make_logon_malformed_sending_time(std::string_view begin_string = "FIX.4.2",
+                                                         std::uint32_t seq = 1,
+                                                         std::string_view sender = "TW",
+                                                         std::string_view target = "ISLD") {
     return make_raw_logon_with_fields(begin_string, sender, target, seq,
                                       "98=0\x01"
                                       "108=30\x01");
@@ -195,9 +194,10 @@ static std::vector<std::byte> make_logon_malformed_sending_time(
 }
 
 // Build a Logon with a timestamp that is stale (more than 120s from mock clock).
-static std::vector<std::byte> make_logon_stale_sending_time(
-    std::string_view begin_string = "FIX.4.2", std::uint32_t seq = 1,
-    std::string_view sender = "TW", std::string_view target = "ISLD") {
+std::vector<std::byte> make_logon_stale_sending_time(std::string_view begin_string = "FIX.4.2",
+                                                     std::uint32_t seq = 1,
+                                                     std::string_view sender = "TW",
+                                                     std::string_view target = "ISLD") {
     // Use a timestamp one year before the mock clock (2024-01-01 00:00:00).
     return make_raw_logon_with_fields(begin_string, sender, target, seq,
                                       "98=0\x01"
@@ -207,10 +207,10 @@ static std::vector<std::byte> make_logon_stale_sending_time(
 }
 
 // Build a Logon where 52="NOTATIME" (present-but-malformed string value).
-static std::vector<std::byte> make_logon_with_malformed_52_in_body(std::string_view begin_string,
-                                                                   std::string_view sender,
-                                                                   std::string_view target,
-                                                                   std::uint32_t seq) {
+std::vector<std::byte> make_logon_with_malformed_52_in_body(std::string_view begin_string,
+                                                            std::string_view sender,
+                                                            std::string_view target,
+                                                            std::uint32_t seq) {
     // We must construct the body WITHOUT using make_raw_logon_with_fields (which
     // always inserts a well-formed 52=). Build the full frame manually.
     std::string body;
@@ -235,7 +235,7 @@ static std::vector<std::byte> make_logon_with_malformed_52_in_body(std::string_v
 }
 
 // Extract a field value from a SOH-delimited FIX frame by tag number.
-static std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag_wanted) {
+std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag_wanted) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
     std::string needle = std::to_string(tag_wanted) + "=";
     auto pos = wire.find(needle);
@@ -380,7 +380,7 @@ struct LogonArmFixture {
         (void)fut2.get();
     }
 
-    bool has_reject_with_reason(int reason) const {
+    [[nodiscard]] bool has_reject_with_reason(int reason) const {
         for (auto const& frame : transport.sent_frames()) {
             if (extract_field(frame, 35) == "3") {
                 auto r373 = extract_field(frame, 373);
@@ -390,14 +390,14 @@ struct LogonArmFixture {
         return false;
     }
 
-    bool has_any_reject() const {
+    [[nodiscard]] bool has_any_reject() const {
         for (auto const& frame : transport.sent_frames()) {
             if (extract_field(frame, 35) == "3") return true;
         }
         return false;
     }
 
-    bool has_logout() const {
+    [[nodiscard]] bool has_logout() const {
         for (auto const& frame : transport.sent_frames()) {
             if (extract_field(frame, 35) == "5") return true;
         }

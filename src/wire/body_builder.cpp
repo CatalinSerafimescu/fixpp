@@ -16,8 +16,8 @@
 // Group-tree shape + count-precedence serialization + INV-5 grammar
 // validation mirror src/capi/message_write.cpp's OutboundAccumulator
 // (compute_entries_size/serialise_entries/validate_group_grammar,
-// `compute_entries_size`/`serialise_entries`/`validate_group_grammar`), adapted to a memory_resource-free
-// std::vector accumulator (data-model §1 "Buffer/allocation policy") and an
+// `compute_entries_size`/`serialise_entries`/`validate_group_grammar`), adapted to a
+// memory_resource-free std::vector accumulator (data-model §1 "Buffer/allocation policy") and an
 // author-supplied delimiter_tag instead of a dictionary lookup (INV-5,
 // contracts/builder-shape-oracle.md C3).
 //
@@ -220,8 +220,7 @@ expected_t<group_handle> body_builder::group_begin(std::uint16_t no_tag,
 }
 
 expected_t<entry_handle> body_builder::add_entry_impl(const group_handle& g) noexcept {
-    if (!is_innermost_open(g.open_seq_))
-        return std::unexpected(error::wire_invalid_field_format);
+    if (!is_innermost_open(g.open_seq_)) return std::unexpected(error::wire_invalid_field_format);
     entry_node* ge = resolve_group(g);
     std::size_t before = ge->instances.size();
     try {
@@ -278,8 +277,7 @@ expected_t<void> body_builder::group_end(group_handle handle) noexcept {
     // body_builder: every builder starts `next_open_seq_` at 1, so builder
     // A's handle (open_seq_ == 1) would otherwise collide with builder B's
     // top-of-stack open_seq_ == 1 and close the wrong builder's group.
-    if (handle.owner_ != this || open_stack_.empty() ||
-        open_stack_.back() != handle.open_seq_) {
+    if (handle.owner_ != this || open_stack_.empty() || open_stack_.back() != handle.open_seq_) {
         return std::unexpected(error::wire_invalid_field_format);
     }
     open_stack_.pop_back();
@@ -298,8 +296,7 @@ expected_t<entry_handle> group_handle::add_entry() noexcept {
 }
 
 expected_t<void> entry_handle::set_string(std::uint16_t tag, std::string_view v) noexcept {
-    if (group_.owner_ == nullptr)
-        return std::unexpected(error::wire_invalid_field_format);
+    if (group_.owner_ == nullptr) return std::unexpected(error::wire_invalid_field_format);
     if (!group_.owner_->is_innermost_open(group_.open_seq_))
         return std::unexpected(error::wire_invalid_field_format);
     return body_builder::append_string_field(group_.owner_->resolve_instance(*this)->fields, tag,
@@ -311,16 +308,14 @@ expected_t<void> entry_handle::set_char(std::uint16_t tag, char c) noexcept {
 }
 
 expected_t<void> entry_handle::set_int(std::uint16_t tag, std::int64_t v) noexcept {
-    if (group_.owner_ == nullptr)
-        return std::unexpected(error::wire_invalid_field_format);
+    if (group_.owner_ == nullptr) return std::unexpected(error::wire_invalid_field_format);
     if (!group_.owner_->is_innermost_open(group_.open_seq_))
         return std::unexpected(error::wire_invalid_field_format);
     return body_builder::append_int_field(group_.owner_->resolve_instance(*this)->fields, tag, v);
 }
 
 expected_t<void> entry_handle::set_decimal(std::uint16_t tag, const fixpp::decimal_t& v) noexcept {
-    if (group_.owner_ == nullptr)
-        return std::unexpected(error::wire_invalid_field_format);
+    if (group_.owner_ == nullptr) return std::unexpected(error::wire_invalid_field_format);
     if (!group_.owner_->is_innermost_open(group_.open_seq_))
         return std::unexpected(error::wire_invalid_field_format);
     return body_builder::append_decimal_field(group_.owner_->resolve_instance(*this)->fields, tag,
@@ -329,8 +324,7 @@ expected_t<void> entry_handle::set_decimal(std::uint16_t tag, const fixpp::decim
 
 expected_t<group_handle> entry_handle::group_begin(std::uint16_t no_tag,
                                                    std::uint16_t delimiter_tag) noexcept {
-    if (group_.owner_ == nullptr)
-        return std::unexpected(error::wire_invalid_field_format);
+    if (group_.owner_ == nullptr) return std::unexpected(error::wire_invalid_field_format);
     return group_.owner_->entry_group_begin_impl(*this, no_tag, delimiter_tag);
 }
 

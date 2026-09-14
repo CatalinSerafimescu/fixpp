@@ -9,6 +9,7 @@ refs:
   - tools/check_alloc.py
   - tests/support/pump_until_ready.hpp
   - tests/support/temp_dir.hpp
+  - tests/support/alloc_guard_markers.hpp
   - ci/pump-census.sh
   - ci/pump-get-sweep.sh
   - ci/pump-red-arm.sh
@@ -71,6 +72,14 @@ markers enclose: *"zero allocations"* means *zero in that window*, never *anywhe
 ```bash
 ls tests/alloc_guard/ && sed -n '1,12p' tools/check_alloc.py
 ```
+
+**Why the Windows markers are null function pointers (#417).** On POSIX the markers are weak
+*undefined* symbols, so `if (alloc_guard_start) alloc_guard_start();` really can be null. On Windows
+they used to be inline no-op functions, which made that same check test a function name that is never
+null — harmless until `/WX` turned MSVC's C4551 into an error at every guarded call site. The fix went
+into `tests/support/alloc_guard_markers.hpp` (null function pointers under `_WIN32`), not into the call
+sites; rewriting every site was rejected because the null-checked call is the shape
+`tools/check_alloc_guard_markers.py` exists to keep.
 
 ## ⭐ Bounded pumps (#289): the hazard is the unconditional `get()`, not the fixed window
 
@@ -655,6 +664,30 @@ source or binary digest at all**, so an edit to the comparator, the readback wri
 `build_replay_frame` leaves the committed artifact green while describing a tree that no longer
 exists. That is `L-089-1` in `spec/behaviors-and-limitations.md`, deferred to fixpp#431 — do not
 read a green schema suite as evidence the current tree still passes interop.
+
+## Discarded `[[nodiscard]]` results in tests (#417) — Linux green is not MSVC green
+
+When `FIXPP_WERROR` was wired, MSVC reported far more discarded `[[nodiscard]]` results in `tests/` than
+any Linux build ever had. The cause is the standard library, not the tests: MSVC's STL declares
+`std::expected` (so `fixpp::core::expected_t`) and `std::future` `[[nodiscard]]`, libstdc++ does not,
+and clang also stays silent on a discarded `co_await` result. **A clean clang/libstdc++ build says
+nothing about this class; only a Windows `/WX` build is an instrument for it.**
+
+**The rule the sweep applied, site by site** — reuse it rather than re-deciding:
+
+- The test depends on the call succeeding (an `open`, a `drain`, a setup `store` a later assertion
+  assumes) → assert it. `ASSERT_*` cannot compile in a coroutine, a lambda or a non-void helper; use
+  `EXPECT_*` there, and a bool-returning helper propagates the failure like its sibling checks do.
+- The result is irrelevant or checked another way (a deliberately invalid frame judged by state or
+  emitted frames afterwards, teardown, a future completed by a later `ioc.run()`) → `(void)` **with the
+  reason next to it**. The cast is the standard's own opt-out; it is only as good as that reason.
+- **Never add an assertion inside an `alloc_guard_start()`/`alloc_guard_end()` window** — the window is
+  measuring allocations, and an assertion is not free.
+
+**Rejected:** disabling C4834 on MSVC test targets (hides real discards and fakes no decision), and a
+mechanical `(void)` at every site (adds casts that read as decisions nobody made). The audit left two
+test-strength questions open rather than strengthening tests silently — setup stores nothing asserts,
+and a loop that passes vacuously on an empty capture — tracked in fixpp#436.
 
 ## Related
 

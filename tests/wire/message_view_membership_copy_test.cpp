@@ -50,7 +50,6 @@ namespace {
 using fixpp::dict::Dictionary;
 using fixpp::dict::table_view;
 using fixpp::wire::access_mode;
-using fixpp::wire::MessageView;
 using fixpp::wire::Parser;
 
 // A group-registering dict: message "U" carries group NoThings(100) ->
@@ -119,7 +118,7 @@ constexpr std::string_view kFrameBody =
 
 // ── (a) membership identity: the copy answers membership identically ────────
 TEST(MessageViewMembershipCopy, CopyAnswersMembershipIdenticallyToSource) {
-    std::array<std::byte, 2u * 1024u * 1024u> dict_buf{};
+    std::array<std::byte, 2U * 1024U * 1024U> dict_buf{};
     std::pmr::monotonic_buffer_resource dict_mr{dict_buf.data(), dict_buf.size()};
     auto dict = std::make_unique<Dictionary>(load_group_dict(&dict_mr));
     auto tv = std::make_unique<table_view>(dict->as_table_view());
@@ -152,7 +151,7 @@ TEST(MessageViewMembershipCopy, CopyAnswersMembershipIdenticallyToSource) {
 
 // ── (b) outlives the source Dictionary AND the source table_view ───────────
 TEST(MessageViewMembershipCopy, CopyOutlivesSourceDictionaryAndTableView) {
-    std::array<std::byte, 2u * 1024u * 1024u> dict_buf{};
+    std::array<std::byte, 2U * 1024U * 1024U> dict_buf{};
     std::pmr::monotonic_buffer_resource dict_mr{dict_buf.data(), dict_buf.size()};
     auto dict = std::make_unique<Dictionary>(load_group_dict(&dict_mr));
     auto tv = std::make_unique<table_view>(dict->as_table_view());
@@ -183,7 +182,7 @@ TEST(MessageViewMembershipCopy, CopyOutlivesSourceDictionaryAndTableView) {
     EXPECT_FALSE(owned.field_valid_for("U", 9999));
     EXPECT_EQ(owned.group_first_field(100), std::uint16_t{200});
     auto members = owned.group_member_tags(100);
-    EXPECT_EQ(members.size(), 2u);
+    EXPECT_EQ(members.size(), 2U);
 }
 
 // ── (c) dict-free source -> empty copy (documented degenerate case) ────────

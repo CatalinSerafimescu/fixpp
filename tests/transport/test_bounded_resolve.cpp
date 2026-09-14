@@ -98,7 +98,7 @@ TEST(BoundedResolve, DeadlineRetiresTheCallerWhileTheOperationIsStillOutstanding
 
     // The operation is STILL outstanding and the state is still alive for it:
     // that is what abandonment means, and it is charged to the backlog.
-    ASSERT_EQ(kept.size(), 1u);
+    ASSERT_EQ(kept.size(), 1U);
     EXPECT_EQ(abandoned_resolve_backlog().load(), 1);
     kept.clear();  // the "op completed / was destroyed" moment
     EXPECT_EQ(abandoned_resolve_backlog().load(), 0) << "the destructor must return the budget";
@@ -141,7 +141,7 @@ TEST(BoundedResolve, CancellationRetiresTheCallerAndReportsCancelled) {
     EXPECT_EQ(out->error(), error::transport_connect_cancelled)
         << "a cancellation must not be reported as a timeout — the reconnect FSM treats both as "
            "attempt failures, but the C API maps them to DIFFERENT categories";
-    ASSERT_EQ(kept.size(), 1u);
+    ASSERT_EQ(kept.size(), 1U);
     kept.clear();
     EXPECT_EQ(abandoned_resolve_backlog().load(), 0);
 }
@@ -159,8 +159,12 @@ TEST(BoundedResolve, CompletionOutcomesMapToTheDocumentedErrors) {
         const char* what;
     };
     const Arm arms[] = {
-        {asio::error::host_not_found, error::transport_resolve_failed, "resolver said no"},
-        {asio::error::operation_aborted, error::transport_connect_cancelled, "op aborted"},
+        {.ec = asio::error::host_not_found,
+         .expected = error::transport_resolve_failed,
+         .what = "resolver said no"},
+        {.ec = asio::error::operation_aborted,
+         .expected = error::transport_connect_cancelled,
+         .what = "op aborted"},
     };
 
     for (const auto& arm : arms) {

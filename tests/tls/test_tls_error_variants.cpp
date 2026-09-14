@@ -46,8 +46,8 @@ public:
 class stub_clock final : public fixpp::core::Clock {
 public:
     explicit stub_clock(std::chrono::system_clock::time_point t) : now_{t} {}
-    fixpp::core::utc_time_point now() const noexcept override { return now_; }
-    fixpp::core::steady_time_point steady_now() const noexcept override {
+    [[nodiscard]] fixpp::core::utc_time_point now() const noexcept override { return now_; }
+    [[nodiscard]] fixpp::core::steady_time_point steady_now() const noexcept override {
         return std::chrono::steady_clock::now();
     }
     asio::awaitable<void> sleep_until(fixpp::core::steady_time_point) override { co_return; }
@@ -87,7 +87,7 @@ Certificate make_valid_ecdsa_cert(std::chrono::system_clock::time_point now) {
 }
 
 // Const storage buffer for DER (test lifetime).
-static std::array<std::byte, 512> g_der_buf{};
+std::array<std::byte, 512> g_der_buf{};
 
 }  // namespace
 
@@ -160,7 +160,7 @@ TEST(TlsErrorVariants, CertDerTooLarge) {
     auto clk = std::make_shared<stub_clock>(now);
     auto cfg = make_mtls_ca_cfg(clk);
     // Default cap is 16 KiB; present 16 KiB + 1.
-    std::vector<std::byte> big_der(16 * 1024 + 1, std::byte{0});
+    std::vector<std::byte> big_der((16 * 1024) + 1, std::byte{0});
     Certificate cert{};
     cert.raw_der_ = std::span<const std::byte>{big_der};
     cert.alg_ = signature_algorithm::ecdsa;

@@ -470,7 +470,7 @@ void map_scalars(const toml::table& merged, fixpp::session::SessionConfig& out,
             });
         }
         if (ver.has_value()) {
-            out.default_appl_ver_id = *ver;
+            out.default_appl_ver_id = ver;
         }
     }
 }
@@ -665,111 +665,117 @@ bool map_syslog_facility(std::string_view name, int& out_facility, const std::st
     static const Entry kFacilities[] = {
 #ifdef FIXPP_HAS_SYSLOG
 #ifdef LOG_KERN
-        {"kern", LOG_KERN},
+        {.name = "kern", .value = LOG_KERN},
 #else
-        {"kern", -1},
+        {.name = "kern", .value = -1},
 #endif
 #ifdef LOG_USER
-        {"user", LOG_USER},
+        {.name = "user", .value = LOG_USER},
 #else
-        {"user", -1},
+        {.name = "user", .value = -1},
 #endif
 #ifdef LOG_MAIL
-        {"mail", LOG_MAIL},
+        {.name = "mail", .value = LOG_MAIL},
 #else
-        {"mail", -1},
+        {.name = "mail", .value = -1},
 #endif
 #ifdef LOG_DAEMON
-        {"daemon", LOG_DAEMON},
+        {.name = "daemon", .value = LOG_DAEMON},
 #else
-        {"daemon", -1},
+        {.name = "daemon", .value = -1},
 #endif
 #ifdef LOG_AUTH
-        {"auth", LOG_AUTH},
+        {.name = "auth", .value = LOG_AUTH},
 #else
-        {"auth", -1},
+        {.name = "auth", .value = -1},
 #endif
 #ifdef LOG_SYSLOG
-        {"syslog", LOG_SYSLOG},
+        {.name = "syslog", .value = LOG_SYSLOG},
 #else
-        {"syslog", -1},
+        {.name = "syslog", .value = -1},
 #endif
 #ifdef LOG_LPR
-        {"lpr", LOG_LPR},
+        {.name = "lpr", .value = LOG_LPR},
 #else
-        {"lpr", -1},
+        {.name = "lpr", .value = -1},
 #endif
 #ifdef LOG_NEWS
-        {"news", LOG_NEWS},
+        {.name = "news", .value = LOG_NEWS},
 #else
-        {"news", -1},
+        {.name = "news", .value = -1},
 #endif
 #ifdef LOG_UUCP
-        {"uucp", LOG_UUCP},
+        {.name = "uucp", .value = LOG_UUCP},
 #else
-        {"uucp", -1},
+        {.name = "uucp", .value = -1},
 #endif
 #ifdef LOG_CRON
-        {"cron", LOG_CRON},
+        {.name = "cron", .value = LOG_CRON},
 #else
-        {"cron", -1},
+        {.name = "cron", .value = -1},
 #endif
 #ifdef LOG_AUTHPRIV
-        {"authpriv", LOG_AUTHPRIV},
+        {.name = "authpriv", .value = LOG_AUTHPRIV},
 #else
-        {"authpriv", -1},
+        {.name = "authpriv", .value = -1},
 #endif
 #ifdef LOG_FTP
-        {"ftp", LOG_FTP},
+        {.name = "ftp", .value = LOG_FTP},
 #else
-        {"ftp", -1},
+        {.name = "ftp", .value = -1},
 #endif
 #ifdef LOG_LOCAL0
-        {"local0", LOG_LOCAL0},
+        {.name = "local0", .value = LOG_LOCAL0},
 #else
-        {"local0", -1},
+        {.name = "local0", .value = -1},
 #endif
 #ifdef LOG_LOCAL1
-        {"local1", LOG_LOCAL1},
+        {.name = "local1", .value = LOG_LOCAL1},
 #else
-        {"local1", -1},
+        {.name = "local1", .value = -1},
 #endif
 #ifdef LOG_LOCAL2
-        {"local2", LOG_LOCAL2},
+        {.name = "local2", .value = LOG_LOCAL2},
 #else
-        {"local2", -1},
+        {.name = "local2", .value = -1},
 #endif
 #ifdef LOG_LOCAL3
-        {"local3", LOG_LOCAL3},
+        {.name = "local3", .value = LOG_LOCAL3},
 #else
-        {"local3", -1},
+        {.name = "local3", .value = -1},
 #endif
 #ifdef LOG_LOCAL4
-        {"local4", LOG_LOCAL4},
+        {.name = "local4", .value = LOG_LOCAL4},
 #else
-        {"local4", -1},
+        {.name = "local4", .value = -1},
 #endif
 #ifdef LOG_LOCAL5
-        {"local5", LOG_LOCAL5},
+        {.name = "local5", .value = LOG_LOCAL5},
 #else
-        {"local5", -1},
+        {.name = "local5", .value = -1},
 #endif
 #ifdef LOG_LOCAL6
-        {"local6", LOG_LOCAL6},
+        {.name = "local6", .value = LOG_LOCAL6},
 #else
-        {"local6", -1},
+        {.name = "local6", .value = -1},
 #endif
 #ifdef LOG_LOCAL7
-        {"local7", LOG_LOCAL7},
+        {.name = "local7", .value = LOG_LOCAL7},
 #else
-        {"local7", -1},
+        {.name = "local7", .value = -1},
 #endif
 #else
         // Non-POSIX build: closed set still defined, every entry is "unavailable"
-        {"kern", -1},     {"user", -1},   {"mail", -1},   {"daemon", -1}, {"auth", -1},
-        {"syslog", -1},   {"lpr", -1},    {"news", -1},   {"uucp", -1},   {"cron", -1},
-        {"authpriv", -1}, {"ftp", -1},    {"local0", -1}, {"local1", -1}, {"local2", -1},
-        {"local3", -1},   {"local4", -1}, {"local5", -1}, {"local6", -1}, {"local7", -1},
+        {.name = "kern", .value = -1},     {.name = "user", .value = -1},
+        {.name = "mail", .value = -1},     {.name = "daemon", .value = -1},
+        {.name = "auth", .value = -1},     {.name = "syslog", .value = -1},
+        {.name = "lpr", .value = -1},      {.name = "news", .value = -1},
+        {.name = "uucp", .value = -1},     {.name = "cron", .value = -1},
+        {.name = "authpriv", .value = -1}, {.name = "ftp", .value = -1},
+        {.name = "local0", .value = -1},   {.name = "local1", .value = -1},
+        {.name = "local2", .value = -1},   {.name = "local3", .value = -1},
+        {.name = "local4", .value = -1},   {.name = "local5", .value = -1},
+        {.name = "local6", .value = -1},   {.name = "local7", .value = -1},
 #endif
     };
     static constexpr std::string_view kLegalSet =

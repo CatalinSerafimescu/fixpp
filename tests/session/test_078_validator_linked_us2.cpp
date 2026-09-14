@@ -84,6 +84,5 @@ TEST(ValidatorLinkedUS2, NewOrderSingle_MissingClOrdID_ReportsRequiredFieldMissi
     // broken/always-failing validator.
     auto valid_args = make_valid_args(&arena);
     auto r_ok = fixpp::v44::validate_NewOrderSingle(valid_args);
-    EXPECT_TRUE(r_ok.has_value())
-        << "with ClOrdID present the identical shape must validate clean";
+    EXPECT_TRUE(r_ok.has_value()) << "with ClOrdID present the identical shape must validate clean";
 }

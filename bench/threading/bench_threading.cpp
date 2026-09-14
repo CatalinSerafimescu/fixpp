@@ -41,6 +41,7 @@
 
 #include <benchmark/benchmark.h>
 
+#include <array>
 #include <asio/bind_executor.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
@@ -50,14 +51,9 @@
 #include <asio/strand.hpp>
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
-
-#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
-#include <memory_resource>
-#include <thread>
-
 #include <fixpp/core/cancellable_dispatch.hpp>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/session_executor.hpp>
@@ -65,6 +61,8 @@
 #include <fixpp/core/trace_context.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
+#include <memory_resource>
+#include <thread>
 
 // test-only minimal dictionary for Session construction
 #include "support/minimal_dictionary.hpp"
@@ -74,12 +72,12 @@ namespace {
 using bench_clock = std::chrono::steady_clock;
 
 // Cycles for coroutine benches (in-strand path; fast, low per-cycle cost).
-constexpr int kCycles          = 50'000;
+constexpr int kCycles = 50'000;
 // Cycles for cross-thread bench (OS scheduling overhead makes fewer cycles OK).
 constexpr int kCrossThreadCycles = 200;
 
-using fixpp::core::EngineConfig;
 using fixpp::core::cancellable_dispatch;
+using fixpp::core::EngineConfig;
 using fixpp::core::make_session_executor;
 using fixpp::core::system_clock_source;
 using fixpp::session::Session;
@@ -113,47 +111,43 @@ static std::array<std::byte, 512 * 1024> g_session_buf;
 // ─────────────────────────────────────────────────────────────────────────────
 void BM_Threading_InStrand_Dispatch(benchmark::State& state) {
     g_session_buf.fill(std::byte{0});
-    std::pmr::monotonic_buffer_resource session_mr{
-        g_session_buf.data(), g_session_buf.size(),
-        std::pmr::get_default_resource()};
+    std::pmr::monotonic_buffer_resource session_mr{g_session_buf.data(), g_session_buf.size(),
+                                                   std::pmr::get_default_resource()};
 
     asio::io_context ioc;
     EngineConfig engine;
-    engine.executor                = ioc.get_executor();
+    engine.executor = ioc.get_executor();
     engine.default_session_resource = &session_mr;
 
     SessionConfig cfg;
     cfg.session_arena = &session_mr;
-    cfg.mode          = threading_mode::per_session_strand;
-    cfg.dictionary    = fixpp::test_support::make_minimal_dictionary();
+    cfg.mode = threading_mode::per_session_strand;
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
 
     Session sess{engine, cfg};
-    auto se = *make_session_executor(
-        ioc.get_executor(), threading_mode::per_session_strand,
-        /*attested=*/false, &sess);
+    auto se = *make_session_executor(ioc.get_executor(), threading_mode::per_session_strand,
+                                     /*attested=*/false, &sess);
 
     for (auto _ : state) {
         double accum = 0.0;
         asio::co_spawn(
             ioc,
-            asio::bind_executor(
-                se,
-                [&]() -> asio::awaitable<void> {
-                    asio::cancellation_signal sig;
-                    for (int i = 0; i < kCycles; ++i) {
-                        auto t0 = bench_clock::now();
-                        auto rc = co_await cancellable_dispatch(
-                            se, sig.slot(), [] { benchmark::DoNotOptimize(0); });
-                        auto t1 = bench_clock::now();
-                        (void)rc;
-                        accum += std::chrono::duration<double>(t1 - t0).count();
-                        if ((i & 1023) == 0)
-                            co_await asio::post(
-                                co_await asio::this_coro::executor,
-                                asio::use_awaitable);
-                    }
-                    co_return;
-                }),
+            asio::bind_executor(se,
+                                [&]() -> asio::awaitable<void> {
+                                    asio::cancellation_signal sig;
+                                    for (int i = 0; i < kCycles; ++i) {
+                                        auto t0 = bench_clock::now();
+                                        auto rc = co_await cancellable_dispatch(
+                                            se, sig.slot(), [] { benchmark::DoNotOptimize(0); });
+                                        auto t1 = bench_clock::now();
+                                        (void)rc;
+                                        accum += std::chrono::duration<double>(t1 - t0).count();
+                                        if ((i & 1023) == 0)
+                                            co_await asio::post(co_await asio::this_coro::executor,
+                                                                asio::use_awaitable);
+                                    }
+                                    co_return;
+                                }),
             asio::detached);
 
         ioc.run();
@@ -187,7 +181,9 @@ void BM_Threading_CrossThread_Dispatch(benchmark::State& state) {
     for (int i = 0; i < 50; ++i) {
         sync.store(0, std::memory_order_relaxed);
         asio::post(strand, [&sync] { sync.store(1, std::memory_order_release); });
-        while (sync.load(std::memory_order_acquire) == 0) { benchmark::DoNotOptimize(sync); }
+        while (sync.load(std::memory_order_acquire) == 0) {
+            benchmark::DoNotOptimize(sync);
+        }
     }
 
     for (auto _ : state) {
@@ -195,9 +191,7 @@ void BM_Threading_CrossThread_Dispatch(benchmark::State& state) {
         for (int i = 0; i < kCrossThreadCycles; ++i) {
             sync.store(0, std::memory_order_relaxed);
             auto t0 = bench_clock::now();
-            asio::post(strand, [&sync] {
-                sync.store(1, std::memory_order_release);
-            });
+            asio::post(strand, [&sync] { sync.store(1, std::memory_order_release); });
             while (sync.load(std::memory_order_acquire) == 0) {
                 benchmark::DoNotOptimize(sync);
             }
@@ -221,52 +215,47 @@ BENCHMARK(BM_Threading_CrossThread_Dispatch)->UseManualTime()->Iterations(3);
 // ─────────────────────────────────────────────────────────────────────────────
 void BM_Threading_CrossStrand_Reify_20tag(benchmark::State& state) {
     g_session_buf.fill(std::byte{0});
-    std::pmr::monotonic_buffer_resource session_mr{
-        g_session_buf.data(), g_session_buf.size(),
-        std::pmr::get_default_resource()};
+    std::pmr::monotonic_buffer_resource session_mr{g_session_buf.data(), g_session_buf.size(),
+                                                   std::pmr::get_default_resource()};
 
     asio::io_context ioc;
     EngineConfig engine;
-    engine.executor                = ioc.get_executor();
+    engine.executor = ioc.get_executor();
     engine.default_session_resource = &session_mr;
 
     SessionConfig cfg;
     cfg.session_arena = &session_mr;
-    cfg.mode          = threading_mode::per_session_strand;
-    cfg.dictionary    = fixpp::test_support::make_minimal_dictionary();
+    cfg.mode = threading_mode::per_session_strand;
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
 
     Session sess{engine, cfg};
-    auto se = *make_session_executor(
-        ioc.get_executor(), threading_mode::per_session_strand,
-        /*attested=*/false, &sess);
+    auto se = *make_session_executor(ioc.get_executor(), threading_mode::per_session_strand,
+                                     /*attested=*/false, &sess);
     auto foreign_strand = asio::make_strand(ioc.get_executor());
 
     for (auto _ : state) {
         double accum = 0.0;
         asio::co_spawn(
             ioc,
-            asio::bind_executor(
-                se,
-                [&]() -> asio::awaitable<void> {
-                    for (int i = 0; i < kCycles; ++i) {
-                        std::array<int, 20> payload;
-                        payload.fill(i);
-                        benchmark::DoNotOptimize(payload.data());
-                        auto t0 = bench_clock::now();
-                        co_await asio::post(foreign_strand, asio::use_awaitable);
-                        auto t1 = bench_clock::now();
-                        accum += std::chrono::duration<double>(t1 - t0).count();
-                        // yield back to the session strand
-                        co_await asio::post(
-                            co_await asio::this_coro::executor,
-                            asio::use_awaitable);
-                        if ((i & 1023) == 0)
-                            co_await asio::post(
-                                co_await asio::this_coro::executor,
-                                asio::use_awaitable);
-                    }
-                    co_return;
-                }),
+            asio::bind_executor(se,
+                                [&]() -> asio::awaitable<void> {
+                                    for (int i = 0; i < kCycles; ++i) {
+                                        std::array<int, 20> payload;
+                                        payload.fill(i);
+                                        benchmark::DoNotOptimize(payload.data());
+                                        auto t0 = bench_clock::now();
+                                        co_await asio::post(foreign_strand, asio::use_awaitable);
+                                        auto t1 = bench_clock::now();
+                                        accum += std::chrono::duration<double>(t1 - t0).count();
+                                        // yield back to the session strand
+                                        co_await asio::post(co_await asio::this_coro::executor,
+                                                            asio::use_awaitable);
+                                        if ((i & 1023) == 0)
+                                            co_await asio::post(co_await asio::this_coro::executor,
+                                                                asio::use_awaitable);
+                                    }
+                                    co_return;
+                                }),
             asio::detached);
 
         ioc.run();
@@ -283,51 +272,46 @@ BENCHMARK(BM_Threading_CrossStrand_Reify_20tag)->UseManualTime()->Iterations(3);
 // ─────────────────────────────────────────────────────────────────────────────
 void BM_Threading_CrossStrand_Reify_200tag(benchmark::State& state) {
     g_session_buf.fill(std::byte{0});
-    std::pmr::monotonic_buffer_resource session_mr{
-        g_session_buf.data(), g_session_buf.size(),
-        std::pmr::get_default_resource()};
+    std::pmr::monotonic_buffer_resource session_mr{g_session_buf.data(), g_session_buf.size(),
+                                                   std::pmr::get_default_resource()};
 
     asio::io_context ioc;
     EngineConfig engine;
-    engine.executor                = ioc.get_executor();
+    engine.executor = ioc.get_executor();
     engine.default_session_resource = &session_mr;
 
     SessionConfig cfg;
     cfg.session_arena = &session_mr;
-    cfg.mode          = threading_mode::per_session_strand;
-    cfg.dictionary    = fixpp::test_support::make_minimal_dictionary();
+    cfg.mode = threading_mode::per_session_strand;
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
 
     Session sess{engine, cfg};
-    auto se = *make_session_executor(
-        ioc.get_executor(), threading_mode::per_session_strand,
-        /*attested=*/false, &sess);
+    auto se = *make_session_executor(ioc.get_executor(), threading_mode::per_session_strand,
+                                     /*attested=*/false, &sess);
     auto foreign_strand = asio::make_strand(ioc.get_executor());
 
     for (auto _ : state) {
         double accum = 0.0;
         asio::co_spawn(
             ioc,
-            asio::bind_executor(
-                se,
-                [&]() -> asio::awaitable<void> {
-                    for (int i = 0; i < kCycles; ++i) {
-                        std::array<int, 200> payload;
-                        payload.fill(i);
-                        benchmark::DoNotOptimize(payload.data());
-                        auto t0 = bench_clock::now();
-                        co_await asio::post(foreign_strand, asio::use_awaitable);
-                        auto t1 = bench_clock::now();
-                        accum += std::chrono::duration<double>(t1 - t0).count();
-                        co_await asio::post(
-                            co_await asio::this_coro::executor,
-                            asio::use_awaitable);
-                        if ((i & 1023) == 0)
-                            co_await asio::post(
-                                co_await asio::this_coro::executor,
-                                asio::use_awaitable);
-                    }
-                    co_return;
-                }),
+            asio::bind_executor(se,
+                                [&]() -> asio::awaitable<void> {
+                                    for (int i = 0; i < kCycles; ++i) {
+                                        std::array<int, 200> payload;
+                                        payload.fill(i);
+                                        benchmark::DoNotOptimize(payload.data());
+                                        auto t0 = bench_clock::now();
+                                        co_await asio::post(foreign_strand, asio::use_awaitable);
+                                        auto t1 = bench_clock::now();
+                                        accum += std::chrono::duration<double>(t1 - t0).count();
+                                        co_await asio::post(co_await asio::this_coro::executor,
+                                                            asio::use_awaitable);
+                                        if ((i & 1023) == 0)
+                                            co_await asio::post(co_await asio::this_coro::executor,
+                                                                asio::use_awaitable);
+                                    }
+                                    co_return;
+                                }),
             asio::detached);
 
         ioc.run();
@@ -352,8 +336,7 @@ void BM_Threading_ClockNow(benchmark::State& state) {
             benchmark::DoNotOptimize(r);
         }
         auto t1 = bench_clock::now();
-        state.SetIterationTime(
-            std::chrono::duration<double>(t1 - t0).count() / kCycles);
+        state.SetIterationTime(std::chrono::duration<double>(t1 - t0).count() / kCycles);
     }
 }
 BENCHMARK(BM_Threading_ClockNow)->UseManualTime()->Iterations(3);
@@ -373,8 +356,7 @@ void BM_Threading_SteadyNow(benchmark::State& state) {
             benchmark::DoNotOptimize(r);
         }
         auto t1 = bench_clock::now();
-        state.SetIterationTime(
-            std::chrono::duration<double>(t1 - t0).count() / kCycles);
+        state.SetIterationTime(std::chrono::duration<double>(t1 - t0).count() / kCycles);
     }
 }
 BENCHMARK(BM_Threading_SteadyNow)->UseManualTime()->Iterations(3);
@@ -387,45 +369,41 @@ BENCHMARK(BM_Threading_SteadyNow)->UseManualTime()->Iterations(3);
 // ─────────────────────────────────────────────────────────────────────────────
 void BM_Threading_TraceContextInDomain(benchmark::State& state) {
     g_session_buf.fill(std::byte{0});
-    std::pmr::monotonic_buffer_resource session_mr{
-        g_session_buf.data(), g_session_buf.size(),
-        std::pmr::get_default_resource()};
+    std::pmr::monotonic_buffer_resource session_mr{g_session_buf.data(), g_session_buf.size(),
+                                                   std::pmr::get_default_resource()};
 
     asio::io_context ioc;
     EngineConfig engine;
-    engine.executor                = ioc.get_executor();
+    engine.executor = ioc.get_executor();
     engine.default_session_resource = &session_mr;
 
     SessionConfig cfg;
     cfg.session_arena = &session_mr;
-    cfg.mode          = threading_mode::per_session_strand;
-    cfg.dictionary    = fixpp::test_support::make_minimal_dictionary();
+    cfg.mode = threading_mode::per_session_strand;
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
 
     Session sess{engine, cfg};
-    auto se = *make_session_executor(
-        ioc.get_executor(), threading_mode::per_session_strand,
-        /*attested=*/false, &sess);
+    auto se = *make_session_executor(ioc.get_executor(), threading_mode::per_session_strand,
+                                     /*attested=*/false, &sess);
 
     for (auto _ : state) {
         double accum = 0.0;
         asio::co_spawn(
             ioc,
-            asio::bind_executor(
-                se,
-                [&]() -> asio::awaitable<void> {
-                    for (int i = 0; i < kCycles; ++i) {
-                        auto t0 = bench_clock::now();
-                        auto tc = co_await fixpp::current_trace_context();
-                        auto t1 = bench_clock::now();
-                        benchmark::DoNotOptimize(tc);
-                        accum += std::chrono::duration<double>(t1 - t0).count();
-                        if ((i & 1023) == 0)
-                            co_await asio::post(
-                                co_await asio::this_coro::executor,
-                                asio::use_awaitable);
-                    }
-                    co_return;
-                }),
+            asio::bind_executor(se,
+                                [&]() -> asio::awaitable<void> {
+                                    for (int i = 0; i < kCycles; ++i) {
+                                        auto t0 = bench_clock::now();
+                                        auto tc = co_await fixpp::current_trace_context();
+                                        auto t1 = bench_clock::now();
+                                        benchmark::DoNotOptimize(tc);
+                                        accum += std::chrono::duration<double>(t1 - t0).count();
+                                        if ((i & 1023) == 0)
+                                            co_await asio::post(co_await asio::this_coro::executor,
+                                                                asio::use_awaitable);
+                                    }
+                                    co_return;
+                                }),
             asio::detached);
 
         ioc.run();
@@ -456,9 +434,8 @@ void BM_Threading_EngineFallback(benchmark::State& state) {
                     benchmark::DoNotOptimize(tc);
                     accum += std::chrono::duration<double>(t1 - t0).count();
                     if ((i & 1023) == 0)
-                        co_await asio::post(
-                            co_await asio::this_coro::executor,
-                            asio::use_awaitable);
+                        co_await asio::post(co_await asio::this_coro::executor,
+                                            asio::use_awaitable);
                 }
                 co_return;
             },

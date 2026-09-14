@@ -18,23 +18,23 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <fixpp/wire/framer.hpp>
 #include <memory_resource>
 #include <span>
 #include <string>
 #include <vector>
-
-#include <fixpp/wire/framer.hpp>
 
 namespace {
 
 // Build a single well-formed FIX 4.4 frame (body ~80 bytes) with correct
 // BodyLength and byte-sum-mod-256 CheckSum ([FIX50SP2 §3]).
 [[nodiscard]] std::vector<std::byte> make_frame(std::string_view body) {
-    std::string pre = std::string("8=FIX.4.4\x01") + "9="
-                      + std::to_string(body.size()) + "\x01";
+    std::string pre = std::string("8=FIX.4.4\x01") + "9=" + std::to_string(body.size()) + "\x01";
     pre.append(body);
     unsigned sum = 0;
-    for (unsigned char c : pre) { sum += c; }
+    for (unsigned char c : pre) {
+        sum += c;
+    }
     sum %= 256U;
     char chk[8]{};
     std::snprintf(chk, sizeof(chk), "10=%03u\x01", sum);
@@ -46,10 +46,10 @@ namespace {
 
 // A single-frame body of ~72 bytes (total frame ~80 byte body per §6.6).
 // 35=D (NewOrderSingle) header fields enough to fill ~80 body bytes.
-const std::string kBody80 =
-    std::string("35=D\x01") + "34=1\x01" + "49=SENDER01\x01" + "56=TARGET01\x01"
-    + "52=20260516-09:30:00.000\x01" + "11=ORD12345678\x01" + "55=AAPL\x01"
-    + "54=1\x01" + "38=100\x01" + "40=2\x01" + "44=150.25\x01";
+const std::string kBody80 = std::string("35=D\x01") + "34=1\x01" + "49=SENDER01\x01" +
+                            "56=TARGET01\x01" + "52=20260516-09:30:00.000\x01" +
+                            "11=ORD12345678\x01" + "55=AAPL\x01" + "54=1\x01" + "38=100\x01" +
+                            "40=2\x01" + "44=150.25\x01";
 
 // Pre-built frame bytes and the frame buffer for the Framer output.
 const std::vector<std::byte> kFrameBytes = make_frame(kBody80);
@@ -65,15 +65,14 @@ const std::vector<std::byte> kFrameBytes = make_frame(kBody80);
 // in the debug preset (linux-clang-debug) where no ceiling enforcement runs;
 // the ±5% regression gate runs in CI on linux-clang-release.
 static void BM_Framer_Feed_NoCarry(benchmark::State& state) {
-    using fixpp::wire::Framer;
     using fixpp::wire::frame_view;
+    using fixpp::wire::Framer;
     using fixpp::wire::pmr_carry_buffer;
 
     // Carry arena (session lifetime — sized to frame + constant).
     std::array<std::byte, 512 * 1024> carry_arena_buf{};
-    std::pmr::monotonic_buffer_resource carry_arena{
-        carry_arena_buf.data(), carry_arena_buf.size(),
-        std::pmr::null_memory_resource()};
+    std::pmr::monotonic_buffer_resource carry_arena{carry_arena_buf.data(), carry_arena_buf.size(),
+                                                    std::pmr::null_memory_resource()};
     pmr_carry_buffer carry{fixpp::wire::default_max_frame_bytes, &carry_arena};
 
     // Output slots for emitted frame_views.
@@ -83,10 +82,8 @@ static void BM_Framer_Feed_NoCarry(benchmark::State& state) {
     for (auto _ : state) {
         // Reset carry so each iteration is "no carry" (one complete frame).
         carry.clear();
-        auto r = framer.feed(
-            std::span<const std::byte>{kFrameBytes.data(), kFrameBytes.size()},
-            carry,
-            std::span<frame_view>{out_views.data(), out_views.size()});
+        auto r = framer.feed(std::span<const std::byte>{kFrameBytes.data(), kFrameBytes.size()},
+                             carry, std::span<frame_view>{out_views.data(), out_views.size()});
         benchmark::DoNotOptimize(r);
     }
     state.SetItemsProcessed(state.iterations());

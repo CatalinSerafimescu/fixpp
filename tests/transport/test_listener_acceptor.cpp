@@ -53,16 +53,17 @@
 // backlog via NETLINK_SOCK_DIAG — Linux-only, guarded at compile time.
 #if defined(__linux__)
 #include <arpa/inet.h>
-#include <cerrno>
-#include <cstring>
-#include <fstream>
-#include <limits>
 #include <linux/inet_diag.h>
 #include <linux/netlink.h>
 #include <linux/sock_diag.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <unistd.h>
+
+#include <cerrno>
+#include <cstring>
+#include <fstream>
+#include <limits>
 #endif
 
 namespace {
@@ -191,7 +192,7 @@ ConnectResult sync_tcp_connect(asio::io_context& ioc, std::string const& host, s
     }
     ioc.restart();
 
-    return ConnectResult{std::move(sock), ec};
+    return ConnectResult{.socket = std::move(sock), .ec = ec};
 }
 
 // Has this connection been refused or reset by the peer? FR-025 action (a)
@@ -330,7 +331,7 @@ struct connect_probe_result {
 // the counts below are computed first, and the close+drain that follows cannot
 // change them.
 connect_probe_result count_completed_connects(asio::io_context& ioc, std::uint16_t port, int probes,
-                                               std::chrono::milliseconds per_connect) {
+                                              std::chrono::milliseconds per_connect) {
     // ⚠️ reserve() is LOAD-BEARING here, not an optimisation. Every socket below
     // has an outstanding async_connect whose handler holds that socket's address,
     // and asio leaves the behaviour undefined if a socket is moved while an async
@@ -348,7 +349,8 @@ connect_probe_result count_completed_connects(asio::io_context& ioc, std::uint16
         sockets.back().async_connect(ep, [&outcome, i](asio::error_code ec) {
             if (!ec) {
                 outcome[static_cast<std::size_t>(i)] = connect_outcome::completed;
-            } else if (ec == asio::error::connection_refused || ec == asio::error::connection_reset) {
+            } else if (ec == asio::error::connection_refused ||
+                       ec == asio::error::connection_reset) {
                 outcome[static_cast<std::size_t>(i)] = connect_outcome::refused_or_reset;
             } else if (ec != asio::error::operation_aborted) {
                 outcome[static_cast<std::size_t>(i)] = connect_outcome::other_error;
@@ -364,9 +366,15 @@ connect_probe_result count_completed_connects(asio::io_context& ioc, std::uint16
     connect_probe_result result;
     for (auto o : outcome) {
         switch (o) {
-            case connect_outcome::completed: ++result.completed; break;
-            case connect_outcome::refused_or_reset: ++result.refused_or_reset; break;
-            case connect_outcome::other_error: ++result.other_error; break;
+            case connect_outcome::completed:
+                ++result.completed;
+                break;
+            case connect_outcome::refused_or_reset:
+                ++result.refused_or_reset;
+                break;
+            case connect_outcome::other_error:
+                ++result.other_error;
+                break;
             case connect_outcome::undecided_in_window:
                 ++result.undecided_in_window;
                 break;
@@ -397,7 +405,7 @@ TEST(ListenerAcceptor, BindsAtOsPickedPort) {
 
     const auto bound = listener.bound_endpoint();
     EXPECT_EQ(bound.host, "127.0.0.1");
-    EXPECT_GT(bound.port, 0u) << "port=0 should resolve to an OS-picked port";
+    EXPECT_GT(bound.port, 0U) << "port=0 should resolve to an OS-picked port";
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -420,8 +428,8 @@ TEST(ListenerAcceptor, CancelIsIdempotent) {
 //
 // Spawns async_accept; before any client connects, calls listener.cancel().
 // The acceptor's close() surfaces operation_aborted; the listener maps to
-// transport_accept_cancelled per [2h §6.6] `transport_accept_cancelled` row. FR-025 Option-A action (2).
-// ════════════════════════════════════════════════════════════════════════════
+// transport_accept_cancelled per [2h §6.6] `transport_accept_cancelled` row. FR-025 Option-A action
+// (2). ════════════════════════════════════════════════════════════════════════════
 TEST(ListenerAcceptor, CancelCompletesInflightAcceptWithCancelled) {
     asio::io_context ioc;
     asio_listener listener{ioc.get_executor(), make_listener_cfg()};
@@ -590,13 +598,13 @@ TEST(ListenerAcceptor, BacklogConfigAcceptedAtConstruction) {
     asio::io_context ioc;
     auto cfg = make_listener_cfg(0, 4);  // small backlog
     asio_listener small_listener{ioc.get_executor(), cfg};
-    EXPECT_GT(small_listener.bound_endpoint().port, 0u);
-    EXPECT_EQ(small_listener.bound_endpoint().backlog, 4u);
+    EXPECT_GT(small_listener.bound_endpoint().port, 0U);
+    EXPECT_EQ(small_listener.bound_endpoint().backlog, 4U);
 
     auto cfg2 = make_listener_cfg(0, 128);
     asio_listener large_listener{ioc.get_executor(), cfg2};
-    EXPECT_GT(large_listener.bound_endpoint().port, 0u);
-    EXPECT_EQ(large_listener.bound_endpoint().backlog, 128u);
+    EXPECT_GT(large_listener.bound_endpoint().port, 0U);
+    EXPECT_EQ(large_listener.bound_endpoint().backlog, 128U);
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -913,7 +921,7 @@ TEST(ListenerAcceptor, AlreadyResumedTransportUnaffectedByCancel) {
 // ════════════════════════════════════════════════════════════════════════════
 TEST(ListenerAcceptor, ConnectionRefusedOrResetRejectsSyntheticTimeout) {
     asio::io_context ioc;
-    ConnectResult cr{asio::ip::tcp::socket{ioc}, asio::error::timed_out};
+    ConnectResult cr{.socket = asio::ip::tcp::socket{ioc}, .ec = asio::error::timed_out};
     EXPECT_FALSE(connection_refused_or_reset(ioc, cr));
 }
 
@@ -987,9 +995,10 @@ TEST(ListenerAcceptor, AcceptUsesCachedServerSslContextAcrossConnections) {
     for (int i = 0; i != 3; ++i) {
         expected_t<std::unique_ptr<fixpp::transport::Transport>> accepted =
             std::unexpected{error::transport_accept_cancelled};
-        expected_t<fixpp::transport::handshake_result>
-            server_hs = std::unexpected{error::transport_handshake_cancelled},
-            client_hs = std::unexpected{error::transport_handshake_cancelled};
+        expected_t<fixpp::transport::handshake_result> server_hs =
+            std::unexpected{error::transport_handshake_cancelled};
+        expected_t<fixpp::transport::handshake_result> client_hs =
+            std::unexpected{error::transport_handshake_cancelled};
         asio::co_spawn(
             ioc.get_executor(),
             [&]() -> asio::awaitable<void> {
@@ -1087,7 +1096,7 @@ TEST(ListenerAcceptor, BacklogBoundsConnectionsCompletedWithoutTheApplication) {
 
     asio::io_context client_ioc;
     const auto r_control = count_completed_connects(client_ioc, control.bound_endpoint().port,
-                                                      kProbes, kControlPerConnect);
+                                                    kProbes, kControlPerConnect);
     const auto r_low =
         count_completed_connects(client_ioc, low.bound_endpoint().port, kProbes, kPerConnect);
     const auto r_high =
@@ -1137,8 +1146,9 @@ TEST(ListenerAcceptor, BacklogBoundsConnectionsCompletedWithoutTheApplication) {
     //      Endpoint::backlog FORWARDING: a listen() that ignored the config and
     //      hardcoded some small depth still satisfies (ii), and dies here.
     EXPECT_GT(r_high.completed, r_low.completed)
-        << "backlog=" << kHighBacklog << " admitted no more connections than backlog="
-        << kLowBacklog << " (" << r_high.completed << " vs " << r_low.completed
+        << "backlog=" << kHighBacklog
+        << " admitted no more connections than backlog=" << kLowBacklog << " (" << r_high.completed
+        << " vs " << r_low.completed
         << ") — the listener is not forwarding Endpoint::backlog to listen()";
     EXPECT_EQ(r_high.other_error, 0)
         << "backlog=" << kHighBacklog << " produced " << r_high.other_error
@@ -1211,7 +1221,9 @@ struct netlink_backlog_result {
 netlink_backlog_result read_listen_backlog_via_netlink(std::uint16_t port) {
     const int fd = ::socket(AF_NETLINK, SOCK_RAW, NETLINK_SOCK_DIAG);
     if (fd < 0) {
-        return {false, 0, std::string{"socket(NETLINK_SOCK_DIAG) failed: "} + std::strerror(errno)};
+        return {.ok = false,
+                .value = 0,
+                .error = std::string{"socket(NETLINK_SOCK_DIAG) failed: "} + std::strerror(errno)};
     }
 
     struct nl_req {
@@ -1229,7 +1241,7 @@ netlink_backlog_result read_listen_backlog_via_netlink(std::uint16_t port) {
     if (::send(fd, &req, sizeof(req), 0) < 0) {
         const std::string err = std::string{"send() failed: "} + std::strerror(errno);
         ::close(fd);
-        return {false, 0, err};
+        return {.ok = false, .value = 0, .error = err};
     }
 
     alignas(4) char buf[8192];  // NLMSG_ALIGNTO == 4
@@ -1242,14 +1254,16 @@ netlink_backlog_result read_listen_backlog_via_netlink(std::uint16_t port) {
         if (n < 0) {
             const std::string err = std::string{"recv() failed: "} + std::strerror(errno);
             ::close(fd);
-            return {false, 0, err};
+            return {.ok = false, .value = 0, .error = err};
         }
         if (n == 0) break;
         auto* nlh = reinterpret_cast<nlmsghdr*>(buf);
         for (; NLMSG_OK(nlh, static_cast<unsigned int>(n)); nlh = NLMSG_NEXT(nlh, n)) {
             if (nlh->nlmsg_flags & NLM_F_DUMP_INTR) {
                 ::close(fd);
-                return {false, 0, "netlink dump was interrupted (NLM_F_DUMP_INTR)"};
+                return {.ok = false,
+                        .value = 0,
+                        .error = "netlink dump was interrupted (NLM_F_DUMP_INTR)"};
             }
             if (nlh->nlmsg_type == NLMSG_DONE) {
                 done = true;
@@ -1257,16 +1271,20 @@ netlink_backlog_result read_listen_backlog_via_netlink(std::uint16_t port) {
             }
             if (nlh->nlmsg_type == NLMSG_ERROR) {
                 ::close(fd);
-                return {false, 0, "netlink returned NLMSG_ERROR"};
+                return {.ok = false, .value = 0, .error = "netlink returned NLMSG_ERROR"};
             }
             if (nlh->nlmsg_type != SOCK_DIAG_BY_FAMILY) {
                 ::close(fd);
-                return {false, 0,
-                        "unexpected netlink message type " + std::to_string(nlh->nlmsg_type)};
+                return {
+                    .ok = false,
+                    .value = 0,
+                    .error = "unexpected netlink message type " + std::to_string(nlh->nlmsg_type)};
             }
             if (static_cast<std::size_t>(NLMSG_PAYLOAD(nlh, 0)) < sizeof(inet_diag_msg)) {
                 ::close(fd);
-                return {false, 0, "netlink message payload too small for inet_diag_msg"};
+                return {.ok = false,
+                        .value = 0,
+                        .error = "netlink message payload too small for inet_diag_msg"};
             }
             auto* msg = reinterpret_cast<inet_diag_msg*>(NLMSG_DATA(nlh));
             if (ntohs(msg->id.idiag_sport) == port && msg->id.idiag_src[0] == loopback) {
@@ -1278,14 +1296,15 @@ netlink_backlog_result read_listen_backlog_via_netlink(std::uint16_t port) {
     ::close(fd);
 
     if (!done) {
-        return {false, 0, "netlink dump did not terminate with NLMSG_DONE"};
+        return {.ok = false, .value = 0, .error = "netlink dump did not terminate with NLMSG_DONE"};
     }
     if (matches != 1) {
-        return {false, 0,
-                "expected exactly 1 matching LISTEN socket on 127.0.0.1:" + std::to_string(port) +
-                    ", found " + std::to_string(matches)};
+        return {.ok = false,
+                .value = 0,
+                .error = "expected exactly 1 matching LISTEN socket on 127.0.0.1:" +
+                         std::to_string(port) + ", found " + std::to_string(matches)};
     }
-    return {true, found, {}};
+    return {.ok = true, .value = found, .error = {}};
 }
 
 // Not a runtime skip target — read_somaxconn() FAILS the test (ADD_FAILURE)

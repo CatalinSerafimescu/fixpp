@@ -22,13 +22,13 @@
 // COROUTINE NOTE: ASSERT_* macros internally call return, which is illegal
 // inside a coroutine. Use EXPECT_* + guard `if (!...) co_return;` instead.
 
-#include <chrono>  // std::chrono — was reaching this transitively (#404)
 #include <gtest/gtest.h>
 
 #include <array>
 #include <asio/co_spawn.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_future.hpp>
+#include <chrono>  // std::chrono — was reaching this transitively (#404)
 #include <cstddef>
 #include <filesystem>
 #include <fixpp/core/error.hpp>
@@ -239,7 +239,7 @@ TEST(FileStoreCoverageUplift, RetrieveGapReturnedWhenSequenceHasHole) {
             EXPECT_EQ(r.error(), error::store_seqnum_gap);
         }
         // seq 1 should have been visited before the gap was detected
-        EXPECT_EQ(vis.frames.size(), 1u);
+        EXPECT_EQ(vis.frames.size(), 1U);
     });
 
     pool.join();
@@ -436,7 +436,7 @@ TEST(FileStoreCoverageUplift, RetrieveBeginBeyondTailSucceedsEmpty) {
         CollectVisitor vis;
         auto r = co_await store->retrieve(100, 0, d, vis);
         EXPECT_TRUE(r.has_value()) << "begin > tail must return success (empty walk)";
-        EXPECT_EQ(vis.frames.size(), 0u);
+        EXPECT_EQ(vis.frames.size(), 0U);
     });
 
     pool.join();

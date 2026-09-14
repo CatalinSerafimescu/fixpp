@@ -28,12 +28,11 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
-#include <string>
-#include <tuple>
-
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <string>
+#include <tuple>
 
 #include "hp_support.hpp"
 
@@ -44,8 +43,7 @@ using fixpp::session::fsm_state;
 
 namespace {
 
-class HappyLogonHbLogout
-    : public ::testing::TestWithParam<std::tuple<Counterparty, Role>> {};
+class HappyLogonHbLogout : public ::testing::TestWithParam<std::tuple<Counterparty, Role>> {};
 
 TEST_P(HappyLogonHbLogout, LogonHeartbeatLogout) {
     const auto [counterparty, role] = GetParam();
@@ -69,8 +67,8 @@ TEST_P(HappyLogonHbLogout, LogonHeartbeatLogout) {
         << "cell endpoint unresolved (parent harness did not lease a port)";
 
     fixpp::interop::InteropEngineFixture fx;
-    auto cfg = hp::make_session_config(role, "FIX.4.4", factory, fx.ioc().get_executor(),
-                                       *endpoint);
+    auto cfg =
+        hp::make_session_config(role, "FIX.4.4", factory, fx.ioc().get_executor(), *endpoint);
     const auto id = fixpp::session::SessionId::from_config(cfg);
     ASSERT_TRUE(fx.engine().register_session(std::move(cfg)).has_value())
         << "register_session failed";
@@ -86,8 +84,7 @@ TEST_P(HappyLogonHbLogout, LogonHeartbeatLogout) {
     // ── Logon: drive to Active ───────────────────────────────────────────────
     const auto reached = hp::drive_to_active(fx, id, 5s);
     EXPECT_EQ(reached, fsm_state::Active)
-        << "session did not reach Active (logon) against "
-        << hp::counterparty_token(counterparty)
+        << "session did not reach Active (logon) against " << hp::counterparty_token(counterparty)
         << "; reached state=" << static_cast<int>(reached);
 
     // ── Seqnum delta (FR-007): outbound advanced past the Logon ──────────────

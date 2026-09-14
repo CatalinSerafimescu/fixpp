@@ -23,13 +23,13 @@
 #pragma once
 
 #include <asio/io_context.hpp>
+#include <atomic>
 #include <chrono>
 #include <fixpp/core/clock.hpp>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/session/engine.hpp>
 #include <functional>
 #include <future>
-#include <atomic>
 #include <memory>
 
 namespace fixpp::interop {
@@ -70,8 +70,8 @@ public:
     // has already drawn a conclusion from the old value, and so the fixture holds
     // no mutable knob. Tests that exercise the miss branch pass 0 ms.
     explicit InteropEngineFixture(fixpp::core::EngineConfig cfg = {},
-                                  std::chrono::milliseconds teardown_bound =
-                                      std::chrono::seconds{2});
+                                  std::chrono::milliseconds teardown_bound = std::chrono::seconds{
+                                      2});
 
     // Ensures Engine::stop() has completed before the Engine is destroyed
     // (the Engine dtor asserts stopped()). Idempotent with explicit stop_within().
@@ -129,10 +129,10 @@ public:
     // NOTE (#292): this forwards Engine::stopped(), which is NOT a completion
     // predicate — Engine::stop() stores stopped_=true at STEP 1 of its teardown
     // (`Engine::stop()`'s inner Step-1 store) and then goes on to cancel loops, join them,
-    // close sessions and clear the registry (through `Engine::stop()`'s Step 5 `registry_.clear()`). So
-    // stopped()==true means "stop was ADMITTED", not "stop has FINISHED", and a
-    // stop suspended anywhere in steps 2-5 reports true. The fixture must not
-    // use it to decide teardown safety; see stop_completed() below.
+    // close sessions and clear the registry (through `Engine::stop()`'s Step 5
+    // `registry_.clear()`). So stopped()==true means "stop was ADMITTED", not "stop has FINISHED",
+    // and a stop suspended anywhere in steps 2-5 reports true. The fixture must not use it to
+    // decide teardown safety; see stop_completed() below.
     [[nodiscard]] bool stopped() const noexcept { return engine_->stopped(); }
 
     // (#292) The predicate teardown actually needs: the ONE co_spawned stop()
@@ -197,13 +197,12 @@ private:
     // Issue #292 suggests declaring this BEFORE ioc_ so the Engine outlives the
     // context. DO NOT DO THAT. Engine holds
     // `asio::strand<asio::any_io_executor> control_strand_` as a VALUE member
-    // (its member declaration in engine.hpp) built from this fixture's own executor (`Engine`'s ctor `control_strand_` initializer),
-    // and a strand handle destroyed after its io_context dereferences an
-    // already-destroyed service: ~strand_impl unlinks through `service_`
-    // (asio strand_executor_service.ipp:83-94) which ~execution_context has
-    // already destroyed (execution_context.ipp:60-64). Verified with a
-    // standalone repro plus a bare-executor control arm (bare executors are
-    // fine; strands are not). That reorder would turn a timeout-only hazard
+    // (its member declaration in engine.hpp) built from this fixture's own executor (`Engine`'s
+    // ctor `control_strand_` initializer), and a strand handle destroyed after its io_context
+    // dereferences an already-destroyed service: ~strand_impl unlinks through `service_` (asio
+    // strand_executor_service.ipp:83-94) which ~execution_context has already destroyed
+    // (execution_context.ipp:60-64). Verified with a standalone repro plus a bare-executor control
+    // arm (bare executors are fine; strands are not). That reorder would turn a timeout-only hazard
     // into a heap-use-after-free on EVERY run, success path included.
     //
     // The pointer is here for the DESTRUCTOR's benefit only: on the

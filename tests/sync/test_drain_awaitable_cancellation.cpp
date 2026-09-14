@@ -140,7 +140,7 @@ TEST(SeamDrainAwaitableCancellation, DrainCompletesEvenIfSlotFiredMidFlight) {
     auto holder_coro = [&]() -> asio::awaitable<void> {
         auto g = co_await mtx.async_lock();
         EXPECT_TRUE(g.has_value());
-        co_await yield_n(N * 8 + 16);
+        co_await yield_n((N * 8) + 16);
         // Guard dtor → unlock() (draining_ == true → short-circuit).
     };
 
@@ -160,7 +160,7 @@ TEST(SeamDrainAwaitableCancellation, DrainCompletesEvenIfSlotFiredMidFlight) {
 
     auto canceller = [&]() -> asio::awaitable<void> {
         // Fire the drain's slot mid-flight while the holder still holds.
-        co_await yield_n(N * 4 + 4);
+        co_await yield_n((N * 4) + 4);
         drain_cancel_sig.emit(asio::cancellation_type::total);
     };
 

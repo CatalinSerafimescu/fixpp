@@ -2,9 +2,9 @@
 // US1 (CA-004): fixpp_version() / fixpp_library_version() correctness (T004)
 // TDD: written RED before version.h / version.cpp exist.
 
-#include <gtest/gtest.h>
-
 #include "fix/c_api/version.h"  // under test — direct include, not umbrella
+
+#include <gtest/gtest.h>
 
 // ── C-ABI version accessors ──────────────────────────────────────────────────
 
@@ -38,13 +38,12 @@ TEST(CapiVersion, CApiVersionIsExactly_1_5_0) {
 
 // Composite macro: (MAJOR<<16)|(MINOR<<8)|PATCH
 TEST(CapiVersion, CompositeMacroValue) {
-    constexpr uint32_t expected =
-        (static_cast<uint32_t>(FIXPP_C_ABI_VERSION_MAJOR) << 16u) |
-        (static_cast<uint32_t>(FIXPP_C_ABI_VERSION_MINOR) << 8u) |
-        static_cast<uint32_t>(FIXPP_C_ABI_VERSION_PATCH);
+    constexpr uint32_t expected = (static_cast<uint32_t>(FIXPP_C_ABI_VERSION_MAJOR) << 16U) |
+                                  (static_cast<uint32_t>(FIXPP_C_ABI_VERSION_MINOR) << 8U) |
+                                  static_cast<uint32_t>(FIXPP_C_ABI_VERSION_PATCH);
     EXPECT_EQ(static_cast<uint32_t>(FIXPP_C_ABI_VERSION), expected);
     // Exact numeric value for MAJOR=1, MINOR=5, PATCH=0 (the 0->1 GA freeze)
-    EXPECT_EQ(static_cast<uint32_t>(FIXPP_C_ABI_VERSION), uint32_t{(1u << 16u) | (5u << 8u) | 0u});
+    EXPECT_EQ(static_cast<uint32_t>(FIXPP_C_ABI_VERSION), uint32_t{(1U << 16U) | (5U << 8U) | 0U});
 }
 
 // ── Library version accessors ─────────────────────────────────────────────────
@@ -60,7 +59,7 @@ TEST(CapiVersion, LibraryVersionIsExactly_0_0_1) {
 // and the C++ library SemVer advance separately.
 TEST(CapiVersion, CApiAndLibraryVersionsAreDecoupled) {
     fixpp_version_t cabi = fixpp_version();
-    fixpp_version_t lib  = fixpp_library_version();
+    fixpp_version_t lib = fixpp_library_version();
     // Library is 0.0.1; C-ABI froze at 1.5.0 — the major values differ (the
     // stablest discriminator across the freeze; the minors differ too, 5 vs 0).
     EXPECT_NE(cabi.major, lib.major);

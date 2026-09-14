@@ -135,7 +135,7 @@ protected:
         fixpp::store_test::remove_store_dir(dir_);
     }
 
-    FileStore::Config make_config(FileStorePolicy policy = {}) const {
+    [[nodiscard]] FileStore::Config make_config(FileStorePolicy policy = {}) const {
         FileStore::Config cfg;
         cfg.directory = dir_;
         cfg.sender_comp_id = "SENDER";
@@ -187,7 +187,7 @@ protected:
 };
 
 // ── Helper: install the thread-id probe and reset probe state ─────────────────
-static void install_tid_probe() {
+void install_tid_probe() {
     g_offload_syscall_tid.store(std::thread::id{}, std::memory_order_relaxed);
     g_offload_syscall_entered.store(false, std::memory_order_relaxed);
     fixpp::session::install_store_offload_probe([](std::thread::id tid) noexcept {
@@ -196,7 +196,7 @@ static void install_tid_probe() {
     });
 }
 
-static void uninstall_tid_probe() { fixpp::session::install_store_offload_probe(nullptr); }
+void uninstall_tid_probe() { fixpp::session::install_store_offload_probe(nullptr); }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SC-001: the blocking syscall runs on a pool thread, NOT the strand thread.

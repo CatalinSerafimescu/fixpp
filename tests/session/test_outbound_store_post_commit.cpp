@@ -85,7 +85,7 @@ TEST(OutboundStorePostCommit, BodyLengthTwoDigitPreserved) {
             byte_collecting_visitor visitor;
             auto rr = co_await store.retrieve(1, 0, direction_t::outbound, visitor);
             EXPECT_TRUE(rr.has_value());
-            EXPECT_EQ(visitor.entries().size(), 1u);
+            EXPECT_EQ(visitor.entries().size(), 1U);
             if (!visitor.entries().empty()) {
                 EXPECT_EQ(visitor.entries()[0].bytes, frame)
                     << "Stored bytes differ from committed frame (2-digit BodyLength)";
@@ -112,7 +112,7 @@ TEST(OutboundStorePostCommit, BodyLengthThreeDigitPreserved) {
             byte_collecting_visitor visitor;
             auto rr = co_await store.retrieve(1, 0, direction_t::outbound, visitor);
             EXPECT_TRUE(rr.has_value());
-            EXPECT_EQ(visitor.entries().size(), 1u);
+            EXPECT_EQ(visitor.entries().size(), 1U);
             if (!visitor.entries().empty()) {
                 EXPECT_EQ(visitor.entries()[0].bytes, frame)
                     << "Stored bytes differ from committed frame (3-digit BodyLength)";

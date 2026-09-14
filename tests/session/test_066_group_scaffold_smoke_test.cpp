@@ -22,11 +22,10 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
-#include <vector>
-
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <vector>
 
 #include "support/fix44_group_frame_bodies.hpp"
 #include "support/group_dispatch_fixture.hpp"

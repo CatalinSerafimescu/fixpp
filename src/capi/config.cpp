@@ -11,16 +11,14 @@
 // session.cpp; on failure it is untouched and the caller still owns it.
 // THREAD: SINGLE_THREAD per handle. All symbols here are construction-time.
 
-#include "fix/c_api/engine.h"
-#include "fix/c_api/session.h"
-
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
 #include "capi_internal.hpp"
-
+#include "fix/c_api/engine.h"
+#include "fix/c_api/session.h"
 #include "fixpp/session/memory_store.hpp"
 #include "fixpp/session/memory_store_factory.hpp"
 #include "fixpp/session/security_profile.hpp"
@@ -35,6 +33,7 @@ fixpp_error_t fixpp_engine_config_create(fixpp_engine_config_t** out_cfg) {
     }
     *out_cfg = nullptr;
     try {
+        // NOLINTNEXTLINE(cppcoreguidelines-owning-memory) -- C-ABI handle
         *out_cfg = new fixpp_engine_config{};
         return FIXPP_ERR_OK;
     } catch (...) {
@@ -62,7 +61,7 @@ fixpp_error_t fixpp_engine_config_set_realtime_clock(fixpp_engine_config_t* cfg)
 }
 
 void fixpp_engine_config_destroy(fixpp_engine_config_t* cfg) {
-    delete cfg;  // NULL-safe; never-throws (trivial members)
+    delete cfg;  // NOLINT(cppcoreguidelines-owning-memory) NULL-safe; never throws
 }
 
 // ── Session-config builder ──────────────────────────────────────────────────
@@ -73,6 +72,7 @@ fixpp_error_t fixpp_session_config_create(fixpp_session_config_t** out_cfg) {
     }
     *out_cfg = nullptr;
     try {
+        // NOLINTNEXTLINE(cppcoreguidelines-owning-memory) -- C-ABI handle
         auto* h = new fixpp_session_config{};
         // Default in-memory store so a session is functional with no store
         // setter (v1.0 exposes none; data-model E-3 "engine defaults"). Use the
@@ -139,6 +139,8 @@ fixpp_error_t fixpp_session_config_set_role(fixpp_session_config_t* cfg, fixpp_s
         case FIXPP_ROLE_ACCEPTOR:
             cfg->cfg.role = fixpp::session::session_role::acceptor;
             return FIXPP_ERR_OK;
+        default:
+            break;
     }
     return FIXPP_ERR_CAPI_CONFIG_INVALID;  // out-of-range cast (FFI bypass)
 }
@@ -178,12 +180,17 @@ fixpp_error_t fixpp_session_config_set_security(fixpp_session_config_t* cfg,
             // Loud opt-in enumerator: confine the -Wdeprecated suppression here
             // (043 D-9 selection-site friction is satisfied at the C consumer's
             // explicit FIXPP_SECURITY_INSECURE_PLAIN_TCP choice).
+#if defined(__clang__) || defined(__GNUC__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
-            cfg->cfg.security_profile.k =
-                fixpp::session::SecurityProfile::kind::insecure_plain_tcp;
+#endif
+            cfg->cfg.security_profile.k = fixpp::session::SecurityProfile::kind::insecure_plain_tcp;
+#if defined(__clang__) || defined(__GNUC__)
 #pragma clang diagnostic pop
+#endif
             return FIXPP_ERR_OK;
+        default:
+            break;
     }
     return FIXPP_ERR_CAPI_CONFIG_INVALID;  // out-of-range cast
 }
@@ -219,7 +226,7 @@ fixpp_error_t fixpp_session_config_set_reset_on_logon(fixpp_session_config_t* cf
 }
 
 fixpp_error_t fixpp_session_config_set_reset_seqnum_policy(fixpp_session_config_t* cfg,
-                                                            fixpp_reset_seqnum_policy kind) {
+                                                           fixpp_reset_seqnum_policy kind) {
     if (cfg == nullptr) {
         return FIXPP_ERR_NULL_HANDLE;
     }
@@ -241,12 +248,14 @@ fixpp_error_t fixpp_session_config_set_reset_seqnum_policy(fixpp_session_config_
         case FIXPP_RESET_SEQNUM_UNILATERAL:
             cfg->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::unilateral;
             return FIXPP_ERR_OK;
+        default:
+            break;
     }
     return FIXPP_ERR_CAPI_CONFIG_INVALID;  // out-of-range cast (FFI bypass)
 }
 
 fixpp_error_t fixpp_session_config_set_tcp_endpoint(fixpp_session_config_t* cfg, const char* host,
-                                                     uint16_t port) {
+                                                    uint16_t port) {
     if (cfg == nullptr || host == nullptr) {
         return FIXPP_ERR_NULL_HANDLE;
     }
@@ -257,10 +266,10 @@ fixpp_error_t fixpp_session_config_set_tcp_endpoint(fixpp_session_config_t* cfg,
     // violation → fatal-log + abort, never translated.  Mirrors
     // fixpp_session_acceptor_bound_endpoint in session.cpp.
     try {
-        // Mirror the L-050-5 seam (tests/capi/capi_loopback_support.hpp's `set_loopback_endpoint`), now public:
-        // set the reconnect_endpoint so the engine's auto-derived plaintext factory
-        // can connect (initiator) or bind (acceptor), and install the transport_send
-        // placeholder that the accept loop rebinds to the live socket.
+        // Mirror the L-050-5 seam (tests/capi/capi_loopback_support.hpp's `set_loopback_endpoint`),
+        // now public: set the reconnect_endpoint so the engine's auto-derived plaintext factory can
+        // connect (initiator) or bind (acceptor), and install the transport_send placeholder that
+        // the accept loop rebinds to the live socket.
         cfg->cfg.reconnect_endpoint = fixpp::transport::Endpoint{host, port};
         cfg->cfg.transport_send = [](std::span<const std::byte>) {};
     } catch (...) {
@@ -274,7 +283,7 @@ fixpp_error_t fixpp_session_config_set_tcp_endpoint(fixpp_session_config_t* cfg,
 }
 
 void fixpp_session_config_destroy(fixpp_session_config_t* cfg) {
-    delete cfg;  // NULL-safe; never-throws
+    delete cfg;  // NOLINT(cppcoreguidelines-owning-memory) NULL-safe; never throws
 }
 
 }  // extern "C"

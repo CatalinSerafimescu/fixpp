@@ -40,7 +40,6 @@ using fixpp::session::direction_t;
 using fixpp::session::FileStore;
 using fixpp::session::FileStoreFactory;
 using fixpp::session::MemoryStore;
-using fixpp::store_test::byte_collecting_visitor;
 using fixpp::store_test::make_store_script;
 using fixpp::store_test::unique_store_dir;
 namespace fs = std::filesystem;
@@ -69,19 +68,21 @@ TEST(StoreResetMemory, HappyPathClearsAndRewinds) {
             auto outbound_script = make_store_script(7, direction_t::outbound);
 
             for (const auto& step : inbound_script) {
-                co_await store.store(step.seq, std::span<const std::byte>(step.frame_bytes),
-                                     step.dir);
+                auto st_r = co_await store.store(
+                    step.seq, std::span<const std::byte>(step.frame_bytes), step.dir);
+                EXPECT_TRUE(st_r.has_value()) << "setup store must succeed";
             }
             for (const auto& step : outbound_script) {
-                co_await store.store(step.seq, std::span<const std::byte>(step.frame_bytes),
-                                     step.dir);
+                auto st_r = co_await store.store(
+                    step.seq, std::span<const std::byte>(step.frame_bytes), step.dir);
+                EXPECT_TRUE(st_r.has_value()) << "setup store must succeed";
             }
 
             // Verify counters are advanced before reset
             auto ni = co_await store.next_seqnum(direction_t::inbound, false);
-            EXPECT_EQ(*ni, 6u) << "inbound next_seqnum should be 6 before reset";
+            EXPECT_EQ(*ni, 6U) << "inbound next_seqnum should be 6 before reset";
             auto no = co_await store.next_seqnum(direction_t::outbound, false);
-            EXPECT_EQ(*no, 8u) << "outbound next_seqnum should be 8 before reset";
+            EXPECT_EQ(*no, 8U) << "outbound next_seqnum should be 8 before reset";
 
             // Reset
             auto r = co_await store.reset();
@@ -90,10 +91,10 @@ TEST(StoreResetMemory, HappyPathClearsAndRewinds) {
             // After reset: counters should be 1 for both directions
             auto ni2 = co_await store.next_seqnum(direction_t::inbound, false);
             EXPECT_TRUE(ni2.has_value());
-            EXPECT_EQ(*ni2, 1u) << "inbound counter must be 1 after reset";
+            EXPECT_EQ(*ni2, 1U) << "inbound counter must be 1 after reset";
             auto no2 = co_await store.next_seqnum(direction_t::outbound, false);
             EXPECT_TRUE(no2.has_value());
-            EXPECT_EQ(*no2, 1u) << "outbound counter must be 1 after reset";
+            EXPECT_EQ(*no2, 1U) << "outbound counter must be 1 after reset";
 
             // After reset: retrieve should find no frames (or empty)
             // We can store new frame at seq=1 to verify the slate is clean
@@ -116,7 +117,7 @@ TEST(StoreResetMemory, ResetOnEmptyStoreIsIdempotent) {
             auto r = co_await store.reset();
             EXPECT_TRUE(r.has_value()) << "reset() on empty store must succeed";
             auto ni = co_await store.next_seqnum(direction_t::inbound, false);
-            EXPECT_EQ(*ni, 1u);
+            EXPECT_EQ(*ni, 1U);
         },
         asio::use_future);
     fut.get();
@@ -131,14 +132,16 @@ TEST(StoreResetMemory, DoubleResetIsIdempotent) {
             auto store = make_memory_store();
             auto script = make_store_script(3, direction_t::inbound);
             for (const auto& s : script) {
-                co_await store.store(s.seq, std::span<const std::byte>(s.frame_bytes), s.dir);
+                // Only the post-reset counter is asserted below; a failed
+                // pre-reset store is not otherwise observable in this test.
+                (void)co_await store.store(s.seq, std::span<const std::byte>(s.frame_bytes), s.dir);
             }
             auto r1 = co_await store.reset();
             EXPECT_TRUE(r1.has_value());
             auto r2 = co_await store.reset();
             EXPECT_TRUE(r2.has_value());
             auto ni = co_await store.next_seqnum(direction_t::inbound, false);
-            EXPECT_EQ(*ni, 1u);
+            EXPECT_EQ(*ni, 1U);
         },
         asio::use_future);
     fut.get();
@@ -176,13 +179,14 @@ TEST(StoreResetFile, HappyPathClearsAndRewinds) {
             // Store 5 outbound frames
             auto script = make_store_script(5, direction_t::outbound);
             for (const auto& step : script) {
-                co_await store.store(step.seq, std::span<const std::byte>(step.frame_bytes),
-                                     step.dir);
+                auto st_r = co_await store.store(
+                    step.seq, std::span<const std::byte>(step.frame_bytes), step.dir);
+                EXPECT_TRUE(st_r.has_value()) << "setup store must succeed";
             }
 
             // Check counter before reset
             auto ns = co_await store.next_seqnum(direction_t::outbound, false);
-            EXPECT_EQ(*ns, 6u);
+            EXPECT_EQ(*ns, 6U);
 
             // Reset
             auto r = co_await store.reset();
@@ -191,10 +195,10 @@ TEST(StoreResetFile, HappyPathClearsAndRewinds) {
             // After reset: counters = 1
             auto ni = co_await store.next_seqnum(direction_t::inbound, false);
             EXPECT_TRUE(ni.has_value());
-            EXPECT_EQ(*ni, 1u);
+            EXPECT_EQ(*ni, 1U);
             auto no = co_await store.next_seqnum(direction_t::outbound, false);
             EXPECT_TRUE(no.has_value());
-            EXPECT_EQ(*no, 1u);
+            EXPECT_EQ(*no, 1U);
         },
         asio::use_future);
     fut.get();
@@ -222,10 +226,13 @@ TEST(StoreResetFile, AfterResetNewOpenSeesCounterOne) {
 
                 auto script = make_store_script(3, direction_t::outbound);
                 for (const auto& step : script) {
-                    co_await store.store(step.seq, std::span<const std::byte>(step.frame_bytes),
-                                         step.dir);
+                    // Only the post-reset+reopen counter is asserted below; a failed
+                    // pre-reset store is not otherwise observable in this test.
+                    (void)co_await store.store(
+                        step.seq, std::span<const std::byte>(step.frame_bytes), step.dir);
                 }
-                co_await store.reset();
+                auto reset_r = co_await store.reset();
+                EXPECT_TRUE(reset_r.has_value()) << "reset() must succeed";
                 // store goes out of scope = file released
             }
 
@@ -240,10 +247,10 @@ TEST(StoreResetFile, AfterResetNewOpenSeesCounterOne) {
 
             auto ni = co_await store2.next_seqnum(direction_t::inbound, false);
             EXPECT_TRUE(ni.has_value());
-            EXPECT_EQ(*ni, 1u) << "inbound counter must be 1 after reset+reopen";
+            EXPECT_EQ(*ni, 1U) << "inbound counter must be 1 after reset+reopen";
             auto no = co_await store2.next_seqnum(direction_t::outbound, false);
             EXPECT_TRUE(no.has_value());
-            EXPECT_EQ(*no, 1u) << "outbound counter must be 1 after reset+reopen";
+            EXPECT_EQ(*no, 1U) << "outbound counter must be 1 after reset+reopen";
         },
         asio::use_future);
     fut.get();
@@ -325,8 +332,8 @@ TEST(StoreResetFile, ResetThenStoreThenReopenRetrieveSucceeds) {
             } vis;
             auto rv = co_await store2.retrieve(1, 0, direction_t::outbound, vis);
             EXPECT_TRUE(rv.has_value()) << "retrieve() after reset+reopen failed";
-            EXPECT_EQ(vis.seqs.size(), 1u) << "expected 1 frame after reset+store(1)+reopen";
-            if (!vis.seqs.empty()) EXPECT_EQ(vis.seqs[0], 1u) << "frame seqnum must be 1";
+            EXPECT_EQ(vis.seqs.size(), 1U) << "expected 1 frame after reset+store(1)+reopen";
+            if (!vis.seqs.empty()) EXPECT_EQ(vis.seqs[0], 1U) << "frame seqnum must be 1";
         },
         asio::use_future);
     fut.get();

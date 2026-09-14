@@ -87,8 +87,10 @@ FileStore::Config make_file_config(const fs::path& dir, asio::any_io_executor ex
         child_pool.get_executor(),
         [&store, &script]() -> asio::awaitable<void> {
             for (const auto& step : script) {
-                co_await store.store(step.seq, std::span<const std::byte>(step.frame_bytes),
-                                     step.dir);
+                // Verified cross-process by the parent's retrieve()+byte-compare below,
+                // not observable from this soon-to-_Exit() child.
+                (void)co_await store.store(step.seq, std::span<const std::byte>(step.frame_bytes),
+                                           step.dir);
             }
         },
         asio::use_future);
@@ -185,7 +187,7 @@ TEST(FileStoreCrashSurvival, CommitPerMessage100Frames) {
     }
 
     // Cleanup
-    minted.value().reset();
+    minted.value() = nullptr;
     fixpp::store_test::remove_store_dir(dir);
 }
 
@@ -246,7 +248,7 @@ TEST(FileStoreCrashSurvival, SecondOpenerReturnsFailed) {
         << "expected store_factory_failed due to advisory lock contention";
 
     // Release first store before removing the directory
-    minted1.value().reset();
+    minted1.value() = nullptr;
     fixpp::store_test::remove_store_dir(dir);
 }
 
@@ -303,7 +305,7 @@ TEST(FileStoreCrashSurvival, CommitBatchedReturnsSuccess) {
     EXPECT_GE(visitor.entries().size(), static_cast<std::size_t>(1));
     EXPECT_LE(visitor.entries().size(), static_cast<std::size_t>(kFrames));
 
-    minted.value().reset();
+    minted.value() = nullptr;
     fixpp::store_test::remove_store_dir(dir);
 }
 

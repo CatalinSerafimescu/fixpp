@@ -184,6 +184,7 @@ void DispatchSpan::set_error(std::string_view description) {
 SessionSpans::SessionSpans(TracerProvider& provider, std::string_view sender_comp_id,
                            std::string_view target_comp_id,
                            const fixpp::otel::trace_context& parent_ctx) {
+    // cppcheck-suppress useInitializationList
     tracer_ = provider.get_tracer("fixpp.session");
 
     trace_api::StartSpanOptions opts;

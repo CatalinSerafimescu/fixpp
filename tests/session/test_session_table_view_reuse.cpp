@@ -104,7 +104,10 @@ std::vector<std::byte> make_logon_frame() {
     body += "98=0\x01";
     body += "108=30\x01";
 
-    std::string full = "8=FIX.4.2\x01" "9=" + std::to_string(body.size()) + "\x01" + body;
+    std::string full =
+        "8=FIX.4.2\x01"
+        "9=" +
+        std::to_string(body.size()) + "\x01" + body;
     unsigned int cs = 0;
     for (unsigned char c : full) {
         cs += c;
@@ -201,7 +204,7 @@ TEST(SessionTableViewReuse, OpenWalksTheDictionaryExactlyOnce) {
     Session sess{fix.engine, cfg};
     fix.run_open(sess);
 
-    EXPECT_EQ(fixpp::dict::detail::as_table_view_call_count(), 1u)
+    EXPECT_EQ(fixpp::dict::detail::as_table_view_call_count(), 1U)
         << "fixpp#215 item 1: open() must walk the Dictionary ONCE and share the result with "
            "the validator, not walk it once per consumer. This reads 2 on the unfixed tree.";
 }
@@ -241,7 +244,7 @@ TEST(SessionTableViewReuse, OpenAdoptsAConfigSuppliedSnapshotAndWalksZeroTimes) 
 
     fix.run_open(sess);
 
-    EXPECT_EQ(fixpp::dict::detail::as_table_view_call_count(), 0u)
+    EXPECT_EQ(fixpp::dict::detail::as_table_view_call_count(), 0U)
         << "fixpp#215 item 1: a config that already carries a snapshot must make open() walk the "
            "Dictionary ZERO further times. This reads 1 on the unfixed tree, where SessionConfig "
            "had no field to carry a snapshot and open() always built its own.";
@@ -276,7 +279,8 @@ class GroupCapturingApplication : public Application {
 public:
     int from_app_calls = 0;
     std::size_t leg_count = 0;
-    bool last_leg_has_trailing_tag60 = true;  // default true: un-run callback must not silently pass
+    bool last_leg_has_trailing_tag60 =
+        true;  // default true: un-run callback must not silently pass
 
     fixpp::core::expected_t<void> fromApp(
         const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg,
@@ -287,7 +291,7 @@ public:
         if (leg_count >= 1) {
             std::string_view last{reinterpret_cast<char const*>(slices[leg_count - 1].data),
                                   slices[leg_count - 1].len};
-            last_leg_has_trailing_tag60 = last.find("60=") != std::string_view::npos;
+            last_leg_has_trailing_tag60 = last.contains("60=");
         }
         return {};
     }
@@ -345,9 +349,14 @@ TEST(SessionTableViewReuse, AdoptedSnapshotDrivesGroupBoundaries) {
         }
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
 
-        std::string logon_body = "35=A\x01" "34=1\x01" "49=TW\x01"
-                                 "52=20240101-00:00:00.000\x01" "56=ISLD\x01"
-                                 "98=0\x01" "108=0\x01";
+        std::string logon_body =
+            "35=A\x01"
+            "34=1\x01"
+            "49=TW\x01"
+            "52=20240101-00:00:00.000\x01"
+            "56=ISLD\x01"
+            "98=0\x01"
+            "108=0\x01";
         auto logon = fixpp_test_support::make_frame("FIX.4.4", logon_body);
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut2, 200ms)) {
@@ -378,7 +387,7 @@ TEST(SessionTableViewReuse, AdoptedSnapshotDrivesGroupBoundaries) {
     ASSERT_EQ(app->from_app_calls, 1)
         << "a config-supplied snapshot must reach fromApp for a well-formed group-bearing "
            "ExecutionReport";
-    EXPECT_EQ(app->leg_count, 2u)
+    EXPECT_EQ(app->leg_count, 2U)
         << "the CONFIG-SUPPLIED snapshot must drive dictionary-backed group boundaries: "
            "NoLegs(555)=2 must resolve to exactly 2 membership-bounded leg slices. A "
            "dictionary-free Parser() ctor cannot produce this at all.";

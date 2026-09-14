@@ -33,7 +33,6 @@
 // checklist, not this test's.
 
 #include <gtest/gtest.h>
-
 #include <openssl/evp.h>
 
 #include <fstream>
@@ -47,10 +46,10 @@ namespace {
 // ── SHA-1 helper (independent re-implementation from the generator's, same
 // algorithm — OpenSSL EVP_sha1 — so this is a genuine cross-check, not a
 // shared-bug risk masquerading as independent verification). ────────────────
-std::string sha1_hex(const std::string &bytes) {
+std::string sha1_hex(const std::string& bytes) {
     unsigned char digest[EVP_MAX_MD_SIZE];
     unsigned int digest_len = 0;
-    EVP_MD_CTX *ctx = EVP_MD_CTX_new();
+    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
     EXPECT_NE(ctx, nullptr);
     if (!ctx) {
         return {};
@@ -63,7 +62,7 @@ std::string sha1_hex(const std::string &bytes) {
     if (!ok) {
         return {};
     }
-    static const char *kHex = "0123456789abcdef";
+    static const char* kHex = "0123456789abcdef";
     std::string out;
     out.reserve(digest_len * 2);
     for (unsigned int i = 0; i < digest_len; ++i) {
@@ -73,7 +72,7 @@ std::string sha1_hex(const std::string &bytes) {
     return out;
 }
 
-std::string read_file_bytes(const std::string &path) {
+std::string read_file_bytes(const std::string& path) {
     std::ifstream f(path, std::ios::binary);
     if (!f) {
         ADD_FAILURE() << "cannot open '" << path << "'";
@@ -84,7 +83,7 @@ std::string read_file_bytes(const std::string &path) {
     return ss.str();
 }
 
-std::vector<std::string> read_lines(const std::string &path) {
+std::vector<std::string> read_lines(const std::string& path) {
     std::vector<std::string> lines;
     std::ifstream f(path, std::ios::binary);
     if (!f) {
@@ -107,7 +106,7 @@ std::vector<std::string> read_lines(const std::string &path) {
 
 // Minimal CSV field splitter matching the generator's own quoting scheme
 // (RFC4180-style: a field wrapped in double quotes, internal quotes doubled).
-std::vector<std::string> split_csv_line(const std::string &line) {
+std::vector<std::string> split_csv_line(const std::string& line) {
     std::vector<std::string> fields;
     std::string cur;
     bool in_quotes = false;
@@ -163,12 +162,12 @@ struct ParsedGolden {
 // tools/quickfix_enum_golden/main.cpp's own parsing (there is none there —
 // main.cpp only WRITES the file) so there is no shared-bug risk between
 // producer and consumer.
-ParsedGolden parse_golden_csv(const std::string &path) {
+ParsedGolden parse_golden_csv(const std::string& path) {
     ParsedGolden result;
     std::vector<std::string> lines = read_lines(path);
 
     std::vector<std::string> csv_lines;
-    for (const std::string &line : lines) {
+    for (const std::string& line : lines) {
         if (line.empty()) {
             continue;
         }
@@ -202,8 +201,8 @@ ParsedGolden parse_golden_csv(const std::string &path) {
     for (std::size_t i = 1; i < csv_lines.size(); ++i) {
         std::vector<std::string> f = split_csv_line(csv_lines[i]);
         if (f.size() != 11) {
-            ADD_FAILURE() << "golden.csv row " << i << " has " << f.size() << " fields, expected 11: '"
-                           << csv_lines[i] << "'";
+            ADD_FAILURE() << "golden.csv row " << i << " has " << f.size()
+                          << " fields, expected 11: '" << csv_lines[i] << "'";
             continue;
         }
         GoldenRow row;
@@ -226,10 +225,11 @@ ParsedGolden parse_golden_csv(const std::string &path) {
 // Recomputes corpus_input_hash per the format documented in
 // tools/quickfix_enum_golden/main.cpp: for row ids ascending, the exact
 // bytes "{id}|{dictionary}|{msg_type}|{tag}|{value}\n", concatenated.
-std::string recompute_corpus_input_hash(const std::vector<GoldenRow> &rows) {
+std::string recompute_corpus_input_hash(const std::vector<GoldenRow>& rows) {
     std::ostringstream buf;
-    for (const GoldenRow &r : rows) {
-        buf << r.id << "|" << r.dictionary << "|" << r.msg_type << "|" << r.tag << "|" << r.value << "\n";
+    for (const GoldenRow& r : rows) {
+        buf << r.id << "|" << r.dictionary << "|" << r.msg_type << "|" << r.tag << "|" << r.value
+            << "\n";
     }
     return sha1_hex(buf.str());
 }
@@ -241,15 +241,16 @@ std::string recompute_corpus_input_hash(const std::vector<GoldenRow> &rows) {
 // columns, so it is the only one that can catch a hand-edited verdict OR a
 // hand-edited RefTagID (075 T005a) — every other field stays byte-identical
 // under such an edit.
-std::string recompute_golden_output_hash(const std::vector<GoldenRow> &rows) {
+std::string recompute_golden_output_hash(const std::vector<GoldenRow>& rows) {
     std::ostringstream buf;
-    for (const GoldenRow &r : rows) {
-        buf << r.id << "|" << r.verdict << "|" << r.reason << "|" << r.ref_tag_id << "|" << r.asserted << "\n";
+    for (const GoldenRow& r : rows) {
+        buf << r.id << "|" << r.verdict << "|" << r.reason << "|" << r.ref_tag_id << "|"
+            << r.asserted << "\n";
     }
     return sha1_hex(buf.str());
 }
 
-std::string manifest_value(const ParsedGolden &g, const std::string &key) {
+std::string manifest_value(const ParsedGolden& g, const std::string& key) {
     auto it = g.manifest.find(key);
     if (it == g.manifest.end()) {
         ADD_FAILURE() << "manifest key '" << key << "' not found in golden.csv's comment block";
@@ -279,7 +280,7 @@ std::string manifest_value(const ParsedGolden &g, const std::string &key) {
 namespace {
 
 class EnumGoldenManifestTest : public ::testing::Test {
-   protected:
+protected:
     void SetUp() override { golden_ = parse_golden_csv(FIXPP_GOLDEN_CSV_PATH); }
 
     ParsedGolden golden_;
@@ -289,7 +290,7 @@ TEST_F(EnumGoldenManifestTest, CorpusHasThirteenRows) {
     // Sanity precondition for every other test here: T006's rebase (row 6
     // swapped to MessageEncoding(347), row 13 added as the DV-5
     // characterization row) makes this 13, not FR-018's original 12.
-    ASSERT_EQ(golden_.rows.size(), 13u);
+    ASSERT_EQ(golden_.rows.size(), 13U);
 }
 
 TEST_F(EnumGoldenManifestTest, DictionarySha1Fix44Matches) {
@@ -313,14 +314,16 @@ TEST_F(EnumGoldenManifestTest, DictionarySha1Fix42Matches) {
 TEST_F(EnumGoldenManifestTest, GeneratorSourceHashMatches) {
     std::string recomputed = sha1_hex(read_file_bytes(FIXPP_GOLDEN_MAIN_CPP_PATH));
     EXPECT_EQ(recomputed, manifest_value(golden_, "generator_source_hash"))
-        << "tools/quickfix_enum_golden/main.cpp changed (config pin or corpus) without regenerating "
+        << "tools/quickfix_enum_golden/main.cpp changed (config pin or corpus) without "
+           "regenerating "
            "golden.csv (tree drift)";
 }
 
 TEST_F(EnumGoldenManifestTest, CorpusInputHashMatches) {
     std::string recomputed = recompute_corpus_input_hash(golden_.rows);
     EXPECT_EQ(recomputed, manifest_value(golden_, "corpus_input_hash"))
-        << "a row's dictionary/msg_type/tag/value changed without regenerating golden.csv (tree drift)";
+        << "a row's dictionary/msg_type/tag/value changed without regenerating golden.csv (tree "
+           "drift)";
 }
 
 // ⚠️ THE LOAD-BEARING CHECK (FR-024). Every OTHER hash in this file stays
@@ -336,7 +339,8 @@ TEST_F(EnumGoldenManifestTest, GoldenOutputHashMatches) {
     std::string recomputed = recompute_golden_output_hash(golden_.rows);
     EXPECT_EQ(recomputed, manifest_value(golden_, "golden_output_hash"))
         << "a checked-in quickfix_verdict/quickfix_reason/quickfix_ref_tag_id/asserted value was "
-           "hand-edited (or the corpus changed) without regenerating golden.csv from a real QuickFIX run";
+           "hand-edited (or the corpus changed) without regenerating golden.csv from a real "
+           "QuickFIX run";
 }
 
 }  // namespace

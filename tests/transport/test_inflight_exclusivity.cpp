@@ -266,7 +266,8 @@ TEST(InflightExclusivity, ReadOverlapReturnImmediately) {
 
     auto strand = asio::make_strand(ioc.get_executor());
 
-    std::byte buf_a{0}, buf_b{0};
+    std::byte buf_a{0};
+    std::byte buf_b{0};
 
     // Coroutine A: read (server doesn't write → suspends).
     asio::co_spawn(
@@ -784,7 +785,6 @@ TEST(InflightExclusivity, PlaintextConnectRetryableAfterFailedAttempt) {
     acc.close(ignored);
     ioc.run_for(200ms);
 }
-
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Cells 10-11: close() DURING DNS RESOLUTION must not resurrect the Transport
@@ -1643,8 +1643,8 @@ TEST(InflightExclusivity, DestroyWithNoDrainDoesNotFaultInFlightGuard) {
             },
             asio::detached);
 
-        ioc.poll();          // start the coroutine; it suspends in async_resolve
-        client.reset();      // D-4.0: destroy the Transport with the op in flight
+        ioc.poll();      // start the coroutine; it suspends in async_resolve
+        client.reset();  // D-4.0: destroy the Transport with the op in flight
         asio::error_code ig;
         acc.close(ig);
         // ioc destructor here destroys the suspended frame -> ~inflight_flag_guard

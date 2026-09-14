@@ -59,8 +59,8 @@ using fixpp::core::expected_t;
 using fixpp::transport::asio_plain_transport;
 using fixpp::transport::asio_plain_transport_factory;
 using fixpp::transport::make_asio_plain_transport_factory;
-using fixpp::transport::transport_security_kind;
 using fixpp::transport::Transport;
+using fixpp::transport::transport_security_kind;
 
 namespace fe = fixpp::transport::errors;
 
@@ -86,7 +86,7 @@ TEST(AsioPlainTransport, ConnectReadWriteCycle) {
     bool timed_out{false};
     bool exchange_done{false};
     expected_t<std::size_t> write_result = std::unexpected{error::transport_write_error};
-    expected_t<std::size_t> read_result  = std::unexpected{error::transport_read_error};
+    expected_t<std::size_t> read_result = std::unexpected{error::transport_read_error};
 
     // Watchdog — cancels all sockets after 10s if exchange has not completed.
     asio::steady_timer watchdog{ioc};
@@ -111,8 +111,8 @@ TEST(AsioPlainTransport, ConnectReadWriteCycle) {
 
             Transport::Config cfg{};
             asio_plain_transport server{asio_plain_transport::from_accepted_tag{},
-                                       co_await asio::this_coro::executor, cfg,
-                                       std::move(accepted_sock)};
+                                        co_await asio::this_coro::executor, cfg,
+                                        std::move(accepted_sock)};
 
             std::array<std::byte, 4> buf{};
             read_result = co_await server.async_read_some(std::span<std::byte>{buf});
@@ -135,7 +135,7 @@ TEST(AsioPlainTransport, ConnectReadWriteCycle) {
 
             // SC-001: first app byte is 0x38 ('8' — start of "8=FIX"), not 0x16 (TLS).
             const std::array<std::byte, 4> payload{std::byte{0x38}, std::byte{0x3d},
-                                                    std::byte{0x46}, std::byte{0x49}};
+                                                   std::byte{0x46}, std::byte{0x49}};
             write_result = co_await client.async_write(
                 std::span<const std::byte>{payload.data(), payload.size()});
 
@@ -147,12 +147,12 @@ TEST(AsioPlainTransport, ConnectReadWriteCycle) {
     ioc.run_for(std::chrono::seconds{12});
 
     ASSERT_FALSE(timed_out) << "test timed out — loopback I/O did not complete";
-    ASSERT_TRUE(write_result.has_value()) << "client async_write failed: "
-                                         << static_cast<int>(write_result.error());
-    EXPECT_EQ(*write_result, 4u);
-    ASSERT_TRUE(read_result.has_value()) << "server async_read_some failed: "
-                                        << static_cast<int>(read_result.error());
-    EXPECT_EQ(*read_result, 4u);
+    ASSERT_TRUE(write_result.has_value())
+        << "client async_write failed: " << static_cast<int>(write_result.error());
+    EXPECT_EQ(*write_result, 4U);
+    ASSERT_TRUE(read_result.has_value())
+        << "server async_read_some failed: " << static_cast<int>(read_result.error());
+    EXPECT_EQ(*read_result, 4U);
 }
 
 // ── Test 2: No TLS ClientHello — first received byte is 0x38, not 0x16 ────────
@@ -209,7 +209,8 @@ TEST(AsioPlainTransport, NoTlsClientHelloFirstByte) {
 
             // 0x38 = '8' — start of FIX BeginString "8=FIX..."
             const std::byte fix_first{0x38};
-            co_await client.async_write(std::span<const std::byte>{&fix_first, 1});
+            auto wr = co_await client.async_write(std::span<const std::byte>{&fix_first, 1});
+            if (!wr) co_return;
             exchange_done = true;
             watchdog.cancel();
         },
@@ -294,8 +295,7 @@ TEST(AsioPlainTransport, CancelInFlightRead) {
     ASSERT_FALSE(timed_out) << "test timed out";
     ASSERT_FALSE(read_result.has_value()) << "expected cancellation error";
     EXPECT_EQ(read_result.error(), error::transport_read_cancelled)
-        << "expected transport_read_cancelled, got slot="
-        << static_cast<int>(read_result.error());
+        << "expected transport_read_cancelled, got slot=" << static_cast<int>(read_result.error());
 }
 
 // ── Test 4: Post-close: async_read_some → transport_already_closed ────────────
@@ -306,7 +306,7 @@ TEST(AsioPlainTransport, PostCloseReadReturnsAlreadyClosed) {
 
     expected_t<std::size_t> read_after_close{std::unexpected{error::transport_read_error}};
     expected_t<std::size_t> write_after_close{std::unexpected{error::transport_write_error}};
-    expected_t<void>        second_close{std::unexpected{error::transport_already_closed}};
+    expected_t<void> second_close{std::unexpected{error::transport_already_closed}};
 
     asio::co_spawn(
         ioc.get_executor(),
@@ -463,7 +463,7 @@ TEST(AsioPlainTransport, MakeAcceptedReturnsConnectedTransport) {
     bool done{false};
     // Verify that the accepted transport can immediately read/write (is in connected state).
     expected_t<std::size_t> write_result = std::unexpected{error::transport_write_error};
-    expected_t<std::size_t> read_result  = std::unexpected{error::transport_read_error};
+    expected_t<std::size_t> read_result = std::unexpected{error::transport_read_error};
 
     asio::steady_timer watchdog{ioc};
     watchdog.expires_after(std::chrono::seconds{10});
@@ -480,8 +480,7 @@ TEST(AsioPlainTransport, MakeAcceptedReturnsConnectedTransport) {
     ASSERT_TRUE(factory_result.has_value());
 
     // Downcast to access make_accepted (concrete, non-virtual).
-    auto* plain_factory =
-        dynamic_cast<asio_plain_transport_factory*>(factory_result->get());
+    auto* plain_factory = dynamic_cast<asio_plain_transport_factory*>(factory_result->get());
     ASSERT_NE(plain_factory, nullptr);
 
     // Server: accept → make_accepted → read.
@@ -528,11 +527,11 @@ TEST(AsioPlainTransport, MakeAcceptedReturnsConnectedTransport) {
     ioc.run_for(std::chrono::seconds{12});
 
     ASSERT_FALSE(timed_out) << "test timed out";
-    ASSERT_TRUE(write_result.has_value()) << "client write failed: "
-                                         << static_cast<int>(write_result.error());
-    ASSERT_TRUE(read_result.has_value()) << "server read via make_accepted failed: "
-                                        << static_cast<int>(read_result.error());
-    EXPECT_EQ(*read_result, 2u);
+    ASSERT_TRUE(write_result.has_value())
+        << "client write failed: " << static_cast<int>(write_result.error());
+    ASSERT_TRUE(read_result.has_value())
+        << "server read via make_accepted failed: " << static_cast<int>(read_result.error());
+    EXPECT_EQ(*read_result, 2U);
 }
 
 // ── Test 7: T3 (SC-014, 088) — connect epoch retired after a real connect ─────
@@ -605,7 +604,7 @@ TEST(AsioPlainTransport, TimerEpochRetiredAfterConnect) {
 
     ASSERT_FALSE(timed_out) << "test timed out";
     ASSERT_TRUE(connect_ok) << "async_connect must succeed for T3's construction";
-    EXPECT_EQ(epoch_after_connect, 2u)
+    EXPECT_EQ(epoch_after_connect, 2U)
         << "T3 (SC-014): connect epoch must be retired (advanced past the armed "
            "value 1) by the time async_connect returns — arm (0->1) then retire "
            "(1->2); got "

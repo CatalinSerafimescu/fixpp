@@ -34,10 +34,9 @@ inline constexpr std::size_t default_max_group_entries_per_instance = 4096;
 // parameter — complete type not required for a declaration), and completing it
 // here would require including group_view.hpp, which itself includes THIS
 // header — a cycle the file's one-directional include edge (see
-// group_view.hpp's own 062 T002 include-edge note) must not acquire. OffsetTable stores the constituent
-// fields raw (never a `group_context` member by value) for the same reason;
-// the .cpp includes group_view.hpp for the complete type where it is
-// actually constructed/consumed.
+// group_view.hpp's own 062 T002 include-edge note) must not acquire. OffsetTable stores the
+// constituent fields raw (never a `group_context` member by value) for the same reason; the .cpp
+// includes group_view.hpp for the complete type where it is actually constructed/consumed.
 struct group_context;
 
 // 073 T002: status-bearing return of both `nested_group_slices` overloads
@@ -57,7 +56,7 @@ struct group_context;
 // Trivially copyable (span + bool) — zero-alloc wire-read discipline
 // preserved.
 struct nested_slices_result {
-    std::span<group_slice const> slices{};
+    std::span<group_slice const> slices;
     bool alloc_failed = false;
 };
 static_assert(std::is_trivially_copyable_v<nested_slices_result>);
@@ -69,7 +68,7 @@ static_assert(std::is_trivially_copyable_v<nested_slices_result>);
 // top-level caller (C-ABI top-level group getter, `MessageView::group<>()`)
 // is unaffected (L-073-1, deferred).
 struct group_slices_result {
-    std::span<group_slice const> slices{};
+    std::span<group_slice const> slices;
     bool alloc_failed = false;
 };
 static_assert(std::is_trivially_copyable_v<group_slices_result>);
@@ -232,9 +231,9 @@ public:
     // recursion). On depth > kMaxGroupDepth or a per-level entry-cap breach,
     // sets `overflow = true` (caller returns err_group_too_large, T022).
     // Returns the entries_ index one-past the group's last field.
-    [[nodiscard]] std::size_t consume_group_extent(
-        std::size_t count_idx, group_context const& ctx, std::uint8_t depth,
-        bool& overflow) const noexcept;
+    [[nodiscard]] std::size_t consume_group_extent(std::size_t count_idx, group_context const& ctx,
+                                                   std::uint8_t depth,
+                                                   bool& overflow) const noexcept;
 
     // 063 T006: sets this table's stored context (msg_type + bounded
     // parent-no_tag path), read by group()'s membership predicate calls. The
@@ -393,7 +392,8 @@ private:
     // tests/support/pmr_allocation_tracking_resource.hpp against
     // `ArenaFit.NearCapHeadroomProbe`.
 
-    static constexpr std::uint8_t kMaxGroupDepth = 16;  // mirror emit_messages.cpp's `kMaxGroupDepth`
+    static constexpr std::uint8_t kMaxGroupDepth =
+        16;  // mirror emit_messages.cpp's `kMaxGroupDepth`
 
     std::byte const* frame_base_ = nullptr;  // for group_slice (ptr,len)
 #ifndef NDEBUG
@@ -411,7 +411,7 @@ private:
 #endif
     }
 
-    Config cfg_{};                           // caller-tunable caps (FR-015 / [2b §1.2])
+    Config cfg_{};  // caller-tunable caps (FR-015 / [2b §1.2])
     void const* opaque_dict_ = nullptr;
     group_member_fn_t group_member_fn_ = nullptr;
     // 083 T057 (C-8.1): supplied at EVERY site that supplies opaque_dict_.
@@ -426,7 +426,7 @@ private:
     // group_index_/nested_cache_ below); default-empty on a table that never
     // calls it (dict-free ctors — group_member_fn_ is null there, so this
     // state is never read).
-    mutable std::string_view group_ctx_msg_type_{};
+    mutable std::string_view group_ctx_msg_type_;
     mutable std::array<std::uint16_t, kMaxGroupDepth> group_ctx_parent_path_{};
     mutable std::uint8_t group_ctx_depth_ = 0;
     std::pmr::vector<entry> entries_;

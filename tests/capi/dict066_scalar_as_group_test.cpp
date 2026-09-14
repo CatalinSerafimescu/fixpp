@@ -29,13 +29,11 @@
 #include <cstdint>
 #include <thread>
 
+#include "capi_dict066_loopback_support.hpp"
+#include "capi_loopback_support.hpp"
 #include "fix/c_api/engine.h"
 #include "fix/c_api/message.h"
 #include "fix/c_api/session.h"
-
-#include "capi_dict066_loopback_support.hpp"
-#include "capi_loopback_support.hpp"
-
 #include "support/fix44_group_frame_bodies.hpp"
 #include "support/wait_until.hpp"
 
@@ -87,7 +85,7 @@ TEST(ScalarAsGroupCapi, SymbolTagQueriedAsGroupReturnsTypeMismatch) {
 
     ASSERT_EQ(fixpp_engine_start(acceptor_engine), FIXPP_ERR_OK);
     std::uint16_t port = wait_for_bound_port(acceptor_engine, acc_id);
-    ASSERT_NE(port, 0u) << "acceptor did not bind";
+    ASSERT_NE(port, 0U) << "acceptor did not bind";
 
     // Initiator session.
     fixpp_session_config_t* ini_cfg =
@@ -106,7 +104,8 @@ TEST(ScalarAsGroupCapi, SymbolTagQueriedAsGroupReturnsTypeMismatch) {
     auto payload = fixpp_test_support::make_execution_report_app_payload(suffix);
     ASSERT_EQ(fixpp_session_send(ini_h, payload.data(), payload.size()), FIXPP_ERR_OK);
 
-    (void)fixpp::test_support::wait_for_flag(ctx.fired, 5s);  // the ASSERT_TRUE(ctx.fired) below is the oracle
+    (void)fixpp::test_support::wait_for_flag(ctx.fired,
+                                             5s);  // the ASSERT_TRUE(ctx.fired) below is the oracle
 
     ASSERT_TRUE(ctx.fired.load()) << "the ExecutionReport must reach the acceptor's registered "
                                      "receive callback";

@@ -81,13 +81,13 @@ namespace {
 
 // ── FIX frame helpers ─────────────────────────────────────────────────────────
 
-static std::string field(int tag, std::string_view val) {
+std::string field(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
-static std::vector<std::byte> make_logon_frame(std::string_view bs, std::uint32_t seq,
-                                               std::string_view sender, std::string_view target,
-                                               int hbt = 30) {
+std::vector<std::byte> make_logon_frame(std::string_view bs, std::uint32_t seq,
+                                        std::string_view sender, std::string_view target,
+                                        int hbt = 30) {
     std::string body;
     body += field(35, "A");
     body += field(34, std::to_string(seq));
@@ -116,16 +116,16 @@ static std::vector<std::byte> make_logon_frame(std::string_view bs, std::uint32_
 
 // ── Event helpers ─────────────────────────────────────────────────────────────
 
-static bool has_peer_identity_bound_event(const fixpp::session::Session& sess) {
+bool has_peer_identity_bound_event(const fixpp::session::Session& sess) {
     auto events = sess.recent_events();
-    return std::any_of(events.begin(), events.end(), [](const fixpp::session::SessionEvent& ev) {
+    return std::ranges::any_of(events, [](const fixpp::session::SessionEvent& ev) {
         return std::holds_alternative<fixpp::session::session_event_peer_identity_bound>(ev);
     });
 }
 
-static bool has_compid_auth_failed_event(const fixpp::session::Session& sess) {
+bool has_compid_auth_failed_event(const fixpp::session::Session& sess) {
     auto events = sess.recent_events();
-    return std::any_of(events.begin(), events.end(), [](const fixpp::session::SessionEvent& ev) {
+    return std::ranges::any_of(events, [](const fixpp::session::SessionEvent& ev) {
         return std::holds_alternative<fixpp::session::session_event_compid_authorization_failed>(
             ev);
     });
@@ -215,7 +215,7 @@ TEST_F(CompidBindingSymmetricTest, CellA_Acceptor_PeerClientCert_BindsSenderComp
 
     // Peer (TW initiator) sends Logon with SenderCompID(49)="TW".
     auto logon = make_logon_frame("FIX.4.2", 1, "TW", "ISLD");
-    feed(sess, logon);
+    ASSERT_TRUE(feed(sess, logon).has_value());
 
     // Cell A: MUST reach Active (SAN-DNS matches binding → TW authorized).
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active)
@@ -274,7 +274,7 @@ TEST_F(CompidBindingSymmetricTest, CellB_Initiator_PeerServerCert_BindsTargetCom
 
     // Peer (ISLD acceptor) sends Logon-ack: SenderCompID=ISLD, TargetCompID=TW.
     auto logon_ack = make_logon_frame("FIX.4.2", 1, "ISLD", "TW");
-    feed(sess, logon_ack);
+    ASSERT_TRUE(feed(sess, logon_ack).has_value());
 
     // Cell B: MUST reach Active (CN matches binding → ISLD authorized for initiator).
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active)
@@ -323,7 +323,7 @@ TEST_F(CompidBindingSymmetricTest, CellC_Acceptor_WrongCompId_Rejected) {
     fixpp::test_support::inject_live_identity(sess, std::move(pid));
 
     auto logon = make_logon_frame("FIX.4.2", 1, "TW", "ISLD");
-    feed(sess, logon);
+    (void)feed(sess, logon);  // outcome checked below via state
 
     // STRANGER not in policy → Disconnected.
     EXPECT_NE(sess.state(), fixpp::session::fsm_state::Active)

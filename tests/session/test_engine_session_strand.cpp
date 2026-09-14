@@ -141,8 +141,8 @@
 #include <fixpp/tls/file_cert_source.hpp>
 #include <fixpp/tls/security_profile.hpp>
 #include <fixpp/transport/endpoint.hpp>
-#include <fixpp/transport/transport_factory.hpp>
 #include <fixpp/transport/tls_transport.hpp>
+#include <fixpp/transport/transport_factory.hpp>
 #include <future>
 #include <memory>
 #include <span>
@@ -153,17 +153,16 @@
 // Internal transport header: needed for V-10's socket executor inspection.
 // The engine_session_strand_test CMakeLists adds "${CMAKE_SOURCE_DIR}/src" to
 // the include path for this purpose (mirrors tests/perf/test_socket_option_defaults).
-#include "transport/asio_tls_transport.hpp"
-
 #include "support/minimal_dictionary.hpp"
 #include "support/wait_until.hpp"
+#include "transport/asio_tls_transport.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::core::error;
 using fixpp::core::expected_t;
 using fixpp::session::Application;
-using fixpp::session::SessionId;
 using fixpp::session::fsm_state;
+using fixpp::session::SessionId;
 
 // ── test-access helper for asio_tls_transport::socket_ ───────────────────────
 // `friend class asio_tls_transport_test_access;` is declared in
@@ -173,9 +172,7 @@ using fixpp::session::fsm_state;
 namespace fixpp::transport {
 class asio_tls_transport_test_access {
 public:
-    static asio::ip::tcp::socket& socket_of(asio_tls_transport& t) noexcept {
-        return t.socket_;
-    }
+    static asio::ip::tcp::socket& socket_of(asio_tls_transport& t) noexcept { return t.socket_; }
 };
 }  // namespace fixpp::transport
 
@@ -194,8 +191,7 @@ const char* get_fixture_dir() {
 }
 
 // Build a shared TLS factory (mtls_ca profile, leaf_rsa2048 cert).
-static std::shared_ptr<fixpp::transport::TransportFactory> make_tls_factory(
-    const char* fixture_dir) {
+std::shared_ptr<fixpp::transport::TransportFactory> make_tls_factory(const char* fixture_dir) {
     fixpp::tls::file_cert_source::Config cs_cfg;
     cs_cfg.leaf_path = std::string(fixture_dir) + "/leaf_rsa2048.pem";
     cs_cfg.private_key_path = std::string(fixture_dir) + "/leaf_rsa2048.key";
@@ -215,7 +211,7 @@ static std::shared_ptr<fixpp::transport::TransportFactory> make_tls_factory(
 }
 
 // Build a mock clock (same pattern as test_application_engine_send.cpp).
-static std::shared_ptr<fixpp::core::mock_clock> make_mock_clock(asio::io_context& ioc) {
+std::shared_ptr<fixpp::core::mock_clock> make_mock_clock(asio::io_context& ioc) {
     using namespace std::chrono;
     auto utc = system_clock::time_point{} + seconds{1704067200};
     auto stp = fixpp::core::steady_time_point{} + seconds{0};
@@ -227,12 +223,9 @@ static std::shared_ptr<fixpp::core::mock_clock> make_mock_clock(asio::io_context
 //   - acceptor: `reconnect_endpoint.port = port` → listens on that specific port.
 //   - initiator: `reconnect_endpoint.port = port` → connects to that port.
 // Same pattern as test_application_engine_send.cpp:make_session_cfg.
-static fixpp::session::SessionConfig make_session_cfg(
-    std::shared_ptr<fixpp::transport::TransportFactory> fac,
-    const char* sender, const char* target,
-    fixpp::session::session_role role,
-    const char* peer_compid,
-    asio::any_io_executor exec,
+fixpp::session::SessionConfig make_session_cfg(
+    std::shared_ptr<fixpp::transport::TransportFactory> fac, const char* sender, const char* target,
+    fixpp::session::session_role role, const char* peer_compid, asio::any_io_executor exec,
     uint16_t port) {
     fixpp::session::SessionConfig c;
     c.sender_comp_id = sender;
@@ -254,7 +247,7 @@ static fixpp::session::SessionConfig make_session_cfg(
 }
 
 // Reserve a free loopback port by binding a temporary acceptor to port 0.
-static uint16_t reserve_free_port(asio::io_context& ioc) {
+uint16_t reserve_free_port(asio::io_context& ioc) {
     asio::ip::tcp::acceptor a{ioc};
     asio::ip::tcp::endpoint ep{asio::ip::make_address("127.0.0.1"), 0};
     a.open(ep.protocol());
@@ -269,8 +262,7 @@ static uint16_t reserve_free_port(asio::io_context& ioc) {
 // Returns pred() at exit.
 // MUST NOT be called while other threads are in ioc.run() — restart() is UB then.
 // Use wait_until_observed() instead when worker threads own the ioc.
-static bool wait_pred(asio::io_context& ioc, auto pred,
-                      std::chrono::milliseconds budget) {
+bool wait_pred(asio::io_context& ioc, auto pred, std::chrono::milliseconds budget) {
     auto end = std::chrono::steady_clock::now() + budget;
     while (!pred() && std::chrono::steady_clock::now() < end) {
         ioc.run_for(50ms);
@@ -344,36 +336,40 @@ using fixpp::test_support::wait_until_observed;
 
 // Wait for both sessions to reach fsm_state::Active via lookup + state() check.
 // Safer than counting onLogon callbacks because it directly observes the FSM state.
-static bool wait_both_active(asio::io_context& ioc,
-                             fixpp::session::Engine& engine,
-                             const SessionId& acc_id, const SessionId& ini_id,
-                             std::chrono::milliseconds budget) {
-    return wait_pred(ioc, [&]() -> bool {
-        // T024: lookup() now returns shared_ptr<Session> (bounded handle).
-        // operator bool() and -> work the same as with raw Session*.
-        auto a = engine.lookup(acc_id);
-        auto i = engine.lookup(ini_id);
-        return a && i
-            && a->state() == fsm_state::Active
-            && i->state() == fsm_state::Active;
-    }, budget);
+bool wait_both_active(asio::io_context& ioc, fixpp::session::Engine& engine,
+                      const SessionId& acc_id, const SessionId& ini_id,
+                      std::chrono::milliseconds budget) {
+    return wait_pred(
+        ioc,
+        [&]() -> bool {
+            // T024: lookup() now returns shared_ptr<Session> (bounded handle).
+            // operator bool() and -> work the same as with raw Session*.
+            auto a = engine.lookup(acc_id);
+            auto i = engine.lookup(ini_id);
+            return a && i && a->state() == fsm_state::Active && i->state() == fsm_state::Active;
+        },
+        budget);
 }
 
 // Stop the engine safely: co_spawn stop() and drain ioc until complete.
 // Hard deadline of 10s. ioc.restart() is called first to ensure the ioc
 // is in a runnable state even if ioc.stop() was called earlier.
-static void stop_engine_sync(asio::io_context& ioc, fixpp::session::Engine& eng) {
+void stop_engine_sync(asio::io_context& ioc, fixpp::session::Engine& eng) {
     if (eng.stopped()) return;
     ioc.restart();
     auto sf = asio::co_spawn(ioc.get_executor(), eng.stop(), asio::use_future);
     // Drive the ioc until the stop() coroutine completes or 10s elapses.
-    bool done = wait_pred(ioc, [&]{ return sf.wait_for(0ms) == std::future_status::ready; }, 10000ms);
+    bool done =
+        wait_pred(ioc, [&] { return sf.wait_for(0ms) == std::future_status::ready; }, 10000ms);
     if (!done) {
         // stop() did not complete within 10s — the engine will assert on destruction.
         // This indicates a bug in stop() or the test setup (e.g., ioc already stopped).
         return;
     }
-    try { sf.get(); } catch (...) { /* tolerate teardown exceptions */ }
+    try {
+        sf.get();
+    } catch (...) { /* tolerate teardown exceptions */
+    }
 }
 
 // ── V-1: PerSessionTeardown_TransportCloseSerializedWithRead ─────────────────
@@ -400,8 +396,7 @@ static void stop_engine_sync(asio::io_context& ioc, fixpp::session::Engine& eng)
 
 TEST(EngineSessionStrand, V1_PerSessionTeardown_TransportCloseSerializedWithRead) {
     const char* fixture_dir = get_fixture_dir();
-    if (!fixture_dir || fixture_dir[0] == '\0')
-        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    if (!fixture_dir || fixture_dir[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
 
     asio::io_context ioc;
     const uint16_t port = reserve_free_port(ioc);
@@ -409,12 +404,12 @@ TEST(EngineSessionStrand, V1_PerSessionTeardown_TransportCloseSerializedWithRead
     if (!fac) GTEST_SKIP() << "TLS factory build failed (cert/key not available)";
 
     // Build session configs before constructing engine (so ASSERT fires pre-engine).
-    auto acc_cfg = make_session_cfg(
-        fac, "ACCEPTOR", "INITIATOR", fixpp::session::session_role::acceptor, "INITIATOR",
-        ioc.get_executor(), port);
-    auto ini_cfg = make_session_cfg(
-        fac, "INITIATOR", "ACCEPTOR", fixpp::session::session_role::initiator, "ACCEPTOR",
-        ioc.get_executor(), port);
+    auto acc_cfg =
+        make_session_cfg(fac, "ACCEPTOR", "INITIATOR", fixpp::session::session_role::acceptor,
+                         "INITIATOR", ioc.get_executor(), port);
+    auto ini_cfg =
+        make_session_cfg(fac, "INITIATOR", "ACCEPTOR", fixpp::session::session_role::initiator,
+                         "ACCEPTOR", ioc.get_executor(), port);
     const SessionId acc_id = SessionId::from_config(acc_cfg);
     const SessionId ini_id = SessionId::from_config(ini_cfg);
 
@@ -451,8 +446,8 @@ TEST(EngineSessionStrand, V1_PerSessionTeardown_TransportCloseSerializedWithRead
     // from the main thread (restart() while workers are in run() is asio UB).
     // [[feedback_single_threaded_harness_masks_strand_races]]
     auto wg = asio::make_work_guard(ioc);
-    std::thread t1{[&ioc]{ ioc.run(); }};
-    std::thread t2{[&ioc]{ ioc.run(); }};
+    std::thread t1{[&ioc] { ioc.run(); }};
+    std::thread t2{[&ioc] { ioc.run(); }};
 
     // Phase 3: Teardown.
     // Pre-T014: transport.close() runs on whatever thread runs stop() — NOT
@@ -465,12 +460,11 @@ TEST(EngineSessionStrand, V1_PerSessionTeardown_TransportCloseSerializedWithRead
     //   If we reach engine->stopped() without aborting, sanitizers confirm no race.
     //   Post-T014: the session strand serializes close() with the read-completion.
     {
-        auto stop_fut = asio::co_spawn(
-            ioc.get_executor(), engine->stop(), asio::use_future);
+        auto stop_fut = asio::co_spawn(ioc.get_executor(), engine->stop(), asio::use_future);
         // wait_until_observed: no ioc.run_for()/restart() while t1/t2 are in run().
         bool stop_done = wait_until_observed(
-            [&]{ return stop_fut.wait_for(0ms) == std::future_status::ready; }, 8000ms);
-        wg.reset();   // release guard → workers exit when queue drains
+            [&] { return stop_fut.wait_for(0ms) == std::future_status::ready; }, 8000ms);
+        wg.reset();  // release guard → workers exit when queue drains
         t1.join();
         t2.join();
         ASSERT_TRUE(stop_done) << "V-1: engine.stop() did not complete within 8s";
@@ -478,8 +472,7 @@ TEST(EngineSessionStrand, V1_PerSessionTeardown_TransportCloseSerializedWithRead
     }
 
     // V-1: verify engine is stopped before destruction.
-    EXPECT_TRUE(engine->stopped())
-        << "V-1: engine must be stopped after co_await stop() completes";
+    EXPECT_TRUE(engine->stopped()) << "V-1: engine must be stopped after co_await stop() completes";
 
     // The sanitizer outcome is the PRIMARY evidence for V-1:
     //   - Pre-T014: ASan/TSan should detect the BIO race or UAF during teardown.
@@ -515,8 +508,7 @@ TEST(EngineSessionStrand, V1_PerSessionTeardown_TransportCloseSerializedWithRead
 
 TEST(EngineSessionStrand, V3_TwoSessionsMT_IndependentProgress) {
     const char* fixture_dir = get_fixture_dir();
-    if (!fixture_dir || fixture_dir[0] == '\0')
-        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    if (!fixture_dir || fixture_dir[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
 
     asio::io_context ioc;
     const uint16_t port1 = reserve_free_port(ioc);
@@ -527,19 +519,19 @@ TEST(EngineSessionStrand, V3_TwoSessionsMT_IndependentProgress) {
 
     // Build session configs before constructing engine.
     // Pair A: ACCEPTOR / INITIATOR (both on port1).
-    auto acc_a = make_session_cfg(
-        fac, "ACCEPTOR", "INITIATOR", fixpp::session::session_role::acceptor, "INITIATOR",
-        ioc.get_executor(), port1);
-    auto ini_a = make_session_cfg(
-        fac, "INITIATOR", "ACCEPTOR", fixpp::session::session_role::initiator, "ACCEPTOR",
-        ioc.get_executor(), port1);
+    auto acc_a =
+        make_session_cfg(fac, "ACCEPTOR", "INITIATOR", fixpp::session::session_role::acceptor,
+                         "INITIATOR", ioc.get_executor(), port1);
+    auto ini_a =
+        make_session_cfg(fac, "INITIATOR", "ACCEPTOR", fixpp::session::session_role::initiator,
+                         "ACCEPTOR", ioc.get_executor(), port1);
     // Pair B: distinct CompID pair (ACCEPTOR2/INITIATOR2), separate listener on port2.
-    auto acc_b = make_session_cfg(
-        fac, "ACCEPTOR2", "INITIATOR2", fixpp::session::session_role::acceptor, "INITIATOR2",
-        ioc.get_executor(), port2);
-    auto ini_b = make_session_cfg(
-        fac, "INITIATOR2", "ACCEPTOR2", fixpp::session::session_role::initiator, "ACCEPTOR2",
-        ioc.get_executor(), port2);
+    auto acc_b =
+        make_session_cfg(fac, "ACCEPTOR2", "INITIATOR2", fixpp::session::session_role::acceptor,
+                         "INITIATOR2", ioc.get_executor(), port2);
+    auto ini_b =
+        make_session_cfg(fac, "INITIATOR2", "ACCEPTOR2", fixpp::session::session_role::initiator,
+                         "ACCEPTOR2", ioc.get_executor(), port2);
 
     const SessionId acc_a_id = SessionId::from_config(acc_a);
     const SessionId ini_a_id = SessionId::from_config(ini_a);
@@ -617,8 +609,7 @@ TEST(EngineSessionStrand, V3_TwoSessionsMT_IndependentProgress) {
 
 TEST(EngineSessionStrand, V9_ReentrantSend_FromCallback_NoDeadlock_AndPostStopFastFails) {
     const char* fixture_dir = get_fixture_dir();
-    if (!fixture_dir || fixture_dir[0] == '\0')
-        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    if (!fixture_dir || fixture_dir[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
 
     asio::io_context ioc;
     const uint16_t port = reserve_free_port(ioc);
@@ -628,16 +619,15 @@ TEST(EngineSessionStrand, V9_ReentrantSend_FromCallback_NoDeadlock_AndPostStopFa
     // Application for sub-cell (a): re-entrant send from inside fromApp.
     struct ReentrantApp : public Application {
         fixpp::session::Engine* engine_ptr = nullptr;
-        asio::any_io_executor exec;   // engine executor (same as ioc.get_executor())
+        asio::any_io_executor exec;  // engine executor (same as ioc.get_executor())
         SessionId send_to_id;
         std::vector<std::byte> payload;
         std::atomic<int> from_app_count{0};
         std::atomic<bool> reentrant_done{false};
         std::atomic<bool> reentrant_error{false};
 
-        expected_t<void> fromApp(
-            const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>&,
-            const SessionId&) override {
+        expected_t<void> fromApp(const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>&,
+                                 const SessionId&) override {
             int call = ++from_app_count;
             // Issue re-entrant Engine::send on the FIRST fromApp call.
             // Use asio::post to hop off the current callback context before calling
@@ -652,16 +642,16 @@ TEST(EngineSessionStrand, V9_ReentrantSend_FromCallback_NoDeadlock_AndPostStopFa
                 auto* err_flag = &reentrant_error;
                 asio::post(ex, [&eng, ex, sid, pl = std::move(pl), done, err_flag]() mutable {
                     asio::co_spawn(ex, eng.send(sid, std::span<const std::byte>(pl)),
-                        [done, err_flag](std::exception_ptr ep, expected_t<void> r) {
-                            if (ep) {
-                                err_flag->store(true, std::memory_order_release);
-                            } else if (r.has_value()) {
-                                done->store(true, std::memory_order_release);
-                            } else {
-                                // Send returned an error (acceptable pre-T012).
-                                err_flag->store(true, std::memory_order_release);
-                            }
-                        });
+                                   [done, err_flag](std::exception_ptr ep, expected_t<void> r) {
+                                       if (ep) {
+                                           err_flag->store(true, std::memory_order_release);
+                                       } else if (r.has_value()) {
+                                           done->store(true, std::memory_order_release);
+                                       } else {
+                                           // Send returned an error (acceptable pre-T012).
+                                           err_flag->store(true, std::memory_order_release);
+                                       }
+                                   });
                 });
             }
             return {};
@@ -671,12 +661,12 @@ TEST(EngineSessionStrand, V9_ReentrantSend_FromCallback_NoDeadlock_AndPostStopFa
 
     // Build session configs before engine construction (avoids ASSERT early-exit
     // with never-stopped engine; Engine::~Engine asserts stopped_ even pre-start).
-    auto acc_cfg = make_session_cfg(
-        fac, "ACCEPTOR", "INITIATOR", fixpp::session::session_role::acceptor, "INITIATOR",
-        ioc.get_executor(), port);
-    auto ini_cfg = make_session_cfg(
-        fac, "INITIATOR", "ACCEPTOR", fixpp::session::session_role::initiator, "ACCEPTOR",
-        ioc.get_executor(), port);
+    auto acc_cfg =
+        make_session_cfg(fac, "ACCEPTOR", "INITIATOR", fixpp::session::session_role::acceptor,
+                         "INITIATOR", ioc.get_executor(), port);
+    auto ini_cfg =
+        make_session_cfg(fac, "INITIATOR", "ACCEPTOR", fixpp::session::session_role::initiator,
+                         "ACCEPTOR", ioc.get_executor(), port);
     const SessionId acc_id = SessionId::from_config(acc_cfg);
     const SessionId ini_id = SessionId::from_config(ini_cfg);
 
@@ -703,12 +693,17 @@ TEST(EngineSessionStrand, V9_ReentrantSend_FromCallback_NoDeadlock_AndPostStopFa
     }
 
     // Phase 2: add background threads for genuine multi-threaded executor.
-    std::thread t1{[&ioc]{ ioc.run(); }};
-    std::thread t2{[&ioc]{ ioc.run(); }};
+    std::thread t1{[&ioc] { ioc.run(); }};
+    std::thread t2{[&ioc] { ioc.run(); }};
 
     // Wire the re-entrant application.
     static const char kPayload[] =
-        "35=D\x01" "11=ORD001\x01" "54=1\x01" "55=AAPL\x01" "40=2\x01" "44=100.00\x01";
+        "35=D\x01"
+        "11=ORD001\x01"
+        "54=1\x01"
+        "55=AAPL\x01"
+        "40=2\x01"
+        "44=100.00\x01";
     std::vector<std::byte> payload;
     for (const char* p = kPayload; *p; ++p) payload.push_back(static_cast<std::byte>(*p));
     app->engine_ptr = engine.get();
@@ -721,11 +716,11 @@ TEST(EngineSessionStrand, V9_ReentrantSend_FromCallback_NoDeadlock_AndPostStopFa
     // Sub-cell (a): trigger fromApp by sending from initiator → acceptor.
     {
         auto send_fut = asio::co_spawn(ioc.get_executor(),
-            engine->send(ini_id, std::span<const std::byte>(payload)),
-            asio::use_future);
+                                       engine->send(ini_id, std::span<const std::byte>(payload)),
+                                       asio::use_future);
         // wait_until_observed: no restart() while t1/t2 are in ioc.run().
         bool send_done = wait_until_observed(
-            [&]{ return send_fut.wait_for(0ms) == std::future_status::ready; }, 5000ms);
+            [&] { return send_fut.wait_for(0ms) == std::future_status::ready; }, 5000ms);
         if (!send_done) {
             ioc.stop();
             t1.join();
@@ -734,23 +729,23 @@ TEST(EngineSessionStrand, V9_ReentrantSend_FromCallback_NoDeadlock_AndPostStopFa
             FAIL() << "V-9(a): initial send did not complete within 5s (possible deadlock)";
         }
         auto r = send_fut.get();
-        EXPECT_TRUE(r.has_value())
-            << "V-9(a): initial send must succeed; err="
-            << (r.has_value() ? 0 : static_cast<int>(r.error()));
+        EXPECT_TRUE(r.has_value()) << "V-9(a): initial send must succeed; err="
+                                   << (r.has_value() ? 0 : static_cast<int>(r.error()));
     }
 
     // Wait for fromApp to fire on the acceptor.
     bool fa_fired = wait_until_observed(
-        [&]{ return app->from_app_count.load(std::memory_order_acquire) >= 1; }, 5000ms);
+        [&] { return app->from_app_count.load(std::memory_order_acquire) >= 1; }, 5000ms);
     EXPECT_TRUE(fa_fired) << "V-9(a): fromApp must fire on the acceptor after initiator send";
 
     if (fa_fired) {
         // Wait for re-entrant send to resolve (done OR error; MUST NOT hang).
         bool re_resolved = wait_until_observed(
-            [&]{
-                return app->reentrant_done.load(std::memory_order_acquire)
-                    || app->reentrant_error.load(std::memory_order_acquire);
-            }, 5000ms);
+            [&] {
+                return app->reentrant_done.load(std::memory_order_acquire) ||
+                       app->reentrant_error.load(std::memory_order_acquire);
+            },
+            5000ms);
 
         // V-9(a) primary assertion: re-entrant send MUST NOT deadlock.
         // Pre-T012: send does NOT route through control_strand_; bare exec_ is used.
@@ -773,8 +768,8 @@ TEST(EngineSessionStrand, V9_ReentrantSend_FromCallback_NoDeadlock_AndPostStopFa
         auto stop_fut = asio::co_spawn(ioc.get_executor(), engine->stop(), asio::use_future);
         // wait_until_observed: no restart() while t1/t2 are in ioc.run().
         bool stop_done = wait_until_observed(
-            [&]{ return stop_fut.wait_for(0ms) == std::future_status::ready; }, 8000ms);
-        ioc.stop();   // safe: stop() from any thread is defined behaviour
+            [&] { return stop_fut.wait_for(0ms) == std::future_status::ready; }, 8000ms);
+        ioc.stop();  // safe: stop() from any thread is defined behaviour
         t1.join();
         t2.join();
         if (!stop_done) {
@@ -789,13 +784,12 @@ TEST(EngineSessionStrand, V9_ReentrantSend_FromCallback_NoDeadlock_AndPostStopFa
     {
         // ioc was stopped above; no workers running — restart() is safe here.
         ioc.restart();
-        auto post_stop_fut = asio::co_spawn(ioc.get_executor(),
-            engine->send(ini_id, std::span<const std::byte>(payload)),
+        auto post_stop_fut = asio::co_spawn(
+            ioc.get_executor(), engine->send(ini_id, std::span<const std::byte>(payload)),
             asio::use_future);
-        bool post_stop_done = wait_pred(ioc,
-            [&]{ return post_stop_fut.wait_for(0ms) == std::future_status::ready; }, 3000ms);
-        ASSERT_TRUE(post_stop_done)
-            << "V-9(b): post-stop send must complete (not hang) within 3s";
+        bool post_stop_done = wait_pred(
+            ioc, [&] { return post_stop_fut.wait_for(0ms) == std::future_status::ready; }, 3000ms);
+        ASSERT_TRUE(post_stop_done) << "V-9(b): post-stop send must complete (not hang) within 3s";
 
         auto r = post_stop_fut.get();
         // Must be an error (not success — engine is stopped, registry is cleared).
@@ -804,11 +798,10 @@ TEST(EngineSessionStrand, V9_ReentrantSend_FromCallback_NoDeadlock_AndPostStopFa
         if (!r.has_value()) {
             const bool is_valid_fast_fail =
                 r.error() == error::session_invalid_state_for_send ||  // slot 77
-                r.error() == error::session_invalid_argument;           // slot 119
+                r.error() == error::session_invalid_argument;          // slot 119
             EXPECT_TRUE(is_valid_fast_fail)
                 << "V-9(b): post-stop send must return session_invalid_state_for_send(77)"
-                << " or session_invalid_argument(119); got="
-                << static_cast<int>(r.error());
+                << " or session_invalid_argument(119); got=" << static_cast<int>(r.error());
         }
     }
 
@@ -846,8 +839,7 @@ TEST(EngineSessionStrand, V9_ReentrantSend_FromCallback_NoDeadlock_AndPostStopFa
 
 TEST(EngineSessionStrand, V10_SocketExecutorIsSessionStrand) {
     const char* fixture_dir = get_fixture_dir();
-    if (!fixture_dir || fixture_dir[0] == '\0')
-        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    if (!fixture_dir || fixture_dir[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
 
     asio::io_context ioc;
     const uint16_t port = reserve_free_port(ioc);
@@ -856,12 +848,12 @@ TEST(EngineSessionStrand, V10_SocketExecutorIsSessionStrand) {
 
     // Build session configs before engine construction (avoids early-exit with
     // never-stopped engine; Engine::~Engine asserts stopped_ even pre-start).
-    auto acc_cfg = make_session_cfg(
-        fac, "ACCEPTOR", "INITIATOR", fixpp::session::session_role::acceptor, "INITIATOR",
-        ioc.get_executor(), port);
-    auto ini_cfg = make_session_cfg(
-        fac, "INITIATOR", "ACCEPTOR", fixpp::session::session_role::initiator, "ACCEPTOR",
-        ioc.get_executor(), port);
+    auto acc_cfg =
+        make_session_cfg(fac, "ACCEPTOR", "INITIATOR", fixpp::session::session_role::acceptor,
+                         "INITIATOR", ioc.get_executor(), port);
+    auto ini_cfg =
+        make_session_cfg(fac, "INITIATOR", "ACCEPTOR", fixpp::session::session_role::initiator,
+                         "ACCEPTOR", ioc.get_executor(), port);
     const SessionId acc_id = SessionId::from_config(acc_cfg);
     const SessionId ini_id = SessionId::from_config(ini_cfg);
 
@@ -1049,8 +1041,7 @@ TEST(EngineSessionStrand, V10_SocketExecutorIsSessionStrand) {
 
 TEST(EngineSessionStrand, V8_ControlPlaneRace_PublicReaderVsMutation) {
     const char* fixture_dir = get_fixture_dir();
-    if (!fixture_dir || fixture_dir[0] == '\0')
-        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    if (!fixture_dir || fixture_dir[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
 
     // Use a multi-threaded io_context: main thread + t1 + t2 drive the engine.
     // A separate t_reader thread calls the public readers with NO synchronisation.
@@ -1064,10 +1055,9 @@ TEST(EngineSessionStrand, V8_ControlPlaneRace_PublicReaderVsMutation) {
 
     // Register an acceptor session: the accept loop writes listener_endpoints_[id]
     // at startup (no peer needed to trigger that write).
-    auto acc_cfg = make_session_cfg(
-        fac, "ACCEPTOR_V8", "INITIATOR_V8",
-        fixpp::session::session_role::acceptor, "INITIATOR_V8",
-        ioc.get_executor(), port);
+    auto acc_cfg =
+        make_session_cfg(fac, "ACCEPTOR_V8", "INITIATOR_V8", fixpp::session::session_role::acceptor,
+                         "INITIATOR_V8", ioc.get_executor(), port);
     const SessionId acc_id = SessionId::from_config(acc_cfg);
 
     fixpp::core::EngineConfig ecfg;
@@ -1087,8 +1077,8 @@ TEST(EngineSessionStrand, V8_ControlPlaneRace_PublicReaderVsMutation) {
     // queued.  t1 and t2 drive the ioc (and the accept loop which writes the map).
     // [[feedback_fork_inherited_asio_pool_deadlock]] — threads constructed after
     // engine->start(), not before.
-    std::thread t1{[&ioc]{ ioc.run(); }};
-    std::thread t2{[&ioc]{ ioc.run(); }};
+    std::thread t1{[&ioc] { ioc.run(); }};
+    std::thread t2{[&ioc] { ioc.run(); }};
 
     // Reader thread: calls acceptor_bound_endpoint() and lookup() in a tight
     // loop with NO synchronisation between this thread and the engine threads.
@@ -1131,7 +1121,7 @@ TEST(EngineSessionStrand, V8_ControlPlaneRace_PublicReaderVsMutation) {
     // object would create a happens-before edge and suppress the race TSan must
     // report. Read that as the design intent it is, qualified by the edge above.
     std::atomic<bool> reader_stop{false};
-    std::atomic<int>  reader_iterations{0};
+    std::atomic<int> reader_iterations{0};
     std::thread t_reader{[&engine, &acc_id, &reader_stop, &reader_iterations]() {
         // Spin calling the public readers.  The reads race:
         //   (a) the accept-loop write of listener_endpoints_[id]  — write vs read
@@ -1197,8 +1187,7 @@ TEST(EngineSessionStrand, V8_ControlPlaneRace_PublicReaderVsMutation) {
     // t_reader is spinning.  This is the second window where the race fires (in
     // addition to the initial write window above).
     {
-        auto stop_fut = asio::co_spawn(
-            ioc.get_executor(), engine->stop(), asio::use_future);
+        auto stop_fut = asio::co_spawn(ioc.get_executor(), engine->stop(), asio::use_future);
         // ⚠️ wait_until_observed, NOT wait_pred — t1 and t2 are inside
         // `ioc.run()` here, and wait_pred drives `run_for()/restart()`, which
         // its own contract forbids in exactly that state. V-11 and V-13 already
@@ -1229,13 +1218,11 @@ TEST(EngineSessionStrand, V8_ControlPlaneRace_PublicReaderVsMutation) {
     //
     //   The gtest assertion below is the GREEN post-condition.  Pre-T026, TSan
     //   aborts before this line is reached.
-    EXPECT_TRUE(engine->stopped())
-        << "V-8: engine must be stopped after stop() completes";
+    EXPECT_TRUE(engine->stopped()) << "V-8: engine must be stopped after stop() completes";
 
     // Confirm the reader actually executed enough iterations to give TSan time
     // to observe the race window (both the initial write and the clear).
-    EXPECT_GT(reader_iterations.load(), 0)
-        << "V-8: reader thread must have iterated at least once";
+    EXPECT_GT(reader_iterations.load(), 0) << "V-8: reader thread must have iterated at least once";
 }
 
 // ── V-12: StopBeforeAwaitedPublish ───────────────────────────────────────────
@@ -1274,8 +1261,7 @@ TEST(EngineSessionStrand, V8_ControlPlaneRace_PublicReaderVsMutation) {
 
 TEST(EngineSessionStrand, V12_StopBeforeAwaitedPublish) {
     const char* fixture_dir = get_fixture_dir();
-    if (!fixture_dir || fixture_dir[0] == '\0')
-        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    if (!fixture_dir || fixture_dir[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
 
     asio::io_context ioc;
     const uint16_t port = reserve_free_port(ioc);
@@ -1284,10 +1270,9 @@ TEST(EngineSessionStrand, V12_StopBeforeAwaitedPublish) {
 
     // Build an acceptor session — its loop parks in async_accept after the
     // listener build.  We call stop() before any peer connects.
-    auto acc_cfg = make_session_cfg(
-        fac, "ACCEPTOR_V12", "INITIATOR_V12",
-        fixpp::session::session_role::acceptor, "INITIATOR_V12",
-        ioc.get_executor(), port);
+    auto acc_cfg = make_session_cfg(fac, "ACCEPTOR_V12", "INITIATOR_V12",
+                                    fixpp::session::session_role::acceptor, "INITIATOR_V12",
+                                    ioc.get_executor(), port);
     const SessionId acc_id = SessionId::from_config(acc_cfg);
 
     fixpp::core::EngineConfig ecfg;
@@ -1320,10 +1305,8 @@ TEST(EngineSessionStrand, V12_StopBeforeAwaitedPublish) {
     // precisely because nothing else is inside `ioc.run()`. Swapping in the
     // sleep-poll form here would wait for an event that nothing is running to
     // produce.
-    const bool acceptor_bound = wait_pred(
-        ioc,
-        [&]{ return engine->acceptor_bound_endpoint(acc_id).port != 0; },
-        5000ms);
+    const bool acceptor_bound =
+        wait_pred(ioc, [&] { return engine->acceptor_bound_endpoint(acc_id).port != 0; }, 5000ms);
     EXPECT_TRUE(acceptor_bound)
         << "V-12: the accept loop did not reach a bound listener within 5s, so "
            "stop() below would be called against a loop that never started — "
@@ -1336,8 +1319,7 @@ TEST(EngineSessionStrand, V12_StopBeforeAwaitedPublish) {
     // earliest possible point (no transport was created).
     stop_engine_sync(ioc, *engine);
 
-    ASSERT_TRUE(engine->stopped())
-        << "V-12: engine must be stopped after stop_engine_sync";
+    ASSERT_TRUE(engine->stopped()) << "V-12: engine must be stopped after stop_engine_sync";
 
     // V-12 primary assertion: no session has been published as Active.
     // After stop(), lookup() returns nullptr (empty shared_ptr, registry cleared in step 5).
@@ -1385,8 +1367,7 @@ TEST(EngineSessionStrand, V12_StopBeforeAwaitedPublish) {
 
 TEST(EngineSessionStrand, V12b_StopBeforePublish_WithLiveTransport) {
     const char* fixture_dir = get_fixture_dir();
-    if (!fixture_dir || fixture_dir[0] == '\0')
-        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    if (!fixture_dir || fixture_dir[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
 
     asio::io_context ioc;
     const uint16_t port = reserve_free_port(ioc);
@@ -1399,14 +1380,12 @@ TEST(EngineSessionStrand, V12b_StopBeforePublish_WithLiveTransport) {
     std::atomic<bool> seam_reached{false};
     std::atomic<bool> seam_release{false};
 
-    auto acc_cfg = make_session_cfg(
-        fac, "ACCEPTOR_V12B", "INITIATOR_V12B",
-        fixpp::session::session_role::acceptor, "INITIATOR_V12B",
-        ioc.get_executor(), port);
-    auto ini_cfg = make_session_cfg(
-        fac, "INITIATOR_V12B", "ACCEPTOR_V12B",
-        fixpp::session::session_role::initiator, "ACCEPTOR_V12B",
-        ioc.get_executor(), port);
+    auto acc_cfg = make_session_cfg(fac, "ACCEPTOR_V12B", "INITIATOR_V12B",
+                                    fixpp::session::session_role::acceptor, "INITIATOR_V12B",
+                                    ioc.get_executor(), port);
+    auto ini_cfg = make_session_cfg(fac, "INITIATOR_V12B", "ACCEPTOR_V12B",
+                                    fixpp::session::session_role::initiator, "ACCEPTOR_V12B",
+                                    ioc.get_executor(), port);
 
     // Use a fast reconnect policy so that if the first TCP connect attempt races
     // the accept loop's listener bind (which is synchronous but happens after
@@ -1417,7 +1396,7 @@ TEST(EngineSessionStrand, V12b_StopBeforePublish_WithLiveTransport) {
         fixpp::transport::ReconnectPolicy fast_policy;
         fast_policy.schedule =
             std::pmr::vector<std::chrono::milliseconds>{std::pmr::get_default_resource()};
-        fast_policy.schedule.push_back(std::chrono::milliseconds{100});
+        fast_policy.schedule.emplace_back(100);
         fast_policy.jitter = 0.0;
         fast_policy.max_attempts = 0;  // unbounded
         ini_cfg.reconnect_policy = std::move(fast_policy);
@@ -1472,15 +1451,14 @@ TEST(EngineSessionStrand, V12b_StopBeforePublish_WithLiveTransport) {
     // can run concurrently with the test's stop() call.
     // work_guard keeps workers alive so restart() is never needed from the main thread.
     auto wg = asio::make_work_guard(ioc);
-    std::thread t1{[&ioc]{ ioc.run(); }};
-    std::thread t2{[&ioc]{ ioc.run(); }};
+    std::thread t1{[&ioc] { ioc.run(); }};
+    std::thread t2{[&ioc] { ioc.run(); }};
 
     // Wait for the seam to be reached (transport created, pre-publish pause).
     // Budget: 8s (covers TLS handshake + Logon frame delivery).
     // wait_until_observed: no restart() while t1/t2 are in ioc.run().
     bool seam_reached_ok = wait_until_observed(
-        [&]{ return seam_reached.load(std::memory_order_acquire); },
-        std::chrono::seconds{8});
+        [&] { return seam_reached.load(std::memory_order_acquire); }, std::chrono::seconds{8});
 
     if (!seam_reached_ok) {
         // Seam not reached — release and clean up.
@@ -1488,7 +1466,8 @@ TEST(EngineSessionStrand, V12b_StopBeforePublish_WithLiveTransport) {
         wg.reset();
         t1.join();
         t2.join();
-        GTEST_SKIP() << "V-12b: seam not reached within 8s (loopback initiator may not have connected)";
+        GTEST_SKIP()
+            << "V-12b: seam not reached within 8s (loopback initiator may not have connected)";
     }
 
     // Seam reached: call stop() NOW while the accept loop is paused with a live
@@ -1506,24 +1485,20 @@ TEST(EngineSessionStrand, V12b_StopBeforePublish_WithLiveTransport) {
     //       (observes stopped_ = true → stopped disposition), calls close(terminal),
     //       co_returns → counter decrements → join completes.
     {
-        auto stop_fut = asio::co_spawn(
-            ioc.get_executor(), engine->stop(), asio::use_future);
+        auto stop_fut = asio::co_spawn(ioc.get_executor(), engine->stop(), asio::use_future);
 
         // (b) Poll until stopped_ = true (stop() step 1 on control strand).
         // wait_until_observed: no restart() while t1/t2 are in ioc.run().
-        bool stopped_flag_set = wait_until_observed(
-            [&]{ return engine->stopped(); },
-            3000ms);
+        bool stopped_flag_set = wait_until_observed([&] { return engine->stopped(); }, 3000ms);
 
         // (c) Release the seam — hook exits, accept loop proceeds to publish_entry.
         seam_release.store(true, std::memory_order_release);
 
         // (d) Poll until stop() coroutine fully completes.
         bool done = wait_until_observed(
-            [&]{ return stop_fut.wait_for(0ms) == std::future_status::ready; },
-            10000ms);
+            [&] { return stop_fut.wait_for(0ms) == std::future_status::ready; }, 10000ms);
 
-        wg.reset();   // release guard → workers exit when queue drains
+        wg.reset();  // release guard → workers exit when queue drains
         t1.join();
         t2.join();
 
@@ -1600,14 +1575,12 @@ TEST(EngineSessionStrand, V4V5_SingleThreadedBaselineAndAbiGate) {
     // tests/abi/baseline/libfixpp_session_engine_pre023.nm shows 0 symbol-name
     // changes — but this compile-time check confirms the signature changed.
     // [tasks T024/T026; contracts C-4/C-8; research D8/D-SNAP]
-    using LookupReturnType = decltype(
-        std::declval<fixpp::session::Engine const&>().lookup(
-            std::declval<fixpp::session::SessionId const&>()));
-    static_assert(
-        std::is_same_v<LookupReturnType, std::shared_ptr<fixpp::session::Session>>,
-        "V-4/V-5: Engine::lookup() must return std::shared_ptr<Session> (T024).\n"
-        "If this static_assert FAILS, T024's return-type change was not applied.\n"
-        "anchor: contracts/engine-session-strand.md C-4 + research.md D-SNAP");
+    using LookupReturnType = decltype(std::declval<fixpp::session::Engine const&>().lookup(
+        std::declval<fixpp::session::SessionId const&>()));
+    static_assert(std::is_same_v<LookupReturnType, std::shared_ptr<fixpp::session::Session>>,
+                  "V-4/V-5: Engine::lookup() must return std::shared_ptr<Session> (T024).\n"
+                  "If this static_assert FAILS, T024's return-type change was not applied.\n"
+                  "anchor: contracts/engine-session-strand.md C-4 + research.md D-SNAP");
 
     // V-5: runtime confirmation that the Engine public API compiles correctly
     // with the current shared_ptr<Session> return type.  Verifies the ABI gate is wired.
@@ -1703,8 +1676,7 @@ TEST(EngineSessionStrand, V4V5_SingleThreadedBaselineAndAbiGate) {
 
 TEST(EngineSessionStrand, V11_SnapshotReadersMtSafe) {
     const char* fixture_dir = get_fixture_dir();
-    if (!fixture_dir || fixture_dir[0] == '\0')
-        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    if (!fixture_dir || fixture_dir[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
 
     asio::io_context ioc;
     const uint16_t port = reserve_free_port(ioc);
@@ -1726,20 +1698,18 @@ TEST(EngineSessionStrand, V11_SnapshotReadersMtSafe) {
     // [Race surface: listener_endpoints_ WRITE (accept-loop startup) vs READ
     //  (t_reader→acceptor_bound_endpoint), and registry_ CLEAR (stop()) vs READ
     //  (t_reader→lookup).  No HB edge between t_reader and engine threads.]
-    auto acc_cfg = make_session_cfg(
-        fac, "ACCEPTOR_V11", "INITIATOR_V11",
-        fixpp::session::session_role::acceptor, "INITIATOR_V11",
-        ioc.get_executor(), port);
+    auto acc_cfg = make_session_cfg(fac, "ACCEPTOR_V11", "INITIATOR_V11",
+                                    fixpp::session::session_role::acceptor, "INITIATOR_V11",
+                                    ioc.get_executor(), port);
     // Register the acceptor id for lookup(); lookup() returns nullptr pre-establish
     // (correct per the "null is NOT an error" contract), but the find() itself still
     // reads registry_ — that read races the stop()-clear.
     const SessionId acc_id = SessionId::from_config(acc_cfg);
     // Use a synthesized initiator id to widen the registry_ read surface (lookup returns
     // nullptr for an unregistered id, but STILL reads registry_ — wider race surface).
-    auto ini_cfg_dummy = make_session_cfg(
-        fac, "INITIATOR_V11", "ACCEPTOR_V11",
-        fixpp::session::session_role::initiator, "ACCEPTOR_V11",
-        ioc.get_executor(), port);
+    auto ini_cfg_dummy = make_session_cfg(fac, "INITIATOR_V11", "ACCEPTOR_V11",
+                                          fixpp::session::session_role::initiator, "ACCEPTOR_V11",
+                                          ioc.get_executor(), port);
     const SessionId ini_id = SessionId::from_config(ini_cfg_dummy);
 
     fixpp::core::EngineConfig ecfg;
@@ -1827,14 +1797,15 @@ TEST(EngineSessionStrand, V11_SnapshotReadersMtSafe) {
     //   D-SNAP installed: acceptor_bound_endpoint() and lookup() go through
     //   atomic_load of the immutable snapshot → no unsynchronised map access.
 
-    // Start engine executor threads AFTER engine.start() (per [[feedback_fork_inherited_asio_pool_deadlock]]).
-    // work_guard keeps workers alive so restart() is never needed from the main thread.
+    // Start engine executor threads AFTER engine.start() (per
+    // [[feedback_fork_inherited_asio_pool_deadlock]]). work_guard keeps workers alive so restart()
+    // is never needed from the main thread.
     auto wg = asio::make_work_guard(ioc);
-    std::thread t1{[&ioc]{ ioc.run(); }};
-    std::thread t2{[&ioc]{ ioc.run(); }};
+    std::thread t1{[&ioc] { ioc.run(); }};
+    std::thread t2{[&ioc] { ioc.run(); }};
 
     std::atomic<bool> reader_stop{false};
-    std::atomic<int>  reader_iters{0};
+    std::atomic<int> reader_iters{0};
 
     // t_reader: raw std::thread, no asio executor.  Spins all three public readers.
     std::thread t_reader{[&engine, &acc_id, &ini_id, &reader_stop, &reader_iters]() {
@@ -1883,8 +1854,8 @@ TEST(EngineSessionStrand, V11_SnapshotReadersMtSafe) {
     // is asio UB (SEGFAULT under gcc-release).
     const bool reader_running = wait_until_observed(
         [&] {
-            return reader_iters.load(std::memory_order_relaxed) > 0
-                && engine->acceptor_bound_endpoint(acc_id).port != 0;
+            return reader_iters.load(std::memory_order_relaxed) > 0 &&
+                   engine->acceptor_bound_endpoint(acc_id).port != 0;
         },
         5000ms);
     EXPECT_TRUE(reader_running)
@@ -1894,17 +1865,15 @@ TEST(EngineSessionStrand, V11_SnapshotReadersMtSafe) {
 
     // Call stop(): triggers the registry_.clear() + listener_endpoints_.clear() (race window 2).
     {
-        auto stop_fut = asio::co_spawn(
-            ioc.get_executor(), engine->stop(), asio::use_future);
+        auto stop_fut = asio::co_spawn(ioc.get_executor(), engine->stop(), asio::use_future);
         // wait_until_observed: no restart() while t1/t2 are in ioc.run().
         bool done = wait_until_observed(
-            [&]{ return stop_fut.wait_for(0ms) == std::future_status::ready; },
-            12000ms);
+            [&] { return stop_fut.wait_for(0ms) == std::future_status::ready; }, 12000ms);
 
         // Signal t_reader to stop AFTER stop() completes (no HB edge during stop()).
         reader_stop.store(true, std::memory_order_relaxed);
 
-        wg.reset();   // release guard → workers exit when queue drains
+        wg.reset();  // release guard → workers exit when queue drains
         t1.join();
         t2.join();
         t_reader.join();
@@ -1918,8 +1887,7 @@ TEST(EngineSessionStrand, V11_SnapshotReadersMtSafe) {
         << "V-11 Part 1: reader thread must have iterated at least once";
 
     // Confirm engine is stopped (reached only if TSan did not abort with halt_on_error=1).
-    EXPECT_TRUE(engine->stopped())
-        << "V-11 Part 1: engine must be stopped after stop() completes";
+    EXPECT_TRUE(engine->stopped()) << "V-11 Part 1: engine must be stopped after stop() completes";
 
     // ── V-11 PART 2: keepalive [T024] ────────────────────────────────────────
     // A shared_ptr<Session> handle obtained BEFORE stop()/clear() keeps the
@@ -1936,16 +1904,17 @@ TEST(EngineSessionStrand, V11_SnapshotReadersMtSafe) {
         fixpp::core::EngineConfig ecfg2;
         ecfg2.executor = ioc.get_executor();
         ecfg2.clock = make_mock_clock(ioc);
-        auto acc_cfg2 = make_session_cfg(
-            fac, "ACC_P2", "INI_P2", fixpp::session::session_role::acceptor, "INI_P2",
-            ioc.get_executor(), port2);
-        auto ini_cfg2 = make_session_cfg(
-            fac, "INI_P2", "ACC_P2", fixpp::session::session_role::initiator, "ACC_P2",
-            ioc.get_executor(), port2);
+        auto acc_cfg2 =
+            make_session_cfg(fac, "ACC_P2", "INI_P2", fixpp::session::session_role::acceptor,
+                             "INI_P2", ioc.get_executor(), port2);
+        auto ini_cfg2 =
+            make_session_cfg(fac, "INI_P2", "ACC_P2", fixpp::session::session_role::initiator,
+                             "ACC_P2", ioc.get_executor(), port2);
         const SessionId acc_id2 = SessionId::from_config(acc_cfg2);
         const SessionId ini_id2 = SessionId::from_config(ini_cfg2);
 
-        auto engine2 = std::make_unique<fixpp::session::Engine>(ioc.get_executor(), std::move(ecfg2));
+        auto engine2 =
+            std::make_unique<fixpp::session::Engine>(ioc.get_executor(), std::move(ecfg2));
         if (!engine2->register_session(std::move(acc_cfg2)).has_value()) {
             stop_engine_sync(ioc, *engine2);
             FAIL() << "V-11 Part 2: acceptor register_session failed";
@@ -1981,8 +1950,7 @@ TEST(EngineSessionStrand, V11_SnapshotReadersMtSafe) {
         ASSERT_TRUE(engine2->stopped());
 
         // 3. Engine is still alive (unique_ptr not reset); handle keeps Session.
-        ASSERT_NE(handle, nullptr)
-            << "V-11 Part 2: handle must remain non-null after stop()";
+        ASSERT_NE(handle, nullptr) << "V-11 Part 2: handle must remain non-null after stop()";
         ASSERT_EQ(handle.get(), raw_ptr)
             << "V-11 Part 2: Session must not have been reallocated (keepalive)";
         (void)handle->state();  // Must not crash/UAF.
@@ -2005,16 +1973,17 @@ TEST(EngineSessionStrand, V11_SnapshotReadersMtSafe) {
         fixpp::core::EngineConfig ecfg3;
         ecfg3.executor = ioc.get_executor();
         ecfg3.clock = make_mock_clock(ioc);
-        auto acc_cfg3 = make_session_cfg(
-            fac, "ACC_P3", "INI_P3", fixpp::session::session_role::acceptor, "INI_P3",
-            ioc.get_executor(), port3);
-        auto ini_cfg3 = make_session_cfg(
-            fac, "INI_P3", "ACC_P3", fixpp::session::session_role::initiator, "ACC_P3",
-            ioc.get_executor(), port3);
+        auto acc_cfg3 =
+            make_session_cfg(fac, "ACC_P3", "INI_P3", fixpp::session::session_role::acceptor,
+                             "INI_P3", ioc.get_executor(), port3);
+        auto ini_cfg3 =
+            make_session_cfg(fac, "INI_P3", "ACC_P3", fixpp::session::session_role::initiator,
+                             "ACC_P3", ioc.get_executor(), port3);
         const SessionId acc_id3 = SessionId::from_config(acc_cfg3);
         const SessionId ini_id3 = SessionId::from_config(ini_cfg3);
 
-        auto engine3 = std::make_unique<fixpp::session::Engine>(ioc.get_executor(), std::move(ecfg3));
+        auto engine3 =
+            std::make_unique<fixpp::session::Engine>(ioc.get_executor(), std::move(ecfg3));
         if (!engine3->register_session(std::move(acc_cfg3)).has_value()) {
             stop_engine_sync(ioc, *engine3);
             FAIL() << "V-11 Part 3: acceptor register_session failed";
@@ -2088,22 +2057,19 @@ TEST(EngineSessionStrand, V11_SnapshotReadersMtSafe) {
 
 TEST(EngineSessionStrand, V13_SendVsFsmTransition_NoRace) {
     const char* fixture_dir = get_fixture_dir();
-    if (!fixture_dir || fixture_dir[0] == '\0')
-        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    if (!fixture_dir || fixture_dir[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
 
     asio::io_context ioc;
     const uint16_t port = reserve_free_port(ioc);
     auto fac = make_tls_factory(fixture_dir);
     if (!fac) GTEST_SKIP() << "TLS factory build failed (cert/key not available)";
 
-    auto acc_cfg = make_session_cfg(
-        fac, "ACCEPTOR_V13", "INITIATOR_V13",
-        fixpp::session::session_role::acceptor, "INITIATOR_V13",
-        ioc.get_executor(), port);
-    auto ini_cfg = make_session_cfg(
-        fac, "INITIATOR_V13", "ACCEPTOR_V13",
-        fixpp::session::session_role::initiator, "ACCEPTOR_V13",
-        ioc.get_executor(), port);
+    auto acc_cfg = make_session_cfg(fac, "ACCEPTOR_V13", "INITIATOR_V13",
+                                    fixpp::session::session_role::acceptor, "INITIATOR_V13",
+                                    ioc.get_executor(), port);
+    auto ini_cfg = make_session_cfg(fac, "INITIATOR_V13", "ACCEPTOR_V13",
+                                    fixpp::session::session_role::initiator, "ACCEPTOR_V13",
+                                    ioc.get_executor(), port);
     const SessionId acc_id = SessionId::from_config(acc_cfg);
     const SessionId ini_id = SessionId::from_config(ini_cfg);
 
@@ -2136,12 +2102,12 @@ TEST(EngineSessionStrand, V13_SendVsFsmTransition_NoRace) {
     // transitions (Active→Disconnecting→Disconnected) during stop().
     // work_guard keeps workers alive while we sleep (no ioc.run_for/restart UB).
     auto wg = asio::make_work_guard(ioc);
-    std::thread t1{[&ioc]{ ioc.run(); }};
-    std::thread t2{[&ioc]{ ioc.run(); }};
-    std::thread t3{[&ioc]{ ioc.run(); }};
+    std::thread t1{[&ioc] { ioc.run(); }};
+    std::thread t2{[&ioc] { ioc.run(); }};
+    std::thread t3{[&ioc] { ioc.run(); }};
 
     std::atomic<bool> sender_stop{false};
-    std::atomic<int>  send_iters{0};
+    std::atomic<int> send_iters{0};
 
     // Dummy payload — send will be rejected once the session transitions out of
     // Active, but that is tolerated.  We care only about no data race on fsm_state_.
@@ -2153,10 +2119,8 @@ TEST(EngineSessionStrand, V13_SendVsFsmTransition_NoRace) {
     // Post-fix: no cross-strand fsm_state_ read → TSan clean.
     auto sender_fn = [&]() {
         while (!sender_stop.load(std::memory_order_relaxed)) {
-            auto fut = asio::co_spawn(
-                ioc.get_executor(),
-                engine->send(acc_id, payload_view),
-                asio::use_future);
+            auto fut = asio::co_spawn(ioc.get_executor(), engine->send(acc_id, payload_view),
+                                      asio::use_future);
             if (fut.wait_for(std::chrono::milliseconds{200}) == std::future_status::ready) {
                 (void)fut.get();
             }
@@ -2212,18 +2176,16 @@ TEST(EngineSessionStrand, V13_SendVsFsmTransition_NoRace) {
     // stop() drives the session-strand FSM to Disconnected while senders loop.
     // Under TSan pre-fix: DATA RACE on fsm_state_ → process abort.
     {
-        auto stop_fut = asio::co_spawn(
-            ioc.get_executor(), engine->stop(), asio::use_future);
+        auto stop_fut = asio::co_spawn(ioc.get_executor(), engine->stop(), asio::use_future);
         // wait_until_observed: no ioc.run_for()/restart() while workers are running.
         bool done = wait_until_observed(
-            [&]{ return stop_fut.wait_for(0ms) == std::future_status::ready; },
-            10000ms);
+            [&] { return stop_fut.wait_for(0ms) == std::future_status::ready; }, 10000ms);
 
         sender_stop.store(true, std::memory_order_relaxed);
         ts1.join();
         ts2.join();
         ts3.join();
-        wg.reset();   // release guard → workers exit when queue drains
+        wg.reset();  // release guard → workers exit when queue drains
         t1.join();
         t2.join();
         t3.join();
@@ -2232,10 +2194,8 @@ TEST(EngineSessionStrand, V13_SendVsFsmTransition_NoRace) {
         stop_fut.get();
     }
 
-    EXPECT_GT(send_iters.load(), 0)
-        << "V-13: sender threads must have iterated at least once";
-    EXPECT_TRUE(engine->stopped())
-        << "V-13: engine must be stopped after stop() completes";
+    EXPECT_GT(send_iters.load(), 0) << "V-13: sender threads must have iterated at least once";
+    EXPECT_TRUE(engine->stopped()) << "V-13: engine must be stopped after stop() completes";
 }
 
 // ── V-14: StartStopCounterOrdering_NoUAF (gate-b/r1 #2) ─────────────────────
@@ -2273,8 +2233,7 @@ TEST(EngineSessionStrand, V13_SendVsFsmTransition_NoRace) {
 
 TEST(EngineSessionStrand, V14_StartStopCounterOrdering_NoUAF) {
     const char* fixture_dir = get_fixture_dir();
-    if (!fixture_dir || fixture_dir[0] == '\0')
-        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    if (!fixture_dir || fixture_dir[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
 
     asio::io_context ioc;
     auto fac = make_tls_factory(fixture_dir);
@@ -2290,19 +2249,17 @@ TEST(EngineSessionStrand, V14_StartStopCounterOrdering_NoUAF) {
 
     auto engine = std::make_unique<fixpp::session::Engine>(ioc.get_executor(), std::move(ecfg));
 
-    auto acc1_cfg = make_session_cfg(
-        fac, "ACC1_V14", "INI1_V14",
-        fixpp::session::session_role::acceptor, "INI1_V14",
-        ioc.get_executor(), port1);
+    auto acc1_cfg =
+        make_session_cfg(fac, "ACC1_V14", "INI1_V14", fixpp::session::session_role::acceptor,
+                         "INI1_V14", ioc.get_executor(), port1);
     if (!engine->register_session(std::move(acc1_cfg)).has_value()) {
         stop_engine_sync(ioc, *engine);
         FAIL() << "V-14: acceptor1 register_session failed";
     }
 
-    auto acc2_cfg = make_session_cfg(
-        fac, "ACC2_V14", "INI2_V14",
-        fixpp::session::session_role::acceptor, "INI2_V14",
-        ioc.get_executor(), port2);
+    auto acc2_cfg =
+        make_session_cfg(fac, "ACC2_V14", "INI2_V14", fixpp::session::session_role::acceptor,
+                         "INI2_V14", ioc.get_executor(), port2);
     if (!engine->register_session(std::move(acc2_cfg)).has_value()) {
         stop_engine_sync(ioc, *engine);
         FAIL() << "V-14: acceptor2 register_session failed";
@@ -2325,9 +2282,9 @@ TEST(EngineSessionStrand, V14_StartStopCounterOrdering_NoUAF) {
     // workers unambiguously live, which is both what the test says it wants and
     // what makes the sleep-poll wait below correct.
     auto wg = asio::make_work_guard(ioc);
-    std::thread t1{[&ioc]{ ioc.run(); }};
-    std::thread t2{[&ioc]{ ioc.run(); }};
-    std::thread t3{[&ioc]{ ioc.run(); }};
+    std::thread t1{[&ioc] { ioc.run(); }};
+    std::thread t2{[&ioc] { ioc.run(); }};
+    std::thread t3{[&ioc] { ioc.run(); }};
 
     // start() spawns loops for all registered sessions.
     // Pre-fix: outstanding_counter_ assigned AFTER loop → concurrent stop() sees null.
@@ -2357,8 +2314,8 @@ TEST(EngineSessionStrand, V14_StartStopCounterOrdering_NoUAF) {
     if (!engine->start().has_value()) {
         ADD_FAILURE() << "engine.start() failed";
         auto sf = asio::co_spawn(ioc.get_executor(), engine->stop(), asio::use_future);
-        (void)wait_until_observed(
-            [&]{ return sf.wait_for(0ms) == std::future_status::ready; }, 10000ms);
+        (void)wait_until_observed([&] { return sf.wait_for(0ms) == std::future_status::ready; },
+                                  10000ms);
         wg.reset();
         ioc.stop();
         t1.join();
@@ -2369,8 +2326,7 @@ TEST(EngineSessionStrand, V14_StartStopCounterOrdering_NoUAF) {
 
     // Immediately call stop() — exercises the start/stop concurrent window.
     {
-        auto stop_fut = asio::co_spawn(
-            ioc.get_executor(), engine->stop(), asio::use_future);
+        auto stop_fut = asio::co_spawn(ioc.get_executor(), engine->stop(), asio::use_future);
         // ⚠️ wait_until_observed, NOT wait_pred — the work guard above keeps
         // t1/t2/t3 inside `ioc.run()`, and `wait_pred` drives
         // `run_for()/restart()`, which its own contract forbids in exactly that
@@ -2386,8 +2342,7 @@ TEST(EngineSessionStrand, V14_StartStopCounterOrdering_NoUAF) {
         // is called. The fix was not to re-word the claim but to remove the
         // race it depended on — hence the work guard.
         bool done = wait_until_observed(
-            [&]{ return stop_fut.wait_for(0ms) == std::future_status::ready; },
-            10000ms);
+            [&] { return stop_fut.wait_for(0ms) == std::future_status::ready; }, 10000ms);
 
         ioc.stop();
         t1.join();
@@ -2398,8 +2353,7 @@ TEST(EngineSessionStrand, V14_StartStopCounterOrdering_NoUAF) {
         stop_fut.get();
     }
 
-    EXPECT_TRUE(engine->stopped())
-        << "V-14: engine must be stopped after stop() completes";
+    EXPECT_TRUE(engine->stopped()) << "V-14: engine must be stopped after stop() completes";
 }
 
 // ── V-15: SendCounterEnrolledBeforeControlHop_NoUAF (gate-b/r2 P1) ──────────
@@ -2439,22 +2393,19 @@ TEST(EngineSessionStrand, V14_StartStopCounterOrdering_NoUAF) {
 
 TEST(EngineSessionStrand, V15_SendCounterEnrolledBeforeControlHop_NoUAF) {
     const char* fixture_dir = get_fixture_dir();
-    if (!fixture_dir || fixture_dir[0] == '\0')
-        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    if (!fixture_dir || fixture_dir[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
 
     asio::io_context ioc;
     const uint16_t port = reserve_free_port(ioc);
     auto fac = make_tls_factory(fixture_dir);
     if (!fac) GTEST_SKIP() << "TLS factory build failed (cert/key not available)";
 
-    auto acc_cfg = make_session_cfg(
-        fac, "ACCEPTOR_V15", "INITIATOR_V15",
-        fixpp::session::session_role::acceptor, "INITIATOR_V15",
-        ioc.get_executor(), port);
-    auto ini_cfg = make_session_cfg(
-        fac, "INITIATOR_V15", "ACCEPTOR_V15",
-        fixpp::session::session_role::initiator, "ACCEPTOR_V15",
-        ioc.get_executor(), port);
+    auto acc_cfg = make_session_cfg(fac, "ACCEPTOR_V15", "INITIATOR_V15",
+                                    fixpp::session::session_role::acceptor, "INITIATOR_V15",
+                                    ioc.get_executor(), port);
+    auto ini_cfg = make_session_cfg(fac, "INITIATOR_V15", "ACCEPTOR_V15",
+                                    fixpp::session::session_role::initiator, "ACCEPTOR_V15",
+                                    ioc.get_executor(), port);
     // Capture ids before the configs are moved into register_session.
     const SessionId acc_id = SessionId::from_config(acc_cfg);
     const SessionId ini_id = SessionId::from_config(ini_cfg);
@@ -2486,9 +2437,9 @@ TEST(EngineSessionStrand, V15_SendCounterEnrolledBeforeControlHop_NoUAF) {
     // Start engine executor threads.
     // work_guard keeps workers alive so restart() is never needed from the main thread.
     auto wg = asio::make_work_guard(ioc);
-    std::thread t1{[&ioc]{ ioc.run(); }};
-    std::thread t2{[&ioc]{ ioc.run(); }};
-    std::thread t3{[&ioc]{ ioc.run(); }};
+    std::thread t1{[&ioc] { ioc.run(); }};
+    std::thread t2{[&ioc] { ioc.run(); }};
+    std::thread t3{[&ioc] { ioc.run(); }};
 
     // Post N send coroutines concurrently onto the ioc.  Each is co_spawn'd
     // onto the ioc executor; they will queue up on the control_strand_.
@@ -2501,10 +2452,8 @@ TEST(EngineSessionStrand, V15_SendCounterEnrolledBeforeControlHop_NoUAF) {
     std::vector<std::future<expected_t<void>>> send_futs;
     send_futs.reserve(kNumSends);
     for (int i = 0; i < kNumSends; ++i) {
-        send_futs.push_back(asio::co_spawn(
-            ioc.get_executor(),
-            engine->send(ini_id, payload_view),
-            asio::use_future));
+        send_futs.push_back(asio::co_spawn(ioc.get_executor(), engine->send(ini_id, payload_view),
+                                           asio::use_future));
     }
 
     // Immediately call stop() — races the queued control-strand sends.
@@ -2513,14 +2462,12 @@ TEST(EngineSessionStrand, V15_SendCounterEnrolledBeforeControlHop_NoUAF) {
     //          run and dereference freed `this` → UAF.
     // Post-fix: sends already bumped counter before co_spawn → stop() waits
     //           for all of them to complete → Engine stays alive → no UAF.
-    auto stop_fut = asio::co_spawn(
-        ioc.get_executor(), engine->stop(), asio::use_future);
+    auto stop_fut = asio::co_spawn(ioc.get_executor(), engine->stop(), asio::use_future);
     // wait_until_observed: no restart() while t1/t2/t3 are in ioc.run().
     bool stop_done = wait_until_observed(
-        [&]{ return stop_fut.wait_for(0ms) == std::future_status::ready; },
-        12000ms);
+        [&] { return stop_fut.wait_for(0ms) == std::future_status::ready; }, 12000ms);
 
-    wg.reset();   // release guard → workers exit when queue drains
+    wg.reset();  // release guard → workers exit when queue drains
     t1.join();
     t2.join();
     t3.join();
@@ -2542,8 +2489,7 @@ TEST(EngineSessionStrand, V15_SendCounterEnrolledBeforeControlHop_NoUAF) {
     EXPECT_EQ(completed, kNumSends)
         << "V-15: all send futures must be ready after stop() drained send_counter_";
 
-    EXPECT_TRUE(engine->stopped())
-        << "V-15: engine must be stopped after stop() completes";
+    EXPECT_TRUE(engine->stopped()) << "V-15: engine must be stopped after stop() completes";
 
     // Destroy the engine — any UAF on stopped_/registry_ from a dangling lambda
     // would manifest here under ASan or as a crash.
@@ -2574,22 +2520,19 @@ TEST(EngineSessionStrand, V15_SendCounterEnrolledBeforeControlHop_NoUAF) {
 
 TEST(EngineSessionStrand, V16_PostDrainLateSendFastFails_WithoutPosting) {
     const char* fixture_dir = get_fixture_dir();
-    if (!fixture_dir || fixture_dir[0] == '\0')
-        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    if (!fixture_dir || fixture_dir[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
 
     asio::io_context ioc;
     const uint16_t port = reserve_free_port(ioc);
     auto fac = make_tls_factory(fixture_dir);
     if (!fac) GTEST_SKIP() << "TLS factory build failed (cert/key not available)";
 
-    auto acc_cfg = make_session_cfg(
-        fac, "ACCEPTOR_V16", "INITIATOR_V16",
-        fixpp::session::session_role::acceptor, "INITIATOR_V16",
-        ioc.get_executor(), port);
-    auto ini_cfg = make_session_cfg(
-        fac, "INITIATOR_V16", "ACCEPTOR_V16",
-        fixpp::session::session_role::initiator, "ACCEPTOR_V16",
-        ioc.get_executor(), port);
+    auto acc_cfg = make_session_cfg(fac, "ACCEPTOR_V16", "INITIATOR_V16",
+                                    fixpp::session::session_role::acceptor, "INITIATOR_V16",
+                                    ioc.get_executor(), port);
+    auto ini_cfg = make_session_cfg(fac, "INITIATOR_V16", "ACCEPTOR_V16",
+                                    fixpp::session::session_role::initiator, "ACCEPTOR_V16",
+                                    ioc.get_executor(), port);
     const SessionId acc_id = SessionId::from_config(acc_cfg);
     const SessionId ini_id = SessionId::from_config(ini_cfg);
 
@@ -2633,12 +2576,11 @@ TEST(EngineSessionStrand, V16_PostDrainLateSendFastFails_WithoutPosting) {
 
     // work_guard keeps workers alive so restart() is never needed from the main thread.
     auto wg = asio::make_work_guard(ioc);
-    std::thread t1{[&ioc]{ ioc.run(); }};
-    std::thread t2{[&ioc]{ ioc.run(); }};
-    std::thread t3{[&ioc]{ ioc.run(); }};
+    std::thread t1{[&ioc] { ioc.run(); }};
+    std::thread t2{[&ioc] { ioc.run(); }};
+    std::thread t3{[&ioc] { ioc.run(); }};
 
-    auto stop_fut = asio::co_spawn(
-        ioc.get_executor(), engine->stop(), asio::use_future);
+    auto stop_fut = asio::co_spawn(ioc.get_executor(), engine->stop(), asio::use_future);
 
     // ⚠️ NON-FATAL, AND NESTED RATHER THAN SEQUENTIAL. These three checks used to
     // be `ASSERT_*`, which return from the test body — and t1/t2/t3 are joinable
@@ -2652,19 +2594,17 @@ TEST(EngineSessionStrand, V16_PostDrainLateSendFastFails_WithoutPosting) {
     // wait timed out, so the nesting is load-bearing, not cosmetic — each step
     // runs only if the one it needs succeeded, and teardown below always runs.
     bool seam_hit = wait_until_observed(
-        [&]{ return post_drain_reached.load(std::memory_order_acquire); },
-        12000ms);
+        [&] { return post_drain_reached.load(std::memory_order_acquire); }, 12000ms);
     EXPECT_TRUE(seam_hit) << "V-16: stop() did not reach the post-send-drain seam";
 
     if (seam_hit) {
         const std::array<std::byte, 4> dummy{};
-        auto late_send_fut = asio::co_spawn(
-            ioc.get_executor(), engine->send(ini_id, std::span<const std::byte>{dummy}),
-            asio::use_future);
+        auto late_send_fut = asio::co_spawn(ioc.get_executor(),
+                                            engine->send(ini_id, std::span<const std::byte>{dummy}),
+                                            asio::use_future);
 
         bool late_send_done = wait_until_observed(
-            [&]{ return late_send_fut.wait_for(0ms) == std::future_status::ready; },
-            5000ms);
+            [&] { return late_send_fut.wait_for(0ms) == std::future_status::ready; }, 5000ms);
         EXPECT_TRUE(late_send_done) << "V-16: late send did not complete within 5s";
 
         if (late_send_done) {
@@ -2672,8 +2612,7 @@ TEST(EngineSessionStrand, V16_PostDrainLateSendFastFails_WithoutPosting) {
             EXPECT_FALSE(late_send_res.has_value())
                 << "V-16: late send must fast-fail after stop() drained send_counter_";
             if (!late_send_res.has_value()) {
-                EXPECT_EQ(late_send_res.error(),
-                          fixpp::core::error::session_invalid_state_for_send)
+                EXPECT_EQ(late_send_res.error(), fixpp::core::error::session_invalid_state_for_send)
                     << "V-16: late send must fail at the admission gate, not by "
                        "half-cleared registry";
             }
@@ -2683,18 +2622,16 @@ TEST(EngineSessionStrand, V16_PostDrainLateSendFastFails_WithoutPosting) {
     post_drain_release.store(true, std::memory_order_release);
 
     bool stop_done = wait_until_observed(
-        [&]{ return stop_fut.wait_for(0ms) == std::future_status::ready; },
-        12000ms);
+        [&] { return stop_fut.wait_for(0ms) == std::future_status::ready; }, 12000ms);
 
-    wg.reset();   // release guard → workers exit when queue drains
+    wg.reset();  // release guard → workers exit when queue drains
     t1.join();
     t2.join();
     t3.join();
 
     ASSERT_TRUE(stop_done) << "V-16: engine.stop() did not complete within 12s";
     stop_fut.get();
-    EXPECT_TRUE(engine->stopped())
-        << "V-16: engine must be stopped after stop() completes";
+    EXPECT_TRUE(engine->stopped()) << "V-16: engine must be stopped after stop() completes";
 
     engine.reset();
 }
@@ -2737,8 +2674,7 @@ TEST(EngineSessionStrand, V16_PostDrainLateSendFastFails_WithoutPosting) {
 
 TEST(EngineSessionStrand, V17_OrphanEntryStopEmit_NoUAF) {
     const char* fixture_dir = get_fixture_dir();
-    if (!fixture_dir || fixture_dir[0] == '\0')
-        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    if (!fixture_dir || fixture_dir[0] == '\0') GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
 
     asio::io_context ioc;
     // A free port with NOTHING listening → initiator connect is refused.
@@ -2747,9 +2683,9 @@ TEST(EngineSessionStrand, V17_OrphanEntryStopEmit_NoUAF) {
     if (!fac) GTEST_SKIP() << "TLS factory build failed (cert/key not available)";
 
     // Initiator ONLY (no acceptor registered) → connect to `port` is refused.
-    auto ini_cfg = make_session_cfg(
-        fac, "INITIATOR", "ACCEPTOR", fixpp::session::session_role::initiator, "ACCEPTOR",
-        ioc.get_executor(), port);
+    auto ini_cfg =
+        make_session_cfg(fac, "INITIATOR", "ACCEPTOR", fixpp::session::session_role::initiator,
+                         "ACCEPTOR", ioc.get_executor(), port);
     // Bounded reconnect: a single 1ms attempt, then exhaust → run_connect_loop
     // unwinds without publishing → orphan entry (session_strand set, no
     // session / no live_transport).
@@ -2775,9 +2711,9 @@ TEST(EngineSessionStrand, V17_OrphanEntryStopEmit_NoUAF) {
     // Worker threads drive the connect loop (which exhausts) + later stop().
     // work_guard keeps run() alive across the idle window (no run_for/restart UB).
     auto wg = asio::make_work_guard(ioc);
-    std::thread t1{[&ioc]{ ioc.run(); }};
-    std::thread t2{[&ioc]{ ioc.run(); }};
-    std::thread t3{[&ioc]{ ioc.run(); }};
+    std::thread t1{[&ioc] { ioc.run(); }};
+    std::thread t2{[&ioc] { ioc.run(); }};
+    std::thread t3{[&ioc] { ioc.run(); }};
 
     // Let the connect loop exhaust (refused → 1ms → exhaust → co_return) so the
     // entry is an ORPHAN before stop() runs. Generous budget; sub-ms in practice.
@@ -2796,11 +2732,9 @@ TEST(EngineSessionStrand, V17_OrphanEntryStopEmit_NoUAF) {
         << "V-17: orphan precondition — initiator must never have published a session";
 
     {
-        auto stop_fut = asio::co_spawn(
-            ioc.get_executor(), engine->stop(), asio::use_future);
+        auto stop_fut = asio::co_spawn(ioc.get_executor(), engine->stop(), asio::use_future);
         bool done = wait_until_observed(
-            [&]{ return stop_fut.wait_for(0ms) == std::future_status::ready; },
-            10000ms);
+            [&] { return stop_fut.wait_for(0ms) == std::future_status::ready; }, 10000ms);
 
         wg.reset();
         t1.join();
@@ -2811,8 +2745,7 @@ TEST(EngineSessionStrand, V17_OrphanEntryStopEmit_NoUAF) {
         stop_fut.get();
     }
 
-    EXPECT_TRUE(engine->stopped())
-        << "V-17: engine must be stopped after stop() completes";
+    EXPECT_TRUE(engine->stopped()) << "V-17: engine must be stopped after stop() completes";
 
     engine.reset();
 }

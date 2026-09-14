@@ -11,9 +11,9 @@
 // NEVER re-sync this to the new impl — that makes both differential
 // consumers (the GoogleTest oracle and the fuzzer) vacuous. See
 // specs/060-int128-decimal-compare/tasks.md T003/T010 + Notes. Verbatim
-// source: `decimal_traits<pod_decimal>::compare` in src/core/decimal.cpp (only the signature is adapted: free
-// function instead of a member of decimal_traits<pod_decimal>, taking `a`/`b`
-// by const ref exactly as the original).
+// source: `decimal_traits<pod_decimal>::compare` in src/core/decimal.cpp (only the signature is
+// adapted: free function instead of a member of decimal_traits<pod_decimal>, taking `a`/`b` by
+// const ref exactly as the original).
 
 #ifndef FIXPP_TESTS_CORE_DECIMAL_REFERENCE_COMPARE_HPP
 #define FIXPP_TESTS_CORE_DECIMAL_REFERENCE_COMPARE_HPP

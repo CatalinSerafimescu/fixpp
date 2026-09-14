@@ -52,8 +52,8 @@ struct NewOrderSingleSeed {
     std::string_view cl_ord_id = "ORD-100";
     std::string_view symbol = "MSFT";
     char side = '1';
-    std::string_view order_qty = "10";   // decimal ASCII
-    std::string_view price = "99.5";     // decimal ASCII
+    std::string_view order_qty = "10";  // decimal ASCII
+    std::string_view price = "99.5";    // decimal ASCII
     bool locate_reqd = true;
     std::string_view encoded_text = "hello world";  // Length+Data pair (FR-007a)
 };
@@ -341,7 +341,7 @@ inline constexpr AllocationReportSeed kAllocationReportSeed{};
 // W MarketDataSnapshotFullRefresh: MDFullGrp NoMDEntries(268) REQUIRED,
 // delimiter MDEntryType(269) (dictionaries/FIX44.xml's MDFullGrp) — RC#1 pin, W half.
 struct MarketDataEntrySeedW {
-    char md_entry_type = '0';           // Bid
+    char md_entry_type = '0';  // Bid
     std::string_view md_entry_px = "99.5";
     std::string_view md_entry_size = "100";
 };
@@ -356,8 +356,8 @@ inline constexpr MarketDataSnapshotFullRefreshSeed kMarketDataSnapshotFullRefres
 // delimiter MDUpdateAction(279) (dictionaries/FIX44.xml's MDIncGrp) — RC#1 pin, X half.
 // SAME no_tag(268) as W, DIFFERENT delimiter/member set (the discriminator).
 struct MarketDataEntrySeedX {
-    char md_update_action = '0';        // New
-    char md_entry_type = '0';           // optional in X, set anyway to differ from W's px
+    char md_update_action = '0';  // New
+    char md_entry_type = '0';     // optional in X, set anyway to differ from W's px
     std::string_view md_entry_px = "100.25";
 };
 struct MarketDataIncrementalRefreshSeed {

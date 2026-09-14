@@ -21,4 +21,4 @@ struct writer_traits<GroupArgs> {
 
 inline int writer_traits<GroupArgs>::required_count() { return 1; }
 
-} // namespace test078_mock
+}  // namespace test078_mock

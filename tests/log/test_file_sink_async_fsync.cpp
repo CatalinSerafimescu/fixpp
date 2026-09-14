@@ -23,15 +23,14 @@
 #include <atomic>
 #include <chrono>
 #include <filesystem>
-#include <memory_resource>
-#include <thread>
-#include <vector>
-
 #include <fixpp/log/file_sink.hpp>
 #include <fixpp/log/level.hpp>
 #include <fixpp/log/logger.hpp>
 #include <fixpp/log/record.hpp>
 #include <fixpp/log/sink.hpp>
+#include <memory_resource>
+#include <thread>
+#include <vector>
 
 #include "support/temp_dir.hpp"  // fixpp::test_support::unique_temp_dir (#404)
 
@@ -44,12 +43,11 @@ namespace {
 
 class MockFsyncState {
 public:
-    std::atomic<bool>                             fsync_called{false};
-    std::thread::id                               fsync_thread_id{};
-    std::atomic<int>                              fsync_call_count{0};
+    std::atomic<bool> fsync_called{false};
+    std::thread::id fsync_thread_id;
+    std::atomic<int> fsync_call_count{0};
 
-    int mock_fsync(int /*fd*/)
-    {
+    int mock_fsync(int /*fd*/) {
         fsync_called.store(true, std::memory_order_release);
         fsync_thread_id = std::this_thread::get_id();
         fsync_call_count.fetch_add(1, std::memory_order_relaxed);
@@ -63,13 +61,9 @@ public:
 
 class FileSinkFsyncTest : public ::testing::Test {
 protected:
-    void SetUp() override
-    {
-        tmpdir_ = fixpp::test_support::unique_temp_dir("log_fsync");
-    }
+    void SetUp() override { tmpdir_ = fixpp::test_support::unique_temp_dir("log_fsync"); }
 
-    void TearDown() override
-    {
+    void TearDown() override {
         // CONTRACT (see support/temp_dir.hpp): every FileSink over tmpdir_ must
         // already be destroyed -- they are locals in the test bodies, and
         // tmpdir_ is this fixture's only member, so nothing outlives the test.
@@ -79,29 +73,26 @@ protected:
     std::filesystem::path tmpdir_;
 };
 
-TEST_F(FileSinkFsyncTest, FlushCallsFsyncOnDrainThread)
-{
+TEST_F(FileSinkFsyncTest, FlushCallsFsyncOnDrainThread) {
     // ── Arrange ───────────────────────────────────────────────────────────────
 
     auto mock = std::make_shared<MockFsyncState>();
 
     fixpp::log::FileSinkConfig cfg;
-    cfg.directory      = tmpdir_;
-    cfg.base_name      = "fsync_test";
-    cfg.max_file_bytes = 256u * 1024u * 1024u;  // 256 MiB — won't rotate
-    cfg.max_keep_count = 8u;
-    cfg.async_fsync    = true;
+    cfg.directory = tmpdir_;
+    cfg.base_name = "fsync_test";
+    cfg.max_file_bytes = 256U * 1024U * 1024U;  // 256 MiB — won't rotate
+    cfg.max_keep_count = 8U;
+    cfg.async_fsync = true;
     // Inject mock fsync function.
-    cfg.fsync_fn = [mock](int fd) -> int {
-        return mock->mock_fsync(fd);
-    };
+    cfg.fsync_fn = [mock](int fd) -> int { return mock->mock_fsync(fd); };
 
     auto* file_sink_raw = new fixpp::log::FileSink(std::move(cfg));
     std::pmr::vector<std::unique_ptr<fixpp::log::Sink>> sinks{};
     sinks.push_back(std::unique_ptr<fixpp::log::Sink>(file_sink_raw));
 
     fixpp::log::LoggerConfig lcfg;
-    lcfg.capacity = 64u;
+    lcfg.capacity = 64U;
 
     auto logger = std::make_unique<fixpp::log::Logger>(std::move(lcfg), std::move(sinks));
 
@@ -110,19 +101,12 @@ TEST_F(FileSinkFsyncTest, FlushCallsFsyncOnDrainThread)
 
     // ── Emit a few records ────────────────────────────────────────────────────
     std::array<std::uint8_t, 16> zeroed_trace_id{};
-    auto ts = fixpp::core::utc_time_point{
-        std::chrono::system_clock::now().time_since_epoch()};
-    constexpr auto fmt_id = static_cast<std::uint32_t>(
-        fixpp::log::detail::crc32_str("msg {}"));
+    auto ts = fixpp::core::utc_time_point{std::chrono::system_clock::now().time_since_epoch()};
+    constexpr auto fmt_id = static_cast<std::uint32_t>(fixpp::log::detail::crc32_str("msg {}"));
 
     for (int i = 0; i < 5; ++i) {
-        logger->enqueue(fixpp::log::Level::info,
-                        fixpp::log::cat::session,
-                        fmt_id,
-                        zeroed_trace_id,
-                        0u,
-                        ts,
-                        {fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(i))});
+        logger->enqueue(fixpp::log::Level::info, fixpp::log::cat::session, fmt_id, zeroed_trace_id,
+                        0U, ts, {fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(i))});
     }
 
     // ── Shutdown triggers flush(drain_timeout) on the drain thread ────────────
@@ -159,16 +143,15 @@ TEST_F(FileSinkFsyncTest, FlushCallsFsyncOnDrainThread)
 // This test verifies that enqueue() on the producer thread returns quickly
 // (< 10 ms per call) even when the drain thread is blocked inside fsync.
 // We inject a slow fsync (10ms sleep) and verify enqueue() does not block.
-TEST_F(FileSinkFsyncTest, ProducerDoesNotBlockOnFsync)
-{
+TEST_F(FileSinkFsyncTest, ProducerDoesNotBlockOnFsync) {
     auto mock = std::make_shared<MockFsyncState>();
 
     fixpp::log::FileSinkConfig cfg;
-    cfg.directory      = tmpdir_;
-    cfg.base_name      = "no_block_test";
-    cfg.max_file_bytes = 256u * 1024u * 1024u;
-    cfg.max_keep_count = 8u;
-    cfg.async_fsync    = true;
+    cfg.directory = tmpdir_;
+    cfg.base_name = "no_block_test";
+    cfg.max_file_bytes = 256U * 1024U * 1024U;
+    cfg.max_keep_count = 8U;
+    cfg.async_fsync = true;
     // Slow fsync: 50ms per call.
     cfg.fsync_fn = [mock](int fd) -> int {
         std::this_thread::sleep_for(std::chrono::milliseconds{50});
@@ -180,28 +163,21 @@ TEST_F(FileSinkFsyncTest, ProducerDoesNotBlockOnFsync)
     sinks.push_back(std::unique_ptr<fixpp::log::Sink>(file_sink_raw));
 
     fixpp::log::LoggerConfig lcfg;
-    lcfg.capacity = 64u;
+    lcfg.capacity = 64U;
 
     auto logger = std::make_unique<fixpp::log::Logger>(std::move(lcfg), std::move(sinks));
 
     // Enqueue several records from the producer (main) thread and measure latency.
     std::array<std::uint8_t, 16> zeroed_trace_id{};
-    auto ts = fixpp::core::utc_time_point{
-        std::chrono::system_clock::now().time_since_epoch()};
-    constexpr auto fmt_id = static_cast<std::uint32_t>(
-        fixpp::log::detail::crc32_str("msg {}"));
+    auto ts = fixpp::core::utc_time_point{std::chrono::system_clock::now().time_since_epoch()};
+    constexpr auto fmt_id = static_cast<std::uint32_t>(fixpp::log::detail::crc32_str("msg {}"));
 
     constexpr int k_records = 10;
     auto t0 = std::chrono::steady_clock::now();
 
     for (int i = 0; i < k_records; ++i) {
-        logger->enqueue(fixpp::log::Level::info,
-                        fixpp::log::cat::session,
-                        fmt_id,
-                        zeroed_trace_id,
-                        0u,
-                        ts,
-                        {fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(i))});
+        logger->enqueue(fixpp::log::Level::info, fixpp::log::cat::session, fmt_id, zeroed_trace_id,
+                        0U, ts, {fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(i))});
     }
 
     auto t1 = std::chrono::steady_clock::now();
@@ -211,8 +187,8 @@ TEST_F(FileSinkFsyncTest, ProducerDoesNotBlockOnFsync)
     // enqueue() must NOT block on fsync. Total enqueue time for 10 records
     // must be < the fsync delay (50ms). We allow 40ms total (4ms per call).
     EXPECT_LT(enqueue_elapsed_ms, 40LL)
-        << "enqueue() blocked on I/O: total enqueue time=" << enqueue_elapsed_ms
-        << "ms for " << k_records << " records. Should be < 40ms.";
+        << "enqueue() blocked on I/O: total enqueue time=" << enqueue_elapsed_ms << "ms for "
+        << k_records << " records. Should be < 40ms.";
 
     // Drain with a generous deadline (flush triggers the slow fsync).
     (void)logger->shutdown(std::chrono::seconds{5});
@@ -228,8 +204,7 @@ TEST_F(FileSinkFsyncTest, ProducerDoesNotBlockOnFsync)
 // Test: inject a fsync_fn that sleeps 500ms. Call flush(10ms).
 // Assert flush() returns well under 500ms. The test has an internal hard
 // deadline so a regression hangs for at most ~600ms before failing (not forever).
-TEST_F(FileSinkFsyncTest, FlushDeadlineBounded)
-{
+TEST_F(FileSinkFsyncTest, FlushDeadlineBounded) {
     constexpr auto k_fsync_sleep_ms = std::chrono::milliseconds{500};
     constexpr auto k_flush_deadline = std::chrono::milliseconds{10};
     // Allow 10× the flush_deadline for OS scheduling jitter before failing.
@@ -247,11 +222,11 @@ TEST_F(FileSinkFsyncTest, FlushDeadlineBounded)
     std::atomic<bool> fsync_returned{false};
 
     fixpp::log::FileSinkConfig cfg;
-    cfg.directory      = tmpdir_;
-    cfg.base_name      = "deadline_test";
-    cfg.max_file_bytes = 256u * 1024u * 1024u;
-    cfg.max_keep_count = 8u;
-    cfg.async_fsync    = true;
+    cfg.directory = tmpdir_;
+    cfg.base_name = "deadline_test";
+    cfg.max_file_bytes = 256U * 1024U * 1024U;
+    cfg.max_keep_count = 8U;
+    cfg.async_fsync = true;
     // Inject a very slow fsync (500ms) so any synchronous implementation hangs.
     cfg.fsync_fn = [k_fsync_sleep_ms, &fsync_entered, &fsync_returned](int) -> int {
         fsync_entered.store(true, std::memory_order_release);
@@ -271,9 +246,9 @@ TEST_F(FileSinkFsyncTest, FlushDeadlineBounded)
 
     // flush() must return well before the fsync sleep completes.
     EXPECT_LT(elapsed.count(), k_max_return_ms.count())
-        << "flush(10ms) took " << elapsed.count()
-        << "ms — should return within " << k_max_return_ms.count()
-        << "ms even when fsync blocks for " << k_fsync_sleep_ms.count() << "ms. "
+        << "flush(10ms) took " << elapsed.count() << "ms — should return within "
+        << k_max_return_ms.count() << "ms even when fsync blocks for " << k_fsync_sleep_ms.count()
+        << "ms. "
         << "flush(deadline) must implement the mandatory deadline escape "
         << "([2k §4.5] / contracts/log-sinks.md).";
 
@@ -382,23 +357,22 @@ TEST_F(FileSinkFsyncTest, FlushDeadlineBounded)
 // The injected fsync_fn uses a flag+condvar so the test can release it at
 // teardown, ensuring the worker can always exit (correct impl terminates;
 // a buggy detach-per-flush impl would skip the close join entirely).
-TEST_F(FileSinkFsyncTest, CloseJoinsWorkerAndPreventsReusedFdWrite)
-{
+TEST_F(FileSinkFsyncTest, CloseJoinsWorkerAndPreventsReusedFdWrite) {
     // Internal self-deadline: if something hangs, the test itself unblocks the
     // stalling fsync_fn after k_release_after_ms so the worker can always exit.
     // (This used to add "and the test fails with a time assertion rather than
     // hanging ctest" — #400 deleted that assertion. The hang instrument is now
     // the ctest TIMEOUT on log_file_fsync; this release only keeps the worker
     // from being stuck forever.)
-    constexpr auto k_flush_deadline      = std::chrono::milliseconds{1};
-    constexpr auto k_release_after_ms    = std::chrono::milliseconds{800};  // test self-deadline
+    constexpr auto k_flush_deadline = std::chrono::milliseconds{1};
+    constexpr auto k_release_after_ms = std::chrono::milliseconds{800};  // test self-deadline
 
     // Shared state for the injected fsync: stall until released.
-    std::atomic<bool>   released{false};
-    std::atomic<int>    fsync_call_count{0};
-    std::atomic<int>    last_fsync_fd{-1};
-    std::atomic<bool>   fsync_returned{false};  // set as the callback's last act
-    std::mutex          release_mu;
+    std::atomic<bool> released{false};
+    std::atomic<int> fsync_call_count{0};
+    std::atomic<int> last_fsync_fd{-1};
+    std::atomic<bool> fsync_returned{false};  // set as the callback's last act
+    std::mutex release_mu;
     std::condition_variable release_cv;
 
     // The injected fsync stalls until released OR k_release_after_ms elapses.
@@ -415,12 +389,12 @@ TEST_F(FileSinkFsyncTest, CloseJoinsWorkerAndPreventsReusedFdWrite)
     };
 
     fixpp::log::FileSinkConfig cfg;
-    cfg.directory      = tmpdir_;
-    cfg.base_name      = "lifetime_test";
-    cfg.max_file_bytes = 256u * 1024u * 1024u;
-    cfg.max_keep_count = 8u;
-    cfg.async_fsync    = true;
-    cfg.fsync_fn       = stalling_fsync;
+    cfg.directory = tmpdir_;
+    cfg.base_name = "lifetime_test";
+    cfg.max_file_bytes = 256U * 1024U * 1024U;
+    cfg.max_keep_count = 8U;
+    cfg.async_fsync = true;
+    cfg.fsync_fn = stalling_fsync;
 
     fixpp::log::FileSink sink{std::move(cfg)};
     ASSERT_TRUE(sink.open().has_value()) << "FileSink::open() failed";
@@ -482,7 +456,7 @@ TEST_F(FileSinkFsyncTest, CloseJoinsWorkerAndPreventsReusedFdWrite)
 
     // Release the stalling fsync (so the worker can finish and let the test end).
     {
-        std::lock_guard<std::mutex> lk(release_mu);
+        std::scoped_lock lk(release_mu);
         released.store(true);
     }
     release_cv.notify_all();
@@ -511,11 +485,11 @@ TEST_F(FileSinkFsyncTest, CloseJoinsWorkerAndPreventsReusedFdWrite)
     // We assert what IS deterministic: fsync was only called for the pre-close fd.
     if (original_fd >= 0) {
         fixpp::log::FileSinkConfig cfg2;
-        cfg2.directory      = tmpdir_;
-        cfg2.base_name      = "lifetime_test";
-        cfg2.max_file_bytes = 256u * 1024u * 1024u;
-        cfg2.max_keep_count = 8u;
-        cfg2.async_fsync    = false;  // don't trigger more fsync calls
+        cfg2.directory = tmpdir_;
+        cfg2.base_name = "lifetime_test";
+        cfg2.max_file_bytes = 256U * 1024U * 1024U;
+        cfg2.max_keep_count = 8U;
+        cfg2.async_fsync = false;  // don't trigger more fsync calls
         fixpp::log::FileSink sink2{std::move(cfg2)};
         (void)sink2.open();
         // Worker already joined — no pending fsync can land on the new fd.

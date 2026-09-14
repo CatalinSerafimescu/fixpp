@@ -23,19 +23,18 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <functional>
-#include <memory>
-#include <span>
-#include <string>
-#include <string_view>
-#include <vector>
-
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <functional>
+#include <memory>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
 
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
@@ -117,7 +116,7 @@ inline std::vector<std::byte> make_sequence_reset(std::string_view bs, std::uint
 
 inline bool frame_is_msg_type(std::span<const std::byte> frame, std::string_view type) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
-    return wire.find("35=" + std::string(type) + "\x01") != std::string::npos;
+    return wire.contains("35=" + std::string(type) + "\x01");
 }
 
 // Outbound capture with an optional fail-injection: once fail_writes is set, the
@@ -178,10 +177,9 @@ protected:
     fixpp::core::expected_t<void> run_open(fixpp::session::Session& s) {
         auto fut = asio::co_spawn(ioc, s.open(), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 100ms)) {
-            fixpp::test_support::cancel_and_drain_or_report(
-                ioc, *clock, "ParityAcceptorFixture::run_open");
-            ADD_FAILURE() << fixpp::test_support::kWindowMiss
-                          << "ParityAcceptorFixture::run_open";
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "ParityAcceptorFixture::run_open");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "ParityAcceptorFixture::run_open";
             return std::unexpected(fixpp::test_support::kWindowMissSentinel);
         }
         return fut.get();
@@ -191,10 +189,9 @@ protected:
                                        std::span<const std::byte> frame) {
         auto fut = asio::co_spawn(ioc, s.on_inbound_frame(frame), asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 100ms)) {
-            fixpp::test_support::cancel_and_drain_or_report(
-                ioc, *clock, "ParityAcceptorFixture::feed");
-            ADD_FAILURE() << fixpp::test_support::kWindowMiss
-                          << "ParityAcceptorFixture::feed";
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
+                                                            "ParityAcceptorFixture::feed");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "ParityAcceptorFixture::feed";
             return std::unexpected(fixpp::test_support::kWindowMissSentinel);
         }
         return fut.get();

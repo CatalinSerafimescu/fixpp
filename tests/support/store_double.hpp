@@ -168,8 +168,8 @@ private:
     seqnum_t next_in_ = seqnum_min;   // next expected inbound  seqnum
     seqnum_t next_out_ = seqnum_min;  // next expected outbound seqnum
 
-    std::size_t reset_calls_ = 0;     // 024: observable awaitable reset() count
-    bool fail_next_reset_ = false;    // 024: one-shot reset failure injection
+    std::size_t reset_calls_ = 0;   // 024: observable awaitable reset() count
+    bool fail_next_reset_ = false;  // 024: one-shot reset failure injection
 };
 
 }  // namespace fixpp::session::test

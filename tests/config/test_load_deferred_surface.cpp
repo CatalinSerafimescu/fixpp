@@ -50,9 +50,6 @@
 
 #include <gtest/gtest.h>
 
-#include "support/temp_dir.hpp"  // fixpp::test_support::remove_temp_dir (#404)
-#include "logger_owner_release.hpp"  // fixpp::config_test::release_log_owners
-
 #include <asio/io_context.hpp>
 #include <filesystem>
 #include <fixpp/config/load_diagnostic.hpp>
@@ -60,6 +57,9 @@
 #include <fixpp/log/logger.hpp>
 #include <fstream>
 #include <string>
+
+#include "logger_owner_release.hpp"  // fixpp::config_test::release_log_owners
+#include "support/temp_dir.hpp"      // fixpp::test_support::remove_temp_dir (#404)
 
 #ifndef FIXPP_CONFIG_FIXTURE_DIR
 #error "FIXPP_CONFIG_FIXTURE_DIR must be set by CMake"
@@ -83,8 +83,8 @@ fixpp::config::LoadResult load(const std::filesystem::path& p) {
 }
 
 // Discriminating check: reason AND key_path must both match.
-bool has_diag(const std::vector<fixpp::config::LoadDiagnostic>& diags,
-              RC expected_reason, std::string_view expected_key_path) {
+bool has_diag(const std::vector<fixpp::config::LoadDiagnostic>& diags, RC expected_reason,
+              std::string_view expected_key_path) {
     for (const auto& d : diags) {
         if (d.reason == expected_reason && d.key_path == expected_key_path) {
             return true;
@@ -97,8 +97,8 @@ bool has_diag(const std::vector<fixpp::config::LoadDiagnostic>& diags,
 std::string diag_string(const std::vector<fixpp::config::LoadDiagnostic>& diags) {
     std::string s;
     for (const auto& d : diags) {
-        s += "[reason=" + std::to_string(static_cast<int>(d.reason)) + " key=" + d.key_path +
-             "] " + d.message + "\n";
+        s += "[reason=" + std::to_string(static_cast<int>(d.reason)) + " key=" + d.key_path + "] " +
+             d.message + "\n";
     }
     return s;
 }
@@ -240,11 +240,11 @@ TEST(LoadDeferredSurface, T020_DeferredTap) {
 //
 // This cell pins the WHOLE deferred surface: the fixture carries all 13 kDeferred
 // keys, and we assert each one yields the deferred reason AND never unknown_key.
-// Dropping any key from kDeferred (recognize_keys's kDeferred set, toml_config_loader.cpp) demotes it to
-// unknown_key → both assertions fail RED here.  This is the exact-coverage
-// discipline of [[feedback_completeness_gate_exact_set_not_subset]] applied at
-// the public-API level (the kDeferred set itself is file-scoped in the .cpp; this
-// is the strongest demotion-detector reachable without exposing it).
+// Dropping any key from kDeferred (recognize_keys's kDeferred set, toml_config_loader.cpp) demotes
+// it to unknown_key → both assertions fail RED here.  This is the exact-coverage discipline of
+// [[feedback_completeness_gate_exact_set_not_subset]] applied at the public-API level (the
+// kDeferred set itself is file-scoped in the .cpp; this is the strongest demotion-detector
+// reachable without exposing it).
 //
 // NOTE: this is exact coverage of "every deferred key STAYS deferred", not of the
 // set's literal membership — ADDING a new deferred key is not an FR-022 regression
@@ -255,9 +255,9 @@ TEST(LoadDeferredSurface, T020_DeferredSetExactCoverage) {
     // The full kDeferred set (toml_config_loader.cpp), minus `logger` (flipped to
     // supported in 045 FR-022).  Mirror of the fixture's keys.
     static constexpr std::string_view kAllDeferredKeys[] = {
-        "tracer",   "meter",         "tap",          "otlp",
-        "prometheus", "exporter",    "log_sink",     "message_arena",
-        "dialect_overlay", "arena",  "session_arena", "framer_carry_arena",
+        "tracer",          "meter",    "tap",           "otlp",
+        "prometheus",      "exporter", "log_sink",      "message_arena",
+        "dialect_overlay", "arena",    "session_arena", "framer_carry_arena",
         "tap_consumer",
     };
 
@@ -297,8 +297,7 @@ TEST(LoadDeferredSurface, T020_DeferredSetExactCoverage) {
 TEST(LoadDeferredSurface, T020_TypoDistinction) {
     auto result = load(fixture_path("neg_deferred_typo.toml"));
 
-    ASSERT_FALSE(result.has_value())
-        << "neg_deferred_typo.toml must fail (unknown key 'loggerr')";
+    ASSERT_FALSE(result.has_value()) << "neg_deferred_typo.toml must fail (unknown key 'loggerr')";
 
     const auto& diags = result.error();
 
@@ -337,8 +336,7 @@ TEST(LoadDeferredSurface, T020_LoggerNotDeferred) {
         std::error_code ec;
         std::filesystem::remove_all(tmp_base, ec);  // clean from any prior run
         std::filesystem::create_directories(log_dir, ec);
-        ASSERT_FALSE(ec) << "failed to create temp log dir: " << log_dir
-                         << " — " << ec.message();
+        ASSERT_FALSE(ec) << "failed to create temp log dir: " << log_dir << " — " << ec.message();
     }
 
     // Write a minimal logger TOML into a temp file so we can embed the absolute
@@ -360,10 +358,12 @@ TEST(LoadDeferredSurface, T020_LoggerNotDeferred) {
                  .generic_string()
           << "\"\n"
           << "ca_file = \""
-          << (std::filesystem::path{std::string{FIXPP_CONFIG_FIXTURE_DIR}} / "ca.pem").generic_string()
+          << (std::filesystem::path{std::string{FIXPP_CONFIG_FIXTURE_DIR}} / "ca.pem")
+                 .generic_string()
           << "\"\n\n"
           << "[dictionary]\nkind = \"path\"\npath = \""
-          << (std::filesystem::path{std::string{FIXPP_CONFIG_FIXTURE_DIR}} / "FIX44.xml").generic_string()
+          << (std::filesystem::path{std::string{FIXPP_CONFIG_FIXTURE_DIR}} / "FIX44.xml")
+                 .generic_string()
           << "\"\n\n"
           << "[logger]\ncapacity = 4096\ndrain_timeout = \"2000ms\"\n\n"
           << "[[logger.sinks]]\nkind = \"file\"\ndirectory = \"" << log_dir.generic_string()
@@ -388,10 +388,9 @@ TEST(LoadDeferredSurface, T020_LoggerNotDeferred) {
     }
 
     // (b) the load must SUCCEED
-    ASSERT_TRUE(result.has_value())
-        << "a minimal valid [logger] block must load successfully; "
-           "diagnostics:\n"
-        << (result.has_value() ? "" : diag_string(result.error()));
+    ASSERT_TRUE(result.has_value()) << "a minimal valid [logger] block must load successfully; "
+                                       "diagnostics:\n"
+                                    << (result.has_value() ? "" : diag_string(result.error()));
 
     // (c) engine.logger must be non-null (the one-key flip is observable)
     ASSERT_NE(result->engine.logger, nullptr)

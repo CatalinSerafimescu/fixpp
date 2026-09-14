@@ -48,8 +48,7 @@ namespace {
 // comment). Selection order and bare-macro guards match the shipped copy
 // exactly. The #else body below is copied VERBATIM from
 // src/core/decimal.cpp's mul_u64_wide.
-static inline std::uint64_t mul_u64_wide(std::uint64_t a, std::uint64_t b,
-                                         std::uint64_t* hi) noexcept {
+inline std::uint64_t mul_u64_wide(std::uint64_t a, std::uint64_t b, std::uint64_t* hi) noexcept {
 #if defined(__SIZEOF_INT128__) && !defined(FIXPP_DECIMAL_FORCE_PORTABLE_MUL)
     unsigned __int128 p = static_cast<unsigned __int128>(a) * b;
     *hi = static_cast<std::uint64_t>(p >> 64);
@@ -72,14 +71,14 @@ static inline std::uint64_t mul_u64_wide(std::uint64_t a, std::uint64_t b,
     const std::uint64_t w0 = t & 0xFFFFFFFFULL;
     std::uint64_t k = t >> 32;
 
-    t = a_hi * b_lo + k;
+    t = (a_hi * b_lo) + k;
     const std::uint64_t w1 = t & 0xFFFFFFFFULL;
     const std::uint64_t w2 = t >> 32;
 
-    t = a_lo * b_hi + w1;
+    t = (a_lo * b_hi) + w1;
     k = t >> 32;
 
-    *hi = a_hi * b_hi + w2 + k;
+    *hi = (a_hi * b_hi) + w2 + k;
     return (t << 32) | w0;
 #endif
 }
@@ -200,11 +199,11 @@ TEST(MulU64WideTest, ProductsCross2Pow64_HiNonZero) {
         std::uint64_t b;
     };
     const Case cases[] = {
-        {99ULL, 9223372036854775807ULL},                 // R5 witness product (~9.9e19)
-        {0xFFFFFFFFFFFFFFFFULL, 0xFFFFFFFFFFFFFFFFULL},  // UINT64_MAX^2
-        {1ULL << 40, 1ULL << 40},                        // 2^80
-        {1000000000000000000ULL, 100ULL},                // 1e20
-        {0x100000000ULL, 0x100000001ULL},                // just over 2^64
+        {.a = 99ULL, .b = 9223372036854775807ULL},                 // R5 witness product (~9.9e19)
+        {.a = 0xFFFFFFFFFFFFFFFFULL, .b = 0xFFFFFFFFFFFFFFFFULL},  // UINT64_MAX^2
+        {.a = 1ULL << 40, .b = 1ULL << 40},                        // 2^80
+        {.a = 1000000000000000000ULL, .b = 100ULL},                // 1e20
+        {.a = 0x100000000ULL, .b = 0x100000001ULL},                // just over 2^64
     };
     for (Case const& c : cases) {
         const WideProduct golden = golden_wide_mul(c.a, c.b);

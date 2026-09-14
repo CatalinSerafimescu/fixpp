@@ -21,7 +21,6 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
-
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/transport/endpoint.hpp>
@@ -54,9 +53,9 @@ TEST(DownPeerWatchdog, StopReturnsBoundedOnNeverAcceptingPeer) {
     ASSERT_NE(factory, nullptr) << "baseline TLS factory build failed";
 
     fixpp::interop::InteropEngineFixture fx;
-    auto cfg = hp::make_session_config(
-        Role::fixpp_initiator, "FIX.4.4", factory, fx.ioc().get_executor(),
-        fixpp::transport::Endpoint{kBlackholeHost, kBlackholePort});
+    auto cfg =
+        hp::make_session_config(Role::fixpp_initiator, "FIX.4.4", factory, fx.ioc().get_executor(),
+                                fixpp::transport::Endpoint{kBlackholeHost, kBlackholePort});
 
     // Finite reconnect policy (FR-004): bounded attempts + non-zero backoff so a
     // repeated connect failure cannot busy-spin (the cause-1 half of the L2 bug).
@@ -76,9 +75,8 @@ TEST(DownPeerWatchdog, StopReturnsBoundedOnNeverAcceptingPeer) {
     // bound. stop_within() returns the measured wall-clock; >= bound means a hang.
     const auto elapsed = fx.stop_within(kStopWatchdog);
     EXPECT_LT(elapsed, kStopWatchdog)
-        << "Engine::stop() took " << elapsed.count()
-        << " ms on a never-accepting peer (watchdog " << kStopWatchdog.count()
-        << " ms) — 015 down-peer L2 carry-forward / T008 fix regression.";
+        << "Engine::stop() took " << elapsed.count() << " ms on a never-accepting peer (watchdog "
+        << kStopWatchdog.count() << " ms) — 015 down-peer L2 carry-forward / T008 fix regression.";
     EXPECT_TRUE(fx.stopped()) << "engine did not reach stopped()";
 }
 

@@ -49,7 +49,7 @@ struct decimal_traits<test::decimal_wide> {
 
     static expected_t<test::decimal_wide> from_chars(std::span<const std::byte>,
                                                      std::pmr::memory_resource*) noexcept {
-        return test::decimal_wide{1, 0};  // stub for AC-X tests
+        return test::decimal_wide{.mantissa = 1, .exponent = 0};  // stub for AC-X tests
     }
 
     static expected_t<std::size_t> to_chars(test::decimal_wide const&,
@@ -61,7 +61,8 @@ struct decimal_traits<test::decimal_wide> {
 
     static expected_t<test::decimal_wide> from_pod(pod_decimal pd) noexcept {
         // Widen: always succeeds for in-domain pod_decimal values
-        return test::decimal_wide{static_cast<__int128>(pd.mantissa), pd.exponent};
+        return test::decimal_wide{.mantissa = static_cast<__int128>(pd.mantissa),
+                                  .exponent = pd.exponent};
     }
 
     static expected_t<pod_decimal> to_pod(test::decimal_wide const& v) noexcept {
@@ -75,7 +76,8 @@ struct decimal_traits<test::decimal_wide> {
             return std::unexpected{error::decimal_overflow};
         // Also enforce exponent domain per the canonical pod_decimal contract.
         if (v.exponent < -38 || v.exponent > 0) return std::unexpected{error::decimal_overflow};
-        return pod_decimal{static_cast<std::int64_t>(v.mantissa), v.exponent};
+        return pod_decimal{.mantissa = static_cast<std::int64_t>(v.mantissa),
+                           .exponent = v.exponent};
     }
 
     static std::strong_ordering compare(test::decimal_wide const& a,
@@ -101,7 +103,7 @@ struct decimal_traits<test::decimal_wide> {
 TEST(DecimalCrossTraits, X1_RoundTripThroughPod) {
     using Wide = fixpp::core::test::decimal_wide;
     // Create a wide decimal with a value that fits in pod_decimal
-    decimal<Wide> src{Wide{12345LL, -2}};
+    decimal<Wide> src{Wide{.mantissa = 12345LL, .exponent = -2}};
 
     // Wide → pod via decimal<Wide>::to<pod_decimal>() wrapper
     auto to_pod_r = src.to<pod_decimal>();
@@ -124,7 +126,7 @@ TEST(DecimalCrossTraits, X2_NarrowingPrecisionLoss) {
     using Wide = fixpp::core::test::decimal_wide;
     // A value that overflows int64 — mock to_pod returns decimal_overflow
     static constexpr __int128 TOO_BIG = static_cast<__int128>(INT64_MAX) + 1;
-    decimal<Wide> wide_val{Wide{TOO_BIG, 0}};
+    decimal<Wide> wide_val{Wide{.mantissa = TOO_BIG, .exponent = 0}};
 
     auto r = wide_val.to<pod_decimal>();
     ASSERT_FALSE(r.has_value());
@@ -137,7 +139,7 @@ TEST(DecimalCrossTraits, X2_NarrowingPrecisionLoss) {
 // decimal<pod_decimal>::to<pod_decimal>() hits the is_same_v<T,U> branch and
 // returns the value directly without going through the pod funnel.
 TEST(DecimalCrossTraits, X3_SameTypeSameValue) {
-    pod_decimal v{100, -2};
+    pod_decimal v{.mantissa = 100, .exponent = -2};
     decimal<pod_decimal> src{v};
 
     // Wrapper short-circuit: to<pod_decimal>() on a decimal<pod_decimal>
@@ -152,7 +154,7 @@ TEST(DecimalCrossTraits, MockTraitsFromPodFail) {
     using Mock = fixpp::core::test::mock_pod;
     fixpp::core::decimal_traits<Mock>::fail_mask = fixpp::core::test::mock_fail::from_pod;
 
-    auto r = decimal_traits<Mock>::from_pod(pod_decimal{1, 0});
+    auto r = decimal_traits<Mock>::from_pod(pod_decimal{.mantissa = 1, .exponent = 0});
     EXPECT_FALSE(r.has_value());
     EXPECT_EQ(r.error(), error::decimal_precision_loss);
 
@@ -167,7 +169,7 @@ TEST(DecimalCrossTraits, MockTraitsFromPodFail) {
 TEST(DecimalCrossTraits, X4_FromOverflowRemap) {
     using Wide = fixpp::core::test::decimal_wide;
     static constexpr __int128 TOO_BIG = static_cast<__int128>(INT64_MAX) + 1;
-    decimal<Wide> wide_val{Wide{TOO_BIG, 0}};
+    decimal<Wide> wide_val{Wide{.mantissa = TOO_BIG, .exponent = 0}};
 
     // from<U>() where U=Wide — Wide's to_pod returns decimal_overflow
     auto r = decimal<pod_decimal>::from(wide_val);
@@ -182,7 +184,7 @@ TEST(DecimalCrossTraits, X5_FromTargetFromPodFailure) {
     using Mock = fixpp::core::test::mock_pod;
     decimal_traits<Mock>::fail_mask = fixpp::core::test::mock_fail::from_pod;
 
-    decimal<pod_decimal> src{pod_decimal{1, 0}};
+    decimal<pod_decimal> src{pod_decimal{.mantissa = 1, .exponent = 0}};
     auto r = decimal<Mock>::from(src);  // T=Mock, U=pod_decimal
     ASSERT_FALSE(r.has_value());
     // Mock's from_pod fails with decimal_precision_loss; passed through raw
@@ -198,7 +200,7 @@ TEST(DecimalCrossTraits, X6_ToTargetFromPodFailure) {
     using Mock = fixpp::core::test::mock_pod;
     decimal_traits<Mock>::fail_mask = fixpp::core::test::mock_fail::from_pod;
 
-    decimal<pod_decimal> src{pod_decimal{1, 0}};
+    decimal<pod_decimal> src{pod_decimal{.mantissa = 1, .exponent = 0}};
     auto r = src.to<Mock>();  // T=pod_decimal, U=Mock
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error(), error::decimal_precision_loss);
@@ -215,7 +217,7 @@ TEST(DecimalCrossTraits, X7_FromNonOverflowErrorPassthrough) {
     decimal_traits<Mock>::fail_mask = fixpp::core::test::mock_fail::to_pod;
     decimal_traits<Mock>::to_pod_error = error::decimal_invalid_input;  // non-overflow
 
-    decimal<Mock> src{fixpp::core::test::mock_pod{1, 0}};
+    decimal<Mock> src{fixpp::core::test::mock_pod{.mantissa = 1, .exponent = 0}};
     auto r_from = decimal<pod_decimal>::from(src);  // hits from<U>() ternary false arm
     ASSERT_FALSE(r_from.has_value());
     EXPECT_EQ(r_from.error(), error::decimal_invalid_input);  // NOT remapped
@@ -251,7 +253,7 @@ TEST(DecimalCrossTraits, FromSameTypeShortCircuitsWithoutTraitHooks) {
     decimal_traits<Mock>::fail_mask =
         fixpp::core::test::mock_fail::from_pod | fixpp::core::test::mock_fail::to_pod;
 
-    decimal<Mock> src{Mock{7, -1}};
+    decimal<Mock> src{Mock{.mantissa = 7, .exponent = -1}};
     auto r = decimal<Mock>::from(src);
     ASSERT_TRUE(r.has_value());
     EXPECT_EQ(r->value().mantissa, 7);
@@ -265,7 +267,7 @@ TEST(DecimalCrossTraits, ToSameTypeShortCircuitsWithoutTraitHooks) {
     decimal_traits<Mock>::fail_mask =
         fixpp::core::test::mock_fail::from_pod | fixpp::core::test::mock_fail::to_pod;
 
-    decimal<Mock> src{Mock{9, -2}};
+    decimal<Mock> src{Mock{.mantissa = 9, .exponent = -2}};
     auto r = src.to<Mock>();
     ASSERT_TRUE(r.has_value());
     EXPECT_EQ(r->value().mantissa, 9);

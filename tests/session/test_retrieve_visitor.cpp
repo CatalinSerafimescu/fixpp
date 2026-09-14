@@ -39,7 +39,6 @@ using fixpp::session::direction_t;
 using fixpp::session::MemoryStore;
 using fixpp::session::seqnum_t;
 using fixpp::session::visit_result;
-using fixpp::store_test::byte_collecting_visitor;
 using fixpp::store_test::make_test_frame;
 
 MemoryStore make_store(std::size_t cap = 200) {
@@ -73,11 +72,12 @@ public:
         co_await timer.async_wait(asio::use_awaitable);
 
         // Deep-copy AFTER the suspend — validates span lifetime guarantee.
-        entries_.push_back({seq, std::vector<std::byte>(frame.begin(), frame.end())});
+        entries_.push_back(
+            {.seq = seq, .bytes = std::vector<std::byte>(frame.begin(), frame.end())});
         co_return fixpp::core::expected_t<visit_result>{visit_result::cont};
     }
 
-    const std::vector<entry>& entries() const noexcept { return entries_; }
+    [[nodiscard]] const std::vector<entry>& entries() const noexcept { return entries_; }
 
 private:
     std::vector<entry> entries_;
@@ -148,7 +148,7 @@ public:
         co_return fixpp::core::expected_t<visit_result>{visit_result::stop};
     }
 
-    bool recursive_store_result() const noexcept { return recursive_store_result_; }
+    [[nodiscard]] bool recursive_store_result() const noexcept { return recursive_store_result_; }
 
 private:
     MemoryStore& store_;
@@ -184,7 +184,7 @@ TEST(RetrieveVisitor, RecursiveStoreFromVisitorDoesNotDeadlock) {
                 // Verify frame 2 was actually stored
                 auto ns = co_await store.next_seqnum(direction_t::inbound, false);
                 EXPECT_TRUE(ns.has_value());
-                EXPECT_EQ(*ns, 3u)
+                EXPECT_EQ(*ns, 3U)
                     << "after recursive store, next_seqnum must be 3 (frames 1 and 2 stored)";
             },
             asio::use_future);
@@ -211,8 +211,8 @@ public:
         co_return fixpp::core::expected_t<visit_result>{visit_result::cont};
     }
 
-    int frames_seen() const noexcept { return frames_seen_; }
-    const std::vector<seqnum_t>& seqs_seen() const noexcept { return seqs_seen_; }
+    [[nodiscard]] int frames_seen() const noexcept { return frames_seen_; }
+    [[nodiscard]] const std::vector<seqnum_t>& seqs_seen() const noexcept { return seqs_seen_; }
 
 private:
     int stop_after_{};
@@ -230,8 +230,10 @@ TEST(RetrieveVisitor, VisitorStopHaltsIteration) {
             // Store 5 frames
             for (int i = 1; i <= 5; ++i) {
                 auto frame = make_test_frame(static_cast<seqnum_t>(i), direction_t::outbound);
-                co_await store.store(static_cast<seqnum_t>(i), std::span<const std::byte>(frame),
-                                     direction_t::outbound);
+                auto st_r =
+                    co_await store.store(static_cast<seqnum_t>(i),
+                                         std::span<const std::byte>(frame), direction_t::outbound);
+                EXPECT_TRUE(st_r.has_value()) << "setup store must succeed";
             }
 
             // Visitor stops after frame 3
@@ -259,7 +261,7 @@ public:
         co_return fixpp::core::expected_t<visit_result>{visit_result::cont};
     }
 
-    int frames_seen() const noexcept { return frames_seen_; }
+    [[nodiscard]] int frames_seen() const noexcept { return frames_seen_; }
 
 private:
     int abort_after_{};
@@ -276,8 +278,10 @@ TEST(RetrieveVisitor, VisitorAbortReturnsStoreVisitorAborted) {
             // Store 5 frames
             for (int i = 1; i <= 5; ++i) {
                 auto frame = make_test_frame(static_cast<seqnum_t>(i), direction_t::inbound);
-                co_await store.store(static_cast<seqnum_t>(i), std::span<const std::byte>(frame),
-                                     direction_t::inbound);
+                auto st_r =
+                    co_await store.store(static_cast<seqnum_t>(i),
+                                         std::span<const std::byte>(frame), direction_t::inbound);
+                EXPECT_TRUE(st_r.has_value()) << "setup store must succeed";
             }
 
             abort_at_visitor vis{3};

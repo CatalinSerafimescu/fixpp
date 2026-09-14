@@ -23,6 +23,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <asio/co_spawn.hpp>
 #include <asio/detached.hpp>
 #include <asio/io_context.hpp>
@@ -31,7 +32,6 @@
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
 #include <asio/write.hpp>
-#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdlib>
@@ -129,7 +129,7 @@ namespace {
 // needs a *fresh* SendingTime(52) so the 038 acceptor first-Logon
 // SendingTime(52) MaxLatency guard admits the peer Logon (an absent 52 is
 // now rejected). Clock-less callers skip the guard, so the field is harmless.
-static std::string utc_now_fix_timestamp() {
+std::string utc_now_fix_timestamp() {
     std::array<char, 32> buf{};
     auto r = fixpp::core::utc_time_to_fix_string(std::chrono::system_clock::now(),
                                                  fixpp::core::fix_time_precision::millis,
@@ -138,8 +138,8 @@ static std::string utc_now_fix_timestamp() {
 }
 
 // Build a valid FIX Logon frame with given sender/target.
-static std::vector<std::byte> make_logon_frame(std::string_view begin_str, std::string_view sender,
-                                               std::string_view target) {
+std::vector<std::byte> make_logon_frame(std::string_view begin_str, std::string_view sender,
+                                        std::string_view target) {
     auto field = [](int tag, std::string_view v) -> std::string {
         return std::to_string(tag) + "=" + std::string(v) + "\x01";
     };
@@ -158,7 +158,7 @@ static std::vector<std::byte> make_logon_frame(std::string_view begin_str, std::
     msg += body;
     unsigned int cs = 0;
     for (unsigned char c : msg) cs += c;
-    cs &= 0xFFu;
+    cs &= 0xFFU;
     char csbuf[5];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     msg += "10=" + std::string(csbuf) + "\x01";
@@ -174,10 +174,10 @@ static std::vector<std::byte> make_logon_frame(std::string_view begin_str, std::
 // a FIX Logon. The acceptor's accept loop will process it.
 // After sending, we wait briefly for the acceptor to reply (it will send a
 // reply Logon once it admits the session), then close.
-static asio::awaitable<void> run_test_initiator(asio::io_context& ioc,
-                                                fixpp::transport::test::LoopbackTlsFixture& fixture,
-                                                uint16_t acceptor_port, std::string sender,
-                                                std::string target) {
+asio::awaitable<void> run_test_initiator(asio::io_context& ioc,
+                                         fixpp::transport::test::LoopbackTlsFixture& fixture,
+                                         uint16_t acceptor_port, std::string sender,
+                                         std::string target) {
     co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
 
     try {
@@ -216,9 +216,8 @@ static asio::awaitable<void> run_test_initiator(asio::io_context& ioc,
 }
 
 // Build a valid FIX Heartbeat (35=0) frame with a given MsgSeqNum.
-static std::vector<std::byte> make_heartbeat_frame(std::string_view begin_str,
-                                                   std::string_view sender, std::string_view target,
-                                                   int seq) {
+std::vector<std::byte> make_heartbeat_frame(std::string_view begin_str, std::string_view sender,
+                                            std::string_view target, int seq) {
     auto field = [](int tag, std::string_view v) -> std::string {
         return std::to_string(tag) + "=" + std::string(v) + "\x01";
     };
@@ -235,7 +234,7 @@ static std::vector<std::byte> make_heartbeat_frame(std::string_view begin_str,
     msg += body;
     unsigned int cs = 0;
     for (unsigned char c : msg) cs += c;
-    cs &= 0xFFu;
+    cs &= 0xFFU;
     char csbuf[5];
     snprintf(csbuf, sizeof(csbuf), "%03u", cs);
     msg += "10=" + std::string(csbuf) + "\x01";
@@ -250,7 +249,7 @@ static std::vector<std::byte> make_heartbeat_frame(std::string_view begin_str,
 // acceptor's bounded first-frame read observes it as TWO separate reads. The
 // incremental-feed fix must reassemble + admit it (the pre-fix whole-buffer
 // re-feed duplicated the carried prefix → malformed → rejected).
-static asio::awaitable<void> run_test_initiator_fragmented(
+asio::awaitable<void> run_test_initiator_fragmented(
     asio::io_context& ioc, fixpp::transport::test::LoopbackTlsFixture& fixture,
     uint16_t acceptor_port, std::string sender, std::string target) {
     co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
@@ -284,7 +283,7 @@ static asio::awaitable<void> run_test_initiator_fragmented(
 // The acceptor must admit the Logon AND drain the Heartbeat surplus through the
 // read-pump (next_inbound advances past the post-Logon value of 2 to 3). The
 // pre-fix code delivered the whole buffer as the "Logon" and dropped the surplus.
-static asio::awaitable<void> run_test_initiator_coalesced(
+asio::awaitable<void> run_test_initiator_coalesced(
     asio::io_context& ioc, fixpp::transport::test::LoopbackTlsFixture& fixture,
     uint16_t acceptor_port, std::string sender, std::string target) {
     co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
@@ -317,7 +316,7 @@ static asio::awaitable<void> run_test_initiator_coalesced(
 // registers the acceptor {ACCEPTOR,INITIATOR} on `engine`, starts it, and returns
 // {acc_id, bound_port}. `fac_keepalive` must outlive `engine` (the Session holds
 // the factory). Returns nullopt if the fixtures are missing or bind fails.
-static std::optional<std::pair<fixpp::session::SessionId, uint16_t>> start_mtls_acceptor(
+std::optional<std::pair<fixpp::session::SessionId, uint16_t>> start_mtls_acceptor(
     asio::io_context& ioc, fixpp::session::Engine& engine, const std::string& fixture_dir,
     std::shared_ptr<fixpp::transport::TransportFactory>& fac_keepalive) {
     fixpp::tls::file_cert_source::Config cs_cfg;
@@ -453,7 +452,7 @@ TEST(EngineAcceptorTest, OnListIdentityAdmitsToEstablished) {
     ioc.restart();
 
     uint16_t bound_port = engine.acceptor_bound_endpoint(acc_id).port;
-    ASSERT_NE(bound_port, 0u) << "acceptor listener did not bind (port is 0)";
+    ASSERT_NE(bound_port, 0U) << "acceptor listener did not bind (port is 0)";
 
     // Build the loopback TLS fixture (for client-side transport).
     fixpp::transport::test::LoopbackTlsFixture fixture{std::string(fixture_dir),
@@ -702,7 +701,7 @@ TEST(EngineAcceptorTest, UnmatchedReversedCompIdRejectedNoSession) {
     ioc.restart();
 
     uint16_t bound_port = engine.acceptor_bound_endpoint(acc_id).port;
-    ASSERT_NE(bound_port, 0u) << "acceptor listener did not bind (port is 0)";
+    ASSERT_NE(bound_port, 0U) << "acceptor listener did not bind (port is 0)";
 
     // Contract witness #1: after start() but BEFORE any peer connects,
     // lookup() must be nullptr (lazy/match-gated construction). [Gate A New-3]
@@ -849,7 +848,7 @@ TEST(EngineAcceptorTest, StopDrainsParkedLivenessLoopNoUaf) {
     ioc.run_for(50ms);
     ioc.restart();
     uint16_t bound_port = engine.acceptor_bound_endpoint(acc_id).port;
-    ASSERT_NE(bound_port, 0u) << "acceptor listener did not bind";
+    ASSERT_NE(bound_port, 0U) << "acceptor listener did not bind";
 
     fixpp::transport::test::LoopbackTlsFixture fixture{std::string(fixture_dir),
                                                        ioc.get_executor()};
@@ -874,7 +873,7 @@ TEST(EngineAcceptorTest, StopDrainsParkedLivenessLoopNoUaf) {
     // Let the liveness loop spawn + register its sleep.
     ioc.run_for(100ms);
     ioc.restart();
-    ASSERT_GE(clock->inflight_count(), 1u)
+    ASSERT_GE(clock->inflight_count(), 1U)
         << "liveness loop must be parked in sleep_until before stop()";
 
     // Stop. After stop() completes, the parked liveness sleep_until MUST be drained.
@@ -900,7 +899,7 @@ TEST(EngineAcceptorTest, StopDrainsParkedLivenessLoopNoUaf) {
     stop_fut.get();
 
     const std::size_t inflight = clock->inflight_count();
-    EXPECT_EQ(inflight, 0u)
+    EXPECT_EQ(inflight, 0U)
         << "Engine::stop() left a parked liveness sleep_until (inflight=" << inflight
         << ") — the F2 heap-use-after-free: stop() must drive each session through "
         << "close() to join its liveness loop.";

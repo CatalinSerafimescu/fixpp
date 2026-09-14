@@ -100,13 +100,13 @@ namespace {
 // ─────────────────────────────────────────────────────────────────────────────
 // FIX frame helper — build a minimal well-formed Logon for on_inbound_frame.
 // ─────────────────────────────────────────────────────────────────────────────
-static std::string fix_field(int tag, std::string_view val) {
+std::string fix_field(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
-static std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
-                                               std::string_view sender,  // 49=
-                                               std::string_view target)  // 56=
+std::vector<std::byte> make_logon_frame(std::string_view begin_string, std::uint32_t seq,
+                                        std::string_view sender,  // 49=
+                                        std::string_view target)  // 56=
 {
     std::string body;
     body += fix_field(35, "A");

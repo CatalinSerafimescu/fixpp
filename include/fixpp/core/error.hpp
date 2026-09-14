@@ -137,30 +137,31 @@ enum class error : std::uint8_t {
     session_already_open = 51,        // [2d §4.7] — Session::open() called twice
                                       //   on the same handle (programmer error).
                                       //   → FIXPP_ERR_THREAD_SESSION_LIFECYCLE
-    session_already_closed = 52,      // [2d §4.7] close()'s idempotency bullet / [2d §6.5] Logout-exchange note —
-                                      //   close() on a NEVER-OPENED or an
-                                      //   ALREADY-CLOSED (drained) session. NOT
-                                      //   returned for an ALREADY-CLOSING
-                                      //   (in-flight) session — that returns the
-                                      //   SAME in-flight awaitable, no error.
-                                      //   Idempotency; non-fatal.
-                                      //   → FIXPP_ERR_THREAD_SESSION_LIFECYCLE
-    invalid_session_config = 53,      // [2d §4.5]/§6.1 — incompatible combo
-                                      //   (direct_executor+lock_policy::spin even
-                                      //   when attested; null EngineConfig::
-                                      //   executor; null dictionary;
-                                      //   default-constructed security_profile
-                                      //   sentinel — N-P2-3).
-                                      //   → FIXPP_ERR_THREAD_CONFIG
-    clock_not_set = 54,               // [2d §4.4] — EngineConfig::clock is null
-                                      //   at Engine::open, regardless of
-                                      //   per-session clock_override (root #2).
-                                      //   → FIXPP_ERR_THREAD_CONFIG
-    dispatch_aborted = 55,            // [2d §6.5] — cancellable_dispatch's slot
-                                      //   fired BEFORE the posted handler was
-                                      //   picked up; handler reaped (not invoked).
-                                      //   Expected on the §4.7 phase-2 close path.
-                                      //   Joins FIXPP_ERR_CANCELLED (reused).
+    session_already_closed =
+        52,  // [2d §4.7] close()'s idempotency bullet / [2d §6.5] Logout-exchange note —
+             //   close() on a NEVER-OPENED or an
+             //   ALREADY-CLOSED (drained) session. NOT
+             //   returned for an ALREADY-CLOSING
+             //   (in-flight) session — that returns the
+             //   SAME in-flight awaitable, no error.
+             //   Idempotency; non-fatal.
+             //   → FIXPP_ERR_THREAD_SESSION_LIFECYCLE
+    invalid_session_config = 53,  // [2d §4.5]/§6.1 — incompatible combo
+                                  //   (direct_executor+lock_policy::spin even
+                                  //   when attested; null EngineConfig::
+                                  //   executor; null dictionary;
+                                  //   default-constructed security_profile
+                                  //   sentinel — N-P2-3).
+                                  //   → FIXPP_ERR_THREAD_CONFIG
+    clock_not_set = 54,           // [2d §4.4] — EngineConfig::clock is null
+                                  //   at Engine::open, regardless of
+                                  //   per-session clock_override (root #2).
+                                  //   → FIXPP_ERR_THREAD_CONFIG
+    dispatch_aborted = 55,        // [2d §6.5] — cancellable_dispatch's slot
+                                  //   fired BEFORE the posted handler was
+                                  //   picked up; handler reaped (not invoked).
+                                  //   Expected on the §4.7 phase-2 close path.
+                                  //   Joins FIXPP_ERR_CANCELLED (reused).
 
     // ── 008-message-store: 10 store_* variants per [2e §6.7] / FR-021 /
     //    FR-023 / research D-6. Non-renumbering append at unused slots 56–65,
@@ -479,42 +480,48 @@ enum class error : std::uint8_t {
     //    rejection. FR-034: 15 tls_* variants from 011 surface UNCHANGED.
 
     // ── LIFECYCLE (8 variants, slots 94–101) ─────────────────────────────────
-    transport_resolve_failed = 94,             // [2h §6.6] `transport_resolve_failed` row — DNS / getaddrinfo
-                                               //   resolution of Endpoint::host failed;
-                                               //   no TCP connection attempted.
-                                               //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
-    transport_connect_refused = 95,            // [2h §6.6] `transport_connect_refused` row — TCP connect() returned
-                                               //   ECONNREFUSED / WSAECONNREFUSED; peer
-                                               //   port not listening.
-                                               //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
-    transport_connect_timeout = 96,            // [2h §6.6] `transport_connect_timeout` row — connect_timeout
-                                               //   (Config::connect_timeout, default 30 s)
-                                               //   elapsed before TCP SYN-ACK received.
-                                               //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
-    transport_already_connected = 97,          // [2h §6.6] `transport_already_connected` row — the ENTRY STATE forbids
-                                               //   it, not the call count (#339):
-                                               //   async_connect from connected/handshaken,
-                                               //   async_handshake from fresh/handshaken.
-                                               //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
-    transport_already_closed = 98,             // [2h §6.6] `transport_already_closed` row — any async_* once state
-                                               //   == closed. close() is not the only door:
-                                               //   a TLS handshake that ENTERED the OpenSSL
-                                               //   exchange also lands there (#339).
-                                               //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
-    transport_read_in_progress = 99,           // [2h §6.6] `transport_read_in_progress` row — concurrent second
-                                               //   async_read_some while a first is
-                                               //   in-flight; returns IMMEDIATELY per
-                                               //   [2h §4.1] RC#3 close / spec FR-007.
-                                               //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
-    transport_write_in_progress = 100,         // [2h §6.6] `transport_write_in_progress` row — concurrent second
-                                               //   async_write while a first is in-flight;
-                                               //   returns IMMEDIATELY per [2h §4.1] RC#3
-                                               //   close / spec FR-007.
-                                               //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
-    transport_reconnect_limit_exceeded = 101,  // [2h §6.6] `transport_reconnect_limit_exceeded` row — ReconnectPolicy
-                                               //   max_attempts exhausted (US2); FSM
-                                               //   transitions to Disconnected-terminal.
-                                               //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
+    transport_resolve_failed = 94,  // [2h §6.6] `transport_resolve_failed` row — DNS / getaddrinfo
+                                    //   resolution of Endpoint::host failed;
+                                    //   no TCP connection attempted.
+                                    //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
+    transport_connect_refused =
+        95,  // [2h §6.6] `transport_connect_refused` row — TCP connect() returned
+             //   ECONNREFUSED / WSAECONNREFUSED; peer
+             //   port not listening.
+             //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
+    transport_connect_timeout = 96,  // [2h §6.6] `transport_connect_timeout` row — connect_timeout
+                                     //   (Config::connect_timeout, default 30 s)
+                                     //   elapsed before TCP SYN-ACK received.
+                                     //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
+    transport_already_connected =
+        97,  // [2h §6.6] `transport_already_connected` row — the ENTRY STATE forbids
+             //   it, not the call count (#339):
+             //   async_connect from connected/handshaken,
+             //   async_handshake from fresh/handshaken.
+             //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
+    transport_already_closed =
+        98,  // [2h §6.6] `transport_already_closed` row — any async_* once state
+             //   == closed. close() is not the only door:
+             //   a TLS handshake that ENTERED the OpenSSL
+             //   exchange also lands there (#339).
+             //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
+    transport_read_in_progress =
+        99,  // [2h §6.6] `transport_read_in_progress` row — concurrent second
+             //   async_read_some while a first is
+             //   in-flight; returns IMMEDIATELY per
+             //   [2h §4.1] RC#3 close / spec FR-007.
+             //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
+    transport_write_in_progress =
+        100,  // [2h §6.6] `transport_write_in_progress` row — concurrent second
+              //   async_write while a first is in-flight;
+              //   returns IMMEDIATELY per [2h §4.1] RC#3
+              //   close / spec FR-007.
+              //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
+    transport_reconnect_limit_exceeded =
+        101,  // [2h §6.6] `transport_reconnect_limit_exceeded` row — ReconnectPolicy
+              //   max_attempts exhausted (US2); FSM
+              //   transitions to Disconnected-terminal.
+              //   → FIXPP_ERR_TRANSPORT_LIFECYCLE
 
     // ── IO (5 variants, slots 102–106) ───────────────────────────────────────
     transport_read_eof = 102,        // [2h §6.6] `transport_read_eof` row — async_read_some got
@@ -529,66 +536,76 @@ enum class error : std::uint8_t {
                                      //   other than EOF (ECONNRESET, ETIMEDOUT,
                                      //   TLS decrypt failure etc.).
                                      //   → FIXPP_ERR_TRANSPORT_IO
-    transport_write_short = 105,     // [2h §6.6] `transport_write_short` row — composed write completed
-                                     //   fewer bytes than requested (torn write);
-                                     //   FSM disconnects + recovers via
-                                     //   ResendRequest per [FIX-SL §4.5.2].
-                                     //   Persisted frame NOT rolled back per
-                                     //   [2e §6.1.4].
-                                     //   → FIXPP_ERR_TRANSPORT_IO
-    transport_write_error = 106,     // [2h §6.6] `transport_write_error` row — OS-level write error
-                                     //   (EPIPE, ECONNRESET, TLS encrypt failure).
-                                     //   → FIXPP_ERR_TRANSPORT_IO
+    transport_write_short =
+        105,  // [2h §6.6] `transport_write_short` row — composed write completed
+              //   fewer bytes than requested (torn write);
+              //   FSM disconnects + recovers via
+              //   ResendRequest per [FIX-SL §4.5.2].
+              //   Persisted frame NOT rolled back per
+              //   [2e §6.1.4].
+              //   → FIXPP_ERR_TRANSPORT_IO
+    transport_write_error = 106,  // [2h §6.6] `transport_write_error` row — OS-level write error
+                                  //   (EPIPE, ECONNRESET, TLS encrypt failure).
+                                  //   → FIXPP_ERR_TRANSPORT_IO
 
     // ── HANDSHAKE (2 variants, slots 107–108) ─────────────────────────────────
-    transport_handshake_failed = 107,   // [2h §6.6] `transport_handshake_failed` row — GROUPING variant;
-                                        //   TLS handshake rejected by peer cert
-                                        //   validation, cipher mismatch, etc.
-                                        //   Diagnostic field carries OpenSSL error
-                                        //   string + [2g §6.6] tls_* sub-reason
-                                        //   on verify_peer rejection. Joins
-                                        //   FIXPP_ERR_TLS_HANDSHAKE at C ABI.
-                                        //   FR-034a + FR-034.
-                                        //   → FIXPP_ERR_TRANSPORT_HANDSHAKE
-    transport_handshake_timeout = 108,  // [2h §6.6] `transport_handshake_timeout` row — Config::tls_handshake_
-                                        //   timeout (default 30 s) elapsed before
-                                        //   OpenSSL handshake completed; SSL* state
-                                        //   broken → caller MUST close() per
-                                        //   [2h §6.4].
-                                        //   → FIXPP_ERR_TRANSPORT_HANDSHAKE
+    transport_handshake_failed =
+        107,  // [2h §6.6] `transport_handshake_failed` row — GROUPING variant;
+              //   TLS handshake rejected by peer cert
+              //   validation, cipher mismatch, etc.
+              //   Diagnostic field carries OpenSSL error
+              //   string + [2g §6.6] tls_* sub-reason
+              //   on verify_peer rejection. Joins
+              //   FIXPP_ERR_TLS_HANDSHAKE at C ABI.
+              //   FR-034a + FR-034.
+              //   → FIXPP_ERR_TRANSPORT_HANDSHAKE
+    transport_handshake_timeout =
+        108,  // [2h §6.6] `transport_handshake_timeout` row — Config::tls_handshake_
+              //   timeout (default 30 s) elapsed before
+              //   OpenSSL handshake completed; SSL* state
+              //   broken → caller MUST close() per
+              //   [2h §6.4].
+              //   → FIXPP_ERR_TRANSPORT_HANDSHAKE
 
     // ── CONFIG (2 variants, slots 109–110) ────────────────────────────────────
-    transport_factory_failed = 109,   // [2h §6.6] `transport_factory_failed` row — TransportFactory::make()
-                                      //   could not construct (OS socket resource
-                                      //   exhaustion, SSL_CTX_new failure, PMR
-                                      //   throw routed via [2a §4.2] trap_throw).
-                                      //   → FIXPP_ERR_TRANSPORT_CONFIG
-    transport_psk_unsupported = 110,  // [2h §6.6] `transport_psk_unsupported` row — caller requested a
-                                      //   PSK-mode TLS session; v1.0 does NOT
-                                      //   implement PSK (deferred per [const §XII.6]
-                                      //   / T-012 P2). Returns this variant at
-                                      //   handshake time.
-                                      //   → FIXPP_ERR_TRANSPORT_CONFIG
+    transport_factory_failed =
+        109,  // [2h §6.6] `transport_factory_failed` row — TransportFactory::make()
+              //   could not construct (OS socket resource
+              //   exhaustion, SSL_CTX_new failure, PMR
+              //   throw routed via [2a §4.2] trap_throw).
+              //   → FIXPP_ERR_TRANSPORT_CONFIG
+    transport_psk_unsupported =
+        110,  // [2h §6.6] `transport_psk_unsupported` row — caller requested a
+              //   PSK-mode TLS session; v1.0 does NOT
+              //   implement PSK (deferred per [const §XII.6]
+              //   / T-012 P2). Returns this variant at
+              //   handshake time.
+              //   → FIXPP_ERR_TRANSPORT_CONFIG
 
     // ── CANCELLED-reuse (5 variants, slots 111–115) ───────────────────────────
-    transport_connect_cancelled = 111,    // [2h §6.6] `transport_connect_cancelled` row — async_connect awaitable
-                                          //   cancelled via cancellation_type::total.
-                                          //   → FIXPP_ERR_CANCELLED (reused)
-    transport_read_cancelled = 112,       // [2h §6.6] `transport_read_cancelled` row — async_read_some awaitable
-                                          //   cancelled; partial bytes LOST per ASIO
-                                          //   contract.
-                                          //   → FIXPP_ERR_CANCELLED (reused)
-    transport_write_cancelled = 113,      // [2h §6.6] `transport_write_cancelled` row — async_write awaitable
-                                          //   cancelled mid-flight. Persisted frame NOT
-                                          //   rolled back per [2e §6.1.4].
-                                          //   → FIXPP_ERR_CANCELLED (reused)
-    transport_handshake_cancelled = 114,  // [2h §6.6] `transport_handshake_cancelled` row — async_handshake awaitable
-                                          //   cancelled; SSL* state broken → caller
-                                          //   MUST close() per [2h §6.4].
-                                          //   → FIXPP_ERR_CANCELLED (reused)
-    transport_accept_cancelled = 115,     // [2h §6.6] `transport_accept_cancelled` row — async_accept awaitable
-                                          //   on Listener cancelled (US3 acceptor path).
-                                          //   → FIXPP_ERR_CANCELLED (reused)
+    transport_connect_cancelled =
+        111,  // [2h §6.6] `transport_connect_cancelled` row — async_connect awaitable
+              //   cancelled via cancellation_type::total.
+              //   → FIXPP_ERR_CANCELLED (reused)
+    transport_read_cancelled =
+        112,  // [2h §6.6] `transport_read_cancelled` row — async_read_some awaitable
+              //   cancelled; partial bytes LOST per ASIO
+              //   contract.
+              //   → FIXPP_ERR_CANCELLED (reused)
+    transport_write_cancelled =
+        113,  // [2h §6.6] `transport_write_cancelled` row — async_write awaitable
+              //   cancelled mid-flight. Persisted frame NOT
+              //   rolled back per [2e §6.1.4].
+              //   → FIXPP_ERR_CANCELLED (reused)
+    transport_handshake_cancelled =
+        114,  // [2h §6.6] `transport_handshake_cancelled` row — async_handshake awaitable
+              //   cancelled; SSL* state broken → caller
+              //   MUST close() per [2h §6.4].
+              //   → FIXPP_ERR_CANCELLED (reused)
+    transport_accept_cancelled =
+        115,  // [2h §6.6] `transport_accept_cancelled` row — async_accept awaitable
+              //   on Listener cancelled (US3 acceptor path).
+              //   → FIXPP_ERR_CANCELLED (reused)
 
     // ── 013-session-reconnect-binding: 4 session_* variants per
     //    contracts/session_errors.hpp + data-model.md §E-1/§E-3/§E-7.

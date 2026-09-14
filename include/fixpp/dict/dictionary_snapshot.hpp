@@ -21,9 +21,8 @@
 // `Dictionary::as_table_view()` (dictionary.hpp's own declaration) stays public and keeps
 // returning a mutable `table_view` BY VALUE — `dictionary_driven_validator`
 // still holds one by value under the frozen SC-007 design point
-// (validator.hpp's `dictionary_driven_validator` ctor) — so this type does not make `table_view` itself
-// immutable. It makes the session-config injection point stop admitting a
-// mutable alias.
+// (validator.hpp's `dictionary_driven_validator` ctor) — so this type does not make `table_view`
+// itself immutable. It makes the session-config injection point stop admitting a mutable alias.
 #pragma once
 
 #include <fixpp/dict/table_view.hpp>
@@ -66,8 +65,7 @@ public:
     // Public so std::make_shared can reach it; unreachable without a
     // snapshot_key, which only make_dictionary_snapshot can mint. `tv` is BY
     // VALUE — see the design doc §3/§4 for the move/allocation accounting.
-    dictionary_snapshot(detail::snapshot_key, std::shared_ptr<const Dictionary> src,
-                        table_view tv);
+    dictionary_snapshot(detail::snapshot_key, std::shared_ptr<const Dictionary> src, table_view tv);
 
     dictionary_snapshot(dictionary_snapshot const&) = delete;
     dictionary_snapshot& operator=(dictionary_snapshot const&) = delete;

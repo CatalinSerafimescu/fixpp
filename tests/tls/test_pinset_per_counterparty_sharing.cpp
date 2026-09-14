@@ -78,7 +78,7 @@ TEST(PinsetPerCounterparty, TwoAliasesObserveRotationAtomically) {
     auto snap_b = session_b_pins->snapshot();
     EXPECT_EQ(snap_a.get(), snap_b.get())
         << "both aliases must observe the same snapshot pointer (atomic publication)";
-    ASSERT_EQ(snap_a->size(), 1u);
+    ASSERT_EQ(snap_a->size(), 1U);
     EXPECT_EQ((*snap_a)[0].sha256, kNew);
 }
 

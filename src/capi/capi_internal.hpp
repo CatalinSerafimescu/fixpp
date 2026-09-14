@@ -10,6 +10,8 @@
 // boundary (fixpp_capi.map exports only `fixpp_*`). [050 data-model E-1..E-6]
 #pragma once
 
+#include <asio/executor_work_guard.hpp>
+#include <asio/io_context.hpp>
 #include <atomic>
 #include <cstdint>
 #include <memory>
@@ -20,13 +22,9 @@
 #include <unordered_map>
 #include <vector>
 
-#include <asio/executor_work_guard.hpp>
-#include <asio/io_context.hpp>
-
 #include "fix/c_api/error.h"
 #include "fix/c_api/handles.h"
 #include "fix/c_api/session.h"  // fixpp_recv_cb, fixpp_session_role, fixpp_security_kind
-
 #include "fixpp/core/clock.hpp"
 #include "fixpp/core/engine_config.hpp"
 #include "fixpp/dict/dictionary.hpp"
@@ -139,9 +137,9 @@ struct fixpp_dict;
 // PLACED HERE: must precede all handle structs that use these constants as
 // default member initialisers (fixpp_msg::tag_, fixpp_engine::tag_, fixpp_dict::tag_).
 static constexpr std::uint32_t FIXPP_HANDLE_TAG_ENGINE = 0xF1ECE001u;
-static constexpr std::uint32_t FIXPP_HANDLE_TAG_MSG    = 0xF1EC1E55u;  // live outbound msg
-static constexpr std::uint32_t FIXPP_HANDLE_TAG_DEAD   = 0xDEADD1EDu;
-static constexpr std::uint32_t FIXPP_HANDLE_TAG_DICT   = 0xD1C70DEFu;  // live dict handle
+static constexpr std::uint32_t FIXPP_HANDLE_TAG_MSG = 0xF1EC1E55u;  // live outbound msg
+static constexpr std::uint32_t FIXPP_HANDLE_TAG_DEAD = 0xDEADD1EDu;
+static constexpr std::uint32_t FIXPP_HANDLE_TAG_DICT = 0xD1C70DEFu;  // live dict handle
 
 // Dictionary handle (052 US1 / [2i §4.2.2]).
 // tag_ is the FIRST member so fixpp_dict_destroy can detect a destroyed handle
@@ -179,7 +177,7 @@ struct OutboundAccumulator;
 
 // Message flavour tag (E-1): distinguishes the two live fixpp_msg shapes.
 enum class FixppMsgFlavour : std::uint8_t {
-    inbound  = 0,  // stack flyweight; view is valid; accumulator == nullptr
+    inbound = 0,   // stack flyweight; view is valid; accumulator == nullptr
     outbound = 1,  // heap shell; accumulator points into the session arena
 };
 
@@ -229,8 +227,8 @@ enum class FixppMsgFlavour : std::uint8_t {
 //
 // [data-model E-1 / E-9 / B-051-2]
 struct fixpp_msg {
-    std::uint32_t        tag_      = FIXPP_HANDLE_TAG_MSG;  // handle-liveness (E-1)
-    FixppMsgFlavour      flavour   = FixppMsgFlavour::inbound;
+    std::uint32_t tag_ = FIXPP_HANDLE_TAG_MSG;  // handle-liveness (E-1)
+    FixppMsgFlavour flavour = FixppMsgFlavour::inbound;
 
     // Inbound arm: borrowed MessageView (valid only in receive-callback window).
     // Also used by clones (owned_view_ backs the pointed-to view).
@@ -249,8 +247,8 @@ struct fixpp_msg {
     // arena_resource_ so the resource destructs before its backing buffer. nullptr
     // for inbound/clone handles. (NOT the session arena — Session::session_arena()
     // does not exist for the C-ABI path; shell-owned ⇒ no session-arena UAF.)
-    std::unique_ptr<std::byte[]>                          arena_buf_;
-    std::unique_ptr<std::pmr::monotonic_buffer_resource>  arena_resource_;
+    std::unique_ptr<std::byte[]> arena_buf_;
+    std::unique_ptr<std::pmr::monotonic_buffer_resource> arena_resource_;
 
     // Validity token (E-9 lazy tombstone).  Default-constructed = expired, which
     // is the correct sentinel for inbound (set_* → FIXPP_ERR_INVALID_HANDLE) and
@@ -294,11 +292,9 @@ struct fixpp_msg {
 
     // Clone-owned storage: allocated by fixpp_msg_clone; nullptr for
     // non-clone handles.  Owned by the shell; destroyed at fixpp_msg_destroy.
-    std::unique_ptr<std::byte[]>
-        owned_frame_;  // deep-copied frame bytes (view aliases into this)
+    std::unique_ptr<std::byte[]> owned_frame_;  // deep-copied frame bytes (view aliases into this)
     std::unique_ptr<fixpp::wire::MessageView<fixpp::wire::access_mode::Index>>
         owned_view_;  // clone-owned MessageView over owned_frame_
-
 };
 
 // fixpp_group — inbound repeating-group read cursor (E-2 / CA-010-read).
@@ -412,13 +408,12 @@ struct GroupInstance {
 // fills `instances`; a SCALAR entry keeps `is_group=false`, `tag = field tag`,
 // `value_bytes = payload`. The commit serialiser discriminates on `is_group`.
 struct AccumulatorEntry {
-    std::uint16_t                   tag = 0;       // scalar: field tag; group: NoXXX count tag
-    bool                            is_group = false;  // US4: true ⇒ repeating group
-    std::pmr::vector<std::byte>     value_bytes;   // scalar: serialised field bytes
-    std::pmr::vector<GroupInstance> instances;     // group: repeating instances
+    std::uint16_t tag = 0;                      // scalar: field tag; group: NoXXX count tag
+    bool is_group = false;                      // US4: true ⇒ repeating group
+    std::pmr::vector<std::byte> value_bytes;    // scalar: serialised field bytes
+    std::pmr::vector<GroupInstance> instances;  // group: repeating instances
 
-    explicit AccumulatorEntry(std::pmr::memory_resource* mr)
-        : value_bytes(mr), instances(mr) {}
+    explicit AccumulatorEntry(std::pmr::memory_resource* mr) : value_bytes(mr), instances(mr) {}
 
     ~AccumulatorEntry() = default;
     AccumulatorEntry(AccumulatorEntry&&) = default;
@@ -432,9 +427,9 @@ struct fixpp_group_builder;
 
 // OutboundAccumulator: the arena-resident root of the outbound message tree.
 struct OutboundAccumulator {
-    std::pmr::memory_resource*         arena_;    // per-message monotonic arena (pmr::string/vector backing)
-    std::pmr::string                   msg_type;  // 35= value (INV-1: non-empty)
-    std::pmr::vector<AccumulatorEntry> entries;   // ordered field/group list
+    std::pmr::memory_resource* arena_;  // per-message monotonic arena (pmr::string/vector backing)
+    std::pmr::string msg_type;          // 35= value (INV-1: non-empty)
+    std::pmr::vector<AccumulatorEntry> entries;  // ordered field/group list
     // US4: stack of currently-open group builders (LIFO close-order, E-4). Holds
     // arena-allocated fixpp_group_builder*. group_end must close the top; commit
     // requires this empty (open builder → INVALID_HANDLE, analyze C2).
@@ -459,17 +454,17 @@ struct OutboundAccumulator {
 struct fixpp_entry;
 
 struct fixpp_group_builder {
-    fixpp_msg*    msg    = nullptr;        // owning outbound shell (tag_/token validity)
-    fixpp_entry*  parent = nullptr;        // null ⇒ top-level group; else the entry this nests within
+    fixpp_msg* msg = nullptr;       // owning outbound shell (tag_/token validity)
+    fixpp_entry* parent = nullptr;  // null ⇒ top-level group; else the entry this nests within
     std::uint32_t group_field_index = 0;  // index of the group AccumulatorEntry — in
                                           // accumulator->entries (top-level) or in the
                                           // parent entry's instance.fields (nested)
-    bool          open   = true;          // false after fixpp_msg_group_end (invalidates it + its entries)
+    bool open = true;  // false after fixpp_msg_group_end (invalidates it + its entries)
 };
 
 struct fixpp_entry {
     fixpp_group_builder* builder = nullptr;  // owning builder (validity ⇒ builder->open)
-    std::uint32_t        instance_index = 0; // index into the builder's group's `instances`
+    std::uint32_t instance_index = 0;        // index into the builder's group's `instances`
 };
 
 // Session handle (E-2): NON-owning observer keyed by SessionId. Stores the
@@ -480,11 +475,11 @@ struct fixpp_entry {
 // alive even after engine destroy — see fixpp_engine destruction note); `valid`
 // flips false once close() returns. [2i §4.2.2]
 struct fixpp_session {
-    fixpp_engine* engine = nullptr;                  // borrowed (owning engine)
-    fixpp::session::SessionId id;                    // registry key
+    fixpp_engine* engine = nullptr;                   // borrowed (owning engine)
+    fixpp::session::SessionId id;                     // registry key
     fixpp_capi::detail::SessionSlot* slot = nullptr;  // borrowed (lives in CapiApplication)
-    std::atomic<bool> valid{true};                   // invalidated by close(); atomic for
-                                                     // send-vs-close concurrent access (Q2)
+    std::atomic<bool> valid{true};                    // invalidated by close(); atomic for
+                                                      // send-vs-close concurrent access (Q2)
 
     // Liveness token (E-9): the STRONG owner of the per-session SessionLiveness
     // control block.  Constructed at session-shell creation time (so a strong ref
@@ -578,11 +573,11 @@ struct EngineState {
     //   engine_ first, work_guard_ second, ioc_ third, clock_ last.
     // workers_ is between work_guard_ and engine_; all workers are
     // joined before EngineState is destroyed, so the order is inert.
-    std::shared_ptr<fixpp::core::Clock> clock_;         // destroyed LAST
+    std::shared_ptr<fixpp::core::Clock> clock_;  // destroyed LAST
     asio::io_context ioc_;
     asio::executor_work_guard<asio::io_context::executor_type> work_guard_;
-    std::vector<std::thread> workers_;                  // joined before state_.reset()
-    std::optional<fixpp::session::Engine> engine_;      // destroyed FIRST
+    std::vector<std::thread> workers_;              // joined before state_.reset()
+    std::optional<fixpp::session::Engine> engine_;  // destroyed FIRST
 
     EngineState() : work_guard_(asio::make_work_guard(ioc_)) {
         fixpp_capi::detail::g_engine_state_live_count.fetch_add(1, std::memory_order_relaxed);
@@ -596,10 +591,10 @@ struct EngineState {
 };
 
 struct fixpp_engine {
-    std::uint32_t tag_ = FIXPP_HANDLE_TAG_ENGINE;                    // liveness tombstone
-    std::shared_ptr<fixpp_capi::detail::CapiApplication> app_;        // retained (slot borrows)
-    std::vector<std::unique_ptr<fixpp_session>> sessions_;            // retained (handle storage)
-    std::unique_ptr<EngineState> state_;                              // reclaimed on destroy
+    std::uint32_t tag_ = FIXPP_HANDLE_TAG_ENGINE;               // liveness tombstone
+    std::shared_ptr<fixpp_capi::detail::CapiApplication> app_;  // retained (slot borrows)
+    std::vector<std::unique_ptr<fixpp_session>> sessions_;      // retained (handle storage)
+    std::unique_ptr<EngineState> state_;                        // reclaimed on destroy
     std::uint32_t worker_threads_ = 1;
     std::uint16_t consumer_minor = 0;
     bool engine_started_ = false;  // Engine::start() succeeded

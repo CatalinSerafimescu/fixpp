@@ -58,12 +58,10 @@
 #include <string_view>
 #include <vector>
 
+#include "capi_internal.hpp"
 #include "fix/c_api/engine.h"
 #include "fix/c_api/message.h"
 #include "fix/c_api/session.h"
-
-#include "capi_internal.hpp"
-
 #include "fixpp/dict/dictionary.hpp"
 #include "fixpp/dict/xml_loader.hpp"
 #include "fixpp/transport/endpoint.hpp"
@@ -120,8 +118,7 @@ struct DictOwner {
     std::pmr::monotonic_buffer_resource mr;
     fixpp_dict_t* handle = nullptr;
 
-    DictOwner()
-        : arena(2UZ * 1024UZ * 1024UZ), mr{arena.data(), arena.size()} {
+    DictOwner() : arena(2UZ * 1024UZ * 1024UZ), mr{arena.data(), arena.size()} {
         auto dict = fixpp::dict::XmlLoader{}.load_from_string(kBenchXml, &mr);
         auto* d = new fixpp_dict{std::make_shared<fixpp::dict::Dictionary>(std::move(dict))};
         handle = reinterpret_cast<fixpp_dict_t*>(d);
@@ -176,8 +173,7 @@ struct SessionOwner {
 
 // Builds `35=G` with `outer_instances` outer instances, each optionally
 // carrying one nested NoInner instance, and commits. Returns the commit rc.
-fixpp_error_t build_and_commit_group(fixpp_session_t* sess, unsigned outer_instances,
-                                     bool nested) {
+fixpp_error_t build_and_commit_group(fixpp_session_t* sess, unsigned outer_instances, bool nested) {
     fixpp_msg_t* msg = nullptr;
     if (fixpp_msg_create_outbound(sess, "G", 1, &msg) != FIXPP_ERR_OK || msg == nullptr) {
         return FIXPP_ERR_INVALID_HANDLE;
@@ -242,7 +238,9 @@ bool warm_up(benchmark::State& state, fixpp_error_t rc, char const* label) {
 // commit path.
 static void BM_CapiCommit_NoGroup(benchmark::State& state) {
     SessionOwner s;
-    if (!warm_up(state, build_and_commit_plain(s.sess), "NoGroup")) { return; }
+    if (!warm_up(state, build_and_commit_plain(s.sess), "NoGroup")) {
+        return;
+    }
     for (auto _ : state) {
         benchmark::DoNotOptimize(build_and_commit_plain(s.sess));
     }
@@ -256,7 +254,9 @@ BENCHMARK(BM_CapiCommit_NoGroup);
 // separates it from the fixed per-commit cost.
 static void BM_CapiCommit_Group1(benchmark::State& state) {
     SessionOwner s;
-    if (!warm_up(state, build_and_commit_group(s.sess, 1, false), "Group1")) { return; }
+    if (!warm_up(state, build_and_commit_group(s.sess, 1, false), "Group1")) {
+        return;
+    }
     for (auto _ : state) {
         benchmark::DoNotOptimize(build_and_commit_group(s.sess, 1, false));
     }
@@ -266,7 +266,9 @@ BENCHMARK(BM_CapiCommit_Group1);
 
 static void BM_CapiCommit_Group8(benchmark::State& state) {
     SessionOwner s;
-    if (!warm_up(state, build_and_commit_group(s.sess, 8, false), "Group8")) { return; }
+    if (!warm_up(state, build_and_commit_group(s.sess, 8, false), "Group8")) {
+        return;
+    }
     for (auto _ : state) {
         benchmark::DoNotOptimize(build_and_commit_group(s.sess, 8, false));
     }
@@ -280,7 +282,9 @@ BENCHMARK(BM_CapiCommit_Group8);
 // only fixture never reaches.
 static void BM_CapiCommit_Nested(benchmark::State& state) {
     SessionOwner s;
-    if (!warm_up(state, build_and_commit_group(s.sess, 2, true), "Nested")) { return; }
+    if (!warm_up(state, build_and_commit_group(s.sess, 2, true), "Nested")) {
+        return;
+    }
     for (auto _ : state) {
         benchmark::DoNotOptimize(build_and_commit_group(s.sess, 2, true));
     }

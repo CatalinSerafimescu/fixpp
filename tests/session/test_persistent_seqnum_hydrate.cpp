@@ -97,14 +97,13 @@ public:
 
 // ── Frame-building helpers (mirror test_next_expected_msgseqnum.cpp) ──────────
 
-static std::string field(int tag, std::string_view val) {
+std::string field(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
-static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
-                                             std::string_view msg_type, std::uint32_t seq,
-                                             std::string_view sender, std::string_view target,
-                                             std::string_view extra = {}) {
+std::vector<std::byte> make_fix_frame(std::string_view begin_string, std::string_view msg_type,
+                                      std::uint32_t seq, std::string_view sender,
+                                      std::string_view target, std::string_view extra = {}) {
     std::string body;
     body += field(35, msg_type);
     body += field(34, std::to_string(seq));
@@ -130,8 +129,8 @@ static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
     return frame;
 }
 
-static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
-                                         std::string_view t, int hbt = 30) {
+std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
+                                  std::string_view t, int hbt = 30) {
     std::string extra;
     extra += field(98, "0");
     extra += field(108, std::to_string(hbt));
@@ -177,7 +176,6 @@ using fixpp::session::MessageStore;
 using fixpp::session::MessageStoreFactory;
 using fixpp::session::retrieve_visitor;
 using fixpp::session::seqnum_t;
-using fixpp::session::visit_result;
 
 class FaultStore final : public MessageStore {
 public:
@@ -199,11 +197,11 @@ public:
           fail_on_nth_outbound_write_(fail_on_nth_outbound_write) {}
 
     // Observable state for witnesses:
-    mutable int call_count{0};     // total next_seqnum calls (read + write)
-    mutable int write_count{0};    // inbound write (increment=true) call count
+    mutable int call_count{0};            // total next_seqnum calls (read + write)
+    mutable int write_count{0};           // inbound write (increment=true) call count
     mutable int outbound_write_count{0};  // outbound write (increment=true) call count
-    seqnum_t durable_inbound{1};   // last persisted inbound counter (after increment)
-    seqnum_t durable_outbound{1};  // last persisted outbound counter (after increment)
+    seqnum_t durable_inbound{1};          // last persisted inbound counter (after increment)
+    seqnum_t durable_outbound{1};         // last persisted outbound counter (after increment)
 
     // W3 hook: if set, called BEFORE updating durable_inbound in next_seqnum(inbound,true).
     // Receives the CURRENT durable_inbound (pre-persist value) — which should equal
@@ -402,10 +400,10 @@ struct Fixture {
 };
 
 // make_acceptor: build an acceptor Session through its Logon handshake (Active state).
-static std::unique_ptr<Fixture> make_acceptor(
-    std::shared_ptr<MessageStoreFactory> store_factory, std::uint32_t peer_logon_seq = 1,
-    bool enable_789 = false, bool reset_on_logon = false,
-    std::shared_ptr<fixpp::session::Application> app = nullptr) {
+std::unique_ptr<Fixture> make_acceptor(std::shared_ptr<MessageStoreFactory> store_factory,
+                                       std::uint32_t peer_logon_seq = 1, bool enable_789 = false,
+                                       bool reset_on_logon = false,
+                                       std::shared_ptr<fixpp::session::Application> app = nullptr) {
     auto fix = std::make_unique<Fixture>();
 
     fix->cfg.role = fixpp::session::session_role::acceptor;
@@ -470,7 +468,7 @@ static std::unique_ptr<Fixture> make_acceptor(
 // make_initiator: build an initiator Session, call open() to emit the outbound Logon
 // (which transitions the session to LogonSent). The outbound capture holds
 // exactly the Logon frame after open().
-static std::unique_ptr<Fixture> make_initiator(
+std::unique_ptr<Fixture> make_initiator(
     std::shared_ptr<MessageStoreFactory> store_factory, bool enable_789 = false,
     bool reset_on_logon = false, std::shared_ptr<fixpp::session::Application> app = nullptr) {
     auto fix = std::make_unique<Fixture>();
@@ -552,7 +550,7 @@ TEST(PersistentSeqnumHydrate, Initiator_Restart_Resumes_Outbound) {
     auto fix = make_initiator(factory);
 
     // Exactly one outbound frame emitted: the Logon.
-    ASSERT_EQ(fix->capture.frames.size(), 1u) << "Expected exactly one outbound frame (Logon)";
+    ASSERT_EQ(fix->capture.frames.size(), 1U) << "Expected exactly one outbound frame (Logon)";
 
     const auto& logon_frame = fix->capture.frames[0];
     const std::string seq_str = extract_tag(logon_frame, 34);
@@ -599,7 +597,7 @@ TEST(PersistentSeqnumHydrate, Hydrate_OneShot_FiresOnce_BothRoles_NotOnReconnect
         // The manager MUST reflect the hydrated outbound value.
         const seqnum_t next_out = fix->session->seqnum_mgr_test_access().next_outbound_unsafe();
         // After emitting Logon at seqnum 42, next_outbound advances to 43.
-        EXPECT_EQ(next_out, 43u)
+        EXPECT_EQ(next_out, 43U)
             << "Initiator: after emitting Logon(34=42), next_outbound must be 43; got " << next_out;
 
         // "Not on reconnect": a second open() on the SAME session object returns
@@ -641,7 +639,7 @@ TEST(PersistentSeqnumHydrate, Hydrate_OneShot_FiresOnce_BothRoles_NotOnReconnect
         // The acceptor reply Logon samples next_outbound BEFORE advancing.
         // After hydrating to 37 and emitting the reply Logon at seq=37, next_outbound==38.
         const seqnum_t next_out = fix->session->seqnum_mgr_test_access().next_outbound_unsafe();
-        EXPECT_EQ(next_out, 38u)
+        EXPECT_EQ(next_out, 38U)
             << "Acceptor: after emitting reply Logon(34=37), next_outbound must be 38; got "
             << next_out;
     }
@@ -665,7 +663,7 @@ TEST(PersistentSeqnumHydrate, ResetOnLogon_Wins_Over_OutboundHydrate) {
         std::make_shared<FaultStoreFactory>(/*seeded_inbound=*/37, /*seeded_outbound=*/42);
     auto fix = make_initiator(factory, /*enable_789=*/false, /*reset_on_logon=*/true);
 
-    ASSERT_EQ(fix->capture.frames.size(), 1u) << "Expected exactly one outbound frame (Logon)";
+    ASSERT_EQ(fix->capture.frames.size(), 1U) << "Expected exactly one outbound frame (Logon)";
     const auto& logon_frame = fix->capture.frames[0];
 
     // Post T007: hydrate seeds {37,42}; reset_on_logon fires and brings outbound to 1.
@@ -734,17 +732,17 @@ TEST(PersistentSeqnumHydrate, HydrateReadFailure_Fatal_NoPartialSeed_FirstReadFa
         << "W14(a): first-read failure must transition session to Disconnected";
 
     // No frame must have been emitted (Logon was never built/sent).
-    EXPECT_EQ(fix->capture.frames.size(), 0u)
+    EXPECT_EQ(fix->capture.frames.size(), 0U)
         << "W14(a): no frame must be emitted when hydrate fails before the Logon";
 
     // Manager must be completely unmodified — next_inbound==1, next_outbound==1.
     // (C2.3: "no partial seed" — mutate only after BOTH reads succeed.)
     const seqnum_t ni = fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
     const seqnum_t no = fix->session->seqnum_mgr_test_access().next_outbound_unsafe();
-    EXPECT_EQ(ni, 1u)
+    EXPECT_EQ(ni, 1U)
         << "W14(a): next_inbound must remain at construction default 1 after first-read failure;"
         << " got " << ni;
-    EXPECT_EQ(no, 1u)
+    EXPECT_EQ(no, 1U)
         << "W14(a): next_outbound must remain at construction default 1 after first-read failure;"
         << " got " << no;
 }
@@ -780,7 +778,7 @@ TEST(PersistentSeqnumHydrate, HydrateReadFailure_Fatal_NoPartialSeed_SecondReadF
         << "W14(b): second-read failure must transition session to Disconnected";
 
     // No frame emitted.
-    EXPECT_EQ(fix->capture.frames.size(), 0u)
+    EXPECT_EQ(fix->capture.frames.size(), 0U)
         << "W14(b): no frame must be emitted when hydrate fails before the Logon";
 
     // Manager must be completely unmodified — C2.3 "no partial seed".
@@ -788,10 +786,10 @@ TEST(PersistentSeqnumHydrate, HydrateReadFailure_Fatal_NoPartialSeed_SecondReadF
     // succeed; the manager stays at construction defaults.
     const seqnum_t ni = fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
     const seqnum_t no = fix->session->seqnum_mgr_test_access().next_outbound_unsafe();
-    EXPECT_EQ(ni, 1u)
+    EXPECT_EQ(ni, 1U)
         << "W14(b): next_inbound must remain at construction default 1 after second-read failure;"
         << " got " << ni;
-    EXPECT_EQ(no, 1u)
+    EXPECT_EQ(no, 1U)
         << "W14(b): next_outbound must remain at construction default 1 after second-read failure;"
         << " got " << no;
 }
@@ -891,9 +889,8 @@ public:
 
 // ── Helper: make_logon_reset ─────────────────────────────────────────────────
 // Build a Logon with 141=Y (ResetSeqNumFlag).
-static std::vector<std::byte> make_logon_reset(std::string_view bs, std::uint32_t seq,
-                                               std::string_view s, std::string_view t,
-                                               int hbt = 30) {
+std::vector<std::byte> make_logon_reset(std::string_view bs, std::uint32_t seq, std::string_view s,
+                                        std::string_view t, int hbt = 30) {
     std::string extra;
     extra += field(98, "0");
     extra += field(108, std::to_string(hbt));
@@ -902,8 +899,8 @@ static std::vector<std::byte> make_logon_reset(std::string_view bs, std::uint32_
 }
 
 // ── Helper: make_heartbeat_frame ─────────────────────────────────────────────
-static std::vector<std::byte> make_heartbeat_frame(std::string_view bs, std::uint32_t seq,
-                                                   std::string_view s, std::string_view t) {
+std::vector<std::byte> make_heartbeat_frame(std::string_view bs, std::uint32_t seq,
+                                            std::string_view s, std::string_view t) {
     return make_fix_frame(bs, "0", seq, s, t);
 }
 
@@ -911,9 +908,9 @@ static std::vector<std::byte> make_heartbeat_frame(std::string_view bs, std::uin
 // Build a SequenceReset(35=4) GapFill (123=Y) frame.
 // seq = MsgSeqNum (the gap-start, in-sequence with what the peer expects)
 // new_seqno = NewSeqNo(36): the jump target
-static std::vector<std::byte> make_seq_reset_gapfill(std::string_view bs, std::uint32_t seq,
-                                                     std::uint32_t new_seqno, std::string_view s,
-                                                     std::string_view t) {
+std::vector<std::byte> make_seq_reset_gapfill(std::string_view bs, std::uint32_t seq,
+                                              std::uint32_t new_seqno, std::string_view s,
+                                              std::string_view t) {
     std::string extra;
     extra += field(36, std::to_string(new_seqno));
     extra += field(123, "Y");
@@ -922,9 +919,9 @@ static std::vector<std::byte> make_seq_reset_gapfill(std::string_view bs, std::u
 
 // ── Helper: make_seq_reset_reset ─────────────────────────────────────────────
 // Build a SequenceReset(35=4) Reset-mode (no 123=Y) frame.
-static std::vector<std::byte> make_seq_reset_reset(std::string_view bs, std::uint32_t seq,
-                                                   std::uint32_t new_seqno, std::string_view s,
-                                                   std::string_view t) {
+std::vector<std::byte> make_seq_reset_reset(std::string_view bs, std::uint32_t seq,
+                                            std::uint32_t new_seqno, std::string_view s,
+                                            std::string_view t) {
     std::string extra;
     extra += field(36, std::to_string(new_seqno));
     return make_fix_frame(bs, "4", seq, s, t, extra);
@@ -1170,7 +1167,7 @@ TEST(PersistentSeqnumHydrate, Acceptor_ColdResume_BothDirections) {
 
     // If Active, verify the reply Logon sampled the hydrated outbound (34=42).
     if (fix->session->state() == fixpp::session::fsm_state::Active) {
-        ASSERT_GE(fix->capture.frames.size(), 1u) << "W4: at least one outbound frame expected";
+        ASSERT_GE(fix->capture.frames.size(), 1U) << "W4: at least one outbound frame expected";
         const std::string out_seq = extract_tag(fix->capture.frames[0], 34);
         EXPECT_EQ(out_seq, "42")
             << "W4: reply Logon must carry 34=42 (hydrated outbound from store)";
@@ -1575,7 +1572,8 @@ TEST(PersistentSeqnumHydrate, PostGapFill_LowerBound_RecoveryPrecondition) {
     // L-029-1: knob-OFF + too-high peer Logon → Disconnected (fatal at Logon gate).
     EXPECT_EQ(fix2->session->state(), fixpp::session::fsm_state::Disconnected)
         << "W5 (L-029-1): knob-OFF + too-high peer Logon after GapFill restart must "
-           "Disconnect (fatal at session.cpp's acceptor Logon check_inbound gate). Do NOT call this 'recovers via "
+           "Disconnect (fatal at session.cpp's acceptor Logon check_inbound gate). Do NOT call "
+           "this 'recovers via "
            "ResendRequest' — the Logon gate has no ResendRequest arm.";
 }
 
@@ -1625,7 +1623,8 @@ TEST(PersistentSeqnumHydrate, Acceptor_ResetLogon_InboundSeedWithheld_NoTooLowFa
 
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
-        << fixpp::test_support::kWindowMiss << "Acceptor_ResetLogon_InboundSeedWithheld_NoTooLowFatal";
+        << fixpp::test_support::kWindowMiss
+        << "Acceptor_ResetLogon_InboundSeedWithheld_NoTooLowFatal";
     (void)open_fut.get();
 
     ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::NotConnected)
@@ -1639,7 +1638,8 @@ TEST(PersistentSeqnumHydrate, Acceptor_ResetLogon_InboundSeedWithheld_NoTooLowFa
     // Pre-T011 (no inbound seed): next_inbound=1 → check_inbound(1) in-seq → Active (trivial).
     EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
         << "W9b (RC-1): acceptor with reset-Logon(141=Y) + store{in=37} must NOT fatal as "
-           "too-low at session.cpp's acceptor Logon check_inbound gate. Inbound seed MUST be withheld so check_inbound(1) is in-seq. "
+           "too-low at session.cpp's acceptor Logon check_inbound gate. Inbound seed MUST be "
+           "withheld so check_inbound(1) is in-seq. "
            "If T011 applies inbound seed WITHOUT withheld guard → too-low fatal → Disconnected.";
 
     // The outbound must have been hydrated (34=42 in reply Logon), then RESET to 1 by 141=Y.
@@ -1706,7 +1706,7 @@ TEST(PersistentSeqnumHydrate, Hydrated_Initiator_Advertises789) {
 
     ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::LogonSent)
         << "W11 precondition: initiator must be in LogonSent after open()";
-    ASSERT_EQ(fix->capture.frames.size(), 1u) << "W11: exactly one outbound frame (Logon)";
+    ASSERT_EQ(fix->capture.frames.size(), 1U) << "W11: exactly one outbound frame (Logon)";
 
     const auto& logon_frame = fix->capture.frames[0];
 
@@ -1757,7 +1757,8 @@ TEST(PersistentSeqnumHydrate, Hydrated_Initiator_Advertises789) {
 //
 // Note: with validate_sequence_numbers=false, reset-mode 35=4 bypasses apply_inbound_sequence_reset
 // (the S6 path, marked `028 T010 (S6)` in session.cpp) AND the GapFill exact-match
-// bypasses apply_inbound_sequence_reset too (the S7 path, marked `028 T011 (S7)`). The exact-match GapFill DOES advance via check_inbound first.
+// bypasses apply_inbound_sequence_reset too (the S7 path, marked `028 T011 (S7)`). The exact-match
+// GapFill DOES advance via check_inbound first.
 TEST(PersistentSeqnumHydrate, ValidateOff_35eq4_PersistSplit) {
     // Build acceptor with validate_sequence_numbers=false.
     auto factory = std::make_shared<FaultStoreFactory>(/*in=*/1, /*out=*/1);
@@ -1807,11 +1808,11 @@ TEST(PersistentSeqnumHydrate, ValidateOff_35eq4_PersistSplit) {
     // Post-T010: GapFill advance (seq=2→3) persisted → durable = durable_before_gapfill + 1.
     // Pre-T010 (RED): durable stays at seeded value (1). durable_before_gapfill=1.
     //   Assertion "durable == 1+1 = 2" FAILs because durable remains 1. ✓ RED.
-    EXPECT_EQ(store->durable_inbound, durable_before_gapfill + 1u)
+    EXPECT_EQ(store->durable_inbound, durable_before_gapfill + 1U)
         << "W12 case1 (RC-B/C3.4): validate-off exact-match GapFill(35=4,123=Y) MUST persist "
            "the +1 advance (the GapFill frame went through check_inbound). "
            "Expected durable="
-        << (durable_before_gapfill + 1u) << " but got " << store->durable_inbound
+        << (durable_before_gapfill + 1U) << " but got " << store->durable_inbound
         << ". pre-T010 RED: no persist, durable stays at seeded value.";
 
     // ── Case 2: Reset-mode 35=4 (no 123=Y), validate_off.
@@ -1876,7 +1877,7 @@ TEST(PersistentSeqnumHydrate, NonPersistent_NoOp_MemoryAndNull) {
 
         // Build initiator. The initiator Logon is emitted at open().
         auto fix = make_initiator(factory);
-        ASSERT_EQ(fix->capture.frames.size(), 1u)
+        ASSERT_EQ(fix->capture.frames.size(), 1U)
             << "W7 (arm1): expected exactly one outbound frame (Logon)";
 
         const auto& logon_frame = fix->capture.frames[0];
@@ -1914,7 +1915,7 @@ TEST(PersistentSeqnumHydrate, NonPersistent_NoOp_MemoryAndNull) {
     {
         // make_initiator with nullptr store_factory (no store).
         auto fix = make_initiator(/*store_factory=*/nullptr);
-        ASSERT_EQ(fix->capture.frames.size(), 1u)
+        ASSERT_EQ(fix->capture.frames.size(), 1U)
             << "W7 (arm2 null): expected exactly one outbound frame (Logon)";
 
         const auto& logon_frame = fix->capture.frames[0];
@@ -1957,7 +1958,7 @@ TEST(PersistentSeqnumHydrate, CustomStore_Discriminator) {
         auto factory = std::make_shared<FaultStoreFactory>(/*in=*/1, /*out=*/42);
         auto fix = make_initiator(factory);
 
-        ASSERT_EQ(fix->capture.frames.size(), 1u)
+        ASSERT_EQ(fix->capture.frames.size(), 1U)
             << "W13 (arm-a): expected one outbound frame (Logon)";
         const auto& logon_frame = fix->capture.frames[0];
 
@@ -1986,7 +1987,7 @@ TEST(PersistentSeqnumHydrate, CustomStore_Discriminator) {
             /*seeded_inbound=*/99, /*seeded_outbound=*/42);
         auto fix = make_initiator(factory);
 
-        ASSERT_EQ(fix->capture.frames.size(), 1u)
+        ASSERT_EQ(fix->capture.frames.size(), 1U)
             << "W13 (arm-b): expected one outbound frame (Logon)";
         const auto& logon_frame = fix->capture.frames[0];
 
@@ -2227,7 +2228,8 @@ TEST(PersistentSeqnumHydrate, INV_H1_Initiator_PeerAck141_NoOverPersist) {
 // lower-bound question, but must not regress CASE (b): reset_on_logon=false + a
 // peer-SPONTANEOUS 141=Y echo + fixpp's Logon already sent at N>1 — there outbound
 // must NOT become 2. Pin case (b) before touching the baseline.
-// [L-024-2; sibling of 030/031; FIX-SL §4.1.1; [[feedback_witness_asserts_named_postcondition_not_proxy]]]
+// [L-024-2; sibling of 030/031; FIX-SL §4.1.1;
+// [[feedback_witness_asserts_named_postcondition_not_proxy]]]
 //
 // W1 wire witness (SC-002): after Active, clear captured frames, feed a peer
 // TestRequest (35=1) and assert the Heartbeat reply carries 34=2 (not a duplicate
@@ -2238,8 +2240,7 @@ TEST(PersistentSeqnumHydrate, ResetOnLogon_Initiator_PeerAck141_OutboundStaysTwo
     auto fix = make_initiator(factory, /*enable_789=*/false, /*reset_on_logon=*/true);
 
     // Precondition: reset_on_logon emitted Logon(141=Y) at 34=1 → outbound advanced to 2.
-    ASSERT_EQ(fix->session->seqnum_mgr_test_access().peek_outbound(),
-              fixpp::session::seqnum_t{2})
+    ASSERT_EQ(fix->session->seqnum_mgr_test_access().peek_outbound(), fixpp::session::seqnum_t{2})
         << "precondition: a reset_on_logon initiator emits its Logon at 34=1, so the next "
            "outbound is 2 (matches the merged ResetOnLogon_Initiator_ResetsAndEmits141 unit)";
 
@@ -2253,8 +2254,7 @@ TEST(PersistentSeqnumHydrate, ResetOnLogon_Initiator_PeerAck141_OutboundStaysTwo
     // 1, so the next send is 2. main rebases it to 1, so the next outbound frame would
     // duplicate 34=1 (QuickFIX-cpp + QuickFIX-J both reject). The 030 inbound restore at
     // session.cpp's `logon_inbound_advanced_init` guard has no outbound twin.
-    EXPECT_EQ(fix->session->seqnum_mgr_test_access().peek_outbound(),
-              fixpp::session::seqnum_t{2})
+    EXPECT_EQ(fix->session->seqnum_mgr_test_access().peek_outbound(), fixpp::session::seqnum_t{2})
         << "L-024-2: reset_on_logon initiator must keep outbound==2 after the peer's 141=Y "
            "echo; main rebases to 1 → next send duplicates 34=1. peek_outbound="
         << fix->session->seqnum_mgr_test_access().peek_outbound();
@@ -2287,7 +2287,7 @@ TEST(PersistentSeqnumHydrate, ResetOnLogon_Initiator_PeerAck141_OutboundStaysTwo
         << "session must remain Active after handling inbound TestRequest";
 
     // The Heartbeat reply must have been emitted (exactly one post-Active frame).
-    ASSERT_GE(fix->capture.frames.size(), 1u)
+    ASSERT_GE(fix->capture.frames.size(), 1U)
         << "a Heartbeat reply (35=0) must be emitted in response to the TestRequest";
 
     // Assert the Heartbeat reply carries 34=2 (NOT 34=1) — the wire witness (SC-002).
@@ -2295,14 +2295,14 @@ TEST(PersistentSeqnumHydrate, ResetOnLogon_Initiator_PeerAck141_OutboundStaysTwo
     EXPECT_EQ(reply_seq, "2")
         << "SC-002 wire witness: post-Active Heartbeat reply must carry 34=2; "
            "main rebases outbound to 1 on the peer_ack_sent_reset_flag arm → "
-           "next send duplicates 34=1 (QuickFIX rejects). got 34=" << reply_seq;
+           "next send duplicates 34=1 (QuickFIX rejects). got 34="
+        << reply_seq;
 
     // Confirm no frame in the post-Active capture carries a duplicate 34=1.
     for (const auto& frame : fix->capture.frames) {
         const std::string seq = extract_tag(frame, 34);
-        EXPECT_NE(seq, "1")
-            << "SC-002: no post-Active outbound frame must carry 34=1 "
-               "(that seq was consumed by the reset Logon); got duplicate 34=1";
+        EXPECT_NE(seq, "1") << "SC-002: no post-Active outbound frame must carry 34=1 "
+                               "(that seq was consumed by the reset Logon); got duplicate 34=1";
     }
 }
 
@@ -2370,8 +2370,9 @@ TEST(PersistentSeqnumHydrate, INV_H1_Acceptor_789BehindSide_NoOverPersist) {
     // Feed peer Logon at seq=5 (too-high vs manager=2) with NO 789 field.
     // The behind-side tolerance path: check_inbound(5) fails (too-high), knob is on →
     // tolerate, manager stays at 2. Fall through toward Active.
-    // NO 789 field: the acceptor's honor_peer_next_expected_ call is skipped (peer_789_present=false).
-    // Pre-fix: unconditional persist fires → durable_inbound 1→3 (next_inbound_ seeded at 2,
+    // NO 789 field: the acceptor's honor_peer_next_expected_ call is skipped
+    // (peer_789_present=false). Pre-fix: unconditional persist fires → durable_inbound 1→3
+    // (next_inbound_ seeded at 2,
     //   write goes 2→3), manager=2. INV-H1 violated.
     // Post-fix: logon_inbound_advanced=false → persist skipped. durable_inbound stays 1. ✓
     manual_fix->feed(make_logon("FIX.4.4", 5, "CLI", "SRV"));
@@ -2533,7 +2534,8 @@ TEST(PersistentSeqnumHydrate, W8_HydratedInitiator_ResetOnLogout_PeerSpontaneous
     manual_fix->cfg.heartbeat_interval = std::chrono::seconds{0};
     manual_fix->cfg.executor_override = manual_fix->ioc.get_executor();
     manual_fix->cfg.store_factory = factory;
-    manual_fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    manual_fix->cfg.reset_seqnum_policy_field =
+        fixpp::session::reset_seqnum_policy::bilateral_lenient;
     manual_fix->cfg.reset_on_logon = false;
     manual_fix->cfg.reset_on_logout = true;  // reset_on_logout=true: any_reset_knob=true
     manual_fix->cfg.transport_send = [&f = *manual_fix](std::span<const std::byte> data) {
@@ -2544,7 +2546,8 @@ TEST(PersistentSeqnumHydrate, W8_HydratedInitiator_ResetOnLogout_PeerSpontaneous
 
     auto open_fut = asio::co_spawn(manual_fix->ioc, manual_fix->session->open(), asio::use_future);
     ASSERT_TRUE(fixpp::test_support::run_window_then_ready(manual_fix->ioc, open_fut, 2s))
-        << fixpp::test_support::kWindowMiss << "W8_HydratedInitiator_ResetOnLogout_PeerSpontaneous141Y";
+        << fixpp::test_support::kWindowMiss
+        << "W8_HydratedInitiator_ResetOnLogout_PeerSpontaneous141Y";
     (void)open_fut.get();
 
     ASSERT_EQ(manual_fix->session->state(), fixpp::session::fsm_state::LogonSent)
@@ -2552,7 +2555,7 @@ TEST(PersistentSeqnumHydrate, W8_HydratedInitiator_ResetOnLogout_PeerSpontaneous
 
     // Verify the initiator did NOT send 141=Y in its Logon (latch=false evidence).
     // The outbound Logon is the first captured frame.
-    ASSERT_GE(manual_fix->capture.frames.size(), 1u) << "T004: expected outbound Logon frame";
+    ASSERT_GE(manual_fix->capture.frames.size(), 1U) << "T004: expected outbound Logon frame";
     {
         const auto& logon_frame = manual_fix->capture.frames[0];
         const auto* data = reinterpret_cast<const char*>(logon_frame.data());

@@ -1232,7 +1232,7 @@ def shift_audit(root, spec, json_out=None, allow_empty=False):
 
 FORM_CASES = [
     ("// see session.cpp:1258 for the thunk",                        ["A"]),
-    ("// (src/wire/offset_table.cpp:440-443) differs",               ["A"]),
+    ("// (src/wire/sample_table.cpp:440-443) differs",               ["A"]),
     ("// silent-drop at line 2234, then Stage-2",                    ["B"]),
     ("// initiator honor block (~line 3232)",                        ["B"]),
     ("// returns the status error (:532-534)",                       ["C"]),
@@ -1361,7 +1361,7 @@ TARGET_CASES = [
     ("cites 2d-threading.md:448 for the block", [("2d-threading.md", 448)]),
     ("// see session.cpp:1258 for the thunk", [("session.cpp", 1258)]),
     # The lookbehind must still stop one path matching three times.
-    ("// (src/wire/offset_table.cpp:440-443)", [("src/wire/offset_table.cpp", 440)]),
+    ("// (src/wire/sample_table.cpp:440-443)", [("src/wire/sample_table.cpp", 440)]),
     ("// the ratio is 3:2 across the board", []),
 ]
 
@@ -2070,7 +2070,7 @@ def self_test():
     # whether the target RESOLVES, so a non-C++ target must be present here or
     # its case reads "foreign" and the extension widening looks broken when it
     # is the FIXTURE that is short.
-    files = ["src/session/session.cpp", "src/wire/offset_table.cpp",
+    files = ["src/session/session.cpp", "src/wire/sample_table.cpp",
              ".specify/constitution.md", ".specify/2d-threading.md",
              "dictionaries/FIX44.xml", "CMakeLists.txt",
              ".github/workflows/tier1.yml",

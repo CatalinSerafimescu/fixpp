@@ -63,11 +63,10 @@ MV parse_frame(std::vector<std::byte> const& buf, std::pmr::memory_resource* mr)
     fixpp::wire::pmr_carry_buffer carry{buf.size(), mr};
     fixpp::wire::Framer fr{};
     fixpp::wire::frame_view fvs[1]{};
-    auto framed = fr.feed(
-        std::span<const std::byte>{buf.data(), buf.size()}, carry,
-        std::span<fixpp::wire::frame_view>{fvs, 1});
+    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()}, carry,
+                          std::span<fixpp::wire::frame_view>{fvs, 1});
     EXPECT_TRUE(framed.has_value()) << "Framer::feed failed";
-    EXPECT_FALSE(framed->empty())   << "Framer produced no frames";
+    EXPECT_FALSE(framed->empty()) << "Framer produced no frames";
     return MV{(*framed)[0], mr};
 }
 
@@ -97,7 +96,7 @@ TEST(BusinessMessagesRead, AS4a_NOS_AccessorsReturnSuppliedValues) {
 
     std::pmr::monotonic_buffer_resource arena{8192};
     auto buf = make_frame(body);
-    auto mv  = parse_frame(buf, &arena);
+    auto mv = parse_frame(buf, &arena);
 
     fixpp::v44::NewOrderSingle nos{mv};
 
@@ -152,7 +151,7 @@ TEST(BusinessMessagesRead, AS4b_ExecRpt_AccessorsReturnSuppliedValues) {
 
     std::pmr::monotonic_buffer_resource arena{8192};
     auto buf = make_frame(body);
-    auto mv  = parse_frame(buf, &arena);
+    auto mv = parse_frame(buf, &arena);
 
     fixpp::v44::ExecutionReport er{mv};
 
@@ -212,7 +211,7 @@ TEST(BusinessMessagesRead, AS4c_MissingRequiredField_ReturnsError) {
 
     std::pmr::monotonic_buffer_resource arena{8192};
     auto buf = make_frame(body);
-    auto mv  = parse_frame(buf, &arena);
+    auto mv = parse_frame(buf, &arena);
 
     fixpp::v44::NewOrderSingle nos{mv};
 
@@ -242,7 +241,7 @@ TEST(BusinessMessagesRead, AS4d_NOS_DecimalTrailingZeroEquality) {
 
     std::pmr::monotonic_buffer_resource arena{8192};
     auto buf = make_frame(body);
-    auto mv  = parse_frame(buf, &arena);
+    auto mv = parse_frame(buf, &arena);
 
     fixpp::v44::NewOrderSingle nos{mv};
 

@@ -33,12 +33,12 @@
 #include <asio/this_coro.hpp>
 #include <asio/use_awaitable.hpp>
 #include <chrono>
-#include <functional>
 #include <cstddef>
 #include <fixpp/core/error.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_errors.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -53,8 +53,7 @@ namespace fixpp::transport {
 // to the private socket_ for get_option verification (T006 SC-008).
 class asio_plain_transport_test_access {
 public:
-    static const asio::ip::tcp::socket& socket_of(
-        const asio_plain_transport& t) noexcept {
+    static const asio::ip::tcp::socket& socket_of(const asio_plain_transport& t) noexcept {
         return t.socket_;
     }
 };
@@ -203,7 +202,7 @@ TEST(AsioPlainTransportConfig, TcpKeepaliveApplied) {
 // discriminating power is CHECKED IN THE CELL (oracle != default) rather than
 // assumed, so a host where the two coincide skips instead of passing vacuously.
 // ─────────────────────────────────────────────────────────────────────────────
-static constexpr int kRequestedBufBytes = 256 * 1024;
+constexpr int kRequestedBufBytes = 256 * 1024;
 
 TEST(AsioPlainTransportConfig, LingerAndBufferSizeKnobsApplied) {
     asio::io_context ioc;
@@ -231,9 +230,12 @@ TEST(AsioPlainTransportConfig, LingerAndBufferSizeKnobsApplied) {
     bool done{false};
     bool linger_on{false};
     int linger_secs{-1};
-    int def_rcv{0}, def_snd{0};      // plain socket, no option
-    int orc_rcv{0}, orc_snd{0};      // plain socket, the SAME setsockopt
-    int recv_buf{0}, send_buf{0};    // the transport
+    int def_rcv{0};
+    int def_snd{0};  // plain socket, no option
+    int orc_rcv{0};
+    int orc_snd{0};  // plain socket, the SAME setsockopt
+    int recv_buf{0};
+    int send_buf{0};  // the transport
 
     asio::co_spawn(
         ioc.get_executor(),
@@ -309,21 +311,27 @@ TEST(AsioPlainTransportConfig, LingerAndBufferSizeKnobsApplied) {
     // would mean nothing.
     if (orc_rcv == def_rcv && orc_snd == def_snd) {
         GTEST_SKIP() << "this host reports identical buffers with and without an explicit "
-                        "setsockopt (rcv=" << def_rcv << " snd=" << def_snd
-                     << "), so the cell cannot discriminate here";
+                        "setsockopt (rcv="
+                     << def_rcv << " snd=" << def_snd << "), so the cell cannot discriminate here";
     }
 
     if (orc_rcv != def_rcv) {
         EXPECT_EQ(recv_buf, orc_rcv)
             << "tcp_recv_buf_bytes must reach SO_RCVBUF: the transport should read what a plain "
-               "socket given the same setsockopt reads (" << orc_rcv << "), not the untouched "
-               "default (" << def_rcv << ")";
+               "socket given the same setsockopt reads ("
+            << orc_rcv
+            << "), not the untouched "
+               "default ("
+            << def_rcv << ")";
     }
     if (orc_snd != def_snd) {
         EXPECT_EQ(send_buf, orc_snd)
             << "tcp_send_buf_bytes must reach SO_SNDBUF: the transport should read what a plain "
-               "socket given the same setsockopt reads (" << orc_snd << "), not the untouched "
-               "default (" << def_snd << ")";
+               "socket given the same setsockopt reads ("
+            << orc_snd
+            << "), not the untouched "
+               "default ("
+            << def_snd << ")";
     }
 }
 
@@ -471,9 +479,9 @@ TEST(AsioPlainTransportConfig, CloseIsPromptNoTlsCloseNotify) {
             // Read until EOF/error.
             std::array<std::byte, 64> buf{};
             while (true) {
-                std::size_t n = co_await peer.async_read_some(
-                    asio::buffer(buf.data(), buf.size()),
-                    asio::redirect_error(asio::use_awaitable, ec));
+                std::size_t n =
+                    co_await peer.async_read_some(asio::buffer(buf.data(), buf.size()),
+                                                  asio::redirect_error(asio::use_awaitable, ec));
                 if (ec == asio::error::eof || ec == asio::error::connection_reset) {
                     peer_got_eof = true;
                     break;
@@ -521,7 +529,8 @@ TEST(AsioPlainTransportConfig, CloseIsPromptNoTlsCloseNotify) {
     auto close_ms = std::chrono::duration_cast<std::chrono::milliseconds>(close_duration).count();
     EXPECT_LT(close_ms, 500)
         << "close() must be prompt (< 500ms); plain transport must NOT block on "
-           "tls_close_timeout. Got: " << close_ms << "ms (cfg had 2s tls_close_timeout)";
+           "tls_close_timeout. Got: "
+        << close_ms << "ms (cfg had 2s tls_close_timeout)";
 
     // SC-001 / FR-011: plain transport emits ZERO bytes before close.
     // The peer must see EOF with NO bytes received (no TLS close-notify 0x15,
@@ -530,8 +539,8 @@ TEST(AsioPlainTransportConfig, CloseIsPromptNoTlsCloseNotify) {
     // "no bytes emitted on close", so the correct outcome is no first byte.
     EXPECT_FALSE(first_byte_at_peer.has_value())
         << "plain transport close() must emit NO bytes (0 bytes before EOF); "
-           "got first_byte=0x" << (first_byte_at_peer
-               ? static_cast<unsigned>(*first_byte_at_peer) : 0u)
+           "got first_byte=0x"
+        << (first_byte_at_peer ? static_cast<unsigned>(*first_byte_at_peer) : 0U)
         << " — TLS close-notify=0x15, TLS handshake=0x16 are both forbidden";
 
     // Peer saw a clean EOF (socket was closed, not just cancelled).
@@ -580,8 +589,7 @@ TEST(AsioPlainTransportConfig, AsyncConnectReturnsConnectInfo) {
             auto conn = co_await client.async_connect(endpoint);
             if (conn) {
                 // ConnectInfo must have valid remote host/port.
-                got_connect_info =
-                    !conn->remote.host.empty() && conn->remote.port == ep.port();
+                got_connect_info = !conn->remote.host.empty() && conn->remote.port == ep.port();
             }
 
             // Second call must return transport_already_connected.

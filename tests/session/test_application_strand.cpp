@@ -71,22 +71,20 @@
 // (#324).
 
 using namespace std::chrono_literals;
-using fixpp::core::error;
 using fixpp::core::expected_t;
 using fixpp::session::Application;
 using fixpp::session::SessionId;
-using fixpp::wire::MessageView;
 using fixpp::wire::access_mode;
+using fixpp::wire::MessageView;
 
 namespace fixpp::session::test {
 namespace {
 
 // ── Frame builder helpers ──────────────────────────────────────────────────────
 
-static std::vector<std::byte> make_raw_frame(std::string_view begin_string,
-                                             std::string_view msg_type, std::uint32_t seq,
-                                             std::string_view sender, std::string_view target,
-                                             std::string extra_body = {}) {
+std::vector<std::byte> make_raw_frame(std::string_view begin_string, std::string_view msg_type,
+                                      std::uint32_t seq, std::string_view sender,
+                                      std::string_view target, std::string extra_body = {}) {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -114,29 +112,29 @@ static std::vector<std::byte> make_raw_frame(std::string_view begin_string,
     return frame;
 }
 
-static std::vector<std::byte> make_logon_frame(std::string_view begin_string = "FIX.4.2",
-                                               std::uint32_t seq = 1,
-                                               std::string_view sender = "TW",
-                                               std::string_view target = "ISLD",
-                                               int heartbt = 0) {
+std::vector<std::byte> make_logon_frame(std::string_view begin_string = "FIX.4.2",
+                                        std::uint32_t seq = 1, std::string_view sender = "TW",
+                                        std::string_view target = "ISLD", int heartbt = 0) {
     std::string extra = std::string("98=0\x01") + "108=" + std::to_string(heartbt) + "\x01";
     return make_raw_frame(begin_string, "A", seq, sender, target, extra);
 }
 
-static std::vector<std::byte> make_app_frame(std::uint32_t seq = 2,
-                                             std::string_view sender = "TW",
-                                             std::string_view target = "ISLD") {
+std::vector<std::byte> make_app_frame(std::uint32_t seq = 2, std::string_view sender = "TW",
+                                      std::string_view target = "ISLD") {
     // 35=D (NewOrderSingle-like) — classified as application, not admin.
     return make_raw_frame("FIX.4.2", "D", seq, sender, target);
 }
 
-static std::vector<std::byte> make_app_payload() {
+std::vector<std::byte> make_app_payload() {
     // Opaque application bytes for Engine::send. Must lead with a 35= MsgType
     // field (FR-016 / 020 send-path validation) and carry no session tags.
-    static const char kPayload[] = "35=D\x01" "11=ORD001\x01" "54=1\x01" "55=AAPL\x01";
+    static const char kPayload[] =
+        "35=D\x01"
+        "11=ORD001\x01"
+        "54=1\x01"
+        "55=AAPL\x01";
     std::vector<std::byte> v;
-    for (const char* p = kPayload; *p; ++p)
-        v.push_back(static_cast<std::byte>(*p));
+    for (const char* p = kPayload; *p; ++p) v.push_back(static_cast<std::byte>(*p));
     return v;
 }
 
@@ -522,10 +520,9 @@ TEST(ApplicationStrand, ReentrantSendNoDeadlock) {
     // complete (from_app_fired is set), in_dispatch_ is false, and the send
     // must complete without deadlock.
     auto payload = make_app_payload();
-    auto send_fut = asio::co_spawn(
-        f.ioc,
-        sess.send(std::span<const std::byte>(payload.data(), payload.size())),
-        asio::use_future);
+    auto send_fut =
+        asio::co_spawn(f.ioc, sess.send(std::span<const std::byte>(payload.data(), payload.size())),
+                       asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(f.ioc, send_fut, 300ms)) {
         fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,
                                                         "ReentrantSendNoDeadlock/send");
@@ -603,8 +600,7 @@ TEST(ApplicationStrand, NullApplicationZeroDelta) {
     {
         auto payload = make_app_payload();
         auto fut = asio::co_spawn(
-            f.ioc,
-            sess.send(std::span<const std::byte>(payload.data(), payload.size())),
+            f.ioc, sess.send(std::span<const std::byte>(payload.data(), payload.size())),
             asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 300ms)) {
             fixpp::test_support::cancel_and_drain_or_report(f.ioc, *f.clock,

@@ -397,9 +397,9 @@ TEST(OrchestraFailClosed, QuickFixXmlFedToOrchestraLoaderThrows) {
     fixpp::dict::OrchestraLoader loader;
     auto const fix44 = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX44.xml";
     // FIX44.xml's root is <fix major="4" minor="4" ...>, not <fixr:repository>
-    // (verified: dictionaries/FIX44.xml's root `<fix>` element), so this hits parse_root_and_version's
-    // root check deterministically (not a downstream unknown-datatype/dangling-
-    // ref path).
+    // (verified: dictionaries/FIX44.xml's root `<fix>` element), so this hits
+    // parse_root_and_version's root check deterministically (not a downstream
+    // unknown-datatype/dangling- ref path).
     EXPECT_THROW((void)loader.load(fix44, &mr), fixpp::dict::orchestra_parse_error);
 }
 
@@ -847,9 +847,15 @@ TEST(OrchestraLegacyNoRegression, NineQuickFixDictsUnchanged) {
     };
     // Counts recorded from a real load of each vendored dict (074 T024).
     constexpr Pinned kPins[] = {
-        {"FIX40.xml", 27U},     {"FIX41.xml", 28U},     {"FIX42.xml", 46U},
-        {"FIX43.xml", 68U},     {"FIX44.xml", 93U},     {"FIX50.xml", 93U},
-        {"FIX50SP1.xml", 105U}, {"FIX50SP2.xml", 156U}, {"FIXT11.xml", 8U},
+        {.file = "FIX40.xml", .message_count = 27U},
+        {.file = "FIX41.xml", .message_count = 28U},
+        {.file = "FIX42.xml", .message_count = 46U},
+        {.file = "FIX43.xml", .message_count = 68U},
+        {.file = "FIX44.xml", .message_count = 93U},
+        {.file = "FIX50.xml", .message_count = 93U},
+        {.file = "FIX50SP1.xml", .message_count = 105U},
+        {.file = "FIX50SP2.xml", .message_count = 156U},
+        {.file = "FIXT11.xml", .message_count = 8U},
     };
 
     for (auto const& pin : kPins) {

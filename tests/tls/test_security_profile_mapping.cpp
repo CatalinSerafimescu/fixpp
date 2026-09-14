@@ -43,10 +43,10 @@ public:
 // Minimal Clock stub.
 class stub_clock final : public fixpp::core::Clock {
 public:
-    fixpp::core::utc_time_point now() const noexcept override {
+    [[nodiscard]] fixpp::core::utc_time_point now() const noexcept override {
         return std::chrono::system_clock::now();
     }
-    fixpp::core::steady_time_point steady_now() const noexcept override {
+    [[nodiscard]] fixpp::core::steady_time_point steady_now() const noexcept override {
         return std::chrono::steady_clock::now();
     }
     asio::awaitable<void> sleep_until(fixpp::core::steady_time_point) override { co_return; }
@@ -110,13 +110,17 @@ TEST(SecurityProfileMapping, MtlsPinnedWithPopulatedPinsetAccepted) {
 
 TEST(SecurityProfileMapping, OneWayCaAccepted) {
     // one_way_ca is deprecated but still functional.
+#if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
     auto result =
         make_ssl_ctx_config(SecurityProfile::one_way_ca, make_cs(), make_clock(), nullptr, nullptr);
     ASSERT_TRUE(result.has_value()) << "one_way_ca with null Pinset should succeed";
     EXPECT_EQ(result->profile, SecurityProfile::one_way_ca);
+#if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop
+#endif
 }
 
 // ── Rejection: SecurityProfile::unset → tls_invalid_security_profile ─────────
@@ -162,11 +166,15 @@ TEST(SecurityProfileMapping, OneWayCaWithPinsetRejected) {
     ASSERT_TRUE(pinset_result.has_value());
     auto pinset = *pinset_result;
 
+#if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
     auto result =
         make_ssl_ctx_config(SecurityProfile::one_way_ca, make_cs(), make_clock(), pinset, nullptr);
+#if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop
+#endif
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error(), error::tls_invalid_security_profile);
 }
@@ -199,10 +207,10 @@ TEST(SecurityProfileMapping, ExtractCapsReadsFileCertSourceConfig) {
     ASSERT_TRUE(cfg_r.has_value());
     auto& cfg = *cfg_r;
 
-    EXPECT_EQ(cfg.caps.max_chain_depth, 4u);
-    EXPECT_EQ(cfg.caps.max_rsa_key_bits, 4096u);
-    EXPECT_EQ(cfg.caps.max_cert_der_bytes, 8u * 1024u);
-    EXPECT_EQ(cfg.caps.max_san_entries, 16u);
+    EXPECT_EQ(cfg.caps.max_chain_depth, 4U);
+    EXPECT_EQ(cfg.caps.max_rsa_key_bits, 4096U);
+    EXPECT_EQ(cfg.caps.max_cert_der_bytes, 8U * 1024U);
+    EXPECT_EQ(cfg.caps.max_san_entries, 16U);
 }
 
 TEST(SecurityProfileMapping, EnumHasFourValues) {
@@ -210,9 +218,13 @@ TEST(SecurityProfileMapping, EnumHasFourValues) {
     static_assert(static_cast<uint8_t>(SecurityProfile::unset) == 0);
     static_assert(static_cast<uint8_t>(SecurityProfile::mtls_ca) == 1);
     static_assert(static_cast<uint8_t>(SecurityProfile::mtls_pinned) == 2);
+#if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
     static_assert(static_cast<uint8_t>(SecurityProfile::one_way_ca) == 3);
+#if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop
+#endif
     SUCCEED();
 }

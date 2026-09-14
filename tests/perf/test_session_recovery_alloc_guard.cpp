@@ -87,21 +87,20 @@ public:
     void do_deallocate(void* p, std::size_t bytes, std::size_t align) override {
         std::pmr::get_default_resource()->deallocate(p, bytes, align);
     }
-    bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override {
+    [[nodiscard]] bool do_is_equal(const std::pmr::memory_resource& other) const noexcept override {
         return this == &other;
     }
 };
 
 namespace {
 
-static std::string field_str(int tag, std::string_view val) {
+std::string field_str(int tag, std::string_view val) {
     return std::to_string(tag) + "=" + std::string(val) + "\x01";
 }
 
-static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
-                                             std::string_view msg_type, std::uint32_t seq,
-                                             std::string_view sender, std::string_view target,
-                                             std::string_view extra = {}) {
+std::vector<std::byte> make_fix_frame(std::string_view begin_string, std::string_view msg_type,
+                                      std::uint32_t seq, std::string_view sender,
+                                      std::string_view target, std::string_view extra = {}) {
     std::string body;
     body += field_str(35, msg_type);
     body += field_str(34, std::to_string(seq));
@@ -127,22 +126,22 @@ static std::vector<std::byte> make_fix_frame(std::string_view begin_string,
     return out;
 }
 
-static std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
-                                         std::string_view t, int hbt = 30) {
+std::vector<std::byte> make_logon(std::string_view bs, std::uint32_t seq, std::string_view s,
+                                  std::string_view t, int hbt = 30) {
     std::string extra;
     extra += field_str(98, "0");
     extra += field_str(108, std::to_string(hbt));
     return make_fix_frame(bs, "A", seq, s, t, extra);
 }
 
-static std::vector<std::byte> make_heartbeat(std::string_view bs, std::uint32_t seq,
-                                             std::string_view s, std::string_view t) {
+std::vector<std::byte> make_heartbeat(std::string_view bs, std::uint32_t seq, std::string_view s,
+                                      std::string_view t) {
     return make_fix_frame(bs, "0", seq, s, t);
 }
 
-static bool is_msg_type(std::span<const std::byte> frame, std::string_view type) {
+bool is_msg_type(std::span<const std::byte> frame, std::string_view type) {
     std::string wire(reinterpret_cast<const char*>(frame.data()), frame.size());
-    return wire.find("35=" + std::string(type) + "\x01") != std::string::npos;
+    return wire.contains("35=" + std::string(type) + "\x01");
 }
 
 }  // namespace
@@ -214,7 +213,7 @@ protected:
     bool drive_to_active(fixpp::session::Session& s) {
         if (!run_open(s).has_value()) return false;
         auto logon = make_logon("FIX.4.2", 1, "TW", "ISLD");
-        feed(s, logon);
+        if (!feed(s, logon).has_value()) return false;
         return s.state() == fixpp::session::fsm_state::Active;
     }
 };
@@ -227,8 +226,9 @@ protected:
 //
 // Behavioral assertion: we feed N inbound Heartbeats in a loop and check that
 //   the session emits NO outbound frame — a Heartbeat is never answered
-//   (specs/005-session-establishment-fsm/data-model.md's FSM table, Active×inbound-Heartbeat = "advance counter", no emit).
-//   The alloc gates measure the steady-state inbound-Heartbeat processing path.
+//   (specs/005-session-establishment-fsm/data-model.md's FSM table, Active×inbound-Heartbeat =
+//   "advance counter", no emit). The alloc gates measure the steady-state inbound-Heartbeat
+//   processing path.
 // ─────────────────────────────────────────────────────────────────────────────
 TEST_F(SessionRecoveryAllocGuardTest, HeartbeatSteadyState_DualGate) {
     auto cfg = make_cfg();
@@ -239,7 +239,7 @@ TEST_F(SessionRecoveryAllocGuardTest, HeartbeatSteadyState_DualGate) {
 
     // Warm up (primes asio per-thread recycler outside the guard window).
     auto warmup_hb = make_heartbeat("FIX.4.2", 2, "TW", "ISLD");
-    for (int i = 0; i < 10; ++i) feed(sess, warmup_hb);
+    for (int i = 0; i < 10; ++i) (void)feed(sess, warmup_hb);  // priming only
     outbound_frames.clear();
     pmr.alloc_count = 0;
 
@@ -249,7 +249,9 @@ TEST_F(SessionRecoveryAllocGuardTest, HeartbeatSteadyState_DualGate) {
 
     for (int i = 0; i < kIter; ++i) {
         auto hb = make_heartbeat("FIX.4.2", static_cast<std::uint32_t>(3 + i), "TW", "ISLD");
-        feed(sess, hb);
+        // Inside the alloc-measured window; behavior is checked below via
+        // outbound_frames, not via feed's own result.
+        (void)feed(sess, hb);
     }
 
     long global_alloc_count = alloc_guard_count ? alloc_guard_count() : 0L;
@@ -263,16 +265,16 @@ TEST_F(SessionRecoveryAllocGuardTest, HeartbeatSteadyState_DualGate) {
         << "window must be zero. [const §VIII.5]. Run with LD_PRELOAD to activate.";
 
     // counting_resource gate: zero PMR allocations (all-arena path).
-    EXPECT_EQ(pmr_allocs_in_window, 0u)
+    EXPECT_EQ(pmr_allocs_in_window, 0U)
         << "counting_resource gate: PMR allocs in Heartbeat steady-state window "
         << "must be zero. [const §VIII.5].";
 
     // Behavioral gate: inbound Heartbeats must produce NO outbound frame
-    // (a Heartbeat is never answered; specs/005-session-establishment-fsm/data-model.md's FSM table).
+    // (a Heartbeat is never answered; specs/005-session-establishment-fsm/data-model.md's FSM
+    // table).
     EXPECT_EQ(outbound_frames.size(), 0U)
         << "Behavioral gate: " << kIter << " inbound Heartbeats must produce ZERO "
-        << "outbound frames (a Heartbeat is never answered); got "
-        << outbound_frames.size();
+        << "outbound frames (a Heartbeat is never answered); got " << outbound_frames.size();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -291,7 +293,7 @@ TEST_F(SessionRecoveryAllocGuardTest, AwaitingResendTransition_DualGate) {
 
     // Warm up.
     auto warmup_hb = make_heartbeat("FIX.4.2", 2, "TW", "ISLD");
-    feed(sess, warmup_hb);
+    (void)feed(sess, warmup_hb);  // priming only; not measured or asserted
     outbound_frames.clear();
     pmr.alloc_count = 0;
 
@@ -301,7 +303,9 @@ TEST_F(SessionRecoveryAllocGuardTest, AwaitingResendTransition_DualGate) {
 
     // Feed heartbeat with too-high seqnum (gap [3..4] → expected 3, got 5).
     auto gap_hb = make_fix_frame("FIX.4.2", "0", 5, "TW", "ISLD");
-    feed(sess, gap_hb);
+    // Inside the alloc-measured window; outcome is checked below via the
+    // emitted ResendRequest, not via feed's own result.
+    (void)feed(sess, gap_hb);
 
     long global_alloc_count = alloc_guard_count ? alloc_guard_count() : 0L;
     std::size_t pmr_allocs_in_window = pmr.alloc_count - pre_pmr_count;
@@ -319,7 +323,7 @@ TEST_F(SessionRecoveryAllocGuardTest, AwaitingResendTransition_DualGate) {
     bool found_resend = false;
     for (const auto& f : outbound_frames) {
         std::string wire(reinterpret_cast<const char*>(f.data()), f.size());
-        if (wire.find("35=2\x01") != std::string::npos) {
+        if (wire.contains("35=2\x01")) {
             found_resend = true;
             break;
         }

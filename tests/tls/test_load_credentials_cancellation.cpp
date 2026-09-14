@@ -58,7 +58,6 @@ using fixpp::core::expected_t;
 using fixpp::tls::cert_source;
 using fixpp::tls::Certificate;
 using fixpp::tls::local_credentials;
-using fixpp::tls::sign_response;
 using fixpp::tls::software_key_ref;
 
 // ── CancellableMockCertSource ─────────────────────────────────────────────────
@@ -122,9 +121,8 @@ public:
 // Drive cs.load_credentials() directly via co_spawn so the bound cancellation
 // slot becomes the child coroutine's OWN cancellation_state — NOT the outer
 // future's. This is what lets a pre-emitted signal land on step 3.
-static expected_t<local_credentials> spawn_and_run(asio::io_context& ioc,
-                                                   CancellableMockCertSource& cs,
-                                                   asio::cancellation_signal& signal) {
+expected_t<local_credentials> spawn_and_run(asio::io_context& ioc, CancellableMockCertSource& cs,
+                                            asio::cancellation_signal& signal) {
     auto fut = asio::co_spawn(ioc, cs.load_credentials(),
                               asio::bind_cancellation_slot(signal.slot(), asio::use_future));
     if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, fut, "spawn_and_run")) {

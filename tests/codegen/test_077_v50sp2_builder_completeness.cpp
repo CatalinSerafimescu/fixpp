@@ -16,19 +16,18 @@
 // Anchors: specs/077-builder-args-dedup/tasks.md T023;
 //          contracts/builder-completeness.md C1-C4.
 
-#include <fixpp/v50sp2/all.hpp>  // GENERATED -- build_<Msg>/validate_<Msg>/builder_registry
-
-#include "builder_completeness_common.hpp"
-
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <fixpp/v50sp2/all.hpp>  // GENERATED -- build_<Msg>/validate_<Msg>/builder_registry
 #include <iterator>
 #include <set>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include "builder_completeness_common.hpp"
 
 #ifndef FIXPP_DICT_DATA_DIR
 #error "FIXPP_DICT_DATA_DIR must be set by CMake target_compile_definitions"
@@ -66,13 +65,14 @@ TEST(BuilderCompleteness077V50sp2, DefTableMatchesRawXmlWalk) {
     std::set<std::string> const table = def_msgtypes(kEntries);
     EXPECT_EQ(table.size(), 156U) << "committed .def table entry count";
 
-    std::vector<std::string> only_expected, only_table;
-    std::set_difference(expected.begin(), expected.end(), table.begin(), table.end(),
-                         std::back_inserter(only_expected));
-    std::set_difference(table.begin(), table.end(), expected.begin(), expected.end(),
-                         std::back_inserter(only_table));
-    EXPECT_TRUE(only_expected.empty()) << "msg_types in raw-XML walk but NOT in .def table (table is stale)";
-    EXPECT_TRUE(only_table.empty()) << "msg_types in .def table but NOT in raw-XML walk (table is stale)";
+    std::vector<std::string> only_expected;
+    std::vector<std::string> only_table;
+    std::ranges::set_difference(expected, table, std::back_inserter(only_expected));
+    std::ranges::set_difference(table, expected, std::back_inserter(only_table));
+    EXPECT_TRUE(only_expected.empty())
+        << "msg_types in raw-XML walk but NOT in .def table (table is stale)";
+    EXPECT_TRUE(only_table.empty())
+        << "msg_types in .def table but NOT in raw-XML walk (table is stale)";
 }
 
 TEST(BuilderCompleteness077V50sp2, AllEntryPointsResolved) {
@@ -87,7 +87,8 @@ TEST(BuilderCompleteness077V50sp2, RegistryExactSetEqualsRawXmlWalk) {
     using namespace fixpp_test::builder_completeness;
     std::set<std::string> const expected =
         legacy_expected_msgtypes(std::string(FIXPP_DICT_DATA_DIR) + "/FIX50SP2.xml");
-    std::set<std::string> const registry = parse_registry_msgtypes(FIXPP_CODEGEN_V50SP2_BUILDERS_HPP);
+    std::set<std::string> const registry =
+        parse_registry_msgtypes(FIXPP_CODEGEN_V50SP2_BUILDERS_HPP);
     EXPECT_EQ(registry, expected);
 }
 
@@ -95,16 +96,17 @@ TEST(BuilderCompleteness077V50sp2, BuildFnSignaturesMatchRawXmlWalk) {
     using namespace fixpp_test::builder_completeness;
     std::set<std::string> const expected =
         legacy_expected_msgtypes(std::string(FIXPP_DICT_DATA_DIR) + "/FIX50SP2.xml");
-    std::set<std::string> const build_idents =
-        parse_build_fn_identifiers(std::filesystem::path(FIXPP_CODEGEN_V50SP2_BUILDERS_HPP).parent_path().string());
+    std::set<std::string> const build_idents = parse_build_fn_identifiers(
+        std::filesystem::path(FIXPP_CODEGEN_V50SP2_BUILDERS_HPP).parent_path().string());
 
     std::set<std::string> translated_msgtypes;
     for (auto const& ident : build_idents) {
-        auto const it = std::find_if(kMsgtypeToIdent.begin(), kMsgtypeToIdent.end(),
-                                      [&](auto const& p) { return p.second == ident; });
+        auto const it =
+            std::ranges::find_if(kMsgtypeToIdent, [&](auto const& p) { return p.second == ident; });
         ASSERT_NE(it, kMsgtypeToIdent.end())
             << "build_" << ident << "( found in " << FIXPP_CODEGEN_V50SP2_BUILDERS_HPP
-            << " has no matching entry in the .def table -- an emitted builder outside the raw-XML scope";
+            << " has no matching entry in the .def table -- an emitted builder outside the raw-XML "
+               "scope";
         translated_msgtypes.emplace(it->first);
     }
     EXPECT_EQ(translated_msgtypes, expected);

@@ -28,7 +28,6 @@
 #include "support/mock_dict_table.hpp"  // concrete dict::table_view (seam #1)
 
 using fixpp::wire::access_mode;
-using fixpp::wire::MessageView;
 using fixpp::wire::Parser;
 using fixpp::wire::Writer;
 

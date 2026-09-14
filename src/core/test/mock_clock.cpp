@@ -186,7 +186,8 @@ void mock_clock::advance(std::chrono::nanoseconds delta) noexcept {
     {
         std::scoped_lock g(impl_->m);
         impl_->steady += delta;
-        impl_->utc += std::chrono::duration_cast<utc_time_point::duration>(delta);  // wall moves with steady unless skewed
+        impl_->utc += std::chrono::duration_cast<utc_time_point::duration>(
+            delta);  // wall moves with steady unless skewed
         due = impl_->due_locked();
     }
     for (auto& w : due) {

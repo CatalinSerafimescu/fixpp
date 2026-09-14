@@ -63,6 +63,6 @@ TEST(TransportFoundational, StaticAssertionsPass) {
     // All load-bearing assertions are static_asserts above; this test body is
     // a compile-time-only witness. A runtime assertion is included to produce
     // a green ctest row.
-    EXPECT_EQ(static_cast<std::uint8_t>(fixpp::core::error::transport_resolve_failed), 94u);
-    EXPECT_EQ(static_cast<std::uint8_t>(fixpp::core::error::transport_accept_cancelled), 115u);
+    EXPECT_EQ(static_cast<std::uint8_t>(fixpp::core::error::transport_resolve_failed), 94U);
+    EXPECT_EQ(static_cast<std::uint8_t>(fixpp::core::error::transport_accept_cancelled), 115U);
 }

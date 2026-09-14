@@ -360,9 +360,9 @@ void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
     // LoadOptions::resource defaults to std::pmr::get_default_resource() (non-null)
     // but the public struct allows LoadOptions{..., nullptr}.  XmlLoader::load and
     // make_file_cert_source both document mr!=nullptr as a caller-precondition with
-    // release UB (xml_loader.hpp's `mr != nullptr` caller-precondition note).  Substitute the default resource BEFORE any
-    // use so the noexcept "every input → ConfigBundle or diagnostics, never UB"
-    // contract holds unconditionally (FR-012 / validation rule 9).
+    // release UB (xml_loader.hpp's `mr != nullptr` caller-precondition note).  Substitute the
+    // default resource BEFORE any use so the noexcept "every input → ConfigBundle or diagnostics,
+    // never UB" contract holds unconditionally (FR-012 / validation rule 9).
     if (opts.resource == nullptr) {
         opts.resource = std::pmr::get_default_resource();
     }
@@ -411,249 +411,252 @@ void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
     // (FR-012 rule-9; [const §VIII.5] — the parse phase above has its own
     // try/catch; this outer block covers everything after it.)
     try {
+        // ── T009: [default]-merge + collect-ALL accumulator ─────────────────────
+        detail::DiagnosticAccumulator acc;
 
-    // ── T009: [default]-merge + collect-ALL accumulator ─────────────────────
-    detail::DiagnosticAccumulator acc;
+        // Extract the optional [default] table.
+        const toml::table* defaults_ptr = nullptr;
+        if (auto* node = root_tbl.get("default"); node && node->is_table()) {
+            defaults_ptr = node->as_table();
+        }
 
-    // Extract the optional [default] table.
-    const toml::table* defaults_ptr = nullptr;
-    if (auto* node = root_tbl.get("default"); node && node->is_table()) {
-        defaults_ptr = node->as_table();
-    }
+        // Extract the [[session]] array-of-tables.
+        // ≥1 [[session]] is required (D-8 / data-model E-1).
+        const toml::array* sessions_arr = nullptr;
+        if (auto* node = root_tbl.get("session"); node && node->is_array()) {
+            sessions_arr = node->as_array();
+        }
 
-    // Extract the [[session]] array-of-tables.
-    // ≥1 [[session]] is required (D-8 / data-model E-1).
-    const toml::array* sessions_arr = nullptr;
-    if (auto* node = root_tbl.get("session"); node && node->is_array()) {
-        sessions_arr = node->as_array();
-    }
-
-    if (!sessions_arr || sessions_arr->empty()) {
-        acc.add(LoadDiagnostic{
-            .key_path = "session",
-            .reason = reason_class::missing_required,
-            .location = {},
-            .message = "at least one [[session]] table is required",
-        });
-    }
-
-    // T022: engine-scope [dictionary] required (resolver returns silently when absent).
-    // Checked here (against root_tbl) rather than per-session because [dictionary]
-    // is a top-level TOML section, NOT merged into each [[session]] table.
-    // key_path = "dictionary" (no session prefix) — consistent with clock.kind / store.kind.
-    if (!root_tbl.contains("dictionary") || !root_tbl.get("dictionary")->is_table()) {
-        acc.add(LoadDiagnostic{
-            .key_path = "dictionary",
-            .reason = reason_class::missing_required,
-            .location = {},
-            .message = "[dictionary] section is required",
-        });
-    }
-
-    // Structural guard (sessions only) — #2 Gate B r1 fix:
-    //
-    // A missing/empty [[session]] array is a TRUE prerequisite: the loop below
-    // dereferences sessions_arr (->size(), range-for) and would null-deref.
-    // Short-circuit ONLY on the sessions condition so collect-ALL (FR-018) spans
-    // engine, [default], and per-session scopes in one pass.
-    //
-    // A missing [dictionary] is NOT a prerequisite: resolve_engine_dictionary
-    // returns silently on an absent dict (`resolve_engine_dictionary`'s `!dict_tbl` arm) and the
-    // missing-dict diagnostic was already accumulated above (T022's check).  Returning
-    // here for the dictionary case truncated root/default/per-session diagnostics
-    // (breaking FR-018 collect-ALL).
-    if (!sessions_arr || sessions_arr->empty()) {
-        return std::unexpected(std::move(acc).release());
-    }
-
-    // Key recognition (FR-018a / E-6) — flag step-2-deferred (e.g. [logger],
-    // dialect_overlay) + unknown keys at every authoring scope:
-    //   - engine/root scope (e.g. a root-level [logger]);
-    //   - the [default] table (a typo/step-2 key authored ONLY in [default]
-    //     would otherwise be silently inherited by every session, unchecked);
-    //   - per-session scope (walked inside the loop, over the RAW session table).
-    recognize_keys(root_tbl, /*key_prefix=*/"", acc);
-    if (defaults_ptr) {
-        recognize_keys(*defaults_ptr, /*key_prefix=*/"default", acc);
-    }
-
-    // ── T009 / T017: Merge + map per session ────────────────────────────────
-    //
-    // 1. Deep-merge [default] under each [[session]].
-    // 2. Call map_scalars + map_structured_members to populate SessionConfig.
-    // 3. Collect the merged tables for the selector resolver (which needs the
-    //    transport sub-table to build the engine-default factory, D-6).
-
-    ConfigBundle bundle;
-    bundle.sessions.reserve(sessions_arr->size());
-
-    // Captured MERGED tables (owned values); pointers into these are passed
-    // to resolve_selectors after the loop. Must outlive the resolver call.
-    std::vector<toml::table> owned_merged_tables;
-    std::vector<const toml::table*> merged_session_ptrs;
-    owned_merged_tables.reserve(sessions_arr->size());
-    merged_session_ptrs.reserve(sessions_arr->size());
-
-    // Capture base_dir once (FR-016a / D-7).
-    const std::filesystem::path base_dir = path.parent_path();
-
-    // ── T019 (045-observability-config): per-session + engine logger pending set
-    // Declared BEFORE the per-session loop so it can accumulate per-session
-    // PendingLoggers across the whole file (N-2: file-scoped; not constructed
-    // inside the loop). The single construct_loggers_if_clean call at the end
-    // drains the whole set (data-model E-5, research D-7 N-2).
-    PendingLoggerSet pending_loggers;
-
-    std::size_t session_idx = 0;
-    for (const auto& elem : *sessions_arr) {
-        if (!elem.is_table()) {
-            // A non-table element in [[session]] is a TOML schema violation.
+        if (!sessions_arr || sessions_arr->empty()) {
             acc.add(LoadDiagnostic{
                 .key_path = "session",
-                .reason = reason_class::parse_error,
+                .reason = reason_class::missing_required,
                 .location = {},
-                .message = "each [[session]] element must be a TOML table",
+                .message = "at least one [[session]] table is required",
             });
-            ++session_idx;
-            continue;
         }
-        const toml::table& session_raw = *elem.as_table();
 
-        // Deep-merge [default] under this session (session keys override).
-        toml::table merged =
-            defaults_ptr ? merge_defaults(*defaults_ptr, session_raw) : session_raw;
+        // T022: engine-scope [dictionary] required (resolver returns silently when absent).
+        // Checked here (against root_tbl) rather than per-session because [dictionary]
+        // is a top-level TOML section, NOT merged into each [[session]] table.
+        // key_path = "dictionary" (no session prefix) — consistent with clock.kind / store.kind.
+        if (!root_tbl.contains("dictionary") || !root_tbl.get("dictionary")->is_table()) {
+            acc.add(LoadDiagnostic{
+                .key_path = "dictionary",
+                .reason = reason_class::missing_required,
+                .location = {},
+                .message = "[dictionary] section is required",
+            });
+        }
 
-        // Map scalar + structured fields onto a SessionConfig.
-        SessionDefinition def;
-        const std::string key_prefix = "session[" + std::to_string(session_idx) + "]";
+        // Structural guard (sessions only) — #2 Gate B r1 fix:
+        //
+        // A missing/empty [[session]] array is a TRUE prerequisite: the loop below
+        // dereferences sessions_arr (->size(), range-for) and would null-deref.
+        // Short-circuit ONLY on the sessions condition so collect-ALL (FR-018) spans
+        // engine, [default], and per-session scopes in one pass.
+        //
+        // A missing [dictionary] is NOT a prerequisite: resolve_engine_dictionary
+        // returns silently on an absent dict (`resolve_engine_dictionary`'s `!dict_tbl` arm) and
+        // the missing-dict diagnostic was already accumulated above (T022's check).  Returning here
+        // for the dictionary case truncated root/default/per-session diagnostics (breaking FR-018
+        // collect-ALL).
+        if (!sessions_arr || sessions_arr->empty()) {
+            return std::unexpected(std::move(acc).release());
+        }
 
-        // Pass &session_raw for diagnostic SourceLoc lookup: toml++ zeroes
-        // node source_regions on table copy, so the merged copy has no line/col;
-        // the raw [[session]] table retains them for keys authored in-session
-        // (T023 / FR-017).
-        detail::map_scalars(merged, def.config, acc, key_prefix, &session_raw);
-        detail::map_structured_members(merged, def.config, acc, key_prefix, &session_raw);
-        check_required_keys(merged, key_prefix, acc);
+        // Key recognition (FR-018a / E-6) — flag step-2-deferred (e.g. [logger],
+        // dialect_overlay) + unknown keys at every authoring scope:
+        //   - engine/root scope (e.g. a root-level [logger]);
+        //   - the [default] table (a typo/step-2 key authored ONLY in [default]
+        //     would otherwise be silently inherited by every session, unchecked);
+        //   - per-session scope (walked inside the loop, over the RAW session table).
+        recognize_keys(root_tbl, /*key_prefix=*/"", acc);
+        if (defaults_ptr) {
+            recognize_keys(*defaults_ptr, /*key_prefix=*/"default", acc);
+        }
 
-        // Per-session key recognition: flag session-level step-2-deferred keys
-        // (e.g. dialect_overlay) and typo'd unknown keys (FR-018a / E-6).
-        // Walk the RAW session table (real source locations; no inherited-default
-        // duplication) — NOT the merged copy.
-        recognize_keys(session_raw, key_prefix, acc);
+        // ── T009 / T017: Merge + map per session ────────────────────────────────
+        //
+        // 1. Deep-merge [default] under each [[session]].
+        // 2. Call map_scalars + map_structured_members to populate SessionConfig.
+        // 3. Collect the merged tables for the selector resolver (which needs the
+        //    transport sub-table to build the engine-default factory, D-6).
 
-        // ── T019 (045-observability-config): per-session [session.logger] ────
-        // Read from the MERGED table (following the 044 convention for per-session
-        // selectors like transport — merged_session_ptrs passes merged to
-        // resolve_selectors). The logger sub-table, if present, was either
-        // written directly in the [[session]] block or inherited from [default]
-        // via deep-merge. SourceLoc comes from session_raw (merged loses it).
-        // Must be called BEFORE std::move(merged) below.
-        {
-            const toml::node* logger_node = merged.get("logger");
-            if (logger_node && logger_node->is_table()) {
-                SourceLoc sess_logger_loc;
-                // Prefer raw-table SourceLoc (merged zeroes source_regions).
-                if (const toml::node* raw_node = session_raw.get("logger")) {
-                    sess_logger_loc = loc_from_region(raw_node->source());
-                }
-                const std::string sess_logger_kp = key_prefix + ".logger";
-                detail::resolve_engine_logger(*logger_node->as_table(), sess_logger_kp,
-                                              sess_logger_loc, base_dir, opts, pending_loggers, acc,
-                                              /*is_engine=*/false, /*session_index=*/session_idx);
-            } else if (logger_node && !logger_node->is_table()) {
-                // Gate B r1 #2: present but not a table → malformed_value (fail-closed).
-                // Silently dropping the entire logger block (the pre-fix behaviour) violates
-                // FR-020 fail-closed / SC-003. Covers both [[session]].logger and
-                // [default].logger (which deep-merges into each session).
+        ConfigBundle bundle;
+        bundle.sessions.reserve(sessions_arr->size());
+
+        // Captured MERGED tables (owned values); pointers into these are passed
+        // to resolve_selectors after the loop. Must outlive the resolver call.
+        std::vector<toml::table> owned_merged_tables;
+        std::vector<const toml::table*> merged_session_ptrs;
+        owned_merged_tables.reserve(sessions_arr->size());
+        merged_session_ptrs.reserve(sessions_arr->size());
+
+        // Capture base_dir once (FR-016a / D-7).
+        const std::filesystem::path base_dir = path.parent_path();
+
+        // ── T019 (045-observability-config): per-session + engine logger pending set
+        // Declared BEFORE the per-session loop so it can accumulate per-session
+        // PendingLoggers across the whole file (N-2: file-scoped; not constructed
+        // inside the loop). The single construct_loggers_if_clean call at the end
+        // drains the whole set (data-model E-5, research D-7 N-2).
+        PendingLoggerSet pending_loggers;
+
+        std::size_t session_idx = 0;
+        for (const auto& elem : *sessions_arr) {
+            if (!elem.is_table()) {
+                // A non-table element in [[session]] is a TOML schema violation.
                 acc.add(LoadDiagnostic{
-                    .key_path = key_prefix + ".logger",
+                    .key_path = "session",
+                    .reason = reason_class::parse_error,
+                    .location = {},
+                    .message = "each [[session]] element must be a TOML table",
+                });
+                ++session_idx;
+                continue;
+            }
+            const toml::table& session_raw = *elem.as_table();
+
+            // Deep-merge [default] under this session (session keys override).
+            toml::table merged =
+                defaults_ptr ? merge_defaults(*defaults_ptr, session_raw) : session_raw;
+
+            // Map scalar + structured fields onto a SessionConfig.
+            SessionDefinition def;
+            const std::string key_prefix = "session[" + std::to_string(session_idx) + "]";
+
+            // Pass &session_raw for diagnostic SourceLoc lookup: toml++ zeroes
+            // node source_regions on table copy, so the merged copy has no line/col;
+            // the raw [[session]] table retains them for keys authored in-session
+            // (T023 / FR-017).
+            detail::map_scalars(merged, def.config, acc, key_prefix, &session_raw);
+            detail::map_structured_members(merged, def.config, acc, key_prefix, &session_raw);
+            check_required_keys(merged, key_prefix, acc);
+
+            // Per-session key recognition: flag session-level step-2-deferred keys
+            // (e.g. dialect_overlay) and typo'd unknown keys (FR-018a / E-6).
+            // Walk the RAW session table (real source locations; no inherited-default
+            // duplication) — NOT the merged copy.
+            recognize_keys(session_raw, key_prefix, acc);
+
+            // ── T019 (045-observability-config): per-session [session.logger] ────
+            // Read from the MERGED table (following the 044 convention for per-session
+            // selectors like transport — merged_session_ptrs passes merged to
+            // resolve_selectors). The logger sub-table, if present, was either
+            // written directly in the [[session]] block or inherited from [default]
+            // via deep-merge. SourceLoc comes from session_raw (merged loses it).
+            // Must be called BEFORE std::move(merged) below.
+            {
+                const toml::node* logger_node = merged.get("logger");
+                if (logger_node && logger_node->is_table()) {
+                    SourceLoc sess_logger_loc;
+                    // Prefer raw-table SourceLoc (merged zeroes source_regions).
+                    if (const toml::node* raw_node = session_raw.get("logger")) {
+                        sess_logger_loc = loc_from_region(raw_node->source());
+                    }
+                    const std::string sess_logger_kp = key_prefix + ".logger";
+                    detail::resolve_engine_logger(
+                        *logger_node->as_table(), sess_logger_kp, sess_logger_loc, base_dir, opts,
+                        pending_loggers, acc,
+                        /*is_engine=*/false, /*session_index=*/session_idx);
+                } else if (logger_node && !logger_node->is_table()) {
+                    // Gate B r1 #2: present but not a table → malformed_value (fail-closed).
+                    // Silently dropping the entire logger block (the pre-fix behaviour) violates
+                    // FR-020 fail-closed / SC-003. Covers both [[session]].logger and
+                    // [default].logger (which deep-merges into each session).
+                    acc.add(LoadDiagnostic{
+                        .key_path = key_prefix + ".logger",
+                        .reason = reason_class::malformed_value,
+                        .location = loc_from_region(logger_node->source()),
+                        .message = "logger must be a TOML table (got a non-table value); "
+                                   "use [[" +
+                                   key_prefix + ".sinks]] syntax",
+                    });
+                }
+            }
+
+            bundle.sessions.push_back(std::move(def));
+
+            // Stash the merged table so resolve_selectors can read transport.kind.
+            owned_merged_tables.push_back(std::move(merged));
+            merged_session_ptrs.push_back(&owned_merged_tables.back());
+
+            ++session_idx;
+        }
+
+        // ── T015/T016: Resolve engine selectors + transport factory ─────────────
+        // Note: the resolver runs even when the loader-boundary checks above added
+        // diagnostics, so collect-ALL (FR-018) spans the loader boundary AND the
+        // selector layer in one pass. The loader-boundary check is the PRIMARY one
+        // for security_profile.kind (it emits the data-model E-3 missing_required at
+        // the named key); the resolver may additionally surface a selector-level
+        // diagnostic for the same broken input — redundant but not contradictory.
+        detail::resolve_selectors(root_tbl, merged_session_ptrs, base_dir, opts, bundle, acc);
+
+        // ── T013 (045-observability-config): Resolve [logger] (if present) ──────
+        //
+        // [logger] is optional (FR-003/SC-004): absent → engine.logger stays null.
+        // Called AFTER 044 resolution so collect-ALL spans the whole file.
+        // pending_loggers is declared before the per-session loop (T019) so it
+        // accumulates both engine and per-session loggers in one file-scoped set.
+        if (const toml::node* logger_root_node = root_tbl.get("logger");
+            logger_root_node != nullptr) {
+            if (logger_root_node->is_table()) {
+                SourceLoc logger_loc = loc_from_region(logger_root_node->source());
+                detail::resolve_engine_logger(*logger_root_node->as_table(), "logger", logger_loc,
+                                              base_dir, opts, pending_loggers, acc,
+                                              /*is_engine=*/true, /*session_index=*/0);
+            } else {
+                // Gate B r1 #2: root-scope logger present but not a table → malformed_value.
+                // Silently ignoring a non-table logger violates FR-020 fail-closed / SC-003.
+                acc.add(LoadDiagnostic{
+                    .key_path = "logger",
                     .reason = reason_class::malformed_value,
-                    .location = loc_from_region(logger_node->source()),
+                    .location = loc_from_region(logger_root_node->source()),
                     .message = "logger must be a TOML table (got a non-table value); "
-                               "use [[" + key_prefix + ".sinks]] syntax",
+                               "use [[logger.sinks]] syntax",
                 });
             }
         }
 
-        bundle.sessions.push_back(std::move(def));
-
-        // Stash the merged table so resolve_selectors can read transport.kind.
-        owned_merged_tables.push_back(std::move(merged));
-        merged_session_ptrs.push_back(&owned_merged_tables.back());
-
-        ++session_idx;
-    }
-
-    // ── T015/T016: Resolve engine selectors + transport factory ─────────────
-    // Note: the resolver runs even when the loader-boundary checks above added
-    // diagnostics, so collect-ALL (FR-018) spans the loader boundary AND the
-    // selector layer in one pass. The loader-boundary check is the PRIMARY one
-    // for security_profile.kind (it emits the data-model E-3 missing_required at
-    // the named key); the resolver may additionally surface a selector-level
-    // diagnostic for the same broken input — redundant but not contradictory.
-    detail::resolve_selectors(root_tbl, merged_session_ptrs, base_dir, opts, bundle, acc);
-
-    // ── T013 (045-observability-config): Resolve [logger] (if present) ──────
-    //
-    // [logger] is optional (FR-003/SC-004): absent → engine.logger stays null.
-    // Called AFTER 044 resolution so collect-ALL spans the whole file.
-    // pending_loggers is declared before the per-session loop (T019) so it
-    // accumulates both engine and per-session loggers in one file-scoped set.
-    if (const toml::node* logger_root_node = root_tbl.get("logger"); logger_root_node != nullptr) {
-        if (logger_root_node->is_table()) {
-            SourceLoc logger_loc = loc_from_region(logger_root_node->source());
-            detail::resolve_engine_logger(*logger_root_node->as_table(), "logger", logger_loc,
-                                          base_dir, opts, pending_loggers, acc,
-                                          /*is_engine=*/true, /*session_index=*/0);
-        } else {
-            // Gate B r1 #2: root-scope logger present but not a table → malformed_value.
-            // Silently ignoring a non-table logger violates FR-020 fail-closed / SC-003.
+        // ── T012: Construct live Logger(s) only when the whole-file acc is clean ─
+        // (research D-7 / FR-015): the SOLE side-effectful step.
+        //
+        // noexcept boundary (FR-012 rule-9): the Logger ctor opens its sinks and
+        // SPAWNS a drain std::thread — thread creation throws std::system_error
+        // (EAGAIN / thread-limit) and make_shared can throw bad_alloc. Unlike the
+        // 044 validation/resolution code (which only ever appends diagnostics), this
+        // step can throw, and it runs OUTSIDE the parse try/catch above — so an
+        // unguarded throw would escape load_toml_config's noexcept boundary →
+        // std::terminate. Catch it and fail closed with a diagnostic. Any Logger
+        // already constructed into `bundle` before the throw is owned by `bundle`;
+        // the error return below discards `bundle`, and the Logger dtor joins its
+        // drain thread — so nothing is left running.
+        try {
+            detail::construct_loggers_if_clean(std::move(pending_loggers), bundle, acc);
+        } catch (const std::exception& e) {
             acc.add(LoadDiagnostic{
                 .key_path = "logger",
-                .reason = reason_class::malformed_value,
-                .location = loc_from_region(logger_root_node->source()),
-                .message = "logger must be a TOML table (got a non-table value); "
-                           "use [[logger.sinks]] syntax",
+                .reason = reason_class::invalid_or_contradictory_selector,
+                .location = {},
+                .message =
+                    std::string{"logger construction failed (resource exhaustion): "} + e.what(),
+            });
+        } catch (...) {
+            acc.add(LoadDiagnostic{
+                .key_path = "logger",
+                .reason = reason_class::invalid_or_contradictory_selector,
+                .location = {},
+                .message = "logger construction failed (unknown exception)",
             });
         }
-    }
 
-    // ── T012: Construct live Logger(s) only when the whole-file acc is clean ─
-    // (research D-7 / FR-015): the SOLE side-effectful step.
-    //
-    // noexcept boundary (FR-012 rule-9): the Logger ctor opens its sinks and
-    // SPAWNS a drain std::thread — thread creation throws std::system_error
-    // (EAGAIN / thread-limit) and make_shared can throw bad_alloc. Unlike the
-    // 044 validation/resolution code (which only ever appends diagnostics), this
-    // step can throw, and it runs OUTSIDE the parse try/catch above — so an
-    // unguarded throw would escape load_toml_config's noexcept boundary →
-    // std::terminate. Catch it and fail closed with a diagnostic. Any Logger
-    // already constructed into `bundle` before the throw is owned by `bundle`;
-    // the error return below discards `bundle`, and the Logger dtor joins its
-    // drain thread — so nothing is left running.
-    try {
-        detail::construct_loggers_if_clean(std::move(pending_loggers), bundle, acc);
-    } catch (const std::exception& e) {
-        acc.add(LoadDiagnostic{
-            .key_path = "logger",
-            .reason = reason_class::invalid_or_contradictory_selector,
-            .location = {},
-            .message = std::string{"logger construction failed (resource exhaustion): "} + e.what(),
-        });
-    } catch (...) {
-        acc.add(LoadDiagnostic{
-            .key_path = "logger",
-            .reason = reason_class::invalid_or_contradictory_selector,
-            .location = {},
-            .message = "logger construction failed (unknown exception)",
-        });
-    }
+        if (!acc.empty()) {
+            return std::unexpected(std::move(acc).release());
+        }
 
-    if (!acc.empty()) {
-        return std::unexpected(std::move(acc).release());
-    }
-
-    return bundle;
+        return bundle;
 
     } catch (const std::exception& e) {
         // Catch any throw escaping the resolve or construct phase (e.g. bad_alloc
@@ -664,7 +667,8 @@ void recognize_keys(const toml::table& tbl, std::string_view key_prefix,
             .reason = reason_class::invalid_or_contradictory_selector,
             .location = {},
             .message = std::string{"logger config resolution failed (resource exhaustion or "
-                                   "internal error): "} + e.what(),
+                                   "internal error): "} +
+                       e.what(),
         }});
     } catch (...) {
         return std::unexpected(std::vector<LoadDiagnostic>{{

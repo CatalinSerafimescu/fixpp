@@ -36,18 +36,17 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
-#include <memory_resource>
-#include <span>
-#include <string>
-#include <string_view>
-#include <vector>
-
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/table_view.hpp>
 #include <fixpp/dict/xml_loader.hpp>
 #include <fixpp/wire/framer.hpp>
 #include <fixpp/wire/parser.hpp>
 #include <fixpp/wire/validator.hpp>
+#include <memory_resource>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
 
 namespace {
 
@@ -83,7 +82,9 @@ constexpr std::size_t kScratchArena = 512;
     std::string pre = std::string("8=FIX.4.4\x01") + "9=" + std::to_string(body.size()) + "\x01";
     pre.append(body);
     unsigned sum = 0;
-    for (unsigned char c : pre) { sum += c; }
+    for (unsigned char c : pre) {
+        sum += c;
+    }
     sum %= 256U;
     char chk[8]{};
     std::snprintf(chk, sizeof(chk), "10=%03u\x01", sum);
@@ -116,8 +117,8 @@ constexpr std::size_t kScratchArena = 512;
     s += "52=";
     s += kSendingTime;
     s += "\x01";
-    s += "98=0\x01";   // EncryptMethod=NONE (in-domain enum)
-    s += "108=30\x01"; // HeartBtInt (required, unconstrained INT — no enum)
+    s += "98=0\x01";    // EncryptMethod=NONE (in-domain enum)
+    s += "108=30\x01";  // HeartBtInt (required, unconstrained INT — no enum)
     return s;
 }
 
@@ -136,12 +137,12 @@ constexpr std::size_t kScratchArena = 512;
     s += kSendingTime;
     s += "\x01";
     s += "11=CLORDID1\x01";
-    s += "40=1\x01"; // OrdType=MARKET (in-domain enum)
+    s += "40=1\x01";  // OrdType=MARKET (in-domain enum)
     s += "60=";
     s += kSendingTime;
     s += "\x01";
-    s += "54=1\x01"; // Side=BUY (in-domain enum)
-    s += "59=0\x01"; // TimeInForce=DAY (in-domain enum)
+    s += "54=1\x01";  // Side=BUY (in-domain enum)
+    s += "59=0\x01";  // TimeInForce=DAY (in-domain enum)
     return s;
 }
 
@@ -176,18 +177,18 @@ constexpr std::size_t kScratchArena = 512;
     s += "52=";
     s += kSendingTime;
     s += "\x01";
-    s += "1=ACCT1\x01";   // Account (message-level required)
-    s += "581=1\x01";     // AccountType
-    s += "715=20240101\x01"; // ClearingBusinessDate
-    s += "721=RPT1\x01";  // PosMaintRptID
-    s += "728=0\x01";     // PosReqResult
-    s += "730=1.5\x01";   // SettlPrice
-    s += "731=1\x01";     // SettlPriceType
-    s += "734=1.4\x01";   // PriorSettlPrice
-    s += "711=1\x01";     // NoUnderlyings=1 (ONE shallow group instance)
-    s += "311=SYMA\x01";  // UnderlyingSymbol (optional, UnderlyingInstrument)
-    s += "732=1.1\x01";   // UnderlyingSettlPrice (group-scoped required)
-    s += "733=1\x01";     // UnderlyingSettlPriceType (group-scoped required)
+    s += "1=ACCT1\x01";       // Account (message-level required)
+    s += "581=1\x01";         // AccountType
+    s += "715=20240101\x01";  // ClearingBusinessDate
+    s += "721=RPT1\x01";      // PosMaintRptID
+    s += "728=0\x01";         // PosReqResult
+    s += "730=1.5\x01";       // SettlPrice
+    s += "731=1\x01";         // SettlPriceType
+    s += "734=1.4\x01";       // PriorSettlPrice
+    s += "711=1\x01";         // NoUnderlyings=1 (ONE shallow group instance)
+    s += "311=SYMA\x01";      // UnderlyingSymbol (optional, UnderlyingInstrument)
+    s += "732=1.1\x01";       // UnderlyingSettlPrice (group-scoped required)
+    s += "733=1\x01";         // UnderlyingSettlPriceType (group-scoped required)
     return s;
 }
 
@@ -196,13 +197,12 @@ constexpr std::size_t kScratchArena = 512;
 // path). 079-required-presence-scope T021: reuses the (e) message-level
 // required prefix; each NoUnderlyings(711) instance carries its two direct
 // required members (732/733, PosUndInstrmtGrp) AND a nested optional
-// UndSecAltIDGrp component (dictionaries/FIX44.xml's UndSecAltIDGrp component declaration — tag 457 is
-// declared EXACTLY ONCE in FIX44.xml, so its delimiter (458) cannot hit the
-// known, tracked L-063-3(b) global-first-seen-delimiter residual that a
-// reused NUMINGROUP tag (e.g. NoQuoteEntries(295), reused 3x with
-// DIVERGENT first children across QuotCxlEntriesGrp/QuotEntryAckGrp/
-// QuotEntryGrp) would hit — as_table_view() derives even the CONTEXT-scoped
-// delimiter from the dictionary's single global first-seen GroupRef
+// UndSecAltIDGrp component (dictionaries/FIX44.xml's UndSecAltIDGrp component declaration — tag 457
+// is declared EXACTLY ONCE in FIX44.xml, so its delimiter (458) cannot hit the known, tracked
+// L-063-3(b) global-first-seen-delimiter residual that a reused NUMINGROUP tag (e.g.
+// NoQuoteEntries(295), reused 3x with DIVERGENT first children across
+// QuotCxlEntriesGrp/QuotEntryAckGrp/ QuotEntryGrp) would hit — as_table_view() derives even the
+// CONTEXT-scoped delimiter from the dictionary's single global first-seen GroupRef
 // (as_table_view()'s group_ctx_delimiter_impl call), not per-real-context; MassQuote's
 // NoQuoteEntries(295) was tried first for this row and rejected the
 // warm-up conformance check for exactly this documented, out-of-scope-for-
@@ -291,10 +291,10 @@ void run_validate_bench(benchmark::State& state, std::string_view body, char con
                                                        std::pmr::null_memory_resource()};
         auto const r = validator.validate(mv, &scratch_mr, nullptr);
         if (!r.has_value()) {
-            state.SkipWithError(
-                (std::string(label) + " fixture is not conformant — validate() rejected it "
-                 "during warm-up (measures a partial walk, not the full path)")
-                    .c_str());
+            state.SkipWithError((std::string(label) +
+                                 " fixture is not conformant — validate() rejected it "
+                                 "during warm-up (measures a partial walk, not the full path)")
+                                    .c_str());
             return;
         }
     }
@@ -304,7 +304,7 @@ void run_validate_bench(benchmark::State& state, std::string_view body, char con
         std::pmr::monotonic_buffer_resource scratch_mr{scratch_buf.data(), scratch_buf.size(),
                                                        std::pmr::null_memory_resource()};
         std::uint16_t ref_tag = 0;
-        auto const r = validator.validate(mv, &scratch_mr, &ref_tag);
+        auto r = validator.validate(mv, &scratch_mr, &ref_tag);
         benchmark::DoNotOptimize(r);
     }
     state.SetItemsProcessed(state.iterations());

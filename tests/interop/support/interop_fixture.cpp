@@ -35,7 +35,8 @@
 //
 // Shape follows the repo's established sanitizer-detection idiom (two separate
 // #if blocks, not an #elif chain) — see tests/alloc_guard/
-// test_validate_gate_alloc_guard.cpp's FIXPP_SANITIZER_REPLACES_NEW detection. An #elif chain would skip the
+// test_validate_gate_alloc_guard.cpp's FIXPP_SANITIZER_REPLACES_NEW detection. An #elif chain would
+// skip the
 // __SANITIZE_ADDRESS__ arm on any compiler that defines __has_feature without
 // reporting address_sanitizer through it.
 //
@@ -47,21 +48,21 @@
 // there is a hard compile error. There is nothing to suppress on that lane
 // anyway — no leak detector runs.
 #if !defined(_MSC_VER)
-#  if defined(__has_feature)
-#    if __has_feature(address_sanitizer)
-#      define FIXPP_INTEROP_HAVE_LSAN 1
-#    endif
-#  endif
-#  if !defined(FIXPP_INTEROP_HAVE_LSAN) && defined(__SANITIZE_ADDRESS__)
-#    define FIXPP_INTEROP_HAVE_LSAN 1
-#  endif
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define FIXPP_INTEROP_HAVE_LSAN 1
+#endif
+#endif
+#if !defined(FIXPP_INTEROP_HAVE_LSAN) && defined(__SANITIZE_ADDRESS__)
+#define FIXPP_INTEROP_HAVE_LSAN 1
+#endif
 #endif
 
 #if defined(FIXPP_INTEROP_HAVE_LSAN)
-#  include <sanitizer/lsan_interface.h>
-#  define FIXPP_INTEROP_LSAN_IGNORE(p) __lsan_ignore_object(p)
+#include <sanitizer/lsan_interface.h>
+#define FIXPP_INTEROP_LSAN_IGNORE(p) __lsan_ignore_object(p)
 #else
-#  define FIXPP_INTEROP_LSAN_IGNORE(p) ((void)(p))
+#define FIXPP_INTEROP_LSAN_IGNORE(p) ((void)(p))
 #endif
 
 #include "support/pump_until_ready.hpp"
@@ -205,8 +206,8 @@ void InteropEngineFixture::start() {
     // (#311): what is unconditional is that SOME clock is set, not that it is the
     // fixture's own system_clock_source. An earlier version of this comment said
     // "the fixture injects a real clock ... unconditionally", and a teardown
-    // safety argument was later built on that misreading.  Assert to surface any future misconfiguration
-    // rather than silently running without session loops.  [041 T019 / C-4]
+    // safety argument was later built on that misreading.  Assert to surface any future
+    // misconfiguration rather than silently running without session loops.  [041 T019 / C-4]
     auto r = engine_->start();
     assert(r.has_value() && "InteropEngineFixture::start() — engine_.start() failed");
     (void)r;

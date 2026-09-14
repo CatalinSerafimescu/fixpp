@@ -615,8 +615,8 @@ warning is about, one paragraph down from the warning.
 
 ⚠️ **The other three rows have been converted too, because leaving them would have made
 this warning contradict the table it sits under.** They had rotted by varying amounts —
-`test_asio_plain_transport_config.cpp:242` was **280 lines** off its assertion (really
-`EXPECT_LT(close_ms, 500)` at `:522`); the other two landed inside the right test but not
+the `test_asio_plain_transport_config.cpp` row was **280 lines** off its assertion (really
+`EXPECT_LT(close_ms, 500)`); the other two landed inside the right test but not
 on the bound. Verified by opening each, not by trusting the row — and re-derive rather than
 trusting this paragraph either.
 

@@ -39,8 +39,10 @@ TEST(DecimalReservedTolerance, FormatGarbageReservedSameAsZero) {
         return d;
     };
 
-    char buf_zero[64]{}, buf_garbage[64]{};
-    size_t wz = 0, wg = 0;
+    char buf_zero[64]{};
+    char buf_garbage[64]{};
+    size_t wz = 0;
+    size_t wg = 0;
 
     ASSERT_EQ(fixpp_decimal_format(make(0x00), buf_zero, sizeof(buf_zero), &wz), FIXPP_ERR_OK);
     ASSERT_EQ(fixpp_decimal_format(make(0x7E), buf_garbage, sizeof(buf_garbage), &wg),

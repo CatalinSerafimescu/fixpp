@@ -55,20 +55,19 @@ TEST(TraceContextAccessors, GetTraceContextReturnsInitialValue) {
     asio::io_context ctx;
     EngineConfig engine_cfg;
     engine_cfg.executor = ctx.get_executor();
-    engine_cfg.clock    = std::make_shared<fixpp::core::mock_clock>(
-        fixpp::core::utc_time_point{}, fixpp::core::steady_time_point{},
-        ctx.get_executor());
+    engine_cfg.clock = std::make_shared<fixpp::core::mock_clock>(
+        fixpp::core::utc_time_point{}, fixpp::core::steady_time_point{}, ctx.get_executor());
 
     SessionConfig cfg;
-    cfg.dictionary        = fixpp::test_support::make_minimal_dictionary();
-    cfg.security_profile  = fixpp::test_support::make_minimal_security_profile();
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+    cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
 
     // Seed a distinct trace_context.
     fixpp::otel::trace_context seed{};
-    seed.trace_id[0]  = std::byte{0xAA};
+    seed.trace_id[0] = std::byte{0xAA};
     seed.trace_id[15] = std::byte{0xFF};
-    seed.span_id.fill(std::byte{0xBB});   // span_id is std::array<std::byte,8>
-    seed.flags        = 0x01;
+    seed.span_id.fill(std::byte{0xBB});  // span_id is std::array<std::byte,8>
+    seed.flags = 0x01;
     cfg.initial_trace_context = seed;
 
     Session sess{engine_cfg, cfg};
@@ -117,14 +116,12 @@ template <typename T, typename = void>
 struct has_trace_context_value : std::false_type {};
 template <typename T>
 struct has_trace_context_value<
-    T, std::void_t<decltype(std::declval<T const&>().trace_context_value())>>
-    : std::true_type {};
+    T, std::void_t<decltype(std::declval<T const&>().trace_context_value())>> : std::true_type {};
 
 template <typename T, typename = void>
 struct has_get_trace_context : std::false_type {};
 template <typename T>
-struct has_get_trace_context<
-    T, std::void_t<decltype(std::declval<T const&>().get_trace_context())>>
+struct has_get_trace_context<T, std::void_t<decltype(std::declval<T const&>().get_trace_context())>>
     : std::true_type {};
 
 // Compile-time gate: get_trace_context() MUST be present on Session.
@@ -152,9 +149,8 @@ TEST(TraceContextAccessors, EngineTraceContextReturnsSeededSnapshot) {
     asio::io_context ioc;
     fixpp::core::EngineConfig eng_cfg;
     eng_cfg.executor = ioc.get_executor();
-    eng_cfg.clock    = std::make_shared<fixpp::core::mock_clock>(
-        fixpp::core::utc_time_point{}, fixpp::core::steady_time_point{},
-        ioc.get_executor());
+    eng_cfg.clock = std::make_shared<fixpp::core::mock_clock>(
+        fixpp::core::utc_time_point{}, fixpp::core::steady_time_point{}, ioc.get_executor());
 
     // Seed engine_trace_context with known values.
     eng_cfg.engine_trace_context.trace_id.fill(std::byte{0xCC});
@@ -181,8 +177,7 @@ TEST(TraceContextAccessors, EngineTraceContextReturnsSeededSnapshot) {
     // Verify NOT the zero value (sanity: test is non-trivial).
     {
         fixpp::otel::trace_context zero{};
-        EXPECT_FALSE(eq(tc, zero))
-            << "sanity: the seeded value is not the zero default";
+        EXPECT_FALSE(eq(tc, zero)) << "sanity: the seeded value is not the zero default";
     }
 
     // Teardown.

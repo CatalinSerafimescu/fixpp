@@ -77,7 +77,7 @@ fixpp::config::LoadResult load(const std::filesystem::path& path) {
 
 bool has_diag(const std::vector<fixpp::config::LoadDiagnostic>& diags,
               fixpp::config::reason_class expected_reason, std::string_view expected_key_path) {
-    return std::any_of(diags.begin(), diags.end(), [&](const fixpp::config::LoadDiagnostic& d) {
+    return std::ranges::any_of(diags, [&](const fixpp::config::LoadDiagnostic& d) {
         return d.reason == expected_reason && d.key_path == expected_key_path;
     });
 }
@@ -108,9 +108,8 @@ TEST(LoadNegativeBattery, T018_ParseError) {
     EXPECT_TRUE(found) << "expected a parse_error diagnostic with key_path=\"\"";
 
     // Location must be populated (line>0) — the parse failure has a source region.
-    auto it = std::find_if(diags.begin(), diags.end(), [](const fixpp::config::LoadDiagnostic& d) {
-        return d.reason == RC::parse_error;
-    });
+    auto it = std::ranges::find_if(
+        diags, [](const fixpp::config::LoadDiagnostic& d) { return d.reason == RC::parse_error; });
     ASSERT_NE(it, diags.end());
     EXPECT_GT(it->location.line, std::uint32_t{0})
         << "parse_error diagnostic must carry source location (line>0)";
@@ -513,7 +512,7 @@ TEST(LoadNegativeBattery, T019_CollectAll_ExactSet) {
     // Report missing diagnostics (present in expected, absent in actual).
     std::vector<KRP> missing_diags;
     for (const auto& e : expected) {
-        if (actual.find(e) == actual.end()) {
+        if (!actual.contains(e)) {
             missing_diags.push_back(e);
         }
     }
@@ -522,7 +521,7 @@ TEST(LoadNegativeBattery, T019_CollectAll_ExactSet) {
     // Report unexpected diagnostics (present in actual, absent in expected).
     std::vector<KRP> extra_diags;
     for (const auto& a : actual) {
-        if (expected.find(a) == expected.end()) {
+        if (!expected.contains(a)) {
             extra_diags.push_back(a);
         }
     }
@@ -698,7 +697,8 @@ TEST(LoadNegativeBattery, T020_MissingRequired_StoreKind) {
 //
 // Fixture: neg_missing_dictionary.toml (entire [dictionary] section absent).
 // Phase 3b's resolve_dict returns early (silently) when the table is absent
-// (resolve_engine_dictionary's early-return-on-absence). Phase 4b will add the missing_required check.
+// (resolve_engine_dictionary's early-return-on-absence). Phase 4b will add the missing_required
+// check.
 
 TEST(LoadNegativeBattery, T020_MissingRequired_Dictionary) {
     auto result = load(neg_fixture("neg_missing_dictionary.toml"));
@@ -1053,7 +1053,8 @@ TEST(LoadNegativeBattery, Cov_UsernameWrongType) {
 }
 
 // ── transport.port: out of range ──────────────────────────────────────────────
-// transport.port = 99999 → out_of_range at session[0].transport.port (map_structured_members's port range arm).
+// transport.port = 99999 → out_of_range at session[0].transport.port (map_structured_members's port
+// range arm).
 
 TEST(LoadNegativeBattery, Cov_TransportPortOutOfRange) {
     auto result = load(neg_fixture("neg_transport_port_out_of_range.toml"));
@@ -1071,11 +1072,11 @@ TEST(LoadNegativeBattery, Cov_CompidAuthNotArray) {
     ASSERT_FALSE(result.has_value());
     using RC = fixpp::config::reason_class;
     // The key_path is built as kp(key_prefix, "compid_authorization_policy.PARTNER_A")
-    bool found = std::any_of(
-        result.error().begin(), result.error().end(), [](const fixpp::config::LoadDiagnostic& d) {
-            return d.reason == RC::malformed_value &&
-                   d.key_path.find("compid_authorization_policy") != std::string::npos;
-        });
+    bool found = std::any_of(result.error().begin(), result.error().end(),
+                             [](const fixpp::config::LoadDiagnostic& d) {
+                                 return d.reason == RC::malformed_value &&
+                                        d.key_path.contains("compid_authorization_policy");
+                             });
     EXPECT_TRUE(found)
         << "expected malformed_value for compid_authorization_policy non-array value";
 }
@@ -1170,7 +1171,8 @@ TEST(LoadNegativeBattery, Cov_StoreFileNoDirectory) {
 }
 
 // ── transport.kind: not a string ─────────────────────────────────────────────
-// transport.kind = 42 → missing_required at "session[0].transport.kind" (resolve_transport's not-a-string arm).
+// transport.kind = 42 → missing_required at "session[0].transport.kind" (resolve_transport's
+// not-a-string arm).
 
 TEST(LoadNegativeBattery, Cov_TransportKindNotString) {
     auto result = load(neg_fixture("neg_transport_kind_not_string.toml"));
@@ -1181,7 +1183,8 @@ TEST(LoadNegativeBattery, Cov_TransportKindNotString) {
 }
 
 // ── transport.kind: empty string ─────────────────────────────────────────────
-// transport.kind = "" → empty_required at "session[0].transport.kind" (resolve_transport's empty-kind arm).
+// transport.kind = "" → empty_required at "session[0].transport.kind" (resolve_transport's
+// empty-kind arm).
 
 TEST(LoadNegativeBattery, Cov_TransportKindEmpty) {
     auto result = load(neg_fixture("neg_transport_kind_empty.toml"));
@@ -1192,7 +1195,8 @@ TEST(LoadNegativeBattery, Cov_TransportKindEmpty) {
 }
 
 // ── transport.kind: unknown value ────────────────────────────────────────────
-// transport.kind = "websocket" → unknown_enum at "session[0].transport.kind" (resolve_transport's unknown-kind arm).
+// transport.kind = "websocket" → unknown_enum at "session[0].transport.kind" (resolve_transport's
+// unknown-kind arm).
 
 TEST(LoadNegativeBattery, Cov_TransportKindUnknown) {
     auto result = load(neg_fixture("neg_transport_kind_unknown.toml"));
@@ -1205,10 +1209,10 @@ TEST(LoadNegativeBattery, Cov_TransportKindUnknown) {
 // ── #1 (Gate B r1): per-session transport.kind validated for non-first sessions
 //
 // Before fix: the divergence scan skipped non-"tls" sessions (continue at
-// the per-session minting loop's tls-only skip), so session[1] with a missing/empty/unknown kind escaped validation
-// and silently ran on the engine-default (wrong) transport.
-// After fix: each session[i>=1] has transport.kind validated; diagnostics are
-// attributed to "session[1].transport.kind" (not "session[0].transport.kind").
+// the per-session minting loop's tls-only skip), so session[1] with a missing/empty/unknown kind
+// escaped validation and silently ran on the engine-default (wrong) transport. After fix: each
+// session[i>=1] has transport.kind validated; diagnostics are attributed to
+// "session[1].transport.kind" (not "session[0].transport.kind").
 //
 // Discriminating: the key_path index MUST be [1], not [0].  A test asserting
 // only reason without key_path would pass whether the fix is present or not
@@ -1336,7 +1340,8 @@ TEST(LoadNegativeBattery, Cov_ClockKindAbsentInTable) {
 }
 
 // ── cert_source.kind: not a string → missing_required ────────────────────────
-// cert_source.kind = 42 → missing_required at "cert_source.kind" (resolve_engine_cert_source's not-a-string arm).
+// cert_source.kind = 42 → missing_required at "cert_source.kind" (resolve_engine_cert_source's
+// not-a-string arm).
 
 TEST(LoadNegativeBattery, Cov_CertSourceKindNotString) {
     auto result = load(neg_fixture("neg_cert_source_kind_not_string.toml"));
@@ -1347,7 +1352,8 @@ TEST(LoadNegativeBattery, Cov_CertSourceKindNotString) {
 }
 
 // ── cert_source.kind: empty string → empty_required ──────────────────────────
-// cert_source.kind = "" → empty_required at "cert_source.kind" (resolve_engine_cert_source's empty-kind arm).
+// cert_source.kind = "" → empty_required at "cert_source.kind" (resolve_engine_cert_source's
+// empty-kind arm).
 
 TEST(LoadNegativeBattery, Cov_CertSourceKindEmpty) {
     auto result = load(neg_fixture("neg_cert_source_kind_empty.toml"));
@@ -1358,7 +1364,8 @@ TEST(LoadNegativeBattery, Cov_CertSourceKindEmpty) {
 }
 
 // ── cert_source.kind: unknown → unknown_enum ─────────────────────────────────
-// cert_source.kind = "pkcs11" → unknown_enum at "cert_source.kind" (resolve_engine_cert_source's unknown-kind arm).
+// cert_source.kind = "pkcs11" → unknown_enum at "cert_source.kind" (resolve_engine_cert_source's
+// unknown-kind arm).
 
 TEST(LoadNegativeBattery, Cov_CertSourceKindUnknown) {
     auto result = load(neg_fixture("neg_cert_source_kind_unknown.toml"));
@@ -1381,7 +1388,8 @@ TEST(LoadNegativeBattery, Cov_DictKindAbsentInTable) {
 }
 
 // ── dictionary.kind: empty string → empty_required ───────────────────────────
-// dictionary.kind = "" → empty_required at "dictionary.kind" (resolve_engine_dictionary's empty-kind arm).
+// dictionary.kind = "" → empty_required at "dictionary.kind" (resolve_engine_dictionary's
+// empty-kind arm).
 
 TEST(LoadNegativeBattery, Cov_DictKindEmpty) {
     auto result = load(neg_fixture("neg_dict_kind_empty.toml"));
@@ -1392,7 +1400,8 @@ TEST(LoadNegativeBattery, Cov_DictKindEmpty) {
 }
 
 // ── dictionary.kind: unknown value → unknown_enum ────────────────────────────
-// dictionary.kind = "database" → unknown_enum at "dictionary.kind" (resolve_engine_dictionary's unknown-kind arm).
+// dictionary.kind = "database" → unknown_enum at "dictionary.kind" (resolve_engine_dictionary's
+// unknown-kind arm).
 
 TEST(LoadNegativeBattery, Cov_DictKindUnknown) {
     auto result = load(neg_fixture("neg_dict_kind_unknown.toml"));
@@ -1403,7 +1412,8 @@ TEST(LoadNegativeBattery, Cov_DictKindUnknown) {
 }
 
 // ── dictionary.path absent → missing_required ─────────────────────────────────
-// dictionary.kind="path" but path key absent → missing_required (resolve_engine_dictionary's missing-path arm).
+// dictionary.kind="path" but path key absent → missing_required (resolve_engine_dictionary's
+// missing-path arm).
 
 TEST(LoadNegativeBattery, Cov_DictPathAbsent) {
     auto result = load(neg_fixture("neg_dict_path_absent.toml"));
@@ -1414,7 +1424,8 @@ TEST(LoadNegativeBattery, Cov_DictPathAbsent) {
 }
 
 // ── dictionary.path empty → empty_required ────────────────────────────────────
-// dictionary.kind="path" with path = "" → empty_required (resolve_engine_dictionary's empty-path arm).
+// dictionary.kind="path" with path = "" → empty_required (resolve_engine_dictionary's empty-path
+// arm).
 
 TEST(LoadNegativeBattery, Cov_DictPathEmpty) {
     auto result = load(neg_fixture("neg_dict_path_empty.toml"));
@@ -1425,7 +1436,8 @@ TEST(LoadNegativeBattery, Cov_DictPathEmpty) {
 }
 
 // ── duration numeric overflow (from_chars fails) → malformed_value ────────────
-// (parse_duration_to_ms's numeric-parse-failure arm, loader_internal.cpp: ec != std::errc{} after from_chars)
+// (parse_duration_to_ms's numeric-parse-failure arm, loader_internal.cpp: ec != std::errc{} after
+// from_chars)
 
 TEST(LoadNegativeBattery, Cov_DurationOverflow) {
     auto result = load(neg_fixture("neg_duration_overflow.toml"));
@@ -1535,8 +1547,9 @@ TEST(LoadNegativeBattery, Cov_CompidAuthNonStringElement) {
 
 // ── cert_source file with missing cert_file (leaf) → make_file_cert_source fails ─
 // [cert_source] kind="file" but cert_file absent → get_path lambda returns {}
-// (resolve_engine_cert_source's get_path lambda, selector_resolver.cpp), make_file_cert_source fails for empty leaf_path
-// → invalid_or_contradictory_selector (resolve_engine_cert_source's cs_result-failure arm, selector_resolver.cpp).
+// (resolve_engine_cert_source's get_path lambda, selector_resolver.cpp), make_file_cert_source
+// fails for empty leaf_path → invalid_or_contradictory_selector (resolve_engine_cert_source's
+// cs_result-failure arm, selector_resolver.cpp).
 
 TEST(LoadNegativeBattery, Cov_CertSourceFileMissingLeaf) {
     auto result = load(neg_fixture("neg_cert_source_file_missing_leaf.toml"));
@@ -1598,7 +1611,7 @@ TEST(LoadNegativeBattery, T021_PasswordRedaction_SecretAbsent) {
 
     // Find the password diagnostic.
     using RC = fixpp::config::reason_class;
-    auto it = std::find_if(diags.begin(), diags.end(), [](const fixpp::config::LoadDiagnostic& d) {
+    auto it = std::ranges::find_if(diags, [](const fixpp::config::LoadDiagnostic& d) {
         return d.key_path == "session[0].password";
     });
     ASSERT_NE(it, diags.end()) << "expected a diagnostic at key_path=\"session[0].password\"";

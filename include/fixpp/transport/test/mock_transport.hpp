@@ -28,7 +28,7 @@
 
 #pragma once
 
-#if !defined(FIXPP_ALLOW_MOCK_TRANSPORT)
+#ifndef FIXPP_ALLOW_MOCK_TRANSPORT
 #error \
     "include/fixpp/transport/test/mock_transport.hpp is a test-only header. \
 Define FIXPP_ALLOW_MOCK_TRANSPORT in the consuming test target."

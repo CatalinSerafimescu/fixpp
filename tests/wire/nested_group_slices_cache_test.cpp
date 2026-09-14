@@ -107,10 +107,11 @@ TEST(NestedGroupSlicesCache, NullSliceDataReturnsEmptySpan) {
 
     std::pmr::monotonic_buffer_resource arena;
     OffsetTable root{*fv, &arena};  // dict-free ctor: the null guard never
-                                     // reaches dict-aware code.
+                                    // reaches dict-aware code.
     int dict_token = 0;
     auto slices = root.nested_group_slices(nullptr, 0, /*nested_no_tag=*/802, &dict_token,
-                                           &always_group_member, fv->token(), kTestCtx).slices;
+                                           &always_group_member, fv->token(), kTestCtx)
+                      .slices;
     EXPECT_TRUE(slices.empty());
 }
 
@@ -170,7 +171,8 @@ TEST(NestedGroupSlicesCache, DifferentSliceContinuesThenSameSliceReusesSubTable)
     // (sliceA, 802): first request — builds + caches a sub-table over
     // sliceA. Cache is empty, so the loop body never executes at all yet.
     auto a802 = root.nested_group_slices(sliceA.data, sliceA.len, /*nested_no_tag=*/802, &dict,
-                                         &dict_group_member, fv->token(), kTestCtx).slices;
+                                         &dict_group_member, fv->token(), kTestCtx)
+                    .slices;
     ASSERT_EQ(a802.size(), 1U);
     auto a523 = fixpp::wire::get({a802[0].data, a802[0].len}, /*tag=*/523, fv->token());
     ASSERT_TRUE(a523.has_value());
@@ -182,7 +184,8 @@ TEST(NestedGroupSlicesCache, DifferentSliceContinuesThenSameSliceReusesSubTable)
     // (the cache loop's `continue`) before falling through to build a fresh
     // sub-table for sliceB.
     auto b802 = root.nested_group_slices(sliceB.data, sliceB.len, /*nested_no_tag=*/802, &dict,
-                                         &dict_group_member, fv->token(), kTestCtx).slices;
+                                         &dict_group_member, fv->token(), kTestCtx)
+                    .slices;
     ASSERT_EQ(b802.size(), 1U);
     auto b523 = fixpp::wire::get({b802[0].data, b802[0].len}, /*tag=*/523, fv->token());
     ASSERT_TRUE(b523.has_value());
@@ -197,7 +200,8 @@ TEST(NestedGroupSlicesCache, DifferentSliceContinuesThenSameSliceReusesSubTable)
     // sub-OffsetTable over sliceA indexes every nested group in that
     // slice).
     auto a900 = root.nested_group_slices(sliceA.data, sliceA.len, /*nested_no_tag=*/900, &dict,
-                                         &dict_group_member, fv->token(), kTestCtx).slices;
+                                         &dict_group_member, fv->token(), kTestCtx)
+                    .slices;
     ASSERT_EQ(a900.size(), 1U);
     auto a901 = fixpp::wire::get({a900[0].data, a900[0].len}, /*tag=*/901, fv->token());
     ASSERT_TRUE(a901.has_value());
@@ -282,10 +286,12 @@ TEST(NestedGroupSlicesCache, BuildNestedSubviewAllocFailureDegradesToEmpty) {
     OffsetTable root{*fv, &mr, &dict, &dict_group_member, dict_group_delim};
     auto outer = root.group_slices(453);
     ASSERT_EQ(outer.size(), 1U);
-    auto inner = root.nested_group_slices(outer[0].data, outer[0].len, /*nested_no_tag=*/802,
-                                          &dict, &dict_group_member, fv->token(), kTestCtx).slices;
-    EXPECT_TRUE(inner.empty()) << "build_nested_subview's object allocation failing must "
-                                  "degrade to an empty span (build_nested_subview's bad_alloc catch)";
+    auto inner = root.nested_group_slices(outer[0].data, outer[0].len, /*nested_no_tag=*/802, &dict,
+                                          &dict_group_member, fv->token(), kTestCtx)
+                     .slices;
+    EXPECT_TRUE(inner.empty())
+        << "build_nested_subview's object allocation failing must "
+           "degrade to an empty span (build_nested_subview's bad_alloc catch)";
 }
 
 TEST(NestedGroupSlicesCache, CacheInsertAllocFailureServesWithoutCaching) {
@@ -345,7 +351,8 @@ TEST(NestedGroupSlicesCache, CacheInsertAllocFailureServesWithoutCaching) {
 
         auto inner1 = root.nested_group_slices(outer[0].data, outer[0].len,
                                                /*nested_no_tag=*/802, &dict, &dict_group_member,
-                                               fv->token(), kTestCtx).slices;
+                                               fv->token(), kTestCtx)
+                          .slices;
         if (inner1.size() != 1U) {
             continue;  // failure landed inside build_nested_subview itself
         }
@@ -362,7 +369,8 @@ TEST(NestedGroupSlicesCache, CacheInsertAllocFailureServesWithoutCaching) {
         auto const calls_after_first = mr.allocate_calls();
         auto inner2 = root.nested_group_slices(outer[0].data, outer[0].len,
                                                /*nested_no_tag=*/802, &dict, &dict_group_member,
-                                               fv->token(), kTestCtx).slices;
+                                               fv->token(), kTestCtx)
+                          .slices;
         ASSERT_EQ(inner2.size(), 1U);
         auto const calls_after_second = mr.allocate_calls();
 
@@ -370,7 +378,8 @@ TEST(NestedGroupSlicesCache, CacheInsertAllocFailureServesWithoutCaching) {
             found = true;
             EXPECT_GT(calls_after_second, calls_after_first)
                 << "second same-key lookup rebuilt instead of being served from cache -- proves "
-                   "the cache-insert push_back failed and was caught (nested_group_slices' own catch)";
+                   "the cache-insert push_back failed and was caught (nested_group_slices' own "
+                   "catch)";
         }
         // Otherwise this k produced a fully successful call (push_back also
         // succeeded, second call is a pure cache hit) — not the boundary;

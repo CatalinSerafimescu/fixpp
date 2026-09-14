@@ -35,7 +35,7 @@ const char* kGolden =
 
 TEST(InteropSupportSmoke, GoldenParseRoundtrip) {
     auto frames = parse_golden(kGolden);
-    ASSERT_EQ(frames.size(), 2u);
+    ASSERT_EQ(frames.size(), 2U);
     EXPECT_EQ(frames[0].dir, '>');
     EXPECT_EQ(frames[1].dir, '<');
     // The \x01 escape decoded to a real SOH byte (0x01).
@@ -128,21 +128,20 @@ TEST(InteropSupportSmoke, IdleEngineStopsPromptly) {
 // [feedback_fail_placeholder_red_test]: real error-string assertions, no SUCCEED().
 
 // Helper: build a minimal valid AdminScenarioDescriptor for testrequest_echo.
-static AdminScenarioDescriptor make_valid_descriptor()
-{
+static AdminScenarioDescriptor make_valid_descriptor() {
     AdminScenarioDescriptor d;
-    d.cell_id        = "HP-QFj-init-fix44-testrequest-echo";
+    d.cell_id = "HP-QFj-init-fix44-testrequest-echo";
     d.scenario_group = AdminScenarioGroup::testrequest_echo;
-    d.role           = Role::fixpp_initiator;
-    d.counterparty   = Counterparty::quickfix_j;
-    d.spec_ref       = "[FIX-SL §4.5.5]";
-    d.golden_ref     = "happy/golden/" + d.cell_id + ".fix";
-    d.induction      = AdminInduction::inbound_silence;
+    d.role = Role::fixpp_initiator;
+    d.counterparty = Counterparty::quickfix_j;
+    d.spec_ref = "[FIX-SL §4.5.5]";
+    d.golden_ref = "happy/golden/" + d.cell_id + ".fix";
+    d.induction = AdminInduction::inbound_silence;
     d.self_deadline_ms = std::chrono::milliseconds{10000};
-    d.round_trips    = {
-        {"US1-1", "[FIX-SL §4.5.5]"},
-        {"US1-2", "[FIX-SL §4.5.1]"},
-        {"US1-3", "[FIX-SL §4.5.5]"},
+    d.round_trips = {
+        {.ac_ref = "US1-1", .spec_ref = "[FIX-SL §4.5.5]"},
+        {.ac_ref = "US1-2", .spec_ref = "[FIX-SL §4.5.1]"},
+        {.ac_ref = "US1-3", .spec_ref = "[FIX-SL §4.5.5]"},
     };
     d.acceptance_ids = {"US1-1", "US1-2", "US1-3"};
     return d;
@@ -171,6 +170,5 @@ TEST(AdminDescriptorValidation, ZeroSelfDeadlineFailsValidation) {
     auto d = make_valid_descriptor();
     d.self_deadline_ms = std::chrono::milliseconds{0};
     const std::string err = validate_admin_descriptor(d);
-    EXPECT_FALSE(err.empty())
-        << "validate_admin_descriptor should reject self_deadline_ms == 0";
+    EXPECT_FALSE(err.empty()) << "validate_admin_descriptor should reject self_deadline_ms == 0";
 }

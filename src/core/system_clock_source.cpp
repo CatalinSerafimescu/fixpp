@@ -148,8 +148,7 @@ std::size_t system_clock_source::inflight_count() const noexcept {
 utc_time_point system_clock_source::now() const noexcept {
     // time_point_cast to nanoseconds: lossless widening on libstdc++ (already
     // ns), best-available on libc++ (µs clock → ns type, last 3 digits = 000).
-    return std::chrono::time_point_cast<std::chrono::nanoseconds>(
-        std::chrono::system_clock::now());
+    return std::chrono::time_point_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now());
 }
 
 steady_time_point system_clock_source::steady_now() const noexcept {

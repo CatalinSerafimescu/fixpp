@@ -99,7 +99,7 @@ TEST(StoreShutdownOrdering, HundredSequentialStoresAllSucceed) {
     // store destroyed after pool.stop() — correct ordering
     pool.stop();
     pool.join();
-    store.reset();  // explicit destroy AFTER pool stops
+    store = nullptr;  // explicit destroy AFTER pool stops
 }
 
 // ── Test 2: Concurrent stores from multiple coroutines, store outlives them ──
@@ -123,8 +123,10 @@ TEST(StoreShutdownOrdering, StoreOutlivesAllCoroutines) {
         [store]() -> asio::awaitable<void> {
             for (int i = 1; i <= kPerDir; ++i) {
                 auto frame = make_test_frame(static_cast<seqnum_t>(i), direction_t::inbound);
-                co_await store->store(static_cast<seqnum_t>(i), std::span<const std::byte>(frame),
-                                      direction_t::inbound);
+                // TSan-only test; correctness of stored content is not asserted.
+                (void)co_await store->store(static_cast<seqnum_t>(i),
+                                            std::span<const std::byte>(frame),
+                                            direction_t::inbound);
             }
         },
         asio::use_future);
@@ -134,8 +136,10 @@ TEST(StoreShutdownOrdering, StoreOutlivesAllCoroutines) {
         [store]() -> asio::awaitable<void> {
             for (int i = 1; i <= kPerDir; ++i) {
                 auto frame = make_test_frame(static_cast<seqnum_t>(i), direction_t::outbound);
-                co_await store->store(static_cast<seqnum_t>(i), std::span<const std::byte>(frame),
-                                      direction_t::outbound);
+                // TSan-only test; correctness of stored content is not asserted.
+                (void)co_await store->store(static_cast<seqnum_t>(i),
+                                            std::span<const std::byte>(frame),
+                                            direction_t::outbound);
             }
         },
         asio::use_future);
@@ -148,7 +152,7 @@ TEST(StoreShutdownOrdering, StoreOutlivesAllCoroutines) {
     pool.join();
 
     // Destroy store AFTER pool joins — correct shutdown ordering
-    store.reset();
+    store = nullptr;
 
     // If we reach here without TSan/ASan complaints, the test passes.
 }
@@ -174,18 +178,21 @@ TEST(StoreShutdownOrdering, ResetDuringOperationalPeriodIsClean) {
             // Store 50 frames
             for (int i = 1; i <= 50; ++i) {
                 auto frame = make_test_frame(static_cast<seqnum_t>(i), direction_t::outbound);
-                co_await store->store(static_cast<seqnum_t>(i), std::span<const std::byte>(frame),
-                                      direction_t::outbound);
+                // Only the post-reset counter is asserted below; a failed
+                // pre-reset store is not otherwise observable in this test.
+                (void)co_await store->store(static_cast<seqnum_t>(i),
+                                            std::span<const std::byte>(frame),
+                                            direction_t::outbound);
             }
 
             // Trigger reset
-            auto r = co_await store->reset();
+            auto r = co_await (*store).reset();
             EXPECT_TRUE(r.has_value()) << "reset() failed";
 
             // Verify counter is back to 1
             auto ns = co_await store->next_seqnum(direction_t::outbound, false);
             EXPECT_TRUE(ns.has_value());
-            EXPECT_EQ(*ns, 1u);
+            EXPECT_EQ(*ns, 1U);
         },
         asio::use_future);
     fut.get();
@@ -193,7 +200,7 @@ TEST(StoreShutdownOrdering, ResetDuringOperationalPeriodIsClean) {
     // Destroy in correct order
     pool.stop();
     pool.join();
-    store.reset();
+    store = nullptr;
 }
 
 // ── Test 4: Concurrent read (retrieve) + write (store) ───────────────────────
@@ -218,8 +225,10 @@ TEST(StoreShutdownOrdering, ConcurrentReadWriteNoDataRace) {
             [store]() -> asio::awaitable<void> {
                 for (int i = 1; i <= 10; ++i) {
                     auto frame = make_test_frame(static_cast<seqnum_t>(i), direction_t::outbound);
-                    co_await store->store(static_cast<seqnum_t>(i),
-                                          std::span<const std::byte>(frame), direction_t::outbound);
+                    auto st_r = co_await store->store(static_cast<seqnum_t>(i),
+                                                      std::span<const std::byte>(frame),
+                                                      direction_t::outbound);
+                    EXPECT_TRUE(st_r.has_value()) << "setup store must succeed";
                 }
             },
             asio::use_future);
@@ -238,8 +247,11 @@ TEST(StoreShutdownOrdering, ConcurrentReadWriteNoDataRace) {
         [store, &writer_done]() -> asio::awaitable<void> {
             for (int i = 11; i <= 30; ++i) {
                 auto frame = make_test_frame(static_cast<seqnum_t>(i), direction_t::outbound);
-                co_await store->store(static_cast<seqnum_t>(i), std::span<const std::byte>(frame),
-                                      direction_t::outbound);
+                // Only frames 1..10 are read back below; this writer's own
+                // per-call success is not otherwise observable in this test.
+                (void)co_await store->store(static_cast<seqnum_t>(i),
+                                            std::span<const std::byte>(frame),
+                                            direction_t::outbound);
             }
             writer_done.store(true, std::memory_order_release);
         },
@@ -264,7 +276,7 @@ TEST(StoreShutdownOrdering, ConcurrentReadWriteNoDataRace) {
             auto r = co_await store->retrieve(1, 10, direction_t::outbound, vis);
             EXPECT_TRUE(r.has_value()) << "concurrent retrieve failed";
             // Must see at least frames 1..10
-            EXPECT_EQ(vis.seqs.size(), 10u);
+            EXPECT_EQ(vis.seqs.size(), 10U);
         },
         asio::use_future);
 
@@ -273,7 +285,7 @@ TEST(StoreShutdownOrdering, ConcurrentReadWriteNoDataRace) {
 
     pool.stop();
     pool.join();
-    store.reset();
+    store = nullptr;
 }
 
 // ── Test 5: RC#1 regression — unbounded retrieve UAF under concurrent append ──
@@ -306,7 +318,9 @@ TEST(StoreShutdownOrdering, UnboundedRetrieveUAFUnderConcurrentAppend) {
             setup.get_executor(),
             [store]() -> asio::awaitable<void> {
                 auto frame = make_test_frame(static_cast<seqnum_t>(1), direction_t::outbound);
-                co_await store->store(1, std::span<const std::byte>(frame), direction_t::outbound);
+                // ASan/UAF-only test; the reader below tolerates either outcome.
+                (void)co_await store->store(1, std::span<const std::byte>(frame),
+                                            direction_t::outbound);
             },
             asio::use_future);
         pre.get();
@@ -320,8 +334,10 @@ TEST(StoreShutdownOrdering, UnboundedRetrieveUAFUnderConcurrentAppend) {
         [store]() -> asio::awaitable<void> {
             for (int i = 2; i <= 200; ++i) {
                 auto frame = make_test_frame(static_cast<seqnum_t>(i), direction_t::outbound);
-                co_await store->store(static_cast<seqnum_t>(i), std::span<const std::byte>(frame),
-                                      direction_t::outbound);
+                // ASan/UAF-only test; we only care that no memory corruption occurs.
+                (void)co_await store->store(static_cast<seqnum_t>(i),
+                                            std::span<const std::byte>(frame),
+                                            direction_t::outbound);
             }
         },
         asio::use_future);
@@ -363,7 +379,7 @@ TEST(StoreShutdownOrdering, UnboundedRetrieveUAFUnderConcurrentAppend) {
 
     pool.stop();
     pool.join();
-    store.reset();
+    store = nullptr;
     // If we reach here without ASan/MSan flags, the RC#1 fix holds.
 }
 
@@ -423,8 +439,7 @@ TEST(StoreShutdownOrdering, FileStoreOffloadDrainBeforePoolJoin) {
                 FileStoreFactory factory{cfg};
                 auto ms = factory.make("SENDER", "TARGET", nullptr, 1024 * 1024, nullptr);
                 if (!ms) co_return nullptr;
-                co_return std::shared_ptr<FileStore>(
-                    static_cast<FileStore*>(ms->release()));
+                co_return std::shared_ptr<FileStore>(static_cast<FileStore*>(ms->release()));
             },
             asio::use_future);
         ASSERT_EQ(fut.wait_for(std::chrono::seconds(10)), std::future_status::ready)
@@ -442,9 +457,9 @@ TEST(StoreShutdownOrdering, FileStoreOffloadDrainBeforePoolJoin) {
             [s = store]() -> asio::awaitable<void> {
                 for (int i = 1; i <= 3; ++i) {
                     auto frame = make_test_frame(static_cast<seqnum_t>(i), direction_t::outbound);
-                    auto r = co_await s->store(static_cast<seqnum_t>(i),
-                                               std::span<const std::byte>(frame),
-                                               direction_t::outbound);
+                    auto r =
+                        co_await s->store(static_cast<seqnum_t>(i),
+                                          std::span<const std::byte>(frame), direction_t::outbound);
                     EXPECT_TRUE(r.has_value()) << "store seq=" << i << " failed";
                 }
             },
@@ -496,7 +511,7 @@ TEST(StoreShutdownOrdering, FileStoreOffloadDrainBeforePoolJoin) {
     // after we begin teardown.
     pool.stop();
     pool.join();
-    store.reset();  // explicit destroy AFTER pool stops (validates no UAF)
+    store = nullptr;  // explicit destroy AFTER pool stops (validates no UAF)
 
     std::filesystem::remove_all(dir);
     // Reaching here under ASan+TSan without flags confirms the C5 contract.
@@ -539,8 +554,7 @@ TEST(StoreShutdownOrdering, FileStoreFlushForCloseIsGenuineOffload) {
                 FileStoreFactory factory{cfg};
                 auto ms = factory.make("SENDER", "TARGET", nullptr, 1024 * 1024, nullptr);
                 if (!ms) co_return false;
-                auto store = std::shared_ptr<FileStore>(
-                    static_cast<FileStore*>(ms->release()));
+                auto store = std::shared_ptr<FileStore>(static_cast<FileStore*>(ms->release()));
 
                 for (int i = 1; i <= 5; ++i) {
                     auto frame = make_test_frame(static_cast<seqnum_t>(i), direction_t::outbound);
@@ -574,8 +588,7 @@ TEST(StoreShutdownOrdering, FileStoreFlushForCloseIsGenuineOffload) {
                 FileStoreFactory factory2{cfg};
                 auto ms2 = factory2.make("SENDER", "TARGET", nullptr, 1024 * 1024, nullptr);
                 if (!ms2) co_return seqnum_t{0};
-                auto store2 = std::shared_ptr<FileStore>(
-                    static_cast<FileStore*>(ms2->release()));
+                auto store2 = std::shared_ptr<FileStore>(static_cast<FileStore*>(ms2->release()));
                 auto r = co_await store2->next_seqnum(direction_t::outbound, /*increment=*/false);
                 co_return r.has_value() ? *r : seqnum_t{0};
             },

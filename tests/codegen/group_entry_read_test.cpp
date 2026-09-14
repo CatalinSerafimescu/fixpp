@@ -42,9 +42,8 @@ using fixpp::decimal_t;
 // Build a well-formed FIX frame: "8=FIX.4.4\x01 9=<len>\x01 <body> 10=<chk>\x01"
 // body must already begin with "35=X\x01" and contain SOH-delimited fields.
 std::vector<std::byte> make_frame(std::string_view body) {
-    std::string pre =
-        "8=FIX.4.4\x01" + std::string("9=") + std::to_string(body.size()) + "\x01" +
-        std::string(body);
+    std::string pre = "8=FIX.4.4\x01" + std::string("9=") + std::to_string(body.size()) + "\x01" +
+                      std::string(body);
     unsigned sum = 0;
     for (unsigned char c : pre) {
         sum += c;
@@ -76,9 +75,8 @@ MV parse_frame(std::vector<std::byte> const& buf, std::pmr::memory_resource* mr)
     fixpp::wire::pmr_carry_buffer carry{buf.size(), mr};
     fixpp::wire::Framer fr{};
     fixpp::wire::frame_view fvs[1]{};
-    auto framed = fr.feed(
-        std::span<const std::byte>{buf.data(), buf.size()}, carry,
-        std::span<fixpp::wire::frame_view>{fvs, 1});
+    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()}, carry,
+                          std::span<fixpp::wire::frame_view>{fvs, 1});
     EXPECT_TRUE(framed.has_value()) << "Framer::feed failed";
     EXPECT_FALSE(framed->empty()) << "Framer produced no frames";
     fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{
@@ -134,8 +132,8 @@ TEST(GroupEntryRead, OneLevelScalarAndDecimalReadExactValues) {
         std::string_view qty;
     };
     expected const exp[2] = {
-        {"CLORD-0", "ORDID-0", '1', "100.5"},
-        {"CLORD-1", "ORDID-1", '2', "200.25"},
+        {.cl_ord_id = "CLORD-0", .order_id = "ORDID-0", .side = '1', .qty = "100.5"},
+        {.cl_ord_id = "CLORD-1", .order_id = "ORDID-1", .side = '2', .qty = "200.25"},
     };
 
     for (std::size_t i = 0; i < 2; ++i) {
@@ -242,8 +240,8 @@ TEST(GroupEntryRead, AbsentVsPresentButEmptyField) {
 // one more field", so it misclassifies the checksum tag itself as a single
 // phantom NoOrders member. The dict-aware path validates that the field
 // immediately after the count (the delimiter candidate) is an actual member
-// of group 73 (`OffsetTable::consume_group_extent`'s `group_member_fn_` check) — 10 (CheckSum) never is — so it
-// correctly reports an empty group. This is a pre-existing wire-layer
+// of group 73 (`OffsetTable::consume_group_extent`'s `group_member_fn_` check) — 10 (CheckSum)
+// never is — so it correctly reports an empty group. This is a pre-existing wire-layer
 // dict-free-group-boundary property, unrelated to and out of scope for 062
 // (062 does not touch OffsetTable::group()/group_slices()).
 TEST(GroupEntryRead, EmptyGroupSizeZeroNoDeref) {
@@ -260,9 +258,8 @@ TEST(GroupEntryRead, EmptyGroupSizeZeroNoDeref) {
     fixpp::wire::pmr_carry_buffer carry{buf.size(), &arena};
     fixpp::wire::Framer fr{};
     fixpp::wire::frame_view fvs[1]{};
-    auto framed = fr.feed(
-        std::span<const std::byte>{buf.data(), buf.size()}, carry,
-        std::span<fixpp::wire::frame_view>{fvs, 1});
+    auto framed = fr.feed(std::span<const std::byte>{buf.data(), buf.size()}, carry,
+                          std::span<fixpp::wire::frame_view>{fvs, 1});
     ASSERT_TRUE(framed.has_value());
     ASSERT_FALSE(framed->empty());
 
@@ -283,8 +280,8 @@ TEST(GroupEntryRead, EmptyGroupSizeZeroNoDeref) {
     EXPECT_EQ(dereferenced, 0) << "empty group must never dereference an entry";
 }
 
-// Edge (specs/062-grouped-typed-read-fix/spec.md's Edge Cases): single-entry group — the entry is simultaneously the
-// FIRST and the LAST occurrence, so its extent has no following delimiter to
+// Edge (specs/062-grouped-typed-read-fix/spec.md's Edge Cases): single-entry group — the entry is
+// simultaneously the FIRST and the LAST occurrence, so its extent has no following delimiter to
 // bound it (relies on end-of-frame accounting). Assert every field, INCLUDING
 // the entry's LAST wire field (side, tag 54), reads its exact value: a
 // truncated extent would corrupt/empty the tail field; an off-by-one on the

@@ -63,7 +63,7 @@ bool run_one_round(int n_waiters) {
     auto main_coro = [&]() -> asio::awaitable<void> {
         auto ex = co_await asio::this_coro::executor;
 
-        auto holder = co_await mtx.async_lock();   // hold throughout the reap
+        auto holder = co_await mtx.async_lock();  // hold throughout the reap
         EXPECT_TRUE(holder.has_value());
 
         for (int i = 0; i < n_waiters; ++i) {
@@ -81,7 +81,7 @@ bool run_one_round(int n_waiters) {
                 },
                 asio::detached);
         }
-        co_await yield_n(n_waiters * 2 + 4);  // let waiters queue behind the holder
+        co_await yield_n((n_waiters * 2) + 4);  // let waiters queue behind the holder
 
         // Spawn the drain while the holder is STILL HELD: it sets draining_ and reaps
         // all queued waiters (every one aborted — none granted, the holder holds), then
@@ -94,7 +94,7 @@ bool run_one_round(int n_waiters) {
                 drain_done.store(true, std::memory_order_release);
             },
             asio::detached);
-        co_await yield_n(n_waiters * 2 + 6);  // let the drain set draining_ + reap (all aborted)
+        co_await yield_n((n_waiters * 2) + 6);  // let the drain set draining_ + reap (all aborted)
 
         // Holder STILL held → all waiters are reaped, none granted. Release → finalize.
         holder = expected_t<async_lock_guard>{};
@@ -117,8 +117,8 @@ bool run_one_round(int n_waiters) {
         return false;  // hang
     }
 
-    return drain_ok.load() && completed_count.load() == n_waiters &&
-           granted_count.load() == 0 && aborted_count.load() == n_waiters;
+    return drain_ok.load() && completed_count.load() == n_waiters && granted_count.load() == 0 &&
+           aborted_count.load() == n_waiters;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

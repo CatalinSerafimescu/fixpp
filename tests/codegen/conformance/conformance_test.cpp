@@ -54,7 +54,9 @@ TEST(CodegenConformance, ManifestStructurallyValidAndCovered) {
     ASSERT_FALSE(m.empty());
     std::map<std::string, int> per_ver;
     int fixt_admin = 0;
-    bool nos_v42 = false, nos_v44 = false, nos_v50 = false;
+    bool nos_v42 = false;
+    bool nos_v44 = false;
+    bool nos_v50 = false;
     for (auto const& e : m) {
         EXPECT_TRUE(e.ver == "v42" || e.ver == "v44" || e.ver == "v50sp2" || e.ver == "vt11")
             << e.ver;

@@ -112,8 +112,9 @@ void assert_unchanged(const std::array<std::byte, N>& buf, const char* label) {
     SCOPED_TRACE(label);
     for (std::size_t i = 0; i < buf.size(); ++i) {
         if (buf[i] != kSentinel) {
-            ADD_FAILURE() << "buf[" << i << "] modified on a fail-closed path (expected 0xAB, got 0x"
-                          << std::hex << static_cast<unsigned>(buf[i]) << ")";
+            ADD_FAILURE() << "buf[" << i
+                          << "] modified on a fail-closed path (expected 0xAB, got 0x" << std::hex
+                          << static_cast<unsigned>(buf[i]) << ")";
             return;
         }
     }
@@ -137,7 +138,7 @@ TEST(ExemplarBuildFailClosed, FailClosed_EmptyRequiredString) {
     // D: empty cl_ord_id.
     buf.fill(kSentinel);
     EXPECT_FALSE(fixpp::session::build_new_order_single(std::span<std::byte>{buf}, "", "MSFT", '1',
-                                                          qty, px, "20240101-10:00:00")
+                                                        qty, px, "20240101-10:00:00")
                      .has_value())
         << "D: empty cl_ord_id must fail-closed";
     assert_unchanged(buf, "D empty cl_ord_id");
@@ -145,7 +146,7 @@ TEST(ExemplarBuildFailClosed, FailClosed_EmptyRequiredString) {
     // 8: empty order_id.
     buf.fill(kSentinel);
     EXPECT_FALSE(fixpp::session::build_execution_report(std::span<std::byte>{buf}, "", "EXEC1", 'F',
-                                                          '2', "MSFT", '1', zero, qty, px)
+                                                        '2', "MSFT", '1', zero, qty, px)
                      .has_value())
         << "8: empty order_id must fail-closed";
     assert_unchanged(buf, "8 empty order_id");
@@ -153,7 +154,7 @@ TEST(ExemplarBuildFailClosed, FailClosed_EmptyRequiredString) {
     // 9: empty order_id (build_order_cancel_reject's first required-string check).
     buf.fill(kSentinel);
     EXPECT_FALSE(fixpp::session::build_order_cancel_reject(std::span<std::byte>{buf}, "", "CLORD1",
-                                                             "CLORD0", '8', '1', 0)
+                                                           "CLORD0", '8', '1', 0)
                      .has_value())
         << "9: empty order_id must fail-closed";
     assert_unchanged(buf, "9 empty order_id");
@@ -161,17 +162,30 @@ TEST(ExemplarBuildFailClosed, FailClosed_EmptyRequiredString) {
     // E: empty list_id. orders left empty too (list_id is checked first, so
     // this alone determines the outcome — build_new_order_list's list_id.empty() guard).
     buf.fill(kSentinel);
-    NewOrderListParams e_params{"", 0, 0, std::span<const NewOrderListOrder>{}};
-    EXPECT_FALSE(fixpp::session::build_new_order_list(std::span<std::byte>{buf}, e_params).has_value())
+    NewOrderListParams e_params{.list_id = "",
+                                .bid_type = 0,
+                                .tot_no_orders = 0,
+                                .orders = std::span<const NewOrderListOrder>{}};
+    EXPECT_FALSE(
+        fixpp::session::build_new_order_list(std::span<std::byte>{buf}, e_params).has_value())
         << "E: empty list_id must fail-closed";
     assert_unchanged(buf, "E empty list_id");
 
     // AS: empty alloc_report_id (the FIRST required-string check,
-    // build_allocation_report's alloc_report_id.empty() guard). trade_date/symbol left non-empty so this
-    // check alone determines the outcome.
+    // build_allocation_report's alloc_report_id.empty() guard). trade_date/symbol left non-empty so
+    // this check alone determines the outcome.
     buf.fill(kSentinel);
-    AllocationReportParams as_params{
-        "",   '0', 9, 0, 0, '1', qty, px, "20240101", "MSFT", std::span<const AllocationReportParty>{}};
+    AllocationReportParams as_params{.alloc_report_id = "",
+                                     .alloc_trans_type = '0',
+                                     .alloc_report_type = 9,
+                                     .alloc_status = 0,
+                                     .alloc_no_orders_type = 0,
+                                     .side = '1',
+                                     .quantity = qty,
+                                     .avg_px = px,
+                                     .trade_date = "20240101",
+                                     .symbol = "MSFT",
+                                     .parties = std::span<const AllocationReportParty>{}};
     EXPECT_FALSE(
         fixpp::session::build_allocation_report(std::span<std::byte>{buf}, as_params).has_value())
         << "AS: empty alloc_report_id must fail-closed";
@@ -193,7 +207,10 @@ TEST(ExemplarBuildFailClosed, FailClosed_EmptyRequiredString_LaterFields) {
 
     // E: valid list_id, EMPTY orders span -> the second required guard fires.
     buf.fill(kSentinel);
-    NewOrderListParams e_no_orders{"LIST1", 0, 0, std::span<const NewOrderListOrder>{}};
+    NewOrderListParams e_no_orders{.list_id = "LIST1",
+                                   .bid_type = 0,
+                                   .tot_no_orders = 0,
+                                   .orders = std::span<const NewOrderListOrder>{}};
     EXPECT_FALSE(
         fixpp::session::build_new_order_list(std::span<std::byte>{buf}, e_no_orders).has_value())
         << "E: empty orders must fail-closed";
@@ -202,15 +219,24 @@ TEST(ExemplarBuildFailClosed, FailClosed_EmptyRequiredString_LaterFields) {
     // 9: valid order_id + cl_ord_id, EMPTY orig_cl_ord_id -> the third guard fires.
     buf.fill(kSentinel);
     EXPECT_FALSE(fixpp::session::build_order_cancel_reject(std::span<std::byte>{buf}, "ORD1",
-                                                             "CLORD1", "", '8', '1', 0)
+                                                           "CLORD1", "", '8', '1', 0)
                      .has_value())
         << "9: empty orig_cl_ord_id must fail-closed";
     assert_unchanged(buf, "9 empty orig_cl_ord_id");
 
     // AS: valid alloc_report_id + symbol, EMPTY trade_date -> the second guard fires.
     buf.fill(kSentinel);
-    AllocationReportParams as_no_td{
-        "RPT1", '0', 9, 0, 0, '1', qty, px, "", "MSFT", std::span<const AllocationReportParty>{}};
+    AllocationReportParams as_no_td{.alloc_report_id = "RPT1",
+                                    .alloc_trans_type = '0',
+                                    .alloc_report_type = 9,
+                                    .alloc_status = 0,
+                                    .alloc_no_orders_type = 0,
+                                    .side = '1',
+                                    .quantity = qty,
+                                    .avg_px = px,
+                                    .trade_date = "",
+                                    .symbol = "MSFT",
+                                    .parties = std::span<const AllocationReportParty>{}};
     EXPECT_FALSE(
         fixpp::session::build_allocation_report(std::span<std::byte>{buf}, as_no_td).has_value())
         << "AS: empty trade_date must fail-closed";
@@ -218,8 +244,17 @@ TEST(ExemplarBuildFailClosed, FailClosed_EmptyRequiredString_LaterFields) {
 
     // AS: valid alloc_report_id + trade_date, EMPTY symbol -> the third guard fires.
     buf.fill(kSentinel);
-    AllocationReportParams as_no_sym{
-        "RPT1", '0', 9, 0, 0, '1', qty, px, "20240101", "", std::span<const AllocationReportParty>{}};
+    AllocationReportParams as_no_sym{.alloc_report_id = "RPT1",
+                                     .alloc_trans_type = '0',
+                                     .alloc_report_type = 9,
+                                     .alloc_status = 0,
+                                     .alloc_no_orders_type = 0,
+                                     .side = '1',
+                                     .quantity = qty,
+                                     .avg_px = px,
+                                     .trade_date = "20240101",
+                                     .symbol = "",
+                                     .parties = std::span<const AllocationReportParty>{}};
     EXPECT_FALSE(
         fixpp::session::build_allocation_report(std::span<std::byte>{buf}, as_no_sym).has_value())
         << "AS: empty symbol must fail-closed";
@@ -247,9 +282,17 @@ TEST(ExemplarBuildFailClosed, FailClosed_EmptyRequiredString_PerEntry) {
     buf.fill(kSentinel);
     {
         fixpp::session::NewOrderListOrder order{
-            "", 1, '1', "MSFT", qty, std::span<const fixpp::session::NewOrderListParty>{}};
+            .cl_ord_id = "",
+            .list_seq_no = 1,
+            .side = '1',
+            .symbol = "MSFT",
+            .order_qty = qty,
+            .parties = std::span<const fixpp::session::NewOrderListParty>{}};
         fixpp::session::NewOrderListParams params{
-            "LIST1", 3, 1, std::span<const fixpp::session::NewOrderListOrder>{&order, 1}};
+            .list_id = "LIST1",
+            .bid_type = 3,
+            .tot_no_orders = 1,
+            .orders = std::span<const fixpp::session::NewOrderListOrder>{&order, 1}};
         auto r = fixpp::session::build_new_order_list(std::span<std::byte>{buf}, params);
         ASSERT_FALSE(r.has_value()) << "E: order.cl_ord_id empty must fail-closed";
         EXPECT_EQ(r.error(), fixpp::core::error::wire_required_field_missing);
@@ -260,9 +303,17 @@ TEST(ExemplarBuildFailClosed, FailClosed_EmptyRequiredString_PerEntry) {
     buf.fill(kSentinel);
     {
         fixpp::session::NewOrderListOrder order{
-            "ORD1", 1, '1', "", qty, std::span<const fixpp::session::NewOrderListParty>{}};
+            .cl_ord_id = "ORD1",
+            .list_seq_no = 1,
+            .side = '1',
+            .symbol = "",
+            .order_qty = qty,
+            .parties = std::span<const fixpp::session::NewOrderListParty>{}};
         fixpp::session::NewOrderListParams params{
-            "LIST1", 3, 1, std::span<const fixpp::session::NewOrderListOrder>{&order, 1}};
+            .list_id = "LIST1",
+            .bid_type = 3,
+            .tot_no_orders = 1,
+            .orders = std::span<const fixpp::session::NewOrderListOrder>{&order, 1}};
         auto r = fixpp::session::build_new_order_list(std::span<std::byte>{buf}, params);
         ASSERT_FALSE(r.has_value()) << "E: order.symbol empty must fail-closed";
         EXPECT_EQ(r.error(), fixpp::core::error::wire_required_field_missing);
@@ -273,12 +324,22 @@ TEST(ExemplarBuildFailClosed, FailClosed_EmptyRequiredString_PerEntry) {
     buf.fill(kSentinel);
     {
         fixpp::session::NewOrderListParty party{
-            "", 'D', 1, std::span<const fixpp::session::NewOrderListPartySubId>{}};
+            .party_id = "",
+            .party_id_source = 'D',
+            .party_role = 1,
+            .sub_ids = std::span<const fixpp::session::NewOrderListPartySubId>{}};
         fixpp::session::NewOrderListOrder order{
-            "ORD1", 1, '1', "MSFT", qty,
-            std::span<const fixpp::session::NewOrderListParty>{&party, 1}};
+            .cl_ord_id = "ORD1",
+            .list_seq_no = 1,
+            .side = '1',
+            .symbol = "MSFT",
+            .order_qty = qty,
+            .parties = std::span<const fixpp::session::NewOrderListParty>{&party, 1}};
         fixpp::session::NewOrderListParams params{
-            "LIST1", 3, 1, std::span<const fixpp::session::NewOrderListOrder>{&order, 1}};
+            .list_id = "LIST1",
+            .bid_type = 3,
+            .tot_no_orders = 1,
+            .orders = std::span<const fixpp::session::NewOrderListOrder>{&order, 1}};
         auto r = fixpp::session::build_new_order_list(std::span<std::byte>{buf}, params);
         ASSERT_FALSE(r.has_value()) << "E: party.party_id empty must fail-closed";
         EXPECT_EQ(r.error(), fixpp::core::error::wire_required_field_missing);
@@ -289,14 +350,24 @@ TEST(ExemplarBuildFailClosed, FailClosed_EmptyRequiredString_PerEntry) {
     // party_sub_id(523, delimiter).
     buf.fill(kSentinel);
     {
-        fixpp::session::NewOrderListPartySubId sub{"", 1};
+        fixpp::session::NewOrderListPartySubId sub{.party_sub_id = "", .party_sub_id_type = 1};
         fixpp::session::NewOrderListParty party{
-            "PID1", 'D', 1, std::span<const fixpp::session::NewOrderListPartySubId>{&sub, 1}};
+            .party_id = "PID1",
+            .party_id_source = 'D',
+            .party_role = 1,
+            .sub_ids = std::span<const fixpp::session::NewOrderListPartySubId>{&sub, 1}};
         fixpp::session::NewOrderListOrder order{
-            "ORD1", 1, '1', "MSFT", qty,
-            std::span<const fixpp::session::NewOrderListParty>{&party, 1}};
+            .cl_ord_id = "ORD1",
+            .list_seq_no = 1,
+            .side = '1',
+            .symbol = "MSFT",
+            .order_qty = qty,
+            .parties = std::span<const fixpp::session::NewOrderListParty>{&party, 1}};
         fixpp::session::NewOrderListParams params{
-            "LIST1", 3, 1, std::span<const fixpp::session::NewOrderListOrder>{&order, 1}};
+            .list_id = "LIST1",
+            .bid_type = 3,
+            .tot_no_orders = 1,
+            .orders = std::span<const fixpp::session::NewOrderListOrder>{&order, 1}};
         auto r = fixpp::session::build_new_order_list(std::span<std::byte>{buf}, params);
         ASSERT_FALSE(r.has_value()) << "E: sub.party_sub_id empty must fail-closed";
         EXPECT_EQ(r.error(), fixpp::core::error::wire_required_field_missing);
@@ -307,10 +378,21 @@ TEST(ExemplarBuildFailClosed, FailClosed_EmptyRequiredString_PerEntry) {
     buf.fill(kSentinel);
     {
         fixpp::session::AllocationReportParty party{
-            "", 'D', 1, std::span<const fixpp::session::AllocationReportPartySubId>{}};
-        AllocationReportParams params{
-            "RPT1", '0', 9, 0, 0, '1', qty, px, "20240101", "MSFT",
-            std::span<const AllocationReportParty>{&party, 1}};
+            .party_id = "",
+            .party_id_source = 'D',
+            .party_role = 1,
+            .sub_ids = std::span<const fixpp::session::AllocationReportPartySubId>{}};
+        AllocationReportParams params{.alloc_report_id = "RPT1",
+                                      .alloc_trans_type = '0',
+                                      .alloc_report_type = 9,
+                                      .alloc_status = 0,
+                                      .alloc_no_orders_type = 0,
+                                      .side = '1',
+                                      .quantity = qty,
+                                      .avg_px = px,
+                                      .trade_date = "20240101",
+                                      .symbol = "MSFT",
+                                      .parties = std::span<const AllocationReportParty>{&party, 1}};
         auto r = fixpp::session::build_allocation_report(std::span<std::byte>{buf}, params);
         ASSERT_FALSE(r.has_value()) << "AS: party.party_id empty must fail-closed";
         EXPECT_EQ(r.error(), fixpp::core::error::wire_required_field_missing);
@@ -321,13 +403,23 @@ TEST(ExemplarBuildFailClosed, FailClosed_EmptyRequiredString_PerEntry) {
     // delimiter).
     buf.fill(kSentinel);
     {
-        fixpp::session::AllocationReportPartySubId sub{"", 1};
+        fixpp::session::AllocationReportPartySubId sub{.party_sub_id = "", .party_sub_id_type = 1};
         fixpp::session::AllocationReportParty party{
-            "PID1", 'D', 1,
-            std::span<const fixpp::session::AllocationReportPartySubId>{&sub, 1}};
-        AllocationReportParams params{
-            "RPT1", '0', 9, 0, 0, '1', qty, px, "20240101", "MSFT",
-            std::span<const AllocationReportParty>{&party, 1}};
+            .party_id = "PID1",
+            .party_id_source = 'D',
+            .party_role = 1,
+            .sub_ids = std::span<const fixpp::session::AllocationReportPartySubId>{&sub, 1}};
+        AllocationReportParams params{.alloc_report_id = "RPT1",
+                                      .alloc_trans_type = '0',
+                                      .alloc_report_type = 9,
+                                      .alloc_status = 0,
+                                      .alloc_no_orders_type = 0,
+                                      .side = '1',
+                                      .quantity = qty,
+                                      .avg_px = px,
+                                      .trade_date = "20240101",
+                                      .symbol = "MSFT",
+                                      .parties = std::span<const AllocationReportParty>{&party, 1}};
         auto r = fixpp::session::build_allocation_report(std::span<std::byte>{buf}, params);
         ASSERT_FALSE(r.has_value()) << "AS: sub.party_sub_id empty must fail-closed";
         EXPECT_EQ(r.error(), fixpp::core::error::wire_required_field_missing);
@@ -355,9 +447,9 @@ TEST(ExemplarBuildFailClosed, FailClosed_SohInValue) {
     // 9: order_id containing SOH + session-tag injection attempt.
     buf.fill(kSentinel);
     EXPECT_FALSE(fixpp::session::build_order_cancel_reject(std::span<std::byte>{buf},
-                                                             "ORD\x01"
-                                                             "49=EVIL",
-                                                             "CLORD1", "CLORD0", '8', '1', 0)
+                                                           "ORD\x01"
+                                                           "49=EVIL",
+                                                           "CLORD1", "CLORD0", '8', '1', 0)
                      .has_value())
         << "9: order_id with SOH+49= injection must fail-closed (body_builder guard)";
     assert_unchanged(buf, "9 order_id SOH-inject");
@@ -366,30 +458,39 @@ TEST(ExemplarBuildFailClosed, FailClosed_SohInValue) {
     // append_string_field). list_id valid, one order with empty parties
     // (present-but-empty is a valid, already-witnessed shape).
     buf.fill(kSentinel);
-    NewOrderListOrder e_order{
-        "ORD\x01"
-        "58=x",
-        1, '1', "MSFT", make_decimal("10", &arena), std::span<const NewOrderListParty>{}};
-    NewOrderListParams e_params{"LIST1", 3, 1, std::span<const NewOrderListOrder>{&e_order, 1}};
-    EXPECT_FALSE(fixpp::session::build_new_order_list(std::span<std::byte>{buf}, e_params).has_value())
+    NewOrderListOrder e_order{.cl_ord_id =
+                                  "ORD\x01"
+                                  "58=x",
+                              .list_seq_no = 1,
+                              .side = '1',
+                              .symbol = "MSFT",
+                              .order_qty = make_decimal("10", &arena),
+                              .parties = std::span<const NewOrderListParty>{}};
+    NewOrderListParams e_params{.list_id = "LIST1",
+                                .bid_type = 3,
+                                .tot_no_orders = 1,
+                                .orders = std::span<const NewOrderListOrder>{&e_order, 1}};
+    EXPECT_FALSE(
+        fixpp::session::build_new_order_list(std::span<std::byte>{buf}, e_params).has_value())
         << "E: order.cl_ord_id with SOH injection must fail-closed (body_builder guard)";
     assert_unchanged(buf, "E cl_ord_id SOH-inject");
 
     // AS: symbol containing SOH (bb.field(55, params.symbol) ->
     // append_string_field). alloc_report_id/trade_date valid.
     buf.fill(kSentinel);
-    AllocationReportParams as_params{"ALLOCRPT1",
-                                      '0',
-                                      9,
-                                      0,
-                                      0,
-                                      '1',
-                                      qty,
-                                      px,
-                                      "20240101",
-                                      "MSFT\x01"
-                                      "58=x",
-                                      std::span<const AllocationReportParty>{}};
+    AllocationReportParams as_params{.alloc_report_id = "ALLOCRPT1",
+                                     .alloc_trans_type = '0',
+                                     .alloc_report_type = 9,
+                                     .alloc_status = 0,
+                                     .alloc_no_orders_type = 0,
+                                     .side = '1',
+                                     .quantity = qty,
+                                     .avg_px = px,
+                                     .trade_date = "20240101",
+                                     .symbol =
+                                         "MSFT\x01"
+                                         "58=x",
+                                     .parties = std::span<const AllocationReportParty>{}};
     EXPECT_FALSE(
         fixpp::session::build_allocation_report(std::span<std::byte>{buf}, as_params).has_value())
         << "AS: symbol with SOH injection must fail-closed (body_builder guard)";
@@ -415,7 +516,7 @@ TEST(ExemplarBuildFailClosed, FailClosed_OutOfRangeSide) {
     // D: side = '9' (only '1'/'2' accepted).
     buf.fill(kSentinel);
     EXPECT_FALSE(fixpp::session::build_new_order_single(std::span<std::byte>{buf}, "ORD1", "MSFT",
-                                                          '9', qty, px, "20240101-10:00:00")
+                                                        '9', qty, px, "20240101-10:00:00")
                      .has_value())
         << "D: side '9' must fail-closed";
     assert_unchanged(buf, "D side '9'");
@@ -423,7 +524,7 @@ TEST(ExemplarBuildFailClosed, FailClosed_OutOfRangeSide) {
     // 8: side = 'X'.
     buf.fill(kSentinel);
     EXPECT_FALSE(fixpp::session::build_execution_report(std::span<std::byte>{buf}, "ORD1", "EXEC1",
-                                                          'F', '2', "MSFT", 'X', zero, qty, px)
+                                                        'F', '2', "MSFT", 'X', zero, qty, px)
                      .has_value())
         << "8: side 'X' must fail-closed";
     assert_unchanged(buf, "8 side 'X'");
@@ -431,19 +532,37 @@ TEST(ExemplarBuildFailClosed, FailClosed_OutOfRangeSide) {
     // E: one order valid except side='9' (FR-003 per-exemplar char-domain guard).
     buf.fill(kSentinel);
     const std::array<fixpp::session::NewOrderListOrder, 1> e_orders{
-        fixpp::session::NewOrderListOrder{"ORD1", 1, '9', "MSFT", qty,
-                                          std::span<const fixpp::session::NewOrderListParty>{}}};
+        fixpp::session::NewOrderListOrder{
+            .cl_ord_id = "ORD1",
+            .list_seq_no = 1,
+            .side = '9',
+            .symbol = "MSFT",
+            .order_qty = qty,
+            .parties = std::span<const fixpp::session::NewOrderListParty>{}}};
     const fixpp::session::NewOrderListParams e_params{
-        "LIST1", 3, 1, std::span<const fixpp::session::NewOrderListOrder>{e_orders}};
-    EXPECT_FALSE(fixpp::session::build_new_order_list(std::span<std::byte>{buf}, e_params).has_value())
+        .list_id = "LIST1",
+        .bid_type = 3,
+        .tot_no_orders = 1,
+        .orders = std::span<const fixpp::session::NewOrderListOrder>{e_orders}};
+    EXPECT_FALSE(
+        fixpp::session::build_new_order_list(std::span<std::byte>{buf}, e_params).has_value())
         << "E: order side '9' must fail-closed";
     assert_unchanged(buf, "E order side '9'");
 
     // AS: valid except side='9'.
     buf.fill(kSentinel);
     const fixpp::session::AllocationReportParams as_params{
-        "ALLOCRPT1", '0', 9, 0, 0, '9', qty, px, "20240101", "MSFT",
-        std::span<const fixpp::session::AllocationReportParty>{}};
+        .alloc_report_id = "ALLOCRPT1",
+        .alloc_trans_type = '0',
+        .alloc_report_type = 9,
+        .alloc_status = 0,
+        .alloc_no_orders_type = 0,
+        .side = '9',
+        .quantity = qty,
+        .avg_px = px,
+        .trade_date = "20240101",
+        .symbol = "MSFT",
+        .parties = std::span<const fixpp::session::AllocationReportParty>{}};
     EXPECT_FALSE(
         fixpp::session::build_allocation_report(std::span<std::byte>{buf}, as_params).has_value())
         << "AS: side '9' must fail-closed";
@@ -468,7 +587,7 @@ TEST(ExemplarBuildFailClosed, FailClosed_UnformattableDecimal) {
     // D: order_qty = invalid sentinel.
     buf.fill(kSentinel);
     EXPECT_FALSE(fixpp::session::build_new_order_single(std::span<std::byte>{buf}, "ORD1", "MSFT",
-                                                          '1', invalid, px, "20240101-10:00:00")
+                                                        '1', invalid, px, "20240101-10:00:00")
                      .has_value())
         << "D: unformattable order_qty must fail-closed with decimal_invalid_input";
     assert_unchanged(buf, "D invalid order_qty");
@@ -476,26 +595,43 @@ TEST(ExemplarBuildFailClosed, FailClosed_UnformattableDecimal) {
     // 8: avg_px = invalid sentinel (the first field() call in build_execution_
     // report is field(6, avg_px)).
     buf.fill(kSentinel);
-    auto er = fixpp::session::build_execution_report(std::span<std::byte>{buf}, "ORD1", "EXEC1", 'F',
-                                                       '2', "MSFT", '1', qty, qty, invalid);
+    auto er = fixpp::session::build_execution_report(std::span<std::byte>{buf}, "ORD1", "EXEC1",
+                                                     'F', '2', "MSFT", '1', qty, qty, invalid);
     EXPECT_FALSE(er.has_value())
         << "8: unformattable avg_px must fail-closed with decimal_invalid_input";
     assert_unchanged(buf, "8 invalid avg_px");
 
     // E: order.order_qty = invalid sentinel.
     buf.fill(kSentinel);
-    NewOrderListOrder e_order{"ORD1", 1, '1', "MSFT", invalid, std::span<const NewOrderListParty>{}};
-    NewOrderListParams e_params{"LIST1", 3, 1, std::span<const NewOrderListOrder>{&e_order, 1}};
-    EXPECT_FALSE(fixpp::session::build_new_order_list(std::span<std::byte>{buf}, e_params).has_value())
+    NewOrderListOrder e_order{.cl_ord_id = "ORD1",
+                              .list_seq_no = 1,
+                              .side = '1',
+                              .symbol = "MSFT",
+                              .order_qty = invalid,
+                              .parties = std::span<const NewOrderListParty>{}};
+    NewOrderListParams e_params{.list_id = "LIST1",
+                                .bid_type = 3,
+                                .tot_no_orders = 1,
+                                .orders = std::span<const NewOrderListOrder>{&e_order, 1}};
+    EXPECT_FALSE(
+        fixpp::session::build_new_order_list(std::span<std::byte>{buf}, e_params).has_value())
         << "E: unformattable order.order_qty must fail-closed with decimal_invalid_input";
     assert_unchanged(buf, "E invalid order_qty");
 
     // AS: avg_px = invalid sentinel (the first field() call in
     // build_allocation_report is field(6, avg_px)).
     buf.fill(kSentinel);
-    AllocationReportParams as_params{"ALLOCRPT1",         '0', 9,     0,   0,   '1',
-                                      qty,                 invalid, "20240101", "MSFT",
-                                      std::span<const AllocationReportParty>{}};
+    AllocationReportParams as_params{.alloc_report_id = "ALLOCRPT1",
+                                     .alloc_trans_type = '0',
+                                     .alloc_report_type = 9,
+                                     .alloc_status = 0,
+                                     .alloc_no_orders_type = 0,
+                                     .side = '1',
+                                     .quantity = qty,
+                                     .avg_px = invalid,
+                                     .trade_date = "20240101",
+                                     .symbol = "MSFT",
+                                     .parties = std::span<const AllocationReportParty>{}};
     EXPECT_FALSE(
         fixpp::session::build_allocation_report(std::span<std::byte>{buf}, as_params).has_value())
         << "AS: unformattable avg_px must fail-closed with decimal_invalid_input";
@@ -516,7 +652,7 @@ TEST(ExemplarBuildFailClosed, FailClosed_MalformedTimestamp) {
     // Wrong-length (16 chars, not 17 or 21).
     buf.fill(kSentinel);
     EXPECT_FALSE(fixpp::session::build_new_order_single(std::span<std::byte>{buf}, "ORD1", "MSFT",
-                                                          '1', qty, px, "20240101-10:00:0")
+                                                        '1', qty, px, "20240101-10:00:0")
                      .has_value())
         << "D: 16-char transact_time must fail-closed";
     assert_unchanged(buf, "D 16-char transact_time");
@@ -524,7 +660,7 @@ TEST(ExemplarBuildFailClosed, FailClosed_MalformedTimestamp) {
     // Wrong-shape (dash not at position 8).
     buf.fill(kSentinel);
     EXPECT_FALSE(fixpp::session::build_new_order_single(std::span<std::byte>{buf}, "ORD1", "MSFT",
-                                                          '1', qty, px, "20240601X09:30:00")
+                                                        '1', qty, px, "20240601X09:30:00")
                      .has_value())
         << "D: non-dash-at-8 transact_time must fail-closed";
     assert_unchanged(buf, "D wrong-shape transact_time");
@@ -545,7 +681,7 @@ TEST(ExemplarBuildFailClosed, FailClosed_UndersizedBuffer_Untouched) {
     // D.
     tiny.fill(kSentinel);
     EXPECT_FALSE(fixpp::session::build_new_order_single(std::span<std::byte>{tiny}, "ORD1", "MSFT",
-                                                          '1', qty, px, "20240101-10:00:00")
+                                                        '1', qty, px, "20240101-10:00:00")
                      .has_value())
         << "D: undersized out must fail-closed with wire_frame_too_large";
     assert_unchanged(tiny, "D undersized out");
@@ -553,7 +689,7 @@ TEST(ExemplarBuildFailClosed, FailClosed_UndersizedBuffer_Untouched) {
     // 8.
     tiny.fill(kSentinel);
     EXPECT_FALSE(fixpp::session::build_execution_report(std::span<std::byte>{tiny}, "ORD1", "EXEC1",
-                                                          'F', '2', "MSFT", '1', zero, qty, px)
+                                                        'F', '2', "MSFT", '1', zero, qty, px)
                      .has_value())
         << "8: undersized out must fail-closed with wire_frame_too_large";
     assert_unchanged(tiny, "8 undersized out");
@@ -561,32 +697,41 @@ TEST(ExemplarBuildFailClosed, FailClosed_UndersizedBuffer_Untouched) {
     // 9.
     tiny.fill(kSentinel);
     EXPECT_FALSE(fixpp::session::build_order_cancel_reject(std::span<std::byte>{tiny}, "ORD1",
-                                                             "CLORD1", "CLORD0", '8', '1', 0)
+                                                           "CLORD1", "CLORD0", '8', '1', 0)
                      .has_value())
         << "9: undersized out must fail-closed with wire_frame_too_large";
     assert_unchanged(tiny, "9 undersized out");
 
     // E.
     tiny.fill(kSentinel);
-    NewOrderListOrder e_order{"ORD1", 1, '1', "MSFT", qty, std::span<const NewOrderListParty>{}};
-    NewOrderListParams e_params{"LIST1", 3, 1, std::span<const NewOrderListOrder>{&e_order, 1}};
-    EXPECT_FALSE(fixpp::session::build_new_order_list(std::span<std::byte>{tiny}, e_params).has_value())
+    NewOrderListOrder e_order{.cl_ord_id = "ORD1",
+                              .list_seq_no = 1,
+                              .side = '1',
+                              .symbol = "MSFT",
+                              .order_qty = qty,
+                              .parties = std::span<const NewOrderListParty>{}};
+    NewOrderListParams e_params{.list_id = "LIST1",
+                                .bid_type = 3,
+                                .tot_no_orders = 1,
+                                .orders = std::span<const NewOrderListOrder>{&e_order, 1}};
+    EXPECT_FALSE(
+        fixpp::session::build_new_order_list(std::span<std::byte>{tiny}, e_params).has_value())
         << "E: undersized out must fail-closed with wire_frame_too_large";
     assert_unchanged(tiny, "E undersized out");
 
     // AS.
     tiny.fill(kSentinel);
-    AllocationReportParams as_params{"ALLOCRPT1",
-                                      '0',
-                                      9,
-                                      0,
-                                      0,
-                                      '1',
-                                      qty,
-                                      px,
-                                      "20240101",
-                                      "MSFT",
-                                      std::span<const AllocationReportParty>{}};
+    AllocationReportParams as_params{.alloc_report_id = "ALLOCRPT1",
+                                     .alloc_trans_type = '0',
+                                     .alloc_report_type = 9,
+                                     .alloc_status = 0,
+                                     .alloc_no_orders_type = 0,
+                                     .side = '1',
+                                     .quantity = qty,
+                                     .avg_px = px,
+                                     .trade_date = "20240101",
+                                     .symbol = "MSFT",
+                                     .parties = std::span<const AllocationReportParty>{}};
     EXPECT_FALSE(
         fixpp::session::build_allocation_report(std::span<std::byte>{tiny}, as_params).has_value())
         << "AS: undersized out must fail-closed with wire_frame_too_large";

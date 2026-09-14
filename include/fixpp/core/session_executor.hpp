@@ -64,9 +64,9 @@ public:
 
     // ── project-specific accessors ──────────────────────────────────────
     [[nodiscard]] fixpp::session::Session* session_ptr() const noexcept { return session_; }
-    // true when constructed under per_session_strand ([2d §4.8]'s `is_strand_wrapped()` declaration).
-    // Used by debug-build asserts + the seam-16 re-entrancy guard; NOT on
-    // the runtime hot path.
+    // true when constructed under per_session_strand ([2d §4.8]'s `is_strand_wrapped()`
+    // declaration). Used by debug-build asserts + the seam-16 re-entrancy guard; NOT on the runtime
+    // hot path.
     [[nodiscard]] bool is_strand_wrapped() const noexcept { return strand_wrapped_; }
     // Engine-internal: the resolved inner executor (strand-wrapped or bare).
     [[nodiscard]] const asio::any_io_executor& underlying() const noexcept { return inner_; }
@@ -90,13 +90,13 @@ public:
     // constrained template SFINAE-rejects it. Explicit forwarding closes the
     // gap (seam 21 — survive erasure into any_io_executor for co_spawn).
     template <class U>
-    U query(asio::execution::context_as_t<U> /*prop*/) const noexcept {
+    [[nodiscard]] U query(asio::execution::context_as_t<U> /*prop*/) const noexcept {
         return asio::query(inner_, asio::execution::context_as<U>);
     }
 
     template <class Property>
         requires asio::can_query_v<asio::any_io_executor, Property>
-    auto query(Property p) const
+    [[nodiscard]] auto query(Property p) const
         noexcept(asio::is_nothrow_query_v<asio::any_io_executor, Property>) {
         return asio::query(inner_, p);
     }
@@ -136,9 +136,9 @@ static_assert(!std::is_trivially_copyable_v<session_executor>,
               "(holds asio::any_io_executor) — E6; do not imply otherwise");
 
 // THE SINGLE ENFORCEMENT POINT for error::executor_not_serialised (slot 48 /
-// FR-009 / I-06 / [2d §4.8]'s make_session_executor unification note). From a resolved (already-override-applied)
-// executor + threading_mode + the already_serialized_executor attestation +
-// the owning Session*: under per_session_strand the inner executor is
+// FR-009 / I-06 / [2d §4.8]'s make_session_executor unification note). From a resolved
+// (already-override-applied) executor + threading_mode + the already_serialized_executor
+// attestation + the owning Session*: under per_session_strand the inner executor is
 // asio::make_strand(resolved_exec); under direct_executor +
 // already_serialized_executor==true it is the bare attested resolved_exec;
 // mode==direct_executor && !already_serialized_executor →

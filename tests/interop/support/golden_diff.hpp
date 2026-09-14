@@ -27,14 +27,10 @@ struct DiffResult {
     DiffStatus status = DiffStatus::match;
     std::string detail;
 
-    explicit operator bool() const
-    {
-        return status == DiffStatus::match;
-    }
+    explicit operator bool() const { return status == DiffStatus::match; }
 };
 
-inline const std::set<int>& default_normalization_tags()
-{
+inline const std::set<int>& default_normalization_tags() {
     static const std::set<int> tags{9, 10, 34, 52, 60, 112, 122};
     return tags;
 }
@@ -49,8 +45,7 @@ inline const std::set<int>& default_normalization_tags()
 // verbatim.  DO NOT substitute default_normalization_tags() for G1: it drops
 // 112/34/122 which are exactly the tags G1 asserts (FR-001/FR-003/FR-004a).
 // Usage: diff_transcripts(expected, actual, admin_profile_excluded_tags())
-inline const std::set<int>& admin_profile_excluded_tags()
-{
+inline const std::set<int>& admin_profile_excluded_tags() {
     static const std::set<int> tags{52, 10};
     return tags;
 }
@@ -66,8 +61,7 @@ inline const std::set<int>& admin_profile_excluded_tags()
 // of these must FAIL the golden diff (gate-biting property).
 // Anchored to: specs/021-inbound-possdup-origsendingtime/quickstart.md §2.
 // Usage: diff_transcripts(expected, actual, poss_dup_profile_excluded_tags())
-inline const std::set<int>& poss_dup_profile_excluded_tags()
-{
+inline const std::set<int>& poss_dup_profile_excluded_tags() {
     // Compose from the admin profile ({52,10}) + OrigSendingTime(122) rather than
     // re-declaring a parallel literal — keeps the two in sync if the admin set
     // ever gains another time-variant tag (avoids silent golden-diff drift).
@@ -92,8 +86,7 @@ inline const std::set<int>& poss_dup_profile_excluded_tags()
 // separately by each exemplar's byte-exact decimal assertion (FR-004).
 // Anchored to: specs/061-typed-app-messages/data-model.md §4; FR-006/contracts C5.
 // Usage: diff_transcripts(golden, {GoldenFrame{'>', body}}, shape_oracle_profile())
-inline const std::set<int>& shape_oracle_profile()
-{
+inline const std::set<int>& shape_oracle_profile() {
     static const std::set<int> tags{8, 9, 10, 34, 52};
     return tags;
 }

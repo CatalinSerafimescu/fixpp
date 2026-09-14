@@ -31,9 +31,7 @@ TEST_F(ThornyRecoveryFixture, Qfj271_LargeGapFillSequenceResetResynchronizesWith
     ASSERT_EQ(next_inbound(s), 2U);
 
     (void)feed(s, fixpp::interop::parity::make_sequence_reset("FIX.4.2",
-                                                              /*seq=*/2,
-                                                              "TW",
-                                                              "ISLD",
+                                                              /*seq=*/2, "TW", "ISLD",
                                                               /*new_seqno=*/20000,
                                                               /*gap_fill=*/true));
 
