@@ -1766,9 +1766,9 @@ struct SendingTimeStamp {
 // keeps the stored 52, so this never emits an empty 52=.
 // fixpp#424 — a stored frame with no 52: emit 52 = the new stamp and 122 = that
 // same value (StandardHeader: "If data is not available set to same value as
-// SendingTime"), never an empty 122=. A stored 52 that is present but EMPTY is
-// data that is not available too: the loop restamps it in place and 122 takes the
-// new stamp, so the frame still carries exactly one 52. A failure is returned,
+// SendingTime"), never an empty 122=. An EMPTY stored 52 is not available either:
+// restamped in place like every stored 52, nothing inserted, and 122 (which
+// follows the first stored 52) takes the new stamp. A failure is returned,
 // never a partial frame; replay_outbound_range_ gap-fills an unbuildable slot (D4a).
 //
 // #419 supersedes 037's tail placement (43/122 appended after the full stored

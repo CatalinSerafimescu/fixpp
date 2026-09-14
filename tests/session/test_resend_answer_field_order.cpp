@@ -1255,13 +1255,13 @@ TEST_F(ResendAnswerReplayTest, Replay_ManyStoredSendingTimes_OutgrowTheBuffer_Sl
 }
 
 // Wherever the replay buffer runs out, a slot is either replayed whole or
-// covered by a GapFill -- never sent partial, never skipped. One ResendRequest
-// covers slots holding the same many-52 frame with the SenderCompID one byte
-// longer each time, so the point where the buffer runs out moves across every
-// field from the last restamped 52, through the 43/122 insertion, to the
-// trailer. An empty `body` moves the insertion to the no-body fallback. The
-// sweep must see both outcomes, or it did not cross the buffer's end.
-TEST_F(ResendAnswerReplayTest, Replay_BufferEndAtEveryField_SlotIsReplayedWholeOrGapFilled) {
+// covered by exactly one GapFill -- never sent partial, never skipped. One
+// ResendRequest covers slots holding the same many-52 frame with the
+// SenderCompID one byte longer each time, so the replay's size crosses the
+// buffer's end. An empty `body` moves the 43/122 insertion to the no-body
+// fallback. The sweep must see both outcomes, or it did not cross the end.
+// Which field a slot fails at is not asserted.
+TEST_F(ResendAnswerReplayTest, Replay_BufferEndSweep_SlotIsReplayedWholeOrGapFilled) {
     auto factory = std::make_shared<CapturingStoreFactory>();
     Session sess(engine, make_cfg(factory));
     drive_to_active(sess);
@@ -1317,16 +1317,29 @@ TEST_F(ResendAnswerReplayTest, Replay_BufferEndAtEveryField_SlotIsReplayedWholeO
 //
 // replay_outbound_range_'s transmit treats a transport_send that throws as a
 // failed write. Each case arms, after the session is Active, a sink that throws
-// on frames of one MsgType, and checks the resend answer's result.
+// on the one frame its transmit site sends -- matched on MsgType(35),
+// MsgSeqNum(34) and NewSeqNo(36), so a different frame of the same type cannot
+// stand in for it -- and checks that write was attempted and the answer's result.
 namespace {
 
-// A transport_send that records into `frames` and, while `armed`, throws on a
-// frame whose MsgType is `fail_msg_type` instead of recording it.
+// The frame a case fails: `new_seq_no` is empty for a replay (no 36).
+struct WriteToFail {
+    std::string_view msg_type;
+    std::string_view msg_seq_num;
+    std::string_view new_seq_no;
+};
+
+// A transport_send that records into `frames` and, while `armed`, throws on the
+// frame matching `target` instead of recording it, counting those attempts.
 std::function<void(std::span<const std::byte>)> failing_sink(
-    std::vector<std::vector<std::byte>>& frames, const bool& armed,
-    std::string_view fail_msg_type) {
-    return [&frames, &armed, fail_msg_type](std::span<const std::byte> frame) {
-        if (armed && extract_field(frame, 35) == fail_msg_type) {
+    std::vector<std::vector<std::byte>>& frames, const bool& armed, WriteToFail target,
+    int& attempts) {
+    return [&frames, &armed, target, &attempts](std::span<const std::byte> frame) {
+        const bool matches = extract_field(frame, 35) == target.msg_type &&
+                             extract_field(frame, 34) == target.msg_seq_num &&
+                             extract_field(frame, 36).value_or("") == target.new_seq_no;
+        if (armed && matches) {
+            ++attempts;
             throw std::runtime_error("transport write fails");
         }
         frames.emplace_back(frame.begin(), frame.end());
@@ -1340,18 +1353,22 @@ TEST_F(ResendAnswerReplayTest, ResendAnswer_WriteFails_Aborts_AtEachTransmitSite
         const char* name;
         seqnum_t begin;  // 1 = the stored Logon reply; 2 = the app message
         seqnum_t end;
-        const char* fail_msg_type;
+        WriteToFail fail;
     };
-    // [1,2] fails the GapFill flushed before the replay; [2,2] fails the replay;
-    // [1,1] fails the trailing GapFill; [5,5] lies past the last stored message,
-    // so the only frame is the nothing-to-replay GapFill.
+    // [1,2]: the GapFill flushed before the replay covers [1,2). Had slot 2 been
+    // folded instead, the only GapFill would cover [1,3) and would not match.
+    // [2,2]: the replay of 2. [1,1]: the trailing GapFill [1,2). [5,5] lies past
+    // the last stored message, so the only frame is the nothing-to-replay
+    // GapFill [5,6).
     for (const Case c :
-         {Case{"gapfill before a replay", 1, 2, "4"}, Case{"replay", 2, 2, "D"},
-          Case{"trailing gapfill", 1, 1, "4"}, Case{"nothing-to-replay gapfill", 5, 5, "4"}}) {
+         {Case{"gapfill before a replay", 1, 2, {"4", "1", "2"}},
+          Case{"replay", 2, 2, {"D", "2", ""}}, Case{"trailing gapfill", 1, 1, {"4", "1", "2"}},
+          Case{"nothing-to-replay gapfill", 5, 5, {"4", "5", "6"}}}) {
         SCOPED_TRACE(c.name);
         bool armed = false;
+        int attempts = 0;
         auto cfg = make_cfg();
-        cfg.transport_send = failing_sink(captured_frames, armed, c.fail_msg_type);
+        cfg.transport_send = failing_sink(captured_frames, armed, c.fail, attempts);
         Session sess(engine, cfg);
         drive_to_active(sess);
         ASSERT_EQ(send_and_capture_seq(sess, "ResendAnswer_WriteFails/send"), 2U);
@@ -1360,6 +1377,7 @@ TEST_F(ResendAnswerReplayTest, ResendAnswer_WriteFails_Aborts_AtEachTransmitSite
         const auto r =
             feed(sess, make_resend_request(c.begin, c.end, /*inbound_seq=*/2, "TW", "ISLD"));
         armed = false;
+        EXPECT_EQ(attempts, 1) << "the named transmit site must attempt its write once";
         // EXPECT, not ASSERT: an ASSERT would end the test at the first failing case
         // and leave the remaining transmit sites unchecked.
         if (r.has_value()) {
