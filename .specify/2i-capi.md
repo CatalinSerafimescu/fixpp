@@ -167,7 +167,7 @@ Source: `library/.specify/architecture.md` §5.6 Configuration shape. The C ABI'
 §X.5 — **Reentrancy contract** is documented per C ABI symbol (thread-safe / single-thread / requires-session-lock). No undocumented reentrancy.
 §X.6 — **ABI-affecting features trigger all four mandatory controls (Appendix A):** `/clarify`, `/analyze`, Codex Gate A, user `/plan` sign-off.
 
-Source: `library/.specify/constitution.md` Article X — ABI Policy, items 1–6.
+Source: `library/.specify/constitution.md` Article X — ABI Policy, items 1–6. Constitution v2.0 adds item 7 (`[const §X.7]`, pre-release breaking changes and the reset to 1.0.0 at the first public release), which is not reproduced here; see the supersession notes in §4.3 and §4.5.
 
 ### §3.6 From `[SYN §3.5 #17]` — message representation decided
 
