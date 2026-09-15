@@ -61,6 +61,19 @@ declared **BREAKING**; at that release the version resets to `1.0.0`; after it, 
 MAJOR. (`[const §X.1]` is the review requirement.)
 ⚠️ This is the **C-ABI surface** version, which moves independently of the C++ library version.
 
+## C-ABI 1.6: the first breaking change before the first release (#428)
+
+`fixpp_msg_set_string`, `fixpp_entry_set_string`, `fixpp_msg_commit` and
+`fixpp_msg_create_outbound` refuse call sequences that used to succeed. That makes it a
+BREAKING change, shipped as MINOR 1.6 under constitution Article X §7 (v2.0).
+
+What was rejected:
+- **A MINOR "conformance fix" ruling.** Every refused call produced malformed FIX, but the
+  owner ruled on 2026-09-15 that a call that used to succeed and now fails is breaking.
+- **Pair logic in `fixpp_msg_set_bytes`.** It stays type-agnostic; commit refuses what it can
+  mis-build.
+- **A pair setter that moves entries.** Open group builders hold indices into those vectors.
+
 ## ⚠️ What the ABI gate actually checks — and what it does not
 
 `abi-golden.yml` runs on every PR and is an **`nm` symbol-set check**: a new or removed exported

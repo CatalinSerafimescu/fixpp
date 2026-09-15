@@ -3204,3 +3204,79 @@ Evidence: issues #346, #348, #349; new issue #351.
 
 - **B-417-1 — With `FIXPP_WERROR=ON`, a compiler warning now FAILS the build of every first-party target.** Before #417 the option was set by every preset inheriting `_base` in `CMakePresets.json` but read by nothing, so no build was ever `-Werror`. `fixpp_apply_werror_to_all_targets()` (`cmake/Helpers.cmake`) now applies `-Werror` (Clang/GNU) or `/WX` (MSVC) to every compiled target the tree defines — library, tests, tools, bench, fuzz and the Python bindings. **Operator impact:** building fixpp from source with a compiler that introduces a new warning now fails where it used to succeed; the escape is `-DFIXPP_WERROR=OFF`. Which presets set the option is decided in `CMakePresets.json` — re-derive it there rather than from a list here. For almost every target the promoted set is the compiler's **default** warnings; `-Wall`/`-Wextra` are not enabled. A target opts out only individually, with the reason in the `FIXPP_WERROR_EXEMPT` target property.
 - **B-417-2 — `FIXPP_BUILD_BENCH` and `FIXPP_BUILD_FUZZ` now build with `FIXPP_BUILD_TESTS=OFF`.** `bench/session` and `tests/fuzz` link `fixpp_mock_clock`, which was built only when tests were enabled, so either option with tests off failed at link time (`cannot find -lfixpp_mock_clock`). The test-support library is now built whenever tests, bench or fuzz are enabled. Found while building the optional parts under `-Werror` for #417.
+
+## fixpp#426 / fixpp#427 / fixpp#428 — Length+Data pairs read by count everywhere; C-ABI Data setters (C-ABI 1.6, BREAKING) (2026-09-15)
+
+### Behaviors
+
+- **B-426-1 — every field scanner reads a Data value by its Length's count, over one standard table of 84 Length+Data pairs.**
+  - **Before #426:** the wire parser knew six pairs, and the session's own scanners split every value at SOH.
+  - **Now it is one rule everywhere:**
+    - a Data value is counted only when it is the field right after its Length;
+    - a counted value must be followed by SOH.
+  - **Who applies it:**
+    - `OffsetTable` (Index) and `field_iterator` (Iter);
+    - `dictionary_driven_validator`;
+    - the session's header scan, first-frame routing, Logon interpretation, Password(554) masking and redaction, resend replay, and `send()`.
+
+    A `<SOH>34=`, `<SOH>49=`, `<SOH>554=` or `<SOH>10=` inside a counted value is not a field.
+
+  *(fixpp#426; `include/fixpp/wire/length_data_pairs.hpp`, `include/fixpp/wire/length_data_carry.hpp` `read_value`; witnesses:*
+  - *`tests/wire/length_data_expansion_test.cpp`;*
+  - *`tests/wire/length_data_pairs_drift_test.cpp` `HeaderEqualsShippedDictionaryUnion`;*
+  - *`tests/session/length_data_session_scanner_test.cpp`: `ScanFrameHeaderIgnoresMsgSeqNumInsideEncodedText`, `ScanFirstFrameIdsIgnoresSenderCompIdInsideRawData`, `InterpretLogonIgnoresPasswordInsideRawData`, `FrameHasGenuineTag554IgnoresACountedValue`, `MaskTag554LeavesCountedValueBytesUnchanged`, `RedactTag554LeavesCountedValueUnchanged`;*
+  - *`tests/session/test_resend_answer_field_order.cpp` `CountedDataSendTest.*`.)*
+- **B-426-2 — what a scanner does with a malformed count differs by scanner.** A count is malformed when it runs past the frame, or when the byte after the value is not SOH.
+
+  | Scanner | Response |
+  |---|---|
+  | Header scan, first-frame ID scan, `interpret_logon` | Stop; every later field stays absent rather than possibly forged. |
+  | Resend replay | Gap-fills the slot with `session_event_resend_slot_gap_filled{code = wire_invalid_field_format}`. |
+  | Password(554) masker and redactor | Fall back to masking every `554=` at offset 0 or after a SOH, from that field on. A real Password is over-masked rather than missed. |
+  | `Session::send` | Refuses the payload with `app_payload_malformed`; no MsgSeqNum is consumed. |
+
+  *(fixpp#426, design `.specify/426-428-length-data-pairs.md` §4; witnesses `ScanFrameHeaderStopsAtAnOverrunningLength`, `ResendAnswerReplayTest.Replay_StoredCountOverrunsTheValue_SlotIsGapFilled`.)*
+- **B-426-3 — a dictionary's own Length+Data pair is honoured only when neither of its tags is in the standard table.** The standard pair governs both directions otherwise. The session's dictionary supplies its pairs to the wire parser, the validator, reified handles and the session scanners through one `wire::dict_hooks` value. *(fixpp#426 design §3; `dict_hooks::data_tag_for_length` / `length_tag_for_data`; witnesses `tests/wire/dict_hooks_custom_pair_test.cpp` `CustomPairSplitsThroughEveryDictAwarePath`, `StandardLengthTagIgnoresConflictingDictionaryPair`, `StandardDataTagIsNeverPairedByADictionary`, `LengthTagForDataIsTheInverseWithTheSamePrecedence`.)*
+- **B-427-1 — the Orchestra (FIX Latest) loader reads `lengthId`, so FIX Latest Data fields pair with their Length fields.**
+  - **Before #427:** a FIX Latest dictionary declared no pairs.
+  - **The load fails closed (`orchestra_parse_error`) when a `lengthId`:**
+    - names an undeclared field;
+    - names a field that is not a Length;
+    - sits on a field that is not Data or XMLData;
+    - is malformed;
+    - or when two Data fields share one Length.
+
+  *(fixpp#427; `src/dictionary/orchestra_loader.cpp` `resolve_length_pairs`; witnesses `tests/dictionary/orchestra_loader_test.cpp` `OrchestraLengthPairs.*`, `OrchestraFailClosed.LengthId*`, `OrchestraFailClosed.TwoDataFieldsSharingOneLengthThrow`.)*
+- **B-428-1 — BREAKING (C-ABI 1.6, constitution Article X §7): `fixpp_msg_set_string` and `fixpp_entry_set_string` refuse a value holding SOH on a tag that is not the Data half of a pair, with `FIXPP_ERR_WIRE_CONFORMANCE`; nothing is written.** Before #428 such a value was stored, and its SOH started a new field on the wire. Other control bytes are still accepted (L-428-1). *(fixpp#428; `src/capi/message_write.cpp` `soh_outside_data`; witnesses `tests/capi/length_data_setters_test.cpp` `CapiStringSetterSoh.*`.)*
+- **B-428-2 — BREAKING (C-ABI 1.6): `fixpp_msg_commit` refuses, with `FIXPP_ERR_WIRE_CONFORMANCE`, a payload in which, whichever setter wrote it:**
+  - a Data field is not immediately after its Length, or a Length is not immediately before its Data;
+  - a Length is not positive ASCII digits equal to the Data byte count (leading zeros are accepted);
+  - a Data value is empty;
+  - a field that is not Data holds SOH.
+
+  The rule applies inside group instances too. *(fixpp#428; `check_length_data`, `include/fixpp/wire/length_data_check.hpp` `length_data_checker`; witnesses `CapiCommitPairs.*`.)*
+- **B-428-3 — `fixpp_msg_set_data` / `fixpp_entry_set_data` (new in C-ABI 1.6) write a Length+Data pair in one call.** The Length is derived from `len` and the bytes are copied verbatim.
+  - **Neither half present:** the Length is appended, then the Data.
+  - **Length immediately before Data:** both are overwritten in place.
+  - **Any other state:** `FIXPP_ERR_TYPE_MISMATCH`, and nothing is written.
+
+  No existing entry moves, so an open group builder keeps its position. Refusals:
+  - `len == 0` → `FIXPP_ERR_WIRE_CONFORMANCE`;
+  - a tag that is not a Data half → `FIXPP_ERR_TYPE_MISMATCH`;
+  - a half absent from the MsgType's grammar → `FIXPP_ERR_DICT_CONFIG` (message level);
+  - a Data tag that is its group's delimiter in that group's own context (MsgType plus enclosing groups, as commit resolves it) → `FIXPP_ERR_TYPE_MISMATCH`.
+
+  A value holding SOH, `10=` and 0xFF arrives byte-exact at a second engine. *(fixpp#428; witnesses `CapiSetData.*`, `CapiEntrySetData.*`, `tests/capi/length_data_send_recv_test.cpp` `EncodedTextWithEmbeddedSohArrivesByteExact`.)*
+- **B-428-4 — BREAKING (C-ABI 1.6): `fixpp_msg_create_outbound` refuses an empty MsgType, or one holding SOH, with `FIXPP_ERR_WIRE_CONFORMANCE`.** A session with a dictionary already refused both with `FIXPP_ERR_DICT_CONFIG`, and still does. Before #428, a session without a dictionary accepted such a MsgType, and commit wrote it verbatim, so `D<SOH>11=X` went out as two fields. *(fixpp#428, Gate B r1 G-1; witness `CapiCreateOutbound.DictFreeSessionRefusesAnEmptyOrSohMsgType`.)*
+
+### Limitations
+
+- **L-426-1 — custom dictionary pairs are not honoured where no dictionary is reachable.** That is pre-session routing (`scan_first_frame_ids`) and redaction at the logger, tap and transcript sites (`redact_tag554`). Both use the standard table alone. *(fixpp#426 design §7.)*
+- **L-426-2 — a dictionary that repurposes a standard Length+Data tag is not honoured for pairing.** Examples are one that types RawData(96) as STRING, or one that pairs SignatureLength(93) with a custom Data tag. The standard pair governs both parsing and commit. *(design §3, r3 R3-1.)*
+- **L-426-3 — QuickFIX interop.**
+  - QuickFIX finds a Data field's Length as `tag - 1`, and QuickFIX C++ sends inverted pairs Data-first. For those FIX50SP2 and FIX Latest pairs fixpp splits the value at SOH, as the standard requires.
+  - Both QuickFIX engines split XmlData at SOH.
+
+  *(design §0, §7.)*
+- **L-428-1 — the C-ABI string setters and `fixpp_msg_commit` accept C0 control bytes other than SOH, and 0x80–0xFF.** That is looser than TagValue §4.1 and than the C++ builder; it is a compatibility choice. *(design §7; witness `CapiStringSetterSoh.OtherControlBytesAreStillAccepted`.)*
+- L-067-2 is unchanged: the C++ `body_builder` still cannot emit a non-ASCII Data value (fixpp#418).

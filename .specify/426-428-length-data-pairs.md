@@ -389,19 +389,20 @@ proposed an Article X ruling that would have classified them as a MINOR "conform
 every refused call produced malformed FIX. The project owner rejected that framing on 2026-09-15: a
 call that used to succeed and now fails is breaking, whatever it produced.
 
-fixpp has no public release and no consumers, so the change ships under proposed constitution
-Article X §7 (amendment branch `constitution/x7-prerelease-cabi`, constitution v1.1). Before the first
+fixpp has no public release and no consumers, so the change ships under constitution v2.0
+Article X §7, ratified 2026-09-15 on PR #451. Before the first
 public release a breaking change bumps MINOR and is declared **BREAKING** on each affected symbol, in
 the PR, and in the B&L delta, with every in-repository consumer updated in the same PR. The
 compatibility promise, and a reset of the C-ABI version to 1.0.0, start at the first public release.
-**This work merges after that amendment.**
+**This work merges after PR #451.**
 
 The dictionary-precedence scope is unchanged: a dictionary that retypes a standard FIX tag does not
 change how that tag pairs (r3 R3-1, §3).
 
 **Bookkeeping:**
 - `include/fix/c_api/message.h`: two new prototypes, plus reworded docs for `set_string`,
-  `set_bytes`, and `commit`.
+  `set_bytes`, and `commit`. Gate B r1 G-1 adds a refusal to `fixpp_msg_create_outbound`: an
+  empty MsgType, or one holding SOH, returns `FIXPP_ERR_WIRE_CONFORMANCE` (B-428-4).
 - `version.h`: MINOR 5→6.
 - `tools/capi_freeze.sha256`: this manifest edit is the visible review point.
 - `tests/abi/golden/fixpp_capi_symbols.txt`: +2.
