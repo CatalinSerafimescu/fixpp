@@ -3,7 +3,7 @@
 > **Status:** user-signed-off v0.2 (2026-05-10) — Phase 2 Gate A converged after 2 rounds (Phase A, no resets). Round-2 verdict `ship-as-is` (0 P1, 0 P2, 1 P3 wording-precision in convergence-log meta-text). See `decisions/api-contract.md`.
 > **Authority:** This document is the consolidated public-surface contract for `fixpp`. It is purely a **distillation** — every rule, name, header, target, macro, and numeric block stated here is sourced from `constitution.md`, `architecture.md`, or one of `2a`–`2m`. No new decisions are introduced; this document does not amend its sources, and on any conflict the source wins (constitution > architecture > 2a–2m design docs).
 > **Citation form:** other documents cite this contract as `[api §N.m]`. This document cites the constitution as `[const §X.y]`, the architecture as `[arch §N.m]`, and design docs as `[2X §N.m]`.
-> **Frozen rule:** every surface marked **Stable from v1.0** in §3 is frozen at v1.0 release. Subsequent breaking changes require a phase-gate event: a constitutional amendment under `[const §XX]` plus the matching SemVer MAJOR bump on either the library track or the C ABI track per §4.
+> **Frozen rule:** every surface marked **Stable from v1.0** in §3 is frozen at v1.0 release. Subsequent breaking changes require a phase-gate event: a constitutional amendment under `[const §XX]` plus the matching SemVer MAJOR bump on either the library track or the C ABI track per §4. Before fixpp's first public release a C-ABI breaking change follows `[const §X.7]` instead: a MINOR bump marked BREAKING, with no amendment.
 
 ---
 
@@ -43,7 +43,7 @@ This contract covers the **v1.0 public surface** of `fixpp` as locked by Phase 2
 
 Three tiers per `[arch §9.3]`:
 
-- **Stable from v1.0** — frozen by this contract; breaking change requires constitutional amendment + MAJOR SemVer bump.
+- **Stable from v1.0** — frozen by this contract; breaking change requires constitutional amendment + MAJOR SemVer bump (for the C ABI before fixpp's first public release, `[const §X.7]` applies instead).
 - **Provisional** — may change in patch releases without notice during early v1.x; **explicitly enumerated** in §3.2 below.
 - **Internal** — anything in `fixpp::detail` or under `<module>/detail/`; no stability guarantee. Headers carry `\internal` for Doxygen and are excluded from the install set per `[arch §9.1]`.
 
@@ -81,10 +81,10 @@ Two **independent** SemVer tracks per `[const §X.1]` / `[arch §9.2]`:
 | Track | Macros | Bumps when |
 |---|---|---|
 | **Library** (C++ surface) | `FIXPP_VERSION_MAJOR/MINOR/PATCH` | Any breaking change to a tier-1 C++ symbol or removal of a Stable-from-v1.0 surface. |
-| **C ABI** | `FIXPP_C_ABI_VERSION_MAJOR/MINOR/PATCH` | Any breaking change to a published C-ABI symbol; numeric meaning of any `fixpp_error_t` value changes. |
+| **C ABI** | `FIXPP_C_ABI_VERSION_MAJOR/MINOR/PATCH` | Any breaking change to a published C-ABI symbol; numeric meaning of any `fixpp_error_t` value changes. Before fixpp's first public release a breaking change bumps MINOR and is marked BREAKING instead (`[const §X.7]`). |
 
 - Both macro families are emitted by `tools/cmake/version.cmake` per `[arch §9.2]`.
-- ABI compatibility is verified in Tier 2 CI: `abidiff` on Linux, structural diff on Windows, against the previous tagged release per `[const §IX.5]` / `[arch §9.2]`.
+- ABI compatibility is verified in Tier 2 CI: `abidiff` on Linux, structural diff on Windows, against the previous tagged release; fixpp's first public release records the baseline and comparison starts with the release after it, per `[const §IX.5]` / `[const §X.7]` / `[arch §9.2]`.
 - The C ABI may stay at MAJOR=1 across multiple library MAJOR bumps if the C surface remains compatible — the two tracks exist precisely to allow that.
 - Runtime version accessor: `fixpp_version()` per `[2i]`.
 
@@ -276,11 +276,14 @@ Each row links the design doc to its public-surface footprint. **Source of truth
 
 ## 11. Frozen-until rule
 
-A surface listed under §3.1 is **frozen** at v1.0 release. Any change with one of the following effects is a breaking change requiring (a) a constitutional amendment under `[const §XX]` and (b) a SemVer MAJOR bump on the affected track per §4:
+A surface listed under §3.1 is **frozen** at v1.0 release. `[const §X.7]` also uses the C-ABI effects below to define a C-ABI breaking change before fixpp's first public release; in that period the consequence is §X.7's (a MINOR bump marked BREAKING, no amendment), not (a) and (b) below. Any change with one of the following effects is a breaking change requiring (a) a constitutional amendment under `[const §XX]` and (b) a SemVer MAJOR bump on the affected track per §4:
 
 - Renaming, removing, or changing the signature of a Stable-from-v1.0 C++ symbol.
 - Renaming, removing, or changing the meaning of a Stable-from-v1.0 C-ABI symbol.
 - Reassigning the numeric value of any published `fixpp_error_t` variant.
+- Changing the size, alignment or member layout of a Stable-from-v1.0 C-ABI struct, or the value of a published C-ABI constant or macro.
+- Changing the calling convention or visibility of a Stable-from-v1.0 C-ABI symbol, or its documented ownership, lifetime or reentrancy rule.
+- Making a call to a Stable-from-v1.0 C-ABI symbol fail where it used to succeed.
 - Reordering, removing, or repurposing a CMake exported target listed in §8.
 - Tightening the include set of `<fix/c_api.h>` (anything beyond `<stddef.h>`, `<stdint.h>`, `<stdbool.h>` would already be a violation of `[arch §9.1]`).
 - Adding a pure-virtual method to any interface in §9 (would invalidate user implementations).

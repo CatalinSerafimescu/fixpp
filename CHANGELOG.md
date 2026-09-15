@@ -29,6 +29,31 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## Constitution v2.0 — 2026-09-15
+
+**Backwards-incompatible.** Article XX §4 major bump. Both changes loosen a rule, and both attach
+obligations that a PR mergeable under v1.0 would now fail, which is the reading v1.0 established.
+This is the constitution's version: it is not C-ABI 2.0 and not a library release.
+
+Ratified 2026-09-15 (PR #451), after Codex Gate A converged at round 4 (0 P1 / 0 P2, one P3 fixed)
+and the user signed off.
+
+### Added
+
+- **Article X §7 — breaking C-ABI changes before the first public release.** Until the first GitHub
+  Release, a breaking C-ABI change bumps MINOR, is marked **BREAKING**, and updates every
+  in-repository consumer in the same PR. At that release one PR resets the C-ABI version to `1.0.0`
+  and rebases every error code to `introducing_minor` 0; after it, a break requires MAJOR.
+
+### Changed
+
+- **Article IX §5** — the ABI check, and its MAJOR rule, start at the first public release.
+- **Article XX §3** — from v2.0 on, every amendment is recorded in its Sync Impact Report with the
+  contents the clause lists. This replaces a pointer to a `_log.md` decision log that never existed.
+  Earlier reports stay as written.
+
+---
+
 ## Constitution v1.0 — 2026-08-21
 
 **Backwards-incompatible.** Article XX §4 major bump: an effective perf-budget tightening.
