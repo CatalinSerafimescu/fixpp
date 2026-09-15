@@ -31,8 +31,11 @@
 >   from "string setters reject SOH" to the condition stated in §5.1. That serves the same intent,
 >   and the ruling now holds.)
 > - **O-3** The loose dictionary callbacks are **bundled now** into one value type.
-> - **O-4** #418 (arbitrary bytes through C++ `body_builder`) stays out; the pair table is shaped so
->   #418 can consume it.
+> - **O-4** #418 (arbitrary bytes through C++ `body_builder`) stays out, but it depends on #427 (landed
+>   first) and must use the same pair table. Two things here exist so it can: the Data→Length lookup
+>   (§3) and the pair checker `wire::length_data_checker` (§5.3), both in the wire layer. D-4's
+>   C-ABI commit is the first caller of the checker; `body_builder` is meant to be the second, so the
+>   rule is written once.
 > - **Rejected:**
 >   - a MAJOR 2.0.0;
 >   - setter-level refusal of pair halves, which breaks callers building valid pairs by hand;
@@ -200,7 +203,11 @@ bundle. There are three factories:
    (on either side), it returns that Data tag.
 3. Otherwise it returns 0.
 
-The inverse, `data → length`, follows the same order. With `none()`, step 2 never applies.
+The inverse, `data → length`, follows the same order. With `none()`, step 2 never applies. It is
+spelled `detail::standard_length_tag_for_data` in `length_data_pairs.hpp` and
+`dict_hooks::length_tag_for_data`; the dictionary side is a second map filled beside the first. A
+compile-time check pins that the two directions agree on every standard pair (the table has no
+ambiguous inverse, §2).
 
 - **Why the standard comes first:** FIX fixes standard tag numbers and their datatypes. A dictionary
   that repurposes a standard pair tag contradicts the standard, and is not honoured for pairing
@@ -353,6 +360,14 @@ sizing, uses the §5.1 source, and covers the top-level entries and every `Group
    `"+3"`, `"-3"`, `"0"` and `"3 "` are refused;
 4. a Length-half entry not immediately followed by its Data entry.
 
+**Where the rule lives.** Rules 2–4 are one wire-layer type, `wire::length_data_checker`
+(`include/fixpp/wire/length_data_check.hpp`), not code inside `src/capi/`. It is fed one field at a
+time — `observe(tag, value)` then `finish()` at the end of a container — and answers with the first
+violation. The C-ABI commit pass feeds it each container's entries, resetting per container. #418's
+`body_builder` emit path can feed it each field it appends, so both writers refuse exactly the same
+pairs. Rule 1 (SOH outside a Data half) is a one-line test over the same `dict_hooks`, kept at the
+caller because only the C-ABI accepts SOH through a string setter.
+
 Each of these is malformed under TagValue §4.2.4/§4.2.5 or FIX 4.4 Vol 1 `data`. So no well-formed
 message is refused. Every existing caller that builds a correct pair by hand keeps working, and
 `set_bytes` and `remove_tag` are unchanged. A caller who wrote the Data before the Length has been
@@ -446,4 +461,6 @@ table swap losing a pair rather than proving the fix.
 - **A dictionary that repurposes a standard Length+Data tag is not honoured for pairing.** An example
   is one that types RawData(96) as STRING, or pairs SignatureLength(93) with a custom Data tag. The
   standard pair governs both parsing and commit (§3, r3 R3-1).
-- #418 is unchanged: C++ `body_builder` still cannot emit a non-ASCII Data value (L-067-2).
+- #418 is unchanged: C++ `body_builder` still cannot emit a non-ASCII Data value (L-067-2). The
+  generated builders keep reading pairs from the dictionary (`FieldRef::length_pair_data_tag`), not
+  from the header; for the shipped dictionaries the §2 drift test is what keeps the two in step.
