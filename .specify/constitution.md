@@ -40,13 +40,20 @@ Sync Impact Report — v1.0 → v2.0 (2026-09-15) — PENDING (ratified on Gate 
   Affected specs and docs (changed):
     - .specify/2i-capi.md — supersession notes at §4.3's stability rule and after §4.5's version-macro
       excerpt. The excerpt itself and Appendix D (a point-in-time Gate A record) stay as written.
-    - .specify/api-contract.md — §4's C-ABI track row cites §X.7; §11 gains the C-ABI effects §X.7
-      relies on (layout and constant values, calling convention and visibility, ownership, lifetime
-      and reentrancy rules, a call that used to succeed and now fails).
+    - .specify/api-contract.md — the Frozen rule, §2's Stable tier, §4's C-ABI track row and ABI-check
+      bullet, and §11's remedy each state §X.7's pre-release consequence; §11 gains the C-ABI effects
+      §X.7 relies on (layout and constant values, calling convention and visibility, ownership,
+      lifetime and reentrancy rules, a call that used to succeed and now fails).
+    - .specify/architecture.md §9.2 and .specify/2a-decimal.md — the Tier 2 ABI check starts at the
+      first public release.
     - include/fix/c_api/version.h comment (+ tools/capi_freeze.sha256), tools/check_capi_freeze.sh
       header, brain/components/c-api.md, CLAUDE.md, CHANGELOG.md.
   Reviewed, no change: merged spec bundles (specs/NNN-*), CLAUDE-history.md, and
-    spec/behaviors-and-limitations*.md rows, which are point-in-time records.
+    spec/behaviors-and-limitations*.md rows, which are point-in-time records. The error-code
+    stability rules in .specify/2m-pybind.md, .specify/2j-controlplane.md and spec/coverage-index.md
+    say "published in a tagged C-ABI release", which §X.7 now defines, so they need no edit. The
+    "previous tagged release" perf-regression bars in the 2b-2f design docs are about benchmarks,
+    not the C ABI.
   Templates reviewed: plan-template.md / spec-template.md / tasks-template.md — no change.
 
 Sync Impact Report — v0.11 → v1.0 (2026-08-21) — RATIFIED
@@ -459,7 +466,7 @@ Sync Impact Report — v0.6 → v0.7 (2026-07-14) — RATIFIED
 5. **Reentrancy contract** is documented per C ABI symbol (thread-safe / single-thread / requires-session-lock). No undocumented reentrancy.
 6. **ABI-affecting features trigger all four mandatory controls (Appendix A):** `/clarify`, `/analyze`, Codex Gate A, user `/plan` sign-off.
 7. **Before the first public release, a breaking C-ABI change is allowed but must be declared.**
-   - **First public release.** The first GitHub Release of this repository; `gh release list` shows whether it has happened. A copy of fixpp distributed any other way before then is unsupported and does not start the compatibility promise. Until that release the C ABI has no supported external consumer and its version is not a compatibility promise: the 0→1 freeze (`FIXPP_C_ABI_VERSION_MAJOR == 1`) fixes the surface's shape and its review discipline only. "A tagged C ABI release" in §4 and in Article IX §5 means the first public release or a later one. §4's append-only audit trail applies throughout: a published numeric error code is never reassigned, before that release or after it.
+   - **First public release.** The first published GitHub Release of this repository. A draft does not count; a published pre-release does. `gh release list --exclude-drafts` shows whether it has happened. A copy of fixpp distributed any other way before then is unsupported and does not start the compatibility promise. Until that release the C ABI has no supported external consumer and its version is not a compatibility promise: the 0→1 freeze (`FIXPP_C_ABI_VERSION_MAJOR == 1`) fixes the surface's shape and its review discipline only. "A tagged C ABI release" in §4 and in Article IX §5 means the first public release or a later one. §4's append-only audit trail applies throughout: a published numeric error code is never reassigned, before that release or after it.
    - **Breaking change.** A C-ABI change after which a consumer written against the previous headers and documentation no longer compiles or links, is no longer ABI-compatible, or sees a call it could already make fail or return a result other than the one documented. Every C-ABI effect listed in `.specify/api-contract.md` §11 is a breaking change. So is a call that used to succeed and now fails, whatever the documentation said about it. Adding a symbol, a constant, or an error code in an unused slot is additive, and so is changing output the documentation leaves unspecified.
 
    Before the first public release, a breaking change:

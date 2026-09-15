@@ -288,7 +288,7 @@ static_assert(offsetof(fixpp_decimal_t, _reserved) == 9);
 static_assert(std::is_standard_layout_v<fixpp_decimal_t>);
 ```
 
-Plus a Tier 2 abidiff golden against the previous tagged ABI release `[const §IX.5]`.
+Plus a Tier 2 abidiff golden against the previous tagged ABI release, from fixpp's first public release on `[const §IX.5]` / `[const §X.7]`.
 
 ## 6. Behavioral contract
 

@@ -635,7 +635,7 @@ This is enforced by — **each mechanism named for what it actually does, correc
 - **Library SemVer** (the C++ surface): `<MAJOR>.<MINOR>.<PATCH>`; pre-1.0 means anything can change.
 - **C ABI SemVer** (independent track from `[const §X.1]`): the C ABI may stay at MAJOR=1 across multiple library MAJOR bumps, provided the surface stays compatible; that's the point of having a separate track.
 - **Macros:** `FIXPP_VERSION_MAJOR/MINOR/PATCH` for the library, `FIXPP_C_ABI_VERSION_MAJOR/MINOR/PATCH` for the C ABI. Both are emitted into the build by `tools/cmake/version.cmake`.
-- **`abidiff` (Linux) and structural diff (Windows)** run in Tier 2 against the previous tagged C ABI release `[const §IX.5]`.
+- **`abidiff` (Linux) and structural diff (Windows)** run in Tier 2 against the previous tagged C ABI release, from fixpp's first public release on `[const §IX.5]` / `[const §X.7]`.
 
 ### 9.3 Stability tiers
 

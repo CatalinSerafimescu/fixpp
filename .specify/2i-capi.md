@@ -621,8 +621,8 @@ const char* fixpp_strerror(fixpp_error_t code);
 
 > **Superseded in part — constitution v2.0, `[const §X.7]`.** Before fixpp's first public release a
 > breaking C-ABI change bumps MINOR and is marked BREAKING, and at that release the version resets to
-> 1.0.0 with the introducing-minor rebase. The MAJOR rule in this paragraph applies from that release
-> on. A published numeric value is still never reassigned.
+> 1.0.0 with the introducing-minor rebase. The MAJOR rule in this paragraph, and the Tier 2 abidiff
+> bullet above, apply from that release on. A published numeric value is still never reassigned.
 
 ### §4.4 `fixpp_strerror()` and forward-compat
 
