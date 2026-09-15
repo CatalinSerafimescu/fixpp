@@ -21,13 +21,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_ConfirmationAck
         auto r = bb.field(75, *args.trade_date);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (args.encoded_text_len) {
-        auto r = bb.field(354, *args.encoded_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (args.encoded_text) {
-        auto r = bb.field(355, *args.encoded_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = bb.field(354, static_cast<::std::int64_t>(args.encoded_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = bb.field(355, *args.encoded_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (args.match_status) {
         auto r = bb.field(573, *args.match_status);
@@ -123,13 +121,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_ConfirmationAck
         auto r = eh1.set_string(2780, *item1.match_exception_text);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item1.encoded_match_exception_text_len) {
-        auto r = eh1.set_int(2797, *item1.encoded_match_exception_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item1.encoded_match_exception_text) {
-        auto r = eh1.set_string(2798, *item1.encoded_match_exception_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh1.set_int(2797, static_cast<::std::int64_t>(item1.encoded_match_exception_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh1.set_string(2798, *item1.encoded_match_exception_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
         }
         auto ge1 = bb.group_end(*gh1);

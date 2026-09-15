@@ -19,7 +19,6 @@ struct ConfirmationAckArgs {
     ::std::optional<::std::string_view> text{};
     ::std::optional<::std::string_view> transact_time{};
     ::std::optional<::std::string_view> trade_date{};
-    ::std::optional<::std::int64_t> encoded_text_len{};
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<char> match_status{};
     ::std::optional<::std::string_view> confirm_id{};

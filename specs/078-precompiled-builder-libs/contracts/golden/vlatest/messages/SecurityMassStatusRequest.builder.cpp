@@ -135,13 +135,11 @@ namespace fixpp::vlatest {
         auto r = bb.field(1616, *args.instrument_scope_security_exchange);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (args.instrument_scope_encoded_security_desc_len) {
-        auto r = bb.field(1620, *args.instrument_scope_encoded_security_desc_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (args.instrument_scope_encoded_security_desc) {
-        auto r = bb.field(1621, *args.instrument_scope_encoded_security_desc);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = bb.field(1620, static_cast<::std::int64_t>(args.instrument_scope_encoded_security_desc->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = bb.field(1621, *args.instrument_scope_encoded_security_desc);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (args.instrument_scope_upi_code) {
         auto r = bb.field(2895, *args.instrument_scope_upi_code);

@@ -18,7 +18,6 @@ struct SettlementInstructionsArgs {
     ::std::optional<::std::string_view> text{};
     ::std::optional<::std::string_view> transact_time{};
     ::std::optional<char> settl_inst_mode{};
-    ::std::optional<::std::int64_t> encoded_text_len{};
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::std::string_view> settl_inst_msg_id{};
     ::std::optional<::std::span<const groups::G_778Args>> settl_inst{};

@@ -17,13 +17,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_PartyActionRepo
         auto r = bb.field(60, *args.transact_time);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (args.encoded_text_len) {
-        auto r = bb.field(354, *args.encoded_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (args.encoded_text) {
-        auto r = bb.field(355, *args.encoded_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = bb.field(354, static_cast<::std::int64_t>(args.encoded_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = bb.field(355, *args.encoded_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     {
         auto gh0 = bb.group_begin(453, 448);
@@ -285,13 +283,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_PartyActionRepo
         auto r = bb.field(1616, *args.instrument_scope_security_exchange);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (args.instrument_scope_encoded_security_desc_len) {
-        auto r = bb.field(1620, *args.instrument_scope_encoded_security_desc_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (args.instrument_scope_encoded_security_desc) {
-        auto r = bb.field(1621, *args.instrument_scope_encoded_security_desc);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = bb.field(1620, static_cast<::std::int64_t>(args.instrument_scope_encoded_security_desc->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = bb.field(1621, *args.instrument_scope_encoded_security_desc);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (args.requesting_party_i_ds) {
         auto gh8 = bb.group_begin(1657, 1658);
@@ -339,13 +335,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_PartyActionRepo
         auto ge8 = bb.group_end(*gh8);
         if (!ge8) return ::std::unexpected(ge8.error());
     }
-    if (args.encoded_reject_text_len) {
-        auto r = bb.field(1664, *args.encoded_reject_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (args.encoded_reject_text) {
-        auto r = bb.field(1665, *args.encoded_reject_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = bb.field(1664, static_cast<::std::int64_t>(args.encoded_reject_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = bb.field(1665, *args.encoded_reject_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (args.party_action_request_id) {
         auto r = bb.field(2328, *args.party_action_request_id);

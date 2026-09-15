@@ -28,7 +28,6 @@ struct MassQuoteArgs {
     ::std::optional<::std::int64_t> account_type{};
     ::std::optional<::std::int64_t> acct_id_source{};
     ::std::optional<::std::int64_t> throttle_inst{};
-    ::std::optional<::std::int64_t> encoded_compliance_text_len{};
     ::std::optional<::std::string_view> encoded_compliance_text{};
     ::std::optional<::std::string_view> self_match_prevention_id{};
     ::std::optional<::std::int64_t> quote_model_type{};

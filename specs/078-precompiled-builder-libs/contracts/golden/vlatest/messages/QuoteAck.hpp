@@ -20,13 +20,11 @@ struct QuoteAckArgs {
     ::std::optional<::std::string_view> quote_req_id{};
     ::std::optional<::std::int64_t> quote_cancel_type{};
     ::std::optional<::std::int64_t> quote_reject_reason{};
-    ::std::optional<::std::int64_t> encoded_text_len{};
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::std::span<const groups::G_453Args>> party_i_ds{};
     ::std::optional<::std::int64_t> quote_type{};
     ::std::optional<::std::string_view> quote_msg_id{};
     ::std::optional<::std::string_view> reject_text{};
-    ::std::optional<::std::int64_t> encoded_reject_text_len{};
     ::std::optional<::std::string_view> encoded_reject_text{};
     ::std::optional<::std::string_view> secondary_quote_id{};
     ::std::optional<::std::int64_t> quote_ack_status{};

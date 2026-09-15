@@ -15,7 +15,6 @@ namespace fixpp::vlatest {
 
 struct ApplicationMessageReportArgs {
     ::std::optional<::std::string_view> text{};
-    ::std::optional<::std::int64_t> encoded_text_len{};
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::std::string_view> appl_req_id{};
     ::std::optional<::std::span<const groups::G_1351_3Args>> appl_i_ds{};

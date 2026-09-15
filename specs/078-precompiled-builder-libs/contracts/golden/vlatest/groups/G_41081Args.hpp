@@ -12,7 +12,6 @@ namespace fixpp::vlatest::groups {
 
 struct G_41081Args {
     ::std::optional<::std::string_view> delivery_stream_cycle_desc{};
-    ::std::optional<::std::int64_t> encoded_delivery_stream_cycle_desc_len{};
     ::std::optional<::std::string_view> encoded_delivery_stream_cycle_desc{};
 };
 

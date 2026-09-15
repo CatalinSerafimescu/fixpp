@@ -69,7 +69,6 @@ struct G_40049Args {
     ::std::optional<::std::string_view> stream_commodity_security_id_source{};
     ::std::optional<::std::span<const G_41277Args>> stream_commodity_alt_i_ds{};
     ::std::optional<::std::string_view> stream_commodity_desc{};
-    ::std::optional<::std::int64_t> encoded_stream_commodity_desc_len{};
     ::std::optional<::std::string_view> encoded_stream_commodity_desc{};
     ::std::optional<::std::string_view> stream_commodity_delivery_pricing_region{};
     ::std::optional<::std::span<const G_41237Args>> stream_asset_attributes{};
@@ -278,7 +277,6 @@ struct G_40049Args {
     ::std::optional<::std::string_view> payment_stream_formula_currency_determination_method{};
     ::std::optional<::std::int64_t> payment_stream_formula_reference_amount{};
     ::std::optional<::std::span<const G_42683Args>> payment_stream_formulas{};
-    ::std::optional<::std::int64_t> payment_stream_formula_image_length{};
     ::std::optional<::std::string_view> payment_stream_formula_image{};
     ::std::optional<bool> dividend_reinvestment_indicator{};
     ::std::optional<::std::int64_t> dividend_entitlement_event{};
@@ -439,7 +437,6 @@ struct G_40049Args {
     ::std::optional<::std::string_view> delivery_stream_route_or_charter{};
     ::std::optional<::std::span<const G_41037Args>> delivery_schedules{};
     ::std::optional<::std::string_view> stream_text{};
-    ::std::optional<::std::int64_t> encoded_stream_text_len{};
     ::std::optional<::std::string_view> encoded_stream_text{};
 };
 

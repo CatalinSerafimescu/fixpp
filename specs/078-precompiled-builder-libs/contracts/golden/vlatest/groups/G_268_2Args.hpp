@@ -109,7 +109,6 @@ struct G_268_2Args {
     ::std::optional<bool> previously_reported{};
     ::std::optional<::std::span<const G_1855Args>> related_trades{};
     ::std::optional<::std::string_view> text{};
-    ::std::optional<::std::int64_t> encoded_text_len{};
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::std::int64_t> md_price_level{};
     ::std::optional<char> order_capacity{};

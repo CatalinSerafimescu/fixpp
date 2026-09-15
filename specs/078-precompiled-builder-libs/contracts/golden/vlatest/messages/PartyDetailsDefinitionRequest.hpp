@@ -16,7 +16,6 @@ namespace fixpp::vlatest {
 
 struct PartyDetailsDefinitionRequestArgs {
     ::std::optional<::std::string_view> text{};
-    ::std::optional<::std::int64_t> encoded_text_len{};
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::std::string_view> party_details_list_request_id{};
     ::std::optional<::std::span<const groups::G_1657Args>> requesting_party_i_ds{};

@@ -17,13 +17,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_PartyDetailsLis
         auto r = bb.field(60, *args.transact_time);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (args.encoded_text_len) {
-        auto r = bb.field(354, *args.encoded_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (args.encoded_text) {
-        auto r = bb.field(355, *args.encoded_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = bb.field(354, static_cast<::std::int64_t>(args.encoded_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = bb.field(355, *args.encoded_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (args.last_fragment) {
         auto r = bb.field(893, (*args.last_fragment) ? 'Y' : 'N');
@@ -65,13 +63,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_PartyDetailsLis
         auto r = bb.field(1512, *args.tot_no_parties);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (args.encoded_reject_text_len) {
-        auto r = bb.field(1664, *args.encoded_reject_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (args.encoded_reject_text) {
-        auto r = bb.field(1665, *args.encoded_reject_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = bb.field(1664, static_cast<::std::int64_t>(args.encoded_reject_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = bb.field(1665, *args.encoded_reject_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (args.party_details) {
         auto gh0 = bb.group_begin(1671, 1691);

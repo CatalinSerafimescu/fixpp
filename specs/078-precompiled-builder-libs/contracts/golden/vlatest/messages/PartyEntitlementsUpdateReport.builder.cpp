@@ -16,13 +16,11 @@ namespace fixpp::vlatest {
         auto r = bb.field(60, *args.transact_time);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (args.encoded_text_len) {
-        auto r = bb.field(354, *args.encoded_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (args.encoded_text) {
-        auto r = bb.field(355, *args.encoded_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = bb.field(354, static_cast<::std::int64_t>(args.encoded_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = bb.field(355, *args.encoded_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (args.last_fragment) {
         auto r = bb.field(893, (*args.last_fragment) ? 'Y' : 'N');
@@ -472,13 +470,11 @@ namespace fixpp::vlatest {
         auto r = eh14.set_string(1556, *item14.instrument_scope_security_desc);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item14.instrument_scope_encoded_security_desc_len) {
-        auto r = eh14.set_int(1620, *item14.instrument_scope_encoded_security_desc_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item14.instrument_scope_encoded_security_desc) {
-        auto r = eh14.set_string(1621, *item14.instrument_scope_encoded_security_desc);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh14.set_int(1620, static_cast<::std::int64_t>(item14.instrument_scope_encoded_security_desc->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh14.set_string(1621, *item14.instrument_scope_encoded_security_desc);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item14.instrument_scope_settl_type) {
         auto r = eh14.set_string(1557, *item14.instrument_scope_settl_type);

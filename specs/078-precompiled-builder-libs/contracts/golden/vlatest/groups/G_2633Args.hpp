@@ -14,7 +14,6 @@ struct G_2633Args {
     ::std::optional<::std::string_view> misc_fee_sub_type{};
     ::std::optional<::fixpp::decimal_t> misc_fee_sub_type_amt{};
     ::std::optional<::std::string_view> misc_fee_sub_type_desc{};
-    ::std::optional<::std::int64_t> encoded_misc_fee_sub_type_desc_len{};
     ::std::optional<::std::string_view> encoded_misc_fee_sub_type_desc{};
 };
 

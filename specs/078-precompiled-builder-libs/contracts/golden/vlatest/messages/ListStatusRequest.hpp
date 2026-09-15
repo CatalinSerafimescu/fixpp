@@ -15,7 +15,6 @@ namespace fixpp::vlatest {
 struct ListStatusRequestArgs {
     ::std::optional<::std::string_view> text{};
     ::std::optional<::std::string_view> list_id{};
-    ::std::optional<::std::int64_t> encoded_text_len{};
     ::std::optional<::std::string_view> encoded_text{};
 };
 

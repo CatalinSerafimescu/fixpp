@@ -19,7 +19,6 @@ struct BidRequestArgs {
     ::std::optional<::std::string_view> text{};
     ::std::optional<::std::string_view> trade_date{};
     ::std::optional<bool> forex_req{};
-    ::std::optional<::std::int64_t> encoded_text_len{};
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<char> bid_request_trans_type{};
     ::std::optional<::std::string_view> bid_id{};

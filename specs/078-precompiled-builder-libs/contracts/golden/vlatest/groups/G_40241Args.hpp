@@ -69,7 +69,6 @@ struct G_40241Args {
     ::std::optional<::std::string_view> leg_stream_commodity_security_id_source{};
     ::std::optional<::std::span<const G_41674Args>> leg_stream_commodity_alt_i_ds{};
     ::std::optional<::std::string_view> leg_stream_commodity_desc{};
-    ::std::optional<::std::int64_t> encoded_leg_stream_commodity_desc_len{};
     ::std::optional<::std::string_view> encoded_leg_stream_commodity_desc{};
     ::std::optional<::std::string_view> leg_stream_commodity_delivery_pricing_region{};
     ::std::optional<::std::span<const G_41452Args>> leg_stream_asset_attributes{};
@@ -278,7 +277,6 @@ struct G_40241Args {
     ::std::optional<::std::string_view> leg_payment_stream_formula_currency_determination_method{};
     ::std::optional<::std::int64_t> leg_payment_stream_formula_reference_amount{};
     ::std::optional<::std::span<const G_42485Args>> leg_payment_stream_formulas{};
-    ::std::optional<::std::int64_t> leg_payment_stream_formula_image_length{};
     ::std::optional<::std::string_view> leg_payment_stream_formula_image{};
     ::std::optional<bool> leg_dividend_reinvestment_indicator{};
     ::std::optional<::std::int64_t> leg_dividend_entitlement_event{};
@@ -439,7 +437,6 @@ struct G_40241Args {
     ::std::optional<::std::string_view> leg_delivery_stream_route_or_charter{};
     ::std::optional<::std::span<const G_41408Args>> leg_delivery_schedules{};
     ::std::optional<::std::string_view> leg_stream_text{};
-    ::std::optional<::std::int64_t> encoded_leg_stream_text_len{};
     ::std::optional<::std::string_view> encoded_leg_stream_text{};
 };
 

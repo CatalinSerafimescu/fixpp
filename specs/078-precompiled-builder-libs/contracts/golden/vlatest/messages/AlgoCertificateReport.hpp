@@ -20,7 +20,6 @@ struct AlgoCertificateReportArgs {
     ::std::optional<::std::string_view> text{};
     ::std::optional<::std::string_view> transact_time{};
     ::std::optional<::std::string_view> effective_time{};
-    ::std::optional<::std::int64_t> encoded_text_len{};
     ::std::optional<::std::string_view> encoded_text{};
     ::std::span<const groups::G_453Args> party_i_ds{};
     ::std::optional<::std::string_view> last_update_time{};

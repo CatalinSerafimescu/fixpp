@@ -62,7 +62,6 @@ struct G_552_3Args {
     ::std::optional<::std::string_view> settl_currency_code_source{};
     ::std::optional<::std::int64_t> booking_type{};
     ::std::optional<::std::string_view> text{};
-    ::std::optional<::std::int64_t> encoded_text_len{};
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::std::int64_t> clearing_account_type{};
     ::std::optional<char> position_effect{};

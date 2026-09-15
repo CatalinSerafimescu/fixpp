@@ -19,7 +19,6 @@ struct QuoteRequestArgs {
     ::std::optional<::std::string_view> text{};
     ::std::optional<::std::string_view> quote_req_id{};
     ::std::span<const groups::G_146_10Args> related_sym{};
-    ::std::optional<::std::int64_t> encoded_text_len{};
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::std::string_view> compliance_id{};
     ::std::optional<char> order_capacity{};
@@ -30,7 +29,6 @@ struct QuoteRequestArgs {
     ::std::optional<::std::span<const groups::G_1116Args>> root_party_i_ds{};
     ::std::optional<bool> private_quote{};
     ::std::optional<::std::int64_t> respondent_type{};
-    ::std::optional<::std::int64_t> encoded_compliance_text_len{};
     ::std::optional<::std::string_view> encoded_compliance_text{};
     ::std::optional<::std::string_view> compliance_text{};
 };

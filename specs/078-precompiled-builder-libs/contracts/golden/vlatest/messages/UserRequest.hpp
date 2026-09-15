@@ -13,7 +13,6 @@
 namespace fixpp::vlatest {
 
 struct UserRequestArgs {
-    ::std::optional<::std::int64_t> raw_data_length{};
     ::std::optional<::std::string_view> raw_data{};
     ::std::optional<::std::string_view> username{};
     ::std::optional<::std::string_view> password{};
@@ -21,9 +20,7 @@ struct UserRequestArgs {
     ::std::optional<::std::int64_t> user_request_type{};
     ::std::optional<::std::string_view> new_password{};
     ::std::optional<::std::int64_t> encrypted_password_method{};
-    ::std::optional<::std::int64_t> encrypted_password_len{};
     ::std::optional<::std::string_view> encrypted_password{};
-    ::std::optional<::std::int64_t> encrypted_new_password_len{};
     ::std::optional<::std::string_view> encrypted_new_password{};
 };
 

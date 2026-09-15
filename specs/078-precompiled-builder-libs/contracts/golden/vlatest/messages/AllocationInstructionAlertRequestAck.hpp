@@ -14,7 +14,6 @@ namespace fixpp::vlatest {
 
 struct AllocationInstructionAlertRequestAckArgs {
     ::std::optional<::std::string_view> reject_text{};
-    ::std::optional<::std::int64_t> encoded_reject_text_len{};
     ::std::optional<::std::string_view> encoded_reject_text{};
     ::std::optional<::std::string_view> alloc_request_id{};
     ::std::optional<::std::int64_t> alloc_request_status{};

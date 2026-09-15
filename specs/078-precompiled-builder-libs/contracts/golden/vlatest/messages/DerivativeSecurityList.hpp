@@ -71,9 +71,7 @@ struct DerivativeSecurityListArgs {
     ::std::optional<::std::string_view> underlying_currency{};
     ::std::optional<::std::string_view> security_req_id{};
     ::std::optional<::std::string_view> security_response_id{};
-    ::std::optional<::std::int64_t> encoded_underlying_issuer_len{};
     ::std::optional<::std::string_view> encoded_underlying_issuer{};
-    ::std::optional<::std::int64_t> encoded_underlying_security_desc_len{};
     ::std::optional<::std::string_view> encoded_underlying_security_desc{};
     ::std::optional<::std::int64_t> tot_no_related_sym{};
     ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
@@ -157,12 +155,9 @@ struct DerivativeSecurityListArgs {
     ::std::optional<::std::int64_t> derivative_nt_position_limit{};
     ::std::optional<::std::string_view> derivative_issuer{};
     ::std::optional<::std::string_view> derivative_issue_date{};
-    ::std::optional<::std::int64_t> derivative_encoded_issuer_len{};
     ::std::optional<::std::string_view> derivative_encoded_issuer{};
     ::std::optional<::std::string_view> derivative_security_desc{};
-    ::std::optional<::std::int64_t> derivative_encoded_security_desc_len{};
     ::std::optional<::std::string_view> derivative_encoded_security_desc{};
-    ::std::optional<::std::int64_t> derivative_security_xml_len{};
     ::std::optional<::std::string_view> derivative_security_xml{};
     ::std::optional<::std::string_view> derivative_security_xml_schema{};
     ::std::optional<::std::string_view> derivative_contract_settl_month{};
@@ -205,7 +200,6 @@ struct DerivativeSecurityListArgs {
     ::std::optional<::std::string_view> derivative_unit_of_measure_currency{};
     ::std::optional<::std::string_view> derivative_price_unit_of_measure_currency{};
     ::std::optional<::std::string_view> underlying_contract_price_ref_month{};
-    ::std::optional<::std::int64_t> underlying_security_xml_len{};
     ::std::optional<::std::string_view> underlying_security_xml{};
     ::std::optional<::std::string_view> underlying_security_xml_schema{};
     ::std::optional<::std::span<const groups::G_1981Args>> underlying_events{};
@@ -269,7 +263,6 @@ struct DerivativeSecurityListArgs {
     ::std::optional<::std::string_view> underlying_settl_rate_index{};
     ::std::optional<::std::string_view> underlying_settl_rate_index_location{};
     ::std::optional<::std::string_view> underlying_option_expiration_desc{};
-    ::std::optional<::std::int64_t> encoded_underlying_option_expiration_desc_len{};
     ::std::optional<::std::string_view> encoded_underlying_option_expiration_desc{};
     ::std::optional<::std::string_view> underlying_swap_sub_class{};
     ::std::optional<::std::string_view> underlying_strike_unit_of_measure{};
@@ -307,7 +300,6 @@ struct DerivativeSecurityListArgs {
     ::std::optional<bool> underlying_contrary_instruction_eligibility_indicator{};
     ::std::optional<bool> derivative_contrary_instruction_eligibility_indicator{};
     ::std::optional<::std::string_view> underlying_financial_instrument_full_name{};
-    ::std::optional<::std::int64_t> encoded_underlying_financial_instrument_full_name_len{};
     ::std::optional<::std::string_view> encoded_underlying_financial_instrument_full_name{};
     ::std::optional<::std::string_view> underlying_index_curve_unit{};
     ::std::optional<::std::int64_t> underlying_index_curve_period{};
@@ -340,7 +332,6 @@ struct DerivativeSecurityListArgs {
     ::std::optional<::std::string_view> underlying_protection_term_xid_ref{};
     ::std::optional<::std::string_view> underlying_settl_term_xid_ref{};
     ::std::optional<::std::string_view> underlying_exercise_desc{};
-    ::std::optional<::std::int64_t> encoded_underlying_exercise_desc_len{};
     ::std::optional<::std::string_view> encoded_underlying_exercise_desc{};
     ::std::optional<bool> underlying_automatic_exercise_indicator{};
     ::std::optional<::fixpp::decimal_t> underlying_automatic_exercise_threshold_rate{};

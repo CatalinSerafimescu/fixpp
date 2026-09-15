@@ -23,7 +23,6 @@ struct ListStatusArgs {
     ::std::optional<::std::int64_t> list_status_type{};
     ::std::optional<::std::int64_t> list_order_status{};
     ::std::optional<::std::string_view> list_status_text{};
-    ::std::optional<::std::int64_t> encoded_list_status_text_len{};
     ::std::optional<::std::string_view> encoded_list_status_text{};
     ::std::optional<bool> last_fragment{};
     ::std::optional<::std::int64_t> contingency_type{};

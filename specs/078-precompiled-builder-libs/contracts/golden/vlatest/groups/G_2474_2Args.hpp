@@ -18,7 +18,6 @@ struct G_2474_2Args {
     ::std::optional<::std::int64_t> md_statistic_scope_type{};
     ::std::optional<::std::string_view> md_statistic_name{};
     ::std::optional<::std::string_view> md_statistic_desc{};
-    ::std::optional<::std::int64_t> encoded_md_statistic_desc_len{};
     ::std::optional<::std::string_view> encoded_md_statistic_desc{};
     ::std::optional<::std::int64_t> market_depth{};
     ::std::optional<::std::int64_t> md_statistic_frequency_period{};

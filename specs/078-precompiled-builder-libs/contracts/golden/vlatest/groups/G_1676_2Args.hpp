@@ -16,7 +16,6 @@ struct G_1676_2Args {
     ::std::optional<::std::int64_t> party_detail_definition_status{};
     ::std::optional<::std::int64_t> party_detail_definition_result{};
     ::std::optional<::std::string_view> reject_text{};
-    ::std::optional<::std::int64_t> encoded_reject_text_len{};
     ::std::optional<::std::string_view> encoded_reject_text{};
     ::std::optional<::std::span<const G_1671Args>> party_details{};
 };

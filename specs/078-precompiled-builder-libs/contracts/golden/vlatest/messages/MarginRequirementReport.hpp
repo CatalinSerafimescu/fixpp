@@ -65,11 +65,8 @@ struct MarginRequirementReportArgs {
     ::std::optional<::std::string_view> redemption_date{};
     ::std::optional<::std::string_view> credit_rating{};
     ::std::optional<bool> unsolicited_indicator{};
-    ::std::optional<::std::int64_t> encoded_issuer_len{};
     ::std::optional<::std::string_view> encoded_issuer{};
-    ::std::optional<::std::int64_t> encoded_security_desc_len{};
     ::std::optional<::std::string_view> encoded_security_desc{};
-    ::std::optional<::std::int64_t> encoded_text_len{};
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::std::span<const groups::G_453Args>> party_i_ds{};
     ::std::optional<::std::span<const groups::G_454Args>> security_alt_id{};
@@ -112,7 +109,6 @@ struct MarginRequirementReportArgs {
     ::std::optional<::std::string_view> security_group{};
     ::std::optional<::std::string_view> appl_id{};
     ::std::optional<::std::int64_t> appl_seq_num{};
-    ::std::optional<::std::int64_t> security_xml_len{};
     ::std::optional<::std::string_view> security_xml{};
     ::std::optional<::std::string_view> security_xml_schema{};
     ::std::optional<::std::string_view> price_unit_of_measure{};
@@ -154,9 +150,8 @@ struct MarginRequirementReportArgs {
     ::std::optional<::std::string_view> margin_class{};
     ::std::optional<::std::string_view> margin_reqmt_rpt_id{};
     ::std::span<const groups::G_1643Args> margin_amt{};
-    ::std::optional<::std::int64_t> encoded_option_expiration_desc_len{};
-    ::std::optional<::std::int64_t> short_sale_restriction{};
     ::std::optional<::std::string_view> encoded_option_expiration_desc{};
+    ::std::optional<::std::int64_t> short_sale_restriction{};
     ::std::optional<::std::string_view> strike_unit_of_measure{};
     ::std::optional<::std::string_view> unit_of_measure_currency{};
     ::std::optional<::std::string_view> price_unit_of_measure_currency{};
@@ -212,7 +207,6 @@ struct MarginRequirementReportArgs {
     ::std::optional<::std::int64_t> in_the_money_condition{};
     ::std::optional<bool> contrary_instruction_eligibility_indicator{};
     ::std::optional<::std::string_view> financial_instrument_full_name{};
-    ::std::optional<::std::int64_t> encoded_financial_instrument_full_name_len{};
     ::std::optional<::std::string_view> encoded_financial_instrument_full_name{};
     ::std::optional<::std::string_view> asset_sub_type{};
     ::std::optional<::std::string_view> financial_instrument_short_name{};
@@ -248,7 +242,6 @@ struct MarginRequirementReportArgs {
     ::std::optional<::std::span<const groups::G_41094Args>> market_disruption_fallbacks{};
     ::std::optional<::std::span<const groups::G_41096Args>> market_disruption_fallback_reference_prices{};
     ::std::optional<::std::string_view> exercise_desc{};
-    ::std::optional<::std::int64_t> encoded_exercise_desc_len{};
     ::std::optional<::std::string_view> encoded_exercise_desc{};
     ::std::optional<bool> automatic_exercise_indicator{};
     ::std::optional<::fixpp::decimal_t> automatic_exercise_threshold_rate{};

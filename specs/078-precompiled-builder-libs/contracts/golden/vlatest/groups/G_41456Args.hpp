@@ -12,7 +12,6 @@ namespace fixpp::vlatest::groups {
 
 struct G_41456Args {
     ::std::optional<::std::string_view> leg_delivery_stream_cycle_desc{};
-    ::std::optional<::std::int64_t> encoded_leg_delivery_stream_cycle_desc_len{};
     ::std::optional<::std::string_view> encoded_leg_delivery_stream_cycle_desc{};
 };
 
