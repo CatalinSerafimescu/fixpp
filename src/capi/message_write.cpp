@@ -406,11 +406,13 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_clone(const fixpp_msg_t* src, fixpp_msg
             if (soh9 == std::string_view::npos)
                 return std::nullopt;  // LCOV_EXCL_LINE — valid inbound view has SOH after 9=NNN
             std::size_t body_off = soh9 + 1;
-            std::size_t p10 = s.find(
+            // fixpp#426: search BACKWARDS. CheckSum is the last field of a
+            // Framer-validated frame, while a Data value in the body may hold
+            // `<SOH>10=`, which a forward search would take for the trailer.
+            std::size_t p10 = s.rfind(
                 "\x01"
-                "10=",
-                body_off);
-            if (p10 == std::string_view::npos)
+                "10=");
+            if (p10 == std::string_view::npos || p10 + 1 < body_off)
                 return std::nullopt;  // LCOV_EXCL_LINE — valid inbound view always has 10=
             std::size_t body_len = (p10 + 1) - body_off;
             return fixpp::wire::frame_view_access::make(buf, len, body_off, body_len);

@@ -721,6 +721,31 @@ target_include_directories(session_scan_frame_header_overflow PRIVATE
 set_tests_properties(session_scan_frame_header_overflow PROPERTIES
   LABELS "040;us1;scan_frame_header;overflow")
 
+# fixpp#426: the dictionary-free session scanners (scan_frame_header,
+# scan_first_frame_ids, interpret_logon, the tag-554 maskers) must treat a
+# counted Data value as one field. Same internal-header include path as above.
+add_threading_test(session_length_data_scanner length_data_session_scanner_test.cpp)
+target_include_directories(session_length_data_scanner PRIVATE
+  "${CMAKE_SOURCE_DIR}/src"
+)
+set_tests_properties(session_length_data_scanner PROPERTIES
+  LABELS "426;length-data;scanner")
+# §VIII.5 zero-alloc gate for those scanners: re-runs ONLY the NoHeap cell under the
+# mallocnesia LD_PRELOAD via check_alloc.py (mirrors credential_store_redaction_mallocnesia).
+# Absent mallocnesia.so -> skipped; the base entry still runs the cell unmeasured.
+if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+  add_test(
+    NAME session_length_data_scanner_mallocnesia
+    COMMAND
+      python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
+      "--binary" "$<TARGET_FILE:session_length_data_scanner>"
+  )
+  set_tests_properties(session_length_data_scanner_mallocnesia PROPERTIES
+    ENVIRONMENT "GTEST_FILTER=LengthDataScannersNoHeap.*"
+    LABELS "426;length-data;alloc_guard;mallocnesia"
+    DEPENDS session_length_data_scanner)
+endif()
+
 # ── 040-inbound-tag-overflow-hardening T011/T012 (US2 Phase 4) ───────────────
 # Wrap-and-continue + non-digit witnesses for scan_first_frame_ids (site 4).
 # 4 cells: forged 429496729649→49 (sender_comp_id), 429496729656→56

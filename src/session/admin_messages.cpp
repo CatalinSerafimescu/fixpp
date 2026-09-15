@@ -31,7 +31,8 @@
 // and reads supported_msg_type::{direction,msg_type} + msg_direction — the COMPLETE
 // definitions come from the light session_types.hpp (also included via
 // admin_messages.hpp; direct include here for IWYU). Avoids the heavy session_config.hpp.
-#include <fixpp/session/session_types.hpp>  // supported_msg_type, msg_direction (complete)
+#include <fixpp/session/session_types.hpp>   // supported_msg_type, msg_direction (complete)
+#include <fixpp/wire/length_data_carry.hpp>  // fixpp#426: counted Data values
 #include <fixpp/wire/tag_scan.hpp>  // accumulate_tag_digit (SC-004 / 040-inbound-tag-overflow)
 #include <fixpp/wire/writer.hpp>
 #include <memory_resource>
@@ -303,7 +304,8 @@ namespace {
 // / begin matches the on-wire field order).
 [[nodiscard]] fixpp::core::expected_t<logon_interpret_result> interpret_logon(
     std::span<const std::byte> frame, std::string_view expected_sender,
-    std::string_view expected_target, std::string_view expected_begin) noexcept {
+    std::string_view expected_target, std::string_view expected_begin,
+    fixpp::wire::dict_hooks const& hooks) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
     // Parse using the dict-free SOH-delimited scanner: no heap, no dictionary required.
     // Fields of interest:
@@ -344,6 +346,7 @@ namespace {
     const std::byte SOH{0x01};
     std::size_t i = 0;
     const std::size_t n = frame.size();
+    fixpp::wire::length_data_carry carry;  // fixpp#426: counted Data values
 
     while (i < n) {
         // Parse tag digits.
@@ -369,12 +372,21 @@ namespace {
         ++i;  // skip '='
 
         {
-            // Parse value until SOH.
+            // Parse value until SOH, or by its Length's count for a Data value.
             std::size_t vstart = i;
-            while (i < n && frame[i] != SOH) {
-                ++i;
+            if (auto const count = carry.take(static_cast<std::uint16_t>(tag))) {
+                auto const end = fixpp::wire::counted_value_end(frame, vstart, *count);
+                if (!end) {
+                    break;  // fixpp#426: nothing after a malformed count can be trusted
+                }
+                i = *end;
+            } else {
+                while (i < n && frame[i] != SOH) {
+                    ++i;
+                }
             }
             std::string_view val(reinterpret_cast<const char*>(frame.data() + vstart), i - vstart);
+            carry.arm(static_cast<std::uint16_t>(tag), frame.subspan(vstart, i - vstart), hooks, n);
 
             switch (tag) {
                 case 8:
@@ -435,6 +447,7 @@ namespace {
         continue;
 
     next_field:
+        carry.reset();
         // Skip to next SOH.
         while (i < n && frame[i] != SOH) {
             ++i;

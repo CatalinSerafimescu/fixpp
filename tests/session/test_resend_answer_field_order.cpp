@@ -1759,4 +1759,110 @@ TEST_F(AliasingStoredTagTest, Replay_StoredTagWithLeadingZero_SlotIsGapFilled) {
         "11=ORD\x01", "Replay_StoredTagWithLeadingZero/send");
 }
 
+// ── fixpp#426: a counted Data value is one field on send and on replay ───────
+//
+// EncodedText(355) is counted by EncodedTextLen(354), so bytes inside it are not
+// fields. Before the fix send_impl split the value at its SOHs: a `34=` piece got
+// a well-formed payload refused, and a `43=Y` piece was excised as PossDupFlag,
+// leaving the Length wrong. Both must go out byte-exact with the Length right
+// before them, and the replay must carry them byte-exact with one real 43.
+namespace {
+
+std::size_t count_of(std::string_view hay, std::string_view needle) {
+    std::size_t n = 0;
+    for (std::size_t p = hay.find(needle); p != std::string_view::npos;
+         p = hay.find(needle, p + 1)) {
+        ++n;
+    }
+    return n;
+}
+
+class CountedDataSendTest : public SendPayloadTagTest {
+protected:
+    void expect_sent_and_replayed_byte_exact(const std::string& value) {
+        Session sess(engine, make_cfg());
+        drive_to_active(sess);
+
+        const std::string counted =
+            "354=" + std::to_string(value.size()) + "\x01" + "355=" + value + "\x01";
+        const std::string payload =
+            "35=D\x01"
+            "11=ORD\x01" +
+            counted + "54=1\x01";
+        const auto r = send_payload(sess, payload, "CountedDataSendTest/send");
+        ASSERT_TRUE(r.has_value()) << "a well-formed counted value must not be refused";
+        ASSERT_EQ(captured_frames.size(), 1U);
+        const std::string sent(reinterpret_cast<const char*>(captured_frames.back().data()),
+                               captured_frames.back().size());
+        EXPECT_NE(sent.find(counted), std::string::npos)
+            << "the Length and its Data value must go out adjacent and byte-exact";
+        const auto seq = extract_field(std::span<const std::byte>(captured_frames.back()), 34);
+        ASSERT_TRUE(seq.has_value());
+        EXPECT_EQ(*seq, "2") << "the real MsgSeqNum, not the one inside EncodedText";
+
+        captured_frames.clear();
+        const auto app_seq = static_cast<seqnum_t>(std::stoul(std::string(*seq)));
+        feed(sess, make_resend_request(app_seq, app_seq, /*inbound_seq=*/2, "TW", "ISLD"));
+        std::size_t replays = 0;
+        for (const auto& f : captured_frames) {
+            if (extract_field(std::span<const std::byte>(f), 35) != "D") continue;
+            ++replays;
+            std::string replayed(reinterpret_cast<const char*>(f.data()), f.size());
+            const auto at = replayed.find(counted);
+            ASSERT_NE(at, std::string::npos) << "the replay must carry the pair byte-exact";
+            replayed.erase(at, counted.size());
+            EXPECT_EQ(count_of(replayed,
+                               "\x01"
+                               "43=Y\x01"),
+                      1U)
+                << "outside EncodedText the replay carries exactly one PossDupFlag";
+        }
+        EXPECT_EQ(replays, 1U);
+    }
+};
+
+}  // namespace
+
+// A `34=` piece: send_impl refused the whole payload before the fix.
+TEST_F(CountedDataSendTest, Send_CountedValueHoldingMsgSeqNum_SentAndReplayedByteExact) {
+    expect_sent_and_replayed_byte_exact(
+        std::string{"x\x01"
+                    "34=99\x01"
+                    "43=Y",
+                    12});
+}
+
+// A `43=` piece alone: send_impl excised it as PossDupFlag before the fix.
+TEST_F(CountedDataSendTest, Send_CountedValueHoldingPossDupFlag_SentAndReplayedByteExact) {
+    expect_sent_and_replayed_byte_exact(
+        std::string{"x\x01"
+                    "43=Y",
+                    6});
+}
+
+// A stored frame whose Length overruns its Data value cannot be rebuilt
+// faithfully, so the slot is gap-filled rather than replayed with the value
+// split into fields (design §4).
+TEST_F(ResendAnswerReplayTest, Replay_StoredCountOverrunsTheValue_SlotIsGapFilled) {
+    auto factory = std::make_shared<CapturingStoreFactory>();
+    auto cfg = make_cfg(factory);
+    Session sess(engine, cfg);
+    drive_to_active(sess);
+
+    const seqnum_t app_seq = send_and_capture_seq(sess, "Replay_StoredCountOverruns/send");
+    ASSERT_NE(factory->last_store, nullptr);
+    ASSERT_FALSE(factory->last_store->outbound_records.empty());
+    factory->last_store->outbound_records.back().frame =
+        to_payload(stored_frame(app_seq, "52=20260614-12:00:00.000\x01",
+                                "11=ORD\x01"
+                                "354=99\x01"
+                                "355=x\x01"
+                                "58=tail\x01"));
+
+    feed(sess, make_resend_request(app_seq, app_seq, /*inbound_seq=*/2, "TW", "ISLD"));
+
+    expect_slot_gap_filled(captured_frames, sess, app_seq,
+                           fixpp::core::error::wire_invalid_field_format);
+}
+
 }  // namespace fixpp::session::test
