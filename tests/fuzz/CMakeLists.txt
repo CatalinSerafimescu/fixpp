@@ -91,6 +91,9 @@ target_link_options(fuzz_wire_nested_slice PRIVATE -fsanitize=fuzzer,address,und
 target_include_directories(fuzz_wire_nested_slice PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
 )
+# fixpp#426: the stub-dictionary (bare uint16 token) bundle needs
+# dict_hooks_test_access::make, gated behind FIXPP_TEST_HOOKS.
+target_compile_definitions(fuzz_wire_nested_slice PRIVATE FIXPP_TEST_HOOKS)
 set_target_properties(fuzz_wire_nested_slice PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )

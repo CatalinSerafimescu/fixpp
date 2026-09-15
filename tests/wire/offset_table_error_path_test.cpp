@@ -54,8 +54,6 @@
 #include <vector>
 
 #include "../support/msvc_debug_arena_skip.hpp"
-#include "support/context_group_delim_fn.hpp"
-#include "support/context_group_member_fn.hpp"
 #include "support/failing_pmr_resource.hpp"
 #include "support/frame_view_factory.hpp"
 #include "support/wire_test_hooks.hpp"
@@ -219,21 +217,20 @@ TEST(OffsetTableErrorPath, GroupSlicesBadAllocDegradeCoversLines231to232) {
 
     fixpp::dict::table_view dict;
     dict.set_group_first(453, 448);
-    auto* const member_fn = &fixpp_test_support::context_group_member_fn;
-    // 384: the delimiter oracle is now threaded too. The fixture sets
-    // `set_group_first(453, 448)`, so it resolves 448 — the same tag the
+    // 384 / fixpp#426: the delimiter oracle is threaded too, bundled with the
+    // membership oracle via `dict_hooks::for_table_view(dict)`. The fixture
+    // sets `set_group_first(453, 448)`, so it resolves 448 — the same tag the
     // wire-derived fallback resolved, which is why every assertion below is
-    // unchanged. It is alloc-free (context_group_delim_fn.hpp), so the
-    // allocation accounting this cell is built on is unchanged as well; the
-    // probe arm below RE-MEASURES that count rather than assuming it.
-    auto* const delim_fn = &fixpp_test_support::context_group_delim_fn;
+    // unchanged. Both are alloc-free (`table_view`'s lookups return spans), so
+    // the allocation accounting this cell is built on is unchanged as well;
+    // the probe arm below RE-MEASURES that count rather than assuming it.
 
     // ── CONTROL ARM: prove the instrument can report NON-empty. ──
     // Without this, the failing arm below is indistinguishable from a cell
     // whose group_slices() returns empty for some unrelated reason.
     {
         std::pmr::monotonic_buffer_resource ok_arena;
-        OffsetTable ok{*fv, &ok_arena, &dict, member_fn, delim_fn};
+        OffsetTable ok{*fv, &ok_arena, fixpp::wire::dict_hooks::for_table_view(dict)};
         ASSERT_TRUE(ok.build_status().has_value());
         ASSERT_FALSE(ok.group_slices(453).empty())
             << "control: with allocation succeeding, this frame MUST materialise one slice — "
@@ -272,7 +269,7 @@ TEST(OffsetTableErrorPath, GroupSlicesBadAllocDegradeCoversLines231to232) {
     {
         std::pmr::monotonic_buffer_resource probe_upstream;
         failing_pmr_resource probe_mr{&probe_upstream, /*fail_on_call_n=*/0};  // never fail
-        OffsetTable probe{*fv, &probe_mr, &dict, member_fn, delim_fn};
+        OffsetTable probe{*fv, &probe_mr, fixpp::wire::dict_hooks::for_table_view(dict)};
         ASSERT_TRUE(probe.build_status().has_value());
         construction_calls = probe_mr.allocate_calls();
     }
@@ -282,7 +279,7 @@ TEST(OffsetTableErrorPath, GroupSlicesBadAllocDegradeCoversLines231to232) {
     // Fail the first allocation AFTER construction (the per-group slice buffer).
     failing_pmr_resource fail_mr{&upstream, /*fail_on_call_n=*/construction_calls + 1};
 
-    OffsetTable t{*fv, &fail_mr, &dict, member_fn, delim_fn};
+    OffsetTable t{*fv, &fail_mr, fixpp::wire::dict_hooks::for_table_view(dict)};
 
     // Construction must succeed (all construction allocs complete before the
     // (construction_calls + 1)-th call).

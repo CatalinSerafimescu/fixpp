@@ -40,7 +40,7 @@
 #include <string_view>
 #include <vector>
 
-#include "support/context_group_delim_fn.hpp"  // 384: the production delimiter oracle
+#include "support/dict_hooks_test_access.hpp"  // fixpp#426: half-threaded dict_hooks bundles
 #include "support/failing_pmr_resource.hpp"
 #include "support/frame_view_factory.hpp"
 #include "support/mock_dict_table.hpp"
@@ -56,30 +56,6 @@ std::vector<std::byte> make_raw_frame(std::string const& body) {
     std::memcpy(out.data(), full.data(), full.size());
     return out;
 }
-
-// Same shape as group_slice_trailing_soh_test.cpp's dict_group_member — the
-// test's own copy of the group_member_fn_t Parser would otherwise capture.
-// 063 T003: widened with an ignored `group_context const&` param (Phase 2
-// seam — context carried-but-unused).
-bool dict_group_member(void const* d, fixpp::wire::group_context const& /*ctx*/,
-                       std::uint16_t no_tag, std::uint16_t tag) noexcept {
-    auto const* dict = static_cast<fixpp::dict::table_view const*>(d);
-    for (auto const member_tag : dict->group_member_tags(no_tag)) {
-        if (member_tag == tag) {
-            return true;
-        }
-    }
-    return false;
-}
-
-// 384: the delimiter sibling of `dict_group_member`. Every fixture below sets
-// `set_group_first` for each of its groups, so this resolves the SAME tag the
-// wire-derived fallback would — these cells are non-divergent by construction
-// and their slice assertions are unchanged. Threading it is what makes them
-// exercise the shape production actually builds (Parser installs both
-// callbacks or neither), instead of the half-threaded shape the removed
-// default used to hand out silently.
-auto* const dict_group_delim = &fixpp_test_support::context_group_delim_fn;
 
 // Trivial group-member predicate for the null-slice test, which needs no
 // real dictionary membership semantics (nested_group_slices returns before
@@ -109,9 +85,13 @@ TEST(NestedGroupSlicesCache, NullSliceDataReturnsEmptySpan) {
     OffsetTable root{*fv, &arena};  // dict-free ctor: the null guard never
                                     // reaches dict-aware code.
     int dict_token = 0;
-    auto slices = root.nested_group_slices(nullptr, 0, /*nested_no_tag=*/802, &dict_token,
-                                           &always_group_member, fv->token(), kTestCtx)
-                      .slices;
+    auto slices =
+        root.nested_group_slices(nullptr, 0, /*nested_no_tag=*/802,
+                                 fixpp::wire::dict_hooks_test_access::make(
+                                     &dict_token, /*classify=*/nullptr, &always_group_member,
+                                     /*group_delim=*/nullptr, /*length_pair=*/nullptr),
+                                 fv->token(), kTestCtx)
+            .slices;
     EXPECT_TRUE(slices.empty());
 }
 
@@ -160,7 +140,7 @@ TEST(NestedGroupSlicesCache, DifferentSliceContinuesThenSameSliceReusesSubTable)
     ASSERT_TRUE(fv.has_value());
 
     std::pmr::monotonic_buffer_resource arena;
-    OffsetTable root{*fv, &arena, &dict, &dict_group_member, dict_group_delim};
+    OffsetTable root{*fv, &arena, fixpp::wire::dict_hooks::for_table_view(dict)};
 
     auto outer = root.group_slices(453);
     ASSERT_EQ(outer.size(), 2U);
@@ -170,8 +150,9 @@ TEST(NestedGroupSlicesCache, DifferentSliceContinuesThenSameSliceReusesSubTable)
 
     // (sliceA, 802): first request — builds + caches a sub-table over
     // sliceA. Cache is empty, so the loop body never executes at all yet.
-    auto a802 = root.nested_group_slices(sliceA.data, sliceA.len, /*nested_no_tag=*/802, &dict,
-                                         &dict_group_member, fv->token(), kTestCtx)
+    auto a802 = root.nested_group_slices(sliceA.data, sliceA.len, /*nested_no_tag=*/802,
+                                         fixpp::wire::dict_hooks::for_table_view(dict), fv->token(),
+                                         kTestCtx)
                     .slices;
     ASSERT_EQ(a802.size(), 1U);
     auto a523 = fixpp::wire::get({a802[0].data, a802[0].len}, /*tag=*/523, fv->token());
@@ -183,8 +164,9 @@ TEST(NestedGroupSlicesCache, DifferentSliceContinuesThenSameSliceReusesSubTable)
     // `row.slice_data != slice_data` guard fires `continue`
     // (the cache loop's `continue`) before falling through to build a fresh
     // sub-table for sliceB.
-    auto b802 = root.nested_group_slices(sliceB.data, sliceB.len, /*nested_no_tag=*/802, &dict,
-                                         &dict_group_member, fv->token(), kTestCtx)
+    auto b802 = root.nested_group_slices(sliceB.data, sliceB.len, /*nested_no_tag=*/802,
+                                         fixpp::wire::dict_hooks::for_table_view(dict), fv->token(),
+                                         kTestCtx)
                     .slices;
     ASSERT_EQ(b802.size(), 1U);
     auto b523 = fixpp::wire::get({b802[0].data, b802[0].len}, /*tag=*/523, fv->token());
@@ -199,8 +181,9 @@ TEST(NestedGroupSlicesCache, DifferentSliceContinuesThenSameSliceReusesSubTable)
     // WITHOUT rebuilding, and resolving 900/901 correctly from it (the one
     // sub-OffsetTable over sliceA indexes every nested group in that
     // slice).
-    auto a900 = root.nested_group_slices(sliceA.data, sliceA.len, /*nested_no_tag=*/900, &dict,
-                                         &dict_group_member, fv->token(), kTestCtx)
+    auto a900 = root.nested_group_slices(sliceA.data, sliceA.len, /*nested_no_tag=*/900,
+                                         fixpp::wire::dict_hooks::for_table_view(dict), fv->token(),
+                                         kTestCtx)
                     .slices;
     ASSERT_EQ(a900.size(), 1U);
     auto a901 = fixpp::wire::get({a900[0].data, a900[0].len}, /*tag=*/901, fv->token());
@@ -268,7 +251,7 @@ TEST(NestedGroupSlicesCache, BuildNestedSubviewAllocFailureDegradesToEmpty) {
         // matched-free upstream would leak it under ASan; the arena reclaims it.
         std::pmr::monotonic_buffer_resource backing;
         fixpp::test_support::failing_pmr_resource mr{&backing, 0};
-        OffsetTable root{*fv, &mr, &dict, &dict_group_member, dict_group_delim};
+        OffsetTable root{*fv, &mr, fixpp::wire::dict_hooks::for_table_view(dict)};
         auto outer = root.group_slices(453);
         ASSERT_EQ(outer.size(), 1U);
         baseline_calls = mr.allocate_calls();
@@ -283,11 +266,12 @@ TEST(NestedGroupSlicesCache, BuildNestedSubviewAllocFailureDegradesToEmpty) {
     // must degrade to an empty span, never crash/UB.
     std::pmr::monotonic_buffer_resource backing;  // bulk-frees (see baseline note above)
     fixpp::test_support::failing_pmr_resource mr{&backing, baseline_calls + 1};
-    OffsetTable root{*fv, &mr, &dict, &dict_group_member, dict_group_delim};
+    OffsetTable root{*fv, &mr, fixpp::wire::dict_hooks::for_table_view(dict)};
     auto outer = root.group_slices(453);
     ASSERT_EQ(outer.size(), 1U);
-    auto inner = root.nested_group_slices(outer[0].data, outer[0].len, /*nested_no_tag=*/802, &dict,
-                                          &dict_group_member, fv->token(), kTestCtx)
+    auto inner = root.nested_group_slices(outer[0].data, outer[0].len, /*nested_no_tag=*/802,
+                                          fixpp::wire::dict_hooks::for_table_view(dict),
+                                          fv->token(), kTestCtx)
                      .slices;
     EXPECT_TRUE(inner.empty())
         << "build_nested_subview's object allocation failing must "
@@ -324,7 +308,7 @@ TEST(NestedGroupSlicesCache, CacheInsertAllocFailureServesWithoutCaching) {
     {
         std::pmr::monotonic_buffer_resource backing;  // bulk-frees (see note above)
         fixpp::test_support::failing_pmr_resource mr{&backing, 0};
-        OffsetTable root{*fv, &mr, &dict, &dict_group_member, dict_group_delim};
+        OffsetTable root{*fv, &mr, fixpp::wire::dict_hooks::for_table_view(dict)};
         auto outer = root.group_slices(453);
         ASSERT_EQ(outer.size(), 1U);
         baseline_calls = mr.allocate_calls();
@@ -345,12 +329,13 @@ TEST(NestedGroupSlicesCache, CacheInsertAllocFailureServesWithoutCaching) {
     for (std::size_t k = 1; k <= 64 && !found; ++k) {
         std::pmr::monotonic_buffer_resource backing;  // bulk-frees (see note above)
         fixpp::test_support::failing_pmr_resource mr{&backing, baseline_calls + k};
-        OffsetTable root{*fv, &mr, &dict, &dict_group_member, dict_group_delim};
+        OffsetTable root{*fv, &mr, fixpp::wire::dict_hooks::for_table_view(dict)};
         auto outer = root.group_slices(453);
         ASSERT_EQ(outer.size(), 1U);
 
         auto inner1 = root.nested_group_slices(outer[0].data, outer[0].len,
-                                               /*nested_no_tag=*/802, &dict, &dict_group_member,
+                                               /*nested_no_tag=*/802,
+                                               fixpp::wire::dict_hooks::for_table_view(dict),
                                                fv->token(), kTestCtx)
                           .slices;
         if (inner1.size() != 1U) {
@@ -368,7 +353,8 @@ TEST(NestedGroupSlicesCache, CacheInsertAllocFailureServesWithoutCaching) {
         // rather than being served for free from the cache.
         auto const calls_after_first = mr.allocate_calls();
         auto inner2 = root.nested_group_slices(outer[0].data, outer[0].len,
-                                               /*nested_no_tag=*/802, &dict, &dict_group_member,
+                                               /*nested_no_tag=*/802,
+                                               fixpp::wire::dict_hooks::for_table_view(dict),
                                                fv->token(), kTestCtx)
                           .slices;
         ASSERT_EQ(inner2.size(), 1U);

@@ -2197,7 +2197,16 @@ std::optional<Session::RejectDecision> Session::validate_inbound_(
     if (!vg_feed || vg_feed->empty()) {
         return std::nullopt;
     }
-    fixpp::wire::Parser<fixpp::wire::access_mode::Index> vg_parser;
+    // fixpp#426 (design §3, item 10): dict-backed over the same table_view
+    // the validator holds a copy of, so the OffsetTable this parse builds
+    // splits Length+Data pairs (including any dictionary-declared custom
+    // pair) the same way the validator's own field walk does. `validator_`
+    // non-null implies `inbound_tv_` non-null (both are set together at
+    // open(), guarded on `cfg_.dictionary && inbound_tv_` — see the ctor
+    // there) — mirrors the established `Parser<Index> pd_parser{*inbound_tv_}`
+    // pattern in `parse_and_dispatch_` above.
+    assert(inbound_tv_ != nullptr);
+    fixpp::wire::Parser<fixpp::wire::access_mode::Index> vg_parser{*inbound_tv_};
     std::array<std::byte, 512> vg_scratch_buf{};
     std::pmr::monotonic_buffer_resource vg_scratch_mr{vg_scratch_buf.data(), vg_scratch_buf.size(),
                                                       ::fixpp::detail::arena_upstream()};

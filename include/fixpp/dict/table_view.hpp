@@ -510,6 +510,19 @@ public:
         return group_required_members(no_tag);  // legacy bare fallback
     }
 
+    // fixpp#426 (design §3): the Data tag this dictionary pairs with
+    // `length_tag`, or 0 when `length_tag` has no dictionary-declared pair.
+    // Dictionary-wide (a tag's Length+Data pairing is a per-tag property, not
+    // a per-msg_type one — mirrors `Dictionary::length_pair_data_tag`, the
+    // fixpp#427 runtime-handle accessor this table copies from at
+    // `Dictionary::as_table_view()`). Read by `wire::dict_hooks::
+    // data_tag_for_length`, which applies the standard table first and this
+    // one only for a tag neither side of the standard table names.
+    [[nodiscard]] std::uint16_t length_pair_data_tag(std::uint16_t length_tag) const noexcept {
+        auto const it = length_pair_data_tag_.find(length_tag);
+        return it == length_pair_data_tag_.end() ? std::uint16_t{0} : it->second;
+    }
+
     // ── 081 Concern A: validator-private FIXT.1.1 framing surface ──────────
     // (research.md D-1/D-2, data-model.md E-2). Populated by
     // Dictionary::as_table_view() ONLY for v50/v50sp1/v50sp2 (empty
@@ -772,6 +785,16 @@ public:
         fixt_framing_types_[tag] = ft;
     }
 
+    // fixpp#426: registers `length_tag`'s dictionary-declared Data partner.
+    // Used EXCLUSIVELY by Dictionary::as_table_view(). A zero `data_tag` is a
+    // no-op (`length_pair_data_tag` already answers 0 for an unregistered
+    // key), so callers need not pre-filter FieldRef::length_pair_data_tag==0.
+    void set_length_pair_data_tag(std::uint16_t length_tag, std::uint16_t data_tag) {
+        if (data_tag != 0) {
+            length_pair_data_tag_[length_tag] = data_tag;
+        }
+    }
+
 private:
     // O(log C) byte-exact, whole-token lookup over a sorted code list — no
     // case folding, no prefix matching. `token` is a slice of the caller's
@@ -916,6 +939,11 @@ private:
     // (field_type_of_with_framing).
     std::unordered_set<std::uint16_t> fixt_framing_tags_;
     std::unordered_map<std::uint16_t, field_type> fixt_framing_types_;
+
+    // fixpp#426 (design §3): Length tag -> its dictionary-declared Data
+    // partner. Populated ONLY by Dictionary::as_table_view() from
+    // FieldRef::length_pair_data_tag (see set_length_pair_data_tag above).
+    std::unordered_map<std::uint16_t, std::uint16_t> length_pair_data_tag_;
 };
 
 }  // namespace fixpp::dict

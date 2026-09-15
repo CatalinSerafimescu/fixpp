@@ -70,6 +70,7 @@
 #include <memory_resource>
 #include <span>
 
+#include "support/dict_hooks_test_access.hpp"  // fixpp#426: half-threaded dict_hooks bundles
 #include "support/frame_view_factory.hpp"
 
 namespace {
@@ -196,10 +197,16 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     // pointer, so widening its meaning costs that predicate nothing.
     std::uint16_t dict_token = pick_fuzz_delim(data, size);
     // Dict-aware ctor is MANDATORY on the nested-descent path (INV-G7).
-    // 384: BOTH callbacks, because the dict-aware ctors no longer default the
-    // delimiter one — the omission this harness used to rely on is what the
-    // issue is about.
-    OffsetTable root{*fv_or_err, &arena, &dict_token, &always_group_member, &fuzz_group_delim};
+    // 384 / fixpp#426: BOTH callbacks, because the dict-aware ctors no longer
+    // default the delimiter one — the omission this harness used to rely on
+    // is what the issue is about. `dict_hooks_test_access::make` is the seam
+    // for a stub dictionary (here, a bare uint16 token) that production code
+    // cannot spell (dict_hooks::for_table_view fills every field from ONE
+    // real table_view).
+    auto const hooks = fixpp::wire::dict_hooks_test_access::make(
+        &dict_token, /*classify=*/nullptr, &always_group_member, &fuzz_group_delim,
+        /*length_pair=*/nullptr);
+    OffsetTable root{*fv_or_err, &arena, hooks};
 
     // The slice-scoped input shape under test: `data[0 .. size-2]` is the
     // slice content, `data[size-1]` plays the RC1-guaranteed in-bounds
@@ -219,18 +226,16 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
     // nested_group_slices() is noexcept; any exception escape -> terminate
     // -> libFuzzer crash report.
-    auto slices =
-        root.nested_group_slices(slice_data, slice_len, nested_no_tag, &dict_token,
-                                 &always_group_member, fixpp::wire::detail::generation_token{}, ctx)
-            .slices;
+    auto slices = root.nested_group_slices(slice_data, slice_len, nested_no_tag, hooks,
+                                           fixpp::wire::detail::generation_token{}, ctx)
+                      .slices;
     (void)slices;
 
     // Second call with the SAME (slice, no_tag) key exercises the T006
     // build-once/fetch-cached path over the same adversarial content.
-    auto slices_again =
-        root.nested_group_slices(slice_data, slice_len, nested_no_tag, &dict_token,
-                                 &always_group_member, fixpp::wire::detail::generation_token{}, ctx)
-            .slices;
+    auto slices_again = root.nested_group_slices(slice_data, slice_len, nested_no_tag, hooks,
+                                                 fixpp::wire::detail::generation_token{}, ctx)
+                            .slices;
     (void)slices_again;
 
     // Third call with a DIFFERENT no_tag over the same slice content widens
@@ -241,10 +246,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         size > 3U
             ? (static_cast<std::uint16_t>(data[2]) | (static_cast<std::uint16_t>(data[3]) << 8))
             : ~nested_no_tag);
-    auto slices2 =
-        root.nested_group_slices(slice_data, slice_len, nested_no_tag2, &dict_token,
-                                 &always_group_member, fixpp::wire::detail::generation_token{}, ctx)
-            .slices;
+    auto slices2 = root.nested_group_slices(slice_data, slice_len, nested_no_tag2, hooks,
+                                            fixpp::wire::detail::generation_token{}, ctx)
+                       .slices;
     (void)slices2;
 
     // Deterministic zero-count exposer (T024): a FIXED "<no_tag>=0<SOH>"
@@ -263,10 +267,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     if (suffix_len > 0) {
         std::memcpy(zc_buf.data() + prefix_len, slice_data, suffix_len);
     }
-    auto zc_slices =
-        root.nested_group_slices(zc_buf.data(), prefix_len + suffix_len, kZeroCountTag, &dict_token,
-                                 &always_group_member, fixpp::wire::detail::generation_token{}, ctx)
-            .slices;
+    auto zc_slices = root.nested_group_slices(zc_buf.data(), prefix_len + suffix_len, kZeroCountTag,
+                                              hooks, fixpp::wire::detail::generation_token{}, ctx)
+                         .slices;
     (void)zc_slices;
 
     return 0;
