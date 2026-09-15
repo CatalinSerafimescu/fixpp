@@ -80,7 +80,7 @@ on_inbound_frame(frame)
             build MessageView<Index>                          // per-arm
             r = validator.validate(mv, scratch)
             if !r and msg_type ∉ {35=3, 35=5}:                // preserve no-reject-loop exemption
-                emit_session_reject_(seq, msg_type, map(r.error()) [, refTag]);  return  // no seqnum advance
+                emit_session_reject_(seq, msg_type, map(r.error()) [, refTag]);  return  // no seqnum advance  [SUPERSEDED fixpp#423: at expected seq → consumed, B-423-1]
         → [existing] CompID / check_inbound (seqnum gate) / msg-type-for-state
         → parse_and_dispatch_(...)    // dispatch (re-parses in MVP)
 

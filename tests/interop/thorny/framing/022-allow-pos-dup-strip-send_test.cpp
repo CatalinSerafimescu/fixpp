@@ -13,8 +13,14 @@
 //
 // In-process witnesses:
 //   (a) Engine::send returns success (the strip ran; no app_payload_malformed).
-//   (b) FSM stays Active after the send (counterparty accepted the stripped frame).
+//   (b) FSM stays Active after the send (the counterparty did not log out or disconnect).
 //   (c) Outbound seqnum advanced by one (the message was transmitted).
+//
+// None of (a)-(c) can see a session-level Reject(35=3) from the counterparty: a Reject
+// leaves fixpp Active with its seqnum already advanced (fixpp#442). That the counterparty
+// ACCEPTED the message is witnessed by the parent harness, which fails the cell on a
+// Reject in the counterparty's transcript (run_interop_cell.py,
+// check_no_unexpected_peer_reject).
 //
 // Golden assertion: diff using admin_profile {52,10}; structural tags 34/35
 // compared verbatim (gate-biting). Golden captured by

@@ -23,7 +23,7 @@ Both `fixpp::dict::table_view` AND the 7-value `fixpp::dict::field_type` enum it
 
 Given a session with `validate_inbound_messages == true`, **in an inbound-processing state** (`NotConnected`/`LogonSent`/`LogonReceived`/`Active`):
 
-- A header-out-of-order message → not dispatched; `Reject(35=3, 373=14)`; sequence number **not** advanced.
+- A header-out-of-order message → not dispatched; `Reject(35=3, 373=14)`; sequence number **not** advanced. **[SUPERSEDED 2026-09-14 by fixpp#423 for a message at the expected MsgSeqNum rejected in `LogonReceived`/`Active`: its number is now consumed and persisted (FIX-SL 2020 §4.5.4, "NextNumIn incremented by 1"). The validate-before-sequence ordering is unchanged; an out-of-sequence message, a rejected Logon/SequenceReset and the establishment arms (`NotConnected`/`LogonSent`) still do not advance. The QuickFIX-parity claim was false: both engines increment at the expected number. See B-423-1 in `spec/behaviors-and-limitations.md`.]**
 - An undefined-tag message → `Reject(35=3, 373=2)`.
 - A required-field-missing message **OR a malformed repeating group** (delimiter misplacement / NumInGroup count mismatch) → `Reject(35=3, 373=1)` (the validator surfaces group-structure failures as `wire_required_field_missing`; no distinct group reason in Phase-1).
 - A type-nonconformant value (type arm — e.g. non-numeric `Int`, multi-byte `Char`) → `Reject(35=3, 373=5)`. (The enum arm also yields slot 40 but is dead Phase-1; the reason-5 witness MUST use the type arm.)

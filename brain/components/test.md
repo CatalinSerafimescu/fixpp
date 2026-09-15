@@ -665,6 +665,27 @@ source or binary digest at all**, so an edit to the comparator, the readback wri
 exists. That is `L-089-1` in `spec/behaviors-and-limitations.md`, deferred to fixpp#431 — do not
 read a green schema suite as evidence the current tree still passes interop.
 
+## A live-cell driver cannot see the counterparty's Reject (#442) — the harness reads the peer's transcript
+
+A session-level `Reject(35=3)` from the counterparty leaves every in-process witness a live-cell driver
+has untouched: fixpp stays Active, its outbound seqnum has already advanced, and the peer does not log
+out. The APDS cell passed its gtest while QuickFIX-J rejected the very order the cell exists to show
+accepted. So the verdict lives in the parent harness: `_finalize` in
+`phase-9-harness/tools/run_interop_cell.py` fails a passing cell whose counterparty transcript holds an
+`OUT` 35=3/35=j frame the cell did not declare. Declared means the conversation script's peer Reject
+messages for that combo, matched on 35 plus their literal intent fields, each at most once; a cell with
+no script declares none.
+
+- **Rejected: a per-driver witness** (an `Application::fromAdmin` recorder in each driver). One copy per
+  driver, and it still needs the live harness to run at all.
+- **Rejected: a per-cell allow-list of RefMsgType(372).** It restated the script in four places and
+  admitted any number of TestRequest Rejects for any reason.
+- ⚠️ **A parent golden is not a substitute.** It notices a peer Reject only as unexplained drift, and a
+  cell with `parent_golden=False` has no golden at all.
+- ⚠️ **The in-repo golden gate compares against the PREVIOUS run's capture sidecar**, which the harness
+  writes after the gtest. The run straight after a rejected one can fail for that reason alone; re-run
+  before reading it as a new failure.
+
 ## Discarded `[[nodiscard]]` results in tests (#417) — Linux green is not MSVC green
 
 When `FIXPP_WERROR` was wired, MSVC reported far more discarded `[[nodiscard]]` results in `tests/` than
