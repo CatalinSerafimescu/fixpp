@@ -49,12 +49,16 @@ the current version *below* the introducing-minor of codes that were already pub
 conforming consumer would see **already-shipped codes downgraded to `UNKNOWN`**. An incoherent
 baseline.
 
-> The rule is stated in `version.h` and it generalises: **MINOR may reset at a BREAKING major, and only
-> there.** At `2.0.0` the introducing-minor table is rebased and a 1.x consumer is already refused by
-> the major check, so the reset costs nothing. At a *non-breaking* freeze it would silently break the
-> downgrade frame.
+> The rule is stated in `version.h` and it generalises: **MINOR may reset only where no conforming
+> consumer can hold an older minor** — at a BREAKING major, or at the first public release
+> (`[const §X.7]`, constitution v1.1). At `2.0.0` the introducing-minor table is rebased and a 1.x
+> consumer is already refused by the major check; at the first release no consumer predates it. In
+> both cases the reset costs nothing. At a *non-breaking* freeze it would silently break the downgrade
+> frame.
 
-The versioning contract itself — additive bumps MINOR, any break requires a MAJOR — is `[const §X.1]`.
+The versioning contract is `[const §X.7]`: until the first public release a break bumps MINOR and is
+declared **BREAKING**; at that release the version resets to `1.0.0`; after it, any break requires a
+MAJOR. (`[const §X.1]` is the review requirement.)
 ⚠️ This is the **C-ABI surface** version, which moves independently of the C++ library version.
 
 ## ⚠️ What the ABI gate actually checks — and what it does not

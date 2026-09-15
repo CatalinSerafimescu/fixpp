@@ -10,7 +10,8 @@
 #
 # ANY content change to a frozen header fails the `sha256sum -c` check; ANY
 # added/removed header fails the exact-set check below. Deliberately unfreezing
-# the C-ABI (a future MAJOR) is therefore a visible, reviewed edit to the
+# the C-ABI (any C-ABI change, including a pre-release MINOR per [const §X.7])
+# is therefore a visible, reviewed edit to the
 # manifest in the same PR — which is the point.
 #
 # Companion to the existing tools/check_capi_occupancy.sh (the C-ABI occupancy
