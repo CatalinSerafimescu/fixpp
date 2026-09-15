@@ -29,13 +29,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## Constitution v2.0 — Unreleased
+## Constitution v2.0 — 2026-09-15
 
 **Backwards-incompatible.** Article XX §4 major bump. Both changes loosen a rule, and both attach
 obligations that a PR mergeable under v1.0 would now fail, which is the reading v1.0 established.
 This is the constitution's version: it is not C-ABI 2.0 and not a library release.
 
-This heading carries `Unreleased` until Gate A has converged and the user has signed off.
+Ratified 2026-09-15 (PR #451), after Codex Gate A converged at round 4 (0 P1 / 0 P2, one P3 fixed)
+and the user signed off.
 
 ### Added
 
