@@ -28,11 +28,12 @@ TEST(CapiVersion, CApiVersionMatchesPatchMacro) {
 // fifth additive minor) so the minor-keyed forward-compat downgrade stays
 // coherent — resetting it to 0 would place the version below the introducing_minor
 // of already-published codes. PY-001..005 validated the 0.5.0 surface and
-// surfaced no C-ABI gap, so it froze unchanged in shape at 1.5.0).
-TEST(CapiVersion, CApiVersionIsExactly_1_5_0) {
+// surfaced no C-ABI gap, so it froze unchanged in shape at 1.5.0). 1.6 is the first
+// MINOR after the freeze: fixpp_msg_set_data / fixpp_entry_set_data (fixpp#428).
+TEST(CapiVersion, CApiVersionIsExactly_1_6_0) {
     fixpp_version_t v = fixpp_version();
     EXPECT_EQ(v.major, uint16_t{1});
-    EXPECT_EQ(v.minor, uint16_t{5});
+    EXPECT_EQ(v.minor, uint16_t{6});
     EXPECT_EQ(v.patch, uint16_t{0});
 }
 
@@ -42,8 +43,8 @@ TEST(CapiVersion, CompositeMacroValue) {
                                   (static_cast<uint32_t>(FIXPP_C_ABI_VERSION_MINOR) << 8U) |
                                   static_cast<uint32_t>(FIXPP_C_ABI_VERSION_PATCH);
     EXPECT_EQ(static_cast<uint32_t>(FIXPP_C_ABI_VERSION), expected);
-    // Exact numeric value for MAJOR=1, MINOR=5, PATCH=0 (the 0->1 GA freeze)
-    EXPECT_EQ(static_cast<uint32_t>(FIXPP_C_ABI_VERSION), uint32_t{(1U << 16U) | (5U << 8U) | 0U});
+    // Exact numeric value for MAJOR=1, MINOR=6, PATCH=0
+    EXPECT_EQ(static_cast<uint32_t>(FIXPP_C_ABI_VERSION), uint32_t{(1U << 16U) | (6U << 8U) | 0U});
 }
 
 // ── Library version accessors ─────────────────────────────────────────────────
@@ -60,7 +61,7 @@ TEST(CapiVersion, LibraryVersionIsExactly_0_0_1) {
 TEST(CapiVersion, CApiAndLibraryVersionsAreDecoupled) {
     fixpp_version_t cabi = fixpp_version();
     fixpp_version_t lib = fixpp_library_version();
-    // Library is 0.0.1; C-ABI froze at 1.5.0 — the major values differ (the
-    // stablest discriminator across the freeze; the minors differ too, 5 vs 0).
+    // Library is 0.0.1; C-ABI is 1.6.0 — the major values differ (the stablest
+    // discriminator across the freeze; the minors differ too).
     EXPECT_NE(cabi.major, lib.major);
 }

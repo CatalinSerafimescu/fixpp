@@ -44,9 +44,10 @@
 #include <fixpp/core/decimal.hpp>  // decimal_traits<pod_decimal>::from_chars — set_double fail-closed guard
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/field_ref.hpp>
-#include <fixpp/session/session.hpp>  // session_arena()
-#include <fixpp/wire/framer.hpp>      // frame_view / frame_view_access
-#include <fixpp/wire/parser.hpp>      // MessageView
+#include <fixpp/session/session.hpp>         // session_arena()
+#include <fixpp/wire/framer.hpp>             // frame_view / frame_view_access
+#include <fixpp/wire/length_data_check.hpp>  // fixpp#428: commit-time pair rule
+#include <fixpp/wire/parser.hpp>             // MessageView
 #include <memory>
 #include <memory_resource>
 #include <new>
@@ -193,6 +194,24 @@ static fixpp_error_t check_dict(const fixpp_msg* h, uint16_t tag,
     return FIXPP_ERR_OK;
 }
 
+// ── Length+Data pairs (fixpp#428, design .specify/426-428-length-data-pairs.md §5) ──
+
+// The pairs a handle is judged against: its session's dictionary when it has one,
+// else the standard table alone (design §5.1). Aliases *h->session_tv_, which the
+// handle keeps alive.
+static fixpp::wire::dict_hooks pair_hooks(const fixpp_msg* h) noexcept {
+    return h->session_tv_ ? fixpp::wire::dict_hooks::for_table_view(*h->session_tv_)
+                          : fixpp::wire::dict_hooks::none();
+}
+
+// §5.1: SOH is well-formed only inside a Data value; anywhere else it starts a new
+// field in the serialised payload.
+static bool soh_outside_data(const fixpp::wire::dict_hooks& hooks, uint16_t tag,
+                             const std::byte* data, std::size_t len) noexcept {
+    return hooks.length_tag_for_data(tag) == 0 &&
+           std::find(data, data + len, std::byte{0x01}) != data + len;
+}
+
 // ── AccumulatorEntry helpers ──────────────────────────────────────────────────
 
 // Upsert: find or create an AccumulatorEntry for `tag`.
@@ -205,6 +224,43 @@ static AccumulatorEntry& upsert_entry(std::pmr::vector<AccumulatorEntry>& entrie
     entries.emplace_back(mr);
     entries.back().tag = tag;
     return entries.back();
+}
+
+// §5.2: writes a Length+Data pair into `fields` without moving any existing entry,
+// because open group builders and entries hold indices into these vectors. Neither
+// half present: append the Length, then the Data. Both present with the Length right
+// before the Data: overwrite both. Any other state: TYPE_MISMATCH, nothing written.
+static fixpp_error_t upsert_pair(std::pmr::vector<AccumulatorEntry>& fields,
+                                 std::pmr::memory_resource* mr, uint16_t length_tag,
+                                 uint16_t data_tag, const std::byte* data, std::size_t len) {
+    const auto index_of = [&fields](uint16_t tag) {
+        return static_cast<std::size_t>(
+            std::ranges::find_if(fields,
+                                 [tag](const AccumulatorEntry& e) { return e.tag == tag; }) -
+            fields.begin());
+    };
+    const std::size_t li = index_of(length_tag);
+    const std::size_t di = index_of(data_tag);
+    const bool has_length = li != fields.size();
+    const bool has_data = di != fields.size();
+    if (has_length != has_data || (has_length && di != li + 1)) return FIXPP_ERR_TYPE_MISMATCH;
+
+    char digits[24];
+    const auto* digits_end = std::to_chars(digits, digits + sizeof(digits), len).ptr;
+    const auto* length_bytes = reinterpret_cast<const std::byte*>(digits);
+    const auto length_size = static_cast<std::size_t>(digits_end - digits);
+    if (!has_length) {
+        fields.emplace_back(mr);
+        fields.back().tag = length_tag;
+        fields.back().value_bytes.assign(length_bytes, length_bytes + length_size);
+        fields.emplace_back(mr);
+        fields.back().tag = data_tag;
+        fields.back().value_bytes.assign(data, data + len);
+        return FIXPP_ERR_OK;
+    }
+    fields[li].value_bytes.assign(length_bytes, length_bytes + length_size);
+    fields[di].value_bytes.assign(data, data + len);
+    return FIXPP_ERR_OK;
 }
 
 // ── Serialisation helpers ─────────────────────────────────────────────────────
@@ -507,6 +563,10 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_string(fixpp_msg_t* msg, uint16_t t
     auto* h = reinterpret_cast<fixpp_msg*>(msg);
     // Dict validation (framing tag + DICT_CONFIG). String setter: always OK on any dict type.
     if (fixpp_error_t c = check_dict(h, tag, SetterFlavour::String); c != FIXPP_ERR_OK) return c;
+    // fixpp#428 §5.1: SOH only inside a Data value.
+    if (soh_outside_data(pair_hooks(h), tag, reinterpret_cast<const std::byte*>(value), len)) {
+        return FIXPP_ERR_WIRE_CONFORMANCE;
+    }
 
     // Steady-state thunk: abort on exception escape ([2i §5.2]).
     auto& acc = *h->accumulator;
@@ -534,6 +594,35 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_bytes(fixpp_msg_t* msg, uint16_t ta
     const auto* bdata = reinterpret_cast<const std::byte*>(bytes);
     entry.value_bytes.assign(bdata, bdata + len);
     return FIXPP_ERR_OK;
+}
+
+// ── fixpp_msg_set_data (fixpp#428, C-ABI 1.6) ──────────────────────────────────
+FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_data(fixpp_msg_t* msg, uint16_t data_tag,
+                                                  const uint8_t* bytes, size_t len) {
+    if (msg == nullptr || bytes == nullptr) return FIXPP_ERR_NULL_HANDLE;
+    if (fixpp_error_t c = check_outbound_msg(msg); c != FIXPP_ERR_OK) return c;
+
+    auto* h = reinterpret_cast<fixpp_msg*>(msg);
+    if (is_framing_tag(data_tag)) return FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN;
+    const uint16_t length_tag = pair_hooks(h).length_tag_for_data(data_tag);
+    if (length_tag == 0) return FIXPP_ERR_TYPE_MISMATCH;
+    if (len == 0) return FIXPP_ERR_WIRE_CONFORMANCE;  // an empty Data value is malformed
+
+    auto& acc = *h->accumulator;
+    if (is_group_collision(h, acc.entries, length_tag) ||
+        is_group_collision(h, acc.entries, data_tag)) {
+        return FIXPP_ERR_TYPE_MISMATCH;
+    }
+    if (h->dict_) {
+        for (const uint16_t t : {length_tag, data_tag}) {
+            if (h->dict_->field_ref(acc.msg_type, t).rule ==
+                fixpp::dict::field_presence::NotDeclared) {
+                return FIXPP_ERR_DICT_CONFIG;
+            }
+        }
+    }
+    return upsert_pair(acc.entries, acc.arena_, length_tag, data_tag,
+                       reinterpret_cast<const std::byte*>(bytes), len);
 }
 
 // ── fixpp_msg_set_int ─────────────────────────────────────────────────────────
@@ -847,6 +936,39 @@ static fixpp_error_t validate_group_grammar(const std::pmr::vector<AccumulatorEn
     return FIXPP_ERR_OK;
 }
 
+// ── Length+Data conformance (fixpp#428 §5.3) ──────────────────────────────────
+//
+// Refuses a container, at any depth, whose Length+Data pairs are malformed or which
+// carries SOH outside a Data value, whichever setter wrote the fields. A group's
+// count field is one field of its container, so a Length right before a group is
+// a Length not followed by its Data; each instance is checked as its own container.
+static fixpp_error_t check_length_data(const std::pmr::vector<AccumulatorEntry>& fields,
+                                       const fixpp::wire::dict_hooks& hooks) noexcept {
+    fixpp::wire::length_data_checker checker{hooks};
+    for (const auto& e : fields) {
+        if (e.is_group) {
+            char cb[16];
+            const auto* ce = std::to_chars(cb, cb + sizeof(cb), e.instances.size()).ptr;
+            if (!checker.observe(e.tag, {reinterpret_cast<const std::byte*>(cb),
+                                         static_cast<std::size_t>(ce - cb)})) {
+                return FIXPP_ERR_WIRE_CONFORMANCE;
+            }
+            for (const auto& inst : e.instances) {
+                if (fixpp_error_t const c = check_length_data(inst.fields, hooks);
+                    c != FIXPP_ERR_OK) {
+                    return c;
+                }
+            }
+            continue;
+        }
+        if (soh_outside_data(hooks, e.tag, e.value_bytes.data(), e.value_bytes.size()) ||
+            !checker.observe(e.tag, e.value_bytes)) {
+            return FIXPP_ERR_WIRE_CONFORMANCE;
+        }
+    }
+    return checker.finish() ? FIXPP_ERR_OK : FIXPP_ERR_WIRE_CONFORMANCE;
+}
+
 // ── fixpp_msg_commit ──────────────────────────────────────────────────────────
 //
 // Serialise the accumulator into an app-payload in the session arena.
@@ -881,6 +1003,11 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_commit(fixpp_msg_t* msg, const uint8_t*
             validate_group_grammar(acc.entries, h->dict_.get(), h->session_tv_.get(),
                                    fixpp::wire::group_context{.msg_type = acc.msg_type});
         c != FIXPP_ERR_OK) {
+        return c;
+    }
+
+    // fixpp#428 §5.3: malformed Length+Data pairs, or SOH outside a Data value.
+    if (fixpp_error_t c = check_length_data(acc.entries, pair_hooks(h)); c != FIXPP_ERR_OK) {
         return c;
     }
 
@@ -1006,7 +1133,43 @@ static fixpp_error_t entry_set_bytes_impl(fixpp_entry_t* entry, uint16_t tag, co
 FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_string(fixpp_entry_t* entry, uint16_t tag,
                                                       const char* value, size_t len) {
     if (value == nullptr) return FIXPP_ERR_NULL_HANDLE;
-    return entry_set_bytes_impl(entry, tag, reinterpret_cast<const std::byte*>(value), len);
+    if (fixpp_error_t c = precheck_entry_tag(entry, tag); c != FIXPP_ERR_OK) return c;
+    const auto* bytes = reinterpret_cast<const std::byte*>(value);
+    // fixpp#428 §5.1: SOH only inside a Data value (checked before delegation, so the
+    // shared entry_set_bytes_impl keeps serving the numeric setters unchanged).
+    if (soh_outside_data(pair_hooks(reinterpret_cast<fixpp_entry*>(entry)->builder->msg), tag,
+                         bytes, len)) {
+        return FIXPP_ERR_WIRE_CONFORMANCE;
+    }
+    return entry_set_bytes_impl(entry, tag, bytes, len);
+}
+
+// ── fixpp_entry_set_data (fixpp#428, C-ABI 1.6) ────────────────────────────────
+// Like fixpp_msg_set_data, on the current group instance. Like every entry setter it
+// runs no MsgType-grammar check.
+FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_data(fixpp_entry_t* entry, uint16_t data_tag,
+                                                    const uint8_t* bytes, size_t len) {
+    if (bytes == nullptr) return FIXPP_ERR_NULL_HANDLE;
+    if (fixpp_error_t c = precheck_entry_tag(entry, data_tag); c != FIXPP_ERR_OK) return c;
+
+    auto* e = reinterpret_cast<fixpp_entry*>(entry);
+    auto* h = e->builder->msg;
+    const uint16_t length_tag = pair_hooks(h).length_tag_for_data(data_tag);
+    if (length_tag == 0) return FIXPP_ERR_TYPE_MISMATCH;
+    if (len == 0) return FIXPP_ERR_WIRE_CONFORMANCE;  // an empty Data value is malformed
+
+    AccumulatorEntry* group = resolve_group(e->builder);
+    // A Data field cannot be a group's delimiter: its Length would have to come first.
+    if (h->dict_ && h->dict_->group_first_field(group->tag) == data_tag) {
+        return FIXPP_ERR_TYPE_MISMATCH;
+    }
+    GroupInstance& inst = group->instances[e->instance_index];
+    if (is_group_collision(h, inst.fields, length_tag) ||
+        is_group_collision(h, inst.fields, data_tag)) {
+        return FIXPP_ERR_TYPE_MISMATCH;
+    }
+    return upsert_pair(inst.fields, h->accumulator->arena_, length_tag, data_tag,
+                       reinterpret_cast<const std::byte*>(bytes), len);
 }
 
 FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_int(fixpp_entry_t* entry, uint16_t tag,

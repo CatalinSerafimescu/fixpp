@@ -15,6 +15,7 @@ fixpp_engine_create
 fixpp_engine_destroy
 fixpp_engine_start
 fixpp_entry_group_begin
+fixpp_entry_set_data
 fixpp_entry_set_decimal
 fixpp_entry_set_double
 fixpp_entry_set_int
@@ -44,6 +45,7 @@ fixpp_msg_group_end
 fixpp_msg_has_tag
 fixpp_msg_remove_tag
 fixpp_msg_set_bytes
+fixpp_msg_set_data
 fixpp_msg_set_decimal
 fixpp_msg_set_double
 fixpp_msg_set_int

@@ -41,7 +41,10 @@ public:
                                        std::uint16_t) noexcept;
     using group_delim_fn_t = std::uint16_t (*)(void const*, group_context const&,
                                                std::uint16_t) noexcept;
-    using length_pair_fn_t = std::uint16_t (*)(void const*, std::uint16_t) noexcept;
+    // Which half of a pair a dictionary lookup starts from.
+    enum class pair_side : std::uint8_t { length, data };
+    // Given one half of a dictionary-declared pair, the other half, or 0.
+    using length_pair_fn_t = std::uint16_t (*)(void const*, std::uint16_t, pair_side) noexcept;
 
     // No dictionary: every predicate is absent and pairs come from the standard
     // table alone.
@@ -75,8 +78,23 @@ public:
         if (length_pair_ == nullptr || detail::is_standard_pair_tag(length_tag)) {
             return 0;
         }
-        std::uint16_t const data = length_pair_(opaque_dict_, length_tag);
+        std::uint16_t const data = length_pair_(opaque_dict_, length_tag, pair_side::length);
         return (data != 0 && !detail::is_standard_pair_tag(data)) ? data : 0;
+    }
+
+    // The Length tag that counts `data_tag`, or 0, by the same precedence: the
+    // standard pairs first, a dictionary pair only when neither tag is standard.
+    [[nodiscard]] constexpr std::uint16_t length_tag_for_data(
+        std::uint16_t data_tag) const noexcept {
+        if (std::uint16_t const standard = detail::standard_length_tag_for_data(data_tag);
+            standard != 0) {
+            return standard;
+        }
+        if (length_pair_ == nullptr || detail::is_standard_pair_tag(data_tag)) {
+            return 0;
+        }
+        std::uint16_t const length = length_pair_(opaque_dict_, data_tag, pair_side::data);
+        return (length != 0 && !detail::is_standard_pair_tag(length)) ? length : 0;
     }
 
 private:

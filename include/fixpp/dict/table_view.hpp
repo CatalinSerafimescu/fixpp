@@ -523,6 +523,13 @@ public:
         return it == length_pair_data_tag_.end() ? std::uint16_t{0} : it->second;
     }
 
+    // fixpp#428 (design §3): the inverse — the Length tag this dictionary pairs
+    // with `data_tag`, or 0. Read by `wire::dict_hooks::length_tag_for_data`.
+    [[nodiscard]] std::uint16_t data_pair_length_tag(std::uint16_t data_tag) const noexcept {
+        auto const it = data_pair_length_tag_.find(data_tag);
+        return it == data_pair_length_tag_.end() ? std::uint16_t{0} : it->second;
+    }
+
     // ── 081 Concern A: validator-private FIXT.1.1 framing surface ──────────
     // (research.md D-1/D-2, data-model.md E-2). Populated by
     // Dictionary::as_table_view() ONLY for v50/v50sp1/v50sp2 (empty
@@ -792,6 +799,7 @@ public:
     void set_length_pair_data_tag(std::uint16_t length_tag, std::uint16_t data_tag) {
         if (data_tag != 0) {
             length_pair_data_tag_[length_tag] = data_tag;
+            data_pair_length_tag_[data_tag] = length_tag;
         }
     }
 
@@ -944,6 +952,8 @@ private:
     // partner. Populated ONLY by Dictionary::as_table_view() from
     // FieldRef::length_pair_data_tag (see set_length_pair_data_tag above).
     std::unordered_map<std::uint16_t, std::uint16_t> length_pair_data_tag_;
+    // fixpp#428: Data tag -> its Length partner; filled beside the map above.
+    std::unordered_map<std::uint16_t, std::uint16_t> data_pair_length_tag_;
 };
 
 }  // namespace fixpp::dict

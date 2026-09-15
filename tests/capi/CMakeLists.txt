@@ -229,6 +229,19 @@ target_include_directories(capi_message_read_test PRIVATE ${FIXPP_CAPI_FEATURE_B
 add_test(NAME capi_message_read COMMAND capi_message_read_test)
 set_tests_properties(capi_message_read PROPERTIES LABELS "capi;051")
 
+# fixpp#428 / #426 (design .specify/426-428-length-data-pairs.md §5, §6): the C-ABI
+# Length+Data setters and commit-time pair rule, and a two-engine loopback whose
+# EncodedText holds SOH through send, receive and clone.
+add_executable(capi_length_data_test length_data_setters_test.cpp length_data_send_recv_test.cpp)
+target_link_libraries(capi_length_data_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_length_data_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
+add_test(NAME capi_length_data COMMAND capi_length_data_test)
+set_tests_properties(capi_length_data PROPERTIES LABELS "capi;426;428;length-data")
+
 # message_read_failloud_test — 073 (L-065-2, #184) T006: nested-read
 # arena-exhaustion fail-loud witness (RED-first against pristine source).
 add_executable(capi_message_read_failloud_test message_read_failloud_test.cpp)

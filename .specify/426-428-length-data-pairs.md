@@ -26,10 +26,10 @@
 >   - `fixpp_msg_commit` refuses malformed Length+Data pairs;
 >   - no other existing-symbol behaviour changes.
 >
->   The justification is the Article X ruling in §5.5: refusing **only output the FIX standard
->   defines as malformed** is a conformance fix, not a contract break. (r2 R2-1 moved the SOH rule
->   from "string setters reject SOH" to the condition stated in §5.1. That serves the same intent,
->   and the ruling now holds.)
+>   This is a **breaking change** to three existing symbols. It ships as MINOR 1.6.0 under proposed
+>   constitution Article X §7: before the first public release a breaking C-ABI change bumps MINOR
+>   (§5.5). r2 R2-1 moved the SOH rule from "string setters reject SOH" to the condition stated in
+>   §5.1, so no well-formed call sequence is refused.
 > - **O-3** The loose dictionary callbacks are **bundled now** into one value type.
 > - **O-4** #418 (arbitrary bytes through C++ `body_builder`) stays out, but it depends on #427 (landed
 >   first) and must use the same pair table. Two things here exist so it can: the Data→Length lookup
@@ -381,20 +381,23 @@ sending Data-first bytes, which are malformed and are now refused.
   is a suspected pre-existing defect, to be verified and filed separately. This design does not rely
   on it.
 
-### 5.5 Article X ruling and surface bookkeeping
+### 5.5 Versioning and surface bookkeeping
 
-**Ruling proposed for `.specify/constitution.md` Article X, as a new clause:**
+**These refusals are a breaking change.** `fixpp_msg_set_string`, `fixpp_entry_set_string` and
+`fixpp_msg_commit` refuse call sequences that used to succeed. An earlier revision of this section
+proposed an Article X ruling that would have classified them as a MINOR "conformance fix", because
+every refused call produced malformed FIX. The project owner rejected that framing on 2026-09-15: a
+call that used to succeed and now fails is breaking, whatever it produced.
 
-> *A change to an existing C-ABI symbol that refuses only inputs whose output is malformed under the
-> FIX standard — or, for fields the standard does not define, under the dictionary in force — is a
-> conformance fix and may ship in a MINOR, provided the refusal is documented on the symbol and
-> listed in the release's B&L delta. A change that refuses any call sequence yielding a message
-> well-formed in that sense is breaking and requires a MAJOR.*
->
-> Scope: a dictionary that retypes a standard FIX tag is non-conformant to the standard, and the
-> standard's definition of that tag governs (r3 R3-1).
+fixpp has no public release and no consumers, so the change ships under proposed constitution
+Article X §7 (amendment branch `constitution/x7-prerelease-cabi`, constitution v1.1). Before the first
+public release a breaking change bumps MINOR and is declared **BREAKING** on each affected symbol, in
+the PR, and in the B&L delta, with every in-repository consumer updated in the same PR. The
+compatibility promise, and a reset of the C-ABI version to 1.0.0, start at the first public release.
+**This work merges after that amendment.**
 
-§5.1 and §5.3 rely on this ruling.
+The dictionary-precedence scope is unchanged: a dictionary that retypes a standard FIX tag does not
+change how that tag pairs (r3 R3-1, §3).
 
 **Bookkeeping:**
 - `include/fix/c_api/message.h`: two new prototypes, plus reworded docs for `set_string`,

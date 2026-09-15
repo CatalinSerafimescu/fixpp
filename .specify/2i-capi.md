@@ -1000,6 +1000,17 @@ fixpp_error_t fixpp_msg_set_bytes(fixpp_msg_t*   msg,
                                   const uint8_t* bytes,
                                   size_t         len);
 
+/* 1.6 (fixpp#428): set a Length+Data pair. `data_tag` is the Data field; its Length
+ * is written from `len`. Appends Length then Data, or overwrites an adjacent
+ * Length-first pair in place; any other state is refused with nothing written.
+ * fixpp_msg_commit refuses malformed pairs and SOH outside a Data value.
+ * Authority: .specify/426-428-length-data-pairs.md §5. */
+FIXPP_API_EXPORT
+fixpp_error_t fixpp_msg_set_data(fixpp_msg_t*   msg,
+                                 uint16_t       data_tag,
+                                 const uint8_t* bytes,
+                                 size_t         len);
+
 /* Set an INT field — engine formats to ASCII. */
 FIXPP_API_EXPORT
 fixpp_error_t fixpp_msg_set_int(fixpp_msg_t* msg,
@@ -1137,6 +1148,13 @@ fixpp_error_t fixpp_entry_set_string(fixpp_entry_t* entry,
                                      uint16_t       tag,
                                      const char*    value,
                                      size_t         len);
+
+/* 1.6 (fixpp#428): fixpp_msg_set_data on the current group instance. */
+FIXPP_API_EXPORT
+fixpp_error_t fixpp_entry_set_data(fixpp_entry_t*  entry,
+                                   uint16_t        data_tag,
+                                   const uint8_t*  bytes,
+                                   size_t          len);
 
 FIXPP_API_EXPORT
 fixpp_error_t fixpp_entry_set_int(fixpp_entry_t* entry,

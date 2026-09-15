@@ -135,6 +135,34 @@ static_assert(standard_length_data_pairs_sorted);
                                                                                     : 0;
 }
 
+// The same pairs sorted by Data tag, for the Data->Length lookup. Derived from the
+// table above rather than written a second time.
+inline constexpr std::array<length_data_pair, standard_length_data_pairs.size()>
+    standard_pairs_by_data = [] {
+        auto out = standard_length_data_pairs;
+        std::ranges::sort(out, std::ranges::less{}, &length_data_pair::data_tag);
+        return out;
+    }();
+// No Data tag is paired twice, so the inverse is unambiguous.
+static_assert(std::ranges::adjacent_find(standard_pairs_by_data, {}, &length_data_pair::data_tag) ==
+              standard_pairs_by_data.end());
+
+// The Length tag paired with `data_tag` by the FIX standard, or 0.
+[[nodiscard]] constexpr std::uint16_t standard_length_tag_for_data(
+    std::uint16_t data_tag) noexcept {
+    auto const it = std::ranges::lower_bound(standard_pairs_by_data, data_tag, std::ranges::less{},
+                                             &length_data_pair::data_tag);
+    return (it != standard_pairs_by_data.end() && it->data_tag == data_tag) ? it->length_tag : 0;
+}
+
+// The two directions agree on every standard pair.
+static_assert(std::ranges::all_of(standard_length_data_pairs, [](length_data_pair const p) {
+    return standard_data_tag_for_length(p.length_tag) == p.data_tag &&
+           standard_length_tag_for_data(p.data_tag) == p.length_tag;
+}));
+static_assert(standard_length_tag_for_data(89) == 93);  // inverted pair
+static_assert(standard_length_tag_for_data(93) == 0);   // a Length tag is not a Data tag
+
 // Every tag that appears on EITHER side of `standard_length_data_pairs`,
 // sorted ascending for a binary-search membership test. Derived from the one
 // table above at compile time rather than hand-written a second time: two

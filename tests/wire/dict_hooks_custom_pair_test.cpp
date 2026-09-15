@@ -437,3 +437,20 @@ TEST(DictHooksCustomPair, StandardDataTagIsNeverPairedByADictionary) {
     EXPECT_EQ(hooks.data_tag_for_length(5001), 0U)
         << "a dictionary pair whose Data tag is a standard pair tag must not be honoured";
 }
+
+// ── The Data->Length inverse (fixpp#428, design §3) ─────────────────────────
+TEST(DictHooksCustomPair, LengthTagForDataIsTheInverseWithTheSamePrecedence) {
+    std::pmr::monotonic_buffer_resource dict_mr;
+    auto tv = load_custom_pair_dict(&dict_mr);
+    auto const hooks = dict_hooks::for_table_view(tv);
+    EXPECT_EQ(hooks.length_tag_for_data(5002), 5001U) << "a dictionary pair, inverted";
+    EXPECT_EQ(hooks.length_tag_for_data(355), 354U) << "a standard pair the dictionary omits";
+    EXPECT_EQ(hooks.length_tag_for_data(89), 93U) << "a standard inverted pair";
+    EXPECT_EQ(hooks.length_tag_for_data(5001), 0U) << "a Length tag is not a Data tag";
+    EXPECT_EQ(dict_hooks::none().length_tag_for_data(5002), 0U) << "no dictionary, no custom pair";
+
+    table_view conflicting;
+    conflicting.set_length_pair_data_tag(5001, 96);
+    EXPECT_EQ(dict_hooks::for_table_view(conflicting).length_tag_for_data(96), 95U)
+        << "the standard RawDataLength(95) keeps RawData(96)";
+}

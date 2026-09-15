@@ -612,8 +612,10 @@ inline dict_hooks dict_hooks::for_table_view(fixpp::dict::table_view const& dict
         },
         // fixpp#426 (design §3): the Length+Data pairing sibling — resolves
         // through the SAME opaque_dict.
-        [](void const* d, std::uint16_t length_tag) noexcept -> std::uint16_t {
-            return static_cast<fixpp::dict::table_view const*>(d)->length_pair_data_tag(length_tag);
+        [](void const* d, std::uint16_t tag, dict_hooks::pair_side from) noexcept -> std::uint16_t {
+            auto const* tv = static_cast<fixpp::dict::table_view const*>(d);
+            return from == dict_hooks::pair_side::length ? tv->length_pair_data_tag(tag)
+                                                         : tv->data_pair_length_tag(tag);
         }};
 }
 
