@@ -1812,9 +1812,10 @@ protected:
         const auto seq = extract_field(std::span<const std::byte>(captured_frames.back()), 34);
         ASSERT_TRUE(seq.has_value());
         EXPECT_EQ(*seq, "2") << "the real MsgSeqNum, not the one inside EncodedText";
+        // `seq` views the captured frame, so read it before the clear frees that frame.
+        const auto app_seq = static_cast<seqnum_t>(std::stoul(std::string(*seq)));
 
         captured_frames.clear();
-        const auto app_seq = static_cast<seqnum_t>(std::stoul(std::string(*seq)));
         feed(sess, make_resend_request(app_seq, app_seq, /*inbound_seq=*/2, "TW", "ISLD"));
         std::size_t replays = 0;
         for (const auto& f : captured_frames) {
