@@ -162,6 +162,69 @@ TEST(LengthDataSessionScanner, RedactTag554LeavesCountedValueUnchanged) {
     EXPECT_NE(redact_tag554(frame).find(counted_part), std::string::npos);
 }
 
+// A count that ends on a byte other than SOH is malformed too (design §4, rows 6-8):
+// the scanner stops, so the bytes after the counted value are never read as a field.
+TEST(LengthDataSessionScanner, ScanFrameHeaderStopsAtACountEndingOnANonSohByte) {
+    auto const frame = make_frame(
+        "35=D\x01"
+        "34=5\x01"
+        "354=2\x01"
+        "355=x\x01"
+        "Z34=99\x01");
+    auto const h = detail::scan_frame_header(std::span<const std::byte>{frame});
+    EXPECT_EQ(h.msg_seq_num, "5");
+}
+
+TEST(LengthDataSessionScanner, InterpretLogonStopsAtAMalformedCount) {
+    auto const frame = make_frame(
+        "35=A\x01"
+        "34=1\x01"
+        "49=TW\x01"
+        "52=20240101-00:00:00.000\x01"
+        "56=ISLD\x01"
+        "98=0\x01"
+        "108=30\x01"
+        "95=999\x01"
+        "96=x\x01"
+        "554=late\x01");
+    auto const r = interpret_logon(std::span<const std::byte>{frame}, /*expected_sender=*/"TW",
+                                   /*expected_target=*/"ISLD", /*expected_begin=*/"FIX.4.4");
+    ASSERT_TRUE(r.has_value());
+    EXPECT_FALSE(r->password.has_value()) << "a field after a malformed count must not be read";
+}
+
+// On a malformed count the Password walk cannot know where the value ends, so from that
+// field on it masks every SOH-anchored `554=` (design §4, rows 10-12): a real Password
+// is over-masked rather than disclosed.
+TEST(LengthDataSessionScanner, Tag554ScannersFallBackToEveryAnchoredPasswordOnAMalformedCount) {
+    auto frame = make_frame(
+        "35=A\x01"
+        "554=pw\x01"
+        "95=999\x01"
+        "96=x\x01"
+        "554=inner\x01");
+    EXPECT_TRUE(mask_tag554_same_length_inplace(std::span<std::byte>{frame}));
+    EXPECT_NE(as_sv(frame).find("554=**\x01"), std::string_view::npos) << as_sv(frame);
+    EXPECT_NE(as_sv(frame).find("554=*****\x01"), std::string_view::npos) << as_sv(frame);
+
+    auto const only_after = make_frame(
+        "35=A\x01"
+        "95=999\x01"
+        "96=x\x01"
+        "554=secret\x01");
+    EXPECT_TRUE(frame_has_genuine_tag554(std::span<const std::byte>{only_after}));
+    EXPECT_EQ(redact_tag554(std::string{as_sv(only_after)}).find("secret"), std::string::npos);
+}
+
+TEST(LengthDataSessionScanner, MaskTag554SkipsAFieldWhoseTagIsNotDigits) {
+    auto frame = make_frame(
+        "35=A\x01"
+        "5x4=1\x01"
+        "554=pw\x01");
+    EXPECT_TRUE(mask_tag554_same_length_inplace(std::span<std::byte>{frame}));
+    EXPECT_NE(as_sv(frame).find("554=**\x01"), std::string_view::npos) << as_sv(frame);
+}
+
 // ── Zero global allocations (constitution §VIII.5) ───────────────────────────
 //
 // These scanners run on the inbound dispatch and persist paths. Each is called once

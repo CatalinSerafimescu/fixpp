@@ -1662,7 +1662,8 @@ namespace {
 class AliasingStoredTagTest : public ResendAnswerReplayTest {
 protected:
     void expect_gap_filled(std::string_view sending_time_field, std::string_view body,
-                           const char* label) {
+                           const char* label,
+                           fixpp::core::error why = fixpp::core::error::wire_tag_out_of_range) {
         auto factory = std::make_shared<CapturingStoreFactory>();
         auto cfg = make_cfg(factory);
         Session sess(engine, cfg);
@@ -1676,12 +1677,24 @@ protected:
 
         feed(sess, make_resend_request(app_seq, app_seq, /*inbound_seq=*/2, "TW", "ISLD"));
 
-        expect_slot_gap_filled(captured_frames, sess, app_seq,
-                               fixpp::core::error::wire_tag_out_of_range);
+        expect_slot_gap_filled(captured_frames, sess, app_seq, why);
     }
 };
 
 }  // namespace
+
+// fixpp#426 (design §4, row 9): a stored Length whose count overruns the frame leaves the
+// replay no trustworthy field boundary, so the slot is gap-filled as for a bad tag. The
+// Length comes before SendingTime(52), because the replay's first pass stops at 52.
+TEST_F(AliasingStoredTagTest, Replay_StoredLengthOverrunningTheFrame_SlotIsGapFilled) {
+    expect_gap_filled("",
+                      "11=ORD\x01"
+                      "354=999\x01"
+                      "355=x\x01"
+                      "52=20260614-12:00:00.000\x01",
+                      "Replay_StoredLengthOverrun/send",
+                      fixpp::core::error::wire_invalid_field_format);
+}
 
 TEST_F(AliasingStoredTagTest, Replay_StoredTagAbove65535_SlotIsGapFilled) {
     expect_gap_filled("52=20260614-12:00:00.000\x01",

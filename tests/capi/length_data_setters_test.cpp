@@ -62,6 +62,35 @@ struct Fixture {
     }
 };
 
+// An open outbound NewOrderSingle on a session with no dictionary: the pairs are the
+// standard table alone, and a group can be opened on any tag.
+struct DictFreeFixture {
+    fixpp_engine_t* eng = nullptr;
+    fixpp_session_t* sess = nullptr;
+    fixpp_msg_t* msg = nullptr;
+    DictFreeFixture() {
+        EXPECT_EQ(fixpp_engine_create(make_engine_cfg(), FIXPP_C_ABI_VERSION_MAJOR,
+                                      FIXPP_C_ABI_VERSION_MINOR, &eng),
+                  FIXPP_ERR_OK);
+        fixpp_session_config_t* sc = nullptr;
+        EXPECT_EQ(fixpp_session_config_create(&sc), FIXPP_ERR_OK);
+        EXPECT_EQ(fixpp_session_config_set_comp_ids(sc, "DFA", "DFB"), FIXPP_ERR_OK);
+        EXPECT_EQ(fixpp_session_config_set_begin_string(sc, "FIX.4.2"), FIXPP_ERR_OK);
+        EXPECT_EQ(fixpp_session_config_set_role(sc, FIXPP_ROLE_ACCEPTOR), FIXPP_ERR_OK);
+        EXPECT_EQ(fixpp_session_config_set_heartbeat_seconds(sc, 30), FIXPP_ERR_OK);
+        EXPECT_EQ(fixpp_session_config_set_security(sc, FIXPP_SECURITY_INSECURE_PLAIN_TCP, nullptr,
+                                                    nullptr),
+                  FIXPP_ERR_OK);
+        set_loopback_endpoint(sc, "127.0.0.1", 0);
+        EXPECT_EQ(fixpp_session_open(eng, sc, &sess), FIXPP_ERR_OK);
+        EXPECT_EQ(fixpp_msg_create_outbound(sess, "D", 1, &msg), FIXPP_ERR_OK);
+    }
+    ~DictFreeFixture() {
+        if (msg) fixpp_msg_destroy(msg);
+        if (eng) fixpp_engine_destroy(eng);
+    }
+};
+
 constexpr std::string_view kBinary{
     "A\x01"
     "B\xff",
@@ -231,6 +260,55 @@ TEST(CapiEntrySetData, DelimiterRuleUsesTheGroupsOwnContext) {
         << payload;
 }
 
+TEST(CapiEntrySetData, NestedGroupDelimiterIsLookedUpUnderItsParentGroup) {
+    // Group 5000 is declared only at the top of "D", where its delimiter is the Data field
+    // 5004. Nested under a NoAllocs(78) entry it has no declaration, so the exact-context
+    // lookup misses and the setter defers to commit, which refuses the undeclared nesting.
+    // A lookup that drops the parent group finds D's top-level declaration and refuses
+    // 5004 at the setter instead.
+    Fixture f;
+    fixpp_group_builder_t* gb = nullptr;
+    ASSERT_EQ(fixpp_msg_group_begin(f.msg, 78, &gb), FIXPP_ERR_OK);
+    fixpp_entry_t* e = nullptr;
+    ASSERT_EQ(fixpp_group_builder_add_entry(gb, &e), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_entry_set_string(e, 79, "ACC", 3), FIXPP_ERR_OK);
+    fixpp_group_builder_t* nested = nullptr;
+    ASSERT_EQ(fixpp_entry_group_begin(e, 5000, &nested), FIXPP_ERR_OK);
+    fixpp_entry_t* ne = nullptr;
+    ASSERT_EQ(fixpp_group_builder_add_entry(nested, &ne), FIXPP_ERR_OK);
+    EXPECT_EQ(fixpp_entry_set_data(ne, 5004, as_u8("blob"), 4), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_msg_group_end(f.msg, nested), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_msg_group_end(f.msg, gb), FIXPP_ERR_OK);
+    fixpp_error_t rc{};
+    (void)f.commit(rc);
+    EXPECT_NE(rc, FIXPP_ERR_OK);
+}
+
+// §5.2: a Data setter refuses a pair whose Length or Data tag is already a group in the
+// target container, and writes nothing. A scalar Data right after the group makes the two
+// look like an adjacent pair, which would otherwise be overwritten in place, group and all.
+TEST(CapiSetData, RefusesAPairThatCollidesWithAGroup) {
+    DictFreeFixture f;
+    fixpp_group_builder_t* gb = nullptr;
+    ASSERT_EQ(fixpp_msg_group_begin(f.msg, 354, &gb), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_msg_group_end(f.msg, gb), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_msg_set_string(f.msg, 355, "abc", 3), FIXPP_ERR_OK);
+    EXPECT_EQ(fixpp_msg_set_data(f.msg, 355, as_u8("xyz"), 3), FIXPP_ERR_TYPE_MISMATCH);
+}
+
+TEST(CapiEntrySetData, RefusesAPairThatCollidesWithANestedGroup) {
+    DictFreeFixture f;
+    fixpp_group_builder_t* gb = nullptr;
+    ASSERT_EQ(fixpp_msg_group_begin(f.msg, 78, &gb), FIXPP_ERR_OK);
+    fixpp_entry_t* e = nullptr;
+    ASSERT_EQ(fixpp_group_builder_add_entry(gb, &e), FIXPP_ERR_OK);
+    fixpp_group_builder_t* nested = nullptr;
+    ASSERT_EQ(fixpp_entry_group_begin(e, 354, &nested), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_msg_group_end(f.msg, nested), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_entry_set_string(e, 355, "abc", 3), FIXPP_ERR_OK);
+    EXPECT_EQ(fixpp_entry_set_data(e, 355, as_u8("xyz"), 3), FIXPP_ERR_TYPE_MISMATCH);
+}
+
 TEST(CapiSetData, RefusesAFramingTagAsTheDerivedLengthHalf) {
     // The dictionary pairs BeginString(8) with the Data field 5100, so the Length half
     // either setter would derive is a framing tag. Both refuse and write nothing.
@@ -396,6 +474,23 @@ TEST(CapiCommitPairs, RefusesALoneLength) {
 
 TEST(CapiCommitPairs, RefusesALoneData) {
     Fixture f;
+    ASSERT_EQ(f.set_string(355, "abc"), FIXPP_ERR_OK);
+    fixpp_error_t rc{};
+    (void)f.commit(rc);
+    EXPECT_EQ(rc, FIXPP_ERR_WIRE_CONFORMANCE);
+}
+
+// A group's count field is a field of its container, so a Length directly before a group
+// is a Length not followed by its Data, even when that Data comes after the group.
+TEST(CapiCommitPairs, RefusesALengthSeparatedFromItsDataByAGroup) {
+    Fixture f;
+    ASSERT_EQ(fixpp_msg_set_int(f.msg, 354, 3), FIXPP_ERR_OK);
+    fixpp_group_builder_t* gb = nullptr;
+    ASSERT_EQ(fixpp_msg_group_begin(f.msg, 78, &gb), FIXPP_ERR_OK);
+    fixpp_entry_t* e = nullptr;
+    ASSERT_EQ(fixpp_group_builder_add_entry(gb, &e), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_entry_set_string(e, 79, "ACC", 3), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_msg_group_end(f.msg, gb), FIXPP_ERR_OK);
     ASSERT_EQ(f.set_string(355, "abc"), FIXPP_ERR_OK);
     fixpp_error_t rc{};
     (void)f.commit(rc);
