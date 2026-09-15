@@ -159,7 +159,7 @@ value changes nothing there:
 
 ## 2. D-1 — the standard pair table: one checked-in header
 
-**The header.** `include/fixpp/wire/length_data_pairs.hpp` (new) holds a constexpr array sorted by
+**The header.** `include/fixpp/core/length_data_pairs.hpp` (new) holds a constexpr array sorted by
 Length tag and `detail::standard_data_tag_for_length(std::uint16_t) noexcept`, a binary search.
 - Both hand copies of the 6-pair table are deleted.
 - So is the comment claiming `offset_table.cpp` cannot include a shared table; that is wrong for a
@@ -193,7 +193,14 @@ Facts behind the test:
 bundle. There are three factories:
 - `none()`: all fields null.
 - `for_table_view(fixpp::dict::table_view const&)`: every callback set, using captureless lambdas
-  moved from `Parser(TV&)`.
+  moved from `Parser(TV&)` — except `length_pair`, which is installed only when
+  `table_view::has_nonstandard_pair()` is true, i.e. the dictionary declares a pair whose two tags
+  the standard table both leave unnamed. Those are the only pairs the lookup rule below can
+  honour, so for every other dictionary the callback could only ever answer 0 — at one lookup per
+  field, on a bundle that `Validator::validate`, `Session`'s scanners and the C-ABI setters build
+  per message. Every shipped dictionary is of that kind. `table_view` computes the flag in
+  `set_length_pair_data_tag`, which is why the standard table is a core header (§2): the
+  dictionary layer may not include wire ([arch §2.3]).
 - A test-only factory under the existing test-hooks seam, for stub dictionaries such as the uint16
   token in `fuzz_wire_nested_slice.cpp` and the offset-table tests that pin a null member function.
 

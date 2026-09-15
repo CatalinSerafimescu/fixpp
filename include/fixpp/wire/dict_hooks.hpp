@@ -70,8 +70,9 @@ public:
     // re-pair or retype a standard pair, and every scanner splits a message the
     // same way whichever dictionary it holds.
     //
-    // Every scanner calls this for every field, so a tag no pair names is answered
-    // from two bits (the standard set, then the dictionary's) without a lookup.
+    // Every scanner calls this for every field, so a tag the standard table does not
+    // name costs one constexpr bit test here, and nothing more when the dictionary
+    // declares no pair of its own (`for_table_view` then installs no callback).
     [[nodiscard]] constexpr std::uint16_t data_tag_for_length(
         std::uint16_t length_tag) const noexcept {
         // A standard pair tag is answered by the standard table alone: a Length gets
@@ -79,7 +80,7 @@ public:
         if (detail::standard_pair_tag_bit(length_tag)) {
             return detail::standard_data_tag_for_length(length_tag);
         }
-        if (!dictionary_may_pair(length_tag)) {
+        if (length_pair_ == nullptr) {
             return 0;
         }
         std::uint16_t const data = length_pair_(opaque_dict_, length_tag, pair_side::length);
@@ -93,7 +94,7 @@ public:
         if (detail::standard_pair_tag_bit(data_tag)) {
             return detail::standard_length_tag_for_data(data_tag);
         }
-        if (!dictionary_may_pair(data_tag)) {
+        if (length_pair_ == nullptr) {
             return 0;
         }
         std::uint16_t const length = length_pair_(opaque_dict_, data_tag, pair_side::data);
@@ -107,32 +108,18 @@ private:
 
     constexpr dict_hooks(void const* opaque_dict, classify_fn_t classify,
                          group_member_fn_t group_member, group_delim_fn_t group_delim,
-                         length_pair_fn_t length_pair,
-                         std::uint64_t const* pair_tag_bits = nullptr) noexcept
+                         length_pair_fn_t length_pair) noexcept
         : opaque_dict_{opaque_dict},
           classify_{classify},
           group_member_{group_member},
           group_delim_{group_delim},
-          length_pair_{length_pair},
-          pair_tag_bits_{pair_tag_bits} {}
-
-    // True only when the bundle carries the dictionary's pair-tag bitset and it names
-    // `tag`; a clear bit means `length_pair_` would answer 0. `for_table_view` passes
-    // the bitset with the callback. The test-only constructor passes none, so a
-    // bundle built there never consults a pair callback.
-    [[nodiscard]] constexpr bool dictionary_may_pair(std::uint16_t tag) const noexcept {
-        return pair_tag_bits_ != nullptr && ((pair_tag_bits_[tag >> 6U] >> (tag & 63U)) & 1U) != 0;
-    }
+          length_pair_{length_pair} {}
 
     void const* opaque_dict_ = nullptr;
     classify_fn_t classify_ = nullptr;
     group_member_fn_t group_member_ = nullptr;
     group_delim_fn_t group_delim_ = nullptr;
     length_pair_fn_t length_pair_ = nullptr;
-    // 1024 words, one bit per tag, owned by the dictionary behind `opaque_dict_`
-    // (table_view::pair_tag_bits): a set bit may pair, a clear bit never does.
-    // Non-null only together with `length_pair_`.
-    std::uint64_t const* pair_tag_bits_ = nullptr;
 };
 
 // Every holder (OffsetTable, MessageView, entry_context, field_iterator)

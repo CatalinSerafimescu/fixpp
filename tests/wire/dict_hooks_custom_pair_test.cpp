@@ -474,11 +474,12 @@ TEST(DictHooksCustomPair, LengthTagForDataIsTheInverseWithTheSamePrecedence) {
         << "the standard RawDataLength(95) keeps RawData(96)";
 }
 
-// ── The bit tests change no answer ───────────────────────────────────────────
+// ── The fast paths change no answer ──────────────────────────────────────────
 //
-// dict_hooks tests the standard pair-tag bits and the dictionary's pair-tag bits
-// before any lookup. Every 16-bit tag, in both directions, must get the answer of
-// the precedence rule written with lookups only.
+// dict_hooks answers a standard pair tag from a constexpr bitset, and
+// `for_table_view` gives it no pair callback at all unless the dictionary declares a
+// pair with both tags outside the standard table. Every 16-bit tag, in both
+// directions, must still get the answer of the rule written with lookups only.
 namespace {
 
 std::uint16_t lookup_only_data_tag_for_length(table_view const& tv, std::uint16_t tag) {
@@ -506,7 +507,7 @@ std::uint16_t lookup_only_length_tag_for_data(table_view const& tv, std::uint16_
 }
 
 // Counts the tags whose answer differs, so one bad tag cannot hide the rest.
-void expect_bit_tests_change_no_answer(table_view const& tv) {
+void expect_fast_paths_change_no_answer(table_view const& tv) {
     auto const hooks = dict_hooks::for_table_view(tv);
     std::size_t standard_bit_wrong = 0;
     std::size_t length_side_wrong = 0;
@@ -527,7 +528,7 @@ void expect_bit_tests_change_no_answer(table_view const& tv) {
 
 }  // namespace
 
-TEST(DictHooksCustomPair, BitTestsChangeNoAnswerForAnyTag) {
+TEST(DictHooksCustomPair, FastPathsChangeNoAnswerForAnyTag) {
     table_view tv;
     tv.set_length_pair_data_tag(5001, 5002);  // a custom pair
     tv.set_length_pair_data_tag(95, 7002);    // re-pairs a standard Length
@@ -536,14 +537,26 @@ TEST(DictHooksCustomPair, BitTestsChangeNoAnswerForAnyTag) {
     tv.set_length_pair_data_tag(7201, 7203);  // the Length moves: 7202's bit stays set
     tv.set_length_pair_data_tag(7301, 7302);
     tv.set_length_pair_data_tag(7311, 7302);    // the Data moves: 7301's bit stays set
-    tv.set_length_pair_data_tag(65535, 65534);  // the bitset's last word
+    tv.set_length_pair_data_tag(65535, 65534);  // the top of the tag range
     auto const hooks = dict_hooks::for_table_view(tv);
     // The walk compares answers, so it must see pairs that answer non-zero.
     ASSERT_EQ(hooks.data_tag_for_length(5001), 5002U);
     ASSERT_EQ(hooks.length_tag_for_data(7203), 7201U);
     ASSERT_EQ(hooks.length_tag_for_data(7302), 7311U);
     ASSERT_EQ(hooks.data_tag_for_length(65535), 65534U);
-    expect_bit_tests_change_no_answer(tv);
+    ASSERT_TRUE(tv.has_nonstandard_pair());
+    expect_fast_paths_change_no_answer(tv);
 
-    expect_bit_tests_change_no_answer(table_view{});  // no pairs: every bit clear
+    expect_fast_paths_change_no_answer(table_view{});  // no pairs at all
+
+    // The predicate must be EXACT, not merely safe: a dictionary whose every pair
+    // names a standard tag gets no callback, and the rule answers those pairs from
+    // the standard table anyway. If the flag were set here, the answers would not
+    // change — only the per-field cost — so this arm pins the flag itself as well.
+    table_view standard_only;
+    standard_only.set_length_pair_data_tag(95, 7002);   // a standard Length
+    standard_only.set_length_pair_data_tag(7101, 96);   // a standard Data
+    standard_only.set_length_pair_data_tag(354, 7202);  // EncodedTextLen
+    EXPECT_FALSE(standard_only.has_nonstandard_pair());
+    expect_fast_paths_change_no_answer(standard_only);
 }

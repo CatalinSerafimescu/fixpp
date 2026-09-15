@@ -39,7 +39,8 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
-#include <fixpp/dict/field_type.hpp>  // field_type (7-value enum)
+#include <fixpp/core/length_data_pairs.hpp>  // is_standard_pair_tag (the standard pairs)
+#include <fixpp/dict/field_type.hpp>         // field_type (7-value enum)
 #include <functional>
 #include <optional>  // group_first_field_exact (fixpp#215 item 2) — header-only, alloc-free
 #include <span>
@@ -530,15 +531,14 @@ public:
         return it == data_pair_length_tag_.end() ? std::uint16_t{0} : it->second;
     }
 
-    // One bit per 16-bit tag (1024 words), set for both halves of every pair
-    // `set_length_pair_data_tag` registered. A re-pair does not clear the old
-    // partner's bit, so only a CLEAR bit carries meaning: both lookups above answer
-    // 0 for that tag. `wire::dict_hooks` tests it to skip those lookups on the
-    // fields no pair names. Held inline rather than behind a pointer so it has the
-    // address and lifetime of this object, which the hooks already point at.
-    [[nodiscard]] std::uint64_t const* pair_tag_bits() const noexcept {
-        return pair_tag_bits_.data();
-    }
+    // True once some registered pair has BOTH tags outside the standard table — the
+    // only pairs `wire::dict_hooks` can honour (design §3: the standard table governs
+    // any tag it names). It only ever goes true, so a re-pair that drops the last such
+    // pair leaves a lookup that answers 0 rather than a wrong answer.
+    // `wire::dict_hooks::for_table_view` reads it to decide whether to install the pair
+    // callback at all: every shipped dictionary declares standard pairs only, and then
+    // no scanner pays a lookup per field.
+    [[nodiscard]] bool has_nonstandard_pair() const noexcept { return has_nonstandard_pair_; }
 
     // ── 081 Concern A: validator-private FIXT.1.1 framing surface ──────────
     // (research.md D-1/D-2, data-model.md E-2). Populated by
@@ -810,6 +810,13 @@ public:
         if (data_tag == 0) {
             return;
         }
+        // Set BEFORE the maps change: an insert that throws may then leave the flag
+        // set for a pair that did not land, which costs a lookup answering 0 — never
+        // the reverse, which would hide a registered pair from every scanner.
+        if (!fixpp::core::detail::is_standard_pair_tag(length_tag) &&
+            !fixpp::core::detail::is_standard_pair_tag(data_tag)) {
+            has_nonstandard_pair_ = true;
+        }
         // Keep the maps inverse: re-pairing either tag drops its old partner, so
         // the two directions never disagree (Gate B r1 G-4).
         if (auto const old = length_pair_data_tag_.find(length_tag);
@@ -822,8 +829,6 @@ public:
         }
         length_pair_data_tag_[length_tag] = data_tag;
         data_pair_length_tag_[data_tag] = length_tag;
-        pair_tag_bits_[length_tag >> 6U] |= std::uint64_t{1} << (length_tag & 63U);
-        pair_tag_bits_[data_tag >> 6U] |= std::uint64_t{1} << (data_tag & 63U);
     }
 
 private:
@@ -977,8 +982,8 @@ private:
     std::unordered_map<std::uint16_t, std::uint16_t> length_pair_data_tag_;
     // fixpp#428: Data tag -> its Length partner; filled beside the map above.
     std::unordered_map<std::uint16_t, std::uint16_t> data_pair_length_tag_;
-    // Both halves of every registered pair, one bit per tag (see pair_tag_bits()).
-    std::array<std::uint64_t, 1024> pair_tag_bits_{};
+    // See has_nonstandard_pair(): set by set_length_pair_data_tag, never cleared.
+    bool has_nonstandard_pair_ = false;
 };
 
 }  // namespace fixpp::dict

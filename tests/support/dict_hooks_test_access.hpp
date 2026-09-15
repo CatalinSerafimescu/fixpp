@@ -11,10 +11,6 @@
 // is that seam, gated behind `FIXPP_TEST_HOOKS`, mirroring the
 // `nested_cache_access_for_testing` precedent in wire_test_hooks.hpp. Never
 // installed; never reachable from production code.
-//
-// A bundle built here carries no pair-tag bitset, so `length_pair` is never
-// consulted: pairs come from the standard table alone. A test that needs a
-// dictionary pair builds a real `table_view` and uses `for_table_view`.
 
 #include <fixpp/wire/dict_hooks.hpp>
 

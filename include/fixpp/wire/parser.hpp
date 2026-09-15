@@ -608,13 +608,18 @@ inline dict_hooks dict_hooks::for_table_view(fixpp::dict::table_view const& dict
                 no_tag);
         },
         // fixpp#426 (design §3): the Length+Data pairing sibling — resolves
-        // through the SAME opaque_dict.
-        [](void const* d, std::uint16_t tag, dict_hooks::pair_side from) noexcept -> std::uint16_t {
-            auto const* tv = static_cast<fixpp::dict::table_view const*>(d);
-            return from == dict_hooks::pair_side::length ? tv->length_pair_data_tag(tag)
-                                                         : tv->data_pair_length_tag(tag);
-        },
-        dict.pair_tag_bits()};
+        // through the SAME opaque_dict. Installed only when this dictionary declares
+        // a pair whose two tags the standard table both leave unnamed: those are the
+        // only pairs the lookup rule can honour, so otherwise the callback would
+        // answer 0 for every field it was asked about, at a lookup each.
+        dict.has_nonstandard_pair()
+            ? +[](void const* d, std::uint16_t tag,
+                  dict_hooks::pair_side from) noexcept -> std::uint16_t {
+                  auto const* tv = static_cast<fixpp::dict::table_view const*>(d);
+                  return from == dict_hooks::pair_side::length ? tv->length_pair_data_tag(tag)
+                                                               : tv->data_pair_length_tag(tag);
+              }
+            : static_cast<dict_hooks::length_pair_fn_t>(nullptr)};
 }
 
 template <access_mode Mode = access_mode::Index>
