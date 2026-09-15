@@ -186,7 +186,8 @@ Facts behind the test:
 - `group_member_fn_t group_member`
 - `group_delim_fn_t group_delim`
 - `length_pair_fn_t length_pair`, where
-  `length_pair_fn_t = std::uint16_t (*)(void const*, std::uint16_t) noexcept`
+  `length_pair_fn_t = std::uint16_t (*)(void const*, std::uint16_t, pair_side) noexcept`
+  (`pair_side::length` or `pair_side::data` selects the lookup direction)
 
 **Construction.** The constructor is private, so production code cannot build a partly filled
 bundle. There are three factories:
@@ -274,7 +275,7 @@ leaf, because they need `dict_hooks`.
 | Scanners | Response to a malformed counted value | Why |
 |---|---|---|
 | 2 `OffsetTable::build` | unchanged: `wire_invalid_field_format`, table cleared | has an error channel |
-| 1 `field_iterator` (3–5 via it) | unchanged: clamp or stop | no error channel |
+| 1 `field_iterator` (3–5 via it) | unchanged: an overrun clamps to the span end, an in-span non-SOH boundary stops, an exact span end is accepted (group slices exclude the terminal SOH) | no error channel |
 | 6, 7, 8 | **stop scanning**; nothing after the value is read | fail toward *absent*, never *forged* |
 | 9 `build_replay_frame` | `wire_invalid_field_format`, so the slot is gap-filled | same disposition as its `bad_tag` arm |
 | 10, 11, 12 | skip a correctly counted value; on a malformed count, fall back to today's rule (every SOH-anchored `554=` matches) | fail toward over-masking, never disclosure |
