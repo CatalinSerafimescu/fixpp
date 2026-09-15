@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # check_capi_freeze.sh — NBC-1 (T017): the C-ABI surface is BYTE-FROZEN.
 #
-# The 0->1 GA freeze (FR-012 / SC-007) means every C-ABI header is immutable.
+# The 0->1 GA freeze (FR-012 / SC-007) means no C-ABI header changes without a
+# reviewed manifest edit. Before fixpp's first public release that is review
+# discipline, not a compatibility promise ([const §X.7]).
 # This gate recomputes the SHA-256 of `include/fix/c_api.h` + every header under
 # `include/fix/c_api/` and verifies it against the committed manifest
 # `tools/capi_freeze.sha256`. It is event-independent (works on push:main where
@@ -10,7 +12,8 @@
 #
 # ANY content change to a frozen header fails the `sha256sum -c` check; ANY
 # added/removed header fails the exact-set check below. Deliberately unfreezing
-# the C-ABI (a future MAJOR) is therefore a visible, reviewed edit to the
+# the C-ABI (any C-ABI change, including a pre-release MINOR per [const §X.7])
+# is therefore a visible, reviewed edit to the
 # manifest in the same PR — which is the point.
 #
 # Companion to the existing tools/check_capi_occupancy.sh (the C-ABI occupancy

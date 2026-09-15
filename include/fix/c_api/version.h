@@ -29,9 +29,11 @@
                modernize-macro-to-enum) */
 
 /** C-ABI surface version — bumped independently of the C++ library version.
- *  GA freeze: MAJOR 0->1 declares the C-ABI surface stable ([const §X.1]; the
- *  shape is frozen for FIXPP_C_ABI_VERSION_MAJOR == 1). Any future breaking
- *  change requires a MAJOR bump; additive-only changes bump MINOR.
+ *  GA freeze: MAJOR 0->1 froze the C-ABI surface's shape ([const §X.1]). Until
+ *  fixpp's first public release a breaking change bumps MINOR and is declared
+ *  BREAKING ([const §X.7]); additive changes bump MINOR too. The compatibility
+ *  promise starts at the first public release, where this version resets to
+ *  1.0.0; from then on a breaking change requires a MAJOR bump.
  *
  *  MINOR is PRESERVED at 5 across the freeze (not reset to 0): it is the fifth
  *  additive minor of the C-ABI (0.1..0.5), and the forward-compat error-code
@@ -39,12 +41,17 @@
  *  this minor. Resetting it to 0 would place the current version BELOW the
  *  introducing_minor (2/4) of already-published codes, so a conforming consumer
  *  would see those codes downgraded to UNKNOWN — an incoherent baseline. 1.5.0
- *  keeps the downgrade frame continuous; the first stable ABI is 1.5.0.
+ *  keeps the downgrade frame continuous. It is a review baseline, not a
+ *  compatibility promise: the first stable ABI is the 1.0.0 of the first
+ *  public release.
  *
  *  Evolution of the downgrade frame:
  *    - Future MINORs within major 1 (1.6, 1.7, ...) just continue: a new code
  *      gets introducing_minor = the minor it appears at, so an older consumer
  *      forward-compat-downgrades it to UNKNOWN. No reset needed.
+ *    - The first public release ([const §X.7]) resets the version to 1.0.0 and
+ *      rebases the introducing_minor table exactly as the next bullet describes;
+ *      no consumer predates it, so no conforming consumer sees a downgrade.
  *    - The next BREAKING MAJOR (2.0.0) is where MINOR resets to 0 AND the
  *      introducing_minor table is rebased so every surviving code is the 2.0
  *      baseline (introducing_minor 0); new 2.x codes gate at 1,2,... A major
