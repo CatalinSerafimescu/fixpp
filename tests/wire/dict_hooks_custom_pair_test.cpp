@@ -473,3 +473,77 @@ TEST(DictHooksCustomPair, LengthTagForDataIsTheInverseWithTheSamePrecedence) {
     EXPECT_EQ(dict_hooks::for_table_view(conflicting).length_tag_for_data(96), 95U)
         << "the standard RawDataLength(95) keeps RawData(96)";
 }
+
+// ── The bit tests change no answer ───────────────────────────────────────────
+//
+// dict_hooks tests the standard pair-tag bits and the dictionary's pair-tag bits
+// before any lookup. Every 16-bit tag, in both directions, must get the answer of
+// the precedence rule written with lookups only.
+namespace {
+
+std::uint16_t lookup_only_data_tag_for_length(table_view const& tv, std::uint16_t tag) {
+    namespace detail = fixpp::wire::detail;
+    if (std::uint16_t const standard = detail::standard_data_tag_for_length(tag); standard != 0) {
+        return standard;
+    }
+    if (detail::standard_length_tag_for_data(tag) != 0) {
+        return 0;
+    }
+    std::uint16_t const data = tv.length_pair_data_tag(tag);
+    return (data != 0 && !detail::is_standard_pair_tag(data)) ? data : 0;
+}
+
+std::uint16_t lookup_only_length_tag_for_data(table_view const& tv, std::uint16_t tag) {
+    namespace detail = fixpp::wire::detail;
+    if (std::uint16_t const standard = detail::standard_length_tag_for_data(tag); standard != 0) {
+        return standard;
+    }
+    if (detail::standard_data_tag_for_length(tag) != 0) {
+        return 0;
+    }
+    std::uint16_t const length = tv.data_pair_length_tag(tag);
+    return (length != 0 && !detail::is_standard_pair_tag(length)) ? length : 0;
+}
+
+// Counts the tags whose answer differs, so one bad tag cannot hide the rest.
+void expect_bit_tests_change_no_answer(table_view const& tv) {
+    auto const hooks = dict_hooks::for_table_view(tv);
+    std::size_t standard_bit_wrong = 0;
+    std::size_t length_side_wrong = 0;
+    std::size_t data_side_wrong = 0;
+    for (std::uint32_t t = 0; t <= 0xFFFFU; ++t) {
+        auto const tag = static_cast<std::uint16_t>(t);
+        standard_bit_wrong += fixpp::wire::detail::standard_pair_tag_bit(tag) !=
+                              fixpp::wire::detail::is_standard_pair_tag(tag);
+        length_side_wrong +=
+            hooks.data_tag_for_length(tag) != lookup_only_data_tag_for_length(tv, tag);
+        data_side_wrong +=
+            hooks.length_tag_for_data(tag) != lookup_only_length_tag_for_data(tv, tag);
+    }
+    EXPECT_EQ(standard_bit_wrong, 0U) << "the standard bits must name exactly the standard tags";
+    EXPECT_EQ(length_side_wrong, 0U) << "data_tag_for_length";
+    EXPECT_EQ(data_side_wrong, 0U) << "length_tag_for_data";
+}
+
+}  // namespace
+
+TEST(DictHooksCustomPair, BitTestsChangeNoAnswerForAnyTag) {
+    table_view tv;
+    tv.set_length_pair_data_tag(5001, 5002);  // a custom pair
+    tv.set_length_pair_data_tag(95, 7002);    // re-pairs a standard Length
+    tv.set_length_pair_data_tag(7101, 96);    // pairs a standard Data tag
+    tv.set_length_pair_data_tag(7201, 7202);
+    tv.set_length_pair_data_tag(7201, 7203);  // the Length moves: 7202's bit stays set
+    tv.set_length_pair_data_tag(7301, 7302);
+    tv.set_length_pair_data_tag(7311, 7302);    // the Data moves: 7301's bit stays set
+    tv.set_length_pair_data_tag(65535, 65534);  // the bitset's last word
+    auto const hooks = dict_hooks::for_table_view(tv);
+    // The walk compares answers, so it must see pairs that answer non-zero.
+    ASSERT_EQ(hooks.data_tag_for_length(5001), 5002U);
+    ASSERT_EQ(hooks.length_tag_for_data(7203), 7201U);
+    ASSERT_EQ(hooks.length_tag_for_data(7302), 7311U);
+    ASSERT_EQ(hooks.data_tag_for_length(65535), 65534U);
+    expect_bit_tests_change_no_answer(tv);
+
+    expect_bit_tests_change_no_answer(table_view{});  // no pairs: every bit clear
+}

@@ -613,7 +613,8 @@ inline dict_hooks dict_hooks::for_table_view(fixpp::dict::table_view const& dict
             auto const* tv = static_cast<fixpp::dict::table_view const*>(d);
             return from == dict_hooks::pair_side::length ? tv->length_pair_data_tag(tag)
                                                          : tv->data_pair_length_tag(tag);
-        }};
+        },
+        dict.pair_tag_bits()};
 }
 
 template <access_mode Mode = access_mode::Index>

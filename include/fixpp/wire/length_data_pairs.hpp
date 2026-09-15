@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cstdint>
 
 namespace fixpp::wire::detail {
@@ -174,5 +175,34 @@ static_assert(standard_length_tag_for_data(93) == 0);   // a Length tag is not a
 static_assert(is_standard_pair_tag(93) && is_standard_pair_tag(89));    // inverted pair, both sides
 static_assert(is_standard_pair_tag(354) && is_standard_pair_tag(355));  // adjacent pair, both sides
 static_assert(!is_standard_pair_tag(5001));                             // an arbitrary non-pair tag
+
+// One bit per 16-bit tag, set for both halves of every standard pair: the same
+// set `is_standard_pair_tag` answers, derived from the table above. Every scanner
+// asks about every field and almost no field is a pair tag, so the hot path
+// (dict_hooks::data_tag_for_length) tests one bit before any binary search.
+inline constexpr std::array<std::uint64_t, 1024> standard_pair_tag_bits = [] {
+    std::array<std::uint64_t, 1024> bits{};
+    for (length_data_pair const p : standard_length_data_pairs) {
+        bits[p.length_tag >> 6U] |= std::uint64_t{1} << (p.length_tag & 63U);
+        bits[p.data_tag >> 6U] |= std::uint64_t{1} << (p.data_tag & 63U);
+    }
+    return bits;
+}();
+// Every table tag is set and nothing else is: the table sets at most one bit per
+// entry half, so a total equal to the entry halves means no two halves share a bit.
+static_assert([] {
+    int set = 0;
+    for (std::uint64_t const word : standard_pair_tag_bits) {
+        set += std::popcount(word);
+    }
+    return set;
+}() == static_cast<int>(2 * standard_length_data_pairs.size()));
+
+[[nodiscard]] constexpr bool standard_pair_tag_bit(std::uint16_t tag) noexcept {
+    return ((standard_pair_tag_bits[tag >> 6U] >> (tag & 63U)) & 1U) != 0;
+}
+
+static_assert(standard_pair_tag_bit(93) && standard_pair_tag_bit(89));
+static_assert(standard_pair_tag_bit(43111) && !standard_pair_tag_bit(5001));
 
 }  // namespace fixpp::wire::detail
