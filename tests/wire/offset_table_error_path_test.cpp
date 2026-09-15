@@ -48,6 +48,7 @@
 #include <fixpp/core/error.hpp>
 #include <fixpp/dict/table_view.hpp>
 #include <fixpp/wire/offset_table.hpp>
+#include <fixpp/wire/parser.hpp>  // dict_hooks::for_table_view is defined here
 #include <memory_resource>
 #include <span>
 #include <string>
