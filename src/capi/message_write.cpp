@@ -612,6 +612,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_data(fixpp_msg_t* msg, uint16_t dat
     if (is_framing_tag(data_tag)) return FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN;
     const uint16_t length_tag = pair_hooks(h).length_tag_for_data(data_tag);
     if (length_tag == 0) return FIXPP_ERR_TYPE_MISMATCH;
+    // The Length half comes from a dictionary pair, and a dictionary can pair a framing tag.
+    if (is_framing_tag(length_tag)) return FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN;
     if (len == 0) return FIXPP_ERR_WIRE_CONFORMANCE;  // an empty Data value is malformed
 
     auto& acc = *h->accumulator;
@@ -1171,6 +1173,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_data(fixpp_entry_t* entry, uint16
     auto* h = e->builder->msg;
     const uint16_t length_tag = pair_hooks(h).length_tag_for_data(data_tag);
     if (length_tag == 0) return FIXPP_ERR_TYPE_MISMATCH;
+    // As in fixpp_msg_set_data: the derived Length half can be a framing tag.
+    if (is_framing_tag(length_tag)) return FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN;
     if (len == 0) return FIXPP_ERR_WIRE_CONFORMANCE;  // an empty Data value is malformed
 
     AccumulatorEntry* group = resolve_group(e->builder);

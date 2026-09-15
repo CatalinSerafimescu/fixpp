@@ -3213,7 +3213,7 @@ Evidence: issues #346, #348, #349; new issue #351.
   - **Before #426:** the wire parser knew six pairs, and the session's own scanners split every value at SOH.
   - **Now it is one rule everywhere:**
     - a Data value is counted only when it is the field right after its Length;
-    - a counted value must be followed by SOH.
+    - a counted value must be followed by SOH inside the span being scanned. `field_iterator` (Iter) also accepts a counted value that ends exactly at the end of its span: the C-ABI group read hands it a group slice, and a slice excludes the entry's terminal SOH. Index and the session scanners have no such exception.
   - **Who applies it:**
     - `OffsetTable` (Index) and `field_iterator` (Iter);
     - `dictionary_driven_validator`;
@@ -3263,6 +3263,7 @@ Evidence: issues #346, #348, #349; new issue #351.
   No existing entry moves, so an open group builder keeps its position. Refusals:
   - `len == 0` → `FIXPP_ERR_WIRE_CONFORMANCE`;
   - a tag that is not a Data half → `FIXPP_ERR_TYPE_MISMATCH`;
+  - a Data tag whose paired Length tag is a framing tag (reachable only with a custom dictionary) → `FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN`;
   - a half absent from the MsgType's grammar → `FIXPP_ERR_DICT_CONFIG` (message level);
   - a Data tag that is its group's delimiter in that group's own context (MsgType plus enclosing groups, as commit resolves it) → `FIXPP_ERR_TYPE_MISMATCH`.
 

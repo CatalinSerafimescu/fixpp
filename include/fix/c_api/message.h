@@ -371,7 +371,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_bytes(fixpp_msg_t* msg, uint16_t ta
  *    FIXPP_ERR_OK                        -- success
  *    FIXPP_ERR_NULL_HANDLE               -- msg or bytes is NULL
  *    FIXPP_ERR_INVALID_HANDLE            -- msg is destroyed / session closed
- *    FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN -- data_tag is a framing tag
+ *    FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN -- data_tag, or the Length tag the pair
+ *                                           gives it, is a framing tag
  *    FIXPP_ERR_TYPE_MISMATCH             -- data_tag is not the Data half of a pair, a
  *                                           half collides with a group, or the pair's
  *                                           current state is not Length-then-Data

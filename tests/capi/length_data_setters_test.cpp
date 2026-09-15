@@ -32,12 +32,12 @@ struct Fixture {
     fixpp_engine_t* eng = nullptr;
     fixpp_session_t* sess = nullptr;
     fixpp_msg_t* msg = nullptr;
-    explicit Fixture(const char* msg_type = "D") {
+    explicit Fixture(const char* msg_type = "D", std::string_view xml = kLengthDataFix42Xml) {
         EXPECT_EQ(fixpp_engine_create(make_engine_cfg(), FIXPP_C_ABI_VERSION_MAJOR,
                                       FIXPP_C_ABI_VERSION_MINOR, &eng),
                   FIXPP_ERR_OK);
         fixpp_session_config_t* sc =
-            make_length_data_session_cfg("CLI", "SRV", FIXPP_ROLE_INITIATOR);
+            make_length_data_session_cfg("CLI", "SRV", FIXPP_ROLE_INITIATOR, xml);
         set_loopback_endpoint(sc, "127.0.0.1", 0);
         EXPECT_EQ(fixpp_session_open(eng, sc, &sess), FIXPP_ERR_OK);
         EXPECT_EQ(fixpp_msg_create_outbound(sess, msg_type, std::strlen(msg_type), &msg),
@@ -229,6 +229,31 @@ TEST(CapiEntrySetData, DelimiterRuleUsesTheGroupsOwnContext) {
                            "5004=blob\x01"),
               std::string::npos)
         << payload;
+}
+
+TEST(CapiSetData, RefusesAFramingTagAsTheDerivedLengthHalf) {
+    // The dictionary pairs BeginString(8) with the Data field 5100, so the Length half
+    // either setter would derive is a framing tag. Both refuse and write nothing.
+    Fixture f("D", kFramingLengthPairFix42Xml);
+    ASSERT_EQ(f.set_string(11, "C1"), FIXPP_ERR_OK);
+    EXPECT_EQ(f.set_data(5100, "blob"), FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN);
+
+    fixpp_group_builder_t* gb = nullptr;
+    ASSERT_EQ(fixpp_msg_group_begin(f.msg, 5101, &gb), FIXPP_ERR_OK);
+    fixpp_entry_t* e = nullptr;
+    ASSERT_EQ(fixpp_group_builder_add_entry(gb, &e), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_entry_set_string(e, 79, "ACC", 3), FIXPP_ERR_OK);
+    EXPECT_EQ(fixpp_entry_set_data(e, 5100, as_u8("blob"), 4), FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN);
+    ASSERT_EQ(fixpp_msg_group_end(f.msg, gb), FIXPP_ERR_OK);
+
+    fixpp_error_t rc{};
+    auto const payload = f.commit(rc);
+    ASSERT_EQ(rc, FIXPP_ERR_OK);
+    EXPECT_EQ(payload.find("\x01"
+                           "8="),
+              std::string::npos)
+        << payload;
+    EXPECT_EQ(payload.find("5100="), std::string::npos) << payload;
 }
 
 // ── fixpp_msg_create_outbound: MsgType (Gate B r1 G-1) ──────────────────────

@@ -112,15 +112,65 @@ inline constexpr std::string_view kLengthDataFix42Xml = R"xml(
 </fix>
 )xml";
 
+// A dictionary that pairs a FRAMING tag: BeginString(8) is declared LENGTH immediately
+// before the DATA field 5100, so the XmlLoader registers the pair 8 -> 5100. Message "D"
+// and group 5101 reference 5100. A Data setter must never write the derived `8=`
+// (Gate B r2 H-1).
+inline constexpr std::string_view kFramingLengthPairFix42Xml = R"xml(
+<fix major="4" minor="2">
+  <header>
+    <field name="BeginString" required="Y"/>
+    <field name="BodyLength" required="Y"/>
+    <field name="MsgType" required="Y"/>
+    <field name="SenderCompID" required="Y"/>
+    <field name="TargetCompID" required="Y"/>
+    <field name="MsgSeqNum" required="Y"/>
+    <field name="SendingTime" required="Y"/>
+  </header>
+  <trailer>
+    <field name="CheckSum" required="Y"/>
+  </trailer>
+  <messages>
+    <message name="Heartbeat" msgtype="0" msgcat="admin">
+      <field name="TestReqID" required="N"/>
+    </message>
+    <message name="NewOrderSingle" msgtype="D" msgcat="app">
+      <field name="ClOrdID" required="Y"/>
+      <field name="FramedData" required="N"/>
+      <group name="NoFramedData" required="N">
+        <field name="AllocAccount" required="N"/>
+        <field name="FramedData" required="N"/>
+      </group>
+    </message>
+  </messages>
+  <fields>
+    <field number="8" name="BeginString" type="LENGTH"/>
+    <field number="5100" name="FramedData" type="DATA"/>
+    <field number="9" name="BodyLength" type="LENGTH"/>
+    <field number="10" name="CheckSum" type="STRING"/>
+    <field number="11" name="ClOrdID" type="STRING"/>
+    <field number="34" name="MsgSeqNum" type="SEQNUM"/>
+    <field number="35" name="MsgType" type="STRING"/>
+    <field number="49" name="SenderCompID" type="STRING"/>
+    <field number="52" name="SendingTime" type="UTCTIMESTAMP"/>
+    <field number="56" name="TargetCompID" type="STRING"/>
+    <field number="79" name="AllocAccount" type="STRING"/>
+    <field number="112" name="TestReqID" type="STRING"/>
+    <field number="5101" name="NoFramedData" type="NUMINGROUP"/>
+  </fields>
+</fix>
+)xml";
+
 // A plaintext session config over kLengthDataFix42Xml (L-050-1 dictionary seam).
 // The endpoint is set separately via set_loopback_endpoint (L-050-5).
-inline fixpp_session_config_t* make_length_data_session_cfg(const char* sender, const char* target,
-                                                            fixpp_session_role role) {
+inline fixpp_session_config_t* make_length_data_session_cfg(
+    const char* sender, const char* target, fixpp_session_role role,
+    std::string_view xml = kLengthDataFix42Xml) {
     constexpr std::size_t kBufSize = 128U * 1024U;
     auto buf = std::make_unique<std::array<std::byte, kBufSize>>();
     auto* mr = new std::pmr::monotonic_buffer_resource{buf->data(), buf->size()};
-    auto* raw_dict = new fixpp::dict::Dictionary{
-        fixpp::dict::XmlLoader{}.load_from_string(kLengthDataFix42Xml, mr)};
+    auto* raw_dict =
+        new fixpp::dict::Dictionary{fixpp::dict::XmlLoader{}.load_from_string(xml, mr)};
     auto* raw_buf = buf.release();
     auto dict_ptr = std::shared_ptr<const fixpp::dict::Dictionary>{
         raw_dict, [mr, raw_buf](fixpp::dict::Dictionary const* p) {
