@@ -84,7 +84,7 @@ Two **independent** SemVer tracks per `[const §X.1]` / `[arch §9.2]`:
 | **C ABI** | `FIXPP_C_ABI_VERSION_MAJOR/MINOR/PATCH` | Any breaking change to a published C-ABI symbol; numeric meaning of any `fixpp_error_t` value changes. Before fixpp's first public release a breaking change bumps MINOR and is marked BREAKING instead (`[const §X.7]`). |
 
 - Both macro families are emitted by `tools/cmake/version.cmake` per `[arch §9.2]`.
-- ABI compatibility is verified in Tier 2 CI: `abidiff` on Linux, structural diff on Windows, against the previous tagged release, from fixpp's first public release on, per `[const §IX.5]` / `[const §X.7]` / `[arch §9.2]`.
+- ABI compatibility is verified in Tier 2 CI: `abidiff` on Linux, structural diff on Windows, against the previous tagged release; fixpp's first public release records the baseline and comparison starts with the release after it, per `[const §IX.5]` / `[const §X.7]` / `[arch §9.2]`.
 - The C ABI may stay at MAJOR=1 across multiple library MAJOR bumps if the C surface remains compatible — the two tracks exist precisely to allow that.
 - Runtime version accessor: `fixpp_version()` per `[2i]`.
 

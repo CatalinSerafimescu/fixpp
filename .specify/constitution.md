@@ -26,8 +26,16 @@ Sync Impact Report — v1.0 → v2.0 (2026-09-15) — PENDING (ratified on Gate 
     existing consumer) does not apply to a first release, which has no prior consumer.
     First applied by fixpp#428 (C-ABI 1.6.0, BREAKING: fixpp_msg_set_string / fixpp_entry_set_string
     refuse SOH outside a Data field; fixpp_msg_commit refuses malformed Length+Data pairs).
-  Modified: Article IX §5 — the ABI check starts at §X.7's first public release, and before it a
+  Modified: Article IX §5 — the ABI check starts at §X.7's first public release: that release records
+    the baseline and each later release is compared against the previous tagged ABI. Before it a
     breaking change follows §X.7 rather than bumping MAJOR.
+  §X.7 also prevails, before the first public release, over freeze statements elsewhere (§X.3's
+    decimal shape, the MAJOR-1 layout freezes in 2a-decimal.md, 2i-capi.md, decimal.h and version.h,
+    and "1.5.0 is stable" wording), which describe the rule from that release on. A single
+    precedence sentence rather than an edit per site, so a site this sweep missed is still covered.
+  Known pre-existing gap, not changed here: the implemented ABI gate (.github/workflows/abi-golden.yml)
+    checks the exported symbol set only, not the layout/type comparison §IX.5 describes. fixpp#450
+    tracks building that comparison before the first public release.
   Modified: Article XX §3 — from v2.0 on, an amendment is recorded in its Sync Impact Report (and in
     CHANGELOG.md when §4 applies), replacing `_log.md`. No decision log of that name ever existed: the
     only file called _log.md (research/_log.md) is the Phase 1 research log, and no amendment since
@@ -47,7 +55,7 @@ Sync Impact Report — v1.0 → v2.0 (2026-09-15) — PENDING (ratified on Gate 
     - .specify/architecture.md §9.2 and .specify/2a-decimal.md — the Tier 2 ABI check starts at the
       first public release.
     - include/fix/c_api/version.h comment (+ tools/capi_freeze.sha256), tools/check_capi_freeze.sh
-      header, brain/components/c-api.md, CLAUDE.md, CHANGELOG.md.
+      header, brain/components/c-api.md (body, title, description, heading), CLAUDE.md, CHANGELOG.md.
   Reviewed, no change: merged spec bundles (specs/NNN-*), CLAUDE-history.md, and
     spec/behaviors-and-limitations*.md rows, which are point-in-time records. The error-code
     stability rules in .specify/2m-pybind.md, .specify/2j-controlplane.md and spec/coverage-index.md
@@ -450,7 +458,7 @@ Sync Impact Report — v0.6 → v0.7 (2026-07-14) — RATIFIED
    - `clang-format` check.
    - `cppcheck` clean.
    - `include-what-you-use` clean.
-5. **ABI check (from the first public release onward, Article X §7):** C ABI surface is dumped (`abidiff` Linux; structural diff Windows in CI) against the previous tagged ABI. From that release on, breaking changes are explicit `MAJOR` bumps; before it, Article X §7 governs them. Silent breaks are a release-blocker bug.
+5. **ABI check (from the first public release onward, Article X §7):** C ABI surface is dumped (`abidiff` Linux; structural diff Windows in CI). The first public release records the baseline, and each later release is compared against the previous tagged ABI. From that release on, breaking changes are explicit `MAJOR` bumps; before it, Article X §7 governs them. Silent breaks are a release-blocker bug.
 6. **Two-tier CI** (per `opus_plan.md` Quality Gate):
    - **Tier 1 — every PR (required to merge):** Linux/Clang Debug+Release, Linux/GCC Release sanity, sanitizers, coverage, perf, static analysis, fuzz (parser-touching modules), Python pytest, catalogue consistency check.
    - **Tier 2 — Windows + ABI:** manual / nightly / on-demand. Triggered by the `windows` PR label or nightly schedule.
@@ -468,6 +476,7 @@ Sync Impact Report — v0.6 → v0.7 (2026-07-14) — RATIFIED
 7. **Before the first public release, a breaking C-ABI change is allowed but must be declared.**
    - **First public release.** The first published GitHub Release of this repository. A draft does not count; a published pre-release does. `gh release list --exclude-drafts` shows whether it has happened. A copy of fixpp distributed any other way before then is unsupported and does not start the compatibility promise. Until that release the C ABI has no supported external consumer and its version is not a compatibility promise: the 0→1 freeze (`FIXPP_C_ABI_VERSION_MAJOR == 1`) fixes the surface's shape and its review discipline only. "A tagged C ABI release" in §4 and in Article IX §5 means the first public release or a later one. §4's append-only audit trail applies throughout: a published numeric error code is never reassigned, before that release or after it.
    - **Breaking change.** A C-ABI change after which a consumer written against the previous headers and documentation no longer compiles or links, is no longer ABI-compatible, or sees a call it could already make fail or return a result other than the one documented. Every C-ABI effect listed in `.specify/api-contract.md` §11 is a breaking change. So is a call that used to succeed and now fails, whatever the documentation said about it. Adding a symbol, a constant, or an error code in an unused slot is additive, and so is changing output the documentation leaves unspecified.
+   - **Freeze statements elsewhere.** §3's frozen decimal shape, and any design document, header comment or brain page that calls a C-ABI shape frozen for `FIXPP_C_ABI_VERSION_MAJOR == 1` or calls `1.5.0` stable, state the rule from the first public release on. Before that release this clause prevails over them: such a shape may change, as a declared breaking change under this clause.
 
    Before the first public release, a breaking change:
    - bumps `FIXPP_C_ABI_VERSION_MINOR`, not MAJOR, so the error-code downgrade frame of §4 stays continuous;

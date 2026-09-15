@@ -1,7 +1,7 @@
 ---
 type: Component Decision Map
-title: C ABI — the legal isolation boundary, why GA is 1.5.0, and what the ABI gate does NOT check
-description: The C ABI is the licence seam, not a convenience wrapper. Its first stable version is 1.5.0 for a reason, and its CI gate checks symbols, not layout.
+title: C ABI — the legal isolation boundary, why the GA-freeze baseline is 1.5.0, and what the ABI gate does NOT check
+description: The C ABI is the licence seam, not a convenience wrapper. Its GA-freeze baseline is 1.5.0 for a reason (the first stable version is the 1.0.0 of the first public release), and its CI gate checks symbols, not layout.
 status: stable
 refs:
   - include/fix/c_api.h
@@ -38,7 +38,7 @@ Everything else follows from it, and this is the part to internalise before chan
 - **`tools/check_layers.py`** enforces that the Python bindings and the C examples may include
   **`capi` only** — never the C++ umbrella. A binding that reaches past the seam would defeat it.
 
-## ⭐ Why the first stable version is `1.5.0` and not `1.0.0`
+## ⭐ Why the GA-freeze baseline is `1.5.0` and not `1.0.0`
 
 This looks like a mistake and is not. **Do not "fix" it.**
 
