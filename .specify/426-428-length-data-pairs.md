@@ -257,13 +257,19 @@ owner:
 
 ## 4. D-3 — one Length→Data carry; the policy on a bad count varies by scanner
 
-Two helpers are added to `include/fixpp/wire/tag_scan.hpp`:
-- **`length_data_carry`.** `take(tag)` returns the counted length when `tag` is the Data partner of
-  the field just scanned, and always disarms (W-P2-1b preserved). `arm(tag, value, hooks, cap)` arms
-  after a Length value, saturating at `cap` (W-P2-1c preserved).
-- **`counted_end(buf, vstart, len)`** classifies where a counted value ends: on SOH, at the buffer
-  end, on a non-SOH byte, or past the end. It uses a subtraction bound that cannot wrap (W-P2-1a
-  preserved).
+The shared helpers live in `include/fixpp/wire/length_data_carry.hpp`. They are kept out of `tag_scan.hpp`, a std-only
+leaf, because they need `dict_hooks`.
+- **`counted_value_end(buf, vstart, count)`** returns the index of the SOH that must follow a
+  counted value. It returns nullopt when the count runs past the buffer, reaches exactly its end, or
+  lands on a non-SOH byte. It uses a subtraction bound that cannot wrap (W-P2-1a preserved).
+- **`length_data_carry`.** `read_value(buf, vstart, tag, hooks)` reads one field's value and arms
+  for the next field.
+  - The value is read by the previous Length's count when `tag` is that Length's Data partner, and
+    to the next SOH otherwise. The carry always disarms (W-P2-1b preserved).
+  - The count is parsed with `parse_bounded_u32`, which saturates (W-P2-1c preserved).
+  - `reset()` disarms for a field the scanner skips.
+
+  The /simplify pass merged the drafted `take` / `arm` / `counted_end` into this one path.
 
 | Scanners | Response to a malformed counted value | Why |
 |---|---|---|
