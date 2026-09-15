@@ -74,6 +74,18 @@ What was rejected:
   mis-build.
 - **A pair setter that moves entries.** Open group builders hold indices into those vectors.
 
+Decided in Gate B, after the first pass over this page:
+- **A derived Length half that is a framing tag is refused (H-1).** The Data setters derive the
+  Length tag from the pair table. A dictionary pairs any LENGTH field with the DATA field declared
+  after it, so it can pair BeginString(8). The setters refuse that with
+  `FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN`, the code the direct setters already return for a framing tag,
+  rather than write a second `8=`.
+- **The "a Data field cannot delimit a group" rule uses the group's exact context (G-3).** A group tag
+  reused in another MsgType, or under another parent, can open with a different field, so the
+  dictionary-wide first-seen delimiter refused pairs that are well-formed in that context. When the
+  context has no entry, the setter defers to commit, which fails closed. Rejected: guessing from the
+  first-seen delimiter.
+
 ## ⚠️ What the ABI gate actually checks — and what it does not
 
 `abi-golden.yml` runs on every PR and is an **`nm` symbol-set check**: a new or removed exported
