@@ -1907,15 +1907,10 @@ struct SendingTimeStamp {
         }
         ++i;  // skip '='
         const std::size_t vstart = i;
-        if (auto const count = carry.take(*tag)) {
-            const auto end = fixpp::wire::counted_value_end(stored, vstart, *count);
-            if (!end) return {.status = FieldStatus::bad_count, .tag = *tag, .value = {}};
-            i = *end;
-        } else {
-            while (i < n && stored[i] != SOH) ++i;
-        }
+        const auto value = carry.read_value(stored, vstart, *tag, hooks);
+        if (!value) return {.status = FieldStatus::bad_count, .tag = *tag, .value = {}};
+        i = value->end;
         std::span<const std::byte> val{stored.data() + vstart, i - vstart};
-        carry.arm(*tag, val, hooks, n);
         if (i < n) ++i;  // skip SOH
         return {.status = FieldStatus::ok, .tag = *tag, .value = val};
     };
@@ -4700,19 +4695,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
             const auto tag = parse_outbound_tag(pv.substr(pos, eq - pos));
             if (!tag) return std::nullopt;
             const std::size_t vstart = eq + 1;
-            std::size_t vend = 0;
-            const auto count = carry.take(*tag);
-            if (count) {
-                const auto end = fixpp::wire::counted_value_end(pb, vstart, *count);
-                if (!end) return std::nullopt;
-                vend = *end;
-            } else {
-                vend = pv.find('\x01', vstart);  // found: the payload ends with SOH
-            }
-            if (vend == vstart) return std::nullopt;  // empty value
-            carry.arm(*tag, pb.subspan(vstart, vend - vstart), hooks, pb.size());
+            const auto value = carry.read_value(pb, vstart, *tag, hooks);
+            // A malformed count, or an empty value (the payload ends with SOH).
+            if (!value || value->end == vstart) return std::nullopt;
             return PayloadField{
-                .tag = *tag, .start = pos, .end = vend + 1, .counted = count.has_value()};
+                .tag = *tag, .start = pos, .end = value->end + 1, .counted = value->counted};
         };
 
         // --- T008: Scanner pass ---------------------------------------------
@@ -5247,8 +5234,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
     std::span<const std::byte> span_to_store = frame;  // default: today's behavior
     bool skip_store = false;
     std::array<std::byte, kMaxMaskableLogonBytes> mask_buf{};  // coroutine-frame copy
-    if (fixpp::session::frame_has_genuine_tag554(frame, session_hooks(inbound_tv_)) &&
-        scan_frame_header(frame, session_hooks(inbound_tv_)).msg_type == "A") {
+    const fixpp::wire::dict_hooks frame_hooks = session_hooks(inbound_tv_);
+    if (fixpp::session::frame_has_genuine_tag554(frame, frame_hooks) &&
+        scan_frame_header(frame, frame_hooks).msg_type == "A") {
         if (frame.size() > kMaxMaskableLogonBytes) {
             // Over-bound: FAIL CLOSED — never persist cleartext. Skip the store
             // write for this frame (logged-then-proceed, I-07, mirroring the
@@ -5268,7 +5256,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
         } else {
             std::memcpy(mask_buf.data(), frame.data(), frame.size());
             (void)fixpp::session::mask_tag554_same_length_inplace(
-                std::span<std::byte>{mask_buf.data(), frame.size()}, session_hooks(inbound_tv_));
+                std::span<std::byte>{mask_buf.data(), frame.size()}, frame_hooks);
             span_to_store = std::span<const std::byte>{mask_buf.data(), frame.size()};
         }
     }

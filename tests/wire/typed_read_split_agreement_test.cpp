@@ -531,7 +531,7 @@ TEST(TypedReadSplitAgreement, ExtentWalkDescendsAtNestedGroupDelimiter_Populated
 //
 // ── The discriminator: a `group_member_fn_` invocation count ────────────────
 // Supplied through the EXISTING construction-time `group_member_fn_t` seam
-// (`OffsetTable::group_member_fn_t`) — a plain function pointer, so no
+// (`dict_hooks::group_member_fn_t`) — a plain function pointer, so no
 // production change and no new seam.
 //
 // The arithmetic, derived in the frame whose descent hits the cap (the frame

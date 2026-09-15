@@ -415,19 +415,22 @@ void OrchestraLoaderState::resolve_length_pairs() {
             continue;
         }
         std::uint16_t const length_tag = *info.length_id;
-        std::string const where = "<fixr:field id=\"" + std::to_string(data_tag) +
-                                  "\" lengthId=\"" + std::to_string(length_tag) + "\">";
+        // Built only on the error paths below.
+        auto const where = [&] {
+            return "<fixr:field id=\"" + std::to_string(data_tag) + "\" lengthId=\"" +
+                   std::to_string(length_tag) + "\">";
+        };
         if (info.type != field_data_type::Data && info.type != field_data_type::XmlData) {
-            throw orchestra_parse_error("dict::orchestra_parse_error: " + where +
+            throw orchestra_parse_error("dict::orchestra_parse_error: " + where() +
                                         " is not a data or XMLData field");
         }
         auto const lit = fields_by_tag_.find(length_tag);
         if (lit == fields_by_tag_.end() || lit->second.type != field_data_type::Length) {
-            throw orchestra_parse_error("dict::orchestra_parse_error: " + where +
+            throw orchestra_parse_error("dict::orchestra_parse_error: " + where() +
                                         " does not name a declared Length field");
         }
         if (!data_by_length_.emplace(length_tag, data_tag).second) {
-            throw orchestra_parse_error("dict::orchestra_parse_error: " + where +
+            throw orchestra_parse_error("dict::orchestra_parse_error: " + where() +
                                         " names a Length field already paired with another field");
         }
     }

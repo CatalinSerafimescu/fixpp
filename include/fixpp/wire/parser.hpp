@@ -95,9 +95,6 @@ public:
     // The dictionary is borrowed from the caller; `hooks` aliases that
     // caller-owned object. No incomplete-type issues — dict_hooks uses
     // void const* + fn ptrs internally. ([PR68-02]/[PR68-10] fix.)
-    using classify_fn_t = dict_hooks::classify_fn_t;
-    using group_member_fn_t = dict_hooks::group_member_fn_t;
-    using group_delim_fn_t = dict_hooks::group_delim_fn_t;
 
     // 384 / fixpp#426: `hooks` has NO default — see the same note on
     // `OffsetTable`'s dict-aware ctors (offset_table.hpp). A view carrying a

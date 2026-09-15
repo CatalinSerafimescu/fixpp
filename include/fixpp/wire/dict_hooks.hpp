@@ -75,7 +75,8 @@ public:
             standard != 0) {
             return standard;
         }
-        if (length_pair_ == nullptr || detail::is_standard_pair_tag(length_tag)) {
+        // Not a standard Length (above); a standard Data tag cannot be a Length either.
+        if (length_pair_ == nullptr || detail::standard_length_tag_for_data(length_tag) != 0) {
             return 0;
         }
         std::uint16_t const data = length_pair_(opaque_dict_, length_tag, pair_side::length);
@@ -90,7 +91,8 @@ public:
             standard != 0) {
             return standard;
         }
-        if (length_pair_ == nullptr || detail::is_standard_pair_tag(data_tag)) {
+        // Not a standard Data tag (above); a standard Length cannot be a Data tag either.
+        if (length_pair_ == nullptr || detail::standard_data_tag_for_length(data_tag) != 0) {
             return 0;
         }
         std::uint16_t const length = length_pair_(opaque_dict_, data_tag, pair_side::data);

@@ -105,19 +105,12 @@ struct FrameHeader {
         }
         ++i;  // skip '='
         std::size_t vstart = i;
-        if (auto const count = carry.take(static_cast<std::uint16_t>(tag))) {
-            auto const end = fixpp::wire::counted_value_end(frame, vstart, *count);
-            if (!end) {
-                return h;
-            }
-            i = *end;
-        } else {
-            while (i < n && frame[i] != SOH) {
-                ++i;
-            }
+        auto const value = carry.read_value(frame, vstart, static_cast<std::uint16_t>(tag), hooks);
+        if (!value) {
+            return h;
         }
+        i = value->end;
         std::string_view val(reinterpret_cast<const char*>(frame.data() + vstart), i - vstart);
-        carry.arm(static_cast<std::uint16_t>(tag), frame.subspan(vstart, i - vstart), hooks, n);
         if (i < n) {
             ++i;
         }  // skip SOH

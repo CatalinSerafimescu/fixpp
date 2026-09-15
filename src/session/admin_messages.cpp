@@ -374,19 +374,13 @@ namespace {
         {
             // Parse value until SOH, or by its Length's count for a Data value.
             std::size_t vstart = i;
-            if (auto const count = carry.take(static_cast<std::uint16_t>(tag))) {
-                auto const end = fixpp::wire::counted_value_end(frame, vstart, *count);
-                if (!end) {
-                    break;  // fixpp#426: nothing after a malformed count can be trusted
-                }
-                i = *end;
-            } else {
-                while (i < n && frame[i] != SOH) {
-                    ++i;
-                }
+            auto const value =
+                carry.read_value(frame, vstart, static_cast<std::uint16_t>(tag), hooks);
+            if (!value) {
+                break;  // fixpp#426: nothing after a malformed count can be trusted
             }
+            i = value->end;
             std::string_view val(reinterpret_cast<const char*>(frame.data() + vstart), i - vstart);
-            carry.arm(static_cast<std::uint16_t>(tag), frame.subspan(vstart, i - vstart), hooks, n);
 
             switch (tag) {
                 case 8:

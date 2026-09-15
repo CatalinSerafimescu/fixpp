@@ -73,16 +73,11 @@ struct FirstFrameIds {
         }
         ++i;  // skip '='
         std::size_t vstart = i;
-        if (auto const count = carry.take(static_cast<std::uint16_t>(tag))) {
-            auto const end = fixpp::wire::counted_value_end(frame, vstart, *count);
-            if (!end) return ids;
-            i = *end;
-        } else {
-            while (i < n && frame[i] != SOH) ++i;
-        }
+        auto const value = carry.read_value(frame, vstart, static_cast<std::uint16_t>(tag),
+                                            fixpp::wire::dict_hooks::none());
+        if (!value) return ids;
+        i = value->end;
         std::string_view val{reinterpret_cast<const char*>(frame.data() + vstart), i - vstart};
-        carry.arm(static_cast<std::uint16_t>(tag), frame.subspan(vstart, i - vstart),
-                  fixpp::wire::dict_hooks::none(), n);
         if (i < n) ++i;  // skip SOH
         if (tag == 8) ids.begin_string = val;
         if (tag == 49) ids.sender_comp_id = val;

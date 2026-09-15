@@ -80,10 +80,7 @@ public:
     // triple that used to live here is now `wire::dict_hooks`, so a table can
     // no longer be handed a membership oracle from one dictionary and a
     // delimiter oracle from another (brain/components/wire.md, "the DELIMITER
-    // oracle (#384)" — the mismatched-pairing sibling that closes). Kept as
-    // aliases for call sites that still name the function-pointer types.
-    using group_member_fn_t = dict_hooks::group_member_fn_t;
-    using group_delim_fn_t = dict_hooks::group_delim_fn_t;
+    // oracle (#384)" — the mismatched-pairing sibling that closes).
 
     // Caller-tunable DoS caps (FR-015 / [2b §1.2] "configurable").
     // Defaults match the module-level inline constexpr above.

@@ -22,55 +22,9 @@
 #include <span>
 
 #include "dict_hooks.hpp"
-#include "tag_scan.hpp"  // accumulate_bounded
+#include "tag_scan.hpp"  // parse_bounded_u32
 
 namespace fixpp::wire {
-
-class length_data_carry {
-public:
-    // Call with each field's tag before reading its value. Returns the counted
-    // byte length when `tag` is the Data field the previous field counted.
-    // Disarms either way, so a count never reaches past the next field.
-    [[nodiscard]] constexpr std::optional<std::uint32_t> take(std::uint16_t tag) noexcept {
-        std::uint16_t const armed = data_tag_;
-        data_tag_ = 0;
-        if (armed == 0 || armed != tag) {
-            return std::nullopt;
-        }
-        return count_;
-    }
-
-    // Call with each field's tag and value after reading it. Arms when `tag` is a
-    // Length field. The count is the value's leading ASCII digits, as
-    // OffsetTable::build reads it, saturating at `limit` (clamped to uint32) so a
-    // lying count can never wrap to a small plausible one (W-P2-1c).
-    constexpr void arm(std::uint16_t tag, std::span<std::byte const> value, dict_hooks const& hooks,
-                       std::size_t limit) noexcept {
-        data_tag_ = hooks.data_tag_for_length(tag);
-        count_ = 0;
-        if (data_tag_ == 0) {
-            return;
-        }
-        // accumulate_bounded needs cap >= 9. Raising a smaller cap is harmless:
-        // any count above the buffer size fails counted_value_end anyway.
-        auto const cap = static_cast<std::uint32_t>(
-            limit > 0xFFFFFFFFU ? 0xFFFFFFFFU : (limit < 9U ? 9U : limit));
-        for (auto const b : value) {
-            auto const c = static_cast<unsigned char>(b);
-            if (c < '0' || c > '9') {
-                break;
-            }
-            (void)accumulate_bounded(count_, c, cap);
-        }
-    }
-
-    // Disarms without a field, for a scanner that skips a malformed field.
-    constexpr void reset() noexcept { data_tag_ = 0; }
-
-private:
-    std::uint16_t data_tag_ = 0;
-    std::uint32_t count_ = 0;
-};
 
 // Where a counted value starting at `vstart` ends: the index of the SOH that
 // must follow it, or nullopt when the count runs past `buf` or the byte after
@@ -103,5 +57,54 @@ static_assert(!counted_value_end(detail::counted_value_end_probe, 0, 2).has_valu
 // A count reaching the end of the buffer, or past it, is malformed.
 static_assert(!counted_value_end(detail::counted_value_end_probe, 0, 4).has_value());
 static_assert(!counted_value_end(detail::counted_value_end_probe, 2, 0xFFFFFFFFU).has_value());
+
+class length_data_carry {
+public:
+    struct value_extent {
+        std::size_t end;  // the index of the SOH ending the value, or buf.size()
+        bool counted;     // read by the count of the field before it
+    };
+
+    // Reads the value of field `tag`, which starts at `vstart` (<= buf.size()), and
+    // arms for the next field. When the previous field was the Length counting
+    // `tag`, the value is read by that count; otherwise it runs to the next SOH or
+    // the end of `buf`. Returns nullopt only for a malformed count (see
+    // counted_value_end); what the scanner does then is its own (design §4). Call
+    // it for every field in order, and reset() for a field skipped as malformed,
+    // so a count never reaches past the next field.
+    [[nodiscard]] std::optional<value_extent> read_value(std::span<std::byte const> buf,
+                                                         std::size_t vstart, std::uint16_t tag,
+                                                         dict_hooks const& hooks) noexcept {
+        bool const counted = data_tag_ != 0 && data_tag_ == tag;
+        data_tag_ = 0;
+        std::size_t end = vstart;
+        if (counted) {
+            auto const counted_end = counted_value_end(buf, vstart, count_);
+            if (!counted_end) {
+                return std::nullopt;
+            }
+            end = *counted_end;
+        } else {
+            while (end < buf.size() && buf[end] != std::byte{0x01}) {
+                ++end;
+            }
+        }
+        data_tag_ = hooks.data_tag_for_length(tag);
+        if (data_tag_ != 0) {
+            // The count is the value's leading ASCII digits, as OffsetTable::build
+            // reads it, saturating so a lying count never wraps to a small plausible
+            // one (W-P2-1c); a saturated count always fails counted_value_end.
+            count_ = parse_bounded_u32(buf.subspan(vstart, end - vstart));
+        }
+        return value_extent{.end = end, .counted = counted};
+    }
+
+    // Disarms without a field, for a scanner that skips a malformed field.
+    constexpr void reset() noexcept { data_tag_ = 0; }
+
+private:
+    std::uint16_t data_tag_ = 0;
+    std::uint32_t count_ = 0;
+};
 
 }  // namespace fixpp::wire

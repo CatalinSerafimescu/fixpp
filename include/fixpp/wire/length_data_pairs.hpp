@@ -163,28 +163,12 @@ static_assert(std::ranges::all_of(standard_length_data_pairs, [](length_data_pai
 static_assert(standard_length_tag_for_data(89) == 93);  // inverted pair
 static_assert(standard_length_tag_for_data(93) == 0);   // a Length tag is not a Data tag
 
-// Every tag that appears on EITHER side of `standard_length_data_pairs`,
-// sorted ascending for a binary-search membership test. Derived from the one
-// table above at compile time rather than hand-written a second time: two
-// representations of the same fact that must agree forever is exactly the
-// `group_slices_reserve_bound()` shape B&L B-389-1 exists about (fixpp#426
-// design §3).
-inline constexpr std::array<std::uint16_t, standard_length_data_pairs.size() * 2>
-    standard_pair_tags = [] {
-        std::array<std::uint16_t, standard_length_data_pairs.size() * 2> out{};
-        for (std::size_t i = 0; i < standard_length_data_pairs.size(); ++i) {
-            out[2 * i] = standard_length_data_pairs[i].length_tag;
-            out[(2 * i) + 1] = standard_length_data_pairs[i].data_tag;
-        }
-        std::ranges::sort(out);
-        return out;
-    }();
-
 // True iff `tag` is the Length or the Data half of a STANDARD pair. Used to
 // exclude a dictionary's own Length+Data pairs from re-pairing or retyping a
-// standard tag (dict_hooks::data_tag_for_length, design §3, r3 R3-1).
+// standard tag (dict_hooks::data_tag_for_length, design §3, r3 R3-1). Answered
+// from the table and its inverse above, not from a third copy of the same fact.
 [[nodiscard]] constexpr bool is_standard_pair_tag(std::uint16_t tag) noexcept {
-    return std::ranges::binary_search(standard_pair_tags, tag);
+    return standard_data_tag_for_length(tag) != 0 || standard_length_tag_for_data(tag) != 0;
 }
 
 static_assert(is_standard_pair_tag(93) && is_standard_pair_tag(89));    // inverted pair, both sides

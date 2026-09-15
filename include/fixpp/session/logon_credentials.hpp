@@ -92,6 +92,16 @@ void for_each_tag554_value(std::span<const std::byte> frame, fixpp::wire::dict_h
                frame[p + 2] == std::byte{'4'} && frame[p + 3] == kEq;
     };
 
+    // Every field starts at offset 0 or right after a SOH, so a frame with no such
+    // `554=` holds no Password field and needs no walk (most outbound frames).
+    bool maybe_554 = false;
+    for (std::size_t p = 0; p + 4 <= n && !maybe_554; ++p) {
+        maybe_554 = (p == 0 || frame[p - 1] == kSoh) && is_554_eq_at(p);
+    }
+    if (!maybe_554) {
+        return;
+    }
+
     fixpp::wire::length_data_carry carry;
     std::size_t i = 0;
     while (i < n) {
@@ -114,25 +124,19 @@ void for_each_tag554_value(std::span<const std::byte> frame, fixpp::wire::dict_h
             continue;
         }
         std::size_t const vstart = i + 1;
-        std::size_t vend = 0;
-        if (auto const count = carry.take(static_cast<std::uint16_t>(tag))) {
-            auto const end = fixpp::wire::counted_value_end(frame, vstart, *count);
-            if (!end) {
-                for (std::size_t p = field_start; p < n; ++p) {
-                    if ((p == 0 || frame[p - 1] == kSoh) && is_554_eq_at(p)) {
-                        on_value(p + 4, value_end(p + 4));
-                    }
+        auto const value = carry.read_value(frame, vstart, static_cast<std::uint16_t>(tag), hooks);
+        if (!value) {
+            for (std::size_t p = field_start; p < n; ++p) {
+                if ((p == 0 || frame[p - 1] == kSoh) && is_554_eq_at(p)) {
+                    on_value(p + 4, value_end(p + 4));
                 }
-                return;
             }
-            vend = *end;
-        } else {
-            vend = value_end(vstart);
+            return;
         }
+        std::size_t const vend = value->end;
         if (is_554_eq_at(field_start) && i == field_start + 3) {
             on_value(vstart, vend);
         }
-        carry.arm(static_cast<std::uint16_t>(tag), frame.subspan(vstart, vend - vstart), hooks, n);
         i = vend < n ? vend + 1 : n;
     }
 }
