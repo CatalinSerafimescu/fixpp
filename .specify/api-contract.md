@@ -81,7 +81,7 @@ Two **independent** SemVer tracks per `[const §X.1]` / `[arch §9.2]`:
 | Track | Macros | Bumps when |
 |---|---|---|
 | **Library** (C++ surface) | `FIXPP_VERSION_MAJOR/MINOR/PATCH` | Any breaking change to a tier-1 C++ symbol or removal of a Stable-from-v1.0 surface. |
-| **C ABI** | `FIXPP_C_ABI_VERSION_MAJOR/MINOR/PATCH` | Any breaking change to a published C-ABI symbol; numeric meaning of any `fixpp_error_t` value changes. |
+| **C ABI** | `FIXPP_C_ABI_VERSION_MAJOR/MINOR/PATCH` | Any breaking change to a published C-ABI symbol; numeric meaning of any `fixpp_error_t` value changes. Before fixpp's first public release a breaking change bumps MINOR and is marked BREAKING instead (`[const §X.7]`). |
 
 - Both macro families are emitted by `tools/cmake/version.cmake` per `[arch §9.2]`.
 - ABI compatibility is verified in Tier 2 CI: `abidiff` on Linux, structural diff on Windows, against the previous tagged release per `[const §IX.5]` / `[arch §9.2]`.
@@ -276,11 +276,14 @@ Each row links the design doc to its public-surface footprint. **Source of truth
 
 ## 11. Frozen-until rule
 
-A surface listed under §3.1 is **frozen** at v1.0 release. Any change with one of the following effects is a breaking change requiring (a) a constitutional amendment under `[const §XX]` and (b) a SemVer MAJOR bump on the affected track per §4:
+A surface listed under §3.1 is **frozen** at v1.0 release. `[const §X.7]` cites the C-ABI effects below to define a C-ABI breaking change before fixpp's first public release too. Any change with one of the following effects is a breaking change requiring (a) a constitutional amendment under `[const §XX]` and (b) a SemVer MAJOR bump on the affected track per §4:
 
 - Renaming, removing, or changing the signature of a Stable-from-v1.0 C++ symbol.
 - Renaming, removing, or changing the meaning of a Stable-from-v1.0 C-ABI symbol.
 - Reassigning the numeric value of any published `fixpp_error_t` variant.
+- Changing the size, alignment or member layout of a Stable-from-v1.0 C-ABI struct, or the value of a published C-ABI constant or macro.
+- Changing the calling convention or visibility of a Stable-from-v1.0 C-ABI symbol, or its documented ownership, lifetime or reentrancy rule.
+- Making a call to a Stable-from-v1.0 C-ABI symbol fail where it used to succeed.
 - Reordering, removing, or repurposing a CMake exported target listed in §8.
 - Tightening the include set of `<fix/c_api.h>` (anything beyond `<stddef.h>`, `<stdint.h>`, `<stdbool.h>` would already be a violation of `[arch §9.1]`).
 - Adding a pure-virtual method to any interface in §9 (would invalidate user implementations).

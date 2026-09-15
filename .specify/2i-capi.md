@@ -619,6 +619,11 @@ const char* fixpp_strerror(fixpp_error_t code);
 - **Tier 2 abidiff.** Per `[const §IX.5]` the abidiff check on the C ABI surface fires on any breaking change. A re-defined `fixpp_error_t` value is a breaking change.
 - **Occupancy drift gate.** `tools/check_capi_occupancy.sh` mechanically counts `| \`*_*\` |` rows in each sibling `[2X §6.X]` errors table (`2a §7.4`, `2b §6.7`, `2c §6.7`, `2d §6.7`, `2e §6.7`, `2f §6.5`, `2g §6.6`, `2h §6.6`) and asserts the counts published in this doc's §1.1 magnitude-domain table + the §1.1 final layout block + §3.11 prose + §4.3 inline comments + §6.5 prior-doc total + Appendix D.2 supplemental match. Drift fails CI. **Single source of truth** for per-block occupancy is the §1.1 magnitude-domain table; every other site in 2i derives from it, and the gate verifies the derivation. Added in v0.2 / RC#2 close (Codex P1-1 counter-proposal generalised). Runs in Tier 1.
 
+> **Superseded in part — constitution v2.0, `[const §X.7]`.** Before fixpp's first public release a
+> breaking C-ABI change bumps MINOR and is marked BREAKING, and at that release the version resets to
+> 1.0.0 with the introducing-minor rebase. The MAJOR rule in this paragraph applies from that release
+> on. A published numeric value is still never reassigned.
+
 ### §4.4 `fixpp_strerror()` and forward-compat
 
 ```c
@@ -728,6 +733,11 @@ fixpp_version_t fixpp_library_version(void);
 #endif
 #endif /* FIXPP_C_API_VERSION_H */
 ```
+
+> **Superseded in part — constitution v2.0, `[const §X.7]`.** The excerpt above is the 0→1 freeze
+> as specified. The MINOR reset and the introducing-minor rebase now happen at fixpp's first public
+> release (reset to 1.0.0), not at 2.0.0, and until that release a breaking change bumps MINOR.
+> `include/fix/c_api/version.h` carries the current rule.
 
 **Reentrancy:** `FIXPP_THREAD_SAFE`. Returns a value-typed PoD; no shared state.
 **Allocation:** ZERO.

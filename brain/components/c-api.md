@@ -51,7 +51,7 @@ baseline.
 
 > The rule is stated in `version.h` and it generalises: **MINOR may reset only where no conforming
 > consumer can hold an older minor** — at a BREAKING major, or at the first public release
-> (`[const §X.7]`, constitution v1.1). At `2.0.0` the introducing-minor table is rebased and a 1.x
+> (`[const §X.7]`, constitution v2.0). At `2.0.0` the introducing-minor table is rebased and a 1.x
 > consumer is already refused by the major check; at the first release no consumer predates it. In
 > both cases the reset costs nothing. At a *non-breaking* freeze it would silently break the downgrade
 > frame.

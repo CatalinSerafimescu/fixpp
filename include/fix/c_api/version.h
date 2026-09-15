@@ -41,7 +41,9 @@
  *  this minor. Resetting it to 0 would place the current version BELOW the
  *  introducing_minor (2/4) of already-published codes, so a conforming consumer
  *  would see those codes downgraded to UNKNOWN — an incoherent baseline. 1.5.0
- *  keeps the downgrade frame continuous; the first stable ABI is 1.5.0.
+ *  keeps the downgrade frame continuous. It is a review baseline, not a
+ *  compatibility promise: the first stable ABI is the 1.0.0 of the first
+ *  public release.
  *
  *  Evolution of the downgrade frame:
  *    - Future MINORs within major 1 (1.6, 1.7, ...) just continue: a new code
