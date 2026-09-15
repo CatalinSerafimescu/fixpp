@@ -438,6 +438,25 @@ TEST(DictHooksCustomPair, StandardDataTagIsNeverPairedByADictionary) {
         << "a dictionary pair whose Data tag is a standard pair tag must not be honoured";
 }
 
+// ── Re-pairing keeps both directions inverse (Gate B r1 G-4) ────────────────
+TEST(DictHooksCustomPair, RepairingATagKeepsBothDirectionsInverse) {
+    table_view length_moves;
+    length_moves.set_length_pair_data_tag(5001, 5002);
+    length_moves.set_length_pair_data_tag(5001, 5003);
+    EXPECT_EQ(length_moves.length_pair_data_tag(5001), 5003U);
+    EXPECT_EQ(length_moves.data_pair_length_tag(5003), 5001U);
+    EXPECT_EQ(length_moves.data_pair_length_tag(5002), 0U) << "the old Data tag keeps no Length";
+    EXPECT_EQ(dict_hooks::for_table_view(length_moves).length_tag_for_data(5002), 0U);
+
+    table_view data_moves;
+    data_moves.set_length_pair_data_tag(5001, 5002);
+    data_moves.set_length_pair_data_tag(5011, 5002);
+    EXPECT_EQ(data_moves.data_pair_length_tag(5002), 5011U);
+    EXPECT_EQ(data_moves.length_pair_data_tag(5011), 5002U);
+    EXPECT_EQ(data_moves.length_pair_data_tag(5001), 0U) << "the old Length tag keeps no Data";
+    EXPECT_EQ(dict_hooks::for_table_view(data_moves).data_tag_for_length(5001), 0U);
+}
+
 // ── The Data->Length inverse (fixpp#428, design §3) ─────────────────────────
 TEST(DictHooksCustomPair, LengthTagForDataIsTheInverseWithTheSamePrecedence) {
     std::pmr::monotonic_buffer_resource dict_mr;

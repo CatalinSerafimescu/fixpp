@@ -284,6 +284,10 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_get_nested_group(const fixpp_group_t*
  *    FIXPP_ERR_NULL_HANDLE    -- session or msg_out is NULL
  *    FIXPP_ERR_INVALID_HANDLE -- session is destroyed / engine is gone
  *    FIXPP_ERR_DICT_CONFIG    -- msg_type not found in the session dictionary
+ *    FIXPP_ERR_WIRE_CONFORMANCE -- msg_type is empty or holds SOH (0x01); a session
+ *                               with a dictionary reports DICT_CONFIG first.
+ *                               (1.6, BREAKING: a session without a dictionary
+ *                               used to accept it.)
  *
  *  Reentrancy: requires-session-lock
  */

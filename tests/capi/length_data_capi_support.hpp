@@ -7,6 +7,8 @@
 //   - NoAllocs(78) whose instances hold EncodedAllocTextLen(360)/EncodedAllocText(361);
 //   - a custom pair 5001/5002 the standard table does not name;
 //   - a custom group 5000 whose FIRST field (its delimiter) is the Data field 5004;
+// and a NewOrderList ("E") reusing group 5000 with its Length 5003 first, so the
+// dictionary-wide first-seen delimiter (5004, from "D") is wrong in "E";
 //   - Text(58), a STRING field.
 // RawDataLength(95)/RawData(96) are declared as fields but not used by "D", so a
 // Data setter on 96 reaches the MsgType-grammar check.
@@ -71,6 +73,12 @@ inline constexpr std::string_view kLengthDataFix42Xml = R"xml(
       <group name="NoCustomBlobs" required="N">
         <field name="CustomBlob" required="N"/>
         <field name="CustomBlobLen" required="N"/>
+      </group>
+    </message>
+    <message name="NewOrderList" msgtype="E" msgcat="app">
+      <group name="NoCustomBlobs" required="N">
+        <field name="CustomBlobLen" required="N"/>
+        <field name="CustomBlob" required="N"/>
       </group>
     </message>
   </messages>

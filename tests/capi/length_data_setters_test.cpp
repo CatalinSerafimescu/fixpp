@@ -17,6 +17,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstring>
 #include <string>
 #include <string_view>
 
@@ -31,7 +32,7 @@ struct Fixture {
     fixpp_engine_t* eng = nullptr;
     fixpp_session_t* sess = nullptr;
     fixpp_msg_t* msg = nullptr;
-    Fixture() {
+    explicit Fixture(const char* msg_type = "D") {
         EXPECT_EQ(fixpp_engine_create(make_engine_cfg(), FIXPP_C_ABI_VERSION_MAJOR,
                                       FIXPP_C_ABI_VERSION_MINOR, &eng),
                   FIXPP_ERR_OK);
@@ -39,7 +40,8 @@ struct Fixture {
             make_length_data_session_cfg("CLI", "SRV", FIXPP_ROLE_INITIATOR);
         set_loopback_endpoint(sc, "127.0.0.1", 0);
         EXPECT_EQ(fixpp_session_open(eng, sc, &sess), FIXPP_ERR_OK);
-        EXPECT_EQ(fixpp_msg_create_outbound(sess, "D", 1, &msg), FIXPP_ERR_OK);
+        EXPECT_EQ(fixpp_msg_create_outbound(sess, msg_type, std::strlen(msg_type), &msg),
+                  FIXPP_ERR_OK);
     }
     ~Fixture() {
         if (msg) fixpp_msg_destroy(msg);
@@ -207,6 +209,62 @@ TEST(CapiEntrySetData, RefusesADataTagThatIsTheGroupDelimiter) {
     fixpp_entry_t* e = nullptr;
     ASSERT_EQ(fixpp_group_builder_add_entry(gb, &e), FIXPP_ERR_OK);
     EXPECT_EQ(fixpp_entry_set_data(e, 5004, as_u8("blob"), 4), FIXPP_ERR_TYPE_MISMATCH);
+}
+
+TEST(CapiEntrySetData, DelimiterRuleUsesTheGroupsOwnContext) {
+    // Group 5000 opens with the Data field 5004 in "D", but with its Length 5003 in "E".
+    // The dictionary-wide first-seen delimiter is D's, so a context-free lookup refuses
+    // a pair that is well-formed in "E".
+    Fixture f("E");
+    fixpp_group_builder_t* gb = nullptr;
+    ASSERT_EQ(fixpp_msg_group_begin(f.msg, 5000, &gb), FIXPP_ERR_OK);
+    fixpp_entry_t* e = nullptr;
+    ASSERT_EQ(fixpp_group_builder_add_entry(gb, &e), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_entry_set_data(e, 5004, as_u8("blob"), 4), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_msg_group_end(f.msg, gb), FIXPP_ERR_OK);
+    fixpp_error_t rc{};
+    auto const payload = f.commit(rc);
+    ASSERT_EQ(rc, FIXPP_ERR_OK);
+    EXPECT_NE(payload.find("5003=4\x01"
+                           "5004=blob\x01"),
+              std::string::npos)
+        << payload;
+}
+
+// ── fixpp_msg_create_outbound: MsgType (Gate B r1 G-1) ──────────────────────
+
+TEST(CapiCreateOutbound, DictFreeSessionRefusesAnEmptyOrSohMsgType) {
+    fixpp_engine_t* eng = nullptr;
+    ASSERT_EQ(fixpp_engine_create(make_engine_cfg(), FIXPP_C_ABI_VERSION_MAJOR,
+                                  FIXPP_C_ABI_VERSION_MINOR, &eng),
+              FIXPP_ERR_OK);
+    fixpp_session_config_t* sc = nullptr;
+    ASSERT_EQ(fixpp_session_config_create(&sc), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_session_config_set_comp_ids(sc, "DFA", "DFB"), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_session_config_set_begin_string(sc, "FIX.4.2"), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_session_config_set_role(sc, FIXPP_ROLE_ACCEPTOR), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_session_config_set_heartbeat_seconds(sc, 30), FIXPP_ERR_OK);
+    ASSERT_EQ(
+        fixpp_session_config_set_security(sc, FIXPP_SECURITY_INSECURE_PLAIN_TCP, nullptr, nullptr),
+        FIXPP_ERR_OK);
+    set_loopback_endpoint(sc, "127.0.0.1", 0);
+    fixpp_session_t* sess = nullptr;
+    ASSERT_EQ(fixpp_session_open(eng, sc, &sess), FIXPP_ERR_OK);
+
+    fixpp_msg_t* msg = nullptr;
+    constexpr std::string_view kInjected{
+        "D\x01"
+        "11=INJECTED",
+        13};
+    EXPECT_EQ(fixpp_msg_create_outbound(sess, kInjected.data(), kInjected.size(), &msg),
+              FIXPP_ERR_WIRE_CONFORMANCE);
+    EXPECT_EQ(msg, nullptr);
+    EXPECT_EQ(fixpp_msg_create_outbound(sess, "", 0, &msg), FIXPP_ERR_WIRE_CONFORMANCE);
+    EXPECT_EQ(msg, nullptr);
+    ASSERT_EQ(fixpp_msg_create_outbound(sess, "D", 1, &msg), FIXPP_ERR_OK)
+        << "an ordinary MsgType is still accepted without a dictionary";
+    fixpp_msg_destroy(msg);
+    fixpp_engine_destroy(eng);
 }
 
 // ── §5.1 SOH in the string setters ───────────────────────────────────────────

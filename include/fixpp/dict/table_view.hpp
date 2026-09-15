@@ -797,10 +797,21 @@ public:
     // no-op (`length_pair_data_tag` already answers 0 for an unregistered
     // key), so callers need not pre-filter FieldRef::length_pair_data_tag==0.
     void set_length_pair_data_tag(std::uint16_t length_tag, std::uint16_t data_tag) {
-        if (data_tag != 0) {
-            length_pair_data_tag_[length_tag] = data_tag;
-            data_pair_length_tag_[data_tag] = length_tag;
+        if (data_tag == 0) {
+            return;
         }
+        // Keep the maps inverse: re-pairing either tag drops its old partner, so
+        // the two directions never disagree (Gate B r1 G-4).
+        if (auto const old = length_pair_data_tag_.find(length_tag);
+            old != length_pair_data_tag_.end() && old->second != data_tag) {
+            data_pair_length_tag_.erase(old->second);
+        }
+        if (auto const old = data_pair_length_tag_.find(data_tag);
+            old != data_pair_length_tag_.end() && old->second != length_tag) {
+            length_pair_data_tag_.erase(old->second);
+        }
+        length_pair_data_tag_[length_tag] = data_tag;
+        data_pair_length_tag_[data_tag] = length_tag;
     }
 
 private:

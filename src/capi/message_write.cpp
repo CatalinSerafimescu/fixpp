@@ -317,6 +317,12 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_create_outbound(fixpp_session_t* sessio
         }
         if (!found) return FIXPP_ERR_DICT_CONFIG;
     }
+    // fixpp#428: commit writes MsgType verbatim as `35=<msg_type><SOH>`, so a SOH in it
+    // injects fields, and an empty one is malformed. A dictionary already refuses both
+    // above (no declared MsgType is empty or holds SOH); this covers dict-free sessions.
+    if (mt.empty() || mt.find('\x01') != std::string_view::npos) {
+        return FIXPP_ERR_WIRE_CONFORMANCE;
+    }
 
     // Construction-time thunk: allocate the outbound handle + a per-message arena
     // + the accumulator. The arena seed below is a CONSTRUCTION-time allocation
@@ -778,6 +784,15 @@ static AccumulatorEntry* resolve_group(fixpp_group_builder* b) noexcept {
     return &inst.fields[b->group_field_index];
 }
 
+// The context commit resolves `b`'s group under (validate_group_grammar): the message's
+// MsgType and the tags of the groups enclosing it, outermost first.
+static fixpp::wire::group_context builder_context(fixpp_group_builder* b) noexcept {
+    if (b->parent == nullptr) {
+        return fixpp::wire::group_context{.msg_type = b->msg->accumulator->msg_type};
+    }
+    return builder_context(b->parent->builder).pushed(resolve_group(b->parent->builder)->tag);
+}
+
 static GroupInstance* resolve_instance(fixpp_entry* e) noexcept {
     AccumulatorEntry* g = resolve_group(e->builder);
     return &g->instances[e->instance_index];
@@ -1160,8 +1175,14 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_data(fixpp_entry_t* entry, uint16
 
     AccumulatorEntry* group = resolve_group(e->builder);
     // A Data field cannot be a group's delimiter: its Length would have to come first.
-    if (h->dict_ && h->dict_->group_first_field(group->tag) == data_tag) {
-        return FIXPP_ERR_TYPE_MISMATCH;
+    // The delimiter is the one for this group's exact context, as commit resolves it; a
+    // group tag reused elsewhere can open with a different field. On a context miss
+    // the setter defers to commit, which fails closed.
+    if (h->dict_ && h->session_tv_) {
+        const fixpp::wire::group_context ctx = builder_context(e->builder);
+        const auto delimiter = h->session_tv_->group_first_field_exact(
+            ctx.msg_type, {ctx.parent_path.data(), ctx.depth}, group->tag);
+        if (delimiter && *delimiter == data_tag) return FIXPP_ERR_TYPE_MISMATCH;
     }
     GroupInstance& inst = group->instances[e->instance_index];
     if (is_group_collision(h, inst.fields, length_tag) ||
