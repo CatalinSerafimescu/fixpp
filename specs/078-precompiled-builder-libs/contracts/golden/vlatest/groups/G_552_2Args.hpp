@@ -45,7 +45,6 @@ struct G_552_2Args {
     ::std::optional<::std::string_view> trade_input_device{};
     ::std::optional<::std::string_view> compliance_id{};
     ::std::optional<::std::string_view> compliance_text{};
-    ::std::optional<::std::int64_t> encoded_compliance_text_len{};
     ::std::optional<::std::string_view> encoded_compliance_text{};
     ::std::optional<bool> solicited_flag{};
     ::std::optional<::std::int64_t> cust_order_capacity{};

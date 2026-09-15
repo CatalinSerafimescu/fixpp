@@ -22,13 +22,11 @@ struct NewsArgs {
     ::std::span<const groups::G_33_1Args> lines_of_text{};
     ::std::optional<::std::string_view> orig_time{};
     ::std::optional<char> urgency{};
-    ::std::optional<::std::int64_t> raw_data_length{};
     ::std::optional<::std::string_view> raw_data{};
     ::std::optional<::std::span<const groups::G_146_4Args>> related_sym{};
     ::std::optional<::std::string_view> headline{};
     ::std::optional<::std::string_view> url_link{};
     ::std::optional<::std::span<const groups::G_215Args>> routing_i_ds{};
-    ::std::optional<::std::int64_t> encoded_headline_len{};
     ::std::optional<::std::string_view> encoded_headline{};
     ::std::optional<::std::span<const groups::G_555_2Args>> legs{};
     ::std::optional<::std::span<const groups::G_711_1Args>> underlyings{};

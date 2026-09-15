@@ -164,7 +164,14 @@ public:
         // `contains()` is false for every tag — identical to field_valid_for
         // returning false for every tag.
         auto const valid_tags = dict_.valid_tags_for(msg_type);
-        for (auto it = msg.begin(); !(it == msg.end()); ++it) {
+        // fixpp#426 (design §3): walk with THIS validator's own dict_hooks,
+        // not `msg`'s — `msg` may be dict-free even when `dict_` is not (or
+        // vice versa), and the field walk must split Length+Data pairs by
+        // the SAME dictionary every other Step below reads through.
+        auto const hooks = dict_hooks::for_table_view(dict_);
+        using iter_t = MessageView<access_mode::Index>::field_iterator;
+        for (iter_t it{msg.bytes(), 0, hooks}, end{msg.bytes(), msg.bytes().size(), hooks};
+             !(it == end); ++it) {
             auto const& fld = *it;
 
             // (a) Unexpected tag check. 081 Concern A (research.md D-1):

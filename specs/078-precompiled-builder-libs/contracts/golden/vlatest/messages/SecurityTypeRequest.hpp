@@ -17,7 +17,6 @@ struct SecurityTypeRequestArgs {
     ::std::optional<::std::string_view> security_type{};
     ::std::optional<::std::string_view> security_req_id{};
     ::std::optional<::std::string_view> trading_session_id{};
-    ::std::optional<::std::int64_t> encoded_text_len{};
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::std::int64_t> product{};
     ::std::optional<::std::string_view> trading_session_sub_id{};

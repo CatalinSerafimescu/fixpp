@@ -245,13 +245,11 @@ namespace fixpp::vlatest {
         auto r = eh0.set_string(58, *item0.text);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item0.encoded_text_len) {
-        auto r = eh0.set_int(354, *item0.encoded_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item0.encoded_text) {
-        auto r = eh0.set_string(355, *item0.encoded_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh0.set_int(354, static_cast<::std::int64_t>(item0.encoded_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh0.set_string(355, *item0.encoded_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
         }
         auto ge0 = bb.group_end(*gh0);

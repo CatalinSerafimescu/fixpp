@@ -9,13 +9,11 @@ namespace fixpp::vlatest {
 
 inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_UserRequest(::std::span<::std::byte> out, UserRequestArgs const& args) noexcept {
     ::fixpp::wire::body_builder bb{"BE"};
-    if (args.raw_data_length) {
-        auto r = bb.field(95, *args.raw_data_length);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (args.raw_data) {
-        auto r = bb.field(96, *args.raw_data);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = bb.field(95, static_cast<::std::int64_t>(args.raw_data->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = bb.field(96, *args.raw_data);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (args.username) {
         auto r = bb.field(553, *args.username);
@@ -41,21 +39,17 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_UserRequest(::s
         auto r = bb.field(1400, *args.encrypted_password_method);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (args.encrypted_password_len) {
-        auto r = bb.field(1401, *args.encrypted_password_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (args.encrypted_password) {
-        auto r = bb.field(1402, *args.encrypted_password);
-        if (!r) return ::std::unexpected(r.error());
-    }
-    if (args.encrypted_new_password_len) {
-        auto r = bb.field(1403, *args.encrypted_new_password_len);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = bb.field(1401, static_cast<::std::int64_t>(args.encrypted_password->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = bb.field(1402, *args.encrypted_password);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (args.encrypted_new_password) {
-        auto r = bb.field(1404, *args.encrypted_new_password);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = bb.field(1403, static_cast<::std::int64_t>(args.encrypted_new_password->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = bb.field(1404, *args.encrypted_new_password);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     return bb.commit(out);
 }

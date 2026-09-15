@@ -32,7 +32,6 @@ struct SecurityListArgs {
     ::std::optional<::std::string_view> security_list_id{};
     ::std::optional<::std::string_view> security_list_ref_id{};
     ::std::optional<::std::string_view> security_list_desc{};
-    ::std::optional<::std::int64_t> encoded_security_list_desc_len{};
     ::std::optional<::std::string_view> encoded_security_list_desc{};
     ::std::optional<::std::int64_t> security_list_type{};
     ::std::optional<::std::int64_t> security_list_type_source{};

@@ -18,7 +18,6 @@ struct G_2104Args {
     ::std::optional<::std::string_view> attachment_external_url{};
     ::std::optional<::std::int64_t> attachment_encoding_type{};
     ::std::optional<::std::int64_t> unencoded_attachment_len{};
-    ::std::optional<::std::int64_t> encoded_attachment_len{};
     ::std::optional<::std::string_view> encoded_attachment{};
     ::std::optional<::std::span<const G_2113Args>> attachment_keywords{};
 };

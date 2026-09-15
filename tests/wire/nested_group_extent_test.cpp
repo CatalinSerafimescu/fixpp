@@ -38,7 +38,6 @@
 #include <string_view>
 #include <vector>
 
-#include "support/context_group_member_fn.hpp"
 #include "support/frame_view_factory.hpp"
 #include "support/mock_dict_table.hpp"
 
@@ -55,20 +54,6 @@ std::vector<std::byte> make_raw_frame(std::string const& body) {
     std::memcpy(out.data(), full.data(), full.size());
     return out;
 }
-
-// Context-aware lookup — the SAME group_member_fn_t shape the Parser
-// dict-lvalue ctor installs (its `group_member_fn_` initializer lambda) / defect_a_group_context_
-// test.cpp's copy. Needed here to call nested_group_slices() directly
-// (opaque_dict_/group_member_fn_ are private on MessageView/Parser). Tries
-// the context store FIRST, falling back to the legacy bare-no_tag store on a
-// MISS (table_view.hpp) — safe for T019/T020(a-c)/T022 above, which register
-// ONLY via the bare (context-free) builder API and so always MISS the
-// context store and fall back identically; BenignSameMembershipReuseAcross
-// Contexts below is the one test that populates group_ctx_ and so actually
-// exercises the context-store HIT path.
-// Shared definition: tests/support/context_group_member_fn.hpp. A reference
-// alias keeps this file's local name and preserves the &-address-of sites.
-constexpr auto& dict_group_member = fixpp_test_support::context_group_member_fn;
 
 }  // namespace
 
@@ -120,10 +105,11 @@ TEST(NestedGroupExtent, MultiEntryNestedExtentGuard) {
     auto const& outer0 = outer_slices[0];
 
     fixpp::wire::group_context const ctx{.msg_type = "D"};
-    auto nested_slices = mv->offsets()
-                             .nested_group_slices(outer0.data, outer0.len, /*nested_no_tag=*/802,
-                                                  &dict, &dict_group_member, fv->token(), ctx)
-                             .slices;
+    auto nested_slices =
+        mv->offsets()
+            .nested_group_slices(outer0.data, outer0.len, /*nested_no_tag=*/802,
+                                 fixpp::wire::dict_hooks::for_table_view(dict), fv->token(), ctx)
+            .slices;
     ASSERT_EQ(nested_slices.size(), 2U)
         << "INV-B: the nested group's full 2-entry extent must be enclosed by the outer";
 
@@ -180,10 +166,11 @@ TEST(NestedGroupExtent, SingleEntryNestedNoOverConsumption) {
     auto const& outer0 = outer_slices[0];
 
     fixpp::wire::group_context const ctx{.msg_type = "D"};
-    auto nested_slices = mv->offsets()
-                             .nested_group_slices(outer0.data, outer0.len, 802, &dict,
-                                                  &dict_group_member, fv->token(), ctx)
-                             .slices;
+    auto nested_slices =
+        mv->offsets()
+            .nested_group_slices(outer0.data, outer0.len, 802,
+                                 fixpp::wire::dict_hooks::for_table_view(dict), fv->token(), ctx)
+            .slices;
     ASSERT_EQ(nested_slices.size(), 1U);
     auto field = fixpp::wire::get({nested_slices[0].data, nested_slices[0].len}, 524, fv->token());
     ASSERT_TRUE(field.has_value());
@@ -233,10 +220,11 @@ TEST(NestedGroupExtent, CountOfZeroNestedConsumesNoExtent) {
     EXPECT_EQ(f->as_string(), "DIRECT");
 
     fixpp::wire::group_context const ctx{.msg_type = "D"};
-    auto nested_slices = mv->offsets()
-                             .nested_group_slices(outer0.data, outer0.len, 802, &dict,
-                                                  &dict_group_member, fv->token(), ctx)
-                             .slices;
+    auto nested_slices =
+        mv->offsets()
+            .nested_group_slices(outer0.data, outer0.len, 802,
+                                 fixpp::wire::dict_hooks::for_table_view(dict), fv->token(), ctx)
+            .slices;
     EXPECT_TRUE(nested_slices.empty()) << "802=0 must yield zero nested instances";
 }
 
@@ -325,10 +313,11 @@ TEST(NestedGroupExtent, MultipleOccurrencesOfSameGroupNoCollision) {
 
     fixpp::wire::group_context const ctx{.msg_type = "D"};
 
-    auto nested0 = mv->offsets()
-                       .nested_group_slices(outer_slices[0].data, outer_slices[0].len, 802, &dict,
-                                            &dict_group_member, fv->token(), ctx)
-                       .slices;
+    auto nested0 =
+        mv->offsets()
+            .nested_group_slices(outer_slices[0].data, outer_slices[0].len, 802,
+                                 fixpp::wire::dict_hooks::for_table_view(dict), fv->token(), ctx)
+            .slices;
     ASSERT_EQ(nested0.size(), 2U);
     auto v00 = fixpp::wire::get({nested0[0].data, nested0[0].len}, 524, fv->token());
     ASSERT_TRUE(v00.has_value());
@@ -337,10 +326,11 @@ TEST(NestedGroupExtent, MultipleOccurrencesOfSameGroupNoCollision) {
     ASSERT_TRUE(v01.has_value());
     EXPECT_EQ(v01->as_string(), "V01");
 
-    auto nested1 = mv->offsets()
-                       .nested_group_slices(outer_slices[1].data, outer_slices[1].len, 802, &dict,
-                                            &dict_group_member, fv->token(), ctx)
-                       .slices;
+    auto nested1 =
+        mv->offsets()
+            .nested_group_slices(outer_slices[1].data, outer_slices[1].len, 802,
+                                 fixpp::wire::dict_hooks::for_table_view(dict), fv->token(), ctx)
+            .slices;
     ASSERT_EQ(nested1.size(), 2U);
     auto v10 = fixpp::wire::get({nested1[0].data, nested1[0].len}, 524, fv->token());
     ASSERT_TRUE(v10.has_value());
@@ -355,8 +345,8 @@ TEST(NestedGroupExtent, MultipleOccurrencesOfSameGroupNoCollision) {
 // outer group 453, and msg_type "8" nested under a DIFFERENT outer group
 // 460 — with IDENTICAL declared membership {523, 524} registered via the
 // context-scoped `_ctx` store (NOT the bare fallback: two DISTINCT
-// `(msg_type, parent_path, 802)` keys are populated so `dict_group_member`'s
-// context-store lookup HITS for both, mirroring the benign counterpart to
+// `(msg_type, parent_path, 802)` keys are populated so the dict_hooks
+// membership lookup HITS for both, mirroring the benign counterpart to
 // Defect A's differing-membership collision covered by
 // tests/dictionary/defect_a_group_context_test.cpp). Both messages must
 // resolve their own 2-entry nested group correctly — no cross-context
@@ -414,8 +404,9 @@ TEST(NestedGroupExtent, BenignSameMembershipReuseAcrossContexts) {
     // 453-instance), NOT the bare root context.
     fixpp::wire::group_context const ctx_d{.msg_type = "D", .parent_path = {453}, .depth = 1};
     auto nested_d = mv_d->offsets()
-                        .nested_group_slices(outer_d[0].data, outer_d[0].len, 802, &dict,
-                                             &dict_group_member, fv_d->token(), ctx_d)
+                        .nested_group_slices(outer_d[0].data, outer_d[0].len, 802,
+                                             fixpp::wire::dict_hooks::for_table_view(dict),
+                                             fv_d->token(), ctx_d)
                         .slices;
     ASSERT_EQ(nested_d.size(), 2U) << "context (\"D\",[453],802) must resolve its own membership";
     auto d0 = fixpp::wire::get({nested_d[0].data, nested_d[0].len}, 524, fv_d->token());
@@ -446,8 +437,9 @@ TEST(NestedGroupExtent, BenignSameMembershipReuseAcrossContexts) {
     ASSERT_EQ(outer_8.size(), 1U);
     fixpp::wire::group_context const ctx_8{.msg_type = "8", .parent_path = {460}, .depth = 1};
     auto nested_8 = mv_8->offsets()
-                        .nested_group_slices(outer_8[0].data, outer_8[0].len, 802, &dict,
-                                             &dict_group_member, fv_8->token(), ctx_8)
+                        .nested_group_slices(outer_8[0].data, outer_8[0].len, 802,
+                                             fixpp::wire::dict_hooks::for_table_view(dict),
+                                             fv_8->token(), ctx_8)
                         .slices;
     ASSERT_EQ(nested_8.size(), 2U) << "context (\"8\",[460],802) must resolve its own membership";
     auto e0 = fixpp::wire::get({nested_8[0].data, nested_8[0].len}, 524, fv_8->token());

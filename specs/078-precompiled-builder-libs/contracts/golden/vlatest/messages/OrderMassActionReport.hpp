@@ -118,15 +118,10 @@ struct OrderMassActionReportArgs {
     ::std::optional<char> underlying_opt_attribute{};
     ::std::optional<::std::string_view> underlying_currency{};
     ::std::optional<::std::string_view> trading_session_id{};
-    ::std::optional<::std::int64_t> encoded_issuer_len{};
     ::std::optional<::std::string_view> encoded_issuer{};
-    ::std::optional<::std::int64_t> encoded_security_desc_len{};
     ::std::optional<::std::string_view> encoded_security_desc{};
-    ::std::optional<::std::int64_t> encoded_text_len{};
     ::std::optional<::std::string_view> encoded_text{};
-    ::std::optional<::std::int64_t> encoded_underlying_issuer_len{};
     ::std::optional<::std::string_view> encoded_underlying_issuer{};
-    ::std::optional<::std::int64_t> encoded_underlying_security_desc_len{};
     ::std::optional<::std::string_view> encoded_underlying_security_desc{};
     ::std::optional<::std::string_view> compliance_id{};
     ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
@@ -201,7 +196,6 @@ struct OrderMassActionReportArgs {
     ::std::optional<::fixpp::decimal_t> min_price_increment_amount{};
     ::std::optional<::fixpp::decimal_t> unit_of_measure_qty{};
     ::std::optional<::std::string_view> security_group{};
-    ::std::optional<::std::int64_t> security_xml_len{};
     ::std::optional<::std::string_view> security_xml{};
     ::std::optional<::std::string_view> security_xml_schema{};
     ::std::optional<::std::string_view> price_unit_of_measure{};
@@ -259,9 +253,8 @@ struct OrderMassActionReportArgs {
     ::std::optional<::std::string_view> settl_rate_index{};
     ::std::optional<::std::string_view> settl_rate_index_location{};
     ::std::optional<::std::string_view> option_expiration_desc{};
-    ::std::optional<::std::int64_t> encoded_option_expiration_desc_len{};
-    ::std::optional<::std::int64_t> short_sale_restriction{};
     ::std::optional<::std::string_view> encoded_option_expiration_desc{};
+    ::std::optional<::std::int64_t> short_sale_restriction{};
     ::std::optional<::std::string_view> strike_unit_of_measure{};
     ::std::optional<::std::string_view> unit_of_measure_currency{};
     ::std::optional<::std::string_view> price_unit_of_measure_currency{};
@@ -274,7 +267,6 @@ struct OrderMassActionReportArgs {
     ::std::optional<::std::span<const groups::G_1793Args>> not_affected_market_segments{};
     ::std::optional<::std::string_view> underlying_contract_price_ref_month{};
     ::std::optional<::std::string_view> strike_index{};
-    ::std::optional<::std::int64_t> underlying_security_xml_len{};
     ::std::optional<::std::string_view> underlying_security_xml{};
     ::std::optional<::std::string_view> underlying_security_xml_schema{};
     ::std::optional<::std::int64_t> asset_class{};
@@ -371,7 +363,6 @@ struct OrderMassActionReportArgs {
     ::std::optional<::std::string_view> underlying_settl_rate_index{};
     ::std::optional<::std::string_view> underlying_settl_rate_index_location{};
     ::std::optional<::std::string_view> underlying_option_expiration_desc{};
-    ::std::optional<::std::int64_t> encoded_underlying_option_expiration_desc_len{};
     ::std::optional<::std::string_view> encoded_underlying_option_expiration_desc{};
     ::std::optional<::std::string_view> underlying_swap_sub_class{};
     ::std::optional<::std::string_view> underlying_strike_unit_of_measure{};
@@ -386,7 +377,6 @@ struct OrderMassActionReportArgs {
     ::std::optional<::std::int64_t> underlying_instrument_rounding_precision{};
     ::std::optional<::std::span<const groups::G_2304Args>> asset_attributes{};
     ::std::optional<::std::span<const groups::G_2312Args>> underlying_asset_attributes{};
-    ::std::optional<::std::int64_t> encoded_compliance_text_len{};
     ::std::optional<::std::string_view> encoded_compliance_text{};
     ::std::optional<::std::int64_t> trading_unit_period_multiplier{};
     ::std::optional<::std::int64_t> underlying_trading_unit_period_multiplier{};
@@ -426,10 +416,8 @@ struct OrderMassActionReportArgs {
     ::std::optional<bool> contrary_instruction_eligibility_indicator{};
     ::std::optional<bool> underlying_contrary_instruction_eligibility_indicator{};
     ::std::optional<::std::string_view> financial_instrument_full_name{};
-    ::std::optional<::std::int64_t> encoded_financial_instrument_full_name_len{};
     ::std::optional<::std::string_view> encoded_financial_instrument_full_name{};
     ::std::optional<::std::string_view> underlying_financial_instrument_full_name{};
-    ::std::optional<::std::int64_t> encoded_underlying_financial_instrument_full_name_len{};
     ::std::optional<::std::string_view> encoded_underlying_financial_instrument_full_name{};
     ::std::optional<::std::string_view> underlying_index_curve_unit{};
     ::std::optional<::std::int64_t> underlying_index_curve_period{};
@@ -485,7 +473,6 @@ struct OrderMassActionReportArgs {
     ::std::optional<::std::span<const groups::G_41094Args>> market_disruption_fallbacks{};
     ::std::optional<::std::span<const groups::G_41096Args>> market_disruption_fallback_reference_prices{};
     ::std::optional<::std::string_view> exercise_desc{};
-    ::std::optional<::std::int64_t> encoded_exercise_desc_len{};
     ::std::optional<::std::string_view> encoded_exercise_desc{};
     ::std::optional<bool> automatic_exercise_indicator{};
     ::std::optional<::fixpp::decimal_t> automatic_exercise_threshold_rate{};
@@ -536,7 +523,6 @@ struct OrderMassActionReportArgs {
     ::std::optional<::std::string_view> underlying_protection_term_xid_ref{};
     ::std::optional<::std::string_view> underlying_settl_term_xid_ref{};
     ::std::optional<::std::string_view> underlying_exercise_desc{};
-    ::std::optional<::std::int64_t> encoded_underlying_exercise_desc_len{};
     ::std::optional<::std::string_view> encoded_underlying_exercise_desc{};
     ::std::optional<bool> underlying_automatic_exercise_indicator{};
     ::std::optional<::fixpp::decimal_t> underlying_automatic_exercise_threshold_rate{};

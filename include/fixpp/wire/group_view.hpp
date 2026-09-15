@@ -15,10 +15,10 @@
 #include <string_view>
 #include <type_traits>
 
-// 062 T002: entry_context needs OffsetTable::group_member_fn_t (a complete
-// nested typedef) + OffsetTable* (pointer-only). offset_table.hpp only
-// includes framer.hpp/view.hpp (no back-edge to this header), so this
-// include is a plain one-directional edge — not a cycle.
+// 062 T002 / fixpp#426: entry_context needs `dict_hooks` (reached through
+// offset_table.hpp) + OffsetTable* (pointer-only). offset_table.hpp has no
+// back-edge to this header, so this include is a plain one-directional edge —
+// not a cycle.
 #include "offset_table.hpp"
 #include "view.hpp"
 
@@ -84,9 +84,12 @@ static_assert(std::is_trivially_copyable_v<group_context>,
 struct entry_context {
     std::span<const std::byte> span;          // this entry's own slice bytes
     std::pmr::memory_resource* mr = nullptr;  // parent per-message PMR arena
-    void const* opaque_dict = nullptr;        // dictionary handle (nested slicer)
-    OffsetTable::group_member_fn_t group_member_fn =
-        nullptr;                     // dict-driven group-membership predicate
+    // fixpp#426 (design §3): the dictionary bundle this entry's own group
+    // reads through — membership, delimiter and Length+Data pairing, all from
+    // the SAME dictionary. Replaces the separate `opaque_dict` +
+    // `group_member_fn` this struct used to carry (see
+    // brain/components/wire.md, "the DELIMITER oracle (#384)").
+    dict_hooks hooks{};
     detail::generation_token gen{};  // [2b §6.4] REQUIRED (N1) — never a default {} token
     OffsetTable const* parent_cache_owner =
         nullptr;  // root OffsetTable owning the single flat nested-view cache (RC2); const — only

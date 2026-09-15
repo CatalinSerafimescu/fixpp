@@ -12,7 +12,6 @@ namespace fixpp::vlatest::groups {
 
 struct G_41804Args {
     ::std::optional<::std::string_view> underlying_delivery_stream_cycle_desc{};
-    ::std::optional<::std::int64_t> encoded_underlying_delivery_stream_cycle_desc_len{};
     ::std::optional<::std::string_view> encoded_underlying_delivery_stream_cycle_desc{};
 };
 

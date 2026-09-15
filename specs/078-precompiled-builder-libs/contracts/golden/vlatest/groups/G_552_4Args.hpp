@@ -28,10 +28,8 @@ struct G_552_4Args {
     ::std::optional<::fixpp::decimal_t> rounding_modulus{};
     ::std::optional<::std::string_view> compliance_id{};
     ::std::optional<::std::string_view> compliance_text{};
-    ::std::optional<::std::int64_t> encoded_compliance_text_len{};
     ::std::optional<::std::string_view> encoded_compliance_text{};
     ::std::optional<::std::string_view> text{};
-    ::std::optional<::std::int64_t> encoded_text_len{};
     ::std::optional<::std::string_view> encoded_text{};
 };
 

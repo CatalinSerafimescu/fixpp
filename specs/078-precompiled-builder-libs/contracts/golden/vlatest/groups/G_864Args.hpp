@@ -19,7 +19,6 @@ struct G_864Args {
     ::std::optional<::std::string_view> event_month_year{};
     ::std::optional<::fixpp::decimal_t> event_px{};
     ::std::optional<::std::string_view> event_text{};
-    ::std::optional<::std::int64_t> encoded_event_text_len{};
     ::std::optional<::std::string_view> encoded_event_text{};
 };
 

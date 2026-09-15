@@ -16,10 +16,8 @@ namespace fixpp::vlatest {
 struct PartyRiskLimitsReportAckArgs {
     ::std::optional<::std::string_view> text{};
     ::std::optional<::std::string_view> transact_time{};
-    ::std::optional<::std::int64_t> encoded_text_len{};
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::std::string_view> reject_text{};
-    ::std::optional<::std::int64_t> encoded_reject_text_len{};
     ::std::optional<::std::string_view> encoded_reject_text{};
     ::std::optional<::std::string_view> risk_limit_request_id{};
     ::std::optional<::std::string_view> risk_limit_report_id{};

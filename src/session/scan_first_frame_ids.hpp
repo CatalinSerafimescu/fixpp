@@ -20,6 +20,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/wire/dict_hooks.hpp>
+#include <fixpp/wire/length_data_carry.hpp>  // fixpp#426: counted Data values
 #include <fixpp/wire/tag_scan.hpp>  // 040 US2: accumulate_tag_digit shared bounded-tag helper
 #include <span>
 #include <string_view>
@@ -35,12 +37,17 @@ struct FirstFrameIds {
     std::string_view target_comp_id;
 };
 
+// fixpp#426: a counted Data value is read as one value, so a `<SOH>49=` inside
+// RawData cannot pick the session. This runs before any Session (and so any
+// dictionary) exists, so the pairs are the standard table alone. A malformed
+// count stops the scan, leaving the later IDs absent (design §4).
 [[nodiscard]] inline FirstFrameIds scan_first_frame_ids(std::span<const std::byte> frame) noexcept {
     FirstFrameIds ids;
     const std::byte SOH{0x01};
     const std::byte EQ{static_cast<std::byte>('=')};
     std::size_t i = 0;
     const std::size_t n = frame.size();
+    fixpp::wire::length_data_carry carry;
 
     while (i < n) {
         std::uint32_t tag = 0;
@@ -59,13 +66,17 @@ struct FirstFrameIds {
             ++i;
         }
         if (i >= n || frame[i] != EQ || !tag_ok) {
+            carry.reset();
             while (i < n && frame[i] != SOH) ++i;
             if (i < n) ++i;
             continue;
         }
         ++i;  // skip '='
         std::size_t vstart = i;
-        while (i < n && frame[i] != SOH) ++i;
+        auto const value = carry.read_value(frame, vstart, static_cast<std::uint16_t>(tag),
+                                            fixpp::wire::dict_hooks::none());
+        if (!value) return ids;
+        i = value->end;
         std::string_view val{reinterpret_cast<const char*>(frame.data() + vstart), i - vstart};
         if (i < n) ++i;  // skip SOH
         if (tag == 8) ids.begin_string = val;

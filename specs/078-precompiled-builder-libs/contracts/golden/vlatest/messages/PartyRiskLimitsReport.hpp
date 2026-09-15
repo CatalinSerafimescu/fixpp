@@ -17,7 +17,6 @@ struct PartyRiskLimitsReportArgs {
     ::std::optional<::std::string_view> text{};
     ::std::optional<::std::string_view> transact_time{};
     ::std::optional<bool> unsolicited_indicator{};
-    ::std::optional<::std::int64_t> encoded_text_len{};
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<bool> last_fragment{};
     ::std::optional<::std::string_view> appl_id{};
@@ -27,7 +26,6 @@ struct PartyRiskLimitsReportArgs {
     ::std::optional<bool> appl_resend_flag{};
     ::std::optional<::std::int64_t> request_result{};
     ::std::optional<::std::int64_t> tot_no_parties{};
-    ::std::optional<::std::int64_t> encoded_reject_text_len{};
     ::std::optional<::std::string_view> encoded_reject_text{};
     ::std::optional<::std::string_view> risk_limit_request_id{};
     ::std::optional<::std::string_view> risk_limit_report_id{};

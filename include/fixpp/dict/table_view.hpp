@@ -510,6 +510,36 @@ public:
         return group_required_members(no_tag);  // legacy bare fallback
     }
 
+    // fixpp#426 (design §3): the Data tag this dictionary pairs with
+    // `length_tag`, or 0 when `length_tag` has no dictionary-declared pair.
+    // Dictionary-wide (a tag's Length+Data pairing is a per-tag property, not
+    // a per-msg_type one — mirrors `Dictionary::length_pair_data_tag`, the
+    // fixpp#427 runtime-handle accessor this table copies from at
+    // `Dictionary::as_table_view()`). Read by `wire::dict_hooks::
+    // data_tag_for_length`, which applies the standard table first and this
+    // one only for a tag neither side of the standard table names.
+    [[nodiscard]] std::uint16_t length_pair_data_tag(std::uint16_t length_tag) const noexcept {
+        auto const it = length_pair_data_tag_.find(length_tag);
+        return it == length_pair_data_tag_.end() ? std::uint16_t{0} : it->second;
+    }
+
+    // fixpp#428 (design §3): the inverse — the Length tag this dictionary pairs
+    // with `data_tag`, or 0. Read by `wire::dict_hooks::length_tag_for_data`.
+    [[nodiscard]] std::uint16_t data_pair_length_tag(std::uint16_t data_tag) const noexcept {
+        auto const it = data_pair_length_tag_.find(data_tag);
+        return it == data_pair_length_tag_.end() ? std::uint16_t{0} : it->second;
+    }
+
+    // One bit per 16-bit tag (1024 words), set for both halves of every pair
+    // `set_length_pair_data_tag` registered. A re-pair does not clear the old
+    // partner's bit, so only a CLEAR bit carries meaning: both lookups above answer
+    // 0 for that tag. `wire::dict_hooks` tests it to skip those lookups on the
+    // fields no pair names. Held inline rather than behind a pointer so it has the
+    // address and lifetime of this object, which the hooks already point at.
+    [[nodiscard]] std::uint64_t const* pair_tag_bits() const noexcept {
+        return pair_tag_bits_.data();
+    }
+
     // ── 081 Concern A: validator-private FIXT.1.1 framing surface ──────────
     // (research.md D-1/D-2, data-model.md E-2). Populated by
     // Dictionary::as_table_view() ONLY for v50/v50sp1/v50sp2 (empty
@@ -772,6 +802,30 @@ public:
         fixt_framing_types_[tag] = ft;
     }
 
+    // fixpp#426: registers `length_tag`'s dictionary-declared Data partner.
+    // Used EXCLUSIVELY by Dictionary::as_table_view(). A zero `data_tag` is a
+    // no-op (`length_pair_data_tag` already answers 0 for an unregistered
+    // key), so callers need not pre-filter FieldRef::length_pair_data_tag==0.
+    void set_length_pair_data_tag(std::uint16_t length_tag, std::uint16_t data_tag) {
+        if (data_tag == 0) {
+            return;
+        }
+        // Keep the maps inverse: re-pairing either tag drops its old partner, so
+        // the two directions never disagree (Gate B r1 G-4).
+        if (auto const old = length_pair_data_tag_.find(length_tag);
+            old != length_pair_data_tag_.end() && old->second != data_tag) {
+            data_pair_length_tag_.erase(old->second);
+        }
+        if (auto const old = data_pair_length_tag_.find(data_tag);
+            old != data_pair_length_tag_.end() && old->second != length_tag) {
+            length_pair_data_tag_.erase(old->second);
+        }
+        length_pair_data_tag_[length_tag] = data_tag;
+        data_pair_length_tag_[data_tag] = length_tag;
+        pair_tag_bits_[length_tag >> 6U] |= std::uint64_t{1} << (length_tag & 63U);
+        pair_tag_bits_[data_tag >> 6U] |= std::uint64_t{1} << (data_tag & 63U);
+    }
+
 private:
     // O(log C) byte-exact, whole-token lookup over a sorted code list — no
     // case folding, no prefix matching. `token` is a slice of the caller's
@@ -916,6 +970,15 @@ private:
     // (field_type_of_with_framing).
     std::unordered_set<std::uint16_t> fixt_framing_tags_;
     std::unordered_map<std::uint16_t, field_type> fixt_framing_types_;
+
+    // fixpp#426 (design §3): Length tag -> its dictionary-declared Data
+    // partner. Populated ONLY by Dictionary::as_table_view() from
+    // FieldRef::length_pair_data_tag (see set_length_pair_data_tag above).
+    std::unordered_map<std::uint16_t, std::uint16_t> length_pair_data_tag_;
+    // fixpp#428: Data tag -> its Length partner; filled beside the map above.
+    std::unordered_map<std::uint16_t, std::uint16_t> data_pair_length_tag_;
+    // Both halves of every registered pair, one bit per tag (see pair_tag_bits()).
+    std::array<std::uint64_t, 1024> pair_tag_bits_{};
 };
 
 }  // namespace fixpp::dict

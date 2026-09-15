@@ -51,7 +51,6 @@ struct G_40212Args {
     ::std::optional<::std::span<const G_40230Args>> payment_settls{};
     ::std::optional<::std::string_view> payment_leg_ref_id{};
     ::std::optional<::std::string_view> payment_text{};
-    ::std::optional<::std::int64_t> encoded_payment_text_len{};
     ::std::optional<::std::string_view> encoded_payment_text{};
 };
 

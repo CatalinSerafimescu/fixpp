@@ -103,7 +103,6 @@ struct G_146_11Args {
     ::std::optional<::std::string_view> settl_rate_index{};
     ::std::optional<::std::string_view> settl_rate_index_location{};
     ::std::optional<::std::string_view> option_expiration_desc{};
-    ::std::optional<::std::int64_t> encoded_option_expiration_desc_len{};
     ::std::optional<::std::string_view> encoded_option_expiration_desc{};
     ::std::optional<::std::string_view> issue_date{};
     ::std::optional<::std::string_view> repo_collateral_security_type{};
@@ -175,16 +174,12 @@ struct G_146_11Args {
     ::std::optional<::std::int64_t> position_limit{};
     ::std::optional<::std::int64_t> nt_position_limit{};
     ::std::optional<::std::string_view> issuer{};
-    ::std::optional<::std::int64_t> encoded_issuer_len{};
     ::std::optional<::std::string_view> encoded_issuer{};
     ::std::optional<::std::string_view> financial_instrument_short_name{};
     ::std::optional<::std::string_view> financial_instrument_full_name{};
-    ::std::optional<::std::int64_t> encoded_financial_instrument_full_name_len{};
     ::std::optional<::std::string_view> encoded_financial_instrument_full_name{};
     ::std::optional<::std::string_view> security_desc{};
-    ::std::optional<::std::int64_t> encoded_security_desc_len{};
     ::std::optional<::std::string_view> encoded_security_desc{};
-    ::std::optional<::std::int64_t> security_xml_len{};
     ::std::optional<::std::string_view> security_xml{};
     ::std::optional<::std::string_view> security_xml_schema{};
     ::std::optional<::std::string_view> pool{};
@@ -224,7 +219,6 @@ struct G_146_11Args {
     ::std::optional<::fixpp::decimal_t> market_disruption_materiality_percentage{};
     ::std::optional<::std::int64_t> market_disruption_minimum_futures_contracts{};
     ::std::optional<::std::string_view> exercise_desc{};
-    ::std::optional<::std::int64_t> encoded_exercise_desc_len{};
     ::std::optional<::std::string_view> encoded_exercise_desc{};
     ::std::optional<bool> automatic_exercise_indicator{};
     ::std::optional<::fixpp::decimal_t> automatic_exercise_threshold_rate{};
@@ -322,7 +316,6 @@ struct G_146_11Args {
     ::std::optional<::std::string_view> credit_support_agreement_id{};
     ::std::optional<::std::string_view> governing_law{};
     ::std::optional<::std::string_view> documentation_text{};
-    ::std::optional<::std::int64_t> encoded_documentation_text_len{};
     ::std::optional<::std::string_view> encoded_documentation_text{};
     ::std::optional<::std::int64_t> termination_type{};
     ::std::optional<::std::string_view> start_date{};

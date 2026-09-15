@@ -40,10 +40,8 @@ struct G_78_3Args {
     ::std::optional<::std::int64_t> trade_alloc_status{};
     ::std::optional<::std::int64_t> allocation_rollup_instruction{};
     ::std::optional<::std::string_view> alloc_text{};
-    ::std::optional<::std::int64_t> encoded_alloc_text_len{};
     ::std::optional<::std::string_view> encoded_alloc_text{};
     ::std::optional<::std::string_view> firm_alloc_text{};
-    ::std::optional<::std::int64_t> encoded_firm_alloc_text_len{};
     ::std::optional<::std::string_view> encoded_firm_alloc_text{};
     ::std::optional<::std::string_view> alloc_ref_risk_limit_check_id{};
     ::std::optional<::std::int64_t> alloc_ref_risk_limit_check_id_type{};

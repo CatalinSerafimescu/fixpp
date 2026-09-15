@@ -19,7 +19,6 @@ struct NewOrderListArgs {
     ::std::optional<::std::int64_t> tot_no_orders{};
     ::std::optional<::std::string_view> list_exec_inst{};
     ::std::span<const groups::G_73_4Args> orders{};
-    ::std::optional<::std::int64_t> encoded_list_exec_inst_len{};
     ::std::optional<::std::string_view> encoded_list_exec_inst{};
     ::std::optional<::std::string_view> bid_id{};
     ::std::optional<::std::string_view> client_bid_id{};

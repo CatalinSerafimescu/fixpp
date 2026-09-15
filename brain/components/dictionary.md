@@ -155,6 +155,13 @@ considered and NOT done.** It would change key types in an installed public head
 consumer, which is a different change from the one that fixed #264. The assertion is the proportionate
 guard for a footgun that is real but currently unreachable.
 
+## Length+Data pairs from Orchestra `lengthId` (#427)
+
+The Orchestra loader reads `lengthId`, so `Dictionary::length_pair_data_tag` answers for
+FIX Latest (B-427-1). The standard pair table (`include/fixpp/wire/length_data_pairs.hpp`)
+is drift-tested against the union of all ten dictionaries. A dictionary's own pair matters
+only when neither of its tags is standard (B-426-3).
+
 ## Where the design decisions live
 
 `2c-codegen.md` is **v1.4 post-sign-off** and was scanned clean in the Step-R sweep. ⚠️ Beside it sits

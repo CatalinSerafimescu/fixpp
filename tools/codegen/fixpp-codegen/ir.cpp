@@ -13,6 +13,7 @@
 #include <fixpp/dict/xml_loader.hpp>
 #include <fstream>
 #include <ios>
+#include <map>
 #include <memory_resource>
 #include <pugixml.hpp>
 #include <stdexcept>
@@ -625,10 +626,6 @@ constexpr VersionMap kCodegenVersions[] = {
      .ns = "vlatest"},
 };
 
-// Highest tag the v1.0 locked set uses; the Length+Data scan walks [1, kMaxTag]
-// in ascending order so the emitted pair table is bytewise-stable (A4).
-constexpr std::uint16_t kMaxTag = 2500;
-
 }  // namespace
 
 std::vector<FieldIR const*> collect_top_fields(MessageIR const& m) {
@@ -746,14 +743,21 @@ VersionIR build_ir(std::filesystem::path const& xml_path, std::pmr::memory_resou
     auto const duplicates = std::ranges::unique(ir.group_tags);
     ir.group_tags.erase(duplicates.begin(), duplicates.end());
 
-    // Length+Data pairs — ascending tag scan (deterministic order). AC-V4 is
-    // verified exhaustively against source XML in seam #19; here we project
-    // every paired LENGTH tag the loaded Dictionary knows.
-    for (std::uint16_t t = 1; t <= kMaxTag; ++t) {
-        std::uint16_t data_tag = dict.length_pair_data_tag(t);
-        if (data_tag != 0) {
-            ir.length_pairs.push_back(LengthPairIR{.length_tag = t, .data_tag = data_tag});
+    // Length+Data pairs, ascending by Length tag (deterministic order). AC-V4 is
+    // verified exhaustively against source XML in seam #19. A pair lives on the
+    // FieldRef of some message's expansion, so enumerating those finds every one;
+    // the old fixed tag-range scan silently dropped pairs above its ceiling
+    // (fixpp#427).
+    std::map<std::uint16_t, std::uint16_t> pairs;
+    for (auto const& m : dict.messages()) {
+        for (auto const& fr : dict.message_fields(m.msg_type)) {
+            if (fr.length_pair_data_tag != 0) {
+                pairs.emplace(fr.tag, fr.length_pair_data_tag);
+            }
         }
+    }
+    for (auto const& [length_tag, data_tag] : pairs) {
+        ir.length_pairs.push_back(LengthPairIR{.length_tag = length_tag, .data_tag = data_tag});
     }
 
     return ir;

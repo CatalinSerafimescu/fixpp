@@ -102,7 +102,6 @@ struct G_42149Args {
     ::std::optional<::std::int64_t> underlying_provision_cash_settl_quote_source{};
     ::std::optional<::std::string_view> underlying_provision_cash_settl_quote_reference_page{};
     ::std::optional<::std::string_view> underlying_provision_text{};
-    ::std::optional<::std::int64_t> encoded_underlying_provision_text_len{};
     ::std::optional<::std::string_view> encoded_underlying_provision_text{};
     ::std::optional<::std::span<const G_42173Args>> underlying_provision_party_i_ds{};
 };

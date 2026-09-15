@@ -284,6 +284,10 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_get_nested_group(const fixpp_group_t*
  *    FIXPP_ERR_NULL_HANDLE    -- session or msg_out is NULL
  *    FIXPP_ERR_INVALID_HANDLE -- session is destroyed / engine is gone
  *    FIXPP_ERR_DICT_CONFIG    -- msg_type not found in the session dictionary
+ *    FIXPP_ERR_WIRE_CONFORMANCE -- msg_type is empty or holds SOH (0x01); a session
+ *                               with a dictionary reports DICT_CONFIG first.
+ *                               (1.6, BREAKING: a session without a dictionary
+ *                               used to accept it.)
  *
  *  Reentrancy: requires-session-lock
  */
@@ -328,6 +332,9 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_clone(const fixpp_msg_t* src, fixpp_msg
  *    FIXPP_ERR_INVALID_HANDLE            -- msg is destroyed / session closed
  *    FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN -- tag is a framing tag
  *    FIXPP_ERR_DICT_CONFIG               -- tag not declared for this MsgType
+ *    FIXPP_ERR_WIRE_CONFORMANCE          -- (1.6, BREAKING) value holds SOH (0x01) and `tag` is not
+ *                                           the Data half of a Length+Data pair; nothing
+ *                                           is written
  *    (note: set_string is always-OK on any dict field type -- no TYPE_MISMATCH)
  *
  *  Reentrancy: requires-session-lock
@@ -337,11 +344,45 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_string(fixpp_msg_t* msg, uint16_t t
 
 /** Set a raw-bytes field (type-agnostic escape hatch for Data or extension tags).
  *  No dictionary type check; framing-tag check still applies.
+ *  Since 1.6, fixpp_msg_commit refuses a malformed Length+Data pair, or SOH outside a
+ *  Data value, whichever setter wrote the field. For a Data field prefer
+ *  fixpp_msg_set_data, which writes the Length too.
  *
  *  Reentrancy: requires-session-lock
  */
 FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_bytes(fixpp_msg_t* msg, uint16_t tag,
                                               const uint8_t* bytes, size_t len);
+
+/** Set a Length+Data pair (1.6). `data_tag` is the Data field; its Length field is
+ *  written from `len`.
+ *
+ *  The bytes are copied verbatim and may hold any value, SOH included: the Length
+ *  makes them framing-safe. The Length paired with `data_tag` comes from the FIX
+ *  standard or, for a pair the standard does not define, from the session's
+ *  dictionary.
+ *
+ *  With neither half present, appends the Length then the Data. With the Length
+ *  immediately followed by the Data, overwrites both in place. Any other state (one
+ *  half only, the halves apart, or the Data first) is refused and nothing is
+ *  written; remove the stray half first. No existing field moves, so open group
+ *  builders stay valid.
+ *
+ *  Return codes:
+ *    FIXPP_ERR_OK                        -- success
+ *    FIXPP_ERR_NULL_HANDLE               -- msg or bytes is NULL
+ *    FIXPP_ERR_INVALID_HANDLE            -- msg is destroyed / session closed
+ *    FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN -- data_tag, or the Length tag the pair
+ *                                           gives it, is a framing tag
+ *    FIXPP_ERR_TYPE_MISMATCH             -- data_tag is not the Data half of a pair, a
+ *                                           half collides with a group, or the pair's
+ *                                           current state is not Length-then-Data
+ *    FIXPP_ERR_WIRE_CONFORMANCE          -- len is 0 (an empty Data value is malformed)
+ *    FIXPP_ERR_DICT_CONFIG               -- a half is not declared for this MsgType
+ *
+ *  Reentrancy: requires-session-lock
+ */
+FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_data(fixpp_msg_t* msg, uint16_t data_tag,
+                                             const uint8_t* bytes, size_t len);
 
 /** Set an integer field (serialised as ASCII decimal).
  *  Reentrancy: requires-session-lock
@@ -382,6 +423,13 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_remove_tag(fixpp_msg_t* msg, uint16_t t
  *    FIXPP_ERR_TYPE_MISMATCH   -- group grammar violated (empty instance or
  *                                 non-delimiter-first instance; INV-4)
  *    FIXPP_ERR_WIRE_LIMIT_EXCEEDED -- serialised body exceeds ~3800 B
+ *    FIXPP_ERR_WIRE_CONFORMANCE    -- (1.6, BREAKING) the output would be malformed, in any group
+ *                                     instance too: a Data field not immediately after
+ *                                     its Length, a Length not immediately before its
+ *                                     Data, a Length that is not positive ASCII digits
+ *                                     equal to the Data byte count (leading zeros are
+ *                                     accepted), an empty Data value, or SOH in a field
+ *                                     that is not a Data field
  *
  *  Reentrancy: requires-session-lock
  */
@@ -393,7 +441,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_commit(fixpp_msg_t* msg, const uint8_t*
  * Build a repeating group on an outbound accumulator:
  *   fixpp_msg_group_begin(msg, NoXxx, &builder)
  *   -> fixpp_group_builder_add_entry(builder, &entry) [per instance]
- *      -> fixpp_entry_set_{string,int,double,decimal}(entry, tag, …) [per field]
+ *      -> fixpp_entry_set_{string,int,double,decimal,data}(entry, tag, …) [per field]
  *      -> fixpp_entry_group_begin(entry, NoYyy, &nested) [optional nested group]
  *   -> fixpp_msg_group_end(msg, builder)
  *
@@ -419,9 +467,19 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_builder_add_entry(fixpp_group_builder
                                                        fixpp_entry_t** entry_out);
 
 /** Set a STRING field on the current entry. Framing tags → MSG_FRAMING_TAG_FORBIDDEN.
+ *  Since 1.6 (BREAKING), a value holding SOH (0x01) on a tag that is not the Data half of a
+ *  Length+Data pair → FIXPP_ERR_WIRE_CONFORMANCE, nothing written.
  *  Reentrancy: requires-session-lock */
 FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_string(fixpp_entry_t* entry, uint16_t tag,
                                                  const char* value, size_t len);
+
+/** Set a Length+Data pair on the current entry (1.6): fixpp_msg_set_data's contract
+ *  on this group instance, except that no MsgType-grammar check runs (as for every
+ *  entry setter) and a Data field that is the group's delimiter →
+ *  FIXPP_ERR_TYPE_MISMATCH, since its Length would have to come first.
+ *  Reentrancy: requires-session-lock */
+FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_data(fixpp_entry_t* entry, uint16_t data_tag,
+                                               const uint8_t* bytes, size_t len);
 
 /** Set an INTEGER field on the current entry. Reentrancy: requires-session-lock */
 FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_int(fixpp_entry_t* entry, uint16_t tag, int64_t value);

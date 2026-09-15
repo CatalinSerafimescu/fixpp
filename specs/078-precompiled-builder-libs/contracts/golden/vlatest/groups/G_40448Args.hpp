@@ -102,7 +102,6 @@ struct G_40448Args {
     ::std::optional<::std::int64_t> leg_provision_cash_settl_quote_source{};
     ::std::optional<::std::string_view> leg_provision_cash_settl_quote_reference_page{};
     ::std::optional<::std::string_view> leg_provision_text{};
-    ::std::optional<::std::int64_t> encoded_leg_provision_text_len{};
     ::std::optional<::std::string_view> encoded_leg_provision_text{};
     ::std::optional<::std::span<const G_40533Args>> leg_provision_party_i_ds{};
 };

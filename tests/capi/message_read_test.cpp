@@ -2001,8 +2001,8 @@ TEST(MessageReadGroup, NestedTrailingMemberExcluded_Fix44LegsAsTableView) {
                 return {};
             }
             auto const r = ctx_.parent_cache_owner->nested_group_slices(
-                ctx_.outer_occurrence_id, ctx_.span.size(), 604, ctx_.opaque_dict,
-                ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+                ctx_.outer_occurrence_id, ctx_.span.size(), 604, ctx_.hooks, ctx_.gen,
+                ctx_.group_ctx);
             return fixpp::wire::group_view<G604Entry>{r.slices, ctx_, r.alloc_failed};
         }
         [[nodiscard]] fixpp::core::expected_t<fixpp::wire::field_view> field_value(
@@ -2107,8 +2107,7 @@ TEST(MessageReadGroup, DictFreeGroupReadReportsTypeMismatch) {
     ASSERT_TRUE(fv.has_value());
 
     std::pmr::monotonic_buffer_resource arena;
-    // Default ctor — dict-free: opaque_dict_ == nullptr, group_member_fn_ ==
-    // nullptr (confirmed constructible; mirrors
+    // Default ctor — dict-free: `dict_hooks::none()` (confirmed constructible; mirrors
     // tests/wire/message_view_membership_copy_test.cpp's DictFreeSourceYieldsEmptyCopy).
     Parser<access_mode::Index> parser{};
     auto mv_res = parser.parse(*fv, &arena);

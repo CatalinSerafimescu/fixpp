@@ -16,7 +16,6 @@ namespace fixpp::vlatest {
 struct SettlementObligationReportArgs {
     ::std::optional<::std::string_view> text{};
     ::std::optional<::std::string_view> transact_time{};
-    ::std::optional<::std::int64_t> encoded_text_len{};
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::std::string_view> clearing_business_date{};
     ::std::optional<::std::int64_t> settlement_cycle_no{};

@@ -24,16 +24,16 @@ namespace fixpp::vt11::groups {  // shared repeating-group flyweights (AC-G5/AC-
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     hop_comp_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 628, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 628, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     hop_sending_time() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 629, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 629, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     hop_ref_id() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 630, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 630, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };

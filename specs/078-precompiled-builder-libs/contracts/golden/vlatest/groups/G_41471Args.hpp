@@ -15,7 +15,6 @@ struct G_41471Args {
     ::std::optional<::std::string_view> leg_market_disruption_fallback_underlier_security_id{};
     ::std::optional<::std::string_view> leg_market_disruption_fallback_underlier_security_id_source{};
     ::std::optional<::std::string_view> leg_market_disruption_fallback_underlier_security_desc{};
-    ::std::optional<::std::int64_t> encoded_leg_market_disruption_fallback_underlier_security_desc_len{};
     ::std::optional<::std::string_view> encoded_leg_market_disruption_fallback_underlier_security_desc{};
     ::std::optional<::fixpp::decimal_t> leg_market_disruption_fallback_open_units{};
     ::std::optional<::std::string_view> leg_market_disruption_fallback_basket_currency{};

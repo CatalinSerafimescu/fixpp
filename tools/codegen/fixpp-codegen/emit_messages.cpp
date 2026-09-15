@@ -77,7 +77,7 @@ void emit_scalar(TemplateWriter& w, std::string_view name, std::uint16_t tag, Ty
         if (ptr) {
             w.raw("auto fv = ::fixpp::wire::get(ctx_.span, ");
             w.num(tag);
-            w.raw(", ctx_.gen);");
+            w.raw(", ctx_.hooks, ctx_.gen);");
         } else {
             w.raw("auto fv = view_.template get<");
             w.num(tag);
@@ -104,7 +104,7 @@ void emit_scalar(TemplateWriter& w, std::string_view name, std::uint16_t tag, Ty
     if (ptr) {
         w.raw("::fixpp::wire::get(ctx_.span, ");
         w.num(tag);
-        w.raw(", ctx_.gen)");
+        w.raw(", ctx_.hooks, ctx_.gen)");
     } else {
         w.raw("view_.template get<");
         w.num(tag);
@@ -118,7 +118,7 @@ void emit_field_value(TemplateWriter& w, bool ptr) {
     w.raw("    [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>\n");
     w.raw("    field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]\n    { ");
     if (ptr) {
-        w.raw("return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }");
+        w.raw("return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }");
     } else {
         w.raw("return view_.get(tag); }");
     }
@@ -280,7 +280,7 @@ void emit_group_class(TemplateWriter& w, VersionIR const& ir, MemberMap const& m
             // distinguish a legitimately-empty group from a failed sub-view
             // allocation (D4).
             w.raw(
-                ", ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, "
+                ", ctx_.hooks, ctx_.gen, "
                 "ctx_.group_ctx);\n"
                 "      ::fixpp::wire::entry_context child_ctx = ctx_;\n"
                 "      child_ctx.group_ctx = ctx_.group_ctx.pushed(");

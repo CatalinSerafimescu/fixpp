@@ -19,7 +19,6 @@ struct G_2772Args {
     ::std::optional<::fixpp::decimal_t> match_exception_tolerance_value{};
     ::std::optional<::std::int64_t> match_exception_tolerance_value_type{};
     ::std::optional<::std::string_view> match_exception_text{};
-    ::std::optional<::std::int64_t> encoded_match_exception_text_len{};
     ::std::optional<::std::string_view> encoded_match_exception_text{};
 };
 

@@ -48,10 +48,8 @@ struct G_78_4Args {
     ::std::optional<bool> notify_broker_of_credit{};
     ::std::optional<::std::int64_t> alloc_handl_inst{};
     ::std::optional<::std::string_view> alloc_text{};
-    ::std::optional<::std::int64_t> encoded_alloc_text_len{};
     ::std::optional<::std::string_view> encoded_alloc_text{};
     ::std::optional<::std::string_view> firm_alloc_text{};
-    ::std::optional<::std::int64_t> encoded_firm_alloc_text_len{};
     ::std::optional<::std::string_view> encoded_firm_alloc_text{};
     ::std::optional<::fixpp::decimal_t> commission{};
     ::std::optional<char> comm_type{};

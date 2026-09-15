@@ -41,7 +41,6 @@ struct G_1890Args {
     ::std::optional<::std::string_view> trade_input_device{};
     ::std::optional<::std::string_view> compliance_id{};
     ::std::optional<::std::string_view> compliance_text{};
-    ::std::optional<::std::int64_t> encoded_compliance_text_len{};
     ::std::optional<::std::string_view> encoded_compliance_text{};
     ::std::optional<bool> solicited_flag{};
     ::std::optional<::std::int64_t> cust_order_capacity{};
@@ -117,7 +116,6 @@ struct G_1890Args {
     ::std::optional<::std::string_view> cust_order_handling_inst{};
     ::std::optional<::std::int64_t> order_handling_inst_source{};
     ::std::optional<::std::string_view> text{};
-    ::std::optional<::std::int64_t> encoded_text_len{};
     ::std::optional<::std::string_view> encoded_text{};
 };
 

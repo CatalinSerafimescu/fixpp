@@ -15,7 +15,6 @@ namespace fixpp::vlatest {
 struct BusinessMessageRejectArgs {
     ::std::optional<::std::int64_t> ref_seq_num{};
     ::std::optional<::std::string_view> text{};
-    ::std::optional<::std::int64_t> encoded_text_len{};
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::std::string_view> ref_msg_type{};
     ::std::optional<::std::string_view> business_reject_ref_id{};

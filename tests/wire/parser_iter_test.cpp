@@ -43,10 +43,10 @@ std::vector<std::byte> make_frame(std::string_view body_after_bodylen) {
 }
 
 // The Length+Data table is a compile-time constant — assert it dict-free.
-static_assert(fixpp::wire::detail::data_tag_for_length(95) == 96);
-static_assert(fixpp::wire::detail::data_tag_for_length(90) == 91);
-static_assert(fixpp::wire::detail::data_tag_for_length(212) == 213);
-static_assert(fixpp::wire::detail::data_tag_for_length(7) == 0);
+static_assert(fixpp::wire::detail::standard_data_tag_for_length(95) == 96);
+static_assert(fixpp::wire::detail::standard_data_tag_for_length(90) == 91);
+static_assert(fixpp::wire::detail::standard_data_tag_for_length(212) == 213);
+static_assert(fixpp::wire::detail::standard_data_tag_for_length(7) == 0);
 
 // parse_iter takes NO memory_resource — the streaming path is zero-alloc by
 // construction (compile-time contract, FR-003).

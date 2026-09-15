@@ -6,8 +6,9 @@
 // value object that pairs a `table_view` with the `Dictionary` it was built
 // from. Replaces `SessionConfig::dictionary_view` (a bare
 // `shared_ptr<const table_view>`), which had two defects (§2): C1 — the
-// `const` on the pointee is not enforced, since `table_view` carries 15
-// public mutators — and C4 — nothing checked that the view actually came
+// `const` on the pointee is not enforced, since `table_view` carries several
+// public mutators (add_valid_tag, set_group_first, set_length_pair_data_tag,
+// …) — and C4 — nothing checked that the view actually came
 // from the paired `SessionConfig::dictionary`, so a mismatched pair silently
 // drove inbound parsing/validation from the wrong grammar.
 //

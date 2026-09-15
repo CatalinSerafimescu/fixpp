@@ -19,7 +19,6 @@ struct G_2059Args {
     ::std::optional<::std::string_view> leg_event_month_year{};
     ::std::optional<::fixpp::decimal_t> leg_event_px{};
     ::std::optional<::std::string_view> leg_event_text{};
-    ::std::optional<::std::int64_t> encoded_leg_event_text_len{};
     ::std::optional<::std::string_view> encoded_leg_event_text{};
 };
 

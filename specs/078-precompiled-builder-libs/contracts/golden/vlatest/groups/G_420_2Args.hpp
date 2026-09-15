@@ -30,7 +30,6 @@ struct G_420_2Args {
     ::std::optional<::std::string_view> trading_session_id{};
     ::std::optional<::std::string_view> trading_session_sub_id{};
     ::std::optional<::std::string_view> text{};
-    ::std::optional<::std::int64_t> encoded_text_len{};
     ::std::optional<::std::string_view> encoded_text{};
 };
 

@@ -34,6 +34,7 @@
 #include <ios>
 #include <memory>
 #include <memory_resource>
+#include <optional>
 #include <pugixml.hpp>
 #include <ranges>
 #include <string>
@@ -197,6 +198,8 @@ struct OrchestraFieldInfo {
     field_data_type type{};
     bool has_enum{false};
     std::string enum_codeset_name;  // valid iff has_enum
+    // fixpp#427: `lengthId=` on a data/XMLData field — its Length partner's tag.
+    std::optional<std::uint16_t> length_id;
 };
 
 struct OrchestraComponentDef {
@@ -250,6 +253,7 @@ private:
     void parse_root_and_version(pugi::xml_node const& root);
     void collect_codesets(pugi::xml_node const& root);
     void collect_fields(pugi::xml_node const& root);
+    void resolve_length_pairs();
     void collect_components(pugi::xml_node const& root);
     void collect_groups(pugi::xml_node const& root);
     void collect_messages(pugi::xml_node const& root);
@@ -302,6 +306,8 @@ private:
 
     std::unordered_map<std::string, OrchestraCodeSet> codesets_by_name_;
     std::unordered_map<std::uint16_t, OrchestraFieldInfo> fields_by_tag_;
+    // Length tag -> Data tag, from each data field's `lengthId=` (fixpp#427).
+    std::unordered_map<std::uint16_t, std::uint16_t> data_by_length_;
     std::vector<OrchestraComponentDef> components_;
     std::unordered_map<std::uint16_t, std::uint16_t> component_index_by_xml_id_;
     // Reverse parent map: parent_of_[child component's vector index] = enclosing
@@ -392,7 +398,41 @@ void OrchestraLoaderState::collect_fields(pugi::xml_node const& root) {
         } else {
             info.type = resolve_datatype(type_attr);  // throws orchestra_parse_error on unknown
         }
+        if (auto const len_attr = f.attribute("lengthId")) {
+            info.length_id = parse_orchestra_id(len_attr, "<fixr:field lengthId>");
+        }
         fields_by_tag_.emplace(tag, std::move(info));
+    }
+}
+
+// fixpp#427: resolved only once every field is declared, because `lengthId=` may
+// point forward (Signature(89) names SignatureLength(93)). Fails closed on a
+// reference that cannot be a Length+Data pair, like every other dangling or
+// malformed reference in this loader.
+void OrchestraLoaderState::resolve_length_pairs() {
+    for (auto const& [data_tag, info] : fields_by_tag_) {
+        if (!info.length_id) {
+            continue;
+        }
+        std::uint16_t const length_tag = *info.length_id;
+        // Built only on the error paths below.
+        auto const where = [&] {
+            return "<fixr:field id=\"" + std::to_string(data_tag) + "\" lengthId=\"" +
+                   std::to_string(length_tag) + "\">";
+        };
+        if (info.type != field_data_type::Data && info.type != field_data_type::XmlData) {
+            throw orchestra_parse_error("dict::orchestra_parse_error: " + where() +
+                                        " is not a data or XMLData field");
+        }
+        auto const lit = fields_by_tag_.find(length_tag);
+        if (lit == fields_by_tag_.end() || lit->second.type != field_data_type::Length) {
+            throw orchestra_parse_error("dict::orchestra_parse_error: " + where() +
+                                        " does not name a declared Length field");
+        }
+        if (!data_by_length_.emplace(length_tag, data_tag).second) {
+            throw orchestra_parse_error("dict::orchestra_parse_error: " + where() +
+                                        " names a Length field already paired with another field");
+        }
     }
 }
 
@@ -472,6 +512,7 @@ void OrchestraLoaderState::parse_document(pugi::xml_document const& doc) {
     parse_root_and_version(root);
     collect_codesets(root);
     collect_fields(root);
+    resolve_length_pairs();
     collect_components(root);
     collect_groups(root);
     collect_messages(root);
@@ -503,7 +544,8 @@ void OrchestraLoaderState::expand_field_list(
             fr.rule = req ? field_presence::Required : field_presence::Optional;
             fr.group_no_tag = enclosing_group_no_tag;
             fr.component_index = enclosing_component_index;
-            fr.length_pair_data_tag = 0;  // out of scope for 074 (not requested by tasks.md)
+            auto const pit = data_by_length_.find(tag);
+            fr.length_pair_data_tag = pit == data_by_length_.end() ? 0 : pit->second;
             out.push_back(fr);
             // 083 D-1: first emission at the open group's level = its delimiter.
             detail::capture_first_emission(delim_cap, tag);

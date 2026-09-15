@@ -376,13 +376,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh1.set_string(1581, *item1.option_expiration_desc);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item1.encoded_option_expiration_desc_len) {
-        auto r = eh1.set_int(1678, *item1.encoded_option_expiration_desc_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item1.encoded_option_expiration_desc) {
-        auto r = eh1.set_string(1697, *item1.encoded_option_expiration_desc);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh1.set_int(1678, static_cast<::std::int64_t>(item1.encoded_option_expiration_desc->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh1.set_string(1697, *item1.encoded_option_expiration_desc);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item1.issue_date) {
         auto r = eh1.set_string(225, *item1.issue_date);
@@ -664,13 +662,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh1.set_string(106, *item1.issuer);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item1.encoded_issuer_len) {
-        auto r = eh1.set_int(348, *item1.encoded_issuer_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item1.encoded_issuer) {
-        auto r = eh1.set_string(349, *item1.encoded_issuer);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh1.set_int(348, static_cast<::std::int64_t>(item1.encoded_issuer->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh1.set_string(349, *item1.encoded_issuer);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item1.financial_instrument_short_name) {
         auto r = eh1.set_string(2737, *item1.financial_instrument_short_name);
@@ -680,33 +676,27 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh1.set_string(2714, *item1.financial_instrument_full_name);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item1.encoded_financial_instrument_full_name_len) {
-        auto r = eh1.set_int(2715, *item1.encoded_financial_instrument_full_name_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item1.encoded_financial_instrument_full_name) {
-        auto r = eh1.set_string(2716, *item1.encoded_financial_instrument_full_name);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh1.set_int(2715, static_cast<::std::int64_t>(item1.encoded_financial_instrument_full_name->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh1.set_string(2716, *item1.encoded_financial_instrument_full_name);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item1.security_desc) {
         auto r = eh1.set_string(107, *item1.security_desc);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item1.encoded_security_desc_len) {
-        auto r = eh1.set_int(350, *item1.encoded_security_desc_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item1.encoded_security_desc) {
-        auto r = eh1.set_string(351, *item1.encoded_security_desc);
-        if (!r) return ::std::unexpected(r.error());
-    }
-    if (item1.security_xml_len) {
-        auto r = eh1.set_int(1184, *item1.security_xml_len);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh1.set_int(350, static_cast<::std::int64_t>(item1.encoded_security_desc->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh1.set_string(351, *item1.encoded_security_desc);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item1.security_xml) {
-        auto r = eh1.set_string(1185, *item1.security_xml);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh1.set_int(1184, static_cast<::std::int64_t>(item1.security_xml->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh1.set_string(1185, *item1.security_xml);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item1.security_xml_schema) {
         auto r = eh1.set_string(1186, *item1.security_xml_schema);
@@ -767,13 +757,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh5.set_string(868, *item5.event_text);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item5.encoded_event_text_len) {
-        auto r = eh5.set_int(1578, *item5.encoded_event_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item5.encoded_event_text) {
-        auto r = eh5.set_string(1579, *item5.encoded_event_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh5.set_int(1578, static_cast<::std::int64_t>(item5.encoded_event_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh5.set_string(1579, *item5.encoded_event_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
         }
         auto ge5 = bb.group_end(*gh5);
@@ -1436,13 +1424,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh24.set_string(41100, *item24.market_disruption_fallback_underlier_security_desc);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item24.encoded_market_disruption_fallback_underlier_security_desc_len) {
-        auto r = eh24.set_int(41101, *item24.encoded_market_disruption_fallback_underlier_security_desc_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item24.encoded_market_disruption_fallback_underlier_security_desc) {
-        auto r = eh24.set_string(41102, *item24.encoded_market_disruption_fallback_underlier_security_desc);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh24.set_int(41101, static_cast<::std::int64_t>(item24.encoded_market_disruption_fallback_underlier_security_desc->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh24.set_string(41102, *item24.encoded_market_disruption_fallback_underlier_security_desc);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item24.market_disruption_fallback_open_units) {
         auto r = eh24.set_decimal(41103, *item24.market_disruption_fallback_open_units);
@@ -1476,13 +1462,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh1.set_string(41106, *item1.exercise_desc);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item1.encoded_exercise_desc_len) {
-        auto r = eh1.set_int(41107, *item1.encoded_exercise_desc_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item1.encoded_exercise_desc) {
-        auto r = eh1.set_string(41108, *item1.encoded_exercise_desc);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh1.set_int(41107, static_cast<::std::int64_t>(item1.encoded_exercise_desc->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh1.set_string(41108, *item1.encoded_exercise_desc);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item1.automatic_exercise_indicator) {
         auto r = eh1.set_char(41109, (*item1.automatic_exercise_indicator) ? 'Y' : 'N');
@@ -1889,13 +1873,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh30.set_string(41255, *item30.stream_commodity_desc);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item30.encoded_stream_commodity_desc_len) {
-        auto r = eh30.set_int(41256, *item30.encoded_stream_commodity_desc_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item30.encoded_stream_commodity_desc) {
-        auto r = eh30.set_string(41257, *item30.encoded_stream_commodity_desc);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh30.set_int(41256, static_cast<::std::int64_t>(item30.encoded_stream_commodity_desc->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh30.set_string(41257, *item30.encoded_stream_commodity_desc);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item30.stream_commodity_delivery_pricing_region) {
         auto r = eh30.set_string(42587, *item30.stream_commodity_delivery_pricing_region);
@@ -3048,13 +3030,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
             auto en52 = gh52->add_entry();
             if (!en52) return ::std::unexpected(en52.error());
             auto& eh52 = *en52;
-    if (item52.payment_stream_formula_length) {
-        auto r = eh52.set_int(43109, *item52.payment_stream_formula_length);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item52.payment_stream_formula) {
-        auto r = eh52.set_string(42684, *item52.payment_stream_formula);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh52.set_int(43109, static_cast<::std::int64_t>(item52.payment_stream_formula->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh52.set_string(42684, *item52.payment_stream_formula);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item52.payment_stream_formula_desc) {
         auto r = eh52.set_string(42685, *item52.payment_stream_formula_desc);
@@ -3064,13 +3044,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto ge52 = bb.group_end(*gh52);
         if (!ge52) return ::std::unexpected(ge52.error());
     }
-    if (item30.payment_stream_formula_image_length) {
-        auto r = eh30.set_int(42652, *item30.payment_stream_formula_image_length);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item30.payment_stream_formula_image) {
-        auto r = eh30.set_string(42653, *item30.payment_stream_formula_image);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh30.set_int(42652, static_cast<::std::int64_t>(item30.payment_stream_formula_image->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh30.set_string(42653, *item30.payment_stream_formula_image);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item30.dividend_reinvestment_indicator) {
         auto r = eh30.set_char(42245, (*item30.dividend_reinvestment_indicator) ? 'Y' : 'N');
@@ -4670,13 +4648,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh78.set_string(41082, *item78.delivery_stream_cycle_desc);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item78.encoded_delivery_stream_cycle_desc_len) {
-        auto r = eh78.set_int(41083, *item78.encoded_delivery_stream_cycle_desc_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item78.encoded_delivery_stream_cycle_desc) {
-        auto r = eh78.set_string(41084, *item78.encoded_delivery_stream_cycle_desc);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh78.set_int(41083, static_cast<::std::int64_t>(item78.encoded_delivery_stream_cycle_desc->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh78.set_string(41084, *item78.encoded_delivery_stream_cycle_desc);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
         }
         auto ge78 = bb.group_end(*gh78);
@@ -4847,13 +4823,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh30.set_string(40056, *item30.stream_text);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item30.encoded_stream_text_len) {
-        auto r = eh30.set_int(40982, *item30.encoded_stream_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item30.encoded_stream_text) {
-        auto r = eh30.set_string(40983, *item30.encoded_stream_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh30.set_int(40982, static_cast<::std::int64_t>(item30.encoded_stream_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh30.set_string(40983, *item30.encoded_stream_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
         }
         auto ge30 = bb.group_end(*gh30);
@@ -5290,13 +5264,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh82.set_string(40113, *item82.provision_text);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item82.encoded_provision_text_len) {
-        auto r = eh82.set_int(40986, *item82.encoded_provision_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item82.encoded_provision_text) {
-        auto r = eh82.set_string(40987, *item82.encoded_provision_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh82.set_int(40986, static_cast<::std::int64_t>(item82.encoded_provision_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh82.set_string(40987, *item82.encoded_provision_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item82.provision_party_i_ds) {
         auto gh91 = eh82.group_begin(40174, 40175);
@@ -5382,13 +5354,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh94.set_string(40003, *item94.additional_term_bond_desc);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item94.encoded_additional_term_bond_desc_len) {
-        auto r = eh94.set_int(40004, *item94.encoded_additional_term_bond_desc_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item94.encoded_additional_term_bond_desc) {
-        auto r = eh94.set_string(40005, *item94.encoded_additional_term_bond_desc);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh94.set_int(40004, static_cast<::std::int64_t>(item94.encoded_additional_term_bond_desc->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh94.set_string(40005, *item94.encoded_additional_term_bond_desc);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item94.additional_term_bond_currency) {
         auto r = eh94.set_string(40006, *item94.additional_term_bond_currency);
@@ -5398,13 +5368,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh94.set_string(40007, *item94.additional_term_bond_issuer);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item94.encoded_additional_term_bond_issuer_len) {
-        auto r = eh94.set_int(40008, *item94.encoded_additional_term_bond_issuer_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item94.encoded_additional_term_bond_issuer) {
-        auto r = eh94.set_string(40009, *item94.encoded_additional_term_bond_issuer);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh94.set_int(40008, static_cast<::std::int64_t>(item94.encoded_additional_term_bond_issuer->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh94.set_string(40009, *item94.encoded_additional_term_bond_issuer);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item94.additional_term_bond_seniority) {
         auto r = eh94.set_string(40010, *item94.additional_term_bond_seniority);
@@ -6013,13 +5981,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh1.set_string(1513, *item1.documentation_text);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item1.encoded_documentation_text_len) {
-        auto r = eh1.set_int(1525, *item1.encoded_documentation_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item1.encoded_documentation_text) {
-        auto r = eh1.set_string(1527, *item1.encoded_documentation_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh1.set_int(1525, static_cast<::std::int64_t>(item1.encoded_documentation_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh1.set_string(1527, *item1.encoded_documentation_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item1.termination_type) {
         auto r = eh1.set_int(788, *item1.termination_type);
@@ -6099,13 +6065,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh112.set_int(462, *item112.underlying_product);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item112.underlying_security_xml_len) {
-        auto r = eh112.set_int(1874, *item112.underlying_security_xml_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item112.underlying_security_xml) {
-        auto r = eh112.set_string(1875, *item112.underlying_security_xml);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh112.set_int(1874, static_cast<::std::int64_t>(item112.underlying_security_xml->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh112.set_string(1875, *item112.underlying_security_xml);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item112.underlying_security_xml_schema) {
         auto r = eh112.set_string(1876, *item112.underlying_security_xml_schema);
@@ -6339,13 +6303,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh112.set_string(306, *item112.underlying_issuer);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item112.encoded_underlying_issuer_len) {
-        auto r = eh112.set_int(362, *item112.encoded_underlying_issuer_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item112.encoded_underlying_issuer) {
-        auto r = eh112.set_string(363, *item112.encoded_underlying_issuer);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh112.set_int(362, static_cast<::std::int64_t>(item112.encoded_underlying_issuer->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh112.set_string(363, *item112.encoded_underlying_issuer);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item112.underlying_financial_instrument_short_name) {
         auto r = eh112.set_string(2742, *item112.underlying_financial_instrument_short_name);
@@ -6355,13 +6317,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh112.set_string(2720, *item112.underlying_financial_instrument_full_name);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item112.encoded_underlying_financial_instrument_full_name_len) {
-        auto r = eh112.set_int(2721, *item112.encoded_underlying_financial_instrument_full_name_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item112.encoded_underlying_financial_instrument_full_name) {
-        auto r = eh112.set_string(2722, *item112.encoded_underlying_financial_instrument_full_name);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh112.set_int(2721, static_cast<::std::int64_t>(item112.encoded_underlying_financial_instrument_full_name->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh112.set_string(2722, *item112.encoded_underlying_financial_instrument_full_name);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item112.underlying_index_curve_unit) {
         auto r = eh112.set_string(2723, *item112.underlying_index_curve_unit);
@@ -6375,13 +6335,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh112.set_string(307, *item112.underlying_security_desc);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item112.encoded_underlying_security_desc_len) {
-        auto r = eh112.set_int(364, *item112.encoded_underlying_security_desc_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item112.encoded_underlying_security_desc) {
-        auto r = eh112.set_string(365, *item112.encoded_underlying_security_desc);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh112.set_int(364, static_cast<::std::int64_t>(item112.encoded_underlying_security_desc->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh112.set_string(365, *item112.encoded_underlying_security_desc);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item112.underlying_cp_program) {
         auto r = eh112.set_int(877, *item112.underlying_cp_program);
@@ -6639,13 +6597,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh117.set_string(2071, *item117.underlying_event_text);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item117.encoded_underlying_event_text_len) {
-        auto r = eh117.set_int(2072, *item117.encoded_underlying_event_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item117.encoded_underlying_event_text) {
-        auto r = eh117.set_string(2073, *item117.encoded_underlying_event_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh117.set_int(2072, static_cast<::std::int64_t>(item117.encoded_underlying_event_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh117.set_string(2073, *item117.encoded_underlying_event_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
         }
         auto ge117 = bb.group_end(*gh117);
@@ -6691,13 +6647,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh112.set_string(2286, *item112.underlying_option_expiration_desc);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item112.encoded_underlying_option_expiration_desc_len) {
-        auto r = eh112.set_int(2287, *item112.encoded_underlying_option_expiration_desc_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item112.encoded_underlying_option_expiration_desc) {
-        auto r = eh112.set_string(2288, *item112.encoded_underlying_option_expiration_desc);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh112.set_int(2287, static_cast<::std::int64_t>(item112.encoded_underlying_option_expiration_desc->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh112.set_string(2288, *item112.encoded_underlying_option_expiration_desc);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item112.underlying_product_complex) {
         auto r = eh112.set_string(2007, *item112.underlying_product_complex);
@@ -7540,13 +7494,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh136.set_string(41872, *item136.underlying_market_disruption_fallback_underlier_security_desc);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item136.encoded_underlying_market_disruption_fallback_underlier_sec_desc_len) {
-        auto r = eh136.set_int(41873, *item136.encoded_underlying_market_disruption_fallback_underlier_sec_desc_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item136.encoded_underlying_market_disruption_fallback_underlier_security_desc) {
-        auto r = eh136.set_string(41874, *item136.encoded_underlying_market_disruption_fallback_underlier_security_desc);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh136.set_int(41873, static_cast<::std::int64_t>(item136.encoded_underlying_market_disruption_fallback_underlier_security_desc->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh136.set_string(41874, *item136.encoded_underlying_market_disruption_fallback_underlier_security_desc);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item136.underlying_market_disruption_fallback_open_units) {
         auto r = eh136.set_decimal(41875, *item136.underlying_market_disruption_fallback_open_units);
@@ -7580,13 +7532,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh112.set_string(41810, *item112.underlying_exercise_desc);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item112.encoded_underlying_exercise_desc_len) {
-        auto r = eh112.set_int(41811, *item112.encoded_underlying_exercise_desc_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item112.encoded_underlying_exercise_desc) {
-        auto r = eh112.set_string(41812, *item112.encoded_underlying_exercise_desc);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh112.set_int(41811, static_cast<::std::int64_t>(item112.encoded_underlying_exercise_desc->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh112.set_string(41812, *item112.encoded_underlying_exercise_desc);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item112.underlying_automatic_exercise_indicator) {
         auto r = eh112.set_char(41813, (*item112.underlying_automatic_exercise_indicator) ? 'Y' : 'N');
@@ -7993,13 +7943,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh142.set_string(41968, *item142.underlying_stream_commodity_desc);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item142.encoded_underlying_stream_commodity_desc_len) {
-        auto r = eh142.set_int(41969, *item142.encoded_underlying_stream_commodity_desc_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item142.encoded_underlying_stream_commodity_desc) {
-        auto r = eh142.set_string(41970, *item142.encoded_underlying_stream_commodity_desc);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh142.set_int(41969, static_cast<::std::int64_t>(item142.encoded_underlying_stream_commodity_desc->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh142.set_string(41970, *item142.encoded_underlying_stream_commodity_desc);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item142.underlying_stream_commodity_delivery_pricing_region) {
         auto r = eh142.set_string(42589, *item142.underlying_stream_commodity_delivery_pricing_region);
@@ -9152,13 +9100,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
             auto en164 = gh164->add_entry();
             if (!en164) return ::std::unexpected(en164.error());
             auto& eh164 = *en164;
-    if (item164.underlying_payment_stream_formula_length) {
-        auto r = eh164.set_int(43111, *item164.underlying_payment_stream_formula_length);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item164.underlying_payment_stream_formula) {
-        auto r = eh164.set_string(42982, *item164.underlying_payment_stream_formula);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh164.set_int(43111, static_cast<::std::int64_t>(item164.underlying_payment_stream_formula->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh164.set_string(42982, *item164.underlying_payment_stream_formula);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item164.underlying_payment_stream_formula_desc) {
         auto r = eh164.set_string(42983, *item164.underlying_payment_stream_formula_desc);
@@ -9168,13 +9114,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto ge164 = bb.group_end(*gh164);
         if (!ge164) return ::std::unexpected(ge164.error());
     }
-    if (item142.underlying_payment_stream_formula_image_length) {
-        auto r = eh142.set_int(42947, *item142.underlying_payment_stream_formula_image_length);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item142.underlying_payment_stream_formula_image) {
-        auto r = eh142.set_string(42948, *item142.underlying_payment_stream_formula_image);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh142.set_int(42947, static_cast<::std::int64_t>(item142.underlying_payment_stream_formula_image->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh142.set_string(42948, *item142.underlying_payment_stream_formula_image);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item142.underlying_dividend_reinvestment_indicator) {
         auto r = eh142.set_char(42826, (*item142.underlying_dividend_reinvestment_indicator) ? 'Y' : 'N');
@@ -10774,13 +10718,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh190.set_string(41805, *item190.underlying_delivery_stream_cycle_desc);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item190.encoded_underlying_delivery_stream_cycle_desc_len) {
-        auto r = eh190.set_int(41806, *item190.encoded_underlying_delivery_stream_cycle_desc_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item190.encoded_underlying_delivery_stream_cycle_desc) {
-        auto r = eh190.set_string(41807, *item190.encoded_underlying_delivery_stream_cycle_desc);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh190.set_int(41806, static_cast<::std::int64_t>(item190.encoded_underlying_delivery_stream_cycle_desc->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh190.set_string(41807, *item190.encoded_underlying_delivery_stream_cycle_desc);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
         }
         auto ge190 = bb.group_end(*gh190);
@@ -10951,13 +10893,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh142.set_string(40547, *item142.underlying_stream_text);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item142.encoded_underlying_stream_text_len) {
-        auto r = eh142.set_int(40988, *item142.encoded_underlying_stream_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item142.encoded_underlying_stream_text) {
-        auto r = eh142.set_string(40989, *item142.encoded_underlying_stream_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh142.set_int(40988, static_cast<::std::int64_t>(item142.encoded_underlying_stream_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh142.set_string(40989, *item142.encoded_underlying_stream_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
         }
         auto ge142 = bb.group_end(*gh142);
@@ -11394,13 +11334,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh194.set_string(42170, *item194.underlying_provision_text);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item194.encoded_underlying_provision_text_len) {
-        auto r = eh194.set_int(42171, *item194.encoded_underlying_provision_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item194.encoded_underlying_provision_text) {
-        auto r = eh194.set_string(42172, *item194.encoded_underlying_provision_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh194.set_int(42171, static_cast<::std::int64_t>(item194.encoded_underlying_provision_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh194.set_string(42172, *item194.encoded_underlying_provision_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item194.underlying_provision_party_i_ds) {
         auto gh203 = eh194.group_begin(42173, 42174);
@@ -11486,13 +11424,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh206.set_string(41709, *item206.underlying_additional_term_bond_desc);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item206.encoded_underlying_additional_term_bond_desc_len) {
-        auto r = eh206.set_int(41710, *item206.encoded_underlying_additional_term_bond_desc_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item206.encoded_underlying_additional_term_bond_desc) {
-        auto r = eh206.set_string(41711, *item206.encoded_underlying_additional_term_bond_desc);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh206.set_int(41710, static_cast<::std::int64_t>(item206.encoded_underlying_additional_term_bond_desc->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh206.set_string(41711, *item206.encoded_underlying_additional_term_bond_desc);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item206.underlying_additional_term_bond_currency) {
         auto r = eh206.set_string(41712, *item206.underlying_additional_term_bond_currency);
@@ -11502,13 +11438,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh206.set_string(42017, *item206.underlying_additional_term_bond_issuer);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item206.encoded_underlying_additional_term_bond_issuer_len) {
-        auto r = eh206.set_int(42025, *item206.encoded_underlying_additional_term_bond_issuer_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item206.encoded_underlying_additional_term_bond_issuer) {
-        auto r = eh206.set_string(42026, *item206.encoded_underlying_additional_term_bond_issuer);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh206.set_int(42025, static_cast<::std::int64_t>(item206.encoded_underlying_additional_term_bond_issuer->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh206.set_string(42026, *item206.encoded_underlying_additional_term_bond_issuer);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item206.underlying_additional_term_bond_seniority) {
         auto r = eh206.set_string(42027, *item206.underlying_additional_term_bond_seniority);
@@ -12301,13 +12235,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh220.set_string(2178, *item220.leg_option_expiration_desc);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item220.encoded_leg_option_expiration_desc_len) {
-        auto r = eh220.set_int(2179, *item220.encoded_leg_option_expiration_desc_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item220.encoded_leg_option_expiration_desc) {
-        auto r = eh220.set_string(2180, *item220.encoded_leg_option_expiration_desc);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh220.set_int(2179, static_cast<::std::int64_t>(item220.encoded_leg_option_expiration_desc->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh220.set_string(2180, *item220.encoded_leg_option_expiration_desc);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item220.leg_issue_date) {
         auto r = eh220.set_string(249, *item220.leg_issue_date);
@@ -12557,13 +12489,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh220.set_string(617, *item220.leg_issuer);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item220.encoded_leg_issuer_len) {
-        auto r = eh220.set_int(618, *item220.encoded_leg_issuer_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item220.encoded_leg_issuer) {
-        auto r = eh220.set_string(619, *item220.encoded_leg_issuer);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh220.set_int(618, static_cast<::std::int64_t>(item220.encoded_leg_issuer->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh220.set_string(619, *item220.encoded_leg_issuer);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item220.leg_financial_instrument_short_name) {
         auto r = eh220.set_string(2740, *item220.leg_financial_instrument_short_name);
@@ -12573,33 +12503,27 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh220.set_string(2717, *item220.leg_financial_instrument_full_name);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item220.encoded_leg_financial_instrument_full_name_len) {
-        auto r = eh220.set_int(2718, *item220.encoded_leg_financial_instrument_full_name_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item220.encoded_leg_financial_instrument_full_name) {
-        auto r = eh220.set_string(2719, *item220.encoded_leg_financial_instrument_full_name);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh220.set_int(2718, static_cast<::std::int64_t>(item220.encoded_leg_financial_instrument_full_name->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh220.set_string(2719, *item220.encoded_leg_financial_instrument_full_name);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item220.leg_security_desc) {
         auto r = eh220.set_string(620, *item220.leg_security_desc);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item220.encoded_leg_security_desc_len) {
-        auto r = eh220.set_int(621, *item220.encoded_leg_security_desc_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item220.encoded_leg_security_desc) {
-        auto r = eh220.set_string(622, *item220.encoded_leg_security_desc);
-        if (!r) return ::std::unexpected(r.error());
-    }
-    if (item220.leg_security_xml_len) {
-        auto r = eh220.set_int(1871, *item220.leg_security_xml_len);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh220.set_int(621, static_cast<::std::int64_t>(item220.encoded_leg_security_desc->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh220.set_string(622, *item220.encoded_leg_security_desc);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item220.leg_security_xml) {
-        auto r = eh220.set_string(1872, *item220.leg_security_xml);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh220.set_int(1871, static_cast<::std::int64_t>(item220.leg_security_xml->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh220.set_string(1872, *item220.leg_security_xml);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item220.leg_security_xml_schema) {
         auto r = eh220.set_string(1873, *item220.leg_security_xml_schema);
@@ -12704,13 +12628,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh224.set_string(2066, *item224.leg_event_text);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item224.encoded_leg_event_text_len) {
-        auto r = eh224.set_int(2074, *item224.encoded_leg_event_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item224.encoded_leg_event_text) {
-        auto r = eh224.set_string(2075, *item224.encoded_leg_event_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh224.set_int(2074, static_cast<::std::int64_t>(item224.encoded_leg_event_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh224.set_string(2075, *item224.encoded_leg_event_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
         }
         auto ge224 = bb.group_end(*gh224);
@@ -13353,13 +13275,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh243.set_string(41475, *item243.leg_market_disruption_fallback_underlier_security_desc);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item243.encoded_leg_market_disruption_fallback_underlier_security_desc_len) {
-        auto r = eh243.set_int(41476, *item243.encoded_leg_market_disruption_fallback_underlier_security_desc_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item243.encoded_leg_market_disruption_fallback_underlier_security_desc) {
-        auto r = eh243.set_string(41477, *item243.encoded_leg_market_disruption_fallback_underlier_security_desc);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh243.set_int(41476, static_cast<::std::int64_t>(item243.encoded_leg_market_disruption_fallback_underlier_security_desc->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh243.set_string(41477, *item243.encoded_leg_market_disruption_fallback_underlier_security_desc);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item243.leg_market_disruption_fallback_open_units) {
         auto r = eh243.set_decimal(41478, *item243.leg_market_disruption_fallback_open_units);
@@ -13393,13 +13313,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh220.set_string(41481, *item220.leg_exercise_desc);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item220.encoded_leg_exercise_desc_len) {
-        auto r = eh220.set_int(41482, *item220.encoded_leg_exercise_desc_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item220.encoded_leg_exercise_desc) {
-        auto r = eh220.set_string(41483, *item220.encoded_leg_exercise_desc);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh220.set_int(41482, static_cast<::std::int64_t>(item220.encoded_leg_exercise_desc->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh220.set_string(41483, *item220.encoded_leg_exercise_desc);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item220.leg_automatic_exercise_indicator) {
         auto r = eh220.set_char(41484, (*item220.leg_automatic_exercise_indicator) ? 'Y' : 'N');
@@ -13806,13 +13724,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh249.set_string(41652, *item249.leg_stream_commodity_desc);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item249.encoded_leg_stream_commodity_desc_len) {
-        auto r = eh249.set_int(41653, *item249.encoded_leg_stream_commodity_desc_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item249.encoded_leg_stream_commodity_desc) {
-        auto r = eh249.set_string(41654, *item249.encoded_leg_stream_commodity_desc);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh249.set_int(41653, static_cast<::std::int64_t>(item249.encoded_leg_stream_commodity_desc->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh249.set_string(41654, *item249.encoded_leg_stream_commodity_desc);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item249.leg_stream_commodity_delivery_pricing_region) {
         auto r = eh249.set_string(42588, *item249.leg_stream_commodity_delivery_pricing_region);
@@ -14965,13 +14881,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
             auto en271 = gh271->add_entry();
             if (!en271) return ::std::unexpected(en271.error());
             auto& eh271 = *en271;
-    if (item271.leg_payment_stream_formula_length) {
-        auto r = eh271.set_int(43110, *item271.leg_payment_stream_formula_length);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item271.leg_payment_stream_formula) {
-        auto r = eh271.set_string(42486, *item271.leg_payment_stream_formula);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh271.set_int(43110, static_cast<::std::int64_t>(item271.leg_payment_stream_formula->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh271.set_string(42486, *item271.leg_payment_stream_formula);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item271.leg_payment_stream_formula_desc) {
         auto r = eh271.set_string(42487, *item271.leg_payment_stream_formula_desc);
@@ -14981,13 +14895,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto ge271 = bb.group_end(*gh271);
         if (!ge271) return ::std::unexpected(ge271.error());
     }
-    if (item249.leg_payment_stream_formula_image_length) {
-        auto r = eh249.set_int(42451, *item249.leg_payment_stream_formula_image_length);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item249.leg_payment_stream_formula_image) {
-        auto r = eh249.set_string(42452, *item249.leg_payment_stream_formula_image);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh249.set_int(42451, static_cast<::std::int64_t>(item249.leg_payment_stream_formula_image->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh249.set_string(42452, *item249.leg_payment_stream_formula_image);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item249.leg_dividend_reinvestment_indicator) {
         auto r = eh249.set_char(42337, (*item249.leg_dividend_reinvestment_indicator) ? 'Y' : 'N');
@@ -16587,13 +16499,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh297.set_string(41457, *item297.leg_delivery_stream_cycle_desc);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item297.encoded_leg_delivery_stream_cycle_desc_len) {
-        auto r = eh297.set_int(41458, *item297.encoded_leg_delivery_stream_cycle_desc_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item297.encoded_leg_delivery_stream_cycle_desc) {
-        auto r = eh297.set_string(41459, *item297.encoded_leg_delivery_stream_cycle_desc);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh297.set_int(41458, static_cast<::std::int64_t>(item297.encoded_leg_delivery_stream_cycle_desc->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh297.set_string(41459, *item297.encoded_leg_delivery_stream_cycle_desc);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
         }
         auto ge297 = bb.group_end(*gh297);
@@ -16764,13 +16674,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh249.set_string(40248, *item249.leg_stream_text);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item249.encoded_leg_stream_text_len) {
-        auto r = eh249.set_int(40978, *item249.encoded_leg_stream_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item249.encoded_leg_stream_text) {
-        auto r = eh249.set_string(40979, *item249.encoded_leg_stream_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh249.set_int(40978, static_cast<::std::int64_t>(item249.encoded_leg_stream_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh249.set_string(40979, *item249.encoded_leg_stream_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
         }
         auto ge249 = bb.group_end(*gh249);
@@ -17207,13 +17115,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh301.set_string(40472, *item301.leg_provision_text);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item301.encoded_leg_provision_text_len) {
-        auto r = eh301.set_int(40980, *item301.encoded_leg_provision_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item301.encoded_leg_provision_text) {
-        auto r = eh301.set_string(40981, *item301.encoded_leg_provision_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh301.set_int(40980, static_cast<::std::int64_t>(item301.encoded_leg_provision_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh301.set_string(40981, *item301.encoded_leg_provision_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item301.leg_provision_party_i_ds) {
         auto gh310 = eh301.group_begin(40533, 40534);
@@ -17299,13 +17205,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh313.set_string(41319, *item313.leg_additional_term_bond_desc);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item313.encoded_leg_additional_term_bond_desc_len) {
-        auto r = eh313.set_int(41320, *item313.encoded_leg_additional_term_bond_desc_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item313.encoded_leg_additional_term_bond_desc) {
-        auto r = eh313.set_string(41321, *item313.encoded_leg_additional_term_bond_desc);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh313.set_int(41320, static_cast<::std::int64_t>(item313.encoded_leg_additional_term_bond_desc->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh313.set_string(41321, *item313.encoded_leg_additional_term_bond_desc);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item313.leg_additional_term_bond_currency) {
         auto r = eh313.set_string(41322, *item313.leg_additional_term_bond_currency);
@@ -17315,13 +17219,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh313.set_string(41323, *item313.leg_additional_term_bond_issuer);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item313.encoded_leg_additional_term_bond_issuer_len) {
-        auto r = eh313.set_int(41324, *item313.encoded_leg_additional_term_bond_issuer_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item313.encoded_leg_additional_term_bond_issuer) {
-        auto r = eh313.set_string(41325, *item313.encoded_leg_additional_term_bond_issuer);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh313.set_int(41324, static_cast<::std::int64_t>(item313.encoded_leg_additional_term_bond_issuer->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh313.set_string(41325, *item313.encoded_leg_additional_term_bond_issuer);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item313.leg_additional_term_bond_seniority) {
         auto r = eh313.set_string(41326, *item313.leg_additional_term_bond_seniority);
@@ -17841,13 +17743,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh220.set_string(2505, *item220.leg_documentation_text);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item220.encoded_leg_documentation_text_len) {
-        auto r = eh220.set_int(2494, *item220.encoded_leg_documentation_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item220.encoded_leg_documentation_text) {
-        auto r = eh220.set_string(2493, *item220.encoded_leg_documentation_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh220.set_int(2494, static_cast<::std::int64_t>(item220.encoded_leg_documentation_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh220.set_string(2493, *item220.encoded_leg_documentation_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item220.leg_termination_type) {
         auto r = eh220.set_int(2514, *item220.leg_termination_type);
@@ -18503,13 +18403,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDataIncre
         auto r = eh1.set_string(58, *item1.text);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item1.encoded_text_len) {
-        auto r = eh1.set_int(354, *item1.encoded_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item1.encoded_text) {
-        auto r = eh1.set_string(355, *item1.encoded_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh1.set_int(354, static_cast<::std::int64_t>(item1.encoded_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh1.set_string(355, *item1.encoded_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item1.md_price_level) {
         auto r = eh1.set_int(1023, *item1.md_price_level);
