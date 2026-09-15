@@ -10,7 +10,8 @@
 #include <fixpp/core/error.hpp>
 #include <fixpp/wire/errors.hpp>  // wire::err_* / fail<T> (module error vocab)
 #include <fixpp/wire/framer.hpp>
-#include <fixpp/wire/group_view.hpp>  // group_context complete type (063 T006/T008)
+#include <fixpp/wire/group_view.hpp>         // group_context complete type (063 T006/T008)
+#include <fixpp/wire/length_data_pairs.hpp>  // standard Length+Data pairs (fixpp#426)
 #include <fixpp/wire/offset_table.hpp>
 #include <fixpp/wire/tag_scan.hpp>  // accumulate_tag_digit (SC-004 / 040-inbound-tag-overflow)
 #include <fixpp/wire/view.hpp>      // group_slice
@@ -25,33 +26,6 @@ namespace {
 
 constexpr std::byte SOH{0x01};
 constexpr std::byte EQ{static_cast<std::byte>('=')};
-
-// Static Length+Data tag pairs ([FIX50SP2 §3]). When a Length tag is seen,
-// the NEXT field (the Data tag) is read by fixed byte count, not by SOH
-// delimiter, so embedded SOH bytes inside Data values are handled correctly.
-// Duplicated from the same table in parser.hpp (which we cannot include here
-// to avoid a circular dependency); kept in sync with the parser's copy.
-struct len_data_pair_t {
-    std::uint16_t length_tag;
-    std::uint16_t data_tag;
-};
-constexpr len_data_pair_t len_data_pairs[] = {
-    {.length_tag = 93, .data_tag = 89},    // SignatureLength / Signature
-    {.length_tag = 90, .data_tag = 91},    // SecureDataLen / SecureData
-    {.length_tag = 95, .data_tag = 96},    // RawDataLength / RawData
-    {.length_tag = 212, .data_tag = 213},  // XmlDataLen / XmlData
-    {.length_tag = 348, .data_tag = 349},  // EncodedHeaderLen / EncodedHeader
-    {.length_tag = 350, .data_tag = 351},  // EncodedMsgLen / EncodedMsg
-};
-
-[[nodiscard]] constexpr std::uint16_t data_tag_for(std::uint16_t length_tag) noexcept {
-    for (auto const& p : len_data_pairs) {
-        if (p.length_tag == length_tag) {
-            return p.data_tag;
-        }
-    }
-    return 0;
-}
 
 // Given the byte offset of the value (val_start, the byte AFTER '='),
 // walk backward past the '=' and the tag digits to find the byte index of
@@ -303,7 +277,8 @@ void OffsetTable::build(frame_view const& frame) noexcept {
                 // the frame size: a lying over-large length saturates to n (=>
                 // the subtraction bound above rejects it) rather than wrapping
                 // uint32 (W-P2-1c / P3-1).
-                if (std::uint16_t const dt = data_tag_for(static_cast<std::uint16_t>(tag));
+                if (std::uint16_t const dt =
+                        detail::standard_data_tag_for_length(static_cast<std::uint16_t>(tag));
                     dt != 0) {
                     std::uint32_t dlen = 0;
                     // cppcheck-suppress-begin knownConditionTrueFalse  -- false only where size_t

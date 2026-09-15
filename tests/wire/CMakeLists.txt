@@ -56,6 +56,7 @@ add_wire_test(wire_pure_tests
   accessor_smoke_test.cpp                                             # T055-R2
   tag_scan_test.cpp                                                   # T004 (040)
   hostile_input_hardening_test.cpp                                    # wire-hostile-input-review
+  length_data_expansion_test.cpp                                      # fixpp#426
   offset_table_overflow_test.cpp                                      # T008/T012 (040)
   parser_overflow_test.cpp                                            # T009/T012 (040)
   group_slice_trailing_soh_test.cpp                                   # T008 (062)
@@ -126,7 +127,8 @@ add_executable(wire_dict_tests
   fixt_header_validate_test.cpp                                       # T003/T004 (081)
   delimiter_divergence_wire_test.cpp                                  # T009 (083)
   consume_group_nested_delim_test.cpp                                 # T010 (083)
-  typed_read_split_agreement_test.cpp)                                # T011 (083)
+  typed_read_split_agreement_test.cpp                                 # T011 (083)
+  length_data_pairs_drift_test.cpp)                                   # fixpp#426
 target_link_libraries(wire_dict_tests PRIVATE
   fixpp_wire
   fixpp_dictionary

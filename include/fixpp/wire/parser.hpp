@@ -44,6 +44,7 @@
 #include "field_view.hpp"
 #include "framer.hpp"
 #include "group_view.hpp"
+#include "length_data_pairs.hpp"  // standard Length+Data pairs (fixpp#426)
 #include "offset_table.hpp"
 #include "tag_scan.hpp"  // accumulate_tag_digit (SC-004 / 040-inbound-tag-overflow)
 #include "unknown_fields.hpp"
@@ -62,31 +63,6 @@ namespace detail {
 // Standard-header tags used for msg_type/msg_seq_num lookups.
 inline constexpr std::uint16_t tag_msg_type = 35;
 inline constexpr std::uint16_t tag_msg_seq_num = 34;
-
-// Static, dict-free Length+Data pairs ([FIX50SP2 §3]) for the Iter path so a
-// Data field's value (which may contain SOH) is read by the preceding
-// Length field, with no runtime dictionary. (length_tag -> data_tag)
-struct len_data_pair {
-    std::uint16_t length_tag;
-    std::uint16_t data_tag;
-};
-inline constexpr len_data_pair length_data_table[] = {
-    {.length_tag = 93, .data_tag = 89},    // SignatureLength / Signature
-    {.length_tag = 90, .data_tag = 91},    // SecureDataLen / SecureData
-    {.length_tag = 95, .data_tag = 96},    // RawDataLength / RawData
-    {.length_tag = 212, .data_tag = 213},  // XmlDataLen / XmlData
-    {.length_tag = 348, .data_tag = 349},  // EncodedHeaderLen / EncodedHeader
-    {.length_tag = 350, .data_tag = 351},  // EncodedMsgLen / EncodedMsg
-};
-
-[[nodiscard]] constexpr std::uint16_t data_tag_for_length(std::uint16_t length_tag) noexcept {
-    for (auto const& p : length_data_table) {
-        if (p.length_tag == length_tag) {
-            return p.data_tag;
-        }
-    }
-    return 0;
-}
 
 }  // namespace detail
 
@@ -527,7 +503,8 @@ void MessageView<Mode>::field_iterator::advance() noexcept {
     cur_ = field{static_cast<std::uint16_t>(tag), buf_.subspan(vstart, i - vstart)};
     next_ = (i < buf_.size()) ? i + 1 : i;
 
-    if (std::uint16_t dt = detail::data_tag_for_length(static_cast<std::uint16_t>(tag)); dt != 0) {
+    if (std::uint16_t dt = detail::standard_data_tag_for_length(static_cast<std::uint16_t>(tag));
+        dt != 0) {
         prev_data_tag_ = dt;
         prev_data_len_ = parse_bounded_u32(cur_.value);
     }
