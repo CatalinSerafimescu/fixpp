@@ -42,8 +42,9 @@ TEST(CodegenFlyweightShape, SizeofIsOnePointer) {
 // SC-001b's MassQuote scenario) is a representative nested-group entry —
 // its sole member is an `entry_context`, so its size/align match exactly.
 // fixpp#426: `dict_hooks` (5 pointers) replaced `opaque_dict` +
-// `group_member_fn` (2 pointers), a deliberate +24 bytes.
-static_assert(sizeof(fixpp::wire::entry_context) == 144);
+// `group_member_fn` (2 pointers), a deliberate +24 bytes. Its sixth pointer, the
+// dictionary's pair-tag bitset (the per-field lookup's fast reject), adds 8 more.
+static_assert(sizeof(fixpp::wire::entry_context) == 152);
 static_assert(alignof(fixpp::wire::entry_context) == 8);
 static_assert(sizeof(fixpp::v44::groups::G_295) == sizeof(fixpp::wire::entry_context));
 static_assert(alignof(fixpp::v44::groups::G_295) == alignof(fixpp::wire::entry_context));
