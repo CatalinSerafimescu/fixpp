@@ -116,12 +116,12 @@ private:
           length_pair_{length_pair},
           pair_tag_bits_{pair_tag_bits} {}
 
-    // False when `length_pair_` would answer 0 for `tag` without being asked: there
-    // is no dictionary, or its pair-tag bitset has no bit for `tag`. With no bitset
-    // every tag is looked up.
+    // True only when the bundle carries the dictionary's pair-tag bitset and it names
+    // `tag`; a clear bit means `length_pair_` would answer 0. `for_table_view` passes
+    // the bitset with the callback. The test-only constructor passes none, so a
+    // bundle built there never consults a pair callback.
     [[nodiscard]] constexpr bool dictionary_may_pair(std::uint16_t tag) const noexcept {
-        return length_pair_ != nullptr && (pair_tag_bits_ == nullptr ||
-                                           ((pair_tag_bits_[tag >> 6U] >> (tag & 63U)) & 1U) != 0);
+        return pair_tag_bits_ != nullptr && ((pair_tag_bits_[tag >> 6U] >> (tag & 63U)) & 1U) != 0;
     }
 
     void const* opaque_dict_ = nullptr;
@@ -131,6 +131,7 @@ private:
     length_pair_fn_t length_pair_ = nullptr;
     // 1024 words, one bit per tag, owned by the dictionary behind `opaque_dict_`
     // (table_view::pair_tag_bits): a set bit may pair, a clear bit never does.
+    // Non-null only together with `length_pair_`.
     std::uint64_t const* pair_tag_bits_ = nullptr;
 };
 
