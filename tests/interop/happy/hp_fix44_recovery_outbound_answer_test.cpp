@@ -34,7 +34,8 @@
 //     43=Y stays compared verbatim).
 //
 // 018 T014 (golden assertion):
-//   When the golden is absent → skip:golden-not-yet-captured (never fail).
+//   Checked in the parent harness's `_finalize` via `interop_golden_check
+//   --check app-replay`; fails closed (no skip).
 //   Golden captured at first paired run by the parent harness.
 //
 // 018 T015 (SC-004 gate-bite negative tests):
@@ -61,11 +62,9 @@
 #include <fixpp/session/memory_store_factory.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_fsm.hpp>
-#include <fstream>
 #include <future>
 #include <memory>
 #include <memory_resource>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -89,57 +88,6 @@ fixpp::decimal_t make_dec(std::string_view sv, std::pmr::memory_resource* mr) {
     for (char c : sv) bytes.push_back(static_cast<std::byte>(c));
     auto r = fixpp::decimal_t::parse(bytes, mr);
     return r.has_value() ? *r : fixpp::decimal_t{};
-}
-
-// 9.H app-replay witness (US3-3). The capture sidecar must contain a fixpp→peer
-// ('>') frame that is BOTH a NewOrderSingle (35=D) AND a PossDup replay (43=Y) —
-// i.e. fixpp answered QFJ's ResendRequest by REPLAYING the stored application
-// message (build_replay_frame: original seqnum, 43=Y, 122=). This is the named
-// US3-3 postcondition, asserted directly (not a proxy): the in-process Active +
-// inbound-advance signals below hold even if fixpp had ignored the ResendRequest,
-// so the replayed wire frame is the only sound emission witness. Mutation: if
-// fixpp does not replay, no '>' 35=D carries 43=Y → this FAILS. Skip-when-absent
-// mirrors diff_golden_or_skip (never a false pass on an un-captured cell).
-void expect_app_replay_or_skip(const std::string& gpath) {
-    if (gpath.empty()) {
-        GTEST_SKIP() << "skip:golden-not-yet-captured (FIXPP_TLS_FIXTURE_DIR unresolvable)";
-    }
-    std::ifstream gfile{gpath};
-    if (!gfile) {
-        GTEST_SKIP() << "skip:golden-not-yet-captured (file absent: " << gpath << ")";
-    }
-    const std::string capture_path = gpath.substr(0, gpath.size() - 4) + "-capture.fix";
-    std::ifstream cfile{capture_path};
-    if (!cfile) {
-        GTEST_SKIP() << "skip:golden-not-yet-captured (capture sidecar absent: " << capture_path
-                     << ")";
-    }
-    std::stringstream css;
-    css << cfile.rdbuf();
-    const std::string capture_text = css.str();
-    if (capture_text.empty()) {
-        GTEST_SKIP() << "skip:golden-not-yet-captured (capture sidecar empty)";
-    }
-
-    const auto frames = fixpp::interop::parse_golden(capture_text);
-    int replayed_nos = 0;
-    for (const auto& f : frames) {
-        if (f.dir != '>') continue;  // fixpp→peer only
-        const std::string_view w{reinterpret_cast<const char*>(f.bytes.data()), f.bytes.size()};
-        const bool is_nos = w.contains(
-            "\x01"
-            "35=D"
-            "\x01");
-        const bool poss_dup = w.contains(
-            "\x01"
-            "43=Y"
-            "\x01");
-        if (is_nos && poss_dup) ++replayed_nos;
-    }
-    EXPECT_GE(replayed_nos, 1)
-        << "no fixpp→peer NewOrderSingle(35=D) carrying PossDupFlag(43=Y) in the capture; "
-        << "fixpp did not REPLAY the stored app message in answer to QFJ's ResendRequest "
-        << "(US3-3 outbound-replay path not witnessed)";
 }
 
 // ---------------------------------------------------------------------------
@@ -372,13 +320,14 @@ TEST_P(HappyRecoveryOutboundAnswer, FixppAnswersResendRequestAndPeerResyncs) {
         << "(US3-3 resend-answer path not triggered)";
 
     // ── Golden assertion (T014 / US3-3) — app-replay witness ───────────────
-    // The capture sidecar is written at first paired run by the parent harness.
-    // If absent → skip:golden-not-yet-captured (never fail, never hand-fabricate).
-    // If present → assert fixpp REPLAYED the stored NewOrderSingle in answer to
-    // QFJ's ResendRequest: a fixpp→peer 35=D frame carrying PossDupFlag(43)=Y. The
-    // capture contains the original 35=D (no 43) AND the replayed 35=D (43=Y); the
-    // witness asserts on the replay specifically (the named US3-3 postcondition).
-    expect_app_replay_or_skip(hp::admin_golden_path(cell_id));
+    // #445: moved OUT of this gtest — reading the capture sidecar here compared
+    // against the PREVIOUS run's frames, not this one's (the sidecar is written
+    // by the parent harness AFTER the gtest exits). fixpp REPLAYED the stored
+    // NewOrderSingle in answer to QFJ's ResendRequest (a fixpp→peer 35=D frame
+    // carrying PossDupFlag(43)=Y, distinct from the original 35=D with no 43) is
+    // now asserted in the parent harness's _finalize, against THIS run's own
+    // capture, via `interop_golden_check --check app-replay`
+    // (support/golden_check.cpp — moved verbatim, not re-derived).
 
     // ── Graceful stop (Logout) ─────────────────────────────────────────────
     hp::expect_graceful_stop(fx);

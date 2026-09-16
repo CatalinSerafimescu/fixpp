@@ -31,11 +31,12 @@
 //   (b) Outbound seqnum advances by ≥3 over the window (each unsolicited outbound
 //       Heartbeat increments the seqnum counter per FIX spec session-layer rule).
 //
-// Wire-frame assertions (T018 — golden-based, admin profile {52,10}):
-//   When the golden is absent → skip:golden-not-yet-captured (never fail).
-//   The golden must contain ≥3 Heartbeat(35=0) in each direction and no
-//   TestRequest(35=1); this is asserted via diff_transcripts with the {52,10}
-//   admin profile.
+// Wire-frame assertions (T018 — golden-based; count-tolerant, see 9.H below):
+//   #445: runs in the PARENT harness's _finalize (against THIS run's own
+//   capture) via `interop_golden_check --check idle-cadence`, not in this
+//   gtest — a capture sidecar read here would compare against the PREVIOUS
+//   run's frames. There is no skip outcome there: absent/empty golden or
+//   capture fails closed.
 //
 // SC-004 gate-bite negative tests (self-contained, no live QFJ):
 //   (A) Drop one of the ≥3 Heartbeats in the expected golden → expected has 3
@@ -57,8 +58,6 @@
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_fsm.hpp>
-#include <fstream>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -77,76 +76,6 @@ using fixpp::interop::Role;
 using fixpp::session::fsm_state;
 
 namespace {
-
-// ---------------------------------------------------------------------------
-// 9.H: count-tolerant idle-cadence golden gate.
-// ---------------------------------------------------------------------------
-//
-// The verbatim diff_golden_or_skip gate is NON-deterministic for this cell. Two
-// sources of jitter, both confirmed live (9.H, 2026-06-18):
-//   1. trailing-frame count races the graceful Logout (±1 frame between runs); and
-//   2. fixpp's liveness loop fires a TestRequest(35=1) after 1× heartbeat_interval
-//      of inbound silence — and at HeartBtInt=1s that window EQUALS the peer's 1s
-//      beat interval, so whether a beat or a liveness TestRequest lands first is a
-//      structural coin-flip. The original FR-002 "no TestRequest" sizing does NOT
-//      hold at 1s cadence; a liveness TestRequest here is CORRECT behavior (the
-//      peer answers it — Heartbeat echoing 112 — and the session stays Active, the
-//      US2-2 in-process witness). So "no TestRequest" is NOT asserted.
-//
-// The robust, jitter-invariant CONTRACT is the per-direction beat COUNT: both
-// engines emit ≥3 unsolicited Heartbeat(35=0) over the idle window (US2-1 cadence)
-// while the session survives (US2-2, witnessed in-process). Assert that directly
-// from the capture sidecar, keeping the skip-when-absent semantics of
-// diff_golden_or_skip (an un-captured cell reports skip:golden-not-yet-captured,
-// never a false pass). The deterministic SC-004 gate-bite tests below still pin
-// the verbatim diff machinery (incl. an injected-TestRequest bite).
-//
-// fixpp→peer is dir '>'; peer→fixpp is dir '<'. Frame bytes are SOH-delimited
-// (decode_frame_bytes normalizes both literal "\x01" and raw SOH to the SOH byte).
-inline void expect_idle_cadence_or_skip(const std::string& gpath) {
-    if (gpath.empty()) {
-        GTEST_SKIP() << "skip:golden-not-yet-captured (FIXPP_TLS_FIXTURE_DIR unresolvable)";
-    }
-    std::ifstream gfile{gpath};
-    if (!gfile) {
-        GTEST_SKIP() << "skip:golden-not-yet-captured (file absent: " << gpath << ")";
-    }
-    const std::string capture_path = gpath.substr(0, gpath.size() - 4) + "-capture.fix";
-    std::ifstream cfile{capture_path};
-    if (!cfile) {
-        GTEST_SKIP() << "skip:golden-not-yet-captured (capture sidecar absent: " << capture_path
-                     << ")";
-    }
-    std::stringstream css;
-    css << cfile.rdbuf();
-    const std::string capture_text = css.str();
-    if (capture_text.empty()) {
-        GTEST_SKIP() << "skip:golden-not-yet-captured (capture sidecar empty)";
-    }
-
-    const auto frames = fixpp::interop::parse_golden(capture_text);
-    const auto is_heartbeat = [](const auto& f) {
-        const std::string_view w{reinterpret_cast<const char*>(f.bytes.data()), f.bytes.size()};
-        return w.contains(
-            "\x01"
-            "35=0"
-            "\x01");
-    };
-    int out_hb = 0;
-    int in_hb = 0;
-    for (const auto& f : frames) {
-        if (!is_heartbeat(f)) continue;
-        if (f.dir == '>') {
-            ++out_hb;
-        } else if (f.dir == '<') {
-            ++in_hb;
-        }
-    }
-    EXPECT_GE(out_hb, 3) << "fixpp emitted only " << out_hb
-                         << " Heartbeat(35=0) over the idle window; expected ≥3 (US2-1)";
-    EXPECT_GE(in_hb, 3) << "peer emitted only " << in_hb
-                        << " Heartbeat(35=0) over the idle window; expected ≥3 (US2-1)";
-}
 
 // ---------------------------------------------------------------------------
 // SC-004 gate-bite negative tests — self-contained, no live QFJ needed.
@@ -359,13 +288,14 @@ TEST_P(HappyIdleHeartbeatCadence, BothDirectionsAtNegotiatedCadence) {
         << " seqnum after window=" << seqnum_after_window;
 
     // ── Golden assertion (T018 / US2-1 wire-frame) — count-tolerant ─────────
-    // The golden capture sidecar is written at first paired run by the parent
-    // harness. If absent → skip:golden-not-yet-captured (never fail, never
-    // hand-fabricate). If present → assert the jitter-invariant CADENCE COUNT
-    // contract (≥3 Heartbeat(35=0) per direction) rather than a verbatim frame
-    // diff: the exact frame sequence is non-deterministic at HeartBtInt=1s (Logout
-    // race + a legitimate liveness TestRequest). See expect_idle_cadence_or_skip.
-    expect_idle_cadence_or_skip(hp::admin_golden_path(cell_id));
+    // #445: moved OUT of this gtest — reading the sidecar here compared against
+    // the PREVIOUS run's capture, not this one's (the sidecar is written by the
+    // parent harness AFTER the gtest exits). The jitter-invariant CADENCE COUNT
+    // contract (≥3 Heartbeat(35=0) per direction; the exact frame sequence is
+    // non-deterministic at HeartBtInt=1s — Logout race + a legitimate liveness
+    // TestRequest) now runs in the parent harness's _finalize, against THIS
+    // run's own capture, via `interop_golden_check --check idle-cadence`
+    // (support/golden_check.cpp — moved verbatim, not re-derived).
 
     // ── Graceful stop (Logout) ─────────────────────────────────────────────
     hp::expect_graceful_stop(fx);

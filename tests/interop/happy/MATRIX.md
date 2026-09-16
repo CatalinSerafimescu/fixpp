@@ -45,7 +45,10 @@ roles**. Goldens compared under the explicit `{52,10}` admin profile (NOT the
 016 default — it would drop `112`/`34`/`122`/`123`). Per-cell completeness:
 every `(scenario_group × role)` present; each cell's `acceptance_ids` is the
 exact set for its group (descriptor rule 7/8). Goldens captured at first paired
-run (parent harness + live QFJ); absent ⇒ `skip:golden-not-yet-captured`.
+run (parent harness + live QFJ). #445: the diff itself runs in the parent
+harness's `_finalize`, against that same run's own capture, via
+`interop_golden_check --check verbatim-admin|verbatim-poss-dup` — fail-closed
+(missing/empty golden or capture ⇒ exit 2), not a gtest-side skip.
 
 | scenario_group | Driver | Cells (QFj × role) | acceptance_ids | spec_ref | Naming |
 |----------------|--------|--------------------|----------------|----------|--------|
@@ -105,7 +108,9 @@ received-141 path (reset AFTER `check_inbound`). 1 scenario × `counterparty ∈
 | `happy/golden/RR-QFcpp-acc-fix44-received-reset.fix` | QFcpp acceptor T028 | peer 141=Y+34=1 Logon + fixpp reply (34=1, 789=2 if 027-on) + peer 34=2 accepted, NO fixpp 35=2 ResendRequest; admin profile {52,10} |
 | `happy/golden/RR-QFj-acc-fix44-received-reset.fix` | QFj acceptor T028 | peer 141=Y+34=1 Logon + fixpp reply + peer 34=2 accepted, NO fixpp ResendRequest; admin profile {52,10} |
 
-Golden absent → `skip:golden-not-yet-captured` (per `diff_golden_or_skip` convention).
+#445: the golden diff runs in the parent harness's `_finalize`, against that run's
+own capture, via `interop_golden_check --check verbatim-admin` — fail-closed
+(missing/empty golden or capture ⇒ exit 2), not a gtest-side skip. Goldens
 MUST NOT be hand-fabricated.
 
 **Parent-harness obligations for T016/T017:**
