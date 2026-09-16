@@ -416,6 +416,82 @@ TEST(InteropGoldenCheck, FlagWithoutValueExitsTwo) {
 }
 
 // ---------------------------------------------------------------------------
+// Gate B r2 F2/L7: --cell (an optional, echoed-only flag) and the missing-
+// value arms of --golden/--capture/--cell that FlagWithoutValueExitsTwo above
+// does not reach (it only leaves --check's value off).
+// ---------------------------------------------------------------------------
+
+TEST(InteropGoldenCheck, CellFlagIsAcceptedAndDoesNotChangeTheVerdict) {
+    const auto golden = make_temp_file("golden", kBaseFrame);
+    const auto identical_capture = make_temp_file("capture", kBaseFrame);
+    const auto pass = run_tool({"--check", "verbatim-admin", "--golden", golden.string(), "--capture",
+                                identical_capture.string(), "--cell", "TEST-cell"});
+    EXPECT_EQ(pass.code, 0) << "stdout: " << pass.stdout_line;
+    EXPECT_EQ(pass.stdout_line.rfind("ok: ", 0), 0U) << "stdout: " << pass.stdout_line;
+
+    // --cell must not turn a genuine mismatch into a pass either.
+    const char* different =
+        "> 8=FIX.4.4\\x0135=1\\x0149=FIXPP_INIT\\x0156=CPTY_ACC"
+        "\\x0134=1\\x0152=20260603-10:00:00.000\\x0110=001\\x01\n";
+    const auto different_capture = make_temp_file("capture", different);
+    const auto fail = run_tool({"--check", "verbatim-admin", "--golden", golden.string(), "--capture",
+                                different_capture.string(), "--cell", "TEST-cell"});
+    EXPECT_EQ(fail.code, 1) << "stdout: " << fail.stdout_line;
+    EXPECT_EQ(fail.stdout_line.rfind("mismatch: ", 0), 0U) << "stdout: " << fail.stdout_line;
+}
+
+// Condition this pins: a missing value for --golden/--capture/--cell exits 2
+// with "error: ", both (a) as the trailing token with no prior occurrence of
+// that flag, and (b) repeated as the trailing token AFTER the flag was
+// already satisfied once. Shape (b) exists because take_value() on failure
+// leaves the destination optional untouched rather than clearing it — for a
+// flag also checked for presence after the parse loop (--golden, --capture),
+// shape (a) alone cannot tell "the early return fired" from "the flag was
+// simply never given" (the post-loop presence check catches both identically).
+// --cell carries no such post-loop check, so shape (a) already discriminates
+// for it; shape (b) is included for --cell too, for symmetry, and is
+// harmless there.
+TEST(InteropGoldenCheck, MissingValueForGoldenCaptureOrCellExitsTwo) {
+    const auto golden = make_temp_file("golden", kBaseFrame);
+    const auto capture = make_temp_file("capture", kBaseFrame);
+
+    struct Case {
+        const char* name;
+        std::vector<std::string> args;
+    };
+    const std::vector<Case> cases = {
+        {"--golden (trailing, first occurrence)",
+         {"--check", "verbatim-admin", "--capture", capture.string(), "--golden"}},
+        {"--golden (trailing, repeated after a satisfied occurrence)",
+         {"--check", "verbatim-admin", "--golden", golden.string(), "--capture", capture.string(),
+          "--golden"}},
+        {"--capture (trailing, first occurrence)",
+         {"--check", "verbatim-admin", "--golden", golden.string(), "--capture"}},
+        {"--capture (trailing, repeated after a satisfied occurrence)",
+         {"--check", "verbatim-admin", "--golden", golden.string(), "--capture", capture.string(),
+          "--capture"}},
+        {"--cell (trailing, first occurrence)",
+         {"--check", "verbatim-admin", "--golden", golden.string(), "--capture", capture.string(),
+          "--cell"}},
+        {"--cell (trailing, repeated after a satisfied occurrence)",
+         {"--check", "verbatim-admin", "--golden", golden.string(), "--capture", capture.string(),
+          "--cell", "TEST-cell", "--cell"}},
+    };
+
+    int failures = 0;
+    for (const auto& c : cases) {
+        const auto r = run_tool(c.args);
+        if (r.code != 2 || r.stdout_line.rfind("error: ", 0) != 0U) {
+            ++failures;
+            ADD_FAILURE() << "flag " << c.name
+                          << " missing value did not exit 2 with \"error: \"; got code=" << r.code
+                          << " stdout=" << r.stdout_line;
+        }
+    }
+    EXPECT_EQ(failures, 0);
+}
+
+// ---------------------------------------------------------------------------
 // Structural validation before mode dispatch (Gate B r1 L3). idle-cadence and
 // app-replay only substring-search the capture and never structurally parse
 // the golden/capture at all; without a validation pass ahead of dispatch,
