@@ -126,6 +126,11 @@ cat > "$shim_dir/ccache" <<'SHIM'
 #!/usr/bin/env bash
 case "${1:-}" in
   --zero-stats)  exit "${FAKE_ZERO_EXIT:-0}" ;;
+  --evict-older-than)
+    # trim-ccache-to-run.sh (#411): the age must be whole seconds.
+    printf '%s\n' "${2:-}" | grep -qE '^[0-9]+s$' || { echo "SHIM-VIOLATION: ccache --evict-older-than '${2:-}'" >&2; exit 2; }
+    printf '%s\n' "${2}" >> "${FAKE_EVICT_RECORD:-/dev/null}"
+    exit "${FAKE_EVICT_EXIT:-0}" ;;
   --show-stats)  printf '%s\n' "${FAKE_SHOW_STATS_OUT:-cacheable calls: 0}"; exit "${FAKE_SHOW_STATS_EXIT:-0}" ;;
   --print-stats)
     [ "${FAKE_PRINT_STATS_EXIT:-0}" = "0" ] || exit "${FAKE_PRINT_STATS_EXIT}"
@@ -186,6 +191,7 @@ if [ "${1:-}" = "api" ] && [ "${2:-}" = "--method" ] && [ "${3:-}" = "DELETE" ];
     /*) echo "SHIM-VIOLATION: leading-slash endpoint '${4}' (MSYS rewrite trap)" >&2; exit 2 ;;
   esac
   [ "${FAKE_GH_DELETE_EXIT:-0}" = "0" ] || { echo '{"status": "403"}' >&2; exit "${FAKE_GH_DELETE_EXIT}"; }
+  printf '%s\n' "${4}" >> "${FAKE_DELETE_RECORD:-/dev/null}"
   exit 0
 fi
 echo "SHIM-VIOLATION: gh $*" >&2; exit 2
@@ -233,7 +239,10 @@ run() {
   STATUS=0
   (
     cd "$sandbox" || exit 1
-    PATH="$shim_dir:$PATH" \
+    # RUN_EXTRA_PATH, when a caller sets it, is prepended AHEAD of the shim
+    # dir — how a case stubs a real coreutils binary (e.g. `date`) without
+    # touching every other case that relies on the shim dir alone.
+    PATH="${RUN_EXTRA_PATH:+$RUN_EXTRA_PATH:}$shim_dir:$PATH" \
     GITHUB_OUTPUT="$GH_OUTPUT" \
     GITHUB_STEP_SUMMARY="$SUMMARY" \
     bash "$script" "$@"
@@ -1375,6 +1384,182 @@ want_out 'hit-floor 7% satisfied' "stats/floor-leading-zero"
 want_no_out '007%' "stats/floor-leading-zero"
 ok "hit-floor 007 — parsed as DECIMAL (7), not octal or malformed, and accepted"
 
+# ═════ ci/trim-ccache-to-run.sh (#411) ═══════════════════════════════════════
+#
+# Each case asserts the disposition line AND what was actually evicted — the
+# evict age handed to ccache — because a trim that prints a plausible line
+# while evicting the wrong age is the failure that matters here.
+#
+# Gate B round 1 (F1): this script used to ALSO delete the entry it superseded,
+# before the ccache-action post step had proved a replacement was saved — a
+# window in which a failed/skipped/cancelled save left the leg with NO entry at
+# all, looking green. That half is deleted, not fixed: reclaiming a superseded
+# generation is left to cache-cleanup.yml's tier-end sweep. This script now
+# does exactly one thing — evict what THIS run did not touch — and calls no
+# API, so it must never invoke `gh` at all (asserted below).
+TRIM="$CI_DIR/trim-ccache-to-run.sh"
+RKEY="tier1-linux-clang-debug"
+EVICT_REC="$sandbox/evict.rec"
+R_STATS="$sandbox/reclaim-stats.tsv"
+R_CDIR="$sandbox/reclaim-ccache"; mkdir -p "$R_CDIR"
+
+trim_case() {
+  : > "$EVICT_REC"
+  FAKE_PRINT_STATS_EXIT="${PS_EXIT:-0}" run "$TRIM" "$RKEY"
+  unset PS_EXIT
+  EVICTED="$(cat "$EVICT_REC")"
+}
+r_env() {
+  export CCACHE_DIR="$R_CDIR" \
+         FAKE_EVICT_RECORD="$EVICT_REC" FAKE_STATS_FILE="$R_STATS" FAKE_EVICT_EXIT=0
+}
+r_unenv() {
+  unset CCACHE_DIR FAKE_EVICT_RECORD FAKE_STATS_FILE FAKE_EVICT_EXIT
+}
+r_stats() {  # $1 = zeroed timestamp ('' = line absent), $2 = hits, $3 = misses
+  { [ -z "$1" ] || printf 'stats_zeroed_timestamp\t%s\n' "$1"
+    printf 'direct_cache_hit\t%s\npreprocessed_cache_hit\t0\ncache_miss\t%s\n' "$2" "$3"; } > "$R_STATS"
+}
+
+# The happy path: restore 300 s ago, a warm build.
+r_env; r_stats "$(( $(date +%s) - 300 ))" 1598 53
+trim_case
+want_status 0 "trim/happy"
+want_out "ccache-evict (${RKEY}): kept files touched in the last" "trim/happy"
+age="${EVICTED%s}"
+{ [ -n "$age" ] && [ "$age" -ge 300 ] && [ "$age" -le 330 ]; } \
+  || fail "trim/happy: evict age '${EVICTED}' is not now-minus-restore (expected 300..330s)"
+ok "evicts to the restore time, labelled with the action key"
+
+# No zeroed timestamp → no eviction.
+r_stats "" 1598 53
+trim_case
+want_status 0 "trim/no-zeroed-ts"
+want_out "ccache-evict (${RKEY}): SKIPPED — no stats_zeroed_timestamp" "trim/no-zeroed-ts"
+[ -z "$EVICTED" ] || fail "trim/no-zeroed-ts: ccache eviction ran ('$EVICTED') without a restore time"
+ok "an unreadable restore time skips eviction"
+
+# Zeroed but zero calls since: the counters were reset AFTER the build, so the
+# timestamp is not the restore time and eviction would truncate the store.
+r_stats "$(( $(date +%s) - 300 ))" 0 0
+trim_case
+want_status 0 "trim/zeroed-after-build"
+want_out "ccache-evict (${RKEY}): SKIPPED — zero compiler calls" "trim/zeroed-after-build"
+[ -z "$EVICTED" ] || fail "trim/zeroed-after-build: eviction ran ('$EVICTED')"
+ok "counters with zero calls since the zero skip eviction"
+
+# ccache eviction fails → warning, still exit 0.
+r_stats "$(( $(date +%s) - 300 ))" 10 1; export FAKE_EVICT_EXIT=1
+trim_case
+want_status 0 "trim/evict-fails"; want_out '::warning::' "trim/evict-fails"
+want_out "ccache-evict (${RKEY}): FAILED" "trim/evict-fails"
+ok "a failing eviction warns and does not redden"
+export FAKE_EVICT_EXIT=0
+
+# A failed stats command is distinct from a valid stats payload without a
+# restore timestamp, and must skip eviction while preserving the green lane.
+r_stats "$(( $(date +%s) - 300 ))" 10 1; PS_EXIT=1
+trim_case
+want_status 0 "trim/print-stats-fails"
+want_out '::warning::' "trim/print-stats-fails"
+want_out "ccache-evict (${RKEY}): FAILED — \`ccache --print-stats\` failed" "trim/print-stats-fails"
+want_no_out 'no stats_zeroed_timestamp' "trim/print-stats-fails"
+[ -z "$EVICTED" ] || fail "trim/print-stats-fails: ccache eviction ran ('$EVICTED')"
+ok "--print-stats failure — warned as unreadable stats, exit 0, no eviction"
+
+# ── the zeroed/now boundary and an unreadable clock (Gate B round 2, F2) ─────
+# These pin the script's OWN `date +%s` call, not the fixture's zeroed
+# timestamp, so each case stubs `date` on a dir prepended ahead of the shim
+# dir via RUN_EXTRA_PATH — the fixture's r_stats call still uses the real
+# clock to write a realistic zeroed timestamp.
+FIXED_DATE_DIR="$sandbox/fixed-date"; mkdir -p "$FIXED_DATE_DIR"
+fixed_date_trim_case() {  # $1 = the value the stubbed `date` prints
+  cat > "$FIXED_DATE_DIR/date" <<SHIM
+#!/usr/bin/env bash
+printf '%s\n' '$1'
+SHIM
+  chmod +x "$FIXED_DATE_DIR/date"
+  : > "$EVICT_REC"
+  RUN_EXTRA_PATH="$FIXED_DATE_DIR"
+  run "$TRIM" "$RKEY"
+  unset RUN_EXTRA_PATH
+  EVICTED="$(cat "$EVICT_REC")"
+}
+
+# zeroed == now: age would be 1s, which keeps only files touched in the last
+# second — effectively a wipe. SKIP instead.
+r_stats 1700000000 1598 53
+fixed_date_trim_case 1700000000
+want_status 0 "trim/zeroed-equals-now"
+want_out "ccache-evict (${RKEY}): SKIPPED — stats_zeroed_timestamp" "trim/zeroed-equals-now"
+[ -z "$EVICTED" ] || fail "trim/zeroed-equals-now: ccache eviction ran ('$EVICTED')"
+ok "zeroed == now skips eviction instead of keeping only the last second"
+
+# zeroed one second AHEAD of now (clock stepped back): age would be 0, which
+# wipes the whole store, including the file just hit. This is Codex's case.
+r_stats 1700000001 1598 53
+fixed_date_trim_case 1700000000
+want_status 0 "trim/zeroed-one-ahead"
+want_out "ccache-evict (${RKEY}): SKIPPED — stats_zeroed_timestamp" "trim/zeroed-one-ahead"
+[ -z "$EVICTED" ] || fail "trim/zeroed-one-ahead: ccache eviction ran ('$EVICTED')"
+ok "zeroed one second ahead of now (age=0) skips eviction rather than wiping the store"
+
+# An unreadable clock reading must skip, not abort the script under `set -u`.
+r_stats "$(( $(date +%s) - 300 ))" 1598 53
+fixed_date_trim_case "12:00"
+want_status 0 "trim/clock-unreadable"
+want_out "ccache-evict (${RKEY}): SKIPPED — the clock is unreadable" "trim/clock-unreadable"
+[ -z "$EVICTED" ] || fail "trim/clock-unreadable: ccache eviction ran ('$EVICTED')"
+ok "a non-numeric clock reading skips eviction instead of reddening the lane"
+
+# One second of margin is the boundary's positive side: eviction must still
+# run there, so an over-wide guard (e.g. \`-ge now-1\`) is caught too.
+r_stats 1700000000 1598 53
+fixed_date_trim_case 1700000001
+want_status 0 "trim/one-second-margin"
+want_out "ccache-evict (${RKEY}): kept files touched in the last 2s" "trim/one-second-margin"
+[ "$EVICTED" = "2s" ] || fail "trim/one-second-margin: expected age 2s, got '${EVICTED}'"
+ok "one second of margin still evicts, at age 2s"
+
+# ── explicit: this script must never invoke gh at all ────────────────────────
+# It calls no API — unlike the deleted reclaim half, nothing here needs one.
+# Swap in a shim that records any invocation and fails loudly, so a
+# regression that reintroduces a `gh` call is caught even though the happy
+# path above would already pass with a real API failure (::warning:: shapes
+# are indistinguishable from a script that never tried).
+GH_CALL_MARKER="$sandbox/gh-was-called"
+rm -f "$GH_CALL_MARKER"
+cat > "$shim_dir/gh" <<SHIM
+#!/usr/bin/env bash
+touch "$GH_CALL_MARKER"
+echo "SHIM-VIOLATION: trim-ccache-to-run.sh must never invoke gh: gh \$*" >&2
+exit 111
+SHIM
+chmod +x "$shim_dir/gh"
+r_stats "$(( $(date +%s) - 300 ))" 1598 53
+trim_case
+want_status 0 "trim/no-gh"
+[ ! -e "$GH_CALL_MARKER" ] || fail "trim/no-gh: gh was invoked"
+ok "the trim script never invokes gh"
+
+# Wiring errors are loud: a missing CCACHE_DIR would otherwise no-op green
+# forever.
+unset CCACHE_DIR
+trim_case
+want_status 2 "trim/unwired-ccache-dir"; want_out '::error::usage' "trim/unwired-ccache-dir"
+[ -z "$EVICTED" ] || fail "trim/unwired-ccache-dir: acted without its environment"
+ok "a missing CCACHE_DIR exits 2 before acting"
+r_env
+
+# A missing key argument is the other half of the same guard.
+: > "$EVICT_REC"
+run "$TRIM"
+EVICTED="$(cat "$EVICT_REC")"
+want_status 2 "trim/unwired-key"; want_out '::error::usage' "trim/unwired-key"
+[ -z "$EVICTED" ] || fail "trim/unwired-key: acted without its environment"
+ok "a missing key argument exits 2 before acting"
+r_unenv
+
 # ═════ ci/assert-ccache-floor-callers.py — the CALL SITES (#299) ═════════════
 #
 # ⚠️ THIS SECTION PINS SOMETHING NO OTHER CELL IN THIS FILE CAN.
@@ -1587,4 +1772,4 @@ want_out 'ZERO ci/ccache-stats.sh call sites' "floor-callers/empty-scan"
 ok "an empty scan is an INSTRUMENT FAILURE (exit 2), not a clean result"
 
 echo
-echo "PASS: $pass assertions over ci/{ccache-cache-key,restore-ccache,seed-ccache,ccache-stats,wheel-ccache-ident,assert-wheel-image,install-ccache}.sh — scripts: $CI_DIR"
+echo "PASS: $pass assertions over ci/{ccache-cache-key,restore-ccache,seed-ccache,ccache-stats,wheel-ccache-ident,assert-wheel-image,install-ccache,trim-ccache-to-run}.sh — scripts: $CI_DIR"
