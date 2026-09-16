@@ -201,11 +201,39 @@ static_assert([] {
     return set;
 }() == static_cast<int>(2 * standard_length_data_pairs.size()));
 
+// The lowest and highest tag the table names, over both halves. Every bit outside
+// [min, max] is clear, so the range test below decides those tags without touching
+// the 8 KiB bitset — which is most of a FIX message: every framing and header tag
+// (8, 9, 35, 34, 49, 56, 52, 10) is under the minimum. Derived from the table, so
+// it cannot drift from it.
+inline constexpr std::uint16_t standard_pair_tag_min = [] {
+    std::uint16_t lo = 0xFFFFU;
+    for (length_data_pair const p : standard_length_data_pairs) {
+        lo = std::min({lo, p.length_tag, p.data_tag});
+    }
+    return lo;
+}();
+inline constexpr std::uint16_t standard_pair_tag_max = [] {
+    std::uint16_t hi = 0;
+    for (length_data_pair const p : standard_length_data_pairs) {
+        hi = std::max({hi, p.length_tag, p.data_tag});
+    }
+    return hi;
+}();
+
 [[nodiscard]] constexpr bool standard_pair_tag_bit(std::uint16_t tag) noexcept {
+    if (tag < standard_pair_tag_min || tag > standard_pair_tag_max) {
+        return false;
+    }
     return ((standard_pair_tag_bits[tag >> 6U] >> (tag & 63U)) & 1U) != 0;
 }
 
 static_assert(standard_pair_tag_bit(93) && standard_pair_tag_bit(89));
 static_assert(standard_pair_tag_bit(43111) && !standard_pair_tag_bit(5001));
+// The bounds are the table's own extremes, and the tags just outside are not pairs.
+static_assert(standard_pair_tag_min == 89 && standard_pair_tag_max == 43111);
+static_assert(!standard_pair_tag_bit(88) && !standard_pair_tag_bit(43112));
+static_assert(standard_pair_tag_bit(standard_pair_tag_min) &&
+              standard_pair_tag_bit(standard_pair_tag_max));
 
 }  // namespace fixpp::core::detail

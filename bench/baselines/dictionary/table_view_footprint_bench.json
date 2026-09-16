@@ -18,9 +18,9 @@
     {
       "name": "BM_TableView_Sizeof",
       "metric": "sizeof_B",
-      "measured_B": 608,
+      "measured_B": 728,
       "pre_change_B": 608,
-      "verdict": "UNCHANGED — the compile-time footprint of table_view does not move",
+      "verdict": "CHANGED +120 B (+19.7%) — re-measured paired for fixpp#426 at 3ac01a3d vs merge-base e6e01f71, both trees built and run back-to-back on one host. The growth is this PR's two Length+Data pair maps (a5f20ce4) plus the one-byte has_nonstandard_pair flag with its padding; the row read 608 UNCHANGED from a5f20ce4 until this measurement, which is the stale value Gate B r5 L-4 caught. table_view is built at config time and copied per reify / C-ABI clone: BM_TableView_CopyFix44 -1.2% and BM_TableView_CopyFix50SP2 +3.1% across the same paired runs, so the copy cost does not move with it.",
       "_timing_is_meaningless_here": "Iterations(1) over a compile-time `sizeof`. Measured real-time across the 4 runs was 37038 / 2923 / 2753 / 3232 ns — a 12.7x first-run outlier on a benchmark that computes a constant. The timing column on THIS row is process warm-up, not a signal; only sizeof_B is."
     },
     {
