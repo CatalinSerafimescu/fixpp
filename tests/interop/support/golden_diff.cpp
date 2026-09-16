@@ -8,6 +8,7 @@
 #include "golden_diff.hpp"
 
 #include <algorithm>
+#include <limits>
 #include <utility>
 
 namespace fixpp::interop {
@@ -46,7 +47,15 @@ int parse_tag(std::span<const std::byte> bytes, bool& ok) {
             return 0;
         }
 
-        tag = (tag * 10) + (std::to_integer<int>(value) - '0');
+        const int digit = std::to_integer<int>(value) - '0';
+        if (tag > (std::numeric_limits<int>::max() - digit) / 10) {
+            // Overflow: this decimal string does not fit in an int. Reject
+            // rather than wrap — a wrapped tag can alias a different, valid
+            // tag number and produce a false verbatim MATCH.
+            ok = false;
+            return 0;
+        }
+        tag = (tag * 10) + digit;
     }
 
     return tag;

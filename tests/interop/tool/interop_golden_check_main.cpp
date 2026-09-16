@@ -42,11 +42,38 @@
 
 namespace {
 
+using fixpp::interop::diff_transcripts;
+using fixpp::interop::DiffResult;
 using fixpp::interop::GoldenCheckMode;
 using fixpp::interop::GoldenCheckOutcome;
+using fixpp::interop::GoldenFrame;
 using fixpp::interop::parse_golden;
 using fixpp::interop::parse_golden_check_mode;
 using fixpp::interop::run_golden_check;
+
+// A parsed frame with an unrecognized direction (parse_golden's '?' fallback
+// for a nonblank line that did not start "> "/"< ") or a malformed FIX body
+// (missing '=', non-numeric tag, missing/extra trailing SOH) is unparseable
+// content, not a frame the specialized (idle-cadence/app-replay) modes may
+// substring-search or the verbatim modes may byte-diff. Reject it up front,
+// before any mode dispatch, so every mode fails closed on it identically.
+// Structural field validation reuses diff_transcripts's own parser via a
+// self-diff (a frame list diffed against itself can only mismatch on a
+// structural defect — direction/missing-field/extra-field — never on value
+// content) rather than re-deriving field parsing here.
+std::optional<std::string> validate_frames(const std::string& path,
+                                           const std::vector<GoldenFrame>& frames) {
+    for (std::size_t i = 0; i < frames.size(); ++i) {
+        if (frames[i].dir != '>' && frames[i].dir != '<') {
+            return "unparseable content: " + path + " frame " + std::to_string(i);
+        }
+    }
+    const DiffResult self_diff = diff_transcripts(frames, frames, {});
+    if (!static_cast<bool>(self_diff)) {
+        return "unparseable content: " + path + ": " + self_diff.detail;
+    }
+    return std::nullopt;
+}
 
 struct Args {
     std::optional<std::string> check;
@@ -138,6 +165,12 @@ int main(int argc, char** argv) {
     if (golden_frames.empty() || capture_frames.empty()) {
         return usage_error("unparseable content: no frames parsed from " +
                            (golden_frames.empty() ? *args->golden_path : *args->capture_path));
+    }
+    if (auto err = validate_frames(*args->golden_path, golden_frames)) {
+        return usage_error(*err);
+    }
+    if (auto err = validate_frames(*args->capture_path, capture_frames)) {
+        return usage_error(*err);
     }
 
     const GoldenCheckOutcome outcome = run_golden_check(*mode, golden_frames, capture_frames);

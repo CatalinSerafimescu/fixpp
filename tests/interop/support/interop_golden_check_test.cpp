@@ -17,6 +17,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstdlib>
 #include <filesystem>
@@ -108,16 +109,29 @@ RunResult run_tool(const std::vector<std::string>& args) {
 
     const int ret = run_system(cmd);
 
-    std::string out;
+    std::string raw;
     {
         std::ifstream f{out_file, std::ios::binary};
         std::ostringstream oss;
         oss << f.rdbuf();
-        out = oss.str();
+        raw = oss.str();
     }
     std::error_code ec;
     fs::remove(out_file, ec);  // best-effort cleanup
 
+    // The binding one-line stdout contract (file header): exactly one line,
+    // terminated by exactly one trailing newline (a trailing "\r\n" on
+    // Windows collapses to one newline for this count). Assert on the RAW
+    // bytes, before any stripping — a stripped copy cannot see an embedded
+    // newline the strip already removed.
+    const auto newline_count = std::count(raw.begin(), raw.end(), '\n');
+    EXPECT_EQ(newline_count, 1) << "not exactly one line of stdout: " << raw;
+    EXPECT_FALSE(raw.empty()) << "expected non-empty stdout";
+    if (!raw.empty()) {
+        EXPECT_EQ(raw.back(), '\n') << "stdout does not end with a newline: " << raw;
+    }
+
+    std::string out = raw;
     while (!out.empty() && (out.back() == '\n' || out.back() == '\r')) {
         out.pop_back();
     }
@@ -399,4 +413,106 @@ TEST(InteropGoldenCheck, FlagWithoutValueExitsTwo) {
     const auto r = run_tool({"--golden", golden.string(), "--capture", capture.string(), "--check"});
     EXPECT_EQ(r.code, 2);
     EXPECT_EQ(r.stdout_line.rfind("error: ", 0), 0U) << "stdout: " << r.stdout_line;
+}
+
+// ---------------------------------------------------------------------------
+// Structural validation before mode dispatch (Gate B r1 L3). idle-cadence and
+// app-replay only substring-search the capture and never structurally parse
+// the golden/capture at all; without a validation pass ahead of dispatch,
+// these two modes could report `ok:` over content that is not well-formed
+// FIX. Verbatim modes already fail closed on malformed input via
+// diff_transcripts, but with the WRONG exit code (1, mismatch, rather than 2,
+// unparseable content) — see the garbage-golden case below.
+// ---------------------------------------------------------------------------
+
+TEST(InteropGoldenCheck, AppReplayGarbageGoldenExitsTwo) {
+    // A nonblank golden line with no "> "/"< " prefix parses to dir='?' — not
+    // a structural defect in the FIELDS, but an invalid direction, which is
+    // exactly as unparseable. app-replay never reads the golden's content, so
+    // without validation ahead of dispatch this would fall through to the
+    // "at least one replayed frame" capture-only check and could still pass.
+    const auto golden = make_temp_file("golden", "garbage\n");
+    const char* replayed =
+        "> 8=FIX.4.4\\x0135=D\\x0149=FIXPP_INIT\\x0156=CPTY_ACC"
+        "\\x0143=Y\\x0134=2\\x0152=20260603-10:00:00.000\\x0110=001\\x01\n";
+    const auto capture = make_temp_file("capture", replayed);
+    const auto r = run_tool({"--check", "app-replay", "--golden", golden.string(), "--capture",
+                             capture.string()});
+    EXPECT_EQ(r.code, 2) << "stdout: " << r.stdout_line;
+    EXPECT_EQ(r.stdout_line.rfind("error: ", 0), 0U) << "stdout: " << r.stdout_line;
+}
+
+TEST(InteropGoldenCheck, AppReplayMalformedCaptureFieldExitsTwo) {
+    // A well-formed golden, but a capture frame with a body segment that has
+    // no '=' between two SOHs — a structural defect check_app_replay's
+    // substring search cannot see.
+    const auto golden = make_temp_file("golden", kBaseFrame);
+    const char* malformed_capture = "> garbage\\x0135=D\\x01not-a-field\\x0143=Y\\x01\n";
+    const auto capture = make_temp_file("capture", malformed_capture);
+    const auto r = run_tool({"--check", "app-replay", "--golden", golden.string(), "--capture",
+                             capture.string()});
+    EXPECT_EQ(r.code, 2) << "stdout: " << r.stdout_line;
+    EXPECT_EQ(r.stdout_line.rfind("error: ", 0), 0U) << "stdout: " << r.stdout_line;
+}
+
+TEST(InteropGoldenCheck, IdleCadenceMalformedFramesExitTwo) {
+    // Six frames (3 each direction) each carrying the "35=0" substring
+    // check_idle_cadence searches for, but each structurally malformed (no
+    // '=' in the first field) — check_idle_cadence's substring search alone
+    // would count all six as Heartbeats and report `ok:`.
+    const auto golden = make_temp_file("golden", kBaseFrame);
+    std::string capture_text;
+    for (int i = 0; i < 3; ++i) {
+        capture_text += "> junk\\x0135=0\\x01\n";
+        capture_text += "< junk\\x0135=0\\x01\n";
+    }
+    const auto capture = make_temp_file("capture", capture_text);
+    const auto r = run_tool({"--check", "idle-cadence", "--golden", golden.string(), "--capture",
+                             capture.string()});
+    EXPECT_EQ(r.code, 2) << "stdout: " << r.stdout_line;
+    EXPECT_EQ(r.stdout_line.rfind("error: ", 0), 0U) << "stdout: " << r.stdout_line;
+}
+
+TEST(InteropGoldenCheck, VerbatimAdminGarbageGoldenExitsTwoNotOne) {
+    // Before L3, a golden with no valid direction fell through to
+    // diff_transcripts, which reports a `direction` mismatch (exit 1) rather
+    // than the "unparseable content" usage error (exit 2) the file header
+    // promises for exactly this case.
+    const auto golden = make_temp_file("golden", "garbage\n");
+    const auto capture = make_temp_file("capture", kBaseFrame);
+    const auto r = run_tool({"--check", "verbatim-admin", "--golden", golden.string(), "--capture",
+                             capture.string()});
+    EXPECT_EQ(r.code, 2) << "stdout: " << r.stdout_line;
+    EXPECT_EQ(r.stdout_line.rfind("error: ", 0), 0U) << "stdout: " << r.stdout_line;
+}
+
+// ---------------------------------------------------------------------------
+// Tag-accumulator overflow (Gate B r1 L4). parse_tag() used to accumulate an
+// arbitrary-length decimal string into `int` with no bound; a tag long enough
+// to wrap past INT_MAX could alias a different, valid tag number and produce
+// a false verbatim MATCH rather than a mismatch or a parse failure.
+// ---------------------------------------------------------------------------
+
+TEST(InteropGoldenCheck, OverflowingTagDoesNotAliasAsAMatch) {
+    // 4294967331 = 2^32 + 35 — wraps to 35 in a naive 32-bit accumulator, which
+    // would make this golden falsely byte-match a capture whose real tag is 35.
+    const auto golden = make_temp_file("golden", "> 4294967331=1\\x01\n");
+    const auto capture = make_temp_file("capture", "> 35=1\\x01\n");
+    const auto r = run_tool({"--check", "verbatim-admin", "--golden", golden.string(), "--capture",
+                             capture.string()});
+    EXPECT_NE(r.code, 0) << "an overflowing tag must never report `ok:`; stdout: "
+                         << r.stdout_line;
+    EXPECT_EQ(r.code, 2) << "stdout: " << r.stdout_line;
+}
+
+TEST(InteropGoldenCheck, OverflowingTagControlPairStillMismatches) {
+    // Control: the instrument can report a genuine non-match on a
+    // (non-overflowing) differing tag, proving the case above is not simply
+    // "everything mismatches".
+    const auto golden = make_temp_file("golden", "> 36=1\\x01\n");
+    const auto capture = make_temp_file("capture", "> 35=1\\x01\n");
+    const auto r = run_tool({"--check", "verbatim-admin", "--golden", golden.string(), "--capture",
+                             capture.string()});
+    EXPECT_EQ(r.code, 1) << "stdout: " << r.stdout_line;
+    EXPECT_EQ(r.stdout_line.rfind("mismatch: ", 0), 0U) << "stdout: " << r.stdout_line;
 }
