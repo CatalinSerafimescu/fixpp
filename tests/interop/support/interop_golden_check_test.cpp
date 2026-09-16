@@ -339,3 +339,64 @@ TEST(InteropGoldenCheck, UnparseableContentExitsTwo) {
     EXPECT_EQ(r.code, 2);
     EXPECT_EQ(r.stdout_line.rfind("error: ", 0), 0U) << "stdout: " << r.stdout_line;
 }
+
+// ---------------------------------------------------------------------------
+// Branches the cases above do not reach: each direction of the idle-cadence
+// threshold on its own, the direction filter of app-replay, and the two argv
+// shapes parse_args rejects besides an omitted flag.
+// ---------------------------------------------------------------------------
+
+namespace {
+std::string heartbeats(char dir, int count) {
+    std::string text;
+    for (int i = 0; i < count; ++i) {
+        text += std::string{dir} + " 8=FIX.4.4\\x0135=0\\x0149=A\\x0156=B\\x0134=" +
+                std::to_string(i + 1) + "\\x0152=20260603-10:00:00.000\\x0110=001\\x01\n";
+    }
+    return text;
+}
+}  // namespace
+
+TEST(InteropGoldenCheck, IdleCadenceOneDirectionShortMismatches) {
+    const auto golden = make_temp_file("golden", kBaseFrame);
+    for (const auto& text : {heartbeats('>', 3) + heartbeats('<', 2),
+                             heartbeats('>', 2) + heartbeats('<', 3)}) {
+        const auto capture = make_temp_file("capture", text);
+        const auto r = run_tool({"--check", "idle-cadence", "--golden", golden.string(),
+                                 "--capture", capture.string()});
+        EXPECT_EQ(r.code, 1) << text;
+        EXPECT_EQ(r.stdout_line.rfind("mismatch: ", 0), 0U) << "stdout: " << r.stdout_line;
+    }
+}
+
+TEST(InteropGoldenCheck, AppReplayFromThePeerDirectionDoesNotCount) {
+    const auto golden = make_temp_file("golden", kBaseFrame);
+    // The replayed NewOrderSingle must be fixpp->peer ('>'); the same frame
+    // arriving from the peer ('<') is not fixpp replaying its stored message.
+    const char* peer_replay =
+        "< 8=FIX.4.4\\x0135=D\\x0149=CPTY_ACC\\x0156=FIXPP_INIT"
+        "\\x0143=Y\\x01122=20260603-09:59:59.000\\x0134=2"
+        "\\x0152=20260603-10:00:00.000\\x0110=001\\x01\n";
+    const auto capture = make_temp_file("capture", peer_replay);
+    const auto r = run_tool({"--check", "app-replay", "--golden", golden.string(), "--capture",
+                             capture.string()});
+    EXPECT_EQ(r.code, 1);
+    EXPECT_EQ(r.stdout_line.rfind("mismatch: ", 0), 0U) << "stdout: " << r.stdout_line;
+}
+
+TEST(InteropGoldenCheck, UnknownFlagExitsTwo) {
+    const auto golden = make_temp_file("golden", kBaseFrame);
+    const auto capture = make_temp_file("capture", kBaseFrame);
+    const auto r = run_tool({"--check", "verbatim-admin", "--golden", golden.string(), "--capture",
+                             capture.string(), "--bogus", "x"});
+    EXPECT_EQ(r.code, 2);
+    EXPECT_EQ(r.stdout_line.rfind("error: ", 0), 0U) << "stdout: " << r.stdout_line;
+}
+
+TEST(InteropGoldenCheck, FlagWithoutValueExitsTwo) {
+    const auto golden = make_temp_file("golden", kBaseFrame);
+    const auto capture = make_temp_file("capture", kBaseFrame);
+    const auto r = run_tool({"--golden", golden.string(), "--capture", capture.string(), "--check"});
+    EXPECT_EQ(r.code, 2);
+    EXPECT_EQ(r.stdout_line.rfind("error: ", 0), 0U) << "stdout: " << r.stdout_line;
+}
