@@ -926,8 +926,10 @@ static nested_slices_result resolve_nested_result(OffsetTable const* table,
 
 // 062 T006: single flat nested-subview cache (see offset_table.hpp for the
 // full keying/ownership contract — ROOT-owned, keyed by
-// `(slice_data, nested_no_tag)`, dedupes the sub-table build across distinct
-// no_tags on the same slice).
+// `(slice_data, hooks.opaque_dict(), nested_no_tag)`, dedupes the sub-table
+// build across distinct no_tags on the same slice AND the same bundle.
+// fixpp#426 (Gate B r9 R-1) added the bundle to the key; a warm hit used to
+// serve the first caller's dictionary to every later one).
 nested_slices_result OffsetTable::nested_group_slices(std::byte const* slice_data,
                                                       std::size_t slice_len,
                                                       std::uint16_t nested_no_tag, dict_hooks hooks,

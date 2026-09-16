@@ -284,18 +284,23 @@ public:
     // the ROOT OffsetTable (reached via entry_context.parent_cache_owner,
     // threaded UNCHANGED at every descent depth — nested sub-tables own no
     // cache of their own; data-model.md §"Nested sub-view cache", RC2/RC5,
-    // INV-G3). Keyed by `(slice_data, nested_no_tag)` where `slice_data` is
+    // INV-G3). Keyed by `(slice_data, hooks.opaque_dict(), nested_no_tag)` —
+    // the BUNDLE identity is part of the key (fixpp#426, Gate B r9 R-1: without
+    // it a warm hit served the FIRST caller's dictionary, silently) — where
+    // `slice_data` is
     // the outer entry slice's globally-unique `data` pointer
     // (`outer_occurrence_id`), collision-free at every nesting depth because
     // every occurrence's slice is carved in place from the one parent frame
     // buffer. Build-once / fetch-cached: on a first request for a given
-    // `(slice_data, nested_no_tag)` pair, builds a dict-aware sub-OffsetTable
+    // `(slice_data, bundle, nested_no_tag)` key, builds a dict-aware sub-OffsetTable
     // over the slice via `build_nested_subview` (T005, RC1 — slice-scoped
     // `len+1`, the whole-frame `build()` guard and `group_slice.len` stay
     // UNCHANGED) and caches it in THIS table's own per-message arena; a
-    // second distinct `nested_no_tag` over the SAME `slice_data` reuses the
-    // already-built sub-table (one sub-OffsetTable indexes every entry in
-    // the slice, so no rebuild is needed) — strictly fewer builds than
+    // second distinct `nested_no_tag` over the SAME `slice_data` AND the SAME
+    // bundle reuses the already-built sub-table (one sub-OffsetTable indexes
+    // every entry in the slice, so no rebuild is needed); a caller supplying a
+    // DIFFERENT bundle over the same slice gets its own build, because the
+    // split itself can differ — strictly fewer builds than
     // INV-G3's "at most one per key" bound. Repeat requests for the same
     // pair allocate zero (the returned span is served from the sub-table's
     // own already-cached `group_slices()`). Empty span if the group is
