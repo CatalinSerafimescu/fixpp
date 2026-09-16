@@ -26,8 +26,10 @@ name: Reclaim unreachable and superseded Actions caches
 # site. It was `python-bindings`' `none` leg, restore-only with `save: false`,
 # and that job was folded into the six `linux` matrix legs and deleted — which
 # also retires this repo's only cross-job ccache key share. Every ccache call
-# site now owns its own key, with a real save path gated on `push`.) This stops
-# PRs writing ccache at all. What remains for this workflow is everything else a PR
+# site now owns its own key, with a real save path gated on `push`.) ⚠️ Corrected
+# again by #411: Tier 1's matrix, coverage and bench jobs moved their ccache to
+# GHCR too, so no workflow writes a ccache entry to the Actions cache any more.
+# This stops PRs writing ccache at all. What remains for this workflow is everything else a PR
 # still legitimately writes — `conan-abi-golden`, tier1's manylinux wheel cache
 # — roughly 1 GB per PR, which would otherwise accumulate.
 #
@@ -75,11 +77,10 @@ on:
   # Firing on the tiers' COMPLETION instead puts the sweep after the saves, which
   # is the only ordering that leaves one entry per leg.
   #
-  # ⚠️ #411: that still holds BOTH generations for the length of a tier run, and
-  # one generation grew until the pair no longer fit the cap. Tier 1's ccache
-  # jobs now trim their own entry to this run's live object set as their last
-  # step (ci/trim-ccache-to-run.sh), which bounds one generation's size — this
-  # sweep is still the only thing that collapses two generations into one.
+  # ⚠️ #411: that held BOTH generations for the length of a tier run, and one
+  # generation of Tier 1 ccache grew until the pair no longer fit the cap. The
+  # fix moved Tier 1's ccache to GHCR, so the ccache sweep below no longer has a
+  # writer; it stays for any entry a future action-based job adds.
   #
   # ⚠️ These entries are NOT literal strings — GitHub runs them through its
   # FILTER-PATTERN parser, where `+` means "one or more of the preceding". The

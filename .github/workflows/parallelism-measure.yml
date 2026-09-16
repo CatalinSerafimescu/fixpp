@@ -221,6 +221,7 @@ jobs:
       CMAKE_C_COMPILER_LAUNCHER: ccache
       CCACHE_COMPILERCHECK: content
       CCACHE_COMPRESSLEVEL: "5"
+      CCACHE_MAXSIZE: 2G
       CCACHE_DIR: /tmp/fixpp-ccache-${{ matrix.preset }}
       # ⚠️ The tier lanes set this at WORKFLOW level, where every job in
       # them inherits it. This job is in a different workflow, so it has
@@ -286,15 +287,21 @@ jobs:
       - name: Restore Conan cache from GHCR
         run: ci/restore-conan-cache.sh ${{ matrix.preset }}
 
-      # `save: false` UNCONDITIONALLY. A measurement job must never write to the
-      # shared compiler cache: it configures for measurement, and an entry it
-      # saved would be served to a production lane.
-      - name: ccache (install + restore, never save)
-        uses: hendrikmuhs/ccache-action@v1.2.23
-        with:
-          key: tier1-${{ matrix.preset }}
-          max-size: 2G
-          save: false
+      # Restore-only, UNCONDITIONALLY: this job has no seed step. A measurement
+      # job must never write to the shared compiler cache: it configures for
+      # measurement, and an entry it published would be served to a production
+      # lane. Since #411 Tier 1's ccache lives on GHCR, so this reads the
+      # production lane's tag. ccache must be on PATH before Conan install.
+      - name: Install ccache
+        run: |
+          set -euo pipefail
+          ci/apt-guard.sh apt-install -- sudo apt-get install -y --no-install-recommends ccache
+          ccache --version
+
+      - name: Restore ccache from GHCR (never published from here)
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin || true
+          ci/restore-ccache.sh ${{ matrix.preset }}
 
       # ⚠️ `conan export civetweb` is done by the tier1 MATRIX job and NOT by
       # its coverage job. Harmless either way, and kept for both so the two
