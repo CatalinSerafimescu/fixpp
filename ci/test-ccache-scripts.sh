@@ -127,7 +127,7 @@ cat > "$shim_dir/ccache" <<'SHIM'
 case "${1:-}" in
   --zero-stats)  exit "${FAKE_ZERO_EXIT:-0}" ;;
   --evict-older-than)
-    # reclaim-ccache-generation.sh (#411): the age must be whole seconds.
+    # trim-ccache-to-run.sh (#411): the age must be whole seconds.
     printf '%s\n' "${2:-}" | grep -qE '^[0-9]+s$' || { echo "SHIM-VIOLATION: ccache --evict-older-than '${2:-}'" >&2; exit 2; }
     printf '%s\n' "${2}" >> "${FAKE_EVICT_RECORD:-/dev/null}"
     exit "${FAKE_EVICT_EXIT:-0}" ;;
@@ -181,15 +181,6 @@ chmod +x "$shim_dir/du"
 # FAKE_GH_DELETE_EXIT says otherwise.
 cat > "$shim_dir/gh" <<'SHIM'
 #!/usr/bin/env bash
-# reclaim-ccache-generation.sh (#411) lists Actions caches with --jq; the shim
-# returns the post-jq TSV in FAKE_CACHES_TSV and checks the query it was given.
-if [ "${1:-}" = "api" ] && [ "${2:-}" = "--paginate" ] && [ "${3#repos/*/actions/caches?}" != "${3:-}" ]; then
-  [ "${3}" = "${FAKE_EXPECTED_CACHES_ENDPOINT:-}" ] || { echo "SHIM-VIOLATION: gh api caches endpoint '${3}' != '${FAKE_EXPECTED_CACHES_ENDPOINT:-}'" >&2; exit 2; }
-  [ "${4:-}" = "--jq" ] || { echo "SHIM-VIOLATION: gh api caches without --jq: $*" >&2; exit 2; }
-  [ "${FAKE_GH_LIST_EXIT:-0}" = "0" ] || { echo 'HTTP 502' >&2; exit "${FAKE_GH_LIST_EXIT}"; }
-  printf '%s' "${FAKE_CACHES_TSV:-}"
-  exit 0
-fi
 if [ "${1:-}" = "api" ] && [ "${2:-}" = "--paginate" ]; then
   if [ -n "${FAKE_VERSIONS_JSON:-}" ]; then printf '%s\n' "$FAKE_VERSIONS_JSON"; exit 0; fi
   printf '[{"id":1,"metadata":{"container":{"tags":["%s"]}}},{"id":2,"metadata":{"container":{"tags":[]}}}]\n' "${FAKE_KEEP_TAG:-}"
@@ -1390,45 +1381,36 @@ want_out 'hit-floor 7% satisfied' "stats/floor-leading-zero"
 want_no_out '007%' "stats/floor-leading-zero"
 ok "hit-floor 007 — parsed as DECIMAL (7), not octal or malformed, and accepted"
 
-# ═════ ci/reclaim-ccache-generation.sh (#411) ═══════════════════════════════
+# ═════ ci/trim-ccache-to-run.sh (#411) ═══════════════════════════════════════
 #
-# Each case asserts the disposition line AND what was actually done — the evict
-# age handed to ccache and the exact cache ids deleted — because a reclaim that
-# prints "deleted 2" while deleting the wrong two (or none) is the failure that
-# matters here.
-RECLAIM="$CI_DIR/reclaim-ccache-generation.sh"
+# Each case asserts the disposition line AND what was actually evicted — the
+# evict age handed to ccache — because a trim that prints a plausible line
+# while evicting the wrong age is the failure that matters here.
+#
+# Gate B round 1 (F1): this script used to ALSO delete the entry it superseded,
+# before the ccache-action post step had proved a replacement was saved — a
+# window in which a failed/skipped/cancelled save left the leg with NO entry at
+# all, looking green. That half is deleted, not fixed: reclaiming a superseded
+# generation is left to cache-cleanup.yml's tier-end sweep. This script now
+# does exactly one thing — evict what THIS run did not touch — and calls no
+# API, so it must never invoke `gh` at all (asserted below).
+TRIM="$CI_DIR/trim-ccache-to-run.sh"
 RKEY="tier1-linux-clang-debug"
-RREPO="o/r"
-RREF="refs/heads/main"
-R_ENDPOINT="repos/o/r/actions/caches?per_page=100&ref=refs/heads/main&key=ccache-tier1-linux-clang-debug-"
-EVICT_REC="$sandbox/evict.rec"; DELETE_REC="$sandbox/delete.rec"
+EVICT_REC="$sandbox/evict.rec"
 R_STATS="$sandbox/reclaim-stats.tsv"
 R_CDIR="$sandbox/reclaim-ccache"; mkdir -p "$R_CDIR"
-TAB="$(printf '\t')"
-# Same group twice (both must go), a LONGER key sharing the prefix, a
-# non-stamp suffix, and another preset — none of the last three may be touched.
-R_LISTING="11${TAB}ccache-tier1-linux-clang-debug-2026-09-15T15:57:30.888Z
-12${TAB}ccache-tier1-linux-clang-debug-2026-09-14T08:00:00Z
-13${TAB}ccache-tier1-linux-clang-debug-py-2026-09-15T15:57:30.888Z
-14${TAB}ccache-tier1-linux-clang-debug-manual
-15${TAB}ccache-tier1-linux-clang-debugx-2026-09-15T15:57:30.888Z
-"
 
-reclaim_case() {  # reads the environment r_env exported, as the workflow step would supply it
-  : > "$EVICT_REC"; : > "$DELETE_REC"
-  run "$RECLAIM" "$RKEY"
-  EVICTED="$(cat "$EVICT_REC")"; DELETED="$(tr '\n' ' ' < "$DELETE_REC")"
+trim_case() {
+  : > "$EVICT_REC"
+  run "$TRIM" "$RKEY"
+  EVICTED="$(cat "$EVICT_REC")"
 }
 r_env() {
-  export REPO="$RREPO" REF="$RREF" CCACHE_DIR="$R_CDIR" GH_TOKEN=x \
-         FAKE_EXPECTED_CACHES_ENDPOINT="$R_ENDPOINT" FAKE_CACHES_TSV="$R_LISTING" \
-         FAKE_EVICT_RECORD="$EVICT_REC" FAKE_DELETE_RECORD="$DELETE_REC" \
-         FAKE_STATS_FILE="$R_STATS" FAKE_GH_LIST_EXIT=0 FAKE_GH_DELETE_EXIT=0 FAKE_EVICT_EXIT=0
+  export CCACHE_DIR="$R_CDIR" \
+         FAKE_EVICT_RECORD="$EVICT_REC" FAKE_STATS_FILE="$R_STATS" FAKE_EVICT_EXIT=0
 }
 r_unenv() {
-  unset REPO REF CCACHE_DIR GH_TOKEN FAKE_EXPECTED_CACHES_ENDPOINT FAKE_CACHES_TSV \
-        FAKE_EVICT_RECORD FAKE_DELETE_RECORD FAKE_STATS_FILE FAKE_GH_LIST_EXIT \
-        FAKE_GH_DELETE_EXIT FAKE_EVICT_EXIT
+  unset CCACHE_DIR FAKE_EVICT_RECORD FAKE_STATS_FILE FAKE_EVICT_EXIT
 }
 r_stats() {  # $1 = zeroed timestamp ('' = line absent), $2 = hits, $3 = misses
   { [ -z "$1" ] || printf 'stats_zeroed_timestamp\t%s\n' "$1"
@@ -1437,73 +1419,76 @@ r_stats() {  # $1 = zeroed timestamp ('' = line absent), $2 = hits, $3 = misses
 
 # The happy path: restore 300 s ago, a warm build.
 r_env; r_stats "$(( $(date +%s) - 300 ))" 1598 53
-reclaim_case
-want_status 0 "reclaim/happy"
-want_out 'ccache-evict: kept files touched in the last' "reclaim/happy"
-want_out 'ccache-reclaim: deleted 2 superseded' "reclaim/happy"
+trim_case
+want_status 0 "trim/happy"
+want_out "ccache-evict (${RKEY}): kept files touched in the last" "trim/happy"
 age="${EVICTED%s}"
 { [ -n "$age" ] && [ "$age" -ge 300 ] && [ "$age" -le 330 ]; } \
-  || fail "reclaim/happy: evict age '${EVICTED}' is not now-minus-restore (expected 300..330s)"
-[ "$DELETED" = "repos/o/r/actions/caches/11 repos/o/r/actions/caches/12 " ] \
-  || fail "reclaim/happy: deleted '$DELETED', expected exactly ids 11 and 12"
-ok "evicts to the restore time and deletes exactly the same-group stamped entries"
+  || fail "trim/happy: evict age '${EVICTED}' is not now-minus-restore (expected 300..330s)"
+ok "evicts to the restore time, labelled with the action key"
 
-# No zeroed timestamp → no eviction; the reclaim is independent of it.
+# No zeroed timestamp → no eviction.
 r_stats "" 1598 53
-reclaim_case
-want_status 0 "reclaim/no-zeroed-ts"
-want_out 'ccache-evict: SKIPPED — no stats_zeroed_timestamp' "reclaim/no-zeroed-ts"
-[ -z "$EVICTED" ] || fail "reclaim/no-zeroed-ts: ccache eviction ran ('$EVICTED') without a restore time"
-[ -n "$DELETED" ] || fail "reclaim/no-zeroed-ts: the reclaim must not depend on the eviction"
-ok "an unreadable restore time skips eviction and still reclaims"
+trim_case
+want_status 0 "trim/no-zeroed-ts"
+want_out "ccache-evict (${RKEY}): SKIPPED — no stats_zeroed_timestamp" "trim/no-zeroed-ts"
+[ -z "$EVICTED" ] || fail "trim/no-zeroed-ts: ccache eviction ran ('$EVICTED') without a restore time"
+ok "an unreadable restore time skips eviction"
 
 # Zeroed but zero calls since: the counters were reset AFTER the build, so the
 # timestamp is not the restore time and eviction would truncate the store.
 r_stats "$(( $(date +%s) - 300 ))" 0 0
-reclaim_case
-want_status 0 "reclaim/zeroed-after-build"
-want_out 'ccache-evict: SKIPPED — zero compiler calls' "reclaim/zeroed-after-build"
-[ -z "$EVICTED" ] || fail "reclaim/zeroed-after-build: eviction ran ('$EVICTED')"
+trim_case
+want_status 0 "trim/zeroed-after-build"
+want_out "ccache-evict (${RKEY}): SKIPPED — zero compiler calls" "trim/zeroed-after-build"
+[ -z "$EVICTED" ] || fail "trim/zeroed-after-build: eviction ran ('$EVICTED')"
 ok "counters with zero calls since the zero skip eviction"
 
 # ccache eviction fails → warning, still exit 0.
 r_stats "$(( $(date +%s) - 300 ))" 10 1; export FAKE_EVICT_EXIT=1
-reclaim_case
-want_status 0 "reclaim/evict-fails"; want_out '::warning::' "reclaim/evict-fails"
-want_out 'ccache-evict: FAILED' "reclaim/evict-fails"
+trim_case
+want_status 0 "trim/evict-fails"; want_out '::warning::' "trim/evict-fails"
+want_out "ccache-evict (${RKEY}): FAILED" "trim/evict-fails"
 ok "a failing eviction warns and does not redden"
 export FAKE_EVICT_EXIT=0
 
-# Listing fails → nothing deleted, exit 0.
-export FAKE_GH_LIST_EXIT=1
-reclaim_case
-want_status 0 "reclaim/list-fails"; want_out 'ccache-reclaim: SKIPPED — listing failed' "reclaim/list-fails"
-[ -z "$DELETED" ] || fail "reclaim/list-fails: deleted '$DELETED' after a failed listing"
-ok "a failed listing deletes nothing and does not redden"
-export FAKE_GH_LIST_EXIT=0
+# ── explicit: this script must never invoke gh at all ────────────────────────
+# It calls no API — unlike the deleted reclaim half, nothing here needs one.
+# Swap in a shim that records any invocation and fails loudly, so a
+# regression that reintroduces a `gh` call is caught even though the happy
+# path above would already pass with a real API failure (::warning:: shapes
+# are indistinguishable from a script that never tried).
+GH_CALL_MARKER="$sandbox/gh-was-called"
+rm -f "$GH_CALL_MARKER"
+cat > "$shim_dir/gh" <<SHIM
+#!/usr/bin/env bash
+touch "$GH_CALL_MARKER"
+echo "SHIM-VIOLATION: trim-ccache-to-run.sh must never invoke gh: gh \$*" >&2
+exit 111
+SHIM
+chmod +x "$shim_dir/gh"
+r_stats "$(( $(date +%s) - 300 ))" 1598 53
+trim_case
+want_status 0 "trim/no-gh"
+[ ! -e "$GH_CALL_MARKER" ] || fail "trim/no-gh: gh was invoked"
+ok "the trim script never invokes gh"
 
-# Delete fails → counted, warned, exit 0.
-export FAKE_GH_DELETE_EXIT=1
-reclaim_case
-want_status 0 "reclaim/delete-fails"
-want_out 'deleted 0 superseded .*, 2 failed' "reclaim/delete-fails"
-ok "failed deletes are counted and do not redden"
-export FAKE_GH_DELETE_EXIT=0
+# Wiring errors are loud: a missing CCACHE_DIR would otherwise no-op green
+# forever.
+unset CCACHE_DIR
+trim_case
+want_status 2 "trim/unwired-ccache-dir"; want_out '::error::usage' "trim/unwired-ccache-dir"
+[ -z "$EVICTED" ] || fail "trim/unwired-ccache-dir: acted without its environment"
+ok "a missing CCACHE_DIR exits 2 before acting"
+r_env
 
-# Nothing of this group on the ref.
-export FAKE_CACHES_TSV="13${TAB}ccache-tier1-linux-clang-debug-py-2026-09-15T15:57:30.888Z
-"
-reclaim_case
-want_status 0 "reclaim/nothing"; want_out 'nothing to reclaim' "reclaim/nothing"
-[ -z "$DELETED" ] || fail "reclaim/nothing: deleted '$DELETED'"
-ok "a listing with no same-group entry deletes nothing"
-
-# Wiring errors are loud: a missing REF would otherwise no-op green forever.
-unset REF
-reclaim_case
-want_status 2 "reclaim/unwired"; want_out '::error::usage' "reclaim/unwired"
-[ -z "$DELETED$EVICTED" ] || fail "reclaim/unwired: acted without its environment"
-ok "a missing argument/environment exits 2 before acting"
+# A missing key argument is the other half of the same guard.
+: > "$EVICT_REC"
+run "$TRIM"
+EVICTED="$(cat "$EVICT_REC")"
+want_status 2 "trim/unwired-key"; want_out '::error::usage' "trim/unwired-key"
+[ -z "$EVICTED" ] || fail "trim/unwired-key: acted without its environment"
+ok "a missing key argument exits 2 before acting"
 r_unenv
 
 # ═════ ci/assert-ccache-floor-callers.py — the CALL SITES (#299) ═════════════
@@ -1718,4 +1703,4 @@ want_out 'ZERO ci/ccache-stats.sh call sites' "floor-callers/empty-scan"
 ok "an empty scan is an INSTRUMENT FAILURE (exit 2), not a clean result"
 
 echo
-echo "PASS: $pass assertions over ci/{ccache-cache-key,restore-ccache,seed-ccache,ccache-stats,wheel-ccache-ident,assert-wheel-image,install-ccache,reclaim-ccache-generation}.sh — scripts: $CI_DIR"
+echo "PASS: $pass assertions over ci/{ccache-cache-key,restore-ccache,seed-ccache,ccache-stats,wheel-ccache-ident,assert-wheel-image,install-ccache,trim-ccache-to-run}.sh — scripts: $CI_DIR"
