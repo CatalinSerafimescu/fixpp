@@ -41,10 +41,10 @@
 // in test_reset_on_lifecycle.cpp and may grow a live cell under the Item-1 effort).
 //
 // LIVE CELL: requires a counterparty. INTEROP_REQUIRE_COUNTERPARTY skips with reason
-// when the counterparty port env is absent (FR-023). Never a silent pass. The golden
-// capture (RR-<cp>-acc-fix44-received-reset.fix) is performed by the parent harness at
-// the first paired live run (the Item-1 live-interop golden-capture effort); absent →
-// skip:golden-not-yet-captured (diff_golden_or_skip convention).
+// when the counterparty port env is absent (FR-023). Never a silent pass. #445: the
+// golden diff (RR-<cp>-acc-fix44-received-reset.fix vs THIS run's own capture) now
+// runs in the parent harness's _finalize via `interop_golden_check --check
+// verbatim-admin`, fail-closed (no skip outcome there).
 //
 // Parent harness MUST: configure its counterparty INITIATOR with ResetOnLogon=Y (QFcpp
 // `ResetOnLogon=Y` / QFJ `ResetOnLogon=Y`) so it sends `Logon(141=Y, 34=1)` then a
@@ -200,7 +200,10 @@ TEST_P(ReceivedResetAcceptor, Received141AdvancesInboundToTwoNoResend) {
     // proxy capture. Golden file: happy/golden/RR-<cp>-acc-fix44-received-reset.fix
     const std::string cp_part = (counterparty == Counterparty::quickfix_cpp) ? "QFcpp" : "QFj";
     const std::string cell_id = "RR-" + cp_part + "-acc-fix44-received-reset";
-    hp::diff_golden_or_skip(cell_id, hp::admin_golden_path(cell_id));
+    // #445: moved OUT of this gtest (was comparing against the PREVIOUS run's
+    // capture sidecar, never this one's). Now asserted in the parent harness's
+    // _finalize, against THIS run's own capture, via
+    // `interop_golden_check --check verbatim-admin`.
 
     // ── Graceful stop (Logout) ────────────────────────────────────────────────
     hp::expect_graceful_stop(fx);

@@ -18,8 +18,9 @@
 //     - Unit witness SendingTimePrecision_Nanos_Emits27Char52
 //       (tests/session/test_sending_time_precision.cpp): directly asserts 52= length == 27
 //       on captured Logon frame bytes.
-//     - Parent golden (diff_golden_or_skip below): asserts 52= length == 27 verbatim
-//       under the {52,10} admin profile against the live proxy capture (first paired run).
+//     - Parent golden (#445: `interop_golden_check --check verbatim-admin`, run
+//       by the parent harness's _finalize against THIS run's own capture):
+//       asserts 52= length == 27 verbatim under the {52,10} admin profile.
 //
 // T019 — NanosSendingTimeAcceptor (C7.2 / SC-003 / SC-004):
 //   A live QFcpp/QFJ INITIATOR configured for NANOS sends a 27-char 52= Logon. The fixpp
@@ -50,8 +51,9 @@
 //   happy/golden/NST-QFcpp-acc-fix44-nanos-sendingtime.fix
 //   happy/golden/NST-QFj-init-fix44-nanos-sendingtime.fix
 //   happy/golden/NST-QFj-acc-fix44-nanos-sendingtime.fix
-// The parent diff asserts 52= length == 27 verbatim under the {52,10} admin profile.
-// Absent → skip:golden-not-yet-captured (diff_golden_or_skip convention).
+// #445: the parent diff (52= length == 27 verbatim under {52,10}) runs in the
+// parent harness's _finalize, against THIS run's own capture, via
+// `interop_golden_check --check verbatim-admin` — fail-closed, no skip outcome.
 //
 // Parent harness MUST:
 //   For fixpp-initiator cells (T018): set INTEROP_<TOKEN>_PORT + optionally
@@ -155,7 +157,10 @@ TEST_P(NanosSendingTimeInitiator, LogonAcceptedWithNanos52) {
     //   happy/golden/NST-<cp>-init-fix44-nanos-sendingtime.fix
     const std::string cp_part = (counterparty == Counterparty::quickfix_cpp) ? "QFcpp" : "QFj";
     const std::string cell_id = "NST-" + cp_part + "-init-fix44-nanos-sendingtime";
-    hp::diff_golden_or_skip(cell_id, hp::admin_golden_path(cell_id));
+    // #445: moved OUT of this gtest (was comparing against the PREVIOUS run's
+    // capture sidecar, never this one's). Now asserted in the parent harness's
+    // _finalize, against THIS run's own capture, via
+    // `interop_golden_check --check verbatim-admin`.
 
     // ── Graceful stop (Logout) ────────────────────────────────────────────────
     hp::expect_graceful_stop(fx);
@@ -252,7 +257,10 @@ TEST_P(NanosSendingTimeAcceptor, AcceptsNanos52WithoutReject) {
     //   happy/golden/NST-<cp>-acc-fix44-nanos-sendingtime.fix
     const std::string cp_part = (counterparty == Counterparty::quickfix_cpp) ? "QFcpp" : "QFj";
     const std::string cell_id = "NST-" + cp_part + "-acc-fix44-nanos-sendingtime";
-    hp::diff_golden_or_skip(cell_id, hp::admin_golden_path(cell_id));
+    // #445: moved OUT of this gtest (was comparing against the PREVIOUS run's
+    // capture sidecar, never this one's). Now asserted in the parent harness's
+    // _finalize, against THIS run's own capture, via
+    // `interop_golden_check --check verbatim-admin`.
 
     // ── Graceful stop (Logout) ────────────────────────────────────────────────
     hp::expect_graceful_stop(fx);

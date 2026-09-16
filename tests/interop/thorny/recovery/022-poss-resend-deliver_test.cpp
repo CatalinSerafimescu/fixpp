@@ -240,7 +240,10 @@ TEST_P(PossResendDeliver, PossResendMessageDeliveredToFromApp_SessionSurvives) {
     const std::string cp_part = (counterparty == Counterparty::quickfix_j) ? "QFj" : "QFcpp";
     const std::string role_part = (role == Role::fixpp_initiator) ? "init" : "acc";
     const std::string cell_id = "PR-" + cp_part + "-" + role_part + "-fix44-poss-resend-deliver";
-    hp::diff_golden_or_skip(cell_id, hp::admin_golden_path(cell_id));
+    // #445: moved OUT of this gtest (was comparing against the PREVIOUS run's
+    // capture sidecar, never this one's). Now asserted in the parent harness's
+    // _finalize, against THIS run's own capture, via
+    // `interop_golden_check --check verbatim-admin`.
 
     // ── Graceful stop ─────────────────────────────────────────────────────────
     hp::expect_graceful_stop(fx);

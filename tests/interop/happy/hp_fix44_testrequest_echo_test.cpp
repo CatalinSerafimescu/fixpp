@@ -231,17 +231,11 @@ TEST_P(HappyTestRequestEcho, BidirectionalTestRequestEcho) {
     }
 
     // ── Golden assertion (T009 / US1-3) ───────────────────────────────────
-    // The golden file is captured at first paired run by the parent harness.
-    // If absent: skip with reason (never FAIL, never hand-fabricate).
-    // If present: assert diff_transcripts(expected, actual, {52,10}) MATCHES
-    // so that tag 112 is verified verbatim (FR-007).
-    //
-    // NOTE: in the local test environment (no live QFJ) the cell has already
-    // been skipped above via INTEROP_REQUIRE_COUNTERPARTY, so this block is
-    // only reached when QFJ is present.  The golden file is expected to have
-    // been committed after the first paired run.  If QFJ is up but the golden
-    // was not yet captured and committed, skip with reason.
-    hp::diff_golden_or_skip(cell_id, hp::admin_golden_path(cell_id));
+    // #445: moved OUT of this gtest — reading the capture sidecar here compared
+    // against the PREVIOUS run's frames, not this one's. diff_transcripts(expected,
+    // actual, {52,10}) — so that tag 112 is verified verbatim (FR-007) — now runs
+    // in the parent harness's _finalize, against THIS run's own capture, via
+    // `interop_golden_check --check verbatim-admin`.
 
     // ── Graceful stop (Logout) ─────────────────────────────────────────────
     hp::expect_graceful_stop(fx);

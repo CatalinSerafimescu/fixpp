@@ -321,61 +321,14 @@ inline std::string admin_golden_path(const std::string& cell_id) {
 }
 
 // ---------------------------------------------------------------------------
-// diff_golden_or_skip — open the golden + capture sidecar, parse both, run
-// diff_transcripts(expected, actual, admin_profile_excluded_tags()), and
-// EXPECT_TRUE the result.  Skips with the canonical reason strings when either
-// file is absent or empty.  The admin normalization profile is {52, 10}.
-//
-// Call site (inside a TEST_P after the live-path section):
-//   hp::diff_golden_or_skip(cell_id, hp::admin_golden_path(cell_id));
-//
-// Skip reason strings (verbatim — do NOT alter):
-//   "skip:golden-not-yet-captured (FIXPP_TLS_FIXTURE_DIR unresolvable)"
-//   "skip:golden-not-yet-captured (file absent: <gpath>)"
-//   "skip:golden-not-yet-captured (file empty: <gpath>)"
-//   "skip:golden-not-yet-captured (capture sidecar absent: <capture_path>)"
-//   "skip:golden-not-yet-captured (capture sidecar empty)"
-// ---------------------------------------------------------------------------
-inline void diff_golden_or_skip(
-    const std::string& cell_id, const std::string& gpath,
-    const std::set<int>& profile = fixpp::interop::admin_profile_excluded_tags()) {
-    if (gpath.empty()) {
-        GTEST_SKIP() << "skip:golden-not-yet-captured (FIXPP_TLS_FIXTURE_DIR unresolvable)";
-    }
-    std::ifstream gfile{gpath};
-    if (!gfile.is_open()) {
-        GTEST_SKIP() << "skip:golden-not-yet-captured (file absent: " << gpath << ")";
-    }
-    std::ostringstream oss;
-    oss << gfile.rdbuf();
-    const std::string golden_text = oss.str();
-    if (golden_text.empty()) {
-        GTEST_SKIP() << "skip:golden-not-yet-captured (file empty: " << gpath << ")";
-    }
-
-    const std::string capture_path = gpath.substr(0, gpath.size() - 4) + "-capture.fix";
-    std::ifstream cfile{capture_path};
-    if (!cfile.is_open()) {
-        GTEST_SKIP() << "skip:golden-not-yet-captured (capture sidecar absent: " << capture_path
-                     << ")";
-    }
-    std::ostringstream css;
-    css << cfile.rdbuf();
-    const std::string capture_text = css.str();
-    if (capture_text.empty()) {
-        GTEST_SKIP() << "skip:golden-not-yet-captured (capture sidecar empty)";
-    }
-
-    const auto expected_frames = fixpp::interop::parse_golden(golden_text);
-    const auto actual_frames = fixpp::interop::parse_golden(capture_text);
-
-    const fixpp::interop::DiffResult diff =
-        fixpp::interop::diff_transcripts(expected_frames, actual_frames, profile);
-    EXPECT_TRUE(static_cast<bool>(diff))
-        << "Golden transcript mismatch for " << cell_id << ": " << diff.detail
-        << "\n  expected golden: " << gpath << "\n  actual capture:  " << capture_path;
-}
-
+// #445: hp::diff_golden_or_skip formerly lived here — it read the capture
+// sidecar (<cell>-capture.fix) written by the parent harness AFTER the gtest
+// exits, so it always compared against the PREVIOUS run's frames, not the
+// current one's. Removed; the verbatim golden-vs-capture diff now runs in the
+// parent harness's _finalize, against THIS run's own capture, via
+// `interop_golden_check --check verbatim-admin|verbatim-poss-dup`
+// (support/golden_check.cpp/.hpp — the moved logic, one copy, shared with the
+// tool's own regression test).
 // ---------------------------------------------------------------------------
 // expect_graceful_stop — assert Engine::stop() completes within 3 s.
 //

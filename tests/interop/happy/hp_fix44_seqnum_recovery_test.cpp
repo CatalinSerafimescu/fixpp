@@ -256,12 +256,12 @@ TEST_P(HappySeqnumRecoveryInbound, GapInductionResendRequestAndReturn) {
         << "outbound seqnum did not advance past logon; ResendRequest may not have been sent";
 
     // ── Golden assertion (T014 / US3-1/US3-2) ─────────────────────────────
-    // The golden file is captured at first paired run by the parent harness.
-    // If absent → skip:golden-not-yet-captured (never fail, never hand-fabricate).
-    // If present → assert diff_transcripts(expected, actual, {52,10}) MATCHES so
-    // that tags 7/16 (ResendRequest range) and 123/122/43 (reply) are verified
-    // verbatim under the admin profile (FR-007).
-    hp::diff_golden_or_skip(cell_id, hp::admin_golden_path(cell_id));
+    // #445: moved OUT of this gtest — reading the capture sidecar here compared
+    // against the PREVIOUS run's frames, not this one's. diff_transcripts(expected,
+    // actual, {52,10}) — so that tags 7/16 (ResendRequest range) and 123/122/43
+    // (reply) are verified verbatim (FR-007) — now runs in the parent harness's
+    // _finalize, against THIS run's own capture, via
+    // `interop_golden_check --check verbatim-admin`.
 
     // ── Graceful stop (Logout) ─────────────────────────────────────────────
     hp::expect_graceful_stop(fx);
