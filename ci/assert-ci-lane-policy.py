@@ -80,10 +80,23 @@ CAMPAIGN_JOB_SOURCES = {
 
 # #411 — the campaign jobs that read Tier 1's GHCR compiler cache, restore-only.
 CCACHE_RESTORE_JOBS = {"linux", "libcxx"}
-MATRIX_PRESET_EXPR = "${{ matrix.preset }}"
 SEED_SCRIPT = "ci/seed-ccache.sh"
 RESTORE_SCRIPT = "ci/restore-ccache.sh"
 CCACHE_ACTION_PREFIX = "hendrikmuhs/ccache-action"
+
+# #411 Gate B r2 F3 — each job's restore step is looked up by its OWN exact
+# name (the two jobs' step names differ), then compared as a canonical object:
+# exact key set, exact run: text. Both jobs restore the SAME preset expression
+# (`matrix.preset`), so one golden covers both.
+CCACHE_RESTORE_STEP_NAME = {
+    "linux": "Restore ccache from GHCR (never published from here)",
+    "libcxx": "Restore ccache from GHCR",
+}
+CCACHE_RESTORE_RUN = (
+    'echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" '
+    '--password-stdin || true\n'
+    'ci/restore-ccache.sh ${{ matrix.preset }}'
+)
 
 # The lane that must build and replay the fuzz corpora, and the flag that does it.
 FUZZ_PRESET = "linux-clang-asan"
@@ -348,6 +361,16 @@ def check_ccache_restore_wiring(root, violations):
     write to the shared compiler cache: it configures for measurement, and an
     entry it published would be served to a production lane.
 
+    #411 Gate B r2 F3. The r1 fix found restore steps by the substring
+    `RESTORE_SCRIPT in run`, which cannot distinguish a step that RUNS the
+    restore from one that merely CONTAINS the text: `if: false`, an `exit 0`
+    before the call, a commented-out call, a duplicated call and a `libcxx`
+    preset drift all passed. Each job's restore is now looked up by its own
+    exact step name and compared as a canonical object (exact key set, exact
+    run: text), the same discipline `ci/test-tier1-python-policy.sh` applies to
+    tier1.yml's own ccache steps. The substring count is kept, but only as a
+    second, independent check for a SECOND restore hiding under another name.
+
     Returns True when a verdict was reached (including "stood down" when the
     campaign workflow is absent), False when it could not be evaluated — same
     contract as check_campaign_trigger/check_campaign_job_env; the caller must
@@ -381,16 +404,25 @@ def check_ccache_restore_wiring(root, violations):
                 f"must not silently stop this check.")
             continue
         steps = job.get("steps") or []
+        expected_name = CCACHE_RESTORE_STEP_NAME[job_id]
+        # Looked up by this job's OWN exact step name — a step matching by name
+        # is not the same as a step that actually runs (`if: false`) or actually
+        # invokes the restore script (a comment, an `exit 0`, a duplicate call).
+        # Those are the run:/key-set comparisons below, not this lookup.
+        name_hits = [i for i, st in enumerate(steps) if str(st.get("name", "")) == expected_name]
         install_hits = [i for i, st in enumerate(steps) if str(st.get("name", "")) == "Install ccache"]
-        restore_hits = [i for i, st in enumerate(steps) if RESTORE_SCRIPT in str(st.get("run", ""))]
         conan_hits = [i for i, st in enumerate(steps) if str(st.get("name", "")) == "Conan install"]
         seed_hits = [i for i, st in enumerate(steps) if SEED_SCRIPT in str(st.get("run", ""))]
         action_hits = [i for i, st in enumerate(steps) if str(st.get("uses", "")).startswith(CCACHE_ACTION_PREFIX)]
+        # A SEPARATE count, over EVERY step's run: text regardless of name — this
+        # is what catches a second restore call hiding under another step name,
+        # which the name lookup above cannot see by construction.
+        restore_script_hits = [i for i, st in enumerate(steps) if RESTORE_SCRIPT in str(st.get("run", ""))]
 
-        if len(restore_hits) != 1:
+        if len(name_hits) != 1:
             violations.append(
                 f"CCACHE RESTORE MISWIRED: `{job_id}` in {CAMPAIGN_WORKFLOW} has "
-                f"{len(restore_hits)} step(s) invoking {RESTORE_SCRIPT}, expected exactly 1. "
+                f"{len(name_hits)} step(s) named '{expected_name}', expected exactly 1. "
                 f"A measurement job with no restore builds cold; more than one is a duplicate call.")
         elif len(install_hits) != 1 or len(conan_hits) != 1:
             violations.append(
@@ -398,7 +430,7 @@ def check_ccache_restore_wiring(root, violations):
                 f"a unique 'Install ccache' or 'Conan install' step, so the restore's position "
                 f"cannot be verified against them.")
         else:
-            i_install, i_restore, i_conan = install_hits[0], restore_hits[0], conan_hits[0]
+            i_install, i_restore, i_conan = install_hits[0], name_hits[0], conan_hits[0]
             if not (i_install < i_restore < i_conan):
                 violations.append(
                     f"CCACHE RESTORE OUT OF ORDER: `{job_id}` in {CAMPAIGN_WORKFLOW} has Install "
@@ -406,22 +438,35 @@ def check_ccache_restore_wiring(root, violations):
                     f"Install < restore < Conan install. Conan's --build=missing compiles through "
                     f"the launcher; a restore after that discards or never sees what just compiled.")
             else:
-                restore_run = str(steps[i_restore].get("run", ""))
-                oras_lines = [ln for ln in restore_run.splitlines() if "oras login" in ln]
-                if not oras_lines or not oras_lines[0].rstrip().endswith("|| true"):
+                restore_step = steps[i_restore]
+                raw_keys = sorted(str(k) for k in restore_step.keys())
+                restore_run = str(restore_step.get("run", "")).rstrip("\n")
+                keys_ok = raw_keys == ["name", "run"]
+                run_ok = restore_run == CCACHE_RESTORE_RUN
+                if not keys_ok:
                     violations.append(
-                        f"CCACHE RESTORE MISSING ANONYMOUS FALLBACK: `{job_id}` in "
-                        f"{CAMPAIGN_WORKFLOW}'s restore step's `oras login` does not end in "
-                        f"`|| true`. A fork PR's token cannot log in, and without the fallback the "
-                        f"step fails instead of falling back to the anonymous pull of the public "
-                        f"package.")
-                if job_id == "linux" and (RESTORE_SCRIPT + " " + MATRIX_PRESET_EXPR) not in restore_run:
+                        f"CCACHE RESTORE KEY SET DRIFT: `{job_id}` in {CAMPAIGN_WORKFLOW}'s "
+                        f"'{expected_name}' step key set is {raw_keys}, expected exactly "
+                        f"['name', 'run']. An `if:` guard can disable this step without deleting "
+                        f"it or its text — the name lookup above still finds it.")
+                if not run_ok:
                     violations.append(
-                        "CCACHE RESTORE PRESET DRIFT: `linux` in " + CAMPAIGN_WORKFLOW + "'s restore "
-                        "step does not call `" + RESTORE_SCRIPT + " " + MATRIX_PRESET_EXPR + "` — the "
-                        "campaign's `linux` job must restore the SAME preset's tag Tier 1 publishes, "
-                        "or the measurement reads a stranger's cache.")
-                checked += 1
+                        f"CCACHE RESTORE RUN TEXT DRIFT: `{job_id}` in {CAMPAIGN_WORKFLOW}'s "
+                        f"'{expected_name}' step run: block does not match the canonical text "
+                        f"pinned in this file. This is a GOLDEN; it reds on ANY change, cosmetic "
+                        f"included — an `exit 0` before the call, a commented-out call, a "
+                        f"duplicated call, the lost `|| true` anonymous-pull fallback and a preset "
+                        f"drift all change this text.\n"
+                        f"--- expected\n{CCACHE_RESTORE_RUN}\n"
+                        f"--- actual\n{restore_run}")
+                if len(restore_script_hits) != 1:
+                    violations.append(
+                        f"CCACHE RESTORE MISWIRED: `{job_id}` in {CAMPAIGN_WORKFLOW} has "
+                        f"{len(restore_script_hits)} step(s) invoking {RESTORE_SCRIPT}, expected "
+                        f"exactly 1 — a second restore under a different name is a duplicate call "
+                        f"the name lookup above cannot see.")
+                if keys_ok and run_ok and len(restore_script_hits) == 1:
+                    checked += 1
 
         if seed_hits:
             violations.append(
@@ -436,8 +481,9 @@ def check_ccache_restore_wiring(root, violations):
                 f"ccache restore to GHCR.")
 
     if checked:
-        print(f"  ccache restore wiring: {checked} job(s) restore Tier 1's GHCR ccache exactly "
-              f"once, correctly positioned, with the anonymous fallback, and never publish.")
+        print(f"  ccache restore wiring: {checked} job(s) restore Tier 1's GHCR ccache via a "
+              f"canonical name/key-set/run-text object, exactly once by call count, correctly "
+              f"positioned, and never publish.")
     return True
 
 
