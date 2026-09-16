@@ -227,8 +227,9 @@ inline std::string validate_admin_descriptor(const AdminScenarioDescriptor& d) {
     }
 
     // T029 identity invariant: golden_ref basename must equal cell_id.
-    // The actual golden is loaded via admin_golden_path(cell_id), not from this
-    // field; this check makes the recorded field consistency-checked.
+    // The actual golden path is derived by the parent harness's
+    // `interop_golden_check` invocation, not from this field; this check makes
+    // the recorded field consistency-checked.
     if (d.golden_ref != "happy/golden/" + d.cell_id + ".fix") {
         return "golden_ref basename != cell_id for cell " + d.cell_id;
     }

@@ -17,8 +17,8 @@
 //   the admin normalization profile {52,10} (FR-007 / admin_profile_excluded_tags()).
 //
 // 018 T009: golden assertion for HP-QFj-{init,acc}-fix44-testrequest-echo.fix.
-//   When the golden file is absent (no first paired run yet) the test emits
-//   skip:golden-not-yet-captured rather than failing (never hand-fabricate).
+//   Checked in the parent harness's `_finalize` via `interop_golden_check
+//   --check verbatim-admin`; fails closed (no skip).
 //
 // 018 T010: SC-004 gate-bite negative test — mutate tag 112 in a synthetic
 //   golden pair and assert diff_transcripts() reports a mismatch on 112.

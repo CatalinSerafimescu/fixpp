@@ -34,7 +34,8 @@
 //     43=Y stays compared verbatim).
 //
 // 018 T014 (golden assertion):
-//   When the golden is absent → skip:golden-not-yet-captured (never fail).
+//   Checked in the parent harness's `_finalize` via `interop_golden_check
+//   --check app-replay`; fails closed (no skip).
 //   Golden captured at first paired run by the parent harness.
 //
 // 018 T015 (SC-004 gate-bite negative tests):

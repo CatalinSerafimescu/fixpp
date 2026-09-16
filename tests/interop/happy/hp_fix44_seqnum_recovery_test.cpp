@@ -22,11 +22,22 @@
 //         inbound seqnum > 2 after recovery, confirming gap-fill applied).
 //     (d) Session returns to Active (not Disconnected) after the recovery window.
 //   The golden asserts tags 7/16 (ResendRequest range) and 123/122/43 (reply)
-//   verbatim under the {52,10} admin profile (FR-007).
+//   verbatim under the {52,10} admin profile (FR-007) — but ONLY once this
+//   TEST_P is wired into the harness; see the T014 note below.
 //
 // 018 T014 (golden assertion for recovery_inbound cells):
-//   When the golden is absent (no first paired run yet) → skip:golden-not-yet-captured.
 //   Cell id reuses HP-QFj-{init,acc}-fix44-seqnum-recovery (T029 reuse-and-enrich).
+//   This TEST_P (GapInductionResendRequestAndReturn) is not reachable from the
+//   harness: `run_interop_cell.py`'s gtest_filter for the seqnum-recovery cells
+//   selects `HappySeqnumRecovery.ResynchronizesWithoutFatalDisconnect` (the T013
+//   smoke test below), never this TEST_P, and the harness has no withhold-frame
+//   induction to make this test's comment ("the parent withholds a QFJ->fixpp
+//   frame") true. No HP-*-seqnum-recovery.fix golden has ever been captured. So
+//   this cell is not `inrepo_golden` in the parent harness, and the golden
+//   assertion this test's body describes has never run against a real capture
+//   (see the #445 note at the assertion site below). Tracked as a follow-up:
+//   wire this TEST_P into the filter, add a withhold induction to the parent
+//   harness, and capture the goldens.
 //
 // 018 T015 (SC-004 gate-bite negative test for recovery tags):
 //   Mutate tag 7 (BeginSeqNo), 16 (EndSeqNo), or 123 (GapFillFlag) — tags compared
@@ -255,13 +266,15 @@ TEST_P(HappySeqnumRecoveryInbound, GapInductionResendRequestAndReturn) {
     EXPECT_GT(s->seqnum_mgr_test_access().peek_outbound(), seqnum_after_logon)
         << "outbound seqnum did not advance past logon; ResendRequest may not have been sent";
 
-    // ── Golden assertion (T014 / US3-1/US3-2) ─────────────────────────────
-    // #445: moved OUT of this gtest — reading the capture sidecar here compared
-    // against the PREVIOUS run's frames, not this one's. diff_transcripts(expected,
-    // actual, {52,10}) — so that tags 7/16 (ResendRequest range) and 123/122/43
-    // (reply) are verified verbatim (FR-007) — now runs in the parent harness's
-    // _finalize, against THIS run's own capture, via
-    // `interop_golden_check --check verbatim-admin`.
+    // ── Golden assertion (T014 / US3-1/US3-2) — NOT WIRED, see the header note ──
+    // #445 removed the old skip-on-absent call here (it read the capture sidecar
+    // from the PREVIOUS run, not this one's). Unlike the sibling happy-path
+    // cells, that removal does not move this assertion into the parent
+    // harness's `_finalize`: this TEST_P is not the one the harness's
+    // gtest_filter selects for a seqnum-recovery cell, so no `--cell` invokes
+    // `interop_golden_check` against it, and no golden has ever been captured
+    // (see the header note above). The tags 7/16/123/122/43 verbatim check
+    // this test's block comments describe is not gated anywhere today.
 
     // ── Graceful stop (Logout) ─────────────────────────────────────────────
     hp::expect_graceful_stop(fx);

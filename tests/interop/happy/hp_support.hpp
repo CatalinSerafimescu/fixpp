@@ -299,28 +299,6 @@ inline std::string cell_name(const ::testing::TestParamInfo<std::tuple<Counterpa
 }
 
 // ---------------------------------------------------------------------------
-// admin_golden_path — resolve the golden file path for a G1 cell.
-//
-// Returns "<tests_root>/interop/happy/golden/<cell_id>.fix".
-// The tests root is derived by stripping "/tls/fixtures" from tls_fixture_dir().
-// Returns an empty string when tls_fixture_dir() is unset or empty.
-// The cell_id is already computed by each TEST_P body (e.g.
-//   "HP-QFj-init-fix44-testrequest-echo").
-// ---------------------------------------------------------------------------
-inline std::string admin_golden_path(const std::string& cell_id) {
-    const char* tls_dir = tls_fixture_dir();
-    if (tls_dir == nullptr || tls_dir[0] == '\0') {
-        return {};
-    }
-    std::string base{tls_dir};
-    const std::string suffix = "/tls/fixtures";
-    if (base.size() > suffix.size() && base.substr(base.size() - suffix.size()) == suffix) {
-        base.resize(base.size() - suffix.size());
-    }
-    return base + "/interop/happy/golden/" + cell_id + ".fix";
-}
-
-// ---------------------------------------------------------------------------
 // #445: hp::diff_golden_or_skip formerly lived here — it read the capture
 // sidecar (<cell>-capture.fix) written by the parent harness AFTER the gtest
 // exits, so it always compared against the PREVIOUS run's frames, not the

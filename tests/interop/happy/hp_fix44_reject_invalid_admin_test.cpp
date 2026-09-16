@@ -28,7 +28,8 @@
 //     HP-QFj-{init,acc}-fix44-reject-invalid-admin
 //   Golden asserts Reject(35=3, 45, 373[, 371]) and survival Heartbeat verbatim
 //   under the {52,10} admin profile.
-//   When the golden is absent → skip:golden-not-yet-captured (never fail/fabricate).
+//   Checked in the parent harness's `_finalize` via `interop_golden_check
+//   --check verbatim-admin`; fails closed (no skip).
 //   Also appended: reject-vs-disconnect peer divergence note in KNOWN-LIMITATIONS.md.
 //
 // 018 SC-004 gate-bite negative tests:

@@ -11,10 +11,9 @@
 //   (b) emit no Logout frame on receipt of the replayed message.
 //
 // LIVE CELL: requires a counterparty. Cells SKIP cleanly when
-// INTEROP_<TOKEN>_PORT is unset (FR-023). Golden CAPTURE is deferred to the
-// first paired run with the parent harness; the golden seam skips
-// (skip:golden-not-yet-captured) when the golden file is absent — never fails
-// and never hand-fabricated.
+// INTEROP_<TOKEN>_PORT is unset (FR-023). The golden diff is checked in the
+// parent harness's `_finalize` via `interop_golden_check --check
+// verbatim-poss-dup`; it fails closed (no skip).
 //
 // Golden normalization profile: {52, 122, 10} (quickstart §2):
 //   - 52  SendingTime — live wall-clock
