@@ -201,6 +201,15 @@ bundle. There are three factories:
   per message. Every shipped dictionary is of that kind. `table_view` computes the flag in
   `set_length_pair_data_tag`, which is why the standard table is a core header (§2): the
   dictionary layer may not include wire ([arch §2.3]).
+
+  ⚠️ **A bundle is a snapshot.** `for_table_view` reads the flag once, so a bundle built before a
+  pair is registered keeps a null callback. No shipped path can observe that: a `table_view` is
+  built once at config time (`Dictionary::as_table_view`, immutable afterwards by its own contract)
+  and every production bundle is rebuilt from it per message. The type does not *enforce* the
+  order — `set_length_pair_data_tag` and assignment stay public — so the rule is pinned by
+  `DictHooksCustomPair.ABundleIsASnapshotOfTheDictionaryItWasBuiltFrom` and sealing the published
+  view is fixpp#456 (Gate B r6 M-1). Pair mutation and copy-assignment carry the strong
+  exception guarantee, so the maps and the flag cannot disagree after a failed allocation (r6 M-2).
 - A test-only factory under the existing test-hooks seam, for stub dictionaries such as the uint16
   token in `fuzz_wire_nested_slice.cpp` and the offset-table tests that pin a null member function.
 

@@ -46,8 +46,10 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace fixpp::dict {
@@ -289,7 +291,19 @@ public:
     // and by the mock-compatibility static_assert in validator_domain_test.cpp).
     // Move is noexcept; copy may throw on allocation failure.
     table_view(table_view const&) = default;
-    table_view& operator=(table_view const&) = default;
+    // Strong guarantee (Gate B r6 M-2): copy first, commit through the nothrow
+    // move-assignment below. A defaulted member-wise assignment can throw part way
+    // and leave this object holding a copied pair while `has_nonstandard_pair_`
+    // still reads false — a pair every scanner would then miss, because
+    // `dict_hooks::for_table_view` installs no callback for a flagless table.
+    // The nothrow-ness the commit relies on is asserted below the class, not assumed.
+    table_view& operator=(table_view const& other) {
+        if (this != &other) {
+            table_view tmp(other);
+            *this = std::move(tmp);
+        }
+        return *this;
+    }
     table_view(table_view&&) noexcept = default;
     table_view& operator=(table_view&&) noexcept = default;
 
@@ -810,25 +824,33 @@ public:
         if (data_tag == 0) {
             return;
         }
-        // Set BEFORE the maps change: an insert that throws may then leave the flag
-        // set for a pair that did not land, which costs a lookup answering 0 — never
-        // the reverse, which would hide a registered pair from every scanner.
+        // Strong guarantee (Gate B r6 M-2): both directions are prepared as copies
+        // and committed with nothrow moves. A throwing insert therefore cannot leave
+        // the forward map holding a pair the inverse map has lost — the "two
+        // directions never disagree" invariant (Gate B r1 G-4) survives allocation
+        // failure, not just success. This runs at config time
+        // (Dictionary::as_table_view), where copying two small maps costs nothing
+        // that matters.
+        auto forward = length_pair_data_tag_;
+        auto inverse = data_pair_length_tag_;
+        // Re-pairing either tag drops its old partner, so the two stay inverse.
+        if (auto const old = forward.find(length_tag);
+            old != forward.end() && old->second != data_tag) {
+            inverse.erase(old->second);
+        }
+        if (auto const old = inverse.find(data_tag);
+            old != inverse.end() && old->second != length_tag) {
+            forward.erase(old->second);
+        }
+        forward[length_tag] = data_tag;
+        inverse[data_tag] = length_tag;
+        length_pair_data_tag_ = std::move(forward);
+        data_pair_length_tag_ = std::move(inverse);
+        // Only past the commit, so the flag never describes a pair that did not land.
         if (!fixpp::core::detail::is_standard_pair_tag(length_tag) &&
             !fixpp::core::detail::is_standard_pair_tag(data_tag)) {
             has_nonstandard_pair_ = true;
         }
-        // Keep the maps inverse: re-pairing either tag drops its old partner, so
-        // the two directions never disagree (Gate B r1 G-4).
-        if (auto const old = length_pair_data_tag_.find(length_tag);
-            old != length_pair_data_tag_.end() && old->second != data_tag) {
-            data_pair_length_tag_.erase(old->second);
-        }
-        if (auto const old = data_pair_length_tag_.find(data_tag);
-            old != data_pair_length_tag_.end() && old->second != length_tag) {
-            length_pair_data_tag_.erase(old->second);
-        }
-        length_pair_data_tag_[length_tag] = data_tag;
-        data_pair_length_tag_[data_tag] = length_tag;
     }
 
 private:
@@ -985,5 +1007,10 @@ private:
     // See has_nonstandard_pair(): set by set_length_pair_data_tag, never cleared.
     bool has_nonstandard_pair_ = false;
 };
+
+// The copy-assignment above commits through the move-assignment. If a member ever
+// stops being nothrow-move-assignable the strong guarantee would silently decay to
+// the basic one, so it is asserted here rather than trusted.
+static_assert(std::is_nothrow_move_assignable_v<table_view>);
 
 }  // namespace fixpp::dict

@@ -560,3 +560,40 @@ TEST(DictHooksCustomPair, FastPathsChangeNoAnswerForAnyTag) {
     EXPECT_FALSE(standard_only.has_nonstandard_pair());
     expect_fast_paths_change_no_answer(standard_only);
 }
+
+// ── A bundle is a SNAPSHOT of the dictionary it was built from ───────────────
+//
+// `for_table_view` reads `has_nonstandard_pair()` once, when the bundle is built.
+// No production path can see the difference: a `table_view` is built once at config
+// time (this header's own contract — "Constructed ONCE at session/validator setup
+// time ... Immutable after construction") and every bundle is rebuilt from it per
+// message by `Validator::validate`, `Session`'s scanners and the C-ABI setters. The
+// TYPE does not enforce that order, so the behaviour is pinned here rather than left
+// to be discovered. Gate B r6 M-1; sealing the published view is fixpp#456.
+TEST(DictHooksCustomPair, ABundleIsASnapshotOfTheDictionaryItWasBuiltFrom) {
+    table_view tv;
+    auto const before = dict_hooks::for_table_view(tv);  // no pairs registered yet
+    tv.set_length_pair_data_tag(5001, 5002);
+
+    EXPECT_EQ(before.data_tag_for_length(5001), 0U)
+        << "a bundle built before the pair was registered keeps the snapshot it was built from";
+    EXPECT_EQ(dict_hooks::for_table_view(tv).data_tag_for_length(5001), 5002U)
+        << "a bundle built after it — what every production path does — honours the pair";
+}
+
+// Copy-assignment carries the flag with the maps. Without that, a target whose flag
+// still read false would hide the source's pairs from every scanner built afterwards
+// (Gate B r6 M-2, the copy-assignment half).
+TEST(DictHooksCustomPair, CopyAssignmentCarriesTheFlagWithThePairs) {
+    table_view source;
+    source.set_length_pair_data_tag(5001, 5002);
+    table_view target;
+    ASSERT_FALSE(target.has_nonstandard_pair()) << "precondition: the target names no pair";
+
+    target = source;
+
+    EXPECT_TRUE(target.has_nonstandard_pair());
+    EXPECT_EQ(dict_hooks::for_table_view(target).data_tag_for_length(5001), 5002U)
+        << "the assigned-in pair must reach a bundle built from the target";
+    expect_fast_paths_change_no_answer(target);
+}
