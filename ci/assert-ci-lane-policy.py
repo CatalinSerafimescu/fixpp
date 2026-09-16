@@ -34,6 +34,13 @@ silently — so each is turned into a check.
      being evaluated, and the lane returns to replaying zero seeds with every
      script gate still green. The guard cannot guard its own enabling flag.
 
+  4. #411 Gate B r1 F4 (parallelism-measure half) — the campaign's `linux` and
+     `libcxx` jobs each restore Tier 1's GHCR compiler cache, restore-only,
+     never publishing. `ci/test-tier1-python-policy.sh` only reads tier1.yml,
+     so nothing pinned this workflow's restore steps at all: deleting one,
+     reordering it after `Conan install`, or adding a seed call all left every
+     existing check green.
+
 EXIT
   0  every invariant holds
   1  at least one violated (each named, with the file that breaks it)
@@ -70,6 +77,13 @@ CAMPAIGN_JOB_SOURCES = {
     "libcxx": ("tier3-libcxx.yml", "libcxx"),
     "windows": ("tier2.yml", "windows"),
 }
+
+# #411 — the campaign jobs that read Tier 1's GHCR compiler cache, restore-only.
+CCACHE_RESTORE_JOBS = {"linux", "libcxx"}
+MATRIX_PRESET_EXPR = "${{ matrix.preset }}"
+SEED_SCRIPT = "ci/seed-ccache.sh"
+RESTORE_SCRIPT = "ci/restore-ccache.sh"
+CCACHE_ACTION_PREFIX = "hendrikmuhs/ccache-action"
 
 # The lane that must build and replay the fuzz corpora, and the flag that does it.
 FUZZ_PRESET = "linux-clang-asan"
@@ -324,6 +338,109 @@ def check_campaign_job_env(root, violations):
     return True
 
 
+def check_ccache_restore_wiring(root, violations):
+    """The campaign's `linux`/`libcxx` jobs restore Tier 1's GHCR ccache correctly.
+
+    #411 Gate B r1 F4 (parallelism-measure half). `ci/test-tier1-python-policy.sh`
+    reads only tier1.yml, so nothing pinned these jobs' ccache steps at all —
+    deleting the restore, reordering it after `Conan install`, or adding a seed
+    call all left every existing check green. A measurement job must never
+    write to the shared compiler cache: it configures for measurement, and an
+    entry it published would be served to a production lane.
+
+    Returns True when a verdict was reached (including "stood down" when the
+    campaign workflow is absent), False when it could not be evaluated — same
+    contract as check_campaign_trigger/check_campaign_job_env; the caller must
+    consume it.
+    """
+    path = root / ".github" / "workflows" / CAMPAIGN_WORKFLOW
+    if not path.is_file():
+        print(f"  ccache restore wiring: {CAMPAIGN_WORKFLOW} is not present — check stood down "
+              f"(retiring the campaign is legitimate; this is a disclosure, not a pass).")
+        return True
+    try:
+        import yaml
+    except ImportError:
+        print("::warning::PyYAML unavailable — the ccache-restore-wiring check did NOT run.")
+        return False
+
+    try:
+        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        jobs = doc["jobs"]
+    except (yaml.YAMLError, KeyError, TypeError) as exc:
+        violations.append(f"CCACHE RESTORE WIRING UNREADABLE: {CAMPAIGN_WORKFLOW} ({exc!r}).")
+        return True
+
+    checked = 0
+    for job_id in sorted(CCACHE_RESTORE_JOBS):
+        job = jobs.get(job_id)
+        if job is None:
+            violations.append(
+                f"CCACHE RESTORE WIRING UNCHECKABLE: job `{job_id}` is missing from "
+                f"{CAMPAIGN_WORKFLOW}, so its ccache restore cannot be verified. A renamed job "
+                f"must not silently stop this check.")
+            continue
+        steps = job.get("steps") or []
+        install_hits = [i for i, st in enumerate(steps) if str(st.get("name", "")) == "Install ccache"]
+        restore_hits = [i for i, st in enumerate(steps) if RESTORE_SCRIPT in str(st.get("run", ""))]
+        conan_hits = [i for i, st in enumerate(steps) if str(st.get("name", "")) == "Conan install"]
+        seed_hits = [i for i, st in enumerate(steps) if SEED_SCRIPT in str(st.get("run", ""))]
+        action_hits = [i for i, st in enumerate(steps) if str(st.get("uses", "")).startswith(CCACHE_ACTION_PREFIX)]
+
+        if len(restore_hits) != 1:
+            violations.append(
+                f"CCACHE RESTORE MISWIRED: `{job_id}` in {CAMPAIGN_WORKFLOW} has "
+                f"{len(restore_hits)} step(s) invoking {RESTORE_SCRIPT}, expected exactly 1. "
+                f"A measurement job with no restore builds cold; more than one is a duplicate call.")
+        elif len(install_hits) != 1 or len(conan_hits) != 1:
+            violations.append(
+                f"CCACHE RESTORE WIRING UNCHECKABLE: `{job_id}` in {CAMPAIGN_WORKFLOW} is missing "
+                f"a unique 'Install ccache' or 'Conan install' step, so the restore's position "
+                f"cannot be verified against them.")
+        else:
+            i_install, i_restore, i_conan = install_hits[0], restore_hits[0], conan_hits[0]
+            if not (i_install < i_restore < i_conan):
+                violations.append(
+                    f"CCACHE RESTORE OUT OF ORDER: `{job_id}` in {CAMPAIGN_WORKFLOW} has Install "
+                    f"ccache={i_install}, restore={i_restore}, Conan install={i_conan}; expected "
+                    f"Install < restore < Conan install. Conan's --build=missing compiles through "
+                    f"the launcher; a restore after that discards or never sees what just compiled.")
+            else:
+                restore_run = str(steps[i_restore].get("run", ""))
+                oras_lines = [ln for ln in restore_run.splitlines() if "oras login" in ln]
+                if not oras_lines or not oras_lines[0].rstrip().endswith("|| true"):
+                    violations.append(
+                        f"CCACHE RESTORE MISSING ANONYMOUS FALLBACK: `{job_id}` in "
+                        f"{CAMPAIGN_WORKFLOW}'s restore step's `oras login` does not end in "
+                        f"`|| true`. A fork PR's token cannot log in, and without the fallback the "
+                        f"step fails instead of falling back to the anonymous pull of the public "
+                        f"package.")
+                if job_id == "linux" and (RESTORE_SCRIPT + " " + MATRIX_PRESET_EXPR) not in restore_run:
+                    violations.append(
+                        "CCACHE RESTORE PRESET DRIFT: `linux` in " + CAMPAIGN_WORKFLOW + "'s restore "
+                        "step does not call `" + RESTORE_SCRIPT + " " + MATRIX_PRESET_EXPR + "` — the "
+                        "campaign's `linux` job must restore the SAME preset's tag Tier 1 publishes, "
+                        "or the measurement reads a stranger's cache.")
+                checked += 1
+
+        if seed_hits:
+            violations.append(
+                f"CCACHE SEED IN A MEASUREMENT JOB: `{job_id}` in {CAMPAIGN_WORKFLOW} has "
+                f"{len(seed_hits)} step(s) invoking {SEED_SCRIPT}. A measurement job must never "
+                f"publish to the shared compiler cache (#411) — its restore step's own comment "
+                f"says so.")
+        if action_hits:
+            violations.append(
+                f"CCACHE ACTION IN A MEASUREMENT JOB: `{job_id}` in {CAMPAIGN_WORKFLOW} still has "
+                f"{len(action_hits)} {CCACHE_ACTION_PREFIX} step(s). #411 moved this workflow's "
+                f"ccache restore to GHCR.")
+
+    if checked:
+        print(f"  ccache restore wiring: {checked} job(s) restore Tier 1's GHCR ccache exactly "
+              f"once, correctly positioned, with the anonymous fallback, and never publish.")
+    return True
+
+
 def check_campaign_trigger(root, violations):
     """The A-B-A campaign must stay dispatch-only.
 
@@ -413,19 +530,20 @@ def main():
     fuzz_seen = check_fuzz_lane(root, violations)
     campaign_judged = check_campaign_trigger(root, violations)
     campaign_judged = check_campaign_job_env(root, violations) and campaign_judged
+    campaign_judged = check_ccache_restore_wiring(root, violations) and campaign_judged
     check_sccache_pins(root, violations)
     if apt_seen is None or fuzz_seen is None:
         return 2
     # A check that could not run must not be reported as one that passed.
     if not campaign_judged:
-        # ⚠️ Names the FLAG, not one of its inputs. Two checks feed
-        # `campaign_judged` (trigger and job-env); this said "the
-        # campaign-trigger invariant", so a PyYAML-absent run — where it is the
-        # job-env check that stands down — pointed the operator at a check that
-        # had run fine.
+        # ⚠️ Names the FLAG, not one of its inputs. Three checks feed
+        # `campaign_judged` (trigger, job-env, ccache-restore-wiring); this said
+        # "the campaign-trigger invariant", so a PyYAML-absent run — where it is
+        # a DIFFERENT check that stands down — pointed the operator at a check
+        # that had run fine.
         print("::error::a campaign invariant could not be evaluated (see the warning above): "
-              "the trigger check, the job-env check, or both. Refusing to report "
-              "`all invariants hold` over a check that did not run.")
+              "the trigger check, the job-env check, the ccache-restore-wiring check, or some "
+              "combination. Refusing to report `all invariants hold` over a check that did not run.")
         return 2
 
     # ⚠️ AN EMPTY SCAN IS AN INSTRUMENT FAILURE, NOT A PASS. If the workflows move
