@@ -204,8 +204,11 @@ bundle. There are three factories:
 
   ⚠️ **A bundle is a snapshot.** `for_table_view` reads the flag once, so a bundle built before a
   pair is registered keeps a null callback. No shipped path can observe that: a `table_view` is
-  built once at config time (`Dictionary::as_table_view`, immutable afterwards by its own contract)
-  and every production bundle is rebuilt from it per message. The type does not *enforce* the
+  built once at config time (`Dictionary::as_table_view`, immutable afterwards by its own contract),
+  and a bundle is built only after it is populated: `Validator::validate`, `Session`'s scanners and the
+  C-ABI setters build one per operation, while `Parser` builds one in its constructor and reuses it for
+  its own lifetime against a view that must stay immutable for at least that long (Gate B r7 N-4 —
+  "rebuilt per message" was too strong; `Parser` retains its bundle). The type does not *enforce* the
   order — `set_length_pair_data_tag` and assignment stay public — so the rule is pinned by
   `DictHooksCustomPair.ABundleIsASnapshotOfTheDictionaryItWasBuiltFrom` and sealing the published
   view is fixpp#456 (Gate B r6 M-1). Pair mutation and copy-assignment carry the strong

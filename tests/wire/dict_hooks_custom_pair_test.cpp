@@ -566,8 +566,10 @@ TEST(DictHooksCustomPair, FastPathsChangeNoAnswerForAnyTag) {
 // `for_table_view` reads `has_nonstandard_pair()` once, when the bundle is built.
 // No production path can see the difference: a `table_view` is built once at config
 // time (this header's own contract — "Constructed ONCE at session/validator setup
-// time ... Immutable after construction") and every bundle is rebuilt from it per
-// message by `Validator::validate`, `Session`'s scanners and the C-ABI setters. The
+// time ... Immutable after construction") and every bundle is built after it is
+// populated — per operation by `Validator::validate`, `Session`'s scanners and the
+// C-ABI setters, and once per `Parser`, which keeps its bundle for its own lifetime
+// against a view that must stay immutable that long (Gate B r7 N-4). The
 // TYPE does not enforce that order, so the behaviour is pinned here rather than left
 // to be discovered. Gate B r6 M-1; sealing the published view is fixpp#456.
 TEST(DictHooksCustomPair, ABundleIsASnapshotOfTheDictionaryItWasBuiltFrom) {
