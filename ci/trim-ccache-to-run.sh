@@ -45,9 +45,15 @@
 # a cancelled or failed run's, which would publish a truncated store. The caller
 # runs this step only after every earlier step succeeded.)
 #
-# Fail direction: anything that makes the timestamp unreadable, or suggests the
-# counters were zeroed AFTER the build (zero calls counted), SKIPS eviction. A
-# skipped eviction saves the old superset — larger, never colder.
+# Fail direction: anything that makes the timestamp unreadable, suggests the
+# counters were zeroed AFTER the build (zero calls counted), or puts the
+# zeroed timestamp at or after now (clock stepped back, or an unreadable
+# clock reading), SKIPS eviction. A skipped eviction saves the old superset —
+# larger, never colder.
+#
+# Residual (disclosed, not guarded): a backward clock step that leaves
+# `now > zeroed` can still evict files touched during the stepped-back
+# window. The wall clock cannot detect this; there is no heuristic for it.
 #
 # ── WHAT NEVER REDDENS ───────────────────────────────────────────────────────
 #
@@ -56,8 +62,9 @@
 # error (missing argument or environment) exits non-zero, because a mis-wired
 # call would otherwise no-op on every run while looking green.
 #
-# Verify on a push run: this step's `ccache-evict:` line (MiB before -> after),
-# then the action's post-step `ccache -s`.
+# Verify on any Tier 1 run (a PR run's trimmed store is not saved): this
+# step's `ccache-evict:` line (MiB before -> after), then the action's
+# post-step `ccache -s`.
 #
 # ⚠️ `set -uo pipefail` WITHOUT `-e` — every failure path is dispositioned.
 set -uo pipefail
@@ -85,14 +92,24 @@ case "$zeroed" in
     if [ "$calls" -eq 0 ]; then
       note "ccache-evict (${KEY}): SKIPPED — zero compiler calls counted since the counters were zeroed, so they were not zeroed at restore; the unevicted store will be saved."
     else
-      age=$(( $(date +%s) - zeroed + 1 ))
-      before="$(mib)"
-      if ccache --evict-older-than "${age}s" >/dev/null 2>&1; then
-        note "ccache-evict (${KEY}): kept files touched in the last ${age}s (since restore, ${calls} calls) — ${before:-?} MiB -> $(mib || true) MiB"
-      else
-        echo "::warning::\`ccache --evict-older-than ${age}s\` failed; the unevicted store will be saved."
-        note "ccache-evict (${KEY}): FAILED — unevicted store will be saved."
-      fi
+      now="$(date +%s 2>/dev/null)"
+      case "$now" in
+        ''|*[!0-9]*)
+          note "ccache-evict (${KEY}): SKIPPED — the clock is unreadable ('${now}'); the unevicted store will be saved." ;;
+        *)
+          if [ "$zeroed" -ge "$now" ]; then
+            note "ccache-evict (${KEY}): SKIPPED — stats_zeroed_timestamp ${zeroed} is not before now ${now} (clock stepped back?); evicting would drop files this run used; the unevicted store will be saved."
+          else
+            age=$(( now - zeroed + 1 ))
+            before="$(mib)"
+            if ccache --evict-older-than "${age}s" >/dev/null 2>&1; then
+              note "ccache-evict (${KEY}): kept files touched in the last ${age}s (since restore, ${calls} calls) — ${before:-?} MiB -> $(mib || true) MiB"
+            else
+              echo "::warning::\`ccache --evict-older-than ${age}s\` failed; the unevicted store will be saved."
+              note "ccache-evict (${KEY}): FAILED — unevicted store will be saved."
+            fi
+          fi ;;
+      esac
     fi ;;
 esac
 

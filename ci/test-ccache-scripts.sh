@@ -239,7 +239,10 @@ run() {
   STATUS=0
   (
     cd "$sandbox" || exit 1
-    PATH="$shim_dir:$PATH" \
+    # RUN_EXTRA_PATH, when a caller sets it, is prepended AHEAD of the shim
+    # dir — how a case stubs a real coreutils binary (e.g. `date`) without
+    # touching every other case that relies on the shim dir alone.
+    PATH="${RUN_EXTRA_PATH:+$RUN_EXTRA_PATH:}$shim_dir:$PATH" \
     GITHUB_OUTPUT="$GH_OUTPUT" \
     GITHUB_STEP_SUMMARY="$SUMMARY" \
     bash "$script" "$@"
@@ -1451,6 +1454,60 @@ want_status 0 "trim/evict-fails"; want_out '::warning::' "trim/evict-fails"
 want_out "ccache-evict (${RKEY}): FAILED" "trim/evict-fails"
 ok "a failing eviction warns and does not redden"
 export FAKE_EVICT_EXIT=0
+
+# ── the zeroed/now boundary and an unreadable clock (Gate B round 2, F2) ─────
+# These pin the script's OWN `date +%s` call, not the fixture's zeroed
+# timestamp, so each case stubs `date` on a dir prepended ahead of the shim
+# dir via RUN_EXTRA_PATH — the fixture's r_stats call still uses the real
+# clock to write a realistic zeroed timestamp.
+FIXED_DATE_DIR="$sandbox/fixed-date"; mkdir -p "$FIXED_DATE_DIR"
+fixed_date_trim_case() {  # $1 = the value the stubbed `date` prints
+  cat > "$FIXED_DATE_DIR/date" <<SHIM
+#!/usr/bin/env bash
+printf '%s\n' '$1'
+SHIM
+  chmod +x "$FIXED_DATE_DIR/date"
+  : > "$EVICT_REC"
+  RUN_EXTRA_PATH="$FIXED_DATE_DIR"
+  run "$TRIM" "$RKEY"
+  unset RUN_EXTRA_PATH
+  EVICTED="$(cat "$EVICT_REC")"
+}
+
+# zeroed == now: age would be 1s, which keeps only files touched in the last
+# second — effectively a wipe. SKIP instead.
+r_stats 1700000000 1598 53
+fixed_date_trim_case 1700000000
+want_status 0 "trim/zeroed-equals-now"
+want_out "ccache-evict (${RKEY}): SKIPPED — stats_zeroed_timestamp" "trim/zeroed-equals-now"
+[ -z "$EVICTED" ] || fail "trim/zeroed-equals-now: ccache eviction ran ('$EVICTED')"
+ok "zeroed == now skips eviction instead of keeping only the last second"
+
+# zeroed one second AHEAD of now (clock stepped back): age would be 0, which
+# wipes the whole store, including the file just hit. This is Codex's case.
+r_stats 1700000001 1598 53
+fixed_date_trim_case 1700000000
+want_status 0 "trim/zeroed-one-ahead"
+want_out "ccache-evict (${RKEY}): SKIPPED — stats_zeroed_timestamp" "trim/zeroed-one-ahead"
+[ -z "$EVICTED" ] || fail "trim/zeroed-one-ahead: ccache eviction ran ('$EVICTED')"
+ok "zeroed one second ahead of now (age=0) skips eviction rather than wiping the store"
+
+# An unreadable clock reading must skip, not abort the script under `set -u`.
+r_stats "$(( $(date +%s) - 300 ))" 1598 53
+fixed_date_trim_case "12:00"
+want_status 0 "trim/clock-unreadable"
+want_out "ccache-evict (${RKEY}): SKIPPED — the clock is unreadable" "trim/clock-unreadable"
+[ -z "$EVICTED" ] || fail "trim/clock-unreadable: ccache eviction ran ('$EVICTED')"
+ok "a non-numeric clock reading skips eviction instead of reddening the lane"
+
+# One second of margin is the boundary's positive side: eviction must still
+# run there, so an over-wide guard (e.g. \`-ge now-1\`) is caught too.
+r_stats 1700000000 1598 53
+fixed_date_trim_case 1700000001
+want_status 0 "trim/one-second-margin"
+want_out "ccache-evict (${RKEY}): kept files touched in the last 2s" "trim/one-second-margin"
+[ "$EVICTED" = "2s" ] || fail "trim/one-second-margin: expected age 2s, got '${EVICTED}'"
+ok "one second of margin still evicts, at age 2s"
 
 # ── explicit: this script must never invoke gh at all ────────────────────────
 # It calls no API — unlike the deleted reclaim half, nothing here needs one.
