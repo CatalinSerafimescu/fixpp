@@ -890,9 +890,21 @@ $got"
   #     is expected rather than a second defect.
   # Conclusion: it cannot change what the pytest pair executes; it can only
   # prevent them from executing at all, loudly.
+  #
+  # 32 -> 33 (#411): the `linux` job gained `Trim ccache to this run and reclaim
+  # the superseded entry (#411)`, which runs ci/reclaim-ccache-generation.sh.
+  #
+  # THE DELIBERATE LOOK. This step is the job's LAST, AFTER the pytest pair, so
+  # nothing it does can precede what they execute:
+  #   * it writes NO environment file — its outputs are stdout, `::warning::`
+  #     and $GITHUB_STEP_SUMMARY (M34's env-writer census polices the rest);
+  #   * its step-level `env:` (GH_TOKEN/REPO/REF) does not outlive it;
+  #   * it has no `id`, collides with no pinned step name, mentions no pytest
+  #     token, and never exits non-zero on an API or ccache failure.
+  # Conclusion: it cannot reach the pytest pair.
   got="$(echo "$json" | jq -r '.linux_step_count')"
-  [ "$got" = "32" ] \
-    || fail "$case_id: the linux job has $got steps, expected 32. A step added anywhere before the pytest pair can change what they execute without colliding with a pinned name or adding a pytest mention (round 4 finding 3, measured). This count is deliberately brittle: adding a step to this job is a deliberate act and must be paired with a deliberate look at whether it reaches the python steps."
+  [ "$got" = "33" ] \
+    || fail "$case_id: the linux job has $got steps, expected 33. A step added anywhere before the pytest pair can change what they execute without colliding with a pinned name or adding a pytest mention (round 4 finding 3, measured). This count is deliberately brittle: adding a step to this job is a deliberate act and must be paired with a deliberate look at whether it reaches the python steps."
 
   got="$(echo "$json" | jq -cS '.linux_job_env')"
   [ "$got" = '{"CCACHE_COMPILERCHECK":"content","CCACHE_COMPRESSLEVEL":"5","CCACHE_DIR":"/tmp/fixpp-ccache-${{ matrix.preset }}","CMAKE_CXX_COMPILER_LAUNCHER":"ccache","CMAKE_C_COMPILER_LAUNCHER":"ccache"}' ] \
@@ -2007,12 +2019,13 @@ open(dst, "w").write(t.replace(old, new))
   # $GITHUB_ENV, which tripped the writer census first and left the step count
   # with no mutant of its own — the shadowing round 5 finding 3 is about.
   # ⚠️ THE LITERAL TRACKS THE BASELINE. Bumped 31->32 by #252's
-  # `Assert the dependency closure is instrumented` step; the mutant inserts one
-  # more, so the message it must produce moves with it. A stale literal here does
+  # `Assert the dependency closure is instrumented` step and 32->33 by #411's
+  # trim-and-reclaim step; the mutant inserts one more, so the message it must
+  # produce moves with it. A stale literal here does
   # not fail open — `mutate_workflow` reports "failed the pin for the WRONG
   # reason" — but it is the second edit the count pin demands, and forgetting it
   # is how a deliberately brittle assertion earns a reputation for being noise.
-  mutate_workflow M33 "an unnamed step is inserted before the pytest pair" "has 33 steps, expected 32" '
+  mutate_workflow M33 "an unnamed step is inserted before the pytest pair" "has 34 steps, expected 33" '
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()

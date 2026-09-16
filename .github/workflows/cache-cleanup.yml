@@ -75,6 +75,12 @@ on:
   # Firing on the tiers' COMPLETION instead puts the sweep after the saves, which
   # is the only ordering that leaves one entry per leg.
   #
+  # ⚠️ #411: that still holds BOTH generations for the length of a tier run, and
+  # one generation grew until the pair no longer fit the cap. Tier 1's ccache
+  # jobs now delete their own superseded entry as their last step
+  # (ci/reclaim-ccache-generation.sh). This sweep stays as the BACKSTOP for a run
+  # that never reaches that step — failed, cancelled, or not a push.
+  #
   # ⚠️ These entries are NOT literal strings — GitHub runs them through its
   # FILTER-PATTERN parser, where `+` means "one or more of the preceding". The
   # unescaped `libc++` below was therefore a malformed pattern (`+` quantifying

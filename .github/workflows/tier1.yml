@@ -323,6 +323,11 @@ jobs:
     permissions:
       contents: read
       packages: write  # auto-push-on-miss (push:main / dispatch on main) — save rebuilt Conan cache to GHCR
+      # #411: the job's last step deletes this leg's superseded ccache entry. The
+      # step is push-only, but job permissions cannot be event-scoped, so PR runs
+      # hold this scope too — the same trade `packages: write` above already
+      # makes. A fork PR's GITHUB_TOKEN is read-only regardless.
+      actions: write
     # Backstop against a hung test wedging the runner. A clean sanitizer leg is
     # ~24 min (build ~15 + test ~6 + setup); the debug leg hit ~45 min cold (whole
     # tree recompile on a new branch). 60->90 (2026-07-09): the tsan leg hit the
@@ -568,6 +573,17 @@ jobs:
           # ~10% hit rate) and even warm runs recompiled ~everything, pushing the
           # debug build to the full 45-min timeout. 2G holds a leg's full object
           # set so warm runs actually hit.
+          #
+          # #411 — DELIBERATELY NOT LOWERED, and not raised for the debug leg.
+          # A store fills to this ceiling with objects from EARLIER commits, so
+          # "Cache size … 99% full" in a warm run is not a measure of need; the
+          # entry SAVED is trimmed to this run's own objects by the job's last
+          # step (ci/reclaim-ccache-generation.sh), which is what bounds this
+          # leg's share of the shared Actions-cache cap. Re-open the ceiling only
+          # on the thrash signature, read from the post-step `ccache -s`:
+          # `Cleanups:` present AND the hit rate falling on a warm restore.
+          # Re-derive the pool with
+          # `gh api "repos/<owner>/<repo>/actions/caches?per_page=100"`.
           max-size: 2G
           # RESTORE-ONLY ON PULL REQUESTS (2026-08-02) — a PR must never WRITE to
           # the repo-wide 10 GB Actions-cache pool.
@@ -1263,6 +1279,31 @@ jobs:
         continue-on-error: true
         run: cat /tmp/disk.txt >> "$GITHUB_STEP_SUMMARY"
 
+      # #411 — one generation of Tier 1 ccache entries no longer fit the
+      # repository's shared Actions-cache cap alongside the generation it
+      # replaces. Two halves, both in the script's header:
+      #  * trim the store to the files THIS run touched, so the entry saved is
+      #    the live object set rather than everything since the last cleanup;
+      #  * delete this leg's superseded entry NOW, instead of when the whole tier
+      #    completes (cache-cleanup.yml, which stays as the backstop for runs
+      #    that never reach this step).
+      #
+      # LAST STEP, and default `success()` on purpose. The action's save is a
+      # POST step, so nothing can run after it; the later this runs, the shorter
+      # the window in which the leg has no entry on this ref. And only a run whose
+      # every step passed trims — a failed or cancelled run saves the untrimmed
+      # store (larger, never colder) and keeps its predecessor.
+      #
+      # Push-only, matching the action's `save:` predicate: a run that does not
+      # save must not delete what it would have replaced.
+      - name: Trim ccache to this run and reclaim the superseded entry (#411)
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref }}
+        run: ci/reclaim-ccache-generation.sh tier1-${{ matrix.preset }}
+
   # ── Coverage job (SOFT — does not fail on threshold; Phase 3) ────────────
   # SOFT GATE: coverage threshold enforcement is disabled until Phase 4 module 1
   # closes per [const §IX.1] and the deliverables note in Step 4.
@@ -1272,6 +1313,7 @@ jobs:
     permissions:
       contents: read
       packages: write  # auto-push-on-miss (push:main / dispatch on main) — coverage owns its tag
+      actions: write   # #411 — see the `linux` job's permissions note
     # Backstop against a hung coverage build; matches the `linux` job's 90 for
     # cold-ccache headroom (previously inherited GitHub's 360-min default).
     # 180->240 (2026-08-02, 083): tracks the `linux` job for the same reason —
@@ -1594,6 +1636,17 @@ jobs:
           flags: unittests
           disable_search: true   # prevent auto-discovery of .ddi/.modmap CMake artefacts
           fail_ci_if_error: false  # SOFT: keep consistent with other coverage steps
+
+      # #411 — same step, same placement and predicate as the `linux` job's last
+      # step; see the note there. Trimming changes which objects are KEPT, never
+      # an object's bytes, so #241's byte-identity proof is untouched.
+      - name: Trim ccache to this run and reclaim the superseded entry (#411)
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref }}
+        run: ci/reclaim-ccache-generation.sh tier1-linux-clang-coverage
 
   # ── Python wheel gate (PY-005 / 056) ─────────────────────────────────────
   # ADDITIVE (CI-8): this does NOT touch the python tests on the `linux` matrix
@@ -2908,6 +2961,11 @@ jobs:
       #
       # Cost, stated: the bench TARGETS themselves are never cached (a handful of
       # TUs against ~1600). Accepted.
+      #
+      # ⚠️ #411 couples this job to the producer's TIMING: on push, the release
+      # leg deletes its superseded entry as its last step, before its post-step
+      # save. A bench restore that lands inside that delete->save window finds
+      # no entry and pays #273's cold build for that one run (self-healing).
       - name: ccache (install + restore — CONSUMES the matrix release leg's cache)
         uses: hendrikmuhs/ccache-action@v1.2.23
         with:
