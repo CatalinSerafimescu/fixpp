@@ -29,11 +29,12 @@
 // does not throw is not a failure — the assertion is about the state after the
 // ones that do.
 //
-// Mutation procedure: drop the `auto forward = ...; auto inverse = ...;` copies in
-// `set_length_pair_data_tag` and mutate the members directly; the re-pair cases
-// below then observe a half-applied pair. Make `operator=(table_view const&)`
-// defaulted again; the copy-assignment case observes a target whose flag and maps
-// disagree.
+// Mutation procedure: delete the try/catch rollback in `set_length_pair_data_tag`
+// so both maps are assigned directly — the insertion and re-pair cases then observe
+// a pair that landed in one direction only. Re-default `operator=(table_view
+// const&)` — the copy-assignment cases then observe a target whose maps and flag
+// disagree. (Both mutants are anchored on code, not on a count of which cases go
+// RED: that count moves with the allocation pattern of the STL underneath.)
 
 #include <gtest/gtest.h>
 
