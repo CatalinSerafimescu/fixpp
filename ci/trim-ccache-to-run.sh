@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# CI-side (Tier 1, #411): shrink a leg's ccache store to what THIS run used,
-# so the archive ci/seed-ccache.sh publishes afterwards is this run's live
-# object set rather than everything since the last cleanup.
+# CI-side (#411): shrink a leg's ccache store to what THIS run used, so the
+# archive ci/seed-ccache.sh publishes afterwards holds what this run touched
+# up to the seed. Objects compiled after it — any nested sub-build a later
+# test step runs — are not published, and recompile on each run; a caller that
+# seeds before its test steps accepts that trade-off deliberately (see the
+# caller's own seed-placement comment).
 #
 #   ci/trim-ccache-to-run.sh <label>
 #

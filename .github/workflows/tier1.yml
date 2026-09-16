@@ -387,7 +387,6 @@ jobs:
     # ⚠️ The FIRST post-merge run of each leg after #411 moved the cache to GHCR
     # is COLD (coverage ~133 min): the tag does not exist until that run's seed
     # step publishes it. That is the change working, not failing.
-    # That is the change working, not failing.
     env:
       CMAKE_CXX_COMPILER_LAUNCHER: ccache
       CMAKE_C_COMPILER_LAUNCHER: ccache
@@ -820,18 +819,22 @@ jobs:
         run: ci/ccache-stats.sh ${{ matrix.preset }} '' '${{ steps.build.outcome }}'
 
       # #411 — trims the store to the files THIS run touched (dated by the
-      # `stats_zeroed_timestamp` restore-ccache.sh sets), so the published
-      # archive is the live object set, not everything since the last cleanup.
-      # Default `success()`: only a successful build trims. It sits BEFORE the
-      # seed because the seed publishes whatever the store holds; a trim after
-      # it would be runner-local and the untrimmed store would reach GHCR.
-      # Trimming changes which entries are kept, never an entry's bytes.
+      # `stats_zeroed_timestamp` restore-ccache.sh sets). The published archive
+      # holds what this run touched up to the seed; objects compiled after it —
+      # any nested sub-build a later test step runs — are not published and
+      # recompile on each run. Default `success()`: only a successful build
+      # trims. It sits BEFORE the seed because the seed publishes whatever the
+      # store holds; a trim after it would be runner-local and the untrimmed
+      # store would reach GHCR. Trimming changes which entries are kept, never
+      # an entry's bytes.
       - name: Trim ccache to this run (#411)
         run: ci/trim-ccache-to-run.sh ${{ matrix.preset }}
 
       # Publish BEFORE the test steps: the cache is a compilation artifact, and
       # withholding it on a red test would make the next run pay a cold build
-      # for an unrelated failure (same placement as tier3-libcxx.yml).
+      # for an unrelated failure (same placement as tier3-libcxx.yml). Trade-off:
+      # this keeps a red test from withholding the library's cache, at the cost
+      # of the later objects described above never reaching GHCR.
       #
       # ⚠️ THE REF GUARD IS LOAD-BEARING. The ccache tag is coarse and ROLLING
       # (ci/ccache-cache-key.sh), so every branch computes the SAME tag; a
@@ -1488,18 +1491,22 @@ jobs:
         run: ci/ccache-stats.sh linux-clang-coverage '' '${{ steps.build.outcome }}'
 
       # #411 — trims the store to the files THIS run touched (dated by the
-      # `stats_zeroed_timestamp` restore-ccache.sh sets), so the published
-      # archive is the live object set, not everything since the last cleanup.
-      # Default `success()`: only a successful build trims. It sits BEFORE the
-      # seed because the seed publishes whatever the store holds; a trim after
-      # it would be runner-local and the untrimmed store would reach GHCR.
-      # Trimming changes which entries are kept, never an entry's bytes.
+      # `stats_zeroed_timestamp` restore-ccache.sh sets). The published archive
+      # holds what this run touched up to the seed; objects compiled after it —
+      # any nested sub-build a later test step runs — are not published and
+      # recompile on each run. Default `success()`: only a successful build
+      # trims. It sits BEFORE the seed because the seed publishes whatever the
+      # store holds; a trim after it would be runner-local and the untrimmed
+      # store would reach GHCR. Trimming changes which entries are kept, never
+      # an entry's bytes.
       - name: Trim ccache to this run (#411)
         run: ci/trim-ccache-to-run.sh linux-clang-coverage
 
       # Publish BEFORE the test steps: the cache is a compilation artifact, and
       # withholding it on a red test would make the next run pay a cold build
-      # for an unrelated failure (same placement as tier3-libcxx.yml).
+      # for an unrelated failure (same placement as tier3-libcxx.yml). Trade-off:
+      # this keeps a red test from withholding the library's cache, at the cost
+      # of the later objects described above never reaching GHCR.
       #
       # ⚠️ THE REF GUARD IS LOAD-BEARING. The ccache tag is coarse and ROLLING
       # (ci/ccache-cache-key.sh), so every branch computes the SAME tag; a
@@ -2796,9 +2803,9 @@ jobs:
       CCACHE_COMPRESSLEVEL: "5"
       # Same directory as the matrix `linux-clang-release` leg. Under
       # actions/cache the path was part of the entry's identity (run
-      # 32159716654: a matching key with a different path missed). The GHCR tag
-      # carries no path, but release objects are built without -g, so ccache
-      # does not hash the directory either; keeping them equal costs nothing.
+      # 32159716654: a matching key with a different path missed). ccache never
+      # hashes CCACHE_DIR; with -g it hashes the build directory, which is the
+      # same preset build tree in both jobs, so keeping these equal costs nothing.
       CCACHE_DIR: /tmp/fixpp-ccache-linux-clang-release
       CCACHE_MAXSIZE: 2G
 

@@ -19,19 +19,22 @@ name: Reclaim unreachable and superseded Actions caches
 # THIS IS THE SECOND HALF OF THE FIX, NOT THE WHOLE FIX. Reclaiming after a PR
 # ends cannot prevent an eviction that happens while the PR is still OPEN — main
 # (~7.7 GB) plus one open PR (~7 GB) does not fit in 10 GB by any ordering of
-# deletions. The first half is `save: ${{ github.event_name == 'push' }}` on
-# every ccache-action site that WRITES — `tier1.yml` matrix + bench. (Corrected
+# deletions. The first half WAS `save: ${{ github.event_name == 'push' }}` on
+# every ccache-action site that WROTE. (Corrected
 # by #240: tier3-libcxx.yml no longer uses the action at all, its ccache having
 # moved to GHCR. ⚠️ Corrected again by #254: there is no longer a THIRD tier-1
 # site. It was `python-bindings`' `none` leg, restore-only with `save: false`,
 # and that job was folded into the six `linux` matrix legs and deleted — which
-# also retires this repo's only cross-job ccache key share. Every ccache call
-# site now owns its own key, with a real save path gated on `push`.) ⚠️ Corrected
-# again by #411: Tier 1's matrix, coverage and bench jobs moved their ccache to
-# GHCR too, so no workflow writes a ccache entry to the Actions cache any more.
-# This stops PRs writing ccache at all. What remains for this workflow is everything else a PR
-# still legitimately writes — `conan-abi-golden`, tier1's manylinux wheel cache
-# — roughly 1 GB per PR, which would otherwise accumulate.
+# also retired this repo's only cross-job ACTIONS-CACHE key share. Every ccache
+# call site then owned its own key, with a real save path gated on `push`.)
+# ⚠️ Corrected again by #411: Tier 1's matrix, coverage and bench jobs moved
+# their ccache to GHCR too, so no workflow writes a ccache entry to the Actions
+# cache any more — this stops PRs writing ccache at all. Bench now deliberately
+# shares the matrix release leg's GHCR tag, restore-only — a DIFFERENT sharing
+# mechanism than the retired Actions-cache key above. What remains for this
+# workflow is everything else a PR still legitimately writes — `conan-abi-golden`,
+# tier1's manylinux wheel cache — roughly 1 GB per PR, which would otherwise
+# accumulate.
 #
 # WHY STATE-BASED RATHER THAN EVENT-BASED
 #
