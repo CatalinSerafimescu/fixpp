@@ -216,10 +216,12 @@ TEST(DictHooksCustomPair, CustomPairSplitsThroughEveryDictAwarePath) {
     EXPECT_TRUE(mv->offsets().find(7001).has_value())
         << "Index: parsing must continue correctly past the counted 5002 value";
 
-    // ── Iter path ───────────────────────────────────────────────────────
+    // ── The Index view's own field_iterator ─────────────────────────────
     // MessageView<Index>::begin()/end() pass this view's own hooks_
     // (parser.hpp), so the SAME dict-aware split applies to the field_iterator
-    // walk.
+    // walk. ⚠️ This is NOT `Parser<Iter>::parse_iter()` — that surface is
+    // covered by DictBackedIterParser below, which is where Gate B r8 P-1 found
+    // the bundle being dropped.
     bool iter_saw_58 = false;
     bool iter_saw_top_5002 = false;
     bool iter_saw_nested_5012 = false;
@@ -559,6 +561,83 @@ TEST(DictHooksCustomPair, FastPathsChangeNoAnswerForAnyTag) {
     standard_only.set_length_pair_data_tag(354, 7202);  // EncodedTextLen
     EXPECT_FALSE(standard_only.has_nonstandard_pair());
     expect_fast_paths_change_no_answer(standard_only);
+}
+
+// ── The dict-backed streaming parser (Gate B r8 P-1) ────────────────────────
+//
+// `Parser<Iter>` captures a dict_hooks bundle in its constructor, and
+// `parse_iter()` used to return `MessageView<Iter>{frame}` — dropping it. A
+// dictionary's own Length+Data pairs therefore never reached the streaming
+// scanner: the standard table split those frames, the dictionary's pairs did not,
+// and the test above could not see it because it walks an Index view's iterator.
+//
+// Mutation procedure: make `parse_iter()` return `{frame}` again; this test fails
+// on the forged 58 and on the truncated 5002 value, while everything above stays
+// green — which is exactly how the defect survived.
+TEST(DictBackedIterParser, CustomPairSplitsThroughParseIter) {
+    std::pmr::monotonic_buffer_resource dict_mr;
+    auto tv = load_custom_pair_dict(&dict_mr);
+    ASSERT_EQ(tv.length_pair_data_tag(5001), 5002U) << "precondition: the pair is registered";
+
+    auto const frame = make_custom_pair_frame();
+    auto const fv = fixpp::wire::test::make_frame_view(frame);
+    ASSERT_TRUE(fv.has_value());
+
+    Parser<access_mode::Iter> parser{tv};
+    auto mv = parser.parse_iter(*fv);
+    ASSERT_TRUE(mv.has_value()) << "parse_iter failed";
+
+    bool saw_forged_58 = false;
+    bool saw_top_5002 = false;
+    for (auto it = mv->begin(); !(it == mv->end()); ++it) {
+        auto const& f = *it;
+        if (f.tag == 58) {
+            saw_forged_58 = true;
+        }
+        if (f.tag == 5002) {
+            std::string_view const v{reinterpret_cast<char const*>(f.value.data()), f.value.size()};
+            EXPECT_EQ(v, kTopValue) << "parse_iter: 5002 must come back byte-exact";
+            saw_top_5002 = true;
+        }
+    }
+    EXPECT_FALSE(saw_forged_58)
+        << "parse_iter: the SOH inside the Data value must not forge a 58 field — "
+           "the parser's own dictionary must reach the streaming scanner";
+    EXPECT_TRUE(saw_top_5002) << "parse_iter: the counted 5002 value must be yielded";
+
+    // The dict-free Iter view is the control: no hooks, so the standard table alone
+    // governs and the forged field DOES appear. Without this arm the test above could
+    // pass on a frame that never needed a dictionary.
+    fixpp::wire::MessageView<access_mode::Iter> bare{*fv};
+    bool bare_saw_58 = false;
+    for (auto it = bare.begin(); !(it == bare.end()); ++it) {
+        if ((*it).tag == 58) {
+            bare_saw_58 = true;
+        }
+    }
+    EXPECT_TRUE(bare_saw_58)
+        << "control: without the dictionary the embedded SOH must split out a 58 field";
+}
+
+// ── Zero is not half of a pair (Gate B r8 P-2) ──────────────────────────────
+//
+// Zero is what BOTH accessors answer for "no pair", so a stored 0 -> data would read
+// back as a forward pair whose inverse says absent — two directions that can never
+// agree. The loaders still accept a zero-numbered field (fixpp#457); this is the
+// boundary that keeps it out of the pair maps whatever a dictionary declares.
+TEST(DictHooksCustomPair, ZeroIsNeverHalfOfAPair) {
+    table_view tv;
+    tv.set_length_pair_data_tag(0, 5002);
+    EXPECT_EQ(tv.length_pair_data_tag(0), 0U) << "a zero Length tag must not be stored";
+    EXPECT_EQ(tv.data_pair_length_tag(5002), 0U) << "and must leave no inverse behind";
+
+    tv.set_length_pair_data_tag(5001, 0);
+    EXPECT_EQ(tv.length_pair_data_tag(5001), 0U) << "a zero Data tag stays a no-op";
+    EXPECT_FALSE(tv.has_nonstandard_pair()) << "neither call may arm the pair flag";
+
+    auto const hooks = dict_hooks::for_table_view(tv);
+    EXPECT_EQ(hooks.data_tag_for_length(0), 0U);
+    EXPECT_EQ(hooks.length_tag_for_data(5002), 0U);
 }
 
 // ── A bundle is a SNAPSHOT of the dictionary it was built from ───────────────

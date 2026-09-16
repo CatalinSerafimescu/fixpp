@@ -146,6 +146,16 @@ public:
         : View{frame.bytes().data(), frame.bytes().size(), frame.token()} {
     }  // [2b §6.4] thread real pool token
 
+    // fixpp#426 (design §3, Gate B r8 P-1): the dictionary-backed Iter view. Without
+    // it `Parser<Iter>` had nowhere to put the bundle it captured, so `parse_iter()`
+    // built a dict-free view and a dictionary's own Length+Data pairs never reached
+    // the streaming scanner — the standard table split those frames, the dictionary's
+    // pairs did not. `hooks` aliases the caller-owned dictionary, exactly as in the
+    // Index ctors above.
+    MessageView(frame_view const& frame, dict_hooks hooks) noexcept
+        requires(Mode == access_mode::Iter)
+        : View{frame.bytes().data(), frame.bytes().size(), frame.token()}, hooks_{hooks} {}
+
     [[nodiscard]] std::string_view msg_type() const noexcept [[clang::lifetimebound]] {
         return field_string(detail::tag_msg_type);
     }
@@ -203,8 +213,10 @@ public:
         dict_hooks hooks_{};
     };
 
-    // fixpp#426: passes THIS view's own `hooks_` — `none()` on a dict-free
-    // view or a Mode==Iter view (which never sets it).
+    // fixpp#426: passes THIS view's own `hooks_` — `none()` on a dict-free view,
+    // and on an Iter view built from the frame alone. `Parser<Iter>::parse_iter()`
+    // builds one WITH hooks (Gate B r8 P-1), so a dictionary-backed streaming walk
+    // splits by that dictionary's pairs too.
     [[nodiscard]] field_iterator begin() const noexcept [[clang::lifetimebound]] {
         return field_iterator{bytes(), 0, hooks_};
     }
@@ -658,10 +670,13 @@ public:
     Parser(Parser&&) = delete;
     Parser& operator=(Parser&&) = delete;
 
-    [[nodiscard]] core::expected_t<MessageView<Mode>> parse(frame_view const& frame
-                                                            [[clang::lifetimebound]],
-                                                            std::pmr::memory_resource* mr) noexcept
-        [[clang::lifetimebound]] {
+    // Index only: `MessageView<Iter>` has no arena-taking ctor, so an Iter
+    // instantiation was ill-formed rather than merely unused (Gate B r8 P-1).
+    // `parse_iter()` is the Iter entry point.
+[[nodiscard]] core::expected_t<MessageView<Mode>> parse(frame_view const& frame
+                                                        [[clang::lifetimebound]],
+                                                        std::pmr::memory_resource* mr) noexcept
+    [[clang::lifetimebound]] requires(Mode == access_mode::Index) {
         // Thread the dict_hooks bundle into the MessageView (fixpp#426).
         MessageView<Mode> mv{frame, mr, hooks_};
         if constexpr (Mode == access_mode::Index) {
@@ -672,9 +687,9 @@ public:
         return mv;
     }
 
-    // FR-015 / [2b §1.2] caller-tunable DoS caps: same contract as parse(),
-    // but threads an OffsetTable::Config so the per-instance group cap is
-    // tunable through the public Parser API (not collapsed to constants).
+// FR-015 / [2b §1.2] caller-tunable DoS caps: same contract as parse(),
+// but threads an OffsetTable::Config so the per-instance group cap is
+// tunable through the public Parser API (not collapsed to constants).
 [[nodiscard]] core::expected_t<MessageView<Mode>> parse(frame_view const& frame
                                                         [[clang::lifetimebound]],
                                                         std::pmr::memory_resource* mr,
@@ -695,7 +710,9 @@ public:
 [[nodiscard]] core::expected_t<MessageView<access_mode::Iter>> parse_iter(
     frame_view const& frame [[clang::lifetimebound]]) noexcept
     [[clang::lifetimebound]] requires(Mode == access_mode::Iter) {
-        return MessageView<access_mode::Iter>{frame};
+        // Gate B r8 P-1: thread THIS parser's bundle. Returning `{frame}` here dropped
+        // the dictionary this parser was constructed with, silently.
+        return MessageView<access_mode::Iter>{frame, hooks_};
     }
 
 private : dict_hooks hooks_ {};  // fixpp#426: replaces the separate opaque_dict_/

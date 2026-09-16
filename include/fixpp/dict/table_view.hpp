@@ -825,7 +825,12 @@ public:
     // no-op (`length_pair_data_tag` already answers 0 for an unregistered
     // key), so callers need not pre-filter FieldRef::length_pair_data_tag==0.
     void set_length_pair_data_tag(std::uint16_t length_tag, std::uint16_t data_tag) {
-        if (data_tag == 0) {
+        // Zero is the "no pair" answer of BOTH accessors, so it cannot be half of one:
+        // storing 0 -> data would read back as a forward pair whose inverse says absent,
+        // and the two directions could never agree again (Gate B r8 P-2). A zero
+        // data_tag stays a silent no-op, which is what Dictionary::as_table_view()
+        // relies on for every field with no declared partner.
+        if (length_tag == 0 || data_tag == 0) {
             return;
         }
         // Strong guarantee (Gate B r6 M-2) at O(1) (Gate B r7 N-1): capture what this
