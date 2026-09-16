@@ -46,6 +46,13 @@
 #include <tuple>
 #include <vector>
 
+// fixpp#426 (Gate B r11): MSVC's debug STL draws a hidden _Container_proxy per
+// std::pmr container through GLOBAL operator new, so the sweep below fails one of
+// THOSE instead of the operation's own allocation and terminates inside
+// member-initialisation. See the macro's own note for why this is a runtime skip
+// rather than an STL-keyed compile-out.
+#include "../support/msvc_debug_arena_skip.hpp"
+
 // ── Sanitizer gate (mirrors reify_membership_copy_oom_test.cpp) ──────────────
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer) || \
@@ -185,18 +192,21 @@ table_view with_one_pair() {
 }
 
 TEST(TableViewPairOom, NewPairInsertionIsAllOrNothing) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_NEW_SWEEP();
     sweep_allocation_failures(
         "new pair", [] { return with_one_pair(); },
         [](table_view& tv) { tv.set_length_pair_data_tag(6001, 6002); });
 }
 
 TEST(TableViewPairOom, RepairingTheLengthSideIsAllOrNothing) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_NEW_SWEEP();
     sweep_allocation_failures(
         "re-pair length", [] { return with_one_pair(); },
         [](table_view& tv) { tv.set_length_pair_data_tag(5001, 5003); });
 }
 
 TEST(TableViewPairOom, RepairingTheDataSideIsAllOrNothing) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_NEW_SWEEP();
     sweep_allocation_failures(
         "re-pair data", [] { return with_one_pair(); },
         [](table_view& tv) { tv.set_length_pair_data_tag(5011, 5002); });
@@ -206,6 +216,7 @@ TEST(TableViewPairOom, RepairingTheDataSideIsAllOrNothing) {
 // holding pairs while `has_nonstandard_pair()` still reads false — pairs no bundle
 // built from that target would ever honour.
 TEST(TableViewPairOom, CopyAssignmentIsAllOrNothing) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_NEW_SWEEP();
     table_view source;
     source.set_length_pair_data_tag(5001, 5002);
     source.set_length_pair_data_tag(5011, 5012);
@@ -216,6 +227,7 @@ TEST(TableViewPairOom, CopyAssignmentIsAllOrNothing) {
 
 // A target that already holds pairs must not lose them to a failed assignment.
 TEST(TableViewPairOom, CopyAssignmentOverAPopulatedTargetIsAllOrNothing) {
+    FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_NEW_SWEEP();
     table_view source;
     source.set_length_pair_data_tag(6001, 6002);
 
