@@ -95,9 +95,13 @@ static constexpr std::string_view kFix42WithNewOrderSingleXml = R"xml(
       <field number="38"  name="OrderQty"   required="N"/>
       <field number="58"  name="Text"       required="N"/>
       <field number="68"  name="TotNoOrders" required="N"/>
+      <field number="354" name="EncodedTextLen" required="N"/>
+      <field number="355" name="EncodedText"    required="N"/>
       <group number="78" name="NoAllocs" required="N">
         <field number="79" name="AllocAccount" required="N"/>
         <field number="80" name="AllocQty"     required="N"/>
+        <field number="360" name="EncodedAllocTextLen" required="N"/>
+        <field number="361" name="EncodedAllocText"    required="N"/>
         <group number="539" name="NoNested" required="N">
           <field number="524" name="NestedPartyID" required="N"/>
         </group>
@@ -119,6 +123,10 @@ static constexpr std::string_view kFix42WithNewOrderSingleXml = R"xml(
     <field number="38"  name="OrderQty"     type="QTY"/>
     <field number="58"  name="Text"          type="STRING"/>
     <field number="68"  name="TotNoOrders"  type="INT"/>
+    <field number="354" name="EncodedTextLen"      type="LENGTH"/>
+    <field number="355" name="EncodedText"         type="DATA"/>
+    <field number="360" name="EncodedAllocTextLen" type="LENGTH"/>
+    <field number="361" name="EncodedAllocText"    type="DATA"/>
     <field number="78"  name="NoAllocs"      type="NUMINGROUP"/>
     <field number="79"  name="AllocAccount"  type="STRING"/>
     <field number="80"  name="AllocQty"      type="QTY"/>
@@ -1078,6 +1086,7 @@ TEST(MessageWrite, ZeroGlobalHeapSetCommitGuard) {
         (void)fixpp_msg_set_decimal(warmup, 38, wu_dec);        // Float (QTY) field
         (void)fixpp_msg_remove_tag(warmup, 55);                 // PMR-vector erase warm-up
         (void)fixpp_msg_set_string(warmup, 55, "WU_RESTR", 8);  // re-set after remove
+        (void)fixpp_msg_set_data(warmup, 355, reinterpret_cast<const uint8_t*>("WU"), 2);  // 1.6
 
         const uint8_t* wup = nullptr;
         size_t wul = 0;
@@ -1097,7 +1106,9 @@ TEST(MessageWrite, ZeroGlobalHeapSetCommitGuard) {
     //
     // Covers ALL setters (SC-003: "every setter"):
     //   set_string, set_bytes (type-agnostic, skips dict check), set_int,
-    //   set_double, set_decimal, remove_tag, commit.
+    //   set_double, set_decimal, remove_tag, commit; since 1.6 (fixpp#428)
+    //   set_data, entry_set_data and group_end, so commit also runs the
+    //   Length+Data pass over a real pair at top level and in a group instance.
     //
     // set_bytes: tag 58 (Text, STRING) — set_bytes bypasses dict type check,
     //   so it works on any non-framing tag; tag 58 is declared for "D" in the
@@ -1120,6 +1131,18 @@ TEST(MessageWrite, ZeroGlobalHeapSetCommitGuard) {
     dec.exponent = 0;
     const uint8_t kBytesPayload[] = {'G', 'U', 'A', 'R', 'D'};
 
+    // fixpp#428: the group instance is opened OUTSIDE the window, so only
+    // entry_set_data and group_end are measured inside it. The group is the first
+    // top-level entry, so the remove_tag(11) below cannot shift its index (#447).
+    fixpp_group_builder_t* gb = nullptr;
+    fixpp_entry_t* entry = nullptr;
+    ASSERT_EQ(fixpp_msg_group_begin(msg, 78, &gb), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_group_builder_add_entry(gb, &entry), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_entry_set_string(entry, 79, "ACC", 3), FIXPP_ERR_OK);
+    fixpp_error_t rc_data = FIXPP_ERR_OK;
+    fixpp_error_t rc_entry_data = FIXPP_ERR_OK;
+    fixpp_error_t rc_group_end = FIXPP_ERR_OK;
+
     if (alloc_guard_start) alloc_guard_start();
 
     rc_str = fixpp_msg_set_string(msg, 11, "GUARD_STR", 9);  // STRING field (ClOrdID)
@@ -1130,6 +1153,10 @@ TEST(MessageWrite, ZeroGlobalHeapSetCommitGuard) {
     rc_dec = fixpp_msg_set_decimal(msg, 38, dec);                 // Float/QTY (overwrite)
     rc_remove = fixpp_msg_remove_tag(msg, 11);                    // PMR-vector erase
     rc_restr = fixpp_msg_set_string(msg, 11, "GUARD_RESTR", 11);  // re-set after remove
+    rc_data = fixpp_msg_set_data(msg, 355, kBytesPayload, sizeof(kBytesPayload));  // 1.6 pair
+    rc_entry_data =
+        fixpp_entry_set_data(entry, 361, kBytesPayload, sizeof(kBytesPayload));  // 1.6 pair
+    rc_group_end = fixpp_msg_group_end(msg, gb);
     rc_commit = fixpp_msg_commit(msg, &payload, &payload_len);
 
     if (alloc_guard_end) alloc_guard_end();  // exits(1) under mallocnesia if any global alloc fired
@@ -1142,6 +1169,9 @@ TEST(MessageWrite, ZeroGlobalHeapSetCommitGuard) {
     EXPECT_EQ(rc_dec, FIXPP_ERR_OK) << "set_decimal(tag 38, Float/QTY field) failed";
     EXPECT_EQ(rc_remove, FIXPP_ERR_OK) << "remove_tag(tag 11) failed";
     EXPECT_EQ(rc_restr, FIXPP_ERR_OK) << "re-set_string(tag 11) after remove failed";
+    EXPECT_EQ(rc_data, FIXPP_ERR_OK) << "set_data(tag 355) failed";
+    EXPECT_EQ(rc_entry_data, FIXPP_ERR_OK) << "entry_set_data(tag 361) failed";
+    EXPECT_EQ(rc_group_end, FIXPP_ERR_OK) << "group_end failed";
     EXPECT_EQ(rc_commit, FIXPP_ERR_OK) << "commit failed";
     EXPECT_NE(payload, nullptr) << "committed payload must not be null";
     EXPECT_GT(payload_len, 0U) << "committed payload must be non-empty";

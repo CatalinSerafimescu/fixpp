@@ -19,7 +19,6 @@ struct G_1981Args {
     ::std::optional<::std::string_view> underlying_event_month_year{};
     ::std::optional<::fixpp::decimal_t> underlying_event_px{};
     ::std::optional<::std::string_view> underlying_event_text{};
-    ::std::optional<::std::int64_t> encoded_underlying_event_text_len{};
     ::std::optional<::std::string_view> encoded_underlying_event_text{};
 };
 

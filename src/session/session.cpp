@@ -56,6 +56,7 @@
 #include <fixpp/session/session_event.hpp>  // 013 T036: SessionEvent variants
 #include <fixpp/session/session_fsm.hpp>    // 005 US1: fsm_state enum (T023–T025)
 #include <fixpp/transport/transport_factory.hpp>  // cfg_.transport_factory_override deref (reconnect_fsm.hpp now fwd-decls it per [const §XV.9])
+#include <fixpp/wire/length_data_carry.hpp>  // fixpp#426: counted Data values
 #include <fixpp/wire/tag_scan.hpp>  // fixpp#421: accumulate_tag_digit (send + replay scanners)
 #include <fixpp/wire/writer.hpp>    // 013 FR-010: replay-frame re-serialization
 // 014 T015: handshake_result full definition needed for install_reconnected_transport.
@@ -1709,6 +1710,14 @@ namespace {
 using fixpp::session::detail::FrameHeader;
 using fixpp::session::detail::scan_frame_header;
 
+// fixpp#426: the Length+Data pairs a Session's own field scanners split by —
+// its dictionary once open() has built `inbound_tv_`, else the standard table
+// alone. The result aliases `*tv`, which the Session owns for its lifetime.
+[[nodiscard]] fixpp::wire::dict_hooks session_hooks(
+    std::shared_ptr<const fixpp::dict::table_view> const& tv) noexcept {
+    return tv ? fixpp::wire::dict_hooks::for_table_view(*tv) : fixpp::wire::dict_hooks::none();
+}
+
 // fixpp#421: the tag of an outbound field — non-empty, ASCII digits, no leading
 // zero, at most 65535 — or nullopt. Stricter than the inbound scanners, which
 // accept zero padding (wire/tag_scan.hpp): an outbound tag is written as is, so a
@@ -1846,7 +1855,7 @@ struct SendingTimeStamp {
 // FIXT-scoped table, for no behavioural gain. Keep S as it is.
 [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_replay_frame(
     std::span<std::byte> out, std::span<const std::byte> stored,
-    std::string_view resend_sending_time) noexcept {
+    std::string_view resend_sending_time, fixpp::wire::dict_hooks const& hooks) noexcept {
     fixpp::wire::Writer w(out, ::fixpp::detail::arena_upstream());
     const std::byte SOH{0x01};
     const std::byte EQ{static_cast<std::byte>('=')};
@@ -1862,13 +1871,22 @@ struct SendingTimeStamp {
     // `malformed` and skipped; a digit-only tag that parse_outbound_tag rejects is
     // `bad_tag`. Shared by the pre-scan pass and the write loop below so the two
     // never diverge.
-    enum class FieldStatus : std::uint8_t { ok, malformed, bad_tag };
+    //
+    // fixpp#426: a Data value counted by the Length field just before it is read
+    // by that count, so a SOH inside it stays in the value and is re-emitted
+    // verbatim (append_raw copies bytes); the Length was emitted just before it,
+    // so the pair stays adjacent. A count that runs past the stored frame or is not
+    // followed by SOH is `bad_count`: the frame cannot be rebuilt faithfully, so
+    // the slot is gap-filled, like `bad_tag` (design §4). Each pass threads its own
+    // `carry`.
+    enum class FieldStatus : std::uint8_t { ok, malformed, bad_tag, bad_count };
     struct FieldScan {
         FieldStatus status;
         std::uint16_t tag;
         std::span<const std::byte> value;
     };
-    const auto scan_field = [&](std::size_t& i) -> FieldScan {
+    const auto scan_field = [&](std::size_t& i,
+                                fixpp::wire::length_data_carry& carry) -> FieldScan {
         const std::size_t tag_start = i;
         bool digits = true;
         while (i < n && stored[i] != EQ && stored[i] != SOH) {
@@ -1882,13 +1900,16 @@ struct SendingTimeStamp {
             const FieldStatus status = (i < n && stored[i] == EQ && digits)
                                            ? FieldStatus::bad_tag
                                            : FieldStatus::malformed;
+            carry.reset();
             while (i < n && stored[i] != SOH) ++i;
             if (i < n) ++i;
             return {.status = status, .tag = 0, .value = {}};
         }
         ++i;  // skip '='
         const std::size_t vstart = i;
-        while (i < n && stored[i] != SOH) ++i;
+        const auto value = carry.read_value(stored, vstart, *tag, hooks);
+        if (!value) return {.status = FieldStatus::bad_count, .tag = *tag, .value = {}};
+        i = value->end;
         std::span<const std::byte> val{stored.data() + vstart, i - vstart};
         if (i < n) ++i;  // skip SOH
         return {.status = FieldStatus::ok, .tag = *tag, .value = val};
@@ -1911,11 +1932,15 @@ struct SendingTimeStamp {
     std::string_view orig_sending_time;
     bool stored_has_52 = false;  // separate from emptiness: an empty 52 is still restamped in place
     {
+        fixpp::wire::length_data_carry carry;
         std::size_t i = 0;
         while (i < n) {
-            auto fr = scan_field(i);
+            auto fr = scan_field(i, carry);
             if (fr.status == FieldStatus::bad_tag) {  // before a missing 52 can be reported
                 return std::unexpected(fixpp::core::error::wire_tag_out_of_range);
+            }
+            if (fr.status == FieldStatus::bad_count) {
+                return std::unexpected(fixpp::core::error::wire_invalid_field_format);
             }
             if (fr.status != FieldStatus::ok) continue;
             if (fr.tag == 52) {
@@ -1953,11 +1978,15 @@ struct SendingTimeStamp {
 
     constexpr std::array<std::uint32_t, 6> kReplayHeaderTags = {8, 34, 35, 49, 52, 56};
     bool inserted_pd = false;
+    fixpp::wire::length_data_carry carry;
     std::size_t i = 0;
     while (i < n) {
-        auto fr = scan_field(i);
+        auto fr = scan_field(i, carry);
         if (fr.status == FieldStatus::bad_tag) {
             return std::unexpected(fixpp::core::error::wire_tag_out_of_range);
+        }
+        if (fr.status == FieldStatus::bad_count) {
+            return std::unexpected(fixpp::core::error::wire_invalid_field_format);
         }
         if (fr.status != FieldStatus::ok) continue;
         if (fr.tag == 9 || fr.tag == 10 || fr.tag == 43 || fr.tag == 122)
@@ -2197,7 +2226,16 @@ std::optional<Session::RejectDecision> Session::validate_inbound_(
     if (!vg_feed || vg_feed->empty()) {
         return std::nullopt;
     }
-    fixpp::wire::Parser<fixpp::wire::access_mode::Index> vg_parser;
+    // fixpp#426 (design §3, item 10): dict-backed over the same table_view
+    // the validator holds a copy of, so the OffsetTable this parse builds
+    // splits Length+Data pairs (including any dictionary-declared custom
+    // pair) the same way the validator's own field walk does. `validator_`
+    // non-null implies `inbound_tv_` non-null (both are set together at
+    // open(), guarded on `cfg_.dictionary && inbound_tv_` — see the ctor
+    // there) — mirrors the established `Parser<Index> pd_parser{*inbound_tv_}`
+    // pattern in `parse_and_dispatch_` above.
+    assert(inbound_tv_ != nullptr);
+    fixpp::wire::Parser<fixpp::wire::access_mode::Index> vg_parser{*inbound_tv_};
     std::array<std::byte, 512> vg_scratch_buf{};
     std::pmr::monotonic_buffer_resource vg_scratch_mr{vg_scratch_buf.data(), vg_scratch_buf.size(),
                                                       ::fixpp::detail::arena_upstream()};
@@ -2307,7 +2345,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // Arena: kInboundParseArena (16384) matches the dispatch arena so the gate
             // never under-parses relative to dispatch. [simplify-triage FIX-1/FIX-2]
             if (cfg_.validate_inbound_messages && validator_) {
-                auto vg_hdr = scan_frame_header(frame);
+                auto vg_hdr = scan_frame_header(frame, session_hooks(inbound_tv_));
                 if (vg_hdr.msg_type != "3" && vg_hdr.msg_type != "5") {
                     if (auto rej = validate_inbound_(frame, vg_hdr)) {
                         co_return co_await emit_session_reject_(parse_seqnum(vg_hdr.msg_seq_num),
@@ -2326,7 +2364,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 frame,
                 cfg_.target_comp_id,  // expected_sender: peer's 49= is our target
                 cfg_.sender_comp_id,  // expected_target: peer's 56= is our sender
-                cfg_.begin_string);
+                cfg_.begin_string, session_hooks(inbound_tv_));
 
             if (!result) {
                 // Refusal — BeginString/CompID mismatch or not-Logon.
@@ -2360,7 +2398,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // [029 INV-H1 fix; triage root-cause #1/#2; contracts C3.1]
             bool logon_inbound_advanced = false;
             {
-                auto hdr = scan_frame_header(frame);
+                auto hdr = scan_frame_header(frame, session_hooks(inbound_tv_));
                 peer_789_raw = hdr.next_expected_msg_seq_num;
                 peer_789_present = hdr.next_expected_present;
                 // 070-fix44-closeout S-030 (FR-007): capture the peer's advertised
@@ -2696,7 +2734,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
                             : SendingTimeStamp{};
                     const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
-                    const seqnum_t rj_ref = parse_seqnum(scan_frame_header(frame).msg_seq_num);
+                    const seqnum_t rj_ref = parse_seqnum(
+                        scan_frame_header(frame, session_hooks(inbound_tv_)).msg_seq_num);
                     std::array<std::byte, 512> rj_buf{};
                     auto rj_r = fixpp::session::build_reject(
                         std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
@@ -2942,7 +2981,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // (4) seqnum class
             // (5) message-type-for-state
 
-            auto hdr = scan_frame_header(frame);
+            auto hdr = scan_frame_header(frame, session_hooks(inbound_tv_));
 
             // ── 041-validation-gate-wiring T014: dictionary-driven validate gate ─
             // Runs after scan_frame_header (hdr.msg_type available for 3/5 exemption)
@@ -3978,7 +4017,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             //   inbound Logout → Disconnected (confirm)
             //   all other inbound → (drained) — silently accepted, no FSM change
             //     (seqnum NOT advanced, no fromAdmin/fromApp dispatch)
-            auto hdr = scan_frame_header(frame);
+            auto hdr = scan_frame_header(frame, session_hooks(inbound_tv_));
             if (hdr.msg_type == "5") {  // Logout(35=5) confirms our Logout
                 record_state_transition_(fsm_state::Disconnected);
                 logout_confirmed_ = true;  // signal run_logout_phase1 coroutine
@@ -4011,7 +4050,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // hdr.msg_seq_num for the RefSeqNum in any emitted Reject.
             // The hdr is reused for the SendingTime/seqnum guards below.
             // [041-validation-gate-wiring T014; data-model guard-precedence C-2]
-            auto hdr = scan_frame_header(frame);
+            auto hdr = scan_frame_header(frame, session_hooks(inbound_tv_));
 
             // ── 041-validation-gate-wiring T014: validate-first gate ──────────────
             // Run BEFORE interpret_logon: a dict-invalid Logon-ack produces a Reject
@@ -4030,8 +4069,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 }
             }
 
-            auto result = fixpp::session::interpret_logon(frame, cfg_.target_comp_id,
-                                                          cfg_.sender_comp_id, cfg_.begin_string);
+            auto result =
+                fixpp::session::interpret_logon(frame, cfg_.target_comp_id, cfg_.sender_comp_id,
+                                                cfg_.begin_string, session_hooks(inbound_tv_));
 
             if (!result) {
                 // Either a refused Logon (CompID/BeginString) OR a non-Logon
@@ -4529,25 +4569,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send(
 // Validation rules (boundary-aware token matching):
 //   (1) payload must not be empty;
 //   (2) payload must begin with the bytes '3','5','=' (i.e. "35=" at offset 0);
-//   (3) no DUPLICATE 35= field (scan for SOH+"35=");
-//   (4) no embedded session header/trailer tag at a field boundary:
-//       tags 8, 9, 34, 49, 52, 56, 10 — matched as "<tag>=" ONLY at a
-//       field boundary (start of payload or right after SOH), so "54=" / "150="
-//       / "134=" do NOT false-match.
-//
-// Helper: returns true if the byte-string `sv` contains the token `tok` at any
-// field boundary (start of sv, or preceded by \x01).  noexcept, no allocation.
-// [020-g2-business-messages T010; research.md D1 "Opaque-payload validation"]
-static bool has_boundary_token(std::string_view sv, std::string_view tok) noexcept {
-    if (tok.size() > sv.size()) return false;
-    // Check at offset 0 (start of payload is a field boundary).
-    if (sv.starts_with(tok)) return true;
-    // Scan for \x01 followed by tok.
-    for (std::size_t i = 1; i + tok.size() <= sv.size(); ++i) {
-        if (sv[i - 1] == '\x01' && sv.substr(i, tok.size()) == tok) return true;
-    }
-    return false;
-}
+//   (3) no DUPLICATE 35= field, and
+//   (4) no session header/trailer field (tags 8, 9, 34, 49, 52, 56, 10) after it.
+//   Both are checked on real fields only, by send_impl's per-field walk: a Data
+//   value counted by its Length is one field (fixpp#426), so `<SOH>34=` inside
+//   EncodedText is neither a second field nor a MsgSeqNum.
 
 // fixpp#422: is `tag` a StandardHeader field? send_impl moves such a field ahead
 // of the payload's body fields; a strict peer (QuickFIX-J UseDataDictionary=Y)
@@ -4603,49 +4629,36 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
             }
         }
 
-        // (3) Duplicate 35=: a second 35= at a field boundary (after the leading one).
-        // The leading "35=" is at offset 0; look for any further SOH+"35=".
-        bool has_dup_35 = false;
-        for (std::size_t i = 1; i + 3 <= pv.size(); ++i) {
-            if (pv[i - 1] == '\x01' && pv[i] == '3' && pv[i + 1] == '5' && pv[i + 2] == '=') {
-                has_dup_35 = true;
-                break;
-            }
-        }
-        if (has_dup_35) {
-            co_return std::unexpected(error::app_payload_malformed);
-        }
-
-        // (4) Embedded session header/trailer tags at field boundaries.
-        // Tags: 8=, 9=, 34=, 49=, 52=, 56=, 10=.
-        // Use has_boundary_token; the leading "35=" is allowed and already verified.
-        // Note: "8=" must match only as a complete field tag (not e.g. inside "38=").
-        // has_boundary_token ensures boundary-context.
-        if (has_boundary_token(pv, "8=") || has_boundary_token(pv, "9=") ||
-            has_boundary_token(pv, "34=") || has_boundary_token(pv, "49=") ||
-            has_boundary_token(pv, "52=") || has_boundary_token(pv, "56=") ||
-            has_boundary_token(pv, "10=")) {
-            co_return std::unexpected(error::app_payload_malformed);
-        }
+        // (3)/(4) — a second 35= and an embedded header/trailer tag — are checked
+        // by the per-field walk below, on real fields only (fixpp#426).
     }
 
     // ── 022 T008+T009: Per-field scanner + AllowPosDup excision ─────────────────
     // Anchors: research.md D2/D5/D6; data-model.md §2 (INV-1..5); contracts §C2.1–C2.6.
     //
     // T008 — Scanner: walk every post-35= field and validate it is
-    //   <non-empty digit-only tag, no leading zero, <= 65535>=<value>\x01
-    // On the FIRST malformed field → return app_payload_malformed=131, no seqnum,
-    // no transmit. The 020 floor guarantees trailing SOH so every interior field IS
-    // SOH-terminated; there is no run-off-the-end case.
+    //   <non-empty digit-only tag, no leading zero, <= 65535>=<non-empty value>\x01
+    //   with a tag that is neither 35 (020 rule 3) nor a session header/trailer tag
+    //   (020 rule 4). On the FIRST malformed field → return app_payload_malformed=131,
+    //   no seqnum, no transmit.
+    //
+    // fixpp#426 — a Data value counted by the Length field just before it is read
+    //   by that count, so a SOH inside it is not a field boundary and nothing inside
+    //   it is checked, moved or excised as a field. A count that runs past the
+    //   payload or is not followed by SOH is malformed; the payload is the caller's,
+    //   so it fails closed (design §4). The pairs are the session's dictionary, else
+    //   the standard table.
     //
     // T009 — Excision + header partition (only over a fully-validated payload):
     //   copy the leading 35= field, then the header-class post-35= fields
     //   (is_send_header_tag), then the remaining fields, each group in original
     //   order, into strip_buf; rebind app_payload to that buffer (fixpp#422).
+    //   A counted Data value goes to the same group as its Length, so the pair stays
+    //   adjacent even when the two tags classify differently.
     //   allow_pos_dup==false (default) skips 43 and 122; allow_pos_dup==true keeps
     //   their values verbatim, at their header position.
     //   INV-1: 35= (field 0) never touched.
-    //   INV-2: only complete, boundary-anchored 43=..\x01 / 122=..\x01 removed.
+    //   INV-2: only complete, real 43=..\x01 / 122=..\x01 fields removed.
     //   INV-3: stripped payload remains 35=-leading SOH-delimited.
     //   INV-4: no heap — ONE stack scratch strip_buf (sized same as body_buf).
     //   INV-5: build_replay_frame is NOT on this path.
@@ -4658,48 +4671,49 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
 
     {
         std::string_view pv{reinterpret_cast<const char*>(app_payload.data()), app_payload.size()};
+        const std::span<const std::byte> pb = app_payload;
+        const fixpp::wire::dict_hooks hooks = session_hooks(inbound_tv_);
 
         // Skip the leading 35=<value>\x01 field (field 0 — never modified).
         // pv.back()=='\x01' is guaranteed by the 020 floor; find('\x01') always succeeds.
         const std::size_t lead_soh = pv.find('\x01');
-        // lead_soh != npos: guaranteed (020 floor ensures trailing SOH → at least one SOH).
+
+        struct PayloadField {
+            std::uint16_t tag;
+            std::size_t start;  // first byte of the tag
+            std::size_t end;    // one past the terminating SOH
+            bool counted;       // a Data value read by its Length's count
+        };
+        // Steps over the field at `pos`; nullopt when it is malformed. One `carry`
+        // is threaded through each walk.
+        const auto next_field =
+            [&](std::size_t pos,
+                fixpp::wire::length_data_carry& carry) -> std::optional<PayloadField> {
+            const std::size_t eq = pv.find_first_of("=\x01", pos);
+            // No '=' before the next SOH, including an empty field.
+            if (eq == std::string_view::npos || pv[eq] != '=') return std::nullopt;
+            const auto tag = parse_outbound_tag(pv.substr(pos, eq - pos));
+            if (!tag) return std::nullopt;
+            const std::size_t vstart = eq + 1;
+            const auto value = carry.read_value(pb, vstart, *tag, hooks);
+            // A malformed count, or an empty value (the payload ends with SOH).
+            if (!value || value->end == vstart) return std::nullopt;
+            return PayloadField{
+                .tag = *tag, .start = pos, .end = value->end + 1, .counted = value->counted};
+        };
 
         // --- T008: Scanner pass ---------------------------------------------
-        // Walk each field starting at lead_soh+1 (first byte after the 35= field).
-        // Each field is: everything up to (and including) the next '\x01'.
-        // Validate: non-zero-length content, contains '=', tag (bytes before '=')
-        // is non-empty and all ASCII digits, and value (bytes after '=') is non-empty.
         {
+            static constexpr std::array<std::uint16_t, 8> kRefusedTags = {8,  9,  10, 34,
+                                                                          35, 49, 52, 56};
+            fixpp::wire::length_data_carry carry;
             std::size_t pos = lead_soh + 1;
             while (pos < pv.size()) {
-                // Find the terminating SOH for this field.
-                const std::size_t soh = pv.find('\x01', pos);
-                // soh != npos is guaranteed: the 020 floor ensures pv ends with '\x01',
-                // so the last field IS SOH-terminated; pos is always inside pv.
-
-                // (a) Empty field (stray doubled SOH): soh == pos.
-                if (soh == pos) {
+                const auto field = next_field(pos, carry);
+                if (!field || std::ranges::find(kRefusedTags, field->tag) != kRefusedTags.end()) {
                     co_return std::unexpected(error::app_payload_malformed);
                 }
-
-                // (b) Must contain '='.
-                std::string_view field_sv = pv.substr(pos, soh - pos);
-                const std::size_t eq = field_sv.find('=');
-                if (eq == std::string_view::npos) {
-                    co_return std::unexpected(error::app_payload_malformed);
-                }
-
-                // (c) Tag (before '=') must be a canonical FIX tag (parse_outbound_tag).
-                if (!parse_outbound_tag(field_sv.substr(0, eq))) {
-                    co_return std::unexpected(error::app_payload_malformed);
-                }
-
-                // (d) Value (after '=', before SOH) must be non-empty.
-                if (eq + 1 >= field_sv.size()) {
-                    co_return std::unexpected(error::app_payload_malformed);
-                }
-
-                pos = soh + 1;
+                pos = field->end;
             }
         }
 
@@ -4721,29 +4735,27 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
             // Pass 1 copies the header-class fields, pass 2 the rest, each in the
             // caller's order, so no header field follows a body field on the wire.
             for (const bool header_pass : {true, false}) {
+                fixpp::wire::length_data_carry carry;
+                bool prev_header = false;
                 std::size_t pos = lead_soh + 1;
                 while (pos < pv.size()) {
-                    const std::size_t soh = pv.find('\x01', pos);
-                    // soh guaranteed to exist (scanner validated entire payload above).
-                    std::string_view field_sv = pv.substr(pos, soh - pos);
-
-                    // The scanner above accepted every tag, so the fallback never applies.
-                    const std::uint16_t tag =
-                        parse_outbound_tag(field_sv.substr(0, field_sv.find('='))).value_or(0);
-
-                    // INV-2: excise ONLY complete boundary-anchored 43 or 122 fields.
-                    // A literal "43=" inside another field's value never reaches this
-                    // branch because the scanner identified ONLY true tag-delimited fields.
-                    const bool excised = !cfg_.allow_pos_dup && (tag == 43 || tag == 122);
-
-                    if (!excised && is_send_header_tag(tag) == header_pass) {
+                    const auto field = next_field(pos, carry);
+                    if (!field) {  // the scanner pass accepted every field
+                        co_return std::unexpected(error::app_payload_malformed);
+                    }
+                    const bool header =
+                        field->counted ? prev_header : is_send_header_tag(field->tag);
+                    // INV-2: excise ONLY a real 43 or 122 field.
+                    const bool excised = !field->counted && !cfg_.allow_pos_dup &&
+                                         (field->tag == 43 || field->tag == 122);
+                    if (!excised && header == header_pass) {
                         // Copy the field (including its terminating SOH).
-                        if (!wstrip(pv.substr(pos, soh - pos + 1))) {
+                        if (!wstrip(pv.substr(field->start, field->end - field->start))) {
                             co_return std::unexpected(error::wire_frame_too_large);
                         }
                     }
-
-                    pos = soh + 1;
+                    prev_header = header;
+                    pos = field->end;
                 }
             }
 
@@ -5222,8 +5234,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
     std::span<const std::byte> span_to_store = frame;  // default: today's behavior
     bool skip_store = false;
     std::array<std::byte, kMaxMaskableLogonBytes> mask_buf{};  // coroutine-frame copy
-    if (fixpp::session::frame_has_genuine_tag554(frame) &&
-        scan_frame_header(frame).msg_type == "A") {
+    const fixpp::wire::dict_hooks frame_hooks = session_hooks(inbound_tv_);
+    if (fixpp::session::frame_has_genuine_tag554(frame, frame_hooks) &&
+        scan_frame_header(frame, frame_hooks).msg_type == "A") {
         if (frame.size() > kMaxMaskableLogonBytes) {
             // Over-bound: FAIL CLOSED — never persist cleartext. Skip the store
             // write for this frame (logged-then-proceed, I-07, mirroring the
@@ -5243,7 +5256,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
         } else {
             std::memcpy(mask_buf.data(), frame.data(), frame.size());
             (void)fixpp::session::mask_tag554_same_length_inplace(
-                std::span<std::byte>{mask_buf.data(), frame.size()});
+                std::span<std::byte>{mask_buf.data(), frame.size()}, frame_hooks);
             span_to_store = std::span<const std::byte>{mask_buf.data(), frame.size()};
         }
     }
@@ -5637,8 +5650,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::replay_outbound_range_(
 
         const bool app_present =
             rr && cv.captured &&
-            !is_admin_type(
-                scan_frame_header(std::span<const std::byte>{cv.buf.data(), cv.len}).msg_type);
+            !is_admin_type(scan_frame_header(std::span<const std::byte>{cv.buf.data(), cv.len},
+                                             session_hooks(inbound_tv_))
+                               .msg_type);
         if (app_present) {
             // #420: stamped per replayed message — SendingTime(52) is the time
             // this frame is sent, not the time the resend answer started.
@@ -5648,7 +5662,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::replay_outbound_range_(
             std::array<std::byte, kRpBufSize> rp_buf{};
             auto rp = build_replay_frame(std::span<std::byte>{rp_buf.data(), rp_buf.size()},
                                          std::span<const std::byte>{cv.buf.data(), cv.len},
-                                         st52_rp.value);
+                                         st52_rp.value, session_hooks(inbound_tv_));
             if (rp) {
                 // Built first, flushed second: an unbuildable slot must be able
                 // to join the open gap run below instead of splitting it.

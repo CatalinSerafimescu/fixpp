@@ -16,25 +16,21 @@ namespace fixpp::vlatest {
         auto r = bb.field(60, *args.transact_time);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (args.encoded_text_len) {
-        auto r = bb.field(354, *args.encoded_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (args.encoded_text) {
-        auto r = bb.field(355, *args.encoded_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = bb.field(354, static_cast<::std::int64_t>(args.encoded_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = bb.field(355, *args.encoded_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (args.reject_text) {
         auto r = bb.field(1328, *args.reject_text);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (args.encoded_reject_text_len) {
-        auto r = bb.field(1664, *args.encoded_reject_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (args.encoded_reject_text) {
-        auto r = bb.field(1665, *args.encoded_reject_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = bb.field(1664, static_cast<::std::int64_t>(args.encoded_reject_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = bb.field(1665, *args.encoded_reject_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (args.risk_limit_request_id) {
         auto r = bb.field(1666, *args.risk_limit_request_id);
@@ -437,13 +433,11 @@ namespace fixpp::vlatest {
         auto r = eh13.set_string(1556, *item13.instrument_scope_security_desc);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item13.instrument_scope_encoded_security_desc_len) {
-        auto r = eh13.set_int(1620, *item13.instrument_scope_encoded_security_desc_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item13.instrument_scope_encoded_security_desc) {
-        auto r = eh13.set_string(1621, *item13.instrument_scope_encoded_security_desc);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh13.set_int(1620, static_cast<::std::int64_t>(item13.instrument_scope_encoded_security_desc->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh13.set_string(1621, *item13.instrument_scope_encoded_security_desc);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item13.instrument_scope_settl_type) {
         auto r = eh13.set_string(1557, *item13.instrument_scope_settl_type);

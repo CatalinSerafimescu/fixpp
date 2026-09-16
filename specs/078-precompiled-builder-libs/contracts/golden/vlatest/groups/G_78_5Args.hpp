@@ -27,10 +27,8 @@ struct G_78_5Args {
     ::std::optional<::std::span<const G_539Args>> nested_party_i_ds{};
     ::std::optional<::std::int64_t> alloc_handl_inst{};
     ::std::optional<::std::string_view> alloc_text{};
-    ::std::optional<::std::int64_t> encoded_alloc_text_len{};
     ::std::optional<::std::string_view> encoded_alloc_text{};
     ::std::optional<::std::string_view> firm_alloc_text{};
-    ::std::optional<::std::int64_t> encoded_firm_alloc_text_len{};
     ::std::optional<::std::string_view> encoded_firm_alloc_text{};
     ::std::optional<::std::string_view> secondary_individual_alloc_id{};
     ::std::optional<::std::string_view> alloc_customer_capacity{};

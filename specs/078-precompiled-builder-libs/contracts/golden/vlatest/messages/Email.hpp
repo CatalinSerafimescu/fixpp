@@ -24,13 +24,11 @@ struct EmailArgs {
     ::std::optional<::std::string_view> order_id{};
     ::std::optional<::std::string_view> orig_time{};
     ::std::optional<char> email_type{};
-    ::std::optional<::std::int64_t> raw_data_length{};
     ::std::optional<::std::string_view> raw_data{};
     ::std::optional<::std::span<const groups::G_146_4Args>> related_sym{};
     ::std::optional<::std::string_view> subject{};
     ::std::optional<::std::string_view> email_thread_id{};
     ::std::optional<::std::span<const groups::G_215Args>> routing_i_ds{};
-    ::std::optional<::std::int64_t> encoded_subject_len{};
     ::std::optional<::std::string_view> encoded_subject{};
     ::std::optional<::std::span<const groups::G_555_2Args>> legs{};
     ::std::optional<::std::span<const groups::G_711_1Args>> underlyings{};

@@ -102,7 +102,6 @@ struct G_40090Args {
     ::std::optional<::std::int64_t> provision_cash_settl_quote_source{};
     ::std::optional<::std::string_view> provision_cash_settl_quote_reference_page{};
     ::std::optional<::std::string_view> provision_text{};
-    ::std::optional<::std::int64_t> encoded_provision_text_len{};
     ::std::optional<::std::string_view> encoded_provision_text{};
     ::std::optional<::std::span<const G_40174Args>> provision_party_i_ds{};
 };

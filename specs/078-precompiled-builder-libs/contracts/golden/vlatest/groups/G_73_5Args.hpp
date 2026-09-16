@@ -22,7 +22,6 @@ struct G_73_5Args {
     ::std::optional<::fixpp::decimal_t> avg_px{};
     ::std::optional<::std::int64_t> ord_rej_reason{};
     ::std::optional<::std::string_view> text{};
-    ::std::optional<::std::int64_t> encoded_text_len{};
     ::std::optional<::std::string_view> encoded_text{};
 };
 

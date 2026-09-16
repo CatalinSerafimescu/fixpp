@@ -63,3 +63,41 @@
 #else
 #define FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_HEAP_GUARD() ((void)0)
 #endif
+
+// FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_NEW_SWEEP(): GTEST_SKIP a test that SWEEPS a
+// global `operator new` override, failing the Nth allocation for every N in turn,
+// on the MSVC debug/asan lanes.
+//
+// ⚠️ This is a THIRD mechanism, not a synonym for the two above, and it gets its
+// own macro because a call site must not carry a sentence that is false of it:
+//   - ..._ARENA is for a byte-exact *std::pmr arena* sized to the failing byte;
+//     a sweep has no arena.
+//   - ..._GLOBAL_HEAP_GUARD is for a counter asserted to read *zero*; a sweep
+//     deliberately makes allocations fail and asserts the subject is unchanged.
+// The ROOT CAUSE is the same as both: MSVC's debug STL (_ITERATOR_DEBUG_LEVEL >= 1)
+// draws a hidden _Container_proxy per std::pmr container through GLOBAL operator
+// new. A sweep counts those proxy allocations as if they belonged to the operation
+// under test and duly fails one, so bad_alloc is thrown inside a container's
+// member-initialisation — before any noexcept ctor body can catch and degrade —
+// and escapes into std::terminate. The signature is a process death with NO gtest
+// output at all (fixpp#426, Gate B r11: `dictionary_table_view_pair_oom_test`
+// died this way on windows-msvc-debug while every Linux lane passed).
+//
+// ⚠️ Deliberately a runtime skip rather than widening the enclosing `#if` to
+// `defined(__GLIBCXX__)` (the reify_membership_copy_oom_test precedent). That
+// precedent exists because its ordinal is *calibrated* to libstdc++; a sweep is
+// calibration-free and runs correctly on libc++, so compiling it out by STL would
+// discard a lane where it genuinely works. The exception-safety behaviour remains
+// verified on windows-msvc-RELEASE (no debug iterators, no proxy) and on ALL Linux
+// lanes (debug/asan/tsan/ubsan/libc++); only the MSVC-debug-iterator interaction
+// is skipped.
+#if defined(_MSC_VER) && defined(_ITERATOR_DEBUG_LEVEL) && (_ITERATOR_DEBUG_LEVEL >= 1)
+#define FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_NEW_SWEEP()                                            \
+    GTEST_SKIP() << "MSVC debug STL draws a hidden _Container_proxy per std::pmr container "   \
+                    "through global operator new (_ITERATOR_DEBUG_LEVEL), so an allocation "   \
+                    "sweep fails one of those instead of the operation's own and terminates "  \
+                    "inside member-initialisation; the exception-safety behaviour is verified " \
+                    "on windows-msvc-release + all Linux lanes (debug/asan/tsan/ubsan/libc++)"
+#else
+#define FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_NEW_SWEEP() ((void)0)
+#endif

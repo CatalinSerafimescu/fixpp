@@ -20,6 +20,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/wire/dict_hooks.hpp>
+#include <fixpp/wire/length_data_carry.hpp>  // fixpp#426: counted Data values
 #include <fixpp/wire/tag_scan.hpp>  // 040 US1: accumulate_tag_digit shared bounded-tag helper
 #include <span>
 #include <string_view>
@@ -59,12 +61,20 @@ struct FrameHeader {
         false;  // tag 789 was present in frame (even if value is empty) — 027
 };
 
-[[nodiscard]] inline FrameHeader scan_frame_header(std::span<const std::byte> frame) noexcept {
+// fixpp#426: a Data value counted by its Length is read as one value, so a
+// `<SOH>34=` inside EncodedText is not a MsgSeqNum. `hooks` supplies the pairs
+// (the session's dictionary, or the standard table alone). A count that runs
+// past the frame or is not followed by SOH stops the scan: every field after it
+// stays absent rather than possibly forged (design §4).
+[[nodiscard]] inline FrameHeader scan_frame_header(
+    std::span<const std::byte> frame,
+    fixpp::wire::dict_hooks const& hooks = fixpp::wire::dict_hooks::none()) noexcept {
     FrameHeader h;
     const std::byte SOH{0x01};
     const std::byte EQ{static_cast<std::byte>('=')};
     std::size_t i = 0;
     const std::size_t n = frame.size();
+    fixpp::wire::length_data_carry carry;
 
     while (i < n) {
         std::uint32_t tag = 0;
@@ -84,6 +94,7 @@ struct FrameHeader {
             ++i;
         }
         if (i >= n || frame[i] != EQ || !tag_ok) {
+            carry.reset();
             while (i < n && frame[i] != SOH) {
                 ++i;
             }
@@ -94,9 +105,11 @@ struct FrameHeader {
         }
         ++i;  // skip '='
         std::size_t vstart = i;
-        while (i < n && frame[i] != SOH) {
-            ++i;
+        auto const value = carry.read_value(frame, vstart, static_cast<std::uint16_t>(tag), hooks);
+        if (!value) {
+            return h;
         }
+        i = value->end;
         std::string_view val(reinterpret_cast<const char*>(frame.data() + vstart), i - vstart);
         if (i < n) {
             ++i;

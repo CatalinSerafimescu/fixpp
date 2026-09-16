@@ -155,6 +155,31 @@ considered and NOT done.** It would change key types in an installed public head
 consumer, which is a different change from the one that fixed #264. The assertion is the proportionate
 guard for a footgun that is real but currently unreachable.
 
+## Length+Data pairs from Orchestra `lengthId` (#427)
+
+The Orchestra loader reads `lengthId`, so `Dictionary::length_pair_data_tag` answers for
+FIX Latest (B-427-1). The standard pair table (`include/fixpp/core/length_data_pairs.hpp`)
+is drift-tested against the union of all ten dictionaries. A dictionary's own pair matters
+only when neither of its tags is standard (B-426-3).
+
+⚠️ **The table lives in `core`, not `wire`.** `table_view` must classify a tag, and the
+dictionary layer may not include wire ([arch §2.3]); `include/fixpp/wire/length_data_pairs.hpp`
+survives as a re-export of the same names, so a reader who follows an older pointer lands on
+using-declarations rather than the table. ⚠️ `tools/check_layers.py` walks `src/` and
+`bindings/` only, so a dictionary **header** including a wire header passes it **silently** —
+the move was made for correctness, not because a gate demanded it.
+
+`table_view` carries one `bool` — some registered pair has **both** tags outside the standard
+table — because `wire::dict_hooks::for_table_view` installs the pair callback **only** when it
+is set, and that bundle is built per message. What was rejected: a sixth `dict_hooks` pointer to
+an inline 8 KiB bitset (contradicted design §3's five fields and `table_view`'s own
+footprint-sized structure), and computing the predicate inside `for_table_view` (it is on
+per-message paths). `set_length_pair_data_tag` is strongly exception-safe at **O(1)** — an
+earlier transactional version copied both maps per registered pair and made
+`Dictionary::as_table_view()` quadratic (+26.3 % on FIX42); do not reintroduce it. Zero is
+refused on **both** halves, at the setter *and* at pair formation in both loaders, because zero
+is the "no pair" answer of every accessor (fixpp#457 covers field number 0 generally).
+
 ## Where the design decisions live
 
 `2c-codegen.md` is **v1.4 post-sign-off** and was scanned clean in the Step-R sweep. ⚠️ Beside it sits

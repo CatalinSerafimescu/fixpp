@@ -14,7 +14,6 @@ namespace fixpp::vlatest {
 
 struct TradeMatchReportAckArgs {
     ::std::optional<::std::string_view> text{};
-    ::std::optional<::std::int64_t> encoded_text_len{};
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::std::string_view> trd_match_id{};
     ::std::optional<::std::string_view> appl_id{};
@@ -22,7 +21,6 @@ struct TradeMatchReportAckArgs {
     ::std::optional<::std::string_view> reject_text{};
     ::std::optional<::std::int64_t> appl_last_seq_num{};
     ::std::optional<bool> appl_resend_flag{};
-    ::std::optional<::std::int64_t> encoded_reject_text_len{};
     ::std::optional<::std::string_view> encoded_reject_text{};
     ::std::optional<::std::int64_t> trade_match_ack_status{};
     ::std::optional<::std::int64_t> trade_match_reject_reason{};

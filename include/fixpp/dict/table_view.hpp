@@ -39,14 +39,17 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
-#include <fixpp/dict/field_type.hpp>  // field_type (7-value enum)
+#include <fixpp/core/length_data_pairs.hpp>  // is_standard_pair_tag (the standard pairs)
+#include <fixpp/dict/field_type.hpp>         // field_type (7-value enum)
 #include <functional>
 #include <optional>  // group_first_field_exact (fixpp#215 item 2) — header-only, alloc-free
 #include <span>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 namespace fixpp::dict {
@@ -286,11 +289,27 @@ public:
     // Copy and move — both allowed. Copies duplicate the owned tables (used
     // when a single table_view configuration seeds multiple validator instances,
     // and by the mock-compatibility static_assert in validator_domain_test.cpp).
-    // Move is noexcept; copy may throw on allocation failure.
+    // Copy may throw on allocation failure. Move assignment is deliberately NOT
+    // spelled `noexcept` (Gate B r7 N-2): declaring it would make the assertion below
+    // observe that promise instead of proving it, and a member that later moved
+    // throwingly would keep the assertion green while turning the copy-assignment
+    // commit into std::terminate. Left to be inferred, the assertion is a proof.
     table_view(table_view const&) = default;
-    table_view& operator=(table_view const&) = default;
+    // Strong guarantee (Gate B r6 M-2): copy first, commit through the nothrow
+    // move-assignment below. A defaulted member-wise assignment can throw part way
+    // and leave this object holding a copied pair while `has_nonstandard_pair_`
+    // still reads false — a pair every scanner would then miss, because
+    // `dict_hooks::for_table_view` installs no callback for a flagless table.
+    // The nothrow-ness the commit relies on is asserted below the class, not assumed.
+    table_view& operator=(table_view const& other) {
+        if (this != &other) {
+            table_view tmp(other);
+            *this = std::move(tmp);
+        }
+        return *this;
+    }
     table_view(table_view&&) noexcept = default;
-    table_view& operator=(table_view&&) noexcept = default;
+    table_view& operator=(table_view&&) = default;
 
     // ── 6-method validator surface (C-1) ────────────────────────────────────
 
@@ -509,6 +528,35 @@ public:
         }
         return group_required_members(no_tag);  // legacy bare fallback
     }
+
+    // fixpp#426 (design §3): the Data tag this dictionary pairs with
+    // `length_tag`, or 0 when `length_tag` has no dictionary-declared pair.
+    // Dictionary-wide (a tag's Length+Data pairing is a per-tag property, not
+    // a per-msg_type one — mirrors `Dictionary::length_pair_data_tag`, the
+    // fixpp#427 runtime-handle accessor this table copies from at
+    // `Dictionary::as_table_view()`). Read by `wire::dict_hooks::
+    // data_tag_for_length`, which applies the standard table first and this
+    // one only for a tag neither side of the standard table names.
+    [[nodiscard]] std::uint16_t length_pair_data_tag(std::uint16_t length_tag) const noexcept {
+        auto const it = length_pair_data_tag_.find(length_tag);
+        return it == length_pair_data_tag_.end() ? std::uint16_t{0} : it->second;
+    }
+
+    // fixpp#428 (design §3): the inverse — the Length tag this dictionary pairs
+    // with `data_tag`, or 0. Read by `wire::dict_hooks::length_tag_for_data`.
+    [[nodiscard]] std::uint16_t data_pair_length_tag(std::uint16_t data_tag) const noexcept {
+        auto const it = data_pair_length_tag_.find(data_tag);
+        return it == data_pair_length_tag_.end() ? std::uint16_t{0} : it->second;
+    }
+
+    // True once some registered pair has BOTH tags outside the standard table — the
+    // only pairs `wire::dict_hooks` can honour (design §3: the standard table governs
+    // any tag it names). It only ever goes true, so a re-pair that drops the last such
+    // pair leaves a lookup that answers 0 rather than a wrong answer.
+    // `wire::dict_hooks::for_table_view` reads it to decide whether to install the pair
+    // callback at all: every shipped dictionary declares standard pairs only, and then
+    // no scanner pays a lookup per field.
+    [[nodiscard]] bool has_nonstandard_pair() const noexcept { return has_nonstandard_pair_; }
 
     // ── 081 Concern A: validator-private FIXT.1.1 framing surface ──────────
     // (research.md D-1/D-2, data-model.md E-2). Populated by
@@ -772,6 +820,61 @@ public:
         fixt_framing_types_[tag] = ft;
     }
 
+    // fixpp#426: registers `length_tag`'s dictionary-declared Data partner.
+    // Used EXCLUSIVELY by Dictionary::as_table_view(). A zero `data_tag` is a
+    // no-op (`length_pair_data_tag` already answers 0 for an unregistered
+    // key), so callers need not pre-filter FieldRef::length_pair_data_tag==0.
+    void set_length_pair_data_tag(std::uint16_t length_tag, std::uint16_t data_tag) {
+        // Zero is the "no pair" answer of BOTH accessors, so it cannot be half of one:
+        // storing 0 -> data would read back as a forward pair whose inverse says absent,
+        // and the two directions could never agree again (Gate B r8 P-2). A zero
+        // data_tag stays a silent no-op, which is what Dictionary::as_table_view()
+        // relies on for every field with no declared partner.
+        if (length_tag == 0 || data_tag == 0) {
+            return;
+        }
+        // Strong guarantee (Gate B r6 M-2) at O(1) (Gate B r7 N-1): capture what this
+        // call would overwrite, insert forward, and insert inverse under a rollback.
+        // Only the two insertions can throw, and only when they need a NEW node; the
+        // rollback is an erase (noexcept) or an assignment to a key that already
+        // exists, whose mapped type is a std::uint16_t — no allocation either way. So
+        // a failed allocation leaves both maps exactly as they were, and the "two
+        // directions never disagree" invariant (Gate B r1 G-4) holds through it.
+        //
+        // ⚠️ An earlier revision took the obvious route — copy both maps, mutate the
+        // copies, commit with nothrow moves. It is correct and it made
+        // `Dictionary::as_table_view()` quadratic in the pair count: measured +26.3 %
+        // on FIX42 and +10.4 % on FIX44 against the merge-base. Do not reintroduce it.
+        std::uint16_t const displaced_data = length_pair_data_tag(length_tag);
+        std::uint16_t const displaced_length = data_pair_length_tag(data_tag);
+
+        length_pair_data_tag_[length_tag] = data_tag;
+        try {
+            data_pair_length_tag_[data_tag] = length_tag;
+        } catch (...) {
+            if (displaced_data == 0) {
+                length_pair_data_tag_.erase(length_tag);
+            } else {
+                length_pair_data_tag_[length_tag] = displaced_data;
+            }
+            throw;
+        }
+
+        // Re-pairing either tag drops its old partner, so the two stay inverse. Both
+        // erases are noexcept, and they run only once the pair itself has landed.
+        if (displaced_data != 0 && displaced_data != data_tag) {
+            data_pair_length_tag_.erase(displaced_data);
+        }
+        if (displaced_length != 0 && displaced_length != length_tag) {
+            length_pair_data_tag_.erase(displaced_length);
+        }
+        // Last, so the flag never describes a pair that did not land.
+        if (!fixpp::core::detail::is_standard_pair_tag(length_tag) &&
+            !fixpp::core::detail::is_standard_pair_tag(data_tag)) {
+            has_nonstandard_pair_ = true;
+        }
+    }
+
 private:
     // O(log C) byte-exact, whole-token lookup over a sorted code list — no
     // case folding, no prefix matching. `token` is a slice of the caller's
@@ -916,6 +1019,22 @@ private:
     // (field_type_of_with_framing).
     std::unordered_set<std::uint16_t> fixt_framing_tags_;
     std::unordered_map<std::uint16_t, field_type> fixt_framing_types_;
+
+    // fixpp#426 (design §3): Length tag -> its dictionary-declared Data
+    // partner. Populated ONLY by Dictionary::as_table_view() from
+    // FieldRef::length_pair_data_tag (see set_length_pair_data_tag above).
+    std::unordered_map<std::uint16_t, std::uint16_t> length_pair_data_tag_;
+    // fixpp#428: Data tag -> its Length partner; filled beside the map above.
+    std::unordered_map<std::uint16_t, std::uint16_t> data_pair_length_tag_;
+    // See has_nonstandard_pair(): set by set_length_pair_data_tag, never cleared.
+    bool has_nonstandard_pair_ = false;
 };
+
+// The copy-assignment above commits through the move-assignment, whose exception
+// specification is INFERRED from the members (see the declaration). So this asserts a
+// property of every member, not a promise this class made about itself: a member that
+// stops being nothrow-move-assignable fails the build here instead of quietly turning
+// the strong guarantee into a call to std::terminate.
+static_assert(std::is_nothrow_move_assignable_v<table_view>);
 
 }  // namespace fixpp::dict

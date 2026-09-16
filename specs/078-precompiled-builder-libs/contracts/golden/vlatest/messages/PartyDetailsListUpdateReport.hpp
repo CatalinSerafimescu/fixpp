@@ -17,7 +17,6 @@ namespace fixpp::vlatest {
 struct PartyDetailsListUpdateReportArgs {
     ::std::optional<::std::string_view> text{};
     ::std::optional<::std::string_view> transact_time{};
-    ::std::optional<::std::int64_t> encoded_text_len{};
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<bool> last_fragment{};
     ::std::optional<::std::string_view> appl_id{};

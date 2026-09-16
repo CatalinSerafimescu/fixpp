@@ -746,6 +746,16 @@ void LoaderState::detect_length_pairs(pugi::xml_node const& root) {
     // global-fields path already captures all standard pairs; the secondary
     // walk retains the original coverage so no existing pair detection regresses.
     auto const mark_pair = [&](std::uint16_t length_tag, std::uint16_t data_tag) {
+        // fixpp#426 (Gate B r9 R-3): zero is the "no pair" answer of every pair
+        // accessor, so it can never be half of one. Refused HERE, at formation —
+        // refusing it only in `table_view::set_length_pair_data_tag` leaves
+        // `Dictionary::length_pair_data_tag(0)`, `field_ref` and `message_fields()`
+        // still reporting a zero-headed pair to any caller that does not go
+        // through a table_view. Field number 0 is itself invalid and both loaders
+        // accept it today: pre-existing and wider than pairs — fixpp#457.
+        if (length_tag == 0 || data_tag == 0) {
+            return;
+        }
         auto const lit = by_tag_.find(length_tag);
         if (lit != by_tag_.end()) {
             auto const nit = by_name_.find(lit->second);

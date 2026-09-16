@@ -471,6 +471,12 @@ table_view Dictionary::as_table_view() const {
             if (fr.rule != field_presence::NotDeclared) {
                 tv.add_valid_tag(mt, fr.tag);
             }
+            // fixpp#426: a tag's Length+Data pairing is dictionary-wide, not
+            // per-msg_type (mirrors Dictionary::length_pair_data_tag_impl,
+            // fixpp#427) — set_length_pair_data_tag no-ops on a zero tag, so
+            // re-registering the same pair from every message that declares
+            // it is idempotent.
+            tv.set_length_pair_data_tag(fr.tag, fr.length_pair_data_tag);
         }
 
         // ── group structure (legacy bare-no_tag store — PRE-063 UNCHANGED) ──

@@ -21,13 +21,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_AlgoCertificate
         auto r = bb.field(168, *args.effective_time);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (args.encoded_text_len) {
-        auto r = bb.field(354, *args.encoded_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (args.encoded_text) {
-        auto r = bb.field(355, *args.encoded_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = bb.field(354, static_cast<::std::int64_t>(args.encoded_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = bb.field(355, *args.encoded_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     {
         auto gh0 = bb.group_begin(453, 448);
@@ -363,13 +361,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_AlgoCertificate
         auto r = eh8.set_string(1556, *item8.instrument_scope_security_desc);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item8.instrument_scope_encoded_security_desc_len) {
-        auto r = eh8.set_int(1620, *item8.instrument_scope_encoded_security_desc_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item8.instrument_scope_encoded_security_desc) {
-        auto r = eh8.set_string(1621, *item8.instrument_scope_encoded_security_desc);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh8.set_int(1620, static_cast<::std::int64_t>(item8.instrument_scope_encoded_security_desc->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh8.set_string(1621, *item8.instrument_scope_encoded_security_desc);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item8.instrument_scope_settl_type) {
         auto r = eh8.set_string(1557, *item8.instrument_scope_settl_type);

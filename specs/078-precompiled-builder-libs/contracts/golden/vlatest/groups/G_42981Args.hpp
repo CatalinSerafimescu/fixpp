@@ -11,7 +11,6 @@
 namespace fixpp::vlatest::groups {
 
 struct G_42981Args {
-    ::std::optional<::std::int64_t> underlying_payment_stream_formula_length{};
     ::std::optional<::std::string_view> underlying_payment_stream_formula{};
     ::std::optional<::std::string_view> underlying_payment_stream_formula_desc{};
 };

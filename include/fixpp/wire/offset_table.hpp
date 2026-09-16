@@ -19,6 +19,7 @@
 #include <type_traits>
 #include <vector>
 
+#include "dict_hooks.hpp"  // fixpp::wire::dict_hooks (fixpp#426)
 #include "framer.hpp"
 #include "view.hpp"  // group_slice (mr-backed group instance slices)
 
@@ -75,17 +76,11 @@ static_assert(std::is_trivially_copyable_v<group_slices_result>);
 
 class OffsetTable {
 public:
-    using group_member_fn_t = bool (*)(void const*, group_context const&, std::uint16_t,
-                                       std::uint16_t) noexcept;
-
-    // 083 T057 (C-8.1): SIBLING of `group_member_fn_t`, resolving through the
-    // SAME `opaque_dict` to `table_view::group_first_field(msg_type,
-    // parent_path, no_tag)`. The callback set was membership-only; this widens
-    // it by exactly one entry. Internal seam — no public signature changes
-    // (C-8.3): `group_slices()` / `group_slices_status()` keep their
-    // signatures. Returns 0 when `no_tag` is not a group in that context.
-    using group_delim_fn_t = std::uint16_t (*)(void const*, group_context const&,
-                                               std::uint16_t) noexcept;
+    // fixpp#426: the loose (opaque_dict, group_member_fn, group_delim_fn)
+    // triple that used to live here is now `wire::dict_hooks`, so a table can
+    // no longer be handed a membership oracle from one dictionary and a
+    // delimiter oracle from another (brain/components/wire.md, "the DELIMITER
+    // oracle (#384)" — the mismatched-pairing sibling that closes).
 
     // Caller-tunable DoS caps (FR-015 / [2b §1.2] "configurable").
     // Defaults match the module-level inline constexpr above.
@@ -139,26 +134,25 @@ public:
     OffsetTable(frame_view const& frame [[clang::lifetimebound]],
                 std::pmr::memory_resource* mr [[clang::lifetimebound]]) noexcept;
 
-    // 384 (C-8.4 row 1): `group_delim_fn` has NO default. It used to default to
-    // `nullptr`, which let a caller build a table carrying a dictionary AND a
-    // membership predicate but NO delimiter oracle *without saying so* — the
+    // 384 (C-8.4 row 1) / fixpp#426: `hooks` has NO default. It used to be
+    // three separate parameters, the last of which (`group_delim_fn`) had no
+    // default itself so a caller building a table carrying a dictionary AND a
+    // membership predicate could not omit the delimiter oracle — the
     // half-threaded shape whose splitter behaviour C-8.4 row 1 justified for a
     // case (`opaque_dict == nullptr`) that #220 made unreachable. Passing an
-    // explicit `nullptr` is still supported and still takes the wire-derived
-    // split; what is gone is doing it by omission. See C-8.4 and
+    // explicit `dict_hooks::none()` is still supported and still takes the
+    // wire-derived split; what is gone is doing it by omission. See C-8.4 and
     // `group_slices_status()`.
     OffsetTable(frame_view const& frame [[clang::lifetimebound]],
-                std::pmr::memory_resource* mr [[clang::lifetimebound]], void const* opaque_dict,
-                group_member_fn_t group_member_fn, group_delim_fn_t group_delim_fn) noexcept;
+                std::pmr::memory_resource* mr [[clang::lifetimebound]], dict_hooks hooks) noexcept;
 
     OffsetTable(frame_view const& frame [[clang::lifetimebound]],
                 std::pmr::memory_resource* mr [[clang::lifetimebound]], Config cfg) noexcept;
 
-    // 384: same no-default rule as the sibling ctor above.
+    // 384 / fixpp#426: same no-default rule as the sibling ctor above.
     OffsetTable(frame_view const& frame [[clang::lifetimebound]],
                 std::pmr::memory_resource* mr [[clang::lifetimebound]], Config cfg,
-                void const* opaque_dict, group_member_fn_t group_member_fn,
-                group_delim_fn_t group_delim_fn) noexcept;
+                dict_hooks hooks) noexcept;
 
     // Non-RED build status (ok, or the wire_* cap/format error hit).
     [[nodiscard]] core::expected_t<void> build_status() const noexcept { return status_; }
@@ -290,20 +284,25 @@ public:
     // the ROOT OffsetTable (reached via entry_context.parent_cache_owner,
     // threaded UNCHANGED at every descent depth — nested sub-tables own no
     // cache of their own; data-model.md §"Nested sub-view cache", RC2/RC5,
-    // INV-G3). Keyed by `(slice_data, nested_no_tag)` where `slice_data` is
+    // INV-G3). Keyed by `(slice_data, hooks.opaque_dict(), nested_no_tag)` —
+    // the BUNDLE identity is part of the key (fixpp#426, Gate B r9 R-1: without
+    // it a warm hit served the FIRST caller's dictionary, silently) — where
+    // `slice_data` is
     // the outer entry slice's globally-unique `data` pointer
     // (`outer_occurrence_id`), collision-free at every nesting depth because
     // every occurrence's slice is carved in place from the one parent frame
     // buffer. Build-once / fetch-cached: on a first request for a given
-    // `(slice_data, nested_no_tag)` pair, builds a dict-aware sub-OffsetTable
+    // `(slice_data, bundle, nested_no_tag)` key, builds a dict-aware sub-OffsetTable
     // over the slice via `build_nested_subview` (T005, RC1 — slice-scoped
     // `len+1`, the whole-frame `build()` guard and `group_slice.len` stay
     // UNCHANGED) and caches it in THIS table's own per-message arena; a
-    // second distinct `nested_no_tag` over the SAME `slice_data` reuses the
-    // already-built sub-table (one sub-OffsetTable indexes every entry in
-    // the slice, so no rebuild is needed) — strictly fewer builds than
+    // second distinct `nested_no_tag` over the SAME `slice_data` AND the SAME
+    // bundle reuses the already-built sub-table (one sub-OffsetTable indexes
+    // every entry in the slice, so no rebuild is needed); a caller supplying a
+    // DIFFERENT bundle over the same slice gets its own build, because the
+    // split itself can differ — strictly fewer builds than
     // INV-G3's "at most one per key" bound. Repeat requests for the same
-    // pair allocate zero (the returned span is served from the sub-table's
+    // KEY allocate zero (the returned span is served from the sub-table's
     // own already-cached `group_slices()`). Empty span if the group is
     // absent, the slice is null, or the sub-build failed (degrade, never
     // throw/UB — mirrors `group_slices()`'s own degradation contract).
@@ -315,17 +314,23 @@ public:
     // not part of the stored path). Ignored on a warm cache hit (a built
     // sub-table's context was already seeded once at cold-build time and is
     // invariant for the rest of this parse, FR-005).
+    // fixpp#426: `hooks` replaces the separate (opaque_dict, group_member_fn)
+    // pair this overload used to take. The prior shape let a caller pass a
+    // membership oracle from one dictionary while this table's OWN
+    // `group_delim_fn_` (a different dictionary's delimiter oracle) resolved
+    // the split — the mismatched-pairing sibling
+    // brain/components/wire.md records under "the DELIMITER oracle (#384)".
+    // This overload no longer reads `group_delim_fn_` from `this` at all.
     [[nodiscard]] nested_slices_result nested_group_slices(
         std::byte const* slice_data [[clang::lifetimebound]], std::size_t slice_len,
-        std::uint16_t nested_no_tag, void const* opaque_dict, group_member_fn_t group_member_fn,
-        detail::generation_token gen, group_context const& ctx) const noexcept
-        [[clang::lifetimebound]];
+        std::uint16_t nested_no_tag, dict_hooks hooks, detail::generation_token gen,
+        group_context const& ctx) const noexcept [[clang::lifetimebound]];
 
-    // 065 T004: convenience overload forwarding to the 7-arg
-    // `nested_group_slices` above using THIS table's own `opaque_dict_` /
-    // `group_member_fn_` and a build-mode-safe token (`token_for_nested_cache()`
+    // 065 T004: convenience overload forwarding to the `nested_group_slices`
+    // overload above using THIS table's own `hooks_` and a build-mode-safe
+    // token (`token_for_nested_cache()`
     // `:private below` — `gen_` exists only `#ifndef NDEBUG`, so forwarding it
-    // directly would not compile in release). The 7-arg algorithm + cache
+    // directly would not compile in release). The algorithm + cache
     // keying stay UNTOUCHED (FR-005). Out-of-line in offset_table.cpp (needs
     // the complete `group_context` type, only forward-declared here — same
     // rule as `group_context_for()` above). Used by the C-ABI nested read
@@ -359,10 +364,13 @@ private:
     // 063 T008: `ctx` seeds the new sub-table's stored context (via
     // set_group_context) immediately after construction — see
     // nested_group_slices()'s doc comment above for what `ctx` means.
-    [[nodiscard]] static OffsetTable* build_nested_subview(
-        std::byte const* data, std::size_t len, std::pmr::memory_resource* mr,
-        void const* opaque_dict, group_member_fn_t group_member_fn, detail::generation_token gen,
-        group_context const& ctx, group_delim_fn_t group_delim_fn) noexcept;
+    // fixpp#426: `hooks` replaces the separate (opaque_dict, group_member_fn,
+    // group_delim_fn) triple.
+    [[nodiscard]] static OffsetTable* build_nested_subview(std::byte const* data, std::size_t len,
+                                                           std::pmr::memory_resource* mr,
+                                                           dict_hooks hooks,
+                                                           detail::generation_token gen,
+                                                           group_context const& ctx) noexcept;
 
     // 063 T006: builds an actual `group_context` value from the raw fields
     // below (needs the complete type — defined in offset_table.cpp, which
@@ -412,10 +420,9 @@ private:
     }
 
     Config cfg_{};  // caller-tunable caps (FR-015 / [2b §1.2])
-    void const* opaque_dict_ = nullptr;
-    group_member_fn_t group_member_fn_ = nullptr;
-    // 083 T057 (C-8.1): supplied at EVERY site that supplies opaque_dict_.
-    group_delim_fn_t group_delim_fn_ = nullptr;
+    // fixpp#426: replaces the separate opaque_dict_/group_member_fn_/
+    // group_delim_fn_ triple — see the class-level `using` aliases above.
+    dict_hooks hooks_{};
     // 063 T006: raw storage for the stored group_context (msg_type + bounded
     // parent-no_tag path). Stored as constituent fields, NOT a `group_context`
     // member by value — `group_context` is only forward-declared in this
@@ -424,7 +431,7 @@ private:
     // group_view.hpp and cycle back to THIS header. Set via
     // set_group_context() (mutable — same lazy-const-method idiom as
     // group_index_/nested_cache_ below); default-empty on a table that never
-    // calls it (dict-free ctors — group_member_fn_ is null there, so this
+    // calls it (dict-free ctors — `hooks_` has no membership oracle, so this
     // state is never read).
     mutable std::string_view group_ctx_msg_type_;
     mutable std::array<std::uint16_t, kMaxGroupDepth> group_ctx_parent_path_{};
@@ -499,6 +506,22 @@ private:
     // individually freed (reclaimed with the arena).
     struct nested_cache_row {
         std::byte const* slice_data;
+        // fixpp#426 (Gate B r9 R-1): the identity of the bundle this row's sub-table
+        // was built with — `dict_hooks::opaque_dict()`. Design §3 says BOTH
+        // `nested_group_slices` overloads split by THEIR CALLER's hooks; without this
+        // in the key, the first caller's dictionary permanently decided the sub-table
+        // and a later caller passing another one silently got the earlier split.
+        //
+        // ⚠️ Sufficient as a discriminator only while `dict_hooks::for_table_view`
+        // and `dict_hooks::none()` are the ONLY producers of a bundle (they are — a
+        // bundle is otherwise unconstructible outside the class), so the callbacks are
+        // a function of the dictionary pointer. `for_table_view` reads
+        // `has_nonstandard_pair()`, so ONE table_view can yield two different bundles
+        // if a pair is registered on a PUBLISHED view mid-parse; that mutation is what
+        // fixpp#456 exists to make impossible. Re-derive this condition, do not trust
+        // the sentence: grep for constructions of `dict_hooks` outside `for_table_view`
+        // and `none()`.
+        void const* hooks_key;
         std::uint16_t nested_no_tag;
         OffsetTable* table;
     };
@@ -517,7 +540,7 @@ private:
     // tests/support/wire_test_hooks.hpp (never installed), so no test-only
     // accessor code ships in this public header, and the friendship itself is
     // now only granted to FIXPP_TEST_HOOKS builds. Resolves the sub-table
-    // ALREADY built for a (slice_data, nested_no_tag) pair without triggering
+    // ALREADY built for a (slice_data, bundle, nested_no_tag) key without triggering
     // a build — used by the wire-level primitive witness to pin research.md
     // §D2 mode (a)/(b)/(c) by introspecting the real sub-table rather than a
     // `sizeof(OffsetTable)`-tuned cap band (not portable across toolchains,

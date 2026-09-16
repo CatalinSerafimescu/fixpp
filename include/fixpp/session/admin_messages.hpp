@@ -24,6 +24,7 @@
 #include <fixpp/dict/version_profile.hpp>  // dict::application_version — T016/033
 #include <fixpp/session/seqnum.hpp>
 #include <fixpp/session/session_types.hpp>  // supported_msg_type/msg_direction (COMPLETE type — logon_advertise_options's std::span member needs it; MSVC rejects span<incomplete> C2036)
+#include <fixpp/wire/dict_hooks.hpp>        // fixpp#426: interpret_logon's Length+Data pairs
 #include <optional>
 #include <span>
 #include <string_view>
@@ -99,10 +100,14 @@ struct logon_interpret_result {
 // Returns logon_interpret_result on success (heartbt_int + optional FIXT fields).
 // The optional string_view fields are views into `frame`; callers must not
 // extend them beyond the frame's lifetime.
+// fixpp#426: a Data value counted by its Length (via `hooks`: the session's
+// dictionary, or the standard table alone) is read as one value, so a
+// `<SOH>554=` inside RawData is not a Password. A malformed count stops the scan.
 // [033 T007 / data-model E5; 005 T021]
 [[nodiscard]] fixpp::core::expected_t<logon_interpret_result> interpret_logon(
     std::span<const std::byte> frame, std::string_view expected_sender,
-    std::string_view expected_target, std::string_view expected_begin) noexcept;
+    std::string_view expected_target, std::string_view expected_begin,
+    fixpp::wire::dict_hooks const& hooks = fixpp::wire::dict_hooks::none()) noexcept;
 
 // ── Logout (35=5) ────────────────────────────────────────────────────────────
 // FR-005, [FIX-SL §4.6]. S-002.

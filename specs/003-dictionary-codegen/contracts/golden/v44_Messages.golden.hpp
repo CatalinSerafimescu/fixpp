@@ -24,16 +24,16 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     hop_comp_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 628, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 628, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     hop_sending_time() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 629, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 629, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     hop_ref_id() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 630, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 630, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -44,10 +44,10 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     ioi_qualifier() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 104, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 104, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -58,13 +58,13 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     routing_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 216, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 216, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     routing_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 217, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 217, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -75,13 +75,13 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     stipulation_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 233, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 233, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     stipulation_value() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 234, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 234, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -92,13 +92,13 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_alt_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 455, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 455, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_alt_id_source() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 456, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 456, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -109,13 +109,13 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_security_alt_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 458, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 458, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_security_alt_id_source() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 459, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 459, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -126,13 +126,13 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_security_alt_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 605, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 605, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_security_alt_id_source() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 606, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 606, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -143,13 +143,13 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_stipulation_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 688, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 688, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_stipulation_value() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 689, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 689, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -160,13 +160,13 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     nested_party_sub_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 545, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 545, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     nested_party_sub_id_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 805, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 805, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -177,23 +177,23 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     nested_party_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 524, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 524, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     nested_party_id_source() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 525, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 525, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     nested_party_role() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 538, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 538, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_804>
     nested_party_sub_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 804, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 804, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(804);
       return ::fixpp::wire::group_view<G_804>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -204,13 +204,13 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     nested2_party_sub_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 760, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 760, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     nested2_party_sub_id_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 807, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 807, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -221,23 +221,23 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     nested2_party_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 757, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 757, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     nested2_party_id_source() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 758, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 758, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     nested2_party_role() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 759, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 759, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_806>
     nested2_party_sub_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 806, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 806, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(806);
       return ::fixpp::wire::group_view<G_806>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -248,30 +248,30 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_alloc_account() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 671, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 671, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_individual_alloc_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 672, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 672, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     leg_alloc_qty(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 673, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 673, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_alloc_acct_id_source() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 674, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 674, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_settl_currency() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 675, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 675, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_756>
     nested2_party_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 756, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 756, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(756);
       return ::fixpp::wire::group_view<G_756>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -282,224 +282,224 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_coupon_payment_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 248, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 248, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_issue_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 249, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 249, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_repo_collateral_security_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 250, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 250, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     leg_repurchase_term() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 251, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 251, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     leg_repurchase_rate(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 252, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 252, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     leg_factor(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 253, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 253, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_redemption_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 254, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 254, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_credit_rating() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 257, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 257, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_currency() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 556, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 556, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_country_of_issue() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 596, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 596, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_state_or_province_of_issue() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 597, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 597, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_locale_of_issue() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 598, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 598, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_instr_registry() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 599, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 599, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_symbol() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 600, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 600, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_symbol_sfx() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 601, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 601, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_security_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 602, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 602, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_security_id_source() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 603, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 603, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     leg_product() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 607, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 607, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_cfi_code() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 608, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 608, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_security_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 609, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 609, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_maturity_month_year() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 610, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 610, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_maturity_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 611, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 611, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     leg_strike_price(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 612, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 612, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     leg_opt_attribute() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 613, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 613, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     leg_contract_multiplier(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 614, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 614, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     leg_coupon_rate(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 615, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 615, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_security_exchange() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 616, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 616, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_issuer() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 617, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 617, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_leg_issuer_len() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 618, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 618, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_leg_issuer() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 619, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 619, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_security_desc() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 620, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 620, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_leg_security_desc_len() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 621, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 621, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_leg_security_desc() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 622, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 622, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     leg_ratio_qty(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 623, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 623, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     leg_side() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 624, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 624, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_ioi_qty() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 682, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 682, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_dated_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 739, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 739, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_pool() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 740, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 740, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_security_sub_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 764, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 764, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_strike_currency() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 942, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 942, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_contract_settl_month() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 955, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 955, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_interest_accrual_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 956, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 956, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     leg_position_effect() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 564, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 564, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     leg_covered_or_uncovered() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 565, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 565, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     leg_price(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 566, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 566, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     leg_settl_type() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 587, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 587, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_settl_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 588, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 588, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     leg_last_px(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 637, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 637, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_ref_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 654, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 654, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     leg_qty(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 687, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 687, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     leg_swap_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 690, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 690, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_benchmark_curve_currency() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 676, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 676, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_benchmark_curve_name() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 677, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 677, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     leg_benchmark_curve_point() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 678, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 678, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     leg_benchmark_price(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 679, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 679, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     leg_benchmark_price_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 680, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 680, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     leg_bid_px(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 681, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 681, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     leg_offer_px(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 684, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 684, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     leg_price_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 686, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 686, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_604>
     leg_security_alt_id() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 604, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 604, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(604);
       return ::fixpp::wire::group_view<G_604>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_683>
     leg_stipulations() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 683, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 683, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(683);
       return ::fixpp::wire::group_view<G_683>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_539>
     nested_party_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 539, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 539, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(539);
       return ::fixpp::wire::group_view<G_539>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_670>
     leg_allocs() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 670, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 670, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(670);
       return ::fixpp::wire::group_view<G_670>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -510,13 +510,13 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_stip_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 888, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 888, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_stip_value() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 889, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 889, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -527,207 +527,207 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_coupon_payment_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 241, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 241, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_issue_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 242, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 242, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_repo_collateral_security_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 243, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 243, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     underlying_repurchase_term() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 244, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 244, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_repurchase_rate(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 245, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 245, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_factor(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 246, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 246, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_redemption_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 247, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 247, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_credit_rating() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 256, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 256, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_security_id_source() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 305, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 305, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_issuer() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 306, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 306, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_security_desc() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 307, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 307, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_security_exchange() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 308, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 308, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_security_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 309, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 309, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_security_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 310, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 310, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_symbol() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 311, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 311, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_symbol_sfx() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 312, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 312, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_maturity_month_year() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 313, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 313, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     underlying_put_or_call() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 315, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 315, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_strike_price(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 316, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 316, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     underlying_opt_attribute() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 317, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 317, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_currency() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 318, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 318, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_underlying_issuer_len() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 362, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 362, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_underlying_issuer() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 363, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 363, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_underlying_security_desc_len() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 364, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 364, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_underlying_security_desc() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 365, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 365, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_coupon_rate(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 435, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 435, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_contract_multiplier(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 436, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 436, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     underlying_product() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 462, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 462, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_cfi_code() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 463, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 463, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_maturity_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 542, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 542, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_country_of_issue() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 592, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 592, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_state_or_province_of_issue() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 593, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 593, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_locale_of_issue() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 594, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 594, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_instr_registry() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 595, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 595, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_security_sub_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 763, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 763, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_px(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 810, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 810, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_cp_program() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 877, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 877, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_cp_reg_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 878, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 878, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_qty(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 879, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 879, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_dirty_price(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 882, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 882, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_end_price(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 883, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 883, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_start_value(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 884, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 884, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_current_value(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 885, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 885, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_end_value(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 886, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 886, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_strike_currency() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 941, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 941, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_settl_price(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 732, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 732, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     underlying_settl_price_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 733, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 733, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     coll_action() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 944, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 944, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cl_ord_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 11, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 11, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     currency() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 15, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 15, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     price(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 44, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 44, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     side() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 54, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 54, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     text() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 58, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 58, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     prev_close_px(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 140, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 140, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_text_len() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 354, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 354, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_text() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 355, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 355, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     secondary_cl_ord_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 526, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 526, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_457>
     underlying_security_alt_id() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 457, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 457, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(457);
       return ::fixpp::wire::group_view<G_457>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_887>
     underlying_stips() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 887, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 887, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(887);
       return ::fixpp::wire::group_view<G_887>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -738,20 +738,20 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     event_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 865, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 865, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     event_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 866, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 866, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     event_px(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 867, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 867, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     event_text() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 868, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 868, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -762,20 +762,20 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     misc_fee_amt(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 137, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 137, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     misc_fee_curr() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 138, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 138, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     misc_fee_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 139, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 139, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     misc_fee_basis() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 891, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 891, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -786,23 +786,23 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     contra_trader() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 337, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 337, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     contra_broker() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 375, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 375, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     contra_trade_qty(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 437, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 437, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     contra_trade_time() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 438, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 438, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     contra_leg_ref_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 655, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 655, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -813,13 +813,13 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     party_sub_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 523, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 523, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     party_sub_id_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 803, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 803, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -830,23 +830,23 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     party_id_source() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 447, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 447, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     party_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 448, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 448, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     party_role() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 452, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 452, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_802>
     party_sub_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 802, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 802, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(802);
       return ::fixpp::wire::group_view<G_802>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -857,17 +857,17 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     cont_amt_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 519, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 519, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     cont_amt_value(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 520, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 520, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cont_amt_curr() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 521, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 521, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -878,13 +878,13 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     ref_msg_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 372, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 372, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     msg_direction() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 385, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 385, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -895,13 +895,13 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     instr_attrib_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 871, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 871, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     instr_attrib_value() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 872, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 872, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -912,10 +912,10 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     quote_qualifier() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 695, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 695, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -926,387 +926,387 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     currency() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 15, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 15, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_id_source() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 22, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 22, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 48, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 48, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     symbol() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 55, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 55, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     text() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 58, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 58, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     symbol_sfx() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 65, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 65, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     issuer() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 106, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 106, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_desc() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 107, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 107, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 167, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 167, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     maturity_month_year() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 200, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 200, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     put_or_call() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 201, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 201, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     strike_price(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 202, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 202, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     opt_attribute() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 206, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 206, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_exchange() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 207, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 207, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     coupon_rate(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 223, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 223, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     coupon_payment_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 224, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 224, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     issue_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 225, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 225, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     repurchase_term() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 226, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 226, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     repurchase_rate(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 227, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 227, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     factor(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 228, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 228, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     contract_multiplier(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 231, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 231, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     repo_collateral_security_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 239, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 239, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     redemption_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 240, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 240, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     credit_rating() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 255, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 255, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trading_session_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 336, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 336, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_issuer_len() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 348, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 348, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_issuer() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 349, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 349, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_security_desc_len() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 350, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 350, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_security_desc() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 351, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 351, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_text_len() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 354, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 354, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_text() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 355, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 355, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     product() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 460, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 460, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cfi_code() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 461, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 461, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     country_of_issue() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 470, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 470, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     state_or_province_of_issue() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 471, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 471, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     locale_of_issue() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 472, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 472, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     maturity_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 541, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 541, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     instr_registry() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 543, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 543, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trading_session_sub_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 625, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 625, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     contract_settl_month() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 667, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 667, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     delivery_form() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 668, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 668, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     pool() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 691, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 691, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_sub_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 762, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 762, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     expiration_cycle() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 827, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 827, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     pct_at_risk(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 869, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 869, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     dated_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 873, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 873, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     interest_accrual_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 874, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 874, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     cp_program() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 875, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 875, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cp_reg_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 876, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 876, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     strike_currency() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 947, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 947, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     account() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 1, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 1, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     order_qty(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 38, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 38, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     ord_type() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 40, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 40, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     price(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 44, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 44, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     side() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 54, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 54, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     transact_time() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 60, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 60, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     settl_type() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 63, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 63, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     settl_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 64, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 64, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     expire_time() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 126, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 126, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     prev_close_px(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 140, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 140, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     cash_order_qty(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 152, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 152, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     order_qty2(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 192, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 192, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     settl_date2() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 193, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 193, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     spread(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 218, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 218, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     benchmark_curve_currency() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 220, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 220, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     benchmark_curve_name() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 221, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 221, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     benchmark_curve_point() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 222, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 222, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trade_origination_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 229, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 229, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     yield_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 235, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 235, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     yield(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 236, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 236, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     quote_request_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 303, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 303, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     price_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 423, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 423, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     rounding_direction() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 468, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 468, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     rounding_modulus(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 469, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 469, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     order_percent(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 516, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 516, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     quote_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 537, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 537, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     account_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 581, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 581, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     price2(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 640, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 640, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     acct_id_source() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 660, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 660, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     benchmark_price(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 662, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 662, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     benchmark_price_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 663, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 663, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     quote_price_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 692, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 692, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     yield_redemption_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 696, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 696, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     yield_redemption_price(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 697, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 697, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     yield_redemption_price_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 698, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 698, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     benchmark_security_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 699, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 699, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     yield_calc_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 701, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 701, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     benchmark_security_id_source() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 761, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 761, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     termination_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 788, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 788, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     qty_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 854, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 854, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     margin_ratio(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 898, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 898, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     agreement_desc() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 913, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 913, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     agreement_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 914, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 914, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     agreement_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 915, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 915, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     start_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 916, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 916, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     end_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 917, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 917, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     agreement_currency() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 918, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 918, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     delivery_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 919, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 919, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     valid_until_time() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 62, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 62, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     round_lot(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 561, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 561, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     min_trade_vol(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 562, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 562, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_454>
     security_alt_id() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 454, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 454, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(454);
       return ::fixpp::wire::group_view<G_454>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_555>
     legs() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 555, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 555, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(555);
       return ::fixpp::wire::group_view<G_555>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_864>
     events() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 864, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 864, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(864);
       return ::fixpp::wire::group_view<G_864>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_870>
     instr_attrib() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 870, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 870, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(870);
       return ::fixpp::wire::group_view<G_870>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_232>
     stipulations() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 232, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 232, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(232);
       return ::fixpp::wire::group_view<G_232>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_453>
     party_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 453, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 453, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(453);
       return ::fixpp::wire::group_view<G_453>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_711>
     underlyings() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 711, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 711, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(711);
       return ::fixpp::wire::group_view<G_711>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_735>
     quote_qualifiers() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 735, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 735, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(735);
       return ::fixpp::wire::group_view<G_735>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -1317,13 +1317,13 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     nested3_party_sub_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 953, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 953, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     nested3_party_sub_id_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 954, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 954, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -1334,23 +1334,23 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     nested3_party_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 949, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 949, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     nested3_party_id_source() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 950, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 950, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     nested3_party_role() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 951, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 951, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_952>
     nested3_party_sub_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 952, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 952, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(952);
       return ::fixpp::wire::group_view<G_952>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -1361,13 +1361,13 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     settl_party_sub_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 785, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 785, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     settl_party_sub_id_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 786, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 786, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -1378,23 +1378,23 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     settl_party_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 782, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 782, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     settl_party_id_source() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 783, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 783, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     settl_party_role() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 784, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 784, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_801>
     settl_party_sub_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 801, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 801, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(801);
       return ::fixpp::wire::group_view<G_801>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -1405,20 +1405,20 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     settl_inst_source() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 165, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 165, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     dlvy_inst_type() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 787, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 787, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_781>
     settl_party_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 781, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 781, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(781);
       return ::fixpp::wire::group_view<G_781>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -1429,10 +1429,10 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     clearing_instruction() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 577, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 577, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -1443,155 +1443,155 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     alloc_account() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 79, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 79, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     alloc_qty(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 80, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 80, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     individual_alloc_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 467, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 467, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     alloc_acct_id_source() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 661, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 661, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     alloc_settl_currency() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 736, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 736, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     commission(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 12, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 12, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     comm_type() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 13, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 13, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     process_code() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 81, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 81, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     settl_curr_amt(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 119, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 119, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     settl_currency() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 120, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 120, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     alloc_avg_px(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 153, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 153, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     alloc_net_money(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 154, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 154, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     settl_curr_fx_rate(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 155, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 155, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     settl_curr_fx_rate_calc() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 156, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 156, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     alloc_text() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 161, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 161, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     stand_inst_db_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 169, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 169, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     stand_inst_db_name() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 170, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 170, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     stand_inst_db_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 171, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 171, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     settl_delivery_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 172, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 172, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<bool>
     notify_broker_of_credit() const noexcept
-    { return ::fixpp::dict::decode_field<bool>(::fixpp::wire::get(ctx_.span, 208, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<bool>(::fixpp::wire::get(ctx_.span, 208, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     alloc_handl_inst() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 209, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 209, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_alloc_text_len() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 360, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 360, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_alloc_text() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 361, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 361, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     alloc_price(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 366, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 366, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     comm_currency() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 479, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 479, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     fund_renew_waiv() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 497, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 497, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     match_status() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 573, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 573, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     alloc_settl_curr_amt(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 737, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 737, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     alloc_interest_at_maturity(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 741, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 741, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     alloc_accrued_interest_amt(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 742, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 742, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     alloc_settl_inst_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 780, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 780, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     individual_alloc_rej_code() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 776, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 776, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_948>
     nested3_party_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 948, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 948, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(948);
       return ::fixpp::wire::group_view<G_948>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_756>
     nested2_party_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 756, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 756, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(756);
       return ::fixpp::wire::group_view<G_756>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_85>
     dlvy_inst() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 85, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 85, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(85);
       return ::fixpp::wire::group_view<G_85>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_136>
     misc_fees() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 136, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 136, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(136);
       return ::fixpp::wire::group_view<G_136>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_539>
     nested_party_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 539, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 539, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(539);
       return ::fixpp::wire::group_view<G_539>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_576>
     clearing_instructions() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 576, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 576, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(576);
       return ::fixpp::wire::group_view<G_576>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -1602,13 +1602,13 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trading_session_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 336, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 336, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trading_session_sub_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 625, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 625, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -1619,13 +1619,13 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     transact_time() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 60, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 60, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trade_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 75, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 75, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -1636,288 +1636,288 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     account() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 1, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 1, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cl_ord_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 11, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 11, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     commission(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 12, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 12, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     comm_type() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 13, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 13, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     currency() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 15, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 15, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     exec_inst() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 18, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 18, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     order_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 37, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 37, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     ord_type() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 40, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 40, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     side() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 54, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 54, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     text() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 58, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 58, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     list_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 66, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 66, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     alloc_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 70, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 70, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     position_effect() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 77, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 77, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     process_code() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 81, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 81, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     net_money(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 118, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 118, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     settl_curr_amt(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 119, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 119, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     settl_currency() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 120, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 120, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     settl_curr_fx_rate(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 155, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 155, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     settl_curr_fx_rate_calc() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 156, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 156, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     num_days_interest() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 157, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 157, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     accrued_interest_rate(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 158, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 158, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     accrued_interest_amt(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 159, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 159, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     secondary_order_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 198, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 198, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     ex_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 230, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 230, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     total_takedown(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 237, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 237, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     concession(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 238, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 238, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trading_session_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 336, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 336, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_text_len() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 354, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 354, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_text() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 355, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 355, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     compliance_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 376, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 376, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<bool>
     solicited_flag() const noexcept
-    { return ::fixpp::dict::decode_field<bool>(::fixpp::wire::get(ctx_.span, 377, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<bool>(::fixpp::wire::get(ctx_.span, 377, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     gross_trade_amt(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 381, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 381, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     comm_currency() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 479, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 479, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trans_bkd_time() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 483, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 483, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     fund_renew_waiv() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 497, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 497, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     secondary_cl_ord_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 526, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 526, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     order_capacity() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 528, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 528, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     order_restrictions() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 529, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 529, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<bool>
     odd_lot() const noexcept
-    { return ::fixpp::dict::decode_field<bool>(::fixpp::wire::get(ctx_.span, 575, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<bool>(::fixpp::wire::get(ctx_.span, 575, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trade_input_source() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 578, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 578, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trade_input_device() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 579, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 579, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     account_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 581, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 581, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     cust_order_capacity() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 582, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 582, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     prealloc_method() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 591, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 591, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trading_session_sub_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 625, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 625, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     acct_id_source() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 660, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 660, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     interest_at_maturity(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 738, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 738, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     side_multi_leg_reporting_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 752, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 752, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     order_input_device() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 821, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 821, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     exchange_rule() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 825, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 825, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     trade_alloc_indicator() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 826, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 826, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     end_accrued_interest_amt(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 920, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 920, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     start_cash(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 921, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 921, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     end_cash(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 922, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 922, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     time_bracket() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 943, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 943, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     order_qty(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 38, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 38, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trade_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 75, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 75, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<bool>
     forex_req() const noexcept
-    { return ::fixpp::dict::decode_field<bool>(::fixpp::wire::get(ctx_.span, 121, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<bool>(::fixpp::wire::get(ctx_.span, 121, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     cash_order_qty(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 152, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 152, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     covered_or_uncovered() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 203, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 203, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trade_origination_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 229, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 229, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     rounding_direction() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 468, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 468, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     rounding_modulus(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 469, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 469, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     order_percent(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 516, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 516, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     cash_margin() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 544, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 544, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cl_ord_link_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 583, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 583, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     day_booking_inst() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 589, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 589, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     booking_unit() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 590, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 590, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     clearing_fee_indicator() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 635, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 635, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     side_compliance_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 659, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 659, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     booking_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 775, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 775, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     qty_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 854, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 854, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     orig_cl_ord_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 41, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 41, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     orig_ord_mod_time() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 586, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 586, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_78>
     allocs() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 78, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 78, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(78);
       return ::fixpp::wire::group_view<G_78>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_136>
     misc_fees() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 136, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 136, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(136);
       return ::fixpp::wire::group_view<G_136>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_232>
     stipulations() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 232, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 232, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(232);
       return ::fixpp::wire::group_view<G_232>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_453>
     party_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 453, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 453, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(453);
       return ::fixpp::wire::group_view<G_453>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_518>
     cont_amts() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 518, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 518, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(518);
       return ::fixpp::wire::group_view<G_518>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_576>
     clearing_instructions() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 576, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 576, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(576);
       return ::fixpp::wire::group_view<G_576>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -1928,14 +1928,14 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     pos_amt_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 707, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 707, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     pos_amt(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 708, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 708, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -1946,16 +1946,16 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trd_reg_timestamp() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 769, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 769, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     trd_reg_timestamp_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 770, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 770, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trd_reg_timestamp_origin() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 771, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 771, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -1966,550 +1966,550 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cl_ord_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 11, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 11, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     order_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 37, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 37, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     order_qty(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 38, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 38, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     list_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 66, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 66, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     secondary_order_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 198, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 198, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     secondary_cl_ord_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 526, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 526, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     order_avg_px(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 799, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 799, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     order_booking_qty(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 800, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 800, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     account() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 1, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 1, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     commission(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 12, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 12, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     comm_type() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 13, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 13, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     currency() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 15, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 15, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     exec_inst() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 18, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 18, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     handl_inst() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 21, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 21, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_id_source() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 22, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 22, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     ioiid() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 23, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 23, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     ord_type() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 40, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 40, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     price(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 44, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 44, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 48, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 48, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     side() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 54, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 54, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     symbol() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 55, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 55, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     text() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 58, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 58, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     time_in_force() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 59, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 59, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     transact_time() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 60, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 60, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     settl_type() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 63, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 63, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     settl_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 64, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 64, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     symbol_sfx() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 65, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 65, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     list_seq_no() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 67, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 67, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     alloc_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 70, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 70, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trade_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 75, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 75, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     position_effect() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 77, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 77, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     process_code() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 81, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 81, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     stop_px(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 99, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 99, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     ex_destination() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 100, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 100, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     issuer() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 106, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 106, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_desc() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 107, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 107, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     min_qty(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 110, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 110, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     max_floor(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 111, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 111, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<bool>
     locate_reqd() const noexcept
-    { return ::fixpp::dict::decode_field<bool>(::fixpp::wire::get(ctx_.span, 114, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<bool>(::fixpp::wire::get(ctx_.span, 114, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     quote_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 117, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 117, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     settl_currency() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 120, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 120, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<bool>
     forex_req() const noexcept
-    { return ::fixpp::dict::decode_field<bool>(::fixpp::wire::get(ctx_.span, 121, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<bool>(::fixpp::wire::get(ctx_.span, 121, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     expire_time() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 126, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 126, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     prev_close_px(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 140, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 140, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     cash_order_qty(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 152, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 152, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     settl_inst_mode() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 160, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 160, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 167, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 167, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     effective_time() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 168, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 168, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     order_qty2(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 192, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 192, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     settl_date2() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 193, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 193, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     maturity_month_year() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 200, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 200, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     put_or_call() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 201, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 201, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     strike_price(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 202, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 202, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     covered_or_uncovered() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 203, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 203, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     opt_attribute() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 206, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 206, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_exchange() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 207, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 207, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     max_show(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 210, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 210, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     peg_offset_value(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 211, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 211, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     spread(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 218, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 218, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     benchmark_curve_currency() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 220, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 220, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     benchmark_curve_name() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 221, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 221, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     benchmark_curve_point() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 222, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 222, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     coupon_rate(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 223, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 223, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     coupon_payment_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 224, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 224, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     issue_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 225, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 225, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     repurchase_term() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 226, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 226, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     repurchase_rate(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 227, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 227, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     factor(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 228, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 228, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trade_origination_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 229, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 229, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     contract_multiplier(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 231, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 231, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     yield_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 235, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 235, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     yield(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 236, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 236, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     repo_collateral_security_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 239, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 239, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     redemption_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 240, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 240, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     credit_rating() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 255, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 255, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_issuer_len() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 348, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 348, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_issuer() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 349, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 349, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_security_desc_len() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 350, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 350, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_security_desc() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 351, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 351, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_text_len() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 354, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 354, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_text() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 355, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 355, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     compliance_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 376, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 376, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<bool>
     solicited_flag() const noexcept
-    { return ::fixpp::dict::decode_field<bool>(::fixpp::wire::get(ctx_.span, 377, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<bool>(::fixpp::wire::get(ctx_.span, 377, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     discretion_inst() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 388, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 388, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     discretion_offset_value(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 389, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 389, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     side_value_ind() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 401, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 401, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     price_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 423, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 423, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     gt_booking_inst() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 427, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 427, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     expire_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 432, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 432, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     product() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 460, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 460, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cfi_code() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 461, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 461, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     rounding_direction() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 468, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 468, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     rounding_modulus(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 469, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 469, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     country_of_issue() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 470, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 470, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     state_or_province_of_issue() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 471, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 471, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     locale_of_issue() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 472, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 472, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     comm_currency() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 479, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 479, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     designation() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 494, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 494, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     fund_renew_waiv() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 497, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 497, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     order_percent(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 516, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 516, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     order_capacity() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 528, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 528, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     order_restrictions() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 529, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 529, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     maturity_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 541, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 541, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     instr_registry() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 543, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 543, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     cash_margin() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 544, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 544, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     account_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 581, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 581, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     cust_order_capacity() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 582, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 582, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cl_ord_link_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 583, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 583, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     day_booking_inst() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 589, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 589, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     booking_unit() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 590, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 590, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     prealloc_method() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 591, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 591, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     clearing_fee_indicator() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 635, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 635, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     price2(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 640, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 640, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     acct_id_source() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 660, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 660, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     benchmark_price(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 662, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 662, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     benchmark_price_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 663, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 663, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     contract_settl_month() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 667, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 667, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     pool() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 691, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 691, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     yield_redemption_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 696, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 696, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     yield_redemption_price(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 697, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 697, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     yield_redemption_price_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 698, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 698, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     benchmark_security_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 699, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 699, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     yield_calc_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 701, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 701, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     benchmark_security_id_source() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 761, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 761, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_sub_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 762, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 762, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     booking_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 775, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 775, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     peg_move_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 835, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 835, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     peg_offset_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 836, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 836, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     peg_limit_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 837, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 837, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     peg_round_direction() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 838, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 838, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     peg_scope() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 840, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 840, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     discretion_move_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 841, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 841, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     discretion_offset_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 842, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 842, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     discretion_limit_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 843, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 843, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     discretion_round_direction() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 844, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 844, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     discretion_scope() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 846, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 846, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     target_strategy() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 847, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 847, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     target_strategy_parameters() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 848, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 848, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     participation_rate(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 849, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 849, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     qty_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 854, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 854, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     dated_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 873, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 873, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     interest_accrual_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 874, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 874, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     cp_program() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 875, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 875, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cp_reg_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 876, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 876, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     strike_currency() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 947, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 947, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     avg_px(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 6, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 6, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     cum_qty(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 14, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 14, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     ord_status() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 39, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 39, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     cxl_qty(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 84, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 84, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     ord_rej_reason() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 103, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 103, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     leaves_qty(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 151, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 151, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<bool>
     working_indicator() const noexcept
-    { return ::fixpp::dict::decode_field<bool>(::fixpp::wire::get(ctx_.span, 636, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<bool>(::fixpp::wire::get(ctx_.span, 636, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_756>
     nested2_party_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 756, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 756, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(756);
       return ::fixpp::wire::group_view<G_756>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_78>
     allocs() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 78, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 78, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(78);
       return ::fixpp::wire::group_view<G_78>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_232>
     stipulations() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 232, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 232, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(232);
       return ::fixpp::wire::group_view<G_232>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_386>
     trading_sessions() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 386, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 386, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(386);
       return ::fixpp::wire::group_view<G_386>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_453>
     party_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 453, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 453, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(453);
       return ::fixpp::wire::group_view<G_453>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_454>
     security_alt_id() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 454, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 454, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(454);
       return ::fixpp::wire::group_view<G_454>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_711>
     underlyings() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 711, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 711, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(711);
       return ::fixpp::wire::group_view<G_711>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_864>
     events() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 864, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 864, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(864);
       return ::fixpp::wire::group_view<G_864>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -2520,17 +2520,17 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     order_capacity() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 528, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 528, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     order_restrictions() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 529, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 529, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     order_capacity_qty(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 863, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 863, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -2541,28 +2541,28 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     pos_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 703, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 703, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     long_qty(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 704, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 704, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     short_qty(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 705, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 705, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     pos_qty_status() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 706, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 706, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_539>
     nested_party_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 539, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 539, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(539);
       return ::fixpp::wire::group_view<G_539>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -2573,28 +2573,28 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     exec_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 17, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 17, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     last_capacity() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 29, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 29, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     last_px(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 31, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 31, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     last_qty(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 32, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 32, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     secondary_exec_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 527, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 527, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     last_par_px(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 669, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 669, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -2605,13 +2605,13 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trade_report_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 571, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 571, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     secondary_trade_report_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 818, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 818, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -2622,16 +2622,16 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     text() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 58, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 58, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_text_len() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 354, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 354, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_text() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 355, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 355, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -2642,10 +2642,10 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     coll_inquiry_qualifier() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 896, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 896, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -2656,25 +2656,25 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     location_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 283, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 283, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     desk_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 284, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 284, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     ref_comp_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 930, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 930, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     ref_sub_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 931, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 931, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     status_value() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 928, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 928, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     status_text() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 929, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 929, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -2685,90 +2685,90 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     side() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 54, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 54, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     expire_time() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 126, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 126, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     settl_inst_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 162, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 162, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     settl_inst_trans_type() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 163, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 163, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 167, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 167, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     effective_time() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 168, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 168, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     stand_inst_db_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 169, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 169, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     stand_inst_db_name() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 170, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 170, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     stand_inst_db_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 171, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 171, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     settl_delivery_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 172, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 172, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     settl_inst_ref_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 214, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 214, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     product() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 460, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 460, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cfi_code() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 461, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 461, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     payment_ref() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 476, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 476, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     card_holder_name() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 488, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 488, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     card_number() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 489, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 489, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     card_exp_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 490, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 490, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     card_iss_num() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 491, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 491, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     payment_method() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 492, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 492, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     card_start_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 503, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 503, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     payment_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 504, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 504, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     payment_remitter_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 505, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 505, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     last_update_time() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 779, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 779, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_85>
     dlvy_inst() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 85, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 85, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(85);
       return ::fixpp::wire::group_view<G_85>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_453>
     party_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 453, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 453, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(453);
       return ::fixpp::wire::group_view<G_453>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -2779,10 +2779,10 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     md_entry_type() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 269, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 269, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -2793,288 +2793,288 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     currency() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 15, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 15, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     exec_inst() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 18, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 18, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     order_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 37, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 37, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     text() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 58, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 58, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     time_in_force() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 59, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 59, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     min_qty(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 110, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 110, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     expire_time() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 126, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 126, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     md_entry_type() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 269, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 269, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     md_entry_px(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 270, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 270, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     md_entry_size(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 271, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 271, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     md_entry_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 272, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 272, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     md_entry_time() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 273, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 273, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     tick_direction() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 274, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 274, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     md_mkt() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 275, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 275, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     quote_condition() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 276, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 276, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trade_condition() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 277, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 277, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     md_entry_originator() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 282, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 282, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     location_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 283, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 283, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     desk_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 284, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 284, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     open_close_settl_flag() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 286, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 286, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     seller_days() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 287, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 287, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     md_entry_buyer() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 288, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 288, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     md_entry_seller() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 289, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 289, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     md_entry_position_no() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 290, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 290, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     quote_entry_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 299, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 299, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trading_session_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 336, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 336, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     number_of_orders() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 346, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 346, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_text_len() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 354, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 354, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_text() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 355, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 355, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     expire_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 432, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 432, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     scope() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 546, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 546, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trading_session_sub_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 625, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 625, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     price_delta(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 811, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 811, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_id_source() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 22, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 22, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 48, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 48, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     symbol() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 55, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 55, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     symbol_sfx() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 65, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 65, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     issuer() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 106, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 106, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_desc() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 107, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 107, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 167, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 167, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     maturity_month_year() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 200, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 200, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     put_or_call() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 201, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 201, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     strike_price(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 202, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 202, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     opt_attribute() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 206, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 206, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_exchange() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 207, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 207, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     coupon_rate(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 223, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 223, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     coupon_payment_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 224, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 224, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     issue_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 225, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 225, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     repurchase_term() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 226, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 226, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     repurchase_rate(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 227, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 227, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     factor(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 228, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 228, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     contract_multiplier(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 231, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 231, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     repo_collateral_security_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 239, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 239, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     redemption_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 240, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 240, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     credit_rating() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 255, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 255, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     md_entry_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 278, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 278, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     md_update_action() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 279, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 279, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     md_entry_ref_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 280, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 280, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     delete_reason() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 285, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 285, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     financial_status() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 291, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 291, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     corporate_action() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 292, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 292, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_issuer_len() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 348, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 348, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_issuer() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 349, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 349, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_security_desc_len() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 350, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 350, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_security_desc() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 351, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 351, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     net_chg_prev_day(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 451, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 451, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     product() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 460, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 460, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cfi_code() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 461, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 461, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     country_of_issue() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 470, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 470, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     state_or_province_of_issue() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 471, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 471, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     locale_of_issue() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 472, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 472, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     maturity_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 541, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 541, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     instr_registry() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 543, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 543, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     contract_settl_month() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 667, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 667, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     pool() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 691, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 691, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_sub_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 762, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 762, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     dated_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 873, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 873, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     interest_accrual_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 874, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 874, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     cp_program() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 875, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 875, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cp_reg_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 876, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 876, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     strike_currency() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 947, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 947, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_454>
     security_alt_id() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 454, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 454, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(454);
       return ::fixpp::wire::group_view<G_454>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_555>
     legs() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 555, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 555, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(555);
       return ::fixpp::wire::group_view<G_555>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_711>
     underlyings() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 711, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 711, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(711);
       return ::fixpp::wire::group_view<G_711>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_864>
     events() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 864, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 864, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(864);
       return ::fixpp::wire::group_view<G_864>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -3085,10 +3085,10 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     alt_md_source_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 817, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 817, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -3099,281 +3099,281 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_id_source() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 22, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 22, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 48, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 48, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     symbol() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 55, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 55, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     symbol_sfx() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 65, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 65, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     issuer() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 106, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 106, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_desc() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 107, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 107, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 167, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 167, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     maturity_month_year() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 200, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 200, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     put_or_call() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 201, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 201, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     strike_price(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 202, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 202, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     opt_attribute() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 206, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 206, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_exchange() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 207, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 207, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     coupon_rate(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 223, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 223, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     coupon_payment_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 224, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 224, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     issue_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 225, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 225, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     repurchase_term() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 226, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 226, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     repurchase_rate(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 227, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 227, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     factor(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 228, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 228, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     contract_multiplier(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 231, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 231, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     repo_collateral_security_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 239, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 239, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     redemption_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 240, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 240, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     credit_rating() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 255, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 255, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_issuer_len() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 348, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 348, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_issuer() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 349, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 349, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_security_desc_len() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 350, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 350, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_security_desc() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 351, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 351, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     product() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 460, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 460, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cfi_code() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 461, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 461, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     country_of_issue() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 470, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 470, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     state_or_province_of_issue() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 471, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 471, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     locale_of_issue() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 472, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 472, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     maturity_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 541, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 541, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     instr_registry() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 543, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 543, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     contract_settl_month() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 667, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 667, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     pool() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 691, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 691, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_sub_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 762, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 762, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     termination_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 788, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 788, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     dated_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 873, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 873, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     interest_accrual_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 874, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 874, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     cp_program() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 875, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 875, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cp_reg_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 876, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 876, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     margin_ratio(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 898, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 898, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     agreement_desc() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 913, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 913, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     agreement_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 914, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 914, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     agreement_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 915, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 915, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     start_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 916, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 916, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     end_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 917, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 917, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     agreement_currency() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 918, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 918, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     delivery_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 919, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 919, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     strike_currency() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 947, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 947, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     currency() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 15, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 15, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     ord_type() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 40, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 40, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     transact_time() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 60, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 60, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     valid_until_time() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 62, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 62, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     settl_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 64, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 64, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     bid_px(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 132, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 132, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     offer_px(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 133, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 133, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     bid_size(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 134, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 134, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     offer_size(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 135, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 135, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     bid_spot_rate(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 188, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 188, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     bid_forward_points(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 189, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 189, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     offer_spot_rate(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 190, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 190, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     offer_forward_points(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 191, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 191, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     order_qty2(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 192, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 192, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     settl_date2() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 193, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 193, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     quote_entry_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 299, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 299, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trading_session_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 336, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 336, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     quote_entry_reject_reason() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 368, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 368, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trading_session_sub_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 625, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 625, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     mid_px(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 631, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 631, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     bid_yield(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 632, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 632, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     mid_yield(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 633, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 633, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     offer_yield(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 634, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 634, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     bid_forward_points2(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 642, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 642, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     offer_forward_points2(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 643, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 643, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_454>
     security_alt_id() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 454, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 454, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(454);
       return ::fixpp::wire::group_view<G_454>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_555>
     legs() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 555, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 555, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(555);
       return ::fixpp::wire::group_view<G_555>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_711>
     underlyings() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 711, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 711, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(711);
       return ::fixpp::wire::group_view<G_711>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_864>
     events() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 864, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 864, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(864);
       return ::fixpp::wire::group_view<G_864>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -3384,187 +3384,187 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_coupon_payment_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 241, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 241, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_issue_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 242, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 242, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_repo_collateral_security_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 243, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 243, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     underlying_repurchase_term() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 244, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 244, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_repurchase_rate(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 245, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 245, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_factor(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 246, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 246, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_redemption_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 247, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 247, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_credit_rating() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 256, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 256, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     quote_set_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 302, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 302, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     tot_no_quote_entries() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 304, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 304, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_security_id_source() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 305, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 305, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_issuer() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 306, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 306, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_security_desc() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 307, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 307, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_security_exchange() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 308, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 308, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_security_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 309, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 309, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_security_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 310, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 310, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_symbol() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 311, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 311, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_symbol_sfx() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 312, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 312, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_maturity_month_year() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 313, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 313, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     underlying_put_or_call() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 315, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 315, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_strike_price(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 316, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 316, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     underlying_opt_attribute() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 317, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 317, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_currency() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 318, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 318, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_underlying_issuer_len() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 362, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 362, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_underlying_issuer() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 363, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 363, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_underlying_security_desc_len() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 364, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 364, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_underlying_security_desc() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 365, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 365, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_coupon_rate(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 435, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 435, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_contract_multiplier(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 436, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 436, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     underlying_product() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 462, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 462, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_cfi_code() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 463, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 463, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_maturity_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 542, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 542, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_country_of_issue() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 592, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 592, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_state_or_province_of_issue() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 593, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 593, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_locale_of_issue() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 594, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 594, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_instr_registry() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 595, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 595, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_security_sub_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 763, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 763, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_px(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 810, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 810, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_cp_program() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 877, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 877, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_cp_reg_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 878, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 878, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_qty(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 879, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 879, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_dirty_price(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 882, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 882, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_end_price(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 883, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 883, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_start_value(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 884, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 884, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_current_value(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 885, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 885, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     underlying_end_value(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 886, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 886, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<bool>
     last_fragment() const noexcept
-    { return ::fixpp::dict::decode_field<bool>(::fixpp::wire::get(ctx_.span, 893, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<bool>(::fixpp::wire::get(ctx_.span, 893, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     underlying_strike_currency() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 941, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 941, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     quote_set_valid_until_time() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 367, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 367, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_295>
     quote_entries() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 295, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 295, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(295);
       return ::fixpp::wire::group_view<G_295>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_457>
     underlying_security_alt_id() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 457, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 457, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(457);
       return ::fixpp::wire::group_view<G_457>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_887>
     underlying_stips() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 887, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 887, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(887);
       return ::fixpp::wire::group_view<G_887>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -3575,47 +3575,47 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     bid_descriptor_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 399, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 399, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     bid_descriptor() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 400, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 400, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     side_value_ind() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 401, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 401, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     liquidity_pct_low(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 402, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 402, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     liquidity_pct_high(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 403, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 403, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     liquidity_value(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 404, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 404, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     efp_tracking_error(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 405, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 405, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     fair_value(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 406, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 406, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     outside_index_pct(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 407, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 407, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     value_of_futures(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 408, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 408, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     liquidity_num_securities() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 441, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 441, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -3626,70 +3626,70 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     account() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 1, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 1, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     side() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 54, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 54, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     settl_type() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 63, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 63, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     settl_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 64, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 64, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     list_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 66, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 66, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trading_session_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 336, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 336, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     net_gross_ind() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 430, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 430, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     trading_session_sub_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 625, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 625, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     acct_id_source() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 660, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 660, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     commission(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 12, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 12, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     comm_type() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 13, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 13, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     price(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 44, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 44, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     text() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 58, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 58, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_text_len() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 354, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 354, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_text() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 355, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 355, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     fair_value(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 406, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 406, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     country() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 421, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 421, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     price_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 423, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 423, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     comm_currency() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 479, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 479, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     fund_renew_waiv() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 497, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 497, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -3700,149 +3700,149 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_id_source() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 22, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 22, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 48, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 48, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     symbol() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 55, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 55, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     symbol_sfx() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 65, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 65, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     issuer() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 106, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 106, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_desc() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 107, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 107, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 167, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 167, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     maturity_month_year() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 200, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 200, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     put_or_call() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 201, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 201, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     strike_price(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 202, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 202, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<char>
     opt_attribute() const noexcept
-    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 206, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<char>(::fixpp::wire::get(ctx_.span, 206, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_exchange() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 207, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 207, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     coupon_rate(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 223, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 223, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     coupon_payment_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 224, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 224, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     issue_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 225, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 225, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     repurchase_term() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 226, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 226, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     repurchase_rate(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 227, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 227, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     factor(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 228, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 228, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     contract_multiplier(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 231, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 231, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     repo_collateral_security_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 239, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 239, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     redemption_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 240, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 240, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     credit_rating() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 255, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 255, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_issuer_len() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 348, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 348, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_issuer() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 349, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 349, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     encoded_security_desc_len() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 350, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 350, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     encoded_security_desc() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 351, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 351, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     product() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 460, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 460, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cfi_code() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 461, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 461, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     country_of_issue() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 470, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 470, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     state_or_province_of_issue() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 471, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 471, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     locale_of_issue() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 472, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 472, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     maturity_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 541, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 541, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     instr_registry() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 543, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 543, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     contract_settl_month() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 667, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 667, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     pool() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 691, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 691, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_sub_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 762, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 762, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     dated_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 873, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 873, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     interest_accrual_date() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 874, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 874, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     cp_program() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 875, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 875, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cp_reg_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 876, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 876, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     strike_currency() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 947, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 947, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_454>
     security_alt_id() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 454, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 454, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(454);
       return ::fixpp::wire::group_view<G_454>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_864>
     events() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 864, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 864, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(864);
       return ::fixpp::wire::group_view<G_864>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -3853,35 +3853,35 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     mailing_dtls() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 474, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 474, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     investor_country_of_residence() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 475, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 475, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     mailing_inst() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 482, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 482, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     date_of_birth() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 486, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 486, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     regist_dtls() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 509, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 509, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     regist_email() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 511, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 511, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     owner_type() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 522, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 522, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::wire::group_view<G_539>
     nested_party_i_ds() const noexcept [[clang::lifetimebound]]
     { if (ctx_.parent_cache_owner == nullptr) return {};
-      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 539, ctx_.opaque_dict, ctx_.group_member_fn, ctx_.gen, ctx_.group_ctx);
+      auto const r = ctx_.parent_cache_owner->nested_group_slices(ctx_.outer_occurrence_id, ctx_.span.size(), 539, ctx_.hooks, ctx_.gen, ctx_.group_ctx);
       ::fixpp::wire::entry_context child_ctx = ctx_;
       child_ctx.group_ctx = ctx_.group_ctx.pushed(539);
       return ::fixpp::wire::group_view<G_539>{r.slices, child_ctx, r.alloc_failed}; }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -3892,32 +3892,32 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     distrib_payment_method() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 477, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 477, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cash_distrib_curr() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 478, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 478, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cash_distrib_agent_name() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 498, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 498, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cash_distrib_agent_code() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 499, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 499, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cash_distrib_agent_acct_number() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 500, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 500, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cash_distrib_pay_ref() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 501, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 501, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cash_distrib_agent_acct_name() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 502, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 502, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::decimal_t>
     distrib_percentage(::std::pmr::memory_resource* mr) const noexcept
-    { auto fv = ::fixpp::wire::get(ctx_.span, 512, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
+    { auto fv = ::fixpp::wire::get(ctx_.span, 512, ctx_.hooks, ctx_.gen); if (!fv) return ::std::unexpected{fv.error()};
       return ::fixpp::decimal_t::parse(fv->bytes(), mr); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -3928,16 +3928,16 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     orig_cl_ord_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 41, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 41, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     affected_order_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 535, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 535, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     affected_secondary_order_id() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 536, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 536, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };
@@ -3948,19 +3948,19 @@ namespace fixpp::v44::groups {  // shared repeating-group flyweights (AC-G5/AC-G
             : ctx_(ctx) {}
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 167, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 167, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::int32_t>
     product() const noexcept
-    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 460, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::int32_t>(::fixpp::wire::get(ctx_.span, 460, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     cfi_code() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 461, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 461, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::std::string_view>
     security_sub_type() const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 762, ctx_.gen)); }
+    { return ::fixpp::dict::decode_field<::std::string_view>(::fixpp::wire::get(ctx_.span, 762, ctx_.hooks, ctx_.gen)); }
     [[nodiscard]] inline ::fixpp::core::expected_t<::fixpp::wire::field_view>
     field_value(::std::uint16_t tag) const noexcept [[clang::lifetimebound]]
-    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.gen); }
+    { return ::fixpp::wire::get(ctx_.span, tag, ctx_.hooks, ctx_.gen); }
     private:
         ::fixpp::wire::entry_context ctx_{};
     };

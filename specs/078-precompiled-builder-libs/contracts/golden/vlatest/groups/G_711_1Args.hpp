@@ -44,7 +44,6 @@ struct G_711_1Args {
     ::std::optional<::std::span<const G_457Args>> underlying_security_alt_id{};
     ::std::optional<::std::string_view> underlying_id{};
     ::std::optional<::std::int64_t> underlying_product{};
-    ::std::optional<::std::int64_t> underlying_security_xml_len{};
     ::std::optional<::std::string_view> underlying_security_xml{};
     ::std::optional<::std::string_view> underlying_security_xml_schema{};
     ::std::optional<::std::string_view> underlying_cfi_code{};
@@ -104,16 +103,13 @@ struct G_711_1Args {
     ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
     ::std::optional<::std::string_view> underlying_security_exchange{};
     ::std::optional<::std::string_view> underlying_issuer{};
-    ::std::optional<::std::int64_t> encoded_underlying_issuer_len{};
     ::std::optional<::std::string_view> encoded_underlying_issuer{};
     ::std::optional<::std::string_view> underlying_financial_instrument_short_name{};
     ::std::optional<::std::string_view> underlying_financial_instrument_full_name{};
-    ::std::optional<::std::int64_t> encoded_underlying_financial_instrument_full_name_len{};
     ::std::optional<::std::string_view> encoded_underlying_financial_instrument_full_name{};
     ::std::optional<::std::string_view> underlying_index_curve_unit{};
     ::std::optional<::std::int64_t> underlying_index_curve_period{};
     ::std::optional<::std::string_view> underlying_security_desc{};
-    ::std::optional<::std::int64_t> encoded_underlying_security_desc_len{};
     ::std::optional<::std::string_view> encoded_underlying_security_desc{};
     ::std::optional<::std::int64_t> underlying_cp_program{};
     ::std::optional<::std::string_view> underlying_cp_reg_type{};
@@ -166,7 +162,6 @@ struct G_711_1Args {
     ::std::optional<::std::string_view> underlying_settl_rate_index{};
     ::std::optional<::std::string_view> underlying_settl_rate_index_location{};
     ::std::optional<::std::string_view> underlying_option_expiration_desc{};
-    ::std::optional<::std::int64_t> encoded_underlying_option_expiration_desc_len{};
     ::std::optional<::std::string_view> encoded_underlying_option_expiration_desc{};
     ::std::optional<::std::string_view> underlying_product_complex{};
     ::std::optional<::std::string_view> underlying_security_group{};
@@ -246,7 +241,6 @@ struct G_711_1Args {
     ::std::optional<::fixpp::decimal_t> underlying_market_disruption_materiality_percentage{};
     ::std::optional<::std::int64_t> underlying_market_disruption_minimum_futures_contracts{};
     ::std::optional<::std::string_view> underlying_exercise_desc{};
-    ::std::optional<::std::int64_t> encoded_underlying_exercise_desc_len{};
     ::std::optional<::std::string_view> encoded_underlying_exercise_desc{};
     ::std::optional<bool> underlying_automatic_exercise_indicator{};
     ::std::optional<::fixpp::decimal_t> underlying_automatic_exercise_threshold_rate{};

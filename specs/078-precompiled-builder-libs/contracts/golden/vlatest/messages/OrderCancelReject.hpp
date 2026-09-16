@@ -27,7 +27,6 @@ struct OrderCancelRejectArgs {
     ::std::optional<::std::int64_t> cxl_rej_reason{};
     ::std::optional<::std::string_view> secondary_order_id{};
     ::std::optional<::std::string_view> trade_origination_date{};
-    ::std::optional<::std::int64_t> encoded_text_len{};
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<char> cxl_rej_response_to{};
     ::std::optional<::std::span<const groups::G_453Args>> party_i_ds{};
@@ -39,7 +38,6 @@ struct OrderCancelRejectArgs {
     ::std::optional<::std::int64_t> acct_id_source{};
     ::std::optional<char> ex_destination_id_source{};
     ::std::optional<::std::string_view> reject_text{};
-    ::std::optional<::std::int64_t> encoded_reject_text_len{};
     ::std::optional<::std::string_view> encoded_reject_text{};
     ::std::optional<::std::int64_t> order_request_id{};
 };

@@ -31,7 +31,8 @@ namespace fixpp::wire {
 // 073 T001 / gate-b/r1 FQ-2: TEST-ONLY nested_cache_ introspection (declared
 // as a friend of OffsetTable in offset_table.hpp, gated behind
 // FIXPP_TEST_HOOKS; see that header for the rationale). Given a ROOT table,
-// resolves the sub-table already cached for `(slice_data, nested_no_tag)` in
+// resolves the sub-table already cached for
+// `(slice_data, hooks.opaque_dict(), nested_no_tag)` in
 // `nested_cache_`, or `nullptr` if no matching row exists (never requested,
 // OR the row's build itself failed — research.md §D2 mode (a)). Does NOT
 // trigger a build: the caller must already have invoked
@@ -41,11 +42,26 @@ namespace fixpp::wire {
 // private OffsetTable::nested_cache_ member in a non-test-hooks build.
 #ifdef FIXPP_TEST_HOOKS
 struct nested_cache_access_for_testing {
+    // fixpp#426 (Gate B r11 T-1): `hooks` is REQUIRED and has NO default. The
+    // cache key is `(slice_data, hooks.opaque_dict(), nested_no_tag)`, and this
+    // seam used to compare only the first and last — so with two bundles over
+    // one slice it could hand back the OTHER dictionary's sub-table. No caller
+    // could hit it yet (each built a single bundle), but an introspection seam
+    // that cannot tell the two apart is blind to the very distinction the
+    // production key exists to make.
+    //
+    // ⚠️ Deliberately not defaulted to the root's own `hooks_`: that would need
+    // no caller churn and would silently MISS any row cached through the 6-arg
+    // overload with a foreign bundle — trading one blindness for a subtler one.
+    // A required parameter also turns every call site into a COMPILE ERROR,
+    // which is how this file's own 389 note says to find the whole population.
     [[nodiscard]] static OffsetTable const* resolve(OffsetTable const& root,
                                                     std::byte const* slice_data,
+                                                    dict_hooks const& hooks,
                                                     std::uint16_t nested_no_tag) noexcept {
         for (auto const& row : root.nested_cache_) {
-            if (row.slice_data == slice_data && row.nested_no_tag == nested_no_tag) {
+            if (row.slice_data == slice_data && row.hooks_key == hooks.opaque_dict() &&
+                row.nested_no_tag == nested_no_tag) {
                 return row.table;
             }
         }

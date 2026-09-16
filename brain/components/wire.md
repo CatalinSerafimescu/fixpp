@@ -181,6 +181,55 @@ correct. It was the wrong question, because the same feature also changed the *d
 assessment scoped to one of a feature's changes cannot certify a site the feature's OTHER change
 invalidates.** See [`failure-classes.md`](../failure-classes.md) class 9 and B&L B-389-1.
 
+## Length+Data pairs: one table, one carry, and a policy that varies on purpose (#426)
+
+The defect was a scope defect, not a parser bug. Fourteen field scanners split a message, and
+each knew a different set of pairs: the wire parser knew six, and the session's own scanners
+none (`.specify/426-428-length-data-pairs.md` §1). The fix shares the pair SET and the
+counted-field RULE. It does not merge the scanners.
+
+What was rejected:
+- **Pairs from the dictionary only.** Pre-session routing and log redaction have no dictionary,
+  so the standard table has to stand alone (L-426-1).
+- **A dictionary overriding a standard pair** (design §3, r3 R3-1). Two dictionaries would then
+  split the same standard frame differently (L-426-2).
+- **Separate pair-callback parameters.** The pair lookup travels in `wire::dict_hooks` with the
+  group oracles: the mismatched-pairing shape of the #384 section above.
+- **One malformed-count policy for every scanner** (design §4). A header scan must stop, a replay
+  must gap-fill, and a Password masker must over-mask rather than miss (B-426-2).
+
+`OffsetTable::build` and `field_iterator` keep their own carries (hot path). The six session
+scanners share `length_data_carry::read_value`. #418's `body_builder` must reuse
+`length_data_pairs.hpp` and `length_data_checker`, not add a fifteenth copy.
+
+**Where the table lives, and why the callback is conditional.** The standard table is
+`include/fixpp/core/length_data_pairs.hpp` — `table_view` must classify a tag and the dictionary
+layer may not include wire ([arch §2.3]); the wire header of the same name re-exports it.
+⚠️ `tools/check_layers.py` walks `src/` and `bindings/` only, so a dictionary **header**
+including a wire header passes **silently** — that move was correctness, not a gate. A first
+implementation paid for the pair lookup on every field of every scanner and cost +113..126 % on
+the parser rows; the shipped shape is a constexpr bitset behind a `[89, 43111]` range guard,
+plus one cached `bool` on `table_view` that makes `dict_hooks::for_table_view` install the pair
+callback **only** for a dictionary whose own pair has both tags outside the standard table. The
+flag is cached rather than computed because `for_table_view` runs **per message**
+(`Validator::validate`, the session scanners, the C-ABI setters).
+
+**A bundle must be threaded, not assumed — this is where the defects were.** Two surfaces
+silently answered with the wrong dictionary, both found by hostile review after the feature was
+"done":
+- `Parser<Iter>::parse_iter()` built its view without its own `hooks_`, so dictionary-backed
+  streaming split by the standard table alone. The test that claimed to cover "the Iter path"
+  was iterating a `MessageView<Index>` — the label said Iter, the code said Index, and every
+  review round read the label (Gate B r8 P-1).
+- `OffsetTable::nested_group_slices` ignored the caller's bundle on **warm cache hits**, so the
+  first caller's dictionary permanently decided a slice's sub-table — the mismatched-pairing
+  shape of the DELIMITER oracle (#384) above, reintroduced by a cache key. `nested_cache_row`
+  now carries the bundle identity (Gate B r9 R-1).
+
+Zero can never be half of a pair: it is the "no pair" answer of both accessors, so it is refused
+at `table_view::set_length_pair_data_tag` **and** at pair formation in both loaders — the setter
+alone leaves `Dictionary::length_pair_data_tag(0)` and `field_ref` still reporting one.
+
 ## The seam into the session layer
 
 `wire_error_to_session_reject_reason` (`include/fixpp/wire/reject_reason_map.hpp`) maps a validator

@@ -4,8 +4,10 @@
 // [2b §4.3] header-only template Parser<Mode> + MessageView<Mode> : View +
 // field_iterator. Mode is resolved at COMPILE time (no runtime branch on the
 // hot path, FR-003): access_mode::Index builds the OffsetTable eagerly;
-// access_mode::Iter skips it (zero-alloc, dict-free streaming + a static
-// constexpr Length+Data pair table). Authority: .specify/2b-wire.md v0.2;
+// access_mode::Iter skips it (zero-alloc streaming; the standard constexpr
+// Length+Data pair table always applies, and a dictionary's own pairs apply
+// too when the view carries a bundle — `Parser<Iter>::parse_iter()` threads
+// one, so Iter is NOT dict-free). Authority: .specify/2b-wire.md v0.2;
 // shape oracle contracts/parser.hpp.
 //
 // (U1) Every W-009 field type decodes/encodes strictly via the 2a
@@ -40,7 +42,8 @@
 #include <string_view>
 #include <type_traits>
 
-#include "errors.hpp"  // wire::err_required_field_missing (062 T004)
+#include "dict_hooks.hpp"  // fixpp::wire::dict_hooks (fixpp#426)
+#include "errors.hpp"      // wire::err_required_field_missing (062 T004)
 #include "field_view.hpp"
 #include "framer.hpp"
 #include "group_view.hpp"
@@ -62,31 +65,6 @@ namespace detail {
 // Standard-header tags used for msg_type/msg_seq_num lookups.
 inline constexpr std::uint16_t tag_msg_type = 35;
 inline constexpr std::uint16_t tag_msg_seq_num = 34;
-
-// Static, dict-free Length+Data pairs ([FIX50SP2 §3]) for the Iter path so a
-// Data field's value (which may contain SOH) is read by the preceding
-// Length field, with no runtime dictionary. (length_tag -> data_tag)
-struct len_data_pair {
-    std::uint16_t length_tag;
-    std::uint16_t data_tag;
-};
-inline constexpr len_data_pair length_data_table[] = {
-    {.length_tag = 93, .data_tag = 89},    // SignatureLength / Signature
-    {.length_tag = 90, .data_tag = 91},    // SecureDataLen / SecureData
-    {.length_tag = 95, .data_tag = 96},    // RawDataLength / RawData
-    {.length_tag = 212, .data_tag = 213},  // XmlDataLen / XmlData
-    {.length_tag = 348, .data_tag = 349},  // EncodedHeaderLen / EncodedHeader
-    {.length_tag = 350, .data_tag = 351},  // EncodedMsgLen / EncodedMsg
-};
-
-[[nodiscard]] constexpr std::uint16_t data_tag_for_length(std::uint16_t length_tag) noexcept {
-    for (auto const& p : length_data_table) {
-        if (p.length_tag == length_tag) {
-            return p.data_tag;
-        }
-    }
-    return 0;
-}
 
 }  // namespace detail
 
@@ -115,29 +93,21 @@ public:
     MessageView(MessageView&&) noexcept = default;
     MessageView& operator=(MessageView&&) = delete;
 
-    // [2b §4.3] Construct with type-erased dict opaque pointer + helper fns.
-    // The dict is borrowed from the caller; the pointer/fns alias that
-    // caller-owned object. No incomplete-type issues — uses void const* + fn
-    // ptrs. ([PR68-02]/[PR68-10] fix.)
-    using classify_fn_t = bool (*)(void const*, std::string_view, std::uint16_t) noexcept;
-    using group_member_fn_t = OffsetTable::group_member_fn_t;
-    using group_delim_fn_t = OffsetTable::group_delim_fn_t;
+    // [2b §4.3] Construct with a dict_hooks bundle (fixpp#426, design §3).
+    // The dictionary is borrowed from the caller; `hooks` aliases that
+    // caller-owned object. No incomplete-type issues — dict_hooks uses
+    // void const* + fn ptrs internally. ([PR68-02]/[PR68-10] fix.)
 
-    // 384: `group_delim_fn` has NO default — see the same note on
-    // `OffsetTable`'s dict-aware ctors (offset_table.hpp). A table carrying a
+    // 384 / fixpp#426: `hooks` has NO default — see the same note on
+    // `OffsetTable`'s dict-aware ctors (offset_table.hpp). A view carrying a
     // dictionary but no delimiter oracle must now say so at the call site.
-    MessageView(frame_view const& frame, std::pmr::memory_resource* mr, void const* opaque_dict,
-                classify_fn_t classify_fn, group_member_fn_t group_member_fn,
-                group_delim_fn_t group_delim_fn) noexcept
+    MessageView(frame_view const& frame, std::pmr::memory_resource* mr, dict_hooks hooks) noexcept
         requires(Mode == access_mode::Index)
         : View{frame.bytes().data(), frame.bytes().size(),
                frame.token()},  // [2b §6.4] thread real pool token
-          table_{frame, mr, opaque_dict, group_member_fn, group_delim_fn},
+          table_{frame, mr, hooks},
           mr_{mr},
-          opaque_dict_{opaque_dict},
-          classify_fn_{classify_fn},
-          group_member_fn_{group_member_fn},
-          group_delim_fn_{group_delim_fn},
+          hooks_{hooks},
           unk_items_{mr} {
         // Gate B PR#176 r1 root cause #1: seed the ROOT group_context ({msg_type,
         // path=[]}) HERE, unconditionally, rather than lazily only in group<>()
@@ -152,17 +122,13 @@ public:
 
     // FR-015 / [2b §1.2]: same as above but with caller-tunable caps.
     MessageView(frame_view const& frame, std::pmr::memory_resource* mr, OffsetTable::Config cfg,
-                void const* opaque_dict, classify_fn_t classify_fn,
-                group_member_fn_t group_member_fn, group_delim_fn_t group_delim_fn) noexcept
+                dict_hooks hooks) noexcept
         requires(Mode == access_mode::Index)
         : View{frame.bytes().data(), frame.bytes().size(),
                frame.token()},  // [2b §6.4] thread real pool token
-          table_{frame, mr, cfg, opaque_dict, group_member_fn, group_delim_fn},
+          table_{frame, mr, cfg, hooks},
           mr_{mr},
-          opaque_dict_{opaque_dict},
-          classify_fn_{classify_fn},
-          group_member_fn_{group_member_fn},
-          group_delim_fn_{group_delim_fn},
+          hooks_{hooks},
           unk_items_{mr} {
         // See the sibling ctor above — same root group_context seed, same
         // rationale (Gate B PR#176 r1 root cause #1).
@@ -182,6 +148,16 @@ public:
         : View{frame.bytes().data(), frame.bytes().size(), frame.token()} {
     }  // [2b §6.4] thread real pool token
 
+    // fixpp#426 (design §3, Gate B r8 P-1): the dictionary-backed Iter view. Without
+    // it `Parser<Iter>` had nowhere to put the bundle it captured, so `parse_iter()`
+    // built a dict-free view and a dictionary's own Length+Data pairs never reached
+    // the streaming scanner — the standard table split those frames, the dictionary's
+    // pairs did not. `hooks` aliases the caller-owned dictionary, exactly as in the
+    // Index ctors above.
+    MessageView(frame_view const& frame, dict_hooks hooks) noexcept
+        requires(Mode == access_mode::Iter)
+        : View{frame.bytes().data(), frame.bytes().size(), frame.token()}, hooks_{hooks} {}
+
     [[nodiscard]] std::string_view msg_type() const noexcept [[clang::lifetimebound]] {
         return field_string(detail::tag_msg_type);
     }
@@ -190,15 +166,24 @@ public:
         return parse_bounded_u32(b);
     }
 
-    // ---- Iter streaming, dict-free ----------------------------------------
+    // ---- Iter streaming (optionally dictionary-backed) ---------------------
     class field_iterator {
     public:
         struct field {
             std::uint16_t tag = 0;
             std::span<const std::byte> value;
         };
-        field_iterator(std::span<const std::byte> buf, std::size_t pos) noexcept
-            : buf_{buf}, pos_{pos} {
+        // fixpp#426: `hooks` has NO default (mirrors OffsetTable's dict-aware
+        // ctors) — every direct construction site must say which dictionary
+        // (or `dict_hooks::none()`) governs the Length+Data split. An Iter
+        // view's own `begin()`/`end()` below pass `hooks_`, which is `none()`
+        // only when the view was built WITHOUT a bundle. ⚠️ Iter mode is NOT
+        // dict-free: `Parser<Iter>::parse_iter()` threads its own `hooks_` into
+        // the view it returns (Gate B r8 P-1 — it used to drop them, and the
+        // test that claimed to cover the Iter path was walking a
+        // `MessageView<Index>` iterator).
+        field_iterator(std::span<const std::byte> buf, std::size_t pos, dict_hooks hooks) noexcept
+            : buf_{buf}, pos_{pos}, hooks_{hooks} {
             advance();
         }
         [[nodiscard]] field const& operator*() const noexcept { return cur_; }
@@ -231,13 +216,18 @@ public:
         // tag, so the next (Data) field is read by fixed length.
         std::uint16_t prev_data_tag_ = 0;
         std::uint32_t prev_data_len_ = 0;
+        dict_hooks hooks_{};
     };
 
+    // fixpp#426: passes THIS view's own `hooks_` — `none()` on a dict-free view,
+    // and on an Iter view built from the frame alone. `Parser<Iter>::parse_iter()`
+    // builds one WITH hooks (Gate B r8 P-1), so a dictionary-backed streaming walk
+    // splits by that dictionary's pairs too.
     [[nodiscard]] field_iterator begin() const noexcept [[clang::lifetimebound]] {
-        return field_iterator{bytes(), 0};
+        return field_iterator{bytes(), 0, hooks_};
     }
     [[nodiscard]] field_iterator end() const noexcept [[clang::lifetimebound]] {
-        return field_iterator{bytes(), bytes().size()};
+        return field_iterator{bytes(), bytes().size(), hooks_};
     }
 
     // ---- Index random access ---------------------------------------------
@@ -309,8 +299,7 @@ public:
             table_.set_group_context(root_ctx);
             entry_context ctx{};
             ctx.mr = mr_;
-            ctx.opaque_dict = opaque_dict_;
-            ctx.group_member_fn = group_member_fn_;
+            ctx.hooks = hooks_;
             ctx.gen = token();
             ctx.parent_cache_owner = &table_;
             ctx.group_ctx = root_ctx.pushed(NoTag);
@@ -343,10 +332,11 @@ public:
                 if (e.tag == kBeginString || e.tag == kBodyLength || e.tag == kCheckSum) {
                     continue;  // framing — never unknown
                 }
-                // classify_fn_ is nullptr for dict-free views (all non-framing =
-                // unknown); otherwise classify via the bound fn + opaque dict.
-                bool const known =
-                    (classify_fn_ != nullptr) && classify_fn_(opaque_dict_, mtype, e.tag);
+                // hooks_.classify_fn() is nullptr for dict-free views (all
+                // non-framing = unknown); otherwise classify via the bound
+                // fn + opaque dict.
+                bool const known = (hooks_.classify_fn() != nullptr) &&
+                                   hooks_.classify_fn()(hooks_.opaque_dict(), mtype, e.tag);
                 if (!known) {
                     unk_items_.push_back(unknown_fields_view::kv{
                         .tag = e.tag, .data = raw.data() + e.offset, .len = e.length});
@@ -363,10 +353,10 @@ public:
     // OWNED, independently-lifetimed `table_view` — safe to outlive the
     // source session/Dictionary (`table_view`'s copy ctor deep-copies its
     // owned tables; table_view.hpp's copy-ctor note, spans "stable for lifetime"
-    // per its own accessor comments). Re-concretizes `opaque_dict_` back to a `table_view`
-    // (sound: every production dict-backed parse binds a real `table_view` —
+    // per its own accessor comments). Re-concretizes `hooks_.opaque_dict()` back to a
+    // `table_view` (sound: every production dict-backed parse binds a real `table_view` —
     // data-model.md "Reify owning handle" accessor precondition). A
-    // dict-free source (`opaque_dict_ == nullptr`) yields a
+    // dict-free source (`hooks_.opaque_dict() == nullptr`) yields a
     // default-constructed (empty) copy, so the clone/reify correctly stays
     // dict-free — the correct degenerate case (contracts/inbound-parse.md
     // C4). Defined out-of-line below (mirrors this file's existing
@@ -382,7 +372,7 @@ public:
 
     // 066-dict-backed-inbound-parse T007/T008: companion predicate to
     // membership_copy() — true iff THIS view is itself dict-backed
-    // (opaque_dict_ non-null). A clone/reify propagation site MUST bind its
+    // (`hooks_.opaque_dict()` non-null). A clone/reify propagation site MUST bind its
     // re-framed MessageView dict-backed ONLY when this is true: binding a
     // non-null opaque_dict at an (empty) copy from a genuinely dict-free
     // source would flip OffsetTable::group()/consume_group_extent from the
@@ -399,7 +389,17 @@ public:
     // It remains load-bearing for the non-group reasons this method also
     // gates — field classification and unknown_fields(), which do read table
     // CONTENT and so do differ between "no dictionary" and "an empty one".
-    [[nodiscard]] bool is_dict_backed() const noexcept { return opaque_dict_ != nullptr; }
+    [[nodiscard]] bool is_dict_backed() const noexcept { return hooks_.opaque_dict() != nullptr; }
+
+    // fixpp#426: this view's own dict_hooks bundle — `none()` only for a view
+    // constructed without one (default/frame-only construction), NOT for every
+    // Iter view: `Parser<Iter>::parse_iter()` passes its own bundle through
+    // (Gate B r8 P-1). Exposed so a caller minting its own field_iterator
+    // (e.g. a nested/C-ABI scan) can reuse the EXACT dictionary this view was
+    // built with.
+    [[nodiscard]] dict_hooks const& hooks() const noexcept [[clang::lifetimebound]] {
+        return hooks_;
+    }
 
 private:
     [[nodiscard]] std::span<const std::byte> field_bytes(std::uint16_t tag) const noexcept {
@@ -429,18 +429,13 @@ private:
     // Index-mode extras. mr_ declared BEFORE unk_items_ so it is initialised
     // first.
     std::pmr::memory_resource* mr_ = std::pmr::null_memory_resource();
-    // [2b §4.3] / [2b §4.8] type-erased dict threaded from the Parser.
-    // Uses void const* + function pointer to avoid requiring table_view to be
-    // complete at class-template definition time. ([PR68-02] fix.)
-    // nullptr classify_fn_ = dict-free path (all non-framing = unknown).
-    void const* opaque_dict_ = nullptr;
-    classify_fn_t classify_fn_ = nullptr;
-    // 062 T007: threaded into every entry_context minted by group<>() below
-    // (the dict-driven group-membership predicate a nested descent needs to
-    // build a dict-aware sub-OffsetTable). Default nullptr on the dict-free
-    // ctors, matching table_'s own dict-free construction.
-    group_member_fn_t group_member_fn_ = nullptr;
-    group_delim_fn_t group_delim_fn_ = nullptr;  // 083 T057 (C-8.1)
+    // [2b §4.3] / [2b §4.8] fixpp#426: the dict_hooks bundle threaded from the
+    // Parser (replaces the separate opaque_dict_/classify_fn_/
+    // group_member_fn_/group_delim_fn_ fields). Default `none()` = dict-free
+    // path (all non-framing = unknown). Threaded into every entry_context
+    // minted by group<>() below (the dict-driven predicates a nested descent
+    // needs to build a dict-aware sub-OffsetTable). ([PR68-02] fix.)
+    dict_hooks hooks_{};
     // unk_items_: lazily built unknown-fields kv list in the per-message arena.
     // An Index-mode ctor overrides this default with the real arena
     // (`unk_items_{mr}`), but a default-constructed view and EVERY Iter-mode view
@@ -455,8 +450,10 @@ private:
     mutable bool unk_items_built_ = false;
 };
 
-// field_iterator::advance — dict-free; honours the static Length+Data table
-// so a Data field carrying embedded SOH is delimited by its Length field.
+// field_iterator::advance — honours `hooks_` (default `none()`, the standard
+// table alone) so a Data field carrying embedded SOH is delimited by its
+// Length field, including a dictionary's own custom pairs when `hooks_` was
+// built `for_table_view()` (fixpp#426, design §3).
 template <access_mode Mode>
 void MessageView<Mode>::field_iterator::advance() noexcept {
     constexpr std::byte SOH{0x01};
@@ -527,7 +524,7 @@ void MessageView<Mode>::field_iterator::advance() noexcept {
     cur_ = field{static_cast<std::uint16_t>(tag), buf_.subspan(vstart, i - vstart)};
     next_ = (i < buf_.size()) ? i + 1 : i;
 
-    if (std::uint16_t dt = detail::data_tag_for_length(static_cast<std::uint16_t>(tag)); dt != 0) {
+    if (std::uint16_t dt = hooks_.data_tag_for_length(static_cast<std::uint16_t>(tag)); dt != 0) {
         prev_data_tag_ = dt;
         prev_data_len_ = parse_bounded_u32(cur_.value);
     }
@@ -543,31 +540,37 @@ void MessageView<Mode>::field_iterator::advance() noexcept {
 // nest <unordered_set>'s `namespace std` under `fixpp::wire::std`.
 template <access_mode Mode>
 fixpp::dict::table_view MessageView<Mode>::membership_copy() const {
-    if (opaque_dict_ == nullptr) {
+    if (hooks_.opaque_dict() == nullptr) {
         return fixpp::dict::table_view{};
     }
     // Copy-constructs (deep-copies the owned tables, table_view.hpp's copy-ctor note)
     // — the result is self-contained and outlives the source session/
     // Dictionary/table_view.
-    return *static_cast<fixpp::dict::table_view const*>(opaque_dict_);
+    return *static_cast<fixpp::dict::table_view const*>(hooks_.opaque_dict());
 }
 
 // [2b §4.3] span-scan → token-bearing field_view helper (062 T004, N1). The
-// one wire primitive that did not exist yet: reuses the dict-free
-// field_iterator to locate `tag` within an arbitrary in-frame slice (e.g. a
-// repeating-group entry's own bytes) and mints a field_view carrying the
-// caller-supplied generation token via field_view_access::make — mirrors
+// one wire primitive that did not exist yet: reuses the field_iterator to
+// locate `tag` within an arbitrary in-frame slice (e.g. a repeating-group
+// entry's own bytes) and mints a field_view carrying the caller-supplied
+// generation token via field_view_access::make — mirrors
 // MessageView<Index>::get(tag) (above) minus the OffsetTable. No
 // sub-index, zero heap allocation; tolerates a missing final SOH (the
 // underlying field_iterator::advance() above already falls through end==size).
 // On a miss, returns the SAME field-not-found error
 // MessageView::get returns (wire_required_field_missing, via table_.find).
+//
+// fixpp#426 (design §3): `hooks` governs the Length+Data split within this
+// slice — generated group-entry readers pass their entry_context's own
+// `hooks` (a dictionary's custom pair, or `none()` for the standard table
+// alone). The 3-arg overload below delegates with `none()`, unchanged for
+// every dict-free caller.
 [[nodiscard]] inline core::expected_t<field_view> get(std::span<const std::byte> span
                                                       [[clang::lifetimebound]],
-                                                      std::uint16_t tag,
+                                                      std::uint16_t tag, dict_hooks const& hooks,
                                                       detail::generation_token gen) noexcept {
     using iter_t = MessageView<access_mode::Iter>::field_iterator;
-    for (iter_t it{span, 0}, end{span, span.size()}; !(it == end); ++it) {
+    for (iter_t it{span, 0, hooks}, end{span, span.size(), hooks}; !(it == end); ++it) {
         if ((*it).tag == tag) {
             auto const& f = *it;
             return field_view_access::make(f.value.data(), f.value.size(), gen);
@@ -576,63 +579,94 @@ fixpp::dict::table_view MessageView<Mode>::membership_copy() const {
     return err_required_field_missing<field_view>();
 }
 
+[[nodiscard]] inline core::expected_t<field_view> get(std::span<const std::byte> span
+                                                      [[clang::lifetimebound]],
+                                                      std::uint16_t tag,
+                                                      detail::generation_token gen) noexcept {
+    return get(span, tag, dict_hooks::none(), gen);
+}
+
+// fixpp#426 (design §3): `dict_hooks::for_table_view` — defined here, not in
+// dict_hooks.hpp, because it needs both `fixpp::dict::table_view` and
+// `group_context` complete (dict_hooks.hpp only forward-declares
+// `group_context` to avoid an include-graph cycle; see that header's own
+// note). `inline` because this header is included by many TUs and the
+// definition lives out-of-line from the class body.
+inline dict_hooks dict_hooks::for_table_view(fixpp::dict::table_view const& dict) noexcept {
+    return dict_hooks{
+        std::addressof(dict),
+        [](void const* d, std::string_view mt, std::uint16_t t) noexcept -> bool {
+            return static_cast<fixpp::dict::table_view const*>(d)->field_valid_for(mt, t);
+        },
+        // 063 T015: resolves via the stored `group_context` (msg_type +
+        // bounded parent-no_tag path) — the context-scoped membership key
+        // (data-model.md "GroupMembership", Option A). Fixes Defect A: a
+        // reused NumInGroup tag (e.g. FIX44 295) now resolves to the members
+        // it has in THIS message/parent-path, not whichever variant the
+        // loader saw first, PROVIDED the context (msg_type + full
+        // parent-no_tag path) is supplied — which it always is on this call
+        // site (ctx comes from the stored OffsetTable context, seeded at
+        // MessageView::group<>() / build_nested_subview(), parser.hpp /
+        // offset_table.cpp). `table_view`'s context accessor falls back to
+        // the legacy bare-`no_tag` store on a MISS (table_view.hpp doc,
+        // amended hardening invariant) — unreachable HERE because this call
+        // site's ctx always matches the exact registration key.
+        [](void const* d, group_context const& ctx, std::uint16_t no_tag,
+           std::uint16_t tag) noexcept -> bool {
+            auto const members = static_cast<fixpp::dict::table_view const*>(d)->group_member_tags(
+                ctx.msg_type, std::span<std::uint16_t const>{ctx.parent_path.data(), ctx.depth},
+                no_tag);
+            return std::ranges::any_of(
+                members, [tag](std::uint16_t const member_tag) { return member_tag == tag; });
+        },
+        // 083 T057 (C-8.1): the delimiter sibling of the membership lambda,
+        // resolving through the SAME opaque_dict and the SAME context key.
+        [](void const* d, group_context const& ctx,
+           std::uint16_t no_tag) noexcept -> std::uint16_t {
+            return static_cast<fixpp::dict::table_view const*>(d)->group_first_field(
+                ctx.msg_type, std::span<std::uint16_t const>{ctx.parent_path.data(), ctx.depth},
+                no_tag);
+        },
+        // fixpp#426 (design §3): the Length+Data pairing sibling — resolves
+        // through the SAME opaque_dict. Installed only when this dictionary declares
+        // a pair whose two tags the standard table both leave unnamed: those are the
+        // only pairs the lookup rule can honour, so otherwise the callback would
+        // answer 0 for every field it was asked about, at a lookup each.
+        dict.has_nonstandard_pair()
+            ? +[](void const* d, std::uint16_t tag,
+                  dict_hooks::pair_side from) noexcept -> std::uint16_t {
+                  auto const* tv = static_cast<fixpp::dict::table_view const*>(d);
+                  return from == dict_hooks::pair_side::length ? tv->length_pair_data_tag(tag)
+                                                               : tv->data_pair_length_tag(tag);
+              }
+            : static_cast<dict_hooks::length_pair_fn_t>(nullptr)};
+}
+
 template <access_mode Mode = access_mode::Index>
 class Parser {
 public:
     Parser() noexcept = default;
 
     template <class TV>
-    // dict_metadata is lvalue-constrained and only address-taken (opaque_dict_);
-    // forwarding would be wrong, so missing-std-forward is a false positive here.
+    // dict_metadata is lvalue-constrained and only address-taken (inside
+    // dict_hooks::for_table_view); forwarding would be wrong, so
+    // missing-std-forward is a false positive here.
     // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
     explicit Parser(TV&& dict_metadata) noexcept
         // gate-b/r1 FQ-2 (PR #181 round 1): constrained to fixpp::dict::table_view
         // (not merely any lvalue-referenced duck-typed dict). membership_copy()
-        // (above) unconditionally static_cast<table_view const*>(opaque_dict_) --
+        // unconditionally static_cast<table_view const*>(opaque_dict()) --
         // sound by construction only if every dict-backed Parser<> is built over
         // a real table_view. Census (src/+tests/+bench/): every construction site
         // already passes a table_view (tests/support/mock_dict_table.hpp is a
         // compatibility shim over table_view, not a distinct type).
         requires(std::is_lvalue_reference_v<TV &&> &&
                  std::same_as<std::remove_cvref_t<TV>, fixpp::dict::table_view>)
-        : opaque_dict_{std::addressof(dict_metadata)},
-          classify_fn_{[](void const* d, std::string_view mt, std::uint16_t t) noexcept -> bool {
-              using dict_t = std::remove_reference_t<TV>;
-              return static_cast<dict_t const*>(d)->field_valid_for(mt, t);
-          }},
-          group_member_fn_{
-              // 063 T015: resolves via the stored `group_context` (msg_type +
-              // bounded parent-no_tag path) — the context-scoped membership
-              // key (data-model.md "GroupMembership", Option A). Fixes
-              // Defect A: a reused NumInGroup tag (e.g. FIX44 295) now
-              // resolves to the members it has in THIS message/parent-path,
-              // not whichever variant the loader saw first, PROVIDED the
-              // context (msg_type + full parent-no_tag path) is supplied —
-              // which it always is on this call site (ctx comes from the
-              // stored OffsetTable context, seeded at MessageView::group<>()
-              // / build_nested_subview(), parser.hpp / offset_table.cpp).
-              // `table_view`'s context accessor falls back to the legacy
-              // bare-`no_tag` store on a MISS (table_view.hpp doc, amended
-              // hardening invariant) — unreachable HERE because this call
-              // site's ctx always matches the exact registration key.
-              [](void const* d, group_context const& ctx, std::uint16_t no_tag,
-                 std::uint16_t tag) noexcept -> bool {
-                  using dict_t = std::remove_reference_t<TV>;
-                  auto const members = static_cast<dict_t const*>(d)->group_member_tags(
-                      ctx.msg_type,
-                      std::span<std::uint16_t const>{ctx.parent_path.data(), ctx.depth}, no_tag);
-                  return std::ranges::any_of(
-                      members, [tag](std::uint16_t const member_tag) { return member_tag == tag; });
-              }},
-          // 083 T057 (C-8.1): the delimiter sibling of the membership lambda,
-          // resolving through the SAME opaque_dict and the SAME context key.
-          group_delim_fn_{[](void const* d, group_context const& ctx,
-                             std::uint16_t no_tag) noexcept -> std::uint16_t {
-              using dict_t = std::remove_reference_t<TV>;
-              return static_cast<dict_t const*>(d)->group_first_field(
-                  ctx.msg_type, std::span<std::uint16_t const>{ctx.parent_path.data(), ctx.depth},
-                  no_tag);
-          }} {}
+        // fixpp#426 (design §3): the three lambdas (classify, group_member,
+        // group_delim) that used to live here move into
+        // `dict_hooks::for_table_view`, defined below once `table_view` and
+        // `group_context` are both complete — see dict_hooks.hpp's own note.
+        : hooks_{dict_hooks::for_table_view(dict_metadata)} {}
 
     template <class TV>
     explicit Parser(TV&&) noexcept
@@ -644,13 +678,15 @@ public:
     Parser(Parser&&) = delete;
     Parser& operator=(Parser&&) = delete;
 
-    [[nodiscard]] core::expected_t<MessageView<Mode>> parse(frame_view const& frame
-                                                            [[clang::lifetimebound]],
-                                                            std::pmr::memory_resource* mr) noexcept
-        [[clang::lifetimebound]] {
-        // Thread the opaque dict pointer + helper fns into the MessageView.
-        MessageView<Mode> mv{frame,          mr, opaque_dict_, classify_fn_, group_member_fn_,
-                             group_delim_fn_};
+    // Index only: `MessageView<Iter>` has no arena-taking ctor, so an Iter
+    // instantiation was ill-formed rather than merely unused (Gate B r8 P-1).
+    // `parse_iter()` is the Iter entry point.
+[[nodiscard]] core::expected_t<MessageView<Mode>> parse(frame_view const& frame
+                                                        [[clang::lifetimebound]],
+                                                        std::pmr::memory_resource* mr) noexcept
+    [[clang::lifetimebound]] requires(Mode == access_mode::Index) {
+        // Thread the dict_hooks bundle into the MessageView (fixpp#426).
+        MessageView<Mode> mv{frame, mr, hooks_};
         if constexpr (Mode == access_mode::Index) {
             if (auto s = mv.offsets().build_status(); !s) {
                 return core::expected_t<MessageView<Mode>>{std::unexpect, s.error()};
@@ -659,21 +695,20 @@ public:
         return mv;
     }
 
-    // FR-015 / [2b §1.2] caller-tunable DoS caps: same contract as parse(),
-    // but threads an OffsetTable::Config so the per-instance group cap is
-    // tunable through the public Parser API (not collapsed to constants).
+// FR-015 / [2b §1.2] caller-tunable DoS caps: same contract as parse(),
+// but threads an OffsetTable::Config so the per-instance group cap is
+// tunable through the public Parser API (not collapsed to constants).
 [[nodiscard]] core::expected_t<MessageView<Mode>> parse(frame_view const& frame
                                                         [[clang::lifetimebound]],
                                                         std::pmr::memory_resource* mr,
                                                         OffsetTable::Config cfg) noexcept
     [[clang::lifetimebound]] requires(Mode == access_mode::Index) {
-        // 083 T057 (C-8.1): the cap-tunable overload threads the delimiter
-        // callback too. It supplies `opaque_dict_`, so omitting it here would
-        // silently take C-8.4's dict-FREE fallback (wire-derived
-        // `entries_[first].tag`) on a dictionary-backed parse — the missed
-        // construction site T057 warns about, one API surface over.
-        MessageView<Mode> mv{frame,          mr, cfg, opaque_dict_, classify_fn_, group_member_fn_,
-                             group_delim_fn_};
+        // 083 T057 (C-8.1) / fixpp#426: the cap-tunable overload threads
+        // `hooks_` too. Omitting it here would silently take C-8.4's
+        // dict-FREE fallback (wire-derived `entries_[first].tag`) on a
+        // dictionary-backed parse — the missed construction site T057 warns
+        // about, one API surface over.
+        MessageView<Mode> mv{frame, mr, cfg, hooks_};
         if (auto s = mv.offsets().build_status(); !s) {
             return core::expected_t<MessageView<Mode>>{std::unexpect, s.error()};
         }
@@ -683,13 +718,14 @@ public:
 [[nodiscard]] core::expected_t<MessageView<access_mode::Iter>> parse_iter(
     frame_view const& frame [[clang::lifetimebound]]) noexcept
     [[clang::lifetimebound]] requires(Mode == access_mode::Iter) {
-        return MessageView<access_mode::Iter>{frame};
+        // Gate B r8 P-1: thread THIS parser's bundle. Returning `{frame}` here dropped
+        // the dictionary this parser was constructed with, silently.
+        return MessageView<access_mode::Iter>{frame, hooks_};
     }
 
-private : void const* opaque_dict_ = nullptr;
-    bool (*classify_fn_)(void const*, std::string_view, std::uint16_t) noexcept = nullptr;
-    OffsetTable::group_member_fn_t group_member_fn_ = nullptr;
-    OffsetTable::group_delim_fn_t group_delim_fn_ = nullptr;
+private : dict_hooks hooks_ {};  // fixpp#426: replaces the separate opaque_dict_/
+                                 // classify_fn_/group_member_fn_/group_delim_fn_
+                                 // fields.
 };
 
 }  // namespace fixpp::wire

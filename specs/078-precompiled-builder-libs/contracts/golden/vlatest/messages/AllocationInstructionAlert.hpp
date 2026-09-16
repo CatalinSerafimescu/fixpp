@@ -112,11 +112,8 @@ struct AllocationInstructionAlertArgs {
     ::std::optional<::fixpp::decimal_t> high_px{};
     ::std::optional<::fixpp::decimal_t> low_px{};
     ::std::optional<::std::string_view> trading_session_id{};
-    ::std::optional<::std::int64_t> encoded_issuer_len{};
     ::std::optional<::std::string_view> encoded_issuer{};
-    ::std::optional<::std::int64_t> encoded_security_desc_len{};
     ::std::optional<::std::string_view> encoded_security_desc{};
-    ::std::optional<::std::int64_t> encoded_text_len{};
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::fixpp::decimal_t> gross_trade_amt{};
     ::std::optional<::std::int64_t> price_type{};
@@ -210,7 +207,6 @@ struct AllocationInstructionAlertArgs {
     ::std::optional<::fixpp::decimal_t> min_price_increment_amount{};
     ::std::optional<::fixpp::decimal_t> unit_of_measure_qty{};
     ::std::optional<::std::string_view> security_group{};
-    ::std::optional<::std::int64_t> security_xml_len{};
     ::std::optional<::std::string_view> security_xml{};
     ::std::optional<::std::string_view> security_xml_schema{};
     ::std::optional<::std::string_view> price_unit_of_measure{};
@@ -242,15 +238,13 @@ struct AllocationInstructionAlertArgs {
     ::std::optional<::std::span<const groups::G_1483Args>> complex_events{};
     ::std::optional<::std::string_view> documentation_text{};
     ::std::optional<::std::string_view> price_quote_currency{};
-    ::std::optional<::std::int64_t> encoded_documentation_text_len{};
     ::std::optional<::std::string_view> encoded_documentation_text{};
     ::std::optional<::std::string_view> swap_sub_class{};
     ::std::optional<::std::string_view> settl_rate_index{};
     ::std::optional<::std::string_view> settl_rate_index_location{};
     ::std::optional<::std::string_view> option_expiration_desc{};
-    ::std::optional<::std::int64_t> encoded_option_expiration_desc_len{};
-    ::std::optional<::std::int64_t> short_sale_restriction{};
     ::std::optional<::std::string_view> encoded_option_expiration_desc{};
+    ::std::optional<::std::int64_t> short_sale_restriction{};
     ::std::optional<::std::string_view> strike_unit_of_measure{};
     ::std::optional<::std::string_view> unit_of_measure_currency{};
     ::std::optional<::std::string_view> price_unit_of_measure_currency{};
@@ -321,7 +315,6 @@ struct AllocationInstructionAlertArgs {
     ::std::optional<bool> contrary_instruction_eligibility_indicator{};
     ::std::optional<::std::span<const groups::G_2709Args>> price_qualifiers{};
     ::std::optional<::std::string_view> financial_instrument_full_name{};
-    ::std::optional<::std::int64_t> encoded_financial_instrument_full_name_len{};
     ::std::optional<::std::string_view> encoded_financial_instrument_full_name{};
     ::std::optional<::std::int64_t> floating_rate_index_curve_period{};
     ::std::optional<::fixpp::decimal_t> floating_rate_index_curve_spread{};
@@ -375,7 +368,6 @@ struct AllocationInstructionAlertArgs {
     ::std::optional<::std::span<const groups::G_41094Args>> market_disruption_fallbacks{};
     ::std::optional<::std::span<const groups::G_41096Args>> market_disruption_fallback_reference_prices{};
     ::std::optional<::std::string_view> exercise_desc{};
-    ::std::optional<::std::int64_t> encoded_exercise_desc_len{};
     ::std::optional<::std::string_view> encoded_exercise_desc{};
     ::std::optional<bool> automatic_exercise_indicator{};
     ::std::optional<::fixpp::decimal_t> automatic_exercise_threshold_rate{};

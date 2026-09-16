@@ -21,7 +21,6 @@ struct G_1677_3Args {
     ::std::optional<::std::string_view> risk_limit_id{};
     ::std::optional<::std::int64_t> risk_limit_check_model_type{};
     ::std::optional<::std::string_view> reject_text{};
-    ::std::optional<::std::int64_t> encoded_reject_text_len{};
     ::std::optional<::std::string_view> encoded_reject_text{};
     ::std::optional<::std::int64_t> party_risk_limit_status{};
 };

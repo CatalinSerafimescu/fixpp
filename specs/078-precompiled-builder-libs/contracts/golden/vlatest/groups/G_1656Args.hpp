@@ -34,7 +34,6 @@ struct G_1656Args {
     ::std::optional<::fixpp::decimal_t> instrument_scope_coupon_rate{};
     ::std::optional<::std::string_view> instrument_scope_security_exchange{};
     ::std::optional<::std::string_view> instrument_scope_security_desc{};
-    ::std::optional<::std::int64_t> instrument_scope_encoded_security_desc_len{};
     ::std::optional<::std::string_view> instrument_scope_encoded_security_desc{};
     ::std::optional<::std::string_view> instrument_scope_settl_type{};
 };

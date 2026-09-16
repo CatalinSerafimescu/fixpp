@@ -13,13 +13,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_TestActionRepor
         auto r = bb.field(58, *args.text);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (args.encoded_text_len) {
-        auto r = bb.field(354, *args.encoded_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (args.encoded_text) {
-        auto r = bb.field(355, *args.encoded_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = bb.field(354, static_cast<::std::int64_t>(args.encoded_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = bb.field(355, *args.encoded_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (args.strategy_parameters) {
         auto gh0 = bb.group_begin(957, 958);
@@ -269,13 +267,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_TestActionRepor
         auto r = eh6.set_string(1556, *item6.instrument_scope_security_desc);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item6.instrument_scope_encoded_security_desc_len) {
-        auto r = eh6.set_int(1620, *item6.instrument_scope_encoded_security_desc_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item6.instrument_scope_encoded_security_desc) {
-        auto r = eh6.set_string(1621, *item6.instrument_scope_encoded_security_desc);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh6.set_int(1620, static_cast<::std::int64_t>(item6.instrument_scope_encoded_security_desc->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh6.set_string(1621, *item6.instrument_scope_encoded_security_desc);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item6.instrument_scope_settl_type) {
         auto r = eh6.set_string(1557, *item6.instrument_scope_settl_type);

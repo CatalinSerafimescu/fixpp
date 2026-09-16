@@ -42,7 +42,6 @@ struct SecurityMassStatusRequestArgs {
     ::std::optional<::std::string_view> instrument_scope_security_desc{};
     ::std::optional<::std::string_view> instrument_scope_settl_type{};
     ::std::optional<::std::string_view> instrument_scope_security_exchange{};
-    ::std::optional<::std::int64_t> instrument_scope_encoded_security_desc_len{};
     ::std::optional<::std::string_view> instrument_scope_encoded_security_desc{};
     ::std::optional<::std::string_view> instrument_scope_upi_code{};
 };

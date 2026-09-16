@@ -13,13 +13,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_PartyRiskLimits
         auto r = bb.field(58, *args.text);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (args.encoded_text_len) {
-        auto r = bb.field(354, *args.encoded_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (args.encoded_text) {
-        auto r = bb.field(355, *args.encoded_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = bb.field(354, static_cast<::std::int64_t>(args.encoded_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = bb.field(355, *args.encoded_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (args.requesting_party_i_ds) {
         auto gh0 = bb.group_begin(1657, 1658);
@@ -472,13 +470,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_PartyRiskLimits
         auto r = eh15.set_string(1556, *item15.instrument_scope_security_desc);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item15.instrument_scope_encoded_security_desc_len) {
-        auto r = eh15.set_int(1620, *item15.instrument_scope_encoded_security_desc_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item15.instrument_scope_encoded_security_desc) {
-        auto r = eh15.set_string(1621, *item15.instrument_scope_encoded_security_desc);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh15.set_int(1620, static_cast<::std::int64_t>(item15.instrument_scope_encoded_security_desc->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh15.set_string(1621, *item15.instrument_scope_encoded_security_desc);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item15.instrument_scope_settl_type) {
         auto r = eh15.set_string(1557, *item15.instrument_scope_settl_type);
@@ -508,13 +504,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_PartyRiskLimits
         auto r = eh2.set_string(1328, *item2.reject_text);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item2.encoded_reject_text_len) {
-        auto r = eh2.set_int(1664, *item2.encoded_reject_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item2.encoded_reject_text) {
-        auto r = eh2.set_string(1665, *item2.encoded_reject_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh2.set_int(1664, static_cast<::std::int64_t>(item2.encoded_reject_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh2.set_string(1665, *item2.encoded_reject_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item2.party_risk_limit_status) {
         auto r = eh2.set_int(2355, *item2.party_risk_limit_status);

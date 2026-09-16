@@ -41,7 +41,9 @@ TEST(CodegenFlyweightShape, SizeofIsOnePointer) {
 // this pin explicitly, not drift silently. `G_295` (v44 QuoteEntries,
 // SC-001b's MassQuote scenario) is a representative nested-group entry —
 // its sole member is an `entry_context`, so its size/align match exactly.
-static_assert(sizeof(fixpp::wire::entry_context) == 120);
+// fixpp#426: `dict_hooks` (5 pointers) replaced `opaque_dict` +
+// `group_member_fn` (2 pointers), a deliberate +24 bytes.
+static_assert(sizeof(fixpp::wire::entry_context) == 144);
 static_assert(alignof(fixpp::wire::entry_context) == 8);
 static_assert(sizeof(fixpp::v44::groups::G_295) == sizeof(fixpp::wire::entry_context));
 static_assert(alignof(fixpp::v44::groups::G_295) == alignof(fixpp::wire::entry_context));

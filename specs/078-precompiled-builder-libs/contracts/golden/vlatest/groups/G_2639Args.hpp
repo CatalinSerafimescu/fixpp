@@ -25,7 +25,6 @@ struct G_2639Args {
     ::std::optional<::fixpp::decimal_t> commission_amount_shared{};
     ::std::optional<::std::string_view> commission_leg_ref_id{};
     ::std::optional<::std::string_view> commission_desc{};
-    ::std::optional<::std::int64_t> encoded_commission_desc_len{};
     ::std::optional<::std::string_view> encoded_commission_desc{};
 };
 

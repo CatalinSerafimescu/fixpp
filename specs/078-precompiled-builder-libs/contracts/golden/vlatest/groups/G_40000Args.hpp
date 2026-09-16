@@ -14,11 +14,9 @@ struct G_40000Args {
     ::std::optional<::std::string_view> additional_term_bond_security_id{};
     ::std::optional<::std::string_view> additional_term_bond_security_id_source{};
     ::std::optional<::std::string_view> additional_term_bond_desc{};
-    ::std::optional<::std::int64_t> encoded_additional_term_bond_desc_len{};
     ::std::optional<::std::string_view> encoded_additional_term_bond_desc{};
     ::std::optional<::std::string_view> additional_term_bond_currency{};
     ::std::optional<::std::string_view> additional_term_bond_issuer{};
-    ::std::optional<::std::int64_t> encoded_additional_term_bond_issuer_len{};
     ::std::optional<::std::string_view> encoded_additional_term_bond_issuer{};
     ::std::optional<::std::string_view> additional_term_bond_seniority{};
     ::std::optional<::std::int64_t> additional_term_bond_coupon_type{};

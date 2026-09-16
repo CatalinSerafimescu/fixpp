@@ -62,9 +62,7 @@ struct SecurityRiskMetricsReportArgs {
     ::std::optional<::fixpp::decimal_t> underlying_strike_price{};
     ::std::optional<char> underlying_opt_attribute{};
     ::std::optional<::std::string_view> underlying_currency{};
-    ::std::optional<::std::int64_t> encoded_underlying_issuer_len{};
     ::std::optional<::std::string_view> encoded_underlying_issuer{};
-    ::std::optional<::std::int64_t> encoded_underlying_security_desc_len{};
     ::std::optional<::std::string_view> encoded_underlying_security_desc{};
     ::std::optional<::fixpp::decimal_t> underlying_coupon_rate{};
     ::std::optional<::fixpp::decimal_t> underlying_contract_multiplier{};
@@ -119,7 +117,6 @@ struct SecurityRiskMetricsReportArgs {
     ::std::optional<::std::string_view> underlying_unit_of_measure_currency{};
     ::std::optional<::std::string_view> underlying_price_unit_of_measure_currency{};
     ::std::optional<::std::string_view> underlying_contract_price_ref_month{};
-    ::std::optional<::std::int64_t> underlying_security_xml_len{};
     ::std::optional<::std::string_view> underlying_security_xml{};
     ::std::optional<::std::string_view> underlying_security_xml_schema{};
     ::std::optional<::std::span<const groups::G_1981Args>> underlying_events{};
@@ -183,7 +180,6 @@ struct SecurityRiskMetricsReportArgs {
     ::std::optional<::std::string_view> underlying_settl_rate_index{};
     ::std::optional<::std::string_view> underlying_settl_rate_index_location{};
     ::std::optional<::std::string_view> underlying_option_expiration_desc{};
-    ::std::optional<::std::int64_t> encoded_underlying_option_expiration_desc_len{};
     ::std::optional<::std::string_view> encoded_underlying_option_expiration_desc{};
     ::std::optional<::std::string_view> underlying_swap_sub_class{};
     ::std::optional<::std::string_view> underlying_strike_unit_of_measure{};
@@ -219,7 +215,6 @@ struct SecurityRiskMetricsReportArgs {
     ::std::optional<::std::int64_t> underlying_in_the_money_condition{};
     ::std::optional<bool> underlying_contrary_instruction_eligibility_indicator{};
     ::std::optional<::std::string_view> underlying_financial_instrument_full_name{};
-    ::std::optional<::std::int64_t> encoded_underlying_financial_instrument_full_name_len{};
     ::std::optional<::std::string_view> encoded_underlying_financial_instrument_full_name{};
     ::std::optional<::std::string_view> underlying_index_curve_unit{};
     ::std::optional<::std::int64_t> underlying_index_curve_period{};
@@ -255,7 +250,6 @@ struct SecurityRiskMetricsReportArgs {
     ::std::optional<::std::string_view> underlying_protection_term_xid_ref{};
     ::std::optional<::std::string_view> underlying_settl_term_xid_ref{};
     ::std::optional<::std::string_view> underlying_exercise_desc{};
-    ::std::optional<::std::int64_t> encoded_underlying_exercise_desc_len{};
     ::std::optional<::std::string_view> encoded_underlying_exercise_desc{};
     ::std::optional<bool> underlying_automatic_exercise_indicator{};
     ::std::optional<::fixpp::decimal_t> underlying_automatic_exercise_threshold_rate{};

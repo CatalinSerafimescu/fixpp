@@ -18,10 +18,13 @@
 #include <fixpp/dict/version_registry.hpp>
 #include <fixpp/dict/xml_loader.hpp>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <memory_resource>
+#include <pugixml.hpp>
 #include <span>
 #include <sstream>
+#include <string>
 #include <string_view>
 #include <unordered_set>
 #include <vector>
@@ -872,4 +875,186 @@ TEST(OrchestraLegacyNoRegression, NineQuickFixDictsUnchanged) {
     auto const fix44 = loader.load(dir / "FIX44.xml", &mr);
     EXPECT_NE(fix44.group_first_field(627), 0U);
     ASSERT_TRUE(fix44.group(627).has_value());
+}
+
+// fixpp#427 — Length+Data pairs come from each data field's `lengthId=`. The
+// expected set is DERIVED from the vendored XML, never hand-listed, and the two
+// sides are compared over every declared field id: a pair's Length tag is a
+// declared field, so that population is exhaustive.
+TEST(OrchestraLengthPairs, DictionaryPairsEqualTheXmlLengthIds) {
+    pugi::xml_document doc;
+    ASSERT_TRUE(doc.load_file(orchestra_file().c_str()));
+    std::map<std::uint16_t, std::uint16_t> from_xml;
+    std::vector<std::uint16_t> declared;
+    for (auto const& f : doc.child("fixr:repository").child("fixr:fields").children("fixr:field")) {
+        auto const id = static_cast<std::uint16_t>(f.attribute("id").as_uint());
+        declared.push_back(id);
+        if (auto const len = f.attribute("lengthId")) {
+            from_xml.emplace(static_cast<std::uint16_t>(len.as_uint()), id);
+        }
+    }
+    ASSERT_FALSE(from_xml.empty());
+
+    std::pmr::monotonic_buffer_resource mr;
+    auto const dict = fixpp::dict::OrchestraLoader{}.load(orchestra_file(), &mr);
+    std::map<std::uint16_t, std::uint16_t> from_dict;
+    for (auto const tag : declared) {
+        if (auto const data = dict.length_pair_data_tag(tag); data != 0) {
+            from_dict.emplace(tag, data);
+        }
+    }
+    EXPECT_EQ(from_dict, from_xml);
+}
+
+// Upstream EP303 declares EncodedMDEntryStatusText(3109) as `data` with no
+// `lengthId=`, although EncodedMDEntryStatusTextLen(3108) is a Length field. The
+// loader does not guess a partner. This is the complement of the census above: a
+// data field without `lengthId=` is only this named upstream gap. If upstream
+// adds the attribute, this fails and the exception should be deleted.
+TEST(OrchestraLengthPairs, DataFieldsWithoutLengthIdAreOnlyTheKnownUpstreamGap) {
+    pugi::xml_document doc;
+    ASSERT_TRUE(doc.load_file(orchestra_file().c_str()));
+    std::vector<std::uint16_t> unpaired;
+    for (auto const& f : doc.child("fixr:repository").child("fixr:fields").children("fixr:field")) {
+        std::string_view const type = f.attribute("type").as_string("");
+        if ((type == "data" || type == "XMLData") && !f.attribute("lengthId")) {
+            unpaired.push_back(static_cast<std::uint16_t>(f.attribute("id").as_uint()));
+        }
+    }
+    EXPECT_EQ(unpaired, std::vector<std::uint16_t>{3109});
+
+    std::pmr::monotonic_buffer_resource mr;
+    auto const dict = fixpp::dict::OrchestraLoader{}.load(orchestra_file(), &mr);
+    EXPECT_EQ(dict.length_pair_data_tag(3108), 0U);
+}
+
+namespace {
+
+// A minimal repository whose Heartbeat references every field in `fields`.
+std::string repository_with_fields(std::string_view fields, std::string_view refs) {
+    return std::string{R"xml(<fixr:repository version="FIX.Latest_EP303"><fixr:fields>)xml"} +
+           std::string{fields} +
+           R"xml(</fixr:fields><fixr:messages><fixr:message id="1" name="Heartbeat" msgType="0"><fixr:structure>)xml" +
+           std::string{refs} +
+           R"xml(</fixr:structure></fixr:message></fixr:messages></fixr:repository>)xml";
+}
+
+}  // namespace
+
+// A `lengthId=` may point FORWARD, as Signature(89) -> SignatureLength(93) does.
+TEST(OrchestraLengthPairs, ForwardLengthIdResolves) {
+    auto const xml = repository_with_fields(
+        R"xml(<fixr:field id="89" name="Signature" type="data" lengthId="93"/>
+              <fixr:field id="93" name="SignatureLength" type="Length"/>)xml",
+        R"xml(<fixr:fieldRef id="93"/><fixr:fieldRef id="89"/>)xml");
+    std::pmr::monotonic_buffer_resource mr;
+    auto const dict = fixpp::dict::OrchestraLoader{}.load_from_string(xml, &mr);
+    EXPECT_EQ(dict.length_pair_data_tag(93), 89U);
+    EXPECT_EQ(dict.length_pair_data_tag(89), 0U);
+}
+
+TEST(OrchestraFailClosed, LengthIdNamingAnUndeclaredFieldThrows) {
+    auto const xml = repository_with_fields(
+        R"xml(<fixr:field id="96" name="RawData" type="data" lengthId="95"/>)xml",
+        R"xml(<fixr:fieldRef id="96"/>)xml");
+    std::pmr::monotonic_buffer_resource mr;
+    EXPECT_THROW((void)fixpp::dict::OrchestraLoader{}.load_from_string(xml, &mr),
+                 fixpp::dict::orchestra_parse_error);
+}
+
+TEST(OrchestraFailClosed, LengthIdNamingANonLengthFieldThrows) {
+    auto const xml = repository_with_fields(
+        R"xml(<fixr:field id="95" name="RawDataLength" type="int"/>
+              <fixr:field id="96" name="RawData" type="data" lengthId="95"/>)xml",
+        R"xml(<fixr:fieldRef id="95"/><fixr:fieldRef id="96"/>)xml");
+    std::pmr::monotonic_buffer_resource mr;
+    EXPECT_THROW((void)fixpp::dict::OrchestraLoader{}.load_from_string(xml, &mr),
+                 fixpp::dict::orchestra_parse_error);
+}
+
+TEST(OrchestraFailClosed, LengthIdOnANonDataFieldThrows) {
+    auto const xml = repository_with_fields(
+        R"xml(<fixr:field id="95" name="RawDataLength" type="Length"/>
+              <fixr:field id="58" name="Text" type="String" lengthId="95"/>)xml",
+        R"xml(<fixr:fieldRef id="95"/><fixr:fieldRef id="58"/>)xml");
+    std::pmr::monotonic_buffer_resource mr;
+    EXPECT_THROW((void)fixpp::dict::OrchestraLoader{}.load_from_string(xml, &mr),
+                 fixpp::dict::orchestra_parse_error);
+}
+
+TEST(OrchestraFailClosed, TwoDataFieldsSharingOneLengthThrow) {
+    auto const xml = repository_with_fields(
+        R"xml(<fixr:field id="95" name="RawDataLength" type="Length"/>
+              <fixr:field id="96" name="RawData" type="data" lengthId="95"/>
+              <fixr:field id="97" name="OtherData" type="data" lengthId="95"/>)xml",
+        R"xml(<fixr:fieldRef id="95"/><fixr:fieldRef id="96"/>)xml");
+    std::pmr::monotonic_buffer_resource mr;
+    EXPECT_THROW((void)fixpp::dict::OrchestraLoader{}.load_from_string(xml, &mr),
+                 fixpp::dict::orchestra_parse_error);
+}
+
+TEST(OrchestraFailClosed, MalformedLengthIdThrows) {
+    auto const xml = repository_with_fields(
+        R"xml(<fixr:field id="95" name="RawDataLength" type="Length"/>
+              <fixr:field id="96" name="RawData" type="data" lengthId="9x"/>)xml",
+        R"xml(<fixr:fieldRef id="95"/><fixr:fieldRef id="96"/>)xml");
+    std::pmr::monotonic_buffer_resource mr;
+    EXPECT_THROW((void)fixpp::dict::OrchestraLoader{}.load_from_string(xml, &mr),
+                 fixpp::dict::orchestra_parse_error);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// fixpp#426 (Gate B r9 R-3) — zero can never be half of a Length+Data pair,
+// refused at FORMATION rather than only at `table_view::set_length_pair_data_tag`.
+// The setter guard is downstream of the loader, so without this a zero-headed
+// pair would still reach `Dictionary::length_pair_data_tag` and `field_ref`.
+//
+// ⚠️ These assert the MESSAGE, not just the exception type. Every neighbouring
+// OrchestraFailClosed case throws the same type, so a type-only assertion would
+// go green while a DIFFERENT check did the work — the guard here sits ahead of
+// both the datatype check and the declared-Length check, so it is the one that
+// must fire. Field number 0 is admitted by the id parser (a plain uint16), so
+// these fixtures are reachable; rejecting field 0 generally is fixpp#457.
+namespace {
+
+// Returns the orchestra_parse_error message, or "" if the load did not throw.
+std::string orchestra_load_error_message(std::string_view xml_text) {
+    std::pmr::monotonic_buffer_resource mr;
+    try {
+        (void)fixpp::dict::OrchestraLoader{}.load_from_string(xml_text, &mr);
+    } catch (fixpp::dict::orchestra_parse_error const& e) {
+        return std::string{e.what()};
+    }
+    return {};
+}
+
+}  // namespace
+
+TEST(OrchestraFailClosed, ZeroLengthIdCannotBeHalfOfAPair) {
+    // Field 0 IS declared, and declared as a Length field — so the
+    // "does not name a declared Length field" check would NOT fire here. Only
+    // the zero guard can reject this.
+    auto const xml = repository_with_fields(
+        R"xml(<fixr:field id="0" name="ZeroLen" type="Length"/>
+              <fixr:field id="96" name="RawData" type="data" lengthId="0"/>)xml",
+        R"xml(<fixr:fieldRef id="0"/><fixr:fieldRef id="96"/>)xml");
+    auto const msg = orchestra_load_error_message(xml);
+    ASSERT_FALSE(msg.empty()) << "a zero Length half must fail the load closed";
+    EXPECT_NE(msg.find("field number 0"), std::string::npos)
+        << "the load failed for the WRONG reason — the zero-pair guard did not fire. Message: "
+        << msg;
+}
+
+TEST(OrchestraFailClosed, ZeroDataFieldCannotBeHalfOfAPair) {
+    // The mirror image: the DATA field is numbered 0, with a perfectly valid
+    // Length partner, so every other check passes.
+    auto const xml = repository_with_fields(
+        R"xml(<fixr:field id="95" name="RawDataLength" type="Length"/>
+              <fixr:field id="0" name="ZeroData" type="data" lengthId="95"/>)xml",
+        R"xml(<fixr:fieldRef id="95"/><fixr:fieldRef id="0"/>)xml");
+    auto const msg = orchestra_load_error_message(xml);
+    ASSERT_FALSE(msg.empty()) << "a zero Data half must fail the load closed";
+    EXPECT_NE(msg.find("field number 0"), std::string::npos)
+        << "the load failed for the WRONG reason — the zero-pair guard did not fire. Message: "
+        << msg;
 }

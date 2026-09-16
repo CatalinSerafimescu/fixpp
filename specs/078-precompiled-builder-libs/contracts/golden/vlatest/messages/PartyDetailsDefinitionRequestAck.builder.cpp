@@ -12,13 +12,11 @@ namespace fixpp::vlatest {
         auto r = bb.field(58, *args.text);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (args.encoded_text_len) {
-        auto r = bb.field(354, *args.encoded_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (args.encoded_text) {
-        auto r = bb.field(355, *args.encoded_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = bb.field(354, static_cast<::std::int64_t>(args.encoded_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = bb.field(355, *args.encoded_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (args.party_details_list_request_id) {
         auto r = bb.field(1505, *args.party_details_list_request_id);
@@ -93,13 +91,11 @@ namespace fixpp::vlatest {
         auto r = eh2.set_string(1328, *item2.reject_text);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item2.encoded_reject_text_len) {
-        auto r = eh2.set_int(1664, *item2.encoded_reject_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item2.encoded_reject_text) {
-        auto r = eh2.set_string(1665, *item2.encoded_reject_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh2.set_int(1664, static_cast<::std::int64_t>(item2.encoded_reject_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh2.set_string(1665, *item2.encoded_reject_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item2.party_details) {
         auto gh3 = eh2.group_begin(1671, 1691);

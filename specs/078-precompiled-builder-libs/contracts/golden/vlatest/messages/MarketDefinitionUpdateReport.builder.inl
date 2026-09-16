@@ -21,13 +21,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDefinitio
         auto r = bb.field(60, *args.transact_time);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (args.encoded_text_len) {
-        auto r = bb.field(354, *args.encoded_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (args.encoded_text) {
-        auto r = bb.field(355, *args.encoded_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = bb.field(354, static_cast<::std::int64_t>(args.encoded_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = bb.field(355, *args.encoded_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (args.price_type) {
         auto r = bb.field(423, *args.price_type);
@@ -360,13 +358,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDefinitio
         auto r = bb.field(1396, *args.market_segment_desc);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (args.encoded_mkt_segm_desc_len) {
-        auto r = bb.field(1397, *args.encoded_mkt_segm_desc_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (args.encoded_mkt_segm_desc) {
-        auto r = bb.field(1398, *args.encoded_mkt_segm_desc);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = bb.field(1397, static_cast<::std::int64_t>(args.encoded_mkt_segm_desc->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = bb.field(1398, *args.encoded_mkt_segm_desc);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (args.instrument_scopes) {
         auto gh9 = bb.group_begin(1656, 1535);
@@ -478,13 +474,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MarketDefinitio
         auto r = eh9.set_string(1556, *item9.instrument_scope_security_desc);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item9.instrument_scope_encoded_security_desc_len) {
-        auto r = eh9.set_int(1620, *item9.instrument_scope_encoded_security_desc_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item9.instrument_scope_encoded_security_desc) {
-        auto r = eh9.set_string(1621, *item9.instrument_scope_encoded_security_desc);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh9.set_int(1620, static_cast<::std::int64_t>(item9.instrument_scope_encoded_security_desc->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh9.set_string(1621, *item9.instrument_scope_encoded_security_desc);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item9.instrument_scope_settl_type) {
         auto r = eh9.set_string(1557, *item9.instrument_scope_settl_type);

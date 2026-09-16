@@ -135,17 +135,19 @@ bool parse_double(std::string_view sv, double& out) noexcept {
 //
 // We walk it with MessageView::field_iterator which scans tag=value<SOH> pairs.
 
-// Find field `tag` inside the raw bytes of group instance slice `sl`.
-// Returns a string_view aliasing sl.data on success.
-// Returns an empty optional if not found.
+// Find field `tag` inside the raw bytes of group instance slice `sl`, split
+// by `hooks` — the dictionary (if any) the view that minted `sl` was built
+// with (fixpp#426, design §3, item 11). Returns a string_view aliasing
+// sl.data on success. Returns an empty optional if not found.
 std::optional<std::string_view> scan_slice_for_tag(const fixpp::wire::group_slice& sl,
-                                                   std::uint16_t tag) noexcept {
+                                                   std::uint16_t tag,
+                                                   fixpp::wire::dict_hooks const& hooks) noexcept {
     if (sl.data == nullptr || sl.len == 0) return std::nullopt;
     auto bytes = std::span<const std::byte>{sl.data, sl.len};
     // field_iterator scans tag=value<SOH> pairs over a byte span.
-    fixpp::wire::MessageView<fixpp::wire::access_mode::Iter>::field_iterator it{bytes, 0};
-    fixpp::wire::MessageView<fixpp::wire::access_mode::Iter>::field_iterator end_it{bytes,
-                                                                                    bytes.size()};
+    fixpp::wire::MessageView<fixpp::wire::access_mode::Iter>::field_iterator it{bytes, 0, hooks};
+    fixpp::wire::MessageView<fixpp::wire::access_mode::Iter>::field_iterator end_it{
+        bytes, bytes.size(), hooks};
     while (!(it == end_it)) {
         auto const& f = *it;
         if (f.tag == tag) {
@@ -161,6 +163,19 @@ std::optional<std::string_view> scan_slice_for_tag(const fixpp::wire::group_slic
 // fixpp_group concrete accessor (not declared in the header — internal helper)
 const fixpp_group* as_group(const fixpp_group_t* g) noexcept {
     return reinterpret_cast<const fixpp_group*>(g);
+}
+
+// fixpp#426 (design §3, item 11): the dict_hooks of the view that minted `g`
+// — falls back to `none()` (the standard table alone; the fail-safe
+// direction) when `g` or its `parent_view` is null, since `fixpp_group`
+// default-initialises `parent_view` and the C-ABI is reachable from
+// arbitrary consumer code.
+fixpp::wire::dict_hooks hooks_for(const fixpp_group_t* g) noexcept {
+    const auto* grp = as_group(g);
+    if (grp == nullptr || grp->parent_view == nullptr) {
+        return fixpp::wire::dict_hooks::none();
+    }
+    return grp->parent_view->hooks();
 }
 
 // Check that entry index i is in range; return the slice or error.
@@ -399,7 +414,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_get_field_string(const fixpp_group_t*
     const auto* sl = group_entry(g, i, &idx_err);
     if (sl == nullptr) return idx_err;
 
-    auto sv = scan_slice_for_tag(*sl, tag);
+    auto sv = scan_slice_for_tag(*sl, tag, hooks_for(g));
     if (!sv) return FIXPP_ERR_TAG_NOT_FOUND;
     *v_out = sv->data();
     *len_out = sv->size();
@@ -413,7 +428,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_get_field_int(const fixpp_group_t* g,
     const auto* sl = group_entry(g, i, &idx_err);
     if (sl == nullptr) return idx_err;
 
-    auto sv = scan_slice_for_tag(*sl, tag);
+    auto sv = scan_slice_for_tag(*sl, tag, hooks_for(g));
     if (!sv) return FIXPP_ERR_TAG_NOT_FOUND;
     int64_t v = 0;
     if (!parse_int64(*sv, v)) return FIXPP_ERR_WIRE_INVALID_FRAME;
@@ -428,7 +443,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_get_field_double(const fixpp_group_t*
     const auto* sl = group_entry(g, i, &idx_err);
     if (sl == nullptr) return idx_err;
 
-    auto sv = scan_slice_for_tag(*sl, tag);
+    auto sv = scan_slice_for_tag(*sl, tag, hooks_for(g));
     if (!sv) return FIXPP_ERR_TAG_NOT_FOUND;
     double v = 0.0;
     if (!parse_double(*sv, v)) return FIXPP_ERR_WIRE_INVALID_FRAME;
@@ -443,7 +458,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_get_field_decimal(const fixpp_group_t
     const auto* sl = group_entry(g, i, &idx_err);
     if (sl == nullptr) return idx_err;
 
-    auto sv = scan_slice_for_tag(*sl, tag);
+    auto sv = scan_slice_for_tag(*sl, tag, hooks_for(g));
     if (!sv) return FIXPP_ERR_TAG_NOT_FOUND;
 
     // Parse decimal from the raw string bytes using the 2a trait.
@@ -512,7 +527,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_get_nested_group(const fixpp_group_t*
         // (contract C3): nested_tag entirely absent -> TAG_NOT_FOUND
         // (NestedGroupAbsentTag); present (count field last / declared count
         // 0) -> OK with count 0 (NestedGroupEmptyGroupCountLastField).
-        if (!scan_slice_for_tag(*sl, nested_tag)) return FIXPP_ERR_TAG_NOT_FOUND;
+        if (!scan_slice_for_tag(*sl, nested_tag, hooks_for(g))) return FIXPP_ERR_TAG_NOT_FOUND;
         return FIXPP_ERR_OK;
     }
 

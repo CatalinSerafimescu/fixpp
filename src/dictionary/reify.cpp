@@ -140,10 +140,25 @@ wire::MessageView<wire::access_mode::Index> const& owning_message_handle::view()
                 }
             }
             if (!dict_framed) {
-                // Dict-free source, OR (practically unreachable — the same
-                // bytes the source already parsed successfully) the
-                // dict-backed re-parse failed: fall back to the dict-free
-                // 2-arg ctor (pre-066 behavior).
+                // Dict-free source, OR the dict-backed re-parse failed: fall
+                // back to the dict-free 2-arg ctor (pre-066 behavior).
+                //
+                // ⚠️ **fixpp#458** — fails OPEN. This fallback is taken whenever
+                // the dict-backed re-parse fails, for ANY reason, and the
+                // reified view then silently loses the dictionary's own
+                // Length+Data pairs (fixpp#426).
+                //
+                // ⚠️ The routes below are NOT exhaustive, and the history is the
+                // reason to say so: this comment first claimed the failure was
+                // "practically unreachable" (false), and the correction then
+                // claimed the trigger was "allocation failure, not frame
+                // content" — which Gate B r10 falsified in turn. Two KNOWN
+                // reachable routes: `OffsetTable::build` catches
+                // `std::bad_alloc`, so a one-shot failing allocator fails the
+                // dict-backed parse while the dict-free retry, allocating less,
+                // succeeds; and this re-parse uses the DEFAULT-cap overload, so
+                // a source a caller parsed with a raised `max_offset_entries`
+                // can exceed the default here and fail on frame shape alone.
                 pimpl_->view_cache_.emplace((*framed)[0],
                                             pimpl_->bytes_.get_allocator().resource());
             }

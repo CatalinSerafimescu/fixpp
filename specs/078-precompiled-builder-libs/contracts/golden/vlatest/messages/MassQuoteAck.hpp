@@ -25,7 +25,6 @@ struct MassQuoteAckArgs {
     ::std::optional<::std::int64_t> quote_cancel_type{};
     ::std::optional<::std::int64_t> quote_reject_reason{};
     ::std::optional<::std::int64_t> quote_response_level{};
-    ::std::optional<::std::int64_t> encoded_text_len{};
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::std::string_view> compliance_id{};
     ::std::optional<::std::span<const groups::G_453Args>> party_i_ds{};
@@ -36,7 +35,6 @@ struct MassQuoteAckArgs {
     ::std::optional<::std::int64_t> throttle_status{};
     ::std::optional<::std::int64_t> throttle_inst{};
     ::std::optional<::std::int64_t> throttle_count_indicator{};
-    ::std::optional<::std::int64_t> encoded_compliance_text_len{};
     ::std::optional<::std::string_view> encoded_compliance_text{};
     ::std::optional<::std::string_view> compliance_text{};
 };

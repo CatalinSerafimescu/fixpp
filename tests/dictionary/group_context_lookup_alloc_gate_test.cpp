@@ -7,7 +7,7 @@
 // `group_member_fn_t` predicate the wire Parser installs over it, per
 // `Parser`'s dict-lvalue ctor) perform ZERO heap allocation.
 //
-// `group_member_fn_t` (its `using` alias in offset_table.hpp) takes NO memory_resource
+// `group_member_fn_t` (declared in wire/dict_hooks.hpp) takes NO memory_resource
 // parameter — it is a pure `unordered_map::find()` over already-built
 // storage — so a PMR `counting_resource` has nothing to route through and
 // would be a false-pass gate here (feedback_tracking_pmr_resource_false_pass:

@@ -14,7 +14,6 @@ namespace fixpp::vlatest {
 
 struct StreamAssignmentReportACKArgs {
     ::std::optional<::std::string_view> text{};
-    ::std::optional<::std::int64_t> encoded_text_len{};
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::std::string_view> stream_asgn_rpt_id{};
     ::std::optional<::std::int64_t> stream_asgn_rej_reason{};

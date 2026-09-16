@@ -16,7 +16,6 @@ namespace fixpp::vlatest {
 
 struct PartyRiskLimitsDefinitionRequestAckArgs {
     ::std::optional<::std::string_view> text{};
-    ::std::optional<::std::int64_t> encoded_text_len{};
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::std::span<const groups::G_1657Args>> requesting_party_i_ds{};
     ::std::optional<::std::string_view> risk_limit_request_id{};

@@ -132,6 +132,20 @@ target_link_libraries(dictionary_table_view_enum_domain_test PRIVATE
 add_test(NAME dictionary_table_view_enum_domain_test COMMAND dictionary_table_view_enum_domain_test)
 set_tests_properties(dictionary_table_view_enum_domain_test PROPERTIES LABELS "075;dictionary")
 
+# ── fixpp#426 Gate B r7 N-3: Length+Data pair state under allocation failure ──
+# Standalone, not in the pure bucket: it replaces global operator new to fail one
+# allocation at a time ([const §VII.8]'s isolation-sensitive carve-out, the same
+# seam as reify_membership_copy_oom_test). Its own "426" label selects it without
+# widening the dictionary-only bucket.
+add_executable(dictionary_table_view_pair_oom_test table_view_pair_oom_test.cpp)
+target_link_libraries(dictionary_table_view_pair_oom_test PRIVATE
+  fixpp_dictionary
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME dictionary_table_view_pair_oom_test COMMAND dictionary_table_view_pair_oom_test)
+set_tests_properties(dictionary_table_view_pair_oom_test PROPERTIES LABELS "426;dictionary")
+
 # ── 074-orchestra-native-reader: native Orchestra reader test bucket ─────────
 # Grouped whole-binary executable (const §VII.8), LABELS "dictionary;orchestra";
 # selected by `ctest -L orchestra`. NO gtest_discover_tests. pugixml is unioned

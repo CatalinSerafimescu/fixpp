@@ -12,7 +12,6 @@ namespace fixpp::vlatest::groups {
 
 struct G_33_1Args {
     ::std::optional<::std::string_view> text{};
-    ::std::optional<::std::int64_t> encoded_text_len{};
     ::std::optional<::std::string_view> encoded_text{};
 };
 

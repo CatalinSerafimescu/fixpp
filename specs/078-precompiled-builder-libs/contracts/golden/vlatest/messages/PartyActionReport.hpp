@@ -19,7 +19,6 @@ namespace fixpp::vlatest {
 struct PartyActionReportArgs {
     ::std::optional<::std::string_view> text{};
     ::std::optional<::std::string_view> transact_time{};
-    ::std::optional<::std::int64_t> encoded_text_len{};
     ::std::optional<::std::string_view> encoded_text{};
     ::std::span<const groups::G_453Args> party_i_ds{};
     ::std::optional<bool> copy_msg_indicator{};
@@ -48,10 +47,8 @@ struct PartyActionReportArgs {
     ::std::optional<::std::string_view> instrument_scope_settl_type{};
     ::std::optional<::std::span<const groups::G_1562Args>> related_party_detail_id{};
     ::std::optional<::std::string_view> instrument_scope_security_exchange{};
-    ::std::optional<::std::int64_t> instrument_scope_encoded_security_desc_len{};
     ::std::optional<::std::string_view> instrument_scope_encoded_security_desc{};
     ::std::optional<::std::span<const groups::G_1657Args>> requesting_party_i_ds{};
-    ::std::optional<::std::int64_t> encoded_reject_text_len{};
     ::std::optional<::std::string_view> encoded_reject_text{};
     ::std::optional<::std::string_view> party_action_request_id{};
     ::std::optional<::std::int64_t> party_action_type{};

@@ -102,7 +102,6 @@ struct G_555_5Args {
     ::std::optional<::std::string_view> leg_settl_rate_index{};
     ::std::optional<::std::string_view> leg_settl_rate_index_location{};
     ::std::optional<::std::string_view> leg_option_expiration_desc{};
-    ::std::optional<::std::int64_t> encoded_leg_option_expiration_desc_len{};
     ::std::optional<::std::string_view> encoded_leg_option_expiration_desc{};
     ::std::optional<::std::string_view> leg_issue_date{};
     ::std::optional<::std::string_view> leg_repo_collateral_security_type{};
@@ -166,16 +165,12 @@ struct G_555_5Args {
     ::std::optional<::std::int64_t> leg_position_limit{};
     ::std::optional<::std::int64_t> leg_nt_position_limit{};
     ::std::optional<::std::string_view> leg_issuer{};
-    ::std::optional<::std::int64_t> encoded_leg_issuer_len{};
     ::std::optional<::std::string_view> encoded_leg_issuer{};
     ::std::optional<::std::string_view> leg_financial_instrument_short_name{};
     ::std::optional<::std::string_view> leg_financial_instrument_full_name{};
-    ::std::optional<::std::int64_t> encoded_leg_financial_instrument_full_name_len{};
     ::std::optional<::std::string_view> encoded_leg_financial_instrument_full_name{};
     ::std::optional<::std::string_view> leg_security_desc{};
-    ::std::optional<::std::int64_t> encoded_leg_security_desc_len{};
     ::std::optional<::std::string_view> encoded_leg_security_desc{};
-    ::std::optional<::std::int64_t> leg_security_xml_len{};
     ::std::optional<::std::string_view> leg_security_xml{};
     ::std::optional<::std::string_view> leg_security_xml_schema{};
     ::std::optional<::std::int64_t> leg_cp_program{};
@@ -221,7 +216,6 @@ struct G_555_5Args {
     ::std::optional<::fixpp::decimal_t> leg_market_disruption_materiality_percentage{};
     ::std::optional<::std::int64_t> leg_market_disruption_minimum_futures_contracts{};
     ::std::optional<::std::string_view> leg_exercise_desc{};
-    ::std::optional<::std::int64_t> encoded_leg_exercise_desc_len{};
     ::std::optional<::std::string_view> encoded_leg_exercise_desc{};
     ::std::optional<bool> leg_automatic_exercise_indicator{};
     ::std::optional<::fixpp::decimal_t> leg_automatic_exercise_threshold_rate{};
@@ -307,7 +301,6 @@ struct G_555_5Args {
     ::std::optional<::std::string_view> leg_credit_support_agreement_id{};
     ::std::optional<::std::string_view> leg_governing_law{};
     ::std::optional<::std::string_view> leg_documentation_text{};
-    ::std::optional<::std::int64_t> encoded_leg_documentation_text_len{};
     ::std::optional<::std::string_view> encoded_leg_documentation_text{};
     ::std::optional<::std::int64_t> leg_termination_type{};
     ::std::optional<::std::string_view> leg_start_date{};

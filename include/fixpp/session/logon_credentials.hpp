@@ -19,10 +19,15 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
+#include <fixpp/wire/dict_hooks.hpp>
+#include <fixpp/wire/length_data_carry.hpp>  // fixpp#426: counted Data values
+#include <fixpp/wire/tag_scan.hpp>
 #include <optional>
 #include <ostream>
 #include <span>
 #include <string>
+#include <string_view>
 
 namespace fixpp::session {
 
@@ -58,102 +63,127 @@ struct logon_credentials {
     }
 };
 
+namespace detail {
+
+// Calls `on_value(vstart, vend)` with the value extent of every genuine
+// Password(554) field in `frame`: a field whose tag bytes are exactly `554`
+// (at offset 0 or right after a SOH).
+//
+// fixpp#426: fields are walked from the start, so a correctly counted Data value
+// is stepped over as one unit and a `<SOH>554=` inside it is not a field — the
+// rule used before, matching every SOH-anchored `554=`, masked such a value and
+// corrupted the stored bytes a resend replays. If a count is malformed the walk
+// cannot know where that value ends, so from that field on it falls back to the
+// old rule: a real Password is over-masked rather than missed (design §4).
+template <class OnValue>
+void for_each_tag554_value(std::span<const std::byte> frame, fixpp::wire::dict_hooks const& hooks,
+                           OnValue&& on_value) {
+    constexpr std::byte kSoh{0x01};
+    constexpr std::byte kEq{'='};
+    std::size_t const n = frame.size();
+    auto const value_end = [&](std::size_t from) {
+        while (from < n && frame[from] != kSoh) {
+            ++from;
+        }
+        return from;
+    };
+    auto const is_554_eq_at = [&](std::size_t p) {
+        return p + 4 <= n && frame[p] == std::byte{'5'} && frame[p + 1] == std::byte{'5'} &&
+               frame[p + 2] == std::byte{'4'} && frame[p + 3] == kEq;
+    };
+
+    // Every field starts at offset 0 or right after a SOH, so a frame with no such
+    // `554=` holds no Password field and needs no walk (most outbound frames).
+    bool maybe_554 = false;
+    for (std::size_t p = 0; p + 4 <= n && !maybe_554; ++p) {
+        maybe_554 = (p == 0 || frame[p - 1] == kSoh) && is_554_eq_at(p);
+    }
+    if (!maybe_554) {
+        return;
+    }
+
+    fixpp::wire::length_data_carry carry;
+    std::size_t i = 0;
+    while (i < n) {
+        std::size_t const field_start = i;
+        std::uint32_t tag = 0;
+        bool tag_ok = true;
+        while (i < n && frame[i] != kEq && frame[i] != kSoh) {
+            auto const c = static_cast<unsigned char>(frame[i]);
+            if (c < '0' || c > '9' || !fixpp::wire::accumulate_tag_digit(tag, c)) {
+                tag_ok = false;
+            }
+            ++i;
+        }
+        if (i >= n || frame[i] != kEq || !tag_ok) {
+            carry.reset();
+            i = value_end(i);
+            if (i < n) {
+                ++i;
+            }
+            continue;
+        }
+        std::size_t const vstart = i + 1;
+        auto const value = carry.read_value(frame, vstart, static_cast<std::uint16_t>(tag), hooks);
+        if (!value) {
+            for (std::size_t p = field_start; p < n; ++p) {
+                if ((p == 0 || frame[p - 1] == kSoh) && is_554_eq_at(p)) {
+                    on_value(p + 4, value_end(p + 4));
+                }
+            }
+            return;
+        }
+        std::size_t const vend = value->end;
+        if (is_554_eq_at(field_start) && i == field_start + 3) {
+            on_value(vstart, vend);
+        }
+        i = vend < n ? vend + 1 : n;
+    }
+}
+
+}  // namespace detail
+
 // ── redact_tag554 ─────────────────────────────────────────────────────────────
 //
-// Shared tag-554 field redactor (C8 / FR-011). Replaces the value of every
-// "554=<value>" occurrence in a SOH-delimited FIX frame string with "***".
-// Detection is anchored on field boundaries (SOH '\x01' precedes every tag
-// except the first) so a decoy containing "554=" inside a free-text value
-// (e.g. inside tag 58= text) is NOT redacted — only a true 554 tag is matched.
+// Shared tag-554 field redactor (C8 / FR-011). Returns a copy of `frame` with the
+// value of every genuine Password(554) field replaced by "***". A genuine field is
+// one detail::for_each_tag554_value reports: a `554=` inside another field's
+// value (tag 58 free text, or a counted Data value — fixpp#426) is not redacted.
 //
-// Algorithm: scan for '\x01' + "554=" (mid-frame) or "554=" at position 0
-// (frame start). Replace the value bytes (up to the next SOH or end-of-string)
-// with "***". Returns a new std::string.
-//
-// This function is the single canonical redaction site; T024 (US2) wires it
-// into logger/transcript sites and T026 (US3) wires it into the golden writer.
+// This is the single canonical redaction site; T024 (US2) wires it into
+// logger/transcript sites and T026 (US3) wires it into the golden writer. Those
+// sites have no dictionary, so the pairs are the standard table alone.
 [[nodiscard]] inline std::string redact_tag554(std::string const& frame) {
-    constexpr std::string_view kMidTag =
-        "\x01"
-        "554=";                                     // SOH + tag + '='
-    constexpr std::string_view kStartTag = "554=";  // at frame position 0
     constexpr std::string_view kMask = "***";
 
     std::string result;
     result.reserve(frame.size());
-
     std::size_t pos = 0;
-    while (pos < frame.size()) {
-        // Find the next 554 field boundary.
-        std::size_t val_start = 0;  // position of the first byte of the value
-
-        // Check mid-frame occurrence first (SOH-anchored).
-        auto mid = frame.find(kMidTag, pos);
-
-        // Check frame-start occurrence only when pos==0.
-        bool has_start =
-            (pos == 0) && (frame.size() >= kStartTag.size()) && (frame.starts_with(kStartTag));
-
-        if (!has_start && mid == std::string::npos) {
-            // No more 554 fields — copy the rest and stop.
-            result.append(frame, pos, std::string::npos);
-            break;
-        }
-
-        if (has_start) {
-            // Frame-start match (only possible when pos==0, so always first).
-            val_start = kStartTag.size();  // past "554="
-        } else {
-            // Mid-frame match.
-            val_start = mid + kMidTag.size();  // past "\x01554="
-        }
-
-        // Append frame bytes up to and including "554=" (but not the value).
-        result.append(frame, pos, val_start - pos);
-
-        // Replace the value with the mask.
-        result.append(kMask);
-
-        // Advance past the original value (up to next SOH or EOS).
-        std::size_t val_end = frame.find('\x01', val_start);
-        if (val_end == std::string::npos) {
-            pos = frame.size();
-        } else {
-            pos = val_end;  // the terminating SOH is not the value; keep it
-        }
-    }
-
+    detail::for_each_tag554_value(
+        std::span<const std::byte>{reinterpret_cast<const std::byte*>(frame.data()), frame.size()},
+        fixpp::wire::dict_hooks::none(), [&](std::size_t vstart, std::size_t vend) {
+            result.append(frame, pos, vstart - pos);
+            result.append(kMask);
+            pos = vend;  // the terminating SOH is not the value; keep it
+        });
+    result.append(frame, pos, std::string::npos);
     return result;
 }
 
 // ── frame_has_genuine_tag554 ─────────────────────────────────────────────────
 //
 // Detection-only sibling of mask_tag554_same_length_inplace (034 / C2 / R4).
-// Returns true iff `frame` carries at least one genuine SOH-delimited 554 field
-// (SAME anchoring rule as the masker: `\x01554=` mid-frame, or `554=` at offset
-// 0; a `554=` substring inside another field's value is NOT a match). Const,
-// zero-alloc, noexcept. Used by the persist-path maskability gate
-// (Session::store_then_emit) so the overwhelming majority of outbound frames —
-// which carry no 554 — are detected and stored as-is with no copy.
-[[nodiscard]] inline bool frame_has_genuine_tag554(std::span<const std::byte> frame) noexcept {
-    constexpr std::byte kSoh = std::byte{0x01};
-    constexpr std::byte k5 = std::byte{'5'};
-    constexpr std::byte k4 = std::byte{'4'};
-    constexpr std::byte kEq = std::byte{'='};
-    const std::size_t n = frame.size();
-
-    // Frame-start occurrence: "554=" at offset 0.
-    if (n >= 4 && frame[0] == k5 && frame[1] == k5 && frame[2] == k4 && frame[3] == kEq) {
-        return true;
-    }
-    // Mid-frame occurrence: SOH + "554=".
-    for (std::size_t i = 0; i + 5 <= n; ++i) {
-        if (frame[i] == kSoh && frame[i + 1] == k5 && frame[i + 2] == k5 && frame[i + 3] == k4 &&
-            frame[i + 4] == kEq) {
-            return true;
-        }
-    }
-    return false;
+// Returns true iff `frame` carries at least one genuine Password(554) field, by
+// the same rule as the masker. Const, zero-alloc, noexcept. Used by the
+// persist-path maskability gate (Session::store_then_emit) so the overwhelming
+// majority of outbound frames — which carry no 554 — are stored as-is with no
+// copy. `hooks` supplies the Length+Data pairs (fixpp#426).
+[[nodiscard]] inline bool frame_has_genuine_tag554(
+    std::span<const std::byte> frame,
+    fixpp::wire::dict_hooks const& hooks = fixpp::wire::dict_hooks::none()) noexcept {
+    bool found = false;
+    detail::for_each_tag554_value(frame, hooks, [&](std::size_t, std::size_t) { found = true; });
+    return found;
 }
 
 // ── mask_tag554_same_length_inplace ──────────────────────────────────────────
@@ -161,10 +191,9 @@ struct logon_credentials {
 // Same-length, zero-allocation in-place masker for the FIX Password(554) field
 // (034-credential-store-redaction / E1 / FR-003 / FR-008).
 //
-// Scans `frame` for every genuine SOH-delimited `554` field (same anchoring rule
-// as redact_tag554: `\x01554=` mid-frame, or `554=` at offset 0). For each
-// match, overwrites the value bytes (from just past `554=` up to the next `\x01`
-// or end-of-frame) with `'*'` (0x2A) in place, preserving the byte count exactly.
+// Overwrites the value bytes of every genuine Password(554) field (see
+// detail::for_each_tag554_value) with `'*'` (0x2A) in place, preserving the byte
+// count exactly. `hooks` supplies the Length+Data pairs (fixpp#426).
 //
 // Returns `true` iff at least one genuine 554 field was found (even if the value
 // extent was empty — zero bytes to overwrite still counts as a match). Returns
@@ -176,71 +205,16 @@ struct logon_credentials {
 //   I-E1-3 (zero-alloc/noexcept): no heap allocation; no exceptions.
 //   I-E1-4 (delimiter-safe): 554 value bytes cannot contain SOH or '=' (033 FQ-3
 //     injection floor), so the value extent is unambiguous.
-[[nodiscard]] inline bool mask_tag554_same_length_inplace(std::span<std::byte> frame) noexcept {
-    // Field-boundary needles (byte literals — no implicit char→byte narrowing).
-    // Mid-frame: SOH + '5' + '5' + '4' + '='  (5 bytes)
-    // Frame-start: '5' + '5' + '4' + '='       (4 bytes)
-    static constexpr std::byte kMid[5] = {std::byte{0x01}, std::byte{'5'}, std::byte{'5'},
-                                          std::byte{'4'}, std::byte{'='}};
-    static constexpr std::byte kStart[4] = {std::byte{'5'}, std::byte{'5'}, std::byte{'4'},
-                                            std::byte{'='}};
-    static constexpr std::size_t kMidLen = 5;
-    static constexpr std::size_t kStartLen = 4;
-    static constexpr std::byte kSoh = std::byte{0x01};
-    static constexpr std::byte kStar = std::byte{0x2A};  // '*'
-
-    const std::size_t n = frame.size();
+[[nodiscard]] inline bool mask_tag554_same_length_inplace(
+    std::span<std::byte> frame,
+    fixpp::wire::dict_hooks const& hooks = fixpp::wire::dict_hooks::none()) noexcept {
     bool masked = false;
-    std::size_t pos = 0;
-
-    while (pos < n) {
-        std::size_t val_start = 0;  // index of first value byte (just past '=')
-
-        // Check frame-start occurrence (only valid when pos == 0).
-        // cppcheck-suppress-begin containerOutOfBounds  -- guarded by n >= kStartLen
-        bool has_start_match = (pos == 0) && (n >= kStartLen) && (frame[0] == kStart[0]) &&
-                               (frame[1] == kStart[1]) && (frame[2] == kStart[2]) &&
-                               (frame[3] == kStart[3]);
-        // cppcheck-suppress-end containerOutOfBounds
-
-        // Search for mid-frame occurrence '\x01554='.
-        std::size_t mid_pos = std::string_view::npos;
-        if (!has_start_match) {
-            for (std::size_t i = pos; i + kMidLen <= n; ++i) {
-                if (frame[i] == kMid[0] && frame[i + 1] == kMid[1] && frame[i + 2] == kMid[2] &&
-                    frame[i + 3] == kMid[3] && frame[i + 4] == kMid[4]) {
-                    mid_pos = i;
-                    break;
-                }
-            }
-        }
-
-        if (!has_start_match && mid_pos == std::string_view::npos) {
-            // No more genuine 554 fields — done.
-            break;
-        }
-
-        // A genuine field was detected (even if empty value).
+    detail::for_each_tag554_value(frame, hooks, [&](std::size_t vstart, std::size_t vend) {
         masked = true;
-
-        if (has_start_match) {
-            val_start = kStartLen;  // past "554="
-        } else {
-            val_start = mid_pos + kMidLen;  // past "\x01554="
+        for (std::size_t k = vstart; k < vend; ++k) {
+            frame[k] = std::byte{0x2A};  // '*'
         }
-
-        // Overwrite value bytes up to the next SOH or end-of-frame with '*'.
-        std::size_t val_end = val_start;
-        while (val_end < n && frame[val_end] != kSoh) {
-            frame[val_end] = kStar;
-            ++val_end;
-        }
-
-        // Resume from val_end (the terminating SOH, if present, is kept as the
-        // anchor for the next mid-frame needle search — mirrors redact_tag554).
-        pos = val_end;
-    }
-
+    });
     return masked;
 }
 
