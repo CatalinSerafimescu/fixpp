@@ -425,16 +425,18 @@ wheel_build_env = {
     str(k): str(v) for k, v in (_wheel_build_steps[0].get("env") or {}).items()
 }
 
-# ── #411 — the GHCR compiler-cache wiring, DERIVED not hardcoded ─────────────
+# ── #411 — the GHCR compiler-cache wiring, pinned as CANONICAL STEP OBJECTS ──
 #
 # The count pin (M33) proves steps exist; it proves nothing about their ORDER,
-# predicates, or whether the preset argument agrees across restore, stats, trim
-# and seed. The preset is read out of the workflow's OWN restore step, never a
-# literal copied into this file, so the pin cannot pass against a stale copy
-# of the coupling it guards. Every step is looked up by NAME and must be
-# unique; a missing or duplicated step reports as index -1.
+# predicates, or the run: text. Gate B r1 F1: a preset DERIVED from the
+# restore step's own text (the prior design here) agrees with itself by
+# construction, so it cannot catch every call in a job drifting to the SAME
+# wrong preset — the coordinated-drift shape M76 alone cannot see. Every
+# ccache step is instead compared, key set and run: block, against a preset
+# LITERAL of this file, one per job — the same discipline as
+# assert_wheel_identity_steps (#270 R3-F1). Every step is looked up by NAME
+# and must be unique; a missing or duplicated step reports as index -1.
 _CCACHE_ACTION = "hendrikmuhs/ccache-action"
-_RESTORE_ARG_RE = re.compile(r"(?m)^\s*ci/restore-ccache\.sh\s+(\S.*?)\s*$")
 
 
 def _step_by_name(job, name):
@@ -450,15 +452,19 @@ def _step_by_name(job, name):
         "if":    str(st.get("if", "")),
         "run":   str(st.get("run", "")),
         "env":   {str(k): str(v) for k, v in (st.get("env") or {}).items()},
+        # #411 Gate B r1 (F3/A1): the wheel lane's `raw_keys`/`continue_on_error`
+        # discipline (#270/#271), mirrored here — a key ADDED or REMOVED (an
+        # `if:`, an `env:`, a `continue-on-error:`) changes this set even when
+        # every value the OLDER checks looked at stays the same.
+        "continue_on_error": str(st.get("continue-on-error", "")),
+        "raw_keys": sorted(str(k) for k in st.keys()),
     }
 
 
 def _ccache_wiring(job):
     restore = _step_by_name(job, "Restore ccache from GHCR")
-    m = _RESTORE_ARG_RE.search(restore.get("run", ""))
     return {
         "action_steps": sum(1 for st in job["steps"] if str(st.get("uses", "")).startswith(_CCACHE_ACTION)),
-        "preset": m.group(1) if m else "",
         "install": _step_by_name(job, "Install ccache"),
         "restore": restore,
         "conan_install": _step_by_name(job, "Conan install"),
@@ -475,6 +481,23 @@ linux_ccache_wiring = _ccache_wiring(linux_job)
 coverage_ccache_wiring = _ccache_wiring(coverage_job)
 linux_permissions = {str(k): str(v) for k, v in (linux_job.get("permissions") or {}).items()}
 coverage_permissions = {str(k): str(v) for k, v in (coverage_job.get("permissions") or {}).items()}
+
+# ── #411 Gate B r1 L2 (F4-bench): bench is a restore-only CONSUMER ───────────
+#
+# Bench has no build/stats/trim/seed steps at all (#273: it never publishes),
+# so it does not fit `_ccache_wiring`'s shape. Pin what it must and must not
+# have: a unique install/restore/Conan-install in order, and ZERO steps that
+# would make it a writer — a seed call, a trim call, or the retired Action.
+bench_job = jobs["bench"]
+bench_ccache = {
+    "install": _step_by_name(bench_job, "Install ccache"),
+    "restore": _step_by_name(bench_job, "Restore ccache from GHCR (CONSUMES the matrix release leg's tag)"),
+    "conan_install": _step_by_name(bench_job, "Conan install"),
+    "seed_count": sum(1 for st in bench_job["steps"] if "ci/seed-ccache.sh" in str(st.get("run", ""))),
+    "trim_count": sum(1 for st in bench_job["steps"] if "ci/trim-ccache-to-run.sh" in str(st.get("run", ""))),
+    "action_steps": sum(1 for st in bench_job["steps"] if str(st.get("uses", "")).startswith(_CCACHE_ACTION)),
+}
+bench_job_env = {str(k): str(v) for k, v in (bench_job.get("env") or {}).items()}
 
 out = {
     "linux_presets": linux_presets,
@@ -512,6 +535,8 @@ out = {
     "coverage_ccache_wiring": coverage_ccache_wiring,
     "linux_permissions": linux_permissions,
     "coverage_permissions": coverage_permissions,
+    "bench_ccache": bench_ccache,
+    "bench_job_env": bench_job_env,
 }
 print(json.dumps(out))
 PYEOF
@@ -971,9 +996,11 @@ $got"
   #     from running at all, loudly. It cannot change what they execute.
   # Conclusion: they cannot reach the pytest pair.
   #
-  # The count proves the steps exist; their order, predicates and preset
-  # pairing are pinned by assert_trim_wiring, derived from the workflow itself
-  # (the preset is read from the restore step), for `linux` and `coverage`.
+  # The count proves the steps exist; their order, predicates and run: text
+  # are pinned by assert_trim_wiring as canonical step objects against each
+  # job's LITERAL preset, for `linux` and `coverage` (a preset derived from
+  # the restore step's own text cannot catch every call in a job drifting to
+  # the same wrong preset).
   got="$(echo "$json" | jq -r '.linux_step_count')"
   [ "$got" = "36" ] \
     || fail "$case_id: the linux job has $got steps, expected 36. A step added anywhere before the pytest pair can change what they execute without colliding with a pinned name or adding a pytest mention (round 4 finding 3, measured). This count is deliberately brittle: adding a step to this job is a deliberate act and must be paired with a deliberate look at whether it reaches the python steps."
@@ -1443,13 +1470,64 @@ assert_bench_cmp_invocations() {
 #                                               so a trim after it never
 #                                               reaches GHCR)
 EXPECTED_CCACHE_SEED_IF="(github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) && steps.ccache_stats.outputs.changed != '0'"
+EXPECTED_CCACHE_SEED_ENV='{"GH_TOKEN":"${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}"}'
+
+# ── canonical run: block / key-set comparators, shared by every ccache step ──
+# (`linux`, `coverage`, `bench`). Same discipline as assert_wheel_run_block /
+# assert_wheel_step_keys (#270 R3-F1): exact-text goldens, not substrings — a
+# selector that degrades into content matching is the defect class that took
+# #270 four Gate B rounds to remove.
+assert_ccache_run_block() {  # <case_id> <job> <label> <step-json> <expected>
+  local _case_id="$1" _job="$2" _label="$3" _step="$4" _expected="$5" _got
+  _got="$(echo "$_step" | jq -r '.run // ""')"
+  _got="${_got%"${_got##*[!$'\n']}"}"
+  _expected="${_expected%"${_expected##*[!$'\n']}"}"
+  if [ "$_got" != "$_expected" ]; then
+    fail "$_case_id: the $_job job's '$_label' step run: block does not match the canonical text pinned in this file.
+
+This is a GOLDEN. It reds on ANY change, cosmetic ones included. If the change is intended, update
+the expected text here in the same commit — do not weaken the selector back into content matching.
+
+--- expected
++++ actual
+$(diff <(printf '%s\n' "$_expected") <(printf '%s\n' "$_got") || true)"
+  fi
+}
+
+assert_ccache_raw_keys() {  # <case_id> <job> <label> <step-json> <expected-sorted-csv>
+  local _case_id="$1" _job="$2" _label="$3" _got
+  _got="$(echo "$4" | jq -r '.raw_keys | sort | join(",")')"
+  [ "$_got" = "$5" ] \
+    || fail "$_case_id: the $_job job's '$_label' step key set is '$_got', expected exactly '$5'. Step-level keys are NOT part of the run: golden — \`if:\` decides whether the step runs at all, \`continue-on-error:\` can turn a publish failure into a green status, and any added key here is a deliberate pin update."
+}
+
+# ── 7: #411 — the GHCR compiler-cache contract, for `linux` and `coverage` ──
+# Every ccache step is pinned as a canonical object against a preset LITERAL,
+# not one derived from the restore step's own text (Gate B r1 F1: a preset
+# that agrees with itself cannot catch every call in a job drifting to the
+# SAME wrong preset). The ORDER is the contract:
+#   Install ccache < Restore < Conan install   (restore-ccache.sh refuses once
+#                                               anything compiled; exit 127 if
+#                                               ccache is not on PATH)
+#   Build < statistics < Trim < Save           (trim only after every compile
+#                                               it must keep; the seed
+#                                               publishes what the store holds,
+#                                               so a trim after it never
+#                                               reaches GHCR)
 assert_trim_wiring() {
   local json="$1" case_id="$2"
   local job w preset n idx_install idx_restore idx_conan idx_build idx_stats idx_trim idx_seed
-  local val perms seed_last
+  local val perms
+  local install_step restore_step stats_step trim_step seed_step
+  local install_run restore_run stats_run trim_run seed_run
 
   for job in linux coverage; do
     w="$(echo "$json" | jq -c --arg j "$job" '.[$j + "_ccache_wiring"]')"
+
+    case "$job" in
+      linux)    preset='${{ matrix.preset }}' ;;
+      coverage) preset='linux-clang-coverage' ;;
+    esac
 
     n="$(echo "$w" | jq -r '.action_steps')"
     [ "$n" = "0" ] \
@@ -1461,16 +1539,52 @@ assert_trim_wiring() {
         || fail "$case_id: $job job — no unique step for '$step' (found $n by name)."
     done
 
-    preset="$(echo "$w" | jq -r '.preset')"
-    [ -n "$preset" ] \
-      || fail "$case_id: $job job's restore step has no \`ci/restore-ccache.sh <preset>\` line — the preset every other ccache step must agree with cannot be derived."
+    install_step="$(echo "$w" | jq -c '.install')"
+    restore_step="$(echo "$w" | jq -c '.restore')"
+    stats_step="$(echo "$w" | jq -c '.stats')"
+    trim_step="$(echo "$w" | jq -c '.trim')"
+    seed_step="$(echo "$w" | jq -c '.seed')"
 
-    val="$(echo "$w" | jq -r '.restore.id')"
+    install_run=$'set -euo pipefail\nci/apt-guard.sh apt-install -- sudo apt-get install -y --no-install-recommends ccache\nccache --version'
+    restore_run='echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin || true
+ci/restore-ccache.sh '"$preset"
+    stats_run="ci/ccache-stats.sh $preset '' '\${{ steps.build.outcome }}'"
+    trim_run="ci/trim-ccache-to-run.sh $preset"
+    seed_run='echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+ci/seed-ccache.sh '"$preset"
+
+    assert_ccache_raw_keys "$case_id" "$job" "Install ccache" "$install_step" "name,run"
+    assert_ccache_run_block "$case_id" "$job" "Install ccache" "$install_step" "$install_run"
+
+    assert_ccache_raw_keys "$case_id" "$job" "Restore ccache from GHCR" "$restore_step" "id,name,run"
+    assert_ccache_run_block "$case_id" "$job" "Restore ccache from GHCR" "$restore_step" "$restore_run"
+    val="$(echo "$restore_step" | jq -r '.id')"
     [ "$val" = "ccache_restore" ] \
       || fail "$case_id: $job job's restore step id is '$val', expected 'ccache_restore'."
-    val="$(echo "$w" | jq -r '.restore.has_if')"
-    [ "$val" = "false" ] \
-      || fail "$case_id: $job job's restore step carries an if: — a skipped restore leaves the leg cold with no signal."
+
+    assert_ccache_raw_keys "$case_id" "$job" "ccache statistics" "$stats_step" "id,if,name,run"
+    assert_ccache_run_block "$case_id" "$job" "ccache statistics" "$stats_step" "$stats_run"
+    val="$(echo "$stats_step" | jq -r '.["if"]')"
+    [ "$val" = "always()" ] \
+      || fail "$case_id: $job job's statistics step if: is '$val', expected 'always()' — a red build must still report its counters."
+    val="$(echo "$stats_step" | jq -r '.id')"
+    [ "$val" = "ccache_stats" ] \
+      || fail "$case_id: $job job's statistics step id is '$val', expected 'ccache_stats' — the seed's changed-guard reads it."
+
+    assert_ccache_raw_keys "$case_id" "$job" "Trim ccache to this run (#411)" "$trim_step" "name,run"
+    assert_ccache_run_block "$case_id" "$job" "Trim ccache to this run (#411)" "$trim_step" "$trim_run"
+
+    assert_ccache_raw_keys "$case_id" "$job" "Save ccache to GHCR (push:main / dispatch on main, cache changed)" "$seed_step" "continue-on-error,env,if,name,run"
+    assert_ccache_run_block "$case_id" "$job" "Save ccache to GHCR (push:main / dispatch on main, cache changed)" "$seed_step" "$seed_run"
+    val="$(echo "$seed_step" | jq -r '.continue_on_error')"
+    [ "$val" = "True" ] \
+      || fail "$case_id: $job job's seed step continue-on-error is '$val', expected 'True' — a cache that cannot publish must not redden a lane whose build and tests passed."
+    val="$(echo "$seed_step" | jq -cS '.env')"
+    [ "$val" = "$(echo "$EXPECTED_CCACHE_SEED_ENV" | jq -cS '.')" ] \
+      || fail "$case_id: $job job's seed step env map is '$val', expected '$EXPECTED_CCACHE_SEED_ENV' — losing GHCR_PAT falls back to GITHUB_TOKEN, which lacks delete:packages, so the pruner stops reclaiming and the GHCR backlog goes unreported."
+    val="$(echo "$seed_step" | jq -r '.["if"]')"
+    [ "$val" = "$EXPECTED_CCACHE_SEED_IF" ] \
+      || fail "$case_id: $job job's seed step if: is '$val', expected exactly \"$EXPECTED_CCACHE_SEED_IF\". The tag is rolling, so without the main-ref guard a dispatch from any branch overwrites what main reads next."
 
     idx_install="$(echo "$w" | jq -r '.install.index')"
     idx_restore="$(echo "$w" | jq -r '.restore.index')"
@@ -1483,30 +1597,6 @@ assert_trim_wiring() {
       || fail "$case_id: $job job's ccache step order is install=$idx_install restore=$idx_restore conan-install=$idx_conan; expected install < restore < Conan install. Conan's --build=missing compiles through the launcher: without ccache on PATH that is exit 127, and restore-ccache.sh refuses to run after anything compiled."
     [ "$idx_build" -lt "$idx_stats" ] && [ "$idx_stats" -lt "$idx_trim" ] && [ "$idx_trim" -lt "$idx_seed" ] \
       || fail "$case_id: $job job's post-build ccache order is build=$idx_build stats=$idx_stats trim=$idx_trim seed=$idx_seed; expected Build < statistics < Trim < Save. A trim before Build evicts the store before any compile; a trim after the seed never reaches GHCR."
-
-    val="$(echo "$w" | jq -r '.stats.run')"
-    [ "$val" = "ci/ccache-stats.sh $preset '' '\${{ steps.build.outcome }}'" ] \
-      || fail "$case_id: $job job's statistics run: is '$val', expected \"ci/ccache-stats.sh $preset '' '\${{ steps.build.outcome }}'\" (empty disposition, no floor — owner decision 2026-09-16)."
-    val="$(echo "$w" | jq -r '.stats.id')"
-    [ "$val" = "ccache_stats" ] \
-      || fail "$case_id: $job job's statistics step id is '$val', expected 'ccache_stats' — the seed's changed-guard reads it."
-
-    val="$(echo "$w" | jq -r '.trim.if')"
-    [ -z "$val" ] || [ "$val" = "success()" ] \
-      || fail "$case_id: $job job's trim step if: is '$val', expected empty (default success()) or literally 'success()' — only a successful build trims, on every event."
-    val="$(echo "$w" | jq -r '.trim.run')"
-    [ "$val" = "ci/trim-ccache-to-run.sh $preset" ] \
-      || fail "$case_id: $job job's trim step run: is '$val', expected 'ci/trim-ccache-to-run.sh $preset' — the preset must pair with the restore step's."
-    n="$(echo "$w" | jq -r '.trim.env | length')"
-    [ "$n" = "0" ] \
-      || fail "$case_id: $job job's trim step carries $n step-level env var(s), expected none — the trim calls no API."
-
-    val="$(echo "$w" | jq -r '.seed.if')"
-    [ "$val" = "$EXPECTED_CCACHE_SEED_IF" ] \
-      || fail "$case_id: $job job's seed step if: is '$val', expected exactly \"$EXPECTED_CCACHE_SEED_IF\". The tag is rolling, so without the main-ref guard a dispatch from any branch overwrites what main reads next."
-    seed_last="$(echo "$w" | jq -r '.seed.run' | sed '/^[[:space:]]*$/d' | tail -1)"
-    [ "$seed_last" = "ci/seed-ccache.sh $preset" ] \
-      || fail "$case_id: $job job's seed step publishes with '$seed_last', expected 'ci/seed-ccache.sh $preset' — the preset must pair with the restore step's."
   done
 
   for job in linux coverage; do
@@ -1514,6 +1604,57 @@ assert_trim_wiring() {
     [ "$perms" = '{"contents":"read","packages":"write"}' ] \
       || fail "$case_id: $job job's permissions are $perms, expected exactly {\"contents\":\"read\",\"packages\":\"write\"} — packages: write publishes the cache; nothing needs actions: write."
   done
+}
+
+# ── #411 Gate B r1 L2 (F4-bench): bench is a restore-only CONSUMER ───────────
+# Bench never publishes (#273) — it consumes the matrix `linux-clang-release`
+# leg's tag and has no build/stats/trim/seed steps of its own, so it gets its
+# own contract rather than reusing assert_trim_wiring's shape.
+assert_bench_ccache_wiring() {
+  local json="$1" case_id="$2"
+  local w n idx_install idx_restore idx_conan val
+  local install_step restore_step install_run restore_run
+
+  w="$(echo "$json" | jq -c '.bench_ccache')"
+
+  for step in install restore conan_install; do
+    n="$(echo "$w" | jq -r --arg s "$step" '.[$s].count')"
+    [ "$n" = "1" ] \
+      || fail "$case_id: bench job — no unique step for '$step' (found $n by name)."
+  done
+
+  install_step="$(echo "$w" | jq -c '.install')"
+  restore_step="$(echo "$w" | jq -c '.restore')"
+
+  install_run=$'set -euo pipefail\nci/apt-guard.sh apt-install -- sudo apt-get install -y --no-install-recommends ccache\nccache --version'
+  restore_run='echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin || true
+ci/restore-ccache.sh linux-clang-release'
+
+  assert_ccache_raw_keys "$case_id" "bench" "Install ccache" "$install_step" "name,run"
+  assert_ccache_run_block "$case_id" "bench" "Install ccache" "$install_step" "$install_run"
+
+  assert_ccache_raw_keys "$case_id" "bench" "Restore ccache from GHCR (CONSUMES the matrix release leg's tag)" "$restore_step" "name,run"
+  assert_ccache_run_block "$case_id" "bench" "Restore ccache from GHCR (CONSUMES the matrix release leg's tag)" "$restore_step" "$restore_run"
+
+  idx_install="$(echo "$w" | jq -r '.install.index')"
+  idx_restore="$(echo "$w" | jq -r '.restore.index')"
+  idx_conan="$(echo "$w" | jq -r '.conan_install.index')"
+  [ "$idx_install" -lt "$idx_restore" ] && [ "$idx_restore" -lt "$idx_conan" ] \
+    || fail "$case_id: bench job's ccache step order is install=$idx_install restore=$idx_restore conan-install=$idx_conan; expected install < restore < Conan install."
+
+  n="$(echo "$w" | jq -r '.seed_count')"
+  [ "$n" = "0" ] \
+    || fail "$case_id: bench job has $n step(s) invoking ci/seed-ccache.sh, expected 0 — bench is a pure ccache CONSUMER of the matrix release leg's tag (#273); it must never publish."
+  n="$(echo "$w" | jq -r '.trim_count')"
+  [ "$n" = "0" ] \
+    || fail "$case_id: bench job has $n step(s) invoking ci/trim-ccache-to-run.sh, expected 0 — nothing to trim on a job that never seeds."
+  n="$(echo "$w" | jq -r '.action_steps')"
+  [ "$n" = "0" ] \
+    || fail "$case_id: bench job still has $n hendrikmuhs/ccache-action step(s). #411 moved bench's ccache to a GHCR restore-only read."
+
+  val="$(echo "$json" | jq -r '.bench_job_env.CCACHE_DIR // ""')"
+  [ "$val" = "/tmp/fixpp-ccache-linux-clang-release" ] \
+    || fail "$case_id: bench job's CCACHE_DIR env is '$val', expected '/tmp/fixpp-ccache-linux-clang-release' — it must match the matrix linux-clang-release leg's directory."
 }
 
 assert_coverage_step_count() {
@@ -1545,6 +1686,7 @@ run_full_pin() {
   assert_wheel_identity_steps "$json" "$case_id"
   assert_wheel_build_step_order "$json" "$case_id"
   assert_trim_wiring "$json" "$case_id"
+  assert_bench_ccache_wiring "$json" "$case_id"
   assert_coverage_step_count "$json" "$case_id"
 }
 
@@ -1573,7 +1715,13 @@ echo "PASS: derive-script table + call site + per-leg FIXPP_INSTALL_PYTHON + PY_
 # not collide). Re-run the harness against the merged number rather than
 # re-deriving from either branch's local total — the failure mode this guards is
 # one side's edit silently replacing the other's, which reads as a passing count.
-MUTANTS_DECLARED=68  # M74-M82 (#411 GHCR ccache contract; M74-M81 first added at PR #460) + M73 (089) + M70 M71 M72 (#271) + M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 M47 M48 M49 M50 M51-M55 M56-M63 M64 M65 M66 M67 M68 M69 + M28 (1
+MUTANTS_DECLARED=82  # M83-M96 (#411 Gate B r1 F1/F3/F4-bench: the canonical-object ccache
+                     # contract — coordinated preset drift and the restore/seed/statistics
+                     # semantics a derived preset and an id/if-only check could not see, plus
+                     # bench's restore-only consumer contract) + M74-M82 (#411 GHCR ccache
+                     # contract; M74-M81 first added at PR #460) + M73 (089) + M70 M71 M72
+                     # (#271) + M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 M47 M48
+                     # M49 M50 M51-M55 M56-M63 M64 M65 M66 M67 M68 M69 + M28 (1
                      # GREEN control; M46 RETIRED at round 9 — its GREEN assertion became false by design) —
                      # DOWN from 27 at round 3b, because the golden subsumed 14 of them. See the RETIRED block
                      # in run_mutant_checks for the list and the reason. M48-M50 added at #270 Gate B r1 (F1):
@@ -2718,7 +2866,7 @@ open(dst, "w").write(before + job + after)
 '
 
   # M75: the linux trim gains if: always(), so a failed build still evicts.
-  mutate_workflow M75 "the linux trim step gains if: always()" "trim step if: is" '
+  mutate_workflow M75 "the linux trim step gains if: always()" "step key set is .if,name,run., expected exactly .name,run." '
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
@@ -2732,7 +2880,7 @@ open(dst, "w").write(before + job + after)
 '
 
   # M76: the linux trim's preset argument drifts from the restore step's.
-  mutate_workflow M76 "the linux trim step.s preset drifts from the restore step.s" "trim step run: is" '
+  mutate_workflow M76 "the linux trim step.s preset drifts from the restore step.s" "Trim ccache to this run .#411.. step run: block does not match" '
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
@@ -2756,7 +2904,7 @@ open(dst, "w").write(t.replace(old, old + "      actions: write\n"))
 '
 
   # M78: the linux trim regains a step-level env: for an API it never calls.
-  mutate_workflow M78 "the linux trim step regains a GH_TOKEN env" "trim step carries" '
+  mutate_workflow M78 "the linux trim step regains a GH_TOKEN env" "step key set is .env,name,run., expected exactly .name,run." '
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
@@ -2833,6 +2981,249 @@ assert job.count(conan) == 1, job.count(conan)
 k = job.index(conan)
 k = job.index("\n\n", k) + 2
 job = job[:k] + restore + "\n" + job[k:]
+open(dst, "w").write(before + job + after)
+'
+
+  # ── #411 Gate B r1 L1 (F1/F3): the CANONICAL-OBJECT contract, M83-M91 ───────
+  # These are the properties assert_trim_wiring could not see before this
+  # round: a literal-preset comparison catches ALL FOUR calls in a job
+  # drifting to the SAME wrong preset (M76 alone only sees one call drift from
+  # the other three), and the canonical run:/key-set goldens catch the
+  # restore/seed/statistics semantics the old id/if-only checks never read.
+
+  # M83: THE F1 SCRATCH MUTANT, run through the real harness. All four `linux`
+  # ccache-script calls drift to the SAME wrong preset — every OTHER call still
+  # agrees with it, which is exactly what a preset DERIVED from one of them
+  # cannot catch.
+  mutate_workflow M83 "all four linux ccache-script calls drift to the same wrong preset" "linux job.s .Restore ccache from GHCR. step run: block does not match" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+start = t.index("\n  linux:\n")
+end = t.index("\n  coverage:\n", start)
+before, job, after = t[:start], t[start:end], t[end:]
+targets = [
+    "          ci/restore-ccache.sh ${{ matrix.preset }}\n",
+    "        run: ci/ccache-stats.sh ${{ matrix.preset }} \x27\x27 \x27${{ steps.build.outcome }}\x27\n",
+    "        run: ci/trim-ccache-to-run.sh ${{ matrix.preset }}\n",
+    "          ci/seed-ccache.sh ${{ matrix.preset }}\n",
+]
+for line in targets:
+    assert job.count(line) == 1, (line, job.count(line))
+    job = job.replace(line, line.replace("${{ matrix.preset }}", "linux-clang-debug"), 1)
+open(dst, "w").write(before + job + after)
+'
+
+  # M84: the coverage job's own four calls drift the same way. Coverage needs
+  # its OWN proof — the linux job passing this cell first does not cover it.
+  mutate_workflow M84 "all four coverage ccache-script calls drift to the same wrong preset" "coverage job.s .Restore ccache from GHCR. step run: block does not match" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+start = t.index("\n  coverage:\n")
+end = t.index("\n  python-wheel-build:\n", start)
+before, job, after = t[:start], t[start:end], t[end:]
+targets = [
+    "          ci/restore-ccache.sh linux-clang-coverage\n",
+    "        run: ci/ccache-stats.sh linux-clang-coverage \x27\x27 \x27${{ steps.build.outcome }}\x27\n",
+    "        run: ci/trim-ccache-to-run.sh linux-clang-coverage\n",
+    "          ci/seed-ccache.sh linux-clang-coverage\n",
+]
+for line in targets:
+    assert job.count(line) == 1, (line, job.count(line))
+    job = job.replace(line, line.replace("linux-clang-coverage", "linux-clang-debug"), 1)
+open(dst, "w").write(before + job + after)
+'
+
+  # M85: the linux restore loses its anonymous-pull fallback. A fork PR whose
+  # token cannot log in then fails the step instead of falling back.
+  mutate_workflow M85 "the linux ccache restore loses .. true" "linux job.s .Restore ccache from GHCR. step run: block does not match" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+start = t.index("\n  linux:\n")
+end = t.index("\n  coverage:\n", start)
+before, job, after = t[:start], t[start:end], t[end:]
+old = "          echo \x22${{ secrets.GITHUB_TOKEN }}\x22 | oras login ghcr.io -u \x22${{ github.actor }}\x22 --password-stdin || true\n          ci/restore-ccache.sh ${{ matrix.preset }}\n"
+new = "          echo \x22${{ secrets.GITHUB_TOKEN }}\x22 | oras login ghcr.io -u \x22${{ github.actor }}\x22 --password-stdin\n          ci/restore-ccache.sh ${{ matrix.preset }}\n"
+assert job.count(old) == 1, job.count(old)
+open(dst, "w").write(before + job.replace(old, new, 1) + after)
+'
+
+  # M86: the linux seed loses continue-on-error entirely. A GHCR outage would
+  # then turn a required lane red instead of publishing best-effort.
+  mutate_workflow M86 "the linux ccache seed loses continue-on-error" "step key set is .env,if,name,run., expected exactly .continue-on-error,env,if,name,run." '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+start = t.index("\n  linux:\n")
+end = t.index("\n  coverage:\n", start)
+before, job, after = t[:start], t[start:end], t[end:]
+old = "      - name: Save ccache to GHCR (push:main / dispatch on main, cache changed)\n        if: (github.event_name == \x27push\x27 || (github.event_name == \x27workflow_dispatch\x27 && github.ref == \x27refs/heads/main\x27)) && steps.ccache_stats.outputs.changed != \x270\x27\n        continue-on-error: true\n"
+new = "      - name: Save ccache to GHCR (push:main / dispatch on main, cache changed)\n        if: (github.event_name == \x27push\x27 || (github.event_name == \x27workflow_dispatch\x27 && github.ref == \x27refs/heads/main\x27)) && steps.ccache_stats.outputs.changed != \x270\x27\n"
+assert job.count(old) == 1, job.count(old)
+open(dst, "w").write(before + job.replace(old, new, 1) + after)
+'
+
+  # M87: the linux seed keeps continue-on-error but flips its VALUE — the key
+  # set is unchanged, exactly the shape #271 found surviving a key-presence-only
+  # check.
+  mutate_workflow M87 "the linux ccache seed.s continue-on-error flips to false" "seed step continue-on-error is .False., expected .True." '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+start = t.index("\n  linux:\n")
+end = t.index("\n  coverage:\n", start)
+before, job, after = t[:start], t[start:end], t[end:]
+old = "      - name: Save ccache to GHCR (push:main / dispatch on main, cache changed)\n        if: (github.event_name == \x27push\x27 || (github.event_name == \x27workflow_dispatch\x27 && github.ref == \x27refs/heads/main\x27)) && steps.ccache_stats.outputs.changed != \x270\x27\n        continue-on-error: true\n"
+new = old.replace("continue-on-error: true", "continue-on-error: false")
+assert job.count(old) == 1, job.count(old)
+open(dst, "w").write(before + job.replace(old, new, 1) + after)
+'
+
+  # M88: the linux seed loses its whole env: block — the pruner then falls
+  # back to GITHUB_TOKEN, which lacks delete:packages, silently.
+  mutate_workflow M88 "the linux ccache seed loses its env: block" "step key set is .continue-on-error,if,name,run., expected exactly .continue-on-error,env,if,name,run." '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+start = t.index("\n  linux:\n")
+end = t.index("\n  coverage:\n", start)
+before, job, after = t[:start], t[start:end], t[end:]
+old = "        continue-on-error: true\n        env:\n          # Prune needs `delete:packages`, which GITHUB_TOKEN does not carry.\n          # With GHCR_PAT it reclaims the untagged version each republish\n          # orphans; without it the backlog is reported in the job summary.\n          GH_TOKEN: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}\n"
+new = "        continue-on-error: true\n"
+assert job.count(old) == 1, job.count(old)
+open(dst, "w").write(before + job.replace(old, new, 1) + after)
+'
+
+  # M89: the linux seed keeps its env: key but the VALUE falls back to
+  # GITHUB_TOKEN — the same class of value drift as M87, on a map instead of a
+  # scalar. Anchored on the full GHCR_PAT literal: coverage and the wheel lane
+  # carry the identical GH_TOKEN literal, and M71 already slices to the wheel
+  # lane, so this must be sliced to `linux` too.
+  mutate_workflow M89 "the linux ccache seed.s GH_TOKEN falls back to GITHUB_TOKEN only" "linux job.s seed step env map is" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+start = t.index("\n  linux:\n")
+end = t.index("\n  coverage:\n", start)
+before, job, after = t[:start], t[start:end], t[end:]
+old = "GH_TOKEN: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}\n"
+new = "GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n"
+assert job.count(old) == 1, job.count(old)
+open(dst, "w").write(before + job.replace(old, new, 1) + after)
+'
+
+  # M90: an `exit 0` inserted before the seed publish line. seed_last (the old
+  # last-nonblank-line check) would have passed this — the seed-ccache.sh
+  # invocation is still the last line, just unreachable.
+  mutate_workflow M90 "exit 0 inserted before the linux ccache seed publish line" "linux job.s .Save ccache to GHCR .push:main / dispatch on main, cache changed.. step run: block does not match" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+start = t.index("\n  linux:\n")
+end = t.index("\n  coverage:\n", start)
+before, job, after = t[:start], t[start:end], t[end:]
+old = "          ci/seed-ccache.sh ${{ matrix.preset }}\n"
+new = "          exit 0\n          ci/seed-ccache.sh ${{ matrix.preset }}\n"
+assert job.count(old) == 1, job.count(old)
+open(dst, "w").write(before + job.replace(old, new, 1) + after)
+'
+
+  # M91: `if: always()` removed from the linux ccache statistics step. Without
+  # it a failed build never reports its counters.
+  mutate_workflow M91 "if: always() removed from the linux ccache statistics step" "step key set is .id,name,run., expected exactly .id,if,name,run." '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+start = t.index("\n  linux:\n")
+end = t.index("\n  coverage:\n", start)
+before, job, after = t[:start], t[start:end], t[end:]
+old = "      - name: ccache statistics\n        id: ccache_stats\n        if: always()\n"
+new = "      - name: ccache statistics\n        id: ccache_stats\n"
+assert job.count(old) == 1, job.count(old)
+open(dst, "w").write(before + job.replace(old, new, 1) + after)
+'
+
+  # ── #411 Gate B r1 L2 (F4-bench): the restore-only consumer contract, M92-M96
+  # bench has no ccache of its own (#273) — it restores the matrix
+  # linux-clang-release leg's tag and must never publish. These mutants are the
+  # ones assert_bench_ccache_wiring exists to catch.
+  mutate_workflow M92 "the bench ccache restore step is deleted" "no unique step for .restore." '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+start = t.index("\n  bench:\n")
+end = t.index("\n  tier1-required:\n", start)
+before, job, after = t[:start], t[start:end], t[end:]
+old = "      - name: Restore ccache from GHCR (CONSUMES the matrix release leg\x27s tag)\n        run: |\n          echo \x22${{ secrets.GITHUB_TOKEN }}\x22 | oras login ghcr.io -u \x22${{ github.actor }}\x22 --password-stdin || true\n          ci/restore-ccache.sh linux-clang-release\n\n"
+assert job.count(old) == 1, job.count(old)
+open(dst, "w").write(before + job.replace(old, "", 1) + after)
+'
+
+  # M93: the bench restore moves after Conan install, where restore-ccache.sh
+  # would discard the dependency build (or exit 1).
+  mutate_workflow M93 "the bench ccache restore is moved after Conan install" "bench job.s ccache step order is" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+start = t.index("\n  bench:\n")
+end = t.index("\n  tier1-required:\n", start)
+before, job, after = t[:start], t[start:end], t[end:]
+old = "      - name: Restore ccache from GHCR (CONSUMES the matrix release leg\x27s tag)\n        run: |\n          echo \x22${{ secrets.GITHUB_TOKEN }}\x22 | oras login ghcr.io -u \x22${{ github.actor }}\x22 --password-stdin || true\n          ci/restore-ccache.sh linux-clang-release\n\n"
+assert job.count(old) == 1, job.count(old)
+job = job.replace(old, "", 1)
+conan = "      - name: Conan install\n"
+assert job.count(conan) == 1, job.count(conan)
+k = job.index(conan)
+k = job.index("\n\n", k) + 2
+job = job[:k] + old + job[k:]
+open(dst, "w").write(before + job + after)
+'
+
+  # M94: the bench restore preset drifts from linux-clang-release. Bench would
+  # then read a tag the matrix release leg never publishes and build cold.
+  mutate_workflow M94 "the bench ccache restore preset drifts from linux-clang-release" "bench job.s .Restore ccache from GHCR .CONSUMES the matrix release leg.s tag.. step run: block does not match" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+start = t.index("\n  bench:\n")
+end = t.index("\n  tier1-required:\n", start)
+before, job, after = t[:start], t[start:end], t[end:]
+old = "          ci/restore-ccache.sh linux-clang-release\n"
+new = "          ci/restore-ccache.sh linux-clang-debug\n"
+assert job.count(old) == 1, job.count(old)
+open(dst, "w").write(before + job.replace(old, new, 1) + after)
+'
+
+  # M95: the bench restore loses its anonymous-pull fallback — a separate
+  # mutant from M94 so each RED reason stays attributable to one property.
+  mutate_workflow M95 "the bench ccache restore loses .. true" "bench job.s .Restore ccache from GHCR .CONSUMES the matrix release leg.s tag.. step run: block does not match" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+start = t.index("\n  bench:\n")
+end = t.index("\n  tier1-required:\n", start)
+before, job, after = t[:start], t[start:end], t[end:]
+old = "--password-stdin || true\n"
+assert job.count(old) == 1, job.count(old)
+open(dst, "w").write(before + job.replace(old, "--password-stdin\n", 1) + after)
+'
+
+  # M96: a `Save ccache to GHCR` step is added to bench, copying the linux
+  # seed with linux-clang-release. Bench must never publish (#273) — it would
+  # overwrite the tag the matrix release leg owns.
+  mutate_workflow M96 "a Save ccache to GHCR step is added to bench" "bench job has 1 step.s. invoking ci/seed-ccache.sh, expected 0" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+start = t.index("\n  bench:\n")
+end = t.index("\n  tier1-required:\n", start)
+before, job, after = t[:start], t[start:end], t[end:]
+anchor = "      - name: Conan install\n        run: |\n          conan install . \\\n            -pr conan/profiles/linux-clang-release \\\n            --build=missing \\\n            -of build/linux-clang-release\n"
+assert job.count(anchor) == 1, job.count(anchor)
+seed = "\n      - name: Save ccache to GHCR (push:main / dispatch on main, cache changed)\n        if: (github.event_name == \x27push\x27 || (github.event_name == \x27workflow_dispatch\x27 && github.ref == \x27refs/heads/main\x27)) && steps.ccache_stats.outputs.changed != \x270\x27\n        continue-on-error: true\n        env:\n          GH_TOKEN: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}\n        run: |\n          echo \x22${{ secrets.GITHUB_TOKEN }}\x22 | oras login ghcr.io -u \x22${{ github.actor }}\x22 --password-stdin\n          ci/seed-ccache.sh linux-clang-release\n"
+job = job.replace(anchor, anchor + seed, 1)
 open(dst, "w").write(before + job + after)
 '
 }
