@@ -1452,8 +1452,11 @@ assert_trim_wiring() {
     [ "$name" = "Trim ccache to this run (#411)" ] \
       || fail "$case_id: $job job's LAST step is named '$name', expected 'Trim ccache to this run (#411)'. An untouched-file eviction must come after every compiler call — the step count pin cannot see a step reordered earlier in the same job."
 
-    [ "$if_val" = "$save_pred" ] \
-      || fail "$case_id: $job job's trim step if: is '$if_val', expected exactly the ccache-action step's save: predicate ('$save_pred') — a run that does not save must not trim the store it would have replaced."
+    [ -z "$if_val" ] || [ "$if_val" = "success()" ] \
+      || fail "$case_id: $job job's trim step if: is '$if_val', expected empty (default success()) or literally 'success()' — the trim must be success-only on every event, never event-gated (a push-only gate means the trim never runs before merge; Gate B r2 F1) and never always()/failure()/cancelled() (a failed run's store must not be truncated)."
+
+    [ "$save_pred" = "github.event_name == 'push'" ] \
+      || fail "$case_id: $job job's ccache-action save: predicate is '$save_pred', expected exactly \"github.event_name == 'push'\" — this is the property that makes a PR-run trim safe (the Actions cache is written only where save: is true), and it is the only pin on coverage's save: predicate."
 
     expected_run="ci/trim-ccache-to-run.sh ${key}"
     [ "$run_val" = "$expected_run" ] \
@@ -1524,7 +1527,7 @@ echo "PASS: derive-script table + call site + per-leg FIXPP_INSTALL_PYTHON + PY_
 # not collide). Re-run the harness against the merged number rather than
 # re-deriving from either branch's local total — the failure mode this guards is
 # one side's edit silently replacing the other's, which reads as a passing count.
-MUTANTS_DECLARED=65  # M74-M79 (#411 Gate B round 1, F3) + M73 (089) + M70 M71 M72 (#271) + M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 M47 M48 M49 M50 M51-M55 M56-M63 M64 M65 M66 M67 M68 M69 + M28 (1
+MUTANTS_DECLARED=67  # M80 M81 (#411 Gate B round 2, F1) + M74-M79 (#411 Gate B round 1, F3) + M73 (089) + M70 M71 M72 (#271) + M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 M47 M48 M49 M50 M51-M55 M56-M63 M64 M65 M66 M67 M68 M69 + M28 (1
                      # GREEN control; M46 RETIRED at round 9 — its GREEN assertion became false by design) —
                      # DOWN from 27 at round 3b, because the golden subsumed 14 of them. See the RETIRED block
                      # in run_mutant_checks for the list and the reason. M48-M50 added at #270 Gate B r1 (F1):
@@ -2647,7 +2650,7 @@ t = open(src).read()
 start = t.index("\n  linux:\n")
 end = t.index("\n  coverage:\n", start)
 before, job, after = t[:start], t[start:end], t[end:]
-trim_step = "      - name: Trim ccache to this run (#411)\n        if: github.event_name == \x27push\x27\n        run: ci/trim-ccache-to-run.sh tier1-${{ matrix.preset }}\n"
+trim_step = "      - name: Trim ccache to this run (#411)\n        run: ci/trim-ccache-to-run.sh tier1-${{ matrix.preset }}\n"
 assert job.count(trim_step) == 1, job.count(trim_step)
 build_anchor = "      - name: Build\n        run: |\n"
 assert job.count(build_anchor) == 1, job.count(build_anchor)
@@ -2656,15 +2659,16 @@ job = job.replace(build_anchor, trim_step + build_anchor, 1)
 open(dst, "w").write(before + job + after)
 '
 
-  # M75: the linux trim step's if: becomes always(), so a run that never saves
+  # M75: the linux trim step gains an if: always(), so a run that never saves
   # (a PR, a failed/cancelled step earlier) still evicts — self-contradicting
-  # the "must match the save: predicate" property.
-  mutate_workflow M75 "the linux trim step.s if: becomes always()" "trim step if: is" '
+  # the success-only property (the default `success()` is what makes trimming
+  # safe to run on every event; only a failed/cancelled run must skip it).
+  mutate_workflow M75 "the linux trim step gains if: always()" "trim step if: is" '
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
-old = "        if: github.event_name == \x27push\x27\n        run: ci/trim-ccache-to-run.sh tier1-${{ matrix.preset }}\n"
-new = "        if: always()\n        run: ci/trim-ccache-to-run.sh tier1-${{ matrix.preset }}\n"
+old = "      - name: Trim ccache to this run (#411)\n        run: ci/trim-ccache-to-run.sh tier1-${{ matrix.preset }}\n"
+new = "      - name: Trim ccache to this run (#411)\n        if: always()\n        run: ci/trim-ccache-to-run.sh tier1-${{ matrix.preset }}\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
 '
@@ -2702,8 +2706,8 @@ open(dst, "w").write(t.replace(old, old + "      actions: write\n"))
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
-old = "      - name: Trim ccache to this run (#411)\n        if: github.event_name == \x27push\x27\n        run: ci/trim-ccache-to-run.sh tier1-${{ matrix.preset }}\n"
-new = "      - name: Trim ccache to this run (#411)\n        if: github.event_name == \x27push\x27\n        env:\n          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n        run: ci/trim-ccache-to-run.sh tier1-${{ matrix.preset }}\n"
+old = "      - name: Trim ccache to this run (#411)\n        run: ci/trim-ccache-to-run.sh tier1-${{ matrix.preset }}\n"
+new = "      - name: Trim ccache to this run (#411)\n        env:\n          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n        run: ci/trim-ccache-to-run.sh tier1-${{ matrix.preset }}\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
 '
@@ -2714,9 +2718,46 @@ open(dst, "w").write(t.replace(old, new))
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
-old = "      - name: Trim ccache to this run (#411)\n        if: github.event_name == \x27push\x27\n        run: ci/trim-ccache-to-run.sh tier1-linux-clang-coverage\n"
+old = "      - name: Trim ccache to this run (#411)\n        run: ci/trim-ccache-to-run.sh tier1-linux-clang-coverage\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, ""))
+'
+
+  # ── #411 Gate B round 2, F1 — the trim runs on every successful run;
+  # save: stays push-only (M80, M81) ──────────────────────────────────────
+  # R2-F1: a push-only trim step never executes before merge, so the
+  # mechanism has zero pre-merge evidence. The fix makes the trim
+  # success-only on every event while `save:` stays push-only. M80 and M81
+  # guard the two literals that make that safe.
+
+  # M80: re-introduce the push-only guard on the LINUX trim step — the exact
+  # regression this round fixes. Must fail the success-only check, not the
+  # save: literal (that pin is on the ccache-action step, untouched here).
+  mutate_workflow M80 "the linux trim step regains if: github.event_name == push" "trim step if: is" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "      - name: Trim ccache to this run (#411)\n        run: ci/trim-ccache-to-run.sh tier1-${{ matrix.preset }}\n"
+new = "      - name: Trim ccache to this run (#411)\n        if: github.event_name == \x27push\x27\n        run: ci/trim-ccache-to-run.sh tier1-${{ matrix.preset }}\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M81: coverage.s ccache-action save: becomes unconditional (true), so a PR
+  # run WOULD write the Actions cache — exactly what save: push-only exists to
+  # prevent. Sliced to the coverage job so it cannot match linux.s save:,
+  # which is character-identical.
+  mutate_workflow M81 "coverage ccache-action save: becomes true" "coverage job.s ccache-action save: predicate is" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+start = t.index("\n  coverage:\n")
+end = t.index("\n  python-wheel-build:\n", start)
+before, job, after = t[:start], t[start:end], t[end:]
+old = "          save: ${{ github.event_name == \x27push\x27 }}\n"
+assert job.count(old) == 1, job.count(old)
+job = job.replace(old, "          save: true\n", 1)
+open(dst, "w").write(before + job + after)
 '
 
 }
