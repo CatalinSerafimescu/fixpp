@@ -302,7 +302,7 @@ public:
     // DIFFERENT bundle over the same slice gets its own build, because the
     // split itself can differ — strictly fewer builds than
     // INV-G3's "at most one per key" bound. Repeat requests for the same
-    // pair allocate zero (the returned span is served from the sub-table's
+    // KEY allocate zero (the returned span is served from the sub-table's
     // own already-cached `group_slices()`). Empty span if the group is
     // absent, the slice is null, or the sub-build failed (degrade, never
     // throw/UB — mirrors `group_slices()`'s own degradation contract).
@@ -540,7 +540,7 @@ private:
     // tests/support/wire_test_hooks.hpp (never installed), so no test-only
     // accessor code ships in this public header, and the friendship itself is
     // now only granted to FIXPP_TEST_HOOKS builds. Resolves the sub-table
-    // ALREADY built for a (slice_data, nested_no_tag) pair without triggering
+    // ALREADY built for a (slice_data, bundle, nested_no_tag) key without triggering
     // a build — used by the wire-level primitive witness to pin research.md
     // §D2 mode (a)/(b)/(c) by introspecting the real sub-table rather than a
     // `sizeof(OffsetTable)`-tuned cap band (not portable across toolchains,

@@ -192,7 +192,8 @@ TEST(NestedGroupSlicesFailLoud, PresentNestedGroup_ArenaExhausted_ReportsFailLou
     // failure -- the sub-table's own ctor build() degraded to
     // out_of_memory, or its group_slices_status() materialization threw --
     // not some other, unexpected state landing on a false empty.
-    auto const* sub = nested_cache_access_for_testing::resolve(offsets, slice.data, kInnerNoTag);
+    auto const* sub = nested_cache_access_for_testing::resolve(
+        offsets, slice.data, fixpp::wire::dict_hooks::for_table_view(dict), kInnerNoTag);
     if (sub != nullptr) {
         bool const ctor_oom = !sub->build_status() &&
                               sub->build_status().error() == fixpp::core::error::out_of_memory;
@@ -269,7 +270,8 @@ TEST(NestedGroupSlicesFailLoud, ControlGenuineCountZeroNonNullOkNeverFails) {
 
     auto const r = offsets.nested_group_slices(slice.data, slice.len, kInnerNoTag, kTestCtx);
 
-    auto const* sub = nested_cache_access_for_testing::resolve(offsets, slice.data, kInnerNoTag);
+    auto const* sub = nested_cache_access_for_testing::resolve(
+        offsets, slice.data, fixpp::wire::dict_hooks::for_table_view(dict), kInnerNoTag);
     ASSERT_NE(sub, nullptr);
     ASSERT_TRUE(sub->build_status());
     EXPECT_FALSE(sub->group_slices_status(kInnerNoTag).alloc_failed);

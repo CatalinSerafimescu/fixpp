@@ -939,7 +939,7 @@ nested_slices_result OffsetTable::nested_group_slices(std::byte const* slice_dat
         return nested_slices_result{.slices = {}, .alloc_failed = false};  // absent, not a failure
     }
     // Zero-length, alloc-free liveness check ([2b §6.4] INV-G6): the cache
-    // scan below can return on a WARM (slice_data, nested_no_tag) hit
+    // scan below can return on a WARM (slice_data, bundle, nested_no_tag) hit
     // without ever touching `gen` again, so a stale token would otherwise be
     // served silently instead of fault-closing. `.bytes()` -> check_alive()
     // traps in debug on a stale token; no-op in release. Mirrors the mint at

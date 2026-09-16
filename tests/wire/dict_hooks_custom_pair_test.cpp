@@ -60,6 +60,7 @@
 #include <vector>
 
 #include "support/frame_view_factory.hpp"
+#include "support/wire_test_hooks.hpp"  // fixpp#426 r11 T-1: the nested-cache introspection seam
 
 namespace {
 
@@ -833,6 +834,23 @@ TEST(NestedGroupSlicesHooksKey, WarmCacheHonoursTheCallersDictionaryNotTheFirstC
         EXPECT_EQ(second.slices[0].len, cold_with_pair)
             << "WARM exact-key hit served the FIRST caller's dictionary: the cache row is not "
                "keyed on the bundle (Gate B r9 R-1)";
+
+        // ── Gate B r11 T-1: the TEST-ONLY introspection seam must key on the
+        // bundle too. After the two calls above the cache holds TWO rows for
+        // the same (slice, 6001) — one per dictionary — which is exactly the
+        // state a seam comparing only `(slice_data, nested_no_tag)` cannot
+        // represent: it returns whichever row comes first, for BOTH queries.
+        // An instrument blind to the distinction its subject exists to make is
+        // worth no more than no instrument at all.
+        auto const* sub_a = fixpp::wire::nested_cache_access_for_testing::resolve(
+            root, outer[0].data, dict_hooks::for_table_view(tv_no_pair), 6001);
+        auto const* sub_b = fixpp::wire::nested_cache_access_for_testing::resolve(
+            root, outer[0].data, dict_hooks::for_table_view(tv_with_pair), 6001);
+        ASSERT_NE(sub_a, nullptr) << "arm A's row must be resolvable by its own bundle";
+        ASSERT_NE(sub_b, nullptr) << "arm B's row must be resolvable by its own bundle";
+        EXPECT_NE(sub_a, sub_b)
+            << "the introspection seam returned ONE sub-table for two different bundles over the "
+               "same slice and no_tag — it is not comparing hooks_key (Gate B r11 T-1)";
     }
 
     // ── ARM 2 (donation branch): same slice, DIFFERENT nested_no_tag. The
