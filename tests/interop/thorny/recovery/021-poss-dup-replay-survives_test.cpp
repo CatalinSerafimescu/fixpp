@@ -11,10 +11,9 @@
 //   (b) emit no Logout frame on receipt of the replayed message.
 //
 // LIVE CELL: requires a counterparty. Cells SKIP cleanly when
-// INTEROP_<TOKEN>_PORT is unset (FR-023). Golden CAPTURE is deferred to the
-// first paired run with the parent harness; the golden seam skips
-// (skip:golden-not-yet-captured) when the golden file is absent — never fails
-// and never hand-fabricated.
+// INTEROP_<TOKEN>_PORT is unset (FR-023). The golden diff is checked in the
+// parent harness's `_finalize` via `interop_golden_check --check
+// verbatim-poss-dup`; it fails closed (no skip).
 //
 // Golden normalization profile: {52, 122, 10} (quickstart §2):
 //   - 52  SendingTime — live wall-clock
@@ -223,8 +222,10 @@ TEST_P(PossDupReplaySurvives, ReplayedPossDupFrameDoesNotDisconnect) {
     const std::string role_part = (role == Role::fixpp_initiator) ? "init" : "acc";
     const std::string cell_id =
         "PD-" + cp_part + "-" + role_part + "-fix44-poss-dup-replay-survives";
-    hp::diff_golden_or_skip(cell_id, hp::admin_golden_path(cell_id),
-                            fixpp::interop::poss_dup_profile_excluded_tags());
+    // #445: moved OUT of this gtest (was comparing against the PREVIOUS run's
+    // capture sidecar, never this one's). Now asserted in the parent harness's
+    // _finalize, against THIS run's own capture, via
+    // `interop_golden_check --check verbatim-poss-dup`.
 
     // ── Graceful stop ─────────────────────────────────────────────────────────
     hp::expect_graceful_stop(fx);

@@ -33,6 +33,7 @@ endif()
 # and so links the session/transport/tls stack.
 add_library(interop_support STATIC
     support/golden_diff.cpp
+    support/golden_check.cpp
     support/interop_fixture.cpp
     support/witness_comparator.cpp
 )
@@ -115,6 +116,35 @@ function(fixpp_add_interop_test)
     set_tests_properties(${IT_NAME} PROPERTIES LABELS "${IT_LABEL}")
     add_dependencies(interop_${IT_GROUP} ${IT_NAME})
 endfunction()
+
+# ── interop_golden_check — #445 CLI tool ──────────────────────────────────────
+# Standalone (own main(), NOT a gtest binary — fixpp_add_interop_test always
+# links GTest::gtest_main, which defines main() and would collide). Invoked by
+# the parent harness's _finalize against THIS run's own capture, closing the
+# one-run lag #445 describes. Links only interop_support (where golden_diff.cpp
+# / golden_check.cpp live) — no direct session/transport/TLS link and no TLS
+# fixture-dir define; interop_support's own PUBLIC deps (fixpp_session/_tls/
+# _transport, OpenSSL, GTest::gtest) still come along transitively because that
+# target is monolithic for every consumer in this file (pre-existing; not
+# something this addition changes). The tool's own sources include none of
+# those headers.
+add_executable(interop_golden_check tool/interop_golden_check_main.cpp)
+target_link_libraries(interop_golden_check PRIVATE interop_support)
+
+# ── interop_golden_check_test — regression test for the tool above (#445) ────
+# Invokes the REAL built binary (not the golden_check.cpp functions directly)
+# so the CLI surface itself — argv parsing, exit codes, the one-line stdout
+# contract — is what's under test, not just the shared logic.
+fixpp_add_interop_test(
+    NAME interop_golden_check_test
+    GROUP happy
+    LABEL "interop;445;interop-support"
+    SOURCES support/interop_golden_check_test.cpp
+)
+target_compile_definitions(interop_golden_check_test PRIVATE
+    "INTEROP_GOLDEN_CHECK_BIN=\"$<TARGET_FILE:interop_golden_check>\""
+)
+add_dependencies(interop_golden_check_test interop_golden_check)
 
 # ── support smoke (T002 Phase-1 checkpoint: the suite configures + builds + runs) ──
 # Runtime-validates the support layer: golden parse/diff + descriptor + probe token.

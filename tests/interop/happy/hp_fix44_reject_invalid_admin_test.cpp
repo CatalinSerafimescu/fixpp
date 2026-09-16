@@ -28,7 +28,8 @@
 //     HP-QFj-{init,acc}-fix44-reject-invalid-admin
 //   Golden asserts Reject(35=3, 45, 373[, 371]) and survival Heartbeat verbatim
 //   under the {52,10} admin profile.
-//   When the golden is absent → skip:golden-not-yet-captured (never fail/fabricate).
+//   Checked in the parent harness's `_finalize` via `interop_golden_check
+//   --check verbatim-admin`; fails closed (no skip).
 //   Also appended: reject-vs-disconnect peer divergence note in KNOWN-LIMITATIONS.md.
 //
 // 018 SC-004 gate-bite negative tests:
@@ -265,12 +266,12 @@ TEST_P(HappyRejectInvalidAdmin, RejectInvalidAdminSurvives) {
     }
 
     // ── Golden assertion (T021 / US4-1 + US4-2) ──────────────────────────
-    // The golden is captured at first paired run by the parent proxy capture.
-    // If absent: skip with reason (never FAIL, never hand-fabricate).
-    // If present: assert diff_transcripts(expected, actual, {52,10}) MATCHES,
-    // so that tags 45 (RefSeqNum) and 373 (SessionRejectReason) are verified
-    // verbatim (FR-007). Tag 371 (RefTagID) is also compared if present.
-    hp::diff_golden_or_skip(cell_id, hp::admin_golden_path(cell_id));
+    // #445: moved OUT of this gtest — reading the capture sidecar here compared
+    // against the PREVIOUS run's frames, not this one's. diff_transcripts(expected,
+    // actual, {52,10}) — so that tags 45 (RefSeqNum) and 373 (SessionRejectReason)
+    // are verified verbatim (FR-007), 371 (RefTagID) if present — now runs in the
+    // parent harness's _finalize, against THIS run's own capture, via
+    // `interop_golden_check --check verbatim-admin`.
 
     // ── Graceful stop (Logout) ─────────────────────────────────────────────
     hp::expect_graceful_stop(fx);

@@ -251,7 +251,10 @@ TEST_P(AllowPosDupStripSend, StripDefaultSends43Free_CounterpartyAccepts) {
     const std::string role_part = (role == Role::fixpp_initiator) ? "init" : "acc";
     const std::string cell_id =
         "APDS-" + cp_part + "-" + role_part + "-fix44-allow-pos-dup-strip-send";
-    hp::diff_golden_or_skip(cell_id, hp::admin_golden_path(cell_id));
+    // #445: moved OUT of this gtest (was comparing against the PREVIOUS run's
+    // capture sidecar, never this one's). Now asserted in the parent harness's
+    // _finalize, against THIS run's own capture, via
+    // `interop_golden_check --check verbatim-admin`.
 
     // ── Graceful stop ─────────────────────────────────────────────────────────
     hp::expect_graceful_stop(fx);

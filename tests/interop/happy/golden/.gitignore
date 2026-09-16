@@ -1,7 +1,12 @@
-# Live-capture sidecars are per-run artifacts written by the parent harness
-# (phase-9-harness/tools/run_interop_cell.py write_inrepo_golden). Only the
-# committed reference golden (<cell>.fix) is tracked; diff_golden_or_skip
-# compares the committed golden against this freshly-captured sidecar. On a
-# checkout with no paired live run, the sidecar is absent and the gated cell
-# skips ("capture sidecar absent") — the intended skip-without-counterparty path.
+# #445: this directory is no longer where the capture sidecar is READ from — a
+# gtest reading <cell>-capture.fix here always compared against the PREVIOUS
+# run's frames, since the parent harness only writes it (write_inrepo_golden,
+# phase-9-harness/tools/run_interop_cell.py) in `_finalize`, AFTER the gtest has
+# already exited. The diff itself now runs in `_finalize`, against that same
+# run's own capture, via `interop_golden_check` — the harness writes the
+# capture into its own per-run directory and never places it here.
+#
+# This entry is kept only to ignore stale *-capture.fix files left over from
+# before the fix (or from any local ad hoc run); only the committed reference
+# golden (<cell>.fix) is tracked.
 *-capture.fix

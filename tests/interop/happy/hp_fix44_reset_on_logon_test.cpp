@@ -21,8 +21,9 @@
 //     - Unit witness ResetOnLogon_Initiator_ResetsAndEmits141
 //       (tests/session/test_reset_on_lifecycle.cpp): directly asserts
 //       34=1 and 141=Y on captured Logon frame bytes via extract_field/frame_has_tag.
-//     - Parent golden (diff_golden_or_skip below): asserts 141=Y + 34=1 verbatim
-//       under the {52,10} admin profile against the live proxy capture.
+//     - Parent golden (#445: `interop_golden_check --check verbatim-admin`, run
+//       by the parent harness's _finalize against THIS run's own capture):
+//       asserts 141=Y + 34=1 verbatim under the {52,10} admin profile.
 //
 // T017 — reset_on_logon_acceptor (C6.2):
 //   A live QFcpp/QFJ INITIATOR sends a Logon with 141=Y + fresh 34=1. The fixpp
@@ -46,8 +47,9 @@
 //   happy/golden/RL-QFcpp-acc-fix44-reset-on-logon.fix
 //   happy/golden/RL-QFj-init-fix44-reset-on-logon.fix
 //   happy/golden/RL-QFj-acc-fix44-reset-on-logon.fix
-// The parent diff asserts 141=Y + 34=1 verbatim under the {52,10} admin profile.
-// Absent → skip:golden-not-yet-captured (diff_golden_or_skip convention).
+// #445: the parent diff (141=Y + 34=1 verbatim under {52,10}) runs in the parent
+// harness's _finalize, against THIS run's own capture, via
+// `interop_golden_check --check verbatim-admin` — fail-closed, no skip outcome.
 //
 // Parent harness MUST:
 //   For fixpp-initiator cells (T016): set INTEROP_<TOKEN>_PORT + optionally
@@ -148,7 +150,10 @@ TEST_P(ResetOnLogonInitiator, LogonAcceptedAndResyncs) {
     //   happy/golden/RL-<cp>-init-fix44-reset-on-logon.fix
     const std::string cp_part = (counterparty == Counterparty::quickfix_cpp) ? "QFcpp" : "QFj";
     const std::string cell_id = "RL-" + cp_part + "-init-fix44-reset-on-logon";
-    hp::diff_golden_or_skip(cell_id, hp::admin_golden_path(cell_id));
+    // #445: moved OUT of this gtest (was comparing against the PREVIOUS run's
+    // capture sidecar, never this one's). Now asserted in the parent harness's
+    // _finalize, against THIS run's own capture, via
+    // `interop_golden_check --check verbatim-admin`.
 
     // ── Graceful stop (Logout) ────────────────────────────────────────────────
     hp::expect_graceful_stop(fx);
@@ -244,7 +249,10 @@ TEST_P(ResetOnLogonAcceptor, AdmitsFresh34eq1AndResyncsFrom1) {
     //   happy/golden/RL-<cp>-acc-fix44-reset-on-logon.fix
     const std::string cp_part = (counterparty == Counterparty::quickfix_cpp) ? "QFcpp" : "QFj";
     const std::string cell_id = "RL-" + cp_part + "-acc-fix44-reset-on-logon";
-    hp::diff_golden_or_skip(cell_id, hp::admin_golden_path(cell_id));
+    // #445: moved OUT of this gtest (was comparing against the PREVIOUS run's
+    // capture sidecar, never this one's). Now asserted in the parent harness's
+    // _finalize, against THIS run's own capture, via
+    // `interop_golden_check --check verbatim-admin`.
 
     // ── Graceful stop (Logout) ────────────────────────────────────────────────
     hp::expect_graceful_stop(fx);
