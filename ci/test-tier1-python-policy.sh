@@ -179,6 +179,17 @@ with open(sys.argv[1]) as f:
 
 jobs = doc["jobs"]
 
+# ── #411 Gate B r2 L2 (Codex P2->P3 F2): the workflow's OWN push trigger ─────
+# Every `push`-accepting publish predicate in this file (both new ccache seeds,
+# the wheel lane's, and the two Conan-cache saves) restricts itself to main
+# only through this trigger — none of them re-checks `github.ref`, and the
+# tags they publish are rolling. YAML 1.1 parses a bare `on:` key as the
+# boolean True, not the string "on" (PyYAML's documented trap); `doc.get(True)`
+# is the fallback for a file that spells it that way.
+_on_block = doc.get("on", doc.get(True))
+push_keys = sorted(str(k) for k in _on_block["push"].keys())
+push_branches = _on_block["push"].get("branches")
+
 def logical_run_lines(run: str) -> list[str]:
     lines = []
     buf = ""
@@ -448,7 +459,6 @@ def _step_by_name(job, name):
         "index": i,
         "count": 1,
         "id":    str(st.get("id", "")),
-        "has_if": "if" in st,
         "if":    str(st.get("if", "")),
         "run":   str(st.get("run", "")),
         "env":   {str(k): str(v) for k, v in (st.get("env") or {}).items()},
@@ -506,6 +516,8 @@ out = {
     "decide_run": decide_run,
     "tier1_required_needs": tier1_required_needs,
     "ci_pin_runs": ci_pin_runs,
+    "push_keys": push_keys,
+    "push_branches": push_branches,
     "linux_matrix_keys": linux_matrix_keys,
     "linux_env_writers": linux_env_writers,
     "linux_uses": linux_uses,
@@ -1458,17 +1470,6 @@ assert_bench_cmp_invocations() {
     || fail "$case_id: bench-job tools/bench_compare.py argv set $(echo "$got_json" | jq -c .) != expected $(echo "$expected_json" | jq -c .). Every production comparator argv must stay pinned exactly, in both directions."
 }
 
-# ── 7: #411 — the GHCR compiler-cache contract, for BOTH jobs ───────────────
-# Values come from linux_ccache_wiring/coverage_ccache_wiring, derived from the
-# workflow itself (see the extractor). The ORDER is the contract:
-#   Install ccache < Restore < Conan install   (restore-ccache.sh refuses once
-#                                               anything compiled; exit 127 if
-#                                               ccache is not on PATH)
-#   Build < statistics < Trim < Save           (trim only after every compile
-#                                               it must keep; the seed
-#                                               publishes what the store holds,
-#                                               so a trim after it never
-#                                               reaches GHCR)
 EXPECTED_CCACHE_SEED_IF="(github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) && steps.ccache_stats.outputs.changed != '0'"
 EXPECTED_CCACHE_SEED_ENV='{"GH_TOKEN":"${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}"}'
 
@@ -1501,6 +1502,24 @@ assert_ccache_raw_keys() {  # <case_id> <job> <label> <step-json> <expected-sort
     || fail "$_case_id: the $_job job's '$_label' step key set is '$_got', expected exactly '$5'. Step-level keys are NOT part of the run: golden — \`if:\` decides whether the step runs at all, \`continue-on-error:\` can turn a publish failure into a green status, and any added key here is a deliberate pin update."
 }
 
+# ── #411 Gate B r2 L2 (Codex P2->P3 F2): the workflow's OWN push trigger ─────
+# Every `push`-accepting publish predicate in this file — both new ccache
+# seeds below, the wheel lane's, and the two Conan-cache saves — restricts
+# itself to main only through THIS trigger; none of those `if:` predicates
+# re-checks `github.ref`, and every tag they publish is rolling. Nothing else
+# in this pin, or in ci/assert-ci-lane-policy.py's check_campaign_trigger
+# (which reads a different workflow), inspects it.
+assert_push_trigger() {
+  local json="$1" case_id="$2"
+  local got
+  got="$(echo "$json" | jq -r '.push_keys | join(",")')"
+  [ "$got" = "branches,paths-ignore" ] \
+    || fail "$case_id: the workflow's on.push key set is '$got', expected exactly 'branches,paths-ignore'. A \`tags:\` conjunct added here changes what \`github.ref\` can be on a trusted push, and every push-gated seed/save predicate in this file trusts that ref is a branch."
+  got="$(echo "$json" | jq -r '.push_branches | join(",")')"
+  [ "$got" = "main" ] \
+    || fail "$case_id: the workflow's on.push.branches is '$got', expected exactly 'main'. Broadening this runs the whole Tier 1 matrix — including every push-gated ccache seed/save in this file — on a non-main push, and the tags those steps publish are rolling."
+}
+
 # ── 7: #411 — the GHCR compiler-cache contract, for `linux` and `coverage` ──
 # Every ccache step is pinned as a canonical object against a preset LITERAL,
 # not one derived from the restore step's own text (Gate B r1 F1: a preset
@@ -1518,7 +1537,7 @@ assert_trim_wiring() {
   local json="$1" case_id="$2"
   local job w preset n idx_install idx_restore idx_conan idx_build idx_stats idx_trim idx_seed
   local val perms
-  local install_step restore_step stats_step trim_step seed_step
+  local install_step restore_step build_step stats_step trim_step seed_step
   local install_run restore_run stats_run trim_run seed_run
 
   for job in linux coverage; do
@@ -1541,6 +1560,7 @@ assert_trim_wiring() {
 
     install_step="$(echo "$w" | jq -c '.install')"
     restore_step="$(echo "$w" | jq -c '.restore')"
+    build_step="$(echo "$w" | jq -c '.build')"
     stats_step="$(echo "$w" | jq -c '.stats')"
     trim_step="$(echo "$w" | jq -c '.trim')"
     seed_step="$(echo "$w" | jq -c '.seed')"
@@ -1561,6 +1581,17 @@ ci/seed-ccache.sh '"$preset"
     val="$(echo "$restore_step" | jq -r '.id')"
     [ "$val" = "ccache_restore" ] \
       || fail "$case_id: $job job's restore step id is '$val', expected 'ccache_restore'."
+
+    # #411 Gate B r2 L1 (Codex P2->P3 F1): Build was found by name and used for
+    # ITS POSITION only — Trim and Save carry no status function, so they rely
+    # on Build's implicit `success()`. A `continue-on-error: true` on Build keeps
+    # that `success()` true after a failed compile, publishing whatever the
+    # incomplete build left in the store. Pinning the key set closes the one
+    # key that can add that escape without touching anything else this pin reads.
+    assert_ccache_raw_keys "$case_id" "$job" "Build" "$build_step" "id,name,run"
+    val="$(echo "$build_step" | jq -r '.id')"
+    [ "$val" = "build" ] \
+      || fail "$case_id: $job job's Build step id is '$val', expected 'build' — the statistics step and the trim/seed ordering above both key off steps.build.outcome / this step's position."
 
     assert_ccache_raw_keys "$case_id" "$job" "ccache statistics" "$stats_step" "id,if,name,run"
     assert_ccache_run_block "$case_id" "$job" "ccache statistics" "$stats_step" "$stats_run"
@@ -1685,6 +1716,7 @@ run_full_pin() {
   assert_wheel_build_env "$json" "$case_id"
   assert_wheel_identity_steps "$json" "$case_id"
   assert_wheel_build_step_order "$json" "$case_id"
+  assert_push_trigger "$json" "$case_id"
   assert_trim_wiring "$json" "$case_id"
   assert_bench_ccache_wiring "$json" "$case_id"
   assert_coverage_step_count "$json" "$case_id"
@@ -1715,7 +1747,8 @@ echo "PASS: derive-script table + call site + per-leg FIXPP_INSTALL_PYTHON + PY_
 # not collide). Re-run the harness against the merged number rather than
 # re-deriving from either branch's local total — the failure mode this guards is
 # one side's edit silently replacing the other's, which reads as a passing count.
-MUTANTS_DECLARED=82  # M83-M96 (#411 Gate B r1 F1/F3/F4-bench: the canonical-object ccache
+MUTANTS_DECLARED=86  # M97-M100 (#411 Gate B r2 L1/L2: Build's key set on both jobs, plus
+                     # the workflow's own on.push key set and branches) + M83-M96 (#411 Gate B r1 F1/F3/F4-bench: the canonical-object ccache
                      # contract — coordinated preset drift and the restore/seed/statistics
                      # semantics a derived preset and an id/if-only check could not see, plus
                      # bench's restore-only consumer contract) + M74-M82 (#411 GHCR ccache
@@ -2845,9 +2878,9 @@ open(dst, "w").write(t.replace(old, ""))
 '
 
   # ── #411 — the GHCR compiler-cache contract (M74-M82) ─────────────────────
-  # assert_trim_wiring pins order, predicates and preset pairing for `linux`
-  # and `coverage`; each property has a mutant proving the pin can fail. All
-  # are sliced to one job, because the two jobs carry near-identical text.
+  # assert_trim_wiring pins order and predicates for `linux` and `coverage`;
+  # each property has a mutant proving the pin can fail. All are sliced to one
+  # job, because the two jobs carry near-identical text.
 
   # M74: THE ONE THE COUNT PIN CANNOT SEE. The linux trim moves before Build:
   # same step count, but the eviction now runs before any compile.
@@ -3225,6 +3258,68 @@ assert job.count(anchor) == 1, job.count(anchor)
 seed = "\n      - name: Save ccache to GHCR (push:main / dispatch on main, cache changed)\n        if: (github.event_name == \x27push\x27 || (github.event_name == \x27workflow_dispatch\x27 && github.ref == \x27refs/heads/main\x27)) && steps.ccache_stats.outputs.changed != \x270\x27\n        continue-on-error: true\n        env:\n          GH_TOKEN: ${{ secrets.GHCR_PAT || secrets.GITHUB_TOKEN }}\n        run: |\n          echo \x22${{ secrets.GITHUB_TOKEN }}\x22 | oras login ghcr.io -u \x22${{ github.actor }}\x22 --password-stdin\n          ci/seed-ccache.sh linux-clang-release\n"
 job = job.replace(anchor, anchor + seed, 1)
 open(dst, "w").write(before + job + after)
+'
+
+  # ── #411 Gate B r2 L1 (Codex P2->P3 F1): Build's key set, M97-M98 ───────────
+  # Trim and Save carry no status function on either job's Build, so they rely
+  # on GitHub's implicit `success()`. `continue-on-error: true` keeps that
+  # `success()` true after a failed compile, so Trim publishes whatever the
+  # incomplete build left behind. The Build lookup already required a UNIQUE
+  # step and pinned its POSITION; it never compared the key set.
+  mutate_workflow M97 "continue-on-error: true added to the linux Build step" "linux job.s .Build. step key set is .continue-on-error,id,name,run., expected exactly .id,name,run." '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+start = t.index("\n  linux:\n")
+end = t.index("\n  coverage:\n", start)
+before, job, after = t[:start], t[start:end], t[end:]
+old = "      - name: Build\n        id: build\n"
+new = "      - name: Build\n        id: build\n        continue-on-error: true\n"
+assert job.count(old) == 1, job.count(old)
+open(dst, "w").write(before + job.replace(old, new, 1) + after)
+'
+
+  # M98: the same mutation on coverage's OWN Build step. Coverage needs its own
+  # proof — linux passing this cell first does not cover it (same discipline as
+  # M83/M84).
+  mutate_workflow M98 "continue-on-error: true added to the coverage Build step" "coverage job.s .Build. step key set is .continue-on-error,id,name,run., expected exactly .id,name,run." '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+start = t.index("\n  coverage:\n")
+end = t.index("\n  python-wheel-build:\n", start)
+before, job, after = t[:start], t[start:end], t[end:]
+old = "      - name: Build\n        id: build\n"
+new = "      - name: Build\n        id: build\n        continue-on-error: true\n"
+assert job.count(old) == 1, job.count(old)
+open(dst, "w").write(before + job.replace(old, new, 1) + after)
+'
+
+  # ── #411 Gate B r2 L2 (Codex P2->P3 F2): the push trigger, M99-M100 ─────────
+  # Every push-gated ccache seed/save predicate in this file trusts that a
+  # `push` event can only land from `main`. Both mutants broaden that trust
+  # WITHOUT touching any predicate this pin already reads.
+  mutate_workflow M99 "on.push.branches broadened to admit a feature branch" "on.push.branches is .main,feature/\\*\\*." '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "    branches: [\x22main\x22]\n"
+new = "    branches: [\x22main\x22, \x22feature/**\x22]\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new, 1))
+'
+
+  # M100: a `tags:` conjunct added under `push:`. A tag push has
+  # `github.ref == 'refs/tags/...'`, which none of this file's push-gated
+  # predicates checks.
+  mutate_workflow M100 "tags: added under on.push" "on.push key set is .branches,paths-ignore,tags." '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "    branches: [\x22main\x22]\n"
+new = old + "    tags: [\x22v*\x22]\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new, 1))
 '
 }
 

@@ -841,8 +841,11 @@ jobs:
       # dispatch from a feature branch would overwrite what main reads next.
       # `changed != '0'` skips republishing a store no compile wrote to
       # (ccache's `local_storage_write`, not `misses` — see ci/ccache-stats.sh).
-      # Fail-open: an empty `changed` publishes. Full rationale at the sibling
-      # step in tier3-libcxx.yml.
+      # An empty `changed` satisfies `!= '0'`, but here it can only come from a
+      # failed statistics step (`if: always()`, no `continue-on-error`, both
+      # pinned in ci/test-tier1-python-policy.sh), which fails the job, so
+      # Save's implicit `success()` skips it. Full rationale for `changed`
+      # itself at the sibling step in tier3-libcxx.yml.
       - name: Save ccache to GHCR (push:main / dispatch on main, cache changed)
         if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) && steps.ccache_stats.outputs.changed != '0'
         continue-on-error: true
@@ -1513,8 +1516,11 @@ jobs:
       # dispatch from a feature branch would overwrite what main reads next.
       # `changed != '0'` skips republishing a store no compile wrote to
       # (ccache's `local_storage_write`, not `misses` — see ci/ccache-stats.sh).
-      # Fail-open: an empty `changed` publishes. Full rationale at the sibling
-      # step in tier3-libcxx.yml.
+      # An empty `changed` satisfies `!= '0'`, but here it can only come from a
+      # failed statistics step (`if: always()`, no `continue-on-error`, both
+      # pinned in ci/test-tier1-python-policy.sh), which fails the job, so
+      # Save's implicit `success()` skips it. Full rationale for `changed`
+      # itself at the sibling step in tier3-libcxx.yml.
       - name: Save ccache to GHCR (push:main / dispatch on main, cache changed)
         if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) && steps.ccache_stats.outputs.changed != '0'
         continue-on-error: true

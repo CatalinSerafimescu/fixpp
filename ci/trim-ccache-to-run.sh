@@ -37,8 +37,11 @@
 # the counters' `stats_zeroed_timestamp` is the restore time. ccache refreshes a
 # file's mtime on every hit, and a restored file keeps the mtime it was
 # archived with, so `--evict-older-than <now - zeroed>` keeps exactly the files
-# hit or written since the restore. The caller runs this step only after every
-# earlier step succeeded, so a failed build never publishes a truncated store.
+# hit or written since the restore. This step relies on the implicit
+# `success()` GitHub Actions applies to a status-function-free `if:` — it
+# excludes a failed build only while Build carries no `continue-on-error`,
+# which the caller's policy test (ci/test-tier1-python-policy.sh,
+# assert_trim_wiring) pins as part of Build's key set.
 #
 # Fail direction: anything that makes the timestamp unreadable, suggests the
 # counters were zeroed AFTER the build (zero calls counted), or puts the
