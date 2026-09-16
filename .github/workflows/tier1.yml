@@ -568,6 +568,17 @@ jobs:
           # ~10% hit rate) and even warm runs recompiled ~everything, pushing the
           # debug build to the full 45-min timeout. 2G holds a leg's full object
           # set so warm runs actually hit.
+          #
+          # #411 — DELIBERATELY NOT LOWERED, and not raised for the debug leg.
+          # A store fills to this ceiling with objects from EARLIER commits, so
+          # "Cache size … 99% full" in a warm run is not a measure of need; the
+          # entry SAVED is trimmed to this run's own objects by the job's last
+          # step (ci/trim-ccache-to-run.sh), which is what bounds this
+          # leg's share of the shared Actions-cache cap. Re-open the ceiling only
+          # on the thrash signature, read from the post-step `ccache -s`:
+          # `Cleanups:` present AND the hit rate falling on a warm restore.
+          # Re-derive the pool with
+          # `gh api "repos/<owner>/<repo>/actions/caches?per_page=100"`.
           max-size: 2G
           # RESTORE-ONLY ON PULL REQUESTS (2026-08-02) — a PR must never WRITE to
           # the repo-wide 10 GB Actions-cache pool.
@@ -1263,6 +1274,32 @@ jobs:
         continue-on-error: true
         run: cat /tmp/disk.txt >> "$GITHUB_STEP_SUMMARY"
 
+      # #411 — one generation of Tier 1 ccache entries no longer fit the
+      # repository's shared Actions-cache cap alongside the generation it
+      # replaces. This step trims the store to the files THIS run touched, so
+      # the entry saved is the live object set rather than everything since the
+      # last cleanup (see the script's header). Reclaiming the superseded
+      # generation itself stays with cache-cleanup.yml's tier-end sweep — Gate B
+      # round 1, F1: an earlier version of this step also deleted the
+      # superseded entry directly, before the action's post step had proved a
+      # replacement was saved, which could leave the leg with no entry at all
+      # on a failed/skipped/cancelled save. That half was removed.
+      #
+      # LAST STEP, and default `success()` on purpose: an untouched-file
+      # eviction must come after every compiler call, and only a run whose
+      # every step passed trims — a failed or cancelled run saves the untrimmed
+      # store (larger, never colder).
+      #
+      # Runs on every event, default `success()`.
+      #
+      # Trimming is runner-local: the Actions cache is written only by
+      # ccache-action's post, and only where `save:` is true (push). On a PR
+      # or dispatch run the trimmed store is discarded, and the
+      # `ccache-evict:` line reports this commit's live object set before
+      # merge.
+      - name: Trim ccache to this run (#411)
+        run: ci/trim-ccache-to-run.sh tier1-${{ matrix.preset }}
+
   # ── Coverage job (SOFT — does not fail on threshold; Phase 3) ────────────
   # SOFT GATE: coverage threshold enforcement is disabled until Phase 4 module 1
   # closes per [const §IX.1] and the deliverables note in Step 4.
@@ -1594,6 +1631,12 @@ jobs:
           flags: unittests
           disable_search: true   # prevent auto-discovery of .ddi/.modmap CMake artefacts
           fail_ci_if_error: false  # SOFT: keep consistent with other coverage steps
+
+      # #411 — same step and placement as the `linux` job's last step; see the
+      # note there. Trimming changes which objects are KEPT, never an object's
+      # bytes, so #241's byte-identity proof is untouched.
+      - name: Trim ccache to this run (#411)
+        run: ci/trim-ccache-to-run.sh tier1-linux-clang-coverage
 
   # ── Python wheel gate (PY-005 / 056) ─────────────────────────────────────
   # ADDITIVE (CI-8): this does NOT touch the python tests on the `linux` matrix

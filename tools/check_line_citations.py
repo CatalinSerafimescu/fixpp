@@ -135,7 +135,7 @@ SCAN_DIRS = [
 #
 #   .xml   435   `dictionaries/FIX44.xml:2805-2824` -- and the dictionaries DO
 #                move; feature 082 changed group registration across all of them
-#   .yml    62   `tier1.yml:392`, `cache-cleanup.yml:207`
+#   .yml    62   `tier1.yml:392`, `cache-cleanup.yml:207`  (citation-ok: example spellings, not citations)
 #   .txt    45   `CMakeLists.txt:401`, `ci/expected-eligible-tests.txt:13-19`
 #   .cmake  20 · .sh 19 · .py 16 · .json 7 · .toml 3
 #
@@ -1252,7 +1252,7 @@ FORM_CASES = [
     # the dictionaries it names are edited by dictionary features.
     ("// (dictionaries/FIX44.xml:3153-3159, PosUndInstrmtGrp)",      ["A"]),
     ("# gate on `add_subdirectory(bench)` (CMakeLists.txt:339)",     ["A"]),
-    ("# see tier1.yml:392 for the cache key",                        ["A"]),
+    ("# see tier1.yml:392 for the cache key",                        ["A"]),  # citation-ok: self-test fixture, not a real citation
     # The approximation mark does not make it less of a line number.
     ("//   Mutation: drop the kind check in session.cpp:~555",       ["A"]),
     # Same claim, two more punctuations. 18 + 22 in the tree, several in

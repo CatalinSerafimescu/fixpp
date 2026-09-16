@@ -425,6 +425,56 @@ wheel_build_env = {
     str(k): str(v) for k, v in (_wheel_build_steps[0].get("env") or {}).items()
 }
 
+# ── #411 Gate B round 1, F3 — the trim step's wiring, DERIVED not hardcoded ──
+#
+# The count pin above (M33) proves the step exists somewhere in the job; it
+# proves nothing about WHERE, under WHAT predicate, against WHICH ccache key,
+# or WHETHER `coverage` carries matching wiring at all. Every value here is
+# read out of the workflow's OWN ccache-action step (`with.key`, `with.save`),
+# never a literal copied into this file — the same discipline assertion 1
+# states for itself — so this cannot pass against a stale copy of the pairing
+# it exists to guard.
+_CCACHE_ACTION = "hendrikmuhs/ccache-action"
+_SAVE_EXPR_RE = re.compile(r"^\$\{\{\s*(.*?)\s*\}\}$")
+
+
+def _ccache_action_step(job):
+    steps = [s for s in job["steps"] if str(s.get("uses", "")).startswith(_CCACHE_ACTION)]
+    assert len(steps) == 1, len(steps)
+    return steps[0]
+
+
+def _last_step(job):
+    last = job["steps"][-1]
+    return {
+        "name": str(last.get("name", "")),
+        "if":   str(last.get("if", "")),
+        "run":  str(last.get("run", "")),
+        "env":  {str(k): str(v) for k, v in (last.get("env") or {}).items()},
+    }
+
+
+def _trim_wiring(job):
+    ccache_with = _ccache_action_step(job).get("with", {}) or {}
+    save_raw = str(ccache_with.get("save", ""))
+    m = _SAVE_EXPR_RE.match(save_raw)
+    return {
+        "ccache_key": str(ccache_with.get("key", "")),
+        # `save:` is a `${{ }}`-wrapped expression; `if:` is bare. Strip the
+        # wrapper so the two are compared as the same predicate string rather
+        # than failing on syntax that carries no semantic difference here.
+        "ccache_save_predicate": m.group(1) if m else save_raw,
+        "last_step": _last_step(job),
+    }
+
+
+coverage_job = jobs["coverage"]
+coverage_step_count = len(coverage_job["steps"])
+linux_trim_wiring = _trim_wiring(linux_job)
+coverage_trim_wiring = _trim_wiring(coverage_job)
+linux_permissions = {str(k): str(v) for k, v in (linux_job.get("permissions") or {}).items()}
+coverage_permissions = {str(k): str(v) for k, v in (coverage_job.get("permissions") or {}).items()}
+
 out = {
     "linux_presets": linux_presets,
     "linux_steps": linux_steps,
@@ -456,6 +506,11 @@ out = {
     "wheel_step_order": wheel_step_order,
     "wheel_identity_steps": wheel_identity_steps,
     "wheel_build_env": wheel_build_env,
+    "coverage_step_count": coverage_step_count,
+    "linux_trim_wiring": linux_trim_wiring,
+    "coverage_trim_wiring": coverage_trim_wiring,
+    "linux_permissions": linux_permissions,
+    "coverage_permissions": coverage_permissions,
 }
 print(json.dumps(out))
 PYEOF
@@ -890,9 +945,35 @@ $got"
   #     is expected rather than a second defect.
   # Conclusion: it cannot change what the pytest pair executes; it can only
   # prevent them from executing at all, loudly.
+  #
+  # 32 -> 33 (#411): the `linux` job gained `Trim ccache to this run (#411)`,
+  # which runs ci/trim-ccache-to-run.sh.
+  #
+  # THE DELIBERATE LOOK. This step is the job's LAST, AFTER the pytest pair, so
+  # nothing it does can precede what they execute:
+  #   * it writes NO environment file — its outputs are stdout, `::warning::`
+  #     and $GITHUB_STEP_SUMMARY (M34's env-writer census polices the rest);
+  #   * it carries no step-level `env:` at all (Gate B round 1, F1/F2: an
+  #     earlier version also deleted the superseded cache entry via `gh api`
+  #     and needed GH_TOKEN/REPO/REF plus `actions: write`; that half is gone,
+  #     and its assertions below moved with it);
+  #   * it has no `id`, collides with no pinned step name, mentions no pytest
+  #     token, and never exits non-zero on a ccache failure.
+  # Conclusion: it cannot reach the pytest pair.
+  #
+  # Gate B round 1, F3: the count pin above proves this step exists and is
+  # somewhere in the job; it proves nothing about WHERE, under WHAT predicate,
+  # against WHICH ccache key, or WHETHER `coverage` carries the same wiring.
+  # Reordering the step before `Build` leaves the count at 33 and stays green
+  # while evicting the whole store before the build ran. The assertions below
+  # pin the last-step placement, predicate, key pairing and permissions for
+  # BOTH `linux` and `coverage`, each derived from the workflow itself (the
+  # ccache-action step's own `with.key`/`with.save`), never hardcoded, so a
+  # pin here cannot pass against a stale copy of the coupling it exists to
+  # guard.
   got="$(echo "$json" | jq -r '.linux_step_count')"
-  [ "$got" = "32" ] \
-    || fail "$case_id: the linux job has $got steps, expected 32. A step added anywhere before the pytest pair can change what they execute without colliding with a pinned name or adding a pytest mention (round 4 finding 3, measured). This count is deliberately brittle: adding a step to this job is a deliberate act and must be paired with a deliberate look at whether it reaches the python steps."
+  [ "$got" = "33" ] \
+    || fail "$case_id: the linux job has $got steps, expected 33. A step added anywhere before the pytest pair can change what they execute without colliding with a pinned name or adding a pytest mention (round 4 finding 3, measured). This count is deliberately brittle: adding a step to this job is a deliberate act and must be paired with a deliberate look at whether it reaches the python steps."
 
   got="$(echo "$json" | jq -cS '.linux_job_env')"
   [ "$got" = '{"CCACHE_COMPILERCHECK":"content","CCACHE_COMPRESSLEVEL":"5","CCACHE_DIR":"/tmp/fixpp-ccache-${{ matrix.preset }}","CMAKE_CXX_COMPILER_LAUNCHER":"ccache","CMAKE_C_COMPILER_LAUNCHER":"ccache"}' ] \
@@ -1347,6 +1428,59 @@ assert_bench_cmp_invocations() {
     || fail "$case_id: bench-job tools/bench_compare.py argv set $(echo "$got_json" | jq -c .) != expected $(echo "$expected_json" | jq -c .). Every production comparator argv must stay pinned exactly, in both directions."
 }
 
+# ── 7: #411 Gate B round 1, F3 — the trim step's contract, for BOTH jobs ─────
+# The count pin (assertion 1 / M33) proves the step exists somewhere in the
+# job; it says nothing about WHERE, under WHAT predicate, against WHICH ccache
+# key, or WHETHER `coverage` carries matching wiring. Every value compared here
+# comes from linux_trim_wiring/coverage_trim_wiring, themselves derived from
+# the workflow's own ccache-action `with:` block (see the extractor).
+assert_trim_wiring() {
+  local json="$1" case_id="$2"
+  local job key save_pred name if_val run_val env_count expected_run perms
+
+  for job in linux coverage; do
+    key="$(echo "$json" | jq -r --arg j "$job" '.[$j + "_trim_wiring"].ccache_key')"
+    [ -n "$key" ] \
+      || fail "$case_id: $job job — no unique hendrikmuhs/ccache-action step found (or its with.key is empty)"
+
+    save_pred="$(echo "$json" | jq -r --arg j "$job" '.[$j + "_trim_wiring"].ccache_save_predicate')"
+    name="$(echo "$json" | jq -r --arg j "$job" '.[$j + "_trim_wiring"].last_step.name')"
+    if_val="$(echo "$json" | jq -r --arg j "$job" '.[$j + "_trim_wiring"].last_step.if')"
+    run_val="$(echo "$json" | jq -r --arg j "$job" '.[$j + "_trim_wiring"].last_step.run')"
+    env_count="$(echo "$json" | jq -r --arg j "$job" '.[$j + "_trim_wiring"].last_step.env | length')"
+
+    [ "$name" = "Trim ccache to this run (#411)" ] \
+      || fail "$case_id: $job job's LAST step is named '$name', expected 'Trim ccache to this run (#411)'. An untouched-file eviction must come after every compiler call — the step count pin cannot see a step reordered earlier in the same job."
+
+    [ -z "$if_val" ] || [ "$if_val" = "success()" ] \
+      || fail "$case_id: $job job's trim step if: is '$if_val', expected empty (default success()) or literally 'success()' — the trim must be success-only on every event, never event-gated (a push-only gate means the trim never runs before merge; Gate B r2 F1) and never always()/failure()/cancelled() (a failed run's store must not be truncated)."
+
+    [ "$save_pred" = "github.event_name == 'push'" ] \
+      || fail "$case_id: $job job's ccache-action save: predicate is '$save_pred', expected exactly \"github.event_name == 'push'\" — this is the property that makes a PR-run trim safe (the Actions cache is written only where save: is true), and it is the only pin on coverage's save: predicate."
+
+    expected_run="ci/trim-ccache-to-run.sh ${key}"
+    [ "$run_val" = "$expected_run" ] \
+      || fail "$case_id: $job job's trim step run: is '$run_val', expected '$expected_run' — the trim step's key argument must pair exactly with the ccache-action step's own with.key."
+
+    [ "$env_count" = "0" ] \
+      || fail "$case_id: $job job's trim step carries $env_count step-level env var(s), expected none — the deleted delete-before-save half needed GH_TOKEN/REPO/REF; the trim needs no environment."
+  done
+
+  for job in linux coverage; do
+    perms="$(echo "$json" | jq -cS --arg j "$job" '.[$j + "_permissions"]')"
+    [ "$perms" = '{"contents":"read","packages":"write"}' ] \
+      || fail "$case_id: $job job's permissions are $perms, expected exactly {\"contents\":\"read\",\"packages\":\"write\"} — actions: write was granted only for the deleted delete-before-save half and must not still be present."
+  done
+}
+
+assert_coverage_step_count() {
+  local json="$1" case_id="$2"
+  local got
+  got="$(echo "$json" | jq -r '.coverage_step_count')"
+  [ "$got" = "23" ] \
+    || fail "$case_id: the coverage job has $got steps, expected 23. This is coverage's OWN count pin, independent of the linux job's — deleting the coverage job's trim step must not hide behind the linux count staying correct."
+}
+
 # Two mutation targets, so two parameters: M1/M2/M3 mutate the DERIVE SCRIPT
 # and leave the workflow alone; M4-M8 do the reverse.
 run_full_pin() {
@@ -1364,6 +1498,8 @@ run_full_pin() {
   assert_wheel_build_env "$json" "$case_id"
   assert_wheel_identity_steps "$json" "$case_id"
   assert_wheel_build_step_order "$json" "$case_id"
+  assert_trim_wiring "$json" "$case_id"
+  assert_coverage_step_count "$json" "$case_id"
 }
 
 # ── Real workflow: must pass all four assertions ────────────────────────────
@@ -1391,7 +1527,7 @@ echo "PASS: derive-script table + call site + per-leg FIXPP_INSTALL_PYTHON + PY_
 # not collide). Re-run the harness against the merged number rather than
 # re-deriving from either branch's local total — the failure mode this guards is
 # one side's edit silently replacing the other's, which reads as a passing count.
-MUTANTS_DECLARED=59  # M73 (089) + M70 M71 M72 (#271) + M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 M47 M48 M49 M50 M51-M55 M56-M63 M64 M65 M66 M67 M68 M69 + M28 (1
+MUTANTS_DECLARED=67  # M80 M81 (#411 Gate B round 2, F1) + M74-M79 (#411 Gate B round 1, F3) + M73 (089) + M70 M71 M72 (#271) + M1 M2 M3 B M4 M5 M6 M7 M11 M14 M15 M21 M26 M27 M29-M45 M47 M48 M49 M50 M51-M55 M56-M63 M64 M65 M66 M67 M68 M69 + M28 (1
                      # GREEN control; M46 RETIRED at round 9 — its GREEN assertion became false by design) —
                      # DOWN from 27 at round 3b, because the golden subsumed 14 of them. See the RETIRED block
                      # in run_mutant_checks for the list and the reason. M48-M50 added at #270 Gate B r1 (F1):
@@ -2007,12 +2143,13 @@ open(dst, "w").write(t.replace(old, new))
   # $GITHUB_ENV, which tripped the writer census first and left the step count
   # with no mutant of its own — the shadowing round 5 finding 3 is about.
   # ⚠️ THE LITERAL TRACKS THE BASELINE. Bumped 31->32 by #252's
-  # `Assert the dependency closure is instrumented` step; the mutant inserts one
-  # more, so the message it must produce moves with it. A stale literal here does
+  # `Assert the dependency closure is instrumented` step and 32->33 by #411's
+  # trim-and-reclaim step; the mutant inserts one more, so the message it must
+  # produce moves with it. A stale literal here does
   # not fail open — `mutate_workflow` reports "failed the pin for the WRONG
   # reason" — but it is the second edit the count pin demands, and forgetting it
   # is how a deliberately brittle assertion earns a reputation for being noise.
-  mutate_workflow M33 "an unnamed step is inserted before the pytest pair" "has 33 steps, expected 32" '
+  mutate_workflow M33 "an unnamed step is inserted before the pytest pair" "has 34 steps, expected 33" '
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
@@ -2496,6 +2633,131 @@ t = open(src).read()
 old = "            \x27${{ steps.wheel_ident.outputs.image_ref }}\x27 \\\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, ""))
+'
+
+  # ── #411 Gate B round 1, F3 — the trim step's contract (M74-M79) ───────────
+  # assert_trim_wiring/assert_coverage_step_count are new; each needs its own
+  # mutant proving it can fail, same discipline as everywhere else in this file.
+
+  # M74: THE ONE THE COUNT PIN CANNOT SEE. Moves the linux job's trim step to
+  # immediately before `Build`, leaving the step COUNT at 33 (M33 stays green)
+  # while the eviction now runs before a single compiler call — the opposite
+  # of what "trim to what this run touched" requires.
+  mutate_workflow M74 "the linux trim step is moved before Build" "linux job.s LAST step is named" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+start = t.index("\n  linux:\n")
+end = t.index("\n  coverage:\n", start)
+before, job, after = t[:start], t[start:end], t[end:]
+trim_step = "      - name: Trim ccache to this run (#411)\n        run: ci/trim-ccache-to-run.sh tier1-${{ matrix.preset }}\n"
+assert job.count(trim_step) == 1, job.count(trim_step)
+build_anchor = "      - name: Build\n        run: |\n"
+assert job.count(build_anchor) == 1, job.count(build_anchor)
+job = job.replace(trim_step, "", 1)
+job = job.replace(build_anchor, trim_step + build_anchor, 1)
+open(dst, "w").write(before + job + after)
+'
+
+  # M75: the linux trim step gains an if: always(), so a run that never saves
+  # (a PR, a failed/cancelled step earlier) still evicts — self-contradicting
+  # the success-only property (the default `success()` is what makes trimming
+  # safe to run on every event; only a failed/cancelled run must skip it).
+  mutate_workflow M75 "the linux trim step gains if: always()" "trim step if: is" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "      - name: Trim ccache to this run (#411)\n        run: ci/trim-ccache-to-run.sh tier1-${{ matrix.preset }}\n"
+new = "      - name: Trim ccache to this run (#411)\n        if: always()\n        run: ci/trim-ccache-to-run.sh tier1-${{ matrix.preset }}\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M76: the linux trim step's run: argument drifts from the ccache-action
+  # step's own key:, while the ccache-action step itself is untouched. This is
+  # the one drift the pre-existing `linux_uses` golden CANNOT see — it pins the
+  # ccache-action step's own object, never the trim step's argument against it.
+  mutate_workflow M76 "the linux trim step.s key argument drifts from the ccache-action key" "trim step run: is" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: ci/trim-ccache-to-run.sh tier1-${{ matrix.preset }}\n"
+new = "        run: ci/trim-ccache-to-run.sh tier1-mismatched\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M77: `actions: write` reappears on the linux job — the scope the deleted
+  # delete-before-save half needed, and the whole point of F2 dissolving under
+  # shape A.
+  mutate_workflow M77 "actions: write reappears on the linux job" "linux job.s permissions are" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "      packages: write  # auto-push-on-miss (push:main / dispatch on main) — save rebuilt Conan cache to GHCR\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, old + "      actions: write\n"))
+'
+
+  # M78: the linux trim step regains a step-level env: (GH_TOKEN), reviving
+  # the wiring the deleted API call needed for something that no longer calls
+  # any API.
+  mutate_workflow M78 "the linux trim step regains a GH_TOKEN env" "trim step carries" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "      - name: Trim ccache to this run (#411)\n        run: ci/trim-ccache-to-run.sh tier1-${{ matrix.preset }}\n"
+new = "      - name: Trim ccache to this run (#411)\n        env:\n          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n        run: ci/trim-ccache-to-run.sh tier1-${{ matrix.preset }}\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M79: the coverage job's trim step is deleted outright — coverage must have
+  # its OWN wiring proof, not inherit a green verdict from the linux job's.
+  mutate_workflow M79 "the coverage job.s trim step is deleted" "coverage job.s LAST step is named" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "      - name: Trim ccache to this run (#411)\n        run: ci/trim-ccache-to-run.sh tier1-linux-clang-coverage\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, ""))
+'
+
+  # ── #411 Gate B round 2, F1 — the trim runs on every successful run;
+  # save: stays push-only (M80, M81) ──────────────────────────────────────
+  # R2-F1: a push-only trim step never executes before merge, so the
+  # mechanism has zero pre-merge evidence. The fix makes the trim
+  # success-only on every event while `save:` stays push-only. M80 and M81
+  # guard the two literals that make that safe.
+
+  # M80: re-introduce the push-only guard on the LINUX trim step — the exact
+  # regression this round fixes. Must fail the success-only check, not the
+  # save: literal (that pin is on the ccache-action step, untouched here).
+  mutate_workflow M80 "the linux trim step regains if: github.event_name == push" "trim step if: is" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "      - name: Trim ccache to this run (#411)\n        run: ci/trim-ccache-to-run.sh tier1-${{ matrix.preset }}\n"
+new = "      - name: Trim ccache to this run (#411)\n        if: github.event_name == \x27push\x27\n        run: ci/trim-ccache-to-run.sh tier1-${{ matrix.preset }}\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M81: coverage.s ccache-action save: becomes unconditional (true), so a PR
+  # run WOULD write the Actions cache — exactly what save: push-only exists to
+  # prevent. Sliced to the coverage job so it cannot match linux.s save:,
+  # which is character-identical.
+  mutate_workflow M81 "coverage ccache-action save: becomes true" "coverage job.s ccache-action save: predicate is" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+start = t.index("\n  coverage:\n")
+end = t.index("\n  python-wheel-build:\n", start)
+before, job, after = t[:start], t[start:end], t[end:]
+old = "          save: ${{ github.event_name == \x27push\x27 }}\n"
+assert job.count(old) == 1, job.count(old)
+job = job.replace(old, "          save: true\n", 1)
+open(dst, "w").write(before + job + after)
 '
 
 }
