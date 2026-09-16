@@ -1405,7 +1405,8 @@ R_CDIR="$sandbox/reclaim-ccache"; mkdir -p "$R_CDIR"
 
 trim_case() {
   : > "$EVICT_REC"
-  run "$TRIM" "$RKEY"
+  FAKE_PRINT_STATS_EXIT="${PS_EXIT:-0}" run "$TRIM" "$RKEY"
+  unset PS_EXIT
   EVICTED="$(cat "$EVICT_REC")"
 }
 r_env() {
@@ -1454,6 +1455,17 @@ want_status 0 "trim/evict-fails"; want_out '::warning::' "trim/evict-fails"
 want_out "ccache-evict (${RKEY}): FAILED" "trim/evict-fails"
 ok "a failing eviction warns and does not redden"
 export FAKE_EVICT_EXIT=0
+
+# A failed stats command is distinct from a valid stats payload without a
+# restore timestamp, and must skip eviction while preserving the green lane.
+r_stats "$(( $(date +%s) - 300 ))" 10 1; PS_EXIT=1
+trim_case
+want_status 0 "trim/print-stats-fails"
+want_out '::warning::' "trim/print-stats-fails"
+want_out "ccache-evict (${RKEY}): FAILED — \`ccache --print-stats\` failed" "trim/print-stats-fails"
+want_no_out 'no stats_zeroed_timestamp' "trim/print-stats-fails"
+[ -z "$EVICTED" ] || fail "trim/print-stats-fails: ccache eviction ran ('$EVICTED')"
+ok "--print-stats failure — warned as unreadable stats, exit 0, no eviction"
 
 # ── the zeroed/now boundary and an unreadable clock (Gate B round 2, F2) ─────
 # These pin the script's OWN `date +%s` call, not the fixture's zeroed

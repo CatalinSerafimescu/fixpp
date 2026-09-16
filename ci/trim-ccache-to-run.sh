@@ -79,7 +79,11 @@ note() { echo "$1"; [ -n "${GITHUB_STEP_SUMMARY:-}" ] && echo "$1" >> "$GITHUB_S
 mib()  { du -sm "$CCACHE_DIR" 2>/dev/null | cut -f1; }
 
 # ── evict what this run did not touch ────────────────────────────────────────
-stats="$(ccache --print-stats 2>/dev/null)" || stats=""
+if ! stats="$(ccache --print-stats 2>/dev/null)"; then
+  echo "::warning::\`ccache --print-stats\` failed; the unevicted store will be saved."
+  note "ccache-evict (${KEY}): FAILED — \`ccache --print-stats\` failed, so the restore time is unreadable; the unevicted store will be saved."
+  exit 0
+fi
 zeroed="$(printf '%s\n' "$stats" | awk -F'\t' '$1 == "stats_zeroed_timestamp" { print $2 }')"
 calls="$(printf '%s\n' "$stats" | awk -F'\t' '
   $1 == "direct_cache_hit" || $1 == "preprocessed_cache_hit" || $1 == "cache_miss" { n += $2 }
@@ -103,7 +107,8 @@ case "$zeroed" in
             age=$(( now - zeroed + 1 ))
             before="$(mib)"
             if ccache --evict-older-than "${age}s" >/dev/null 2>&1; then
-              note "ccache-evict (${KEY}): kept files touched in the last ${age}s (since restore, ${calls} calls) — ${before:-?} MiB -> $(mib || true) MiB"
+              after="$(mib)"
+              note "ccache-evict (${KEY}): kept files touched in the last ${age}s (since restore, ${calls} calls) — ${before:-?} MiB -> ${after:-?} MiB"
             else
               echo "::warning::\`ccache --evict-older-than ${age}s\` failed; the unevicted store will be saved."
               note "ccache-evict (${KEY}): FAILED — unevicted store will be saved."
