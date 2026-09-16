@@ -682,9 +682,12 @@ no script declares none.
   admitted any number of TestRequest Rejects for any reason.
 - ⚠️ **A parent golden is not a substitute.** It notices a peer Reject only as unexplained drift, and a
   cell with `parent_golden=False` has no golden at all.
-- ⚠️ **The in-repo golden gate compares against the PREVIOUS run's capture sidecar**, which the harness
-  writes after the gtest. The run straight after a rejected one can fail for that reason alone; re-run
-  before reading it as a new failure.
+- **The in-repo golden gate used to compare against the PREVIOUS run's capture sidecar** (the harness
+  wrote it after the gtest had already read it). Superseded by #445: the gtests no longer read it, and
+  the harness's `_finalize` checks each cell's OWN transcript with `interop_golden_check --check <mode>`.
+  **Rejected for #445:** porting the diff to Python (a second copy of `parse_golden`/`diff_transcripts`
+  and both exclusion profiles) and a second golden-only gtest invocation (a mode switch in every
+  golden-gated test).
 
 ## Discarded `[[nodiscard]]` results in tests (#417) — Linux green is not MSVC green
 
