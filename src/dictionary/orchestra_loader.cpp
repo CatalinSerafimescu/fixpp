@@ -420,6 +420,17 @@ void OrchestraLoaderState::resolve_length_pairs() {
             return "<fixr:field id=\"" + std::to_string(data_tag) + "\" lengthId=\"" +
                    std::to_string(length_tag) + "\">";
         };
+        // fixpp#426 (Gate B r9 R-3): zero is the "no pair" sentinel of every pair
+        // accessor, so it cannot be half of a pair. Fails closed, like every other
+        // malformed reference in this loader. Reachable only where a field numbered
+        // 0 was declared at all — itself invalid, pre-existing, and wider than pairs
+        // (fixpp#457); no fixture in the tree declares one, so this throw cannot
+        // break a dictionary that loads today.
+        if (length_tag == 0 || data_tag == 0) {
+            throw orchestra_parse_error("dict::orchestra_parse_error: " + where() +
+                                        " names field number 0, which cannot be half of a "
+                                        "Length+Data pair");
+        }
         if (info.type != field_data_type::Data && info.type != field_data_type::XmlData) {
             throw orchestra_parse_error("dict::orchestra_parse_error: " + where() +
                                         " is not a data or XMLData field");

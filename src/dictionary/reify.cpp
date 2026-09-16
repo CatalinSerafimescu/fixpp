@@ -140,10 +140,17 @@ wire::MessageView<wire::access_mode::Index> const& owning_message_handle::view()
                 }
             }
             if (!dict_framed) {
-                // Dict-free source, OR (practically unreachable — the same
-                // bytes the source already parsed successfully) the
-                // dict-backed re-parse failed: fall back to the dict-free
-                // 2-arg ctor (pre-066 behavior).
+                // Dict-free source, OR the dict-backed re-parse failed: fall
+                // back to the dict-free 2-arg ctor (pre-066 behavior).
+                //
+                // ⚠️ **fixpp#458** — fails OPEN, and the claim that used to
+                // stand here ("practically unreachable — the same bytes the
+                // source already parsed successfully") is FALSE: the trigger is
+                // allocation failure, not frame content. `OffsetTable::build`
+                // catches `std::bad_alloc`, so a one-shot failing allocator
+                // fails the dict-backed parse while the dict-free retry — which
+                // allocates less — succeeds, and the reified view silently loses
+                // the dictionary's own Length+Data pairs (fixpp#426).
                 pimpl_->view_cache_.emplace((*framed)[0],
                                             pimpl_->bytes_.get_allocator().resource());
             }

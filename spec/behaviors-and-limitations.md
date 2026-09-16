@@ -3225,7 +3225,7 @@ Evidence: issues #346, #348, #349; new issue #351.
 
     A `<SOH>34=`, `<SOH>49=`, `<SOH>554=` or `<SOH>10=` inside a counted value is not a field.
 
-  *(fixpp#426; `include/fixpp/wire/length_data_pairs.hpp`, `include/fixpp/wire/length_data_carry.hpp` `read_value`; witnesses:*
+  *(fixpp#426; `include/fixpp/core/length_data_pairs.hpp` — the standard table lives in `core` so the dictionary layer can classify a tag without including wire; `include/fixpp/wire/length_data_pairs.hpp` re-exports the names — `include/fixpp/wire/length_data_carry.hpp` `read_value`; witnesses:*
   - *`tests/wire/length_data_expansion_test.cpp`;*
   - *`tests/wire/length_data_pairs_drift_test.cpp` `HeaderEqualsShippedDictionaryUnion`;*
   - *`tests/session/length_data_session_scanner_test.cpp`: `ScanFrameHeaderIgnoresMsgSeqNumInsideEncodedText`, `ScanFirstFrameIdsIgnoresSenderCompIdInsideRawData`, `InterpretLogonIgnoresPasswordInsideRawData`, `FrameHasGenuineTag554IgnoresACountedValue`, `MaskTag554LeavesCountedValueBytesUnchanged`, `RedactTag554LeavesCountedValueUnchanged`;*

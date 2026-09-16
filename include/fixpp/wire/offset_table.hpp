@@ -501,6 +501,22 @@ private:
     // individually freed (reclaimed with the arena).
     struct nested_cache_row {
         std::byte const* slice_data;
+        // fixpp#426 (Gate B r9 R-1): the identity of the bundle this row's sub-table
+        // was built with — `dict_hooks::opaque_dict()`. Design §3 says BOTH
+        // `nested_group_slices` overloads split by THEIR CALLER's hooks; without this
+        // in the key, the first caller's dictionary permanently decided the sub-table
+        // and a later caller passing another one silently got the earlier split.
+        //
+        // ⚠️ Sufficient as a discriminator only while `dict_hooks::for_table_view`
+        // and `dict_hooks::none()` are the ONLY producers of a bundle (they are — a
+        // bundle is otherwise unconstructible outside the class), so the callbacks are
+        // a function of the dictionary pointer. `for_table_view` reads
+        // `has_nonstandard_pair()`, so ONE table_view can yield two different bundles
+        // if a pair is registered on a PUBLISHED view mid-parse; that mutation is what
+        // fixpp#456 exists to make impossible. Re-derive this condition, do not trust
+        // the sentence: grep for constructions of `dict_hooks` outside `for_table_view`
+        // and `none()`.
+        void const* hooks_key;
         std::uint16_t nested_no_tag;
         OffsetTable* table;
     };

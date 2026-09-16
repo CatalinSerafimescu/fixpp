@@ -533,9 +533,21 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_clone(const fixpp_msg_t* src, fixpp_msg
             }
         }
         if (!clone_view) {
-            // Dict-free source, OR (practically unreachable — the same bytes the
-            // source already parsed successfully) the dict-backed re-parse
-            // failed: fall back to the dict-free 2-arg ctor (pre-066 behavior).
+            // Dict-free source, OR the dict-backed re-parse failed: fall back to
+            // the dict-free 2-arg ctor (pre-066 behavior).
+            //
+            // ⚠️ **fixpp#458** — this fallback FAILS OPEN and the claim that used
+            // to stand here ("practically unreachable — the same bytes the source
+            // already parsed successfully") is FALSE. The trigger is allocation
+            // failure, not frame content: `OffsetTable::build` catches
+            // `std::bad_alloc` (src/wire/offset_table.cpp), so a one-shot failing
+            // allocator fails the dict-backed parse while the dict-free retry —
+            // which allocates less — succeeds. The clone then reports OK from a
+            // dict-backed source with NO dictionary, so a custom Length+Data
+            // value is split by the standard table alone and an embedded
+            // `58=...` surfaces as a forged field (fixpp#426). Pre-existing on
+            // `main` and a C-ABI error-semantics change to fix, so it is filed,
+            // not patched here.
             clone_view =
                 std::make_unique<fixpp::wire::MessageView<fixpp::wire::access_mode::Index>>(
                     fv, clone_mr);

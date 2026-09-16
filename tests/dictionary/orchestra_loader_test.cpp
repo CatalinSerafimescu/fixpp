@@ -1002,3 +1002,59 @@ TEST(OrchestraFailClosed, MalformedLengthIdThrows) {
     EXPECT_THROW((void)fixpp::dict::OrchestraLoader{}.load_from_string(xml, &mr),
                  fixpp::dict::orchestra_parse_error);
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// fixpp#426 (Gate B r9 R-3) — zero can never be half of a Length+Data pair,
+// refused at FORMATION rather than only at `table_view::set_length_pair_data_tag`.
+// The setter guard is downstream of the loader, so without this a zero-headed
+// pair would still reach `Dictionary::length_pair_data_tag` and `field_ref`.
+//
+// ⚠️ These assert the MESSAGE, not just the exception type. Every neighbouring
+// OrchestraFailClosed case throws the same type, so a type-only assertion would
+// go green while a DIFFERENT check did the work — the guard here sits ahead of
+// both the datatype check and the declared-Length check, so it is the one that
+// must fire. Field number 0 is admitted by the id parser (a plain uint16), so
+// these fixtures are reachable; rejecting field 0 generally is fixpp#457.
+namespace {
+
+// Returns the orchestra_parse_error message, or "" if the load did not throw.
+std::string orchestra_load_error_message(std::string_view xml_text) {
+    std::pmr::monotonic_buffer_resource mr;
+    try {
+        (void)fixpp::dict::OrchestraLoader{}.load_from_string(xml_text, &mr);
+    } catch (fixpp::dict::orchestra_parse_error const& e) {
+        return std::string{e.what()};
+    }
+    return {};
+}
+
+}  // namespace
+
+TEST(OrchestraFailClosed, ZeroLengthIdCannotBeHalfOfAPair) {
+    // Field 0 IS declared, and declared as a Length field — so the
+    // "does not name a declared Length field" check would NOT fire here. Only
+    // the zero guard can reject this.
+    auto const xml = repository_with_fields(
+        R"xml(<fixr:field id="0" name="ZeroLen" type="Length"/>
+              <fixr:field id="96" name="RawData" type="data" lengthId="0"/>)xml",
+        R"xml(<fixr:fieldRef id="0"/><fixr:fieldRef id="96"/>)xml");
+    auto const msg = orchestra_load_error_message(xml);
+    ASSERT_FALSE(msg.empty()) << "a zero Length half must fail the load closed";
+    EXPECT_NE(msg.find("field number 0"), std::string::npos)
+        << "the load failed for the WRONG reason — the zero-pair guard did not fire. Message: "
+        << msg;
+}
+
+TEST(OrchestraFailClosed, ZeroDataFieldCannotBeHalfOfAPair) {
+    // The mirror image: the DATA field is numbered 0, with a perfectly valid
+    // Length partner, so every other check passes.
+    auto const xml = repository_with_fields(
+        R"xml(<fixr:field id="95" name="RawDataLength" type="Length"/>
+              <fixr:field id="0" name="ZeroData" type="data" lengthId="95"/>)xml",
+        R"xml(<fixr:fieldRef id="95"/><fixr:fieldRef id="0"/>)xml");
+    auto const msg = orchestra_load_error_message(xml);
+    ASSERT_FALSE(msg.empty()) << "a zero Data half must fail the load closed";
+    EXPECT_NE(msg.find("field number 0"), std::string::npos)
+        << "the load failed for the WRONG reason — the zero-pair guard did not fire. Message: "
+        << msg;
+}

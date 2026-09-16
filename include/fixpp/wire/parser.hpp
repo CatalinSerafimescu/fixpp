@@ -4,8 +4,10 @@
 // [2b §4.3] header-only template Parser<Mode> + MessageView<Mode> : View +
 // field_iterator. Mode is resolved at COMPILE time (no runtime branch on the
 // hot path, FR-003): access_mode::Index builds the OffsetTable eagerly;
-// access_mode::Iter skips it (zero-alloc, dict-free streaming + a static
-// constexpr Length+Data pair table). Authority: .specify/2b-wire.md v0.2;
+// access_mode::Iter skips it (zero-alloc streaming; the standard constexpr
+// Length+Data pair table always applies, and a dictionary's own pairs apply
+// too when the view carries a bundle — `Parser<Iter>::parse_iter()` threads
+// one, so Iter is NOT dict-free). Authority: .specify/2b-wire.md v0.2;
 // shape oracle contracts/parser.hpp.
 //
 // (U1) Every W-009 field type decodes/encodes strictly via the 2a
@@ -164,7 +166,7 @@ public:
         return parse_bounded_u32(b);
     }
 
-    // ---- Iter streaming, dict-free ----------------------------------------
+    // ---- Iter streaming (optionally dictionary-backed) ---------------------
     class field_iterator {
     public:
         struct field {
@@ -174,8 +176,12 @@ public:
         // fixpp#426: `hooks` has NO default (mirrors OffsetTable's dict-aware
         // ctors) — every direct construction site must say which dictionary
         // (or `dict_hooks::none()`) governs the Length+Data split. An Iter
-        // view's own `begin()`/`end()` below pass `hooks_`, which defaults to
-        // `none()` on a dict-free/Iter-mode view.
+        // view's own `begin()`/`end()` below pass `hooks_`, which is `none()`
+        // only when the view was built WITHOUT a bundle. ⚠️ Iter mode is NOT
+        // dict-free: `Parser<Iter>::parse_iter()` threads its own `hooks_` into
+        // the view it returns (Gate B r8 P-1 — it used to drop them, and the
+        // test that claimed to cover the Iter path was walking a
+        // `MessageView<Index>` iterator).
         field_iterator(std::span<const std::byte> buf, std::size_t pos, dict_hooks hooks) noexcept
             : buf_{buf}, pos_{pos}, hooks_{hooks} {
             advance();
@@ -385,8 +391,10 @@ public:
     // CONTENT and so do differ between "no dictionary" and "an empty one".
     [[nodiscard]] bool is_dict_backed() const noexcept { return hooks_.opaque_dict() != nullptr; }
 
-    // fixpp#426: this view's own dict_hooks bundle — `none()` for a dict-free
-    // or Mode==Iter view. Exposed so a caller minting its own field_iterator
+    // fixpp#426: this view's own dict_hooks bundle — `none()` only for a view
+    // constructed without one (default/frame-only construction), NOT for every
+    // Iter view: `Parser<Iter>::parse_iter()` passes its own bundle through
+    // (Gate B r8 P-1). Exposed so a caller minting its own field_iterator
     // (e.g. a nested/C-ABI scan) can reuse the EXACT dictionary this view was
     // built with.
     [[nodiscard]] dict_hooks const& hooks() const noexcept [[clang::lifetimebound]] {

@@ -678,3 +678,266 @@ TEST(DictHooksCustomPair, CopyAssignmentCarriesTheFlagWithThePairs) {
         << "the assigned-in pair must reach a bundle built from the target";
     expect_fast_paths_change_no_answer(target);
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Gate B r9 R-1 — `nested_group_slices` must split by the CALLER's bundle on
+// WARM cache hits too, not only on a cold build.
+//
+// `nested_cache_row` used to be keyed on `(slice_data, nested_no_tag)` alone,
+// so the first caller's dictionary permanently decided a slice's sub-table:
+// a later caller handing in a different bundle got the earlier split back,
+// silently. That is the mismatched-pairing defect this PR exists to remove
+// (brain/components/wire.md, "the DELIMITER oracle (#384)") reintroduced by a
+// cache key, and it contradicts design §3 — "BOTH overloads take dict_hooks
+// from their caller".
+//
+// ⚠️ The dictionaries here are built BY HAND rather than loaded from XML. The
+// loader detects a pair by LENGTH/DATA adjacency in both the <fields> block
+// and the message body, so an XML "dictionary without the pair" would need two
+// coordinated edits and could silently stop differing for the wrong reason.
+// Hand-built views also pin `has_nonstandard_pair()`, which is what decides
+// whether `for_table_view` installs the pair callback at all.
+namespace {
+
+// The value carried by the counted 5012 field. The forged tag inside it is 7003,
+// a member of the OUTER group (7001) but NOT of the nested one (6001). That
+// asymmetry is load-bearing in both directions:
+//   - NOT a 6001 member => without the pair it ENDS the nested entry early, so
+//     the nested extent differs between the two dictionaries (the discriminator);
+//   - IS a 7001 member  => it does NOT end the OUTER entry, so `outer[0]` is the
+//     same byte range whichever dictionary built the root table.
+// ⚠️ An earlier revision embedded `58=G`, a member of NEITHER group. The outer
+// slice was then truncated at the forged field by the dictionary WITHOUT the
+// pair, and handing that short slice to the dictionary WITH the pair made its
+// counted read overrun and return ZERO nested slices — the witness failed for a
+// fixture reason that had nothing to do with the cache key under test.
+constexpr std::string_view kHooksKeyValue =
+    "y"
+    "\x01"
+    "7003=Z";
+static_assert(kHooksKeyValue.size() == 8);
+
+// Identical structure in both arms; they differ ONLY in whether 5011/5012 is a
+// registered Length+Data pair.
+table_view make_nested_pair_dict(bool with_pair) {
+    table_view tv;
+    tv.add_valid("T", 35)
+        .add_valid("T", 7001)
+        .add_valid("T", 7002)
+        .add_valid("T", 6001)
+        .add_valid("T", 6002)
+        .add_valid("T", 5011)
+        .add_valid("T", 5012)
+        .add_valid("T", 7003)
+        .set_group_first(7001, 7002)
+        .add_group_member(7001, 6001)
+        .add_group_member(7001, 6002)
+        .add_group_member(7001, 5011)
+        .add_group_member(7001, 5012)
+        // 7003 is a member of the OUTER group ONLY — deliberately never added to
+        // 6001. See kHooksKeyValue above for why both halves of that matter.
+        .add_group_member(7001, 7003)
+        .set_group_first(6001, 6002)
+        .add_group_member(6001, 5011)
+        .add_group_member(6001, 5012);
+    if (with_pair) {
+        tv.set_length_pair_data_tag(5011, 5012);
+    }
+    return tv;
+}
+
+// 7001 > 6001, whose single entry carries the counted 5012 value with a forged
+// `7003=Z` inside it. WITHOUT the pair the scanner stops the value at the
+// embedded SOH and 7003 — not a member of 6001 — ends the NESTED entry early, so
+// the nested slice is SHORTER; the OUTER entry is unaffected because 7003 IS a
+// 7001 member. WITH the pair the 8 bytes are consumed whole.
+std::vector<std::byte> make_nested_custom_pair_frame() {
+    std::string body = "35=T\x01";
+    body += "7001=1\x01";
+    body += "7002=O1\x01";
+    body += "6001=1\x01";
+    body += "6002=E1\x01";
+    body += "5011=8\x01";
+    body += "5012=";
+    body += kHooksKeyValue;
+    body += "\x01";
+    return make_raw_frame(body);
+}
+
+std::size_t nested_len_on_fresh_table(table_view const& tv, std::vector<std::byte> const& buf,
+                                      fixpp::wire::frame_view const& fv,
+                                      std::uint16_t nested_no_tag) {
+    (void)buf;
+    std::pmr::monotonic_buffer_resource arena;
+    fixpp::wire::OffsetTable root{fv, &arena, dict_hooks::for_table_view(tv)};
+    auto const outer = root.group_slices(7001);
+    EXPECT_EQ(outer.size(), 1U);
+    if (outer.empty()) {
+        return 0;
+    }
+    auto const r = root.nested_group_slices(
+        outer[0].data, outer[0].len, nested_no_tag, dict_hooks::for_table_view(tv), fv.token(),
+        fixpp::wire::group_context{.msg_type = "T"}.pushed(7001));
+    EXPECT_EQ(r.slices.size(), 1U);
+    return r.slices.empty() ? 0 : r.slices[0].len;
+}
+
+}  // namespace
+
+TEST(NestedGroupSlicesHooksKey, WarmCacheHonoursTheCallersDictionaryNotTheFirstCallers) {
+    auto const tv_no_pair = make_nested_pair_dict(/*with_pair=*/false);
+    auto const tv_with_pair = make_nested_pair_dict(/*with_pair=*/true);
+
+    // Preconditions — the flag is what gates the pair callback, so pin both.
+    ASSERT_FALSE(tv_no_pair.has_nonstandard_pair())
+        << "precondition: arm A must register no non-standard pair";
+    ASSERT_TRUE(tv_with_pair.has_nonstandard_pair())
+        << "precondition: arm B must register 5011/5012 as a non-standard pair";
+    ASSERT_EQ(tv_with_pair.length_pair_data_tag(5011), 5012U);
+    ASSERT_EQ(tv_no_pair.length_pair_data_tag(5011), 0U);
+
+    auto buf = make_nested_custom_pair_frame();
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+
+    // ── NON-VACUITY: the two dictionaries really do split this slice
+    // differently, each measured on its OWN cold table. Without this, every
+    // assertion below could pass with the hooks key doing nothing.
+    std::size_t const cold_no_pair = nested_len_on_fresh_table(tv_no_pair, buf, *fv, 6001);
+    std::size_t const cold_with_pair = nested_len_on_fresh_table(tv_with_pair, buf, *fv, 6001);
+    ASSERT_NE(cold_no_pair, cold_with_pair)
+        << "fixture invariant: the counted 5012 value must make the two dictionaries "
+           "produce different nested extents, else this witness proves nothing";
+    ASSERT_GT(cold_with_pair, cold_no_pair)
+        << "fixture invariant: consuming the counted value must EXTEND the entry";
+
+    // ── ARM 1 (exact-key warm hit): one table, dictionary A first, then B at
+    // the SAME nested_no_tag. B must get B's split, not A's cached one.
+    {
+        std::pmr::monotonic_buffer_resource arena;
+        fixpp::wire::OffsetTable root{*fv, &arena, dict_hooks::for_table_view(tv_no_pair)};
+        auto const outer = root.group_slices(7001);
+        ASSERT_EQ(outer.size(), 1U);
+        auto const ctx = fixpp::wire::group_context{.msg_type = "T"}.pushed(7001);
+
+        auto const first =
+            root.nested_group_slices(outer[0].data, outer[0].len, 6001,
+                                     dict_hooks::for_table_view(tv_no_pair), fv->token(), ctx);
+        ASSERT_EQ(first.slices.size(), 1U);
+        EXPECT_EQ(first.slices[0].len, cold_no_pair) << "arm A must match its own cold build";
+
+        auto const second =
+            root.nested_group_slices(outer[0].data, outer[0].len, 6001,
+                                     dict_hooks::for_table_view(tv_with_pair), fv->token(), ctx);
+        ASSERT_EQ(second.slices.size(), 1U);
+        EXPECT_EQ(second.slices[0].len, cold_with_pair)
+            << "WARM exact-key hit served the FIRST caller's dictionary: the cache row is not "
+               "keyed on the bundle (Gate B r9 R-1)";
+    }
+
+    // ── ARM 2 (donation branch): same slice, DIFFERENT nested_no_tag. The
+    // `!found_slice` branch donates a row's sub-table across no_tags; it must
+    // not donate one built with another dictionary.
+    {
+        std::pmr::monotonic_buffer_resource arena;
+        fixpp::wire::OffsetTable root{*fv, &arena, dict_hooks::for_table_view(tv_no_pair)};
+        auto const outer = root.group_slices(7001);
+        ASSERT_EQ(outer.size(), 1U);
+        auto const ctx = fixpp::wire::group_context{.msg_type = "T"}.pushed(7001);
+
+        // Warm the cache for a DIFFERENT no_tag under dictionary A.
+        (void)root.nested_group_slices(outer[0].data, outer[0].len, /*nested_no_tag=*/7002,
+                                       dict_hooks::for_table_view(tv_no_pair), fv->token(), ctx);
+
+        auto const under_b =
+            root.nested_group_slices(outer[0].data, outer[0].len, 6001,
+                                     dict_hooks::for_table_view(tv_with_pair), fv->token(), ctx);
+        ASSERT_EQ(under_b.slices.size(), 1U);
+        EXPECT_EQ(under_b.slices[0].len, cold_with_pair)
+            << "the same-slice donation branch handed over a sub-table built with ANOTHER "
+               "dictionary (Gate B r9 R-1)";
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Gate B r9 R-3 — zero is refused at pair FORMATION, not only at the setter.
+//
+// `table_view::set_length_pair_data_tag` refusing a zero half keeps the WIRE
+// pair maps clean, but it sits downstream of the loaders: a dictionary could
+// still FORM a zero-headed pair, and `Dictionary::length_pair_data_tag`,
+// `field_ref` and `message_fields()` would report it to any caller that never
+// goes through a table_view. Both loaders now refuse at formation.
+//
+// Field number 0 is itself invalid and both loaders admit it — the xml bound is
+// `tag_i < 0 || tag_i > 65535` and Orchestra's id parse is a plain uint16 — so
+// these fixtures are REACHABLE, not hypothetical. Rejecting field 0 generally
+// is pre-existing and wider than pairs: fixpp#457.
+TEST(DictHooksCustomPair, ZeroIsNeverHalfOfAPairAtLoadTimeEither) {
+    // A LENGTH field numbered 0 sitting adjacent to a DATA field: the
+    // adjacency detector would otherwise pair (0, 5002).
+    constexpr std::string_view kZeroLengthXml =
+        R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+        R"(<fields>)"
+        R"(<field number='8' name='BeginString' type='STRING'/>)"
+        R"(<field number='9' name='BodyLength' type='INT'/>)"
+        R"(<field number='10' name='CheckSum' type='STRING'/>)"
+        R"(<field number='35' name='MsgType' type='STRING'/>)"
+        R"(<field number='0' name='ZeroLen' type='LENGTH'/>)"
+        R"(<field number='5002' name='CustomData' type='DATA'/>)"
+        R"(</fields>)"
+        R"(<messages>)"
+        R"(<message name='TestMsg' msgtype='T' msgcat='app'>)"
+        R"(<field name='MsgType' required='N'/>)"
+        R"(<field name='ZeroLen' required='N'/>)"
+        R"(<field name='CustomData' required='N'/>)"
+        R"(</message>)"
+        R"(</messages></fix>)";
+
+    // The mirror image: a valid LENGTH adjacent to a DATA field numbered 0.
+    constexpr std::string_view kZeroDataXml =
+        R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+        R"(<fields>)"
+        R"(<field number='8' name='BeginString' type='STRING'/>)"
+        R"(<field number='9' name='BodyLength' type='INT'/>)"
+        R"(<field number='10' name='CheckSum' type='STRING'/>)"
+        R"(<field number='35' name='MsgType' type='STRING'/>)"
+        R"(<field number='5001' name='CustomLen' type='LENGTH'/>)"
+        R"(<field number='0' name='ZeroData' type='DATA'/>)"
+        R"(</fields>)"
+        R"(<messages>)"
+        R"(<message name='TestMsg' msgtype='T' msgcat='app'>)"
+        R"(<field name='MsgType' required='N'/>)"
+        R"(<field name='CustomLen' required='N'/>)"
+        R"(<field name='ZeroData' required='N'/>)"
+        R"(</message>)"
+        R"(</messages></fix>)";
+
+    {
+        std::pmr::monotonic_buffer_resource mr;
+        auto dict = fixpp::dict::XmlLoader{}.load_from_string(kZeroLengthXml, &mr);
+        // Non-vacuity: the fixture must actually have loaded field 0, else the
+        // zero pair was never offered to the detector and this proves nothing.
+        ASSERT_NE(dict.field_by_name("ZeroLen"), std::nullopt)
+            << "fixture invariant: field number 0 must be ADMITTED by the loader, otherwise "
+               "the pair detector never sees a zero half and this witness is vacuous";
+        EXPECT_EQ(dict.length_pair_data_tag(std::uint16_t{0}), 0U)
+            << "a zero Length half must never form a pair at load time";
+        auto tv = dict.as_table_view();
+        EXPECT_EQ(tv.length_pair_data_tag(std::uint16_t{0}), 0U);
+        EXPECT_EQ(tv.data_pair_length_tag(std::uint16_t{5002}), 0U)
+            << "the inverse direction must agree: 5002 has no Length partner";
+        EXPECT_FALSE(tv.has_nonstandard_pair())
+            << "a refused zero pair must not set the flag that installs the pair callback";
+    }
+    {
+        std::pmr::monotonic_buffer_resource mr;
+        auto dict = fixpp::dict::XmlLoader{}.load_from_string(kZeroDataXml, &mr);
+        ASSERT_NE(dict.field_by_name("ZeroData"), std::nullopt)
+            << "fixture invariant: field number 0 must be ADMITTED by the loader";
+        EXPECT_EQ(dict.length_pair_data_tag(std::uint16_t{5001}), 0U)
+            << "a zero Data half must never form a pair at load time";
+        auto tv = dict.as_table_view();
+        EXPECT_EQ(tv.length_pair_data_tag(std::uint16_t{5001}), 0U);
+        EXPECT_FALSE(tv.has_nonstandard_pair());
+    }
+}

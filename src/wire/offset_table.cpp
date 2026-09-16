@@ -944,19 +944,34 @@ nested_slices_result OffsetTable::nested_group_slices(std::byte const* slice_dat
     // build_nested_subview, but with len=0 so it never builds/allocs
     // — must not regress the FR-004b zero-alloc-on-repeat gate.
     (void)frame_view_slice_access::make(slice_data, 0, gen).bytes();
+    // fixpp#426 (Gate B r9 R-1): a row matches only when it was built with the
+    // SAME bundle this call carries. Both warm branches below serve a cached
+    // sub-table, and neither used to look at `hooks` at all — so the first
+    // caller's dictionary decided the split for every later caller, silently,
+    // which is the mismatched-pairing defect this PR exists to remove and a
+    // contradiction of design §3 ("BOTH overloads take dict_hooks from their
+    // caller"). The identity is `opaque_dict()`; see the sufficiency condition
+    // on `nested_cache_row::hooks_key` in offset_table.hpp — and re-derive it
+    // there rather than trusting it here.
+    void const* const hooks_key = hooks.opaque_dict();
     // Single pass over the flat cache:
-    //  - exact (slice, no_tag) hit → serve immediately (build-once per pair);
-    //  - otherwise remember the FIRST row for this slice so a second distinct
-    //    no_tag on the SAME slice reuses its already-built sub-OffsetTable (one
-    //    sub-table indexes every nested group in the slice). FIRST-wins matches
-    //    the prior `break`-on-first-same-slice semantics exactly: a failed
-    //    build_nested_subview pushes a `table == nullptr` row, so a slice may
-    //    hold a null row followed by a non-null one — taking the first keeps
-    //    the build count identical (a stale null → one rebuild, as before).
+    //  - exact (slice, hooks, no_tag) hit → serve immediately (build-once per key);
+    //  - otherwise remember the FIRST row for this slice AND bundle so a second
+    //    distinct no_tag on the SAME slice reuses its already-built
+    //    sub-OffsetTable (one sub-table indexes every nested group in the
+    //    slice). FIRST-wins keeps the prior `break`-on-first-same-slice
+    //    semantics: a failed build_nested_subview pushes a `table == nullptr`
+    //    row, so a slice may hold a null row followed by a non-null one, and
+    //    taking the first means a stale null costs one rebuild.
+    //    ⚠️ Do NOT restate a build COUNT here. An earlier revision of this
+    //    comment claimed the count was "identical" to the pre-cache behaviour;
+    //    adding the bundle to the key changed which rows are candidates and
+    //    falsified it silently, because nothing re-runs a comment. The
+    //    CONDITION (first-wins per (slice, bundle)) is what survives an edit.
     OffsetTable* table = nullptr;
     bool found_slice = false;
     for (auto const& row : nested_cache_) {
-        if (row.slice_data != slice_data) {
+        if (row.slice_data != slice_data || row.hooks_key != hooks_key) {
             continue;
         }
         if (row.nested_no_tag == nested_no_tag) {
@@ -984,8 +999,10 @@ nested_slices_result OffsetTable::nested_group_slices(std::byte const* slice_dat
         table = build_nested_subview(slice_data, slice_len, resource(), hooks, gen, ctx);
     }
     try {
-        nested_cache_.push_back(nested_cache_row{
-            .slice_data = slice_data, .nested_no_tag = nested_no_tag, .table = table});
+        nested_cache_.push_back(nested_cache_row{.slice_data = slice_data,
+                                                 .hooks_key = hooks_key,
+                                                 .nested_no_tag = nested_no_tag,
+                                                 .table = table});
     } catch (std::bad_alloc const&) {
         // Cache insert failed; still serve this call from the built table —
         // degrade to "rebuild next time" rather than lose this result.
