@@ -50,6 +50,7 @@
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
 #include <future>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -312,12 +313,18 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogon) {
 
     ASSERT_TRUE(engine.start().has_value()) << "engine.start() failed";
 
-    // Let the accept loop bind the listener.
-    ioc.run_for(50ms);
-    ioc.restart();
-
-    uint16_t bound_port = engine.acceptor_bound_endpoint(acc_id).port;
-    ASSERT_NE(bound_port, 0U) << "acceptor did not bind (port=0)";
+    // Let the accept loop bind the listener, not for a fixed window (#470): a fixed
+    // window misses whenever the accept-loop thread is descheduled past it. No fatal
+    // assertion runs until after engine.stop() below -- see the moved ASSERT_NE.
+    uint16_t bound_port = 0;
+    (void)fixpp::test_support::pump_until(
+        ioc,
+        [&] {
+            bound_port = engine.acceptor_bound_endpoint(acc_id).port;
+            return bound_port != 0;
+        },
+        kStateBudget, fixpp::test_support::kPumpSlice,
+        "PlainAcceptorAndInitiatorCompleteLogon/bind");
 
     // Watchdog: armed from the point the session is attempted, and longer than the
     // establish pump plus the stop window, so it can fire only when one of them
@@ -330,12 +337,6 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogon) {
         if (!ec) watchdog_fired.store(true, std::memory_order_release);
     });
 
-    // Spawn the standalone plaintext initiator.
-    asio::co_spawn(ioc,
-                   run_plain_initiator(ioc, bound_port,
-                                       /*sender=*/"PLAIN-INITIATOR", /*target=*/"PLAIN-ACCEPTOR"),
-                   asio::detached);
-
     // Pump until accept→(no handshake)→attach→Logon-admit is observed, not for a fixed
     // window (#470). The acceptor session is published to lookup() only after the
     // accept, so `null` below means the accept was not observed within the budget.
@@ -344,21 +345,35 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogon) {
     // state() here is safe only because this thread is the one driving `ioc`, and the
     // predicate runs between `run_for` slices, when no session-strand handler is
     // mid-flight.
+    //
+    // Only attempted when the bind succeeded: a bind miss leaves bound_port == 0, and
+    // nothing would ever connect, so this pump would exist only to consume its own
+    // budget before the fatal bind assertion below runs.
     bool established = false;
     std::string state_str = "null";
-    const auto observe_established = [&] {
-        if (established) return true;
-        auto acc_session = engine.lookup(acc_id);
-        if (acc_session == nullptr) return false;
-        const auto st = acc_session->state();
-        state_str = std::to_string(static_cast<int>(st));
-        established = st == fixpp::session::fsm_state::Active ||
-                      st == fixpp::session::fsm_state::LogonReceived;
-        return established;
-    };
-    (void)fixpp::test_support::pump_until(ioc, observe_established, kStateBudget,
-                                          fixpp::test_support::kPumpSlice,
-                                          "PlainAcceptorAndInitiatorCompleteLogon/establish");
+    bool establish_pumped = true;
+    if (bound_port != 0) {
+        // Spawn the standalone plaintext initiator.
+        asio::co_spawn(ioc,
+                       run_plain_initiator(ioc, bound_port,
+                                           /*sender=*/"PLAIN-INITIATOR",
+                                           /*target=*/"PLAIN-ACCEPTOR"),
+                       asio::detached);
+
+        const auto observe_established = [&] {
+            if (established) return true;
+            auto acc_session = engine.lookup(acc_id);
+            if (acc_session == nullptr) return false;
+            const auto st = acc_session->state();
+            state_str = std::to_string(static_cast<int>(st));
+            established = st == fixpp::session::fsm_state::Active ||
+                          st == fixpp::session::fsm_state::LogonReceived;
+            return established;
+        };
+        establish_pumped = fixpp::test_support::pump_until(
+            ioc, observe_established, kStateBudget, fixpp::test_support::kPumpSlice,
+            "PlainAcceptorAndInitiatorCompleteLogon/establish");
+    }
 
     // Stop cleanly, with the watchdog still armed. We check stop_fut before assertions.
     auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
@@ -370,8 +385,8 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogon) {
     if (!stopped_in_window) {
         fixpp::test_support::cancel_and_drain_or_report(
             ioc, *engine.clock(), "PlainAcceptorAndInitiatorCompleteLogon/stop");
-        // A miss means engine.stop() did not complete within 2 s -- a potential wedge in
-        // session teardown. Report text is the stem plus the label, nothing else.
+        // A miss means engine.stop() did not complete within kStopWindow -- a potential
+        // wedge in session teardown. Report text is the stem plus the label, nothing else.
         ADD_FAILURE() << fixpp::test_support::kWindowMiss
                       << "PlainAcceptorAndInitiatorCompleteLogon/stop";
         return;
@@ -382,6 +397,15 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogon) {
     ASSERT_FALSE(watchdog_fired.load()) << "watchdog fired: plaintext round-trip overran the "
                                            "establish budget plus the stop window — potential "
                                            "hang in accept/handshake path";
+
+    // Bind must have succeeded -- checked only now, after a completed engine.stop(),
+    // so a bind miss never destroys a started-but-not-yet-stopped Engine.
+    ASSERT_NE(bound_port, 0U) << fixpp::test_support::kPumpBudgetMiss
+                              << "PlainAcceptorAndInitiatorCompleteLogon/bind"
+                              << " -- acceptor did not bind";
+
+    EXPECT_TRUE(establish_pumped) << fixpp::test_support::kPumpBudgetMiss
+                                  << "PlainAcceptorAndInitiatorCompleteLogon/establish";
 
     // SC-001 core assertion: acceptor reached established state.
     EXPECT_TRUE(established)
@@ -449,11 +473,17 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogonLogout) {
         << "register_session(acceptor) failed";
     ASSERT_TRUE(engine.start().has_value()) << "engine.start() failed";
 
-    ioc.run_for(50ms);
-    ioc.restart();
-
-    uint16_t bound_port = engine.acceptor_bound_endpoint(acc_id).port;
-    ASSERT_NE(bound_port, 0U) << "acceptor did not bind (port=0)";
+    // Let the accept loop bind the listener, not for a fixed window (#470). No fatal
+    // assertion runs until after engine.stop() below -- see the moved ASSERT_NE.
+    uint16_t bound_port = 0;
+    (void)fixpp::test_support::pump_until(
+        ioc,
+        [&] {
+            bound_port = engine.acceptor_bound_endpoint(acc_id).port;
+            return bound_port != 0;
+        },
+        kStateBudget, fixpp::test_support::kPumpSlice,
+        "PlainAcceptorAndInitiatorCompleteLogonLogout/bind");
 
     // Watchdog: longer than the state pump plus the stop window, so it fires only
     // when one of them overran.
@@ -464,42 +494,53 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogonLogout) {
         if (!ec) watchdog_fired.store(true, std::memory_order_release);
     });
 
-    // Spawn the Logon+Logout initiator.
-    asio::co_spawn(ioc,
-                   run_plain_initiator_with_logout(ioc, bound_port,
-                                                   /*sender=*/"PLAIN-INITIATOR",
-                                                   /*target=*/"PLAIN-ACCEPTOR"),
-                   asio::detached);
-
     // Pump until the acceptor is observed Disconnected, not for a fixed window (#470).
     // Disconnected is also reachable by a raw socket close, which the initiator does
     // after its Logout; that is why assertion (2) below, not this wait, is what tells
     // the Logout path apart. Same threading condition as the Logon test's pump.
+    //
+    // Only attempted when the bind succeeded -- see the Logon test's twin pump for why.
     std::shared_ptr<fixpp::session::Session> acc_session;
-    (void)fixpp::test_support::pump_until(
-        ioc,
-        [&] {
-            acc_session = engine.lookup(acc_id);
-            return acc_session != nullptr &&
-                   acc_session->state() == fixpp::session::fsm_state::Disconnected;
-        },
-        kStateBudget, fixpp::test_support::kPumpSlice,
-        "PlainAcceptorAndInitiatorCompleteLogonLogout/disconnected");
+    bool disconnected_pumped = true;
+    if (bound_port != 0) {
+        // Spawn the Logon+Logout initiator.
+        asio::co_spawn(ioc,
+                       run_plain_initiator_with_logout(ioc, bound_port,
+                                                       /*sender=*/"PLAIN-INITIATOR",
+                                                       /*target=*/"PLAIN-ACCEPTOR"),
+                       asio::detached);
 
-    // Capture state BEFORE stop() — the session is still in the registry snapshot.
-    ASSERT_NE(acc_session, nullptr) << "session not found in registry after Logout";
+        disconnected_pumped = fixpp::test_support::pump_until(
+            ioc,
+            [&] {
+                acc_session = engine.lookup(acc_id);
+                return acc_session != nullptr &&
+                       acc_session->state() == fixpp::session::fsm_state::Disconnected;
+            },
+            kStateBudget, fixpp::test_support::kPumpSlice,
+            "PlainAcceptorAndInitiatorCompleteLogonLogout/disconnected");
+    }
 
-    const auto final_state = acc_session->state();
-
-    // Capture recent_events() to find the Logout-specific signal.
-    // recent_events() is safe to call here: ioc is not being run (the pump returned),
-    // so the session strand is idle — no concurrent writes to recent_events_.
+    // Capture state and events BEFORE stop() — the session is still in the registry
+    // snapshot, and the strand is idle here (ioc is not being run). `found` and
+    // `final_state` are recorded rather than asserted immediately: a fatal assertion
+    // here, before engine.stop() runs, would tear down a started-but-not-yet-stopped
+    // Engine.
+    const bool found = acc_session != nullptr;
+    std::optional<fixpp::session::fsm_state> final_state;
     bool logout_seqreset_event_found = false;
-    for (const auto& ev : acc_session->recent_events()) {
-        if (const auto* sr =
-                std::get_if<fixpp::session::session_event_sequence_numbers_reset>(&ev)) {
-            if (!sr->by_peer_request) {
-                logout_seqreset_event_found = true;
+    if (found) {
+        final_state = acc_session->state();
+
+        // recent_events() is safe to call here: ioc is not being run (the pump
+        // returned), so the session strand is idle — no concurrent writes to
+        // recent_events_.
+        for (const auto& ev : acc_session->recent_events()) {
+            if (const auto* sr =
+                    std::get_if<fixpp::session::session_event_sequence_numbers_reset>(&ev)) {
+                if (!sr->by_peer_request) {
+                    logout_seqreset_event_found = true;
+                }
             }
         }
     }
@@ -522,11 +563,21 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogonLogout) {
         << "watchdog fired: plaintext Logon+Logout round-trip overran the state budget plus "
            "the stop window";
 
+    // Bind must have succeeded -- checked only now, after a completed engine.stop().
+    ASSERT_NE(bound_port, 0U) << fixpp::test_support::kPumpBudgetMiss
+                              << "PlainAcceptorAndInitiatorCompleteLogonLogout/bind"
+                              << " -- acceptor did not bind";
+
+    EXPECT_TRUE(disconnected_pumped) << fixpp::test_support::kPumpBudgetMiss
+                                     << "PlainAcceptorAndInitiatorCompleteLogonLogout/disconnected";
+
+    ASSERT_TRUE(found) << "session not found in registry after Logout";
+
     // (1) Acceptor must have reached Disconnected (terminal) after the clean Logout.
-    EXPECT_EQ(final_state, fixpp::session::fsm_state::Disconnected)
+    EXPECT_EQ(final_state, std::optional{fixpp::session::fsm_state::Disconnected})
         << "SC-001 / T-042: plaintext acceptor must reach Disconnected after a clean "
            "inbound Logout. final_state="
-        << static_cast<int>(final_state);
+        << (final_state ? std::to_string(static_cast<int>(*final_state)) : std::string{"-1"});
 
     // (2) Discriminating signal: session_event_sequence_numbers_reset{by_peer_request=false}
     // is emitted ONLY on the inbound-Logout-in-Active path (session.cpp T046), not on
