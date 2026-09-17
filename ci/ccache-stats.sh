@@ -130,11 +130,17 @@ calls=$((hits + miss))
 # wanted even on the paths that end in `exit 1`, and computing it after a branch
 # that can exit is how an output silently goes missing.
 #
-# ⚠️ THE CONSUMER'S GUARD IS FAIL-OPEN, AND THAT IS THE RIGHT DIRECTION. If this
-# step never ran or died before this line, `steps.<id>.outputs.changed` is
-# empty, `!= '0'` is true, and the seed publishes exactly as it does today. The
-# guard only ever SKIPS on positive evidence that nothing changed; it can never
-# withhold a cache because a measurement was missing.
+# ⚠️ AN EMPTY `changed` SATISFIES THE CONSUMER'S `!= '0'`. Whether that
+# publishes depends on WHY it read empty. Every path above this line that
+# would leave it unset exits 1 first, so an empty read caused by THIS SCRIPT
+# failing is withheld from publishing only while the caller ALSO fails the
+# job on that exit (no `continue-on-error`) and the seed step's implicit
+# `success()` gates on it. An empty read caused by the CONSUMER naming an
+# output this script does not emit is a different failure: the statistics
+# step still succeeds, and the seed publishes — ci/test-ccache-scripts.sh's
+# `stats/output-name` cell guards that drift for tier3. Re-check both the
+# caller's step attributes and the output name it reads before relying on
+# this at a new call site.
 #
 # ⚠️ `changed` ALONE IS SUFFICIENT — do not add `&& restore == 'hit'`. A restore
 # MISS with zero writes would mean no compile ran at all, and that case cannot
