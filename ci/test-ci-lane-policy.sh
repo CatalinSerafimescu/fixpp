@@ -531,6 +531,22 @@ p.write_text(s, encoding="utf-8")
 MUT
 expect "T26 a roster member is caught even when its guard no longer matches the idiom" 1 "PUSH TRIGGER NOT MAIN-ONLY: tier2.yml"
 
+# ── T27: #465 F2 — a NEW workflow using LIST-FORM `on: [push, ...]` is caught
+# by the list-normalisation arm, not treated as vacuous ─────────────────────
+fresh
+cat > "$WORK/t/.github/workflows/list-form-publisher.yml" <<'WF'
+name: list form publisher
+on: [push, workflow_dispatch]
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Save ccache to GHCR
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        run: ci/seed-ccache.sh linux-clang-debug
+WF
+expect "T27 a new workflow with list-form on: [push, ...] is caught, not read as vacuous" 1 "PUSH TRIGGER NOT MAIN-ONLY: list-form-publisher.yml: \`push\` has no filters"
+
 # ── T6: THE EMPTY SCAN ───────────────────────────────────────────────────────
 #
 # If the workflows move or the patterns break, "0 violations over 0 sites" must
@@ -552,8 +568,10 @@ expect "T6 an empty scan is an instrument failure, not a pass" 2 "ZERO apt-backe
 # admitted (a disabled step, an unreachable call, and libcxx preset drift).
 # T21-T25 (#465) added the push-trigger cells for push-admitting publish guards.
 # T26 (#465 Gate B r1 F1) added the roster-floor cell — a roster member whose
-# guard is respelled away from the idiom must still be caught.
-CELLS_DECLARED=28
+# guard is respelled away from the idiom must still be caught. T27 (#465 Gate
+# B r1 F2) added the list-form `on:` cell the per-line assessment had claimed
+# without a driving test.
+CELLS_DECLARED=29
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$CELLS_DECLARED" ]; then
