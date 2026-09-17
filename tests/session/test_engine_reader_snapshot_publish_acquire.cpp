@@ -301,8 +301,8 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
         // Only this thread drives `ioc` until it is joined, which is what makes the
         // pump's trailing restart() safe. The verdict is the reader's counts below.
         (void)fixpp::test_support::pump_until(
-            ioc, [&] { return reader_saw_nonnull.load(std::memory_order_acquire); },
-            kPublishBudget);
+            ioc, [&] { return reader_saw_nonnull.load(std::memory_order_acquire); }, kPublishBudget,
+            fixpp::test_support::kPumpSlice, "LookupNeverSeesTornPointer/publish");
         ioc_done.store(true, std::memory_order_release);
     });
 
