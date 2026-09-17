@@ -37,8 +37,10 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
 TIER1="$REPO/.github/workflows/tier1.yml"
+TIER2="$REPO/.github/workflows/tier2.yml"
 STEP_NAME="Interop gate — ctest -L interop, skip set asserted (#431)"
 PRESET="linux-clang-release"
+PRESET_TIER2="windows-msvc-release"
 BINARIES_MARKER='binaries=$(echo "$names"'
 
 command -v python3 >/dev/null || { echo "python3 is required" >&2; exit 1; }
@@ -60,8 +62,20 @@ bad() { FAIL=$((FAIL+1)); echo "  FAIL  $1"; }
 # computed variable) so the caller can see it — `$binaries` is local to the
 # extracted script's own bash process and does not otherwise survive it.
 extract_run() {
-  local out="$1" marker="${2:-}"
-  python3 - "$TIER1" "$STEP_NAME" "$PRESET" "$out" "$marker" <<'PY'
+  extract_run_from "$TIER1" "$PRESET" "$@"
+}
+
+# extract_run_from <workflow> <preset-literal> <out-script> [truncate-marker]
+#
+# Same as extract_run, but over an explicit <workflow>/<preset-literal> pair
+# instead of the TIER1/PRESET globals — used to exercise tier2.yml's own
+# extracted text directly (tier2 carries `shell: bash`/cygpath/`python`
+# AFTER the derivation truncation point, but the derivation-only body up to
+# and including `binaries=` is textually identical to tier1/tier3's, so no
+# fake cygpath or python is needed to run it).
+extract_run_from() {
+  local workflow="$1" preset="$2" out="$3" marker="${4:-}"
+  python3 - "$workflow" "$STEP_NAME" "$preset" "$out" "$marker" <<'PY'
 import sys
 import yaml
 
@@ -160,6 +174,10 @@ PIN_LF="linux-clang-release   3
 PIN_CRLF=$'linux-clang-release   3\r\n'
 PIN_NO_PRESET_LINE="some-other-preset   9
 "
+# tier2's own preset, for the D-tier2-* cells below.
+PIN_LF_TIER2="windows-msvc-release   3
+"
+PIN_CRLF_TIER2=$'windows-msvc-release   3\r\n'
 
 # run_derivation <label> <listing-file> <pin-content> <want-rc> <frag>
 #                [<script-override>] [<argv-fragments, |-separated>]
@@ -231,6 +249,28 @@ run_derivation "Dc schema-check entry missing + extra binary is caught before bi
 # never regression-pinned before this harness) ───────────────────────────────
 run_derivation "Dd pin file missing this preset's line is caught" \
   "$LISTING_LF" "$PIN_NO_PRESET_LINE" 1 "expected '<no line>'"
+
+# ── D-tier2-b/c: the SAME two properties, re-run against tier2.yml's OWN
+# extracted body (windows-msvc-release). Without these, tier2's own copy of
+# the CR-normalisation and exactly-once-exclusion fixes was pinned by
+# NOTHING: Da/Db/Dc above only ever extract TIER1's text, the tier1==tier3
+# identity check in ci/assert-ci-lane-policy.py explicitly exempts tier2,
+# and its static checks there don't look for CR-normalisation/exactly-once
+# text at all. Reverting either fix in tier2.yml ALONE left every other
+# committed check green. The derivation-only body (up to and including
+# `binaries=`) needs no fake cygpath/python — those appear only later in
+# tier2's real body, after this truncation point.
+tier2_script_b="$WORK/tier2-Db.sh"
+extract_run_from "$TIER2" "$PRESET_TIER2" "$tier2_script_b" "$BINARIES_MARKER"
+run_derivation "D-tier2-b CRLF listing + CRLF pin derives binaries=2 on tier2.yml's own body" \
+  "$LISTING_CRLF" "$PIN_CRLF_TIER2" 0 "DERIVATION_BINARIES=2" "$tier2_script_b"
+
+tier2_script_c="$WORK/tier2-Dc.sh"
+extract_run_from "$TIER2" "$PRESET_TIER2" "$tier2_script_c" "$BINARIES_MARKER"
+run_derivation "D-tier2-c schema-check entry missing is caught on tier2.yml's own body" \
+  "$LISTING_NO_SCHEMA" "$PIN_LF_TIER2" 1 \
+  "interop_cell_results_schema_check registered 0 time(s) on $PRESET_TIER2, expected exactly 1" \
+  "$tier2_script_c"
 
 # ── E: the real (GTEST_OUTPUT) ctest call fails — must be annotated ────────
 # Runs the FULL, untruncated step. The fake ctest succeeds on `-N` (so the
@@ -326,7 +366,7 @@ del lines[i:i + 5]
 open(p, "w", encoding="utf-8").writelines(lines)
 ' "$LISTING_NO_SCHEMA" "$PIN_LF" 0 "DERIVATION_BINARIES=3"
 
-CELLS_DECLARED=8
+CELLS_DECLARED=10
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$CELLS_DECLARED" ]; then
