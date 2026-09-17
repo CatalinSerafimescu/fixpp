@@ -678,6 +678,29 @@ p.write_text(s.replace(old, "", 1), encoding="utf-8")
 MUT
 expect "T35 tier2 GTEST controls unset line removed is caught" 1 "INTEROP GATE STEP GTEST CONTROLS NOT UNSET: tier2.yml"
 
+# T36: tier2's TESTBRIDGE_TEST_ONLY is dropped from its continued unset line.
+fresh
+python3 - "$WORK/t/.github/workflows/tier2.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old = "INTEROP_QUICKFIX_J_HOST \\\n                TESTBRIDGE_TEST_ONLY\n"
+assert s.count(old) == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+p.write_text(s.replace(old, "INTEROP_QUICKFIX_J_HOST\n", 1), encoding="utf-8")
+MUT
+expect "T36 tier2 TESTBRIDGE_TEST_ONLY dropped from the unset is caught" 1 "INTEROP GATE STEP TESTBRIDGE NOT UNSET: tier2.yml"
+
+# T37: the same drop, with the name kept only in a comment — a mention is not
+# an unset.
+fresh
+python3 - "$WORK/t/.github/workflows/tier2.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old = "INTEROP_QUICKFIX_J_HOST \\\n                TESTBRIDGE_TEST_ONLY\n"
+assert s.count(old) == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+p.write_text(s.replace(old, "INTEROP_QUICKFIX_J_HOST\n          # TESTBRIDGE_TEST_ONLY\n", 1), encoding="utf-8")
+MUT
+expect "T37 tier2 TESTBRIDGE_TEST_ONLY kept only in a comment is caught" 1 "INTEROP GATE STEP TESTBRIDGE NOT UNSET: tier2.yml"
+
 # ── The harness's own execution count ────────────────────────────────────────
 #
 # ⚠️ ADDED WITH THE FOUR NEW CELLS, and the omission is the point: a `cell`
@@ -692,9 +715,9 @@ expect "T35 tier2 GTEST controls unset line removed is caught" 1 "INTEROP GATE S
 # T26 (#465 Gate B r1 F1) added the roster-floor cell — a roster member whose
 # guard is respelled away from the idiom must still be caught. T27 (#465 Gate
 # B r1 F2) added the list-form `on:` cell the per-line assessment had claimed
-# without a driving test. T28-T35 (fixpp#431 Gate B r1/r5) added the interop
-# gate step's static wiring cells.
-CELLS_DECLARED=38
+# without a driving test. T28-T37 (fixpp#431) added the interop gate step's
+# static wiring cells.
+CELLS_DECLARED=40
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$CELLS_DECLARED" ]; then

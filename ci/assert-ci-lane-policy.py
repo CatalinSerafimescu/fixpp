@@ -796,6 +796,17 @@ def check_interop_gate_step(root, violations):
                 f"'{INTEROP_STEP_NAME}' step no longer unsets inherited GTEST_* "
                 f"variables before either ctest invocation.")
 
+        # gtest also takes a filter default from TESTBRIDGE_TEST_ONLY, which
+        # the GTEST_ prefix unset above does not reach. The unset must be a
+        # real `unset` command (backslash continuations joined), not a mention.
+        joined = re.sub(r"\\\n\s*", " ", run)
+        if not any(re.match(r"\s*unset\b", ln) and re.search(r"\bTESTBRIDGE_TEST_ONLY\b", ln)
+                   for ln in joined.splitlines()):
+            violations.append(
+                f"INTEROP GATE STEP TESTBRIDGE NOT UNSET: {wf_name}'s "
+                f"'{INTEROP_STEP_NAME}' step no longer unsets TESTBRIDGE_TEST_ONLY "
+                f"before either ctest invocation.")
+
         checked += 1
 
     # tier1 and tier3-libcxx both run the step under `python3`/no cygpath, so
