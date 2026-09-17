@@ -122,11 +122,13 @@ mutate_script() {
 
 # A fake ctest: records its own argv (one call per line) to
 # $FAKE_CTEST_ARGV_LOG, and on a `-N` (registration) call cats
-# $FAKE_CTEST_LISTING; any other call exits with $FAKE_CTEST_REAL_EXIT
-# (default 0). It does not special-case any other flag — a mutant that
-# changes `-L interop` to `-L interopX` is caught by the extracted script
-# still passing that flag through to argv, which the caller asserts on
-# directly, not by the fake refusing to run.
+# $FAKE_CTEST_LISTING unless $FAKE_CTEST_N_EXIT is set to a nonzero value, in
+# which case it prints a CMake-shaped error to stderr and exits that code
+# instead; any other call exits with $FAKE_CTEST_REAL_EXIT (default 0). It
+# does not special-case any other flag — a mutant that changes `-L interop`
+# to `-L interopX` is caught by the extracted script still passing that flag
+# through to argv, which the caller asserts on directly, not by the fake
+# refusing to run.
 #
 # The non-`-N` (real run) branch also records the shell's own GTEST_FILTER
 # and GTEST_TOTAL_SHARDS at the point ctest is invoked, so a caller can
@@ -139,7 +141,13 @@ make_fake_ctest() {
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$FAKE_CTEST_ARGV_LOG"
 case " $* " in
-  *" -N "*) cat "$FAKE_CTEST_LISTING" ;;
+  *" -N "*)
+    if [ "${FAKE_CTEST_N_EXIT:-0}" != "0" ]; then
+      echo "CMake Error: preset not found" >&2
+      exit "${FAKE_CTEST_N_EXIT}"
+    fi
+    cat "$FAKE_CTEST_LISTING"
+    ;;
   *)
     printf 'GTEST_FILTER=%s GTEST_TOTAL_SHARDS=%s\n' \
       "${GTEST_FILTER-<unset>}" "${GTEST_TOTAL_SHARDS-<unset>}" >> "$FAKE_CTEST_ARGV_LOG"
@@ -316,6 +324,38 @@ run_full() {
 }
 run_full "E ctest failure on the real run is annotated with ::error, not a bare set -e abort" \
   1 1 "::error title=Interop gate::ctest -L interop failed on $PRESET."
+
+# ── E-N: the REGISTRATION (`-N`) ctest call fails — must be annotated too,
+# not left to a bare `set -e` abort with no ::error line (Codex round-1 #7,
+# re-raised round 6 #1). Runs the FULL, untruncated step with the fake ctest
+# failing only on `-N`; the real (GTEST_OUTPUT) call is never reached. ─────
+run_full_n_fail() {
+  local label="$1" want_rc="$2" frag="$3"
+  local celldir="$WORK/cell-$RANDOM$RANDOM"
+  local bindir="$celldir-bin"
+  mkdir -p "$celldir/ci" "$bindir"
+  printf '%s' "$PIN_LF" > "$celldir/ci/expected-interop-tests.txt"
+  make_fake_ctest "$bindir"
+  local argvlog="$celldir.argv"; : > "$argvlog"
+  local script="$celldir.sh"
+  extract_run "$script"
+  local out rc=0
+  out="$(cd "$celldir" && PATH="$bindir:$PATH" RUNNER_TEMP="$celldir/runnertemp" \
+           FAKE_CTEST_ARGV_LOG="$argvlog" FAKE_CTEST_LISTING="$LISTING_LF" \
+           FAKE_CTEST_N_EXIT=1 \
+           bash "$script" 2>&1)" || rc=$?
+  if [ "$rc" -ne "$want_rc" ]; then
+    printf '%s\n' "$out" | sed 's/^/  | /'
+    bad "$label — expected exit $want_rc, got $rc"; return
+  fi
+  if ! printf '%s\n' "$out" | grep -qF -- "$frag"; then
+    printf '%s\n' "$out" | sed 's/^/  | /'
+    bad "$label — exited $rc but WITHOUT '$frag' (failed/passed for the wrong reason)"; return
+  fi
+  ok "$label"
+}
+run_full_n_fail "E-N ctest -N failure is annotated with ::error, not a bare set -e abort" \
+  1 "::error title=Interop gate::ctest -L interop -N failed on $PRESET."
 
 # ── S: the step's SUCCESS path — cell E, above, forces the real ctest call
 # to fail, so the checker line after it is never reached there. This drives
@@ -526,7 +566,7 @@ del lines[i:i + 5]
 open(p, "w", encoding="utf-8").writelines(lines)
 ' "$LISTING_NO_SCHEMA" "$PIN_LF" 0 "DERIVATION_BINARIES=3"
 
-CELLS_DECLARED=13
+CELLS_DECLARED=14
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$CELLS_DECLARED" ]; then

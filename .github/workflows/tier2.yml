@@ -704,7 +704,10 @@ jobs:
           # Inherited GTEST_* is cleared so the run is unfiltered; the checker
           # compares each report against the binary's own enumeration.
           unset "${!GTEST_@}"
-          full=$(ctest --preset ${{ matrix.preset }} -L interop -N)
+          if ! full=$(ctest --preset ${{ matrix.preset }} -L interop -N); then
+            echo "::error title=Interop gate::ctest -L interop -N failed on ${{ matrix.preset }}."
+            exit 1
+          fi
           full="${full//$'\r'/}"
           n=$(echo "$full" | sed -n 's/^Total Tests: //p')
           expected=$(tr -d '\r' < ci/expected-interop-tests.txt \
