@@ -52,6 +52,25 @@
 # dimension whose only effect would be to discard a still-usable cache whenever
 # the runner image bumps a package.
 
+# ccache_preset_family <preset>
+#
+# Prints the compiler family a host preset's tag is minted and matched under:
+# `gcc` when the preset name carries a `gcc` segment, otherwise `clang`.
+#
+# ⚠️ READ FROM THE PRESET NAME, AND THAT IS A CONDITION, NOT A PROBE. The pruner's
+# `ccache_tag_regex` must stay pure string work (see its header), so the family
+# cannot come from `--version` or CMakePresets.json there. Both the minter and the
+# matcher call THIS function, so they cannot disagree about the family. The minter
+# additionally refuses a banner that contradicts it (see ccache_cache_key): the
+# family LABEL a tag carries must not contradict the compiler that actually built
+# it, or the tag would misreport its own diagnostic.
+ccache_preset_family() {
+  case "-$1-" in
+    *-gcc-*) printf 'gcc' ;;
+    *)       printf 'clang' ;;
+  esac
+}
+
 # ccache_cache_key <preset>
 #
 # Sets: CCACHE_CACHE_TAG, CCACHE_CACHE_COMPILER, CCACHE_CACHE_TOOLSET.
@@ -122,15 +141,59 @@ ccache_cache_key() {
     return 1
   fi
 
-  local major digest
-  # First `NN` following the word `version`. Readability only — the digest below
-  # is what discriminates. An unparseable banner yields `unknown`, which is
-  # still a valid, stable tag component rather than a failure.
-  major="$(printf '%s' "$vout" | sed -n 's/.*version[[:space:]]\{1,\}\([0-9]\{1,\}\).*/\1/p' | head -1)"
+  local family major digest first
+  family="$(ccache_preset_family "$preset")"
+  first="$(printf '%s\n' "$vout" | head -1)"
+
+  # The banner must agree with the family the preset NAME selects (#464): a tag
+  # minted under a family label the compiler does not back would misreport its
+  # own diagnostic. That is a cost failure, so it degrades to "no cache this
+  # run", like every other failure here.
+  #
+  # ⚠️ THE TWO ARMS CHECK DIFFERENT SCOPES ON PURPOSE, NOT BY OVERSIGHT. Clang
+  # reports its identity as the phrase `clang version` anywhere in `--version`'s
+  # output (checked against $vout); GCC reports it as argv[0], always the FIRST
+  # TOKEN of the first line (checked against $first). No GCC banner contains the
+  # phrase `clang version`, and no CLANG banner's first token is a `gcc`/`g++`
+  # executable name, so unifying the scope would not change what either arm
+  # accepts — it would just make the gcc arm re-scan text it doesn't need.
+  case "$family" in
+    clang)
+      case "$vout" in
+        *"clang version"*) ;;
+        *) echo "ccache-cache: preset '$preset' is named as a clang preset but '$CCACHE_CACHE_COMPILER --version' is not a clang banner: $first" >&2
+           return 1 ;;
+      esac
+      # First `NN` following the word `version`.
+      major="$(printf '%s' "$vout" | sed -n 's/.*version[[:space:]]\{1,\}\([0-9]\{1,\}\).*/\1/p' | head -1)" ;;
+    gcc)
+      # Classify the FIRST TOKEN, not a glob over the whole line — a glob can
+      # span the space before the version parenthesis, so `g++\ *` only ever
+      # matched an UNVERSIONED `g++ (...)`. Ubuntu's actual GCC banners report
+      # argv[0] as the first token (`g++-13`, `x86_64-linux-gnu-g++-13`), so the
+      # accepted shapes are the bare/target-prefixed executable names GCC can be
+      # invoked as, gcc/g++ optionally followed by `-` and a suffix that STARTS
+      # with a digit (a glob: what follows that digit is not checked), and bare
+      # `c++` only. A token that merely CONTAINS `g++`/`gcc` (e.g. inside a
+      # clang banner's own parenthetical) must still refuse.
+      case "${first%% *}" in
+        gcc|g++|c++|gcc-[0-9]*|g++-[0-9]*|*-gcc|*-g++|*-gcc-[0-9]*|*-g++-[0-9]*) ;;
+        *) echo "ccache-cache: preset '$preset' is named as a gcc preset but '$CCACHE_CACHE_COMPILER --version' is not a gcc banner: $first" >&2
+           return 1 ;;
+      esac
+      # GCC formats this line as `progname (pkgversion) version_string`. The
+      # major is the digit run immediately after the first `) `, and only when
+      # that whole field is dotted-numeric (N.N…) — never a fallback to the
+      # line's last field, which can be a distro-appended build suffix that is
+      # itself dotted-numeric and would otherwise be misread as the version.
+      major="$(printf '%s' "$first" | sed -n 's/^[^)]*)[[:space:]]\{1,\}\([0-9]\{1,\}\)\(\.[0-9]\{1,\}\)\{1,\}\([[:space:]].*\)\{0,1\}$/\1/p')" ;;
+  esac
+  # Readability only — the digest below is what discriminates. An unparseable
+  # version yields `unknown`, which is still a valid, stable tag component.
   [ -n "$major" ] || major=unknown
   digest="$(printf '%s' "$vout" | sha256sum | cut -c1-8)"
 
-  CCACHE_CACHE_TOOLSET="clang${major}-${digest}"
+  CCACHE_CACHE_TOOLSET="${family}${major}-${digest}"
 
   # OCI tags allow [A-Za-z0-9._-] and must NOT contain '+', so `libc++` has to
   # be sanitized — `linux-clang-libc++-asan` → `linux-clang-libcxx-asan`. Same
@@ -337,7 +400,7 @@ ccache_tag_regex() {
   # DELETE, and this repo's precedent is strictest exactly there.
   # ── ONE GRAMMAR PER MINTER, BRANCHED — NOT ONE LOOSENED GRAMMAR FOR BOTH ────
   #
-  # A container lane's tag is `ccache-<lane>-<digest8>`: no `clang<major>`
+  # A container lane's tag is `ccache-<lane>-<digest8>`: no `<family><major>`
   # component at all, because `ccache_container_cache_key` mints no such thing.
   #
   # ⚠️ The tempting shortcut — relaxing the host grammar to
@@ -353,5 +416,8 @@ ccache_tag_regex() {
     return 0
   fi
 
-  CCACHE_TAG_RE="^ccache-${safe}-clang([0-9]+|unknown)-[0-9a-f]{8}\$"
+  # The host grammar is branched by family too, and for the same reason: each
+  # branch accepts exactly its own family's literal, never `(clang|gcc)`.
+  # The family comes from ccache_preset_family, the same function the minter uses.
+  CCACHE_TAG_RE="^ccache-${safe}-$(ccache_preset_family "$preset")([0-9]+|unknown)-[0-9a-f]{8}\$"
 }

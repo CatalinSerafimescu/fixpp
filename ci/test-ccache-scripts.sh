@@ -61,6 +61,35 @@ printf 'clang version 22.1.2 (https://github.com/llvm/llvm-project deadbeef)\n'
 SHIM
 chmod +x "$shim_dir/fixpp-fake-clang"
 
+# The real Ubuntu g++ banner shape (#464): no word `version`.
+cat > "$shim_dir/fixpp-fake-gcc" <<'SHIM'
+#!/usr/bin/env bash
+[ "${1:-}" = "--version" ] || { echo "SHIM-VIOLATION: compiler $*" >&2; exit 2; }
+printf 'g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright (C) 2024 Free Software Foundation, Inc.\n'
+SHIM
+chmod +x "$shim_dir/fixpp-fake-gcc"
+
+# ── #467 — additional gcc banner shapes ──
+# Table: fake-compiler suffix | banner first line | preset name. One shim per row.
+while IFS='|' read -r suffix banner preset; do
+  [ -n "$suffix" ] || continue
+  cat > "$shim_dir/fixpp-fake-gcc-$suffix" <<SHIM
+#!/usr/bin/env bash
+[ "\${1:-}" = "--version" ] || { echo "SHIM-VIOLATION: compiler \$*" >&2; exit 2; }
+printf '%s\n' '$banner'
+SHIM
+  chmod +x "$shim_dir/fixpp-fake-gcc-$suffix"
+done <<'TABLE'
+v13|g++-13 (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0|fake-gcc-v13
+tgt13|x86_64-linux-gnu-g++-13 (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0|fake-gcc-tgt13
+bare|gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0|fake-gcc-bare
+cxx|c++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0|fake-gcc-cxx
+negctrl|Ubuntu clang version 22.1.2 (g++ compat)|fake-gcc-negctrl
+buildsuffix|g++ (Vendor) 13.3.0 build 2.7.4|fake-gcc-buildsuffix
+snapshot|gcc (GCC) 15.0.0 20240505 (experimental)|fake-gcc-snapshot
+badver|g++ (Vendor) 13.not-a-version|fake-gcc-badver
+TABLE
+
 cat > "$sandbox/CMakePresets.json" <<'JSON'
 {
   "version": 6,
@@ -68,7 +97,18 @@ cat > "$sandbox/CMakePresets.json" <<'JSON'
     { "name": "fake-libc++",        "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-clang" } },
     { "name": "fake-libc++-asan",   "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-clang" } },
     { "name": "fake-no-compiler",   "cacheVariables": { "CMAKE_C_COMPILER": "cc" } },
-    { "name": "fake-gone-compiler", "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-clang-missing" } }
+    { "name": "fake-gcc-release",   "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-gcc" } },
+    { "name": "fake-gcc-clangbanner", "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-clang" } },
+    { "name": "fake-clang-gccbanner", "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-gcc" } },
+    { "name": "fake-gone-compiler", "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-clang-missing" } },
+    { "name": "fake-gcc-v13",         "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-gcc-v13" } },
+    { "name": "fake-gcc-tgt13",       "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-gcc-tgt13" } },
+    { "name": "fake-gcc-bare",        "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-gcc-bare" } },
+    { "name": "fake-gcc-cxx",         "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-gcc-cxx" } },
+    { "name": "fake-gcc-negctrl",     "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-gcc-negctrl" } },
+    { "name": "fake-gcc-buildsuffix", "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-gcc-buildsuffix" } },
+    { "name": "fake-gcc-snapshot",    "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-gcc-snapshot" } },
+    { "name": "fake-gcc-badver",      "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-gcc-badver" } }
   ]
 }
 JSON
@@ -332,11 +372,142 @@ printf '%s' "$UNKNOWN_MAJOR_TAG" | grep -qE -- "$TAG_RE" \
   || fail "prune/tag-regex-unknown-major: '$UNKNOWN_MAJOR_TAG' does not match '$TAG_RE' — the tightened regex must still accept the minter's 'unknown major' fallback"
 ok "the pruner's regex still accepts the minter's 'unknown major' fallback tag"
 
+# ── #464 — THE GCC FAMILY: a second host grammar, branched by preset name ────
+#
+# The family is read from the preset NAME (ccache_preset_family), because the
+# matcher must stay pure string work.
+GCC_TAG="$(expected_tag 'fake-gcc-release')" || fail "gcc/mint: no tag for a gcc preset with a g++ banner"
+case "$GCC_TAG" in
+  'ccache-fake-gcc-release-gcc13-'????????) ok "a gcc preset mints gcc<major> from the real Ubuntu banner shape" ;;
+  *) fail "gcc/mint: tag '$GCC_TAG' is not ccache-<preset>-gcc13-<digest8>" ;;
+esac
+GCC_RE="$( cd "$sandbox" && PATH="$shim_dir:$PATH" . "$CI_DIR/ccache-cache-key.sh" && ccache_tag_regex 'fake-gcc-release' >/dev/null 2>&1 && printf '%s' "$CCACHE_TAG_RE" )"
+[ -n "$GCC_RE" ] || fail "gcc/regex: ccache_tag_regex produced nothing for a gcc preset"
+printf '%s' "$GCC_TAG" | grep -qE -- "$GCC_RE" \
+  || fail "gcc/bridge: the pruner's regex '$GCC_RE' does not match the tag the key script minted ('$GCC_TAG')"
+ok "the gcc regex matches a tag the key script actually minted"
+
+# Disjoint in BOTH directions:
+# widening either branch to accept the other family's literal must fail here.
+CLANG_AS_GCC_TAG="ccache-fake-gcc-release-clang22-$(printf '%s' "$GCC_TAG" | sed 's/.*-//')"
+if printf '%s' "$CLANG_AS_GCC_TAG" | grep -qE -- "$GCC_RE"; then
+  fail "gcc/disjoint: the gcc regex '$GCC_RE' accepts a clang-family tag '$CLANG_AS_GCC_TAG'"
+fi
+GCC_AS_CLANG_TAG="$(printf '%s' "$TAG" | sed 's/-clang22-/-gcc13-/')"
+[ "$GCC_AS_CLANG_TAG" != "$TAG" ] || fail "gcc/disjoint: could not build the gcc-family variant of '$TAG'"
+if printf '%s' "$GCC_AS_CLANG_TAG" | grep -qE -- "$TAG_RE"; then
+  fail "gcc/disjoint: the clang regex '$TAG_RE' accepts a gcc-family tag '$GCC_AS_CLANG_TAG'"
+fi
+ok "the clang and gcc regexes each reject the other family's tag"
+
+# The retired `clangunknown` label (what linux-gcc-release minted before #464)
+# is not a gcc-family tag; the gcc branch's own unknown fallback is.
+if printf '%s' "ccache-fake-gcc-release-clangunknown-7a345d7a" | grep -qE -- "$GCC_RE"; then
+  fail "gcc/retired-label: the gcc regex accepts the pre-#464 'clangunknown' tag"
+fi
+printf '%s' "ccache-fake-gcc-release-gccunknown-7a345d7a" | grep -qE -- "$GCC_RE" \
+  || fail "gcc/unknown-major: the gcc regex rejects its own 'unknown major' fallback"
+ok "the gcc regex rejects the retired clangunknown label and accepts gccunknown"
+
+# A banner that contradicts the preset name refuses to mint, in both
+# directions.
+#
+# ⚠️ PATH is exported as its own statement. `PATH=… . script && fn` scopes the
+# assignment to the `.` builtin only, so `fn` would run without the shim and
+# refuse for "compiler not found", which is a pass for the wrong reason. The
+# positive control proves the construct can mint.
+mint_rc() {
+  ( cd "$sandbox" || exit 9; export PATH="$shim_dir:$PATH"
+    . "$CI_DIR/ccache-cache-key.sh"; ccache_cache_key "$1" >/dev/null 2>&1 )
+}
+mint_rc fake-gcc-release || fail "gcc/banner-control: a gcc preset with a g++ banner did not mint through mint_rc"
+for pre in fake-gcc-clangbanner fake-clang-gccbanner; do
+  if mint_rc "$pre"; then
+    fail "gcc/banner-mismatch: '$pre' minted a tag although its banner contradicts its name's family"
+  fi
+done
+ok "a banner contradicting the preset name's family refuses to mint (both directions)"
+
+# ── #467 F1 — accept versioned / target-prefixed gcc tokens (C1) ────────────
+#
+# The classifier reads the FIRST TOKEN of the banner, not a glob over the
+# whole line, so Ubuntu's actual `g++-13`/`x86_64-linux-gnu-g++-13` argv[0]
+# shapes must mint exactly like the bare `gcc`/`g++`/`c++` shapes.
+for row in fake-gcc-v13 fake-gcc-tgt13 fake-gcc-bare fake-gcc-cxx; do
+  T="$(expected_tag "$row")" || fail "gcc/mint-token: no tag for '$row' with a real gcc-family banner"
+  case "$T" in
+    "ccache-$row-gcc13-"????????) ;;
+    *) fail "gcc/mint-token: '$row' minted '$T', not ccache-$row-gcc13-<digest8>" ;;
+  esac
+done
+ok "each banner row in the loop above mints gcc13 (C1)"
+
+# The negative control: a banner whose first TOKEN is not a gcc executable name
+# must still refuse, even though the string 'g++' appears later on the line —
+# only a whole-line substring check would be fooled by this.
+if mint_rc fake-gcc-negctrl; then
+  fail "gcc/token-negctrl: 'fake-gcc-negctrl' minted although its first token is 'Ubuntu', not a gcc executable name (the line only contains 'g++' inside a parenthetical)"
+fi
+ok "a banner whose first token is not a gcc executable name refuses to mint, even when 'g++' appears later on the line"
+
+# ── #467 F2 — the gcc major is the field after the first ') ', dotted-numeric
+# only, never a fallback to the banner's last field (C2) ────────────────────
+BUILDSUFFIX_TAG="$(expected_tag fake-gcc-buildsuffix)" || fail "gcc/major: no tag for a distro build-suffix banner"
+case "$BUILDSUFFIX_TAG" in
+  'ccache-fake-gcc-buildsuffix-gcc13-'????????) ;;
+  *) fail "gcc/major: distro build-suffix banner minted '$BUILDSUFFIX_TAG', expected gcc13 (a last-field parse reads the suffix's own dotted number, gcc2)" ;;
+esac
+SNAPSHOT_TAG="$(expected_tag fake-gcc-snapshot)" || fail "gcc/major: no tag for a gcc snapshot banner"
+case "$SNAPSHOT_TAG" in
+  'ccache-fake-gcc-snapshot-gcc15-'????????) ;;
+  *) fail "gcc/major: snapshot banner minted '$SNAPSHOT_TAG', expected gcc15" ;;
+esac
+BADVER_TAG="$(expected_tag fake-gcc-badver)" || fail "gcc/major: no tag for a malformed-version banner"
+case "$BADVER_TAG" in
+  'ccache-fake-gcc-badver-gccunknown-'????????) ;;
+  *) fail "gcc/major: malformed version 'g++ (Vendor) 13.not-a-version' minted '$BADVER_TAG', expected gccunknown (uncertainty must degrade to unknown, never a wrong number)" ;;
+esac
+ok "the gcc major comes from the field after the first ') ', dotted-numeric only — a build suffix, a snapshot date and a malformed version each parse correctly (C2)"
+
+# gccunknown must still classify under its own gcc regex.
+BADVER_RE="$( cd "$sandbox" && PATH="$shim_dir:$PATH" . "$CI_DIR/ccache-cache-key.sh" && ccache_tag_regex 'fake-gcc-badver' >/dev/null 2>&1 && printf '%s' "$CCACHE_TAG_RE" )"
+[ -n "$BADVER_RE" ] || fail "gcc/major: ccache_tag_regex produced nothing for 'fake-gcc-badver'"
+printf '%s' "$BADVER_TAG" | grep -qE -- "$BADVER_RE" \
+  || fail "gcc/major: the pruner's regex '$BADVER_RE' does not match the gccunknown tag it was minted for"
+ok "the gcc regex still classifies its own 'unknown major' fallback for a real unparseable banner"
+
+# ── #467 F3 — pin ccache_preset_family's segment boundaries (C3) ────────────
+FAMILY_CASES='
+gcc gcc
+gcc-release gcc
+linux-gcc gcc
+linux-gcc-release gcc
+libgcc clang
+gcc13 clang
+linux-clang-libc++ clang
+'
+while read -r name expect; do
+  [ -n "$name" ] || continue
+  got="$( . "$CI_DIR/ccache-cache-key.sh" >/dev/null 2>&1; ccache_preset_family "$name" )"
+  [ "$got" = "$expect" ] || fail "family/$name: expected '$expect', got '$got'"
+done <<< "$FAMILY_CASES"
+ok "ccache_preset_family classifies each FAMILY_CASES row as expected"
+
+# Bridge — 'gcc13' is a name where a bare substring check and the segment rule
+# disagree (it CONTAINS 'gcc', but not as a '-gcc-' segment). A matcher that classifies by substring
+# rather than by segment carries 'gcc' here and fails.
+FAM_BRIDGE_RE="$( . "$CI_DIR/ccache-cache-key.sh" && ccache_tag_regex 'gcc13' >/dev/null 2>&1 && printf '%s' "$CCACHE_TAG_RE" )"
+[ -n "$FAM_BRIDGE_RE" ] || fail "family/bridge: ccache_tag_regex produced nothing for 'gcc13'"
+case "$FAM_BRIDGE_RE" in
+  *-clang\(*) ok "family/bridge: 'gcc13' classifies as clang in the derived regex, matching ccache_preset_family" ;;
+  *) fail "family/bridge: 'gcc13' regex '$FAM_BRIDGE_RE' does not use the clang family literal — ccache_tag_regex and ccache_preset_family have drifted" ;;
+esac
+
 # ── CONTAINER LANES (#259) — the SAME producer/matcher bridge, second grammar ─
 #
 # A container lane's compiler lives inside a pinned image and cannot be probed
 # on the host, so `ccache_container_cache_key` mints `ccache-<lane>-<digest8>`
-# with no `clang<major>` component. That is a SECOND grammar, and the pruner
+# with no `<family><major>` component. That is a SECOND grammar, and the pruner
 # must classify it exactly — every assertion below is derived from the real
 # script, nothing about either grammar is restated here.
 KEYSH="$CI_DIR/ccache-cache-key.sh"
