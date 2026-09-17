@@ -568,12 +568,9 @@ jobs:
             exit 1
           fi
 
-      # fixpp#431 — same signal as tier1's linux-clang-release leg; see that
-      # workflow's comment on the matching step for the full design rationale
-      # (issue design decided 2026-09-17: "a named interop step or job on the
-      # cheapest non-sanitizer leg of each tier" — Tier 3 has no `-release`
-      # preset at all, which is why the amended wording says "step or job").
-      # linux-clang-libc++ is the plain (non-sanitizer) preset in this tier.
+      # fixpp#431: the same interop gate as tier1.yml's step of the same name,
+      # which carries the rationale. linux-clang-libc++ is this tier's
+      # non-sanitizer leg.
       - name: "Interop gate — ctest -L interop, skip set asserted (#431)"
         if: matrix.preset == 'linux-clang-libc++'
         run: |

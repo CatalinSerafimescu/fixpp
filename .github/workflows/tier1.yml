@@ -929,36 +929,21 @@ jobs:
             exit 1
           fi
 
-      # fixpp#431 — a dedicated, fast, attributable interop signal on the
-      # cheapest non-sanitizer leg. Today `-L interop` runs unfiltered inside
-      # the Test step below on EVERY lane, so a break surfaces as "the 1800s
-      # ctest step on linux-clang-tsan failed" rather than as "interop broke"
-      # — and 90 of its cases SKIP for lack of a leased counterparty on every
-      # lane, with ctest reporting a skip as a pass, so that gap has never had
-      # a signal at all. Design decided in the issue; see its 2026-09-17
-      # comment for the two acceptance amendments (a step, not a job, because
-      # Tier 3 has no `-release` preset; "skip set and reason asserted"
-      # replacing the counterparty alternative, deferred to #468).
+      # fixpp#431: a fast interop signal with its own name. This step runs on the
+      # cheapest non-sanitizer leg only, right after Build, so an interop break
+      # shows under this name before the long Test step.
       #
-      # `ctest -L` exits 0 on an empty match (#247/#250/#262), so the count is
-      # asserted BEFORE the run, same vacuity guard as the two witnesses
-      # above. A SKIP must not read as a PASS either: every skip is required
-      # to be one of the checked-in cases in
-      # tests/interop/expected-skips-without-counterparty.txt, for the one
-      # allowed reason (a counterparty port not leased) — see
-      # ci/assert-interop-skips.py's header for the full contract.
+      # It closes two vacuity traps:
+      # - `ctest -L` exits 0 on an empty match, so the registered count is
+      #   asserted first, against ci/expected-interop-tests.txt.
+      # - ctest reports a gtest SKIP as a pass. So ci/assert-interop-skips.py
+      #   requires every skip to be listed in
+      #   tests/interop/expected-skips-without-counterparty.txt, and to give the
+      #   one allowed reason (no counterparty port leased).
       #
-      # if:-guarded to ONE preset, matching the consumer-witness step's
-      # unconditional placement pattern but not its unconditional `if:` —
-      # this signal only needs to exist once, and linux-clang-release is the
-      # cheapest non-sanitizer leg (avoids linux-gcc-release, the packaging
-      # lane, so this step never competes with the six packaging witnesses'
-      # stage-install).
-      #
-      # Runs a SECOND time inside the unfiltered `-LE packaging` Test step
-      # below on every lane, including this one — intentional, not a
-      # duplicate to remove: that unfiltered run is the coverage backstop,
-      # this step is for speed and attribution.
+      # Interop also runs again inside the unfiltered Test step below. That is
+      # intentional: that step is the coverage backstop, and this one is for
+      # speed and attribution.
       - name: "Interop gate — ctest -L interop, skip set asserted (#431)"
         if: matrix.preset == 'linux-clang-release'
         run: |

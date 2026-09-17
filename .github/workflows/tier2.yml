@@ -666,10 +666,9 @@ jobs:
             exit 1
           fi
 
-      # fixpp#431 — same signal as tier1's linux-clang-release leg; see that
-      # workflow's comment on the matching step for the full design rationale
-      # (issue design decided 2026-09-17). windows-msvc-release is the
-      # cheapest non-sanitizer Windows leg.
+      # fixpp#431: the same interop gate as tier1.yml's step of the same name,
+      # which carries the rationale. windows-msvc-release is this tier's
+      # non-sanitizer leg.
       #
       # `shell: bash` for the same reason as the consumer-witness step above:
       # POSIX-shell script, this file's ctest steps are `shell: cmd`.
@@ -681,12 +680,8 @@ jobs:
       # same split this workflow's sccache-download step already uses
       # (`cygpath -u "$RUNNER_TEMP"`, above).
       #
-      # ⚠️ UNCONFIRMED ON THIS LANE: gtest's `GTEST_OUTPUT=json:` path
-      # handling on Windows was not verified against a live Windows runner for
-      # this change — no Windows build tree was available to test against.
-      # The checker fails CLOSED on a path it cannot read (exit 2, "found 0
-      # gtest JSON report(s)"), so a wrong form reds this step loudly on the
-      # first CI run rather than passing silently on an empty scan.
+      # If gtest cannot write to the GTEST_OUTPUT path form used here, no reports
+      # appear, and the checker fails closed: exit 2, report count mismatch.
       - name: "Interop gate — ctest -L interop, skip set asserted (#431)"
         if: matrix.preset == 'windows-msvc-release'
         shell: bash

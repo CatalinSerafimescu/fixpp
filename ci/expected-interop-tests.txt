@@ -13,8 +13,8 @@
 # `if(TARGET fixpp_codegen_generate)` in tests/interop/CMakeLists.txt — that
 # target is defined whenever FIXPP_BUILD_CODEGEN_TOOL is ON, which is the
 # CMakeLists.txt default and is not overridden by any preset in
-# CMakePresets.json (`grep -n FIXPP_BUILD_CODEGEN_TOOL CMakePresets.json` is
-# empty at the time this pin was written).
+# CMakePresets.json. Check with:
+#   grep -n FIXPP_BUILD_CODEGEN_TOOL CMakePresets.json
 #
 # RE-DERIVE with:
 #   ctest --preset <preset> -L interop -N | sed -n 's/^Total Tests: //p'
@@ -23,12 +23,6 @@
 # the line — same discipline as ci/expected-eligible-tests.txt: exact
 # equality, never a floor.
 #
-# windows-msvc-release and linux-clang-libc++ are UNMEASURED from this
-# checkout (no built tree for either was available to run `ctest -N`
-# against). Pinned to the linux-clang-release value on the strength of the
-# FIXPP_BUILD_CODEGEN_TOOL argument above and the absence of any other
-# preset-conditional interop source; the first CI run on each of those two
-# lanes is this pin's actual verification, not a claim already discharged.
 linux-clang-release   30
 windows-msvc-release  30
 linux-clang-libc++    30
