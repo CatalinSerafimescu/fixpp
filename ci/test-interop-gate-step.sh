@@ -329,16 +329,17 @@ run_full "E ctest failure on the real run is annotated with ::error, not a bare 
 # not left to a bare `set -e` abort with no ::error line. Runs the FULL,
 # untruncated step with the fake ctest failing only on `-N`, and asserts the
 # real (GTEST_OUTPUT) call is never reached rather than merely narrating it. ─
-run_full_n_fail() {
+run_full_n_fail() {  # <label> <want-rc> <frag> [<workflow> <preset> <pin>]
   local label="$1" want_rc="$2" frag="$3"
+  local workflow="${4:-$TIER1}" preset="${5:-$PRESET}" pin="${6:-$PIN_LF}"
   local celldir="$WORK/cell-$RANDOM$RANDOM"
   local bindir="$celldir-bin"
   mkdir -p "$celldir/ci" "$bindir"
-  printf '%s' "$PIN_LF" > "$celldir/ci/expected-interop-tests.txt"
+  printf '%s' "$pin" > "$celldir/ci/expected-interop-tests.txt"
   make_fake_ctest "$bindir"
   local argvlog="$celldir.argv"; : > "$argvlog"
   local script="$celldir.sh"
-  extract_run "$script"
+  extract_run_from "$workflow" "$preset" "$script"
   local out rc=0
   out="$(cd "$celldir" && PATH="$bindir:$PATH" RUNNER_TEMP="$celldir/runnertemp" \
            FAKE_CTEST_ARGV_LOG="$argvlog" FAKE_CTEST_LISTING="$LISTING_LF" \
@@ -361,6 +362,11 @@ run_full_n_fail() {
 }
 run_full_n_fail "E-N ctest -N failure is annotated with ::error, not a bare set -e abort" \
   1 "::error title=Interop gate::ctest -L interop -N failed on $PRESET."
+# tier2 carries its own copy of the step (exempt from the tier1==tier3
+# byte-identity pin); the -N failure exits before its cygpath/python lines.
+run_full_n_fail "E-N-tier2 ctest -N failure is annotated with ::error on tier2.yml's own body" \
+  1 "::error title=Interop gate::ctest -L interop -N failed on $PRESET_TIER2." \
+  "$TIER2" "$PRESET_TIER2" "$PIN_LF_TIER2"
 
 # ── S: the step's SUCCESS path — cell E, above, forces the real ctest call
 # to fail, so the checker line after it is never reached there. This drives
@@ -571,7 +577,7 @@ del lines[i:i + 5]
 open(p, "w", encoding="utf-8").writelines(lines)
 ' "$LISTING_NO_SCHEMA" "$PIN_LF" 0 "DERIVATION_BINARIES=3"
 
-CELLS_DECLARED=14
+CELLS_DECLARED=15
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$CELLS_DECLARED" ]; then
