@@ -61,9 +61,9 @@
 # `ccache_tag_regex` must stay pure string work (see its header), so the family
 # cannot come from `--version` or CMakePresets.json there. Both the minter and the
 # matcher call THIS function, so they cannot disagree about the family. The minter
-# additionally refuses a banner that contradicts it (see ccache_cache_key), so a
-# gcc preset whose name does not carry `gcc` fails loudly instead of minting a tag
-# its own pruner would skip.
+# additionally refuses a banner that contradicts it (see ccache_cache_key): the
+# family LABEL a tag carries must not contradict the compiler that actually built
+# it, or the tag would misreport its own diagnostic.
 ccache_preset_family() {
   case "-$1-" in
     *-gcc-*) printf 'gcc' ;;
@@ -145,10 +145,10 @@ ccache_cache_key() {
   family="$(ccache_preset_family "$preset")"
   first="$(printf '%s\n' "$vout" | head -1)"
 
-  # The banner must agree with the family the preset NAME selects (#464): the
-  # pruner matches by name, so a disagreeing tag would be minted under a grammar
-  # its own prune never classifies. That is a cost failure, so it degrades to
-  # "no cache this run", like every other failure here.
+  # The banner must agree with the family the preset NAME selects (#464): a tag
+  # minted under a family label the compiler does not back would misreport its
+  # own diagnostic. That is a cost failure, so it degrades to "no cache this
+  # run", like every other failure here.
   case "$family" in
     clang)
       case "$vout" in
