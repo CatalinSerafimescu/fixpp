@@ -690,9 +690,9 @@ def check_push_trusting_triggers(root, violations):
 # label/checker-call wiring is intact.
 #
 # What is asserted here is deliberately the STATIC, per-workflow shape:
-# the step exists exactly once, its leg guard, no continue-on-error, `-L
-# interop` appears for both ctest calls, the pin file is read, and the
-# checker invocation carries all three required flags. The CR-normalisation,
+# the step exists exactly once, its leg guard, no continue-on-error, every
+# `ctest -L interop` invocation carries the label, the pin file is read, and
+# the checker invocation carries every required flag. The CR-normalisation,
 # exactly-once schema-check exclusion and ctest-failure annotation this step
 # also carries are exercised by EXECUTING the extracted run: text against a
 # fake ctest in ci/test-interop-gate-step.sh — a static grep for those lines
@@ -766,12 +766,11 @@ def check_interop_gate_step(root, violations):
         # count as a match of its own prefix.
         l_count = len(re.findall(
             r"ctest --preset \$\{\{ matrix\.preset \}\} -L interop\b", run))
-        if l_count != 3:
+        if l_count != 2:
             violations.append(
                 f"INTEROP GATE STEP LABEL DRIFT: {wf_name}'s '{INTEROP_STEP_NAME}' step "
-                f"invokes `ctest ... -L interop` {l_count} time(s), expected exactly 3 (the "
-                f"registration-count call, the ctest JSON registration call, and the real "
-                "GTEST_OUTPUT run).")
+                f"invokes `ctest ... -L interop` {l_count} time(s), expected exactly 2 (the "
+                f"registration-count call and the real GTEST_OUTPUT run).")
 
         # The actual READ (an input redirect), not merely a mention — the
         # step's own diagnostic `echo` text also names the file when it
@@ -781,7 +780,7 @@ def check_interop_gate_step(root, violations):
                 f"INTEROP GATE STEP PIN READ MISSING: {wf_name}'s '{INTEROP_STEP_NAME}' "
                 f"step no longer reads ci/expected-interop-tests.txt.")
 
-        for flag in ("--json-dir", "--ctest-json", "--expected-skips", "--expected-count"):
+        for flag in ("--json-dir", "--bin-dir", "--expected-skips", "--expected-count"):
             if flag not in run:
                 violations.append(
                     f"INTEROP GATE STEP CHECKER CALL DRIFT: {wf_name}'s "
@@ -824,7 +823,7 @@ def check_interop_gate_step(root, violations):
 
     if checked:
         print(f"  interop gate step: {checked}/{len(INTEROP_ROSTER)} tier workflow(s) wire "
-              f"the #431 step correctly (leg guard, no continue-on-error, -L interop three times, "
+              f"the #431 step correctly (leg guard, no continue-on-error, -L interop twice, "
               f"pin-file read, checker invocation args).")
     return True
 

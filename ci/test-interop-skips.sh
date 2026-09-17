@@ -64,33 +64,54 @@ write_empty_json() {
   printf '%s' '{"tests":0,"failures":0,"disabled":0,"errors":0,"name":"AllTests","testsuites":[]}' > "$path"
 }
 
-write_ctest_json() {
-  local path="$1" tests_json="${2:-}"
-  if [ -z "$tests_json" ]; then
-    tests_json='[{"name":"interop_alpha_test","command":["/fake/interop_alpha_test"],"properties":[]}]'
-  fi
-  python3 - "$path" "$tests_json" <<'PY'
-import json, sys
-path, tests_json = sys.argv[1:3]
-with open(path, "w", encoding="utf-8") as f:
-    json.dump({"kind": "ctestInfo", "version": {"major": 1, "minor": 0},
-               "tests": json.loads(tests_json)}, f)
-PY
+# Writes an executable stub at <bin-dir>/<stem> that, when invoked with
+# `--gtest_list_tests --gtest_output=json:PATH`, copies <report> to PATH
+# verbatim — the binary's own enumeration then equals whatever the report
+# already says, which is what makes every pre-existing (non-L) cell below
+# trivially consistent: the mirrored "binary" cannot itself disagree with
+# the report it mirrors. It ignores every other argument.
+write_mirror_stub() {
+  local stub="$1" report="$2"
+  cat > "$stub" <<PYEOF
+#!/usr/bin/env python3
+import shutil, sys
+report = "$report"
+out = None
+for a in sys.argv[1:]:
+    if a.startswith("--gtest_output=json:"):
+        out = a.split(":", 1)[1]
+if out:
+    shutil.copyfile(report, out)
+PYEOF
+  chmod +x "$stub"
+}
+
+# For every <json-dir>/*.json report, writes a mirror stub named after its
+# stem into <bin-dir>.
+make_mirror_bin_dir() {
+  local json_dir="$1" bin_dir="$2"
+  mkdir -p "$bin_dir"
+  local f stem
+  for f in "$json_dir"/*.json; do
+    [ -e "$f" ] || continue
+    stem="$(basename "$f" .json)"
+    write_mirror_stub "$bin_dir/$stem" "$f"
+  done
 }
 
 # $1 = case name, $2 = json-dir, $3 = expected-skips file, $4 = expected-count,
 # $5 = expected exit code, $6 = required fragment in stdout+stderr,
-# $7 = optional ctest --show-only=json-v1 fixture.
+# $7 = optional bin-dir (default: a mirror stub per report, see above).
 run_check() {
   local name="$1" json_dir="$2" skips_file="$3" count="$4" want_rc="$5" frag="$6"
-  local ctest_json="${7:-}"
+  local bin_dir="${7:-}"
   local out rc=0
-  if [ -z "$ctest_json" ]; then
-    ctest_json="$WORK/ctest-${PASS}-${FAIL}.json"
-    write_ctest_json "$ctest_json"
+  if [ -z "$bin_dir" ]; then
+    bin_dir="$WORK/bin-${PASS}-${FAIL}"
+    make_mirror_bin_dir "$json_dir" "$bin_dir"
   fi
   out="$(python3 "$CHECK" --json-dir "$json_dir" --expected-skips "$skips_file" \
-           --ctest-json "$ctest_json" \
+           --bin-dir "$bin_dir" \
            --expected-count "$count" 2>&1)" || rc=$?
   if [ "$rc" -ne "$want_rc" ]; then
     printf '%s\n' "$out" | sed 's/^/  | /'
@@ -417,52 +438,6 @@ printf 'Suite.CaseA\n' > "$WORK/t29-skips.txt"
 run_check "T29 skip message without a trailing newline is a bad reason" \
   "$d" "$WORK/t29-skips.txt" 2 1 "reason other than a counterparty"
 
-# ── T30-T34: CTest-registered gtest controls must fail the gate before the
-# per-report scan, because filtered or sharded cases are absent from gtest JSON.
-d="$WORK/t30"; mkdir -p "$d"
-write_json "$d/binA.json" Suite CaseA COMPLETED
-write_json "$d/binB.json" Suite CaseB COMPLETED
-: > "$WORK/t30-skips.txt"
-write_ctest_json "$WORK/t30-ctest.json" \
-  '[{"name":"interop_alpha_test","command":["/fake/interop_alpha_test"],"properties":[{"name":"ENVIRONMENT","value":["GTEST_FILTER=-Suite.CaseB"]}]}]'
-run_check "T30 registered ENVIRONMENT GTEST_FILTER is caught" \
-  "$d" "$WORK/t30-skips.txt" 2 1 "registered gtest filter/shard control" "$WORK/t30-ctest.json"
-
-d="$WORK/t31"; mkdir -p "$d"
-write_json "$d/binA.json" Suite CaseA COMPLETED
-write_json "$d/binB.json" Suite CaseB COMPLETED
-: > "$WORK/t31-skips.txt"
-write_ctest_json "$WORK/t31-ctest.json" \
-  '[{"name":"interop_alpha_test","command":["/fake/interop_alpha_test"],"properties":[{"name":"ENVIRONMENT_MODIFICATION","value":["GTEST_FILTER=set:-Suite.CaseB"]}]}]'
-run_check "T31 registered ENVIRONMENT_MODIFICATION GTEST_FILTER is caught" \
-  "$d" "$WORK/t31-skips.txt" 2 1 "registered gtest filter/shard control" "$WORK/t31-ctest.json"
-
-d="$WORK/t32"; mkdir -p "$d"
-write_json "$d/binA.json" Suite CaseA COMPLETED
-write_json "$d/binB.json" Suite CaseB COMPLETED
-: > "$WORK/t32-skips.txt"
-write_ctest_json "$WORK/t32-ctest.json" \
-  '[{"name":"interop_alpha_test","command":["/fake/interop_alpha_test","--gtest_filter=-Suite.CaseB"],"properties":[]}]'
-run_check "T32 registered --gtest_filter command argument is caught" \
-  "$d" "$WORK/t32-skips.txt" 2 1 "registered gtest filter/shard control" "$WORK/t32-ctest.json"
-
-d="$WORK/t33"; mkdir -p "$d"
-write_json "$d/binA.json" Suite CaseA COMPLETED
-write_json "$d/binB.json" Suite CaseB COMPLETED
-: > "$WORK/t33-skips.txt"
-write_ctest_json "$WORK/t33-ctest.json" \
-  '[{"name":"interop_alpha_test","command":["/fake/interop_alpha_test"],"properties":[{"name":"ENVIRONMENT","value":["TSAN_OPTIONS=halt_on_error=1"]}]},{"name":"interop_cell_results_schema_check","command":["python3","-m","pytest"],"properties":[]}]'
-run_check "T33 non-gtest ENVIRONMENT and pytest command are allowed" \
-  "$d" "$WORK/t33-skips.txt" 2 0 "PASS:" "$WORK/t33-ctest.json"
-
-d="$WORK/t34"; mkdir -p "$d"
-write_json "$d/binA.json" Suite CaseA COMPLETED
-write_json "$d/binB.json" Suite CaseB COMPLETED
-: > "$WORK/t34-skips.txt"
-printf '{not json' > "$WORK/t34-ctest.json"
-run_check "T34 bad ctest JSON fails closed" \
-  "$d" "$WORK/t34-skips.txt" 2 2 "could not be read as JSON" "$WORK/t34-ctest.json"
-
 # ── T35-T36: the counterparty name and its port token must agree.
 d="$WORK/t35"; mkdir -p "$d"
 write_json "$d/binA.json" Suite CaseA SKIPPED "quickfix-cpp unavailable: INTEROP_QUICKFIX_J_PORT not set (parent harness did not lease a port)"
@@ -497,7 +472,120 @@ printf '%s' '{"testsuites":[{"name":"Suite","testsuite":[{"name":"CaseA","status
 run_check "T39 sibling suite without testsuite fails closed" \
   "$d" "$WORK/t39-skips.txt" 1 2 "has no \`testsuite\` field"
 
-CELLS_DECLARED=39
+# ── L1-L6: the checker enumerates each binary's own cases with
+# --gtest_list_tests, outside its ctest registration, and requires the
+# listed and reported Suite.Case sets to be equal in both directions — the
+# structural replacement for the deleted ctest-JSON registration scan
+# (fixpp#431 Gate B r6). ─────────────────────────────────────────────────────
+
+# ── L1: a case the binary enumerates is absent from the run report (a
+# filter/shard/wrapper/launcher omitted it). ────────────────────────────────
+d="$WORK/l1"; mkdir -p "$d"
+write_json "$d/binA.json" Suite CaseA COMPLETED
+b="$WORK/l1-bin"; mkdir -p "$b"
+cat > "$b/binA" <<'PYEOF'
+#!/usr/bin/env python3
+import json, sys
+out = None
+for a in sys.argv[1:]:
+    if a.startswith("--gtest_output=json:"):
+        out = a.split(":", 1)[1]
+doc = {"tests": 2, "testsuites": [{"name": "Suite",
+       "testsuite": [{"name": "CaseA"}, {"name": "CaseZ"}]}]}
+json.dump(doc, open(out, "w"))
+PYEOF
+chmod +x "$b/binA"
+: > "$WORK/l1-skips.txt"
+run_check "L1 a case enumerated by the binary is absent from the run report" \
+  "$d" "$WORK/l1-skips.txt" 1 1 "enumerated but absent from the run report" "$b"
+
+# ── L2: a case IN the run report that the binary does not enumerate (a
+# stale or wrong --bin-dir). ─────────────────────────────────────────────────
+d="$WORK/l2"; mkdir -p "$d"
+python3 - "$d/binA.json" <<'PY'
+import json, sys
+mk = lambda n: {"name": n, "file": "fixture.cpp", "line": 1, "status": "RUN",
+                "result": "COMPLETED", "time": "0s", "classname": "Suite"}
+doc = {"tests": 2, "failures": 0, "disabled": 0, "errors": 0, "name": "AllTests",
+       "testsuites": [{"name": "Suite", "tests": 2, "failures": 0, "disabled": 0,
+                        "testsuite": [mk("CaseA"), mk("CaseB")]}]}
+json.dump(doc, open(sys.argv[1], "w"))
+PY
+b="$WORK/l2-bin"; mkdir -p "$b"
+cat > "$b/binA" <<'PYEOF'
+#!/usr/bin/env python3
+import json, sys
+out = None
+for a in sys.argv[1:]:
+    if a.startswith("--gtest_output=json:"):
+        out = a.split(":", 1)[1]
+doc = {"tests": 1, "testsuites": [{"name": "Suite", "testsuite": [{"name": "CaseA"}]}]}
+json.dump(doc, open(out, "w"))
+PYEOF
+chmod +x "$b/binA"
+: > "$WORK/l2-skips.txt"
+run_check "L2 a case in the run report is not enumerated by the binary" \
+  "$d" "$WORK/l2-skips.txt" 1 1 "reported but not enumerated" "$b"
+
+# ── L3: no binary under --bin-dir for a report — fail closed. ──────────────
+d="$WORK/l3"; mkdir -p "$d"
+write_json "$d/binA.json" Suite CaseA COMPLETED
+b="$WORK/l3-bin"; mkdir -p "$b"
+: > "$WORK/l3-skips.txt"
+run_check "L3 missing binary under --bin-dir fails closed" \
+  "$d" "$WORK/l3-skips.txt" 1 2 "no binary for report" "$b"
+
+# ── L4: the binary cannot be enumerated (a nonzero exit from
+# --gtest_list_tests) — fail closed. ────────────────────────────────────────
+d="$WORK/l4"; mkdir -p "$d"
+write_json "$d/binA.json" Suite CaseA COMPLETED
+b="$WORK/l4-bin"; mkdir -p "$b"
+cat > "$b/binA" <<'PYEOF'
+#!/usr/bin/env python3
+import sys
+sys.exit(3)
+PYEOF
+chmod +x "$b/binA"
+: > "$WORK/l4-skips.txt"
+run_check "L4 a binary that cannot be enumerated fails closed" \
+  "$d" "$WORK/l4-skips.txt" 1 2 "could not enumerate" "$b"
+
+# ── L5: an inherited GTEST_FILTER must be scrubbed from the enumeration's
+# own environment — a stub that only omits a case when IT sees GTEST_FILTER
+# set proves the checker's child process does not inherit it, and the
+# checker still catches the run report's real omission. ────────────────────
+d="$WORK/l5"; mkdir -p "$d"
+write_json "$d/binA.json" Suite CaseA COMPLETED
+b="$WORK/l5-bin"; mkdir -p "$b"
+cat > "$b/binA" <<'PYEOF'
+#!/usr/bin/env python3
+import json, os, sys
+out = None
+for a in sys.argv[1:]:
+    if a.startswith("--gtest_output=json:"):
+        out = a.split(":", 1)[1]
+cases = [{"name": "CaseA"}]
+if "GTEST_FILTER" not in os.environ:
+    cases.append({"name": "CaseB"})
+doc = {"tests": len(cases), "testsuites": [{"name": "Suite", "testsuite": cases}]}
+json.dump(doc, open(out, "w"))
+PYEOF
+chmod +x "$b/binA"
+: > "$WORK/l5-skips.txt"
+GTEST_FILTER='-Suite.CaseB' run_check \
+  "L5 an inherited GTEST_FILTER is scrubbed from the enumeration's own environment" \
+  "$d" "$WORK/l5-skips.txt" 1 1 "enumerated but absent from the run report" "$b"
+
+# ── L6: pass control — the default mirroring stub (used by every cell above
+# that passes no explicit bin-dir) on a clean multi-binary run. ─────────────
+d="$WORK/l6"; mkdir -p "$d"
+write_json "$d/binA.json" Suite CaseA SKIPPED "$PORT_OK_CPP"
+write_json "$d/binB.json" Suite CaseB COMPLETED
+printf 'Suite.CaseA\n' > "$WORK/l6-skips.txt"
+run_check "L6 the default mirroring stub passes on a clean multi-binary run" \
+  "$d" "$WORK/l6-skips.txt" 2 0 "PASS:"
+
+CELLS_DECLARED=40
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$CELLS_DECLARED" ]; then

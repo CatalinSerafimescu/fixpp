@@ -631,16 +631,16 @@ p.write_text(s.replace(old, "", 1), encoding="utf-8")
 MUT
 expect "T32 tier2 checker invocation drops --expected-count is caught" 1 "INTEROP GATE STEP CHECKER CALL DRIFT: tier2.yml"
 
-# T32b: the checker invocation drops --ctest-json.
+# T32b: the checker invocation drops --bin-dir.
 fresh
 python3 - "$WORK/t/.github/workflows/tier1.yml" <<'MUT'
 import sys, pathlib
 p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
-old = '            --ctest-json "$ctest_json" \\\n'
+old = '            --bin-dir "build/${{ matrix.preset }}/bin" \\\n'
 assert s.count(old) == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
 p.write_text(s.replace(old, "", 1), encoding="utf-8")
 MUT
-expect "T32b tier1 checker invocation drops --ctest-json is caught" 1 "INTEROP GATE STEP CHECKER CALL DRIFT: tier1.yml"
+expect "T32b tier1 checker invocation drops --bin-dir is caught" 1 "INTEROP GATE STEP CHECKER CALL DRIFT: tier1.yml"
 
 # T33: the gate step is renamed away — zero steps match the pinned name.
 fresh

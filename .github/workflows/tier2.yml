@@ -700,8 +700,8 @@ jobs:
           set -euo pipefail
           unset INTEROP_QUICKFIX_CPP_PORT INTEROP_QUICKFIX_J_PORT \
                 INTEROP_QUICKFIX_CPP_HOST INTEROP_QUICKFIX_J_HOST
-          # Inherited gtest controls are cleared here; registered controls are
-          # checked from ctest's JSON registration before the report scan.
+          # Inherited GTEST_* is cleared so the run is unfiltered; the checker
+          # compares each report against the binary's own enumeration.
           unset "${!GTEST_@}"
           full=$(ctest --preset ${{ matrix.preset }} -L interop -N)
           full="${full//$'\r'/}"
@@ -726,11 +726,6 @@ jobs:
           names=$(echo "$names_all" | grep -v -x 'interop_cell_results_schema_check')
           binaries=$(echo "$names" | grep -c .)
 
-          ctest_json_unix="$(cygpath -u "$RUNNER_TEMP")/interop-ctest.json"
-          ctest_json_native="$(cygpath -m "$RUNNER_TEMP")/interop-ctest.json"
-          mkdir -p "$(cygpath -u "$RUNNER_TEMP")"
-          ctest --preset ${{ matrix.preset }} -L interop --show-only=json-v1 > "$ctest_json_unix"
-
           out_dir_unix="$(cygpath -u "$RUNNER_TEMP")/interop-gtest"
           out_dir_native="$(cygpath -m "$RUNNER_TEMP")/interop-gtest"
           rm -rf "$out_dir_unix" && mkdir -p "$out_dir_unix"
@@ -741,9 +736,11 @@ jobs:
             exit 1
           fi
 
+          bin_dir_native="$(cygpath -m "$PWD")/build/${{ matrix.preset }}/bin"
+
           python ci/assert-interop-skips.py \
             --json-dir "$out_dir_native" \
-            --ctest-json "$ctest_json_native" \
+            --bin-dir "$bin_dir_native" \
             --expected-skips tests/interop/expected-skips-without-counterparty.txt \
             --expected-count "$binaries"
 

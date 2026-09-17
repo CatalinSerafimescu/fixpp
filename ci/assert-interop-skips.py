@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """assert-interop-skips — a SKIP must not read as a PASS (fixpp#431).
 
-    ci/assert-interop-skips.py --json-dir DIR --ctest-json FILE --expected-skips FILE --expected-count N
+    ci/assert-interop-skips.py --json-dir DIR --bin-dir DIR --expected-skips FILE --expected-count N
 
 Reads the per-binary gtest JSON reports `GTEST_OUTPUT=json:DIR/` writes for a
-`ctest -L interop` run with no counterparty leased, and asserts three things
+`ctest -L interop` run with no counterparty leased, and asserts things
 the CI step's own count assertion (run before this script, over `ctest -N`)
 does not:
 
@@ -13,14 +13,21 @@ does not:
      {COMPLETED, SKIPPED}), and no report or suite has a nonzero `disabled`
      count — gtest reports a DISABLED_ case as status=NOTRUN,
      result=SUPPRESSED with a nonzero `disabled` count, and that is not the
-     same as running and passing. A GTEST_FILTER or shard control instead
-     OMITS a case from the report entirely, so the calling step unsets
-     inherited `GTEST_*` variables and `--ctest-json` rejects registered
-     gtest controls before this per-report scan runs;
-  3. the set of SKIPPED `Suite.Case` ids is EXACTLY the checked-in list in
+     same as running and passing;
+  3. the run report's case set matches the binary's OWN `--gtest_list_tests`
+     enumeration exactly, in both directions. A GTEST_FILTER, a shard
+     control, a wrapper, or a launcher can OMIT a case from the report
+     entirely regardless of how it is spelled in the ctest registration —
+     so this checker enumerates each binary itself, outside that
+     registration, with inherited `GTEST_*` variables scrubbed from the
+     enumeration's own environment, and requires the listed and reported
+     `Suite.Case` id sets to be equal. A case enumerated but absent from the
+     report, and a case reported but not enumerated (a stale or wrong
+     `--bin-dir`), are both violations;
+  4. the set of SKIPPED `Suite.Case` ids is EXACTLY the checked-in list in
      `--expected-skips` (both directions: an id that skips and is not listed,
      and a listed id that no longer skips, are both violations);
-  4. every skip's message, once its leading `<file>:<line>` location line is
+  5. every skip's message, once its leading `<file>:<line>` location line is
      stripped, FULLMATCHES the ONE reason this leg is allowed to skip for —
      a counterparty port not leased (INTEROP_QUICKFIX_{CPP,J}_PORT unset) —
      never any other guard the same test file may also carry
@@ -33,14 +40,16 @@ EXIT
      matches exactly
   1  a NAMED invariant above is violated — a real defect in this run
   2  the check could not be trusted to answer at all: the JSON directory or
-     the expected-skips file or ctest JSON file is missing, the number of JSON
-     reports does not match --expected-count, a report does not parse as JSON or
-     is not structurally a gtest report at any level (a non-object top level, a
+     the expected-skips file is missing, the number of JSON reports does not
+     match --expected-count, a report does not parse as JSON or is not
+     structurally a gtest report at any level (a non-object top level, a
      `testsuites`/`testsuite`/`skipped`/`failures` field of the wrong shape),
      the same `Suite.Case` id appears in two different reports, a single
-     report has zero cases with status=RUN, or zero cases were found across
-     every report. An empty, partial, or malformed-but-parseable scan is an
-     INSTRUMENT failure here, never a clean pass
+     report has zero cases with status=RUN, zero cases were found across
+     every report, a report's binary is missing under --bin-dir, or that
+     binary could not be enumerated with --gtest_list_tests. An empty,
+     partial, or malformed-but-parseable scan is an INSTRUMENT failure here,
+     never a clean pass
      (feedback_verification_grep_must_be_proven_nonzero_on_the_unfixed_tree).
 
 `--expected-count` is REQUIRED and must be a positive integer: this is the
@@ -87,74 +96,35 @@ def load_expected_skips(path: str) -> set:
     return ids
 
 
-def load_ctest_json(path: str) -> dict:
-    try:
-        with open(path, encoding="utf-8") as f:
-            doc = json.load(f)
-    except (OSError, json.JSONDecodeError) as e:
-        gh_error(f"ctest JSON '{path}' could not be read as JSON: {e}. Fail-closed.")
-        raise SystemExit(2)
+def listed_case_ids(exe: str) -> set:
+    """Enumerate the binary's own `Suite.Case` ids, bypassing whatever launcher,
+    wrapper, filter, or shard control its ctest registration carries — the
+    check that no scan of that registration's text can ever fully enumerate.
+    """
+    import subprocess
+    import tempfile
 
-    if not isinstance(doc, dict):
-        gh_error(f"ctest JSON '{path}' top level is a {type(doc).__name__}, "
-                  "not a JSON object. Fail-closed.")
-        raise SystemExit(2)
-    tests = doc.get("tests")
-    if not isinstance(tests, list):
-        gh_error(f"ctest JSON '{path}' has no `tests` list. Fail-closed.")
-        raise SystemExit(2)
-    return doc
-
-
-def registered_gtest_controls(ctest_doc: dict) -> list:
-    violations = []
-    for t in ctest_doc["tests"]:
-        if not isinstance(t, dict):
-            gh_error("ctest JSON has a `tests` entry that is not an object. Fail-closed.")
+    # Resolved to an absolute path BEFORE the subprocess's cwd is changed
+    # below — a relative --bin-dir (what every calling workflow passes,
+    # `build/${{ matrix.preset }}/bin`) contains a `/`, so POSIX exec takes
+    # it as a path rather than a PATH lookup: run with cwd=td unresolved, it
+    # would be interpreted relative to td and never found.
+    exe = os.path.abspath(exe)
+    env = {k: v for k, v in os.environ.items() if not k.upper().startswith("GTEST_")}
+    with tempfile.TemporaryDirectory() as td:
+        out = os.path.join(td, "list.json")
+        try:
+            subprocess.run(
+                [exe, "--gtest_list_tests", f"--gtest_output=json:{out}"],
+                env=env, cwd=td, capture_output=True, timeout=120, check=True)
+            with open(out, encoding="utf-8") as f:
+                doc = json.load(f)
+            return {f"{ts['name']}.{tc['name']}"
+                    for ts in doc["testsuites"] for tc in ts["testsuite"]}
+        except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError) as e:
+            gh_error(f"could not enumerate '{exe}' with --gtest_list_tests: {e!r}. "
+                     "Fail-closed.")
             raise SystemExit(2)
-        test_name = t.get("name")
-        if not isinstance(test_name, str) or not test_name:
-            gh_error("ctest JSON has a test entry without a non-empty `name`. Fail-closed.")
-            raise SystemExit(2)
-        properties = t.get("properties", [])
-        if not isinstance(properties, list):
-            gh_error(f"ctest JSON test '{test_name}' has a non-list `properties` field. "
-                      "Fail-closed.")
-            raise SystemExit(2)
-        props = {}
-        for p in properties:
-            if not isinstance(p, dict) or "name" not in p or "value" not in p:
-                gh_error(f"ctest JSON test '{test_name}' has a malformed property. "
-                          "Fail-closed.")
-                raise SystemExit(2)
-            props[p["name"]] = p["value"]
-        for k in ("ENVIRONMENT", "ENVIRONMENT_MODIFICATION"):
-            v = props.get(k)
-            entries = [v] if isinstance(v, str) else (v or [])
-            if not isinstance(entries, list):
-                gh_error(f"ctest JSON test '{test_name}' has a malformed `{k}` value. "
-                          "Fail-closed.")
-                raise SystemExit(2)
-            for e in entries:
-                if not isinstance(e, str):
-                    gh_error(f"ctest JSON test '{test_name}' has a non-string `{k}` entry. "
-                              "Fail-closed.")
-                    raise SystemExit(2)
-                if e.split("=", 1)[0].upper().startswith("GTEST_"):
-                    violations.append((test_name, k, e))
-        command = t.get("command", [])
-        if not isinstance(command, list):
-            gh_error(f"ctest JSON test '{test_name}' has a non-list `command` field. "
-                      "Fail-closed.")
-            raise SystemExit(2)
-        for a in command[1:]:
-            if not isinstance(a, str):
-                gh_error(f"ctest JSON test '{test_name}' has a non-string command argument. "
-                          "Fail-closed.")
-                raise SystemExit(2)
-            if re.match(r"--?gtest_", a, re.I):
-                violations.append((test_name, "command argument", a))
-    return violations
 
 
 def main() -> int:
@@ -162,8 +132,10 @@ def main() -> int:
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--json-dir", required=True,
                      help="directory GTEST_OUTPUT=json: wrote per-binary reports into")
-    ap.add_argument("--ctest-json", required=True,
-                     help="ctest --show-only=json-v1 output for the interop registration")
+    ap.add_argument("--bin-dir", required=True,
+                     help="directory holding the binary each <stem>.json report names, "
+                          "used to enumerate that binary's own cases with "
+                          "--gtest_list_tests, outside its ctest registration")
     ap.add_argument("--expected-skips", required=True,
                      help="checked-in sorted Suite.Case list "
                           "(tests/interop/expected-skips-without-counterparty.txt)")
@@ -194,14 +166,6 @@ def main() -> int:
         gh_error(f"could not read '{args.expected_skips}': {e}")
         return 2
 
-    ctest_doc = load_ctest_json(args.ctest_json)
-    ctest_violations = registered_gtest_controls(ctest_doc)
-    if ctest_violations:
-        for test_name, kind, entry in ctest_violations:
-            gh_error(f"{test_name} registers {kind} {entry} — a registered gtest "
-                      "filter/shard control omits cases from the JSON report")
-        return 1
-
     json_files = sorted(glob.glob(os.path.join(args.json_dir, "*.json")))
     if len(json_files) != args.expected_count:
         gh_error(f"found {len(json_files)} gtest JSON report(s) under "
@@ -216,6 +180,8 @@ def main() -> int:
     bad_reason_skips = []
     bad_status_cases = []
     disabled_violations = []
+    omitted_from_report = []  # enumerated by the binary but absent from its report
+    extra_in_report = []      # reported but not enumerated (stale/wrong --bin-dir)
     total_cases = 0
     seen_case_ids = {}  # case_id -> path of the report it was first seen in
 
@@ -247,6 +213,7 @@ def main() -> int:
 
         report_cases = 0
         report_run_cases = 0
+        report_ids = set()
 
         for ts in testsuites:
             if not isinstance(ts, dict):
@@ -293,6 +260,7 @@ def main() -> int:
                               "skip set cannot be compared.")
                     return 2
                 seen_case_ids[case_id] = path
+                report_ids.add(case_id)
                 status = tc.get("status")
                 result = tc.get("result")
 
@@ -300,10 +268,11 @@ def main() -> int:
                     report_run_cases += 1
 
                 # gtest reports a DISABLED_ case as status=NOTRUN,
-                # result=SUPPRESSED; GTEST_FILTER/shard-excluded cases are
-                # absent from the report. The gate requires emitted cases to
-                # have a real (COMPLETED/SKIPPED) result after the ctest-json
-                # preflight has rejected registered gtest controls.
+                # result=SUPPRESSED; a GTEST_FILTER/shard/wrapper/launcher
+                # instead omits the case from the report entirely, which the
+                # enumeration comparison below catches. The gate requires
+                # every emitted case to have a real (COMPLETED/SKIPPED)
+                # result.
                 if status != "RUN" or result not in ("COMPLETED", "SKIPPED"):
                     bad_status_cases.append((case_id, status, result))
                     continue
@@ -350,12 +319,31 @@ def main() -> int:
         # Per-report zero, replacing the aggregate-only guard below: a binary
         # whose tests are all compiled out on one platform (an #ifdef) can
         # report zero RUN cases while every OTHER report in this run is
-        # non-empty — the aggregate check alone cannot see that.
+        # non-empty — the aggregate check alone cannot see that. Checked
+        # BEFORE the enumeration below so an entirely-empty/suppressed
+        # report is attributed to this named cause, not to an enumeration
+        # mismatch or an "enumerates zero cases" instrument failure.
         if report_run_cases == 0:
             gh_error(f"'{path}' has {report_cases} test case(s) registered but ZERO with "
                       "status=RUN. An empty or entirely-suppressed report cannot be "
                       "trusted as a clean one — fail-closed.")
             return 2
+
+        stem = os.path.splitext(os.path.basename(path))[0]
+        exe = next((c for c in (os.path.join(args.bin_dir, stem),
+                                 os.path.join(args.bin_dir, stem + ".exe"))
+                    if os.path.isfile(c)), None)
+        if exe is None:
+            gh_error(f"no binary for report '{path}' under '{args.bin_dir}'. Fail-closed.")
+            return 2
+        listed = listed_case_ids(exe)
+        if not listed:
+            gh_error(f"'{exe}' enumerates zero cases with --gtest_list_tests. Fail-closed.")
+            return 2
+        for cid in sorted(listed - report_ids):
+            omitted_from_report.append((cid, stem))
+        for cid in sorted(report_ids - listed):
+            extra_in_report.append((cid, stem))
 
     if total_cases == 0:
         gh_error(f"{len(json_files)} JSON report(s) present but ZERO test cases were "
@@ -364,6 +352,18 @@ def main() -> int:
         return 2
 
     violations = []
+
+    if omitted_from_report:
+        violations.append(
+            f"{len(omitted_from_report)} case(s) enumerated but absent from the run report "
+            "(a filter, shard, wrapper, or launcher omitted them): "
+            + ", ".join(f"{stem}:{cid}" for cid, stem in omitted_from_report))
+
+    if extra_in_report:
+        violations.append(
+            f"{len(extra_in_report)} case(s) reported but not enumerated by the binary "
+            "under --bin-dir (a stale or wrong --bin-dir): "
+            + ", ".join(f"{stem}:{cid}" for cid, stem in extra_in_report))
 
     if failed_cases:
         violations.append(
