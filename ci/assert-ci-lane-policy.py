@@ -798,9 +798,12 @@ def check_interop_gate_step(root, violations):
 
         # gtest also takes a filter default from TESTBRIDGE_TEST_ONLY, which
         # the GTEST_ prefix unset above does not reach. The unset must be a
-        # real `unset` command (backslash continuations joined), not a mention.
+        # plain `unset NAME...` command whose arguments are only variable names
+        # (backslash continuations joined) — not a mention, not `unset -f`,
+        # not a line carrying a comment or a second command.
         joined = re.sub(r"\\\n\s*", " ", run)
-        if not any(re.match(r"\s*unset\b", ln) and re.search(r"\bTESTBRIDGE_TEST_ONLY\b", ln)
+        unset_re = re.compile(r"\s*unset((?:\s+[A-Za-z_][A-Za-z0-9_]*)+)\s*")
+        if not any((m := unset_re.fullmatch(ln)) and "TESTBRIDGE_TEST_ONLY" in m.group(1).split()
                    for ln in joined.splitlines()):
             violations.append(
                 f"INTEROP GATE STEP TESTBRIDGE NOT UNSET: {wf_name}'s "

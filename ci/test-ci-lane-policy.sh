@@ -701,6 +701,26 @@ p.write_text(s.replace(old, "INTEROP_QUICKFIX_J_HOST\n          # TESTBRIDGE_TES
 MUT
 expect "T37 tier2 TESTBRIDGE_TEST_ONLY kept only in a comment is caught" 1 "INTEROP GATE STEP TESTBRIDGE NOT UNSET: tier2.yml"
 
+# T38/T39: an `unset` line that names TESTBRIDGE_TEST_ONLY without unsetting
+# the variable — in a trailing comment, or as a function via `unset -f`.
+for form in inline-comment unset-f; do
+  fresh
+  python3 - "$WORK/t/.github/workflows/tier2.yml" "$form" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old = "INTEROP_QUICKFIX_J_HOST \\\n                TESTBRIDGE_TEST_ONLY\n"
+new = {"inline-comment": "INTEROP_QUICKFIX_J_HOST # TESTBRIDGE_TEST_ONLY\n",
+       "unset-f": "INTEROP_QUICKFIX_J_HOST\n          unset -f TESTBRIDGE_TEST_ONLY\n"}[sys.argv[2]]
+assert s.count(old) == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+p.write_text(s.replace(old, new, 1), encoding="utf-8")
+MUT
+  case "$form" in
+    inline-comment) label="T38 tier2 TESTBRIDGE_TEST_ONLY only in a trailing comment on the unset line is caught" ;;
+    unset-f)        label="T39 tier2 \`unset -f TESTBRIDGE_TEST_ONLY\` (a function unset) is caught" ;;
+  esac
+  expect "$label" 1 "INTEROP GATE STEP TESTBRIDGE NOT UNSET: tier2.yml"
+done
+
 # ── The harness's own execution count ────────────────────────────────────────
 #
 # ⚠️ ADDED WITH THE FOUR NEW CELLS, and the omission is the point: a `cell`
@@ -715,9 +735,8 @@ expect "T37 tier2 TESTBRIDGE_TEST_ONLY kept only in a comment is caught" 1 "INTE
 # T26 (#465 Gate B r1 F1) added the roster-floor cell — a roster member whose
 # guard is respelled away from the idiom must still be caught. T27 (#465 Gate
 # B r1 F2) added the list-form `on:` cell the per-line assessment had claimed
-# without a driving test. T28-T37 (fixpp#431) added the interop gate step's
-# static wiring cells.
-CELLS_DECLARED=40
+# without a driving test.
+CELLS_DECLARED=42
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$CELLS_DECLARED" ]; then
