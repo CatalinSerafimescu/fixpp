@@ -16,18 +16,24 @@
 using fixpp::test_support::wait_until_observed;
 
 TEST(WaitUntilObservedClamp, TimeoutReturnsPromptlyWhenSliceOutlivesBudget) {
-    // Predicate never becomes true; slice is two orders of magnitude larger
-    // than the budget. An unclamped sleep would block for ~slice (200ms);
-    // the clamp bounds the wait to ~budget (2ms).
+    // Predicate never becomes true, and the slice dwarfs the budget: an
+    // unclamped sleep blocks for at least `slice`, the clamp bounds the wait to
+    // about `budget`.
+    //
+    // The bound is derived from the MUTANT's side, which cannot move: sleep_for
+    // blocks for at least its duration, so an unclamped wait is never shorter
+    // than `slice`, however fast the runner is. A scheduling stall is ADDITIVE
+    // and only lengthens the clamped path, so the false red needs one stall of
+    // about `bound`. Size `slice` against the largest stall a runner can
+    // produce, never against the clamped path's latency (#470).
     const auto budget = std::chrono::milliseconds{2};
-    const auto slice = std::chrono::milliseconds{200};
+    const auto slice = std::chrono::seconds{10};
+    const auto bound = slice - std::chrono::seconds{1};
 
     const auto start = std::chrono::steady_clock::now();
     const bool observed = wait_until_observed([] { return false; }, budget, slice);
     const auto elapsed = std::chrono::steady_clock::now() - start;
 
     EXPECT_FALSE(observed);
-    // Generous upper bound to stay robust under CI scheduling jitter while
-    // still discriminating against the unclamped ~200ms behaviour.
-    EXPECT_LT(elapsed, std::chrono::milliseconds{100});
+    EXPECT_LT(elapsed, bound);
 }
