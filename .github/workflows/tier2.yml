@@ -699,7 +699,8 @@ jobs:
         run: |
           set -euo pipefail
           unset INTEROP_QUICKFIX_CPP_PORT INTEROP_QUICKFIX_J_PORT \
-                INTEROP_QUICKFIX_CPP_HOST INTEROP_QUICKFIX_J_HOST
+                INTEROP_QUICKFIX_CPP_HOST INTEROP_QUICKFIX_J_HOST \
+                TESTBRIDGE_TEST_ONLY
           # Inherited GTEST_* is cleared so the run is unfiltered; the checker
           # compares each report against the binary's own enumeration.
           unset "${!GTEST_@}"

@@ -585,7 +585,74 @@ printf 'Suite.CaseA\n' > "$WORK/l6-skips.txt"
 run_check "L6 the default mirroring stub passes on a clean multi-binary run" \
   "$d" "$WORK/l6-skips.txt" 2 0 "PASS:"
 
-CELLS_DECLARED=40
+# ── T-L-bridge: googletest takes a filter default from TESTBRIDGE_TEST_ONLY
+# when GTEST_FILTER is unset, and that name is not GTEST_-prefixed, so an
+# inherited value reaches both the real run and (absent a command-line
+# override) the enumeration subprocess alike. The stub below encodes that
+# precedence as data — the cell does not itself measure gtest's behaviour —
+# and the run report is built to match what a real run under the same
+# inherited variable would omit. ────────────────────────────────────────────
+d="$WORK/tlbridge"; mkdir -p "$d"
+write_json "$d/binA.json" Suite CaseA COMPLETED
+b="$WORK/tlbridge-bin"; mkdir -p "$b"
+cat > "$b/binA" <<'PYEOF'
+#!/usr/bin/env python3
+import json, os, sys
+argv = sys.argv[1:]
+log = os.environ.get("STUB_ARGV_LOG")
+if log:
+    with open(log, "a") as lf:
+        lf.write(" ".join(argv) + "\n")
+out = None
+for a in argv:
+    if a.startswith("--gtest_output=json:"):
+        out = a.split(":", 1)[1]
+if os.environ.get("TESTBRIDGE_TEST_ONLY") and "--gtest_filter=*" not in argv:
+    cases = [{"name": "CaseA"}]
+else:
+    cases = [{"name": "CaseA"}, {"name": "CaseB"}]
+doc = {"tests": len(cases), "testsuites": [{"name": "Suite", "testsuite": cases}]}
+json.dump(doc, open(out, "w"))
+PYEOF
+chmod +x "$b/binA"
+: > "$WORK/tlbridge-skips.txt"
+tlbridge_log="$WORK/tlbridge.argvlog"; : > "$tlbridge_log"
+STUB_ARGV_LOG="$tlbridge_log" TESTBRIDGE_TEST_ONLY='-Suite.CaseB' run_check \
+  "T-L-bridge an inherited TESTBRIDGE_TEST_ONLY does not let a filtered report agree with an equally-filtered enumeration" \
+  "$d" "$WORK/tlbridge-skips.txt" 1 1 "enumerated but absent from the run report" "$b"
+if ! grep -qF -- "--gtest_filter=*" "$tlbridge_log"; then
+  bad "T-L-bridge-argv the enumeration subprocess argv did not carry --gtest_filter=*: $(cat "$tlbridge_log")"
+else
+  ok "T-L-bridge-argv the enumeration subprocess argv carries --gtest_filter=*"
+fi
+
+# ── T-L-bridge-mutant: removing --gtest_filter=* from the checker's own
+# enumeration argv must let the same inherited TESTBRIDGE_TEST_ONLY collapse
+# the run and the enumeration back onto each other, flipping the cell above
+# to a false pass — run against a mutated TEMP COPY of the checker; the
+# tracked script is never touched. ──────────────────────────────────────────
+mutant_check="$WORK/assert-interop-skips-mutant.py"
+python3 - "$CHECK" "$mutant_check" <<'PY'
+import sys
+src, dst = sys.argv[1:3]
+lines = open(src, encoding="utf-8").read().splitlines(keepends=True)
+target = '[exe, "--gtest_list_tests", "--gtest_filter=*",'
+old_join = '"--gtest_list_tests", "--gtest_filter=*",'
+new_join = '"--gtest_list_tests",'
+hits = [i for i, ln in enumerate(lines) if ln.strip() == target]
+assert len(hits) == 1, (
+    "MUTATION DID NOT APPLY (found %d) - re-point the pattern, do not delete "
+    "the mutant: %r" % (len(hits), target))
+assert old_join in lines[hits[0]], lines[hits[0]]
+lines[hits[0]] = lines[hits[0]].replace(old_join, new_join)
+open(dst, "w", encoding="utf-8").writelines(lines)
+PY
+: > "$WORK/tlbridge-mutant-skips.txt"
+CHECK="$mutant_check" TESTBRIDGE_TEST_ONLY='-Suite.CaseB' run_check \
+  "T-L-bridge-mutant removing --gtest_filter=* from the checker lets TESTBRIDGE_TEST_ONLY filter both sides alike" \
+  "$d" "$WORK/tlbridge-mutant-skips.txt" 1 0 "PASS:" "$b"
+
+CELLS_DECLARED=43
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$CELLS_DECLARED" ]; then

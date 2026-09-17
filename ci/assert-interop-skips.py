@@ -20,10 +20,13 @@ does not:
      entirely regardless of how it is spelled in the ctest registration —
      so this checker enumerates each binary itself, outside that
      registration, with inherited `GTEST_*` variables scrubbed from the
-     enumeration's own environment, and requires the listed and reported
-     `Suite.Case` id sets to be equal. A case enumerated but absent from the
-     report, and a case reported but not enumerated (a stale or wrong
-     `--bin-dir`), are both violations;
+     enumeration's own environment AND its filter forced to `*` on the
+     command line (googletest takes a filter default from
+     `TESTBRIDGE_TEST_ONLY` when unset, which is not `GTEST_`-prefixed and
+     so survives the environment scrub alone), and requires the listed and
+     reported `Suite.Case` id sets to be equal. A case enumerated but absent
+     from the report, and a case reported but not enumerated (a stale or
+     wrong `--bin-dir`), are both violations;
   4. the set of SKIPPED `Suite.Case` ids is EXACTLY the checked-in list in
      `--expected-skips` (both directions: an id that skips and is not listed,
      and a listed id that no longer skips, are both violations);
@@ -114,8 +117,14 @@ def listed_case_ids(exe: str) -> set:
     with tempfile.TemporaryDirectory() as td:
         out = os.path.join(td, "list.json")
         try:
+            # `--gtest_filter=*` on the command line, not only the env scrub
+            # above: googletest's GetDefaultFilter() falls back to
+            # TESTBRIDGE_TEST_ONLY when GTEST_FILTER is unset, and that name
+            # is not GTEST_-prefixed, so it would otherwise reach this
+            # enumeration and the real run identically.
             subprocess.run(
-                [exe, "--gtest_list_tests", f"--gtest_output=json:{out}"],
+                [exe, "--gtest_list_tests", "--gtest_filter=*",
+                 f"--gtest_output=json:{out}"],
                 env=env, cwd=td, capture_output=True, timeout=120, check=True)
             with open(out, encoding="utf-8") as f:
                 doc = json.load(f)
