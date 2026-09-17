@@ -326,9 +326,9 @@ run_full "E ctest failure on the real run is annotated with ::error, not a bare 
   1 1 "::error title=Interop gate::ctest -L interop failed on $PRESET."
 
 # ── E-N: the REGISTRATION (`-N`) ctest call fails — must be annotated too,
-# not left to a bare `set -e` abort with no ::error line (Codex round-1 #7,
-# re-raised round 6 #1). Runs the FULL, untruncated step with the fake ctest
-# failing only on `-N`; the real (GTEST_OUTPUT) call is never reached. ─────
+# not left to a bare `set -e` abort with no ::error line. Runs the FULL,
+# untruncated step with the fake ctest failing only on `-N`, and asserts the
+# real (GTEST_OUTPUT) call is never reached rather than merely narrating it. ─
 run_full_n_fail() {
   local label="$1" want_rc="$2" frag="$3"
   local celldir="$WORK/cell-$RANDOM$RANDOM"
@@ -351,6 +351,11 @@ run_full_n_fail() {
   if ! printf '%s\n' "$out" | grep -qF -- "$frag"; then
     printf '%s\n' "$out" | sed 's/^/  | /'
     bad "$label — exited $rc but WITHOUT '$frag' (failed/passed for the wrong reason)"; return
+  fi
+  local l_count
+  l_count=$(grep -cF -- "-L interop" "$argvlog")
+  if [ "$l_count" != "1" ]; then
+    bad "$label — fake ctest's argv log records $l_count '-L interop' call(s), expected exactly 1 (the real GTEST_OUTPUT call must never be reached): $(cat "$argvlog")"; return
   fi
   ok "$label"
 }

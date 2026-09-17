@@ -22,8 +22,9 @@ does not:
      registration, with inherited `GTEST_*` variables scrubbed from the
      enumeration's own environment AND its filter forced to `*` on the
      command line (googletest takes a filter default from
-     `TESTBRIDGE_TEST_ONLY` when unset, which is not `GTEST_`-prefixed and
-     so survives the environment scrub alone), and requires the listed and
+     `TESTBRIDGE_TEST_ONLY` when `GTEST_FILTER` is unset, and that name is
+     not `GTEST_`-prefixed and so survives the environment scrub alone),
+     and requires the listed and
      reported `Suite.Case` id sets to be equal. A case enumerated but absent
      from the report, and a case reported but not enumerated (a stale or
      wrong `--bin-dir`), are both violations;
