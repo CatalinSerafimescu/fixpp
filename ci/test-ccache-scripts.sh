@@ -70,6 +70,27 @@ printf 'g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright (C) 2024 Free Sof
 SHIM
 chmod +x "$shim_dir/fixpp-fake-gcc"
 
+# ── #467 F1 — additional gcc banner shapes (versioned / target-prefixed argv[0]
+# executable names, and a token that only contains 'g++' as a substring) ────
+# Table: fake-compiler suffix | banner first line | preset name. One shim per
+# row, generated here rather than five hand-written heredocs, because these
+# banners are exactly the shapes the triage names for C1.
+while IFS='|' read -r suffix banner preset; do
+  [ -n "$suffix" ] || continue
+  cat > "$shim_dir/fixpp-fake-gcc-$suffix" <<SHIM
+#!/usr/bin/env bash
+[ "\${1:-}" = "--version" ] || { echo "SHIM-VIOLATION: compiler \$*" >&2; exit 2; }
+printf '%s\n' '$banner'
+SHIM
+  chmod +x "$shim_dir/fixpp-fake-gcc-$suffix"
+done <<'TABLE'
+v13|g++-13 (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0|fake-gcc-v13
+tgt13|x86_64-linux-gnu-g++-13 (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0|fake-gcc-tgt13
+bare|gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0|fake-gcc-bare
+cxx|c++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0|fake-gcc-cxx
+negctrl|Ubuntu clang version 22.1.2 (g++ compat)|fake-gcc-negctrl
+TABLE
+
 cat > "$sandbox/CMakePresets.json" <<'JSON'
 {
   "version": 6,
@@ -80,7 +101,12 @@ cat > "$sandbox/CMakePresets.json" <<'JSON'
     { "name": "fake-gcc-release",   "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-gcc" } },
     { "name": "fake-gcc-clangbanner", "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-clang" } },
     { "name": "fake-clang-gccbanner", "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-gcc" } },
-    { "name": "fake-gone-compiler", "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-clang-missing" } }
+    { "name": "fake-gone-compiler", "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-clang-missing" } },
+    { "name": "fake-gcc-v13",         "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-gcc-v13" } },
+    { "name": "fake-gcc-tgt13",       "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-gcc-tgt13" } },
+    { "name": "fake-gcc-bare",        "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-gcc-bare" } },
+    { "name": "fake-gcc-cxx",         "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-gcc-cxx" } },
+    { "name": "fake-gcc-negctrl",     "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-gcc-negctrl" } }
   ]
 }
 JSON
@@ -400,6 +426,28 @@ for pre in fake-gcc-clangbanner fake-clang-gccbanner; do
   fi
 done
 ok "a banner contradicting the preset name's family refuses to mint (both directions)"
+
+# ── #467 F1 — accept versioned / target-prefixed gcc tokens (C1) ────────────
+#
+# The classifier reads the FIRST TOKEN of the banner, not a glob over the
+# whole line, so Ubuntu's actual `g++-13`/`x86_64-linux-gnu-g++-13` argv[0]
+# shapes must mint exactly like the bare `gcc`/`g++`/`c++` shapes.
+for row in fake-gcc-v13 fake-gcc-tgt13 fake-gcc-bare fake-gcc-cxx; do
+  T="$(expected_tag "$row")" || fail "gcc/mint-token: no tag for '$row' with a real gcc-family banner"
+  case "$T" in
+    "ccache-$row-gcc13-"????????) ;;
+    *) fail "gcc/mint-token: '$row' minted '$T', not ccache-$row-gcc13-<digest8>" ;;
+  esac
+done
+ok "versioned, bare and target-prefixed gcc/g++/c++ banners all mint gcc13 (C1)"
+
+# The negative control: a banner whose first TOKEN is not a gcc executable name
+# must still refuse, even though the string 'g++' appears later on the line —
+# only a whole-line substring check would be fooled by this.
+if mint_rc fake-gcc-negctrl; then
+  fail "gcc/token-negctrl: 'fake-gcc-negctrl' minted although its first token is 'Ubuntu', not a gcc executable name (the line only contains 'g++' inside a parenthetical)"
+fi
+ok "a banner whose first token is not a gcc executable name refuses to mint, even when 'g++' appears later on the line"
 
 # ── CONTAINER LANES (#259) — the SAME producer/matcher bridge, second grammar ─
 #

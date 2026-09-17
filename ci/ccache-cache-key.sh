@@ -149,6 +149,14 @@ ccache_cache_key() {
   # minted under a family label the compiler does not back would misreport its
   # own diagnostic. That is a cost failure, so it degrades to "no cache this
   # run", like every other failure here.
+  #
+  # ⚠️ THE TWO ARMS CHECK DIFFERENT SCOPES ON PURPOSE, NOT BY OVERSIGHT. Clang
+  # reports its identity as the phrase `clang version` anywhere in `--version`'s
+  # output (checked against $vout); GCC reports it as argv[0], always the FIRST
+  # TOKEN of the first line (checked against $first). No GCC banner contains the
+  # phrase `clang version`, and no CLANG banner's first token is a `gcc`/`g++`
+  # executable name, so unifying the scope would not change what either arm
+  # accepts — it would just make the gcc arm re-scan text it doesn't need.
   case "$family" in
     clang)
       case "$vout" in
@@ -159,8 +167,16 @@ ccache_cache_key() {
       # First `NN` following the word `version`.
       major="$(printf '%s' "$vout" | sed -n 's/.*version[[:space:]]\{1,\}\([0-9]\{1,\}\).*/\1/p' | head -1)" ;;
     gcc)
-      case "$first" in
-        g++\ *|gcc\ *|c++\ *) ;;
+      # Classify the FIRST TOKEN, not a glob over the whole line — a glob can
+      # span the space before the version parenthesis, so `g++\ *` only ever
+      # matched an UNVERSIONED `g++ (...)`. Ubuntu's actual GCC banners report
+      # argv[0] as the first token (`g++-13`, `x86_64-linux-gnu-g++-13`), so the
+      # accepted shapes are the bare/target-prefixed executable names GCC can be
+      # invoked as, with an optional numeric suffix. Nothing broader: a token
+      # that merely CONTAINS `g++`/`gcc` (e.g. inside a clang banner's own
+      # parenthetical) must still refuse.
+      case "${first%% *}" in
+        gcc|g++|c++|gcc-[0-9]*|g++-[0-9]*|*-gcc|*-g++|*-gcc-[0-9]*|*-g++-[0-9]*) ;;
         *) echo "ccache-cache: preset '$preset' is named as a gcc preset but '$CCACHE_CACHE_COMPILER --version' is not a gcc banner: $first" >&2
            return 1 ;;
       esac
