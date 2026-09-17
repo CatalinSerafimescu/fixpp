@@ -513,13 +513,16 @@ jobs:
       # writes: the cache only SHRANK, so republishing would replace the tagged
       # artifact with a strictly worse one.
       #
-      # An empty `outputs.changed` satisfies `!= '0'`, but it does NOT publish:
-      # every path in ci/ccache-stats.sh that ends before the emission exits 1,
-      # and the statistics step above is `if: always()` with no
-      # `continue-on-error`, so the job fails and this step's implicit
-      # `success()` skips it. That holds only while both of those stay true on
-      # the statistics step. The rationale for `changed` alone, with no
-      # restore-hit conjunct, is at the emission site in ci/ccache-stats.sh.
+      # An empty `outputs.changed` satisfies `!= '0'`, but the statistics step
+      # failing alone does not publish it: every path in ci/ccache-stats.sh
+      # that ends before the emission exits 1, and WHILE the statistics step
+      # above keeps `if: always()` and no `continue-on-error`, that exit fails
+      # the job and this step's implicit `success()` skips it. Nothing pins
+      # that step's key set for this workflow, so re-check it before relying
+      # on it. An empty read caused by THIS step reading an output name
+      # ci/ccache-stats.sh does not emit is a separate failure that DOES
+      # publish. The rationale for `changed` alone, with no restore-hit
+      # conjunct, is at the emission site in ci/ccache-stats.sh.
       - name: Save ccache to GHCR (push:main / dispatch on main, cache changed)
         if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) && steps.ccache_stats.outputs.changed != '0'
         continue-on-error: true
