@@ -326,12 +326,12 @@ run_full() {
 run_full "E ctest failure on the real run is annotated with ::error, not a bare set -e abort" \
   1 1 "::error title=Interop gate::ctest -L interop failed on $PRESET."
 
-# ── S: the step's SUCCESS path — the only other full-step cell (E, above)
-# forces the real ctest call to fail, so the checker line after it is never
-# reached there. This drives the whole step to a real exit 0, with a fake
-# python3 on PATH standing in for the checker, and asserts both that it was
-# invoked with the expected flags and that an inherited GTEST_FILTER/
-# GTEST_TOTAL_SHARDS did not reach the real ctest run. ──────────────────────
+# ── S: the step's SUCCESS path — cell E, above, forces the real ctest call
+# to fail, so the checker line after it is never reached there. This drives
+# the whole step to a real exit 0, with a fake python3 on PATH standing in
+# for the checker, and asserts both that it was invoked with the expected
+# flags and that an inherited GTEST_FILTER/GTEST_TOTAL_SHARDS did not reach
+# the real ctest run. ────────────────────────────────────────────────────
 run_success() {
   local label="$1"
   local celldir="$WORK/cell-$RANDOM$RANDOM"
@@ -401,11 +401,16 @@ assert len(hits) == 1, "MUTATION DID NOT APPLY (found " + str(len(hits)) + ") - 
 lines[hits[0]] = "echo " + lines[hits[0]]
 open(p, "w", encoding="utf-8").writelines(lines)
 '
-  ( cd "$celldir" && PATH="$bindir:$PATH" RUNNER_TEMP="$celldir/runnertemp" \
+  local out rc=0
+  out="$( cd "$celldir" && PATH="$bindir:$PATH" RUNNER_TEMP="$celldir/runnertemp" \
       FAKE_CTEST_ARGV_LOG="$argvlog" FAKE_CTEST_LISTING="$LISTING_LF" \
       FAKE_CTEST_REAL_EXIT=0 \
       FAKE_PY_ARGV_LOG="$pyargvlog" \
-      bash "$script" >/dev/null 2>&1 )
+      bash "$script" 2>&1 )" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    printf '%s\n' "$out" | sed 's/^/  | /'
+    bad "$label — expected exit 0 (an echoed line is not itself a failure), got $rc — a script that instead died before reaching the checker call would ALSO leave the argv log empty, which is not this mutant's claim"; return
+  fi
   local n_lines
   n_lines=$(grep -c . "$pyargvlog" || true)
   if [ "$n_lines" != "0" ]; then
@@ -415,7 +420,7 @@ open(p, "w", encoding="utf-8").writelines(lines)
 }
 run_mutant_echo_checker "S-mutant-a echoing the checker call site leaves the checker uninvoked (Codex #1)"
 
-# ── S-mutant-b: the new GTEST unset line removed — the inherited
+# ── S-mutant-b: the GTEST unset line removed — the inherited
 # GTEST_FILTER/GTEST_TOTAL_SHARDS must then REACH the real ctest run.
 run_mutant_remove_gtest_unset() {
   local label="$1"
@@ -439,14 +444,23 @@ assert len(hits) == 1, "MUTATION DID NOT APPLY (found " + str(len(hits)) + ") - 
 del lines[hits[0]]
 open(p, "w", encoding="utf-8").writelines(lines)
 '
-  ( cd "$celldir" && PATH="$bindir:$PATH" RUNNER_TEMP="$celldir/runnertemp" \
+  local out rc=0
+  out="$( cd "$celldir" && PATH="$bindir:$PATH" RUNNER_TEMP="$celldir/runnertemp" \
       FAKE_CTEST_ARGV_LOG="$argvlog" FAKE_CTEST_LISTING="$LISTING_LF" \
       FAKE_CTEST_REAL_EXIT=0 \
       FAKE_PY_ARGV_LOG="$pyargvlog" \
       GTEST_FILTER=-Plain.MustRun GTEST_TOTAL_SHARDS=2 GTEST_SHARD_INDEX=0 \
-      bash "$script" >/dev/null 2>&1 )
-  if grep -qF -- "GTEST_FILTER=<unset> GTEST_TOTAL_SHARDS=<unset>" "$argvlog"; then
-    bad "$label — expected the inherited GTEST_FILTER/GTEST_TOTAL_SHARDS to REACH ctest once the unset line is removed, but the argv log still shows <unset>: $(cat "$argvlog")"; return
+      bash "$script" 2>&1 )" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    printf '%s\n' "$out" | sed 's/^/  | /'
+    bad "$label — expected exit 0, got $rc"; return
+  fi
+  # Positive assertion: the real values must reach the fake ctest's argv
+  # log. A script that instead died before reaching the real ctest call
+  # would ALSO leave the log without the `<unset>` line, which is not
+  # evidence of this mutant's claim (checked above by asserting rc 0).
+  if ! grep -qF -- "GTEST_FILTER=-Plain.MustRun GTEST_TOTAL_SHARDS=2" "$argvlog"; then
+    bad "$label — expected the inherited GTEST_FILTER/GTEST_TOTAL_SHARDS to REACH ctest once the unset line is removed: $(cat "$argvlog")"; return
   fi
   ok "$label"
 }

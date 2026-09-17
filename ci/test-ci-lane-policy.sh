@@ -654,6 +654,20 @@ p.write_text(s.replace(old, 'echo "::error title=Interop gate::ctest failed on $
 MUT
 expect "T34 tier3 interop gate body drifts from tier1's byte-identical text is caught" 1 "INTEROP GATE STEP DRIFT: tier1.yml and tier3-libcxx.yml"
 
+# T35: tier2's GTEST-controls unset line is removed. tier2 is exempt from the
+# tier1==tier3 byte-identity check (T34) and from the executed D-tier2-*
+# derivation cells (which truncate before this line), so this static check is
+# its only coverage.
+fresh
+python3 - "$WORK/t/.github/workflows/tier2.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old = '          unset "${!GTEST_@}"\n'
+assert s.count(old) == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+p.write_text(s.replace(old, "", 1), encoding="utf-8")
+MUT
+expect "T35 tier2 GTEST controls unset line removed is caught" 1 "INTEROP GATE STEP GTEST CONTROLS NOT UNSET: tier2.yml"
+
 # ── The harness's own execution count ────────────────────────────────────────
 #
 # ⚠️ ADDED WITH THE FOUR NEW CELLS, and the omission is the point: a `cell`
@@ -670,7 +684,7 @@ expect "T34 tier3 interop gate body drifts from tier1's byte-identical text is c
 # B r1 F2) added the list-form `on:` cell the per-line assessment had claimed
 # without a driving test. T28-T34 (fixpp#431 Gate B r1) added the interop
 # gate step's static wiring cells.
-CELLS_DECLARED=36
+CELLS_DECLARED=37
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$CELLS_DECLARED" ]; then

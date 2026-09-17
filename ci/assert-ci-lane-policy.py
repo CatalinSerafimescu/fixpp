@@ -789,6 +789,17 @@ def check_interop_gate_step(root, violations):
                     f"INTEROP GATE STEP CHECKER CALL DRIFT: {wf_name}'s "
                     f"'{INTEROP_STEP_NAME}' step's checker invocation is missing `{flag}`.")
 
+        # tier2 is exempt from the tier1==tier3 byte-identity check below, so
+        # this is its only static coverage for the inherited-gtest-controls
+        # unset — an execution-only check would need a fake cygpath/python on
+        # top of the D-tier2-* cells, which only run the truncated
+        # derivation-only body (up to `binaries=`, before this line).
+        if 'unset "${!GTEST_@}"' not in run:
+            violations.append(
+                f"INTEROP GATE STEP GTEST CONTROLS NOT UNSET: {wf_name}'s "
+                f"'{INTEROP_STEP_NAME}' step no longer unsets inherited GTEST_* "
+                f"variables before either ctest invocation.")
+
         checked += 1
 
     # tier1 and tier3-libcxx both run the step under `python3`/no cygpath, so

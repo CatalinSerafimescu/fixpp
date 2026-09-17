@@ -36,7 +36,8 @@ EXIT
      the expected-skips file is missing, the number of JSON reports does not
      match --expected-count, a report does not parse as JSON or is not
      structurally a gtest report at any level (a non-object top level, a
-     `testsuites`/`testsuite`/`skipped` field of the wrong shape), a single
+     `testsuites`/`testsuite`/`skipped`/`failures` field of the wrong shape),
+     the same `Suite.Case` id appears in two different reports, a single
      report has zero cases with status=RUN, or zero cases were found across
      every report. An empty, partial, or malformed-but-parseable scan is an
      INSTRUMENT failure here, never a clean pass
