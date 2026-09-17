@@ -2519,10 +2519,7 @@ jobs:
       # fixpp#431's checker, ci/assert-interop-skips.py: reads a gtest JSON
       # dir and asserts no case failed, the SKIPPED set matches the checked-in
       # list exactly (both directions), every skip gives the one allowed
-      # reason, and it fails CLOSED (exit 2) on an unparsable report, a
-      # JSON-file-count mismatch, or zero cases found. Fixture cells only, no
-      # ctest, no build — see the harness's own header for the full cell list
-      # and its own instrument-can-report-non-zero proof.
+      # reason. Fixture cells only, no ctest, no build.
       - name: "Regression pin — interop skip-set witness escapes (#431)"
         run: bash ci/test-interop-skips.sh
 

@@ -33,7 +33,7 @@ bad() { FAIL=$((FAIL+1)); echo "  FAIL  $1"; }
 # Writes one gtest JSON report containing exactly one testsuite with one case.
 #   write_json <path> <suite> <case> <result:COMPLETED|SKIPPED|...> [<message>] [<failed:0|1>]
 # COMPLETED + failed=1 emits a `failures` entry; SKIPPED emits a `skipped`
-# entry whose message is `<file>:<line>\n<message>` — the real shape a gtest
+# entry whose message is `<file>:<line>\n<message>\n` — the real shape a gtest
 # JSON report uses, location line then reason, which is what makes the
 # checker's location-line strip a load-bearing thing for a fixture to prove,
 # not a decoration; COMPLETED + failed=0 (the default) emits neither — an
@@ -47,7 +47,7 @@ path, suite, name, result, msg, failed = sys.argv[1:7]
 tc = {"name": name, "file": "fixture.cpp", "line": 1, "status": "RUN",
       "result": result, "time": "0s", "classname": suite}
 if result == "SKIPPED":
-    tc["skipped"] = [{"message": f"{tc['file']}:{tc['line']}\n{msg}"}]
+    tc["skipped"] = [{"message": f"{tc['file']}:{tc['line']}\n{msg}\n"}]
 elif failed == "1":
     tc["failures"] = [{"failure": msg or "fixture failure", "type": ""}]
 doc = {"tests": 1, "failures": 0, "disabled": 0, "errors": 0, "name": "AllTests",
@@ -213,8 +213,8 @@ run_check "T14 unrecognised result value is caught" \
   "$d" "$WORK/t14-skips.txt" 2 1 "did not run with a real result"
 
 # ── T15: one report reports zero cases while a SIBLING report is populated —
-# the aggregate-only zero guard (T8) cannot see this; the per-report guard
-# added this round can. ─────────────────────────────────────────────────────
+# the aggregate-only zero guard (T8) cannot see this; the per-report guard can.
+# ───────────────────────────────────────────────────────────────────────────
 d="$WORK/t15"; mkdir -p "$d"
 write_json "$d/binA.json" Suite CaseA COMPLETED
 write_empty_json "$d/binB.json"
@@ -246,11 +246,9 @@ printf 'Suite.CaseA\n' > "$WORK/t18-skips.txt"
 run_check "T18 reason plus an EXTRA LINE after it is caught" \
   "$d" "$WORK/t18-skips.txt" 2 1 "reason other than a counterparty"
 
-# ── T19: a location-only skip message (gtest 1.17's SetUpTestSuite shape —
-# see the verify record's `gt/` reproduction: message is location ONLY, no
-# reason line at all) is a bad reason, not a pass. Positive control: this was
-# already RED under the unfixed unanchored `.search()` too, since it contains
-# no port text at all — it stays RED here on purpose. ───────────────────────
+# ── T19: a location-only skip message (gtest 1.17's SetUpTestSuite shape:
+# message is location ONLY, no reason line at all) is a bad reason, not a pass.
+# ───────────────────────────────────────────────────────────────────────────
 d="$WORK/t19"; mkdir -p "$d"
 python3 - "$d/binA.json" <<'PY'
 import json, sys
@@ -292,7 +290,7 @@ run_check "T22 a skipped entry is a string, not an object with a message" \
 d="$WORK/t23"; mkdir -p "$d"
 python3 - "$d/binA.json" <<PY
 import json, sys
-msg = "C:\\\\a\\\\fixpp\\\\tests\\\\x.cpp:12\n$PORT_OK_CPP"
+msg = "C:\\\\a\\\\fixpp\\\\tests\\\\x.cpp:12\n$PORT_OK_CPP\n"
 tc = {"name": "CaseA", "file": "fixture.cpp", "line": 12, "status": "RUN",
       "result": "SKIPPED", "time": "0s", "classname": "Suite",
       "skipped": [{"message": msg}]}
@@ -362,7 +360,43 @@ PY
 run_check "T27 a non-list failures field on a COMPLETED case is fail-closed" \
   "$d" "$WORK/t27-skips.txt" 1 2 "failures\` field that is a"
 
-CELLS_DECLARED=27
+# ── T28-T29: the skip-message envelope must include both the leading
+# `<file>:<line>\n` line and the trailing newline. ───────────────────────────
+d="$WORK/t28"; mkdir -p "$d"
+python3 - "$d/binA.json" "$PORT_OK_CPP" <<'PY'
+import json, sys
+msg = sys.argv[2] + "\n"
+tc = {"name": "CaseA", "file": "fixture.cpp", "line": 1, "status": "RUN",
+      "result": "SKIPPED", "time": "0s", "classname": "Suite",
+      "skipped": [{"message": msg}]}
+doc = {"tests": 1, "failures": 0, "disabled": 0, "errors": 0, "name": "AllTests",
+       "testsuites": [{"name": "Suite", "tests": 1, "failures": 0, "disabled": 0,
+                       "testsuite": [tc]}]}
+json.dump(doc, open(sys.argv[1], "w"))
+PY
+write_json "$d/binB.json" Suite CaseB COMPLETED
+printf 'Suite.CaseA\n' > "$WORK/t28-skips.txt"
+run_check "T28 skip message without a location line is a bad reason" \
+  "$d" "$WORK/t28-skips.txt" 2 1 "reason other than a counterparty"
+
+d="$WORK/t29"; mkdir -p "$d"
+python3 - "$d/binA.json" "$PORT_OK_CPP" <<'PY'
+import json, sys
+msg = "fixture.cpp:1\n" + sys.argv[2]
+tc = {"name": "CaseA", "file": "fixture.cpp", "line": 1, "status": "RUN",
+      "result": "SKIPPED", "time": "0s", "classname": "Suite",
+      "skipped": [{"message": msg}]}
+doc = {"tests": 1, "failures": 0, "disabled": 0, "errors": 0, "name": "AllTests",
+       "testsuites": [{"name": "Suite", "tests": 1, "failures": 0, "disabled": 0,
+                       "testsuite": [tc]}]}
+json.dump(doc, open(sys.argv[1], "w"))
+PY
+write_json "$d/binB.json" Suite CaseB COMPLETED
+printf 'Suite.CaseA\n' > "$WORK/t29-skips.txt"
+run_check "T29 skip message without a trailing newline is a bad reason" \
+  "$d" "$WORK/t29-skips.txt" 2 1 "reason other than a counterparty"
+
+CELLS_DECLARED=29
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$CELLS_DECLARED" ]; then

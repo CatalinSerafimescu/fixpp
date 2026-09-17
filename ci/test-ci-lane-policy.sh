@@ -656,8 +656,7 @@ expect "T34 tier3 interop gate body drifts from tier1's byte-identical text is c
 
 # T35: tier2's GTEST-controls unset line is removed. tier2 is exempt from the
 # tier1==tier3 byte-identity check (T34) and from the executed D-tier2-*
-# derivation cells (which truncate before this line), so this static check is
-# its only coverage.
+# derivation cells (which truncate before this line).
 fresh
 python3 - "$WORK/t/.github/workflows/tier2.yml" <<'MUT'
 import sys, pathlib

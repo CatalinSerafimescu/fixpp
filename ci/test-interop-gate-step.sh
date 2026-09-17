@@ -7,10 +7,7 @@
 # gate step's STATIC shape (leg guard, no continue-on-error, -L interop
 # twice, pin-file read, checker-call args). Neither EXECUTES the step's own
 # shell — the count derivation, the CR normalisation, and the exactly-once
-# schema-check exclusion. Codex #1's CRLF finding is live in exactly that gap:
-# a Windows checkout (`core.autocrlf=true`) or native ctest output carrying
-# `\r` silently miscounts, and no committed cell before this ran that code at
-# all.
+# schema-check exclusion.
 #
 # HOW. Each cell EXTRACTS the real `run:` text of the "Interop gate" step out
 # of the actual workflow file (tier1.yml, byte-identical to tier3-libcxx.yml
@@ -269,20 +266,14 @@ run_derivation "Dc schema-check entry missing + extra binary is caught before bi
   "$LISTING_NO_SCHEMA" "$PIN_LF" 1 \
   "interop_cell_results_schema_check registered 0 time(s) on $PRESET, expected exactly 1"
 
-# ── D-d: the pin file has no line for this preset (pre-existing behaviour,
-# never regression-pinned before this harness) ───────────────────────────────
+# ── D-d: the pin file has no line for this preset ───────────────────────────
 run_derivation "Dd pin file missing this preset's line is caught" \
   "$LISTING_LF" "$PIN_NO_PRESET_LINE" 1 "expected '<no line>'"
 
 # ── D-tier2-b/c: the SAME two properties, re-run against tier2.yml's OWN
-# extracted body (windows-msvc-release). Without these, tier2's own copy of
-# the CR-normalisation and exactly-once-exclusion fixes was pinned by
-# NOTHING: Da/Db/Dc above only ever extract TIER1's text, the tier1==tier3
-# identity check in ci/assert-ci-lane-policy.py explicitly exempts tier2,
-# and its static checks there don't look for CR-normalisation/exactly-once
-# text at all. The derivation-only body (up to and including `binaries=`)
-# needs no fake cygpath/python — those appear only later in tier2's real
-# body, after this truncation point.
+# extracted body (windows-msvc-release). The derivation-only body (up to and
+# including `binaries=`) needs no fake cygpath/python — those appear only later
+# in tier2's real body, after this truncation point.
 tier2_script_b="$WORK/tier2-Db.sh"
 extract_run_from "$TIER2" "$PRESET_TIER2" "$tier2_script_b" "$BINARIES_MARKER"
 run_derivation "D-tier2-b CRLF listing + CRLF pin derives binaries=2 on tier2.yml's own body" \

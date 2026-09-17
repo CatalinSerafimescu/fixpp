@@ -687,10 +687,7 @@ def check_push_trusting_triggers(root, violations):
 
 # #431 Gate B r1 (Codex #5/#4a/P2): the interop gate step exists in each tier
 # workflow's cheapest non-sanitizer leg, is not silently disarmed, and its
-# label/checker-call wiring is intact. `ci/test-tier1-python-policy.sh` only
-# reads tier1.yml, and the step is new in this PR, so nothing pinned it at
-# all — a `continue-on-error: true`, a `-L interop` -> `-L interopX`, or a
-# drifted `if:` guard would all leave every existing check green.
+# label/checker-call wiring is intact.
 #
 # What is asserted here is deliberately the STATIC, per-workflow shape:
 # the step exists exactly once, its leg guard, no continue-on-error, `-L
@@ -789,11 +786,10 @@ def check_interop_gate_step(root, violations):
                     f"INTEROP GATE STEP CHECKER CALL DRIFT: {wf_name}'s "
                     f"'{INTEROP_STEP_NAME}' step's checker invocation is missing `{flag}`.")
 
-        # tier2 is exempt from the tier1==tier3 byte-identity check below, so
-        # this is its only static coverage for the inherited-gtest-controls
-        # unset — an execution-only check would need a fake cygpath/python on
-        # top of the D-tier2-* cells, which only run the truncated
-        # derivation-only body (up to `binaries=`, before this line).
+        # tier2 is exempt from the tier1==tier3 byte-identity check below; an
+        # execution-only check would need a fake cygpath/python on top of the
+        # D-tier2-* cells, which only run the truncated derivation-only body
+        # (up to `binaries=`, before this line).
         if 'unset "${!GTEST_@}"' not in run:
             violations.append(
                 f"INTEROP GATE STEP GTEST CONTROLS NOT UNSET: {wf_name}'s "

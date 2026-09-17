@@ -235,16 +235,12 @@ def main() -> int:
                                       "Fail-closed.")
                             return 2
                         msg = entry["message"]
-                        # Strip exactly one leading `<file>:<line>\n` (gtest's
-                        # own location prefix — tolerant of a Windows
-                        # `C:\...` path) and one trailing `\n`, then the
-                        # WHOLE remainder must fullmatch the one allowed
-                        # reason — not merely contain it as a substring
-                        # (Codex #3: a prefix, a suffix, or an extra line all
-                        # escaped the previous unanchored `.search()`).
-                        stripped = LOCATION_LINE_RE.sub("", msg, count=1)
-                        if stripped.endswith("\n"):
-                            stripped = stripped[:-1]
+                        # A valid gtest skip message is exactly
+                        # `<file>:<line>\n<reason>\n` (with Windows paths
+                        # accepted in the location line), and the interior
+                        # reason must fullmatch the one allowed reason.
+                        loc = LOCATION_LINE_RE.match(msg)
+                        stripped = msg[loc.end():-1] if (loc and msg.endswith("\n")) else ""
                         if not PORT_REASON_RE.fullmatch(stripped):
                             bad_reason_skips.append((case_id, msg))
                 elif "failures" in tc:
