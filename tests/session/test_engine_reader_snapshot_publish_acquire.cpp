@@ -297,10 +297,13 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
         },
         asio::detached);
 
+    // Written only by ioc_thread below, read only after it is joined -- the join
+    // establishes the happens-before, so no atomic is needed for this one.
+    bool published_in_budget = false;
     std::thread ioc_thread([&] {
         // Only this thread drives `ioc` until it is joined, which is what makes the
         // pump's trailing restart() safe. The verdict is the reader's counts below.
-        (void)fixpp::test_support::pump_until(
+        published_in_budget = fixpp::test_support::pump_until(
             ioc, [&] { return reader_saw_nonnull.load(std::memory_order_acquire); }, kPublishBudget,
             fixpp::test_support::kPumpSlice, "LookupNeverSeesTornPointer/publish");
         ioc_done.store(true, std::memory_order_release);
@@ -311,6 +314,9 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
     // std::terminate on unwind).
     ioc_thread.join();
     reader_thread.join();
+
+    EXPECT_TRUE(published_in_budget)
+        << fixpp::test_support::kPumpBudgetMiss << "LookupNeverSeesTornPointer/publish";
 
     // If the initiator never connected within the budget (e.g. a slow or
     // failed loopback connect), run_raw_acceptor's async_accept() (or the
