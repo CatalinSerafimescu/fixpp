@@ -375,8 +375,7 @@ ok "the pruner's regex still accepts the minter's 'unknown major' fallback tag"
 # ── #464 — THE GCC FAMILY: a second host grammar, branched by preset name ────
 #
 # The family is read from the preset NAME (ccache_preset_family), because the
-# matcher must stay pure string work. Every tag below is minted by the real key
-# script from a fake g++ banner, and every regex comes from the real matcher.
+# matcher must stay pure string work.
 GCC_TAG="$(expected_tag 'fake-gcc-release')" || fail "gcc/mint: no tag for a gcc preset with a g++ banner"
 case "$GCC_TAG" in
   'ccache-fake-gcc-release-gcc13-'????????) ok "a gcc preset mints gcc<major> from the real Ubuntu banner shape" ;;
@@ -388,7 +387,7 @@ printf '%s' "$GCC_TAG" | grep -qE -- "$GCC_RE" \
   || fail "gcc/bridge: the pruner's regex '$GCC_RE' does not match the tag the key script minted ('$GCC_TAG')"
 ok "the gcc regex matches a tag the key script actually minted"
 
-# Disjoint in BOTH directions, derived from the other preset's real regex:
+# Disjoint in BOTH directions:
 # widening either branch to accept the other family's literal must fail here.
 CLANG_AS_GCC_TAG="ccache-fake-gcc-release-clang22-$(printf '%s' "$GCC_TAG" | sed 's/.*-//')"
 if printf '%s' "$CLANG_AS_GCC_TAG" | grep -qE -- "$GCC_RE"; then
@@ -470,8 +469,7 @@ case "$BADVER_TAG" in
 esac
 ok "the gcc major comes from the field after the first ') ', dotted-numeric only — a build suffix, a snapshot date and a malformed version each parse correctly (C2)"
 
-# gccunknown must still classify under its own gcc regex — also the first cell
-# to EXECUTE the gcc 'unknown' fallback (the Article IX gap the record disclosed).
+# gccunknown must still classify under its own gcc regex.
 BADVER_RE="$( cd "$sandbox" && PATH="$shim_dir:$PATH" . "$CI_DIR/ccache-cache-key.sh" && ccache_tag_regex 'fake-gcc-badver' >/dev/null 2>&1 && printf '%s' "$CCACHE_TAG_RE" )"
 [ -n "$BADVER_RE" ] || fail "gcc/major: ccache_tag_regex produced nothing for 'fake-gcc-badver'"
 printf '%s' "$BADVER_TAG" | grep -qE -- "$BADVER_RE" \
