@@ -8,13 +8,8 @@
 // socket. Exercises all three E-7 acceptor sites (profile-map arm, plaintext accept-
 // factory selection, post-accept handshake skip). No TLS bytes are emitted.
 //
-// Mutation evidence (manual spot-check during development):
-//   Reverting the site-#3 handshake-skip guard causes the accept loop to attempt
-//   async_handshake on the plain socket, which fails (null TlsTransport cast) →
-//   session never establishes → this test times out (FAIL).
-//
 // Watchdog: an asio::steady_timer fails the test (not hangs) if the round-trip
-// does not complete within 5 seconds.
+// does not complete within its establish/state pump plus the stop window.
 //
 // Anchors: spec.md SC-001; research.md D-7/D-8; data-model.md E-7;
 //          tasks.md T007; [const §XII.5 amended v0.3]
@@ -185,7 +180,7 @@ std::atomic<bool> g_first_byte_captured{false};
 
 // Standalone plaintext initiator coroutine (Logon-only).
 // Connects to the acceptor's bound port via a raw TCP socket (no TLS),
-// sends a FIX Logon frame, waits for the acceptor reply (up to 5s), then exits.
+// sends a FIX Logon frame, holds the socket open (see kInitiatorHold), then closes.
 asio::awaitable<void> run_plain_initiator(asio::io_context& ioc, uint16_t acceptor_port,
                                           std::string sender, std::string target) {
     co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());

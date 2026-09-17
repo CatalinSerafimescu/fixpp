@@ -161,8 +161,8 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
     // Short connect timeout. ⚠️ Since #361 this budget covers the RESOLVE as well
     // as the connect — it is one absolute deadline for the whole attempt. Still
     // ample: the host is a literal, and the first async_resolve in a process
-    // (which lazily spawns asio's resolver work thread and loads the NSS modules)
-    // measures ~1 ms under ASan, i.e. 0.5 % of this budget.
+    // lazily spawns asio's resolver work thread and loads the NSS modules, which
+    // this budget must cover.
     tcfg.connect_timeout = 200ms;
     auto factory_r = fixpp::transport::make_asio_plain_transport_factory(tcfg);
     ASSERT_TRUE(factory_r.has_value()) << "make_asio_plain_transport_factory failed";
@@ -285,7 +285,7 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
         ioc,
         [&]() -> asio::awaitable<void> {
             asio::error_code ec;
-            // Accept one connection and hold for the window.
+            // Accept one connection and hold for the publish budget.
             auto sock =
                 co_await raw_acc.async_accept(asio::redirect_error(asio::use_awaitable, ec));
             if (!ec) {
@@ -323,8 +323,8 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
     // co_spawned accept lambda above) may be STILL SUSPENDED here — the
     // unconditional ioc.run() this block used to call would then wait on it
     // forever instead of returning once stop() completes, turning a
-    // diagnosable failure (nonnull_reads==0 below) into a 30s CTest timeout.
-    // Force it to unblock before draining. [gate-b/r1 P2-6]
+    // diagnosable failure (nonnull_reads==0 below) into a CTest kill that
+    // discards it. Force it to unblock before draining. [gate-b/r1 P2-6]
     asio::error_code raw_acc_close_ec;
     raw_acc.cancel(raw_acc_close_ec);
     raw_acc.close(raw_acc_close_ec);
