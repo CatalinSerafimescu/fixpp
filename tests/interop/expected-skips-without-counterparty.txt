@@ -1,0 +1,138 @@
+# Expected SKIPPED gtest cases when no interop counterparty is leased (#431).
+#
+# CONDITION this file states: every id below is expected to report
+# result=SKIPPED, with a skip message matching the regex
+#
+#   quickfix-(cpp|j) unavailable: INTEROP_QUICKFIX_(CPP|J)_PORT not set
+#   \(parent harness did not lease a port\)
+#
+# whenever `ctest -L interop` runs with neither INTEROP_QUICKFIX_CPP_PORT nor
+# INTEROP_QUICKFIX_J_PORT set in the environment (the case in every library
+# CI lane today — the parent harness that leases those ports never runs
+# here). `ci/assert-interop-skips.py` enforces both directions: an id that
+# skips here and is NOT listed, and a listed id that instead runs (or fails,
+# or skips for a different reason this time), are both violations.
+#
+# A case reaching this list got there via `INTEROP_REQUIRE_COUNTERPARTY(...)`
+# (tests/interop/support/counterparty_probe.hpp) and nothing past that guard
+# — a test that also has a SECOND, later skip guard (e.g. a
+# `FIXPP_TLS_FIXTURE_DIR`-not-set or `skip:not-applicable` disposition) never
+# reaches this reason and must not be listed here for that combo.
+#
+# FORMAT: one fully-qualified gtest id per line, `<TestSuiteName>.<TestName>`
+# (parameterized suites/names keep their `/index` or `/ParamName` suffix
+# verbatim, exactly as gtest emits it), sorted, blank lines and `#`-prefixed
+# lines ignored.
+#
+# RE-DERIVE from a debug or release build tree with no INTEROP_QUICKFIX_*_PORT
+# set in the environment:
+#
+#   GTEST_OUTPUT=json:<dir>/ ctest --preset <preset> -L interop \
+#       --output-on-failure --no-tests=error --timeout 1800
+#   python3 - <<'PY'
+#   import glob, json
+#   ids = set()
+#   for f in glob.glob("<dir>/*.json"):
+#       doc = json.load(open(f))
+#       for ts in doc["testsuites"]:
+#           for tc in ts["testsuite"]:
+#               if tc.get("result") == "SKIPPED":
+#                   ids.add(f"{ts['name']}.{tc['name']}")
+#   print("\n".join(sorted(ids)))
+#   PY
+#
+# A regenerated list that differs from the one below is the designed prompt
+# to look at WHY before updating this file — a new entry means a case started
+# skipping for this reason (a new counterparty-gated cell, most often); a
+# removed entry means one stopped (the counterparty guard was dropped, or the
+# cell now reaches a different skip reason first).
+AllCounterparties/NextExpectedAcceptor.ProactiveResendNoResendRequest/QFcpp_acc
+AllCounterparties/NextExpectedAcceptor.ProactiveResendNoResendRequest/QFj_acc
+AllCounterparties/NextExpectedBidirectional.BothGapsRecoverNoResendRequest/QFcpp_bidir
+AllCounterparties/NextExpectedBidirectional.BothGapsRecoverNoResendRequest/QFj_bidir
+AllCounterparties/NextExpectedInitiator.ProactiveResendNoResendRequest/QFcpp_init
+AllCounterparties/NextExpectedInitiator.ProactiveResendNoResendRequest/QFj_init
+AllCounterparties/RestartResume_Acceptor.BothCountersResumeFromStore/QFcpp_acc
+AllCounterparties/RestartResume_Acceptor.BothCountersResumeFromStore/QFj_acc
+AllCounterparties/RestartResume_Initiator.BothCountersResumeFromStore/QFcpp_init
+AllCounterparties/RestartResume_Initiator.BothCountersResumeFromStore/QFj_init
+AllCounterparties/StandbyRehydrate_Initiator.RehydratesOnReconnect/QFcpp_standby
+AllCounterparties/StandbyRehydrate_Initiator.RehydratesOnReconnect/QFj_standby
+AllCounterparties/ValidationCompat_CompID.AcceptsWithKnobOff/QFcpp_acc
+AllCounterparties/ValidationCompat_CompID.AcceptsWithKnobOff/QFcpp_init
+AllCounterparties/ValidationCompat_CompID.AcceptsWithKnobOff/QFj_acc
+AllCounterparties/ValidationCompat_CompID.AcceptsWithKnobOff/QFj_init
+AllCounterparties/ValidationCompat_Seqnum.ToleratesOutOfOrderWithKnobOff/QFcpp_acc
+AllCounterparties/ValidationCompat_Seqnum.ToleratesOutOfOrderWithKnobOff/QFcpp_init
+AllCounterparties/ValidationCompat_Seqnum.ToleratesOutOfOrderWithKnobOff/QFj_acc
+AllCounterparties/ValidationCompat_Seqnum.ToleratesOutOfOrderWithKnobOff/QFj_init
+Conversation.Cell
+Fix44/AllowPosDupStripSend.StripDefaultSends43Free_CounterpartyAccepts/QFcpp_acc
+Fix44/AllowPosDupStripSend.StripDefaultSends43Free_CounterpartyAccepts/QFcpp_init
+Fix44/AllowPosDupStripSend.StripDefaultSends43Free_CounterpartyAccepts/QFj_acc
+Fix44/AllowPosDupStripSend.StripDefaultSends43Free_CounterpartyAccepts/QFj_init
+Fix44/BusinessMessageInterop.NosExecRptRoundTrip/QFcpp_acc
+Fix44/BusinessMessageInterop.NosExecRptRoundTrip/QFcpp_init
+Fix44/BusinessMessageInterop.NosExecRptRoundTrip/QFj_acc
+Fix44/BusinessMessageInterop.NosExecRptRoundTrip/QFj_init
+Fix44/HappyDisconnectReconnectNoReset.ReconnectPreservesSequenceContinuity/QFcpp_init
+Fix44/HappyDisconnectReconnectNoReset.ReconnectPreservesSequenceContinuity/QFj_init
+Fix44/HappyIdleHeartbeatCadence.BothDirectionsAtNegotiatedCadence/QFcpp_acc
+Fix44/HappyIdleHeartbeatCadence.BothDirectionsAtNegotiatedCadence/QFcpp_init
+Fix44/HappyIdleHeartbeatCadence.BothDirectionsAtNegotiatedCadence/QFj_acc
+Fix44/HappyIdleHeartbeatCadence.BothDirectionsAtNegotiatedCadence/QFj_init
+Fix44/HappyLogonHbLogout.LogonHeartbeatLogout/QFcpp_acc
+Fix44/HappyLogonHbLogout.LogonHeartbeatLogout/QFcpp_init
+Fix44/HappyLogonHbLogout.LogonHeartbeatLogout/QFj_acc
+Fix44/HappyLogonHbLogout.LogonHeartbeatLogout/QFj_init
+Fix44/HappyRecoveryOutboundAnswer.FixppAnswersResendRequestAndPeerResyncs/QFcpp_acc
+Fix44/HappyRecoveryOutboundAnswer.FixppAnswersResendRequestAndPeerResyncs/QFcpp_init
+Fix44/HappyRecoveryOutboundAnswer.FixppAnswersResendRequestAndPeerResyncs/QFj_acc
+Fix44/HappyRecoveryOutboundAnswer.FixppAnswersResendRequestAndPeerResyncs/QFj_init
+Fix44/HappyRejectInvalidAdmin.RejectInvalidAdminSurvives/QFcpp_acc
+Fix44/HappyRejectInvalidAdmin.RejectInvalidAdminSurvives/QFcpp_init
+Fix44/HappyRejectInvalidAdmin.RejectInvalidAdminSurvives/QFj_acc
+Fix44/HappyRejectInvalidAdmin.RejectInvalidAdminSurvives/QFj_init
+Fix44/HappySeqnumRecovery.ResynchronizesWithoutFatalDisconnect/QFcpp_acc
+Fix44/HappySeqnumRecovery.ResynchronizesWithoutFatalDisconnect/QFcpp_init
+Fix44/HappySeqnumRecovery.ResynchronizesWithoutFatalDisconnect/QFj_acc
+Fix44/HappySeqnumRecovery.ResynchronizesWithoutFatalDisconnect/QFj_init
+Fix44/HappySeqnumRecoveryInbound.GapInductionResendRequestAndReturn/QFcpp_acc
+Fix44/HappySeqnumRecoveryInbound.GapInductionResendRequestAndReturn/QFcpp_init
+Fix44/HappySeqnumRecoveryInbound.GapInductionResendRequestAndReturn/QFj_acc
+Fix44/HappySeqnumRecoveryInbound.GapInductionResendRequestAndReturn/QFj_init
+Fix44/HappyTestRequestEcho.BidirectionalTestRequestEcho/QFcpp_acc
+Fix44/HappyTestRequestEcho.BidirectionalTestRequestEcho/QFcpp_init
+Fix44/HappyTestRequestEcho.BidirectionalTestRequestEcho/QFj_acc
+Fix44/HappyTestRequestEcho.BidirectionalTestRequestEcho/QFj_init
+Fix44/MalformedDupRejected.MissingOrigSendingTimeTriggersRejectAndSessionSurvives/QFcpp_acc
+Fix44/MalformedDupRejected.MissingOrigSendingTimeTriggersRejectAndSessionSurvives/QFcpp_init
+Fix44/MalformedDupRejected.MissingOrigSendingTimeTriggersRejectAndSessionSurvives/QFj_acc
+Fix44/MalformedDupRejected.MissingOrigSendingTimeTriggersRejectAndSessionSurvives/QFj_init
+Fix44/NanosSendingTimeAcceptor.AcceptsNanos52WithoutReject/QFcpp
+Fix44/NanosSendingTimeAcceptor.AcceptsNanos52WithoutReject/QFj
+Fix44/NanosSendingTimeInitiator.LogonAcceptedWithNanos52/QFcpp
+Fix44/NanosSendingTimeInitiator.LogonAcceptedWithNanos52/QFj
+Fix44/PossDupReplaySurvives.ReplayedPossDupFrameDoesNotDisconnect/QFcpp_acc
+Fix44/PossDupReplaySurvives.ReplayedPossDupFrameDoesNotDisconnect/QFcpp_init
+Fix44/PossDupReplaySurvives.ReplayedPossDupFrameDoesNotDisconnect/QFj_acc
+Fix44/PossDupReplaySurvives.ReplayedPossDupFrameDoesNotDisconnect/QFj_init
+Fix44/PossResendDeliver.PossResendMessageDeliveredToFromApp_SessionSurvives/QFcpp_acc
+Fix44/PossResendDeliver.PossResendMessageDeliveredToFromApp_SessionSurvives/QFcpp_init
+Fix44/PossResendDeliver.PossResendMessageDeliveredToFromApp_SessionSurvives/QFj_acc
+Fix44/PossResendDeliver.PossResendMessageDeliveredToFromApp_SessionSurvives/QFj_init
+Fix44/ReceivedResetAcceptor.Received141AdvancesInboundToTwoNoResend/QFcpp
+Fix44/ReceivedResetAcceptor.Received141AdvancesInboundToTwoNoResend/QFj
+Fix44/ResetOnLogonAcceptor.AdmitsFresh34eq1AndResyncsFrom1/QFcpp
+Fix44/ResetOnLogonAcceptor.AdmitsFresh34eq1AndResyncsFrom1/QFj
+Fix44/ResetOnLogonInitiator.LogonAcceptedAndResyncs/QFcpp
+Fix44/ResetOnLogonInitiator.LogonAcceptedAndResyncs/QFj
+Fixt/HappyFixtLogonHbLogout.LogonHeartbeatLogout/QFcpp_acc_fix44
+Fixt/HappyFixtLogonHbLogout.LogonHeartbeatLogout/QFcpp_acc_fix50sp2
+Fixt/HappyFixtLogonHbLogout.LogonHeartbeatLogout/QFcpp_init_fix44
+Fixt/HappyFixtLogonHbLogout.LogonHeartbeatLogout/QFcpp_init_fix50sp2
+Fixt/HappyFixtLogonHbLogout.LogonHeartbeatLogout/QFj_acc_fix44
+Fixt/HappyFixtLogonHbLogout.LogonHeartbeatLogout/QFj_acc_fix50sp2
+Fixt/HappyFixtLogonHbLogout.LogonHeartbeatLogout/QFj_init_fix44
+Fixt/HappyFixtLogonHbLogout.LogonHeartbeatLogout/QFj_init_fix50sp2
+Probe.Cell

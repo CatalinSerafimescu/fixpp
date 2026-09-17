@@ -1,0 +1,34 @@
+# Per-preset pin for `ctest -N -L interop`'s registered count (fixpp#431).
+#
+#   <preset>  <expected count>
+#
+# CONDITION: the count is the TOTAL under `-N -L interop`, INCLUDING the one
+# non-gtest ctest entry (`interop_cell_results_schema_check`, a pytest case —
+# tests/interop/CMakeLists.txt's `find_package(Python3 ...)` block). The
+# gate step subtracts that one name by exact match before deriving how many
+# gtest JSON reports to expect from `GTEST_OUTPUT=json:`.
+#
+# Two interop binaries (interop_conversation_test,
+# interop_business_message_interop_test) register only under
+# `if(TARGET fixpp_codegen_generate)` in tests/interop/CMakeLists.txt — that
+# target is defined whenever FIXPP_BUILD_CODEGEN_TOOL is ON, which is the
+# CMakeLists.txt default and is not overridden by any preset in
+# CMakePresets.json (`grep -n FIXPP_BUILD_CODEGEN_TOOL CMakePresets.json` is
+# empty at the time this pin was written).
+#
+# RE-DERIVE with:
+#   ctest --preset <preset> -L interop -N | sed -n 's/^Total Tests: //p'
+#
+# A mismatch is the designed prompt to look at what changed before updating
+# the line — same discipline as ci/expected-eligible-tests.txt: exact
+# equality, never a floor.
+#
+# windows-msvc-release and linux-clang-libc++ are UNMEASURED from this
+# checkout (no built tree for either was available to run `ctest -N`
+# against). Pinned to the linux-clang-release value on the strength of the
+# FIXPP_BUILD_CODEGEN_TOOL argument above and the absence of any other
+# preset-conditional interop source; the first CI run on each of those two
+# lanes is this pin's actual verification, not a claim already discharged.
+linux-clang-release   30
+windows-msvc-release  30
+linux-clang-libc++    30
