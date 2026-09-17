@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """assert-interop-skips — a SKIP must not read as a PASS (fixpp#431).
 
-    ci/assert-interop-skips.py --json-dir DIR --expected-skips FILE --expected-count N
+    ci/assert-interop-skips.py --json-dir DIR --ctest-json FILE --expected-skips FILE --expected-count N
 
 Reads the per-binary gtest JSON reports `GTEST_OUTPUT=json:DIR/` writes for a
 `ctest -L interop` run with no counterparty leased, and asserts three things
@@ -14,9 +14,9 @@ does not:
      count — gtest reports a DISABLED_ case as status=NOTRUN,
      result=SUPPRESSED with a nonzero `disabled` count, and that is not the
      same as running and passing. A GTEST_FILTER or shard control instead
-     OMITS a case from the report entirely, which this per-report scan
-     cannot see at all; the calling step unsets every `GTEST_*` variable
-     before either ctest invocation for exactly that reason;
+     OMITS a case from the report entirely, so the calling step unsets
+     inherited `GTEST_*` variables and `--ctest-json` rejects registered
+     gtest controls before this per-report scan runs;
   3. the set of SKIPPED `Suite.Case` ids is EXACTLY the checked-in list in
      `--expected-skips` (both directions: an id that skips and is not listed,
      and a listed id that no longer skips, are both violations);
@@ -33,9 +33,9 @@ EXIT
      matches exactly
   1  a NAMED invariant above is violated — a real defect in this run
   2  the check could not be trusted to answer at all: the JSON directory or
-     the expected-skips file is missing, the number of JSON reports does not
-     match --expected-count, a report does not parse as JSON or is not
-     structurally a gtest report at any level (a non-object top level, a
+     the expected-skips file or ctest JSON file is missing, the number of JSON
+     reports does not match --expected-count, a report does not parse as JSON or
+     is not structurally a gtest report at any level (a non-object top level, a
      `testsuites`/`testsuite`/`skipped`/`failures` field of the wrong shape),
      the same `Suite.Case` id appears in two different reports, a single
      report has zero cases with status=RUN, or zero cases were found across
@@ -58,8 +58,9 @@ import re
 import sys
 
 PORT_REASON_RE = re.compile(
-    r"quickfix-(?:cpp|j) unavailable: "
-    r"INTEROP_QUICKFIX_(?:CPP|J)_PORT not set \(parent harness did not lease a port\)"
+    r"(?:quickfix-cpp unavailable: INTEROP_QUICKFIX_CPP_PORT|"
+    r"quickfix-j unavailable: INTEROP_QUICKFIX_J_PORT)"
+    r" not set \(parent harness did not lease a port\)"
 )
 
 # A real gtest JSON skip message is `<file>:<line>\n<reason>\n` — one leading
@@ -86,11 +87,83 @@ def load_expected_skips(path: str) -> set:
     return ids
 
 
+def load_ctest_json(path: str) -> dict:
+    try:
+        with open(path, encoding="utf-8") as f:
+            doc = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        gh_error(f"ctest JSON '{path}' could not be read as JSON: {e}. Fail-closed.")
+        raise SystemExit(2)
+
+    if not isinstance(doc, dict):
+        gh_error(f"ctest JSON '{path}' top level is a {type(doc).__name__}, "
+                  "not a JSON object. Fail-closed.")
+        raise SystemExit(2)
+    tests = doc.get("tests")
+    if not isinstance(tests, list):
+        gh_error(f"ctest JSON '{path}' has no `tests` list. Fail-closed.")
+        raise SystemExit(2)
+    return doc
+
+
+def registered_gtest_controls(ctest_doc: dict) -> list:
+    violations = []
+    for t in ctest_doc["tests"]:
+        if not isinstance(t, dict):
+            gh_error("ctest JSON has a `tests` entry that is not an object. Fail-closed.")
+            raise SystemExit(2)
+        test_name = t.get("name")
+        if not isinstance(test_name, str) or not test_name:
+            gh_error("ctest JSON has a test entry without a non-empty `name`. Fail-closed.")
+            raise SystemExit(2)
+        properties = t.get("properties", [])
+        if not isinstance(properties, list):
+            gh_error(f"ctest JSON test '{test_name}' has a non-list `properties` field. "
+                      "Fail-closed.")
+            raise SystemExit(2)
+        props = {}
+        for p in properties:
+            if not isinstance(p, dict) or "name" not in p or "value" not in p:
+                gh_error(f"ctest JSON test '{test_name}' has a malformed property. "
+                          "Fail-closed.")
+                raise SystemExit(2)
+            props[p["name"]] = p["value"]
+        for k in ("ENVIRONMENT", "ENVIRONMENT_MODIFICATION"):
+            v = props.get(k)
+            entries = [v] if isinstance(v, str) else (v or [])
+            if not isinstance(entries, list):
+                gh_error(f"ctest JSON test '{test_name}' has a malformed `{k}` value. "
+                          "Fail-closed.")
+                raise SystemExit(2)
+            for e in entries:
+                if not isinstance(e, str):
+                    gh_error(f"ctest JSON test '{test_name}' has a non-string `{k}` entry. "
+                              "Fail-closed.")
+                    raise SystemExit(2)
+                if e.split("=", 1)[0].upper().startswith("GTEST_"):
+                    violations.append((test_name, k, e))
+        command = t.get("command", [])
+        if not isinstance(command, list):
+            gh_error(f"ctest JSON test '{test_name}' has a non-list `command` field. "
+                      "Fail-closed.")
+            raise SystemExit(2)
+        for a in command[1:]:
+            if not isinstance(a, str):
+                gh_error(f"ctest JSON test '{test_name}' has a non-string command argument. "
+                          "Fail-closed.")
+                raise SystemExit(2)
+            if re.match(r"--?gtest_", a, re.I):
+                violations.append((test_name, "command argument", a))
+    return violations
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                   formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--json-dir", required=True,
                      help="directory GTEST_OUTPUT=json: wrote per-binary reports into")
+    ap.add_argument("--ctest-json", required=True,
+                     help="ctest --show-only=json-v1 output for the interop registration")
     ap.add_argument("--expected-skips", required=True,
                      help="checked-in sorted Suite.Case list "
                           "(tests/interop/expected-skips-without-counterparty.txt)")
@@ -120,6 +193,14 @@ def main() -> int:
     except OSError as e:
         gh_error(f"could not read '{args.expected_skips}': {e}")
         return 2
+
+    ctest_doc = load_ctest_json(args.ctest_json)
+    ctest_violations = registered_gtest_controls(ctest_doc)
+    if ctest_violations:
+        for test_name, kind, entry in ctest_violations:
+            gh_error(f"{test_name} registers {kind} {entry} — a registered gtest "
+                      "filter/shard control omits cases from the JSON report")
+        return 1
 
     json_files = sorted(glob.glob(os.path.join(args.json_dir, "*.json")))
     if len(json_files) != args.expected_count:
@@ -172,7 +253,10 @@ def main() -> int:
                 gh_error(f"'{path}' has a `testsuites` entry that is a "
                           f"{type(ts).__name__}, not a JSON object. Fail-closed.")
                 return 2
-            suite = ts.get("name", "")
+            suite = ts.get("name")
+            if not isinstance(suite, str) or not suite:
+                gh_error(f"'{path}' has a suite without a non-empty `name`. Fail-closed.")
+                return 2
             suite_disabled = ts.get("disabled", 0)
             if not isinstance(suite_disabled, int):
                 gh_error(f"'{path}' suite '{suite}' has a non-integer `disabled` field "
@@ -181,7 +265,10 @@ def main() -> int:
             if suite_disabled:
                 disabled_violations.append((path, f"suite '{suite}'", suite_disabled))
 
-            testcases = ts.get("testsuite", [])
+            if "testsuite" not in ts:
+                gh_error(f"'{path}' suite '{suite}' has no `testsuite` field. Fail-closed.")
+                return 2
+            testcases = ts.get("testsuite")
             if not isinstance(testcases, list):
                 gh_error(f"'{path}' suite '{suite}' has a `testsuite` field that is a "
                           f"{type(testcases).__name__}, not a list. Fail-closed.")
@@ -194,7 +281,12 @@ def main() -> int:
                     return 2
                 report_cases += 1
                 total_cases += 1
-                case_id = f"{suite}.{tc.get('name', '')}"
+                case_name = tc.get("name")
+                if not isinstance(case_name, str) or not case_name:
+                    gh_error(f"'{path}' suite '{suite}' has a testcase without a non-empty "
+                              "`name`. Fail-closed.")
+                    return 2
+                case_id = f"{suite}.{case_name}"
                 if case_id in seen_case_ids:
                     gh_error(f"'{case_id}' appears in both {seen_case_ids[case_id]} and "
                               f"{path} — Suite.Case is unique only within a binary; the "
@@ -208,13 +300,10 @@ def main() -> int:
                     report_run_cases += 1
 
                 # gtest reports a DISABLED_ case as status=NOTRUN,
-                # result=SUPPRESSED — that is not the same as running and
-                # getting a real (COMPLETED/SKIPPED) result, and this gate's
-                # whole charter is that a case which did not run must not
-                # read as a pass. A GTEST_FILTER/shard-excluded case is not
-                # present in the report at all, so it cannot be caught here —
-                # the calling step unsets every `GTEST_*` variable before
-                # either ctest invocation for exactly that reason.
+                # result=SUPPRESSED; GTEST_FILTER/shard-excluded cases are
+                # absent from the report. The gate requires emitted cases to
+                # have a real (COMPLETED/SKIPPED) result after the ctest-json
+                # preflight has rejected registered gtest controls.
                 if status != "RUN" or result not in ("COMPLETED", "SKIPPED"):
                     bad_status_cases.append((case_id, status, result))
                     continue

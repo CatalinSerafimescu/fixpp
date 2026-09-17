@@ -631,6 +631,17 @@ p.write_text(s.replace(old, "", 1), encoding="utf-8")
 MUT
 expect "T32 tier2 checker invocation drops --expected-count is caught" 1 "INTEROP GATE STEP CHECKER CALL DRIFT: tier2.yml"
 
+# T32b: the checker invocation drops --ctest-json.
+fresh
+python3 - "$WORK/t/.github/workflows/tier1.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old = '            --ctest-json "$ctest_json" \\\n'
+assert s.count(old) == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+p.write_text(s.replace(old, "", 1), encoding="utf-8")
+MUT
+expect "T32b tier1 checker invocation drops --ctest-json is caught" 1 "INTEROP GATE STEP CHECKER CALL DRIFT: tier1.yml"
+
 # T33: the gate step is renamed away — zero steps match the pinned name.
 fresh
 python3 - "$WORK/t/.github/workflows/tier1.yml" <<'MUT'
@@ -681,9 +692,9 @@ expect "T35 tier2 GTEST controls unset line removed is caught" 1 "INTEROP GATE S
 # T26 (#465 Gate B r1 F1) added the roster-floor cell — a roster member whose
 # guard is respelled away from the idiom must still be caught. T27 (#465 Gate
 # B r1 F2) added the list-form `on:` cell the per-line assessment had claimed
-# without a driving test. T28-T34 (fixpp#431 Gate B r1) added the interop
+# without a driving test. T28-T35 (fixpp#431 Gate B r1/r5) added the interop
 # gate step's static wiring cells.
-CELLS_DECLARED=37
+CELLS_DECLARED=38
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$CELLS_DECLARED" ]; then

@@ -122,7 +122,8 @@ mutate_script() {
 
 # A fake ctest: records its own argv (one call per line) to
 # $FAKE_CTEST_ARGV_LOG, and on a `-N` (registration) call cats
-# $FAKE_CTEST_LISTING; any other call exits with $FAKE_CTEST_REAL_EXIT
+# $FAKE_CTEST_LISTING, and on a `--show-only=json-v1` call cats
+# $FAKE_CTEST_SHOWONLY; any other call exits with $FAKE_CTEST_REAL_EXIT
 # (default 0). It does not special-case any other flag — a mutant that
 # changes `-L interop` to `-L interopX` is caught by the extracted script
 # still passing that flag through to argv, which the caller asserts on
@@ -140,6 +141,7 @@ make_fake_ctest() {
 printf '%s\n' "$*" >> "$FAKE_CTEST_ARGV_LOG"
 case " $* " in
   *" -N "*) cat "$FAKE_CTEST_LISTING" ;;
+  *" --show-only=json-v1 "*) cat "$FAKE_CTEST_SHOWONLY" ;;
   *)
     printf 'GTEST_FILTER=%s GTEST_TOTAL_SHARDS=%s\n' \
       "${GTEST_FILTER-<unset>}" "${GTEST_TOTAL_SHARDS-<unset>}" >> "$FAKE_CTEST_ARGV_LOG"
@@ -189,6 +191,9 @@ sed 's/$/\r/' "$LISTING_LF" > "$LISTING_CRLF"
 # stays 3, but the exactly-once exclusion now has nothing to remove.
 LISTING_NO_SCHEMA="$WORK/listing-no-schema.txt"
 sed 's/interop_cell_results_schema_check/interop_gamma_test/' "$LISTING_LF" > "$LISTING_NO_SCHEMA"
+
+CTEST_SHOWONLY="$WORK/ctest-show-only.json"
+printf '%s\n' '{"tests":[{"name":"interop_alpha_test","command":["/fake/interop_alpha_test"],"properties":[]}]}' > "$CTEST_SHOWONLY"
 
 PIN_LF="linux-clang-release   3
 "
@@ -302,6 +307,7 @@ run_full() {
   local out rc=0
   out="$(cd "$celldir" && PATH="$bindir:$PATH" RUNNER_TEMP="$celldir/runnertemp" \
            FAKE_CTEST_ARGV_LOG="$argvlog" FAKE_CTEST_LISTING="$LISTING_LF" \
+           FAKE_CTEST_SHOWONLY="$CTEST_SHOWONLY" \
            FAKE_CTEST_REAL_EXIT="$real_exit" \
            bash "$script" 2>&1)" || rc=$?
   if [ "$rc" -ne "$want_rc" ]; then
@@ -338,6 +344,7 @@ run_success() {
   local out rc=0
   out="$(cd "$celldir" && PATH="$bindir:$PATH" RUNNER_TEMP="$celldir/runnertemp" \
            FAKE_CTEST_ARGV_LOG="$argvlog" FAKE_CTEST_LISTING="$LISTING_LF" \
+           FAKE_CTEST_SHOWONLY="$CTEST_SHOWONLY" \
            FAKE_CTEST_REAL_EXIT=0 \
            FAKE_PY_ARGV_LOG="$pyargvlog" \
            GTEST_FILTER=-Plain.MustRun GTEST_TOTAL_SHARDS=2 GTEST_SHARD_INDEX=0 \
@@ -354,6 +361,7 @@ run_success() {
   local line f
   line=$(cat "$pyargvlog")
   for f in "ci/assert-interop-skips.py" "--json-dir $celldir/runnertemp/interop-gtest" \
+           "--ctest-json $celldir/runnertemp/interop-ctest.json" \
            "--expected-skips tests/interop/expected-skips-without-counterparty.txt" \
            "--expected-count 2"; do
     if ! printf '%s' "$line" | grep -qF -- "$f"; then
@@ -366,6 +374,41 @@ run_success() {
   ok "$label"
 }
 run_success "S1+S2 the full step's success path invokes the checker exactly once with the right flags, and the inherited gtest filter/shard controls do not reach the real ctest run"
+
+# ── F1: the full step obtains ctest JSON registration data and passes it to the
+# checker.
+run_full_ctest_json() {
+  local label="$1"
+  local celldir="$WORK/cell-$RANDOM$RANDOM"
+  local bindir="$celldir-bin"
+  mkdir -p "$celldir/ci" "$bindir"
+  printf '%s' "$PIN_LF" > "$celldir/ci/expected-interop-tests.txt"
+  make_fake_ctest "$bindir"
+  make_fake_python3 "$bindir"
+  local argvlog="$celldir.argv"; : > "$argvlog"
+  local pyargvlog="$celldir.pyargv"; : > "$pyargvlog"
+  local script="$celldir.sh"
+  extract_run "$script"
+  local out rc=0
+  out="$(cd "$celldir" && PATH="$bindir:$PATH" RUNNER_TEMP="$celldir/runnertemp" \
+           FAKE_CTEST_ARGV_LOG="$argvlog" FAKE_CTEST_LISTING="$LISTING_LF" \
+           FAKE_CTEST_SHOWONLY="$CTEST_SHOWONLY" \
+           FAKE_CTEST_REAL_EXIT=0 \
+           FAKE_PY_ARGV_LOG="$pyargvlog" \
+           bash "$script" 2>&1)" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    printf '%s\n' "$out" | sed 's/^/  | /'
+    bad "$label — expected exit 0, got $rc"; return
+  fi
+  if ! grep -qF -- "-L interop --show-only=json-v1" "$argvlog"; then
+    bad "$label — fake ctest's argv log is missing the show-only JSON call: $(cat "$argvlog")"; return
+  fi
+  if ! grep -qF -- "--ctest-json $celldir/runnertemp/interop-ctest.json" "$pyargvlog"; then
+    bad "$label — fake python3's argv log is missing --ctest-json: $(cat "$pyargvlog")"; return
+  fi
+  ok "$label"
+}
+run_full_ctest_json "F1 the full step requests ctest JSON and passes --ctest-json to the checker"
 
 # ── S-mutant-a: the checker call site replaced by `echo` (Codex #1) — the
 # fake python3's argv log must stay EMPTY, since the checker is never really
@@ -395,6 +438,7 @@ open(p, "w", encoding="utf-8").writelines(lines)
   local out rc=0
   out="$( cd "$celldir" && PATH="$bindir:$PATH" RUNNER_TEMP="$celldir/runnertemp" \
       FAKE_CTEST_ARGV_LOG="$argvlog" FAKE_CTEST_LISTING="$LISTING_LF" \
+      FAKE_CTEST_SHOWONLY="$CTEST_SHOWONLY" \
       FAKE_CTEST_REAL_EXIT=0 \
       FAKE_PY_ARGV_LOG="$pyargvlog" \
       bash "$script" 2>&1 )" || rc=$?
@@ -438,6 +482,7 @@ open(p, "w", encoding="utf-8").writelines(lines)
   local out rc=0
   out="$( cd "$celldir" && PATH="$bindir:$PATH" RUNNER_TEMP="$celldir/runnertemp" \
       FAKE_CTEST_ARGV_LOG="$argvlog" FAKE_CTEST_LISTING="$LISTING_LF" \
+      FAKE_CTEST_SHOWONLY="$CTEST_SHOWONLY" \
       FAKE_CTEST_REAL_EXIT=0 \
       FAKE_PY_ARGV_LOG="$pyargvlog" \
       GTEST_FILTER=-Plain.MustRun GTEST_TOTAL_SHARDS=2 GTEST_SHARD_INDEX=0 \
@@ -520,7 +565,7 @@ del lines[i:i + 5]
 open(p, "w", encoding="utf-8").writelines(lines)
 ' "$LISTING_NO_SCHEMA" "$PIN_LF" 0 "DERIVATION_BINARIES=3"
 
-CELLS_DECLARED=13
+CELLS_DECLARED=14
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$CELLS_DECLARED" ]; then

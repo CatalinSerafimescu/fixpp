@@ -960,9 +960,8 @@ jobs:
           set -euo pipefail
           unset INTEROP_QUICKFIX_CPP_PORT INTEROP_QUICKFIX_J_PORT \
                 INTEROP_QUICKFIX_CPP_HOST INTEROP_QUICKFIX_J_HOST
-          # An inherited gtest filter or shard control (GTEST_FILTER,
-          # GTEST_TOTAL_SHARDS, GTEST_SHARD_INDEX, ...) omits cases from the
-          # JSON report entirely, which no report-level check below can see.
+          # Inherited gtest controls are cleared here; registered controls are
+          # checked from ctest's JSON registration before the report scan.
           unset "${!GTEST_@}"
           full=$(ctest --preset ${{ matrix.preset }} -L interop -N)
           full="${full//$'\r'/}"
@@ -987,6 +986,10 @@ jobs:
           names=$(echo "$names_all" | grep -v -x 'interop_cell_results_schema_check')
           binaries=$(echo "$names" | grep -c .)
 
+          ctest_json="$RUNNER_TEMP/interop-ctest.json"
+          mkdir -p "$RUNNER_TEMP"
+          ctest --preset ${{ matrix.preset }} -L interop --show-only=json-v1 > "$ctest_json"
+
           out_dir="$RUNNER_TEMP/interop-gtest"
           rm -rf "$out_dir" && mkdir -p "$out_dir"
           if ! GTEST_OUTPUT="json:${out_dir}/" \
@@ -998,6 +1001,7 @@ jobs:
 
           python3 ci/assert-interop-skips.py \
             --json-dir "$out_dir" \
+            --ctest-json "$ctest_json" \
             --expected-skips tests/interop/expected-skips-without-counterparty.txt \
             --expected-count "$binaries"
 

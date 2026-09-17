@@ -64,12 +64,33 @@ write_empty_json() {
   printf '%s' '{"tests":0,"failures":0,"disabled":0,"errors":0,"name":"AllTests","testsuites":[]}' > "$path"
 }
 
+write_ctest_json() {
+  local path="$1" tests_json="${2:-}"
+  if [ -z "$tests_json" ]; then
+    tests_json='[{"name":"interop_alpha_test","command":["/fake/interop_alpha_test"],"properties":[]}]'
+  fi
+  python3 - "$path" "$tests_json" <<'PY'
+import json, sys
+path, tests_json = sys.argv[1:3]
+with open(path, "w", encoding="utf-8") as f:
+    json.dump({"kind": "ctestInfo", "version": {"major": 1, "minor": 0},
+               "tests": json.loads(tests_json)}, f)
+PY
+}
+
 # $1 = case name, $2 = json-dir, $3 = expected-skips file, $4 = expected-count,
-# $5 = expected exit code, $6 = required fragment in stdout+stderr.
+# $5 = expected exit code, $6 = required fragment in stdout+stderr,
+# $7 = optional ctest --show-only=json-v1 fixture.
 run_check() {
   local name="$1" json_dir="$2" skips_file="$3" count="$4" want_rc="$5" frag="$6"
+  local ctest_json="${7:-}"
   local out rc=0
+  if [ -z "$ctest_json" ]; then
+    ctest_json="$WORK/ctest-${PASS}-${FAIL}.json"
+    write_ctest_json "$ctest_json"
+  fi
   out="$(python3 "$CHECK" --json-dir "$json_dir" --expected-skips "$skips_file" \
+           --ctest-json "$ctest_json" \
            --expected-count "$count" 2>&1)" || rc=$?
   if [ "$rc" -ne "$want_rc" ]; then
     printf '%s\n' "$out" | sed 's/^/  | /'
@@ -396,7 +417,87 @@ printf 'Suite.CaseA\n' > "$WORK/t29-skips.txt"
 run_check "T29 skip message without a trailing newline is a bad reason" \
   "$d" "$WORK/t29-skips.txt" 2 1 "reason other than a counterparty"
 
-CELLS_DECLARED=29
+# ── T30-T34: CTest-registered gtest controls must fail the gate before the
+# per-report scan, because filtered or sharded cases are absent from gtest JSON.
+d="$WORK/t30"; mkdir -p "$d"
+write_json "$d/binA.json" Suite CaseA COMPLETED
+write_json "$d/binB.json" Suite CaseB COMPLETED
+: > "$WORK/t30-skips.txt"
+write_ctest_json "$WORK/t30-ctest.json" \
+  '[{"name":"interop_alpha_test","command":["/fake/interop_alpha_test"],"properties":[{"name":"ENVIRONMENT","value":["GTEST_FILTER=-Suite.CaseB"]}]}]'
+run_check "T30 registered ENVIRONMENT GTEST_FILTER is caught" \
+  "$d" "$WORK/t30-skips.txt" 2 1 "registered gtest filter/shard control" "$WORK/t30-ctest.json"
+
+d="$WORK/t31"; mkdir -p "$d"
+write_json "$d/binA.json" Suite CaseA COMPLETED
+write_json "$d/binB.json" Suite CaseB COMPLETED
+: > "$WORK/t31-skips.txt"
+write_ctest_json "$WORK/t31-ctest.json" \
+  '[{"name":"interop_alpha_test","command":["/fake/interop_alpha_test"],"properties":[{"name":"ENVIRONMENT_MODIFICATION","value":["GTEST_FILTER=set:-Suite.CaseB"]}]}]'
+run_check "T31 registered ENVIRONMENT_MODIFICATION GTEST_FILTER is caught" \
+  "$d" "$WORK/t31-skips.txt" 2 1 "registered gtest filter/shard control" "$WORK/t31-ctest.json"
+
+d="$WORK/t32"; mkdir -p "$d"
+write_json "$d/binA.json" Suite CaseA COMPLETED
+write_json "$d/binB.json" Suite CaseB COMPLETED
+: > "$WORK/t32-skips.txt"
+write_ctest_json "$WORK/t32-ctest.json" \
+  '[{"name":"interop_alpha_test","command":["/fake/interop_alpha_test","--gtest_filter=-Suite.CaseB"],"properties":[]}]'
+run_check "T32 registered --gtest_filter command argument is caught" \
+  "$d" "$WORK/t32-skips.txt" 2 1 "registered gtest filter/shard control" "$WORK/t32-ctest.json"
+
+d="$WORK/t33"; mkdir -p "$d"
+write_json "$d/binA.json" Suite CaseA COMPLETED
+write_json "$d/binB.json" Suite CaseB COMPLETED
+: > "$WORK/t33-skips.txt"
+write_ctest_json "$WORK/t33-ctest.json" \
+  '[{"name":"interop_alpha_test","command":["/fake/interop_alpha_test"],"properties":[{"name":"ENVIRONMENT","value":["TSAN_OPTIONS=halt_on_error=1"]}]},{"name":"interop_cell_results_schema_check","command":["python3","-m","pytest"],"properties":[]}]'
+run_check "T33 non-gtest ENVIRONMENT and pytest command are allowed" \
+  "$d" "$WORK/t33-skips.txt" 2 0 "PASS:" "$WORK/t33-ctest.json"
+
+d="$WORK/t34"; mkdir -p "$d"
+write_json "$d/binA.json" Suite CaseA COMPLETED
+write_json "$d/binB.json" Suite CaseB COMPLETED
+: > "$WORK/t34-skips.txt"
+printf '{not json' > "$WORK/t34-ctest.json"
+run_check "T34 bad ctest JSON fails closed" \
+  "$d" "$WORK/t34-skips.txt" 2 2 "could not be read as JSON" "$WORK/t34-ctest.json"
+
+# ── T35-T36: the counterparty name and its port token must agree.
+d="$WORK/t35"; mkdir -p "$d"
+write_json "$d/binA.json" Suite CaseA SKIPPED "quickfix-cpp unavailable: INTEROP_QUICKFIX_J_PORT not set (parent harness did not lease a port)"
+write_json "$d/binB.json" Suite CaseB COMPLETED
+printf 'Suite.CaseA\n' > "$WORK/t35-skips.txt"
+run_check "T35 quickfix-cpp reason carrying the J port token is caught" \
+  "$d" "$WORK/t35-skips.txt" 2 1 "reason other than a counterparty"
+
+d="$WORK/t36"; mkdir -p "$d"
+write_json "$d/binA.json" Suite CaseA SKIPPED "quickfix-j unavailable: INTEROP_QUICKFIX_CPP_PORT not set (parent harness did not lease a port)"
+write_json "$d/binB.json" Suite CaseB COMPLETED
+printf 'Suite.CaseA\n' > "$WORK/t36-skips.txt"
+run_check "T36 quickfix-j reason carrying the CPP port token is caught" \
+  "$d" "$WORK/t36-skips.txt" 2 1 "reason other than a counterparty"
+
+# ── T37-T39: suite/case identity fields and suite arrays are required.
+d="$WORK/t37"; mkdir -p "$d"
+printf '%s' '{"testsuites":[{"testsuite":[{"name":"CaseA","status":"RUN","result":"COMPLETED"}]}]}' > "$d/binA.json"
+: > "$WORK/t37-skips.txt"
+run_check "T37 suite without a name fails closed" \
+  "$d" "$WORK/t37-skips.txt" 1 2 "suite without a non-empty \`name\`"
+
+d="$WORK/t38"; mkdir -p "$d"
+printf '%s' '{"testsuites":[{"name":"Suite","testsuite":[{"status":"RUN","result":"COMPLETED"}]}]}' > "$d/binA.json"
+: > "$WORK/t38-skips.txt"
+run_check "T38 case without a name fails closed" \
+  "$d" "$WORK/t38-skips.txt" 1 2 "testcase without a non-empty \`name\`"
+
+d="$WORK/t39"; mkdir -p "$d"
+printf '%s' '{"testsuites":[{"name":"Suite","testsuite":[{"name":"CaseA","status":"RUN","result":"COMPLETED"}]},{"name":"Sibling"}]}' > "$d/binA.json"
+: > "$WORK/t39-skips.txt"
+run_check "T39 sibling suite without testsuite fails closed" \
+  "$d" "$WORK/t39-skips.txt" 1 2 "has no \`testsuite\` field"
+
+CELLS_DECLARED=39
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$CELLS_DECLARED" ]; then

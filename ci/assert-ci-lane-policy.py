@@ -766,11 +766,12 @@ def check_interop_gate_step(root, violations):
         # count as a match of its own prefix.
         l_count = len(re.findall(
             r"ctest --preset \$\{\{ matrix\.preset \}\} -L interop\b", run))
-        if l_count != 2:
+        if l_count != 3:
             violations.append(
                 f"INTEROP GATE STEP LABEL DRIFT: {wf_name}'s '{INTEROP_STEP_NAME}' step "
-                f"invokes `ctest ... -L interop` {l_count} time(s), expected exactly 2 (the "
-                f"registration-count call and the real GTEST_OUTPUT run).")
+                f"invokes `ctest ... -L interop` {l_count} time(s), expected exactly 3 (the "
+                f"registration-count call, the ctest JSON registration call, and the real "
+                "GTEST_OUTPUT run).")
 
         # The actual READ (an input redirect), not merely a mention — the
         # step's own diagnostic `echo` text also names the file when it
@@ -780,7 +781,7 @@ def check_interop_gate_step(root, violations):
                 f"INTEROP GATE STEP PIN READ MISSING: {wf_name}'s '{INTEROP_STEP_NAME}' "
                 f"step no longer reads ci/expected-interop-tests.txt.")
 
-        for flag in ("--json-dir", "--expected-skips", "--expected-count"):
+        for flag in ("--json-dir", "--ctest-json", "--expected-skips", "--expected-count"):
             if flag not in run:
                 violations.append(
                     f"INTEROP GATE STEP CHECKER CALL DRIFT: {wf_name}'s "
@@ -823,7 +824,7 @@ def check_interop_gate_step(root, violations):
 
     if checked:
         print(f"  interop gate step: {checked}/{len(INTEROP_ROSTER)} tier workflow(s) wire "
-              f"the #431 step correctly (leg guard, no continue-on-error, -L interop twice, "
+              f"the #431 step correctly (leg guard, no continue-on-error, -L interop three times, "
               f"pin-file read, checker invocation args).")
     return True
 
