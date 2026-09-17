@@ -1014,8 +1014,8 @@ $got"
   # the restore step's own text cannot catch every call in a job drifting to
   # the same wrong preset).
   got="$(echo "$json" | jq -r '.linux_step_count')"
-  [ "$got" = "36" ] \
-    || fail "$case_id: the linux job has $got steps, expected 36. A step added anywhere before the pytest pair can change what they execute without colliding with a pinned name or adding a pytest mention (round 4 finding 3, measured). This count is deliberately brittle: adding a step to this job is a deliberate act and must be paired with a deliberate look at whether it reaches the python steps."
+  [ "$got" = "37" ] \
+    || fail "$case_id: the linux job has $got steps, expected 37. A step added anywhere before the pytest pair can change what they execute without colliding with a pinned name or adding a pytest mention (round 4 finding 3, measured). This count is deliberately brittle: adding a step to this job is a deliberate act and must be paired with a deliberate look at whether it reaches the python steps. (36 -> 37, fixpp#431: the 'Interop gate — ctest -L interop, skip set asserted (#431)' step, inserted before the pytest pair; it mentions neither GITHUB_ENV/PATH nor pytest, and its name collides with no pinned step.)"
 
   got="$(echo "$json" | jq -cS '.linux_job_env')"
   [ "$got" = '{"CCACHE_COMPILERCHECK":"content","CCACHE_COMPRESSLEVEL":"5","CCACHE_DIR":"/tmp/fixpp-ccache-${{ matrix.preset }}","CCACHE_MAXSIZE":"2G","CMAKE_CXX_COMPILER_LAUNCHER":"ccache","CMAKE_C_COMPILER_LAUNCHER":"ccache"}' ] \
@@ -1423,6 +1423,11 @@ CI_PIN_HARNESSES=(
   # dead-call-site shape as M26/M64/M65/M69 — none of those prove THIS row can
   # fail, only that the census mechanism can fail for a different harness.
   "ci/test-disk-preflight.sh"
+  # fixpp#431's interop skip-set witness. ⚠️ ADDED WITH ITS OWN MUTANT (M101),
+  # same dead-call-site shape as M26/M64/M65/M69/M73 — none of those prove
+  # THIS row can fail, only that the census mechanism can fail for a
+  # different harness.
+  "ci/test-interop-skips.sh"
 )
 
 assert_ci_pin_call_sites() {
@@ -1747,7 +1752,8 @@ echo "PASS: derive-script table + call site + per-leg FIXPP_INSTALL_PYTHON + PY_
 # not collide). Re-run the harness against the merged number rather than
 # re-deriving from either branch's local total — the failure mode this guards is
 # one side's edit silently replacing the other's, which reads as a passing count.
-MUTANTS_DECLARED=86  # M97-M100 (#411 Gate B r2 L1/L2: Build's key set on both jobs, plus
+MUTANTS_DECLARED=87  # M101 (fixpp#431: the ci-script-pins call-site pin for
+                     # ci/test-interop-skips.sh) + M97-M100 (#411 Gate B r2 L1/L2: Build's key set on both jobs, plus
                      # the workflow's own on.push key set and branches) + M83-M96 (#411 Gate B r1 F1/F3/F4-bench: the canonical-object ccache
                      # contract — coordinated preset drift and the restore/seed/statistics
                      # semantics a derived preset and an id/if-only check could not see, plus
@@ -2234,6 +2240,21 @@ assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
 '
 
+  # M101 (fixpp#431): the SAME dead-call-site shape as M26/M64/M65/M69/M73, on
+  # the interop skip-set witness row #431 added. Its own mutant because none
+  # of those prove THIS row can fail — each proves the census mechanism fires
+  # for a DIFFERENT harness, and a row proven by a sibling mutant is a row
+  # nobody has seen fail.
+  mutate_workflow M101 "the interop skip-set harness call site replaced by an echo" "ci-script-pins does not INVOKE" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: bash ci/test-interop-skips.sh\n"
+new = "        run: echo \"bash ci/test-interop-skips.sh\"\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
   # ── #271: the wheel identity steps' VALUE drift (M70-M72) ───────────────────
   #
   # assert_wheel_identity_steps extracted six fields per step and compared four.
@@ -2381,12 +2402,13 @@ open(dst, "w").write(t.replace(old, new))
   # with no mutant of its own — the shadowing round 5 finding 3 is about.
   # ⚠️ THE LITERAL TRACKS THE BASELINE. Bumped 31->32 by #252's
   # `Assert the dependency closure is instrumented` step, 32->33 by #411's
-  # trim step and 33->36 by #411's GHCR move; the mutant inserts one more, so the message it must
+  # trim step, 33->36 by #411's GHCR move, and 36->37 by fixpp#431's interop
+  # gate step; the mutant inserts one more, so the message it must
   # produce moves with it. A stale literal here does
   # not fail open — `mutate_workflow` reports "failed the pin for the WRONG
   # reason" — but it is the second edit the count pin demands, and forgetting it
   # is how a deliberately brittle assertion earns a reputation for being noise.
-  mutate_workflow M33 "an unnamed step is inserted before the pytest pair" "has 37 steps, expected 36" '
+  mutate_workflow M33 "an unnamed step is inserted before the pytest pair" "has 38 steps, expected 37" '
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()

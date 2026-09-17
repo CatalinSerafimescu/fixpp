@@ -929,6 +929,67 @@ jobs:
             exit 1
           fi
 
+      # fixpp#431 — a dedicated, fast, attributable interop signal on the
+      # cheapest non-sanitizer leg. Today `-L interop` runs unfiltered inside
+      # the Test step below on EVERY lane, so a break surfaces as "the 1800s
+      # ctest step on linux-clang-tsan failed" rather than as "interop broke"
+      # — and 90 of its cases SKIP for lack of a leased counterparty on every
+      # lane, with ctest reporting a skip as a pass, so that gap has never had
+      # a signal at all. Design decided in the issue; see its 2026-09-17
+      # comment for the two acceptance amendments (a step, not a job, because
+      # Tier 3 has no `-release` preset; "skip set and reason asserted"
+      # replacing the counterparty alternative, deferred to #468).
+      #
+      # `ctest -L` exits 0 on an empty match (#247/#250/#262), so the count is
+      # asserted BEFORE the run, same vacuity guard as the two witnesses
+      # above. A SKIP must not read as a PASS either: every skip is required
+      # to be one of the checked-in cases in
+      # tests/interop/expected-skips-without-counterparty.txt, for the one
+      # allowed reason (a counterparty port not leased) — see
+      # ci/assert-interop-skips.py's header for the full contract.
+      #
+      # if:-guarded to ONE preset, matching the consumer-witness step's
+      # unconditional placement pattern but not its unconditional `if:` —
+      # this signal only needs to exist once, and linux-clang-release is the
+      # cheapest non-sanitizer leg (avoids linux-gcc-release, the packaging
+      # lane, so this step never competes with the six packaging witnesses'
+      # stage-install).
+      #
+      # Runs a SECOND time inside the unfiltered `-LE packaging` Test step
+      # below on every lane, including this one — intentional, not a
+      # duplicate to remove: that unfiltered run is the coverage backstop,
+      # this step is for speed and attribution.
+      - name: "Interop gate — ctest -L interop, skip set asserted (#431)"
+        if: matrix.preset == 'linux-clang-release'
+        run: |
+          set -euo pipefail
+          full=$(ctest --preset ${{ matrix.preset }} -L interop -N)
+          n=$(echo "$full" | sed -n 's/^Total Tests: //p')
+          expected=$(awk -v p="${{ matrix.preset }}" '$1 == p { print $2; exit }' ci/expected-interop-tests.txt)
+          echo "registered interop tests: ${n:-0} (expected ${expected:-<no line>})"
+          if [ -z "${expected:-}" ] || [ "${n:-0}" != "${expected}" ]; then
+            echo "::error title=Interop gate::ctest -L interop registered ${n:-0} tests on ${{ matrix.preset }}, expected '${expected:-<no line>}' from ci/expected-interop-tests.txt."
+            exit 1
+          fi
+
+          # interop_cell_results_schema_check is a pytest ctest entry (see
+          # tests/interop/CMakeLists.txt) — it never emits a gtest JSON report,
+          # so it is excluded before deriving how many reports to expect.
+          names=$(echo "$full" | sed -n 's/^ *Test *#[0-9]*: //p' \
+                    | grep -v -x 'interop_cell_results_schema_check')
+          binaries=$(echo "$names" | grep -c .)
+
+          out_dir="$RUNNER_TEMP/interop-gtest"
+          rm -rf "$out_dir" && mkdir -p "$out_dir"
+          GTEST_OUTPUT="json:${out_dir}/" \
+            ctest --preset ${{ matrix.preset }} -L interop --no-tests=error \
+                  --output-on-failure --timeout 1800
+
+          python3 ci/assert-interop-skips.py \
+            --json-dir "$out_dir" \
+            --expected-skips tests/interop/expected-skips-without-counterparty.txt \
+            --expected-count "$binaries"
+
       # 084 T067 / FR-026a — the packaging tier is GATED ON ONE LANE.
       #
       # `ctest --preset` carries no label filter, so the six packaging witnesses
@@ -2443,6 +2504,16 @@ jobs:
       # — bash + coreutils, no real disk, no /proc reads (both overridden).
       - name: "Regression pin — 089 disk-preflight gate (D-1..D-11, spurious-hit arms)"
         run: bash ci/test-disk-preflight.sh
+
+      # fixpp#431's checker, ci/assert-interop-skips.py: reads a gtest JSON
+      # dir and asserts no case failed, the SKIPPED set matches the checked-in
+      # list exactly (both directions), every skip gives the one allowed
+      # reason, and it fails CLOSED (exit 2) on an unparsable report, a
+      # JSON-file-count mismatch, or zero cases found. Fixture cells only, no
+      # ctest, no build — see the harness's own header for the full cell list
+      # and its own instrument-can-report-non-zero proof.
+      - name: "Regression pin — interop skip-set witness escapes (#431)"
+        run: bash ci/test-interop-skips.sh
 
       # ci/cxx_blank.py is the SHARED lexer three of the gates above resolve at
       # runtime, and #289 batch 19 moved `blank_unevaluated` into it and replaced

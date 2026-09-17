@@ -568,6 +568,43 @@ jobs:
             exit 1
           fi
 
+      # fixpp#431 — same signal as tier1's linux-clang-release leg; see that
+      # workflow's comment on the matching step for the full design rationale
+      # (issue design decided 2026-09-17: "a named interop step or job on the
+      # cheapest non-sanitizer leg of each tier" — Tier 3 has no `-release`
+      # preset at all, which is why the amended wording says "step or job").
+      # linux-clang-libc++ is the plain (non-sanitizer) preset in this tier.
+      - name: "Interop gate — ctest -L interop, skip set asserted (#431)"
+        if: matrix.preset == 'linux-clang-libc++'
+        run: |
+          set -euo pipefail
+          full=$(ctest --preset ${{ matrix.preset }} -L interop -N)
+          n=$(echo "$full" | sed -n 's/^Total Tests: //p')
+          expected=$(awk -v p="${{ matrix.preset }}" '$1 == p { print $2; exit }' ci/expected-interop-tests.txt)
+          echo "registered interop tests: ${n:-0} (expected ${expected:-<no line>})"
+          if [ -z "${expected:-}" ] || [ "${n:-0}" != "${expected}" ]; then
+            echo "::error title=Interop gate::ctest -L interop registered ${n:-0} tests on ${{ matrix.preset }}, expected '${expected:-<no line>}' from ci/expected-interop-tests.txt."
+            exit 1
+          fi
+
+          # interop_cell_results_schema_check is a pytest ctest entry (see
+          # tests/interop/CMakeLists.txt) — it never emits a gtest JSON report,
+          # so it is excluded before deriving how many reports to expect.
+          names=$(echo "$full" | sed -n 's/^ *Test *#[0-9]*: //p' \
+                    | grep -v -x 'interop_cell_results_schema_check')
+          binaries=$(echo "$names" | grep -c .)
+
+          out_dir="$RUNNER_TEMP/interop-gtest"
+          rm -rf "$out_dir" && mkdir -p "$out_dir"
+          GTEST_OUTPUT="json:${out_dir}/" \
+            ctest --preset ${{ matrix.preset }} -L interop --no-tests=error \
+                  --output-on-failure --timeout 1800
+
+          python3 ci/assert-interop-skips.py \
+            --json-dir "$out_dir" \
+            --expected-skips tests/interop/expected-skips-without-counterparty.txt \
+            --expected-count "$binaries"
+
       # TSan only: the apt-installed libc++ is NOT TSan-instrumented, so TSan
       # cannot see libc++'s internal synchronisation and reports FALSE data
       # races in std::future / asio::use_future shared-state teardown (proven
