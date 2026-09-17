@@ -700,6 +700,10 @@ jobs:
           set -euo pipefail
           unset INTEROP_QUICKFIX_CPP_PORT INTEROP_QUICKFIX_J_PORT \
                 INTEROP_QUICKFIX_CPP_HOST INTEROP_QUICKFIX_J_HOST
+          # An inherited gtest filter or shard control (GTEST_FILTER,
+          # GTEST_TOTAL_SHARDS, GTEST_SHARD_INDEX, ...) omits cases from the
+          # JSON report entirely, which no report-level check below can see.
+          unset "${!GTEST_@}"
           full=$(ctest --preset ${{ matrix.preset }} -L interop -N)
           full="${full//$'\r'/}"
           n=$(echo "$full" | sed -n 's/^Total Tests: //p')

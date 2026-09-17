@@ -130,6 +130,11 @@ mutate_script() {
 # changes `-L interop` to `-L interopX` is caught by the extracted script
 # still passing that flag through to argv, which the caller asserts on
 # directly, not by the fake refusing to run.
+#
+# The non-`-N` (real run) branch also records the shell's own GTEST_FILTER
+# and GTEST_TOTAL_SHARDS at the point ctest is invoked, so a caller can
+# assert what state those variables were in when the real run happened,
+# not merely what the calling shell exported at the top of the script.
 make_fake_ctest() {
   local bindir="$1"
   mkdir -p "$bindir"
@@ -138,10 +143,29 @@ make_fake_ctest() {
 printf '%s\n' "$*" >> "$FAKE_CTEST_ARGV_LOG"
 case " $* " in
   *" -N "*) cat "$FAKE_CTEST_LISTING" ;;
-  *) exit "${FAKE_CTEST_REAL_EXIT:-0}" ;;
+  *)
+    printf 'GTEST_FILTER=%s GTEST_TOTAL_SHARDS=%s\n' \
+      "${GTEST_FILTER-<unset>}" "${GTEST_TOTAL_SHARDS-<unset>}" >> "$FAKE_CTEST_ARGV_LOG"
+    exit "${FAKE_CTEST_REAL_EXIT:-0}"
+    ;;
 esac
 SH
   chmod +x "$bindir/ctest"
+}
+
+# A fake python3: records its own argv (one call per line) to
+# $FAKE_PY_ARGV_LOG, and exits 0. Used to prove the step's success path
+# actually reaches and invokes the checker with the expected flags, rather
+# than merely reaching a `ctest` call that happens to succeed.
+make_fake_python3() {
+  local bindir="$1"
+  mkdir -p "$bindir"
+  cat > "$bindir/python3" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$FAKE_PY_ARGV_LOG"
+exit 0
+SH
+  chmod +x "$bindir/python3"
 }
 
 # ── Fixture listings and pin files ───────────────────────────────────────────
@@ -159,8 +183,8 @@ Test project /fake
 Total Tests: 3
 EOF
 
-# The CRLF form of the same listing — every line ends `\r\n`, as native
-# Windows ctest emits (Codex #1's reproduction, crlf/derive.sh).
+# The CRLF form of the same listing, a constructed input: every line ends
+# `\r\n`.
 LISTING_CRLF="$WORK/listing-crlf.txt"
 sed 's/$/\r/' "$LISTING_LF" > "$LISTING_CRLF"
 
@@ -256,10 +280,9 @@ run_derivation "Dd pin file missing this preset's line is caught" \
 # NOTHING: Da/Db/Dc above only ever extract TIER1's text, the tier1==tier3
 # identity check in ci/assert-ci-lane-policy.py explicitly exempts tier2,
 # and its static checks there don't look for CR-normalisation/exactly-once
-# text at all. Reverting either fix in tier2.yml ALONE left every other
-# committed check green. The derivation-only body (up to and including
-# `binaries=`) needs no fake cygpath/python — those appear only later in
-# tier2's real body, after this truncation point.
+# text at all. The derivation-only body (up to and including `binaries=`)
+# needs no fake cygpath/python — those appear only later in tier2's real
+# body, after this truncation point.
 tier2_script_b="$WORK/tier2-Db.sh"
 extract_run_from "$TIER2" "$PRESET_TIER2" "$tier2_script_b" "$BINARIES_MARKER"
 run_derivation "D-tier2-b CRLF listing + CRLF pin derives binaries=2 on tier2.yml's own body" \
@@ -302,6 +325,132 @@ run_full() {
 }
 run_full "E ctest failure on the real run is annotated with ::error, not a bare set -e abort" \
   1 1 "::error title=Interop gate::ctest -L interop failed on $PRESET."
+
+# ── S: the step's SUCCESS path — the only other full-step cell (E, above)
+# forces the real ctest call to fail, so the checker line after it is never
+# reached there. This drives the whole step to a real exit 0, with a fake
+# python3 on PATH standing in for the checker, and asserts both that it was
+# invoked with the expected flags and that an inherited GTEST_FILTER/
+# GTEST_TOTAL_SHARDS did not reach the real ctest run. ──────────────────────
+run_success() {
+  local label="$1"
+  local celldir="$WORK/cell-$RANDOM$RANDOM"
+  local bindir="$celldir-bin"
+  mkdir -p "$celldir/ci" "$bindir"
+  printf '%s' "$PIN_LF" > "$celldir/ci/expected-interop-tests.txt"
+  make_fake_ctest "$bindir"
+  make_fake_python3 "$bindir"
+  local argvlog="$celldir.argv"; : > "$argvlog"
+  local pyargvlog="$celldir.pyargv"; : > "$pyargvlog"
+  local script="$celldir.sh"
+  extract_run "$script"
+  local out rc=0
+  out="$(cd "$celldir" && PATH="$bindir:$PATH" RUNNER_TEMP="$celldir/runnertemp" \
+           FAKE_CTEST_ARGV_LOG="$argvlog" FAKE_CTEST_LISTING="$LISTING_LF" \
+           FAKE_CTEST_REAL_EXIT=0 \
+           FAKE_PY_ARGV_LOG="$pyargvlog" \
+           GTEST_FILTER=-Plain.MustRun GTEST_TOTAL_SHARDS=2 GTEST_SHARD_INDEX=0 \
+           bash "$script" 2>&1)" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    printf '%s\n' "$out" | sed 's/^/  | /'
+    bad "$label — expected exit 0, got $rc"; return
+  fi
+  local n_lines
+  n_lines=$(grep -c . "$pyargvlog" || true)
+  if [ "$n_lines" != "1" ]; then
+    bad "$label — python3 argv log has $n_lines line(s), expected exactly 1: $(cat "$pyargvlog")"; return
+  fi
+  local line f
+  line=$(cat "$pyargvlog")
+  for f in "ci/assert-interop-skips.py" "--json-dir $celldir/runnertemp/interop-gtest" \
+           "--expected-skips tests/interop/expected-skips-without-counterparty.txt" \
+           "--expected-count 2"; do
+    if ! printf '%s' "$line" | grep -qF -- "$f"; then
+      bad "$label — python3 argv missing '$f': $line"; return
+    fi
+  done
+  if ! grep -qF -- "GTEST_FILTER=<unset> GTEST_TOTAL_SHARDS=<unset>" "$argvlog"; then
+    bad "$label — inherited GTEST_FILTER/GTEST_TOTAL_SHARDS reached the real ctest run: $(cat "$argvlog")"; return
+  fi
+  ok "$label"
+}
+run_success "S1+S2 the full step's success path invokes the checker exactly once with the right flags, and the inherited gtest filter/shard controls do not reach the real ctest run"
+
+# ── S-mutant-a: the checker call site replaced by `echo` (Codex #1) — the
+# fake python3's argv log must stay EMPTY, since the checker is never really
+# invoked; a cell that could not tell the difference would not be evidence.
+run_mutant_echo_checker() {
+  local label="$1"
+  local celldir="$WORK/cell-$RANDOM$RANDOM"
+  local bindir="$celldir-bin"
+  mkdir -p "$celldir/ci" "$bindir"
+  printf '%s' "$PIN_LF" > "$celldir/ci/expected-interop-tests.txt"
+  make_fake_ctest "$bindir"
+  make_fake_python3 "$bindir"
+  local argvlog="$celldir.argv"; : > "$argvlog"
+  local pyargvlog="$celldir.pyargv"; : > "$pyargvlog"
+  local script="$celldir.sh"
+  extract_run "$script"
+  mutate_script "$script" '
+import sys
+p = sys.argv[1]
+lines = open(p, encoding="utf-8").read().splitlines(keepends=True)
+target = "python3 ci/assert-interop-skips.py " + chr(92) + "\n"
+hits = [i for i, ln in enumerate(lines) if ln == target]
+assert len(hits) == 1, "MUTATION DID NOT APPLY (found " + str(len(hits)) + ") - re-point the pattern, do not delete the mutant: " + repr(target)
+lines[hits[0]] = "echo " + lines[hits[0]]
+open(p, "w", encoding="utf-8").writelines(lines)
+'
+  ( cd "$celldir" && PATH="$bindir:$PATH" RUNNER_TEMP="$celldir/runnertemp" \
+      FAKE_CTEST_ARGV_LOG="$argvlog" FAKE_CTEST_LISTING="$LISTING_LF" \
+      FAKE_CTEST_REAL_EXIT=0 \
+      FAKE_PY_ARGV_LOG="$pyargvlog" \
+      bash "$script" >/dev/null 2>&1 )
+  local n_lines
+  n_lines=$(grep -c . "$pyargvlog" || true)
+  if [ "$n_lines" != "0" ]; then
+    bad "$label — expected the fake python3's argv log to stay EMPTY once the checker call is echoed, got $n_lines line(s): $(cat "$pyargvlog")"; return
+  fi
+  ok "$label"
+}
+run_mutant_echo_checker "S-mutant-a echoing the checker call site leaves the checker uninvoked (Codex #1)"
+
+# ── S-mutant-b: the new GTEST unset line removed — the inherited
+# GTEST_FILTER/GTEST_TOTAL_SHARDS must then REACH the real ctest run.
+run_mutant_remove_gtest_unset() {
+  local label="$1"
+  local celldir="$WORK/cell-$RANDOM$RANDOM"
+  local bindir="$celldir-bin"
+  mkdir -p "$celldir/ci" "$bindir"
+  printf '%s' "$PIN_LF" > "$celldir/ci/expected-interop-tests.txt"
+  make_fake_ctest "$bindir"
+  make_fake_python3 "$bindir"
+  local argvlog="$celldir.argv"; : > "$argvlog"
+  local pyargvlog="$celldir.pyargv"; : > "$pyargvlog"
+  local script="$celldir.sh"
+  extract_run "$script"
+  mutate_script "$script" '
+import sys
+p = sys.argv[1]
+lines = open(p, encoding="utf-8").read().splitlines(keepends=True)
+target = "unset " + chr(34) + "${!GTEST_@}" + chr(34)
+hits = [i for i, ln in enumerate(lines) if ln.strip() == target]
+assert len(hits) == 1, "MUTATION DID NOT APPLY (found " + str(len(hits)) + ") - re-point the pattern, do not delete the mutant: " + repr(target)
+del lines[hits[0]]
+open(p, "w", encoding="utf-8").writelines(lines)
+'
+  ( cd "$celldir" && PATH="$bindir:$PATH" RUNNER_TEMP="$celldir/runnertemp" \
+      FAKE_CTEST_ARGV_LOG="$argvlog" FAKE_CTEST_LISTING="$LISTING_LF" \
+      FAKE_CTEST_REAL_EXIT=0 \
+      FAKE_PY_ARGV_LOG="$pyargvlog" \
+      GTEST_FILTER=-Plain.MustRun GTEST_TOTAL_SHARDS=2 GTEST_SHARD_INDEX=0 \
+      bash "$script" >/dev/null 2>&1 )
+  if grep -qF -- "GTEST_FILTER=<unset> GTEST_TOTAL_SHARDS=<unset>" "$argvlog"; then
+    bad "$label — expected the inherited GTEST_FILTER/GTEST_TOTAL_SHARDS to REACH ctest once the unset line is removed, but the argv log still shows <unset>: $(cat "$argvlog")"; return
+  fi
+  ok "$label"
+}
+run_mutant_remove_gtest_unset "S-mutant-b removing the GTEST unset line lets the inherited filter/shard controls reach ctest"
 
 # ── M-RC1a/b/c: the round-1 fixes' inverse, applied to already-extracted and
 # preset-substituted text, must bring the pre-fix defects back ──────────────
@@ -366,7 +515,7 @@ del lines[i:i + 5]
 open(p, "w", encoding="utf-8").writelines(lines)
 ' "$LISTING_NO_SCHEMA" "$PIN_LF" 0 "DERIVATION_BINARIES=3"
 
-CELLS_DECLARED=10
+CELLS_DECLARED=13
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$CELLS_DECLARED" ]; then
