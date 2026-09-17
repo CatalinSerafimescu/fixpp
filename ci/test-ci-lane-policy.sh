@@ -235,6 +235,9 @@ elif printf '%s\n' "$t11_out" | grep -q "^ci lane policy: all invariants hold"; 
 elif ! printf '%s\n' "$t11_out" | grep -qF "could not be evaluated"; then
   printf '%s\n' "$t11_out" | sed 's/^/  | /'
   bad "T11 PyYAML absent exited 2 but without saying which check did not run"
+elif ! printf '%s\n' "$t11_out" | grep -qF "push-trigger check did NOT run"; then
+  printf '%s\n' "$t11_out" | sed 's/^/  | /'
+  bad "T11 PyYAML absent exited 2 but the push-trigger check did not say it stood down"
 else
   ok "T11 PyYAML absent fails closed instead of reporting the all-clear"
 fi
@@ -439,6 +442,118 @@ p.write_text(before + job + after, encoding="utf-8")
 MUT
 expect "T20 the parallelism libcxx restore preset drifts from matrix.preset is caught" 1 "CCACHE RESTORE RUN TEXT DRIFT"
 
+# ── T21-T25: #465 — push-admitting publish guards trust the push trigger ─────
+#
+# A guard whose `push` arm admits `github.event_name == 'push'` without
+# re-checking `github.ref` is main-only only through `on.push.branches`, so a
+# widened trigger admits a non-main push the guard still treats as trusted.
+# T21 widens tier2's branches to include a feature branch; T22 adds a `tags:`
+# key under tier3's push trigger; T23 removes tier3's `branches:`, leaving an
+# unfiltered push; T24 is a new, unlisted workflow whose guard still matches
+# the idiom with a bare `push` trigger; T25 removes the idiom's literal from
+# every workflow, leaving zero guards for the check to find.
+fresh
+python3 - "$WORK/t/.github/workflows/tier2.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old = '  push:\n    branches: ["main"]\n'
+assert s.count(old) == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+p.write_text(s.replace(old, '  push:\n    branches: ["main", "feature/**"]\n', 1), encoding="utf-8")
+MUT
+expect "T21 tier2 push trigger broadened to a feature branch is caught" 1 "PUSH TRIGGER NOT MAIN-ONLY: tier2.yml"
+
+fresh
+python3 - "$WORK/t/.github/workflows/tier3-libcxx.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old = '  push:\n    branches: ["main"]\n'
+assert s.count(old) == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+p.write_text(s.replace(old, old + '    tags: ["v*"]\n', 1), encoding="utf-8")
+MUT
+expect "T22 tags: added under tier3's push trigger is caught" 1 "PUSH TRIGGER NOT MAIN-ONLY: tier3-libcxx.yml: on.push carries tags"
+
+# Dropping `branches:` leaves only paths-ignore, which fires on EVERY branch.
+fresh
+python3 - "$WORK/t/.github/workflows/tier3-libcxx.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old = '  push:\n    branches: ["main"]\n'
+assert s.count(old) == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+p.write_text(s.replace(old, '  push:\n', 1), encoding="utf-8")
+MUT
+expect "T23 tier3 push trigger with branches: removed is caught" 1 "on.push.branches is None"
+
+# A NEW workflow, not on the roster, is caught while its guard still uses the
+# exact `github.event_name` + quoted `push` idiom — nobody has to add it to a
+# list.
+fresh
+cat > "$WORK/t/.github/workflows/new-publisher.yml" <<'WF'
+name: new publisher
+on: push
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Save ccache to GHCR
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        run: ci/seed-ccache.sh linux-clang-debug
+WF
+expect "T24 a new workflow with a push guard and a bare push trigger is caught" 1 "PUSH TRIGGER NOT MAIN-ONLY: new-publisher.yml: \`push\` has no filters"
+
+# Zero push-admitting workflows is an instrument failure, not a pass.
+fresh
+python3 - "$WORK/t/.github/workflows" <<'MUT'
+import sys, pathlib, re
+n = 0
+for p in pathlib.Path(sys.argv[1]).glob("*.yml"):
+    s = p.read_text(encoding="utf-8")
+    t, k = re.subn(r"""github\.event_name == 'push'""", "github.event_name == 'pushed'", s)
+    n += k
+    p.write_text(t, encoding="utf-8")
+assert n >= 9, f"MUTATION DID NOT APPLY ({n} sites) — re-point the pattern, do not delete the mutant"
+MUT
+expect "T25 zero push-admitting workflows is an instrument failure, not a pass" 2 "ZERO workflows whose expressions admit a \`push\` event"
+
+# ── T26: #465 F1 — the roster is checked even when a workflow's guard no
+# longer matches the derived idiom ──────────────────────────────────────────
+#
+# The population used to be derived only: a workflow entered scope while its
+# strings paired `github.event_name` with a quoted `push` literal. A guard
+# respelled away from that literal removed the workflow from scope even if
+# its trigger was widened at the same time. PUSH_TRUSTING_ROSTER closes that:
+# tier2.yml is checked whether or not its guard still matches the idiom.
+fresh
+python3 - "$WORK/t/.github/workflows/tier2.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old_guard = "github.event_name == 'push' ||"
+new_guard = "github.event_name != 'pull_request' ||"
+n = s.count(old_guard)
+assert n == 2, f"MUTATION DID NOT APPLY ({n} sites) — re-point the pattern, do not delete the mutant"
+s = s.replace(old_guard, new_guard)
+old_branches = '  push:\n    branches: ["main"]\n'
+assert s.count(old_branches) == 1, "MUTATION DID NOT APPLY (branches) — re-point the pattern, do not delete the mutant"
+s = s.replace(old_branches, '  push:\n    branches: ["main", "feature/**"]\n', 1)
+p.write_text(s, encoding="utf-8")
+MUT
+expect "T26 a roster member is caught even when its guard no longer matches the idiom" 1 "PUSH TRIGGER NOT MAIN-ONLY: tier2.yml"
+
+# ── T27: #465 F2 — a NEW workflow using LIST-FORM `on: [push, ...]` is caught
+# by the list-normalisation arm, not treated as vacuous ─────────────────────
+fresh
+cat > "$WORK/t/.github/workflows/list-form-publisher.yml" <<'WF'
+name: list form publisher
+on: [push, workflow_dispatch]
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Save ccache to GHCR
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        run: ci/seed-ccache.sh linux-clang-debug
+WF
+expect "T27 a new workflow with list-form on: [push, ...] is caught, not read as vacuous" 1 "PUSH TRIGGER NOT MAIN-ONLY: list-form-publisher.yml: \`push\` has no filters"
+
 # ── T6: THE EMPTY SCAN ───────────────────────────────────────────────────────
 #
 # If the workflows move or the patterns break, "0 violations over 0 sites" must
@@ -458,7 +573,12 @@ expect "T6 an empty scan is an instrument failure, not a pass" 2 "ZERO apt-backe
 # added the parallelism-measure ccache-restore-wiring cells; T18-T20 (#411
 # Gate B r2 F3) added the false-greens the r1 checker's substring match still
 # admitted (a disabled step, an unreachable call, and libcxx preset drift).
-CELLS_DECLARED=22
+# T21-T25 (#465) added the push-trigger cells for push-admitting publish guards.
+# T26 (#465 Gate B r1 F1) added the roster-floor cell — a roster member whose
+# guard is respelled away from the idiom must still be caught. T27 (#465 Gate
+# B r1 F2) added the list-form `on:` cell the per-line assessment had claimed
+# without a driving test.
+CELLS_DECLARED=29
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$CELLS_DECLARED" ]; then

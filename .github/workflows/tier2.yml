@@ -591,7 +591,10 @@ jobs:
       # rationale differs and is recorded in ci/seed-sccache.sh.
       #
       # ⚠️ THE REF GUARD IS LOAD-BEARING HERE, MORE SO THAN ON THE CONAN STEP.
-      # `push` is already safe — `on: push:` is restricted to `branches: ["main"]`.
+      # `push` is safe only through this workflow's trigger — `on: push:` is
+      # restricted to `branches: ["main"]`, and this predicate does not re-check
+      # the ref. ci/assert-ci-lane-policy.py (check_push_trusting_triggers) pins
+      # this workflow's trigger unconditionally via PUSH_TRUSTING_ROSTER (#465).
       # `workflow_dispatch` is not: GitHub's dispatch UI lets you select ANY
       # branch, so without `github.ref` this step publishes whatever branch you
       # dispatched into the namespace `main` consumes.

@@ -1171,7 +1171,8 @@ ok "cache_miss=0 with a preprocessed-hit write (reachable, ordinary) — changed
 # hardcoded here — and assert the script's LAST run actually emitted a step
 # output by that name, so a rename on EITHER side the other does not follow
 # fails here instead of publishing 2 GB x 4 legs on every push, silently and
-# green (the consumer's guard is fail-open). Same producer/matcher-drift
+# green (the consumer's guard publishes on an output name the producer never
+# emits). Same producer/matcher-drift
 # argument `ccache_tag_regex` is co-located with its minter for, above.
 WORKFLOW="$repo_root/.github/workflows/tier3-libcxx.yml"
 [ -f "$WORKFLOW" ] || fail "stats/output-name: $WORKFLOW not found"
