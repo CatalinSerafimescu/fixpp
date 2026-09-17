@@ -21,7 +21,7 @@
 //   - The Engine registers one insecure_plain_tcp INITIATOR session pointing at a
 //     raw TCP acceptor on loopback (port=0).
 //   - The raw acceptor (a standalone asio::ip::tcp::acceptor coroutine) accepts the
-//     connection and holds it open for the test window.
+//     connection and holds it open for the publish budget.
 //   - The Engine's connect loop (run_connect_loop) connects, emits the initiator
 //     Logon, and then calls publish_entry — making the session visible via lookup().
 //   - No TLS fixtures required; no FIX Logon ACK required for publication.
@@ -99,7 +99,7 @@ namespace {
 constexpr auto kPublishBudget = fixpp::test_support::kPumpBudget;
 
 // ── Raw TCP acceptor coroutine ────────────────────────────────────────────────
-// Accepts exactly one connection and holds it open for the run window, then
+// Accepts exactly one connection and holds it open for `hold_window`, then
 // exits.  This gives the initiator something to connect to without needing any
 // FIX protocol implementation or TLS on the peer side.
 // The port is passed by reference and set before the coroutine suspends so the
@@ -119,7 +119,7 @@ asio::awaitable<void> run_raw_acceptor(asio::io_context& ioc, uint16_t& bound_po
     asio::error_code ec;
     auto sock = co_await acceptor.async_accept(asio::redirect_error(asio::use_awaitable, ec));
     if (!ec) {
-        // Hold the socket open for the test window so the initiator's read-pump
+        // Hold the socket open for `hold_window` so the initiator's read-pump
         // stays alive (not EOF-terminated) and the session remains published.
         asio::steady_timer timer{ioc};
         timer.expires_after(hold_window);
@@ -191,7 +191,7 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
 #pragma clang diagnostic pop
 #endif
     sc.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", bound_port};
-    // Unlimited reconnect attempts so the loop stays alive for the whole window.
+    // Unlimited reconnect attempts so the loop stays alive for the whole publish budget.
     fixpp::transport::ReconnectPolicy policy;
     policy.max_attempts = std::numeric_limits<unsigned>::max();
     sc.reconnect_policy = policy;
@@ -319,8 +319,8 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
         << fixpp::test_support::kPumpBudgetMiss << "LookupNeverSeesTornPointer/publish";
 
     // If the initiator never connected within the budget (e.g. a slow or
-    // failed loopback connect), run_raw_acceptor's async_accept() (or the
-    // co_spawned accept lambda above) may be STILL SUSPENDED here — the
+    // failed loopback connect), the co_spawned accept lambda's async_accept()
+    // may be STILL SUSPENDED here — the
     // unconditional ioc.run() this block used to call would then wait on it
     // forever instead of returning once stop() completes, turning a
     // diagnosable failure (nonnull_reads==0 below) into a CTest kill that

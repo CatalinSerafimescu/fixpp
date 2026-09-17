@@ -310,7 +310,7 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogon) {
 
     // Let the accept loop bind the listener, not for a fixed window (#470): a fixed
     // window misses whenever the accept-loop thread is descheduled past it. No fatal
-    // assertion runs until after engine.stop() below -- see the moved ASSERT_NE.
+    // assertion runs until after engine.stop() below -- see the ASSERT_NE there.
     uint16_t bound_port = 0;
     (void)fixpp::test_support::pump_until(
         ioc,
@@ -469,7 +469,7 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogonLogout) {
     ASSERT_TRUE(engine.start().has_value()) << "engine.start() failed";
 
     // Let the accept loop bind the listener, not for a fixed window (#470). No fatal
-    // assertion runs until after engine.stop() below -- see the moved ASSERT_NE.
+    // assertion runs until after engine.stop() below -- see the ASSERT_NE there.
     uint16_t bound_port = 0;
     (void)fixpp::test_support::pump_until(
         ioc,
