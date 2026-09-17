@@ -1506,9 +1506,9 @@ assert_ccache_raw_keys() {  # <case_id> <job> <label> <step-json> <expected-sort
 # Every `push`-accepting publish predicate in this file — both new ccache
 # seeds below, the wheel lane's, and the two Conan-cache saves — restricts
 # itself to main only through THIS trigger; none of those `if:` predicates
-# re-checks `github.ref`, and every tag they publish is rolling. Nothing else
-# in this pin, or in ci/assert-ci-lane-policy.py's check_campaign_trigger
-# (which reads a different workflow), inspects it.
+# re-checks `github.ref`, and every tag they publish is rolling. The
+# cross-workflow form of this pin is ci/assert-ci-lane-policy.py's
+# check_push_trusting_triggers (#465); this one stays as Tier 1's exact golden.
 assert_push_trigger() {
   local json="$1" case_id="$2"
   local got

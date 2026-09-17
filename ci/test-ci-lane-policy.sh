@@ -439,6 +439,73 @@ p.write_text(before + job + after, encoding="utf-8")
 MUT
 expect "T20 the parallelism libcxx restore preset drifts from matrix.preset is caught" 1 "CCACHE RESTORE RUN TEXT DRIFT"
 
+# ── T21-T25: #465 — push-admitting publish guards trust the push trigger ─────
+#
+# Every GHCR publish guard admits `github.event_name == 'push'` without
+# re-checking `github.ref`; it is main-only only through `on.push.branches`.
+# Tier 1's trigger was already pinned by ci/test-tier1-python-policy.sh (M99,
+# M100); tier2 and tier3 were pinned by nothing.
+fresh
+python3 - "$WORK/t/.github/workflows/tier2.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old = '  push:\n    branches: ["main"]\n'
+assert s.count(old) == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+p.write_text(s.replace(old, '  push:\n    branches: ["main", "feature/**"]\n', 1), encoding="utf-8")
+MUT
+expect "T21 tier2 push trigger broadened to a feature branch is caught" 1 "PUSH TRIGGER NOT MAIN-ONLY: tier2.yml"
+
+fresh
+python3 - "$WORK/t/.github/workflows/tier3-libcxx.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old = '  push:\n    branches: ["main"]\n'
+assert s.count(old) == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+p.write_text(s.replace(old, old + '    tags: ["v*"]\n', 1), encoding="utf-8")
+MUT
+expect "T22 tags: added under tier3's push trigger is caught" 1 "PUSH TRIGGER NOT MAIN-ONLY: tier3-libcxx.yml: on.push carries tags"
+
+# Dropping `branches:` leaves only paths-ignore, which fires on EVERY branch.
+fresh
+python3 - "$WORK/t/.github/workflows/tier3-libcxx.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old = '  push:\n    branches: ["main"]\n'
+assert s.count(old) == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+p.write_text(s.replace(old, '  push:\n', 1), encoding="utf-8")
+MUT
+expect "T23 tier3 push trigger with branches: removed is caught" 1 "on.push.branches is None"
+
+# The population is derived: a NEW workflow with a push-admitting guard and a
+# bare `on: push` is caught without anyone adding it to a list.
+fresh
+cat > "$WORK/t/.github/workflows/new-publisher.yml" <<'WF'
+name: new publisher
+on: push
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Save ccache to GHCR
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        run: ci/seed-ccache.sh linux-clang-debug
+WF
+expect "T24 a new workflow with a push guard and a bare push trigger is caught" 1 "PUSH TRIGGER NOT MAIN-ONLY: new-publisher.yml: \`push\` has no filters"
+
+# Zero push-admitting workflows is an instrument failure, not a pass.
+fresh
+python3 - "$WORK/t/.github/workflows" <<'MUT'
+import sys, pathlib, re
+n = 0
+for p in pathlib.Path(sys.argv[1]).glob("*.yml"):
+    s = p.read_text(encoding="utf-8")
+    t, k = re.subn(r"""github\.event_name == 'push'""", "github.event_name == 'pushed'", s)
+    n += k
+    p.write_text(t, encoding="utf-8")
+assert n >= 9, f"MUTATION DID NOT APPLY ({n} sites) — re-point the pattern, do not delete the mutant"
+MUT
+expect "T25 zero push-admitting workflows is an instrument failure, not a pass" 2 "ZERO workflows whose expressions admit a \`push\` event"
+
 # ── T6: THE EMPTY SCAN ───────────────────────────────────────────────────────
 #
 # If the workflows move or the patterns break, "0 violations over 0 sites" must
@@ -458,7 +525,8 @@ expect "T6 an empty scan is an instrument failure, not a pass" 2 "ZERO apt-backe
 # added the parallelism-measure ccache-restore-wiring cells; T18-T20 (#411
 # Gate B r2 F3) added the false-greens the r1 checker's substring match still
 # admitted (a disabled step, an unreachable call, and libcxx preset drift).
-CELLS_DECLARED=22
+# T21-T25 (#465) added the push-trigger cells for push-admitting publish guards.
+CELLS_DECLARED=27
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$CELLS_DECLARED" ]; then

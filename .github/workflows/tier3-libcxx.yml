@@ -477,7 +477,10 @@ jobs:
       # run pay a full cold build to fix an unrelated test.
       #
       # ⚠️ THE REF GUARD IS LOAD-BEARING, AND ITS REASON IS NOT THE CONAN STEP'S.
-      # `push` is already safe — `on: push:` is restricted to `branches: [main]`.
+      # `push` is safe only through this workflow's trigger — `on: push:` is
+      # restricted to `branches: ["main"]`, and this predicate does not re-check
+      # the ref. ci/assert-ci-lane-policy.py (check_push_trusting_triggers) pins
+      # that trigger for every workflow whose expressions admit `push` (#465).
       # `workflow_dispatch` is not: the dispatch UI lets you select ANY branch.
       #
       # The Conan tag is content-derived, so a branch that changes conanfile.py
@@ -510,11 +513,12 @@ jobs:
       # writes: the cache only SHRANK, so republishing would replace the tagged
       # artifact with a strictly worse one.
       #
-      # ⚠️ FAIL-OPEN BY CONSTRUCTION. An empty `outputs.changed` — the stats
-      # step never ran, or died before emitting — makes `!= '0'` true and
-      # publishes exactly as before. The guard only ever skips on positive
-      # evidence that nothing changed, and can never withhold a cache because a
-      # measurement was missing. The rationale for `changed` alone, with no
+      # An empty `outputs.changed` satisfies `!= '0'`, but it does NOT publish:
+      # every path in ci/ccache-stats.sh that ends before the emission exits 1,
+      # and the statistics step above is `if: always()` with no
+      # `continue-on-error`, so the job fails and this step's implicit
+      # `success()` skips it. That holds only while both of those stay true on
+      # the statistics step. The rationale for `changed` alone, with no
       # restore-hit conjunct, is at the emission site in ci/ccache-stats.sh.
       - name: Save ccache to GHCR (push:main / dispatch on main, cache changed)
         if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) && steps.ccache_stats.outputs.changed != '0'

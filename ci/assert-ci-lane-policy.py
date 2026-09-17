@@ -565,6 +565,96 @@ def check_campaign_trigger(root, violations):
     return True
 
 
+# #465 — a guard that admits `push` trusts the workflow's OWN trigger for the ref.
+# Every GHCR publish step here gates on
+#   (github.event_name == 'push' || (… workflow_dispatch && github.ref == 'refs/heads/main'))
+# and the `push` half re-checks nothing: it is main-only BECAUSE `on.push.branches`
+# is `[main]`. The tags those steps publish are rolling, so a trigger widened to a
+# feature branch would let that branch overwrite what main and every PR restore.
+#
+# The population is DERIVED, not enumerated: any workflow with a non-trigger string
+# naming both `github.event_name` and a quoted `push` literal is held to it. Reading
+# more than the publish guards (tier1's `concurrency:` expression also matches) is
+# the safe direction — a main-only trigger satisfies every such workflow.
+PUSH_EVENT_LITERAL = re.compile(r"""['"]push['"]""")
+PUSH_TRIGGER_KEYS = {"branches", "paths", "paths-ignore"}
+
+
+def _strings(node):
+    if isinstance(node, str):
+        yield node
+    elif isinstance(node, dict):
+        for v in node.values():
+            yield from _strings(v)
+    elif isinstance(node, list):
+        for v in node:
+            yield from _strings(v)
+
+
+def check_push_trusting_triggers(root, violations):
+    """Every workflow whose expressions admit a `push` event must be main-only on push.
+
+    Returns the number of push-trusting workflows found, or None when PyYAML is
+    unavailable.  ZERO IS A FAILURE the caller reports: if the guards move or this
+    pattern stops matching, "0 workflows, 0 violations" reads like a clean tree.
+    """
+    try:
+        import yaml
+    except ImportError:
+        print("::warning::PyYAML unavailable — the push-trigger check did NOT run.")
+        return None
+
+    trusting = 0
+    for path in sorted((root / ".github" / "workflows").glob("*.y*ml")):
+        try:
+            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except yaml.YAMLError as exc:
+            violations.append(
+                f"PUSH TRIGGER UNREADABLE: {path.name} does not parse as YAML "
+                f"({exc.__class__.__name__}), so whether its publish guards are main-only "
+                f"cannot be decided.")
+            continue
+        if not isinstance(doc, dict):
+            continue
+        # YAML 1.1: a bare `on:` key loads as the boolean True (see check_campaign_trigger).
+        block = doc.get("on", doc.get(True))
+        body = {k: v for k, v in doc.items() if k not in ("on", True)}
+        if not any("github.event_name" in t and PUSH_EVENT_LITERAL.search(t)
+                   for t in _strings(body)):
+            continue
+        trusting += 1
+
+        if isinstance(block, str):
+            block = {block: None}
+        elif isinstance(block, list):
+            block = {k: None for k in block}
+        elif not isinstance(block, dict):
+            block = {}
+        if "push" not in block:
+            print(f"  push trigger: {path.name} admits `push` in an expression but has no push "
+                  f"trigger (vacuous)")
+            continue
+        push = block["push"]
+        problems = []
+        if not isinstance(push, dict):
+            problems.append("`push` has no filters, so it fires on every branch and tag")
+        else:
+            extra = sorted(set(push) - PUSH_TRIGGER_KEYS)
+            if extra:
+                problems.append(f"on.push carries {', '.join(extra)}, which widens what "
+                                f"`github.ref` can be on a push")
+            if push.get("branches") != ["main"]:
+                problems.append(f"on.push.branches is {push.get('branches')!r}, expected ['main']")
+        if problems:
+            violations.append(
+                f"PUSH TRIGGER NOT MAIN-ONLY: {path.name}: {'; '.join(problems)}. Its expressions "
+                f"admit `github.event_name == 'push'` without re-checking `github.ref`, so a "
+                f"non-main push would publish over the rolling tags main and every PR restore.")
+        else:
+            print(f"  push trigger: {path.name} is main-only")
+    return trusting
+
+
 def main():
     root = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ".")
     if not root.is_dir():
@@ -578,6 +668,7 @@ def main():
     campaign_judged = check_campaign_job_env(root, violations) and campaign_judged
     campaign_judged = check_ccache_restore_wiring(root, violations) and campaign_judged
     check_sccache_pins(root, violations)
+    push_trusting = check_push_trusting_triggers(root, violations)
     if apt_seen is None or fuzz_seen is None:
         return 2
     # A check that could not run must not be reported as one that passed.
@@ -600,6 +691,17 @@ def main():
         print("::error::found ZERO apt-backed install sites across the workflows. Either "
               "they moved or this check's patterns are broken; refusing to report clean "
               "on an empty scan.")
+        return 2
+
+    if push_trusting is None:
+        print("::error::the push-trigger check could not be evaluated (PyYAML unavailable). "
+              "Refusing to report `all invariants hold` over a check that did not run.")
+        return 2
+    if push_trusting == 0:
+        print("::error::found ZERO workflows whose expressions admit a `push` event. Either the "
+              "publish guards now re-check `github.ref` themselves (then retire "
+              "check_push_trusting_triggers deliberately) or this check's pattern is broken; "
+              "refusing to report clean on an empty scan.")
         return 2
 
     print(f"  apt-backed install sites scanned: {apt_seen} (all must use {GUARD})")

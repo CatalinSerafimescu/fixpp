@@ -130,11 +130,13 @@ calls=$((hits + miss))
 # wanted even on the paths that end in `exit 1`, and computing it after a branch
 # that can exit is how an output silently goes missing.
 #
-# ⚠️ THE CONSUMER'S GUARD IS FAIL-OPEN, AND THAT IS THE RIGHT DIRECTION. If this
-# step never ran or died before this line, `steps.<id>.outputs.changed` is
-# empty, `!= '0'` is true, and the seed publishes exactly as it does today. The
-# guard only ever SKIPS on positive evidence that nothing changed; it can never
-# withhold a cache because a measurement was missing.
+# ⚠️ AN EMPTY `changed` DOES NOT PUBLISH, although it satisfies the consumer's
+# `!= '0'`. Every path above that ends before this line exits 1. Where the
+# statistics step is `if: always()` without `continue-on-error`, that fails the
+# job, and the seed's implicit `success()` skips it. So the guard
+# skips on positive evidence that nothing changed, and a missing measurement
+# withholds the publish by failing the job, not by this guard. Re-check both
+# step attributes before relying on this at a new call site.
 #
 # ⚠️ `changed` ALONE IS SUFFICIENT — do not add `&& restore == 'hit'`. A restore
 # MISS with zero writes would mean no compile ran at all, and that case cannot
