@@ -319,6 +319,126 @@ else
   ok "T14 the shipped to_json handles empty/single/duplicate/whitespace lane lists under bash"
 fi
 
+# ── T15: the linux job's ccache restore step deleted ─────────────────────────
+#
+# #411 Gate B r1 F4 (parallelism-measure half): the campaign's `linux`/`libcxx`
+# jobs restore Tier 1's GHCR compiler cache, restore-only, and nothing in this
+# repo pinned that at all — ci/test-tier1-python-policy.sh only reads
+# tier1.yml. Deleting the restore silently returns the lane to a cold build.
+fresh
+python3 - "$WORK/t/.github/workflows/parallelism-measure.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old = '''      - name: Restore ccache from GHCR (never published from here)
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin || true
+          ci/restore-ccache.sh ${{ matrix.preset }}
+
+'''
+assert old in s, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+p.write_text(s.replace(old, "", 1), encoding="utf-8")
+MUT
+expect "T15 the parallelism linux job's ccache restore deleted is caught" 1 "CCACHE RESTORE MISWIRED"
+
+# ── T16: a seed call added to a measurement job ──────────────────────────────
+#
+# A measurement job must never publish to the shared compiler cache — an entry
+# it published would be served to a production lane it does not represent.
+fresh
+python3 - "$WORK/t/.github/workflows/parallelism-measure.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+start = s.index("\n  linux:\n")
+end = s.index("\n  libcxx:\n", start)
+before, job, after = s[:start], s[start:end], s[end:]
+anchor = "          ci/restore-ccache.sh ${{ matrix.preset }}\n"
+assert job.count(anchor) == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+seed = "      - name: Save ccache to GHCR (never — measurement must not publish)\n        run: ci/seed-ccache.sh ${{ matrix.preset }}\n"
+job = job.replace(anchor, anchor + seed, 1)
+p.write_text(before + job + after, encoding="utf-8")
+MUT
+expect "T16 a seed call added to a parallelism measurement job is caught" 1 "CCACHE SEED IN A MEASUREMENT JOB"
+
+# ── T17: the restore moved after Conan install ───────────────────────────────
+#
+# restore-ccache.sh refuses once anything has compiled through the launcher;
+# moving the restore after Conan install would discard the just-built objects
+# (or, if it does not refuse, waste the compile that already happened cold).
+fresh
+python3 - "$WORK/t/.github/workflows/parallelism-measure.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+start = s.index("\n  linux:\n")
+end = s.index("\n  libcxx:\n", start)
+before, job, after = s[:start], s[start:end], s[end:]
+i = job.index("      - name: Restore ccache from GHCR (never published from here)\n")
+j = job.index("          ci/restore-ccache.sh ${{ matrix.preset }}\n", i) + len("          ci/restore-ccache.sh ${{ matrix.preset }}\n")
+restore = job[i:j]
+assert restore, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+job = job[:i] + job[j:]
+conan = "      - name: Conan install\n"
+assert job.count(conan) == 1, job.count(conan)
+k = job.index(conan)
+k = job.index("\n\n", k) + 2
+job = job[:k] + restore + "\n" + job[k:]
+p.write_text(before + job + after, encoding="utf-8")
+MUT
+expect "T17 the parallelism linux restore moved after Conan install is caught" 1 "CCACHE RESTORE OUT OF ORDER"
+
+# ── T18: if: false added to the linux restore ────────────────────────────────
+#
+# #411 Gate B r2 F3: the r1 checker found this step by the substring
+# `RESTORE_SCRIPT in run`, so a disabled-but-present step still counted as
+# "restoring". The step's key set is now compared as a canonical object.
+fresh
+python3 - "$WORK/t/.github/workflows/parallelism-measure.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old = "      - name: Restore ccache from GHCR (never published from here)\n        run: |\n"
+new = "      - name: Restore ccache from GHCR (never published from here)\n        if: false\n        run: |\n"
+assert s.count(old) == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+p.write_text(s.replace(old, new, 1), encoding="utf-8")
+MUT
+expect "T18 if: false added to the parallelism linux restore is caught" 1 "CCACHE RESTORE KEY SET DRIFT"
+
+# ── T19: exit 0 inserted before the linux restore invocation ────────────────
+#
+# The restore step still contains the text `ci/restore-ccache.sh`, so the
+# substring-only r1 check saw a live restore; the call is unreachable.
+fresh
+python3 - "$WORK/t/.github/workflows/parallelism-measure.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+start = s.index("\n  linux:\n")
+end = s.index("\n  libcxx:\n", start)
+before, job, after = s[:start], s[start:end], s[end:]
+old = "          ci/restore-ccache.sh ${{ matrix.preset }}\n"
+new = "          exit 0\n          ci/restore-ccache.sh ${{ matrix.preset }}\n"
+assert job.count(old) == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+job = job.replace(old, new, 1)
+p.write_text(before + job + after, encoding="utf-8")
+MUT
+expect "T19 exit 0 inserted before the parallelism linux restore call is caught" 1 "CCACHE RESTORE RUN TEXT DRIFT"
+
+# ── T20: the libcxx restore preset drifts from matrix.preset ────────────────
+#
+# Only `linux`'s preset argument was ever checked before this round; the
+# libcxx job's own call was unpinned.
+fresh
+python3 - "$WORK/t/.github/workflows/parallelism-measure.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+start = s.index("\n  libcxx:\n")
+end = s.index("\n  windows:\n", start)
+before, job, after = s[:start], s[start:end], s[end:]
+old = "          ci/restore-ccache.sh ${{ matrix.preset }}\n"
+new = "          ci/restore-ccache.sh linux-clang-debug\n"
+assert job.count(old) == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+job = job.replace(old, new, 1)
+p.write_text(before + job + after, encoding="utf-8")
+MUT
+expect "T20 the parallelism libcxx restore preset drifts from matrix.preset is caught" 1 "CCACHE RESTORE RUN TEXT DRIFT"
+
 # ── T6: THE EMPTY SCAN ───────────────────────────────────────────────────────
 #
 # If the workflows move or the patterns break, "0 violations over 0 sites" must
@@ -334,8 +454,11 @@ expect "T6 an empty scan is an instrument failure, not a pass" 2 "ZERO apt-backe
 # invocation lost to an editing slip removes a gate SILENTLY, and the tally
 # below would still read "N passed, 0 failed" for a smaller N. Both sibling
 # harnesses in this directory assert their count; this one did not, and four
-# cells were added to it before anyone noticed.
-CELLS_DECLARED=16
+# cells were added to it before anyone noticed. T15-T17 (#411 Gate B r1 F4)
+# added the parallelism-measure ccache-restore-wiring cells; T18-T20 (#411
+# Gate B r2 F3) added the false-greens the r1 checker's substring match still
+# admitted (a disabled step, an unreachable call, and libcxx preset drift).
+CELLS_DECLARED=22
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$CELLS_DECLARED" ]; then
