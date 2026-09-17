@@ -444,10 +444,14 @@ expect "T20 the parallelism libcxx restore preset drifts from matrix.preset is c
 
 # ── T21-T25: #465 — push-admitting publish guards trust the push trigger ─────
 #
-# Every GHCR publish guard admits `github.event_name == 'push'` without
-# re-checking `github.ref`; it is main-only only through `on.push.branches`.
-# Tier 1's trigger was already pinned by ci/test-tier1-python-policy.sh (M99,
-# M100); tier2 and tier3 were pinned by nothing.
+# A guard whose `push` arm admits `github.event_name == 'push'` without
+# re-checking `github.ref` is main-only only through `on.push.branches`, so a
+# widened trigger admits a non-main push the guard still treats as trusted.
+# T21 widens tier2's branches to include a feature branch; T22 adds a `tags:`
+# key under tier3's push trigger; T23 removes tier3's `branches:`, leaving an
+# unfiltered push; T24 is a new, unlisted workflow whose guard still matches
+# the idiom with a bare `push` trigger; T25 removes the idiom's literal from
+# every workflow, leaving zero guards for the check to find.
 fresh
 python3 - "$WORK/t/.github/workflows/tier2.yml" <<'MUT'
 import sys, pathlib

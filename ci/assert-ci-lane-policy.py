@@ -566,11 +566,10 @@ def check_campaign_trigger(root, violations):
 
 
 # #465 — a guard that admits `push` trusts the workflow's OWN trigger for the ref.
-# Every GHCR publish step here gates on
-#   (github.event_name == 'push' || (… workflow_dispatch && github.ref == 'refs/heads/main'))
-# and the `push` half re-checks nothing: it is main-only BECAUSE `on.push.branches`
-# is `[main]`. The tags those steps publish are rolling, so a trigger widened to a
-# feature branch would let that branch overwrite what main and every PR restore.
+# A publish guard whose `push` arm does not re-check `github.ref` is main-only
+# only through `on.push.branches`. A rolling published tag means a trigger
+# widened to a feature branch would let that branch overwrite what main and
+# every PR restore.
 #
 # PUSH_TRUSTING_ROSTER below is checked UNCONDITIONALLY: membership does not
 # depend on how a workflow's guard is spelled, so respelling or removing the
