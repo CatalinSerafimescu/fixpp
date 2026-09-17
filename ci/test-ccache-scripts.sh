@@ -482,6 +482,34 @@ printf '%s' "$BADVER_TAG" | grep -qE -- "$BADVER_RE" \
   || fail "gcc/major: the pruner's regex '$BADVER_RE' does not match the gccunknown tag it was minted for"
 ok "the gcc regex still classifies its own 'unknown major' fallback for a real unparseable banner"
 
+# ── #467 F3 — pin ccache_preset_family's segment boundaries (C3) ────────────
+FAMILY_CASES='
+gcc gcc
+gcc-release gcc
+linux-gcc gcc
+linux-gcc-release gcc
+libgcc clang
+gcc13 clang
+linux-clang-libc++ clang
+'
+while read -r name expect; do
+  [ -n "$name" ] || continue
+  got="$( . "$CI_DIR/ccache-cache-key.sh" >/dev/null 2>&1; ccache_preset_family "$name" )"
+  [ "$got" = "$expect" ] || fail "family/$name: expected '$expect', got '$got'"
+done <<< "$FAMILY_CASES"
+ok "ccache_preset_family classifies every segment-boundary shape correctly (start/end/substring)"
+
+# Bridge — 'gcc13' is a name where a bare substring check and the segment rule
+# disagree (it CONTAINS 'gcc', but not as a '-gcc-' segment). Deriving its
+# regex and checking which family literal it carries proves ccache_tag_regex
+# still calls ccache_preset_family, rather than a rule of its own.
+FAM_BRIDGE_RE="$( . "$CI_DIR/ccache-cache-key.sh" && ccache_tag_regex 'gcc13' >/dev/null 2>&1 && printf '%s' "$CCACHE_TAG_RE" )"
+[ -n "$FAM_BRIDGE_RE" ] || fail "family/bridge: ccache_tag_regex produced nothing for 'gcc13'"
+case "$FAM_BRIDGE_RE" in
+  *-clang\(*) ok "family/bridge: 'gcc13' classifies as clang in the derived regex, matching ccache_preset_family" ;;
+  *) fail "family/bridge: 'gcc13' regex '$FAM_BRIDGE_RE' does not use the clang family literal — ccache_tag_regex and ccache_preset_family have drifted" ;;
+esac
+
 # ── CONTAINER LANES (#259) — the SAME producer/matcher bridge, second grammar ─
 #
 # A container lane's compiler lives inside a pinned image and cannot be probed
