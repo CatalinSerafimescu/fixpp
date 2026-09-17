@@ -180,8 +180,12 @@ ccache_cache_key() {
         *) echo "ccache-cache: preset '$preset' is named as a gcc preset but '$CCACHE_CACHE_COMPILER --version' is not a gcc banner: $first" >&2
            return 1 ;;
       esac
-      # The banner's LAST field is the version (`g++ (Ubuntu 13.3.0-…) 13.3.0`).
-      major="$(printf '%s' "$first" | awk '{print $NF}' | sed -n 's/^\([0-9]\{1,\}\)\..*/\1/p')" ;;
+      # GCC formats this line as `progname (pkgversion) version_string`. The
+      # major is the digit run immediately after the first `) `, and only when
+      # that whole field is dotted-numeric (N.N…) — never a fallback to the
+      # line's last field, which can be a distro-appended build suffix that is
+      # itself dotted-numeric and would otherwise be misread as the version.
+      major="$(printf '%s' "$first" | sed -n 's/^[^)]*)[[:space:]]\{1,\}\([0-9]\{1,\}\)\(\.[0-9]\{1,\}\)\{1,\}\([[:space:]].*\)\{0,1\}$/\1/p')" ;;
   esac
   # Readability only — the digest below is what discriminates. An unparseable
   # version yields `unknown`, which is still a valid, stable tag component.

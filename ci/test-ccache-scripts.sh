@@ -89,6 +89,9 @@ tgt13|x86_64-linux-gnu-g++-13 (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0|fake-gcc-t
 bare|gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0|fake-gcc-bare
 cxx|c++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0|fake-gcc-cxx
 negctrl|Ubuntu clang version 22.1.2 (g++ compat)|fake-gcc-negctrl
+buildsuffix|g++ (Vendor) 13.3.0 build 2.7.4|fake-gcc-buildsuffix
+snapshot|gcc (GCC) 15.0.0 20240505 (experimental)|fake-gcc-snapshot
+badver|g++ (Vendor) 13.not-a-version|fake-gcc-badver
 TABLE
 
 cat > "$sandbox/CMakePresets.json" <<'JSON'
@@ -106,7 +109,10 @@ cat > "$sandbox/CMakePresets.json" <<'JSON'
     { "name": "fake-gcc-tgt13",       "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-gcc-tgt13" } },
     { "name": "fake-gcc-bare",        "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-gcc-bare" } },
     { "name": "fake-gcc-cxx",         "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-gcc-cxx" } },
-    { "name": "fake-gcc-negctrl",     "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-gcc-negctrl" } }
+    { "name": "fake-gcc-negctrl",     "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-gcc-negctrl" } },
+    { "name": "fake-gcc-buildsuffix", "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-gcc-buildsuffix" } },
+    { "name": "fake-gcc-snapshot",    "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-gcc-snapshot" } },
+    { "name": "fake-gcc-badver",      "cacheVariables": { "CMAKE_CXX_COMPILER": "fixpp-fake-gcc-badver" } }
   ]
 }
 JSON
@@ -448,6 +454,33 @@ if mint_rc fake-gcc-negctrl; then
   fail "gcc/token-negctrl: 'fake-gcc-negctrl' minted although its first token is 'Ubuntu', not a gcc executable name (the line only contains 'g++' inside a parenthetical)"
 fi
 ok "a banner whose first token is not a gcc executable name refuses to mint, even when 'g++' appears later on the line"
+
+# ── #467 F2 — the gcc major is the field after the first ') ', dotted-numeric
+# only, never a fallback to the banner's last field (C2) ────────────────────
+BUILDSUFFIX_TAG="$(expected_tag fake-gcc-buildsuffix)" || fail "gcc/major: no tag for a distro build-suffix banner"
+case "$BUILDSUFFIX_TAG" in
+  'ccache-fake-gcc-buildsuffix-gcc13-'????????) ;;
+  *) fail "gcc/major: distro build-suffix banner minted '$BUILDSUFFIX_TAG', expected gcc13 (a last-field parse reads the suffix's own dotted number, gcc2)" ;;
+esac
+SNAPSHOT_TAG="$(expected_tag fake-gcc-snapshot)" || fail "gcc/major: no tag for a gcc snapshot banner"
+case "$SNAPSHOT_TAG" in
+  'ccache-fake-gcc-snapshot-gcc15-'????????) ;;
+  *) fail "gcc/major: snapshot banner minted '$SNAPSHOT_TAG', expected gcc15" ;;
+esac
+BADVER_TAG="$(expected_tag fake-gcc-badver)" || fail "gcc/major: no tag for a malformed-version banner"
+case "$BADVER_TAG" in
+  'ccache-fake-gcc-badver-gccunknown-'????????) ;;
+  *) fail "gcc/major: malformed version 'g++ (Vendor) 13.not-a-version' minted '$BADVER_TAG', expected gccunknown (uncertainty must degrade to unknown, never a wrong number)" ;;
+esac
+ok "the gcc major comes from the field after the first ') ', dotted-numeric only — a build suffix, a snapshot date and a malformed version each parse correctly (C2)"
+
+# gccunknown must still classify under its own gcc regex — also the first cell
+# to EXECUTE the gcc 'unknown' fallback (the Article IX gap the record disclosed).
+BADVER_RE="$( cd "$sandbox" && PATH="$shim_dir:$PATH" . "$CI_DIR/ccache-cache-key.sh" && ccache_tag_regex 'fake-gcc-badver' >/dev/null 2>&1 && printf '%s' "$CCACHE_TAG_RE" )"
+[ -n "$BADVER_RE" ] || fail "gcc/major: ccache_tag_regex produced nothing for 'fake-gcc-badver'"
+printf '%s' "$BADVER_TAG" | grep -qE -- "$BADVER_RE" \
+  || fail "gcc/major: the pruner's regex '$BADVER_RE' does not match the gccunknown tag it was minted for"
+ok "the gcc regex still classifies its own 'unknown major' fallback for a real unparseable banner"
 
 # ── CONTAINER LANES (#259) — the SAME producer/matcher bridge, second grammar ─
 #
