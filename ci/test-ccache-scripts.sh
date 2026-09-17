@@ -61,8 +61,7 @@ printf 'clang version 22.1.2 (https://github.com/llvm/llvm-project deadbeef)\n'
 SHIM
 chmod +x "$shim_dir/fixpp-fake-clang"
 
-# The real Ubuntu g++ banner shape (#464): no word `version`, and the version is
-# the LAST field of the first line.
+# The real Ubuntu g++ banner shape (#464): no word `version`.
 cat > "$shim_dir/fixpp-fake-gcc" <<'SHIM'
 #!/usr/bin/env bash
 [ "${1:-}" = "--version" ] || { echo "SHIM-VIOLATION: compiler $*" >&2; exit 2; }
@@ -70,11 +69,8 @@ printf 'g++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright (C) 2024 Free Sof
 SHIM
 chmod +x "$shim_dir/fixpp-fake-gcc"
 
-# ── #467 F1 — additional gcc banner shapes (versioned / target-prefixed argv[0]
-# executable names, and a token that only contains 'g++' as a substring) ────
-# Table: fake-compiler suffix | banner first line | preset name. One shim per
-# row, generated here rather than five hand-written heredocs, because these
-# banners are exactly the shapes the triage names for C1.
+# ── #467 — additional gcc banner shapes ──
+# Table: fake-compiler suffix | banner first line | preset name. One shim per row.
 while IFS='|' read -r suffix banner preset; do
   [ -n "$suffix" ] || continue
   cat > "$shim_dir/fixpp-fake-gcc-$suffix" <<SHIM
@@ -383,7 +379,7 @@ ok "the pruner's regex still accepts the minter's 'unknown major' fallback tag"
 # script from a fake g++ banner, and every regex comes from the real matcher.
 GCC_TAG="$(expected_tag 'fake-gcc-release')" || fail "gcc/mint: no tag for a gcc preset with a g++ banner"
 case "$GCC_TAG" in
-  'ccache-fake-gcc-release-gcc13-'????????) ok "a gcc preset mints gcc<major> from the banner's last field" ;;
+  'ccache-fake-gcc-release-gcc13-'????????) ok "a gcc preset mints gcc<major> from the real Ubuntu banner shape" ;;
   *) fail "gcc/mint: tag '$GCC_TAG' is not ccache-<preset>-gcc13-<digest8>" ;;
 esac
 GCC_RE="$( cd "$sandbox" && PATH="$shim_dir:$PATH" . "$CI_DIR/ccache-cache-key.sh" && ccache_tag_regex 'fake-gcc-release' >/dev/null 2>&1 && printf '%s' "$CCACHE_TAG_RE" )"
@@ -415,7 +411,7 @@ printf '%s' "ccache-fake-gcc-release-gccunknown-7a345d7a" | grep -qE -- "$GCC_RE
 ok "the gcc regex rejects the retired clangunknown label and accepts gccunknown"
 
 # A banner that contradicts the preset name refuses to mint, in both
-# directions: minting it would produce a tag its own pruner never classifies.
+# directions.
 #
 # ⚠️ PATH is exported as its own statement. `PATH=… . script && fn` scopes the
 # assignment to the `.` builtin only, so `fn` would run without the shim and
@@ -445,7 +441,7 @@ for row in fake-gcc-v13 fake-gcc-tgt13 fake-gcc-bare fake-gcc-cxx; do
     *) fail "gcc/mint-token: '$row' minted '$T', not ccache-$row-gcc13-<digest8>" ;;
   esac
 done
-ok "versioned, bare and target-prefixed gcc/g++/c++ banners all mint gcc13 (C1)"
+ok "each banner row in the loop above mints gcc13 (C1)"
 
 # The negative control: a banner whose first TOKEN is not a gcc executable name
 # must still refuse, even though the string 'g++' appears later on the line —
@@ -497,12 +493,11 @@ while read -r name expect; do
   got="$( . "$CI_DIR/ccache-cache-key.sh" >/dev/null 2>&1; ccache_preset_family "$name" )"
   [ "$got" = "$expect" ] || fail "family/$name: expected '$expect', got '$got'"
 done <<< "$FAMILY_CASES"
-ok "ccache_preset_family classifies every segment-boundary shape correctly (start/end/substring)"
+ok "ccache_preset_family classifies each FAMILY_CASES row as expected"
 
 # Bridge — 'gcc13' is a name where a bare substring check and the segment rule
-# disagree (it CONTAINS 'gcc', but not as a '-gcc-' segment). Deriving its
-# regex and checking which family literal it carries proves ccache_tag_regex
-# still calls ccache_preset_family, rather than a rule of its own.
+# disagree (it CONTAINS 'gcc', but not as a '-gcc-' segment). A matcher that classifies by substring
+# rather than by segment carries 'gcc' here and fails.
 FAM_BRIDGE_RE="$( . "$CI_DIR/ccache-cache-key.sh" && ccache_tag_regex 'gcc13' >/dev/null 2>&1 && printf '%s' "$CCACHE_TAG_RE" )"
 [ -n "$FAM_BRIDGE_RE" ] || fail "family/bridge: ccache_tag_regex produced nothing for 'gcc13'"
 case "$FAM_BRIDGE_RE" in

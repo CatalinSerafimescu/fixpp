@@ -172,9 +172,10 @@ ccache_cache_key() {
       # matched an UNVERSIONED `g++ (...)`. Ubuntu's actual GCC banners report
       # argv[0] as the first token (`g++-13`, `x86_64-linux-gnu-g++-13`), so the
       # accepted shapes are the bare/target-prefixed executable names GCC can be
-      # invoked as, with an optional numeric suffix. Nothing broader: a token
-      # that merely CONTAINS `g++`/`gcc` (e.g. inside a clang banner's own
-      # parenthetical) must still refuse.
+      # invoked as, gcc/g++ optionally followed by `-` and a suffix that STARTS
+      # with a digit (a glob: what follows that digit is not checked), and bare
+      # `c++` only. A token that merely CONTAINS `g++`/`gcc` (e.g. inside a
+      # clang banner's own parenthetical) must still refuse.
       case "${first%% *}" in
         gcc|g++|c++|gcc-[0-9]*|g++-[0-9]*|*-gcc|*-g++|*-gcc-[0-9]*|*-g++-[0-9]*) ;;
         *) echo "ccache-cache: preset '$preset' is named as a gcc preset but '$CCACHE_CACHE_COMPILER --version' is not a gcc banner: $first" >&2
