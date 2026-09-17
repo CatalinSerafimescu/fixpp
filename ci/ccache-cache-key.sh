@@ -52,6 +52,25 @@
 # dimension whose only effect would be to discard a still-usable cache whenever
 # the runner image bumps a package.
 
+# ccache_preset_family <preset>
+#
+# Prints the compiler family a host preset's tag is minted and matched under:
+# `gcc` when the preset name carries a `gcc` segment, otherwise `clang`.
+#
+# ⚠️ READ FROM THE PRESET NAME, AND THAT IS A CONDITION, NOT A PROBE. The pruner's
+# `ccache_tag_regex` must stay pure string work (see its header), so the family
+# cannot come from `--version` or CMakePresets.json there. Both the minter and the
+# matcher call THIS function, so they cannot disagree about the family. The minter
+# additionally refuses a banner that contradicts it (see ccache_cache_key), so a
+# gcc preset whose name does not carry `gcc` fails loudly instead of minting a tag
+# its own pruner would skip.
+ccache_preset_family() {
+  case "-$1-" in
+    *-gcc-*) printf 'gcc' ;;
+    *)       printf 'clang' ;;
+  esac
+}
+
 # ccache_cache_key <preset>
 #
 # Sets: CCACHE_CACHE_TAG, CCACHE_CACHE_COMPILER, CCACHE_CACHE_TOOLSET.
@@ -122,15 +141,38 @@ ccache_cache_key() {
     return 1
   fi
 
-  local major digest
-  # First `NN` following the word `version`. Readability only — the digest below
-  # is what discriminates. An unparseable banner yields `unknown`, which is
-  # still a valid, stable tag component rather than a failure.
-  major="$(printf '%s' "$vout" | sed -n 's/.*version[[:space:]]\{1,\}\([0-9]\{1,\}\).*/\1/p' | head -1)"
+  local family major digest first
+  family="$(ccache_preset_family "$preset")"
+  first="$(printf '%s\n' "$vout" | head -1)"
+
+  # The banner must agree with the family the preset NAME selects (#464): the
+  # pruner matches by name, so a disagreeing tag would be minted under a grammar
+  # its own prune never classifies. That is a cost failure, so it degrades to
+  # "no cache this run", like every other failure here.
+  case "$family" in
+    clang)
+      case "$vout" in
+        *"clang version"*) ;;
+        *) echo "ccache-cache: preset '$preset' is named as a clang preset but '$CCACHE_CACHE_COMPILER --version' is not a clang banner: $first" >&2
+           return 1 ;;
+      esac
+      # First `NN` following the word `version`.
+      major="$(printf '%s' "$vout" | sed -n 's/.*version[[:space:]]\{1,\}\([0-9]\{1,\}\).*/\1/p' | head -1)" ;;
+    gcc)
+      case "$first" in
+        g++\ *|gcc\ *|c++\ *) ;;
+        *) echo "ccache-cache: preset '$preset' is named as a gcc preset but '$CCACHE_CACHE_COMPILER --version' is not a gcc banner: $first" >&2
+           return 1 ;;
+      esac
+      # The banner's LAST field is the version (`g++ (Ubuntu 13.3.0-…) 13.3.0`).
+      major="$(printf '%s' "$first" | awk '{print $NF}' | sed -n 's/^\([0-9]\{1,\}\)\..*/\1/p')" ;;
+  esac
+  # Readability only — the digest below is what discriminates. An unparseable
+  # version yields `unknown`, which is still a valid, stable tag component.
   [ -n "$major" ] || major=unknown
   digest="$(printf '%s' "$vout" | sha256sum | cut -c1-8)"
 
-  CCACHE_CACHE_TOOLSET="clang${major}-${digest}"
+  CCACHE_CACHE_TOOLSET="${family}${major}-${digest}"
 
   # OCI tags allow [A-Za-z0-9._-] and must NOT contain '+', so `libc++` has to
   # be sanitized — `linux-clang-libc++-asan` → `linux-clang-libcxx-asan`. Same
@@ -337,7 +379,7 @@ ccache_tag_regex() {
   # DELETE, and this repo's precedent is strictest exactly there.
   # ── ONE GRAMMAR PER MINTER, BRANCHED — NOT ONE LOOSENED GRAMMAR FOR BOTH ────
   #
-  # A container lane's tag is `ccache-<lane>-<digest8>`: no `clang<major>`
+  # A container lane's tag is `ccache-<lane>-<digest8>`: no `<family><major>`
   # component at all, because `ccache_container_cache_key` mints no such thing.
   #
   # ⚠️ The tempting shortcut — relaxing the host grammar to
@@ -353,5 +395,8 @@ ccache_tag_regex() {
     return 0
   fi
 
-  CCACHE_TAG_RE="^ccache-${safe}-clang([0-9]+|unknown)-[0-9a-f]{8}\$"
+  # The host grammar is branched by family too, and for the same reason: each
+  # branch accepts exactly its own family's literal, never `(clang|gcc)`.
+  # The family comes from ccache_preset_family, the same function the minter uses.
+  CCACHE_TAG_RE="^ccache-${safe}-$(ccache_preset_family "$preset")([0-9]+|unknown)-[0-9a-f]{8}\$"
 }
