@@ -8,13 +8,10 @@
 # gate step subtracts that one name by exact match before deriving how many
 # gtest JSON reports to expect from `GTEST_OUTPUT=json:`.
 #
-# Some interop binaries (interop_conversation_test,
-# interop_business_message_interop_test) register only under
-# `if(TARGET fixpp_codegen_generate)` in tests/interop/CMakeLists.txt — that
-# target is defined whenever FIXPP_BUILD_CODEGEN_TOOL is ON, which is the
-# CMakeLists.txt default and is not overridden by any preset in
-# CMakePresets.json. Check with:
-#   grep -n FIXPP_BUILD_CODEGEN_TOOL CMakePresets.json
+# Interop binaries registered under `if(TARGET fixpp_codegen_generate)` in
+# tests/interop/CMakeLists.txt count only on a preset where
+# FIXPP_BUILD_CODEGEN_TOOL is ON. Check with:
+#   grep -n FIXPP_BUILD_CODEGEN_TOOL CMakePresets.json CMakeLists.txt
 #
 # RE-DERIVE with:
 #   ctest --preset <preset> -L interop -N | sed -n 's/^Total Tests: //p'

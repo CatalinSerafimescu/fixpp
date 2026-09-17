@@ -1015,7 +1015,7 @@ $got"
   # the same wrong preset).
   got="$(echo "$json" | jq -r '.linux_step_count')"
   [ "$got" = "37" ] \
-    || fail "$case_id: the linux job has $got steps, expected 37. A step added anywhere before the pytest pair can change what they execute without colliding with a pinned name or adding a pytest mention (round 4 finding 3, measured). This count is deliberately brittle: adding a step to this job is a deliberate act and must be paired with a deliberate look at whether it reaches the python steps. (36 -> 37, fixpp#431: the 'Interop gate — ctest -L interop, skip set asserted (#431)' step, inserted before the pytest pair; it mentions neither GITHUB_ENV/PATH nor pytest, and its name collides with no pinned step.)"
+    || fail "$case_id: the linux job has $got steps, expected 37. A step added anywhere before the pytest pair can change what they execute without colliding with a pinned name or adding a pytest mention (round 4 finding 3, measured). This count is deliberately brittle: adding a step to this job is a deliberate act and must be paired with a deliberate look at whether it reaches the python steps."
 
   got="$(echo "$json" | jq -cS '.linux_job_env')"
   [ "$got" = '{"CCACHE_COMPILERCHECK":"content","CCACHE_COMPRESSLEVEL":"5","CCACHE_DIR":"/tmp/fixpp-ccache-${{ matrix.preset }}","CCACHE_MAXSIZE":"2G","CMAKE_CXX_COMPILER_LAUNCHER":"ccache","CMAKE_C_COMPILER_LAUNCHER":"ccache"}' ] \
@@ -1757,8 +1757,8 @@ echo "PASS: derive-script table + call site + per-leg FIXPP_INSTALL_PYTHON + PY_
 # not collide). Re-run the harness against the merged number rather than
 # re-deriving from either branch's local total — the failure mode this guards is
 # one side's edit silently replacing the other's, which reads as a passing count.
-MUTANTS_DECLARED=88  # M102 (fixpp#431 Gate B r1: the ci-script-pins call-site
-                     # pin for ci/test-interop-gate-step.sh) + M101 (fixpp#431: the ci-script-pins call-site pin for
+MUTANTS_DECLARED=88  # M102 (the ci-script-pins call-site
+                     # pin for ci/test-interop-gate-step.sh) + M101 (the ci-script-pins call-site pin for
                      # ci/test-interop-skips.sh) + M97-M100 (#411 Gate B r2 L1/L2: Build's key set on both jobs, plus
                      # the workflow's own on.push key set and branches) + M83-M96 (#411 Gate B r1 F1/F3/F4-bench: the canonical-object ccache
                      # contract — coordinated preset drift and the restore/seed/statistics
@@ -2422,11 +2422,8 @@ open(dst, "w").write(t.replace(old, new))
   # ⚠️ The inserted step deliberately writes NOTHING. An earlier version wrote
   # $GITHUB_ENV, which tripped the writer census first and left the step count
   # with no mutant of its own — the shadowing round 5 finding 3 is about.
-  # ⚠️ THE LITERAL TRACKS THE BASELINE. Bumped 31->32 by #252's
-  # `Assert the dependency closure is instrumented` step, 32->33 by #411's
-  # trim step, 33->36 by #411's GHCR move, and 36->37 by fixpp#431's interop
-  # gate step; the mutant inserts one more, so the message it must
-  # produce moves with it. A stale literal here does
+  # ⚠️ THE LITERAL TRACKS THE BASELINE. The mutant inserts one more, so the
+  # message it must produce moves with it. A stale literal here does
   # not fail open — `mutate_workflow` reports "failed the pin for the WRONG
   # reason" — but it is the second edit the count pin demands, and forgetting it
   # is how a deliberately brittle assertion earns a reputation for being noise.
