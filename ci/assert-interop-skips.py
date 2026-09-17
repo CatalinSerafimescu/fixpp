@@ -11,9 +11,12 @@ does not:
   1. no case FAILED;
   2. every case actually RAN with a real result (status=RUN, result in
      {COMPLETED, SKIPPED}), and no report or suite has a nonzero `disabled`
-     count — gtest reports a DISABLED_ or GTEST_FILTER-excluded case as
-     status=NOTRUN, result=SUPPRESSED, and that is not the same as running
-     and passing;
+     count — gtest reports a DISABLED_ case as status=NOTRUN,
+     result=SUPPRESSED with a nonzero `disabled` count, and that is not the
+     same as running and passing. A GTEST_FILTER or shard control instead
+     OMITS a case from the report entirely, which this per-report scan
+     cannot see at all; the calling step unsets every `GTEST_*` variable
+     before either ctest invocation for exactly that reason;
   3. the set of SKIPPED `Suite.Case` ids is EXACTLY the checked-in list in
      `--expected-skips` (both directions: an id that skips and is not listed,
      and a listed id that no longer skips, are both violations);
@@ -132,6 +135,7 @@ def main() -> int:
     bad_status_cases = []
     disabled_violations = []
     total_cases = 0
+    seen_case_ids = {}  # case_id -> path of the report it was first seen in
 
     for path in json_files:
         try:
@@ -190,17 +194,26 @@ def main() -> int:
                 report_cases += 1
                 total_cases += 1
                 case_id = f"{suite}.{tc.get('name', '')}"
+                if case_id in seen_case_ids:
+                    gh_error(f"'{case_id}' appears in both {seen_case_ids[case_id]} and "
+                              f"{path} — Suite.Case is unique only within a binary; the "
+                              "skip set cannot be compared.")
+                    return 2
+                seen_case_ids[case_id] = path
                 status = tc.get("status")
                 result = tc.get("result")
 
                 if status == "RUN":
                     report_run_cases += 1
 
-                # gtest reports a DISABLED_ or GTEST_FILTER-excluded-but-still-
-                # listed case as status=NOTRUN, result=SUPPRESSED — that is not
-                # the same as running and getting a real (COMPLETED/SKIPPED)
-                # result, and this gate's whole charter is that a case which
-                # did not run must not read as a pass.
+                # gtest reports a DISABLED_ case as status=NOTRUN,
+                # result=SUPPRESSED — that is not the same as running and
+                # getting a real (COMPLETED/SKIPPED) result, and this gate's
+                # whole charter is that a case which did not run must not
+                # read as a pass. A GTEST_FILTER/shard-excluded case is not
+                # present in the report at all, so it cannot be caught here —
+                # the calling step unsets every `GTEST_*` variable before
+                # either ctest invocation for exactly that reason.
                 if status != "RUN" or result not in ("COMPLETED", "SKIPPED"):
                     bad_status_cases.append((case_id, status, result))
                     continue
@@ -212,6 +225,8 @@ def main() -> int:
                         gh_error(f"'{path}' case '{case_id}' has a `skipped` field that is "
                                   f"a {type(skipped).__name__}, not a list. Fail-closed.")
                         return 2
+                    if not skipped:
+                        bad_reason_skips.append((case_id, "<no skip message>"))
                     for entry in skipped:
                         if not isinstance(entry, dict) or not isinstance(entry.get("message"), str):
                             gh_error(f"'{path}' case '{case_id}' has a `skipped` entry that "
@@ -231,13 +246,14 @@ def main() -> int:
                             stripped = stripped[:-1]
                         if not PORT_REASON_RE.fullmatch(stripped):
                             bad_reason_skips.append((case_id, msg))
-                elif tc.get("failures"):
+                elif "failures" in tc:
                     failures = tc.get("failures")
                     if not isinstance(failures, list):
                         gh_error(f"'{path}' case '{case_id}' has a `failures` field that is "
                                   f"a {type(failures).__name__}, not a list. Fail-closed.")
                         return 2
-                    failed_cases.append(case_id)
+                    if failures:
+                        failed_cases.append(case_id)
                 # else: status=RUN, result=COMPLETED, no failures — an
                 # ordinary pass (true: both status and result were checked
                 # above, not assumed).
@@ -280,8 +296,8 @@ def main() -> int:
                             for path, level, n in disabled_violations)
         violations.append(
             f"{len(disabled_violations)} nonzero `disabled` count(s) (must be zero): "
-            f"{detail} — a nonzero disabled count means gtest excluded a case outright "
-            "(DISABLED_ or a GTEST_FILTER exclusion), which this gate cannot inspect.")
+            f"{detail} — a nonzero disabled count means gtest excluded a DISABLED_ case "
+            "outright, which this gate cannot inspect.")
 
     unexpected = sorted(actual_skips - expected_skips)
     not_skipped = sorted(expected_skips - actual_skips)

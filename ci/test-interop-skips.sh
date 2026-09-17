@@ -180,11 +180,9 @@ write_json "$d/binA.json" Suite CaseA COMPLETED
 run_check "T12 missing expected-skips file" "$d" "$WORK/does-not-exist.txt" 1 2 "does not exist"
 
 # ── T13-T23: RC2 (fixpp#431 Gate B r1, Codex #2/#3/#6) — the classification
-# holes a SKIP-must-not-read-as-a-PASS gate exists to close. Each of these was
-# RED (wrongly rc 0, or rc 1 instead of the documented rc 2) against the
-# UNFIXED checker before RC2 landed — see the verify record's `m/` mutants. ──
+# holes a SKIP-must-not-read-as-a-PASS gate exists to close. ────────────────
 
-# ── T13: NOTRUN/SUPPRESSED (gtest's DISABLED_/GTEST_FILTER-excluded shape) —
+# ── T13: NOTRUN/SUPPRESSED (gtest's DISABLED_ shape) —
 # must NOT read as a pass just because it carries no `failures` array. The
 # NOTRUN case sits ALONGSIDE a real RUN case in the SAME report (the actual
 # shape: one case in a many-case binary flips to DISABLED_, the rest of that
@@ -307,7 +305,64 @@ printf 'Suite.CaseA\n' > "$WORK/t23-skips.txt"
 run_check "T23 Windows-style C:\\ location prefix strips correctly" \
   "$d" "$WORK/t23-skips.txt" 1 0 "PASS:"
 
-CELLS_DECLARED=23
+# ── T24-T25: a SKIPPED case with no skip message at all must be a bad
+# reason, not silently pass the reason check by iterating zero entries. ─────
+d="$WORK/t24"; mkdir -p "$d"
+python3 - "$d/binA.json" <<'PY'
+import json, sys
+tc = {"name": "CaseA", "file": "fixture.cpp", "line": 1, "status": "RUN",
+      "result": "SKIPPED", "time": "0s", "classname": "Suite", "skipped": []}
+doc = {"tests": 1, "failures": 0, "disabled": 0, "errors": 0, "name": "AllTests",
+       "testsuites": [{"name": "Suite", "tests": 1, "failures": 0, "disabled": 0,
+                        "testsuite": [tc]}]}
+json.dump(doc, open(sys.argv[1], "w"))
+PY
+write_json "$d/binB.json" Suite CaseB COMPLETED
+printf 'Suite.CaseA\n' > "$WORK/t24-skips.txt"
+run_check "T24 SKIPPED with an empty skipped array is a bad reason, not a pass" \
+  "$d" "$WORK/t24-skips.txt" 2 1 "reason other than a counterparty"
+
+d="$WORK/t25"; mkdir -p "$d"
+python3 - "$d/binA.json" <<'PY'
+import json, sys
+tc = {"name": "CaseA", "file": "fixture.cpp", "line": 1, "status": "RUN",
+      "result": "SKIPPED", "time": "0s", "classname": "Suite"}
+doc = {"tests": 1, "failures": 0, "disabled": 0, "errors": 0, "name": "AllTests",
+       "testsuites": [{"name": "Suite", "tests": 1, "failures": 0, "disabled": 0,
+                        "testsuite": [tc]}]}
+json.dump(doc, open(sys.argv[1], "w"))
+PY
+write_json "$d/binB.json" Suite CaseB COMPLETED
+printf 'Suite.CaseA\n' > "$WORK/t25-skips.txt"
+run_check "T25 SKIPPED with no skipped field at all is a bad reason, not a pass" \
+  "$d" "$WORK/t25-skips.txt" 2 1 "reason other than a counterparty"
+
+# ── T26: the SAME Suite.Case id in two different binaries — the skip set
+# arithmetic is only meaningful when a case id names one case. ──────────────
+d="$WORK/t26"; mkdir -p "$d"
+write_json "$d/binA.json" Suite CaseA COMPLETED
+write_json "$d/binB.json" Suite CaseA SKIPPED "$PORT_OK_CPP"
+printf 'Suite.CaseA\n' > "$WORK/t26-skips.txt"
+run_check "T26 duplicate Suite.Case id across two binaries is rejected" \
+  "$d" "$WORK/t26-skips.txt" 2 2 "appears in both"
+
+# ── T27: a `failures` field that is present but not a list must be
+# fail-closed, not read as falsy-and-therefore-not-failed. ──────────────────
+d="$WORK/t27"; mkdir -p "$d"
+python3 - "$d/binA.json" <<'PY'
+import json, sys
+tc = {"name": "CaseA", "file": "fixture.cpp", "line": 1, "status": "RUN",
+      "result": "COMPLETED", "time": "0s", "classname": "Suite", "failures": ""}
+doc = {"tests": 1, "failures": 0, "disabled": 0, "errors": 0, "name": "AllTests",
+       "testsuites": [{"name": "Suite", "tests": 1, "failures": 0, "disabled": 0,
+                        "testsuite": [tc]}]}
+json.dump(doc, open(sys.argv[1], "w"))
+PY
+: > "$WORK/t27-skips.txt"
+run_check "T27 a non-list failures field on a COMPLETED case is fail-closed" \
+  "$d" "$WORK/t27-skips.txt" 1 2 "failures\` field that is a"
+
+CELLS_DECLARED=27
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$CELLS_DECLARED" ]; then
