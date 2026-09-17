@@ -235,6 +235,9 @@ elif printf '%s\n' "$t11_out" | grep -q "^ci lane policy: all invariants hold"; 
 elif ! printf '%s\n' "$t11_out" | grep -qF "could not be evaluated"; then
   printf '%s\n' "$t11_out" | sed 's/^/  | /'
   bad "T11 PyYAML absent exited 2 but without saying which check did not run"
+elif ! printf '%s\n' "$t11_out" | grep -qF "push-trigger check did NOT run"; then
+  printf '%s\n' "$t11_out" | sed 's/^/  | /'
+  bad "T11 PyYAML absent exited 2 but the push-trigger check did not say it stood down"
 else
   ok "T11 PyYAML absent fails closed instead of reporting the all-clear"
 fi
