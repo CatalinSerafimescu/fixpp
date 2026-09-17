@@ -8,13 +8,8 @@
 // socket. Exercises all three E-7 acceptor sites (profile-map arm, plaintext accept-
 // factory selection, post-accept handshake skip). No TLS bytes are emitted.
 //
-// Mutation evidence (manual spot-check during development):
-//   Reverting the site-#3 handshake-skip guard causes the accept loop to attempt
-//   async_handshake on the plain socket, which fails (null TlsTransport cast) →
-//   session never establishes → this test times out (FAIL).
-//
 // Watchdog: an asio::steady_timer fails the test (not hangs) if the round-trip
-// does not complete within 5 seconds.
+// does not complete within its establish/state pump plus the stop window.
 //
 // Anchors: spec.md SC-001; research.md D-7/D-8; data-model.md E-7;
 //          tasks.md T007; [const §XII.5 amended v0.3]
@@ -50,6 +45,7 @@
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
 #include <future>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -59,8 +55,8 @@
 
 // ── #289: bounded pumps ──────────────────────────────────────────────
 //
-// Both census sites in this file use `run_window_then_ready` plus a miss-branch drain
-// (tests/support/pump_until_ready.hpp). The window is PRESERVED: the hazard #289
+// Both census sites in this file (the two `/stop` windows) use `run_window_then_ready` plus a
+// miss-branch drain (tests/support/pump_until_ready.hpp). The window is PRESERVED: the hazard #289
 // names is the UNCONDITIONAL `get()`, not the fixed window.
 //
 // ⚠️ BOTH ARE NORMALISATIONS, NOT HAZARD FIXES. An
@@ -72,9 +68,9 @@
 // ⚠️ THE VERDICT IS CAPTURED BEFORE `watchdog.cancel()`, AND THE ORDER IS
 // LOAD-BEARING IN BOTH DIRECTIONS. The window must stay INSIDE the armed watchdog --
 // that is what the original `run_for(2s)` comment says it is for -- so the pump
-// happens first. But the miss-branch DRAIN must run AFTER the cancel: it pumps for up
-// to 5 s, which is at or past this test's 5 s (and the next one's 6 s) watchdog
-// deadline, so draining with the timer still armed would let a REAL `steady_timer`
+// happens first. But the miss-branch DRAIN must run AFTER the cancel: its budget can
+// reach the watchdog's deadline, so draining with the timer still armed would let a
+// REAL `steady_timer`
 // set `watchdog_fired` during failure handling and report a second, spurious defect.
 // [[feedback_a_pump_budget_above_a_real_fallback_timer_turns_a_hang_into_a_false_pass]]
 //
@@ -97,6 +93,20 @@
 using namespace std::chrono_literals;
 
 namespace {
+
+// Budget for the pump that waits for the acceptor to reach the state a test
+// asserts (#470). It replaces a fixed `run_for` window, which misses whenever the
+// thread is descheduled past the window, so it is a wedge detector, not a latency
+// claim.
+constexpr auto kStateBudget = 3s;
+
+// Window `engine.stop()` is given before the test reports a teardown miss.
+constexpr auto kStopWindow = 2s;
+
+// The Logon-only initiator must stay connected for longer than `kStateBudget`:
+// once it closes, the acceptor leaves Active, so a pump still waiting at that point
+// would miss a state it can no longer observe.
+constexpr auto kInitiatorHold = kStateBudget + 1s;
 
 // Current wall-clock UTC as a FIX UTCTimestamp "YYYYMMDD-HH:MM:SS.mmm".
 // Required by the 038 acceptor first-Logon SendingTime(52) MaxLatency guard.
@@ -170,7 +180,7 @@ std::atomic<bool> g_first_byte_captured{false};
 
 // Standalone plaintext initiator coroutine (Logon-only).
 // Connects to the acceptor's bound port via a raw TCP socket (no TLS),
-// sends a FIX Logon frame, waits for the acceptor reply (up to 5s), then exits.
+// sends a FIX Logon frame, holds the socket open (see kInitiatorHold), then closes.
 asio::awaitable<void> run_plain_initiator(asio::io_context& ioc, uint16_t acceptor_port,
                                           std::string sender, std::string target) {
     co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
@@ -197,12 +207,10 @@ asio::awaitable<void> run_plain_initiator(asio::io_context& ioc, uint16_t accept
         co_await asio::async_write(sock, asio::buffer(logon.data(), logon.size()),
                                    asio::redirect_error(asio::use_awaitable, ec));
 
-        // Stay connected for a short window so the acceptor's read-pump sees the
-        // socket as live while the test captures session state. 1s is sufficient;
-        // the test's run_for(2s) always outlasts this, so the initiator has
-        // already disconnected by the time ioc.run() runs after engine.stop().
+        // Stay connected so the acceptor's read-pump sees the socket as live while
+        // the test waits for Active; see kInitiatorHold for the ordering it needs.
         asio::steady_timer t{ioc};
-        t.expires_after(1s);
+        t.expires_after(kInitiatorHold);
         co_await t.async_wait(asio::redirect_error(asio::use_awaitable, ec));
 
         sock.close(ec);
@@ -300,63 +308,80 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogon) {
 
     ASSERT_TRUE(engine.start().has_value()) << "engine.start() failed";
 
-    // Let the accept loop bind the listener.
-    ioc.run_for(50ms);
-    ioc.restart();
+    // Let the accept loop bind the listener, not for a fixed window (#470): a fixed
+    // window misses whenever the accept-loop thread is descheduled past it. No fatal
+    // assertion runs until after engine.stop() below -- see the ASSERT_NE there.
+    uint16_t bound_port = 0;
+    (void)fixpp::test_support::pump_until(
+        ioc,
+        [&] {
+            bound_port = engine.acceptor_bound_endpoint(acc_id).port;
+            return bound_port != 0;
+        },
+        kStateBudget, fixpp::test_support::kPumpSlice,
+        "PlainAcceptorAndInitiatorCompleteLogon/bind");
 
-    uint16_t bound_port = engine.acceptor_bound_endpoint(acc_id).port;
-    ASSERT_NE(bound_port, 0U) << "acceptor did not bind (port=0)";
-
-    // Watchdog: fires at 5s from the point the session is attempted.
-    // Protects BOTH the establish phase (run_for(500ms)) AND the cleanup phase
-    // (run_for(3s) after stop). Total budget: 500ms + 3s = 3.5s << 5s.
-    // We do NOT cancel the watchdog before cleanup — it must remain armed to
-    // catch a wedged engine.stop(). [spec brief: self-deadline that FAILs not hangs]
+    // Watchdog: armed from the point the session is attempted, and longer than the
+    // establish pump plus the stop window, so it can fire only when one of them
+    // overran. It stays armed through the stop window to catch a wedged
+    // engine.stop(). [spec brief: self-deadline that FAILs not hangs]
     std::atomic<bool> watchdog_fired{false};
     asio::steady_timer watchdog{ioc};
-    watchdog.expires_after(5s);
+    watchdog.expires_after(kStateBudget + kStopWindow + 1s);
     watchdog.async_wait([&](asio::error_code ec) {
         if (!ec) watchdog_fired.store(true, std::memory_order_release);
     });
 
-    // Spawn the standalone plaintext initiator.
-    asio::co_spawn(ioc,
-                   run_plain_initiator(ioc, bound_port,
-                                       /*sender=*/"PLAIN-INITIATOR", /*target=*/"PLAIN-ACCEPTOR"),
-                   asio::detached);
+    // Pump until accept→(no handshake)→attach→Logon-admit is observed, not for a fixed
+    // window (#470). The acceptor session is published to lookup() only after the
+    // accept, so `null` below means the accept was not observed within the budget.
+    //
+    // Latched: the first observation of Active/LogonReceived ends the wait. Reading
+    // state() here is safe only because this thread is the one driving `ioc`, and the
+    // predicate runs between `run_for` slices, when no session-strand handler is
+    // mid-flight.
+    //
+    // Only attempted when the bind succeeded: a bind miss leaves bound_port == 0, and
+    // nothing would ever connect, so this pump would exist only to consume its own
+    // budget before the fatal bind assertion below runs.
+    bool established = false;
+    std::string state_str = "null";
+    bool establish_pumped = true;
+    if (bound_port != 0) {
+        // Spawn the standalone plaintext initiator.
+        asio::co_spawn(ioc,
+                       run_plain_initiator(ioc, bound_port,
+                                           /*sender=*/"PLAIN-INITIATOR",
+                                           /*target=*/"PLAIN-ACCEPTOR"),
+                       asio::detached);
 
-    // Run for 500ms to allow accept→(no handshake)→attach→Logon-admit.
-    // The initiator connects and sends the Logon immediately; the full exchange
-    // (connect + Logon processing) completes within ~10ms on a loopback socket.
-    // At 500ms the initiator's 1s stay-connected timer has NOT yet fired, so the
-    // session is still Active when we capture state.
-    ioc.run_for(500ms);
-    ioc.restart();
+        const auto observe_established = [&] {
+            if (established) return true;
+            auto acc_session = engine.lookup(acc_id);
+            if (acc_session == nullptr) return false;
+            const auto st = acc_session->state();
+            state_str = std::to_string(static_cast<int>(st));
+            established = st == fixpp::session::fsm_state::Active ||
+                          st == fixpp::session::fsm_state::LogonReceived;
+            return established;
+        };
+        establish_pumped = fixpp::test_support::pump_until(
+            ioc, observe_established, kStateBudget, fixpp::test_support::kPumpSlice,
+            "PlainAcceptorAndInitiatorCompleteLogon/establish");
+    }
 
-    // Capture state while the initiator is still connected (Active window).
-    auto acc_session = engine.lookup(acc_id);
-    const bool established = (acc_session != nullptr) &&
-                             (acc_session->state() == fixpp::session::fsm_state::Active ||
-                              acc_session->state() == fixpp::session::fsm_state::LogonReceived);
-    const std::string state_str =
-        (acc_session != nullptr) ? std::to_string(static_cast<int>(acc_session->state())) : "null";
-
-    // Stop cleanly. Use run_for(2s) — watchdog is still armed.
-    // engine.stop() with logout_disconnect_timeout_ms=500 takes ≤1.5s; 2s is ample.
-    // If stop() wedges, run_for returns after 2s; watchdog fires at 5s from
-    // session-start — still well within the external test timeout. We check
-    // stop_fut before assertions.
+    // Stop cleanly, with the watchdog still armed. We check stop_fut before assertions.
     auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
     const bool stopped_in_window = fixpp::test_support::run_window_then_ready(
-        ioc, stop_fut, 2s, "PlainAcceptorAndInitiatorCompleteLogon/stop");
+        ioc, stop_fut, kStopWindow, "PlainAcceptorAndInitiatorCompleteLogon/stop");
     // Cancel watchdog after cleanup so it doesn't fire during assertions — and, on the
     // miss branch, before the drain, whose budget reaches the watchdog's deadline.
     watchdog.cancel();
     if (!stopped_in_window) {
         fixpp::test_support::cancel_and_drain_or_report(
             ioc, *engine.clock(), "PlainAcceptorAndInitiatorCompleteLogon/stop");
-        // A miss means engine.stop() did not complete within 2 s -- a potential wedge in
-        // session teardown. Report text is the stem plus the label, nothing else.
+        // A miss means engine.stop() did not complete within kStopWindow -- a potential
+        // wedge in session teardown. Report text is the stem plus the label, nothing else.
         ADD_FAILURE() << fixpp::test_support::kWindowMiss
                       << "PlainAcceptorAndInitiatorCompleteLogon/stop";
         return;
@@ -364,8 +389,18 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogon) {
     stop_fut.get();
 
     // Assert no watchdog fired during establish or cleanup.
-    ASSERT_FALSE(watchdog_fired.load()) << "watchdog fired: plaintext round-trip did not complete "
-                                           "within 5s — potential hang in accept/handshake path";
+    ASSERT_FALSE(watchdog_fired.load()) << "watchdog fired: plaintext round-trip overran the "
+                                           "establish budget plus the stop window — potential "
+                                           "hang in accept/handshake path";
+
+    // Bind must have succeeded -- checked only now, after a completed engine.stop(),
+    // so a bind miss never destroys a started-but-not-yet-stopped Engine.
+    ASSERT_NE(bound_port, 0U) << fixpp::test_support::kPumpBudgetMiss
+                              << "PlainAcceptorAndInitiatorCompleteLogon/bind"
+                              << " -- acceptor did not bind";
+
+    EXPECT_TRUE(establish_pumped) << fixpp::test_support::kPumpBudgetMiss
+                                  << "PlainAcceptorAndInitiatorCompleteLogon/establish";
 
     // SC-001 core assertion: acceptor reached established state.
     EXPECT_TRUE(established)
@@ -433,48 +468,74 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogonLogout) {
         << "register_session(acceptor) failed";
     ASSERT_TRUE(engine.start().has_value()) << "engine.start() failed";
 
-    ioc.run_for(50ms);
-    ioc.restart();
+    // Let the accept loop bind the listener, not for a fixed window (#470). No fatal
+    // assertion runs until after engine.stop() below -- see the ASSERT_NE there.
+    uint16_t bound_port = 0;
+    (void)fixpp::test_support::pump_until(
+        ioc,
+        [&] {
+            bound_port = engine.acceptor_bound_endpoint(acc_id).port;
+            return bound_port != 0;
+        },
+        kStateBudget, fixpp::test_support::kPumpSlice,
+        "PlainAcceptorAndInitiatorCompleteLogonLogout/bind");
 
-    uint16_t bound_port = engine.acceptor_bound_endpoint(acc_id).port;
-    ASSERT_NE(bound_port, 0U) << "acceptor did not bind (port=0)";
-
-    // Watchdog: 6s budget covers the full Logon+Logout exchange + cleanup.
+    // Watchdog: longer than the state pump plus the stop window, so it fires only
+    // when one of them overran.
     std::atomic<bool> watchdog_fired{false};
     asio::steady_timer watchdog{ioc};
-    watchdog.expires_after(6s);
+    watchdog.expires_after(kStateBudget + kStopWindow + 1s);
     watchdog.async_wait([&](asio::error_code ec) {
         if (!ec) watchdog_fired.store(true, std::memory_order_release);
     });
 
-    // Spawn the Logon+Logout initiator.
-    asio::co_spawn(ioc,
-                   run_plain_initiator_with_logout(ioc, bound_port,
-                                                   /*sender=*/"PLAIN-INITIATOR",
-                                                   /*target=*/"PLAIN-ACCEPTOR"),
-                   asio::detached);
+    // Pump until the acceptor is observed Disconnected, not for a fixed window (#470).
+    // Disconnected is also reachable by a raw socket close, which the initiator does
+    // after its Logout; that is why assertion (2) below, not this wait, is what tells
+    // the Logout path apart. Same threading condition as the Logon test's pump.
+    //
+    // Only attempted when the bind succeeded -- see the Logon test's twin pump for why.
+    std::shared_ptr<fixpp::session::Session> acc_session;
+    bool disconnected_pumped = true;
+    if (bound_port != 0) {
+        // Spawn the Logon+Logout initiator.
+        asio::co_spawn(ioc,
+                       run_plain_initiator_with_logout(ioc, bound_port,
+                                                       /*sender=*/"PLAIN-INITIATOR",
+                                                       /*target=*/"PLAIN-ACCEPTOR"),
+                       asio::detached);
 
-    // Run for 700ms: 200ms (Logon exchange) + 300ms (Logout exchange) + 200ms margin.
-    // After this point the initiator has sent Logon + Logout; the acceptor should have
-    // processed the Logout and transitioned to Disconnected.
-    ioc.run_for(700ms);
-    ioc.restart();
+        disconnected_pumped = fixpp::test_support::pump_until(
+            ioc,
+            [&] {
+                acc_session = engine.lookup(acc_id);
+                return acc_session != nullptr &&
+                       acc_session->state() == fixpp::session::fsm_state::Disconnected;
+            },
+            kStateBudget, fixpp::test_support::kPumpSlice,
+            "PlainAcceptorAndInitiatorCompleteLogonLogout/disconnected");
+    }
 
-    // Capture state BEFORE stop() — the session is still in the registry snapshot.
-    auto acc_session = engine.lookup(acc_id);
-    ASSERT_NE(acc_session, nullptr) << "session not found in registry after Logout";
-
-    const auto final_state = acc_session->state();
-
-    // Capture recent_events() to find the Logout-specific signal.
-    // recent_events() is safe to call here: ioc is paused (run_for returned),
-    // so the session strand is idle — no concurrent writes to recent_events_.
+    // Capture state and events BEFORE stop() — the session is still in the registry
+    // snapshot, and the strand is idle here (ioc is not being run). `found` and
+    // `final_state` are recorded rather than asserted immediately: a fatal assertion
+    // here, before engine.stop() runs, would tear down a started-but-not-yet-stopped
+    // Engine.
+    const bool found = acc_session != nullptr;
+    std::optional<fixpp::session::fsm_state> final_state;
     bool logout_seqreset_event_found = false;
-    for (const auto& ev : acc_session->recent_events()) {
-        if (const auto* sr =
-                std::get_if<fixpp::session::session_event_sequence_numbers_reset>(&ev)) {
-            if (!sr->by_peer_request) {
-                logout_seqreset_event_found = true;
+    if (found) {
+        final_state = acc_session->state();
+
+        // recent_events() is safe to call here: ioc is not being run (the pump
+        // returned), so the session strand is idle — no concurrent writes to
+        // recent_events_.
+        for (const auto& ev : acc_session->recent_events()) {
+            if (const auto* sr =
+                    std::get_if<fixpp::session::session_event_sequence_numbers_reset>(&ev)) {
+                if (!sr->by_peer_request) {
+                    logout_seqreset_event_found = true;
+                }
             }
         }
     }
@@ -482,7 +543,7 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogonLogout) {
     // Stop cleanly.
     auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
     const bool stopped_in_window = fixpp::test_support::run_window_then_ready(
-        ioc, stop_fut, 2s, "PlainAcceptorAndInitiatorCompleteLogonLogout/stop");
+        ioc, stop_fut, kStopWindow, "PlainAcceptorAndInitiatorCompleteLogonLogout/stop");
     watchdog.cancel();
     if (!stopped_in_window) {
         fixpp::test_support::cancel_and_drain_or_report(
@@ -494,13 +555,24 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogonLogout) {
     stop_fut.get();
 
     ASSERT_FALSE(watchdog_fired.load())
-        << "watchdog fired: plaintext Logon+Logout round-trip did not complete within 6s";
+        << "watchdog fired: plaintext Logon+Logout round-trip overran the state budget plus "
+           "the stop window";
+
+    // Bind must have succeeded -- checked only now, after a completed engine.stop().
+    ASSERT_NE(bound_port, 0U) << fixpp::test_support::kPumpBudgetMiss
+                              << "PlainAcceptorAndInitiatorCompleteLogonLogout/bind"
+                              << " -- acceptor did not bind";
+
+    EXPECT_TRUE(disconnected_pumped) << fixpp::test_support::kPumpBudgetMiss
+                                     << "PlainAcceptorAndInitiatorCompleteLogonLogout/disconnected";
+
+    ASSERT_TRUE(found) << "session not found in registry after Logout";
 
     // (1) Acceptor must have reached Disconnected (terminal) after the clean Logout.
-    EXPECT_EQ(final_state, fixpp::session::fsm_state::Disconnected)
+    EXPECT_EQ(final_state, std::optional{fixpp::session::fsm_state::Disconnected})
         << "SC-001 / T-042: plaintext acceptor must reach Disconnected after a clean "
            "inbound Logout. final_state="
-        << static_cast<int>(final_state);
+        << (final_state ? std::to_string(static_cast<int>(*final_state)) : std::string{"-1"});
 
     // (2) Discriminating signal: session_event_sequence_numbers_reset{by_peer_request=false}
     // is emitted ONLY on the inbound-Logout-in-Active path (session.cpp T046), not on

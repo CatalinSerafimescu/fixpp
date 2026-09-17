@@ -57,6 +57,7 @@
 
 // Internal transport header — needed for asio_tls_transport::timer_epochs(), the
 // observable that makes the close_async idempotency guard mutation-killable.
+#include "support/pump_until_ready.hpp"
 #include "transport/asio_tls_transport.hpp"
 #include "transport/loopback_tls_fixture.hpp"
 
@@ -230,11 +231,16 @@ TEST(InflightExclusivity, WriteOverlapReturnImmediately) {
         },
         asio::detached);
 
-    // Run for 500 ms — enough for A to start and suspend, B to fire.
-    ioc.run_for(500ms);
-
-    ASSERT_TRUE(result_b.has_value())
-        << "Coroutine B must complete (exclusivity guard fires immediately)";
+    // Pump until B has an answer, not for a fixed window (#470): whether queued
+    // handlers ran inside a fixed `run_for` is a scheduling question, see
+    // `pump_until`. The budget may be generous because nothing but the guard
+    // answers B while A is in flight -- without the guard B either joins A's
+    // back-pressure (budget miss) or completes with a value (the next assertion).
+    ASSERT_TRUE(fixpp::test_support::pump_until(
+        ioc, [&result_b] { return result_b.has_value(); }, fixpp::test_support::kPumpBudget,
+        fixpp::test_support::kPumpSlice, "InflightExclusivity/WriteOverlap/b"))
+        << fixpp::test_support::kPumpBudgetMiss << "InflightExclusivity/WriteOverlap/b"
+        << " -- coroutine B must complete (exclusivity guard fires immediately)";
     ASSERT_FALSE(result_b->has_value()) << "Coroutine B must return an error, not success";
     EXPECT_EQ(result_b->error(), error::transport_write_in_progress)
         << "Expected transport_write_in_progress from second async_write";
@@ -287,10 +293,14 @@ TEST(InflightExclusivity, ReadOverlapReturnImmediately) {
         },
         asio::detached);
 
-    ioc.run_for(500ms);
-
-    ASSERT_TRUE(result_b.has_value())
-        << "Coroutine B must complete (exclusivity guard fires immediately)";
+    // Pump until B has an answer, not for a fixed window (#470). Nothing but the
+    // guard answers B: the server never writes and a read has no timeout, so
+    // without the guard B suspends beside A and the pump misses.
+    ASSERT_TRUE(fixpp::test_support::pump_until(
+        ioc, [&result_b] { return result_b.has_value(); }, fixpp::test_support::kPumpBudget,
+        fixpp::test_support::kPumpSlice, "InflightExclusivity/ReadOverlap/b"))
+        << fixpp::test_support::kPumpBudgetMiss << "InflightExclusivity/ReadOverlap/b"
+        << " -- coroutine B must complete (exclusivity guard fires immediately)";
     ASSERT_FALSE(result_b->has_value()) << "Coroutine B must return an error, not success";
     EXPECT_EQ(result_b->error(), error::transport_read_in_progress)
         << "Expected transport_read_in_progress from second async_read_some";

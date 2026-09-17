@@ -21,7 +21,7 @@
 //   - The Engine registers one insecure_plain_tcp INITIATOR session pointing at a
 //     raw TCP acceptor on loopback (port=0).
 //   - The raw acceptor (a standalone asio::ip::tcp::acceptor coroutine) accepts the
-//     connection and holds it open for the test window.
+//     connection and holds it open for the publish budget.
 //   - The Engine's connect loop (run_connect_loop) connects, emits the initiator
 //     Logon, and then calls publish_entry — making the session visible via lookup().
 //   - No TLS fixtures required; no FIX Logon ACK required for publication.
@@ -91,16 +91,15 @@ using fixpp::session::SessionId;
 
 namespace {
 
-// How long we let the engine run before calling stop().
-// Must be large enough for:
-//   (1) The ioc_thread to start and pick up tasks.
-//   (2) The raw acceptor to bind and begin listening.
-//   (3) The connect loop to connect, emit Logon, and call publish_entry.
-// On a loopback the connect+logon-emit path takes <10ms; 500ms gives plenty of margin.
-constexpr auto kRunWindow = 500ms;
+// The io_context is driven until the reader has OBSERVED publication, bounded by
+// this budget, not for a fixed window (#470): a fixed window misses whenever the io
+// thread is descheduled past it. It is a wedge detector, not a latency claim.
+// Nothing but publish_entry makes lookup() non-null, so a generous budget cannot
+// turn a missing publication into a pass.
+constexpr auto kPublishBudget = fixpp::test_support::kPumpBudget;
 
 // ── Raw TCP acceptor coroutine ────────────────────────────────────────────────
-// Accepts exactly one connection and holds it open for the run window, then
+// Accepts exactly one connection and holds it open for `hold_window`, then
 // exits.  This gives the initiator something to connect to without needing any
 // FIX protocol implementation or TLS on the peer side.
 // The port is passed by reference and set before the coroutine suspends so the
@@ -120,7 +119,7 @@ asio::awaitable<void> run_raw_acceptor(asio::io_context& ioc, uint16_t& bound_po
     asio::error_code ec;
     auto sock = co_await acceptor.async_accept(asio::redirect_error(asio::use_awaitable, ec));
     if (!ec) {
-        // Hold the socket open for the test window so the initiator's read-pump
+        // Hold the socket open for `hold_window` so the initiator's read-pump
         // stays alive (not EOF-terminated) and the session remains published.
         asio::steady_timer timer{ioc};
         timer.expires_after(hold_window);
@@ -162,8 +161,8 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
     // Short connect timeout. ⚠️ Since #361 this budget covers the RESOLVE as well
     // as the connect — it is one absolute deadline for the whole attempt. Still
     // ample: the host is a literal, and the first async_resolve in a process
-    // (which lazily spawns asio's resolver work thread and loads the NSS modules)
-    // measures ~1 ms under ASan, i.e. 0.5 % of this budget.
+    // lazily spawns asio's resolver work thread and loads the NSS modules, which
+    // this budget must cover.
     tcfg.connect_timeout = 200ms;
     auto factory_r = fixpp::transport::make_asio_plain_transport_factory(tcfg);
     ASSERT_TRUE(factory_r.has_value()) << "make_asio_plain_transport_factory failed";
@@ -192,7 +191,7 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
 #pragma clang diagnostic pop
 #endif
     sc.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", bound_port};
-    // Unlimited reconnect attempts so the loop stays alive for the whole window.
+    // Unlimited reconnect attempts so the loop stays alive for the whole publish budget.
     fixpp::transport::ReconnectPolicy policy;
     policy.max_attempts = std::numeric_limits<unsigned>::max();
     sc.reconnect_policy = policy;
@@ -225,6 +224,7 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
 
     std::atomic<bool> ioc_done{false};
     std::atomic<bool> reader_saw_null{false};
+    std::atomic<bool> reader_saw_nonnull{false};
     int null_reads = 0;
     int nonnull_reads = 0;
 
@@ -254,9 +254,13 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
                 // a torn acquire-load of reader_snapshot_ would produce an invalid
                 // shared_ptr whose refcount operations race → TSan fires.
                 ++nonnull_reads;
+                reader_saw_nonnull.store(true, std::memory_order_release);
             }
             // Prevent the optimizer from eliding the loads.
             (void)session.get();
+            // Yield between reads: an unthrottled reader competes for a core with the
+            // io thread it is waiting on, which matters on a runner with few cores.
+            std::this_thread::yield();
         }
     });
 
@@ -274,26 +278,34 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
         [&reader_saw_null] { return reader_saw_null.load(std::memory_order_acquire); }, 2s);
 
     // ── Let the io_context run, witnessed concurrently by the reader ────────
-    // Spawn the raw acceptor coroutine.  Hold window = kRunWindow so the socket
-    // stays alive for the whole test.
+    // Spawn the raw acceptor coroutine. It holds the accepted socket for the whole
+    // publish budget, so the peer closing cannot end the session before the pump
+    // below has had its chance to observe publication.
     asio::co_spawn(
         ioc,
         [&]() -> asio::awaitable<void> {
             asio::error_code ec;
-            // Accept one connection and hold for the window.
+            // Accept one connection and hold for the publish budget.
             auto sock =
                 co_await raw_acc.async_accept(asio::redirect_error(asio::use_awaitable, ec));
             if (!ec) {
                 asio::steady_timer timer{ioc};
-                timer.expires_after(kRunWindow);
+                timer.expires_after(kPublishBudget);
                 co_await timer.async_wait(asio::redirect_error(asio::use_awaitable, ec));
                 sock.close(ec);
             }
         },
         asio::detached);
 
+    // Written only by ioc_thread below, read only after it is joined -- the join
+    // establishes the happens-before, so no atomic is needed for this one.
+    bool published_in_budget = false;
     std::thread ioc_thread([&] {
-        ioc.run_for(kRunWindow);
+        // Only this thread drives `ioc` until it is joined, which is what makes the
+        // pump's trailing restart() safe. The verdict is the reader's counts below.
+        published_in_budget = fixpp::test_support::pump_until(
+            ioc, [&] { return reader_saw_nonnull.load(std::memory_order_acquire); }, kPublishBudget,
+            fixpp::test_support::kPumpSlice, "LookupNeverSeesTornPointer/publish");
         ioc_done.store(true, std::memory_order_release);
     });
 
@@ -303,13 +315,16 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
     ioc_thread.join();
     reader_thread.join();
 
-    // If the initiator never connected within the window (e.g. a slow or
-    // failed loopback connect), run_raw_acceptor's async_accept() (or the
-    // co_spawned accept lambda above) is STILL SUSPENDED here — the
+    EXPECT_TRUE(published_in_budget)
+        << fixpp::test_support::kPumpBudgetMiss << "LookupNeverSeesTornPointer/publish";
+
+    // If the initiator never connected within the budget (e.g. a slow or
+    // failed loopback connect), the co_spawned accept lambda's async_accept()
+    // may be STILL SUSPENDED here — the
     // unconditional ioc.run() this block used to call would then wait on it
     // forever instead of returning once stop() completes, turning a
-    // diagnosable failure (nonnull_reads==0 below) into a 30s CTest timeout.
-    // Force it to unblock before draining. [gate-b/r1 P2-6]
+    // diagnosable failure (nonnull_reads==0 below) into a CTest kill that
+    // discards it. Force it to unblock before draining. [gate-b/r1 P2-6]
     asio::error_code raw_acc_close_ec;
     raw_acc.cancel(raw_acc_close_ec);
     raw_acc.close(raw_acc_close_ec);
@@ -344,9 +359,9 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
 
     EXPECT_GT(nonnull_reads, 0)
         << "Expected at least one non-null lookup() result — the connect loop should have "
-           "called publish_entry (reader_snapshot_ release-store) before the 500ms window "
-           "expired.  If this fails, the test window is too short or the loopback connect "
-           "is failing.  null_reads="
+           "called publish_entry (reader_snapshot_ release-store) within the publish budget. "
+           "If this fails, check whether the loopback connect failed or publish_entry never "
+           "ran.  null_reads="
         << null_reads << " nonnull_reads=" << nonnull_reads;
 
     // Destroy Engine after stop() — strict assert(stopped()) is satisfied.

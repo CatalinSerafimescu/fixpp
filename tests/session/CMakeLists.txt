@@ -2462,10 +2462,13 @@ target_include_directories(engine_reader_snapshot_publish_acquire_test PRIVATE
 )
 add_test(NAME engine_reader_snapshot_publish_acquire
          COMMAND engine_reader_snapshot_publish_acquire_test)
+# TIMEOUT must exceed the sum of the inner failure-path budgets in both TESTs in this
+# binary (reader-null wait + publish budget + stop pump + the counter-test's drain), so
+# a miss reports its counts instead of being killed by CTest before it can (#470).
 set_tests_properties(engine_reader_snapshot_publish_acquire PROPERTIES
     LABELS "session;015;046;nfr017;publish_acquire"
     ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
-    TIMEOUT 30)
+    TIMEOUT 60)
 
 # T019 (plan row +B): forced-fallback link test for fixpp_session.
 # Constructs fixpp::sync::atomic_shared_ptr<int> in a binary that links fixpp_session;
