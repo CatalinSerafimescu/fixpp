@@ -652,7 +652,30 @@ CHECK="$mutant_check" TESTBRIDGE_TEST_ONLY='-Suite.CaseB' run_check \
   "T-L-bridge-mutant removing --gtest_filter=* from the checker lets TESTBRIDGE_TEST_ONLY filter both sides alike" \
   "$d" "$WORK/tlbridge-mutant-skips.txt" 1 0 "PASS:" "$b"
 
-CELLS_DECLARED=43
+# ── T-G: a case gtest never started reads RUN/COMPLETED with an epoch
+# timestamp (every case after a GTEST_SKIP() in a global Environment::SetUp).
+# T-G1 must fail on the epoch; T-G2 is its control: the same shape with a
+# real start time passes. ─────────────────────────────────────────────────
+for cell in g1 g2; do
+  d="$WORK/t$cell"; mkdir -p "$d"
+  write_json "$d/binA.json" Suite CaseA SKIPPED "$PORT_OK_CPP"
+  write_json "$d/binB.json" Suite CaseB COMPLETED
+  if [ "$cell" = g1 ]; then stamp="1970-01-01T00:00:00Z"; else stamp="2026-01-01T00:00:00Z"; fi
+  python3 - "$d/binB.json" "$stamp" <<'PY'
+import json, sys
+p, stamp = sys.argv[1:3]
+doc = json.load(open(p))
+doc["testsuites"][0]["testsuite"][0]["timestamp"] = stamp
+json.dump(doc, open(p, "w"))
+PY
+  printf 'Suite.CaseA\n' > "$WORK/t$cell-skips.txt"
+done
+run_check "T-G1 a case with an epoch start time (never started) is caught" \
+  "$WORK/tg1" "$WORK/tg1-skips.txt" 2 1 "never started"
+run_check "T-G2 control: the same case with a real start time passes" \
+  "$WORK/tg2" "$WORK/tg2-skips.txt" 2 0 "PASS:"
+
+CELLS_DECLARED=45
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$CELLS_DECLARED" ]; then

@@ -13,7 +13,9 @@ does not:
      {COMPLETED, SKIPPED}), and no report or suite has a nonzero `disabled`
      count — gtest reports a DISABLED_ case as status=NOTRUN,
      result=SUPPRESSED with a nonzero `disabled` count, and that is not the
-     same as running and passing;
+     same as running and passing. A case carrying an epoch `timestamp` never
+     started (gtest emits every case after a global-environment GTEST_SKIP()
+     as RUN/COMPLETED that way) and is a violation too;
   3. the run report's case set matches the binary's OWN `--gtest_list_tests`
      enumeration exactly, in both directions. A GTEST_FILTER, a shard
      control, a wrapper, or a launcher can OMIT a case from the report
@@ -189,6 +191,7 @@ def main() -> int:
     actual_skips = set()
     bad_reason_skips = []
     bad_status_cases = []
+    never_started = []
     disabled_violations = []
     omitted_from_report = []  # enumerated by the binary but absent from its report
     extra_in_report = []      # reported but not enumerated (stale/wrong --bin-dir)
@@ -285,6 +288,15 @@ def main() -> int:
                 # result.
                 if status != "RUN" or result not in ("COMPLETED", "SKIPPED"):
                     bad_status_cases.append((case_id, status, result))
+                    continue
+
+                # A case gtest never started — e.g. every case after a
+                # GTEST_SKIP() in a global Environment::SetUp — is still
+                # emitted as RUN/COMPLETED; its unset start time renders as
+                # the epoch, which a case that ran never carries.
+                started = tc.get("timestamp")
+                if isinstance(started, str) and started[:4] in ("1969", "1970"):
+                    never_started.append((case_id, started))
                     continue
 
                 if result == "SKIPPED":
@@ -386,6 +398,12 @@ def main() -> int:
         violations.append(
             f"{len(bad_status_cases)} case(s) did not run with a real result (status must "
             f"be RUN and result must be COMPLETED or SKIPPED): {detail}")
+
+    if never_started:
+        violations.append(
+            f"{len(never_started)} case(s) reported RUN but never started (epoch "
+            "timestamp — e.g. a GTEST_SKIP() in a global test environment): "
+            + ", ".join(f"{cid} ({ts})" for cid, ts in never_started))
 
     if disabled_violations:
         detail = "; ".join(f"{path}:{level}=disabled({n})"
