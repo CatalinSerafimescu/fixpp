@@ -9,15 +9,21 @@ the CI step's own count assertion (run before this script, over `ctest -N`)
 does not:
 
   1. no case FAILED;
-  2. the set of SKIPPED `Suite.Case` ids is EXACTLY the checked-in list in
+  2. every case actually RAN with a real result (status=RUN, result in
+     {COMPLETED, SKIPPED}), and no report or suite has a nonzero `disabled`
+     count — gtest reports a DISABLED_ or GTEST_FILTER-excluded case as
+     status=NOTRUN, result=SUPPRESSED, and that is not the same as running
+     and passing;
+  3. the set of SKIPPED `Suite.Case` ids is EXACTLY the checked-in list in
      `--expected-skips` (both directions: an id that skips and is not listed,
      and a listed id that no longer skips, are both violations);
-  3. every skip's message matches the ONE reason this leg is allowed to skip
-     for — a counterparty port not leased (INTEROP_QUICKFIX_{CPP,J}_PORT unset)
-     — never any other guard the same test file may also carry
+  4. every skip's message, once its leading `<file>:<line>` location line is
+     stripped, FULLMATCHES the ONE reason this leg is allowed to skip for —
+     a counterparty port not leased (INTEROP_QUICKFIX_{CPP,J}_PORT unset) —
+     never any other guard the same test file may also carry
      (tests/interop/support/counterparty_probe.hpp's other two ProbeResult
      reasons, or a `skip:not-applicable`/fixture-dir guard reached after the
-     probe).
+     probe), and never that reason plus a prefix, suffix, or extra line.
 
 EXIT
   0  every case ran or skipped for the one allowed reason, and the skip set
@@ -25,9 +31,12 @@ EXIT
   1  a NAMED invariant above is violated — a real defect in this run
   2  the check could not be trusted to answer at all: the JSON directory or
      the expected-skips file is missing, the number of JSON reports does not
-     match --expected-count, a report does not parse, or zero cases were
-     found across every report. An empty or partial scan is an INSTRUMENT
-     failure here, never a clean pass
+     match --expected-count, a report does not parse as JSON or is not
+     structurally a gtest report at any level (a non-object top level, a
+     `testsuites`/`testsuite`/`skipped` field of the wrong shape), a single
+     report has zero cases with status=RUN, or zero cases were found across
+     every report. An empty, partial, or malformed-but-parseable scan is an
+     INSTRUMENT failure here, never a clean pass
      (feedback_verification_grep_must_be_proven_nonzero_on_the_unfixed_tree).
 
 `--expected-count` is REQUIRED and must be a positive integer: this is the
@@ -48,6 +57,14 @@ PORT_REASON_RE = re.compile(
     r"quickfix-(?:cpp|j) unavailable: "
     r"INTEROP_QUICKFIX_(?:CPP|J)_PORT not set \(parent harness did not lease a port\)"
 )
+
+# A real gtest JSON skip message is `<file>:<line>\n<reason>\n` — one leading
+# location line (which may be a Windows `C:\...` path, hence `[^\n]*` rather
+# than excluding `:`), then the reason. Reason matching strips exactly this
+# much and nothing else, so a message with NO location line, or with a SECOND
+# line after the reason, cannot silently pass by matching a substring of a
+# longer string (Codex #3).
+LOCATION_LINE_RE = re.compile(r"^[^\n]*:\d+\n")
 
 
 def gh_error(msg: str) -> None:
@@ -112,6 +129,8 @@ def main() -> int:
     failed_cases = []
     actual_skips = set()
     bad_reason_skips = []
+    bad_status_cases = []
+    disabled_violations = []
     total_cases = 0
 
     for path in json_files:
@@ -123,26 +142,118 @@ def main() -> int:
                      "this cannot read is not a report this can call clean.")
             return 2
 
+        if not isinstance(doc, dict):
+            gh_error(f"'{path}' top level is a {type(doc).__name__}, not a JSON object — "
+                      "not a gtest JSON report this checker recognises. Fail-closed.")
+            return 2
+
+        top_disabled = doc.get("disabled", 0)
+        if not isinstance(top_disabled, int):
+            gh_error(f"'{path}' has a non-integer top-level `disabled` field "
+                      f"({top_disabled!r}). Fail-closed.")
+            return 2
+
         testsuites = doc.get("testsuites")
         if not isinstance(testsuites, list):
             gh_error(f"'{path}' has no `testsuites` list — not a gtest JSON report "
                      "this checker recognises. Fail-closed.")
             return 2
 
+        report_cases = 0
+        report_run_cases = 0
+
         for ts in testsuites:
+            if not isinstance(ts, dict):
+                gh_error(f"'{path}' has a `testsuites` entry that is a "
+                          f"{type(ts).__name__}, not a JSON object. Fail-closed.")
+                return 2
             suite = ts.get("name", "")
-            for tc in ts.get("testsuite", []):
+            suite_disabled = ts.get("disabled", 0)
+            if not isinstance(suite_disabled, int):
+                gh_error(f"'{path}' suite '{suite}' has a non-integer `disabled` field "
+                          f"({suite_disabled!r}). Fail-closed.")
+                return 2
+            if suite_disabled:
+                disabled_violations.append((path, f"suite '{suite}'", suite_disabled))
+
+            testcases = ts.get("testsuite", [])
+            if not isinstance(testcases, list):
+                gh_error(f"'{path}' suite '{suite}' has a `testsuite` field that is a "
+                          f"{type(testcases).__name__}, not a list. Fail-closed.")
+                return 2
+
+            for tc in testcases:
+                if not isinstance(tc, dict):
+                    gh_error(f"'{path}' suite '{suite}' has a testcase entry that is a "
+                              f"{type(tc).__name__}, not a JSON object. Fail-closed.")
+                    return 2
+                report_cases += 1
                 total_cases += 1
                 case_id = f"{suite}.{tc.get('name', '')}"
+                status = tc.get("status")
                 result = tc.get("result")
+
+                if status == "RUN":
+                    report_run_cases += 1
+
+                # gtest reports a DISABLED_ or GTEST_FILTER-excluded-but-still-
+                # listed case as status=NOTRUN, result=SUPPRESSED — that is not
+                # the same as running and getting a real (COMPLETED/SKIPPED)
+                # result, and this gate's whole charter is that a case which
+                # did not run must not read as a pass.
+                if status != "RUN" or result not in ("COMPLETED", "SKIPPED"):
+                    bad_status_cases.append((case_id, status, result))
+                    continue
+
                 if result == "SKIPPED":
                     actual_skips.add(case_id)
-                    msgs = "\n".join(m.get("message", "") for m in tc.get("skipped", []))
-                    if not PORT_REASON_RE.search(msgs):
-                        bad_reason_skips.append((case_id, msgs))
+                    skipped = tc.get("skipped", [])
+                    if not isinstance(skipped, list):
+                        gh_error(f"'{path}' case '{case_id}' has a `skipped` field that is "
+                                  f"a {type(skipped).__name__}, not a list. Fail-closed.")
+                        return 2
+                    for entry in skipped:
+                        if not isinstance(entry, dict) or not isinstance(entry.get("message"), str):
+                            gh_error(f"'{path}' case '{case_id}' has a `skipped` entry that "
+                                      "is not a JSON object with a string `message`. "
+                                      "Fail-closed.")
+                            return 2
+                        msg = entry["message"]
+                        # Strip exactly one leading `<file>:<line>\n` (gtest's
+                        # own location prefix — tolerant of a Windows
+                        # `C:\...` path) and one trailing `\n`, then the
+                        # WHOLE remainder must fullmatch the one allowed
+                        # reason — not merely contain it as a substring
+                        # (Codex #3: a prefix, a suffix, or an extra line all
+                        # escaped the previous unanchored `.search()`).
+                        stripped = LOCATION_LINE_RE.sub("", msg, count=1)
+                        if stripped.endswith("\n"):
+                            stripped = stripped[:-1]
+                        if not PORT_REASON_RE.fullmatch(stripped):
+                            bad_reason_skips.append((case_id, msg))
                 elif tc.get("failures"):
+                    failures = tc.get("failures")
+                    if not isinstance(failures, list):
+                        gh_error(f"'{path}' case '{case_id}' has a `failures` field that is "
+                                  f"a {type(failures).__name__}, not a list. Fail-closed.")
+                        return 2
                     failed_cases.append(case_id)
-                # else: COMPLETED with no failures — an ordinary pass.
+                # else: status=RUN, result=COMPLETED, no failures — an
+                # ordinary pass (true: both status and result were checked
+                # above, not assumed).
+
+        if top_disabled:
+            disabled_violations.append((path, "report", top_disabled))
+
+        # Per-report zero, replacing the aggregate-only guard below: a binary
+        # whose tests are all compiled out on one platform (an #ifdef) can
+        # report zero RUN cases while every OTHER report in this run is
+        # non-empty — the aggregate check alone cannot see that.
+        if report_run_cases == 0:
+            gh_error(f"'{path}' has {report_cases} test case(s) registered but ZERO with "
+                      "status=RUN. An empty or entirely-suppressed report cannot be "
+                      "trusted as a clean one — fail-closed.")
+            return 2
 
     if total_cases == 0:
         gh_error(f"{len(json_files)} JSON report(s) present but ZERO test cases were "
@@ -156,6 +267,21 @@ def main() -> int:
         violations.append(
             f"{len(failed_cases)} case(s) FAILED (must be zero for this gate): "
             + ", ".join(sorted(failed_cases)))
+
+    if bad_status_cases:
+        detail = "; ".join(f"{cid} (status={status!r}, result={result!r})"
+                            for cid, status, result in bad_status_cases)
+        violations.append(
+            f"{len(bad_status_cases)} case(s) did not run with a real result (status must "
+            f"be RUN and result must be COMPLETED or SKIPPED): {detail}")
+
+    if disabled_violations:
+        detail = "; ".join(f"{path}:{level}=disabled({n})"
+                            for path, level, n in disabled_violations)
+        violations.append(
+            f"{len(disabled_violations)} nonzero `disabled` count(s) (must be zero): "
+            f"{detail} — a nonzero disabled count means gtest excluded a case outright "
+            "(DISABLED_ or a GTEST_FILTER exclusion), which this gate cannot inspect.")
 
     unexpected = sorted(actual_skips - expected_skips)
     not_skipped = sorted(expected_skips - actual_skips)

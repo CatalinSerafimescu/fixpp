@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Regression harness for ci/assert-interop-skips.py (fixpp#431).
 #
-# WHY THIS EXISTS. The checker is what stands between "90 skipped cases" and a
+# WHY THIS EXISTS. The checker is what stands between the skipped cases and a
 # green CI lane — a SKIP must not read as a PASS, and this is the instrument
 # that enforces it. Per this repo's rule
 # (feedback_verification_grep_must_be_proven_nonzero_on_the_unfixed_tree), an
@@ -12,9 +12,11 @@
 # passing cell).
 #
 # Buildless: python3 + coreutils only, no ctest, no compiler, no real gtest
-# binary. Every fixture is a hand-built gtest JSON report (same schema
-# `GTEST_OUTPUT=json:` writes, verified against real interop binaries' output
-# while this checker was written).
+# binary. Every fixture is a hand-built gtest JSON report — the skipped-case
+# fixtures carry the same leading `<file>:<line>\n` location line a real
+# report does (write_json below), because the checker strips exactly that
+# much before matching the reason, and a fixture without it cannot witness
+# the strip being load-bearing.
 #
 # Run by the `ci-script-pins` job in tier1.yml, and locally with:
 #   ci/test-interop-skips.sh
@@ -29,10 +31,14 @@ ok()  { PASS=$((PASS+1)); echo "  PASS  $1"; }
 bad() { FAIL=$((FAIL+1)); echo "  FAIL  $1"; }
 
 # Writes one gtest JSON report containing exactly one testsuite with one case.
-#   write_json <path> <suite> <case> <result:COMPLETED|SKIPPED> [<message>] [<failed:0|1>]
+#   write_json <path> <suite> <case> <result:COMPLETED|SKIPPED|...> [<message>] [<failed:0|1>]
 # COMPLETED + failed=1 emits a `failures` entry; SKIPPED emits a `skipped`
-# entry carrying <message>; COMPLETED + failed=0 (the default) emits neither —
-# an ordinary pass.
+# entry whose message is `<file>:<line>\n<message>` — the real shape a gtest
+# JSON report uses, location line then reason, which is what makes the
+# checker's location-line strip a load-bearing thing for a fixture to prove,
+# not a decoration; COMPLETED + failed=0 (the default) emits neither — an
+# ordinary pass. Any other <result> (e.g. a deliberately wrong one) is passed
+# through verbatim with neither `skipped` nor `failures`.
 write_json() {
   local path="$1" suite="$2" case_name="$3" result="$4" msg="${5:-}" failed="${6:-0}"
   python3 - "$path" "$suite" "$case_name" "$result" "$msg" "$failed" <<'PY'
@@ -41,7 +47,7 @@ path, suite, name, result, msg, failed = sys.argv[1:7]
 tc = {"name": name, "file": "fixture.cpp", "line": 1, "status": "RUN",
       "result": result, "time": "0s", "classname": suite}
 if result == "SKIPPED":
-    tc["skipped"] = [{"message": msg}]
+    tc["skipped"] = [{"message": f"{tc['file']}:{tc['line']}\n{msg}"}]
 elif failed == "1":
     tc["failures"] = [{"failure": msg or "fixture failure", "type": ""}]
 doc = {"tests": 1, "failures": 0, "disabled": 0, "errors": 0, "name": "AllTests",
@@ -134,7 +140,7 @@ d="$WORK/t8"; mkdir -p "$d"
 write_empty_json "$d/binA.json"
 write_empty_json "$d/binB.json"
 : > "$WORK/t8-skips.txt"
-run_check "T8 zero cases executed" "$d" "$WORK/t8-skips.txt" 2 2 "ZERO test cases"
+run_check "T8 zero cases executed" "$d" "$WORK/t8-skips.txt" 2 2 "ZERO with status=RUN"
 
 # ── T9: positive control — the real file's SHAPE (header comment, blank
 # lines, unsorted entries) parses identically to a bare list. Proves the
@@ -173,7 +179,135 @@ d="$WORK/t12"; mkdir -p "$d"
 write_json "$d/binA.json" Suite CaseA COMPLETED
 run_check "T12 missing expected-skips file" "$d" "$WORK/does-not-exist.txt" 1 2 "does not exist"
 
-CELLS_DECLARED=12
+# ── T13-T23: RC2 (fixpp#431 Gate B r1, Codex #2/#3/#6) — the classification
+# holes a SKIP-must-not-read-as-a-PASS gate exists to close. Each of these was
+# RED (wrongly rc 0, or rc 1 instead of the documented rc 2) against the
+# UNFIXED checker before RC2 landed — see the verify record's `m/` mutants. ──
+
+# ── T13: NOTRUN/SUPPRESSED (gtest's DISABLED_/GTEST_FILTER-excluded shape) —
+# must NOT read as a pass just because it carries no `failures` array. The
+# NOTRUN case sits ALONGSIDE a real RUN case in the SAME report (the actual
+# shape: one case in a many-case binary flips to DISABLED_, the rest of that
+# binary's cases still run) — so this exercises bad_status_cases, not the
+# per-report-zero guard T15 already covers. ──────────────────────────────────
+d="$WORK/t13"; mkdir -p "$d"
+python3 - "$d/binA.json" <<'PY'
+import json, sys
+run_case = {"name": "CaseA", "file": "fixture.cpp", "line": 1, "status": "RUN",
+            "result": "COMPLETED", "time": "0s", "classname": "Suite"}
+disabled_case = {"name": "CaseB", "file": "fixture.cpp", "line": 2, "status": "NOTRUN",
+                  "result": "SUPPRESSED", "time": "0s", "classname": "Suite"}
+doc = {"tests": 2, "failures": 0, "disabled": 1, "errors": 0, "name": "AllTests",
+       "testsuites": [{"name": "Suite", "tests": 2, "failures": 0, "disabled": 1,
+                        "errors": 0, "testsuite": [run_case, disabled_case]}]}
+json.dump(doc, open(sys.argv[1], "w"))
+PY
+: > "$WORK/t13-skips.txt"
+run_check "T13 NOTRUN/SUPPRESSED case with disabled:1 is caught, not read as a pass" \
+  "$d" "$WORK/t13-skips.txt" 1 1 "did not run with a real result"
+
+# ── T14: an unrecognised `result` value must not read as a pass either ─────
+d="$WORK/t14"; mkdir -p "$d"
+write_json "$d/binA.json" Suite CaseA WHATEVER
+write_json "$d/binB.json" Suite CaseB COMPLETED
+: > "$WORK/t14-skips.txt"
+run_check "T14 unrecognised result value is caught" \
+  "$d" "$WORK/t14-skips.txt" 2 1 "did not run with a real result"
+
+# ── T15: one report reports zero cases while a SIBLING report is populated —
+# the aggregate-only zero guard (T8) cannot see this; the per-report guard
+# added this round can. ─────────────────────────────────────────────────────
+d="$WORK/t15"; mkdir -p "$d"
+write_json "$d/binA.json" Suite CaseA COMPLETED
+write_empty_json "$d/binB.json"
+: > "$WORK/t15-skips.txt"
+run_check "T15 one empty report beside a populated one is caught per-report" \
+  "$d" "$WORK/t15-skips.txt" 2 2 "ZERO with status=RUN"
+
+# ── T16-T18: the reason must FULLMATCH after the location strip, not merely
+# CONTAIN the allowed reason as a substring. ────────────────────────────────
+d="$WORK/t16"; mkdir -p "$d"
+write_json "$d/binA.json" Suite CaseA SKIPPED "NEW REASON; $PORT_OK_CPP"
+write_json "$d/binB.json" Suite CaseB COMPLETED
+printf 'Suite.CaseA\n' > "$WORK/t16-skips.txt"
+run_check "T16 reason with a PREFIX before the allowed text is caught" \
+  "$d" "$WORK/t16-skips.txt" 2 1 "reason other than a counterparty"
+
+d="$WORK/t17"; mkdir -p "$d"
+write_json "$d/binA.json" Suite CaseA SKIPPED "$PORT_OK_CPP; more"
+write_json "$d/binB.json" Suite CaseB COMPLETED
+printf 'Suite.CaseA\n' > "$WORK/t17-skips.txt"
+run_check "T17 reason with a SUFFIX after the allowed text is caught" \
+  "$d" "$WORK/t17-skips.txt" 2 1 "reason other than a counterparty"
+
+d="$WORK/t18"; mkdir -p "$d"
+write_json "$d/binA.json" Suite CaseA SKIPPED "$PORT_OK_CPP
+skip:not-applicable fixture dir missing"
+write_json "$d/binB.json" Suite CaseB COMPLETED
+printf 'Suite.CaseA\n' > "$WORK/t18-skips.txt"
+run_check "T18 reason plus an EXTRA LINE after it is caught" \
+  "$d" "$WORK/t18-skips.txt" 2 1 "reason other than a counterparty"
+
+# ── T19: a location-only skip message (gtest 1.17's SetUpTestSuite shape —
+# see the verify record's `gt/` reproduction: message is location ONLY, no
+# reason line at all) is a bad reason, not a pass. Positive control: this was
+# already RED under the unfixed unanchored `.search()` too, since it contains
+# no port text at all — it stays RED here on purpose. ───────────────────────
+d="$WORK/t19"; mkdir -p "$d"
+python3 - "$d/binA.json" <<'PY'
+import json, sys
+tc = {"name": "CaseA", "file": "fixture.cpp", "line": 5, "status": "RUN",
+      "result": "SKIPPED", "time": "0s", "classname": "Suite",
+      "skipped": [{"message": "fixture.cpp:5\n"}]}
+doc = {"tests": 1, "failures": 0, "disabled": 0, "errors": 0, "name": "AllTests",
+       "testsuites": [{"name": "Suite", "tests": 1, "failures": 0, "disabled": 0,
+                        "testsuite": [tc]}]}
+json.dump(doc, open(sys.argv[1], "w"))
+PY
+write_json "$d/binB.json" Suite CaseB COMPLETED
+printf 'Suite.CaseA\n' > "$WORK/t19-skips.txt"
+run_check "T19 location-only skip message (SetUpTestSuite shape) is caught" \
+  "$d" "$WORK/t19-skips.txt" 2 1 "reason other than a counterparty"
+
+# ── T20-T22: structurally malformed but syntactically valid JSON must exit 2
+# with a named ::error, not a Python traceback (Codex #6). ──────────────────
+d="$WORK/t20"; mkdir -p "$d"
+printf '%s' '[]' > "$d/binA.json"
+: > "$WORK/t20-skips.txt"
+run_check "T20 top-level JSON value is a list, not an object" \
+  "$d" "$WORK/t20-skips.txt" 1 2 "not a JSON object"
+
+d="$WORK/t21"; mkdir -p "$d"
+printf '%s' '{"testsuites": ["notadict"]}' > "$d/binA.json"
+: > "$WORK/t21-skips.txt"
+run_check "T21 a testsuites entry is a string, not an object" \
+  "$d" "$WORK/t21-skips.txt" 1 2 "testsuites\` entry that is a"
+
+d="$WORK/t22"; mkdir -p "$d"
+printf '%s' '{"testsuites": [{"name": "Suite", "testsuite": [{"name": "CaseA", "status": "RUN", "result": "SKIPPED", "skipped": ["juststring"]}]}]}' > "$d/binA.json"
+: > "$WORK/t22-skips.txt"
+run_check "T22 a skipped entry is a string, not an object with a message" \
+  "$d" "$WORK/t22-skips.txt" 1 2 "skipped\` entry that is not a JSON object"
+
+# ── T23: a Windows-style `C:\...` location prefix strips correctly — the
+# location-line regex must not be confused by the drive-letter colon. ───────
+d="$WORK/t23"; mkdir -p "$d"
+python3 - "$d/binA.json" <<PY
+import json, sys
+msg = "C:\\\\a\\\\fixpp\\\\tests\\\\x.cpp:12\n$PORT_OK_CPP"
+tc = {"name": "CaseA", "file": "fixture.cpp", "line": 12, "status": "RUN",
+      "result": "SKIPPED", "time": "0s", "classname": "Suite",
+      "skipped": [{"message": msg}]}
+doc = {"tests": 1, "failures": 0, "disabled": 0, "errors": 0, "name": "AllTests",
+       "testsuites": [{"name": "Suite", "tests": 1, "failures": 0, "disabled": 0,
+                        "testsuite": [tc]}]}
+json.dump(doc, open(sys.argv[1], "w"))
+PY
+printf 'Suite.CaseA\n' > "$WORK/t23-skips.txt"
+run_check "T23 Windows-style C:\\ location prefix strips correctly" \
+  "$d" "$WORK/t23-skips.txt" 1 0 "PASS:"
+
+CELLS_DECLARED=23
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$CELLS_DECLARED" ]; then

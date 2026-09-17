@@ -8,7 +8,7 @@
 # gate step subtracts that one name by exact match before deriving how many
 # gtest JSON reports to expect from `GTEST_OUTPUT=json:`.
 #
-# Two interop binaries (interop_conversation_test,
+# Some interop binaries (interop_conversation_test,
 # interop_business_message_interop_test) register only under
 # `if(TARGET fixpp_codegen_generate)` in tests/interop/CMakeLists.txt — that
 # target is defined whenever FIXPP_BUILD_CODEGEN_TOOL is ON, which is the
