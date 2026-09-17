@@ -572,10 +572,17 @@ def check_campaign_trigger(root, violations):
 # is `[main]`. The tags those steps publish are rolling, so a trigger widened to a
 # feature branch would let that branch overwrite what main and every PR restore.
 #
-# The population is DERIVED, not enumerated: any workflow with a non-trigger string
-# naming both `github.event_name` and a quoted `push` literal is held to it. Reading
-# more than the publish guards (tier1's `concurrency:` expression also matches) is
-# the safe direction — a main-only trigger satisfies every such workflow.
+# PUSH_TRUSTING_ROSTER below is checked UNCONDITIONALLY: membership does not
+# depend on how a workflow's guard is spelled, so respelling or removing the
+# guard cannot drop a roster member out of scope. Any OTHER workflow is held
+# to the same rule only while one of its strings still pairs
+# `github.event_name` with a quoted `push` literal — that can also match a
+# non-publish expression (a `concurrency:` key, for instance), which is the
+# safe direction, since a main-only trigger satisfies every such workflow. A
+# guard spelled another way, split into a composite action, or living in a
+# `workflow_call` workflow (where `github.event_name` is the caller's event)
+# is not caught by that added match.
+PUSH_TRUSTING_ROSTER = ("tier1.yml", "tier2.yml", "tier3-libcxx.yml")
 PUSH_EVENT_LITERAL = re.compile(r"""['"]push['"]""")
 PUSH_TRIGGER_KEYS = {"branches", "paths", "paths-ignore"}
 
@@ -592,11 +599,22 @@ def _strings(node):
 
 
 def check_push_trusting_triggers(root, violations):
-    """Every workflow whose expressions admit a `push` event must be main-only on push.
+    """Every workflow in PUSH_TRUSTING_ROSTER, plus any other workflow whose
+    expressions pair `github.event_name` with a quoted `push` literal, must be
+    main-only on push.
 
-    Returns the number of push-trusting workflows found, or None when PyYAML is
-    unavailable.  ZERO IS A FAILURE the caller reports: if the guards move or this
-    pattern stops matching, "0 workflows, 0 violations" reads like a clean tree.
+    The roster is checked unconditionally: how its guard is spelled does not
+    matter. A workflow outside the roster is checked only while it still
+    matches that one idiom — a guard spelled another way, split into a
+    composite action, or living in a `workflow_call` workflow (where
+    `github.event_name` is the caller's event) is invisible to that half of
+    this check.
+
+    Returns the number of workflows found to match the idiom (the roster is
+    not counted here — see the zero-refusal in main()), or None when PyYAML
+    is unavailable.  ZERO IS A FAILURE the caller reports: if the guards move
+    or this pattern stops matching, "0 workflows, 0 violations" reads like a
+    clean tree.
     """
     try:
         import yaml
@@ -605,6 +623,7 @@ def check_push_trusting_triggers(root, violations):
         return None
 
     trusting = 0
+    seen_roster = set()
     for path in sorted((root / ".github" / "workflows").glob("*.y*ml")):
         try:
             doc = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -619,10 +638,15 @@ def check_push_trusting_triggers(root, violations):
         # YAML 1.1: a bare `on:` key loads as the boolean True (see check_campaign_trigger).
         block = doc.get("on", doc.get(True))
         body = {k: v for k, v in doc.items() if k not in ("on", True)}
-        if not any("github.event_name" in t and PUSH_EVENT_LITERAL.search(t)
-                   for t in _strings(body)):
+        in_roster = path.name in PUSH_TRUSTING_ROSTER
+        admits = any("github.event_name" in t and PUSH_EVENT_LITERAL.search(t)
+                     for t in _strings(body))
+        if admits:
+            trusting += 1
+        if not (in_roster or admits):
             continue
-        trusting += 1
+        if in_roster:
+            seen_roster.add(path.name)
 
         if isinstance(block, str):
             block = {block: None}
@@ -631,8 +655,8 @@ def check_push_trusting_triggers(root, violations):
         elif not isinstance(block, dict):
             block = {}
         if "push" not in block:
-            print(f"  push trigger: {path.name} admits `push` in an expression but has no push "
-                  f"trigger (vacuous)")
+            print(f"  push trigger: {path.name} admits `push` in an expression but has no own "
+                  f"push trigger — this check does not evaluate a `workflow_call` caller's event")
             continue
         push = block["push"]
         problems = []
@@ -652,6 +676,13 @@ def check_push_trusting_triggers(root, violations):
                 f"non-main push would publish over the rolling tags main and every PR restore.")
         else:
             print(f"  push trigger: {path.name} is main-only")
+
+    missing = sorted(set(PUSH_TRUSTING_ROSTER) - seen_roster)
+    if missing:
+        violations.append(
+            f"PUSH TRIGGER ROSTER MISSING: {', '.join(missing)} not found (or not readable "
+            f"as a YAML mapping) under .github/workflows — update PUSH_TRUSTING_ROSTER if it "
+            f"was renamed or removed, or restore its trigger pin if it still publishes.")
     return trusting
 
 
@@ -698,7 +729,8 @@ def main():
               "Refusing to report `all invariants hold` over a check that did not run.")
         return 2
     if push_trusting == 0:
-        print("::error::found ZERO workflows whose expressions admit a `push` event. Either the "
+        print("::error::found ZERO workflows whose expressions admit a `push` event. "
+              "(PUSH_TRUSTING_ROSTER is pinned regardless of this count.) Either the "
               "publish guards now re-check `github.ref` themselves (then retire "
               "check_push_trusting_triggers deliberately) or this check's pattern is broken; "
               "refusing to report clean on an empty scan.")

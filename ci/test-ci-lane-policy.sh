@@ -476,8 +476,9 @@ p.write_text(s.replace(old, '  push:\n', 1), encoding="utf-8")
 MUT
 expect "T23 tier3 push trigger with branches: removed is caught" 1 "on.push.branches is None"
 
-# The population is derived: a NEW workflow with a push-admitting guard and a
-# bare `on: push` is caught without anyone adding it to a list.
+# A NEW workflow, not on the roster, is caught while its guard still uses the
+# exact `github.event_name` + quoted `push` idiom — nobody has to add it to a
+# list.
 fresh
 cat > "$WORK/t/.github/workflows/new-publisher.yml" <<'WF'
 name: new publisher
@@ -506,6 +507,30 @@ assert n >= 9, f"MUTATION DID NOT APPLY ({n} sites) — re-point the pattern, do
 MUT
 expect "T25 zero push-admitting workflows is an instrument failure, not a pass" 2 "ZERO workflows whose expressions admit a \`push\` event"
 
+# ── T26: #465 F1 — the roster is checked even when a workflow's guard no
+# longer matches the derived idiom ──────────────────────────────────────────
+#
+# The population used to be derived only: a workflow entered scope while its
+# strings paired `github.event_name` with a quoted `push` literal. A guard
+# respelled away from that literal removed the workflow from scope even if
+# its trigger was widened at the same time. PUSH_TRUSTING_ROSTER closes that:
+# tier2.yml is checked whether or not its guard still matches the idiom.
+fresh
+python3 - "$WORK/t/.github/workflows/tier2.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old_guard = "github.event_name == 'push' ||"
+new_guard = "github.event_name != 'pull_request' ||"
+n = s.count(old_guard)
+assert n == 2, f"MUTATION DID NOT APPLY ({n} sites) — re-point the pattern, do not delete the mutant"
+s = s.replace(old_guard, new_guard)
+old_branches = '  push:\n    branches: ["main"]\n'
+assert s.count(old_branches) == 1, "MUTATION DID NOT APPLY (branches) — re-point the pattern, do not delete the mutant"
+s = s.replace(old_branches, '  push:\n    branches: ["main", "feature/**"]\n', 1)
+p.write_text(s, encoding="utf-8")
+MUT
+expect "T26 a roster member is caught even when its guard no longer matches the idiom" 1 "PUSH TRIGGER NOT MAIN-ONLY: tier2.yml"
+
 # ── T6: THE EMPTY SCAN ───────────────────────────────────────────────────────
 #
 # If the workflows move or the patterns break, "0 violations over 0 sites" must
@@ -526,7 +551,9 @@ expect "T6 an empty scan is an instrument failure, not a pass" 2 "ZERO apt-backe
 # Gate B r2 F3) added the false-greens the r1 checker's substring match still
 # admitted (a disabled step, an unreachable call, and libcxx preset drift).
 # T21-T25 (#465) added the push-trigger cells for push-admitting publish guards.
-CELLS_DECLARED=27
+# T26 (#465 Gate B r1 F1) added the roster-floor cell — a roster member whose
+# guard is respelled away from the idiom must still be caught.
+CELLS_DECLARED=28
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$CELLS_DECLARED" ]; then
