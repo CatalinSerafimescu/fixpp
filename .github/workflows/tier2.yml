@@ -680,6 +680,17 @@ jobs:
       # same split this workflow's sccache-download step already uses
       # (`cygpath -u "$RUNNER_TEMP"`, above).
       #
+      # This runner checks out with `core.autocrlf=true` (.gitattributes), and
+      # native ctest/gtest output may itself carry `\r` — both the ctest
+      # listing and the pin-file read are stripped of it before any
+      # line-anchored match, so the arithmetic below does not depend on which
+      # form either input arrives in.
+      #
+      # The pytest schema-check exclusion below is a `grep -v -x`, which is a
+      # silent no-op if the name it removes is absent — so its presence is
+      # asserted exactly once before it is used to derive the expected report
+      # count.
+      #
       # If gtest cannot write to the GTEST_OUTPUT path form used here, no reports
       # appear, and the checker fails closed: exit 2, report count mismatch.
       - name: "Interop gate — ctest -L interop, skip set asserted (#431)"
@@ -687,9 +698,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          unset INTEROP_QUICKFIX_CPP_PORT INTEROP_QUICKFIX_J_PORT \
+                INTEROP_QUICKFIX_CPP_HOST INTEROP_QUICKFIX_J_HOST
           full=$(ctest --preset ${{ matrix.preset }} -L interop -N)
+          full="${full//$'\r'/}"
           n=$(echo "$full" | sed -n 's/^Total Tests: //p')
-          expected=$(awk -v p="${{ matrix.preset }}" '$1 == p { print $2; exit }' ci/expected-interop-tests.txt)
+          expected=$(tr -d '\r' < ci/expected-interop-tests.txt \
+                       | awk -v p="${{ matrix.preset }}" '$1 == p { print $2; exit }')
           echo "registered interop tests: ${n:-0} (expected ${expected:-<no line>})"
           if [ -z "${expected:-}" ] || [ "${n:-0}" != "${expected}" ]; then
             echo "::error title=Interop gate::ctest -L interop registered ${n:-0} tests on ${{ matrix.preset }}, expected '${expected:-<no line>}' from ci/expected-interop-tests.txt."
@@ -699,16 +714,24 @@ jobs:
           # interop_cell_results_schema_check is a pytest ctest entry (see
           # tests/interop/CMakeLists.txt) — it never emits a gtest JSON report,
           # so it is excluded before deriving how many reports to expect.
-          names=$(echo "$full" | sed -n 's/^ *Test *#[0-9]*: //p' \
-                    | grep -v -x 'interop_cell_results_schema_check')
+          names_all=$(echo "$full" | sed -n 's/^ *Test *#[0-9]*: //p')
+          schema_hits=$(echo "$names_all" | grep -c -x 'interop_cell_results_schema_check' || true)
+          if [ "$schema_hits" != "1" ]; then
+            echo "::error title=Interop gate::interop_cell_results_schema_check registered ${schema_hits} time(s) on ${{ matrix.preset }}, expected exactly 1 — the pytest schema-check exclusion below would be a silent no-op (or would remove more than one entry)."
+            exit 1
+          fi
+          names=$(echo "$names_all" | grep -v -x 'interop_cell_results_schema_check')
           binaries=$(echo "$names" | grep -c .)
 
           out_dir_unix="$(cygpath -u "$RUNNER_TEMP")/interop-gtest"
           out_dir_native="$(cygpath -m "$RUNNER_TEMP")/interop-gtest"
           rm -rf "$out_dir_unix" && mkdir -p "$out_dir_unix"
-          GTEST_OUTPUT="json:${out_dir_native}/" \
+          if ! GTEST_OUTPUT="json:${out_dir_native}/" \
             ctest --preset ${{ matrix.preset }} -L interop --no-tests=error \
-                  --output-on-failure --timeout 1800
+                  --output-on-failure --timeout 1800; then
+            echo "::error title=Interop gate::ctest -L interop failed on ${{ matrix.preset }}."
+            exit 1
+          fi
 
           python ci/assert-interop-skips.py \
             --json-dir "$out_dir_native" \

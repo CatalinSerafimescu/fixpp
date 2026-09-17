@@ -1428,6 +1428,11 @@ CI_PIN_HARNESSES=(
   # THIS row can fail, only that the census mechanism can fail for a
   # different harness.
   "ci/test-interop-skips.sh"
+  # fixpp#431 Gate B r1's interop gate STEP SHELL derivation witness. ⚠️ ADDED
+  # WITH ITS OWN MUTANT (M102), same dead-call-site shape as
+  # M26/M64/M65/M69/M73/M101 — none of those prove THIS row can fail, only
+  # that the census mechanism can fail for a different harness.
+  "ci/test-interop-gate-step.sh"
 )
 
 assert_ci_pin_call_sites() {
@@ -1752,7 +1757,8 @@ echo "PASS: derive-script table + call site + per-leg FIXPP_INSTALL_PYTHON + PY_
 # not collide). Re-run the harness against the merged number rather than
 # re-deriving from either branch's local total — the failure mode this guards is
 # one side's edit silently replacing the other's, which reads as a passing count.
-MUTANTS_DECLARED=87  # M101 (fixpp#431: the ci-script-pins call-site pin for
+MUTANTS_DECLARED=88  # M102 (fixpp#431 Gate B r1: the ci-script-pins call-site
+                     # pin for ci/test-interop-gate-step.sh) + M101 (fixpp#431: the ci-script-pins call-site pin for
                      # ci/test-interop-skips.sh) + M97-M100 (#411 Gate B r2 L1/L2: Build's key set on both jobs, plus
                      # the workflow's own on.push key set and branches) + M83-M96 (#411 Gate B r1 F1/F3/F4-bench: the canonical-object ccache
                      # contract — coordinated preset drift and the restore/seed/statistics
@@ -2251,6 +2257,22 @@ src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
 old = "        run: bash ci/test-interop-skips.sh\n"
 new = "        run: echo \"bash ci/test-interop-skips.sh\"\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M102 (fixpp#431 Gate B r1): the SAME dead-call-site shape as
+  # M26/M64/M65/M69/M73/M101, on the interop gate step shell derivation
+  # witness row added this round. Its own mutant because none of those prove
+  # THIS row can fail — each proves the census mechanism fires for a
+  # DIFFERENT harness, and a row proven by a sibling's mutant is a row nobody
+  # has seen fail.
+  mutate_workflow M102 "the interop gate step derivation harness call site replaced by an echo" "ci-script-pins does not INVOKE" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: bash ci/test-interop-gate-step.sh\n"
+new = "        run: echo \"bash ci/test-interop-gate-step.sh\"\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
 '

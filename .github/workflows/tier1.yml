@@ -941,6 +941,16 @@ jobs:
       #   tests/interop/expected-skips-without-counterparty.txt, and to give the
       #   one allowed reason (no counterparty port leased).
       #
+      # A Windows checkout (`core.autocrlf=true`) and native tool output may
+      # carry `\r`; both the ctest listing and the pin-file read are stripped of
+      # it before any line-anchored match, so this step's arithmetic does not
+      # depend on which OS produced either input.
+      #
+      # The pytest schema-check exclusion below is a `grep -v -x`, which is a
+      # silent no-op if the name it removes is absent — so its presence is
+      # asserted exactly once before it is used to derive the expected report
+      # count.
+      #
       # Interop also runs again inside the unfiltered Test step below. That is
       # intentional: that step is the coverage backstop, and this one is for
       # speed and attribution.
@@ -948,9 +958,13 @@ jobs:
         if: matrix.preset == 'linux-clang-release'
         run: |
           set -euo pipefail
+          unset INTEROP_QUICKFIX_CPP_PORT INTEROP_QUICKFIX_J_PORT \
+                INTEROP_QUICKFIX_CPP_HOST INTEROP_QUICKFIX_J_HOST
           full=$(ctest --preset ${{ matrix.preset }} -L interop -N)
+          full="${full//$'\r'/}"
           n=$(echo "$full" | sed -n 's/^Total Tests: //p')
-          expected=$(awk -v p="${{ matrix.preset }}" '$1 == p { print $2; exit }' ci/expected-interop-tests.txt)
+          expected=$(tr -d '\r' < ci/expected-interop-tests.txt \
+                       | awk -v p="${{ matrix.preset }}" '$1 == p { print $2; exit }')
           echo "registered interop tests: ${n:-0} (expected ${expected:-<no line>})"
           if [ -z "${expected:-}" ] || [ "${n:-0}" != "${expected}" ]; then
             echo "::error title=Interop gate::ctest -L interop registered ${n:-0} tests on ${{ matrix.preset }}, expected '${expected:-<no line>}' from ci/expected-interop-tests.txt."
@@ -960,15 +974,23 @@ jobs:
           # interop_cell_results_schema_check is a pytest ctest entry (see
           # tests/interop/CMakeLists.txt) — it never emits a gtest JSON report,
           # so it is excluded before deriving how many reports to expect.
-          names=$(echo "$full" | sed -n 's/^ *Test *#[0-9]*: //p' \
-                    | grep -v -x 'interop_cell_results_schema_check')
+          names_all=$(echo "$full" | sed -n 's/^ *Test *#[0-9]*: //p')
+          schema_hits=$(echo "$names_all" | grep -c -x 'interop_cell_results_schema_check' || true)
+          if [ "$schema_hits" != "1" ]; then
+            echo "::error title=Interop gate::interop_cell_results_schema_check registered ${schema_hits} time(s) on ${{ matrix.preset }}, expected exactly 1 — the pytest schema-check exclusion below would be a silent no-op (or would remove more than one entry)."
+            exit 1
+          fi
+          names=$(echo "$names_all" | grep -v -x 'interop_cell_results_schema_check')
           binaries=$(echo "$names" | grep -c .)
 
           out_dir="$RUNNER_TEMP/interop-gtest"
           rm -rf "$out_dir" && mkdir -p "$out_dir"
-          GTEST_OUTPUT="json:${out_dir}/" \
+          if ! GTEST_OUTPUT="json:${out_dir}/" \
             ctest --preset ${{ matrix.preset }} -L interop --no-tests=error \
-                  --output-on-failure --timeout 1800
+                  --output-on-failure --timeout 1800; then
+            echo "::error title=Interop gate::ctest -L interop failed on ${{ matrix.preset }}."
+            exit 1
+          fi
 
           python3 ci/assert-interop-skips.py \
             --json-dir "$out_dir" \
@@ -2499,6 +2521,15 @@ jobs:
       # and its own instrument-can-report-non-zero proof.
       - name: "Regression pin — interop skip-set witness escapes (#431)"
         run: bash ci/test-interop-skips.sh
+
+      # fixpp#431 Gate B r1: EXECUTES the interop gate step's own extracted
+      # `run:` text against a fake ctest, so the CR-normalisation and
+      # exactly-once schema-check exclusion the step's shell carries are
+      # regression-pinned by running the code, not by grepping for it. The
+      # static leg-guard/continue-on-error/label/pin-read/checker-call shape
+      # is pinned separately by ci/assert-ci-lane-policy.py.
+      - name: "Regression pin — interop gate step shell derivation (#431)"
+        run: bash ci/test-interop-gate-step.sh
 
       # ci/cxx_blank.py is the SHARED lexer three of the gates above resolve at
       # runtime, and #289 batch 19 moved `blank_unevaluated` into it and replaced

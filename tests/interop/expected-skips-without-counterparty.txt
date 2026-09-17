@@ -7,11 +7,12 @@
 #   \(parent harness did not lease a port\)
 #
 # whenever `ctest -L interop` runs with neither INTEROP_QUICKFIX_CPP_PORT nor
-# INTEROP_QUICKFIX_J_PORT set in the environment (the case in every library
-# CI lane today — the parent harness that leases those ports never runs
-# here). `ci/assert-interop-skips.py` enforces both directions: an id that
-# skips here and is NOT listed, and a listed id that instead runs (or fails,
-# or skips for a different reason this time), are both violations.
+# INTEROP_QUICKFIX_J_PORT set in the environment — the #431 gate step in each
+# tier workflow `unset`s both (and their _HOST siblings) before running, so
+# this file's condition is established by the step rather than assumed of the
+# lane it runs on. `ci/assert-interop-skips.py` enforces both directions: an
+# id that skips here and is NOT listed, and a listed id that instead runs (or
+# fails, or skips for a different reason this time), are both violations.
 #
 # A case reaching this list got there via `INTEROP_REQUIRE_COUNTERPARTY(...)`
 # (tests/interop/support/counterparty_probe.hpp) and nothing past that guard
