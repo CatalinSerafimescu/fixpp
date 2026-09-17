@@ -1,0 +1,25 @@
+# Per-preset pin for `ctest -N -L interop`'s registered count (fixpp#431).
+#
+#   <preset>  <expected count>
+#
+# CONDITION: the count is the TOTAL under `-N -L interop`, INCLUDING the one
+# non-gtest ctest entry (`interop_cell_results_schema_check`, a pytest case —
+# tests/interop/CMakeLists.txt's `find_package(Python3 ...)` block). The
+# gate step subtracts that one name by exact match before deriving how many
+# gtest JSON reports to expect from `GTEST_OUTPUT=json:`.
+#
+# Interop binaries registered under `if(TARGET fixpp_codegen_generate)` in
+# tests/interop/CMakeLists.txt count only on a preset where
+# FIXPP_BUILD_CODEGEN_TOOL is ON. Check with:
+#   grep -n FIXPP_BUILD_CODEGEN_TOOL CMakePresets.json CMakeLists.txt
+#
+# RE-DERIVE with:
+#   ctest --preset <preset> -L interop -N | sed -n 's/^Total Tests: //p'
+#
+# A mismatch is the designed prompt to look at what changed before updating
+# the line — same discipline as ci/expected-eligible-tests.txt: exact
+# equality, never a floor.
+#
+linux-clang-release   30
+windows-msvc-release  30
+linux-clang-libc++    30

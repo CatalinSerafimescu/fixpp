@@ -563,6 +563,164 @@ cp "$REPO/CMakePresets.json" "$WORK/t/"
 printf 'name: nothing\non: push\njobs: {}\n' > "$WORK/t/.github/workflows/empty.yml"
 expect "T6 an empty scan is an instrument failure, not a pass" 2 "ZERO apt-backed install sites"
 
+# ── T28-T34: fixpp#431 Gate B r1 (Codex #5/#4a P2) — the interop gate step's
+# static wiring, in each of the three tier workflows. Codex #1's CRLF defect
+# and the CR-normalisation/exactly-once/ctest-failure-annotation fixes for it
+# are exercised by EXECUTING the extracted run: text in
+# ci/test-interop-gate-step.sh; these cells are the static leg-guard/
+# continue-on-error/label/pin-read/checker-call/identity shape only. ─────────
+
+# T28 (M-RC1f): the step's `if:` leg guard drifts to a different preset.
+fresh
+python3 - "$WORK/t/.github/workflows/tier1.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old = ('- name: "Interop gate — ctest -L interop, skip set asserted (#431)"\n'
+       "        if: matrix.preset == 'linux-clang-release'\n")
+assert s.count(old) == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+new = old.replace("linux-clang-release'\n", "linux-clang-debug'\n")
+p.write_text(s.replace(old, new, 1), encoding="utf-8")
+MUT
+expect "T28 tier1 interop gate step's if: preset guard drifts (M-RC1f) is caught" 1 "INTEROP GATE STEP GUARD DRIFT: tier1.yml"
+
+# T29 (M-RC1e): continue-on-error added to the gate step.
+fresh
+python3 - "$WORK/t/.github/workflows/tier2.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old = ('- name: "Interop gate — ctest -L interop, skip set asserted (#431)"\n'
+       "        if: matrix.preset == 'windows-msvc-release'\n"
+       "        shell: bash\n")
+assert s.count(old) == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+new = old + "        continue-on-error: true\n"
+p.write_text(s.replace(old, new, 1), encoding="utf-8")
+MUT
+expect "T29 tier2 interop gate step gains continue-on-error (M-RC1e) is caught" 1 "INTEROP GATE STEP TOLERATES FAILURE: tier2.yml"
+
+# T30 (M-RC1d): the registration ctest call's label drifts to -L interopX.
+fresh
+python3 - "$WORK/t/.github/workflows/tier3-libcxx.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old = "ctest --preset ${{ matrix.preset }} -L interop -N"
+assert s.count(old) == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+p.write_text(s.replace(old, old.replace("-L interop", "-L interopX"), 1), encoding="utf-8")
+MUT
+expect "T30 tier3 registration ctest call's label drifts to -L interopX (M-RC1d) is caught" 1 "INTEROP GATE STEP LABEL DRIFT: tier3-libcxx.yml"
+
+# T31: the gate step stops reading the pin file at all (hardcodes `expected`).
+fresh
+python3 - "$WORK/t/.github/workflows/tier1.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old = ("          expected=$(tr -d '\\r' < ci/expected-interop-tests.txt \\\n"
+       "                       | awk -v p=\"${{ matrix.preset }}\" '$1 == p { print $2; exit }')\n")
+assert s.count(old) == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+p.write_text(s.replace(old, "          expected=30\n", 1), encoding="utf-8")
+MUT
+expect "T31 tier1 interop gate step stops reading the pin file is caught" 1 "INTEROP GATE STEP PIN READ MISSING: tier1.yml"
+
+# T32: the checker invocation drops --expected-count.
+fresh
+python3 - "$WORK/t/.github/workflows/tier2.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old = '            --expected-count "$binaries"\n'
+assert s.count(old) == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+p.write_text(s.replace(old, "", 1), encoding="utf-8")
+MUT
+expect "T32 tier2 checker invocation drops --expected-count is caught" 1 "INTEROP GATE STEP CHECKER CALL DRIFT: tier2.yml"
+
+# T32b: the checker invocation drops --bin-dir.
+fresh
+python3 - "$WORK/t/.github/workflows/tier1.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old = '            --bin-dir "build/${{ matrix.preset }}/bin" \\\n'
+assert s.count(old) == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+p.write_text(s.replace(old, "", 1), encoding="utf-8")
+MUT
+expect "T32b tier1 checker invocation drops --bin-dir is caught" 1 "INTEROP GATE STEP CHECKER CALL DRIFT: tier1.yml"
+
+# T33: the gate step is renamed away — zero steps match the pinned name.
+fresh
+python3 - "$WORK/t/.github/workflows/tier1.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old = '- name: "Interop gate — ctest -L interop, skip set asserted (#431)"'
+assert s.count(old) == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+p.write_text(s.replace(old, '- name: "Interop gate (renamed)"', 1), encoding="utf-8")
+MUT
+expect "T33 tier1 interop gate step renamed away is caught" 1 "INTEROP GATE STEP MISWIRED: tier1.yml has 0 step(s)"
+
+# T34: tier3's body drifts from tier1's byte-identical text (both run under
+# python3 with no cygpath, so they must match exactly).
+fresh
+python3 - "$WORK/t/.github/workflows/tier3-libcxx.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old = 'echo "::error title=Interop gate::ctest -L interop failed on ${{ matrix.preset }}."'
+assert s.count(old) == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+p.write_text(s.replace(old, 'echo "::error title=Interop gate::ctest failed on ${{ matrix.preset }}."', 1), encoding="utf-8")
+MUT
+expect "T34 tier3 interop gate body drifts from tier1's byte-identical text is caught" 1 "INTEROP GATE STEP DRIFT: tier1.yml and tier3-libcxx.yml"
+
+# T35: tier2's GTEST-controls unset line is removed. tier2 is exempt from the
+# tier1==tier3 byte-identity check (T34) and from the executed D-tier2-*
+# derivation cells (which truncate before this line).
+fresh
+python3 - "$WORK/t/.github/workflows/tier2.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old = '          unset "${!GTEST_@}"\n'
+assert s.count(old) == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+p.write_text(s.replace(old, "", 1), encoding="utf-8")
+MUT
+expect "T35 tier2 GTEST controls unset line removed is caught" 1 "INTEROP GATE STEP GTEST CONTROLS NOT UNSET: tier2.yml"
+
+# T36: tier2's TESTBRIDGE_TEST_ONLY is dropped from its continued unset line.
+fresh
+python3 - "$WORK/t/.github/workflows/tier2.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old = "INTEROP_QUICKFIX_J_HOST \\\n                TESTBRIDGE_TEST_ONLY\n"
+assert s.count(old) == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+p.write_text(s.replace(old, "INTEROP_QUICKFIX_J_HOST\n", 1), encoding="utf-8")
+MUT
+expect "T36 tier2 TESTBRIDGE_TEST_ONLY dropped from the unset is caught" 1 "INTEROP GATE STEP TESTBRIDGE NOT UNSET: tier2.yml"
+
+# T37: the same drop, with the name kept only in a comment — a mention is not
+# an unset.
+fresh
+python3 - "$WORK/t/.github/workflows/tier2.yml" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old = "INTEROP_QUICKFIX_J_HOST \\\n                TESTBRIDGE_TEST_ONLY\n"
+assert s.count(old) == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+p.write_text(s.replace(old, "INTEROP_QUICKFIX_J_HOST\n          # TESTBRIDGE_TEST_ONLY\n", 1), encoding="utf-8")
+MUT
+expect "T37 tier2 TESTBRIDGE_TEST_ONLY kept only in a comment is caught" 1 "INTEROP GATE STEP TESTBRIDGE NOT UNSET: tier2.yml"
+
+# T38/T39: an `unset` line that names TESTBRIDGE_TEST_ONLY without unsetting
+# the variable — in a trailing comment, or as a function via `unset -f`.
+for form in inline-comment unset-f; do
+  fresh
+  python3 - "$WORK/t/.github/workflows/tier2.yml" "$form" <<'MUT'
+import sys, pathlib
+p = pathlib.Path(sys.argv[1]); s = p.read_text(encoding="utf-8")
+old = "INTEROP_QUICKFIX_J_HOST \\\n                TESTBRIDGE_TEST_ONLY\n"
+new = {"inline-comment": "INTEROP_QUICKFIX_J_HOST # TESTBRIDGE_TEST_ONLY\n",
+       "unset-f": "INTEROP_QUICKFIX_J_HOST\n          unset -f TESTBRIDGE_TEST_ONLY\n"}[sys.argv[2]]
+assert s.count(old) == 1, "MUTATION DID NOT APPLY — re-point the pattern, do not delete the mutant"
+p.write_text(s.replace(old, new, 1), encoding="utf-8")
+MUT
+  case "$form" in
+    inline-comment) label="T38 tier2 TESTBRIDGE_TEST_ONLY only in a trailing comment on the unset line is caught" ;;
+    unset-f)        label="T39 tier2 \`unset -f TESTBRIDGE_TEST_ONLY\` (a function unset) is caught" ;;
+  esac
+  expect "$label" 1 "INTEROP GATE STEP TESTBRIDGE NOT UNSET: tier2.yml"
+done
+
 # ── The harness's own execution count ────────────────────────────────────────
 #
 # ⚠️ ADDED WITH THE FOUR NEW CELLS, and the omission is the point: a `cell`
@@ -578,7 +736,7 @@ expect "T6 an empty scan is an instrument failure, not a pass" 2 "ZERO apt-backe
 # guard is respelled away from the idiom must still be caught. T27 (#465 Gate
 # B r1 F2) added the list-form `on:` cell the per-line assessment had claimed
 # without a driving test.
-CELLS_DECLARED=29
+CELLS_DECLARED=42
 TOTAL=$((PASS + FAIL))
 echo
 if [ "$TOTAL" -ne "$CELLS_DECLARED" ]; then

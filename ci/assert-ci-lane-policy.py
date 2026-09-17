@@ -685,6 +685,163 @@ def check_push_trusting_triggers(root, violations):
     return trusting
 
 
+# #431 Gate B r1 (Codex #5/#4a/P2): the interop gate step exists in each tier
+# workflow's cheapest non-sanitizer leg, is not silently disarmed, and its
+# label/checker-call wiring is intact.
+#
+# What is asserted here is deliberately the STATIC, per-workflow shape:
+# the step exists exactly once, its leg guard, no continue-on-error, every
+# `ctest -L interop` invocation carries the label, the pin file is read, and
+# the checker invocation carries every required flag. The CR-normalisation,
+# exactly-once schema-check exclusion and ctest-failure annotation this step
+# also carries are exercised by EXECUTING the extracted run: text against a
+# fake ctest in ci/test-interop-gate-step.sh — a static grep for those lines
+# proves they are present, not that the arithmetic they enable is correct,
+# and the executed cells are the stronger claim for exactly that reason.
+INTEROP_STEP_NAME = "Interop gate — ctest -L interop, skip set asserted (#431)"
+INTEROP_ROSTER = {
+    "tier1.yml": "linux-clang-release",
+    "tier2.yml": "windows-msvc-release",
+    "tier3-libcxx.yml": "linux-clang-libc++",
+}
+
+
+def check_interop_gate_step(root, violations):
+    """The #431 interop gate step is wired correctly in every tier workflow.
+
+    Returns True when a verdict was reached (including "stood down" for a
+    missing workflow, reported as a violation rather than silently skipped),
+    False only when PyYAML is unavailable — same contract as the campaign
+    checks above; the caller must consume it.
+    """
+    wf_dir = root / ".github" / "workflows"
+    try:
+        import yaml
+    except ImportError:
+        print("::warning::PyYAML unavailable — the interop-gate-step check did NOT run.")
+        return False
+
+    checked = 0
+    for wf_name, preset in INTEROP_ROSTER.items():
+        path = wf_dir / wf_name
+        if not path.is_file():
+            violations.append(f"INTEROP GATE STEP UNCHECKABLE: {wf_name} is missing.")
+            continue
+        try:
+            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except yaml.YAMLError as exc:
+            violations.append(f"INTEROP GATE STEP UNREADABLE: {wf_name} ({exc!r}).")
+            continue
+
+        hits = [step for job in (doc.get("jobs") or {}).values()
+                for step in (job.get("steps") or [])
+                if str(step.get("name", "")) == INTEROP_STEP_NAME]
+        if len(hits) != 1:
+            violations.append(
+                f"INTEROP GATE STEP MISWIRED: {wf_name} has {len(hits)} step(s) named "
+                f"'{INTEROP_STEP_NAME}', expected exactly 1.")
+            continue
+        step = hits[0]
+        run = str(step.get("run", ""))
+        raw_keys = sorted(str(k) for k in step.keys())
+
+        want_if = f"matrix.preset == '{preset}'"
+        got_if = str(step.get("if", ""))
+        if got_if != want_if:
+            violations.append(
+                f"INTEROP GATE STEP GUARD DRIFT: {wf_name}'s '{INTEROP_STEP_NAME}' step "
+                f"has if: `{got_if}`, expected exactly `{want_if}` — this step must run on "
+                f"its tier's cheapest non-sanitizer leg only, by design.")
+
+        if "continue-on-error" in raw_keys:
+            violations.append(
+                f"INTEROP GATE STEP TOLERATES FAILURE: {wf_name}'s '{INTEROP_STEP_NAME}' "
+                f"step carries continue-on-error — a failing interop gate would report "
+                f"this leg green.")
+
+        # Counted over actual `ctest ... -L interop` INVOCATIONS, not the
+        # diagnostic `echo`/`::error` lines that also happen to contain the
+        # substring `-L interop` when they quote it back at the operator.
+        # `\b` after `interop` so `-L interopX` (a mutated label) does not
+        # count as a match of its own prefix.
+        l_count = len(re.findall(
+            r"ctest --preset \$\{\{ matrix\.preset \}\} -L interop\b", run))
+        if l_count != 2:
+            violations.append(
+                f"INTEROP GATE STEP LABEL DRIFT: {wf_name}'s '{INTEROP_STEP_NAME}' step "
+                f"invokes `ctest ... -L interop` {l_count} time(s), expected exactly 2 (the "
+                f"registration-count call and the real GTEST_OUTPUT run).")
+
+        # The actual READ (an input redirect), not merely a mention — the
+        # step's own diagnostic `echo` text also names the file when it
+        # reports a mismatch, which is not evidence the file is read.
+        if "< ci/expected-interop-tests.txt" not in run:
+            violations.append(
+                f"INTEROP GATE STEP PIN READ MISSING: {wf_name}'s '{INTEROP_STEP_NAME}' "
+                f"step no longer reads ci/expected-interop-tests.txt.")
+
+        for flag in ("--json-dir", "--bin-dir", "--expected-skips", "--expected-count"):
+            if flag not in run:
+                violations.append(
+                    f"INTEROP GATE STEP CHECKER CALL DRIFT: {wf_name}'s "
+                    f"'{INTEROP_STEP_NAME}' step's checker invocation is missing `{flag}`.")
+
+        # tier2 is exempt from the tier1==tier3 byte-identity check below; an
+        # execution-only check would need a fake cygpath/python on top of the
+        # D-tier2-* cells, which only run the truncated derivation-only body
+        # (up to `binaries=`, before this line).
+        if 'unset "${!GTEST_@}"' not in run:
+            violations.append(
+                f"INTEROP GATE STEP GTEST CONTROLS NOT UNSET: {wf_name}'s "
+                f"'{INTEROP_STEP_NAME}' step no longer unsets inherited GTEST_* "
+                f"variables before either ctest invocation.")
+
+        # gtest also takes a filter default from TESTBRIDGE_TEST_ONLY, which
+        # the GTEST_ prefix unset above does not reach. The unset must be a
+        # plain `unset NAME...` command whose arguments are only variable names
+        # (backslash continuations joined) — not a mention, not `unset -f`,
+        # not a line carrying a comment or a second command.
+        joined = re.sub(r"\\\n\s*", " ", run)
+        unset_re = re.compile(r"\s*unset((?:\s+[A-Za-z_][A-Za-z0-9_]*)+)\s*")
+        if not any((m := unset_re.fullmatch(ln)) and "TESTBRIDGE_TEST_ONLY" in m.group(1).split()
+                   for ln in joined.splitlines()):
+            violations.append(
+                f"INTEROP GATE STEP TESTBRIDGE NOT UNSET: {wf_name}'s "
+                f"'{INTEROP_STEP_NAME}' step no longer unsets TESTBRIDGE_TEST_ONLY "
+                f"before either ctest invocation.")
+
+        checked += 1
+
+    # tier1 and tier3-libcxx both run the step under `python3`/no cygpath, so
+    # their run: text should be byte-identical (only the `if:` preset
+    # literal differs, which is a separate YAML key). tier2 legitimately
+    # differs (`shell: bash`, cygpath, `python`) and is not compared here.
+    t1 = wf_dir / "tier1.yml"
+    t3 = wf_dir / "tier3-libcxx.yml"
+    if t1.is_file() and t3.is_file():
+        try:
+            d1 = yaml.safe_load(t1.read_text(encoding="utf-8"))
+            d3 = yaml.safe_load(t3.read_text(encoding="utf-8"))
+            r1 = next(str(s.get("run", "")) for job in d1["jobs"].values()
+                      for s in (job.get("steps") or []) if s.get("name") == INTEROP_STEP_NAME)
+            r3 = next(str(s.get("run", "")) for job in d3["jobs"].values()
+                      for s in (job.get("steps") or []) if s.get("name") == INTEROP_STEP_NAME)
+            if r1 != r3:
+                violations.append(
+                    "INTEROP GATE STEP DRIFT: tier1.yml and tier3-libcxx.yml's "
+                    f"'{INTEROP_STEP_NAME}' run: blocks are not byte-identical, though "
+                    "both run under python3 with no cygpath step — a fix landed in one "
+                    "and not the other.")
+        except (StopIteration, KeyError, TypeError, yaml.YAMLError):
+            pass  # already reported above as MISWIRED/UNREADABLE
+
+    if checked:
+        print(f"  interop gate step: {checked}/{len(INTEROP_ROSTER)} tier workflow(s) wire "
+              f"the #431 step correctly (leg guard, no continue-on-error, -L interop twice, "
+              f"pin-file read, checker invocation args).")
+    return True
+
+
 def main():
     root = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ".")
     if not root.is_dir():
@@ -699,7 +856,13 @@ def main():
     campaign_judged = check_ccache_restore_wiring(root, violations) and campaign_judged
     check_sccache_pins(root, violations)
     push_trusting = check_push_trusting_triggers(root, violations)
+    interop_judged = check_interop_gate_step(root, violations)
     if apt_seen is None or fuzz_seen is None:
+        return 2
+    if not interop_judged:
+        print("::error::the interop-gate-step invariant could not be evaluated (PyYAML "
+              "unavailable). Refusing to report `all invariants hold` over a check that did "
+              "not run.")
         return 2
     # A check that could not run must not be reported as one that passed.
     if not campaign_judged:
