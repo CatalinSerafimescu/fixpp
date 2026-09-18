@@ -290,18 +290,18 @@ std::atomic<std::uint64_t> g_offload_exit_count{0};
 // The entry was counted; the matching exit then fires against a null probe and
 // is lost, so the gauge keeps a phantom +1 for the rest of the process and
 // every later arm reads it. That is not hypothetical -- it is what happened,
-// and the whole-string pin is what caught it: the arm passed in isolation and
-// failed in the suite. Resetting on install AND uninstall scopes the gauge to
-// the window where a seam is actually watching, which is the only window in
-// which it means anything.
+// and the whole-string pin is what caught it. Resetting on install AND
+// uninstall scopes the gauge to the window where a seam is actually watching,
+// which is the only window in which it means anything. To confirm the leak is
+// real rather than take this paragraph's word for it, remove both resets and
+// run the arm alone and then in the full suite; the readings differ.
 //
-// ⚠️ BOTH RESETS ARE LOAD-BEARING, AND THE UNINSTALL ONE ONLY SHOWS UNDER A
-// SHUFFLE -- verify it that way or you will conclude it is dead code. Deleting
-// the uninstall-side reset leaves the DEFAULT order green, because the next
-// arm that installs happens to reset on the way in and absorbs the phantom.
-// Re-derive with `--gtest_shuffle --gtest_random_seed=N`: at the time of
-// writing, seeds 1-4 passed and 5-8 failed. Those seed numbers are a RESULT and
-// will rot -- the procedure is the part to keep.
+// ⚠️ THE UNINSTALL-SIDE RESET LOOKS LIKE DEAD CODE IN THE DEFAULT TEST ORDER,
+// BECAUSE THE NEXT ARM THAT INSTALLS RESETS ON THE WAY IN AND ABSORBS THE
+// PHANTOM. Do not delete it on that reading. Re-derive instead:
+//   ./session_logout_exchange --gtest_shuffle --gtest_random_seed=<N>
+// sweeping N, with the reset removed. Orders that read the gauge before any
+// later install are the ones that expose it.
 std::atomic<std::int64_t> g_offload_inflight{0};
 
 void offload_entry_probe(std::thread::id) noexcept {
@@ -330,7 +330,20 @@ struct scoped_offload_probe {
         fixpp::session::install_store_offload_exit_probe(&offload_exit_probe);
     }
     ~scoped_offload_probe() noexcept {
-        // Uninstall FIRST so nothing can increment past the reset.
+        // ⚠️ UNINSTALLING IS NOT A BARRIER, AND THIS RESET IS NOT SYNCHRONISATION.
+        // The ENTRY probe pointer is loaded on the strand at SUBMIT time and
+        // captured by value into the offloaded lambda (src/session/file_store.cpp,
+        // "Snapshot the probe pointer on the strand"), so an offload already
+        // submitted when this runs still calls the OLD entry probe and can
+        // increment AFTER the store below. The EXIT probe is loaded at return
+        // time, so it goes null immediately -- the two seams are asymmetric.
+        //
+        // What makes the gauge trustworthy is therefore NOT this reset but the
+        // condition each arm satisfies: its pool is joined (or its offload
+        // awaited) before the arm ends, so no submitted-but-not-entered offload
+        // survives it. The reset only clears what the F1.4 arm knowingly
+        // strands -- an offload still parked inside its callable when the drain
+        // that frees it has not run yet.
         fixpp::session::install_store_offload_probe(nullptr);
         fixpp::session::install_store_offload_exit_probe(nullptr);
         g_offload_inflight.store(0, std::memory_order_relaxed);
@@ -409,6 +422,36 @@ std::string describe_offload_progress(offload_counts before, asio::thread_pool& 
            std::string{kProbeTail} +
            " The file_pool observation below is meaningful ONLY in this branch:" +
            probe_file_pool(pool, probe_budget);
+}
+
+// The two labelled production sites' identity and per-site clause, hoisted so
+// the pin arm renders the SAME strings the sites emit. Inline literals at the
+// call sites would leave the pin asserting against its own private copy -- the
+// defect this whole thread of findings keeps circling.
+constexpr const char* kSiteOpen = "FlushRunsAndFramesDurableAfterClose/open";
+constexpr const char* kSiteLogonAck = "FlushRunsAndFramesDurableAfterClose/logon-ack";
+constexpr const char* kWhatOpen = "open() did not complete within the bounded-pump budget";
+constexpr const char* kWhatLogonAck =
+    "on_inbound_frame(Logon-ack) did not complete within the bounded-pump budget";
+
+// #476 / gate-b r2 C3 -- THE COMPLETE FAILURE TEXT, built in ONE place.
+//
+// The pin below used to cover `describe_offload_progress` only. That left the
+// call sites' own preamble unpinned, and the preamble is where a causal claim
+// had ALREADY crept in twice ("the probe below is what tells the candidate
+// causes apart", then "the measurements below are what narrow it"). A pin that
+// covers the half which has never been wrong, and not the half that has, is
+// pointed at the wrong target.
+//
+// So the sites stream exactly one string, and that string is what the arms pin.
+// `what` is the only per-site part: a plain statement of which call did not
+// finish. It must stay a statement -- nothing here may say what the numbers
+// MEAN.
+std::string describe_pump_miss(const char* site, const char* what, offload_counts before,
+                               asio::thread_pool& pool, std::chrono::milliseconds probe_budget) {
+    return std::string{fixpp::test_support::kPumpBudgetMiss} + site + " -- " + what +
+           ". This is #433's observed failure; raw offload measurements follow" +
+           describe_offload_progress(before, pool, probe_budget);
 }
 
 // Replace every "<digits>ms" run with a fixed token. The rendering above has
@@ -1187,8 +1230,6 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
         // Each label is a named constant used BOTH as the `site` and in the
         // failure text: the seam matches the string's CONTENTS, so two raw
         // copies could drift apart silently.
-        constexpr const char* kSiteOpen = "FlushRunsAndFramesDurableAfterClose/open";
-        constexpr const char* kSiteLogonAck = "FlushRunsAndFramesDurableAfterClose/logon-ack";
 
         // #433 F1.1: install BEFORE open() so its offload (the outbound Logon
         // store) is observed too, not only the Logon-ack path below. Scoped to
@@ -1203,9 +1244,8 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
             const auto before = read_offload_counts();
             auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
             ASSERT_TRUE(pump_until_ready(ioc, fut, kSiteOpen))
-                << kPumpBudgetMiss << kSiteOpen
-                << " -- open() did not complete within the bounded-pump budget"
-                << describe_offload_progress(before, file_pool, kPoolProbeBudget);
+                << describe_pump_miss(kSiteOpen, kWhatOpen, before, file_pool,
+                                      kPoolProbeBudget);
             ASSERT_TRUE(fut.get().has_value()) << "open() should succeed";
             ASSERT_EQ(sess.state(), fixpp::session::fsm_state::LogonSent);
         }
@@ -1213,21 +1253,16 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
         {
             const auto before = read_offload_counts();
             auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(logon_ack), asio::use_future);
+            // The per-site clause is a STATEMENT of what did not finish, and
+            // nothing more. It has been walked back twice for saying more than
+            // that -- first "the probe below is what tells the candidate causes
+            // apart" (it does not), then "the measurements below are what narrow
+            // it" (they may not). Both lived here, outside the report builder,
+            // which is why `describe_pump_miss` now renders the whole text and
+            // the arms pin the whole text.
             ASSERT_TRUE(pump_until_ready(ioc, fut, kSiteLogonAck))
-                << kPumpBudgetMiss
-                << kSiteLogonAck
-                // This clause has been walked back TWICE and the direction is the
-                // point. It began as "the probe below is what tells the candidate
-                // causes apart" (it does not), was softened to "the measurements
-                // below are what narrow it" (they may not -- an unrelated offload
-                // can enter and return while the awaited operation was never
-                // submitted, and then they narrow nothing), and is now simply an
-                // announcement. Every promise about what the numbers MEAN belongs
-                // to the reader and the header block, not to this sentence.
-                << " -- on_inbound_frame(Logon-ack) did not complete within the bounded-pump "
-                   "budget. This is #433's observed failure; raw offload measurements "
-                   "follow"
-                << describe_offload_progress(before, file_pool, kPoolProbeBudget);
+                << describe_pump_miss(kSiteLogonAck, kWhatLogonAck, before, file_pool,
+                                      kPoolProbeBudget);
             ASSERT_TRUE(fut.get().has_value()) << "Logon-ack inbound should succeed";
             ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
         }
@@ -1415,6 +1450,8 @@ TEST(SessionGracefulCloseFlushesFileStore, OffloadProbe_ForcedSpuriousHit_Report
     TransportDouble td;
     cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
 
+    // Hoisted: the pin below this scope names it too.
+    constexpr const char* kSite = "OffloadProbe_ForcedSpuriousHit/open";
     std::string diagnostic;
 
     {
@@ -1458,46 +1495,48 @@ TEST(SessionGracefulCloseFlushesFileStore, OffloadProbe_ForcedSpuriousHit_Report
         // blocked, so `fut` never becomes ready and a default kPumpBudget
         // would burn 10s to observe an outcome this budget already settles.
         constexpr auto kShortBudget = std::chrono::milliseconds{300};
-        constexpr const char* kSite = "OffloadProbe_ForcedSpuriousHit/open";
         const bool ready = pump_until_ready(ioc, fut, kShortBudget, kSite);
         ASSERT_FALSE(ready) << "the offload is deliberately blocked inside the probe; "
                                 "open() must NOT complete within the short budget";
 
-        diagnostic = describe_offload_progress(before, file_pool, kPoolProbeBudget);
+        diagnostic = describe_pump_miss(kSite, "open() did not complete within the "
+                                               "bounded-pump budget",
+                                        before, file_pool, kPoolProbeBudget);
     }  // release_guard unblocks + uninstalls; quiesce then drains the now-completing open().
 
     file_pool.stop();
     file_pool.join();
     std::filesystem::remove_all(dir);
 
-    // F2.1 (#476) -- the assertion is a WHOLE-STRING comparison, and that is a
-    // deliberate move away from what stood here before.
+    // F2.1 (#476) -- WHOLE-STRING comparison against the COMPLETE emitted text,
+    // preamble included.
     //
-    // History, because it is the argument: F1.6 deleted the causal nouns; F1.7
-    // re-pointed at "cannot tell them apart"; #476 deleted that too and the
-    // assertion moved to `ends_with` plus a six-phrase blacklist. An adversarial
-    // review then defeated BOTH by inserting "therefore the awaited syscall
-    // finished" just before the tail -- causal, mid-string, built from words no
-    // list contained. It ran the exact predicates and they returned PASS.
+    // Why a pin and not a predicate: every predicate tried here was defeated by
+    // respelling. Asserting the absence of causal NOUNS was defeated by a causal
+    // CLAUSE; asserting a trailing sentence plus a list of forbidden phrases was
+    // defeated by a causal clause built from words the list did not contain. A
+    // blacklist can only catch prose someone anticipated. A pin has nothing left
+    // to respell: any insertion, anywhere, in either branch, changes the string.
     //
-    // A blacklist can only ever catch prose someone anticipated, so each round
-    // spelled the claim differently and the check chased it. Pinning the
-    // complete rendering ends that: there is nothing left to respell, because
-    // ANY insertion, in either branch, changes the string.
+    // Why it covers the preamble too: both causal claims this file has had to
+    // walk back lived in the call-site preamble, NOT in the report builder. A
+    // pin on the builder alone would have caught neither of them.
+    //
+    // The VALUES are the load-bearing half: "1 entered" means the seam saw the
+    // submission, "1 inside ... right now" means the gauge still counts the
+    // blocked callable. A seam that never fired reads 0 there -- which is how an
+    // earlier version of this arm passed while the exit probe was not installed.
     EXPECT_EQ(blank_ms_fields(diagnostic),
-              "\n  #433 offload probe: 1 offload(s) entered a pool thread since this pump "
-              "began (last entry <N>ms ago); 1 inside an offloaded callable right now. What "
-              "these numbers do and do not establish is in the header block of " __FILE__
-              " -- read it before concluding anything about which side stalled.")
+              std::string{fixpp::test_support::kPumpBudgetMiss} + kSite +
+                  " -- open() did not complete within the bounded-pump budget. This is #433's "
+                  "observed failure; raw offload measurements follow"
+                  "\n  #433 offload probe: 1 offload(s) entered a pool thread since this pump "
+                  "began (last entry <N>ms ago); 1 inside an offloaded callable right now. What "
+                  "these numbers do and do not establish is in the header block of " __FILE__
+                  " -- read it before concluding anything about which side stalled.")
         << "the rendering is pinned (#476). If you changed the wording deliberately, update "
            "this literal; if you did not, something inserted text into the report.\n"
         << diagnostic;
-
-    // The VALUES above are the load-bearing half and are worth saying out loud:
-    // "1 entered" means the seam saw the submission, and "1 inside ... right
-    // now" means the gauge still counts the blocked callable. A seam that never
-    // fired would read 0 there -- which is exactly how an earlier version of
-    // this arm passed while the exit probe was not even installed.
 }
 
 // #433 F2.2 (#476) -- POSITIVE CONTROL for the exit seam. The arm above pins
@@ -1563,15 +1602,71 @@ TEST(SessionGracefulCloseFlushesFileStore, OffloadProbe_CompletedOffload_Advance
         << "an offload entered a pool thread and its callable returned, but the exit seam did "
            "not fire: `store_offload_exit_guard` in src/session/file_store.cpp's offload_to is "
            "missing or misplaced";
-    EXPECT_EQ(after.exits - before.exits, after.entries - before.entries)
-        << "every offloaded callable this arm started was awaited to completion before the "
-           "counters were read, so exits must equal entries";
+    // NO exits-vs-entries equality here. Comparing those two deltas is exactly
+    // the unmatched-pair fallacy round 1 removed from the report, and it would
+    // be no sounder for being written in a test. The positive delta above shows
+    // the seam fires; the gauge below shows it fires in the right PLACE.
     // The gauge is what the report actually prints, so assert on IT, not only
     // on the counters feeding it. Back to zero means every callable that
     // entered also left -- an exit seam that fired twice, or not at all, shows
     // up here and nowhere else.
     EXPECT_EQ(g_offload_inflight.load(std::memory_order_relaxed), 0)
         << "after a fully-awaited offload the in-flight gauge must return to zero";
+}
+
+// #433 F2.3 (gate-b r2, C3) -- pin the rendering of the TWO PRODUCTION SITES.
+//
+// The other pins render a site label this arm's own code chose. That leaves the
+// strings the real sites emit -- `kWhatOpen` / `kWhatLogonAck` -- covered by
+// nothing, and those are precisely where both causal claims this file has had
+// to retract actually lived. So render them here, through the same builder the
+// sites use, and pin the result.
+//
+// This arm produces no offload: with no seam installed the entry delta is zero
+// by construction, so it exercises the zero branch. What it is for is the TEXT,
+// not the branch.
+TEST(SessionGracefulCloseFlushesFileStore, OffloadProbe_ProductionSiteRenderings_ArePinned) {
+    asio::thread_pool pool{2};
+    const auto before = read_offload_counts();
+
+    const std::string open_text = describe_pump_miss(kSiteOpen, kWhatOpen, before, pool,
+                                                     std::chrono::milliseconds{200});
+    const std::string ack_text = describe_pump_miss(kSiteLogonAck, kWhatLogonAck, before, pool,
+                                                    std::chrono::milliseconds{200});
+    pool.stop();
+    pool.join();
+
+    const std::string tail =
+        ". This is #433's observed failure; raw offload measurements follow"
+        "\n  #433 offload probe: no offload entered a pool thread since this pump began; 0 "
+        "inside an offloaded callable right now. What these numbers do and do not establish is "
+        "in the header block of " __FILE__
+        " -- read it before concluding anything about which side stalled. The file_pool "
+        "observation below is meaningful ONLY in this branch:"
+        "\n  #433 file_pool probe: RAN after <N>ms -- a pool thread was free for this "
+        "unrelated trivial task.";
+
+    // ⚠️ THE EXPECTED TEXT IS SPELLED OUT HERE, NOT BUILT FROM kSite*/kWhat*.
+    // Building it from those constants is what the first version of this arm
+    // did, and it was VACUOUS: a causal clause appended to `kWhatOpen` changed
+    // both sides of the comparison equally and the arm stayed green. A check
+    // that reads its expectation from the thing it is checking cannot fail.
+    // The duplication is the mechanism -- an intended reword must be written
+    // twice, deliberately; an unintended one fails here.
+    EXPECT_EQ(blank_ms_fields(open_text),
+              std::string{fixpp::test_support::kPumpBudgetMiss} +
+                  "FlushRunsAndFramesDurableAfterClose/open -- open() did not complete within "
+                  "the bounded-pump budget" +
+                  tail)
+        << "the kSiteOpen rendering is pinned (#476)\n"
+        << open_text;
+    EXPECT_EQ(blank_ms_fields(ack_text),
+              std::string{fixpp::test_support::kPumpBudgetMiss} +
+                  "FlushRunsAndFramesDurableAfterClose/logon-ack -- on_inbound_frame(Logon-ack) "
+                  "did not complete within the bounded-pump budget" +
+                  tail)
+        << "the kSiteLogonAck rendering is pinned (#476)\n"
+        << ack_text;
 }
 
 // #433 F6.1 (gate-b/r2, C4) -- witness the delta == 0 branch of
