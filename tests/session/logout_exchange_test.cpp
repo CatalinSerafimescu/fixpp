@@ -265,7 +265,8 @@ std::string describe_offload_progress(std::uint64_t entries_before, asio::thread
     }
     return "\n  #433 offload probe: no offload entered a pool thread since this pump began "
            "-- consistent with the operation never having been submitted, or with the pool "
-           "never scheduling it. The secondary probe below narrows between those two:" +
+           "never scheduling it -- the file_pool observation appended here narrows between "
+           "them:" +
            probe_file_pool(pool, probe_budget);
 }
 
@@ -1179,9 +1180,8 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
 // so it exercises the real production data path that feeds `describe_offload_progress`.
 // It calls `describe_offload_progress` directly rather than reproducing the literal
 // `ASSERT_TRUE(pump_until_ready(...)) << ...` streaming expression at kSiteOpen/
-// kSiteLogonAck above -- both call sites forward to the same function with the same
-// argument shape, so this does not leave that expression unexercised, but say so
-// rather than claim more: this is the shared report BUILDER bound at the real
+// kSiteLogonAck above -- that expression itself is NOT exercised by this arm. Say
+// so rather than claim more: this is the shared report BUILDER bound at the real
 // production seam, not a capture of the two call sites' own source text.
 //
 // The complementary delta == 0 branch is NOT witnessed by an automated arm in this
@@ -1193,10 +1193,11 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
 //   FIXPP_FORCE_WINDOW_MISS='FlushRunsAndFramesDurableAfterClose/open' \
 //     ./session_logout_exchange \
 //     --gtest_filter='SessionGracefulCloseFlushesFileStore.FlushRunsAndFramesDurableAfterClose'
-// which takes the miss branch before any pumping occurs, so the offload backing
-// `open()` never enters a pool thread and delta stays 0 -- the probe_file_pool
-// secondary path is what fires. Re-run that recipe to re-verify; do not trust a
-// cached account of its output.
+// `forced_miss_here` (called before `pump_until` ever reaches `ioc.run_for`) returns
+// on that FIRST call, so no offload can have entered a pool thread by the time the
+// snapshot is compared -- the delta==0 branch, and the probe_file_pool secondary
+// path inside it, is what the miss then reaches. Re-run that recipe to re-verify;
+// do not trust a cached account of its output.
 TEST(SessionGracefulCloseFlushesFileStore, OffloadProbe_ForcedSpuriousHit_NamesFileIoStage) {
     using fixpp::store_test::unique_store_dir;
     auto dir = unique_store_dir("f14_forced_spurious_hit");
