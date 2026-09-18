@@ -365,7 +365,7 @@ fixpp_add_mallocnesia_test(
   NAME capi_recv_alloc_guard_mallocnesia
   TARGET capi_recv_alloc_guard_test
   LABELS "capi;050;alloc_guard"
-  DEPENDS "capi_recv_alloc_guard_test")
+  DEPENDS "capi_recv_alloc_guard")
 
 # SC-003 dual gate — read path: mallocnesia LD_PRELOAD interception for the
 # inbound get_* accessors. The in-process marker test is in message_read_test.cpp
@@ -375,7 +375,7 @@ fixpp_add_mallocnesia_test(
   NAME capi_message_read_mallocnesia
   TARGET capi_message_read_test
   LABELS "capi;051;alloc_guard"
-  DEPENDS "capi_message_read_test")
+  DEPENDS "capi_message_read")
 
 # SC-003 dual gate — write path: mallocnesia LD_PRELOAD interception for the
 # outbound set_*/commit accessors. The in-process marker test is in
@@ -384,7 +384,7 @@ fixpp_add_mallocnesia_test(
   NAME capi_message_write_mallocnesia
   TARGET capi_message_write_test
   LABELS "capi;051;alloc_guard"
-  DEPENDS "capi_message_write_test")
+  DEPENDS "capi_message_write")
 
 # SC-003 dual gate — toApp path: mallocnesia LD_PRELOAD interception for the
 # on-strand toApp trampoline (CapiApplication::toApp). The in-process marker
@@ -394,7 +394,7 @@ fixpp_add_mallocnesia_test(
   NAME capi_toapp_alloc_guard_mallocnesia
   TARGET capi_toapp_alloc_guard_test
   LABELS "capi;051;alloc_guard"
-  DEPENDS "capi_toapp_alloc_guard_test")
+  DEPENDS "capi_toapp_alloc_guard")
 
 # SC-003 dual gate — field iteration: mallocnesia LD_PRELOAD interception for
 # fixpp_msg_field_count + fixpp_msg_field_at (CA-053 / 052 US3).  These functions
@@ -405,7 +405,7 @@ fixpp_add_mallocnesia_test(
   NAME capi_message_field_iteration_mallocnesia
   TARGET capi_message_field_iteration_test
   LABELS "capi;052;alloc_guard"
-  DEPENDS "capi_message_field_iteration_test")
+  DEPENDS "capi_message_field_iteration")
 
 # ── 066-dict-backed-inbound-parse T001 — C-ABI engine-loopback scaffold smoke ─
 # Compile/smoke check for capi_dict066_loopback_support.hpp (a real

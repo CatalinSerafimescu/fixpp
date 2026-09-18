@@ -12,13 +12,30 @@
 # Building it as a target removes the precondition rather than checking it: there is no
 # longer a state in which the gates are registered against something that may not exist.
 #
-# ⚠️ Linux-only BY CONSTRUCTION, not by preference. The mechanism is ELF LD_PRELOAD
+# ⚠️ Linux-only AND non-sanitizer BY CONSTRUCTION, not by preference. The mechanism is
+# ELF LD_PRELOAD
 # symbol interposition; macOS needs DYLD_INSERT_LIBRARIES + interpose sections and
 # Windows has no equivalent. Callers must not "port" this by relaxing the guard —
 # a gate that registers on a platform where interposition does not happen is a gate
 # that passes without measuring, which is the whole defect class this file closes.
 
-if(UNIX AND NOT APPLE)
+# ⚠️ NOT SUPPORTED UNDER A SANITIZER, AND THIS IS A CORRECTNESS CONDITION, NOT A COST
+# ONE. A sanitizer installs its OWN allocator ahead of this interposer, so our malloc
+# hook never fires: the gates then report "interception confirmed" and catch nothing —
+# a vacuous pass, which is the exact defect class fixpp#448 exists to remove.
+#
+# MEASURED on linux-clang-asan, and it is worth stating precisely because the obvious
+# guard does not catch it: the interceptor's CONSTRUCTOR RUNS (the witness file is
+# written, so `check_alloc.py` is satisfied that a preload took effect) while the
+# planted allocation is NOT intercepted. Constructor execution and symbol interposition
+# are different facts, and only the positive control can tell them apart — it FAILS
+# there, with "interception was active yet the planted allocation was not caught".
+#
+# So the gates must not REGISTER on a sanitizer build. Excluding them at the ctest
+# selection instead would leave them registered and runnable — and the unfiltered
+# full-ctest runs on those lanes would pick them up and pass vacuously.
+if(UNIX AND NOT APPLE AND NOT FIXPP_ENABLE_ASAN AND NOT FIXPP_ENABLE_TSAN
+   AND NOT FIXPP_ENABLE_UBSAN)
   set(FIXPP_MALLOCNESIA_SUPPORTED TRUE)
 else()
   set(FIXPP_MALLOCNESIA_SUPPORTED FALSE)
@@ -26,11 +43,16 @@ endif()
 
 if(FIXPP_MALLOCNESIA_SUPPORTED AND NOT TARGET mallocnesia)
   # ⚠️ `project()` declares `LANGUAGES CXX` only, so C is enabled HERE rather than
-  # widened there: this interceptor is the sole C translation unit in the tree, it is
-  # test-only, and adding C to the project line would run the C compiler probe on every
-  # configure of every preset — including the Windows and macOS ones that will never
-  # build this target. Enabling it inside the platform guard keeps the cost where the
-  # need is.
+  # widened there: adding C to the project line would run the C compiler probe on every
+  # configure of every preset, including the Windows and macOS ones that never build
+  # this target. Enabling it inside the platform guard keeps the cost where the need is.
+  # `enable_language` is idempotent, so the call tests/capi/CMakeLists.txt already makes
+  # for its own C sources is harmless — this module is included first, which merely makes
+  # that one the redundant call rather than this one.
+  #
+  # (An earlier revision of this comment justified the placement by claiming this is
+  # "the sole C translation unit in the tree". That is false — tests/capi has three and
+  # tests/consumer a fourth. The placement is right; the reason given for it was not.)
   enable_language(C)
   add_library(mallocnesia SHARED "${CMAKE_SOURCE_DIR}/tools/mallocnesia/mallocnesia.c")
   target_link_libraries(mallocnesia PRIVATE ${CMAKE_DL_LIBS})
@@ -59,7 +81,13 @@ if(FIXPP_MALLOCNESIA_SUPPORTED AND NOT TARGET mallocnesia)
 endif()
 
 # fixpp_add_mallocnesia_test(NAME <test> TARGET <binary-target>
-#                            [MAX_ALLOCS <n>] [LABELS <l>...] [DEPENDS <t>...])
+#                            [LABELS <l>...] [DEPENDS <t>...] [ENVIRONMENT <e>]
+#                            [EXPECT_VIOLATION])
+#
+# No MAX_ALLOCS keyword: every gate wants zero, and zero is already the default in
+# all three layers (check_alloc.py's argparse, and the interceptor's own `g_max`
+# when MALLOCNESIA_MAX_ALLOCS is unset). A knob no call site turns is a fourth
+# place for those defaults to disagree. Add it back when a gate needs a budget.
 #
 # The single registration path. It always routes through tools/check_alloc.py, never a
 # raw LD_PRELOAD `cmake -E env` line: the wrapper is what FAILS CLOSED when the
@@ -71,16 +99,13 @@ endif()
 # gate population cannot drift apart the way they had (measured on main: 18 entries by
 # name, 8 by label).
 function(fixpp_add_mallocnesia_test)
-  cmake_parse_arguments(_MN "EXPECT_VIOLATION" "NAME;TARGET;MAX_ALLOCS"
+  cmake_parse_arguments(_MN "EXPECT_VIOLATION" "NAME;TARGET"
                       "LABELS;DEPENDS;ENVIRONMENT" ${ARGN})
   if(NOT _MN_NAME OR NOT _MN_TARGET)
     message(FATAL_ERROR "fixpp_add_mallocnesia_test: NAME and TARGET are required")
   endif()
   if(NOT FIXPP_MALLOCNESIA_SUPPORTED)
     return()
-  endif()
-  if(NOT DEFINED _MN_MAX_ALLOCS)
-    set(_MN_MAX_ALLOCS 0)
   endif()
 
   # ⚠️ NOT a generator expression here. `$<$<BOOL:...>:--expect-violation>` evaluates to
@@ -96,7 +121,6 @@ function(fixpp_add_mallocnesia_test)
     COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
             --binary "$<TARGET_FILE:${_MN_TARGET}>"
             --mallocnesia "$<TARGET_FILE:mallocnesia>"
-            --max-allocs ${_MN_MAX_ALLOCS}
             ${_MN_EXTRA})
   set_tests_properties(${_MN_NAME} PROPERTIES LABELS "mallocnesia;${_MN_LABELS}")
   if(_MN_ENVIRONMENT)

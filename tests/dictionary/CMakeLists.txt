@@ -320,14 +320,14 @@ set_tests_properties(delimiter_census PROPERTIES LABELS "dictionary;083;census" 
 
 # mallocnesia gate for the group-context lookup no-alloc test — re-runs the
 # standalone binary under LD_PRELOAD so global malloc/calloc/realloc is
-# intercepted (dual gate alongside the in-TU global operator-new counter; absent
+# intercepted (dual gate alongside the in-TU global operator-new counter;
 # the interceptor is a build target, so this is ALWAYS registered — fixpp#448;
 # rationale for the gate itself: feedback_tracking_pmr_resource_false_pass).
 
 fixpp_add_mallocnesia_test(
   NAME dictionary_group_context_lookup_alloc_gate_test_mallocnesia
   TARGET dictionary_group_context_lookup_alloc_gate_test
-  LABELS "dictionary;alloc_guard;mallocnesia;063")
+  LABELS "dictionary;alloc_guard;063")
 
 # ── US2 Reify tests ─────────────────────────────────────────────────────────
 # These tests include generated <vXX>/Reify.hpp (build-tree only, AC-C4).

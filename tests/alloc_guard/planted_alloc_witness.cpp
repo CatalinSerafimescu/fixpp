@@ -35,7 +35,7 @@ int main() {
     // which is the same false green it exists to catch. Release is the lane this runs
     // on, so the elision risk is real and not theoretical.
     void* volatile p = std::malloc(16);
-    std::free(const_cast<void*>(p));
+    std::free(p);
 
     if (alloc_guard_end) alloc_guard_end();  // exits(1) under interception
 

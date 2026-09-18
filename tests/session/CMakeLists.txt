@@ -1959,7 +1959,7 @@ set_tests_properties(session_validation_compat_toggles PROPERTIES
 # T012 mallocnesia companion — DISABLED (item 13, 2026-06-19): RED — same allocating
 # window as above; re-enable by restoring the EXISTS guard once the window is
 # zero-alloc (tracked: parent REMAINING-WORK.md item 13).
-if(FALSE)  # was: if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+if(FALSE)  # re-enable via fixpp_add_mallocnesia_test() — NOT the old EXISTS guard (#448)
   add_test(
     NAME session_validation_compat_toggles_mallocnesia
     COMMAND
@@ -2002,7 +2002,7 @@ set_tests_properties(session_persistent_seqnum_hydrate PROPERTIES
 # session_next_expected_msgseqnum (027).
 # item 13 (2026-06-19): DISABLED — RED window (fix->feed(...)) allocates on the
 # global heap (false-green while markers were inert). Tracked: REMAINING-WORK item 13.
-if(FALSE)  # was: if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+if(FALSE)  # re-enable via fixpp_add_mallocnesia_test() — NOT the old EXISTS guard (#448)
   set_property(TEST session_persistent_seqnum_hydrate APPEND PROPERTY
     ENVIRONMENT "LD_PRELOAD=${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
 endif()
@@ -2010,7 +2010,7 @@ endif()
 # global malloc/calloc/realloc between the guard markers causes exit(1).
 # Absent mallocnesia.so → skip; the base test is the fallback.
 # item 13 (2026-06-19): DISABLED companion — RED (same allocating window). Tracked: REMAINING-WORK item 13.
-if(FALSE)  # was: if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+if(FALSE)  # re-enable via fixpp_add_mallocnesia_test() — NOT the old EXISTS guard (#448)
   add_test(
     NAME session_persistent_seqnum_hydrate_mallocnesia
     COMMAND
@@ -2054,7 +2054,7 @@ set_tests_properties(session_refresh_on_logon PROPERTIES
 # item 13 (2026-06-19): DISABLED — RED window (asio::co_spawn(...hydrate)) allocates
 # a coroutine frame on the global heap (false-green while markers were inert; a
 # co_spawn frame can't be warmed away). Tracked: REMAINING-WORK item 13.
-if(FALSE)  # was: if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+if(FALSE)  # re-enable via fixpp_add_mallocnesia_test() — NOT the old EXISTS guard (#448)
   set_property(TEST session_refresh_on_logon APPEND PROPERTY
     ENVIRONMENT "LD_PRELOAD=${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
 endif()
@@ -2062,7 +2062,7 @@ endif()
 # global malloc/calloc/realloc between the guard markers causes exit(1).
 # Absent mallocnesia.so → skip; the base test is the fallback.
 # item 13 (2026-06-19): DISABLED companion — RED (same co_spawn-frame alloc). Tracked: REMAINING-WORK item 13.
-if(FALSE)  # was: if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+if(FALSE)  # re-enable via fixpp_add_mallocnesia_test() — NOT the old EXISTS guard (#448)
   add_test(
     NAME session_refresh_on_logon_mallocnesia
     COMMAND

@@ -911,7 +911,14 @@ jobs:
       # count-or-population assertion is the only thing that sees that.
       - name: "Assert the mallocnesia gate population (#448)"
         if: matrix.preset == 'linux-clang-release'
-        run: python3 tools/check_mallocnesia_population.py --build-dir build/${{ matrix.preset }}
+        run: |
+          # ⚠️ --min-gates is a FLOOR and is deliberately brittle, exactly like the
+          # `-L consumer -N` / `-L packaging -N` pins a few steps above. The set rules
+          # in the checker are all satisfied by ONE surviving gate, so they cannot see a
+          # population that shrinks. Adding a gate does not need an edit here; removing
+          # one does, and that is the point.
+          python3 tools/check_mallocnesia_population.py \
+            --build-dir build/${{ matrix.preset }} --min-gates 20
 
       # The gates themselves. No `|| true`, no continue-on-error: a real allocation on a
       # gated hot path must fail this lane. `mallocnesia_positive_control` runs inside
@@ -2550,6 +2557,14 @@ jobs:
       # (its T0 arm reconciles the REAL population when one happens to be present).
       - name: "Regression pin — mallocnesia gate population (#448)"
         run: bash ci/test-mallocnesia-population.sh
+
+      # fixpp#448: check_alloc.py carries the fail-closed refusal, the interception
+      # witness and the positive control's inverted verdict — the heart of the change,
+      # and every one of them is a refusal nobody had seen fire. Self-contained: the
+      # harness builds the real interceptor and its own subject binaries with cc, so it
+      # needs no configured tree.
+      - name: "Regression pin — check_alloc refusals (#448)"
+        run: bash ci/test-check-alloc.sh
 
       # #289 batch 18: a fixed `run_for` staging a MOCK-CLOCK advance is a
       # wall-clock hope, and a starved runner turns it into a LOST advance --

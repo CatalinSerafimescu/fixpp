@@ -33,15 +33,20 @@ import sys
 
 # Entries that carry the label but do NOT match the *_mallocnesia name pattern.
 # Adding a row is a deliberate act and needs a reason someone can check.
+#
+# ⚠️ KEEP THIS LIST AS SHORT AS THE NAMING ALLOWS. It is a checker holding part of the
+# authority's membership, which this repo has a recorded lesson against. The planted
+# control was briefly in here purely because of what it was CALLED; renaming it into the
+# convention removed the row rather than justifying it. Prefer that fix to a new row.
 DECLARED_EXTRAS = {
+    "alloc_guard_no_raw_preload":
+        "static scan for gates that register a raw LD_PRELOAD instead of going through "
+        "fixpp_add_mallocnesia_test — the shape that bypasses the fail-closed wrapper, "
+        "the witness and this very label. Belongs to the population; needs no preload.",
     "alloc_guard_markers_no_local_def":
         "static scan for locally-defined alloc_guard markers — the pattern that silently "
         "disables interception. Belongs to the gate population; needs no preload, so it "
         "will never match the name pattern.",
-    "mallocnesia_positive_control":
-        "the planted-allocation control (fixpp#448). It must run in the same selection as "
-        "the gates it vouches for, or a lane could run the gates without it and never "
-        "learn that interception had stopped.",
 }
 
 NAME_RE = re.compile(r"^\s*Test\s+#\d+:\s+(\S+)", re.M)
@@ -61,6 +66,11 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--build-dir", required=True)
+    ap.add_argument("--min-gates", type=int, default=0,
+                    help="FLOOR on the number of registered gates. Vacuity-at-zero is not "
+                         "enough: the failure being closed here is GRADUAL. Delete 17 of 18 "
+                         "gates and every set rule below still passes — one named gate, "
+                         "labelled, extras intact. CI pins this; local runs need not.")
     args = ap.parse_args()
 
     by_name = ctest_names(args.build_dir, "-R", "_mallocnesia$")
@@ -68,12 +78,27 @@ def main() -> int:
 
     failures = []
 
+    # (0a) FLOOR. Deliberately brittle, and the same shape as tier1.yml's neighbouring
+    # `-L consumer -N` / `-L packaging -N` pins: a gate population that SHRINKS is the
+    # hazard, and no set relation below can see it. A floor rather than an exact count
+    # because ADDING a gate must not need a CI edit, while removing one must.
+    if args.min_gates and len(by_name) < args.min_gates:
+        failures.append(
+            f"only {len(by_name)} gate(s) registered, floor is {args.min_gates}. Gates have "
+            f"been REMOVED or are no longer registered on this lane. Every set rule below "
+            f"still passes in that state — that is why the floor exists. If the removal is "
+            f"deliberate, lower the floor in the same commit and say why.")
+
     # (0) VACUITY FIRST. Everything below is trivially satisfied by two empty sets.
     if not by_name:
         failures.append(
-            "ZERO tests match the name pattern `_mallocnesia$`. Either the gates are not "
-            "registered in this build (the failure fixpp#448 removed), or the naming "
-            "convention moved. Refusing to report a clean population over nothing.")
+            "ZERO tests match the name pattern `_mallocnesia$`. Refusing to report a "
+            "clean population over nothing. Expected causes, in order of likelihood: "
+            "(a) this is a SANITIZER build, where the gates deliberately do not register "
+            "at all — a sanitizer's allocator interposes ahead of the interceptor, so "
+            "they would pass vacuously (run this against linux-clang-release); "
+            "(b) the gates are not registered on this lane, the failure fixpp#448 "
+            "removed; (c) the naming convention moved.")
     if not by_label:
         failures.append(
             "ZERO tests carry the `mallocnesia` label, so `ctest -L mallocnesia` would "

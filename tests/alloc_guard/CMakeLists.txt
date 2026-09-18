@@ -145,7 +145,7 @@ target_include_directories(planted_alloc_witness PRIVATE "${CMAKE_SOURCE_DIR}/te
 set_target_properties(planted_alloc_witness PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 fixpp_add_mallocnesia_test(
-  NAME mallocnesia_positive_control
+  NAME alloc_guard_positive_control_mallocnesia
   TARGET planted_alloc_witness
   EXPECT_VIOLATION
   LABELS "alloc_guard;positive-control;448")
@@ -223,7 +223,7 @@ set_tests_properties(dict066_grouped_read_alloc_guard PROPERTIES
 fixpp_add_mallocnesia_test(
   NAME dict066_grouped_read_alloc_guard_mallocnesia
   TARGET test_dict066_grouped_read_alloc_guard
-  LABELS "066;us3;alloc_guard;mallocnesia")
+  LABELS "066;us3;alloc_guard")
 
 # ── item 13: recurrence guard — fail if any test/bench source reintroduces a
 # bodied alloc_guard_start/end definition (the local-symbol pattern that silently
@@ -232,5 +232,17 @@ fixpp_add_mallocnesia_test(
 add_test(
   NAME alloc_guard_markers_no_local_def
   COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc_guard_markers.py")
+
+# ── fixpp#448: the SIBLING recurrence guard ──────────────────────────────────
+# The one above catches a test DEFINING the markers locally (which silently disables
+# interposition). This one catches a test registering a raw LD_PRELOAD itself, which
+# bypasses the fail-closed wrapper, the witness, the label, and therefore CI selection.
+# #448 named two such sites; both are converted, and this is what stops the third.
+# Same shape, same label, no preload needed.
+add_test(
+  NAME alloc_guard_no_raw_preload
+  COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/check_no_raw_mallocnesia_preload.py")
+set_tests_properties(alloc_guard_no_raw_preload PROPERTIES
+  LABELS "alloc_guard;mallocnesia;448")
 set_tests_properties(alloc_guard_markers_no_local_def PROPERTIES
   LABELS "alloc_guard;mallocnesia;item13")

@@ -106,11 +106,12 @@ def main() -> int:
         env["MALLOCNESIA_WITNESS"] = witness
         print(f"[check_alloc] Using mallocnesia: {mallocnesia} (max-allocs={args.max_allocs})")
 
-        if args.expect_violation:
-            result = subprocess.run([binary], env=env, stderr=subprocess.PIPE, text=True)
-            sys.stderr.write(result.stderr or "")
-        else:
-            result = subprocess.run([binary], env=env)
+        # stderr is captured ONLY for the positive control, which has to read the
+        # interceptor's verdict out of it; every other gate streams straight through.
+        # `result.stderr` is None when not piped, so one call covers both.
+        result = subprocess.run([binary], env=env, text=True,
+                                stderr=subprocess.PIPE if args.expect_violation else None)
+        sys.stderr.write(result.stderr or "")
 
         # ⚠️ ORDER MATTERS. The witness is checked BEFORE the exit code, because the
         # case being closed is a binary that exits 0 having never been instrumented.

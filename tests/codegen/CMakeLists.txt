@@ -79,14 +79,16 @@ set_tests_properties(codegen_group_entry_alloc_gate_test PROPERTIES LABELS codeg
 # it under LD_PRELOAD so global malloc/calloc/realloc is intercepted (the
 # dual-gate: the in-band counting_resource above catches PMR-routed
 # allocation; this catches a non-PMR escape via global new, per
-# feedback_tracking_pmr_resource_false_pass). Always registered; the interceptor is a build target (fixpp#448)
-# (the base ctest above is the fallback; the counting_resource + stack/NULL-
-# upstream arena still enforce the gate without interception).
+# feedback_tracking_pmr_resource_false_pass). ALWAYS registered since fixpp#448 —
+# the interceptor is a build target, so there is no state in which this silently
+# does not exist. The base ctest above is a COMPANION, not a fallback: it enforces
+# the PMR half without interception, and a green run of it says nothing about the
+# global-new escape this entry is the only thing watching.
 
 fixpp_add_mallocnesia_test(
   NAME codegen_group_entry_alloc_gate_test_mallocnesia
   TARGET codegen_group_entry_alloc_gate_test
-  LABELS "codegen;alloc_guard;mallocnesia;062")
+  LABELS "codegen;alloc_guard;062")
 
 # 067-codegen-writer-emitter T007/T009: emit_builders unit tests — link the
 # codegen tool's ir.cpp/gen_util.hpp DIRECTLY (not via the generated headers)

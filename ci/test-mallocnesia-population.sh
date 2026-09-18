@@ -46,8 +46,14 @@ check() {  # check <name> <want-rc> <want-substring> <dir>
   echo "ok    $name"; pass=$((pass+1))
 }
 
-# Both declared extras must be present for the happy case, or rule (3) fires.
-EXTRAS=("alloc_guard_markers_no_local_def:mallocnesia" "mallocnesia_positive_control:mallocnesia")
+# ⚠️ DERIVED from the checker, never restated. Every fixture below must contain all of
+# DECLARED_EXTRAS or rule (3) fires and four arms fail with a rule-3 message instead of
+# the one they assert. A hand-written copy here HAS already gone stale once: renaming
+# the positive control into the *_mallocnesia convention silently broke this list.
+EXTRAS=()
+while IFS= read -r _e; do EXTRAS+=("${_e}:mallocnesia"); done < <(
+  python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import check_mallocnesia_population as m; print("\n".join(m.DECLARED_EXTRAS))' "$REPO/tools")
+[ "${#EXTRAS[@]}" -gt 0 ] || { echo "FAIL: could not read DECLARED_EXTRAS from the checker"; exit 1; }
 
 # T0 — THE REAL TREE. Without this the suite proves only that the checker can say no.
 # Skipped (not failed) when no configured build is present, e.g. on a buildless lane.
