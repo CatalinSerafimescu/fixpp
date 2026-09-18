@@ -39,6 +39,7 @@
 #include <asio/co_spawn.hpp>
 #include <asio/executor_work_guard.hpp>
 #include <asio/io_context.hpp>
+#include <asio/post.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
@@ -141,6 +142,56 @@ std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag) {
     }
     return wire.substr(pos, end - pos);
 }
+
+// ── #433: WHICH SIDE STALLED? ──────────────────────────────────────────
+//
+// `SessionGracefulCloseFlushesFileStore` drives a session on a single-threaded
+// `io_context` while its FileStore offloads onto a real `asio::thread_pool`. A
+// bounded pump that exhausts its budget there reports only that the awaited
+// future never became ready -- never WHERE the time went. That is precisely why
+// #433 can offer a suspect and not a cause: one linux-gcc-release failure, with
+// no observation separating a stalled pool from a lost wake on the io_context.
+//
+// This probe posts a trivial task onto the pool and waits for it:
+//
+//   RAN         the pool has a free thread, so pool saturation is NOT the stall.
+//               Look at the io_context side: a completion never posted back, or
+//               a wake that was lost.
+//   DID NOT RUN every pool thread is occupied. That is the shape #433 names as
+//               its suspect, and this line is what would promote it to cause.
+//
+// ⚠️ IT IS CALLED ONLY FROM A gtest FAILURE-MESSAGE STREAM, which gtest evaluates
+// only when the assertion fails. The passing path posts nothing and waits for
+// nothing.
+// ⚠️ THE PROMISE IS SHARED, NOT CAPTURED BY REFERENCE. On the DID-NOT-RUN branch
+// the task is still queued when this function returns, so a reference to a frame
+// local would dangle until `file_pool` is destroyed.
+// ⚠️ "DID NOT RUN" IS "OCCUPIED", NOT "DEADLOCKED". A pool merely busy with a
+// long fdatasync reports the same thing. The distinction the probe DOES make --
+// pool side versus io_context side -- is the one #433 asks for; anything finer
+// needs the offload path instrumented, not this.
+std::string probe_file_pool(asio::thread_pool& pool, std::chrono::milliseconds budget) {
+    auto done = std::make_shared<std::promise<void>>();
+    auto ran = done->get_future();
+    asio::post(pool, [done] { done->set_value(); });
+
+    const auto t0 = std::chrono::steady_clock::now();
+    const bool completed = ran.wait_for(budget) == std::future_status::ready;
+    const auto waited = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t0);
+
+    if (completed) {
+        return "\n  #433 file_pool probe: RAN after " + std::to_string(waited.count()) +
+               "ms -- the pool had a free thread, so the stall is NOT pool saturation; "
+               "look at the io_context side (a completion never posted back, or a lost wake).";
+    }
+    return "\n  #433 file_pool probe: DID NOT RUN within " + std::to_string(budget.count()) +
+           "ms -- every pool thread is occupied; the stall is on the file_io side.";
+}
+
+// The probe asks "is a pool thread free NOW", so its budget only has to outlast
+// the post-and-schedule round trip on a loaded runner, not any store operation.
+constexpr auto kPoolProbeBudget = std::chrono::milliseconds{2000};
 
 }  // namespace
 
@@ -858,16 +909,40 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
         fixpp::test_support::quiesce_on_exit quiesce{.ioc = ioc, .clock = *clock};
 
         // Drive to Active: open() → LogonSent → inbound Logon-ack → Active.
+        //
+        // BOTH PUMPS CARRY A SITE LABEL AND A POOL PROBE (#433). The Logon-ack one
+        // is where the linux-gcc-release failure landed; `open()` stores the
+        // outbound Logon through the same FileStore offload, so it is the same
+        // site twice and is labelled for the same reason. Unlabelled, a site is
+        // unreachable by the forcing seam (`forced_miss_here` compares the
+        // `site` pointer's contents, and `nullptr` never matches), so the miss
+        // branch here could never be armed, and a real miss reported a bare
+        // sentence instead of the stem the site-report tooling matches.
+        // ⚠️ THE BUDGET IS SPELLED ONLY BECAUSE `pump_until_ready` HAS NO
+        // LABEL-ONLY OVERLOAD -- `kPumpBudget` by name, not a literal, so it does
+        // not read as a tuning. The sibling `/close` site below spells a literal
+        // 10 s and DOES mean it.
         {
             auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-            ASSERT_TRUE(pump_until_ready(ioc, fut)) << "open() did not complete within 10s";
+            ASSERT_TRUE(pump_until_ready(ioc, fut, fixpp::test_support::kPumpBudget,
+                                         "FlushRunsAndFramesDurableAfterClose/open"))
+                << kPumpBudgetMiss
+                << "FlushRunsAndFramesDurableAfterClose/open -- open() did not complete within "
+                   "the bounded-pump budget"
+                << probe_file_pool(file_pool, kPoolProbeBudget);
             ASSERT_TRUE(fut.get().has_value()) << "open() should succeed";
             ASSERT_EQ(sess.state(), fixpp::session::fsm_state::LogonSent);
         }
 
         {
             auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(logon_ack), asio::use_future);
-            ASSERT_TRUE(pump_until_ready(ioc, fut)) << "Logon-ack did not complete within 10s";
+            ASSERT_TRUE(pump_until_ready(ioc, fut, fixpp::test_support::kPumpBudget,
+                                         "FlushRunsAndFramesDurableAfterClose/logon-ack"))
+                << kPumpBudgetMiss
+                << "FlushRunsAndFramesDurableAfterClose/logon-ack -- on_inbound_frame(Logon-ack) "
+                   "did not complete within the bounded-pump budget. This is #433's observed "
+                   "failure; the probe below is what tells the two candidate causes apart"
+                << probe_file_pool(file_pool, kPoolProbeBudget);
             ASSERT_TRUE(fut.get().has_value()) << "Logon-ack inbound should succeed";
             ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
         }
