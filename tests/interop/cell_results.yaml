@@ -41,13 +41,20 @@ cells:
 
   # ── G1 (018-interop-live-admin) admin round-trip cells — NEW scenario groups ─
   # recovery_outbound (fixpp answers a QFJ ResendRequest) + idle_cadence (108=1s
-  # unsolicited beats). The other three G1 groups (testrequest_echo,
-  # recovery_inbound == seqnum-recovery, session_reject == reject-invalid-admin)
-  # are reuse-and-enrich of the existing QFj rows above (no new id). QFj-only at G1.
+  # unsolicited beats) + recovery_inbound (fixpp DETECTS a gap and asks). The other
+  # two G1 groups (testrequest_echo, session_reject == reject-invalid-admin) are
+  # reuse-and-enrich of the existing QFj rows above (no new id). QFj-only at G1.
   - { id: HP-QFj-init-fix44-recovery-outbound, config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "FIX-SL §4.8.2/§4.8.5/§4.8.6" }
   - { id: HP-QFj-acc-fix44-recovery-outbound,  config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "FIX-SL §4.8.2/§4.8.5/§4.8.6" }
   - { id: HP-QFj-init-fix44-idle-cadence,      config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "FIX-SL §4.5.1" }
   - { id: HP-QFj-acc-fix44-idle-cadence,       config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "FIX-SL §4.5.1" }
+  # fixpp#462: recovery_inbound gets its OWN id rather than enriching the
+  # seqnum-recovery rows above. Those four cells select the 016 SMOKE TEST_P in
+  # `hp_fix44_seqnum_recovery_test.cpp`; the 018 inbound TEST_P is a second one in
+  # the same binary, and a cell's gtest filter names exactly one. Enriching in
+  # place would have retired the US1 smoke witness to gain the FR-007 one.
+  - { id: HP-QFj-init-fix44-recovery-inbound,  config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "FIX-SL §4.5.3/§4.8.2/§4.8.5" }
+  - { id: HP-QFj-acc-fix44-recovery-inbound,   config: normal, kind: happy, status: "skip:counterparty-unavailable", matrix_disposition: live, spec_ref: "FIX-SL §4.5.3/§4.8.2/§4.8.5" }
 
   # ── Separate (non-matrix) regression cell — runs green locally, no counterparty
   - { id: HP-down-peer-stop-watchdog, config: normal, kind: happy, status: pass, matrix_disposition: live, spec_ref: "FIX-SL §4.4" }
