@@ -228,8 +228,9 @@ constexpr auto kPoolProbeBudget =
 // #433 F1.1 -- entry-only offload diagnostic (see the block comment above).
 // Process-global: `install_store_offload_probe` is one function pointer for
 // all four offload sites in src/session/file_store.cpp, so install/uninstall
-// discipline matters -- twelve tests share this binary, and a leaked probe
-// corrupts whichever runs next. Install/uninstall through `scoped_offload_probe`
+// discipline matters -- the probe is process-global, so a leaked install
+// corrupts whichever test runs next in this binary. Install/uninstall through
+// `scoped_offload_probe`
 // below, never bare, so every exit path (including an ASSERT_TRUE early
 // return) restores nullptr.
 std::atomic<std::uint64_t> g_offload_entry_count{0};
