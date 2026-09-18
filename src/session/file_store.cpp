@@ -206,10 +206,11 @@ namespace {
 // to make it symmetric with the entry probe. A per-site exit pointer would be
 // captured into each lambda -- and each lambda IS the by-value `Fn fn`
 // parameter of the inner coroutine below, so it lands in a heap-allocated
-// coroutine frame. This guard is a local that does not cross a suspension
-// point, so it is not spilled into the frame at all (measured: frame size
-// unchanged on clang 22 and gcc 13, against a control where a suspend-crossing
-// local does grow it).
+// coroutine frame. This guard is a local whose lifetime ENDS BEFORE the final
+// suspend, so an implementation has no reason to reserve frame storage for it.
+// That is the durable condition; do not replace it with a frame-size number,
+// which no build gate re-checks and which a compiler upgrade can falsify while
+// the comment goes on certifying it.
 //
 // WHAT THE PAIR ESTABLISHES (and what it does NOT). Entry fires at the start
 // of the offloaded callable, exit when that callable has returned or thrown —

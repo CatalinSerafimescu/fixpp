@@ -176,23 +176,29 @@ std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag) {
 // DELTA since that snapshot, never the absolute count:
 //
 //   delta >= 1   an offload reached a pool thread since the snapshot and the
-//                awaited operation still has not completed. The EXIT delta
-//                then splits this case -- and only in the pool-side sense:
-//                  entered > returned  at least one offloaded callable is
-//                                      still running. Some pool-side call has
-//                                      not come back.
-//                  entered == returned every offloaded callable that started
-//                                      since the snapshot has finished. No
-//                                      pool-side call is outstanding.
-//                ⚠️ NEITHER READING IS ABOUT THE AWAITED OPERATION -- the
-//                attribution warning above applies unchanged, because the exit
-//                seam carries no operation identity either. In particular
-//                `entered == returned` is consistent BOTH with "the awaited
-//                operation's callable finished and its completion never
-//                reached the io_context" AND with "the awaited operation was
-//                never submitted, and what was counted is unrelated". The pair
-//                cannot tell those apart; it is the io_context side that is
-//                unobserved, and closing that is what #433 still wants.
+//                awaited operation still has not completed.
+//
+// The second reported number is the IN-FLIGHT GAUGE, not an exit delta:
+//
+//   in flight k  exactly k offloaded callables are between their entry and
+//                their return AT THE INSTANT THE REPORT IS BUILT. k > 0 means
+//                something is sitting inside an offloaded callable -- which is
+//                what the slow-syscall hypothesis predicts. k == 0 means
+//                nothing is.
+//
+// ⚠️ DO NOT REPLACE THE GAUGE WITH A COMPARISON OF THE TWO DELTAS. That was
+// tried and it was WRONG: the deltas are unmatched, so an offload entering
+// before the snapshot and exiting after it inflates the exit delta with no
+// entry delta to pair against. See the gauge's own comment for the worked
+// counterexample.
+//
+// ⚠️ NEITHER NUMBER IS ABOUT THE AWAITED OPERATION -- the attribution warning
+// above applies to both unchanged, because neither seam carries an operation
+// identity. `k == 0` is consistent BOTH with "the awaited operation's callable
+// finished and its completion never reached the io_context" AND with "the
+// awaited operation was never submitted, and what was counted is unrelated".
+// Nothing here tells those apart; it is the io_context side that is
+// unobserved, and closing that is what #433 still wants.
 //   delta == 0   nothing reached a pool thread since the snapshot: either the
 //                operation was never submitted (io_context/strand side), or
 //                the pool never scheduled it. `probe_file_pool` below answers
@@ -254,16 +260,60 @@ std::atomic<std::uint64_t> g_offload_entry_count{0};
 std::atomic<std::int64_t> g_offload_last_entry_ns{0};
 // #433 -- the EXIT companion (install_store_offload_exit_probe). Incremented
 // when an offloaded callable has returned or thrown, on the same pool thread.
+// Exists to let a test prove the exit seam FIRES; it is deliberately not
+// reported as a delta -- see the gauge below for why.
 std::atomic<std::uint64_t> g_offload_exit_count{0};
+
+// ⚠️ THE REPORTED "IS ANYTHING STUCK" FACT COMES FROM THIS GAUGE, NOT FROM
+// COMPARING THE TWO DELTAS. A delta pair is UNMATCHED: an offload that entered
+// BEFORE the snapshot and exits after it adds to the exit delta with no entry
+// delta to pair against. So `entered == returned` is NOT "everything that
+// started has finished" -- let A enter pre-snapshot, exit post-snapshot, and B
+// enter post-snapshot and block: the deltas read 1 and 1 while B is still
+// inside its callable. The claim looked sound and was false; it was caught by
+// an adversarial review with exactly that counterexample, not by reading.
+//
+// A gauge needs no matching. Incremented on entry, decremented on exit, read
+// at the report instant, it answers "how many offloaded callables are inside
+// RIGHT NOW" -- true regardless of when any of them entered. That is the one
+// genuinely new fact the exit seam buys, and it is the question the
+// slow-syscall hypothesis actually asks.
+//
+// It still carries NO operation identity: `k > 0` does not mean the AWAITED
+// operation is the one inside. The attribution warning above applies to it
+// unchanged.
+//
+// ⚠️ THE GAUGE COUNTS WHAT THE INSTALLED SEAMS OBSERVE, AND `scoped_offload_probe`
+// RESETS IT AT BOTH ENDS FOR A REASON -- without that it leaks, permanently.
+// The F1.4 arm deliberately uninstalls while its blocked callable is STILL
+// INSIDE (it must: the drain that lets that callable finish runs afterwards).
+// The entry was counted; the matching exit then fires against a null probe and
+// is lost, so the gauge keeps a phantom +1 for the rest of the process and
+// every later arm reads it. That is not hypothetical -- it is what happened,
+// and the whole-string pin is what caught it: the arm passed in isolation and
+// failed in the suite. Resetting on install AND uninstall scopes the gauge to
+// the window where a seam is actually watching, which is the only window in
+// which it means anything.
+//
+// ⚠️ BOTH RESETS ARE LOAD-BEARING, AND THE UNINSTALL ONE ONLY SHOWS UNDER A
+// SHUFFLE -- verify it that way or you will conclude it is dead code. Deleting
+// the uninstall-side reset leaves the DEFAULT order green, because the next
+// arm that installs happens to reset on the way in and absorbs the phantom.
+// Re-derive with `--gtest_shuffle --gtest_random_seed=N`: at the time of
+// writing, seeds 1-4 passed and 5-8 failed. Those seed numbers are a RESULT and
+// will rot -- the procedure is the part to keep.
+std::atomic<std::int64_t> g_offload_inflight{0};
 
 void offload_entry_probe(std::thread::id) noexcept {
     g_offload_entry_count.fetch_add(1, std::memory_order_relaxed);
+    g_offload_inflight.fetch_add(1, std::memory_order_relaxed);
     g_offload_last_entry_ns.store(
         std::chrono::steady_clock::now().time_since_epoch().count(), std::memory_order_relaxed);
 }
 
 void offload_exit_probe(std::thread::id) noexcept {
     g_offload_exit_count.fetch_add(1, std::memory_order_relaxed);
+    g_offload_inflight.fetch_sub(1, std::memory_order_relaxed);
 }
 
 // Installs BOTH seams and clears BOTH, and is the ONLY place in this file that
@@ -275,17 +325,22 @@ void offload_exit_probe(std::thread::id) noexcept {
 struct scoped_offload_probe {
     explicit scoped_offload_probe(
         void (*entry)(std::thread::id) noexcept = &offload_entry_probe) noexcept {
+        g_offload_inflight.store(0, std::memory_order_relaxed);
         fixpp::session::install_store_offload_probe(entry);
         fixpp::session::install_store_offload_exit_probe(&offload_exit_probe);
     }
     ~scoped_offload_probe() noexcept {
+        // Uninstall FIRST so nothing can increment past the reset.
         fixpp::session::install_store_offload_probe(nullptr);
         fixpp::session::install_store_offload_exit_probe(nullptr);
+        g_offload_inflight.store(0, std::memory_order_relaxed);
     }
 };
 
-// Both counters, read as a pair at one instant. Snapshot immediately BEFORE a
-// labelled pump; report the DELTA (see the header block above).
+// Two independent relaxed loads -- NOT an atomic pair, and nothing here needs
+// them to be. `entries` is used only as a DELTA base (see the header block);
+// `exits` is used only by the arms that prove the exit seam fires, never in a
+// comparison against `entries`.
 struct offload_counts {
     std::uint64_t entries;
     std::uint64_t exits;
@@ -330,17 +385,12 @@ std::string describe_offload_progress(offload_counts before, asio::thread_pool& 
         const auto age = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() -
             std::chrono::steady_clock::time_point(std::chrono::steady_clock::duration(last_ns)));
-        // "N entered, M returned" rather than "M of them returned": the two
-        // counters are read without a lock between them, so M > N is momentarily
-        // possible, and "of them" is what would make that read as nonsense. The
-        // phrasing dissolves the invariant instead of defending it with a clamp
-        // that could never fire (same monotonic counter, `now` read later).
         return "\n  #433 offload probe: " + std::to_string(now.entries - before.entries) +
-               " offload(s) entered a pool thread since this pump began, " +
-               std::to_string(now.exits - before.exits) + " returned (last entry " +
-               std::to_string(age.count()) +
-               "ms ago). What these counts do and do not establish is in the header block "
-               "of " __FILE__ +
+               " offload(s) entered a pool thread since this pump began (last entry " +
+               std::to_string(age.count()) + "ms ago); " +
+               std::to_string(g_offload_inflight.load(std::memory_order_relaxed)) +
+               " inside an offloaded callable right now. What these numbers do and do not "
+               "establish is in the header block of " __FILE__ +
                kProbeTail;
     }
     // The same rule as the branch above, applied to the branch #476 did not
@@ -352,11 +402,42 @@ std::string describe_offload_progress(offload_counts before, asio::thread_pool& 
     // completed. This function never observes that -- two of its callers pass a
     // bare pool with no awaited operation in existence at all -- and the real
     // pump sites state it themselves in their own failure text.
-    return "\n  #433 offload probe: no offload entered a pool thread since this pump began. "
-           "What this does and does not establish is in the header block of " __FILE__ +
+    return "\n  #433 offload probe: no offload entered a pool thread since this pump began; " +
+           std::to_string(g_offload_inflight.load(std::memory_order_relaxed)) +
+           " inside an offloaded callable right now. What these numbers do and do not establish "
+           "is in the header block of " __FILE__ +
            std::string{kProbeTail} +
            " The file_pool observation below is meaningful ONLY in this branch:" +
            probe_file_pool(pool, probe_budget);
+}
+
+// Replace every "<digits>ms" run with a fixed token. The rendering above has
+// exactly two nondeterministic fields (the entry age, and probe_file_pool's own
+// elapsed time) and both are of that shape; blanking them lets a test compare
+// the COMPLETE rendering rather than probe it for phrases.
+//
+// ⚠️ THIS IS WHY THERE IS NO VOCABULARY BLACKLIST ANY MORE. A list of forbidden
+// phrases can only catch prose someone anticipated: an adversarial review
+// inserted "therefore the awaited syscall finished" -- a causal claim built
+// from words no list contained -- and every check then in place returned PASS.
+// A whole-string comparison has no such gap: any insertion, anywhere, in either
+// branch, fails. The cost is that a deliberate reword must update the expected
+// literal in the arm, which is the point -- the text is #476's deliverable, so
+// changing it should be a decision, not a side effect.
+std::string blank_ms_fields(std::string s) {
+    for (std::size_t i = 0; (i = s.find("ms", i)) != std::string::npos;) {
+        std::size_t start = i;
+        while (start > 0 && (std::isdigit(static_cast<unsigned char>(s[start - 1])) != 0)) {
+            --start;
+        }
+        if (start == i) {  // "ms" not preceded by digits -- leave it alone
+            i += 2;
+            continue;
+        }
+        s.replace(start, i - start, "<N>");
+        i = start + 3 + 2;
+    }
+    return s;
 }
 
 // #433 F1.4 -- forced-SPURIOUS-HIT counter-test state. A forced-MISS arm cannot
@@ -1135,15 +1216,17 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
             ASSERT_TRUE(pump_until_ready(ioc, fut, kSiteLogonAck))
                 << kPumpBudgetMiss
                 << kSiteLogonAck
-                // "the probe below is what tells the candidate causes apart" stood
-                // here until someone read the actual failure output: the probe does
-                // NOT tell them apart -- saying so is the same overclaim #476 is
-                // about, one frame further out, and it is the sentence a debugger
-                // reads FIRST. It promised an answer the lines under it then refuse
-                // to give.
+                // This clause has been walked back TWICE and the direction is the
+                // point. It began as "the probe below is what tells the candidate
+                // causes apart" (it does not), was softened to "the measurements
+                // below are what narrow it" (they may not -- an unrelated offload
+                // can enter and return while the awaited operation was never
+                // submitted, and then they narrow nothing), and is now simply an
+                // announcement. Every promise about what the numbers MEAN belongs
+                // to the reader and the header block, not to this sentence.
                 << " -- on_inbound_frame(Logon-ack) did not complete within the bounded-pump "
-                   "budget. This is #433's observed failure; the measurements below are what "
-                   "narrow it"
+                   "budget. This is #433's observed failure; raw offload measurements "
+                   "follow"
                 << describe_offload_progress(before, file_pool, kPoolProbeBudget);
             ASSERT_TRUE(fut.get().has_value()) << "Logon-ack inbound should succeed";
             ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
@@ -1387,71 +1470,50 @@ TEST(SessionGracefulCloseFlushesFileStore, OffloadProbe_ForcedSpuriousHit_Report
     file_pool.join();
     std::filesystem::remove_all(dir);
 
-    // F2.1 (#476) -- re-pointed ONCE MORE, and this is the last time it should
-    // need to move. F1.6 removed the causal nouns and F1.7 re-pointed to
-    // "cannot tell them apart"; #476 deletes that clause too, so an assertion
-    // aimed at any surviving PHRASE would move again on the next rewording.
-    // That treadmill is the defect PR #325 spent five rounds on.
+    // F2.1 (#476) -- the assertion is a WHOLE-STRING comparison, and that is a
+    // deliberate move away from what stood here before.
     //
-    // So this asserts two things that survive any rewording:
-    //   (a) the MEASUREMENTS are present -- these are the deliverable, and an
-    //       empty string, an early-returning builder or a truncated report
-    //       cannot pass. The counts are checked by VALUE, not merely present:
-    //       the blocked callable has entered and not returned.
-    //   (b) the text names NO CAUSE. Checked as a closed vocabulary below; a
-    //       reworded observation still passes, while restoring any causal
-    //       clause fails. See the mutation note above the list.
-    EXPECT_NE(diagnostic.find("1 offload(s) entered a pool thread"), std::string::npos)
-        << diagnostic;
-    EXPECT_NE(diagnostic.find("0 returned"), std::string::npos)
-        << "the callable is blocked INSIDE the offload, so the exit seam must not have fired; "
-           "a non-zero count here means the exit probe fires somewhere other than after the "
-           "callable returns\n"
+    // History, because it is the argument: F1.6 deleted the causal nouns; F1.7
+    // re-pointed at "cannot tell them apart"; #476 deleted that too and the
+    // assertion moved to `ends_with` plus a six-phrase blacklist. An adversarial
+    // review then defeated BOTH by inserting "therefore the awaited syscall
+    // finished" just before the tail -- causal, mid-string, built from words no
+    // list contained. It ran the exact predicates and they returned PASS.
+    //
+    // A blacklist can only ever catch prose someone anticipated, so each round
+    // spelled the claim differently and the check chased it. Pinning the
+    // complete rendering ends that: there is nothing left to respell, because
+    // ANY insertion, in either branch, changes the string.
+    EXPECT_EQ(blank_ms_fields(diagnostic),
+              "\n  #433 offload probe: 1 offload(s) entered a pool thread since this pump "
+              "began (last entry <N>ms ago); 1 inside an offloaded callable right now. What "
+              "these numbers do and do not establish is in the header block of " __FILE__
+              " -- read it before concluding anything about which side stalled.")
+        << "the rendering is pinned (#476). If you changed the wording deliberately, update "
+           "this literal; if you did not, something inserted text into the report.\n"
         << diagnostic;
 
-    // (b) is two checks because they fail on different edits, and neither
-    // subsumes the other:
-    //
-    //   ends_with(kProbeTail) is STRUCTURAL -- it compares against the
-    //   producer's own closing sentence, not a private copy of it, so a reword
-    //   moves both sides together and cannot drift. It kills the exact
-    //   regression the builder's comment predicts: a clause APPENDED after the
-    //   pointer. It says nothing about an insertion mid-string.
-    //
-    //   the vocabulary loop covers that mid-string case. It is the weaker of
-    //   the two -- a causal phrase not on the list slips through -- so it is
-    //   the one to re-verify by mutation rather than trust. Every entry is a
-    //   phrase this file actually emitted during #475's rounds or #476.
-    //
-    // ⚠️ Re-verify by restoring a clause as a mutant and requiring RED, e.g.
-    // append " -- consistent with still being inside the syscall" to the
-    // delta >= 1 branch and re-run this arm. A check that cannot fail is worth
-    // nothing.
-    EXPECT_TRUE(diagnostic.ends_with(kProbeTail))
-        << "the report must end with the producer's own pointer-to-the-header sentence; a "
-           "clause appended after it is the #476 regression\n"
-        << diagnostic;
-    for (const char* cause : {"consistent with", "cannot tell them apart", "look at the",
-                              "a slow syscall", "never posting", "still being inside"}) {
-        EXPECT_EQ(diagnostic.find(cause), std::string::npos)
-            << "the report must state measurements and name no cause (#476); found: " << cause
-            << "\n"
-            << diagnostic;
-    }
+    // The VALUES above are the load-bearing half and are worth saying out loud:
+    // "1 entered" means the seam saw the submission, and "1 inside ... right
+    // now" means the gauge still counts the blocked callable. A seam that never
+    // fired would read 0 there -- which is exactly how an earlier version of
+    // this arm passed while the exit probe was not even installed.
 }
 
-// #433 F2.2 (#476) -- POSITIVE CONTROL for the exit seam. The arm above
-// asserts "0 of them returned" while the callable is blocked; that zero is
-// worthless unless this counter can be observed non-zero through the same
-// production seam. So: install both probes, let a real offload run to
-// COMPLETION, and require the exit count to advance.
+// #433 F2.2 (#476) -- POSITIVE CONTROL for the exit seam. The arm above pins
+// "1 inside an offloaded callable right now" while the callable is blocked --
+// a reading the gauge produces only because the exit seam has NOT yet fired.
+// That is worthless unless the seam can be observed FIRING through the same
+// production path. So: install both probes, let a real offload run to
+// COMPLETION, and require the exit count to advance and the gauge to return
+// to where it started.
 //
 // ⚠️ This is the arm that fails if `store_offload_exit_guard` is deleted from
 // `offload_to`, or if it is placed where the callable's return does not reach
 // it. Without this arm, that deletion leaves the suite green -- the blocked
-// arm's "0 of them returned" would then be satisfied by a seam that never
-// fires at all, which is exactly the instrument-cannot-report-non-zero defect
-// this repository keeps re-finding.
+// arm's gauge reading would then be produced by a seam that never fires at
+// all, which is exactly the instrument-cannot-report-non-zero defect this
+// repository keeps re-finding.
 TEST(SessionGracefulCloseFlushesFileStore, OffloadProbe_CompletedOffload_AdvancesExitCount) {
     using fixpp::store_test::unique_store_dir;
     auto dir = unique_store_dir("f22_exit_seam_positive_control");
@@ -1504,6 +1566,12 @@ TEST(SessionGracefulCloseFlushesFileStore, OffloadProbe_CompletedOffload_Advance
     EXPECT_EQ(after.exits - before.exits, after.entries - before.entries)
         << "every offloaded callable this arm started was awaited to completion before the "
            "counters were read, so exits must equal entries";
+    // The gauge is what the report actually prints, so assert on IT, not only
+    // on the counters feeding it. Back to zero means every callable that
+    // entered also left -- an exit seam that fired twice, or not at all, shows
+    // up here and nowhere else.
+    EXPECT_EQ(g_offload_inflight.load(std::memory_order_relaxed), 0)
+        << "after a fully-awaited offload the in-flight gauge must return to zero";
 }
 
 // #433 F6.1 (gate-b/r2, C4) -- witness the delta == 0 branch of
@@ -1522,8 +1590,20 @@ TEST(SessionGracefulCloseFlushesFileStore, OffloadProbe_ZeroDelta_ReportsFilePoo
     pool.stop();
     pool.join();
 
-    EXPECT_NE(diagnostic.find("no offload entered a pool thread"), std::string::npos) << diagnostic;
-    EXPECT_NE(diagnostic.find("RAN after"), std::string::npos) << diagnostic;
+    // Pinned whole, like the delta >= 1 branch. The adversarial review that
+    // defeated the old phrase-probing checks noted this branch was not subject
+    // to ANY of them, so it was the easier one to regress.
+    EXPECT_EQ(blank_ms_fields(diagnostic),
+              "\n  #433 offload probe: no offload entered a pool thread since this pump "
+              "began; 0 inside an offloaded callable right now. What these numbers do and do "
+              "not establish is in the header block of " __FILE__
+              " -- read it before concluding anything about which side stalled. The file_pool "
+              "observation below is meaningful ONLY in this branch:"
+              "\n  #433 file_pool probe: RAN after <N>ms -- a pool thread was free for this "
+              "unrelated trivial task.")
+        << "the rendering is pinned (#476); update this literal only for a deliberate "
+           "reword\n"
+        << diagnostic;
 }
 
 // #433 F6.3 (gate-b/r2, C4, optional) -- witness `probe_file_pool`'s NO POOL
@@ -1567,7 +1647,16 @@ TEST(SessionGracefulCloseFlushesFileStore, OffloadProbe_PoolSaturated_ReportsNoT
     pool.stop();
     pool.join();
 
-    EXPECT_NE(diagnostic.find("NO POOL THREAD BECAME FREE"), std::string::npos) << diagnostic;
+    EXPECT_EQ(blank_ms_fields(diagnostic),
+              "\n  #433 offload probe: no offload entered a pool thread since this pump "
+              "began; 0 inside an offloaded callable right now. What these numbers do and do "
+              "not establish is in the header block of " __FILE__
+              " -- read it before concluding anything about which side stalled. The file_pool "
+              "observation below is meaningful ONLY in this branch:"
+              "\n  #433 file_pool probe: NO POOL THREAD BECAME FREE within <N>ms.")
+        << "the rendering is pinned (#476); update this literal only for a deliberate "
+           "reword\n"
+        << diagnostic;
 }
 
 }  // namespace fixpp::session::test
