@@ -28,6 +28,16 @@ endfunction()
 # ── Werror — turned on in CI via FIXPP_WERROR cache variable ─────────────────
 option(FIXPP_WERROR "Treat compile warnings as errors" OFF)
 
+function(fixpp_maybe_werror target)
+  if(FIXPP_WERROR)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+      target_compile_options(${target} PRIVATE -Werror)
+    elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+      target_compile_options(${target} PRIVATE /WX)
+    endif()
+  endif()
+endfunction()
+
 # ── GCC does not know the `clang::` attribute namespace (#439) ───────────────
 #
 # The tree spells `[[clang::lifetimebound]]` in hand-written headers AND the
