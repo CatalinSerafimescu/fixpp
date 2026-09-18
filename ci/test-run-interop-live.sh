@@ -48,7 +48,11 @@ mk_harness() {  # mk_harness <dir> <filter>...
     echo "CELLS = {}"
     local i=0
     for f in "$@"; do i=$((i+1)); echo "CELLS['CELL-$i'] = C('$f')"; done
-    echo "def run_cell(*a, **k): return {'status': 'pass', '_detail': 'stub'}"
+    echo "import os"
+    echo "def run_cell(*a, **k):"
+    echo "    v = os.environ.get('STUB_VERDICT', 'pass')"
+    echo "    if v == 'raise': raise RuntimeError('stub blew up')"
+    echo "    return {'status': v, '_detail': 'stub'}"
   } > "$dir/tools/run_interop_cell.py"
 }
 
@@ -129,6 +133,25 @@ check "T8b unknown reason tag refused" 2 "malformed exclusion line" -- run
 mkexc "qfj-only-at-g1 Fix44/S.C/QFcpp_init" "unregistered-tracked $LONE" \
       "unregistered-tracked $LONE"
 check "T8c duplicate exclusion refused" 2 "duplicate exclusion" -- run
+
+# ── T9: the RUN phase's verdict. The reconciliation above happens before any cell
+# runs; these pin what the driver does with the results. This is the claim the whole
+# job rests on, and the stub above returned 'pass' unconditionally until it had an
+# arm — an omission of exactly the kind this file exists to catch. ────────────────
+mkexc "qfj-only-at-g1 Fix44/S.C/QFcpp_init" "unregistered-tracked $LONE"
+runcells() { STUB_VERDICT="$1" python3 "$DRIVER" --harness "$H" --build-root "$TMP" \
+               --skip-set "$SKIP" --exclusions "$EXC"; }
+
+check "T9a all cells pass -> job passes" 0 "live interop cell(s) passed" -- runcells pass
+
+# ⚠️ THE headline: interop-smoke tolerates skip:* (FR-023, light tier). Here the
+# counterparty is guaranteed present, so a skip means a cell did not run what it
+# claims to. Inheriting smoke's shape would let this job pass while testing nothing.
+check "T9b a SKIPPED cell fails the job" 1 "did not pass" \
+  -- runcells "skip:counterparty-unavailable"
+check "T9c a FAILED cell fails the job" 1 "did not pass" -- runcells fail
+# A raise must not escape as a traceback and a non-specific exit; it is a cell result.
+check "T9d a RAISING cell is reported, not crashed" 1 "raised: RuntimeError" -- runcells raise
 
 echo
 echo "test-run-interop-live: $pass passed, $fail failed"
