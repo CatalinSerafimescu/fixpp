@@ -1557,9 +1557,9 @@ EXPECTED_IDS = frozenset({
     "HP-QFj-acc-fix44-recovery-outbound",
     "HP-QFj-init-fix44-idle-cadence",
     "HP-QFj-acc-fix44-idle-cadence",
-    # fixpp#462: recovery_inbound, the third G1 group to take its own id — the
-    # 018 inbound TEST_P shares a binary with the 016 smoke TEST_P, and one cell
-    # selects one TEST_P.
+    # fixpp#462: recovery_inbound, a G1 group with its own id — the 018 inbound
+    # TEST_P shares a binary with the 016 smoke TEST_P, and the two need opposite
+    # counterparty inductions, which is one cell each.
     "HP-QFj-init-fix44-recovery-inbound",
     "HP-QFj-acc-fix44-recovery-inbound",
     # Regression cell (runs green locally)

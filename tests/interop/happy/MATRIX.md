@@ -56,7 +56,7 @@ harness's `_finalize`, against that same run's own capture, via
 |----------------|--------|--------------------|----------------|----------|--------|
 | `testrequest_echo` | `hp_fix44_testrequest_echo_test.cpp` (T007) | init/acc (2) | {US1-1, US1-2, US1-3} | [FIX-SL §4.5.5] | reuse-and-enrich `…-testrequest-echo` |
 | `idle_cadence` | `hp_fix44_idle_heartbeat_cadence_test.cpp` (T016) | init/acc (2) | {US2-1, US2-2} | [FIX-SL §4.5.1] | **new** `…-idle-cadence` |
-| `recovery_inbound` | `hp_fix44_seqnum_recovery_test.cpp` (T011) | init/acc (2) | {US3-1, US3-2, US3-4} | [FIX-SL §4.8.2/§4.8.5/§4.5.3] | **new** `…-recovery-inbound` (fixpp#462; the planned reuse of `…-seqnum-recovery` was not possible — one cell selects one TEST_P, and that id's cells select the 016 smoke one in the same binary) |
+| `recovery_inbound` | `hp_fix44_seqnum_recovery_test.cpp` (T011) | init/acc (2) | {US3-1, US3-2, US3-4} | [FIX-SL §4.8.2/§4.8.5/§4.5.3] | **new** `…-recovery-inbound` (fixpp#462; the planned reuse of `…-seqnum-recovery` was not possible — a cell carries one counterparty environment, and the 016 smoke TEST_P in that binary is a witness only while the peer induces nothing) |
 | `recovery_outbound` | `hp_fix44_recovery_outbound_answer_test.cpp` (T012) | init/acc (2) | {US3-3, US3-4} | [FIX-SL §4.8.2/§4.8.5/§4.8.6] | **new** `…-recovery-outbound` |
 | `session_reject` | `hp_fix44_reject_invalid_admin_test.cpp` (T019) | init/acc (2) | {US4-1, US4-2} | [FIX-SL §4.5.4] | reuse-and-enrich `…-reject-invalid-admin` |
 

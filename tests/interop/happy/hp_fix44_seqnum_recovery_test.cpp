@@ -19,19 +19,22 @@
 //     (a) FSM stays Active throughout (recovery runs as AwaitingResend transient,
 //         NOT a separate fsm_state — session stays Active during gap-fill dialogue).
 //     (b) Outbound seqnum advances beyond Logon (at least the ResendRequest emitted).
-//     (c) Expected inbound seqnum advances to the post-recovery value (no prefix loss:
-//         inbound seqnum > 2 after recovery, confirming gap-fill applied).
+//     (c) Expected inbound seqnum reaches the post-GapFill FLOOR — past the frame
+//         that revealed the gap, which only applying NewSeqNo(36) can reach. A bare
+//         "advanced at all" is satisfied by the GapFill's own in-sequence +1 and is
+//         a spurious hit; the derivation is at the assertion site.
 //     (d) Session returns to Active (not Disconnected) after the recovery window.
 //   The golden asserts tags 7/16 (ResendRequest range) and 123/36/43 (reply)
 //   verbatim; see the T014 note below for why 122 is the one excluded.
 //
 // 018 T014 (golden assertion for recovery_inbound cells) — WIRED by fixpp#462:
 //   Cell id is HP-QFj-{init,acc}-fix44-recovery-inbound — its OWN id, not the
-//   T029 reuse-and-enrich of HP-*-seqnum-recovery the 018 plan assumed. A cell
-//   names exactly one gtest filter, and the 016 smoke TEST_P below lives in this
-//   same binary: enriching that id in place would have selected this TEST_P at
-//   the cost of retiring the US1 smoke witness, so both ids now exist and both
-//   TEST_Ps run. `run_interop_cell.py` registers the pair with
+//   T029 reuse-and-enrich of HP-*-seqnum-recovery the 018 plan assumed. The reason
+//   is NOT that a filter can name only one case — a gtest filter takes
+//   ':'-separated patterns. It is that a CELL carries one counterparty environment:
+//   the 016 smoke TEST_P below is a witness only while the peer sends nothing
+//   unusual, so running it under the withhold induction would retire it. Both ids
+//   now exist and both TEST_Ps run. `run_interop_cell.py` registers the pair with
 //   `cp_withhold_frame=True`, under which the QFJ counterparty SKIPS one outbound
 //   MsgSeqNum and sends a Heartbeat at the next one — the induction that makes
 //   this test's "the parent withholds a QFJ->fixpp frame" true rather than
@@ -241,13 +244,28 @@ TEST_P(HappySeqnumRecoveryInbound, GapInductionResendRequestAndReturn) {
     // with GapFill or replay. The session stays Active throughout (AwaitingResend is
     // a transient flag, not a distinct fsm_state).
     //
-    // We pump until the inbound seqnum advances (gap-fill applied) or the window
-    // expires. A live counterparty completes the dialogue within the window.
+    // ⚠️ "inbound advanced AT ALL" is a SPURIOUS HIT, not this witness. The GapFill
+    // itself arrives IN SEQUENCE, at the withheld number == inbound_before_recovery:
+    // Session's ordinary check_inbound advances the counter by one BEFORE
+    // apply_inbound_sequence_reset performs the absolute NewSeqNo(36) jump (the two
+    // steps are named in that order in src/session/session.cpp's GapFill branch). So
+    // a fixpp that RECEIVED the GapFill and never APPLIED it still lands on
+    // inbound_before_recovery + 1 and would satisfy `> inbound_before_recovery`.
+    //
+    // The peer sent the frame that revealed the gap at inbound_before_recovery + 1,
+    // and nothing but the NewSeqNo jump can carry the expected inbound PAST it.
+    // + 2 is therefore the smallest value that is unreachable without the behaviour
+    // under test — a derivation from the induction's shape, not a pinned observation.
+    const auto recovered_inbound_floor =
+        static_cast<fixpp::session::seqnum_t>(inbound_before_recovery + 2);
+
+    // Pump until the inbound seqnum reaches that floor, or the window expires.
+    // A live counterparty completes the dialogue within the window.
     fx.run_until(
         [&] {
             auto ss = fx.engine().lookup(id);
             return ss != nullptr &&
-                   ss->seqnum_mgr_test_access().next_inbound_unsafe() > inbound_before_recovery;
+                   ss->seqnum_mgr_test_access().next_inbound_unsafe() >= recovered_inbound_floor;
         },
         25s);
 
@@ -259,12 +277,14 @@ TEST_P(HappySeqnumRecoveryInbound, GapInductionResendRequestAndReturn) {
     EXPECT_EQ(s->state(), fsm_state::Active)
         << "FSM left Active during/after the recovery_inbound window (US3-4 violated)";
 
-    // ── In-process witness (c): inbound seqnum advanced (no prefix loss) ───
-    // After the gap-fill, the expected inbound sequence must have advanced beyond
-    // its pre-recovery value, confirming the gap was filled (US3-2 + US3-4).
-    EXPECT_GT(s->seqnum_mgr_test_access().next_inbound_unsafe(), inbound_before_recovery)
-        << "inbound expected seqnum did not advance after recovery window "
-        << "(gap-fill may not have been applied; US3-2/US3-4 in-process check)";
+    // ── In-process witness (c): the gap-fill was APPLIED (no prefix loss) ──
+    // The floor, not a bare advance — see the derivation above. A fixpp that
+    // received the GapFill and dropped its NewSeqNo lands one short of this and
+    // fails here, which a `> inbound_before_recovery` test would have passed.
+    EXPECT_GE(s->seqnum_mgr_test_access().next_inbound_unsafe(), recovered_inbound_floor)
+        << "inbound expected seqnum did not reach the post-GapFill floor "
+        << recovered_inbound_floor << " after the recovery window "
+        << "(NewSeqNo(36) may have been received but not applied; US3-2/US3-4)";
 
     // ── In-process witness (b): outbound seqnum advanced further ───────────
     // The ResendRequest(35=2) is an outbound admin frame; seqnum must have grown.
