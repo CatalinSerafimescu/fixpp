@@ -26,8 +26,10 @@ maintained — this page exists because agents did not find them, not because th
 
 > ### ⚠️ About to trust a zero, write a count, or copy a rule?
 >
-> Read [`failure-classes.md`](failure-classes.md) — seven recurring classes with the **trigger** that puts
-> you at risk and the **procedure** that refutes each. It is a taxonomy, not a checklist: the instances
+> Read [`failure-classes.md`](failure-classes.md) — the recurring classes, each with the **trigger** that
+> puts you at risk and the **procedure** that refutes it. (This line used to say *"seven"*. The page had
+> grown well past that and nothing re-reads a sentence — class 3, sitting in the index that routes
+> people to it. The count is gone rather than corrected, per class 2.) It is a taxonomy, not a checklist: the instances
 > live in a private corpus queried at the moment of the trigger, via
 > `research/G19-fix-fpml-iso20022/tools/lessons.py`. ⭐ **A lookup, never a gate** — nothing returned
 > means no recorded lesson matched, not that the code is safe.
