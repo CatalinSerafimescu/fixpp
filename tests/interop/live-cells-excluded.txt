@@ -1,0 +1,66 @@
+# Interop gtest cases that the LIVE job does not run, with the reason (fixpp#468).
+#
+# CONDITION this file states, together with the harness registry:
+#
+#     {gtest id of every cell the live job runs}  ∪  {every id below}
+#   = {every id in expected-skips-without-counterparty.txt}
+#
+# checked in BOTH directions by ci/run-interop-live.py. That equality is what makes
+# the live job's population honest: #431's skip set pins what SKIPS when no
+# counterparty is leased, and on its own it is satisfied equally by a case that runs
+# everywhere and by one that runs NOWHERE. This file is the difference, stated out
+# loud, so a case can stop running only by someone writing down why.
+#
+# ⚠️ An entry here is NOT free. Each group carries a STRUCTURAL condition that the
+# checker re-derives; an id filed under the wrong group fails even though the
+# equality above still holds. Adding a line is therefore a claim, not an escape.
+#
+# Format:  <reason-tag> <Prefix/Suite.Case/param>
+
+# ── qfj-only-at-g1 ───────────────────────────────────────────────────────────
+# The QuickFIX-cpp variant of a scenario whose INDUCTION exists only in the QFJ
+# counterparty at G1. The gtest itself GTEST_SKIPs non-QFj with skip:not-applicable,
+# and the in-repo template declares these as deferred:qfj-only-at-g1 (status n/a)
+# rather than live, so a cell here would always skip and would break the
+# n/a<=>deferred invariant the template's own comments record.
+#
+# STRUCTURAL CONDITION (re-derived by the checker): the SAME Suite.Case has another
+# param that IS covered by a registered cell. That is what distinguishes "this
+# engine is not wired for this scenario" from "this scenario runs nowhere". It also
+# self-retires: implement the QFcpp induction, register the cell, and the line must
+# be deleted or the equality above breaks.
+qfj-only-at-g1 Fix44/HappyIdleHeartbeatCadence.BothDirectionsAtNegotiatedCadence/QFcpp_acc
+qfj-only-at-g1 Fix44/HappyIdleHeartbeatCadence.BothDirectionsAtNegotiatedCadence/QFcpp_init
+qfj-only-at-g1 Fix44/HappyRecoveryOutboundAnswer.FixppAnswersResendRequestAndPeerResyncs/QFcpp_acc
+qfj-only-at-g1 Fix44/HappyRecoveryOutboundAnswer.FixppAnswersResendRequestAndPeerResyncs/QFcpp_init
+qfj-only-at-g1 Fix44/HappyRejectInvalidAdmin.RejectInvalidAdminSurvives/QFcpp_acc
+qfj-only-at-g1 Fix44/HappyRejectInvalidAdmin.RejectInvalidAdminSurvives/QFcpp_init
+qfj-only-at-g1 Fix44/HappySeqnumRecoveryInbound.GapInductionResendRequestAndReturn/QFcpp_acc
+qfj-only-at-g1 Fix44/HappySeqnumRecoveryInbound.GapInductionResendRequestAndReturn/QFcpp_init
+qfj-only-at-g1 Fix44/HappyTestRequestEcho.BidirectionalTestRequestEcho/QFcpp_acc
+qfj-only-at-g1 Fix44/HappyTestRequestEcho.BidirectionalTestRequestEcho/QFcpp_init
+qfj-only-at-g1 Fix44/MalformedDupRejected.MissingOrigSendingTimeTriggersRejectAndSessionSurvives/QFcpp_acc
+qfj-only-at-g1 Fix44/MalformedDupRejected.MissingOrigSendingTimeTriggersRejectAndSessionSurvives/QFcpp_init
+qfj-only-at-g1 Fix44/PossDupReplaySurvives.ReplayedPossDupFrameDoesNotDisconnect/QFcpp_acc
+qfj-only-at-g1 Fix44/PossDupReplaySurvives.ReplayedPossDupFrameDoesNotDisconnect/QFcpp_init
+
+# ── unregistered-tracked ─────────────────────────────────────────────────────
+# NOT a design decision — a KNOWN GAP with an issue. No cell selects these on ANY
+# engine, so they have never run live, and in two cases spec/feature-catalogue.md
+# claims otherwise. Tracked by fixpp#472, which is where the dispositions belong.
+#
+# STRUCTURAL CONDITION (re-derived by the checker): NO param of this Suite.Case is
+# covered. If one ever is, the case has stopped being "runs nowhere" and the entry
+# must be re-argued under the group above rather than silently inherited.
+#
+# ⚠️ This group is the one that must SHRINK. It is written separately from
+# qfj-only-at-g1 precisely so it cannot hide inside a permanent exemption: those 14
+# are a property of the G1 scope, these 8 are a debt.
+unregistered-tracked AllCounterparties/NextExpectedBidirectional.BothGapsRecoverNoResendRequest/QFcpp_bidir
+unregistered-tracked AllCounterparties/NextExpectedBidirectional.BothGapsRecoverNoResendRequest/QFj_bidir
+unregistered-tracked AllCounterparties/RestartResume_Acceptor.BothCountersResumeFromStore/QFcpp_acc
+unregistered-tracked AllCounterparties/RestartResume_Acceptor.BothCountersResumeFromStore/QFj_acc
+unregistered-tracked AllCounterparties/RestartResume_Initiator.BothCountersResumeFromStore/QFcpp_init
+unregistered-tracked AllCounterparties/RestartResume_Initiator.BothCountersResumeFromStore/QFj_init
+unregistered-tracked AllCounterparties/StandbyRehydrate_Initiator.RehydratesOnReconnect/QFcpp_standby
+unregistered-tracked AllCounterparties/StandbyRehydrate_Initiator.RehydratesOnReconnect/QFj_standby
