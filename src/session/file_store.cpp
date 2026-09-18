@@ -185,11 +185,73 @@ static constexpr std::size_t kAlignment = 8;
 
 namespace {
 
+// ── #433 test-seam: offload EXIT probe ───────────────────────────────────────
+//
+// g_store_offload_exit_probe — the companion to g_store_offload_probe (defined
+// further down, next to the other probe state). Defined HERE, apart from its
+// sibling, because `offload_to` below is the only reader and a global must be
+// declared before its use; moving the whole probe block up would churn a file
+// the flake investigation wants stable. Production value: nullptr.
+//
+// WHY THE FUNNEL AND NOT THE PER-SITE LAMBDAS. The ENTRY probe is invoked by
+// each call site's lambda; re-derive which those are rather than trusting a
+// count here:
+//   git grep -n 'g_store_offload_probe' src/session/file_store.cpp
+// The EXIT probe is invoked here instead, once, because `offload_to` is the
+// single point every offload returns through: no site can be forgotten by a
+// future one, and a scope guard also fires while UNWINDING, which a statement
+// at the end of each lambda would not.
+//
+// It is also the CHEAPER placement, which is worth keeping when someone tries
+// to make it symmetric with the entry probe. A per-site exit pointer would be
+// captured into each lambda -- and each lambda IS the by-value `Fn fn`
+// parameter of the inner coroutine below, so it lands in a heap-allocated
+// coroutine frame. This guard is a local whose lifetime ENDS BEFORE the final
+// suspend, so an implementation has no reason to reserve frame storage for it.
+// That is the durable condition; do not replace it with a frame-size number,
+// which no build gate re-checks and which a compiler upgrade can falsify while
+// the comment goes on certifying it.
+//
+// WHAT THE PAIR ESTABLISHES (and what it does NOT). Entry fires at the start
+// of the offloaded callable, exit when that callable has returned or thrown —
+// both on the pool thread. The pair therefore brackets the BLOCKING CALLABLE.
+// ⚠️ It does NOT bracket submit→completion-posted-back: neither seam observes
+// the io_context side, and neither carries the identity of any particular
+// operation, so a counted pair cannot be attributed to the operation a caller
+// is awaiting. Read tests/session/logout_exchange_test.cpp's header block
+// before drawing a conclusion from a count.
+//
+// HOT-PATH / ALLOCATION DISPOSITION (stated, not inherited). Unlike the
+// `flush_for_session_close` witness counter below — which could claim "cold
+// path, graceful close only" — this guard sits in the funnel, so `store()`
+// reaches it on every offloaded write. Cost per offload: one relaxed atomic
+// load and one branch that is not taken in production, inside a destructor
+// that allocates nothing and cannot throw (the probe is `noexcept`). That is
+// the same per-offload cost as the already-shipped ENTRY probe, and it is
+// dominated by the blocking syscall it brackets. No §XV.1 allocation and no
+// §VIII.5 noexcept concern.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+std::atomic<void (*)(std::thread::id) noexcept> g_store_offload_exit_probe{nullptr};
+
+// Fires the exit probe on EVERY path out of the offloaded callable, including
+// an exception unwinding out of `fn()`.
+struct store_offload_exit_guard {
+    ~store_offload_exit_guard() {
+        const auto probe_fn = g_store_offload_exit_probe.load(std::memory_order_relaxed);
+        if (probe_fn) {
+            probe_fn(std::this_thread::get_id());
+        }
+    }
+};
+
 template <class Fn>
 asio::awaitable<std::invoke_result_t<Fn>> offload_to(asio::any_io_executor pool_ex, Fn fn) {
     co_return co_await asio::co_spawn(
         pool_ex,
         [fn = std::move(fn)]() -> asio::awaitable<std::invoke_result_t<Fn>> {
+            // Destroyed when this body completes — before final suspend, on the
+            // pool thread, because the body has no suspension point of its own.
+            store_offload_exit_guard exit_guard;
             co_return fn();  // raw blocking syscall runs HERE, pinned to pool_ex
         },
         asio::use_awaitable);
@@ -275,6 +337,13 @@ std::atomic<void (*)(std::thread::id) noexcept> g_store_offload_probe{nullptr};
 // ── file-store probe API (used by tests via file_store.hpp #ifdef FIXPP_TEST_HOOKS) ──
 void install_store_offload_probe(void (*probe)(std::thread::id) noexcept) noexcept {
     g_store_offload_probe.store(probe, std::memory_order_relaxed);
+}
+
+// #433: the EXIT companion. Its global and the scope guard that calls it live
+// beside `offload_to` above (which is the only reader); see the block comment
+// there for why the pair brackets the blocking callable and NOT submit→post-back.
+void install_store_offload_exit_probe(void (*probe)(std::thread::id) noexcept) noexcept {
+    g_store_offload_exit_probe.store(probe, std::memory_order_relaxed);
 }
 
 // Read and reset the T012 operation_aborted catch-fired counter.
