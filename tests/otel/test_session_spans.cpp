@@ -16,7 +16,7 @@
 //
 // The three `sleep_for(10us)` calls below are sub-granularity and DELIBERATELY
 // left as sleeps. Note what they are NOT for: `latency_ns > 0` is guaranteed
-// without them, by the `std::max(INT64_C(1), ...)` clamp at each site and, for
+// without them, by the 1-ns clamp applied at each site and, for
 // the RAII path, in `record_latency` (src/otel/session_spans.cpp). What a sleep
 // buys is that the recorded latency is a MEASURED interval rather than that
 // clamp floor — so deleting them would leave the assertions passing on the
@@ -124,8 +124,8 @@ TEST_F(SessionSpansTest, SessionSpanAndParseChildBothOK) {
     // Deliberate sub-granularity sleep — see the file header (issue #327).
     std::this_thread::sleep_for(std::chrono::microseconds(10));
 
-    const auto latency_ns = std::max(
-        INT64_C(1),
+    const auto latency_ns = std::max<std::int64_t>(
+        1,
         std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - t0)
             .count());
 
@@ -190,9 +190,9 @@ TEST_F(SessionSpansTest, ParseChildOnDifferentThreadParentsCorrectly) {
             std::this_thread::sleep_for(std::chrono::microseconds(10));
 
             const auto ns =
-                std::max(INT64_C(1), std::chrono::duration_cast<std::chrono::nanoseconds>(
-                                         std::chrono::steady_clock::now() - t0)
-                                         .count());
+                std::max<std::int64_t>(1, std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                              std::chrono::steady_clock::now() - t0)
+                                              .count());
             ps->SetAttribute("latency_ns", ns);
             ps->SetStatus(opentelemetry::trace::StatusCode::kOk);
             ps->End();
