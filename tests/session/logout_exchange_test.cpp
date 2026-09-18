@@ -172,8 +172,10 @@ std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag) {
 // DELTA since that snapshot, never the absolute count:
 //
 //   delta >= 1   an offload reached a pool thread since the snapshot and the
-//                awaited operation still has not completed: the time is at or
-//                after the syscall -- the file-I/O side.
+//                awaited operation still has not completed: consistent with
+//                still being inside the syscall, or with the syscall having
+//                returned and the continuation never posting back -- this
+//                probe cannot tell them apart.
 //   delta == 0   nothing reached a pool thread since the snapshot: either the
 //                operation was never submitted (io_context/strand side), or
 //                the pool never scheduled it. `probe_file_pool` below answers
@@ -260,8 +262,9 @@ std::string describe_offload_progress(std::uint64_t entries_before, asio::thread
         return "\n  #433 offload probe: " + std::to_string(entries_now - entries_before) +
                " offload(s) entered a pool thread since this pump began (last entry " +
                std::to_string(age.count()) +
-               "ms ago) and the awaited operation still has not completed -- look at the "
-               "file-I/O side (a slow syscall).";
+               "ms ago) and the awaited operation still has not completed -- consistent with "
+               "still being inside the syscall, or with the syscall having returned and the "
+               "continuation never posting back -- this probe cannot tell them apart.";
     }
     return "\n  #433 offload probe: no offload entered a pool thread since this pump began "
            "-- consistent with the operation never having been submitted, or with the pool "
@@ -1198,7 +1201,7 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
 // snapshot is compared -- the delta==0 branch, and the probe_file_pool secondary
 // path inside it, is what the miss then reaches. Re-run that recipe to re-verify;
 // do not trust a cached account of its output.
-TEST(SessionGracefulCloseFlushesFileStore, OffloadProbe_ForcedSpuriousHit_NamesFileIoStage) {
+TEST(SessionGracefulCloseFlushesFileStore, OffloadProbe_ForcedSpuriousHit_ReportsUncommittedDelta) {
     using fixpp::store_test::unique_store_dir;
     auto dir = unique_store_dir("f14_forced_spurious_hit");
     asio::thread_pool file_pool{2};
@@ -1271,8 +1274,14 @@ TEST(SessionGracefulCloseFlushesFileStore, OffloadProbe_ForcedSpuriousHit_NamesF
     file_pool.join();
     std::filesystem::remove_all(dir);
 
-    EXPECT_NE(diagnostic.find("file-I/O"), std::string::npos) << diagnostic;
-    EXPECT_EQ(diagnostic.find("io_context side"), std::string::npos) << diagnostic;
+    // F1.7 (gate-b/r2): re-pointed off the deleted "file-I/O"/"a slow syscall"
+    // wording F1.6 removed. Assert on the enumeration clause's PRESENCE (so an
+    // empty string, an early-returning builder, or a truncated diagnostic
+    // cannot pass) and on the commitment's ABSENCE, not on the absence of the
+    // noun -- "file-I/O" still occurs inside the honest enumeration text.
+    EXPECT_NE(diagnostic.find("cannot tell them apart"), std::string::npos) << diagnostic;
+    EXPECT_EQ(diagnostic.find("look at the"), std::string::npos) << diagnostic;
+    EXPECT_EQ(diagnostic.find("a slow syscall"), std::string::npos) << diagnostic;
 }
 
 }  // namespace fixpp::session::test
