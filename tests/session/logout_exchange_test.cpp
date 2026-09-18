@@ -1247,6 +1247,14 @@ TEST(SessionGracefulCloseFlushesFileStore, OffloadProbe_ForcedSpuriousHit_Report
         // can actually finish rather than something still parked in the probe.
         // On EVERY exit from this scope, including a failing ASSERT below --
         // the same hazard F2.1 fixes for `gate->release()` above.
+        //
+        // F5.1 (gate-b/r2, C5): re-arm the release flag BEFORE installing the
+        // probe, where no callback can yet be running. `release_and_uninstall`
+        // stores `true` at scope exit and never stores `false` again, so
+        // without this a repeat run (--gtest_repeat) after the first
+        // iteration finds the flag already `true` and `blocking_offload_probe`
+        // returns immediately instead of blocking.
+        g_f14_release.store(false, std::memory_order_release);
         fixpp::session::install_store_offload_probe(&blocking_offload_probe);
         struct release_and_uninstall {
             ~release_and_uninstall() noexcept {
