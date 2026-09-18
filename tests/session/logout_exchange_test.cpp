@@ -155,12 +155,16 @@ std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag) {
 //
 // `install_store_offload_probe` (include/fixpp/session/file_store.hpp, under
 // FIXPP_TEST_HOOKS) fires at the start of an offloaded lambda, on the pool
-// thread, before its first syscall. It gives ENTRY only -- there is no exit
-// seam in src/session/file_store.cpp, so "still inside the syscall" and
-// "returned, but the continuation never posted" remain indistinguishable by
-// this probe. #433's literal submit/complete pair is not delivered here; that
-// residual is a disposition, not a coverage claim -- do not let a later
-// record say this probe records completion.
+// thread, before its first syscall. `install_store_offload_exit_probe` fires
+// when that callable has returned or thrown, from the single `offload_to`
+// funnel in src/session/file_store.cpp. Together they bracket the BLOCKING
+// CALLABLE on the pool side.
+//
+// ⚠️ THE PAIR IS NOT #433'S SUBMIT/COMPLETE PAIR, AND MUST NOT BE RECORDED AS
+// ONE. #433 asks for submit → completion-posted-back, which spans the
+// io_context side; neither seam observes that side. What the pair adds over
+// entry alone is one genuinely new fact -- whether an offloaded callable is
+// still running RIGHT NOW -- and nothing about the io_context.
 //
 // ⚠️ AN ABSOLUTE ENTRY COUNT IS NOT EVIDENCE ABOUT THE AWAITED OPERATION: more
 // than one offload can precede the one a labelled pump is waiting on, so
@@ -172,10 +176,23 @@ std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag) {
 // DELTA since that snapshot, never the absolute count:
 //
 //   delta >= 1   an offload reached a pool thread since the snapshot and the
-//                awaited operation still has not completed: consistent with
-//                still being inside the syscall, or with the syscall having
-//                returned and the continuation never posting back -- this
-//                probe cannot tell them apart.
+//                awaited operation still has not completed. The EXIT delta
+//                then splits this case -- and only in the pool-side sense:
+//                  entered > returned  at least one offloaded callable is
+//                                      still running. Some pool-side call has
+//                                      not come back.
+//                  entered == returned every offloaded callable that started
+//                                      since the snapshot has finished. No
+//                                      pool-side call is outstanding.
+//                ⚠️ NEITHER READING IS ABOUT THE AWAITED OPERATION -- the
+//                attribution warning above applies unchanged, because the exit
+//                seam carries no operation identity either. In particular
+//                `entered == returned` is consistent BOTH with "the awaited
+//                operation's callable finished and its completion never
+//                reached the io_context" AND with "the awaited operation was
+//                never submitted, and what was counted is unrelated". The pair
+//                cannot tell those apart; it is the io_context side that is
+//                unobserved, and closing that is what #433 still wants.
 //   delta == 0   nothing reached a pool thread since the snapshot: either the
 //                operation was never submitted (io_context/strand side), or
 //                the pool never scheduled it. `probe_file_pool` below answers
@@ -235,6 +252,9 @@ constexpr auto kPoolProbeBudget =
 // return) restores nullptr.
 std::atomic<std::uint64_t> g_offload_entry_count{0};
 std::atomic<std::int64_t> g_offload_last_entry_ns{0};
+// #433 -- the EXIT companion (install_store_offload_exit_probe). Incremented
+// when an offloaded callable has returned or thrown, on the same pool thread.
+std::atomic<std::uint64_t> g_offload_exit_count{0};
 
 void offload_entry_probe(std::thread::id) noexcept {
     g_offload_entry_count.fetch_add(1, std::memory_order_relaxed);
@@ -242,35 +262,85 @@ void offload_entry_probe(std::thread::id) noexcept {
         std::chrono::steady_clock::now().time_since_epoch().count(), std::memory_order_relaxed);
 }
 
+void offload_exit_probe(std::thread::id) noexcept {
+    g_offload_exit_count.fetch_add(1, std::memory_order_relaxed);
+}
+
+// Installs BOTH seams and clears BOTH. A guard that installed only one would
+// leave the other pointing at this TU's probe after the test returns.
 struct scoped_offload_probe {
     scoped_offload_probe() noexcept {
         fixpp::session::install_store_offload_probe(&offload_entry_probe);
+        fixpp::session::install_store_offload_exit_probe(&offload_exit_probe);
     }
-    ~scoped_offload_probe() noexcept { fixpp::session::install_store_offload_probe(nullptr); }
+    ~scoped_offload_probe() noexcept {
+        fixpp::session::install_store_offload_probe(nullptr);
+        fixpp::session::install_store_offload_exit_probe(nullptr);
+    }
 };
+
+// Both counters, read as a pair at one instant. Snapshot immediately BEFORE a
+// labelled pump; report the DELTA (see the header block above).
+struct offload_counts {
+    std::uint64_t entries;
+    std::uint64_t exits;
+};
+
+offload_counts read_offload_counts() noexcept {
+    // Entries first: the two loads are not atomic together, and an offload
+    // entering between them would otherwise be counted as an exit without its
+    // entry, making `returned > entered` -- a nonsense pair in the report.
+    const auto entries = g_offload_entry_count.load(std::memory_order_relaxed);
+    const auto exits = g_offload_exit_count.load(std::memory_order_relaxed);
+    return {entries, exits};
+}
 
 // Snapshot `g_offload_entry_count` immediately before the labelled pump and
 // pass it here as `entries_before` -- see the block comment above for why the
 // DELTA, not the absolute count, is what may be reported.
-std::string describe_offload_progress(std::uint64_t entries_before, asio::thread_pool& pool,
+// ⚠️ #476: THIS FUNCTION REPORTS MEASUREMENTS AND NAMES NO CAUSE. It used to
+// close the `delta >= 1` branch with an enumeration of the readings the counts
+// are "consistent with". That enumeration listed two while the header block
+// above lists three, so the output was narrower than the file's own authority
+// -- and an engineer debugging a #433 recurrence reads the output, not the
+// header. The #325-correct fix for an enumeration that keeps being wrong is to
+// DELETE it, not to add the missing clause: a fix that replaces one claim with
+// a better claim reproduces the defect (that is how PR #325 spent five Gate B
+// rounds). So the readings live in the header block, which is a CONDITION and
+// may be maintained, and the emitted text carries the numbers and a pointer.
+// Keep it that way: if you find yourself appending "-- consistent with ..."
+// here, you are re-opening #476.
+std::string describe_offload_progress(offload_counts before, asio::thread_pool& pool,
                                       std::chrono::milliseconds probe_budget) {
-    const auto entries_now = g_offload_entry_count.load(std::memory_order_relaxed);
-    if (entries_now > entries_before) {
+    const auto now = read_offload_counts();
+    if (now.entries > before.entries) {
         const auto last_ns = g_offload_last_entry_ns.load(std::memory_order_relaxed);
         const auto age = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() -
             std::chrono::steady_clock::time_point(std::chrono::steady_clock::duration(last_ns)));
-        return "\n  #433 offload probe: " + std::to_string(entries_now - entries_before) +
-               " offload(s) entered a pool thread since this pump began (last entry " +
+        // Saturating: `before` is read entries-then-exits, so an offload that
+        // exits between a later pair of loads cannot make this go negative --
+        // but clamp rather than rely on that argument holding after an edit.
+        const auto returned = now.exits > before.exits ? now.exits - before.exits : 0;
+        return "\n  #433 offload probe: " + std::to_string(now.entries - before.entries) +
+               " offload(s) entered a pool thread since this pump began and " +
+               std::to_string(returned) + " of them returned (last entry " +
                std::to_string(age.count()) +
-               "ms ago) and the awaited operation still has not completed -- consistent with "
-               "still being inside the syscall, or with the syscall having returned and the "
-               "continuation never posting back -- this probe cannot tell them apart.";
+               "ms ago); the awaited operation has not completed. What these counts do and do "
+               "not establish is in the header block of " __FILE__ " -- read it before "
+               "concluding anything about which side stalled.";
     }
-    return "\n  #433 offload probe: no offload entered a pool thread since this pump began "
-           "-- consistent with the operation never having been submitted, or with the pool "
-           "never scheduling it -- the file_pool observation appended here narrows between "
-           "them:" +
+    // The same rule as the branch above, applied to the branch #476 did not
+    // name. Deleting the cause in one branch and enumerating in the other
+    // would leave this function with two rules and invite the next reader to
+    // restore the symmetry in the WRONG direction. The readings this branch's
+    // enumeration used to carry are in the header block, which also says why
+    // the file_pool observation below is only meaningful here.
+    return "\n  #433 offload probe: no offload entered a pool thread since this pump began; "
+           "the awaited operation has not completed. What this does and does not establish is "
+           "in the header block of " __FILE__ " -- read it before concluding anything about "
+           "which side stalled. The file_pool observation below is meaningful ONLY in this "
+           "branch:" +
            probe_file_pool(pool, probe_budget);
 }
 
@@ -1034,25 +1104,25 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
         scoped_offload_probe offload_probe;
 
         {
-            const auto entries_before = g_offload_entry_count.load(std::memory_order_relaxed);
+            const auto before = read_offload_counts();
             auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
             ASSERT_TRUE(pump_until_ready(ioc, fut, kSiteOpen))
                 << kPumpBudgetMiss << kSiteOpen
                 << " -- open() did not complete within the bounded-pump budget"
-                << describe_offload_progress(entries_before, file_pool, kPoolProbeBudget);
+                << describe_offload_progress(before, file_pool, kPoolProbeBudget);
             ASSERT_TRUE(fut.get().has_value()) << "open() should succeed";
             ASSERT_EQ(sess.state(), fixpp::session::fsm_state::LogonSent);
         }
 
         {
-            const auto entries_before = g_offload_entry_count.load(std::memory_order_relaxed);
+            const auto before = read_offload_counts();
             auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(logon_ack), asio::use_future);
             ASSERT_TRUE(pump_until_ready(ioc, fut, kSiteLogonAck))
                 << kPumpBudgetMiss << kSiteLogonAck
                 << " -- on_inbound_frame(Logon-ack) did not complete within the bounded-pump "
                    "budget. This is #433's observed failure; the probe below is what tells the "
                    "candidate causes apart"
-                << describe_offload_progress(entries_before, file_pool, kPoolProbeBudget);
+                << describe_offload_progress(before, file_pool, kPoolProbeBudget);
             ASSERT_TRUE(fut.get().has_value()) << "Logon-ack inbound should succeed";
             ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
         }
@@ -1262,14 +1332,24 @@ TEST(SessionGracefulCloseFlushesFileStore, OffloadProbe_ForcedSpuriousHit_Report
         // returns immediately instead of blocking.
         g_f14_release.store(false, std::memory_order_release);
         fixpp::session::install_store_offload_probe(&blocking_offload_probe);
+        // ⚠️ THE EXIT PROBE MUST BE ARMED HERE TOO, OR THIS ARM'S "0 of them
+        // returned" IS VACUOUS. Found by mutation, not by reading: with only
+        // the entry probe installed the exit counter cannot advance for ANY
+        // reason, so the assertion below reported 0 because nothing was
+        // watching -- and a mutant that fires the exit seam in the wrong place
+        // (before the callable instead of after it) stayed GREEN. Arming it
+        // here makes the 0 mean "the seam was watching and the callable had
+        // not returned".
+        fixpp::session::install_store_offload_exit_probe(&offload_exit_probe);
         struct release_and_uninstall {
             ~release_and_uninstall() noexcept {
                 g_f14_release.store(true, std::memory_order_release);
                 fixpp::session::install_store_offload_probe(nullptr);
+                fixpp::session::install_store_offload_exit_probe(nullptr);
             }
         } release_guard;
 
-        const auto entries_before = g_offload_entry_count.load(std::memory_order_relaxed);
+        const auto before = read_offload_counts();
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
 
         // Short explicit budget (F1.4 hazard): the offload is deliberately
@@ -1281,21 +1361,120 @@ TEST(SessionGracefulCloseFlushesFileStore, OffloadProbe_ForcedSpuriousHit_Report
         ASSERT_FALSE(ready) << "the offload is deliberately blocked inside the probe; "
                                 "open() must NOT complete within the short budget";
 
-        diagnostic = describe_offload_progress(entries_before, file_pool, kPoolProbeBudget);
+        diagnostic = describe_offload_progress(before, file_pool, kPoolProbeBudget);
     }  // release_guard unblocks + uninstalls; quiesce then drains the now-completing open().
 
     file_pool.stop();
     file_pool.join();
     std::filesystem::remove_all(dir);
 
-    // F1.7 (gate-b/r2): re-pointed off the deleted "file-I/O"/"a slow syscall"
-    // wording F1.6 removed. Assert on the enumeration clause's PRESENCE (so an
-    // empty string, an early-returning builder, or a truncated diagnostic
-    // cannot pass) and on the commitment's ABSENCE, not on the absence of the
-    // noun -- "file-I/O" still occurs inside the honest enumeration text.
-    EXPECT_NE(diagnostic.find("cannot tell them apart"), std::string::npos) << diagnostic;
-    EXPECT_EQ(diagnostic.find("look at the"), std::string::npos) << diagnostic;
-    EXPECT_EQ(diagnostic.find("a slow syscall"), std::string::npos) << diagnostic;
+    // F2.1 (#476) -- re-pointed ONCE MORE, and this is the last time it should
+    // need to move. F1.6 removed the causal nouns and F1.7 re-pointed to
+    // "cannot tell them apart"; #476 deletes that clause too, so an assertion
+    // aimed at any surviving PHRASE would move again on the next rewording.
+    // That treadmill is the defect PR #325 spent five rounds on.
+    //
+    // So this asserts two things that survive any rewording:
+    //   (a) the MEASUREMENTS are present -- these are the deliverable, and an
+    //       empty string, an early-returning builder or a truncated report
+    //       cannot pass. The counts are checked by VALUE, not merely present:
+    //       the blocked callable has entered and not returned.
+    //   (b) the text names NO CAUSE. Checked as a closed vocabulary below; a
+    //       reworded observation still passes, while restoring any causal
+    //       clause fails. See the mutation note above the list.
+    EXPECT_NE(diagnostic.find("1 offload(s) entered a pool thread"), std::string::npos)
+        << diagnostic;
+    EXPECT_NE(diagnostic.find("0 of them returned"), std::string::npos)
+        << "the callable is blocked INSIDE the offload, so the exit seam must not have fired; "
+           "a non-zero count here means the exit probe fires somewhere other than after the "
+           "callable returns\n"
+        << diagnostic;
+
+    // ⚠️ THIS LIST IS THE ASSERTION'S WEAKEST POINT, SO PROVE IT CAN REPORT
+    // NON-ZERO RATHER THAN TRUSTING IT. Every entry is a phrase this file has
+    // actually emitted at some point in #475's rounds or #476. Re-verify by
+    // restoring one as a mutant and requiring RED, e.g. append
+    //   " -- consistent with still being inside the syscall"
+    // to the delta >= 1 branch of describe_offload_progress and re-run this
+    // arm; a list that cannot fail is worth nothing. A causal phrase NOT on
+    // this list is the residual and is why (a) carries the real weight: the
+    // vocabulary check narrows the regression, it does not eliminate it.
+    for (const char* cause : {"consistent with", "cannot tell them apart", "look at the",
+                              "a slow syscall", "never posting", "still being inside"}) {
+        EXPECT_EQ(diagnostic.find(cause), std::string::npos)
+            << "the report must state measurements and name no cause (#476); found: " << cause
+            << "\n"
+            << diagnostic;
+    }
+}
+
+// #433 F2.2 (#476) -- POSITIVE CONTROL for the exit seam. The arm above
+// asserts "0 of them returned" while the callable is blocked; that zero is
+// worthless unless this counter can be observed non-zero through the same
+// production seam. So: install both probes, let a real offload run to
+// COMPLETION, and require the exit count to advance.
+//
+// ⚠️ This is the arm that fails if `store_offload_exit_guard` is deleted from
+// `offload_to`, or if it is placed where the callable's return does not reach
+// it. Without this arm, that deletion leaves the suite green -- the blocked
+// arm's "0 of them returned" would then be satisfied by a seam that never
+// fires at all, which is exactly the instrument-cannot-report-non-zero defect
+// this repository keeps re-finding.
+TEST(SessionGracefulCloseFlushesFileStore, OffloadProbe_CompletedOffload_AdvancesExitCount) {
+    using fixpp::store_test::unique_store_dir;
+    auto dir = unique_store_dir("f22_exit_seam_positive_control");
+
+    FileStore::Config cfg;
+    cfg.directory = dir;
+    cfg.max_frame_bytes = 4096;
+    // per_message so next_seqnum(increment=true) reaches the datasync offload
+    // rather than deferring it to a batch boundary this arm never crosses.
+    cfg.policy.which = FileStorePolicy::kind::commit_per_message;
+
+    asio::thread_pool pool{2};
+    auto pool_ex = pool.get_executor();
+    cfg.file_io_executor = pool_ex;
+    FileStoreFactory factory{cfg};
+
+    offload_counts before{};
+    offload_counts after{};
+    bool bumped = false;
+    {
+        scoped_offload_probe probe_guard;
+        before = read_offload_counts();
+        // Same shape as the durability-verify block above: drive the store from
+        // a coroutine spawned onto the pool itself, so `fut.get()` returns only
+        // once every offload it awaited has completed -- which is what makes
+        // the exits==entries assertion below a fact rather than a race.
+        auto fut = asio::co_spawn(
+            pool,
+            [&]() -> asio::awaitable<void> {
+                auto ms = factory.make("ISLD", "TW", nullptr, 1024 * 1024, pool_ex);
+                if (!ms.has_value()) co_return;
+                auto* fs = static_cast<FileStore*>(ms->get());
+                auto r = co_await fs->next_seqnum(direction_t::outbound, true);
+                bumped = r.has_value();
+            },
+            asio::use_future);
+        fut.get();
+        after = read_offload_counts();
+    }
+
+    pool.stop();
+    pool.join();
+    std::filesystem::remove_all(dir);
+
+    ASSERT_TRUE(bumped) << "the store must open and bump a counter for this arm to mean anything";
+    ASSERT_GT(after.entries, before.entries)
+        << "no offload entered at all -- this arm cannot say anything about the EXIT seam "
+           "until the ENTRY seam has fired; fix the fixture before reading the assertions below";
+    EXPECT_GT(after.exits, before.exits)
+        << "an offload entered a pool thread and its callable returned, but the exit seam did "
+           "not fire: `store_offload_exit_guard` in src/session/file_store.cpp's offload_to is "
+           "missing or misplaced";
+    EXPECT_EQ(after.exits - before.exits, after.entries - before.entries)
+        << "every offloaded callable this arm started was awaited to completion before the "
+           "counters were read, so exits must equal entries";
 }
 
 // #433 F6.1 (gate-b/r2, C4) -- witness the delta == 0 branch of
@@ -1307,9 +1486,9 @@ TEST(SessionGracefulCloseFlushesFileStore, OffloadProbe_ForcedSpuriousHit_Report
 // construction -- reaching this branch does not depend on timing.
 TEST(SessionGracefulCloseFlushesFileStore, OffloadProbe_ZeroDelta_ReportsFilePoolProbe) {
     asio::thread_pool pool{2};
-    const auto entries_before = g_offload_entry_count.load(std::memory_order_relaxed);
+    const auto before = read_offload_counts();
 
-    const std::string diagnostic = describe_offload_progress(entries_before, pool, kPoolProbeBudget);
+    const std::string diagnostic = describe_offload_progress(before, pool, kPoolProbeBudget);
 
     pool.stop();
     pool.join();
@@ -1351,9 +1530,9 @@ TEST(SessionGracefulCloseFlushesFileStore, OffloadProbe_PoolSaturated_ReportsNoT
         [&] { return occupied.load(std::memory_order_acquire) == 2; }, std::chrono::seconds{5}))
         << "both pool workers must be occupied before the saturated probe runs";
 
-    const auto entries_before = g_offload_entry_count.load(std::memory_order_relaxed);
+    const auto before = read_offload_counts();
     const std::string diagnostic =
-        describe_offload_progress(entries_before, pool, std::chrono::milliseconds{50});
+        describe_offload_progress(before, pool, std::chrono::milliseconds{50});
 
     release.store(true, std::memory_order_release);
     pool.stop();
