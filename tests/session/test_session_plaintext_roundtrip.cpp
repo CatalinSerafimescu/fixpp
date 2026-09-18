@@ -85,8 +85,8 @@
 // selects the value (it IS the plaintext round-trip test), so suppress file-wide
 // per the fixpp-internal-code pragma idiom. [043 T020]
 #if defined(__clang__) || defined(__GNUC__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
 #include <fixpp/session/security_profile.hpp>
 
@@ -584,5 +584,5 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogonLogout) {
            "(possibly the session disconnected for another reason before Logout).";
 }
 #if defined(__clang__) || defined(__GNUC__)
-#pragma clang diagnostic pop  // -Wdeprecated-declarations (insecure_plain_tcp, 043 T020)
+#pragma GCC diagnostic pop  // -Wdeprecated-declarations (insecure_plain_tcp, 043 T020)
 #endif

@@ -38,6 +38,90 @@ function(fixpp_maybe_werror target)
   endif()
 endfunction()
 
+# ── GCC does not know the `clang::` attribute namespace (#439) ───────────────
+#
+# The tree spells `[[clang::lifetimebound]]` in hand-written headers AND the
+# codegen emitter writes it into every generated accessor, so the diagnostic
+# count is dominated by generated code and moves with each regeneration. GCC
+# parses the attribute, cannot act on it, and says so with `-Wattributes` --
+# which is ON BY DEFAULT, not part of -Wall. Without this suppression `-Werror`
+# on GCC is unusable.
+#
+# ⚠️ SUPPRESSED BY ATTRIBUTE, NOT BY NAMESPACE. `-Wno-attributes=clang::` would
+# also swallow a MISSPELLED attribute in that namespace -- `[[clang::lifetimebond]]`
+# compiles silently under it, on the very lane that exists to be strict. Naming
+# the one attribute keeps that diagnostic. Measured three ways on GCC 13.3:
+#   -Wno-attributes=clang::lifetimebound + [[clang::lifetimebound]] -> silent
+#   -Wno-attributes=clang::lifetimebound + [[clang::lifetimebond]]  -> STILL errors
+#   -Wno-attributes=clang::              + [[clang::lifetimebond]]  -> swallowed
+# `lifetimebound` is currently the ONLY clang:: attribute in the tree; a second
+# one means adding a second entry here, deliberately. Re-derive the population:
+#   grep -rhoE '\[\[clang::[a-zA-Z_]+' include src tests tools perf | sort -u
+#
+# ⚠️ CXX ONLY, via a generator expression. `add_compile_options` is
+# directory-scoped and reaches every language; this repo has a C target
+# (`mallocnesia`). A configuration pairing GNU C++ with a non-GNU C compiler
+# would hand this GCC-only spelling to that compiler, which rejects it as an
+# unknown warning option -- fatal under -Werror.
+#
+# ⚠️ THE SUPPORT CHECK IS A BEHAVIOURAL PROBE, NOT A VERSION NUMBER. An earlier
+# draft refused GCC < 13, on the belief that the scoped `-Wno-attributes=` form
+# arrived in 13. That is a claim about other people's compilers that nothing
+# here can re-check, it was disputed as wrong for GCC 12, and a version test
+# cannot see a backport or a vendor build anyway. So compile the attribute WITH
+# the flag under -Werror and ask whether it is silent -- the property actually
+# depended upon. ⚠️ A bare flag-ACCEPTANCE test would not do: GCC accepts an
+# unknown `-Wno-*` silently unless some other diagnostic fires, so it would pass
+# on a compiler where the suppression does nothing.
+#
+# ⚠️ THE GATE ON FIXPP_WERROR IS A CACHE DECISION, NOT A LOGICAL ONE -- the
+# suppression is correct on GCC unconditionally. GCC can never act on a
+# `clang::` attribute, with or without -Werror; read this as "applied where it
+# is load-bearing", NOT as "only needed under -Werror".
+#
+# What the gate buys, measured rather than assumed. Adding a flag moves EVERY
+# compile command line, so a lane's ccache restore still HITs while every entry
+# misses -- the signature ci/ccache-stats.sh calls pathological. Two lanes
+# assert a 70% FATAL floor: python-wheel-build (tier1.yml) and all four
+# linux-clang-libc++* legs (tier3-libcxx.yml). The libc++ legs are clang, so
+# this flag never reaches them. python-wheel-build is GNU and never sets
+# FIXPP_WERROR, and its cache identity is the manylinux image digest + py-api,
+# which does NOT cover the flag surface -- so it cannot rotate its own key and
+# would take the full miss. Ungated, that lane breaches its floor with
+# certainty; gated, its command lines are byte-identical.
+#
+# ⚠️ THE CONDITION, so this does not rot into a rule nobody can re-check: the
+# gate is worth keeping only while some floored lane is GNU and does not set
+# FIXPP_WERROR. Re-derive with
+#   grep -rn "ccache-stats.sh" .github/workflows/   # which callers pass a floor
+# and check that lane's compiler and FIXPP_WERROR. If no floored lane is GNU any
+# more, DELETE the gate -- an unconditional suppression is the better mechanism.
+# If a GCC lane without -Werror ever wants clean output, delete the gate and
+# re-seed that lane's cache the way #437/#453 did (drop the stale GHCR tags so
+# the restore MISSes, which the floor exempts).
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND FIXPP_WERROR)
+  include(CheckCXXSourceCompiles)
+  set(CMAKE_REQUIRED_FLAGS "-Werror -Wno-attributes=clang::lifetimebound")
+  check_cxx_source_compiles(
+    "struct S { int v; const int& f() const [[clang::lifetimebound]] { return v; } };
+     int main() { return 0; }"
+    FIXPP_GCC_SUPPRESSES_CLANG_LIFETIMEBOUND)
+  unset(CMAKE_REQUIRED_FLAGS)
+
+  if(NOT FIXPP_GCC_SUPPRESSES_CLANG_LIFETIMEBOUND)
+    message(FATAL_ERROR
+      "FIXPP_WERROR=ON with GCC ${CMAKE_CXX_COMPILER_VERSION}, but this compiler "
+      "does not silence [[clang::lifetimebound]] under "
+      "-Wno-attributes=clang::lifetimebound. Every such attribute in the tree -- "
+      "hand-written and codegen-emitted alike -- is then a -Wattributes error, so "
+      "this configuration cannot build. Use a GCC that supports the scoped "
+      "-Wno-attributes= form, or configure with -DFIXPP_WERROR=OFF.")
+  endif()
+
+  add_compile_options(
+    $<$<COMPILE_LANG_AND_ID:CXX,GNU>:-Wno-attributes=clang::lifetimebound>)
+endif()
+
 # ── #417: FIXPP_WERROR reaches every first-party compiled target ─────────────
 #
 #   fixpp_apply_werror_to_all_targets()   — call DEFERRED from the top-level

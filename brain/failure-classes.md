@@ -588,6 +588,65 @@ that only fails under a shuffled order.
 - **Scanning heuristic:** grep for `install_`/`uninstall_` pairs not wrapped in a guard, and for a
   guard declared *after* the pool or context whose work it observes.
 
+### 16. A disabled gate rots everything written to satisfy it, and the two gaps hide each other
+
+A suppression, exemption or annotation written for a gate that is **off** is never exercised as a
+claim. It decays with no symptom, because the only thing that would have contradicted it is the gate.
+The dead gate and the dead opt-out are therefore the *same* blind spot, each concealing the other.
+Turning the gate on does not merely surface the findings it was always meant to catch — it surfaces
+every opt-out that quietly stopped working while nobody was looking.
+
+**Reference instance: fixpp#439.** The gcc presets set `FIXPP_WERROR=OFF` from the first presets
+commit. Fifteen deprecated-API uses across nine files were suppressed with
+
+```c
+#if defined(__clang__) || defined(__GNUC__)
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#endif
+```
+
+The **guard names `__GNUC__`**, so it claims to cover GCC. The **pragma is `#pragma clang
+diagnostic`**, which GCC does not honour — and does not warn about, so there is no diagnostic about
+the missing diagnostic. The suppression was inert on GCC for its entire life, and nothing noticed
+because the one lane that could have noticed had `-Werror` off. The guard recorded an INTENT; the
+pragma is the MECHANISM; only the mechanism executes. (The same flip also found a second, larger
+rot in the same direction: `[[clang::lifetimebound]]`, which GCC reports under `-Wattributes` — a
+DEFAULT-ON warning, so `-Wall` was never what stood between the tree and the gate. 92767 distinct
+sites **as measured at #439**; the figure is a record of that measurement, not a property of the
+tree — it is dominated by generated headers and moves with every regeneration.)
+
+**Three instances, one flip, three different mechanisms — which is the point.** The same gate flip
+also found `-Wno-macro-redefined` applied to every non-MSVC compiler in `tests/log/CMakeLists.txt`,
+with a comment saying it was there *"so FIXPP_WERROR does not turn the expected redefinition into an
+error"*. That is a **clang** spelling. GCC does not recognise it and accepts it silently — an unknown
+`-Wno-*` is only ever reported when some other diagnostic fires — so the target could not build once
+`-Werror` arrived. GCC itself printed the diagnosis (*"unrecognized command-line option
+'-Wno-macro-redefined' may have been intended to silence earlier diagnostics"*), which nothing had
+ever been in a position to read. So the class is not "someone wrote the wrong pragma": the rot
+appeared in a **pragma**, in a **preprocessor guard**, and in a **build-system flag**, because the
+common cause is the disabled gate, not the mechanism.
+
+⚠️ **Prefer removing the CAUSE to suppressing the diagnostic, because a suppression is what rots.**
+The redefinition fix is `-U` then `-D` rather than a second `-D` plus a silencer: then no
+redefinition happens on any compiler and there is nothing to keep working. Where you do suppress,
+verify the SUPPRESSED PROPERTY still holds — here, that the macro is still `3` afterwards and not
+merely undefined, which a check for "the error went away" would have missed.
+
+- **Trigger:** you are about to ENABLE a gate that has been off — a lane's `-Werror`, a sanitizer, a
+  lint, a coverage floor — or you are writing an opt-out for a gate that is off on some platform.
+- **Procedure:** budget for the rot rather than meeting it as a surprise. MEASURE before flipping:
+  replay the lane's own compile/run commands with the gate on and enumerate what fails, instead of
+  flipping and reading the CI log. Compile to `/dev/null`, not `-fsyntax-only` — a front-end-only run
+  cannot see the optimiser-emitted diagnostics, which are exactly the compiler-specific ones a
+  disabled lane accumulates. Then check each surviving opt-out **two-sided**: prove the suppressed
+  site is silent AND that an unsuppressed sibling still fires, on *every* compiler the guard names.
+- ⚠️ **Enabling the gate also invalidates the lane's compiler cache**, because the gate is a flag and
+  a flag moves every command line. Check what asserts a cache HIT FLOOR before flipping: a floor will
+  fire correctly on the deliberate re-seed and read as a failure of the change.
+- **Sibling:** class 3 says a document may not record a RESULT. This is its executable form — a
+  PREPROCESSOR CONDITION can record an intent it does not implement, and unlike a comment it looks
+  like code that someone checked.
+
 ## How to query the instances
 
 The corpus is private and machine-local. From the parent repo:

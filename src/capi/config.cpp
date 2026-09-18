@@ -181,12 +181,12 @@ fixpp_error_t fixpp_session_config_set_security(fixpp_session_config_t* cfg,
             // (043 D-9 selection-site friction is satisfied at the C consumer's
             // explicit FIXPP_SECURITY_INSECURE_PLAIN_TCP choice).
 #if defined(__clang__) || defined(__GNUC__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
             cfg->cfg.security_profile.k = fixpp::session::SecurityProfile::kind::insecure_plain_tcp;
 #if defined(__clang__) || defined(__GNUC__)
-#pragma clang diagnostic pop
+#pragma GCC diagnostic pop
 #endif
             return FIXPP_ERR_OK;
         default:

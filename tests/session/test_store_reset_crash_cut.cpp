@@ -349,7 +349,7 @@ TEST(StoreResetCrashCut, CrashBetweenRenameAndParentDirFsync_CoherentState) {
                 auto r = co_await store.reset();
                 // Signal parent: rename is done (or reset completed)
                 char done = r.has_value() ? 1 : 0;
-                ::write(pipefd[1], &done, 1);
+                (void)!::write(pipefd[1], &done, 1);
             },
             asio::use_future);
         try {
@@ -357,7 +357,7 @@ TEST(StoreResetCrashCut, CrashBetweenRenameAndParentDirFsync_CoherentState) {
         } catch (...) {
             // On any error, signal with 0
             char done = 0;
-            ::write(pipefd[1], &done, 1);
+            (void)!::write(pipefd[1], &done, 1);
         }
 
         // Block forever — parent SIGKILLs us after seeing the pipe byte.

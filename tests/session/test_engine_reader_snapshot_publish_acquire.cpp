@@ -50,8 +50,8 @@
 //          engine.cpp run_connect_loop step 4 (its `publish_entry` call).
 
 #if defined(__clang__) || defined(__GNUC__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
 
 #include <gtest/gtest.h>
@@ -182,13 +182,13 @@ TEST(EngineReaderSnapshotPublishAcquire, LookupNeverSeesTornPointer) {
     sc.sender_comp_id = "SNAP_SENDER";
     sc.target_comp_id = "SNAP_TARGET";
 #if defined(__clang__) || defined(__GNUC__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
     sc.security_profile =
         fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::insecure_plain_tcp};
 #if defined(__clang__) || defined(__GNUC__)
-#pragma clang diagnostic pop
+#pragma GCC diagnostic pop
 #endif
     sc.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", bound_port};
     // Unlimited reconnect attempts so the loop stays alive for the whole publish budget.
@@ -415,5 +415,5 @@ TEST(EngineReaderSnapshotPublishAcquire, PendingAcceptDoesNotWedgeBoundedDrain) 
 }
 
 #if defined(__clang__) || defined(__GNUC__)
-#pragma clang diagnostic pop
+#pragma GCC diagnostic pop
 #endif

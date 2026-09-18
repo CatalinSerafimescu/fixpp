@@ -50,15 +50,39 @@ add_test(NAME log_block COMMAND log_block_test)
 # NOTE: This test is compiled with FIXPP_LOG_MIN_LEVEL overridden to warn(3)
 # so that debug/info call sites are compiled out.
 add_executable(log_alloc_test test_compile_cutoff_zero_alloc.cpp)
+# fixpp_log exports FIXPP_LOG_MIN_LEVEL PUBLIC, so this target sees the library's
+# value AND the override (=3), and the later one wins -- the override IS the
+# property under test.
+#
+# ⚠️ THE OVERRIDE IS APPLIED AS -U THEN -D, NOT AS A SECOND -D, so that no
+# redefinition happens at all and there is nothing to suppress. The previous
+# shape defined it twice and silenced the resulting diagnostic with
+# `-Wno-macro-redefined` for every non-MSVC compiler -- but that is a CLANG
+# spelling. GCC does not recognise it, accepts it silently (an unknown `-Wno-*`
+# is only reported when some other diagnostic fires), and still warns. Under
+# FIXPP_WERROR that is a hard error, which is why this target could not build
+# once #439 turned -Werror on for the gcc presets. The comment here previously
+# claimed the suppression covered that case; it never did on GCC. Same shape as
+# the `#pragma clang diagnostic` rot #439 found elsewhere -- see
+# brain/failure-classes.md class 16.
+#
+# ⚠️ ORDER IS LOAD-BEARING AND COMES FROM CMAKE, not from this file: CMake emits
+# <DEFINES> before <FLAGS>, so a `-U` added here can only ever follow the
+# library's PUBLIC `-D`. That is exactly what is wanted -- undefine, then define
+# -- but it also means the override MUST NOT also be a target_compile_definition,
+# or the redefinition it is avoiding happens in the DEFINES group before this
+# runs. Verified: the macro is 3 after this (g++ -dM -E), not undefined.
+#
+# MSVC is deliberately left on its proven define + /wd4005 path: that leg cannot
+# be exercised from here, and the defect being fixed is GCC-only. Unifying it is
+# a follow-up, not a change to ship untested to a required lane.
 target_compile_definitions(log_alloc_test PRIVATE
-  FIXPP_LOG_MIN_LEVEL=3   # warn (Level::warn == 3)
+  $<$<CXX_COMPILER_ID:MSVC>:FIXPP_LOG_MIN_LEVEL=3>   # warn (Level::warn == 3)
 )
-# fixpp_log exports FIXPP_LOG_MIN_LEVEL PUBLIC, so this target sees both definitions
-# and the later (=3) wins -- the override IS the property under test. Say so, so
-# FIXPP_WERROR does not turn the expected redefinition into an error (#417).
 target_compile_options(log_alloc_test PRIVATE
   $<$<CXX_COMPILER_ID:MSVC>:/wd4005>
-  $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wno-macro-redefined>
+  $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-UFIXPP_LOG_MIN_LEVEL>
+  $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-DFIXPP_LOG_MIN_LEVEL=3>
 )
 target_link_libraries(log_alloc_test PRIVATE
   fixpp_log

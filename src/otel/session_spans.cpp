@@ -81,8 +81,8 @@ trace_api::StartSpanOptions make_child_opts(const trace_api::SpanContext& parent
 void record_latency(opentelemetry::nostd::shared_ptr<trace_api::Span>& span,
                     std::chrono::steady_clock::time_point start) {
     const auto now = std::chrono::steady_clock::now();
-    const auto ns = std::max(
-        INT64_C(1), std::chrono::duration_cast<std::chrono::nanoseconds>(now - start).count());
+    const auto ns = std::max<std::int64_t>(
+        1, std::chrono::duration_cast<std::chrono::nanoseconds>(now - start).count());
     span->SetAttribute("latency_ns", static_cast<int64_t>(ns));
 }
 

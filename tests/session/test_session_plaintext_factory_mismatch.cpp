@@ -49,12 +49,12 @@
 
 // SecurityProfile::kind::insecure_plain_tcp carries [[deprecated]]; suppress file-wide.
 #if defined(__clang__) || defined(__GNUC__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
 #include <fixpp/session/security_profile.hpp>
 #if defined(__clang__) || defined(__GNUC__)
-#pragma clang diagnostic pop
+#pragma GCC diagnostic pop
 #endif
 
 #include <gtest/gtest.h>
@@ -128,12 +128,12 @@ SessionConfig make_cfg(SecurityProfile::kind k) {
     cfg.heartbeat_interval = std::chrono::seconds{0};
 
 #if defined(__clang__) || defined(__GNUC__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
     cfg.security_profile = SecurityProfile{k};
 #if defined(__clang__) || defined(__GNUC__)
-#pragma clang diagnostic pop
+#pragma GCC diagnostic pop
 #endif
 
     cfg.transport_send = [](std::span<const std::byte>) {};
@@ -154,12 +154,12 @@ TEST(PlaintextFactoryMismatch, Cell_a_PlaintextProfileWithTlsOverrideRejects) {
     eng.clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
 
 #if defined(__clang__) || defined(__GNUC__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
     auto cfg = make_cfg(SecurityProfile::kind::insecure_plain_tcp);
 #if defined(__clang__) || defined(__GNUC__)
-#pragma clang diagnostic pop
+#pragma GCC diagnostic pop
 #endif
 
     // TLS-kind override (MinimalTlsFactory defaults kind() → tls).
@@ -354,12 +354,12 @@ TEST(PlaintextFactoryMismatch, Cell_d_PlaintextProfileNoOverrideOpens) {
     eng.clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
 
 #if defined(__clang__) || defined(__GNUC__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
     auto cfg = make_cfg(SecurityProfile::kind::insecure_plain_tcp);
 #if defined(__clang__) || defined(__GNUC__)
-#pragma clang diagnostic pop
+#pragma GCC diagnostic pop
 #endif
     cfg.executor_override = ioc.get_executor();
     // No transport_factory_override → auto-derive.
@@ -437,12 +437,12 @@ TEST(PlaintextFactoryMismatch, Cell_f_PlaintextProfileWithPlaintextOverrideOpens
     eng.clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
 
 #if defined(__clang__) || defined(__GNUC__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
     auto cfg = make_cfg(SecurityProfile::kind::insecure_plain_tcp);
 #if defined(__clang__) || defined(__GNUC__)
-#pragma clang diagnostic pop
+#pragma GCC diagnostic pop
 #endif
 
     auto plain_r =
@@ -521,8 +521,8 @@ TEST(PlaintextFactoryMintWitness, Cell_g_PlaintextNoOverrideAutoDeriveMint) {
     // No engine default — auto-derive derives its own factory.
 
 #if defined(__clang__) || defined(__GNUC__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
     SessionConfig cfg;
     cfg.sender_comp_id = "TW";
@@ -532,7 +532,7 @@ TEST(PlaintextFactoryMintWitness, Cell_g_PlaintextNoOverrideAutoDeriveMint) {
     cfg.engine_managed = true;  // defer connect to drive_reconnect()
     cfg.security_profile = SecurityProfile{SecurityProfile::kind::insecure_plain_tcp};
 #if defined(__clang__) || defined(__GNUC__)
-#pragma clang diagnostic pop
+#pragma GCC diagnostic pop
 #endif
     cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
     cfg.heartbeat_interval = std::chrono::seconds{0};
