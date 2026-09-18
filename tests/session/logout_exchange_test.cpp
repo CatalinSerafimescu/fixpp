@@ -1187,12 +1187,17 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
 // so rather than claim more: this is the shared report BUILDER bound at the real
 // production seam, not a capture of the two call sites' own source text.
 //
-// The complementary delta == 0 branch is NOT witnessed by an automated arm in this
-// binary: `forced_miss_here`'s env var is read via a function-local static on its
-// FIRST call in the process (tests/support/pump_until_ready.hpp), so a `setenv()`
-// inside a running test has no effect once any earlier test has already pumped.
-// Reaching delta == 0 at the real kSiteOpen/kSiteLogonAck sites requires the env
-// var set BEFORE process start, i.e. a separate process invocation:
+// F6.2 (gate-b/r2, C4): the complementary delta == 0 branch IS witnessed at
+// builder scope -- OffloadProbe_ZeroDelta_ReportsFilePoolProbe below (F6.1)
+// calls `describe_offload_progress` directly with no offload produced, the
+// same scope this arm already occupies for the delta >= 1 branch. It is NOT
+// witnessed at the real kSiteOpen/kSiteLogonAck sites, and that narrower
+// claim is the one with a real obstacle: `forced_miss_here`'s env var is read
+// via a function-local static on its FIRST call in the process
+// (tests/support/pump_until_ready.hpp), so a `setenv()` inside a running test
+// has no effect once any earlier test has already pumped. Reaching delta == 0
+// at the real kSiteOpen/kSiteLogonAck sites requires the env var set BEFORE
+// process start, i.e. a separate process invocation:
 //   FIXPP_FORCE_WINDOW_MISS='FlushRunsAndFramesDurableAfterClose/open' \
 //     ./session_logout_exchange \
 //     --gtest_filter='SessionGracefulCloseFlushesFileStore.FlushRunsAndFramesDurableAfterClose'
@@ -1290,6 +1295,60 @@ TEST(SessionGracefulCloseFlushesFileStore, OffloadProbe_ForcedSpuriousHit_Report
     EXPECT_NE(diagnostic.find("cannot tell them apart"), std::string::npos) << diagnostic;
     EXPECT_EQ(diagnostic.find("look at the"), std::string::npos) << diagnostic;
     EXPECT_EQ(diagnostic.find("a slow syscall"), std::string::npos) << diagnostic;
+}
+
+// #433 F6.1 (gate-b/r2, C4) -- witness the delta == 0 branch of
+// `describe_offload_progress` at builder scope, which the F1.4/F1.7 arm above
+// already occupies for the delta >= 1 branch (see its own disclosure of what
+// it binds). No `install_store_offload_probe` is installed in this arm, so
+// nothing can increment `g_offload_entry_count`: the snapshot taken here
+// equals the count read back inside the builder, so the delta is 0 by
+// construction -- reaching this branch does not depend on timing.
+TEST(SessionGracefulCloseFlushesFileStore, OffloadProbe_ZeroDelta_ReportsFilePoolProbe) {
+    asio::thread_pool pool{2};
+    const auto entries_before = g_offload_entry_count.load(std::memory_order_relaxed);
+
+    const std::string diagnostic = describe_offload_progress(entries_before, pool, kPoolProbeBudget);
+
+    pool.stop();
+    pool.join();
+
+    EXPECT_NE(diagnostic.find("no offload entered a pool thread"), std::string::npos) << diagnostic;
+    EXPECT_NE(diagnostic.find("RAN after"), std::string::npos) << diagnostic;
+}
+
+// #433 F6.3 (gate-b/r2, C4, optional) -- witness `probe_file_pool`'s NO POOL
+// THREAD BECAME FREE branch. Occupies both pool workers with a blocking task
+// BEFORE calling the builder, so the probe's own trivial post-and-wait cannot
+// find a free thread within the short budget. This saturates the pool
+// directly (bypassing `FileStoreImpl`'s per-instance `async_mutex`, which is
+// what keeps this branch unreachable through the two labelled production
+// sites -- see the record's §3 table), so it does not revise that reading;
+// it demonstrates the branch is reachable at builder scope.
+TEST(SessionGracefulCloseFlushesFileStore, OffloadProbe_PoolSaturated_ReportsNoThreadFree) {
+    asio::thread_pool pool{2};
+    std::atomic<bool> release{false};
+    std::atomic<int> occupied{0};
+    for (int i = 0; i < 2; ++i) {
+        asio::post(pool, [&] {
+            occupied.fetch_add(1, std::memory_order_release);
+            (void)fixpp::test_support::wait_until_observed(
+                [&] { return release.load(std::memory_order_acquire); }, std::chrono::seconds{5});
+        });
+    }
+    ASSERT_TRUE(fixpp::test_support::wait_until_observed(
+        [&] { return occupied.load(std::memory_order_acquire) == 2; }, std::chrono::seconds{5}))
+        << "both pool workers must be occupied before the saturated probe runs";
+
+    const auto entries_before = g_offload_entry_count.load(std::memory_order_relaxed);
+    const std::string diagnostic =
+        describe_offload_progress(entries_before, pool, std::chrono::milliseconds{50});
+
+    release.store(true, std::memory_order_release);
+    pool.stop();
+    pool.join();
+
+    EXPECT_NE(diagnostic.find("NO POOL THREAD BECAME FREE"), std::string::npos) << diagnostic;
 }
 
 }  // namespace fixpp::session::test
