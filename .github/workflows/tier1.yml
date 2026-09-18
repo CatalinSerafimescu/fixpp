@@ -891,6 +891,37 @@ jobs:
             exit 1
           fi
 
+      # ── fixpp#448: the allocation-discipline gates, which NO CI lane ran ─────
+      #
+      # `grep -rn mallocnesia .github/` returned nothing before this. The gates existed,
+      # were labelled, and were enforced only when someone ran them by hand on a machine
+      # that had hand-built the interceptor. A bug fix adding a malloc to a hot path
+      # merged green.
+      #
+      # linux-clang-release ONLY, and that is a property of the mechanism, not a budget
+      # decision: the interceptor is an LD_PRELOAD malloc interposer, which the sanitizer
+      # lanes cannot host (their own allocator re-enters these hooks), and Release is the
+      # build whose hot path the zero-allocation rule is actually about.
+      #
+      # ⚠️ TWO STEPS, and the first is NOT redundant with `--no-tests=error`. MEASURED:
+      # with the gates deliberately unregistered, `ctest -L mallocnesia --no-tests=error`
+      # exits 0 reporting "100% tests passed, 0 failed out of 1" — one label member
+      # (the static marker scan) is registered outside the helper and survives, so ctest
+      # finds a test and is satisfied while EIGHTEEN gates have silently vanished. A
+      # count-or-population assertion is the only thing that sees that.
+      - name: "Assert the mallocnesia gate population (#448)"
+        if: matrix.preset == 'linux-clang-release'
+        run: python3 tools/check_mallocnesia_population.py --build-dir build/${{ matrix.preset }}
+
+      # The gates themselves. No `|| true`, no continue-on-error: a real allocation on a
+      # gated hot path must fail this lane. `mallocnesia_positive_control` runs inside
+      # this same selection and is the arm that reddens if interception stops working —
+      # without it, "0 failed" is equally consistent with a clean tree and a dead
+      # interceptor, which is exactly the state this issue found on main.
+      - name: "Run the allocation-discipline gates (#448)"
+        if: matrix.preset == 'linux-clang-release'
+        run: ctest --preset ${{ matrix.preset }} -L mallocnesia --no-tests=error --output-on-failure
+
       # ── #254 / R2-P2-1 — the same vacuity gate, for the install witness ──────
       #
       # `fixpp::python::install-absent-witness` is the SEMANTIC half of the
@@ -2510,6 +2541,15 @@ jobs:
       # Buildless — python3 + coreutils only.
       - name: "Regression pin — interop-live population reconciliation (#468)"
         run: bash ci/test-run-interop-live.sh
+
+      # fixpp#448: the allocation gates are selected by LABEL, and on main that label
+      # picked 8 of 18 real gates — silently, because a label selecting 8 real tests
+      # still runs 8 real tests and they pass. tools/check_mallocnesia_population.py is
+      # what sees that; this pins its branches with a mutant each.
+      # Buildless — synthetic CTestTestfile.cmake fixtures, no configured tree needed
+      # (its T0 arm reconciles the REAL population when one happens to be present).
+      - name: "Regression pin — mallocnesia gate population (#448)"
+        run: bash ci/test-mallocnesia-population.sh
 
       # #289 batch 18: a fixed `run_for` staging a MOCK-CLOCK advance is a
       # wall-clock hope, and a starved runner turns it into a LOST advance --

@@ -1440,6 +1440,10 @@ CI_PIN_HARNESSES=(
   # only thing standing between "the live interop job is green" and "it ran the cells
   # it claims to", and every one of its refusals is pinned in that harness alone.
   "ci/test-run-interop-live.sh"
+  # fixpp#448's gate-population harness. ⚠️ ADDED WITH ITS OWN MUTANT (M104), same
+  # dead-call-site shape as M26/M64/M65/M69/M73/M101/M102/M103 — none of those prove
+  # THIS row can fail, only that the census mechanism can fail for a different harness.
+  "ci/test-mallocnesia-population.sh"
 )
 
 assert_ci_pin_call_sites() {
@@ -1764,7 +1768,8 @@ echo "PASS: derive-script table + call site + per-leg FIXPP_INSTALL_PYTHON + PY_
 # not collide). Re-run the harness against the merged number rather than
 # re-deriving from either branch's local total — the failure mode this guards is
 # one side's edit silently replacing the other's, which reads as a passing count.
-MUTANTS_DECLARED=89  # M103 (the ci-script-pins call-site pin for
+MUTANTS_DECLARED=90  # M104 (the ci-script-pins call-site pin for
+                     # ci/test-mallocnesia-population.sh, fixpp#448) + M103 (the ci-script-pins call-site pin for
                      # ci/test-run-interop-live.sh, fixpp#468) + M102 (the ci-script-pins call-site
                      # pin for ci/test-interop-gate-step.sh) + M101 (the ci-script-pins call-site pin for
                      # ci/test-interop-skips.sh) + M97-M100 (#411 Gate B r2 L1/L2: Build's key set on both jobs, plus
@@ -2295,6 +2300,19 @@ src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
 old = "        run: bash ci/test-run-interop-live.sh\n"
 new = "        run: echo \"bash ci/test-run-interop-live.sh\"\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M104 (fixpp#448): the SAME dead-call-site shape, on the allocation-gate
+  # population harness added this round. Its own mutant for the reason every
+  # sibling above states.
+  mutate_workflow M104 "the mallocnesia population harness call site replaced by an echo" "ci-script-pins does not INVOKE" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: bash ci/test-mallocnesia-population.sh\n"
+new = "        run: echo \"bash ci/test-mallocnesia-population.sh\"\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
 '
