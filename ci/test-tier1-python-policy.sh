@@ -1014,8 +1014,16 @@ $got"
   # the restore step's own text cannot catch every call in a job drifting to
   # the same wrong preset).
   got="$(echo "$json" | jq -r '.linux_step_count')"
-  [ "$got" = "37" ] \
-    || fail "$case_id: the linux job has $got steps, expected 37. A step added anywhere before the pytest pair can change what they execute without colliding with a pinned name or adding a pytest mention (round 4 finding 3, measured). This count is deliberately brittle: adding a step to this job is a deliberate act and must be paired with a deliberate look at whether it reaches the python steps."
+  # 37 -> 39 (fixpp#448): the two allocation-gate steps. The pin demands a deliberate
+  # look before this number moves, so here it is, recorded rather than asserted:
+  # both sit at indices 23-24, BEFORE the pytest pair at 33-34, so the question the pin
+  # asks is live. They cannot reach it — neither writes GITHUB_ENV or GITHUB_PATH,
+  # neither pip-installs, neither mutates the build tree (one reads `ctest -N` output,
+  # the other runs already-built binaries), and both are `if:`-guarded to
+  # linux-clang-release. They CAN fail the job before python runs, which is intended:
+  # an allocation regression on a gated hot path should stop the lane.
+  [ "$got" = "39" ] \
+    || fail "$case_id: the linux job has $got steps, expected 39. A step added anywhere before the pytest pair can change what they execute without colliding with a pinned name or adding a pytest mention (round 4 finding 3, measured). This count is deliberately brittle: adding a step to this job is a deliberate act and must be paired with a deliberate look at whether it reaches the python steps."
 
   got="$(echo "$json" | jq -cS '.linux_job_env')"
   [ "$got" = '{"CCACHE_COMPILERCHECK":"content","CCACHE_COMPRESSLEVEL":"5","CCACHE_DIR":"/tmp/fixpp-ccache-${{ matrix.preset }}","CCACHE_MAXSIZE":"2G","CMAKE_CXX_COMPILER_LAUNCHER":"ccache","CMAKE_C_COMPILER_LAUNCHER":"ccache"}' ] \
@@ -2467,7 +2475,7 @@ open(dst, "w").write(t.replace(old, new))
   # not fail open — `mutate_workflow` reports "failed the pin for the WRONG
   # reason" — but it is the second edit the count pin demands, and forgetting it
   # is how a deliberately brittle assertion earns a reputation for being noise.
-  mutate_workflow M33 "an unnamed step is inserted before the pytest pair" "has 38 steps, expected 37" '
+  mutate_workflow M33 "an unnamed step is inserted before the pytest pair" "has 40 steps, expected 39" '
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
