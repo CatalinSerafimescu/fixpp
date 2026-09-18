@@ -615,6 +615,23 @@ DEFAULT-ON warning, so `-Wall` was never what stood between the tree and the gat
 sites **as measured at #439**; the figure is a record of that measurement, not a property of the
 tree — it is dominated by generated headers and moves with every regeneration.)
 
+**Three instances, one flip, three different mechanisms — which is the point.** The same gate flip
+also found `-Wno-macro-redefined` applied to every non-MSVC compiler in `tests/log/CMakeLists.txt`,
+with a comment saying it was there *"so FIXPP_WERROR does not turn the expected redefinition into an
+error"*. That is a **clang** spelling. GCC does not recognise it and accepts it silently — an unknown
+`-Wno-*` is only ever reported when some other diagnostic fires — so the target could not build once
+`-Werror` arrived. GCC itself printed the diagnosis (*"unrecognized command-line option
+'-Wno-macro-redefined' may have been intended to silence earlier diagnostics"*), which nothing had
+ever been in a position to read. So the class is not "someone wrote the wrong pragma": the rot
+appeared in a **pragma**, in a **preprocessor guard**, and in a **build-system flag**, because the
+common cause is the disabled gate, not the mechanism.
+
+⚠️ **Prefer removing the CAUSE to suppressing the diagnostic, because a suppression is what rots.**
+The redefinition fix is `-U` then `-D` rather than a second `-D` plus a silencer: then no
+redefinition happens on any compiler and there is nothing to keep working. Where you do suppress,
+verify the SUPPRESSED PROPERTY still holds — here, that the macro is still `3` afterwards and not
+merely undefined, which a check for "the error went away" would have missed.
+
 - **Trigger:** you are about to ENABLE a gate that has been off — a lane's `-Werror`, a sanitizer, a
   lint, a coverage floor — or you are writing an opt-out for a gate that is off on some platform.
 - **Procedure:** budget for the rot rather than meeting it as a surprise. MEASURE before flipping:

@@ -154,7 +154,14 @@ std::string now_utc_ms() {
 #else
     gmtime_r(&t, &tm);
 #endif
-    char buf[32];
+    // 96, not 32: the nominal rendering is 21 characters, but a compiler cannot
+    // prove tm_year + 1900 <= 9999 or ms <= 999 from the types, so it must assume
+    // every %0Nd can be a full int. GCC computes the worst case at 75 bytes and
+    // reports -Wformat-truncation (reachable under -Werror because the hardening
+    // profile already passes -Wformat, which enables it -- it is NOT part of
+    // -Wall here). Sized past that bound so the call cannot truncate for any
+    // input, rather than silencing the diagnostic.
+    char buf[96];
     std::snprintf(buf, sizeof(buf), "%04d%02d%02d-%02d:%02d:%02d.%03d", tm.tm_year + 1900,
                   tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec,
                   static_cast<int>(ms.count()));
