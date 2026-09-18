@@ -193,6 +193,24 @@ template <class Fut>
     return pump_until_ready(ioc, fut, budget, kPumpSlice, site);
 }
 
+// Label-only form, the future-shaped twin of `pump_until(ioc, ready, site)` above, and it
+// exists for the reason stated there: without it a site must spell a budget purely to reach
+// `site`, WHICH READS AS A DELIBERATE TUNING AND IS NOT ONE. The asymmetry was an omission,
+// not a decision -- the window form and `pump_until` both had their label-only overload while
+// this one did not, so every labelled future site was forced to look like a tuned one.
+//
+// ⚠️ SAME SIGNATURE HAZARD AS EVERY FORM ABOVE, and adding this overload is what makes the
+// THREE-argument spelling reachable: a bare `0` is a null pointer constant, so
+// `pump_until_ready(ioc, fut, 0)` binds HERE with `site = nullptr` rather than selecting
+// `budget = 0` on the primary. A `duration` third argument still selects the primary (it does
+// not convert to `const char*`), and a string literal cannot select the primary, so no
+// existing call changes meaning. Derive rather than trust a count:
+//   git grep -n 'pump_until_ready(' -- tests/ | grep -E ', *0 *[,)]'
+template <class Fut>
+[[nodiscard]] bool pump_until_ready(asio::io_context& ioc, Fut& fut, const char* site) {
+    return pump_until_ready(ioc, fut, kPumpBudget, kPumpSlice, site);
+}
+
 // Failure text for a `pump_until*` that ran out of budget. Stream the site name
 // after it.
 inline constexpr const char* kPumpBudgetMiss =
