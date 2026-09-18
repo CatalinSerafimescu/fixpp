@@ -10,10 +10,12 @@
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <fcntl.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 typedef void *(*malloc_fn)(size_t);
 typedef void  (*free_fn)(void *);
@@ -46,9 +48,35 @@ static void resolve_fns(void) {
     bootstrap_done = 1;
 }
 
+/* fixpp#448: PROOF OF INTERCEPTION.
+ *
+ * `LD_PRELOAD=/nonexistent/libmallocnesia.so` is NOT an error: ld.so prints
+ * "cannot be preloaded ... ignored" and runs the binary UNINSTRUMENTED, which then
+ * exits 0 and reads as a passing gate. Measured on main before this change, that is
+ * how several gates were green.
+ *
+ * A gate cannot prove its own instrumentation from inside the parent process, so the
+ * CHILD leaves evidence: when MALLOCNESIA_WITNESS is set, this constructor creates
+ * that path. The parent (tools/check_alloc.py) requires it afterwards. Only a loaded
+ * interceptor can create it -- the binary under test cannot, and neither can a
+ * silently-ignored preload.
+ *
+ * open()/write(), never fopen(): this runs as a malloc interposer, and the stdio
+ * path allocates through the very hooks being installed.
+ */
+static void mallocnesia_write_witness(void) {
+    const char *path = getenv("MALLOCNESIA_WITNESS");
+    if (!path || !*path) return;
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) return;
+    (void)!write(fd, "mallocnesia\n", 12);
+    close(fd);
+}
+
 __attribute__((constructor))
 static void mallocnesia_init(void) {
     resolve_fns();
+    mallocnesia_write_witness();
 }
 
 /* --- Guard markers (override the weak no-op symbols in the test binary) --- */
