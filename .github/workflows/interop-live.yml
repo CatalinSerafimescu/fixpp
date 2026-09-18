@@ -3,12 +3,9 @@ name: Interop live cells (per-PR)
 # fixpp#468. Runs the LIVE interop cells against this PR's own binaries, using only the
 # PUBLIC prebuilt counterparties image — no checkout of the private parent repo.
 #
-# WHY THIS EXISTS. #431 made the interop skips visible and pinned: a named step on each
-# tier asserts the exact set of cases that skip when no counterparty is leased, and
-# their one allowed reason. It did not make them RUN. Those cases run only under the
-# parent harness, which leases a port and starts a QuickFIX counterparty per cell — so a
-# fixpp PR learned about a live-interop regression only AFTER it merged and its gitlink
-# was bumped. This closes that window.
+# WHY THIS EXISTS, and what it refuses to do: see the module docstring of
+# ci/run-interop-live.py. Stated there rather than here because that file ships with
+# the logic; two copies of a rationale drift, and the drift is invisible.
 #
 # RELATION TO THE OTHER TWO INTEROP LANES:
 #   interop-smoke.yml      one cell, release, skip-tolerant (FR-023 light tier).
@@ -113,6 +110,11 @@ jobs:
       # rather than skip ("Adding a cell to the template and adding its target here are
       # ONE change, not two"). Deriving it removes that failure mode instead of
       # documenting it.
+      # ⚠️ SIBLING: interop-smoke.yml has a near-identical extraction block. There is no
+      # composite-action mechanism in this repo to share it, and nothing pins the two
+      # together, so a change to the image layout in the parent's
+      # ci/counterparties.Dockerfile must be applied to BOTH. Named here so the second
+      # copy is findable from the first.
       - name: Pull counterparties + driver, recreate the harness layout
         run: |
           docker pull "$IMAGE"                      # PUBLIC package → no auth
@@ -137,15 +139,13 @@ jobs:
         id: targets
         run: |
           set -euo pipefail
-          targets=$(python3 - "$HARNESS/tools/run_interop_cell.py" <<'EOF'
-          import importlib.util, sys
-          spec = importlib.util.spec_from_file_location("ric", sys.argv[1])
-          m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
-          bins = sorted({c.binary for c in m.CELLS.values()})
-          assert bins, "the bundled registry named ZERO binaries -- refusing to build nothing"
-          print(" ".join(bins))
-          EOF
-          )
+          # Via the driver's own --list-binaries, NOT a second inline copy of the
+          # module load: `load_harness` there is the tested one (ci/test-run-interop-live.sh
+          # T7c/T10a/T10c cover its refusals), and a copy here would be the one place
+          # a `CELLS` schema change could rot unnoticed until a PR run failed.
+          # No `test -n` here: --list-binaries refuses a zero-binary registry itself
+          # (exit 2), and a second guard would be a second claim to keep true.
+          targets=$(python3 ci/run-interop-live.py --harness "$HARNESS" --list-binaries)
           echo "targets=$targets" >> "$GITHUB_OUTPUT"
           echo "will build: $targets"
 

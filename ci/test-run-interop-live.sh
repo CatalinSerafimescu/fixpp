@@ -45,10 +45,15 @@ mk_harness() {  # mk_harness <dir> <filter>...
     echo "    gtest_filter: str"
     echo "    counterparty: str = 'quickfix-j'"
     echo "    arm: str = 'validation-off'"
+    echo "    binary: str = 'interop_stub'"
     echo "CELLS = {}"
     local i=0
     for f in "$@"; do i=$((i+1)); echo "CELLS['CELL-$i'] = C('$f')"; done
     echo "import os"
+    echo "def settle_between_cells():"
+    echo "    log = os.environ.get('SETTLE_LOG')"
+    echo "    if log:"
+    echo "        open(log, 'a').write('settle\\n')"
     echo "def run_cell(*a, **k):"
     echo "    v = os.environ.get('STUB_VERDICT', 'pass')"
     echo "    if v == 'raise': raise RuntimeError('stub blew up')"
@@ -71,10 +76,20 @@ mkexc() { printf '%s\n' "$@" > "$EXC"; }
 run() { python3 "$DRIVER" --harness "$H" --build-root "$TMP" \
           --skip-set "$SKIP" --exclusions "$EXC" --list; }
 
-# ── T0: the REAL population reconciles. Without this the suite proves only that the
-# driver can say no, never that it says yes to the tree we actually ship. ──────────
-check "T0 real population reconciles" 0 "reconciled:" \
-  -- python3 "$DRIVER" --harness "$REPO/../phase-9-harness" --build-root "$REPO/build" --list
+# ── T0: the REAL files, checked by the REAL checker. Without this the suite proves
+# only that the driver can say no, never that it says yes to the tree we ship.
+#
+# ⚠️ --offline-checks, NOT the full reconciliation. This harness runs in
+# `ci-script-pins`, whose checkout is the LIBRARY ONLY — no parent repo, no docker,
+# no image — so an earlier draft's `--harness "$REPO/../phase-9-harness"` would have
+# reddened the pin on every run while passing on the author's machine, where the
+# parent tree happens to sit one level up. An arm that can only pass where it was
+# written is not an arm. The covered-vs-excluded half needs the image's registry and
+# is asserted by the live job itself, before any cell starts, every time it runs.
+check "T0 the real exclusion file checks out against the real skip set" 0 \
+  "offline checks passed" -- python3 "$DRIVER" --offline-checks
+check "T0b offline mode refuses to also take --harness" 2 "does not take --harness" \
+  -- python3 "$DRIVER" --offline-checks --harness "$H"
 
 # ── T1: a case that neither runs nor is excluded ──────────────────────────────────
 mkexc "qfj-only-at-g1 Fix44/S.C/QFcpp_init"
@@ -152,6 +167,80 @@ check "T9b a SKIPPED cell fails the job" 1 "did not pass" \
 check "T9c a FAILED cell fails the job" 1 "did not pass" -- runcells fail
 # A raise must not escape as a traceback and a non-specific exit; it is a cell result.
 check "T9d a RAISING cell is reported, not crashed" 1 "raised: RuntimeError" -- runcells raise
+
+# ── T10: the inter-cell settle — a RELIABILITY property, not a nicety. Acceptor
+# cells flake on port/process teardown when run back-to-back, which is why the
+# harness owns INTER_CELL_SETTLE_S. This driver's first draft wrote its own loop and
+# silently omitted it, so both halves get a real arm. ────────────────────────────
+# Written WITHOUT the helper, not grep-stripped out of a full one: deleting the
+# `def` line alone leaves an orphaned body, and the module then fails to IMPORT —
+# which exercises a different refusal (T10c) and silently stops testing this one.
+H4="$TMP/h4"; mkdir -p "$H4/tools"
+{ echo "import dataclasses"
+  echo "@dataclasses.dataclass"
+  echo "class C:"
+  echo "    gtest_filter: str"
+  echo "    counterparty: str = 'quickfix-j'"
+  echo "    arm: str = 'validation-off'"
+  echo "CELLS = {'CELL-1': C('$COVERED_A'), 'CELL-2': C('$COVERED_B')}"
+  echo "def run_cell(*a, **k): return {'status': 'pass', '_detail': 'stub'}"
+} > "$H4/tools/run_interop_cell.py"
+mkexc "qfj-only-at-g1 Fix44/S.C/QFcpp_init" "unregistered-tracked $LONE"
+check "T10a a pre-settle image is REFUSED, not run without the settle" 2 \
+  "predates settle_between_cells" \
+  -- python3 "$DRIVER" --harness "$H4" --build-root "$TMP" --skip-set "$SKIP" \
+       --exclusions "$EXC" --list
+
+# A bundled driver that will not import at all is its own refusal, distinct from the
+# one above — and the fixture bug that produced it is how we learned this path
+# existed as an unhandled traceback.
+H5="$TMP/h5"; mkdir -p "$H5/tools"
+printf 'def broken(:\n' > "$H5/tools/run_interop_cell.py"
+check "T10c an image whose driver will not import is refused, not a traceback" 2 \
+  "failed to import" \
+  -- python3 "$DRIVER" --harness "$H5" --build-root "$TMP" --skip-set "$SKIP" \
+       --exclusions "$EXC" --list
+
+# Counted, not grepped: the stub's settle appends a line, so this observes the real
+# call. Two cells => exactly one settle (between them, never after the last).
+SETTLE_LOG="$TMP/settles.txt"; : > "$SETTLE_LOG"
+SETTLE_LOG="$SETTLE_LOG" STUB_VERDICT=pass python3 "$DRIVER" --harness "$H" \
+  --build-root "$TMP" --skip-set "$SKIP" --exclusions "$EXC" >/dev/null 2>&1
+n=$(wc -l < "$SETTLE_LOG")
+if [ "$n" = "1" ]; then
+  echo "ok    T10b 2 cells -> exactly 1 settle (between, not after the last)"; pass=$((pass+1))
+else
+  echo "FAIL  T10b 2 cells -> $n settle(s), wanted 1"; fail=$((fail+1))
+fi
+
+# ── T11: --list-binaries, which interop-live.yml's build step now depends on. An
+# UNTESTED derive step is the failure mode the step exists to remove: the parent
+# matrix hardcodes its target list, and a list that silently comes back short builds
+# fewer binaries than the run needs, so the cells fail for a reason that looks like
+# the product. Two properties, because either alone can be satisfied by nothing:
+# it must SPEAK the registry's binaries (deduped, sorted, one line), and it must
+# REFUSE rather than print an empty line when the registry names none.
+HB="$TMP/hb"; mk_harness "$HB" "$COVERED_A" "$COVERED_B" "$LONE"
+python3 - "$HB/tools/run_interop_cell.py" <<'PYEOF'
+import sys, pathlib
+# two cells share one binary, the third differs and sorts FIRST -- so a driver that
+# neither dedups nor sorts cannot produce the expected line by accident.
+p = pathlib.Path(sys.argv[1])
+p.write_text(p.read_text() + "\nCELLS['CELL-3'].binary = 'interop_aaa'\n")
+PYEOF
+got="$(python3 "$DRIVER" --harness "$HB" --list-binaries 2>&1)"; rc=$?
+if [ "$rc" = 0 ] && [ "$got" = "interop_aaa interop_stub" ]; then
+  echo "ok    T11a --list-binaries prints the deduped, sorted binary set on one line"
+  pass=$((pass+1))
+else
+  echo "FAIL  T11a --list-binaries: rc=$rc out=[$got], wanted 'interop_aaa interop_stub'"
+  fail=$((fail+1))
+fi
+
+HZ="$TMP/hz"; mk_harness "$HZ"
+check "T11b a registry naming ZERO binaries is refused, not an empty target list" 2 \
+  "refusing to build nothing" -- \
+  python3 "$DRIVER" --harness "$HZ" --list-binaries
 
 echo
 echo "test-run-interop-live: $pass passed, $fail failed"

@@ -17,18 +17,30 @@
 #
 # Format:  <reason-tag> <Prefix/Suite.Case/param>
 
-# ── qfj-only-at-g1 ───────────────────────────────────────────────────────────
-# The QuickFIX-cpp variant of a scenario whose INDUCTION exists only in the QFJ
-# counterparty at G1. The gtest itself GTEST_SKIPs non-QFj with skip:not-applicable,
-# and the in-repo template declares these as deferred:qfj-only-at-g1 (status n/a)
-# rather than live, so a cell here would always skip and would break the
-# n/a<=>deferred invariant the template's own comments record.
+# ── this engine cannot drive this scenario ───────────────────────────────────
+# Two tags, because there are two DIFFERENT mechanisms and calling them one thing
+# would be false of some of the ids. The authority for which applies to a given id
+# is that scenario's `deferred_reason` in tests/interop/cell_results.yaml, whose
+# vocabulary these tags reuse — not a sentence here.
 #
-# STRUCTURAL CONDITION (re-derived by the checker): the SAME Suite.Case has another
-# param that IS covered by a registered cell. That is what distinguishes "this
-# engine is not wired for this scenario" from "this scenario runs nowhere". It also
-# self-retires: implement the QFcpp induction, register the cell, and the line must
-# be deleted or the equality above breaks.
+#   qfj-only-at-g1            the gtest ITSELF GTEST_SKIPs non-QFj with
+#                             skip:not-applicable, because the induction is
+#                             configured only in the QFJ counterparty at G1.
+#   qfcpp-no-possdup-injection  the gtest skips NOTHING per engine; QuickFIX-cpp
+#                             simply cannot emit the stimulus — `send()` strips
+#                             43/122 and there is no public sendRaw/AllowPosDup.
+#
+# ⚠️ An earlier draft of this file asserted the first mechanism for ALL of them. It
+# was false for the four PossDup ids: 021-poss-dup-*_test.cpp carries no per-engine
+# GTEST_SKIP at all. The reconciliation still passed, because the structural
+# condition below is identical for both tags — which is exactly why the tag had to
+# be got right by reading, not by watching the checker stay green.
+#
+# STRUCTURAL CONDITION (re-derived by the checker, for BOTH tags): the SAME
+# Suite.Case has another param that IS covered by a registered cell. That is what
+# separates "this engine cannot drive it" from "this scenario runs nowhere". It also
+# self-retires: make the engine able to drive it, register the cell, and the line
+# must be deleted or the equality above breaks.
 qfj-only-at-g1 Fix44/HappyIdleHeartbeatCadence.BothDirectionsAtNegotiatedCadence/QFcpp_acc
 qfj-only-at-g1 Fix44/HappyIdleHeartbeatCadence.BothDirectionsAtNegotiatedCadence/QFcpp_init
 qfj-only-at-g1 Fix44/HappyRecoveryOutboundAnswer.FixppAnswersResendRequestAndPeerResyncs/QFcpp_acc
@@ -39,10 +51,10 @@ qfj-only-at-g1 Fix44/HappySeqnumRecoveryInbound.GapInductionResendRequestAndRetu
 qfj-only-at-g1 Fix44/HappySeqnumRecoveryInbound.GapInductionResendRequestAndReturn/QFcpp_init
 qfj-only-at-g1 Fix44/HappyTestRequestEcho.BidirectionalTestRequestEcho/QFcpp_acc
 qfj-only-at-g1 Fix44/HappyTestRequestEcho.BidirectionalTestRequestEcho/QFcpp_init
-qfj-only-at-g1 Fix44/MalformedDupRejected.MissingOrigSendingTimeTriggersRejectAndSessionSurvives/QFcpp_acc
-qfj-only-at-g1 Fix44/MalformedDupRejected.MissingOrigSendingTimeTriggersRejectAndSessionSurvives/QFcpp_init
-qfj-only-at-g1 Fix44/PossDupReplaySurvives.ReplayedPossDupFrameDoesNotDisconnect/QFcpp_acc
-qfj-only-at-g1 Fix44/PossDupReplaySurvives.ReplayedPossDupFrameDoesNotDisconnect/QFcpp_init
+qfcpp-no-possdup-injection Fix44/MalformedDupRejected.MissingOrigSendingTimeTriggersRejectAndSessionSurvives/QFcpp_acc
+qfcpp-no-possdup-injection Fix44/MalformedDupRejected.MissingOrigSendingTimeTriggersRejectAndSessionSurvives/QFcpp_init
+qfcpp-no-possdup-injection Fix44/PossDupReplaySurvives.ReplayedPossDupFrameDoesNotDisconnect/QFcpp_acc
+qfcpp-no-possdup-injection Fix44/PossDupReplaySurvives.ReplayedPossDupFrameDoesNotDisconnect/QFcpp_init
 
 # ── unregistered-tracked ─────────────────────────────────────────────────────
 # NOT a design decision — a KNOWN GAP with an issue. No cell selects these on ANY
@@ -53,9 +65,10 @@ qfj-only-at-g1 Fix44/PossDupReplaySurvives.ReplayedPossDupFrameDoesNotDisconnect
 # covered. If one ever is, the case has stopped being "runs nowhere" and the entry
 # must be re-argued under the group above rather than silently inherited.
 #
-# ⚠️ This group is the one that must SHRINK. It is written separately from
-# qfj-only-at-g1 precisely so it cannot hide inside a permanent exemption: those 14
-# are a property of the G1 scope, these 8 are a debt.
+# ⚠️ This group is the one that must SHRINK. It is written separately from the
+# engine-capability tags precisely so it cannot hide inside a permanent exemption:
+# those are a property of the G1 scope, these are a debt. No count is recorded here
+# on purpose — read it off the file.
 unregistered-tracked AllCounterparties/NextExpectedBidirectional.BothGapsRecoverNoResendRequest/QFcpp_bidir
 unregistered-tracked AllCounterparties/NextExpectedBidirectional.BothGapsRecoverNoResendRequest/QFj_bidir
 unregistered-tracked AllCounterparties/RestartResume_Acceptor.BothCountersResumeFromStore/QFcpp_acc
