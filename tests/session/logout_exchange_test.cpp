@@ -273,8 +273,8 @@ void offload_exit_probe(std::thread::id) noexcept {
 // arms differ in which one they need; the exit probe is always the counter, so
 // there is nothing to get wrong. Adding a third seam means editing here, once.
 struct scoped_offload_probe {
-    explicit scoped_offload_probe(void (*entry)(std::thread::id) noexcept =
-                                      &offload_entry_probe) noexcept {
+    explicit scoped_offload_probe(
+        void (*entry)(std::thread::id) noexcept = &offload_entry_probe) noexcept {
         fixpp::session::install_store_offload_probe(entry);
         fixpp::session::install_store_offload_exit_probe(&offload_exit_probe);
     }
@@ -300,8 +300,9 @@ offload_counts read_offload_counts() noexcept {
 // asserts against this symbol rather than against a private copy of the
 // wording, so a reword moves both sides together
 // [[feedback_a_false_green_respelled_each_round_needs_a_structural_check]].
-constexpr const char* kProbeTail = " -- read it before concluding anything about which side "
-                                   "stalled.";
+constexpr const char* kProbeTail =
+    " -- read it before concluding anything about which side "
+    "stalled.";
 
 // Snapshot the counters with `read_offload_counts()` immediately before the
 // labelled pump and pass the pair here -- see the block comment above for why
@@ -338,8 +339,9 @@ std::string describe_offload_progress(offload_counts before, asio::thread_pool& 
                " offload(s) entered a pool thread since this pump began, " +
                std::to_string(now.exits - before.exits) + " returned (last entry " +
                std::to_string(age.count()) +
-               "ms ago). What these counts do and do not establish is in the header block of "
-               __FILE__ + kProbeTail;
+               "ms ago). What these counts do and do not establish is in the header block "
+               "of " __FILE__ +
+               kProbeTail;
     }
     // The same rule as the branch above, applied to the branch #476 did not
     // name. Deleting the cause in one branch and enumerating in the other
@@ -1131,7 +1133,8 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
             const auto before = read_offload_counts();
             auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(logon_ack), asio::use_future);
             ASSERT_TRUE(pump_until_ready(ioc, fut, kSiteLogonAck))
-                << kPumpBudgetMiss << kSiteLogonAck
+                << kPumpBudgetMiss
+                << kSiteLogonAck
                 // "the probe below is what tells the candidate causes apart" stood
                 // here until someone read the actual failure output: the probe does
                 // NOT tell them apart -- saying so is the same overclaim #476 is
