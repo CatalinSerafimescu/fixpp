@@ -4,9 +4,21 @@
  * Counts malloc/calloc/realloc calls between alloc_guard_start() and
  * alloc_guard_end() and exits 1 if the count exceeds MALLOCNESIA_MAX_ALLOCS.
  *
- * Build:  make -C tools/mallocnesia
- * Use:    MALLOCNESIA_PATH=tools/mallocnesia/libmallocnesia.so
- *         python3 tools/check_alloc.py --binary <binary>
+ * Build:  it is a CMake target — `cmake --build <dir> --target mallocnesia` builds it,
+ *         and an ordinary build of the test tree builds it anyway. The artifact lands at
+ *         <build>/lib/libmallocnesia.so and is gitignored; only this source is tracked.
+ *
+ *         ⚠️ There is NO hand-build route any more. A Makefile here produced a
+ *         gitignored .so in the SOURCE tree, every gate was registered inside
+ *         `if(EXISTS <that path>)`, and on any machine that had not run it — every CI
+ *         runner — the gates were silently never registered. fixpp#448 deleted both the
+ *         Makefile and that path: a precondition someone has to remember is one CI never
+ *         satisfies. Do not reintroduce them.
+ *
+ * Use:    the gates go through tools/check_alloc.py, which CMake invokes with
+ *         --mallocnesia $<TARGET_FILE:mallocnesia>. By hand:
+ *         python3 tools/check_alloc.py --binary <binary> \
+ *                 --mallocnesia <build>/lib/libmallocnesia.so
  */
 #define _GNU_SOURCE
 #include <dlfcn.h>

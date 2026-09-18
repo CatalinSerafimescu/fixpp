@@ -43,13 +43,18 @@ def find_mallocnesia(explicit: str | None) -> str | None:
     must not silently fall back to a stale one someone built by hand months ago."""
     if explicit:
         return explicit if os.path.exists(explicit) else None
-    tools_dir = os.path.dirname(os.path.abspath(__file__))
-    for candidate in [
-        os.environ.get("MALLOCNESIA_PATH", ""),
-        os.path.join(tools_dir, "mallocnesia", "libmallocnesia.so"),
-        "/usr/local/lib/mallocnesia.so",
-        "/usr/lib/mallocnesia.so",
-    ]:
+    # ⚠️ NO source-tree fallback. The interceptor is a BUILD TARGET
+    # (cmake/FixppMallocnesia.cmake) and `fixpp_add_mallocnesia_test` always passes
+    # $<TARGET_FILE:mallocnesia>, so the artifact lives in build/<preset>/lib/.
+    #
+    # `tools/mallocnesia/libmallocnesia.so` used to be searched here. It was produced by a
+    # hand-run Makefile, both of which fixpp#448 removed — and a fallback pointing at a
+    # path nothing can produce is worse than none: it silently prefers whatever stale
+    # binary a developer built months ago over the one this build just made. That is the
+    # staleness the target exists to remove.
+    for candidate in [os.environ.get("MALLOCNESIA_PATH", ""),
+                      "/usr/local/lib/mallocnesia.so",
+                      "/usr/lib/mallocnesia.so"]:
         if candidate and os.path.exists(candidate):
             return candidate
     return None
@@ -88,11 +93,14 @@ def main() -> int:
 
     if not mallocnesia:
         if not args.allow_missing:
-            where = args.mallocnesia or "the search path (MALLOCNESIA_PATH, tools/mallocnesia/)"
+            where = args.mallocnesia or "MALLOCNESIA_PATH or /usr/{local/,}lib"
             print(f"[check_alloc] FAIL: mallocnesia interceptor not found at {where}. "
                   f"Refusing to run: without it this gate asserts NOTHING and would report "
-                  f"PASS. Build it (target `mallocnesia`), or pass --allow-missing if you "
-                  f"deliberately want an uninstrumented local run.", file=sys.stderr)
+                  f"PASS. It is a BUILD TARGET — `cmake --build <dir> --target mallocnesia` "
+                  f"puts it at <dir>/lib/libmallocnesia.so; pass that with --mallocnesia "
+                  f"(which is what CMake does) or via MALLOCNESIA_PATH. Use --allow-missing "
+                  f"only if you deliberately want an uninstrumented local run.",
+                  file=sys.stderr)
             return 2
         print("[check_alloc] WARNING: mallocnesia not found and --allow-missing given; "
               "running UNINSTRUMENTED. This run proves nothing.", file=sys.stderr)

@@ -12,6 +12,13 @@
 # Building it as a target removes the precondition rather than checking it: there is no
 # longer a state in which the gates are registered against something that may not exist.
 #
+# ⚠️ THIS IS THE ONLY PRODUCER. The hand-run Makefile and the source-tree artifact it
+# built are deleted (fixpp#448), and tools/check_alloc.py no longer searches that
+# path. The .so remains gitignored and is never committed: a prebuilt binary has to
+# match the runner's libc and arch, cannot be reviewed, and becomes the thing someone
+# must remember to refresh when mallocnesia.c changes — the same staleness in a new
+# place. Only the source is tracked.
+#
 # ⚠️ Linux-only AND non-sanitizer BY CONSTRUCTION, not by preference. The mechanism is
 # ELF LD_PRELOAD
 # symbol interposition; macOS needs DYLD_INSERT_LIBRARIES + interpose sections and
