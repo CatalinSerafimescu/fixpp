@@ -610,9 +610,10 @@ diagnostic`**, which GCC does not honour — and does not warn about, so there i
 the missing diagnostic. The suppression was inert on GCC for its entire life, and nothing noticed
 because the one lane that could have noticed had `-Werror` off. The guard recorded an INTENT; the
 pragma is the MECHANISM; only the mechanism executes. (The same flip also found a second, larger
-rot in the same direction: `[[clang::lifetimebound]]` at 92767 sites, which GCC reports under
-`-Wattributes` — a DEFAULT-ON warning, so `-Wall` was never what stood between the tree and the
-gate.)
+rot in the same direction: `[[clang::lifetimebound]]`, which GCC reports under `-Wattributes` — a
+DEFAULT-ON warning, so `-Wall` was never what stood between the tree and the gate. 92767 distinct
+sites **as measured at #439**; the figure is a record of that measurement, not a property of the
+tree — it is dominated by generated headers and moves with every regeneration.)
 
 - **Trigger:** you are about to ENABLE a gate that has been off — a lane's `-Werror`, a sanitizer, a
   lint, a coverage floor — or you are writing an opt-out for a gate that is off on some platform.

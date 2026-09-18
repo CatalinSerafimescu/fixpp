@@ -294,7 +294,8 @@ if(TARGET fixpp_codegen_generate AND FIXPP_CODEGEN_FIX_LATEST)
   # _M_assign_aux. Argument 1 is the DESTINATION — the vector's own freshly
   # allocated buffer — and the whole `inlined from` chain lies inside libstdc++
   # with no line of this repo named. It is an instantiation artifact of this one
-  # TU: 1 of 679 hand-written TUs reproduces it.
+  # TU -- a sweep of every hand-written TU in the compile database reproduced it
+  # here and nowhere else.
   #
   # It was NOT dismissed on shape. The one attributable hypothesis — that the
   # copied span could be empty, so reify.cpp's `bytes_.assign(sb.begin(),

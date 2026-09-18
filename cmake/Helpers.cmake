@@ -25,31 +25,68 @@ function(fixpp_apply_common_flags target)
   endif()
 endfunction()
 
-# ── GCC does not know the `clang::` attribute namespace (#439) ───────────────
-#
-# The tree spells `[[clang::lifetimebound]]` directly at ~200 hand-written sites
-# and the codegen emitter writes it into the generated headers. GCC parses the
-# attribute, cannot act on it, and says so with `-Wattributes` — which is ON BY
-# DEFAULT, not part of -Wall. So `FIXPP_WERROR=ON` turns every one of those into
-# an error, which is why the gcc presets could not simply drop their override.
-#
-# ⚠️ SCOPED TO THE VENDOR NAMESPACE, NOT `-Wno-attributes`. The blanket form
-# would also swallow a MISSPELLED attribute in any namespace — `[[gnu::nortern]]`
-# would compile silently. The `=clang::` form suppresses exactly the namespace
-# GCC cannot implement and still reports every other ignored attribute.
-#
-# Re-derive the condition (not the count — it moves with every generated header):
-#   g++ -std=c++23 -Werror -c <any TU spelling [[clang::lifetimebound]]>
-#   g++ -std=c++23 -Werror -Wno-attributes=clang:: -c <same TU>   # must be clean
-#
-# The namespace-scoped form is GCC >= 13; older GCC rejects the option itself.
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
-   AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13)
-  add_compile_options(-Wno-attributes=clang::)
-endif()
-
 # ── Werror — turned on in CI via FIXPP_WERROR cache variable ─────────────────
 option(FIXPP_WERROR "Treat compile warnings as errors" OFF)
+
+# ── GCC does not know the `clang::` attribute namespace (#439) ───────────────
+#
+# The tree spells `[[clang::lifetimebound]]` in hand-written headers AND the
+# codegen emitter writes it into every generated accessor, so the diagnostic
+# count is dominated by generated code and moves with each regeneration. GCC
+# parses the attribute, cannot act on it, and says so with `-Wattributes` --
+# which is ON BY DEFAULT, not part of -Wall. Without this suppression `-Werror`
+# on GCC is unusable.
+#
+# ⚠️ SCOPED TO THE VENDOR NAMESPACE, NOT `-Wno-attributes`. The blanket form
+# would also swallow a MISSPELLED attribute in any other namespace --
+# `[[gnu::nortern]]` would compile silently. The `=clang::` form suppresses
+# exactly the namespace GCC cannot implement and still reports every other
+# ignored attribute. Verified both ways; see the re-derivation below.
+#
+# ⚠️ THE GATE ON FIXPP_WERROR IS A CACHE DECISION, NOT A LOGICAL ONE -- the
+# suppression is correct on GCC unconditionally. GCC can never act on a
+# `clang::` attribute, with or without -Werror; read this as "applied where it
+# is load-bearing", NOT as "only needed under -Werror".
+#
+# What the gate buys, measured rather than assumed. Adding a flag moves EVERY
+# compile command line, so a lane's ccache restore still HITs while every entry
+# misses -- the signature ci/ccache-stats.sh calls pathological. Two lanes
+# assert a 70% FATAL floor: python-wheel-build (tier1.yml) and all four
+# linux-clang-libc++* legs (tier3-libcxx.yml). The libc++ legs are clang, so
+# this flag never reaches them. python-wheel-build is GNU >= 13 and never sets
+# FIXPP_WERROR, and its cache identity is the manylinux image digest + py-api,
+# which does NOT cover the flag surface -- so it cannot rotate its own key and
+# would take the full miss. Ungated, that lane breaches its floor with
+# certainty; gated, its command lines are byte-identical.
+#
+# ⚠️ THE CONDITION, so this does not rot into a rule nobody can re-check: the
+# gate is worth keeping only while some floored lane is GNU and does not set
+# FIXPP_WERROR. Re-derive with
+#   grep -rn "ccache-stats.sh" .github/workflows/   # which callers pass a floor
+# and check that lane's compiler and FIXPP_WERROR. If no floored lane is GNU any
+# more, DELETE the gate -- an unconditional suppression is the better mechanism.
+# If a GCC lane without -Werror ever wants clean output, delete the gate and
+# re-seed that lane's cache; the procedure is the one #437/#453 used (drop the
+# stale GHCR tags so the restore MISSes, which the floor exempts).
+#
+# Re-derive the condition (not the count -- it moves with every generated header):
+#   g++ -std=c++23 -Werror -c <a TU spelling [[clang::lifetimebound]]>   # errors
+#   g++ -std=c++23 -Werror -Wno-attributes=clang:: -c <same TU>          # clean
+#   g++ -std=c++23 -Wno-attributes=clang:: -c <a TU with [[gnu::bogus]]> # STILL warns
+#
+# The namespace-scoped form is GCC >= 13; older GCC rejects the option itself,
+# which is why FIXPP_WERROR=ON on GCC < 13 is refused outright below.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND FIXPP_WERROR)
+  if(CMAKE_CXX_COMPILER_VERSION VERSION_LESS 13)
+    message(FATAL_ERROR
+      "FIXPP_WERROR=ON with GCC ${CMAKE_CXX_COMPILER_VERSION}, but the "
+      "-Wno-attributes=clang:: suppression it depends on is GCC >= 13 only. "
+      "Without it every [[clang::lifetimebound]] in the tree -- hand-written "
+      "and codegen-emitted alike -- is a -Wattributes error, so this "
+      "configuration cannot build. Use GCC >= 13, or -DFIXPP_WERROR=OFF.")
+  endif()
+  add_compile_options(-Wno-attributes=clang::)
+endif()
 
 function(fixpp_maybe_werror target)
   if(FIXPP_WERROR)

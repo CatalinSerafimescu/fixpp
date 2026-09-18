@@ -119,8 +119,9 @@ was also considered and rejected; the user chose to wire it on every toolchain, 
   Wiring it is #439 part 2; split out because part 1 (below) was already a sweep.
 - **The gcc presets NO LONGER set `FIXPP_WERROR=OFF`** (#439). Dropping that override was not a
   one-line change: five DEFAULT-ON classes fired, so `-Wall` was never the obstacle. `-Wattributes`
-  dominated at 92767 sites — the tree spells `[[clang::lifetimebound]]`, which GCC parses and cannot
-  act on — and is suppressed by the **namespace-scoped** `-Wno-attributes=clang::` (GCC >= 13; the
+  dominated, by orders of magnitude, over every other class — the tree spells `[[clang::lifetimebound]]`,
+  which GCC parses and cannot act on, and the codegen emitter writes it into every generated accessor, so
+  the count is dominated by generated code and moves with each regeneration — and is suppressed by the **namespace-scoped** `-Wno-attributes=clang::` (GCC >= 13; the
   blanket `-Wno-attributes` would also swallow a misspelled attribute in any other namespace). That
   suppression is gated on `FIXPP_WERROR` for a **ccache** reason, stated at the site. A second class
   was pure rot: fifteen deprecation suppressions guarded on `__GNUC__` but spelled
