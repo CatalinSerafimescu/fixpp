@@ -209,13 +209,11 @@ static_assert(static_cast<std::uint8_t>(FileStorePolicy::kind::commit_interval) 
 #ifdef FIXPP_TEST_HOOKS
 void install_store_offload_probe(void (*probe)(std::thread::id) noexcept) noexcept;
 // #433 companion to the above: install a probe called when the offloaded
-// callable has RETURNED (or thrown), on the same pool thread. Installed from
-// the single `offload_to` funnel in file_store.cpp, so it covers every offload
-// site and fires while unwinding. Pass nullptr to disable (production default).
-// ⚠️ Entry+exit brackets the BLOCKING CALLABLE only. Neither seam observes the
-// io_context side and neither carries an operation identity, so a counted pair
-// is NOT attributable to any particular awaited operation — see the block
-// comment at the definition before drawing a conclusion from a count.
+// callable has RETURNED (or thrown), on the same pool thread. Pass nullptr to
+// disable (production default).
+// ⚠️ Brackets the BLOCKING CALLABLE only -- not submit->post-back, and no
+// operation identity. Read the block comment at the definition in
+// file_store.cpp before drawing any conclusion from a count.
 void install_store_offload_exit_probe(void (*probe)(std::thread::id) noexcept) noexcept;
 // Read and reset the T012 catch-fired diagnostic counter (T009 arm (b) verification).
 int read_and_reset_catch_fired() noexcept;

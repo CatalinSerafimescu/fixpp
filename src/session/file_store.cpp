@@ -193,12 +193,23 @@ namespace {
 // declared before its use; moving the whole probe block up would churn a file
 // the flake investigation wants stable. Production value: nullptr.
 //
-// WHY THE FUNNEL AND NOT THE FOUR LAMBDAS. The ENTRY probe is invoked by each
-// call site's lambda (four `if (probe_fn)` blocks). The EXIT probe is invoked
-// here instead, once, because `offload_to` is the single point every offload
-// returns through: one site cannot be forgotten by a future fifth call site,
-// and a scope guard also fires while UNWINDING, which a statement at the end
-// of each lambda would not.
+// WHY THE FUNNEL AND NOT THE PER-SITE LAMBDAS. The ENTRY probe is invoked by
+// each call site's lambda; re-derive which those are rather than trusting a
+// count here:
+//   git grep -n 'g_store_offload_probe' src/session/file_store.cpp
+// The EXIT probe is invoked here instead, once, because `offload_to` is the
+// single point every offload returns through: no site can be forgotten by a
+// future one, and a scope guard also fires while UNWINDING, which a statement
+// at the end of each lambda would not.
+//
+// It is also the CHEAPER placement, which is worth keeping when someone tries
+// to make it symmetric with the entry probe. A per-site exit pointer would be
+// captured into each lambda -- and each lambda IS the by-value `Fn fn`
+// parameter of the inner coroutine below, so it lands in a heap-allocated
+// coroutine frame. This guard is a local that does not cross a suspension
+// point, so it is not spilled into the frame at all (measured: frame size
+// unchanged on clang 22 and gcc 13, against a control where a suspend-crossing
+// local does grow it).
 //
 // WHAT THE PAIR ESTABLISHES (and what it does NOT). Entry fires at the start
 // of the offloaded callable, exit when that callable has returned or thrown —
