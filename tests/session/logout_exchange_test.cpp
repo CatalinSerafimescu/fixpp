@@ -166,10 +166,21 @@ std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag) {
 // ⚠️ THE PROMISE IS SHARED, NOT CAPTURED BY REFERENCE. On the DID-NOT-RUN branch
 // the task is still queued when this function returns, so a reference to a frame
 // local would dangle until `file_pool` is destroyed.
-// ⚠️ "DID NOT RUN" IS "OCCUPIED", NOT "DEADLOCKED". A pool merely busy with a
-// long fdatasync reports the same thing. The distinction the probe DOES make --
-// pool side versus io_context side -- is the one #433 asks for; anything finer
-// needs the offload path instrumented, not this.
+// ⚠️ "DID NOT RUN" HERE MEANS "SLOW", NOT "DEADLOCKED", AND THAT READING IS
+// STRUCTURAL rather than a judgement about this run. Pool-exhaustion deadlock is
+// ruled out by the type of the offloaded callable: `offload_to` invokes `fn()` as
+// a plain call (src/session/file_store.cpp `offload_to`), and every one of its
+// call sites passes a NON-COROUTINE lambda returning `bool`. A non-coroutine
+// cannot `co_await`, so nothing running on a pool thread can initiate or await a
+// second offload -- peak occupancy is one pool thread per logical operation, and
+// a 2-thread pool cannot be exhausted by one FileStore. Re-derive rather than
+// trust this: if any call site ever passes a lambda returning `awaitable<...>`,
+// the argument is void and nested-offload deadlock is back on the table.
+// So a DID-NOT-RUN verdict points at a genuinely slow syscall. The one on this
+// path is the `fdatasync` at the end of `next_seqnum(increment=true)`'s offload,
+// which is unconditional -- `commit_batched` batches FRAME writes, not the
+// counter record, which is the linearisation point. `on_inbound_frame(Logon-ack)`
+// therefore carries exactly one blocking fdatasync.
 std::string probe_file_pool(asio::thread_pool& pool, std::chrono::milliseconds budget) {
     auto done = std::make_shared<std::promise<void>>();
     auto ran = done->get_future();
@@ -189,9 +200,14 @@ std::string probe_file_pool(asio::thread_pool& pool, std::chrono::milliseconds b
            "ms -- every pool thread is occupied; the stall is on the file_io side.";
 }
 
-// The probe asks "is a pool thread free NOW", so its budget only has to outlast
-// the post-and-schedule round trip on a loaded runner, not any store operation.
-constexpr auto kPoolProbeBudget = std::chrono::milliseconds{2000};
+// Derived from the budget it runs AFTER, not picked. The probe is reached only
+// once a full `kPumpBudget` pump has already missed, so any small fraction of
+// that budget answers "is a pool thread free" without meaningfully extending an
+// already-failing test. A fifth is small enough to stay cheap and large enough
+// that a post-and-schedule round trip on a loaded runner is not mistaken for
+// saturation.
+constexpr auto kPoolProbeBudget =
+    std::chrono::duration_cast<std::chrono::milliseconds>(fixpp::test_support::kPumpBudget) / 5;
 
 }  // namespace
 
