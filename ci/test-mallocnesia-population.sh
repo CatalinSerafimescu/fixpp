@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# ci/test-mallocnesia-population.sh — pin tools/check_mallocnesia_population.py (fixpp#448).
+# ci/test-mallocnesia-population.sh — pin fixpp#448's two static checkers:
+# tools/check_mallocnesia_population.py and tools/check_no_raw_mallocnesia_preload.py.
 #
 # That checker exists because a label silently selected 8 of 18 real gates on main, and a
 # checker which cannot report that is worth nothing. So every branch gets a mutant here,
@@ -116,6 +117,51 @@ if [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF "floor is 5"; then
   echo "ok    T7c the --min-gates floor fires when the population SHRINKS"; pass=$((pass+1))
 else
   echo "FAIL  T7c floor did not fire: rc=$rc"; echo "$out" | sed 's/^/      /' | head -2; fail=$((fail+1))
+fi
+
+# ── T8: the raw-preload scanner under a NON-UTF-8 LOCALE ─────────────────────
+# MEASURED on windows-msvc-release: `path.read_text()` with no encoding uses the LOCALE
+# codec (cp1252 on a Windows runner), and this repo's CMakeLists are full of UTF-8, so the
+# scanner died with `UnicodeDecodeError: charmap codec can't decode byte 0x81`. It runs on
+# Windows because it is a static scan registered unconditionally -- correctly, since a raw
+# LD_PRELOAD is wrong on any platform.
+#
+# ⚠️ THE LEVER IS THE LOCALE, NOT PYTHONIOENCODING. A first version of these arms used
+# PYTHONIOENCODING=cp1252 and BOTH mutants stayed green: that variable sets stdio only,
+# while read_text() consults locale.getpreferredencoding(). LC_ALL=C + PYTHONUTF8=0 +
+# PYTHONCOERCECLOCALE=0 is what actually forces an ASCII codec on Linux.
+RAW="$REPO/tools/check_no_raw_mallocnesia_preload.py"
+ASCII_LOCALE=(env LC_ALL=C PYTHONUTF8=0 PYTHONCOERCECLOCALE=0)
+
+U="$TMP/utf8/tests/x"; mkdir -p "$U" "$TMP/utf8/tools"
+printf '# non-ASCII comment: \xe2\x80\x94 \xe2\x9a\xa0\nadd_test(NAME t COMMAND true)\n' > "$U/CMakeLists.txt"
+cp "$RAW" "$TMP/utf8/tools/c.py"
+out="$(cd "$TMP/utf8" && "${ASCII_LOCALE[@]}" python3 tools/c.py 2>&1)"; rc=$?
+if [ "$rc" = 0 ] && ! printf '%s' "$out" | grep -q "Traceback"; then
+  echo "ok    T8a UTF-8 CMake text under an ASCII locale is READ, not a UnicodeDecodeError"
+  pass=$((pass+1))
+else
+  echo "FAIL  T8a rc=$rc"; echo "$out" | sed 's/^/      /' | head -3; fail=$((fail+1))
+fi
+
+# ⚠️ The reporting half is asserted STRUCTURALLY, not against a chosen codec. A first
+# version printed an em-dash under cp1252 expecting a crash -- but cp1252 CONTAINS the
+# em-dash (0x97), so that mutant was green for a reason that had nothing to do with the
+# check. The glyphs that actually break are the ones cp1252 lacks (arrow, warning sign,
+# subset-of), which is what the repo's recorded fix was about. Requiring pure-ASCII output
+# is codec-independent and cannot be defeated by picking the wrong test codepage.
+V="$TMP/enc/tests/x"; mkdir -p "$V" "$TMP/enc/tools"
+printf 'set_property(TEST t APPEND PROPERTY ENVIRONMENT "LD_PRELOAD=/x.so")\n' > "$V/CMakeLists.txt"
+cp "$RAW" "$TMP/enc/tools/c.py"
+out="$(cd "$TMP/enc" && "${ASCII_LOCALE[@]}" python3 tools/c.py 2>&1)"; rc=$?
+if [ "$rc" = 1 ] && printf '%s' "$out" | grep -q "set LD_PRELOAD directly" \
+   && ! printf '%s' "$out" | grep -q "Traceback" \
+   && LC_ALL=C grep -qP '^[\x00-\x7F]*$' <<<"$out"; then
+  echo "ok    T8b the finding is REPORTED, and its text is pure ASCII (any codepage)"
+  pass=$((pass+1))
+else
+  echo "FAIL  T8b rc=$rc (want 1, finding reported, no traceback, ASCII-only output)"
+  echo "$out" | sed 's/^/      /' | head -3; fail=$((fail+1))
 fi
 
 echo

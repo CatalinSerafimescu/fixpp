@@ -51,7 +51,15 @@ def main() -> int:
     for path in paths:
         scanned += 1
         disabled = False
-        for n, line in enumerate(path.read_text().splitlines(), 1):
+        # ⚠️ encoding="utf-8" is NOT optional. `read_text()` with no encoding uses the
+        # LOCALE default, which is cp1252 on a Windows runner, and these CMakeLists are
+        # full of UTF-8 (the repo's comments use -- and warning glyphs heavily). MEASURED
+        # on windows-msvc-release: `UnicodeDecodeError: 'charmap' codec can't decode byte
+        # 0x81`. The sibling scanner registered next to this one
+        # (check_alloc_guard_markers.py) already reads this way, which is why it passes
+        # there. errors="replace" so one odd byte reports a finding rather than a crash.
+        for n, line in enumerate(
+                path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
             stripped = line.lstrip()
             if stripped.startswith("if(FALSE)"):
                 disabled = True
@@ -66,15 +74,27 @@ def main() -> int:
     # ⚠️ Prove the sweep reached something. A glob that matches no file reports clean,
     # which is this repo's most recurring defect shape.
     if scanned == 0:
-        print("::error::[no-raw-preload] the sweep examined ZERO test CMake files — "
+        print("::error::[no-raw-preload] the sweep examined ZERO test CMake files -- "
               "the glob is wrong, so a clean result here means nothing.")
         return 2
 
     if offenders:
+        # ⚠️ ASCII ONLY on every printed path. A Windows console is cp1252; a glyph that
+        # codepage LACKS raises UnicodeEncodeError and the checker CRASHES INSTEAD OF
+        # REPORTING -- precisely when it has a finding, which is the worst possible time.
+        # The repo has hit this before (memory project_tier2_windows_runtime_fixes:
+        # "Python arrow -> ASCII ... (cp1252)").
+        #
+        # ⚠️ Do NOT reason about this by picking one character: cp1252 CONTAINS the
+        # em-dash (0x97), so an em-dash is harmless and a mutant built from one stays
+        # green for a reason unrelated to the check. It is the arrow, warning sign and
+        # set-operator glyphs that are absent. The arm in
+        # ci/test-mallocnesia-population.sh therefore asserts the output is pure ASCII
+        # rather than testing against any one codepage.
         print(f"::error::[no-raw-preload] {len(offenders)} test-registration site(s) set "
               f"LD_PRELOAD directly instead of using fixpp_add_mallocnesia_test(). Such a "
               f"site bypasses the fail-closed wrapper, the interception witness, the "
-              f"`mallocnesia` label and therefore the CI selection — and ld.so IGNORES an "
+              f"`mallocnesia` label and therefore the CI selection -- and ld.so IGNORES an "
               f"unloadable preload, so it runs uninstrumented and PASSES:")
         for o in offenders:
             print(f"::error::  {o}")
