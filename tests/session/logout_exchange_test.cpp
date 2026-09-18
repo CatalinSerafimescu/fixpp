@@ -1160,6 +1160,22 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
 
     auto dir = unique_store_dir("sc007_graceful_flush");
 
+    // #433 F1.1 -- INSTALLED BEFORE `file_pool` IS CONSTRUCTED, AND THE ORDER IS
+    // THE POINT, NOT STYLE. Reverse destruction makes `~thread_pool` (which
+    // stops and joins) run BEFORE this guard uninstalls, on every exit path
+    // including an early ASSERT return or an exception. That is what keeps the
+    // in-flight gauge honest: at uninstall time no offload can still be queued
+    // or running, so none can fire its ENTRY probe -- captured BY VALUE at
+    // submit time, and therefore still callable -- after the guard has reset
+    // the gauge, leaving a phantom +1 for every later arm to read.
+    //
+    // ⚠️ `quiesce_on_exit` DOES NOT PROVIDE THIS AND MUST NOT BE RELIED ON FOR
+    // IT. It is a BOUNDED observer, not a completion barrier: if both workers
+    // stay busy past its budget it returns with work still outstanding. Only
+    // the pool's own join is a barrier, which is why the guard sits outside it
+    // rather than merely before the quiescence guard.
+    scoped_offload_probe offload_probe;
+
     // Separate pool for file I/O — MUST outlive the session.
     asio::thread_pool file_pool{2};
 
@@ -1211,35 +1227,6 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
         // local input a suspended coroutine may reference is required, not
         // just after `sess` itself.
         auto logon_ack = make_logon_frame("FIX.4.2", 1, "TW", "ISLD", 30);
-
-        // #433 F1.1: install BEFORE open() so its offload (the outbound Logon
-        // store) is observed too, not only the Logon-ack path below. Scoped to
-        // this block: its destructor uninstalls before `file_pool.stop()` and
-        // before the durability re-open below opens a second FileStore on a
-        // DIFFERENT pool (`verify_pool`) -- see the block comment above
-        // `probe_file_pool` for why a leaked probe cannot be left installed
-        // past this scope.
-        //
-        // ⚠️ DECLARED BEFORE `quiesce`, SO IT UNINSTALLS *AFTER* THE DRAIN.
-        // Under the reverse order, an early ASSERT return destroys the probe
-        // first -- uninstalling and resetting the gauge -- and only then does
-        // `quiesce` drain `ioc`. An offload that was submitted but had not yet
-        // entered can then run its ENTRY probe, which the lambda captured BY
-        // VALUE at submit time and can still call, incrementing past the reset
-        // while its exit observes nullptr and never decrements.
-        //
-        // ⚠️ EVIDENCE STATUS, STATED BECAUSE IT IS WEAKER THAN THE REST OF THIS
-        // FILE'S. This ordering rests on the capture-by-value mechanism (read it
-        // in src/session/file_store.cpp, "Snapshot the probe pointer on the
-        // strand") plus destruction order -- NOT on a mutation that exhibits the
-        // leak. Swapping the two declarations back does not reproduce it with
-        // the tools here: the only way to force an early return at these sites
-        // is `FIXPP_FORCE_WINDOW_MISS`, which short-circuits BEFORE the pump
-        // ever submits, so no offload is in flight to strand (the forced run
-        // reports "no offload entered a pool thread"). Reaching the state needs
-        // a real timeout with an offload queued behind a saturated pool, which
-        // is #433 itself. Do not record this ordering as mutation-proven.
-        scoped_offload_probe offload_probe;
 
         // Declared after `sess` and `logon_ack`: on every exit path this
         // destructs before them, draining `ioc` while `sess`, `clock`, `ioc`,
