@@ -9,7 +9,8 @@
 # a non-zero exit, which any typo also produces.
 #
 # Each case builds a synthetic harness module and fixture population, because driving
-# the real 90-id set could only ever exercise the passing path. T0 covers the real one.
+# the real population could only ever exercise the passing path. T0 covers the real
+# files (offline half); the arms below cover every refusal.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -54,9 +55,18 @@ mk_harness() {  # mk_harness <dir> <filter>...
     echo "    log = os.environ.get('SETTLE_LOG')"
     echo "    if log:"
     echo "        open(log, 'a').write('settle\\n')"
-    echo "def run_cell(*a, **k):"
+    echo "def run_cell(cell, config, build_root, run_dir, **k):"
     echo "    v = os.environ.get('STUB_VERDICT', 'pass')"
     echo "    if v == 'raise': raise RuntimeError('stub blew up')"
+    # A real cell writes its transcript and capture here; the driver requires evidence
+    # on disk before it will believe a 'pass'. STUB_EVIDENCE=none forces the arm where
+    # a (broken/stale) image reports pass having launched nothing.
+    echo "    if os.environ.get('STUB_EVIDENCE') != 'none':"
+    echo "        os.makedirs(run_dir, exist_ok=True)"
+    echo "        open(os.path.join(str(run_dir), 'transcript.txt'), 'w').write('stub')"
+    echo "    log = os.environ.get('SETTLE_LOG')"
+    echo "    if log:"
+    echo "        open(log, 'a').write('cell %s\\n' % cell.gtest_filter)"
     echo "    return {'status': v, '_detail': 'stub'}"
   } > "$dir/tools/run_interop_cell.py"
 }
@@ -187,7 +197,7 @@ H4="$TMP/h4"; mkdir -p "$H4/tools"
 } > "$H4/tools/run_interop_cell.py"
 mkexc "qfj-only-at-g1 Fix44/S.C/QFcpp_init" "unregistered-tracked $LONE"
 check "T10a a pre-settle image is REFUSED, not run without the settle" 2 \
-  "predates settle_between_cells" \
+  "no CALLABLE settle_between_cells" \
   -- python3 "$DRIVER" --harness "$H4" --build-root "$TMP" --skip-set "$SKIP" \
        --exclusions "$EXC" --list
 
@@ -201,16 +211,56 @@ check "T10c an image whose driver will not import is refused, not a traceback" 2
   -- python3 "$DRIVER" --harness "$H5" --build-root "$TMP" --skip-set "$SKIP" \
        --exclusions "$EXC" --list
 
-# Counted, not grepped: the stub's settle appends a line, so this observes the real
-# call. Two cells => exactly one settle (between them, never after the last).
+# ⚠️ The THREE import-refusal shapes below are not variations on T10c. Each reaches a
+# DIFFERENT line, and the first of them exited 0 — green, having run nothing — until
+# Codex r1 P1-A named it. They are separated so that a fix to one cannot quietly
+# retire the others.
+
+# (1) SystemExit is NOT an Exception. A module body reaching sys.exit(0) used to
+# terminate this process with status 0: --list-binaries printed an empty target list
+# and the run phase returned before reconciling or running a single cell. Both wrapper
+# modes are exercised, because they exit through different call paths.
+H6="$TMP/h6"; mkdir -p "$H6/tools"
+printf 'import sys\nsys.exit(0)\n' > "$H6/tools/run_interop_cell.py"
+check "T10d a driver whose body calls sys.exit(0) is REFUSED, not silently green" 2 \
+  "failed to import" \
+  -- python3 "$DRIVER" --harness "$H6" --build-root "$TMP" --skip-set "$SKIP" \
+       --exclusions "$EXC" --list
+check "T10d2 ... and --list-binaries refuses it too, rather than printing nothing" 2 \
+  "failed to import" \
+  -- python3 "$DRIVER" --harness "$H6" --list-binaries
+
+# (2) hasattr() accepts a non-callable. `settle_between_cells = None` satisfied the
+# compatibility check and then raised mid-run — the refusal firing as a crash.
+H7="$TMP/h7"; mkdir -p "$H7/tools"
+{ echo "CELLS = {}"
+  echo "settle_between_cells = None"
+} > "$H7/tools/run_interop_cell.py"
+check "T10e a NON-CALLABLE settle attribute is refused, not accepted by hasattr" 2 \
+  "no CALLABLE settle_between_cells" \
+  -- python3 "$DRIVER" --harness "$H7" --build-root "$TMP" --skip-set "$SKIP" \
+       --exclusions "$EXC" --list
+
+# (3) exists() accepts a DIRECTORY of that name; the named "not found" refusal was
+# bypassed and importlib died with an unhandled loader error.
+H8="$TMP/h8"; mkdir -p "$H8/tools/run_interop_cell.py"
+check "T10f a DIRECTORY named run_interop_cell.py gets the named refusal" 2 \
+  "bundled harness driver not found" \
+  -- python3 "$DRIVER" --harness "$H8" --build-root "$TMP" --skip-set "$SKIP" \
+       --exclusions "$EXC" --list
+
+# Counted AND ORDERED. Counting alone is not enough: a driver that settled ONCE before
+# the first cell also logs exactly one line for two cells, and would pass a count-only
+# arm while doing nothing between them -- which is the entire point of the settle
+# (Codex r1 P2-c). So the stub logs each cell too and the interleaving is asserted.
 SETTLE_LOG="$TMP/settles.txt"; : > "$SETTLE_LOG"
 SETTLE_LOG="$SETTLE_LOG" STUB_VERDICT=pass python3 "$DRIVER" --harness "$H" \
   --build-root "$TMP" --skip-set "$SKIP" --exclusions "$EXC" >/dev/null 2>&1
-n=$(wc -l < "$SETTLE_LOG")
-if [ "$n" = "1" ]; then
-  echo "ok    T10b 2 cells -> exactly 1 settle (between, not after the last)"; pass=$((pass+1))
+got=$(sed 's/^cell .*/CELL/; s/^settle$/SETTLE/' "$SETTLE_LOG" | tr '\n' ' ')
+if [ "$got" = "CELL SETTLE CELL " ]; then
+  echo "ok    T10b 2 cells -> settle BETWEEN them (cell, settle, cell)"; pass=$((pass+1))
 else
-  echo "FAIL  T10b 2 cells -> $n settle(s), wanted 1"; fail=$((fail+1))
+  echo "FAIL  T10b wanted 'CELL SETTLE CELL ', got '$got'"; fail=$((fail+1))
 fi
 
 # ── T11: --list-binaries, which interop-live.yml's build step now depends on. An
@@ -241,6 +291,95 @@ HZ="$TMP/hz"; mk_harness "$HZ"
 check "T11b a registry naming ZERO binaries is refused, not an empty target list" 2 \
   "refusing to build nothing" -- \
   python3 "$DRIVER" --harness "$HZ" --list-binaries
+
+# ── T12: the exclusion TAG is checked against the authority the file names, not
+# trusted. The two sibling tags share ONE structural condition (T6a), so they are
+# freely interchangeable as far as it can tell: swap a line's tag and everything else
+# stays green while the file asserts something false. Codex r1 P1-D.
+CR="$TMP/cell_results.yaml"
+cat > "$CR" <<'YEOF'
+cells:
+  - { id: CELL-DEF-A, matrix_disposition: "deferred:qfj-only-at-g1" }
+  - { id: CELL-DEF-B, matrix_disposition: "deferred:qfcpp-no-possdup-injection" }
+  - { id: CELL-LIVE,  matrix_disposition: live }
+YEOF
+runauth() { python3 "$DRIVER" --harness "$H" --build-root "$TMP" --skip-set "$SKIP" \
+              --exclusions "$EXC" --cell-results "$CR" --list; }
+
+# the honest baseline: a correctly-tagged pointer reconciles
+mkexc "qfj-only-at-g1 Fix44/S.C/QFcpp_init CELL-DEF-A" "unregistered-tracked $LONE"
+if runauth >/dev/null 2>&1; then
+  echo "ok    T12a a tag matching the authority's disposition reconciles"; pass=$((pass+1))
+else
+  echo "FAIL  T12a a correctly-tagged exclusion was rejected"; fail=$((fail+1))
+fi
+
+# the swap Codex named -- structurally identical, semantically false
+mkexc "qfcpp-no-possdup-injection Fix44/S.C/QFcpp_init CELL-DEF-A" "unregistered-tracked $LONE"
+check "T12b a tag CONTRADICTING the authority is rejected (the sibling-tag swap)" 1 \
+  "dispositions its cell CELL-DEF-A as 'deferred:qfj-only-at-g1'" -- runauth
+
+# a pointer that resolves to nothing must FAIL, not read as "nothing to check"
+mkexc "qfj-only-at-g1 Fix44/S.C/QFcpp_init CELL-NO-SUCH" "unregistered-tracked $LONE"
+check "T12c a DANGLING cell-id pointer is rejected, not silently unchecked" 1 \
+  "does not disposition as deferred:* at all" -- runauth
+
+# a `live` cell is not a deferred disposition -- the pointer must not resolve to it
+mkexc "qfj-only-at-g1 Fix44/S.C/QFcpp_init CELL-LIVE" "unregistered-tracked $LONE"
+check "T12d a pointer at a LIVE row is rejected (only deferred:* is an authority)" 1 \
+  "does not disposition as deferred:* at all" -- runauth
+
+# unregistered-tracked means NO cell selects it anywhere, so naming a cell contradicts it
+mkexc "unregistered-tracked $LONE CELL-DEF-A" "qfj-only-at-g1 Fix44/S.C/QFcpp_init"
+check "T12e unregistered-tracked naming a cell id is a contradiction, refused at parse" 2 \
+  "contradicts it" -- runauth
+
+# restore the fixture the later arms expect
+mkexc "qfj-only-at-g1 Fix44/S.C/QFcpp_init" "unregistered-tracked $LONE"
+
+# ── T13: the EXECUTION WITNESS. Every check above is about the POPULATION; none of
+# them asks whether a cell ran. This job consumes a mutable `:latest`, so a rolled-back
+# or broken image whose run_cell returns pass without launching a binary would sail
+# through all of them. The driver owns run_dir, so it requires evidence there.
+mkexc "qfj-only-at-g1 Fix44/S.C/QFcpp_init" "unregistered-tracked $LONE"
+out=$(STUB_EVIDENCE=none STUB_VERDICT=pass python3 "$DRIVER" --harness "$H" \
+        --build-root "$TMP" --skip-set "$SKIP" --exclusions "$EXC" 2>&1); rc=$?
+if [ "$rc" != 0 ] && printf '%s' "$out" | grep -qF "wrote NOTHING to"; then
+  echo "ok    T13a a cell reporting pass with an EMPTY run dir fails, not passes"
+  pass=$((pass+1))
+else
+  echo "FAIL  T13a pass-with-no-evidence: rc=$rc"; echo "$out" | sed 's/^/      /' | head -4
+  fail=$((fail+1))
+fi
+
+# ⚠️ The companion arm: prove the witness is not simply always-RED, which would make
+# T13a pass for the wrong reason and every real run fail. Same driver, evidence written.
+out=$(STUB_VERDICT=pass python3 "$DRIVER" --harness "$H" --build-root "$TMP" \
+        --skip-set "$SKIP" --exclusions "$EXC" 2>&1); rc=$?
+if [ "$rc" = 0 ]; then
+  echo "ok    T13b ... and a cell that DID write evidence still passes"; pass=$((pass+1))
+else
+  echo "FAIL  T13b the witness reddens a cell that wrote evidence: rc=$rc"
+  echo "$out" | sed 's/^/      /' | head -4; fail=$((fail+1))
+fi
+
+# ── T14: the accepted status is EXACTLY `pass`. Written by CLASS, not by spelling:
+# an arm per known skip string is a list to keep in sync with the harness, and the
+# next spelling it grows is invisible to it. These four classes cover any value.
+for spec in "skip:counterparty-unavailable:a known skip" \
+            "skip:golden-not-yet-captured:a DIFFERENT known skip" \
+            "skip:some-future-reason-nobody-wrote-yet:an UNKNOWN skip" \
+            "PASS:a case variant of the accepted value" \
+            "weird-unknown-status:a non-skip unknown status"; do
+  v="${spec%%:*}"; rest="${spec#*:}"; v="${spec%:*}"; desc="${spec##*:}"
+  out=$(STUB_VERDICT="$v" python3 "$DRIVER" --harness "$H" --build-root "$TMP" \
+          --skip-set "$SKIP" --exclusions "$EXC" 2>&1); rc=$?
+  if [ "$rc" != 0 ]; then
+    echo "ok    T14 $desc ('$v') is a FAILURE, not a pass"; pass=$((pass+1))
+  else
+    echo "FAIL  T14 status '$v' ($desc) was accepted as a pass"; fail=$((fail+1))
+  fi
+done
 
 echo
 echo "test-run-interop-live: $pass passed, $fail failed"

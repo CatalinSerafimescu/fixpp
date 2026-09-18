@@ -1433,6 +1433,13 @@ CI_PIN_HARNESSES=(
   # M26/M64/M65/M69/M73/M101 — none of those prove THIS row can fail, only
   # that the census mechanism can fail for a different harness.
   "ci/test-interop-gate-step.sh"
+  # fixpp#468's interop-live population-reconciliation harness. ⚠️ ADDED WITH ITS OWN
+  # MUTANT (M103), same dead-call-site shape as M26/M64/M65/M69/M73/M101/M102 — none
+  # of those prove THIS row can fail, only that the census mechanism can fail for a
+  # different harness. This row matters more than most: ci/run-interop-live.py is the
+  # only thing standing between "the live interop job is green" and "it ran the cells
+  # it claims to", and every one of its refusals is pinned in that harness alone.
+  "ci/test-run-interop-live.sh"
 )
 
 assert_ci_pin_call_sites() {
@@ -1757,7 +1764,8 @@ echo "PASS: derive-script table + call site + per-leg FIXPP_INSTALL_PYTHON + PY_
 # not collide). Re-run the harness against the merged number rather than
 # re-deriving from either branch's local total — the failure mode this guards is
 # one side's edit silently replacing the other's, which reads as a passing count.
-MUTANTS_DECLARED=88  # M102 (the ci-script-pins call-site
+MUTANTS_DECLARED=89  # M103 (the ci-script-pins call-site pin for
+                     # ci/test-run-interop-live.sh, fixpp#468) + M102 (the ci-script-pins call-site
                      # pin for ci/test-interop-gate-step.sh) + M101 (the ci-script-pins call-site pin for
                      # ci/test-interop-skips.sh) + M97-M100 (#411 Gate B r2 L1/L2: Build's key set on both jobs, plus
                      # the workflow's own on.push key set and branches) + M83-M96 (#411 Gate B r1 F1/F3/F4-bench: the canonical-object ccache
@@ -2273,6 +2281,20 @@ src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
 old = "        run: bash ci/test-interop-gate-step.sh\n"
 new = "        run: echo \"bash ci/test-interop-gate-step.sh\"\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M103 (fixpp#468): the SAME dead-call-site shape, on the interop-live
+  # reconciliation harness row added this round. Its own mutant for the reason
+  # every sibling above states: a row proven only by another row's mutant is a
+  # row nobody has seen fail.
+  mutate_workflow M103 "the interop-live reconciliation harness call site replaced by an echo" "ci-script-pins does not INVOKE" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: bash ci/test-run-interop-live.sh\n"
+new = "        run: echo \"bash ci/test-run-interop-live.sh\"\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
 '

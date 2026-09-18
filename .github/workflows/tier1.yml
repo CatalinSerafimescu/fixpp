@@ -2501,8 +2501,12 @@ jobs:
       # merely a non-zero exit — which any typo also produces. The driver is the only
       # thing standing between "the live job is green" and "the live job ran the cells
       # it claims to", so an unexercised refusal in it would be the exact defect class
-      # it exists to catch. T0 reconciles the REAL population, so the suite also proves
-      # the driver says yes to the tree we ship, not only that it can say no.
+      # it exists to catch.
+      #
+      # ⚠️ BOUND, because an earlier revision of this comment overstated it: T0 runs the
+      # driver's OFFLINE checks against the real files, so it proves the driver says yes
+      # to the tree we ship for the half that needs no image. The covered∪excluded
+      # equality needs the image's registry and runs only in the interop-live job.
       # Buildless — python3 + coreutils only.
       - name: "Regression pin — interop-live population reconciliation (#468)"
         run: bash ci/test-run-interop-live.sh

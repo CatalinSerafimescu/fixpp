@@ -21,14 +21,31 @@ on:
   pull_request:
     types: [opened, reopened, synchronize]
     branches: ["**"]
+    # ⚠️ WIDE ON PURPOSE. An earlier revision listed only session/transport/tls and
+    # was WRONG: the live interop tests include headers from six fixpp subtrees, so a
+    # PR touching only `include/fixpp/wire/**` could break live FIX parsing without
+    # ever instantiating this workflow — the advertised per-PR signal simply absent.
+    #
+    # RE-DERIVE, do not trust this list (the recipe, because the answer rots):
+    #   grep -rho '#include <fixpp/[a-z_]*/' tests/interop/ | sort -u
+    # If that prints a subtree `include/fixpp/**` does not cover, widen further. The
+    # glob is deliberately coarser than the census so that adding an include to a test
+    # cannot silently fall outside it.
+    #
+    # The population files are IN scope (tests/interop/**) even though tier1 checks
+    # their offline half: the covered∪excluded equality against a real registry runs
+    # only here, so an exclusion-line edit must be able to reach it.
     paths:
-      - "include/fixpp/session/**"
-      - "include/fixpp/transport/**"
-      - "src/session/**"
-      - "src/transport/**"
-      - "src/tls/**"
+      - "include/fixpp/**"
+      - "src/**"
+      - "dictionaries/**"
       - "tests/interop/**"
+      - "CMakeLists.txt"
+      - "CMakePresets.json"
+      - "conanfile.py"
+      - "conan/profiles/**"
       - "ci/run-interop-live.py"
+      - "ci/restore-conan-cache.sh"
       - ".github/workflows/interop-live.yml"
   workflow_dispatch:
 
@@ -88,6 +105,15 @@ jobs:
               version: ["19", "20", "21", "22", "23"]
           EOF
 
+      # ⚠️ BEFORE the derive step, not in the run step where the first draft had it.
+      # The bundled run_interop_cell.py imports yaml at MODULE scope, and the derive
+      # step imports that module -- so on a clean actions/setup-python interpreter the
+      # job died at `--list-binaries` with "failed to import", having built nothing.
+      - name: Install the bundled harness's import-time dependencies
+        run: |
+          pip install pyyaml
+          python3 -c "import yaml; print('pyyaml', yaml.__version__)"
+
       - name: Set up oras
         uses: oras-project/setup-oras@v2
 
@@ -143,9 +169,15 @@ jobs:
           # module load: `load_harness` there is the tested one (ci/test-run-interop-live.sh
           # T7c/T10a/T10c cover its refusals), and a copy here would be the one place
           # a `CELLS` schema change could rot unnoticed until a PR run failed.
-          # No `test -n` here: --list-binaries refuses a zero-binary registry itself
-          # (exit 2), and a second guard would be a second claim to keep true.
+          # ⚠️ `test -n` is NOT redundant with the driver's own zero-registry refusal,
+          # and an earlier revision of this file deleted it saying that it was. The two
+          # cover different failures: the driver refuses an EMPTY REGISTRY, and this
+          # line is the only thing left if the bundled module body calls `os._exit()`,
+          # which no `except` anywhere can catch. (`sys.exit()` IS caught -- see
+          # load_harness, arm T10d.) A silently empty target list builds nothing and
+          # the job goes green having run no cell, so the cheap belt stays.
           targets=$(python3 ci/run-interop-live.py --harness "$HARNESS" --list-binaries)
+          test -n "$targets" || { echo "::error::empty target list"; exit 1; }
           echo "targets=$targets" >> "$GITHUB_OUTPUT"
           echo "will build: $targets"
 
@@ -175,7 +207,6 @@ jobs:
           INTEROP_BUILD_PRESET: ${{ env.PRESET }}
           FIXPP_INTEROP_EVIDENCE_ROOT: ${{ runner.temp }}/interop-evidence
         run: |
-          pip install pyyaml
           python3 ci/run-interop-live.py \
             --harness "$HARNESS" --build-root "$GITHUB_WORKSPACE/build"
 

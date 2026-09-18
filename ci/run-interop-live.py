@@ -37,11 +37,15 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import pathlib
+import shutil
 import sys
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
 SKIP_SET = REPO / "tests" / "interop" / "expected-skips-without-counterparty.txt"
 EXCLUSIONS = REPO / "tests" / "interop" / "live-cells-excluded.txt"
+# The authority live-cells-excluded.txt names for WHICH engine-capability reason
+# applies to an excluded id. Read, not paraphrased -- see authority_tags().
+CELL_RESULTS = REPO / "tests" / "interop" / "cell_results.yaml"
 # The reason a case does not run here. The first two mean "this engine cannot drive
 # this scenario" for two DIFFERENT mechanisms, and the vocabulary is the template's
 # own (`cell_results.yaml`'s `matrix_disposition: deferred:*`) rather than a parallel
@@ -62,15 +66,35 @@ def load_harness(harness_dir: pathlib.Path):
     were built together. Importing a parent checkout's copy here would be the version
     skew this script exists to refuse, committed by the script itself."""
     path = harness_dir / "tools" / "run_interop_cell.py"
-    if not path.exists():
+    # is_file(), not exists(): a DIRECTORY of that name passes exists() and then dies
+    # inside importlib with an unhandled loader error -- a traceback where this
+    # function's whole job is to report a named refusal (Codex r1 P2-e).
+    if not path.is_file():
         fail(f"bundled harness driver not found at {path} -- the image layout changed, "
              f"or --harness is wrong. Refusing to run.")
         sys.exit(2)
-    spec = importlib.util.spec_from_file_location("ric_bundled", path)
-    mod = importlib.util.module_from_spec(spec)
+    # Everything importlib can raise goes inside the guard, spec construction included.
+    #
+    # ⚠️ `except Exception` is NOT enough, and this is the interesting half: a bundled
+    # driver whose module body reaches `sys.exit(0)` raises SystemExit, which derives
+    # from BaseException, so it sails past `except Exception` and TERMINATES THIS
+    # PROCESS WITH STATUS 0. Both entry points would then succeed having done nothing:
+    # --list-binaries prints no targets, and the run phase exits before reconciling or
+    # running a single cell. A green job that ran zero cells is the exact defect this
+    # driver exists to make impossible, so the import refusal has to cover it.
+    # KeyboardInterrupt and the rest of BaseException are deliberately NOT caught --
+    # an operator's ^C is not an unusable image.
+    #
+    # BOUND, stated rather than chased: `os._exit()` in a module body cannot be caught
+    # by anything, here or elsewhere. The workflow's `test -n "$targets"` is what
+    # survives that one; see the derive step.
     try:
+        spec = importlib.util.spec_from_file_location("ric_bundled", path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"no import spec for {path}")
+        mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-    except Exception as e:                       # noqa: BLE001 - any import failure
+    except (Exception, SystemExit) as e:         # noqa: BLE001 - any import failure
         # A bundled driver that will not import is an unusable image, not a crash of
         # this script: report it as the refusal it is, so the job log names the image
         # rather than showing a traceback through importlib.
@@ -78,18 +102,46 @@ def load_harness(harness_dir: pathlib.Path):
              f"({type(e).__name__}: {e}) -- the image is unusable; republish it.")
         sys.exit(2)
     # ⚠️ Refused, not worked around. The inter-cell settle is a RELIABILITY property
-    # (acceptor cells flake on port/process teardown when run back-to-back — see
-    # INTER_CELL_SETTLE_S in that module), and an image predating it would run 68
-    # cells with no settle and produce flakes indistinguishable from real failures.
+    # (acceptor cells flake on port/process teardown when run back-to-back -- see
+    # INTER_CELL_SETTLE_S in that module), and an image predating it would run every
+    # cell with no settle and produce flakes indistinguishable from real failures.
     # Falling back to a local default would put the value in two places, which is
     # the duplication that lost it here in the first place.
-    if not hasattr(mod, "settle_between_cells"):
-        fail(f"the bundled harness at {path} predates settle_between_cells "
+    #
+    # callable(), not hasattr(): `settle_between_cells = None` satisfies hasattr and
+    # then raises mid-run, which is the compatibility refusal firing as a crash.
+    if not callable(getattr(mod, "settle_between_cells", None)):
+        fail(f"the bundled harness at {path} has no CALLABLE settle_between_cells "
              f"(fixpp#468) -- republish the counterparties image before running the "
              f"live cells. Running without the settle reintroduces a known "
              f"acceptor-cell flake.")
         sys.exit(2)
     return mod
+
+
+def authority_tags(path: pathlib.Path) -> dict[str, str]:
+    """{cell id -> the tag in its `matrix_disposition: deferred:<tag>`}, read from
+    tests/interop/cell_results.yaml.
+
+    This is the file live-cells-excluded.txt NAMES as the authority for which
+    engine-capability reason applies to an id, so the tag is CHECKED against it rather
+    than trusted. No vocabulary is written down here: whatever the row says after
+    `deferred:` is the answer, so a new tag needs no change to this checker and a
+    checker-local copy of the tag list cannot drift from the authority (the recorded
+    failure in `every_spelling_was_found_by_reading`).
+
+    ⚠️ The authority is keyed by CELL id and the exclusion file by GTEST id, and it
+    does NOT carry a row for every excluded case -- see the caller, which is explicit
+    about covering only the ids it can resolve rather than pretending to cover all."""
+    import yaml
+    doc = yaml.safe_load(path.read_text())
+    rows = doc["cells"] if isinstance(doc, dict) and "cells" in doc else doc
+    out = {}
+    for row in rows:
+        disposition = str(row.get("matrix_disposition", ""))
+        if disposition.startswith("deferred:"):
+            out[str(row["id"])] = disposition.split(":", 1)[1]
+    return out
 
 
 def read_ids(path: pathlib.Path) -> list[str]:
@@ -101,19 +153,31 @@ def read_ids(path: pathlib.Path) -> list[str]:
             if l.strip() and not l.lstrip().startswith("#")]
 
 
-def read_exclusions(path: pathlib.Path) -> dict[str, str]:
-    out: dict[str, str] = {}
+def read_exclusions(path: pathlib.Path) -> dict[str, tuple[str, str | None]]:
+    """{gtest id -> (reason tag, cell id or None)}.
+
+    The optional THIRD field is a pointer into tests/interop/cell_results.yaml, the
+    file this list names as the authority for which engine-capability reason applies.
+    It is optional because the template carries no deferred row for every excluded
+    param -- but where it IS given it is VERIFIED (reconcile step 4), so a dangling or
+    mis-pointed cell id fails rather than reading as "nothing to check"."""
+    out: dict[str, tuple[str, str | None]] = {}
     for line in read_ids(path):
-        parts = line.split(None, 1)
-        if len(parts) != 2 or parts[0] not in REASON_TAGS:
-            fail(f"malformed exclusion line (want '<reason-tag> <gtest-id>', tag one of "
-                 f"{'/'.join(REASON_TAGS)}): {line!r}")
+        parts = line.split()
+        if len(parts) not in (2, 3) or parts[0] not in REASON_TAGS:
+            fail(f"malformed exclusion line (want '<reason-tag> <gtest-id> [<cell-id>]', "
+                 f"tag one of {'/'.join(REASON_TAGS)}): {line!r}")
             sys.exit(2)
-        tag, gid = parts
+        tag, gid = parts[0], parts[1]
+        cid = parts[2] if len(parts) == 3 else None
+        if tag == "unregistered-tracked" and cid is not None:
+            fail(f"{gid} is unregistered-tracked yet names cell {cid}. That tag means no "
+                 f"cell selects the case on ANY engine, so a cell id here contradicts it.")
+            sys.exit(2)
         if gid in out:
             fail(f"duplicate exclusion for {gid}")
             sys.exit(2)
-        out[gid] = tag
+        out[gid] = (tag, cid)
     return out
 
 
@@ -123,7 +187,9 @@ def base(gid: str) -> str:
     return gid.rsplit("/", 1)[0] if gid.count("/") >= 2 else gid
 
 
-def reconcile(cells: dict | None, skip_set: list[str], exclusions: dict[str, str]) -> int:
+def reconcile(cells: dict | None, skip_set: list[str],
+              exclusions: dict[str, tuple[str, str | None]],
+              cell_results: pathlib.Path | None = None) -> int:
     """Every named invariant, checked before a single cell runs. Returns an exit code.
 
     `cells is None` runs only the checks that need NOTHING but this repository -- the
@@ -191,7 +257,7 @@ def reconcile(cells: dict | None, skip_set: list[str], exclusions: dict[str, str
     # (3) The per-group STRUCTURAL conditions the exclusion file states. Without these
     # the file is a free pass: anything could be filed under any tag and the equality in
     # (2) would still hold.
-    for gid, tag in sorted(exclusions.items()):
+    for gid, (tag, _cid) in sorted(exclusions.items()):
         sibling_covered = any(c != gid and base(c) == base(gid) for c in covered)
         if tag in SIBLING_COVERED_TAGS and not sibling_covered:
             fail(f"{gid} is filed {tag}, but NO param of {base(gid)} is covered by any "
@@ -204,6 +270,47 @@ def reconcile(cells: dict | None, skip_set: list[str], exclusions: dict[str, str
                  f"another param -- the debt was partly paid and the entry must be "
                  f"re-argued, not inherited.")
             rc = 1
+
+    # (4) AUTHORITY. For every excluded id whose CELL the template dispositions as
+    # `deferred:<tag>`, that tag must be the one the exclusion file wrote down.
+    #
+    # ⚠️ WHY THIS EXISTS: (3)'s structural condition is IDENTICAL for both sibling
+    # tags, so the two are freely interchangeable as far as it is concerned -- rename
+    # any `qfcpp-no-possdup-injection` line to `qfj-only-at-g1` and everything above
+    # stays green while the file states something false. (3) cannot see it; only the
+    # authority can.
+    #
+    # ⚠️ AND ITS BOUND, stated because a partial check read as total is worse than
+    # none: the template carries a deferred row only for cells it KNOWS, and several
+    # excluded gtest params have no row at all -- their engine-capability claim rests
+    # on the test source, not on this file. Those ids are counted and REPORTED below,
+    # never silently treated as checked. Re-derive which they are; do not read a
+    # number here.
+    authority = cell_results or CELL_RESULTS
+    tags = authority_tags(authority) if authority.exists() else {}
+    checked, unbacked = 0, []
+    for gid, (tag, cid) in sorted(exclusions.items()):
+        if tag == "unregistered-tracked":
+            continue                      # (3) re-derives this one in full
+        if cid is None:
+            unbacked.append(gid)
+            continue
+        if cid not in tags:
+            fail(f"{gid} names cell {cid}, which {authority.name} does not disposition "
+                 f"as deferred:* at all. A pointer that resolves to nothing is worse than "
+                 f"no pointer -- it reads as checked. Fix the id, or drop the field.")
+            rc = 1
+            continue
+        checked += 1
+        if tags[cid] != tag:
+            fail(f"{gid} is filed '{tag}', but {authority.name} dispositions its cell "
+                 f"{cid} as 'deferred:{tags[cid]}'. The exclusion file names that template "
+                 f"row as the authority for which reason applies -- fix the tag, or fix "
+                 f"the row, but they cannot disagree.")
+            rc = 1
+    print(f"exclusion tags: {checked} checked against {authority.name}, "
+          f"{len(unbacked)} carry no deferred row there and rest on the test source"
+          + (": " + ", ".join(unbacked) if unbacked else ""))
 
     print(f"reconciled: {len(covered)} case(s) run, {len(exclusions)} excluded, "
           f"{len(skip)} in the skip set")
@@ -226,6 +333,9 @@ def main() -> int:
     # population -- a checker whose inputs are always synthetic checks nothing.
     ap.add_argument("--skip-set", default=str(SKIP_SET))
     ap.add_argument("--exclusions", default=str(EXCLUSIONS))
+    ap.add_argument("--cell-results", default=str(CELL_RESULTS),
+                    help="the template whose deferred:* dispositions are the authority "
+                         "for an exclusion's reason tag (reconcile step 4).")
     ap.add_argument("--only", action="append", default=[],
                     help="run just this cell id (repeatable). Reconciliation still runs "
                          "in full -- the population check is not scoped by --only.")
@@ -264,7 +374,8 @@ def main() -> int:
         print(" ".join(bins))
         return 0
 
-    rc = reconcile(ric.CELLS, skip_set, exclusions)
+    rc = reconcile(ric.CELLS, skip_set, exclusions,
+                   pathlib.Path(args.cell_results))
     if rc:
         fail("population reconciliation FAILED -- not running any cell. Whatever this "
              "job would have reported could not have been trusted.")
@@ -295,6 +406,12 @@ def main() -> int:
         # `continue` would skip exactly then.)
         if idx > 1:
             ric.settle_between_cells()  # see INTER_CELL_SETTLE_S in the harness module
+        # ⚠️ Cleared BEFORE the cell, so the evidence witness below cannot be satisfied
+        # by a PREVIOUS run's artefacts. Without this the check is sound only on a fresh
+        # workspace -- true of the CI lane, false locally and on a re-run, and "sound
+        # only where nobody re-runs it" is the shape of an instrument that fails toward
+        # clean. Found by the witness's own no-evidence arm passing for the wrong reason.
+        shutil.rmtree(run_dir, ignore_errors=True)
         print(f"[{idx}/{len(cells)}] {cid}", flush=True)
         try:
             res = ric.run_cell(cell, args.config, build_root, run_dir,
@@ -304,6 +421,23 @@ def main() -> int:
             continue
         status = res.get("status", "<none>")
         detail = res.get("_detail", "")
+        # ⚠️ EXECUTION WITNESS. `status: pass` is the harness's SAY-SO, and this job
+        # consumes a mutable `:latest` image, so the thing being trusted is exactly the
+        # thing that can drift. A run_cell that launched no binary at all -- a broken or
+        # rolled-back image -- reports pass and leaves the run dir empty, and every
+        # check above is about the POPULATION, not about whether a cell ran. So the one
+        # artefact this driver owns is checked: it passes run_dir in, so it is entitled
+        # to require the cell to have written something there.
+        #
+        # This is deliberately a LIVENESS check, not a content one: asserting particular
+        # files would be a second copy of the harness's own output contract, and the
+        # thing it must catch (nothing ran) is visible without one.
+        if status == "pass" and not (run_dir.is_dir() and any(run_dir.iterdir())):
+            failures.append((cid, f"reported '{status}' but wrote NOTHING to {run_dir} -- "
+                                  f"a cell that ran leaves evidence; this one did not, so "
+                                  f"the pass is unsupported. Suspect a stale image."))
+            print(f"    {status}  (NO EVIDENCE) {detail}", flush=True)
+            continue
         # ⚠️ A skip is a FAILURE here. See the module docstring: interop-smoke tolerates
         # one because its counterparty may legitimately be absent; on this job it is
         # guaranteed present, so a skip means the cell did not run what it claims to.
@@ -316,6 +450,15 @@ def main() -> int:
             fail(f"{cid}: {why}")
         fail(f"{len(failures)} of {len(cells)} live interop cell(s) did not pass.")
         return 1
+    # ⚠️ --only runs a SUBSET while reconcile() above certified the WHOLE registry, so
+    # its success says nothing about the cells it did not run. Saying "all N passed"
+    # there would be true of the subset and read as true of the job. The CI lane never
+    # passes --only; this wording is what stops a local subset run being pasted into a
+    # PR as evidence.
+    if args.only:
+        print(f"SUBSET ONLY: {len(cells)} of {len(ric.CELLS)} cell(s) ran and passed. "
+              f"This is NOT a live-matrix result and must not be reported as one.")
+        return 0
     print(f"all {len(cells)} live interop cell(s) passed")
     return 0
 
