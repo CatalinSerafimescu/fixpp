@@ -22,13 +22,33 @@ import re
 import sys
 
 REPO = pathlib.Path(__file__).resolve().parent.parent
-# The pattern is LD_PRELOAD pointing at mallocnesia by any spelling.
-RAW = re.compile(r'LD_PRELOAD\s*=\s*[^"\']*mallocnesia', re.I)
+
+# ⚠️ ANY LD_PRELOAD ASSIGNMENT, whatever the right-hand side.
+#
+# An earlier revision required the literal token `mallocnesia` on the same line, which
+# ordinary CMake variable indirection walks straight past:
+#
+#     set(_mn "${CMAKE_BINARY_DIR}/missing/libmallocnesia.so")
+#     COMMAND ${CMAKE_COMMAND} -E env "LD_PRELOAD=${_mn}" $<TARGET_FILE:x>
+#
+# The scan saw no `mallocnesia` on the LD_PRELOAD line; the population checker saw a
+# correctly-named, correctly-labelled test; ld.so ignored the missing library; the weak
+# markers no-oped; the binary exited 0. Green, uninstrumented.
+#
+# Matching the right-hand side at all is the mistake — it is a value, and a value can be
+# spelled arbitrarily many ways. A TEST-REGISTRATION file has no legitimate reason to set
+# LD_PRELOAD itself, so the LEFT-hand side is the whole condition and there is nothing
+# left to evade. If a non-mallocnesia preload is ever genuinely needed here, this check
+# is the right place to argue for it.
+RAW = re.compile(r'LD_PRELOAD\s*=', re.I)
 
 
 def main() -> int:
     offenders, scanned = [], 0
-    for path in sorted(REPO.glob("tests/**/CMakeLists.txt")):
+    # .cmake modules under tests/ are included INTO these files and can register tests
+    # just as well; scanning only CMakeLists.txt left that door open.
+    paths = sorted(set(REPO.glob("tests/**/CMakeLists.txt")) | set(REPO.glob("tests/**/*.cmake")))
+    for path in paths:
         scanned += 1
         disabled = False
         for n, line in enumerate(path.read_text().splitlines(), 1):
@@ -46,13 +66,13 @@ def main() -> int:
     # ⚠️ Prove the sweep reached something. A glob that matches no file reports clean,
     # which is this repo's most recurring defect shape.
     if scanned == 0:
-        print("::error::[no-raw-preload] the sweep examined ZERO CMakeLists.txt files — "
+        print("::error::[no-raw-preload] the sweep examined ZERO test CMake files — "
               "the glob is wrong, so a clean result here means nothing.")
         return 2
 
     if offenders:
-        print(f"::error::[no-raw-preload] {len(offenders)} site(s) set LD_PRELOAD to "
-              f"mallocnesia directly instead of using fixpp_add_mallocnesia_test(). Such a "
+        print(f"::error::[no-raw-preload] {len(offenders)} test-registration site(s) set "
+              f"LD_PRELOAD directly instead of using fixpp_add_mallocnesia_test(). Such a "
               f"site bypasses the fail-closed wrapper, the interception witness, the "
               f"`mallocnesia` label and therefore the CI selection — and ld.so IGNORES an "
               f"unloadable preload, so it runs uninstrumented and PASSES:")
@@ -60,8 +80,8 @@ def main() -> int:
             print(f"::error::  {o}")
         return 1
 
-    print(f"[no-raw-preload] OK: {scanned} CMakeLists.txt scanned, no raw mallocnesia "
-          f"LD_PRELOAD outside the helper.")
+    print(f"[no-raw-preload] OK: {scanned} test CMake file(s) scanned, no raw LD_PRELOAD "
+          f"outside the helper.")
     return 0
 
 

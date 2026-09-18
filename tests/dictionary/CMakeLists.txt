@@ -321,7 +321,7 @@ set_tests_properties(delimiter_census PROPERTIES LABELS "dictionary;083;census" 
 # mallocnesia gate for the group-context lookup no-alloc test — re-runs the
 # standalone binary under LD_PRELOAD so global malloc/calloc/realloc is
 # intercepted (dual gate alongside the in-TU global operator-new counter;
-# the interceptor is a build target, so this is ALWAYS registered — fixpp#448;
+# the interceptor is a build target, so this is registered on every FIXPP_MALLOCNESIA_SUPPORTED configuration — fixpp#448;
 # rationale for the gate itself: feedback_tracking_pmr_resource_false_pass).
 
 fixpp_add_mallocnesia_test(

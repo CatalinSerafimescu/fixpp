@@ -202,7 +202,7 @@ set_tests_properties(tls_forced_fallback_link PROPERTIES
 
 # ── T018 mallocnesia gate ─────────────────────────────────────────────────────
 # Registers a second CTest entry that invokes check_alloc.py to intercept global
-# malloc via LD_PRELOAD. ALWAYS registered (fixpp#448): it used to be conditional on
+# malloc via LD_PRELOAD. registered on every FIXPP_MALLOCNESIA_SUPPORTED configuration (fixpp#448): it used to be conditional on
 # a hand-built .so, which meant it silently did not exist on any CI runner.
 
 fixpp_add_mallocnesia_test(

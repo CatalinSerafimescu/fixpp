@@ -56,32 +56,49 @@ static void resolve_fns(void) {
  * how several gates were green.
  *
  * A gate cannot prove its own instrumentation from inside the parent process, so the
- * CHILD leaves evidence: when MALLOCNESIA_WITNESS is set, this constructor creates
- * that path. The parent (tools/check_alloc.py) requires it afterwards. Only a loaded
- * interceptor can create it -- the binary under test cannot, and neither can a
- * silently-ignored preload.
+ * CHILD leaves evidence at MALLOCNESIA_WITNESS. THREE notes, not one, each tagged with
+ * the writing process's pid:
+ *
+ *   loaded  this .so was actually mapped and its constructor ran
+ *   start   THIS binary called alloc_guard_start, and OUR definition answered
+ *   end     ... and OUR alloc_guard_end answered too
+ *
+ * ⚠️ "loaded" ALONE IS NOT ENOUGH, and an earlier revision required only that.
+ * `alloc_guard_start`/`_end` are WEAK UNDEFINED in the test binaries, so a STRONG
+ * definition anywhere in the link closure wins over this preload: the constructor still
+ * runs and still writes "loaded", while `g_active` is never set and every allocation
+ * sails past. The same split appears under a sanitizer, whose allocator interposes
+ * ahead of these hooks. Constructor execution and symbol interposition are different
+ * facts; only the start/end notes distinguish them, because only OUR definitions
+ * write them.
  *
  * open()/write(), never fopen(): this runs as a malloc interposer, and the stdio
  * path allocates through the very hooks being installed.
  */
-static void mallocnesia_write_witness(void) {
+static void mallocnesia_note(const char *what) {
     const char *path = getenv("MALLOCNESIA_WITNESS");
     if (!path || !*path) return;
-    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    /* O_APPEND, not O_TRUNC: the three notes accumulate. */
+    int fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0644);
     if (fd < 0) return;
-    (void)!write(fd, "mallocnesia\n", 12);
+    char buf[64];
+    /* snprintf, not fprintf: this runs as a malloc interposer and the stdio path
+     * allocates through the very hooks being installed. */
+    int n = snprintf(buf, sizeof buf, "%s %ld\n", what, (long)getpid());
+    if (n > 0) (void)!write(fd, buf, (size_t)n);
     close(fd);
 }
 
 __attribute__((constructor))
 static void mallocnesia_init(void) {
     resolve_fns();
-    mallocnesia_write_witness();
+    mallocnesia_note("loaded");
 }
 
 /* --- Guard markers (override the weak no-op symbols in the test binary) --- */
 
 void alloc_guard_start(void) {
+    mallocnesia_note("start");
     const char *env = getenv("MALLOCNESIA_MAX_ALLOCS");
     g_max = env ? atol(env) : 0;
     atomic_store(&g_count, 0);
@@ -89,6 +106,7 @@ void alloc_guard_start(void) {
 }
 
 void alloc_guard_end(void) {
+    mallocnesia_note("end");
     atomic_store(&g_active, 0);
     long count = atomic_load(&g_count);
     if (count > g_max) {

@@ -96,8 +96,10 @@ endif()
 # group that was passing uninstrumented.
 #
 # Every entry gets the `mallocnesia` label here, in one place, so the label and the
-# gate population cannot drift apart the way they had (measured on main: 18 entries by
-# name, 8 by label).
+# gate population cannot drift apart the way they had: immediately BEFORE fixpp#448 the
+# name set and the label set disagreed by more than half. That is a historical
+# measurement of a fixed tree, not a description of today — re-derive the current
+# state with `tools/check_mallocnesia_population.py`, which prints both sizes.
 function(fixpp_add_mallocnesia_test)
   cmake_parse_arguments(_MN "EXPECT_VIOLATION" "NAME;TARGET"
                       "LABELS;DEPENDS;ENVIRONMENT" ${ARGN})

@@ -156,7 +156,7 @@ set_tests_properties(alloc_guard_validate_gate PROPERTIES
 )
 
 # Mallocnesia gate: re-runs the validate-ON alloc-guard under LD_PRELOAD so global
-# malloc/calloc/realloc is intercepted. ALWAYS registered (fixpp#448) — it used to be
+# malloc/calloc/realloc is intercepted. registered on every FIXPP_MALLOCNESIA_SUPPORTED configuration (fixpp#448) — it used to be
 # conditional on a hand-built .so, so it did not exist on any CI runner. The base test
 # alloc_guard_validate_gate still runs WITHOUT interception and asserts the validation
 # outcome only; it is a companion, never a fallback for this one.
@@ -169,7 +169,7 @@ fixpp_add_mallocnesia_test(
 # ── item 13 (2026-06-19): mallocnesia gate entries for the alloc-guard binaries
 # that previously had NO LD_PRELOAD entry. The marker fix (weak UNDEFINED symbols,
 # item 13) makes interception real; without these add_test entries the binaries
-# ran plainly and never enforced zero-alloc under mallocnesia. ALWAYS registered
+# ran plainly and never enforced zero-alloc under mallocnesia. registered on every FIXPP_MALLOCNESIA_SUPPORTED configuration
 # since fixpp#448. Mirrors alloc_guard_validate_gate_mallocnesia.
 #
 # Only the binaries whose MEASURED WINDOW is genuinely zero-global-alloc are gated

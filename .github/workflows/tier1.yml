@@ -910,6 +910,7 @@ jobs:
       # finds a test and is satisfied while EIGHTEEN gates have silently vanished. A
       # count-or-population assertion is the only thing that sees that.
       - name: "Assert the mallocnesia gate population (#448)"
+        id: mallocnesia_population
         if: matrix.preset == 'linux-clang-release'
         run: |
           # ⚠️ --min-gates is a FLOOR and is deliberately brittle, exactly like the
@@ -926,8 +927,41 @@ jobs:
       # without it, "0 failed" is equally consistent with a clean tree and a dead
       # interceptor, which is exactly the state this issue found on main.
       - name: "Run the allocation-discipline gates (#448)"
+        id: mallocnesia_gates
         if: matrix.preset == 'linux-clang-release'
         run: ctest --preset ${{ matrix.preset }} -L mallocnesia --no-tests=error --output-on-failure
+
+      # ⚠️ THE STEPS ABOVE ARE GUARDED BY A STRING, AND A STRING CAN BE MISSPELLED.
+      # `if: matrix.preset == 'linux-clang-relese'` skips both on EVERY leg; the job then
+      # passes, the step-count pin still counts 39, and no allocation gate runs anywhere.
+      # A green job is not evidence a step ran — so this reads the steps' own OUTCOMES.
+      #
+      # It is deliberately UNGUARDED: a sentinel sharing the guard it is checking would be
+      # skipped by the same typo. On other legs it asserts the pair is `skipped`, which is
+      # what catches the inverse mistake of the gates silently running on a lane that
+      # cannot host the interposer.
+      - name: "Assert the allocation gates actually ran (#448)"
+        if: always()
+        run: |
+          set -euo pipefail
+          pop="${{ steps.mallocnesia_population.outcome }}"
+          gates="${{ steps.mallocnesia_gates.outcome }}"
+          echo "preset=${{ matrix.preset }} population=${pop:-<unset>} gates=${gates:-<unset>}"
+          if [ "${{ matrix.preset }}" = "linux-clang-release" ]; then
+            if [ "$pop" != "success" ] || [ "$gates" != "success" ]; then
+              echo "::error::the allocation gates did not run to success on the one lane"
+              echo "::error::that hosts them (population=$pop gates=$gates). If they were"
+              echo "::error::SKIPPED, the \`if:\` predicate no longer matches this preset —"
+              echo "::error::check its spelling. Refusing to report this lane green."
+              exit 1
+            fi
+          elif [ "$pop" != "skipped" ] || [ "$gates" != "skipped" ]; then
+            echo "::error::the allocation gates ran on ${{ matrix.preset }}, which is not"
+            echo "::error::linux-clang-release. Under a sanitizer the interceptor is"
+            echo "::error::outranked by the sanitizer's allocator and the gates pass"
+            echo "::error::VACUOUSLY, so running them here is worse than not running them."
+            exit 1
+          fi
 
       # ── #254 / R2-P2-1 — the same vacuity gate, for the install witness ──────
       #

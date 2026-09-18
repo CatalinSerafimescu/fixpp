@@ -8,7 +8,7 @@
 #
 # BUILDLESS on purpose: `ctest -N` reads CTestTestfile.cmake and nothing else, so each
 # case is a three-line synthetic file rather than a configured tree. Driving the real
-# 20-entry population could only ever exercise the passing path; T0 covers that one.
+# real population could only ever exercise the passing path; T0 covers that one.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -55,6 +55,12 @@ while IFS= read -r _e; do EXTRAS+=("${_e}:mallocnesia"); done < <(
   python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import check_mallocnesia_population as m; print("\n".join(m.DECLARED_EXTRAS))' "$REPO/tools")
 [ "${#EXTRAS[@]}" -gt 0 ] || { echo "FAIL: could not read DECLARED_EXTRAS from the checker"; exit 1; }
 
+# The checker also requires exactly one positive control in the label. Every fixture that
+# is meant to reach the LATER rules needs one, or it fails on this rule first and the arm
+# stops discriminating what it was written for. T4/T5 deliberately omit it — they assert
+# the vacuity rules, which fire before this one matters.
+CONTROL="alloc_guard_positive_control_mallocnesia:mallocnesia"
+
 # T0 — THE REAL TREE. Without this the suite proves only that the checker can say no.
 # Skipped (not failed) when no configured build is present, e.g. on a buildless lane.
 if [ -f "$REPO/build/linux-clang-release/CTestTestfile.cmake" ]; then
@@ -66,15 +72,15 @@ fi
 
 check "T1 a gate missing the label is REPORTED, not tolerated" 1 \
   "do NOT carry the \`mallocnesia\` label" \
-  "$(mk t1 "a_mallocnesia:mallocnesia" "b_mallocnesia:alloc_guard" "${EXTRAS[@]}")"
+  "$(mk t1 "$CONTROL" "a_mallocnesia:mallocnesia" "b_mallocnesia:alloc_guard" "${EXTRAS[@]}")"
 
 check "T2 an UNDECLARED label member fails (the label cannot become a catch-all)" 1 \
   "nor are declared in DECLARED_EXTRAS" \
-  "$(mk t2 "a_mallocnesia:mallocnesia" "something_else:mallocnesia" "${EXTRAS[@]}")"
+  "$(mk t2 "$CONTROL" "a_mallocnesia:mallocnesia" "something_else:mallocnesia" "${EXTRAS[@]}")"
 
 check "T3 a STALE declared row fails (a declaration describing nothing)" 1 \
   "no longer carries the label" \
-  "$(mk t3 "a_mallocnesia:mallocnesia" "alloc_guard_markers_no_local_def:mallocnesia")"
+  "$(mk t3 "$CONTROL" "a_mallocnesia:mallocnesia" "alloc_guard_markers_no_local_def:mallocnesia")"
 
 # ⚠️ THE ONE THAT MATTERS. Zero registered gates makes every set comparison trivially
 # true, and `ctest -L mallocnesia --no-tests=error` still exits 0 when ANY label member
@@ -90,7 +96,27 @@ check "T5 ZERO labelled tests is RED (a CI step that would run nothing)" 1 \
 
 check "T6 the happy case passes (the checker is not simply always-RED)" 0 \
   "named gate(s), all labelled" \
-  "$(mk t6 "a_mallocnesia:mallocnesia" "b_mallocnesia:mallocnesia" "${EXTRAS[@]}")"
+  "$(mk t6 "$CONTROL" "a_mallocnesia:mallocnesia" "b_mallocnesia:mallocnesia" "${EXTRAS[@]}")"
+
+# ── T7: the POSITIVE CONTROL's own membership. Codex r1 P2: the floor counts NAMES,
+# and a name is cheap — a decoy satisfies it while a real gate is deleted. The control
+# is the one member whose absence means nobody is checking that interception works, so
+# it is asserted by identity rather than left to arithmetic.
+check "T7a a missing positive control is REJECTED (the floor cannot see this)" 1 \
+  "expected exactly ONE positive control" \
+  "$(mk t7a "a_mallocnesia:mallocnesia" "b_mallocnesia:mallocnesia" "${EXTRAS[@]}")"
+
+check "T7b TWO positive controls are rejected (ambiguous: which one vouches?)" 1 \
+  "expected exactly ONE positive control" \
+  "$(mk t7b "a_mallocnesia:mallocnesia" "$CONTROL" "x_positive_control_mallocnesia:mallocnesia" "${EXTRAS[@]}")"
+
+# ⚠️ And the floor itself, which is what P2 showed a decoy walking past.
+out="$(python3 "$CHECK" --build-dir "$(mk t7c "a_mallocnesia:mallocnesia" "$CONTROL" "${EXTRAS[@]}")" --min-gates 5 2>&1)"; rc=$?
+if [ "$rc" = 1 ] && printf '%s' "$out" | grep -qF "floor is 5"; then
+  echo "ok    T7c the --min-gates floor fires when the population SHRINKS"; pass=$((pass+1))
+else
+  echo "FAIL  T7c floor did not fire: rc=$rc"; echo "$out" | sed 's/^/      /' | head -2; fail=$((fail+1))
+fi
 
 echo
 echo "test-mallocnesia-population: $pass passed, $fail failed"

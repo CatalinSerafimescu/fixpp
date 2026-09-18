@@ -46,6 +46,19 @@ EOF
 "$CC" -O1 -o "$TMP/dirty" "$TMP/dirty.c"
 printf 'not an elf\n' > "$TMP/bogus.so"
 
+# ⚠️ Codex r1 P1-B's mutant, as a permanent arm. The guard markers are WEAK UNDEFINED in
+# the test binaries, so ANY strong definition in the link closure beats the preload: the
+# constructor still runs and still writes "loaded" while g_active is never set and the
+# planted allocation sails through. The repo's marker scanner only looks at tests/ and
+# bench/, so a definition under src/ is invisible to it. This is the shape that made
+# "the witness file exists" an insufficient proof of interception.
+cat > "$TMP/shadow.c" <<'EOF'
+void alloc_guard_start(void) {}
+void alloc_guard_end(void) {}
+EOF
+"$CC" -O1 -c "$TMP/shadow.c" -o "$TMP/shadow.o"
+"$CC" -O1 -o "$TMP/shadowed" "$TMP/dirty.c" "$TMP/shadow.o"
+
 pass=0; fail=0
 check() {  # check <name> <want-rc> <want-substring> -- <cmd...>
   local name="$1" want_rc="$2" want="$3"; shift 4
@@ -103,6 +116,28 @@ check "T7 the control FAILS when the plant is NOT caught (a control measuring no
 check "T8 --allow-missing runs uninstrumented but SAYS SO" 0 \
   "proves nothing" -- \
   python3 "$CHECK" --binary "$TMP/clean" --mallocnesia "$TMP/nope.so" --allow-missing
+
+# ── T9: LOADED is not INTERPOSED ──────────────────────────────────────────────
+# The single most important arm here. The subject allocates inside its window and exits
+# ZERO, because its own strong markers answered instead of ours; the interceptor loaded
+# perfectly well. An exit-code check passes it. A witness that only records "loaded"
+# passes it. Only the start/end notes — which nothing but OUR marker definitions write —
+# can tell that this binary's window was never measured.
+check "T9 a binary whose OWN markers beat the preload is REFUSED, not read as clean" 2 \
+  "guard markers did NOT run" -- \
+  python3 "$CHECK" --binary "$TMP/shadowed" --mallocnesia "$TMP/libmn.so"
+
+# ⚠️ Its companion: the same refusal must NOT fire on an honest binary, or every gate
+# breaks and the arm above is passing for the wrong reason.
+check "T9b ... and an honest binary still satisfies the start/end requirement" 0 \
+  "markers ran" -- \
+  python3 "$CHECK" --binary "$TMP/clean" --mallocnesia "$TMP/libmn.so"
+
+# The positive control is equally fooled by a shadowed binary: it would see no violation
+# and must say so, rather than reporting the control merely "failed".
+check "T9c the positive control on a shadowed binary names the MARKERS, not the plant" 2 \
+  "guard markers did NOT run" -- \
+  python3 "$CHECK" --binary "$TMP/shadowed" --mallocnesia "$TMP/libmn.so" --expect-violation
 
 echo
 echo "test-check-alloc: $pass passed, $fail failed"

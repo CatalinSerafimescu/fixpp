@@ -3,11 +3,12 @@
 
 WHAT DRIFTED, AND WHY A LABEL IS THE THING WORTH PINNING.
 
-CI selects the allocation-discipline gates by LABEL (`ctest -L mallocnesia`). Measured on
-`main` before fixpp#448: 18 entries matched by NAME and 8 carried the label. Eleven gates
-— every capi one, tls, log, two session ones — were therefore invisible to any
-label-driven runner. Nothing reported that, because a label selecting 8 of 18 real tests
-still runs 8 real tests and they pass.
+CI selects the allocation-discipline gates by LABEL (`ctest -L mallocnesia`). Immediately
+BEFORE fixpp#448 the label carried fewer than half the gates that matched by name —
+every capi one, plus tls, log and two session entries were invisible to any
+label-driven runner. Nothing reported it, because a label selecting SOME real tests
+still runs real tests and they pass. (A historical measurement of a fixed tree. This
+checker prints the current sizes on every run; do not read a count from this prose.)
 
 THE INVARIANT IS ⊆, NOT ==, and this is the half #448's own text gets wrong. It asks for
 a check that the two sets are EQUAL. They cannot be: `alloc_guard_markers_no_local_def`
@@ -104,6 +105,22 @@ def main() -> int:
             "ZERO tests carry the `mallocnesia` label, so `ctest -L mallocnesia` would "
             "exit 0 having run NOTHING. That is the shape of a green CI step that "
             "measures nothing.")
+
+    # (0b) THE POSITIVE CONTROL MUST EXIST, exactly once. The floor above counts NAMES,
+    # and a name is cheap: `add_test(NAME padding_mallocnesia COMMAND cmake -E true)` with
+    # the label satisfies the count, both set relations and the raw-preload scan, while a
+    # real gate has been deleted. The count cannot tell a gate from a decoy — but the
+    # control is the one member whose ABSENCE means nobody is checking that interception
+    # works at all, so it is named here rather than left to arithmetic.
+    controls = sorted(n for n in by_label if "positive_control" in n)
+    if len(controls) != 1:
+        failures.append(
+            f"expected exactly ONE positive control in the `mallocnesia` label, found "
+            f"{len(controls)}: {', '.join(controls) or '(none)'}. The control is the only "
+            f"member that fails when interception silently stops working; without it "
+            f"'0 failed' is equally consistent with a clean tree and a dead interceptor. "
+            f"It must carry the label so it cannot be run separately from the gates it "
+            f"vouches for.")
 
     # (1) ⊆ : every named gate carries the label.
     unlabelled = sorted(by_name - by_label)

@@ -109,20 +109,52 @@ def main() -> int:
         # stderr is captured ONLY for the positive control, which has to read the
         # interceptor's verdict out of it; every other gate streams straight through.
         # `result.stderr` is None when not piped, so one call covers both.
-        result = subprocess.run([binary], env=env, text=True,
+        # Popen, not run(): the witness is checked against the DIRECT CHILD's pid, so a
+        # note written by some grandchild that inherited the env var cannot stand in for
+        # the process actually under test.
+        proc = subprocess.Popen([binary], env=env, text=True,
                                 stderr=subprocess.PIPE if args.expect_violation else None)
-        sys.stderr.write(result.stderr or "")
+        _, captured_stderr = proc.communicate()   # (stdout, stderr) — in that order
+        child_pid = proc.pid
+        result = subprocess.CompletedProcess([binary], proc.returncode, None, captured_stderr)
+        sys.stderr.write(captured_stderr or "")
 
         # ⚠️ ORDER MATTERS. The witness is checked BEFORE the exit code, because the
         # case being closed is a binary that exits 0 having never been instrumented.
         # Checking rc first and returning early would step straight over it.
-        if not os.path.exists(witness):
+        notes = set()
+        if os.path.exists(witness):
+            for line in open(witness, encoding="utf-8", errors="replace"):
+                what, _, pid = line.strip().partition(" ")
+                # Only the direct child counts (see Popen above).
+                if pid == str(child_pid):
+                    notes.add(what)
+
+        if "loaded" not in notes:
             print(f"[check_alloc] FAIL: the interceptor left no witness — it was NOT loaded "
                   f"into {os.path.basename(binary)}, so nothing was intercepted and the "
                   f"binary's exit status ({result.returncode}) says nothing about "
                   f"allocations. ld.so IGNORES an unloadable LD_PRELOAD rather than "
                   f"failing; check that {mallocnesia} is loadable by that binary "
                   f"(architecture, missing deps, noexec mount).", file=sys.stderr)
+            return 2
+
+        # ⚠️ LOADED IS NOT INTERPOSED, and requiring only "loaded" was this check's own
+        # false-green. The guard markers are WEAK UNDEFINED in the test binaries, so any
+        # STRONG definition in the link closure beats the preload: the constructor still
+        # runs and still writes "loaded" while g_active is never set and every allocation
+        # is ignored. A sanitizer's allocator produces the same split. The start/end
+        # notes are written by OUR marker definitions and by nothing else, so they are
+        # what actually proves this binary's window was measured.
+        missing = {"start", "end"} - notes
+        if missing:
+            print(f"[check_alloc] FAIL: the interceptor loaded into "
+                  f"{os.path.basename(binary)} but its guard markers did NOT run "
+                  f"({', '.join(sorted(missing))} never reached). Either the binary never "
+                  f"entered its guarded window, or something in its link closure defines "
+                  f"alloc_guard_start/alloc_guard_end STRONGLY and beat the preload — in "
+                  f"which case nothing was measured and a zero count means nothing. "
+                  f"`nm -C {binary} | grep alloc_guard` names the culprit.", file=sys.stderr)
             return 2
 
     # ⚠️ WHY THIS IS NOT ctest's WILL_FAIL.
@@ -161,7 +193,8 @@ def main() -> int:
         print(f"[check_alloc] FAIL: binary exited {result.returncode}", file=sys.stderr)
         return result.returncode
 
-    print("[check_alloc] PASS: interception confirmed, no unexpected allocations detected")
+    print("[check_alloc] PASS: interception confirmed (loaded + markers ran), "
+              "no unexpected allocations detected")
     return 0
 
 

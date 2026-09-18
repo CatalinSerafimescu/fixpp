@@ -5,7 +5,7 @@
 //
 // Every other alloc-guard binary asserts that a window does NOT allocate, and a green
 // run of those is consistent with two very different worlds: the code is clean, or the
-// interceptor is not running. Eighteen entries all reporting "no allocations detected"
+// interceptor is not running. The whole population reporting "no allocations detected"
 // cannot distinguish them, and on `main` the second world was the real one on every
 // machine that had not hand-built the .so.
 //

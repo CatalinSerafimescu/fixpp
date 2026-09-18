@@ -400,7 +400,9 @@ target_compile_definitions(credential_store_redaction PRIVATE FIXPP_TEST_HOOKS)
 # hooks); the _mallocnesia variant re-runs ONLY that cell under LD_PRELOAD via
 # check_alloc.py so a global-heap escape in the copy+mask window aborts.
 # GTEST_FILTER isolates the NoHeap cell (the FileStore/thread-pool cells need not
-# run under interception). ALWAYS registered since fixpp#448; the base test is a
+# run under interception). registered on every FIXPP_MALLOCNESIA_SUPPORTED configuration since
+# fixpp#448 (Linux, non-sanitizer — see cmake/FixppMallocnesia.cmake for why a sanitizer
+# build is excluded rather than merely skipped); the base test is a
 # companion that runs the cell unmeasured, never a fallback for this one.
 fixpp_add_mallocnesia_test(
   NAME credential_store_redaction_mallocnesia
@@ -727,7 +729,9 @@ set_tests_properties(session_length_data_scanner PROPERTIES
   LABELS "426;length-data;scanner")
 # §VIII.5 zero-alloc gate for those scanners: re-runs ONLY the NoHeap cell under the
 # mallocnesia LD_PRELOAD via check_alloc.py (mirrors credential_store_redaction_mallocnesia).
-# ALWAYS registered since fixpp#448; the base entry still runs the cell unmeasured.
+# registered on every FIXPP_MALLOCNESIA_SUPPORTED configuration since
+# fixpp#448 (Linux, non-sanitizer — see cmake/FixppMallocnesia.cmake for why a sanitizer
+# build is excluded rather than merely skipped); the base entry still runs the cell unmeasured.
 fixpp_add_mallocnesia_test(
   NAME session_length_data_scanner_mallocnesia
   TARGET session_length_data_scanner
@@ -1868,7 +1872,9 @@ set_tests_properties(session_sending_time_precision PROPERTIES
 # session_sending_time_precision runs the witness; the _mallocnesia variant
 # re-runs it under LD_PRELOAD so global-heap escapes are intercepted.
 # Mirrors perf_session_recovery_alloc_guard_mallocnesia in tests/perf/CMakeLists.txt.
-# ALWAYS registered since fixpp#448; the base test is a companion, not a fallback.
+# registered on every FIXPP_MALLOCNESIA_SUPPORTED configuration since
+# fixpp#448 (Linux, non-sanitizer — see cmake/FixppMallocnesia.cmake for why a sanitizer
+# build is excluded rather than merely skipped); the base test is a companion, not a fallback.
 fixpp_add_mallocnesia_test(
   NAME session_sending_time_precision_mallocnesia
   TARGET session_sending_time_precision
@@ -1910,7 +1916,9 @@ set_tests_properties(session_next_expected_msgseqnum PROPERTIES
 # session_next_expected_msgseqnum runs the witness; the _mallocnesia variant
 # re-runs it under LD_PRELOAD so global-heap escapes are intercepted.
 # Mirrors session_sending_time_precision_mallocnesia (026 pattern).
-# ALWAYS registered since fixpp#448; the base test is a companion, not a fallback.
+# registered on every FIXPP_MALLOCNESIA_SUPPORTED configuration since
+# fixpp#448 (Linux, non-sanitizer — see cmake/FixppMallocnesia.cmake for why a sanitizer
+# build is excluded rather than merely skipped); the base test is a companion, not a fallback.
 fixpp_add_mallocnesia_test(
   NAME session_next_expected_msgseqnum_mallocnesia
   TARGET session_next_expected_msgseqnum
