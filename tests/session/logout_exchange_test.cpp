@@ -199,13 +199,18 @@ std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag) {
 // awaited operation was never submitted, and what was counted is unrelated".
 // Nothing here tells those apart; it is the io_context side that is
 // unobserved, and closing that is what #433 still wants.
-//   delta == 0   nothing reached a pool thread since the snapshot: either the
-//                operation was never submitted (io_context/strand side), or
-//                the pool never scheduled it. `probe_file_pool` below answers
-//                that SECOND, narrower question by posting an unrelated
-//                trivial task and reporting whether a thread was free for it.
-//                It observes nothing about the awaited operation and must not
-//                be read as if it did -- only meaningful once delta == 0.
+//   delta == 0   nothing reached a pool thread since the snapshot. That is the
+//                whole of what is measured. ⚠️ THIS LINE USED TO CONTINUE
+//                "either the operation was never submitted, or the pool never
+//                scheduled it" -- a flat either/or, and it was NOT exhaustive:
+//                the awaited operation's own offload may have entered BEFORE
+//                the snapshot, and a path may not offload at all. Do not
+//                restore a closed list here; if you need one, derive it from
+//                the call sites, which move.
+//                `probe_file_pool` below posts an unrelated trivial task and
+//                reports whether a thread was free for it. It observes nothing
+//                about the awaited operation and must not be read as if it did
+//                -- only meaningful once delta == 0.
 //
 // ⚠️ THE PROMISE IS SHARED, NOT CAPTURED BY REFERENCE. On the DID-NOT-RUN
 // branch the task is still queued when `probe_file_pool` returns, so a
@@ -289,12 +294,11 @@ std::atomic<std::uint64_t> g_offload_exit_count{0};
 // INSIDE (it must: the drain that lets that callable finish runs afterwards).
 // The entry was counted; the matching exit then fires against a null probe and
 // is lost, so the gauge keeps a phantom +1 for the rest of the process and
-// every later arm reads it. That is not hypothetical -- it is what happened,
-// and the whole-string pin is what caught it. Resetting on install AND
-// uninstall scopes the gauge to the window where a seam is actually watching,
-// which is the only window in which it means anything. To confirm the leak is
-// real rather than take this paragraph's word for it, remove both resets and
-// run the arm alone and then in the full suite; the readings differ.
+// every later arm reads it. Treat this as a live hazard, not a past one:
+// Resetting on install AND uninstall scopes the gauge to the window where a
+// seam is actually watching, which is the only window in which it means
+// anything. To check that for yourself rather than take this paragraph's word:
+// remove both resets, then run the arm alone and again in the full suite.
 //
 // ⚠️ THE UNINSTALL-SIDE RESET LOOKS LIKE DEAD CODE IN THE DEFAULT TEST ORDER,
 // BECAUSE THE NEXT ARM THAT INSTALLS RESETS ON THE WAY IN AND ABSORBS THE
@@ -462,7 +466,7 @@ std::string describe_pump_miss(const char* site, const char* what, offload_count
 // ⚠️ THIS IS WHY THERE IS NO VOCABULARY BLACKLIST ANY MORE. A list of forbidden
 // phrases can only catch prose someone anticipated: an adversarial review
 // inserted "therefore the awaited syscall finished" -- a causal claim built
-// from words no list contained -- and every check then in place returned PASS.
+// from words no list contained, which no such list can exclude in advance.
 // A whole-string comparison has no such gap: any insertion, anywhere, in either
 // branch, fails. The cost is that a deliberate reword must update the expected
 // literal in the arm, which is the point -- the text is #476's deliverable, so
@@ -1208,9 +1212,38 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
         // just after `sess` itself.
         auto logon_ack = make_logon_frame("FIX.4.2", 1, "TW", "ISLD", 30);
 
-        // Declared after `sess` and `logon_ack`, before the first pump: on
-        // every exit path this destructs first, draining `ioc` while `sess`,
-        // `clock`, `ioc`, cfg, transport, and the file pool are still alive.
+        // #433 F1.1: install BEFORE open() so its offload (the outbound Logon
+        // store) is observed too, not only the Logon-ack path below. Scoped to
+        // this block: its destructor uninstalls before `file_pool.stop()` and
+        // before the durability re-open below opens a second FileStore on a
+        // DIFFERENT pool (`verify_pool`) -- see the block comment above
+        // `probe_file_pool` for why a leaked probe cannot be left installed
+        // past this scope.
+        //
+        // ⚠️ DECLARED BEFORE `quiesce`, SO IT UNINSTALLS *AFTER* THE DRAIN.
+        // Under the reverse order, an early ASSERT return destroys the probe
+        // first -- uninstalling and resetting the gauge -- and only then does
+        // `quiesce` drain `ioc`. An offload that was submitted but had not yet
+        // entered can then run its ENTRY probe, which the lambda captured BY
+        // VALUE at submit time and can still call, incrementing past the reset
+        // while its exit observes nullptr and never decrements.
+        //
+        // ⚠️ EVIDENCE STATUS, STATED BECAUSE IT IS WEAKER THAN THE REST OF THIS
+        // FILE'S. This ordering rests on the capture-by-value mechanism (read it
+        // in src/session/file_store.cpp, "Snapshot the probe pointer on the
+        // strand") plus destruction order -- NOT on a mutation that exhibits the
+        // leak. Swapping the two declarations back does not reproduce it with
+        // the tools here: the only way to force an early return at these sites
+        // is `FIXPP_FORCE_WINDOW_MISS`, which short-circuits BEFORE the pump
+        // ever submits, so no offload is in flight to strand (the forced run
+        // reports "no offload entered a pool thread"). Reaching the state needs
+        // a real timeout with an offload queued behind a saturated pool, which
+        // is #433 itself. Do not record this ordering as mutation-proven.
+        scoped_offload_probe offload_probe;
+
+        // Declared after `sess` and `logon_ack`: on every exit path this
+        // destructs before them, draining `ioc` while `sess`, `clock`, `ioc`,
+        // cfg, transport, and the file pool are still alive.
         fixpp::test_support::quiesce_on_exit quiesce{.ioc = ioc, .clock = *clock};
 
         // Drive to Active: open() → LogonSent → inbound Logon-ack → Active.
@@ -1230,15 +1263,6 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
         // Each label is a named constant used BOTH as the `site` and in the
         // failure text: the seam matches the string's CONTENTS, so two raw
         // copies could drift apart silently.
-
-        // #433 F1.1: install BEFORE open() so its offload (the outbound Logon
-        // store) is observed too, not only the Logon-ack path below. Scoped to
-        // this block: its destructor uninstalls before `file_pool.stop()` and
-        // before the durability re-open below opens a second FileStore on a
-        // DIFFERENT pool (`verify_pool`) -- see the block comment above
-        // `probe_file_pool` for why a leaked probe cannot be left installed
-        // past this scope.
-        scoped_offload_probe offload_probe;
 
         {
             const auto before = read_offload_counts();
@@ -1476,10 +1500,10 @@ TEST(SessionGracefulCloseFlushesFileStore, OffloadProbe_ForcedSpuriousHit_Report
         // ⚠️ BOTH SEAMS MUST BE ARMED HERE, OR THIS ARM'S "0 returned" IS
         // VACUOUS -- with only the entry probe installed the exit counter
         // cannot advance for ANY reason, so the assertion would read 0 because
-        // nothing was watching. That is not hypothetical: it was the state of
-        // this arm until a mutant that fires the exit seam in the WRONG PLACE
-        // (before the callable instead of after it) stayed GREEN. Found by
-        // mutation, not by reading. Going through `scoped_offload_probe`
+        // nothing was watching. The mutant that exposes it fires the exit seam
+        // in the WRONG PLACE (before the callable instead of after it); with
+        // only one seam armed, that mutant is invisible. Going through
+        // `scoped_offload_probe`
         // rather than hand-installing is what removes the way to make the
         // mistake again; `release_and_uninstall` below keeps only the part
         // that is genuinely local to this arm.
@@ -1646,24 +1670,26 @@ TEST(SessionGracefulCloseFlushesFileStore, OffloadProbe_ProductionSiteRenderings
         "\n  #433 file_pool probe: RAN after <N>ms -- a pool thread was free for this "
         "unrelated trivial task.";
 
-    // ⚠️ THE EXPECTED TEXT IS SPELLED OUT HERE, NOT BUILT FROM kSite*/kWhat*.
-    // Building it from those constants is what the first version of this arm
-    // did, and it was VACUOUS: a causal clause appended to `kWhatOpen` changed
-    // both sides of the comparison equally and the arm stayed green. A check
-    // that reads its expectation from the thing it is checking cannot fail.
-    // The duplication is the mechanism -- an intended reword must be written
-    // twice, deliberately; an unintended one fails here.
+    // ⚠️ THE EXPECTED TEXT IMPORTS NOTHING FROM THE PRODUCER -- not `kSite*`,
+    // not `kWhat*`, and not `kPumpBudgetMiss`. Every one of those was tried and
+    // each made the arm VACUOUS in the same way: a causal clause appended to a
+    // shared constant changes both sides of the comparison equally, so the
+    // comparison cannot fail. A check that reads its expectation from the thing
+    // it is checking is not a check. The duplication is the mechanism -- an
+    // intended reword must be written twice, deliberately; an unintended one
+    // fails here. If you shorten this by reaching for a constant, you have
+    // reintroduced the defect.
     EXPECT_EQ(blank_ms_fields(open_text),
-              std::string{fixpp::test_support::kPumpBudgetMiss} +
-                  "FlushRunsAndFramesDurableAfterClose/open -- open() did not complete within "
-                  "the bounded-pump budget" +
+              "#284: the operation did not complete within the bounded-pump budget. Site: "
+              "FlushRunsAndFramesDurableAfterClose/open -- open() did not complete within the "
+              "bounded-pump budget" +
                   tail)
         << "the kSiteOpen rendering is pinned (#476)\n"
         << open_text;
     EXPECT_EQ(blank_ms_fields(ack_text),
-              std::string{fixpp::test_support::kPumpBudgetMiss} +
-                  "FlushRunsAndFramesDurableAfterClose/logon-ack -- on_inbound_frame(Logon-ack) "
-                  "did not complete within the bounded-pump budget" +
+              "#284: the operation did not complete within the bounded-pump budget. Site: "
+              "FlushRunsAndFramesDurableAfterClose/logon-ack -- on_inbound_frame(Logon-ack) did "
+              "not complete within the bounded-pump budget" +
                   tail)
         << "the kSiteLogonAck rendering is pinned (#476)\n"
         << ack_text;
