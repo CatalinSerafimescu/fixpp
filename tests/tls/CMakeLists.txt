@@ -201,17 +201,13 @@ set_tests_properties(tls_forced_fallback_link PROPERTIES
     LABELS "tls;011;046;nfr017;fallback_link")
 
 # ── T018 mallocnesia gate ─────────────────────────────────────────────────────
-# Registers a second CTest entry that invokes check_alloc.py to intercept
-# global malloc via LD_PRELOAD. Only runs if mallocnesia.so is present.
-if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
-    add_test(
-        NAME tls_handshake_alloc_guard_mallocnesia
-        COMMAND
-            python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
-            "--binary" "$<TARGET_FILE:tls_handshake_alloc_guard>"
-    )
-    set_tests_properties(tls_handshake_alloc_guard_mallocnesia PROPERTIES
-        LABELS "tls;011;alloc_guard"
-        DEPENDS tls_handshake_alloc_guard
-    )
-endif()
+# Registers a second CTest entry that invokes check_alloc.py to intercept global
+# malloc via LD_PRELOAD. registered on every FIXPP_MALLOCNESIA_SUPPORTED configuration (fixpp#448): it used to be conditional on
+# a hand-built .so, which meant it silently did not exist on any CI runner.
+
+fixpp_add_mallocnesia_test(
+  NAME tls_handshake_alloc_guard_mallocnesia
+  TARGET tls_handshake_alloc_guard
+  LABELS "tls;011;alloc_guard"
+  DEPENDS "tls_handshake_alloc_guard")
+

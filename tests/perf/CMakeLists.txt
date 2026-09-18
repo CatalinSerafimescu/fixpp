@@ -81,8 +81,22 @@ add_test(NAME perf_transport_read_alloc_guard
          COMMAND perf_transport_read_alloc_guard)
 set_tests_properties(perf_transport_read_alloc_guard PROPERTIES
   LABELS "transport;012;us1;seam4;perf")
-set_property(TEST perf_transport_read_alloc_guard APPEND PROPERTY
-  ENVIRONMENT "LD_PRELOAD=${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+# ⚠️ This used to bolt LD_PRELOAD onto the base test via ENVIRONMENT, pointing at the
+# hand-built source-tree .so. #448 names this site and tests/log's as the two unguarded
+# ones; both ran UNINSTRUMENTED wherever that file was absent, because ld.so ignores an
+# unloadable preload rather than failing. It was also invisible to
+# check_mallocnesia_population.py by construction: the base test is not named
+# *_mallocnesia and carried no `mallocnesia` label, so neither of the checker's two sets
+# contained it. A separate gate entry fixes both — it fails closed and it is in the
+# population.
+#
+# The window was MEASURED zero-alloc under the real interceptor before this was turned
+# into a binding gate, rather than assumed from the fact that it used to pass.
+fixpp_add_mallocnesia_test(
+  NAME perf_transport_read_alloc_guard_mallocnesia
+  TARGET perf_transport_read_alloc_guard
+  LABELS "transport;012;us1;seam4;perf"
+  DEPENDS "perf_transport_read_alloc_guard")
 
 # T019 — FR-029 / FR-029a — socket option defaults.
 # Cell 1 (initiator leg) wired by T029. Cell 2 (acceptor leg) wired by T038
@@ -135,7 +149,7 @@ set_tests_properties(perf_session_recovery_alloc_guard PROPERTIES
 # Precedent: tls_handshake_alloc_guard_mallocnesia (tests/tls/CMakeLists.txt's mallocnesia gate).
 # [[feedback_tracking_pmr_resource_false_pass]] REQUIRES both gates.
 # item 13 (2026-06-19): DISABLED companion — RED (same allocating recovery window). Tracked: REMAINING-WORK item 13.
-if(FALSE)  # was: if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+if(FALSE)  # re-enable via fixpp_add_mallocnesia_test() — NOT the old EXISTS guard (#448)
     add_test(
         NAME perf_session_recovery_alloc_guard_mallocnesia
         COMMAND

@@ -79,17 +79,18 @@ set_tests_properties(codegen_group_entry_alloc_gate_test PROPERTIES LABELS codeg
 # it under LD_PRELOAD so global malloc/calloc/realloc is intercepted (the
 # dual-gate: the in-band counting_resource above catches PMR-routed
 # allocation; this catches a non-PMR escape via global new, per
-# feedback_tracking_pmr_resource_false_pass). Absent mallocnesia.so → skipped
-# (the base ctest above is the fallback; the counting_resource + stack/NULL-
-# upstream arena still enforce the gate without interception).
-if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
-  add_test(
-    NAME codegen_group_entry_alloc_gate_test_mallocnesia
-    COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
-            "--binary" "$<TARGET_FILE:codegen_group_entry_alloc_gate_test>")
-  set_tests_properties(codegen_group_entry_alloc_gate_test_mallocnesia PROPERTIES
-    LABELS "codegen;alloc_guard;mallocnesia;062")
-endif()
+# feedback_tracking_pmr_resource_false_pass). registered on every FIXPP_MALLOCNESIA_SUPPORTED configuration since
+# fixpp#448 (Linux, non-sanitizer — see cmake/FixppMallocnesia.cmake for why a sanitizer
+# build is excluded rather than merely skipped) —
+# the interceptor is a build target, so there is no state in which this silently
+# does not exist. The base ctest above is a COMPANION, not a fallback: it enforces
+# the PMR half without interception, and a green run of it says nothing about the
+# global-new escape this entry is the only thing watching.
+
+fixpp_add_mallocnesia_test(
+  NAME codegen_group_entry_alloc_gate_test_mallocnesia
+  TARGET codegen_group_entry_alloc_gate_test
+  LABELS "codegen;alloc_guard;062")
 
 # 067-codegen-writer-emitter T007/T009: emit_builders unit tests — link the
 # codegen tool's ir.cpp/gen_util.hpp DIRECTLY (not via the generated headers)

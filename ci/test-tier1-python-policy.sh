@@ -319,6 +319,16 @@ linux_uses = [
     for s in linux_job["steps"] if "uses" in s
 ]
 linux_step_count = len(linux_job["steps"])
+# fixpp#448: the two gate steps are guarded by a STRING. A typo in it skips both on
+# every leg while the job stays green and the step count is unchanged, so the predicate
+# itself is pinned, not merely the step's existence.
+mallocnesia_guards = {
+    s.get("id"): s.get("if")
+    for s in linux_job["steps"]
+    if s.get("id") in ("mallocnesia_population", "mallocnesia_gates")
+}
+mallocnesia_sentinel = any(
+    "allocation gates actually ran" in (s.get("name") or "") for s in linux_job["steps"])
 linux_job_env = {str(k): str(v) for k, v in (linux_job.get("env") or {}).items()}
 linux_has_defaults = "defaults" in linux_job
 
@@ -522,6 +532,8 @@ out = {
     "linux_env_writers": linux_env_writers,
     "linux_uses": linux_uses,
     "linux_step_count": linux_step_count,
+    "mallocnesia_guards": mallocnesia_guards,
+    "mallocnesia_sentinel": mallocnesia_sentinel,
     "linux_job_env": linux_job_env,
     "linux_has_defaults": linux_has_defaults,
     "linux_job_keys": linux_job_keys,
@@ -1013,9 +1025,29 @@ $got"
   # job's LITERAL preset, for `linux` and `coverage` (a preset derived from
   # the restore step's own text cannot catch every call in a job drifting to
   # the same wrong preset).
+  # fixpp#448 — the gate steps' PREDICATE, not just their presence.
+  local want_guard="matrix.preset == 'linux-clang-release'"
+  local g
+  for k in mallocnesia_population mallocnesia_gates; do
+    g="$(echo "$json" | jq -r --arg k "$k" '.mallocnesia_guards[$k] // "<absent>"')"
+    [ "$g" = "$want_guard" ] \
+      || fail "$case_id: the #448 step '$k' has if: '$g', expected '$want_guard'. A typo here SKIPS the allocation gates on every leg while the job stays green and the step count is unchanged — which is why the string is pinned and not merely counted."
+  done
+  [ "$(echo "$json" | jq -r '.mallocnesia_sentinel')" = "true" ] \
+    || fail "$case_id: the #448 outcome sentinel step is gone. Without it, both gate steps can be skipped by a mistyped preset and nothing reads their outcome — a green job is not evidence a step ran."
+
   got="$(echo "$json" | jq -r '.linux_step_count')"
-  [ "$got" = "37" ] \
-    || fail "$case_id: the linux job has $got steps, expected 37. A step added anywhere before the pytest pair can change what they execute without colliding with a pinned name or adding a pytest mention (round 4 finding 3, measured). This count is deliberately brittle: adding a step to this job is a deliberate act and must be paired with a deliberate look at whether it reaches the python steps."
+  # 37 -> 40 (fixpp#448): two allocation-gate steps + the unguarded outcome sentinel
+  # that proves they ran. The pin demands a deliberate
+  # look before this number moves, so here it is, recorded rather than asserted:
+  # both sit at indices 23-24, BEFORE the pytest pair at 33-34, so the question the pin
+  # asks is live. They cannot reach it — neither writes GITHUB_ENV or GITHUB_PATH,
+  # neither pip-installs, neither mutates the build tree (one reads `ctest -N` output,
+  # the other runs already-built binaries), and both are `if:`-guarded to
+  # linux-clang-release. They CAN fail the job before python runs, which is intended:
+  # an allocation regression on a gated hot path should stop the lane.
+  [ "$got" = "40" ] \
+    || fail "$case_id: the linux job has $got steps, expected 40. A step added anywhere before the pytest pair can change what they execute without colliding with a pinned name or adding a pytest mention (round 4 finding 3, measured). This count is deliberately brittle: adding a step to this job is a deliberate act and must be paired with a deliberate look at whether it reaches the python steps."
 
   got="$(echo "$json" | jq -cS '.linux_job_env')"
   [ "$got" = '{"CCACHE_COMPILERCHECK":"content","CCACHE_COMPRESSLEVEL":"5","CCACHE_DIR":"/tmp/fixpp-ccache-${{ matrix.preset }}","CCACHE_MAXSIZE":"2G","CMAKE_CXX_COMPILER_LAUNCHER":"ccache","CMAKE_C_COMPILER_LAUNCHER":"ccache"}' ] \
@@ -1440,6 +1472,13 @@ CI_PIN_HARNESSES=(
   # only thing standing between "the live interop job is green" and "it ran the cells
   # it claims to", and every one of its refusals is pinned in that harness alone.
   "ci/test-run-interop-live.sh"
+  # fixpp#448's gate-population harness. ⚠️ ADDED WITH ITS OWN MUTANT (M104), same
+  # dead-call-site shape as M26/M64/M65/M69/M73/M101/M102/M103 — none of those prove
+  # THIS row can fail, only that the census mechanism can fail for a different harness.
+  "ci/test-mallocnesia-population.sh"
+  # fixpp#448's check_alloc refusal harness. ⚠️ ADDED WITH ITS OWN MUTANT (M105), same
+  # dead-call-site shape as its siblings — none of those prove THIS row can fail.
+  "ci/test-check-alloc.sh"
 )
 
 assert_ci_pin_call_sites() {
@@ -1764,7 +1803,9 @@ echo "PASS: derive-script table + call site + per-leg FIXPP_INSTALL_PYTHON + PY_
 # not collide). Re-run the harness against the merged number rather than
 # re-deriving from either branch's local total — the failure mode this guards is
 # one side's edit silently replacing the other's, which reads as a passing count.
-MUTANTS_DECLARED=89  # M103 (the ci-script-pins call-site pin for
+MUTANTS_DECLARED=92  # M106 (the #448 gate-step guard pin) + M105 (the ci-script-pins call-site pin for
+                     # ci/test-check-alloc.sh, fixpp#448) + M104 (the ci-script-pins call-site pin for
+                     # ci/test-mallocnesia-population.sh, fixpp#448) + M103 (the ci-script-pins call-site pin for
                      # ci/test-run-interop-live.sh, fixpp#468) + M102 (the ci-script-pins call-site
                      # pin for ci/test-interop-gate-step.sh) + M101 (the ci-script-pins call-site pin for
                      # ci/test-interop-skips.sh) + M97-M100 (#411 Gate B r2 L1/L2: Build's key set on both jobs, plus
@@ -2299,6 +2340,61 @@ assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
 '
 
+  # M104 (fixpp#448): the SAME dead-call-site shape, on the allocation-gate
+  # population harness added this round. Its own mutant for the reason every
+  # sibling above states.
+  mutate_workflow M104 "the mallocnesia population harness call site replaced by an echo" "ci-script-pins does not INVOKE" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: bash ci/test-mallocnesia-population.sh\n"
+new = "        run: echo \"bash ci/test-mallocnesia-population.sh\"\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M105 (fixpp#448): the SAME dead-call-site shape, on the check_alloc refusal
+  # harness added this round.
+  mutate_workflow M105 "the check_alloc refusal harness call site replaced by an echo" "ci-script-pins does not INVOKE" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: bash ci/test-check-alloc.sh\n"
+new = "        run: echo \"bash ci/test-check-alloc.sh\"\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M106 (fixpp#448): the gate steps preset guard misspelled. The step count is
+  # UNCHANGED, the job is green, and both gates silently never run on any leg — the exact
+  # shape the count pin cannot see.
+  #
+  # ⚠️ SCOPED to the two #448 steps, by their ids. A blanket replace of the predicate hits
+  # the `uses:` steps too and the harness then (correctly) reports "failed the pin for the
+  # WRONG reason" — a mutant that reddens the wrong assertion proves nothing about the one
+  # it was written for.
+  #
+  # ⚠️ NO literal single quote anywhere below: mutate_workflow takes this as a
+  # single-quoted bash argument and the YAML predicate is itself single-quoted. chr(39)
+  # builds it. An earlier revision embedded one and broke the whole harness with
+  # `syntax error near unexpected token`.
+  mutate_workflow M106 "the #448 gate steps preset guard is misspelled" "expected " '
+import re, sys
+q = chr(39)
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+good = "matrix.preset == " + q + "linux-clang-release" + q
+bad = "matrix.preset == " + q + "linux-clang-relese" + q
+n = 0
+out = []
+for block in t.split("      - name:"):
+    if re.search(r"id: mallocnesia_(population|gates)\b", block) and good in block:
+        block = block.replace(good, bad, 1); n += 1
+    out.append(block)
+assert n == 2, "expected to mutate 2 guarded steps, mutated " + str(n)
+open(dst, "w").write("      - name:".join(out))
+'
+
   # ── #271: the wheel identity steps' VALUE drift (M70-M72) ───────────────────
   #
   # assert_wheel_identity_steps extracted six fields per step and compared four.
@@ -2449,7 +2545,7 @@ open(dst, "w").write(t.replace(old, new))
   # not fail open — `mutate_workflow` reports "failed the pin for the WRONG
   # reason" — but it is the second edit the count pin demands, and forgetting it
   # is how a deliberately brittle assertion earns a reputation for being noise.
-  mutate_workflow M33 "an unnamed step is inserted before the pytest pair" "has 38 steps, expected 37" '
+  mutate_workflow M33 "an unnamed step is inserted before the pytest pair" "has 41 steps, expected 40" '
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()

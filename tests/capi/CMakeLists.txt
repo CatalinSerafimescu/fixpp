@@ -361,76 +361,51 @@ target_compile_definitions(capi_dictionary_load_test PRIVATE
 add_test(NAME capi_dictionary_load COMMAND capi_dictionary_load_test)
 set_tests_properties(capi_dictionary_load PROPERTIES LABELS "capi;052;080")
 
-if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
-    add_test(
-        NAME capi_recv_alloc_guard_mallocnesia
-        COMMAND
-            python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
-            "--binary" "$<TARGET_FILE:capi_recv_alloc_guard_test>"
-    )
-    set_tests_properties(capi_recv_alloc_guard_mallocnesia PROPERTIES
-        LABELS "capi;050;alloc_guard"
-        DEPENDS capi_recv_alloc_guard_test
-    )
+fixpp_add_mallocnesia_test(
+  NAME capi_recv_alloc_guard_mallocnesia
+  TARGET capi_recv_alloc_guard_test
+  LABELS "capi;050;alloc_guard"
+  DEPENDS "capi_recv_alloc_guard")
 
-    # SC-003 dual gate — read path: mallocnesia LD_PRELOAD interception for the
-    # inbound get_* accessors. The in-process marker test is in message_read_test.cpp
-    # (ZeroGlobalHeapAllocGuard). A counting-resource alone false-passes
-    # ([[feedback_tracking_pmr_resource_false_pass]]); this entry is the binding gate.
-    add_test(
-        NAME capi_message_read_mallocnesia
-        COMMAND
-            python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
-            "--binary" "$<TARGET_FILE:capi_message_read_test>"
-    )
-    set_tests_properties(capi_message_read_mallocnesia PROPERTIES
-        LABELS "capi;051;alloc_guard"
-        DEPENDS capi_message_read_test
-    )
+# SC-003 dual gate — read path: mallocnesia LD_PRELOAD interception for the
+# inbound get_* accessors. The in-process marker test is in message_read_test.cpp
+# (ZeroGlobalHeapAllocGuard). A counting-resource alone false-passes
+# ([[feedback_tracking_pmr_resource_false_pass]]); this entry is the binding gate.
+fixpp_add_mallocnesia_test(
+  NAME capi_message_read_mallocnesia
+  TARGET capi_message_read_test
+  LABELS "capi;051;alloc_guard"
+  DEPENDS "capi_message_read")
 
-    # SC-003 dual gate — write path: mallocnesia LD_PRELOAD interception for the
-    # outbound set_*/commit accessors. The in-process marker test is in
-    # message_write_test.cpp (ZeroGlobalHeapSetCommitGuard).
-    add_test(
-        NAME capi_message_write_mallocnesia
-        COMMAND
-            python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
-            "--binary" "$<TARGET_FILE:capi_message_write_test>"
-    )
-    set_tests_properties(capi_message_write_mallocnesia PROPERTIES
-        LABELS "capi;051;alloc_guard"
-        DEPENDS capi_message_write_test
-    )
+# SC-003 dual gate — write path: mallocnesia LD_PRELOAD interception for the
+# outbound set_*/commit accessors. The in-process marker test is in
+# message_write_test.cpp (ZeroGlobalHeapSetCommitGuard).
+fixpp_add_mallocnesia_test(
+  NAME capi_message_write_mallocnesia
+  TARGET capi_message_write_test
+  LABELS "capi;051;alloc_guard"
+  DEPENDS "capi_message_write")
 
-    # SC-003 dual gate — toApp path: mallocnesia LD_PRELOAD interception for the
-    # on-strand toApp trampoline (CapiApplication::toApp). The in-process marker
-    # test is in toapp_alloc_guard_test.cpp (TrampolineToAppNoGlobalHeapAlloc).
-    # Third zero-heap path per SC-003 / T020 ([[feedback_tracking_pmr_resource_false_pass]]).
-    add_test(
-        NAME capi_toapp_alloc_guard_mallocnesia
-        COMMAND
-            python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
-            "--binary" "$<TARGET_FILE:capi_toapp_alloc_guard_test>"
-    )
-    set_tests_properties(capi_toapp_alloc_guard_mallocnesia PROPERTIES
-        LABELS "capi;051;alloc_guard"
-        DEPENDS capi_toapp_alloc_guard_test
-    )
+# SC-003 dual gate — toApp path: mallocnesia LD_PRELOAD interception for the
+# on-strand toApp trampoline (CapiApplication::toApp). The in-process marker
+# test is in toapp_alloc_guard_test.cpp (TrampolineToAppNoGlobalHeapAlloc).
+# Third zero-heap path per SC-003 / T020 ([[feedback_tracking_pmr_resource_false_pass]]).
+fixpp_add_mallocnesia_test(
+  NAME capi_toapp_alloc_guard_mallocnesia
+  TARGET capi_toapp_alloc_guard_test
+  LABELS "capi;051;alloc_guard"
+  DEPENDS "capi_toapp_alloc_guard")
 
-    # SC-003 dual gate — field iteration: mallocnesia LD_PRELOAD interception for
-    # fixpp_msg_field_count + fixpp_msg_field_at (CA-053 / 052 US3).  These functions
-    # are pure span lookups over the OffsetTable; the in-process alloc_guard_markers
-    # test confirms zero-alloc; mallocnesia is the binding gate
-    # ([[feedback_tracking_pmr_resource_false_pass]]).
-    add_test(NAME capi_message_field_iteration_mallocnesia
-        COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
-                "--binary" "$<TARGET_FILE:capi_message_field_iteration_test>"
-    )
-    set_tests_properties(capi_message_field_iteration_mallocnesia PROPERTIES
-        LABELS "capi;052;alloc_guard"
-        DEPENDS capi_message_field_iteration_test
-    )
-endif()
+# SC-003 dual gate — field iteration: mallocnesia LD_PRELOAD interception for
+# fixpp_msg_field_count + fixpp_msg_field_at (CA-053 / 052 US3).  These functions
+# are pure span lookups over the OffsetTable; the in-process alloc_guard_markers
+# test confirms zero-alloc; mallocnesia is the binding gate
+# ([[feedback_tracking_pmr_resource_false_pass]]).
+fixpp_add_mallocnesia_test(
+  NAME capi_message_field_iteration_mallocnesia
+  TARGET capi_message_field_iteration_test
+  LABELS "capi;052;alloc_guard"
+  DEPENDS "capi_message_field_iteration")
 
 # ── 066-dict-backed-inbound-parse T001 — C-ABI engine-loopback scaffold smoke ─
 # Compile/smoke check for capi_dict066_loopback_support.hpp (a real

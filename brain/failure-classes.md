@@ -47,6 +47,24 @@ prints `0` for a whole syntax.
   - **Procedure:** spell the expectation out independently and accept the duplication — it *is* the
     mechanism. Then prove it: mutate the shared constant and require RED. A pin that imports
     anything from its subject must be assumed inert until a mutant says otherwise.
+- ⚠️ **PRESENT IS NOT ACTIVE — a witness can prove a mechanism was LOADED and say nothing about
+  whether it TOOK EFFECT.** When an instrument works by interposition, injection or overriding
+  (LD_PRELOAD, a monkey-patch, a subclass, a mock registered in a container, an interceptor
+  installed by a constructor), the natural proof is "did the thing get installed?" — and that proof
+  is satisfied in configurations where installation succeeds and OVERRIDING DOES NOT.
+  - **Trigger:** your evidence of instrumentation is existence — a file the injector wrote, a
+    symbol present in the binary, a constructor that ran, a plugin that imported.
+  - **Procedure:** require evidence written by the OVERRIDE ITSELF on the path under test, not by
+    the mechanism's arrival. Ask what outranks you: a strong symbol beats a weak one, a sanitizer's
+    allocator beats an LD_PRELOAD interposer, an earlier entry in a preload list beats a later one,
+    an alternative allocator linked into the binary beats both.
+  - ⚠️ **The scan that guards this is usually scoped too narrowly.** A repo checking that no *test*
+    redefines the overridden symbol does not see a definition in *production* sources, which is the
+    same link closure. Derive the scope from what the LINKER sees, not from where such code is
+    expected to live.
+  - **Where it lands when true:** the gate reports clean because nothing was ever measured, which is
+    class 1 by a different door — and the positive control is the only arm that can tell, because
+    it is the only one whose expected result is a FAILURE.
 - ⚠️ **A REFUSAL IS ONLY AS WIDE AS THE ESCAPE IT CATCHES — and the escapes that matter exit
   SUCCESSFULLY.** A guard written to turn an unusable input into a named error is itself an
   instrument, so ask what reaches the interpreter *past* it. In Python the sharp edge is that
