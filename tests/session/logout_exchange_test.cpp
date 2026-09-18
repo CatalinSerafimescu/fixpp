@@ -1002,8 +1002,8 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
         // Drive to Active: open() → LogonSent → inbound Logon-ack → Active.
         //
         // BOTH PUMPS CARRY A SITE LABEL AND A POOL PROBE (#433). The Logon-ack one
-        // is where the linux-gcc-release failure landed; `open()` stores the
-        // outbound Logon through the same FileStore offload, so it is the same
+        // is where #433's observed linux-gcc-release failure landed; `open()` stores
+        // the outbound Logon through the same FileStore offload, so it is the same
         // site twice and is labelled for the same reason. Unlabelled, a site is
         // unreachable by the forcing seam (`forced_miss_here` compares the
         // `site` pointer's contents, and `nullptr` never matches), so the miss
