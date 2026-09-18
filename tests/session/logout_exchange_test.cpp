@@ -1327,9 +1327,19 @@ TEST(SessionGracefulCloseFlushesFileStore, OffloadProbe_ZeroDelta_ReportsFilePoo
 // sites -- see the record's §3 table), so it does not revise that reading;
 // it demonstrates the branch is reachable at builder scope.
 TEST(SessionGracefulCloseFlushesFileStore, OffloadProbe_PoolSaturated_ReportsNoThreadFree) {
-    asio::thread_pool pool{2};
     std::atomic<bool> release{false};
     std::atomic<int> occupied{0};
+    asio::thread_pool pool{2};
+    // The posted callbacks capture the frame-local state by reference, and
+    // thread_pool joins them during destruction. Keep the atomics before the
+    // pool and this guard after it so early exits publish release before that
+    // join while the captured state is still alive; if this held state ever
+    // becomes a non-trivially-destructible gate, the same order is
+    // correctness-critical rather than only teardown discipline.
+    struct release_on_exit {
+        std::atomic<bool>& flag;
+        ~release_on_exit() { flag.store(true, std::memory_order_release); }
+    } releaser{release};
     for (int i = 0; i < 2; ++i) {
         asio::post(pool, [&] {
             occupied.fetch_add(1, std::memory_order_release);
