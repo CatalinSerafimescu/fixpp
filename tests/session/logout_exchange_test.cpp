@@ -39,9 +39,11 @@
 #include <asio/co_spawn.hpp>
 #include <asio/executor_work_guard.hpp>
 #include <asio/io_context.hpp>
+#include <asio/post.hpp>
 #include <asio/thread_pool.hpp>
 #include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -61,6 +63,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include "_fixtures_/store_temp_dir.hpp"
@@ -140,6 +143,150 @@ std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag) {
         return wire.substr(pos);
     }
     return wire.substr(pos, end - pos);
+}
+
+// ── #433: WHICH SIDE STALLED? ──────────────────────────────────────────
+//
+// `SessionGracefulCloseFlushesFileStore` drives a session on a single-threaded
+// `io_context` while its FileStore offloads onto a real `asio::thread_pool`. A
+// bounded pump that exhausts its budget there reports only that the awaited
+// future never became ready -- never WHERE the time went. #433 can offer a
+// suspect and not a cause: nothing measured what the pool was doing.
+//
+// `install_store_offload_probe` (include/fixpp/session/file_store.hpp, under
+// FIXPP_TEST_HOOKS) fires at the start of an offloaded lambda, on the pool
+// thread, before its first syscall. It gives ENTRY only -- there is no exit
+// seam in src/session/file_store.cpp, so "still inside the syscall" and
+// "returned, but the continuation never posted" remain indistinguishable by
+// this probe. #433's literal submit/complete pair is not delivered here; that
+// residual is a disposition, not a coverage claim -- do not let a later
+// record say this probe records completion.
+//
+// ⚠️ AN ABSOLUTE ENTRY COUNT IS NOT EVIDENCE ABOUT THE AWAITED OPERATION: more
+// than one offload can precede the one a labelled pump is waiting on, so
+// `N >= 1` is consistent with "an earlier, unrelated offload entered and
+// returned, and the one being awaited was never submitted". Re-derive which
+// paths can offload before trusting a count:
+//   git grep -n 'g_store_offload_probe' src/session/file_store.cpp
+// Snapshot the counter immediately BEFORE the labelled pump and report the
+// DELTA since that snapshot, never the absolute count:
+//
+//   delta >= 1   an offload reached a pool thread since the snapshot and the
+//                awaited operation still has not completed: consistent with
+//                still being inside the syscall, or with the syscall having
+//                returned and the continuation never posting back -- this
+//                probe cannot tell them apart.
+//   delta == 0   nothing reached a pool thread since the snapshot: either the
+//                operation was never submitted (io_context/strand side), or
+//                the pool never scheduled it. `probe_file_pool` below answers
+//                that SECOND, narrower question by posting an unrelated
+//                trivial task and reporting whether a thread was free for it.
+//                It observes nothing about the awaited operation and must not
+//                be read as if it did -- only meaningful once delta == 0.
+//
+// ⚠️ THE PROMISE IS SHARED, NOT CAPTURED BY REFERENCE. On the DID-NOT-RUN
+// branch the task is still queued when `probe_file_pool` returns, so a
+// reference to a frame local would dangle until `file_pool` is destroyed.
+// ⚠️ WHETHER `probe_file_pool`'s negative verdict MEANS "SLOW" OR "WEDGED" IS
+// A PROPERTY OF THE OFFLOAD PATH, AND YOU MUST RE-DERIVE IT RATHER THAN READ
+// IT HERE. `offload_to` (src/session/file_store.cpp) invokes its callable as
+// a PLAIN CALL. A non-coroutine callable therefore cannot `co_await`, cannot
+// initiate a second offload, and occupies one pool thread per logical
+// operation -- so while that holds of every call site, nested-offload
+// deadlock is impossible and a negative verdict points at a slow syscall. A
+// call site passing a callable that returns `awaitable<...>` voids the
+// argument and puts deadlock back on the table. Check, do not assume:
+//   git grep -n 'offload_to(' src/session/file_store.cpp   # then each callable's return type
+std::string probe_file_pool(asio::thread_pool& pool, std::chrono::milliseconds budget) {
+    auto done = std::make_shared<std::promise<void>>();
+    auto ran = done->get_future();
+    asio::post(pool, [done] { done->set_value(); });
+
+    const auto t0 = std::chrono::steady_clock::now();
+    const bool completed = ran.wait_for(budget) == std::future_status::ready;
+    const auto waited = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t0);
+
+    if (completed) {
+        return "\n  #433 file_pool probe: RAN after " + std::to_string(waited.count()) +
+               "ms -- a pool thread was free for this unrelated trivial task.";
+    }
+    return "\n  #433 file_pool probe: NO POOL THREAD BECAME FREE within " +
+           std::to_string(budget.count()) + "ms.";
+}
+
+// Reached only once a labelled pump has already missed AND its offload-entry
+// delta is zero (see `describe_offload_progress` below) -- a fraction of the
+// pump budget answers "is a pool thread free" without meaningfully extending
+// an already-failing test. A fifth is small enough to stay cheap and large
+// enough that a post-and-schedule round trip on a loaded runner is not
+// mistaken for saturation. The F1.4 forced-defect counter-test below reaches
+// this same call through a deliberately short explicit budget instead.
+constexpr auto kPoolProbeBudget =
+    std::chrono::duration_cast<std::chrono::milliseconds>(fixpp::test_support::kPumpBudget) / 5;
+
+// #433 F1.1 -- entry-only offload diagnostic (see the block comment above).
+// Process-global: `install_store_offload_probe` is one function pointer for
+// all four offload sites in src/session/file_store.cpp, so install/uninstall
+// discipline matters -- the probe is process-global, so a leaked install
+// corrupts whichever test runs next in this binary. Install/uninstall through
+// `scoped_offload_probe`
+// below, never bare, so every exit path (including an ASSERT_TRUE early
+// return) restores nullptr.
+std::atomic<std::uint64_t> g_offload_entry_count{0};
+std::atomic<std::int64_t> g_offload_last_entry_ns{0};
+
+void offload_entry_probe(std::thread::id) noexcept {
+    g_offload_entry_count.fetch_add(1, std::memory_order_relaxed);
+    g_offload_last_entry_ns.store(
+        std::chrono::steady_clock::now().time_since_epoch().count(), std::memory_order_relaxed);
+}
+
+struct scoped_offload_probe {
+    scoped_offload_probe() noexcept {
+        fixpp::session::install_store_offload_probe(&offload_entry_probe);
+    }
+    ~scoped_offload_probe() noexcept { fixpp::session::install_store_offload_probe(nullptr); }
+};
+
+// Snapshot `g_offload_entry_count` immediately before the labelled pump and
+// pass it here as `entries_before` -- see the block comment above for why the
+// DELTA, not the absolute count, is what may be reported.
+std::string describe_offload_progress(std::uint64_t entries_before, asio::thread_pool& pool,
+                                      std::chrono::milliseconds probe_budget) {
+    const auto entries_now = g_offload_entry_count.load(std::memory_order_relaxed);
+    if (entries_now > entries_before) {
+        const auto last_ns = g_offload_last_entry_ns.load(std::memory_order_relaxed);
+        const auto age = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() -
+            std::chrono::steady_clock::time_point(std::chrono::steady_clock::duration(last_ns)));
+        return "\n  #433 offload probe: " + std::to_string(entries_now - entries_before) +
+               " offload(s) entered a pool thread since this pump began (last entry " +
+               std::to_string(age.count()) +
+               "ms ago) and the awaited operation still has not completed -- consistent with "
+               "still being inside the syscall, or with the syscall having returned and the "
+               "continuation never posting back -- this probe cannot tell them apart.";
+    }
+    return "\n  #433 offload probe: no offload entered a pool thread since this pump began "
+           "-- consistent with the operation never having been submitted, or with the pool "
+           "never scheduling it -- the file_pool observation appended here narrows between "
+           "them:" +
+           probe_file_pool(pool, probe_budget);
+}
+
+// #433 F1.4 -- forced-SPURIOUS-HIT counter-test state. A forced-MISS arm cannot
+// catch a spurious HIT (#337): it must force the DEFECT itself, not merely
+// force a miss and hope. Blocks inside the offloaded lambda -- exactly as
+// `hold_probe` does in test_file_store_cancellation.cpp -- while the pool's
+// second worker stays free, reproducing the shape RC-1 diagnoses.
+std::atomic<bool> g_f14_release{false};
+
+void blocking_offload_probe(std::thread::id id) noexcept {
+    offload_entry_probe(id);
+    // Bounded spin: a safety valve, not a wait-forever. On a miss the test
+    // still terminates via the caller's pump budget, not here.
+    (void)fixpp::test_support::wait_until_observed(
+        [] { return g_f14_release.load(std::memory_order_acquire); }, std::chrono::seconds{5});
 }
 
 }  // namespace
@@ -858,16 +1005,54 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
         fixpp::test_support::quiesce_on_exit quiesce{.ioc = ioc, .clock = *clock};
 
         // Drive to Active: open() → LogonSent → inbound Logon-ack → Active.
+        //
+        // BOTH PUMPS CARRY A SITE LABEL AND A POOL PROBE (#433). The Logon-ack one
+        // is where #433's observed linux-gcc-release failure landed; `open()` stores
+        // the outbound Logon through the same FileStore offload, so it is the same
+        // site twice and is labelled for the same reason. Unlabelled, a site is
+        // unreachable by the forcing seam (`forced_miss_here` compares the
+        // `site` pointer's contents, and `nullptr` never matches), so the miss
+        // branch here could never be armed, and a real miss reported a bare
+        // sentence instead of the stem the site-report tooling matches.
+        // ⚠️ NEITHER SPELLS A BUDGET, DELIBERATELY: the label-only overload takes
+        // the default, so a site that DOES spell one is saying something. The
+        // sibling `/close` site below spells a literal 10 s and means it.
+        //
+        // Each label is a named constant used BOTH as the `site` and in the
+        // failure text: the seam matches the string's CONTENTS, so two raw
+        // copies could drift apart silently.
+        constexpr const char* kSiteOpen = "FlushRunsAndFramesDurableAfterClose/open";
+        constexpr const char* kSiteLogonAck = "FlushRunsAndFramesDurableAfterClose/logon-ack";
+
+        // #433 F1.1: install BEFORE open() so its offload (the outbound Logon
+        // store) is observed too, not only the Logon-ack path below. Scoped to
+        // this block: its destructor uninstalls before `file_pool.stop()` and
+        // before the durability re-open below opens a second FileStore on a
+        // DIFFERENT pool (`verify_pool`) -- see the block comment above
+        // `probe_file_pool` for why a leaked probe cannot be left installed
+        // past this scope.
+        scoped_offload_probe offload_probe;
+
         {
+            const auto entries_before = g_offload_entry_count.load(std::memory_order_relaxed);
             auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-            ASSERT_TRUE(pump_until_ready(ioc, fut)) << "open() did not complete within 10s";
+            ASSERT_TRUE(pump_until_ready(ioc, fut, kSiteOpen))
+                << kPumpBudgetMiss << kSiteOpen
+                << " -- open() did not complete within the bounded-pump budget"
+                << describe_offload_progress(entries_before, file_pool, kPoolProbeBudget);
             ASSERT_TRUE(fut.get().has_value()) << "open() should succeed";
             ASSERT_EQ(sess.state(), fixpp::session::fsm_state::LogonSent);
         }
 
         {
+            const auto entries_before = g_offload_entry_count.load(std::memory_order_relaxed);
             auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(logon_ack), asio::use_future);
-            ASSERT_TRUE(pump_until_ready(ioc, fut)) << "Logon-ack did not complete within 10s";
+            ASSERT_TRUE(pump_until_ready(ioc, fut, kSiteLogonAck))
+                << kPumpBudgetMiss << kSiteLogonAck
+                << " -- on_inbound_frame(Logon-ack) did not complete within the bounded-pump "
+                   "budget. This is #433's observed failure; the probe below is what tells the "
+                   "candidate causes apart"
+                << describe_offload_progress(entries_before, file_pool, kPoolProbeBudget);
             ASSERT_TRUE(fut.get().has_value()) << "Logon-ack inbound should succeed";
             ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
         }
@@ -989,6 +1174,192 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
     }
 
     std::filesystem::remove_all(dir);
+}
+
+// #433 F1.4 -- forced-spurious-HIT counter-test for `describe_offload_progress`.
+//
+// ⚠️ WHAT THIS ARM BINDS, AND WHAT IT DOES NOT. It drives a real `Session::open()`
+// through the real `FileStore` offload seam (the production `g_store_offload_probe`
+// hook, the same entry-counting mechanism the two labelled pumps above read from),
+// so it exercises the real production data path that feeds `describe_offload_progress`.
+// It calls `describe_offload_progress` directly rather than reproducing the literal
+// `ASSERT_TRUE(pump_until_ready(...)) << ...` streaming expression at kSiteOpen/
+// kSiteLogonAck above -- that expression itself is NOT exercised by this arm. Say
+// so rather than claim more: this is the shared report BUILDER bound at the real
+// production seam, not a capture of the two call sites' own source text.
+//
+// F6.2 (gate-b/r2, C4): the complementary delta == 0 branch IS witnessed at
+// builder scope -- OffloadProbe_ZeroDelta_ReportsFilePoolProbe below (F6.1)
+// calls `describe_offload_progress` directly with no offload produced, the
+// same scope this arm already occupies for the delta >= 1 branch. It is NOT
+// witnessed at the real kSiteOpen/kSiteLogonAck sites, and that narrower
+// claim is the one with a real obstacle: `forced_miss_here`'s env var is read
+// via a function-local static on its FIRST call in the process
+// (tests/support/pump_until_ready.hpp), so a `setenv()` inside a running test
+// has no effect once any earlier test has already pumped. Reaching delta == 0
+// at the real kSiteOpen/kSiteLogonAck sites requires the env var set BEFORE
+// process start, i.e. a separate process invocation:
+//   FIXPP_FORCE_WINDOW_MISS='FlushRunsAndFramesDurableAfterClose/open' \
+//     ./session_logout_exchange \
+//     --gtest_filter='SessionGracefulCloseFlushesFileStore.FlushRunsAndFramesDurableAfterClose'
+// `forced_miss_here` (called before `pump_until` ever reaches `ioc.run_for`) returns
+// on that FIRST call, so no offload can have entered a pool thread by the time the
+// snapshot is compared -- the delta==0 branch, and the probe_file_pool secondary
+// path inside it, is what the miss then reaches. Re-run that recipe to re-verify;
+// do not trust a cached account of its output.
+TEST(SessionGracefulCloseFlushesFileStore, OffloadProbe_ForcedSpuriousHit_ReportsUncommittedDelta) {
+    using fixpp::store_test::unique_store_dir;
+    auto dir = unique_store_dir("f14_forced_spurious_hit");
+    asio::thread_pool file_pool{2};
+    asio::io_context ioc;
+
+    auto utc = std::chrono::system_clock::time_point{} + std::chrono::seconds{1704067200};
+    auto stp = fixpp::core::steady_time_point{} + std::chrono::seconds{0};
+    auto clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
+
+    fixpp::core::EngineConfig engine;
+    engine.clock = clock;
+    engine.executor = ioc.get_executor();
+    engine.file_io_executor = file_pool.get_executor();
+
+    FileStore::Config fs_cfg;
+    fs_cfg.directory = dir;
+    fs_cfg.max_frame_bytes = 4096;
+    fs_cfg.file_io_executor = file_pool.get_executor();
+
+    fixpp::session::SessionConfig cfg;
+    cfg.sender_comp_id = "ISLD";
+    cfg.target_comp_id = "TW";
+    cfg.begin_string = "FIX.4.2";
+    cfg.heartbeat_interval = std::chrono::seconds{30};
+    cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+    cfg.executor_override = ioc.get_executor();
+    cfg.store_factory = std::make_unique<FileStoreFactory>(fs_cfg);
+
+    TransportDouble td;
+    cfg.transport_send = [&td](std::span<const std::byte> frame) { td.capture_outbound(frame); };
+
+    std::string diagnostic;
+
+    {
+        fixpp::session::Session sess(engine, cfg);
+        fixpp::test_support::quiesce_on_exit quiesce{.ioc = ioc, .clock = *clock};
+
+        // Declared AFTER `quiesce` so it destructs BEFORE `quiesce` (reverse
+        // declaration order): the block below unblocks `blocking_offload_probe`
+        // and uninstalls the probe before `quiesce`'s drain runs, so the
+        // now-unblocked offload can complete and the drain has something it
+        // can actually finish rather than something still parked in the probe.
+        // On EVERY exit from this scope, including a failing ASSERT below --
+        // the same hazard F2.1 fixes for `gate->release()` above.
+        //
+        // F5.1 (gate-b/r2, C5): re-arm the release flag BEFORE installing the
+        // probe, where no callback can yet be running. `release_and_uninstall`
+        // stores `true` at scope exit and never stores `false` again, so
+        // without this a repeat run (--gtest_repeat) after the first
+        // iteration finds the flag already `true` and `blocking_offload_probe`
+        // returns immediately instead of blocking.
+        g_f14_release.store(false, std::memory_order_release);
+        fixpp::session::install_store_offload_probe(&blocking_offload_probe);
+        struct release_and_uninstall {
+            ~release_and_uninstall() noexcept {
+                g_f14_release.store(true, std::memory_order_release);
+                fixpp::session::install_store_offload_probe(nullptr);
+            }
+        } release_guard;
+
+        const auto entries_before = g_offload_entry_count.load(std::memory_order_relaxed);
+        auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+
+        // Short explicit budget (F1.4 hazard): the offload is deliberately
+        // blocked, so `fut` never becomes ready and a default kPumpBudget
+        // would burn 10s to observe an outcome this budget already settles.
+        constexpr auto kShortBudget = std::chrono::milliseconds{300};
+        constexpr const char* kSite = "OffloadProbe_ForcedSpuriousHit/open";
+        const bool ready = pump_until_ready(ioc, fut, kShortBudget, kSite);
+        ASSERT_FALSE(ready) << "the offload is deliberately blocked inside the probe; "
+                                "open() must NOT complete within the short budget";
+
+        diagnostic = describe_offload_progress(entries_before, file_pool, kPoolProbeBudget);
+    }  // release_guard unblocks + uninstalls; quiesce then drains the now-completing open().
+
+    file_pool.stop();
+    file_pool.join();
+    std::filesystem::remove_all(dir);
+
+    // F1.7 (gate-b/r2): re-pointed off the deleted "file-I/O"/"a slow syscall"
+    // wording F1.6 removed. Assert on the enumeration clause's PRESENCE (so an
+    // empty string, an early-returning builder, or a truncated diagnostic
+    // cannot pass) and on the commitment's ABSENCE, not on the absence of the
+    // noun -- "file-I/O" still occurs inside the honest enumeration text.
+    EXPECT_NE(diagnostic.find("cannot tell them apart"), std::string::npos) << diagnostic;
+    EXPECT_EQ(diagnostic.find("look at the"), std::string::npos) << diagnostic;
+    EXPECT_EQ(diagnostic.find("a slow syscall"), std::string::npos) << diagnostic;
+}
+
+// #433 F6.1 (gate-b/r2, C4) -- witness the delta == 0 branch of
+// `describe_offload_progress` at builder scope, which the F1.4/F1.7 arm above
+// already occupies for the delta >= 1 branch (see its own disclosure of what
+// it binds). No `install_store_offload_probe` is installed in this arm, so
+// nothing can increment `g_offload_entry_count`: the snapshot taken here
+// equals the count read back inside the builder, so the delta is 0 by
+// construction -- reaching this branch does not depend on timing.
+TEST(SessionGracefulCloseFlushesFileStore, OffloadProbe_ZeroDelta_ReportsFilePoolProbe) {
+    asio::thread_pool pool{2};
+    const auto entries_before = g_offload_entry_count.load(std::memory_order_relaxed);
+
+    const std::string diagnostic = describe_offload_progress(entries_before, pool, kPoolProbeBudget);
+
+    pool.stop();
+    pool.join();
+
+    EXPECT_NE(diagnostic.find("no offload entered a pool thread"), std::string::npos) << diagnostic;
+    EXPECT_NE(diagnostic.find("RAN after"), std::string::npos) << diagnostic;
+}
+
+// #433 F6.3 (gate-b/r2, C4, optional) -- witness `probe_file_pool`'s NO POOL
+// THREAD BECAME FREE branch. Occupies both pool workers with a blocking task
+// BEFORE calling the builder, so the probe's own trivial post-and-wait cannot
+// find a free thread within the short budget. This saturates the pool
+// directly (bypassing `FileStoreImpl`'s per-instance `async_mutex`, which is
+// what keeps this branch unreachable through the two labelled production
+// sites -- see the record's §3 table), so it does not revise that reading;
+// it demonstrates the branch is reachable at builder scope.
+TEST(SessionGracefulCloseFlushesFileStore, OffloadProbe_PoolSaturated_ReportsNoThreadFree) {
+    std::atomic<bool> release{false};
+    std::atomic<int> occupied{0};
+    asio::thread_pool pool{2};
+    // The posted callbacks capture the frame-local state by reference, and
+    // thread_pool joins them during destruction. Keep the atomics before the
+    // pool and this guard after it so early exits publish release before that
+    // join while the captured state is still alive; if this held state ever
+    // becomes a non-trivially-destructible gate, the same order is
+    // correctness-critical rather than only teardown discipline.
+    struct release_on_exit {
+        std::atomic<bool>& flag;
+        ~release_on_exit() { flag.store(true, std::memory_order_release); }
+    } releaser{release};
+    for (int i = 0; i < 2; ++i) {
+        asio::post(pool, [&] {
+            occupied.fetch_add(1, std::memory_order_release);
+            (void)fixpp::test_support::wait_until_observed(
+                [&] { return release.load(std::memory_order_acquire); }, std::chrono::seconds{5});
+        });
+    }
+    ASSERT_TRUE(fixpp::test_support::wait_until_observed(
+        [&] { return occupied.load(std::memory_order_acquire) == 2; }, std::chrono::seconds{5}))
+        << "both pool workers must be occupied before the saturated probe runs";
+
+    const auto entries_before = g_offload_entry_count.load(std::memory_order_relaxed);
+    const std::string diagnostic =
+        describe_offload_progress(entries_before, pool, std::chrono::milliseconds{50});
+
+    release.store(true, std::memory_order_release);
+    pool.stop();
+    pool.join();
+
+    EXPECT_NE(diagnostic.find("NO POOL THREAD BECAME FREE"), std::string::npos) << diagnostic;
 }
 
 }  // namespace fixpp::session::test

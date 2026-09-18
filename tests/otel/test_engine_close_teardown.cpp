@@ -63,8 +63,10 @@
 #include <fixpp/log/sink.hpp>
 #include <fixpp/otel/providers.hpp>
 #include <fixpp/session/engine.hpp>
+#include <condition_variable>
+#include <iostream>
 #include <memory>
-#include <thread>
+#include <mutex>
 
 #include "support/pump_until_ready.hpp"
 
@@ -116,21 +118,54 @@ private:
     std::shared_ptr<std::atomic<int>> flush_counter_;
 };
 
-// ── SlowFlushSink — blocks flush() for a configurable duration ───────────────
+// ── SlowFlushSink — blocks flush() until released, or until max_block ────────
 // Used to verify drain_timeout is observed (not a hardcoded longer value).
+//
+// THE BLOCK IS RELEASE-GATED RATHER THAN A FIXED SLEEP, and that is what lets
+// `max_block` be sized for discrimination instead of for wall clock (#446).
+// `Logger::shutdown()` abandons a drain that timed out WITHOUT joining it
+// (src/log/logger.cpp, step 4b runs only on the signalled path), but `~Logger`
+// joins unconditionally (`~Impl`). So a sink that sleeps a fixed duration is
+// paid in full on the CORRECT path too, at the join — buying margin by
+// lengthening the sleep would lengthen every green run by the same amount.
+// Gated, the correct path pays only the drain timeout and releases, while the
+// defect path — which never reaches the release, because it is still inside
+// stop() — waits out `max_block`. The block is bounded rather than indefinite
+// so that a caller which never releases (an early return on a teardown miss)
+// cannot wedge the join.
 class SlowFlushSink final : public fixpp::log::Sink {
 public:
-    explicit SlowFlushSink(std::chrono::milliseconds flush_delay) : flush_delay_(flush_delay) {}
+    // Shared with the test, which releases it once the measurement it gates is
+    // taken. `flush()` runs on the Logger's drain thread; the test runs on its
+    // own. Hence the mutex/condvar rather than a flag.
+    struct Gate {
+        std::mutex mutex;
+        std::condition_variable cv;
+        bool released{false};
+
+        void release() {
+            {
+                std::scoped_lock lock(mutex);
+                released = true;
+            }
+            cv.notify_all();
+        }
+    };
+
+    SlowFlushSink(std::shared_ptr<Gate> gate, std::chrono::milliseconds max_block)
+        : gate_(std::move(gate)), max_block_(max_block) {}
 
     [[nodiscard]] fixpp::core::expected_t<void> open() override { return {}; }
     void emit(fixpp::log::Record const&) noexcept override {}
     void flush(std::chrono::milliseconds /*deadline*/) noexcept override {
-        std::this_thread::sleep_for(flush_delay_);
+        std::unique_lock lock(gate_->mutex);
+        (void)gate_->cv.wait_for(lock, max_block_, [this] { return gate_->released; });
     }
     void close() noexcept override {}
 
 private:
-    std::chrono::milliseconds flush_delay_;
+    std::shared_ptr<Gate> gate_;
+    std::chrono::milliseconds max_block_;
 };
 
 // ── Helper: build a mock clock ────────────────────────────────────────────────
@@ -257,28 +292,52 @@ TEST(EngineCloseTeardown, E2_LoggerShutdownFlushesSinks) {
 // LoggerConfig rather than a hardcoded 5 s literal. [2k §6.6].
 //
 // DISCRIMINATING strategy: configure Logger with drain_timeout = 50ms; wire a
-// SlowFlushSink that blocks flush() for 800ms. Call Engine::stop(). Assert:
-//   (a) stop() returns in well under 800ms (drain_timeout = 50ms was respected)
+// SlowFlushSink whose flush() blocks until the test releases it, for at most
+// k_flush_block. Call Engine::stop(). Assert:
+//   (a) stop() returns well below k_flush_block (drain_timeout was respected)
 //   (b) logger->timeout_drop_count() incremented (Logger::shutdown returned
 //       log_drain_timeout, proving the 50ms deadline was actually applied)
 //
-// Under the OLD hardcoded shutdown(5000ms): the 800ms flush would complete
-// within budget → no timeout → timeout_drop_count() == 0 → assertion (b) FAILS.
-// Under the correct path (uses LoggerConfig::drain_timeout = 50ms): the 800ms
-// flush trips the 50ms wait → shutdown returns log_drain_timeout →
-// timeout_drop_count() > 0 → both assertions pass.
+// Under the OLD hardcoded shutdown(5000ms): the drain is not cut short, so the
+// gate is never released (the release is after stop() returns) and flush()
+// waits out k_flush_block → stop() takes ~k_flush_block, which is above (a)'s
+// bound, AND the drain completes inside the 5000ms budget → no timeout →
+// timeout_drop_count() == 0. Both assertions FAIL.
+// Under the correct path (uses LoggerConfig::drain_timeout = 50ms): the gated
+// flush cannot return before the 50ms wait expires → shutdown returns
+// log_drain_timeout → timeout_drop_count() > 0, and stop() returns at ~50ms
+// plus engine teardown. Both assertions pass.
+//
+// ⚠️ (b)'s discrimination is a CONDITION on k_flush_block, not a free property:
+// it must stay below the hardcoded value the defect path would use, or the
+// defect path would ALSO time out and (b) would stop telling the two apart.
+// ⚠️ THE GREEN PATH'S OUTCOME IS STRUCTURAL, NOT A RACE. In the correct path
+// stop() can only return via the drain timeout: the gate is released only after
+// stop() returns, so drain_done_ cannot be set before the 50ms wait expires.
 
 TEST(EngineCloseTeardown, E2_EngineTeardownHonorsDrainTimeout) {
-    // drain_timeout = 50 ms; SlowFlushSink blocks for 800 ms.
-    // Under correct impl: flush times out at ~50ms → stop() is well under 800ms.
-    // Under old hardcode (5000ms): flush completes in 800ms → stop() takes ~800ms.
     constexpr auto k_drain_timeout = std::chrono::milliseconds{50};
-    constexpr auto k_flush_delay = std::chrono::milliseconds{800};
-    // stop() must return well under k_flush_delay; allow 3× k_drain_timeout +
-    // generous OS scheduling margin.
-    constexpr auto k_max_stop_ms = std::chrono::milliseconds{400};
 
-    auto slow_sink = std::make_unique<SlowFlushSink>(k_flush_delay);
+    // How long an unreleased flush() blocks. This is the DEFECT path's floor:
+    // `cv::wait_for` does not return early without the predicate, so a drain
+    // that is not cut short cannot finish sooner than this, however fast the
+    // runner is. Kept well below the 5000ms a hardcoded drain would allow, so
+    // that path still completes inside its budget and (b) stays discriminating.
+    constexpr auto k_flush_block = std::chrono::milliseconds{3000};
+
+    // (a)'s bound is derived from that floor, the side that CANNOT move — not
+    // from the correct path's latency, the side that can. The previous bound
+    // was 3× k_drain_timeout plus a margin, i.e. derived from the moving side,
+    // and a loaded MSVC ASan runner measured 560ms against it (#446).
+    // A scheduling stall is ADDITIVE and only lengthens the correct path, so a
+    // false red now needs one stall of about k_stall_margin. Size that against
+    // the largest stall a sanitizer runner can produce, never against the
+    // correct path's measured latency (#470).
+    constexpr auto k_stall_margin = std::chrono::milliseconds{1500};
+    constexpr auto k_max_stop_ms = k_flush_block - k_stall_margin;
+
+    auto gate = std::make_shared<SlowFlushSink::Gate>();
+    auto slow_sink = std::make_unique<SlowFlushSink>(gate, k_flush_block);
 
     fixpp::log::LoggerConfig lcfg;
     lcfg.capacity = 128U;
@@ -288,6 +347,23 @@ TEST(EngineCloseTeardown, E2_EngineTeardownHonorsDrainTimeout) {
     sinks.push_back(std::move(slow_sink));
 
     auto logger = std::make_shared<fixpp::log::Logger>(lcfg, std::move(sinks));
+
+    // gate-b/r1 F2.1: release `gate` on EVERY exit from this scope, including
+    // one that UNWINDS rather than returns. `run_to_exhaustion_or_report`'s
+    // ADD_FAILURE() throws under --gtest_throw_on_failure, which skips the
+    // explicit `gate->release()` below entirely -- ~Logger's unconditional
+    // join then pays the whole k_flush_block. Idempotent (`Gate::release`
+    // just sets a bool under a mutex), so a later explicit release is free.
+    // Declared between `logger` (above) and `ioc`/`engine` (below): reverse
+    // destruction order then runs this AFTER ~Engine and BEFORE ~Logger,
+    // which also covers the `ASSERT_TRUE(engine.start()...)` early return --
+    // a placement immediately after `engine` would not, since that ASSERT
+    // sits below it. See the comment at the `if` below for the condition
+    // that keeps assertion (b) alive under this guard.
+    struct scoped_gate_release {
+        std::shared_ptr<SlowFlushSink::Gate> gate;
+        ~scoped_gate_release() { gate->release(); }
+    } release_on_exit{gate};
 
     asio::io_context ioc;
     fixpp::core::EngineConfig eng_cfg;
@@ -299,27 +375,55 @@ TEST(EngineCloseTeardown, E2_EngineTeardownHonorsDrainTimeout) {
     ASSERT_TRUE(engine.start().has_value()) << "engine.start() failed";
 
     // Time Engine::stop() — it must return bounded by drain_timeout, not
-    // blocked for the full k_flush_delay.
+    // blocked for the full k_flush_block.
     auto t0 = std::chrono::steady_clock::now();
     auto fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
     if (!fixpp::test_support::run_to_exhaustion_or_report(
             ioc, fut, "EngineCloseTeardown::E2_EngineTeardownHonorsDrainTimeout")) {
+        // Release before leaving, or ~Logger's unconditional join waits out the
+        // whole block on a path that has already failed.
+        // ⚠️ IT CANNOT BE HOISTED ABOVE THIS `if`, AND THAT IS THE WHOLE DESIGN:
+        // releasing before stop() returns lets the drain complete inside the
+        // drain-timeout wait, so shutdown() would return success and assertion
+        // (b) would stop discriminating.
+        // ⚠️ THIS EXPLICIT CALL COVERS THE ORDINARY (non-throwing) MISS RETURN
+        // ONLY. It does NOT cover unwinding from a fatal failure that THROWS
+        // past this point -- `run_to_exhaustion_or_report`'s `ADD_FAILURE()`
+        // does exactly that under --gtest_throw_on_failure, before control
+        // ever reaches this line. That path is covered instead by
+        // `release_on_exit` above: an RAII guard IS safe here, on the
+        // condition that reverse destruction places it AFTER ~Engine and
+        // BEFORE ~Logger (declared between `logger` and `ioc` above) -- a
+        // guard declared BESIDE `gate` would destruct AFTER `logger`, which
+        // has already joined, and would not help.
+        gate->release();
         return;
     }
     EXPECT_NO_THROW(fut.get());
     auto stop_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - t0);
 
-    // (a) stop() must return well under k_flush_delay (bounded by drain_timeout).
+    // The measurement (a) gates is taken; let the drain thread finish so
+    // ~Logger's unconditional join does not wait out k_flush_block.
+    gate->release();
+
+    // Reported UNCONDITIONALLY, not only on failure: ctest runs
+    // --output-on-failure, so a passing run otherwise prints no timing at all
+    // and the margin this bound actually has stays unknown (#446).
+    std::cout << "[ INFO     ] E2_EngineTeardownHonorsDrainTimeout: stop_elapsed="
+              << stop_elapsed.count() << "ms, bound=" << k_max_stop_ms.count()
+              << "ms, defect-path floor=" << k_flush_block.count() << "ms\n";
+
+    // (a) stop() must return well below k_flush_block (bounded by drain_timeout).
     EXPECT_LT(stop_elapsed.count(), k_max_stop_ms.count())
         << "Engine::stop() took " << stop_elapsed.count() << "ms — should return within ~"
         << k_max_stop_ms.count() << "ms (drain_timeout=" << k_drain_timeout.count()
-        << "ms); a hardcoded 5000ms path would block for ~" << k_flush_delay.count() << "ms";
+        << "ms); a hardcoded 5000ms path would block for ~" << k_flush_block.count() << "ms";
 
     // (b) drain timed out → timeout_drop_count() must have incremented.
     // This fails under the old hardcoded shutdown(5000ms) which would NOT time out.
     EXPECT_GT(logger->timeout_drop_count(), 0U)
         << "Logger::timeout_drop_count() must be > 0 after a drain that timed out "
-        << "(drain_timeout=" << k_drain_timeout.count() << "ms, flush took "
-        << k_flush_delay.count() << "ms); a hardcoded longer timeout would NOT trigger this";
+        << "(drain_timeout=" << k_drain_timeout.count() << "ms, flush blocks for up to "
+        << k_flush_block.count() << "ms); a hardcoded longer timeout would NOT trigger this";
 }
