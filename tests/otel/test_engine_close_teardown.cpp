@@ -348,6 +348,23 @@ TEST(EngineCloseTeardown, E2_EngineTeardownHonorsDrainTimeout) {
 
     auto logger = std::make_shared<fixpp::log::Logger>(lcfg, std::move(sinks));
 
+    // gate-b/r1 F2.1: release `gate` on EVERY exit from this scope, including
+    // one that UNWINDS rather than returns. `run_to_exhaustion_or_report`'s
+    // ADD_FAILURE() throws under --gtest_throw_on_failure, which skips the
+    // explicit `gate->release()` below entirely -- ~Logger's unconditional
+    // join then pays the whole k_flush_block. Idempotent (`Gate::release`
+    // just sets a bool under a mutex), so a later explicit release is free.
+    // Declared between `logger` (above) and `ioc`/`engine` (below): reverse
+    // destruction order then runs this AFTER ~Engine and BEFORE ~Logger,
+    // which also covers the `ASSERT_TRUE(engine.start()...)` early return --
+    // a placement immediately after `engine` would not, since that ASSERT
+    // sits below it. See the comment at the `if` below for the condition
+    // that keeps assertion (b) alive under this guard.
+    struct scoped_gate_release {
+        std::shared_ptr<SlowFlushSink::Gate> gate;
+        ~scoped_gate_release() { gate->release(); }
+    } release_on_exit{gate};
+
     asio::io_context ioc;
     fixpp::core::EngineConfig eng_cfg;
     eng_cfg.executor = ioc.get_executor();
@@ -368,9 +385,17 @@ TEST(EngineCloseTeardown, E2_EngineTeardownHonorsDrainTimeout) {
         // ⚠️ IT CANNOT BE HOISTED ABOVE THIS `if`, AND THAT IS THE WHOLE DESIGN:
         // releasing before stop() returns lets the drain complete inside the
         // drain-timeout wait, so shutdown() would return success and assertion
-        // (b) would stop discriminating. ⚠️ NOR CAN IT BE AN RAII GUARD DECLARED
-        // BESIDE `gate` -- that destructs AFTER `logger`, which has already
-        // joined. The release belongs on each exit path, after the measurement.
+        // (b) would stop discriminating.
+        // ⚠️ THIS EXPLICIT CALL COVERS THE ORDINARY (non-throwing) MISS RETURN
+        // ONLY. It does NOT cover unwinding from a fatal failure that THROWS
+        // past this point -- `run_to_exhaustion_or_report`'s `ADD_FAILURE()`
+        // does exactly that under --gtest_throw_on_failure, before control
+        // ever reaches this line. That path is covered instead by
+        // `release_on_exit` above: an RAII guard IS safe here, on the
+        // condition that reverse destruction places it AFTER ~Engine and
+        // BEFORE ~Logger (declared between `logger` and `ioc` above) -- a
+        // guard declared BESIDE `gate` would destruct AFTER `logger`, which
+        // has already joined, and would not help.
         gate->release();
         return;
     }
