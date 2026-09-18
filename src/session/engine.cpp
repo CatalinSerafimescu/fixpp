@@ -613,8 +613,8 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         auto k = entry.config.security_profile.k;
         // The engine must still map the deprecated-but-supported legacy profile.
 #if defined(__clang__) || defined(__GNUC__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
         if (k == sk::mtls_pinned)
             ssl_cfg.profile = fixpp::tls::SecurityProfile::mtls_pinned;
@@ -623,7 +623,7 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         else  // mtls_ca (default for TLS acceptors)
             ssl_cfg.profile = fixpp::tls::SecurityProfile::mtls_ca;
 #if defined(__clang__) || defined(__GNUC__)
-#pragma clang diagnostic pop
+#pragma GCC diagnostic pop
 #endif
 
         if (entry.config.transport_factory_override)

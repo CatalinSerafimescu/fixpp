@@ -130,8 +130,8 @@ public:
 // The insecure_plain_tcp enumerator is [[deprecated]] (loud-insecure friction,
 // SC-005 / D-9); fixpp-internal/test selection wraps the construction site.
 #if defined(__clang__) || defined(__GNUC__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
 
 TEST(PlaintextReconnectTest, PlaintextReconnectSkipsHandshakeAndLeavesPeerIdNullopt) {
@@ -199,5 +199,5 @@ TEST(PlaintextReconnectTest, PlaintextReconnectSkipsHandshakeAndLeavesPeerIdNull
 }
 
 #if defined(__clang__) || defined(__GNUC__)
-#pragma clang diagnostic pop  // -Wdeprecated-declarations (insecure_plain_tcp)
+#pragma GCC diagnostic pop  // -Wdeprecated-declarations (insecure_plain_tcp)
 #endif

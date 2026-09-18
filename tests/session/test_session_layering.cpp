@@ -134,7 +134,7 @@ TEST(SessionLayering, NoExternCSessionSymbolsInArchive) {
     FILE* pipe = ::popen(cmd.c_str(), "r");
     ASSERT_NE(pipe, nullptr) << "popen(nm) failed";
     int matches = -1;
-    (void)std::fscanf(pipe, "%d", &matches);
+    (void)!std::fscanf(pipe, "%d", &matches);
     const int rc = ::pclose(pipe);
     (void)std::remove(tmp.c_str());
 

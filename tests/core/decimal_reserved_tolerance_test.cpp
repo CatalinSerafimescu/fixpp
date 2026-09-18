@@ -31,7 +31,7 @@ TEST(DecimalReservedTolerance, ParseGarbageReservedSameAsZero) {
 }
 
 TEST(DecimalReservedTolerance, FormatGarbageReservedSameAsZero) {
-    auto make = [](int8_t reserved_fill) {
+    auto make = [](unsigned char reserved_fill) {
         fixpp_decimal_t d{};
         d.mantissa = 314;
         d.exponent = -2;
@@ -53,7 +53,7 @@ TEST(DecimalReservedTolerance, FormatGarbageReservedSameAsZero) {
 }
 
 TEST(DecimalReservedTolerance, CompareGarbageReservedSameAsZero) {
-    auto make = [](int8_t reserved_fill) {
+    auto make = [](unsigned char reserved_fill) {
         fixpp_decimal_t d{};
         d.mantissa = 100;
         d.exponent = -2;

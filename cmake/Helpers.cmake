@@ -25,6 +25,29 @@ function(fixpp_apply_common_flags target)
   endif()
 endfunction()
 
+# ── GCC does not know the `clang::` attribute namespace (#439) ───────────────
+#
+# The tree spells `[[clang::lifetimebound]]` directly at ~200 hand-written sites
+# and the codegen emitter writes it into the generated headers. GCC parses the
+# attribute, cannot act on it, and says so with `-Wattributes` — which is ON BY
+# DEFAULT, not part of -Wall. So `FIXPP_WERROR=ON` turns every one of those into
+# an error, which is why the gcc presets could not simply drop their override.
+#
+# ⚠️ SCOPED TO THE VENDOR NAMESPACE, NOT `-Wno-attributes`. The blanket form
+# would also swallow a MISSPELLED attribute in any namespace — `[[gnu::nortern]]`
+# would compile silently. The `=clang::` form suppresses exactly the namespace
+# GCC cannot implement and still reports every other ignored attribute.
+#
+# Re-derive the condition (not the count — it moves with every generated header):
+#   g++ -std=c++23 -Werror -c <any TU spelling [[clang::lifetimebound]]>
+#   g++ -std=c++23 -Werror -Wno-attributes=clang:: -c <same TU>   # must be clean
+#
+# The namespace-scoped form is GCC >= 13; older GCC rejects the option itself.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+   AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13)
+  add_compile_options(-Wno-attributes=clang::)
+endif()
+
 # ── Werror — turned on in CI via FIXPP_WERROR cache variable ─────────────────
 option(FIXPP_WERROR "Treat compile warnings as errors" OFF)
 

@@ -50,7 +50,7 @@ struct SecurityProfile {
         // diagnostic at every unsuppressed selection site — the construction-
         // site friction prescribed by [const §XII.5] v0.3 / 043 spec SC-005 /
         // D-9. fixpp-internal code that legitimately selects this value wraps
-        // the selection in `#pragma clang diagnostic push/ignored/pop` per the
+        // the selection in `#pragma GCC diagnostic push/ignored/pop` per the
         // one_way_ca precedent at session.cpp. An operator selecting this value
         // without a pragma suppression WILL see the diagnostic. [043 D-9/T019]
         insecure_plain_tcp                                                  //
@@ -67,7 +67,7 @@ struct SecurityProfile {
 // The [[deprecated]] enumerator fires -Wdeprecated-declarations on every named
 // reference, including fixpp's own internal *inspection* sites. Centralizing the
 // read here confines the suppression to ONE place rather than scattering
-// `#pragma clang diagnostic push/ignored/pop` triplets across session.cpp /
+// `#pragma GCC diagnostic push/ignored/pop` triplets across session.cpp /
 // engine.cpp — each scattered ignore silences ALL deprecation diagnostics in its
 // region (a masking hazard). This is a read-only predicate: the SC-005 / D-9
 // operator friction targets the *selection/assignment* site (`k = insecure_plain_tcp`)
@@ -75,12 +75,12 @@ struct SecurityProfile {
 // enumerator still sees the diagnostic. [043 D-9; /simplify 2026-06-17]
 [[nodiscard]] constexpr bool is_insecure_plain_tcp(SecurityProfile::kind k) noexcept {
 #if defined(__clang__) || defined(__GNUC__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 #endif
     return k == SecurityProfile::kind::insecure_plain_tcp;
 #if defined(__clang__) || defined(__GNUC__)
-#pragma clang diagnostic pop
+#pragma GCC diagnostic pop
 #endif
 }
 

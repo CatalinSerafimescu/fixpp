@@ -287,6 +287,31 @@ if(TARGET fixpp_codegen_generate AND FIXPP_CODEGEN_FIX_LATEST)
     "${CMAKE_SOURCE_DIR}/tests"
     "${CMAKE_BINARY_DIR}/_codegen/include"
   )
+  # ⚠️ PER-TARGET, PER-WARNING CARVE-OUT (#439) — NOT an exemption from -Werror.
+  #
+  # At -O3 GCC 13 reports `-Wnonnull` ("argument 1 null where non-null expected")
+  # for the __builtin_memmove inside std::vector<std::byte, pmr-alloc>'s
+  # _M_assign_aux. Argument 1 is the DESTINATION — the vector's own freshly
+  # allocated buffer — and the whole `inlined from` chain lies inside libstdc++
+  # with no line of this repo named. It is an instantiation artifact of this one
+  # TU: 1 of 679 hand-written TUs reproduces it.
+  #
+  # It was NOT dismissed on shape. The one attributable hypothesis — that the
+  # copied span could be empty, so reify.cpp's `bytes_.assign(sb.begin(),
+  # sb.end())` passes a null source — was TESTED by guarding that call with
+  # `if (!sb.empty())` and re-compiling: the diagnostic is UNCHANGED. So the
+  # source span is not what GCC is complaining about, and the guard was reverted
+  # rather than left in as a fix that fixes nothing.
+  #
+  # -Wno-error= and not -Wno-: the warning stays VISIBLE in the build log, so a
+  # future GCC that starts attributing it to real code is not silenced here.
+  #
+  # Re-derive: replay this TU's own compile command from
+  # build/linux-gcc-release/compile_commands.json, dropping -o/-MD/-MF, and
+  # grep the stderr for -Wnonnull. If it is gone, delete this block.
+  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(wire_vlatest_reify_roundtrip_test PRIVATE -Wno-error=nonnull)
+  endif()
   add_test(NAME wire_vlatest_reify_roundtrip_test COMMAND wire_vlatest_reify_roundtrip_test)
   set_tests_properties(wire_vlatest_reify_roundtrip_test PROPERTIES LABELS "076;vlatest_roundtrip")
 endif()
