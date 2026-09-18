@@ -104,7 +104,6 @@
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_C_COMPILER": "gcc",
         "CMAKE_CXX_COMPILER": "g++",
-        "FIXPP_WERROR": "OFF",
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/linux-gcc-release/conan_toolchain.cmake"
       }
     },
@@ -117,7 +116,6 @@
         "CMAKE_BUILD_TYPE": "Debug",
         "CMAKE_C_COMPILER": "gcc",
         "CMAKE_CXX_COMPILER": "g++",
-        "FIXPP_WERROR": "OFF",
         "FIXPP_BUILD_OTEL": "ON",
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/linux-gcc-debug/conan_toolchain.cmake"
       }
