@@ -1132,9 +1132,15 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
             auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(logon_ack), asio::use_future);
             ASSERT_TRUE(pump_until_ready(ioc, fut, kSiteLogonAck))
                 << kPumpBudgetMiss << kSiteLogonAck
+                // "the probe below is what tells the candidate causes apart" stood
+                // here until someone read the actual failure output: the probe does
+                // NOT tell them apart -- saying so is the same overclaim #476 is
+                // about, one frame further out, and it is the sentence a debugger
+                // reads FIRST. It promised an answer the lines under it then refuse
+                // to give.
                 << " -- on_inbound_frame(Logon-ack) did not complete within the bounded-pump "
-                   "budget. This is #433's observed failure; the probe below is what tells the "
-                   "candidate causes apart"
+                   "budget. This is #433's observed failure; the measurements below are what "
+                   "narrow it"
                 << describe_offload_progress(before, file_pool, kPoolProbeBudget);
             ASSERT_TRUE(fut.get().has_value()) << "Logon-ack inbound should succeed";
             ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
