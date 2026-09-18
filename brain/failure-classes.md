@@ -37,6 +37,16 @@ prints `0` for a whole syntax.
   no match. Assert how many files the sweep actually examined, and check whether any root is a link.
 - ⚠️ **A self-test written from the implementation certifies the implementation**, bug included. Build
   fixtures from the real artefact, verbatim.
+- ⚠️ **A CHECK THAT READS ITS EXPECTATION FROM THE THING IT CHECKS CANNOT FAIL.** The runtime form
+  of the entry above, and it survives review because it looks like good hygiene — no duplication, one
+  source of truth. If the expected value is built from the producer's own constant, a mutation moves
+  **both sides together** and the comparison is inert. It recurs at successively wider scope on the
+  same assertion: first the identifier, then the per-site clause, then the shared prefix constant —
+  each fix removing one import and leaving the next.
+  - **Trigger:** you are writing an expectation, and reaching for a symbol the subject also uses.
+  - **Procedure:** spell the expectation out independently and accept the duplication — it *is* the
+    mechanism. Then prove it: mutate the shared constant and require RED. A pin that imports
+    anything from its subject must be assumed inert until a mutant says otherwise.
 - ⚠️ **PRESENT IS NOT ACTIVE — a witness can prove a mechanism was LOADED and say nothing about
   whether it TOOK EFFECT.** When an instrument works by interposition, injection or overriding
   (LD_PRELOAD, a monkey-patch, a subclass, a mock registered in a container, an interceptor
@@ -55,7 +65,6 @@ prints `0` for a whole syntax.
   - **Where it lands when true:** the gate reports clean because nothing was ever measured, which is
     class 1 by a different door — and the positive control is the only arm that can tell, because
     it is the only one whose expected result is a FAILURE.
-
 - ⚠️ **A REFUSAL IS ONLY AS WIDE AS THE ESCAPE IT CATCHES — and the escapes that matter exit
   SUCCESSFULLY.** A guard written to turn an unusable input into a named error is itself an
   instrument, so ask what reaches the interpreter *past* it. In Python the sharp edge is that
@@ -541,6 +550,43 @@ population an audit asserts over. This is *creating* one, invisibly. Both say th
 moving object that the instrument's key does not track.
 
 ---
+
+### 14. A forbidden-list check catches only the spellings someone anticipated
+
+Asserting the **absence** of bad content is unbounded by construction: the next wording is not on the
+list. The failure is quiet and it compounds — each review round respells the claim, the list is
+widened to match, and the widening reads as progress. A reviewer acting adversarially will produce a
+phrase no list contained, and every live predicate reports PASS.
+
+- **Trigger:** you are enumerating forbidden words, phrases or patterns to police free text.
+- **Procedure:** invert it — assert the **complete permitted output**, normalising only the genuinely
+  nondeterministic fields (timings, ids, paths). A pin has nothing left to respell, and it turns a
+  reword from a silent pass into a loud, deliberate update. Pin **every** branch: the one no arm
+  checks is the one that regresses. Where a list must survive, treat it as the weaker half, say so,
+  and mutation-test that half specifically.
+- **Relation to class 2:** class 2 says a corrected claim is still a claim. This is its enforcement
+  twin — a check that enumerates wrong answers inherits the same treadmill as the claim it guards.
+
+### 15. A seam that outlives the window it observes leaks into whatever runs next
+
+Process-global instrumentation — an installed probe, a counter, a gauge — is sound only while its
+install window brackets **all** the work it counts. Uninstall mid-flight and a pair is stranded: an
+entry is counted while its exit fires against a null hook, leaving a phantom that every later
+consumer reads as real. The signature is an arm that **passes alone and fails in the suite**, or one
+that only fails under a shuffled order.
+
+- **Trigger:** you are installing or removing a process-global hook, or reasoning about when one is
+  safe to remove.
+- **Procedure:** bracket the seam by a **barrier**, not by hope. Two specific traps:
+  - the entry hook's pointer may be **captured by value at submit time**, so it stays callable after
+    the uninstall — uninstalling is not a barrier, and resetting a counter is not synchronisation;
+  - a **bounded drain is an observer, not a barrier**. It returns when its budget expires, with work
+    still outstanding. Only a join is a barrier.
+  Prefer a **structural** guarantee over a timing one: declare the guard so that reverse destruction
+  runs the joining object first. A structural ordering needs no mutation to license it, which matters
+  because the timing version may be unreproducible with the forcing seams available.
+- **Scanning heuristic:** grep for `install_`/`uninstall_` pairs not wrapped in a guard, and for a
+  guard declared *after* the pool or context whose work it observes.
 
 ## How to query the instances
 
