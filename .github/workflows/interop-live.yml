@@ -1,0 +1,219 @@
+name: Interop live cells (per-PR)
+
+# fixpp#468. Runs the LIVE interop cells against this PR's own binaries, using only the
+# PUBLIC prebuilt counterparties image — no checkout of the private parent repo.
+#
+# WHY THIS EXISTS, and what it refuses to do: see the module docstring of
+# ci/run-interop-live.py. Stated there rather than here because that file ships with
+# the logic; two copies of a rationale drift, and the drift is invisible.
+#
+# RELATION TO THE OTHER TWO INTEROP LANES:
+#   interop-smoke.yml      one cell, release, skip-tolerant (FR-023 light tier).
+#   this workflow          every live cell, skip is a FAILURE.
+#   parent interop-matrix  the same cells on linux-clang-debug, plus badge + manifest.
+#
+# ADVISORY for now, exactly as the parent matrix was on arrival: it reports its true
+# pass/fail, but must not be added to branch protection until it has proven stable here
+# (CI timing differs from local; the trailing-LOGOUT capture race is one such class —
+# fixpp#473). Promote once green across a stretch of PRs.
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+    branches: ["**"]
+    # ⚠️ WIDE ON PURPOSE. An earlier revision listed only session/transport/tls and
+    # was WRONG: the live interop tests include headers from six fixpp subtrees, so a
+    # PR touching only `include/fixpp/wire/**` could break live FIX parsing without
+    # ever instantiating this workflow — the advertised per-PR signal simply absent.
+    #
+    # RE-DERIVE, do not trust this list (the recipe, because the answer rots):
+    #   grep -rho '#include <fixpp/[a-z_]*/' tests/interop/ | sort -u
+    # If that prints a subtree `include/fixpp/**` does not cover, widen further. The
+    # glob is deliberately coarser than the census so that adding an include to a test
+    # cannot silently fall outside it.
+    #
+    # The population files are IN scope (tests/interop/**) even though tier1 checks
+    # their offline half: the covered∪excluded equality against a real registry runs
+    # only here, so an exclusion-line edit must be able to reach it.
+    paths:
+      - "include/fixpp/**"
+      - "src/**"
+      - "dictionaries/**"
+      - "tests/interop/**"
+      - "CMakeLists.txt"
+      - "CMakePresets.json"
+      - "conanfile.py"
+      - "conan/profiles/**"
+      - "ci/run-interop-live.py"
+      - "ci/restore-conan-cache.sh"
+      - ".github/workflows/interop-live.yml"
+  workflow_dispatch:
+
+env:
+  CONAN_HOME: ~/.conan2
+  # Published PUBLIC from the parent harness (ci/counterparties.Dockerfile); pulled
+  # anonymously, so this job needs no credentials and no parent checkout.
+  IMAGE: ghcr.io/catalinserafimescu/fixpp-interop-counterparties:latest
+  PRESET: linux-clang-release
+
+concurrency:
+  group: interop-live-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  live:
+    name: interop live cells (linux-clang-release)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Clang 22 (apt.llvm.org) + Ninja
+        run: |
+          wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x /tmp/llvm.sh
+          ci/apt-guard.sh llvm-toolchain -- sudo /tmp/llvm.sh 22 all
+          CLANG_BIN=$(ls /usr/bin/clang++-* 2>/dev/null | grep -oE '/usr/bin/clang\+\+-[0-9]+$' | sort -V | tail -1)
+          CLANG_VER=$(echo "$CLANG_BIN" | grep -oE '[0-9]+$')
+          test -n "$CLANG_VER" || { echo "::error::No clang-* installed by llvm.sh"; exit 1; }
+          sudo ln -sf /usr/bin/clang-$CLANG_VER   /usr/bin/clang
+          sudo ln -sf /usr/bin/clang++-$CLANG_VER /usr/bin/clang++
+          clang++ --version
+          ci/apt-guard.sh apt-install -- sudo apt-get install -y --no-install-recommends \
+            ninja-build python3-pip pipx openssl
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      # The counterparty jar needs a JRE. This is NOT a parent checkout and not harness
+      # code — the acceptance is "only the GHCR image" for the harness and the
+      # counterparties, and a runner-provided JDK is neither.
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install Conan via pipx
+        run: |
+          pipx install conan
+          conan profile detect --force
+          mkdir -p ~/.conan2
+          cat > ~/.conan2/settings_user.yml <<'EOF'
+          compiler:
+            clang:
+              version: ["19", "20", "21", "22", "23"]
+          EOF
+
+      # ⚠️ BEFORE the derive step, not in the run step where the first draft had it.
+      # The bundled run_interop_cell.py imports yaml at MODULE scope, and the derive
+      # step imports that module -- so on a clean actions/setup-python interpreter the
+      # job died at `--list-binaries` with "failed to import", having built nothing.
+      - name: Install the bundled harness's import-time dependencies
+        run: |
+          pip install pyyaml
+          python3 -c "import yaml; print('pyyaml', yaml.__version__)"
+
+      - name: Set up oras
+        uses: oras-project/setup-oras@v2
+
+      # Same reasoning as interop-smoke: read from the GHCR tag a main run seeded, never
+      # write. This lane never runs on main, so it has no business publishing, and an
+      # actions/cache entry here would only ever be readable by the same PR.
+      - name: Restore Conan cache from GHCR
+        run: ci/restore-conan-cache.sh ${{ env.PRESET }}
+
+      - name: Conan install + configure
+        run: |
+          conan install . -pr conan/profiles/${{ env.PRESET }} \
+            -c tools.build:jobs=4 --build=missing -of build/${{ env.PRESET }}
+          cmake --preset ${{ env.PRESET }}
+
+      # ⚠️ The image is pulled BEFORE the build on purpose: the set of binaries to build
+      # is DERIVED from the bundled harness registry in the next step. The parent's
+      # interop-matrix.yml hardcodes that list, under a comment recording the failure it
+      # caused — a template row whose binary was not in the list made the run raise
+      # rather than skip ("Adding a cell to the template and adding its target here are
+      # ONE change, not two"). Deriving it removes that failure mode instead of
+      # documenting it.
+      # ⚠️ SIBLING: interop-smoke.yml has a near-identical extraction block. There is no
+      # composite-action mechanism in this repo to share it, and nothing pins the two
+      # together, so a change to the image layout in the parent's
+      # ci/counterparties.Dockerfile must be applied to BOTH. Named here so the second
+      # copy is findable from the first.
+      - name: Pull counterparties + driver, recreate the harness layout
+        run: |
+          docker pull "$IMAGE"                      # PUBLIC package → no auth
+          cid=$(docker create "$IMAGE")
+          # run_interop_cell.py derives every path from its own location, so the bundled
+          # driver goes at <base>/research/G19-fix-fpml-iso20022/phase-9-harness with
+          # .../library symlinked to this checkout (LIB_ROOT then resolves here: TLS
+          # fixtures, dictionaries, in-repo goldens).
+          G19="$RUNNER_TEMP/h/research/G19-fix-fpml-iso20022"
+          mkdir -p "$G19"
+          docker cp "$cid:/opt/interop/harness"              "$G19/phase-9-harness"
+          docker cp "$cid:/opt/interop/interop_counterparty" "$RUNNER_TEMP/cp_bin"
+          docker cp "$cid:/opt/interop/lib"                  "$RUNNER_TEMP/cp_lib"
+          docker cp "$cid:/opt/interop/counterparty-all.jar" "$RUNNER_TEMP/cp.jar"
+          docker cp "$cid:/opt/interop/qfcpp-spec"           "$RUNNER_TEMP/qfcpp-spec"
+          docker rm "$cid"
+          chmod +x "$RUNNER_TEMP/cp_bin"
+          ln -sfn "$GITHUB_WORKSPACE" "$G19/library"
+          echo "HARNESS=$G19/phase-9-harness" >> "$GITHUB_ENV"
+
+      - name: Derive the build target list from the bundled registry
+        id: targets
+        run: |
+          set -euo pipefail
+          # Via the driver's own --list-binaries, NOT a second inline copy of the
+          # module load: `load_harness` there is the tested one (ci/test-run-interop-live.sh
+          # T7c/T10a/T10c cover its refusals), and a copy here would be the one place
+          # a `CELLS` schema change could rot unnoticed until a PR run failed.
+          # ⚠️ `test -n` is NOT redundant with the driver's own zero-registry refusal,
+          # and an earlier revision of this file deleted it saying that it was. The two
+          # cover different failures: the driver refuses an EMPTY REGISTRY, and this
+          # line is the only thing left if the bundled module body calls `os._exit()`,
+          # which no `except` anywhere can catch. (`sys.exit()` IS caught -- see
+          # load_harness, arm T10d.) A silently empty target list builds nothing and
+          # the job goes green having run no cell, so the cheap belt stays.
+          targets=$(python3 ci/run-interop-live.py --harness "$HARNESS" --list-binaries)
+          test -n "$targets" || { echo "::error::empty target list"; exit 1; }
+          echo "targets=$targets" >> "$GITHUB_OUTPUT"
+          echo "will build: $targets"
+
+      # interop_golden_check is NOT a cell: run_interop_cell.py's _finalize runs it next
+      # to the cell binaries to check each in-repo-golden cell's OWN capture (fixpp#445).
+      # Without it every such cell fails closed.
+      - name: Build the interop binaries + the in-repo golden checker
+        run: |
+          cmake --build --preset ${{ env.PRESET }} --target \
+            ${{ steps.targets.outputs.targets }} interop_golden_check
+
+      - name: Generate interop TLS (from fixpp's committed CA fixtures)
+        run: bash "$HARNESS/tls/gen-interop-certs.sh"
+
+      # ⚠️ NO `|| true`, and a skip is NOT tolerated. interop-smoke ends its cell run
+      # with `|| true` and treats `skip:*` as a warning, correctly: it is the light tier
+      # and an absent counterparty must not gate a PR (FR-023). Here the counterparty is
+      # guaranteed present, so a skip means a cell did not run what it claims to, and the
+      # driver fails on it. Inheriting smoke's shape would make this whole job able to
+      # pass while testing nothing.
+      - name: Run the live interop cells
+        env:
+          INTEROP_QFC_COUNTERPARTY_BIN: ${{ runner.temp }}/cp_bin
+          INTEROP_QFJ_JAR: ${{ runner.temp }}/cp.jar
+          INTEROP_QFCPP_SPEC_DIR: ${{ runner.temp }}/qfcpp-spec
+          LD_LIBRARY_PATH: ${{ runner.temp }}/cp_lib
+          INTEROP_BUILD_PRESET: ${{ env.PRESET }}
+          FIXPP_INTEROP_EVIDENCE_ROOT: ${{ runner.temp }}/interop-evidence
+        run: |
+          python3 ci/run-interop-live.py \
+            --harness "$HARNESS" --build-root "$GITHUB_WORKSPACE/build"
+
+      - name: Upload per-cell run dirs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: interop-live-results
+          path: ${{ env.HARNESS }}/results/**
+          retention-days: 7

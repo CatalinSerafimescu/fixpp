@@ -37,6 +37,21 @@ prints `0` for a whole syntax.
   no match. Assert how many files the sweep actually examined, and check whether any root is a link.
 - ⚠️ **A self-test written from the implementation certifies the implementation**, bug included. Build
   fixtures from the real artefact, verbatim.
+- ⚠️ **A REFUSAL IS ONLY AS WIDE AS THE ESCAPE IT CATCHES — and the escapes that matter exit
+  SUCCESSFULLY.** A guard written to turn an unusable input into a named error is itself an
+  instrument, so ask what reaches the interpreter *past* it. In Python the sharp edge is that
+  `except Exception` does not cover `SystemExit` or `KeyboardInterrupt` (both `BaseException`), so a
+  loaded module that calls `sys.exit(0)` does not raise past the guard — **it terminates the whole
+  process with status 0**, and every downstream step reads that as success with empty output.
+  - **Trigger:** you are guarding a plugin load, an `exec_module`, a config eval, a subprocess
+    wrapper — anywhere foreign code runs inside your process and you wrote `except Exception`.
+  - **Procedure:** enumerate the escape deliberately (`except (Exception, SystemExit)` catches the
+    threat without swallowing an operator's ^C), and **write the arm that exits zero** — a fixture
+    whose body is `sys.exit(0)`, asserted to produce the named refusal. A syntax-error fixture does
+    not cover this: it tests a different branch and is the arm people write.
+  - **And state the bound you did not close.** `os._exit()` is uncatchable by anything; when that is
+    the residue, the surviving defence belongs one level out (a caller asserting the output is
+    non-empty), named at both ends rather than assumed.
 - ⚠️ **A THRESHOLD THAT FLAKES IS USUALLY ALSO BLIND, AND THE FLAKE IS THE HALF YOU NOTICE.** A
   wall-clock band derived as a *ratio to some other timeout* rather than measured against the
   behaviour rejects by machine load — the visible symptom, which gets an issue filed. Ask the other

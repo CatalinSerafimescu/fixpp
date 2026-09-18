@@ -2495,6 +2495,22 @@ jobs:
       - name: "Regression pin — #289 site-label uniqueness"
         run: bash ci/pump-label-uniqueness.sh
 
+      # fixpp#468: ci/run-interop-live.py REFUSES to run the live-interop job when it
+      # cannot account for the whole #431 population. Every one of those refusals is
+      # pinned here by a mutant, each asserted to produce its OWN message rather than
+      # merely a non-zero exit — which any typo also produces. The driver is the only
+      # thing standing between "the live job is green" and "the live job ran the cells
+      # it claims to", so an unexercised refusal in it would be the exact defect class
+      # it exists to catch.
+      #
+      # ⚠️ BOUND, because an earlier revision of this comment overstated it: T0 runs the
+      # driver's OFFLINE checks against the real files, so it proves the driver says yes
+      # to the tree we ship for the half that needs no image. The covered∪excluded
+      # equality needs the image's registry and runs only in the interop-live job.
+      # Buildless — python3 + coreutils only.
+      - name: "Regression pin — interop-live population reconciliation (#468)"
+        run: bash ci/test-run-interop-live.sh
+
       # #289 batch 18: a fixed `run_for` staging a MOCK-CLOCK advance is a
       # wall-clock hope, and a starved runner turns it into a LOST advance --
       # unrecoverable, not slow. The sweep REPORTS candidates and exits 0; what
