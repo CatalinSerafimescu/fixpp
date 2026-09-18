@@ -273,8 +273,10 @@ TEST_P(HappySeqnumRecoveryInbound, GapInductionResendRequestAndReturn) {
     // the GapFill and never APPLIED it still lands on 3 — which is why the
     // postcondition is 4 and not "more than it was".
     //
-    // Pump until inbound reaches that value, or the window expires. A live
-    // counterparty completes the dialogue well inside it.
+    // The PUMP predicate stays a floor (`>=`) deliberately, so an over-advancing
+    // fixpp stops pumping immediately and is caught by the equality below rather
+    // than burning the whole 25 s window first. Predicate and postcondition are
+    // different jobs: one decides when to stop looking, the other decides the verdict.
     fx.run_until(
         [&] {
             auto ss = fx.engine().lookup(id);
@@ -292,20 +294,27 @@ TEST_P(HappySeqnumRecoveryInbound, GapInductionResendRequestAndReturn) {
         << "FSM left Active during/after the recovery_inbound window (US3-4 violated)";
 
     // ── In-process witness (c): the gap-fill was APPLIED (no prefix loss) ──
-    // A fixpp that received the GapFill and dropped its NewSeqNo lands on 3 and
-    // fails here; a "did it advance?" test would have passed it.
-    EXPECT_GE(s->seqnum_mgr_test_access().next_inbound_unsafe(), kPostRecoveryInbound)
-        << "inbound expected seqnum did not reach " << kPostRecoveryInbound
+    // EQUALITY, not a floor. A floor is open on the OVER-advance side, and an
+    // over-advance is a defect of exactly the same kind: install NewSeqNo + 1 and
+    // fixpp expects 5, silently losing the next legitimate frame — while the wire
+    // is unchanged, so both goldens still match and `>= 4` still passes. The
+    // scenario is closed, so the correct value is a single number and anything
+    // else is wrong in one direction or the other.
+    EXPECT_EQ(s->seqnum_mgr_test_access().next_inbound_unsafe(), kPostRecoveryInbound)
+        << "inbound expected seqnum is not " << kPostRecoveryInbound
         << " after the recovery window (NewSeqNo(36) may have been received but not "
         << "applied; US3-2/US3-4). Pre-window reading was " << inbound_before_recovery
         << " — if that is not 2 the induction outran the pump and this cell's "
         << "arithmetic needs re-deriving, not just retrying";
 
     // ── In-process witness (b), part 2: the ResendRequest was emitted ──────
-    // 35=2 is an outbound admin frame, so the counter must have reached 3.
-    EXPECT_GE(s->seqnum_mgr_test_access().peek_outbound(), kPostRecoveryOutbound)
-        << "outbound seqnum did not reach " << kPostRecoveryOutbound
-        << "; the ResendRequest may not have been sent";
+    // 35=2 is an outbound admin frame, so the counter is exactly 3 here. Equality
+    // for the same reason as (c): a double increment overshoots to 4, the wire is
+    // unchanged, and a floor would pass it while the next outbound frame carries a
+    // seqnum the peer will gap on.
+    EXPECT_EQ(s->seqnum_mgr_test_access().peek_outbound(), kPostRecoveryOutbound)
+        << "outbound seqnum is not " << kPostRecoveryOutbound
+        << "; the ResendRequest may not have been sent, or the counter over-advanced";
 
     // ── Golden assertion (T014 / US3-1/US3-2) — in the parent harness ──────
     // Not a call site here, by #445's design: the wire-frame check runs in
