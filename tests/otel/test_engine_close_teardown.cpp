@@ -358,11 +358,20 @@ TEST(EngineCloseTeardown, E2_EngineTeardownHonorsDrainTimeout) {
     ASSERT_TRUE(engine.start().has_value()) << "engine.start() failed";
 
     // Time Engine::stop() — it must return bounded by drain_timeout, not
-    // blocked for the full k_flush_delay.
+    // blocked for the full k_flush_block.
     auto t0 = std::chrono::steady_clock::now();
     auto fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
     if (!fixpp::test_support::run_to_exhaustion_or_report(
             ioc, fut, "EngineCloseTeardown::E2_EngineTeardownHonorsDrainTimeout")) {
+        // Release before leaving, or ~Logger's unconditional join waits out the
+        // whole block on a path that has already failed.
+        // ⚠️ IT CANNOT BE HOISTED ABOVE THIS `if`, AND THAT IS THE WHOLE DESIGN:
+        // releasing before stop() returns lets the drain complete inside the
+        // drain-timeout wait, so shutdown() would return success and assertion
+        // (b) would stop discriminating. ⚠️ NOR CAN IT BE AN RAII GUARD DECLARED
+        // BESIDE `gate` -- that destructs AFTER `logger`, which has already
+        // joined. The release belongs on each exit path, after the measurement.
+        gate->release();
         return;
     }
     EXPECT_NO_THROW(fut.get());

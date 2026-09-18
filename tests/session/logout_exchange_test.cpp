@@ -154,11 +154,13 @@ std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag) {
 //
 // This probe posts a trivial task onto the pool and waits for it:
 //
-//   RAN         the pool has a free thread, so pool saturation is NOT the stall.
+//   RAN         a pool thread was free, so pool saturation is NOT the stall.
 //               Look at the io_context side: a completion never posted back, or
 //               a wake that was lost.
-//   DID NOT RUN every pool thread is occupied. That is the shape #433 names as
-//               its suspect, and this line is what would promote it to cause.
+//   NO THREAD   nothing became free inside the budget -- consistent with the
+//   BECAME FREE saturation #433 names as its suspect. ⚠️ That is what the probe
+//               OBSERVES; it is weaker than "every thread is occupied", which it
+//               cannot establish.
 //
 // ⚠️ IT IS CALLED ONLY FROM A gtest FAILURE-MESSAGE STREAM, which gtest evaluates
 // only when the assertion fails. The passing path posts nothing and waits for
@@ -166,21 +168,20 @@ std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag) {
 // ⚠️ THE PROMISE IS SHARED, NOT CAPTURED BY REFERENCE. On the DID-NOT-RUN branch
 // the task is still queued when this function returns, so a reference to a frame
 // local would dangle until `file_pool` is destroyed.
-// ⚠️ "DID NOT RUN" HERE MEANS "SLOW", NOT "DEADLOCKED", AND THAT READING IS
-// STRUCTURAL rather than a judgement about this run. Pool-exhaustion deadlock is
-// ruled out by the type of the offloaded callable: `offload_to` invokes `fn()` as
-// a plain call (src/session/file_store.cpp `offload_to`), and every one of its
-// call sites passes a NON-COROUTINE lambda returning `bool`. A non-coroutine
-// cannot `co_await`, so nothing running on a pool thread can initiate or await a
-// second offload -- peak occupancy is one pool thread per logical operation, and
-// a 2-thread pool cannot be exhausted by one FileStore. Re-derive rather than
-// trust this: if any call site ever passes a lambda returning `awaitable<...>`,
-// the argument is void and nested-offload deadlock is back on the table.
-// So a DID-NOT-RUN verdict points at a genuinely slow syscall. The one on this
-// path is the `fdatasync` at the end of `next_seqnum(increment=true)`'s offload,
-// which is unconditional -- `commit_batched` batches FRAME writes, not the
-// counter record, which is the linearisation point. `on_inbound_frame(Logon-ack)`
-// therefore carries exactly one blocking fdatasync.
+// ⚠️ WHETHER A NEGATIVE VERDICT MEANS "SLOW" OR "WEDGED" IS A PROPERTY OF THE
+// OFFLOAD PATH, AND YOU MUST RE-DERIVE IT RATHER THAN READ IT HERE.
+// `offload_to` (src/session/file_store.cpp) invokes its callable as a PLAIN
+// CALL. A non-coroutine callable therefore cannot `co_await`, cannot initiate a
+// second offload, and occupies one pool thread per logical operation -- so while
+// that holds of every call site, nested-offload deadlock is impossible and a
+// negative verdict points at a slow syscall. A call site passing a callable that
+// returns `awaitable<...>` voids the argument and puts deadlock back on the
+// table. Check, do not assume:
+//   git grep -n 'offload_to(' src/session/file_store.cpp   # then each callable's return type
+// The slow syscall on this path is the `raw_datasync` ending
+// `next_seqnum(increment=true)`'s offload, which no policy guards --
+// `commit_batched` batches FRAME writes, not the counter record, which is the
+// linearisation point.
 std::string probe_file_pool(asio::thread_pool& pool, std::chrono::milliseconds budget) {
     auto done = std::make_shared<std::promise<void>>();
     auto ran = done->get_future();
@@ -196,8 +197,9 @@ std::string probe_file_pool(asio::thread_pool& pool, std::chrono::milliseconds b
                "ms -- the pool had a free thread, so the stall is NOT pool saturation; "
                "look at the io_context side (a completion never posted back, or a lost wake).";
     }
-    return "\n  #433 file_pool probe: DID NOT RUN within " + std::to_string(budget.count()) +
-           "ms -- every pool thread is occupied; the stall is on the file_io side.";
+    return "\n  #433 file_pool probe: NO POOL THREAD BECAME FREE within " +
+           std::to_string(budget.count()) +
+           "ms -- consistent with pool saturation; the file_io side is where to look.";
 }
 
 // Derived from the budget it runs AFTER, not picked. The probe is reached only
@@ -934,17 +936,21 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
         // `site` pointer's contents, and `nullptr` never matches), so the miss
         // branch here could never be armed, and a real miss reported a bare
         // sentence instead of the stem the site-report tooling matches.
-        // ⚠️ THE BUDGET IS SPELLED ONLY BECAUSE `pump_until_ready` HAS NO
-        // LABEL-ONLY OVERLOAD -- `kPumpBudget` by name, not a literal, so it does
-        // not read as a tuning. The sibling `/close` site below spells a literal
-        // 10 s and DOES mean it.
+        // ⚠️ NEITHER SPELLS A BUDGET, DELIBERATELY: the label-only overload takes
+        // the default, so a site that DOES spell one is saying something. The
+        // sibling `/close` site below spells a literal 10 s and means it.
+        //
+        // Each label is a named constant used BOTH as the `site` and in the
+        // failure text: the seam matches the string's CONTENTS, so two raw
+        // copies could drift apart silently.
+        constexpr const char* kSiteOpen = "FlushRunsAndFramesDurableAfterClose/open";
+        constexpr const char* kSiteLogonAck = "FlushRunsAndFramesDurableAfterClose/logon-ack";
+
         {
             auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-            ASSERT_TRUE(pump_until_ready(ioc, fut, fixpp::test_support::kPumpBudget,
-                                         "FlushRunsAndFramesDurableAfterClose/open"))
-                << kPumpBudgetMiss
-                << "FlushRunsAndFramesDurableAfterClose/open -- open() did not complete within "
-                   "the bounded-pump budget"
+            ASSERT_TRUE(pump_until_ready(ioc, fut, kSiteOpen))
+                << kPumpBudgetMiss << kSiteOpen
+                << " -- open() did not complete within the bounded-pump budget"
                 << probe_file_pool(file_pool, kPoolProbeBudget);
             ASSERT_TRUE(fut.get().has_value()) << "open() should succeed";
             ASSERT_EQ(sess.state(), fixpp::session::fsm_state::LogonSent);
@@ -952,12 +958,11 @@ TEST(SessionGracefulCloseFlushesFileStore, FlushRunsAndFramesDurableAfterClose) 
 
         {
             auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(logon_ack), asio::use_future);
-            ASSERT_TRUE(pump_until_ready(ioc, fut, fixpp::test_support::kPumpBudget,
-                                         "FlushRunsAndFramesDurableAfterClose/logon-ack"))
-                << kPumpBudgetMiss
-                << "FlushRunsAndFramesDurableAfterClose/logon-ack -- on_inbound_frame(Logon-ack) "
-                   "did not complete within the bounded-pump budget. This is #433's observed "
-                   "failure; the probe below is what tells the two candidate causes apart"
+            ASSERT_TRUE(pump_until_ready(ioc, fut, kSiteLogonAck))
+                << kPumpBudgetMiss << kSiteLogonAck
+                << " -- on_inbound_frame(Logon-ack) did not complete within the bounded-pump "
+                   "budget. This is #433's observed failure; the probe below is what tells the "
+                   "candidate causes apart"
                 << probe_file_pool(file_pool, kPoolProbeBudget);
             ASSERT_TRUE(fut.get().has_value()) << "Logon-ack inbound should succeed";
             ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
