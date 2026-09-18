@@ -350,6 +350,10 @@ endif()
 
 # ── Tests ────────────────────────────────────────────────────────────────────
 if(FIXPP_BUILD_TESTS)
+  # fixpp#448: the allocation-discipline interceptor + the single registration path for
+  # every gate that uses it. Included INSIDE the tests guard because it exists only to
+  # serve ctest entries; it is never linked into a shipped artifact.
+  include(cmake/FixppMallocnesia.cmake)
   # Windows defaults to a 1 MiB stack; several tests put large parse arenas on
   # the stack (e.g. the dictionary suites' 1–4 MiB std::array buffers) that fit
   # comfortably under Linux's 8 MiB default but overflow on Windows (a __chkstk

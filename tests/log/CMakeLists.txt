@@ -71,18 +71,22 @@ target_include_directories(log_alloc_test PRIVATE
 add_test(NAME log_alloc COMMAND log_alloc_test
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
-# T014 gate: run under LD_PRELOAD=mallocnesia to catch global new() calls.
-# MALLOCNESIA_MAX_ALLOCS=0 means zero allocations allowed in the guard window.
-set(MALLOCNESIA_SO "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
-add_test(NAME log_alloc_mallocnesia
-  COMMAND ${CMAKE_COMMAND} -E env
-    "LD_PRELOAD=${MALLOCNESIA_SO}"
-    "MALLOCNESIA_MAX_ALLOCS=0"
-    $<TARGET_FILE:log_alloc_test>
-  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-set_tests_properties(log_alloc_mallocnesia PROPERTIES
-  PASS_REGULAR_EXPRESSION "PASSED"
-  FAIL_REGULAR_EXPRESSION "\\[mallocnesia\\] FAIL")
+# T014 gate: zero global allocations in the guard window.
+#
+# ⚠️ This entry used to set LD_PRELOAD directly, with NO guard on the interceptor
+# existing — and ld.so IGNORES an unloadable preload rather than failing, so on every
+# machine without the hand-built .so (all of CI) this ran UNINSTRUMENTED and passed.
+# MEASURED on main: `LD_PRELOAD=/nonexistent/libmallocnesia.so MALLOCNESIA_MAX_ALLOCS=0
+# log_alloc_test` prints the ld.so notice, then `[  PASSED  ] 2 tests`, exit 0.
+#
+# Routed through the shared helper, which runs check_alloc.py — the only path that
+# fails closed on a missing interceptor AND requires the child's interception witness.
+# The PASS/FAIL_REGULAR_EXPRESSION pair is gone with it: both were satisfied by an
+# uninstrumented run, so neither discriminated (fixpp#448).
+fixpp_add_mallocnesia_test(
+  NAME log_alloc_mallocnesia
+  TARGET log_alloc_test
+  LABELS "t014;log")
 
 # ── Slice 3c: T017 (TS-4) — FileSink rotation + byte bound ───────────────────
 add_executable(log_file_rotation_test test_file_sink_rotation.cpp)

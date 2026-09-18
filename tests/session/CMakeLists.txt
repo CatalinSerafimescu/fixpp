@@ -400,19 +400,16 @@ target_compile_definitions(credential_store_redaction PRIVATE FIXPP_TEST_HOOKS)
 # hooks); the _mallocnesia variant re-runs ONLY that cell under LD_PRELOAD via
 # check_alloc.py so a global-heap escape in the copy+mask window aborts.
 # GTEST_FILTER isolates the NoHeap cell (the FileStore/thread-pool cells need not
-# run under interception). Absent mallocnesia.so → skip (base test is the fallback).
-if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
-  add_test(
-    NAME credential_store_redaction_mallocnesia
-    COMMAND
-      python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
-      "--binary" "$<TARGET_FILE:credential_store_redaction>"
-  )
-  set_tests_properties(credential_store_redaction_mallocnesia PROPERTIES
-    ENVIRONMENT "GTEST_FILTER=NoHeap.*"
-    LABELS "034;credential-store-redaction;alloc_guard"
-    DEPENDS credential_store_redaction)
-endif()
+# run under interception). registered on every FIXPP_MALLOCNESIA_SUPPORTED configuration since
+# fixpp#448 (Linux, non-sanitizer — see cmake/FixppMallocnesia.cmake for why a sanitizer
+# build is excluded rather than merely skipped); the base test is a
+# companion that runs the cell unmeasured, never a fallback for this one.
+fixpp_add_mallocnesia_test(
+  NAME credential_store_redaction_mallocnesia
+  TARGET credential_store_redaction
+  ENVIRONMENT "GTEST_FILTER=NoHeap.*"
+  LABELS "034;credential-store-redaction;alloc_guard"
+  DEPENDS "credential_store_redaction")
 
 # T038 — seam 18: session shutdown ordering (I-22 / SC-005)
 fixpp_add_store_test(store_shutdown_ordering SOURCES
@@ -732,19 +729,15 @@ set_tests_properties(session_length_data_scanner PROPERTIES
   LABELS "426;length-data;scanner")
 # §VIII.5 zero-alloc gate for those scanners: re-runs ONLY the NoHeap cell under the
 # mallocnesia LD_PRELOAD via check_alloc.py (mirrors credential_store_redaction_mallocnesia).
-# Absent mallocnesia.so -> skipped; the base entry still runs the cell unmeasured.
-if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
-  add_test(
-    NAME session_length_data_scanner_mallocnesia
-    COMMAND
-      python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
-      "--binary" "$<TARGET_FILE:session_length_data_scanner>"
-  )
-  set_tests_properties(session_length_data_scanner_mallocnesia PROPERTIES
-    ENVIRONMENT "GTEST_FILTER=LengthDataScannersNoHeap.*"
-    LABELS "426;length-data;alloc_guard;mallocnesia"
-    DEPENDS session_length_data_scanner)
-endif()
+# registered on every FIXPP_MALLOCNESIA_SUPPORTED configuration since
+# fixpp#448 (Linux, non-sanitizer — see cmake/FixppMallocnesia.cmake for why a sanitizer
+# build is excluded rather than merely skipped); the base entry still runs the cell unmeasured.
+fixpp_add_mallocnesia_test(
+  NAME session_length_data_scanner_mallocnesia
+  TARGET session_length_data_scanner
+  ENVIRONMENT "GTEST_FILTER=LengthDataScannersNoHeap.*"
+  LABELS "426;length-data;alloc_guard"
+  DEPENDS "session_length_data_scanner")
 
 # ── 040-inbound-tag-overflow-hardening T011/T012 (US2 Phase 4) ───────────────
 # Wrap-and-continue + non-digit witnesses for scan_first_frame_ids (site 4).
@@ -1879,18 +1872,14 @@ set_tests_properties(session_sending_time_precision PROPERTIES
 # session_sending_time_precision runs the witness; the _mallocnesia variant
 # re-runs it under LD_PRELOAD so global-heap escapes are intercepted.
 # Mirrors perf_session_recovery_alloc_guard_mallocnesia in tests/perf/CMakeLists.txt.
-# Absent mallocnesia.so → skip (the base test is the fallback).
-if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
-  add_test(
-    NAME session_sending_time_precision_mallocnesia
-    COMMAND
-      python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
-      "--binary" "$<TARGET_FILE:session_sending_time_precision>"
-  )
-  set_tests_properties(session_sending_time_precision_mallocnesia PROPERTIES
-    LABELS "026;s039;sending-time-precision;alloc_guard"
-    DEPENDS session_sending_time_precision)
-endif()
+# registered on every FIXPP_MALLOCNESIA_SUPPORTED configuration since
+# fixpp#448 (Linux, non-sanitizer — see cmake/FixppMallocnesia.cmake for why a sanitizer
+# build is excluded rather than merely skipped); the base test is a companion, not a fallback.
+fixpp_add_mallocnesia_test(
+  NAME session_sending_time_precision_mallocnesia
+  TARGET session_sending_time_precision
+  LABELS "026;s039;sending-time-precision;alloc_guard"
+  DEPENDS "session_sending_time_precision")
 
 # ── 027-next-expected-msgseqnum (S-031) — T001/T004 walk-extraction witnesses ──
 # T001 (Setup): test skeleton + ctest target registration.
@@ -1927,18 +1916,14 @@ set_tests_properties(session_next_expected_msgseqnum PROPERTIES
 # session_next_expected_msgseqnum runs the witness; the _mallocnesia variant
 # re-runs it under LD_PRELOAD so global-heap escapes are intercepted.
 # Mirrors session_sending_time_precision_mallocnesia (026 pattern).
-# Absent mallocnesia.so → skip (the base test is the fallback).
-if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
-  add_test(
-    NAME session_next_expected_msgseqnum_mallocnesia
-    COMMAND
-      python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
-      "--binary" "$<TARGET_FILE:session_next_expected_msgseqnum>"
-  )
-  set_tests_properties(session_next_expected_msgseqnum_mallocnesia PROPERTIES
-    LABELS "027;s031;next-expected-msgseqnum;alloc_guard"
-    DEPENDS session_next_expected_msgseqnum)
-endif()
+# registered on every FIXPP_MALLOCNESIA_SUPPORTED configuration since
+# fixpp#448 (Linux, non-sanitizer — see cmake/FixppMallocnesia.cmake for why a sanitizer
+# build is excluded rather than merely skipped); the base test is a companion, not a fallback.
+fixpp_add_mallocnesia_test(
+  NAME session_next_expected_msgseqnum_mallocnesia
+  TARGET session_next_expected_msgseqnum
+  LABELS "027;s031;next-expected-msgseqnum;alloc_guard"
+  DEPENDS "session_next_expected_msgseqnum")
 
 # ── 028-validation-compat-toggles (S-040/S-041) — T001 Setup skeleton ────────
 # T001: skeleton + ctest target registration.
@@ -1982,7 +1967,7 @@ set_tests_properties(session_validation_compat_toggles PROPERTIES
 # T012 mallocnesia companion — DISABLED (item 13, 2026-06-19): RED — same allocating
 # window as above; re-enable by restoring the EXISTS guard once the window is
 # zero-alloc (tracked: parent REMAINING-WORK.md item 13).
-if(FALSE)  # was: if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+if(FALSE)  # re-enable via fixpp_add_mallocnesia_test() — NOT the old EXISTS guard (#448)
   add_test(
     NAME session_validation_compat_toggles_mallocnesia
     COMMAND
@@ -2025,7 +2010,7 @@ set_tests_properties(session_persistent_seqnum_hydrate PROPERTIES
 # session_next_expected_msgseqnum (027).
 # item 13 (2026-06-19): DISABLED — RED window (fix->feed(...)) allocates on the
 # global heap (false-green while markers were inert). Tracked: REMAINING-WORK item 13.
-if(FALSE)  # was: if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+if(FALSE)  # re-enable via fixpp_add_mallocnesia_test() — NOT the old EXISTS guard (#448)
   set_property(TEST session_persistent_seqnum_hydrate APPEND PROPERTY
     ENVIRONMENT "LD_PRELOAD=${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
 endif()
@@ -2033,7 +2018,7 @@ endif()
 # global malloc/calloc/realloc between the guard markers causes exit(1).
 # Absent mallocnesia.so → skip; the base test is the fallback.
 # item 13 (2026-06-19): DISABLED companion — RED (same allocating window). Tracked: REMAINING-WORK item 13.
-if(FALSE)  # was: if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+if(FALSE)  # re-enable via fixpp_add_mallocnesia_test() — NOT the old EXISTS guard (#448)
   add_test(
     NAME session_persistent_seqnum_hydrate_mallocnesia
     COMMAND
@@ -2077,7 +2062,7 @@ set_tests_properties(session_refresh_on_logon PROPERTIES
 # item 13 (2026-06-19): DISABLED — RED window (asio::co_spawn(...hydrate)) allocates
 # a coroutine frame on the global heap (false-green while markers were inert; a
 # co_spawn frame can't be warmed away). Tracked: REMAINING-WORK item 13.
-if(FALSE)  # was: if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+if(FALSE)  # re-enable via fixpp_add_mallocnesia_test() — NOT the old EXISTS guard (#448)
   set_property(TEST session_refresh_on_logon APPEND PROPERTY
     ENVIRONMENT "LD_PRELOAD=${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
 endif()
@@ -2085,7 +2070,7 @@ endif()
 # global malloc/calloc/realloc between the guard markers causes exit(1).
 # Absent mallocnesia.so → skip; the base test is the fallback.
 # item 13 (2026-06-19): DISABLED companion — RED (same co_spawn-frame alloc). Tracked: REMAINING-WORK item 13.
-if(FALSE)  # was: if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
+if(FALSE)  # re-enable via fixpp_add_mallocnesia_test() — NOT the old EXISTS guard (#448)
   add_test(
     NAME session_refresh_on_logon_mallocnesia
     COMMAND
