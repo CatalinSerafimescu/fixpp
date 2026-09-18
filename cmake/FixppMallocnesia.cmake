@@ -71,7 +71,8 @@ endif()
 # gate population cannot drift apart the way they had (measured on main: 18 entries by
 # name, 8 by label).
 function(fixpp_add_mallocnesia_test)
-  cmake_parse_arguments(_MN "" "NAME;TARGET;MAX_ALLOCS" "LABELS;DEPENDS" ${ARGN})
+  cmake_parse_arguments(_MN "EXPECT_VIOLATION" "NAME;TARGET;MAX_ALLOCS"
+                      "LABELS;DEPENDS;ENVIRONMENT" ${ARGN})
   if(NOT _MN_NAME OR NOT _MN_TARGET)
     message(FATAL_ERROR "fixpp_add_mallocnesia_test: NAME and TARGET are required")
   endif()
@@ -82,13 +83,28 @@ function(fixpp_add_mallocnesia_test)
     set(_MN_MAX_ALLOCS 0)
   endif()
 
+  # ⚠️ NOT a generator expression here. `$<$<BOOL:...>:--expect-violation>` evaluates to
+  # the EMPTY STRING when false, and CMake passes that as a real, empty argv entry —
+  # argparse then dies with `unrecognized arguments:` on every non-control gate. An
+  # unquoted empty CMake variable, by contrast, drops out of the list entirely.
+  set(_MN_EXTRA "")
+  if(_MN_EXPECT_VIOLATION)
+    set(_MN_EXTRA --expect-violation)
+  endif()
   add_test(
     NAME ${_MN_NAME}
     COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
             --binary "$<TARGET_FILE:${_MN_TARGET}>"
             --mallocnesia "$<TARGET_FILE:mallocnesia>"
-            --max-allocs ${_MN_MAX_ALLOCS})
+            --max-allocs ${_MN_MAX_ALLOCS}
+            ${_MN_EXTRA})
   set_tests_properties(${_MN_NAME} PROPERTIES LABELS "mallocnesia;${_MN_LABELS}")
+  if(_MN_ENVIRONMENT)
+    # Passthrough, e.g. GTEST_FILTER to isolate the zero-alloc cell of a binary whose
+    # other cells legitimately allocate. check_alloc.py runs the binary as a child with
+    # the environment inherited, so this reaches gtest.
+    set_tests_properties(${_MN_NAME} PROPERTIES ENVIRONMENT "${_MN_ENVIRONMENT}")
+  endif()
   if(_MN_DEPENDS)
     set_tests_properties(${_MN_NAME} PROPERTIES DEPENDS "${_MN_DEPENDS}")
   endif()

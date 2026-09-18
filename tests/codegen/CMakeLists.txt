@@ -79,17 +79,14 @@ set_tests_properties(codegen_group_entry_alloc_gate_test PROPERTIES LABELS codeg
 # it under LD_PRELOAD so global malloc/calloc/realloc is intercepted (the
 # dual-gate: the in-band counting_resource above catches PMR-routed
 # allocation; this catches a non-PMR escape via global new, per
-# feedback_tracking_pmr_resource_false_pass). Absent mallocnesia.so → skipped
+# feedback_tracking_pmr_resource_false_pass). Always registered; the interceptor is a build target (fixpp#448)
 # (the base ctest above is the fallback; the counting_resource + stack/NULL-
 # upstream arena still enforce the gate without interception).
-if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
-  add_test(
-    NAME codegen_group_entry_alloc_gate_test_mallocnesia
-    COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
-            "--binary" "$<TARGET_FILE:codegen_group_entry_alloc_gate_test>")
-  set_tests_properties(codegen_group_entry_alloc_gate_test_mallocnesia PROPERTIES
-    LABELS "codegen;alloc_guard;mallocnesia;062")
-endif()
+
+fixpp_add_mallocnesia_test(
+  NAME codegen_group_entry_alloc_gate_test_mallocnesia
+  TARGET codegen_group_entry_alloc_gate_test
+  LABELS "codegen;alloc_guard;mallocnesia;062")
 
 # 067-codegen-writer-emitter T007/T009: emit_builders unit tests — link the
 # codegen tool's ir.cpp/gen_util.hpp DIRECTLY (not via the generated headers)

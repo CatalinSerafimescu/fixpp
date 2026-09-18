@@ -63,6 +63,12 @@ def main() -> int:
     parser.add_argument("--target", default=None, help="Alias for --binary (CMake-style usage)")
     parser.add_argument("--mallocnesia", default=None,
                         help="Explicit interceptor path; CMake passes $<TARGET_FILE:mallocnesia>.")
+    parser.add_argument("--expect-violation", action="store_true",
+                        help="POSITIVE CONTROL. Invert the verdict: this binary is "
+                             "supposed to allocate inside its guard window, so the run "
+                             "passes ONLY if interception was active AND the interceptor "
+                             "reported the violation. See the block comment below for why "
+                             "this is not the same as ctest's WILL_FAIL.")
     parser.add_argument("--allow-missing", action="store_true",
                         help="Run UNINSTRUMENTED when the interceptor is absent. Local "
                              "convenience only — this is the fail-open behaviour fixpp#448 "
@@ -100,7 +106,11 @@ def main() -> int:
         env["MALLOCNESIA_WITNESS"] = witness
         print(f"[check_alloc] Using mallocnesia: {mallocnesia} (max-allocs={args.max_allocs})")
 
-        result = subprocess.run([binary], env=env)
+        if args.expect_violation:
+            result = subprocess.run([binary], env=env, stderr=subprocess.PIPE, text=True)
+            sys.stderr.write(result.stderr or "")
+        else:
+            result = subprocess.run([binary], env=env)
 
         # ⚠️ ORDER MATTERS. The witness is checked BEFORE the exit code, because the
         # case being closed is a binary that exits 0 having never been instrumented.
@@ -113,6 +123,38 @@ def main() -> int:
                   f"failing; check that {mallocnesia} is loadable by that binary "
                   f"(architecture, missing deps, noexec mount).", file=sys.stderr)
             return 2
+
+    # ⚠️ WHY THIS IS NOT ctest's WILL_FAIL.
+    #
+    # The obvious way to prove the gate can go RED is a binary that allocates on purpose,
+    # registered WILL_FAIL. It does not work HERE, and it fails in the silent direction:
+    # WILL_FAIL accepts ANY nonzero exit, and this wrapper returns 2 when the interceptor
+    # is missing or was never loaded. So on precisely the lane where interception has
+    # broken — the case the control exists to detect — the control still passes.
+    # That is `an arm whose forced defect stays green measures its own setup`.
+    #
+    # So the control is inverted HERE instead, where all three facts are visible, and it
+    # demands all three: interception was ACTIVE (witness above), the binary FAILED, and
+    # it failed for the RIGHT REASON (the interceptor said so). Any other combination is
+    # a broken control, not a pass.
+    if args.expect_violation:
+        said_so = "[mallocnesia] FAIL" in (result.stderr or "")
+        if result.returncode == 0:
+            print("[check_alloc] FAIL: this binary allocates inside its guard window on "
+                  "purpose, but the run SUCCEEDED. Interception was active (witness "
+                  "present) yet the planted allocation was not caught — the gate is not "
+                  "measuring what it claims.", file=sys.stderr)
+            return 1
+        if not said_so:
+            print(f"[check_alloc] FAIL: the binary exited {result.returncode}, but the "
+                  f"interceptor never reported a violation. A nonzero exit for some OTHER "
+                  f"reason (a crash, a gtest assertion) would satisfy a WILL_FAIL entry "
+                  f"and prove nothing; this control requires the interceptor's own "
+                  f"verdict.", file=sys.stderr)
+            return 1
+        print("[check_alloc] PASS (positive control): interception active, planted "
+              "allocation detected and reported by the interceptor.")
+        return 0
 
     if result.returncode != 0:
         print(f"[check_alloc] FAIL: binary exited {result.returncode}", file=sys.stderr)

@@ -134,32 +134,43 @@ target_include_directories(test_validate_gate_alloc_guard PRIVATE
 set_target_properties(test_validate_gate_alloc_guard PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
+# ── fixpp#448: the POSITIVE CONTROL for the entire mallocnesia population ─────
+# Eighteen gates reporting "no allocations detected" cannot tell a clean tree from a
+# dead interceptor. This one allocates on purpose and must be CAUGHT; if interception
+# silently stops, this is the entry that reddens. Registered on the same lane and in
+# the same ctest label as the gates it vouches for, so it cannot be skipped separately
+# from them. See planted_alloc_witness.cpp for why it is not WILL_FAIL.
+add_executable(planted_alloc_witness planted_alloc_witness.cpp)
+target_include_directories(planted_alloc_witness PRIVATE "${CMAKE_SOURCE_DIR}/tests")
+set_target_properties(planted_alloc_witness PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+fixpp_add_mallocnesia_test(
+  NAME mallocnesia_positive_control
+  TARGET planted_alloc_witness
+  EXPECT_VIOLATION
+  LABELS "alloc_guard;positive-control;448")
+
 add_test(NAME alloc_guard_validate_gate COMMAND test_validate_gate_alloc_guard)
 set_tests_properties(alloc_guard_validate_gate PROPERTIES
   LABELS "041;alloc_guard;validation-gate;t014"
 )
 
-# Mallocnesia gate: re-runs the validate-ON alloc-guard under LD_PRELOAD so
-# global malloc/calloc/realloc is intercepted.  Absent mallocnesia.so → skip
-# (the base test alloc_guard_validate_gate is the fallback; it runs without
-# interception and asserts the validation outcome only).
-if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
-  add_test(
-    NAME alloc_guard_validate_gate_mallocnesia
-    COMMAND
-      python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
-      "--binary" "$<TARGET_FILE:test_validate_gate_alloc_guard>"
-  )
-  set_tests_properties(alloc_guard_validate_gate_mallocnesia PROPERTIES
-    LABELS "041;alloc_guard;validation-gate;t014"
-    DEPENDS alloc_guard_validate_gate)
-endif()
+# Mallocnesia gate: re-runs the validate-ON alloc-guard under LD_PRELOAD so global
+# malloc/calloc/realloc is intercepted. ALWAYS registered (fixpp#448) — it used to be
+# conditional on a hand-built .so, so it did not exist on any CI runner. The base test
+# alloc_guard_validate_gate still runs WITHOUT interception and asserts the validation
+# outcome only; it is a companion, never a fallback for this one.
+fixpp_add_mallocnesia_test(
+  NAME alloc_guard_validate_gate_mallocnesia
+  TARGET test_validate_gate_alloc_guard
+  LABELS "041;alloc_guard;validation-gate;t014"
+  DEPENDS "alloc_guard_validate_gate")
 
 # ── item 13 (2026-06-19): mallocnesia gate entries for the alloc-guard binaries
 # that previously had NO LD_PRELOAD entry. The marker fix (weak UNDEFINED symbols,
 # item 13) makes interception real; without these add_test entries the binaries
-# ran plainly and never enforced zero-alloc under mallocnesia. Absent the .so →
-# skipped. Mirrors alloc_guard_validate_gate_mallocnesia.
+# ran plainly and never enforced zero-alloc under mallocnesia. ALWAYS registered
+# since fixpp#448. Mirrors alloc_guard_validate_gate_mallocnesia.
 #
 # Only the binaries whose MEASURED WINDOW is genuinely zero-global-alloc are gated
 # here (decimal / wire / sync — all verified green under the now-real interceptor).
@@ -169,19 +180,15 @@ endif()
 # global heap (the false-green these were silently relying on). Gating them at
 # max-allocs=0 would be red. Re-scoping those windows to the true steady-state hot
 # path is tracked as a follow-up (see parent REMAINING-WORK.md item 13).
-if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
-  foreach(_ag IN ITEMS
-      decimal_alloc_guard_test
-      wire_alloc_guard_test
-      sync_alloc_guard_test)
-    add_test(
-      NAME ${_ag}_mallocnesia
-      COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
-              "--binary" "$<TARGET_FILE:${_ag}>")
-    set_tests_properties(${_ag}_mallocnesia PROPERTIES
-      LABELS "alloc_guard;mallocnesia;item13")
-  endforeach()
-endif()
+foreach(_ag IN ITEMS
+    decimal_alloc_guard_test
+    wire_alloc_guard_test
+    sync_alloc_guard_test)
+  fixpp_add_mallocnesia_test(
+    NAME ${_ag}_mallocnesia
+    TARGET ${_ag}
+    LABELS "alloc_guard;item13")
+endforeach()
 
 # 066-dict-backed-inbound-parse T013 (SC-004/FR-004): zero-GLOBAL-heap gate
 # for the dict-backed inbound parse+read path, measured at the
@@ -213,14 +220,10 @@ add_test(NAME dict066_grouped_read_alloc_guard COMMAND test_dict066_grouped_read
 set_tests_properties(dict066_grouped_read_alloc_guard PROPERTIES
   LABELS "066;us3;alloc_guard")
 
-if(EXISTS "${CMAKE_SOURCE_DIR}/tools/mallocnesia/libmallocnesia.so")
-  add_test(
-    NAME dict066_grouped_read_alloc_guard_mallocnesia
-    COMMAND python3 "${CMAKE_SOURCE_DIR}/tools/check_alloc.py"
-            "--binary" "$<TARGET_FILE:test_dict066_grouped_read_alloc_guard>")
-  set_tests_properties(dict066_grouped_read_alloc_guard_mallocnesia PROPERTIES
-    LABELS "066;us3;alloc_guard;mallocnesia")
-endif()
+fixpp_add_mallocnesia_test(
+  NAME dict066_grouped_read_alloc_guard_mallocnesia
+  TARGET test_dict066_grouped_read_alloc_guard
+  LABELS "066;us3;alloc_guard;mallocnesia")
 
 # ── item 13: recurrence guard — fail if any test/bench source reintroduces a
 # bodied alloc_guard_start/end definition (the local-symbol pattern that silently
