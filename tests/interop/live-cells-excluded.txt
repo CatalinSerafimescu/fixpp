@@ -1,0 +1,107 @@
+# Interop gtest cases that the LIVE job does not run, with the reason (fixpp#468).
+#
+# CONDITION this file states, together with the harness registry:
+#
+#     {gtest id of every cell the live job runs}  ∪  {every id below}
+#   = {every id in expected-skips-without-counterparty.txt}
+#
+# checked in BOTH directions by ci/run-interop-live.py.
+#
+# ⚠️ WHERE THE RIGHT-HAND SIDE COMES FROM, because it is the load-bearing half and it
+# is NOT this file's doing: expected-skips-without-counterparty.txt is held to the
+# OBSERVED skip set of the built binaries by ci/assert-interop-skips.py, which runs as
+# a named step on each tier and fails in both directions. That is what stops a new
+# counterparty-gated case being added to a binary and to none of these files — the
+# equality here would hold, and the case would run nowhere. THIS check does not close
+# that on its own and never claimed to; it composes with that one.
+#
+# ⚠️ And the composition has an ORDER: the tiers run only once the gate labels land,
+# while the interop-live job is advisory and runs from the first push. So a green
+# interop-live PRECEDES the population guarantee rather than establishing it.
+#
+# That equality is what makes
+# the live job's population honest: #431's skip set pins what SKIPS when no
+# counterparty is leased, and on its own it is satisfied equally by a case that runs
+# everywhere and by one that runs NOWHERE. This file is the difference, stated out
+# loud, so a case can stop running only by someone writing down why.
+#
+# ⚠️ An entry here is NOT free. Each group carries a STRUCTURAL condition that the
+# checker re-derives; an id filed under the wrong group fails even though the
+# equality above still holds. Adding a line is therefore a claim, not an escape.
+#
+# Format:  <reason-tag> <Prefix/Suite.Case/param>
+
+# ── this engine cannot drive this scenario ───────────────────────────────────
+# Two tags, because there are two DIFFERENT mechanisms and calling them one thing
+# would be false of some of the ids:
+#
+#   qfj-only-at-g1            the gtest ITSELF GTEST_SKIPs non-QFj with
+#                             skip:not-applicable, because the induction is
+#                             configured only in the QFJ counterparty at G1.
+#   qfcpp-no-possdup-injection  the gtest skips NOTHING per engine; QuickFIX-cpp
+#                             simply cannot emit the stimulus — `send()` strips
+#                             43/122 and there is no public sendRaw/AllowPosDup.
+#
+# ⚠️ An earlier draft asserted the FIRST mechanism for all of them. It was false for
+# the PossDup ids: 021-poss-dup-*_test.cpp carries no per-engine GTEST_SKIP at all.
+# The reconciliation still passed, because the structural condition below is IDENTICAL
+# for both tags — the two are freely interchangeable as far as it can tell.
+#
+# ⚠️ AND an earlier draft of THIS header then said the authority for which tag applies
+# is the id's `deferred_reason` in cell_results.yaml — which is true only where such a
+# row EXISTS, and several ids below have none. That is why the third field is optional
+# and why its absence is reported rather than hidden:
+#
+#   FORMAT:  <reason-tag> <gtest-id> [<cell-id>]
+#
+#   With a <cell-id>, ci/run-interop-live.py requires cell_results.yaml to disposition
+#   that cell as `deferred:<reason-tag>` — the tag is CHECKED, and the sibling-tag swap
+#   above is rejected in both directions. A cell-id that resolves to no deferred row
+#   FAILS rather than reading as "nothing to check".
+#
+#   Without one, the claim rests on the test source and the checker SAYS SO on every
+#   run, listing the ids by name. Re-derive which those are from that output; a count
+#   written here would rot. Adding the missing rows to cell_results.yaml, or a cell-id
+#   to a line here, moves an id from the reported set into the checked set.
+#
+# STRUCTURAL CONDITION (re-derived by the checker, for BOTH tags): the SAME
+# Suite.Case has another param that IS covered by a registered cell. That is what
+# separates "this engine cannot drive it" from "this scenario runs nowhere". It also
+# self-retires: make the engine able to drive it, register the cell, and the line
+# must be deleted or the equality above breaks.
+qfj-only-at-g1 Fix44/HappyIdleHeartbeatCadence.BothDirectionsAtNegotiatedCadence/QFcpp_acc
+qfj-only-at-g1 Fix44/HappyIdleHeartbeatCadence.BothDirectionsAtNegotiatedCadence/QFcpp_init
+qfj-only-at-g1 Fix44/HappyRecoveryOutboundAnswer.FixppAnswersResendRequestAndPeerResyncs/QFcpp_acc
+qfj-only-at-g1 Fix44/HappyRecoveryOutboundAnswer.FixppAnswersResendRequestAndPeerResyncs/QFcpp_init
+qfj-only-at-g1 Fix44/HappyRejectInvalidAdmin.RejectInvalidAdminSurvives/QFcpp_acc HP-QFcpp-acc-fix44-reject-invalid-admin
+qfj-only-at-g1 Fix44/HappyRejectInvalidAdmin.RejectInvalidAdminSurvives/QFcpp_init HP-QFcpp-init-fix44-reject-invalid-admin
+qfj-only-at-g1 Fix44/HappySeqnumRecoveryInbound.GapInductionResendRequestAndReturn/QFcpp_acc
+qfj-only-at-g1 Fix44/HappySeqnumRecoveryInbound.GapInductionResendRequestAndReturn/QFcpp_init
+qfj-only-at-g1 Fix44/HappyTestRequestEcho.BidirectionalTestRequestEcho/QFcpp_acc HP-QFcpp-acc-fix44-testrequest-echo
+qfj-only-at-g1 Fix44/HappyTestRequestEcho.BidirectionalTestRequestEcho/QFcpp_init HP-QFcpp-init-fix44-testrequest-echo
+qfcpp-no-possdup-injection Fix44/MalformedDupRejected.MissingOrigSendingTimeTriggersRejectAndSessionSurvives/QFcpp_acc PD-QFcpp-acc-fix44-malformed-dup-rejected
+qfcpp-no-possdup-injection Fix44/MalformedDupRejected.MissingOrigSendingTimeTriggersRejectAndSessionSurvives/QFcpp_init PD-QFcpp-init-fix44-malformed-dup-rejected
+qfcpp-no-possdup-injection Fix44/PossDupReplaySurvives.ReplayedPossDupFrameDoesNotDisconnect/QFcpp_acc PD-QFcpp-acc-fix44-poss-dup-replay-survives
+qfcpp-no-possdup-injection Fix44/PossDupReplaySurvives.ReplayedPossDupFrameDoesNotDisconnect/QFcpp_init PD-QFcpp-init-fix44-poss-dup-replay-survives
+
+# ── unregistered-tracked ─────────────────────────────────────────────────────
+# NOT a design decision — a KNOWN GAP with an issue. No cell selects these on ANY
+# engine, so they have never run live, and in two cases spec/feature-catalogue.md
+# claims otherwise. Tracked by fixpp#472, which is where the dispositions belong.
+#
+# STRUCTURAL CONDITION (re-derived by the checker): NO param of this Suite.Case is
+# covered. If one ever is, the case has stopped being "runs nowhere" and the entry
+# must be re-argued under the group above rather than silently inherited.
+#
+# ⚠️ This group is the one that must SHRINK. It is written separately from the
+# engine-capability tags precisely so it cannot hide inside a permanent exemption:
+# those are a property of the G1 scope, these are a debt. No count is recorded here
+# on purpose — read it off the file.
+unregistered-tracked AllCounterparties/NextExpectedBidirectional.BothGapsRecoverNoResendRequest/QFcpp_bidir
+unregistered-tracked AllCounterparties/NextExpectedBidirectional.BothGapsRecoverNoResendRequest/QFj_bidir
+unregistered-tracked AllCounterparties/RestartResume_Acceptor.BothCountersResumeFromStore/QFcpp_acc
+unregistered-tracked AllCounterparties/RestartResume_Acceptor.BothCountersResumeFromStore/QFj_acc
+unregistered-tracked AllCounterparties/RestartResume_Initiator.BothCountersResumeFromStore/QFcpp_init
+unregistered-tracked AllCounterparties/RestartResume_Initiator.BothCountersResumeFromStore/QFj_init
+unregistered-tracked AllCounterparties/StandbyRehydrate_Initiator.RehydratesOnReconnect/QFcpp_standby
+unregistered-tracked AllCounterparties/StandbyRehydrate_Initiator.RehydratesOnReconnect/QFj_standby
