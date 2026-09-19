@@ -328,8 +328,7 @@ TEST(ValidatorProductionTableView, FloatGarbageValueRemappedToWireOutOfRange) {
 TEST(ValidatorProductionTableView, FloatParseErrorAlwaysMapsToWireSlot) {
     table_view_builder tvb;
     tvb.set_field_type(38, field_type::Float);
-    table_view tv = std::move(tvb).build();
-    dictionary_driven_validator v{std::move(tv)};
+    dictionary_driven_validator v{std::move(tvb).build()};
 
     // (a) Garbage value — guaranteed to fail decimal parse.
     {

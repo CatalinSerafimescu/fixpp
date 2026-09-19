@@ -457,9 +457,7 @@ TEST(ValidatorDomain, TrailingTopLevelFieldSharingMemberTagIsNotAbsorbed) {
         .set_type(54, field_type::Char)
         .add_enum(54, "1")
         .add_enum(54, "2");
-    table_view gram = std::move(gramb).build();
-
-    dictionary_driven_validator v{std::move(gram)};
+    dictionary_driven_validator v{std::move(gramb).build()};
 
     auto buf = make_frame(
         "35=D\x01"
@@ -523,9 +521,7 @@ TEST(ValidatorDomain, NestedMalformedGroupRejected) {
         .set_type(54, field_type::Char)
         .add_enum(54, "1")
         .add_enum(54, "2");
-    table_view gram = std::move(gramb).build();
-
-    dictionary_driven_validator v{std::move(gram)};
+    dictionary_driven_validator v{std::move(gramb).build()};
 
     // Outer 453=1 (1 instance), inner 460=2 declares 2 but only 1 follows.
     auto buf = make_frame(

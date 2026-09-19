@@ -294,8 +294,9 @@ std::vector<std::byte> group_with_trailing_field_frame() {
 }
 
 // Membership for the frame above: 453 is a real group, delimiter 448.
-void fill_group_with_trailing_field_dict(fixpp::dict::table_view_builder& dict) {
-    dict.add_valid("D", 35)
+fixpp::dict::table_view group_with_trailing_field_dict() {
+    fixpp::dict::table_view_builder b;
+    b.add_valid("D", 35)
         .add_valid("D", 34)
         .add_valid("D", 453)
         .add_valid("D", 448)
@@ -306,6 +307,7 @@ void fill_group_with_trailing_field_dict(fixpp::dict::table_view_builder& dict) 
         .add_group_member(453, 447)
         .add_group_member(453, 452)
         .add_group_member(453, 802);
+    return std::move(b).build();
 }
 
 // PATH: opaque_dict_ == nullptr, DEFAULT Config.
@@ -367,9 +369,7 @@ TEST(WireOffsetTable, DictFreeGroupDeclinesWhenMembershipFnMissing) {
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
 
-    fixpp::dict::table_view_builder dictb;
-    fill_group_with_trailing_field_dict(dictb);
-    fixpp::dict::table_view const dict = std::move(dictb).build();
+    auto const dict = group_with_trailing_field_dict();
 
     std::pmr::monotonic_buffer_resource arena;
     // 384 / fixpp#426: the delimiter oracle is spelled out too, now that it
@@ -427,9 +427,7 @@ TEST(WireOffsetTable, TrailingFieldNotCountedIntoLastInstance) {
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
 
-    fixpp::dict::table_view_builder dictb;
-    fill_group_with_trailing_field_dict(dictb);
-    fixpp::dict::table_view const dict = std::move(dictb).build();
+    auto const dict = group_with_trailing_field_dict();
 
     // ARM 1 — cap 4: the old measure (5) breached, the membership measure (4)
     // does not. This is the false rejection #220 reported.

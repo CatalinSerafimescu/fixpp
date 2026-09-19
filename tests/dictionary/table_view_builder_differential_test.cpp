@@ -32,18 +32,17 @@
 
 #include <gtest/gtest.h>
 
-#include <cstddef>
 #include <cstdint>
-#include <filesystem>
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/field_type.hpp>
 #include <fixpp/dict/table_view.hpp>
-#include <fixpp/dict/xml_loader.hpp>
-#include <memory_resource>
+#include <memory>
 #include <span>
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include "support/fix44_dictionary.hpp"
 
 namespace {
 
@@ -60,20 +59,25 @@ std::vector<std::uint16_t> to_vec(std::span<std::uint16_t const> s) {
 // what makes the direction of `set_group_first` observable at all.
 constexpr std::uint16_t kNoPartyIDs = 453;
 
-struct Fix44 {
-    std::vector<std::byte> buf = std::vector<std::byte>(4U * 1024U * 1024U);
-    std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
-    fixpp::dict::Dictionary dict =
-        fixpp::dict::XmlLoader{}.load(std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX44.xml",
-                                      &mr);
-    table_view view = dict.as_table_view();
-};
+// The comparand, loaded ONCE for the whole TU. `make_fix44_dictionary()` owns the
+// member declaration order the buffer/resource/Dictionary triple depends on, which
+// is the real reason not to re-spell it here.
+//
+// Shared rather than per-test because every arm below binds it as
+// `table_view const&` and reads: since fixpp#456 `table_view` is immutable by
+// type, so no arm can leave state for the next one. Constructed per test, the
+// FIX44 XML load plus `as_table_view()` ran four times over.
+table_view const& fix44_view() {
+    static std::shared_ptr<fixpp::dict::Dictionary const> const dict =
+        fixpp::test_support::make_fix44_dictionary();
+    static table_view const view = dict->as_table_view();
+    return view;
+}
 
 // ── the differential: replay the dictionary's own answers through the builder ──
 
 TEST(TableViewBuilderDifferential, GroupStructureMatchesTheDictionary) {
-    Fix44 f;
-    table_view const& ref = f.view;
+    table_view const& ref = fix44_view();
 
     auto const first = ref.group_first_field(kNoPartyIDs);
     auto const members = to_vec(ref.group_member_tags(kNoPartyIDs));
@@ -124,8 +128,7 @@ TEST(TableViewBuilderDifferential, GroupStructureMatchesTheDictionary) {
 }
 
 TEST(TableViewBuilderDifferential, ContextScopedGroupMatchesTheDictionary) {
-    Fix44 f;
-    table_view const& ref = f.view;
+    table_view const& ref = fix44_view();
 
     // A context the dictionary itself registered: NoPartyIDs at top level in
     // NewOrderSingle(D). Read the context's own answers, then replay them.
@@ -158,8 +161,7 @@ TEST(TableViewBuilderDifferential, ContextScopedGroupMatchesTheDictionary) {
 }
 
 TEST(TableViewBuilderDifferential, MembershipAndTypesMatchTheDictionary) {
-    Fix44 f;
-    table_view const& ref = f.view;
+    table_view const& ref = fix44_view();
 
     auto const logon_required = to_vec(ref.required_fields("A"));
     ASSERT_FALSE(logon_required.empty()) << "FIX44 Logon(A) must have required fields";
@@ -192,8 +194,7 @@ TEST(TableViewBuilderDifferential, MembershipAndTypesMatchTheDictionary) {
 }
 
 TEST(TableViewBuilderDifferential, LengthDataPairMatchesTheDictionaryInBothDirections) {
-    Fix44 f;
-    table_view const& ref = f.view;
+    table_view const& ref = fix44_view();
 
     // RawDataLength(95) -> RawData(96) is declared in FIX44; read it rather than
     // assuming it, and refuse to run on a dictionary that does not carry it.

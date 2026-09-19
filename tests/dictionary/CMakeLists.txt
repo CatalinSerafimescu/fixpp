@@ -149,8 +149,9 @@ set_tests_properties(dictionary_table_view_seal_compile_test PROPERTIES LABELS "
 
 # ── fixpp#456 seam 4: builder/as_table_view() differential ───────────────────
 # Standalone rather than folded into the pure bucket's table_view_test.cpp: it needs
-# its own FIXPP_DICT_DATA_DIR and its own "456" label, and it must stay buildable
-# independently of the rest of the dictionary test tree.
+# its own "456" label — same reason dictionary_table_view_enum_domain_test above is
+# standalone for "075" — and it must stay buildable independently of the rest of the
+# dictionary test tree.
 add_executable(dictionary_table_view_builder_differential_test
   table_view_builder_differential_test.cpp)
 target_link_libraries(dictionary_table_view_builder_differential_test PRIVATE
@@ -158,6 +159,9 @@ target_link_libraries(dictionary_table_view_builder_differential_test PRIVATE
   GTest::gtest
   GTest::gtest_main
 )
+# tests/support/fix44_dictionary.hpp — same pattern as the reify_* bucket below.
+target_include_directories(dictionary_table_view_builder_differential_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests")
 target_compile_definitions(dictionary_table_view_builder_differential_test PRIVATE
   "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\"")
 add_test(NAME dictionary_table_view_builder_differential_test

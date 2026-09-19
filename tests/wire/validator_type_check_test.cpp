@@ -119,8 +119,7 @@ TEST(ValidatorTypeCheck, FloatFieldValidDecimalAccepted) {
     // OrderQty (38) is Float; "123.45" is a valid decimal.
     table_view_builder tb;
     tb.add_valid("D", 38).set_type(38, field_type::Float);
-    table_view t = std::move(tb).build();
-    dictionary_driven_validator v{std::move(t)};
+    dictionary_driven_validator v{std::move(tb).build()};
 
     auto val = bv("123.45");
     // validate_field goes through check_field_type Float path.
@@ -133,8 +132,7 @@ TEST(ValidatorTypeCheck, FloatFieldInvalidDecimalRejected) {
     // A value that fails decimal_t::parse (not a valid number) → error.
     table_view_builder tb;
     tb.add_valid("D", 38).set_type(38, field_type::Float);
-    table_view t = std::move(tb).build();
-    dictionary_driven_validator v{std::move(t)};
+    dictionary_driven_validator v{std::move(tb).build()};
 
     auto val = bv("NOT_A_NUMBER");
     auto rc = v.validate_field(38, std::span<const std::byte>{val.data(), val.size()});
@@ -147,8 +145,7 @@ TEST(ValidatorTypeCheck, FloatFieldInvalidDecimalRejected) {
 TEST(ValidatorTypeCheck, IntFieldValidPositiveAccepted) {
     table_view_builder tb;
     tb.add_valid("D", 34).set_type(34, field_type::Int);
-    table_view t = std::move(tb).build();
-    dictionary_driven_validator v{std::move(t)};
+    dictionary_driven_validator v{std::move(tb).build()};
 
     auto val = bv("42");
     auto rc = v.validate_field(34, std::span<const std::byte>{val.data(), val.size()});
@@ -159,8 +156,7 @@ TEST(ValidatorTypeCheck, IntFieldValidNegativeAccepted) {
     // Leading '-' is allowed for Int.
     table_view_builder tb;
     tb.add_valid("D", 34).set_type(34, field_type::Int);
-    table_view t = std::move(tb).build();
-    dictionary_driven_validator v{std::move(t)};
+    dictionary_driven_validator v{std::move(tb).build()};
 
     auto val = bv("-42");
     auto rc = v.validate_field(34, std::span<const std::byte>{val.data(), val.size()});
@@ -171,8 +167,7 @@ TEST(ValidatorTypeCheck, IntFieldEmptyValueRejected) {
     // Empty value is invalid for Int.
     table_view_builder tb;
     tb.add_valid("D", 34).set_type(34, field_type::Int);
-    table_view t = std::move(tb).build();
-    dictionary_driven_validator v{std::move(t)};
+    dictionary_driven_validator v{std::move(tb).build()};
 
     std::vector<std::byte> empty_val;
     auto rc = v.validate_field(34, std::span<const std::byte>{empty_val.data(), empty_val.size()});
@@ -184,8 +179,7 @@ TEST(ValidatorTypeCheck, IntFieldNonDigitCharRejected) {
     // "12A3" contains a non-digit after digits → rejected.
     table_view_builder tb;
     tb.add_valid("D", 34).set_type(34, field_type::Int);
-    table_view t = std::move(tb).build();
-    dictionary_driven_validator v{std::move(t)};
+    dictionary_driven_validator v{std::move(tb).build()};
 
     auto val = bv("12A3");
     auto rc = v.validate_field(34, std::span<const std::byte>{val.data(), val.size()});
@@ -202,8 +196,7 @@ TEST(ValidatorTypeCheck, IntFieldWidthOverflowPassesValidatorEnforcedDownstream)
     // pins that boundary so nobody "hardens" the validator with a spurious width.
     table_view_builder tb;
     tb.add_valid("D", 34).set_type(34, field_type::Int);
-    table_view t = std::move(tb).build();
-    dictionary_driven_validator v{std::move(t)};
+    dictionary_driven_validator v{std::move(tb).build()};
 
     auto val = bv("2147483648");  // INT32_MAX + 1: digit-format valid
     auto rc = v.validate_field(34, std::span<const std::byte>{val.data(), val.size()});
@@ -216,8 +209,7 @@ TEST(ValidatorTypeCheck, IntFieldWidthOverflowPassesValidatorEnforcedDownstream)
 TEST(ValidatorTypeCheck, CharFieldSingleByteAccepted) {
     table_view_builder tb;
     tb.add_valid("D", 54).set_type(54, field_type::Char);
-    table_view t = std::move(tb).build();
-    dictionary_driven_validator v{std::move(t)};
+    dictionary_driven_validator v{std::move(tb).build()};
 
     auto val = bv("1");
     auto rc = v.validate_field(54, std::span<const std::byte>{val.data(), val.size()});
@@ -228,8 +220,7 @@ TEST(ValidatorTypeCheck, CharFieldWrongLengthRejected) {
     // Char must be exactly 1 byte; "AB" (2 bytes) is invalid.
     table_view_builder tb;
     tb.add_valid("D", 54).set_type(54, field_type::Char);
-    table_view t = std::move(tb).build();
-    dictionary_driven_validator v{std::move(t)};
+    dictionary_driven_validator v{std::move(tb).build()};
 
     auto val = bv("AB");
     auto rc = v.validate_field(54, std::span<const std::byte>{val.data(), val.size()});
@@ -242,8 +233,7 @@ TEST(ValidatorTypeCheck, CharFieldWrongLengthRejected) {
 TEST(ValidatorTypeCheck, StringFieldAlwaysAccepted) {
     table_view_builder tb;
     tb.add_valid("D", 11).set_type(11, field_type::String);
-    table_view t = std::move(tb).build();
-    dictionary_driven_validator v{std::move(t)};
+    dictionary_driven_validator v{std::move(tb).build()};
 
     auto val = bv("anything");
     auto rc = v.validate_field(11, std::span<const std::byte>{val.data(), val.size()});
@@ -253,8 +243,7 @@ TEST(ValidatorTypeCheck, StringFieldAlwaysAccepted) {
 TEST(ValidatorTypeCheck, BooleanFieldAccepted) {
     table_view_builder tb;
     tb.add_valid("D", 50).set_type(50, field_type::Boolean);
-    table_view t = std::move(tb).build();
-    dictionary_driven_validator v{std::move(t)};
+    dictionary_driven_validator v{std::move(tb).build()};
 
     auto val = bv("Y");
     auto rc = v.validate_field(50, std::span<const std::byte>{val.data(), val.size()});
@@ -264,8 +253,7 @@ TEST(ValidatorTypeCheck, BooleanFieldAccepted) {
 TEST(ValidatorTypeCheck, DataFieldAccepted) {
     table_view_builder tb;
     tb.add_valid("D", 96).set_type(96, field_type::Data);
-    table_view t = std::move(tb).build();
-    dictionary_driven_validator v{std::move(t)};
+    dictionary_driven_validator v{std::move(tb).build()};
 
     auto val = bv("rawbytes");
     auto rc = v.validate_field(96, std::span<const std::byte>{val.data(), val.size()});
@@ -282,8 +270,7 @@ TEST(ValidatorTypeCheck, DataFieldAccepted) {
 TEST(ValidatorTypeCheck, ValidateFieldEnumInDomainAccepted) {
     table_view_builder tb;
     tb.add_valid("D", 54).set_type(54, field_type::Char).add_enum(54, "1").add_enum(54, "2");
-    table_view t = std::move(tb).build();
-    dictionary_driven_validator v{std::move(t)};
+    dictionary_driven_validator v{std::move(tb).build()};
 
     auto val = bv("1");
     auto rc = v.validate_field(54, std::span<const std::byte>{val.data(), val.size()});
@@ -293,8 +280,7 @@ TEST(ValidatorTypeCheck, ValidateFieldEnumInDomainAccepted) {
 TEST(ValidatorTypeCheck, ValidateFieldEnumOutOfDomainRejected) {
     table_view_builder tb;
     tb.add_valid("D", 54).set_type(54, field_type::Char).add_enum(54, "1").add_enum(54, "2");
-    table_view t = std::move(tb).build();
-    dictionary_driven_validator v{std::move(t)};
+    dictionary_driven_validator v{std::move(tb).build()};
 
     // "X" is not in {"1","2"} — enum_valid() is real, so this must reject.
     auto val = bv("X");
@@ -311,8 +297,7 @@ TEST(ValidatorTypeCheck, ValidateFieldEnumMultiValueAllDeclaredAccepted) {
         .add_enum(18, "6")
         .add_enum(18, "G")
         .set_multi_value(18, true);
-    table_view t = std::move(tb).build();
-    dictionary_driven_validator v{std::move(t)};
+    dictionary_driven_validator v{std::move(tb).build()};
 
     auto val = bv("1 G 6");
     auto rc = v.validate_field(18, std::span<const std::byte>{val.data(), val.size()});
@@ -327,8 +312,7 @@ TEST(ValidatorTypeCheck, ValidateFieldEnumMultiValueOneUndeclaredRejected) {
         .add_enum(18, "6")
         .add_enum(18, "G")
         .set_multi_value(18, true);
-    table_view t = std::move(tb).build();
-    dictionary_driven_validator v{std::move(t)};
+    dictionary_driven_validator v{std::move(tb).build()};
 
     auto val = bv("1 ZZ 6");  // "ZZ" not declared
     auto rc = v.validate_field(18, std::span<const std::byte>{val.data(), val.size()});
@@ -341,8 +325,7 @@ TEST(ValidatorTypeCheck, ValidateFieldEnumEmptyValueAccepted) {
     // even when the tag carries a non-empty codeset.
     table_view_builder tb;
     tb.add_valid("D", 54).set_type(54, field_type::Char).add_enum(54, "1").add_enum(54, "2");
-    table_view t = std::move(tb).build();
-    dictionary_driven_validator v{std::move(t)};
+    dictionary_driven_validator v{std::move(tb).build()};
 
     std::vector<std::byte> empty_val;
     auto rc = v.validate_field(54, std::span<const std::byte>{empty_val.data(), empty_val.size()});
@@ -512,8 +495,7 @@ TEST(ValidatorTypeCheck, ValidateWithInvalidFloatFieldRejected) {
 TEST(ValidatorTypeCheck, VirtualDispatchRequiredFields) {
     table_view_builder tb;
     tb.add_required("D", 35).add_required("D", 11);
-    table_view t = std::move(tb).build();
-    dictionary_driven_validator ddv{std::move(t)};
+    dictionary_driven_validator ddv{std::move(tb).build()};
     Validator* vp = &ddv;
 
     auto req = vp->required_fields("D");
@@ -523,8 +505,7 @@ TEST(ValidatorTypeCheck, VirtualDispatchRequiredFields) {
 TEST(ValidatorTypeCheck, VirtualDispatchFieldValidFor) {
     table_view_builder tb;
     tb.add_valid("D", 55);
-    table_view t = std::move(tb).build();
-    dictionary_driven_validator ddv{std::move(t)};
+    dictionary_driven_validator ddv{std::move(tb).build()};
     Validator* vp = &ddv;
 
     EXPECT_TRUE(vp->field_valid_for("D", 55)) << "tag 55 must be valid for D";
@@ -534,8 +515,7 @@ TEST(ValidatorTypeCheck, VirtualDispatchFieldValidFor) {
 TEST(ValidatorTypeCheck, VirtualDispatchGroupFirstField) {
     table_view_builder tb;
     tb.set_group_first(453, 448);
-    table_view t = std::move(tb).build();
-    dictionary_driven_validator ddv{std::move(t)};
+    dictionary_driven_validator ddv{std::move(tb).build()};
     Validator* vp = &ddv;
 
     EXPECT_EQ(vp->group_first_field(453), 448U) << "group_first_field via base must work";
@@ -547,8 +527,7 @@ TEST(ValidatorTypeCheck, VirtualDispatchGroupFirstField) {
 TEST(ValidatorTypeCheck, CharFieldEmptyValueRejected) {
     table_view_builder tb;
     tb.add_valid("D", 54).set_type(54, field_type::Char);
-    table_view t = std::move(tb).build();
-    dictionary_driven_validator v{std::move(t)};
+    dictionary_driven_validator v{std::move(tb).build()};
 
     std::vector<std::byte> empty_val;
     auto rc = v.validate_field(54, std::span<const std::byte>{empty_val.data(), empty_val.size()});
@@ -563,8 +542,7 @@ TEST(ValidatorTypeCheck, CharFieldEmptyValueRejected) {
 TEST(ValidatorTypeCheck, ValidateFieldIntNonDigitReturnsSpecificError) {
     table_view_builder tb;
     tb.set_type(34, field_type::Int);
-    table_view t = std::move(tb).build();
-    dictionary_driven_validator v{std::move(t)};
+    dictionary_driven_validator v{std::move(tb).build()};
 
     auto val = bv("abc");  // non-digit → wire_field_value_out_of_range
     auto rc = v.validate_field(34, std::span<const std::byte>{val.data(), val.size()});
