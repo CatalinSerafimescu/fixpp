@@ -25,6 +25,7 @@
 namespace {
 
 using fixpp::dict::table_view;
+using fixpp::dict::table_view_builder;
 
 [[nodiscard]] std::span<std::byte const> as_bytes(std::string_view sv) noexcept {
     return {reinterpret_cast<std::byte const*>(sv.data()), sv.size()};
@@ -43,8 +44,9 @@ TEST(TableViewEnumDomainTest, AbsentTagAccepts) {
 // code set is empty must still accept — this is a DISTINCT branch from
 // AbsentTagAccepts (a tag that was never registered at all).
 TEST(TableViewEnumDomainTest, EmptyCodesetAccepts) {
-    table_view tv;
-    tv.set_multi_value(35, false);  // registers tag 35 with zero codes
+    table_view_builder tvb;
+    tvb.set_multi_value(35, false);  // registers tag 35 with zero codes
+    table_view const tv = std::move(tvb).build();
     EXPECT_TRUE(tv.enum_valid(35, as_bytes("A")));
 }
 
@@ -54,31 +56,35 @@ TEST(TableViewEnumDomainTest, EmptyCodesetAccepts) {
 // to reject, because "" is absent from every codeset.
 
 TEST(TableViewEnumDomainTest, EmptyValueBypassesEnumCheckAndAccepts) {
-    table_view tv;
-    tv.add_enum(18, "1").add_enum(18, "G");
+    table_view_builder tvb;
+    tvb.add_enum(18, "1").add_enum(18, "G");
+    table_view const tv = std::move(tvb).build();
     EXPECT_TRUE(tv.enum_valid(18, std::span<std::byte const>{}));
 }
 
 // ── Single-value: byte-exact whole-token binary search ────────────────────
 
 TEST(TableViewEnumDomainTest, InDomainSingleValueAccepts) {
-    table_view tv;
-    tv.add_enum(54, "1").add_enum(54, "2").add_enum(54, "A");
+    table_view_builder tvb;
+    tvb.add_enum(54, "1").add_enum(54, "2").add_enum(54, "A");
+    table_view const tv = std::move(tvb).build();
     EXPECT_TRUE(tv.enum_valid(54, as_bytes("1")));
     EXPECT_TRUE(tv.enum_valid(54, as_bytes("A")));
 }
 
 TEST(TableViewEnumDomainTest, OutOfDomainSingleValueRejects) {
-    table_view tv;
-    tv.add_enum(54, "1").add_enum(54, "2").add_enum(54, "A");
+    table_view_builder tvb;
+    tvb.add_enum(54, "1").add_enum(54, "2").add_enum(54, "A");
+    table_view const tv = std::move(tvb).build();
     EXPECT_FALSE(tv.enum_valid(54, as_bytes("Z")));
 }
 
 // No case folding, no prefix matching (FR-009): MatchType(574) declares
 // A1..A5 but not bare 'A' — a prefix match would wrongly accept.
 TEST(TableViewEnumDomainTest, NoPrefixMatchOnDeclaredExtension) {
-    table_view tv;
-    tv.add_enum(574, "A1").add_enum(574, "A2").add_enum(574, "A3");
+    table_view_builder tvb;
+    tvb.add_enum(574, "A1").add_enum(574, "A2").add_enum(574, "A3");
+    table_view const tv = std::move(tvb).build();
     EXPECT_FALSE(tv.enum_valid(574, as_bytes("A")));
     EXPECT_TRUE(tv.enum_valid(574, as_bytes("A1")));
 }
@@ -90,16 +96,18 @@ TEST(TableViewEnumDomainTest, NoPrefixMatchOnDeclaredExtension) {
 // mutation of the tokenizer (a reject-only witness set would pass under a
 // broken tokenizer that never splits).
 TEST(TableViewEnumDomainTest, MultiValueAllDeclaredAccepts) {
-    table_view tv;
-    tv.add_enum(18, "1").add_enum(18, "G").add_enum(18, "6");
-    tv.set_multi_value(18);
+    table_view_builder tvb;
+    tvb.add_enum(18, "1").add_enum(18, "G").add_enum(18, "6");
+    tvb.set_multi_value(18);
+    table_view const tv = std::move(tvb).build();
     EXPECT_TRUE(tv.enum_valid(18, as_bytes("1 G 6")));
 }
 
 TEST(TableViewEnumDomainTest, MultiValueOneUndeclaredRejects) {
-    table_view tv;
-    tv.add_enum(18, "1").add_enum(18, "G").add_enum(18, "6");
-    tv.set_multi_value(18);
+    table_view_builder tvb;
+    tvb.add_enum(18, "1").add_enum(18, "G").add_enum(18, "6");
+    tvb.set_multi_value(18);
+    table_view const tv = std::move(tvb).build();
     EXPECT_FALSE(tv.enum_valid(18, as_bytes("1 ZZ 6")));
 }
 
@@ -107,17 +115,19 @@ TEST(TableViewEnumDomainTest, MultiValueOneUndeclaredRejects) {
 // which is never a declared code ⇒ reject. Byte-for-byte QuickFIX
 // (DataDictionary.h:265-275) — the tokenizer must NOT skip empty tokens.
 TEST(TableViewEnumDomainTest, DoubleSpaceYieldsEmptyTokenAndRejects) {
-    table_view tv;
-    tv.add_enum(18, "1").add_enum(18, "G").add_enum(18, "6");
-    tv.set_multi_value(18);
+    table_view_builder tvb;
+    tvb.add_enum(18, "1").add_enum(18, "G").add_enum(18, "6");
+    tvb.set_multi_value(18);
+    table_view const tv = std::move(tvb).build();
     EXPECT_FALSE(tv.enum_valid(18, as_bytes("1  G")));
 }
 
 // T018: a trailing space yields a final empty token ⇒ reject.
 TEST(TableViewEnumDomainTest, TrailingSpaceYieldsEmptyTokenAndRejects) {
-    table_view tv;
-    tv.add_enum(18, "1").add_enum(18, "G").add_enum(18, "6");
-    tv.set_multi_value(18);
+    table_view_builder tvb;
+    tvb.add_enum(18, "1").add_enum(18, "G").add_enum(18, "6");
+    tvb.set_multi_value(18);
+    table_view const tv = std::move(tvb).build();
     EXPECT_FALSE(tv.enum_valid(18, as_bytes("1 G ")));
 }
 
@@ -125,8 +135,9 @@ TEST(TableViewEnumDomainTest, TrailingSpaceYieldsEmptyTokenAndRejects) {
 // ONE whole token, with NO tokenization — tokenization applies only to
 // tags the dictionary types as multi-value.
 TEST(TableViewEnumDomainTest, SingleValueFieldWithSpaceIsNotTokenized) {
-    table_view tv;
-    tv.add_enum(166, "ISO Country Code");  // multi_value left at default false
+    table_view_builder tvb;
+    tvb.add_enum(166, "ISO Country Code");  // multi_value left at default false
+    table_view const tv = std::move(tvb).build();
     EXPECT_TRUE(tv.enum_valid(166, as_bytes("ISO Country Code")));
     EXPECT_FALSE(tv.enum_valid(166, as_bytes("ISO")));
 }
@@ -140,8 +151,9 @@ TEST(TableViewEnumDomainTest, SingleValueFieldWithSpaceIsNotTokenized) {
 // code byte >= 0x80).
 
 TEST(TableViewEnumDomainTest, SingleCharMaskTwoByteTokenRejects) {
-    table_view tv;
-    tv.add_enum(54, "1").add_enum(54, "2");
+    table_view_builder tvb;
+    tvb.add_enum(54, "1").add_enum(54, "2");
+    table_view const tv = std::move(tvb).build();
     EXPECT_TRUE(tv.enum_valid(54, as_bytes("1")));
     // A 2-byte token must not match the declared 1-byte code "1" by prefix —
     // enum_valid's Tier-2 path guards on sv.size()==1 before the mask test.
@@ -149,9 +161,10 @@ TEST(TableViewEnumDomainTest, SingleCharMaskTwoByteTokenRejects) {
 }
 
 TEST(TableViewEnumDomainTest, SingleCharMaskHighByteDeclaredAccepts) {
-    table_view tv;
+    table_view_builder tvb;
     std::string const high_byte(1, static_cast<char>(0xC3));  // 195 >= 0x80
-    tv.add_enum(54, high_byte);
+    tvb.add_enum(54, high_byte);
+    table_view const tv = std::move(tvb).build();
     EXPECT_TRUE(tv.enum_valid(54, as_bytes(high_byte)))
         << "a declared byte >= 0x80 must be accepted -- proves mask_has indexes "
            "via unsigned char, not signed char (a signed-char bug would corrupt "
@@ -161,10 +174,11 @@ TEST(TableViewEnumDomainTest, SingleCharMaskHighByteDeclaredAccepts) {
 }
 
 TEST(TableViewEnumDomainTest, SingleCharMaskMultiValueHighByteTokenAccepts) {
-    table_view tv;
+    table_view_builder tvb;
     std::string const high_byte(1, static_cast<char>(0xC3));
-    tv.add_enum(18, "1").add_enum(18, high_byte);
-    tv.set_multi_value(18);
+    tvb.add_enum(18, "1").add_enum(18, high_byte);
+    tvb.set_multi_value(18);
+    table_view const tv = std::move(tvb).build();
     std::string const value = std::string("1 ") + high_byte;
     EXPECT_TRUE(tv.enum_valid(18, as_bytes(value)))
         << "a multi-value token equal to a declared high byte must be accepted";
@@ -175,9 +189,10 @@ TEST(TableViewEnumDomainTest, SingleCharMaskMultiValueHighByteTokenAccepts) {
 // path instead of the mask. ─────────────────────────────────────────────────
 
 TEST(TableViewEnumDomainTest, SortedVectorFallbackMixedLengthWholeTokenMatch) {
-    table_view tv;
+    table_view_builder tvb;
     // "A1" (2 bytes) clears all_single_char for tag 574.
-    tv.add_enum(574, "A1").add_enum(574, "1");
+    tvb.add_enum(574, "A1").add_enum(574, "1");
+    table_view const tv = std::move(tvb).build();
     EXPECT_TRUE(tv.enum_valid(574, as_bytes("1")))
         << "declared 1-byte code must accept via the fallback path too";
     EXPECT_TRUE(tv.enum_valid(574, as_bytes("A1"))) << "declared 2-byte code must accept";
@@ -188,9 +203,10 @@ TEST(TableViewEnumDomainTest, SortedVectorFallbackMixedLengthWholeTokenMatch) {
 }
 
 TEST(TableViewEnumDomainTest, SortedVectorFallbackMixedLengthHighByteAccepts) {
-    table_view tv;
+    table_view_builder tvb;
     std::string const high_byte(1, static_cast<char>(0xC3));
-    tv.add_enum(574, "A1").add_enum(574, high_byte);  // mixed lengths -> fallback path
+    tvb.add_enum(574, "A1").add_enum(574, high_byte);  // mixed lengths -> fallback path
+    table_view const tv = std::move(tvb).build();
     EXPECT_TRUE(tv.enum_valid(574, as_bytes(high_byte)))
         << "a declared high byte must accept via the byte-exact fallback";
     EXPECT_FALSE(tv.enum_valid(574, as_bytes("C"))) << "an undeclared byte must reject";
@@ -199,8 +215,9 @@ TEST(TableViewEnumDomainTest, SortedVectorFallbackMixedLengthHighByteAccepts) {
 // ── T019: add_enum / set_multi_value population surface ───────────────────
 
 TEST(TableViewEnumDomainTest, AddEnumDedupesDuplicateCodes) {
-    table_view tv;
-    tv.add_enum(54, "1").add_enum(54, "1").add_enum(54, "2");
+    table_view_builder tvb;
+    tvb.add_enum(54, "1").add_enum(54, "1").add_enum(54, "2");
+    table_view const tv = std::move(tvb).build();
     EXPECT_TRUE(tv.enum_valid(54, as_bytes("1")));
     EXPECT_TRUE(tv.enum_valid(54, as_bytes("2")));
     EXPECT_FALSE(tv.enum_valid(54, as_bytes("3")));
@@ -209,9 +226,10 @@ TEST(TableViewEnumDomainTest, AddEnumDedupesDuplicateCodes) {
 // The codes are OWNED copies: mutating the caller's original buffer after
 // add_enum() must not affect a subsequent enum_valid() call.
 TEST(TableViewEnumDomainTest, AddEnumOwnsACopyOfTheCodeBytes) {
-    table_view tv;
+    table_view_builder tvb;
     std::string mutable_code = "1";
-    tv.add_enum(54, mutable_code);
+    tvb.add_enum(54, mutable_code);
+    table_view const tv = std::move(tvb).build();
     mutable_code[0] = 'Z';  // mutate the source buffer after add_enum returns
     EXPECT_TRUE(tv.enum_valid(54, as_bytes("1")));   // still declared
     EXPECT_FALSE(tv.enum_valid(54, as_bytes("Z")));  // "Z" was never declared
@@ -220,8 +238,9 @@ TEST(TableViewEnumDomainTest, AddEnumOwnsACopyOfTheCodeBytes) {
 // set_multi_value is add_enum's companion for the multi-value bit
 // (FR-005) — without it, the tokenizer has no unit-level witness.
 TEST(TableViewEnumDomainTest, SetMultiValueDefaultsFalse) {
-    table_view tv;
-    tv.add_enum(18, "1").add_enum(18, "G");
+    table_view_builder tvb;
+    tvb.add_enum(18, "1").add_enum(18, "G");
+    table_view const tv = std::move(tvb).build();
     // multi_value never set ⇒ default false ⇒ "1 G" is ONE undeclared token.
     EXPECT_FALSE(tv.enum_valid(18, as_bytes("1 G")));
 }

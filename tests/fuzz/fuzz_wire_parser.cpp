@@ -84,8 +84,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     // pointer arithmetic) under adversarial offsets — the wire layer's most
     // intricate pointer math, previously never fuzzed because the harness built
     // Parser from an EMPTY table_view (wire-hostile-input-review T-1).
-    fixpp::dict::table_view tv{};
-    tv.set_group_first(453, 448).add_group_member(453, 447);  // NoPartyIDs group
+    fixpp::dict::table_view_builder tvb;
+    tvb.set_group_first(453, 448).add_group_member(453, 447);  // NoPartyIDs group
+    fixpp::dict::table_view const tv = std::move(tvb).build();
     Parser<access_mode::Index> p{tv};
 
     // parse() is noexcept; any exception escape -> std::terminate -> libFuzzer

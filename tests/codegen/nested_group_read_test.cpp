@@ -125,8 +125,8 @@ decimal_t parse_decimal(std::string_view sv, std::pmr::memory_resource* mr) {
 // would produce for a non-collided dictionary (src/dictionary/dictionary.cpp /
 // xml_loader.cpp).
 fixpp::dict::table_view make_correct_massquote_dict() {
-    fixpp::dict::table_view dict;
-    dict.add_group_member(296, 302)   // QuoteSetID — NoQuoteSets' own delimiter
+    fixpp::dict::table_view_builder b;
+    b.add_group_member(296, 302)      // QuoteSetID — NoQuoteSets' own delimiter
         .add_group_member(296, 295)   // NoQuoteEntries (nested group's own count field)
         .add_group_member(296, 299)   // QuoteEntryID — transitively under 296
         .add_group_member(296, 132)   // BidPx — transitively under 296
@@ -140,7 +140,7 @@ fixpp::dict::table_view make_correct_massquote_dict() {
         .add_group_member(295, 555)   // NoLegs — direct member of 295
         .add_group_member(295, 602)   // LegSecurityID — transitively under 295
         .add_group_member(555, 602);  // LegSecurityID — NoLegs' own delimiter
-    return dict;
+    return std::move(b).build();
 }
 
 }  // namespace
@@ -706,13 +706,13 @@ TEST(NestedGroupRead, RealDictionaryMassQuote296RootContextSeededAtCtorNoCachePo
 namespace {
 
 fixpp::dict::table_view make_depth3_divergent_dict() {
-    fixpp::dict::table_view dict;
+    fixpp::dict::table_view_builder b;
     // Outer 296 + middle 295 carry FULL transitive membership (incl. 602/603) so
     // the QuoteSet/QuoteEntries slices span every nested byte — mirrors what
     // as_table_view()'s recursive expand_field_list produces (bare store; the
     // parser's context queries for 296/295 MISS and fall back here, which is
     // CORRECT at depth 1/2 — the bug is depth-3 only).
-    dict.add_group_member(296, 302)
+    b.add_group_member(296, 302)
         .add_group_member(296, 295)
         .add_group_member(296, 299)
         .add_group_member(296, 132)
@@ -727,13 +727,13 @@ fixpp::dict::table_view make_depth3_divergent_dict() {
         .add_group_member(295, 602)
         .add_group_member(295, 603);
     // Grandchild 555 BARE (WRONG): delimiter 602 only — 603 is NOT a member.
-    dict.set_group_first(555, 602);
+    b.set_group_first(555, 602);
     // Grandchild 555 CONTEXT (CORRECT), under lookup key ("i",[296,295],555):
     // delimiter 602 + the trailing member 603.
     std::array<std::uint16_t, 2> const path555{296, 295};
-    dict.set_group_first_ctx("i", path555, 555, 602);
-    dict.add_group_member_ctx("i", path555, 555, 603);
-    return dict;
+    b.set_group_first_ctx("i", path555, 555, 602);
+    b.add_group_member_ctx("i", path555, 555, 603);
+    return std::move(b).build();
 }
 
 }  // namespace

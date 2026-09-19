@@ -150,8 +150,8 @@ constexpr std::size_t kTinyCap = 3775;      // 389 re-tune, see sweep above
 constexpr std::size_t kAmpleCap = 16384;
 
 fixpp::dict::table_view make_dict() {
-    fixpp::dict::table_view dict;
-    dict.add_valid("i", 35)
+    fixpp::dict::table_view_builder dictb;
+    dictb.add_valid("i", 35)
         .add_valid("i", kOuterNoTag)
         .add_valid("i", kOuterDelim)
         .add_valid("i", kInnerNoTag)
@@ -160,7 +160,7 @@ fixpp::dict::table_view make_dict() {
         .add_group_member(kOuterNoTag, kInnerNoTag)
         .add_group_member(kOuterNoTag, kInnerDelim)
         .set_group_first(kInnerNoTag, kInnerDelim);
-    return dict;
+    return std::move(dictb).build();
 }
 
 // One outer (296/302) occurrence containing a nested group (295/299) with

@@ -64,8 +64,8 @@ std::vector<std::byte> make_raw_frame(std::string const& body) {
 // truncates at the 2nd nested entry (its repeated delimiter looks like a new
 // outer-instance boundary).
 TEST(NestedGroupExtent, MultiEntryNestedExtentGuard) {
-    fixpp::dict::table_view dict;
-    dict.add_valid("D", 35)
+    fixpp::dict::table_view_builder dictb;
+    dictb.add_valid("D", 35)
         .add_valid("D", 453)
         .add_valid("D", 448)
         .add_valid("D", 802)
@@ -77,6 +77,7 @@ TEST(NestedGroupExtent, MultiEntryNestedExtentGuard) {
         .add_group_member(453, 524)  // nested member — transitively under 453
         .set_group_first(802, 523)
         .add_group_member(802, 524);
+    fixpp::dict::table_view const dict = std::move(dictb).build();
 
     auto buf = make_raw_frame(
         "35=D\x01"
@@ -128,8 +129,8 @@ TEST(NestedGroupExtent, MultiEntryNestedExtentGuard) {
 
 // (a) single-entry nested: no over-consumption past the one entry.
 TEST(NestedGroupExtent, SingleEntryNestedNoOverConsumption) {
-    fixpp::dict::table_view dict;
-    dict.add_valid("D", 35)
+    fixpp::dict::table_view_builder dictb;
+    dictb.add_valid("D", 35)
         .add_valid("D", 453)
         .add_valid("D", 448)
         .add_valid("D", 802)
@@ -141,6 +142,7 @@ TEST(NestedGroupExtent, SingleEntryNestedNoOverConsumption) {
         .add_group_member(453, 524)
         .set_group_first(802, 523)
         .add_group_member(802, 524);
+    fixpp::dict::table_view const dict = std::move(dictb).build();
 
     auto buf = make_raw_frame(
         "35=D\x01"
@@ -180,8 +182,8 @@ TEST(NestedGroupExtent, SingleEntryNestedNoOverConsumption) {
 // (b) count-of-zero nested: consumes no extent (B-004-7); the outer walk
 // continues normally past the zero-count group to a trailing scalar.
 TEST(NestedGroupExtent, CountOfZeroNestedConsumesNoExtent) {
-    fixpp::dict::table_view dict;
-    dict.add_valid("D", 35)
+    fixpp::dict::table_view_builder dictb;
+    dictb.add_valid("D", 35)
         .add_valid("D", 453)
         .add_valid("D", 448)
         .add_valid("D", 802)
@@ -189,6 +191,7 @@ TEST(NestedGroupExtent, CountOfZeroNestedConsumesNoExtent) {
         .set_group_first(453, 448)
         .add_group_member(453, 802)
         .add_group_member(453, 449);
+    fixpp::dict::table_view const dict = std::move(dictb).build();
 
     auto buf = make_raw_frame(
         "35=D\x01"
@@ -230,13 +233,14 @@ TEST(NestedGroupExtent, CountOfZeroNestedConsumesNoExtent) {
 
 // (c) flat/non-nested group: unaffected by the nesting-aware walk.
 TEST(NestedGroupExtent, FlatNonNestedGroupUnchanged) {
-    fixpp::dict::table_view dict;
-    dict.add_valid("D", 35)
+    fixpp::dict::table_view_builder dictb;
+    dictb.add_valid("D", 35)
         .add_valid("D", 453)
         .add_valid("D", 448)
         .add_valid("D", 447)
         .set_group_first(453, 448)
         .add_group_member(453, 447);
+    fixpp::dict::table_view const dict = std::move(dictb).build();
 
     auto buf = make_raw_frame(
         "35=D\x01"
@@ -271,8 +275,8 @@ TEST(NestedGroupExtent, FlatNonNestedGroupUnchanged) {
 // regression to (e) below, not the C-5 "same tag reused across differing
 // CONTEXTS" case — see (e)'s comment for that.
 TEST(NestedGroupExtent, MultipleOccurrencesOfSameGroupNoCollision) {
-    fixpp::dict::table_view dict;
-    dict.add_valid("D", 35)
+    fixpp::dict::table_view_builder dictb;
+    dictb.add_valid("D", 35)
         .add_valid("D", 453)
         .add_valid("D", 448)
         .add_valid("D", 802)
@@ -284,6 +288,7 @@ TEST(NestedGroupExtent, MultipleOccurrencesOfSameGroupNoCollision) {
         .add_group_member(453, 524)
         .set_group_first(802, 523)
         .add_group_member(802, 524);
+    fixpp::dict::table_view const dict = std::move(dictb).build();
 
     auto buf = make_raw_frame(
         "35=D\x01"
@@ -352,8 +357,8 @@ TEST(NestedGroupExtent, MultipleOccurrencesOfSameGroupNoCollision) {
 // resolve their own 2-entry nested group correctly — no cross-context
 // interference, no collision, both context keys independently correct.
 TEST(NestedGroupExtent, BenignSameMembershipReuseAcrossContexts) {
-    fixpp::dict::table_view dict;
-    dict.add_valid("D", 35)
+    fixpp::dict::table_view_builder dictb;
+    dictb.add_valid("D", 35)
         .add_valid("D", 453)
         .add_valid("D", 448)
         .add_valid("8", 460)
@@ -369,10 +374,11 @@ TEST(NestedGroupExtent, BenignSameMembershipReuseAcrossContexts) {
     // Context-scoped registration: no_tag 802 nested under 453 in msg "D",
     // and under 460 in msg "8" — TWO DISTINCT context keys, IDENTICAL
     // declared membership {523, 524}.
-    dict.set_group_first_ctx("D", std::array<std::uint16_t, 1>{453}, 802, 523);
-    dict.add_group_member_ctx("D", std::array<std::uint16_t, 1>{453}, 802, 524);
-    dict.set_group_first_ctx("8", std::array<std::uint16_t, 1>{460}, 802, 523);
-    dict.add_group_member_ctx("8", std::array<std::uint16_t, 1>{460}, 802, 524);
+    dictb.set_group_first_ctx("D", std::array<std::uint16_t, 1>{453}, 802, 523);
+    dictb.add_group_member_ctx("D", std::array<std::uint16_t, 1>{453}, 802, 524);
+    dictb.set_group_first_ctx("8", std::array<std::uint16_t, 1>{460}, 802, 523);
+    dictb.add_group_member_ctx("8", std::array<std::uint16_t, 1>{460}, 802, 524);
+    fixpp::dict::table_view const dict = std::move(dictb).build();
 
     auto buf_d = make_raw_frame(
         "35=D\x01"
@@ -460,12 +466,13 @@ TEST(NestedGroupExtent, BenignSameMembershipReuseAcrossContexts) {
 // the 17th pair's "900" field triggers the depth==16 check (kMaxGroupDepth)
 // before anything inside it is read.
 TEST(NestedGroupExtent, DepthOverflowReturnsGroupTooLarge) {
-    fixpp::dict::table_view dict;
-    dict.add_valid("D", 35)
+    fixpp::dict::table_view_builder dictb;
+    dictb.add_valid("D", 35)
         .add_valid("D", 900)
         .add_valid("D", 901)
         .set_group_first(900, 901)
         .add_group_member(900, 900);  // 900 is a member of its own group -> self-nesting chain
+    fixpp::dict::table_view const dict = std::move(dictb).build();
 
     std::string body = "35=D\x01";
     for (int i = 0; i < 17; ++i) {
@@ -495,12 +502,13 @@ TEST(NestedGroupExtent, DepthOverflowReturnsGroupTooLarge) {
 // stays within depth<16 and must NOT overflow — proves the K=16 disposition
 // is a genuine boundary, not an always-fail stub.
 TEST(NestedGroupExtent, DepthSixteenNoOverflow) {
-    fixpp::dict::table_view dict;
-    dict.add_valid("D", 35)
+    fixpp::dict::table_view_builder dictb;
+    dictb.add_valid("D", 35)
         .add_valid("D", 900)
         .add_valid("D", 901)
         .set_group_first(900, 901)
         .add_group_member(900, 900);
+    fixpp::dict::table_view const dict = std::move(dictb).build();
 
     std::string body = "35=D\x01";
     for (int i = 0; i < 16; ++i) {

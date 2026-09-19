@@ -256,20 +256,24 @@ TEST(ArenaFit, NearCapHeadroomProbe) {
 // pass for the WRONG reason — a dictionary-registration bug would also yield
 // an empty/absent read; asserting the SPECIFIC wire_group_too_large error at
 // n=17 while n=16 yields a real group_index rules that out).
+fixpp::dict::table_view make_chain_table(int n) {
+    fixpp::dict::table_view_builder b;
+    for (int i = 0; i < n; ++i) {
+        auto const t_i = static_cast<std::uint16_t>(9000 + i);
+        auto const d_i = static_cast<std::uint16_t>(8000 + i);
+        auto const second =
+            (i < n - 1) ? static_cast<std::uint16_t>(9000 + i + 1) : std::uint16_t{7000};
+        b.add_group_member(t_i, d_i);
+        b.add_group_member(t_i, second);
+    }
+    return std::move(b).build();
+}
+
 struct ChainFixture {
     fixpp::dict::table_view tv;
     std::vector<std::byte> frame_bytes;
 
-    explicit ChainFixture(int n) {
-        for (int i = 0; i < n; ++i) {
-            auto const t_i = static_cast<std::uint16_t>(9000 + i);
-            auto const d_i = static_cast<std::uint16_t>(8000 + i);
-            auto const second =
-                (i < n - 1) ? static_cast<std::uint16_t>(9000 + i + 1) : std::uint16_t{7000};
-            tv.add_group_member(t_i, d_i);
-            tv.add_group_member(t_i, second);
-        }
-
+    explicit ChainFixture(int n) : tv{make_chain_table(n)} {
         std::string body = "35=X\x01";
         for (int i = 0; i < n; ++i) {
             body += std::to_string(9000 + i) + "=1\x01";

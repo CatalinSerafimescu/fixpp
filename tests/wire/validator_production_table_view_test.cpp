@@ -48,6 +48,7 @@ namespace {
 using fixpp::core::error;
 using fixpp::dict::field_type;
 using fixpp::dict::table_view;
+using fixpp::dict::table_view_builder;
 using fixpp::wire::access_mode;
 using fixpp::wire::dictionary_driven_validator;
 using fixpp::wire::MessageView;
@@ -325,8 +326,9 @@ TEST(ValidatorProductionTableView, FloatGarbageValueRemappedToWireOutOfRange) {
 // table_view integration, we test the structural invariant instead.
 
 TEST(ValidatorProductionTableView, FloatParseErrorAlwaysMapsToWireSlot) {
-    table_view tv;
-    tv.set_field_type(38, field_type::Float);
+    table_view_builder tvb;
+    tvb.set_field_type(38, field_type::Float);
+    table_view tv = std::move(tvb).build();
     dictionary_driven_validator v{std::move(tv)};
 
     // (a) Garbage value — guaranteed to fail decimal parse.

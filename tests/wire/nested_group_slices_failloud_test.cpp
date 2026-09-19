@@ -115,8 +115,8 @@ constexpr int kInnerInstances = 40;
 constexpr std::size_t kFailCap = 6000;
 
 fixpp::dict::table_view make_dict() {
-    fixpp::dict::table_view dict;
-    dict.add_valid("D", 35)
+    fixpp::dict::table_view_builder dictb;
+    dictb.add_valid("D", 35)
         .add_valid("D", 34)
         .add_valid("D", kOuterNoTag)
         .add_valid("D", kOuterDelim)
@@ -131,7 +131,7 @@ fixpp::dict::table_view make_dict() {
         .add_group_member(kOuterNoTag, kInnerMember)
         .set_group_first(kInnerNoTag, kInnerDelim)
         .add_group_member(kInnerNoTag, kInnerMember);
-    return dict;
+    return std::move(dictb).build();
 }
 
 // One outer (453/448/447) occurrence containing a nested group (539/524/525)

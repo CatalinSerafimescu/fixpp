@@ -24,13 +24,14 @@
 #pragma once
 
 #include <fixpp/dict/table_view.hpp>
+#include <utility>
 
 namespace fixpp_test_support {
 
-inline fixpp::dict::table_view& group73_table_view() {
-    static fixpp::dict::table_view tv = [] {
-        fixpp::dict::table_view t;
-        t.add_valid("E", 35)
+inline fixpp::dict::table_view const& group73_table_view() {
+    static fixpp::dict::table_view const tv = [] {
+        fixpp::dict::table_view_builder b;
+        b.add_valid("E", 35)
             .add_valid("E", 73)
             .add_valid("E", 11)
             .add_valid("E", 37)
@@ -40,7 +41,7 @@ inline fixpp::dict::table_view& group73_table_view() {
             .add_group_member(73, 37)
             .add_group_member(73, 38)
             .add_group_member(73, 54);
-        return t;
+        return std::move(b).build();
     }();
     return tv;
 }
@@ -50,10 +51,10 @@ inline fixpp::dict::table_view& group73_table_view() {
 // and 604 (delimiter 605). 604 is a nested group in real FIX; these frames use
 // it at top level, which is another reason the shipped dictionary is the wrong
 // oracle for them.
-inline fixpp::dict::table_view& legs_and_alt_table_view() {
-    static fixpp::dict::table_view tv = [] {
-        fixpp::dict::table_view t;
-        t.add_valid("AB", 35)
+inline fixpp::dict::table_view const& legs_and_alt_table_view() {
+    static fixpp::dict::table_view const tv = [] {
+        fixpp::dict::table_view_builder b;
+        b.add_valid("AB", 35)
             .add_valid("AB", 34)
             .add_valid("AB", 555)
             .add_valid("AB", 600)
@@ -63,7 +64,7 @@ inline fixpp::dict::table_view& legs_and_alt_table_view() {
             .set_group_first(555, 600)
             .add_group_member(555, 608)
             .set_group_first(604, 605);
-        return t;
+        return std::move(b).build();
     }();
     return tv;
 }

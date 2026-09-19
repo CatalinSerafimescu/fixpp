@@ -41,6 +41,7 @@
 namespace {
 
 using fixpp::dict::table_view;
+using fixpp::dict::table_view_builder;
 using fixpp::wire::access_mode;
 using fixpp::wire::dictionary_driven_validator;
 using fixpp::wire::MessageView;
@@ -80,13 +81,13 @@ MessageView<access_mode::Index> parse_index(std::vector<std::byte> const& buf,
 // 555's bare (first-seen) delimiter DIVERGES from its context delimiter, so the
 // flat root-context walk mis-validates it.
 table_view make_nested_membership_dict() {
-    table_view tv;
+    table_view_builder tvb;
     for (std::uint16_t const t :
          {std::uint16_t{8}, std::uint16_t{9}, std::uint16_t{10}, std::uint16_t{35},
           std::uint16_t{296}, std::uint16_t{302}, std::uint16_t{295}, std::uint16_t{299},
           std::uint16_t{132}, std::uint16_t{133}, std::uint16_t{555}, std::uint16_t{602},
           std::uint16_t{603}}) {
-        tv.add_valid("i", t);
+        tvb.add_valid("i", t);
     }
 
     std::array<std::uint16_t, 0> const root{};
@@ -94,26 +95,26 @@ table_view make_nested_membership_dict() {
     std::array<std::uint16_t, 2> const p296_295{296, 295};
 
     // Context store — correct membership at each real path.
-    tv.set_group_first_ctx("i", root, 296, 302);
+    tvb.set_group_first_ctx("i", root, 296, 302);
     for (std::uint16_t const m : {295, 299, 132, 133, 555, 602, 603}) {
-        tv.add_group_member_ctx("i", root, 296, m);
+        tvb.add_group_member_ctx("i", root, 296, m);
     }
-    tv.set_group_first_ctx("i", p296, 295, 299);
+    tvb.set_group_first_ctx("i", p296, 295, 299);
     for (std::uint16_t const m : {132, 133, 555, 602, 603}) {
-        tv.add_group_member_ctx("i", p296, 295, m);
+        tvb.add_group_member_ctx("i", p296, 295, m);
     }
-    tv.set_group_first_ctx("i", p296_295, 555, 602);  // CORRECT grandchild delimiter
-    tv.add_group_member_ctx("i", p296_295, 555, 603);
+    tvb.set_group_first_ctx("i", p296_295, 555, 602);  // CORRECT grandchild delimiter
+    tvb.add_group_member_ctx("i", p296_295, 555, 603);
 
     // Bare/first-seen store — 296/295 correct, but 555's delimiter WRONG (299),
     // the divergence the nesting-aware walk must resolve via context.
-    tv.set_group_first(296, 302);
-    for (std::uint16_t const m : {295, 299, 132, 133, 555, 602, 603}) tv.add_group_member(296, m);
-    tv.set_group_first(295, 299);
-    for (std::uint16_t const m : {132, 133, 555, 602, 603}) tv.add_group_member(295, m);
-    tv.set_group_first(555, 299);  // WRONG bare delimiter (first-seen variant)
-    tv.add_group_member(555, 602).add_group_member(555, 603);
-    return tv;
+    tvb.set_group_first(296, 302);
+    for (std::uint16_t const m : {295, 299, 132, 133, 555, 602, 603}) tvb.add_group_member(296, m);
+    tvb.set_group_first(295, 299);
+    for (std::uint16_t const m : {132, 133, 555, 602, 603}) tvb.add_group_member(295, m);
+    tvb.set_group_first(555, 299);  // WRONG bare delimiter (first-seen variant)
+    tvb.add_group_member(555, 602).add_group_member(555, 603);
+    return std::move(tvb).build();
 }
 
 }  // namespace

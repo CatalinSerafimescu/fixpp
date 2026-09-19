@@ -65,6 +65,7 @@
 namespace {
 
 using fixpp::dict::table_view;
+using fixpp::dict::table_view_builder;
 using fixpp::wire::access_mode;
 using fixpp::wire::dict_hooks;
 using fixpp::wire::Parser;
@@ -416,8 +417,9 @@ TEST(DictHooksCustomPair, StandardLengthTagIgnoresConflictingDictionaryPair) {
     // RawDataLength(95) is standard-paired with RawData(96). This hand-built
     // dictionary re-pairs it with a custom Data tag 5002; the standard pair
     // must still govern.
-    table_view tv;
-    tv.set_length_pair_data_tag(95, 5002);
+    table_view_builder tvb;
+    tvb.set_length_pair_data_tag(95, 5002);
+    table_view const tv = std::move(tvb).build();
     ASSERT_EQ(tv.length_pair_data_tag(95), 5002U)
         << "precondition: the dictionary really did register the conflicting pair";
 
@@ -431,8 +433,9 @@ TEST(DictHooksCustomPair, StandardDataTagIsNeverPairedByADictionary) {
     // STANDARD Data tag 96 (RawData). Because 96 already names a side of a
     // standard pair, the dictionary pair must not be honoured at all — not
     // even under the custom Length tag.
-    table_view tv;
-    tv.set_length_pair_data_tag(5001, 96);
+    table_view_builder tvb;
+    tvb.set_length_pair_data_tag(5001, 96);
+    table_view const tv = std::move(tvb).build();
     ASSERT_EQ(tv.length_pair_data_tag(5001), 96U)
         << "precondition: the dictionary really did register the conflicting pair";
 
@@ -443,17 +446,19 @@ TEST(DictHooksCustomPair, StandardDataTagIsNeverPairedByADictionary) {
 
 // ── Re-pairing keeps both directions inverse (Gate B r1 G-4) ────────────────
 TEST(DictHooksCustomPair, RepairingATagKeepsBothDirectionsInverse) {
-    table_view length_moves;
-    length_moves.set_length_pair_data_tag(5001, 5002);
-    length_moves.set_length_pair_data_tag(5001, 5003);
+    table_view_builder length_movesb;
+    length_movesb.set_length_pair_data_tag(5001, 5002);
+    length_movesb.set_length_pair_data_tag(5001, 5003);
+    table_view const length_moves = std::move(length_movesb).build();
     EXPECT_EQ(length_moves.length_pair_data_tag(5001), 5003U);
     EXPECT_EQ(length_moves.data_pair_length_tag(5003), 5001U);
     EXPECT_EQ(length_moves.data_pair_length_tag(5002), 0U) << "the old Data tag keeps no Length";
     EXPECT_EQ(dict_hooks::for_table_view(length_moves).length_tag_for_data(5002), 0U);
 
-    table_view data_moves;
-    data_moves.set_length_pair_data_tag(5001, 5002);
-    data_moves.set_length_pair_data_tag(5011, 5002);
+    table_view_builder data_movesb;
+    data_movesb.set_length_pair_data_tag(5001, 5002);
+    data_movesb.set_length_pair_data_tag(5011, 5002);
+    table_view const data_moves = std::move(data_movesb).build();
     EXPECT_EQ(data_moves.data_pair_length_tag(5002), 5011U);
     EXPECT_EQ(data_moves.length_pair_data_tag(5011), 5002U);
     EXPECT_EQ(data_moves.length_pair_data_tag(5001), 0U) << "the old Length tag keeps no Data";
@@ -471,8 +476,9 @@ TEST(DictHooksCustomPair, LengthTagForDataIsTheInverseWithTheSamePrecedence) {
     EXPECT_EQ(hooks.length_tag_for_data(5001), 0U) << "a Length tag is not a Data tag";
     EXPECT_EQ(dict_hooks::none().length_tag_for_data(5002), 0U) << "no dictionary, no custom pair";
 
-    table_view conflicting;
-    conflicting.set_length_pair_data_tag(5001, 96);
+    table_view_builder conflictingb;
+    conflictingb.set_length_pair_data_tag(5001, 96);
+    table_view const conflicting = std::move(conflictingb).build();
     EXPECT_EQ(dict_hooks::for_table_view(conflicting).length_tag_for_data(96), 95U)
         << "the standard RawDataLength(95) keeps RawData(96)";
 }
@@ -532,15 +538,16 @@ void expect_fast_paths_change_no_answer(table_view const& tv) {
 }  // namespace
 
 TEST(DictHooksCustomPair, FastPathsChangeNoAnswerForAnyTag) {
-    table_view tv;
-    tv.set_length_pair_data_tag(5001, 5002);  // a custom pair
-    tv.set_length_pair_data_tag(95, 7002);    // re-pairs a standard Length
-    tv.set_length_pair_data_tag(7101, 96);    // pairs a standard Data tag
-    tv.set_length_pair_data_tag(7201, 7202);
-    tv.set_length_pair_data_tag(7201, 7203);  // the Length moves: 7202's bit stays set
-    tv.set_length_pair_data_tag(7301, 7302);
-    tv.set_length_pair_data_tag(7311, 7302);    // the Data moves: 7301's bit stays set
-    tv.set_length_pair_data_tag(65535, 65534);  // the top of the tag range
+    table_view_builder tvb;
+    tvb.set_length_pair_data_tag(5001, 5002);  // a custom pair
+    tvb.set_length_pair_data_tag(95, 7002);    // re-pairs a standard Length
+    tvb.set_length_pair_data_tag(7101, 96);    // pairs a standard Data tag
+    tvb.set_length_pair_data_tag(7201, 7202);
+    tvb.set_length_pair_data_tag(7201, 7203);  // the Length moves: 7202's bit stays set
+    tvb.set_length_pair_data_tag(7301, 7302);
+    tvb.set_length_pair_data_tag(7311, 7302);    // the Data moves: 7301's bit stays set
+    tvb.set_length_pair_data_tag(65535, 65534);  // the top of the tag range
+    table_view const tv = std::move(tvb).build();
     auto const hooks = dict_hooks::for_table_view(tv);
     // The walk compares answers, so it must see pairs that answer non-zero.
     ASSERT_EQ(hooks.data_tag_for_length(5001), 5002U);
@@ -556,10 +563,11 @@ TEST(DictHooksCustomPair, FastPathsChangeNoAnswerForAnyTag) {
     // names a standard tag gets no callback, and the rule answers those pairs from
     // the standard table anyway. If the flag were set here, the answers would not
     // change — only the per-field cost — so this arm pins the flag itself as well.
-    table_view standard_only;
-    standard_only.set_length_pair_data_tag(95, 7002);   // a standard Length
-    standard_only.set_length_pair_data_tag(7101, 96);   // a standard Data
-    standard_only.set_length_pair_data_tag(354, 7202);  // EncodedTextLen
+    table_view_builder standard_onlyb;
+    standard_onlyb.set_length_pair_data_tag(95, 7002);   // a standard Length
+    standard_onlyb.set_length_pair_data_tag(7101, 96);   // a standard Data
+    standard_onlyb.set_length_pair_data_tag(354, 7202);  // EncodedTextLen
+    table_view const standard_only = std::move(standard_onlyb).build();
     EXPECT_FALSE(standard_only.has_nonstandard_pair());
     expect_fast_paths_change_no_answer(standard_only);
 }
@@ -625,61 +633,46 @@ TEST(DictBackedIterParser, CustomPairSplitsThroughParseIter) {
 // Zero is what BOTH accessors answer for "no pair", so a stored 0 -> data would read
 // back as a forward pair whose inverse says absent — two directions that can never
 // agree. Since fixpp#457 the loaders refuse a zero-numbered field outright, so a
-// dictionary can no longer offer one — this stays the boundary for a `table_view`
-// populated directly, and any future non-loader builder.
+// dictionary can no longer offer one — this stays the boundary for a table
+// populated through `table_view_builder`, and any future non-loader builder.
+//
+// The first four expectations read state BETWEEN two mutator calls, which is why
+// `table_view_builder` forwards those three accessors (fixpp#456 design §5d item
+// 4). Do NOT split this into two build cycles: the case pins that a rejected zero
+// leaves no inverse behind IN THE SAME TABLE, and two tables cannot assert that.
 TEST(DictHooksCustomPair, ZeroIsNeverHalfOfAPair) {
-    table_view tv;
-    tv.set_length_pair_data_tag(0, 5002);
-    EXPECT_EQ(tv.length_pair_data_tag(0), 0U) << "a zero Length tag must not be stored";
-    EXPECT_EQ(tv.data_pair_length_tag(5002), 0U) << "and must leave no inverse behind";
+    table_view_builder b;
+    b.set_length_pair_data_tag(0, 5002);
+    EXPECT_EQ(b.length_pair_data_tag(0), 0U) << "a zero Length tag must not be stored";
+    EXPECT_EQ(b.data_pair_length_tag(5002), 0U) << "and must leave no inverse behind";
 
-    tv.set_length_pair_data_tag(5001, 0);
-    EXPECT_EQ(tv.length_pair_data_tag(5001), 0U) << "a zero Data tag stays a no-op";
-    EXPECT_FALSE(tv.has_nonstandard_pair()) << "neither call may arm the pair flag";
+    b.set_length_pair_data_tag(5001, 0);
+    EXPECT_EQ(b.length_pair_data_tag(5001), 0U) << "a zero Data tag stays a no-op";
+    EXPECT_FALSE(b.has_nonstandard_pair()) << "neither call may arm the pair flag";
 
+    table_view const tv = std::move(b).build();
     auto const hooks = dict_hooks::for_table_view(tv);
     EXPECT_EQ(hooks.data_tag_for_length(0), 0U);
     EXPECT_EQ(hooks.length_tag_for_data(5002), 0U);
 }
 
-// ── A bundle is a SNAPSHOT of the dictionary it was built from ───────────────
+// ── DELETED at fixpp#456, and the deletion is a DISCLOSURE ──────────────────
 //
-// `for_table_view` reads `has_nonstandard_pair()` once, when the bundle is built.
-// No production path can see the difference: a `table_view` is built once at config
-// time (this header's own contract — "Constructed ONCE at session/validator setup
-// time ... Immutable after construction") and every bundle is built after it is
-// populated — per operation by `Validator::validate`, `Session`'s scanners and the
-// C-ABI setters, and once per `Parser`, which keeps its bundle for its own lifetime
-// against a view that must stay immutable that long (Gate B r7 N-4). The
-// TYPE does not enforce that order, so the behaviour is pinned here rather than left
-// to be discovered. Gate B r6 M-1; sealing the published view is fixpp#456.
-TEST(DictHooksCustomPair, ABundleIsASnapshotOfTheDictionaryItWasBuiltFrom) {
-    table_view tv;
-    auto const before = dict_hooks::for_table_view(tv);  // no pairs registered yet
-    tv.set_length_pair_data_tag(5001, 5002);
-
-    EXPECT_EQ(before.data_tag_for_length(5001), 0U)
-        << "a bundle built before the pair was registered keeps the snapshot it was built from";
-    EXPECT_EQ(dict_hooks::for_table_view(tv).data_tag_for_length(5001), 5002U)
-        << "a bundle built after it — what every production path does — honours the pair";
-}
-
-// Copy-assignment carries the flag with the maps. Without that, a target whose flag
-// still read false would hide the source's pairs from every scanner built afterwards
-// (Gate B r6 M-2, the copy-assignment half).
-TEST(DictHooksCustomPair, CopyAssignmentCarriesTheFlagWithThePairs) {
-    table_view source;
-    source.set_length_pair_data_tag(5001, 5002);
-    table_view target;
-    ASSERT_FALSE(target.has_nonstandard_pair()) << "precondition: the target names no pair";
-
-    target = source;
-
-    EXPECT_TRUE(target.has_nonstandard_pair());
-    EXPECT_EQ(dict_hooks::for_table_view(target).data_tag_for_length(5001), 5002U)
-        << "the assigned-in pair must reach a bundle built from the target";
-    expect_fast_paths_change_no_answer(target);
-}
+// `DictHooksCustomPair.ABundleIsASnapshotOfTheDictionaryItWasBuiltFrom` pinned
+// that `for_table_view` latches `has_nonstandard_pair()` at build time, by
+// mutating a view AFTER a bundle had been taken from it. That premise is
+// unconstructible now that the view is sealed, so the staleness half of the
+// behaviour is no longer observable through the public API. What records the
+// loss: `B-456-2` in spec/behaviors-and-limitations.md, and the compile-time
+// seal witness in tests/dictionary/table_view_seal_compile_test.cpp, which
+// asserts the stronger property that replaced it. The case's POSITIVE half — a
+// bundle built after the pair was registered honours it — survives above in
+// `FastPathsChangeNoAnswerForAnyTag`, on the same tags.
+//
+// `DictHooksCustomPair.CopyAssignmentCarriesTheFlagWithThePairs` went with it:
+// its subject was `table_view::operator=`, which fixpp#456 deletes. It was also
+// the proof that assignment had to go (design §3.2) — copy-assignment moved the
+// exact `has_nonstandard_pair_` bit the seal exists to freeze.
 
 // ─────────────────────────────────────────────────────────────────────────
 // Gate B r9 R-1 — `nested_group_slices` must split by the CALLER's bundle on
@@ -722,8 +715,8 @@ static_assert(kHooksKeyValue.size() == 8);
 // Identical structure in both arms; they differ ONLY in whether 5011/5012 is a
 // registered Length+Data pair.
 table_view make_nested_pair_dict(bool with_pair) {
-    table_view tv;
-    tv.add_valid("T", 35)
+    table_view_builder b;
+    b.add_valid("T", 35)
         .add_valid("T", 7001)
         .add_valid("T", 7002)
         .add_valid("T", 6001)
@@ -743,9 +736,9 @@ table_view make_nested_pair_dict(bool with_pair) {
         .add_group_member(6001, 5011)
         .add_group_member(6001, 5012);
     if (with_pair) {
-        tv.set_length_pair_data_tag(5011, 5012);
+        b.set_length_pair_data_tag(5011, 5012);
     }
-    return tv;
+    return std::move(b).build();
 }
 
 // 7001 > 6001, whose single entry carries the counted 5012 value with a forged

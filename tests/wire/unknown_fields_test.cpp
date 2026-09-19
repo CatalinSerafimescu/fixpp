@@ -84,9 +84,10 @@ TEST(WireUnknownFields, DocumentOrderRoundTripNoMaterialization) {
 // tags (8, 9, 10) must NOT appear. ([2b §4.3] / [2b §4.8])
 TEST(WireUnknownFields, DictBoundUnknownSplit) {
     // Build a dict that knows 35 (MsgType) and 34 (MsgSeqNum) for "D".
-    fixpp::dict::table_view dict;
-    dict.add_valid("D", 35)   // MsgType
+    fixpp::dict::table_view_builder b;
+    b.add_valid("D", 35)      // MsgType
         .add_valid("D", 34);  // MsgSeqNum
+    fixpp::dict::table_view const dict = std::move(b).build();
 
     auto buf = make_raw_frame(
         "35=D\x01"
@@ -117,8 +118,9 @@ TEST(WireUnknownFields, DictBoundUnknownSplit) {
 }
 
 TEST(WireUnknownFields, UnknownFieldsRemainUsableAfterTemporaryParserDies) {
-    fixpp::dict::table_view dict;
-    dict.add_valid("D", 35).add_valid("D", 34);
+    fixpp::dict::table_view_builder b;
+    b.add_valid("D", 35).add_valid("D", 34);
+    fixpp::dict::table_view const dict = std::move(b).build();
 
     auto buf = make_raw_frame(
         "35=D\x01"

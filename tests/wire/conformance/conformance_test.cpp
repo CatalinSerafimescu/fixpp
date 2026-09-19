@@ -191,9 +191,9 @@ inline std::vector<CorpusRow> load_all() {
 // Used by: 4.2, 5.0SP2, T1.1 conforming-heartbeat rows and unexpected-tag row.
 [[nodiscard]] inline fixpp::dict::table_view make_heartbeat_grammar() {
     using ft = fixpp::dict::field_type;
-    fixpp::dict::table_view t;
+    fixpp::dict::table_view_builder tb;
     // Required standard-header fields for Heartbeat
-    t.add_required("0", 8)      // BeginString
+    tb.add_required("0", 8)     // BeginString
         .add_required("0", 9)   // BodyLength
         .add_required("0", 35)  // MsgType
         .add_required("0", 49)  // SenderCompID
@@ -201,15 +201,15 @@ inline std::vector<CorpusRow> load_all() {
         .add_required("0", 34)  // MsgSeqNum
         .add_required("0", 10)  // CheckSum
         .set_type(34, ft::Int);
-    return t;
+    return std::move(tb).build();
 }
 
 // NewOrderSingle grammar (35=D): required fields for the W-014 NOS corpus rows.
 // Matches make_d_grammar() in validator_domain_test.cpp exactly.
 [[nodiscard]] inline fixpp::dict::table_view make_nos_grammar() {
     using ft = fixpp::dict::field_type;
-    fixpp::dict::table_view t;
-    t.add_required("D", 8)      // BeginString
+    fixpp::dict::table_view_builder tb;
+    tb.add_required("D", 8)     // BeginString
         .add_required("D", 9)   // BodyLength
         .add_required("D", 35)  // MsgType
         .add_required("D", 49)  // SenderCompID
@@ -231,7 +231,7 @@ inline std::vector<CorpusRow> load_all() {
         .add_enum(54, "1")
         .add_enum(54, "2")
         .set_group_first(453, 448);
-    return t;
+    return std::move(tb).build();
 }
 
 // Resolve the dict to use for a w014 validation row.  The fix_version string
