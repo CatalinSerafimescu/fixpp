@@ -1069,7 +1069,7 @@ TEST(OrchestraFailClosed, ZeroDataFieldIsRefusedAtDeclarationBeforeThePairGuard)
         R"xml(<fixr:fieldRef id="95"/><fixr:fieldRef id="0"/>)xml");
     auto const msg = orchestra_load_error_message(xml);
     ASSERT_FALSE(msg.empty()) << "a zero-numbered DATA field must fail the load closed";
-    EXPECT_NE(msg.find("<fixr:field> id attribute"), std::string::npos)
+    EXPECT_NE(msg.find("<fixr:field> id must be 1..65535"), std::string::npos)
         << "expected the fixpp#457 DECLARATION refusal. Message: " << msg;
     EXPECT_EQ(msg.find("field number 0"), std::string::npos)
         << "the pair-formation guard fired, which means the declaration rule did not — the "
@@ -1092,7 +1092,7 @@ TEST(OrchestraFailClosed, ZeroFieldIdThrows) {
     // The message, not just the type: every neighbouring OrchestraFailClosed
     // case throws this same type, so a type-only arm cannot tell the
     // declaration refusal from any other malformation in the fixture.
-    EXPECT_NE(msg.find("<fixr:field> id attribute"), std::string::npos)
+    EXPECT_NE(msg.find("<fixr:field> id must be 1..65535"), std::string::npos)
         << "refused for the WRONG reason. Message: " << msg;
 }
 

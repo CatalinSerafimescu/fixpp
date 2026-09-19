@@ -183,12 +183,23 @@ is the "no pair" answer of every accessor.
 ⚠️ **fixpp#457 then moved the refusal UPSTREAM of all three, and that changed which of them a
 test can still reach** — the kind of thing a page like this exists to record, because the guards
 are still in the source and read as live. A field numbered 0 is now refused at DECLARATION in
-both loaders, so the pair-formation guards can no longer be reached *through a loader*: the XML
-`mark_pair` skip cannot fire at all, and the Orchestra throw keeps only its `length_tag` half
-(a `lengthId=` reference is parsed with the shared `parse_orchestra_id`, which must keep
-admitting zero for the structural-id namespace, and is resolved after the declaration check).
-They are kept as boundary conditions — the condition is a property of the accessors, not of
-today's callers — but **do not read either as a witnessed path.** The decision that keeps the
+both loaders, upstream of both guards.
+
+**Do not read either guard as a witnessed path, and do not take a reachability verdict from this
+page** — derive it, because the two halves differ and the difference follows from where each value
+comes from: a `data_tag` is a key of the loader's own field store, which the declaration rule bars
+from zero; a `length_tag` comes from a `lengthId=` reference, parsed with the shared
+`parse_orchestra_id` (which must keep admitting zero for the structural-id namespace) and resolved
+*after* the declaration check. The recipe: read `parse_document` / `collect_fields` call order and
+ask, for each argument, whether it originates in a declaration or in a reference. The guards are
+kept as boundary conditions — zero is the "no pair" answer of the accessors, which is a property of
+the accessors rather than of today's callers.
+
+⚠️ **This closes a disposition `specs/002-dictionary-xml-loader` deferred for itself.** That spec's
+§10 **follow-up F4** and its `CHK017` checklist row both list `<field number="0">` as an XML-grammar
+edge case left undecided in v1.0 ("rejected vs accepted" unstated). The bundle is frozen, so it
+still reads as open; the answer is REJECTED, here and in `B-457-1`. Pointer lives here because a
+frozen bundle cannot carry it. The decision that keeps the
 rule off the shared parser is the load-bearing one: `<fixr:component id>` / `<fixr:group id>`
 are a repository-local surrogate key where `id="0"` is legal, so the Orchestra rule lives in
 `parse_orchestra_field_tag` and the false-positive arm

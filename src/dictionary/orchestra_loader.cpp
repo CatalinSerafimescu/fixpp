@@ -191,8 +191,13 @@ constexpr OrchestraTypeEntry kOrchestraTypeTable[] = {
                                                       char const* what) {
     auto const tag = parse_orchestra_id(attr, what);
     if (tag == 0) {
-        throw orchestra_parse_error(std::string{"dict::orchestra_parse_error: missing/invalid "} +
-                                    what + " id attribute");
+        // A DISTINCT message, not `parse_orchestra_id`'s. Zero is present and
+        // well-formed, so reporting it as "missing/invalid" would name the wrong
+        // defect; and unlike the XML loader there is no out-of-range message to
+        // reuse here, because `try_parse_uint16` collapses missing, malformed
+        // and out-of-range into that one string.
+        throw orchestra_parse_error(std::string{"dict::orchestra_parse_error: "} + what +
+                                    " id must be 1..65535, got 0");
     }
     return tag;
 }

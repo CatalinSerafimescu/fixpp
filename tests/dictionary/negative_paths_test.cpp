@@ -34,6 +34,7 @@ inline unsigned current_pid() noexcept {
 #include <fixpp/dict/xml_loader.hpp>
 #include <fstream>
 #include <memory_resource>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -490,21 +491,29 @@ TEST(NegativePaths, ZeroFieldNumberThrowsXmlParseError) {
     expect_xml_parse_error_contains(kXml, R"(<field number="0"> non-numeric or out-of-range)");
 }
 
-// The false-positive arm, and it is the load-bearing one: 0 is a legal value of
-// every OTHER number this loader parses. `minor` and `servicepack` go through
-// `parse_nonneg_int`, which must keep accepting 0 — `servicepack='0'` is the
-// normal spelling for FIX.4.4 and is carried by most fixtures in this file, so
-// a tightening that leaked one level up would refuse nearly every dictionary in
-// the tree. A test that only proves the refusal fires cannot catch it firing
-// where it must not.
-TEST(NegativePaths, ZeroVersionNumbersAreStillAccepted) {
+// The false-positive arm. A refusal test alone cannot catch the rule firing where
+// it must NOT, and this one covers both ways that can happen:
+//
+//  * one level UP — `minor` / `servicepack` go through `parse_nonneg_int`, a
+//    DIFFERENT parser from the `<field number>` parse, where 0 is a legal value;
+//  * one off the BOUNDARY — `<field number='1'>` is the smallest valid tag, so
+//    this fixture goes RED if the bound is ever written `<= 1` rather than
+//    `<= 0`. Without a tag of 1 present, that off-by-one leaves every fixpp#457
+//    assertion green and is caught only collaterally, by an unrelated test dying
+//    on an uncaught exception — a failure mode this repo does not accept as a
+//    witness.
+TEST(NegativePaths, ZeroVersionNumbersAndTagOneAreStillAccepted) {
     auto* mr = std::pmr::new_delete_resource();
-    constexpr std::string_view kXml =
-        R"(<fix type='FIX' major='5' minor='0' servicepack='0'>)"
-        R"(<fields><field number='35' name='MsgType' type='STRING'/></fields>)"
-        R"(<messages/></fix>)";
+    constexpr std::string_view kXml = R"(<fix type='FIX' major='5' minor='0' servicepack='0'>)"
+                                      R"(<fields>)"
+                                      R"(<field number='1' name='Account' type='STRING'/>)"
+                                      R"(<field number='35' name='MsgType' type='STRING'/>)"
+                                      R"(</fields>)"
+                                      R"(<messages/></fix>)";
     EXPECT_NO_THROW({
         auto dict = fixpp::dict::XmlLoader{}.load_from_string(kXml, mr);
         EXPECT_EQ(dict.which_session_version(), fixpp::dict::session_version::v50);
-    }) << "minor='0' / servicepack='0' are not field numbers and must keep loading";
+        EXPECT_NE(dict.field_by_name("Account"), std::nullopt)
+            << "non-vacuity: tag 1 must be ADMITTED, not merely tolerated";
+    }) << "minor='0' / servicepack='0' are not field numbers, and 1 is a valid tag";
 }
