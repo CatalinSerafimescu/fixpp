@@ -491,17 +491,26 @@ TEST(NegativePaths, ZeroFieldNumberThrowsXmlParseError) {
     expect_xml_parse_error_contains(kXml, R"(<field number="0"> non-numeric or out-of-range)");
 }
 
-// The false-positive arm. A refusal test alone cannot catch the rule firing where
-// it must NOT, and this one covers both ways that can happen:
+// Pins the two values a fixpp#457-shaped rule must NOT refuse: 0 where it is a
+// version number (`minor`/`servicepack`, parsed by `parse_nonneg_int` — a
+// different parser from the `<field number>` parse), and 1, the smallest valid
+// tag.
 //
-//  * one level UP — `minor` / `servicepack` go through `parse_nonneg_int`, a
-//    DIFFERENT parser from the `<field number>` parse, where 0 is a legal value;
-//  * one off the BOUNDARY — `<field number='1'>` is the smallest valid tag, so
-//    this fixture goes RED if the bound is ever written `<= 1` rather than
-//    `<= 0`. Without a tag of 1 present, that off-by-one leaves every fixpp#457
-//    assertion green and is caught only collaterally, by an unrelated test dying
-//    on an uncaught exception — a failure mode this repo does not accept as a
-//    witness.
+// ⚠️ NO COVERAGE CLAIM IS MADE FOR THIS CASE, because two were written here and
+// both were false. Measured: under either mutation it is meant to describe —
+// `parse_nonneg_int` requiring `out > 0`, or the tag bound written `<= 1` — this
+// TARGET aborts during static initialization (`--gtest_list_tests` exits 134),
+// since a namespace-scope fixture elsewhere in it loads a real dictionary and
+// every real dictionary carries both a `minor`/`servicepack` of 0 and tag 1. No
+// test body runs, so no assertion here can be the witness; the witness is the
+// abort, which is loud and self-describing but is not this case.
+//
+// It is kept because it STATES the boundary where a reader looks for it. The
+// arm that actually reports a wrongly-widened rule is the Orchestra one,
+// `OrchestraFailClosed.ZeroStructuralXmlIdsAreStillAccepted`, which fails
+// cleanly because the structural-id namespace it defends is not exercised by
+// any static-init fixture. Re-derive before citing either: apply the mutation
+// and look at the EXIT STATUS, not at the test list.
 TEST(NegativePaths, ZeroVersionNumbersAndTagOneAreStillAccepted) {
     auto* mr = std::pmr::new_delete_resource();
     constexpr std::string_view kXml = R"(<fix type='FIX' major='5' minor='0' servicepack='0'>)"
