@@ -122,12 +122,14 @@ CONTINUATION = re.compile(r"^\s*\.\s*" + MUTRE + r"\s*\(")
 def source_lines(root, path):
     """The file with comments and literals blanked — the view both halves scan.
 
-    ⚠️ `re.sub(r"//.*", "", l)` was NOT good enough, even though it produced
-    identical output on every file this script scans today. Brace depth is the
-    whole instrument, and a brace inside a STRING LITERAL is a brace the crude
-    strip hands straight to the counter. `tests/wire/offset_table_test.cpp`
-    already carries a net +7 brace delta inside literals; that the two agree is
-    luck about where those braces fall, not a property of either.
+    ⚠️ `re.sub(r"//.*", "", l)` was NOT good enough, even where it happened to
+    leave this script's numbers unmoved. Brace depth is the whole instrument, and
+    a brace inside a STRING LITERAL is a brace the crude strip hands straight to
+    the counter. At least one scanned file carries unbalanced braces inside
+    literals, so the two strips agree only about where those braces happen to
+    fall — a property of today's corpus, not of either strip. Re-derive it rather
+    than trusting a number here: for each candidate file, compare the net
+    `{` minus `}` of `re.sub(r"//.*", "", l)` per line against `strip_noncode`'s.
 
     `strip_noncode` blanks `//`, `/* */`, string and raw-string literals while
     PRESERVING length and newlines, so it is a drop-in for a line-indexed scan.

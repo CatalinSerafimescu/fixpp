@@ -971,12 +971,43 @@ Nothing is built for either residue; both are named.
 
 #### The shape, and why it is two mechanical lines per scope
 
-```
-python3 tools/table_view_mutation_scope.py --root . --emit-sites sites.tsv --naive-decl-count \
-    --known-unscoped 'tests/dictionary/table_view_pair_oom_test.cpp:tv,tests/wire/offset_table_test.cpp:dict'
-```
+⚠️ **`--known-unscoped` takes a list that is DERIVED, never one copied from here.** The receiver
+population moves with the tree — the seal added an entry, and fixpp#456's `/simplify` pass removed
+another — so a hardcoded list rots in both directions: it exits `4` when it is missing a receiver
+and `3` when it names one that no longer exists. The recipe, which cannot rot:
+
+1. run the command **with no `--known-unscoped`**;
+2. read the receivers it prints as `<< UNATTRIBUTED`;
+3. pass exactly those. Every one is the shape the allow-list exists for — a reference with no named
+   local to rename (a `table_view&` parameter or lambda argument), migrated by hand.
 
 ```
+python3 tools/table_view_mutation_scope.py --root . --emit-sites sites.tsv --naive-decl-count \
+    --known-unscoped '<the receivers step 2 printed, comma-separated>'
+```
+
+As of **`90c34ec0`** (post-`/simplify`) step 2 prints **three** — an example of that commit's output,
+not a fixed argument:
+
+```
+include/fixpp/dict/table_view.hpp:tv_                      16   table_view_builder's own MEMBER
+tests/dictionary/table_view_pair_oom_test.cpp:tv            3   lambda parameter (seam 3)
+tests/dictionary/table_view_seal_compile_test.cpp:t        16   `requires(T& t)` — not executable code
+```
+
+⚠️ **Scope the run the same way you scope the allow-list.** `tv_` is invisible to a run filtered to
+`--filter tests/`, so a list derived under that filter exits `4` on an unfiltered run. The two must
+be derived together — which is the whole reason step 1 exists.
+
+⚠️ **The block below is a PINNED HISTORICAL RECORD, not a current claim.** It was measured at
+**`414875d5`, pre-seal** — the tree the 36-TU migration bill was computed from — and it is retained
+because that bill rests on it. On any later tree the figures differ by construction: post-seal every
+mutator call is on a `table_view_builder`, so `scoped declarations that are mutated` goes to **0**
+and the receivers move into the `already on a table_view_builder` column that
+commit `0b06afd6` added. Re-run the command for today's numbers; do not read these as them.
+
+```
+[measured at 414875d5, pre-seal — see the warning above]
 files scanned: 32
 scoped declarations that are mutated: 126
   ... with a non-mutator use of the SAME var BEFORE the last mutator call: 3
@@ -995,14 +1026,24 @@ attribution guard (every mutator-call HEAD RECEIVER must fall inside a scoped de
 sites written: sites.tsv (126 rows)
 ```
 
-**`rc=0`.** ⚠️ **Without `--known-unscoped` the same run exits `4`, names those two receivers as
-`<< UNATTRIBUTED` — and writes NO site table at all.** The ordering is deliberate and is the same
+**The exit code is a statement about the allow-list, so state it as the condition rather than as a
+value — the value is only true of the tree that produced it:**
+
+| condition | rc |
+|---|---|
+| the allow-list names **exactly** the receivers the run finds unattributed | `0` |
+| it names one that **no longer exists** (an exemption outliving its subject) | `3` |
+| a receiver is **missing** from it | `4`, naming it `<< UNATTRIBUTED` |
+
+⚠️ **In the `4` case the run writes NO site table at all.** The ordering is deliberate and is the same
 rule as the sweep's `--emit-set` withholding (#18): a file this document calls *"the sole driver of
 the migration"* must not exist in a complete-looking but incomplete form, because a caller who does
-not check `$?` will open it and trust it. The two names on the allow-list are §5d item 2's
-hand-listed bare-`table_view&` sites — the receiver *is* a reference with no named local to rename,
-so they are migrated by hand and allow-listed **explicitly by name**, not absorbed by widening the
-declaration regex. An allow-list entry that stops naming anything exits `3` rather than passing
+not check `$?` will open it and trust it. Every name on the allow-list is a receiver with **no named
+local to rename**, which is the shape the list exists for — and that shape has more than one kind:
+§5d item 2's bare-`table_view&` parameters and lambda arguments, a class's own **data member**
+(`table_view_builder::tv_`), and a concept's `requires(T& t)` binding, which is not executable code
+at all. They are allow-listed **explicitly by name**, not absorbed by widening the declaration
+regex, which would blind the guard to the one receiver spelling nobody rewrote. An allow-list entry that stops naming anything exits `3` rather than passing
 quietly: an exemption that outlives its subject would silently absorb the next receiver of that name
 in that file.
 
