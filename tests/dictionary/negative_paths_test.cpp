@@ -500,10 +500,11 @@ TEST(NegativePaths, ZeroFieldNumberThrowsXmlParseError) {
 // both were false. Measured: under either mutation it is meant to describe —
 // `parse_nonneg_int` requiring `out > 0`, or the tag bound written `<= 1` — this
 // TARGET aborts during static initialization (`--gtest_list_tests` exits 134),
-// since a namespace-scope fixture elsewhere in it loads a real dictionary and
-// every real dictionary carries both a `minor`/`servicepack` of 0 and tag 1. No
-// test body runs, so no assertion here can be the witness; the witness is the
-// abort, which is loud and self-describing but is not this case.
+// because the target's `INSTANTIATE_TEST_SUITE_P` generator in
+// `collision_membership_guards_test.cpp` loads `kRuntimeDicts` at static init,
+// so any rule that refuses a value a vendored dictionary carries aborts before
+// `main`. No test body runs, so no assertion here can be the witness; the
+// witness is the abort, which is loud and self-describing but is not this case.
 //
 // It is kept because it STATES the boundary where a reader looks for it. The
 // arm that actually reports a wrongly-widened rule is the Orchestra one,

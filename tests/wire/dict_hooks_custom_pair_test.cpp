@@ -626,7 +626,7 @@ TEST(DictBackedIterParser, CustomPairSplitsThroughParseIter) {
 // back as a forward pair whose inverse says absent — two directions that can never
 // agree. Since fixpp#457 the loaders refuse a zero-numbered field outright, so a
 // dictionary can no longer offer one — this stays the boundary for a `table_view`
-// populated directly, which is every test TU and any future non-loader builder.
+// populated directly, and any future non-loader builder.
 TEST(DictHooksCustomPair, ZeroIsNeverHalfOfAPair) {
     table_view tv;
     tv.set_length_pair_data_tag(0, 5002);

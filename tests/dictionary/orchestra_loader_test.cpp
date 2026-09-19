@@ -1103,8 +1103,7 @@ TEST(OrchestraFailClosed, ZeroFieldIdThrows) {
 // share `parse_orchestra_id` with the field-tag sites. Zero is a legal value
 // there, so a rejection placed inside the shared parser (or inside
 // `try_parse_uint16`) would retroactively outlaw a valid Orchestra document.
-// This arm is what distinguishes the two namespaces; without it, the cheapest
-// wrong fix passes every other test in this file.
+// This arm is what distinguishes the two namespaces.
 TEST(OrchestraFailClosed, ZeroStructuralXmlIdsAreStillAccepted) {
     constexpr std::string_view kXml = R"xml(
 <fixr:repository version="FIX.Latest_EP303">
