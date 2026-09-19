@@ -624,8 +624,9 @@ TEST(DictBackedIterParser, CustomPairSplitsThroughParseIter) {
 //
 // Zero is what BOTH accessors answer for "no pair", so a stored 0 -> data would read
 // back as a forward pair whose inverse says absent — two directions that can never
-// agree. The loaders still accept a zero-numbered field (fixpp#457); this is the
-// boundary that keeps it out of the pair maps whatever a dictionary declares.
+// agree. Since fixpp#457 the loaders refuse a zero-numbered field outright, so a
+// dictionary can no longer offer one — this stays the boundary for a `table_view`
+// populated directly, and any future non-loader builder.
 TEST(DictHooksCustomPair, ZeroIsNeverHalfOfAPair) {
     table_view tv;
     tv.set_length_pair_data_tag(0, 5002);
@@ -878,84 +879,41 @@ TEST(NestedGroupSlicesHooksKey, WarmCacheHonoursTheCallersDictionaryNotTheFirstC
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Gate B r9 R-3 — zero is refused at pair FORMATION, not only at the setter.
+// Gate B r9 R-3 / fixpp#457 — a zero tag cannot reach the pair maps from a
+// dictionary, because it cannot get past the field declaration.
 //
 // `table_view::set_length_pair_data_tag` refusing a zero half keeps the WIRE
 // pair maps clean, but it sits downstream of the loaders: a dictionary could
 // still FORM a zero-headed pair, and `Dictionary::length_pair_data_tag`,
 // `field_ref` and `message_fields()` would report it to any caller that never
-// goes through a table_view. Both loaders now refuse at formation.
+// goes through a table_view. fixpp#457 closed that further upstream still.
 //
-// Field number 0 is itself invalid and both loaders admit it — the xml bound is
-// `tag_i < 0 || tag_i > 65535` and Orchestra's id parse is a plain uint16 — so
-// these fixtures are REACHABLE, not hypothetical. Rejecting field 0 generally
-// is pre-existing and wider than pairs: fixpp#457.
-TEST(DictHooksCustomPair, ZeroIsNeverHalfOfAPairAtLoadTimeEither) {
-    // A LENGTH field numbered 0 sitting adjacent to a DATA field: the
-    // adjacency detector would otherwise pair (0, 5002).
+// ⚠️ ONE fixture, deliberately — the LENGTH/DATA distinction that used to make
+// two cases here is no longer observable. `parse_document` runs
+// `parse_global_fields` before `detect_length_pairs` (xml_loader.cpp), so the
+// declaration refusal fires before any adjacency is examined; a "zero DATA
+// half" fixture would take the identical path and assert the identical thing.
+// Two cases that cannot diverge are one case wearing a loop.
+TEST(DictHooksCustomPair, ZeroIsRefusedAtDeclarationBeforeAPairCanForm) {
+    // A LENGTH field numbered 0 adjacent to a DATA field — the shape the
+    // adjacency detector would have paired as (0, 5002), had it run.
     constexpr std::string_view kZeroLengthXml =
         R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
         R"(<fields>)"
-        R"(<field number='8' name='BeginString' type='STRING'/>)"
-        R"(<field number='9' name='BodyLength' type='INT'/>)"
-        R"(<field number='10' name='CheckSum' type='STRING'/>)"
-        R"(<field number='35' name='MsgType' type='STRING'/>)"
         R"(<field number='0' name='ZeroLen' type='LENGTH'/>)"
         R"(<field number='5002' name='CustomData' type='DATA'/>)"
-        R"(</fields>)"
-        R"(<messages>)"
-        R"(<message name='TestMsg' msgtype='T' msgcat='app'>)"
-        R"(<field name='MsgType' required='N'/>)"
-        R"(<field name='ZeroLen' required='N'/>)"
-        R"(<field name='CustomData' required='N'/>)"
-        R"(</message>)"
-        R"(</messages></fix>)";
+        R"(</fields><messages/></fix>)";
 
-    // The mirror image: a valid LENGTH adjacent to a DATA field numbered 0.
-    constexpr std::string_view kZeroDataXml =
-        R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
-        R"(<fields>)"
-        R"(<field number='8' name='BeginString' type='STRING'/>)"
-        R"(<field number='9' name='BodyLength' type='INT'/>)"
-        R"(<field number='10' name='CheckSum' type='STRING'/>)"
-        R"(<field number='35' name='MsgType' type='STRING'/>)"
-        R"(<field number='5001' name='CustomLen' type='LENGTH'/>)"
-        R"(<field number='0' name='ZeroData' type='DATA'/>)"
-        R"(</fields>)"
-        R"(<messages>)"
-        R"(<message name='TestMsg' msgtype='T' msgcat='app'>)"
-        R"(<field name='MsgType' required='N'/>)"
-        R"(<field name='CustomLen' required='N'/>)"
-        R"(<field name='ZeroData' required='N'/>)"
-        R"(</message>)"
-        R"(</messages></fix>)";
-
-    {
-        std::pmr::monotonic_buffer_resource mr;
-        auto dict = fixpp::dict::XmlLoader{}.load_from_string(kZeroLengthXml, &mr);
-        // Non-vacuity: the fixture must actually have loaded field 0, else the
-        // zero pair was never offered to the detector and this proves nothing.
-        ASSERT_NE(dict.field_by_name("ZeroLen"), std::nullopt)
-            << "fixture invariant: field number 0 must be ADMITTED by the loader, otherwise "
-               "the pair detector never sees a zero half and this witness is vacuous";
-        EXPECT_EQ(dict.length_pair_data_tag(std::uint16_t{0}), 0U)
-            << "a zero Length half must never form a pair at load time";
-        auto tv = dict.as_table_view();
-        EXPECT_EQ(tv.length_pair_data_tag(std::uint16_t{0}), 0U);
-        EXPECT_EQ(tv.data_pair_length_tag(std::uint16_t{5002}), 0U)
-            << "the inverse direction must agree: 5002 has no Length partner";
-        EXPECT_FALSE(tv.has_nonstandard_pair())
-            << "a refused zero pair must not set the flag that installs the pair callback";
-    }
-    {
-        std::pmr::monotonic_buffer_resource mr;
-        auto dict = fixpp::dict::XmlLoader{}.load_from_string(kZeroDataXml, &mr);
-        ASSERT_NE(dict.field_by_name("ZeroData"), std::nullopt)
-            << "fixture invariant: field number 0 must be ADMITTED by the loader";
-        EXPECT_EQ(dict.length_pair_data_tag(std::uint16_t{5001}), 0U)
-            << "a zero Data half must never form a pair at load time";
-        auto tv = dict.as_table_view();
-        EXPECT_EQ(tv.length_pair_data_tag(std::uint16_t{5001}), 0U);
-        EXPECT_FALSE(tv.has_nonstandard_pair());
+    std::pmr::monotonic_buffer_resource mr;
+    try {
+        (void)fixpp::dict::XmlLoader{}.load_from_string(kZeroLengthXml, &mr);
+        FAIL() << "the loader must refuse a zero-numbered field";
+    } catch (fixpp::dict::xml_parse_error const& e) {
+        // The message, not just the type: this loader raises `xml_parse_error`
+        // for unrelated malformations too, so a type-only arm would stay green
+        // if the fixture began failing for anything but the rule under test.
+        EXPECT_NE(std::string{e.what()}.find(R"(<field number="0">)"), std::string::npos)
+            << "refused for the WRONG reason — the declaration rule did not fire. what()="
+            << e.what();
     }
 }

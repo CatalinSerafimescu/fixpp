@@ -177,6 +177,31 @@ constexpr OrchestraTypeEntry kOrchestraTypeTable[] = {
     return out;
 }
 
+// fixpp#457: the same strict parse, restricted to the ids that ARE FIX tags.
+// The valid tag range is 1..65535: zero is the "absent" answer of several
+// dict/table_view accessors, so a zero-numbered field reads as present or
+// absent depending on which direction is asked.
+//
+// Deliberately NOT folded into `parse_orchestra_id` or `try_parse_uint16`:
+// those are shared with `<fixr:component id>` / `<fixr:group id>` and their
+// refs, which are a repository-LOCAL surrogate key — an XML document id, not a
+// FIX tag — where zero is a legal value. Widening the rule to the shared parser
+// would refuse a valid Orchestra document.
+[[nodiscard]] std::uint16_t parse_orchestra_field_tag(pugi::xml_attribute const& attr,
+                                                      char const* what) {
+    auto const tag = parse_orchestra_id(attr, what);
+    if (tag == 0) {
+        // A DISTINCT message, not `parse_orchestra_id`'s. Zero is present and
+        // well-formed, so reporting it as "missing/invalid" would name the wrong
+        // defect; and unlike the XML loader there is no out-of-range message to
+        // reuse here, because `try_parse_uint16` collapses missing, malformed
+        // and out-of-range into that one string.
+        throw orchestra_parse_error(std::string{"dict::orchestra_parse_error: "} + what +
+                                    " id must be 1..65535, got 0");
+    }
+    return tag;
+}
+
 // ----------------------------------------------------------------------------
 // Build-time scaffolding (NOT PMR — mirrors xml_loader.cpp's rationale:
 // pugixml itself goes through malloc; freed before the loader returns).
@@ -377,7 +402,12 @@ void OrchestraLoaderState::collect_fields(pugi::xml_node const& root) {
         throw orchestra_parse_error("dict::orchestra_parse_error: missing <fixr:fields> block");
     }
     for (auto const& f : fields_node.children("fixr:field")) {
-        auto const tag = parse_orchestra_id(f.attribute("id"), "<fixr:field>");
+        // fixpp#457: refused HERE, at the declaration. No reference to a field
+        // can resolve to 0, because 0 can no longer be declared — which guard
+        // reports it differs by reference kind; `lengthId=` is caught earlier,
+        // by the retained zero-pair guard in `resolve_length_pairs` (witness
+        // `OrchestraFailClosed.ZeroLengthIdCannotBeHalfOfAPair`).
+        auto const tag = parse_orchestra_field_tag(f.attribute("id"), "<fixr:field>");
         if (fields_by_tag_.contains(tag)) {
             throw orchestra_parse_error("dict::orchestra_parse_error: duplicate <fixr:field id=\"" +
                                         std::to_string(tag) + "\">");
@@ -422,10 +452,16 @@ void OrchestraLoaderState::resolve_length_pairs() {
         };
         // fixpp#426 (Gate B r9 R-3): zero is the "no pair" sentinel of every pair
         // accessor, so it cannot be half of a pair. Fails closed, like every other
-        // malformed reference in this loader. Reachable only where a field numbered
-        // 0 was declared at all — itself invalid, pre-existing, and wider than pairs
-        // (fixpp#457); no fixture in the tree declares one, so this throw cannot
-        // break a dictionary that loads today.
+        // malformed reference in this loader.
+        //
+        // The two halves are no longer symmetric in what can reach them, and the
+        // asymmetry follows from where each value comes from rather than from any
+        // count: `data_tag` is a key of `fields_by_tag_`, which fixpp#457 bars
+        // from being zero at declaration; `length_tag` is a `lengthId=` reference,
+        // parsed with the shared `parse_orchestra_id` (which must keep admitting
+        // zero for the structural-id namespace) and resolved here, so it can still
+        // arrive zero. Both are refused, because the condition — zero is the "no
+        // pair" answer — is a property of the accessors, not of today's callers.
         if (length_tag == 0 || data_tag == 0) {
             throw orchestra_parse_error("dict::orchestra_parse_error: " + where() +
                                         " names field number 0, which cannot be half of a "

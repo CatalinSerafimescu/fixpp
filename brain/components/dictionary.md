@@ -178,7 +178,35 @@ per-message paths). `set_length_pair_data_tag` is strongly exception-safe at **O
 earlier transactional version copied both maps per registered pair and made
 `Dictionary::as_table_view()` quadratic (+26.3 % on FIX42); do not reintroduce it. Zero is
 refused on **both** halves, at the setter *and* at pair formation in both loaders, because zero
-is the "no pair" answer of every accessor (fixpp#457 covers field number 0 generally).
+is the "no pair" answer of every accessor.
+
+⚠️ **fixpp#457 then moved the refusal UPSTREAM of all three, and that changed which of them a
+test can still reach** — the kind of thing a page like this exists to record, because the guards
+are still in the source and read as live. A field numbered 0 is now refused at DECLARATION in
+both loaders, upstream of both guards.
+
+**Do not read either guard as a witnessed path, and do not take a reachability verdict from this
+page** — derive it, because the two halves differ and the difference follows from where each value
+comes from: a `data_tag` is a key of the loader's own field store, which the declaration rule bars
+from zero; a `length_tag` comes from a `lengthId=` reference, parsed with the shared
+`parse_orchestra_id` (which must keep admitting zero for the structural-id namespace) and resolved
+*after* the declaration check. The recipe: read `parse_document` / `collect_fields` call order and
+ask, for each argument, whether it originates in a declaration or in a reference. The guards are
+kept as boundary conditions — zero is the "no pair" answer of the accessors, which is a property of
+the accessors rather than of today's callers.
+
+⚠️ **This closes a disposition `specs/002-dictionary-xml-loader` deferred for itself.** That spec's
+§10 **follow-up F4** and its `CHK017` checklist row both list `<field number="0">` as an XML-grammar
+edge case left undecided in v1.0 ("rejected vs accepted" unstated). The bundle is frozen, so it
+still reads as open; the answer is REJECTED, here and in `B-457-1`. Pointer lives here because a
+frozen bundle cannot carry it. The decision that keeps the
+rule off the shared parser is the load-bearing one: `<fixr:component id>` / `<fixr:group id>`
+are a repository-local surrogate key where `id="0"` is legal, so the Orchestra rule lives in
+`parse_orchestra_field_tag` and the false-positive arm
+(`OrchestraFailClosed.ZeroStructuralXmlIdsAreStillAccepted`) is what holds the two namespaces
+apart. **What remains open is `table_view`'s own mutator surface** — a hand-built view can still
+plant a zero where a loaded dictionary cannot, which is `table_view.hpp`'s B-384-2 note and
+fixpp#456.
 
 ## Where the design decisions live
 

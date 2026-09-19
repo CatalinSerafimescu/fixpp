@@ -34,6 +34,7 @@ inline unsigned current_pid() noexcept {
 #include <fixpp/dict/xml_loader.hpp>
 #include <fstream>
 #include <memory_resource>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -465,4 +466,64 @@ TEST(NegativePaths, LoadRejectsMalformedXmlFileWithPugixmlDescription) {
         EXPECT_NE(std::string{e.what()}.find("Start-end tags mismatch"), std::string::npos)
             << "what()=" << e.what();
     }
+}
+
+// ---------------------------------------------------------------------------
+// fixpp#457 — a field number of 0 is refused, with the out-of-range error shape.
+//
+// FIX tags are positive. 0 is additionally the "absent" answer of several
+// dict/table_view accessors (`length_pair_data_tag`, `data_pair_length_tag`,
+// `group_first_field`), so a zero-numbered field reads as both present and
+// absent depending on the direction asked. The bound was `tag_i < 0`, which
+// admitted it.
+// ---------------------------------------------------------------------------
+TEST(NegativePaths, ZeroFieldNumberThrowsXmlParseError) {
+    constexpr std::string_view kXml = R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+                                      R"(<fields>)"
+                                      R"(<field number='0' name='ZeroTag' type='STRING'/>)"
+                                      R"(</fields><messages/></fix>)";
+    // The needle is the EXISTING out-of-range message, unchanged — which is both
+    // the assertion and the point of the change: fixpp#457 asks for the same
+    // error shape, so a caller already handling <field number='70000'> needs no
+    // new arm. Asserting the message and not just the code is what stops this
+    // going green if the fixture ever starts failing for its <messages> block or
+    // a typo instead of for the rule under test.
+    expect_xml_parse_error_contains(kXml, R"(<field number="0"> non-numeric or out-of-range)");
+}
+
+// Pins the two values a fixpp#457-shaped rule must NOT refuse: 0 where it is a
+// version number (`minor`/`servicepack`, parsed by `parse_nonneg_int` — a
+// different parser from the `<field number>` parse), and 1, the smallest valid
+// tag.
+//
+// ⚠️ NO COVERAGE CLAIM IS MADE FOR THIS CASE, because two were written here and
+// both were false. Measured: under either mutation it is meant to describe —
+// `parse_nonneg_int` requiring `out > 0`, or the tag bound written `<= 1` — this
+// TARGET aborts during static initialization (`--gtest_list_tests` exits 134),
+// because the target's `INSTANTIATE_TEST_SUITE_P` generator in
+// `collision_membership_guards_test.cpp` loads `kRuntimeDicts` at static init,
+// so any rule that refuses a value a vendored dictionary carries aborts before
+// `main`. No test body runs, so no assertion here can be the witness; the
+// witness is the abort, which is loud and self-describing but is not this case.
+//
+// It is kept because it STATES the boundary where a reader looks for it. The
+// arm that actually reports a wrongly-widened rule is the Orchestra one,
+// `OrchestraFailClosed.ZeroStructuralXmlIdsAreStillAccepted`, which fails
+// cleanly because the structural-id namespace it defends is not exercised by
+// any static-init fixture. Re-derive before citing either: apply the mutation
+// and look at the EXIT STATUS, not at the test list.
+TEST(NegativePaths, ZeroVersionNumbersAndTagOneAreStillAccepted) {
+    auto* mr = std::pmr::new_delete_resource();
+    constexpr std::string_view kXml = R"(<fix type='FIX' major='5' minor='0' servicepack='0'>)"
+                                      R"(<fields>)"
+                                      R"(<field number='1' name='Account' type='STRING'/>)"
+                                      R"(<field number='35' name='MsgType' type='STRING'/>)"
+                                      R"(</fields>)"
+                                      R"(<messages/></fix>)";
+    EXPECT_NO_THROW({
+        auto dict = fixpp::dict::XmlLoader{}.load_from_string(kXml, mr);
+        EXPECT_EQ(dict.which_session_version(), fixpp::dict::session_version::v50);
+        EXPECT_NE(dict.field_by_name("Account"), std::nullopt)
+            << "non-vacuity: tag 1 must be ADMITTED, not merely tolerated";
+    }) << "minor='0' / servicepack='0' are not field numbers, and 1 is a valid tag";
 }
