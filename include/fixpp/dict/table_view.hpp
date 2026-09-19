@@ -683,16 +683,16 @@ private:
 
     // ── Build-time population surface ────────────────────────────────────────
     // PRIVATE since fixpp#456: every caller reaches these through
-    // `table_view_builder` (below), which the declaration above grants the ONLY
-    // inward access to this band. `Dictionary::as_table_view()` is deliberately
-    // granted nothing — it populates a builder like every other caller. Not part
-    // of the validator-facing contract.
+    // `table_view_builder` (below), which is the type's only friend that points
+    // inward. `Dictionary::as_table_view()` is deliberately NOT a friend — it
+    // populates a builder like every other caller. Not part of the
+    // validator-facing contract.
     //
-    // ⚠️ The word on line one of this band is a DECLARATION, and seam 2's census
-    // must read declarations, not tokens: a `grep -c` over this heavily commented
-    // header counts prose as readily as code, so one added sentence would move it.
-    // Re-derive with the declaration pattern in the seal witness's header comment,
-    // and keep that spelling out of the prose here so the two stay equal.
+    // Seam 2's friendship census is a DECLARATION count, and the pattern that
+    // implements it is anchored at `^[[:space:]]*friend[[:space:]]+class` (the
+    // recipe lives in the seal witness's header comment). That anchor cannot
+    // match a `//`-prefixed line, so prose here — including this sentence — is
+    // outside it by construction. Nothing needs to avoid the word.
     //
     // The chain-style methods mirror the test mock's builder surface; the
     // builder's forwarders preserve that spelling, so a migrated call site
