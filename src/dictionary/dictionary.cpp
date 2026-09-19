@@ -448,14 +448,13 @@ void maybe_drop_first_group_ctx_delim_run_for_testing(dict_metadata_handle& h) n
 
 table_view Dictionary::as_table_view() const {
     detail::bump_as_table_view_call_count();  // 083 T049 test seam (W-11a)
-    // fixpp#456: population goes through the builder; `tv` no longer exists as a
-    // mutable local. The early exit still yields an empty view — `build()` on an
-    // untouched builder is exactly the object the bare `table_view tv;` was.
-    table_view_builder b;
-
     if (!handle_) {
-        return std::move(b).build();  // null handle (moved-from Dictionary) → empty table_view
+        return {};  // null handle (moved-from Dictionary) → empty table_view
     }
+
+    // fixpp#456: population goes through the builder; `tv` no longer exists as a
+    // mutable local.
+    table_view_builder b;
 
     auto const msgs = messages();
 

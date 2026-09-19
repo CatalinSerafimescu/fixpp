@@ -694,9 +694,10 @@ private:
     // match a `//`-prefixed line, so prose here — including this sentence — is
     // outside it by construction. Nothing needs to avoid the word.
     //
-    // The chain-style methods mirror the test mock's builder surface; the
-    // builder's forwarders preserve that spelling, so a migrated call site
-    // differs only in the receiver's name.
+    // These methods mirror the test mock's builder surface; the builder's
+    // forwarders preserve that spelling, so a migrated call site differs only in
+    // the receiver's name. Chaining lives on `table_view_builder`, whose
+    // forwarders return `table_view_builder&`; nothing chains on this band.
 
     void add_valid_tag(std::string_view msg_type, std::uint16_t tag) {
         valid_[std::string{msg_type}].insert(tag);
@@ -709,60 +710,47 @@ private:
 
     void set_field_type(std::uint16_t tag, field_type ft) { types_[tag] = ft; }
 
-    // add_group_member returns *this for chaining (mirrors mock surface).
-    table_view& add_group_member(std::uint16_t no_tag, std::uint16_t member_tag) {
+    void add_group_member(std::uint16_t no_tag, std::uint16_t member_tag) {
         set_group_bit(no_tag);
         auto& members = group_members_[no_tag];
         for (auto const t : members) {
-            if (t == member_tag) return *this;  // dedup
+            if (t == member_tag) return;  // dedup
         }
         members.push_back(member_tag);
-        return *this;
     }
 
     // fixpp#201: register `member_tag` as a DIRECT required member of group
     // `no_tag` (bare store). Does NOT add it to the member set — callers pair
     // this with add_group_member/set_group_first as needed.
-    table_view& add_group_required_member(std::uint16_t no_tag, std::uint16_t member_tag) {
+    void add_group_required_member(std::uint16_t no_tag, std::uint16_t member_tag) {
         set_group_bit(no_tag);
         auto& req = group_required_members_[no_tag];
         for (auto const t : req) {
-            if (t == member_tag) return *this;  // dedup
+            if (t == member_tag) return;  // dedup
         }
         req.push_back(member_tag);
-        return *this;
     }
 
-    // Chain-style helpers — all return *this for fluent use.
+    void add_valid(std::string_view msg_type, std::uint16_t tag) { add_valid_tag(msg_type, tag); }
 
-    table_view& add_valid(std::string_view msg_type, std::uint16_t tag) {
-        add_valid_tag(msg_type, tag);
-        return *this;
-    }
-
-    table_view& add_required(std::string_view msg_type, std::uint16_t tag) {
+    void add_required(std::string_view msg_type, std::uint16_t tag) {
         add_required_tag(msg_type, tag);
-        return *this;
     }
 
-    table_view& set_type(std::uint16_t tag, field_type ft) {
-        set_field_type(tag, ft);
-        return *this;
-    }
+    void set_type(std::uint16_t tag, field_type ft) { set_field_type(tag, ft); }
 
     // set_group_first: sets the first-delimiter tag AND adds it as a member
     // (mirrors the mock's set_group_first behaviour exactly).
-    table_view& set_group_first(std::uint16_t no_tag, std::uint16_t first) {
+    void set_group_first(std::uint16_t no_tag, std::uint16_t first) {
         set_group_bit(no_tag);
         group_first_[no_tag] = first;
         add_group_member(no_tag, first);
-        return *this;
     }
 
     // Inserts an OWNED COPY of `value`'s bytes into `tag`'s code list (see
     // `enum_domain` above for why the table owns them). Sorted-on-insert and
     // deduped, so enum_valid's binary search is valid regardless of call order.
-    table_view& add_enum(std::uint16_t tag, std::string_view value) {
+    void add_enum(std::uint16_t tag, std::string_view value) {
         set_enum_bit(tag);
         auto& domain = enums_[tag];
         auto& codes = domain.codes;
@@ -783,16 +771,14 @@ private:
         } else {
             domain.all_single_char = false;
         }
-        return *this;
     }
 
     // T019 companion [FR-005]: the multi-value bit `add_enum` cannot itself
     // carry — without this, FR-004's tokenizer (T018) has no unit-level
     // witness that does not require a full XML load.
-    table_view& set_multi_value(std::uint16_t tag, bool multi = true) {
+    void set_multi_value(std::uint16_t tag, bool multi = true) {
         set_enum_bit(tag);
         enums_[tag].multi_value = multi;
-        return *this;
     }
 
     // ── 063 Defect-A: context-scoped population surface ───────────────────
@@ -1088,7 +1074,7 @@ static_assert(std::is_nothrow_move_constructible_v<table_view>);
 // ⚠️ There is deliberately no `table_view const& peek()` (design §5d item 4): the
 // reference it returned would point into storage `build() &&` subsequently moves
 // from. The three `const` readbacks below are SCALARS — nothing to escape — and
-// exist for the one witness that must assert state mid-build.
+// exist for the witnesses that must assert state mid-build.
 //
 // `build()` performs NO consistency validation (L-456-1): a builder can still
 // produce an internally inconsistent table (a group with members and no first
@@ -1184,7 +1170,7 @@ public:
         return *this;
     }
 
-    // ── scalar readbacks, for the one witness that asserts BETWEEN mutations ──
+    // ── scalar readbacks, for the witnesses that assert BETWEEN mutations ─────
     // Scalars by design: a reference-returning accessor would alias storage that
     // `build() &&` moves from. See the `peek()` refusal above.
     [[nodiscard]] std::uint16_t length_pair_data_tag(std::uint16_t length_tag) const noexcept {
