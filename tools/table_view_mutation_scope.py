@@ -79,6 +79,15 @@ ROOTS = ["src", "tests", "bench", "tools", "bindings", "include", "perf"]
 # scope_file() discards any declaration with no mutator call in its scope: what
 # survives is an `auto` whose variable receives a table_view mutator.
 DECL = re.compile(r"^\s*(?:static\s+)?(?:fixpp::)?(?:dict::)?table_view\s+(\w+)\s*[;{=]")
+
+# A receiver that is ALREADY a builder. After fixpp#456's seal every mutator call
+# in the tree is on one of these, so without this the attribution guard below is
+# SATURATED — it reports all ~122 calls as unattributed and exits 4 on a correct,
+# fully-migrated tree. A guard that fires on everything detects nothing: it could
+# no longer single out the one receiver spelling nobody rewrote, which is its only
+# job. These are counted and reported separately, never as leaks.
+BUILDER_DECL = re.compile(
+    r"^\s*(?:static\s+)?(?:fixpp::)?(?:dict::)?table_view_builder\s+(\w+)\s*[;{=]")
 AUTO_DECL = re.compile(r"^\s*(?:static\s+)?auto\s+(\w+)\s*=")
 NAIVE_DECL = re.compile(r"\btable_view\s+[A-Za-z_][A-Za-z0-9_]*\s*;")
 
@@ -185,9 +194,14 @@ def main():
     per, perbad, rows, examples = collections.Counter(), collections.Counter(), [], []
     attributed = unattributed = continuation = 0
     unscoped = collections.Counter()
+    on_builder = 0
     for f in files:
         lines = source_lines(root, f)
         seen = set()
+        # Receivers that are already builders. Collected per file, before the
+        # attribution guard runs, so a call on one is ATTRIBUTED (to the migrated
+        # form) rather than counted as a leak — see BUILDER_DECL.
+        builders = {m.group(1) for l in lines for m in [BUILDER_DECL.match(l)] if m}
         for decl, name, lastmut, end, pre, mutlines in scope_file(root, f, lines):
             total += 1
             per[f] += 1
@@ -204,6 +218,8 @@ def main():
         for j, recv in mutator_receivers(lines):
             if (j, recv) in seen:
                 attributed += 1
+            elif recv in builders:
+                on_builder += 1
             else:
                 unattributed += 1
                 unscoped[f"{f}:{recv}"] += 1
@@ -245,6 +261,7 @@ def main():
     print("\nattribution guard (every mutator-call HEAD RECEIVER must fall inside a "
           "scoped decl):")
     print(f"  head receivers attributed to a scoped declaration:    {attributed}")
+    print(f"  head receivers already on a `table_view_builder`:     {on_builder}")
     print(f"  head receivers attributed to NOTHING:                 {unattributed}")
     print(f"  chain CONTINUATION lines (`    .add_valid(…)`, no receiver token of\n"
           f"    their own — in neither column above; renaming the head migrates\n"
