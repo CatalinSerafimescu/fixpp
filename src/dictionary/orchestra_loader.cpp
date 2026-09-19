@@ -397,11 +397,10 @@ void OrchestraLoaderState::collect_fields(pugi::xml_node const& root) {
         throw orchestra_parse_error("dict::orchestra_parse_error: missing <fixr:fields> block");
     }
     for (auto const& f : fields_node.children("fixr:field")) {
-        // fixpp#457: refused HERE, at the declaration, and nowhere else. Every id
-        // that REFERENCES a field — <fixr:fieldRef>, <fixr:numInGroup>,
-        // `lengthId=` — is resolved against `fields_by_tag_` and already fails
-        // closed on a miss, so barring a zero declaration bars a zero reference
-        // too, without duplicating the rule at four sites.
+        // fixpp#457: refused HERE, at the declaration. Every id that REFERENCES a
+        // field is resolved against `fields_by_tag_` and already fails closed on
+        // a miss, so barring a zero declaration bars a zero reference too —
+        // without repeating the rule at every reference site.
         auto const tag = parse_orchestra_field_tag(f.attribute("id"), "<fixr:field>");
         if (fields_by_tag_.contains(tag)) {
             throw orchestra_parse_error("dict::orchestra_parse_error: duplicate <fixr:field id=\"" +

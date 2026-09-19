@@ -879,92 +879,41 @@ TEST(NestedGroupSlicesHooksKey, WarmCacheHonoursTheCallersDictionaryNotTheFirstC
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Gate B r9 R-3 — zero is refused at pair FORMATION, not only at the setter.
+// Gate B r9 R-3 / fixpp#457 — a zero tag cannot reach the pair maps from a
+// dictionary, because it cannot get past the field declaration.
 //
 // `table_view::set_length_pair_data_tag` refusing a zero half keeps the WIRE
 // pair maps clean, but it sits downstream of the loaders: a dictionary could
 // still FORM a zero-headed pair, and `Dictionary::length_pair_data_tag`,
 // `field_ref` and `message_fields()` would report it to any caller that never
-// goes through a table_view. Both loaders now refuse at formation.
+// goes through a table_view. fixpp#457 closed that further upstream still.
 //
-// ⚠️ fixpp#457 REMOVED THIS TEST'S ORIGINAL PREMISE, and that is the finding, not
-// a maintenance detail. It used to assert that the pair detector refuses a zero
-// half, guarded by an explicit non-vacuity check that field 0 had been ADMITTED
-// by the loader — because if the loader never admitted it, the detector was
-// never offered a zero and the witness proved nothing. #457 makes the loader
-// refuse it, so that non-vacuity check can no longer pass: the scenario is now
-// unconstructible through the XML loader, and no rewording of the assertions
-// brings it back.
-//
-// The fixtures are kept verbatim and the assertion is INVERTED onto the refusal
-// that displaced them. That keeps the thing this test is really for — a zero
-// tag must never reach the pair maps from a dictionary — while stating honestly
-// which mechanism now enforces it. It goes RED if the declaration rule is
-// relaxed, which is the only way the original scenario could return.
-TEST(DictHooksCustomPair, ZeroIsRefusedAtLoadBeforeAPairCanEvenForm) {
-    // A LENGTH field numbered 0 sitting adjacent to a DATA field: the
-    // adjacency detector would otherwise pair (0, 5002).
+// ⚠️ ONE fixture, deliberately — the LENGTH/DATA distinction that used to make
+// two cases here is no longer observable. `parse_document` runs
+// `parse_global_fields` before `detect_length_pairs` (xml_loader.cpp), so the
+// declaration refusal fires before any adjacency is examined; a "zero DATA
+// half" fixture would take the identical path and assert the identical thing.
+// Two cases that cannot diverge are one case wearing a loop.
+TEST(DictHooksCustomPair, ZeroIsRefusedAtDeclarationBeforeAPairCanForm) {
+    // A LENGTH field numbered 0 adjacent to a DATA field — the shape the
+    // adjacency detector would have paired as (0, 5002), had it run.
     constexpr std::string_view kZeroLengthXml =
         R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
         R"(<fields>)"
-        R"(<field number='8' name='BeginString' type='STRING'/>)"
-        R"(<field number='9' name='BodyLength' type='INT'/>)"
-        R"(<field number='10' name='CheckSum' type='STRING'/>)"
-        R"(<field number='35' name='MsgType' type='STRING'/>)"
         R"(<field number='0' name='ZeroLen' type='LENGTH'/>)"
         R"(<field number='5002' name='CustomData' type='DATA'/>)"
-        R"(</fields>)"
-        R"(<messages>)"
-        R"(<message name='TestMsg' msgtype='T' msgcat='app'>)"
-        R"(<field name='MsgType' required='N'/>)"
-        R"(<field name='ZeroLen' required='N'/>)"
-        R"(<field name='CustomData' required='N'/>)"
-        R"(</message>)"
-        R"(</messages></fix>)";
+        R"(</fields><messages/></fix>)";
 
-    // The mirror image: a valid LENGTH adjacent to a DATA field numbered 0.
-    constexpr std::string_view kZeroDataXml =
-        R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
-        R"(<fields>)"
-        R"(<field number='8' name='BeginString' type='STRING'/>)"
-        R"(<field number='9' name='BodyLength' type='INT'/>)"
-        R"(<field number='10' name='CheckSum' type='STRING'/>)"
-        R"(<field number='35' name='MsgType' type='STRING'/>)"
-        R"(<field number='5001' name='CustomLen' type='LENGTH'/>)"
-        R"(<field number='0' name='ZeroData' type='DATA'/>)"
-        R"(</fields>)"
-        R"(<messages>)"
-        R"(<message name='TestMsg' msgtype='T' msgcat='app'>)"
-        R"(<field name='MsgType' required='N'/>)"
-        R"(<field name='CustomLen' required='N'/>)"
-        R"(<field name='ZeroData' required='N'/>)"
-        R"(</message>)"
-        R"(</messages></fix>)";
-
-    // Asserting the MESSAGE, not just the type: `xml_parse_error` is what this
-    // loader throws for a dozen unrelated malformations, so a type-only arm
-    // would stay green if the fixture started failing for its `<messages>`
-    // block, its version attributes, or a typo — i.e. for anything but the rule
-    // under test. The substring is the one the out-of-range arm already emits.
-    auto const refusal_message = [](std::string_view xml) {
-        std::pmr::monotonic_buffer_resource mr;
-        try {
-            (void)fixpp::dict::XmlLoader{}.load_from_string(xml, &mr);
-        } catch (fixpp::dict::xml_parse_error const& e) {
-            return std::string{e.what()};
-        }
-        return std::string{};
-    };
-
-    for (auto const& [label, xml] : {std::pair{"zero LENGTH half", kZeroLengthXml},
-                                     std::pair{"zero DATA half", kZeroDataXml}}) {
-        auto const msg = refusal_message(xml);
-        // EXPECT, not ASSERT: an ASSERT here returns from the test body, so a
-        // mutant that only breaks the FIRST case would leave the second one
-        // unmeasured and the failure count would understate it.
-        EXPECT_FALSE(msg.empty()) << label << ": the loader must refuse a zero-numbered field";
-        EXPECT_NE(msg.find(R"(<field number="0">)"), std::string::npos)
-            << label << ": refused for the WRONG reason — the declaration rule did not fire. "
-            << "what()=" << msg;
+    std::pmr::monotonic_buffer_resource mr;
+    try {
+        (void)fixpp::dict::XmlLoader{}.load_from_string(kZeroLengthXml, &mr);
+        FAIL() << "the loader must refuse a zero-numbered field";
+    } catch (fixpp::dict::xml_parse_error const& e) {
+        // The message, not just the type: this loader raises `xml_parse_error`
+        // for unrelated malformations too, so a type-only arm would stay green
+        // if the fixture began failing for anything but the rule under test.
+        EXPECT_NE(std::string{e.what()}.find(R"(<field number="0">)"), std::string::npos)
+            << "refused for the WRONG reason — the declaration rule did not fire. what()="
+            << e.what();
     }
 }

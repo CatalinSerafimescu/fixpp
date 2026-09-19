@@ -1015,14 +1015,14 @@ TEST(OrchestraFailClosed, MalformedLengthIdThrows) {
 // both the datatype check and the declared-Length check, so it is the one that
 // must fire.
 //
-// ⚠️ fixpp#457 CHANGED WHAT IS REACHABLE HERE, and the two cases below diverged
-// as a result. `collect_fields` now refuses a zero `<fixr:field id>` at
-// declaration, so the guard's `data_tag` half can no longer be reached through
-// this loader — a DATA field numbered 0 cannot be declared to be iterated over.
-// The `length_tag` half stays reachable, because `lengthId=` is parsed with the
-// shared `parse_orchestra_id` and is resolved later, so it can still carry a
-// zero into this function. One case is therefore re-grounded on that surviving
-// arm and the other is re-grounded on the refusal that displaced it.
+// ⚠️ The two cases below assert DIFFERENT mechanisms, and the difference follows
+// from where each value comes from. `data_tag` is a key of `fields_by_tag_`,
+// which `collect_fields` bars from being zero (fixpp#457); `length_tag` is a
+// `lengthId=` reference, parsed with the shared `parse_orchestra_id` — which
+// must keep admitting zero for the structural-id namespace — and resolved after
+// the declaration check. So one case still exercises the pair guard and the
+// other exercises the declaration refusal that precedes it. Re-derive by
+// reading the two call sites, not by trusting this note.
 namespace {
 
 // Returns the orchestra_parse_error message, or "" if the load did not throw.
@@ -1057,16 +1057,11 @@ TEST(OrchestraFailClosed, ZeroLengthIdCannotBeHalfOfAPair) {
         << msg;
 }
 
-// The mirror image, re-grounded. This fixture used to reach the zero guard's
-// `data_tag` half; under fixpp#457 the declaration is refused first, so the
-// guard is never consulted. The case is kept ON THE SAME FIXTURE rather than
-// deleted, because the fixture is the thing that changed meaning: it pins that
-// the shape which used to need a pair-formation guard is now refused earlier,
-// and it goes RED if the declaration rule is ever relaxed — which would silently
-// hand the `data_tag` half back its only caller.
-//
-// The message is asserted for the same reason as its sibling, in the opposite
-// direction: it must NOT be the pair guard's message any more.
+// The mirror image: a DATA field numbered 0, with a valid Length partner. The
+// declaration refusal precedes the pair guard, so this fixture must fail with
+// the declaration's message and NOT the pair guard's. Asserting both directions
+// is what keeps the two cases from collapsing into one: relax the declaration
+// rule and this goes RED, handing the guard's `data_tag` half back its caller.
 TEST(OrchestraFailClosed, ZeroDataFieldIsRefusedAtDeclarationBeforeThePairGuard) {
     auto const xml = repository_with_fields(
         R"xml(<fixr:field id="95" name="RawDataLength" type="Length"/>
@@ -1085,23 +1080,20 @@ TEST(OrchestraFailClosed, ZeroDataFieldIsRefusedAtDeclarationBeforeThePairGuard)
 // ---------------------------------------------------------------------------
 // fixpp#457 — a <fixr:field id="0"> is refused at DECLARATION.
 //
-// The bound in `try_parse_uint16` was `val < 0 || val > 65535`, so 0 parsed
-// cleanly. Tightening at the declaration is sufficient for the whole loader:
-// every id that REFERENCES a field (`<fixr:fieldRef>`, `<fixr:numInGroup>`,
-// `lengthId=`) is resolved against `fields_by_tag_` and already fails closed on
-// a miss, so once no field can be declared with tag 0 those paths cannot admit
-// one either.
+// Tightening the declaration is sufficient for the whole loader: every id that
+// REFERENCES a field (`<fixr:fieldRef>`, `<fixr:numInGroup>`, `lengthId=`) is
+// resolved against `fields_by_tag_` and already fails closed on a miss, so a
+// tag barred from being declared cannot be referenced either.
 // ---------------------------------------------------------------------------
 TEST(OrchestraFailClosed, ZeroFieldIdThrows) {
-    constexpr std::string_view kXml = R"xml(
-<fixr:repository version="FIX.Latest_EP303">
-  <fixr:fields><fixr:field id="0" name="ZeroTag" type="String"/></fixr:fields>
-  <fixr:messages/>
-</fixr:repository>
-)xml";
-    std::pmr::monotonic_buffer_resource mr;
-    fixpp::dict::OrchestraLoader loader;
-    EXPECT_THROW((void)loader.load_from_string(kXml, &mr), fixpp::dict::orchestra_parse_error);
+    auto const msg = orchestra_load_error_message(
+        repository_with_fields(R"xml(<fixr:field id="0" name="ZeroTag" type="String"/>)xml", ""));
+    ASSERT_FALSE(msg.empty()) << "a zero <fixr:field id> must fail the load closed";
+    // The message, not just the type: every neighbouring OrchestraFailClosed
+    // case throws this same type, so a type-only arm cannot tell the
+    // declaration refusal from any other malformation in the fixture.
+    EXPECT_NE(msg.find("<fixr:field> id attribute"), std::string::npos)
+        << "refused for the WRONG reason. Message: " << msg;
 }
 
 // The false-positive arm. `<fixr:component id>` and `<fixr:group id>` are a

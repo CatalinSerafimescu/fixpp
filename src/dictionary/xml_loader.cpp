@@ -757,14 +757,12 @@ void LoaderState::detect_length_pairs(pugi::xml_node const& root) {
         // refusing it only in `table_view::set_length_pair_data_tag` leaves
         // `Dictionary::length_pair_data_tag(0)`, `field_ref` and `message_fields()`
         // still reporting a zero-headed pair to any caller that does not go
-        // through a table_view.
-        //
-        // fixpp#457 moved the refusal upstream: a zero `<field number>` is now
-        // rejected at declaration, so both halves reaching here are non-zero by
-        // construction and this guard cannot fire through THIS loader. It is
-        // kept as the boundary condition rather than as a reachability claim —
-        // it holds for any population path, including one added later that does
-        // not go through `parse_document`.
+        // through a table_view. Kept as a CONDITION, not a reachability claim:
+        // zero is the "no pair" answer of every pair accessor, which is a
+        // property of the accessors rather than of any caller. (fixpp#457 also
+        // bars a zero `<field number>` at declaration, upstream of this lambda;
+        // re-derive what that leaves reachable by reading `parse_document`'s
+        // call order, not this comment.)
         if (length_tag == 0 || data_tag == 0) {
             return;
         }

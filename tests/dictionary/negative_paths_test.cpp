@@ -477,21 +477,17 @@ TEST(NegativePaths, LoadRejectsMalformedXmlFileWithPugixmlDescription) {
 // admitted it.
 // ---------------------------------------------------------------------------
 TEST(NegativePaths, ZeroFieldNumberThrowsXmlParseError) {
-    Arena a;
-    fixpp::dict::XmlLoader loader;
     constexpr std::string_view kXml = R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
                                       R"(<fields>)"
                                       R"(<field number='0' name='ZeroTag' type='STRING'/>)"
                                       R"(</fields><messages/></fix>)";
-    try {
-        (void)loader.load_from_string(kXml, &a.mr);
-        FAIL() << "expected dict::xml_parse_error";
-    } catch (fixpp::dict::xml_parse_error const& e) {
-        EXPECT_EQ(e.code(), fixpp::core::error::dict_xml_parse_failed)
-            << "fixpp#457 asks for the SAME error shape as the out-of-range case, so a caller "
-               "already handling <field number='70000'> needs no new arm; what()="
-            << e.what();
-    }
+    // The needle is the EXISTING out-of-range message, unchanged — which is both
+    // the assertion and the point of the change: fixpp#457 asks for the same
+    // error shape, so a caller already handling <field number='70000'> needs no
+    // new arm. Asserting the message and not just the code is what stops this
+    // going green if the fixture ever starts failing for its <messages> block or
+    // a typo instead of for the rule under test.
+    expect_xml_parse_error_contains(kXml, R"(<field number="0"> non-numeric or out-of-range)");
 }
 
 // The false-positive arm, and it is the load-bearing one: 0 is a legal value of
