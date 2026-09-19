@@ -1080,10 +1080,12 @@ TEST(OrchestraFailClosed, ZeroDataFieldIsRefusedAtDeclarationBeforeThePairGuard)
 // ---------------------------------------------------------------------------
 // fixpp#457 — a <fixr:field id="0"> is refused at DECLARATION.
 //
-// Tightening the declaration is sufficient for the whole loader: every id that
-// REFERENCES a field (`<fixr:fieldRef>`, `<fixr:numInGroup>`, `lengthId=`) is
-// resolved against `fields_by_tag_` and already fails closed on a miss, so a
-// tag barred from being declared cannot be referenced either.
+// Tightening the declaration is sufficient for the whole loader: no reference
+// to a field (`<fixr:fieldRef>`, `<fixr:numInGroup>`, `lengthId=`) can resolve
+// to 0, because 0 can no longer be declared — though which guard reports it
+// differs by reference kind; `lengthId=` is caught earlier, by the retained
+// zero-pair guard in `resolve_length_pairs` (witness
+// `ZeroLengthIdCannotBeHalfOfAPair`, above).
 // ---------------------------------------------------------------------------
 TEST(OrchestraFailClosed, ZeroFieldIdThrows) {
     auto const msg = orchestra_load_error_message(
