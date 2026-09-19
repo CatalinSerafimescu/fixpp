@@ -22,7 +22,11 @@
 // STORAGE (E-2, data-model.md):
 // Owns its tables using std::vector / std::unordered_map. Constructed ONCE at
 // session/validator setup time by `Dictionary::as_table_view()` ([const §XV.1]
-// — config-time, not per-message). Immutable after construction.
+// — config-time, not per-message). Immutable after construction, and that is
+// now a property of the TYPE rather than a rule kept by convention (fixpp#456,
+// `.specify/456-table-view-seal.md`): the population surface is private and
+// reachable only through `fixpp::dict::table_view_builder` (below), whose
+// `build() &&` yields the view; assignment is deleted.
 //
 // INCLUDE-GRAPH CONSTRAINT ([const §XV.9]):
 // This header is included (transitively) by `validator.hpp`, which lands on
@@ -274,10 +278,12 @@ private:
 // `wire::dictionary_driven_validator`. Owns its backing storage; spans
 // returned by the methods remain valid for the lifetime of this object.
 //
-// Copyable AND movable — see the copy/move block below, which defaults all four.
-// (This line read "move-only … copying is intentionally deleted" until fixpp#215;
-// that was contradicted by the very next declarations and had been false since the
-// copy ctor was defaulted. Copies are load-bearing, not incidental:
+// Copy- AND move-CONSTRUCTIBLE, and neither copy- nor move-ASSIGNABLE — see the
+// copy/move block below. (This line read "move-only … copying is intentionally
+// deleted" until fixpp#215; that was contradicted by the very next declarations
+// and had been false since the copy ctor was defaulted. Then it read "Copyable
+// AND movable … defaults all four", which fixpp#456 falsified by deleting both
+// assignment operators. Copies are load-bearing, not incidental:
 // `wire::dictionary_driven_validator` holds its `table_view` BY VALUE — a frozen
 // design point, "SC-007: no virtual edge" — so every validating session
 // copy-constructs one.)
@@ -286,30 +292,32 @@ public:
     table_view() = default;
     ~table_view() = default;
 
-    // Copy and move — both allowed. Copies duplicate the owned tables (used
-    // when a single table_view configuration seeds multiple validator instances,
-    // and by the mock-compatibility static_assert in validator_domain_test.cpp).
-    // Copy may throw on allocation failure. Move assignment is deliberately NOT
-    // spelled `noexcept` (Gate B r7 N-2): declaring it would make the assertion below
-    // observe that promise instead of proving it, and a member that later moved
-    // throwingly would keep the assertion green while turning the copy-assignment
-    // commit into std::terminate. Left to be inferred, the assertion is a proof.
+    // Copy and move CONSTRUCTION — both allowed. Copies duplicate the owned tables
+    // (used when a single table_view configuration seeds multiple validator
+    // instances, and by the mock-compatibility static_assert in
+    // validator_domain_test.cpp). Copy may throw on allocation failure.
+    //
+    // The move CONSTRUCTOR is deliberately NOT spelled `noexcept` (Gate B r7 N-2,
+    // carried across from the move-assignment fixpp#456 deleted): declaring it would
+    // make the assertion below the class observe that promise instead of proving it
+    // — since P1286R2 an explicit exception specification on a defaulted special
+    // member simply wins over the implicit one — and a member that later moved
+    // throwingly would keep the assertion green while silently making every
+    // `build()`, every `optional::emplace` and every by-value validator seat a
+    // throwing move. Left to be inferred, the assertion is a proof.
     table_view(table_view const&) = default;
-    // Strong guarantee (Gate B r6 M-2): copy first, commit through the nothrow
-    // move-assignment below. A defaulted member-wise assignment can throw part way
-    // and leave this object holding a copied pair while `has_nonstandard_pair_`
-    // still reads false — a pair every scanner would then miss, because
-    // `dict_hooks::for_table_view` installs no callback for a flagless table.
-    // The nothrow-ness the commit relies on is asserted below the class, not assumed.
-    table_view& operator=(table_view const& other) {
-        if (this != &other) {
-            table_view tmp(other);
-            *this = std::move(tmp);
-        }
-        return *this;
-    }
-    table_view(table_view&&) noexcept = default;
-    table_view& operator=(table_view&&) = default;
+    table_view(table_view&&) = default;
+
+    // fixpp#456: assignment is DELETED, in both forms. A caller who can write
+    // `published = other;` has not been sealed — copy-assignment moves the exact
+    // `has_nonstandard_pair_` bit the seal exists to freeze (the deleted
+    // `DictHooksCustomPair.CopyAssignmentCarriesTheFlagWithThePairs` proved it).
+    // The hand-written strong-guarantee copy-assignment that stood here existed
+    // ONLY to commit through the nothrow move-assignment; both go together.
+    // Re-populate through `table_view_builder` instead; seat an optional with
+    // `emplace`, not with assignment.
+    table_view& operator=(table_view const&) = delete;
+    table_view& operator=(table_view&&) = delete;
 
     // ── 6-method validator surface (C-1) ────────────────────────────────────
 
@@ -670,13 +678,19 @@ public:
         return true;
     }
 
+private:
+    friend class table_view_builder;
+
     // ── Build-time population surface ────────────────────────────────────────
-    // Used by Dictionary::as_table_view() (non-chain void) and by test code
-    // via the chain-style API below. Not part of the validator-facing contract.
+    // PRIVATE since fixpp#456: every caller reaches these through
+    // `table_view_builder` (below), which is the type's only friend that points
+    // inward. `Dictionary::as_table_view()` is deliberately NOT a friend — it
+    // populates a builder like every other caller. Not part of the
+    // validator-facing contract.
     //
-    // The chain-style methods mirror the test mock's builder surface so that
-    // existing tests/wire/validator_*_test.cpp TUs can drop the mock include
-    // and use this production type directly (RC-A closure, T009).
+    // The chain-style methods mirror the test mock's builder surface; the
+    // builder's forwarders preserve that spelling, so a migrated call site
+    // differs only in the receiver's name.
 
     void add_valid_tag(std::string_view msg_type, std::uint16_t tag) {
         valid_[std::string{msg_type}].insert(tag);
@@ -1030,11 +1044,159 @@ private:
     bool has_nonstandard_pair_ = false;
 };
 
-// The copy-assignment above commits through the move-assignment, whose exception
-// specification is INFERRED from the members (see the declaration). So this asserts a
-// property of every member, not a promise this class made about itself: a member that
-// stops being nothrow-move-assignable fails the build here instead of quietly turning
-// the strong guarantee into a call to std::terminate.
-static_assert(std::is_nothrow_move_assignable_v<table_view>);
+// Move CONSTRUCTION is the property that became load-bearing when fixpp#456 deleted
+// assignment: it is how `table_view_builder::build() &&` returns, how
+// `std::optional<table_view>::emplace` seats a view, and how the by-value validator
+// copy is moved into place. The move constructor's exception specification is
+// INFERRED from the members (see its declaration), so this asserts a property of
+// every member rather than a promise this class made about itself: a member that
+// stops being nothrow-move-constructible fails the build here instead of quietly
+// making every one of those paths a throwing move.
+//
+// NOT MEASURED on MSVC (`.specify/456-table-view-seal.md` §3.2, §7): std::unordered_map's
+// move constructor is not required by the standard to be noexcept, and only a Tier-2
+// MSVC leg can decide it. If it decides false the disposition is already written —
+// REMOVE this assertion and file a limitation naming the deciding member. Do NOT
+// restore an explicit `noexcept` on the move constructor: that silences the assertion
+// on every lane without making the move any safer.
+static_assert(std::is_nothrow_move_constructible_v<table_view>);
+
+// ── fixpp#456: the mutation surface, as a distinct owning type ───────────────
+// `table_view`'s sixteen mutators are private; this is the only way to reach them.
+// It holds a `table_view` BY VALUE — a stack-local scaffold with no reference to
+// anything — and `build() &&` moves that view out. No back-pointer, no lifetime
+// edge, nothing to dangle.
+//
+// Shape (design §3.1 S1, §3.3):
+//   table_view_builder b;
+//   b.add_valid("D", 11);
+//   b.set_field_type(11, field_type::String);
+//   table_view const tv = std::move(b).build();
+//
+// ⚠️ `build()` is `&&`-qualified, so a NAMED builder must be spelled
+// `std::move(b).build()` and the consumption is visible at the call site. The
+// forwarders return `table_view_builder&` — an LVALUE — so a chained prvalue
+// (`table_view_builder{}.add_valid(…).build()`) does NOT compile. That friction is
+// deliberate; write two statements.
+//
+// ⚠️ There is deliberately no `table_view const& peek()` (design §5d item 4): the
+// reference it returned would point into storage `build() &&` subsequently moves
+// from. The three `const` readbacks below are SCALARS — nothing to escape — and
+// exist for the one witness that must assert state mid-build.
+//
+// `build()` performs NO consistency validation (L-456-1): a builder can still
+// produce an internally inconsistent table (a group with members and no first
+// field — B-384-2). The seal makes the view immutable; it does not make it valid.
+class table_view_builder {
+public:
+    // ── the sixteen forwarders, each returning *this for chaining ───────────
+    table_view_builder& add_valid_tag(std::string_view msg_type, std::uint16_t tag) {
+        tv_.add_valid_tag(msg_type, tag);
+        return *this;
+    }
+
+    table_view_builder& add_required_tag(std::string_view msg_type, std::uint16_t tag) {
+        tv_.add_required_tag(msg_type, tag);
+        return *this;
+    }
+
+    table_view_builder& set_field_type(std::uint16_t tag, field_type ft) {
+        tv_.set_field_type(tag, ft);
+        return *this;
+    }
+
+    table_view_builder& add_group_member(std::uint16_t no_tag, std::uint16_t member_tag) {
+        tv_.add_group_member(no_tag, member_tag);
+        return *this;
+    }
+
+    table_view_builder& add_group_required_member(std::uint16_t no_tag, std::uint16_t member_tag) {
+        tv_.add_group_required_member(no_tag, member_tag);
+        return *this;
+    }
+
+    table_view_builder& add_valid(std::string_view msg_type, std::uint16_t tag) {
+        tv_.add_valid(msg_type, tag);
+        return *this;
+    }
+
+    table_view_builder& add_required(std::string_view msg_type, std::uint16_t tag) {
+        tv_.add_required(msg_type, tag);
+        return *this;
+    }
+
+    table_view_builder& set_type(std::uint16_t tag, field_type ft) {
+        tv_.set_type(tag, ft);
+        return *this;
+    }
+
+    table_view_builder& set_group_first(std::uint16_t no_tag, std::uint16_t first) {
+        tv_.set_group_first(no_tag, first);
+        return *this;
+    }
+
+    table_view_builder& add_enum(std::uint16_t tag, std::string_view value) {
+        tv_.add_enum(tag, value);
+        return *this;
+    }
+
+    table_view_builder& set_multi_value(std::uint16_t tag, bool multi = true) {
+        tv_.set_multi_value(tag, multi);
+        return *this;
+    }
+
+    table_view_builder& add_group_member_ctx(std::string_view msg_type,
+                                             std::span<std::uint16_t const> parent_path,
+                                             std::uint16_t no_tag, std::uint16_t member_tag) {
+        tv_.add_group_member_ctx(msg_type, parent_path, no_tag, member_tag);
+        return *this;
+    }
+
+    table_view_builder& add_group_required_member_ctx(std::string_view msg_type,
+                                                      std::span<std::uint16_t const> parent_path,
+                                                      std::uint16_t no_tag,
+                                                      std::uint16_t member_tag) {
+        tv_.add_group_required_member_ctx(msg_type, parent_path, no_tag, member_tag);
+        return *this;
+    }
+
+    table_view_builder& set_group_first_ctx(std::string_view msg_type,
+                                            std::span<std::uint16_t const> parent_path,
+                                            std::uint16_t no_tag, std::uint16_t first) {
+        tv_.set_group_first_ctx(msg_type, parent_path, no_tag, first);
+        return *this;
+    }
+
+    table_view_builder& add_fixt_framing_tag(std::uint16_t tag, field_type ft) {
+        tv_.add_fixt_framing_tag(tag, ft);
+        return *this;
+    }
+
+    table_view_builder& set_length_pair_data_tag(std::uint16_t length_tag,
+                                                 std::uint16_t data_tag) {
+        tv_.set_length_pair_data_tag(length_tag, data_tag);
+        return *this;
+    }
+
+    // ── scalar readbacks, for the one witness that asserts BETWEEN mutations ──
+    // Scalars by design: a reference-returning accessor would alias storage that
+    // `build() &&` moves from. See the `peek()` refusal above.
+    [[nodiscard]] std::uint16_t length_pair_data_tag(std::uint16_t length_tag) const noexcept {
+        return tv_.length_pair_data_tag(length_tag);
+    }
+
+    [[nodiscard]] std::uint16_t data_pair_length_tag(std::uint16_t data_tag) const noexcept {
+        return tv_.data_pair_length_tag(data_tag);
+    }
+
+    [[nodiscard]] bool has_nonstandard_pair() const noexcept { return tv_.has_nonstandard_pair(); }
+
+    // Consumes the builder. The move is a member-to-return move, so NRVO cannot
+    // apply; C++17 guaranteed elision then makes the caller's own return free.
+    [[nodiscard]] table_view build() && { return std::move(tv_); }
+
+private:
+    table_view tv_;
+};
 
 }  // namespace fixpp::dict
