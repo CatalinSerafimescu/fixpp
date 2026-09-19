@@ -466,3 +466,49 @@ TEST(NegativePaths, LoadRejectsMalformedXmlFileWithPugixmlDescription) {
             << "what()=" << e.what();
     }
 }
+
+// ---------------------------------------------------------------------------
+// fixpp#457 — a field number of 0 is refused, with the out-of-range error shape.
+//
+// FIX tags are positive. 0 is additionally the "absent" answer of several
+// dict/table_view accessors (`length_pair_data_tag`, `data_pair_length_tag`,
+// `group_first_field`), so a zero-numbered field reads as both present and
+// absent depending on the direction asked. The bound was `tag_i < 0`, which
+// admitted it.
+// ---------------------------------------------------------------------------
+TEST(NegativePaths, ZeroFieldNumberThrowsXmlParseError) {
+    Arena a;
+    fixpp::dict::XmlLoader loader;
+    constexpr std::string_view kXml = R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+                                      R"(<fields>)"
+                                      R"(<field number='0' name='ZeroTag' type='STRING'/>)"
+                                      R"(</fields><messages/></fix>)";
+    try {
+        (void)loader.load_from_string(kXml, &a.mr);
+        FAIL() << "expected dict::xml_parse_error";
+    } catch (fixpp::dict::xml_parse_error const& e) {
+        EXPECT_EQ(e.code(), fixpp::core::error::dict_xml_parse_failed)
+            << "fixpp#457 asks for the SAME error shape as the out-of-range case, so a caller "
+               "already handling <field number='70000'> needs no new arm; what()="
+            << e.what();
+    }
+}
+
+// The false-positive arm, and it is the load-bearing one: 0 is a legal value of
+// every OTHER number this loader parses. `minor` and `servicepack` go through
+// `parse_nonneg_int`, which must keep accepting 0 — `servicepack='0'` is the
+// normal spelling for FIX.4.4 and is carried by most fixtures in this file, so
+// a tightening that leaked one level up would refuse nearly every dictionary in
+// the tree. A test that only proves the refusal fires cannot catch it firing
+// where it must not.
+TEST(NegativePaths, ZeroVersionNumbersAreStillAccepted) {
+    auto* mr = std::pmr::new_delete_resource();
+    constexpr std::string_view kXml =
+        R"(<fix type='FIX' major='5' minor='0' servicepack='0'>)"
+        R"(<fields><field number='35' name='MsgType' type='STRING'/></fields>)"
+        R"(<messages/></fix>)";
+    EXPECT_NO_THROW({
+        auto dict = fixpp::dict::XmlLoader{}.load_from_string(kXml, mr);
+        EXPECT_EQ(dict.which_session_version(), fixpp::dict::session_version::v50);
+    }) << "minor='0' / servicepack='0' are not field numbers and must keep loading";
+}

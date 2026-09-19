@@ -415,7 +415,13 @@ void LoaderState::parse_global_fields(pugi::xml_node const& root) {
         std::string const num_s{number_attr.as_string("")};
         int tag_i = 0;
         auto const r = std::from_chars(num_s.data(), num_s.data() + num_s.size(), tag_i);
-        if (r.ec != std::errc{} || r.ptr != num_s.data() + num_s.size() || tag_i < 0 ||
+        // fixpp#457: the valid tag range is 1..65535, not 0..65535. Zero is the
+        // "absent" answer of several dict/table_view accessors
+        // (`length_pair_data_tag`, `data_pair_length_tag`, `group_first_field`),
+        // so a zero-numbered field reads as present or absent depending on which
+        // direction is asked. Refused with the out-of-range error shape, so a
+        // caller already handling <field number="70000"> needs no new arm.
+        if (r.ec != std::errc{} || r.ptr != num_s.data() + num_s.size() || tag_i <= 0 ||
             tag_i > 65535) {
             throw xml_parse_error("dict::xml_parse_error: <field number=\"" + num_s +
                                   "\"> non-numeric or out-of-range");
@@ -751,8 +757,14 @@ void LoaderState::detect_length_pairs(pugi::xml_node const& root) {
         // refusing it only in `table_view::set_length_pair_data_tag` leaves
         // `Dictionary::length_pair_data_tag(0)`, `field_ref` and `message_fields()`
         // still reporting a zero-headed pair to any caller that does not go
-        // through a table_view. Field number 0 is itself invalid and both loaders
-        // accept it today: pre-existing and wider than pairs — fixpp#457.
+        // through a table_view.
+        //
+        // fixpp#457 moved the refusal upstream: a zero `<field number>` is now
+        // rejected at declaration, so both halves reaching here are non-zero by
+        // construction and this guard cannot fire through THIS loader. It is
+        // kept as the boundary condition rather than as a reachability claim —
+        // it holds for any population path, including one added later that does
+        // not go through `parse_document`.
         if (length_tag == 0 || data_tag == 0) {
             return;
         }
