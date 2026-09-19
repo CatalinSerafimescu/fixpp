@@ -208,11 +208,14 @@ bundle. There are three factories:
   and a bundle is built only after it is populated: `Validator::validate`, `Session`'s scanners and the
   C-ABI setters build one per operation, while `Parser` builds one in its constructor and reuses it for
   its own lifetime against a view that must stay immutable for at least that long (Gate B r7 N-4 —
-  "rebuilt per message" was too strong; `Parser` retains its bundle). The type does not *enforce* the
-  order — `set_length_pair_data_tag` and assignment stay public — so the rule is pinned by
-  `DictHooksCustomPair.ABundleIsASnapshotOfTheDictionaryItWasBuiltFrom` and sealing the published
-  view is fixpp#456 (Gate B r6 M-1). Pair mutation and copy-assignment carry the strong
-  exception guarantee, so the maps and the flag cannot disagree after a failed allocation (r6 M-2).
+  "rebuilt per message" was too strong; `Parser` retains its bundle). ⚠️ **SUPERSEDED — see
+  `.specify/456-table-view-seal.md`.** At the time of writing the type did not *enforce* the order
+  (`set_length_pair_data_tag` and assignment were public) and the rule was pinned by
+  `DictHooksCustomPair.ABundleIsASnapshotOfTheDictionaryItWasBuiltFrom`. fixpp#456 sealed the
+  published view, which makes the stale case unconstructible and deletes that witness with its
+  premise; do not look for it. Pair mutation still carries the strong exception guarantee, so the
+  maps and the flag cannot disagree after a failed allocation (r6 M-2) — copy-assignment, which
+  carried the other half of that claim, no longer exists.
 - A test-only factory under the existing test-hooks seam, for stub dictionaries such as the uint16
   token in `fuzz_wire_nested_slice.cpp` and the offset-table tests that pin a null member function.
 

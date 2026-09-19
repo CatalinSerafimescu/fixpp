@@ -17,8 +17,10 @@
 // header declares — so a test that populates a table names the builder, not the
 // view.
 //
-// No test changes are required to keep existing wire validator tests working.
-// Tests that want to migrate to the production header directly may include
+// Including this header is still enough to keep an existing wire validator test
+// working; fixpp#456 changed what a test WRITES, not what it includes — a test
+// that populates a table now declares a `table_view_builder` and finishes with
+// `build()`. Tests that want the production header directly may include
 // <fixpp/dict/table_view.hpp> instead; this header remains for compatibility.
 
 #include <fixpp/dict/field_type.hpp>
