@@ -57,6 +57,16 @@ import re
 import subprocess
 import sys
 
+# Shared with check_co_spawn_lambda rather than re-spelled: a second copy of a
+# comment/literal blanker must agree with the first forever, and a byte-identical
+# copy propagates a claim that is false at the new site the moment one of them is
+# fixed. check_co_spawn_lambda is side-effect-free at module scope (constants +
+# `if __name__`), so importing it runs nothing. sys.path[0] is tools/ when run as
+# `python3 tools/<x>.py`, but that is not guaranteed for any other entry point --
+# hence the explicit insert rather than relying on it.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from check_co_spawn_lambda import strip_noncode  # noqa: E402
+
 # The sixteen public mutators, alternation ordered LONGEST-FIRST so that
 # add_valid/add_valid_tag and set_group_first/set_group_first_ctx cannot swallow
 # each other.
@@ -110,9 +120,20 @@ CONTINUATION = re.compile(r"^\s*\.\s*" + MUTRE + r"\s*\(")
 
 
 def source_lines(root, path):
-    """The file with `//` comments crudely stripped — the view both halves scan."""
-    raw = open(os.path.join(root, path), errors="replace").read().split("\n")
-    return [re.sub(r"//.*", "", l) for l in raw]
+    """The file with comments and literals blanked — the view both halves scan.
+
+    ⚠️ `re.sub(r"//.*", "", l)` was NOT good enough, even though it produced
+    identical output on every file this script scans today. Brace depth is the
+    whole instrument, and a brace inside a STRING LITERAL is a brace the crude
+    strip hands straight to the counter. `tests/wire/offset_table_test.cpp`
+    already carries a net +7 brace delta inside literals; that the two agree is
+    luck about where those braces fall, not a property of either.
+
+    `strip_noncode` blanks `//`, `/* */`, string and raw-string literals while
+    PRESERVING length and newlines, so it is a drop-in for a line-indexed scan.
+    """
+    raw = open(os.path.join(root, path), errors="replace").read()
+    return strip_noncode(raw).split("\n")
 
 
 def mutator_receivers(lines):

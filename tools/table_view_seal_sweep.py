@@ -185,14 +185,31 @@ def sealed_header_text(src_path, seed_error=False):
               "tree, where it would produce a control-shaped run and a misleading zero. "
               "Validate a completed migration with a full build, not with this sweep.")
 
+    # The three anchors are guarded above with `s.strip()`, which is indentation-
+    # insensitive on purpose. Re-finding one afterwards by an EXACT four-space
+    # spelling was not: a header whose indentation changed passed the guard and
+    # then died on an uncaught ValueError -- the one exit path in this file that
+    # bypassed `Fatal`, whose contract is that nothing here fails toward clean.
+    # So each anchor is resolved ONCE, above, and used directly.
+    #
+    # ⚠️ THE ORDER IS THE OTHER HALF OF THE FIX. The copy-assignment splice
+    # replaces 7 lines with 1, so applying these in file order would shift the two
+    # indices resolved against the ORIGINAL line numbering. They sit in ascending
+    # file order, so applying HIGHEST INDEX FIRST means no edit can move an index a
+    # later edit still needs.
+    if not copy_assign[0] < move_assign[0] < banner[0]:
+        raise Fatal(
+            "SIMULATION ANCHORS ARE NOT IN THE EXPECTED FILE ORDER "
+            f"(copy-assignment {copy_assign[0]}, move-assignment {move_assign[0]}, "
+            f"banner {banner[0]}).\n  The splices below are applied highest-index-first "
+            "so that none shifts another; that is only shift-free while the anchors "
+            "ascend. Re-derive the order before editing this block.")
+
+    lines[banner[0]:banner[0]] = ["private:", "    friend class table_view_builder;"]
+    lines[move_assign[0]] = "    table_view& operator=(table_view&&) = delete;"
     # the hand-written strong-guarantee copy-assignment body is 7 lines
     lines[copy_assign[0]:copy_assign[0] + 7] = [
         "    table_view& operator=(table_view const&) = delete;"]
-    k = lines.index("    table_view& operator=(table_view&&) = default;")
-    lines[k] = "    table_view& operator=(table_view&&) = delete;"
-    b = [k for k, s in enumerate(lines)
-         if s.strip().startswith("// ── Build-time population surface")][0]
-    lines[b:b] = ["private:", "    friend class table_view_builder;"]
     lines = [s for s in lines if "is_nothrow_move_assignable_v<table_view>" not in s]
 
     if seed_error:
@@ -230,7 +247,25 @@ def entries(build, filt):
             if p == "-o":
                 skip = True
                 continue
-            if p == "-c" or (p.startswith("@") and p.endswith(".modmap")):
+            if p.startswith("@") and p.endswith(".modmap"):
+                # Dropping the module map is a semantic no-op only while this tree
+                # contains no C++20 modules, and THIS is what keeps that true:
+                # every modmap CMake emits here is 0 bytes. A non-empty one means
+                # the TU genuinely needs it, and silently dropping it would
+                # mis-parse that TU -- measuring the wrong thing rather than
+                # failing. Same guard, for the same reason, as sanitize_db() in
+                # tools/reconcile_co_spawn_census.py.
+                mp = p[1:]
+                if not os.path.isabs(mp):
+                    mp = os.path.join(e["directory"], mp)
+                if os.path.exists(mp) and os.path.getsize(mp) > 0:
+                    raise Fatal(
+                        f"{mp} IS {os.path.getsize(mp)} BYTES, NOT EMPTY. This tree has "
+                        "started using C++20 modules and dropping the module map would "
+                        "mis-parse that TU. Teach this script to keep it (and build the "
+                        "modmaps first) rather than removing this check.")
+                continue
+            if p == "-c":
                 continue
             keep.append(p)
         out.append((f, keep, e["directory"]))
