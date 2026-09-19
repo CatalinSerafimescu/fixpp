@@ -178,7 +178,24 @@ per-message paths). `set_length_pair_data_tag` is strongly exception-safe at **O
 earlier transactional version copied both maps per registered pair and made
 `Dictionary::as_table_view()` quadratic (+26.3 % on FIX42); do not reintroduce it. Zero is
 refused on **both** halves, at the setter *and* at pair formation in both loaders, because zero
-is the "no pair" answer of every accessor (fixpp#457 covers field number 0 generally).
+is the "no pair" answer of every accessor.
+
+⚠️ **fixpp#457 then moved the refusal UPSTREAM of all three, and that changed which of them a
+test can still reach** — the kind of thing a page like this exists to record, because the guards
+are still in the source and read as live. A field numbered 0 is now refused at DECLARATION in
+both loaders, so the pair-formation guards can no longer be reached *through a loader*: the XML
+`mark_pair` skip cannot fire at all, and the Orchestra throw keeps only its `length_tag` half
+(a `lengthId=` reference is parsed with the shared `parse_orchestra_id`, which must keep
+admitting zero for the structural-id namespace, and is resolved after the declaration check).
+They are kept as boundary conditions — the condition is a property of the accessors, not of
+today's callers — but **do not read either as a witnessed path.** The decision that keeps the
+rule off the shared parser is the load-bearing one: `<fixr:component id>` / `<fixr:group id>`
+are a repository-local surrogate key where `id="0"` is legal, so the Orchestra rule lives in
+`parse_orchestra_field_tag` and the false-positive arm
+(`OrchestraFailClosed.ZeroStructuralXmlIdsAreStillAccepted`) is what holds the two namespaces
+apart. **What remains open is `table_view`'s own mutator surface** — a hand-built view can still
+plant a zero where a loaded dictionary cannot, which is `table_view.hpp`'s B-384-2 note and
+fixpp#456.
 
 ## Where the design decisions live
 

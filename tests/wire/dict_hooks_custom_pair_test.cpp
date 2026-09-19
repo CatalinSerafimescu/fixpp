@@ -959,10 +959,12 @@ TEST(DictHooksCustomPair, ZeroIsRefusedAtLoadBeforeAPairCanEvenForm) {
     for (auto const& [label, xml] : {std::pair{"zero LENGTH half", kZeroLengthXml},
                                      std::pair{"zero DATA half", kZeroDataXml}}) {
         auto const msg = refusal_message(xml);
-        ASSERT_FALSE(msg.empty()) << label << ": the loader must refuse a zero-numbered field";
+        // EXPECT, not ASSERT: an ASSERT here returns from the test body, so a
+        // mutant that only breaks the FIRST case would leave the second one
+        // unmeasured and the failure count would understate it.
+        EXPECT_FALSE(msg.empty()) << label << ": the loader must refuse a zero-numbered field";
         EXPECT_NE(msg.find(R"(<field number="0">)"), std::string::npos)
-            << label << ": refused for the WRONG reason — the fixpp#457 declaration rule did "
-                        "not fire. what()="
-            << msg;
+            << label << ": refused for the WRONG reason — the declaration rule did not fire. "
+            << "what()=" << msg;
     }
 }
