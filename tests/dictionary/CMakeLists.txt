@@ -132,6 +132,39 @@ target_link_libraries(dictionary_table_view_enum_domain_test PRIVATE
 add_test(NAME dictionary_table_view_enum_domain_test COMMAND dictionary_table_view_enum_domain_test)
 set_tests_properties(dictionary_table_view_enum_domain_test PROPERTIES LABELS "075;dictionary")
 
+# ── fixpp#456 seam 1: the compile-time seal witness ─────────────────────────
+# An ORDINARY TU, deliberately NOT a WILL_FAIL negative-compile target: such a
+# target passes for any compile error at all (design §6 seam 1 gives the reasons,
+# and tests/consumer/CMakeLists.txt rule 2 already wrote the argument down). Its
+# own "456" label selects it without widening the dictionary-only bucket.
+add_executable(dictionary_table_view_seal_compile_test table_view_seal_compile_test.cpp)
+target_link_libraries(dictionary_table_view_seal_compile_test PRIVATE
+  fixpp_dictionary
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME dictionary_table_view_seal_compile_test
+  COMMAND dictionary_table_view_seal_compile_test)
+set_tests_properties(dictionary_table_view_seal_compile_test PROPERTIES LABELS "456;dictionary")
+
+# ── fixpp#456 seam 4: builder/as_table_view() differential ───────────────────
+# Standalone rather than folded into the pure bucket's table_view_test.cpp: it needs
+# its own FIXPP_DICT_DATA_DIR and its own "456" label, and it must stay buildable
+# independently of the rest of the dictionary test tree.
+add_executable(dictionary_table_view_builder_differential_test
+  table_view_builder_differential_test.cpp)
+target_link_libraries(dictionary_table_view_builder_differential_test PRIVATE
+  fixpp_dictionary
+  GTest::gtest
+  GTest::gtest_main
+)
+target_compile_definitions(dictionary_table_view_builder_differential_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\"")
+add_test(NAME dictionary_table_view_builder_differential_test
+  COMMAND dictionary_table_view_builder_differential_test)
+set_tests_properties(dictionary_table_view_builder_differential_test PROPERTIES
+  LABELS "456;dictionary")
+
 # ── fixpp#426 Gate B r7 N-3: Length+Data pair state under allocation failure ──
 # Standalone, not in the pure bucket: it replaces global operator new to fail one
 # allocation at a time ([const §VII.8]'s isolation-sensitive carve-out, the same

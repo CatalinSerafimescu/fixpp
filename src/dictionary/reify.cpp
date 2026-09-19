@@ -21,6 +21,7 @@
 // stays T059-stubbed (out of scope). Construction is the single hand-written
 // factory detail::owning_message_handle_from_frame (research D-2 / contract
 // C-2), defined out-of-line here (the handle is a heap pimpl).
+#include <cassert>
 #include <cstdint>
 #include <expected>
 #include <fixpp/core/error.hpp>
@@ -202,7 +203,13 @@ core::expected_t<owning_message_handle> owning_message_handle_from_frame(
         // else stay dict-free (data-model.md degenerate case; see view()'s
         // re-frame above).
         if (view.is_dict_backed()) {
-            handle.pimpl_->owned_tv_ = view.membership_copy();
+            // fixpp#456 seam 6: `table_view` is no longer assignable, so the optional
+            // is SEATED rather than assigned. emplace destroys-then-constructs, so it
+            // differs from assignment only when the optional is already engaged — the
+            // precondition this assertion carries, instead of the reading that
+            // established it (the impl is allocated a few lines above, in this try).
+            assert(!handle.pimpl_->owned_tv_.has_value());
+            handle.pimpl_->owned_tv_.emplace(view.membership_copy());
         }
         return handle;  // move (custom noexcept move ctor)
     } catch (std::bad_alloc const&) {

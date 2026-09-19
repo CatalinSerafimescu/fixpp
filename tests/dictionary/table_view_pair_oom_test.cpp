@@ -9,12 +9,25 @@
 // pair present in one map but not the other breaks the "two directions never
 // disagree" invariant (Gate B r1 G-4).
 //
-// Both mutating paths — `set_length_pair_data_tag` and copy-assignment — are
-// written for the STRONG guarantee: prepare, then commit with operations the
-// compiler proves `noexcept`. This witness is what makes that claim falsifiable:
-// it fails EVERY allocation the operation performs, one at a time, and after each
-// caught `std::bad_alloc` requires the observable pair state to be byte-for-byte
-// what it was before the call.
+// `set_length_pair_data_tag` is written for the STRONG guarantee: prepare, then
+// commit with operations the compiler proves `noexcept`. This witness is what makes
+// that claim falsifiable: it fails EVERY allocation the operation performs, one at a
+// time, and after each caught `std::bad_alloc` requires the observable pair state to
+// be byte-for-byte what it was before the call.
+//
+// fixpp#456 re-grounded these cases on `table_view_builder`: the mutator is private
+// on the view now, so the subject of the sweep is the builder. THE THREE MUTATION
+// CASES BELOW ARE THE ONLY REMAINING COVERAGE OF THAT ROLLBACK. The invariant was
+// enforced twice — once here on the mutation path, once on the copy-assignment path
+// that #456 deleted — so losing these alongside the assignment cases would silently
+// drop the half of the guarantee the seal claims to preserve. The two
+// copy-assignment cases are gone with their subject; that is a deletion, not a
+// coverage gap that was overlooked.
+//
+// The builder forwards exactly three `const` readbacks — `length_pair_data_tag`,
+// `data_pair_length_tag`, `has_nonstandard_pair` — which is precisely the state this
+// witness observes. There is deliberately no `peek()` returning the view under
+// construction (design §5d item 4).
 //
 // Mechanism: a TU-local global `operator new` that throws on one armed call
 // number, the same seam `reify_membership_copy_oom_test.cpp` and
@@ -31,10 +44,9 @@
 //
 // Mutation procedure: delete the try/catch rollback in `set_length_pair_data_tag`
 // so both maps are assigned directly — the insertion and re-pair cases then observe
-// a pair that landed in one direction only. Re-default `operator=(table_view
-// const&)` — the copy-assignment cases then observe a target whose maps and flag
-// disagree. (Both mutants are anchored on code, not on a count of which cases go
-// RED: that count moves with the allocation pattern of the STL underneath.)
+// a pair that landed in one direction only. (The mutant is anchored on code, not on
+// a count of which cases go RED: that count moves with the allocation pattern of the
+// STL underneath.)
 
 #include <gtest/gtest.h>
 
@@ -102,7 +114,7 @@ void operator delete[](void* p, std::size_t) noexcept { std::free(p); }
 
 namespace {
 
-using fixpp::dict::table_view;
+using fixpp::dict::table_view_builder;
 
 // Every tag the cases below touch, so a snapshot covers both directions for all
 // of them rather than only the pair under test.
@@ -117,7 +129,7 @@ struct pair_state {
     friend bool operator==(pair_state const&, pair_state const&) = default;
 };
 
-pair_state snapshot(table_view const& tv) {
+pair_state snapshot(table_view_builder const& tv) {
     pair_state s;
     s.flag = tv.has_nonstandard_pair();
     for (auto const tag : kTags) {
@@ -129,7 +141,7 @@ pair_state snapshot(table_view const& tv) {
 
 // The G-4 invariant, checked directly: every forward entry has its inverse, and
 // every inverse entry has its forward.
-void expect_directions_agree(table_view const& tv, char const* where) {
+void expect_directions_agree(table_view_builder const& tv, char const* where) {
     for (auto const tag : kTags) {
         if (auto const data = tv.length_pair_data_tag(tag); data != 0) {
             EXPECT_EQ(tv.data_pair_length_tag(data), tag)
@@ -185,55 +197,31 @@ void sweep_allocation_failures(char const* where, Build build, Op op) {
                             "nothing (arming is broken)";
 }
 
-table_view with_one_pair() {
-    table_view tv;
-    tv.set_length_pair_data_tag(5001, 5002);
-    return tv;
+table_view_builder with_one_pair() {
+    table_view_builder b;
+    b.set_length_pair_data_tag(5001, 5002);
+    return b;
 }
 
 TEST(TableViewPairOom, NewPairInsertionIsAllOrNothing) {
     FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_NEW_SWEEP();
     sweep_allocation_failures(
         "new pair", [] { return with_one_pair(); },
-        [](table_view& tv) { tv.set_length_pair_data_tag(6001, 6002); });
+        [](table_view_builder& tv) { tv.set_length_pair_data_tag(6001, 6002); });
 }
 
 TEST(TableViewPairOom, RepairingTheLengthSideIsAllOrNothing) {
     FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_NEW_SWEEP();
     sweep_allocation_failures(
         "re-pair length", [] { return with_one_pair(); },
-        [](table_view& tv) { tv.set_length_pair_data_tag(5001, 5003); });
+        [](table_view_builder& tv) { tv.set_length_pair_data_tag(5001, 5003); });
 }
 
 TEST(TableViewPairOom, RepairingTheDataSideIsAllOrNothing) {
     FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_NEW_SWEEP();
     sweep_allocation_failures(
         "re-pair data", [] { return with_one_pair(); },
-        [](table_view& tv) { tv.set_length_pair_data_tag(5011, 5002); });
-}
-
-// The flag lives beside the maps, so a half-applied copy could leave a target
-// holding pairs while `has_nonstandard_pair()` still reads false — pairs no bundle
-// built from that target would ever honour.
-TEST(TableViewPairOom, CopyAssignmentIsAllOrNothing) {
-    FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_NEW_SWEEP();
-    table_view source;
-    source.set_length_pair_data_tag(5001, 5002);
-    source.set_length_pair_data_tag(5011, 5012);
-
-    sweep_allocation_failures(
-        "copy assignment", [] { return table_view{}; }, [&source](table_view& tv) { tv = source; });
-}
-
-// A target that already holds pairs must not lose them to a failed assignment.
-TEST(TableViewPairOom, CopyAssignmentOverAPopulatedTargetIsAllOrNothing) {
-    FIXPP_SKIP_ON_MSVC_DEBUG_GLOBAL_NEW_SWEEP();
-    table_view source;
-    source.set_length_pair_data_tag(6001, 6002);
-
-    sweep_allocation_failures(
-        "copy assignment over populated", [] { return with_one_pair(); },
-        [&source](table_view& tv) { tv = source; });
+        [](table_view_builder& tv) { tv.set_length_pair_data_tag(5011, 5002); });
 }
 
 }  // namespace

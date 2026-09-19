@@ -208,7 +208,10 @@ public:
     // longer a stub).
     //
     // [const §XV.1]: construction only at config-time; the returned table_view
-    // is immutable and must not be rebuilt on the per-message hot path.
+    // is immutable — ENFORCED BY THE TYPE since fixpp#456, not merely asserted
+    // here: its population surface is private and reachable only through
+    // `table_view_builder`, and assignment is deleted — and must not be rebuilt
+    // on the per-message hot path.
     [[nodiscard]] table_view as_table_view() const;
 
 private:
