@@ -1,15 +1,17 @@
 # fixpp#456 — sealing `table_view`'s mutation surface
 
-> **Status: Draft v0.3 — Gate A Phase A, round 3 under review, 2026-09-19.**
+> **Status: v0.4 — Gate A CONVERGED at round 3, 2026-09-19.** Supersedes v0.3.
 >
 > - **Round 1: BLOCKED** — Codex `1 P1 / 4 P2`; Opus adversarial `2 P1 / 3 P2 / 5 P3` post-judging.
 > - **Round 2: BLOCKED** — Codex `2 P1 / 1 P2`; Opus adversarial `2 P1 / 2 P2 / 3 P3` post-judging,
 >   three root causes.
-> - **No round-1 or round-2 finding touched the design.** Convergence is `P1 == 0 AND P2 == 0`; it
->   **has not been reached**, and this document does not claim it. ⚠️ v0.2's header said *"Gate A
->   round 1 converged"* against its own appendix's `1 P1 / 4 P2`. Record a tally; record a
->   convergence only when a round returns zero and zero — the shape
->   `.specify/426-428-length-data-pairs.md` uses.
+> - **Round 3: CONVERGED** — Codex `0 P1 / 1 P2`; Opus adversarial `0 P1 / 0 P2 / 2 P3` post-judging,
+>   verdict *"Gate A converges"*. Recorded in `.specify/decisions/456-table-view-seal-gatea.md`.
+> - **No finding across all three rounds touched the design.** Convergence is `P1 == 0 AND P2 == 0`;
+>   it was reached at round 3. ⚠️ v0.2's header said *"Gate A round 1 converged"* against its own
+>   appendix's `1 P1 / 4 P2`. Record a tally; record a convergence only when a round returns zero and
+>   zero — the shape `.specify/426-428-length-data-pairs.md` uses, and the shape this status block now
+>   follows.
 >
 
 > **Owner:** Opus (Phase A designer). **Issue:** fixpp#456. **Tree:** `main` at `f49f462a`, clean.
@@ -29,9 +31,10 @@
 > design document under `.specify/` … qualifies by default"*.
 >
 > **Convergence log:** Appendix, at the end. It carries one section per revision: v0.1 → v0.2
-> responds to round 1, v0.2 → v0.3 responds to round 2. Disagreements and declined prescriptions are
-> recorded there with their reasoning rather than applied silently, and each rewrite's own re-runs
-> added further rows. The round-3 outcome will be recorded there when it exists.
+> responds to round 1, v0.2 → v0.3 responds to round 2, v0.3 → v0.4 responds to round 3 and records
+> Gate B round 1's post-convergence fix queue. Disagreements and declined prescriptions are recorded
+> there with their reasoning rather than applied silently, and each rewrite's own re-runs added
+> further rows.
 >
 > **Citation style.** No line numbers anywhere in this document, by `tools/check_line_citations.py`'s
 > own rule — *"THE FIX FOR A FLAGGED CITATION IS TO DELETE THE NUMBER, NOT TO CORRECT IT … Cite a
@@ -174,8 +177,10 @@ that the premise is a **temporal rule kept by convention**, not a property of th
 in `tests/wire/dict_hooks_custom_pair_test.cpp` pins the behaviour, and its own comment names this
 issue: *"The TYPE does not enforce that order, so the behaviour is pinned here rather than left to be
 discovered. Gate B r6 M-1; sealing the published view is fixpp#456."* Its premise is
-mutate-after-publish. **Under every design in the surviving family it becomes unconstructible.**
-§5c and §5d decide what happens to it, as a disclosure rather than a cleanup.
+mutate-after-publish. **Under every design in the surviving family the POPULATION half becomes
+unconstructible; the IDENTITY half — re-seating the object a bundle latched against, e.g. via
+`std::optional<table_view>::emplace` — does not (Gate B round 1 finding).** §5c and §5d decide what
+happens to it, as a disclosure rather than a cleanup.
 
 ### 2a. The two instruments used throughout this document — CHECKED IN, and hardened
 
@@ -596,8 +601,10 @@ reader finds the reason beside the declaration rather than in this document.
   design claims to preserve.
 - `TableViewTest.SpansRemainingValidAfterDictionaryDestroyed` in
   `tests/dictionary/table_view_test.cpp` move-assigns (`tv = dict.as_table_view();`) in order to
-  outlive the `Dictionary`. **Restructured, not deleted**: the declaration moves inside the inner
-  scope and the view is move-*constructed*, which tests the same property.
+  outlive the `Dictionary`. **Restructured, not deleted**: `std::optional<table_view> tv;` stays
+  declared *outside* the inner scope and is seated with `tv.emplace(dict.as_table_view());` inside
+  it, with an `ASSERT_TRUE(tv.has_value())` precondition after the scope closes — assignment is
+  gone, and the optional makes the seating explicit — which tests the same property.
 
 **Holders checked for a cascade.** Deleting assignment on `table_view` deletes the implicit
 assignment operators of everything holding one by value. Executed census:
@@ -760,9 +767,16 @@ new indirection, no back-pointer, no lifetime edge.
 **The property the seal actually buys.** `215` §2a established by census that `table_view` has no
 `mutable` members and no lazy fill, so a genuinely-`const` view is safe to share across sessions,
 threads and strands with no synchronisation — *"true only while no mutable alias exists."* After this
-change no mutable alias to a built view can be formed at all, so the qualifier is discharged rather
-than assumed. That is the same conversion Option C performed at the injection point, now performed
-at the type.
+change no **population** alias to a built view can be formed: the sixteen mutators are unreachable
+except through `table_view_builder`, and assignment is deleted. Three channels remain, so the
+qualifier is **narrowed, not discharged** — (i) a view the holder does not declare `const` can be
+**moved from** (`table_view(table_view&&)` is public and load-bearing, §5a); (ii) `const_cast` through
+a span-returning accessor reaches non-`const` backing storage, which is defined behaviour on a
+non-`const` view; (iii) destroy-and-reconstruct at the same address (`optional::emplace`) substitutes
+a different object under an existing `dict_hooks` bundle (`B-456-2`). `215` §2a's cross-thread-sharing
+argument therefore holds for a view the holder declares `const` — the shape `table_view.hpp`'s own
+usage banner prescribes, `table_view const tv = std::move(b).build();` — and for none of the three
+above.
 
 **What it does NOT buy.** `dict_hooks` stores `std::addressof(dict)` as a raw non-owning
 `void const* opaque_dict_`. A bundle outliving the view it was built from is still a dangling read,
@@ -784,8 +798,8 @@ bundle-snapshot behaviour is pinned only by the test and by `.specify/426-428-le
 
 | row | disposition |
 |---|---|
-| **`B-456-1` (NEW, behaviour)** | *"A `fixpp::dict::table_view` is immutable and non-assignable once built. Population goes through `fixpp::dict::table_view_builder`, whose `build() &&` yields the view. This is a **source-breaking** change to a public C++ type; it is not a C-ABI change — `table_view` appears in no `include/fix/` header."* |
-| **`B-456-2` (NEW, behaviour) — the disclosure** | *"A `wire::dict_hooks` bundle latches `has_nonstandard_pair()` at build time. That latch can no longer go stale against the view it was built from, because the view cannot change after `build()`. The behaviour itself is unaltered — what changes is that its precondition is now enforced by the type rather than by convention, and is therefore **no longer observable through the public API**. The witness that demonstrated the stale case, `DictHooksCustomPair.ABundleIsASnapshotOfTheDictionaryItWasBuiltFrom`, is deleted; the compile-time seal witness asserts the stronger property that replaced it."* |
+| **`B-456-1` (NEW, behaviour)** | *"A `fixpp::dict::table_view`'s population surface is sealed, and the type is non-assignable, once built. Population goes through `fixpp::dict::table_view_builder`, whose `build() &&` yields the view. **Sealed means no population channel; it does not mean an immutable object** — a non-`const` view can still be moved from, and a re-seated `optional<table_view>` substitutes a new object at the same address (`B-456-2`). This is a **source-breaking** change to a public C++ type; it is not a C-ABI change — `table_view` appears in no `include/fix/` header."* |
+| **`B-456-2` (NEW, behaviour) — the disclosure** | *"A `wire::dict_hooks` bundle latches `has_nonstandard_pair()` at build time, and that latch can still go stale through a re-seated `optional<table_view>`. The seal closes every **population** channel, so a published view's contents cannot change in place; what remains observable is that a bundle latches against an **object at an address**, and `std::optional<table_view>::emplace` substitutes a **different** object at that same address with the bundle none the wiser. The witness that demonstrated the stale case, `DictHooksCustomPair.ABundleIsASnapshotOfTheDictionaryItWasBuiltFrom`, is deleted on the claim its premise was unconstructible — the *population* half was, the *identity* half was not, and `DictHooksCustomPair.ABundleDoesNotFollowAReSeatedOptional` carries it now."* |
 | **`B-384-2` — AMENDED, not closed** | Its reachability clause reads *"through the hand-built `dict::table_view` surface only (`add_group_member` without `set_group_first` sets `group_bit` while leaving `group_first_` empty)."* **The seal does not close this.** `table_view_builder` still permits `add_group_member` without `set_group_first`; only a consistency check inside `build()` would close it, and that is out of scope (§7). The row needs a **wording** amendment — "hand-built `dict::table_view` surface" becomes "`table_view_builder` surface" — and nothing more. Leaving it unamended would leave a row naming an API that no longer exists. |
 | **`L-456-1` (NEW, limitation)** | *"`table_view_builder::build()` performs no consistency validation. A builder can still produce an internally inconsistent table — a group with members and no first field (`B-384-2`) is the known shape. The seal makes the view immutable; it does not make it valid."* |
 | `L-215-1` / `B-215-2` / `L-215-2` / `B-215-1` | **untouched.** Different code path (the config injection point); `L-215-2` / SC-007 is explicitly out of scope per `215` §7. |
@@ -965,7 +979,10 @@ ways**: it reports the known bare-`table_view&` receivers today with no allow-li
 ⚠️ **What "attributed" does not prove**, stated so the guard is not read as wider than it is — two
 things. First, attribution is by (variable name, brace scope), so a call attributed to a same-named
 declaration in a **sibling** scope still counts as attributed: the guard catches a receiver **no**
-declaration explains, and does not adjudicate which one explains it. Second, the population is
+declaration explains, and does not adjudicate which one explains it. This now holds identically for
+**both** columns — the builder-exemption column shares the same (variable name, brace scope)
+machinery the declaration column uses, rather than a bare file-wide name set, so the sibling-scope
+residue it concedes is the same one, not a wider one (Gate B round 1). Second, the population is
 **head receivers**, not calls — see the chain-continuation and expression-headed shapes above.
 Nothing is built for either residue; both are named.
 
@@ -1197,15 +1214,21 @@ file falls outside every declaration the scoper found.
    asserts, since the case currently pins that a rejected zero leaves *no inverse behind in the
    same table*.
 5. **`DictHooksCustomPair.ABundleIsASnapshotOfTheDictionaryItWasBuiltFrom` — deleted, and that is a
-   disclosure, not a cleanup.** Its premise is mutate-after-publish, which is exactly what is being
-   made unconstructible; re-grounding it on two separate views would test a different claim (two
-   objects, no staleness) and would be a test wearing the old one's name. It is replaced by §6 seam
-   1's compile-time seal witness, which asserts the *stronger* property, and by `B-456-2` (§5c),
-   which records what stopped being observable. **Rejected alternative: keeping it alive through a
-   test-only friend or back door** — that reintroduces the mutation channel this gate exists to
-   remove, in the one TU most likely to be read as authority on the subject. *(Its second assertion —
-   that a bundle built afterwards honours the pair — survives the seal and is independently pinned
-   elsewhere in the same file, so the deletion loses the staleness half only.)*
+   disclosure, not a cleanup.** ⚠️ **Gate B round 1 found the deletion's own justification too wide.**
+   Its premise was read as mutate-after-publish in general, made unconstructible; re-grounding it on
+   two separate views would test a different claim (two objects, no staleness) and would be a test
+   wearing the old one's name. What is actually unconstructible is the **population** half only — a
+   bundle latches against an **object at an address**, and `std::optional<table_view>::emplace`
+   substitutes a *different* object at that same address without the bundle noticing, which is the
+   **identity** half of the same premise and remains fully constructible. It is replaced by §6 seam
+   1's compile-time seal witness for the population half, and by
+   `DictHooksCustomPair.ABundleDoesNotFollowAReSeatedOptional` (`B-456-2`, §5c) for the identity half.
+   **Rejected alternative: keeping it alive through a test-only friend or back door** — that
+   reintroduces the mutation channel this gate exists to remove, in the one TU most likely to be read
+   as authority on the subject. *(Its second assertion — that a bundle built afterwards honours the
+   pair — survives the seal and is independently pinned elsewhere in the same file. The deletion lost
+   only the move-based reconstruction of the staleness half; the identity-based reconstruction is
+   restored under a new name.)*
 6. **`Dictionary::as_table_view()` itself** — 13 mutator lines, confirmed by the compile sweep.
    Mechanical in form, but it is the one **production** site, it changes `table_view tv;` into a
    builder across an early return, and it carries §4's one added move construction; it gets read, not
@@ -1517,7 +1540,7 @@ are discharged with a witness rather than inherited as prose:
 | `TableViewPairOom.NewPairInsertionIsAllOrNothing` / `.RepairingTheLengthSideIsAllOrNothing` / `.RepairingTheDataSideIsAllOrNothing` | **changed** | lambdas take `table_view_builder&`; the guarantee's surviving half (seam 3) |
 | `TableViewPairOom.CopyAssignmentIsAllOrNothing` / `.CopyAssignmentOverAPopulatedTargetIsAllOrNothing` | **deleted** | their subject (assignment) no longer exists |
 | `DictHooksCustomPair.CopyAssignmentCarriesTheFlagWithThePairs` | **deleted** | same — and it is also the proof that assignment had to go (§3.2) |
-| `DictHooksCustomPair.ABundleIsASnapshotOfTheDictionaryItWasBuiltFrom` | **deleted** | premise unconstructible; replaced by seam 1 and `B-456-2` — **a disclosure** (§5d, item 5) |
+| `DictHooksCustomPair.ABundleIsASnapshotOfTheDictionaryItWasBuiltFrom` | **deleted** | population half of premise unconstructible; replaced by seam 1 (population) and `ABundleDoesNotFollowAReSeatedOptional` (identity, `B-456-2`) — **a disclosure** (§5d, item 5) |
 | `DictHooksCustomPair.ZeroIsNeverHalfOfAPair` | **changed** | reads through the builder's three scalar readback forwarders (§5d, item 4) |
 | `TableViewTest.SpansRemainingValidAfterDictionaryDestroyed` | **changed** | move-**construct** instead of move-assign (§3.2) |
 | `validator_domain_test.cpp`'s `is_copy_constructible_v` and `!is_polymorphic_v` static_asserts | **unchanged** | both still hold; measured |
@@ -1867,3 +1890,45 @@ ask of each what **else** could satisfy the condition it watches. For the attrib
 question has an answer, and it is written down beside the guard: attribution is by (variable name,
 brace scope), so a call attributed to a same-named declaration in a **sibling** scope still counts as
 attributed. Nothing is built for that residue, and it is named rather than left for round 3 to find.
+
+---
+
+## v0.3 → v0.4 (round 3, and Gate B round 1's post-convergence fix queue)
+
+**Round 3.** Codex review (`research/reviews/codex_456_3_table-view-seal_review.md`, `0 P1 / 1 P2`)
+and Opus adversarial review (`research/reviews/opus_456_3_table-view-seal_adversarial_review.md`,
+judging Codex's one finding and adding its own; post-judging `P1=0 P2=0 P3=2`). **No finding touched
+the design.** The adversarial review downgraded Codex's sole finding (456-R3-1: an rc audit over
+every compilation behind the sweep's published figures) from P2 to P3 on a measured discriminator —
+TU membership in the migration bill is preserved regardless of the finding, and a full rc audit
+(`/src/` 132 compilations, `/tests/` 1148 compilations, none outside `{0,1}`) reproduced exactly.
+**Gate A CONVERGED**, recorded in `.specify/decisions/456-table-view-seal-gatea.md`
+(`gate-a-done`). Four obligations carried forward to Gate B: a public-surface read at seam 2's
+class-scoped band, the MSVC `is_nothrow_move_constructible_v` disposition (pre-registered as
+NOT MEASURED there), a non-zero fuzz-TU witness for seam 5, and hardening the sweep's classifier
+before the migration bill is consumed by it — all named as dischargeable, none blocking convergence.
+
+**Gate B round 1** (Codex review + Opus triage, `research/reviews/codex_456_gateb_r1.md` /
+`opus_456_gateb_r1_triage.md`) reviewed the shipped migration against this converged design and found
+**zero production-code defects** and **zero design defects**. What it found is **RC-1 from the v0.1 → v0.2
+section, recurring a fourth time, in a fourth artifact class**: five prose sites (two shipped
+headers, `spec/behaviors-and-limitations.md`'s `B-456-1`/`B-456-2`, and this document's own §5b)
+described the seal as an absolute — *"immutable"*, *"no mutable alias … at all"*, *"no mutation
+channel at all"* — where the true statement is narrower: the sixteen population methods are
+unreachable except through `table_view_builder`, and assignment is deleted, but a non-`const` view
+can still be moved from, `const_cast` through a span accessor reaches non-`const` storage, and
+`std::optional<table_view>::emplace` substitutes a different object under a live `dict_hooks` bundle
+at the same address. All three residual channels were already implied by facts this document itself
+states (§5a's move-constructor entry; the `emplace`-not-assignment seating instruction), so the fix
+is **prose scoped to its narrowest true form**, not a design change: §5b above is corrected to name
+all three channels explicitly, `spec/behaviors-and-limitations.md` correspondingly, and a restored
+regression witness (`DictHooksCustomPair.ABundleDoesNotFollowAReSeatedOptional`) pins the
+`optional::emplace` channel specifically, since it — not move-from — is what reconstructs the premise
+of the test `B-456-2` recorded as deleted. Gate B round 1 also confirmed and fixed a real code defect
+outside this document's scope: `tools/table_view_mutation_scope.py`'s builder-exemption set was a
+bare file-wide name set rather than brace-scoped like the declaration census beside it, so an
+unrelated same-named `table_view_builder` anywhere in a file could silently absorb an unattributed
+mutator receiver. Fixed to share the declaration census's (variable name, brace scope) machinery,
+mutation-proven both before and after. **No design content in this document changed as a result of
+Gate B round 1** — every edit is either this appendix section or a narrowing of a claim already
+false at the time it was written.
