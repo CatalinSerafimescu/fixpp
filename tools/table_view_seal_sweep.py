@@ -48,17 +48,18 @@ corresponding failure was OBSERVED, and each one fails LOUD rather than clean:
      TU including `table_view.hpp` is a hard failure — a vacuous sweep cannot
      report a plausible zero.
 
-  4. `EXPECTED_CONTROL_FAILURES` binds the repo's three must-fail
-     negative-compile probes to their intended diagnostics. The control arm
+  4. `EXPECTED_CONTROL_FAILURES` binds the repo's must-fail negative-compile
+     probes to their intended diagnostics — the dict below is the authority on
+     how many there are. The control arm
      passes on IDENTITY, not on count: a listed probe that fails differently, a
      listed probe that stops failing, and any unlisted control failure are all
      fatal. In the sealed arm a listed probe carrying any diagnostic other than
      its bound one is fatal too, so a probe that additionally acquired a seal
      error cannot be absorbed by a subtraction.
 
-  5. `-ferror-limit=0` is load-bearing. clang stops at 19 by default, so every
-     heavily-hit TU reports the SAME plausible number and the census becomes a
-     ceiling wearing the costume of a count.
+  5. `-ferror-limit=0` is load-bearing. clang stops at a default error limit, so
+     a run without it turns a census into a ceiling wearing the costume of a
+     count — every heavily-hit TU would report the same plausible number.
 
   6. The scratch root must PRECEDE the build's own `-I`. It is injected ahead of
      every flag the compile database carries.

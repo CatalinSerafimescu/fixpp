@@ -11,10 +11,10 @@ write INTERLEAVES and cannot be migrated by two mechanical lines.
     python3 tools/table_view_mutation_scope.py --root <library> --naive-decl-count
 
 ⚠️ SCOPING BY BRACE DEPTH IS THE WHOLE INSTRUMENT. The first version of this
-script scanned whole FILES and reported 30 interleaves of 39. It was wrong: in a
-file of many `TEST(...) { table_view tv; ... }` blocks, test 1's reads of `tv`
-preceded test 2's writes to a DIFFERENT `tv`. Any figure produced by a
-file-scoped scan is a fossil.
+script scanned whole FILES. It was wrong: in a file of many
+`TEST(...) { table_view tv; ... }` blocks, test 1's reads of `tv` preceded test
+2's writes to a DIFFERENT `tv`. Any figure produced by a file-scoped scan is a
+fossil.
 
 `--emit-sites` writes one TSV row per mutated declaration:
 
@@ -43,7 +43,10 @@ they are allow-listed explicitly rather than by widening the declaration regex.
 ⚠️ What "attributed" does NOT prove. Attribution is by (variable name, brace
 scope), so a call attributed to a same-named declaration in a sibling scope
 counts as attributed. The guard catches a receiver NO declaration explains; it
-does not adjudicate which declaration explains it.
+does not adjudicate which declaration explains it. The builder column shares
+this same (variable name, brace scope) machinery with the declaration column
+above it, not a bare file-wide name set — the two concede the identical
+sibling-scope residue.
 
 Self-check: this instrument is proven able to report non-zero (it reports the
 interleaves it lists by name, and the unattributed receivers it lists by name)
@@ -92,10 +95,13 @@ DECL = re.compile(r"^\s*(?:static\s+)?(?:fixpp::)?(?:dict::)?table_view\s+(\w+)\
 
 # A receiver that is ALREADY a builder. After fixpp#456's seal every mutator call
 # in the tree is on one of these, so without this the attribution guard below is
-# SATURATED — it reports all ~122 calls as unattributed and exits 4 on a correct,
-# fully-migrated tree. A guard that fires on everything detects nothing: it could
-# no longer single out the one receiver spelling nobody rewrote, which is its only
-# job. These are counted and reported separately, never as leaks.
+# SATURATED — without it, every mutator call attributes to nothing and the guard
+# exits 4 on a correct, fully-migrated tree. A guard that fires on everything
+# detects nothing: it could no longer single out the one receiver spelling nobody
+# rewrote, which is its only job. These are counted and reported separately, never
+# as leaks. Scoped the same way the declaration census above is (fix-queue item 4):
+# an exemption added to stop a guard firing must be at least as precise as the
+# guard, or it becomes the guard.
 BUILDER_DECL = re.compile(
     r"^\s*(?:static\s+)?(?:fixpp::)?(?:dict::)?table_view_builder\s+(\w+)\s*[;{=]")
 AUTO_DECL = re.compile(r"^\s*(?:static\s+)?auto\s+(\w+)\s*=")
@@ -107,6 +113,14 @@ def candidate_files(root, sub):
         ["grep", "-rlE", r"\.(" + MUTRE + r")[[:space:]]*\(",
          "--include=*.cpp", "--include=*.hpp"] + ROOTS,
         cwd=root, capture_output=True, text=True)
+    # 0 = matches found, 1 = no matches (its own NO CANDIDATE FILE guard below).
+    # Anything else — a missing ROOTS directory, a bad pattern — is a grep
+    # failure that can still emit partial stdout; treat it as fatal rather than
+    # silently census-ing a partial file list.
+    if r.returncode not in (0, 1):
+        print(f"!! grep exited {r.returncode} scanning for candidate files:\n"
+              + (r.stderr or "(no stderr)"), file=sys.stderr)
+        sys.exit(r.returncode)
     files = sorted(r.stdout.split())
     return [f for f in files if sub in f] if sub else files
 
@@ -161,24 +175,58 @@ def mutator_receivers(lines):
             for j, l in enumerate(lines, 1) for m in RECEIVER.finditer(l)}
 
 
-def scope_file(root, path, lines=None):
-    """Yield (declline, var, lastmut, scope_end, preceding_uses, mutlines) per decl."""
-    lines = source_lines(root, path) if lines is None else lines
+def line_depths(lines):
+    """Brace depth AT THE START of each line (1-indexed).
+
+    Shared by every brace-scope-keyed pass, so the builder-declaration scope
+    below agrees with the `table_view`-declaration scope byte-for-byte instead
+    of being a second, driftable copy of the same arithmetic.
+    """
     depth = [0] * (len(lines) + 1)
     d = 0
     for i, l in enumerate(lines, 1):
-        depth[i] = d                                   # depth at START of line i
+        depth[i] = d
         d += l.count("{") - l.count("}")
+    return depth
+
+
+def scope_end(lines, depth, i):
+    """The last line still inside the brace scope opened at line `i`."""
+    d0 = depth[i]
+    for j in range(i + 1, len(lines) + 1):
+        if depth[j] < d0:
+            return j - 1
+    return len(lines)
+
+
+def builder_scopes(lines):
+    """Yield (name, decl_line, scope_end) per `table_view_builder` declaration.
+
+    The same (variable name, brace scope) machinery `scope_file` uses for
+    `table_view` declarations (fix-queue item 4) — an exemption added to stop
+    the attribution guard firing must be at least as precise as the guard, or
+    it becomes the guard. A receiver is `on_builder` only when it falls AFTER
+    its matching declaration's line and INSIDE that declaration's scope; a
+    same-named builder anywhere else in the file no longer attributes it.
+    """
+    depth = line_depths(lines)
+    for i, l in enumerate(lines, 1):
+        m = BUILDER_DECL.match(l)
+        if not m:
+            continue
+        yield m.group(1), i, scope_end(lines, depth, i)
+
+
+def scope_file(root, path, lines=None):
+    """Yield (declline, var, lastmut, scope_end, preceding_uses, mutlines) per decl."""
+    lines = source_lines(root, path) if lines is None else lines
+    depth = line_depths(lines)
     for i, l in enumerate(lines, 1):
         m = DECL.match(l) or AUTO_DECL.match(l)
         if not m:
             continue
-        name, d0 = m.group(1), depth[i]
-        end = len(lines)
-        for j in range(i + 1, len(lines) + 1):
-            if depth[j] < d0:
-                end = j - 1
-                break
+        name = m.group(1)
+        end = scope_end(lines, depth, i)
         mre = re.compile(r"\b" + re.escape(name) + r"\s*\.\s*" + MUTRE + r"\s*\(")
         ure = re.compile(r"\b" + re.escape(name) + r"\b")
         mut, use = [], []
@@ -221,10 +269,11 @@ def main():
     for f in files:
         lines = source_lines(root, f)
         seen = set()
-        # Receivers that are already builders. Collected per file, before the
-        # attribution guard runs, so a call on one is ATTRIBUTED (to the migrated
-        # form) rather than counted as a leak — see BUILDER_DECL.
-        builders = {m.group(1) for l in lines for m in [BUILDER_DECL.match(l)] if m}
+        # Receivers that are already builders, scoped like the declarations
+        # below rather than as a bare file-wide name set. Collected per file,
+        # before the attribution guard runs, so a call on one is ATTRIBUTED (to
+        # the migrated form) rather than counted as a leak — see BUILDER_DECL.
+        builder_scope_list = list(builder_scopes(lines))
         for decl, name, lastmut, end, pre, mutlines in scope_file(root, f, lines):
             total += 1
             per[f] += 1
@@ -241,7 +290,8 @@ def main():
         for j, recv in mutator_receivers(lines):
             if (j, recv) in seen:
                 attributed += 1
-            elif recv in builders:
+            elif any(name == recv and decl_line < j <= end
+                     for name, decl_line, end in builder_scope_list):
                 on_builder += 1
             else:
                 unattributed += 1
