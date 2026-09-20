@@ -50,7 +50,7 @@ Quoted verbatim.
 | 1 | *"bumps `FIXPP_C_ABI_VERSION_MINOR`, not MAJOR, so the error-code downgrade frame of §4 stays continuous"* | §3 |
 | 2 | *"is marked **BREAKING** in the documentation of each affected declaration (in the version comment of `version.h` where no declaration carries the change), **in the PR description**, and in the behaviors-and-limitations delta"* | §4 — **three limbs**, and the middle one is the one that gets dropped |
 | 3 | *"updates every in-repository consumer (the Python binding, tests, examples, interop harnesses) in the same PR"* | §6 |
-| 4 | *"remains subject to §1 review and to all four Appendix A controls"* | the design authority is the `[const §X.1]` Gate A; ⚠️ **it RAN and did NOT converge** — `gate-a-waived` on two reasons, with `/speckit-analyze` and the user's `/plan` sign-off **OWED**. The `/clarify` control was discharged **in substance, by hand**, not by running the skill — recorded as **adapted, not as run** |
+| 4 | *"remains subject to §1 review and to all four Appendix A controls"* | the design authority is the `[const §X.1]` Gate A; ⚠️ **it RAN and did NOT converge** — `gate-a-waived` on two reasons, with **`/speckit-analyze` OWED** and the user's `/plan` sign-off ✅ **DISCHARGED 2026-09-20** (pinned to `plan.md` at `d12d2270`). ⚠️ **This cell said BOTH were owed until 2026-09-20** — true when written, falsified by the sign-off, and missed by a repair sweep whose grep pattern was too narrow to reach this phrasing. The `/clarify` control was discharged **in substance, by hand**, not by running the skill — recorded as **adapted, not as run** |
 
 ---
 

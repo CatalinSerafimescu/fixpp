@@ -30,8 +30,14 @@ single **P1** (a quotation whose ellipsis cut the clause's own non-exhaustivenes
 | user `/plan` sign-off | ✅ **DISCHARGED 2026-09-20**, pinned to `plan.md` at commit `d12d2270`. Re-derive with `git diff d12d2270..HEAD -- specs/090-capi-refusals/plan.md`; anything beyond the Constitution-Check row that records the sign-off is **not covered** |
 | `[const §XVII.7]` local pre-PR build | ⚠️ **OWED**, and resource-gated — T004 surfaces the approval; every seam RED below except Story 1's depends on it |
 
-⚠️ **`spec.md`, `data-model.md` and `quickstart.md` still say the `/plan` sign-off is OWED.** The
-live state is `plan.md`'s Constitution Check row and this table. Flagged, not silently reconciled.
+⚠️ **The `/plan` sign-off is DISCHARGED (2026-09-20, pinned to `plan.md` at `d12d2270`); `/analyze` is not.**
+The live state is `plan.md`'s Constitution Check **row 5**. ⚠️ **THIS NOTE NAMED A FROZEN THREE-FILE LIST
+UNTIL 2026-09-20 AND THE LIST WENT WRONG IN BOTH DIRECTIONS** — it listed `spec.md`, `data-model.md` and
+`quickstart.md`, which were **corrected**, while staying silent on `contracts/version-and-freeze.md`,
+which was **actually stale**. A frozen list pre-registered inside the task that runs `/analyze` would
+have let a re-run declare success against the wrong file set. **State the CONDITION — *every site
+asserting the sign-off's state* — and re-derive it:**
+`grep -rln "sign-off" specs/090-capi-refusals/ | xargs grep -l "OWED"`.
 
 **Tests are MANDATORY here, and the grounds are stated rather than assumed**: `[const §VII]`'s
 testing requirements and `[const §VII.3]`'s TDD rule; `[const §XVII.8]`, which makes
