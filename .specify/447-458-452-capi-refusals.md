@@ -1,6 +1,6 @@
 # fixpp#447 / #458 / #452 — three refusals the C ABI owes, and the C++ guards beside them
 
-> **Status: v0.9 — an OWNER DECISION of 2026-09-20 widens the amendment beyond `[2i]`. NOT a review round. NOT converged by the loop's criterion; Gate A label stays `gate-a-waived`.**
+> **Status: v0.10 — a targeted correction to a PUBLISHED CONTROL TRANSCRIPT that stopped reproducing. NOT a review round. NOT converged by the loop's criterion; Gate A label stays `gate-a-waived`.**
 >
 > ```
 > Round 1: Codex 2 P1 / 9 P2 / 2 P3; Opus adversarial post-judging P1 3 · P2 11 · P3 4, 4 root causes.
@@ -34,6 +34,16 @@
 >         the delta. ⚠️ **THE `[2i]` POPULATION OF EIGHT IS UNCHANGED**, the two new
 >         passages are a **separate population with a different ground**, and **no merged
 >         count is written anywhere in this document.**
+> v0.10:  NOT A REVIEW ROUND AND NO REVIEW PRODUCED IT. A targeted correction to ONE published
+>         control transcript in `## Clarifications`: the `check-prerequisites.sh` output offered as
+>         the evidence that `[const §X.6]`'s `/clarify` could not be run as written. It **stopped
+>         reproducing** when this work was converted to feature mode and the tracked pin moved.
+>         ⚠️ **NO FINDING COUNTS ARE ENTERED, BECAUSE NO REVIEW RAN.** The transcript is KEPT as a
+>         dated historical measurement, the CURRENT measurement is added beside it, and the
+>         CONDITION both share — the field is pin-derived, never git-derived — is promoted above
+>         both, with its re-derivation recipe and no value as the claim. ⚠️ **fixpp#490 is
+>         MITIGATED, NOT FIXED, and the mitigation made it SILENT rather than LOUD.** ⚠️ **The
+>         `/clarify` by-hand discharge STANDS** — it was correct when taken.
 > ```
 >
 > **Date:** 2026-09-20. ⚠️ **NO CONVERGENCE IS CLAIMED, AND NONE MAY BE.** The loop's criterion is
@@ -98,6 +108,26 @@
 > one.** ⚠️ **The seam that hid it is recorded as a RESIDUAL and deliberately NOT fixed** (§7):
 > the owner declined amending recipe (c2.i) to derive its own corpus, so the instrument still
 > hardcodes one file while the outcome has been widened.
+>
+> ⚠️ **v0.10 CORRECTS ONE PUBLISHED CONTROL TRANSCRIPT AND CLAIMS NOTHING v0.9 DID NOT.** It is **not
+> a review round**, no review produced it, and it re-decides nothing, re-derives no population and
+> re-opens no decision. `## Clarifications`' preamble published a `check-prerequisites.sh` transcript
+> as the **evidence that `/speckit-clarify` could not be run as written** — the justification for a
+> constitutional control not being executed as written, which is the most load-bearing kind of claim
+> here. ⚠️ **One limb of it stopped reproducing**: this work was converted to feature mode, which
+> **re-pinned** the tracked `.specify/feature.json`, so the script's `BRANCH` and `FEATURE_SPEC` now
+> name this feature's own directory. **A reader re-running the published evidence gets a clean,
+> correct resolution and concludes the justification was fabricated.** ⚠️ **THE CONDITION HOLDS AND IS
+> STILL DEMONSTRABLE TODAY**: the field is **pin-derived, never git-derived**, and the script's
+> `BRANCH` still disagrees with `git rev-parse --abbrev-ref HEAD`. **That disagreement is the durable
+> claim; neither transcript's value ever was.** ⚠️ **fixpp#490 IS MITIGATED, NOT FIXED — AND THE
+> MITIGATION MADE THE DEFECT SILENT RATHER THAN LOUD**, which is the sharpest thing this revision
+> records: it now resolves correctly **by coincidence of the pin being right**, so nothing looks wrong
+> while the `BRANCH` field is still fabricated, and **the next actor on a bundle-less branch gets the
+> original destructive behaviour back with no warning.** ⚠️ **The `/clarify` by-hand discharge
+> STANDS** — it was correct when taken, on evidence that was correct when taken. ⚠️ **Status stays
+> `NOT converged by the loop's criterion`, the Gate A label stays `gate-a-waived`, no finding counts
+> are entered because no review ran, and no label moves.**
 >
 > ⚠️ **Round 4 sits beyond the loop's 3-round Phase A cap, as the pass that produced v0.4 did, and
 > the user authorised each explicitly.** v0.4's authorisation rested on the round-3 review's closing recommendation — *"the
@@ -358,7 +388,36 @@ NOT A FOOTNOTE.** A control recorded as discharged by a procedure that was not t
 failure class this document is written against, so the adaptation is stated before the answers.
 
 The skill's step 1 runs `.specify/scripts/bash/check-prerequisites.sh`. On this branch it
-**succeeds** — and reports a **different feature than the one checked out**:
+**succeeds** — and the `BRANCH` it reports is **not the branch that is checked out**.
+
+⚠️ **THE LOAD-BEARING CLAIM IS THE CONDITION BELOW, AND NO VALUE IN EITHER TRANSCRIPT IS THE CLAIM.**
+A published value here is a **RESULT**, and nothing ever re-runs a result. The condition is a
+property of the code and does not rot the same way.
+
+**THE CONDITION.** The script's `BRANCH` field is **pin-derived, never git-derived** — and that is
+structural rather than a fact about any one branch. `common.sh`'s `get_current_branch` returns
+`$SPECIFY_FEATURE` or the **empty string** and **never invokes git at all**; with it empty,
+`get_feature_paths` falls back to the **basename of the `feature_directory` pinned in the tracked
+`.specify/feature.json`**, and derives `FEATURE_DIR` and `FEATURE_SPEC` from that same pin. **Read
+those two functions before believing either transcript below.**
+
+**THE RE-DERIVATION RECIPE — run both, compare them, and write down neither value as a claim:**
+
+```
+bash .specify/scripts/bash/check-prerequisites.sh --json --paths-only   # read its BRANCH field
+git rev-parse --abbrev-ref HEAD                                         # read the real branch
+```
+
+**The two DISAGREE whenever the checked-out branch is not the pinned feature directory's basename**
+— which is every branch that owns no Spec-Kit bundle named after it, this one included. ⚠️ **What
+the disagreement does NOT tell you is whether `FEATURE_SPEC` points somewhere harmful.** That
+depends on where the pin happens to sit, and **the pin moves**. The two measurements below are kept
+as a pair precisely because they are the evidence that **the value moves and the condition does
+not**; neither one alone can show that.
+
+**MEASUREMENT A — taken at v0.7, when the tracked pin held `specs/089-quickfix-interop-conversation`.**
+⚠️ **A DATED, PINNED HISTORICAL OBSERVATION. It is a real measurement, it is NOT a statement of
+current state, and re-running it today does not reproduce its first line.**
 
 ```
 bash .specify/scripts/bash/check-prerequisites.sh --json --paths-only   ->  rc=0
@@ -371,13 +430,43 @@ git rev-parse --abbrev-ref HEAD                                         ->  447-
 ls -l specs/089-quickfix-interop-conversation/spec.md  (field 5)        ->  141498 bytes
 ```
 
-⚠️ **`rc=0` is the defect, not the reassurance.** The script does not fail on a branch that owns no
-Spec-Kit bundle; it resolves `FEATURE_DIR` from a **tracked pin** and never consults the branch, so
-it hands back the last-pinned feature — **089, shipped and unrelated**. The skill's steps **6 and 8
-write to `FEATURE_SPEC`**. Running it literally would have asked questions about QuickFIX interop
-conversations and written the answers into a **141 498-byte shipped spec**. Filed as **fixpp#490**
+**MEASUREMENT B — taken at v0.10, after this work was converted to feature mode.** The commit
+*"Convert B6 to feature mode: create specs/090-capi-refusals"* ran `create-new-feature.sh`, which
+**re-pinned the tracked `.specify/feature.json`** off 089 and onto this feature's own directory.
+
+```
+bash .specify/scripts/bash/check-prerequisites.sh --json --paths-only   ->  rc=0
+  {"REPO_ROOT":"<repo>","BRANCH":"090-capi-refusals",
+   "FEATURE_DIR":"<repo>/specs/090-capi-refusals",
+   "FEATURE_SPEC":"<repo>/specs/090-capi-refusals/spec.md", … }
+# the SAME discriminating control — still disagreeing, at a different value:
+git rev-parse --abbrev-ref HEAD                                         ->  447-458-452-capi-refusals
+```
+
+⚠️ **EXACTLY ONE LIMB OF MEASUREMENT A STOPPED REPRODUCING, and *"the transcript no longer
+reproduces"* would be WIDER THAN THE MEASUREMENT** — which is this document's signature defect
+restated. Re-measured limb by limb: the **JSON** line **MOVED**; `git rev-parse --abbrev-ref HEAD`
+**REPRODUCES UNCHANGED**; the `ls -l` field-5 figure **REPRODUCES UNCHANGED** (089's spec was never
+touched — it is simply no longer what the script resolves to). **The discriminating control still
+works. It yields a different pair.**
+
+⚠️ **`rc=0` WAS THE DEFECT AND STILL IS — and the change since v0.7 made it WORSE-SHAPED, NOT
+BETTER.** The script does not fail on a branch that owns no Spec-Kit bundle; it resolves
+`FEATURE_DIR` from the **tracked pin** and never consults the branch, so it hands back **whatever
+feature was pinned last**. At v0.7 that was a shipped, unrelated feature — a **141 498-byte** spec
+that the skill's steps **6 and 8 write to**, so running the skill literally would have asked
+questions about QuickFIX interop conversations and written the answers into it. **That is a defect
+that ANNOUNCES ITSELF**: the target is visibly wrong to anyone who looks. Filed as **fixpp#490**
 (*"Spec-Kit resolves FEATURE_DIR from a tracked pin, never from the branch — `/speckit-*` on a
 bundle-less branch silently targets the last-pinned feature"*, `gh issue view 490`).
+
+⚠️ **fixpp#490 IS MITIGATED, NOT FIXED — AND ONLY FOR THIS BRANCH, BY COINCIDENCE OF THE PIN.**
+Nothing in the resolution was repaired. The pin now simply happens to point at the right directory,
+so `FEATURE_SPEC` resolves correctly **by accident**, while the `BRANCH` field is still fabricated
+from that pin's basename. ⚠️ **A DEFECT THAT HAS BEEN MADE TO RESOLVE CORRECTLY BY ACCIDENT IS MORE
+DANGEROUS THAN ONE THAT RESOLVES WRONGLY**: the loud failure has been converted into a silent one,
+nothing looks wrong any more, and **the next actor on a bundle-less branch gets the original
+destructive behaviour back with no warning.**
 
 **The clarify SUBSTANCE was executed against this design note instead, at the user's explicit
 direction.** The questions were asked, answered by the owner, and each answer is applied below to
@@ -385,6 +474,12 @@ the section that governs it. ⚠️ **What was NOT obtained is the skill's own m
 `specs/<id>/spec.md` encoding, no skill-generated question taxonomy, no coverage scan of that spec.
 That is stated rather than implied, because *"the control ran"* and *"the control's substance was
 executed by hand"* are different claims and only the second is true here.
+
+⚠️ **AND THE BY-HAND DISCHARGE STANDS — the pin moving does not retroactively unmake it.** It was
+taken correctly, on evidence that was correct when it was taken. **Nothing above should be read as
+*"the skill could have been run after all"***: the adaptation was right at the time, the condition
+that forced it is **unrepaired**, and a mitigation that arrived later cannot convert a control
+executed by hand into a control that ran.
 
 ### Session 2026-09-20
 
@@ -3212,7 +3307,7 @@ else.
 
 | # | claim | why not measured here | the instrument that would decide it |
 |---|---|---|---|
-| 1 | ⚠️ **NARROWED AT v0.7, NOT STRUCK — and the distinction is this register's own rule.** The row now claims only that **`/analyze` and the user `/plan` sign-off** are satisfied. **`/clarify` is out of it**, discharged in substance by the `## Clarifications` section | `/analyze` and `/plan` still run at the Spec-Kit stage after this gate. ⚠️ **`/clarify` was NOT discharged by running the skill** — `check-prerequisites.sh` resolves `FEATURE_DIR` from a tracked pin and returned a **shipped, unrelated feature** at `rc=0` (fixpp#490); the substance was executed against this document instead, at the user's direction. **A control discharged by an adapted procedure is recorded as adapted, not as run** | `/speckit-analyze`, and the user's `/plan` sign-off, recorded in `specs/<id>/`. ⚠️ For the `/clarify` half the instrument is the `## Clarifications` section itself plus **fixpp#490**'s resolution — until #490 is fixed, `/speckit-clarify` on this branch writes into `specs/089-quickfix-interop-conversation/spec.md` and is **not** a usable instrument here |
+| 1 | ⚠️ **NARROWED AT v0.7, NOT STRUCK — and the distinction is this register's own rule.** The row now claims only that **`/analyze` and the user `/plan` sign-off** are satisfied. **`/clarify` is out of it**, discharged in substance by the `## Clarifications` section | `/analyze` and `/plan` still run at the Spec-Kit stage after this gate. ⚠️ **`/clarify` was NOT discharged by running the skill** — `check-prerequisites.sh` resolves `FEATURE_DIR` from a tracked pin and returned a **shipped, unrelated feature** at `rc=0` (fixpp#490); the substance was executed against this document instead, at the user's direction. **A control discharged by an adapted procedure is recorded as adapted, not as run** | `/speckit-analyze`, and the user's `/plan` sign-off, recorded in `specs/<id>/`. ⚠️ For the `/clarify` half the instrument is the `## Clarifications` section itself plus **fixpp#490**'s resolution. ⚠️ **CORRECTED AT v0.10 — #490 is MITIGATED, NOT FIXED, and the mitigation made the defect SILENT rather than LOUD.** Converting this work to feature mode re-pinned the tracked `.specify/feature.json` at this feature's own directory, so `FEATURE_SPEC` now resolves to a correct target **by coincidence of the pin**, not because the resolution was repaired; the `BRANCH` field is still derived from the pin's basename and still disagrees with `git rev-parse --abbrev-ref HEAD`. **A defect that resolves correctly by accident is more dangerous than one that resolves wrongly** — nothing looks wrong, and the next actor on a bundle-less branch gets the original destructive behaviour back with no warning. ⚠️ **The by-hand discharge STANDS**: it was correct when taken, on evidence correct when taken, and a later mitigation cannot convert it into a control that ran. ⚠️ **Re-derive rather than reading any value here or in the preamble** — compare the script's `BRANCH` against `git rev-parse --abbrev-ref HEAD`; they disagree whenever the checked-out branch is not the pinned directory's basename |
 | 2 | The change builds and its tests pass on `linux-clang-debug` | `[const §XVII.7]`'s resource gate — an agent must surface an `AskUserQuestion` before running a local build | The `[const §XVII.7]` cycle: Conan install + CMake configure + build + ctest, with the `local build: green on linux-clang-debug @ <sha>` line |
 | 3 | The three headers' freeze hashes after the edits | The edits do not exist yet | `bash tools/check_capi_freeze.sh` — expected to FAIL after the header edits and PASS after the re-baseline. **Both states must be observed**; a green result alone is consistent with a re-baseline applied before the edits |
 | 4 | ~~Whether `.specify/2i-capi.md` carries a per-symbol error-code roster~~ | ⚠️ **DELETED at v0.2 — this was never unmeasurable.** The grep takes under a second, and parking it concealed three binding contradictions: §5.2's closed construction whitelist (D-3b), §4.7's `FIXPP_ERR_VERSION_MISMATCH` that the function never returns, and §4.7's `remove_tag` idempotence line that D-1 falsifies. Executed and dispositioned in §5c. ⚠️ **v0.3 narrows the first of those three**: §5.2's whitelist is no longer contradicted, because D-3b no longer moves clone (§2.3a). The deletion of this item stands — the grep *was* runnable and the other two contradictions are real — and v0.3 adds the **rule-keyed** recipe (b) the symbol grep structurally could not satisfy | — |
@@ -4967,3 +5062,193 @@ a worse one**. ⚠️ **No convergence is claimed, no new review ran, and no lab
 ⚠️ **What v0.9 does NOT establish.** It builds nothing, runs no seam, re-derives no producer
 population, discharges no §8 row, and **repairs no instrument** — recipe (c2.i) is unchanged by
 design (§7).
+
+
+---
+
+### v0.9 → v0.10 — a published control transcript that stopped reproducing
+
+⚠️ **NOT A REVIEW ROUND, AND NO REVIEW PRODUCED IT. NO ROUND NUMBER IS CLAIMED AND NO FINDING COUNTS
+ARE ENTERED, because none were produced.** This pass applies **one targeted correction** — to
+`## Clarifications`' preamble and to its consequence in §8 item 1. **It re-decides nothing,
+re-derives no population, mints no enumerator, writes no numeral into any `[2i]` prescription, and
+changes no source file.**
+
+#### What was false
+
+`## Clarifications` published a `check-prerequisites.sh` transcript as the **evidence** that
+`/speckit-clarify` could not be run as written. ⚠️ **That is not an ordinary figure — it is the
+JUSTIFICATION FOR A CONSTITUTIONAL CONTROL (`[const §X.6]`'s `/clarify`) NOT BEING EXECUTED AS
+WRITTEN**, which makes it the most load-bearing kind of claim this document carries.
+
+Since it was published, this work was converted to feature mode. `create-new-feature.sh` **re-pinned
+the tracked `.specify/feature.json`** off `specs/089-quickfix-interop-conversation` and onto this
+feature's own directory. Re-run today, the script names **this feature**, and `FEATURE_SPEC`
+resolves to a real, correct, unshipped target. ⚠️ **A reader re-running the published evidence gets
+a clean, correct resolution and concludes the justification was FABRICATED** — the worst outcome
+available to a document whose entire method is *"print the command beside the result"*.
+
+#### Exactly ONE limb stopped reproducing — and the correction says which
+
+⚠️ ***"The transcript no longer reproduces"* would be WIDER THAN THE MEASUREMENT**, which is this
+document's signature defect restated at a new value. Re-measured, limb by limb:
+
+- the **JSON** line — **MOVED** (the pin moved, and the field is derived from the pin);
+- `git rev-parse --abbrev-ref HEAD` — **REPRODUCES UNCHANGED**;
+- the `ls -l` field-5 figure on 089's spec — **REPRODUCES UNCHANGED** (that spec was never touched;
+  it is simply no longer what the script resolves to).
+
+**So the discriminating control still works — it yields a different pair.** That is why the fix is
+**not a deletion**: the two transcripts TOGETHER are the evidence that **the value moves and the
+condition does not**, and neither one alone can show it.
+
+#### The correction — a CONDITION above two dated transcripts, and no value as the claim
+
+The 089 transcript is **kept**, re-framed as a dated observation pinned to the pin state that
+produced it. The **current** measurement is added beside it with its own command. Above both now
+sits the claim that actually carries the argument, stated from the **mechanism** rather than from
+either observation: `common.sh`'s `get_current_branch` returns `$SPECIFY_FEATURE` or the **empty
+string** and **never invokes git**; `get_feature_paths` then falls back to the **basename of the
+pinned `feature_directory`**. ⚠️ **That is structural — true of the code, not of a branch — and it
+cannot rot the way a value does.** The re-derivation recipe (run the script, run `git rev-parse`,
+compare the two) is written out beside it, and **no value is written as the claim.**
+
+#### The sharpest thing recorded — the mitigation made the defect SILENT rather than LOUD
+
+⚠️ **fixpp#490 IS MITIGATED, NOT FIXED — and only for this branch, by coincidence of the pin.**
+Before, `FEATURE_SPEC` resolved to an obviously wrong target: a **shipped** feature with a
+141 498-byte spec. **The defect announced itself to anyone who looked.** Now it resolves correctly
+**by accident of the pin being right**, so **nothing looks wrong while the `BRANCH` field is still
+fabricated.**
+
+⚠️ **A DEFECT THAT HAS BEEN MADE TO RESOLVE CORRECTLY BY ACCIDENT IS MORE DANGEROUS THAN ONE THAT
+RESOLVES WRONGLY.** A loud failure has been converted into a silent one; nothing in the resolution
+was repaired; and **the next actor on a bundle-less branch gets the original destructive behaviour
+back with no warning.** It is recorded in the preamble **and** in §8 item 1, because a reader who
+consults only the register must not come away believing #490 is closed.
+
+#### The `/clarify` discharge STANDS — stated, because its absence would read as a retraction
+
+The by-hand discharge **was correct when taken, on evidence that was correct when taken.** A
+mitigation that arrived afterwards cannot convert a control executed by hand into a control that
+ran, and nothing in this revision may be read as *"the skill could have been run after all."*
+
+#### The staleness sweep — population derived, and the HANDED population was UNDER-DERIVED
+
+⚠️ **The brief that commissioned this revision named three sweep patterns, and one of them cannot
+see a hit inside the correction's own paragraph.** The unspaced spelling of the spec size does not
+match **the same figure written with a digit-group space**, which is a **live** occurrence in the
+very passage being rewritten. **It was found by READING the block, not by the detector** — this
+repository's recorded lesson (*"every spelling was found by reading, never by the detector"*)
+recurring inside the sweep written to prevent it.
+
+The population was therefore extended by **complement**, onto axes the brief did not name: the
+**space-grouped spelling** of the figure, `rc=0`, the printed **field names**, the bare feature
+number, and the **prose restatement** of the target. ⚠️ **No count of hits is written here.** The
+recipe is: sweep the figure **in every spelling it is written in**, sweep the field names the script
+prints, sweep the prose restatement — then adjudicate each hit as **LIVE body text** or **FROZEN
+Appendix record**.
+
+#### What was adjudicated and NOT edited — because "no edit needed" is itself a claim
+
+- **The Appendix's `v0.6 → v0.7` section**, which states that the script resolved `FEATURE_DIR` to a
+  shipped, unrelated feature. ⚠️ **FROZEN HISTORICAL RECORD — deliberately NOT rewritten**, under
+  this document's own rule for changelog entries (`v0.7 → v0.8`, *"The frozen records"*). It is
+  dated, scoped to a version transition, and **true of v0.7**. Editing it would rewrite history to
+  match the present, which is the opposite of what a convergence log is for.
+- **The Appendix's `v0.8 → v0.9` ordinal-derivation block.** ⚠️ **FROZEN, same rule — and NOT
+  edited even though the section below records a real defect in it.**
+- **§5e's `[const §X.6]` row.** It names fixpp#490 as the reason the skill's machinery was not
+  obtained and **publishes no value** — no feature directory, no size, no branch name. Its claim is
+  *"the substance was executed by hand, not by the skill"*, which is still true. **LIVE and correct;
+  no edit.**
+- **The status block's v0.7 lines and paragraph.** They **point at** the preamble and at fixpp#490
+  rather than restating any value out of the transcript, so the correction lands where they already
+  point. **LIVE and correct; no edit.**
+- **The `rc=0` occurrences in §9 and in the header's tracked-state block.** A different subject
+  entirely — the citation gate and `git ls-files` — swept only because `rc=0` was one of the
+  complement axes, and adjudicated **out of scope**. **No edit.**
+
+#### Root cause — a NEW one, and RC#1's ordinal does NOT advance
+
+⚠️ **THIS IS BETTER CLASSIFIED AS A DISTINCT ROOT CAUSE THAN AS RC#1's NEXT INSTANCE, and the
+distinction is worth more than the bookkeeping.** **RC#1 is *a claim whose derivation stopped one
+hop short of the source*.** This derivation **did not stop short**: it went all the way to the
+script, ran it, and printed the result. **The claim was RIGHT WHEN WRITTEN.** ⚠️ **Every prior
+occurrence in this log was wrong at the moment of writing; this one was TRUE at the moment of
+writing and was FALSIFIED BY A LATER ACTION.** That is a different failure with a different defence:
+RC#1 is defeated by deriving one hop further, and **this one is defeated only by never publishing a
+result as the claim in the first place.**
+
+**The root cause, named plainly:** ⚠️ **THIS DOCUMENT'S OWN ORCHESTRATOR CHANGED THE WORLD THE
+TRANSCRIPT DESCRIBED, AND THE TRANSCRIPT DID NOT MOVE WITH IT.** The conversion to feature mode was
+a deliberate act of this same work, and it re-pinned the file the published evidence depended on.
+**The evidence was invalidated by its own author, from a different seat, with nothing connecting the
+two.**
+
+It is this repository's standing rule violated in a design document rather than in a comment: **a
+record may state a PROCEDURE or a CONDITION; it may not state a RESULT**, because nothing ever
+re-runs a record. The defence is the one already written for comments — **keep the condition, keep
+the re-derivation recipe, and let the result live only as a dated observation beneath them.** That
+is exactly the shape of the correction above, which is why the correction and the root cause are the
+same edit.
+
+⚠️ **NO NEW ROOT-CAUSE NUMBER IS MINTED.** `RC#2`–`RC#5` in this log are **section-local labels** —
+the `v0.2 → v0.3` pass numbers its own five, `v0.3 → v0.4` its own, `v0.4 → v0.5` its own three —
+and **only RC#1 is the global recurring cause carrying a derived ordinal.** Inventing a global
+`RC#6` would assert a registry that does not exist.
+
+⚠️ **RC#1's ordinal is DERIVED HERE AND DOES NOT ADVANCE — it stands exactly where `v0.8 → v0.9`
+left it, because this revision is not an instance of it.**
+
+#### ⚠️ The ordinal recipe published at `v0.8 → v0.9` POISONS ITSELF — recorded, not repaired
+
+**Re-run today, before this revision's edits, the `v0.8 → v0.9` ordinal greps do NOT return what
+that section prints.** Its block publishes one hit and zero hits; the same two commands now return
+**two and two**. ⚠️ **Nothing about the history changed** — the section's **own pasted grep PATTERNS
+are matched by those greps.** Each literal pattern is itself an occurrence of the token it searches
+for, so **publishing the recipe added a hit to it.** The different-pattern control in that block is
+unaffected and still fires, which is why the block looks sound.
+
+⚠️ **THE CONSEQUENCE IS A FALSE ORDINAL FOR THE NEXT ACTOR, not a cosmetic blemish.** The recipe
+says *"the highest ordinal present plus one is the next"*, and a self-matched pattern makes an
+ordinal look **already used**. Anyone following it as written **skips a number.**
+
+**This revision does three things about it, and deliberately not a fourth:**
+
+1. It **does not edit** the `v0.8 → v0.9` block. Frozen record; the numbers it printed were true
+   when it ran, and the poisoning is a property of **publishing** them, not an error in them.
+2. It states the **condition**, so the next reader sees it instead of re-discovering it: ⚠️ **a grep
+   recipe pasted as a LITERAL into the corpus it greps becomes a member of its own result set.**
+3. It **pastes no ordinal pattern anywhere in this section** — which is why no such literal appears
+   above, and why the non-claim about RC#1's ordinal is phrased so that it does not itself contain
+   the token a derivation would match.
+
+**The repaired procedure, as a procedure:** derive the ordinal from the Appendix's **root-cause
+SECTION HEADINGS**, which are one per revision and cannot be manufactured by a pasted pattern — or
+scope the grep to **exclude fenced blocks**. ⚠️ **Do not trust the printed numbers in any previously
+published derivation block. Re-run it.**
+
+#### Net effect — stated as change, not as prediction
+
+**±0 decisions** (D-1, D-2, D-2b, D-3, D-3b, D-4, D-5a/b/c all stand). **±0 test seams. ±0 error
+variants. ±0 pins. ±0 enumerators. ±0 populations** — the `[2i]` eight and the two outside-`[2i]`
+restatements are both untouched, and **no numeral in any `[2i]` prescription is written or moved.**
+**0 source files changed.** `.specify/2i-capi.md`, `.specify/api-contract.md`,
+`.specify/2m-pybind.md` and `specs/090-capi-refusals/spec.md` are **NOT edited by this revision.**
+
+**What changed: `## Clarifications`' preamble** gains the CONDITION, the re-derivation recipe and a
+second dated transcript, with the 089 transcript **kept and re-framed rather than deleted**; **§8
+item 1 gains the mitigated-not-fixed disposition** and loses its now-false *"not a usable instrument
+here"* tail; **the status block gains a v0.10 entry and paragraph**; **the Appendix gains this
+section.**
+
+⚠️ **Status stays `NOT converged by the loop's criterion`, and the Gate A label stays
+`gate-a-waived`.** **No review ran, no finding counts are claimed, no convergence is claimed, and no
+label moves.**
+
+⚠️ **What v0.10 does NOT establish.** It builds nothing, runs no seam, discharges no §8 row, and
+**closes nothing about fixpp#490** — it records that the defect was mitigated by an unrelated action
+and is now **harder to see**, which is the opposite of closing it. ⚠️ **And it repairs no
+instrument**: the `v0.8 → v0.9` ordinal recipe is left self-poisoning, protected by the same
+frozen-record rule that makes it un-editable, with the condition stated in its place.
