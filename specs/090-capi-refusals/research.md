@@ -374,7 +374,7 @@ table at the two numbers this bundle discusses elsewhere.
   change**, so `[const §X.6]` puts **all four** Appendix A controls on it; `/analyze` is a
   cross-artifact check over `spec.md` / `plan.md` / `tasks.md`, and **in issue mode none of those
   exist**, so the control could not be discharged at all. A feature bundle is the only shape in
-  which the two owed controls can run.
+  which the two controls that were **then** owed can run.
 - **Alternatives considered**: staying in issue mode. **Rejected**: `/analyze` would remain
   permanently undischargeable.
 

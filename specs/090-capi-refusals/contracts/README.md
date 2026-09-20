@@ -32,7 +32,14 @@ to `[const §X.7]` before the first public release (a MINOR bump marked BREAKING
 amendment**); citing §11 for the procedure would be wrong.
 
 ⚠️ **Gate A RAN and did NOT converge.** It is `gate-a-waived` on two reasons. `/speckit-analyze` and
-the user's `/plan` sign-off — ⚠️ **the latter is now DISCHARGED (2026-09-20), pinned to `plan.md` at `d12d2270`; `/speckit-analyze` remains OWED.** This line said both were owed until the sign-off landed. Nothing in this directory asserts a Gate A pass.
+the user's `/plan` sign-off are ✅ **both now DISCHARGED (2026-09-20), each PINNED to a DIFFERENT
+thing: the sign-off to `plan.md` at `d12d2270`; `/speckit-analyze` to the artifacts at `505adafa`**,
+where a run through the canonical `spec-analyzer` executor returned **1 finding (F1, multi-site),
+0 CRITICAL, 100 % coverage** and the finding was **remediated at `e9833610`, not deferred**.
+⚠️ **Neither discharge covers a LATER artifact state**, so `tasks.md`'s T084 still owes the re-run.
+This line said both were owed, and then that only the sign-off had landed; each reading was true when
+written. Nothing in this directory asserts a Gate A pass — and a discharged `/speckit-analyze` is not
+one.
 
 **Design authority**: `.specify/447-458-452-capi-refusals.md` **v0.10**. These files restate its
 decisions as contracts; they do not re-decide, re-derive or contradict anything in it.

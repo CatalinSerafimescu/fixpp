@@ -12,7 +12,14 @@ is validated by observation, not by an example call.
 This file **references** them and does not duplicate them.
 
 ⚠️ **Gate A RAN and did NOT converge** — `gate-a-waived` on two reasons. `/speckit-analyze` and the
-user's `/plan` sign-off — ⚠️ **the latter is now DISCHARGED (2026-09-20), pinned to `plan.md` at `d12d2270`; `/speckit-analyze` remains OWED.** This line said both were owed until the sign-off landed. Nothing below asserts a Gate A pass.
+user's `/plan` sign-off are ✅ **both now DISCHARGED (2026-09-20), each PINNED to a DIFFERENT thing:
+the sign-off to `plan.md` at `d12d2270`; `/speckit-analyze` to the artifacts at `505adafa`**, where a
+run through the canonical `spec-analyzer` executor returned **1 finding (F1, multi-site), 0 CRITICAL,
+100 % coverage** and the finding was **remediated at `e9833610`, not deferred**. ⚠️ **Neither
+discharge covers a LATER artifact state**, so `tasks.md`'s T084 still owes the re-run. This line said
+both were owed, and then that only the sign-off had landed; each reading was true when written.
+Nothing below asserts a Gate A pass — and a discharged `/speckit-analyze` is not one: Gate A is
+`gate-a-waived` on two reasons, permanently.
 
 ⚠️ **`[const §XVII.7]` resource gate:** local builds are resource-heavy; an AI agent MUST surface an
 `AskUserQuestion` and get approval **before** running any build command in this file.

@@ -6,7 +6,7 @@ population it derived. Where it states a **condition** and a **re-derivation rec
 count, this file carries the condition and the recipe — not a number.
 
 ⚠️ **Gate A on this bundle RAN and did NOT converge.** It is `gate-a-waived` on two reasons.
-`/speckit-analyze` is **OWED**, not discharged; the user's `/plan` sign-off is ✅ **DISCHARGED 2026-09-20**, pinned to `plan.md` at `d12d2270` (authoritative statement: `plan.md`'s Constitution Check row 5). **`/speckit-analyze` remains OWED**. ⚠️ **This line read "both are OWED" until the sign-off landed** — it was true when written and was falsified by a later event, which is this bundle's recurring defect shape, not a typo. Nothing in this file
+Both Appendix A controls this line once recorded as owed are now ✅ **DISCHARGED 2026-09-20, and each is PINNED**: the user's `/plan` sign-off to `plan.md` at `d12d2270` (authoritative statement: `plan.md`'s Constitution Check row 5), and `/speckit-analyze` to the artifacts at `505adafa`, where a run through the canonical `spec-analyzer` executor returned **1 finding (F1, multi-site), 0 CRITICAL, 100 % coverage** and the finding was **remediated at `e9833610`, not deferred** (authoritative statement: `plan.md`'s Constitution Check row 4). ⚠️ **Neither discharge covers a LATER artifact state** — the artifacts have moved since and implementation will move them again, which is why `tasks.md`'s T084 survives as a re-run obligation. ⚠️ **This line read "both are OWED", and then "`/speckit-analyze` remains OWED"; each reading was true when written and was falsified by a later event** — this bundle's recurring defect shape, not a typo. Nothing in this file
 should be read as a Gate A pass.
 
 ---

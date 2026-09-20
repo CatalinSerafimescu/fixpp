@@ -90,7 +90,7 @@ Citing §11 for the procedure would be wrong.
 |---|---|
 | Gate A (`[const §X.1]`, mandatory) | **RAN; DID NOT CONVERGE.** Label **`gate-a-waived`**, two reasons (header block). Four rounds, a post-sign-off P1, a scoped delta review and two owner decisions. `P1 == 0 AND P2 == 0` has never been returned |
 | `/clarify` | **Discharged in substance, not by running the skill.** The skill would have resolved `FEATURE_SPEC` through the fixpp#490 pin and written into a shipped, unrelated feature's spec. The questions were asked and answered by the owner against the design note. *"The control ran"* and *"the control's substance was executed by hand"* are different claims; only the second is true |
-| `/analyze` | ⚠️ **OWED. NOT DISCHARGED.** A plan entry claimed otherwise until 2026-09-20 and that claim was **false**. `/analyze` is a cross-artifact check over `spec.md` / `plan.md` / `tasks.md`; until this bundle has all three it cannot run at all |
+| `/analyze` | ✅ **DISCHARGED 2026-09-20 — but PINNED, not unconditional.** It is a cross-artifact check over `spec.md` / `plan.md` / `tasks.md`, so it could not run until this bundle had all three; it was then run through the canonical `spec-analyzer` executor **against the artifacts at `505adafa`**, returning **1 finding (F1, multi-site), 0 CRITICAL, 100 % coverage** — 20 FR + 14 SC over 93 tasks, every FR and every buildable SC mapping to at least one task — and F1 was **remediated at `e9833610`, not deferred**. ⚠️ **A plan entry claimed this control discharged until 2026-09-20 and that claim was FALSE WHEN MADE — it rested on no run at all.** Do not restate it: what discharges the control is the run above, which is different evidence, not a vindication of that entry. ⚠️ **A control discharged against ONE artifact state does not cover a LATER one** — the artifacts have moved since (`e9833610`, `40f2bb92`) and implementation will move them again, which is why **T084 survives as a re-run obligation** rather than being struck |
 | user `/plan` sign-off | ✅ **DISCHARGED 2026-09-20** — given by the owner in session, **pinned to `plan.md` at `d12d2270`**; `plan.md`'s Constitution Check row 5 is the authoritative statement and carries the re-derivation command. The control is the **user's sign-off on the plan**, not the command's execution |
 
 ---
@@ -158,8 +158,8 @@ spec discusses elsewhere.**
   from the controls rather than from preference: it is an **ABI surface change**, so `[const §X.6]`
   puts **all four** Appendix A controls on it; `/analyze` is a cross-artifact check over
   `spec.md` / `plan.md` / `tasks.md`, and **in issue mode none of those exist**, so the control
-  could not be discharged at all. A `specs/<id>/` bundle is the only shape in which the two owed
-  controls can run.
+  could not be discharged at all. A `specs/<id>/` bundle is the only shape in which the two
+  controls that were **then** owed can run.
 
 ---
 
@@ -480,9 +480,19 @@ compare**, not an internal invariant.
   registered as such — an external checkout or a vendored copy leaves no trace here.
 - **Every code this feature returns is already published**, so the version downgrade machinery needs
   no new row and 1.7 is a pure **semantics** bump (FR-007).
-- ⚠️ **`/analyze` and the user `/plan` sign-off are OWED**, not discharged. A summary artifact said
-  otherwise and was wrong; a control's discharge is read from the artifact that owes it, never from
-  a plan entry describing it.
+- ✅ **`/analyze` and the user `/plan` sign-off are both DISCHARGED**, by different routes and each
+  **PINNED to the state it covers**: the sign-off by the owner's act in session, pinned to `plan.md`
+  at `d12d2270`; `/analyze` by a run through the canonical `spec-analyzer` executor on 2026-09-20,
+  pinned to the artifacts at `505adafa` — **1 finding (F1, multi-site), 0 CRITICAL, 100 % coverage**
+  (20 FR + 14 SC over 93 tasks), with F1 **remediated at `e9833610`, not deferred**.
+  ⚠️ **A summary artifact claimed `/analyze` discharged long before any of this, and was wrong** —
+  that claim rested on **no run**, it stays recorded because it is why the sweep that corrected this
+  bundle exists, and the present state is **not** its vindication: different evidence, not the same
+  claim turning out true. The rule it violated is unchanged, and is the rule the present state
+  satisfies — a control's discharge is read from the artifact that owes it, never from a plan entry
+  describing it. ⚠️ **Neither discharge extends past the state it is pinned to**: the artifacts have
+  moved since (`e9833610`, `40f2bb92`) and implementation will move them again, so **T084 stands as a
+  re-run obligation**.
 - ⚠️ **Gate A did not converge; the label is `gate-a-waived` on two reasons.** No downstream step
   may treat this bundle as having a converged Gate A.
 - ⚠️ **Only one pre-fix RED has been executed** — Story 1's, inside fixpp#447. Every other seam's
