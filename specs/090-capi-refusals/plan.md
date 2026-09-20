@@ -323,6 +323,39 @@ open:
 
 ---
 
+## Constitution Check — POST-DESIGN RE-EVALUATION (after Phase 1)
+
+*The gate above was evaluated before Phase 0. The skill requires a re-check after Phase 1 design.
+This is that re-check.*
+
+**Verdict: NO ROW CHANGES.** Phase 1 produced `data-model.md`, six `contracts/` files and
+`quickstart.md`. It made **no decision** — every one was already settled in the design authority and
+transcribed in `research.md` — so no gate's basis moved.
+
+⚠️ **One Phase 1 act COULD have changed a verdict, and is recorded here rather than left implicit.**
+Phase 1 added a contract file the plan's four-symbol list did not name — `msg-index-bounds.md`
+(D-2b / FR-004 / SC-003) — because `§5a` of the design authority declares that surface gains a
+documented `FIXPP_ERR_INVALID_HANDLE` return, and omitting it would have left an FR uncovered.
+
+**It does NOT enlarge the `[const §X.7]` BREAKING population**, and the discriminator is the design
+authority's own: *"the arm it replaces is undefined behaviour, not a documented success."*
+`[api-contract §11]` defines the C-ABI breaking effect as **"making a call to a Stable-from-v1.0
+C-ABI symbol fail where it used to succeed"** — undefined behaviour is not a success that can be
+taken away. The file is therefore deliberately **not** marked BREAKING, and is kept **separate** so
+no reader inherits BREAKING from an adjacent section.
+
+**The four `FAIL` rows are unchanged and all four remain SEQUENCING failures, not violations:**
+`/analyze` (owed), the user `/plan` sign-off (owed), `[const §XVII.7]`'s local pre-PR build (owed by
+sequencing), and obligation 4 as their roll-up. ⚠️ **Phase 1 discharged none of them and claims
+none.** Gate A remains **`JUSTIFIED-DEVIATION`** — ran, did **not** converge, `gate-a-waived` on two
+reasons.
+
+**Re-derivation recipe, not a result:** re-read the Verdict column against
+`.specify/constitution.md` and the design authority's `§5e`; a row changes only when a decision
+changes, and Phase 1 changed none.
+
+---
+
 ## Phase 0 exit state
 
 - **Produced**: this file and [research.md](./research.md).
