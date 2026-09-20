@@ -48,10 +48,15 @@ this same (variable name, brace scope) machinery with the declaration column
 above it, not a bare file-wide name set — the two concede the identical
 sibling-scope residue.
 
-Self-check: this instrument is proven able to report non-zero (it reports the
-interleaves it lists by name, and the unattributed receivers it lists by name)
-AND able to report zero (most files come back 0). Both halves are printed by
-every run, so neither can be assumed.
+Self-check, on the ATTRIBUTION GUARD (both columns print on every run, so
+neither can be assumed): proven able to report non-zero (an unattributed
+receiver is printed by name and the run exits non-zero unless it is named on
+`--known-unscoped`) AND able to report zero (a receiver attributed to a scoped
+declaration is counted, not printed). The DECLARATION CENSUS's own two-sidedness
+is CONDITIONAL, not a standing property: post-migration every mutator call is on
+a `table_view_builder`, so the census runs over an empty population and its zero
+is evidence of nothing. Re-derive both counts with a fresh run; do not trust a
+figure pasted here.
 """
 import argparse
 import collections
