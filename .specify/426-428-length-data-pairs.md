@@ -207,13 +207,18 @@ bundle. There are three factories:
   built once at config time (`Dictionary::as_table_view`, immutable afterwards by its own contract),
   and a bundle is built only after it is populated: `Validator::validate`, `Session`'s scanners and the
   C-ABI setters build one per operation, while `Parser` builds one in its constructor and reuses it for
-  its own lifetime against a view that must stay immutable for at least that long (Gate B r7 N-4 —
+  its own lifetime against a view that must stay stable for at least that long (Gate B r7 N-4 —
   "rebuilt per message" was too strong; `Parser` retains its bundle). ⚠️ **SUPERSEDED — see
   `.specify/456-table-view-seal.md`.** At the time of writing the type did not *enforce* the order
   (`set_length_pair_data_tag` and assignment were public) and the rule was pinned by
   `DictHooksCustomPair.ABundleIsASnapshotOfTheDictionaryItWasBuiltFrom`. fixpp#456 sealed the
-  published view, which makes the stale case unconstructible and deletes that witness with its
-  premise; do not look for it. Pair mutation still carries the strong exception guarantee, so the
+  published view's population surface, which makes the mutate-after-publish case this test built
+  unconstructible; its population half is now covered by the compile-time seal witness
+  (`tests/dictionary/table_view_seal_compile_test.cpp`), and its identity half — the same latch
+  observed through a destroy-and-reconstruct at the same address, e.g.
+  `std::optional<table_view>::emplace` — by
+  `DictHooksCustomPair.ABundleKeepsItsNullPairCallbackAcrossAReSeatThatAddsThePair`. Pair mutation
+  still carries the strong exception guarantee, so the
   maps and the flag cannot disagree after a failed allocation (r6 M-2) — copy-assignment, which
   carried the other half of that claim, no longer exists.
 - A test-only factory under the existing test-hooks seam, for stub dictionaries such as the uint16

@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // tests/dictionary/table_view_seal_compile_test.cpp — fixpp#456, design §6 seam 1.
 //
-// THE RED. `fixpp::dict::table_view` documents itself as immutable after
+// THE RED. `fixpp::dict::table_view` documented itself as immutable after
 // construction; until fixpp#456 it enforced none of it, and #456's own witness
 // mutated a default-constructed view that never came from a `Dictionary`. This TU
-// asserts, at compile time, that the mutation surface is unreachable through the
-// view and reachable through `table_view_builder`.
+// asserts, at compile time, that the sixteen population members and both
+// assignment operators are unreachable through the view and reachable (the
+// mutators) through `table_view_builder`.
 //
 // ⚠️ THIS IS DELIBERATELY NOT A MUST-FAIL BUILD TARGET (`WILL_FAIL TRUE` over
 // `cmake --build --target …`), and §6 rejects that form with reasons: such a target
@@ -37,11 +38,16 @@
 // POPULATION mutator: move-construction from a non-`const` view (`table_view(
 // table_view&&)` is public and load-bearing, §5a), and `const_cast` through a
 // span-returning accessor (`required_fields`, `group_member_tags`,
-// `group_required_members`) reaching non-`const` backing storage on a non-`const`
-// view. Those two sit OUTSIDE this TU's subject rather than being gaps in its
-// coverage of it — §5b and `B-456-1` carry them — and the remaining §5b channel,
-// destroy-and-reconstruct at the same address, is pinned at runtime by
-// `DictHooksCustomPair.ABundleDoesNotFollowAReSeatedOptional`.
+// `group_required_members`) reaching non-`const` backing storage — defined
+// behaviour on a `const` view as much as a non-`const` one, since the elements
+// behind the span are allocated by the member vectors and are not themselves
+// `const` objects. Those two sit OUTSIDE this TU's subject rather than being gaps
+// in its coverage of it — §5b and `B-456-1` carry them — and the remaining §5b
+// channel, destroy-and-reconstruct at the same address, is pinned at runtime by
+// `DictHooksCustomPair.ABundleKeepsItsNullPairCallbackAcrossAReSeatThatAddsThePair`,
+// which pins the pair-callback latch specifically, not the view as a whole —
+// every other `dict_hooks` callback dereferences the stored address live and does
+// follow the re-seat.
 //
 // Re-derivation recipe for the structural half (§6 seam 2) — the counts are
 // deliberately NOT written here, because nothing re-runs a comment:
@@ -151,8 +157,9 @@ concept can_set_length_pair_data_tag = requires(T& t) {
 };
 
 // ── the seal: sixteen NEGATIVE/POSITIVE pairs, adjacent ─────────────────────
-// Read each pair together. The negative says the view cannot be mutated; the
-// positive directly beneath says the concept is capable of matching at all.
+// Read each pair together. The negative says that one named mutator is not
+// callable on a `table_view&`; the positive directly beneath says the concept is
+// capable of matching at all.
 
 static_assert(!can_add_valid_tag<table_view>, "SEAL LEAK: add_valid_tag");
 static_assert(can_add_valid_tag<table_view_builder>, "PROBE BLIND: can_add_valid_tag");

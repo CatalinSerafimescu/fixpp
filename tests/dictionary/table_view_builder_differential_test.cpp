@@ -64,9 +64,10 @@ constexpr std::uint16_t kNoPartyIDs = 453;
 // is the real reason not to re-spell it here.
 //
 // Shared rather than per-test because every arm below binds it as
-// `table_view const&` and reads: since fixpp#456 `table_view` is immutable by
-// type, so no arm can leave state for the next one. Constructed per test, the
-// FIX44 XML load plus `as_table_view()` ran four times over.
+// `table_view const&` and reads, and none of them casts away the constness of a
+// span accessor's pointer — the only write the type does not prevent — so no arm
+// can leave state for the next one. Constructed per test, the FIX44 XML load plus
+// `as_table_view()` ran four times over.
 table_view const& fix44_view() {
     static std::shared_ptr<fixpp::dict::Dictionary const> const dict =
         fixpp::test_support::make_fix44_dictionary();

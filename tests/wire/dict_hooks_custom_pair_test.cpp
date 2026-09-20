@@ -663,11 +663,9 @@ TEST(DictHooksCustomPair, ZeroIsNeverHalfOfAPair) {
 // that `for_table_view` latches `has_nonstandard_pair()` at build time, by
 // mutating a view AFTER a bundle had been taken from it. Its deletion claimed
 // that premise was unconstructible. That claim was wrong: the *population*
-// half became unconstructible, the *identity* half did not — a bundle latches
-// against an OBJECT AT AN ADDRESS, and `std::optional<table_view>::emplace`
-// substitutes a different object at that same address without the bundle
-// noticing. `DictHooksCustomPair.ABundleDoesNotFollowAReSeatedOptional` below
-// carries that half now. What records the full picture: `B-456-2` in
+// half became unconstructible, the *identity* half did not.
+// `DictHooksCustomPair.ABundleKeepsItsNullPairCallbackAcrossAReSeatThatAddsThePair`
+// below carries that half now. What records the full picture: `B-456-2` in
 // spec/behaviors-and-limitations.md, and the compile-time seal witness in
 // tests/dictionary/table_view_seal_compile_test.cpp, which asserts the
 // population-sealing property the type actually buys. The case's POSITIVE
@@ -679,13 +677,15 @@ TEST(DictHooksCustomPair, ZeroIsNeverHalfOfAPair) {
 // the proof that assignment had to go (design §3.2) — copy-assignment moved the
 // exact `has_nonstandard_pair_` bit the seal exists to freeze.
 
-// A `dict_hooks` bundle latches against the OBJECT `for_table_view` was called
-// on, not a value. Re-seating that storage — `std::optional<table_view>::emplace`,
-// destroy-and-reconstruct in place — does not update a bundle already taken
-// from it, and the build-time `has_nonstandard_pair()` latch in particular
-// keeps its old answer. That is the identity half of the deleted case above;
-// the seal did not close it.
-TEST(DictHooksCustomPair, ABundleDoesNotFollowAReSeatedOptional) {
+// `for_table_view` stores `std::addressof(dict)` and latches exactly one thing
+// from the view: whether to install the Length/Data-pair callback, from
+// `has_nonstandard_pair()`. Every other callback — and the pair callback's own
+// answers — dereferences the stored address on each call, so a
+// destroy-and-reconstruct in the same storage (`std::optional<table_view>::emplace`)
+// IS followed by all of them. The one transition an existing bundle cannot see is
+// pair-free -> pair-bearing: its `length_pair_` is null, and
+// `data_tag_for_length` returns 0 before it reaches the address.
+TEST(DictHooksCustomPair, ABundleKeepsItsNullPairCallbackAcrossAReSeatThatAddsThePair) {
     std::optional<table_view> opt;
     table_view_builder no_pair;
     opt.emplace(std::move(no_pair).build());
