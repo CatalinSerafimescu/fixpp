@@ -226,6 +226,22 @@ silently answered with the wrong dictionary, both found by hostile review after 
   shape of the DELIMITER oracle (#384) above, reintroduced by a cache key. `nested_cache_row`
   now carries the bundle identity (Gate B r9 R-1).
 
+⚠️ **A third member of the same family, and this one is DISCLOSED rather than fixed (fixpp#456).**
+`for_table_view` stores `std::addressof(dict)`, so a bundle binds to an object **at an address**,
+not to a value. It latches exactly one bit —
+`dict.has_nonstandard_pair() ? +[lambda] : nullptr` — while the classify, group-member and
+group-delimiter callbacks each dereference that address on **every call**. So a same-address
+replacement (`std::optional<table_view>::emplace`, destroy-and-reconstruct in place) **is** followed
+by those three, and is **not** followed by the pair-callback installation decision. Only the
+pair-free → pair-bearing transition is invisible; pair-bearing → pair-bearing with different tags is
+followed like anything else. fixpp#456 sealed the view's *population* surface and did not make the
+*identity* at an address stable — read `parser.hpp`'s `for_table_view` and `dict_hooks.hpp`'s
+`data_tag_for_length` together to check this, not the prose. `B-456-2` records it;
+`DictHooksCustomPair.ABundleKeepsItsNullPairCallbackAcrossAReSeatThatAddsThePair` pins it. ⚠️ Its
+predecessor was deleted at #456 on the claim that mutate-after-publish had become unconstructible —
+the population half had, this half had not, and it took two Gate B rounds to say so at the right
+width.
+
 Zero can never be half of a pair: it is the "no pair" answer of both accessors, so it is refused
 at `table_view::set_length_pair_data_tag` **and** at pair formation in both loaders — the setter
 alone leaves `Dictionary::length_pair_data_tag(0)` and `field_ref` still reporting one.
