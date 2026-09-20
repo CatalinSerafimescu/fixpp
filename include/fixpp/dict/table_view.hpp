@@ -1050,18 +1050,27 @@ private:
 // assignment: it is how `table_view_builder::build() &&` returns, how
 // `std::optional<table_view>::emplace` seats a view, and how the by-value validator
 // copy is moved into place. The move constructor's exception specification is
-// INFERRED from the members (see its declaration), so this asserts a property of
-// every member rather than a promise this class made about itself: a member that
-// stops being nothrow-move-constructible fails the build here instead of quietly
-// making every one of those paths a throwing move.
+// INFERRED from the members (see its declaration), so whether those paths move
+// nothrow is a property of every member rather than a promise this class made about
+// itself — which is the whole reason the specification is left inferred.
 //
-// NOT MEASURED on MSVC (`.specify/456-table-view-seal.md` §3.2, §7): std::unordered_map's
-// move constructor is not required by the standard to be noexcept, and only a Tier-2
-// MSVC leg can decide it. If it decides false the disposition is already written —
-// REMOVE this assertion and file a limitation naming the deciding member. Do NOT
-// restore an explicit `noexcept` on the move constructor: that silences the assertion
-// on every lane without making the move any safer.
-static_assert(std::is_nothrow_move_constructible_v<table_view>);
+// MEASURED on MSVC, and it decided FALSE — so the assertion that stood here is
+// REMOVED, per the disposition `.specify/456-table-view-seal.md` §3.2/§7 wrote in
+// advance for exactly this outcome. `L-456-2` records what it costs and names the
+// members. The Microsoft STL does not declare its `unordered_map`/`unordered_set`
+// move constructors `noexcept`, and this class holds ten of them; `std::vector`,
+// `std::string`, the hash/equal functors and the allocator are all fine, so it is
+// the hash containers themselves, not anything this class does to them.
+//
+// ⛔ Do NOT restore an explicit `noexcept` on the move constructor to make this
+// compile again. Since P1286R2 the explicit specification simply WINS over the
+// inferred one, so it would not make the move any safer — it would only re-hide
+// the fact on every lane. That mask is what `main` shipped, and removing it is how
+// this was found.
+//
+// Re-derive per toolchain — the answer is a property of the STL, not of this file:
+//   static_assert(std::is_nothrow_move_constructible_v<
+//       std::unordered_map<std::uint16_t, std::uint16_t>>);
 
 // ── fixpp#456: the mutation surface, as a distinct owning type ───────────────
 // `table_view`'s sixteen mutators are private; this is the only way to reach them.

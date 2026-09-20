@@ -571,9 +571,27 @@ reader finds the reason beside the declaration rather than in this document.
 > finding objects to.
 >
 > **So the residual is narrowed by measurement rather than deleted.** `linux-gcc-release`
-> (g++/libstdc++) and `tier3-libcxx` (clang/libc++) are **DISCHARGED** by the table above. **MSVC
-> remains NOT MEASURED** — no MSVC toolchain was available here — and it is the one lane that can
-> still decide it.
+> (g++/libstdc++) and `tier3-libcxx` (clang/libc++) are **DISCHARGED** by the table above.
+>
+> ⚠️ **MSVC has now DECIDED IT, and it decided FALSE — Gate B, PR #485.** All three
+> `windows-msvc-{debug,release,asan}` legs failed to configure with
+> `table_view.hpp: error C2607: static assertion failed`, inside the codegen bootstrap's
+> `fixpp_wire` build. Measured locally on MSVC **14.44.35207** (`_MSC_VER` 1944, STL 202503) with a
+> standalone probe: the Microsoft STL does not declare `unordered_map`/`unordered_set` move
+> construction `noexcept`, so **all ten hash-container members** decide it, while every
+> `std::vector`, `std::string`, hash, equality functor and allocator involved **is** nothrow-move.
+> The probe is two-sided by construction — it reports YES and NO in the same run.
+>
+> **The branch written below was taken exactly as written**: the assertion is REMOVED, the fact is
+> filed as `L-456-2` naming the deciding members, and the `noexcept` promise is NOT restored.
+>
+> ⚠️ **And the measurement carries a finding this section did not anticipate.** `main` already
+> spelled `table_view(table_view&&) noexcept = default;`, and since P1286R2 that explicit
+> specification **wins** over the inferred one — so MSVC builds have always carried a move promising
+> `noexcept` over ten members that promise nothing of the kind, with
+> `wire::dictionary_driven_validator`'s **`noexcept`** constructor move-constructing its member on
+> top of it. fixpp#456 did not introduce that; **dropping the promise is what made it visible.**
+> That is the inferred form doing precisely the job §3.2 argued for, on its first real test.
 >
 > **And the obligation is already in a form Tier-2 discharges fail-closed, which was checked rather
 > than assumed**: `tests/dictionary/CMakeLists.txt` has no `WIN32`/`MSVC` gating around its

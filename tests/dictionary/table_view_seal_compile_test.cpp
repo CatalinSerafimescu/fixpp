@@ -226,12 +226,20 @@ static_assert(!std::is_move_assignable_v<table_view>, "SEAL LEAK: move-assign");
 // `wire::dictionary_driven_validator` holds its `table_view` BY VALUE behind the
 // frozen SC-007 "no virtual edge" design point, so every validating session
 // copy-constructs one. Move construction is how `build()` returns, how
-// `optional::emplace` seats a view, and how that by-value copy is moved into place —
-// and the move constructor's specification is INFERRED, so the second assertion is a
-// proof about the members rather than a promise the class made about itself.
+// `optional::emplace` seats a view, and how that by-value copy is moved into place.
+//
+// ⚠️ These assert that the two operations SURVIVED the seal — nothing about their
+// exception specifications. The move constructor's specification is INFERRED from
+// the members, and on the Microsoft STL it infers to potentially-throwing because
+// `unordered_map`/`unordered_set` move construction is not `noexcept` there. That is
+// a platform fact, recorded as `L-456-2`; it is deliberately NOT an assertion,
+// because an assertion here could only be satisfied by re-spelling the promise the
+// type stopped making. Asserting `is_nothrow_move_constructible_v` in this block is
+// what made all three Tier-2 legs red, and it duplicated a claim that already had a
+// home.
 static_assert(std::is_copy_constructible_v<table_view>,
               "SEAL OVERREACH: copy construction is load-bearing (SC-007)");
-static_assert(std::is_nothrow_move_constructible_v<table_view>,
+static_assert(std::is_move_constructible_v<table_view>,
               "SEAL OVERREACH: move construction is how build() returns");
 
 // The builder is itself a plain stack-local scaffold: default-constructible, and
