@@ -1,6 +1,6 @@
 # fixpp#447 / #458 / #452 — three refusals the C ABI owes, and the C++ guards beside them
 
-> **Status: v0.10 — a targeted correction to a PUBLISHED CONTROL TRANSCRIPT that stopped reproducing. NOT a review round. NOT converged by the loop's criterion; Gate A label stays `gate-a-waived`.**
+> **Status: v0.11 — FOUR deferred corrections applied as ONE revision, with the cost of having deferred them recorded rather than glossed. NOT a review round. NOT converged by the loop's criterion; Gate A label stays `gate-a-waived`.**
 >
 > ```
 > Round 1: Codex 2 P1 / 9 P2 / 2 P3; Opus adversarial post-judging P1 3 · P2 11 · P3 4, 4 root causes.
@@ -44,6 +44,22 @@
 >         both, with its re-derivation recipe and no value as the claim. ⚠️ **fixpp#490 is
 >         MITIGATED, NOT FIXED, and the mitigation made it SILENT rather than LOUD.** ⚠️ **The
 >         `/clarify` by-hand discharge STANDS** — it was correct when taken.
+> v0.11:  NOT A REVIEW ROUND AND NO REVIEW PRODUCED IT. **FOUR corrections that arrived separately
+>         over one day, applied as ONE revision.** The batching is deliberate — minting a version
+>         for each as it landed would have produced revisions superseded within the hour — and
+>         ⚠️ **the deferral's COST is recorded in the Appendix, not glossed: a known-false claim
+>         stood in the design authority for hours.** (i) `[const §X.6]`'s two remaining controls
+>         are BOTH discharged — the user `/plan` sign-off, GIVEN by the owner and PINNED, and
+>         `/speckit-analyze`, which RAN. (ii) What `/analyze` actually found. (iii) A NOTE on §7's
+>         declined corpus/seam residual — ⚠️ **NEW EVIDENCE ON A DECLINED DECISION, NOT A
+>         REOPENING.** (iv) The conversion to feature mode, recorded as a decision, with this
+>         note's standing as **DESIGN AUTHORITY** stated and the derived bundle named as derived.
+>         ⚠️ **NO FINDING COUNTS ARE ENTERED, BECAUSE NO REVIEW RAN.** ⚠️ **ALL FOUR APPENDIX A
+>         CONTROLS ARE NOW DISCHARGED — IN FOUR DIFFERENT MODES, AND NOT ONE OF THEM IS
+>         "PASSED".** Gate A **RAN AND DID NOT CONVERGE** (`gate-a-waived`, two reasons);
+>         `/clarify` was discharged **IN SUBSTANCE BY HAND**, not by the skill; the sign-off was
+>         **GIVEN**; `/analyze` **RAN**. ⚠️ **`[const §XVII.7]`'s LOCAL PRE-PR BUILD IS THE ONE
+>         OUTSTANDING CONSTITUTIONAL OBLIGATION**, owed by sequencing. **No label moves.**
 > ```
 >
 > **Date:** 2026-09-20. ⚠️ **NO CONVERGENCE IS CLAIMED, AND NONE MAY BE.** The loop's criterion is
@@ -128,6 +144,23 @@
 > STANDS** — it was correct when taken, on evidence that was correct when taken. ⚠️ **Status stays
 > `NOT converged by the loop's criterion`, the Gate A label stays `gate-a-waived`, no finding counts
 > are entered because no review ran, and no label moves.**
+>
+> ⚠️ **v0.11 APPLIES FOUR CORRECTIONS THAT ARRIVED SEPARATELY, AND THE BATCHING IS ITSELF A
+> DISCLOSED DECISION.** They are applied as one revision because minting a version for each as it
+> landed would have produced revisions superseded within the hour — the reasoning recorded at the
+> time, in the commit that discharged the `/plan` sign-off and that deliberately did **not** patch
+> this document. ⚠️ **THE DEFERRAL HAD A COST AND IT IS STATED, NOT GLOSSED: from the moment the
+> sign-off was given until this revision, §5e's `[const §X.6]` row and §8 item 1 carried a claim
+> KNOWN to be false — in the DESIGN AUTHORITY, for hours, with the falsity recorded only in a commit
+> message that no reader of this document ever sees.** A commit message is not an erratum on the
+> document it describes. ⚠️ **The two remaining Appendix A controls are now DISCHARGED** — the user
+> `/plan` sign-off (GIVEN, and PINNED to `plan.md` at `d12d2270`) and `/speckit-analyze` (RAN; one
+> finding, zero CRITICAL, full requirement-to-task coverage; the finding **REMEDIATED** at
+> `e9833610`, not deferred). ⚠️ **ALL FOUR CONTROLS ARE THEREFORE DISCHARGED AND NOT ONE OF THEM
+> PASSED A ZERO-DEFECT CRITERION: Gate A RAN AND DID NOT CONVERGE, `/clarify` was executed BY HAND,
+> the sign-off was GIVEN, `/analyze` RAN AND RETURNED A FINDING.** ⚠️ **`[const §XVII.7]`'s local
+> pre-PR build is the ONE outstanding constitutional obligation**, owed by sequencing. **Nothing
+> here converges anything and no label moves.**
 >
 > ⚠️ **Round 4 sits beyond the loop's 3-round Phase A cap, as the pass that produced v0.4 did, and
 > the user authorised each explicitly.** v0.4's authorisation rested on the round-3 review's closing recommendation — *"the
@@ -351,6 +384,28 @@ engaged"*. The same disposition applies to the C++ half here.
   that inventory or leave one PR's consumers unupdated at its own merge. Discharged in §5d;
   **recorded once here and cross-referenced, not restated.**
 
+⚠️ **AND A FIFTH OWNER DECISION OF THE SAME DATE, WHICH THIS DOCUMENT DID NOT RECORD AS A DECISION
+UNTIL v0.11: THIS WORK WAS CONVERTED FROM ISSUE MODE TO FEATURE MODE, AT `specs/090-capi-refusals/`.**
+It is recorded here as prose and **no enumerator is minted for it** — the bundle already carries its
+own label (`OD-2`, defined in the bundle's research record and recorded in its `spec.md`), and
+**minting a second name for one decision is how two registries start disagreeing.** ⚠️ **The ground
+was not convenience.** This is an **ABI surface change**, which is Appendix A's **first trigger
+row**, and in issue mode **three of the four controls had no artifact that could discharge them**:
+`/analyze` is a cross-artifact check over `spec.md` / `plan.md` / `tasks.md` and **in issue mode
+none of those existed**, so it could not run at all; the user `/plan` sign-off had no plan to sign;
+and `[const §X.6]`'s roll-up had nowhere to be recorded. ⚠️ **THE PRECEDENT WAS MEASURED RATHER THAN
+ASSUMED, AND IT IS NEGATIVE:** no prior issue-mode note in `.specify/` has ever discharged them —
+`426-428-length-data-pairs.md`, `456-table-view-seal.md` and `215-dictionary-view.md` each return
+**zero** for `clarify`, for `analyze`/`analyse` and for `§X.6`, against a **working positive control on
+the same three files** (`gate a` returns 2, 8 and 18), so the three zeros are measurements and not a
+pattern that could not match. ⚠️ **THIS NOTE REMAINS THE DESIGN AUTHORITY, AND THE BUNDLE DERIVES
+FROM IT RATHER THAN THE REVERSE.** `spec.md` is the **WHAT and WHY**, `plan.md` is the **HOW**, and
+**neither supersedes this document**: a decision is re-decided here or not at all, and a bundle
+artifact that disagrees with this note is **stale, not authoritative.** ⚠️ **The converse obligation
+is real, and this revision demonstrates it rather than asserting it** — when this note moves, every
+derived artifact owes an update, and the Appendix's `v0.10 → v0.11` section records one such
+divergence **live**, with its re-derivation command, instead of leaving it to be re-found at Gate B.
+
 ### 0c. Why all three C-ABI changes are breaking, from the authority rather than by assertion
 
 `.specify/api-contract.md` §11 lists, among the C-ABI effects, *"Making a call to a Stable-from-v1.0
@@ -381,7 +436,14 @@ Quoted verbatim; each is discharged in a named section, not in prose here.
 ## Clarifications
 
 **This section discharges the `/clarify` control — one of `[const §X.6]`'s four Appendix A
-controls.** §5e's `[const §X.6]` row and §8 item 1 are narrowed to the two that remain.
+controls.** §5e's `[const §X.6]` row and §8 item 1 were narrowed, at v0.7, to the two that then
+remained. ⚠️ **CORRECTED AT v0.11 — *"the two that remain"* IS NO LONGER TRUE OF EITHER, AND THIS
+SENTENCE WAS NOT IN THE EDIT POPULATION HANDED TO v0.11; IT WAS FOUND BY SWEEPING THE WHOLE DOCUMENT
+BY COMPLEMENT.** Both of those two — the user `/plan` sign-off and `/speckit-analyze` — are
+**discharged** as of 2026-09-20. **Read each control's disposition from §5e's row and §8 item 1
+themselves, never from this pointer** — a pointer that restates a state is the thing that goes
+stale, which is this document's signature defect at one more value. ⚠️ **The `/clarify` discharge
+recorded below is UNAFFECTED** and still stands as **adapted, not as run.**
 
 ⚠️ **THE `/speckit-clarify` SKILL WAS NOT RUN AS WRITTEN, AND THE REASON IS PART OF THE EVIDENCE,
 NOT A FOOTNOTE.** A control recorded as discharged by a procedure that was not the procedure is the
@@ -2873,7 +2935,7 @@ A #452 change lands in both.
 | `[const §XIV.2]` — ≤5 pure-virtual on a pluggable interface | **Not engaged.** Nothing here adds a virtual method to anything. ⚠️ `[arch Z-8]` (*"§6 justifies six `Application` methods; the header has seven"*) is *adjacent* to this row and does not change it — Z-8 is about a count in architecture.md, not about a pluggable-interface cap this change touches |
 | `[[clang::lifetimebound]]` on view-returning accessors | `owning_message_handle::view()` already carries it and its signature is unchanged under D-4. No new view-returning accessor is added |
 | `[[nodiscard]]` on `expected_t<T>`-returning methods | `owning_message_handle_from_frame` is already `[[nodiscard]] … expected_t<…>` and stays so; D-4 widens its failure set, not its signature. D-5b's predicate is `[[nodiscard]]`. **No new `expected_t<T>` method is introduced** |
-| `[const §X.6]` / Appendix A — all four controls | Gate A is this document. ⚠️ **NARROWED AT v0.7 — `/clarify` IS NO LONGER IN THIS ROW, because a row that stayed behind after the thing it describes changed is this document's signature defect.** The `/clarify` control is **discharged in substance** by the `## Clarifications` section, ⚠️ **with the skill's own machinery NOT obtained and fixpp#490 recorded as the reason** — read that section's preamble before citing this row, because *"the control ran"* and *"the control's substance was executed by hand"* are different claims and only the second is true. **`/analyze` and the user `/plan` sign-off remain owed** at the Spec-Kit stage that follows and are **NOT MEASURED** here (§8 item 1) |
+| `[const §X.6]` / Appendix A — all four controls | Gate A is this document. ⚠️ **NARROWED AT v0.7 — `/clarify` IS NO LONGER IN THIS ROW, because a row that stayed behind after the thing it describes changed is this document's signature defect.** The `/clarify` control is **discharged in substance** by the `## Clarifications` section, ⚠️ **with the skill's own machinery NOT obtained and fixpp#490 recorded as the reason** — read that section's preamble before citing this row, because *"the control ran"* and *"the control's substance was executed by hand"* are different claims and only the second is true. ⚠️ **CORRECTED AT v0.11 — THE SENTENCE THAT STOOD HERE WAS FALSE IN BOTH OF ITS HALVES, AND ONE HALF WAS KNOWN FALSE FOR HOURS BEFORE IT WAS REPAIRED.** It read *"`/analyze` and the user `/plan` sign-off remain owed"*. **Both are discharged.** The user **`/plan` sign-off was GIVEN by the owner in session on 2026-09-20 and is PINNED** to `specs/090-capi-refusals/plan.md` at commit `d12d2270` — an unpinned sign-off is worthless the moment the document moves. ⚠️ **Re-derive rather than trusting this row:** `git diff d12d2270..HEAD -- specs/090-capi-refusals/plan.md`; **if that diff shows anything beyond the sign-off's own state and its propagation, the sign-off does not cover it and must be re-taken.** **`/speckit-analyze` RAN**, through the canonical `spec-analyzer` executor, over the bundle as it stood at `505adafa`: **one finding, zero CRITICAL, and every requirement and buildable success criterion mapping to at least one task.** That finding was **REMEDIATED at `e9833610`, not deferred** — what it found is in §8 item 1, and it is worth more than the verdict. ⚠️ **ALL FOUR APPENDIX A CONTROLS ARE NOW DISCHARGED, IN FOUR DIFFERENT MODES, AND "DISCHARGED" IS NOT "PASSED":** Gate A **RAN AND DID NOT CONVERGE** — `gate-a-waived` on two reasons, and **nothing in this revision moves that label**; `/clarify` was discharged **in substance BY HAND**, recorded as adapted, not as run; the sign-off was **GIVEN**; `/analyze` **RAN and returned a finding**. ⚠️ **THE ONE OUTSTANDING CONSTITUTIONAL OBLIGATION IS `[const §XVII.7]`'s LOCAL PRE-PR BUILD** — the row below, owed by **sequencing** — so this row must never be read as *"clear to proceed"*. ⚠️ **AND THE DERIVED BUNDLE DISAGREES WITH THIS ROW AS THIS REVISION IS WRITTEN:** several of its artifacts still record `/analyze` as OWED. The Appendix's `v0.10 → v0.11` section states the divergence and its re-derivation command; **it is not repaired here, because this revision may not edit those artifacts** (§8 item 1) |
 | `[const §XVII.7]` — the local pre-PR build gate | Owed before the PR; resource-gated behind an explicit user approval, so **NOT MEASURED** here (§8 item 2) |
 
 ---
@@ -3226,6 +3288,28 @@ edits would produce a green gate over unchanged hashes.
   **`research/reviews/opus_447_458_452_corpus_scope_finding.md` in the PARENT repository**;
   ⚠️ **and that artifact's own corpus step stopped at `.specify/` — §5c extends it to `spec/` and
   records the extension**, which is the residual demonstrating itself one level up.
+- ⚠️ **A NOTE ON THE RESIDUAL IMMEDIATELY ABOVE — NEW EVIDENCE ABOUT A DECLINED DECISION'S COST,
+  NOT A REOPENING OF IT. ADDED AT v0.11.** The owner's scope decision of 2026-09-20 **stands**: the
+  (c2.i) corpus recipe and the §5c/§5d seam are **declined for repair**, and nothing here re-opens
+  that. ⚠️ **What is new is that the seam has now been MEASURED TO RECUR, one artifact downstream.**
+  The residual as written is scoped to the derivation **inside `.specify/`**; **it does not say the
+  gap reproduces in artifacts DERIVED from that derivation**, and it does. In the feature bundle's
+  task list the same missing join caused **two real misses** — a missing amendment task for
+  `.specify/2c-codegen.md`, and a missing per-symbol-roster task for `[2i §4.7]` — **both found by
+  adversarial review and both since fixed there.** Each sat in exactly the same place: the symbol
+  derivation did not reach it because the changed code does not appear in it, and the scope-claim
+  derivation did not reach it because it makes no scope claim. ⚠️ **THE REUSABLE FORM, WHICH IS THE
+  POINT OF THIS NOTE:** **a claim falsified by a change, sitting in a document that names neither
+  the changed symbol nor the changed identifier, is invisible to every recipe derived from either
+  — two correct derivations can each correctly exclude it, and no gate can see a missing join.**
+  Neither derivation is wrong; **the join is what does not exist**, and a reviewer checking each
+  derivation against its own criterion will find both sound. ⚠️ **AND THE WARNING THAT BELONGS
+  ATTACHED TO ANY REPAIR:** when the complement-derivation was run by hand for the corpus finding,
+  **that artifact's own corpus step stopped at `.specify/` and missed `spec/`**. **A repair must
+  derive its DIRECTORY SET too, or it reproduces the very defect it was written to close** — a
+  corpus recipe that hardcodes a directory is the same defect as one that hardcodes a file, one
+  level up. ⚠️ **This is recorded FOR THE OWNER TO WEIGH against the declined decision; it changes
+  no scope, re-opens no decision, and adds no task here.**
 - ⚠️ **`fixpp_engine_start`'s PARTIAL worker launch returns `FIXPP_ERR_OK` — FILED AS fixpp#492, NOT
   FIXED HERE** (`## Clarifications`, answer C-3). The catch-all is guarded by
   `if (engine->state_->workers_.empty()) return …`, so a `std::thread` failure at `i > 0` leaves
@@ -3307,7 +3391,7 @@ else.
 
 | # | claim | why not measured here | the instrument that would decide it |
 |---|---|---|---|
-| 1 | ⚠️ **NARROWED AT v0.7, NOT STRUCK — and the distinction is this register's own rule.** The row now claims only that **`/analyze` and the user `/plan` sign-off** are satisfied. **`/clarify` is out of it**, discharged in substance by the `## Clarifications` section | `/analyze` and `/plan` still run at the Spec-Kit stage after this gate. ⚠️ **`/clarify` was NOT discharged by running the skill** — `check-prerequisites.sh` resolves `FEATURE_DIR` from a tracked pin and returned a **shipped, unrelated feature** at `rc=0` (fixpp#490); the substance was executed against this document instead, at the user's direction. **A control discharged by an adapted procedure is recorded as adapted, not as run** | `/speckit-analyze`, and the user's `/plan` sign-off, recorded in `specs/<id>/`. ⚠️ For the `/clarify` half the instrument is the `## Clarifications` section itself plus **fixpp#490**'s resolution. ⚠️ **CORRECTED AT v0.10 — #490 is MITIGATED, NOT FIXED, and the mitigation made the defect SILENT rather than LOUD.** Converting this work to feature mode re-pinned the tracked `.specify/feature.json` at this feature's own directory, so `FEATURE_SPEC` now resolves to a correct target **by coincidence of the pin**, not because the resolution was repaired; the `BRANCH` field is still derived from the pin's basename and still disagrees with `git rev-parse --abbrev-ref HEAD`. **A defect that resolves correctly by accident is more dangerous than one that resolves wrongly** — nothing looks wrong, and the next actor on a bundle-less branch gets the original destructive behaviour back with no warning. ⚠️ **The by-hand discharge STANDS**: it was correct when taken, on evidence correct when taken, and a later mitigation cannot convert it into a control that ran. ⚠️ **Re-derive rather than reading any value here or in the preamble** — compare the script's `BRANCH` against `git rev-parse --abbrev-ref HEAD`; they disagree whenever the checked-out branch is not the pinned directory's basename |
+| 1 | ⚠️ **NARROWED AT v0.7, NOT STRUCK — and the distinction is this register's own rule.** The row now claims only that **`/analyze` and the user `/plan` sign-off** are satisfied. **`/clarify` is out of it**, discharged in substance by the `## Clarifications` section | ⚠️ **BOTH HALVES OF THIS ROW ARE DISCHARGED AS OF 2026-09-20 — CORRECTED AT v0.11, AND CORRECTED RATHER THAN STRUCK, BECAUSE A STRUCK ROW IS A DELETED OBLIGATION AND THESE WERE MEASURED, WHICH IS THE OPPOSITE.** The row read *"`/analyze` and `/plan` still run at the Spec-Kit stage after this gate"*; **that stage has now happened.** The user **`/plan` sign-off was GIVEN by the owner in session and is PINNED** to `plan.md` at `d12d2270` — re-derive with `git diff d12d2270..HEAD -- specs/090-capi-refusals/plan.md`, and **anything in that diff beyond the sign-off's own state propagation is outside what was signed.** **`/speckit-analyze` RAN** through the canonical `spec-analyzer` executor over the bundle at `505adafa` — **one finding, zero CRITICAL, full requirement-and-criterion-to-task coverage** — and the finding was **REMEDIATED at `e9833610`, not deferred.** ⚠️ **WHAT IT FOUND IS WORTH MORE THAN ITS VERDICT, AND ALL THREE PARTS WERE THIS DOCUMENT'S SIGNATURE DEFECT AT A NEW VALUE.** **(a)** A contract artifact in the bundle still recorded the sign-off as OWED — **missed by an earlier repair sweep whose grep pattern matched two phrasings while that file used a third.** A too-narrow instrument reporting clean is the class this branch has spent the day on, and it was committed **inside the fix for it**. **(b)** The plan was **internally split**: one row correct while three other sites still said outstanding. ⚠️ **The instructive one is the row whose VERDICT was unaffected by the sign-off — so its stale JUSTIFICATION survived the very change that falsified it.** A verdict that does not move is not evidence that its reasons did not. **(c)** The task that **RUNS** `/analyze` pre-registered a **frozen three-file list** of stale sites, and the list was wrong **in both directions** — it named three files already corrected and was **silent on the one actually stale** — so a re-run could have declared success against the wrong file set. ⚠️ **A FROZEN LIST INSIDE THE TASK THAT RE-RUNS THE CHECK IS A RESULT WHERE A CONDITION BELONGS**, which is this repository's standing rule met at a third value; the repair is the **condition** plus its re-derivation command, never a longer list. ⚠️ **`/clarify` was NOT discharged by running the skill** — `check-prerequisites.sh` resolves `FEATURE_DIR` from a tracked pin and returned a **shipped, unrelated feature** at `rc=0` (fixpp#490); the substance was executed against this document instead, at the user's direction. **A control discharged by an adapted procedure is recorded as adapted, not as run** | `/speckit-analyze`, and the user's `/plan` sign-off, recorded in `specs/<id>/`. ⚠️ For the `/clarify` half the instrument is the `## Clarifications` section itself plus **fixpp#490**'s resolution. ⚠️ **CORRECTED AT v0.10 — #490 is MITIGATED, NOT FIXED, and the mitigation made the defect SILENT rather than LOUD.** Converting this work to feature mode re-pinned the tracked `.specify/feature.json` at this feature's own directory, so `FEATURE_SPEC` now resolves to a correct target **by coincidence of the pin**, not because the resolution was repaired; the `BRANCH` field is still derived from the pin's basename and still disagrees with `git rev-parse --abbrev-ref HEAD`. **A defect that resolves correctly by accident is more dangerous than one that resolves wrongly** — nothing looks wrong, and the next actor on a bundle-less branch gets the original destructive behaviour back with no warning. ⚠️ **The by-hand discharge STANDS**: it was correct when taken, on evidence correct when taken, and a later mitigation cannot convert it into a control that ran. ⚠️ **Re-derive rather than reading any value here or in the preamble** — compare the script's `BRANCH` against `git rev-parse --abbrev-ref HEAD`; they disagree whenever the checked-out branch is not the pinned directory's basename |
 | 2 | The change builds and its tests pass on `linux-clang-debug` | `[const §XVII.7]`'s resource gate — an agent must surface an `AskUserQuestion` before running a local build | The `[const §XVII.7]` cycle: Conan install + CMake configure + build + ctest, with the `local build: green on linux-clang-debug @ <sha>` line |
 | 3 | The three headers' freeze hashes after the edits | The edits do not exist yet | `bash tools/check_capi_freeze.sh` — expected to FAIL after the header edits and PASS after the re-baseline. **Both states must be observed**; a green result alone is consistent with a re-baseline applied before the edits |
 | 4 | ~~Whether `.specify/2i-capi.md` carries a per-symbol error-code roster~~ | ⚠️ **DELETED at v0.2 — this was never unmeasurable.** The grep takes under a second, and parking it concealed three binding contradictions: §5.2's closed construction whitelist (D-3b), §4.7's `FIXPP_ERR_VERSION_MISMATCH` that the function never returns, and §4.7's `remove_tag` idempotence line that D-1 falsifies. Executed and dispositioned in §5c. ⚠️ **v0.3 narrows the first of those three**: §5.2's whitelist is no longer contradicted, because D-3b no longer moves clone (§2.3a). The deletion of this item stands — the grep *was* runnable and the other two contradictions are real — and v0.3 adds the **rule-keyed** recipe (b) the symbol grep structurally could not satisfy | — |
@@ -5252,3 +5336,249 @@ label moves.**
 and is now **harder to see**, which is the opposite of closing it. ⚠️ **And it repairs no
 instrument**: the `v0.8 → v0.9` ordinal recipe is left self-poisoning, protected by the same
 frozen-record rule that makes it un-editable, with the condition stated in its place.
+
+---
+
+### v0.10 → v0.11 — four deferred corrections, and the cost of deferring them
+
+⚠️ **NOT A REVIEW ROUND, AND NO REVIEW PRODUCED IT. NO ROUND NUMBER IS CLAIMED AND NO FINDING COUNTS
+ARE ENTERED, because none were produced.** This pass applies **four corrections that arrived
+separately over one day**. It **re-decides nothing** — D-1, D-2, D-2b, D-3, D-3b, D-4 and D-5a/b/c
+all stand — **re-derives no population, mints no enumerator, writes no numeral into any `[2i]`
+prescription, and changes no source file.**
+
+#### Why ONE revision and not four — the batching, restated where a reader can see it
+
+The four corrections were **deliberately batched.** The reasoning was recorded at the time, in the
+commit that discharged the user `/plan` sign-off: minting a version for each correction as it landed
+would have produced **revisions superseded within the hour** — the sign-off closed one half of a
+claim, `/analyze` was already scheduled to close the other, and a v0.11 carrying only the first
+would have been falsified by the run that followed it. That reasoning was right, and it is restated
+here because **a rationale that lives only in a commit message is invisible to every reader of the
+document it governs.**
+
+#### ⚠️ AND THE DEFERRAL HAD A COST, WHICH IS STATED RATHER THAN GLOSSED
+
+**A known-false claim stood in the DESIGN AUTHORITY for hours.** From the moment the sign-off was
+given, §5e's `[const §X.6]` row and §8 item 1 read *"`/analyze` and the user `/plan` sign-off remain
+owed"*, and **the author knew it was false when it was left standing** — the deferring commit says
+so in as many words. ⚠️ **THAT IS A WORSE SHAPE THAN THE STALE CLAIMS THIS LOG IS FULL OF, NOT A
+MILDER ONE.** Every earlier entry here records a claim that was **wrong without anyone knowing**;
+this one was **known wrong and left in place by decision.** The batching was still the better
+trade — but *"the cheaper option was taken"* and *"nothing was lost"* are different statements, and
+only the first is true. What was at risk in that window is concrete: **any reader, gate or derived
+artifact consulting the authority would have read the false state**, and a constitutional control's
+status is the most load-bearing kind of claim this document carries. ⚠️ **The correct discipline,
+had the window been longer, was an ERRATUM POINTER in the document — one line naming what is known
+false and where the correction is coming from — not silence plus a commit message.** A commit
+message is not an erratum on the document it describes.
+
+#### Correction 1 — `[const §X.6]`'s control state, and BOTH halves were false
+
+Each half was verified before it was written, not carried over from the brief.
+
+- **The user `/plan` sign-off — DISCHARGED**, given by the owner in session on 2026-09-20 and
+  **PINNED** to the feature's `plan.md` at commit `d12d2270`, because an unpinned sign-off is
+  worthless the moment the document moves. Its re-derivation recipe is written into both corrected
+  sites: `git diff d12d2270..HEAD -- specs/090-capi-refusals/plan.md`, with the **condition** that
+  anything in that diff beyond the sign-off's own state and its propagation is **outside what was
+  signed**. Run for this revision, that diff shows the sign-off row, the roll-up row's
+  justification, the complexity-tracking row and the phase-exit bullet — all of them the sign-off's
+  own state — and nothing else.
+- **`/analyze` — DISCHARGED**, by a `/speckit-analyze` run through the canonical `spec-analyzer`
+  executor over the bundle as it stood at `505adafa`: **one finding, zero CRITICAL, and every
+  requirement and buildable success criterion mapping to at least one task.** The finding was
+  **REMEDIATED at `e9833610`, not deferred.**
+
+⚠️ **ALL FOUR APPENDIX A CONTROLS ARE NOW DISCHARGED — AND THE FOUR MODES ARE WRITTEN OUT SEPARATELY
+BECAUSE ONE WORD WOULD FLATTEN THEM INTO A FALSEHOOD.** Gate A **RAN AND DID NOT CONVERGE**
+(`gate-a-waived`, two reasons, and **no label moves here**); `/clarify` was discharged **in substance
+BY HAND**, recorded as adapted, **not as run**; the sign-off was **GIVEN**; `/analyze` **RAN and
+returned a finding.** ⚠️ ***"All four discharged"* MUST NOT BE READ AS *"all four passed"*, AND
+NOTHING HERE MAY BE READ AS GATE A HAVING CONVERGED — it did not.** ⚠️ **THE ONE OUTSTANDING
+CONSTITUTIONAL OBLIGATION IS `[const §XVII.7]`'s LOCAL PRE-PR BUILD**, owed by **sequencing**, with
+its own §5e row and its own §8 register entry. The control set being closed is **not** a
+clear-to-proceed signal.
+
+#### Correction 2 — what `/analyze` found, including against this document's own neighbours
+
+The verdict is the least interesting part of it. All three parts of the single finding were **this
+document's signature defect at a new value**, and each is now recorded in §8 item 1:
+
+1. A bundle contract artifact still recorded the sign-off as **OWED** — **missed by an earlier repair
+   sweep whose grep pattern matched two phrasings while that file used a third.** ⚠️ **A
+   too-narrow instrument reporting clean, committed INSIDE the fix for a too-narrow instrument.**
+2. The plan was **internally split**: one row correct while three other sites still said
+   outstanding. ⚠️ **The instructive one is the row whose VERDICT was unaffected by the sign-off,
+   so its stale JUSTIFICATION survived the very change that falsified it.** **A verdict that does
+   not move is not evidence that its reasons did not** — and a reviewer checking verdicts will
+   never see it.
+3. The task that **runs** `/analyze` pre-registered a **frozen three-file list** of stale sites, and
+   it was wrong **in both directions**: it named three files already corrected and was **silent on
+   the one actually stale**, so a re-run could have declared success against the wrong file set.
+   ⚠️ **A FROZEN LIST INSIDE THE TASK THAT RE-RUNS THE CHECK IS A RESULT WHERE A CONDITION
+   BELONGS** — this repository's standing rule met at a third value. The repair is the **condition**
+   plus its re-derivation command; **a longer list would have reproduced it.**
+
+#### Correction 3 — §7's declined residual has been MEASURED TO RECUR, and the DECISION IS NOT REOPENED
+
+⚠️ **THE OWNER'S SCOPE DECISION OF 2026-09-20 STANDS AND IS NOT RE-OPENED BY THIS REVISION.** The
+(c2.i) hardcoded corpus and the §5c/§5d seam remain **declined for repair.** What v0.11 adds is a
+**note on the existing residual**, explicitly **new evidence about that decision's COST, not a new
+decision** — the owner weighs it, this document does not pre-empt it.
+
+The evidence: the residual as written is scoped to the derivation **inside `.specify/`**, and **it
+does not say the gap reproduces in artifacts derived from that derivation.** It does. The same
+missing join propagated **one artifact downstream** and caused **two real misses** in the feature's
+task list — a missing `.specify/2c-codegen.md` amendment task and a missing per-symbol-roster task
+for `[2i §4.7]` — **both found by adversarial review and both fixed there.**
+
+⚠️ **THE REUSABLE FORM, WHICH IS WORTH MORE THAN EITHER MISS:** **a claim falsified by a change,
+sitting in a document that names neither the changed symbol nor the changed identifier, is invisible
+to every recipe derived from either — two correct derivations can each correctly exclude it, and no
+gate can see a missing join.** Neither derivation is wrong. **The join is what does not exist**, so
+auditing each derivation against its own criterion returns sound, twice, over a real gap.
+
+⚠️ **AND THE WARNING THAT BELONGS ATTACHED TO ANY FUTURE REPAIR, BECAUSE WITHOUT IT THE REPAIR
+REPRODUCES THE DEFECT:** when the complement-derivation was run by hand for the corpus finding,
+**that artifact's own corpus step stopped at `.specify/` and missed `spec/`.** **A repair must derive
+its DIRECTORY SET as well as its file set** — a recipe that hardcodes a directory is the same defect
+as one that hardcodes a file, one level up, and it fails the same way: silently, toward clean.
+
+#### Correction 4 — feature mode, recorded as a decision — AND THE BRIEF'S PREMISE DID NOT REPRODUCE
+
+⚠️ **THE PREMISE HANDED TO THIS REVISION WAS FALSIFIED BY THE FIRST COMMAND RUN AGAINST IT, AND
+THAT IS RECORDED HERE RATHER THAN QUIETLY ROUTED AROUND** — a document whose entire method is
+*"print the command beside the result"* owes the same treatment to a premise it was given. The brief
+asserted, as a measured premise, that **no occurrence of this feature's bundle directory name, and
+none of either mode name, appears anywhere in this document**, and that the design authority
+therefore *"has no idea the Spec-Kit bundle exists."* ⚠️ **THE PATTERN IS DESCRIBED HERE IN PROSE
+AND DELIBERATELY NOT PASTED AS A LITERAL**, under the condition the `v0.9 → v0.10` pass recorded: **a
+grep recipe pasted as a literal into the corpus it greps becomes a member of its own result set**,
+and a premise about whether three tokens occur here is the one claim that literal would corrupt
+outright. **Re-derive it** by sweeping this document for the bundle's directory name and for each
+mode name separately. Run before this revision's edits, that sweep returns **several live hits**: the status block's v0.10 entry and paragraph, `## Clarifications`'
+current control transcript, §8 item 1's corrected disposition and the `v0.9 → v0.10` section all
+name the bundle, because the conversion is what **caused** v0.10's transcript correction.
+
+⚠️ **THE SUBSTANCE SURVIVES, NARROWED — AND THE NARROWED CLAIM IS THE ONE THAT WAS WRITTEN.** The
+document knew the bundle existed as an **event that moved a pin.** What it did not do is: **record
+the conversion as a DECISION**, **state its own standing as the DESIGN AUTHORITY**, or **name the
+derived artifacts as derived.** Measured: `design authority` returned **zero**, and the only
+occurrence of `plan.md` was a row in a historical-bundle table about an unrelated feature. §0b now
+carries all three, as prose.
+
+What it records: the conversion is an **owner decision of 2026-09-20**, taken because this is an
+**ABI surface change** — Appendix A's **first trigger row** — and because **no issue-mode note had
+ever discharged three of the four controls.** That precedent was **measured, not assumed**: the three
+comparable issue-mode notes each return **zero** for `clarify`, for `analyze`/`analyse` and for the
+controls clause, **against a working positive control on the same three files**, so the zeros are
+measurements and not a pattern that could not match. ⚠️ **NO ENUMERATOR IS MINTED FOR IT.** The
+bundle already labels this decision in its own research record and `spec.md`; §0b **cites that
+label** rather than creating a second name, because two names for one decision is how two registries
+begin to disagree. And §0b states the standing plainly: **this note is the design authority**,
+`spec.md` is the WHAT and WHY, `plan.md` is the HOW, **neither supersedes this document**, and a
+bundle artifact that disagrees with this note is **stale, not authoritative.**
+
+#### ⚠️ A LIVE DIVERGENCE THIS REVISION CREATES AND CANNOT REPAIR — DISCLOSED, NOT LEFT FOR GATE B
+
+**As this revision is written, the derived bundle still records `/analyze` as OWED in several of its
+artifacts** — its plan's control table, that table's justification and complexity rows, its phase
+exit-state bullet, and its version-and-freeze contract's obligation-4 row. **They were true when
+written and were falsified by the run itself**, which landed in the same commit that remediated the
+run's finding.
+
+⚠️ **THIS IS THE SAME SHAPE AS `/analyze`'s OWN FINDING PART 2, REPRODUCED ONE ARTIFACT LATER**, and
+it is disclosed here for exactly that reason: **a document internally consistent with itself and
+falsified by its neighbours is the defect this revision documents.** **It is NOT repaired here,
+because this revision may not edit those artifacts** — that is a scope boundary, not a judgement
+that the divergence is acceptable. **Re-derive, never trust this paragraph's account of it:**
+`grep -rn "analyze" specs/090-capi-refusals/plan.md specs/090-capi-refusals/contracts/`, then read
+each hit and adjudicate it as **still-OWED** or **already-corrected**. ⚠️ **No count is written
+here**, because the count is what would rot first, and the next actor is owed the condition instead:
+**every site in the derived bundle asserting `/analyze`'s state must be re-read against §5e's row,
+and §5e's row is the authority.**
+
+#### The edit population — DERIVED BY COMPLEMENT, because the handed one was again a list
+
+⚠️ **THE BRIEF NAMED TWO SITES, AND TWO SITES WAS NOT THE POPULATION.** Taking a handed list at
+face value is precisely the defect `/analyze`'s finding part 3 records, so the document was swept on
+axes the brief did not name — the sign-off's own vocabulary, *"remain owed"*, *"still owed"*, the
+bare `OWED` token, *"not measured here"*, `/analyze`, *"four controls"* and *"Appendix A"* — and
+every hit adjudicated as **LIVE body text** or **FROZEN Appendix record.** ⚠️ **No hit count is
+written here**; the recipe is the claim.
+
+**That sweep found a third live site the brief did not name:** `## Clarifications`' opening
+pointer, which said §5e's row and §8 item 1 *"are narrowed to the two that remain."* **After this
+revision neither of those two remains owed**, so the pointer was corrected in place, with the rule
+it violates stated beside it: **a pointer that restates a STATE is the thing that goes stale.**
+
+**Adjudicated and deliberately NOT edited** — because *"no edit needed"* is itself a claim:
+
+- **§0d's obligation-4 row.** It says this document **is** the `[const §X.1]` Gate A and that §5e
+  records the other three. It asserts no control's **status** and claims no convergence, so nothing
+  in this revision falsifies it. **LIVE and correct; no edit.**
+- **The Normative References row for `[const §X.6]`.** It points at §5e and §8 item 1 rather than
+  restating their contents — which is why it survives a change to both. **LIVE and correct; no
+  edit.**
+- **§5e's `[const §XVII.7]` row.** Still **owed**, unchanged by anything here. **LIVE and correct;
+  no edit** — and §5e's `[const §X.6]` row now points **at** it, so the closed control set cannot be
+  read as a clear-to-proceed signal.
+- **The status block's v0.7 lines and the `v0.5 → v0.6`, `v0.6 → v0.7`, `v0.8 → v0.9` and
+  `v0.9 → v0.10` Appendix sections**, including the one stating that the two controls stay owed.
+  ⚠️ **FROZEN HISTORICAL RECORDS — deliberately NOT rewritten**, under this document's standing
+  rule for changelog entries. Each was **true of its own revision**; editing them would rewrite
+  history to match the present, which is the opposite of what a convergence log is for. **The
+  falsification is recorded HERE, which is where the rule puts it.**
+- **The `OWED` occurrences in §5c's and §5d's disposition tables, and §8 item 13.** A different
+  subject entirely, swept only because the bare token was one of the complement axes. **Out of
+  scope; no edit.**
+
+#### Root cause — a THIRD shape, and no ordinal is minted or advanced
+
+The recurring global cause in this log is **a claim whose derivation stopped one hop short of the
+source.** The `v0.9 → v0.10` pass recorded a second shape: **a claim that was TRUE when written and
+was falsified by a later action of this same work.** ⚠️ **v0.11's is a THIRD, and it is the least
+flattering of the three: A CLAIM KNOWN TO BE FALSE, LEFT STANDING BY DECISION, WITH THE KNOWLEDGE
+RECORDED SOMEWHERE THE DOCUMENT'S READERS CANNOT SEE IT.**
+
+The three have three different defences, which is why collapsing them would lose something: the
+first is defeated by **deriving one hop further**; the second by **never publishing a result as the
+claim**; and this one by **an erratum pointer in the document itself the moment a claim is known
+false** — the batching decision is then still available, and costs nothing, because the reader is no
+longer misled while it is taken.
+
+⚠️ **NO ROOT-CAUSE NUMBER IS MINTED, AND THE RECURRING GLOBAL CAUSE'S ORDINAL DOES NOT ADVANCE** —
+this revision is not an instance of it. The section-local numbering used by earlier passes is
+section-local; inventing a global successor would assert a registry that does not exist. ⚠️ **And
+no ordinal-matching pattern is pasted in this section**, under the condition the `v0.9 → v0.10` pass
+recorded: **a grep recipe pasted as a literal into the corpus it greps becomes a member of its own
+result set.**
+
+#### Net effect — stated as change, not as prediction
+
+**±0 decisions** (D-1, D-2, D-2b, D-3, D-3b, D-4, D-5a/b/c all stand). **±0 test seams. ±0 error
+variants. ±0 pins. ±0 enumerators. ±0 populations** — the `[2i]` scope-claim population and the two
+outside-`[2i]` restatements are untouched, and **no numeral in any `[2i]` prescription is written or
+moved.** **0 source files changed.** `.specify/2i-capi.md`, `.specify/api-contract.md`,
+`.specify/2m-pybind.md`, `.specify/2c-codegen.md` and everything under `specs/090-capi-refusals/`
+are **NOT edited by this revision.**
+
+**What changed:** the **status block** gains a v0.11 entry and paragraph; **§0b** gains the
+feature-mode conversion, the design-authority statement and the measured precedent;
+**`## Clarifications`' pointer** is corrected; **§5e's `[const §X.6]` row** and **§8 item 1** are
+corrected — both halves discharged, the four modes spelled out separately, `[const §XVII.7]` named
+as the one outstanding obligation, and what `/analyze` found recorded in the register; **§7** gains
+a **note on** the declined residual; and **the Appendix gains this section.**
+
+⚠️ **Status stays `NOT converged by the loop's criterion`, and the Gate A label stays
+`gate-a-waived`.** **No review ran here, no finding counts are claimed for this revision, no
+convergence is claimed, and no label moves.**
+
+⚠️ **What v0.11 does NOT establish.** It builds nothing, runs no seam, and discharges no §8 row
+beyond item 1's two halves. **It does not repair the (c2.i) corpus recipe or the §5c/§5d seam** —
+the owner's decision to decline both stands, and the new note is evidence for the owner to weigh,
+not a reversal. **It does not repair the derived bundle's `/analyze` rows**, which are outside what
+this revision may edit and are disclosed above instead. **And it does not make Gate A converged**:
+the criterion is unchanged, no round returned it, and the waiver's two reasons still owe their
+rationales to both the verification record and the PR body.
