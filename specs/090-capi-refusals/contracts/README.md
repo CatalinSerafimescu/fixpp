@@ -32,7 +32,7 @@ to `[const §X.7]` before the first public release (a MINOR bump marked BREAKING
 amendment**); citing §11 for the procedure would be wrong.
 
 ⚠️ **Gate A RAN and did NOT converge.** It is `gate-a-waived` on two reasons. `/speckit-analyze` and
-the user's `/plan` sign-off are **OWED**. Nothing in this directory asserts a Gate A pass.
+the user's `/plan` sign-off — ⚠️ **the latter is now DISCHARGED (2026-09-20), pinned to `plan.md` at `d12d2270`; `/speckit-analyze` remains OWED.** This line said both were owed until the sign-off landed. Nothing in this directory asserts a Gate A pass.
 
 **Design authority**: `.specify/447-458-452-capi-refusals.md` **v0.10**. These files restate its
 decisions as contracts; they do not re-decide, re-derive or contradict anything in it.

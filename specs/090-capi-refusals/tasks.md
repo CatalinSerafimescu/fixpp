@@ -1,0 +1,399 @@
+# Tasks: Three C-ABI calls that must refuse — C-ABI 1.7, marked BREAKING
+
+**Input**: Design documents from `specs/090-capi-refusals/`
+**Prerequisites**: `plan.md`, `spec.md` (user stories + FR-001..FR-020 + SC-001..SC-014), `research.md`, `data-model.md`, `contracts/` (six files), `quickstart.md` (V1–V10)
+**Design authority**: `.specify/447-458-452-capi-refusals.md` **v0.10**. Nothing below re-decides, re-derives or contradicts it.
+
+---
+
+## ⚠️ Read this header block before executing any task
+
+**Branch**: `447-458-452-capi-refusals`, read from `git rev-parse --abbrev-ref HEAD`. The feature
+directory is `specs/090-capi-refusals/` and the two **differ deliberately**.
+`.specify/scripts/bash/check-prerequisites.sh` emits a `BRANCH` field derived from a **tracked pin,
+never from git** — fixpp#490, **mitigated, not fixed**. Never consume that field. T001 re-derives
+the disagreement rather than quoting a value from this page.
+
+**Gate status — do NOT record this bundle as having passed Gate A.** Gate A **RAN and did NOT
+converge**. The label is **`gate-a-waived`**, on **two** reasons: the C-4 scoped delta review's
+single **P1** (a quotation whose ellipsis cut the clause's own non-exhaustiveness hedge) and the
+**corpus finding** of 2026-09-20 (the amendment's derivation hardcoded its corpus to one file).
+`P1 == 0 AND P2 == 0` has never been returned.
+
+**Appendix A controls, as they stand when this file is written:**
+
+| control | state |
+|---|---|
+| Gate A (`[const §X.1]`) | RAN, did **not** converge — `gate-a-waived`, two reasons |
+| `/clarify` | discharged **in substance, by hand** — recorded as **adapted, not as run** |
+| `/analyze` | ⚠️ **OWED.** It is a cross-artifact check over `spec.md` / `plan.md` / `tasks.md` and becomes runnable only once this file exists — scheduled at T082 |
+| user `/plan` sign-off | ✅ **DISCHARGED 2026-09-20**, pinned to `plan.md` at commit `d12d2270`. Re-derive with `git diff d12d2270..HEAD -- specs/090-capi-refusals/plan.md`; anything beyond the Constitution-Check row that records the sign-off is **not covered** |
+| `[const §XVII.7]` local pre-PR build | ⚠️ **OWED**, and resource-gated — T004 surfaces the approval; every seam RED below except Story 1's depends on it |
+
+⚠️ **`spec.md`, `data-model.md` and `quickstart.md` still say the `/plan` sign-off is OWED.** The
+live state is `plan.md`'s Constitution Check row and this table. Flagged, not silently reconciled.
+
+**Tests are MANDATORY here, and the grounds are stated rather than assumed**: `[const §VII]`'s
+testing requirements and `[const §VII.3]`'s TDD rule; `[const §XVII.8]`, which makes
+`/speckit-verify` mandatory after `/speckit-implement` with **paired evidence** before any
+`gate-{a,b}-{done,waived}` label; `spec.md`'s **14 success criteria**, every one of which is a
+return code or a byte comparison; and `quickstart.md`'s **V1–V10**. Every test task below names the
+V-scenario and/or SC it discharges.
+
+⚠️ **This repository's deepest recurring defect is a test that cannot fail.** Every refusal task
+below carries its **control** — the arm proving the test can report the other outcome — and, where
+`quickstart.md` names one, its **wrong-reason green**. An arm without its control is not a witness.
+
+⚠️ **Two tracks, and folding them is the single most likely way to get this feature wrong.** The
+C-ABI track is governed by `[const §X.7]`'s BREAKING machinery; the `[C++ track]` (US4, and the
+`Session::open` half of US2) is governed by `[const §XVII.1]`, with `[const §X.7]` recorded as
+**NOT ENGAGED** — not a C-ABI symbol, no error-code slot, no version macro, absent from
+`tools/capi_freeze.sha256`'s manifest.
+
+⚠️ **`src/capi/message.cpp` DOES NOT EXIST.** `src/capi/message_write.cpp` carries D-1, D-2b **and**
+`fixpp_msg_clone`; the two setters are in `src/capi/config.cpp`.
+
+## Format: `[ID] [P?] [Story] Description`
+
+- **[P]**: different files, no incomplete dependency — genuinely parallelisable.
+- **[Story]**: `[US1]`…`[US4]`, used **only** in the user-story phases.
+- Every task names an exact file path.
+
+---
+
+## Phase 1: Setup (Shared Infrastructure)
+
+**Purpose**: resolve the identifiers and premises every later task consumes, and open the resource gate.
+
+- [ ] T001 [P] Re-derive the branch/feature-directory divergence rather than reading a value from this file: run `git rev-parse --abbrev-ref HEAD` and `bash .specify/scripts/bash/check-prerequisites.sh --json --paths-only`, confirm the emitted `BRANCH` field disagrees with git, and use the **git** value in every downstream step (PR head, worktree resolution, gate invocation). The mechanism is in `.specify/scripts/bash/common.sh` — `get_current_branch` never invokes git.
+- [ ] T002 [P] Capture the pre-edit SHA-256 of the three headers this feature will re-baseline — `include/fix/c_api/version.h`, `include/fix/c_api/message.h`, `include/fix/c_api/session.h` — with `sha256sum`, and confirm each equals its committed value in `tools/capi_freeze.sha256`. This baseline is what makes the later FAILING state of the gate **attributable to this feature's edits** rather than to a pre-existing drift. ⚠️ **Expect the collision at the START of implementation, not at the end.** `tools/capi_freeze.sha256` lists **all three** of those headers, and `[const §X.7]` obligation 2 edits **doc comments** in every one — `message.h` carries `remove_tag`'s and `clone`'s blocks, `session.h` the two setters', `version.h` the macro and its trailing comment. **A doc-comment edit is a byte edit**: `tools/check_capi_freeze.sh` runs `sha256sum -c` over whole files, with no tokenizer and no comment stripping, so nothing in it can tell a comment byte from a declaration byte. ⚠️ **From T008 onward the gate WILL fail, and that is the EXPECTED state, not a defect — do NOT re-baseline to silence it**; SC-012 requires that failing state to be *observed*, and a re-baseline applied before the edits is a green gate over unchanged hashes. The re-baseline is **T079**, last. Derive the manifest's population with `awk '{print $2}' tools/capi_freeze.sha256`, never from a number written in a document.
+- [ ] T003 [P] Re-measure `[const §X.7]`'s pre-first-release premise with the recipe in `specs/090-capi-refusals/contracts/version-and-freeze.md` §1 — `gh repo view --json nameWithOwner -q .nameWithOwner`, `gh release list --exclude-drafts`, and the **positive control** `gh release list --exclude-drafts --repo cli/cli` — because an empty listing and a broken invocation both print nothing.
+- [ ] T004 Surface an `AskUserQuestion` for the `[const §XVII.7]` local-build resource gate before running any build command from `specs/090-capi-refusals/quickstart.md` §1. Every seam RED below except Story 1's needs a cell written **and built**; until this is approved those REDs stay **registered as NOT MEASURED**, never claimed.
+- [ ] T005 [P] Confirm the change surface before editing: run `grep -rln "fixpp_msg_clone" src/ include/` and confirm `src/capi/message_write.cpp` carries clone, and that no `src/capi/message.cpp` exists. An earlier draft fabricated that path.
+
+---
+
+## Phase 2: Foundational (Blocking Prerequisites)
+
+**Purpose**: move the version contract. Every user story's declaration edits carry a `Since 1.7
+(BREAKING)` marking and cannot be authored before the macro moves.
+
+**⚠️ CRITICAL**: no user story work can begin until this phase is complete.
+
+⚠️ **The freeze COLLISION is expected from here on; the freeze RE-BASELINE is deliberately NOT here.**
+All three frozen headers — `include/fix/c_api/version.h`, `include/fix/c_api/message.h` and
+`include/fix/c_api/session.h` — gain bytes across Foundational, US1, US2 and US3, and the manifest
+hashes bytes, **comments included**. So `bash tools/check_capi_freeze.sh` **starts failing here and stays
+failing**, by design; T002 records the baseline that makes that attributable. **Re-baselining before the
+last header edit lands produces exactly the false evidence SC-012 names.** The re-baseline is **T079**, in
+Polish, after T008, T026, T027, T042 and T056 have all landed.
+
+- [ ] T006 Rename `CapiVersion.CApiVersionIsExactly_1_6_0` to `CapiVersion.CApiVersionIsExactly_1_7_0` and move its major/minor/patch expectations to 1/7/0 in `tests/capi/version_test.cpp`; observe it **RED at ctest time**. ⚠️ There is no `static_assert` in that file — a successful build proves nothing about these cells. (SC-010)
+- [ ] T007 Move `CapiVersion.CompositeMacroValue`'s assertion **against the composite literal** — not the one against the macro, which moves automatically — to the 1.7.0 composite in `tests/capi/version_test.cpp`; observe RED. ⚠️ **There are TWO version-literal cells in that file, not one**, and a sweep that fixes one and misses the other is the failure this task exists to prevent. The **condition** that survives a third appearing: *a cell whose ASSERTION or whose TEST NAME encodes the version literal* — the file's other cells compare against the macros. **Acceptance: BOTH cells assert 1.7.** Recipe: `grep -nE "TEST\(CapiVersion|uint16_t\{[0-9]+\}|_1_[0-9]_0" tests/capi/version_test.cpp`, then classify each hit as *literal-encoding* or *macro-comparing*. (SC-010)
+- [ ] T008 Change `#define FIXPP_C_ABI_VERSION_MINOR 6` to `7` in `include/fix/c_api/version.h` **and re-author its trailing comment** — today `/* 1.6: the Length+Data setters (fixpp#428) */` — to name 1.7 and fixpp#447 / fixpp#458 / fixpp#452. ⚠️ The trailing comment is **part of the pin** and is re-authored, not renumbered; ⚠️ only MINOR carries one — MAJOR and PATCH have none. Re-run T006/T007 to GREEN. (FR-014)
+- [ ] T009 Re-derive the version-pin sweep **per artefact**, over the Tier-1 and Tier-2 population in `specs/090-capi-refusals/contracts/version-and-freeze.md` §3, with `specs/` and `build/` declared excluded. ⚠️ **Never one `\b1\.6\b` regex** — it false-positives on reconnect schedules, variance percentages and tag pairs. (FR-017)
+- [ ] T010 [P] Correct the Tier-2 prose pin in `src/capi/version.cpp`'s header comment — it states the macros are `(1/5/0)` and was **already stale at 6**, which is direct in-tree evidence that prose pins are unmaintained — and the MINOR narrative clauses in `include/fix/c_api/version.h`. ⚠️ Do **not** treat the absence of a gate failure there as evidence the prose pins are current.
+- [ ] T011 [P] Re-grep `ci/expected-preset-conditional-tests.txt` and `ci/expected-eligible-tests.txt` for the cell name T006 renames; a renamed gtest can leave a stale entry that reds the CI script-pins check. Run this **before pushing**, not at the end.
+- [ ] T012 [P] Record the checked negatives the bump must **not** move, so each absence is a decision and not an omission: `src/capi/error.cpp`'s `introducing_minor()` and `tools/abi_history/error_codes_v1.txt` (nothing is minted); `tests/abi/golden/fixpp_capi_symbols.txt` (no symbol added, removed or re-signed); `bindings/python/fixpp.i` and `bindings/python/tests/wheel/test_import_surface.py` (the macro is re-exported and only its **name** is asserted); `tests/capi/capi_version_smoke.c` (compares against the macros, so it moves automatically); `tests/capi/error_live_test.cpp`'s hardcoded `consumer_minor` (a downgrade-mechanism fixture, **leave it**); and `CMakeLists.txt`'s project `VERSION` (a separate version space — no `SOVERSION` pins the C ABI).
+
+**Checkpoint**: the version contract has moved; declaration markings can now be authored.
+
+---
+
+## Phase 3: User Story 1 — A message builder cannot be silently corrupted from under the caller (Priority: P1) 🎯 MVP
+
+**Goal**: `fixpp_msg_remove_tag` refuses while any group builder is open and erases nothing, and
+every group/instance index dereference reachable from a C-ABI entry point becomes a **defined**
+refusal instead of an out-of-bounds read.
+
+**Independent Test**: run the two-arm probe recorded in fixpp#447 — the same build sequence with and
+without one `fixpp_msg_remove_tag` call — and compare the **committed payload bytes**.
+
+⚠️ **MVP does not mean shippable increment.** FR-018 and clarification C-5 bind all three refusals
+to **ONE PR** under `[const §X.7]` obligation 3; the priority ordering governs **implementation and
+test sequencing, not delivery**.
+
+⚠️ **A clean sanitizer run is NOT the instrument for this story.** The outbound accumulator carves
+from a per-message `std::pmr::monotonic_buffer_resource`, so an overrun lands **inside a live
+allocation**; ASan does not annotate a `std::pmr::vector`; UBSan's `bounds` covers fixed-size arrays
+only; and libstdc++/libc++ hardening is off in every preset. **The instrument is the committed byte
+string.**
+
+⚠️ **`src/capi/message_write.cpp` also carries US3's clone changes**, so no task touching it is `[P]`
+with any US3 task, and the tasks within this story that touch it run in sequence.
+
+### Tests for User Story 1 (write FIRST; each must be observed RED before its implementation)
+
+- [ ] T013 [US1] Seam 1a — the two-builder arrangement lifted verbatim from fixpp#447's measured probe — in `tests/capi/message_write_test.cpp`. Assert **all five**, not a subset: `fixpp_msg_remove_tag` returns **exactly** `FIXPP_ERR_INVALID_HANDLE`; the scalar is **still present** in the committed frame; **both builders are still usable** after the refused call; both `fixpp_msg_group_end` and `fixpp_msg_commit` succeed; and the **complete** committed byte string equals the control run's. ⚠️ The pre-fix RED is a **commit refusal with an empty payload** (`FIXPP_ERR_TYPE_MISMATCH`), **not** "the payload differs". ⚠️ **Wrong-reason green**: an arena layout in which the shifted index happens to land on a benign entry — defended by asserting the full byte string, never a spot check. ⚠️ Assertions 1 and 3 are what distinguish this fix from the rejected re-indexing option, which a payload-only assertion also satisfies. (V1 / FR-001 / SC-001)
+- [ ] T014 [US1] Seam 1b — one builder, the erased entry positioned so the shifted index lands **past the end** — in `tests/capi/message_write_test.cpp`. Assert the **full committed byte string** against the pre-`remove_tag` expectation. ⚠️ Its RED is **not observable as a crash**; a sanitizer could not have reported it. This arm's RED is **registered as NOT MEASURED** in the design authority — execute it under T004's approval or carry the registration forward verbatim, never claim it. (V1 second arrangement / FR-001)
+- [ ] T015 [US1] Seam 2 — mode (b): `remove_tag` is passed the **NoXXX count tag of the open group**, the tag on which a group `AccumulatorEntry` is matched — in `tests/capi/message_write_test.cpp`. Assert **exactly** `FIXPP_ERR_INVALID_HANDLE`, that the group entry is **unchanged** (its count, its instances and their fields all survive the refused call), and that `fixpp_msg_commit` still produces the pre-call frame. (V2 / FR-002)
+- [ ] T016 [US1] Seam 2b — the **positive baseline** — in `tests/capi/message_write_test.cpp`: with **no** builder open a present tag is still erased with `FIXPP_ERR_OK`, and an absent tag still returns `FIXPP_ERR_OK` (the published idempotence). `MessageWrite.RemoveTagIdempotent` and `CapiSetData.RefusesWhenOnlyOneHalfIsPresentAndWritesNothing` must stay green. ⚠️ **Without this arm, "refuse always" passes seams 1 and 2.** (V3 / FR-003 / SC-002)
+- [ ] T017 [US1] Seam 2c — drive `fixpp_entry_set_data` with an `fixpp_entry` whose `instance_index` is out of range for its resolved group, reaching the subscript in **the entry point's own body**, which no resolver covers — in `tests/capi/message_write_test.cpp`. Assert **exactly** `FIXPP_ERR_INVALID_HANDLE`, that **nothing is written**, and that the builder is **still usable**. ⚠️ The RED is **the absence of a defined refusal** — the call returns something other than that code while the committed payload is corrupt — so assert the **full committed byte string**. (V4 / FR-004 / SC-003)
+- [ ] T018 [US1] Seam 2c's **propagation arm** in `tests/capi/message_write_test.cpp`: with a resolver able to report failure, exercise a **nested** builder so that `builder_context`'s immediate dereference of a resolver result runs on the failing path. ⚠️ **A null dereference there is the NEW UB the bounds check would have introduced.** This arm's RED is **registered as NOT MEASURED** in the design authority. (V4's propagation arm / FR-004)
+- [ ] T019 [US1] Register any new cell or target added by T013–T018 in `tests/capi/CMakeLists.txt`.
+
+### Implementation for User Story 1
+
+- [ ] T020 [US1] Implement D-1 in `fixpp_msg_remove_tag` in `src/capi/message_write.cpp` as a third precondition — after the null check and `check_outbound_msg`, and **before** the `std::ranges::find_if` — keyed verbatim on the data model's EC-1: *"`fixpp_msg_remove_tag` called while the accumulator's `open_builders` is non-empty"* → **`FIXPP_ERR_INVALID_HANDLE` (4)**. ⚠️ Keyed on **the builder stack being non-empty**, NOT on the erased tag and NOT on the erased position: a position-keyed guard misses mode (b) when the group entry is last, a tag-keyed guard misses mode (a) entirely. On refusal the accumulator's `entries` is **unchanged** and every open builder stays usable. (FR-001, FR-002)
+- [ ] T021 [US1] Implement D-2b in `src/capi/message_write.cpp` so that the data model's EC-2 holds verbatim: *"a `group_field_index` or `instance_index` dereference reachable from a C-ABI entry point would be **out of range** for the container it subscripts"* → **`FIXPP_ERR_INVALID_HANDLE` (4)**, with **nothing written** and the builder **still usable**. ⚠️ The shape is left open **but bound**: it MUST discharge **all three reachability classes** — the resolver bodies; the direct subscript inside `fixpp_entry_set_data`'s own body, which no resolver covers; and the **propagation points** where a resolver result is immediately dereferenced (`builder_context`, `resolve_group`'s recursion, `resolve_instance`'s call to `resolve_group`). ⚠️ `resolve_group` and `resolve_instance` are `noexcept` and return raw pointers, so the refusal **cannot be a return value from them** without a signature change; and a null-returning resolver discharges the third class **only if** `builder_context` and the two internal uses are rewritten with it. (FR-004)
+- [ ] T022 [US1] Re-derive the reachability classification before and after T021 with the contract's own recipe — `grep -n "resolve_group\|resolve_instance\|instances\[\|entries\[\|fields\[" src/capi/message_write.cpp`, then classify every hit as *resolver body* / *direct subscript in a C-ABI entry point* / *immediate dereference of a resolver result* / *unrelated*. ⚠️ **Write no count**: successive revisions of the authority wrote "three", then measured four, and then established the count was never the question. ⚠️ Do **not** pull in `src/wire/body_builder.cpp`'s distinct sibling `resolve_group` / `resolve_instance` (same shape, append-only, no `remove_tag` analogue, **not in this population**), and do **not** conflate this with `src/capi/message_read.cpp`'s already-checked **read-path** surface, which returns `FIXPP_ERR_INDEX_OUT_OF_RANGE`.
+- [ ] T023 [US1] Write the `[const §IX.1]` **assessed** disposition at the D-2b refusal sites in `src/capi/message_write.cpp`: once D-1 lands no shipped path reaches an out-of-range index, so these lines land **uncovered by design**. `[const §IX.1]` permits three dispositions — tested, waived, escalated — and this is the **assessed** one, written at the site. ⚠️ Choosing it **before** the code exists is the point: an obligation named in advance is a disposition; discovered afterwards it is a Gate B finding.
+- [ ] T024 [US1] **Mutation control for D-1's predicate**, a two-state observation: replace `!open_builders.empty()` in `src/capi/message_write.cpp` with a **position test**, re-run, and require seam 2 to go **RED** while seam 1 stays **GREEN**; then revert. **A guard that passes seam 1 and fails seam 2 is the defect this control exists to catch.** (V2's mutation)
+- [ ] T025 [US1] **Mutation control for D-2b's mechanism**, a two-state observation: implement the bounds check in the **two resolver bodies only** in `src/capi/message_write.cpp`, re-run, and require seam 2c to stay **RED** while the resolver-path cells go **GREEN**; then restore the three-class shape. **A fix that passes seams 1 and 2 and the resolver cells but fails seam 2c is exactly the mechanism gap this control exists to catch.** (V4's mutation)
+- [ ] T026 [US1] Amend `fixpp_msg_remove_tag`'s doc block in `include/fix/c_api/message.h` with all four limbs: the **BREAKING** marking in fixpp#428's in-tree spelling (`-- (1.7, BREAKING) …` / `Since 1.7 (BREAKING), …` — ⚠️ **do not invent a second spelling**); an **error-code list**, which the declaration does not carry today at all; the new `FIXPP_ERR_INVALID_HANDLE` condition stated as *a group builder is open*; and the **two refused-but-safe classes** stated rather than implied — *absent tag with a builder open* (which the shipped block currently promises returns OK: *"Idempotent (absent returns OK)"*) and *a present tag positioned after every live root's group entry*. ⚠️ **Do NOT re-date fixpp#428's existing markings** — `include/fix/c_api/message.h` already carries several, in the spellings `-- (1.6, BREAKING)`, `Since 1.6 (BREAKING),` and `(1.6, BREAKING: …)`, and they **correctly date #428**; re-dating them would falsify history. **Recipe, not a count**: run `grep -nE "BREAKING|Since 1\.6" include/fix/c_api/message.h` and classify every hit as *#428's — leave alone* or *this feature's — author fresh at 1.7 in the same spelling*. (FR-015 limb 1, FR-016 input)
+- [ ] T027 [US1] Document the index-bounds refusal on every affected declaration in `include/fix/c_api/message.h` as an **assessed-unreachable defence-in-depth** `FIXPP_ERR_INVALID_HANDLE` return per `[const §IX.1]`. ⚠️ **NOT marked BREAKING** — the arm it replaces is undefined behaviour, not a documented success. ⚠️ **Counting call sites UNDER-COUNTS declarations**: the non-exported `static entry_set_bytes_impl` fans out to four exported setters, so re-derive the population with the recipe in `specs/090-capi-refusals/contracts/msg-index-bounds.md` §3 (`grep -n "resolve_group\|resolve_instance" src/capi/message_write.cpp`, with `check_builder\|check_entry` as a different-pattern control positive on the same corpus).
+- [ ] T028 [US1] Rewrite `MessageWrite.ZeroGlobalHeapSetCommitGuard` in `tests/capi/message_write_test.cpp`: it holds a builder open across a `remove_tag` and its comment asserts an absence D-1 removes — *"The group is the first top-level entry, so the `remove_tag(11)` below cannot shift its index (#447)"*. Rewrite the comment and re-scope the cell; do not leave it asserting a dodge the fix makes impossible.
+- [ ] T029 [US1] Re-scope the `remove_tag`-as-**setup** consumer in `tests/capi/length_data_setters_test.cpp`: a cell that calls `remove_tag` merely to arrange a fixture is still broken by the refusal if a builder happens to be open at that point. ⚠️ Scope the sweep to D-1's **true width** — **both** refused-but-safe classes, absent tag included — not to a narrower reading. (FR-018 / obligation 3)
+
+**Checkpoint**: US1's refusal and bounds surface are complete and independently testable.
+
+---
+
+## Phase 4: User Story 2 — Configured strings cannot inject fields into the wire (Priority: P1)
+
+**Goal**: the two session-config setters refuse injected bytes at the point the value is set (C-ABI),
+and `Session::open` applies the same floor to CompIDs, BeginString and each configured
+RefMsgType(372) before any frame can be emitted (`[C++ track]`).
+
+**Independent Test**: call `fixpp_session_config_set_comp_ids` with a value containing a literal SOH
+byte and assert the return code; then drive a session with the same value through the C++ surface
+and assert it never opens.
+
+⚠️ **This story touches `src/capi/config.cpp` and `src/session/session.cpp` — disjoint from US1's and
+US3's translation unit**, so the story as a whole runs in parallel with US1 and US3.
+
+⚠️ **The code does NOT identify the state.** `FIXPP_ERR_CAPI_CONFIG_INVALID` is already produced by
+the setters' own pre-existing null/empty guard, by a **dead** engine handle, and by
+`fixpp_session_open` called **after** `fixpp_engine_start`. A witness asserting only the code
+measures nothing.
+
+### Tests for User Story 2 (write FIRST; each must be observed RED before its implementation)
+
+- [ ] T030 [US2] Seam 5 at the C-ABI setters in `tests/capi/config_builders_test.cpp`, mirroring the shipped naming contract of `tests/session/test_fixt_credentials.cpp` — `…_ReturnsInvalidConfig_NoWireEmit`. ⚠️ **The suffix IS the requirement: assert the error AND assert no wire emission.** Cover the grid: **field** (`sender`, `target`, `begin_string`) × **byte class** (SOH `\x01`, `=`, another control byte below `0x20`). Assert **exactly** `FIXPP_ERR_CAPI_CONFIG_INVALID` (10) and that **nothing is stored** — the offending value does not reach the config and a previously-set value is not overwritten. (V8 / FR-011 / SC-006)
+- [ ] T031 [US2] Atomicity arm for `fixpp_session_config_set_comp_ids` in `tests/capi/config_builders_test.cpp`: both assignments run inside one `try` today, so **a bad `target` must not leave a new `sender` stored**. (V8 / FR-011)
+- [ ] T032 [US2] **The mandatory spurious-hit control** in `tests/capi/config_builders_test.cpp`: assert the code **from the call under test**, with a **live** handle, in a **pre-start** state where no confusable producer is live, and pair it with a value that differs from an accepted one **only** by the injected byte. Without this arm the cell is indistinguishable from the pre-existing null/empty guard, a dead handle, or a post-`fixpp_engine_start` `fixpp_session_open`. (V8's control)
+- [ ] T033 [US2] `[C++ track]` `Session::open` cells in `tests/session/test_fixt_credentials.cpp` for the data model's EC-7 verbatim — *"the same byte condition on `SessionConfig::sender_comp_id` / `::target_comp_id` / `::begin_string` / `supported_msg_types[].msg_type`, observed at `Session::open`"* → `core::error::invalid_session_config`. Assert the session **never emits a frame**. Cover **both roles**: the shipped role-symmetry precedent is `CredentialStoreRedaction.T007_OversizedCredential_OpenRejects_{Initiator,Acceptor}` in `tests/session/test_credential_store_redaction.cpp`, and CompIDs and BeginString are emitted by **both**. (V8 / FR-012 / SC-007)
+- [ ] T034 [US2] **Positive baselines that MUST stay green**, so the guard is not simply "refuse everything": `FixtCredentials.W6a_ConfiguredCreds_EmittedOnOutboundLogon` and `W6b_NoCreds_553and554Absent_EstablishmentUnaffected` in `tests/session/test_fixt_credentials.cpp`, and `CredentialStoreRedaction.T009_CredentialFreeLogon_StoredByteIdenticalToWire` in `tests/session/test_credential_store_redaction.cpp`. (V8's positive baselines / FR-011, FR-012)
+- [ ] T035 [US2] Seam 6 — the same refusal through the Python binding — in `bindings/python/tests/test_roundtrip.py`: pass a CompID containing **SOH (`\x01`), NOT NUL**, and assert it is rejected. **RED on the unfixed tree**: it currently returns OK. (V9 / SC-008)
+- [ ] T036 [US2] The same cell in `bindings/python/tests/wheel/test_roundtrip.py`. ⚠️ It lands in **both** trees because `[const §X.7]` obligation 3 requires **every** in-repository consumer updated in the same PR. (V9 / FR-018 / SC-008)
+- [ ] T037 [US2] **The control for seam 6, and the way this scenario fails silently**: the existing `test_config_str_rejects_embedded_nul` in `bindings/python/tests/test_roundtrip.py` and `bindings/python/tests/wheel/test_roundtrip.py` must **keep raising from the SWIG typemap** — the binding is **SWIG**, generated from `bindings/python/fixpp.i`, despite the design document being named `2m-pybind.md` — and its failure text must stay **distinguishable** from the new SOH cell's. ⚠️ **If the SOH cell and the NUL cell become indistinguishable in their failure text, the SOH cell is measuring marshalling again**, not the new refusal. (V9's control / SC-008)
+
+### Implementation for User Story 2
+
+- [ ] T038 [US2] Create D-5b's **one definition** of the policy floor as a new session-owned config-validation **leaf header** under `include/fixpp/session/`: a `[[nodiscard]] constexpr bool` over a `std::string_view`, depending on nothing but `<string_view>`. The rule, verbatim: **"A configured FIX field value MUST NOT contain any byte `< 0x20` (SOH `\x01` included) or `'='` (0x3D)."** ⚠️ **Name and document it as a POLICY FLOOR, not as the FIX grammar** — the scanner splits a field at the **first** `'='`, so `372=A=B` parses as one field whose value is `A=B`; a name such as `contains_forbidden_config_byte` states what is true and `is_valid_fix_field_value` does not. ⚠️ The charset is the **existing credential floor, unchanged** — widening it is a separate decision with a separate blast radius. ⚠️ The home is `session` on **OWNERSHIP**, not on layering: the argument that once pointed at `core` is **retracted as false against the clause it cited** — `[arch §2.3]`'s whitelist always permitted the `capi → session` edge, and `src/capi/config.cpp` already includes `fixpp/session/` headers today, so **no `[arch §2.3]` amendment is triggered and no task exists for one**. ⚠️ **Re-arguing this on layering grounds reinstates a retracted claim**: the ground is that the rule is a policy about what may appear in a **configured FIX field value**, whose authority is `SessionConfig`, and `core` cannot own a rule it cannot justify. ⚠️ **A NEW header is created — no existing one satisfies the contract.** Verify with the condition rather than a list: loop `include/fixpp/session/*.hpp`, count each one's `#include <fixpp/` and `#include "` lines, and read the includes of every header with zero; none of them is a config-validation header and none pulls `<string_view>`. ⚠️ **Record the placement fork rather than deciding it silently**: `include/fixpp/session/session_types.hpp` is the nearest precedent and a candidate home (it already holds `supported_msg_type::msg_type`, one of the four declarations gaining the floor), but co-locating there **costs the contract's "nothing but `<string_view>`" property** by adding a second std include to a header whose single-include discipline is deliberate and documented; `include/fixpp/session/session_config.hpp` is **disqualified** — it is asio/transport-heavy and `src/capi/config.cpp` would inherit that. State both costs and record the choice. (FR-013)
+- [ ] T039 [US2] **REPLACE** — not join — `Session::open`'s function-local `is_invalid_cred_byte` lambda in `src/session/session.cpp` with a call to T038's predicate, re-pointing **both** of its call sites. ⚠️ **A lambda has no linkage** — nothing outside that body can call it, and `src/capi/config.cpp` must validate a config **before any `Session` exists**. ⚠️ **Adding the predicate while leaving the lambda in place ships TWO definitions of one rule, and they will drift SILENTLY, because each would pass its own tests.** ⚠️ **The acceptance condition is *`is_invalid_cred_byte` no longer exists and both former call sites call the predicate*, NOT *the predicate was added*.** Recipe: `grep -rn "is_invalid_cred_byte" src/ include/` must return nothing, against a control pattern that is positive on the same corpus. (FR-013)
+- [ ] T040 [US2] Extend the guard in `src/session/session.cpp`'s `Session::open` to apply the floor to `sender_comp_id`, `target_comp_id`, `begin_string` and **each** configured `supported_msg_types[].msg_type`, before any message is emitted, failing with `core::error::invalid_session_config`. (FR-012)
+- [ ] T041 [US2] Add the byte floor as **check 3** — after the existing `cfg != nullptr` null-handle check and the existing null/empty argument guard — to `fixpp_session_config_set_comp_ids` and `fixpp_session_config_set_begin_string` in `src/capi/config.cpp`, per the data model's EC-6 verbatim: *"a configured CompID / BeginString string containing a byte `< 0x20` or `'='`"* → **`FIXPP_ERR_CAPI_CONFIG_INVALID` (10)**. ⚠️ The refusal is keyed on **byte content** — not on lifecycle, not on the config's prior state, not on which fields are already set. ⚠️ The code is chosen because **every sibling `fixpp_session_config_set_*` in that file already returns it**, including their own null and empty refusals. (FR-011)
+- [ ] T042 [US2] Amend both setter doc blocks in `include/fix/c_api/session.h` with the **BREAKING** marking in fixpp#428's in-tree spelling and the new refusal condition and code. ⚠️ Both signatures, their export macro and their reentrancy class (`single-thread` per handle) are unchanged; **the delta is the byte floor alone**. (FR-015 limb 1)
+- [ ] T043 [US2] Document the floor as a **stated precondition** on `SessionConfig::sender_comp_id`, `::target_comp_id` and `::begin_string` in `include/fixpp/session/session_config.hpp`, and on `Session::open()`'s documented failure conditions in `include/fixpp/session/session.hpp` under `error::invalid_session_config`.
+- [ ] T044 [US2] Document the same floor on `supported_msg_type::msg_type` in `include/fixpp/session/session_types.hpp` — today it carries the bare comment `// RefMsgType(372)`. ⚠️ 372 has **no C-ABI setter**, so it rides the `[C++ track]` only and touches neither the version bump nor the freeze.
+- [ ] T045 [US2] Re-derive the RefMsgType(372) scope split rather than reading it from a list: `grep -n "append_raw(372" src/session/admin_messages.cpp`, then follow each hit's enclosing builder's parameter back to its call site in `src/session/session.cpp`. The `build_logon` site inside the NoMsgTypes(384) group is **in scope** (config-fed, verbatim, unvalidated); `build_reject` and `build_business_message_reject` take `ref_msg_type` from an **inbound** frame and are a **checked negative** on the condition *the value at those sites is produced by a scanner that terminates a non-Data field at SOH*. ⚠️ **A new 372 site fed by config would show up as a builder whose argument is a `cfg_.` member.** ⚠️ What a **counterparty** parser does with a surviving `'='` is **not measured and not claimed**.
+- [ ] T046 [US2] Record the two checked negatives this story must **not** touch, because "no edit needed" is itself a claim: `error::invalid_session_config`'s `translate()` arm in `src/capi/error.cpp` is **NOT re-pointed** — it is grouped with `error::clock_not_set` (`case error::invalid_session_config: case error::clock_not_set: return FIXPP_ERR_THREAD_CONFIG;`), so re-pointing it would silently move an unrelated error; and `src/session/file_store_factory.cpp`'s comp-id validator is **not unified** with T038's rule — it checks a different thing (path separators, a NUL byte, a filename length bound) for a different reason, and SOH and `=` pass it cleanly.
+
+**Checkpoint**: US1 and US2 both work independently.
+
+---
+
+## Phase 5: User Story 3 — A clone is either equivalent or an error, never a silent downgrade (Priority: P2)
+
+**Goal**: `fixpp_msg_clone` returns the caller-visible translation of the wire failure it discards
+today, instead of a dictionary-free clone with `FIXPP_ERR_OK`; and its exception boundary becomes a
+**nested** pair inside clone's own body.
+
+**Independent Test**: build a source message whose dict-backed re-parse fails via the raised-cap
+route, clone it, and assert the call returns non-OK and produces no handle.
+
+⚠️ **This story edits `src/capi/message_write.cpp`, the same translation unit as US1** — no task
+here is `[P]` with any US1 task that touches that file.
+
+### Tests for User Story 3 (write FIRST; each must be observed RED before its implementation)
+
+- [ ] T047 [US3] Seam 3 via the **raised-cap route** in `tests/capi/message_write_test.cpp`. ⭐ Prefer it over allocator injection: it is **allocator-free and sanitizer-safe**, whereas the existing clone-only technique is a TU-local global `operator new` override in `tests/capi/dict066_clone_membership_copy_oom_test.cpp`, gated on a witness macro and **disabled under ASan/TSan/MSan** — it produces no evidence in three lanes of the matrix. Mechanism: clone calls the **two-argument** `Parser::parse(frame, mr)`, the default-cap overload; parse the **source** with the **three-argument** overload at a **raised cap**, over a frame with more entries than the default cap admits, so the clone's re-parse fails **on frame shape alone**. Assert **exactly** `FIXPP_ERR_WIRE_LIMIT_EXCEEDED` and that `*clone_out` is `NULL`. **RED on the unfixed tree**: `FIXPP_ERR_OK` with a silently dict-free clone. (V5 / FR-005 / SC-004)
+- [ ] T048 [US3] **The spurious-hit control for seam 3** in `tests/capi/message_write_test.cpp`: clone the **same oversized source** from a **dict-free** handle — it **must still return `FIXPP_ERR_OK`**, because no dict-backed attempt is made and nothing can fail. ⚠️ **Without this arm, "refuse whenever the source is big" passes.** ⚠️ Assert the **exact** code throughout, never `!= FIXPP_ERR_OK` — a null handle yields `FIXPP_ERR_NULL_HANDLE` and a dead handle `FIXPP_ERR_INVALID_HANDLE`. (V5's control)
+- [ ] T049 [US3] Cells for the other two codes of the fan in `tests/capi/message_write_test.cpp` — `FIXPP_ERR_WIRE_INVALID_FRAME` for a malformed-field failure and `FIXPP_ERR_UNKNOWN` for the out-of-memory route. ⚠️ **Derive each from `src/capi/error.cpp`'s `translate()`** — which is already **total** over `fixpp::core::error` with `-Wswitch` as the enforcement and `tests/capi/expected_error_map.csv` as the audited oracle — rather than trusting any table. ⚠️ The OOM route surfacing as `FIXPP_ERR_UNKNOWN` is **documented v1.0 behaviour (L-049-2)**, referenced in the ledger, not presented as new. (FR-006, FR-007 / SC-005)
+- [ ] T050 [US3] Seam 3b **arm A** — a **REGRESSION arm, not a new witness**: keep `CloneMembershipCopyOom.TableViewCopyOomYieldsCapiConfigInvalid` in `tests/capi/dict066_clone_membership_copy_oom_test.cpp` **green under the narrowed `catch`**, asserting **exactly** `FIXPP_ERR_CAPI_CONFIG_INVALID` (10) and `*clone_out` `NULL`. This is EC-4 — *"`std::bad_alloc` during clone construction"*, **preserved, narrowed**. (V6 arm A / FR-008)
+- [ ] T051 [US3] Seam 3b **arm B** — a **non-allocation exception inside the same window ABORTS** — as an in-process abort-trap cell landing with the clone suite in `tests/capi/dict066_clone_membership_copy_oom_test.cpp`, in the death-test shape `tests/capi/thunk_split_test.cpp`'s **steady** arm already uses. The abort must originate from **clone's own outer `catch (...)`**. ⚠️ **Arm B needs a DIFFERENT injection seam from arm A and this bundle names none**: arm A's inherited injection throws `std::bad_alloc` by construction, and `Parser::parse` is **not** a candidate and never was — both overloads are declared `noexcept`, so a throw there calls `std::terminate` and can never reach either handler. **Whether any injectable non-`bad_alloc` seam exists is undecided and the set may be empty**, registered as NOT MEASURED. ⚠️ **Both arms or neither**: arm A alone passes against the shipped blanket catch, the narrowed catch and every intermediate; arm B alone passes against "abort everything", which reds arm A's shipped pin. **The two arms name the COUNT, not a direction.** ⚠️ `tests/capi/thunk_split_test.cpp` covers `fixpp_engine_create` and `fixpp_session_send` and **does not mention clone** — under this design that silence is **correct, not a gap**; do not add a clone arm there. (V6 arm B / FR-008)
+- [ ] T052 [US3] **The expected discharge for arm B when no injection seam exists** — a mutation, in `src/capi/message_write.cpp`: delete the **inner** `catch (std::bad_alloc const&)` handler and assert arm A goes **from return to abort**; then restore. ⚠️ **This mutation only works once the OUTER `catch (...)` exists** — against a flat narrowing it produces an **escape**, not an abort, and would report an outcome it cannot observe. It is **the cheapest single signal** that the boundary is actually in place. (V6's mutation)
+- [ ] T053 [US3] **The polarity control — widen the INNER handler, not the outer** — in `src/capi/message_write.cpp`: restore the single blanket `catch (...)` (i.e. widen `catch (std::bad_alloc const&)` back to `catch (...)`), re-run, and require arm B's `SIGABRT` to **disappear and become a `FIXPP_ERR_CAPI_CONFIG_INVALID` return**; then revert. ⚠️ **Widening the OUTER catch changes nothing** — it is already `catch (...)`. (V6's control)
+
+### Implementation for User Story 3
+
+- [ ] T054 [US3] Implement D-3 in `fixpp_msg_clone` in `src/capi/message_write.cpp`: stop discarding `parsed.error()` at the dict-backed arm and return `translate(parsed.error())` with **no clone handle**, per the data model's EC-3 — *"`fixpp_msg_clone` on a dict-backed source whose re-parse failed — the code is `translate()`'s image of the `core::error` that failure produced"*. On refusal `*clone_out` is **`NULL`** and the **source handle is unchanged and still usable**. ⚠️ **Nothing is minted**: `include/fix/c_api/error.h`, `src/capi/error.cpp`'s `introducing_minor()` and `tools/abi_history/error_codes_v1.txt` are all untouched. ⚠️ `FIXPP_ERR_DICT_OOM` is **rejected** as the OOM code — its name scopes it to dictionary load/reify. (FR-005, FR-006, FR-007)
+- [ ] T055 [US3] Implement D-3b's **nested** exception boundary inside clone's own body in `src/capi/message_write.cpp`: an **OUTER** `catch (...)` that writes a fatal log to `stderr` and then calls `std::abort()`, matching the shipped idiom `src/capi/session.cpp` already carries at `fixpp_session_send` and `fixpp_session_acceptor_bound_endpoint`; and an **INNER** `catch (std::bad_alloc const&)` around the construction returning `FIXPP_ERR_CAPI_CONFIG_INVALID`, preserving the shipped pin. Delete the `// Construction-time thunk: catch→translate.` comment — it records a classification the C-ABI owner document does not make. ⚠️ **A FLAT narrowing would let a `std::logic_error` or a foreign exception leave an `extern "C"` function** — the outer catch is what makes the abort outcome exist at all. ⚠️ **Clone STAYS a steady-state symbol**: `[2i §5.2]`'s construction-time whitelist is **NOT amended** and `fixpp_msg_clone` is **NOT reclassified** — an earlier reclassification proposal is withdrawn. ⚠️ **There is no shared construct to delegate to** — re-derive with `grep -rn "guarded_call" src/ include/ tests/ bench/` against a different-pattern control positive on the same corpus; the absence is fixpp#487 and is out of this feature's scope for every symbol other than clone. (FR-008)
+- [ ] T056 [US3] Amend `fixpp_msg_clone`'s doc block in `include/fix/c_api/message.h` with the **BREAKING** marking on **two limbs**, in fixpp#428's spelling: the failed-dict-backed-re-parse refusal naming the three already-published codes, and the **abort limb** — ⚠️ stated with **its trigger set declared NOT ENUMERATED**, because whether such an exception can be produced on that path at all is **undecided**. A limb declared unreachable on the strength of an exclusion comment would be a classification nothing enforces. (FR-015 limb 1)
+- [ ] T057 [US3] Register any new clone cell or target added by T047–T053 in `tests/capi/CMakeLists.txt`.
+
+**Checkpoint**: all three C-ABI refusals are complete.
+
+---
+
+## Phase 6: User Story 4 — A C++ caller receives an error instead of a handle that will disappoint it (Priority: P3) — `[C++ track]`
+
+**Goal**: the dictionary reify factory materialises **eagerly** and refuses through its **existing**
+error channel on **exactly one** condition — a failed dict-backed re-parse — without moving any of
+the three retained behaviours.
+
+**Independent Test**: call the reify factory with a dict-backed source whose re-parse fails and
+assert an error is returned; then re-run the shipped cells that pin the retained behaviours and
+assert they are unchanged.
+
+⚠️ **`[const §X.7]` is recorded here as NOT ENGAGED.** This is public C++ surface governed by
+`[const §XVII.1]`: no C-ABI symbol, no error-code slot, no version macro, and nothing in
+`tools/capi_freeze.sha256`'s manifest. Precedent: `.specify/456-table-view-seal.md`.
+
+⚠️ **This story touches `include/fixpp/dict/reify.hpp` and `src/dictionary/reify.cpp`** — disjoint
+from every other story's files, so the whole story runs in parallel with US1, US2 and US3.
+
+### Tests for User Story 4 (write FIRST; each must be observed RED before its implementation)
+
+- [ ] T058 [US4] Arm (iii) — **the only new refusal this half adds, anywhere** — in `tests/dictionary/reify_dispatch_test.cpp`: reach `fixpp::dict::detail::owning_message_handle_from_frame` directly, the same entry point the existing cells use, with `fixpp::test_support::failing_pmr_resource` from `tests/support/failing_pmr_resource.hpp`, calibrated to fail the **dict-backed parse** rather than the `bytes_` deep copy. Assert the factory returns `unexpected`; that the error is **the wire error the failed parse produced** — per EC-8 verbatim, *"the wire error the failed parse produced, through the factory's existing `core::expected_t` channel"* — **not** the pre-existing deep-copy sentinel and **not** a generic one; and that **no handle is constructed**. (V7 arm (iii) / FR-009 / SC-009)
+- [ ] T059 [US4] Arms (i-a) and (ii) in `tests/dictionary/reify_dispatch_test.cpp`: a **dict-free** source with a healthy allocator **succeeds**, its build status is ok and it is not dict-backed; a **dict-backed** source that parses cleanly **succeeds** with a dict-backed view. ⚠️ **Without (i-a), (i-b) and (iv), "refuse whenever anything goes wrong" would pass** — and would red every shipped dict-free reify in the suite. (V7 arms (i-a), (ii))
+- [ ] T060 [P] [US4] **KEEP GREEN, DO NOT WRITE** — arm (i-b): `ReifyErrorContract.ViewRebuildOomDegradesNotTerminate` in `tests/dictionary/reify_dispatch_test.cpp` is **shipped and pinned**. A **dict-free** source with a **failing** allocator still **succeeds**: a live handle, a build status reporting `out_of_memory`, and the field reading absent. ⚠️ **This is exactly the arm that distinguishes D-4 from the rejected refuse-everything option**, which would red it. The obligation is to keep it green, not to write it. (V7 arm (i-b) / FR-010 / SC-009)
+- [ ] T061 [P] [US4] **KEEP GREEN, DO NOT WRITE** — arm (iv): a span that **frames to nothing**, including a zero-byte span, still yields a live handle over a default-constructed empty view, because `Framer::feed` on a zero-byte span returns success with an empty span. Shipped across `tests/dictionary/reify_dispatch_test.cpp`, `tests/codegen/vlatest_dispatch_exclusion_test.cpp` and `tests/integration/fixt_cross_vocabulary.cpp`. ⚠️ A refusal on this arm was **proposed and withdrawn**; re-introducing it reds those cells. (V7 arm (iv) / FR-010 / SC-009)
+- [ ] T062 [US4] **The spurious-hit control** in `tests/dictionary/reify_dispatch_test.cpp`: a failing allocator can **also** fail the `bytes_` deep copy, which returns the **pre-existing** sentinel through an arm that already worked. Add a control calibrated to fail the **deep copy** that must still yield that pre-existing sentinel. ⚠️ **Without it, this seam measures the arm that was never broken.** (V7's control)
+- [ ] T063 [US4] **Calibration obligation** for `tests/dictionary/reify_dispatch_test.cpp`: **derive** the failing-allocator ordinal by instrumenting the candidate build — **do not copy the existing constant**. Eager materialisation moves *where* the allocations happen without changing the *sequence*, so the ordinal is **expected** to hold — ⚠️ but **a structural expectation is not a measurement**. ⚠️ **If the ordinal moved, RECALIBRATE the cell; NEVER rewrite it to assert a refusal** — that is the rejected option, not D-4. Registered as NOT MEASURED in the design authority. (V7's calibration obligation / FR-010)
+
+### Implementation for User Story 4
+
+- [ ] T064 [US4] Implement D-4 in `src/dictionary/reify.cpp`: the out-of-line factory materialises **eagerly** and refuses through its **existing** `core::expected_t` channel on **exactly one** condition — a failed **dict-backed** re-parse — propagating the same growth through `reify()` and the generated dispatch. ⚠️ **NOT on a failed or empty frame.** ⚠️ **No new public method is added**: an earlier three-state status accessor proposal is **withdrawn**, and a witness asserting one would pass against a design that does not exist. ⚠️ `[const §VIII.5]` is **not engaged**, on the **narrow** ground that the reify entry point has **no in-window caller today** — the first change that adds one must re-run that assessment. (FR-009)
+- [ ] T065 [US4] Update the declarations' documented contracts in `include/fixpp/dict/reify.hpp`: `fixpp::dict::detail::owning_message_handle_from_frame`'s documented failure set grows by **one** class; `fixpp::dict::owning_message_handle::view()` moves from *lazily re-framed* to *a pre-populated cache* — ⚠️ **NOT to "a cache the factory validated"**, because the factory seats an empty view when the span frames to nothing, so the observable on that arm is unchanged; and `fixpp::dict::reify()` carries the same growth. ⚠️ **Signatures unchanged** — `[[nodiscard]]`, `core::expected_t`, `noexcept` and `[[clang::lifetimebound]]` all stay as published. (FR-009, FR-010)
+- [ ] T066 [US4] Re-run the shipped cells this change must **not** move and confirm they are **green AND unedited** (SC-009) — in `tests/dictionary/`, `tests/codegen/`, `tests/integration/` and `tests/wire/`. ⚠️ **Re-derive them from the entry point's call sites rather than from any list** (FR-010). ⚠️ **B-458-2 declares NO test rewrite** — a task that rewrites one of these is a scope breach, not a fix.
+
+**Checkpoint**: all four user stories are independently functional.
+
+---
+
+## Phase 7: Polish & Cross-Cutting Concerns
+
+### The ledger delta (`[const §X.7]` obligation 2, limb 3)
+
+- [ ] T067 [P] Add behaviour row **B-447-1** to the **live** `spec/behaviors-and-limitations.md`: `fixpp_msg_remove_tag` refuses with `FIXPP_ERR_INVALID_HANDLE` while any group builder is open and erases nothing. ⚠️ It **MUST state the guard's TRUE WIDTH** — both failure modes, the one-line migration (*move the `remove_tag` before the `group_begin` or after the matching `group_end`*), **and the two refused-but-safe classes**. (FR-016)
+- [ ] T068 Add behaviour row **B-458-1** to `spec/behaviors-and-limitations.md`: `fixpp_msg_clone` refuses a failed dict-backed re-parse, naming the three already-published codes and **referencing L-049-2** for the OOM route surfacing as `FIXPP_ERR_UNKNOWN` — ⚠️ **reference, not restate**. ⚠️ It **also declares the abort limb** and states plainly that **its trigger set is not enumerated**. (FR-016)
+- [ ] T069 Add behaviour row **B-458-2** to `spec/behaviors-and-limitations.md` for the `[C++ track]` half: the reify factory materialises eagerly and returns `unexpected` on the **one** new failure class, stating **exactly what is NOT covered** — the dict-free degrade and the frames-to-nothing arm — and **declaring no test rewrite**. ⚠️ A **separate row** from B-458-1 because the two halves ride **different tracks**, not because they behave differently. (FR-016)
+- [ ] T070 Add behaviour row **B-452-1** to `spec/behaviors-and-limitations.md`: the two setters and `Session::open` refuse any byte below `0x20` or `'='` in CompIDs, BeginString and SupportedMsgTypes' RefMsgType. (FR-016)
+- [ ] T071 Confirm the delta in `spec/behaviors-and-limitations.md` carries **four behaviour rows and NO limitation row**, and that `L-452-1` is **DELETED — not narrowed, not hedged, not re-worded**. ⚠️ **A false claim replaced by a narrower claim reproduces the defect; only deletion closes it.** ⚠️ Read the **live** file; resolved rows live in `spec/behaviors-and-limitations-closed.md` and a grep across the pair reports resolved limitations as open. Record the two out-of-scope residuals (the probe-cap degradation and RefMsgType(372) at the two inbound-fed reject builders) — **they are limitations if they are written down and defects found at Gate B if they are not**. (FR-016)
+- [ ] T072 Run the B&L functional-delta gate that `/gate-b` pre-flight runs: `.claude/scripts/check_bl_delta.py gate --feature 090-capi-refusals`. ⚠️ **It lives in the PARENT repository, not in this submodule's `tools/`** — its authority is `.specify/close-out.md` row 2, and the design authority names no B&L gate at all. ⚠️ **Its green proves a B&L surface MOVED, not that it moved for this feature** — that judgement is Gate B's.
+
+### The design-corpus amendment — TWO POPULATIONS, NEVER SUMMED
+
+- [ ] T073 Amend the scope claims in `.specify/2i-capi.md` by the **CONDITION**, re-deriving the population rather than reading a list: *every passage that **BINDS** `FIXPP_ERR_CAPI_CONFIG_INVALID` to a **producer set** is amended; a passage that merely **mentions** it in a count, a changelog or a hedged list is **not***. `spec.md` FR-019 records the population as **eight**; ⚠️ **the figure has been wrong more than once, in both directions** — *three*, then *eight*, each falsified by the next pass — **so re-derive by the criterion and state each amendment as a condition, not as an enumeration**. The amendment is **prose-only**: it reds no pin, mints nothing and touches no source. ⚠️ Leaving any subset live means the owner document **still contradicts itself after a PR that claimed to fix exactly that**. (FR-019 / SC-014)
+- [ ] T074 Delete the *"CI grep enforces"* assertion in `.specify/2i-capi.md` §5.2, **in the same paragraph** as T073's amendment — measured against **zero** references to the construct anywhere under the CI, tooling and build directories, with a **different-pattern control positive on the same corpus** so that zero is a measurement. ⚠️ **Deleting the assertion that drift is caught is NOT closing the gap** — whether the constructs get implemented remains **fixpp#487, which stays OPEN**. (FR-019 / C-2)
+- [ ] T075 [P] Amend the **first derived restatement outside** `[2i]` — the code-scoping parenthetical in `.specify/api-contract.md` §7.5 — on the **separate ground** that it restates `[2i]`'s claim **while naming `[2i]` as its source**, and that file's own authority clause says it *"does not amend its sources, and on any conflict the source wins"*. ⚠️ **This is a SEPARATE POPULATION with a SEPARATE GROUND; it is NEVER summed with T073's, and NO TOTAL IS WRITTEN ANYWHERE** (OD-1). ⚠️ Leave §11's breaking-change **definition** untouched — it is cited in that capacity and needs no edit. (FR-020 / SC-014)
+- [ ] T076 [P] Amend the **second derived restatement** — the *"Construction failure modes"* limb in `.specify/2m-pybind.md` — on the same separate ground, **and in the same edit replace its positional citation with a content-keyed one**: the row that ordinal names is not the row a reader resolving it lands on, and ⚠️ **a positional index is a RESULT, and nothing ever re-runs it**. ⚠️ The file's other disposition is **not withdrawn**: 2m designs a **deferred** `Message.clone()` that the shipped binding omits, the two agree, and fixpp#458 stays invisible to Python — **no edit is owed on that account**. (FR-020 / SC-014)
+
+### The freeze, the pins and the negatives
+
+- [ ] T077 Re-derive the full consumer inventory for `[const §X.7]` obligation 3 with the authority's own command over the four changed symbols — `grep -rln "<symbol>" . --exclude-dir=.git --exclude-dir=build --exclude-dir=.codegraph | grep -v '^./src/\|^./include/'` — and give **every returned path exactly one disposition** (*direct call · ABI golden data · build registration · Python exposure · benchmark · comment-only · live documentation · historical bundle*). ⚠️ **The condition, not a list**: *anything in this repository that calls one of the four changed symbols, or that pins a version value the bump moves.* ⚠️ Two shapes need care — a consumer that uses a refused call as **setup** rather than as the behaviour under test (scoped to D-1's true width), and the Python binding, which needs the refusal witness **and** its distinguishability control. ⚠️ `examples/` **does not exist in this repository**; record that as a checked negative rather than leaving the obligation's word unaccounted for. (FR-018)
+- [ ] T078 [P] Verify SC-011's three unchanged artefacts — **measurable proof that FR-007 held and that this PR does not collide with the error-taxonomy work**: `include/fix/c_api/error.h`'s enumeration, `tools/abi_history/error_codes_v1.txt`, and `tests/abi/golden/fixpp_capi_symbols.txt`. ⚠️ **Check, do not claim**: re-run the `nm --defined-only --extern-only` diff step that `.github/workflows/abi-golden.yml` performs. ⚠️ **The error-code layout has a THIRD copy, hardcoded inside `tools/check_capi_occupancy.sh` itself** — beyond the header and `.specify/2i-capi.md`. Because **this feature mints nothing**, that copy does not drift, and this task records the negative so it is not discovered at Gate B. ⚠️ **Do NOT write any task assuming that gate would catch a layout drift** — it reads far less than it claims, which is fixpp#491, **open and out of scope**. (SC-011)
+- [ ] T079 Re-baseline `tools/capi_freeze.sha256` **after every header edit has landed**, and **observe the gate in BOTH states** (SC-012): run `bash tools/check_capi_freeze.sh` and record it **FAILING**, then re-baseline the three changed entries and record it **PASSING**, keeping both exit codes. ⚠️ **A green result alone is consistent with a re-baseline applied BEFORE the edits**, which is a green gate over unchanged hashes and is not evidence. ⚠️ **Three headers re-baseline for TWO different reasons**: `include/fix/c_api/version.h` because **its macro moves**, and `include/fix/c_api/message.h` and `include/fix/c_api/session.h` because **obligation 2 edits their comment bytes** — the manifest is byte-level and hashes comments. ⚠️ **Writing "the bump re-baselines three headers" is wrong.** Compare against T002's captured baseline. ⚠️ **The manifest's SET check covers more than the subdirectory**: re-derive it with the gate's **own** command, `find include/fix/c_api.h include/fix/c_api -type f -name '*.h' | sort`, which includes the **top-level umbrella header `include/fix/c_api.h`**. A re-baseline scoped to the subdirectory alone silently misses it. ⚠️ **Check 2 is an EXACT-SET comparison, not a subset one**, so an added or removed header is caught independently of the digests — *"I only added a file"* does not slip through. Verify with `bash tools/check_capi_freeze.sh`, which **prints its own header count beside its verdict — read it there, never from a number written in a document**. (FR-017 / SC-012)
+
+### Catalogue, controls and gates
+
+- [ ] T080 [P] Update the `Tests` column of the `CA-009` row in `spec/feature-catalogue.md` with this feature's new seams. ⚠️ That row's **Title enumerates symbols and its Status tracks delivery, and neither moves** — D-1 and D-3 change behaviour, not the published surface's existence. Re-derive that no other C-ABI row names a symbol this PR touches.
+- [ ] T081 [P] Correct the **live claim D-4 falsifies** in `spec/coverage-index.md`: the reify-mechanism block describes the handle's view cache as **lazy** and the `view()` re-frame as **lazy**. D-4 makes the factory materialise **EAGERLY**. ⚠️ This is a live claim, not a coverage number that merely narrows.
+- [ ] T082 Run `/speckit-analyze` over `spec.md`, `plan.md` and this file in `specs/090-capi-refusals/`. ⚠️ **It is OWED, NOT discharged** — a plan entry claimed otherwise until 2026-09-20 and that claim was **FALSE; do not restate it**. It could not run before this file existed. ⚠️ Expect it to flag the `/plan` sign-off divergence this file's header block records between `plan.md` and `spec.md` / `data-model.md` / `quickstart.md`.
+- [ ] T083 Discharge `[const §XVII.7]`'s local pre-PR build under T004's approval and record the one-line confirmation `local build: green on linux-clang-debug @ <git-sha>` in `.specify/decisions/090-capi-refusals-verify.md`. ⚠️ Every seam RED registered NOT MEASURED above becomes executable here — execute them, or carry each registration forward verbatim. ⚠️ *"The C++ source and the Python binding are present locally"* is **not** the proposition *"the agent may build"*.
+- [ ] T084 Discharge the **two performance obligations pre-registered as NOT MEASURED**, using the instrument quoted verbatim from `[const §VIII.2]`: a **paired base-vs-candidate run on one runner, A-B-A-B, min-per-tree**. (a) The **per-call cost of D-4's eager materialisation** over `fixpp::dict::reify()`. ⚠️ The population of affected callers being empty in production is a **DIFFERENT PROPOSITION** from per-call cost and does not substitute for it. (b) The **byte scan's cost on the commit path** introduced by T038's predicate. ⚠️ **"Should be unmeasurable" is NOT a measurement**, and ⚠️ **do not let this degrade into "verify no regression"** — that is the exact shape that loses the obligation. Record both results, or carry both registrations forward verbatim, in `.specify/decisions/090-capi-refusals-verify.md`. ⚠️ **No new budget is introduced and none is claimed met.**
+- [ ] T085 Run `/simplify` over this feature's diff **before** `/speckit-verify`, per `[const §XVI.7]`. ⚠️ A post-`/simplify` source change invalidates every preset build directory and forces the whole verify matrix to re-run, so it must precede verify — **not merely precede PR open**. ⚠️ A guard that looks redundant may cover a **different** failure; do not delete one on a rationale this bundle does not carry.
+- [ ] T086 Run `/speckit-verify` and produce `.specify/decisions/090-capi-refusals-verify.md`. ⚠️ **`gate-a-waived` is ALREADY applied while the paired evidence it requires cannot yet exist** — under `[const §XVII.8]` a gate label is an **evidence claim, not a status decoration**, so **both** waiver reasons (the C-4 scoped review's P1 and the corpus finding) MUST reach **both** this record and the PR body. Record the `[const §IX.1]` **assessed** disposition for D-2b's uncovered lines here as well. `/gate-b` refuses to start if this record is absent or RED.
+- [ ] T087 Draft the PR body in the session scratchpad and verify its headings against `.github/workflows/gate-b.yml`'s own check **before opening the PR**. It MUST carry (a) a `##` **HEADING** naming all three changes as BREAKING in fixpp#428's in-tree spelling — one line each for `fixpp_msg_remove_tag`'s builder-open refusal, `fixpp_msg_clone`'s failed-re-parse refusal **and its abort limb**, and the two setters' byte floor — and (b) a `## Gate A` **heading** carrying the `gate-a-waived` rationales. ⚠️ **A HEADING, NOT BOLD TEXT: this repository has already lost a gate to bold text under another heading, and every downstream tier went red.** ⚠️ Do not invent a second BREAKING spelling. (FR-015 limbs 2 / SC-013)
+- [ ] T088 Add the closing keyword for **fixpp#488** to the PR body, and confirm that every issue listed under `## Explicitly out of scope` in `specs/090-capi-refusals/spec.md` — fixpp#487, fixpp#489, fixpp#490, fixpp#491 and fixpp#492 — is **named as out of scope and stays OPEN**; re-derive that set from `spec.md` rather than from this line. ⚠️ **A closing keyword fires inside a negation** — grep the PR body **and** every commit message for an accidental closing reference to the five that must stay open, and verify each issue's state after merge. (FR-019)
+- [ ] T089 Stage `specs/090-capi-refusals/tasks.md` and the rest of this feature's diff and run `python3 tools/check_line_citations.py --staged`, requiring rc 0. ⚠️ **Before believing that zero, prove the instrument can report non-zero on this file**: seed a `path:NNN`-shaped citation, confirm the gate reports it **naming this file**, then remove it and re-run. ⚠️ Also run `python3 tools/check_line_citations.py --shift-audit origin/main..HEAD` — this change amends cited documents, which **shifts the lines other files already cite**, and an edit that adds no citation passes `--staged` while invalidating existing ones.
+
+### Mandatory close-out tasks (Gate-B preconditions, Article XVII §8 — never omit)
+
+- [ ] T090 [P] **Catalogue close-out**: flip every feature-owned **OFFICIAL** row in `spec/feature-catalogue.md` that is not already `done` to `done` with its PR / evidence reference, and add or update its matching `spec/coverage-index.md` entry. ⚠️ **Re-derive the feature-owned set by condition** — *every OFFICIAL row naming a symbol or surface this PR changes* — rather than reading a list: on the tree this file was written against that set resolves to `CA-009`, which is **already `done`** at 051, so the edits owed there are **its `Tests` column** (T080) and the `spec/coverage-index.md` reify block's **lazy** clause (T081), not a status flip. If the re-derivation finds a row not already `done`, flip it here.
+- [ ] T091 **Feature-completeness audit — the FINAL task.** Assert against the merged tree that (i) every row in `specs/090-capi-refusals/tasks.md` is `[X]` or carries an explicit waiver rationale; (ii) every **FR-001..FR-020** and **SC-001..SC-014** in `specs/090-capi-refusals/spec.md` maps to a **landed test** AND a **landed implementation**; and (iii) every feature-owned OFFICIAL `spec/feature-catalogue.md` row is `done` with a matching `spec/coverage-index.md` entry. Record the verdict — **100 % or fully waived**, with each waiver's rationale — in `.specify/decisions/090-capi-refusals-verify.md` under a `## Completeness` section. ⚠️ **This is the hard `/gate-b` precondition**; `/gate-b` pre-flight blocks without it.
+
+---
+
+## Dependencies & Execution Order
+
+### Phase dependencies
+
+- **Setup (Phase 1)**: no dependencies. T004's approval gates every build-dependent RED below.
+- **Foundational (Phase 2)**: depends on Setup. **BLOCKS all four user stories** — every story's declaration edits carry a `Since 1.7 (BREAKING)` marking that cannot be authored before the macro moves.
+- **User stories (Phases 3–6)**: all depend on Foundational. See the file-collision constraint below before parallelising.
+- **Polish (Phase 7)**: depends on all four stories. Within it, T079's freeze re-baseline depends on **every** header edit (T008, T026, T027, T042, T056) having landed; T082 → T083 → T084 → T085 → T086 run in that order (`/speckit-analyze` → local build → the paired performance runs → `/simplify` → `/speckit-verify`), and T084 depends on T083's build approval; T090 and T091 are last, in that order.
+
+### User story dependencies
+
+- **US1 (P1)** — no dependency on another story.
+- **US2 (P1)** — no dependency on another story. Its D-5b predicate leaf header is created **inside** this story (T038) because only this story consumes it.
+- **US3 (P2)** — no behavioural dependency on US1, but **shares `src/capi/message_write.cpp` with it**.
+- **US4 (P3)** — no dependency on any other story; it is the `[C++ track]` half of US3's defect and consumes no version-contract machinery.
+
+### ⚠️ The file-collision constraint that decides `[P]`
+
+`src/capi/message_write.cpp` is **ONE translation unit carrying THREE of the five changes** — D-1's
+guard, D-2b's bounds refusals and the resolvers, **and** `fixpp_msg_clone` itself. Therefore:
+
+- **no US1 task is `[P]` with any US3 task**, and no task inside either story that touches that file is `[P]`;
+- **US2 and US4 are genuinely parallel** with US1 and US3 and with each other — US2 lives in `src/capi/config.cpp`, `src/session/session.cpp` and `include/fixpp/session/`; US4 lives in `include/fixpp/dict/reify.hpp` and `src/dictionary/reify.cpp`;
+- `include/fix/c_api/message.h` is edited by **both** US1 (T026, T027) and US3 (T056) — those three are sequential with one another.
+
+### Within each user story
+
+- Tests are written and observed **RED** before implementation (`[const §VII.3]`).
+- **Every mutation and control task runs AFTER its implementation task** — a mutation against absent code measures its own setup.
+- Declaration/doc edits follow the implementation they document.
+- Consumer re-scoping follows the refusal that breaks the consumer.
+
+### Parallel opportunities
+
+- **Setup**: T001, T002, T003, T005 in parallel; T004 is a user interaction.
+- **Foundational**: T010, T011, T012 in parallel once T008 has landed.
+- **Across stories**: US2 (T030–T046) and US4 (T058–T066) can each run alongside US1, and alongside each other.
+- **Inside US4**: only **T060 and T061** are `[P]`, and only because they are **keep-green obligations that edit nothing**. ⚠️ T058, T059, T062 and T063 all **write `tests/dictionary/reify_dispatch_test.cpp`**, so they are sequential with one another — the same file-collision rule applied to `src/capi/message_write.cpp` above.
+- **Polish**: ⚠️ the four ledger rows **T067–T070 all write `spec/behaviors-and-limitations.md` and are therefore SEQUENTIAL** — only T067 carries `[P]`, against tasks in other files. T075 and T076 are `[P]` (different files); T078, T080, T081 and T090 are `[P]`.
+
+⚠️ **Nothing in Polish is `[P]` with T079** — the freeze re-baseline must observe the tree after the
+last header edit.
+
+---
+
+## Implementation Strategy
+
+### Sequencing, not delivery
+
+1. Phase 1 Setup → Phase 2 Foundational (**blocks everything**).
+2. Phase 3 US1 → **STOP and VALIDATE** with V1–V4 and the two mutations (T024, T025).
+3. Phase 4 US2 → validate with V8 and V9, including the distinguishability control.
+4. Phase 5 US3 → validate with V5 and V6, including the polarity control and the inner-handler mutation.
+5. Phase 6 US4 → validate with V7's five arms, including the two keep-green ones.
+6. Phase 7 Polish → the ledger delta, the two amendment populations, V10's version/pin/freeze observations, the owed controls, then the two close-outs.
+
+### The three BREAKING tracks — and the fourth surface that is NOT one
+
+**Three** contracts are marked BREAKING: `contracts/msg-remove-tag.md`, `contracts/msg-clone.md`
+and `contracts/session-config-byte-floor.md`. ⚠️ **`contracts/msg-index-bounds.md` is NOT**, and it
+is kept in its own file precisely so no reader inherits the marking from a neighbouring section.
+The discriminator is the authority's own: *the arm it replaces is undefined behaviour, not a
+documented success* — the breaking test is **a call that used to return `FIXPP_ERR_OK` and now
+refuses**, and an out-of-range subscript is silent UB today, so nothing **defined** changes.
+**A four-way count is exactly the error that file exists to prevent**, and SC-013's PR heading names
+**three**.
+
+⚠️ **There is no incremental delivery here.** FR-018 and C-5 bind all three refusals to **ONE PR**,
+on `[const §X.7]` obligation 3: three breaking changes share one consumer inventory, so a split
+would either duplicate that inventory or leave one PR's consumers unupdated at its own merge. The
+bump, the version comment, the freeze re-baselines and the design-corpus amendment are **shared
+infrastructure**.
+
+### What this file deliberately does NOT claim
+
+- **Not that Gate A passed.** It ran, did not converge, and is `gate-a-waived` on two reasons.
+- **Not that the seam REDs are executed.** Only Story 1's has been, inside fixpp#447 itself. Every other RED is **registered as NOT MEASURED** until T083's build gate opens.
+- **Not a count for the `[2i]` scope-claim population, and no total across the two populations** (OD-1).
+- **Not that the probe-cap degradation is covered** — that arm leaves the build status untouched, so the parse **succeeds** and this feature's fallback is never entered.
+- **Not that RefMsgType(372) at the two inbound-fed reject builders is covered** — it is a checked negative on a stated condition, and what a counterparty parser does with a surviving `'='` is not measured.
+- **Not that a clean sanitizer run is evidence** for anything in US1 or US3's byte-level seams.
+
+---
+
+## Notes
+
+- `[P]` = different files, no incomplete dependency.
+- Every task names an exact file path; no task cites a line number, because a line-number citation rots silently and `tools/check_line_citations.py` rejects one on an added line.
+- Conditions and re-derivation recipes are written in place of counts wherever a number would rot.
+- Commit after each task or logical group; stop at any checkpoint to validate a story independently.

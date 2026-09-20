@@ -12,7 +12,7 @@ is validated by observation, not by an example call.
 This file **references** them and does not duplicate them.
 
 ⚠️ **Gate A RAN and did NOT converge** — `gate-a-waived` on two reasons. `/speckit-analyze` and the
-user's `/plan` sign-off are **OWED**. Nothing below asserts a Gate A pass.
+user's `/plan` sign-off — ⚠️ **the latter is now DISCHARGED (2026-09-20), pinned to `plan.md` at `d12d2270`; `/speckit-analyze` remains OWED.** This line said both were owed until the sign-off landed. Nothing below asserts a Gate A pass.
 
 ⚠️ **`[const §XVII.7]` resource gate:** local builds are resource-heavy; an AI agent MUST surface an
 `AskUserQuestion` and get approval **before** running any build command in this file.

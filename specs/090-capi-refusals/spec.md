@@ -91,7 +91,7 @@ Citing §11 for the procedure would be wrong.
 | Gate A (`[const §X.1]`, mandatory) | **RAN; DID NOT CONVERGE.** Label **`gate-a-waived`**, two reasons (header block). Four rounds, a post-sign-off P1, a scoped delta review and two owner decisions. `P1 == 0 AND P2 == 0` has never been returned |
 | `/clarify` | **Discharged in substance, not by running the skill.** The skill would have resolved `FEATURE_SPEC` through the fixpp#490 pin and written into a shipped, unrelated feature's spec. The questions were asked and answered by the owner against the design note. *"The control ran"* and *"the control's substance was executed by hand"* are different claims; only the second is true |
 | `/analyze` | ⚠️ **OWED. NOT DISCHARGED.** A plan entry claimed otherwise until 2026-09-20 and that claim was **false**. `/analyze` is a cross-artifact check over `spec.md` / `plan.md` / `tasks.md`; until this bundle has all three it cannot run at all |
-| user `/plan` sign-off | ⚠️ **OWED.** The control is the **user's sign-off on the plan**, not the command's execution |
+| user `/plan` sign-off | ✅ **DISCHARGED 2026-09-20** — given by the owner in session, **pinned to `plan.md` at `d12d2270`**; `plan.md`'s Constitution Check row 5 is the authoritative statement and carries the re-derivation command. The control is the **user's sign-off on the plan**, not the command's execution |
 
 ---
 

@@ -6,7 +6,7 @@ population it derived. Where it states a **condition** and a **re-derivation rec
 count, this file carries the condition and the recipe — not a number.
 
 ⚠️ **Gate A on this bundle RAN and did NOT converge.** It is `gate-a-waived` on two reasons.
-`/speckit-analyze` and the user's `/plan` sign-off are **OWED**, not discharged. Nothing in this file
+`/speckit-analyze` is **OWED**, not discharged; the user's `/plan` sign-off is ✅ **DISCHARGED 2026-09-20**, pinned to `plan.md` at `d12d2270` (authoritative statement: `plan.md`'s Constitution Check row 5). **`/speckit-analyze` remains OWED**. ⚠️ **This line read "both are OWED" until the sign-off landed** — it was true when written and was falsified by a later event, which is this bundle's recurring defect shape, not a typo. Nothing in this file
 should be read as a Gate A pass.
 
 ---
