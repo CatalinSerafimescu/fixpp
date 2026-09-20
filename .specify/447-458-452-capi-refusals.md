@@ -1,6 +1,6 @@
 # fixpp#447 / #458 / #452 — three refusals the C ABI owes, and the C++ guards beside them
 
-> **Status: v0.7 — a `/speckit-clarify` integration, NOT a review round. NOT converged by the loop's criterion.**
+> **Status: v0.8 — the C-4 scoped delta review RAN; its single P1 is applied. NOT converged by the loop's criterion.**
 >
 > ```
 > Round 1: Codex 2 P1 / 9 P2 / 2 P3; Opus adversarial post-judging P1 3 · P2 11 · P3 4, 4 root causes.
@@ -13,8 +13,16 @@
 > v0.7:   NOT A REVIEW ROUND EITHER, and it makes no claim v0.6 did not. A `/speckit-clarify`
 >         session's five answers, recorded in `## Clarifications` and applied to the sections
 >         they govern. No finding counts are entered above, because no review produced any:
->         ⚠️ **the scoped review of v0.6's delta that answer C-4 commissions has NOT run**, and
->         no label follows until it does.
+>         ⚠️ **the scoped review of v0.6's delta that answer C-4 commissions had NOT run as of
+>         v0.7**, and no label followed. It has run since — see the v0.8 line.
+> v0.8:   THE C-4 SCOPED REVIEW OF v0.6's DELTA — **IT RAN**, against the live `[2i]` source,
+>         and it returned **1 P1 / 0 P2 / 0 P3**. That one P1 is applied in this revision.
+>         ⚠️ **NO ROUND NUMBER IS CLAIMED AND NO COUNTS ARE ENTERED IN THE ROUND LINES ABOVE**:
+>         it was a **scoped** review of one delta, not a full adversarial round, and entering
+>         it as `Round 5` would claim a coverage it never had.
+>         ⚠️ **GATE A HAS NOT CONVERGED.** The criterion is `P1 == 0 AND P2 == 0`; this
+>         returned `P1 = 1`, so the `0 P1 / 0 P2` branch of answer C-4 did **not** fire and
+>         **no label is earned by this revision or by the review that produced it.**
 > ```
 >
 > **Date:** 2026-09-20. ⚠️ **NO CONVERGENCE IS CLAIMED, AND NONE MAY BE.** The loop's criterion is
@@ -41,8 +49,24 @@
 > skill was NOT run as written, and the reason is evidence rather than a footnote — see that
 > section's preamble and fixpp#490.** ⚠️ **AND THE ONE CLAIM A READER MIGHT INFER FROM A
 > CLARIFICATION PASS IS FALSE HERE: answer C-4 COMMISSIONS a scoped review of v0.6's delta and
-> that review HAS NOT RUN.** No `gate-a-done` label is earned by this revision, by the review's
-> absence, or by anything below. **Gate A has not converged and this pass does not move it.**
+> that review HAD NOT RUN AT v0.7.** No `gate-a-done` label was earned by that revision, by the
+> review's absence, or by anything below it. **Gate A had not converged and that pass did not
+> move it.**
+>
+> ⚠️ **v0.8 APPLIES THE C-4 REVIEW'S SINGLE P1 AND CLAIMS NOTHING ELSE.** The review **ran**;
+> it returned **1 P1 / 0 P2 / 0 P3**; the P1 is that `[2i §6.5]`'s middle column was quoted here
+> **with an ellipsis that cut the clause's own non-exhaustiveness hedge** — *"or any future
+> construction-time C-ABI entry that lacks a domain prefix"*, which is §5c's **exemption 1
+> verbatim** — after which the document characterised what was left as *"a closed
+> enumeration"*. ⚠️ **THE POPULATION DOES NOT MOVE: the eight stay eight**, because the same
+> cell's *"Used only by `guarded_call_construction`"* binds the code exclusively on its own and
+> carries no hedge; `8 + 2 + 4 + 5 = 19` and the superset **24** are untouched, and **B6's
+> amendment is unchanged** — only the *reason* for amending one clause moves. ⚠️ **AND GATE A
+> STILL HAS NOT CONVERGED**: `P1 == 0 AND P2 == 0` is the criterion, this returned `P1 = 1`, and
+> **no label follows from this revision.** ⚠️ **The review's other findings were all PASS** —
+> the re-measured discrimination reproduced on all six figures with **both positive controls
+> firing**, and all six relayed fixes verified; the Appendix records that rather than leaving a
+> reader to infer a clean sheet from the absence of findings.
 >
 > ⚠️ **Round 4 sits beyond the loop's 3-round Phase A cap, as the pass that produced v0.4 did, and
 > the user authorised each explicitly.** v0.4's authorisation rested on the round-3 review's closing recommendation — *"the
@@ -373,9 +397,17 @@ executed by hand"* are different claims and only the second is true here.
   further findings relayed into this pass"*; the post-sign-off **P1 is not one of them** — it came
   from an independent session, not a relay. If it returns **0 P1 / 0 P2** the label is
   `gate-a-done` **on honest evidence**; if not, the finding is known **before** Gate B rather than
-  during it. ⚠️ **THAT REVIEW HAS NOT RUN, AND GATE A HAS NOT CONVERGED.** Nothing in v0.7 is
-  evidence for it, and this document's status line stays *"NOT converged by the loop's criterion"*.
-  Recorded in the status block.
+  during it. ⚠️ **THE REVIEW HAS NOW RUN — AT v0.8 — AND GATE A STILL HAS NOT CONVERGED.** It
+  returned **1 P1 / 0 P2 / 0 P3**, so the `0 P1 / 0 P2` branch one sentence above did **not**
+  fire and **no label is earned**; the P1 is applied in this revision (Appendix, `v0.7 → v0.8`),
+  and it is a **scoped delta review, not a round** — no round number is claimed for it. ⚠️
+  **Nothing in v0.7 was evidence for it, and the sentence that said so is REPLACED rather than
+  left standing**: a present-tense *"that review has not run"* is precisely the shape this
+  document's own EDIT-vs-SHIPPING-POLICY test (§5c's `[2i §10 Q2]` row) says **rots**, and
+  leaving it here while the status block said the opposite would be a contradiction inside one
+  document. The frozen `v0.6 → v0.7` Appendix record of the same answer is **NOT** edited, by
+  the other half of that same test. This document's status line stays *"NOT converged by the
+  loop's criterion"*. Recorded in the status block.
 - **Q: One PR for all three refusals, or one per issue? → A: ONE PR.** The bump, `version.h`'s
   version comment, the three freeze re-baselines and the `[2i]` amendment are **shared
   infrastructure**; splitting duplicates them or makes a later PR depend on an unmerged earlier one.
@@ -2043,6 +2075,20 @@ respelling and is not what this revision does.
   continuations**. ⚠️ **A class label with no quoted passage is not an adjudication**, and that is
   precisely how v0.5's five misfiles became invisible: they were labelled by **section role**
   (*"whitelist statement"*) and no reader could see which sentence had been judged.
+  ⚠️ **AND QUOTE IT WITHOUT ELISION — THE LIMB ADDED AT v0.8, STATED AS A CONDITION.** An `…`
+  inside a quoted claim unit is an **unaudited edit to the evidence**. The criterion is decided by
+  tokens that must be **quotable from the passage itself**, and **exemption 1's list literally
+  includes *"or any future …"*** — so one ellipsis can delete the exact token the adjudication
+  turns on, and the remainder then *reads* closed because the hedge was cut, not because the
+  passage is closed. **THE CONDITION: no passage adjudicated against the criterion may be quoted
+  with an internal elision.** Quote the whole claim unit, however long it runs, and keep the
+  commentary outside the quote marks. **THE RECIPE WHERE AN ELISION ALREADY EXISTS:** for every
+  `…` that falls *inside* quote marks, re-read the source span it replaced and ask whether any of
+  `/ etc.`, a producer-governing `e.g.`, or *"or any future …"* sits in what was cut; if one does,
+  the ellipsis made the adjudication, not the reader. ⚠️ **This is a condition and a recipe, NOT a
+  tally** — *"N quotes checked"* would be false at the next edit, and the sweep that found the
+  v0.7 instance is recorded with its commands in the Appendix (`v0.7 → v0.8`), where a reader can
+  re-run it rather than believe it.
 - **(c2.iii) Apply the positive test**, naming the exemption **by its quoted token** wherever the
   answer is NO.
 - **(c2.iv) AUDIT THE CRITERION — the obligation none of the four rounds had.** Run whatever lexical
@@ -2059,7 +2105,7 @@ producers**, on every one of the three readings §5c derives below.
 | **§5.2** — construction-time-flavour bullet | *"(or the new `FIXPP_ERR_CAPI_CONFIG_INVALID` **for the engine-construction case where no domain prefix applies** — see §6.5 below)"* | ⚠️ **MISSED FOR FOUR ROUNDS.** The `for …` clause assigns the code to one case |
 | **§5.2** — `guarded_call_construction` doc comment | *"The domain-appropriate code is selected **per call site**: dictionary load surfaces `FIXPP_ERR_DICT_CONFIG`; **engine creation surfaces `FIXPP_ERR_CAPI_CONFIG_INVALID`**; outbound message creation surfaces `FIXPP_ERR_DICT_CONFIG` when the `msg_type` is not in the dictionary."* | ⚠️ **MISSED FOR FOUR ROUNDS, AND IT IS THE STRONGEST CLAIM IN THE FILE** — an **exhaustive partition** over the whole whitelist, with no hedge anywhere in it |
 | **§5.4** — construction-time-exceptions bullet | *"(or the new cross-cutting `FIXPP_ERR_CAPI_CONFIG_INVALID` **for engine creation when no domain prefix applies** — see §6.5)"* | ⚠️ **MISSED FOR FOUR ROUNDS.** The bullet's outer `e.g.` governs the **exception examples**; the parenthetical scoping the **code** carries no hedge of its own |
-| **§6.5** — the code's row, **BOTH** clauses | *"**Used only by** `guarded_call_construction` per `[arch §5.3]` carve-out where no specific domain `_CONFIG` code applies"*, and independently the middle column's *"a construction-time C-ABI thunk (`fixpp_engine_create`, `fixpp_dict_load_from_xml` …) caught a `std::exception` and chose this fallback code"* | exclusivity in one clause, a closed enumeration in the other |
+| **§6.5** — the code's row, **BOTH** clauses (both of them sentences of the middle column) | ⚠️ **QUOTED WITHOUT ELISION AT v0.8, AND THE ELLIPSIS THAT USED TO SIT HERE IS WHY.** *"a construction-time C-ABI thunk (`fixpp_engine_create`, `fixpp_dict_load_from_xml` for the no-domain-prefix case, **or any future construction-time C-ABI entry that lacks a domain prefix**) caught a `std::exception` and chose this fallback code. **Used only by** `guarded_call_construction` per `[arch §5.3]` carve-out where no specific domain `_CONFIG` code applies."* | **the second sentence binds the code, and it alone**: *"Used only by"* is unhedged exclusivity, which is why this passage stays in the eight whatever happens to the first. ⚠️ **THE FIRST SENTENCE IS NOT A CLOSED ENUMERATION, AND THIS ROW SAID IT WAS FROM v0.6 TO v0.7** — ⚠️ **the range is DERIVED, not assumed** (`git log -S` on the cell's own words returns the v0.6 commit, which is the revision that created this table; §5c's disposition row carries the same error from **v0.5**, one revision earlier, and is corrected in its own cell) — its producer list ends *"or any future construction-time C-ABI entry that lacks a domain prefix"*, which is **exemption 1 of the criterion directly above, verbatim** — the very token that criterion names. The document elided exactly that fragment and then called what was left closed. **It is still amended, for a DIFFERENT reason:** the hedge widens the **entry-point set** and nothing else — the sentence still conditions the code on a thunk having **caught a `std::exception`**, and the class-**C** and class-**D** producers below are **explicit refusals** that throw and catch nothing, so no widening of the entry points reaches them. Nor does *"construction-time"* stretch: `fixpp_session_send` sits in class **C** and is the symbol `[2i §5.2]` uses to **define** the STEADY side |
 | **§6.5** — counting-convention **appositive** | *"(v0.2: added `FIXPP_ERR_CAPI_CONFIG_INVALID = 10` under RC#3 close — **the construction-time C-ABI thunk fallback for engine creation where no domain `_CONFIG` code applies**)"* | ⚠️ **ADJUDICATED AT v0.6, and the reasoning matters more than the verdict.** The *sentence's* subject and predicate are **arithmetic** (10 → 11 occupied), which is why v0.5 filed the whole line under `count`. But the **appositive** is a separate claim: definite article, **present tense**, describing the code — the same form as §1.1's, which v0.4 also filed under something else and v0.5 had to promote. **The enclosing clause's class does not immunise an embedded one.** ⚠️ **It cannot be left alone**: §6.5 would then state the NARROW scope one paragraph above the row stating the WIDE one — a contradiction **inside a single section**, which is worse than the cross-section one that makes this a P1. ⚠️ **AMEND THE APPOSITIVE; TOUCH NO NUMERAL** — see the gate note below |
 | **§10 Q2** — the thunk-split decision row | *"v1.0 **ships** the construction-vs-steady split … construction-time thunks (…) catch and translate to the domain-appropriate `FIXPP_ERR_*_CONFIG` code (**or the new `FIXPP_ERR_CAPI_CONFIG_INVALID` for the engine-construction case where no domain prefix applies**)"* | ⚠️ **ADJUDICATED AT v0.6.** Same unhedged `for …` clause as §5.2 and §5.4. **The distinguishing test against Appendix C, which carries the identical clause and is NOT amended:** does the passage describe an **edit** or state the **shipping policy**? Appendix C's verbs are verbs of editing, dated and scoped to a version transition (*"updated in lockstep"*, *"+1 new error variant"*) — a reader parses them as *what changed then*, which stays true whatever the document later says. §10 Q2's verbs are verbs of **shipping, in the present tense**, and it closes by indexing the **live** sections. It presents as current policy, so it **rots** if left behind |
 
@@ -2148,7 +2194,7 @@ false-gate deletion is how one would be reported as covering the other.
 | **§6.2** — exception safety, both limbs | *"No exception crosses `extern \"C\"` from a steady-state thunk — `std::abort` … is the trap"*, and *"Construction-time thunks (`fixpp_engine_create`, `fixpp_dict_load_from_xml`, `fixpp_msg_create_outbound`) catch and translate"*, verified by *"§9 seam #5a"* | **READ; UNCHANGED.** ⚠️ **v0.3's cell said the first limb *"is what D-3b's arm 3 now HONOURS"* and that was FALSE — rewritten at v0.4, not softened.** The limb has **two clauses**, and v0.3's edit inverted its own claim on both: (1) *no exception crosses* is **satisfied at `e391944c`** by the blanket `catch (...)`, and narrowing that catch with nothing outside it would have **newly broken** it; (2) *`std::abort` is the trap* is **not** satisfied at `e391944c` for clone, and no `guarded_call_steady` exists to supply it (§2.3a, fixpp#487). **Under D-3b's NESTED boundary both clauses hold**: the outer `catch (...)` in clone's own body keeps every exception inside `extern "C"` *and* makes the trap `std::abort()`. That is the amended claim — the mechanism changed, not the wording. ⚠️ **NO EDIT IS NEEDED FOR THE SCOPE CLAIM HERE, AND v0.6 STATES THAT RATHER THAN LEAVING IT IMPLIED** — an unstated "no edit needed" is exactly how five sites went un-adjudicated. The code appears in this section inside a list ending *"`/ etc.` per the source layer"*: an **explicit non-exhaustiveness marker**, and the bullet names no producer **of this code**. **v0.5's classification of §6.2 is CORRECT and is deliberately left alone** |
 | **§1.1** — the *"Sentinel codes"* paragraph, where the code is **DEFINED** | *"`FIXPP_ERR_CAPI_CONFIG_INVALID` (the latter NEW in v0.2 / RC#3 close — **the cross-cutting fallback for construction-time C-ABI thunk exceptions where no domain `_CONFIG` code applies**)"* | ⚠️ **AMENDED at v0.5 — A SITE v0.4's ONE-ROW EDIT MISSED.** This is the **same scope claim** as §6.5's, definite-article and definitional, in the section that *defines* the code — and it is **live and unsuperseded**: the whole §1.1 body was read for an amendment or supersession marker and carries none. **Replace the scoping parenthetical with the condition-stated form §6.5's row carries below.** ⚠️ **AMEND THE SCOPING PARENTHETICAL ONLY, AND THE COUNT LANGUAGE IS ELSEWHERE IN §1.1 — the locator matters, so it was read rather than inherited.** The Sentinel-codes paragraph **enumerates the eight names without a numeral**; the *"8 2i-introduced"* **count** lives in §1.1's **magnitude-domain table row** — the `FIXPP_ERR_CAPI_*` row whose owner column reads `2i` and whose count column reads **8** — and its layout block, and again in §6.5's counting convention and introduced-variants tally. ⚠️ **`tools/check_capi_occupancy.sh` reads the TABLE ROW, not the paragraph** — verified by reading the script: it greps `^\|` rows matching `FIXPP_ERR_<DOMAIN>_*` out of `.specify/2i-capi.md` and takes **the first integer in field 4** against `include/fix/c_api/error.h`'s `#define`s and the append-only audit file. ⚠️ **v0.5 THEN DREW THE WRONG SECOND HALF FROM THAT READING AND v0.6 CORRECTS IT.** It wrote *"the scoping parenthetical is outside everything the gate parses, **and the count sites are inside it**."* The first half is right; **the second is false, and it is false in the direction that matters.** Re-measured: the script's `doc_rows` grep returns **eight rows, all of them §1.1's magnitude-domain table**, and Check B compares each against an `EXPECT_COUNT` map **hardcoded in the script** over the eight *domain* prefixes — **there is no cross-cutting-block entry at all.** So §6.5's counts, §1.1's layout block, §3.11's prose and Appendix D.2's supplemental are watched by **nothing**. **The scope edit cannot red the gate, and the counts it must not touch are not protected by the gate either — they are protected by nobody.** That is why the instruction here is narrow in the other direction: amend the parenthetical, **touch no numeral**. **Re-derive before editing:** read the script's `doc_rows` grep and its field-4 `awk`, and its `EXPECT_COUNT` keys |
 | **§4.4** — the `fixpp_strerror` lookup-table excerpt | the string literal *"C ABI config invalid (**engine_create / dict_load / msg_create_outbound**)"* | ⚠️ **AMENDED at v0.5 — A SECOND SITE v0.4 MISSED, and for its PRODUCER PARENTHETICAL ONLY.** The three-symbol enumeration is an explicit scope claim, false of 21 of the 24; drop it or replace it with the condition-stated form. ⚠️ **The string TEXT is explicitly OUT OF SCOPE for B6.** Shipped `src/capi/error.cpp`'s `fixpp_strerror` arm returns *"C ABI configuration invalid"*, which differs from this excerpt independently of the producer question; that excerpt-vs-shipped mismatch belongs to **#449/#450**, the error-taxonomy single-sourcing work. Letting it into this pass would drag B6 into a `strerror` reconciliation it must not carry |
-| **§6.5** — `FIXPP_ERR_CAPI_CONFIG_INVALID`'s row | *"Used only by `guarded_call_construction` per `[arch §5.3]` carve-out where no specific domain `_CONFIG` code applies"*, **and, independently, the middle column's** *"a construction-time C-ABI thunk (`fixpp_engine_create`, `fixpp_dict_load_from_xml` …) caught a `std::exception` and chose this fallback code"*; remediation *"Configuration error — … correct the config; retry."* | ⚠️ **AMENDED — decided at v0.4, and at v0.5 both the EDIT POPULATION and the EDIT SHAPE are corrected. v0.3's "NOT amended; recorded as a residual" stays WITHDRAWN**: its cost was priced against a population of **one** (clone) and the corrected producer population inverts that argument. ⚠️ **What v0.4 got wrong, on two axes.** *(i)* It named **one clause** — *"Used only by `guarded_call_construction` …"* — and left the **middle column's independent enumeration** standing, which is still false of 21 of the 24; an implementer replacing only the named sentence publishes the contradiction anyway. *(ii)* Its replacement **enumerated producer classes** (*"refuses on invalid configuration input or fails a local expected-allocation boundary"*), and an enumeration is exactly the shape four consecutive rounds have falsified with a producer nobody listed — it leaves **four** of the 24 uncovered (classes **D** and **E** below). **THE EDIT, STATED AS A CONDITION AND NOT AS A POPULATION — replace BOTH clauses with:** *Produced by a C-ABI entry point that cannot complete — either an **explicit refusal** (an invalid argument, an unusable configured value, or a call made **out of lifecycle order**) or a **caught exception** on a fallible construction/mutation step (allocation **or other resource failure**, e.g. thread creation). **Not exclusive to `guarded_call_construction`.*** ⚠️ **And the REMEDIATION column takes matching arms**, because correcting the producer clause and leaving remediation false of the same sites reproduces the defect one column over. ⚠️ **v0.5's remediation was itself 22/24 and v0.6 corrects it** — its third arm read *"or retry, with no guarantee of success after a resource failure"*, and **retry is structurally unreachable at two of the 24** (derived below). **THE REMEDIATION, STATED AS A CONDITION:** *correct the offending argument or the unusable configured value and call again*; **or, for an ordering refusal, call before `fixpp_engine_start`**; *or, after a caught failure that consumed nothing, retry — with no guarantee of success*; ⚠️ ***or, where the failing return left engine- or session-side state already changed, destroy the owning handle and rebuild it, because neither retry nor re-ordering can succeed there.*** The shipped *"correct the config; retry"* is false of an exhausted heap, **of an ordering violation, and of both state-changing sites**. **The derivation, and the 24/24 coverage check against this exact wording, are below.** A row that states the producing **condition** cannot be falsified by a producer nobody listed — which is the structural reason this is the last spelling of the edit and not the fifth. This reds no pin — in particular it does **not** touch the 066 pin, which is why Codex's alternative (re-code clone's OOM) stays rejected — mints no enumerator, and changes no source. ⚠️ **The "changes no source" argument is stated in its NARROW true form at v0.5:** shipped `include/fix/c_api/error.h` documents the code generically (*"C-ABI configuration is invalid (e.g. conflicting options)"*) and `fixpp_strerror` returns *"C ABI configuration invalid"*, so **no shipped header or string needs editing**. That is a fact about the **source** corpus; it establishes **nothing** about how many **design**-corpus sites carry the claim, and v0.4's Appendix drew exactly that invalid inference (*"the construction-only claim lives **only** in `[2i §6.5]`"* — false, by two sites). ⚠️ **AND AT v0.6 THE POPULATION MOVES AGAIN — THIS SECTION ITSELF CARRIES A SECOND AMENDED SITE.** §6.5's **counting-convention appositive** (*"the construction-time C-ABI thunk fallback **for engine creation** where no domain `_CONFIG` code applies"*) is the same scope claim one paragraph above this row, and leaving it would make §6.5 state the **narrow** scope and the **wide** scope within a single section. **Amend the appositive; touch no numeral** — the sentence's subject and predicate are arithmetic (`10 → 11` occupied) and none of it turns on producer scope; the arithmetic is watched by **no instrument at all** (see §1.1's row), so a careless rewrite of it would be silent. **B6 carries EIGHT sites and its PR CLOSES fixpp#488**, whose own *"Suggested fix"* is this amendment; the producer **re-pointing** question is **fixpp#489** (§7) |
+| **§6.5** — `FIXPP_ERR_CAPI_CONFIG_INVALID`'s row | ⚠️ **QUOTED WITHOUT ELISION AT v0.8** — the middle column, whole: *"a construction-time C-ABI thunk (`fixpp_engine_create`, `fixpp_dict_load_from_xml` for the no-domain-prefix case, **or any future construction-time C-ABI entry that lacks a domain prefix**) caught a `std::exception` and chose this fallback code. **Used only by** `guarded_call_construction` per `[arch §5.3]` carve-out where no specific domain `_CONFIG` code applies."*; remediation, also whole: *"Configuration error — inspect the engine-internal logger's fatal-level record for the exception detail; correct the config; retry."* | ⚠️ **AMENDED — decided at v0.4, and at v0.5 both the EDIT POPULATION and the EDIT SHAPE are corrected. v0.3's "NOT amended; recorded as a residual" stays WITHDRAWN**: its cost was priced against a population of **one** (clone) and the corrected producer population inverts that argument. ⚠️ **What v0.4 got wrong, on two axes.** *(i)* It named **one clause** — the *"Used only by"* sentence — and left the middle column's **other** sentence standing; an implementer replacing only the named sentence publishes the contradiction anyway. ⚠️ **THE DEFECT IS REAL AND THE REASON GIVEN FOR IT WAS FALSE — CORRECTED AT v0.8, AND THE FALSE REASON WAS MANUFACTURED BY AN ELLIPSIS IN THIS ROW'S OWN QUOTE.** That sentence is **not** an independent *closed* enumeration: its producer list ends *"or any future construction-time C-ABI entry that lacks a domain prefix"* — §5c **exemption 1 verbatim** — so it cannot be falsified by naming a construction-time entry point it did not list, and **the figure *"false of 21 of the 24"* was never a statement about it**: that figure belongs to the three-symbol **whitelist reading** of *"Used only by"*, in the readings table below. **WHAT IS ACTUALLY FALSE ABOUT IT, WHICH IS WHY THE AMENDMENT IS STILL OWED:** the hedge opens the **entry-point set** within construction-time thunks; it does **not** open the **mechanism**. The sentence still says the code arises when a thunk **caught a `std::exception`**, and the class-**C** and class-**D** producers are **explicit refusals** — an invalid argument, an unusable configured value, a call out of lifecycle order — which throw nothing and catch nothing. A hedge over entry points cannot reach a producer that never raised. ⚠️ **RE-DERIVE IT, DO NOT TAKE A FIGURE FROM HERE:** read the producing-condition table below and take **C ∪ D**; its arms sum to the measured 24. And the clause does not stretch on the other axis either — `fixpp_session_send` sits in class **C** and is the symbol `[2i §5.2]` uses to **define** the STEADY side. ⚠️ **THE EDIT IS UNCHANGED: BOTH CLAUSES ARE STILL REPLACED** with the condition-stated form below. Only the justification for amending the first one moves. *(ii)* Its replacement **enumerated producer classes** (*"refuses on invalid configuration input or fails a local expected-allocation boundary"*), and an enumeration is exactly the shape four consecutive rounds have falsified with a producer nobody listed — it leaves **four** of the 24 uncovered (classes **D** and **E** below). **THE EDIT, STATED AS A CONDITION AND NOT AS A POPULATION — replace BOTH clauses with:** *Produced by a C-ABI entry point that cannot complete — either an **explicit refusal** (an invalid argument, an unusable configured value, or a call made **out of lifecycle order**) or a **caught exception** on a fallible construction/mutation step (allocation **or other resource failure**, e.g. thread creation). **Not exclusive to `guarded_call_construction`.*** ⚠️ **And the REMEDIATION column takes matching arms**, because correcting the producer clause and leaving remediation false of the same sites reproduces the defect one column over. ⚠️ **v0.5's remediation was itself 22/24 and v0.6 corrects it** — its third arm read *"or retry, with no guarantee of success after a resource failure"*, and **retry is structurally unreachable at two of the 24** (derived below). **THE REMEDIATION, STATED AS A CONDITION:** *correct the offending argument or the unusable configured value and call again*; **or, for an ordering refusal, call before `fixpp_engine_start`**; *or, after a caught failure that consumed nothing, retry — with no guarantee of success*; ⚠️ ***or, where the failing return left engine- or session-side state already changed, destroy the owning handle and rebuild it, because neither retry nor re-ordering can succeed there.*** The shipped *"correct the config; retry"* is false of an exhausted heap, **of an ordering violation, and of both state-changing sites**. **The derivation, and the 24/24 coverage check against this exact wording, are below.** A row that states the producing **condition** cannot be falsified by a producer nobody listed — which is the structural reason this is the last spelling of the edit and not the fifth. This reds no pin — in particular it does **not** touch the 066 pin, which is why Codex's alternative (re-code clone's OOM) stays rejected — mints no enumerator, and changes no source. ⚠️ **The "changes no source" argument is stated in its NARROW true form at v0.5:** shipped `include/fix/c_api/error.h` documents the code generically (*"C-ABI configuration is invalid (e.g. conflicting options)"*) and `fixpp_strerror` returns *"C ABI configuration invalid"*, so **no shipped header or string needs editing**. That is a fact about the **source** corpus; it establishes **nothing** about how many **design**-corpus sites carry the claim, and v0.4's Appendix drew exactly that invalid inference (*"the construction-only claim lives **only** in `[2i §6.5]`"* — false, by two sites). ⚠️ **AND AT v0.6 THE POPULATION MOVES AGAIN — THIS SECTION ITSELF CARRIES A SECOND AMENDED SITE.** §6.5's **counting-convention appositive** (*"the construction-time C-ABI thunk fallback **for engine creation** where no domain `_CONFIG` code applies"*) is the same scope claim one paragraph above this row, and leaving it would make §6.5 state the **narrow** scope and the **wide** scope within a single section. **Amend the appositive; touch no numeral** — the sentence's subject and predicate are arithmetic (`10 → 11` occupied) and none of it turns on producer scope; the arithmetic is watched by **no instrument at all** (see §1.1's row), so a careless rewrite of it would be silent. **B6 carries EIGHT sites and its PR CLOSES fixpp#488**, whose own *"Suggested fix"* is this amendment; the producer **re-pointing** question is **fixpp#489** (§7) |
 | **§6.1** — the allocation-discipline table | rows for `fixpp_msg_get_*`, `_set_*`, `_get_group`, `_group_begin/_add_entry/_end`, `_create_outbound`, `_destroy`, `fixpp_strerror`, `fixpp_version` | **READ; UNCHANGED — and it has NO `fixpp_msg_clone` row at all**, so D-3's refusal contradicts nothing here. Recorded as read-and-unchanged rather than left unmentioned |
 | **§10 Q2** — the thunk-split disposition | **DECIDED v0.2 / RC#3 close**, enumerating the same three construction symbols — and carrying *"(or the new `FIXPP_ERR_CAPI_CONFIG_INVALID` **for the engine-construction case where no domain prefix applies**)"* | ⚠️ **AMENDED AT v0.6 — v0.5's "READ; UNCHANGED" WAS WRONG, and the interesting part is the test that separates it from Appendix C, which carries the IDENTICAL clause and is NOT amended.** **Does the passage describe an EDIT or state the SHIPPING POLICY?** Appendix C's verbs are verbs of **editing** — dated, scoped to a version transition (*"updated in lockstep"*, *"+1 new error variant"*) — and a reader parses them as *what changed then*, which stays true whatever the document later says; that is why they are frozen. §10 Q2's verbs are verbs of **shipping, in the present tense** (*"v1.0 **ships** the construction-vs-steady split"*), and it closes by indexing the **live** sections. It presents as **current policy**, so it rots if left behind. **Amend the code-scoping parenthetical only**; the row's construction-vs-steady decision, its rationale (a)/(b)/(c) and its `DECIDED v0.2` dating are untouched |
 | **§4.7** — `fixpp_msg_clone`'s per-symbol roster | publishes *"Returns `FIXPP_ERR_VERSION_MISMATCH` if src's resolved version is not in the engine's loaded dictionaries"* — **a return the implementation does not contain** — and omits `FIXPP_ERR_CAPI_CONFIG_INVALID` entirely | **AMENDED:** drop the `VERSION_MISMATCH` clause as never-implemented; add D-3's three codes plus D-3b's `FIXPP_ERR_CAPI_CONFIG_INVALID` — described as the **local boundary's `bad_alloc` return**, not as a thunk-flavour translation (§2.3a). ⚠️ The roster also calls clone outbound-shaped; the implementation is inbound-flavoured (`h->view == nullptr` ⇒ `INVALID_HANDLE`). Correct it in the same pass |
@@ -2927,6 +2973,12 @@ which is the same class of false clean the section exists to prevent. ⚠️ **E
 captured WITHOUT A PIPE** — the command's output was redirected to a file and `$?` read immediately
 — because `cmd | tail` makes `$?` report `tail`, which turns a **firing** control into a passing one
 silently. That failure was hit for real on the day this revision was written.
+
+⚠️ **v0.8 DOES NOT RE-RUN THESE ROWS IN FULL, AND THAT IS STATED RATHER THAN LEFT TO A READER WHO SEES *"v0.7"* IN A v0.8 DOCUMENT.** The rows below are **v0.7's executions** and are not re-labelled. What v0.8 ran, with the corpus each form read named, because a bare `rc=0` from this gate is the exact shape this section exists to refuse:
+
+- `--shift-audit origin/main..HEAD` → **rc=0**, reading the **committed v0.7 bytes**. ⚠️ **It   saw NOTHING of v0.8's edits** — they were uncommitted — and its own report says so   (*"`.md` files shift-checked: 0"*). **It returns the same `rc=0` it returned before a single   v0.8 character existed**, so it is not evidence for this revision; it is recorded because it   is the form the branch's commits will be read by.
+- `--staged`, after `git add` of this file → **rc=0**, reading the **index**, which is the only   corpus v0.8's uncommitted bytes appear in. **This is the form that covers this revision.**
+- `--self-test` → **151/151 pass**. ⚠️ **This is a capability check, NOT the seeded control the   rows below run**: it proves the detector reports non-zero **on its own known positives**, not   that it fires on **this file's** content. The stronger, file-seeded control is v0.7's and is   **not** re-executed at v0.8 — an unstated substitution of the weaker instrument for the   stronger one is precisely what this section is written against, so it is stated.
 
 ⚠️ **TWO FORMS, BECAUSE THEY READ DIFFERENT CORPORA AND NEITHER SUBSTITUTES FOR THE OTHER.**
 `--range origin/main..HEAD` reads the **commit** that carries this file; `--staged` reads the
@@ -4233,3 +4285,207 @@ sign-off stay owed. **Status stays `NOT converged by the loop's criterion`.**
 ⚠️ **What v0.7 does NOT establish.** It builds nothing, runs no seam, and discharges no §8 row other
 than narrowing item 1. ⚠️ **It is not a review**, and it must not be cited as one: **C-4's scoped
 review of v0.6's delta is owed and unrun**, and no `gate-a-done` label follows from this revision.
+---
+
+### v0.7 → v0.8 — the C-4 scoped delta review's single P1, applied
+
+⚠️ **THE REVIEW RAN. IT RETURNED 1 P1 / 0 P2 / 0 P3. GATE A HAS NOT CONVERGED.** The loop's
+criterion is `P1 == 0 AND P2 == 0`; this returned `P1 = 1`, so answer C-4's *"0 P1 / 0 P2 ⇒
+`gate-a-done`"* branch did **not** fire and **no label is earned** — not by the review, not by this
+revision. ⚠️ **NO ROUND NUMBER IS CLAIMED AND NO COUNTS ARE ENTERED IN THE STATUS BLOCK'S ROUND
+LINES**: this was a **scoped** review of v0.6's delta, not a full adversarial round over the
+document, and filing it as `Round 5` would claim a coverage it never had.
+
+#### What was false
+
+§5c quoted `[2i §6.5]`'s middle column **twice**, both times with an ellipsis, and both times the
+ellipsis fell in the same place — immediately after `` `fixpp_dict_load_from_xml` ``. What it cut,
+verbatim, is ***"for the no-domain-prefix case, or any future construction-time C-ABI entry that
+lacks a domain prefix"***. Having cut it, the document characterised the surviving text as **"a
+closed enumeration"** and rested an amendment argument on that characterisation.
+
+⚠️ **THE ELIDED FRAGMENT IS §5c's OWN EXEMPTION 1, WORD FOR WORD.** The criterion three paragraphs
+above the first of those quotes lists, as its first exemption, *"an explicit non-exhaustiveness
+marker governing the code's producer list (`/ etc.`, an `e.g.` that governs the producers rather
+than the exception examples, **"or any future …"**)"*. The document deleted from its evidence the
+exact token its own criterion names as decisive, and then adjudicated the remainder.
+
+#### Why it is a P1 and not a P2
+
+**The quote is truncated at the point where the evidence turns.** This is not a wording defect: the
+clause-level source claim (*"a closed enumeration"*) is **false on source**, and the exemption
+attribution that follows from it is false in the direction that flatters the document. A reader
+checking the adjudication against the quote printed beside it would confirm it — the quote had been
+edited to agree.
+
+#### What did NOT change, and each is a claim, so each is stated
+
+- **The passage STAYS in the eight, and the eight stay eight.** The same cell's second sentence —
+  *"Used only by `guarded_call_construction` per `[arch §5.3]` carve-out where no specific domain
+  `_CONFIG` code applies"* — binds the code **exclusively**, carries **no** hedge, and is not
+  touched by the correction. `8 + 2 + 4 + 5 = 19` and the abbreviated superset **24** are unmoved.
+- **The blanket above the eight-site table survives, and it was re-checked rather than assumed.**
+  *"All eight are false of the 24 producers, on every one of the three readings"* holds for this
+  row through the surviving sentence — the readings table is an analysis of *"used only by
+  `guarded_call_construction`"*, which is precisely the clause the correction leaves standing.
+- **B6's amendment is unchanged.** Both clauses are still replaced with the condition-stated form.
+  Only the **reason** for amending the first one moves.
+- **±0 decisions, ±0 seams, ±0 error variants, ±0 pins, ±0 enumerators, 0 source files changed.**
+  D-1, D-2, D-2b, D-3, D-3b, D-4 and D-5a/b/c all stand and none is re-opened.
+
+#### The corrected reason the middle column is still amended
+
+⚠️ **The hedge opens the ENTRY-POINT set; it does not open the MECHANISM — and the amendment is
+owed on the mechanism.** *"or any future construction-time C-ABI entry that lacks a domain prefix"*
+means the sentence cannot be falsified by naming a construction-time entry point it failed to list.
+But the sentence still conditions the code on a thunk having **caught a `std::exception`**, and
+§5c's class-**C** and class-**D** producers are **explicit refusals** — an invalid argument, an
+unusable configured value, a call made out of lifecycle order — which throw nothing and catch
+nothing. **A hedge over entry points cannot reach a producer that never raised.** Nor does
+*"construction-time"* stretch: `fixpp_session_send` sits in class **C** and is the symbol
+`[2i §5.2]` uses to **define** the STEADY side. ⚠️ **NO FIGURE IS PRINTED HERE ON PURPOSE** — the
+condition is *"every class-C and class-D producer is an explicit refusal"*, and the population is
+re-derived by reading §5c's producing-condition table and taking **C ∪ D**, whose arms sum to the
+measured 24. ⚠️ **And the figure that WAS printed there was never about this clause:** *"false of
+21 of the 24"* is the **whitelist reading of *"Used only by"***, from the readings table, not a
+measurement of the middle column's producer list.
+
+#### The elision sweep — commands beside results, and the population derived by COMPLEMENT
+
+The sweep that found it was bounded by a line range over the eight-site table. **That form is not
+reproducible across an edit** — the ranges moved when this section was written — so it is recorded
+here in the form that survives, keyed on the text rather than on a line number:
+
+```
+# (1) the population: every quote of the §6.5 middle column ANYWHERE in this document,
+#     derived by complement rather than from a list, with its intra-row ellipsis count
+awk '/construction-time C-ABI thunk/ {printf "%d: ellipses=%d\n", NR, gsub(/…/,"…")}' \
+    .specify/447-458-452-capi-refusals.md
+  ->  BEFORE: four hits, TWO of them carrying one ellipsis each (the eight-site table's
+      §6.5 row and §5c's [2i §6.5] disposition row); the other two — §6.5's
+      counting-convention appositive and §1.1's Sentinel-codes row — carried none.
+  ->  AFTER:  four hits, ellipses=0 at all four.
+  ->  ⚠️ BUT RE-RUN IT AND YOU GET FIVE: the command's own text now sits in this
+      document, so it matches ITSELF and reports ellipses=2 for its gsub pattern.
+      That is the corpus-contains-the-measurement trap this log already recorded
+      once (v0.5's `guarded_call` count read 51, then 64, for the same reason).
+      The fifth hit is the command line; the CLAIM is about the four QUOTES.
+
+# (2) the source, located by CONTENT so the locator cannot rot
+grep -c '^| `FIXPP_ERR_CAPI_CONFIG_INVALID` | 10 |' .specify/2i-capi.md        ->  1
+
+# (3) the hedge is really there, and it is the only one of its kind in [2i]
+grep -c 'or any future' .specify/2i-capi.md                                    ->  1
+grep -c 'or any past'   .specify/2i-capi.md                                    ->  0, rc=1
+#    the second line is the control: the same grep on the same corpus with a pattern
+#    known absent returns 0 at rc=1, so the 1 above is a measurement and not a
+#    command that fires on anything.
+
+# (4) the population figures this section asserts are UNMOVED — re-executed here rather
+#     than carried over from the review that reported them
+grep -c  'FIXPP_ERR_CAPI_CONFIG_INVALID' .specify/2i-capi.md                   ->  19
+grep -ci 'config.invalid'                .specify/2i-capi.md                   ->  24
+grep -ci 'config.rubbish'                .specify/2i-capi.md                   ->  0, rc=1
+#    third line is again the control on the same corpus. 8 + 2 + 4 + 5 = 19 and the
+#    abbreviated superset 24 both reproduce; neither moves, because no source file is
+#    edited by this revision.
+```
+
+⚠️ **THE EXTENSION IS WHAT MAKES IT A SWEEP RATHER THAN A CONFIRMATION, AND ONE OF THE TWO
+INTRA-QUOTE ELISIONS CHANGED ITS ADJUDICATION WHILE THE OTHER DID NOT.** Every `…` sitting *inside*
+quote marks in §5c's two tables was re-read against the span it replaced in `[2i]`:
+
+| where the `…` sat | what it elided, read at source | verdict |
+|---|---|---|
+| the eight-site table's **§6.5** row, and §5c's **`[2i §6.5]`** disposition row | ***"for the no-domain-prefix case, or any future construction-time C-ABI entry that lacks a domain prefix"*** | ⚠️ **THE DEFECT.** The elided span **is** exemption 1 |
+| **§10 Q2**'s row — **two** elisions inside one quote | *"per `[arch §5.3]`:"*, and the `(…)` = *"(`fixpp_engine_create`, `fixpp_dict_load_from_xml`, `fixpp_msg_create_outbound`)"* | ⚠️ **HARMLESS, AND SAID RATHER THAN LEFT UNMENTIONED.** A **closed three-member list, no hedge** — measured: the whole source row contains **no** `or any future`, `/ etc.` or `e.g.`, against a positive control on the same pattern that fires on the §6.5 row. The classification stands unaltered |
+| **§5.2**'s per-call-site partition (disposition row) | *"`FIXPP_ERR_DICT_CONFIG` when the `msg_type` is not in the dictionary."* | **HARMLESS** — no hedge; the partition is quoted **in full** in the eight-site table, where it was adjudicated |
+| **§5.4**'s bullet — three elisions | the three per-symbol descriptions (*"calling into engine code that throws on bad config"*, *"parsing a malformed XML"*, *"rejecting an unknown `msg_type`"*) | **HARMLESS** — the bullet's hedge is `e.g.`, and the quote **retains** it; the row adjudicates that hedge explicitly rather than hiding it |
+| **§6.2**'s first limb | *"(with fatal log)"* | **HARMLESS** — and §6.2's exemption token, `/ etc.`, is quoted **unelided** in the same cell |
+| **§6.5**'s remediation column, and the *"Used only by"* short form | *"inspect the engine-internal logger's fatal-level record for the exception detail;"* and *"per `[arch §5.3]` carve-out where no specific domain `_CONFIG` code applies"* | **HARMLESS** — no hedge in either span; both are now written out in full anyway |
+
+⚠️ **The two commentary ellipses — *"the `for …` clause"* on the §5.2 row and *"the same unhedged
+`for …` clause"* on the §10 Q2 row — are OUTSIDE the quote marks and are not evidence.** Named so
+that a later reader re-running the count does not re-discover them as findings.
+
+#### The frozen records — NOT edited, and saying so is the point
+
+⚠️ **"No edit needed" is itself a claim, and an unstated one is how five sites went un-adjudicated
+in this very document.** Two records carry the superseded characterisation and are **deliberately
+left standing**:
+
+- **The `v0.3 → v0.4` per-edit resolution table's edit 1**, which describes the rewritten §6.5 cell
+  as *"covering BOTH clauses of the row, the middle column's enumeration included"*. It is an
+  Appendix **changelog** record — dated, scoped to a version transition, its verbs verbs of
+  **editing**. By this document's own EDIT-vs-SHIPPING-POLICY test (the one §5c applies to separate
+  `[2i §10 Q2]` from `[2i]`'s Appendix C) it states *what changed then*, which stays true whatever
+  the document later says. **Editing it would rewrite history to match the present**, which is the
+  opposite of what a convergence log is for.
+- **The `v0.6 → v0.7` section's C-4 row**, *"it has NOT run, and Gate A has NOT converged"*. Same
+  rule, same reason: at v0.7 it had not run, and that record is of v0.7.
+
+⚠️ **The LIVE copy of that same C-4 claim was NOT left standing.** `## Clarifications`' answer C-4
+asserted, in the **present tense**, *"THAT REVIEW HAS NOT RUN"*. That is body text stating current
+state, it went false the moment the review ran, and leaving it would have put a contradiction
+inside one document. **It is replaced, and the replacement names both halves of the rule** so the
+asymmetry with the two frozen records above reads as a decision rather than as an oversight.
+
+#### The recipe gains a limb — as a CONDITION, not a count
+
+§5c's **(c2.ii)** already said *"Expand every hit to its CLAIM UNIT and QUOTE it."* It now also
+says: **quote it WITHOUT ELISION.** An `…` inside a quoted claim unit is an **unaudited edit to the
+evidence** — the criterion is decided by tokens that must be *quotable from the passage itself*, and
+**exemption 1's list literally includes *"or any future …"***, which is exactly what one ellipsis
+hid. The limb is written as the condition plus the re-derivation recipe (for every `…` inside quote
+marks, re-read the span it replaced and ask whether a hedge sits in it). ⚠️ **It deliberately does
+NOT say "N quotes checked"** — this document has watched five rounds of fixes that replaced a claim
+with a new claim of the same shape, and a tally here would be the sixth.
+
+#### Root cause — RC#1's SEVENTH occurrence, and its sharpest form yet
+
+**RC#1: a claim whose derivation stopped one hop short of the source.** Its ordinal is derived, not
+inherited: the convergence log records occurrences one through three as rounds 1–3, the fourth in
+`v0.4 → v0.5`, the fifth inside §5c's own instrument in `v0.5 → v0.6`, and the sixth in v0.5's
+closing-edit section. **This is the seventh.**
+
+⚠️ **AND IT IS THE FORM THAT MATTERS MOST, BECAUSE OF WHERE IT LANDED. This document's strongest
+evidence form is a QUOTATION — an ellipsis inside a quotation is an unaudited edit to the
+evidence.** Every prior occurrence corrupted a **retrieval** (a grep that could not see a spelling)
+or an **adjudication** (a criterion applied to the wrong unit). Both are checked *by* quoting the
+passage: §5c's answer to five rounds of population defects was *"a class label with no quoted
+passage is not an adjudication"*. This occurrence corrupted **the quote itself** — the instrument
+both of the others are checked against. A retrieval defect leaves the evidence intact for the next
+reader to catch; **an elided quote hands the next reader a document that confirms itself.**
+
+#### The review's OTHER findings were all PASS — stated, not left to inference
+
+⚠️ **A clean sheet inferred from the absence of findings is not a clean sheet reported.** The same
+review re-measured this document's discrimination figures and re-verified the six relayed fixes:
+
+- **The re-measured discrimination reproduced on all six figures**, and ⚠️ **both positive controls
+  fired** — the `/ etc.` control on §6.2 and the *"the test verifies"* control on §9 seam #5a each
+  returned `1` against the eight adjudicated passages' zeros. **The two sets of eight zeros are
+  therefore earned**, not the silence of an instrument that could not report anything else, which
+  is this repository's most recurring defect and one this document has already committed twice.
+- **The old criterion's audited recall reproduced at `1 of 8`** — three raw `only` hits, two of them
+  predicated of something other than the code.
+- **The population arithmetic reproduced**: `8 + 2 + 4 + 5 = 19`, superset `24`.
+- **All six relayed fixes verified PASS**, including the two that were re-read on `src/capi/` —
+  the unreachable-retry remediation and class E's corrected *"not allocation"* label — with one
+  recorded qualification: the #452 misattribution verdict is against the **relayed** issue text,
+  because this environment's external network was unavailable to re-fetch the live issue.
+- **The reviewer recorded no out-of-scope observations.**
+
+#### Net effect — stated as change, not as prediction
+
+**±0 decisions. ±0 test seams. ±0 error variants. ±0 pins. ±0 enumerators. 0 source files changed.
+`.specify/2i-capi.md` is NOT edited by this revision — this document PRESCRIBES; B6's PR performs.**
+**`[2i]` SCOPE-CLAIM population: 8 passages, UNCHANGED.** **B6's edit list: UNCHANGED** (the eight
+plus C-2's ninth, non-scope deletion). **Two quotes un-elided; one "why it binds" cell and one
+disposition axis re-reasoned; (c2.ii) gains one limb; one live C-4 sentence replaced; §9 gains a
+v0.8 execution note that names the corpus each form read and states that its ROWS are NOT re-run;
+two frozen records deliberately untouched.** **Status stays `NOT converged by the loop's criterion`.**
+
+⚠️ **What v0.8 does NOT establish.** It builds nothing, runs no seam, re-derives no population and
+discharges no §8 row. ⚠️ **It does not converge Gate A**, and the review it applies **cannot**:
+that review returned a P1, which is the branch of answer C-4 under which **no label is earned**.
