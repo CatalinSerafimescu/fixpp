@@ -1,12 +1,15 @@
 # fixpp#447 / #458 / #452 — three refusals the C ABI owes, and the C++ guards beside them
 
-> **Status: v0.5 — Gate A round 4 applied (Phase A). NOT converged by the loop's criterion.**
+> **Status: v0.6 — post-sign-off P1 correction applied. NOT converged by the loop's criterion.**
 >
 > ```
 > Round 1: Codex 2 P1 / 9 P2 / 2 P3; Opus adversarial post-judging P1 3 · P2 11 · P3 4, 4 root causes.
 > Round 2: Codex 3 P1 / 3 P2 / 1 P3; Opus adversarial post-judging P1 2 · P2 6 · P3 3, 5 root causes.
 > Round 3: Codex 3 P1 / 0 P2 / 0 P3; Opus adversarial post-judging P1 3 · P2 1 · P3 0, 2 root causes.
 > Round 4: Codex 1 P1 / 1 P2 / 1 P3; Opus adversarial post-judging P1 1 · P2 2 · P3 3, 3 root causes.
+> v0.6:   NOT A REVIEW ROUND. A post-sign-off P1, raised by an INDEPENDENT session that had not
+>         read this document, plus two source-verified defects relayed by the orchestrator. No
+>         round number is claimed for it and no finding counts are entered above.
 > ```
 >
 > **Date:** 2026-09-20. ⚠️ **NO CONVERGENCE IS CLAIMED, AND NONE MAY BE.** The loop's criterion is
@@ -17,6 +20,15 @@
 > disposition is a **rewrite pass with per-edit verification**"*, and named **five verifications** as
 > the completion test. **v0.5 is that pass. Its completion criterion is those five verifications,
 > executed and recorded in §9 — not a zero-zero round.**
+>
+> ⚠️ **v0.6 IS NOT A SIXTH ROUND AND CLAIMS NOTHING v0.5 DID NOT.** It applies one **P1 found after
+> sign-off**, by an independent session that had never read this document: §5c's *"Exactly three
+> sites make a scope claim"* was **false — there are eight**, and the three the brief named were
+> sitting inside recipe (c)'s own output, mis-classified. Two further defects, relayed by the
+> orchestrator and re-verified here on `src/capi/engine.cpp`, are folded in: the replacement
+> remediation's retry arm is **impossible** at the only site that motivates it, and the producer
+> class that site sits in was labelled *"not allocation"* when its handler cannot tell allocation
+> from thread-creation failure. **All three are one root cause** (Appendix, `v0.5 → v0.6`).
 >
 > ⚠️ **Round 4 sits beyond the loop's 3-round Phase A cap, as the pass that produced v0.4 did, and
 > the user authorised each explicitly.** v0.4's authorisation rested on the round-3 review's closing recommendation — *"the
@@ -29,24 +41,39 @@
 > source-grounded. Two issues were filed out of round 3 and are cited where they bind: **fixpp#487**
 > (`guarded_call_*` has no source-level implementation) and **fixpp#488** (`[2i §6.5]`'s
 > construction-only clause measured against its 24 producers). ⚠️ **A third, fixpp#489, was filed
-> out of round 4** — *"`FIXPP_ERR_CAPI_CONFIG_INVALID` has four producer classes, not one — decide
-> which should re-point at domain codes"* — because **#488's own "Suggested fix" is the amendment
+> out of round 4** — ⚠️ **retitled since, and re-read live at v0.6 rather than re-quoted from this
+> document:** *"`FIXPP_ERR_CAPI_CONFIG_INVALID` has **five** producer classes, not one — decide
+> which should re-point at domain codes"* (`gh issue view 489`; its class-E row now reads
+> *"worker-launch catch-all"*, matching §5c's corrected label) — because **#488's own "Suggested fix" is the amendment
 > B6 performs**, so B6's PR **closes** #488 and #489 carries the re-pointing residue v0.4 had
 > wrongly attached to it (§7).
 >
 > **Owner:** Opus (Phase A designer). **Issues:** fixpp#447, fixpp#458, fixpp#452.
-> **Tree:** submodule branch `447-458-452-capi-refusals`. The **tracked** tree equals `origin/main`
-> at `e391944c`; **this draft is the sole untracked file**, and that is load-bearing — §9 exists
-> because the citation gate cannot report on an untracked file. ⚠️ **v0.2's header printed
-> `(no output)` and called the tree "clean", contradicting §9 row 4 in the same document.** The real
+> **Tree:** submodule branch `447-458-452-capi-refusals`. ⚠️ **THE PREMISE CHANGED AT v0.6 AND §9
+> IS RE-MEASURED RATHER THAN ANNOTATED: this document is now TRACKED AND COMMITTED.** Every revision
+> through v0.5 rested on *"this draft is the sole untracked file"*, and that premise was load-bearing
+> — §9 existed because the citation gate **cannot report on an untracked file**, so a clean result
+> from it would have been an instrument reporting clean because it could not report anything else.
+> It is no longer true. The gate is now runnable in its **ordinary** form, and §9 runs **both** forms
+> because they read different corpora: `--range origin/main..HEAD` reads the **commit** that carries
+> this file, and `--staged` reads the **index**, which is the only corpus a v0.6 edit that is not yet
+> committed appears in. ⚠️ **Figures measured under the untracked premise are SUPERSEDED, not carried
+> forward** — v0.5's §9 rows 0–7 each encode that premise in their own text (*"every line is an
+> addition — the file is untracked"*, *"back to untracked"*), so they are **replaced**. ⚠️ **v0.2's
+> header printed `(no output)` and called the tree "clean", contradicting §9 row 4 in the same
+> document**; that defect belonged to the old premise and is recorded, not repeated. The real
 > transcript, executed for this revision:
 >
 > ```
-> git rev-parse --abbrev-ref HEAD   ->  447-458-452-capi-refusals
-> git rev-parse HEAD                ->  e391944c58491a9f2d4a8353fb153c18e5a9388b
-> git diff --stat origin/main       ->  (no output)          # tracked tree == origin/main
-> git status --porcelain            ->  ?? .specify/447-458-452-capi-refusals.md
+> git rev-parse --abbrev-ref HEAD                          ->  447-458-452-capi-refusals
+> git rev-parse origin/main                                ->  e391944c58491a9f2d4a8353fb153c18e5a9388b
+> git ls-files --error-unmatch <this file>                 ->  the path, rc=0        # TRACKED
+> git status --porcelain                                   ->  (no output)           # clean at v0.5's commit
+> git diff --stat origin/main..HEAD                        ->  one file changed, and it is this one
 > ```
+>
+> ⚠️ **No added-line count is printed from that last command, for §9's reason**: the condition is
+> *"the range contains exactly this file"*, and a line count is falsified by the next edit.
 >
 > **Trigger.** `[const §X.1]` — *"The C ABI in `include/fix/c_api.h` is a versioned contract. Every
 > change to it is reviewed against the contract; Codex Gate A is mandatory."* Also
@@ -87,20 +114,29 @@
 > addition gate. ⚠️ Note for a reader who follows a pointer into `include/fix/c_api/message.h`: that
 > header carries pre-existing `parser.hpp:NNN` citations. They are not a licence to add more here.
 >
-> **The staged-gate procedure, and its result.** ⚠️ **While this document is UNTRACKED the gate
-> reports clean because it cannot report anything else** — `--range` reads commits, `--staged` reads
-> the index, and `git add -N` yields an empty `git diff --cached`, so all three print
-> *"no new line-number citations … OK"* over a file they never opened. This document was therefore
-> staged for real and the gate proven able to report non-zero on **this file's own staged diff**, not
-> merely on the tool's self-test fixtures. The recipe, re-runnable by anyone amending this document:
+> **The gate procedure, and its result — REWRITTEN AT v0.6 FOR THE TRACKED PREMISE.** ⚠️ **The
+> reason the staged form was load-bearing has expired, and the reason it is still run has not.**
+> While this document was untracked, `--range` read commits, `--staged` read the index and `git
+> add -N` yielded an empty `git diff --cached`, so all three printed *"no new line-number
+> citations … OK"* over a file they had never opened — a clean result no instrument could have
+> failed to give. Now that the file is committed, **`--range origin/main..HEAD` reads it for real**
+> and is the form that matches the file's state. `--staged` is still run, for a different reason:
+> **a v0.6 edit that is not yet committed is invisible to `--range`**, so the two forms are not
+> substitutes. **Both still need the seeded positive control**, because `rc=0` from either is
+> indistinguishable from a gate that read nothing until the detector has been shown firing on this
+> file's own content. The recipe, re-runnable by anyone amending this document:
 >
 > ```
+> python3 tools/check_line_citations.py --range origin/main..HEAD   # committed content; expect OK, rc=0
 > git add -- .specify/447-458-452-capi-refusals.md
-> python3 tools/check_line_citations.py --staged          # expect OK, rc=0
-> # seed one `path:NNN` into the staged content, re-stage, re-run  -> expect rc=1 quoting the seed
-> # restore, verify `cmp` identical, re-stage, re-run              -> expect OK, rc=0
-> git restore --staged -- .specify/447-458-452-capi-refusals.md
+> python3 tools/check_line_citations.py --staged                    # uncommitted edits; expect OK, rc=0
+> # seed one `path:NNN` into the staged content, re-stage, re-run   -> expect rc=1 quoting the seed
+> # restore, verify `cmp` identical, re-stage, re-run               -> expect OK, rc=0
 > ```
+>
+> ⚠️ **`git restore --staged` is NO LONGER the last step.** Under the untracked premise it returned
+> the file to `??`; against a tracked file it un-stages an edit that must stay staged or committed.
+> Carrying that step forward would have been the premise change going unread.
 >
 > **Executed, this revision:** see §9, which prints the three return codes and the `cmp` result.
 >
@@ -220,7 +256,7 @@ Quoted verbatim; each is discharged in a named section, not in prose here.
 | # | obligation, verbatim | discharged in |
 |---|---|---|
 | 1 | *"bumps `FIXPP_C_ABI_VERSION_MINOR`, not MAJOR, so the error-code downgrade frame of §4 stays continuous"* | §5b |
-| 2 | *"is marked **BREAKING** in the documentation of each affected declaration (in the version comment of `version.h` where no declaration carries the change), in the PR description, and in the behaviors-and-limitations delta"* | §5a (declarations), §5c (B&L delta) |
+| 2 | *"is marked **BREAKING** in the documentation of each affected declaration (in the version comment of `version.h` where no declaration carries the change), in the PR description, and in the behaviors-and-limitations delta"* | §5a (declarations), §5c (B&L delta), **§5c's PR-body sub-clause (PR description)**. ⚠️ **THE THIRD LIMB HAD NO HOME UNTIL v0.6** — it is **three** limbs and this table discharged **two**, while *"PR description"* occurred exactly once in the whole document: inside the quoted obligation itself. It is **mandatory under `[const §X.7]` and checkable at Gate B**, and this repo has already lost a gate to a missing PR-body heading |
 | 3 | *"updates every in-repository consumer (the Python binding, tests, examples, interop harnesses) in the same PR"* | §5d |
 | 4 | *"remains subject to §1 review and to all four Appendix A controls"* | this document is the `[const §X.1]` Gate A; §5e records the other three |
 
@@ -253,10 +289,20 @@ A guard keyed on one misses the other. A guard keyed on the erased **position** 
 fire when the group itself is the target and it happens to be the last entry; a guard keyed on the
 erased **tag** (mode b) does not fire for an unrelated scalar before the group.
 
-**The three "stable under reallocation" comments are NARROWER than they read — they are not false.**
-All are scoped to growth: *"stable under the vector reallocations that `add_entry` / `group_begin`
-trigger"*. Append-only growth does preserve position. **No comment anywhere claims stability under
-erasure**, and `upsert_pair` states the invariant positively — *"without moving any existing entry,
+**The three "stable under …" comments do not say one thing, and v0.6 states them SEPARATELY because
+the previous phrasing shielded the wrong one.** ⚠️ **v0.5 wrote *"All are scoped to growth"* and
+that is FALSE of two of the three** — read at the source:
+
+- *"stable under the vector reallocations that `add_entry` / `group_begin` trigger"* — **growth-scoped**, as claimed.
+- *"pointer stable under move; not under `push_back`"* — **POINTER stability, and the opposite polarity**: it says the pointer is *not* stable under growth. It is not a growth-scoping at all.
+- *"hold **INDICES** re-resolved per call (stable under vector reallocation)"* — ⚠️ **UNQUALIFIED, and it is about INDICES — exactly what `remove_tag` invalidates.** This is the comment a Gate B reviewer will cite, and the old phrasing did not cover it.
+
+⚠️ **The narrow conclusion survives, and it survives for a reason the old phrasing hid:
+REALLOCATION AND ERASURE ARE DIFFERENT EVENTS.** A `std::vector` reallocation moves the buffer and
+preserves every index; an erase shifts the tail and does not. So the unqualified comment is **true**
+as written rather than narrow — it promises index stability under *reallocation*, and `remove_tag`
+breaks index stability under *erasure*, which the comment never mentions. **No comment anywhere
+claims stability under erasure**, and `upsert_pair` states the invariant positively — *"without moving any existing entry,
 because open group builders and entries hold indices into these vectors."* `remove_tag` predates and
 violates *that* sentence. ⚠️ A finding phrased *"the comments are wrong"* is falsifiable and will be
 falsified; the finding is the invariant `remove_tag` breaks.
@@ -840,14 +886,19 @@ allocation failure is what the local boundary catches*. **Re-derive if you need 
 > printed in §5c. v0.3 measured the divergence at **one** identifier (clone), priced the cost of
 > amending against a population of one, and deferred it. Correcting that population inverts the
 > argument: **this is a factual correction to a clause about producers, not a rewrite of an error
-> code's meaning**, it costs **three prose sites in one design document**, it reds no pin and it
-> mints nothing. ⚠️ **v0.4 said "one table row" and the live scope claim is made at THREE sites in
-> `[2i]`** — §1.1's Sentinel-codes parenthetical, §4.4's `fixpp_strerror` producer parenthetical and
-> **both** clauses of §6.5's row. §5c derives them by complement and prints the arithmetic. The cost
-> argument survives the correction unchanged. Option (c) *retains*
+> code's meaning**, it costs **prose passages in one design document**, it reds no pin and it
+> mints nothing. ⚠️ **THE POPULATION HAS NOW MOVED TWICE AND THE NUMBER IS DELIBERATELY NOT REPEATED
+> HERE.** v0.4 said *"one table row"*; v0.5 said **three sites**; **v0.6 adjudicates EIGHT**, after a
+> P1 raised by an independent session. **The condition, which is what survives: every passage in
+> `[2i]` that BINDS the code to a producer set is amended; a passage that merely mentions it in a
+> count, a changelog or a hedged list is not.** §5c states that condition, names the three
+> exemptions, quotes the passage adjudicated at every site, and **audits the criterion** — the step
+> four rounds never had. **Re-derive from §5c; do not carry a figure out of this bullet.** The cost
+> argument survives every correction unchanged: prose in one design document, no pin red, nothing
+> minted. Option (c) *retains*
 > clone's return (narrowed to `bad_alloc`) and obligation 2 *publishes* it on the declaration, so the
-> contradiction would otherwise be published by this very PR. **B6 carries all three sites (§5c),
-> and B6's PR CLOSES fixpp#488** — the issue's own *"Suggested fix"* is *"Amend §6.5's row … costs
+> contradiction would otherwise be published by this very PR. **B6 carries the whole adjudicated
+> population (§5c), and B6's PR CLOSES fixpp#488** — the issue's own *"Suggested fix"* is *"Amend §6.5's row … costs
 > one table row"*, which is what B6 performs. ⚠️ **The producer-RE-POINTING question is NOT in
 > #488's body at all** — v0.4 asserted a split the issue does not contain — and it is filed
 > separately as **fixpp#489** (§7).
@@ -1324,7 +1375,14 @@ sites in `src/session/admin_messages.cpp`:
 | `password` | `optional<std::string>` | yes — tag 554 | yes, at `Session::open` |
 | `supported_msg_types[].msg_type` | `std::string` inside a vector | yes — tag 372 inside the 384 group | **no** (⚠️ §3.2) |
 
-**Both negatives the issue asked about are clean, and structurally so:**
+⚠️ **RE-ATTRIBUTED AT v0.6 — the DECISION is unchanged, the attribution was wrong.** v0.5 wrote
+*"Both negatives the issue asked about"*. **#452 poses no negatives**: it asks to *"Check any other
+configured string that reaches the wire verbatim, such as `default_appl_ver_id` and sub-IDs, **if
+configurable**"* — a hedged request for a sweep, naming **no tag numbers**. **The issue asks for a
+sweep of configured strings; this document enumerates them and disposes of each**, and the seven-tag
+enumeration below is **this document's work, not the issue's ask**. D-5a's *"asks for the sweep"*
+remains a fair paraphrase. **Both members the sweep returns as non-injectable are clean, and
+structurally so:**
 `default_appl_ver_id` is `std::optional<fixpp::dict::application_version>` where
 `application_version` is an `enum class : std::uint8_t`, reaching the wire only through a fixed
 ordinal→literal mapping — **non-injectable by construction**, not by validation. The sub-IDs
@@ -1532,7 +1590,7 @@ exhibiting that witness.
 | 2 | #447's error code; whether the out-of-range arm becomes a defined error | `FIXPP_ERR_INVALID_HANDLE`, per `fixpp_msg_commit`'s precedent (D-2). Out-of-range becomes a **defined refusal**, assessed as unreachable after D-1 (D-2b). ⚠️ **Condition widened at v0.3** to *every raw dereference of `group_field_index`/`instance_index` reachable from a C-ABI entry point* — three classes, including `fixpp_entry_set_data`'s direct subscript and `builder_context`'s immediate dereference | §1.1a, §1.4 |
 | 3 | #458 mint vs reuse `translate()`, with the B11 cost stated | **Reuse `translate()`; mint nothing** (D-3). B6 then touches none of B11's files. Fan of **three** codes, not two | §2.3 |
 | 3b | is `fixpp_msg_clone` a construction-time or a steady-state thunk? | **RE-ADJUDICATED v0.3: it stays STEADY-STATE, and `[2i §5.2]` is NOT amended.** ⚠️ **MECHANISM CORRECTED v0.4:** the boundary is **nested inside clone's own body** — an **outer** `catch (...)` that logs at fatal level and `std::abort()`s (matching the shipped `fputs` + `std::abort()` idiom in `src/capi/session.cpp`), wrapping an **inner** `catch (std::bad_alloc const&)` that keeps `FIXPP_ERR_CAPI_CONFIG_INVALID` (preserving the 066 pin) and the `if (parsed)` arm that takes D-3's `translate()` (D-3b). **`guarded_call_steady` does not exist in source** — measured 0 hits across `src/ include/ tests/ bench/` against a 77-hit control — so v0.3's *"escapes to `guarded_call_steady`"* delegated to nothing and, taken literally, would have **newly violated** `[2i §6.2]`'s no-exception-crosses-`extern "C"` limb. Filed as **fixpp#487**. ⚠️ v0.2's reclassification, its "3 → 4" whitelist amendment and its four-allocation enumeration remain **withdrawn** | §2.3a |
-| 3c | `[2i §6.5]`'s *"Used only by `guarded_call_construction`"* — residual or amendment? | **DECIDED v0.4; POPULATION and ISSUE ROUTING CORRECTED v0.5: B6 carries a THREE-SITE, condition-stated amendment in `[2i]` and its PR CLOSES fixpp#488; the producer RE-POINTING residue is fixpp#489.** The clause is false of **24 of 24** direct `return FIXPP_ERR_CAPI_CONFIG_INVALID` sites as literally written, false of **21 of 24** against §5.2's whitelist, and false of **at least 4** even on the strictest steady-side reading — including `fixpp_session_send`, the symbol §5.2 uses to *define* the steady side. ⚠️ v0.3 deferred this having measured the population at **one** identifier (clone); the corrected population inverts the cost argument. The amendment reds no pin, mints nothing and touches no source | §2.3a, §5c, §7 |
+| 3c | `[2i §6.5]`'s *"Used only by `guarded_call_construction`"* — residual or amendment? | **DECIDED v0.4; POPULATION CORRECTED v0.5 AND AGAIN AT v0.6 — B6 carries a condition-stated amendment at EIGHT passages in `[2i]`, its PR CLOSES fixpp#488, and the producer RE-POINTING residue is fixpp#489.** ⚠️ **v0.5's "THREE-SITE" was a post-sign-off P1**, raised by an independent session; §5c now states the membership **condition** and audits the criterion rather than publishing a fourth figure. The clause is false of **24 of 24** direct `return FIXPP_ERR_CAPI_CONFIG_INVALID` sites as literally written, false of **21 of 24** against §5.2's whitelist, and false of **at least 4** even on the strictest steady-side reading — including `fixpp_session_send`, the symbol §5.2 uses to *define* the steady side. ⚠️ v0.3 deferred this having measured the population at **one** identifier (clone); the corrected population inverts the cost argument. The amendment reds no pin, mints nothing and touches no source | §2.3a, §5c, §7 |
 | 4 | #458's C++ half — what "stays degraded" means | **RE-DECIDED v0.2, SCOPED v0.3, SCOPED AGAIN v0.4.** The reify factory materialises **eagerly** and refuses through its existing `expected_t` channel on **one** condition: a **failed dict-backed re-parse** (D-4). ⚠️ v0.2's *"nothing stays degraded"* is **false and withdrawn**: a dict-free `OffsetTable` degradation is **retained**, is state 5b, pinned by `ReifyErrorContract.ViewRebuildOomDegradesNotTerminate`. ⚠️ **v0.3's FRAMING arm is also withdrawn**: `Framer::feed` on a zero-byte span **succeeds with an empty span**, and **ten shipped cells in three files** ride that arm, so refusal there reds them whatever enumerator it carries. Live states are **five**, not four. No accessor is added | §2.4 |
 | 5 | #452 helper shape and home; 372 in scope | A **`session`** leaf-header predicate replacing the lambda (D-5b — `core` and the layering argument for it are both retracted); **372 in scope**, C++ track only (D-5a); the setters keep `FIXPP_ERR_CAPI_CONFIG_INVALID` on sibling-consistency and the grouped `translate()` arm is not re-pointed (D-5c). ⚠️ **The code-asymmetry claim and `L-452-1` are DELETED** | §3.2–§3.4 |
 | 6 | the 1.7 bump's pin population and the freeze coupling | §5b. ⚠️ The `session.h` / `message.h` re-baselines follow from **obligation 2 editing those headers' bytes**, not from the version bump | §5b |
@@ -1580,7 +1638,7 @@ functions that reach it. A new resolver consumer appears as a new outer call sit
 | file | declaration | what obligation 2 requires |
 |---|---|---|
 | `include/fix/c_api/message.h` | `fixpp_msg_remove_tag` | Today its whole doc block is *"Remove a tag from the accumulator. Idempotent (absent returns OK). Reentrancy: requires-session-lock"* — **it lists no error codes at all.** Needs the BREAKING marking, the new `FIXPP_ERR_INVALID_HANDLE` condition, an error-code list, and the two refused-but-safe classes (§1.3) stated rather than implied |
-| `include/fix/c_api/message.h` | `fixpp_msg_clone` | BREAKING marking, the three D-3 codes, **and** `FIXPP_ERR_CAPI_CONFIG_INVALID` for allocation failure during clone construction. ⚠️ **No `[2i §5.2]` amendment precedes this at v0.3** — D-3b's local boundary makes the code a handled return value rather than a guard translation, so the whitelist is untouched (§2.3a). The published wording must say *allocation failure*, not *configuration error* — and after this PR that wording contradicts no live scope claim in the owner document, because the same PR amends **all three of those claims**: `[2i §1.1]`'s Sentinel-codes parenthetical, `[2i §4.4]`'s producer parenthetical, and **both clauses** of `[2i §6.5]`'s row, its remediation column included — each replaced with the condition-stated form (§5c). ⚠️ **Also BREAKING on the abort limb** (§2.3a): a non-`bad_alloc` exception that returns today terminates under D-3b, declared in **B-458-1** |
+| `include/fix/c_api/message.h` | `fixpp_msg_clone` | BREAKING marking, the three D-3 codes, **and** `FIXPP_ERR_CAPI_CONFIG_INVALID` for allocation failure during clone construction. ⚠️ **No `[2i §5.2]` amendment precedes this at v0.3** — D-3b's local boundary makes the code a handled return value rather than a guard translation, so the whitelist is untouched (§2.3a). The published wording must say *allocation failure*, not *configuration error* — and after this PR that wording contradicts no live scope claim in the owner document, because the same PR amends **every live passage in `[2i]` that binds the code to a producer set** — `[2i §1.1]`'s Sentinel-codes parenthetical, `[2i §4.4]`'s producer parenthetical, `[2i §5.2]`'s flavour bullet **and** its `guarded_call_construction` per-call-site partition, `[2i §5.4]`'s parenthetical, **both clauses** of `[2i §6.5]`'s row plus that section's counting-convention appositive, and `[2i §10 Q2]`'s decision row — each replaced with the condition-stated form, remediation column included (§5c). ⚠️ **v0.5 listed three of those eight**; the shortfall was a post-sign-off P1, and the membership **condition** in §5c is what this row now depends on rather than a count. ⚠️ **Also BREAKING on the abort limb** (§2.3a): a non-`bad_alloc` exception that returns today terminates under D-3b, declared in **B-458-1** |
 | `include/fix/c_api/session.h` | `fixpp_session_config_set_comp_ids` | BREAKING marking, the refusal condition, `FIXPP_ERR_CAPI_CONFIG_INVALID`. ⚠️ **No asymmetry note** — §3.4 deletes it |
 | `include/fix/c_api/session.h` | `fixpp_session_config_set_begin_string` | same |
 | `include/fix/c_api/version.h` | the `FIXPP_C_ABI_VERSION_MINOR` version comment | MINOR 6 → 7 with a re-authored trailing comment naming these three issues |
@@ -1744,6 +1802,19 @@ from the ledger delta.
 Plus §7's two out-of-scope residuals, which are limitations if they are written down and defects
 found at Gate B if they are not.
 
+**The PR-body BREAKING marking — obligation 2's THIRD limb, which had no home before v0.6.**
+`[const §X.7]` requires the BREAKING marking *"in the documentation of each affected declaration …,
+**in the PR description**, and in the behaviors-and-limitations delta"*. §5a discharges the first and
+the B&L rows above discharge the third; ⚠️ **the middle limb was discharged nowhere, and the phrase
+*"PR description"* occurred exactly once in this document — inside the quoted obligation itself.**
+It is **checkable at Gate B**, and this repo has already lost a gate to a PR-body heading that was
+present in bold but not as a heading. **B6's PR body must carry, as its own `##` heading, a BREAKING
+section naming all three changes in `#428`'s in-tree spelling** — *"`-- (1.7, BREAKING) …`"* /
+*"Since 1.7 (BREAKING), …"* — one line each for `fixpp_msg_remove_tag`'s builder-open refusal,
+`fixpp_msg_clone`'s failed-re-parse refusal **and its abort limb**, and the two session-config
+setters' byte floor. ⚠️ **A heading, not bold text**, and ⚠️ **do not invent a second spelling**:
+#428's is the in-tree precedent §5a already binds the headers to, and the body must match it.
+
 **`.specify/2i-capi.md` — READ for this revision, not deferred.** ⚠️ v0.1 parked the one-second grep
 that decides this as §8 item 4, on the grounds that the file is long. That item is **deleted**.
 
@@ -1783,49 +1854,163 @@ grep -n "Construction-time flavour\|Construction-time exceptions\|Construction-t
 The whitelist for v1.0\|correct the config; retry" .specify/2i-capi.md
   ->  §5.2, §5.4, §6.2, §6.5's code row
 
-# (c) NEW at v0.5 — the population for a clause about the ERROR CODE is every live
-#     occurrence of the CODE, each READ for whether its sentence makes a SCOPE claim:
-grep -n "FIXPP_ERR_CAPI_CONFIG_INVALID" .specify/2i-capi.md   ->  19 matching lines
+# (c) the RETRIEVAL for a clause about the ERROR CODE — every occurrence of the CODE.
+#     ⚠️ THIS STEP WAS NEVER THE BLIND ONE. At v0.5 it returned all three of the sites
+#     v0.5 then missed. Retrieval is deliberately a SUPERSET; the adjudication is
+#     step (c2) below and it is where the P1 lived.
+grep -c "FIXPP_ERR_CAPI_CONFIG_INVALID" .specify/2i-capi.md   ->  19
 # control — a DIFFERENT pattern, positive on the SAME corpus, so 19 is a measurement
 # and not a mis-invoked command:
 grep -c "guarded_call" .specify/2i-capi.md                    ->  21
-# and the COMPLEMENT, which is what proves the recipe CAN return what the amendment
-# claims is absent: the abbreviated spelling is a strict SUPERSET of the full one, so
-# a fourth scope claim hiding behind `_CAPI_CONFIG_INVALID` would show up as a
-# difference here and does not:
+# the abbreviated spelling is a strict SUPERSET of the full one, and it is the corpus
+# actually adjudicated, so nothing can hide behind the shorter form:
 grep -ci "config.invalid" .specify/2i-capi.md                 ->  24   (= 19 + 5)
 ```
 
-⚠️ **Classify the 19 by what the enclosing SENTENCE asserts; derive the edit set by COMPLEMENT, not
-by vocabulary.** Exactly three sites make a **scope claim** — they assert *which* producers may emit
-the code — and all three are false of the 24 producers. The other sixteen make no scope claim, and
-that is precisely why they are **not** edited:
+⚠️ **(c2) — THE ADJUDICATION, AND THIS IS THE STEP v0.6 REPLACES. v0.5's classification of the 24
+was WRONG, and the P1 it produced was found after sign-off by an INDEPENDENT session that had not
+read this document.** v0.5 wrote *"Exactly three sites make a **scope claim** … The other sixteen
+make no scope claim."* **The live scope-claim population is EIGHT.** ⚠️ **The three the independent
+session named were inside recipe (c)'s own output the whole time** — §5.2's construction-time-flavour
+bullet, §5.2's `guarded_call_construction` doc comment and §5.4's construction-time-exceptions
+bullet — and two more fall out of adjudicating them consistently (§6.5's counting-convention
+appositive and §10 Q2's decision row).
 
-| class | sites | scope claim? |
+⚠️ **ONE MISCLASSIFICATION, NOT TWO MISCOUNTS — and the arithmetic shows it.** v0.5's *"whitelist
+statement"* class held **six** sites; **four of them move out** (the three above plus §10 Q2) and it
+collapses to **two**. The scope class did not grow because a new search found new text; it grew
+because the class test was wrong and one class absorbed the other's members. ⚠️ **A relay reached
+this revision claiming the six was reachable only by counting a frozen Appendix C line into it; that
+is FALSE on source** — all six of v0.5's named sites (§5.2 ×2, §5.4, §6.2, §9 seam #5a, §10 Q2) are
+live body text and no Appendix C line was ever in that class. The single-error framing survives the
+correction; the Appendix C detail does not.
+
+⚠️ **THE CONDITION, WHICH IS WHAT SURVIVES A COMMIT — a count here does not.** A passage is a
+**scope claim** iff **it binds the code to a producer set**: it says, of
+`FIXPP_ERR_CAPI_CONFIG_INVALID` itself, *which* entry points, constructs or situations may emit it.
+The test is **positive**, and it has exactly **three** exemptions, each of which must be **quotable
+from the passage itself**:
+
+1. an **explicit non-exhaustiveness marker** governing the code's producer list (`/ etc.`, an `e.g.`
+   that governs the producers rather than the exception examples, *"or any future …"*);
+2. the passage's **subject is a test's assertion**, not the code's production — it says what a seam
+   verifies on an injected case and defers the scope elsewhere;
+3. the passage's **predicate is a count or a version-transition record** — numbering, a block tally,
+   or a changelog entry describing an edit that was made.
+
+⚠️ **v0.5's test was none of these. It was the single lexical trigger *"does the sentence say ONLY
+of the code?"*, and that trigger is measurably blind.** Run mechanically over the eight adjudicated
+scope passages it fires on **three** — and **two of those three firings are on an `only` that is not
+predicated of the code at all** (§5.2's *"used only by entry points"*, which scopes the *construct*,
+and §6.5's counting convention's *"variants only"*, which scopes a *count*). **As v0.5 applied it —
+`only`, predicated of the code — it returned ONE of the eight: §6.5's row.** The trigger is both
+under- and over-inclusive, which is why replacing it with another trigger would be the fifth
+respelling and is not what this revision does.
+
+**THE RE-DERIVATION RECIPE, AND ITS FOUR OBLIGATIONS. Re-run it; never trust the table below.**
+
+- **(c2.i) Retrieve the superset.** `grep -ci "config.invalid"` over `.specify/2i-capi.md` — the
+  abbreviated spelling, which strictly contains the full one. Over-returning is safe; the whole
+  defect class is under-returning.
+- **(c2.ii) Expand every hit to its CLAIM UNIT and QUOTE it.** ⚠️ **The unit is not the line and not
+  the code-bearing cell.** Two of the eight prove why: §6.5's scope claim lives in a **table cell
+  that does not contain the code token** (the middle column), and §5.2's per-call-site partition is
+  a **doc comment spanning several lines**. A code-keyed, line-keyed extraction under-returns both.
+  The unit is the complete statement — table **row**, list **bullet**, or **sentence including its
+  continuations**. ⚠️ **A class label with no quoted passage is not an adjudication**, and that is
+  precisely how v0.5's five misfiles became invisible: they were labelled by **section role**
+  (*"whitelist statement"*) and no reader could see which sentence had been judged.
+- **(c2.iii) Apply the positive test**, naming the exemption **by its quoted token** wherever the
+  answer is NO.
+- **(c2.iv) AUDIT THE CRITERION — the obligation none of the four rounds had.** Run whatever lexical
+  trigger you are tempted to trust over the passages the READ classified, and print its recall. A
+  trigger scoring below 100 % **is** the blind part. v0.5's scores **1 of 8**.
+
+**THE EIGHT, EACH WITH THE QUOTED PASSAGE THAT WAS ADJUDICATED.** ⚠️ **All eight are false of the 24
+producers**, on every one of the three readings §5c derives below.
+
+| `[2i]` site | the passage adjudicated (quoted, not summarised) | why it binds the code |
 |---|---|---|
-| **scope claim — AMENDED by B6** | **§1.1's Sentinel-codes parenthetical** · **§4.4's `fixpp_strerror` lookup-table producer parenthetical** · **§6.5's row, BOTH clauses** | **yes — all three falsified by the 24** |
-| whitelist statement — says what *construction* thunks do, without exclusivity | §5.2 (twice), §5.4, §6.2, §9 seam #5a, §10 Q2 | no — none says *only* of the code, and D-3b leaves clone steady |
-| count / layout | §1.1's magnitude-domain row, the `#define`, §6.5's counting convention, §6.5's introduced-variants tally, §4.3's block line | no |
-| history | Appendix C's round-1 and round-2 entries | no |
+| **§1.1** — Sentinel-codes paragraph | *"the cross-cutting fallback for **construction-time** C-ABI thunk exceptions where no domain `_CONFIG` code applies"* | definite article, definitional, in the section that **defines** the code |
+| **§4.4** — `fixpp_strerror` lookup-table excerpt | *"C ABI config invalid (**engine_create / dict_load / msg_create_outbound**)"* | a closed three-symbol enumeration, no hedge |
+| **§5.2** — construction-time-flavour bullet | *"(or the new `FIXPP_ERR_CAPI_CONFIG_INVALID` **for the engine-construction case where no domain prefix applies** — see §6.5 below)"* | ⚠️ **MISSED FOR FOUR ROUNDS.** The `for …` clause assigns the code to one case |
+| **§5.2** — `guarded_call_construction` doc comment | *"The domain-appropriate code is selected **per call site**: dictionary load surfaces `FIXPP_ERR_DICT_CONFIG`; **engine creation surfaces `FIXPP_ERR_CAPI_CONFIG_INVALID`**; outbound message creation surfaces `FIXPP_ERR_DICT_CONFIG` when the `msg_type` is not in the dictionary."* | ⚠️ **MISSED FOR FOUR ROUNDS, AND IT IS THE STRONGEST CLAIM IN THE FILE** — an **exhaustive partition** over the whole whitelist, with no hedge anywhere in it |
+| **§5.4** — construction-time-exceptions bullet | *"(or the new cross-cutting `FIXPP_ERR_CAPI_CONFIG_INVALID` **for engine creation when no domain prefix applies** — see §6.5)"* | ⚠️ **MISSED FOR FOUR ROUNDS.** The bullet's outer `e.g.` governs the **exception examples**; the parenthetical scoping the **code** carries no hedge of its own |
+| **§6.5** — the code's row, **BOTH** clauses | *"**Used only by** `guarded_call_construction` per `[arch §5.3]` carve-out where no specific domain `_CONFIG` code applies"*, and independently the middle column's *"a construction-time C-ABI thunk (`fixpp_engine_create`, `fixpp_dict_load_from_xml` …) caught a `std::exception` and chose this fallback code"* | exclusivity in one clause, a closed enumeration in the other |
+| **§6.5** — counting-convention **appositive** | *"(v0.2: added `FIXPP_ERR_CAPI_CONFIG_INVALID = 10` under RC#3 close — **the construction-time C-ABI thunk fallback for engine creation where no domain `_CONFIG` code applies**)"* | ⚠️ **ADJUDICATED AT v0.6, and the reasoning matters more than the verdict.** The *sentence's* subject and predicate are **arithmetic** (10 → 11 occupied), which is why v0.5 filed the whole line under `count`. But the **appositive** is a separate claim: definite article, **present tense**, describing the code — the same form as §1.1's, which v0.4 also filed under something else and v0.5 had to promote. **The enclosing clause's class does not immunise an embedded one.** ⚠️ **It cannot be left alone**: §6.5 would then state the NARROW scope one paragraph above the row stating the WIDE one — a contradiction **inside a single section**, which is worse than the cross-section one that makes this a P1. ⚠️ **AMEND THE APPOSITIVE; TOUCH NO NUMERAL** — see the gate note below |
+| **§10 Q2** — the thunk-split decision row | *"v1.0 **ships** the construction-vs-steady split … construction-time thunks (…) catch and translate to the domain-appropriate `FIXPP_ERR_*_CONFIG` code (**or the new `FIXPP_ERR_CAPI_CONFIG_INVALID` for the engine-construction case where no domain prefix applies**)"* | ⚠️ **ADJUDICATED AT v0.6.** Same unhedged `for …` clause as §5.2 and §5.4. **The distinguishing test against Appendix C, which carries the identical clause and is NOT amended:** does the passage describe an **edit** or state the **shipping policy**? Appendix C's verbs are verbs of editing, dated and scoped to a version transition (*"updated in lockstep"*, *"+1 new error variant"*) — a reader parses them as *what changed then*, which stays true whatever the document later says. §10 Q2's verbs are verbs of **shipping, in the present tense**, and it closes by indexing the **live** sections. It presents as current policy, so it **rots** if left behind |
 
-3 + 6 + 5 + 5 = **19.** ✓ The five further lines the complement returns (Appendix A.1's `CA-002`,
-Appendix B's engineering-judgment paragraph, two Appendix C rows, Appendix D.2's `CA-002`
-supplemental) spell the code as `_CAPI_CONFIG_INVALID` inside a **count** or a **history** sentence;
-**none is a fourth scope claim.** ⚠️ **Re-derive; never trust this table.** Run (c), open the
-enclosing sentence at each hit, and ask one question — *does this sentence assert which producers
-may emit the code?* A site that merely mentions the code in a whitelist, a tally or a changelog
-entry is not an edit target, and widening the edit to it would red `tools/check_capi_occupancy.sh`.
+**AND THE SIXTEEN THAT ARE NOT, WITH "NO EDIT NEEDED" STATED EXPLICITLY — because that is itself a
+claim, and an unstated one is how five of these got mis-filed in the first place.**
+
+| class | n | sites | the exemption, quoted from the passage |
+|---|---|---|---|
+| **whitelist / seam statement — NO EDIT NEEDED** | **2** | **§6.2**'s construction-time-exceptions bullet · **§9 seam #5a** | §6.2: the code sits in a list ending *"`/ etc.` per the source layer"* — **exemption 1**, and the bullet names no producer *of this code*. **v0.5's classification of §6.2 is CORRECT and is left alone.** · §9 seam #5a: the subject is *"**the test verifies** the C-ABI return is … (or `FIXPP_ERR_CAPI_CONFIG_INVALID` **per §6.5**)"* — **exemption 2**. ⚠️ **It INHERITS §6.5, so it needs no edit once §6.5 is fixed — and for exactly that reason it can never be cited as EVIDENCE of the code's scope.** v0.5 counted it toward a scope population; it cannot bear that weight in either direction |
+| count / layout — NO EDIT NEEDED | 4 | §1.1's magnitude-domain table row · §4.3's `#define` · §6.5's *"2i introduces 8 new variants"* sentence · §6.5's *"(8 new variants in the cross-cutting `[0, 99]` block …)"* tally | **exemption 3.** Each asserts numbering, not producers. ⚠️ **v0.5's prose for this class named five items and one was a phantom** — it listed *"the `#define`"* **and** *"§4.3's block line"* as separate sites when there is a single §4.3 occurrence, while §6.5's **two** tally sentences were written as one. The **set** of lines was right; the enumeration describing it was not, which is the same failure at a smaller scale |
+| history — NO EDIT NEEDED **under any resolution** | 5 | the Appendix C round-1 and round-2 entries | **exemption 3**, and stronger than that: **four of the five say only *"construction-time fallback"*, which is true of whatever scope is finally chosen**, so they need no edit whichever way this is resolved. ⚠️ **The fifth carries the full scope clause verbatim and is STILL NOT AMENDED** — it is a convergence-log record of what **v0.2 decided**, and the file's Appendix carries its own no-edit rule. **Rewriting it would itself be the defect**: a changelog edited to agree with the present stops being evidence of what the past said. **Classified frozen-historical, explicitly, not overlooked** |
+
+**8 + 2 + 4 + 5 = 19** on the full spelling. ✓ The **5** further passages the superset adds
+(Appendix A.1's `CA-002`, Appendix B's engineering-judgment paragraph, two more Appendix C rows,
+Appendix D.2's `CA-002` supplemental) are all **exemption 3** — counts and history — bringing the
+adjudicated corpus to **24**, and the scope population stays at **8**.
+
+**THE INSTRUMENT AUDIT, EXECUTED — both sides, because a criterion that only ever says YES is not a
+criterion.** Each of the ten live passages was cut to its own file and the criteria run over them:
+
+```
+# (ii) the OLD criterion, mechanised, over the 8 adjudicated SCOPE passages:
+grep -lE '\bonly\b' <the 8 scope passages> | wc -l            ->  3
+#   and only ONE of the three is an `only` predicated of the CODE (§6.5's row). The
+#   other two scope a CONSTRUCT (§5.2's "used only by entry points") and a COUNT
+#   (§6.5's "variants only"). As APPLIED, the old criterion returns 1 of 8.
+# (iii) the NEW criterion must be able to say NO. Its two exemption tokens, run over
+#   all ten passages, discriminate perfectly — 0 false exemptions on the eight:
+grep -c '/ etc\.'          <each of the 8 scope passages>  ->  0 0 0 0 0 0 0 0
+grep -c '/ etc\.'          <§6.2's passage>                ->  1
+grep -c 'the test verifies' <each of the 8 scope passages>  ->  0 0 0 0 0 0 0 0
+grep -c 'the test verifies' <§9 seam #5a's passage>         ->  1
+```
+
+⚠️ **That (iii) half is the arm four rounds never had.** A forced-miss arm cannot catch a spurious
+hit: a test that returns everything is not a test, and a widened population offered without it is
+indistinguishable from giving up on classification. The exemption tokens fire on **exactly** the two
+passages they are meant to exempt and on **none** of the eight.
+
+⚠️ **THE OCCUPANCY GATE DOES NOT WATCH ANY OF THIS, AND v0.5 SAID OTHERWISE.** v0.5's §1.1 row wrote
+*"the scoping parenthetical is outside everything the gate parses, and **the count sites are inside
+it**."* The first half is right; **the second is false**. `tools/check_capi_occupancy.sh`'s own
+`doc_rows` extraction — `grep -E "^\|[[:space:]]*\`?FIXPP_ERR_[A-Z]+_\*\`?[[:space:]]*\|"` —
+returns **8 rows, all in §1.1's magnitude-domain table**, and its Check B compares each against a
+`EXPECT_COUNT` map **hardcoded in the script** covering `DECIMAL WIRE DICT THREAD STORE SYNC TLS
+TRANSPORT`. **There is no cross-cutting-block entry**, Check A's symbol→numeric map is compared
+against `include/fix/c_api/error.h` and `tools/abi_history/error_codes_v1.txt` rather than the doc,
+and **the gate never reads §6.5, §3.11, §1.1's layout block or Appendix D.2 at all.** ⚠️ **So the
+risk INVERTS, and it inverts toward the quiet side.** Editing inside §6.5's counting-convention
+sentence **cannot red the gate** — the gate is not looking. What it **can** break is arithmetic that
+**nothing checks**: the *"11 occupied = 3 sentinels + 8 introduced"* identity and the *"10 → 11"*
+grow path, which exist **only** because a Codex round-2 finding caught the doc reading *"8 +
+sentinels"* and mistaking it for a 10-code block. **A fixer who rewrites that sentence for scope and
+gets the arithmetic subtly wrong reintroduces the exact finding the paragraph was written to close,
+and no instrument will report it.** ⚠️ **Hence the narrow instruction, whose two risks are now
+disjoint: replace the trailing appositive, TOUCH NO NUMERAL.** The sentence's subject and predicate
+are arithmetic and none of it depends on producer scope. ⚠️ **Recorded, and deliberately NOT acted
+on here:** `[2i §4.3]`'s occupancy bullet claims the gate *"asserts the counts published in this
+doc's §1.1 magnitude-domain table + the §1.1 final layout block + §3.11 prose + §4.3 inline comments
++ §6.5 prior-doc total + Appendix D.2 supplemental match"* and that *"the gate verifies the
+derivation"*. **Measured: it reads one of those six.** That is a documented guarantee the instrument
+does not provide; it is filed separately and is **not** in B6's scope. **Nothing in this document
+leans on it** — §5c's only claim about the gate is the one re-measured above.
 
 | `[2i]` section | what it says today | disposition |
 |---|---|---|
-| **§5.2** — the construction-vs-steady split | the criterion: *"used only by entry points whose invocation is the explicit C-ABI mirror of a constructor that may throw **on bad config**"*; whitelist closed at `fixpp_engine_create`, `fixpp_dict_load_from_xml`, `fixpp_msg_create_outbound`; `fixpp_msg_clone` named on the **steady** side twice (prose + `guarded_call_steady` doc-comment) | **READ; UNCHANGED at v0.3.** ⚠️ **v0.2 said "AMENDED … three symbols → four" and that is WITHDRAWN.** D-3b's local expected-allocation boundary keeps clone on the steady side, so the criterion is neither met nor tested and the whitelist is not touched (§2.3a) |
-| **§5.4** — construction-time exceptions, stated by enumeration | *"Construction-time exceptions (e.g., `fixpp_engine_create` …; `fixpp_dict_load_from_xml` …; `fixpp_msg_create_outbound` …) are caught by `guarded_call_construction`"* | **READ; UNCHANGED.** Returned by recipe (b), not by the symbol grep — which is the point of recipe (b) |
-| **§6.2** — exception safety, both limbs | *"No exception crosses `extern \"C\"` from a steady-state thunk — `std::abort` … is the trap"*, and *"Construction-time thunks (`fixpp_engine_create`, `fixpp_dict_load_from_xml`, `fixpp_msg_create_outbound`) catch and translate"*, verified by *"§9 seam #5a"* | **READ; UNCHANGED.** ⚠️ **v0.3's cell said the first limb *"is what D-3b's arm 3 now HONOURS"* and that was FALSE — rewritten at v0.4, not softened.** The limb has **two clauses**, and v0.3's edit inverted its own claim on both: (1) *no exception crosses* is **satisfied at `e391944c`** by the blanket `catch (...)`, and narrowing that catch with nothing outside it would have **newly broken** it; (2) *`std::abort` is the trap* is **not** satisfied at `e391944c` for clone, and no `guarded_call_steady` exists to supply it (§2.3a, fixpp#487). **Under D-3b's NESTED boundary both clauses hold**: the outer `catch (...)` in clone's own body keeps every exception inside `extern "C"` *and* makes the trap `std::abort()`. That is the amended claim — the mechanism changed, not the wording |
-| **§1.1** — the *"Sentinel codes"* paragraph, where the code is **DEFINED** | *"`FIXPP_ERR_CAPI_CONFIG_INVALID` (the latter NEW in v0.2 / RC#3 close — **the cross-cutting fallback for construction-time C-ABI thunk exceptions where no domain `_CONFIG` code applies**)"* | ⚠️ **AMENDED at v0.5 — A SITE v0.4's ONE-ROW EDIT MISSED.** This is the **same scope claim** as §6.5's, definite-article and definitional, in the section that *defines* the code — and it is **live and unsuperseded**: the whole §1.1 body was read for an amendment or supersession marker and carries none. **Replace the scoping parenthetical with the condition-stated form §6.5's row carries below.** ⚠️ **AMEND THE SCOPING PARENTHETICAL ONLY, AND THE COUNT LANGUAGE IS ELSEWHERE IN §1.1 — the locator matters, so it was read rather than inherited.** The Sentinel-codes paragraph **enumerates the eight names without a numeral**; the *"8 2i-introduced"* **count** lives in §1.1's **magnitude-domain table row** — the `FIXPP_ERR_CAPI_*` row whose owner column reads `2i` and whose count column reads **8** — and its layout block, and again in §6.5's counting convention and introduced-variants tally. ⚠️ **`tools/check_capi_occupancy.sh` reads the TABLE ROW, not the paragraph** — verified by reading the script: it greps `^\|` rows matching `FIXPP_ERR_<DOMAIN>_*` out of `.specify/2i-capi.md` and takes **the first integer in field 4** against `include/fix/c_api/error.h`'s `#define`s and the append-only audit file. **So the scoping parenthetical is outside everything the gate parses, and the count sites are inside it.** That separation is what keeps this a one-pass prose edit rather than an occupancy re-baseline. **Re-derive before editing:** read the script's `doc_rows` grep and its field-4 `awk` |
+| **§5.2** — the construction-vs-steady split | the criterion: *"used only by entry points whose invocation is the explicit C-ABI mirror of a constructor that may throw **on bad config**"*; whitelist closed at `fixpp_engine_create`, `fixpp_dict_load_from_xml`, `fixpp_msg_create_outbound`; `fixpp_msg_clone` named on the **steady** side twice (prose + `guarded_call_steady` doc-comment) | ⚠️ **SPLIT AT v0.6 — THIS SECTION CARRIES TWO DIFFERENT CLAIMS AND THEY TAKE OPPOSITE DISPOSITIONS. Reading the row as one thing is what hid a P1 for four rounds.** **(1) The WHITELIST — which symbols sit on the construction side — is UNCHANGED**, and ⚠️ **v0.2's "AMENDED … three symbols → four" stays WITHDRAWN**: D-3b's local expected-allocation boundary keeps clone on the steady side, so the criterion is neither met nor tested and the whitelist is not touched (§2.3a). **D-3b IS NOT RE-OPENED BY ANYTHING BELOW.** **(2) The two CODE-SCOPING passages ARE AMENDED by B6** — the flavour bullet's *"(or the new `FIXPP_ERR_CAPI_CONFIG_INVALID` **for the engine-construction case where no domain prefix applies**)"* and the `guarded_call_construction` doc comment's **per-call-site partition** (*"dictionary load surfaces `FIXPP_ERR_DICT_CONFIG`; **engine creation surfaces `FIXPP_ERR_CAPI_CONFIG_INVALID`**; outbound message creation surfaces …"*). Each is replaced with the condition-stated form §6.5's row carries below. ⚠️ **The partition is the STRONGEST scope claim in the file** — exhaustive over the whole whitelist, unhedged — and B6 amending §4.4 while leaving it standing would publish a contradiction inside `[2i]` itself, which is the whole reason route 3 exists. ⚠️ **Different claims, same section: amending (2) says NOTHING about (1).** v0.5 classified both under one label, *"whitelist statement"*, and that single label is the P1 |
+| **§5.4** — construction-time exceptions, stated by enumeration | *"Construction-time exceptions (e.g., `fixpp_engine_create` …; `fixpp_dict_load_from_xml` …; `fixpp_msg_create_outbound` …) are caught by `guarded_call_construction`"* | ⚠️ **AMENDED AT v0.6 — v0.5's "READ; UNCHANGED" WAS WRONG.** The bullet's **outer** enumeration is hedged (*"e.g., `fixpp_engine_create` …"*) and that hedge governs the **exception examples**. The **parenthetical that scopes the CODE carries no hedge of its own**: *"(or the new cross-cutting `FIXPP_ERR_CAPI_CONFIG_INVALID` **for engine creation when no domain prefix applies** — see §6.5)"*. ⚠️ **An `e.g.` elsewhere in the sentence is not an exemption for a clause that does not sit under it** — that conflation is how this site was filed as a whitelist statement for four rounds. **Replace the parenthetical with the condition-stated form; the bullet's construction-vs-steady prose is untouched.** Returned by recipe (b) *and* by recipe (c) — retrieval was never the problem here |
+| **§6.2** — exception safety, both limbs | *"No exception crosses `extern \"C\"` from a steady-state thunk — `std::abort` … is the trap"*, and *"Construction-time thunks (`fixpp_engine_create`, `fixpp_dict_load_from_xml`, `fixpp_msg_create_outbound`) catch and translate"*, verified by *"§9 seam #5a"* | **READ; UNCHANGED.** ⚠️ **v0.3's cell said the first limb *"is what D-3b's arm 3 now HONOURS"* and that was FALSE — rewritten at v0.4, not softened.** The limb has **two clauses**, and v0.3's edit inverted its own claim on both: (1) *no exception crosses* is **satisfied at `e391944c`** by the blanket `catch (...)`, and narrowing that catch with nothing outside it would have **newly broken** it; (2) *`std::abort` is the trap* is **not** satisfied at `e391944c` for clone, and no `guarded_call_steady` exists to supply it (§2.3a, fixpp#487). **Under D-3b's NESTED boundary both clauses hold**: the outer `catch (...)` in clone's own body keeps every exception inside `extern "C"` *and* makes the trap `std::abort()`. That is the amended claim — the mechanism changed, not the wording. ⚠️ **NO EDIT IS NEEDED FOR THE SCOPE CLAIM HERE, AND v0.6 STATES THAT RATHER THAN LEAVING IT IMPLIED** — an unstated "no edit needed" is exactly how five sites went un-adjudicated. The code appears in this section inside a list ending *"`/ etc.` per the source layer"*: an **explicit non-exhaustiveness marker**, and the bullet names no producer **of this code**. **v0.5's classification of §6.2 is CORRECT and is deliberately left alone** |
+| **§1.1** — the *"Sentinel codes"* paragraph, where the code is **DEFINED** | *"`FIXPP_ERR_CAPI_CONFIG_INVALID` (the latter NEW in v0.2 / RC#3 close — **the cross-cutting fallback for construction-time C-ABI thunk exceptions where no domain `_CONFIG` code applies**)"* | ⚠️ **AMENDED at v0.5 — A SITE v0.4's ONE-ROW EDIT MISSED.** This is the **same scope claim** as §6.5's, definite-article and definitional, in the section that *defines* the code — and it is **live and unsuperseded**: the whole §1.1 body was read for an amendment or supersession marker and carries none. **Replace the scoping parenthetical with the condition-stated form §6.5's row carries below.** ⚠️ **AMEND THE SCOPING PARENTHETICAL ONLY, AND THE COUNT LANGUAGE IS ELSEWHERE IN §1.1 — the locator matters, so it was read rather than inherited.** The Sentinel-codes paragraph **enumerates the eight names without a numeral**; the *"8 2i-introduced"* **count** lives in §1.1's **magnitude-domain table row** — the `FIXPP_ERR_CAPI_*` row whose owner column reads `2i` and whose count column reads **8** — and its layout block, and again in §6.5's counting convention and introduced-variants tally. ⚠️ **`tools/check_capi_occupancy.sh` reads the TABLE ROW, not the paragraph** — verified by reading the script: it greps `^\|` rows matching `FIXPP_ERR_<DOMAIN>_*` out of `.specify/2i-capi.md` and takes **the first integer in field 4** against `include/fix/c_api/error.h`'s `#define`s and the append-only audit file. ⚠️ **v0.5 THEN DREW THE WRONG SECOND HALF FROM THAT READING AND v0.6 CORRECTS IT.** It wrote *"the scoping parenthetical is outside everything the gate parses, **and the count sites are inside it**."* The first half is right; **the second is false, and it is false in the direction that matters.** Re-measured: the script's `doc_rows` grep returns **eight rows, all of them §1.1's magnitude-domain table**, and Check B compares each against an `EXPECT_COUNT` map **hardcoded in the script** over the eight *domain* prefixes — **there is no cross-cutting-block entry at all.** So §6.5's counts, §1.1's layout block, §3.11's prose and Appendix D.2's supplemental are watched by **nothing**. **The scope edit cannot red the gate, and the counts it must not touch are not protected by the gate either — they are protected by nobody.** That is why the instruction here is narrow in the other direction: amend the parenthetical, **touch no numeral**. **Re-derive before editing:** read the script's `doc_rows` grep and its field-4 `awk`, and its `EXPECT_COUNT` keys |
 | **§4.4** — the `fixpp_strerror` lookup-table excerpt | the string literal *"C ABI config invalid (**engine_create / dict_load / msg_create_outbound**)"* | ⚠️ **AMENDED at v0.5 — A SECOND SITE v0.4 MISSED, and for its PRODUCER PARENTHETICAL ONLY.** The three-symbol enumeration is an explicit scope claim, false of 21 of the 24; drop it or replace it with the condition-stated form. ⚠️ **The string TEXT is explicitly OUT OF SCOPE for B6.** Shipped `src/capi/error.cpp`'s `fixpp_strerror` arm returns *"C ABI configuration invalid"*, which differs from this excerpt independently of the producer question; that excerpt-vs-shipped mismatch belongs to **#449/#450**, the error-taxonomy single-sourcing work. Letting it into this pass would drag B6 into a `strerror` reconciliation it must not carry |
-| **§6.5** — `FIXPP_ERR_CAPI_CONFIG_INVALID`'s row | *"Used only by `guarded_call_construction` per `[arch §5.3]` carve-out where no specific domain `_CONFIG` code applies"*, **and, independently, the middle column's** *"a construction-time C-ABI thunk (`fixpp_engine_create`, `fixpp_dict_load_from_xml` …) caught a `std::exception` and chose this fallback code"*; remediation *"Configuration error — … correct the config; retry."* | ⚠️ **AMENDED — decided at v0.4, and at v0.5 both the EDIT POPULATION and the EDIT SHAPE are corrected. v0.3's "NOT amended; recorded as a residual" stays WITHDRAWN**: its cost was priced against a population of **one** (clone) and the corrected producer population inverts that argument. ⚠️ **What v0.4 got wrong, on two axes.** *(i)* It named **one clause** — *"Used only by `guarded_call_construction` …"* — and left the **middle column's independent enumeration** standing, which is still false of 21 of the 24; an implementer replacing only the named sentence publishes the contradiction anyway. *(ii)* Its replacement **enumerated producer classes** (*"refuses on invalid configuration input or fails a local expected-allocation boundary"*), and an enumeration is exactly the shape four consecutive rounds have falsified with a producer nobody listed — it leaves **four** of the 24 uncovered (classes **D** and **E** below). **THE EDIT, STATED AS A CONDITION AND NOT AS A POPULATION — replace BOTH clauses with:** *Produced by a C-ABI entry point that cannot complete — either an **explicit refusal** (an invalid argument, an unusable configured value, or a call made **out of lifecycle order**) or a **caught exception** on a fallible construction/mutation step (allocation **or other resource failure**, e.g. thread creation). **Not exclusive to `guarded_call_construction`.*** ⚠️ **And the REMEDIATION column takes the matching third arm**, because correcting the producer clause and leaving remediation false of the same sites reproduces the defect one column over: *correct the offending argument*; **or call before `fixpp_engine_start`**; *or retry, with no guarantee of success after a resource failure*. The shipped *"correct the config; retry"* is false of an exhausted heap **and of an ordering violation**. **The derivation, and the 24/24 coverage check against this exact wording, are below.** A row that states the producing **condition** cannot be falsified by a producer nobody listed — which is the structural reason this is the last spelling of the edit and not the fifth. This reds no pin — in particular it does **not** touch the 066 pin, which is why Codex's alternative (re-code clone's OOM) stays rejected — mints no enumerator, and changes no source. ⚠️ **The "changes no source" argument is stated in its NARROW true form at v0.5:** shipped `include/fix/c_api/error.h` documents the code generically (*"C-ABI configuration is invalid (e.g. conflicting options)"*) and `fixpp_strerror` returns *"C ABI configuration invalid"*, so **no shipped header or string needs editing**. That is a fact about the **source** corpus; it establishes **nothing** about how many **design**-corpus sites carry the claim, and v0.4's Appendix drew exactly that invalid inference (*"the construction-only claim lives **only** in `[2i §6.5]`"* — false, by two sites). **B6 carries all three sites and its PR CLOSES fixpp#488**, whose own *"Suggested fix"* is this amendment; the producer **re-pointing** question is **fixpp#489** (§7) |
+| **§6.5** — `FIXPP_ERR_CAPI_CONFIG_INVALID`'s row | *"Used only by `guarded_call_construction` per `[arch §5.3]` carve-out where no specific domain `_CONFIG` code applies"*, **and, independently, the middle column's** *"a construction-time C-ABI thunk (`fixpp_engine_create`, `fixpp_dict_load_from_xml` …) caught a `std::exception` and chose this fallback code"*; remediation *"Configuration error — … correct the config; retry."* | ⚠️ **AMENDED — decided at v0.4, and at v0.5 both the EDIT POPULATION and the EDIT SHAPE are corrected. v0.3's "NOT amended; recorded as a residual" stays WITHDRAWN**: its cost was priced against a population of **one** (clone) and the corrected producer population inverts that argument. ⚠️ **What v0.4 got wrong, on two axes.** *(i)* It named **one clause** — *"Used only by `guarded_call_construction` …"* — and left the **middle column's independent enumeration** standing, which is still false of 21 of the 24; an implementer replacing only the named sentence publishes the contradiction anyway. *(ii)* Its replacement **enumerated producer classes** (*"refuses on invalid configuration input or fails a local expected-allocation boundary"*), and an enumeration is exactly the shape four consecutive rounds have falsified with a producer nobody listed — it leaves **four** of the 24 uncovered (classes **D** and **E** below). **THE EDIT, STATED AS A CONDITION AND NOT AS A POPULATION — replace BOTH clauses with:** *Produced by a C-ABI entry point that cannot complete — either an **explicit refusal** (an invalid argument, an unusable configured value, or a call made **out of lifecycle order**) or a **caught exception** on a fallible construction/mutation step (allocation **or other resource failure**, e.g. thread creation). **Not exclusive to `guarded_call_construction`.*** ⚠️ **And the REMEDIATION column takes matching arms**, because correcting the producer clause and leaving remediation false of the same sites reproduces the defect one column over. ⚠️ **v0.5's remediation was itself 22/24 and v0.6 corrects it** — its third arm read *"or retry, with no guarantee of success after a resource failure"*, and **retry is structurally unreachable at two of the 24** (derived below). **THE REMEDIATION, STATED AS A CONDITION:** *correct the offending argument or the unusable configured value and call again*; **or, for an ordering refusal, call before `fixpp_engine_start`**; *or, after a caught failure that consumed nothing, retry — with no guarantee of success*; ⚠️ ***or, where the failing return left engine- or session-side state already changed, destroy the owning handle and rebuild it, because neither retry nor re-ordering can succeed there.*** The shipped *"correct the config; retry"* is false of an exhausted heap, **of an ordering violation, and of both state-changing sites**. **The derivation, and the 24/24 coverage check against this exact wording, are below.** A row that states the producing **condition** cannot be falsified by a producer nobody listed — which is the structural reason this is the last spelling of the edit and not the fifth. This reds no pin — in particular it does **not** touch the 066 pin, which is why Codex's alternative (re-code clone's OOM) stays rejected — mints no enumerator, and changes no source. ⚠️ **The "changes no source" argument is stated in its NARROW true form at v0.5:** shipped `include/fix/c_api/error.h` documents the code generically (*"C-ABI configuration is invalid (e.g. conflicting options)"*) and `fixpp_strerror` returns *"C ABI configuration invalid"*, so **no shipped header or string needs editing**. That is a fact about the **source** corpus; it establishes **nothing** about how many **design**-corpus sites carry the claim, and v0.4's Appendix drew exactly that invalid inference (*"the construction-only claim lives **only** in `[2i §6.5]`"* — false, by two sites). ⚠️ **AND AT v0.6 THE POPULATION MOVES AGAIN — THIS SECTION ITSELF CARRIES A SECOND AMENDED SITE.** §6.5's **counting-convention appositive** (*"the construction-time C-ABI thunk fallback **for engine creation** where no domain `_CONFIG` code applies"*) is the same scope claim one paragraph above this row, and leaving it would make §6.5 state the **narrow** scope and the **wide** scope within a single section. **Amend the appositive; touch no numeral** — the sentence's subject and predicate are arithmetic (`10 → 11` occupied) and none of it turns on producer scope; the arithmetic is watched by **no instrument at all** (see §1.1's row), so a careless rewrite of it would be silent. **B6 carries EIGHT sites and its PR CLOSES fixpp#488**, whose own *"Suggested fix"* is this amendment; the producer **re-pointing** question is **fixpp#489** (§7) |
 | **§6.1** — the allocation-discipline table | rows for `fixpp_msg_get_*`, `_set_*`, `_get_group`, `_group_begin/_add_entry/_end`, `_create_outbound`, `_destroy`, `fixpp_strerror`, `fixpp_version` | **READ; UNCHANGED — and it has NO `fixpp_msg_clone` row at all**, so D-3's refusal contradicts nothing here. Recorded as read-and-unchanged rather than left unmentioned |
-| **§10 Q2** — the thunk-split disposition | **DECIDED v0.2 / RC#3 close**, enumerating the same three construction symbols | **READ; UNCHANGED.** Also returned only by recipe (b) |
+| **§10 Q2** — the thunk-split disposition | **DECIDED v0.2 / RC#3 close**, enumerating the same three construction symbols — and carrying *"(or the new `FIXPP_ERR_CAPI_CONFIG_INVALID` **for the engine-construction case where no domain prefix applies**)"* | ⚠️ **AMENDED AT v0.6 — v0.5's "READ; UNCHANGED" WAS WRONG, and the interesting part is the test that separates it from Appendix C, which carries the IDENTICAL clause and is NOT amended.** **Does the passage describe an EDIT or state the SHIPPING POLICY?** Appendix C's verbs are verbs of **editing** — dated, scoped to a version transition (*"updated in lockstep"*, *"+1 new error variant"*) — and a reader parses them as *what changed then*, which stays true whatever the document later says; that is why they are frozen. §10 Q2's verbs are verbs of **shipping, in the present tense** (*"v1.0 **ships** the construction-vs-steady split"*), and it closes by indexing the **live** sections. It presents as **current policy**, so it rots if left behind. **Amend the code-scoping parenthetical only**; the row's construction-vs-steady decision, its rationale (a)/(b)/(c) and its `DECIDED v0.2` dating are untouched |
 | **§4.7** — `fixpp_msg_clone`'s per-symbol roster | publishes *"Returns `FIXPP_ERR_VERSION_MISMATCH` if src's resolved version is not in the engine's loaded dictionaries"* — **a return the implementation does not contain** — and omits `FIXPP_ERR_CAPI_CONFIG_INVALID` entirely | **AMENDED:** drop the `VERSION_MISMATCH` clause as never-implemented; add D-3's three codes plus D-3b's `FIXPP_ERR_CAPI_CONFIG_INVALID` — described as the **local boundary's `bad_alloc` return**, not as a thunk-flavour translation (§2.3a). ⚠️ The roster also calls clone outbound-shaped; the implementation is inbound-flavoured (`h->view == nullptr` ⇒ `INVALID_HANDLE`). Correct it in the same pass |
 | **§4.7** — `fixpp_msg_remove_tag`'s one-line roster | *"Remove a tag from the message (idempotent — no-op if not present)."* | **AMENDED:** that sentence is exactly what D-1 falsifies, and it is in the owner document as well as in `message.h` |
 | **§6.3 / §6.4 / §9 seam #13 / §10 Q5** | the cross-strand-handoff contract, the ≤ 1 µs clone latency row, the seam and the Q5 disposition | **Read; unchanged.** None of them turns on the thunk flavour or on the fallback. Seam #13 clones a *successful* dict-backed inbound message, so D-3's refusal arm is not on its path |
@@ -1864,10 +2049,13 @@ itself a direct producer, and its trigger — a null pointer or a zero length �
 configuration"* than an exhausted heap is. **Re-derive, do not trust these figures:** re-run the two
 commands above, then for each hit read the enclosing `fixpp_*` signature and bucket it against
 `[2i §5.2]`'s whitelist. **The number is not the claim — the classification is**, and the
-classification is what makes the edit **three prose sites in one design document** rather than a
-rewrite of a published meaning. ⚠️ **v0.4 wrote *"one row"* here and that was the P1's other half**;
-the cost argument is unchanged by the correction — three prose sites still red no pin and mint
-nothing — but the number moves.
+classification is what makes the edit **prose passages in one design document** rather than a
+rewrite of a published meaning. ⚠️ **v0.4 wrote *"one row"* here, v0.5 wrote *"three prose sites"*,
+and BOTH were the same defect at a different value** — the second was a post-sign-off P1. **The cost
+argument is unchanged by either correction** — prose in one design document still reds no pin and
+mints nothing — **and the number is not restated here on purpose.** A corrected count is the same
+claim at a new value; §5c's membership **condition** and its criterion audit are what a later reader
+should re-run.
 
 ⚠️ **NEW at v0.5 — the 24 classified by PRODUCING CONDITION, and the replacement row checked
 against all 24. The three readings above establish that the shipped clause is FALSE; they do not
@@ -1881,21 +2069,66 @@ at every one of the 24:
 | **B** — non-whitelisted `catch (...)` over a fallible construction/mutation body | 7 | `fixpp_engine_config_create`, `fixpp_session_config_create`, `_set_comp_ids`, `_set_begin_string`, `fixpp_session_open` ×2, `fixpp_msg_clone` |
 | **C** — explicit refusal on an invalid argument or an unusable configured value | 10 | worker-threads `n == 0`; null/empty CompIDs; null/empty BeginString; three out-of-range enum casts (`_set_role`, `_set_security`, `_set_reset_seqnum_policy`); null dict handle; empty dict wrapper; empty host; **`fixpp_session_send`'s null frame / zero length** |
 | **D** — explicit refusal on a lifecycle-**ORDERING** violation | 3 | `fixpp_session_open` post-`engine_start`; `fixpp_session_register_callback` post-start; `fixpp_session_register_send_callback` post-start |
-| **E** — resource failure that is **not** allocation | 1 | `fixpp_engine_start`'s `catch (...)` on worker-thread creation — `if (engine->state_->workers_.empty()) return …`, under its own comment *"Thread creation failed … report a config error"*. That catch receives `std::system_error` from `std::thread` construction |
+| **E** — a **catch-all over the worker-thread launch**, fired **only on TOTAL launch failure** | 1 | `fixpp_engine_start`'s `catch (...)`, guarded by `if (engine->state_->workers_.empty()) return …`. ⚠️ **v0.5 LABELLED THIS *"resource failure that is NOT allocation"* AND THAT IS FALSE OF THE SITE AS WRITTEN — corrected at v0.6, read to the call site this time.** The `try` block's **first statement is `workers_.reserve(worker_threads_)`**, which throws `std::bad_alloc` / `std::length_error`; `std::thread`'s constructor throws `std::system_error`. **Both land in the SAME `catch (...)`, and nothing in the code distinguishes them.** The bucket's population therefore **includes allocation**. The *"e.g. thread creation"* justification for the arm's existence survives — that route is real and is the only one the other 23 sites do not already cover — but the **exclusivity** does not. ⚠️ **And the guard bounds the arm further:** a throw at `i > 0` leaves `workers_` **non-empty**, the handler **falls through**, and the call returns `FIXPP_ERR_OK`. The code is produced **only when zero workers launched** |
 
 3 + 7 + 10 + 3 + 1 = **24.** ✓
 
 ⚠️ **D and E are exactly what v0.4's two arms missed, and D is the sharper miss: the derivation
 printed in THIS SECTION already names the two callback-registration ordering refusals** — so the
-proposed row would have contradicted its own section forty lines up. **Against the condition-stated
-row the coverage is 24/24:** *explicit refusal* takes **C** (invalid argument · unusable value) and
-**D** (out of lifecycle order); *caught exception on a fallible construction/mutation step* takes
-**A**, **B** and **E** (allocation **or other resource failure**). ⚠️ **The remediation column
-matches arm for arm** — correct the argument (C) · call before `fixpp_engine_start` (D) · retry
-without guarantee (A/B/E) — because a producer clause fixed while the remediation clause stays false
-of the same three sites is the same defect one column over. **Re-derive, never trust this table:**
-re-run the census, read the enclosing `fixpp_*` signature at each hit, and bucket it by **what makes
-the call fail**, not by which construct catches it.
+proposed row would have contradicted its own section forty lines up.
+
+**THE PRODUCER CLAUSE — 24/24, and it is the DROPPED words that earn it.** *Explicit refusal* takes
+**C** (an invalid argument · an unusable configured value) and **D** (out of lifecycle order) —
+**13** sites; *caught exception on a fallible construction/mutation step (allocation **or other
+resource failure**, e.g. thread creation)* takes **A**, **B** and **E** — **11** sites. No site
+needs two arms and none is uncovered. ⚠️ **State plainly why this is not cosmetic: the SHIPPED
+clause — *"Used only by `guarded_call_construction`"* — covers NONE of those 13 C/D sites.** Dropping
+*"construction-time thunk"* is what buys the coverage, not the new adjectives. ⚠️ **Two C sites
+strain the wording and a Gate B reviewer should be sent to them rather than to the enum casts:**
+`config.cpp`'s empty-dict-wrapper gate (`h->dict == nullptr` **after** the tag gate has passed — the
+handle is non-null and validly typed, so what is wrong is its **contents**; the caller's real fix is
+*load a dictionary into it*, which *"correct the offending argument"* states poorly) and the
+empty-host gate beside it. ⚠️ **And `fixpp_session_send`'s `frame == nullptr || len == 0` must land
+on *invalid argument*, NOT on *unusable configured value*** — nothing there is configured; the arm's
+wording keeps the two limbs separate for that reason.
+
+⚠️ **THE REMEDIATION COLUMN IS NOT 24/24 UNDER v0.5's ARMS — IT IS 22/24, AND THE TWO DEAD SITES ARE
+ONE DEFECT SEEN TWICE.** v0.5 wrote the third arm as *"or retry, with no guarantee of success after
+a resource failure"*. **Retry is not merely unpromising at two of the 24; it is structurally
+unreachable, and both were verified on source for v0.6:**
+
+- **`fixpp_engine_start` (class E).** `engine->engine_started_ = true;` executes **before** the
+  `try` that launches the workers. On a retry the function hits its already-started guard and
+  returns `translate(session_already_open)`; **the worker launch is never re-attempted.** The
+  handler's own comment names the real recovery: *"the engine is recoverable via `destroy()`"*.
+- **`fixpp_session_open`'s handle-allocation `catch` (class B).** Its comment reads *"The session is
+  registered with the engine but the handle alloc failed"*. A retry re-derives the **same**
+  `SessionId` and meets `Engine::register_session`'s
+  `if (registry_.contains(id)) return std::unexpected(error::session_invalid_argument);` — so it
+  returns a **different** code, never `OK`, and the orphan registration persists. Nothing in the
+  C-ABI surface removes it: `fixpp_session_close` needs the `fixpp_session_t*` that this call never
+  produced, and the engine exposes no unregister.
+
+⚠️ **THE COUPLING, WHICH IS THE PART WORTH WRITING DOWN — a reader who sees two isolated carve-outs
+will not understand why either exists.** Because `engine_started_` is set **before** the worker-launch
+`try`, a class-E failure leaves it **true**. From that instant **all three class-D sites refuse
+permanently** (`fixpp_session_open` post-start and both callback registrations each test
+`engine_started_`) **and `fixpp_engine_start` itself refuses permanently.** So for that engine *"call
+before `fixpp_engine_start`"* and *"retry"* are **both dead**, and `destroy()` is the only exit. The
+two failing remediations are one defect seen twice.
+
+**THE REMEDIATION, STATED AS A CONDITION SO A THIRD SITE CANNOT FALSIFY IT — two named exceptions
+would rot the moment one appears:** *Correct the offending argument or the unusable configured value
+and call again; for an ordering refusal, make the call before `fixpp_engine_start`; after a caught
+failure that consumed nothing, retry — with no guarantee of success.* ⚠️ ***Where the failing return
+left engine- or session-side state already changed, neither retry nor re-ordering can succeed: the
+owning handle must be destroyed and rebuilt.*** That last arm is written as a **condition on the
+state**, not as a list of the two sites that meet it today.
+
+⚠️ **Re-derive, never trust this table:** re-run the census, read the enclosing `fixpp_*` signature
+at each hit, and bucket it by **what makes the call fail**, not by which construct catches it —
+**and then read past the `return` to what the next call would do**, which is the step v0.5 skipped
+in both of the sites above.
 
 **`.specify/2c-codegen.md` — D-4 amends it, and the amendment is owed in the same PR.** §4.8 and §6.6
 own `owning_message_handle`.
@@ -1997,8 +2230,8 @@ falsify history)*.
 | `.specify/426-428-length-data-pairs.md` | historical bundle (design) | the 1.6 bump's record; **not re-dated** (§5b) |
 | `.specify/447-458-452-capi-refusals.md` | — | this document |
 | `spec/behaviors-and-limitations.md` | live documentation | **edited by obligation 2** — B-458-1 lands here (§5c). Already in the delta |
-| `spec/feature-catalogue.md` | live documentation | ⚠️ **added at v0.3.** Per-feature status ledger; a behaviour change to a shipped symbol is a catalogue touch to check, not assume |
-| `spec/coverage-index.md` | live documentation | ⚠️ **added at v0.3.** Checked for a clone row whose coverage claim the new refusal arm changes |
+| `spec/feature-catalogue.md` | live documentation | ⚠️ **READ AT v0.6, AND THE OUTCOME IS PRINTED — v0.5's cell said *"a catalogue touch to check, not assume"* and then printed no result, which is the command-to-prose handoff this very table exists to remove.** The affected row is **`CA-009`** — *"Field setter — `fixpp_msg_create_outbound`/`set_*`/**`remove_tag`**/`commit`/**`clone`**/`destroy` + toApp hook"*, status `done`. ⚠️ **Its Title enumerates SYMBOLS and its Status tracks delivery; neither moves**, because D-1 and D-3 change behaviour, not the published surface's existence. **What DOES move is the `Tests` column**, which enumerates the files that verify the row: §6's new seams land there. **EDIT OWED: the `Tests` column of `CA-009` only.** No other C-ABI row names a symbol this PR touches |
+| `spec/coverage-index.md` | live documentation | ⚠️ **READ AT v0.6, AND THE OUTCOME IS PRINTED.** There is **no `fixpp_msg_clone` row** — the C-ABI clone refusal touches nothing here. ⚠️ **But the C++ half does:** the **reify-mechanism block** states *"`owning_message_handle` completed to byte storage `{resolved_message_version, pmr::vector<byte> bytes_, **lazy** view_cache_}`"* and *"**lazy** `view()` re-frame via one-shot Framer"*. **D-4 makes the factory materialise EAGERLY**, so that is a **live claim D-4 falsifies**, not a coverage number that merely narrows. **EDIT OWED: the block's lazy-view clause**, in the same PR per obligation 3. ⚠️ **This is the row v0.5's own table set the standard for and did not meet** — its `2m-pybind.md` row read the file and concluded *"No edit owed"*; these two printed the command and not the answer |
 | `CLAUDE-history.md` | live documentation | ⚠️ **added at v0.3.** A merged-feature changelog — **historical, not edited**; recorded so it is not re-discovered as an omission |
 | `specs/051-c-abi-message-accessors/` (checklists/{abi,security,threading}.md, contracts/message-write.md, data-model.md, plan.md, quickstart.md, research.md, spec.md, tasks.md) · `specs/052-c-abi-python-readiness/spec.md` · `specs/053-python-thin-binding/{data-model,research}.md` · `specs/055-python-lifetime-ownership/plan.md` · `specs/066-dict-backed-inbound-parse/{contracts/inbound-parse.md,data-model.md,plan.md,quickstart.md,research.md,spec.md,tasks.md}` | historical bundle | **closed point-in-time records; not edited.** The living ledger is `spec/` |
 
@@ -2377,9 +2610,9 @@ edits would produce a green gate over unchanged hashes.
   the re-derivation recipe stated there. An `=` can survive into the value; what a **counterparty**
   parser does with it is not measured. **Residual recorded**, not fixed.
 - ⚠️ **`[2i §6.5]`'s *"Used only by `guarded_call_construction`"* clause — NO LONGER A RESIDUAL. The
-  amendment is IN SCOPE for B6; at v0.5 it is a THREE-SITE, condition-stated edit and B6's PR
-  CLOSES fixpp#488. The residue that remains is the producer RE-POINTING question, and it is
-  fixpp#489 — NOT #488.**
+  amendment is IN SCOPE for B6; it is a condition-stated edit over EVERY live passage in `[2i]`
+  that binds the code to a producer set, and B6's PR CLOSES fixpp#488. The residue that remains is
+  the producer RE-POINTING question, and it is fixpp#489 — NOT #488.**
   v0.3 listed the whole thing as out of scope on the ground that *"re-authoring a published error
   code's meaning is a wider C-ABI change than the three refusals here"*. That cost was priced
   against a population of **one** producer (clone). §5c now derives the population from the **24
@@ -2388,10 +2621,16 @@ edits would produce a green gate over unchanged hashes.
   on the strictest steady-side reading — including `fixpp_session_send`. **Correcting a clause that
   is false of every one of its producers is a factual correction, not a meaning change**, it reds no
   pin (the 066 pin is untouched, which is still why re-coding clone's OOM stays rejected), mints
-  nothing, and costs **three prose sites in one design document** — §1.1's Sentinel-codes
-  parenthetical, §4.4's producer parenthetical and **both** clauses of §6.5's row, derived by
-  complement in §5c. ⚠️ **v0.4 said "one table row"; the population was two sites short and the
-  proposed taxonomy four producers short.** **B6 carries all three.**
+  nothing, and costs **prose passages in one design document**, enumerated with their quoted text
+  in §5c. ⚠️ **THE POPULATION HAS BEEN WRONG TWICE AND THE FIGURE IS NOT REPEATED HERE.** v0.4 said
+  *"one table row"* and was two sites short with a taxonomy four producers short; **v0.5 said
+  "three prose sites" and was FIVE short — a P1 found after sign-off by an independent session that
+  had never read this document.** §5c now states the membership **condition**, quotes the passage
+  adjudicated at every site, names the three exemptions and **audits the criterion**. ⚠️ **v0.5's
+  remediation arms were also 22/24**: retry is structurally unreachable at `fixpp_engine_start`'s
+  zero-worker catch and at `fixpp_session_open`'s handle-allocation catch, both verified on source
+  at v0.6, and both take *destroy the owning handle and rebuild*. **B6 carries the whole
+  adjudicated population — read it from §5c, not from a number in this bullet.**
   ⚠️ **THE B6-vs-#488 SPLIT v0.4 STATED AS FACT DOES NOT EXIST, and v0.5 states what the issues
   actually contain instead of what the document wished they did.** `gh issue view 488` was read in
   full for this revision. Its *"## Suggested fix"* is *"Amend §6.5's row **in one sentence** to
@@ -2407,7 +2646,9 @@ edits would produce a green gate over unchanged hashes.
   **The disposition, taken clean:** **B6's PR executes #488's own stated fix and therefore CLOSES
   #488** — widening it in place would mean rewriting its *"Suggested fix"* section and leaving it
   open describing work that shipped. **What is still deferred, and to fixpp#489** (*"`FIXPP_ERR_CAPI_CONFIG_INVALID`
-  has four producer classes, not one — decide which should re-point at domain codes"*, filed out of
+  has **five** producer classes, not one — decide which should re-point at domain codes"* ⚠️ (**the
+  live title, re-read at v0.6 — the issue was retitled from "four" after §5c's class census, and its
+  class-E row now reads "worker-launch catch-all"**), filed out of
   round 4): whether the **historical** producers — the thirteen
   `src/capi/config.cpp` returns, `fixpp_session_open`'s three, `fixpp_engine_start`'s,
   `fixpp_session_send`'s and the callback-registration pair's — should keep returning this code at
@@ -2501,37 +2742,47 @@ else.
 
 ---
 
-## 9. The staged citation gate — executed
+## 9. The citation gate — executed, under the TRACKED premise
 
-Recorded here, per the procedure in the header block, because the gate cannot report on an untracked
-file and a clean result from it would otherwise be an instrument reporting clean because it could not
-report anything else.
+⚠️ **THE PREMISE OF THIS SECTION CHANGED AT v0.6, AND THE SECTION IS RE-MEASURED RATHER THAN
+ANNOTATED.** Every revision through v0.5 rested on *"this draft is the sole untracked file"*. That
+was load-bearing: the gate **cannot report on an untracked file**, so §9 existed to keep a clean
+result from being an instrument reporting clean because it could not report anything else, and each
+of v0.5's rows encoded the premise in its own text (*"every line is an addition — the file is
+untracked"*, *"back to untracked"*). **The file is now tracked and committed.** ⚠️ **Carrying those
+rows forward with a note attached would have been the premise change going unread**, so they are
+**deleted and re-run**, not amended.
 
-**Re-executed for v0.5**, in this order, from the submodule root at `e391944c`. ⚠️ **A gate result is
-scoped to the content that existed when it ran, so v0.4's figures are superseded, not carried
-forward** — v0.5 corrected one amendment population, re-shaped one replacement row from an
-enumeration into a condition, re-routed one deferral onto a different issue, struck one obligation,
-deleted one impossible seam and two rotted figures, added the five-verification section below and a
-whole Appendix section. A result measured over v0.4's bytes says nothing about v0.5's, and v0.4's
-own preamble made exactly this point about v0.3. ⚠️ **And re-executed AGAIN for the v0.5 closing
-edit — rows 6 and 7.** That pass was **not** a review round (see the Appendix), but it changed three
-passages and added an Appendix section, so rows 0–5 measure bytes this file no longer has.
+⚠️ **TWO FORMS, BECAUSE THEY READ DIFFERENT CORPORA AND NEITHER SUBSTITUTES FOR THE OTHER.**
+`--range origin/main..HEAD` reads the **commit** that carries this file; `--staged` reads the
+**index**, which is the only corpus an uncommitted v0.6 edit appears in. Running only the first
+would have measured v0.5's bytes and reported nothing about this revision's. ⚠️ **Both still need
+the seeded positive control**: `rc=0` from either is indistinguishable from a gate that read
+nothing until the detector has been shown firing on **this file's own content**, and that was true
+under the old premise and is still true under the new one.
 
 ⚠️ **No added-line count is printed for any row.** v0.2 printed *"1795 added lines"* in row 0 and
-then had to explain in prose why that was not the final file's length. The condition is what the
-gate establishes — *a non-empty staged diff was read, the detector was proven able to fire on it,
-and the final content returned zero* — and a number here is falsified by the next edit.
+then had to explain in prose why that was not the final file's length; v0.5 printed one here and had
+to delete it for falsifying this very paragraph. The condition is what the gate establishes — *a
+non-empty diff was read, the detector was proven able to fire on it, and the final content returned
+zero* — and a number here is falsified by the next edit.
 
 | # | action | what the gate read | result |
 |---|---|---|---|
-| 0 | `git add -- .specify/447-458-452-capi-refusals.md` | a non-empty `git diff --cached` over the whole file (every line is an addition — the file is untracked) | the gate has a real diff to read; this is the part `git add -N` does **not** give you |
-| 1 | `python3 tools/check_line_citations.py --staged` | those added lines | *"check-line-citations: no new line-number citations in added lines. OK"* — **rc=0** |
-| 2 | one `path:NNN` citation appended and re-staged, gate re-run | the same diff plus the seed | **rc=1**, form **`[A]`**, and it **quoted the seeded line back verbatim** (a *"SEEDED POSITIVE CONTROL"* line carrying a `src/capi/message_write.cpp` path plus a number), followed by *"DELETE the number -- do NOT re-point it at a fresh one."* ⚠️ **Re-executed against this revision's own staged diff**, not carried forward. ⚠️ **The line count v0.5 printed here is DELETED, not corrected** — it falsified the preamble two paragraphs above (*"No added-line count is printed for any row"*) and it had already rotted inside v0.5 itself; the condition is that a non-empty staged diff was read, and the recipe is the header block's four commands |
-| 3 | file restored from a pre-seed copy, `cmp` run, re-staged, gate re-run | the restored diff | `cmp` **byte-identical** to the pre-seed copy, rc=0; gate prints *"… OK"* — **rc=0** |
-| 4 | `git restore --staged -- .specify/447-458-452-capi-refusals.md` | — | back to untracked; `git status --porcelain` shows only `?? .specify/447-458-452-capi-refusals.md` — **the transcript the header now prints** |
-| 5 | steps 0–1 **re-run as the last action**, after this section and the five verifications were written | the whole final v0.5 file | **rc=0**, *"check-line-citations: no new line-number citations in added lines. OK"*, then unstaged again. ⚠️ **The independent different-corpus scan was re-run on the final bytes too** — the prohibited form returns **0** over this document while the same regex returns **3** over `include/fix/c_api/message.h` |
-| 6 | the whole cycle **re-executed for the v0.5 CLOSING EDIT** (Appendix, *"a targeted correction, NOT a review round"*) | the closing edit's own staged diff | steps 0–4 re-run in order: clean staged content **rc=0** · one `path:NNN` seeded and re-staged → **rc=1**, form **`[A]`**, the seeded line **quoted back verbatim** · file restored from the pre-seed copy, `cmp` **byte-identical**, re-staged, **rc=0** · `git restore --staged` back to untracked. The independent different-corpus scan was re-run on the same bytes: **0** here, **3** in the control corpus. ⚠️ **v0.5's rows 0–5 are SUPERSEDED for this file's current bytes, not carried forward** — a gate result is scoped to the content that existed when it ran, and the closing edit changed the content |
-| 7 | steps 0–1 **re-run as the very last action**, after row 6 and this row were written | the whole final file, closing edit included | **rc=0**, *"check-line-citations: no new line-number citations in added lines. OK"*, then unstaged. ⚠️ **Stated as a CONDITION and not as a figure**, for row 5's reason: a row recording a run cannot be inside the content that run read, and the recipe to re-check it is the four commands in the header block |
+| 0 | `python3 tools/check_line_citations.py --range origin/main..HEAD` | the **committed** content: `origin/main` is `e391944c` and this branch adds one commit whose only content is this file. **This is the form that was impossible before v0.6** | *"check-line-citations: no new line-number citations in added lines. OK"* — **rc=0** |
+| 1 | `git add -- .specify/447-458-452-capi-refusals.md`, then `--staged` | **v0.6's own uncommitted edits** — the corpus row 0 cannot see. ⚠️ **This is why `--range` alone would have been a false clean for this revision** | *"… OK"* — **rc=0** |
+| 2 | one `path:NNN` citation appended and re-staged, gate re-run | the same staged diff plus the seed | **rc=1**, form **`[A]`**, and it **quoted the seeded line back verbatim** (a *"SEEDED POSITIVE CONTROL"* line carrying a `src/capi/message_write.cpp` path plus a number), followed by *"DELETE the number -- do NOT re-point it at a fresh one."* ⚠️ **Executed against THIS revision's staged diff**, not carried forward from v0.5's |
+| 3 | file restored from a pre-seed copy, `cmp` run, re-staged, gate re-run | the restored staged diff | `cmp` **byte-identical** to the pre-seed copy; gate prints *"… OK"* — **rc=0** |
+| 4 | `tools/check_line_citations.py --self-test` | the tool's own fixtures | **151/151 pass, rc=0** — recorded as **NOT a substitute** for row 2: it proves the detector fires on fixtures, not on this document's diff |
+| 5 | rows 0 and 1 **re-run as the very last action**, after §9 and the Appendix were written | ⚠️ **TWO DIFFERENT CORPORA ON THIS RUN, AND SAYING "the whole final file" WOULD HAVE BEEN FALSE OF ONE OF THEM.** Row 1 read the **final v0.6 bytes**. Row 0 read the **committed v0.5 bytes** — v0.6 is not committed, so **row 0 returns the same `rc=0` it returned before a single v0.6 edit existed.** ⚠️ **An instrument that reports the same value whether or not the work exists is reporting nothing about the work**, which is this document's own first failure class arriving inside the section written against it. Row 0 is kept because it is the form that matches the file's **tracked** state and it is the only check on the committed content; it is **not** evidence for v0.6 | **rc=0** from each, over the corpora just named. ⚠️ **Row 0 covers v0.6 only after the commit, and re-running it then is the next actor's obligation.** ⚠️ **Stated as a CONDITION and not as a figure** — a row recording a run cannot be inside the content that run read, and the recipe is the commands in the header block |
+
+⚠️ **`git restore --staged` IS NO LONGER THE LAST STEP, AND THAT IS THE PREMISE CHANGE MADE
+OPERATIONAL.** Under the untracked premise it returned the file to `??`, which was the state the
+header printed. Against a tracked file it would un-stage edits that must stay staged or be
+committed. **The file is left STAGED**; the next actor's last action is the commit, after which
+`--range origin/main..HEAD` covers v0.6's bytes too and row 1 becomes redundant for them. ⚠️ **Until
+that commit lands, row 0 measures v0.5's content and row 1 measures v0.6's — the split is real and
+is stated rather than blurred.**
 
 ⚠️ **An independent zero, with its own different-corpus control.** Scanning this document directly
 for the prohibited form returns zero, and the same regex over a corpus known to contain the form
@@ -2551,22 +2802,22 @@ a licence to add more here.
 citation (`[A]`) from a shifted one; `[A]` is what proves the detector fired on *this document's own
 staged diff*, not on a pre-existing line it happened to re-read.
 
-⚠️ **Row 5 exists because a gate result is scoped to the content that existed when it ran.** Steps
+⚠️ **Row 5 exists because a gate result is scoped to the content that existed when it ran.** Rows
 0–4 necessarily read a version of this file that did not yet contain this table — a section
-recording a run cannot be inside the content that run read. The condition is *"the gate was re-run,
-over the whole file, as the last action, and returned zero"*, and the recipe to check it is the four
-commands in the header block.
+recording a run cannot be inside the content that run read. The condition is *"both forms were
+re-run, over the whole file, as the last action, and each returned zero"*, and the recipe to check
+it is the commands in the header block.
 
-Step 2 is the load-bearing one. Without it, step 1's `rc=0` is indistinguishable from a gate that
-read nothing — which is exactly what it returns for this file while untracked. The tool's
-`--self-test` (**151/151 pass**, rc=0) was also run, and is recorded as *not* a substitute: it
-proves the detector fires on **its own fixtures**, not on this document's staged diff.
+Row 2 is the load-bearing one. Without it, rows 0 and 1 are `rc=0` from a gate whose reading you
+have not verified. ⚠️ **Under the old premise that was a certainty — the gate could not read an
+untracked file at all. Under the new one it is merely unverified, which is a weaker failure and an
+easier one to stop checking for.** The control is kept for that reason, not out of habit.
 
 ⚠️ One consequence of this gate shaped the document's own evidence: §1.1 prints its `grep` output
 **without `-n`**. A line number in executed output is still a line number, and it rots exactly as
 fast as a cited one.
 
-### The five closing-pass verifications — executed at `e391944c`, printed beside their commands
+### The five closing-pass verifications — executed, printed beside their commands
 
 ⚠️ **NEW at v0.5, and this section is the revision's COMPLETION CRITERION, not a decoration.** Round
 4's reviewer recommended a rewrite pass with per-edit verification **instead of** a fifth adversarial
@@ -2574,25 +2825,53 @@ round, and named these five as the test. Each is re-runnable; each carries a con
 instrument can report the other answer. ⚠️ **No `grep -n` output is pasted below** — a line number in
 executed output rots as fast as a cited one, and the gate above scans this file.
 
-**V1 — the `[2i]` scope-claim population: all three amended sites derived, and NO FOURTH.**
+**V1 — the `[2i]` scope-claim population. ⚠️ THIS VERIFICATION FAILED AFTER SIGN-OFF, AND ITS v0.5
+RESULT IS FALSIFIED RATHER THAN STALE.**
+
+⚠️ **v0.5's V1 concluded *"the prescribed population is the complete live scope-claim set; there is
+no fourth site."* THERE WERE FIVE MORE.** The P1 was raised by an **independent session that had
+never read this document**, after four Gate A rounds, a closing pass, and this very verification
+written to prevent it. ⚠️ **The retrieval was never wrong** — the three sites the independent
+session named were sitting in V1's own output. **The classification was**, and V1 never checked the
+classification, only the retrieval. That is the whole finding and it is recorded in the Appendix.
 
 ```
-grep -n "FIXPP_ERR_CAPI_CONFIG_INVALID" .specify/2i-capi.md    ->  19 matching lines
+# RETRIEVAL — unchanged, and it was never the blind step:
+grep -c "FIXPP_ERR_CAPI_CONFIG_INVALID" .specify/2i-capi.md    ->  19
 # control — a DIFFERENT pattern, positive on the SAME corpus:
 grep -c "guarded_call" .specify/2i-capi.md                     ->  21
-# COMPLEMENT — the abbreviated spelling is a strict SUPERSET, so this is where a
-# fourth scope claim would hide. It does not:
+# the superset spelling, which is the corpus actually adjudicated:
 grep -ci "config.invalid" .specify/2i-capi.md                  ->  24   (= 19 + 5)
+# ADJUDICATION AUDIT — the step v0.5 did not have. The OLD criterion, run over the
+# eight passages the READ classified as scope claims:
+grep -lE '\bonly\b' <the 8 scope passages> | wc -l            ->  3
+#   and only ONE of those three is an `only` predicated of the CODE. As APPLIED,
+#   v0.5's criterion scored 1 of 8.
+# and the NEW criterion's ability to say NO — its two exemption tokens over all ten
+# live passages, which is the arm four rounds never had:
+grep -c '/ etc\.'          <the 8 scope passages> -> 0 x8 ;  <§6.2>       -> 1
+grep -c 'the test verifies' <the 8 scope passages> -> 0 x8 ;  <§9 seam #5a> -> 1
 ```
 
-All 19 were mapped to their enclosing `###` heading and read: **3 scope claims** (§1.1's
-Sentinel-codes parenthetical, §4.4's `fixpp_strerror` producer parenthetical, §6.5's row — **both
-clauses**), **6 whitelist statements** with no exclusivity (§5.2 ×2, §5.4, §6.2, §9 seam #5a,
-§10 Q2), **5 count/layout**, **5 history**. 3 + 6 + 5 + 5 = **19** ✓. The 5 complement-only lines
-(Appendix A.1, Appendix B, two Appendix C rows, Appendix D.2) are **count or history** sentences.
-**RESULT: the prescribed population is the complete live scope-claim set; there is no fourth site.**
-⚠️ **This verifies the PRESCRIPTION, not an executed edit** — `[2i]` is amended by **B6's PR**, not
-by this document (§5c is a disposition table).
+**RESULT: the live scope-claim population is EIGHT, not three. §5c states the membership CONDITION,
+quotes the passage adjudicated at every site, names the three exemptions, and audits the criterion.**
+⚠️ **No "and no ninth" claim is made here, and that omission is deliberate.** Four rounds' worth of
+*"and no fourth exists"* is exactly the shape that has now failed twice. What a later reader gets
+instead is the condition and the re-derivation recipe; what they should not get is this section's
+confidence.
+
+⚠️ **AND A FINDING THAT BELONGS TO `[2i]` ITSELF, NOT TO THIS DOCUMENT'S DERIVATION: `[2i]`
+CONTRADICTS ITSELF ABOUT THIS CODE'S PRODUCERS, TODAY, BEFORE B6 TOUCHES ANYTHING.** §4.4's
+`fixpp_strerror` excerpt names **all three** whitelist symbols — *"C ABI config invalid
+(`engine_create / dict_load / msg_create_outbound`)"* — while §5.2's doc comment partitions them so
+that **engine creation alone** surfaces this code and the other two surface `FIXPP_ERR_DICT_CONFIG`.
+**Both are false of the measured 24, and they are false DIFFERENTLY**, so a reader who resolves the
+contradiction by picking one gets a wrong answer either way. ⚠️ **As prescribed at v0.5, B6 amended
+§4.4 and left the partition standing — which would have published the contradiction rather than
+closed it. Route 3 exists precisely so B6 does not do that.**
+
+⚠️ **This verifies a PRESCRIPTION, not an executed edit** — `[2i]` is amended by **B6's PR**, not by
+this document (§5c is a disposition table).
 
 **V2 — the condition-stated row against all 24 producers: 24/24, in BOTH columns.**
 
@@ -2605,12 +2884,54 @@ grep -rn "FIXPP_ERR_CAPI_CONFIG_INVALID" src/ include/ tests/ bench/ | wc -l  ->
 ```
 
 Every one of the 24 was re-read at its **enclosing entry point** (§5c's table): **A** 3 · **B** 7 ·
-**C** 10 · **D** 3 · **E** 1 = **24** ✓. Against the replacement row: *explicit refusal* covers
-**C + D**, *caught exception on a fallible construction/mutation step (allocation or other resource
-failure)* covers **A + B + E**. **RESULT: 24/24 on the producer clause, and 24/24 on the remediation
-clause**, whose third arm (*call before `fixpp_engine_start`*) exists precisely because **D** has no
-remediation in either of v0.4's two. ⚠️ **v0.4's proposed arms covered 20 of 24** — the four misses
-are **D** ×3 and **E** ×1.
+**C** 10 · **D** 3 · **E** 1 = **24** ✓.
+
+**PRODUCER CLAUSE — 24/24, and the coverage is bought by the words DROPPED.** *Explicit refusal*
+covers **C + D** (13 sites); *caught exception on a fallible construction/mutation step (allocation
+**or other resource failure**, e.g. thread creation)* covers **A + B + E** (11 sites). No site needs
+two arms; none is uncovered. ⚠️ **The shipped clause — *"Used only by `guarded_call_construction`"*
+— covers NONE of those 13 C/D sites**, which is why this is not a cosmetic rewording.
+
+⚠️ **REMEDIATION CLAUSE — v0.5 CLAIMED 24/24 AND IT WAS 22/24. RE-WALKED AT v0.6, ON SOURCE.** Two
+sites have **no reachable remediation under v0.5's arms**, and they are **one defect seen twice**:
+
+```
+# the two dead sites, read PAST the return to what the next call does:
+src/capi/engine.cpp  fixpp_engine_start   ->  `engine->engine_started_ = true;` executes
+    BEFORE the worker-launch `try`; the catch-all fires only `if (workers_.empty())`.
+    A retry meets the already-started guard and returns `translate(session_already_open)`.
+    The launch is NEVER re-attempted. The handler's own comment: "the engine is
+    recoverable via destroy()".
+src/capi/session.cpp fixpp_session_open   ->  the handle-allocation `catch (...)`, comment
+    "The session is registered with the engine but the handle alloc failed". A retry
+    re-derives the SAME SessionId and meets Engine::register_session's
+    `if (registry_.contains(id)) return std::unexpected(error::session_invalid_argument);`
+    -> a DIFFERENT code, never OK, and the orphan registration persists. Nothing in the
+    C-ABI surface removes it: fixpp_session_close needs the handle this call never made,
+    and the engine exposes no unregister.
+```
+
+⚠️ **THE COUPLING IS WHY THESE ARE ONE DEFECT.** `engine_started_` is set **before** the
+worker-launch `try`, so a class-E failure leaves it **true** — from which point **all three class-D
+sites refuse permanently** (each tests `engine_started_`) **and `fixpp_engine_start` itself refuses
+permanently.** For that engine *"call before `fixpp_engine_start`"* and *"retry"* are **both** dead
+and `destroy()` is the only exit. A reader shown two isolated carve-outs would not see that.
+
+**RESULT: 24/24 on the producer clause. On the remediation clause, v0.5's arms were 22/24 and the
+corrected arms are 24/24** — the fourth arm is stated as a **condition on the state**
+(*"where the failing return left engine- or session-side state already changed, destroy the owning
+handle and rebuild it"*), **not** as a list of the two sites that meet it today, because a named
+exception rots the moment a third appears. ⚠️ **v0.4's arms covered 20 of 24; v0.5's covered 22; the
+pattern is a taxonomy corrected by adding the case just found, which is the shape §5c's
+condition-stated form exists to break.**
+
+⚠️ **Two label adjudications from the same walk, recorded because they change the arm's WORDING.**
+`config.cpp`'s empty-dict-wrapper gate (`h->dict == nullptr`, **after** the tag gate has passed) is
+**not** an argument defect — the handle is non-null and validly typed, and what is wrong is its
+**contents**; it and the empty-host gate are the C sites that strain *"correct the offending
+argument"*, and a reviewer hunting for the weak fit should be sent there rather than to the enum
+casts. And `session.cpp`'s `frame == nullptr || len == 0` gate must land on **invalid argument**,
+**not** on *"unusable configured value"* — nothing there is configured.
 
 **V3 — §8 item 9 struck, preamble count corrected.** ⚠️ **The corpus is SCOPED to §8 and the reason
 is the finding below**: an unscoped whole-document count is measured over a corpus that contains
@@ -2669,8 +2990,15 @@ awk '/^## Normative References/,/^## Appendix/' <this document> | grep -c "amend
 #  true of v0.3, and not edited per this Appendix's own rule)
 ```
 
-Both sites now state the same disposition: **AMENDED at three sites, condition-stated, B6's PR
-CLOSES fixpp#488, residue fixpp#489.** **RESULT: no live assertion that `[2i §6.5]` is not amended.**
+⚠️ **RE-RUN AT v0.6, AND THE SCOPE OF THE AGREEMENT CHANGED WITH THE POPULATION.** Both sites now
+state the same disposition: **AMENDED at every live passage binding the code to a producer set,
+condition-stated, B6's PR CLOSES fixpp#488, residue fixpp#489** — and the Normative References'
+`[2i §5.4]` / `[2i §6.2]` / `[2i §10 Q2]` row, which v0.5 left reading *"Read; all unchanged"*, is
+**rewritten**: two of those three are amended. ⚠️ **That row contains NO NUMERAL, so a figure-keyed
+sweep could never have reached it** — it was found by sweeping **disposition vocabulary**
+(`unchanged`, `not amended`, `READ;`) instead, which is the derivation this verification now
+prescribes alongside the figure sweep. **RESULT: no live assertion that `[2i §6.5]` is not amended,
+and no live assertion that §5.4 or §10 Q2 is unchanged.**
 
 ⚠️ **A DEFECT THIS SECTION PRODUCED IN ITSELF, CAUGHT ON ITS OWN FINAL RUN AND RECORDED RATHER THAN
 QUIETLY FIXED.** V3, V4 and V5 were first written as **whole-document** counts, and on the last
@@ -2728,10 +3056,10 @@ printed beside it.
 | `[api-contract §11]` | *"Making a call to a Stable-from-v1.0 C-ABI symbol fail where it used to succeed."* — the definition; ⚠️ and its own sentence routing the *consequence* to `[const §X.7]` in the pre-release period, which is why §11's amendment-plus-MAJOR is **not** what applies (§0c) |
 | `[2i §4.3]` | the `fixpp_error_t` numeric block layout — cited to show a slot exists (`[1400, 1499]`, *"6 occupied"*), so D-3's mint-nothing is a cost decision and not a feasibility one (§2.3) |
 | `[2i §4.7]` | the per-symbol declaration block. Its `fixpp_msg_clone` roster publishes *"Returns `FIXPP_ERR_VERSION_MISMATCH` if src's resolved version is not in the engine's loaded dictionaries"* — a return the implementation does not contain — and omits `FIXPP_ERR_CAPI_CONFIG_INVALID`; its `fixpp_msg_remove_tag` line is *"Remove a tag from the message (idempotent — no-op if not present)."*, which D-1 falsifies. **Both amended** (§5c) |
-| `[2i §5.2]` | the criterion in full — *"Construction-time flavour (`guarded_call_construction`) — used only by entry points whose invocation is the explicit C-ABI mirror of a constructor that may throw **on bad config** per `[arch §5.3]` carve-out. The whitelist for v1.0: `fixpp_engine_create`, `fixpp_dict_load_from_xml`, `fixpp_msg_create_outbound`."* — and, on the steady side, *"log the exception at fatal level … and `std::abort()`"*. The clause D-3b adjudicates and, **at v0.3, leaves UNCHANGED**: clone does not meet the semantic test, so it stays steady-state and the whitelist is not amended (§2.3a, §5c). ⚠️ **v0.2 cited this row as *"amends"*; that is withdrawn** |
-| `[2i §5.4]` / `[2i §6.2]` / `[2i §10 Q2]` | the three further sites that state the construction-vs-steady rule **by enumerating the other three symbols**, which is why a grep keyed on the symbol under change cannot return them (§5c recipe (b)). **Read; all unchanged** under D-3b's local boundary — and `[2i §6.2]`'s *"No exception crosses `extern \"C\"` from a steady-state thunk — `std::abort` … is the trap"* is what the boundary's third arm now **honours** rather than contradicts |
-| `[2i §6.5]` | `FIXPP_ERR_CAPI_CONFIG_INVALID`'s row: *"Used only by `guarded_call_construction` per `[arch §5.3]` carve-out"*, remediation *"Configuration error — … correct the config; retry."* ⚠️ Cited to record a **measured pre-existing divergence**: shipped `fixpp_msg_clone` already returns this code on the steady side and a shipped test pins it, so the *"used only by"* clause is false at `e391944c` independently of this document. D-3b retains the return and obligation 2 publishes it. ⚠️ **This row was STALE at v0.4 and is REWRITTEN at v0.5.** It still read *"the divergence is recorded as a residual to file (§7), **not amended** (§5c)"* — contradicting §5c's operative decision in the same document, and pointing an implementer at the one disposition that leaves the contradiction published. **The operative decision, which this row now states:** B6 **AMENDS** the scope claim at **all three** of its live sites in `[2i]` — §1.1's Sentinel-codes parenthetical, §4.4's `fixpp_strerror` producer parenthetical, and **both** clauses of §6.5's row — with a **condition-stated** taxonomy that covers all 24 producers (§5c); **B6's PR CLOSES fixpp#488**, whose own *"Suggested fix"* is that amendment; and the producer **re-pointing** residue is **fixpp#489** (§7) |
-| `[2i §1.1]` / `[2i §4.4]` | ⚠️ **NEW rows at v0.5 — the two further live sites of the construction-only scope claim, which no earlier revision listed.** `[2i §1.1]`'s *"Sentinel codes"* paragraph **defines** the code as *"the cross-cutting fallback for **construction-time** C-ABI thunk exceptions where no domain `_CONFIG` code applies"*; `[2i §4.4]`'s `fixpp_strerror` lookup-table excerpt spells the string *"C ABI config invalid (**engine_create / dict_load / msg_create_outbound**)"*. **Both AMENDED by B6** with the same condition-stated form as §6.5's row (§5c). ⚠️ **Scoped:** §1.1's **variant-count** language is untouched (it, not the parenthetical, is what `tools/check_capi_occupancy.sh` parses), and §4.4's **string text** is untouched (its mismatch with shipped `fixpp_strerror` is #449/#450). **They were missed for four rounds because every derivation ran on the rule's vocabulary rather than on the error code** — §5c recipe (c) |
+| `[2i §5.2]` | the criterion in full — *"Construction-time flavour (`guarded_call_construction`) — used only by entry points whose invocation is the explicit C-ABI mirror of a constructor that may throw **on bad config** per `[arch §5.3]` carve-out. The whitelist for v1.0: `fixpp_engine_create`, `fixpp_dict_load_from_xml`, `fixpp_msg_create_outbound`."* — and, on the steady side, *"log the exception at fatal level … and `std::abort()`"*. The clause D-3b adjudicates and, **at v0.3, leaves UNCHANGED**: clone does not meet the semantic test, so it stays steady-state and the whitelist is not amended (§2.3a, §5c). ⚠️ **v0.2 cited this row as *"amends"*; that is withdrawn** — **and that remains true at v0.6.** ⚠️ **BUT §5.2 CARRIES A SECOND, DIFFERENT CLAIM AND v0.6 AMENDS IT:** the flavour bullet's *"(or the new `FIXPP_ERR_CAPI_CONFIG_INVALID` **for the engine-construction case**)"* and the `guarded_call_construction` doc comment's **per-call-site partition** (*"**engine creation surfaces `FIXPP_ERR_CAPI_CONFIG_INVALID`**"*) bind the **CODE** to a producer set; the whitelist binds **SYMBOLS** to a thunk flavour. **Amending the first says nothing about the second, and D-3b is NOT re-opened.** Conflating them under one label is the P1 v0.6 corrects (§5c) |
+| `[2i §5.4]` / `[2i §6.2]` / `[2i §10 Q2]` | the three further sites that state the construction-vs-steady rule **by enumerating the other three symbols**, which is why a grep keyed on the symbol under change cannot return them (§5c recipe (b)) | ⚠️ **v0.5's *"Read; all unchanged"* IS FALSE FOR TWO OF THE THREE, AND THIS ROW HAD NO NUMERAL IN IT — so the figure-keyed sweep could never have found it. It was derived at v0.6 by DISPOSITION vocabulary instead.** **`[2i §5.4]` — AMENDED:** its parenthetical *"(or the new cross-cutting `FIXPP_ERR_CAPI_CONFIG_INVALID` **for engine creation when no domain prefix applies**)"* carries no hedge of its own; the bullet's `e.g.` governs the exception examples, not that clause. **`[2i §10 Q2]` — AMENDED:** present-tense shipping policy (*"v1.0 **ships** …"*), indexing the live sections — it rots if left behind, unlike an Appendix C entry carrying the identical clause. **`[2i §6.2]` — UNCHANGED, and that is stated rather than implied:** the code sits in a list ending *"`/ etc.` per the source layer"*, an explicit non-exhaustiveness marker, and the bullet names no producer of this code. Its *"No exception crosses `extern \"C\"` from a steady-state thunk — `std::abort` … is the trap"* limb is still what D-3b's boundary **honours** rather than contradicts |
+| `[2i §6.5]` | `FIXPP_ERR_CAPI_CONFIG_INVALID`'s row: *"Used only by `guarded_call_construction` per `[arch §5.3]` carve-out"*, remediation *"Configuration error — … correct the config; retry."* ⚠️ Cited to record a **measured pre-existing divergence**: shipped `fixpp_msg_clone` already returns this code on the steady side and a shipped test pins it, so the *"used only by"* clause is false at `e391944c` independently of this document. D-3b retains the return and obligation 2 publishes it. ⚠️ **This row was STALE at v0.4 and is REWRITTEN at v0.5.** It still read *"the divergence is recorded as a residual to file (§7), **not amended** (§5c)"* — contradicting §5c's operative decision in the same document, and pointing an implementer at the one disposition that leaves the contradiction published. **The operative decision, which this row now states:** B6 **AMENDS** the scope claim at **every live passage in `[2i]` that binds the code to a producer set** — §1.1's Sentinel-codes parenthetical, §4.4's `fixpp_strerror` producer parenthetical, §5.2's flavour bullet and its `guarded_call_construction` per-call-site partition, §5.4's parenthetical, **both** clauses of §6.5's row, §6.5's counting-convention appositive, and §10 Q2's decision row — with a **condition-stated** taxonomy that covers all 24 producers (§5c); **B6's PR CLOSES fixpp#488**, whose own *"Suggested fix"* is that amendment; and the producer **re-pointing** residue is **fixpp#489** (§7). ⚠️ **v0.5's version of this row said "all three" and that was a post-sign-off P1 — five short.** ⚠️ **The REMEDIATION column moves too:** v0.5's *"retry, with no guarantee"* arm is **impossible** at `fixpp_engine_start`'s zero-worker catch (`engine_started_` is set **before** the `try`, so a retry returns `session_already_open`) and at `fixpp_session_open`'s handle-allocation catch (the same `SessionId` re-registers into `registry_.contains(id)` and returns `session_invalid_argument`). Both take **destroy the owning handle and rebuild** |
+| `[2i §1.1]` / `[2i §4.4]` | ⚠️ **NEW rows at v0.5 — the two further live sites of the construction-only scope claim, which no earlier revision listed.** `[2i §1.1]`'s *"Sentinel codes"* paragraph **defines** the code as *"the cross-cutting fallback for **construction-time** C-ABI thunk exceptions where no domain `_CONFIG` code applies"*; `[2i §4.4]`'s `fixpp_strerror` lookup-table excerpt spells the string *"C ABI config invalid (**engine_create / dict_load / msg_create_outbound**)"*. **Both AMENDED by B6** with the same condition-stated form as §6.5's row (§5c). ⚠️ **Scoped:** §1.1's **variant-count** language is untouched (it, not the parenthetical, is what `tools/check_capi_occupancy.sh` parses), and §4.4's **string text** is untouched (its mismatch with shipped `fixpp_strerror` is #449/#450). **They were missed for four rounds because every derivation ran on the rule's vocabulary rather than on the error code** — §5c recipe (c). ⚠️ **AND AT v0.6 THAT DIAGNOSIS IS ITSELF CORRECTED: recipe (c) RETRIEVED the three further sites §5.2 and §5.4 carry, and v0.5 then MIS-CLASSIFIED them.** The blind step was never the grep; it was an adjudication no round ever instrumented. §5c now audits the criterion and measures v0.5's at **1 of 8** |
 | `[2i §6.1]` | the allocation-discipline table — cited to record that it carries **no `fixpp_msg_clone` row at all**, so D-3's refusal contradicts nothing in it. Read and unchanged (§5c) |
 | `[2i §6.3]` / `[2i §6.4]` / `[2i §9 seam #13]` / `[2i §10 Q5]` | clone's cross-strand-handoff contract, its ≤ 1 µs p99 latency row (*"per `[2c §6.6]` reify-equivalent budget"*), the seam that verifies it, and the Q5 disposition that makes clone the v1.0 mutation escape hatch — **read; all unchanged** by D-3/D-3b, because none turns on the thunk flavour or on the fallback (§5c) |
 | `[2c §4.8]` / `[2c §6.6]` | the owner of `owning_message_handle`. **Bullet 6's failure enumeration is what D-4 amends — and it is the ONLY 2c edit D-4 owes** (§2.4b, §5c). ⚠️ **Bullet 4 is NOT a second edit, and v0.2's claim that it is, is withdrawn:** it is headed **Lifetime** and its lazy-view clause governs a custom `noexcept` move over *"the destination's **`frame_cache_` / `view_cache_`** `optional`s"* — `frame_cache_` being a member of the codegen-emitted `owning_<Msg>`, which `owning_message_handle::impl` (`{version, bytes_, owned_tv_, view_cache_}`) does not have. So `[2c]` has **not** been shown to bind the handle to lazy at all. ⚠️ Bullet 2's ≤ 4-allocation itemisation is likewise scoped *"per `dict::reify_as<Msg>`, itemised against the §4.8 `owning_<Msg>` declaration"* and mentions the handle only as *"may add one more allocation if `owning_message_handle` is heap-backed"* — cited to record what it does NOT say, not as authority for eager |
@@ -3394,11 +3722,50 @@ stamp makes it wrong — the claim was **not true at the version it names**, or 
 **changed since**. A **historical record** stamps *when* something changed and is still accurate;
 it is left, because rewriting it destroys the evidence of what the process caught.
 
-Constructs enumerated (every preposition-plus-version form the document actually uses, not one
-pattern): `at v0.[1-4]` · `in v0.[1-4]` · `by v0.[1-4]` · `under v0.[1-4]` · `to v0.[1-4]` ·
-`of v0.[1-4]` · `v0.[1-4] that` · `v0.[1-4]` at end of line · `as of v0.` (**zero hits** — the
-spelling does not occur here). The possessive `v0.[1-4]'s` is **attribution by construction**
-(*"v0.3's row said…"*) and carries no stamp on a present-state claim.
+⚠️ **THE ENUMERATION BELOW IS FALSE AS A COMPLETENESS CLAIM, AND THAT WAS MEASURED AT v0.6 — RC#1's
+SIXTH OCCURRENCE, INSIDE THE SWEEP WRITTEN TO CLOSE ITS FIFTH.** It was published as *"every
+preposition-plus-version form the document actually uses"*. It is not: **`from` · `than` · `with` ·
+`for` are all used and none is listed**, and the extractor is **line-based** while the document is
+hard-wrapped, so any construct straddling a newline is invisible to it. **Both measured, by
+COMPLEMENT over the whole `v0.[1-4]` population rather than by enumerating spellings:**
+
+```
+# derive the preceding word instead of listing prepositions — the population, not a guess:
+grep -oE "[A-Za-z']+ v0\.[1-4]" <this document> | sed 's/ v0\.[1-4]$//' | sort | uniq -c | sort -rn
+#   -> `from`, `than`, `with`, `for`, `over`, `about` all present; none was enumerated.
+# and the WRAP blindness — the CONDITION is that the two corpora DISAGREE:
+grep -oE "[A-Za-z']+ v0\.[1-4]" <this document> | wc -l
+tr '\n' ' ' < <this document> | tr -s ' ' | grep -oE "[A-Za-z']+ v0\.[1-4]" | wc -l
+diff <(<line-based set> | sort) <(<joined set> | sort)      # the pairs only joining returns
+```
+
+⚠️ **NO COUNTS ARE PRINTED FOR EITHER COMMAND, AND THE REASON IS THIS REVISION'S OWN.** They were
+first written here **with** their figures, measured mid-edit, and the Appendix append and four
+further findings moved them **within the same revision that printed them** — the exact defect
+recorded two sections above. **The condition survives a commit; a delta between two counts of one
+population does not.** What does not rot is the **named** residue below: two specific sentences,
+quoted, that the line-based instrument never classified.
+
+⚠️ **The conclusion survives and the derivation does not, which is the honest split.** Every site
+the enumeration omitted was read at v0.6 and **all are comparative or contrastive** — *"wider **than
+v0.2** stated"*, *"re-executed **for v0.3**"*, *"a scope change **from v0.3**"*, *"distinguishes
+v0.4's D-4 **from v0.3's**"* — **not one is a stamped present-state assertion**, so **no stale claim
+was actually missed**. ⚠️ **But the DISPOSITION was inconsistent, not merely incomplete:** two
+structurally identical stamps — *"and **at v0.4** the only new refusal D-4 adds anywhere"* and
+*"Nor is the CHECKED SET left open **at v0.3**"* — were never classified at all, because they
+**straddle a line break** and the instrument could not see them. Both are still true; neither was
+adjudicated. **An instrument that classifies some members of a class and silently drops others is
+worse than one that misses the class**, because its output looks complete.
+
+**THE CORRECTED RECIPE — a condition, not a spelling list:** join lines (or scan sentences) before
+matching; derive the **preceding-word population by complement** rather than enumerating
+prepositions; and **re-run the discriminator against the sites only the joined corpus returns**.
+
+Constructs the v0.5 sweep enumerated, kept here as the record of what it actually ran: `at v0.[1-4]`
+· `in v0.[1-4]` · `by v0.[1-4]` · `under v0.[1-4]` · `to v0.[1-4]` · `of v0.[1-4]` ·
+`v0.[1-4] that` · `v0.[1-4]` at end of line · `as of v0.` (**zero hits** — the spelling does not
+occur here). The possessive `v0.[1-4]'s` is **attribution by construction** (*"v0.3's row said…"*)
+and carries no stamp on a present-state claim.
 
 ⚠️ **The instrument was proven able to report the class it hunts, on a SCRATCH COPY.** A synthetic
 stamped present-state line was appended to a copy of the document in a scratch directory and the
@@ -3424,10 +3791,225 @@ line sets, and read every line only the looser one returns.
 | §2.2's *"**At v0.2** that claim covers BOTH halves, and **at v0.3** it still does"* | A carried-forward record of a claim surviving a scoping decision. D-4 was untouched at v0.4 and v0.5, so it still holds; the sentence is narrating the chain, not stamping a present state |
 | The header's *"**At v0.2** that sentence was a commitment, not a property"* | Past tense throughout, about a superseded revision |
 | §2.3a's *"and **at v0.4** it is AMENDED rather than deferred"* | Records **when the disposition flipped** (v0.3 deferred, v0.4 amended). v0.5 corrected the amendment's population and shape, not the decision to amend |
-| §5c's and Normative References' *"READ; UNCHANGED **at v0.3**"* / *"**at v0.3**, leaves UNCHANGED"* | Dispositions stamped with the round that decided them; each is still the live disposition, and the stamp is how a reader finds the adjudication |
+| §5c's and Normative References' *"READ; UNCHANGED **at v0.3**"* / *"**at v0.3**, leaves UNCHANGED"* | Dispositions stamped with the round that decided them, and the stamp is how a reader finds the adjudication. ⚠️ **NO LONGER TRUE OF ALL OF THEM AT v0.6, AND CORRECTED RATHER THAN LEFT:** *"each is still the live disposition"* held when it was written and does not now — **`[2i §5.4]` and `[2i §10 Q2]` are AMENDED**, and `[2i §5.2]`'s row is **split** (its whitelist unchanged, its two code-scoping passages amended). Only `[2i §6.2]`'s *"unchanged"* survives intact. ⚠️ **This row's own claim was the disposition-vocabulary hit that led to the Normative References sweep** — a figure-keyed sweep could not have reached either |
 | Every *"NEW at v0.X"*, *"CORRECTED at v0.X"*, *"added at v0.X"*, *"narrowed at v0.X"*, *"struck at v0.X"* | Change records by construction. They are the Appendix's rule applied in the body |
 
 **Nothing else was touched.** No decision was re-taken, no section restructured, no adjacent text
 improved. ⚠️ **`.specify/2i-capi.md` was NOT edited** — §5c is a prescription for what B6's PR
-performs, and this draft remains the **sole untracked file**, which is the precondition §9's figures
-depend on.
+performs. ⚠️ **STALE AT v0.6 AND CORRECTED IN PLACE RATHER THAN LEFT:** this sentence used to close
+*"and this draft remains the **sole untracked file**, which is the precondition §9's figures depend
+on."* **The document is now tracked and committed**, that precondition is gone, and §9 is re-measured
+under the new premise rather than annotated. The correction is recorded here because the sentence is
+a **present-state** assertion inside a historical section — exactly the class this sweep's own
+discriminator names, arriving in the sweep's own paragraph.
+
+---
+
+### v0.5 → v0.6 — a post-sign-off P1 correction, NOT a review round
+
+⚠️ **NO ROUND NUMBER IS CLAIMED AND NO CONVERGENCE IS CLAIMED.** The loop's criterion is
+`P1 == 0 AND P2 == 0`; no round has returned both, and v0.6 is not a round. It applies **one P1 found
+after sign-off**, plus two source-verified defects relayed into it, plus one falsified derivation in
+v0.5's own closing-edit section. The status block's round table is **unchanged** — entering finding
+counts for a correction pass would misrepresent what produced them.
+
+#### What was FALSE
+
+**§5c asserted:** *"Exactly three sites make a **scope claim** — they assert *which* producers may
+emit the code — and all three are false of the 24 producers. **The other sixteen make no scope
+claim.**"* ⚠️ **The live scope-claim population is EIGHT.** Five sites were mis-classified:
+
+| site | v0.5 filed it as | it is |
+|---|---|---|
+| `[2i §5.2]`'s construction-time-flavour bullet | whitelist statement | **scope claim** — *"for the engine-construction case where no domain prefix applies"*, unhedged |
+| `[2i §5.2]`'s `guarded_call_construction` doc comment | whitelist statement | **scope claim, and the STRONGEST in the file** — an exhaustive **per-call-site partition**: *"dictionary load surfaces `FIXPP_ERR_DICT_CONFIG`; **engine creation surfaces `FIXPP_ERR_CAPI_CONFIG_INVALID`**; outbound message creation surfaces …"*. It assigns this code to engine creation **only**, and assigns the other two producers explicitly elsewhere — exclusive by construction |
+| `[2i §5.4]`'s construction-time-exceptions bullet | whitelist statement | **scope claim** — the bullet's `e.g.` governs the **exception examples**, not the parenthetical that scopes the code |
+| `[2i §6.5]`'s counting-convention appositive | count | **hybrid — the sentence is arithmetic, the appositive is a scope claim.** Amended for the appositive; **no numeral touched** |
+| `[2i §10 Q2]`'s decision row | whitelist statement | **scope claim** — present-tense shipping policy (*"v1.0 **ships** …"*) indexing the live sections, not a changelog |
+
+#### Why it is a P1 and not a nit
+
+`[2i §6.5]` was already going to be amended by B6. **`[2i]` contradicts ITSELF about this code's
+producers, today, before B6 touches anything:** §4.4 — **which B6 DOES amend** — names all three of
+`engine_create / dict_load / msg_create_outbound`, while §5.2's partition assigns the code to
+**engine creation alone**. Both are false of the measured 24, and they are false **differently**, so
+a reader resolving the contradiction by picking one gets a wrong answer either way. **As prescribed
+at v0.5, B6 amends §4.4 and leaves the contradicting partition live — publishing a contradiction
+that route 3 exists precisely to prevent.**
+
+#### Where it came from, and what that says about the loop
+
+⚠️ **It was found by an INDEPENDENT SESSION THAT HAD NOT READ THIS DOCUMENT.** Four Gate A rounds,
+an adversarial reviewer's five-verification completion test, and a closing pass all missed it.
+⚠️ **And it is RC#1's FIFTH occurrence, landing INSIDE THE INSTRUMENT BUILT TO CATCH IT.** §5c's
+recipe (c) was introduced at v0.5 with a check described as catching *"a fourth scope claim hiding
+behind `_CAPI_CONFIG_INVALID`"*. **It ran. It reported three. It missed three.**
+
+⚠️ **THE SHARPER STATEMENT, AND IT IS WORTH MORE THAN THE COUNT: the blind step was never the
+grep.** Recipe (c) **retrieved all three of the missed sites** — they were in its output the whole
+time. **Four consecutive rounds each replaced a RETRIEVAL, and not one of them ever instrumented the
+ADJUDICATION.** v0.5's class test was a single lexical trigger — *"does the sentence say **only** of
+the code?"* — and it is measurably blind: run over the eight adjudicated scope passages it fires on
+**three**, of which **two are an `only` predicated of a construct or a count rather than of the
+code**; **as applied, it scored 1 of 8.**
+
+⚠️ **ONE MISCLASSIFICATION, NOT TWO MISCOUNTS.** v0.5's *"whitelist statement"* class held six
+sites; **four move out and it collapses to two.** The scope class did not grow because a search
+found new text — it grew because one class had absorbed the other's members. ⚠️ **A relay claiming
+the six was reachable only by counting a frozen Appendix C line into it is FALSE on source:** all
+six of v0.5's named sites are live body text.
+
+#### The three defects are ONE root cause, and it is not "scope claims"
+
+**RC#1 restated for v0.6: a CLAIM ABOUT CODE WHOSE DERIVATION STOPPED SHORT OF THE CODE.** Three
+instances in this one pass, in three different columns:
+
+1. **Producer column** — five passages classified by their **section role** instead of by their
+   **quoted text**.
+2. **Remediation column, retry arm (relayed, re-verified on source here).** v0.5's *"or retry, with
+   no guarantee of success after a resource failure"* is **impossible at the only site that
+   motivates it**: in `fixpp_engine_start`, `engine->engine_started_ = true;` executes **before** the
+   worker-launch `try`, so a retry hits the already-started guard and returns
+   `translate(session_already_open)` — the launch is never re-attempted. The handler's own comment
+   already said so: *"the engine is recoverable via `destroy()`"*. ⚠️ **A second dead site was found
+   by the same question:** `fixpp_session_open`'s handle-allocation `catch` leaves the session
+   registered, and a retry re-derives the same `SessionId` into
+   `if (registry_.contains(id)) return std::unexpected(error::session_invalid_argument);` — a
+   **different** code, never `OK`. **The remediation was 22/24, not 24/24.**
+3. **Bucket label (relayed, re-verified on source here).** Class **E** was labelled *"resource
+   failure that is **not** allocation"*. The `try`'s **first statement is
+   `workers_.reserve(worker_threads_)`**, which throws `std::bad_alloc` / `std::length_error`, and
+   `std::thread`'s constructor throws `std::system_error` — **both land in the same `catch (...)`,
+   indistinguishably.** The bucket **includes** allocation. The *"e.g. thread creation"* motivation
+   survives; the exclusivity does not. ⚠️ **And the guard bounds the arm further:** a throw at
+   `i > 0` leaves `workers_` non-empty, the handler falls through, and the call returns
+   `FIXPP_ERR_OK` — the code is produced **only on total launch failure**.
+
+⚠️ **2 and 3 are one defect seen twice, and the coupling is the part worth keeping.** Because
+`engine_started_` is set before the `try`, a class-E failure leaves it **true** — from which point
+all three class-D sites **and** `fixpp_engine_start` itself refuse permanently. *"Call before
+`fixpp_engine_start`"* and *"retry"* are **both** dead for that engine; `destroy()` is the only exit.
+The corrected fourth remediation arm is therefore stated as a **condition on the state**, not as two
+named exceptions that would rot when a third appears.
+
+#### What was adjudicated as NOT requiring amendment — stated, because "no edit needed" is a claim
+
+- **`[2i §6.2]`'s code list — NO EDIT.** It ends *"`/ etc.` per the source layer"*: an explicit
+  non-exhaustiveness marker, and it names no producer **of this code**. **v0.5's classification is
+  CORRECT and was left alone.**
+- **`[2i §9 seam #5a]` — NO EDIT.** Its subject is *"**the test verifies** …"* and it defers **per
+  §6.5**. ⚠️ **It INHERITS §6.5, so it needs no edit once §6.5 is fixed — and for exactly that reason
+  it can never be cited as EVIDENCE of the code's scope, in either direction.**
+- **`[2i]`'s Appendix C mentions — NO EDIT, and this one is load-bearing.** They are
+  convergence-log records of what **v0.2 decided**, governed by that file's own Appendix rule.
+  **Rewriting one would itself be the defect**: a changelog edited to agree with the present stops
+  being evidence of what the past said. ⚠️ **Four of the five say only *"construction-time
+  fallback"*, true under any resolution; the fifth carries the full clause verbatim and is STILL not
+  amended.** Classified **frozen-historical**, explicitly.
+- **The four count / layout sites — NO EDIT.** ⚠️ **v0.5's prose for that class named five items and
+  one was a phantom** (*"the `#define`"* and *"§4.3's block line"* are one occurrence, while §6.5's
+  **two** tally sentences were written as one). The **set** was right; the enumeration was not.
+
+#### One claim THIS REVISION was handed and falsified against source, before shipping
+
+⚠️ **The orchestrator's brief carried a caution that §6.5's counts are load-bearing for
+`tools/check_capi_occupancy.sh`. Measured: they are not, and the risk INVERTS.** The script's own
+`doc_rows` extraction returns **eight rows, all in §1.1's magnitude-domain table**; Check B compares
+them against an `EXPECT_COUNT` map **hardcoded in the script** over the eight *domain* prefixes, with
+**no cross-cutting-block entry**; Check A compares a hardcoded symbol→numeric map against
+`include/fix/c_api/error.h` and `tools/abi_history/error_codes_v1.txt`, **not against the doc**. The
+gate never reads §6.5, §3.11, §1.1's layout block or Appendix D.2. **So editing §6.5's
+counting-convention sentence cannot red the gate — and the arithmetic it must not disturb is
+protected by nothing at all.** ⚠️ **v0.5's own §1.1 row had the false half of this too** (*"the count
+sites are inside it"*) and is corrected. ⚠️ **Recorded and deliberately NOT acted on:** `[2i §4.3]`'s
+occupancy bullet claims the gate asserts counts across six sites and *"verifies the derivation"* —
+**it reads one of the six.** Filed separately; not in B6's scope; **nothing in this document leans
+on it.**
+
+⚠️ **The orchestrator named this as its own instance of the root cause being documented here — an
+instrument's coverage asserted from a document's description of it rather than from the
+instrument.** It is recorded as such rather than quietly dropped: **a root cause that only ever
+appears in other people's work is not being stated honestly.**
+
+#### RC#1's SIXTH occurrence, inside v0.5's own closing-edit section
+
+⚠️ **The stale-self-reference sweep claimed it enumerated *"every preposition-plus-version form the
+document actually uses"*. It did not.** `from` · `than` · `with` · `for` · `over` · `about` are all
+used and none was listed, and the extractor is **line-based** over a **hard-wrapped** document, so
+**pairs that straddle a newline exist only after joining lines**. Both measured by complement, with
+the commands — **and no counts, for the reason given there** — printed in that section. ⚠️ **The conclusion survives and the derivation does not:** every omitted
+site was read and all are **comparative or contrastive**, so **no stale claim was actually missed**.
+⚠️ **But the disposition was INCONSISTENT rather than merely incomplete** — two structurally
+identical stamps (*"and at v0.4 the only new refusal D-4 adds anywhere"*, *"Nor is the CHECKED SET
+left open at v0.3"*) were never classified at all because they straddle a line break. **An
+instrument that classifies some members of a class and silently drops others is worse than one that
+misses the class, because its output looks complete.** The recipe is replaced with a **condition**:
+join lines before matching, derive the preceding-word population by **complement**, and re-run the
+discriminator against the sites only the joined corpus returns.
+
+#### §9's premise changed, and it is re-measured rather than annotated
+
+**This document is now TRACKED and COMMITTED.** The *"sole untracked file"* framing that made §9
+exist — the gate **cannot report on an untracked file** — no longer holds, and v0.5's rows each
+encoded it in their own text. **They are deleted and re-run**, in **both** forms, because the two
+read different corpora: `--range origin/main..HEAD` reads the **commit**, `--staged` reads the
+**index**, and an uncommitted v0.6 edit appears only in the second. **Both carry the seeded positive
+control**, because `rc=0` from either is still indistinguishable from a gate that read nothing.
+⚠️ **`git restore --staged` is no longer the last step** — under the old premise it restored the
+state the header printed; against a tracked file it would un-stage work that must stay staged or be
+committed.
+
+#### Propagation — where the superseded figure and the superseded disposition were carried
+
+**Derived two ways, because one of them could not have worked.** By **figure** vocabulary
+(*"three prose sites"*, *"THREE-SITE"*, *"all three"*): §2.3a's cost bullet ×2, §4's decision table
+row **3c**, §5a's `message.h` `fixpp_msg_clone` row, §5c's post-producer-table paragraph, §7's
+residual bullet ×2, §9's **V1** and **V5**, and Normative References' `[2i §6.5]` row. By
+**disposition** vocabulary (`unchanged`, `not amended`, `READ;`): Normative References'
+`[2i §5.4]` / `[2i §6.2]` / `[2i §10 Q2]` row — which **contains no numeral and no figure sweep
+could have reached it** — §5c's `[2i §5.2]`, `[2i §5.4]`, `[2i §6.2]` and `[2i §10 Q2]` disposition
+rows, and the closing-edit section's *"each is still the live disposition"* row. ⚠️ **Wherever the
+figure was the claim it is DELETED rather than re-pointed at 8**, per this document's own rule: a
+corrected count is the same defect at a new value, and this section exists because that rule was
+violated by the section that states it.
+
+#### Four further findings relayed into this pass, each re-verified on source before applying
+
+⚠️ **An independent `/analyze` pass DISAGREED with the P1 itself**, classifying §5.2's doc comment as
+a whitelist-without-exclusivity and concluding *"exactly 3, no fourth"*. **It was adjudicated against
+the primary source and overruled**, and this revision's author read the comment in full and reached
+the same verdict independently: it is an **exhaustive per-call-site partition** that assigns this
+code to engine creation **only** while assigning the other two producers explicitly elsewhere —
+exclusive by construction, and under §5c's own definition a scope claim. ⚠️ **Recorded because a
+split between two careful passes is information**: the same pass reproduced ~30 other populations
+correctly, and everything else it walked HELD.
+
+| # | finding | disposition |
+|---|---|---|
+| **1** | **Obligation 2 has THREE limbs and §0d discharged TWO.** *"PR description"* occurred exactly **once** in the document — inside the quoted obligation. Mandatory under `[const §X.7]` and checkable at Gate B | **APPLIED.** §0d's row 2 names the third target; §5c gains a **PR-body sub-clause** prescribing a `##` **heading** (not bold text — this repo has lost a gate to exactly that) in #428's in-tree spelling |
+| **2** | **§1.1's shield paragraph over-generalised.** It said all three *"stable under reallocation"* comments are growth-scoped. **Only one is**: another is about **POINTER** stability and states the **opposite** polarity (*"not under `push_back`"*), and the third is **UNQUALIFIED** and about **INDICES** — which is what `remove_tag` invalidates, and is the comment a reviewer will actually cite | **APPLIED.** The three are stated separately, **and the reason the narrow conclusion survives is now printed**: reallocation and erasure are **different events**, which makes the unqualified comment **true as written** rather than narrow |
+| **3** | **§3.1's *"Both negatives the issue asked about"* fails on attribution.** #452 poses no negatives, names no tag numbers, and hedges *"if configurable"* | **APPLIED as re-attribution; the DECISION stands.** The issue asks for a **sweep**; the seven-tag enumeration is **this document's work**, not the issue's ask |
+| **4** | **§5d's `feature-catalogue` and `coverage-index` rows printed a command and no result** — the command-to-prose handoff that same table condemns, while its `2m-pybind` row set the standard by reading the file and concluding *"No edit owed"* | **APPLIED — both read, both outcomes printed.** `feature-catalogue`: **`CA-009`**, Title and Status unmoved, **`Tests` column owed**. `coverage-index`: **no clone row**, but the reify block's **lazy-view clause is a live claim D-4 falsifies** — **edit owed** |
+
+⚠️ **fixpp#489 was RETITLED while this pass was running** — *four* → **five** producer classes, with
+a class-E row now reading *"worker-launch catch-all"*, matching §5c's corrected label. **Both quotes
+of it were re-read from the live issue rather than re-quoted from this document.** A quoted title is
+a figure like any other: it rots, and nothing in this repository re-runs a quotation.
+
+#### Net effect — stated as change, not as prediction
+
+**±0 decisions** (D-1, D-2, D-2b, D-3, D-3b, D-4, D-5a/b/c all untouched; **D-3b is NOT re-opened** —
+`[2i §5.2]`'s **whitelist** stays unamended and only its **code-scoping** passages move).
+**±0 test seams. ±0 error variants. ±0 pins. 0 source files changed.**
+**`[2i]` amendment population: 3 → 8 passages**, with the membership **condition** and a criterion
+audit replacing the figure. **Remediation arms: 3 → 4**, the fourth stated as a condition on the
+state. **Class E relabelled** from an exclusivity that is false of the site to a catch-all bounded by
+`workers_.empty()`. **§9 re-measured** under the tracked premise, in two forms. **V1's RESULT
+falsified and replaced**; **V2's remediation half re-walked**; **V5's scope widened**. **Two stale
+present-state claims corrected inside v0.5's closing-edit section**, one of them the sweep's own
+completeness claim. **Status stays `NOT converged by the loop's criterion`.**
+
+⚠️ **What v0.6 does NOT establish.** It verifies **text against source**. It builds nothing, runs no
+seam, and discharges no §8 row. ⚠️ **And it makes no "and no ninth site" claim** — four rounds of
+*"and no fourth exists"* is the shape that has now failed twice, and the replacement for that
+confidence is the condition and the recipe, not a better number.
