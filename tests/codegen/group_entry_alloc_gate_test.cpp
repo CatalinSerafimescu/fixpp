@@ -215,8 +215,8 @@ decimal_t parse_decimal(std::string_view sv, std::pmr::memory_resource* mr) {
 // make_correct_massquote_dict(), trimmed to only what this one-level-of-
 // nesting witness needs (no Legs(555) descent required here).
 fixpp::dict::table_view make_massquote_dict() {
-    fixpp::dict::table_view dict;
-    dict.add_group_member(296, 302)   // QuoteSetID
+    fixpp::dict::table_view_builder b;
+    b.add_group_member(296, 302)      // QuoteSetID
         .add_group_member(296, 295)   // NoQuoteEntries (nested group's own count field)
         .add_group_member(296, 299)   // QuoteEntryID — transitively under 296
         .add_group_member(296, 132)   // BidPx — transitively under 296
@@ -224,7 +224,7 @@ fixpp::dict::table_view make_massquote_dict() {
         .add_group_member(295, 299)   // QuoteEntryID — NoQuoteEntries' own delimiter
         .add_group_member(295, 132)   // BidPx — direct member of 295
         .add_group_member(295, 133);  // OfferPx — direct member of 295
-    return dict;
+    return std::move(b).build();
 }
 
 }  // namespace

@@ -68,6 +68,7 @@ namespace {
 
 using fixpp::core::error;
 using fixpp::dict::table_view;
+using fixpp::dict::table_view_builder;
 using fixpp::wire::access_mode;
 using fixpp::wire::dictionary_driven_validator;
 using fixpp::wire::MessageView;
@@ -122,15 +123,15 @@ MessageView<access_mode::Index> parse_index(std::vector<std::byte> const& buf,
 // — never as a member of NoOuter itself, matching contract C-4.1's "the tags
 // [inside the nested group] are not members of the outer group" framing.
 table_view make_bare_nested_delim_dict() {
-    table_view tv;
+    table_view_builder tvb;
     for (std::uint16_t const t :
          {std::uint16_t{8}, std::uint16_t{9}, std::uint16_t{10}, std::uint16_t{35},
           std::uint16_t{100}, std::uint16_t{200}, std::uint16_t{201}}) {
-        tv.add_valid("X", t);
+        tvb.add_valid("X", t);
     }
-    tv.set_group_first(100, 200);  // NoOuter: delimiter = NoInner's own count tag
-    tv.set_group_first(200, 201);  // NoInner: delimiter = InnerField
-    return tv;
+    tvb.set_group_first(100, 200);  // NoOuter: delimiter = NoInner's own count tag
+    tvb.set_group_first(200, 201);  // NoInner: delimiter = InnerField
+    return std::move(tvb).build();
 }
 
 // ── W-1a fixture: a real loaded dictionary, so NoOuter registers under a
@@ -182,21 +183,21 @@ constexpr std::string_view kNestedDelimContextXml =
 constexpr std::uint16_t kChainBaseTag = 1000;
 
 table_view make_chain_dict(std::uint16_t base_tag, std::size_t total_groups) {
-    table_view tv;
+    table_view_builder b;
     for (std::uint16_t const t :
          {std::uint16_t{8}, std::uint16_t{9}, std::uint16_t{10}, std::uint16_t{35}}) {
-        tv.add_valid("Z", t);
+        b.add_valid("Z", t);
     }
     // total_groups group-count tags (base_tag .. base_tag+total_groups-1)
     // plus one terminal leaf scalar (base_tag+total_groups).
     for (std::size_t i = 0; i <= total_groups; ++i) {
-        tv.add_valid("Z", static_cast<std::uint16_t>(base_tag + i));
+        b.add_valid("Z", static_cast<std::uint16_t>(base_tag + i));
     }
     for (std::size_t i = 0; i < total_groups; ++i) {
-        tv.set_group_first(static_cast<std::uint16_t>(base_tag + i),
-                           static_cast<std::uint16_t>(base_tag + i + 1));
+        b.set_group_first(static_cast<std::uint16_t>(base_tag + i),
+                          static_cast<std::uint16_t>(base_tag + i + 1));
     }
-    return tv;
+    return std::move(b).build();
 }
 
 // One instance's worth of the nested chain BELOW the outermost group (tags

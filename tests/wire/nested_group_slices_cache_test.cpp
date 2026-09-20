@@ -101,8 +101,8 @@ TEST(NestedGroupSlicesCache, NullSliceDataReturnsEmptySpan) {
 // ─────────────────────────────────────────────────────────────────
 
 TEST(NestedGroupSlicesCache, DifferentSliceContinuesThenSameSliceReusesSubTable) {
-    fixpp::dict::table_view dict;
-    dict.add_valid("D", 35)
+    fixpp::dict::table_view_builder dictb;
+    dictb.add_valid("D", 35)
         .add_valid("D", 34)
         .add_valid("D", 453)
         .add_valid("D", 448)
@@ -117,6 +117,7 @@ TEST(NestedGroupSlicesCache, DifferentSliceContinuesThenSameSliceReusesSubTable)
         .add_group_member(453, 901)
         .set_group_first(802, 523)
         .set_group_first(900, 901);
+    fixpp::dict::table_view const dict = std::move(dictb).build();
 
     // Outer group 453 (delimiter 448), TWO occurrences: the first contains
     // TWO distinct single-entry nested groups (802/523 and 900/901); the
@@ -207,8 +208,8 @@ namespace {
 
 // Shared single-nested-group fixture for the OOM tests below.
 fixpp::dict::table_view make_oom_dict() {
-    fixpp::dict::table_view dict;
-    dict.add_valid("D", 35)
+    fixpp::dict::table_view_builder dictb;
+    dictb.add_valid("D", 35)
         .add_valid("D", 34)
         .add_valid("D", 453)
         .add_valid("D", 448)
@@ -218,7 +219,7 @@ fixpp::dict::table_view make_oom_dict() {
         .add_group_member(453, 802)
         .add_group_member(453, 523)
         .set_group_first(802, 523);
-    return dict;
+    return std::move(dictb).build();
 }
 
 std::vector<std::byte> make_oom_frame() {

@@ -9,9 +9,10 @@ refs:
   - src/dictionary/version_registry.cpp
   - .specify/2c-codegen.md
   - .specify/215-dictionary-view.md
+  - .specify/456-table-view-seal.md
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/2c-codegen.md
-codegraph_entry: [Dictionary, xml_loader, orchestra_loader, field_traits, version_registry]
+codegraph_entry: [Dictionary, xml_loader, orchestra_loader, field_traits, version_registry, table_view_builder]
 constitution: ["§I.1"]
 ---
 
@@ -204,9 +205,25 @@ rule off the shared parser is the load-bearing one: `<fixr:component id>` / `<fi
 are a repository-local surrogate key where `id="0"` is legal, so the Orchestra rule lives in
 `parse_orchestra_field_tag` and the false-positive arm
 (`OrchestraFailClosed.ZeroStructuralXmlIdsAreStillAccepted`) is what holds the two namespaces
-apart. **What remains open is `table_view`'s own mutator surface** — a hand-built view can still
-plant a zero where a loaded dictionary cannot, which is `table_view.hpp`'s B-384-2 note and
-fixpp#456.
+apart. **`table_view`'s own mutator surface was the residue, and fixpp#456 MOVED it rather than
+closing it.** The population members are private now and reachable only through
+`table_view_builder` — `include/fixpp/dict/table_view.hpp`'s STORAGE banner states the mechanism,
+and is the one place that does. The *hazard* is unchanged: the builder accepts everything the view
+used to, and `build()` is `return std::move(tv_);` with no validation of any kind, so a hand-built
+table can still plant a zero where a loaded dictionary cannot. That is why `B-384-2` was **amended,
+not closed** — its wording now names the `table_view_builder` surface instead of the hand-built
+view — and why `L-456-1` was filed beside it.
+
+> ⚠️ **Before you write "immutable" about a `table_view`, read that banner.** #456 took three Gate B
+> rounds and found **zero** code defects across all three; every finding was prose claiming more than
+> the type delivers. What the seal buys is reachability of the population members. It does not make
+> the object unwritable: the `std::uint16_t` elements behind the span accessors are allocated by the
+> member vectors and are not `const` objects, so a `const_cast` and a write through it is defined
+> behaviour — on a `const` view as much as a non-`const` one. Declaring the view `const` closes
+> move-from and `optional::emplace` re-seating, and not that. The rejected alternatives are worth
+> knowing too: a runtime `frozen_` flag, freezing at `as_table_view()`, and a facade over a reference
+> all died to the same discriminator — #456's witness mutates a *default-constructed* view, so any
+> design leaving a reachable mutation surface on a `table_view` **value** fails it.
 
 ## Where the design decisions live
 

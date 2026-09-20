@@ -38,6 +38,7 @@ namespace {
 using fixpp::core::error;
 using fixpp::dict::field_type;
 using fixpp::dict::table_view;
+using fixpp::dict::table_view_builder;
 using fixpp::wire::access_mode;
 using fixpp::wire::dictionary_driven_validator;
 using fixpp::wire::MessageView;
@@ -71,9 +72,9 @@ std::vector<std::byte> make_versioned_frame(std::string_view version_tag8,
 //   valid (optional): 112 (TestReqID), 98 (EncryptMethod in some versions)
 //   tag 98 (EncryptMethod) is enumerated: only "0" (no encryption) and "1"
 // Tag 9999 is NOT registered as valid (used in unexpected-tag tests).
-table_view make_heartbeat_grammar() {
-    table_view t;
-    t.add_required("0", 8)
+table_view_builder make_heartbeat_grammar() {
+    table_view_builder tb;
+    tb.add_required("0", 8)
         .add_required("0", 9)
         .add_required("0", 35)
         .add_required("0", 49)
@@ -87,7 +88,7 @@ table_view make_heartbeat_grammar() {
         .set_type(98, field_type::Int)
         .add_enum(98, "0")
         .add_enum(98, "1");
-    return t;
+    return tb;
 }
 
 // Heartbeat grammar extended with a synthetic repeating group.
@@ -98,13 +99,13 @@ table_view make_heartbeat_grammar() {
 // Used only by MalformedGroupCountRejected; other cases use the plain
 // make_heartbeat_grammar() to avoid grammar drift.
 table_view make_heartbeat_grammar_with_group() {
-    table_view t = make_heartbeat_grammar();
+    table_view_builder t = make_heartbeat_grammar();
     t.add_valid("0", 627)             // NoHops (group count field)
         .add_valid("0", 628)          // HopCompID (group delimiter — member)
         .add_valid("0", 629)          // HopSendingTime (optional group member)
         .set_group_first(627, 628)    // 627 starts a group; 628 is the delimiter
         .add_group_member(627, 629);  // 629 is the second member
-    return t;
+    return std::move(t).build();
 }
 
 // ── MessageView builder ───────────────────────────────────────────────────────
@@ -173,7 +174,7 @@ TEST_P(ValidatorPerVersion, ConformingHeartbeatAccepted) {
     auto const& p = GetParam();
     SCOPED_TRACE(p.label);
 
-    dictionary_driven_validator v{make_heartbeat_grammar()};
+    dictionary_driven_validator v{make_heartbeat_grammar().build()};
 
     auto buf = make_versioned_frame(p.tag8_value,
                                     "35=0\x01"
@@ -193,7 +194,7 @@ TEST_P(ValidatorPerVersion, MissingRequiredSenderRejected) {
     auto const& p = GetParam();
     SCOPED_TRACE(p.label);
 
-    dictionary_driven_validator v{make_heartbeat_grammar()};
+    dictionary_driven_validator v{make_heartbeat_grammar().build()};
 
     auto buf = make_versioned_frame(p.tag8_value,
                                     "35=0\x01"
@@ -218,7 +219,7 @@ TEST_P(ValidatorPerVersion, BadEnumEncryptMethodRejected) {
     auto const& p = GetParam();
     SCOPED_TRACE(p.label);
 
-    dictionary_driven_validator v{make_heartbeat_grammar()};
+    dictionary_driven_validator v{make_heartbeat_grammar().build()};
 
     auto buf = make_versioned_frame(p.tag8_value,
                                     "35=0\x01"
@@ -241,7 +242,7 @@ TEST_P(ValidatorPerVersion, UnexpectedTagRejected) {
     auto const& p = GetParam();
     SCOPED_TRACE(p.label);
 
-    dictionary_driven_validator v{make_heartbeat_grammar()};
+    dictionary_driven_validator v{make_heartbeat_grammar().build()};
 
     auto buf = make_versioned_frame(p.tag8_value,
                                     "35=0\x01"

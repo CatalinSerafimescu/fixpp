@@ -207,8 +207,12 @@ public:
     // checks against (store-driven projection of `enum_values()` above; no
     // longer a stub).
     //
-    // [const §XV.1]: construction only at config-time; the returned table_view
-    // is immutable and must not be rebuilt on the per-message hot path.
+    // [const §XV.1]: construction only at config-time; the returned table_view's
+    // population surface is sealed by the type since fixpp#456, not merely
+    // asserted here — the population surface is as `table_view.hpp`'s STORAGE
+    // banner states. ⚠️ It is returned BY VALUE, so the caller's view is
+    // non-`const` unless the caller declares it so, and must not be rebuilt
+    // on the per-message hot path.
     [[nodiscard]] table_view as_table_view() const;
 
 private:

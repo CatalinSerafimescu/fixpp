@@ -216,8 +216,9 @@ TEST(OffsetTableErrorPath, GroupSlicesBadAllocDegradeCoversLines231to232) {
     auto fv = fixpp::wire::test::make_frame_view(buf);
     ASSERT_TRUE(fv.has_value());
 
-    fixpp::dict::table_view dict;
-    dict.set_group_first(453, 448);
+    fixpp::dict::table_view_builder dictb;
+    dictb.set_group_first(453, 448);
+    fixpp::dict::table_view const dict = std::move(dictb).build();
     // 384 / fixpp#426: the delimiter oracle is threaded too, bundled with the
     // membership oracle via `dict_hooks::for_table_view(dict)`. The fixture
     // sets `set_group_first(453, 448)`, so it resolves 448 — the same tag the

@@ -523,7 +523,10 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_clone(const fixpp_msg_t* src, fixpp_msg
             fixpp::wire::frame_view_access::make(owned_frame.get(), frame_len, 0, frame_len));
         std::unique_ptr<fixpp::wire::MessageView<fixpp::wire::access_mode::Index>> clone_view;
         if (h->view->is_dict_backed()) {
-            clone->owned_tv_ = h->view->membership_copy();
+            // fixpp#456 seam 6: seated rather than assigned — the rationale is
+            // written once, at the sibling site in src/dictionary/reify.cpp.
+            assert(!clone->owned_tv_.has_value());
+            clone->owned_tv_.emplace(h->view->membership_copy());
             fixpp::wire::Parser<fixpp::wire::access_mode::Index> clone_parser{*clone->owned_tv_};
             auto parsed = clone_parser.parse(fv, clone_mr);
             if (parsed) {

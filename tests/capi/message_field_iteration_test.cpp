@@ -68,8 +68,8 @@ struct InboundHandle {
 // Minimal dictionary: 453=NoPartyIDs, delimiter=448, member=447.
 // Same as message_read_test.cpp::make_group_dict() (SC-002).
 fixpp::dict::table_view make_group_dict() {
-    fixpp::dict::table_view dict;
-    dict.add_valid("D", 35)
+    fixpp::dict::table_view_builder dictb;
+    dictb.add_valid("D", 35)
         .add_valid("D", 34)
         .add_valid("D", 49)
         .add_valid("D", 453)
@@ -77,7 +77,7 @@ fixpp::dict::table_view make_group_dict() {
         .add_valid("D", 447)
         .set_group_first(453, 448)
         .add_group_member(453, 447);
-    return dict;
+    return std::move(dictb).build();
 }
 
 // ── Error paths ───────────────────────────────────────────────────────────────

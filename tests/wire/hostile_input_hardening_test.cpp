@@ -412,14 +412,15 @@ TEST(HostileInputHardening, CraftedCollisionSetDefeatedByDifferentSeed) {
 // kept only as the weaker complement, for the case where both frames regress
 // by the same declared-count-independent amount.
 TEST(HostileInputHardening, InflatedGroupCountDoesNotInflateArenaUse) {
-    fixpp::dict::table_view dict;
-    dict.add_valid("D", 35)
+    fixpp::dict::table_view_builder dictb;
+    dictb.add_valid("D", 35)
         .add_valid("D", 34)
         .add_valid("D", 453)
         .add_valid("D", 448)
         .add_valid("D", 447)
         .set_group_first(453, 448)
         .add_group_member(453, 447);
+    fixpp::dict::table_view const dict = std::move(dictb).build();
 
     // Measure ONLY the slice materialization, not construction. Both frames
     // carry the SAME single instance (448=PA|447=D) and differ only in the

@@ -51,14 +51,15 @@ std::vector<std::byte> make_raw_frame(std::string const& body) {
 }
 
 TEST(GroupSliceTrailingSoh, WholeFrameParseUnchanged) {
-    fixpp::dict::table_view dict;
-    dict.add_valid("D", 35)
+    fixpp::dict::table_view_builder dictb;
+    dictb.add_valid("D", 35)
         .add_valid("D", 34)
         .add_valid("D", 453)
         .add_valid("D", 448)
         .add_valid("D", 447)
         .set_group_first(453, 448)
         .add_group_member(453, 447);
+    fixpp::dict::table_view const dict = std::move(dictb).build();
 
     auto buf = make_raw_frame(
         "35=D\x01"
@@ -101,8 +102,8 @@ TEST(GroupSliceTrailingSoh, WholeFrameParseUnchanged) {
 // that is provably already present in the parent frame buffer at
 // `data+len` — this is exactly that boundary.
 TEST(GroupSliceTrailingSoh, NestedSliceBuildCountedLastField) {
-    fixpp::dict::table_view dict;
-    dict.add_valid("D", 35)
+    fixpp::dict::table_view_builder dictb;
+    dictb.add_valid("D", 35)
         .add_valid("D", 34)
         .add_valid("D", 453)
         .add_valid("D", 448)
@@ -116,6 +117,7 @@ TEST(GroupSliceTrailingSoh, NestedSliceBuildCountedLastField) {
         .add_group_member(453, 95)
         .add_group_member(453, 96)
         .set_group_first(802, 523);
+    fixpp::dict::table_view const dict = std::move(dictb).build();
 
     // Outer group 453 (delimiter 448), single occurrence, whose entry
     // contains a nested group 802 (delimiter 523) and ends with the counted
@@ -193,8 +195,8 @@ TEST(GroupSliceTrailingSoh, NestedSliceBuildCountedLastField) {
 // wire_group_too_large behaviour as before the 062 entry-read seam addition
 // (mirrors WireOffsetTable.DoSCapPerInstanceRejectsOversizedSingleInstance).
 TEST(GroupSliceTrailingSoh, OversizedCountPerInstanceCapPreserved) {
-    fixpp::dict::table_view dict;
-    dict.add_valid("D", 35)
+    fixpp::dict::table_view_builder dictb;
+    dictb.add_valid("D", 35)
         .add_valid("D", 34)
         .add_valid("D", 453)
         .add_valid("D", 448)
@@ -205,6 +207,7 @@ TEST(GroupSliceTrailingSoh, OversizedCountPerInstanceCapPreserved) {
         .add_group_member(453, 447)
         .add_group_member(453, 452)
         .add_group_member(453, 802);
+    fixpp::dict::table_view const dict = std::move(dictb).build();
 
     auto buf = make_raw_frame(
         "35=D\x01"

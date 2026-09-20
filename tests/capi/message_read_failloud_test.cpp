@@ -103,8 +103,8 @@ std::vector<std::byte> make_raw_frame(std::string const& body) {
 // per file-locality convention — no shared test-support header for this
 // dict exists yet).
 fixpp::dict::table_view make_nested_group_dict() {
-    fixpp::dict::table_view dict;
-    dict.add_valid("D", 35)
+    fixpp::dict::table_view_builder dictb;
+    dictb.add_valid("D", 35)
         .add_valid("D", 34)
         .add_valid("D", 453)
         .add_valid("D", 448)
@@ -119,7 +119,7 @@ fixpp::dict::table_view make_nested_group_dict() {
         .add_group_member(453, 525)
         .set_group_first(539, 524)
         .add_group_member(539, 525);
-    return dict;
+    return std::move(dictb).build();
 }
 
 // Wrap a stack MessageView<Index> as a fixpp_msg_t for the C-ABI calls

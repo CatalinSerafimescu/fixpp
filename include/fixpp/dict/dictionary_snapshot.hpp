@@ -6,9 +6,10 @@
 // value object that pairs a `table_view` with the `Dictionary` it was built
 // from. Replaces `SessionConfig::dictionary_view` (a bare
 // `shared_ptr<const table_view>`), which had two defects (§2): C1 — the
-// `const` on the pointee is not enforced, since `table_view` carries several
-// public mutators (add_valid_tag, set_group_first, set_length_pair_data_tag,
-// …) — and C4 — nothing checked that the view actually came
+// `const` on the pointee WAS not enforced, because `table_view` then carried
+// its population surface in public (add_valid_tag, set_group_first,
+// set_length_pair_data_tag, …), and a caller holding a non-const alias could
+// repopulate a published view — and C4 — nothing checked that the view actually came
 // from the paired `SessionConfig::dictionary`, so a mismatched pair silently
 // drove inbound parsing/validation from the wrong grammar.
 //
@@ -20,10 +21,13 @@
 // against `source()`, not a construction closure — see the design doc §3).
 //
 // `Dictionary::as_table_view()` (dictionary.hpp's own declaration) stays public and keeps
-// returning a mutable `table_view` BY VALUE — `dictionary_driven_validator`
-// still holds one by value under the frozen SC-007 design point
-// (validator.hpp's `dictionary_driven_validator` ctor) — so this type does not make `table_view`
-// itself immutable. It makes the session-config injection point stop admitting a mutable alias.
+// returning a `table_view` BY VALUE — `dictionary_driven_validator` still holds one by
+// value under the frozen SC-007 design point (validator.hpp's
+// `dictionary_driven_validator` ctor). fixpp#456 sealed that view's population surface
+// (`table_view.hpp`'s STORAGE banner); it is still returned by value into a non-`const`
+// caller variable unless the caller declares otherwise. What this type does remains what
+// it always did and is NOT subsumed by that seal — it is the PAIRING with the source
+// `Dictionary` that closes C4, which the seal does not touch.
 #pragma once
 
 #include <fixpp/dict/table_view.hpp>

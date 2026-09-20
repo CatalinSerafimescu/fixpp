@@ -24,6 +24,7 @@
 #include <fixpp/dict/table_view.hpp>
 #include <fixpp/dict/xml_loader.hpp>
 #include <memory_resource>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -261,11 +262,12 @@ TEST(TableViewTest, GroupMemberTagsAgreesWithDictionary) {
 // tests/wire/nested_group_extent_test.cpp::BenignSameMembershipReuseAcrossContexts
 // and tests/codegen/nested_group_read_test.cpp).
 TEST(TableViewTest, GroupContextOnlyRegistrationFoundThroughContextAccessor) {
-    fixpp::dict::table_view tv;
+    fixpp::dict::table_view_builder tvb;
     std::array<std::uint16_t, 1> const parent_path{453};
     // Context-scoped ONLY — no add_group_member(802, ...) / set_group_first(802, ...).
-    tv.set_group_first_ctx("D", parent_path, 802, 523);
-    tv.add_group_member_ctx("D", parent_path, 802, 524);
+    tvb.set_group_first_ctx("D", parent_path, 802, 523);
+    tvb.add_group_member_ctx("D", parent_path, 802, 524);
+    fixpp::dict::table_view const tv = std::move(tvb).build();
 
     // The context-aware 3-arg overloads must resolve this no_tag under the
     // exact (msg_type, parent_path) it was registered with — proving the
@@ -310,12 +312,13 @@ TEST(TableViewTest, GroupContextOnlyRegistrationFoundThroughContextAccessor) {
 // that exact key is a miss with a non-zero bare answer waiting behind it — the
 // precise shape that is invisible through the old accessor.
 TEST(TableViewTest, GroupFirstFieldExactReportsAContextMissInsteadOfMaskingIt) {
-    fixpp::dict::table_view tv;
+    fixpp::dict::table_view_builder tvb;
     std::array<std::uint16_t, 1> const registered_path{453};
     std::array<std::uint16_t, 1> const other_path{555};
 
-    tv.set_group_first(802, 600);                            // legacy bare store
-    tv.set_group_first_ctx("D", registered_path, 802, 523);  // context store — this key only
+    tvb.set_group_first(802, 600);                            // legacy bare store
+    tvb.set_group_first_ctx("D", registered_path, 802, 523);  // context store — this key only
+    fixpp::dict::table_view const tv = std::move(tvb).build();
 
     // 1. Context HIT — both accessors give the CONTEXT answer (523, not 600).
     EXPECT_EQ(tv.group_first_field("D", registered_path, 802), std::uint16_t{523});
@@ -467,18 +470,22 @@ TEST(TableViewTest, EnumValidAbsentTagAcceptFloor) {
 
 TEST(TableViewTest, SpansRemainingValidAfterDictionaryDestroyed) {
     // Build the table_view, then destroy the dictionary; spans must still work.
-    fixpp::dict::table_view tv;
+    // fixpp#456 deletes assignment, so the view is SEATED with `emplace` into a
+    // disengaged optional rather than assigned into a default-constructed one.
+    // The arm is unchanged: one view, built inside the scope, read after it.
+    std::optional<fixpp::dict::table_view> tv;
     {
         std::vector<std::byte> buf(2U * 1024U * 1024U);
         std::pmr::monotonic_buffer_resource mr{buf.data(), buf.size()};
         auto dict = load_test_dictionary(&mr);
-        tv = dict.as_table_view();
+        tv.emplace(dict.as_table_view());
         // dict goes out of scope here (dictionary destroyed).
     }
+    ASSERT_TRUE(tv.has_value()) << "precondition: the view was seated inside the scope";
     // Must still be usable.
-    EXPECT_FALSE(tv.required_fields("A").empty())
+    EXPECT_FALSE(tv->required_fields("A").empty())
         << "required_fields span must remain valid after Dictionary is destroyed";
-    EXPECT_TRUE(tv.field_valid_for("A", 49))
+    EXPECT_TRUE(tv->field_valid_for("A", 49))
         << "field_valid_for must work after Dictionary is destroyed";
 }
 
@@ -599,13 +606,14 @@ TEST(TableViewCtxQuery, OverLongAncestorPathTripsTheClampAssertion) {
     // preset is indistinguishable from one that never existed.
     GTEST_SKIP() << "assert() is compiled out under NDEBUG; this pins the debug-build guard.";
 #else
-    fixpp::dict::table_view tv;
+    fixpp::dict::table_view_builder tvb;
 
     // Register the context under a SHORT path — this also sets the group bit,
     // without which `group_first_field_exact` returns early and never reaches
     // the query the assertion guards.
     std::array<std::uint16_t, 1> const short_path{901};
-    tv.set_group_first_ctx("M", std::span<std::uint16_t const>{short_path}, 100, 110);
+    tvb.set_group_first_ctx("M", std::span<std::uint16_t const>{short_path}, 100, 110);
+    fixpp::dict::table_view const tv = std::move(tvb).build();
     ASSERT_EQ(tv.group_first_field_exact("M", std::span<std::uint16_t const>{short_path},
                                          std::uint16_t{100}),
               std::optional<std::uint16_t>{110})

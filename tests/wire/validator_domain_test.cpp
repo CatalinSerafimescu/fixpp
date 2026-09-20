@@ -75,6 +75,7 @@ namespace {
 using fixpp::core::error;
 using fixpp::dict::field_type;
 using fixpp::dict::table_view;
+using fixpp::dict::table_view_builder;
 using fixpp::wire::access_mode;
 using fixpp::wire::dictionary_driven_validator;
 using fixpp::wire::MessageView;
@@ -133,9 +134,9 @@ MessageView<access_mode::Index> parse_index(std::vector<std::byte> const& buf,
 //   tag 54 (Side) is enumerated: allowed values "1" (Buy) and "2" (Sell)
 //   tag 453 starts a repeating group; first field is 448 (PartyID)
 table_view make_d_grammar() {
-    table_view t;
+    table_view_builder tb;
     // Header fields (always required/valid for every message)
-    t.add_required("D", 8)      // BeginString
+    tb.add_required("D", 8)     // BeginString
         .add_required("D", 9)   // BodyLength
         .add_required("D", 35)  // MsgType
         .add_required("D", 49)  // SenderCompID
@@ -162,7 +163,7 @@ table_view make_d_grammar() {
         // repeating group: tag 453 (NoPartyIDs), first delimiter is tag 448
         .set_group_first(453, 448)
         .add_group_member(453, 447);
-    return t;
+    return std::move(tb).build();
 }
 
 // ── Scratch arena for validator calls (≤ 600 B working set per spec). ─────────
@@ -437,8 +438,8 @@ TEST(ValidatorDomain, GroupThenTopLevelFieldNotOverCounted) {
 }
 
 TEST(ValidatorDomain, TrailingTopLevelFieldSharingMemberTagIsNotAbsorbed) {
-    table_view gram;
-    gram.add_required("D", 8)
+    table_view_builder gramb;
+    gramb.add_required("D", 8)
         .add_required("D", 9)
         .add_required("D", 35)
         .add_required("D", 49)
@@ -456,8 +457,7 @@ TEST(ValidatorDomain, TrailingTopLevelFieldSharingMemberTagIsNotAbsorbed) {
         .set_type(54, field_type::Char)
         .add_enum(54, "1")
         .add_enum(54, "2");
-
-    dictionary_driven_validator v{std::move(gram)};
+    dictionary_driven_validator v{std::move(gramb).build()};
 
     auto buf = make_frame(
         "35=D\x01"
@@ -496,8 +496,8 @@ TEST(ValidatorDomain, NestedMalformedGroupRejected) {
     //     447 (PartyIDSource) — a member
     //     460 (NoRelationships, delimiter=461) — inner group count
     //     461 (Relationship) — inner group delimiter/member
-    table_view gram;
-    gram.add_required("D", 8)
+    table_view_builder gramb;
+    gramb.add_required("D", 8)
         .add_required("D", 9)
         .add_required("D", 35)
         .add_required("D", 49)
@@ -521,8 +521,7 @@ TEST(ValidatorDomain, NestedMalformedGroupRejected) {
         .set_type(54, field_type::Char)
         .add_enum(54, "1")
         .add_enum(54, "2");
-
-    dictionary_driven_validator v{std::move(gram)};
+    dictionary_driven_validator v{std::move(gramb).build()};
 
     // Outer 453=1 (1 instance), inner 460=2 declares 2 but only 1 follows.
     auto buf = make_frame(

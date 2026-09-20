@@ -448,11 +448,13 @@ void maybe_drop_first_group_ctx_delim_run_for_testing(dict_metadata_handle& h) n
 
 table_view Dictionary::as_table_view() const {
     detail::bump_as_table_view_call_count();  // 083 T049 test seam (W-11a)
-    table_view tv;
-
     if (!handle_) {
-        return tv;  // null handle (moved-from Dictionary) → empty table_view
+        return {};  // null handle (moved-from Dictionary) → empty table_view
     }
+
+    // fixpp#456: population goes through the builder; `tv` no longer exists as a
+    // mutable local.
+    table_view_builder b;
 
     auto const msgs = messages();
 
@@ -462,21 +464,21 @@ table_view Dictionary::as_table_view() const {
         // ── required-fields list ─────────────────────────────────────────
         auto const req_span = required_fields(mt);
         for (auto const tag : req_span) {
-            tv.add_required_tag(mt, tag);
+            b.add_required_tag(mt, tag);
         }
 
         // ── valid-tag set (all fields for this msg_type) ─────────────────
         auto const all_fields = message_fields(mt);
         for (auto const& fr : all_fields) {
             if (fr.rule != field_presence::NotDeclared) {
-                tv.add_valid_tag(mt, fr.tag);
+                b.add_valid_tag(mt, fr.tag);
             }
             // fixpp#426: a tag's Length+Data pairing is dictionary-wide, not
             // per-msg_type (mirrors Dictionary::length_pair_data_tag_impl,
             // fixpp#427) — set_length_pair_data_tag no-ops on a zero tag, so
             // re-registering the same pair from every message that declares
             // it is idempotent.
-            tv.set_length_pair_data_tag(fr.tag, fr.length_pair_data_tag);
+            b.set_length_pair_data_tag(fr.tag, fr.length_pair_data_tag);
         }
 
         // ── group structure (legacy bare-no_tag store — PRE-063 UNCHANGED) ──
@@ -497,9 +499,9 @@ table_view Dictionary::as_table_view() const {
             if (legacy_first == 0) {
                 continue;
             }
-            tv.set_group_first(legacy_no_tag, legacy_first);
+            b.set_group_first(legacy_no_tag, legacy_first);
             for (auto const& gfr : group_fields(legacy_no_tag)) {
-                tv.add_group_member(legacy_no_tag, gfr.tag);
+                b.add_group_member(legacy_no_tag, gfr.tag);
             }
             // Gate B r1 F1 (fixpp#201): the DIRECT required-member set is now
             // sourced from the GROUP-RELATIVE store (own_req gated by a
@@ -509,7 +511,7 @@ table_view Dictionary::as_table_view() const {
             // only inside an OPTIONAL component nested within the group; see
             // `dict_metadata_handle::group_required_members_impl`).
             for (auto const req_tag : handle_->group_required_members_impl(legacy_no_tag)) {
-                tv.add_group_required_member(legacy_no_tag, req_tag);
+                b.add_group_required_member(legacy_no_tag, req_tag);
             }
         }
 
@@ -660,12 +662,12 @@ table_view Dictionary::as_table_view() const {
             // there). Every context-aware consumer (parser lambda,
             // validator.hpp) queries THIS store first, so Defect A stays
             // fixed on those call sites regardless of the legacy loop above.
-            tv.set_group_first_ctx(mt, path, no_tag, delim);
+            b.set_group_first_ctx(mt, path, no_tag, delim);
             for (auto const member_tag : members) {
-                tv.add_group_member_ctx(mt, path, no_tag, member_tag);
+                b.add_group_member_ctx(mt, path, no_tag, member_tag);
             }
             for (auto const req_tag : required_members) {  // fixpp#201
-                tv.add_group_required_member_ctx(mt, path, no_tag, req_tag);
+                b.add_group_required_member_ctx(mt, path, no_tag, req_tag);
             }
         }
     }
@@ -685,10 +687,10 @@ table_view Dictionary::as_table_view() const {
                 continue;
             }
             // Only record if not already mapped (first-seen wins; invariant).
-            tv.set_field_type(fr.tag, field_type_from_data_type(fr.type));
+            b.set_field_type(fr.tag, field_type_from_data_type(fr.type));
             if (fr.type == field_data_type::MultiCharValue ||
                 fr.type == field_data_type::MultiStringValue) {
-                tv.set_multi_value(fr.tag, true);
+                b.set_multi_value(fr.tag, true);
             }
         }
     }
@@ -711,7 +713,7 @@ table_view Dictionary::as_table_view() const {
     // why the table must own them rather than alias `handle_->name_pool_`.
     for (auto const& run : handle_->enum_runs_) {
         for (auto const& ev : enum_values(run.tag)) {
-            tv.add_enum(run.tag, ev.value);
+            b.add_enum(run.tag, ev.value);
         }
     }
 
@@ -726,14 +728,14 @@ table_view Dictionary::as_table_view() const {
         case session_version::v50sp1:
         case session_version::v50sp2:
             for (auto const& entry : detail::kFixtFramingTable) {
-                tv.add_fixt_framing_tag(entry.tag, entry.type);
+                b.add_fixt_framing_tag(entry.tag, entry.type);
             }
             break;
         default:
             break;  // all other versions: framing surface stays empty
     }
 
-    return tv;
+    return std::move(b).build();
 }
 
 }  // namespace fixpp::dict

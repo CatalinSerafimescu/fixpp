@@ -559,8 +559,8 @@ TEST(MessageRead, ZeroGlobalHeapAllocGuard) {
 // A minimal dictionary with one group: 453=NoPartyIDs, delimiter=448 (PartyID),
 // member 447 (PartyIDSource).
 fixpp::dict::table_view make_group_dict() {
-    fixpp::dict::table_view dict;
-    dict.add_valid("D", 35)
+    fixpp::dict::table_view_builder dictb;
+    dictb.add_valid("D", 35)
         .add_valid("D", 34)
         .add_valid("D", 49)
         .add_valid("D", 453)
@@ -568,14 +568,14 @@ fixpp::dict::table_view make_group_dict() {
         .add_valid("D", 447)
         .set_group_first(453, 448)
         .add_group_member(453, 447);
-    return dict;
+    return std::move(dictb).build();
 }
 
 // Nested group: within each 453 instance, nest a sub-group under tag 539
 // (NoNestedPartyIDs), delimiter 524 (NestedPartyID), member 525.
 fixpp::dict::table_view make_nested_group_dict() {
-    fixpp::dict::table_view dict;
-    dict.add_valid("D", 35)
+    fixpp::dict::table_view_builder dictb;
+    dictb.add_valid("D", 35)
         .add_valid("D", 34)
         .add_valid("D", 453)
         .add_valid("D", 448)
@@ -590,7 +590,7 @@ fixpp::dict::table_view make_nested_group_dict() {
         .add_group_member(453, 525)
         .set_group_first(539, 524)
         .add_group_member(539, 525);
-    return dict;
+    return std::move(dictb).build();
 }
 
 // SC-003 alloc guard: group cursor path.  The group cursor shell
@@ -904,8 +904,8 @@ TEST(MessageReadGroup, NonGroupTagReturnsTypeMismatch) {
 
 TEST(MessageReadGroup, GetGroupIntAndDouble) {
     // Build a group with a numeric tag
-    fixpp::dict::table_view dict;
-    dict.add_valid("D", 35)
+    fixpp::dict::table_view_builder dictb;
+    dictb.add_valid("D", 35)
         .add_valid("D", 453)
         .add_valid("D", 448)
         .add_valid("D", 15)  // Currency (string), used as numeric for test
@@ -915,6 +915,7 @@ TEST(MessageReadGroup, GetGroupIntAndDouble) {
         .add_group_member(453, 15)
         .add_group_member(453, 44)
         .add_group_member(453, 38);
+    fixpp::dict::table_view const dict = std::move(dictb).build();
 
     auto buf = make_raw_frame(
         "35=D\x01"
@@ -949,13 +950,14 @@ TEST(MessageReadGroup, GetGroupIntAndDouble) {
 }
 
 TEST(MessageReadGroup, GetGroupDecimal) {
-    fixpp::dict::table_view dict;
-    dict.add_valid("D", 35)
+    fixpp::dict::table_view_builder dictb;
+    dictb.add_valid("D", 35)
         .add_valid("D", 453)
         .add_valid("D", 448)
         .add_valid("D", 44)
         .set_group_first(453, 448)
         .add_group_member(453, 44);
+    fixpp::dict::table_view const dict = std::move(dictb).build();
 
     auto buf = make_raw_frame(
         "35=D\x01"
@@ -1119,8 +1121,8 @@ TEST(MessageReadGroup, NestedGroupDescentTwoOuterEntries) {
 // it. See src/capi/message_read.cpp::fixpp_group_get_nested_group and
 // specs/065-cabi-nested-group-membership/ for the fix.
 TEST(MessageReadGroup, NestedGroupLastInstanceExtentDoesNotAbsorbTrailingOuterMember) {
-    fixpp::dict::table_view dict;
-    dict.add_valid("D", 35)
+    fixpp::dict::table_view_builder dictb;
+    dictb.add_valid("D", 35)
         .add_valid("D", 453)
         .add_valid("D", 448)
         .add_valid("D", 447)
@@ -1136,6 +1138,7 @@ TEST(MessageReadGroup, NestedGroupLastInstanceExtentDoesNotAbsorbTrailingOuterMe
         .add_group_member(453, 999)  // outer trailing scalar, AFTER the nested group
         .set_group_first(539, 524)
         .add_group_member(539, 525);
+    fixpp::dict::table_view const dict = std::move(dictb).build();
 
     auto buf = make_raw_frame(
         "35=D\x01"
@@ -1319,8 +1322,8 @@ TEST(MessageRead, GetDecimalInvalid) {
 // Group field accessors — error arms for int, double, decimal.
 // Reuses the dict and frame from GetGroupIntAndDouble.
 TEST(MessageReadGroup, GroupFieldIntErrors) {
-    fixpp::dict::table_view dict;
-    dict.add_valid("D", 35)
+    fixpp::dict::table_view_builder dictb;
+    dictb.add_valid("D", 35)
         .add_valid("D", 453)
         .add_valid("D", 448)
         .add_valid("D", 38)
@@ -1328,6 +1331,7 @@ TEST(MessageReadGroup, GroupFieldIntErrors) {
         .set_group_first(453, 448)
         .add_group_member(453, 38)
         .add_group_member(453, 44);
+    fixpp::dict::table_view const dict = std::move(dictb).build();
 
     // Entry with non-numeric value in tag 38
     auto buf = make_raw_frame(
@@ -1362,13 +1366,14 @@ TEST(MessageReadGroup, GroupFieldIntErrors) {
 }
 
 TEST(MessageReadGroup, GroupFieldDoubleErrors) {
-    fixpp::dict::table_view dict;
-    dict.add_valid("D", 35)
+    fixpp::dict::table_view_builder dictb;
+    dictb.add_valid("D", 35)
         .add_valid("D", 453)
         .add_valid("D", 448)
         .add_valid("D", 44)
         .set_group_first(453, 448)
         .add_group_member(453, 44);
+    fixpp::dict::table_view const dict = std::move(dictb).build();
 
     auto buf = make_raw_frame(
         "35=D\x01"
@@ -1401,13 +1406,14 @@ TEST(MessageReadGroup, GroupFieldDoubleErrors) {
 }
 
 TEST(MessageReadGroup, GroupFieldDecimalErrors) {
-    fixpp::dict::table_view dict;
-    dict.add_valid("D", 35)
+    fixpp::dict::table_view_builder dictb;
+    dictb.add_valid("D", 35)
         .add_valid("D", 453)
         .add_valid("D", 448)
         .add_valid("D", 44)
         .set_group_first(453, 448)
         .add_group_member(453, 44);
+    fixpp::dict::table_view const dict = std::move(dictb).build();
 
     auto buf = make_raw_frame(
         "35=D\x01"
@@ -1675,8 +1681,8 @@ TEST(MessageReadGroup, NestedGroupNullOutParamWithValidHandle) {
 // scan_slice_for_tag matches on the raw bytes; we build a frame with "38=\x01"
 // and verify WIRE_INVALID_FRAME is returned (parse_int64 with empty → false).
 TEST(MessageReadGroup, ParseIntAndDoubleEmptyFieldValue) {
-    fixpp::dict::table_view dict;
-    dict.add_valid("D", 35)
+    fixpp::dict::table_view_builder dictb;
+    dictb.add_valid("D", 35)
         .add_valid("D", 453)
         .add_valid("D", 448)
         .add_valid("D", 38)
@@ -1684,6 +1690,7 @@ TEST(MessageReadGroup, ParseIntAndDoubleEmptyFieldValue) {
         .set_group_first(453, 448)
         .add_group_member(453, 38)
         .add_group_member(453, 44);
+    fixpp::dict::table_view const dict = std::move(dictb).build();
 
     // Wire frame with empty values for tag 38 and tag 44
     auto buf = make_raw_frame(

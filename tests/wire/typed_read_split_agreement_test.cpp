@@ -56,6 +56,7 @@
 namespace {
 
 using fixpp::dict::table_view;
+using fixpp::dict::table_view_builder;
 using fixpp::wire::access_mode;
 using fixpp::wire::dictionary_driven_validator;
 using fixpp::wire::group_slice;
@@ -94,15 +95,15 @@ std::vector<std::byte> make_frame(std::string_view body_fields) {
 // itself (contract C-4.1's "the tags [inside the nested group] are not
 // members of the outer group" framing).
 table_view make_bare_nested_delim_dict() {
-    table_view tv;
+    table_view_builder tvb;
     for (std::uint16_t const t :
          {std::uint16_t{8}, std::uint16_t{9}, std::uint16_t{10}, std::uint16_t{35},
           std::uint16_t{100}, std::uint16_t{200}, std::uint16_t{201}}) {
-        tv.add_valid("X", t);
+        tvb.add_valid("X", t);
     }
-    tv.set_group_first(100, 200);  // NoOuter: delimiter = NoInner's own count tag
-    tv.set_group_first(200, 201);  // NoInner: delimiter = InnerField
-    return tv;
+    tvb.set_group_first(100, 200);  // NoOuter: delimiter = NoInner's own count tag
+    tvb.set_group_first(200, 201);  // NoInner: delimiter = InnerField
+    return std::move(tvb).build();
 }
 
 // ── T020 (W-10a legs 2/3): the SAME shape on a POPULATED context store ──────
@@ -571,19 +572,19 @@ constexpr std::size_t kChainGroups = 17;
 constexpr std::size_t kCapHittingIndex = 15;
 
 table_view make_chain_dict() {
-    table_view tv;
+    table_view_builder b;
     for (std::uint16_t const t :
          {std::uint16_t{8}, std::uint16_t{9}, std::uint16_t{10}, std::uint16_t{35}}) {
-        tv.add_valid("Z", t);
+        b.add_valid("Z", t);
     }
     for (std::size_t i = 0; i <= kChainGroups; ++i) {
-        tv.add_valid("Z", static_cast<std::uint16_t>(kChainBase + i));
+        b.add_valid("Z", static_cast<std::uint16_t>(kChainBase + i));
     }
     for (std::size_t i = 0; i < kChainGroups; ++i) {
-        tv.set_group_first(static_cast<std::uint16_t>(kChainBase + i),
-                           static_cast<std::uint16_t>(kChainBase + i + 1));
+        b.set_group_first(static_cast<std::uint16_t>(kChainBase + i),
+                          static_cast<std::uint16_t>(kChainBase + i + 1));
     }
-    return tv;
+    return std::move(b).build();
 }
 
 // One physical instance at every level. `deep_count` is written into the

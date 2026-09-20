@@ -360,17 +360,18 @@ TEST(ValidateGateAllocGuard, LongMsgTypeNoGlobalHeapAlloc) {
     // The validator calls field_valid_for(msg_type, tag) for EVERY field in the
     // parsed message, including framing tags (8, 9, 10, 35). We must declare them
     // all as valid for kLongMsgType, otherwise the unexpected-tag check fires.
-    fixpp::dict::table_view tv;
+    fixpp::dict::table_view_builder tvb;
     // Framing tags — always present in every FIX frame (8, 9, 35, 10).
-    tv.add_valid(kLongMsgType, 8);   // BeginString
-    tv.add_valid(kLongMsgType, 9);   // BodyLength
-    tv.add_valid(kLongMsgType, 10);  // CheckSum
-    tv.add_valid(kLongMsgType, 35);  // MsgType
+    tvb.add_valid(kLongMsgType, 8);   // BeginString
+    tvb.add_valid(kLongMsgType, 9);   // BodyLength
+    tvb.add_valid(kLongMsgType, 10);  // CheckSum
+    tvb.add_valid(kLongMsgType, 35);  // MsgType
     // Required header fields for kLongMsgType.
-    tv.add_required(kLongMsgType, 34);  // MsgSeqNum
-    tv.add_required(kLongMsgType, 49);  // SenderCompID
-    tv.add_required(kLongMsgType, 52);  // SendingTime
-    tv.add_required(kLongMsgType, 56);  // TargetCompID
+    tvb.add_required(kLongMsgType, 34);  // MsgSeqNum
+    tvb.add_required(kLongMsgType, 49);  // SenderCompID
+    tvb.add_required(kLongMsgType, 52);  // SendingTime
+    tvb.add_required(kLongMsgType, 56);  // TargetCompID
+    fixpp::dict::table_view const tv = std::move(tvb).build();
 
     fixpp::wire::dictionary_driven_validator validator{tv};
 
