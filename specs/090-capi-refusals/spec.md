@@ -33,7 +33,7 @@ MINOR bump marked BREAKING under the pre-first-release clause."
 **Issues**: fixpp#447, fixpp#458, fixpp#452. The PR **closes fixpp#488**; **fixpp#487** and
 **fixpp#489** stay open.
 
-**Design authority**: `.specify/447-458-452-capi-refusals.md` at **v0.9**. ⚠️ **That document
+**Design authority**: `.specify/447-458-452-capi-refusals.md` — **read its Status line for the current version; do not trust a version written here.** It was **v0.9** when this spec was authored and is **v0.10** now; the pointer went stale within the day, which is the same defect class v0.10 itself exists to correct. ⚠️ **That document
 remains the design authority and this spec does not supersede it.** This spec states **what** each
 refusal does and **why**; the note states **how**, decides the options, and carries every
 derivation, population and control. Where the two could be read as disagreeing, the note wins and
@@ -501,7 +501,7 @@ compare**, not an internal invariant.
 
 ## Normative References
 
-- `.specify/447-458-452-capi-refusals.md` **v0.9** — the design authority for every decision,
+- `.specify/447-458-452-capi-refusals.md` — the design authority for every decision,
   population and control behind this spec.
 - `.specify/constitution.md` — `[const §X.1]` (mandatory Gate A on the C ABI), `[const §X.6]` (all
   four Appendix A controls on an ABI-affecting feature), `[const §X.7]` (pre-first-release breaking
