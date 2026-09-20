@@ -34,7 +34,7 @@
 // behaviour — on a `const` view as much as a non-`const` one. A non-`const`
 // view can additionally be moved from, and an `optional<table_view>`
 // re-seated with `emplace` substitutes a different object at the same
-// address, which a `dict_hooks` bundle taken from it will not notice
+// address
 // (`B-456-2`); declaring the view `const` closes those two and not the
 // first.
 //

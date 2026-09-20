@@ -764,7 +764,7 @@ with no reference to anything. It holds a `table_view` by value, `build() &&` mo
 builder is then a moved-from object that the ref-qualifier makes awkward to reuse by accident. No
 new indirection, no back-pointer, no lifetime edge.
 
-**The property the seal actually buys.** `215` §2a established by census that `table_view` has no
+`215` §2a established by census that `table_view` has no
 `mutable` members and no lazy fill — that census is unaffected by this change. What this change adds:
 `table_view`'s sixteen population members are `private`; its only `friend` is `table_view_builder`,
 which holds its own `table_view` by value and yields it from `build() &&`; both `operator=` overloads
@@ -773,8 +773,8 @@ are `= delete`. This does not make the object unwritable. The `std::uint16_t` el
 vectors and are not `const` objects, so `const_cast` on a span's pointer and a write through it is
 defined behaviour — on a `const` view as much as a non-`const` one. A non-`const` view can
 additionally be moved from (`table_view(table_view&&)` is public and load-bearing, §5a), and an
-`optional<table_view>` re-seated with `emplace` substitutes a different object at the same address,
-which an existing `dict_hooks` bundle will not notice (`B-456-2`); declaring the view `const` closes
+`optional<table_view>` re-seated with `emplace` substitutes a different object at the same address
+(`B-456-2`); declaring the view `const` closes
 those two and not the first.
 
 **What it does NOT buy.** `dict_hooks` stores `std::addressof(dict)` as a raw non-owning
@@ -797,8 +797,8 @@ bundle-snapshot behaviour is pinned only by the test and by `.specify/426-428-le
 
 | row | disposition |
 |---|---|
-| **`B-456-1` (NEW, behaviour)** | `table_view`'s population surface is sealed and the type is non-assignable, once built; a caller who does not declare the result `const` can still move from it, and a re-seated `optional<table_view>` substitutes a new object at the same address (`B-456-2`). Source-breaking, not a C-ABI change. **Shipped text lives in `spec/behaviors-and-limitations.md`; not restated here** — a second copy is a second claim to keep true. |
-| **`B-456-2` (NEW, behaviour) — the disclosure** | A `wire::dict_hooks` bundle latches `has_nonstandard_pair()` at build time only; every other callback dereferences the stored address live, so only that one latch can go stale through a re-seated `optional<table_view>`. **Shipped text lives in `spec/behaviors-and-limitations.md`; not restated here.** |
+| **`B-456-1` (NEW, behaviour)** | `table_view`'s population surface is sealed and the type is non-assignable, once built; a caller who does not declare the result `const` can still move from it, and a re-seated `optional<table_view>` substitutes a new object at the same address (`B-456-2`). Source-breaking, not a C-ABI change. **Shipped text lives in `spec/behaviors-and-limitations.md`** |
+| **`B-456-2` (NEW, behaviour) — the disclosure** | A `wire::dict_hooks` bundle latches `has_nonstandard_pair()` at build time only; every other callback dereferences the stored address live, so only that one latch can go stale through a re-seated `optional<table_view>`. **Shipped text lives in `spec/behaviors-and-limitations.md`.** |
 | **`B-384-2` — AMENDED, not closed** | Its reachability clause reads *"through the hand-built `dict::table_view` surface only (`add_group_member` without `set_group_first` sets `group_bit` while leaving `group_first_` empty)."* **The seal does not close this.** `table_view_builder` still permits `add_group_member` without `set_group_first`; only a consistency check inside `build()` would close it, and that is out of scope (§7). The row needs a **wording** amendment — "hand-built `dict::table_view` surface" becomes "`table_view_builder` surface" — and nothing more. Leaving it unamended would leave a row naming an API that no longer exists. |
 | **`L-456-1` (NEW, limitation)** | *"`table_view_builder::build()` performs no consistency validation. A builder can still produce an internally inconsistent table — a group with members and no first field (`B-384-2`) is the known shape. The seal governs reachability, not consistency: `build()` is `return std::move(tv_);` and checks nothing."* |
 | `L-215-1` / `B-215-2` / `L-215-2` / `B-215-1` | **untouched.** Different code path (the config injection point); `L-215-2` / SC-007 is explicitly out of scope per `215` §7. |

@@ -667,8 +667,7 @@ TEST(DictHooksCustomPair, ZeroIsNeverHalfOfAPair) {
 // `DictHooksCustomPair.ABundleKeepsItsNullPairCallbackAcrossAReSeatThatAddsThePair`
 // below carries that half now. What records the full picture: `B-456-2` in
 // spec/behaviors-and-limitations.md, and the compile-time seal witness in
-// tests/dictionary/table_view_seal_compile_test.cpp, which asserts the
-// population-sealing property the type actually buys. The case's POSITIVE
+// tests/dictionary/table_view_seal_compile_test.cpp. The case's POSITIVE
 // half — a bundle built after the pair was registered honours it — survives
 // above in `FastPathsChangeNoAnswerForAnyTag`, on the same tags.
 //
@@ -703,7 +702,7 @@ TEST(DictHooksCustomPair, ABundleKeepsItsNullPairCallbackAcrossAReSeatThatAddsTh
         << "precondition: the re-seated view really does declare the pair";
 
     EXPECT_EQ(hooks.data_tag_for_length(5001), 0U)
-        << "the bundle did not follow the re-seat";
+        << "the bundle retained its null pair callback across the re-seat";
     EXPECT_EQ(dict_hooks::for_table_view(*opt).data_tag_for_length(5001), 5002U)
         << "a bundle built after the re-seat honours it";
 }
