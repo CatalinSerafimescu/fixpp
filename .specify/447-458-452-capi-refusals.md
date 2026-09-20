@@ -1,6 +1,6 @@
 # fixpp#447 / #458 / #452 — three refusals the C ABI owes, and the C++ guards beside them
 
-> **Status: v0.8 — the C-4 scoped delta review RAN; its single P1 is applied. NOT converged by the loop's criterion.**
+> **Status: v0.9 — an OWNER DECISION of 2026-09-20 widens the amendment beyond `[2i]`. NOT a review round. NOT converged by the loop's criterion; Gate A label stays `gate-a-waived`.**
 >
 > ```
 > Round 1: Codex 2 P1 / 9 P2 / 2 P3; Opus adversarial post-judging P1 3 · P2 11 · P3 4, 4 root causes.
@@ -23,6 +23,17 @@
 >         ⚠️ **GATE A HAS NOT CONVERGED.** The criterion is `P1 == 0 AND P2 == 0`; this
 >         returned `P1 = 1`, so the `0 P1 / 0 P2` branch of answer C-4 did **not** fire and
 >         **no label is earned by this revision or by the review that produced it.**
+> v0.9:   NOT A REVIEW ROUND, AND NO REVIEW PRODUCED IT. An **OWNER DECISION taken 2026-09-20**,
+>         applied as bookkeeping: the `[2i]` scope-claim amendment widens to **two derived
+>         restatements outside `[2i]`** that cite `[2i]` as their source — `api-contract.md`'s
+>         §7.5 parenthetical and `2m-pybind.md`'s construction-failure-modes limb.
+>         ⚠️ **NO FINDING COUNTS ARE ENTERED, BECAUSE NO REVIEW RAN.** The trigger was a
+>         post-review **finding about the DERIVATION** — §5c's recipe (c2.i) hardcodes its
+>         corpus to one file — raised after the C-4 scoped review closed and **uncatchable by
+>         it**, since C-4 scoped that review to the v0.6/v0.7 delta and this defect predates
+>         the delta. ⚠️ **THE `[2i]` POPULATION OF EIGHT IS UNCHANGED**, the two new
+>         passages are a **separate population with a different ground**, and **no merged
+>         count is written anywhere in this document.**
 > ```
 >
 > **Date:** 2026-09-20. ⚠️ **NO CONVERGENCE IS CLAIMED, AND NONE MAY BE.** The loop's criterion is
@@ -67,6 +78,26 @@
 > the re-measured discrimination reproduced on all six figures with **both positive controls
 > firing**, and all six relayed fixes verified; the Appendix records that rather than leaving a
 > reader to infer a clean sheet from the absence of findings.
+>
+> ⚠️ **v0.9 RECORDS AN OWNER DECISION AND CLAIMS NOTHING v0.8 DID NOT.** It is **not a review
+> round**, no review produced it, and it applies **one decision taken by the owner on 2026-09-20**:
+> the `[2i]` scope-claim amendment **widens to two passages outside `[2i]`** —
+> `.specify/api-contract.md`'s §7.5 code-scoping parenthetical and `.specify/2m-pybind.md`'s
+> *"Construction failure modes"* limb — because each **restates `[2i]`'s claim while naming `[2i]`
+> as its source**. ⚠️ **TWO POPULATIONS, NOT ONE SUM: the `[2i]` scope-claim population stays
+> EIGHT**, and the two restatements are a **separate population with a separate ground**; this
+> document publishes no merged figure, because *three* and then *eight* were each falsified by the
+> next pass and **a corrected count is the same defect at a new value**. ⚠️ **NO CONSTITUTIONAL
+> AMENDMENT IS TRIGGERED** — `api-contract.md`'s frozen rule governs surfaces marked **Stable from
+> v1.0** in §3, not §7.5 prose, and §11 itself routes a pre-first-release C-ABI breaking change to
+> `[const §X.7]` (*"a MINOR bump marked BREAKING, no amendment"*), which is §0c's own premise
+> (§5c). ⚠️ **AND THE CONVERGENCE POSITION IS UNCHANGED, STATED AS ONE SENTENCE SO IT CANNOT BE
+> READ AS A FLIP: no convergence is claimed and none is earned — `P1 == 0 AND P2 == 0` has still
+> never been returned, no new review ran here — while the Gate A label stands at `gate-a-waived`,
+> the WAIVER earned on the C-4 review's P1, to which this finding adds a SECOND REASON, not a worse
+> one.** ⚠️ **The seam that hid it is recorded as a RESIDUAL and deliberately NOT fixed** (§7):
+> the owner declined amending recipe (c2.i) to derive its own corpus, so the instrument still
+> hardcodes one file while the outcome has been widened.
 >
 > ⚠️ **Round 4 sits beyond the loop's 3-round Phase A cap, as the pass that produced v0.4 did, and
 > the user authorised each explicitly.** v0.4's authorisation rested on the round-3 review's closing recommendation — *"the
@@ -2316,6 +2347,228 @@ at each hit, and bucket it by **what makes the call fail**, not by which constru
 **and then read past the `return` to what the next call would do**, which is the step v0.5 skipped
 in both of the sites above.
 
+#### The two passages OUTSIDE `[2i]` — AN OWNER DECISION TAKEN 2026-09-20, and they are NOT `[2i]` sites
+
+⚠️ **TWO POPULATIONS, TWO GROUNDS, AND THEY ARE NEVER SUMMED.** The `[2i]` scope-claim population is
+**the eight adjudicated above** and **nothing in this sub-section moves it**. What follows is a
+**second and smaller population with a different ground**: passages in *other* live documents that
+**restate** `[2i]`'s scope claim and **cite `[2i]` as their source**. They are not scope claims
+discovered inside `[2i]`; they are **derived restatements that track an amended source**, which is
+why they are bookkeeping and not a scope widening.
+⚠️ **DO NOT WRITE "THE POPULATION IS TEN."** This document has published *three*, then *eight*, and
+each was falsified by the next pass — **a corrected count is the same defect at a new value**. The
+two populations answer different questions — *which `[2i]` passages bind the code to a producer
+set?* versus *which derived restatements cite a `[2i]` passage B6 amends?* — and a single merged
+figure deletes exactly the distinction that keeps the second one honest.
+⚠️ **AND THE *"ten"* ALREADY IN §5c's INSTRUMENT AUDIT IS A THIRD, UNRELATED FIGURE — said here because a v0.9 reader will otherwise read it as 8 + 2 of these.** That ten is the **live `[2i]` passages** over which the exemption tokens were run — **the eight scope claims plus the two EXEMPTED ones (§6.2 and §9 seam #5a)** — all of them inside `.specify/2i-capi.md`. It has nothing to do with the two passages below.
+
+**WHAT WAS MISSED, AND WHY NO GATE COULD HAVE CAUGHT IT.** Recipe **(c2.i)** hardcodes its corpus:
+`grep -ci "config.invalid"` over **`.specify/2i-capi.md` alone**. Four Gate A rounds, a post-sign-off
+P1 and the C-4 scoped review each replaced or audited the retrieval **inside** that file; **none ever
+asked whether that file was the right universe.** The C-4 review could not have caught it — answer
+C-4 scoped that review to the **v0.6/v0.7 delta**, and this is a defect of the **derivation**, which
+**predates the delta**. The full evidence, with every locator and every control, is the finding
+artifact **`research/reviews/opus_447_458_452_corpus_scope_finding.md` in the PARENT repository**;
+every figure in it was re-executed for this revision and the re-execution is below.
+
+**THE CORPUS, DERIVED RATHER THAN ASSUMED — re-run it, and NO FILE COUNT IS WRITTEN HERE.** A count
+of files that mention the token is not what decides anything; the **classification of the live
+documents** is.
+
+```
+grep -rl "CAPI_CONFIG_INVALID" . --exclude-dir=.git
+# then drop the SOURCE corpus and the FROZEN bundles, which §5c already treats separately:
+  | grep -vE '^(src|include|tests|tools|bindings|specs)/'
+  ->  .specify/215-dictionary-view.md · .specify/2i-capi.md · .specify/2j-controlplane.md
+      .specify/2m-pybind.md · .specify/447-458-452-capi-refusals.md · .specify/api-contract.md
+      spec/behaviors-and-limitations.md · spec/coverage-index.md
+# control — a DIFFERENT pattern through the SAME pipeline, positive on the SAME corpus, so the
+# filter is a measurement and not a sieve that empties whatever it is given:
+grep -rl "guarded_call" . --exclude-dir=.git | grep -vE '^(src|include|tests|tools|bindings|specs)/'
+  ->  five files, all under .specify/
+```
+
+⚠️ **THE FINDING ARTIFACT'S OWN CORPUS STEP STOPPED AT `.specify/`, AND THIS REVISION EXTENDS IT
+RATHER THAN INHERITING IT.** That note named four live documents outside `[2i]` and this one — all
+four under `.specify/`. **The derivation above returns two more**, `spec/behaviors-and-limitations.md`
+and `spec/coverage-index.md`, and §5d's own disposition classes call `spec/` **live documentation
+(maintained, may need editing)**. ⚠️ **That is RC#1 recurring inside the note that names it** — the
+note that says *"the corpus was never derived"* derived a corpus one directory short. **It changes
+no verdict** (both adjudicate to NO EDIT below), which is precisely why it is recorded: a defect
+found in the instrument matters even when its output survives. ⚠️ **`spec/behaviors-and-limitations-closed.md`
+is a MEASURED ABSENCE from the corpus, not an unexamined one:** `grep -c "CAPI_CONFIG_INVALID"` over
+it returns **0** (`rc=1`, grep's no-match) against the control `grep -c "L-0"` → **48** on the same
+file — so nobody needs to re-grep the live/closed pair, which this repository's own rule forbids.
+
+**EACH LIVE DOCUMENT ADJUDICATED AGAINST §5c's OWN CONDITION** — *a passage is a scope claim iff it
+binds the code to a producer set* — with the three exemptions applied by their quoted tokens.
+
+| live document | hits | verdict |
+|---|---|---|
+| `.specify/2i-capi.md` | — | **the eight**, above. Unchanged by this sub-section |
+| `.specify/api-contract.md` | 1 | ⚠️ **SCOPE CLAIM — AMENDED, see the prescription below** |
+| `.specify/2m-pybind.md` | 1 | ⚠️ **SCOPE CLAIM — AMENDED, see the prescription below** |
+| `.specify/2j-controlplane.md` | 2 | **NO EDIT — exemption 3.** Both are the **`CA-002` supplemental** `fixpp_error_t` **numeric-block layout** paragraph, and the code appears inside *"8 2i-introduced variants `_NULL_HANDLE` through `_CAPI_CONFIG_INVALID`"* — an **endpoint of a range in a tally**. The predicate is a **count**, exactly as §1.1's magnitude-domain row and §6.5's two tallies are. ⚠️ **AND THE SAME "TOUCH NO NUMERAL" INSTRUCTION APPLIES IF ANYONE EVER DOES EDIT THEM** |
+| `spec/coverage-index.md` | 2 | **NO EDIT — exemption 3.** One hit is the **same `CA-002` supplemental paragraph** as `2j`'s; the other is a `src/capi/` implementation-inventory line (*"`CAPI_CONFIG_INVALID` on throw"*, *"out-of-range `CAPI_CONFIG_INVALID`"*) describing **what a named symbol returns**, not which entry points may emit the code. ⚠️ **Those two are ILLUSTRATIVE FRAGMENTS of a passage adjudicated NON-SCOPE, not an adjudication quote — (c2.ii)'s no-elision obligation binds passages judged AGAINST the criterion, and a NO-EDIT verdict reached because the passage names no producer set does not engage it.** Re-read the two lines whole before relying on this cell |
+| `spec/behaviors-and-limitations.md` | 3 | **NO EDIT — not a scope claim, and two of the three CORROBORATE the wide reading.** All three are **per-symbol shipped-behaviour rows**: they say of a **symbol** what it returns (B-052-1's dictionary loader, L-052-2's *"empty-host only"* setter, B-080-1's pre-080 Orchestra refusal). ⚠️ **The direction of the test matters:** §5c's condition asks what a passage says **of the CODE** — which producers may emit it. A row saying *"this symbol returns this code"* asserts nothing about the producer set and cannot be false of the 24. ⚠️ **And L-052-2's empty-host refusal is a class-C explicit refusal in a NON-whitelisted setter** — the ledger already publishes a producer the narrow claim excludes |
+| `.specify/215-dictionary-view.md` | 6 | **NO EDIT — not a scope claim, and it CORROBORATES the wide reading. All six adjudicated, not four:** ⚠️ **four** are the *"non-whitelisted thunk / what the handler does"* table rows — `fixpp_engine_config_create`, `fixpp_session_config_create`, `_set_comp_ids`, `_set_begin_string`, each **translates** → this code — **four non-whitelisted producers enumerated in a live design document**, which is the narrow claim being falsified by a *sibling document*; **one** restates `[2i §5.2]`'s **whitelist** (*"the construction-time whitelist is exactly three symbols"*) — that is §5c's limb **(1)**, which is **SOUND and UNAMENDED**, not a code-scoping claim; **one** is comparative remediation prose (*"materially worse for the caller than today's `FIXPP_ERR_CAPI_CONFIG_INVALID`"*), whose predicate is a comparison and which binds nothing |
+| `.specify/447-458-452-capi-refusals.md` | — | this document |
+
+**THE EXEMPTION AUDIT ON THE TWO NEW PASSAGES — a criterion that can only say YES is not a
+criterion.** Each passage was cut to its own file and the four exemption tokens run over it.
+⚠️ **These are PRESENCE tests on a one-line claim unit**, so `1` is each count's ceiling and a `0`
+means the token is absent from the passage:
+
+```
+grep -c '/ etc\.'           <api-contract passage>  ->  0      <2m-pybind passage>  ->  0
+grep -c 'the test verifies' <api-contract passage>  ->  0      <2m-pybind passage>  ->  0
+grep -c 'e\.g\.'            <api-contract passage>  ->  0      <2m-pybind passage>  ->  0
+grep -c 'or any future'     <api-contract passage>  ->  0      <2m-pybind passage>  ->  0
+# the tokens' POSITIVE CONTROLS — each pattern shown firing, so the eight zeros are
+# measurements and not patterns that could not match:
+grep -c '/ etc\.'           .specify/2i-capi.md     ->  1
+grep -c 'the test verifies' .specify/2i-capi.md     ->  1
+grep -c 'or any future'     .specify/2i-capi.md     ->  1
+grep -c 'e\.g\.'            .specify/2m-pybind.md   ->  13
+```
+
+⚠️ **ONE CONTROL IS HONESTLY CROSS-CORPUS AND IT IS SAID RATHER THAN BLURRED.** `e.g.` occurs
+**nowhere in `.specify/api-contract.md`** — `grep -c 'e\.g\.'` over the whole file returns **0** —
+so that token's zero on the api-contract passage is **not** discriminated in-corpus. The pattern is
+shown able to fire on `.specify/2m-pybind.md` (**13**), which establishes the instrument; it does
+not establish an in-file contrast for api-contract, and no such contrast exists to be had.
+
+---
+
+**PASSAGE 1 — `.specify/api-contract.md` §7.5 *"Exception trap split"*.**
+**Content-keyed locator, which is what survives an edit above it:**
+
+```
+grep -cF -e 'Per `[2i §5.2]`: construction-vs-steady-state split.' .specify/api-contract.md   ->  1
+# negative control — the same -F form, one word changed, so the 1 is a match and not an echo:
+grep -cF -e 'Per `[2i §5.2]`: construction-vs-steady-state SPLURGE.' .specify/api-contract.md ->  0  (rc=1)
+```
+
+**The claim unit, QUOTED WITHOUT ELISION** per (c2.ii) — the whole paragraph, because the exactness
+claim in its last sentence is part of why no exemption is quotable from it:
+
+> *"Per `[2i §5.2]`: construction-vs-steady-state split. `guarded_call_construction` whitelists
+> exactly three v1.0 entry points — `fixpp_engine_create`, `fixpp_dict_load_from_xml`,
+> `fixpp_msg_create_outbound` — where a C++ exception is trapped and translated to a
+> domain-appropriate `FIXPP_ERR_*_CONFIG` (**or `FIXPP_ERR_CAPI_CONFIG_INVALID` for engine
+> creation**). `guarded_call_steady` is `std::abort` per `[arch §5.3]` invariant-violation rule (the
+> no-throw hot path itself is `[const §VIII.5]`; the abort response is architectural, not
+> constitutional). **The whitelist is v1.0-exact**; sourced from `[2i §5.2]`."*
+
+⚠️ **THE SAME (1)/(2) SPLIT §5c APPLIES TO `[2i §5.2]` APPLIES TO ITS DISTILLATION, AND GETTING THIS
+WRONG WOULD READ AS RE-OPENING D-3b.** **(1) The WHITELIST sentence is SOUND and is NOT TOUCHED** —
+`guarded_call_construction`'s three v1.0 entry points are unchanged by B6 (D-3b keeps clone on the
+steady side; §2.3a), and *"The whitelist is v1.0-exact"* is **true**. **(2) The CODE-SCOPING
+parenthetical — *"(or `FIXPP_ERR_CAPI_CONFIG_INVALID` for engine creation)"* — is the scope claim**,
+and it is the **same unhedged *"for … creation"* clause** as `[2i §5.2]`'s flavour bullet, `[2i §5.4]`'s
+bullet and `[2i §10 Q2]`'s row, all three of which are in the eight. ⚠️ **The exactness sentence is
+the OPPOSITE of a hedge** — it is an explicit claim that the section is closed, which is why no
+exemption is quotable from this passage and why it is cited here as *evidence about the criterion*
+rather than as an edit target.
+
+**THE PRESCRIPTION — prose only, the parenthetical only.** Replace the code-scoping parenthetical
+with the **condition-stated** form §6.5's row already carries in this note — the code arises where a
+C-ABI entry point cannot complete, by **explicit refusal** or by a **caught exception on a fallible
+construction/mutation step**, and it is **not exclusive to `guarded_call_construction`** —
+worded for a **distillation**, i.e. carrying the condition and its `[2i §5.2]` / `[2i §6.5]` source
+citation and **introducing nothing `[2i]` does not say**. ⚠️ **Touch neither the whitelist sentence,
+the `guarded_call_steady` sentence, nor the `v1.0-exact` sentence.**
+
+**WHY THIS IS THIS DOCUMENT'S OWN CONTRACT AND NOT SCOPE CREEP — from the target's Authority clause,
+read at source.** `api-contract.md`'s header states it is *"purely a **distillation** — every rule,
+name, header, target, macro, and numeric block stated here is sourced from `constitution.md`,
+`architecture.md`, or one of `2a`–`2m`. **No new decisions are introduced; this document does not
+amend its sources, and on any conflict the source wins**"*. The offending sentence **names
+`[2i §5.2]` as its source, twice**. So tracking `[2i]` is that document's **own stated contract**;
+leaving the restatement stale manufactures **precisely the conflict its authority clause
+anticipates** — and it would leave it in the document `[2i]`'s own amendment cites for its
+authority (§0c derives *"why all three changes are breaking"* from `[api-contract §11]`).
+
+⚠️ **NO CONSTITUTIONAL AMENDMENT IS TRIGGERED, AND IT IS SAID EXPLICITLY BECAUSE A READER'S FIRST
+INSTINCT IS THE OPPOSITE.** Editing `api-contract.md` **looks** like a governed act and is not one
+here, for a reason that must be quotable. **(a)** The document's **Frozen rule** binds *"every surface
+marked **Stable from v1.0** in §3"*, and §11 binds *"a surface listed under §3.1"*. **§7.5 is prose
+about an exception-translation convention; it is not a §3/§3.1 surface listing.** **(b)** Even for a
+surface that *is* listed, §11 states in its own words that *"`[const §X.7]` also uses the C-ABI
+effects below to define a C-ABI breaking change **before fixpp's first public release**; in that
+period the consequence is §X.7's (**a MINOR bump marked BREAKING, no amendment**), not (a) and (b)
+below"* — and §0c of this note already establishes that pre-first-release premise from that same
+section. **(c)** The edit introduces **no new decision**: it removes a restatement that its own
+source no longer supports, which is the distillation contract operating, not a decision taken in a
+distillation. ⚠️ **Re-derive before editing:** read the header's *"Frozen rule"* line and §11's
+first paragraph; if either has been amended, this paragraph's ground must be re-taken.
+
+---
+
+**PASSAGE 2 — `.specify/2m-pybind.md` §4.2 `fixpp.Engine`, *"Construction failure modes"*.**
+
+```
+grep -cF -e '**Construction failure modes.**' .specify/2m-pybind.md   ->  1
+# negative control — one letter changed:
+grep -cF -e '**Construction failure nodes.**' .specify/2m-pybind.md   ->  0  (rc=1)
+```
+
+**The claim unit, QUOTED WITHOUT ELISION:**
+
+> *"**Construction failure modes.** Per `[2i §4.5]`: `VersionMismatch` (engine major != consumer
+> major); **per `[2i §6.5]` row 8: `BindingError(FIXPP_ERR_CAPI_CONFIG_INVALID)` for any other
+> construction-time exception (bad config, OOM during arena setup)**; per `[2j §3.10]`
+> `EngineConfig` validation may raise `ControlPlaneError(FIXPP_ERR_CTRL_CONFIG)`."*
+
+⚠️ **IT IS A DERIVED RESTATEMENT — *"per `[2i §6.5]`"* is in the sentence** — of the exact row B6
+amends, and it is false of the same producers. *"For **any other construction-time exception**"*
+widens the **entry-point set** and leaves the **mechanism** untouched: it still conditions the code
+on a **caught exception**, and the class-**C** and class-**D** producers are **explicit refusals**
+that throw and catch nothing. ⚠️ **That is the same distinction v0.8 established for `[2i §6.5]`'s
+own middle column** — a hedge over entry points cannot reach a producer that never raised. ⚠️ **And
+the exemption tokens return 0**, above: *"any other"* is a universal over construction-time
+**exceptions**, not a non-exhaustiveness marker over the code's **producers**.
+
+**THE PRESCRIPTION — prose only, the middle limb only.** Replace that limb with the
+**condition-stated** form, in the binding's own idiom (*which Python exception carries which code*),
+so that the `BindingError` mapping survives and only the **producing condition** changes. ⚠️ **The
+`[2i §4.5]` `VersionMismatch` limb and the `[2j §3.10]` `ControlPlaneError` limb are untouched**, and
+⚠️ **nothing here re-opens §5d's Python conclusion**: `fixpp.i` exposes neither `fixpp_msg_clone` nor
+`fixpp_msg_remove_tag`, that finding stands, and this is an edit to a **design document**, not to a
+shipped binding.
+
+⚠️ **AND *"row 8"* IS A POSITIONAL CITATION — DE-ORDINALISE IT IN THE SAME EDIT. THE CALL, AND WHY,
+BECAUSE THE OBVIOUS REASON IS THE WRONG ONE.** ⚠️ **B6 does NOT rot this ordinal**, and inheriting
+*"a table B6 rewrites"* would be a claim wider than its mechanism: B6 amends a **cell** of that row —
+its middle column — **mints no enumerator and touches no numeral**, so the row's position does not
+move. **The reasons that do hold are stronger, and both are measured.** **(i)** The ordinal is
+**already ambiguous against the table's own Numeric column**: counted as data rows,
+`FIXPP_ERR_CAPI_CONFIG_INVALID` **is** the 8th — but the row whose **Numeric is 8** is
+`FIXPP_ERR_TAG_NOT_FOUND`, so a reader resolving *"row 8"* by the column the table publishes lands
+on **the wrong row today**, before anything is edited. **(ii)** A positional index is a **RESULT**,
+and this repository's standing rule is that a citation may record a **condition or a procedure** but
+never a result — a result goes stale silently, because nothing re-runs a citation. **So: replace
+*"per `[2i §6.5]` row 8"* with a CONTENT-KEYED citation — `[2i §6.5]`'s `FIXPP_ERR_CAPI_CONFIG_INVALID`
+row — rather than re-pointing the ordinal.** ⚠️ **Re-derive, do not trust this paragraph:** enumerate
+`[2i §6.5]`'s table rows and read both the position and the Numeric column before touching the
+citation.
+
+---
+
+**THE `[const §X.7]` HOOK, STATED IN ITS TRUE AND NARROW FORM.** Obligation 3 requires every
+in-repository consumer updated *"in the **same PR**"*. ⚠️ **That clause supplies the TIMING, not the
+MANDATE, and the difference must not be blurred:** its own list names *"the Python binding, tests,
+examples, interop harnesses"* — **code consumers** — and §5d already places `.specify/` and `spec/`
+under its own **live documentation** class rather than under that list. **The mandate for these two
+edits is the one above** — `api-contract.md`'s Authority clause, and `2m-pybind.md`'s *"per `[2i]`"*
+derivation. **What obligation 3 adds is that, once the owner decided they are owed, they ride B6's
+PR and are not deferred** — the same limb §5d discharges as **O-4**.
+
+**WHAT THIS SUB-SECTION DOES NOT DO.** It re-opens **no decision** (D-1, D-2, D-2b, D-3, D-3b, D-4,
+D-5a/b/c all stand), moves **no numeral in any `[2i]` prescription**, mints **no enumerator**, changes
+**no source file**, and edits **none of the three target documents** — ⚠️ **this note PRESCRIBES and
+B6's PR PERFORMS**, which is the same division §5c has kept for `[2i]` since v0.2.
+
 **`.specify/2c-codegen.md` — D-4 amends it, and the amendment is owed in the same PR.** §4.8 and §6.6
 own `owning_message_handle`.
 
@@ -2419,8 +2672,8 @@ falsify history)*.
 | `tests/abi/golden/fixpp_capi_symbols.txt` | ABI golden data | ⚠️ **added at v0.3.** §5b asserts this file is expected **byte-unchanged** — no symbol is added, removed or re-signed. That assertion is the disposition, and it is checked by `.github/workflows/abi-golden.yml`'s own `nm --defined-only --extern-only` diff step, not by this table |
 | `tests/wire/message_view_membership_copy_test.cpp` | comment-only (1 / 0) | **not a consumer** — its single occurrence is a file-header comment |
 | `.specify/2i-capi.md` | live documentation | the owner document; §5c dispositions it section by section |
-| `.specify/2m-pybind.md` | live documentation | ⚠️ **added at v0.3, and READ rather than deferred.** It designs a Python `Message.clone()` — *"The Python `Message.clone()` method calls `fixpp_msg_clone`"* (§3.18), with latency, GIL and ownership rows for it. **That surface is not shipped**: `fixpp.i`'s `message.h` re-declaration block says *"Groups, typed getters/setters, clone, field iteration are **deferred**"* and omits it. **So 2m and the shipped binding AGREE — 2m describes deferred surface, not a divergence — and #458 stays invisible to Python** (§5d's conclusion is unchanged). **No edit owed.** ⚠️ Recorded this way because *"someone should check this"* in a disposition column is the command-to-prose handoff this table exists to remove |
-| `.specify/api-contract.md` | live documentation | ⚠️ **added at v0.3.** §11 supplies the breaking-change **definition** used in §0c; its clone mention is in that capacity and needs no edit |
+| `.specify/2m-pybind.md` | live documentation | ⚠️ **added at v0.3, and READ rather than deferred.** It designs a Python `Message.clone()` — *"The Python `Message.clone()` method calls `fixpp_msg_clone`"* (§3.18), with latency, GIL and ownership rows for it. **That surface is not shipped**: `fixpp.i`'s `message.h` re-declaration block says *"Groups, typed getters/setters, clone, field iteration are **deferred**"* and omits it. **So 2m and the shipped binding AGREE — 2m describes deferred surface, not a divergence — and #458 stays invisible to Python** (§5d's conclusion is unchanged). **No edit owed.** ⚠️ Recorded this way because *"someone should check this"* in a disposition column is the command-to-prose handoff this table exists to remove ⚠️ **EXTENDED AT v0.9 TO A SECOND QUESTION — AND *"NO EDIT OWED"* IS NOT WITHDRAWN.** It was and remains **SOUND for the question this table asks**: 2m designs a **deferred** `Message.clone()`, the shipped binding omits it, the two AGREE, and **#458 stays invisible to Python**. **That conclusion is untouched.** What §5d could not see is the question it does not ask: by §5c's criterion this file also carries §4.2's **"Construction failure modes"** limb — a **derived restatement** that cites `[2i §6.5]` in its own sentence — which B6 amends by the owner decision of 2026-09-20, **as a design-document edit and not as a change to `fixpp.i`**. ⚠️ **Same seam as the row above: consumer-of-a-SYMBOL and maker-of-a-SCOPE-CLAIM are two derivations and nothing joined them.** See §5c's *"two passages OUTSIDE `[2i]`"* sub-section and §7's residual |
+| `.specify/api-contract.md` | live documentation | ⚠️ **added at v0.3.** §11 supplies the breaking-change **definition** used in §0c; its clone mention is in that capacity and needs no edit ⚠️ **EXTENDED AT v0.9 TO A SECOND QUESTION — AND THE SENTENCE BEFORE THIS ONE IS NOT WITHDRAWN.** *"Needs no edit"* was and remains **SOUND for the question this table asks**: §5d derives **consumers of the four changed symbols**, and this file's `fixpp_msg_clone` mention is a breaking-change-definition citation that no refusal touches. **It is being extended, not corrected.** §5c asks a different question — *which passages make a scope claim about `FIXPP_ERR_CAPI_CONFIG_INVALID`* — and by that question this file carries **§7.5's code-scoping parenthetical**, which B6 amends by the owner decision of 2026-09-20. ⚠️ **THE SEAM IS THE DEFECT, NOT EITHER ROW: §5d derives by SYMBOL and §5c derives by SCOPE CLAIM, nothing joined them, and a file cleared by one was never seen by the other.** See §5c's *"two passages OUTSIDE `[2i]`"* sub-section for the quoted passage, its content-keyed locator and the prescription, and §7's residual for the seam itself |
 | `.specify/426-428-length-data-pairs.md` | historical bundle (design) | the 1.6 bump's record; **not re-dated** (§5b) |
 | `.specify/447-458-452-capi-refusals.md` | — | this document |
 | `spec/behaviors-and-limitations.md` | live documentation | **edited by obligation 2** — B-458-1 lands here (§5c). Already in the delta |
@@ -2856,6 +3109,28 @@ edits would produce a green gate over unchanged hashes.
   with the complement sweep, each read for whether its sentence makes a **scope claim**. A recipe for
   one cannot enumerate the other. ⚠️ **This is a scope change from v0.3 and is recorded as one** — it is not
   a re-decision of D-3b, which is untouched by it.
+- ⚠️ **§5c's RECIPE (c2.i) STILL HARDCODES ITS CORPUS, AND THAT IS AN OWNER SCOPE DECISION TAKEN
+  2026-09-20 — RECORDED AS A KNOWN RESIDUAL, NOT SILENTLY LEFT.** Recipe **(c2.i)** reads
+  `grep -ci "config.invalid"` over **`.specify/2i-capi.md` alone**; the file is **hardcoded and no
+  step derives it**. That is the defect the 2026-09-20 finding names, and **it is not fixed here**:
+  the owner **declined** amending the recipe to derive its own corpus, and widened only the
+  **outcome** — the two out-of-`[2i]` restatements now ride B6 (§5c). ⚠️ **The two halves must be
+  read together: the CONSEQUENCE was taken, the INSTRUMENT was not repaired.** A later reader who
+  re-runs (c2.i) as written will re-derive the same one-file universe and will again see neither
+  `.specify/api-contract.md` nor `.specify/2m-pybind.md`. **What the corpus recipe SHOULD be, if and
+  when it is repaired:** `grep -rl "CAPI_CONFIG_INVALID"` repo-wide, drop the source corpus and the
+  frozen `specs/` bundles, and adjudicate **every remaining live document** against §5c's condition
+  — the form executed once in §5c's *"two passages OUTSIDE `[2i]`"* sub-section. ⚠️ **AND THE
+  §5c/§5d SEAM IS THE SAME RESIDUAL SEEN FROM THE OTHER END:** §5d derives **consumers of the changed
+  symbols**, §5c derives **passages making a scope claim**, **nothing joins the two**, and both
+  `api-contract.md` and `2m-pybind.md` were cleared by §5d for the clone/#458 question and never
+  examined by §5c's. **Neither §5d row was wrong**; the join is what is missing, and no gate can see
+  a missing join. ⚠️ **This residual is a DELIBERATE SCOPE DECISION by the owner and is recorded as
+  one — not an oversight, and not a defect to be re-discovered at Gate B.** The full evidence,
+  including the corpus derivation and every control, is
+  **`research/reviews/opus_447_458_452_corpus_scope_finding.md` in the PARENT repository**;
+  ⚠️ **and that artifact's own corpus step stopped at `.specify/` — §5c extends it to `spec/` and
+  records the extension**, which is the residual demonstrating itself one level up.
 - ⚠️ **`fixpp_engine_start`'s PARTIAL worker launch returns `FIXPP_ERR_OK` — FILED AS fixpp#492, NOT
   FIXED HERE** (`## Clarifications`, answer C-3). The catch-all is guarded by
   `if (engine->state_->workers_.empty()) return …`, so a `std::thread` failure at `i > 0` leaves
@@ -2979,6 +3254,29 @@ silently. That failure was hit for real on the day this revision was written.
 - `--shift-audit origin/main..HEAD` → **rc=0**, reading the **committed v0.7 bytes**. ⚠️ **It   saw NOTHING of v0.8's edits** — they were uncommitted — and its own report says so   (*"`.md` files shift-checked: 0"*). **It returns the same `rc=0` it returned before a single   v0.8 character existed**, so it is not evidence for this revision; it is recorded because it   is the form the branch's commits will be read by.
 - `--staged`, after `git add` of this file → **rc=0**, reading the **index**, which is the only   corpus v0.8's uncommitted bytes appear in. **This is the form that covers this revision.**
 - `--self-test` → **151/151 pass**. ⚠️ **This is a capability check, NOT the seeded control the   rows below run**: it proves the detector reports non-zero **on its own known positives**, not   that it fires on **this file's** content. The stronger, file-seeded control is v0.7's and is   **not** re-executed at v0.8 — an unstated substitution of the weaker instrument for the   stronger one is precisely what this section is written against, so it is stated.
+
+
+⚠️ **v0.9 DOES NOT RE-RUN THE ROWS BELOW EITHER, AND IT RAN THE STRONGER CONTROL THAT v0.8
+DECLINED.** The rows below remain **v0.7's executions** and are not re-labelled. What v0.9 ran, with
+the corpus each form read named:
+
+- `--staged`, after `git add` of this file → **rc=0**, reading the **index** — **the only corpus
+  v0.9's uncommitted bytes appear in, and the form that covers this revision.**
+- ⚠️ **THE SEEDED, FILE-KEYED POSITIVE CONTROL WAS EXECUTED AT v0.9 — the one v0.8 recorded as
+  NOT re-run.** One `path:NNN` citation was appended to **this file** and re-staged: the gate
+  returned **rc=1**, in form **`[A]`**, and **quoted the seeded line back verbatim**. The file was
+  then restored from a pre-seed copy, `cmp` reported **byte-identical**, it was re-staged, and the
+  gate returned **rc=0** again. ⚠️ **That is what makes v0.9's zero a measurement**: the detector
+  is shown firing on **this revision's own staged diff**, not on its fixtures.
+- ⚠️ **`--shift-audit origin/main..HEAD` IS NOT EVIDENCE FOR THIS REVISION AND IS NOT CITED AS
+  ANY.** It reads the **committed** bytes; v0.9's edits are uncommitted, so that form **cannot see a
+  single character of them** and would return the same `rc=0` it returned before this revision
+  existed. ⚠️ **Every exit code above was captured WITHOUT A PIPE** — redirected to a file with
+  `$?` read immediately — because `cmd | tail` makes `$?` report `tail`, which turns a **firing**
+  control into a passing one silently.
+- ⚠️ **The file is left STAGED, not committed** — this revision's author does not commit; the
+  next actor's commit is what brings v0.9's bytes into `--shift-audit`'s corpus.
+- ⚠️ **THE PARAGRAPH IMMEDIATELY BELOW SAYS *"an uncommitted v0.6 edit"* AND IS NOT STALE — it is v0.6-era FRAMING of a rule that is version-independent.** *"`--range` reads the commit, `--staged` reads the index, and neither substitutes for the other"* is true of v0.9's bytes for exactly the reason it was true of v0.6's. **It is left as written rather than re-versioned each revision**, which is how the rot it warns about would start.
 
 ⚠️ **TWO FORMS, BECAUSE THEY READ DIFFERENT CORPORA AND NEITHER SUBSTITUTES FOR THE OTHER.**
 `--range origin/main..HEAD` reads the **commit** that carries this file; `--staged` reads the
@@ -4489,3 +4787,183 @@ two frozen records deliberately untouched.** **Status stays `NOT converged by th
 ⚠️ **What v0.8 does NOT establish.** It builds nothing, runs no seam, re-derives no population and
 discharges no §8 row. ⚠️ **It does not converge Gate A**, and the review it applies **cannot**:
 that review returned a P1, which is the branch of answer C-4 under which **no label is earned**.
+
+### v0.8 → v0.9 — an owner decision widening the amendment beyond `[2i]`
+
+⚠️ **NOT A REVIEW ROUND, AND NO REVIEW PRODUCED IT.** No Codex round ran, no Opus adversarial pass
+ran, no finding counts are entered in the round lines, and **no label is earned or moved by this
+revision**. What this revision applies is **one decision taken by the owner on 2026-09-20**, in
+response to a post-review finding about §5c's **derivation**.
+
+#### The decision, recorded as a decision
+
+**B6's `[2i]` amendment WIDENS to both out-of-`[2i]` scope claims.** Its `[2i]` amendment population
+of **eight** is **unchanged**. Two further passages, in *other* live documents, join the same
+prose amendment:
+
+| passage | content-keyed locator | result |
+|---|---|---|
+| `.specify/api-contract.md` §7.5 — *"(or `FIXPP_ERR_CAPI_CONFIG_INVALID` **for engine creation**)"* | `grep -cF -e 'Per \`[2i §5.2]\`: construction-vs-steady-state split.'` | **1** |
+| `.specify/2m-pybind.md` §4.2 — *"per `[2i §6.5]` **row 8**: `BindingError(FIXPP_ERR_CAPI_CONFIG_INVALID)` **for any other construction-time exception**"* | `grep -cF -e '**Construction failure modes.**'` | **1** |
+
+⚠️ **TWO POPULATIONS WITH DIFFERENT GROUNDS, AND NO SUM IS WRITTEN ANYWHERE.** The `[2i]`
+scope-claim population is **eight**, derived by §5c's criterion over passages that **bind the code
+to a producer set**. The two above are a **separate population**: **derived restatements that name
+`[2i]` as their source**. ⚠️ ***"The population is ten"* is exactly the sentence this document must
+not contain** — *three*, then *eight*, were each falsified by the next pass, and each respelling was
+the same defect at a new value. Merging the two figures would delete the very distinction that makes
+the widening **bookkeeping** rather than scope creep.
+
+#### The ground — and it is what makes this bookkeeping
+
+- **`api-contract.md`'s own Authority clause**, read at source, states it is *"purely a
+  **distillation** … No new decisions are introduced; **this document does not amend its sources,
+  and on any conflict the source wins**"*. Its offending sentence **names `[2i §5.2]` as its source,
+  twice**. Tracking `[2i]` is therefore **that document's own contract**, and leaving the
+  restatement stale manufactures **precisely the conflict its authority clause anticipates** — in
+  the document `[2i]`'s own amendment cites for its authority (§0c derives the breaking-change
+  definition from `[api-contract §11]`).
+- **`2m-pybind.md`'s limb likewise says *"per `[2i §6.5]`"*** — a derived restatement of the row B6
+  rewrites, false of the same class-**C** and class-**D** explicit refusals, for the same reason:
+  it conditions the code on a **caught exception**.
+- ⚠️ **NO CONSTITUTIONAL AMENDMENT IS TRIGGERED, AND v0.9 SAYS SO EXPLICITLY BECAUSE A READER'S
+  FIRST INSTINCT IS THE OPPOSITE.** `api-contract.md`'s **frozen rule** governs *"every surface
+  marked **Stable from v1.0** in §3"*, and §11 governs *"a surface listed under §3.1"* — **§7.5 is
+  prose about an exception-translation convention and is neither**. And §11 states in its own words
+  that before fixpp's first public release the consequence is `[const §X.7]`'s — *"a MINOR bump
+  marked BREAKING, no amendment"* — which is the premise §0c already established from that same
+  section. The edit **introduces no new decision**; it removes a restatement its own source no
+  longer supports.
+- **`[const §X.7]` obligation 3 supplies the TIMING, not the mandate** — *"in the same PR"*. Its own
+  list names **code** consumers; §5d places `.specify/` and `spec/` under its **live documentation**
+  class. **What obligation 3 adds is that these two do not get deferred once they are owed.**
+
+#### What was missed, and why no gate could have caught it
+
+§5c's recipe **(c2.i)** reads `grep -ci "config.invalid"` over **`.specify/2i-capi.md` alone**. **The
+corpus is hardcoded and no step ever derived it.** Four Gate A rounds, a post-sign-off P1 and the
+C-4 scoped delta review each replaced or audited the **retrieval inside that file**; **none asked
+whether that file was the right universe.**
+
+⚠️ **The C-4 review could not have caught it, and that is a property of its charter rather than of
+its execution.** Answer C-4 commissioned a review **scoped to the v0.6/v0.7 delta**. This is a defect
+of the **derivation**, and the derivation **predates the delta** — it has been in the document since
+recipe (c) was written at v0.5. A scoped review is answerable for what changed; nothing in its
+charter directs it at the frame around what changed.
+
+#### The §5c/§5d seam — the defect is the join, and neither row is wrong
+
+**Both files were already in §5d's consumer table, and both rows are SOUND for the question they
+asked** — the clone / #458 question:
+
+- `api-contract.md` — *"§11 supplies the breaking-change definition used in §0c; its clone mention is
+  in that capacity and needs no edit"*.
+- `2m-pybind.md` — *"It designs a Python `Message.clone()` … That surface is not shipped … No edit
+  owed."*
+
+⚠️ **Neither is corrected at v0.9; both are EXTENDED to a second question.** §5d derives **consumers
+of the changed symbols**. §5c derives **passages making a scope claim about the code**. **Nothing
+joins the two**, so a file can be **cleared by one derivation and never examined by the other** —
+which is exactly what happened, twice, to the same two files. ⚠️ **No gate can see a missing join:**
+each derivation is individually complete and individually auditable, and the absence lives between
+them rather than inside either.
+
+#### Root cause — RC#1's EIGHTH occurrence, and the FIRST at CORPUS level
+
+**RC#1: a claim whose derivation stopped one hop short of the source.** ⚠️ **The ordinal is DERIVED,
+not inherited** — the brief that commissioned this revision asserted *"eighth"* and it was re-derived
+before being written, over this file, **before this revision's edits**:
+
+```
+grep -c "SEVENTH OCCURRENCE\|SEVENTH occurrence" .specify/447-458-452-capi-refusals.md  ->  1
+grep -c "EIGHTH OCCURRENCE\|EIGHTH occurrence"   .specify/447-458-452-capi-refusals.md  ->  0
+# control — a DIFFERENT pattern, positive on the SAME corpus, so the zero is a measurement:
+grep -c "RC#1" .specify/447-458-452-capi-refusals.md                                    ->  16
+```
+
+The convergence log records occurrences one through three as rounds 1–3, the fourth in
+`v0.4 → v0.5`, the fifth inside §5c's own instrument in `v0.5 → v0.6`, the sixth in v0.5's
+closing-edit section, and the seventh — the elided quotation — in `v0.7 → v0.8`. **This is the
+eighth.** ⚠️ **Re-derive rather than trusting this paragraph:** re-run the greps above; the highest
+ordinal present plus one is the next.
+
+⚠️ **AND IT IS THE FIRST AT CORPUS LEVEL, WHICH IS WHY IT OUTRANKS THE SEVEN BEFORE IT.** Every prior
+occurrence narrowed on something **inside the chosen file** — a passage, a class test, an
+adjudication, a quotation. **This one is the frame around all of them.** A population derived
+perfectly over the wrong universe is still wrong, and **no amount of rigour inside the chosen set
+repairs an incomplete set** — which is this repository's own recorded lesson from issue #334:
+*"Rigor inside the set you chose does not compensate for an incomplete set."* ⚠️ **The seven prior
+fixes were all instruments pointed INTO `2i-capi.md`; each made the eighth harder to see, because a
+better instrument aimed at the same corpus reads as better coverage.**
+
+#### The residual the owner DECLINED to fix — recorded as a scope decision, not left silent
+
+⚠️ **(c2.i) STILL HARDCODES ITS CORPUS.** The owner **explicitly declined** amending the recipe to
+derive it, and widened only the **outcome**. So the instrument is unrepaired while the consequence
+has been taken, and **§7 records that as a known residual** with the repaired recipe written out and
+a pointer to the finding artifact — rather than leaving a later reader to re-run (c2.i) as written,
+re-derive the same one-file universe, and see neither passage again. ⚠️ **Recording it AS A
+DELIBERATE OWNER SCOPE DECISION is the point**: an undocumented residual is a Gate B finding waiting
+to be re-discovered, and a documented one is a disposition.
+
+#### The finding artifact's OWN corpus stopped at `.specify/` — extended here
+
+⚠️ **RC#1 recurring inside the note that names it.** The finding artifact
+(`research/reviews/opus_447_458_452_corpus_scope_finding.md`, parent repository) named four live
+documents outside `[2i]` and this one, **all four under `.specify/`**. Re-executed for v0.9, the
+repo-wide derivation returns **two more** — `spec/behaviors-and-limitations.md` and
+`spec/coverage-index.md` — and §5d's own disposition classes call `spec/` **live documentation
+(maintained, may need editing)**. ⚠️ **Every figure the artifact published REPRODUCED** (both
+locators at **1**, negative controls at **0**, all four exemption tokens at **0** on both passages
+with their positive controls firing, `2j`'s two hits exemption 3, `215-dictionary-view.md` not a
+scope claim and corroborating); **what did not reproduce was the completeness of its corpus step**,
+and that is recorded rather than written around. **It changes no verdict** — both new files
+adjudicate to **NO EDIT** — which is exactly why it is worth writing down: a defect in the
+instrument matters even when its output survives.
+
+⚠️ **And `215-dictionary-view.md` is adjudicated on ALL SIX of its hits at v0.9, not the four the
+artifact named** — four *"non-whitelisted thunk → translates"* table rows (which **corroborate** the
+wide reading), one restatement of `[2i §5.2]`'s **whitelist** (§5c's limb **(1)**, SOUND and
+unamended), and one comparative remediation clause. A verdict resting on four of six hits is the
+shape of defect this document exists to prevent.
+
+#### The positional citation — de-ordinalised, and the obvious reason is the WRONG one
+
+`2m-pybind.md` cites *"`[2i §6.5]` **row 8**"*. ⚠️ **B6 does NOT rot that ordinal** — it amends a
+**cell** of the row (the middle column), **mints no enumerator and touches no numeral**, so the row's
+position does not move; inheriting *"a positional citation into a table B6 rewrites"* would be a
+claim wider than its mechanism. **The reasons that do hold are stronger and both are measured:**
+**(i)** counted as data rows the code's row **is** the 8th, but the row whose **Numeric column is 8**
+is `FIXPP_ERR_TAG_NOT_FOUND` — so a reader resolving *"row 8"* by the number the table publishes
+lands on **the wrong row today**, before any edit; **(ii)** a positional index is a **RESULT**, and
+this repository's rule is that a citation may carry a **condition or a procedure** and never a
+result, because nothing ever re-runs a citation. **v0.9 therefore prescribes REPLACING the ordinal
+with a content-keyed citation** — `[2i §6.5]`'s `FIXPP_ERR_CAPI_CONFIG_INVALID` row — **in the same
+edit**, and says which and why rather than leaving the choice to a fixer.
+
+#### Net effect — stated as change, not as prediction
+
+**±0 decisions** (D-1, D-2, D-2b, D-3, D-3b, D-4, D-5a/b/c all stand). **±0 test seams. ±0 error
+variants. ±0 pins. ±0 enumerators. 0 source files changed. `.specify/2i-capi.md`,
+`.specify/api-contract.md` and `.specify/2m-pybind.md` are NOT edited by this revision — this
+document PRESCRIBES; B6's PR performs.**
+
+**`[2i]` SCOPE-CLAIM population: 8 passages, UNCHANGED.** **Two derived restatements OUTSIDE `[2i]`
+join B6's prose amendment, on the separate ground that each cites `[2i]` as its source** — a second
+population, never summed with the first. **B6's `[2i]` edit list: UNCHANGED** (the eight plus C-2's
+ninth, non-scope deletion).
+
+**What changed: §5c gains one sub-section** (the corpus derivation with its controls, every live
+document adjudicated, both passages quoted un-elided with content-keyed locators and prescriptions,
+the constitutional non-trigger, the de-ordinalisation call); **§5d's `api-contract.md` and
+`2m-pybind.md` rows are EXTENDED to a second question with both original dispositions affirmed as
+sound**; **§7 gains one residual** (the hardcoded corpus and the §5c/§5d seam, declined by the
+owner); **§9 gains a v0.9 execution note**; **the status block gains a v0.9 entry and paragraph.**
+
+⚠️ **Status stays `NOT converged by the loop's criterion`, and the Gate A label stays
+`gate-a-waived`** — earned on the C-4 review's P1, to which this finding adds **a second reason, not
+a worse one**. ⚠️ **No convergence is claimed, no new review ran, and no label moves.**
+
+⚠️ **What v0.9 does NOT establish.** It builds nothing, runs no seam, re-derives no producer
+population, discharges no §8 row, and **repairs no instrument** — recipe (c2.i) is unchanged by
+design (§7).
