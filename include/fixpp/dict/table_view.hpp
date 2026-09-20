@@ -22,11 +22,16 @@
 // STORAGE (E-2, data-model.md):
 // Owns its tables using std::vector / std::unordered_map. Constructed ONCE at
 // session/validator setup time by `Dictionary::as_table_view()` ([const §XV.1]
-// — config-time, not per-message). Immutable after construction, and that is
-// now a property of the TYPE rather than a rule kept by convention (fixpp#456,
-// `.specify/456-table-view-seal.md`): the population surface is private and
-// reachable only through `fixpp::dict::table_view_builder` (below), whose
-// `build() &&` yields the view; assignment is deleted.
+// — config-time, not per-message). Its POPULATION SURFACE is sealed as of
+// fixpp#456 (`.specify/456-table-view-seal.md`): the sixteen mutators are
+// private and reachable only through `fixpp::dict::table_view_builder`
+// (below), whose `build() &&` yields the view; assignment is deleted.
+// ⚠️ Sealed is narrower than immutable. Declare the view `const` —
+// `table_view const tv = std::move(b).build();` — and it is immutable. A
+// non-`const` view can still be moved from, `const_cast` through a span
+// accessor reaches its storage, and re-seating an `optional<table_view>`
+// substitutes a new object at the same address, which a `dict_hooks` bundle
+// taken from it will not notice (`B-456-2`).
 //
 // INCLUDE-GRAPH CONSTRAINT ([const §XV.9]):
 // This header is included (transitively) by `validator.hpp`, which lands on

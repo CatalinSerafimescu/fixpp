@@ -207,11 +207,13 @@ public:
     // checks against (store-driven projection of `enum_values()` above; no
     // longer a stub).
     //
-    // [const §XV.1]: construction only at config-time; the returned table_view
-    // is immutable — ENFORCED BY THE TYPE since fixpp#456, not merely asserted
-    // here: its population surface is private and reachable only through
-    // `table_view_builder`, and assignment is deleted — and must not be rebuilt
-    // on the per-message hot path.
+    // [const §XV.1]: construction only at config-time; the returned table_view's
+    // population surface is sealed by the type since fixpp#456, not merely
+    // asserted here: the mutators are private and reachable only through
+    // `table_view_builder`, and assignment is deleted. ⚠️ It is returned BY
+    // VALUE, so the caller's view is non-`const` unless the caller declares it
+    // so, and sealed is not immutable (`table_view.hpp`'s banner, `B-456-1`) —
+    // and must not be rebuilt on the per-message hot path.
     [[nodiscard]] table_view as_table_view() const;
 
 private:

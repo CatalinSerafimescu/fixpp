@@ -25,11 +25,14 @@
 // value under the frozen SC-007 design point (validator.hpp's
 // `dictionary_driven_validator` ctor). ⚠️ The paragraph that stood here said that view
 // was still MUTABLE and that this type therefore did not make `table_view` itself
-// immutable. fixpp#456 falsified both clauses: the population surface is private and
-// reachable only through `table_view_builder`, and assignment is deleted, so a returned
-// view carries no mutation channel at all (`.specify/456-table-view-seal.md`). What this
-// type does remains what it always did and is NOT subsumed by that seal — it is the
-// PAIRING with the source `Dictionary` that closes C4, which the seal does not touch.
+// immutable. fixpp#456 NARROWED both clauses rather than falsifying them: the population
+// surface is private and reachable only through `table_view_builder`, and assignment is
+// deleted, so a returned view carries no POPULATION channel
+// (`.specify/456-table-view-seal.md`). It is still returned by value into a non-`const`
+// caller variable unless the caller declares otherwise, and §5b's three residual channels
+// remain. What this type does remains what it always did and is NOT subsumed by that
+// seal — it is the PAIRING with the source `Dictionary` that closes C4, which the seal
+// does not touch.
 #pragma once
 
 #include <fixpp/dict/table_view.hpp>

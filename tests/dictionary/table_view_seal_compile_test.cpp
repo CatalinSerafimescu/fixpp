@@ -33,6 +33,16 @@
 // obligation is that the public surface is READ at each change, with the class-scoped
 // access-label census pasted into the decision record.
 //
+// Nor do they see the channels the seal never closed, because none of those is a
+// POPULATION mutator: move-construction from a non-`const` view (`table_view(
+// table_view&&)` is public and load-bearing, §5a), and `const_cast` through a
+// span-returning accessor (`required_fields`, `group_member_tags`,
+// `group_required_members`) reaching non-`const` backing storage on a non-`const`
+// view. Those two sit OUTSIDE this TU's subject rather than being gaps in its
+// coverage of it — §5b and `B-456-1` carry them — and the remaining §5b channel,
+// destroy-and-reconstruct at the same address, is pinned at runtime by
+// `DictHooksCustomPair.ABundleDoesNotFollowAReSeatedOptional`.
+//
 // Re-derivation recipe for the structural half (§6 seam 2) — the counts are
 // deliberately NOT written here, because nothing re-runs a comment:
 //   grep -nE '^[[:space:]]*friend[[:space:]]+class[[:space:]]+(table_view|table_view_builder);' \

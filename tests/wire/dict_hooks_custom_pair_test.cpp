@@ -52,6 +52,7 @@
 #include <fixpp/wire/offset_table.hpp>
 #include <fixpp/wire/parser.hpp>
 #include <fixpp/wire/validator.hpp>
+#include <memory>
 #include <memory_resource>
 #include <optional>
 #include <span>
@@ -660,19 +661,52 @@ TEST(DictHooksCustomPair, ZeroIsNeverHalfOfAPair) {
 //
 // `DictHooksCustomPair.ABundleIsASnapshotOfTheDictionaryItWasBuiltFrom` pinned
 // that `for_table_view` latches `has_nonstandard_pair()` at build time, by
-// mutating a view AFTER a bundle had been taken from it. That premise is
-// unconstructible now that the view is sealed, so the staleness half of the
-// behaviour is no longer observable through the public API. What records the
-// loss: `B-456-2` in spec/behaviors-and-limitations.md, and the compile-time
-// seal witness in tests/dictionary/table_view_seal_compile_test.cpp, which
-// asserts the stronger property that replaced it. The case's POSITIVE half — a
-// bundle built after the pair was registered honours it — survives above in
-// `FastPathsChangeNoAnswerForAnyTag`, on the same tags.
+// mutating a view AFTER a bundle had been taken from it. Its deletion claimed
+// that premise was unconstructible. That claim was wrong: the *population*
+// half became unconstructible, the *identity* half did not — a bundle latches
+// against an OBJECT AT AN ADDRESS, and `std::optional<table_view>::emplace`
+// substitutes a different object at that same address without the bundle
+// noticing. `DictHooksCustomPair.ABundleDoesNotFollowAReSeatedOptional` below
+// carries that half now. What records the full picture: `B-456-2` in
+// spec/behaviors-and-limitations.md, and the compile-time seal witness in
+// tests/dictionary/table_view_seal_compile_test.cpp, which asserts the
+// population-sealing property the type actually buys. The case's POSITIVE
+// half — a bundle built after the pair was registered honours it — survives
+// above in `FastPathsChangeNoAnswerForAnyTag`, on the same tags.
 //
 // `DictHooksCustomPair.CopyAssignmentCarriesTheFlagWithThePairs` went with it:
 // its subject was `table_view::operator=`, which fixpp#456 deletes. It was also
 // the proof that assignment had to go (design §3.2) — copy-assignment moved the
 // exact `has_nonstandard_pair_` bit the seal exists to freeze.
+
+// A `dict_hooks` bundle latches against the OBJECT `for_table_view` was called
+// on, not a value. Re-seating that storage — `std::optional<table_view>::emplace`,
+// destroy-and-reconstruct in place — does not update a bundle already taken
+// from it, and the build-time `has_nonstandard_pair()` latch in particular
+// keeps its old answer. That is the identity half of the deleted case above;
+// the seal did not close it.
+TEST(DictHooksCustomPair, ABundleDoesNotFollowAReSeatedOptional) {
+    std::optional<table_view> opt;
+    table_view_builder no_pair;
+    opt.emplace(std::move(no_pair).build());
+    void const* const addr = std::addressof(*opt);
+    auto const hooks = dict_hooks::for_table_view(*opt);
+    ASSERT_EQ(hooks.data_tag_for_length(5001), 0U)
+        << "precondition: the bundle latched a pair-free view, so no callback was installed";
+
+    table_view_builder with_pair;
+    with_pair.set_length_pair_data_tag(5001, 5002);
+    opt.emplace(std::move(with_pair).build());
+    ASSERT_EQ(static_cast<void const*>(std::addressof(*opt)), addr)
+        << "precondition: emplace reconstructed IN THE SAME STORAGE";
+    ASSERT_TRUE(opt->has_nonstandard_pair())
+        << "precondition: the re-seated view really does declare the pair";
+
+    EXPECT_EQ(hooks.data_tag_for_length(5001), 0U)
+        << "the bundle did not follow the re-seat";
+    EXPECT_EQ(dict_hooks::for_table_view(*opt).data_tag_for_length(5001), 5002U)
+        << "a bundle built after the re-seat honours it";
+}
 
 // ─────────────────────────────────────────────────────────────────────────
 // Gate B r9 R-1 — `nested_group_slices` must split by the CALLER's bundle on
