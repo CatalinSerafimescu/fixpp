@@ -19,6 +19,7 @@
 #include "capi_internal.hpp"
 #include "fix/c_api/engine.h"
 #include "fix/c_api/session.h"
+#include "fixpp/session/config_byte_floor.hpp"  // 090-capi-refusals (fixpp#452): contains_forbidden_config_byte (D-5b/FR-011)
 #include "fixpp/session/memory_store.hpp"
 #include "fixpp/session/memory_store_factory.hpp"
 #include "fixpp/session/security_profile.hpp"
@@ -97,6 +98,13 @@ fixpp_error_t fixpp_session_config_set_comp_ids(fixpp_session_config_t* cfg, con
     if (sender == nullptr || target == nullptr || sender[0] == '\0' || target[0] == '\0') {
         return FIXPP_ERR_CAPI_CONFIG_INVALID;  // both required (eager validation)
     }
+    // 090-capi-refusals (fixpp#452, FR-011, EC-6): the byte floor (D-5b),
+    // checked for BOTH arguments BEFORE either is written to cfg->cfg — a bad
+    // target must not leave a new sender stored (atomicity).
+    if (fixpp::session::contains_forbidden_config_byte(sender) ||
+        fixpp::session::contains_forbidden_config_byte(target)) {
+        return FIXPP_ERR_CAPI_CONFIG_INVALID;
+    }
     try {
         cfg->cfg.sender_comp_id = sender;
         cfg->cfg.target_comp_id = target;
@@ -112,6 +120,10 @@ fixpp_error_t fixpp_session_config_set_begin_string(fixpp_session_config_t* cfg,
         return FIXPP_ERR_NULL_HANDLE;
     }
     if (begin_string == nullptr || begin_string[0] == '\0') {
+        return FIXPP_ERR_CAPI_CONFIG_INVALID;
+    }
+    // 090-capi-refusals (fixpp#452, FR-011, EC-6): the byte floor (D-5b).
+    if (fixpp::session::contains_forbidden_config_byte(begin_string)) {
         return FIXPP_ERR_CAPI_CONFIG_INVALID;
     }
     try {

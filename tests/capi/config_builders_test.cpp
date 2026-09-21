@@ -12,6 +12,9 @@
 
 #include <gtest/gtest.h>
 
+#include <string>
+
+#include "capi_internal.hpp"  // fixpp_session_config internals (T030-T032: "nothing stored")
 #include "capi_loopback_support.hpp"  // make_test_dict_handle / destroy_test_dict_handle (L-050-1)
 #include "fix/c_api/dict.h"           // fixpp_dict_destroy (F1 negative tests)
 #include "fix/c_api/engine.h"
@@ -98,6 +101,130 @@ TEST(CapiConfigBuilders, BeginStringRejectsNullOrEmpty) {
     EXPECT_EQ(fixpp_session_config_set_begin_string(cfg, nullptr), FIXPP_ERR_CAPI_CONFIG_INVALID);
     EXPECT_EQ(fixpp_session_config_set_begin_string(cfg, ""), FIXPP_ERR_CAPI_CONFIG_INVALID);
     EXPECT_EQ(fixpp_session_config_set_begin_string(cfg, "FIX.4.2"), FIXPP_ERR_OK);
+    fixpp_session_config_destroy(cfg);
+}
+
+// ── 090-capi-refusals (fixpp#452) — T030: Seam 5, the byte floor at the two
+// C-ABI setters. Naming mirrors tests/session/test_fixt_credentials.cpp's
+// shipped `…_ReturnsInvalidConfig_NoWireEmit` family (contracts/
+// session-config-byte-floor.md §4.1). At this layer no session/wire ever
+// exists (the refusal fires at config-build time, before fixpp_session_open),
+// so "no wire emission" is a structural fact rather than a runtime
+// observable here — the runtime assertion is EC-6's other half: NOTHING
+// STORED, checked by reaching through capi_internal.hpp into
+// fixpp_session_config::cfg and confirming a previously-set valid value
+// survives the refused call unchanged. [FR-011; SC-006]
+
+TEST(CapiConfigBuilders, CompIdsSenderRejectsForbiddenBytes_NoWireEmit) {
+    fixpp_session_config_t* cfg = nullptr;
+    ASSERT_EQ(fixpp_session_config_create(&cfg), FIXPP_ERR_OK);
+    auto* internal = reinterpret_cast<fixpp_session_config*>(cfg);
+
+    // Establish a known-good baseline first, so a later refusal's "nothing
+    // stored" assertion is discriminating: it must show the BASELINE survives,
+    // not merely that the field is empty.
+    ASSERT_EQ(fixpp_session_config_set_comp_ids(cfg, "GOODSENDER", "GOODTARGET"), FIXPP_ERR_OK);
+
+    // Grid: byte class — SOH (\x01), '=' (0x3D), another control byte < 0x20.
+    const std::string soh = std::string("SEN") + "\x01" + "DER";
+    const std::string eq = "SEN=DER";
+    const std::string ctrl = std::string("SEN") + "\x1f" + "DER";
+    for (const std::string& bad : {soh, eq, ctrl}) {
+        EXPECT_EQ(fixpp_session_config_set_comp_ids(cfg, bad.c_str(), "GOODTARGET"),
+                  FIXPP_ERR_CAPI_CONFIG_INVALID)
+            << "sender=" << bad;
+        EXPECT_EQ(internal->cfg.sender_comp_id, "GOODSENDER")
+            << "the previously-set sender must survive the refused call unchanged";
+        EXPECT_EQ(internal->cfg.target_comp_id, "GOODTARGET")
+            << "target must be untouched by a sender-only refusal";
+    }
+    fixpp_session_config_destroy(cfg);
+}
+
+TEST(CapiConfigBuilders, CompIdsTargetRejectsForbiddenBytes_NoWireEmit) {
+    fixpp_session_config_t* cfg = nullptr;
+    ASSERT_EQ(fixpp_session_config_create(&cfg), FIXPP_ERR_OK);
+    auto* internal = reinterpret_cast<fixpp_session_config*>(cfg);
+
+    ASSERT_EQ(fixpp_session_config_set_comp_ids(cfg, "GOODSENDER", "GOODTARGET"), FIXPP_ERR_OK);
+
+    const std::string soh = std::string("TAR") + "\x01" + "GET";
+    const std::string eq = "TAR=GET";
+    const std::string ctrl = std::string("TAR") + "\x1f" + "GET";
+    for (const std::string& bad : {soh, eq, ctrl}) {
+        EXPECT_EQ(fixpp_session_config_set_comp_ids(cfg, "GOODSENDER", bad.c_str()),
+                  FIXPP_ERR_CAPI_CONFIG_INVALID)
+            << "target=" << bad;
+        EXPECT_EQ(internal->cfg.sender_comp_id, "GOODSENDER")
+            << "sender must be untouched by a target-only refusal";
+        EXPECT_EQ(internal->cfg.target_comp_id, "GOODTARGET")
+            << "the previously-set target must survive the refused call unchanged";
+    }
+    fixpp_session_config_destroy(cfg);
+}
+
+TEST(CapiConfigBuilders, BeginStringRejectsForbiddenBytes_NoWireEmit) {
+    fixpp_session_config_t* cfg = nullptr;
+    ASSERT_EQ(fixpp_session_config_create(&cfg), FIXPP_ERR_OK);
+    auto* internal = reinterpret_cast<fixpp_session_config*>(cfg);
+
+    ASSERT_EQ(fixpp_session_config_set_begin_string(cfg, "FIX.4.2"), FIXPP_ERR_OK);
+
+    const std::string soh = std::string("FIX") + "\x01" + ".4.2";
+    const std::string eq = "FIX=4.2";
+    const std::string ctrl = std::string("FIX") + "\x1f" + ".4.2";
+    for (const std::string& bad : {soh, eq, ctrl}) {
+        EXPECT_EQ(fixpp_session_config_set_begin_string(cfg, bad.c_str()),
+                  FIXPP_ERR_CAPI_CONFIG_INVALID)
+            << "begin_string=" << bad;
+        EXPECT_EQ(internal->cfg.begin_string, "FIX.4.2")
+            << "the previously-set begin_string must survive the refused call unchanged";
+    }
+    fixpp_session_config_destroy(cfg);
+}
+
+// T031: atomicity for fixpp_session_config_set_comp_ids — a bad target must
+// not leave a new sender stored, even though sender alone was valid.
+// [FR-011]
+TEST(CapiConfigBuilders, CompIdsSetterIsAtomicAcrossBothArguments) {
+    fixpp_session_config_t* cfg = nullptr;
+    ASSERT_EQ(fixpp_session_config_create(&cfg), FIXPP_ERR_OK);
+    auto* internal = reinterpret_cast<fixpp_session_config*>(cfg);
+
+    // No prior sender configured — the surviving state after refusal must be
+    // "nothing stored", not "the valid sender half was applied".
+    const std::string bad_target = std::string("BADTARGET") + "\x01";
+    EXPECT_EQ(fixpp_session_config_set_comp_ids(cfg, "NEWSENDER", bad_target.c_str()),
+              FIXPP_ERR_CAPI_CONFIG_INVALID);
+    EXPECT_TRUE(internal->cfg.sender_comp_id.empty())
+        << "a bad target must leave a valid sender UNSTORED (atomicity, FR-011)";
+    EXPECT_TRUE(internal->cfg.target_comp_id.empty());
+
+    fixpp_session_config_destroy(cfg);
+}
+
+// T032: the mandatory spurious-hit control. FIXPP_ERR_CAPI_CONFIG_INVALID is
+// ALREADY produced by the pre-existing null/empty guard on this same call —
+// assert the code from the call under test, with a live handle, pre-start,
+// paired with a control value differing from an accepted one ONLY by the
+// injected byte. [data-model.md §2.3/§5; quickstart.md V8's control]
+TEST(CapiConfigBuilders, ForbiddenByteControlIsolatesInjectedByteAsCause) {
+    fixpp_session_config_t* cfg = nullptr;
+    ASSERT_EQ(fixpp_session_config_create(&cfg), FIXPP_ERR_OK);
+
+    // Live handle, pre-start (no engine exists at this layer at all), a
+    // non-empty non-NULL value differing from an accepted sibling of the SAME
+    // shape ONLY by the injected byte.
+    const std::string accepted = "SENDER";
+    std::string injected = accepted;
+    injected[4] = '\x01';  // 'E' -> SOH; same length, one byte different
+
+    EXPECT_EQ(fixpp_session_config_set_comp_ids(cfg, accepted.c_str(), "TARGET"), FIXPP_ERR_OK)
+        << "control: the accepted sibling of identical shape must succeed";
+    EXPECT_EQ(fixpp_session_config_set_comp_ids(cfg, injected.c_str(), "TARGET"),
+              FIXPP_ERR_CAPI_CONFIG_INVALID)
+        << "same shape, only the injected byte differs — isolates the byte as cause";
+
     fixpp_session_config_destroy(cfg);
 }
 

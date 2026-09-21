@@ -42,7 +42,8 @@
 #include <fixpp/core/session_local.hpp>
 #include <fixpp/core/trace_context.hpp>
 #include <fixpp/session/admin_messages.hpp>  // 005 US1: interpret_logon / T046: build_logout
-#include <fixpp/session/direction.hpp>       // 005 US4: direction_t (store outbound)
+#include <fixpp/session/config_byte_floor.hpp>  // 090-capi-refusals (fixpp#452): contains_forbidden_config_byte (D-5b/FR-013)
+#include <fixpp/session/direction.hpp>  // 005 US4: direction_t (store outbound)
 #include <fixpp/session/logon_credentials.hpp>  // 034: frame_has_genuine_tag554 / mask_tag554_same_length_inplace
 #include <fixpp/session/message_store.hpp>          // 008-message-store — store_ unique_ptr dtor
 #include <fixpp/session/message_store_factory.hpp>  // 008-message-store — make() call site
@@ -1126,37 +1127,43 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         co_return std::unexpected(error::invalid_session_config);
     }
 
-    // gate-b/r1 FQ-3 (finding #3): credential delimiter injection validation.
+    // gate-b/r1 FQ-3 (finding #3) + 090-capi-refusals (fixpp#452, FR-012/FR-013,
+    // EC-7): configured-string delimiter injection validation.
     //
-    // username/password are copied verbatim into append_raw() in build_logon
-    // (admin_messages.cpp's `build_logon`, 553/554 append_raw calls) with no SOH/= validation. A
-    // configured value containing SOH (\x01) or '=' can inject arbitrary FIX fields. This is the
-    // known feedback_delimiter_injection_verbatim_field_copy anti-pattern.
+    // sender_comp_id/target_comp_id/begin_string, each configured
+    // supported_msg_types[].msg_type (RefMsgType(372)), and username/password
+    // are all copied verbatim into append_raw() in build_logon
+    // (admin_messages.cpp's `build_logon`, tags 49/56/8/372/553/554) with no
+    // SOH/= validation. A configured value containing SOH (\x01) or '=' can
+    // inject arbitrary FIX fields. This is the known
+    // feedback_delimiter_injection_verbatim_field_copy anti-pattern.
     //
-    // Floor: reject any byte < 0x20 (incl. SOH \x01) or '=' (0x3D) in
-    // username/password when set. Fail-closed at open()-time before any emission.
-    // FIX.4.x paths are NOT bypassed: these fields are version-agnostic and
-    // build_logon conditionally emits 553/554 for any config that sets them.
-    // Clean/absent credentials never trip this guard → W4 byte-identical preserved.
-    // [feedback_delimiter_injection_verbatim_field_copy; FR-007; data-model E3]
-    {
-        auto is_invalid_cred_byte = [](unsigned char c) noexcept -> bool {
-            return c < 0x20U || c == static_cast<unsigned char>('=');
-        };
-        if (cfg_.username.has_value()) {
-            for (unsigned char c : *cfg_.username) {
-                if (is_invalid_cred_byte(c)) {
-                    co_return std::unexpected(error::invalid_session_config);
-                }
-            }
+    // Floor: reject any byte < 0x20 (incl. SOH \x01) or '=' (0x3D) — the ONE
+    // definition fixpp::session::contains_forbidden_config_byte
+    // (config_byte_floor.hpp, D-5b; contracts/session-config-byte-floor.md
+    // §2/§8; FR-013). Fail-closed at open()-time before any emission. FIX.4.x
+    // paths are NOT bypassed: sender_comp_id/target_comp_id/begin_string are
+    // version-agnostic and emitted by every admin builder; build_logon
+    // conditionally emits 372/553/554 for any config that sets them.
+    // Clean/absent configs never trip this guard → W4/W6 byte-identical
+    // preserved.
+    // [feedback_delimiter_injection_verbatim_field_copy; FR-012/FR-013;
+    // data-model.md E3/EC-7]
+    if (contains_forbidden_config_byte(cfg_.sender_comp_id) ||
+        contains_forbidden_config_byte(cfg_.target_comp_id) ||
+        contains_forbidden_config_byte(cfg_.begin_string)) {
+        co_return std::unexpected(error::invalid_session_config);
+    }
+    for (const auto& entry : cfg_.supported_msg_types) {
+        if (contains_forbidden_config_byte(entry.msg_type)) {
+            co_return std::unexpected(error::invalid_session_config);
         }
-        if (cfg_.password.has_value()) {
-            for (unsigned char c : *cfg_.password) {
-                if (is_invalid_cred_byte(c)) {
-                    co_return std::unexpected(error::invalid_session_config);
-                }
-            }
-        }
+    }
+    if (cfg_.username.has_value() && contains_forbidden_config_byte(*cfg_.username)) {
+        co_return std::unexpected(error::invalid_session_config);
+    }
+    if (cfg_.password.has_value() && contains_forbidden_config_byte(*cfg_.password)) {
+        co_return std::unexpected(error::invalid_session_config);
     }
 
     // 034 T007 (C3): credential-length guard — role-independent, at the shared

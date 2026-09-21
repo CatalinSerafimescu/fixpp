@@ -32,7 +32,12 @@ enum class msg_direction { send, receive };
 // std::vector<supported_msg_type>.
 struct supported_msg_type {
     msg_direction direction;  // MsgDirection(385)
-    std::string msg_type;     // RefMsgType(372)
+    // RefMsgType(372). Precondition (Session::open, fixpp#452 / FR-012): must
+    // not contain a byte < 0x20 (incl. SOH \x01) or '=' (0x3D) — the
+    // fixpp::session::contains_forbidden_config_byte floor
+    // (config_byte_floor.hpp). No C-ABI setter exists for this field
+    // ([C++ track] only).
+    std::string msg_type;
 };
 
 }  // namespace fixpp::session

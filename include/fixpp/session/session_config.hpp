@@ -170,6 +170,11 @@ struct SessionConfig {
     bool already_serialized_executor = false;            // MUST be true when mode==direct_executor
     std::shared_ptr<fixpp::core::Clock> clock_override;  // null → EngineConfig::clock
 
+    // Precondition (Session::open, fixpp#452 / FR-012/FR-013): none of these
+    // three may contain a byte < 0x20 (incl. SOH \x01) or '=' (0x3D) — the
+    // fixpp::session::contains_forbidden_config_byte floor
+    // (config_byte_floor.hpp). open() rejects with
+    // core::error::invalid_session_config before any emission.
     std::string sender_comp_id;  // identity owned by 005
     std::string target_comp_id;
     std::string begin_string;
