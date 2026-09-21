@@ -311,10 +311,41 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_destroy(fixpp_msg_t* msg);
  *  liveness token (session close does NOT tombstone the clone).
  *  Clone reads (get, has_tag) are THREAD_SAFE.
  *
+ *  (1.7, BREAKING), two limbs:
+ *
+ *  Limb 1 -- a DICT-BACKED source whose re-parse of the copied frame fails
+ *  now REFUSES: no clone handle, *clone_out stays NULL, and the source
+ *  handle is unchanged and still usable. Before 1.7 this silently returned
+ *  FIXPP_ERR_OK with a dictionary-free clone. The code is the caller-visible
+ *  translation of the wire failure that caused the re-parse to fail; the
+ *  three routes reachable today are FIXPP_ERR_UNKNOWN (an out-of-memory
+ *  allocation failure -- documented v1.0 behaviour, see the live
+ *  spec/behaviors-and-limitations.md L-049-2), FIXPP_ERR_WIRE_LIMIT_EXCEEDED
+ *  (a capacity or tag-range failure), and FIXPP_ERR_WIRE_INVALID_FRAME (a
+ *  malformed field). This is not a closed list -- any future route added to
+ *  the engine's internal error translation reaches the caller the same way.
+ *
+ *  Limb 2 -- a non-allocation exception raised during clone's own
+ *  construction now terminates the process after a fatal log, instead of
+ *  returning FIXPP_ERR_CAPI_CONFIG_INVALID. Its trigger set is NOT
+ *  enumerated: whether such an exception can be produced on this path at
+ *  all is undecided; the behaviour change is declared regardless, because a
+ *  return becoming a process abort is observable on this symbol whatever
+ *  its reachability.
+ *
  *  Return codes:
- *    FIXPP_ERR_OK             -- success; *clone_out is live
- *    FIXPP_ERR_NULL_HANDLE    -- src or clone_out is NULL
- *    FIXPP_ERR_INVALID_HANDLE -- src is destroyed / tombstoned
+ *    FIXPP_ERR_OK                    -- success; *clone_out is live
+ *    FIXPP_ERR_NULL_HANDLE            -- src or clone_out is NULL
+ *    FIXPP_ERR_INVALID_HANDLE         -- src is destroyed / tombstoned, or is an
+ *                                        outbound accumulator handle (no wire view)
+ *    FIXPP_ERR_CAPI_CONFIG_INVALID    -- std::bad_alloc during clone construction
+ *                                        (preserved from before 1.7, narrowed)
+ *    FIXPP_ERR_UNKNOWN                -- (1.7, BREAKING) limb 1: dict-backed
+ *                                        re-parse failed, out-of-memory route
+ *    FIXPP_ERR_WIRE_LIMIT_EXCEEDED    -- (1.7, BREAKING) limb 1: dict-backed
+ *                                        re-parse failed, capacity/range route
+ *    FIXPP_ERR_WIRE_INVALID_FRAME     -- (1.7, BREAKING) limb 1: dict-backed
+ *                                        re-parse failed, malformed-field route
  *
  *  Reentrancy: requires-session-lock (on the source handle's owning session)
  */

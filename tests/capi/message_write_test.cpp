@@ -50,6 +50,7 @@
 #include <fixpp/dict/table_view.hpp>
 #include <fixpp/wire/parser.hpp>
 
+#include "support/fix44_dictionary.hpp"  // fixpp#458 (090) US3 clone-refusal cells
 #include "support/frame_view_factory.hpp"
 
 using namespace std::chrono_literals;
@@ -2138,6 +2139,162 @@ TEST(MessageWrite, CloneNullAndDeadHandleErrors) {
         EXPECT_EQ(fixpp_msg_clone(dp, &co), FIXPP_ERR_INVALID_HANDLE);
         EXPECT_EQ(co, nullptr);
     }
+}
+
+// ── fixpp_msg_clone refuses a failed dict-backed re-parse (fixpp#458, D-3) ────
+//
+// T047/T048/T049 (part): contracts/msg-clone.md §1/§4; data-model.md EC-3/§4.1;
+// spec.md FR-005/FR-006/SC-004/SC-005; quickstart.md V5.
+//
+// A dict-backed CLONE's re-parse always goes through the DEFAULT-cap 2-arg
+// `Parser::parse(frame, mr)` overload (message_write.cpp's
+// `clone_parser.parse(fv, clone_mr)`). Building a SOURCE whose own view was
+// parsed at a RAISED cap admits more entries than the clone's re-parse will
+// accept, so the re-parse fails on frame shape alone — allocator-free and
+// sanitizer-safe (the raised-cap route, preferred over allocator injection
+// per quickstart.md V5).
+
+namespace {
+
+// A dict-backed-shaped frame: MsgType(35)=D, a marker field (49), then
+// `n_occurrences` repeats of a plain non-group tag (1=x). 4100 repeats plus
+// the two header fields (4102 total) exceeds offset_table.hpp's
+// default_max_offset_entries (4096) — the same DoS-cap mechanism
+// WireOffsetTable.DoSCapOffsetTableFull (tests/wire/offset_table_test.cpp)
+// exercises, reused here over a dict-backed table_view.
+std::vector<std::byte> make_oversized_frame_for_clone_test(int n_occurrences) {
+    std::string body =
+        "35=D\x01"
+        "49=SENDERID\x01";
+    for (int i = 0; i < n_occurrences; ++i) {
+        body += "1=x\x01";
+    }
+    return make_raw_frame_for_write_test(body);
+}
+
+}  // namespace
+
+// T047 (V5 / FR-005 / SC-004): the raised-cap route. Assert the EXACT code
+// (never `!= FIXPP_ERR_OK`), `*clone_out == NULL`, AND (FR-005's post-
+// condition) that the source handle is unchanged and still usable — a field
+// lookup that succeeded before the refused clone still succeeds after it,
+// with the same value.
+TEST(MessageWrite, CloneDictBackedReparseCapExceededYieldsWireLimitExceeded) {
+    using fixpp::wire::access_mode;
+    using fixpp::wire::MessageView;
+    using fixpp::wire::OffsetTable;
+
+    auto dict = fixpp::test_support::make_fix44_dictionary();
+    auto tv = dict->as_table_view();
+
+    // 4102 entries total: past the default 4096 cap the clone's re-parse
+    // uses, admitted here by a raised cap so the SOURCE itself is valid.
+    auto src_buf = make_oversized_frame_for_clone_test(4100);
+    auto fv = fixpp::wire::test::make_frame_view(src_buf);
+    ASSERT_TRUE(fv.has_value());
+
+    std::pmr::monotonic_buffer_resource arena;
+    fixpp::wire::Parser<access_mode::Index> parser{tv};
+    OffsetTable::Config raised_cfg{.max_offset_entries = 8192};
+    auto mv_src = parser.parse(*fv, &arena, raised_cfg);
+    ASSERT_TRUE(mv_src.has_value());
+    ASSERT_TRUE(mv_src->is_dict_backed());
+
+    InboundHandleForWrite h;
+    h.msg.view = &(*mv_src);
+
+    auto assert_source_intact = [&] {
+        const char* mt = nullptr;
+        size_t mt_len = 0;
+        ASSERT_EQ(fixpp_msg_get_msg_type(h.ptr(), &mt, &mt_len), FIXPP_ERR_OK);
+        ASSERT_NE(mt, nullptr);
+        EXPECT_EQ(std::string_view(mt, mt_len), "D");
+
+        const char* sv = nullptr;
+        size_t sv_len = 0;
+        ASSERT_EQ(fixpp_msg_get_string(h.ptr(), 49, &sv, &sv_len), FIXPP_ERR_OK);
+        ASSERT_NE(sv, nullptr);
+        EXPECT_EQ(std::string_view(sv, sv_len), "SENDERID");
+    };
+    assert_source_intact();  // pre-condition: the lookup succeeds BEFORE the refusal
+
+    fixpp_msg_t* clone_out = nullptr;
+    EXPECT_EQ(fixpp_msg_clone(h.ptr(), &clone_out), FIXPP_ERR_WIRE_LIMIT_EXCEEDED);
+    EXPECT_EQ(clone_out, nullptr);
+
+    assert_source_intact();  // FR-005: source unchanged and still usable AFTER the refusal
+}
+
+// T048 — the mandatory spurious-hit control for seam 3 (V5's control): clone
+// the SAME oversized source from a DICT-FREE handle. It must still return
+// FIXPP_ERR_OK, because no dict-backed re-parse is attempted and nothing can
+// fail. Without this arm, "refuse whenever the source is big" would pass.
+TEST(MessageWrite, CloneDictFreeOversizedSourceStillReturnsOk) {
+    using fixpp::wire::access_mode;
+    using fixpp::wire::MessageView;
+    using fixpp::wire::OffsetTable;
+
+    auto src_buf = make_oversized_frame_for_clone_test(4100);
+    auto fv = fixpp::wire::test::make_frame_view(src_buf);
+    ASSERT_TRUE(fv.has_value());
+
+    std::pmr::monotonic_buffer_resource arena;
+    fixpp::wire::Parser<access_mode::Index> parser_free{};  // no table_view → dict-free
+    OffsetTable::Config raised_cfg{.max_offset_entries = 8192};
+    auto mv_src = parser_free.parse(*fv, &arena, raised_cfg);
+    ASSERT_TRUE(mv_src.has_value());
+    ASSERT_FALSE(mv_src->is_dict_backed());
+
+    InboundHandleForWrite h;
+    h.msg.view = &(*mv_src);
+
+    fixpp_msg_t* clone_out = nullptr;
+    EXPECT_EQ(fixpp_msg_clone(h.ptr(), &clone_out), FIXPP_ERR_OK);
+    ASSERT_NE(clone_out, nullptr);
+    EXPECT_EQ(fixpp_msg_destroy(clone_out), FIXPP_ERR_OK);
+}
+
+// T049 (part 1 of 2 — see dict066_clone_membership_copy_oom_test.cpp for the
+// out-of-memory arm): the malformed-field failure route
+// (core::error::wire_invalid_field_format -> FIXPP_ERR_WIRE_INVALID_FRAME).
+//
+// The source handle is built via MessageView's RAW dict-backed constructor
+// (bypassing Parser::parse's own build_status() check) so a handle can exist
+// over a malformed body — a state the production inbound path cannot reach
+// (a real inbound parse would have refused the frame before a handle ever
+// existed), but a legitimate probe of CLONE's OWN re-parse, which explicitly
+// re-checks build_status() via Parser::parse. This is the only lever
+// available for this error class: the cap-asymmetry route (T047) only ever
+// yields WIRE_LIMIT_EXCEEDED, and the clone re-parses with a membership_copy()
+// of the source's own dictionary, so there is no other way to make the
+// re-parse see malformed bytes the source's own construction did not.
+TEST(MessageWrite, CloneDictBackedReparseMalformedFieldYieldsWireInvalidFrame) {
+    using fixpp::wire::access_mode;
+    using fixpp::wire::dict_hooks;
+    using fixpp::wire::MessageView;
+
+    auto dict = fixpp::test_support::make_fix44_dictionary();
+    auto tv = dict->as_table_view();
+    auto hooks = dict_hooks::for_table_view(tv);
+
+    // Malformed body: a field with no '=' separator, mirroring
+    // WireOffsetTable.InvalidFieldFormatRejected (tests/wire/offset_table_test.cpp).
+    auto src_buf = make_raw_frame_for_write_test(
+        "35=D\x01"
+        "nofieldsep\x01");
+    auto fv = fixpp::wire::test::make_frame_view(src_buf);
+    ASSERT_TRUE(fv.has_value());
+
+    std::pmr::monotonic_buffer_resource arena;
+    MessageView<access_mode::Index> mv_src{*fv, &arena, hooks};
+    ASSERT_TRUE(mv_src.is_dict_backed());
+
+    InboundHandleForWrite h;
+    h.msg.view = &mv_src;
+
+    fixpp_msg_t* clone_out = nullptr;
+    EXPECT_EQ(fixpp_msg_clone(h.ptr(), &clone_out), FIXPP_ERR_WIRE_INVALID_FRAME);
+    EXPECT_EQ(clone_out, nullptr);
 }
 
 // create_outbound on a CLOSED session → INVALID_HANDLE.

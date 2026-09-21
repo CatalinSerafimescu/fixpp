@@ -39,6 +39,7 @@
 #include <cassert>
 #include <charconv>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fixpp/core/decimal.hpp>  // decimal_traits<pod_decimal>::from_chars — set_double fail-closed guard
@@ -440,142 +441,160 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_clone(const fixpp_msg_t* src, fixpp_msg
         return FIXPP_ERR_INVALID_HANDLE;
     }
 
-    // Construction-time thunk: catch→translate.
-    try {
-        // Get the source's raw wire bytes.
-        auto src_bytes = h->view->bytes();  // span<const byte> aliasing the source frame
-        std::size_t frame_len = src_bytes.size();
+    // fixpp#458 (090-capi-refusals) D-3b: a NESTED exception boundary,
+    // not three peers (contracts/msg-clone.md §8). The OUTER catch(...) is
+    // what makes clone's abort outcome exist at all -- narrowing straight to
+    // catch(std::bad_alloc const&) with nothing outside would let a
+    // std::logic_error or a foreign exception leave this extern "C" function.
+    // Clone STAYS a steady-state symbol ([2i §5.2]'s construction-time
+    // whitelist is NOT amended); matches the shipped idiom already carried by
+    // src/capi/session.cpp's fixpp_session_send / fixpp_session_acceptor_
+    // bound_endpoint (FR-008).
+    try {  // OUTER
+        // INNER: clone's construction. std::bad_alloc is a documented,
+        // preserved refusal (EC-4, §3.2) -- narrowed from the blanket catch
+        // this replaces.
+        try {
+            // Get the source's raw wire bytes.
+            auto src_bytes = h->view->bytes();  // span<const byte> aliasing the source frame
+            std::size_t frame_len = src_bytes.size();
 
-        // Allocate a new owned frame buffer (deep copy).
-        auto owned_frame = std::make_unique<std::byte[]>(frame_len);
-        std::memcpy(owned_frame.get(), src_bytes.data(), frame_len);
+            // Allocate a new owned frame buffer (deep copy).
+            auto owned_frame = std::make_unique<std::byte[]>(frame_len);
+            std::memcpy(owned_frame.get(), src_bytes.data(), frame_len);
 
-        // Locate the "9=" and "10=" boundaries to compute body_off / body_len
-        // for the frame_view we build over the cloned bytes. Uses the
-        // fixpp::wire::frame_view_access helper defined above in this TU.
-        auto mk_fv = [](const std::byte* buf,
-                        std::size_t len) -> std::optional<fixpp::wire::frame_view> {
-            constexpr char SOH = '\x01';
-            std::string_view s{reinterpret_cast<const char*>(buf), len};
-            std::size_t p9 = s.starts_with("9=") ? 0
-                                                 : s.find(
-                                                       "\x01"
-                                                       "9=");
-            if (p9 == std::string_view::npos)
-                return std::nullopt;  // LCOV_EXCL_LINE — valid inbound view always has 9=
-            if (s[p9] == SOH) ++p9;
-            std::size_t soh9 = s.find(SOH, p9);
-            if (soh9 == std::string_view::npos)
-                return std::nullopt;  // LCOV_EXCL_LINE — valid inbound view has SOH after 9=NNN
-            std::size_t body_off = soh9 + 1;
-            // fixpp#426: search BACKWARDS. CheckSum is the last field of a
-            // Framer-validated frame, while a Data value in the body may hold
-            // `<SOH>10=`, which a forward search would take for the trailer.
-            std::size_t p10 = s.rfind(
-                "\x01"
-                "10=");
-            if (p10 == std::string_view::npos || p10 + 1 < body_off)
-                return std::nullopt;  // LCOV_EXCL_LINE — valid inbound view always has 10=
-            std::size_t body_len = (p10 + 1) - body_off;
-            return fixpp::wire::frame_view_access::make(buf, len, body_off, body_len);
-        };
+            // Locate the "9=" and "10=" boundaries to compute body_off / body_len
+            // for the frame_view we build over the cloned bytes. Uses the
+            // fixpp::wire::frame_view_access helper defined above in this TU.
+            auto mk_fv = [](const std::byte* buf,
+                            std::size_t len) -> std::optional<fixpp::wire::frame_view> {
+                constexpr char SOH = '\x01';
+                std::string_view s{reinterpret_cast<const char*>(buf), len};
+                std::size_t p9 = s.starts_with("9=") ? 0
+                                                     : s.find(
+                                                           "\x01"
+                                                           "9=");
+                if (p9 == std::string_view::npos)
+                    return std::nullopt;  // LCOV_EXCL_LINE — valid inbound view always has 9=
+                if (s[p9] == SOH) ++p9;
+                std::size_t soh9 = s.find(SOH, p9);
+                if (soh9 == std::string_view::npos)
+                    return std::nullopt;  // LCOV_EXCL_LINE — valid inbound view has SOH after 9=NNN
+                std::size_t body_off = soh9 + 1;
+                // fixpp#426: search BACKWARDS. CheckSum is the last field of a
+                // Framer-validated frame, while a Data value in the body may hold
+                // `<SOH>10=`, which a forward search would take for the trailer.
+                std::size_t p10 = s.rfind(
+                    "\x01"
+                    "10=");
+                if (p10 == std::string_view::npos || p10 + 1 < body_off)
+                    return std::nullopt;  // LCOV_EXCL_LINE — valid inbound view always has 10=
+                std::size_t body_len = (p10 + 1) - body_off;
+                return fixpp::wire::frame_view_access::make(buf, len, body_off, body_len);
+            };
 
-        auto maybe_fv = mk_fv(owned_frame.get(), frame_len);
+            auto maybe_fv = mk_fv(owned_frame.get(), frame_len);
 
-        // Allocate the clone shell first so we can seed its per-clone arena
-        // BEFORE building the MessageView.  The arena (arena_buf_ / arena_resource_)
-        // backs the clone's OffsetTable PMR vectors AND any group cursor shells
-        // allocated via fixpp_msg_get_group on the clone.  Seeded to frame_len +
-        // 4096 bytes: OffsetTable entries are proportional to the frame size; the
-        // extra 4096 gives headroom for group_slices + cursor shells.  Upstream =
-        // new_delete (graceful degrade if arena is exhausted, never null).
-        // Destruction order: fixpp_msg_destroy resets owned_view_ BEFORE
-        // arena_resource_, so MessageView destructs into a live arena.
-        auto clone = std::make_unique<fixpp_msg>();
-        constexpr std::size_t kCursorHeadroom = 4096;
-        std::size_t clone_arena_size = frame_len + kCursorHeadroom;
-        clone->arena_buf_ = std::make_unique<std::byte[]>(clone_arena_size);
-        clone->arena_resource_ = std::make_unique<std::pmr::monotonic_buffer_resource>(
-            clone->arena_buf_.get(), clone_arena_size, std::pmr::new_delete_resource());
-        auto* clone_mr = clone->arena_resource_.get();
+            // Allocate the clone shell first so we can seed its per-clone arena
+            // BEFORE building the MessageView.  The arena (arena_buf_ / arena_resource_)
+            // backs the clone's OffsetTable PMR vectors AND any group cursor shells
+            // allocated via fixpp_msg_get_group on the clone.  Seeded to frame_len +
+            // 4096 bytes: OffsetTable entries are proportional to the frame size; the
+            // extra 4096 gives headroom for group_slices + cursor shells.  Upstream =
+            // new_delete (graceful degrade if arena is exhausted, never null).
+            // Destruction order: fixpp_msg_destroy resets owned_view_ BEFORE
+            // arena_resource_, so MessageView destructs into a live arena.
+            auto clone = std::make_unique<fixpp_msg>();
+            constexpr std::size_t kCursorHeadroom = 4096;
+            std::size_t clone_arena_size = frame_len + kCursorHeadroom;
+            clone->arena_buf_ = std::make_unique<std::byte[]>(clone_arena_size);
+            clone->arena_resource_ = std::make_unique<std::pmr::monotonic_buffer_resource>(
+                clone->arena_buf_.get(), clone_arena_size, std::pmr::new_delete_resource());
+            auto* clone_mr = clone->arena_resource_.get();
 
-        // Build the clone's MessageView<Index> over the cloned bytes.
-        //
-        // 066-dict-backed-inbound-parse T007 (mechanism (b), FR-007/C4):
-        // propagate the source view's dictionary membership into a clone-owned
-        // table_view so the clone reads groups membership-bounded identically
-        // to its source. Bind dict-backed ONLY when the source itself is
-        // dict-backed (is_dict_backed()) — else stay dict-free (data-model.md
-        // degenerate case; binding a non-null-but-empty dict would instead flip
-        // OffsetTable::group() to a fail-closed empty-membership walk).
-        //
-        // 220: the clause that used to end that sentence — "NOT the dict-free
-        // positional fallback the source actually used" — is deleted, not
-        // reworded, because there is no longer a positional fallback to
-        // contrast with. A dict-free source does not read groups positionally;
-        // group() declines outright, so `fixpp_msg_get_group` reports
-        // TYPE_MISMATCH (B-220-1). The conditional itself is UNCHANGED and
-        // still correct, for the reasons that do not concern groups (field
-        // classification, unknown_fields), and clone/source fidelity is
-        // preserved in the stronger sense that both now decline identically
-        // rather than both guessing identically.
-        fixpp::wire::frame_view fv = maybe_fv.value_or(
-            fixpp::wire::frame_view_access::make(owned_frame.get(), frame_len, 0, frame_len));
-        std::unique_ptr<fixpp::wire::MessageView<fixpp::wire::access_mode::Index>> clone_view;
-        if (h->view->is_dict_backed()) {
-            // fixpp#456 seam 6: seated rather than assigned — the rationale is
-            // written once, at the sibling site in src/dictionary/reify.cpp.
-            assert(!clone->owned_tv_.has_value());
-            clone->owned_tv_.emplace(h->view->membership_copy());
-            fixpp::wire::Parser<fixpp::wire::access_mode::Index> clone_parser{*clone->owned_tv_};
-            auto parsed = clone_parser.parse(fv, clone_mr);
-            if (parsed) {
+            // Build the clone's MessageView<Index> over the cloned bytes.
+            //
+            // 066-dict-backed-inbound-parse T007 (mechanism (b), FR-007/C4):
+            // propagate the source view's dictionary membership into a clone-owned
+            // table_view so the clone reads groups membership-bounded identically
+            // to its source. Bind dict-backed ONLY when the source itself is
+            // dict-backed (is_dict_backed()) — else stay dict-free (data-model.md
+            // degenerate case; binding a non-null-but-empty dict would instead flip
+            // OffsetTable::group() to a fail-closed empty-membership walk).
+            //
+            // 220: the clause that used to end that sentence — "NOT the dict-free
+            // positional fallback the source actually used" — is deleted, not
+            // reworded, because there is no longer a positional fallback to
+            // contrast with. A dict-free source does not read groups positionally;
+            // group() declines outright, so `fixpp_msg_get_group` reports
+            // TYPE_MISMATCH (B-220-1). The conditional itself is UNCHANGED and
+            // still correct, for the reasons that do not concern groups (field
+            // classification, unknown_fields), and clone/source fidelity is
+            // preserved in the stronger sense that both now decline identically
+            // rather than both guessing identically.
+            fixpp::wire::frame_view fv = maybe_fv.value_or(
+                fixpp::wire::frame_view_access::make(owned_frame.get(), frame_len, 0, frame_len));
+            std::unique_ptr<fixpp::wire::MessageView<fixpp::wire::access_mode::Index>> clone_view;
+            if (h->view->is_dict_backed()) {
+                // fixpp#456 seam 6: seated rather than assigned — the rationale is
+                // written once, at the sibling site in src/dictionary/reify.cpp.
+                assert(!clone->owned_tv_.has_value());
+                clone->owned_tv_.emplace(h->view->membership_copy());
+                fixpp::wire::Parser<fixpp::wire::access_mode::Index> clone_parser{
+                    *clone->owned_tv_};
+                auto parsed = clone_parser.parse(fv, clone_mr);
+                if (parsed) {
+                    clone_view =
+                        std::make_unique<fixpp::wire::MessageView<fixpp::wire::access_mode::Index>>(
+                            std::move(*parsed));
+                } else {
+                    // fixpp#458 (090-capi-refusals) D-3: a dict-backed source whose
+                    // re-parse of the copied frame fails now REFUSES instead of
+                    // silently falling through to a dictionary-free clone (the
+                    // fail-open defect this comment used to document — see
+                    // contracts/msg-clone.md §1/§4.1). The code is translate()'s
+                    // own image of the core::error the failed re-parse produced
+                    // (FR-006) -- a condition plus a function, not a list: read
+                    // translate()'s switch for the codes a re-parse failure can
+                    // map to today (the out-of-memory route's code is L-049-2's
+                    // documented behaviour). `*clone_out` stays NULL (set unconditionally at
+                    // function entry); `clone` (the partially-built shell + its
+                    // arena) unwinds via RAII on this return; `src` is untouched
+                    // -- nothing beyond the initial byte copy was read from it.
+                    return fixpp_capi::detail::translate(parsed.error());
+                }
+            }
+            if (!clone_view) {
+                // Dict-free source: no dict-backed attempt was made (the branch
+                // above runs only under `is_dict_backed()`), so there is nothing
+                // that can fail here. Fall back to the dict-free 2-arg ctor
+                // (pre-066 behavior).
                 clone_view =
                     std::make_unique<fixpp::wire::MessageView<fixpp::wire::access_mode::Index>>(
-                        std::move(*parsed));
+                        fv, clone_mr);
             }
-        }
-        if (!clone_view) {
-            // Dict-free source, OR the dict-backed re-parse failed: fall back to
-            // the dict-free 2-arg ctor (pre-066 behavior).
-            //
-            // ⚠️ **fixpp#458** — this fallback FAILS OPEN. It is taken whenever
-            // the dict-backed re-parse fails, for ANY reason: the clone then
-            // reports OK from a dict-backed source with NO dictionary, so a
-            // custom Length+Data value is split by the standard table alone and
-            // an embedded `58=...` surfaces as a forged field (fixpp#426).
-            // Pre-existing on `main` and a C-ABI error-semantics change to fix,
-            // so it is filed, not patched here.
-            //
-            // ⚠️ The routes below are NOT exhaustive, and the history is the
-            // reason to say so: this comment first claimed the failure was
-            // "practically unreachable" (false), and the correction then claimed
-            // the trigger was "allocation failure, not frame content" — which
-            // Gate B r10 falsified in turn. Two KNOWN reachable routes:
-            // `OffsetTable::build` catches `std::bad_alloc`, so a one-shot
-            // failing allocator fails the dict-backed parse while the dict-free
-            // retry, allocating less, succeeds; and a re-parse at the DEFAULT
-            // cap can fail on frame shape alone for a source whose caller raised
-            // `max_offset_entries`.
-            clone_view =
-                std::make_unique<fixpp::wire::MessageView<fixpp::wire::access_mode::Index>>(
-                    fv, clone_mr);
-        }
 
-        clone->tag_ = FIXPP_HANDLE_TAG_MSG;
-        clone->flavour = FixppMsgFlavour::inbound;  // reads via view (get_* API)
-        clone->view = clone_view.get();             // points to the owned view
-        clone->accumulator = nullptr;
-        // token is default-constructed (expired) — clone is session-independent (D-9).
-        // dict_ is nullptr for clone (no outbound mutation path).
-        clone->owned_frame_ = std::move(owned_frame);
-        clone->owned_view_ = std::move(clone_view);
+            clone->tag_ = FIXPP_HANDLE_TAG_MSG;
+            clone->flavour = FixppMsgFlavour::inbound;  // reads via view (get_* API)
+            clone->view = clone_view.get();             // points to the owned view
+            clone->accumulator = nullptr;
+            // token is default-constructed (expired) — clone is session-independent (D-9).
+            // dict_ is nullptr for clone (no outbound mutation path).
+            clone->owned_frame_ = std::move(owned_frame);
+            clone->owned_view_ = std::move(clone_view);
 
-        *clone_out = reinterpret_cast<fixpp_msg_t*>(clone.release());
-        return FIXPP_ERR_OK;
-    } catch (...) {  // LCOV_EXCL_LINE — OOM during clone construction; untestable in unit tests
-        return FIXPP_ERR_CAPI_CONFIG_INVALID;  // LCOV_EXCL_LINE
-    }  // LCOV_EXCL_LINE
+            *clone_out = reinterpret_cast<fixpp_msg_t*>(clone.release());
+            return FIXPP_ERR_OK;
+        } catch (std::bad_alloc const&) {
+            return FIXPP_ERR_CAPI_CONFIG_INVALID;
+        }
+    } catch (...) {
+        std::fputs(
+            "fixpp C-ABI: fixpp_msg_clone caught an escaping exception; "
+            "aborting (steady-state invariant violation, FR-008)\n",
+            stderr);
+        std::abort();
+    }
 }
 
 // ── fixpp_msg_set_string ──────────────────────────────────────────────────────

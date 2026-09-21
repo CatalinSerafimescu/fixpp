@@ -262,6 +262,9 @@ target_link_libraries(capi_message_write_test PRIVATE
   GTest::gtest_main
 )
 target_include_directories(capi_message_write_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
+target_compile_definitions(capi_message_write_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
 add_test(NAME capi_message_write COMMAND capi_message_write_test)
 set_tests_properties(capi_message_write PROPERTIES LABELS "capi;051")
 
