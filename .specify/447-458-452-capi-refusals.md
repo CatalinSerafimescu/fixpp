@@ -766,6 +766,16 @@ or second class. **No number is written here**: v0.1 wrote "three", round 1 meas
   # positive control on the SAME corpus, so the zero is a measurement and not a broken command:
   grep -rn "FIXPP_WERROR" cmake/ CMakeLists.txt CMakePresets.json | wc -l   ->  21
   ```
+  ⚠️ **CORRECTED 2026-09-21, DURING IMPLEMENTATION — THE CONCLUSION ABOVE WAS FALSE FOR `-O0`
+  PRESETS, AND THE INSTRUMENT COULD NOT HAVE SEEN WHY.** The grep measures what the **project** sets;
+  it cannot see a **library default**. libstdc++ defines `_GLIBCXX_ASSERTIONS` by default when not
+  optimising. Re-derive: preprocess `#include <vector>` then `#ifdef _GLIBCXX_ASSERTIONS` with the
+  toolchain's `clang++ -stdlib=libstdc++`, once at `-O0` and once at `-O2`, and compare. At `-O0` a
+  **hard** out-of-range `std::vector` subscript therefore **aborts** (observed as T017's pre-fix RED).
+  ⭐ **What survives, and it is the point of this section:** failure mode (a) is a **stale but
+  IN-RANGE** index, which no bounds assertion can see at any optimisation level, so the committed
+  byte string remains the instrument. Only the stated premise was wrong, not the conclusion drawn
+  for the defect this feature fixes.
 
 ⇒ **The regression test must assert on committed PAYLOAD CONTENT.** A clean ASan/UBSan/TSan run over
 the defect is not evidence of anything; it is the expected output of an instrument that cannot
