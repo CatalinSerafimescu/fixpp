@@ -62,7 +62,7 @@
  *  This is the C-ABI SURFACE version only — fixpp_library_version() (the C++
  *  SemVer) is unaffected. Byte-frozen by tools/check_capi_freeze.sh (NBC-1). */
 #define FIXPP_C_ABI_VERSION_MAJOR 1
-#define FIXPP_C_ABI_VERSION_MINOR 6 /* 1.6: the Length+Data setters (fixpp#428) */
+#define FIXPP_C_ABI_VERSION_MINOR 7 /* 1.7: the three refusals (fixpp#447, fixpp#458, fixpp#452) */
 #define FIXPP_C_ABI_VERSION_PATCH 0
 
 /** Composite: (MAJOR<<16)|(MINOR<<8)|PATCH — single-integer compatibility check. */
