@@ -798,12 +798,26 @@ static bool serialise_entries(std::byte* buf, std::size_t cap, std::size_t& pos,
 
 // Re-resolve a builder's group AccumulatorEntry BY INDEX (stable under the
 // vector reallocations that add_entry / group_begin trigger).
+//
+// D-2b (090 bundle, contracts/msg-index-bounds.md EC-2): returns nullptr when
+// `group_field_index`, or an ancestor's `instance_index`, is out of range for
+// the container it names, instead of subscripting past it. Every caller MUST
+// check for nullptr before dereferencing (msg-index-bounds.md §2.1 class (3)).
 static AccumulatorEntry* resolve_group(fixpp_group_builder* b) noexcept {
     if (b->parent == nullptr) {
-        return &b->msg->accumulator->entries[b->group_field_index];
+        auto& entries = b->msg->accumulator->entries;
+        if (b->group_field_index >= entries.size()) return nullptr;
+        return &entries[b->group_field_index];
     }
     AccumulatorEntry* pg = resolve_group(b->parent->builder);
+    if (pg == nullptr) return nullptr;  // class (3): propagate rather than dereference
+    // [const §IX.1] assessed: reachable only via a corrupted/stale builder — no
+    // shipped call path produces one once D-1 (fixpp#447) refuses remove_tag
+    // while a builder is open (msg-index-bounds.md §1).
+    if (b->parent->instance_index >= pg->instances.size()) return nullptr;
     GroupInstance& inst = pg->instances[b->parent->instance_index];
+    // [const §IX.1] assessed: same reasoning as above.
+    if (b->group_field_index >= inst.fields.size()) return nullptr;
     return &inst.fields[b->group_field_index];
 }
 
@@ -813,11 +827,23 @@ static fixpp::wire::group_context builder_context(fixpp_group_builder* b) noexce
     if (b->parent == nullptr) {
         return fixpp::wire::group_context{.msg_type = b->msg->accumulator->msg_type};
     }
-    return builder_context(b->parent->builder).pushed(resolve_group(b->parent->builder)->tag);
+    fixpp::wire::group_context parent_ctx = builder_context(b->parent->builder);
+    AccumulatorEntry* pg = resolve_group(b->parent->builder);
+    // [const §IX.1] assessed unreachable: this function's only caller
+    // (fixpp_entry_set_data) already refuses on a null `resolve_group(e->builder)`
+    // before calling here, and that call recurses through the identical
+    // ancestor chain this one does (msg-index-bounds.md §2.1 class (3)); kept
+    // as defence in depth against a future caller that does not check first.
+    if (pg == nullptr) return parent_ctx;
+    return parent_ctx.pushed(pg->tag);
 }
 
 static GroupInstance* resolve_instance(fixpp_entry* e) noexcept {
     AccumulatorEntry* g = resolve_group(e->builder);
+    if (g == nullptr) return nullptr;  // class (3): propagate rather than dereference
+    // [const §IX.1] assessed: reachable only via a corrupted/stale entry — no
+    // shipped call path produces one once D-1 lands.
+    if (e->instance_index >= g->instances.size()) return nullptr;
     return &g->instances[e->instance_index];
 }
 
@@ -839,6 +865,15 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_remove_tag(fixpp_msg_t* msg, uint16_t t
     if (fixpp_error_t c = check_outbound_msg(msg); c != FIXPP_ERR_OK) return c;
 
     auto* h = reinterpret_cast<fixpp_msg*>(msg);
+    // D-1 (fixpp#447, contracts/msg-remove-tag.md §2): a live open group builder
+    // holds an INDEX into `entries` (or a parent instance's fields); erasing
+    // shifts every later index and can retarget or invalidate it. Keyed on the
+    // builder stack being non-empty — not on the erased tag and not on the
+    // erased position — because a narrower guard misses one of the two
+    // failure modes (see the contract). Runs BEFORE the find below: it does
+    // not matter whether `tag` is even present.
+    if (!h->accumulator->open_builders.empty()) return FIXPP_ERR_INVALID_HANDLE;
+
     auto& entries = h->accumulator->entries;
     // Erase the entry with `tag` if present (idempotent: absent → no-op).
     auto it =
@@ -1131,6 +1166,10 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_builder_add_entry(fixpp_group_builder
 
     auto* arena = b->msg->accumulator->arena_;
     AccumulatorEntry* g = resolve_group(b);
+    // [const §IX.1] assessed: `b` is a live, open, LIFO-valid builder
+    // (check_builder above) — g resolves by construction; kept as defence in
+    // depth (msg-index-bounds.md §2.1 class (3)).
+    if (g == nullptr) return FIXPP_ERR_INVALID_HANDLE;
     g->instances.emplace_back(arena);
     auto inst_idx = static_cast<std::uint32_t>(g->instances.size() - 1);
 
@@ -1159,6 +1198,9 @@ static fixpp_error_t entry_set_bytes_impl(fixpp_entry_t* entry, uint16_t tag, co
     if (is_framing_tag(tag)) return FIXPP_ERR_MSG_FRAMING_TAG_FORBIDDEN;
     auto* arena = e->builder->msg->accumulator->arena_;
     GroupInstance* inst = resolve_instance(e);
+    // [const §IX.1] assessed: same reasoning as fixpp_group_builder_add_entry
+    // (msg-index-bounds.md §2.1 class (3)).
+    if (inst == nullptr) return FIXPP_ERR_INVALID_HANDLE;
     // P2-1: a nested entry setter must not collide with a (nested) group either —
     // group-count tag, or clobbering an existing nested group node.
     if (is_group_collision(e->builder->msg, inst->fields, tag)) return FIXPP_ERR_TYPE_MISMATCH;
@@ -1199,6 +1241,12 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_data(fixpp_entry_t* entry, uint16
     if (len == 0) return FIXPP_ERR_WIRE_CONFORMANCE;  // an empty Data value is malformed
 
     AccumulatorEntry* group = resolve_group(e->builder);
+    // D-2b (msg-index-bounds.md EC-2, class (3)): a corrupted/stale ancestor
+    // builder resolves to nullptr here — checked before any further use of
+    // `group` (including builder_context below, which recurses through the
+    // identical ancestor chain and would otherwise be the first to dereference
+    // it). [const §IX.1] assessed: no shipped call path produces one.
+    if (group == nullptr) return FIXPP_ERR_INVALID_HANDLE;
     // A Data field cannot be a group's delimiter: its Length would have to come first.
     // The delimiter is the one for this group's exact context, as commit resolves it; a
     // group tag reused elsewhere can open with a different field. On a context miss
@@ -1209,6 +1257,10 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_data(fixpp_entry_t* entry, uint16
             ctx.msg_type, {ctx.parent_path.data(), ctx.depth}, group->tag);
         if (delimiter && *delimiter == data_tag) return FIXPP_ERR_TYPE_MISMATCH;
     }
+    // D-2b (msg-index-bounds.md EC-2, class (2)): the direct subscript below is
+    // reached by no resolver ("no resolver covers it" per the contract), so it
+    // needs its own bounds check.
+    if (e->instance_index >= group->instances.size()) return FIXPP_ERR_INVALID_HANDLE;
     GroupInstance& inst = group->instances[e->instance_index];
     if (is_group_collision(h, inst.fields, length_tag) ||
         is_group_collision(h, inst.fields, data_tag)) {
@@ -1262,6 +1314,9 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_entry_group_begin(fixpp_entry_t* entry, uin
 
     auto* arena = h->accumulator->arena_;
     GroupInstance* inst = resolve_instance(e);
+    // [const §IX.1] assessed: same reasoning as entry_set_bytes_impl
+    // (msg-index-bounds.md §2.1 class (3)).
+    if (inst == nullptr) return FIXPP_ERR_INVALID_HANDLE;
     inst->fields.emplace_back(arena);
     auto idx = static_cast<std::uint32_t>(inst->fields.size() - 1);
     inst->fields.back().tag = group_tag;

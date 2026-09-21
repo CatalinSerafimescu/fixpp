@@ -721,7 +721,9 @@ TEST(MessageWrite, RoundTripCommitPayloadFormatAndPeerReceive) {
     teardown_loopback_pair(pair);
 }
 
-// remove_tag: idempotent — removing an absent tag returns OK
+// remove_tag: idempotent — removing an absent tag returns OK. Also T016/V3's
+// positive baseline (no group builder is open here): without this arm,
+// "refuse always" would pass D-1's seam 1 (T013) and seam 2 (T015) too.
 TEST(MessageWrite, RemoveTagIdempotent) {
     fixpp_engine_t* eng = nullptr;
     ASSERT_EQ(make_engine(&eng), FIXPP_ERR_OK);
@@ -1132,8 +1134,14 @@ TEST(MessageWrite, ZeroGlobalHeapSetCommitGuard) {
     const uint8_t kBytesPayload[] = {'G', 'U', 'A', 'R', 'D'};
 
     // fixpp#428: the group instance is opened OUTSIDE the window, so only
-    // entry_set_data and group_end are measured inside it. The group is the first
-    // top-level entry, so the remove_tag(11) below cannot shift its index (#447).
+    // entry_set_data and group_end are measured inside it.
+    // fixpp#447 (090, D-1): remove_tag now refuses while any group builder is
+    // open, so group_end is moved BEFORE remove_tag in the window below — the
+    // builder is closed by the time the erase runs, exactly as the contract's
+    // migration note prescribes (move remove_tag after the matching
+    // group_end). This still measures remove_tag's PMR-vector-erase path
+    // under the guard; it no longer needs the "group is the first entry"
+    // dodge that removed comment relied on, which fixpp#447 makes impossible.
     fixpp_group_builder_t* gb = nullptr;
     fixpp_entry_t* entry = nullptr;
     ASSERT_EQ(fixpp_msg_group_begin(msg, 78, &gb), FIXPP_ERR_OK);
@@ -1148,15 +1156,16 @@ TEST(MessageWrite, ZeroGlobalHeapSetCommitGuard) {
     rc_str = fixpp_msg_set_string(msg, 11, "GUARD_STR", 9);  // STRING field (ClOrdID)
     rc_bytes = fixpp_msg_set_bytes(msg, 58,                  // TEXT field, type-agnostic
                                    kBytesPayload, sizeof(kBytesPayload));
-    rc_int = fixpp_msg_set_int(msg, 68, 42);                      // INT field (TotNoOrders)
-    rc_dbl = fixpp_msg_set_double(msg, 38, 2.5);                  // Float/QTY field
-    rc_dec = fixpp_msg_set_decimal(msg, 38, dec);                 // Float/QTY (overwrite)
-    rc_remove = fixpp_msg_remove_tag(msg, 11);                    // PMR-vector erase
-    rc_restr = fixpp_msg_set_string(msg, 11, "GUARD_RESTR", 11);  // re-set after remove
+    rc_int = fixpp_msg_set_int(msg, 68, 42);       // INT field (TotNoOrders)
+    rc_dbl = fixpp_msg_set_double(msg, 38, 2.5);   // Float/QTY field
+    rc_dec = fixpp_msg_set_decimal(msg, 38, dec);  // Float/QTY (overwrite)
     rc_data = fixpp_msg_set_data(msg, 355, kBytesPayload, sizeof(kBytesPayload));  // 1.6 pair
     rc_entry_data =
         fixpp_entry_set_data(entry, 361, kBytesPayload, sizeof(kBytesPayload));  // 1.6 pair
-    rc_group_end = fixpp_msg_group_end(msg, gb);
+    rc_group_end =
+        fixpp_msg_group_end(msg, gb);  // closes the builder — remove_tag (below) requires it
+    rc_remove = fixpp_msg_remove_tag(msg, 11);                    // PMR-vector erase
+    rc_restr = fixpp_msg_set_string(msg, 11, "GUARD_RESTR", 11);  // re-set after remove
     rc_commit = fixpp_msg_commit(msg, &payload, &payload_len);
 
     if (alloc_guard_end) alloc_guard_end();  // exits(1) under mallocnesia if any global alloc fired
@@ -1369,6 +1378,291 @@ TEST(MessageWriteGroup, WellFormedGroupCommitStillPasses) {
     EXPECT_TRUE(span_has_field(p, plen, 78, "1"));     // NoAllocs=1
     EXPECT_TRUE(span_has_field(p, plen, 79, "ACC1"));  // AllocAccount
     EXPECT_TRUE(span_has_field(p, plen, 80, "50"));    // AllocQty
+}
+
+// ── 090 (fixpp#447/#452): fixpp_msg_remove_tag refuses while a builder is
+// open (D-1), and an out-of-range group/instance index is a DEFINED refusal
+// rather than UB (D-2b) ──────────────────────────────────────────────────────
+//
+// D-1 (contracts/msg-remove-tag.md): an open group builder holds an INDEX
+// into `entries` (or a parent instance's fields, for a nested builder);
+// remove_tag erasing an entry shifts every later index, so it must refuse
+// instead of erasing while any builder is open. Two distinct failure modes
+// (data-model.md §1.3): (a) a scalar POSITIONED BEFORE the group is erased,
+// shifting the group's index; (b) the erased tag IS the group's own NoXXX
+// count tag.
+
+namespace {
+// The V1 two-builder arrangement (fixpp#447's measured probe): a scalar,
+// then group A opened with one instance, then group B opened, filled and
+// CLOSED — then, if `attempt_remove`, the (refused) remove_tag on the scalar
+// BEFORE A is finished. `attempt_remove=false` reproduces the CONTROL run
+// (the call is simply never made).
+struct V1Outcome {
+    fixpp_error_t remove_rc = FIXPP_ERR_OK;
+    bool b_group_end_ok = false;
+    bool a_add_entry_after_ok = false;
+    bool a_set_after_ok = false;
+    bool a_group_end_ok = false;
+    fixpp_error_t commit_rc = FIXPP_ERR_OK;
+    std::string payload;
+};
+
+V1Outcome run_v1_two_builder_scenario(fixpp_session_t* sess, bool attempt_remove) {
+    V1Outcome r;
+    fixpp_msg_t* msg = nullptr;
+    EXPECT_EQ(fixpp_msg_create_outbound(sess, "D", 1, &msg), FIXPP_ERR_OK);
+
+    EXPECT_EQ(fixpp_msg_set_string(msg, 11, "SCALAR", 6), FIXPP_ERR_OK);
+
+    fixpp_group_builder_t* a = nullptr;
+    EXPECT_EQ(fixpp_msg_group_begin(msg, 78, &a), FIXPP_ERR_OK);
+    fixpp_entry_t* a0 = nullptr;
+    EXPECT_EQ(fixpp_group_builder_add_entry(a, &a0), FIXPP_ERR_OK);
+    EXPECT_EQ(fixpp_entry_set_string(a0, 79, "A0", 2), FIXPP_ERR_OK);
+
+    fixpp_group_builder_t* b = nullptr;
+    EXPECT_EQ(fixpp_msg_group_begin(msg, 78, &b), FIXPP_ERR_OK);
+    fixpp_entry_t* b0 = nullptr;
+    EXPECT_EQ(fixpp_group_builder_add_entry(b, &b0), FIXPP_ERR_OK);
+    EXPECT_EQ(fixpp_entry_set_string(b0, 79, "B0", 2), FIXPP_ERR_OK);
+    r.b_group_end_ok = (fixpp_msg_group_end(msg, b) == FIXPP_ERR_OK);
+
+    if (attempt_remove) {
+        r.remove_rc = fixpp_msg_remove_tag(msg, 11);  // scalar, positioned BEFORE A's group entry
+    }
+
+    fixpp_entry_t* a1 = nullptr;
+    r.a_add_entry_after_ok = (fixpp_group_builder_add_entry(a, &a1) == FIXPP_ERR_OK);
+    r.a_set_after_ok =
+        r.a_add_entry_after_ok && (fixpp_entry_set_string(a1, 79, "A1", 2) == FIXPP_ERR_OK);
+    r.a_group_end_ok = (fixpp_msg_group_end(msg, a) == FIXPP_ERR_OK);
+
+    const uint8_t* payload = nullptr;
+    size_t payload_len = 0;
+    r.commit_rc = fixpp_msg_commit(msg, &payload, &payload_len);
+    if (r.commit_rc == FIXPP_ERR_OK) {
+        r.payload.assign(reinterpret_cast<const char*>(payload), payload_len);
+    }
+    fixpp_msg_destroy(msg);
+    return r;
+}
+}  // namespace
+
+// T013 / V1 / FR-001 / SC-001: mode (a), positional shift, two builders.
+TEST(MessageWriteGroup, RemoveTagRefusesWhileBuilderOpenPositionalShift) {
+    GroupFixture f;
+    V1Outcome control = run_v1_two_builder_scenario(f.sess, /*attempt_remove=*/false);
+    ASSERT_EQ(control.commit_rc, FIXPP_ERR_OK);
+
+    V1Outcome refused = run_v1_two_builder_scenario(f.sess, /*attempt_remove=*/true);
+
+    // 1. exactly INVALID_HANDLE — not merely "non-OK".
+    EXPECT_EQ(refused.remove_rc, FIXPP_ERR_INVALID_HANDLE);
+    // 3. both builders are still usable after the refused call.
+    EXPECT_TRUE(refused.b_group_end_ok);
+    EXPECT_TRUE(refused.a_add_entry_after_ok);
+    EXPECT_TRUE(refused.a_set_after_ok);
+    // 4. both group_end calls and commit succeed.
+    EXPECT_TRUE(refused.a_group_end_ok);
+    ASSERT_EQ(refused.commit_rc, FIXPP_ERR_OK);
+    // 2. the scalar is still present in the committed frame.
+    EXPECT_TRUE(span_has_field(reinterpret_cast<const uint8_t*>(refused.payload.data()),
+                               refused.payload.size(), 11, "SCALAR"));
+    // 5. the complete committed byte string equals the control run's, byte
+    // for byte — defends against a wrong-reason green (an arena layout where
+    // the shifted index happens to land on a benign entry) and distinguishes
+    // this fix from the rejected re-indexing option (which also yields a
+    // correct payload — assertions 1 and 3 are what tell them apart).
+    EXPECT_EQ(refused.payload, control.payload);
+}
+
+// T014 / V1's second arrangement / FR-001: mode (a), ONE builder, the erased
+// entry positioned so the shifted index would land PAST THE END of `entries`.
+//
+// This arm's RED is registered as NOT MEASURED in the design authority
+// (contracts/msg-remove-tag.md, quickstart.md V1): on the unfixed tree,
+// observing the specific past-the-end mechanism means letting a group
+// builder's stale index run through `resolve_group`, which has no bounds
+// check at all pre-fix (msg-index-bounds.md) — a real OOB-read risk this task
+// does not take. The assertions below are ordered to fail SAFELY instead: the
+// first post-call check is a plain `.size()` read on `entries`, which never
+// touches the (potentially stale) builder index, so a pre-fix run stops
+// there rather than proceeding into a resolver call on corrupted state.
+TEST(MessageWriteGroup, RemoveTagRefusesWhileBuilderOpenPositionalShiftPastEnd) {
+    GroupFixture f;
+    ASSERT_EQ(fixpp_msg_set_string(f.msg, 11, "SCALAR", 6), FIXPP_ERR_OK);
+    fixpp_group_builder_t* gb = nullptr;
+    ASSERT_EQ(fixpp_msg_group_begin(f.msg, 78, &gb), FIXPP_ERR_OK);  // the LAST entry
+    fixpp_entry_t* e0 = nullptr;
+    ASSERT_EQ(fixpp_group_builder_add_entry(gb, &e0), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_entry_set_string(e0, 79, "A0", 2), FIXPP_ERR_OK);
+
+    auto* h = reinterpret_cast<fixpp_msg*>(f.msg);
+    ASSERT_EQ(h->accumulator->entries.size(), 2u);
+
+    fixpp_error_t rc = fixpp_msg_remove_tag(f.msg, 11);  // scalar, BEFORE the group, which is last
+
+    EXPECT_EQ(rc, FIXPP_ERR_INVALID_HANDLE);
+    // Safe unconditionally: `.size()` never touches the builder's own index.
+    ASSERT_EQ(h->accumulator->entries.size(), 2u) << "remove_tag must not have erased anything";
+
+    ASSERT_EQ(fixpp_msg_group_end(f.msg, gb), FIXPP_ERR_OK);
+    const uint8_t* payload = nullptr;
+    size_t len = 0;
+    ASSERT_EQ(fixpp_msg_commit(f.msg, &payload, &len), FIXPP_ERR_OK);
+    EXPECT_TRUE(span_has_field(payload, len, 11, "SCALAR"));
+    EXPECT_TRUE(span_has_field(payload, len, 79, "A0"));
+}
+
+// T015 / V2 / FR-002: mode (b), the erased tag IS the open group's own NoXXX
+// count tag.
+TEST(MessageWriteGroup, RemoveTagRefusesGroupCountTagWhileOpen) {
+    GroupFixture f;
+    fixpp_group_builder_t* gb = nullptr;
+    ASSERT_EQ(fixpp_msg_group_begin(f.msg, 78, &gb), FIXPP_ERR_OK);
+    fixpp_entry_t* e0 = nullptr;
+    ASSERT_EQ(fixpp_group_builder_add_entry(gb, &e0), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_entry_set_string(e0, 79, "A0", 2), FIXPP_ERR_OK);
+
+    auto* h = reinterpret_cast<fixpp_msg*>(f.msg);
+    ASSERT_EQ(h->accumulator->entries.size(), 1u);
+
+    fixpp_error_t rc = fixpp_msg_remove_tag(f.msg, 78);  // the group's own NoXXX tag
+
+    EXPECT_EQ(rc, FIXPP_ERR_INVALID_HANDLE);
+    // The group entry survives unchanged: count, instances and their fields.
+    ASSERT_EQ(h->accumulator->entries.size(), 1u);
+    const AccumulatorEntry& group_entry = h->accumulator->entries[0];
+    EXPECT_EQ(group_entry.tag, 78);
+    EXPECT_TRUE(group_entry.is_group);
+    ASSERT_EQ(group_entry.instances.size(), 1u);
+    ASSERT_EQ(group_entry.instances[0].fields.size(), 1u);
+    EXPECT_EQ(group_entry.instances[0].fields[0].tag, 79);
+
+    ASSERT_EQ(fixpp_msg_group_end(f.msg, gb), FIXPP_ERR_OK);
+    const uint8_t* payload = nullptr;
+    size_t len = 0;
+    ASSERT_EQ(fixpp_msg_commit(f.msg, &payload, &len), FIXPP_ERR_OK);
+    EXPECT_TRUE(span_has_field(payload, len, 78, "1"));
+    EXPECT_TRUE(span_has_field(payload, len, 79, "A0"));
+}
+
+namespace {
+// The V4/T017 scenario (msg-index-bounds.md, class (2)): two real,
+// fully-populated group instances; the caller then pops the second directly
+// from the LIVE `instances` vector (a well-defined vector operation), which
+// makes e1's OWN instance_index out of range for its resolved group WITHOUT
+// any wild/unmapped memory: because
+// std::pmr::monotonic_buffer_resource::deallocate is a no-op, the popped
+// slot's last image (a valid, arena-backed GroupInstance, since e1's field
+// was actually set) stays intact — reading it is a stale-object access, not
+// an out-of-bounds one. Post-fix the bounds check fires BEFORE the subscript,
+// so the FIXED code path never touches that popped slot at all; only this
+// transient RED observation does.
+struct V4Outcome {
+    fixpp_error_t set_data_rc = FIXPP_ERR_OK;
+    bool group_end_ok = false;
+    fixpp_error_t commit_rc = FIXPP_ERR_OK;
+    std::string payload;
+};
+
+V4Outcome run_v4_out_of_range_scenario(fixpp_session_t* sess, bool attempt_write) {
+    V4Outcome r;
+    fixpp_msg_t* msg = nullptr;
+    EXPECT_EQ(fixpp_msg_create_outbound(sess, "D", 1, &msg), FIXPP_ERR_OK);
+    fixpp_group_builder_t* gb = nullptr;
+    EXPECT_EQ(fixpp_msg_group_begin(msg, 78, &gb), FIXPP_ERR_OK);
+    fixpp_entry_t* e0 = nullptr;
+    EXPECT_EQ(fixpp_group_builder_add_entry(gb, &e0), FIXPP_ERR_OK);
+    EXPECT_EQ(fixpp_entry_set_string(e0, 79, "ACC0", 4), FIXPP_ERR_OK);
+    fixpp_entry_t* e1 = nullptr;
+    EXPECT_EQ(fixpp_group_builder_add_entry(gb, &e1), FIXPP_ERR_OK);
+    EXPECT_EQ(fixpp_entry_set_string(e1, 79, "ACC1", 4), FIXPP_ERR_OK);
+
+    auto* b = reinterpret_cast<fixpp_group_builder*>(gb);
+    auto* h = reinterpret_cast<fixpp_msg*>(msg);
+    AccumulatorEntry& group = h->accumulator->entries[b->group_field_index];
+    EXPECT_EQ(group.instances.size(), 2u);
+    group.instances.pop_back();  // e1->instance_index is now out of range
+
+    if (attempt_write) {
+        const uint8_t data[] = {'X', 'Y', 'Z'};
+        r.set_data_rc = fixpp_entry_set_data(e1, 361, data, sizeof(data));
+    }
+
+    r.group_end_ok = (fixpp_msg_group_end(msg, gb) == FIXPP_ERR_OK);
+    const uint8_t* payload = nullptr;
+    size_t len = 0;
+    r.commit_rc = fixpp_msg_commit(msg, &payload, &len);
+    if (r.commit_rc == FIXPP_ERR_OK) r.payload.assign(reinterpret_cast<const char*>(payload), len);
+    fixpp_msg_destroy(msg);
+    return r;
+}
+}  // namespace
+
+// T017 / V4 / FR-004 / SC-003 (msg-index-bounds.md class (2)): drive
+// fixpp_entry_set_data with an entry whose instance_index is out of range for
+// its resolved group — the direct subscript in the entry point's OWN body,
+// which no resolver covers.
+TEST(MessageWriteGroup, EntrySetDataOutOfRangeInstanceIndexRefusesDefined) {
+    GroupFixture f;
+    V4Outcome control = run_v4_out_of_range_scenario(f.sess, /*attempt_write=*/false);
+    ASSERT_EQ(control.commit_rc, FIXPP_ERR_OK);
+
+    V4Outcome refused = run_v4_out_of_range_scenario(f.sess, /*attempt_write=*/true);
+
+    EXPECT_EQ(refused.set_data_rc, FIXPP_ERR_INVALID_HANDLE);
+    EXPECT_TRUE(refused.group_end_ok) << "the builder is still usable after the refused call";
+    ASSERT_EQ(refused.commit_rc, FIXPP_ERR_OK);
+    // Nothing written: the committed frame matches the no-op control exactly.
+    EXPECT_EQ(refused.payload, control.payload);
+}
+
+// T018 / V4's propagation arm / FR-004 (msg-index-bounds.md §2.1 class (3)):
+// with a resolver able to report failure, exercise a NESTED builder so that
+// the ancestor-resolution machinery (resolve_group's own recursion,
+// resolve_instance's call to resolve_group, and each caller's use of the
+// result) runs on the failing path. A null dereference there would be the NEW
+// UB the bounds check itself would introduce.
+//
+// This arm's RED is registered as NOT MEASURED in the design authority
+// (contracts/msg-index-bounds.md §5, quickstart.md V4): on the unfixed tree
+// resolve_group/resolve_instance have no bounds check at all, so driving this
+// scenario there means a genuinely wild out-of-range subscript
+// (`entries[far-past-size]`) — a real crash risk this task does not take.
+// This test is therefore validated ONLY once D-2b's full three-class fix is
+// in place; it is never run against the unfixed tree.
+TEST(MessageWriteGroup, NestedEntrySetDataAncestorOutOfRangePropagatesSafely) {
+    GroupFixture f;
+    fixpp_group_builder_t* top = nullptr;
+    ASSERT_EQ(fixpp_msg_group_begin(f.msg, 78, &top), FIXPP_ERR_OK);
+    fixpp_entry_t* e0 = nullptr;
+    ASSERT_EQ(fixpp_group_builder_add_entry(top, &e0), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_entry_set_string(e0, 79, "ACC1", 4), FIXPP_ERR_OK);
+    fixpp_group_builder_t* nested = nullptr;
+    ASSERT_EQ(fixpp_entry_group_begin(e0, 539, &nested), FIXPP_ERR_OK);
+    fixpp_entry_t* ne = nullptr;
+    ASSERT_EQ(fixpp_group_builder_add_entry(nested, &ne), FIXPP_ERR_OK);
+
+    // Corrupt the OUTER (top-level) builder's own index into `entries`, far
+    // past its size — the ancestor every resolution for `nested`/`ne` must
+    // walk through.
+    auto* top_b = reinterpret_cast<fixpp_group_builder*>(top);
+    auto* h = reinterpret_cast<fixpp_msg*>(f.msg);
+    top_b->group_field_index = static_cast<std::uint32_t>(h->accumulator->entries.size()) + 1000;
+
+    // Class (3): resolve_group's own recursion + fixpp_entry_set_data's use
+    // of the (now nullptr) result. Tag 524 has no Length+Data pairing, so a
+    // Data tag (361, paired with 360) is used here instead — entry setters
+    // run no MsgType-grammar check (message.h), so this still reaches
+    // resolve_group.
+    const uint8_t data[] = {'N', 'P'};
+    EXPECT_EQ(fixpp_entry_set_data(ne, 361, data, sizeof(data)), FIXPP_ERR_INVALID_HANDLE);
+
+    // Class (3): resolve_instance's own call to resolve_group, reached from a
+    // scalar entry setter (entry_set_bytes_impl).
+    EXPECT_EQ(fixpp_entry_set_string(ne, 524, "NP1", 3), FIXPP_ERR_INVALID_HANDLE);
 }
 
 // ── Coverage gap closers ──────────────────────────────────────────────────────

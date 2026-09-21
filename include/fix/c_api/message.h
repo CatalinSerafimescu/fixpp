@@ -406,7 +406,24 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_double(fixpp_msg_t* msg, uint16_t t
 FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_decimal(fixpp_msg_t* msg, uint16_t tag,
                                                 fixpp_decimal_t value);
 
-/** Remove a tag from the accumulator.  Idempotent (absent returns OK).
+/** Remove a tag from the accumulator.
+ *
+ *  Idempotent (absent returns OK) ONLY when no group builder is open --
+ *  (1.7, BREAKING): an open builder holds an INDEX into `entries` (or a
+ *  parent instance's fields), and erasing shifts every later index, so the
+ *  call refuses instead of erasing while ANY group builder is open -- even
+ *  for the two classes that are individually harmless: an absent tag
+ *  (nothing would move) and a present tag positioned after every live
+ *  root's group entry (erase would not shift it). The refusal is keyed on
+ *  the builder stack being non-empty, not on the erased tag or its
+ *  position, so no tag choice defeats it.
+ *
+ *  Return codes:
+ *    FIXPP_ERR_OK              -- erased (or absent), no group builder open
+ *    FIXPP_ERR_NULL_HANDLE     -- msg is NULL
+ *    FIXPP_ERR_INVALID_HANDLE  -- msg is destroyed/inbound/session closed, or
+ *                                 (1.7, BREAKING) a group builder is open
+ *
  *  Reentrancy: requires-session-lock
  */
 FIXPP_API_EXPORT fixpp_error_t fixpp_msg_remove_tag(fixpp_msg_t* msg, uint16_t tag);
@@ -462,6 +479,9 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_group_begin(fixpp_msg_t* msg, uint16_t 
                                                 fixpp_group_builder_t** builder_out);
 
 /** Append a new entry (group instance) to `builder`; returns a writable entry.
+ *  FIXPP_ERR_INVALID_HANDLE, assessed-unreachable defence-in-depth
+ *  ([const §IX.1], not BREAKING — msg-index-bounds.md), if the builder's
+ *  resolved group index is out of range for the container it names.
  *  Reentrancy: requires-session-lock */
 FIXPP_API_EXPORT fixpp_error_t fixpp_group_builder_add_entry(fixpp_group_builder_t* builder,
                                                        fixpp_entry_t** entry_out);
@@ -469,6 +489,9 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_group_builder_add_entry(fixpp_group_builder
 /** Set a STRING field on the current entry. Framing tags → MSG_FRAMING_TAG_FORBIDDEN.
  *  Since 1.6 (BREAKING), a value holding SOH (0x01) on a tag that is not the Data half of a
  *  Length+Data pair → FIXPP_ERR_WIRE_CONFORMANCE, nothing written.
+ *  FIXPP_ERR_INVALID_HANDLE, assessed-unreachable defence-in-depth
+ *  ([const §IX.1], not BREAKING — msg-index-bounds.md), if the entry's
+ *  resolved group instance index is out of range.
  *  Reentrancy: requires-session-lock */
 FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_string(fixpp_entry_t* entry, uint16_t tag,
                                                  const char* value, size_t len);
@@ -477,24 +500,42 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_string(fixpp_entry_t* entry, uint
  *  on this group instance, except that no MsgType-grammar check runs (as for every
  *  entry setter) and a Data field that is the group's delimiter →
  *  FIXPP_ERR_TYPE_MISMATCH, since its Length would have to come first.
+ *  FIXPP_ERR_INVALID_HANDLE, assessed-unreachable defence-in-depth
+ *  ([const §IX.1], not BREAKING — msg-index-bounds.md), if the entry's
+ *  resolved group or its resolved instance index is out of range.
  *  Reentrancy: requires-session-lock */
 FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_data(fixpp_entry_t* entry, uint16_t data_tag,
                                                const uint8_t* bytes, size_t len);
 
-/** Set an INTEGER field on the current entry. Reentrancy: requires-session-lock */
+/** Set an INTEGER field on the current entry.
+ *  FIXPP_ERR_INVALID_HANDLE, assessed-unreachable defence-in-depth
+ *  ([const §IX.1], not BREAKING — msg-index-bounds.md), if the entry's
+ *  resolved group instance index is out of range.
+ *  Reentrancy: requires-session-lock */
 FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_int(fixpp_entry_t* entry, uint16_t tag, int64_t value);
 
 /** Set a DOUBLE field on the current entry. Serialised as locale-independent
  *  fixed-point ASCII (never scientific); FIXPP_ERR_DECIMAL_INVALID for non-finite
- *  or out-of-range values (see fixpp_msg_set_double). Reentrancy: requires-session-lock */
+ *  or out-of-range values (see fixpp_msg_set_double).
+ *  FIXPP_ERR_INVALID_HANDLE, assessed-unreachable defence-in-depth
+ *  ([const §IX.1], not BREAKING — msg-index-bounds.md), if the entry's
+ *  resolved group instance index is out of range.
+ *  Reentrancy: requires-session-lock */
 FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_double(fixpp_entry_t* entry, uint16_t tag, double value);
 
-/** Set a DECIMAL field on the current entry. Reentrancy: requires-session-lock */
+/** Set a DECIMAL field on the current entry.
+ *  FIXPP_ERR_INVALID_HANDLE, assessed-unreachable defence-in-depth
+ *  ([const §IX.1], not BREAKING — msg-index-bounds.md), if the entry's
+ *  resolved group instance index is out of range.
+ *  Reentrancy: requires-session-lock */
 FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_decimal(fixpp_entry_t* entry, uint16_t tag,
                                                   fixpp_decimal_t value);
 
 /** Begin a NESTED group `group_tag` within `entry` (FR-012). Closed by the same
  *  fixpp_msg_group_end under the LIFO contract. TYPE_MISMATCH if not a group.
+ *  FIXPP_ERR_INVALID_HANDLE, assessed-unreachable defence-in-depth
+ *  ([const §IX.1], not BREAKING — msg-index-bounds.md), if the entry's
+ *  resolved group instance index is out of range.
  *  Reentrancy: requires-session-lock */
 FIXPP_API_EXPORT fixpp_error_t fixpp_entry_group_begin(fixpp_entry_t* entry, uint16_t group_tag,
                                                   fixpp_group_builder_t** builder_out);
