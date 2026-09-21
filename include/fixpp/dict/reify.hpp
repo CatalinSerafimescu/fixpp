@@ -80,10 +80,19 @@ namespace detail {
 // the complete impl type and cannot be inline in this header.
 // owning_message_handle `friend`s this ONE stable name to reach its private
 // ctor/storage (passkey/attorney pattern). Deep-copies view.bytes() into mr;
-// std::bad_alloc -> dict_reify_oom. Called by the generated dispatch functions
-// in the build-tree bridge TU (and by reify()). NOT a user construction
-// surface — "handles come only from reify()" (FR-012: no C-ABI / public-builder
-// surface added).
+// std::bad_alloc during construction -> dict_reify_oom. Called by the
+// generated dispatch functions in the build-tree bridge TU (and by reify()).
+// NOT a user construction surface — "handles come only from reify()"
+// (FR-012: no C-ABI / public-builder surface added).
+//
+// fixpp#458 (090-capi-refusals) D-4: materialises the returned handle's view
+// EAGERLY (moved out of owning_message_handle::view()'s former lazy
+// build-on-first-call) and its documented failure set grows by ONE class: a
+// dict-backed source whose re-parse of the copied frame fails now returns
+// the wire error that re-parse produced, through this SAME channel, with no
+// handle constructed (contracts/msg-clone.md §9 / EC-8). A framing failure,
+// a framed-but-empty span, and a dict-free view's degraded OffsetTable build
+// are all RETAINED exactly as they behaved before — none of them refuses.
 [[nodiscard]] core::expected_t<owning_message_handle> owning_message_handle_from_frame(
     resolved_message_version rmv, wire::MessageView<wire::access_mode::Index> const& view,
     std::pmr::memory_resource* mr) noexcept;
@@ -92,8 +101,9 @@ namespace detail {
 // 057: owning byte-storage message handle (runtime-dispatch return of
 // dict::reify()). Move-only, heap pimpl. The impl stores
 // {resolved_message_version, std::pmr::vector<std::byte> deep-copied frame,
-// lazily re-framed MessageView cache} — NOT type-erased, because the entire
-// in-scope surface (version()/msg_type()/view()/field_value()) is untyped.
+// eagerly-populated MessageView cache (fixpp#458 D-4)} — NOT type-erased,
+// because the entire in-scope surface (version()/msg_type()/view()/
+// field_value()) is untyped.
 // as<Msg>() remains AC-R6/T059-deferred; the byte storage does not foreclose a
 // future lazily-populated owner-cache (research D-2).
 class owning_message_handle {
@@ -110,6 +120,10 @@ public:
 
     [[nodiscard]] resolved_message_version version() const noexcept;  // AC-R6
     [[nodiscard]] std::string_view msg_type() const noexcept [[clang::lifetimebound]];
+    // fixpp#458 D-4: a pre-populated cache, seated by the minting factory
+    // before this handle is returned — NOT a cache this accessor validates.
+    // The observable on a span that frames to nothing is unchanged: an empty
+    // view, seated exactly as before.
     [[nodiscard]] wire::MessageView<wire::access_mode::Index> const& view() const noexcept
         [[clang::lifetimebound]];
     [[nodiscard]] core::expected_t<wire::field_view> field_value(std::uint16_t tag) const noexcept
@@ -172,6 +186,9 @@ template <class Msg>
 //   dict_unknown_appl_ver_id, dict_unresolved_application_version (NOT a
 //   sentinel fall-through — RC#1), dict_reify_unknown_msg_type (resolved
 //   version+MsgType has no codegen owner, e.g. runtime-XML-only version).
+//   fixpp#458 D-4: plus, propagated from owning_message_handle_from_frame,
+//   the wire error a failed DICT-BACKED re-parse produced (EC-8) — a
+//   condition, not a closed additional enumerator list.
 [[nodiscard]] core::expected_t<owning_message_handle> reify(
     wire::MessageView<wire::access_mode::Index> const& view, version_profile profile,
     std::pmr::memory_resource* mr) noexcept;

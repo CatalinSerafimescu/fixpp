@@ -57,9 +57,11 @@ namespace {
 
 // ─── owning_message_handle implementation (057 live byte storage) ────────────
 // Storage mirrors a concrete owning_<Msg> minus the typed accessors: the full
-// validated frame span deep-copied into the caller mr, plus a lazily re-framed
-// MessageView cache (same pattern as owning_<Msg>::view()). Move-only via the
-// heap pimpl pointer (moving the pointer moves bytes_ + view_cache_ wholesale).
+// validated frame span deep-copied into the caller mr, plus an EAGERLY
+// materialised MessageView cache (fixpp#458 / 090-capi-refusals D-4 — moved
+// out of view()'s former lazy re-frame; see
+// detail::owning_message_handle_from_frame below). Move-only via the heap
+// pimpl pointer (moving the pointer moves bytes_ + view_cache_ wholesale).
 struct owning_message_handle::impl {
     resolved_message_version version{.k = resolved_message_version::kind::session_admin,
                                      .session = session_version::Unknown,
@@ -69,15 +71,19 @@ struct owning_message_handle::impl {
     // 066-dict-backed-inbound-parse T008 (mechanism (b), FR-007/C4): an OWNED
     // copy of the source view's dictionary membership (MessageView::
     // membership_copy(), parser.hpp), populated ONLY when the source is itself
-    // dict-backed (MessageView::is_dict_backed()) — else nullopt, so view()'s
-    // lazy re-frame below stays dict-free, mirroring a dict-free source
-    // (data-model.md "Reify owning handle owned table_view" degenerate case).
+    // dict-backed (MessageView::is_dict_backed()) — else nullopt, so the
+    // factory's eager materialisation (below) stays dict-free, mirroring a
+    // dict-free source (data-model.md "Reify owning handle owned table_view"
+    // degenerate case).
     // Heap-owned (table_view's own containers use the default/global
     // allocator, independent of `bytes_`'s mr) and self-contained — safe to
     // outlive the source session/Dictionary (table_view.hpp's "may legally outlive the Dictionary"
     // note).
     std::optional<table_view> owned_tv_;
-    mutable std::optional<wire::MessageView<wire::access_mode::Index>> view_cache_;
+    // fixpp#458 D-4: populated ONCE, eagerly, by owning_message_handle_from_
+    // frame (a non-const context) -- no longer mutated from view() (a const
+    // accessor), so this is no longer `mutable`.
+    std::optional<wire::MessageView<wire::access_mode::Index>> view_cache_;
 
     explicit impl(std::pmr::memory_resource* mr) : bytes_(mr) {}
 };
@@ -110,62 +116,13 @@ resolved_message_version owning_message_handle::version() const noexcept {
 
 wire::MessageView<wire::access_mode::Index> const& owning_message_handle::view() const noexcept {
     static wire::MessageView<wire::access_mode::Index> const kEmpty{};
+    // fixpp#458 D-4: view_cache_ is populated EAGERLY, by the factory, before
+    // any live handle is returned to a caller — this accessor is now a pure
+    // read over a pre-populated cache (contracts/msg-clone.md §9.1), not the
+    // former lazy-build-on-first-call. See
+    // detail::owning_message_handle_from_frame for the materialisation.
     if (pimpl_ == nullptr) {
         return kEmpty;
-    }
-    if (!pimpl_->view_cache_) {
-        // Lazily re-frame over the owned bytes_ via a one-shot Framer (same
-        // pattern as owning_<Msg>::view()). A zero-cap local carry suffices —
-        // a complete frame never appends to it (004 T059 design).
-        wire::pmr_carry_buffer carry{0, pimpl_->bytes_.get_allocator().resource()};
-        wire::Framer framer{};
-        wire::frame_view out_arr[1]{};
-        auto framed =
-            framer.feed(std::span<const std::byte>{pimpl_->bytes_.data(), pimpl_->bytes_.size()},
-                        carry, std::span<wire::frame_view>{out_arr, 1});
-        if (framed && !framed->empty()) {
-            // 066-dict-backed-inbound-parse T008: re-frame dict-backed when
-            // this handle carries an owned membership copy (owned_tv_), so
-            // group reads are membership-bounded identically to the source
-            // (contracts/inbound-parse.md C4). Reuses the SAME
-            // Parser<Index>{table_view} template instantiation the shipped
-            // Session inbound path (T006) and the C-ABI clone path (T007)
-            // already exercise — no duplicated classify_fn/group_member_fn.
-            bool dict_framed = false;
-            if (pimpl_->owned_tv_) {
-                wire::Parser<wire::access_mode::Index> parser{*pimpl_->owned_tv_};
-                if (auto parsed =
-                        parser.parse((*framed)[0], pimpl_->bytes_.get_allocator().resource())) {
-                    pimpl_->view_cache_.emplace(std::move(*parsed));
-                    dict_framed = true;
-                }
-            }
-            if (!dict_framed) {
-                // Dict-free source, OR the dict-backed re-parse failed: fall
-                // back to the dict-free 2-arg ctor (pre-066 behavior).
-                //
-                // ⚠️ **fixpp#458** — fails OPEN. This fallback is taken whenever
-                // the dict-backed re-parse fails, for ANY reason, and the
-                // reified view then silently loses the dictionary's own
-                // Length+Data pairs (fixpp#426).
-                //
-                // ⚠️ The routes below are NOT exhaustive, and the history is the
-                // reason to say so: this comment first claimed the failure was
-                // "practically unreachable" (false), and the correction then
-                // claimed the trigger was "allocation failure, not frame
-                // content" — which Gate B r10 falsified in turn. Two KNOWN
-                // reachable routes: `OffsetTable::build` catches
-                // `std::bad_alloc`, so a one-shot failing allocator fails the
-                // dict-backed parse while the dict-free retry, allocating less,
-                // succeeds; and this re-parse uses the DEFAULT-cap overload, so
-                // a source a caller parsed with a raised `max_offset_entries`
-                // can exceed the default here and fail on frame shape alone.
-                pimpl_->view_cache_.emplace((*framed)[0],
-                                            pimpl_->bytes_.get_allocator().resource());
-            }
-        } else {
-            pimpl_->view_cache_.emplace();
-        }
     }
     return *pimpl_->view_cache_;
 }
@@ -185,8 +142,15 @@ core::expected_t<wire::field_view> owning_message_handle::field_value(
 
 // ─── detail::owning_message_handle_from_frame (construction seam, C-2) ────────
 // The single hand-written factory that mints a live handle: deep-copy the
-// validated frame span into mr, set the resolved version, leave view_cache_
-// empty (built lazily on first view()). std::bad_alloc → dict_reify_oom. The
+// validated frame span into mr, set the resolved version, then EAGERLY
+// materialise view_cache_ (fixpp#458 / 090-capi-refusals D-4 — moved out of
+// view()'s former lazy build-on-first-call). std::bad_alloc during
+// construction (the deep copy or the membership copy) → dict_reify_oom,
+// preserved. A FAILED DICT-BACKED RE-PARSE is the one new refusal this
+// factory adds: it returns the wire error the failed parse produced (EC-8),
+// with no handle constructed. A framing failure, a framed-but-empty span,
+// and a dict-free OffsetTable degradation are all RETAINED, exactly as
+// view()'s former lazy re-frame behaved (data-model.md §2.2 B/C). The
 // resulting handle is independent of the source parse buffer (FR-005).
 namespace detail {
 core::expected_t<owning_message_handle> owning_message_handle_from_frame(
@@ -200,8 +164,8 @@ core::expected_t<owning_message_handle> owning_message_handle_from_frame(
         // 066-dict-backed-inbound-parse T008 (mechanism (b), FR-007/C4):
         // propagate the source view's dictionary membership into the handle's
         // own owned table_view, ONLY when the source itself is dict-backed —
-        // else stay dict-free (data-model.md degenerate case; see view()'s
-        // re-frame above).
+        // else stay dict-free (data-model.md degenerate case; see the eager
+        // materialisation below).
         if (view.is_dict_backed()) {
             // fixpp#456 seam 6: `table_view` is no longer assignable, so the optional
             // is SEATED rather than assigned. emplace destroys-then-constructs, so it
@@ -211,6 +175,55 @@ core::expected_t<owning_message_handle> owning_message_handle_from_frame(
             assert(!handle.pimpl_->owned_tv_.has_value());
             handle.pimpl_->owned_tv_.emplace(view.membership_copy());
         }
+
+        // fixpp#458 D-4: EAGER materialisation, moved here verbatim from
+        // view()'s former lazy re-frame. A zero-cap local carry suffices — a
+        // complete frame never appends to it (004 T059 design).
+        wire::pmr_carry_buffer carry{0, mr};
+        wire::Framer framer{};
+        wire::frame_view out_arr[1]{};
+        auto framed = framer.feed(
+            std::span<const std::byte>{handle.pimpl_->bytes_.data(), handle.pimpl_->bytes_.size()},
+            carry, std::span<wire::frame_view>{out_arr, 1});
+        if (framed && !framed->empty()) {
+            // 066-dict-backed-inbound-parse T008: re-frame dict-backed when
+            // this handle carries an owned membership copy (owned_tv_), so
+            // group reads are membership-bounded identically to the source
+            // (contracts/inbound-parse.md C4). Reuses the SAME
+            // Parser<Index>{table_view} template instantiation the shipped
+            // Session inbound path (T006) and the C-ABI clone path (T007)
+            // already exercise — no duplicated classify_fn/group_member_fn.
+            if (handle.pimpl_->owned_tv_) {
+                wire::Parser<wire::access_mode::Index> parser{*handle.pimpl_->owned_tv_};
+                auto parsed = parser.parse((*framed)[0], mr);
+                if (!parsed) {
+                    // fixpp#458 (090-capi-refusals) D-4: a dict-backed source
+                    // whose re-parse of the copied frame fails now REFUSES
+                    // instead of silently falling through to a dict-free
+                    // handle (the fail-open defect this comment used to
+                    // document — see contracts/msg-clone.md §9 / EC-8). The
+                    // error is the wire error the failed re-parse produced,
+                    // verbatim — not dict_reify_oom, not a generic sentinel.
+                    // No handle escapes: `handle` unwinds via RAII on this
+                    // return; `view` (the source) is untouched.
+                    return std::unexpected{parsed.error()};
+                }
+                handle.pimpl_->view_cache_.emplace(std::move(*parsed));
+            } else {
+                // Dict-free source (data-model.md §2.2 B, RETAINED): the
+                // dict-free 2-arg ctor never refuses -- OffsetTable::build
+                // catches std::bad_alloc internally and degrades in place,
+                // publicly reported via view().offsets().build_status().
+                handle.pimpl_->view_cache_.emplace((*framed)[0], mr);
+            }
+        } else {
+            // Span frames to nothing, including a zero-byte span
+            // (data-model.md §2.2 C, RETAINED): still succeeds, with a
+            // default-constructed empty view -- Framer::feed on a zero-byte
+            // span returns success with an empty span.
+            handle.pimpl_->view_cache_.emplace();
+        }
+
         return handle;  // move (custom noexcept move ctor)
     } catch (std::bad_alloc const&) {
         return std::unexpected{core::error::dict_reify_oom};

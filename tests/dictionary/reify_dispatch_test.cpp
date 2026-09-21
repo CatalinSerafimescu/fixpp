@@ -50,6 +50,7 @@
 #include <fixpp/dict/reify.hpp>
 #include <fixpp/dict/version_profile.hpp>
 #include <fixpp/wire/message_view_contract.hpp>
+#include <memory>
 #include <memory_resource>
 #include <optional>
 #include <span>
@@ -59,6 +60,7 @@
 #include <vector>
 
 #include "support/failing_pmr_resource.hpp"  // 057: view()-OOM degrade witness
+#include "support/fix44_dictionary.hpp"  // 090-capi-refusals US4: dict-backed source (T058/T059/T062)
 #include "support/msvc_debug_arena_skip.hpp"
 #include "support/reify_test_frame.hpp"  // 057: make_*_frame() helpers (E-6)
 
@@ -742,6 +744,146 @@ TEST(ReifyAsTyped, AbsentMsgTypeRejected) {
     auto r = fixpp::dict::reify_as<fixpp::v44::NewOrderSingle>(f.view(), &mr);
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error(), error::dict_reify_msg_type_mismatch);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 090-capi-refusals US4 (T058-T063) — [C++ track]. The reify factory
+// (`fixpp::dict::detail::owning_message_handle_from_frame`) materialises its
+// view EAGERLY and refuses through its EXISTING core::expected_t channel on
+// EXACTLY ONE new condition: a failed dict-backed re-parse (D-4). Arms
+// (i-b) and (iv) — the dict-free OOM degrade and the frames-to-nothing span
+// — are SHIPPED ELSEWHERE (ViewRebuildOomDegradesNotTerminate above; the
+// default-constructed-MV cells throughout this file, vlatest_dispatch_
+// exclusion_test.cpp and fixt_cross_vocabulary.cpp) and are KEPT GREEN,
+// UNEDITED — not re-witnessed here (T060/T061).
+// fixpp#458 / contracts/msg-clone.md §9 / data-model.md §2.2, §3.3, EC-8.
+// ═════════════════════════════════════════════════════════════════════════════
+
+// A dict-backed source MessageView<Index> over a v44 NewOrderSingle
+// (make_nos_frame()), backed by the real FIX44 dictionary. Every dependency
+// (dict, table_view, frame bytes, parse arena) is kept alive for the
+// fixture's own lifetime — mirrors reify_membership_identity_test.cpp's
+// source-construction pattern.
+class DictBackedNosFixture {
+public:
+    DictBackedNosFixture()
+        : dict_(fixpp::test_support::make_fix44_dictionary()),
+          tv_(dict_->as_table_view()),
+          frame_(fixpp::test_support::make_nos_frame()) {
+        fixpp::wire::pmr_carry_buffer carry{frame_.size(), &arena_};
+        fixpp::wire::Framer framer{};
+        auto framed = framer.feed(std::span<const std::byte>{frame_.data(), frame_.size()}, carry,
+                                  std::span<fixpp::wire::frame_view>{fvs_, 1});
+        if (!framed.has_value() || framed->empty()) {
+            return;
+        }
+        fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{tv_};
+        auto parsed = parser.parse(fvs_[0], &arena_);
+        if (!parsed.has_value()) {
+            return;
+        }
+        mv_.emplace(std::move(*parsed));
+    }
+    [[nodiscard]] bool ok() const noexcept { return mv_.has_value(); }
+    [[nodiscard]] MV const& view() const noexcept { return *mv_; }
+
+private:
+    std::shared_ptr<const fixpp::dict::Dictionary> dict_;
+    fixpp::dict::table_view tv_;
+    std::vector<std::byte> frame_;
+    std::pmr::monotonic_buffer_resource arena_;
+    fixpp::wire::frame_view fvs_[1]{};
+    std::optional<MV> mv_;
+};
+
+constexpr resolved_message_version kAppV44Rmv{.k = resolved_message_version::kind::application,
+                                              .session = session_version::v44,
+                                              .application = application_version::v44,
+                                              ._reserved = 0};
+
+// T059 arm (i-a): a dict-free source, healthy allocator — succeeds, not
+// dict-backed, OffsetTable build_status ok. Without this arm (and (i-b) and
+// (iv)), "refuse whenever anything goes wrong" would pass.
+TEST(ReifyEagerMaterialization, DictFreeHealthySourceSucceeds) {
+    ReifyFixture f{fixpp::test_support::make_nos_frame()};
+    ASSERT_TRUE(f.ok());
+    std::pmr::monotonic_buffer_resource mr;
+    auto r = fixpp::dict::detail::owning_message_handle_from_frame(kAppV44Rmv, f.view(), &mr);
+    ASSERT_TRUE(r.has_value())
+        << "V7 arm (i-a): a dict-free source with a healthy allocator must succeed";
+    EXPECT_FALSE(r->view().is_dict_backed());
+    EXPECT_TRUE(r->view().offsets().build_status().has_value());
+    auto clord = r->field_value(11);
+    ASSERT_TRUE(clord.has_value());
+    EXPECT_EQ(clord->as_string(), "ORD1");
+}
+
+// T059 arm (ii): a dict-backed source that parses cleanly — succeeds, the
+// view is dict-backed.
+TEST(ReifyEagerMaterialization, DictBackedCleanParseSucceeds) {
+    DictBackedNosFixture f;
+    ASSERT_TRUE(f.ok()) << "fixture precondition: v44 NewOrderSingle must dict-parse cleanly";
+    std::pmr::monotonic_buffer_resource mr;
+    auto r = fixpp::dict::detail::owning_message_handle_from_frame(kAppV44Rmv, f.view(), &mr);
+    ASSERT_TRUE(r.has_value())
+        << "V7 arm (ii): a dict-backed source whose re-parse succeeds must succeed";
+    EXPECT_TRUE(r->view().is_dict_backed());
+    auto clord = r->field_value(11);
+    ASSERT_TRUE(clord.has_value());
+    EXPECT_EQ(clord->as_string(), "ORD1");
+}
+
+// T058 — arm (iii), the ONLY new refusal this half adds, anywhere: a
+// dict-backed source whose re-parse of the copied frame fails. Calibrated by
+// INSTRUMENTING this build (never by copying an existing constant, per
+// T063/§8 item 11): a healthy warm-up run through a COUNTING
+// failing_pmr_resource (fail_on_call_n=0, never fails) establishes the total
+// allocation count through `mr` for a successful materialisation of this
+// exact source; injecting failure at that LAST call lands inside the eager
+// re-parse's OffsetTable build, never the bytes_ deep copy (call #1, T062's
+// spurious-hit boundary).
+TEST(ReifyEagerMaterialization, FailedDictBackedReparseRefuses) {
+    DictBackedNosFixture f;
+    ASSERT_TRUE(f.ok()) << "fixture precondition: v44 NewOrderSingle must dict-parse cleanly";
+
+    std::pmr::monotonic_buffer_resource probe_upstream;
+    fixpp::test_support::failing_pmr_resource probe{&probe_upstream, /*fail_on_call_n=*/0};
+    auto warm = fixpp::dict::detail::owning_message_handle_from_frame(kAppV44Rmv, f.view(), &probe);
+    ASSERT_TRUE(warm.has_value()) << "calibration: an unfailing allocator must still succeed";
+    auto const total_calls = probe.allocate_calls();
+    ASSERT_GT(total_calls, 1U)
+        << "calibration sanity: the eager re-parse must allocate beyond the bytes_ deep copy "
+           "(call #1), or this cell cannot land inside it";
+
+    std::pmr::monotonic_buffer_resource fail_upstream;
+    fixpp::test_support::failing_pmr_resource fail{&fail_upstream, total_calls};
+    auto r = fixpp::dict::detail::owning_message_handle_from_frame(kAppV44Rmv, f.view(), &fail);
+
+    ASSERT_FALSE(r.has_value())
+        << "V7 arm (iii): a dict-backed source whose re-parse fails must refuse — no handle";
+    EXPECT_EQ(r.error(), fixpp::core::error::out_of_memory)
+        << "EC-8: the refusal must carry the wire error the failed parse produced (the "
+           "OffsetTable build's own out_of_memory degrade, propagated by Parser::parse), "
+           "NOT the pre-existing deep-copy sentinel (dict_reify_oom) and not a generic code";
+}
+
+// T062 — the mandatory spurious-hit control: a failing allocator can ALSO
+// fail the bytes_ deep copy (call #1), which returns the PRE-EXISTING
+// dict_reify_oom sentinel through the outer catch, an arm that already
+// worked before D-4. Without this control, FailedDictBackedReparseRefuses
+// measures the arm that was never broken.
+TEST(ReifyEagerMaterialization, SpuriousHitControl_DeepCopyOomStillYieldsDictReifyOom) {
+    DictBackedNosFixture f;
+    ASSERT_TRUE(f.ok()) << "fixture precondition: v44 NewOrderSingle must dict-parse cleanly";
+
+    std::pmr::monotonic_buffer_resource fail_upstream;
+    fixpp::test_support::failing_pmr_resource fail{&fail_upstream, /*fail_on_call_n=*/1};
+    auto r = fixpp::dict::detail::owning_message_handle_from_frame(kAppV44Rmv, f.view(), &fail);
+
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), fixpp::core::error::dict_reify_oom)
+        << "control: failing the bytes_ deep copy (call #1) must still yield the pre-existing "
+           "dict_reify_oom sentinel, not EC-8's re-parse refusal";
 }
 
 }  // namespace
