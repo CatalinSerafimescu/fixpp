@@ -33,9 +33,14 @@ Read these once; they are why each scenario names more than one command.
 1. ⚠️ **A clean sanitizer run is NOT the instrument for the `#447` scenarios.** The outbound
    accumulator carves from a per-message monotonic arena, so an overrun lands **inside a live
    allocation**; ASan does not annotate a `std::pmr::vector`; UBSan's `bounds` covers fixed-size
-   arrays only; and libstdc++/libc++ hardening is off in every preset. **A green ASan run is the
-   expected output of an instrument that could not report otherwise.** The instrument is the
-   **committed byte string**. Derivation: [`data-model.md`](./data-model.md) §1.6.
+   arrays only; and no project flag sets libstdc++/libc++ hardening. ⚠️ **That is not "hardening is
+   off in every preset"**: libstdc++ enables `_GLIBCXX_ASSERTIONS` by default at `-O0` (a hard
+   out-of-range `vector`/`pmr::vector` subscript aborts there — `linux-clang-debug` builds at
+   `-O0`) and not at `-O2`, independent of any project flag. **A green ASan run is the
+   expected output of an instrument that could not report otherwise**, and for the
+   **stale-but-in-range** shape I-1 actually produces (§1.6), no bounds assertion at any
+   optimization level can see it either. The instrument is the **committed byte string**.
+   Derivation: [`data-model.md`](./data-model.md) §1.6.
 2. ⚠️ **A forced-MISS arm cannot catch a spurious HIT.** Every refusal below is also produced by
    some *other* condition — a null handle, a dead handle, a post-`fixpp_engine_start`
    `fixpp_session_open`, a marshalling rejection. **Assert the exact code from the call under test,
@@ -208,9 +213,13 @@ ctest --preset linux-clang-debug -R '^capi_message_write$' --output-on-failure
 **Expected observable.** **Exactly** `FIXPP_ERR_INVALID_HANDLE`, **nothing written**, and the
 builder **still usable**.
 
-⚠️ **The RED on the unfixed tree is NOT a crash** (§0 rule 1). It is **the absence of a defined
-refusal**: the call returns something other than `FIXPP_ERR_INVALID_HANDLE` while the committed
-payload is corrupt. **Assert the full committed byte string.**
+⚠️ **The RED this scenario is written against is the ABSENCE of a defined refusal** — the call
+returns something other than `FIXPP_ERR_INVALID_HANDLE` while the committed payload is corrupt —
+**not a wrong-reason crash claim (§0 rule 1's correction applies here too)**: on a `-O0`/Debug
+preset a genuinely out-of-range `std::pmr::vector` subscript is bounds-checked by
+`_GLIBCXX_ASSERTIONS` and would abort rather than silently corrupt, which is a *different* (louder)
+wrong-reason failure than "returns the wrong code" — assert the exact code AND the full committed
+byte string so either wrong-reason shape is caught.
 
 ⚠️ **THE MUTATION — a two-state observation.** Implement the bounds check in the **two resolver
 bodies only** and re-run:

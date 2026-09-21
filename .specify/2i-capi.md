@@ -50,7 +50,7 @@
 
 **Reserved blocks.** Five blocks are reserved for downstream / future docs that have not yet published their variant list: 2j (control plane), 2k (log + otel), 2l (session-tap consumer), 2m (SWIG/Python translation), plus one **post-v1.x growth** block. Reserved blocks are documented as "may not be used by 2i v0.1 publication"; assignment to a downstream doc happens at that doc's sign-off.
 
-**Sentinel codes.** `FIXPP_ERR_OK = 0`, `FIXPP_ERR_CANCELLED = 1`, `FIXPP_ERR_UNKNOWN = 2`, plus the 2i-introduced `FIXPP_ERR_NULL_HANDLE`, `FIXPP_ERR_INVALID_HANDLE`, `FIXPP_ERR_VERSION_MISMATCH`, `FIXPP_ERR_BUFFER_TOO_SMALL`, `FIXPP_ERR_TYPE_MISMATCH`, `FIXPP_ERR_TAG_NOT_FOUND`, `FIXPP_ERR_INDEX_OUT_OF_RANGE`, `FIXPP_ERR_CAPI_CONFIG_INVALID` (the latter NEW in v0.2 / RC#3 close — the cross-cutting fallback for construction-time C-ABI thunk exceptions where no domain `_CONFIG` code applies). These live in the **cross-cutting block** `[0, 99]` and are intentionally low-numbered so no domain prefix can accidentally collide with the sentinels.
+**Sentinel codes.** `FIXPP_ERR_OK = 0`, `FIXPP_ERR_CANCELLED = 1`, `FIXPP_ERR_UNKNOWN = 2`, plus the 2i-introduced `FIXPP_ERR_NULL_HANDLE`, `FIXPP_ERR_INVALID_HANDLE`, `FIXPP_ERR_VERSION_MISMATCH`, `FIXPP_ERR_BUFFER_TOO_SMALL`, `FIXPP_ERR_TYPE_MISMATCH`, `FIXPP_ERR_TAG_NOT_FOUND`, `FIXPP_ERR_INDEX_OUT_OF_RANGE`, `FIXPP_ERR_CAPI_CONFIG_INVALID` (the latter NEW in v0.2 / RC#3 close — produced by a C-ABI entry point that cannot complete, either by explicit refusal or by a caught exception on a fallible construction/mutation step; not exclusive to `guarded_call_construction` — see §6.5). These live in the **cross-cutting block** `[0, 99]` and are intentionally low-numbered so no domain prefix can accidentally collide with the sentinels.
 
 **Layout (final, this version):**
 
@@ -654,7 +654,7 @@ static const char* const k_strerror_table[] = {
     "type mismatch (e.g., get_int on a STRING field)",  /* FIXPP_ERR_TYPE_MISMATCH = 7 */
     "tag not found in the message",       /* FIXPP_ERR_TAG_NOT_FOUND = 8 */
     "index out of range",                 /* FIXPP_ERR_INDEX_OUT_OF_RANGE = 9 */
-    "C ABI config invalid (engine_create / dict_load / msg_create_outbound)",  /* FIXPP_ERR_CAPI_CONFIG_INVALID = 10 */
+    "C ABI config invalid (any entry point that cannot complete — explicit refusal or a caught fallible-construction exception; not construction-only)",  /* FIXPP_ERR_CAPI_CONFIG_INVALID = 10 */
     /* [11, 99] reserved — return "reserved code" */
     /* [100, 199] WIRE — 3 entries used:
         100: "wire frame invalid",
@@ -949,11 +949,11 @@ fixpp_error_t fixpp_msg_create_outbound(fixpp_session_t* session,
 FIXPP_API_EXPORT
 fixpp_error_t fixpp_msg_destroy(fixpp_msg_t* msg);
 
-/* Clone an inbound flyweight (or any fixpp_msg_t) into a freshly-constructed
- * outbound-shaped message. The clone is independent of the source: a different
- * per-message arena slot, a different generation token; cross-strand handoff
- * after clone is safe (the clone's lifetime is owner-controlled via
- * fixpp_msg_destroy, not bounded by the source's fromApp dispatch window).
+/* Clone an inbound-flavoured fixpp_msg_t into a freshly-constructed,
+ * independent inbound-flavoured handle: a different per-message arena slot,
+ * a different generation token; cross-strand handoff after clone is safe
+ * (the clone's lifetime is owner-controlled via fixpp_msg_destroy, not
+ * bounded by the source's fromApp dispatch window).
  *
  * Bulk: one memcpy of the wire bytes plus an offset-table rebuild;
  * ≤ 1 µs warm-cache for a ~200-byte message per [2c §6.6] reify-equivalent
@@ -966,11 +966,19 @@ fixpp_error_t fixpp_msg_destroy(fixpp_msg_t* msg);
  *
  * Returns FIXPP_ERR_OK on success; *clone_out is set.
  * Returns FIXPP_ERR_NULL_HANDLE on NULL src or clone_out.
- * Returns FIXPP_ERR_INVALID_HANDLE on destroyed src.
- * Returns FIXPP_ERR_VERSION_MISMATCH if src's resolved version is
- *   not in the engine's loaded dictionaries (rare; surfaces a 2c
- *   `dict_no_dictionary_for_application_version` on the cloned outbound
- *   per [2c §6.7]).
+ * Returns FIXPP_ERR_INVALID_HANDLE on a destroyed src, or on an
+ *   outbound-shaped src (h->view == nullptr) — clone supports inbound
+ *   sources only.
+ * Returns FIXPP_ERR_WIRE_LIMIT_EXCEEDED / FIXPP_ERR_WIRE_INVALID_FRAME /
+ *   FIXPP_ERR_UNKNOWN if the clone's dict-backed re-parse of the source's
+ *   wire bytes fails — the caller-visible image of the wire error the
+ *   failed re-parse produced, via translate(); no clone handle is
+ *   constructed (fixpp#458, 090-capi-refusals D-3). *clone_out stays NULL
+ *   and src is unchanged and still usable.
+ * Returns FIXPP_ERR_CAPI_CONFIG_INVALID if clone's own construction throws
+ *   std::bad_alloc — the local boundary's bad_alloc return, not a
+ *   thunk-flavour translation (clone stays a steady-state symbol per
+ *   [2i §5.2]; D-3b).
  *
  * Used as the v1.0 cross-strand-handoff escape hatch — see §6.3 and
  * §10 Q5. */
@@ -1041,7 +1049,13 @@ fixpp_error_t fixpp_msg_set_decimal(fixpp_msg_t*    msg,
                                     uint16_t        tag,
                                     fixpp_decimal_t value);
 
-/* Remove a tag from the message (idempotent — no-op if not present). */
+/* Remove a tag from the message. Refuses with FIXPP_ERR_INVALID_HANDLE while
+ * any group builder is open on this msg (an open fixpp_entry_group_begin /
+ * fixpp_entry_group_end pair), erasing nothing and leaving every open
+ * builder still usable — see include/fix/c_api/message.h and
+ * contracts/msg-remove-tag.md §6 (fixpp#447, 090-capi-refusals D-1). With
+ * no builder open, idempotent: a present tag is erased with FIXPP_ERR_OK;
+ * an absent tag also returns FIXPP_ERR_OK. */
 FIXPP_API_EXPORT
 fixpp_error_t fixpp_msg_remove_tag(fixpp_msg_t* msg,
                                    uint16_t     tag);
@@ -1273,7 +1287,7 @@ The `fixpp::capi::detail::*` namespace (private; `// detail: not API` per `[arch
 
 The C-ABI thunk surface inherits the split. **Two flavours of `guarded_call` are published**, and every `extern "C"` symbol is placed on exactly one side:
 
-- **Construction-time flavour (`guarded_call_construction`)** — used only by entry points whose invocation is the explicit C-ABI mirror of a constructor that may throw on bad config per `[arch §5.3]` carve-out. The whitelist for v1.0: `fixpp_engine_create`, `fixpp_dict_load_from_xml`, `fixpp_msg_create_outbound`. These thunks **catch** `std::exception&` and translate to a domain-appropriate `FIXPP_ERR_*_CONFIG` (or the new `FIXPP_ERR_CAPI_CONFIG_INVALID` for the engine-construction case where no domain prefix applies — see §6.5 below).
+- **Construction-time flavour (`guarded_call_construction`)** — used only by entry points whose invocation is the explicit C-ABI mirror of a constructor that may throw on bad config per `[arch §5.3]` carve-out. The whitelist for v1.0: `fixpp_engine_create`, `fixpp_dict_load_from_xml`, `fixpp_msg_create_outbound`. These thunks **catch** `std::exception&` and translate to a domain-appropriate `FIXPP_ERR_*_CONFIG` (or the new `FIXPP_ERR_CAPI_CONFIG_INVALID`, produced by a C-ABI entry point that cannot complete — either an explicit refusal or a caught exception on a fallible construction/mutation step, and not exclusive to `guarded_call_construction` — see §6.5 below).
 - **Steady-state flavour (`guarded_call_steady`)** — used by every other public C-ABI symbol: every `fixpp_msg_get_*`, every `fixpp_msg_set_*`, every `fixpp_group_*`, `fixpp_msg_destroy`, `fixpp_strerror`, `fixpp_version`, `fixpp_msg_clone`, plus every shape-pinned-here entry point that 2j later publishes on the steady-state path (`fixpp_session_send`, callback-trampoline thunks). An exception escaping a steady-state thunk implies an `assert` failure at the C++ layer or a memory-corruption / PMR-allocator-bypass bug per `[arch §5.3]`'s invariant-violation rule (`std::bad_alloc` from a steady-state path means the project's `[2a §4.2]` `trap_throw` was bypassed — itself an invariant violation). These thunks log the exception at fatal level via `fixpp::core::Logger` (engine-internal) and **`std::abort()`**.
 
 The split matches `[arch §5.3]` exactly: construction-time exceptions are translated for ergonomics; steady-state exceptions are bugs not error returns and are surfaced via the architecturally-mandated `std::abort` path. The v0.1 uniform "translate to `FIXPP_ERR_UNKNOWN`" policy is **dropped** because (a) the steady-state hot path is exception-free per `[const §VIII.5]` — any escape is by definition an invariant violation; (b) translating to `FIXPP_ERR_UNKNOWN` lets the C consumer continue calling into the engine after potential memory corruption, which is a worst-of-both-worlds outcome (the bug is hidden, the consumer's recovery path is ad-hoc); (c) `[const §XV]` does not list "abort on invariant violation" as a banned pattern — the architecturally-mandated path is to `std::abort`.
@@ -1295,8 +1309,11 @@ namespace fixpp::capi::detail {
  * domain-appropriate code is selected per call site: dictionary load
  * surfaces FIXPP_ERR_DICT_CONFIG; engine creation surfaces
  * FIXPP_ERR_CAPI_CONFIG_INVALID (see §6.5 — new variant introduced in
- * v0.2 / RC#3 close); outbound message creation surfaces
- * FIXPP_ERR_DICT_CONFIG when the msg_type is not in the dictionary. */
+ * v0.2 / RC#3 close; NOT exclusive to this construct — the same code
+ * also arises from an explicit refusal or a caught exception on a
+ * fallible construction/mutation step at other, non-whitelisted entry
+ * points); outbound message creation surfaces FIXPP_ERR_DICT_CONFIG
+ * when the msg_type is not in the dictionary. */
 template <typename F>
 fixpp_error_t guarded_call_construction(fixpp_error_t fallback_code,
                                         F&&           thunk_body) noexcept {
@@ -1364,7 +1381,7 @@ fixpp::core::error translate_back(fixpp_error_t code) noexcept;
 }  // namespace fixpp::capi::detail
 ```
 
-**Per-symbol placement.** The §5.2 split rule constrains every `extern "C"` symbol to one of the two flavours; the full per-symbol mapping is **generated at sign-off** in `docs/c_api_thunk_split.md` (engineering documentation; not part of the spec doc, not present in the repo at v0.3 authoring time — produced post-sign-off from the header annotations and verified by §9 seam #5a/#5b). The design-doc rule is that every `extern "C"` symbol carries a comment naming `guarded_call_construction` or `guarded_call_steady` immediately above its definition, and CI grep enforces that exactly one of the two macros appears in every `src/capi/*.cpp` file (§9 seam #5 below splits into #5a / #5b to verify both arms — synthetic-throw on the construction side returns the fallback code; synthetic-throw on the steady-state side fires `SIGABRT`, which the test fixture traps).
+**Per-symbol placement.** The §5.2 split rule constrains every `extern "C"` symbol to one of the two flavours; the full per-symbol mapping is **generated at sign-off** in `docs/c_api_thunk_split.md` (engineering documentation; not part of the spec doc, not present in the repo at v0.3 authoring time — produced post-sign-off from the header annotations and verified by §9 seam #5a/#5b). The design-doc rule is that every `extern "C"` symbol carries a comment naming `guarded_call_construction` or `guarded_call_steady` immediately above its definition (§9 seam #5 below splits into #5a / #5b to verify both arms — synthetic-throw on the construction side returns the fallback code; synthetic-throw on the steady-state side fires `SIGABRT`, which the test fixture traps).
 
 **§10 Q2 disposition update.** v1.0 ships with the construction-vs-steady split: construction-time exceptions translate (per `[arch §5.3]` carve-out); steady-state exceptions `std::abort` (per `[arch §5.3]` invariant-violation rule). The v0.1 admission ("the trap decision is one of the explicit v0.1 trade-offs the round-1 review will likely surface") is closed by this rewrite.
 
@@ -1382,7 +1399,7 @@ Per §4.2.1, each opaque handle wraps either a `unique_ptr` (engine, dict) or a 
 
 - **Inside the thunk body:** `noexcept` lambdas only. The thunk body may call into engine C++ code that uses `expected_t<T>` per `[arch §5.3]` — never throws.
 - **Across the `extern "C"` boundary:** **no exception ever crosses.** Per the §5.2 split: construction-time thunks trap-and-translate to `FIXPP_ERR_*_CONFIG`; steady-state thunks `std::abort` after a fatal log.
-- **Construction-time exceptions** (e.g., `fixpp_engine_create` calling into engine code that throws on bad config; `fixpp_dict_load_from_xml` parsing a malformed XML; `fixpp_msg_create_outbound` rejecting an unknown `msg_type`) are caught by `guarded_call_construction` and translated to the appropriate `FIXPP_ERR_*_CONFIG` (or the new cross-cutting `FIXPP_ERR_CAPI_CONFIG_INVALID` for engine creation when no domain prefix applies — see §6.5) per `[arch §5.3]` carve-out.
+- **Construction-time exceptions** (e.g., `fixpp_engine_create` calling into engine code that throws on bad config; `fixpp_dict_load_from_xml` parsing a malformed XML; `fixpp_msg_create_outbound` rejecting an unknown `msg_type`) are caught by `guarded_call_construction` and translated to the appropriate `FIXPP_ERR_*_CONFIG` (or the new cross-cutting `FIXPP_ERR_CAPI_CONFIG_INVALID`, produced by a C-ABI entry point that cannot complete — either an explicit refusal or a caught exception on a fallible construction/mutation step, and not exclusive to engine creation — see §6.5) per `[arch §5.3]` carve-out.
 - **Steady-state thunk exceptions** (e.g., a `std::bad_alloc` escaping `fixpp_msg_get_string` despite the PMR `[2a §4.2]` `trap_throw`; a foreign exception escaping a callback-trampoline thunk) are caught by `guarded_call_steady` and `std::abort()`'d after a fatal-level log per `[arch §5.3]` invariant-violation rule. No `FIXPP_ERR_UNKNOWN` is returned on the steady-state path; the abort is the architecturally-mandated trap.
 
 ---
@@ -1442,7 +1459,7 @@ CI flags > 5 % regression on the hot-path rows. Per `[const §VIII.1]` / `[const
 
 ### §6.5 Errors introduced by this design
 
-**Counting convention (v0.3 phrasing tightness — Opus round-2 N-P3-2 close).** The cross-cutting `[0, 99]` block carries **11 occupied codes** at v0.3 = **3 architectural sentinels** (`FIXPP_ERR_OK`, `FIXPP_ERR_CANCELLED`, `FIXPP_ERR_UNKNOWN` per `[arch §5.3]`) + **8 2i-introduced variants** (`FIXPP_ERR_NULL_HANDLE` through `FIXPP_ERR_CAPI_CONFIG_INVALID`). The 8 introduced variants enumerated below grew the cross-cutting block from 10 occupied codes (v0.1: 3 sentinels + 7 introduced — `_NULL_HANDLE` through `_INDEX_OUT_OF_RANGE`) to 11 (v0.2: added `FIXPP_ERR_CAPI_CONFIG_INVALID = 10` under RC#3 close — the construction-time C-ABI thunk fallback for engine creation where no domain `_CONFIG` code applies). Throughout this doc, "8 introduced" refers to 2i-introduced variants only; "11 occupied" or "11 codes" refers to the full block including the 3 architectural sentinels.
+**Counting convention (v0.3 phrasing tightness — Opus round-2 N-P3-2 close).** The cross-cutting `[0, 99]` block carries **11 occupied codes** at v0.3 = **3 architectural sentinels** (`FIXPP_ERR_OK`, `FIXPP_ERR_CANCELLED`, `FIXPP_ERR_UNKNOWN` per `[arch §5.3]`) + **8 2i-introduced variants** (`FIXPP_ERR_NULL_HANDLE` through `FIXPP_ERR_CAPI_CONFIG_INVALID`). The 8 introduced variants enumerated below grew the cross-cutting block from 10 occupied codes (v0.1: 3 sentinels + 7 introduced — `_NULL_HANDLE` through `_INDEX_OUT_OF_RANGE`) to 11 (v0.2: added `FIXPP_ERR_CAPI_CONFIG_INVALID = 10` under RC#3 close — produced by a C-ABI entry point that cannot complete, by explicit refusal or by a caught exception on a fallible construction/mutation step; not exclusive to the construction-time thunk fallback). Throughout this doc, "8 introduced" refers to 2i-introduced variants only; "11 occupied" or "11 codes" refers to the full block including the 3 architectural sentinels.
 
 2i introduces 8 new `fixpp_error_t` variants (the cross-cutting block sentinels at numeric codes `[3, 10]`; v0.2 adds `FIXPP_ERR_CAPI_CONFIG_INVALID = 10` per RC#3 close); the rest of the §4.3 layout is **re-publication** of variants owned by sibling docs (their definitions per their `[2X §6.X]` sections — see §3 inherited surface citations; the live total of prior-doc variants is 4 + 13 + 20 + 9 + 10 + 4 + 15 + 22 = 97 per `[2a §7.4]` / `[2b §6.7]` / `[2c §6.7]` / `[2d §6.7]` / `[2e §6.7]` / `[2f §6.5]` / `[2g §6.6]` / `[2h §6.6]`).
 
@@ -1455,7 +1472,7 @@ CI flags > 5 % regression on the hot-path rows. Per `[const §VIII.1]` / `[const
 | `FIXPP_ERR_TYPE_MISMATCH` | 7 | §4.6 / §4.7 — caller used `fixpp_msg_get_int` (or `_double` / `_decimal`) on a tag the dictionary marks as a non-INT (or non-FLOAT) field. | Programmer error — use the type-correct accessor or fall back to `fixpp_msg_get_bytes` for type-erased access. |
 | `FIXPP_ERR_TAG_NOT_FOUND` | 8 | §4.6 / §4.8 — the tag is absent from the message. | Caller's choice — either treat as missing-optional-field or fall through to validator-driven Session-Reject. |
 | `FIXPP_ERR_INDEX_OUT_OF_RANGE` | 9 | §4.8 — `fixpp_group_get_field_*(group, entry_index, ...)` was called with `entry_index >= count`. | Programmer error — fix the loop bound (the group's count is returned by `fixpp_msg_get_group`'s `count_out` parameter). |
-| `FIXPP_ERR_CAPI_CONFIG_INVALID` | 10 | §5.2 / §5.4 / §6.2 (NEW v0.2 / RC#3 close) — a construction-time C-ABI thunk (`fixpp_engine_create`, `fixpp_dict_load_from_xml` for the no-domain-prefix case, or any future construction-time C-ABI entry that lacks a domain prefix) caught a `std::exception` and chose this fallback code. Used only by `guarded_call_construction` per `[arch §5.3]` carve-out where no specific domain `_CONFIG` code applies. | Configuration error — inspect the engine-internal logger's fatal-level record for the exception detail; correct the config; retry. |
+| `FIXPP_ERR_CAPI_CONFIG_INVALID` | 10 | §5.2 / §5.4 / §6.2 / §6.5 (NEW v0.2 / RC#3 close) — produced by a C-ABI entry point that cannot complete: either an explicit refusal (an invalid argument, an unusable configured value, or a call made out of lifecycle order) or a caught exception on a fallible construction/mutation step (allocation or other resource failure, e.g. thread creation). Not exclusive to `guarded_call_construction`. | Correct the offending argument or the unusable configured value and call again; for an ordering refusal, call before `fixpp_engine_start`; after a caught failure that consumed nothing, retry — with no guarantee of success; or, where the failing return left engine- or session-side state already changed, destroy the owning handle and rebuild it — neither retry nor re-ordering can succeed there. |
 
 (8 new variants in the cross-cutting `[0, 99]` block — `FIXPP_ERR_NULL_HANDLE` through `FIXPP_ERR_INDEX_OUT_OF_RANGE` from v0.1 plus `FIXPP_ERR_CAPI_CONFIG_INVALID` added in v0.2 per RC#3 close; the cancellation sentinel `FIXPP_ERR_CANCELLED = 1` and `FIXPP_ERR_OK = 0` and `FIXPP_ERR_UNKNOWN = 2` are pre-existing per `[arch §5.3]` and are not new variants here — they are codified at this point per the brief's "lock the layout" requirement.)
 
@@ -1653,7 +1670,7 @@ Per `[arch §10]` requirement (4) and `[const §VII.4]`. 2i ships **13 seams** (
 | # | Question | Disposition | Owner |
 |---|---|---|---|
 | 1 | **Source-distinguishing cancellation variants for v1.x?** §4.9 unifies all cancellation outcomes under `FIXPP_ERR_CANCELLED`; the §4.9 trade-off explicitly forecloses source distinction at the C ABI in v1.0. A v1.x consumer (e.g., a sophisticated recovery layer that wants different action on `transport_read_cancelled` vs `tls_load_cancelled`) might want this. **Disposition:** DEFER to post-v1; if a real consumer hits the limitation, expose via an auxiliary `fixpp_error_diagnostic_t` accessor in v1.x without touching the published numeric values (additive change per `[const §X.1]`). | post-v1 follow-up; 2i |
-| 2 | **Trap policy on unexpected C++ exceptions — translate or `std::abort`?** **DECIDED in v0.2 / RC#3 close (Codex P2-1 → P1; Opus confirmed).** v1.0 ships the **construction-vs-steady split** per `[arch §5.3]`: construction-time thunks (`fixpp_engine_create`, `fixpp_dict_load_from_xml`, `fixpp_msg_create_outbound`) catch and translate to the domain-appropriate `FIXPP_ERR_*_CONFIG` code (or the new `FIXPP_ERR_CAPI_CONFIG_INVALID` for the engine-construction case where no domain prefix applies); steady-state thunks (every read accessor, every setter, every group accessor, every callback-trampoline) **`std::abort`** after a fatal log. The v0.1 uniform "translate to `FIXPP_ERR_UNKNOWN`" policy was wrong because (a) the steady-state hot path is exception-free per `[const §VIII.5]` so any escape is by definition an invariant violation; (b) translating after potential memory corruption hides bugs; (c) `[arch §5.3]` invariant-violation rule mandates `std::abort`. See §5.2 / §5.4 / §6.2 / §9 seam #5a / #5b. | DECIDED v0.2; 2i v1.0 |
+| 2 | **Trap policy on unexpected C++ exceptions — translate or `std::abort`?** **DECIDED in v0.2 / RC#3 close (Codex P2-1 → P1; Opus confirmed).** v1.0 ships the **construction-vs-steady split** per `[arch §5.3]`: construction-time thunks (`fixpp_engine_create`, `fixpp_dict_load_from_xml`, `fixpp_msg_create_outbound`) catch and translate to the domain-appropriate `FIXPP_ERR_*_CONFIG` code (or the new `FIXPP_ERR_CAPI_CONFIG_INVALID`, produced by a C-ABI entry point that cannot complete — an explicit refusal or a caught exception on a fallible construction/mutation step, and not exclusive to the engine-construction case); steady-state thunks (every read accessor, every setter, every group accessor, every callback-trampoline) **`std::abort`** after a fatal log. The v0.1 uniform "translate to `FIXPP_ERR_UNKNOWN`" policy was wrong because (a) the steady-state hot path is exception-free per `[const §VIII.5]` so any escape is by definition an invariant violation; (b) translating after potential memory corruption hides bugs; (c) `[arch §5.3]` invariant-violation rule mandates `std::abort`. See §5.2 / §5.4 / §6.2 / §9 seam #5a / #5b. | DECIDED v0.2; 2i v1.0 |
 | 3 | **C-ABI cert/pinset rotation surface in v1.x?** §7.7 defers the TLS rotation accessors to post-v1; rotation triggers go through 2j's control plane. **Disposition:** revisit when the first non-C++ consumer asks for in-process rotation. Until then, the control plane is sufficient. | v1.x feedback-driven; 2g + 2i jointly |
 | 4 | **Receive callback shape (CA-007) — sync trampoline or `fixpp_session_poll(...)`?** Two shapes:<br>(a) **Sync trampoline** — engine calls user fn directly on the strand. Latency-optimal; user code runs in the strand; user MUST be quick (no I/O, no GIL acquire) or it stalls the session.<br>(b) **`fixpp_session_poll(session, msg_out)`** — engine queues; user drains in their own thread. Latency-suboptimal (one extra hop); user code runs anywhere; ergonomic for Python (no GIL contention).<br>**Disposition:** route to **2j**. 2i pins the **shape** (the receive-callback signature, the message handle's lifetime through it) but the policy choice is 2j's. The §10 Q4 entry exists so the round-1 reviewer notes the cross-doc dependency. | 2j |
 | 5 | **Does `fixpp_msg_set_*` on a parsed inbound message create a copy or modify in place?** For receive-side mutation (e.g., a Python binding that wants to add a custom dialect tag to an inbound message before forwarding), the C-ABI shape needs to specify whether the mutation is destructive (modifies the underlying wire buffer in place) or copy-on-write (clones to a new arena). **Disposition:** **DECIDED v0.2 / Opus N-P2-2 close.** v1.0 picks **immutable inbound messages** — `fixpp_msg_set_*` on an inbound flyweight returns `FIXPP_ERR_INVALID_HANDLE` (the handle is a `const wire::MessageView`). A consumer that wants to mutate calls `fixpp_msg_clone(inbound, &mutable_copy)` first; the clone is a fresh outbound-shaped message. The `fixpp_msg_clone` symbol is published at §4.7 (added in v0.2 — the v0.1 doc referenced the symbol from §6.3 / §10 Q5 but failed to declare it; that gap is closed). Verified by §9 seam #13 (cross-strand handoff). | DECIDED v0.2; 2i v1.0 |

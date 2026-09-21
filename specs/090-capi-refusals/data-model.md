@@ -158,10 +158,17 @@ clean run.
   non-default allocator, and these are `std::pmr::vector`.
 - UBSan `-fsanitize=bounds` covers fixed-size arrays; `operator[]` on a vector is plain pointer
   arithmetic.
-- libstdc++/libc++ hardening is **off** in every preset. Re-derive:
+- libstdc++/libc++ hardening is **not set by any project flag** — re-derive:
   `grep -rn "_GLIBCXX_ASSERTIONS\|_GLIBCXX_DEBUG\|_LIBCPP_HARDENING" cmake/ CMakeLists.txt
   CMakePresets.json`, with a positive control on the same corpus (`FIXPP_WERROR`) so a zero is a
-  measurement and not a broken command.
+  measurement and not a broken command. ⚠️ **That zero is not "hardening is off in every preset."**
+  Measured this session: libstdc++ enables `_GLIBCXX_ASSERTIONS` **by default at `-O0`** (clang +
+  libstdc++, no project define) — a hard out-of-range `vector::operator[]` **aborts** — and does
+  **not** at `-O2`, independent of any project flag; `linux-clang-debug`'s `CMAKE_BUILD_TYPE=Debug`
+  builds at `-O0`. **The claim that survives is narrower and still holds**: a **stale-but-in-range**
+  index (the shape I-1 actually produces) is invisible to `_GLIBCXX_ASSERTIONS` regardless of
+  optimization level — the assertion checks the bound, not the value — so the committed byte string
+  remains the instrument for THAT arm.
 
 ⇒ **A clean ASan/UBSan/TSan run over the defect is not evidence of anything**; it is the expected
 output of an instrument that could not report otherwise.
