@@ -132,7 +132,9 @@ precedent that §4.1 already binds the headers to, and the body must match it.
 
 ### 4.3 Limb 3 — the behaviors-and-limitations delta
 
-**Four BEHAVIOUR rows, all in the LIVE `spec/behaviors-and-limitations.md`, and NO limitation row.**
+**Four BEHAVIOUR rows, all in the LIVE `spec/behaviors-and-limitations.md`, and NO limitation row
+**for the three refusals** — plus one limitation row apiece for the two out-of-scope residuals below
+(owner decision, 2026-09-21).
 
 | row | track | content |
 |---|---|---|
@@ -150,7 +152,9 @@ file; do not grep across the pair.**
 
 Plus the two **out-of-scope residuals** the design authority records — the probe-cap degradation and
 RefMsgType(372) at the two reject builders. **They are limitations if they are written down and
-defects found at Gate B if they are not.**
+defects found at Gate B if they are not** — so each is written down as **its own limitation row** in
+the same live ledger. ⚠️ *"No limitation row"* above bounds the rows **for the three refusals**; it
+never meant the residuals go unrecorded.
 
 ---
 

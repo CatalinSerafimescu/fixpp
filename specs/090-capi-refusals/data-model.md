@@ -464,7 +464,8 @@ reachability is **declined, not asserted**; the behaviour change is declared any
 - **No new public C++ method on the reify handle.** The withdrawn status accessor does not exist.
 - **No change to the nested `GroupInstance::fields` vectors' mutation shape** (§1.4).
 - **No change to the engine lifecycle ordering** (§3.2).
-- **No limitation row** in the B&L delta. `L-452-1` is deleted (§4).
+- **No limitation row for the three refusals** in the B&L delta. `L-452-1` is deleted (§4). The
+  delta's only limitation rows are the two out-of-scope residuals, one apiece (FR-016).
 - **The probe-cap degradation is OUT OF SCOPE and must not be claimed as covered.**
   `OffsetTable::build`'s probe-cap arm sets `skip_insert = true` under *"DoS bound: leave this occ
   un-indexed"* and **never assigns `status_`** — so `build_status()` stays ok, `Parser::parse`

@@ -320,7 +320,19 @@ cells that pin the retained behaviours below and assert they are unchanged.
   `FIXPP_ERR_CAPI_CONFIG_INVALID`; after this change it terminates the process after a fatal log,
   matching every other steady-state C-ABI symbol. ⚠️ **Whether such an exception can be produced at
   all on that path is undecided** — the ledger row declares the change anyway rather than letting a
-  limb change behaviour while its row says it did not.
+  limb change behaviour while its row says it did not. If no such exception can be constructed as a
+  test seam, the declaration and ledger row still stand on the shape of the code (a narrowed inner
+  `catch` beneath a matching outer one) rather than on a demonstrated trigger, and any resulting
+  uncovered line is dispositioned per `[const §IX.1]` at implementation time.
+- **Two distinct out-of-memory arms on the clone path, not one.** US3 scenario 2's
+  `FIXPP_ERR_UNKNOWN` is the dict-backed re-parse's own allocation failure (FR-006). A **separate**,
+  pre-existing arm — `std::bad_alloc` raised during the clone's own construction (copying the frame,
+  allocating the clone shell or its arena) — is unrelated to the re-parse and keeps returning
+  `FIXPP_ERR_CAPI_CONFIG_INVALID`, preserved and narrowed by FR-008's exception boundary, not
+  widened by it.
+- **Bytes `0x7F` and every byte `≥ 0x80` are deliberately accepted by the floor**, not merely
+  untested — widening the floor to exclude them is the separate decision recorded as out of scope
+  above.
 
 ---
 
@@ -332,7 +344,9 @@ Each requirement carries its track. **C-ABI** requirements are governed by `[con
 ### Functional Requirements
 
 - **FR-001** *(C-ABI)*: `fixpp_msg_remove_tag` MUST return `FIXPP_ERR_INVALID_HANDLE` and erase
-  nothing whenever any group builder is open on the message.
+  nothing whenever any group builder is open on the message. Every open builder MUST remain usable
+  after the refusal — its add-entry, field-set and group-end calls continue to succeed — as a
+  post-condition distinct from SC-001's byte-identical committed payload.
 - **FR-002** *(C-ABI)*: that refusal MUST be keyed on **a builder being open**, not on the erased
   tag or its position, so both failure modes — a shifted index and an erased group entry — are one
   predicate.
@@ -340,14 +354,22 @@ Each requirement carries its track. **C-ABI** requirements are governed by `[con
 - **FR-004** *(C-ABI)*: every group-index and instance-index dereference reachable from a C-ABI
   entry point MUST become a **defined refusal** (`FIXPP_ERR_INVALID_HANDLE`) instead of an
   out-of-bounds read. Three reachability classes exist and the delivered shape MUST discharge all
-  three; the classes are the requirement, the members are a reading.
+  three; the classes are the requirement, the members are a reading: **(1)** a subscript inside a
+  resolver's own body; **(2)** a direct subscript inside a C-ABI entry point that no resolver
+  covers; **(3)** an immediate dereference of a resolver's result, which becomes a new
+  null-dereference site unless the resolver's failure is propagated through it.
 - **FR-005** *(C-ABI)*: `fixpp_msg_clone` MUST return an error, and no clone handle, when the
   dict-backed re-parse of its source fails — instead of returning a dictionary-free clone with
-  `FIXPP_ERR_OK`.
+  `FIXPP_ERR_OK`. On this and every other refusal arm, `*clone_out` MUST be set to `NULL` and the
+  **source** handle MUST remain unchanged and usable — no clone was constructed and nothing was
+  consumed from it.
 - **FR-006** *(C-ABI)*: that error MUST be the caller-visible translation of the underlying wire
   failure, yielding a fan of **three already-published codes**: `FIXPP_ERR_UNKNOWN` for
   out-of-memory, `FIXPP_ERR_WIRE_LIMIT_EXCEEDED` for capacity and range failures, and
-  `FIXPP_ERR_WIRE_INVALID_FRAME` for malformed-field failures.
+  `FIXPP_ERR_WIRE_INVALID_FRAME` for malformed-field failures. These three are the re-parse failure
+  routes reachable **today**; the mapping is `translate()`'s existing total switch over
+  `fixpp::core::error`, not a closed list this feature owns — a future route added to that switch
+  translates through the same mechanism without further change here.
 - **FR-007** *(C-ABI)*: **no new error code is minted.** The out-of-memory route surfacing as
   `FIXPP_ERR_UNKNOWN` is existing documented behaviour (**L-049-2**) and MUST be disclosed as such,
   not presented as new. Minting a code would move a frozen header, an audited oracle, an
@@ -357,8 +379,8 @@ Each requirement carries its track. **C-ABI** requirements are governed by `[con
   fatal log rather than returning `FIXPP_ERR_CAPI_CONFIG_INVALID`. The ledger row MUST state that
   its trigger set is **not enumerated**.
 - **FR-009** *(C++)*: a message handle obtained from a **dict-backed** source whose re-parse fails
-  MUST be reported as an error through the existing error channel, before the handle is handed to
-  the caller.
+  MUST be reported, before the handle is handed to the caller, as an error carrying the **wire
+  failure that caused the re-parse to fail** — through the existing error channel.
 - **FR-010** *(C++)*: FR-009 MUST NOT change three retained behaviours: a **dict-free** source whose
   index build degrades still yields a handle and still reports through the already-public build
   status; a span that frames to nothing still yields a handle over an empty view; and no new status
@@ -367,41 +389,55 @@ Each requirement carries its track. **C-ABI** requirements are governed by `[con
 - **FR-011** *(C-ABI)*: `fixpp_session_config_set_comp_ids` and
   `fixpp_session_config_set_begin_string` MUST return `FIXPP_ERR_CAPI_CONFIG_INVALID` when a value
   contains any byte below `0x20` (SOH included) or `'='`, and MUST leave the configuration
-  unchanged. The code is chosen because **every sibling setter already returns it**, including their
-  existing null and empty refusals.
+  unchanged. For `set_comp_ids`, the refusal MUST be **atomic across both arguments**: a valid
+  sender paired with an invalid target MUST leave neither stored. The code is chosen because
+  **every sibling setter already returns it**, including their existing null and empty refusals.
 - **FR-012** *(C++)*: opening a session MUST apply the same refusal to SenderCompID, TargetCompID,
-  BeginString and **each configured RefMsgType(372) entry**, before any message is emitted.
+  BeginString and **each configured RefMsgType(372) entry**, before any message is emitted,
+  returning `core::error::invalid_session_config`.
 - **FR-013** *(both tracks)*: the rule MUST have **exactly one definition**, callable from
   configuration validation before any session exists as well as from session open. The charset is
   the **existing credential floor, unchanged**: widening it is a separate decision with a separate
   blast radius. It MUST be named and documented as a **policy floor**, not as a statement of FIX
-  grammar.
+  grammar. Replacing the credential guard's existing function-local lambda with a call to this one
+  definition MUST NOT change the credential refusal's observable behaviour — its return code and
+  refusal condition stay exactly as shipped.
 - **FR-014** *(C-ABI)*: the C-ABI version MUST move **1.6 → 1.7**, a MINOR bump **marked
   BREAKING**, with no constitutional amendment. The version macro's trailing comment is part of the
   pin and MUST be re-authored, not renumbered.
 - **FR-015** *(C-ABI)*: the BREAKING marking MUST appear in **all three** places
-  `[const §X.7]` obligation 2 requires: the documentation of each affected declaration (or the
-  version header's comment where no declaration carries it), the **PR description**, and the
-  behaviors-and-limitations delta. ⚠️ The PR-description limb MUST be its own `##` **heading** —
+  `[const §X.7]` obligation 2 requires: the documentation of each affected declaration — the three
+  refusing calls' own declarations, FR-001's, FR-005's and FR-011's (or the version header's comment
+  where no declaration carries the change) — the **PR description**, and the behaviors-and-limitations
+  delta. **FR-004's index-bounds declarations are excluded from this marking**: the arm they replace
+  is undefined behaviour, not a documented success, so no call there "used to succeed and now fails."
+  ⚠️ The PR-description limb MUST be its own `##` **heading** —
   bold text under another heading has already failed a gate in this repository and sent every
   downstream tier red.
-- **FR-016** *(C-ABI)*: the ledger delta MUST carry **four behaviour rows and no limitation row** —
-  one for the remove-tag refusal (stating the guard's true width, including the refused-but-safe
-  classes), one for the clone refusal (naming the three codes, referencing L-049-2, and declaring
-  the termination limb), one for the C++ handle refusal (naming the **one** new failure class and
-  **exactly what is not covered**), and one for the configured-byte refusal across both surfaces.
+- **FR-016** *(both tracks)*: the ledger delta MUST carry **four behaviour rows and no limitation
+  row** — one for the remove-tag refusal (stating the guard's true width, including the
+  refused-but-safe classes), one for the clone refusal (naming the three codes, referencing
+  L-049-2, and declaring the termination limb), one for the C++ handle refusal (naming the **one**
+  new failure class and **exactly what is not covered**), and one for the configured-byte refusal
+  across both surfaces. The "no limitation row" clause bounds only these four mandatory rows: the
+  two out-of-scope residuals named below (the probe-cap degradation and RefMsgType(372) at the two
+  inbound-fed reject builders) MUST additionally be recorded as their own limitation row apiece in
+  the same live ledger — leaving either unrecorded there is a Gate B defect.
 - **FR-017** *(C-ABI)*: every version pin outside the version header, and the byte-level freeze
   manifest for each header whose bytes change, MUST move in the same change. Documentation edits
   required by FR-015 are **byte** edits, so headers that carry only a comment change still
   re-baseline. Markings that correctly date the **previous** bump MUST NOT be re-dated.
 - **FR-018** *(both tracks)*: **all three refusals ship in ONE PR**, with **every in-repository
   consumer** — the Python binding, tests, examples and interop harnesses — updated in that same PR,
-  per `[const §X.7]` obligation 3.
+  per `[const §X.7]` obligation 3. This includes a consumer that uses one of the three refused calls
+  only as fixture **setup** — such a call is still broken by a refusal if it happens to run in a
+  state the guard now catches, and must be counted.
 - **FR-019** *(documentation)*: the C-ABI owner document's scope claims that this change falsifies
-  MUST be amended at **all eight** passages that bind the affected error code to a producer set,
-  stated as a **condition** rather than as an enumeration — an enumeration is the shape four
-  consecutive review rounds have falsified. The *"CI grep enforces"* sentence MUST be deleted in the
-  same paragraph (C-2). The PR **closes fixpp#488**.
+  MUST be amended at **every passage that binds the affected error code to a producer set** — a
+  passage that merely mentions it in a count, a changelog or a hedged list is not amended — stated
+  as a **condition** rather than as an enumeration; an enumeration is the shape four consecutive
+  review rounds have falsified. The *"CI grep enforces"* sentence MUST be deleted in the same
+  paragraph (C-2). The PR **closes fixpp#488**.
 - **FR-020** *(documentation)*: the **two derived restatements outside** that document — the
   contract distillation's code-scoping parenthetical and the Python-binding design's
   construction-failure-modes limb — MUST be amended in the same PR, on the separate ground that each
@@ -414,7 +450,12 @@ Each requirement carries its track. **C-ABI** requirements are governed by `[con
 
 - **The three refusing calls** — `fixpp_msg_remove_tag`, `fixpp_msg_clone`, and the pair
   `fixpp_session_config_set_comp_ids` / `fixpp_session_config_set_begin_string`: the only C-ABI
-  symbols whose observable behaviour changes.
+  symbols whose **BREAKING** behaviour changes (FR-004 separately gives further declarations a new
+  *defined, non-breaking* return code; see FR-004/FR-015). **None of the three changes signature,
+  export macro or reentrancy class** — only their return-code behaviour in the newly refused states.
+- **Dict-backed vs. dict-free** — a message handle is *dict-backed* when its view was built by
+  re-parsing the frame against a loaded dictionary (membership and type information available);
+  *dict-free* when built without one. FR-009 and FR-010 turn on this distinction.
 - **The reused error codes** — `FIXPP_ERR_INVALID_HANDLE`, `FIXPP_ERR_CAPI_CONFIG_INVALID`,
   `FIXPP_ERR_UNKNOWN`, `FIXPP_ERR_WIRE_LIMIT_EXCEEDED`, `FIXPP_ERR_WIRE_INVALID_FRAME`: all already
   published; none is minted here.
@@ -439,7 +480,9 @@ compare**, not an internal invariant.
   tag is gone — the positive baseline that proves the guard discriminates rather than refusing
   everything.
 - **SC-003**: a C-ABI entry point handed an out-of-range group or instance index returns
-  `FIXPP_ERR_INVALID_HANDLE`.
+  `FIXPP_ERR_INVALID_HANDLE`. Reached through an arrangement that presents an out-of-range index
+  directly, since FR-001's guard is expected to make the public path unreachable once it lands (see
+  Edge Cases).
 - **SC-004**: cloning a message whose dict-backed re-parse fails returns a **non-OK** code and
   yields **no handle**; no caller can obtain a clone that reports a field the source resolves.
 - **SC-005**: each of the three clone failure modes returns its stated code — `FIXPP_ERR_UNKNOWN`,
@@ -449,7 +492,9 @@ compare**, not an internal invariant.
   configured value is still in effect.
 - **SC-007**: a session configured with such a value **never emits a frame**; opening it fails.
 - **SC-008**: the Python binding exposes the same refusal — a value containing SOH (not NUL)
-  produces the error rather than a successful call.
+  produces the error rather than a successful call. NUL is excluded because a C string cannot carry
+  an embedded NUL to this call at all — the byte scan never sees it — so SOH is the byte that
+  exercises the floor.
 - **SC-009**: a C++ caller requesting a handle over a dict-backed source whose re-parse fails
   receives an **error**; the same caller over a dict-free source whose index build degrades still
   receives a **handle**, and the shipped cells pinning that degradation and the frames-to-nothing
@@ -458,13 +503,14 @@ compare**, not an internal invariant.
   composite value and any test whose **name** encodes the version) reports the new value. These fail
   at test time, not build time — there is no compile-time version assertion.
 - **SC-011**: the error-code enumeration, the append-only code history and the exported-symbol
-  golden are **unchanged** — measurable proof that FR-007 held and that this PR does not collide
-  with the error-taxonomy work.
+  golden are **byte-for-byte unchanged**, compared against this PR's own merge-base — measurable
+  proof that FR-007 held and that this PR does not collide with the error-taxonomy work.
 - **SC-012**: the byte-freeze gate is observed in **both** states — **failing** after the header
   edits and **passing** after the re-baseline. ⚠️ A green result alone is consistent with a
   re-baseline applied before the edits and is not evidence.
-- **SC-013**: the PR body carries a `##` **heading** naming all three changes as BREAKING, in the
-  spelling the previous bump used; the heading check is run locally before the PR is opened.
+- **SC-013**: the PR body carries a `##` **heading** naming all three changes as BREAKING, in
+  fixpp#428's in-tree header-comment spelling (`(1.7, BREAKING)` / `Since 1.7 (BREAKING)`); the
+  heading check is run locally before the PR is opened.
 - **SC-014**: after the amendment, no live passage in the C-ABI owner document or in the two derived
   restatements binds the affected error code to a producer set that its measured producers falsify;
   re-derive by the amended criterion rather than by re-reading a list.
@@ -480,6 +526,10 @@ compare**, not an internal invariant.
   registered as such — an external checkout or a vendored copy leaves no trace here.
 - **Every code this feature returns is already published**, so the version downgrade machinery needs
   no new row and 1.7 is a pure **semantics** bump (FR-007).
+- **No other C-ABI entry point writes `SessionConfig::sender_comp_id`, `::target_comp_id` or
+  `::begin_string`** — re-derive by searching `src/capi/` for writes to those members; a new route
+  appears as a write outside the two setters. FR-011's C-ABI-side protection rests on this staying
+  true.
 - ✅ **`/analyze` and the user `/plan` sign-off are both DISCHARGED**, by different routes and each
   **PINNED to the state it covers**: the sign-off by the owner's act in session, pinned to `plan.md`
   at `d12d2270`; `/analyze` by a run through the canonical `spec-analyzer` executor on 2026-09-20,
