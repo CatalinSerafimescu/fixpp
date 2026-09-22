@@ -376,9 +376,7 @@ TEST(CloneReparseOom, OffsetTableBuildOomYieldsUnknown) {
     h.msg.view = &(*mv);
 
     // gate-b/r1 (G-4): FR-005/B-458-1's source-usable postcondition, on THIS
-    // route (the malformed-field cell cannot carry it -- its raw ctor's
-    // OffsetTable build fails wholesale, so even tag 35 is unreadable BEFORE
-    // any clone call; see CloneDictBackedReparseMalformedFieldYieldsWireInvalidFrame).
+    // route.
     auto assert_source_intact = [&] {
         const char* mt = nullptr;
         size_t mt_len = 0;
