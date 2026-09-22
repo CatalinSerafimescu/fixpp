@@ -28,10 +28,14 @@
 // the bench correctly captures the same hot path.
 //
 // dict::reify() also returns field-absent in R6 scope (get<35>() on the stub
-// always returns dict_xml_parse_failed). These benchmarks therefore measure
-// dispatch and error-path overhead only; real NFR-003-3 numbers require the
-// 2b wire feature. NFR-003-3 assertion gates MUST NOT be derived from stub
-// timings. See spec.md §11 R6 / plan.md Tier-1 preset matrix.
+// always returns dict_xml_parse_failed). For the functions below that pass a
+// default-constructed MV (BM_ReifyAs_20tag, BM_ReifyAs_200tag,
+// BM_Reify_Dispatch_20tag), these benchmarks therefore measure dispatch and
+// error-path overhead only; real NFR-003-3 numbers require the 2b wire
+// feature. NFR-003-3 assertion gates MUST NOT be derived from stub timings.
+// See spec.md §11 R6 / plan.md Tier-1 preset matrix.
+// BM_Reify_DictBacked_20tag below does NOT pass a default-constructed MV --
+// it parses a real dict-backed frame, so this scope does not apply to it.
 // ───────────────────────────────────────────────────────────────────────────
 
 #include <benchmark/benchmark.h>
@@ -62,6 +66,11 @@ namespace {
 
 using MV = fixpp::wire::MessageView<fixpp::wire::access_mode::Index>;
 
+// `_20tag` / `_200tag` in a benchmark name below designates the NFR-003-3
+// workload CLASS a row is compared against (spec.md §11), not the field
+// count of the frame it constructs -- read the frame each function builds,
+// not its suffix, for what it actually times.
+//
 // Stack-local PMR monotonic buffer sized for a typical "20-tag" message.
 constexpr std::size_t k20TagBufSz = 4 * 1024;
 // 64 KiB for the "200-tag" scenario.
