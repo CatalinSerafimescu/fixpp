@@ -233,6 +233,13 @@ prints `0` for a whole syntax.
   `THREADED`), read every one by hand: correcting an instrument in the *safe* direction is still a
   change in the *unsafe* direction for the rows it reclassifies. (#289 batch 21.)
 
+**The same class, in a benchmark: a timing row that never runs the code it is cited for.**
+- A flat paired delta reads as "no cost". It is only evidence if the timed loop reaches the changed path.
+- The 090 case (PR #494, Gate B): the existing reify row passed a view with no MsgType, so `reify()` returned before the factory it was cited for.
+- **Procedure:**
+  - Prove the bench reaches the path: a mutant that slows or deletes the path must move the number, or trace one iteration.
+  - Size small moved work with an attribution bench that times it alone. A small cost inside a large, noisy call is below resolution, not absent.
+
 ### 2. A fix that replaces a wrong claim with a NEW claim reproduces the defect
 
 Rounds of review converge only when a claim is **deleted**, not refreshed. A corrected claim is still a
@@ -250,6 +257,9 @@ re-runs a document. What follows from *structure* cannot rot; what follows from 
 - **Trigger:** you are about to write a number, a list, or a measurement into a document.
 - **Procedure:** keep the condition and the recipe; delete the answer. If the number is load-bearing,
   say so and name the command that regenerates it.
+- **Provenance is a result too.** "Unedited", "kept green", "no test is rewritten by this change" are claims about a diff that is still growing, and any later commit in the same PR can falsify them.
+  - In PR #494's Gate B, a round's own comment fix made its "UNEDITED" note false.
+  - Write the condition a reader can re-check, such as "exercised by `<cell>`", never the history.
 
 ### 4. A copy propagates a claim that is false at the new site
 

@@ -11,6 +11,8 @@ status: stable
   - that the pre-existing reify benchmark returned before the path it was named for;
   - why a layout-only regression past +5% was not "fixed" by forcing alignment.
 
+  `failure-classes.md` gains two owner-approved forms. Class 1 gains the benchmark that never runs the path it is cited for. Class 3 gains provenance ("unedited", "kept green"), a result about a diff that is still growing. The same two are entries in the Sonnet implementer's anti-pattern library. Follow-up fixpp#495 covers the dict-backed reify cost.
+
   Gate B changed no production code across four rounds. Every finding was a test or benchmark gap, or prose claiming more than the code delivers, and twice a fix wrote the next false claim: a replacement list, and an "unedited" provenance note that its own round falsified.
 
 - **2026-09-22 — 090 (#447 / #458 / #452), three C-ABI refusals and a producer set the code never had.**
