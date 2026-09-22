@@ -5,7 +5,9 @@
 # Spec-Kit refresh. .specify/feature.json is tracked, so a bare pin is inherited
 # by every branch and a bundle-less branch silently resolved to the last-pinned
 # (possibly shipped) feature. The pin now records the git branch it was written
-# on, and get_feature_paths refuses a pin recorded for another branch. After a
+# on, and get_feature_paths trusts it only on that branch, or when it names
+# specs/<branch> itself; otherwise it is ignored in favour of specs/<branch>
+# (with a NOTE) when that bundle exists, and refused when it does not. After a
 # refresh, run test-feature-pin.sh (beside this file) — it goes RED if the
 # patch was dropped. Nothing runs it automatically.
 
@@ -230,7 +232,8 @@ get_feature_paths() {
     # Resolve feature directory.  Priority:
     #   1. SPECIFY_FEATURE_DIRECTORY env var (explicit override)
     #   2. .specify/feature.json "feature_directory" key (persisted by specify
-    #      command) — in a git tree only if pinned on the current branch (fixpp#490)
+    #      command) — in a git tree only if it is pinned on the current branch,
+    #      or names specs/<current branch> itself (fixpp#490)
     #   3. specs/<current branch>, when that bundle exists (fixpp#490)
     #   4. Error — no feature context available
     local feature_dir

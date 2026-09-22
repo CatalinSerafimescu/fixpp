@@ -4,8 +4,11 @@
 # .specify/scripts/bash/test-feature-pin.sh
 #
 # Guards the fixpp-local patch to .specify/scripts/bash/common.sh (fixpp#490):
-# the tracked .specify/feature.json pin must not resolve a branch it was not
-# written on. Runs the repo's own common.sh + check-prerequisites.sh inside a
+# the tracked .specify/feature.json pin must not resolve an unrelated branch's
+# feature. A pin is trusted only on the branch it records, or when it names
+# specs/<branch> itself (the same directory the fallback would select) — its
+# identity is the whole normalized path, never its basename. Runs the repo's
+# own common.sh + check-prerequisites.sh inside a
 # throwaway git repo, so the real pin and working tree are never touched.
 # NOT wired into CI (a .specify/-only change runs no matrix, by choice): run it
 # by hand after any Spec-Kit refresh — a refresh that drops the patch goes RED.
@@ -193,7 +196,7 @@ for mode in default nojq; do
         && fail "[$mode] honoured pin unexpectedly emitted a NOTE: ${out:-}" \
         || pass "[$mode] honoured pin emitted no NOTE"
 
-    # 5. Legacy pin (no branch key) whose bundle is named after the branch -> honoured.
+    # 5. Legacy pin (no branch key) naming specs/<branch> itself -> honoured.
     g switch -q -C 089-shipped main
     pin '{"feature_directory":"specs/089-shipped"}'
     if out="$(resolve "$P")" && [[ "$(field FEATURE_DIR "$out")" == "${work}/specs/089-shipped" ]]; then
