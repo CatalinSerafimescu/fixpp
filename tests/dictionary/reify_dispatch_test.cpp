@@ -845,6 +845,11 @@ TEST(ReifyEagerMaterialization, DictBackedCleanParseSucceeds) {
 // re-parse's OffsetTable build, never the bytes_ deep copy (call #1, T062's
 // spurious-hit boundary).
 TEST(ReifyEagerMaterialization, FailedDictBackedReparseRefuses) {
+    // Byte-exact failing-allocator injection: MSVC's debug STL draws a hidden
+    // _Container_proxy from the same resource, shifting the failing call into a
+    // container's initialisation, where bad_alloc escapes a noexcept path. Skipped
+    // there only; exercised on MSVC release and every Linux lane.
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     DictBackedNosFixture f;
     ASSERT_TRUE(f.ok()) << "fixture precondition: v44 NewOrderSingle must dict-parse cleanly";
 
