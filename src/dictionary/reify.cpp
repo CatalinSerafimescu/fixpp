@@ -116,8 +116,11 @@ resolved_message_version owning_message_handle::version() const noexcept {
 wire::MessageView<wire::access_mode::Index> const& owning_message_handle::view() const noexcept {
     static wire::MessageView<wire::access_mode::Index> const kEmpty{};
     // fixpp#458 D-4: a pure read of the cache the factory populated eagerly
-    // (rationale at detail::owning_message_handle_from_frame).
-    if (pimpl_ == nullptr) {
+    // (rationale at detail::owning_message_handle_from_frame). The factory seats
+    // view_cache_ on every path that returns a handle, so an unseated cache is
+    // unreachable; checking it keeps that state defined rather than UB now that
+    // the seating lives in another function.
+    if (pimpl_ == nullptr || !pimpl_->view_cache_) {
         return kEmpty;
     }
     return *pimpl_->view_cache_;
