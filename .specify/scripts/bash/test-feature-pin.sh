@@ -6,9 +6,8 @@
 # Guards the fixpp-local patch to .specify/scripts/bash/common.sh (fixpp#490):
 # the tracked .specify/feature.json pin must not resolve an unrelated branch's
 # feature. A pin is trusted only on the branch it records, or when it names
-# specs/<branch> itself (the same directory the fallback would select) — its
-# identity is the whole normalized path, never its basename. Runs the repo's
-# own common.sh + check-prerequisites.sh inside a
+# specs/<branch> itself — its identity is the whole normalized path, never its
+# basename. Runs the repo's own common.sh + check-prerequisites.sh inside a
 # throwaway git repo, so the real pin and working tree are never touched.
 # NOT wired into CI (a .specify/-only change runs no matrix, by choice): run it
 # by hand after any Spec-Kit refresh — a refresh that drops the patch goes RED.
