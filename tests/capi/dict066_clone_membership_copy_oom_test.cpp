@@ -47,6 +47,7 @@
 #include <new>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <vector>
 
 #include "capi_internal.hpp"  // engine-internal fixpp_msg (test-only access)
@@ -374,6 +375,25 @@ TEST(CloneReparseOom, OffsetTableBuildOomYieldsUnknown) {
     InboundHandle h;
     h.msg.view = &(*mv);
 
+    // gate-b/r1 (G-4): FR-005/B-458-1's source-usable postcondition, on THIS
+    // route (the malformed-field cell cannot carry it -- its raw ctor's
+    // OffsetTable build fails wholesale, so even tag 35 is unreadable BEFORE
+    // any clone call; see CloneDictBackedReparseMalformedFieldYieldsWireInvalidFrame).
+    auto assert_source_intact = [&] {
+        const char* mt = nullptr;
+        size_t mt_len = 0;
+        ASSERT_EQ(fixpp_msg_get_msg_type(h.ptr(), &mt, &mt_len), FIXPP_ERR_OK);
+        ASSERT_NE(mt, nullptr);
+        EXPECT_EQ(std::string_view(mt, mt_len), "8");
+
+        const char* sv = nullptr;
+        size_t sv_len = 0;
+        ASSERT_EQ(fixpp_msg_get_string(h.ptr(), 49, &sv, &sv_len), FIXPP_ERR_OK);
+        ASSERT_NE(sv, nullptr);
+        EXPECT_EQ(std::string_view(sv, sv_len), "SENDER");
+    };
+    assert_source_intact();  // pre-condition: the lookup succeeds BEFORE either clone call
+
     g_alloc_count.store(0);
     g_fail_at.store(-1);
     fixpp_msg_t* clone_calib = nullptr;
@@ -399,6 +419,8 @@ TEST(CloneReparseOom, OffsetTableBuildOomYieldsUnknown) {
         threw = true;
     }
     g_fail_at.store(-1);  // disarm before any further allocation (test teardown)
+
+    assert_source_intact();  // FR-005: source unchanged and still usable AFTER the refusal
 
     EXPECT_FALSE(threw) << "a bad_alloc inside OffsetTable::build() must be caught INTERNALLY "
                            "(OffsetTable::build's own catch) and never propagate";

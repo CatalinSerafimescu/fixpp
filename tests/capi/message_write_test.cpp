@@ -2502,6 +2502,16 @@ TEST(MessageWrite, CloneDictBackedReparseMalformedFieldYieldsWireInvalidFrame) {
     InboundHandleForWrite h;
     h.msg.view = &mv_src;
 
+    // gate-b/r1 (G-4): a before/after fixpp_msg_get_msg_type postcondition was
+    // attempted here to match T047's assert_source_intact, but the raw
+    // dict-backed ctor's OffsetTable build fails wholesale on the malformed
+    // field -- even tag 35, which precedes it in the body, is NOT indexed
+    // (FIXPP_ERR_TAG_NOT_FOUND on the BEFORE read, before any clone call).
+    // Per the fix-queue instruction, the assertion is not weakened to a
+    // proxy (e.g. bytes() non-empty); this route's source-usable postcondition
+    // is unwitnessable by this lever. See CloneReparseOom.
+    // OffsetTableBuildOomYieldsUnknown (dict066_clone_membership_copy_oom_test.cpp)
+    // for the postcondition landed on the OOM route instead.
     fixpp_msg_t* clone_out = nullptr;
     EXPECT_EQ(fixpp_msg_clone(h.ptr(), &clone_out), FIXPP_ERR_WIRE_INVALID_FRAME);
     EXPECT_EQ(clone_out, nullptr);
