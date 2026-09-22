@@ -10,7 +10,7 @@
 # NOT wired into CI (a .specify/-only change runs no matrix, by choice): run it
 # by hand after any Spec-Kit refresh — a refresh that drops the patch goes RED.
 set -euo pipefail
-# An exported GIT_DIR (e.g. ctest run from a git hook) would point every
+# An exported GIT_DIR (e.g. run from a git hook) would point every
 # `git -C "$work"` below at the REAL checkout — commits and branch switches included.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_CEILING_DIRECTORIES
 
@@ -55,18 +55,30 @@ fail() { echo "FAIL: $1"; fails=$((fails + 1)); }
 
 pin() { printf '%s\n' "$1" > "${work}/.specify/feature.json"; }
 
-# Resolve with every SPECIFY_* override scrubbed: an inherited one would make
-# every arm below vacuous. $1 = PATH to use.
-resolve() {
-    (cd "$work" && env -u SPECIFY_FEATURE -u SPECIFY_FEATURE_DIRECTORY -u SPECIFY_INIT_DIR \
-        PATH="$1" bash .specify/scripts/bash/check-prerequisites.sh --paths-only 2>&1)
-}
 field() { sed -n "s/^$1: //p" <<< "$2"; }
+# Resolve with every SPECIFY_* override scrubbed: an inherited one would make
+# every arm below vacuous. $1 = PATH to use. Extra args ($2+) are VAR=val
+# assignments applied only to this one invocation (e.g. GIT_DIR=...,
+# GIT_TEST_ASSUME_DIFFERENT_OWNER=1), so the leak under test is injected per
+# call and never left set for the rest of the suite.
+resolve() {
+    local pathval="$1"; shift
+    (cd "$work" && env -u SPECIFY_FEATURE -u SPECIFY_FEATURE_DIRECTORY -u SPECIFY_INIT_DIR \
+        PATH="$pathval" "$@" bash .specify/scripts/bash/check-prerequisites.sh --paths-only 2>&1)
+}
+# Same as resolve(), rooted at an arbitrary directory holding its own
+# .specify/scripts/bash copy (arms 10-11, which are not under $work).
+resolve_in() {
+    local dir="$1" pathval="$2"; shift 2
+    (cd "$dir" && env -u SPECIFY_FEATURE -u SPECIFY_FEATURE_DIRECTORY -u SPECIFY_INIT_DIR \
+        PATH="$pathval" "$@" bash .specify/scripts/bash/check-prerequisites.sh --paths-only 2>&1)
+}
 # A refusal must be THIS refusal: any non-zero exit (a crash, an unbound
-# variable) would otherwise pass. $1 = arm, $2 = expected reason text.
+# variable) would otherwise pass. $1 = arm, $2 = expected reason text,
+# $3+ = extra env assignments forwarded to resolve().
 refused() {
     local out
-    if out="$(resolve "$P")"; then
+    if out="$(resolve "$P" "${@:3}")"; then
         fail "[$mode] $1 resolved: $(field FEATURE_DIR "$out")"
     elif grep -qF "$2" <<< "$out" && grep -qF 'fixpp#490' <<< "$out"; then
         pass "[$mode] $1 refused"
@@ -74,6 +86,47 @@ refused() {
         fail "[$mode] $1 failed for the wrong reason: ${out}"
     fi
 }
+
+# --- RC-1 fixtures (fixpp#490 Gate B round 1): independent of $work, so the
+#     git-failure / non-git / unborn-branch paths are exercised even though
+#     arms 1-7b never touch them. ---
+
+# Arm 8: a second git repo on branch 'foreign', with its own bundle, so a
+# leaked GIT_DIR resolves plausibly instead of erroring for an unrelated
+# reason.
+other="${tmp}/other"
+mkdir -p "${other}/specs/089-shipped"
+git -C "$other" init -q -b foreign
+git -C "$other" config user.name t
+git -C "$other" config user.email t@t
+git -C "$other" commit -q --allow-empty -m root
+
+# Arm 10: a directory with NO .git ancestor at all, holding its own copy of
+# the scripts and a legacy (no-branch) pin -- exercises the genuine non-git
+# path (upstream behaviour kept). mktemp honours TMPDIR, so confirm the
+# precondition rather than assume it.
+nogit="${tmp}/nogit"
+mkdir -p "${nogit}/.specify/scripts/bash" "${nogit}/specs/089-shipped"
+cp "${scripts}/common.sh" "${scripts}/check-prerequisites.sh" "${nogit}/.specify/scripts/bash/"
+printf '{"feature_directory":"specs/089-shipped"}\n' > "${nogit}/.specify/feature.json"
+d="$nogit"
+while [[ -n "$d" ]]; do
+    if [[ -e "$d/.git" ]]; then
+        fail "arm 10 precondition: $nogit has a .git ancestor at $d (TMPDIR is inside a git tree)"
+        break
+    fi
+    [[ "$d" == / ]] && break
+    d="$(dirname "$d")"
+done
+
+# Arm 11: a fresh, unborn-branch repo (no commit yet) with its own scripts and
+# a matching bundle, no pin.
+unborn="${tmp}/unborn"
+mkdir -p "${unborn}/.specify/scripts/bash" "${unborn}/specs/092-unborn"
+cp "${scripts}/common.sh" "${scripts}/check-prerequisites.sh" "${unborn}/.specify/scripts/bash/"
+git -C "$unborn" init -q -b 092-unborn
+git -C "$unborn" config user.name t
+git -C "$unborn" config user.email t@t
 
 for mode in default nojq; do
     P="$PATH"; [[ "$mode" == nojq ]] && P="$nojq"
@@ -86,24 +139,38 @@ for mode in default nojq; do
     pin '{"feature_directory":"specs/089-shipped"}'
     refused "bundle-less branch" "No feature for branch '447-bundleless'"
 
-    # 1b. --paths-only must never write the pin (upstream #3025), even when the
-    #     env override differs from it in both directory and recorded branch.
+    # 1b. --paths-only resolves via SPECIFY_FEATURE_DIRECTORY and never writes
+    #     the pin (upstream #3025), even when the override differs from it in
+    #     both directory and recorded branch.
     pin '{"feature_directory":"specs/089-shipped","branch":"main"}'
     before="$(cksum < "${work}/.specify/feature.json")"
-    (cd "$work" && env -u SPECIFY_FEATURE -u SPECIFY_INIT_DIR PATH="$P" \
+    rc=0
+    out="$(cd "$work" && env -u SPECIFY_FEATURE -u SPECIFY_INIT_DIR PATH="$P" \
         SPECIFY_FEATURE_DIRECTORY=specs/090-bundle \
-        bash .specify/scripts/bash/check-prerequisites.sh --paths-only >/dev/null 2>&1) || true
+        bash .specify/scripts/bash/check-prerequisites.sh --paths-only 2>&1)" || rc=$?
+    if [[ $rc -eq 0 && "$(field FEATURE_DIR "$out")" == "${work}/specs/090-bundle" ]]; then
+        pass "[$mode] --paths-only resolved via the override"
+    else
+        fail "[$mode] --paths-only via override: rc=$rc ${out}"
+    fi
     [[ "$(cksum < "${work}/.specify/feature.json")" == "$before" ]] \
         && pass "[$mode] --paths-only left feature.json untouched" \
         || fail "[$mode] --paths-only rewrote feature.json"
 
-    # 2. Branch with its own bundle + pin recorded for another branch -> own bundle.
+    # 2. Branch with its own bundle + pin recorded for another branch -> own
+    #    bundle, with the stale-pin NOTE naming the ignored pin, its recorded
+    #    branch, and the bundle used (fixpp#490).
     g switch -q -C 091-own main
     pin '{"feature_directory":"specs/089-shipped","branch":"main"}'
     if out="$(resolve "$P")" && [[ "$(field FEATURE_DIR "$out")" == "${work}/specs/091-own" ]]; then
         pass "[$mode] stale pin ignored for branch with own bundle"
     else
         fail "[$mode] branch with own bundle: ${out}"
+    fi
+    if grep -qF "NOTE: ignoring .specify/feature.json pin 'specs/089-shipped' (branch 'main'); using specs/091-own (fixpp#490)." <<< "${out:-}"; then
+        pass "[$mode] stale-pin NOTE names the ignored pin and the branch bundle"
+    else
+        fail "[$mode] stale-pin NOTE missing or wrong: ${out:-}"
     fi
 
     # 3. Same branch, pin recorded for it but naming another bundle -> refuse.
@@ -123,6 +190,9 @@ for mode in default nojq; do
     [[ "$(field BRANCH "${out:-}")" == 447-bundleless ]] \
         && pass "[$mode] BRANCH is the git branch" \
         || fail "[$mode] BRANCH reported as '$(field BRANCH "${out:-}")'"
+    grep -qF 'NOTE:' <<< "${out:-}" \
+        && fail "[$mode] honoured pin unexpectedly emitted a NOTE: ${out:-}" \
+        || pass "[$mode] honoured pin emitted no NOTE"
 
     # 5. Legacy pin (no branch key) whose bundle is named after the branch -> honoured.
     g switch -q -C 089-shipped main
@@ -132,6 +202,9 @@ for mode in default nojq; do
     else
         fail "[$mode] legacy pin matching the branch: ${out}"
     fi
+    grep -qF 'NOTE:' <<< "${out:-}" \
+        && fail "[$mode] honoured legacy pin unexpectedly emitted a NOTE: ${out:-}" \
+        || pass "[$mode] honoured legacy pin emitted no NOTE"
 
     # 6. Detached HEAD -> refuse (no branch to validate against).
     g switch -q --detach main
@@ -141,14 +214,61 @@ for mode in default nojq; do
     #    written pin then resolves on that branch without the env var.
     g switch -q -C 447-bundleless main
     rm -f "${work}/.specify/feature.json"
+    rc=0
     (cd "$work" && env -u SPECIFY_FEATURE -u SPECIFY_INIT_DIR PATH="$P" \
         SPECIFY_FEATURE_DIRECTORY=specs/090-bundle \
-        bash -c 'source .specify/scripts/bash/common.sh && get_feature_paths >/dev/null')
-    if grep -q '"branch":"447-bundleless"' "${work}/.specify/feature.json" \
+        bash -c 'source .specify/scripts/bash/common.sh && get_feature_paths >/dev/null') || rc=$?
+    if [[ $rc -eq 0 ]] && grep -q '"branch":"447-bundleless"' "${work}/.specify/feature.json" \
         && out="$(resolve "$P")" && [[ "$(field FEATURE_DIR "$out")" == "${work}/specs/090-bundle" ]]; then
         pass "[$mode] persisted pin records its branch and round-trips"
     else
-        fail "[$mode] persist round-trip: $(cat "${work}/.specify/feature.json") / ${out:-}"
+        fail "[$mode] persist round-trip: rc=$rc $(cat "${work}/.specify/feature.json" 2>/dev/null) / ${out:-}"
+    fi
+
+    # 7b. Re-persisting a LEGACY pin (same directory, no branch key) still
+    #     writes the branch: the skip-write check must compare branch too, not
+    #     just feature_directory (fixpp#490 migration path).
+    pin '{"feature_directory":"specs/090-bundle"}'
+    rc=0
+    (cd "$work" && env -u SPECIFY_FEATURE -u SPECIFY_INIT_DIR PATH="$P" \
+        SPECIFY_FEATURE_DIRECTORY=specs/090-bundle \
+        bash -c 'source .specify/scripts/bash/common.sh && get_feature_paths >/dev/null') || rc=$?
+    if [[ $rc -eq 0 ]] && grep -q '"branch":"447-bundleless"' "${work}/.specify/feature.json"; then
+        pass "[$mode] re-persisting a legacy same-directory pin still records the branch"
+    else
+        fail "[$mode] legacy pin migration: rc=$rc $(cat "${work}/.specify/feature.json" 2>/dev/null)"
+    fi
+
+    # 8. A foreign GIT_DIR (leaked from the caller's environment) must not
+    #    redirect branch detection to a different repository (fixpp#490
+    #    recreated).
+    g switch -q -C 447-bundleless main
+    pin '{"feature_directory":"specs/089-shipped","branch":"foreign"}'
+    refused "foreign GIT_DIR" "No feature for branch '447-bundleless'" "GIT_DIR=${other}/.git"
+
+    # 9. A git failure at repo_root (dubious ownership) must refuse, not fall
+    #    back to the untrusted legacy pin.
+    rc=0
+    env GIT_TEST_ASSUME_DIFFERENT_OWNER=1 PATH="$P" git -C "$work" rev-parse >/dev/null 2>&1 || rc=$?
+    if [[ $rc -eq 0 ]]; then
+        fail "[$mode] arm 9 precondition: GIT_TEST_ASSUME_DIFFERENT_OWNER=1 not honoured by this git (safe.directory=$(git config --global --get-all safe.directory 2>/dev/null | paste -sd, -))"
+    else
+        refused "git failure (dubious ownership)" "git cannot read the branch" GIT_TEST_ASSUME_DIFFERENT_OWNER=1
+    fi
+
+    # 10. A genuine non-git directory keeps the upstream legacy-pin behaviour.
+    if out="$(resolve_in "$nogit" "$P")" && [[ "$(field FEATURE_DIR "$out")" == "${nogit}/specs/089-shipped" ]]; then
+        pass "[$mode] genuine non-git directory resolves the legacy pin"
+    else
+        fail "[$mode] genuine non-git directory: ${out:-}"
+    fi
+
+    # 11. An unborn branch (no commit yet) resolves its own bundle rather than
+    #     being misclassified as detached HEAD.
+    if out="$(resolve_in "$unborn" "$P")" && [[ "$(field FEATURE_DIR "$out")" == "${unborn}/specs/092-unborn" ]]; then
+        pass "[$mode] unborn branch resolves its own bundle"
+    else
+        fail "[$mode] unborn branch: ${out:-}"
     fi
 done
 
