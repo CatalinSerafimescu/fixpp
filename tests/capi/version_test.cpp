@@ -62,7 +62,7 @@ TEST(CapiVersion, LibraryVersionIsExactly_0_0_1) {
 TEST(CapiVersion, CApiAndLibraryVersionsAreDecoupled) {
     fixpp_version_t cabi = fixpp_version();
     fixpp_version_t lib = fixpp_library_version();
-    // Library is 0.0.1; C-ABI is 1.6.0 — the major values differ (the stablest
-    // discriminator across the freeze; the minors differ too).
+    // The two tracks advance independently; their MAJOR values differ, which
+    // is the stablest discriminator across a freeze (the minors differ too).
     EXPECT_NE(cabi.major, lib.major);
 }
