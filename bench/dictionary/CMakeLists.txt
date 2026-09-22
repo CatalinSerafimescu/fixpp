@@ -55,6 +55,9 @@ if(TARGET fixpp_codegen_generate)
   target_include_directories(reify_bench PRIVATE
     "${_REIFY_CODEGEN_INC}"
   )
+  target_compile_definitions(reify_bench PRIVATE
+    "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
+  )
   set_target_properties(reify_bench PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bench/dictionary"
   )
