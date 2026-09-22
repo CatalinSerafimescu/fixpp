@@ -10,6 +10,7 @@ refs:
   - bindings/python/CMakeLists.txt
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/2m-pybind.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/090-capi-refusals-gatea.md
 codegraph_entry: []
 ---
 
@@ -115,3 +116,8 @@ grep -n 'class ' bindings/python/fixpp_oo.py          # the OO layer's real shap
 
 - [`c-api.md`](./c-api.md) — the seam this wraps, and why its version is `1.5.0`.
 - [`errors.md`](./errors.md) — error codes surface through the same ABI, downgraded per consumer minor.
+  ⚠️ `2m-pybind.md`'s *Construction failure modes* repeated `2i`'s construction-only reading of
+  `FIXPP_ERR_CAPI_CONFIG_INVALID`. 090 amended it to the condition; see `errors.md` for what was
+  wrong. The binding needed no change for 090's config byte floor. A CompID carrying SOH is refused
+  inside the C setter, not by the typemap's embedded-NUL guard. `bindings/python/tests/test_roundtrip.py`'s
+  byte-floor cell asserts that the refusal is not the NUL guard's.

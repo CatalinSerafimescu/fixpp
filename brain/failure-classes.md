@@ -47,6 +47,20 @@ prints `0` for a whole syntax.
   - **Procedure:** spell the expectation out independently and accept the duplication — it *is* the
     mechanism. Then prove it: mutate the shared constant and require RED. A pin that imports
     anything from its subject must be assumed inert until a mutant says otherwise.
+- ⚠️ **A POSITIVE CONTROL PROVES THE COMMAND RAN; IT DOES NOT PROVE THE CORPUS HOLDS THE ANSWER.**
+  A zero can be done correctly: a different pattern, positive on the same corpus. It can still be
+  wrong if the property is not decided in that corpus. 090's design note concluded "libstdc++
+  hardening is off everywhere" from a grep of `cmake/`, `CMakeLists.txt` and `CMakePresets.json`,
+  with `FIXPP_WERROR` as its control. But `_GLIBCXX_ASSERTIONS` is a **library default**, on when
+  not optimising. No pattern over the project's build files could ever have reported it. A hard
+  out-of-range subscript aborted in the debug preset, which was the first sign.
+  - **Trigger:** you are concluding that a toolchain or library property is off because no project
+    flag sets it.
+  - **Procedure:** ask the compiler, not the build files. Preprocess with the real toolchain and
+    flags, test the macro, and do it once per optimisation level the presets use.
+  - ⭐ **Check what survives before rewriting the conclusion.** In 090 the premise was wrong and the
+    decision was not: the defect was a stale but *in-range* index, which no bounds assertion sees at
+    any level.
 - ⚠️ **PRESENT IS NOT ACTIVE — a witness can prove a mechanism was LOADED and say nothing about
   whether it TOOK EFFECT.** When an instrument works by interposition, injection or overriding
   (LD_PRELOAD, a monkey-patch, a subclass, a mock registered in a container, an interceptor

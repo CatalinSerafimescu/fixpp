@@ -7,11 +7,17 @@ refs:
   - src/dictionary/xml_loader.cpp
   - src/dictionary/orchestra_loader.cpp
   - src/dictionary/version_registry.cpp
+  - src/dictionary/reify.cpp
+  - include/fixpp/dict/reify.hpp
   - .specify/2c-codegen.md
   - .specify/215-dictionary-view.md
   - .specify/456-table-view-seal.md
+  - .specify/447-458-452-capi-refusals.md
+  - spec/behaviors-and-limitations.md
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/2c-codegen.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/090-capi-refusals-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/090-capi-refusals-implement-log.md
 codegraph_entry: [Dictionary, xml_loader, orchestra_loader, field_traits, version_registry, table_view_builder]
 constitution: ["§I.1"]
 ---
@@ -213,6 +219,30 @@ used to, and `build()` is `return std::move(tv_);` with no validation of any kin
 table can still plant a zero where a loaded dictionary cannot. That is why `B-384-2` was **amended,
 not closed** — its wording now names the `table_view_builder` surface instead of the hand-built
 view — and why `L-456-1` was filed beside it.
+
+## The reify handle materialises EAGERLY and refuses a failed re-parse (090, fixpp#458)
+
+`fixpp::dict::detail::owning_message_handle_from_frame` (`src/dictionary/reify.cpp`) builds the
+handle's view when it mints the handle. Before 090 the build happened lazily, on the first `view()`.
+When a dict-backed source's re-parse fails, the factory now returns that wire error through its
+`expected_t` channel, and so do `reify()` and the generated dispatch. Before, it fell back silently
+to a dict-free view that lost the dictionary's Length+Data pairs. This is `B-458-2`, BREAKING for a
+direct C++ caller. The C-ABI twin is `fixpp_msg_clone`; see [`c-api.md`](./c-api.md).
+
+- **Why eager.** `view()` is a `noexcept` accessor that returns a reference, so a refusal found
+  lazily had nowhere to go. The factory already had a refusal channel (`dict_reify_oom`). It simply
+  ran the fallible work later. The design note's v0.1 had called that deferral a source fact rather
+  than a choice.
+- **Rejected:** v0.1's three-state status accessor on the handle. It could not report a framing
+  failure, and it could not be both non-allocating and post-materialisation.
+- **Kept as it was, on purpose:** a framing failure, a framed-but-empty span, and a dict-free view's
+  degraded build still return a live handle. Only the re-parse of a frame that framed successfully
+  refuses (`include/fixpp/dict/reify.hpp`'s factory comment). `.specify/2c-codegen.md`'s reify
+  error entry carries an in-place *"Updated (fixpp#458 …)"* note saying the same.
+- ⚠️ **Open residuals:** `L-458-2` (fixpp#493). The re-parse uses the DEFAULT offset-entry cap, so a
+  source accepted under a raised cap cannot be cloned or reified. `L-458-1` covers a dict-backed
+  build that under-indexes near the probe cap while reporting success. Check the live B&L file
+  before treating either as open.
 
 > ⚠️ **Before you write "immutable" about a `table_view`, read that banner.** #456 took three Gate B
 > rounds and found **zero** code defects across all three; every finding was prose claiming more than

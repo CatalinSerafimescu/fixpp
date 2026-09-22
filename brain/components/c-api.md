@@ -8,11 +8,19 @@ refs:
   - include/fix/c_api/version.h
   - include/fix/c_api/handles.h
   - src/capi/fixpp_capi.map
+  - src/capi/message_write.cpp
+  - src/capi/config.cpp
   - .specify/2i-capi.md
+  - .specify/447-458-452-capi-refusals.md
+  - specs/090-capi-refusals/spec.md
+  - spec/behaviors-and-limitations.md
   - tools/check_layers.py
   - .github/workflows/abi-golden.yml
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/2i-capi.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/090-capi-refusals-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/090-capi-refusals-implement-log.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/090-capi-refusals-verify.md
 codegraph_entry: [fixpp_engine_t, fixpp_session_t, fixpp_msg_t, fixpp_strerror]
 constitution: ["§V.1", "§IV.2", "§X.1", "§X.4"]
 ---
@@ -85,6 +93,40 @@ Decided in Gate B, after the first pass over this page:
   dictionary-wide first-seen delimiter refused pairs that are well-formed in that context. When the
   context has no entry, the setter defers to commit, which fails closed. Rejected: guessing from the
   first-seen delimiter.
+
+## C-ABI 1.7: three refusals, declared BREAKING (090, fixpp#447 / #458 / #452)
+
+Design authority: `.specify/447-458-452-capi-refusals.md`. ⚠️ **Its Gate A did NOT converge** — the
+feature carries `gate-a-waived`; read the gate record before treating a decision below as reviewed.
+What each refusal is, per symbol, is in `include/fix/c_api/message.h` / `session.h` and the B&L rows
+`B-447-1`, `B-458-1`, `B-452-1`. What follows is the half the headers do not state.
+
+- **`fixpp_msg_remove_tag` refuses while ANY group builder is open** (`src/capi/message_write.cpp`).
+  Rejected: **re-indexing the open builders after the erase** (the issue's Option B). It cannot
+  repair the case where the erased entry *is* the open group — there is no correct index to
+  renumber to — so it would have to refuse there anyway, giving one call two behaviours. Also
+  rejected: a narrower guard keyed on the tag or the erase position. It over-refuses less, but its
+  outcome depends on accumulator layout the C ABI does not expose. The code is
+  `FIXPP_ERR_INVALID_HANDLE` because `fixpp_msg_commit` already answers "a builder is open" with it.
+  ⚠️ The guard knowingly refuses two calls that were safe (an absent tag; a tag after every open
+  group). The design note's v0.1 claim that no correct program loses anything was false and was
+  withdrawn.
+- **Every group/instance index dereference reachable from the C ABI is a defined refusal.** This is
+  defence in depth after the guard above, and it is **not** a BREAKING change on its own.
+- **`fixpp_msg_clone` refuses a failed dict-backed re-parse** instead of returning a silently
+  dict-free clone. Rejected: **minting a new error code.** It returns `translate(parsed.error())`,
+  whose cost is nothing, where a new enumerator re-baselines the freeze and the ABI history.
+  Rejected too: `FIXPP_ERR_DICT_OOM` for the out-of-memory route, whose name scopes it to dictionary
+  load. The exception boundary is **nested**: an inner `bad_alloc` gives `FIXPP_ERR_CAPI_CONFIG_INVALID`
+  and an outer `catch (...)` gives a fatal log and `abort`. ⭐ **Clone stays a steady-state symbol.**
+  `[2i §5.2]`'s construction-time whitelist was **not** amended. The defect was the old blanket
+  catch's *width*, not its code.
+- **`fixpp_session_config_set_comp_ids` / `_set_begin_string` refuse a byte `< 0x20` or `'='`**
+  (`src/capi/config.cpp`). They use the same predicate as `Session::open`; see
+  [`session.md`](./session.md) for why it is one function and why it is policy, not grammar.
+
+All three changed a call that used to succeed, so under `[const §X.7]` they are BREAKING, as with
+1.6. The C++ track (the reify factory, `Session::open`) moves with them but is not ABI.
 
 ## ⚠️ What the ABI gate actually checks — and what it does not
 
