@@ -170,6 +170,25 @@ def test_config_str_rejects_embedded_nul():
     fixpp.session_config_destroy(sc)
 
 
+def test_config_str_rejects_soh_byte_floor():
+    """090-capi-refusals (fixpp#452): a CompID containing SOH (\x01), NOT NUL,
+    is refused by the NEW byte floor inside the C function itself
+    (FIXPP_ERR_CAPI_CONFIG_INVALID), not by the typemap's embedded-NUL
+    marshalling guard above. RED on the unfixed tree: this currently returns
+    OK. [SC-008; V9]
+
+    The control (V9's control): this failure's message must NOT match the
+    embedded-NUL cell's marshalling message -- if it did, this cell would be
+    measuring marshalling again, not the new refusal."""
+    sc = fixpp.session_config_create()
+    with pytest.raises(fixpp.Error) as ei:
+        fixpp.session_config_set_comp_ids(sc, "SEND\x01ER", "TARGET")
+    assert "embedded NUL" not in str(ei.value), (
+        "the SOH cell must fail for the byte-floor reason, not the NUL marshalling reason"
+    )
+    fixpp.session_config_destroy(sc)
+
+
 def test_config_str_rejects_wrong_type():
     """A non-str config const char* raises fixpp.Error (single binding exception
     type, FR-008 / T-3), not a bare Python TypeError."""

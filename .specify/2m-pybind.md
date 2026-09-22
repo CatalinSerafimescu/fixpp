@@ -415,7 +415,7 @@ class Engine:
 
 **Reentrancy:** `__init__` is `FIXPP_SINGLE_THREAD`; subsequent methods are mostly `FIXPP_THREAD_SAFE` (per the C-ABI annotations on the underlying symbols). Verified by §6.5 enforcement.
 
-**Construction failure modes.** Per `[2i §4.5]`: `VersionMismatch` (engine major != consumer major); per `[2i §6.5]` row 8: `BindingError(FIXPP_ERR_CAPI_CONFIG_INVALID)` for any other construction-time exception (bad config, OOM during arena setup); per `[2j §3.10]` `EngineConfig` validation may raise `ControlPlaneError(FIXPP_ERR_CTRL_CONFIG)`.
+**Construction failure modes.** Per `[2i §4.5]`: `VersionMismatch` (engine major != consumer major); per `[2i §6.5]`'s `FIXPP_ERR_CAPI_CONFIG_INVALID` row: `BindingError(FIXPP_ERR_CAPI_CONFIG_INVALID)` where the underlying C-ABI entry point cannot complete — an explicit refusal or a caught exception on a fallible construction/mutation step (bad config, OOM during arena setup), not exclusive to construction-time exceptions; per `[2j §3.10]` `EngineConfig` validation may raise `ControlPlaneError(FIXPP_ERR_CTRL_CONFIG)`.
 
 **Close discipline.** `Engine.close()` calls `fixpp_engine_destroy`; the engine destructor drains all open sessions per `[2d §6.6]` / `[2i §5.3]`. Calling `close()` on an already-closed engine is a no-op (idempotent per `[2i §4.2.1]`). The `__exit__` context manager hook calls `close()` automatically.
 

@@ -937,4 +937,157 @@ TEST(FixtCredentials, FQ3e_PasswordWithControlByte_ReturnsInvalidConfig_NoWireEm
     EXPECT_TRUE(emitted.empty()) << "No frame must be emitted when open() rejects (FQ-3e)";
 }
 
+// ── 090-capi-refusals (fixpp#452) — T033: `[C++ track]` Session::open cells
+// for EC-7 — the same byte floor as FQ-3, applied to sender_comp_id /
+// target_comp_id / begin_string / supported_msg_types[].msg_type. Mirrors the
+// role-symmetry precedent
+// CredentialStoreRedaction.T007_OversizedCredential_OpenRejects_{Initiator,
+// Acceptor} (test_credential_store_redaction.cpp) — CompIDs and BeginString
+// are emitted by BOTH roles. [FR-012; SC-007; data-model.md EC-7]
+
+TEST(FixtCredentials, SessionOpen_SenderCompIdWithSOH_ReturnsInvalidConfig_NoWireEmit_Initiator) {
+    auto dict = make_dict_creds(kMinimalFix50sp2XmlCreds);
+    CredsFixtSetup s{{dict}};
+
+    std::vector<std::byte> emitted;
+    auto cfg = s.make_initiator_cfg(application_version::v50sp2);
+    cfg.sender_comp_id = std::string("T") + "\x01" + "W";  // SOH injection
+    cfg.transport_send = [&](std::span<const std::byte> f) { emitted.assign(f.begin(), f.end()); };
+
+    fixpp::session::Session sess(s.engine, cfg, &s.registry);
+    auto result = run_sync_creds(s, [&] { return sess.open(); });
+
+    ASSERT_FALSE(result.has_value())
+        << "open() must fail when sender_comp_id contains SOH (090/EC-7)";
+    EXPECT_EQ(result.error(), fixpp::core::error::invalid_session_config)
+        << "got: " << static_cast<int>(result.error());
+    EXPECT_TRUE(emitted.empty()) << "No frame must be emitted when open() rejects";
+}
+
+TEST(FixtCredentials, SessionOpen_SenderCompIdWithSOH_ReturnsInvalidConfig_NoWireEmit_Acceptor) {
+    auto dict = make_dict_creds(kMinimalFix50sp2XmlCreds);
+    CredsFixtSetup s{{dict}};
+
+    std::vector<std::byte> emitted;
+    auto cfg = s.make_acceptor_cfg(application_version::v50sp2);
+    cfg.sender_comp_id = std::string("I") + "\x01" + "SLD";  // SOH injection
+    cfg.transport_send = [&](std::span<const std::byte> f) { emitted.assign(f.begin(), f.end()); };
+
+    fixpp::session::Session sess(s.engine, cfg, &s.registry);
+    auto result = run_sync_creds(s, [&] { return sess.open(); });
+
+    ASSERT_FALSE(result.has_value())
+        << "acceptor open() must fail when sender_comp_id contains SOH (090/EC-7/FR-012)";
+    EXPECT_EQ(result.error(), fixpp::core::error::invalid_session_config)
+        << "got: " << static_cast<int>(result.error());
+    EXPECT_TRUE(emitted.empty()) << "No frame must be emitted when open() rejects";
+}
+
+TEST(FixtCredentials,
+     SessionOpen_TargetCompIdWithEquals_ReturnsInvalidConfig_NoWireEmit_Initiator) {
+    auto dict = make_dict_creds(kMinimalFix50sp2XmlCreds);
+    CredsFixtSetup s{{dict}};
+
+    std::vector<std::byte> emitted;
+    auto cfg = s.make_initiator_cfg(application_version::v50sp2);
+    cfg.target_comp_id = "ISLD=X";  // '=' injection
+    cfg.transport_send = [&](std::span<const std::byte> f) { emitted.assign(f.begin(), f.end()); };
+
+    fixpp::session::Session sess(s.engine, cfg, &s.registry);
+    auto result = run_sync_creds(s, [&] { return sess.open(); });
+
+    ASSERT_FALSE(result.has_value())
+        << "open() must fail when target_comp_id contains '=' (090/EC-7)";
+    EXPECT_EQ(result.error(), fixpp::core::error::invalid_session_config)
+        << "got: " << static_cast<int>(result.error());
+    EXPECT_TRUE(emitted.empty()) << "No frame must be emitted when open() rejects";
+}
+
+TEST(FixtCredentials, SessionOpen_TargetCompIdWithEquals_ReturnsInvalidConfig_NoWireEmit_Acceptor) {
+    auto dict = make_dict_creds(kMinimalFix50sp2XmlCreds);
+    CredsFixtSetup s{{dict}};
+
+    std::vector<std::byte> emitted;
+    auto cfg = s.make_acceptor_cfg(application_version::v50sp2);
+    cfg.target_comp_id = "TW=X";  // '=' injection
+    cfg.transport_send = [&](std::span<const std::byte> f) { emitted.assign(f.begin(), f.end()); };
+
+    fixpp::session::Session sess(s.engine, cfg, &s.registry);
+    auto result = run_sync_creds(s, [&] { return sess.open(); });
+
+    ASSERT_FALSE(result.has_value())
+        << "acceptor open() must fail when target_comp_id contains '=' (090/EC-7/FR-012)";
+    EXPECT_EQ(result.error(), fixpp::core::error::invalid_session_config)
+        << "got: " << static_cast<int>(result.error());
+    EXPECT_TRUE(emitted.empty()) << "No frame must be emitted when open() rejects";
+}
+
+TEST(FixtCredentials,
+     SessionOpen_BeginStringWithControlByte_ReturnsInvalidConfig_NoWireEmit_Initiator) {
+    auto dict = make_dict_creds(kMinimalFix50sp2XmlCreds);
+    CredsFixtSetup s{{dict}};
+
+    std::vector<std::byte> emitted;
+    auto cfg = s.make_initiator_cfg(application_version::v50sp2);
+    // \x1f = 0x1F, below 0x20, not SOH — a control byte other than the SOH
+    // covered above. Deliberately NOT the literal "FIXT.1.1" any more, so this
+    // does not exercise the pre-existing is_fixt() equality check.
+    cfg.begin_string = std::string("FIX") + "\x1f" + "T.1.1";
+    cfg.transport_send = [&](std::span<const std::byte> f) { emitted.assign(f.begin(), f.end()); };
+
+    fixpp::session::Session sess(s.engine, cfg, &s.registry);
+    auto result = run_sync_creds(s, [&] { return sess.open(); });
+
+    ASSERT_FALSE(result.has_value())
+        << "open() must fail when begin_string contains a control byte (090/EC-7)";
+    EXPECT_EQ(result.error(), fixpp::core::error::invalid_session_config)
+        << "got: " << static_cast<int>(result.error());
+    EXPECT_TRUE(emitted.empty()) << "No frame must be emitted when open() rejects";
+}
+
+TEST(FixtCredentials,
+     SessionOpen_BeginStringWithControlByte_ReturnsInvalidConfig_NoWireEmit_Acceptor) {
+    auto dict = make_dict_creds(kMinimalFix50sp2XmlCreds);
+    CredsFixtSetup s{{dict}};
+
+    std::vector<std::byte> emitted;
+    auto cfg = s.make_acceptor_cfg(application_version::v50sp2);
+    cfg.begin_string = std::string("FIX") + "\x1f" + "T.1.1";
+    cfg.transport_send = [&](std::span<const std::byte> f) { emitted.assign(f.begin(), f.end()); };
+
+    fixpp::session::Session sess(s.engine, cfg, &s.registry);
+    auto result = run_sync_creds(s, [&] { return sess.open(); });
+
+    ASSERT_FALSE(result.has_value())
+        << "acceptor open() must fail when begin_string contains a control byte (090/EC-7/FR-012)";
+    EXPECT_EQ(result.error(), fixpp::core::error::invalid_session_config)
+        << "got: " << static_cast<int>(result.error());
+    EXPECT_TRUE(emitted.empty()) << "No frame must be emitted when open() rejects";
+}
+
+// RefMsgType(372) — in scope at the build_logon site (data-model.md §8.2 /
+// contracts/session-config-byte-floor.md §8.2). No C-ABI setter exists for
+// this field; the guard fires identically in open() regardless of role, so a
+// single role suffices to witness the mechanism.
+TEST(FixtCredentials, SessionOpen_RefMsgType372WithSOH_ReturnsInvalidConfig_NoWireEmit) {
+    auto dict = make_dict_creds(kMinimalFix50sp2XmlCreds);
+    CredsFixtSetup s{{dict}};
+
+    std::vector<std::byte> emitted;
+    auto cfg = s.make_initiator_cfg(application_version::v50sp2);
+    cfg.supported_msg_types.push_back(
+        {.direction = fixpp::session::msg_direction::send,
+         .msg_type = std::string("D") + "\x01" + "X"});  // SOH injection via 372
+    cfg.transport_send = [&](std::span<const std::byte> f) { emitted.assign(f.begin(), f.end()); };
+
+    fixpp::session::Session sess(s.engine, cfg, &s.registry);
+    auto result = run_sync_creds(s, [&] { return sess.open(); });
+
+    ASSERT_FALSE(result.has_value())
+        << "open() must fail when a configured RefMsgType(372) contains SOH (090/EC-7/FR-012)";
+    EXPECT_EQ(result.error(), fixpp::core::error::invalid_session_config)
+        << "got: " << static_cast<int>(result.error());
+    EXPECT_TRUE(emitted.empty()) << "No frame must be emitted when open() rejects";
+}
+
 }  // namespace fixpp_fixt_creds

@@ -197,7 +197,7 @@ Per `[2i §4.3]`. The numeric value of any **published** variant is frozen for l
 
 ### 7.5 Exception trap split
 
-Per `[2i §5.2]`: construction-vs-steady-state split. `guarded_call_construction` whitelists exactly three v1.0 entry points — `fixpp_engine_create`, `fixpp_dict_load_from_xml`, `fixpp_msg_create_outbound` — where a C++ exception is trapped and translated to a domain-appropriate `FIXPP_ERR_*_CONFIG` (or `FIXPP_ERR_CAPI_CONFIG_INVALID` for engine creation). `guarded_call_steady` is `std::abort` per `[arch §5.3]` invariant-violation rule (the no-throw hot path itself is `[const §VIII.5]`; the abort response is architectural, not constitutional). The whitelist is v1.0-exact; sourced from `[2i §5.2]`.
+Per `[2i §5.2]`: construction-vs-steady-state split. `guarded_call_construction` whitelists exactly three v1.0 entry points — `fixpp_engine_create`, `fixpp_dict_load_from_xml`, `fixpp_msg_create_outbound` — where a C++ exception is trapped and translated to a domain-appropriate `FIXPP_ERR_*_CONFIG` (or `FIXPP_ERR_CAPI_CONFIG_INVALID`, produced by a C-ABI entry point that cannot complete — an explicit refusal or a caught exception on a fallible construction/mutation step per `[2i §5.2]` / `[2i §6.5]`, and not exclusive to engine creation). `guarded_call_steady` is `std::abort` per `[arch §5.3]` invariant-violation rule (the no-throw hot path itself is `[const §VIII.5]`; the abort response is architectural, not constitutional). The whitelist is v1.0-exact; sourced from `[2i §5.2]`.
 
 ### 7.6 Reentrancy annotation
 

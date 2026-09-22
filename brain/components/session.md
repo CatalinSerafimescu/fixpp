@@ -7,6 +7,8 @@ refs:
   - include/fixpp/session/session.hpp
   - include/fixpp/session/session_fsm.hpp
   - include/fixpp/session/seqnum_manager.hpp
+  - include/fixpp/session/config_byte_floor.hpp
+  - .specify/447-458-452-capi-refusals.md
   - specs/005-session-establishment-fsm/spec.md
   - spec/behaviors-and-limitations.md
 refs_external:
@@ -17,6 +19,7 @@ refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/029-persistent-seqnum-hydrate-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/033-fixt-fix50sp2-session-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/042-fixt-version-serviceability-guard-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/090-capi-refusals-gatea.md
 codegraph_entry: [Session, fsm_state, SeqnumManager, Engine, on_inbound_frame]
 constitution: ["§XI.4", "§XV.4"]
 ---
@@ -81,6 +84,7 @@ The authority is therefore split three ways, and knowing the split is most of th
 | **Acceptor sessions stay in `NotConnected` at `open()` and emit no Logon; only initiators do** | the asymmetry is deliberate — an acceptor has no peer to greet yet | `B-009-1`; pairs with the lazy-connect invariant in [`initiator-connect-path`](./initiator-connect-path.md) |
 | **A refused first Logon transitions to `Disconnected`, not back to `NotConnected`** | the two states are not interchangeable: `Disconnected` records that an attempt happened and failed | `B-009-2` |
 | **The live inbound path accepts out-of-order header/body fields, including `MsgType` not first** | real counterparties emit them; strictness here buys conformance-theatre and loses interop | `B-005-7` |
+| **`open()` refuses a configured string that an admin builder would copy verbatim, if it holds a byte `< 0x20` or `'='`** — CompIDs, BeginString, each `supported_msg_types[].msg_type`, and the credentials | those values reach the wire through `append_raw` unvalidated, so one SOH injects a field. Every admin builder emits CompIDs and BeginString; `build_logon` adds RefMsgType and the credentials when they are configured. ⭐ **ONE predicate, `fixpp::session::contains_forbidden_config_byte`** (`config_byte_floor.hpp`), also called by the C-ABI setters before any `Session` exists. ⚠️ **It is a POLICY floor, not FIX grammar**: fixpp's scanner splits at the *first* `'='`, so `'='` is legal in a value as fixpp parses it. Do not cite it as the grammar | `B-452-1`; residual `L-452-2` |
 
 ## What was rejected — the half the code cannot tell you
 
@@ -107,6 +111,12 @@ The authority is therefore split three ways, and knowing the split is most of th
   join that run. A flush that blocks on the transport therefore leaves the replay's `52` older than
   its send time. Rebuilding after the flush was declined for #420: it costs a second build per replay,
   and the stamp is late only by as long as that one write blocks.
+- **Two homes for the configured-byte floor** (090 D-5b, fixpp#452). The first was the function-local
+  lambda that `Session::open` used for the credentials. It had no linkage, so
+  `src/capi/config.cpp` could not call it. The second was `src/session/file_store_factory.cpp`'s
+  comp-id check, which is the wrong layer with the wrong charset: SOH and `'='` pass it, and the
+  C-ABI default `MemoryStoreFactory` runs no comp-id check at all. Widening the charset (all C0,
+  printable-only) was **not** taken either. It is a separate decision with its own blast radius.
 - **Gap-filling a frame too large to capture** (fixpp#424 D5). Rejected *for now*: it stays a loud
   disconnect (`L-424-1`), deferred, and may be reopened.
 - **Rejecting a `send()` payload whose header-class field follows a body field** (fixpp#422, owner

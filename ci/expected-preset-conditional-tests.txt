@@ -50,6 +50,7 @@ MessageReadGroupDeath.StaleTopLevelGroupCursorMetadataTrapsAfterRecycle    NDEBU
 
 ReifyMembershipCopyOom.TableViewCopyOomYieldsDictReifyOom    Sanitizer presets only (FIXPP_OOM_WITNESS_ENABLED is 0 under ASan/TSan/MSan). The cell injects an OOM by replacing global operator new; under a sanitizer that replacement is not ours to make. The non-OOM behaviour of the same path is covered by the unguarded cells in this file.
 CloneMembershipCopyOom.TableViewCopyOomYieldsCapiConfigInvalid    Sanitizer presets only, same mechanism as ReifyMembershipCopyOom.TableViewCopyOomYieldsDictReifyOom — the C-ABI leg of the same OOM witness.
+CloneReparseOom.OffsetTableBuildOomYieldsUnknown    Sanitizer presets only, same mechanism as ReifyMembershipCopyOom.TableViewCopyOomYieldsDictReifyOom — fixpp#458 (090-capi-refusals) T049's out-of-memory arm for fixpp_msg_clone's OWN dict-backed re-parse (OffsetTable::build's internal catch, distinct from CloneMembershipCopyOom's membership_copy() catch above), same TU-local operator-new override.
 
 # ── Class C: cells that EXIST ONLY under a sanitizer ──────────────────────────
 # The inverse shape. These ADD coverage on a sanitizer leg rather than removing

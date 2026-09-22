@@ -246,6 +246,12 @@ Zero can never be half of a pair: it is the "no pair" answer of both accessors, 
 at `table_view::set_length_pair_data_tag` **and** at pair formation in both loaders — the setter
 alone leaves `Dictionary::length_pair_data_tag(0)` and `field_ref` still reporting one.
 
+⚠️ **An `OffsetTable` build can report success and still leave a tag un-indexed** (`L-458-1`). The
+`kMaxBuildProbe` DoS arm in `src/wire/offset_table.cpp` skips an occurrence without setting a
+failure status, so `find()` reports that tag absent. 090 found it while making clone and reify
+refuse a failed re-parse (see [`dictionary.md`](./dictionary.md)). That refusal cannot see this case,
+because the build did not fail. Check the live B&L file before treating the row as open.
+
 ## The seam into the session layer
 
 `wire_error_to_session_reject_reason` (`include/fixpp/wire/reject_reason_map.hpp`) maps a validator

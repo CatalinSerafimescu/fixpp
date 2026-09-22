@@ -47,6 +47,20 @@ prints `0` for a whole syntax.
   - **Procedure:** spell the expectation out independently and accept the duplication — it *is* the
     mechanism. Then prove it: mutate the shared constant and require RED. A pin that imports
     anything from its subject must be assumed inert until a mutant says otherwise.
+- ⚠️ **A POSITIVE CONTROL PROVES THE COMMAND RAN; IT DOES NOT PROVE THE CORPUS HOLDS THE ANSWER.**
+  A zero can be done correctly: a different pattern, positive on the same corpus. It can still be
+  wrong if the property is not decided in that corpus. 090's design note concluded "libstdc++
+  hardening is off everywhere" from a grep of `cmake/`, `CMakeLists.txt` and `CMakePresets.json`,
+  with `FIXPP_WERROR` as its control. But `_GLIBCXX_ASSERTIONS` is a **library default**, on when
+  not optimising. No pattern over the project's build files could ever have reported it. A hard
+  out-of-range subscript aborted in the debug preset, which was the first sign.
+  - **Trigger:** you are concluding that a toolchain or library property is off because no project
+    flag sets it.
+  - **Procedure:** ask the compiler, not the build files. Preprocess with the real toolchain and
+    flags, test the macro, and do it once per optimisation level the presets use.
+  - ⭐ **Check what survives before rewriting the conclusion.** In 090 the premise was wrong and the
+    decision was not: the defect was a stale but *in-range* index, which no bounds assertion sees at
+    any level.
 - ⚠️ **PRESENT IS NOT ACTIVE — a witness can prove a mechanism was LOADED and say nothing about
   whether it TOOK EFFECT.** When an instrument works by interposition, injection or overriding
   (LD_PRELOAD, a monkey-patch, a subclass, a mock registered in a container, an interceptor
@@ -219,6 +233,13 @@ prints `0` for a whole syntax.
   `THREADED`), read every one by hand: correcting an instrument in the *safe* direction is still a
   change in the *unsafe* direction for the rows it reclassifies. (#289 batch 21.)
 
+**The same class, in a benchmark: a timing row that never runs the code it is cited for.**
+- A flat paired delta reads as "no cost". It is only evidence if the timed loop reaches the changed path.
+- The 090 case (PR #494, Gate B): the existing reify row passed a view with no MsgType, so `reify()` returned before the factory it was cited for.
+- **Procedure:**
+  - Prove the bench reaches the path: a mutant that slows or deletes the path must move the number, or trace one iteration.
+  - Size small moved work with an attribution bench that times it alone. A small cost inside a large, noisy call is below resolution, not absent.
+
 ### 2. A fix that replaces a wrong claim with a NEW claim reproduces the defect
 
 Rounds of review converge only when a claim is **deleted**, not refreshed. A corrected claim is still a
@@ -236,6 +257,9 @@ re-runs a document. What follows from *structure* cannot rot; what follows from 
 - **Trigger:** you are about to write a number, a list, or a measurement into a document.
 - **Procedure:** keep the condition and the recipe; delete the answer. If the number is load-bearing,
   say so and name the command that regenerates it.
+- **Provenance is a result too.** "Unedited", "kept green", "no test is rewritten by this change" are claims about a diff that is still growing, and any later commit in the same PR can falsify them.
+  - In PR #494's Gate B, a round's own comment fix made its "UNEDITED" note false.
+  - Write the condition a reader can re-check, such as "exercised by `<cell>`", never the history.
 
 ### 4. A copy propagates a claim that is false at the new site
 

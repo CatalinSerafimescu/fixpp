@@ -40,8 +40,10 @@ set_target_properties(table_view_footprint_bench PROPERTIES
 # NFR-003-3 dict::reify_as / dict::reify latency harness (seam #5/#6).
 # Includes generated Reify.hpp and _dispatch/ headers (build-tree, AC-C4).
 #
-# R6 DEFERRED: frozen wire stub returns field-absent; timings measure dispatch
-# overhead only. Real NFR-003-3 numbers require 2b (see reify_bench.cpp).
+# R6 DEFERRED: frozen wire stub returns field-absent; for the default-MV
+# functions, timings measure dispatch overhead only. Real NFR-003-3 numbers
+# require 2b (see reify_bench.cpp). BM_Reify_DictBacked_20tag parses a real
+# dict-backed frame and is not in this scope.
 if(TARGET fixpp_codegen_generate)
   set(_REIFY_CODEGEN_INC "${CMAKE_BINARY_DIR}/_codegen/include")
 
@@ -54,6 +56,9 @@ if(TARGET fixpp_codegen_generate)
   )
   target_include_directories(reify_bench PRIVATE
     "${_REIFY_CODEGEN_INC}"
+  )
+  target_compile_definitions(reify_bench PRIVATE
+    "FIXPP_DICT_DATA_DIR=\"${FIXPP_DICT_DATA_DIR}\""
   )
   set_target_properties(reify_bench PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bench/dictionary"

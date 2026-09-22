@@ -137,7 +137,10 @@ TEST(CapiSetData, RefusesWhenOnlyOneHalfIsPresentAndWritesNothing) {
     Fixture f;
     ASSERT_EQ(fixpp_msg_set_int(f.msg, 354, 3), FIXPP_ERR_OK);
     EXPECT_EQ(f.set_data(355, "abc"), FIXPP_ERR_TYPE_MISMATCH);
-    // Removing the stray half makes the same call succeed.
+    // Removing the stray half makes the same call succeed. 090/D-1 (fixpp#447):
+    // remove_tag now refuses this erase while a group builder is open — not
+    // the case here, no group builder has been opened on `f.msg` at all — so
+    // this setup use is unaffected by that refusal.
     ASSERT_EQ(fixpp_msg_remove_tag(f.msg, 354), FIXPP_ERR_OK);
     EXPECT_EQ(f.set_data(355, "abc"), FIXPP_ERR_OK);
 }

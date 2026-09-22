@@ -151,8 +151,11 @@ public:
     // bound to session lifetime (FR-005/I-03); (3) populate the
     // session_local<trace_context> slot from initial_trace_context (FR-014);
     // (4) reject null dictionary / null EngineConfig::executor / sentinel
-    // security_profile / incompatible combo → invalid_session_config
-    // (FR-018); (5) reject a second open() → session_already_open (slot 51).
+    // security_profile / incompatible combo / a SenderCompID, TargetCompID,
+    // BeginString or configured RefMsgType(372) holding a byte < 0x20 (incl.
+    // SOH \x01) or '=' (0x3D) (fixpp#452, FR-012/FR-013) →
+    // invalid_session_config (FR-018); (5) reject a second open() →
+    // session_already_open (slot 51).
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> open() noexcept;
 
     // Two-phase close ([2d §4.7] close() declaration frozen shape). Idempotent

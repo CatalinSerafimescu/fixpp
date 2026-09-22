@@ -9,9 +9,14 @@ refs:
   - src/capi/error.cpp
   - .specify/2k-log-otel.md
   - .specify/2i-capi.md
+  - .specify/api-contract.md
+  - .specify/2m-pybind.md
+  - .specify/447-458-452-capi-refusals.md
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/2k-log-otel.md
   - research/G19-fix-fpml-iso20022/decisions/2i-capi.md
+  - research/G19-fix-fpml-iso20022/decisions/2m-pybind.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/090-capi-refusals-gatea.md
 codegraph_entry: [error, expected_t, error_message, translate, translate_for_consumer, fixpp_strerror]
 constitution: ["§X.4"]
 ---
@@ -71,6 +76,27 @@ exclusions are deliberate, and both are stated in the code at the call site** �
 gate is not routed through it (there is no handle yet to read a minor from), and success is not routed
 through it (`OK` is `OK` at every version). Those two boundaries are the shape of the rule; find them
 with `grep -rn translate_for_consumer src/capi/` and read the comments, not this paragraph.
+
+## ⚠️ `FIXPP_ERR_CAPI_CONFIG_INVALID` was documented with a producer set the code never had
+
+**Was wrong, and CORRECTED by 090 (fixpp#488).** `.specify/2i-capi.md` tied the code to the
+construction-time thunks: §6.5's row said *"Used only by `guarded_call_construction`"*, the
+`k_strerror_table` string named *"engine_create / dict_load / msg_create_outbound"*, and §5.2 said
+*"CI grep enforces"* the thunk split. The shipped tree already returned it from explicit refusals at
+entry points outside that whitelist, such as the session-config setters. Two passages restated the
+rule: `.specify/api-contract.md` §7.5 (*"… for engine creation"*) and `.specify/2m-pybind.md`'s
+*Construction failure modes*.
+
+090 rewrote all three as a **condition**: the code comes from an entry point that cannot complete,
+through either an explicit refusal or a caught exception on a fallible step. It is not
+construction-only. The *"CI grep enforces"* clause was **deleted**, not reworded. fixpp#488 tracks
+the closure. Before citing any of these passages, check that your copy carries the condition-stated
+wording.
+
+> **Do not re-derive a producer list for this code from a design doc.** Read the sites:
+> `git grep -n FIXPP_ERR_CAPI_CONFIG_INVALID src/capi/`. A list goes stale with the next refusal.
+> The code is the lesson: a documented producer set nobody re-checked went wrong without anyone
+> noticing.
 
 ## A range that is frozen by the compiler, not by a comment
 

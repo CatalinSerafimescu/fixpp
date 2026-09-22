@@ -100,11 +100,35 @@ typedef enum fixpp_reset_seqnum_policy {
 FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_create(fixpp_session_config_t** out_cfg);
 
 /** SenderCompID / TargetCompID (both required; empty → config error).
+ *
+ *  Since 1.7 (BREAKING), a value holding a byte < 0x20 (incl. SOH \x01) or
+ *  '=' (0x3D) → FIXPP_ERR_CAPI_CONFIG_INVALID, checked for BOTH arguments
+ *  before either is stored — a bad target leaves a previously-stored sender
+ *  unchanged.
+ *
+ *  Return codes:
+ *    FIXPP_ERR_OK                  -- stored
+ *    FIXPP_ERR_NULL_HANDLE         -- cfg is NULL
+ *    FIXPP_ERR_CAPI_CONFIG_INVALID -- sender or target is NULL/empty, or
+ *                                     (1.7, BREAKING) either holds a
+ *                                     forbidden byte
+ *
  *  Reentrancy: single-thread. */
 FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_set_comp_ids(
     fixpp_session_config_t* cfg, const char* sender, const char* target);
 
-/** BeginString (e.g. "FIX.4.4" / "FIXT.1.1"). Reentrancy: single-thread. */
+/** BeginString (e.g. "FIX.4.4" / "FIXT.1.1").
+ *
+ *  Since 1.7 (BREAKING), a value holding a byte < 0x20 (incl. SOH \x01) or
+ *  '=' (0x3D) → FIXPP_ERR_CAPI_CONFIG_INVALID.
+ *
+ *  Return codes:
+ *    FIXPP_ERR_OK                  -- stored
+ *    FIXPP_ERR_NULL_HANDLE         -- cfg is NULL
+ *    FIXPP_ERR_CAPI_CONFIG_INVALID -- begin_string is NULL/empty, or
+ *                                     (1.7, BREAKING) holds a forbidden byte
+ *
+ *  Reentrancy: single-thread. */
 FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_set_begin_string(
     fixpp_session_config_t* cfg, const char* begin_string);
 
