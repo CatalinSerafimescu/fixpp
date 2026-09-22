@@ -6,6 +6,13 @@ status: stable
 
 # Log
 
+- **2026-09-22: fixpp#490 Gate B (PR #496).** `failure-classes.md` gains two owner-approved forms:
+  - class 1: an oracle's error routed into the "not applicable" branch fails open in a gate;
+  - a NEW **class 17** (*trust keyed on a textual proxy admits whatever shares the proxy*): basename
+    identity, and path text taken as existence.
+
+  The same forms are entries in the Sonnet implementer's anti-pattern library.
+
 - **2026-09-22: 090 Gate B (PR #494).** `components/dictionary.md`'s eager-reify section gains three things:
   - what eager costs;
   - that the pre-existing reify benchmark returned before the path it was named for;

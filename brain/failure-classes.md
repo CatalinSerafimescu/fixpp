@@ -205,6 +205,16 @@ prints `0` for a whole syntax.
   migrating it — and add a control that fails if the fallback is reverted, since a control asserting
   the common case would have passed the whole time it was wrong.
 
+- ⚠️ **AN ORACLE'S ERROR ROUTED INTO THE "NOT APPLICABLE" BRANCH IS THE SAME FALLBACK, AND IN A GATE
+  IT FAILS OPEN.** The classifier's-fallback form above, applied to a trust decision. In fixpp#490's
+  first fix, `git rev-parse` failing was read as "not a git tree", and that branch keeps the old,
+  permissive behaviour. So the stale pin the patch exists to refuse resolved at rc 0 again. The
+  realistic trigger needed no caller action: git refuses a repository it considers of *dubious
+  ownership*. **Procedure:** enumerate the oracle's outcomes (answer / legitimately absent / could not
+  tell) and give *could not tell* its own branch, which refuses. Prove "absent" positively, e.g. that
+  no `.git` exists at or above the root. Then force the failure (`GIT_TEST_ASSUME_DIFFERENT_OWNER=1`,
+  a nonexistent `GIT_DIR`) and require the refusal. (PR #496, Gate B round 1.)
+
 - ⚠️ **A SHELL PIPELINE CAN TURN A SUCCESSFUL MATCH INTO A FAILURE, AND IT DOES SO ONLY ON LARGE
   INPUTS.** Under `set -o pipefail`, `printf '%s' "$out" | grep -q PATTERN` exits **141** when the
   pattern MATCHES: `grep -q` stops at the first hit and closes the pipe, `printf` takes SIGPIPE, and
@@ -670,6 +680,34 @@ merely undefined, which a check for "the error went away" would have missed.
 - **Sibling:** class 3 says a document may not record a RESULT. This is its executable form — a
   PREPROCESSOR CONDITION can record an intent it does not implement, and unlike a comment it looks
   like code that someone checked.
+
+---
+
+### 17. Trust keyed on a textual proxy admits whatever shares the proxy
+
+A check decides "this is the thing I trust" by comparing a **derived or textual stand-in** — a
+basename for a path, a path string for the directory it names, a name for an identity. Anything that
+shares the stand-in without being the thing passes the check.
+
+- **Trigger:** a trust, ownership or identity decision compares a value you *computed from* the
+  thing (a suffix, a basename, a normalised string, a name), or treats "the text matches" as "it
+  exists".
+- **Procedure:** compare the full, normalised value, and state what the normalisation does and does
+  not canonicalise. Where the decision needs the thing to be real, test that it is real (`-d`, a
+  lookup), not that its name is right. Then write the alias explicitly as a test case — a different
+  thing that shares the proxy — and require it to be refused.
+- **Instance (PR #496, fixpp#490, Gate B rounds 2 and 3).** The pin was trusted when its basename
+  equalled the branch, so `elsewhere/091-own` was trusted on `091-own`, and a legacy `specs/feature/x`
+  on branch `x`. That was fixed to full-path identity, and the next round found the second layer:
+  a foreign pin *naming* `specs/<branch>` was trusted though that directory did not exist, so a
+  bundle-less branch resolved and `setup-plan.sh` would have created it. Each layer passed every arm
+  written for the previous one; only a case built as an alias exposed it.
+- ⚠️ **A name is still a proxy after the fix.** A recorded branch name identifies a branch by NAME, so a
+  branch re-created under that name inherits the trust. That residue is disclosed, not closed —
+  close it only if the name can be reused without deliberate intent.
+
+**Sibling.** Class 13 is an instrument keyed on an identifier that misses a *copy*. This is a gate
+keyed on an identifier that admits an *alias*. Same key, opposite direction.
 
 ## How to query the instances
 
