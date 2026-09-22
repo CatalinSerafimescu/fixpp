@@ -144,14 +144,30 @@ _read_feature_json_key() {
     return 0
 }
 
-# The git branch checked out at repo_root: a branch name, "HEAD" when detached,
-# or empty when repo_root is not a git work tree (fixpp#490).
+# The git branch checked out at repo_root: a branch name (unborn included), "HEAD" when
+# detached, "?" when repo_root is inside a git tree but git cannot answer (e.g. dubious
+# ownership), or empty when it is not in a git tree at all (fixpp#490). Repo-selection
+# variables are dropped so the answer is about repo_root, as find_specify_root's is.
 _git_current_branch() {
-    git -C "$1" rev-parse --abbrev-ref HEAD 2>/dev/null || true
+    local out rc=0 d
+    out=$(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR \
+        git -C "$1" symbolic-ref -q --short HEAD 2>/dev/null) || rc=$?
+    case $rc in
+        0) printf '%s' "$out"; return 0 ;;
+        1) printf 'HEAD'; return 0 ;;
+    esac
+    d=$1
+    while [[ -n "$d" ]]; do
+        [[ -e "$d/.git" ]] && { printf '?'; return 0; }
+        [[ "$d" == / ]] && break
+        d=$(dirname "$d")
+    done
+    return 0
 }
 
 # Persist a feature_directory value to .specify/feature.json, together with the
-# git branch it was pinned on (fixpp#490; omitted when detached or not in git).
+# git branch it was pinned on (fixpp#490; omitted when detached, not in git, or
+# when git cannot read the branch, e.g. dubious ownership).
 # Writes only when the file is missing or either value differs from what's stored.
 # Accepts the raw (possibly relative) path — callers should pass the original
 # user-supplied value, not the normalized absolute path.
@@ -167,7 +183,7 @@ _persist_feature_json() {
 
     local branch_value
     branch_value=$(_git_current_branch "$repo_root")
-    [[ "$branch_value" == HEAD ]] && branch_value=''
+    [[ "$branch_value" == HEAD || "$branch_value" == '?' ]] && branch_value=''
 
     # Read current values (if any) and skip write when unchanged
     local current_val current_branch_val
@@ -227,14 +243,22 @@ get_feature_paths() {
         if [[ "$no_persist" != true ]]; then
             _persist_feature_json "$repo_root" "$SPECIFY_FEATURE_DIRECTORY"
         fi
+    elif [[ "$git_branch" == '?' ]]; then
+        echo "ERROR: git cannot read the branch at '$repo_root' (e.g. safe.directory / dubious ownership) — refusing to trust .specify/feature.json. Set SPECIFY_FEATURE_DIRECTORY explicitly (fixpp#490)." >&2
+        return 1
     elif [[ -z "$git_branch" ]]; then
         # Not a git work tree: no branch to validate against, keep upstream behaviour.
-        local _fd
-        _fd=$(read_feature_json_feature_directory "$repo_root")
-        if [[ -n "$_fd" ]]; then
-            feature_dir="$_fd"
-            # Normalize relative paths to absolute under repo root
-            [[ "$feature_dir" != /* ]] && feature_dir="$repo_root/$feature_dir"
+        if [[ -f "$repo_root/.specify/feature.json" ]]; then
+            local _fd
+            _fd=$(read_feature_json_feature_directory "$repo_root")
+            if [[ -n "$_fd" ]]; then
+                feature_dir="$_fd"
+                # Normalize relative paths to absolute under repo root
+                [[ "$feature_dir" != /* ]] && feature_dir="$repo_root/$feature_dir"
+            else
+                echo "ERROR: Feature directory not found. Set SPECIFY_FEATURE_DIRECTORY or ensure .specify/feature.json contains feature_directory." >&2
+                return 1
+            fi
         else
             echo "ERROR: Feature directory not found. Set SPECIFY_FEATURE_DIRECTORY or run the specify command to create .specify/feature.json." >&2
             return 1
@@ -273,7 +297,7 @@ get_feature_paths() {
     # an empty, misleading value (issue #3026).
     # fixpp#490: report the real git branch when there is one — the basename
     # fallback named the pinned feature as the BRANCH.
-    if [[ -z "$current_branch" && -n "$git_branch" && "$git_branch" != HEAD ]]; then
+    if [[ -z "$current_branch" && -n "$git_branch" && "$git_branch" != HEAD && "$git_branch" != '?' ]]; then
         current_branch="$git_branch"
     fi
     if [[ -z "$current_branch" ]]; then
