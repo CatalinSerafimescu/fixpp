@@ -390,6 +390,15 @@ if(FIXPP_BUILD_TESTS)
   add_subdirectory(tests/sync)   # 006-async-mutex — 29 sync_* seams (T002)
   add_subdirectory(tests/conformance)  # 008-message-store — seam 17 store-side corpus replay (T019)
   add_subdirectory(tests/perf)         # 008-message-store — seam 14 mallocnesia alloc-guard (T050)
+  # fixpp#490 — guards the local patch to the vendored .specify/scripts/bash/common.sh
+  # (a Spec-Kit refresh that drops it fails here). Not on Windows: the harness
+  # builds a PATH without jq/python3 by symlinking every PATH entry, which Git
+  # Bash turns into copies; the logic under test is plain bash either way.
+  if(NOT WIN32)
+    add_test(NAME speckit_feature_pin
+      COMMAND bash "${CMAKE_SOURCE_DIR}/tools/test_speckit_feature_pin.sh"
+      WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+  endif()
   # 084 — package/export witnesses. Gated with the CPack module below: every one
   # of them invokes cpack, so registering them where packaging is not configured
   # would fail on a missing CPackConfig.cmake rather than on anything real.

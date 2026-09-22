@@ -1,5 +1,13 @@
 #!/usr/bin/env bash
 # Common functions and variables for all scripts
+#
+# fixpp-local patch (fixpp#490) — NOT upstream Spec-Kit; re-apply after any
+# Spec-Kit refresh. .specify/feature.json is tracked, so a bare pin is inherited
+# by every branch and a bundle-less branch silently resolved to the last-pinned
+# (possibly shipped) feature. The pin now records the git branch it was written
+# on, and get_feature_paths refuses a pin recorded for another branch. Guarded
+# by tools/test_speckit_feature_pin.sh (ctest speckit_feature_pin), which fails
+# if a refresh drops this patch.
 
 # Find repository root by searching upward for .specify directory
 # This is the primary marker for spec-kit projects
@@ -93,7 +101,14 @@ get_current_branch() {
 # under `set -e` cannot be aborted by parser failure.
 # Parser order mirrors the historical get_feature_paths behavior: jq -> python3 -> grep/sed.
 read_feature_json_feature_directory() {
+    _read_feature_json_key "$1" feature_directory
+}
+
+# Same contract as read_feature_json_feature_directory, for any string key
+# (fixpp#490: also used for "branch").
+_read_feature_json_key() {
     local repo_root="$1"
+    local key="$2"
     local fj="$repo_root/.specify/feature.json"
     [[ -f "$fj" ]] || { printf '%s' ''; return 0; }
 
@@ -106,30 +121,38 @@ read_feature_json_feature_directory() {
     # though it is valid (issue #3304).
     local _fd=''
     if command -v jq >/dev/null 2>&1; then
-        if ! _fd=$(jq -r '.feature_directory // empty' "$fj" 2>/dev/null); then
+        if ! _fd=$(jq -r --arg k "$key" '.[$k] // empty' "$fj" 2>/dev/null); then
             _fd=''
         fi
     fi
     if [[ -z "$_fd" ]] && command -v python3 >/dev/null 2>&1; then
         # Use Python so pretty-printed/multi-line JSON still parses correctly.
-        if ! _fd=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); v=d.get('feature_directory'); print(v if v else '')" "$fj" 2>/dev/null); then
+        if ! _fd=$(python3 -c "import json,sys; d=json.load(open(sys.argv[1])); v=d.get(sys.argv[2]); print(v if v else '')" "$fj" "$key" 2>/dev/null); then
             _fd=''
         fi
     fi
     if [[ -z "$_fd" ]]; then
         # Last-resort single-line grep/sed fallback. The `|| true` guards against
         # grep returning 1 (no match) aborting under `set -e` / `pipefail`.
-        _fd=$( { grep -E '"feature_directory"[[:space:]]*:' "$fj" 2>/dev/null || true; } \
+        # -o isolates the "key":"value" pair, so key order does not matter.
+        _fd=$( { grep -oE "\"$key\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$fj" 2>/dev/null || true; } \
             | head -n 1 \
-            | sed -E 's/^[^:]*:[[:space:]]*"([^"]*)".*$/\1/' )
+            | sed -E 's/^.*:[[:space:]]*"([^"]*)"$/\1/' )
     fi
 
     printf '%s' "$_fd"
     return 0
 }
 
-# Persist a feature_directory value to .specify/feature.json.
-# Writes only when the file is missing or the value differs from what's stored.
+# The git branch checked out at repo_root: a branch name, "HEAD" when detached,
+# or empty when repo_root is not a git work tree (fixpp#490).
+_git_current_branch() {
+    git -C "$1" rev-parse --abbrev-ref HEAD 2>/dev/null || true
+}
+
+# Persist a feature_directory value to .specify/feature.json, together with the
+# git branch it was pinned on (fixpp#490; omitted when detached or not in git).
+# Writes only when the file is missing or either value differs from what's stored.
 # Accepts the raw (possibly relative) path — callers should pass the original
 # user-supplied value, not the normalized absolute path.
 _persist_feature_json() {
@@ -142,10 +165,15 @@ _persist_feature_json() {
         feature_dir_value="${feature_dir_value#"$repo_root/"}"
     fi
 
-    # Read current value (if any) and skip write when unchanged
-    local current_val
+    local branch_value
+    branch_value=$(_git_current_branch "$repo_root")
+    [[ "$branch_value" == HEAD ]] && branch_value=''
+
+    # Read current values (if any) and skip write when unchanged
+    local current_val current_branch_val
     current_val=$(read_feature_json_feature_directory "$repo_root")
-    if [[ "$current_val" == "$feature_dir_value" ]]; then
+    current_branch_val=$(_read_feature_json_key "$repo_root" branch)
+    if [[ "$current_val" == "$feature_dir_value" && "$current_branch_val" == "$branch_value" ]]; then
         return 0
     fi
 
@@ -154,7 +182,11 @@ _persist_feature_json() {
 
     # Write feature.json — prefer jq for safe JSON, fall back to printf
     if command -v jq >/dev/null 2>&1; then
-        jq -cn --arg fd "$feature_dir_value" '{feature_directory:$fd}' > "$fj"
+        jq -cn --arg fd "$feature_dir_value" --arg br "$branch_value" \
+            '{feature_directory:$fd} + (if $br == "" then {} else {branch:$br} end)' > "$fj"
+    elif [[ -n "$branch_value" ]]; then
+        printf '{"feature_directory":"%s","branch":"%s"}\n' \
+            "$(json_escape "$feature_dir_value")" "$(json_escape "$branch_value")" > "$fj"
     else
         printf '{"feature_directory":"%s"}\n' "$(json_escape "$feature_dir_value")" > "$fj"
     fi
@@ -176,11 +208,15 @@ get_feature_paths() {
     repo_root=$(get_repo_root) || return 1
     local current_branch
     current_branch=$(get_current_branch)
+    local git_branch
+    git_branch=$(_git_current_branch "$repo_root")
 
     # Resolve feature directory.  Priority:
     #   1. SPECIFY_FEATURE_DIRECTORY env var (explicit override)
-    #   2. .specify/feature.json "feature_directory" key (persisted by specify command)
-    #   3. Error — no feature context available
+    #   2. .specify/feature.json "feature_directory" key (persisted by specify
+    #      command) — in a git tree only if pinned on the current branch (fixpp#490)
+    #   3. specs/<current branch>, when that bundle exists (fixpp#490)
+    #   4. Error — no feature context available
     local feature_dir
     if [[ -n "${SPECIFY_FEATURE_DIRECTORY:-}" ]]; then
         feature_dir="$SPECIFY_FEATURE_DIRECTORY"
@@ -191,7 +227,8 @@ get_feature_paths() {
         if [[ "$no_persist" != true ]]; then
             _persist_feature_json "$repo_root" "$SPECIFY_FEATURE_DIRECTORY"
         fi
-    elif [[ -f "$repo_root/.specify/feature.json" ]]; then
+    elif [[ -z "$git_branch" ]]; then
+        # Not a git work tree: no branch to validate against, keep upstream behaviour.
         local _fd
         _fd=$(read_feature_json_feature_directory "$repo_root")
         if [[ -n "$_fd" ]]; then
@@ -199,18 +236,46 @@ get_feature_paths() {
             # Normalize relative paths to absolute under repo root
             [[ "$feature_dir" != /* ]] && feature_dir="$repo_root/$feature_dir"
         else
-            echo "ERROR: Feature directory not found. Set SPECIFY_FEATURE_DIRECTORY or ensure .specify/feature.json contains feature_directory." >&2
+            echo "ERROR: Feature directory not found. Set SPECIFY_FEATURE_DIRECTORY or run the specify command to create .specify/feature.json." >&2
             return 1
         fi
-    else
-        echo "ERROR: Feature directory not found. Set SPECIFY_FEATURE_DIRECTORY or run the specify command to create .specify/feature.json." >&2
+    elif [[ "$git_branch" == HEAD ]]; then
+        echo "ERROR: Detached HEAD — no branch to validate .specify/feature.json against. Set SPECIFY_FEATURE_DIRECTORY explicitly (fixpp#490)." >&2
         return 1
+    else
+        # fixpp#490: the tracked pin is only trusted for the branch it was
+        # written on (or a branch named after its bundle). Otherwise it is
+        # inherited, and resolving through it would target an unrelated feature.
+        local pin_fd pin_branch pin_base branch_bundle="$repo_root/specs/$git_branch"
+        pin_fd=$(read_feature_json_feature_directory "$repo_root")
+        pin_branch=$(_read_feature_json_key "$repo_root" branch)
+        pin_base="${pin_fd%/}"; pin_base="${pin_base##*/}"
+        if [[ -n "$pin_fd" && ( "$pin_branch" == "$git_branch" || "$pin_base" == "$git_branch" ) ]]; then
+            if [[ -d "$branch_bundle" && "$pin_base" != "$git_branch" ]]; then
+                echo "ERROR: .specify/feature.json pins '$pin_fd' for branch '$git_branch', but that branch also has its own bundle 'specs/$git_branch'. Set SPECIFY_FEATURE_DIRECTORY to the one you mean (fixpp#490)." >&2
+                return 1
+            fi
+            feature_dir="$pin_fd"
+            [[ "$feature_dir" != /* ]] && feature_dir="$repo_root/$feature_dir"
+        elif [[ -d "$branch_bundle" ]]; then
+            # A pin recorded for another branch is stale, not a disagreement.
+            [[ -n "$pin_fd" ]] && echo "NOTE: ignoring .specify/feature.json pin '$pin_fd' (branch '${pin_branch:-<not recorded>}'); using specs/$git_branch (fixpp#490)." >&2
+            feature_dir="$branch_bundle"
+        else
+            echo "ERROR: No feature for branch '$git_branch': there is no specs/$git_branch, and .specify/feature.json pins '${pin_fd:-nothing}' for branch '${pin_branch:-<not recorded>}'. Set SPECIFY_FEATURE_DIRECTORY explicitly, or run /speckit-specify (fixpp#490)." >&2
+            return 1
+        fi
     fi
 
     # When no branch context exists (no SPECIFY_FEATURE, feature resolved via
     # SPECIFY_FEATURE_DIRECTORY or feature.json), fall back to the feature
     # directory basename so CURRENT_BRANCH is a usable identifier rather than
     # an empty, misleading value (issue #3026).
+    # fixpp#490: report the real git branch when there is one — the basename
+    # fallback named the pinned feature as the BRANCH.
+    if [[ -z "$current_branch" && -n "$git_branch" && "$git_branch" != HEAD ]]; then
+        current_branch="$git_branch"
+    fi
     if [[ -z "$current_branch" ]]; then
         local feature_dir_trimmed="${feature_dir%/}"
         current_branch="${feature_dir_trimmed##*/}"
