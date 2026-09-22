@@ -1,21 +1,20 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
-# tools/test_speckit_feature_pin.sh
+# .specify/scripts/bash/test-feature-pin.sh
 #
 # Guards the fixpp-local patch to .specify/scripts/bash/common.sh (fixpp#490):
 # the tracked .specify/feature.json pin must not resolve a branch it was not
 # written on. Runs the repo's own common.sh + check-prerequisites.sh inside a
-# throwaway git repo, so the real pin and working tree are never touched. A
-# Spec-Kit refresh that drops the patch turns the bundle-less arm green -> this
-# test red.
+# throwaway git repo, so the real pin and working tree are never touched.
+# NOT wired into CI (a .specify/-only change runs no matrix, by choice): run it
+# by hand after any Spec-Kit refresh — a refresh that drops the patch goes RED.
 set -euo pipefail
 # An exported GIT_DIR (e.g. ctest run from a git hook) would point every
 # `git -C "$work"` below at the REAL checkout — commits and branch switches included.
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_CEILING_DIRECTORIES
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-scripts="${repo_root}/.specify/scripts/bash"
+scripts="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -154,7 +153,7 @@ for mode in default nojq; do
 done
 
 if (( fails )); then
-    echo "test_speckit_feature_pin: ${fails} arm(s) FAILED"
+    echo "test-feature-pin: ${fails} arm(s) FAILED"
     exit 1
 fi
-echo "test_speckit_feature_pin: all arms passed"
+echo "test-feature-pin: all arms passed"

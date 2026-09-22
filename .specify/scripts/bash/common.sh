@@ -5,9 +5,9 @@
 # Spec-Kit refresh. .specify/feature.json is tracked, so a bare pin is inherited
 # by every branch and a bundle-less branch silently resolved to the last-pinned
 # (possibly shipped) feature. The pin now records the git branch it was written
-# on, and get_feature_paths refuses a pin recorded for another branch. Guarded
-# by tools/test_speckit_feature_pin.sh (ctest speckit_feature_pin), which fails
-# if a refresh drops this patch.
+# on, and get_feature_paths refuses a pin recorded for another branch. After a
+# refresh, run test-feature-pin.sh (beside this file) — it goes RED if the
+# patch was dropped. Nothing runs it automatically.
 
 # Find repository root by searching upward for .specify directory
 # This is the primary marker for spec-kit projects
