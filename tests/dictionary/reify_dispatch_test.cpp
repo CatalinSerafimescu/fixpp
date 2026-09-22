@@ -754,8 +754,8 @@ TEST(ReifyAsTyped, AbsentMsgTypeRejected) {
 // (i-b) and (iv) — the dict-free OOM degrade and the frames-to-nothing span
 // — are SHIPPED ELSEWHERE (ViewRebuildOomDegradesNotTerminate above; the
 // default-constructed-MV cells throughout this file, vlatest_dispatch_
-// exclusion_test.cpp and fixt_cross_vocabulary.cpp) and are KEPT GREEN,
-// UNEDITED — not re-witnessed here (T060/T061).
+// exclusion_test.cpp and fixt_cross_vocabulary.cpp)
+// and are not re-witnessed here (T060/T061).
 // fixpp#458 / contracts/msg-clone.md §9 / data-model.md §2.2, §3.3, EC-8.
 // ═════════════════════════════════════════════════════════════════════════════
 
