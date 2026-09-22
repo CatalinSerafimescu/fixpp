@@ -422,7 +422,7 @@ Each requirement carries its track. **C-ABI** requirements are governed by `[con
   across both surfaces. The "no limitation row" clause bounds only these four mandatory rows: the
   two out-of-scope residuals named below (the probe-cap degradation and RefMsgType(372) at the two
   inbound-fed reject builders) MUST additionally be recorded as their own limitation row apiece in
-  the same live ledger — leaving either unrecorded there is a Gate B defect.
+  the same live ledger — leaving either unrecorded there is a Gate B defect. A residual the implementation itself surfaces is recorded the same way (**L-458-2**, the default-cap re-parse, fixpp#493, owner decision 2026-09-22).
 - **FR-017** *(C-ABI)*: every version pin outside the version header, and the byte-level freeze
   manifest for each header whose bytes change, MUST move in the same change. Documentation edits
   required by FR-015 are **byte** edits, so headers that carry only a comment change still

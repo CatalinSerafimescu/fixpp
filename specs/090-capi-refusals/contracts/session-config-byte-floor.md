@@ -177,8 +177,7 @@ re-introduce the note without exhibiting a caller that both propagates that erro
 puts it through `translate()`.**
 
 **A false limitation in the live ledger is durable and citable.** B-452-1 is a **behaviour** row;
-there is no limitation row **for this refusal** in this delta. (The delta's only limitation rows are the
-two out-of-scope residuals — see [`version-and-freeze.md`](./version-and-freeze.md) §4.3.)
+there is no limitation row **for this refusal** in this delta. (No limitation row covers any of the three refusals; the delta's limitation rows record only **residuals the design leaves unfixed** — read them from the live file rather than from a count here. See [`version-and-freeze.md`](./version-and-freeze.md) §4.3.)
 
 ---
 

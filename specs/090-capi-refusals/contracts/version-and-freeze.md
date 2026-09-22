@@ -154,7 +154,7 @@ Plus the two **out-of-scope residuals** the design authority records — the pro
 RefMsgType(372) at the two reject builders. **They are limitations if they are written down and
 defects found at Gate B if they are not** — so each is written down as **its own limitation row** in
 the same live ledger. ⚠️ *"No limitation row"* above bounds the rows **for the three refusals**; it
-never meant the residuals go unrecorded.
+never meant the residuals go unrecorded. ⚠️ **A third residual surfaced at `/simplify` (2026-09-22) and is recorded the same way:** **L-458-2**, a source parsed under a raised `OffsetTable` entry cap cannot be cloned or reified because the copy re-parses under the default cap (C++ track only; tracked as **fixpp#493**).
 
 ---
 
