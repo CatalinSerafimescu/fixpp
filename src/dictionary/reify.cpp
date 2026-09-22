@@ -80,9 +80,8 @@ struct owning_message_handle::impl {
     // outlive the source session/Dictionary (table_view.hpp's "may legally outlive the Dictionary"
     // note).
     std::optional<table_view> owned_tv_;
-    // fixpp#458 D-4: populated ONCE, eagerly, by owning_message_handle_from_
-    // frame (a non-const context) -- no longer mutated from view() (a const
-    // accessor), so this is no longer `mutable`.
+    // fixpp#458 D-4: populated once, eagerly, by the factory (rationale there),
+    // so no longer `mutable`.
     std::optional<wire::MessageView<wire::access_mode::Index>> view_cache_;
 
     explicit impl(std::pmr::memory_resource* mr) : bytes_(mr) {}
@@ -116,11 +115,8 @@ resolved_message_version owning_message_handle::version() const noexcept {
 
 wire::MessageView<wire::access_mode::Index> const& owning_message_handle::view() const noexcept {
     static wire::MessageView<wire::access_mode::Index> const kEmpty{};
-    // fixpp#458 D-4: view_cache_ is populated EAGERLY, by the factory, before
-    // any live handle is returned to a caller — this accessor is now a pure
-    // read over a pre-populated cache (contracts/msg-clone.md §9.1), not the
-    // former lazy-build-on-first-call. See
-    // detail::owning_message_handle_from_frame for the materialisation.
+    // fixpp#458 D-4: a pure read of the cache the factory populated eagerly
+    // (rationale at detail::owning_message_handle_from_frame).
     if (pimpl_ == nullptr) {
         return kEmpty;
     }

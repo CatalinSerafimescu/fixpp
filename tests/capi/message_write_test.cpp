@@ -1654,10 +1654,9 @@ TEST(MessageWriteGroup, NestedEntrySetDataAncestorOutOfRangePropagatesSafely) {
     top_b->group_field_index = static_cast<std::uint32_t>(h->accumulator->entries.size()) + 1000;
 
     // Class (3): resolve_group's own recursion + fixpp_entry_set_data's use
-    // of the (now nullptr) result. Tag 524 has no Length+Data pairing, so a
-    // Data tag (361, paired with 360) is used here instead — entry setters
-    // run no MsgType-grammar check (message.h), so this still reaches
-    // resolve_group.
+    // of the (now nullptr) result, reached through a Data tag (361, paired
+    // with 360): entry setters run no MsgType-grammar check (message.h), so
+    // this still reaches resolve_group.
     const uint8_t data[] = {'N', 'P'};
     EXPECT_EQ(fixpp_entry_set_data(ne, 361, data, sizeof(data)), FIXPP_ERR_INVALID_HANDLE);
 
@@ -2181,7 +2180,6 @@ std::vector<std::byte> make_oversized_frame_for_clone_test(int n_occurrences) {
 // with the same value.
 TEST(MessageWrite, CloneDictBackedReparseCapExceededYieldsWireLimitExceeded) {
     using fixpp::wire::access_mode;
-    using fixpp::wire::MessageView;
     using fixpp::wire::OffsetTable;
 
     auto dict = fixpp::test_support::make_fix44_dictionary();
@@ -2231,7 +2229,6 @@ TEST(MessageWrite, CloneDictBackedReparseCapExceededYieldsWireLimitExceeded) {
 // fail. Without this arm, "refuse whenever the source is big" would pass.
 TEST(MessageWrite, CloneDictFreeOversizedSourceStillReturnsOk) {
     using fixpp::wire::access_mode;
-    using fixpp::wire::MessageView;
     using fixpp::wire::OffsetTable;
 
     auto src_buf = make_oversized_frame_for_clone_test(4100);

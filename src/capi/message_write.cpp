@@ -563,12 +563,9 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_clone(const fixpp_msg_t* src, fixpp_msg
                     // -- nothing beyond the initial byte copy was read from it.
                     return fixpp_capi::detail::translate(parsed.error());
                 }
-            }
-            if (!clone_view) {
-                // Dict-free source: no dict-backed attempt was made (the branch
-                // above runs only under `is_dict_backed()`), so there is nothing
-                // that can fail here. Fall back to the dict-free 2-arg ctor
-                // (pre-066 behavior).
+            } else {
+                // Dict-free source: no dict-backed attempt is made, so nothing can
+                // fail here. The dict-free 2-arg ctor (pre-066 behavior).
                 clone_view =
                     std::make_unique<fixpp::wire::MessageView<fixpp::wire::access_mode::Index>>(
                         fv, clone_mr);
@@ -841,20 +838,22 @@ static AccumulatorEntry* resolve_group(fixpp_group_builder* b) noexcept {
 }
 
 // The context commit resolves `b`'s group under (validate_group_grammar): the message's
-// MsgType and the tags of the groups enclosing it, outermost first.
-static fixpp::wire::group_context builder_context(fixpp_group_builder* b) noexcept {
+// MsgType and the tags of the groups enclosing it, outermost first. nullopt when an
+// ancestor's group does not resolve: the failure propagates (D-2b class (3)) rather
+// than yielding a context silently missing a level.
+static std::optional<fixpp::wire::group_context> builder_context(fixpp_group_builder* b) noexcept {
     if (b->parent == nullptr) {
         return fixpp::wire::group_context{.msg_type = b->msg->accumulator->msg_type};
     }
-    fixpp::wire::group_context parent_ctx = builder_context(b->parent->builder);
+    std::optional<fixpp::wire::group_context> parent_ctx = builder_context(b->parent->builder);
     AccumulatorEntry* pg = resolve_group(b->parent->builder);
     // [const §IX.1] assessed unreachable: this function's only caller
     // (fixpp_entry_set_data) already refuses on a null `resolve_group(e->builder)`
     // before calling here, and that call recurses through the identical
     // ancestor chain this one does (msg-index-bounds.md §2.1 class (3)); kept
     // as defence in depth against a future caller that does not check first.
-    if (pg == nullptr) return parent_ctx;
-    return parent_ctx.pushed(pg->tag);
+    if (!parent_ctx || pg == nullptr) return std::nullopt;
+    return parent_ctx->pushed(pg->tag);
 }
 
 static GroupInstance* resolve_instance(fixpp_entry* e) noexcept {
@@ -1271,9 +1270,10 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_data(fixpp_entry_t* entry, uint16
     // group tag reused elsewhere can open with a different field. On a context miss
     // the setter defers to commit, which fails closed.
     if (h->dict_ && h->session_tv_) {
-        const fixpp::wire::group_context ctx = builder_context(e->builder);
+        const std::optional<fixpp::wire::group_context> ctx = builder_context(e->builder);
+        if (!ctx) return FIXPP_ERR_INVALID_HANDLE;  // unreachable: `group` resolved above
         const auto delimiter = h->session_tv_->group_first_field_exact(
-            ctx.msg_type, {ctx.parent_path.data(), ctx.depth}, group->tag);
+            ctx->msg_type, {ctx->parent_path.data(), ctx->depth}, group->tag);
         if (delimiter && *delimiter == data_tag) return FIXPP_ERR_TYPE_MISMATCH;
     }
     // D-2b (msg-index-bounds.md EC-2, class (2)): the direct subscript below is
