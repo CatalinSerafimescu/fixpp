@@ -1500,13 +1500,13 @@ TEST(MessageWriteGroup, RemoveTagRefusesWhileBuilderOpenPositionalShiftPastEnd) 
     ASSERT_EQ(fixpp_entry_set_string(e0, 79, "A0", 2), FIXPP_ERR_OK);
 
     auto* h = reinterpret_cast<fixpp_msg*>(f.msg);
-    ASSERT_EQ(h->accumulator->entries.size(), 2u);
+    ASSERT_EQ(h->accumulator->entries.size(), 2U);
 
     fixpp_error_t rc = fixpp_msg_remove_tag(f.msg, 11);  // scalar, BEFORE the group, which is last
 
     EXPECT_EQ(rc, FIXPP_ERR_INVALID_HANDLE);
     // Safe unconditionally: `.size()` never touches the builder's own index.
-    ASSERT_EQ(h->accumulator->entries.size(), 2u) << "remove_tag must not have erased anything";
+    ASSERT_EQ(h->accumulator->entries.size(), 2U) << "remove_tag must not have erased anything";
 
     ASSERT_EQ(fixpp_msg_group_end(f.msg, gb), FIXPP_ERR_OK);
     const uint8_t* payload = nullptr;
@@ -1527,18 +1527,18 @@ TEST(MessageWriteGroup, RemoveTagRefusesGroupCountTagWhileOpen) {
     ASSERT_EQ(fixpp_entry_set_string(e0, 79, "A0", 2), FIXPP_ERR_OK);
 
     auto* h = reinterpret_cast<fixpp_msg*>(f.msg);
-    ASSERT_EQ(h->accumulator->entries.size(), 1u);
+    ASSERT_EQ(h->accumulator->entries.size(), 1U);
 
     fixpp_error_t rc = fixpp_msg_remove_tag(f.msg, 78);  // the group's own NoXXX tag
 
     EXPECT_EQ(rc, FIXPP_ERR_INVALID_HANDLE);
     // The group entry survives unchanged: count, instances and their fields.
-    ASSERT_EQ(h->accumulator->entries.size(), 1u);
+    ASSERT_EQ(h->accumulator->entries.size(), 1U);
     const AccumulatorEntry& group_entry = h->accumulator->entries[0];
     EXPECT_EQ(group_entry.tag, 78);
     EXPECT_TRUE(group_entry.is_group);
-    ASSERT_EQ(group_entry.instances.size(), 1u);
-    ASSERT_EQ(group_entry.instances[0].fields.size(), 1u);
+    ASSERT_EQ(group_entry.instances.size(), 1U);
+    ASSERT_EQ(group_entry.instances[0].fields.size(), 1U);
     EXPECT_EQ(group_entry.instances[0].fields[0].tag, 79);
 
     ASSERT_EQ(fixpp_msg_group_end(f.msg, gb), FIXPP_ERR_OK);
@@ -1584,7 +1584,7 @@ V4Outcome run_v4_out_of_range_scenario(fixpp_session_t* sess, bool attempt_write
     auto* b = reinterpret_cast<fixpp_group_builder*>(gb);
     auto* h = reinterpret_cast<fixpp_msg*>(msg);
     AccumulatorEntry& group = h->accumulator->entries[b->group_field_index];
-    EXPECT_EQ(group.instances.size(), 2u);
+    EXPECT_EQ(group.instances.size(), 2U);
     group.instances.pop_back();  // e1->instance_index is now out of range
 
     if (attempt_write) {

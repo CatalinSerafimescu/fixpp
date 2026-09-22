@@ -151,6 +151,9 @@ void operator delete[](void* p, std::size_t) noexcept {
 // growth this file's NEW OOM arm (CloneReparseOom) needs to inject into is
 // invisible to g_alloc_count/g_fail_at entirely, and the injected ordinal
 // can only ever land inside membership_copy()'s (plain-new) allocations.
+// NOLINTBEGIN(cppcoreguidelines-owning-memory,cppcoreguidelines-no-malloc,hicpp-no-malloc)
+// A replaceable global operator new/delete must obtain and release raw storage
+// itself; RAII and gsl::owner<> do not apply to the allocator's own definition.
 void* operator new(std::size_t size, std::align_val_t al) {
     long const n = ++g_alloc_count;
     if (n == g_fail_at.load(std::memory_order_relaxed)) {
@@ -191,6 +194,7 @@ void operator delete[](void* p, std::size_t, std::align_val_t) noexcept {
     if (p != nullptr) --g_live;
     std::free(p);
 }
+// NOLINTEND(cppcoreguidelines-owning-memory,cppcoreguidelines-no-malloc,hicpp-no-malloc)
 #endif  // FIXPP_OOM_WITNESS_ENABLED
 
 namespace {

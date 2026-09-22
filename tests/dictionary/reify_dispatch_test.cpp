@@ -785,6 +785,8 @@ public:
         mv_.emplace(std::move(*parsed));
     }
     [[nodiscard]] bool ok() const noexcept { return mv_.has_value(); }
+    // Every caller ASSERTs ok() first, as with ReifyFixture above.
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     [[nodiscard]] MV const& view() const noexcept { return *mv_; }
 
 private:
