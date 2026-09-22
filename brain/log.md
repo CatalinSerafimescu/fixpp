@@ -6,6 +6,13 @@ status: stable
 
 # Log
 
+- **2026-09-22: 090 Gate B (PR #494).** `components/dictionary.md`'s eager-reify section gains three things:
+  - what eager costs;
+  - that the pre-existing reify benchmark returned before the path it was named for;
+  - why a layout-only regression past +5% was not "fixed" by forcing alignment.
+
+  Gate B changed no production code across four rounds. Every finding was a test or benchmark gap, or prose claiming more than the code delivers, and twice a fix wrote the next false claim: a replacement list, and an "unedited" provenance note that its own round falsified.
+
 - **2026-09-22 — 090 (#447 / #458 / #452), three C-ABI refusals and a producer set the code never had.**
   `components/c-api.md` gains a *C-ABI 1.7* section on the three BREAKING refusals and what each
   one rejected: re-indexing open builders, minting a new code for clone, `FIXPP_ERR_DICT_OOM`, and
