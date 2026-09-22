@@ -374,4 +374,3 @@ changes, and Phase 1 changed none.
   record and the PR body (row 7) · the PR body's `##` BREAKING **heading** in #428's spelling
   (row 1b) · the freeze gate observed **failing then passing** (row 1a/structure note 1) · the
   catalogue and coverage-index edits (row 19).
-

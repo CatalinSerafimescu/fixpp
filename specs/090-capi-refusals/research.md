@@ -421,4 +421,3 @@ open item for a decided one.
 - `.specify/456-table-view-seal.md` — the precedent for recording `[const §X.7]` as **NOT engaged**
   on a C++-only break, and for the inert-documentation-generation disposition.
 - `specs/090-capi-refusals/spec.md` — the requirements input, and the sole record of **OD-2**.
-
