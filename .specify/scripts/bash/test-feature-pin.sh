@@ -87,9 +87,8 @@ refused() {
     fi
 }
 
-# --- RC-1 fixtures (fixpp#490 Gate B round 1): independent of $work, so the
-#     git-failure / non-git / unborn-branch paths are exercised even though
-#     arms 1-7b never touch them. ---
+# --- Fixtures outside $work, for the git-failure / non-git / unborn-branch
+#     paths (fixpp#490). ---
 
 # Arm 8: a second git repo on branch 'foreign', with its own bundle, so a
 # leaked GIT_DIR resolves plausibly instead of erroring for an unrelated
