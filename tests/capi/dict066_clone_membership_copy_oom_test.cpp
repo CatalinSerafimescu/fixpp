@@ -4,10 +4,10 @@
 // gate-b/r1 FQ-1 (PR #181 round 1, Finding 1) — OOM hardening witness for
 // MessageView::membership_copy() (include/fixpp/wire/parser.hpp), now NOT
 // noexcept: `fixpp_msg_clone()`'s production caller
-// (`fixpp_msg_clone()`'s src/capi/message_write.cpp definition, inside the function's single
-// `catch (...)` block) must translate a bad_alloc thrown during the
-// table_view deep-copy into FIXPP_ERR_CAPI_CONFIG_INVALID, NOT
-// std::terminate.
+// (`fixpp_msg_clone()`'s src/capi/message_write.cpp definition, inside the inner
+// `catch (std::bad_alloc const&)` of its nested boundary) must translate a
+// bad_alloc thrown during the table_view deep-copy into
+// FIXPP_ERR_CAPI_CONFIG_INVALID, NOT std::terminate.
 //
 // Construction strategy: mirrors tests/capi/message_read_test.cpp's
 // "InboundHandle" pattern (a stack fixpp_msg wrapping a real
@@ -26,9 +26,9 @@
 // bad_alloc on a specific call number.
 //
 // Calibration: source-verified (`fixpp_msg_clone()`'s full body in src/capi/message_write.cpp), the
-// ENTIRE fixpp_msg_clone() body is one try/catch(...). After the dict-backed
-// branch's `clone->owned_tv_ = h->view->membership_copy();`, exactly ONE
-// further global-new call remains before the try block ends (the
+// construction body sits in an INNER try/catch(std::bad_alloc const&), itself inside
+// an OUTER catch(...) that aborts (fixpp#458 D-3b). After the dict-backed branch's `clone->owned_tv_ = h->view->membership_copy();`, exactly ONE
+// further global-new call remains before the inner try block ends (the
 // `std::make_unique<MessageView<Index>>(std::move(*parsed))` inside the
 // `if (parsed)` arm). So membership_copy()'s own K allocations are positions
 // [dict_total-K .. dict_total-1] -- position `dict_total - 1` is therefore
@@ -306,12 +306,12 @@ TEST(CloneMembershipCopyOom, TableViewCopyOomYieldsCapiConfigInvalid) {
 
     EXPECT_FALSE(threw)
         << "gate-b/r1 FQ-1: a bad_alloc during membership_copy()'s table_view deep-copy "
-           "must NOT propagate out of fixpp_msg_clone() -- must be caught by its own "
-           "catch(...) and translated to FIXPP_ERR_CAPI_CONFIG_INVALID. Propagation here "
-           "means membership_copy()'s noexcept was NOT removed (or the catch regressed).";
+           "must NOT propagate out of fixpp_msg_clone() -- must be caught by its inner "
+           "catch(std::bad_alloc const&) and translated to FIXPP_ERR_CAPI_CONFIG_INVALID. "
+           "Propagation here means membership_copy()'s noexcept was NOT removed (or the catch regressed).";
     EXPECT_EQ(rc_injected, FIXPP_ERR_CAPI_CONFIG_INVALID)
         << "a bad_alloc thrown during membership_copy()'s table_view deep-copy must be "
-           "caught by fixpp_msg_clone's catch(...) and translated to "
+           "caught by fixpp_msg_clone's inner catch(std::bad_alloc const&) and translated to "
            "FIXPP_ERR_CAPI_CONFIG_INVALID -- NOT std::terminate.";
     EXPECT_EQ(clone_injected, nullptr);
 }

@@ -17,7 +17,7 @@
 // #includes a build-tree header — NFR-003-8 is satisfied literally.
 //
 // owning_message_handle (057): a live byte-storage handle — {version, bytes_
-// deep-copied frame, lazily re-framed view_cache_}. NOT type-erased; as<Msg>()
+// deep-copied frame, eagerly materialised view_cache_}. NOT type-erased; as<Msg>()
 // stays T059-stubbed (out of scope). Construction is the single hand-written
 // factory detail::owning_message_handle_from_frame (research D-2 / contract
 // C-2), defined out-of-line here (the handle is a heap pimpl).

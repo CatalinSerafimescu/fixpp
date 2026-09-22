@@ -529,7 +529,7 @@ TEST(ReifyRoundTrip, HandleMoveAssignPreservesTargetAndResetsSource) {
     auto b = fixpp::dict::reify(fb.view(), kProfileV44, &mr);
     ASSERT_TRUE(a.has_value());
     ASSERT_TRUE(b.has_value());
-    (void)a->view();  // populate a's lazy view_cache_ so a non-trivial pimpl moves
+    (void)a->view();  // view_cache_ is already populated by reify() (fixpp#458 D-4); this read is kept only as the pre-D-4 shape
 
     *b = std::move(*a);
 
@@ -627,10 +627,10 @@ TEST(ReifyErrorContract, DeepCopyOomYieldsReifyOom) {
 
 TEST(ReifyErrorContract, ViewRebuildOomDegradesNotTerminate) {
     // 057 / 004-T059 hardening: the deep-copy (alloc #1) succeeds so reify()
-    // returns a live handle, but the LAZY view() OffsetTable build (alloc #2)
-    // then OOMs. owning_message_handle::view() is noexcept, so a throwing mr at
-    // first field access must NOT terminate — the OffsetTable ctor degrades to
-    // an empty table (out_of_memory) and field_value() reports field-absent.
+    // returns a live handle, but the dict-free OffsetTable build (alloc #2),
+    // which since fixpp#458 D-4 runs EAGERLY inside the factory, then OOMs.
+    // The factory is noexcept, so it must NOT terminate — the OffsetTable ctor
+    // degrades to an empty table (out_of_memory) and field_value() reports field-absent.
     FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     ReifyFixture f{fixpp::test_support::make_nos_frame()};
     ASSERT_TRUE(f.ok());
@@ -640,8 +640,8 @@ TEST(ReifyErrorContract, ViewRebuildOomDegradesNotTerminate) {
 
     auto r = fixpp::dict::reify(f.view(), kProfileV44, &fail);
     ASSERT_TRUE(r.has_value()) << "deep-copy (alloc #1) must succeed → live handle";
-    // First field access triggers the lazy view() rebuild → OffsetTable alloc #2
-    // fails. Must degrade, not terminate.
+    // alloc #2 already failed inside reify(); the handle is returned degraded,
+    // so the field read reports absent.
     auto clord = r->field_value(11);
     EXPECT_FALSE(clord.has_value())
         << "OOM during OffsetTable build → field-absent (graceful degrade)";
