@@ -1665,6 +1665,219 @@ TEST(MessageWriteGroup, NestedEntrySetDataAncestorOutOfRangePropagatesSafely) {
     EXPECT_EQ(fixpp_entry_set_string(ne, 524, "NP1", 3), FIXPP_ERR_INVALID_HANDLE);
 }
 
+// ── gate-b/r1 RC-1 (G-2a, msg-index-bounds.md §2.1 class (1)): three
+// corruption witnesses reaching the class (1) resolver-body guards no prior
+// test took — resolve_instance's own `e->instance_index >= g->instances.size()`
+// bound, and resolve_group's two nested-ancestor bounds (`b->parent->
+// instance_index >= pg->instances.size()`, `b->group_field_index >=
+// inst.fields.size()`). Each follows the V4Outcome shape: the corruption is
+// unconditional (identical arrangement in both runs), only the refused call
+// is conditional on `attempt_write`, and the refused run's committed payload
+// must equal the no-op control's, byte for byte — "nothing written, builder
+// still usable".
+
+namespace {
+// (i) resolve_instance's own bound: a TOP-LEVEL builder with two entries, the
+// second instance popped (same technique as run_v4_out_of_range_scenario),
+// then a SCALAR setter (entry_set_bytes_impl -> resolve_instance) on the
+// entry whose instance_index is now out of range — distinct from
+// EntrySetDataOutOfRangeInstanceIndexRefusesDefined, which drives
+// fixpp_entry_set_data's own separate class (2) direct-subscript guard.
+struct ResolveInstanceOutcome {
+    fixpp_error_t set_string_rc = FIXPP_ERR_OK;
+    bool group_end_ok = false;
+    fixpp_error_t commit_rc = FIXPP_ERR_OK;
+    std::string payload;
+};
+
+ResolveInstanceOutcome run_resolve_instance_out_of_range_scenario(fixpp_session_t* sess,
+                                                                  bool attempt_write) {
+    ResolveInstanceOutcome r;
+    fixpp_msg_t* msg = nullptr;
+    EXPECT_EQ(fixpp_msg_create_outbound(sess, "D", 1, &msg), FIXPP_ERR_OK);
+    fixpp_group_builder_t* gb = nullptr;
+    EXPECT_EQ(fixpp_msg_group_begin(msg, 78, &gb), FIXPP_ERR_OK);
+    fixpp_entry_t* e0 = nullptr;
+    EXPECT_EQ(fixpp_group_builder_add_entry(gb, &e0), FIXPP_ERR_OK);
+    EXPECT_EQ(fixpp_entry_set_string(e0, 79, "ACC0", 4), FIXPP_ERR_OK);
+    fixpp_entry_t* e1 = nullptr;
+    EXPECT_EQ(fixpp_group_builder_add_entry(gb, &e1), FIXPP_ERR_OK);
+    EXPECT_EQ(fixpp_entry_set_string(e1, 79, "ACC1", 4), FIXPP_ERR_OK);
+
+    auto* b = reinterpret_cast<fixpp_group_builder*>(gb);
+    auto* h = reinterpret_cast<fixpp_msg*>(msg);
+    AccumulatorEntry& group = h->accumulator->entries[b->group_field_index];
+    EXPECT_EQ(group.instances.size(), 2U);
+    group.instances.pop_back();  // e1->instance_index is now out of range
+
+    if (attempt_write) {
+        r.set_string_rc = fixpp_entry_set_string(e1, 79, "LATE", 4);
+    }
+
+    r.group_end_ok = (fixpp_msg_group_end(msg, gb) == FIXPP_ERR_OK);
+    const uint8_t* payload = nullptr;
+    size_t len = 0;
+    r.commit_rc = fixpp_msg_commit(msg, &payload, &len);
+    if (r.commit_rc == FIXPP_ERR_OK) r.payload.assign(reinterpret_cast<const char*>(payload), len);
+    fixpp_msg_destroy(msg);
+    return r;
+}
+}  // namespace
+
+TEST(MessageWriteGroup, ResolveInstanceOutOfRangeScalarSetterRefusesDefined) {
+    GroupFixture f;
+    ResolveInstanceOutcome control =
+        run_resolve_instance_out_of_range_scenario(f.sess, /*attempt_write=*/false);
+    ASSERT_EQ(control.commit_rc, FIXPP_ERR_OK);
+
+    ResolveInstanceOutcome refused =
+        run_resolve_instance_out_of_range_scenario(f.sess, /*attempt_write=*/true);
+
+    EXPECT_EQ(refused.set_string_rc, FIXPP_ERR_INVALID_HANDLE);
+    EXPECT_TRUE(refused.group_end_ok) << "the builder is still usable after the refused call";
+    ASSERT_EQ(refused.commit_rc, FIXPP_ERR_OK);
+    EXPECT_EQ(refused.payload, control.payload);
+}
+
+namespace {
+// (ii) resolve_group's nested PARENT-instance bound
+// (`b->parent->instance_index >= pg->instances.size()`): a nested builder
+// (top -> e0 -> nested -> ne), with ne's own delimiter field set BEFORE any
+// corruption (so the nested instance is non-empty and well-formed once
+// restored — INV-4 requires it). e0's own instance_index (b->parent-
+// >instance_index, read by resolve_group(nested)) is then corrupted far past
+// pg->instances.size(), leaving the ROOT builder's own top-level bound
+// (resolve_group's `b->parent == nullptr` arm) untouched, so that arm still
+// passes. The corruption and its restore are unconditional (identical
+// arrangement in both runs); only the refused re-set attempt is conditional.
+struct NestedParentOutOfRangeOutcome {
+    fixpp_error_t set_string_rc = FIXPP_ERR_OK;
+    bool nested_group_end_ok = false;
+    bool top_group_end_ok = false;
+    fixpp_error_t commit_rc = FIXPP_ERR_OK;
+    std::string payload;
+};
+
+NestedParentOutOfRangeOutcome run_nested_parent_out_of_range_scenario(fixpp_session_t* sess,
+                                                                      bool attempt_write) {
+    NestedParentOutOfRangeOutcome r;
+    fixpp_msg_t* msg = nullptr;
+    EXPECT_EQ(fixpp_msg_create_outbound(sess, "D", 1, &msg), FIXPP_ERR_OK);
+    fixpp_group_builder_t* top = nullptr;
+    EXPECT_EQ(fixpp_msg_group_begin(msg, 78, &top), FIXPP_ERR_OK);
+    fixpp_entry_t* e0 = nullptr;
+    EXPECT_EQ(fixpp_group_builder_add_entry(top, &e0), FIXPP_ERR_OK);
+    EXPECT_EQ(fixpp_entry_set_string(e0, 79, "ACC1", 4), FIXPP_ERR_OK);
+    fixpp_group_builder_t* nested = nullptr;
+    EXPECT_EQ(fixpp_entry_group_begin(e0, 539, &nested), FIXPP_ERR_OK);
+    fixpp_entry_t* ne = nullptr;
+    EXPECT_EQ(fixpp_group_builder_add_entry(nested, &ne), FIXPP_ERR_OK);
+    EXPECT_EQ(fixpp_entry_set_string(ne, 524, "NP1", 3), FIXPP_ERR_OK);
+
+    auto* e0_raw = reinterpret_cast<fixpp_entry*>(e0);
+    auto const original_instance_index = e0_raw->instance_index;
+    e0_raw->instance_index = original_instance_index + 1000;
+
+    if (attempt_write) {
+        r.set_string_rc = fixpp_entry_set_string(ne, 524, "LATE", 4);
+    }
+
+    e0_raw->instance_index = original_instance_index;  // restore
+
+    r.nested_group_end_ok = (fixpp_msg_group_end(msg, nested) == FIXPP_ERR_OK);
+    r.top_group_end_ok = (fixpp_msg_group_end(msg, top) == FIXPP_ERR_OK);
+    const uint8_t* payload = nullptr;
+    size_t len = 0;
+    r.commit_rc = fixpp_msg_commit(msg, &payload, &len);
+    if (r.commit_rc == FIXPP_ERR_OK) r.payload.assign(reinterpret_cast<const char*>(payload), len);
+    fixpp_msg_destroy(msg);
+    return r;
+}
+}  // namespace
+
+TEST(MessageWriteGroup, NestedParentInstanceIndexOutOfRangeRefusesDefined) {
+    GroupFixture f;
+    NestedParentOutOfRangeOutcome control =
+        run_nested_parent_out_of_range_scenario(f.sess, /*attempt_write=*/false);
+    ASSERT_EQ(control.commit_rc, FIXPP_ERR_OK);
+
+    NestedParentOutOfRangeOutcome refused =
+        run_nested_parent_out_of_range_scenario(f.sess, /*attempt_write=*/true);
+
+    EXPECT_EQ(refused.set_string_rc, FIXPP_ERR_INVALID_HANDLE);
+    EXPECT_TRUE(refused.nested_group_end_ok);
+    EXPECT_TRUE(refused.top_group_end_ok);
+    ASSERT_EQ(refused.commit_rc, FIXPP_ERR_OK);
+    EXPECT_EQ(refused.payload, control.payload);
+}
+
+namespace {
+// (iii) resolve_group's nested OWN bound (`b->group_field_index >=
+// inst.fields.size()`): same nested arrangement, with e0's instance_index
+// LEFT VALID this time (so the parent-instance bound above still passes) and
+// `nested`'s own group_field_index corrupted far past
+// pg->instances[e0->instance_index].fields.size() instead.
+struct NestedOwnIndexOutOfRangeOutcome {
+    fixpp_error_t set_string_rc = FIXPP_ERR_OK;
+    bool nested_group_end_ok = false;
+    bool top_group_end_ok = false;
+    fixpp_error_t commit_rc = FIXPP_ERR_OK;
+    std::string payload;
+};
+
+NestedOwnIndexOutOfRangeOutcome run_nested_own_index_out_of_range_scenario(fixpp_session_t* sess,
+                                                                           bool attempt_write) {
+    NestedOwnIndexOutOfRangeOutcome r;
+    fixpp_msg_t* msg = nullptr;
+    EXPECT_EQ(fixpp_msg_create_outbound(sess, "D", 1, &msg), FIXPP_ERR_OK);
+    fixpp_group_builder_t* top = nullptr;
+    EXPECT_EQ(fixpp_msg_group_begin(msg, 78, &top), FIXPP_ERR_OK);
+    fixpp_entry_t* e0 = nullptr;
+    EXPECT_EQ(fixpp_group_builder_add_entry(top, &e0), FIXPP_ERR_OK);
+    EXPECT_EQ(fixpp_entry_set_string(e0, 79, "ACC1", 4), FIXPP_ERR_OK);
+    fixpp_group_builder_t* nested = nullptr;
+    EXPECT_EQ(fixpp_entry_group_begin(e0, 539, &nested), FIXPP_ERR_OK);
+    fixpp_entry_t* ne = nullptr;
+    EXPECT_EQ(fixpp_group_builder_add_entry(nested, &ne), FIXPP_ERR_OK);
+    EXPECT_EQ(fixpp_entry_set_string(ne, 524, "NP1", 3), FIXPP_ERR_OK);
+
+    auto* nested_raw = reinterpret_cast<fixpp_group_builder*>(nested);
+    auto const original_group_field_index = nested_raw->group_field_index;
+    nested_raw->group_field_index = original_group_field_index + 1000;
+
+    if (attempt_write) {
+        r.set_string_rc = fixpp_entry_set_string(ne, 524, "LATE", 4);
+    }
+
+    nested_raw->group_field_index = original_group_field_index;  // restore
+
+    r.nested_group_end_ok = (fixpp_msg_group_end(msg, nested) == FIXPP_ERR_OK);
+    r.top_group_end_ok = (fixpp_msg_group_end(msg, top) == FIXPP_ERR_OK);
+    const uint8_t* payload = nullptr;
+    size_t len = 0;
+    r.commit_rc = fixpp_msg_commit(msg, &payload, &len);
+    if (r.commit_rc == FIXPP_ERR_OK) r.payload.assign(reinterpret_cast<const char*>(payload), len);
+    fixpp_msg_destroy(msg);
+    return r;
+}
+}  // namespace
+
+TEST(MessageWriteGroup, NestedOwnGroupFieldIndexOutOfRangeRefusesDefined) {
+    GroupFixture f;
+    NestedOwnIndexOutOfRangeOutcome control =
+        run_nested_own_index_out_of_range_scenario(f.sess, /*attempt_write=*/false);
+    ASSERT_EQ(control.commit_rc, FIXPP_ERR_OK);
+
+    NestedOwnIndexOutOfRangeOutcome refused =
+        run_nested_own_index_out_of_range_scenario(f.sess, /*attempt_write=*/true);
+
+    EXPECT_EQ(refused.set_string_rc, FIXPP_ERR_INVALID_HANDLE);
+    EXPECT_TRUE(refused.nested_group_end_ok);
+    EXPECT_TRUE(refused.top_group_end_ok);
+    ASSERT_EQ(refused.commit_rc, FIXPP_ERR_OK);
+    EXPECT_EQ(refused.payload, control.payload);
+}
+
 // ── Coverage gap closers ──────────────────────────────────────────────────────
 
 // create_outbound with NULL msg_type → NULL_HANDLE.
