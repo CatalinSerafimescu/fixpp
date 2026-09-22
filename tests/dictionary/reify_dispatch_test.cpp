@@ -880,6 +880,9 @@ TEST(ReifyEagerMaterialization, FailedDictBackedReparseRefuses) {
 // worked before D-4. Without this control, FailedDictBackedReparseRefuses
 // measures the arm that was never broken.
 TEST(ReifyEagerMaterialization, SpuriousHitControl_DeepCopyOomStillYieldsDictReifyOom) {
+    // Same byte-exact injection as FailedDictBackedReparseRefuses: on MSVC's debug
+    // STL the first call on the resource is a hidden _Container_proxy, not bytes_.
+    FIXPP_SKIP_ON_MSVC_DEBUG_ARENA();
     DictBackedNosFixture f;
     ASSERT_TRUE(f.ok()) << "fixture precondition: v44 NewOrderSingle must dict-parse cleanly";
 
