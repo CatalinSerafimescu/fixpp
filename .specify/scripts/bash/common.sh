@@ -268,19 +268,20 @@ get_feature_paths() {
         return 1
     else
         # fixpp#490: the tracked pin is only trusted for the branch it was
-        # written on (or a branch named after its bundle). Otherwise it is
+        # written on, or when it names specs/<branch> itself. Otherwise it is
         # inherited, and resolving through it would target an unrelated feature.
-        local pin_fd pin_branch pin_base branch_bundle="$repo_root/specs/$git_branch"
+        # Identity is the whole path, never its basename (fixpp#496 Gate B r2).
+        local pin_fd pin_branch pin_dir branch_bundle="$repo_root/specs/$git_branch"
         pin_fd=$(read_feature_json_feature_directory "$repo_root")
         pin_branch=$(_read_feature_json_key "$repo_root" branch)
-        pin_base="${pin_fd%/}"; pin_base="${pin_base##*/}"
-        if [[ -n "$pin_fd" && ( "$pin_branch" == "$git_branch" || "$pin_base" == "$git_branch" ) ]]; then
-            if [[ -d "$branch_bundle" && "$pin_base" != "$git_branch" ]]; then
+        pin_dir="${pin_fd%/}"
+        [[ -n "$pin_dir" && "$pin_dir" != /* ]] && pin_dir="$repo_root/${pin_dir#./}"
+        if [[ -n "$pin_fd" && ( "$pin_branch" == "$git_branch" || "$pin_dir" == "$branch_bundle" ) ]]; then
+            if [[ -d "$branch_bundle" && "$pin_dir" != "$branch_bundle" ]]; then
                 echo "ERROR: .specify/feature.json pins '$pin_fd' for branch '$git_branch', but that branch also has its own bundle 'specs/$git_branch'. Set SPECIFY_FEATURE_DIRECTORY to the one you mean (fixpp#490)." >&2
                 return 1
             fi
-            feature_dir="$pin_fd"
-            [[ "$feature_dir" != /* ]] && feature_dir="$repo_root/$feature_dir"
+            feature_dir="$pin_dir"
         elif [[ -d "$branch_bundle" ]]; then
             # A pin recorded for another branch is stale, not a disagreement.
             [[ -n "$pin_fd" ]] && echo "NOTE: ignoring .specify/feature.json pin '$pin_fd' (branch '${pin_branch:-<not recorded>}'); using specs/$git_branch (fixpp#490)." >&2

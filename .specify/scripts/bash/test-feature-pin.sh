@@ -21,7 +21,7 @@ trap 'rm -rf "$tmp"' EXIT
 work="${tmp}/repo"
 mkdir -p "${work}/.specify/scripts/bash"
 cp "${scripts}/common.sh" "${scripts}/check-prerequisites.sh" "${work}/.specify/scripts/bash/"
-mkdir -p "${work}/specs/089-shipped" "${work}/specs/090-bundle" "${work}/specs/091-own"
+mkdir -p "${work}/specs/089-shipped" "${work}/specs/090-bundle" "${work}/specs/091-own" "${work}/specs/feature/x"
 
 g() { git -C "$work" "$@"; }
 g init -q
@@ -268,6 +268,61 @@ for mode in default nojq; do
         pass "[$mode] unborn branch resolves its own bundle"
     else
         fail "[$mode] unborn branch: ${out:-}"
+    fi
+
+    # 12. Pin whose BASENAME is the branch but whose path is elsewhere, recorded
+    #     on another branch -> stale: the branch bundle, with the NOTE.
+    g switch -q -C 091-own main
+    pin '{"feature_directory":"elsewhere/091-own","branch":"main"}'
+    if out="$(resolve "$P")" && [[ "$(field FEATURE_DIR "$out")" == "${work}/specs/091-own" ]] \
+        && grep -qF "NOTE: ignoring .specify/feature.json pin 'elsewhere/091-own' (branch 'main')" <<< "$out"; then
+        pass "[$mode] basename-alias pin recorded elsewhere is stale"
+    else
+        fail "[$mode] basename-alias stale pin: ${out:-}"
+    fi
+    # 13. Same path, recorded on THIS branch, while specs/<branch> exists -> refuse.
+    pin '{"feature_directory":"elsewhere/091-own","branch":"091-own"}'
+    refused "basename-alias pin/branch-bundle disagreement" "also has its own bundle"
+    # 14. Path normalisation: ./, trailing slash, absolute -- each names specs/091-own.
+    for fd in "./specs/091-own" "specs/091-own/" "${work}/specs/091-own"; do
+        pin "{\"feature_directory\":\"${fd}\",\"branch\":\"091-own\"}"
+        if out="$(resolve "$P")" && [[ "$(field FEATURE_DIR "$out")" == "${work}/specs/091-own" ]] \
+            && ! grep -qF 'NOTE:' <<< "$out"; then
+            pass "[$mode] pin '${fd}' is the branch bundle"
+        else
+            fail "[$mode] pin '${fd}': ${out:-}"
+        fi
+    done
+    # 14b. A pin naming specs/<branch> exactly but recorded on ANOTHER branch
+    #      (create-new-feature.sh persists before any branch switch) -> the
+    #      same directory, honoured, no NOTE.
+    pin '{"feature_directory":"specs/091-own","branch":"main"}'
+    if out="$(resolve "$P")" && [[ "$(field FEATURE_DIR "$out")" == "${work}/specs/091-own" ]] \
+        && ! grep -qF 'NOTE:' <<< "$out"; then
+        pass "[$mode] pin naming specs/<branch> recorded elsewhere honoured"
+    else
+        fail "[$mode] pin naming specs/<branch> recorded elsewhere: ${out:-}"
+    fi
+    # 15. Slash branch: persisted pin round-trips; legacy form honoured.
+    g switch -q -C feature/x main
+    rm -f "${work}/.specify/feature.json"
+    rc=0
+    (cd "$work" && env -u SPECIFY_FEATURE -u SPECIFY_INIT_DIR PATH="$P" \
+        SPECIFY_FEATURE_DIRECTORY=specs/feature/x \
+        bash -c 'source .specify/scripts/bash/common.sh && get_feature_paths >/dev/null') || rc=$?
+    if [[ $rc -eq 0 ]] && grep -qF '"branch":"feature/x"' "${work}/.specify/feature.json" \
+        && out="$(resolve "$P")" && [[ "$(field FEATURE_DIR "$out")" == "${work}/specs/feature/x" ]] \
+        && ! grep -qF 'NOTE:' <<< "$out"; then
+        pass "[$mode] slash-branch pin round-trips"
+    else
+        fail "[$mode] slash-branch round-trip: rc=$rc $(cat "${work}/.specify/feature.json" 2>/dev/null) / ${out:-}"
+    fi
+    pin '{"feature_directory":"specs/feature/x"}'
+    if out="$(resolve "$P")" && [[ "$(field FEATURE_DIR "$out")" == "${work}/specs/feature/x" ]] \
+        && ! grep -qF 'NOTE:' <<< "$out"; then
+        pass "[$mode] slash-branch legacy pin honoured"
+    else
+        fail "[$mode] slash-branch legacy pin: ${out:-}"
     fi
 done
 
