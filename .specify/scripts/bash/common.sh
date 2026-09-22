@@ -5,8 +5,8 @@
 # Spec-Kit refresh. .specify/feature.json is tracked, so a bare pin is inherited
 # by every branch and a bundle-less branch silently resolved to the last-pinned
 # (possibly shipped) feature. The pin now records the git branch it was written
-# on, and get_feature_paths trusts it only on that branch, or when it names
-# specs/<branch> itself; otherwise it is ignored in favour of specs/<branch>
+# on, and get_feature_paths trusts it only on that branch, or when it names an
+# existing specs/<branch> itself; otherwise it is ignored in favour of specs/<branch>
 # (with a NOTE) when that bundle exists, and refused when it does not. After a
 # refresh, run test-feature-pin.sh (beside this file) — it goes RED if the
 # patch was dropped. Nothing runs it automatically.
@@ -233,7 +233,7 @@ get_feature_paths() {
     #   1. SPECIFY_FEATURE_DIRECTORY env var (explicit override)
     #   2. .specify/feature.json "feature_directory" key (persisted by specify
     #      command) — in a git tree only if it is pinned on the current branch,
-    #      or names specs/<current branch> itself (fixpp#490)
+    #      or names specs/<current branch> itself and that bundle exists (fixpp#490)
     #   3. specs/<current branch>, when that bundle exists (fixpp#490)
     #   4. Error — no feature context available
     local feature_dir
@@ -271,15 +271,17 @@ get_feature_paths() {
         return 1
     else
         # fixpp#490: the tracked pin is only trusted for the branch it was
-        # written on, or when it names specs/<branch> itself. Otherwise it is
-        # inherited, and resolving through it would target an unrelated feature.
+        # written on, or when it names specs/<branch> itself and that bundle
+        # exists (fixpp#496 Gate B r3). Otherwise it is inherited, and resolving
+        # through it would target an unrelated feature.
         # Identity is the whole path, never its basename (fixpp#496 Gate B r2).
         local pin_fd pin_branch pin_dir branch_bundle="$repo_root/specs/$git_branch"
         pin_fd=$(read_feature_json_feature_directory "$repo_root")
         pin_branch=$(_read_feature_json_key "$repo_root" branch)
         pin_dir="${pin_fd%/}"
         [[ -n "$pin_dir" && "$pin_dir" != /* ]] && pin_dir="$repo_root/${pin_dir#./}"
-        if [[ -n "$pin_fd" && ( "$pin_branch" == "$git_branch" || "$pin_dir" == "$branch_bundle" ) ]]; then
+        if [[ -n "$pin_fd" && ( "$pin_branch" == "$git_branch" ||
+                ( "$pin_dir" == "$branch_bundle" && -d "$branch_bundle" ) ) ]]; then
             if [[ -d "$branch_bundle" && "$pin_dir" != "$branch_bundle" ]]; then
                 echo "ERROR: .specify/feature.json pins '$pin_fd' for branch '$git_branch', but that branch also has its own bundle 'specs/$git_branch'. Set SPECIFY_FEATURE_DIRECTORY to the one you mean (fixpp#490)." >&2
                 return 1

@@ -5,8 +5,8 @@
 #
 # Guards the fixpp-local patch to .specify/scripts/bash/common.sh (fixpp#490):
 # the tracked .specify/feature.json pin must not resolve an unrelated branch's
-# feature. A pin is trusted only on the branch it records, or when it names
-# specs/<branch> itself — its identity is the whole normalized path, never its
+# feature. A pin is trusted only on the branch it records, or when it names an
+# existing specs/<branch> itself — its identity is the whole normalized path, never its
 # basename. Runs the repo's own common.sh + check-prerequisites.sh inside a
 # throwaway git repo, so the real pin and working tree are never touched.
 # NOT wired into CI (a .specify/-only change runs no matrix, by choice): run it
@@ -325,6 +325,27 @@ for mode in default nojq; do
         pass "[$mode] slash-branch legacy pin honoured"
     else
         fail "[$mode] slash-branch legacy pin: ${out:-}"
+    fi
+
+    # 16. Bundle-less branch + a pin naming specs/<branch> exactly but NOT
+    #     recorded on this branch -> refuse: path identity alone is trusted
+    #     only when that bundle exists (fixpp#496 Gate B r3). A pin recorded
+    #     on THIS branch is honoured even when its directory does not exist
+    #     yet (explicit SPECIFY_FEATURE_DIRECTORY persisted here).
+    g switch -q -C 093-ghost main
+    if [[ -e "${work}/specs/093-ghost" ]]; then
+        fail "[$mode] arm 16 precondition: specs/093-ghost exists"
+    fi
+    pin '{"feature_directory":"specs/093-ghost","branch":"main"}'
+    refused "bundle-less branch, pin naming its path recorded elsewhere" "No feature for branch '093-ghost'"
+    pin '{"feature_directory":"specs/093-ghost"}'
+    refused "bundle-less branch, legacy pin naming its path" "No feature for branch '093-ghost'"
+    pin '{"feature_directory":"specs/093-ghost","branch":"093-ghost"}'
+    if out="$(resolve "$P")" && [[ "$(field FEATURE_DIR "$out")" == "${work}/specs/093-ghost" ]] \
+        && ! grep -qF 'NOTE:' <<< "$out"; then
+        pass "[$mode] pin recorded on this branch honoured before its directory exists"
+    else
+        fail "[$mode] this-branch pin to a not-yet-created directory: ${out:-}"
     fi
 done
 
