@@ -1121,8 +1121,8 @@ C++ callers' own parses (§8); other `get_default_resource()` captures (§7.1).
 
 ## 15. Open questions
 
-- **Q-2.** Does MSVC evaluate §5's prvalue `noexcept` form as the standard requires? The MSVC leg
-  (§13 step 6) decides; if not, §5's behavioural fallback stands in.
+- **Q-2 (decided by the MSVC leg, §13 step 6).** MSVC evaluates §5's prvalue `noexcept` form as the
+  standard requires: T-1 fails to compile unfixed and compiles fixed, so §5's fallback is not used.
 
 Closed on evidence in round 2, now decisions: Q-4 (C-ABI MINOR sequencing) → §7.2, with its
 re-run-at-implementation checks; Q-5 (G2 scope) → §6.4, tree-wide; `view_owner()` vs a friend →
