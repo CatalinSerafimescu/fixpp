@@ -122,6 +122,7 @@ add_executable(wire_dict_tests
   validator_production_table_view_test.cpp
   validator_nested_membership_test.cpp
   message_view_membership_copy_test.cpp
+  message_view_shared_membership_test.cpp                             # T-7/T-8 (fixpp#495)
   validator_enum_domain_test.cpp                                      # T022/T022a/T023 (075)
   validator_enum_multivalue_test.cpp                                  # T027 (075)
   fixt_header_validate_test.cpp                                       # T003/T004 (081)
