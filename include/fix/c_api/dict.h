@@ -23,8 +23,11 @@ extern "C" {
 /**
  * fixpp_dict_load_from_xml — load a FIX XML data dictionary from a filesystem path.
  *
- * Wraps fixpp::dict::XmlLoader::load(path, std::pmr::get_default_resource()) and
- * produces an OWNING fixpp_dict_t (refcounted shared_ptr<const Dictionary>).  Pass
+ * Wraps fixpp::dict::load_any(path, std::pmr::new_delete_resource()) and
+ * produces an OWNING fixpp_dict_t (refcounted shared_ptr<const Dictionary>).  A
+ * host's std::pmr::set_default_resource() does not affect the dictionary's
+ * storage. BREAKING (C-ABI 1.8): it used to allocate from the default resource
+ * installed at load time.  Pass
  * the result to fixpp_session_config_set_dictionary (which copies the shared_ptr),
  * then call fixpp_dict_destroy on your handle.
  *
