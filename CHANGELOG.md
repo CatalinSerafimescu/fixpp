@@ -41,13 +41,15 @@ Pending: Codex Gate A, then the owner's sign-off.
 ### Changed
 
 - **Article XVI §6** — the orchestrator does not implement. The clause defines *implement* (production
-  code, tests, build/CI/configuration and generated files, their regeneration, and merge-conflict
-  resolution in them) and lists what the orchestrator may do. The implementer's model is
+  code, tests, scripts, build/CI/configuration files, committed generated files and their regeneration,
+  and merge-conflict resolution in them, classified by file type) and lists what the orchestrator may
+  do, including governance texts and transient build, test and index outputs. The implementer's model is
   configuration, not a constitutional term.
 - **Article XVI §7** — the implementer sub-agent applies accepted `/simplify` findings.
 - **Article XVII §4** — a user's `/gate-a` or `/gate-b` authorizes that gate's Codex calls; the
   §XVI.8 Codex fallback needs the user's confirmation.
-- **Article XVII §5** — accepted findings are applied by the active fixer, never the orchestrator.
+- **Article XVII §5** — accepted findings are applied by the actor the procedure assigns (implementer,
+  Gate A rewrite agent, or Codex), never the orchestrator.
 - **Article XX §5** — the example hand-off rule names the implementer, not a model.
 
 ---

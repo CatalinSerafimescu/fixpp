@@ -308,10 +308,9 @@ sound, matches memory. Disposition (user-approved 2026-05-17):
   (step 14). Constitution v3.0 (MAJOR) defines what the orchestrator may and may
   not do (Article XVI §6: mutation proofs in a scratch copy, merge conflicts and
   codegen regeneration to the implementer) and names roles instead of models
-  (Articles XVI §7, XVII §4–§5, XX §5). Rationale: the Gate B records of PR #258
-  (orchestrator-fixed rounds 3-8, no triage) and PR #453 (orchestrator-fixed
-  throughout) in the research repository's decisions/speckit/, and PR #469's,
-  where a fixer rewrote a queued comment-claim deletion into a new claim.
+  (Articles XVI §7, XVII §4–§5, XX §5). Rationale: PR #258's Gate B record in the
+  research repository (decisions/speckit/pr258-python-fold-gateb.md) — rounds 3-8
+  were "Codex-review + orchestrator-fix with no Step B triage at all".
 
 
 No conflicts found on: `/clarify` before `/plan` (§XVI.3), Gate A before

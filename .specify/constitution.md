@@ -7,23 +7,25 @@ Sync Impact Report — v2.0 → v3.0 (2026-09-23) — PROPOSED (Codex Gate A, th
     amendment classified itself MINOR and was corrected at Gate A round 1 (P1).
   Modified: Article XVI §6 — a clean-context implementer sub-agent executes and the orchestrator (the
     main session) does not implement. The clause now defines "implement" (production code, tests,
-    build/CI/configuration files, generated files and running their regeneration, and resolving merge
-    conflicts in any of those) and lists what the orchestrator MAY do. The model that runs the
+    scripts, build/CI/configuration files, committed generated files and the regeneration producing
+    them, and resolving merge conflicts in any of those; classified by file type, not directory) and
+    lists what the orchestrator MAY do, including governance texts and transient build/test/index
+    outputs. The model that runs the
     implementer is configuration, not a constitutional term.
   Modified: Article XVI §7 — the orchestrator triages /simplify findings and the implementer sub-agent
     applies the accepted ones; the step citation is corrected to pipeline steps 11 and 12.
   Modified: Article XVII §4 — no Claude agent starts Codex on its own initiative; a user's /gate-a or
     /gate-b invocation authorizes that gate's bounded Codex calls, and the §XVI.8 fallback runs only
     once the user confirms it. The model list ("Neither Sonnet nor Opus") is removed.
-  Modified: Article XVII §5 — accepted findings are applied by the active fixer (the implementer
-    sub-agent, or Codex where §XVI.8 or the Gate B fixer hand-off applies), never by the orchestrator.
+  Modified: Article XVII §5 — accepted findings are applied by the active fixer, the non-orchestrator
+    actor the applicable procedure assigns (the implementer sub-agent, Gate A's rewrite agent, or Codex
+    where §XVI.8 or the Gate B fixer hand-off applies), never by the orchestrator.
   Modified: Article XX §5 — the illustrative hand-off rule names "the implementer" instead of Sonnet.
   Rationale: the owner moved the implementer and Gate B fixer from Sonnet to the Opus alias and ruled
-    that the orchestrator never implements (2026-09-23). Recorded Gate B loops in which the
-    orchestrator applied fixes itself: PR #258 (9 rounds; orchestrator-fixed rounds 3-8 with no
-    triage, research repository decisions/speckit/pr258-python-fold-gateb.md, "Convergence story"),
-    and PR #453 (11 rounds; decisions/speckit/pr453-426-427-428-length-data-pairs-gateb.md). Naming a
-    model in the constitution also made every model change an amendment; naming the role does not.
+    that the orchestrator never implements (2026-09-23). The recorded case: PR #258's Gate B ran 9
+    rounds, rounds 3-8 "Codex-review + orchestrator-fix with no Step B triage at all" (research
+    repository decisions/speckit/pr258-python-fold-gateb.md, "Convergence story"). Naming a model in
+    the constitution also made every model change an amendment; naming the role does not.
   Affected catalogue rows: none.
   Affected feature specs: none (merged specs/<id>/ bundles that name the old agent are historical
     records and stay as written).
@@ -33,7 +35,8 @@ Sync Impact Report — v2.0 → v3.0 (2026-09-23) — PROPOSED (Codex Gate A, th
     comment-claim lint), CONTRIBUTING.md, CHANGELOG.md. Parent-repository counterparts (agent
     definition, /gate-b, the edit guard) are outside this repository.
   Review and sign-off: pending — Codex Gate A on this branch (round 1: NOT CONVERGED, 1 P1 / 4 P2 /
-    3 P3, all addressed in this revision), then the owner's sign-off. PR: not yet opened.
+    3 P3; round 2: NOT CONVERGED, 0 P1 / 3 P2 / 1 P3 — A-2, A-4 and A-7 were only partly closed by
+    the round-1 revision), then the owner's sign-off. PR: not yet opened.
 -->
 <!--
 Sync Impact Report — v1.0 → v2.0 (2026-09-15) — RATIFIED
@@ -624,7 +627,7 @@ Each entry is a CI-enforced rule wherever feasible (Article IX §4 covers static
 3. **`/clarify` is MANDATORY before `/plan` for any feature that touches:** ABI, threading, error semantics, wire format, codegen, session FSM, or security. (Same trigger set as Codex Gate A — Article XVII.)
 4. **`/analyze` is MANDATORY** for the same trigger set as `/clarify`. Drift between constitution ↔ spec ↔ plan ↔ tasks is caught here, before `/implement`.
 5. **`/checklist` output is part of CI evidence.** Checklists tied to NFRs and acceptance criteria become the e-book's "how to verify" appendix.
-6. **`/implement` is one task at a time, TDD red-green-refactor.** A clean-context implementer sub-agent executes; the orchestrator (the main session) reviews increments and does not implement. *Implement* means authoring or changing production code, tests, build/CI/configuration files or generated files (including running their regeneration), and resolving merge conflicts in any of those. The orchestrator MAY edit documentation, specs, design documents, SecondBrain pages, catalogue rows and gate/decision records; commit edits a fixer authored but could not commit; make empty flag commits; push, open PRs, bump the parent repository's gitlink, and merge the base branch when it merges without conflict; and run mutation proofs in a scratch copy of the tree, never in the PR's worktree. Which model runs the implementer is configuration (the agent definition), not a constitutional term.
+6. **`/implement` is one task at a time, TDD red-green-refactor.** A clean-context implementer sub-agent executes; the orchestrator (the main session) reviews increments and does not implement. *Implement* means authoring or changing production code, tests, scripts, build/CI/configuration files, or generated files committed to the repository (including running the regeneration that produces them), and resolving merge conflicts in any of those; code is classified by what a file is, not by the directory it sits in. The orchestrator MAY edit documentation, specs and design documents (a feature bundle's `specs/<id>/contracts/` headers are design artifacts), SecondBrain pages, catalogue rows, gate/decision records, and governance texts (agent, skill and command definitions); produce transient outputs that are not committed — configuring, building and running tests and checks, refreshing code indexes, benchmark and comparison runs; commit edits a fixer authored but could not commit; make empty flag commits; push, open PRs, bump the parent repository's gitlink, and merge the base branch when it merges without conflict; and run mutation proofs in a scratch copy of the tree, never in the PR's worktree. Which model runs the implementer is configuration (the agent definition), not a constitutional term.
 7. **`/simplify` runs on the implementation diff before `/speckit-verify`** (pipeline step 11, before step 12 — see `.specify/pipeline.md`). Code-reuse, quality, efficiency findings reviewed by 3 specialized review agents, then triaged by the orchestrator; the implementer sub-agent applies the genuine in-scope simplifications + any real Gate-B-relevant defect; behavioral/perf redesigns + ambiguous items deferred as tracked follow-ups in the verify decision doc. **Rationale:** a post-`/simplify` source change invalidates every preset build dir, forcing the full 6-preset `/speckit-verify` matrix to re-run — so `/simplify` must precede verify, not merely precede PR open.
 8. **Stuck loop:** three failed `/implement` invocations on the same red test (each invocation is a fresh-context attempt at one TDD cycle, per §1 and §6) → escalate to Codex as fallback implementer; if still stuck, `AskUserQuestion`. Codex's PR review for that task must come from a **fresh** Codex session, not the one that wrote the code (independence between author and reviewer is non-negotiable).
 
@@ -648,7 +651,7 @@ Each entry is a CI-enforced rule wherever feasible (Article IX §4 covers static
 
 4. **User invokes Codex.** No Claude agent starts Codex on its own initiative: a user's `/gate-a` or `/gate-b` invocation authorizes that gate's bounded Codex calls, and the §XVI.8 fallback runs only once the user confirms it; the gates are user-driven (`codex:codex-rescue` agent or local Codex CLI). The PR description links to the Gate A outcome and the Gate B outcome.
 
-5. **Findings triage:** Opus triages; the active fixer applies accepted items — the implementer sub-agent, or Codex where §XVI.8 or the Gate B fixer hand-off applies — never the orchestrator (§XVI.6); user signs off feature completion at `/specify` boundaries and at module close.
+5. **Findings triage:** Opus triages; the active fixer applies accepted items — the non-orchestrator actor the applicable procedure assigns: the implementer sub-agent, Gate A's rewrite agent for design documents, or Codex where §XVI.8 or the Gate B fixer hand-off applies — never the orchestrator (§XVI.6); user signs off feature completion at `/specify` boundaries and at module close.
 
 6. **CI enforcement.** The `.github/workflows/gate-a.yml` workflow inspects every PR's changed-file set against the Appendix A trigger paths (path globs are owned by the workflow itself, not the constitution). If any trigger path is touched, the workflow blocks merge unless the PR carries either a `gate-a-done` label (Codex Gate A passed) or a `gate-a-waived` label with mandatory rationale in the PR body. Trivial diffs auto-waive: comment-only edits, doc fixes, single-line whitespace, dependency-pin bumps without code changes.
 
