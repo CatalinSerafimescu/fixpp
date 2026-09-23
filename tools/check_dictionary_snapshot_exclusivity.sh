@@ -140,8 +140,20 @@ code_hits_only() {
     done
 }
 
+# The scanned root: `--root DIR`, else $FIXPP_GATE_ROOT, else the git toplevel.
+# tools/test_dictionary_snapshot_exclusivity_gate.sh uses the override to run
+# the gate on a seeded temp copy, so the tracked tree is never edited.
 main() {
-    cd "$(git rev-parse --show-toplevel)"
+    local root="${FIXPP_GATE_ROOT-}"
+    if [[ "${1-}" == "--root" ]]; then
+        [ $# -eq 2 ] || { echo "usage: $0 [--root DIR]" >&2; exit 2; }
+        root="$2"
+    elif [ $# -ne 0 ]; then
+        echo "usage: $0 [--root DIR] | --strip-comments <file>" >&2
+        exit 2
+    fi
+    [ -n "$root" ] || root="$(git rev-parse --show-toplevel)"
+    cd "$root"
 
     HDR='include/fixpp/dict/dictionary_snapshot.hpp'
     FACTORY='src/dictionary/dictionary_snapshot.cpp'

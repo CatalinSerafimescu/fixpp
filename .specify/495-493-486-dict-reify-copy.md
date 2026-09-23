@@ -870,13 +870,15 @@ the C cells use one definition.
   that path — TSan reports a race.
 
 ### D-4 / R-C
-- **T-18 — G2 seeded positives** (`tools/test_dictionary_snapshot_exclusivity_gate.sh`). Clean tree:
-  exit 0 and `G2 matches of the enumerated spellings = 0`. Seeds 1 (`(std::move(`) and 2
-  (`(identifier,`) appended to `src/dictionary/dictionary_snapshot.cpp` with a backup and restore,
-  as the A5 cases do. Each seed: exit 1 **and** `G2 FAIL` in the log (G1 runs first, so a bare exit
-  code is not enough). Seeds follow §6.4's spelling rule. ⚠️ The self-test's existing `EXIT` trap
-  restores the A5 TU; the seed restore goes into that same handler (a second `trap … EXIT` would
-  replace it). Mutation: revert the assertion to `-eq 1` — the clean-tree case goes RED.
+- **T-18 — G2 seeded positives** (`tools/test_dictionary_snapshot_exclusivity_gate.sh`). The
+  self-test copies the scanned directories (`src include bindings tools tests`) to a `mktemp -d`
+  directory and runs every case — clean, A5 and seeds — on that copy through the gate's root
+  override (`--root DIR`, or `FIXPP_GATE_ROOT`; default `git rev-parse --show-toplevel`). The source
+  tree is never edited, so the ctest carries no `RUN_SERIAL` or resource lock. Clean copy: exit 0
+  and `G2 matches of the enumerated spellings = 0`. Seeds 1 (`(std::move(`) and 2 (`(identifier,`)
+  appended to the copy's `src/dictionary/dictionary_snapshot.cpp`. Each seed: exit 1 **and**
+  `G2 FAIL` in the log (G1 runs first, so a bare exit code is not enough). Seeds follow §6.4's
+  spelling rule. Mutation: revert the assertion to `-eq 1` — the clean-copy case goes RED.
 - **T-19 — amended control-block pins.**
   - (a) `DictionarySnapshot.SharedDictionaryViewAliasesRatherThanCopies`
     (`tests/dictionary/dictionary_snapshot_test.cpp`), renamed for sharing the table owner. Keeps
@@ -1067,7 +1069,8 @@ Builds are owner-approved before they run (`[const §XVII.7]`); check `df -h /mn
      `495;alloc_guard`), `dictionary_reify_shared_table_concurrency_test` (T-17;
      `495;dictionary;tsan`), `capi_dict495_loader_default_resource` (T-20; `495;capi`);
    - T-18 is the unlabelled `dictionary_snapshot_exclusivity_gate` ctest (it runs
-     `tools/test_dictionary_snapshot_exclusivity_gate.sh`), also run directly in step 7.
+     `tools/test_dictionary_snapshot_exclusivity_gate.sh` on a temp copy), also run directly in
+     step 7; `git status` stays clean across the ctest run.
    Run `ctest -L '495|dictionary|capi|session|wire|alloc_guard|066'`.
 2. **Mallocnesia, point 1** (owner): after implementation, before `/simplify` and the verify record,
    on the Linux non-sanitizer preset (`build/<preset>/lib/libmallocnesia.so`):
@@ -1089,7 +1092,7 @@ Builds are owner-approved before they run (`[const §XVII.7]`); check `df -h /mn
    from `CMakeCache.txt`'s `CMAKE_LINKER`): T-1 fails to compile unfixed and compiles fixed (decides
    Q-2); T-16's cells run on `windows-msvc-release`.
 7. **Gates:** `bash tools/test_dictionary_snapshot_exclusivity_gate.sh` (T-18's seeds RED with
-   `G2 FAIL`, clean tree green); `bash tools/check_dictionary_snapshot_exclusivity.sh`
+   `G2 FAIL`, clean copy green); `bash tools/check_dictionary_snapshot_exclusivity.sh`
    (`G2 matches of the enumerated spellings = 0`, G1 lines unchanged); `bash tools/check_capi_freeze.sh`
    (§7.2 fail-then-pass); `.claude/scripts/check-comment-claims.py --root <tree> --base origin/main`;
    `check_line_citations.py --shift-audit origin/main..HEAD`.

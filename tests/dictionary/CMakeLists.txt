@@ -10,27 +10,16 @@
 find_package(GTest CONFIG REQUIRED)
 find_package(pugixml CONFIG REQUIRED)
 
-# WORKING_DIRECTORY is load-bearing, not decoration. The gate this drives does
-# `cd "$(git rev-parse --show-toplevel)"` and then greps RELATIVE paths
-# (src/ include/ bindings/ tools/ tests/). ctest runs a test from the BUILD dir
-# by default, so with an out-of-tree build directory — a symlinked or relocated
-# `build/<preset>`, which the repo's own presets make easy — `git rev-parse`
-# fails, every grep resolves nothing, and the run is scored against an empty
-# corpus. The gate itself catches that (its G1 liveness check reports
-# "scanner broken" and exits 1), but the harness's three RED arms expect exit 1
-# and so pass VACUOUSLY in that state: they see the scanner's failure, not the
-# removed static_asserts they exist to detect. Only the positive arm fails.
-# Pinning cwd to the source tree is what keeps those three arms meaningful.
+# The self-test copies the directories the gate scans into a temp dir, seeds
+# only that copy, and runs the gate on it with `--root`; it never edits the
+# source tree, so it needs no RUN_SERIAL and no lock shared with the git-clean
+# `fixpp::dict::codegen-build-graph-check`. A copy the gate cannot read makes
+# the RED arms pass VACUOUSLY (they expect exit 1, which the G1 liveness
+# "scanner broken" failure also gives); the clean arm, run on the same copy,
+# is the one that fails in that state.
 add_test(NAME dictionary_snapshot_exclusivity_gate
   COMMAND bash "${CMAKE_SOURCE_DIR}/tools/test_dictionary_snapshot_exclusivity_gate.sh"
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-# The self-test rewrites tracked source files in place while it runs, restoring
-# them on exit (the files are the ones its EXIT trap copies back). Serialize it, and share the lock the git-clean
-# `fixpp::dict::codegen-build-graph-check` holds, so no parallel ctest sibling
-# compiles or inspects a transiently edited tree.
-set_tests_properties(dictionary_snapshot_exclusivity_gate PROPERTIES
-  RUN_SERIAL TRUE
-  RESOURCE_LOCK codegen_source_tree)
 
 # Path to vendored XML fixtures so tests can locate them regardless of
 # build-tree depth (used by load(path, mr) AC-L1 / AC-L2 paths and the

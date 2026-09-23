@@ -142,19 +142,10 @@ BENCHMARK(BM_Reify_Dispatch_20tag);
 // view() access, now moved into the factory call itself) is on the timed
 // path. The dictionary load, frame assembly and source parse all happen
 // ONCE, outside the timed loop; only dict::reify() itself is timed.
-static void BM_Reify_DictBacked_20tag(benchmark::State& state) {
-    auto const dict_path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX44.xml";
-    std::array<std::byte, 4U * 1024U * 1024U> dict_buf{};
-    std::pmr::monotonic_buffer_resource dict_mr{dict_buf.data(), dict_buf.size()};
-    auto const dictionary = fixpp::dict::XmlLoader{}.load(dict_path, &dict_mr);
-    auto const tv = dictionary.as_table_view();
+namespace {
 
-    // ClOrdID(11)="ORD1", MsgType(35)="D", v44. BodyLength + CheckSum computed
-    // (mirrors tests/support/reify_test_frame.hpp's make_nos_frame() --
-    // reproduced locally rather than included, since a tests/support header
-    // is not on a bench target's include path).
-    std::string const body = std::string("35=D\x01") + "34=1\x01" + "49=S\x01" + "56=T\x01" +
-                             "11=ORD1\x01" + "55=AAPL\x01";
+// `8=FIX.4.4|9=<len>|<body>10=<sum>|` with BodyLength and CheckSum computed.
+std::vector<std::byte> frame_with_checksum(std::string const& body) {
     std::string const pre =
         std::string("8=FIX.4.4\x01") + "9=" + std::to_string(body.size()) + "\x01" + body;
     unsigned sum = 0;
@@ -163,26 +154,77 @@ static void BM_Reify_DictBacked_20tag(benchmark::State& state) {
     }
     std::array<char, 8> chk{};
     std::snprintf(chk.data(), chk.size(), "10=%03u\x01", sum % 256U);
-    std::string const frame_str = pre + chk.data();
-    std::vector<std::byte> frame_bytes(frame_str.size());
-    std::memcpy(frame_bytes.data(), frame_str.data(), frame_str.size());
+    std::string const full = pre + chk.data();
+    std::vector<std::byte> out(full.size());
+    std::memcpy(out.data(), full.data(), full.size());
+    return out;
+}
 
+// The untimed setup the dict-backed rows share: load FIX44, frame `frame`, and
+// parse it on the owned route (`owned`) or through a borrowed `Parser{*table}`.
+// Non-movable, so the owner object the owned route records stays put.
+struct dict_backed_source {
+    std::unique_ptr<std::pmr::monotonic_buffer_resource> dict_mr =
+        std::make_unique<std::pmr::monotonic_buffer_resource>();
+    std::optional<fixpp::dict::Dictionary> dictionary;  // `table` reads its storage
+    std::shared_ptr<const fixpp::dict::table_view> table;
+    std::vector<std::byte> frame;
     std::pmr::monotonic_buffer_resource frame_mr;
-    fixpp::wire::pmr_carry_buffer carry{frame_bytes.size(), &frame_mr};
+    std::optional<fixpp::wire::pmr_carry_buffer> carry;  // lives as long as the view
     fixpp::wire::Framer framer{};
     fixpp::wire::frame_view fvs[1]{};
-    auto framed = framer.feed(std::span<const std::byte>{frame_bytes.data(), frame_bytes.size()},
-                              carry, std::span<fixpp::wire::frame_view>{fvs, 1});
-    if (!framed.has_value() || framed->empty()) {
-        state.SkipWithError("fixture precondition failed: Framer::feed did not produce a frame");
+    std::optional<fixpp::wire::Parser<fixpp::wire::access_mode::Index>> parser;
+    std::optional<MV> view;
+
+    dict_backed_source() = default;
+    dict_backed_source(dict_backed_source const&) = delete;
+    dict_backed_source& operator=(dict_backed_source const&) = delete;
+    dict_backed_source(dict_backed_source&&) = delete;
+    dict_backed_source& operator=(dict_backed_source&&) = delete;
+    ~dict_backed_source() = default;
+
+    // Returns false after SkipWithError on any setup failure.
+    bool setup(benchmark::State& state, std::vector<std::byte> bytes, bool owned) {
+        auto const dict_path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX44.xml";
+        dictionary.emplace(fixpp::dict::XmlLoader{}.load(dict_path, dict_mr.get()));
+        table = std::make_shared<const fixpp::dict::table_view>(dictionary->as_table_view());
+        frame = std::move(bytes);
+        carry.emplace(frame.size(), &frame_mr);
+        auto framed = framer.feed(std::span<const std::byte>{frame.data(), frame.size()}, *carry,
+                                  std::span<fixpp::wire::frame_view>{fvs, 1});
+        if (!framed.has_value() || framed->empty()) {
+            state.SkipWithError("setup: Framer::feed did not produce a frame");
+            return false;
+        }
+        if (owned) {
+            parser.emplace(fixpp::wire::detail::owned_route_key{}, table);
+        } else {
+            parser.emplace(*table);
+        }
+        auto parsed = parser->parse(fvs[0], &frame_mr);
+        if (!parsed.has_value()) {
+            state.SkipWithError("setup: dict-backed parse of the source frame failed");
+            return false;
+        }
+        view.emplace(std::move(*parsed));
+        return true;
+    }
+};
+
+}  // namespace
+
+static void BM_Reify_DictBacked_20tag(benchmark::State& state) {
+    // ClOrdID(11)="ORD1", MsgType(35)="D", v44 (mirrors
+    // tests/support/reify_test_frame.hpp's make_nos_frame(), spelled out here
+    // because a tests/support header is not on a bench target's include path).
+    dict_backed_source src;
+    if (!src.setup(state,
+                   frame_with_checksum(std::string("35=D\x01") + "34=1\x01" + "49=S\x01" +
+                                       "56=T\x01" + "11=ORD1\x01" + "55=AAPL\x01"),
+                   /*owned=*/false)) {
         return;
     }
-    fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{tv};
-    auto parsed = parser.parse(fvs[0], &frame_mr);
-    if (!parsed.has_value()) {
-        state.SkipWithError("fixture precondition failed: dict-backed parse of the source frame");
-        return;
-    }
+    auto const& parsed = src.view;
 
     fixpp::dict::version_profile profile{};
     profile.default_appl = fixpp::dict::application_version::v44;
@@ -240,58 +282,23 @@ private:
     std::size_t drawn_ = 0;
 };
 
-// A v44 NewOrderSingle whose body carries >= 20 fields; BodyLength + CheckSum
-// computed.
+// A v44 NewOrderSingle whose body carries >= 20 fields.
 std::vector<std::byte> make_nos_20field_frame() {
-    std::string const body =
+    return frame_with_checksum(
         std::string("35=D\x01") + "34=1\x01" + "49=S\x01" + "52=20240101-00:00:00.000\x01" +
         "56=T\x01" + "1=ACCT\x01" + "11=ORD1\x01" + "15=USD\x01" + "18=G\x01" + "21=1\x01" +
         "22=4\x01" + "38=100\x01" + "40=2\x01" + "44=10.5\x01" + "48=US0378331005\x01" +
         "54=1\x01" + "55=AAPL\x01" + "58=bench\x01" + "59=0\x01" + "60=20240101-00:00:00.000\x01" +
-        "100=XNAS\x01" + "110=10\x01" + "207=XNAS\x01";
-    std::string const pre =
-        std::string("8=FIX.4.4\x01") + "9=" + std::to_string(body.size()) + "\x01" + body;
-    unsigned sum = 0;
-    for (unsigned char c : pre) {
-        sum += c;
-    }
-    std::array<char, 8> chk{};
-    std::snprintf(chk.data(), chk.size(), "10=%03u\x01", sum % 256U);
-    std::string const full = pre + chk.data();
-    std::vector<std::byte> out(full.size());
-    std::memcpy(out.data(), full.data(), full.size());
-    return out;
+        "100=XNAS\x01" + "110=10\x01" + "207=XNAS\x01");
 }
 
 void reify_20field(benchmark::State& state, bool owned) {
-    auto const dict_path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX44.xml";
-    auto dict_mr = std::make_unique<std::pmr::monotonic_buffer_resource>();
-    auto const dictionary = fixpp::dict::XmlLoader{}.load(dict_path, dict_mr.get());
-    std::shared_ptr<const fixpp::dict::table_view> const sp =
-        std::make_shared<const fixpp::dict::table_view>(dictionary.as_table_view());
-
-    auto const frame_bytes = make_nos_20field_frame();
-    std::pmr::monotonic_buffer_resource frame_mr;
-    fixpp::wire::pmr_carry_buffer carry{frame_bytes.size(), &frame_mr};
-    fixpp::wire::Framer framer{};
-    fixpp::wire::frame_view fvs[1]{};
-    auto framed = framer.feed(std::span<const std::byte>{frame_bytes.data(), frame_bytes.size()},
-                              carry, std::span<fixpp::wire::frame_view>{fvs, 1});
-    if (!framed.has_value() || framed->empty()) {
-        state.SkipWithError("setup: Framer::feed did not produce a frame");
+    dict_backed_source src;
+    if (!src.setup(state, make_nos_20field_frame(), owned)) {
         return;
     }
-    std::optional<fixpp::wire::Parser<fixpp::wire::access_mode::Index>> parser;
-    if (owned) {
-        parser.emplace(fixpp::wire::detail::owned_route_key{}, sp);
-    } else {
-        parser.emplace(*sp);
-    }
-    auto parsed = parser->parse(fvs[0], &frame_mr);
-    if (!parsed.has_value()) {
-        state.SkipWithError("setup: dict-backed parse of the source frame failed");
-        return;
-    }
+    auto const& sp = src.table;
+    auto const& parsed = src.view;
     std::size_t valid_for_d = 0;
     for (auto const& e : parsed->offsets().entries()) {
         valid_for_d += sp->field_valid_for("D", e.tag) ? 1U : 0U;
