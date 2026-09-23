@@ -19,6 +19,10 @@ refs:
   - specs/090-capi-refusals/quickstart.md
   - specs/090-capi-refusals/spec.md
   - specs/090-capi-refusals/tasks.md
+  - specs/057-behavioral-reify-unblock/data-model.md
+  - specs/057-behavioral-reify-unblock/plan.md
+  - specs/057-behavioral-reify-unblock/research.md
+  - specs/057-behavioral-reify-unblock/contracts/reify-dispatch-bridge.md
   - spec/behaviors-and-limitations.md
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/2c-codegen.md
@@ -274,6 +278,13 @@ direct C++ caller. The C-ABI twin is `fixpp_msg_clone`; see [`c-api.md`](./c-api
   `FIXPP_ERR_WIRE_LIMIT_EXCEEDED`. Since #493 that clone succeeds under the source's own caps:
   `.specify/495-493-486-dict-reify-copy.md` §4 and T-3. The code still comes back for a source
   whose own build failed at the default cap (T-6).
+- ⚠️ **Superseded in part (fixpp#495 D-1c):** frozen 057 records describe the
+  `owning_message_handle` as a **heap** pimpl, flagged here and not edited (frozen `specs/` are
+  not rewritten): `specs/057-behavioral-reify-unblock/data-model.md` E-1, `plan.md`,
+  `research.md` and `contracts/reify-dispatch-bridge.md`. Since #495 the impl is allocated from
+  the `mr` passed to `reify`, not the global heap: `.specify/495-493-486-dict-reify-copy.md` §2.5
+  (D-1c), the `include/fixpp/dict/reify.hpp` class comment, and `B-495-4`. Re-derive the sites
+  with `git grep -n -i 'heap pimpl' -- specs/057-behavioral-reify-unblock`.
 - ⚠️ **Open residuals:** `L-458-1` covers a dict-backed build that under-indexes near the probe cap
   while reporting success; `L-495-1` the borrowed-route copy. Check the live B&L file before
   treating either as open.
