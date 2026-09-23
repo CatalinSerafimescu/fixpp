@@ -78,10 +78,12 @@ struct owning_message_handle::impl {
     // self-contained copy. Either way the pointee is self-contained and may outlive
     // the source session and Dictionary (table_view.hpp's "may legally outlive the
     // Dictionary" note).
-    // This member is the OWNER OBJECT of view_cache_'s owned-route parse (§3.1):
-    // seated once by the factory, never reassigned, and the impl never relocates.
-    // Declared BEFORE view_cache_ so reverse-order destruction destroys the view
-    // first (§3.5).
+    // The owner object of view_cache_'s owned-route parse: the OWNER-OBJECT RULE
+    // at Parser's owned-route constructor (parser.hpp; note §3.1) applies. This
+    // site's facts: seated once by the factory (re-check with
+    // `grep -n "owned_tv_ *=" src/dictionary/reify.cpp`), inside an impl that never
+    // relocates; declared BEFORE view_cache_ so reverse-order destruction destroys
+    // the view first.
     std::shared_ptr<const table_view> owned_tv_;
     // fixpp#458 D-4: populated once, eagerly, by the factory (rationale there),
     // so no longer `mutable`.

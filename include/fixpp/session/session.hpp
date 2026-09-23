@@ -820,14 +820,11 @@ private:
     // Session owns a strong reference for its whole lifetime, so the pointee
     // outlives every Parser built over it.
     //
-    // fixpp#495 (`.specify/495-493-486-dict-reify-copy.md` §2.6, §3.1): this
-    // member is the OWNER OBJECT of every view parse_and_dispatch_ hands an
-    // application (its Parser runs on the owned route and records this member's
-    // address), so a reify handle or C clone of such a view shares the table and
-    // may keep it alive after the Session closes. Invariant: written only in
-    // open(), before `state_ = lifecycle::open`; afterwards open()'s first check
-    // makes further writes unreachable. It must never be reassigned or reset
-    // while parse_and_dispatch_ can run. Re-check the write census with
+    // fixpp#495: the owner object of every view parse_and_dispatch_ hands an
+    // application — the OWNER-OBJECT RULE at Parser's owned-route constructor
+    // (parser.hpp; note §3.1) applies. This site's fact: written only in open(),
+    // before `state_ = lifecycle::open`, after which open()'s first check makes
+    // further writes unreachable. Re-check with
     // `grep -n "inbound_tv_ *=" src/session/session.cpp`.
     //
     // Invariant: open() hard-fails (invalid_session_config) when

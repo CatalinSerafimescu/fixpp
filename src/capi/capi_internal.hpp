@@ -282,14 +282,13 @@ struct fixpp_msg {
     // SHARES the table; a clone of a borrowed-route view gets a self-contained
     // copy. The pointee's own containers use the default allocator, independent of
     // arena_buf_/owned_frame_'s per-clone arena.
-    // This member is the OWNER OBJECT of owned_view_'s owned-route parse (§3.1):
-    // seated once by fixpp_msg_clone, never reassigned, and the heap shell never
-    // relocates. Declared BEFORE owned_frame_/owned_view_ so implicit
-    // member-destruction order (reverse declaration order) destroys owned_view_
-    // before owned_tv_ (§3.5); fixpp_msg_destroy also resets owned_view_
-    // explicitly first (see message_write.cpp), so this ordering is
-    // defense-in-depth for any other teardown path (e.g. shell deletion on a
-    // construction-time exception).
+    // The owner object of owned_view_'s owned-route parse: the OWNER-OBJECT RULE
+    // at Parser's owned-route constructor (parser.hpp; note §3.1) applies. This
+    // site's facts: seated once by fixpp_msg_clone (re-check with
+    // `grep -n "owned_tv_ *=" src/capi/message_write.cpp`), inside a heap shell
+    // that never relocates; declared BEFORE owned_frame_/owned_view_ so reverse
+    // declaration order destroys owned_view_ first, and fixpp_msg_destroy also
+    // resets owned_view_ explicitly first (see message_write.cpp).
     std::shared_ptr<const fixpp::dict::table_view> owned_tv_;
 
     // Clone-owned storage: allocated by fixpp_msg_clone; nullptr for

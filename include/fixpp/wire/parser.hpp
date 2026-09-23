@@ -71,8 +71,7 @@ inline constexpr std::uint16_t tag_msg_seq_num = 34;
 // the tag that selects Parser's OWNED route. Constructible anywhere; living in
 // `detail` is what marks it "not an entry point" (`.specify/api-contract.md`'s
 // Internal class, which names `detail` tags such as this one). A caller naming it
-// takes on §3.1's precondition: the owner object outlives every view parsed
-// through it and is not reassigned while such a view may be shared.
+// takes on the OWNER-OBJECT RULE stated at Parser's owned-route constructor.
 struct owned_route_key {
     explicit owned_route_key() = default;
 };
@@ -751,10 +750,15 @@ public:
 
     // fixpp#495 (`.specify/495-493-486-dict-reify-copy.md` §2.2): the OWNED route.
     // Views this parser returns record `&owner`, so a copy of them (reify, clone)
-    // shares the table instead of deep-copying it. `owner` must be an lvalue of
-    // exactly `shared_ptr<const table_view>` (its address is stored, so a temporary
-    // would dangle), non-null, and — §3.1 — outlive every view parsed through it
-    // without being reassigned while such a view may be shared.
+    // shares the table instead of deep-copying it. `owner` must be a non-null lvalue
+    // of exactly `shared_ptr<const table_view>` (its address is stored, so a
+    // temporary would dangle).
+    //
+    // OWNER-OBJECT RULE (§3.1; stated here once — each owner site points here):
+    // the `shared_ptr` OBJECT passed as `owner` is seated once before any view is
+    // parsed through it, is never reassigned or reset while such a view may be
+    // shared, does not relocate, and outlives — so is destroyed after — every view
+    // parsed through it. The pointee table is not enough: views read `&owner`.
     template <class SP>
     // `owner` is address-taken, never forwarded.
     // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
