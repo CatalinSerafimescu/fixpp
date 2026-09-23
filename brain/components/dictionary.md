@@ -11,8 +11,18 @@ refs:
   - include/fixpp/dict/reify.hpp
   - .specify/2c-codegen.md
   - .specify/215-dictionary-view.md
+  - .specify/495-493-486-dict-reify-copy.md
   - .specify/456-table-view-seal.md
   - .specify/447-458-452-capi-refusals.md
+  - specs/090-capi-refusals/contracts/msg-clone.md
+  - specs/090-capi-refusals/data-model.md
+  - specs/090-capi-refusals/quickstart.md
+  - specs/090-capi-refusals/spec.md
+  - specs/090-capi-refusals/tasks.md
+  - specs/057-behavioral-reify-unblock/data-model.md
+  - specs/057-behavioral-reify-unblock/plan.md
+  - specs/057-behavioral-reify-unblock/research.md
+  - specs/057-behavioral-reify-unblock/contracts/reify-dispatch-bridge.md
   - spec/behaviors-and-limitations.md
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/2c-codegen.md
@@ -43,7 +53,11 @@ A real subsystem, not a thin layer: **two independent loaders** — `xml_loader.
 XML) and `orchestra_loader.cpp` (FIX Orchestra) — plus `reify.cpp`, `field_traits.cpp`,
 `version_registry.cpp`, `version_profile.cpp`, `dictionary_snapshot.cpp` and a
 `reify_dispatch_bridge`. **Two owning design docs**: `2c-codegen.md` (header layout, multi-version
-coexistence, dialect overlay binding) and `215-dictionary-view.md`.
+coexistence, dialect overlay binding) and `215-dictionary-view.md`. ⚠️ 215's alias design — §3's
+`shared_dictionary_view` forming an aliasing pointer, §5b's "third owner of the snapshot's control
+block", §6 seam 7's G2 count of one — is **superseded in part** by
+`.specify/495-493-486-dict-reify-copy.md` §6 (D-4): the snapshot owns its table in the table's own
+control block and G2 asserts zero matches. The passkey and the provenance check stand.
 
 ⚠️ **Counts and file lists rot.** Derive the current surface from the graph index; the point above is
 the *shape* — two loader front-ends converging on one dictionary representation, with codegen on top.
@@ -246,10 +260,34 @@ direct C++ caller. The C-ABI twin is `fixpp_msg_clone`; see [`c-api.md`](./c-api
   - **One pre-existing row still went past +5%**, from code *placement*: the function's instructions were identical and its alignment moved.
   - **Rejected:** forcing alignment or moving the function to a separate file to recover it. Either would tune the code to one benchmark and move the layout luck elsewhere.
   - `[const §VIII.2]` makes accepting it a non-author decision. The figures and procedure are in the 090 verify record's *Gate B G-1* section.
-- ⚠️ **Open residuals:** `L-458-2` (fixpp#493). The re-parse uses the DEFAULT offset-entry cap, so a
-  source accepted under a raised cap cannot be cloned or reified. `L-458-1` covers a dict-backed
-  build that under-indexes near the probe cap while reporting success. Check the live B&L file
-  before treating either as open.
+- **fixpp#495 / #493 (`.specify/495-493-486-dict-reify-copy.md`):** the factory no longer
+  deep-copies the membership table for a view parsed on `Parser`'s **owned route** (every view the
+  `Session` hands an application, and every handle's own view); the handle holds one more reference
+  to that table, and pins the table only — never the `Dictionary` (D-4). The handle's impl comes
+  from `mr` (D-1c). Every copy re-parses under its source's `OffsetTable::Config` (#493). Rejected:
+  a public owned route (R-A keeps it `detail`), a `shared_ptr` by value on every view (an atomic
+  pair per inbound message), and the owner token inside `dict_hooks` (size-pinned `entry_context`).
+  A view parsed through a borrowed `Parser{tv}` still copies (`L-495-1`).
+- ⚠️ **Superseded in part (fixpp#493):** 090 made a dict-backed clone of a raised-cap source
+  refuse with `FIXPP_ERR_WIRE_LIMIT_EXCEEDED`. Frozen 090 records that still describe that
+  refusal, flagged here and not edited (frozen `specs/` are not rewritten):
+  `specs/090-capi-refusals/contracts/msg-clone.md` §4 and `data-model.md` §4.1 (the
+  `wire_offset_table_full` "raised-cap route" row), `quickstart.md` V5, `spec.md` User Story 3's
+  *Independent Test*, and `tasks.md` US3 / T047 all describe a source parsed at a raised
+  `max_offset_entries` making a dict-backed `fixpp_msg_clone` return
+  `FIXPP_ERR_WIRE_LIMIT_EXCEEDED`. Since #493 that clone succeeds under the source's own caps:
+  `.specify/495-493-486-dict-reify-copy.md` §4 and T-3. The code still comes back for a source
+  whose own build failed at the default cap (T-6).
+- ⚠️ **Superseded in part (fixpp#495 D-1c):** frozen 057 records describe the
+  `owning_message_handle` as a **heap** pimpl, flagged here and not edited (frozen `specs/` are
+  not rewritten): `specs/057-behavioral-reify-unblock/data-model.md` E-1, `plan.md`,
+  `research.md` and `contracts/reify-dispatch-bridge.md`. Since #495 the impl is allocated from
+  the `mr` passed to `reify`, not the global heap: `.specify/495-493-486-dict-reify-copy.md` §2.5
+  (D-1c), the `include/fixpp/dict/reify.hpp` class comment, and `B-495-4`. Re-derive the sites
+  with `git grep -n -i 'heap pimpl' -- specs/057-behavioral-reify-unblock`.
+- ⚠️ **Open residuals:** `L-458-1` covers a dict-backed build that under-indexes near the probe cap
+  while reporting success; `L-495-1` the borrowed-route copy. Check the live B&L file before
+  treating either as open.
 
 > ⚠️ **Before you write "immutable" about a `table_view`, read that banner.** #456 took three Gate B
 > rounds and found **zero** code defects across all three; every finding was prose claiming more than

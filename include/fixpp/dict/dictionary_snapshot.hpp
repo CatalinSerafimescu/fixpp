@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // include/fixpp/dict/dictionary_snapshot.hpp
 //
+// ⚠️ Superseded in part by `.specify/495-493-486-dict-reify-copy.md` §6 (D-4,
+// fixpp#495, owner rulings R-B/R-C): the snapshot owns its table in the table's
+// OWN control block, and shared_dictionary_view() hands out that owner instead of
+// forming an aliasing pointer into the snapshot. A held view therefore keeps the
+// table alive but neither the snapshot nor its Dictionary. 215's alias design
+// (§3's helper, §5b's "third owner of the snapshot's control block", §6 seam 7's
+// G2 count of one) is history; the pairing and the passkey below are unchanged.
+//
 // fixpp#215 item 1, Option C (`.specify/215-dictionary-view.md` §3) —
 // `fixpp::dict::dictionary_snapshot`: an opaque, non-copyable, non-movable
 // value object that pairs a `table_view` with the `Dictionary` it was built
@@ -15,8 +23,9 @@
 //
 // C1 is closed AT THE INJECTION POINT by construction: the only way to seat
 // a view on a `SessionConfig` is through `make_dictionary_snapshot`, and the
-// object it returns exposes the view only as `table_view const&` from a type
-// that cannot be copied, moved, or value-constructed. C4 is rejected
+// object it returns exposes the view only with a `const` pointee —
+// `table_view const&` from view(), `shared_ptr<const table_view>` from
+// view_owner() — from a type that cannot be copied, moved, or value-constructed. C4 is rejected
 // fail-closed at `Session::open()` (a runtime pointer-identity compare
 // against `source()`, not a construction closure — see the design doc §3).
 //
@@ -62,9 +71,8 @@ class snapshot_key {
 // A table_view PAIRED WITH the Dictionary it was built from. Copy AND move
 // are deleted so the type is reachable ONLY through the shared_ptr the
 // factory returns, and so a copy cannot silently duplicate an expensive
-// table_view. NOT for pointer stability — a shared_ptr's pointee never
-// relocates, so the aliasing pointer formed by shared_dictionary_view()
-// below is safe regardless.
+// table_view. The table itself lives behind its own shared_ptr (fixpp#495 D-4),
+// whose pointee never relocates.
 class dictionary_snapshot {
 public:
     // Public so std::make_shared can reach it; unreachable without a
@@ -78,17 +86,23 @@ public:
     dictionary_snapshot& operator=(dictionary_snapshot&&) = delete;
 
     [[nodiscard]] table_view const& view() const noexcept [[clang::lifetimebound]];
+    // fixpp#495 D-4: the table's owner. Never null. The pointee is `const`, the same
+    // one shared_dictionary_view() hands out; `SessionConfig` accepts only a
+    // `dictionary_snapshot`, so a bare owner is no injection surface.
+    [[nodiscard]] std::shared_ptr<const table_view> const& view_owner() const noexcept
+        [[clang::lifetimebound]];
     [[nodiscard]] std::shared_ptr<const Dictionary> const& source() const noexcept
         [[clang::lifetimebound]];
 
 private:
     std::shared_ptr<const Dictionary> source_;
-    table_view view_;
+    std::shared_ptr<const table_view> view_;
 };
 
-// The ONE production site that forms the aliasing view pointer. Both
-// `Session::open()` and `fixpp_session_open` (seating `fixpp_session::tv_`)
-// MUST go through this. Null snap -> null return.
+// The snapshot's table owner, for every consumer that seats a table from a
+// snapshot (re-derive with `grep -rn "shared_dictionary_view(" src`). It returns
+// `snap->view_owner()` (fixpp#495 D-4): a held result keeps the table alive but
+// not the snapshot or its Dictionary. Null snap -> null return.
 [[nodiscard]] std::shared_ptr<const table_view> shared_dictionary_view(
     std::shared_ptr<const dictionary_snapshot> snap) noexcept;
 

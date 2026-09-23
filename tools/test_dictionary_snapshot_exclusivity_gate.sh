@@ -4,20 +4,42 @@
 # tools/test_dictionary_snapshot_exclusivity_gate.sh
 #
 # Positive/negative test for tools/check_dictionary_snapshot_exclusivity.sh.
-# Proves the stateful comment stripper handles the lexer corpus, the clean tree
-# stays green with printed liveness counts, and removing all five static_asserts
-# in tests/dictionary/dictionary_snapshot_test.cpp goes red under three comment
-# spellings.
+# Requires the stateful comment stripper to handle the lexer corpus, the gate to
+# exit 0 on a clean copy of the tree printing G1's liveness counts and G2's zero-match line,
+# and the gate to exit 1 when either:
+#   * all five static_asserts in tests/dictionary/dictionary_snapshot_test.cpp are
+#     removed, under three comment spellings (G1); or
+#   * one of G2's enumerated spellings is seeded into the snapshot TU (fixpp#495
+#     R-C, `.specify/495-493-486-dict-reify-copy.md` §6.4 / T-18). G1 runs first,
+#     so a seeded case must show `G2 FAIL` in the log, not just a non-zero exit.
+#
+# The G2 seeds are ASSEMBLED FROM FRAGMENTS at run time: G2 scans tools/ and
+# does not strip comments, so a literal seed spelled in this file would itself
+# be a match on the clean tree.
+#
+# Every case runs the gate with `--root` on ONE temp copy of the directories it
+# scans; seeds are written into that copy, never into the source tree. The clean
+# case runs on the same copy, so it is also what shows the copy is a complete
+# corpus: a copy the scanner cannot read fails G1 liveness there, and the RED
+# cases' expected exit 1 would otherwise be met by that failure alone.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 gate="${repo_root}/tools/check_dictionary_snapshot_exclusivity.sh"
-a5tu="${repo_root}/tests/dictionary/dictionary_snapshot_test.cpp"
+a5tu_rel="tests/dictionary/dictionary_snapshot_test.cpp"
+factory_rel="src/dictionary/dictionary_snapshot.cpp"
+a5tu_src="${repo_root}/${a5tu_rel}"
+factory_src="${repo_root}/${factory_rel}"
 
 tmp="$(mktemp -d)"
-backup="${tmp}/dictionary_snapshot_test.cpp.orig"
-cp "$a5tu" "$backup"
-trap 'cp "$backup" "$a5tu"; rm -rf "$tmp"' EXIT
+trap 'rm -rf "$tmp"' EXIT
+root="${tmp}/root"
+mkdir "$root"
+for d in src include bindings tools tests; do
+  cp -R "${repo_root}/${d}" "${root}/${d}"
+done
+a5tu="${root}/${a5tu_rel}"
+factory_tu="${root}/${factory_rel}"
 
 rc=0
 
@@ -67,7 +89,7 @@ comment_out_static_asserts() {
         exit 1
       }
     }
-  ' "$backup" > "$a5tu"
+  ' "$a5tu_src" > "$a5tu"
 }
 
 run_gate_expect() {
@@ -75,7 +97,7 @@ run_gate_expect() {
   local expected_rc="$2"
   local log="${tmp}/${label}.log"
   set +e
-  bash "$gate" >"$log" 2>&1
+  bash "$gate" --root "$root" >"$log" 2>&1
   local gate_rc=$?
   set -e
   cat "$log"
@@ -87,9 +109,37 @@ run_gate_expect() {
   fi
 }
 
+# Like run_gate_expect, and additionally requires `needle` (fixed string) in the log.
+run_gate_expect_log() {
+  local label="$1"
+  local expected_rc="$2"
+  local needle="$3"
+  run_gate_expect "$label" "$expected_rc"
+  if grep -qF -- "$needle" "${tmp}/${label}.log"; then
+    printf 'PASS %s: log has %q\n' "$label" "$needle"
+  else
+    printf 'FAIL %s: log lacks %q\n' "$label" "$needle" >&2
+    rc=1
+  fi
+}
+
+# G2 seeds, from fragments (see the header).
+g2_type='shared_ptr<const table_view>'
+g2_seed_move="static auto g2_seed_move = std::${g2_type}(std::move(g2_seed_src));"
+g2_seed_ident="static auto g2_seed_ident = std::${g2_type}(g2_seed_src, g2_seed_ptr);"
+
+run_g2_seed_case() {
+  local label="$1"
+  local seed="$2"
+  cp "$factory_src" "$factory_tu"
+  printf '%s\n' "$seed" >> "$factory_tu"
+  run_gate_expect_log "$label" 1 "G2 FAIL"
+  cp "$factory_src" "$factory_tu"
+}
+
 run_red_case() {
   local style="$1"
-  cp "$backup" "$a5tu"
+  cp "$a5tu_src" "$a5tu"
   comment_out_static_asserts "$style"
   run_gate_expect "whole_script_${style}" 1
 }
@@ -106,13 +156,13 @@ run_strip_case 9 "const char* s = \"// snapshot_key\";" "const char* s = \"// sn
 run_strip_case 10 " code  snapshot_key" "/* a */ code /* b */ snapshot_key"
 run_strip_case 11 "const char* s = R\"(/* snapshot_key */)\";" "const char* s = R\"(/* snapshot_key */)\";"
 
-cp "$backup" "$a5tu"
-run_gate_expect "whole_script_clean" 0
+cp "$a5tu_src" "$a5tu"
+run_gate_expect_log "whole_script_clean" 0 "G2 matches of the enumerated spellings = 0"
+run_g2_seed_case "g2_seed_std_move" "$g2_seed_move"
+run_g2_seed_case "g2_seed_identifier_comma" "$g2_seed_ident"
 run_red_case line
 run_red_case block-line
 run_red_case block-unstarred
-
-cp "$backup" "$a5tu"
 
 if [[ "$rc" -eq 0 ]]; then
   echo "test_dictionary_snapshot_exclusivity_gate: OK"

@@ -813,11 +813,19 @@ private:
     // fixpp#215 item 1 (Option C) — shared_ptr, not std::optional-by-value: the
     // view is built by whoever gets there FIRST and then SHARED, instead of
     // every consumer walking the same Dictionary again. open() adopts
-    // cfg_.dict_snapshot's view (via fixpp::dict::shared_dictionary_view) when
+    // cfg_.dict_snapshot's table (via fixpp::dict::shared_dictionary_view, which
+    // shares the table's own owner, not the snapshot — fixpp#495 D-4) when
     // the config supplies one (the C-ABI path, which needs the same view for
     // its outbound commit path) and otherwise builds one itself. Either way the
     // Session owns a strong reference for its whole lifetime, so the pointee
     // outlives every Parser built over it.
+    //
+    // fixpp#495: the owner object of every view parse_and_dispatch_ hands an
+    // application — the OWNER-OBJECT RULE at Parser's owned-route constructor
+    // (parser.hpp; note §3.1) applies. This site's fact: written only in open(),
+    // before `state_ = lifecycle::open`, after which open()'s first check makes
+    // further writes unreachable. Re-check with
+    // `grep -n "inbound_tv_ *=" src/session/session.cpp`.
     //
     // Invariant: open() hard-fails (invalid_session_config) when
     // cfg_.dictionary is null, BEFORE this member is built — so

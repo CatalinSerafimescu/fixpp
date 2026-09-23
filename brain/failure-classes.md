@@ -243,6 +243,13 @@ prints `0` for a whole syntax.
   `THREADED`), read every one by hand: correcting an instrument in the *safe* direction is still a
   change in the *unsafe* direction for the rows it reclassifies. (#289 batch 21.)
 
+- ⚠️ **A phrase grep over comments cannot see a phrase that WRAPS.** In fixpp#495's Gate B, round 2's
+  check for a stale claim (`git grep -n -i 'heap pimpl' -- include src` must be empty) was already
+  empty on the UNFIXED tree. The phrase in `reify.cpp` was split `heap` / `// pimpl` across two
+  comment lines, so round 1's sweep, which used the same grep, had missed it too. **Procedure:** before
+  searching, join each line wrap with its comment leader (`//`, `#`, `*`, `>`) into a single space,
+  then match `word[\s-]+word`. Prove the search finds the known site on the unfixed tree first.
+
 **The same class, in a benchmark: a timing row that never runs the code it is cited for.**
 - A flat paired delta reads as "no cost". It is only evidence if the timed loop reaches the changed path.
 - The 090 case (PR #494, Gate B): the existing reify row passed a view with no MsgType, so `reify()` returned before the factory it was cited for.
@@ -474,6 +481,16 @@ mode was live on the shipped path, exhibited by 083's own witness.
 - **A satisfied obligation is the most dangerous kind of stale record**, because it is filed under
   "done". When a site's justification depends on an invariant, name the INVARIANT in the clause, not
   the assessment that happened to hold that day.
+
+**Instance (fixpp#495, caught before the PR by the per-effect bench).** The design note assessed
+`MessageView`'s new owner pointer against the effect it was added for: Index-mode views reaching the
+reify and clone copy sites. It concluded that no size pin moves. But the member sat on the class
+TEMPLATE, so every `access_mode` paid for it, including `Iter`, whose views never reach a copy site.
+`BM_Parser_Iter_20tag` went +6.7…+8.5% in 5 of 5 A-B pairs (+8 B per view, plus one store per
+parse). The fix (`06eada45`) makes the member Index-only
+(`[[no_unique_address]] std::conditional_t<Mode == Index, T, empty>`) and guards its stores with
+`if constexpr`. **Procedure:** a member added to a class template is an effect on EVERY
+instantiation. Assess, and bench, each mode's row, not only the mode the change targets.
 
 **Sibling.** Where class 9 is a justification that lost its SUBJECT, this is a justification that
 kept its subject and lost its SCOPE. Both are recorded on the same site pair (`#384`, `#389`) because

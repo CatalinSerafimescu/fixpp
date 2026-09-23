@@ -268,27 +268,28 @@ struct fixpp_msg {
     // whose dict_ is null (inbound dispatch-window handles), so "no dictionary"
     // and "no view" remain ONE state and C-9.4's dict-free disposition is
     // unchanged. This is NOT owned_tv_ below — that is the clone-inbound
-    // membership copy, a different artifact.
+    // membership table, a different artifact; non-null here still means
+    // "outbound".
     std::shared_ptr<const fixpp::dict::table_view> session_tv_;
 
-    // 066-dict-backed-inbound-parse T007 (mechanism (b), FR-007/C4): clone-owned
-    // membership copy, populated ONLY when the source view is dict-backed
-    // (MessageView::is_dict_backed()) via MessageView::membership_copy()
-    // (parser.hpp) — the same accessor `reify` uses. nullopt => the clone binds
-    // its MessageView dict-free, exactly mirroring a dict-free source
-    // (data-model.md "Clone-owned table_view" degenerate case). Heap-owned
-    // (table_view's own containers use the default/global allocator),
-    // independent of arena_buf_/owned_frame_'s per-clone arena; a STABLE
-    // address for the clone shell's lifetime (owned_view_'s dict-backed ctor
-    // aliases it — mirrors Session::inbound_tv_). Declared BEFORE
-    // owned_frame_/owned_view_ so implicit member-destruction order (reverse
-    // declaration order) destroys owned_view_ (the MessageView pointing into
-    // it) before owned_tv_ — mirrors owned_view_/arena_resource_'s existing
-    // "MessageView destructs into a live arena" ordering below. In practice
-    // fixpp_msg_destroy resets owned_view_ explicitly before this member (see
-    // message_write.cpp), so this ordering is defense-in-depth for any other
-    // teardown path (e.g. shell deletion on a construction-time exception).
-    std::optional<fixpp::dict::table_view> owned_tv_;
+    // ⚠️ Superseded in part by `.specify/495-493-486-dict-reify-copy.md` §2.4
+    // (fixpp#495): was a clone-owned deep copy (066 T007, `membership_copy()`); now
+    // the source's membership table held by reference count, seated from
+    // `MessageView::shared_membership()` ONLY when the source view is dict-backed.
+    // Null => the clone binds its MessageView dict-free, exactly mirroring a
+    // dict-free source (data-model.md "Clone-owned table_view" degenerate case). A
+    // clone of an owned-route view (every Session-dispatched view, and every clone)
+    // SHARES the table; a clone of a borrowed-route view gets a self-contained
+    // copy. The pointee's own containers use the default allocator, independent of
+    // arena_buf_/owned_frame_'s per-clone arena.
+    // The owner object of owned_view_'s owned-route parse: the OWNER-OBJECT RULE
+    // at Parser's owned-route constructor (parser.hpp; note §3.1) applies. This
+    // site's facts: seated once by fixpp_msg_clone (re-check with
+    // `grep -n "owned_tv_ *=" src/capi/message_write.cpp`), inside a heap shell
+    // that never relocates; declared BEFORE owned_frame_/owned_view_ so reverse
+    // declaration order destroys owned_view_ first, and fixpp_msg_destroy also
+    // resets owned_view_ explicitly first (see message_write.cpp).
+    std::shared_ptr<const fixpp::dict::table_view> owned_tv_;
 
     // Clone-owned storage: allocated by fixpp_msg_clone; nullptr for
     // non-clone handles.  Owned by the shell; destroyed at fixpp_msg_destroy.

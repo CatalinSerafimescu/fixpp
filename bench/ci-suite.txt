@@ -70,6 +70,7 @@ bench/core/decimal_bench                    gb-json:decimal_baseline.json       
 # It is the single most important `paired` row in this file.
 bench/dictionary/xml_loader_bench           gb-json:dictionary/xml_loader.json               paired
 bench/dictionary/table_view_footprint_bench none:records-footprint-in-bytes-not-timing       no
+# reify_bench: fixpp#495 holds the BORROWED Parser{tv} route to no regression against the merge-base on BM_Reify_DictBacked_20tag (paired manual run; `.specify/495-493-486-dict-reify-copy.md` §11).
 bench/dictionary/reify_bench                none:baseline-has-zero-benchmark-rows            no
 
 # ── codegen ──────────────────────────────────────────────────────────────────

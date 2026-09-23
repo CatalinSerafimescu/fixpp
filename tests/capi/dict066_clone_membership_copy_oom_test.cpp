@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // tests/capi/dict066_clone_membership_copy_oom_test.cpp
 //
+// Superseded in part by `.specify/495-493-486-dict-reify-copy.md` §2.3/§2.4 (fixpp#495).
+//
 // gate-b/r1 FQ-1 (PR #181 round 1, Finding 1) — OOM hardening witness for
-// MessageView::membership_copy() (include/fixpp/wire/parser.hpp), now NOT
-// noexcept: `fixpp_msg_clone()`'s production caller
+// the borrowed-route table copy: MessageView::shared_membership() copies a
+// borrowed-route source's table in place (include/fixpp/wire/parser.hpp), and
+// that copy may throw: `fixpp_msg_clone()`'s production caller
 // (`fixpp_msg_clone()`'s src/capi/message_write.cpp definition, inside the inner
 // `catch (std::bad_alloc const&)` of its nested boundary) must translate a
 // bad_alloc thrown during the table_view deep-copy into
@@ -25,15 +28,18 @@
 // feedback_operator_new_witness_breaks_sanitizers) is armed to throw
 // bad_alloc on a specific call number.
 //
-// Calibration: source-verified (`fixpp_msg_clone()`'s full body in src/capi/message_write.cpp), the
-// construction body sits in an INNER try/catch(std::bad_alloc const&), itself inside
-// an OUTER catch(...) that aborts (fixpp#458 D-3b). After the dict-backed branch's `clone->owned_tv_ = h->view->membership_copy();`, exactly ONE
-// further global-new call remains before the inner try block ends (the
-// `std::make_unique<MessageView<Index>>(std::move(*parsed))` inside the
-// `if (parsed)` arm). So membership_copy()'s own K allocations are positions
-// [dict_total-K .. dict_total-1] -- position `dict_total - 1` is therefore
-// ALWAYS the LAST allocation inside membership_copy()'s table_view copy ctor
-// (as long as K>=1, confirmed by the T_dict>T_free sanity check below).
+// Calibration: `fixpp_msg_clone()`'s construction body (src/capi/message_write.cpp)
+// sits in an INNER try/catch(std::bad_alloc const&), itself inside an OUTER
+// catch(...) that aborts (fixpp#458 D-3b). Premise, stated as a condition
+// (fixpp#495, `.specify/495-493-486-dict-reify-copy.md` §10 T-16(b)): a
+// BORROWED-route source makes the dict-backed branch copy the table in place
+// through `MessageView::shared_membership()`, after which exactly ONE further
+// global-new call remains before the inner try block ends — the
+// `std::make_unique<MessageView<Index>>` of the parsed view (the re-parse draws
+// from the clone's pre-seeded arena). So position `dict_total - 1` is the LAST
+// allocation inside the table_view copy constructor (as long as K>=1, confirmed
+// by the T_dict>T_free sanity check below). Re-derive the landing site with
+// `gdb -batch -ex "catch throw" -ex run -ex bt` on this binary.
 #include <gtest/gtest.h>
 
 #include <atomic>
@@ -75,11 +81,11 @@
 // ── libstdc++ gate (gate-b CI-fix, PR #181 Tier 2 MSVC + Tier 3 libc++). ─────
 // The fault-injection ordinal below (see file header "Calibration") is derived
 // from a libstdc++-specific GLOBAL-allocation sequence: it assumes exactly ONE
-// further global-new call remains after membership_copy() before the try ends.
+// further global-new call remains after the table copy before the try ends.
 // libc++ (Tier 3) and MSVC's STL (Tier 2) allocate a different number/order of
-// internal blocks, so `t_dict - 1` no longer lands inside membership_copy()'s
+// internal blocks, so `t_dict - 1` no longer lands inside the table copy's
 // table_view copy and the witness mis-fires. The behaviour it guards
-// (membership_copy() no longer noexcept + std::unique_ptr<fixpp_msg> RAII in
+// (the table copy is not noexcept + std::unique_ptr<fixpp_msg> RAII in
 // fixpp_msg_clone) is a source-level guarantee independent of the STL and is
 // mutation-proven on libstdc++ (and the RAII clone success-path is covered
 // under libc++/MSVC by capi_dict066_clone_identity + the libc++-ASan lane), so
@@ -151,7 +157,7 @@ void operator delete[](void* p, std::size_t) noexcept {
 // overload above -- so without these, the entries_/overlay_ pmr::vector
 // growth this file's NEW OOM arm (CloneReparseOom) needs to inject into is
 // invisible to g_alloc_count/g_fail_at entirely, and the injected ordinal
-// can only ever land inside membership_copy()'s (plain-new) allocations.
+// can only ever land inside the table copy's (plain-new) allocations.
 // NOLINTBEGIN(cppcoreguidelines-owning-memory,cppcoreguidelines-no-malloc,hicpp-no-malloc)
 // A replaceable global operator new/delete must obtain and release raw storage
 // itself; RAII and gsl::owner<> do not apply to the allocator's own definition.
@@ -216,7 +222,7 @@ TEST(CloneMembershipCopyOom, TableViewCopyOomYieldsCapiConfigInvalid) {
     auto frame_bytes =
         fixpp_test_support::make_execution_report_frame(suffix, /*seq=*/9, "SENDER", "TARGET");
 
-    // ── Calibration pass 1: dict-FREE clone (no membership_copy() call) ─────
+    // ── Calibration pass 1: dict-FREE clone (no table copy) ─────
     std::pmr::monotonic_buffer_resource parse_arena_free;
     fixpp::wire::pmr_carry_buffer carry_free{frame_bytes.size(), &parse_arena_free};
     fixpp::wire::Framer framer_free{};
@@ -242,7 +248,7 @@ TEST(CloneMembershipCopyOom, TableViewCopyOomYieldsCapiConfigInvalid) {
     ASSERT_NE(clone_free, nullptr);
     EXPECT_EQ(fixpp_msg_destroy(clone_free), FIXPP_ERR_OK);
 
-    // ── Calibration pass 2: dict-BACKED clone (calls membership_copy()) ─────
+    // ── Calibration pass 2: dict-BACKED clone (copies the table) ─────
     std::pmr::monotonic_buffer_resource parse_arena_dict;
     fixpp::wire::pmr_carry_buffer carry_dict{frame_bytes.size(), &parse_arena_dict};
     fixpp::wire::Framer framer_dict{};
@@ -271,13 +277,13 @@ TEST(CloneMembershipCopyOom, TableViewCopyOomYieldsCapiConfigInvalid) {
 
     ASSERT_GT(t_dict, t_free)
         << "sanity: a dict-backed clone must allocate MORE than a dict-free clone "
-           "(membership_copy()'s table_view deep-copy) -- else the injected pass below "
-           "cannot be attributed to membership_copy() specifically";
+           "(the table_view deep-copy) -- else the injected pass below "
+           "cannot be attributed to the table copy specifically";
 
     // ── Injected pass: fail_at = t_dict - 1 (the LAST allocation of the
     // dict-backed call BEFORE the final make_unique<MessageView<Index>>).
     // Per the file-header derivation this position is guaranteed inside
-    // membership_copy()'s table_view copy ctor. ─────────────────────────────
+    // the table_view copy ctor. ─────────────────────────────
     g_alloc_count.store(0);
     g_fail_at.store(t_dict - 1);
     long const live_before = g_live.load();
@@ -300,17 +306,17 @@ TEST(CloneMembershipCopyOom, TableViewCopyOomYieldsCapiConfigInvalid) {
     // and live_after == live_before.
     EXPECT_EQ(live_after, live_before)
         << "gate-b/r2 FQ-1: fixpp_msg_clone() leaked " << (live_after - live_before)
-        << " live heap object(s) on the membership_copy() OOM path -- the clone shell "
+        << " live heap object(s) on the table-copy OOM path -- the clone shell "
            "(and/or its arena_buf_/arena_resource_ members) must be freed via RAII on "
            "the catch(...) unwind.";
 
     EXPECT_FALSE(threw)
-        << "gate-b/r1 FQ-1: a bad_alloc during membership_copy()'s table_view deep-copy "
+        << "gate-b/r1 FQ-1: a bad_alloc during the table_view deep-copy "
            "must NOT propagate out of fixpp_msg_clone() -- must be caught by its inner "
            "catch(std::bad_alloc const&) and translated to FIXPP_ERR_CAPI_CONFIG_INVALID. "
-           "Propagation here means membership_copy()'s noexcept was NOT removed (or the catch regressed).";
+           "Propagation here means the copy path became noexcept (or the catch regressed).";
     EXPECT_EQ(rc_injected, FIXPP_ERR_CAPI_CONFIG_INVALID)
-        << "a bad_alloc thrown during membership_copy()'s table_view deep-copy must be "
+        << "a bad_alloc thrown during the table_view deep-copy must be "
            "caught by fixpp_msg_clone's inner catch(std::bad_alloc const&) and translated to "
            "FIXPP_ERR_CAPI_CONFIG_INVALID -- NOT std::terminate.";
     EXPECT_EQ(clone_injected, nullptr);
@@ -326,7 +332,7 @@ TEST(CloneMembershipCopyOom, TableViewCopyOomYieldsCapiConfigInvalid) {
 // `catch (std::bad_alloc const&)` (src/wire/offset_table.cpp) and degrades to
 // `status_ = fail(core::error::out_of_memory)` -- a DIFFERENT catch site from
 // the arm above (which catches a bad_alloc that ESCAPES all the way to
-// clone's own boundary, inside membership_copy()). translate() then maps
+// clone's own boundary, inside the table copy). translate() then maps
 // core::error::out_of_memory -> FIXPP_ERR_UNKNOWN (documented v1.0 behaviour,
 // L-049-2 -- spec.md FR-006/FR-007).
 //
@@ -337,7 +343,7 @@ TEST(CloneMembershipCopyOom, TableViewCopyOomYieldsCapiConfigInvalid) {
 // this file already installs, at an ordinal INSIDE OffsetTable::build()'s own
 // allocations (the entries_/overlay_ pmr::vector growth reallocations that
 // spill past the arena's initial block once it is exhausted), not at
-// membership_copy()'s tail (that ordinal produces EC-4/CAPI_CONFIG_INVALID
+// the table copy's tail (that ordinal produces EC-4/CAPI_CONFIG_INVALID
 // instead -- the discriminator assertion below tells the two apart).
 //
 // A LARGE frame (3000 repeats of a plain field) forces this spillover:
@@ -405,7 +411,7 @@ TEST(CloneReparseOom, OffsetTableBuildOomYieldsUnknown) {
     // ── Injected pass: fail at the LAST allocation before the final
     // make_unique<MessageView<Index>> (same recipe as the calibration above);
     // for THIS big frame that ordinal lands inside OffsetTable::build()'s own
-    // spillover allocations, not membership_copy()'s tail. ──────────────────
+    // spillover allocations, not the table copy's tail. ──────────────────
     g_alloc_count.store(0);
     g_fail_at.store(t_big - 1);
     fixpp_msg_t* clone_injected = nullptr;
@@ -425,7 +431,7 @@ TEST(CloneReparseOom, OffsetTableBuildOomYieldsUnknown) {
     // Discriminator: FIXPP_ERR_UNKNOWN confirms the injected ordinal landed
     // inside the re-parse's OffsetTable::build (EC-3's failing-allocator
     // route); FIXPP_ERR_CAPI_CONFIG_INVALID would mean it landed in
-    // membership_copy() instead (EC-4) -- the frame would need to be bigger.
+    // the table copy instead (EC-4) -- the frame would need to be bigger.
     // ⚠️ RED on the unfixed tree is NOT "wrong catch site" — it is the SAME
     // fail-open fallback T047/T049's sibling cells hit: OffsetTable::build's
     // internal catch degrades `parsed` to `!has_value()`, and the unfixed
@@ -438,7 +444,7 @@ TEST(CloneReparseOom, OffsetTableBuildOomYieldsUnknown) {
            "(EC-3 / FR-006 / SC-005) -- got "
         << static_cast<int>(rc_injected)
         << " (CAPI_CONFIG_INVALID==10 would mean the injected ordinal landed in "
-           "membership_copy() instead; the frame needs to be bigger).";
+           "the table copy instead; the frame needs to be bigger).";
     EXPECT_EQ(clone_injected, nullptr);
     if (clone_injected != nullptr) {
         EXPECT_EQ(fixpp_msg_destroy(clone_injected), FIXPP_ERR_OK);

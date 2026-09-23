@@ -626,7 +626,7 @@ This is enforced by — **each mechanism named for what it actually does, correc
 
 ### 9.1 Public vs internal headers
 
-- Every header under `include/fixpp/` is part of the **C++ public API surface** unless it lives in `include/fixpp/<module>/detail/`. Detail headers are excluded from the install set.
+- Every header under `include/fixpp/` is part of the **C++ public API surface** unless it lives in `include/fixpp/<module>/detail/`. Detail headers are installed, because public headers include them, but are internal and not for clients (owner ruling R-E, `.specify/495-493-486-dict-reify-copy.md`; `.specify/api-contract.md` §3.3).
 - **Doxygen scopes:** only public headers are scanned. Detail headers carry `\internal` directives.
 - **No transitive C++ leaks across `capi/`.** `include/fix/c_api.h` is `#include <stddef.h>`, `<stdint.h>`, `<stdbool.h>` only — no `<atomic>`, no `<type_traits>`, no `<asio>`. Verified by a CI grep.
 

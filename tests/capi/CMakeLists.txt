@@ -364,6 +364,23 @@ target_compile_definitions(capi_dictionary_load_test PRIVATE
 add_test(NAME capi_dictionary_load COMMAND capi_dictionary_load_test)
 set_tests_properties(capi_dictionary_load PROPERTIES LABELS "capi;052;080")
 
+# fixpp#495 D-5 T-20 (`.specify/495-493-486-dict-reify-copy.md` §10): the C loader
+# retains nothing in the host's default resource. Standalone: it installs a
+# process-wide default resource. Its positive control loads through the C++
+# `dict::load_any` with the host resource, hence `fixpp_dictionary`.
+add_executable(capi_dict495_loader_default_resource_test dict495_loader_default_resource_test.cpp)
+target_link_libraries(capi_dict495_loader_default_resource_test PRIVATE
+  fixpp_capi
+  fixpp_dictionary
+  GTest::gtest
+  GTest::gtest_main
+)
+target_compile_definitions(capi_dict495_loader_default_resource_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
+add_test(NAME capi_dict495_loader_default_resource
+  COMMAND capi_dict495_loader_default_resource_test)
+set_tests_properties(capi_dict495_loader_default_resource PROPERTIES LABELS "495;capi")
+
 fixpp_add_mallocnesia_test(
   NAME capi_recv_alloc_guard_mallocnesia
   TARGET capi_recv_alloc_guard_test
@@ -514,6 +531,44 @@ target_compile_definitions(capi_dict066_clone_identity_test PRIVATE
 add_test(NAME capi_dict066_clone_identity COMMAND capi_dict066_clone_identity_test)
 set_tests_properties(capi_dict066_clone_identity PROPERTIES
   LABELS "066;us1;capi")
+
+# fixpp#495 T-13, C twin (`.specify/495-493-486-dict-reify-copy.md` §10): two
+# clones from the shipped C-ABI dispatch path share the session's table and
+# outlive the engine. Standalone: a live two-engine loopback.
+add_executable(capi_dict495_clone_shared_table_test dict495_clone_shared_table_test.cpp)
+target_link_libraries(capi_dict495_clone_shared_table_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_dict495_clone_shared_table_test PRIVATE
+  ${FIXPP_CAPI_FEATURE_B_INCLUDES}
+)
+target_compile_definitions(capi_dict495_clone_shared_table_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME capi_dict495_clone_shared_table COMMAND capi_dict495_clone_shared_table_test)
+set_tests_properties(capi_dict495_clone_shared_table PROPERTIES
+  LABELS "495;capi")
+
+# fixpp#495 T-11 (`.specify/495-493-486-dict-reify-copy.md` §10): a handle and a
+# clone pin the snapshot's table, not the Dictionary or its heap load arena.
+# Standalone: a second thread; run under ASan and TSan.
+add_executable(capi_dict495_pinned_table_lifetime_test dict495_pinned_table_lifetime_test.cpp)
+target_link_libraries(capi_dict495_pinned_table_lifetime_test PRIVATE
+  fixpp_capi
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(capi_dict495_pinned_table_lifetime_test PRIVATE
+  ${FIXPP_CAPI_FEATURE_B_INCLUDES}
+)
+target_compile_definitions(capi_dict495_pinned_table_lifetime_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+add_test(NAME capi_dict495_pinned_table_lifetime COMMAND capi_dict495_pinned_table_lifetime_test)
+set_tests_properties(capi_dict495_pinned_table_lifetime PROPERTIES
+  LABELS "495;capi;tsan")
 
 # gate-b/r1 FQ-1 (PR #181 round 1, Finding 1): OOM hardening witness for
 # MessageView::membership_copy() (now NOT noexcept) — a bad_alloc during the

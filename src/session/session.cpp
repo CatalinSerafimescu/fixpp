@@ -329,7 +329,11 @@ template <class CB>
     // GUARANTEED (see hpp comment above the member + Session::open()): both
     // callers (fire_to_admin_ and the receive loop) run only post-open.
     assert(inbound_tv_ != nullptr);
-    fixpp::wire::Parser<fixpp::wire::access_mode::Index> pd_parser{*inbound_tv_};
+    // fixpp#495 (`.specify/495-493-486-dict-reify-copy.md` §2.6): the OWNED route,
+    // so a reify or clone of a view handed to an application callback (C++ and C)
+    // shares the table; inbound_tv_ is its owner object (session.hpp).
+    fixpp::wire::Parser<fixpp::wire::access_mode::Index> pd_parser{
+        fixpp::wire::detail::owned_route_key{}, inbound_tv_};
     auto mv_r = pd_parser.parse((*feed_r)[0], &pa_mr);
     if (!mv_r) return fixpp::core::expected_t<void>{};  // parse error — skip
 
@@ -1037,9 +1041,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // mutation (state_ = lifecycle::open happens later, further down in open()): a supplied
     // snapshot whose source() is not cfg_.dictionary would silently drive
     // inbound parsing/validation from the wrong grammar (§2b of the design
-    // doc). shared_dictionary_view() is the sole production alias-formation
-    // site — it must be used here AND at fixpp_session_open, never a
-    // hand-rolled aliasing shared_ptr construction (§6 seam 4/G2).
+    // doc). shared_dictionary_view() is how both this line and
+    // fixpp_session_open take the snapshot's table; it shares the table's own
+    // owner, so inbound_tv_ pins the table and not the snapshot or its
+    // Dictionary (fixpp#495 D-4, `.specify/495-493-486-dict-reify-copy.md` §6).
+    // Owner-object site (session.hpp's inbound_tv_ comment). No assert that it
+    // is unset: a failed open() leaves state_ at never_opened and a legitimate
+    // retry reassigns it while no view exists.
     if (cfg_.dict_snapshot) {
         if (cfg_.dict_snapshot->source() != cfg_.dictionary) {
             co_return std::unexpected(error::invalid_session_config);

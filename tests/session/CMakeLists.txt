@@ -2180,8 +2180,8 @@ set_tests_properties(session_validate_gate_inbound PROPERTIES
 # W1: open() with no config-supplied snapshot walks the Dictionary exactly ONCE
 #     (was 2: inbound_tv_ + the strict validator, independently).
 # W2: open() with SessionConfig::dict_snapshot set walks it ZERO times and
-#     adopts an aliased view of THAT snapshot (use_count) — the C-ABI's half of
-#     the fix.
+#     adopts a shared view of THAT snapshot's table (use_count; fixpp#495 D-4
+#     shares the table owner, not the snapshot) — the C-ABI's half of the fix.
 # W3: the adopted view is wired into the parser and validator (group-bearing
 #     frame — Gate B triage C5), not just stored.
 # Instrument is 083 T049's W-11a counter, which lives in the INTERNAL dictionary
@@ -2200,6 +2200,14 @@ target_compile_definitions(session_table_view_reuse PRIVATE
   "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
 set_tests_properties(session_table_view_reuse PROPERTIES
   LABELS "fixpp215;table-view;session;validation-gate")
+
+# fixpp#495 T-13, C++ twin (`.specify/495-493-486-dict-reify-copy.md` §10): two
+# handles reified on the shipped dispatch path share one table, and a held handle
+# does not keep the Dictionary alive. Standalone: a live Session.
+add_threading_test(session_reify_shared_dispatch test_reify_shared_dispatch.cpp)
+target_compile_definitions(session_reify_shared_dispatch PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
+set_tests_properties(session_reify_shared_dispatch PROPERTIES LABELS "495;session")
 
 # ── fixpp#215 item 1 (Option C) — provenance rejection/acceptance ────────────
 # .specify/215-dictionary-view.md §6 seams 1+2: a dict_snapshot whose

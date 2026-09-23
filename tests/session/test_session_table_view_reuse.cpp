@@ -26,10 +26,11 @@
 // fixpp#215 item 1, Option C (`.specify/215-dictionary-view.md`) — W1/W2
 // migrated from the retired `dictionary_view` field to
 // `SessionConfig::dict_snapshot` (a `shared_ptr<const dictionary_snapshot>`
-// minted by `fixpp::dict::make_dictionary_snapshot`); W2's identity pin now
-// tracks the SNAPSHOT's refcount (open() adopts an ALIASING view into it via
-// `shared_dictionary_view`, so the snapshot's control block is shared with
-// `inbound_tv_`, not copied).
+// minted by `fixpp::dict::make_dictionary_snapshot`); W2's identity pin
+// tracks the refcount of the snapshot's TABLE owner (open() takes it via
+// `shared_dictionary_view`, so that control block is shared with `inbound_tv_`,
+// not copied — the table's own control block, not the snapshot's: fixpp#495 D-4,
+// `.specify/495-493-486-dict-reify-copy.md` §6).
 //
 // W3 replaced (Gate B round-1 triage, finding C5): the original W3 fed a
 // group-FREE Logon and asserted only `state() == Active`, which cannot
@@ -52,6 +53,7 @@
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
 #include <chrono>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -68,6 +70,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "dictionary_internal.hpp"  // 083 T049 W-11a seam: as_table_view_call_count()
@@ -211,13 +214,13 @@ TEST(SessionTableViewReuse, OpenWalksTheDictionaryExactlyOnce) {
 
 // ============================================================================
 // W2 — open() with a config-supplied snapshot walks the Dictionary ZERO
-// times, and ADOPTS an aliased view of THAT exact snapshot.
+// times, and ADOPTS a shared view of THAT exact snapshot's table.
 //
 // The count alone would not distinguish "adopted the supplied snapshot" from
-// "adopted it and also kept a private copy of the tables"; the snapshot's
-// use_count() pins identity (open() adopts via the aliasing
-// shared_dictionary_view() helper, which shares the snapshot's control block
-// rather than copying the table_view — §6 seam 4). Together they are the
+// "adopted it and also kept a private copy of the tables"; the table owner's
+// use_count() pins identity (open() adopts via the shared_dictionary_view()
+// helper, which shares the snapshot's table owner rather than copying the
+// table_view — fixpp#495 D-4, `.specify/495-493-486-dict-reify-copy.md` §6). Together they are the
 // whole C-ABI claim: `fixpp_session_open` mints ONE snapshot (pinned
 // separately by 083 W-11a in tests/capi) and passes it through
 // `SessionConfig::dict_snapshot`, so the C-ABI total is 1 walk, not 3.
@@ -238,7 +241,10 @@ TEST(SessionTableViewReuse, OpenAdoptsAConfigSuppliedSnapshotAndWalksZeroTimes) 
     // would make the assertion below pass whether or not open() adopted
     // anything — a count identity that proves nothing.
     Session sess{fix.engine, cfg};
-    long const use_count_before_open = snap.use_count();
+    // fixpp#495 D-4 (T-19(b)): sample the snapshot's TABLE owner, not the snapshot
+    // — open() now shares the table, not the snapshot. Both samples include the
+    // helper's own temporary reference.
+    long const table_refs_before_open = fixpp::dict::shared_dictionary_view(snap).use_count();
 
     fixpp::dict::detail::reset_as_table_view_call_count();
 
@@ -249,14 +255,19 @@ TEST(SessionTableViewReuse, OpenAdoptsAConfigSuppliedSnapshotAndWalksZeroTimes) 
            "Dictionary ZERO further times. This reads 1 on the unfixed tree, where SessionConfig "
            "had no field to carry a snapshot and open() always built its own.";
 
-    EXPECT_GT(snap.use_count(), use_count_before_open)
-        << "open() must take a strong reference (via shared_dictionary_view's aliasing "
-           "shared_ptr, which shares the SNAPSHOT's control block) to THE SUPPLIED snapshot "
-           "object. Sampled across open() ALONE (the construction copy is already in the "
-           "baseline), so this rises only if inbound_tv_ was aliased from cfg_.dict_snapshot. "
-           "Zero new walks paired with an unchanged count would mean open() had silently "
-           "stopped resolving a view at all.";
+    EXPECT_GT(fixpp::dict::shared_dictionary_view(snap).use_count(), table_refs_before_open)
+        << "open() must take a strong reference to THE SUPPLIED snapshot's table (via "
+           "shared_dictionary_view, which shares the snapshot's table owner). Sampled across "
+           "open() ALONE, so this rises only if inbound_tv_ was taken from cfg_.dict_snapshot; "
+           "a copy of the table would leave it unchanged. Zero new walks paired with an "
+           "unchanged count would mean open() had silently stopped resolving a view at all.";
 }
+
+// fixpp#495 D-4 (T-19(d)): view_owner() hands out only a CONST pointee, the one
+// shared_dictionary_view already returns — no injection surface for a mutable table.
+static_assert(
+    std::same_as<decltype(std::declval<fixpp::dict::dictionary_snapshot const&>().view_owner()),
+                 std::shared_ptr<const fixpp::dict::table_view> const&>);
 
 // ============================================================================
 // W3 — the adopted CONFIG-SUPPLIED snapshot drives GROUP boundaries, not

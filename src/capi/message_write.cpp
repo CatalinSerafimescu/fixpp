@@ -36,7 +36,6 @@
 // no liveness token. Reads (incl. get_group) are THREAD_SAFE and leak-free.
 
 #include <algorithm>
-#include <cassert>
 #include <charconv>
 #include <cmath>
 #include <cstdio>
@@ -536,13 +535,18 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_clone(const fixpp_msg_t* src, fixpp_msg
                 fixpp::wire::frame_view_access::make(owned_frame.get(), frame_len, 0, frame_len));
             std::unique_ptr<fixpp::wire::MessageView<fixpp::wire::access_mode::Index>> clone_view;
             if (h->view->is_dict_backed()) {
-                // fixpp#456 seam 6: seated rather than assigned — the rationale is
-                // written once, at the sibling site in src/dictionary/reify.cpp.
-                assert(!clone->owned_tv_.has_value());
-                clone->owned_tv_.emplace(h->view->membership_copy());
+                // fixpp#495 (`.specify/495-493-486-dict-reify-copy.md` §2.4): an
+                // owned-route source shares its table; a borrowed one is copied.
+                // The re-parse runs on the OWNED route over the heap shell's own
+                // member, so a clone of this clone shares too.
+                clone->owned_tv_ =
+                    fixpp::wire::detail::message_view_membership_access::shared_membership(
+                        *h->view);
                 fixpp::wire::Parser<fixpp::wire::access_mode::Index> clone_parser{
-                    *clone->owned_tv_};
-                auto parsed = clone_parser.parse(fv, clone_mr);
+                    fixpp::wire::detail::owned_route_key{}, clone->owned_tv_};
+                // fixpp#493 (`.specify/495-493-486-dict-reify-copy.md` §4): re-parse
+                // under the SOURCE's caps, so a raised or lowered cap survives the clone.
+                auto parsed = clone_parser.parse(fv, clone_mr, h->view->offsets().config());
                 if (parsed) {
                     clone_view =
                         std::make_unique<fixpp::wire::MessageView<fixpp::wire::access_mode::Index>>(
@@ -565,10 +569,13 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_clone(const fixpp_msg_t* src, fixpp_msg
                 }
             } else {
                 // Dict-free source: no dict-backed attempt is made, so nothing can
-                // fail here. The dict-free 2-arg ctor (pre-066 behavior).
+                // fail here — the dict-free constructor never refuses; a failed build
+                // degrades in place. fixpp#493: it takes the source's caps too, through
+                // the four-argument form with `dict_hooks::none()`, which also seeds
+                // the root group context.
                 clone_view =
                     std::make_unique<fixpp::wire::MessageView<fixpp::wire::access_mode::Index>>(
-                        fv, clone_mr);
+                        fv, clone_mr, h->view->offsets().config(), fixpp::wire::dict_hooks::none());
             }
 
             clone->tag_ = FIXPP_HANDLE_TAG_MSG;

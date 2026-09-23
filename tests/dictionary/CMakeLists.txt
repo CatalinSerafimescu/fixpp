@@ -10,17 +10,13 @@
 find_package(GTest CONFIG REQUIRED)
 find_package(pugixml CONFIG REQUIRED)
 
-# WORKING_DIRECTORY is load-bearing, not decoration. The gate this drives does
-# `cd "$(git rev-parse --show-toplevel)"` and then greps RELATIVE paths
-# (src/ include/ bindings/ tools/ tests/). ctest runs a test from the BUILD dir
-# by default, so with an out-of-tree build directory — a symlinked or relocated
-# `build/<preset>`, which the repo's own presets make easy — `git rev-parse`
-# fails, every grep resolves nothing, and the run is scored against an empty
-# corpus. The gate itself catches that (its G1 liveness check reports
-# "scanner broken" and exits 1), but the harness's three RED arms expect exit 1
-# and so pass VACUOUSLY in that state: they see the scanner's failure, not the
-# removed static_asserts they exist to detect. Only the positive arm fails.
-# Pinning cwd to the source tree is what keeps those three arms meaningful.
+# The self-test copies the directories the gate scans into a temp dir, seeds
+# only that copy, and runs the gate on it with `--root`; it never edits the
+# source tree, so it needs no RUN_SERIAL and no lock shared with the git-clean
+# `fixpp::dict::codegen-build-graph-check`. A copy the gate cannot read makes
+# the RED arms pass VACUOUSLY (they expect exit 1, which the G1 liveness
+# "scanner broken" failure also gives); the clean arm, run on the same copy,
+# is the one that fails in that state.
 add_test(NAME dictionary_snapshot_exclusivity_gate
   COMMAND bash "${CMAKE_SOURCE_DIR}/tools/test_dictionary_snapshot_exclusivity_gate.sh"
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
@@ -403,6 +399,7 @@ if(TARGET fixpp_codegen_generate)
     reify_cross_strand_test           # TSan target (LABELS dictionary;tsan) + threads
     reify_membership_identity_test    # label-heterogeneous 066;dictionary;us1
     reify_membership_copy_oom_test    # global-new alloc counting + 066;dictionary;us1
+    reify_shared_table_concurrency_test  # fixpp#495 T-17: threads, TSan target (495;dictionary;tsan)
   )
   foreach(target IN LISTS FIXPP_REIFY_STANDALONE)
     add_executable(dictionary_${target} "${target}.cpp")
@@ -424,6 +421,10 @@ if(TARGET fixpp_codegen_generate)
   # reify_cross_strand_test is a TSan target per [const §IX.2] / AC-R5/AC-T3.
   set_tests_properties(dictionary_reify_cross_strand_test PROPERTIES
     LABELS "dictionary;tsan")
+
+  # fixpp#495 T-17 (`.specify/495-493-486-dict-reify-copy.md` §10): a TSan target.
+  set_tests_properties(dictionary_reify_shared_table_concurrency_test PROPERTIES
+    LABELS "495;dictionary;tsan")
 
   # 066-dict-backed-inbound-parse T008: label override so `ctest -L 066`
   # (and the T021/T022 coverage-index / completeness audit) picks these up.

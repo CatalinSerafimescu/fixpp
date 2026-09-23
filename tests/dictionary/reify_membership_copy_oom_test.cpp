@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // tests/dictionary/reify_membership_copy_oom_test.cpp
 //
+// Superseded in part by `.specify/495-493-486-dict-reify-copy.md` §2.3/§2.4 (fixpp#495).
+//
 // gate-b/r1 FQ-1 (PR #181 round 1, Finding 1) — OOM hardening witness for
-// MessageView::membership_copy() (include/fixpp/wire/parser.hpp), now NOT
-// noexcept: `dict::reify()`'s production caller
+// the borrowed-route table copy: MessageView::shared_membership() copies a
+// borrowed-route source's table in place (include/fixpp/wire/parser.hpp), and
+// that copy may throw: `dict::reify()`'s production caller
 // (inside `owning_message_handle_from_frame`'s
 // `catch (std::bad_alloc const&)`) must translate a bad_alloc thrown during
 // the table_view deep-copy into dict_reify_oom, NOT std::terminate.
@@ -13,7 +16,7 @@
 // a caller-supplied pmr::memory_resource -- so the existing
 // tests/support/failing_pmr_resource.hpp harness (used by reify_oom_test.cpp
 // for the bytes_ deep-copy, which IS routed through the pmr `mr` parameter)
-// cannot intercept membership_copy()'s allocation. Instead: a TU-local
+// cannot intercept the table copy's allocation. Instead: a TU-local
 // global operator new override that can be armed to throw bad_alloc on a
 // specific call number (gated out under ASan/TSan/MSan, which own the
 // allocator -- mirrors tests/session/test_business_messages_build.cpp's
@@ -22,18 +25,22 @@
 // Calibration (avoids hardcoding an allocation index, which would be brittle
 // against libstdc++/libc++ container-internals differences): a single
 // unarmed dict-backed reify() call establishes `dict_total` (the total
-// global-new call count for that invocation). Source-verified
-// (`owning_message_handle_from_frame`): after `handle.pimpl_->owned_tv_ =
-// view.membership_copy();` the function does ONLY `return handle;` (a
-// noexcept move, zero allocation) before the try block ends -- so
-// membership_copy()'s own K allocations are the LAST K allocations in the
-// call, i.e. positions [dict_total-K+1 .. dict_total]. Position `dict_total`
-// itself is therefore ALWAYS inside membership_copy()'s table_view copy ctor
-// (as long as K>=1, confirmed by the T_dict>T_free sanity check below).
-// Arming `fail_at = dict_total` injects the OOM precisely into the copy.
+// global-new call count for that invocation), and the armed pass fails its
+// LAST global allocation. Premises, stated as conditions (fixpp#495,
+// `.specify/495-493-486-dict-reify-copy.md` §10 T-16(b)): this source is parsed
+// on the BORROWED route, so the factory copies the table in place through
+// `MessageView::shared_membership()` (one control-block-plus-table allocation,
+// then the table's own containers — the copy's allocations come last); and the
+// factory's post-copy work (the eager re-parse from the handle arena, which also
+// holds the impl since D-1c) fits the chunk the handle arena already acquired,
+// so it adds no global allocation after the copy. Re-derive the landing site
+// with `gdb -batch -ex "catch throw" -ex run -ex bt` on this binary: the throw
+// must sit inside `fixpp::dict::table_view::table_view` (the copy constructor);
+// the prvalue spelling `make_shared<const table_view>(membership_copy())` moves
+// it into the shared_ptr's own allocation instead.
 //
 // Anchors: opus_pr181_1_triage.md Finding 1 / FQ-1; parser.hpp's
-// membership_copy() out-of-line definition; table_view.hpp's "copy may
+// shared_membership() out-of-line definition; table_view.hpp's "copy may
 // throw on allocation failure".
 #include <gtest/gtest.h>
 
@@ -76,8 +83,8 @@
 // The fault-injection ordinal below (see file header) is derived from a
 // libstdc++-specific GLOBAL-allocation sequence; libc++ (Tier 3) and MSVC's STL
 // (Tier 2) allocate a different number/order of internal blocks, so the armed
-// ordinal no longer lands inside membership_copy()'s table_view copy and the
-// witness mis-fires. The behaviour it guards (membership_copy() no longer
+// ordinal no longer lands inside the table_view copy and the
+// witness mis-fires. The behaviour it guards (the table copy is not
 // noexcept; dict::reify() translates the bad_alloc to dict_reify_oom, not
 // std::terminate) is a source-level guarantee independent of the STL and is
 // mutation-proven on libstdc++ (the reify success-path is covered under
@@ -177,9 +184,9 @@ TEST(ReifyMembershipCopyOom, TableViewCopyOomYieldsDictReifyOom) {
         fixpp_test_support::make_execution_report_frame(suffix, /*seq=*/7, "SENDER", "TARGET");
 
     // ── Sanity comparison: a dict-free reify() must allocate strictly LESS
-    // than a dict-backed one (membership_copy() really does allocate). This
+    // than a dict-backed one (the table copy really does allocate). This
     // is not itself used to compute fail_at (see file header derivation) but
-    // grounds the claim that the injected pass below targets membership_copy()
+    // grounds the claim that the injected pass below targets the table copy
     // specifically, not some unrelated call. ──────────────────────────────
     std::pmr::monotonic_buffer_resource parse_arena_free;
     std::pmr::monotonic_buffer_resource handle_mr_free;
@@ -199,11 +206,11 @@ TEST(ReifyMembershipCopyOom, TableViewCopyOomYieldsDictReifyOom) {
 
     ASSERT_GT(t_dict, t_free)
         << "sanity: a dict-backed reify() must allocate MORE than a dict-free one "
-           "(membership_copy()'s table_view deep-copy) -- else the injected pass below "
-           "cannot be attributed to membership_copy() specifically";
+           "(the table_view deep-copy) -- else the injected pass below "
+           "cannot be attributed to the table copy specifically";
 
     // ── Injected pass: fail_at = t_dict (the LAST allocation of the
-    // dict-backed call). Per the file-header derivation, membership_copy()'s
+    // dict-backed call). Per the file-header derivation, the table copy's
     // own allocations are the trailing block of this call (nothing allocates
     // after them), so this position is guaranteed inside the table_view copy
     // ctor. ──────────────────────────────────────────────────────────────
@@ -221,14 +228,14 @@ TEST(ReifyMembershipCopyOom, TableViewCopyOomYieldsDictReifyOom) {
     g_fail_at.store(-1);  // disarm before any further allocation (destructors, teardown)
 
     EXPECT_FALSE(threw)
-        << "gate-b/r1 FQ-1: a bad_alloc during membership_copy()'s table_view deep-copy "
+        << "gate-b/r1 FQ-1: a bad_alloc during the table_view deep-copy "
            "must NOT propagate out of dict::reify() (it is noexcept) -- must be caught by "
            "owning_message_handle_from_frame's catch(std::bad_alloc const&) and translated "
-           "to dict_reify_oom. Propagation here means membership_copy()'s noexcept was NOT "
-           "removed (or the catch site regressed).";
+           "to dict_reify_oom. Propagation here means the copy path became noexcept (or the catch "
+           "site regressed).";
     ASSERT_TRUE(r_inj.has_value()) << "reify() must return (not throw) even under OOM";
     ASSERT_FALSE(r_inj->has_value()) << "the injected allocation must have failed reify()";
     EXPECT_EQ(r_inj->error(), fixpp::core::error::dict_reify_oom)
-        << "bad_alloc during membership_copy()'s table_view copy must map to dict_reify_oom";
+        << "bad_alloc during the table_view copy must map to dict_reify_oom";
 }
 #endif  // FIXPP_OOM_WITNESS_ENABLED

@@ -6,6 +6,18 @@ status: stable
 
 # Log
 
+- **2026-09-23 — B13 (#495 / #493 / #486), a shared reify table, copies that keep their caps.**
+  `components/dictionary.md`'s eager-reify section gains the owned route: a reify of a
+  `Session`-dispatched view shares the table by reference count and pins the table only, never the
+  `Dictionary`; the impl comes from `mr`. What was rejected: a public owned route, a `shared_ptr` by
+  value on every view, the owner token inside `dict_hooks`. 215's alias design is flagged
+  superseded in part. `components/c-api.md` gains the C-ABI 1.8 loader entry (D-5) and a
+  superseded-in-part note on the clone refusal it described. `L-458-2` is resolved. Authority:
+  `.specify/495-493-486-dict-reify-copy.md`.
+  - **Gate B (PR #502)** adds two owner-approved instances to `failure-classes.md`:
+    - class 1: a phrase grep over comments cannot see a phrase that wraps onto the next comment line;
+    - class 10: a member added to a class template costs every instantiation (`MessageView<Iter>`).
+
 - **2026-09-22: fixpp#490 Gate B (PR #496).** `failure-classes.md` gains two owner-approved forms:
   - class 1: an oracle's error routed into the "not applicable" branch fails open in a gate;
   - a NEW **class 17** (*trust keyed on a textual proxy admits whatever shares the proxy*): basename

@@ -57,8 +57,12 @@ fixpp_error_t fixpp_dict_load_from_xml(const char* path, fixpp_dict_t** out_dict
     // Construction-time thunk ([2i §5.2]): catch all exceptions; never let one
     // cross extern "C" (undefined behaviour in C callers; std::terminate for C++).
     try {
+        // fixpp#495 D-5 (`.specify/495-493-486-dict-reify-copy.md` §7, BREAKING
+        // C-ABI 1.8): the immortal, thread-safe new_delete_resource(), never the
+        // host's default resource — which it may replace, tear down, or not make
+        // thread-safe while this Dictionary is alive or being destroyed.
         auto d =
-            fixpp::dict::load_any(std::filesystem::path{path}, std::pmr::get_default_resource());
+            fixpp::dict::load_any(std::filesystem::path{path}, std::pmr::new_delete_resource());
         auto* h = new fixpp_dict{std::make_shared<const fixpp::dict::Dictionary>(std::move(d))};
         *out_dict = reinterpret_cast<fixpp_dict_t*>(h);
         return FIXPP_ERR_OK;

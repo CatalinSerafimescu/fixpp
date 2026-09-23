@@ -45,7 +45,7 @@ Three tiers per `[arch §9.3]`:
 
 - **Stable from v1.0** — frozen by this contract; breaking change requires constitutional amendment + MAJOR SemVer bump (for the C ABI before fixpp's first public release, `[const §X.7]` applies instead).
 - **Provisional** — may change in patch releases without notice during early v1.x; **explicitly enumerated** in §3.2 below.
-- **Internal** — anything in `fixpp::detail` or under `<module>/detail/`; no stability guarantee. Headers carry `\internal` for Doxygen and are excluded from the install set per `[arch §9.1]`.
+- **Internal** — anything in `fixpp::detail`, in a nested `<module>::detail` namespace, or under `<module>/detail/`; no stability guarantee and not for clients. These headers ARE installed, because public headers include them (owner ruling R-E, 2026-09-23, `.specify/495-493-486-dict-reify-copy.md`); being installed does not make them API. Headers carry `\internal` for Doxygen per `[arch §9.1]`.
 
 **No transitive C++ leaks across the C ABI** per `[arch §9.1]`: `<fix/c_api.h>` includes only `<stddef.h>`, `<stdint.h>`, `<stdbool.h>`. Verified by CI grep.
 
@@ -71,6 +71,7 @@ Per `[arch §9.3]`:
 ### 3.3 Internal
 
 - `fixpp::detail::*` and any `include/fixpp/<module>/detail/` headers.
+- Nested `detail` namespaces inside installed module headers (`fixpp::<module>::detail::*`), including `detail` tags and accessors such as `fixpp::wire::detail::owned_route_key`, `fixpp::wire::detail::message_view_membership_access` and `fixpp::dict::detail::owning_message_handle_from_frame`. A tag being constructible from anywhere does not make it an entry point; the `detail` namespace is the signal (R-E).
 
 ---
 
@@ -86,6 +87,7 @@ Two **independent** SemVer tracks per `[const §X.1]` / `[arch §9.2]`:
 - Both macro families are emitted by `tools/cmake/version.cmake` per `[arch §9.2]`.
 - ABI compatibility is verified in Tier 2 CI: `abidiff` on Linux, structural diff on Windows, against the previous tagged release; fixpp's first public release records the baseline and comparison starts with the release after it, per `[const §IX.5]` / `[const §X.7]` / `[arch §9.2]`.
 - The C ABI may stay at MAJOR=1 across multiple library MAJOR bumps if the C surface remains compatible — the two tracks exist precisely to allow that.
+- **Library track before the first public release:** a C++ layout or signature break does not bump `FIXPP_VERSION_*` or the CMake `project()` `VERSION`; both the library and the C-ABI versions reset to 1.0.0 at v1.0 (owner ruling R-F, 2026-09-23, `.specify/495-493-486-dict-reify-copy.md`).
 - Runtime version accessor: `fixpp_version()` per `[2i]`.
 
 ---
@@ -149,7 +151,7 @@ include/
     └── v42/, v44/, v50sp2/, vt11/   # generated typed messages (build tree)
 ```
 
-Detail headers (`include/fixpp/<module>/detail/`) are excluded from the install set and from Doxygen per `[arch §9.1]`.
+Detail headers (`include/fixpp/<module>/detail/`) are installed (public headers include them) but are Internal (§3.3) and excluded from Doxygen per `[arch §9.1]` (R-E, `.specify/495-493-486-dict-reify-copy.md`).
 
 ---
 

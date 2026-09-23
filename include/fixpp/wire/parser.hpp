@@ -19,6 +19,7 @@
 // parse->fromApp window (FR-013, [arch §5.3]).
 
 #include <algorithm>
+#include <cassert>   // detail::checked_owner precondition (fixpp#495)
 #include <concepts>  // std::same_as (gate-b/r1 FQ-2 ctor constraint)
 #include <cstddef>
 #include <cstdint>
@@ -66,7 +67,30 @@ namespace detail {
 inline constexpr std::uint16_t tag_msg_type = 35;
 inline constexpr std::uint16_t tag_msg_seq_num = 34;
 
+// fixpp#495 (`.specify/495-493-486-dict-reify-copy.md` §2.2, owner ruling R-A):
+// the tag that selects Parser's OWNED route. Constructible anywhere; living in
+// `detail` is what marks it "not an entry point" (`.specify/api-contract.md`'s
+// Internal class, which names `detail` tags such as this one). A caller naming it
+// takes on the OWNER-OBJECT RULE stated at Parser's owned-route constructor.
+struct owned_route_key {
+    explicit owned_route_key() = default;
+};
+
+// Precondition of the owned route: a non-null owner, checked BEFORE the
+// dereference.
+inline fixpp::dict::table_view const& checked_owner(
+    std::shared_ptr<const fixpp::dict::table_view> const& owner) noexcept {
+    assert(owner);
+    return *owner;
+}
+
+// Reaches MessageView's private shared_membership() (defined below).
+struct message_view_membership_access;
+
 }  // namespace detail
+
+template <access_mode Mode>
+class Parser;  // befriended by MessageView; defined below with its default argument
 
 template <access_mode Mode>
 class MessageView : public View {
@@ -347,7 +371,12 @@ public:
                 token()};
         }
 
-    // 066-dict-backed-inbound-parse T003 (mechanism (b)): the ONE internal
+    // ⚠️ Superseded at both copy sites by shared_membership() below (fixpp#495,
+    // `.specify/495-493-486-dict-reify-copy.md` §2.3): `fixpp_msg_clone` and the
+    // `reify` factory now share an owned-route table instead of copying it. This
+    // accessor stays public and unchanged for its other callers.
+    //
+    // 066-dict-backed-inbound-parse T003 (mechanism (b)): was the ONE internal
     // membership-copy accessor shared by `fixpp_msg_clone` and the `reify`
     // owning handle to propagate this view's dictionary membership into an
     // OWNED, independently-lifetimed `table_view` — safe to outlive the
@@ -402,6 +431,20 @@ public:
     }
 
 private:
+    // fixpp#495: Parser seats `dict_owner_`; the accessor reaches shared_membership().
+    template <access_mode>
+    friend class Parser;
+    friend struct detail::message_view_membership_access;
+
+    // fixpp#495 (`.specify/495-493-486-dict-reify-copy.md` §2.3): the table this
+    // view was parsed against, as a refcounted owner. Owned route (dict_owner_ still
+    // names the table in hooks_): the owner itself, no allocation. Borrowed and
+    // dict-backed: a self-contained copy of the table, made in place (may throw
+    // bad_alloc, like membership_copy()). Dict-free: nullptr. The identity check
+    // makes an owner reassigned after the parse fall to the copy of the table the
+    // view was parsed against; it does not make a dead owner safe (§3.1).
+    [[nodiscard]] std::shared_ptr<const fixpp::dict::table_view> shared_membership() const;
+
     [[nodiscard]] std::span<const std::byte> field_bytes(std::uint16_t tag) const noexcept {
         if constexpr (Mode == access_mode::Index) {
             auto e = table_.find(tag);
@@ -448,6 +491,16 @@ private:
     // arena), so behaviour is unchanged on every lane.
     mutable std::pmr::vector<unknown_fields_view::kv> unk_items_{::fixpp::detail::arena_upstream()};
     mutable bool unk_items_built_ = false;
+    // fixpp#495 (`.specify/495-493-486-dict-reify-copy.md` §2.1): the owner object
+    // of the table in `hooks_` when this view came from Parser's owned route, else
+    // nullptr. A BORROWED pointer to the shared_ptr object, not a shared_ptr: no
+    // refcount traffic per inbound message. Read only by shared_membership().
+    // Index mode only: both copy sites take a MessageView<Index>, so an Iter view
+    // carries an empty member of its own type and stores no owner pointer.
+    struct no_dict_owner_t {};
+    [[no_unique_address]] std::conditional_t<Mode == access_mode::Index,
+                                             std::shared_ptr<const fixpp::dict::table_view> const*,
+                                             no_dict_owner_t> dict_owner_{};
 };
 
 // field_iterator::advance — honours `hooks_` (default `none()`, the standard
@@ -548,6 +601,35 @@ fixpp::dict::table_view MessageView<Mode>::membership_copy() const {
     // Dictionary/table_view.
     return *static_cast<fixpp::dict::table_view const*>(hooks_.opaque_dict());
 }
+
+// fixpp#495: MessageView<Mode>::shared_membership() — see the declaration.
+template <access_mode Mode>
+std::shared_ptr<const fixpp::dict::table_view> MessageView<Mode>::shared_membership() const {
+    if (hooks_.opaque_dict() == nullptr) {
+        return nullptr;
+    }
+    if constexpr (Mode == access_mode::Index) {
+        if (dict_owner_ != nullptr && dict_owner_->get() == hooks_.opaque_dict()) {
+            return *dict_owner_;
+        }
+    }
+    // Copied in place from the table reference: control block and table share one
+    // allocation, and no table_view is moved.
+    return std::make_shared<const fixpp::dict::table_view>(
+        *static_cast<fixpp::dict::table_view const*>(hooks_.opaque_dict()));
+}
+
+namespace detail {
+// fixpp#495: the only door to MessageView::shared_membership(). Used by the two
+// copy sites (dict::reify's factory, fixpp_msg_clone).
+struct message_view_membership_access {
+    template <access_mode M>
+    [[nodiscard]] static std::shared_ptr<const fixpp::dict::table_view> shared_membership(
+        MessageView<M> const& v) {
+        return v.shared_membership();
+    }
+};
+}  // namespace detail
 
 // [2b §4.3] span-scan → token-bearing field_view helper (062 T004, N1). The
 // one wire primitive that did not exist yet: reuses the field_iterator to
@@ -673,6 +755,34 @@ public:
         requires(!std::is_lvalue_reference_v<TV &&>)
     = delete;
 
+    // fixpp#495 (`.specify/495-493-486-dict-reify-copy.md` §2.2): the OWNED route.
+    // Views this parser returns record `&owner`, so a copy of them (reify, clone)
+    // shares the table instead of deep-copying it. `owner` must be a non-null lvalue
+    // of exactly `shared_ptr<const table_view>` (its address is stored, so a
+    // temporary would dangle).
+    //
+    // OWNER-OBJECT RULE (§3.1; stated here once — each owner site points here):
+    // the `shared_ptr` OBJECT passed as `owner` is seated once before any view is
+    // parsed through it, is never reassigned or reset while such a view may be
+    // shared, does not relocate, and outlives — so is destroyed after — every view
+    // parsed through it. The pointee table is not enough: views read `&owner`.
+    template <class SP>
+    // `owner` is address-taken, never forwarded.
+    // NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
+    Parser(detail::owned_route_key /*key*/, SP&& owner) noexcept
+        requires(std::is_lvalue_reference_v<SP &&> &&
+                 std::same_as<std::remove_cvref_t<SP>,
+                              std::shared_ptr<const fixpp::dict::table_view>>)
+        : hooks_{dict_hooks::for_table_view(detail::checked_owner(owner))},
+          owner_{std::addressof(owner)} {}
+
+    // Redundant with the constraint above (each alone rejects rvalues); kept for
+    // its clearer "deleted function" diagnostic.
+    template <class SP>
+    Parser(detail::owned_route_key /*key*/, SP&&) noexcept
+        requires(!std::is_lvalue_reference_v<SP &&>)
+    = delete;
+
     Parser(Parser const&) = delete;
     Parser& operator=(Parser const&) = delete;
     Parser(Parser&&) = delete;
@@ -687,6 +797,7 @@ public:
     [[clang::lifetimebound]] requires(Mode == access_mode::Index) {
         // Thread the dict_hooks bundle into the MessageView (fixpp#426).
         MessageView<Mode> mv{frame, mr, hooks_};
+        mv.dict_owner_ = owner_;  // fixpp#495: nullptr unless built on the owned route
         if constexpr (Mode == access_mode::Index) {
             if (auto s = mv.offsets().build_status(); !s) {
                 return core::expected_t<MessageView<Mode>>{std::unexpect, s.error()};
@@ -709,6 +820,7 @@ public:
         // dictionary-backed parse — the missed construction site T057 warns
         // about, one API surface over.
         MessageView<Mode> mv{frame, mr, cfg, hooks_};
+        mv.dict_owner_ = owner_;  // fixpp#495: nullptr unless built on the owned route
         if (auto s = mv.offsets().build_status(); !s) {
             return core::expected_t<MessageView<Mode>>{std::unexpect, s.error()};
         }
@@ -720,12 +832,17 @@ public:
     [[clang::lifetimebound]] requires(Mode == access_mode::Iter) {
         // Gate B r8 P-1: thread THIS parser's bundle. Returning `{frame}` here dropped
         // the dictionary this parser was constructed with, silently.
+        // fixpp#495: an Iter view records no owner (MessageView's `dict_owner_`).
         return MessageView<access_mode::Iter>{frame, hooks_};
     }
 
 private : dict_hooks hooks_ {};  // fixpp#426: replaces the separate opaque_dict_/
                                  // classify_fn_/group_member_fn_/group_delim_fn_
                                  // fields.
+    // fixpp#495: the owned route's owner object (§2.2), nullptr on every other route.
+    // Held in both modes so the owned-route constructor compiles for either; only
+    // Index-mode parses store it on a view.
+    std::shared_ptr<const fixpp::dict::table_view> const* owner_ = nullptr;
 };
 
 }  // namespace fixpp::wire

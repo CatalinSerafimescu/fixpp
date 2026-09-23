@@ -1,14 +1,20 @@
 #!/usr/bin/env bash
 # check_dictionary_snapshot_exclusivity.sh — fixpp#215 item 1 (Option C),
-# `.specify/215-dictionary-view.md` §6 seam 7, v0.4.
-#
-# Two singularity claims are load-bearing for Option C's C1 closure and
-# nothing else can pin them (not a static_assert — see the design doc):
+# `.specify/215-dictionary-view.md` §6 seam 7, v0.4; G2 as amended by
+# `.specify/495-493-486-dict-reify-copy.md` §6.4 (fixpp#495, owner ruling R-C).
 #
 #   G1 — `snapshot_key` (the passkey) is minted by exactly ONE production
-#        function: fixpp::dict::make_dictionary_snapshot.
-#   G2 — the aliasing shared_ptr<const table_view> construction happens at
-#        exactly ONE production site: fixpp::dict::shared_dictionary_view.
+#        function: fixpp::dict::make_dictionary_snapshot. Load-bearing for
+#        Option C's C1 closure and not expressible as a static_assert.
+#   G2 — a SPELLING LINT: ZERO matches, tree-wide, of the enumerated
+#        two-argument `shared_ptr<const ... table_view>(` spellings (the
+#        aliasing constructor). The snapshot owns its table in the table's own
+#        control block (fixpp#495 D-4), so no production code forms an alias.
+#        G2 claims nothing about aliasing constructions it does not spell; the
+#        PROPERTY (a handle or clone never keeps the Dictionary alive) is
+#        witnessed behaviourally by the C++ Session twin of the design note's
+#        T-13 and by T-19. tools/test_dictionary_snapshot_exclusivity_gate.sh
+#        seeds each spelling and requires `G2 FAIL`.
 #
 # This is a source gate mirrored by the Tier-1 workflow and recorded manually
 # in the 215 `/speckit-verify` evidence doc; it is NOT wired through the same
@@ -134,8 +140,20 @@ code_hits_only() {
     done
 }
 
+# The scanned root: `--root DIR`, else $FIXPP_GATE_ROOT, else the git toplevel.
+# tools/test_dictionary_snapshot_exclusivity_gate.sh uses the override to run
+# the gate on a seeded temp copy, so the tracked tree is never edited.
 main() {
-    cd "$(git rev-parse --show-toplevel)"
+    local root="${FIXPP_GATE_ROOT-}"
+    if [[ "${1-}" == "--root" ]]; then
+        [ $# -eq 2 ] || { echo "usage: $0 [--root DIR]" >&2; exit 2; }
+        root="$2"
+    elif [ $# -ne 0 ]; then
+        echo "usage: $0 [--root DIR] | --strip-comments <file>" >&2
+        exit 2
+    fi
+    [ -n "$root" ] || root="$(git rev-parse --show-toplevel)"
+    cd "$root"
 
     HDR='include/fixpp/dict/dictionary_snapshot.hpp'
     FACTORY='src/dictionary/dictionary_snapshot.cpp'
@@ -208,30 +226,19 @@ main() {
         *) echo "G1 FAIL: the sole key construction is not in $FACTORY:"; echo "$g1_mint"; exit 1 ;;
     esac
 
-    # ── G2 — SOLE ALIAS-FORMER ────────────────────────────────────────────────
+    # ── G2 — NO ENUMERATED ALIAS SPELLING ─────────────────────────────────────
     # A TWO-ARGUMENT shared_ptr<const table_view> construction IS the aliasing
-    # ctor. Two spellings are matched: `(std::move(...)` and `(<identifier>,`. The
-    # pattern's coverage is the LISTED SPELLINGS ONLY (see the design doc §6 seam
-    # 7 "east const" / "brace-init" / "deduced return" / "type alias" limitation —
-    # a clang-query/AST check would be strictly stronger; this exact-count grep is
-    # the minimum repair, not an exhaustive census).
+    # ctor. Two spellings are matched: `(std::move(...)` and `(<identifier>,`.
+    # Coverage is THOSE SPELLINGS ONLY: east const, brace-init, a deduced return
+    # and a type alias all evade it (see the design notes named in the header).
+    # No comment stripping and no self-exclusion: the self-test assembles its
+    # seeds from fragments so that this file and it stay clean.
     G2='shared_ptr<[[:space:]]*const[^>]*table_view[[:space:]]*>[[:space:]]*\([[:space:]]*(std::move\(|[A-Za-z_][A-Za-z0-9_]*[[:space:]]*,)'
     g2_hits=$(grep -rnE "$G2" src/ include/ bindings/ tools/ tests/ || true)
     g2_all_n=$(n_of "$g2_hits")
-    g2_helper_n=$(in_file "$FACTORY" "$g2_hits")
-    g2_bad_n=$(( g2_all_n - g2_helper_n ))
-    echo "G2 alias-formation sites = $g2_all_n (in $FACTORY: $g2_helper_n, elsewhere: $g2_bad_n)"
-
-    # LIVENESS — the helper's OWN aliasing ctor must match, or the pattern is dead
-    # and the allowlist is filtering an empty set.
-    [ "$g2_all_n" -ge 1 ] || { echo "G2 DEAD: pattern matches nothing, not even the helper"; exit 1; }
-    # ASSERTION (a) — EXACTLY ONE aliasing-ctor expression in the whole tree. An
-    # occurrence count, not a file boundary: a second one inside the helper's own
-    # TU is a second alias-formation site and is caught here.
-    [ "$g2_all_n" -eq 1 ] || { echo "G2 FAIL: $g2_all_n aliasing-ctor expression(s), expected exactly 1:"; echo "$g2_hits"; exit 1; }
-    # ASSERTION (b) — and that one is the helper's.
-    [ "$g2_bad_n" -eq 0 ] || { echo "G2 FAIL: $g2_bad_n hand-rolled alias site(s):"; echo "$g2_hits"; exit 1; }
-    echo "PASS: dictionary_snapshot exclusivity gates (G1 sole minter, G2 sole alias-former)."
+    echo "G2 matches of the enumerated spellings = $g2_all_n"
+    [ "$g2_all_n" -eq 0 ] || { echo "G2 FAIL: $g2_all_n match(es) of an enumerated aliasing-ctor spelling, expected 0:"; echo "$g2_hits"; exit 1; }
+    echo "PASS: dictionary_snapshot exclusivity gates (G1 sole minter, G2 zero enumerated alias spellings)."
 }
 
 if [[ "${1-}" == "--strip-comments" ]]; then

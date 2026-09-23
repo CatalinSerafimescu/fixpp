@@ -157,6 +157,11 @@ public:
     // Non-RED build status (ok, or the wire_* cap/format error hit).
     [[nodiscard]] core::expected_t<void> build_status() const noexcept { return status_; }
 
+    // fixpp#493 (`.specify/495-493-486-dict-reify-copy.md` §4): the caps this table
+    // was built under. Every re-parse of a copy (clone, reify) passes its source's
+    // `config()` so the copy keeps both a raised and a lowered cap.
+    [[nodiscard]] Config config() const noexcept { return cfg_; }
+
     [[nodiscard]] core::expected_t<entry> find(
         std::uint16_t tag) const noexcept;  // first occurrence, O(1)
 

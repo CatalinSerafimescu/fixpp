@@ -31,6 +31,8 @@
 
 ## Decision 4 — Clone/reify propagate membership (clarified 2026-07-09)
 
+> **Superseded in part by `.specify/495-493-486-dict-reify-copy.md`** (fixpp#495, 2026-09-23): on the owned route (every view the shipped `Session` dispatch path hands an application, and every handle's or clone's own view) clone and reify SHARE the source's `table_view` by reference count instead of copying it; a view parsed through a borrowed `Parser{tv}` is still copied (`L-495-1`). The history below stays as written.
+
 **Decision**: `fixpp_msg_clone` and `reify` views carry the source's membership so a clone/reified handle reads groups identically to its dict-backed source (no silent positional-vs-membership divergence). **Both use the SAME mechanism (b)**: copy the source view's membership into an **owned** `table_view` via a new internal `MessageView` membership-copy accessor, then re-frame the clone/reify `MessageView` dict-backed against that owned copy. This is sound for both because at clone/reify time the source is a **live dict-backed** `MessageView` (post-066 the inbound view is dict-backed), and a copied `table_view` is self-contained so it safely outlives the source session/`Dictionary`. There is **no asymmetry** — no inbound-handle dict-threading and no retain-dict-and-rebuild path.
 
 **Mechanism + lifetime** (read-it):
