@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // tests/capi/dict066_clone_membership_copy_oom_test.cpp
 //
+// ⚠️ Superseded in part by `.specify/495-493-486-dict-reify-copy.md` §2.3/§2.4
+// (fixpp#495): the copy site no longer calls MessageView::membership_copy(); a
+// borrowed-route source is copied in place by MessageView::shared_membership()
+// (an owned-route source is shared, not copied). Where the prose below says
+// "membership_copy()", read "the borrowed-route table copy" — the throw it
+// injects is still inside table_view's copy constructor.
+//
 // gate-b/r1 FQ-1 (PR #181 round 1, Finding 1) — OOM hardening witness for
 // MessageView::membership_copy() (include/fixpp/wire/parser.hpp), now NOT
 // noexcept: `fixpp_msg_clone()`'s production caller
@@ -25,15 +32,18 @@
 // feedback_operator_new_witness_breaks_sanitizers) is armed to throw
 // bad_alloc on a specific call number.
 //
-// Calibration: source-verified (`fixpp_msg_clone()`'s full body in src/capi/message_write.cpp), the
-// construction body sits in an INNER try/catch(std::bad_alloc const&), itself inside
-// an OUTER catch(...) that aborts (fixpp#458 D-3b). After the dict-backed branch's `clone->owned_tv_ = h->view->membership_copy();`, exactly ONE
-// further global-new call remains before the inner try block ends (the
-// `std::make_unique<MessageView<Index>>(std::move(*parsed))` inside the
-// `if (parsed)` arm). So membership_copy()'s own K allocations are positions
-// [dict_total-K .. dict_total-1] -- position `dict_total - 1` is therefore
-// ALWAYS the LAST allocation inside membership_copy()'s table_view copy ctor
-// (as long as K>=1, confirmed by the T_dict>T_free sanity check below).
+// Calibration: `fixpp_msg_clone()`'s construction body (src/capi/message_write.cpp)
+// sits in an INNER try/catch(std::bad_alloc const&), itself inside an OUTER
+// catch(...) that aborts (fixpp#458 D-3b). Premise, stated as a condition
+// (fixpp#495, `.specify/495-493-486-dict-reify-copy.md` §10 T-16(b)): a
+// BORROWED-route source makes the dict-backed branch copy the table in place
+// through `MessageView::shared_membership()`, after which exactly ONE further
+// global-new call remains before the inner try block ends — the
+// `std::make_unique<MessageView<Index>>` of the parsed view (the re-parse draws
+// from the clone's pre-seeded arena). So position `dict_total - 1` is the LAST
+// allocation inside the table_view copy constructor (as long as K>=1, confirmed
+// by the T_dict>T_free sanity check below). Re-derive the landing site with
+// `gdb -batch -ex "catch throw" -ex run -ex bt` on this binary.
 #include <gtest/gtest.h>
 
 #include <atomic>

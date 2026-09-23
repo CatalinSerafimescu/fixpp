@@ -1,6 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // tests/dictionary/reify_membership_copy_oom_test.cpp
 //
+// ⚠️ Superseded in part by `.specify/495-493-486-dict-reify-copy.md` §2.3/§2.4
+// (fixpp#495): the copy site no longer calls MessageView::membership_copy(); a
+// borrowed-route source is copied in place by MessageView::shared_membership()
+// (an owned-route source is shared, not copied). Where the prose below says
+// "membership_copy()", read "the borrowed-route table copy" — the throw it
+// injects is still inside table_view's copy constructor.
+//
 // gate-b/r1 FQ-1 (PR #181 round 1, Finding 1) — OOM hardening witness for
 // MessageView::membership_copy() (include/fixpp/wire/parser.hpp), now NOT
 // noexcept: `dict::reify()`'s production caller
@@ -22,15 +29,19 @@
 // Calibration (avoids hardcoding an allocation index, which would be brittle
 // against libstdc++/libc++ container-internals differences): a single
 // unarmed dict-backed reify() call establishes `dict_total` (the total
-// global-new call count for that invocation). Source-verified
-// (`owning_message_handle_from_frame`): after `handle.pimpl_->owned_tv_ =
-// view.membership_copy();` the function does ONLY `return handle;` (a
-// noexcept move, zero allocation) before the try block ends -- so
-// membership_copy()'s own K allocations are the LAST K allocations in the
-// call, i.e. positions [dict_total-K+1 .. dict_total]. Position `dict_total`
-// itself is therefore ALWAYS inside membership_copy()'s table_view copy ctor
-// (as long as K>=1, confirmed by the T_dict>T_free sanity check below).
-// Arming `fail_at = dict_total` injects the OOM precisely into the copy.
+// global-new call count for that invocation), and the armed pass fails its
+// LAST global allocation. Premises, stated as conditions (fixpp#495,
+// `.specify/495-493-486-dict-reify-copy.md` §10 T-16(b)): this source is parsed
+// on the BORROWED route, so the factory copies the table in place through
+// `MessageView::shared_membership()` (one control-block-plus-table allocation,
+// then the table's own containers — the copy's allocations come last); and the
+// factory's post-copy work (the eager re-parse from the handle arena, which also
+// holds the impl since D-1c) fits the chunk the handle arena already acquired,
+// so it adds no global allocation after the copy. Re-derive the landing site
+// with `gdb -batch -ex "catch throw" -ex run -ex bt` on this binary: the throw
+// must sit inside `fixpp::dict::table_view::table_view` (the copy constructor);
+// the prvalue spelling `make_shared<const table_view>(membership_copy())` moves
+// it into the shared_ptr's own allocation instead.
 //
 // Anchors: opus_pr181_1_triage.md Finding 1 / FQ-1; parser.hpp's
 // membership_copy() out-of-line definition; table_view.hpp's "copy may

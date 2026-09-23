@@ -2368,6 +2368,45 @@ using fixpp::test_support::make_oversized_frame_for_clone_test;
 using fixpp::test_support::same_config;
 using fixpp::test_support::same_group_context;
 
+// T-10 (fixpp#495, `.specify/495-493-486-dict-reify-copy.md` §2.4): a clone of an
+// owned-route view SHARES the owner's table, and a clone of that clone shares it
+// too. Mutation: the clone site seats owned_tv_ through arm 2 (a copy) — the
+// address equality goes RED.
+TEST(MessageWrite, CloneOfOwnedRouteViewSharesTheTable) {
+    using fixpp::wire::access_mode;
+
+    auto dict = fixpp::test_support::make_fix44_dictionary();
+    std::shared_ptr<const fixpp::dict::table_view> sp =
+        std::make_shared<const fixpp::dict::table_view>(dict->as_table_view());
+    auto src_buf = make_raw_frame_for_write_test(
+        "35=D\x01"
+        "49=SENDERID\x01");
+    auto fv = fixpp::wire::test::make_frame_view(src_buf);
+    ASSERT_TRUE(fv.has_value());
+
+    std::pmr::monotonic_buffer_resource arena;
+    fixpp::wire::Parser<access_mode::Index> parser{fixpp::wire::detail::owned_route_key{}, sp};
+    auto mv_src = parser.parse(*fv, &arena);
+    ASSERT_TRUE(mv_src.has_value());
+
+    InboundHandleForWrite h;
+    h.msg.view = &(*mv_src);
+    fixpp_msg_t* c1 = nullptr;
+    ASSERT_EQ(fixpp_msg_clone(h.ptr(), &c1), FIXPP_ERR_OK);
+    ASSERT_NE(c1, nullptr);
+    EXPECT_EQ(reinterpret_cast<const fixpp_msg*>(c1)->owned_tv_.get(), sp.get())
+        << "the clone must share the owner's table";
+
+    fixpp_msg_t* c2 = nullptr;
+    ASSERT_EQ(fixpp_msg_clone(c1, &c2), FIXPP_ERR_OK);
+    ASSERT_NE(c2, nullptr);
+    EXPECT_EQ(reinterpret_cast<const fixpp_msg*>(c2)->owned_tv_.get(), sp.get())
+        << "a clone's own view is owned-route: cloning it shares too";
+
+    EXPECT_EQ(fixpp_msg_destroy(c2), FIXPP_ERR_OK);
+    EXPECT_EQ(fixpp_msg_destroy(c1), FIXPP_ERR_OK);
+}
+
 // T-3 (fixpp#493): a dict-backed source parsed under a RAISED entry cap clones —
 // the clone's re-parse inherits the source's Config instead of the default. Asserts
 // the clone reads the marker field, keeps the source's entry count and Config, and
