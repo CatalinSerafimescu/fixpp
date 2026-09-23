@@ -39,7 +39,7 @@ the PR description before merge.
 - When Codex implements (escalation path per `[const §XVI.8]`), the PR review
   for that PR must come from a **separate Codex session**, not the one that
   wrote the code.
-- Neither Sonnet nor Opus auto-invokes Codex; gates are user-driven.
+- No Claude agent auto-invokes Codex; gates are user-driven.
 
 ---
 

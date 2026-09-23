@@ -51,7 +51,7 @@ PRs missing that line, or with a known-red local build, are rejected at review.
 
 ### AI agents: ask before running local builds
 
-Local Conan + CMake + build + sanitizer cycles are resource-heavy (CPU, disk, time). When an AI agent (Sonnet, Opus, Codex) needs to run a local build on the user's machine, it **must surface an `AskUserQuestion` first** stating:
+Local Conan + CMake + build + sanitizer cycles are resource-heavy (CPU, disk, time). When an AI agent (Claude, Codex) needs to run a local build on the user's machine, it **must surface an `AskUserQuestion` first** stating:
 
 - which preset(s) it wants to build,
 - approximate expected runtime,

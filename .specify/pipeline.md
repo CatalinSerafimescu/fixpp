@@ -91,7 +91,7 @@ PHASE 3 — IMPLEMENT
 
 14. /gate-b <branch>                  Codex hostile review of main..HEAD on local branch
                                       → .specify/decisions/<feature>-gateb.md (round 1..N)
-                                      Fix-loop (Sonnet fixer rounds 1-2 → Codex fixer rounds 3-4)
+                                      Fix-loop (Claude fixer rounds 1-2 → Codex fixer rounds 3-4)
                                       converge to SHIP-AS-IS or SHIP-WITH-FIXES + documented waivers
 
 PHASE 4 — PUBLISH + MERGE
@@ -289,6 +289,26 @@ sound, matches memory. Disposition (user-approved 2026-05-17):
   (close-out itself writes `phases/**` and `decisions/**`, which is exactly what
   `refs_external` names, so it can dangle a ref **after** the pre-push pass), and
   the Gate-B scoping question a commit inserted between steps 14 and 15 raises.
+- **[L] APPLIED (user-directed 2026-09-23).** The implementer and Gate B fixer
+  move from Sonnet to the `opus` model alias (always the latest Opus, never a
+  pinned version), and the agent file is renamed
+  `.claude/agents/phase-implementer.md` (`subagent_type=phase-implementer`); the
+  names `phase-implementer-sonnet` in [H], [I] and [J] above mean that file and
+  are left as written, since they record what was decided then. `checklist-auditor`
+  and `spec-analyzer` move to `opus` too. Two mechanisms come with it:
+  (1) the orchestrator never implements — `/speckit-implement` step 5a loses its
+  "MAY implement directly" carve-out, and a parent-root PreToolUse hook
+  (`.claude/scripts/pretooluse-orchestrator-library-edit-guard.sh`) blocks
+  main-session edits to library code in every worktree, with an owner-only
+  override; (2) a comment-claim lint (`.claude/scripts/check-comment-claims.py`,
+  parent root) that flags added comment lines recording a result instead of a
+  condition. The implementer runs it before reporting and the orchestrator
+  re-runs it between phases (step 10) and after every Gate B fixer round
+  (step 14). Constitution v2.1 names roles instead of models (Articles XVI §6,
+  XVII §4–§5, XX §5). Root cause, from a transcript audit: the longest Gate B
+  loops ran with the orchestrator as fixer and no independent judge, and the
+  fix→reintroduce pattern was a claim in a comment rewritten into a new claim,
+  which both models did; a model change alone does not remove that class.
 
 
 No conflicts found on: `/clarify` before `/plan` (§XVI.3), Gate A before

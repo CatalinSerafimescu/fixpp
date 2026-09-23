@@ -14,8 +14,9 @@ metadata:
   #    (read-only gate, requirements.md provenance, checked != complete)
   #    are KEPT — they agree with our exemption.
   # 2. Step 5a was added (between step 5 and step 6) to bind the
-  #    per-phase executor to the `phase-implementer-sonnet` agent
-  #    (`.claude/agents/phase-implementer-sonnet.md` at parent root).
+  #    per-phase executor to the `phase-implementer` agent
+  #    (`.claude/agents/phase-implementer.md` at parent root; renamed from
+  #    `phase-implementer-sonnet` by pipeline.md [L] 2026-09-23).
   #    See pipeline.md [H] (2026-05-22) and
   #    `[[feedback_speckit_subagent_phasing]]`.
   # If spec-kit is re-vendored or regenerated, this header WILL be
@@ -185,11 +186,11 @@ You **MUST** consider the user input before proceeding (if not empty).
    pipeline.md [H] 2026-05-22).
 
    The canonical executor for each phase's implementation work is the
-   `phase-implementer-sonnet` agent at
-   `.claude/agents/phase-implementer-sonnet.md` (parent root). The
-   orchestrator (Opus main session) SHOULD NOT implement task bodies
-   directly — it spawns one `phase-implementer-sonnet` subagent per
-   phase via `Agent(subagent_type="phase-implementer-sonnet", ...)`,
+   `phase-implementer` agent at
+   `.claude/agents/phase-implementer.md` (parent root; `model: opus`). The
+   orchestrator (the main session) MUST NOT implement task bodies
+   (`[const §XVI.6]`) — it spawns one `phase-implementer` subagent per
+   phase via `Agent(subagent_type="phase-implementer", ...)`,
    re-verifies the result per the parent-verification checklist
    (`[[feedback_subagent_phase_verification_two_traps]]`,
    `[[feedback_tracking_pmr_resource_false_pass]]`), and only then
@@ -202,11 +203,11 @@ You **MUST** consider the user input before proceeding (if not empty).
    path(s), and any phase-specific anchors the orchestrator decided
    matter.
 
-   The orchestrator MAY implement task bodies directly only when (a)
-   the agent escalates with a question that requires reading code the
-   orchestrator already has cached, OR (b) a phase is trivially one
-   task with no test gate (rare — Setup/Polish only). Anything else
-   goes through the agent so the persona stays consistent.
+   There is no carve-out for small phases or escalations: when the
+   agent escalates, answer the question and resume the same agent
+   (SendMessage) or spawn a fresh one with the answer in its brief. A
+   parent-root PreToolUse hook blocks main-session edits to library
+   code; only the owner's override file lifts it (pipeline.md [L]).
 
    **Between phases — CodeGraph freshness gate.** After each phase
    agent returns, BEFORE spawning the next phase's agent (or before
@@ -231,6 +232,19 @@ You **MUST** consider the user input before proceeding (if not empty).
       over `sync` per the parent CLAUDE.md rule for structural
       changes — the file-count delta will be larger than `sync`
       tolerates cleanly.
+
+   4. Re-run the comment-claim lint yourself (the agent's report is
+      not the evidence):
+
+      ```bash
+      python3 /home/catalin/Work/Programming/Antreprenoriat/.claude/scripts/check-comment-claims.py \
+        --root <the feature's worktree> --base origin/main
+      ```
+
+      Exit 1 → send the findings back to the agent to DELETE each claim
+      (keep the condition and the re-derivation recipe); read every
+      `SUPPRESSED` line. Exit 2 → the lint did not run; that is not
+      clean.
 
    A stale index between phases silently mislabels impact and
    callers, so the next phase agent's `codegraph_impact` lookups
