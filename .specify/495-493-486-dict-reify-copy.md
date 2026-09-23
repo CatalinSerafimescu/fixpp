@@ -1011,8 +1011,8 @@ own control block, and G2 asserts zero matches of its enumerated spellings."*
   `make_shared` block (same count). Borrowed arm 2 adds no move path.
 
 **Catalogue** (`spec/feature-catalogue.md`): dated notes on CA-009 (clone), the wire rows carrying the
-066 / 458 notes, W-014 (validator), the 215 row (D-4) and the C-ABI dictionary row (D-5); no new rows.
-Rows: `grep -n "066-dict\|#458\|090-capi\|215\|fixpp_dict_load" spec/feature-catalogue.md`.
+066 / 458 notes, CA-010 (group caps), W-001, W-014 (validator), and the dictionary loader rows CA-011 and D-011 (D-5); each note names its witnesses in its row's `Tests` cell.
+D-4 has no catalogue row (B-495-2 carries it); no new rows. Rows: `grep -n "066-dict\|#458\|090-capi\|fixpp_dict_load" spec/feature-catalogue.md`, plus W-001 and W-014.
 
 **Brain:** `brain/components/dictionary.md` — *"The reify handle materialises EAGERLY"* gains the owned
 route and table pin; the ⚠️ residuals line drops `L-458-2`; its `.specify/215-dictionary-view.md`
