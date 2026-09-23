@@ -74,8 +74,10 @@
 #include <fixpp/core/pmr_arena_upstream.hpp>
 #include <fixpp/dict/table_view.hpp>
 #include <fixpp/wire/parser.hpp>
+#include <memory>
 #include <memory_resource>
 #include <string>
+#include <utility>
 #include <string_view>
 
 #include "support/app_message_read_scaffold.hpp"  // fixpp_test_support::make_frame
@@ -147,9 +149,13 @@ bool slice_has_tag(fixpp::wire::group_slice const& s, std::uint16_t tag) {
 // One parse+read pass, mirroring parse_and_dispatch_'s exact arena shape.
 // Returns true iff the frame parsed and the caller-supplied read callback's
 // own correctness assertions (via ADD_FAILURE inside `read`) all held.
+// `owner` null: the BORROWED route (`Parser{tv}`). Non-null: the OWNED route
+// (`Parser{owned_route_key{}, *owner}`), which is what parse_and_dispatch_
+// builds since fixpp#495 (`.specify/495-493-486-dict-reify-copy.md` §2.6, T-15).
 template <class ReadFn>
 bool parse_and_read(fixpp::dict::table_view const& tv, std::vector<std::byte> const& raw,
-                    ReadFn&& read) {
+                    ReadFn&& read,
+                    std::shared_ptr<const fixpp::dict::table_view> const* owner = nullptr) {
     std::array<std::byte, kInboundParseArena> pa_buf{};
     std::pmr::monotonic_buffer_resource pa_mr{pa_buf.data(), pa_buf.size(),
                                               ::fixpp::detail::arena_upstream()};
@@ -162,12 +168,37 @@ bool parse_and_read(fixpp::dict::table_view const& tv, std::vector<std::byte> co
     auto feed_r = framer.feed(std::span<const std::byte>{raw}, carry, std::span{out});
     if (!feed_r.has_value() || feed_r->empty()) return false;
 
+    auto run = [&](Parser<access_mode::Index>& parser) {
+        auto mv_r = parser.parse(out[0], &pa_mr);
+        if (!mv_r.has_value()) return false;
+        read(*mv_r);
+        return true;
+    };
+    if (owner != nullptr) {
+        Parser<access_mode::Index> parser{fixpp::wire::detail::owned_route_key{}, *owner};
+        return run(parser);
+    }
     Parser<access_mode::Index> parser{tv};
-    auto mv_r = parser.parse(out[0], &pa_mr);
-    if (!mv_r.has_value()) return false;
+    return run(parser);
+}
 
-    read(*mv_r);
-    return true;
+// The measured window around one parse_and_read(); returns the global-new delta
+// (0 when the counter is compiled out) and the pass's own result.
+template <class ReadFn>
+std::pair<bool, long> measured(fixpp::dict::table_view const& tv,
+                               std::vector<std::byte> const& raw, ReadFn&& read,
+                               std::shared_ptr<const fixpp::dict::table_view> const* owner) {
+#if !FIXPP_SANITIZER_REPLACES_NEW
+    g_alloc_count.store(0, std::memory_order_relaxed);
+#endif
+    if (alloc_guard_start) alloc_guard_start();
+    bool const ok = parse_and_read(tv, raw, read, owner);
+    if (alloc_guard_end) alloc_guard_end();
+#if !FIXPP_SANITIZER_REPLACES_NEW
+    return {ok, g_alloc_count.load(std::memory_order_relaxed)};
+#else
+    return {ok, 0L};
+#endif
 }
 
 }  // namespace
@@ -208,6 +239,19 @@ TEST(Dict066GroupedReadAllocGuard, TopLevelGroupParseAndReadZeroGlobalHeap) {
     EXPECT_EQ(g_alloc_count.load(std::memory_order_relaxed), 0)
         << "top-level dict-backed group parse+read must not touch the global heap "
            "(FR-004: table_view built once, per-message reads from the stack arena)";
+#endif
+
+    // fixpp#495 T-15: the OWNED route, as parse_and_dispatch_ builds it since
+    // `.specify/495-493-486-dict-reify-copy.md` §2.6. The owner is built outside the
+    // window and outlives every view parsed through it (§3.1).
+    auto const owner = std::make_shared<const fixpp::dict::table_view>(tv);
+    ASSERT_TRUE(parse_and_read(tv, raw, do_read, &owner));  // warm-up
+    auto const [owned_ok, owned_allocs] = measured(tv, raw, do_read, &owner);
+    EXPECT_TRUE(owned_ok);
+#if !FIXPP_SANITIZER_REPLACES_NEW
+    EXPECT_EQ(owned_allocs, 0) << "top-level dict-backed group parse+read on the OWNED route must not touch the global heap";
+#else
+    (void)owned_allocs;
 #endif
 }
 
@@ -277,5 +321,18 @@ TEST(Dict066GroupedReadAllocGuard, NestedGroupParseAndReadZeroGlobalHeap) {
     EXPECT_EQ(g_alloc_count.load(std::memory_order_relaxed), 0)
         << "nested descent through the flipped dict-backed session-inbound path "
            "must not touch the global heap (sub-views draw only from the arena)";
+#endif
+
+    // fixpp#495 T-15: the OWNED route, as parse_and_dispatch_ builds it since
+    // `.specify/495-493-486-dict-reify-copy.md` §2.6. The owner is built outside the
+    // window and outlives every view parsed through it (§3.1).
+    auto const owner = std::make_shared<const fixpp::dict::table_view>(tv);
+    ASSERT_TRUE(parse_and_read(tv, raw, do_read, &owner));  // warm-up
+    auto const [owned_ok, owned_allocs] = measured(tv, raw, do_read, &owner);
+    EXPECT_TRUE(owned_ok);
+#if !FIXPP_SANITIZER_REPLACES_NEW
+    EXPECT_EQ(owned_allocs, 0) << "nested descent on the OWNED route must not touch the global heap";
+#else
+    (void)owned_allocs;
 #endif
 }

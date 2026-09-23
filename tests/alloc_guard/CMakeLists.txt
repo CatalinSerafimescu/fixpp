@@ -225,6 +225,44 @@ fixpp_add_mallocnesia_test(
   TARGET test_dict066_grouped_read_alloc_guard
   LABELS "066;us3;alloc_guard")
 
+# fixpp#495 (`.specify/495-493-486-dict-reify-copy.md` §10 T-14): owned-route
+# dict::reify draws every allocation from the caller's mr. Dual gate: the TU-local
+# operator-new counter (the plain test) plus mallocnesia. The owned cell is the
+# gate; the borrowed cell is its EXPECT_VIOLATION control (the table copy on the
+# global heap), each selected by GTEST_FILTER. Neither name carries
+# `positive_control`: tools/check_mallocnesia_population.py requires exactly one
+# such label member, and alloc_guard_positive_control_mallocnesia is it.
+add_executable(test_reify_owned_alloc_guard test_reify_owned_alloc_guard.cpp)
+target_link_libraries(test_reify_owned_alloc_guard PRIVATE
+  fixpp_dictionary
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(test_reify_owned_alloc_guard PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+)
+target_compile_definitions(test_reify_owned_alloc_guard PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+)
+set_target_properties(test_reify_owned_alloc_guard PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+)
+add_test(NAME reify_owned_alloc_guard COMMAND test_reify_owned_alloc_guard)
+set_tests_properties(reify_owned_alloc_guard PROPERTIES LABELS "495;alloc_guard")
+
+fixpp_add_mallocnesia_test(
+  NAME reify_owned_alloc_guard_mallocnesia
+  TARGET test_reify_owned_alloc_guard
+  LABELS "495;alloc_guard"
+  ENVIRONMENT "GTEST_FILTER=*OwnedRoute*")
+
+fixpp_add_mallocnesia_test(
+  NAME reify_borrowed_alloc_guard_expected_violation_mallocnesia
+  TARGET test_reify_owned_alloc_guard
+  EXPECT_VIOLATION
+  LABELS "495;alloc_guard"
+  ENVIRONMENT "GTEST_FILTER=*BorrowedRoute*")
+
 # ── item 13: recurrence guard — fail if any test/bench source reintroduces a
 # bodied alloc_guard_start/end definition (the local-symbol pattern that silently
 # disables LD_PRELOAD interception and made every gate false-green). Cheap static

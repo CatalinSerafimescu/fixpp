@@ -403,6 +403,7 @@ if(TARGET fixpp_codegen_generate)
     reify_cross_strand_test           # TSan target (LABELS dictionary;tsan) + threads
     reify_membership_identity_test    # label-heterogeneous 066;dictionary;us1
     reify_membership_copy_oom_test    # global-new alloc counting + 066;dictionary;us1
+    reify_shared_table_concurrency_test  # fixpp#495 T-17: threads, TSan target (495;dictionary;tsan)
   )
   foreach(target IN LISTS FIXPP_REIFY_STANDALONE)
     add_executable(dictionary_${target} "${target}.cpp")
@@ -424,6 +425,10 @@ if(TARGET fixpp_codegen_generate)
   # reify_cross_strand_test is a TSan target per [const §IX.2] / AC-R5/AC-T3.
   set_tests_properties(dictionary_reify_cross_strand_test PROPERTIES
     LABELS "dictionary;tsan")
+
+  # fixpp#495 T-17 (`.specify/495-493-486-dict-reify-copy.md` §10): a TSan target.
+  set_tests_properties(dictionary_reify_shared_table_concurrency_test PROPERTIES
+    LABELS "495;dictionary;tsan")
 
   # 066-dict-backed-inbound-parse T008: label override so `ctest -L 066`
   # (and the T021/T022 coverage-index / completeness audit) picks these up.
