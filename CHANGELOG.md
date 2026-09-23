@@ -29,6 +29,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## Constitution v3.0 — PROPOSED 2026-09-23
+
+**Backwards-incompatible.** Article XX §4 major bump. v2.0's `/speckit-implement` step 5a let the
+orchestrator implement task bodies itself on an escalation or for a one-task phase; v3.0 removes both
+exceptions, so a PR that used one conformed under v2.0 and does not under v3.0. This is the
+constitution's version: it is not a C-ABI or library version.
+
+Pending: Codex Gate A, then the owner's sign-off.
+
+### Changed
+
+- **Article XVI §6** — the orchestrator does not implement. The clause defines *implement* (production
+  code, tests, build/CI/configuration and generated files, their regeneration, and merge-conflict
+  resolution in them) and lists what the orchestrator may do. The implementer's model is
+  configuration, not a constitutional term.
+- **Article XVI §7** — the implementer sub-agent applies accepted `/simplify` findings.
+- **Article XVII §4** — a user's `/gate-a` or `/gate-b` authorizes that gate's Codex calls; the
+  §XVI.8 Codex fallback needs the user's confirmation.
+- **Article XVII §5** — accepted findings are applied by the active fixer, never the orchestrator.
+- **Article XX §5** — the example hand-off rule names the implementer, not a model.
+
+---
+
 ## Constitution v2.0 — 2026-09-15
 
 **Backwards-incompatible.** Article XX §4 major bump. Both changes loosen a rule, and both attach

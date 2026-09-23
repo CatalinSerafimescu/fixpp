@@ -203,6 +203,11 @@ You **MUST** consider the user input before proceeding (if not empty).
    path(s), and any phase-specific anchors the orchestrator decided
    matter.
 
+   What counts as implementing, and what the orchestrator may still
+   do, is defined in `[const §XVI.6]`; notably, mutation proofs run
+   in a scratch copy (`git archive HEAD | tar -x -C <scratch>`), never
+   in the feature's worktree.
+
    There is no carve-out for small phases or escalations: when the
    agent escalates, answer the question and resume the same agent
    (SendMessage) or spawn a fresh one with the answer in its brief. A

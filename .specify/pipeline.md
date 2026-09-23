@@ -69,8 +69,9 @@ PHASE 3 — IMPLEMENT
 10. /speckit-implement                runs tasks, marks [X] (NOT evidence-based — see step 12)
 
 11. /simplify                         3 specialized Opus review agents (reuse / quality /
-                                      efficiency) → Opus triages: fix genuine in-scope
-                                      simplifications + any real Gate-B-relevant defect;
+                                      efficiency) → orchestrator triages; phase-implementer
+                                      fixes genuine in-scope simplifications + any real
+                                      Gate-B-relevant defect;
                                       defer behavioral/perf redesigns + ambiguous items as
                                       tracked follow-ups in the verify decision doc
                                       [const §XVI.7 — before verify, NOT merely before PR]
@@ -304,11 +305,13 @@ sound, matches memory. Disposition (user-approved 2026-05-17):
   parent root) that flags added comment lines recording a result instead of a
   condition. The implementer runs it before reporting and the orchestrator
   re-runs it between phases (step 10) and after every Gate B fixer round
-  (step 14). Constitution v2.1 names roles instead of models (Articles XVI §6,
-  XVII §4–§5, XX §5). Root cause, from a transcript audit: the longest Gate B
-  loops ran with the orchestrator as fixer and no independent judge, and the
-  fix→reintroduce pattern was a claim in a comment rewritten into a new claim,
-  which both models did; a model change alone does not remove that class.
+  (step 14). Constitution v3.0 (MAJOR) defines what the orchestrator may and may
+  not do (Article XVI §6: mutation proofs in a scratch copy, merge conflicts and
+  codegen regeneration to the implementer) and names roles instead of models
+  (Articles XVI §7, XVII §4–§5, XX §5). Rationale: the Gate B records of PR #258
+  (orchestrator-fixed rounds 3-8, no triage) and PR #453 (orchestrator-fixed
+  throughout) in the research repository's decisions/speckit/, and PR #469's,
+  where a fixer rewrote a queued comment-claim deletion into a new claim.
 
 
 No conflicts found on: `/clarify` before `/plan` (§XVI.3), Gate A before
