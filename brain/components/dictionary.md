@@ -11,6 +11,7 @@ refs:
   - include/fixpp/dict/reify.hpp
   - .specify/2c-codegen.md
   - .specify/215-dictionary-view.md
+  - .specify/495-493-486-dict-reify-copy.md
   - .specify/456-table-view-seal.md
   - .specify/447-458-452-capi-refusals.md
   - spec/behaviors-and-limitations.md
@@ -43,7 +44,11 @@ A real subsystem, not a thin layer: **two independent loaders** — `xml_loader.
 XML) and `orchestra_loader.cpp` (FIX Orchestra) — plus `reify.cpp`, `field_traits.cpp`,
 `version_registry.cpp`, `version_profile.cpp`, `dictionary_snapshot.cpp` and a
 `reify_dispatch_bridge`. **Two owning design docs**: `2c-codegen.md` (header layout, multi-version
-coexistence, dialect overlay binding) and `215-dictionary-view.md`.
+coexistence, dialect overlay binding) and `215-dictionary-view.md`. ⚠️ 215's alias design — §3's
+`shared_dictionary_view` forming an aliasing pointer, §5b's "third owner of the snapshot's control
+block", §6 seam 7's G2 count of one — is **superseded in part** by
+`.specify/495-493-486-dict-reify-copy.md` §6 (D-4): the snapshot owns its table in the table's own
+control block and G2 asserts zero matches. The passkey and the provenance check stand.
 
 ⚠️ **Counts and file lists rot.** Derive the current surface from the graph index; the point above is
 the *shape* — two loader front-ends converging on one dictionary representation, with codegen on top.
@@ -246,10 +251,17 @@ direct C++ caller. The C-ABI twin is `fixpp_msg_clone`; see [`c-api.md`](./c-api
   - **One pre-existing row still went past +5%**, from code *placement*: the function's instructions were identical and its alignment moved.
   - **Rejected:** forcing alignment or moving the function to a separate file to recover it. Either would tune the code to one benchmark and move the layout luck elsewhere.
   - `[const §VIII.2]` makes accepting it a non-author decision. The figures and procedure are in the 090 verify record's *Gate B G-1* section.
-- ⚠️ **Open residuals:** `L-458-2` (fixpp#493). The re-parse uses the DEFAULT offset-entry cap, so a
-  source accepted under a raised cap cannot be cloned or reified. `L-458-1` covers a dict-backed
-  build that under-indexes near the probe cap while reporting success. Check the live B&L file
-  before treating either as open.
+- **fixpp#495 / #493 (`.specify/495-493-486-dict-reify-copy.md`):** the factory no longer
+  deep-copies the membership table for a view parsed on `Parser`'s **owned route** (every view the
+  `Session` hands an application, and every handle's own view); the handle holds one more reference
+  to that table, and pins the table only — never the `Dictionary` (D-4). The handle's impl comes
+  from `mr` (D-1c). Every copy re-parses under its source's `OffsetTable::Config` (#493). Rejected:
+  a public owned route (R-A keeps it `detail`), a `shared_ptr` by value on every view (an atomic
+  pair per inbound message), and the owner token inside `dict_hooks` (size-pinned `entry_context`).
+  A view parsed through a borrowed `Parser{tv}` still copies (`L-495-1`).
+- ⚠️ **Open residuals:** `L-458-1` covers a dict-backed build that under-indexes near the probe cap
+  while reporting success; `L-495-1` the borrowed-route copy. Check the live B&L file before
+  treating either as open.
 
 > ⚠️ **Before you write "immutable" about a `table_view`, read that banner.** #456 took three Gate B
 > rounds and found **zero** code defects across all three; every finding was prose claiming more than

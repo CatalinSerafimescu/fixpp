@@ -1,5 +1,11 @@
 # #215 item 1 — the shape of `SessionConfig::dictionary_view`
 
+> ⚠️ **Superseded in part (2026-09-23).** The aliasing design (§3's `shared_dictionary_view`, §5b's
+> "third owner of the snapshot's control block", §6 seam 7's G2) is superseded by
+> `.specify/495-493-486-dict-reify-copy.md` §6 (D-4): the snapshot owns its table in its own control
+> block, and G2 asserts zero matches of its enumerated spellings. The passkey, the pairing and the
+> provenance check stand as written below.
+
 > **Status: v0.4, 2026-08-13.** Supersedes v0.3. **Gate A converged at round 3** — the round-3 Opus
 > adversarial review returned `P1 = 0, P2 = 0, P3 = 5`, verdict **CONVERGE** (*"do not rewrite, and
 > do not send this to a ground-up redesign"*). v0.4 applies the **five approved mechanical

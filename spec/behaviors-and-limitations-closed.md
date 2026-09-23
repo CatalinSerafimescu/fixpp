@@ -272,3 +272,12 @@ All in `tests/session/test_fixt_logon_establishment.cpp`.
   **L-419-2 — a stored frame's tag, if it exceeds 65535 or carries a leading zero, can alias to a different tag (including 52/43/10) when replayed.** `build_replay_frame`'s tag scanner accumulates an unbounded `uint32_t` and the wire writer truncates to `uint16_t`; `send_impl`'s own scanner (T008) does not reject an out-of-range or leading-zero tag before it is stored. Pre-existing since 013; not introduced or fixed by #419 — #419's first-`52`-wins pre-scan does fix the half of this where a *stored* `122` used to be poisoned by a later-occurring aliased `52`. → **fixpp#421**.
 
   </details>
+
+<!-- L-458-2 — closed: RESOLVED 2026-09-23 by fixpp#493 (copies re-parse under the source's caps) -->
+- **L-458-2 — a source parsed under a RAISED `OffsetTable` entry cap could not be cloned or reified — RESOLVED 2026-09-23 by fixpp#493.** Fixed: see `B-493-1` in the live file (`spec/behaviors-and-limitations.md`, `## fixpp#495 / #493 / #486`).
+
+  <details><summary>Original row as it stood before resolution (fixpp#458)</summary>
+
+  **L-458-2 — a source parsed under a RAISED `OffsetTable` entry cap cannot be cloned or reified: the copy re-parses under the DEFAULT cap and refuses.** `fixpp_msg_clone` and `fixpp::dict::detail::owning_message_handle_from_frame` both re-parse the copied frame with the two-argument `Parser::parse`, which applies the default `max_offset_entries`, so a source a C++ caller accepted through the three-argument overload at a raised cap can fail the re-parse for a reason the copy itself introduced, and B-458-1 / B-458-2 then refuse with the wire error rather than return a usable copy. **C consumers cannot reach this**: nothing in the session layer or the C ABI raises the cap, so every C-ABI clone source comes from a default-cap parse (re-derive: `grep -rn "max_offset_entries" src include`). Re-parsing under the source's own caps would make these copies succeed — **fixpp#493**. *(090-capi-refusals `/simplify` altitude finding; owner decision 2026-09-22: recorded, not fixed.)*
+
+  </details>

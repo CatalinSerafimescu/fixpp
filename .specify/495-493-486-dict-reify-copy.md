@@ -537,6 +537,8 @@ deduced return and type aliases. After R-C:
   even as a one-argument move: G2 cannot tell it from the alias. The self-test assembles its seed text
   from fragments at run time, **or** G2 gains a `SELF` / `SELF_TEST` exclusion mirroring G1's; the
   implementer picks one and records which.
+  **Recorded at implementation:** fragments — the self-test assembles both seeds at run time; G2 has
+  no `SELF` / `SELF_TEST` exclusion.
 - **215 v0.4's "required helper calls" census does not exist in the shipped script** (PR #262
   replaced it with behavioural pins; `grep -n "shared_dictionary_view" tools/*.sh` finds only a
   comment). Those pins are amended by T-19.
@@ -1049,15 +1051,24 @@ obeys §6.4's spelling rule.
 Builds are owner-approved before they run (`[const §XVII.7]`); check `df -h /mnt/e` first.
 
 1. **`linux-clang-debug`, targeted, by label (`[const §VII.8]`: `ctest -L`, never `-R`).** The cells
-   land in these ctest buckets: `dictionary_reify_tests` (T-2, T-4 twin, T-5, T-9, T-16; label
-   `dictionary`), `dictionary_pure_tests` (T-19(a); `dictionary`), `dictionary_reify_membership_copy_oom_test`
-   (T-16(b); `066`), `wire_pure_tests` (T-1, T-7, T-8; `wire`), `capi_message_write` (T-3, T-4, T-6,
-   T-10; `capi`), `capi_dict066_clone_membership_copy_oom` (T-16(b); `066`), `capi_pure_tests`
-   (T-19(c), T-21; `capi`), `session_table_view_reuse` (T-19(b),(d); `session`),
-   `dict066_grouped_read_alloc_guard` (T-15; `alloc_guard`), and the new standalone binaries
-   (T-11, T-13, T-14, T-17, T-20), each labelled `495`. Run
-   `ctest -L '495|dictionary|capi|session|wire|alloc_guard|066'`. A bucket's final name and label are
-   re-derived from `ctest --show-only=json-v1` after registration.
+   land in these ctest buckets, as registered at implementation (re-derive with
+   `ctest --show-only=json-v1`):
+   - existing grouped buckets: `dictionary_reify_tests` (T-2, T-4 twin, T-5 reify arms, T-9, T-16(a);
+     label `dictionary`), `dictionary_pure_tests` (T-19(a); `dictionary`), `wire_dict_tests` (T-7,
+     T-8; `075;wire`), `wire_pure_tests` (T-1; `wire`), `capi_message_write` (T-3, T-4, T-5 clone
+     arms, T-6, T-10; `capi`), `capi_pure_tests` (T-19(c), T-21; `capi`), `session_table_view_reuse`
+     (T-19(b),(d); `session`), `dict066_grouped_read_alloc_guard` (T-15; `alloc_guard`); the T-16(b)
+     standalones `dictionary_reify_membership_copy_oom_test` and
+     `capi_dict066_clone_membership_copy_oom` (`066`);
+   - new standalone binaries, each labelled `495`: `capi_dict495_pinned_table_lifetime` (T-11;
+     `495;capi;tsan` — in `tests/capi/` because it clones through the C ABI),
+     `session_reify_shared_dispatch` (T-13 C++; `495;session`), `capi_dict495_clone_shared_table`
+     (T-13 C; `495;capi`), `reify_owned_alloc_guard` and its two mallocnesia entries (T-14;
+     `495;alloc_guard`), `dictionary_reify_shared_table_concurrency_test` (T-17;
+     `495;dictionary;tsan`), `capi_dict495_loader_default_resource` (T-20; `495;capi`);
+   - T-18 is the unlabelled `dictionary_snapshot_exclusivity_gate` ctest (it runs
+     `tools/test_dictionary_snapshot_exclusivity_gate.sh`), also run directly in step 7.
+   Run `ctest -L '495|dictionary|capi|session|wire|alloc_guard|066'`.
 2. **Mallocnesia, point 1** (owner): after implementation, before `/simplify` and the verify record,
    on the Linux non-sanitizer preset (`build/<preset>/lib/libmallocnesia.so`):
    - `python3 tools/check_mallocnesia_population.py --build-dir build/<preset> --min-gates 20`

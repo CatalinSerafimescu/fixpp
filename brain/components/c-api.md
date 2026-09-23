@@ -12,6 +12,7 @@ refs:
   - src/capi/config.cpp
   - .specify/2i-capi.md
   - .specify/447-458-452-capi-refusals.md
+  - .specify/495-493-486-dict-reify-copy.md
   - specs/090-capi-refusals/spec.md
   - spec/behaviors-and-limitations.md
   - tools/check_layers.py
@@ -127,6 +128,21 @@ What each refusal is, per symbol, is in `include/fix/c_api/message.h` / `session
 
 All three changed a call that used to succeed, so under `[const §X.7]` they are BREAKING, as with
 1.6. The C++ track (the reify factory, `Session::open`) moves with them but is not ABI.
+
+⚠️ **Superseded in part (fixpp#495/#493):** `fixpp_msg_clone` of a `Session`-dispatched view (and of
+a clone) now SHARES the source's membership table instead of copying it, and re-parses under the
+source's `OffsetTable::Config`, so the raised-cap refusal described above no longer occurs for a
+source whose own build succeeded (`L-458-2` resolved). See `.specify/495-493-486-dict-reify-copy.md`.
+
+## C-ABI 1.8: the dictionary loader stops using the host's default resource (fixpp#495 D-5)
+
+`fixpp_dict_load_from_xml` (`src/capi/dictionary.cpp`) allocates the Dictionary from
+`std::pmr::new_delete_resource()`, not the default resource installed at load. Why: a C host may
+replace, destroy or never make thread-safe the default resource while a dictionary it loaded is still
+alive — held for the process lifetime by a retained session shell, or destroyed on another thread.
+BREAKING under `[const §X.7]` because `dict.h` documents the resource and a host with a counting
+default resource observes the difference (`B-495-3`). Rejected: leaving it and documenting the hazard;
+it was closed together with D-4 (owner ruling R-D). The library version is not bumped (R-F).
 
 ## ⚠️ What the ABI gate actually checks — and what it does not
 
