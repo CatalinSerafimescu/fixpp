@@ -61,8 +61,9 @@ namespace {
 // validated frame span deep-copied into the caller mr, plus an EAGERLY
 // materialised MessageView cache (fixpp#458 / 090-capi-refusals D-4 — moved
 // out of view()'s former lazy re-frame; see
-// detail::owning_message_handle_from_frame below). Move-only via the heap
-// pimpl pointer (moving the pointer moves bytes_ + view_cache_ wholesale).
+// detail::owning_message_handle_from_frame below). Move-only through the raw
+// pimpl pointer: moving the pointer transfers the impl without relocating it
+// (the impl lives in the factory's `mr`, fixpp#495 D-1c).
 struct owning_message_handle::impl {
     resolved_message_version version{.k = resolved_message_version::kind::session_admin,
                                      .session = session_version::Unknown,
