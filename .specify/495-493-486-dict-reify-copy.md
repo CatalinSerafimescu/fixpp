@@ -1,6 +1,8 @@
 # #495 / #493 / #486 — a shared reify table, copies that keep the source's caps, and an honest validator `noexcept`
 
-> **Status: v0.3 — Gate A round 2 applied, round 3 pending.**
+> **Status: v0.4 — Gate A CLOSED at round 3 by owner-approved amendment (2026-09-23).** Rounds
+> (P1/P2/P3): R1 Codex 3/4/3, Opus 1/5/8; R2 Codex 0/5/4, Opus 0/4/11; R3 Codex 0/0/2, Opus 0/1/4 →
+> amended per owner (no re-review).
 >
 > Batch branch `fix/495-493-486-dict-reify-copy`, cut from `origin/main` `3f200360`. This note is the
 > design authority for all three issues and **replaces a Spec-Kit bundle**. It triggers Gate A under
@@ -24,6 +26,10 @@
 >   `L-495-2`. → §6.
 > - **R-C** — G2 flips from "exactly one" to "zero matches". → §6.4.
 > - **R-D** — the C loader uses `new_delete_resource()`; C-ABI MINOR 7 → 8, BREAKING. → §7.
+> - **Q-6 (2026-09-23)** — NO: `fixpp_engine_destroy` does not release retained session shells'
+>   `dict_` / `tv_` in this batch; the C-route text narrows instead (§3.4, T-13, B-495-1). The
+>   retained-shell cost is filed separately as fixpp#501.
+> - **Q-7 (2026-09-23)** — Gate A closes after round 3 by "amend, no re-review" (Opus option (a)).
 > - **Rejected by the owner:** (b) refusing reify/clone on the borrowed route; (c) amending NFR-003-3
 >   only; v0.1's O-5 (keep the alias, document `L-495-2`).
 >
@@ -43,7 +49,7 @@
 | fixpp#493 | Clone and the reify factory re-parse under the **default** caps (`L-458-2`) | D-2: inherit the source's `Config` at every re-parse site |
 | fixpp#486 | `dictionary_driven_validator`'s `noexcept` constructor moves a `table_view`; on MSVC that allocates, so OOM terminates | D-3: conditional `noexcept` |
 | ride-along | Sharing through the snapshot's alias would pin the `Dictionary` and its load resource | D-4 |
-| ride-along | An outbound C `fixpp_msg` pins the `Dictionary`, which deallocates into the host's default resource at load | D-5 |
+| ride-along | A C `Dictionary`'s storage lives in the host's default resource at load: one never attached to a session deallocates into it, and a session-attached one keeps live storage there that the host may tear down (an outbound `fixpp_msg::dict_` cannot drop the last reference while the session shell holds it) | D-5 |
 
 One note, because the three issues edit the same statements: #493's two dict-backed sites are the
 two #495 rewrites, and D-4/D-5 exist because #495's sharing changes what a handle pins.
@@ -74,7 +80,7 @@ two #495 rewrites, and D-4/D-5 exist because #495's sharing changes what a handl
 | C-2 | The owned route "restores no allocation outside `mr`" | `owning_message_handle_from_frame` begins with a global `new owning_message_handle::impl{mr}` on every route | Sharing alone cannot meet the clause; D-1c (§2.5) |
 | C-3 | `static_assert(is_nothrow_constructible_v<V, table_view&&> == is_nothrow_move_constructible_v<table_view>)` pins #486 | The trait also counts the caller-side move into the by-value parameter, so the equality holds on the unfixed tree on every toolchain | §5 isolates the constructor's own specification |
 | C-4 | A handle pins "the shared table" | For the C ABI and any C++ `Session` given `SessionConfig::dict_snapshot`, `inbound_tv_` aliases into a `dictionary_snapshot` whose `source_` holds the `Dictionary` | D-4 (§6) |
-| C-5 | Pinning only extends a lifetime | A `Dictionary` deallocates into its **load** resource on whatever thread drops it last | D-4 removes this for handles and clones; D-5 for outbound C handles |
+| C-5 | Pinning only extends a lifetime | A `Dictionary` deallocates into its **load** resource on whatever thread drops it last | D-4 removes this for handles and clones; D-5 for C dictionaries — one never attached to a session, or storage in a host resource the host tears down (an outbound `fixpp_msg::dict_` cannot drop the last reference while the session shell holds it) |
 
 ---
 
@@ -341,11 +347,22 @@ A `shared_ptr`'s pointee never relocates, and owner objects are not reassigned w
 | Borrowed `Parser{tv}` | none | its own deep copy (unchanged) |
 
 - The pinned table is self-contained (§6.1), so handles and clones carry no load-resource obligation.
-  The `Dictionary` dies when the application's and the session's own references go, as on
-  `origin/main`.
-- One object outside this change still pins the `Dictionary`: an **outbound** C `fixpp_msg`, through
-  `fixpp_msg::dict_` (copied by `fixpp_msg_create_outbound`). D-5 makes its load resource immortal
-  and thread-safe.
+  On the **C++** route the `Dictionary` dies when the application's and the session's own references
+  go, as on `origin/main` (T-13 C++ twin).
+- On the **C ABI** the session shell holds the `Dictionary` for the **process lifetime**:
+  `fixpp_session_open` sets `fixpp_session::dict_` (and `tv_`) and nothing resets them, and
+  `fixpp_engine_destroy` retains its session shells in the dead-shells registry until the process
+  exits (closed `L-050-z`, `spec/behaviors-and-limitations-closed.md`). Recipe:
+  `grep -n "dict_ = \|dict_\.reset" src/capi/session.cpp src/capi/engine.cpp` (positive control: the
+  same grep over `src/capi/message_write.cpp` prints the outbound assignment and reset). This is
+  pre-existing and independent of handles, so "a clone never keeps the `Dictionary` alive" is **moot**
+  on the C route, not witnessed; the C route's no-alias property rests on `fixpp_session_open` going
+  through `shared_dictionary_view` (T-11, T-19). Owner ruling Q-6: not changed here; the retained-shell
+  cost is filed separately as fixpp#501.
+- D-5 closes the two load-resource paths that remain (§7.1): a `fixpp_dict_t` never attached to a
+  session, destroyed into its load-time default resource; and a session-attached `Dictionary` whose
+  live storage sits for the process lifetime in a host resource the host may tear down. An outbound
+  `fixpp_msg::dict_` never drops the last reference while the session shell holds one.
 - **Memory per handle:** before, one full table copy on the global heap; after, on the owned route,
   one refcount. A session closed while handles live keeps its table alive until the last handle dies
   — the pin O-1 accepted.
@@ -495,8 +512,9 @@ identifier followed by a comma. The script's own comment concedes it misses east
 deduced return and type aliases. After R-C:
 - **Assertion `g2_all_n -eq 0`, log line `G2 matches of the enumerated spellings = 0`.** It claims
   nothing about aliasing constructions in general; the **property** — a handle or clone never keeps
-  the `Dictionary` alive — is witnessed behaviourally on the shipped routes by T-13's `weak_ptr`
-  arms and on the helper by T-19. G2 is a cheap early tripwire for the spellings it lists.
+  the `Dictionary` alive — is witnessed behaviourally on the C++ shipped route by T-13's `weak_ptr`
+  arm (moot on the C route, where the session shell pins the `Dictionary`, §3.4) and on the helper
+  by T-19. G2 is a cheap early tripwire for the spellings it lists.
 - **Scope: tree-wide** (`src/ include/ bindings/ tools/ tests/`), decided: it costs nothing today,
   scratch-copy mutants are never committed, and a test needing an alias would need an allowlist.
 - The `G2 DEAD` liveness line (`-ge 1`) is deleted (the flipped tree fails it by design); T-18's
@@ -520,10 +538,13 @@ deduced return and type aliases. After R-C:
 
 - `fixpp_dict_load_from_xml` (`src/capi/dictionary.cpp`) calls
   `load_any(path, std::pmr::new_delete_resource())` instead of `get_default_resource()`.
-- **Why.** An outbound `fixpp_msg` copies the session's `Dictionary` into `fixpp_msg::dict_`
-  (`grep -n "dict_ = " src/capi/*.cpp`), so its destruction can drop the last reference on any thread,
-  and `~Dictionary` then deallocates into whatever default resource the host had installed at load —
-  possibly dead, possibly not thread-safe. `new_delete_resource()` is immortal and thread-safe.
+- **Why.** A C `Dictionary`'s storage lives in whatever default resource the host had installed at
+  load — possibly since replaced, destroyed, or not thread-safe. Two paths reach it: (1) a
+  `fixpp_dict_t` never attached to a session is destroyed, and `~Dictionary` deallocates into that
+  resource; (2) a session-attached `Dictionary`, held for the process lifetime by the retained session
+  shell (§3.4), keeps its **live** storage in a host resource the host may tear down, so any later read
+  is a use-after-free. (An outbound `fixpp_msg::dict_` cannot drop the last reference: the session
+  shell outlives it.) `new_delete_resource()` is immortal and thread-safe, closing both.
 - **Scope of the claim:** this closes the hazard for the **dictionary loader** only. Other
   `get_default_resource()` captures (e.g. `EngineConfig::default_session_resource` /
   `default_message_resource`, evaluated at construction) are outside this note; re-derive the
@@ -672,8 +693,13 @@ failing to compile (record the error). Mutations run in a **scratch copy**, neve
   (`grep -rn WIRE_LIMIT_EXCEEDED tests/capi`: besides T-3, only translate-table and read-path hits).
   Source: the 4100-field frame through the raw dict-backed `MessageView` constructor at the default
   cap, so its own build failed (the lever `…MalformedFieldYieldsWireInvalidFrame` uses). Asserts the
-  exact code, `clone_out == NULL`, unchanged source. Mutation: map the re-parse error through a
-  constant instead of `translate()`.
+  exact code, `clone_out == NULL`, unchanged source. What only T-6 witnesses: after #493 a clone's
+  re-parse still refuses under the source's own (default) caps. Mutation (turns T-6 RED, the clone
+  succeeding with `FIXPP_ERR_OK`): the clone re-parses with a `Config` other than the source's, e.g. a
+  raised `max_offset_entries`. Mapping the error through the constant `FIXPP_ERR_WIRE_LIMIT_EXCEEDED`
+  instead of `translate()` is an **equivalent mutant** for T-6; the `translate()` delegation is
+  witnessed by `MessageWrite.CloneDictBackedReparseMalformedFieldYieldsWireInvalidFrame`, which
+  expects `FIXPP_ERR_WIRE_INVALID_FRAME` and goes RED under that constant.
 
 ### #495
 - **T-7 — constructor constraints**, `static_assert`s in a wire test TU. With
@@ -685,7 +711,7 @@ failing to compile (record the error). Mutations run in a **scratch copy**, neve
   - drop the `is_lvalue_reference_v` conjunct **and** the deleted overload → the `S&&` and
     `S const&&` rows;
   - parameter `SP&`, constraint reduced to `same_as`, no deleted overload → the `S const&&` row.
-  
+
   Deleting only the overload, or only the conjunct, is an **equivalent mutant** (each alone suffices)
   and is not listed as a witness.
 - **T-8 — `shared_membership()` arms** (`MessageViewSharedMembership.*`, through the accessor):
@@ -722,17 +748,14 @@ failing to compile (record the error). Mutations run in a **scratch copy**, neve
     test holds — each `SessionConfig` copy, the snapshot, the `Dictionary`, and
     `EngineConfig::dictionaries` if an `Engine` is used (it pins the `Dictionary`) — and destroy the
     Session/Engine. Assert `weak.expired()` while both handles live, then read a group from each.
-  - **C twin** (engine loopback). Load via `fixpp_dict_load_from_xml`; capture the `weak_ptr` from
-    `struct fixpp_dict::dict` (`src/capi/capi_internal.hpp`). The recv callback clones two inbound
-    handles; compare their `owned_tv_`. Then destroy the engine, every session config, and the test's
-    `fixpp_dict_t`, creating **no** outbound message (its `dict_` pins the `Dictionary`, §3.4). Assert
-    `weak.expired()` while both clones live, then read a group from each under ASan. Retained dead
-    shells must release their `shared_ptr` members before retention
-    (`grep -n "dead_next\|retain" src/capi/*.cpp`; `fixpp_dict_destroy` does `dict.reset()`); a
-    not-expired reading on the fixed tree from a retained shell is a **finding** in that destroy, not
-    a test defect.
-  - Mutations: revert `pd_parser` to `{*inbound_tv_}` (address equality RED); the T-11 alias mutant
-    (`weak.expired()` RED in both twins).
+  - **C twin** (engine loopback). Load via `fixpp_dict_load_from_xml`. The recv callback clones two
+    inbound handles; assert their `owned_tv_` compare equal and equal `sess->tv_` (sharing). Then
+    destroy the engine, every session config, and the test's `fixpp_dict_t`, and read a group from
+    each clone under ASan. **No `weak.expired()` assertion:** on the C ABI the retained session shell
+    holds the `Dictionary` for the process lifetime (§3.4, owner ruling Q-6), so expiry is
+    unsatisfiable on the fixed tree.
+  - Mutations: revert `pd_parser` to `{*inbound_tv_}` (address equality RED in both twins); the T-11
+    alias mutant (`weak.expired()` RED in the C++ twin).
 - **T-14 — the owned route performs no global-heap allocation.**
   - New binary `tests/alloc_guard/test_reify_owned_alloc_guard.cpp`, dual gate per
     `test_dict066_grouped_read_alloc_guard.cpp` (TU-local `operator new` counter compiled out under
@@ -787,8 +810,16 @@ failing to compile (record the error). Mutations run in a **scratch copy**, neve
   - **(b) Global-new cells.** `reify_membership_copy_oom_test.cpp` arms `fail_at = t_dict` (premise:
     the copy's K allocations are the last K); `dict066_clone_membership_copy_oom_test.cpp` arms
     `dict_total - 1` (premise: exactly one further global allocation, the `make_unique<MessageView>`).
-    Arm 2's in-place spelling keeps both premises. Witness (libstdc++): a `gdb` backtrace at each
-    armed ordinal lands inside `table_view`'s copy constructor. Mutation: the prvalue spelling
+    Arm 2's in-place spelling keeps both premises **for arm 2**, but the `reify_membership_copy_oom_test`
+    calibration can also move because of **D-1c**: the impl now sits in the handle arena's first
+    block (a default-constructed `monotonic_buffer_resource` over the counted global heap), so the
+    re-parse after the copy may force a chunk refill — a counted global `new` after the copy, landing
+    `fail_at = t_dict` in the re-parse. Second premise, stated: the handle arena's post-copy
+    allocations fit the chunk already acquired; recalibrate at implementation if the witness below
+    shows otherwise. That test's header derivation (the function does only `return handle;` after the
+    copy) is stale since #458 D-4 moved the eager re-parse into the factory; fixed at implementation.
+    Witness (libstdc++): a `gdb` backtrace at each armed ordinal lands inside `table_view`'s copy
+    constructor. Mutation: the prvalue spelling
     `make_shared<const table_view>(membership_copy())` — the ordinal lands in `__allocate_shared`.
   - `FIXPP_SKIP_ON_MSVC_DEBUG_ARENA` still applies on MSVC debug throughout.
 - **T-17 — concurrent readers of one shared table** (TSan). Two handles reified over the same `sp`
@@ -892,8 +923,10 @@ own control block, and G2 asserts zero matches of its enumerated spellings."*
 
 **B&L** (`spec/behaviors-and-limitations.md`), new section; each row names its witness:
 - **`B-495-1`** — on the shipped dispatch path, `dict::reify` and `fixpp_msg_clone` share the source's
-  table by reference count; a live handle or clone keeps that table alive, never the `Dictionary`.
-  *Witness: T-9, T-10, T-13.*
+  table by reference count; a live handle or clone keeps that table alive, never the `Dictionary`
+  (C++ route). On the C ABI the session shell holds the `Dictionary` for the process lifetime
+  (pre-existing; cost filed separately as fixpp#501), so there only the sharing is claimed.
+  *Witness: T-9, T-10, T-13 (C++ twin: sharing + expiry; C twin: sharing).*
 - **`L-495-1`** — a source parsed through a borrowed `Parser{tv}` still deep-copies the table per
   handle, above NFR-003-3's ceiling and scoped out of it. *Witness: T-12; §11 borrowed rows.*
 - **`B-495-2`** (D-4) — a `dictionary_snapshot`'s table outlives the snapshot while a view of it is
@@ -1036,3 +1069,4 @@ supersedes; `.specify/456-table-view-seal.md`'s no-assignment rule; `.specify/ap
 
 - Round 1 applied 2026-09-23: Codex P1=3 P2=4 P3=3; Opus post-judging P1=1 P2=5 P3=8; rewrite addresses root causes 1-4 + owner rulings R-A..R-D (Fable consult b13-reify-handle-pins-dictionary-resource). Reviews: `research/G19-fix-fpml-iso20022/research/reviews/codex_495_493_486_1_dict-reify-copy_review.md`, `research/G19-fix-fpml-iso20022/research/reviews/opus_495_493_486_1_dict-reify-copy_triage.md` (parent repo).
 - Round 2 applied 2026-09-23: Codex P1=0 P2=5 P3=4; Opus post-judging P1=0 P2=4 P3=11; rewrite addresses root causes A-D + P3s + consolidation. Reviews: `research/G19-fix-fpml-iso20022/research/reviews/codex_495_493_486_2_dict-reify-copy_review.md`, `research/G19-fix-fpml-iso20022/research/reviews/opus_495_493_486_2_dict-reify-copy_triage.md` (parent repo).
+- Round 3 2026-09-23: Codex P1=0 P2=0 P3=2; Opus post-judging P1=0 P2=1 P3=4; rewrite cap reached; owner ruled "amend, no re-review" — text-only amendment of N-1 (C expiry assertion dropped, §3.4/B-495-1 narrowed), T-6 mutation, whitespace, N-2, N-3. Reviews: `research/G19-fix-fpml-iso20022/research/reviews/codex_495_493_486_3_dict-reify-copy_review.md`, `research/G19-fix-fpml-iso20022/research/reviews/opus_495_493_486_3_dict-reify-copy_triage.md` (parent repo).
