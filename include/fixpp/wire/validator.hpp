@@ -109,8 +109,15 @@ static_assert(std::is_abstract_v<Validator>, "[const §XIV.2] cap = 5");
 // table_view exists (test TUs). Bodies land in T046 (Phase C).
 class dictionary_driven_validator final : public Validator {
 public:
+    // fixpp#486 (`.specify/495-493-486-dict-reify-copy.md` §5): the exception
+    // specification follows `table_view`'s own move. Where that move can allocate
+    // (MSVC), an allocation failure in the member move propagates as bad_alloc to
+    // the caller instead of terminating inside a `noexcept` body. `table_view`'s
+    // own move specification stays inferred (its ⛔ note); only this constructor
+    // changes. Pinned two-sided by tests/wire/validator_domain_test.cpp.
     // NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
-    explicit dictionary_driven_validator(fixpp::dict::table_view dict) noexcept
+    explicit dictionary_driven_validator(fixpp::dict::table_view dict) noexcept(
+        std::is_nothrow_move_constructible_v<fixpp::dict::table_view>)
         : dict_{std::move(dict)} {}
 
     // [2b §6.5] Unconditional validation over every field present in `msg`.

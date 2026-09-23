@@ -22,6 +22,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 // clang-format off
@@ -52,6 +53,18 @@ static_assert(std::is_final_v<fixpp::wire::dictionary_driven_validator>,
 static_assert(
     std::is_constructible_v<fixpp::wire::dictionary_driven_validator, fixpp::dict::table_view>,
     "[2b §6.5] must be explicitly constructible from dict::table_view by value");
+
+// fixpp#486 (`.specify/495-493-486-dict-reify-copy.md` §5, T-1): the constructor's
+// OWN exception specification equals table_view's move specification. The argument
+// is a prvalue from a noexcept function, so guaranteed elision initialises the
+// by-value parameter with no move and the noexcept operator sees only the
+// constructor's specification (a table_view&& argument would also count the
+// caller-side move, which makes the equality hold on every toolchain). On MSVC,
+// where table_view's move can allocate, the unfixed `noexcept` makes this fire.
+using t1_tv_factory = fixpp::dict::table_view (&)() noexcept;
+static_assert(noexcept(fixpp::wire::dictionary_driven_validator{std::declval<t1_tv_factory>()()}) ==
+                  std::is_nothrow_move_constructible_v<fixpp::dict::table_view>,
+              "fixpp#486: dictionary_driven_validator's noexcept must follow table_view's move");
 
 // table_view is held BY VALUE (SC-007: no virtual edge). It must be
 // copy-constructible so dictionary_driven_validator can store a local copy.
