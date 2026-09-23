@@ -69,8 +69,9 @@ PHASE 3 — IMPLEMENT
 10. /speckit-implement                runs tasks, marks [X] (NOT evidence-based — see step 12)
 
 11. /simplify                         3 specialized Opus review agents (reuse / quality /
-                                      efficiency) → Opus triages: fix genuine in-scope
-                                      simplifications + any real Gate-B-relevant defect;
+                                      efficiency) → orchestrator triages; phase-implementer
+                                      fixes genuine in-scope simplifications + any real
+                                      Gate-B-relevant defect;
                                       defer behavioral/perf redesigns + ambiguous items as
                                       tracked follow-ups in the verify decision doc
                                       [const §XVI.7 — before verify, NOT merely before PR]
@@ -91,7 +92,7 @@ PHASE 3 — IMPLEMENT
 
 14. /gate-b <branch>                  Codex hostile review of main..HEAD on local branch
                                       → .specify/decisions/<feature>-gateb.md (round 1..N)
-                                      Fix-loop (Sonnet fixer rounds 1-2 → Codex fixer rounds 3-4)
+                                      Fix-loop (Claude fixer rounds 1-2 → Codex fixer rounds 3-4)
                                       converge to SHIP-AS-IS or SHIP-WITH-FIXES + documented waivers
 
 PHASE 4 — PUBLISH + MERGE
@@ -289,6 +290,27 @@ sound, matches memory. Disposition (user-approved 2026-05-17):
   (close-out itself writes `phases/**` and `decisions/**`, which is exactly what
   `refs_external` names, so it can dangle a ref **after** the pre-push pass), and
   the Gate-B scoping question a commit inserted between steps 14 and 15 raises.
+- **[L] APPLIED (user-directed 2026-09-23).** The implementer and Gate B fixer
+  move from Sonnet to the `opus` model alias (always the latest Opus, never a
+  pinned version), and the agent file is renamed
+  `.claude/agents/phase-implementer.md` (`subagent_type=phase-implementer`); the
+  names `phase-implementer-sonnet` in [H], [I] and [J] above mean that file and
+  are left as written, since they record what was decided then. `checklist-auditor`
+  and `spec-analyzer` move to `opus` too. Two mechanisms come with it:
+  (1) the orchestrator never implements — `/speckit-implement` step 5a loses its
+  "MAY implement directly" carve-out, and a parent-root PreToolUse hook
+  (`.claude/scripts/pretooluse-orchestrator-library-edit-guard.sh`) blocks
+  main-session edits to library code in every worktree (classified by file
+  type, no override — an owner-directed change still goes to the implementer); (2) a comment-claim lint (`.claude/scripts/check-comment-claims.py`,
+  parent root) that flags added comment lines recording a result instead of a
+  condition. The implementer runs it before reporting and the orchestrator
+  re-runs it between phases (step 10) and after every Gate B fixer round
+  (step 14). Constitution v3.0 (MAJOR) defines what the orchestrator may and may
+  not do (Article XVI §6: mutation proofs in a scratch copy, merge conflicts and
+  codegen regeneration to the implementer) and names roles instead of models
+  (Articles XVI §7, XVII §4–§5, XX §5). Rationale: PR #258's Gate B record in the
+  research repository (decisions/speckit/pr258-python-fold-gateb.md) — rounds 3-8
+  were "Codex-review + orchestrator-fix with no Step B triage at all".
 
 
 No conflicts found on: `/clarify` before `/plan` (§XVI.3), Gate A before
