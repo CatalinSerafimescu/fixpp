@@ -5,19 +5,31 @@
 #
 # Positive/negative test for tools/check_dictionary_snapshot_exclusivity.sh.
 # Proves the stateful comment stripper handles the lexer corpus, the clean tree
-# stays green with printed liveness counts, and removing all five static_asserts
-# in tests/dictionary/dictionary_snapshot_test.cpp goes red under three comment
-# spellings.
+# stays green with G1's printed liveness counts and G2's zero-match line, and the
+# gate goes red when either:
+#   * all five static_asserts in tests/dictionary/dictionary_snapshot_test.cpp are
+#     removed, under three comment spellings (G1); or
+#   * one of G2's enumerated spellings is seeded into the snapshot TU (fixpp#495
+#     R-C, `.specify/495-493-486-dict-reify-copy.md` §6.4 / T-18). G1 runs first,
+#     so a seeded case must show `G2 FAIL` in the log, not just a non-zero exit.
+#
+# The G2 seeds are ASSEMBLED FROM FRAGMENTS at run time: G2 scans tools/ and
+# does not strip comments, so a literal seed spelled in this file would itself
+# be a match on the clean tree.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 gate="${repo_root}/tools/check_dictionary_snapshot_exclusivity.sh"
 a5tu="${repo_root}/tests/dictionary/dictionary_snapshot_test.cpp"
+factory_tu="${repo_root}/src/dictionary/dictionary_snapshot.cpp"
 
 tmp="$(mktemp -d)"
 backup="${tmp}/dictionary_snapshot_test.cpp.orig"
+factory_backup="${tmp}/dictionary_snapshot.cpp.orig"
 cp "$a5tu" "$backup"
-trap 'cp "$backup" "$a5tu"; rm -rf "$tmp"' EXIT
+cp "$factory_tu" "$factory_backup"
+# ONE handler restores both files: a second `trap ... EXIT` would replace this one.
+trap 'cp "$backup" "$a5tu"; cp "$factory_backup" "$factory_tu"; rm -rf "$tmp"' EXIT
 
 rc=0
 
@@ -87,6 +99,34 @@ run_gate_expect() {
   fi
 }
 
+# Like run_gate_expect, and additionally requires `needle` (fixed string) in the log.
+run_gate_expect_log() {
+  local label="$1"
+  local expected_rc="$2"
+  local needle="$3"
+  run_gate_expect "$label" "$expected_rc"
+  if grep -qF -- "$needle" "${tmp}/${label}.log"; then
+    printf 'PASS %s: log has %q\n' "$label" "$needle"
+  else
+    printf 'FAIL %s: log lacks %q\n' "$label" "$needle" >&2
+    rc=1
+  fi
+}
+
+# G2 seeds, from fragments (see the header).
+g2_type='shared_ptr<const table_view>'
+g2_seed_move="static auto g2_seed_move = std::${g2_type}(std::move(g2_seed_src));"
+g2_seed_ident="static auto g2_seed_ident = std::${g2_type}(g2_seed_src, g2_seed_ptr);"
+
+run_g2_seed_case() {
+  local label="$1"
+  local seed="$2"
+  cp "$factory_backup" "$factory_tu"
+  printf '%s\n' "$seed" >> "$factory_tu"
+  run_gate_expect_log "$label" 1 "G2 FAIL"
+  cp "$factory_backup" "$factory_tu"
+}
+
 run_red_case() {
   local style="$1"
   cp "$backup" "$a5tu"
@@ -107,12 +147,15 @@ run_strip_case 10 " code  snapshot_key" "/* a */ code /* b */ snapshot_key"
 run_strip_case 11 "const char* s = R\"(/* snapshot_key */)\";" "const char* s = R\"(/* snapshot_key */)\";"
 
 cp "$backup" "$a5tu"
-run_gate_expect "whole_script_clean" 0
+run_gate_expect_log "whole_script_clean" 0 "G2 matches of the enumerated spellings = 0"
+run_g2_seed_case "g2_seed_std_move" "$g2_seed_move"
+run_g2_seed_case "g2_seed_identifier_comma" "$g2_seed_ident"
 run_red_case line
 run_red_case block-line
 run_red_case block-unstarred
 
 cp "$backup" "$a5tu"
+cp "$factory_backup" "$factory_tu"
 
 if [[ "$rc" -eq 0 ]]; then
   echo "test_dictionary_snapshot_exclusivity_gate: OK"

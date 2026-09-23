@@ -1,19 +1,25 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // src/dictionary/dictionary_snapshot.cpp
 //
-// fixpp#215 item 1, Option C (`.specify/215-dictionary-view.md` §3).
+// fixpp#215 item 1, Option C (`.specify/215-dictionary-view.md` §3); the table's
+// ownership is superseded by `.specify/495-493-486-dict-reify-copy.md` §6 (D-4).
 
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/dictionary_snapshot.hpp>
+#include <memory>
 #include <utility>
 
 namespace fixpp::dict {
 
 dictionary_snapshot::dictionary_snapshot(detail::snapshot_key,
                                          std::shared_ptr<const Dictionary> src, table_view tv)
-    : source_(std::move(src)), view_(std::move(tv)) {}
+    : source_(std::move(src)), view_(std::make_shared<const table_view>(std::move(tv))) {}
 
-table_view const& dictionary_snapshot::view() const noexcept { return view_; }
+table_view const& dictionary_snapshot::view() const noexcept { return *view_; }
+
+std::shared_ptr<const table_view> const& dictionary_snapshot::view_owner() const noexcept {
+    return view_;
+}
 
 std::shared_ptr<const Dictionary> const& dictionary_snapshot::source() const noexcept {
     return source_;
@@ -31,19 +37,16 @@ std::shared_ptr<const dictionary_snapshot> make_dictionary_snapshot(
         detail::snapshot_key{}, std::move(dict), std::move(tv));
 }
 
-// The ONLY place this form appears in production — the aliasing
-// shared_ptr<const table_view> constructor. src/session/session.cpp and
-// src/capi/session.cpp MUST call this rather than hand-rolling the alias.
+// src/session/session.cpp and src/capi/session.cpp both take their table through
+// this. fixpp#495 D-4: a copy of the snapshot's table owner — the returned pointer
+// shares the TABLE's control block, so it does not keep the snapshot (and its
+// Dictionary) alive.
 std::shared_ptr<const table_view> shared_dictionary_view(
     std::shared_ptr<const dictionary_snapshot> snap) noexcept {
     if (!snap) {
         return nullptr;
     }
-    table_view const* p = &snap->view();
-    // Spelled out on purpose: tools/check_dictionary_snapshot_exclusivity.sh (G2)
-    // counts this exact constructor spelling; a braced return hides the site.
-    // NOLINTNEXTLINE(modernize-return-braced-init-list)
-    return std::shared_ptr<const table_view>(std::move(snap), p);  // aliasing ctor
+    return snap->view_owner();
 }
 
 }  // namespace fixpp::dict

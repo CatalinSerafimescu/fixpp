@@ -11,11 +11,13 @@
 // if in an unrelated context (that is what makes A5 meaningful: it goes RED
 // exactly when the passkey's friend list is opened).
 //
-// Seam 4: alias lifetime and IDENTITY, tested on shared_dictionary_view — the
+// Seam 4: lifetime and IDENTITY, tested on shared_dictionary_view — the
 // production helper — not on std::shared_ptr directly. v0.2's version of this
-// seam was GREEN for a helper that COPIES instead of aliasing (measured, not
+// seam was GREEN for a helper that COPIES instead of sharing (measured, not
 // argued, in the design doc); the fix is to pin identity and shared
-// ownership, not just validity.
+// ownership, not just validity. Since fixpp#495 D-4 the helper shares the
+// snapshot's TABLE owner rather than aliasing the snapshot
+// (`.specify/495-493-486-dict-reify-copy.md` §6).
 //
 // This file is also G1's A5TU allowlist entry
 // (tools/check_dictionary_snapshot_exclusivity.sh) — relocating these
@@ -81,36 +83,40 @@ TEST(DictionarySnapshot, NonNullDictionaryYieldsSnapshotPairedWithIt) {
     EXPECT_EQ(snap->source(), dict);
 }
 
-// ── Seam 4 — alias lifetime and identity on shared_dictionary_view ──────────
+// ── Seam 4 — shared_dictionary_view shares the snapshot's TABLE OWNER ────────
 //
-// The order is load-bearing: the first three assertions require `snap` to
-// still be alive, the last two require it dropped.
-TEST(DictionarySnapshot, SharedDictionaryViewAliasesRatherThanCopies) {
+// fixpp#495 D-4 (`.specify/495-493-486-dict-reify-copy.md` §6, T-19(a)): the
+// snapshot owns its table in its own control block, so the helper hands out that
+// owner — identity with the snapshot's table, not a copy — and a held view keeps
+// the TABLE alive but neither the snapshot nor its Dictionary. The order is
+// load-bearing: the identity assertion needs `snap` alive, the rest need it gone.
+TEST(DictionarySnapshot, SharedDictionaryViewSharesTheTableOwner) {
     auto dict = fixpp::test_support::make_validation_test_dictionary();
+    long const dict_refs_before_snapshot = dict.use_count();
     auto snap = make_dictionary_snapshot(dict);
     ASSERT_NE(snap, nullptr);
-    auto alias = shared_dictionary_view(snap);
-    ASSERT_NE(alias, nullptr);
+    auto owner = shared_dictionary_view(snap);
+    ASSERT_NE(owner, nullptr);
 
-    // WHILE snap is alive — identity and shared control block:
-    EXPECT_EQ(alias.get(), &snap->view())  // points INTO the snapshot, not at a copy
-        << "shared_dictionary_view must alias the snapshot's own table_view, not copy it";
-    EXPECT_FALSE(alias.owner_before(snap));  // same control block, both directions
-    EXPECT_FALSE(snap.owner_before(alias));
+    // WHILE snap is alive — identity: the snapshot's own table, not a copy.
+    EXPECT_EQ(owner.get(), &snap->view())
+        << "shared_dictionary_view must share the snapshot's own table_view, not copy it";
 
     snap.reset();  // AFTER: lifetime
-    EXPECT_EQ(alias.use_count(), 1)
-        << "the alias must be the SOLE remaining owner of the snapshot's control block";
+    EXPECT_EQ(owner.use_count(), 1)
+        << "the held view must be the SOLE remaining owner of the table";
+    EXPECT_EQ(dict.use_count(), dict_refs_before_snapshot)
+        << "a held view must not keep the snapshot, and so its Dictionary, alive (D-4)";
     // UAF here under a non-owning impl (ASan would catch it); a valid read
-    // proves the alias kept the snapshot (and therefore its table_view) alive.
-    EXPECT_TRUE(alias->field_valid_for("A", 98))
+    // proves the owner kept the table alive.
+    EXPECT_TRUE(owner->field_valid_for("A", 98))
         << "EncryptMethod(98) is a required field of Logon(A) in the test dictionary";
 }
 
 TEST(DictionarySnapshot, SharedDictionaryViewOfNullSnapshotIsNull) {
     std::shared_ptr<const dictionary_snapshot> null_snap;
-    auto alias = shared_dictionary_view(null_snap);
-    EXPECT_EQ(alias, nullptr);
+    auto owner = shared_dictionary_view(null_snap);
+    EXPECT_EQ(owner, nullptr);
 }
 
 }  // namespace

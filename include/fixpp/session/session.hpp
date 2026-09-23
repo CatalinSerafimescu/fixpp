@@ -813,11 +813,22 @@ private:
     // fixpp#215 item 1 (Option C) — shared_ptr, not std::optional-by-value: the
     // view is built by whoever gets there FIRST and then SHARED, instead of
     // every consumer walking the same Dictionary again. open() adopts
-    // cfg_.dict_snapshot's view (via fixpp::dict::shared_dictionary_view) when
+    // cfg_.dict_snapshot's table (via fixpp::dict::shared_dictionary_view, which
+    // since fixpp#495 D-4 shares the table's own owner, not the snapshot) when
     // the config supplies one (the C-ABI path, which needs the same view for
     // its outbound commit path) and otherwise builds one itself. Either way the
     // Session owns a strong reference for its whole lifetime, so the pointee
     // outlives every Parser built over it.
+    //
+    // fixpp#495 (`.specify/495-493-486-dict-reify-copy.md` §2.6, §3.1): this
+    // member is the OWNER OBJECT of every view parse_and_dispatch_ hands an
+    // application (its Parser runs on the owned route and records this member's
+    // address), so a reify handle or C clone of such a view shares the table and
+    // may keep it alive after the Session closes. Invariant: written only in
+    // open(), before `state_ = lifecycle::open`; afterwards open()'s first check
+    // makes further writes unreachable. It must never be reassigned or reset
+    // while parse_and_dispatch_ can run. Re-check the write census with
+    // `grep -n "inbound_tv_ *=" src/session/session.cpp`.
     //
     // Invariant: open() hard-fails (invalid_session_config) when
     // cfg_.dictionary is null, BEFORE this member is built — so
