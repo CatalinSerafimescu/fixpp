@@ -8,8 +8,8 @@
 #        Option C's C1 closure and not expressible as a static_assert.
 #   G2 — a SPELLING LINT: ZERO matches, tree-wide, of the enumerated
 #        two-argument `shared_ptr<const ... table_view>(` spellings (the
-#        aliasing constructor). Since fixpp#495 D-4 the snapshot owns its table
-#        in the table's own control block and no production code forms an alias.
+#        aliasing constructor). The snapshot owns its table in the table's own
+#        control block (fixpp#495 D-4), so no production code forms an alias.
 #        G2 claims nothing about aliasing constructions it does not spell; the
 #        PROPERTY (a handle or clone never keeps the Dictionary alive) is
 #        witnessed behaviourally by the C++ Session twin of the design note's

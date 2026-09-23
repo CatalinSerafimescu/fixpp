@@ -31,9 +31,9 @@
                                                  // arrive transitively via the
                                                  // parser.hpp re-export) — the
                                                  // ONLY exempt bridge include.
+#include <memory>
 #include <memory_resource>
 #include <new>  // std::bad_alloc
-#include <memory>
 #include <optional>
 #include <span>
 #include <string_view>

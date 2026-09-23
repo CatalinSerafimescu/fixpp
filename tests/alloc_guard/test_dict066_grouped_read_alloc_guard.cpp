@@ -77,8 +77,8 @@
 #include <memory>
 #include <memory_resource>
 #include <string>
-#include <utility>
 #include <string_view>
+#include <utility>
 
 #include "support/app_message_read_scaffold.hpp"  // fixpp_test_support::make_frame
 #include "support/fix44_dictionary.hpp"
@@ -151,7 +151,7 @@ bool slice_has_tag(fixpp::wire::group_slice const& s, std::uint16_t tag) {
 // own correctness assertions (via ADD_FAILURE inside `read`) all held.
 // `owner` null: the BORROWED route (`Parser{tv}`). Non-null: the OWNED route
 // (`Parser{owned_route_key{}, *owner}`), which is what parse_and_dispatch_
-// builds since fixpp#495 (`.specify/495-493-486-dict-reify-copy.md` §2.6, T-15).
+// builds (fixpp#495, `.specify/495-493-486-dict-reify-copy.md` §2.6, T-15).
 template <class ReadFn>
 bool parse_and_read(fixpp::dict::table_view const& tv, std::vector<std::byte> const& raw,
                     ReadFn&& read,
@@ -182,11 +182,11 @@ bool parse_and_read(fixpp::dict::table_view const& tv, std::vector<std::byte> co
     return run(parser);
 }
 
-// The measured window around one parse_and_read(); returns the global-new delta
+// The instrumented window around one parse_and_read(); returns the global-new delta
 // (0 when the counter is compiled out) and the pass's own result.
 template <class ReadFn>
-std::pair<bool, long> measured(fixpp::dict::table_view const& tv,
-                               std::vector<std::byte> const& raw, ReadFn&& read,
+std::pair<bool, long> measured(fixpp::dict::table_view const& tv, std::vector<std::byte> const& raw,
+                               ReadFn&& read,
                                std::shared_ptr<const fixpp::dict::table_view> const* owner) {
 #if !FIXPP_SANITIZER_REPLACES_NEW
     g_alloc_count.store(0, std::memory_order_relaxed);
@@ -241,15 +241,16 @@ TEST(Dict066GroupedReadAllocGuard, TopLevelGroupParseAndReadZeroGlobalHeap) {
            "(FR-004: table_view built once, per-message reads from the stack arena)";
 #endif
 
-    // fixpp#495 T-15: the OWNED route, as parse_and_dispatch_ builds it since
-    // `.specify/495-493-486-dict-reify-copy.md` §2.6. The owner is built outside the
+    // fixpp#495 T-15: the OWNED route, as parse_and_dispatch_ builds it
+    // (`.specify/495-493-486-dict-reify-copy.md` §2.6). The owner is built outside the
     // window and outlives every view parsed through it (§3.1).
     auto const owner = std::make_shared<const fixpp::dict::table_view>(tv);
     ASSERT_TRUE(parse_and_read(tv, raw, do_read, &owner));  // warm-up
     auto const [owned_ok, owned_allocs] = measured(tv, raw, do_read, &owner);
     EXPECT_TRUE(owned_ok);
 #if !FIXPP_SANITIZER_REPLACES_NEW
-    EXPECT_EQ(owned_allocs, 0) << "top-level dict-backed group parse+read on the OWNED route must not touch the global heap";
+    EXPECT_EQ(owned_allocs, 0) << "top-level dict-backed group parse+read on the OWNED route must "
+                                  "not touch the global heap";
 #else
     (void)owned_allocs;
 #endif
@@ -323,15 +324,16 @@ TEST(Dict066GroupedReadAllocGuard, NestedGroupParseAndReadZeroGlobalHeap) {
            "must not touch the global heap (sub-views draw only from the arena)";
 #endif
 
-    // fixpp#495 T-15: the OWNED route, as parse_and_dispatch_ builds it since
-    // `.specify/495-493-486-dict-reify-copy.md` §2.6. The owner is built outside the
+    // fixpp#495 T-15: the OWNED route, as parse_and_dispatch_ builds it
+    // (`.specify/495-493-486-dict-reify-copy.md` §2.6). The owner is built outside the
     // window and outlives every view parsed through it (§3.1).
     auto const owner = std::make_shared<const fixpp::dict::table_view>(tv);
     ASSERT_TRUE(parse_and_read(tv, raw, do_read, &owner));  // warm-up
     auto const [owned_ok, owned_allocs] = measured(tv, raw, do_read, &owner);
     EXPECT_TRUE(owned_ok);
 #if !FIXPP_SANITIZER_REPLACES_NEW
-    EXPECT_EQ(owned_allocs, 0) << "nested descent on the OWNED route must not touch the global heap";
+    EXPECT_EQ(owned_allocs, 0)
+        << "nested descent on the OWNED route must not touch the global heap";
 #else
     (void)owned_allocs;
 #endif

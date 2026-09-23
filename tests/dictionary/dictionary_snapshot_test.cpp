@@ -12,12 +12,11 @@
 // exactly when the passkey's friend list is opened).
 //
 // Seam 4: lifetime and IDENTITY, tested on shared_dictionary_view — the
-// production helper — not on std::shared_ptr directly. v0.2's version of this
-// seam was GREEN for a helper that COPIES instead of sharing (measured, not
-// argued, in the design doc); the fix is to pin identity and shared
-// ownership, not just validity. Since fixpp#495 D-4 the helper shares the
-// snapshot's TABLE owner rather than aliasing the snapshot
-// (`.specify/495-493-486-dict-reify-copy.md` §6).
+// production helper — not on std::shared_ptr directly. It pins identity and
+// shared ownership, not just validity, so a helper that COPIES instead of
+// sharing cannot satisfy it. The helper shares the snapshot's TABLE owner
+// rather than aliasing the snapshot (fixpp#495 D-4,
+// `.specify/495-493-486-dict-reify-copy.md` §6).
 //
 // This file is also G1's A5TU allowlist entry
 // (tools/check_dictionary_snapshot_exclusivity.sh) — relocating these

@@ -1043,9 +1043,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // snapshot whose source() is not cfg_.dictionary would silently drive
     // inbound parsing/validation from the wrong grammar (§2b of the design
     // doc). shared_dictionary_view() is how both this line and
-    // fixpp_session_open take the snapshot's table; since fixpp#495 D-4 it
-    // shares the table's own owner, so inbound_tv_ pins the table and not the
-    // snapshot or its Dictionary (`.specify/495-493-486-dict-reify-copy.md` §6).
+    // fixpp_session_open take the snapshot's table; it shares the table's own
+    // owner, so inbound_tv_ pins the table and not the snapshot or its
+    // Dictionary (fixpp#495 D-4, `.specify/495-493-486-dict-reify-copy.md` §6).
     // inbound_tv_ is written ONLY here, before `state_ = lifecycle::open`
     // (§2.6); it is the owner object of every view parse_and_dispatch_ hands an
     // application. No assert that it is unset: a failed open() leaves state_

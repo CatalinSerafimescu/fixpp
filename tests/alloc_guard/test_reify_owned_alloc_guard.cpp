@@ -113,7 +113,7 @@ struct WindowResult {
     long global_new = 0;
 };
 
-// One measured window reifying `src`.
+// One instrumented window reifying `src`.
 WindowResult reify_window(fixpp::wire::MessageView<access_mode::Index> const& src,
                           fixpp::dict::table_view const* owner_table) {
     std::array<std::byte, kHandleArena> buf{};
@@ -162,7 +162,7 @@ TEST_F(ReifyOwnedAllocGuard, OwnedRouteZeroGlobalHeap) {
     auto src = parser.parse(*fv_, &parse_arena_);
     ASSERT_TRUE(src.has_value());
 
-    (void)reify_window(*src, sp_.get());  // warm-up, outside the measured run
+    (void)reify_window(*src, sp_.get());  // warm-up, before the asserted window
     WindowResult const r = reify_window(*src, sp_.get());
 
     ASSERT_TRUE(r.reified) << "the window must reach a live handle (arena too small?)";

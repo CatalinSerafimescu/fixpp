@@ -19,7 +19,7 @@
 // parse->fromApp window (FR-013, [arch §5.3]).
 
 #include <algorithm>
-#include <cassert>  // detail::checked_owner precondition (fixpp#495)
+#include <cassert>   // detail::checked_owner precondition (fixpp#495)
 #include <concepts>  // std::same_as (gate-b/r1 FQ-2 ctor constraint)
 #include <cstddef>
 #include <cstdint>

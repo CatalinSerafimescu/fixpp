@@ -13,8 +13,8 @@
 // ruling Q-6). The C++ twin (tests/session/test_reify_shared_dispatch.cpp)
 // carries that property.
 //
-// Mutation: `parse_and_dispatch_`'s parser back to `{*inbound_tv_}` (the borrowed
-// route) — the clones copy, and the address equalities go RED.
+// Discriminates against `parse_and_dispatch_`'s parser on the borrowed route
+// (`{*inbound_tv_}`): the clones would then copy, failing the address equalities.
 //
 // Standalone (`[const §VII.8]`): two live engines on loopback sockets.
 
@@ -68,7 +68,8 @@ TEST(Dict495CloneSharedTable, ClonesShareTheSessionTableAndOutliveTheEngine) {
         if (i < 2) {
             c->clone_rc[i] = fixpp_msg_clone(inbound, &c->clones[i]);
             if (c->clones[i] != nullptr) {
-                c->clone_tables[i] = reinterpret_cast<const fixpp_msg*>(c->clones[i])->owned_tv_.get();
+                c->clone_tables[i] =
+                    reinterpret_cast<const fixpp_msg*>(c->clones[i])->owned_tv_.get();
             }
         }
         c->fired.store(i + 1, std::memory_order_release);

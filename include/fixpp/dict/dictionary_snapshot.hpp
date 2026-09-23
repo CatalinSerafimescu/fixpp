@@ -100,8 +100,8 @@ private:
 };
 
 // The snapshot's table owner, for `Session::open()` and `fixpp_session_open`
-// (seating `fixpp_session::tv_`), which both go through this. Since fixpp#495
-// D-4 it returns `snap->view_owner()` — a held result keeps the table alive but
+// (seating `fixpp_session::tv_`), which both go through this. It returns
+// `snap->view_owner()` (fixpp#495 D-4): a held result keeps the table alive but
 // not the snapshot or its Dictionary. Null snap -> null return.
 [[nodiscard]] std::shared_ptr<const table_view> shared_dictionary_view(
     std::shared_ptr<const dictionary_snapshot> snap) noexcept;

@@ -65,17 +65,15 @@ TEST(Dict495PinnedTableLifetime, HandleAndCloneOutliveTheDictionaryAndItsLoadAre
     ASSERT_NE(sp, nullptr);
 
     // Owned-route parse of a NoLegs frame, in its own heap parse arena.
-    auto frame = std::make_unique<std::vector<std::byte>>(
-        fixpp_test_support::make_execution_report_frame(
-            fixpp_test_support::execution_report_two_legs_trailing_suffix(), /*seq=*/4, "S",
-            "T"));
+    auto frame =
+        std::make_unique<std::vector<std::byte>>(fixpp_test_support::make_execution_report_frame(
+            fixpp_test_support::execution_report_two_legs_trailing_suffix(), /*seq=*/4, "S", "T"));
     auto parse_arena = std::make_unique<std::pmr::monotonic_buffer_resource>();
     auto fv = fixpp::wire::test::make_frame_view(*frame);
     ASSERT_TRUE(fv.has_value());
     std::optional<MV> src;
     {
-        fixpp::wire::Parser<access_mode::Index> parser{fixpp::wire::detail::owned_route_key{},
-                                                       sp};
+        fixpp::wire::Parser<access_mode::Index> parser{fixpp::wire::detail::owned_route_key{}, sp};
         auto parsed = parser.parse(*fv, parse_arena.get());
         ASSERT_TRUE(parsed.has_value());
         src.emplace(std::move(*parsed));

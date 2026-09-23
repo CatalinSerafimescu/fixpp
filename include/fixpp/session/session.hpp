@@ -814,7 +814,7 @@ private:
     // view is built by whoever gets there FIRST and then SHARED, instead of
     // every consumer walking the same Dictionary again. open() adopts
     // cfg_.dict_snapshot's table (via fixpp::dict::shared_dictionary_view, which
-    // since fixpp#495 D-4 shares the table's own owner, not the snapshot) when
+    // shares the table's own owner, not the snapshot — fixpp#495 D-4) when
     // the config supplies one (the C-ABI path, which needs the same view for
     // its outbound commit path) and otherwise builds one itself. Either way the
     // Session owns a strong reference for its whole lifetime, so the pointee

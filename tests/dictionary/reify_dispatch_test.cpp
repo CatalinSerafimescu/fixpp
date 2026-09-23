@@ -59,7 +59,7 @@
 #include <utility>
 #include <vector>
 
-#include "support/copy_site_fixtures.hpp"   // fixpp#493: shared copy-site frames + comparisons
+#include "support/copy_site_fixtures.hpp"    // fixpp#493: shared copy-site frames + comparisons
 #include "support/failing_pmr_resource.hpp"  // 057: view()-OOM degrade witness
 #include "support/fix44_dictionary.hpp"  // 090-capi-refusals US4: dict-backed source (T058/T059/T062)
 #include "support/msvc_debug_arena_skip.hpp"
@@ -116,9 +116,10 @@ private:
 
 // fixpp#495 D-1c (`.specify/495-493-486-dict-reify-copy.md` §2.5, §10 T-16): the
 // number of `mr` calls the reify factory makes BEFORE it copies the frame bytes —
-// the handle's impl. Derived at run time from an empty default view, whose path
-// draws nothing else from `mr` (empty byte copy, zero-capacity carry, framer,
-// default view), so an OOM cell names the PHASE it fails and never an ordinal.
+// the handle's impl. Derived at run time from an empty default view, on the
+// precondition (asserted by ImplIsTheFactorysFirstMrAllocation) that the
+// empty-view path uses `mr` only for the impl, so an OOM cell names the PHASE it
+// fails and never an ordinal.
 // Returns 0 if the probe itself fails, which every caller treats as a failure.
 [[nodiscard]] std::size_t impl_mr_calls() {
     constexpr resolved_message_version rmv{.k = resolved_message_version::kind::application,
@@ -657,9 +658,8 @@ TEST(ReifyErrorContract, ImplOomYieldsReifyOom) {
 
 TEST(ReifyErrorContract, DeepCopyOomYieldsReifyOom) {
     // Phase: the frame-byte deep copy, the first `mr` call after the impl
-    // (impl_mr_calls() + 1) → dict_reify_oom. Before D-1c this cell used a
-    // null-upstream arena that failed the first `mr` call, which is now the impl,
-    // so it would have stayed green while measuring the wrong allocation.
+    // (impl_mr_calls() + 1) → dict_reify_oom. A cell that fails the FIRST `mr`
+    // call fails the impl (D-1c), not the deep copy, so it would not measure it.
     // MSVC debug/asan STL allocates a hidden _Container_proxy per pmr container
     // from `mr` during a noexcept ctor → terminate, not a catchable bad_alloc.
     // Behaviour is covered on msvc-release + all Linux lanes.
@@ -679,7 +679,7 @@ TEST(ReifyErrorContract, ViewRebuildOomDegradesNotTerminate) {
     // 057 / 004-T059 hardening: the impl and the frame-byte deep copy succeed so
     // reify() returns a live handle, but the dict-free OffsetTable build — its
     // first `mr` call, impl_mr_calls() + 2 (a complete frame never appends to the
-    // carry), which since fixpp#458 D-4 runs EAGERLY inside the factory — then
+    // carry), which runs EAGERLY inside the factory (fixpp#458 D-4) — then
     // OOMs. The factory is noexcept, so it must NOT terminate — the OffsetTable
     // ctor degrades to an empty table (out_of_memory) and field_value() reports
     // field-absent.
@@ -954,7 +954,6 @@ TEST(ReifyEagerMaterialization, SpuriousHitControl_DeepCopyOomStillYieldsDictRei
            "dict_reify_oom sentinel, not EC-8's re-parse refusal";
 }
 
-
 // ═════════════════════════════════════════════════════════════════════════════
 // fixpp#493 — the reify factory re-parses under its SOURCE's caps
 // (`.specify/495-493-486-dict-reify-copy.md` §4 / §10 T-2, T-4, T-5).
@@ -1056,10 +1055,9 @@ TEST(ReifyEagerMaterialization, RaisedCapDictFreeSourceReifiesReadable) {
 // T-5(a): the whole Config travels. Both caps raised, one NoPartyIDs instance
 // longer than the default per-instance cap; the copy reads that group.
 TEST(ReifyEagerMaterialization, CopyKeepsRaisedGroupInstanceCap) {
-    CopySiteSource src{
-        fixpp::test_support::make_long_party_instance_frame(4200),
-        {.max_offset_entries = 16384, .max_group_entries_per_instance = 8192},
-        /*dict_backed=*/true};
+    CopySiteSource src{fixpp::test_support::make_long_party_instance_frame(4200),
+                       {.max_offset_entries = 16384, .max_group_entries_per_instance = 8192},
+                       /*dict_backed=*/true};
     ASSERT_TRUE(src.ok());
     ASSERT_TRUE(src.view().offsets().group(453).has_value())
         << "precondition: the source reads its long instance under its raised caps";
@@ -1093,7 +1091,6 @@ TEST(ReifyEagerMaterialization, CopyKeepsLoweredGroupInstanceCap) {
         EXPECT_EQ(copy_group.error(), src_group.error());
     }
 }
-
 
 // ═════════════════════════════════════════════════════════════════════════════
 // fixpp#495 T-9 — reify SHARES an owned-route source's table

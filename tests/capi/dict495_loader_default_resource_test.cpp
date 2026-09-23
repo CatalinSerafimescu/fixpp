@@ -7,9 +7,10 @@
 // NONE of its storage once the call returns. The installed resource tracks bytes
 // currently held (not a total: a transient pmr temporary may allocate and free).
 //
-// Mutation: the loader back to `std::pmr::get_default_resource()` — held bytes > 0.
-// If this stays RED after the one-line fix, the loader has a
-// `get_default_resource()` fallback for retained storage: a finding in the loader.
+// Discriminates against the loader using `std::pmr::get_default_resource()`: held
+// bytes would then be non-zero. A non-zero reading with the loader on
+// `new_delete_resource()` means a `get_default_resource()` fallback for retained
+// storage elsewhere in the loader: a finding in the loader.
 //
 // Standalone (`[const §VII.8]`): it replaces the process-wide default resource.
 

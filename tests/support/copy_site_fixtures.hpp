@@ -42,8 +42,7 @@ namespace fixpp::test_support {
 // repeats of a plain non-group tag (1=x). Once `n_occurrences + 2` exceeds
 // offset_table.hpp's `default_max_offset_entries`, a DEFAULT-cap parse of this
 // frame fails its OffsetTable build while a raised-cap parse admits it.
-[[nodiscard]] inline std::vector<std::byte> make_oversized_frame_for_clone_test(
-    int n_occurrences) {
+[[nodiscard]] inline std::vector<std::byte> make_oversized_frame_for_clone_test(int n_occurrences) {
     std::string body =
         "35=D\x01"
         "49=SENDERID\x01";
@@ -55,12 +54,11 @@ namespace fixpp::test_support {
 
 // MsgType(35)=D with SenderCompID(49)=SENDERID and one NoPartyIDs(453) instance:
 // PartyID(448)=P, then `n_party_id_source` repeats of PartyIDSource(447)=D, then
-// PartyRole(452)=1. FIX44 registers 447/452 as NoPartyIDs members, so under a
-// dict-backed parse the whole run is ONE instance of `n_party_id_source + 2`
-// entries — the lever for OffsetTable::Config::max_group_entries_per_instance,
-// which is enforced lazily on the group read.
-[[nodiscard]] inline std::vector<std::byte> make_long_party_instance_frame(
-    int n_party_id_source) {
+// PartyRole(452)=1. FIX44 registers PartyIDSource and PartyRole as NoPartyIDs
+// members, so under a dict-backed parse the whole run is ONE instance of
+// `n_party_id_source + 2` entries — the lever for
+// OffsetTable::Config::max_group_entries_per_instance, which is enforced lazily on the group read.
+[[nodiscard]] inline std::vector<std::byte> make_long_party_instance_frame(int n_party_id_source) {
     std::string body =
         "35=D\x01"
         "49=SENDERID\x01"
@@ -73,8 +71,8 @@ namespace fixpp::test_support {
     return make_raw_fix44_frame(body);
 }
 
-// Member-wise comparisons — the types carry no operator== and this change adds
-// none (note §10 "Comparisons").
+// Member-wise comparisons: the types carry no operator== (note §10
+// "Comparisons").
 [[nodiscard]] inline bool same_config(fixpp::wire::OffsetTable::Config const& a,
                                       fixpp::wire::OffsetTable::Config const& b) noexcept {
     return a.max_offset_entries == b.max_offset_entries &&

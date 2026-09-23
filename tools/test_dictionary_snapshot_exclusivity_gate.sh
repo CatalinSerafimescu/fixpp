@@ -4,9 +4,9 @@
 # tools/test_dictionary_snapshot_exclusivity_gate.sh
 #
 # Positive/negative test for tools/check_dictionary_snapshot_exclusivity.sh.
-# Proves the stateful comment stripper handles the lexer corpus, the clean tree
-# stays green with G1's printed liveness counts and G2's zero-match line, and the
-# gate goes red when either:
+# Requires the stateful comment stripper to handle the lexer corpus, the gate to
+# exit 0 on the clean tree printing G1's liveness counts and G2's zero-match line,
+# and the gate to exit 1 when either:
 #   * all five static_asserts in tests/dictionary/dictionary_snapshot_test.cpp are
 #     removed, under three comment spellings (G1); or
 #   * one of G2's enumerated spellings is seeded into the snapshot TU (fixpp#495

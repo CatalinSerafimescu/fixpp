@@ -8,9 +8,9 @@
 // keep the `Dictionary` alive (D-4): once the test drops every anchor it holds and
 // destroys the Session, the Dictionary expires while both handles still read.
 //
-// Mutations: `parse_and_dispatch_`'s parser back to `{*inbound_tv_}` (the borrowed
-// route) — the address equality goes RED; an aliasing `shared_dictionary_view`
-// (D-4 reverted) — `weak.expired()` goes RED.
+// Discriminates against `parse_and_dispatch_`'s parser on the borrowed route
+// (`{*inbound_tv_}`), which fails the address equality, and against an aliasing
+// `shared_dictionary_view` (D-4 reverted), which fails `weak.expired()`.
 //
 // Standalone (`[const §VII.8]`): a live Session with its own io_context.
 

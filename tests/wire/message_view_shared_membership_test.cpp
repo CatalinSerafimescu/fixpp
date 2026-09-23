@@ -2,8 +2,9 @@
 // tests/wire/message_view_shared_membership_test.cpp
 //
 // fixpp#495 (`.specify/495-493-486-dict-reify-copy.md` §2.2, §2.3; §10 T-7, T-8):
-//   T-7 — the owned-route Parser constructor accepts exactly an lvalue
-//         `shared_ptr<const table_view>` (const or not) and nothing else.
+//   T-7 — the owned-route Parser constructor accepts an lvalue
+//         `shared_ptr<const table_view>`, const-qualified or not; the
+//         static_asserts below pin the forms it rejects.
 //   T-8 — `detail::message_view_membership_access::shared_membership()` shares on
 //         the owned route (arm 1), copies on the borrowed route (arm 2), yields
 //         nullptr dict-free (arm 3), and copies the OLD table when the owner
@@ -46,8 +47,9 @@ static_assert(!std::is_constructible_v<P, K, S&&>,
               "an rvalue owner would dangle: the parser stores its address");
 static_assert(!std::is_constructible_v<P, K, S const&&>,
               "a const rvalue owner would dangle: the parser stores its address");
-static_assert(!std::is_constructible_v<P, K, std::shared_ptr<table_view>&>,
-              "only the exact owner type: a non-const pointee is rejected in the immediate context");
+static_assert(
+    !std::is_constructible_v<P, K, std::shared_ptr<table_view>&>,
+    "only the exact owner type: a non-const pointee is rejected in the immediate context");
 
 // A dictionary other than FIX44, for the reassigned-owner arm. FIX42's
 // NewOrderSingle has no NoPartyIDs(453); FIX44's does.
@@ -127,8 +129,7 @@ TEST_F(SharedMembership, ReassignedOwnerCopiesTheTableTheViewWasParsedAgainst) {
     sp = std::make_shared<const table_view>(dict42->as_table_view());
     ASSERT_FALSE(sp->field_valid_for("D", kNoPartyIDs))
         << "control: the new table must not carry the discriminating membership";
-    ASSERT_TRUE(old->field_valid_for("D", kNoPartyIDs))
-        << "control: the old table must carry it";
+    ASSERT_TRUE(old->field_valid_for("D", kNoPartyIDs)) << "control: the old table must carry it";
 
     S const s = message_view_membership_access::shared_membership(*mv);
     ASSERT_NE(s, nullptr);

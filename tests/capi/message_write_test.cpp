@@ -51,7 +51,7 @@
 #include <fixpp/wire/parser.hpp>
 
 #include "support/copy_site_fixtures.hpp"  // fixpp#493: shared copy-site frames + comparisons
-#include "support/fix44_dictionary.hpp"  // fixpp#458 (090) US3 clone-refusal cells
+#include "support/fix44_dictionary.hpp"    // fixpp#458 (090) US3 clone-refusal cells
 #include "support/frame_view_factory.hpp"
 
 using namespace std::chrono_literals;
@@ -2370,8 +2370,8 @@ using fixpp::test_support::same_group_context;
 
 // T-10 (fixpp#495, `.specify/495-493-486-dict-reify-copy.md` §2.4): a clone of an
 // owned-route view SHARES the owner's table, and a clone of that clone shares it
-// too. Mutation: the clone site seats owned_tv_ through arm 2 (a copy) — the
-// address equality goes RED.
+// too. Discriminates against the clone site seating owned_tv_ through arm 2 (a
+// copy), which would fail the address equality.
 TEST(MessageWrite, CloneOfOwnedRouteViewSharesTheTable) {
     using fixpp::wire::access_mode;
 

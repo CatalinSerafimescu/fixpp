@@ -129,8 +129,8 @@ fixpp_error_t fixpp_session_open(fixpp_engine_t* engine, fixpp_session_config_t*
         // 083 T050 / fixpp#215 item 1 (Option C): adopt the table of the snapshot
         // minted above — the very snapshot the registered SessionConfig carries —
         // rather than building a second one from the same Dictionary, through
-        // shared_dictionary_view (since fixpp#495 D-4 it shares the snapshot's
-        // table owner: `.specify/495-493-486-dict-reify-copy.md` §6). Null exactly
+        // shared_dictionary_view, which shares the snapshot's table owner (fixpp#495
+        // D-4, `.specify/495-493-486-dict-reify-copy.md` §6). Null exactly
         // when dict_ is null, so "no dictionary" and "no view" stay ONE state.
         h->tv_ = fixpp::dict::shared_dictionary_view(std::move(snap));
         fixpp_session* raw = h.get();

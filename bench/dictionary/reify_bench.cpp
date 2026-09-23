@@ -209,9 +209,10 @@ BENCHMARK(BM_Reify_DictBacked_20tag);
 // informational only (the copy's cost on this frame), not a regression witness —
 // BM_Reify_DictBacked_20tag is that.
 //
-// Setup checks (SkipWithError): the frame parses with >= 20 entries, >= 20 of them
-// valid for D; one untimed reify succeeds and, on the owned row, shares the
-// owner's table (the timed loop reaches the owned path, not an early return); and
+// Setup preconditions, each refused with SkipWithError: the frame's entry count,
+// and its count of fields valid for D, both reach the NFR's twenty; one untimed
+// reify succeeds and, on the owned row, shares the owner's table (the timed loop
+// reaches the owned path, not an early return); and
 // the arena margin rule holds — one untimed reify's draw from a counting resource
 // over this frame must fit HALF of the timed loop's arena. That arena has
 // `null_memory_resource()` upstream, so an overflow in the timed loop is a refusal
