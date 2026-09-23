@@ -14,6 +14,9 @@ status: stable
   superseded in part. `components/c-api.md` gains the C-ABI 1.8 loader entry (D-5) and a
   superseded-in-part note on the clone refusal it described. `L-458-2` is resolved. Authority:
   `.specify/495-493-486-dict-reify-copy.md`.
+  - **Gate B (PR #502)** adds two owner-approved instances to `failure-classes.md`:
+    - class 1: a phrase grep over comments cannot see a phrase that wraps onto the next comment line;
+    - class 10: a member added to a class template costs every instantiation (`MessageView<Iter>`).
 
 - **2026-09-22: fixpp#490 Gate B (PR #496).** `failure-classes.md` gains two owner-approved forms:
   - class 1: an oracle's error routed into the "not applicable" branch fails open in a gate;
