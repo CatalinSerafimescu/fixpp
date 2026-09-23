@@ -495,7 +495,12 @@ private:
     // of the table in `hooks_` when this view came from Parser's owned route, else
     // nullptr. A BORROWED pointer to the shared_ptr object, not a shared_ptr: no
     // refcount traffic per inbound message. Read only by shared_membership().
-    std::shared_ptr<const fixpp::dict::table_view> const* dict_owner_ = nullptr;
+    // Index mode only: both copy sites take a MessageView<Index>, so an Iter view
+    // carries an empty member of its own type and stores no owner pointer.
+    struct no_dict_owner_t {};
+    [[no_unique_address]] std::conditional_t<Mode == access_mode::Index,
+                                             std::shared_ptr<const fixpp::dict::table_view> const*,
+                                             no_dict_owner_t> dict_owner_{};
 };
 
 // field_iterator::advance — honours `hooks_` (default `none()`, the standard
@@ -603,8 +608,10 @@ std::shared_ptr<const fixpp::dict::table_view> MessageView<Mode>::shared_members
     if (hooks_.opaque_dict() == nullptr) {
         return nullptr;
     }
-    if (dict_owner_ != nullptr && dict_owner_->get() == hooks_.opaque_dict()) {
-        return *dict_owner_;
+    if constexpr (Mode == access_mode::Index) {
+        if (dict_owner_ != nullptr && dict_owner_->get() == hooks_.opaque_dict()) {
+            return *dict_owner_;
+        }
     }
     // Copied in place from the table reference: control block and table share one
     // allocation, and no table_view is moved.
@@ -825,15 +832,16 @@ public:
     [[clang::lifetimebound]] requires(Mode == access_mode::Iter) {
         // Gate B r8 P-1: thread THIS parser's bundle. Returning `{frame}` here dropped
         // the dictionary this parser was constructed with, silently.
-        MessageView<access_mode::Iter> mv{frame, hooks_};
-        mv.dict_owner_ = owner_;  // fixpp#495: nullptr unless built on the owned route
-        return mv;
+        // fixpp#495: an Iter view records no owner (MessageView's `dict_owner_`).
+        return MessageView<access_mode::Iter>{frame, hooks_};
     }
 
 private : dict_hooks hooks_ {};  // fixpp#426: replaces the separate opaque_dict_/
                                  // classify_fn_/group_member_fn_/group_delim_fn_
                                  // fields.
     // fixpp#495: the owned route's owner object (§2.2), nullptr on every other route.
+    // Held in both modes so the owned-route constructor compiles for either; only
+    // Index-mode parses store it on a view.
     std::shared_ptr<const fixpp::dict::table_view> const* owner_ = nullptr;
 };
 

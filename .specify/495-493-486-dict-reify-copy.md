@@ -158,8 +158,9 @@ throw `bad_alloc`; after the fix an MSVC failure in the member move reaches the 
 
 ### 2.1 The owner token lives on `MessageView`
 
-`MessageView<Mode>` gains `std::shared_ptr<const fixpp::dict::table_view> const* dict_owner_ = nullptr;`
-— a borrowed pointer to a `shared_ptr` **object**; `nullptr` means borrowed or dict-free. `Parser`
+`MessageView<Index>` gains `std::shared_ptr<const fixpp::dict::table_view> const* dict_owner_ = nullptr;`
+(`MessageView<Iter>` gets an empty `[[no_unique_address]]` member instead: both copy sites take
+`MessageView<Index>`, so an Iter view never reads an owner) — a borrowed pointer to a `shared_ptr` **object**; `nullptr` means borrowed or dict-free. `Parser`
 sets it after constructing the view (`MessageView` gains the declaration `template <access_mode>
 friend class Parser;` — it has none today — so no public constructor changes). The defaulted move carries it; copy is already deleted.
 
@@ -197,7 +198,8 @@ Parser(detail::owned_route_key, SP&&) noexcept
 // + private: std::shared_ptr<const fixpp::dict::table_view> const* owner_ = nullptr;
 ```
 
-`parse(frame, mr)`, `parse(frame, mr, cfg)` and `parse_iter(frame)` set `mv.dict_owner_ = owner_`.
+`parse(frame, mr)` and `parse(frame, mr, cfg)` set `mv.dict_owner_ = owner_`; `parse_iter(frame)` stores
+nothing. `Parser<Iter>` keeps `owner_`, so the owned-route constructor compiles in both modes.
 
 - **Why "not public API" holds (R-A basis).** `owned_route_key` is a **tag**, not a passkey:
   `dict::detail::snapshot_key` (`dictionary_snapshot.hpp`) has a private constructor and one friend,
@@ -644,7 +646,7 @@ The Python binding wraps `dict_load_from_xml` and gets the fix transparently
 | `template <class SP> Parser<Mode>::Parser(detail::owned_route_key, SP&&)` (+ deleted rvalue overload) | `parser.hpp` | **new**, `detail`-keyed |
 | `Parser<Mode>` layout | `parser.hpp` | +1 private pointer (`owner_`): size and layout change; source-compatible; not across the C ABI |
 | `wire::detail::message_view_membership_access::shared_membership` | `parser.hpp` | **new**, `detail` |
-| `MessageView<Mode>` | `parser.hpp` | +1 private pointer, one private member function, befriends `Parser` and the accessor; size grows by one pointer; no public signature change; not across the C ABI |
+| `MessageView<Mode>` | `parser.hpp` | +1 private pointer in `MessageView<Index>` only (an empty `[[no_unique_address]]` member in `Iter`: both copy sites take `MessageView<Index>`), one private member function, befriends `Parser` and the accessor; `MessageView<Index>` grows by one pointer, `MessageView<Iter>` does not; no public signature change; not across the C ABI |
 | `OffsetTable::Config OffsetTable::config() const noexcept` | `include/fixpp/wire/offset_table.hpp` | **new**, public |
 | `dictionary_driven_validator(table_view)` | `include/fixpp/wire/validator.hpp` | `noexcept` → conditional: unchanged on libstdc++/libc++, **narrowed** on MSVC |
 | `dictionary_snapshot` layout | `include/fixpp/dict/dictionary_snapshot.hpp` | inline `table_view` → `shared_ptr<const table_view>`: size, layout and destruction change; construction stays passkey-gated; not across the C ABI |
