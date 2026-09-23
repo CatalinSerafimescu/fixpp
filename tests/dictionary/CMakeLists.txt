@@ -24,9 +24,8 @@ find_package(pugixml CONFIG REQUIRED)
 add_test(NAME dictionary_snapshot_exclusivity_gate
   COMMAND bash "${CMAKE_SOURCE_DIR}/tools/test_dictionary_snapshot_exclusivity_gate.sh"
   WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-# The self-test rewrites tracked source files in place while it runs (the A5 test
-# TU, and `src/dictionary/dictionary_snapshot.cpp` for fixpp#495's T-18 seeds),
-# restoring them on exit. Serialize it, and share the lock the git-clean
+# The self-test rewrites tracked source files in place while it runs, restoring
+# them on exit (the files are the ones its EXIT trap copies back). Serialize it, and share the lock the git-clean
 # `fixpp::dict::codegen-build-graph-check` holds, so no parallel ctest sibling
 # compiles or inspects a transiently edited tree.
 set_tests_properties(dictionary_snapshot_exclusivity_gate PROPERTIES

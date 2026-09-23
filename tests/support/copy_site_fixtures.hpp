@@ -2,9 +2,9 @@
 // tests/support/copy_site_fixtures.hpp
 //
 // Shared frame builders and comparisons for the copy-site cap cells of fixpp#493
-// (`.specify/495-493-486-dict-reify-copy.md` §10, T-2..T-6). One definition for
-// the C clone cells (tests/capi/message_write_test.cpp) and the C++ reify cells
-// (tests/dictionary/reify_dispatch_test.cpp), so both sides copy the same shape.
+// (`.specify/495-493-486-dict-reify-copy.md` §10, T-2..T-6). One definition for the
+// C clone cells and the C++ reify cells, so both sides copy the same shape; list
+// the consumers with `grep -rln copy_site_fixtures.hpp tests`.
 //
 // The frames carry a computed CheckSum, so they pass the Framer the reify factory
 // re-frames its copy with, as well as `fixpp::wire::test::make_frame_view`
