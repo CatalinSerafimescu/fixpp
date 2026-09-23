@@ -1,8 +1,8 @@
 # #495 / #493 / #486 — a shared reify table, copies that keep the source's caps, and an honest validator `noexcept`
 
-> **Status: v0.4 — Gate A CLOSED at round 3 by owner-approved amendment (2026-09-23).** Rounds
-> (P1/P2/P3): R1 Codex 3/4/3, Opus 1/5/8; R2 Codex 0/5/4, Opus 0/4/11; R3 Codex 0/0/2, Opus 0/1/4 →
-> amended per owner (no re-review).
+> **Status: v0.5 — Gate A CLOSED at round 3 by owner-approved amendment (2026-09-23); post-Gate-A
+> `/analyze` applied (text only, no design change).** Rounds (P1/P2/P3): R1 Codex 3/4/3, Opus 1/5/8;
+> R2 Codex 0/5/4, Opus 0/4/11; R3 Codex 0/0/2, Opus 0/1/4 → amended per owner (no re-review).
 >
 > Batch branch `fix/495-493-486-dict-reify-copy`, cut from `origin/main` `3f200360`. This note is the
 > design authority for all three issues and **replaces a Spec-Kit bundle**. It triggers Gate A under
@@ -30,6 +30,13 @@
 >   `dict_` / `tv_` in this batch; the C-route text narrows instead (§3.4, T-13, B-495-1). The
 >   retained-shell cost is filed separately as fixpp#501.
 > - **Q-7 (2026-09-23)** — Gate A closes after round 3 by "amend, no re-review" (Opus option (a)).
+> - **R-E (2026-09-23)** — `detail/` headers and nested `<module>::detail` namespaces are Internal
+>   (clients must not use them) but ARE installed, because public headers include them. The
+>   api-contract Internal class names nested `detail` namespaces and tags such as `owned_route_key`
+>   explicitly, which grounds R-A in the contract rather than in precedent. → §2.2, §12.
+> - **R-F (2026-09-23)** — pre-release, `FIXPP_VERSION_*` and the CMake `project()` `VERSION` (0.0.1)
+>   are not bumped for C++ layout breaks; both the C-ABI and the library version reset to 1.0.0 at
+>   v1.0. → §7.2, §9, §12.
 > - **Rejected by the owner:** (b) refusing reify/clone on the borrowed route; (c) amending NFR-003-3
 >   only; v0.1's O-5 (keep the alias, document `L-495-2`).
 >
@@ -49,7 +56,7 @@
 | fixpp#493 | Clone and the reify factory re-parse under the **default** caps (`L-458-2`) | D-2: inherit the source's `Config` at every re-parse site |
 | fixpp#486 | `dictionary_driven_validator`'s `noexcept` constructor moves a `table_view`; on MSVC that allocates, so OOM terminates | D-3: conditional `noexcept` |
 | ride-along | Sharing through the snapshot's alias would pin the `Dictionary` and its load resource | D-4 |
-| ride-along | A C `Dictionary`'s storage lives in the host's default resource at load: one never attached to a session deallocates into it, and a session-attached one keeps live storage there that the host may tear down (an outbound `fixpp_msg::dict_` cannot drop the last reference while the session shell holds it) | D-5 |
+| ride-along | A C `Dictionary`'s storage lives in the host's default resource at load (the two paths that reach it: §7.1) | D-5 |
 
 One note, because the three issues edit the same statements: #493's two dict-backed sites are the
 two #495 rewrites, and D-4/D-5 exist because #495's sharing changes what a handle pins.
@@ -59,9 +66,13 @@ two #495 rewrites, and D-4/D-5 exist because #495's sharing changes what a handl
 - `[const §XVII.1]`: public C++ API (§9), parser (new `Parser` constructor), C ABI (D-5).
 - `[const §X.1]` / `[const §X.6]` / `[const §X.7]`: the C ABI changes (§7). §X.6's four Appendix A
   controls are discharged as `.specify/447-458-452-capi-refusals.md` did in issue mode: Codex Gate A
-  (this loop); `/clarify` by hand (the owner rulings are its record); `/analyze` over this note before
-  implementation (**pending**); owner `/plan` sign-off recorded in this header before implementation
-  (**pending**).
+  (this loop); `/clarify` by hand (the owner rulings are its record); `/analyze` over this note, run
+  by the spec-analyzer on 2026-09-23 before implementation (all findings text-only, applied in v0.5);
+  owner `/plan` sign-off = the owner's Gate A approval of 2026-09-23 (Q-7).
+- Appendix A categories this change touches, beyond the C ABI: **threading** (a table shared by
+  refcount and read from several threads, §3.3); **error semantics** (a copy's refusal set changes
+  under #493, §4; the validator's exception specification, §5); **codegen/loader** (the C
+  dictionary loader's resource, §7). No wire format, session FSM or security surface changes.
   - **#493 on the C ABI is an internal clone-seam widening with no public C producer.** No C surface
     can raise or lower a cap: `grep -rn "max_offset_entries\|max_group_entries_per_instance\|OffsetTable::Config" src include`
     finds only `offset_table.cpp`'s enforcement and `parser.hpp`'s C++ overloads (positive control:
@@ -69,8 +80,9 @@ two #495 rewrites, and D-4/D-5 exist because #495's sharing changes what a handl
     case. T-6 keeps the seam's remaining refusal witnessed.
 - `[const §VIII.2]`: any bench row past +5% needs non-author approval (§11).
 - `[const §VII.7]`: no new scanning code. The new `Parser` constructor builds the same `dict_hooks`
-  as the existing one; the `tests/fuzz/fuzz_wire_*` harnesses already cover the scanners it feeds.
-  No new harness is planned.
+  as the existing one; the `tests/fuzz/fuzz_wire_*` harnesses already cover the scanners it feeds —
+  recipe: `grep -n "Parser<access_mode::Index> p{tv}" tests/fuzz/fuzz_wire_parser.cpp` shows the
+  dict-backed `Parser` construction the harness drives. No new harness is planned.
 
 ### 0.3 Where the source contradicts the brief
 
@@ -80,7 +92,7 @@ two #495 rewrites, and D-4/D-5 exist because #495's sharing changes what a handl
 | C-2 | The owned route "restores no allocation outside `mr`" | `owning_message_handle_from_frame` begins with a global `new owning_message_handle::impl{mr}` on every route | Sharing alone cannot meet the clause; D-1c (§2.5) |
 | C-3 | `static_assert(is_nothrow_constructible_v<V, table_view&&> == is_nothrow_move_constructible_v<table_view>)` pins #486 | The trait also counts the caller-side move into the by-value parameter, so the equality holds on the unfixed tree on every toolchain | §5 isolates the constructor's own specification |
 | C-4 | A handle pins "the shared table" | For the C ABI and any C++ `Session` given `SessionConfig::dict_snapshot`, `inbound_tv_` aliases into a `dictionary_snapshot` whose `source_` holds the `Dictionary` | D-4 (§6) |
-| C-5 | Pinning only extends a lifetime | A `Dictionary` deallocates into its **load** resource on whatever thread drops it last | D-4 removes this for handles and clones; D-5 for C dictionaries — one never attached to a session, or storage in a host resource the host tears down (an outbound `fixpp_msg::dict_` cannot drop the last reference while the session shell holds it) |
+| C-5 | Pinning only extends a lifetime | A `Dictionary` deallocates into its **load** resource on whatever thread drops it last | D-4 removes this for handles and clones; D-5 for C dictionaries (§7.1) |
 
 ---
 
@@ -148,8 +160,8 @@ throw `bad_alloc`; after the fix an MSVC failure in the member move reaches the 
 
 `MessageView<Mode>` gains `std::shared_ptr<const fixpp::dict::table_view> const* dict_owner_ = nullptr;`
 — a borrowed pointer to a `shared_ptr` **object**; `nullptr` means borrowed or dict-free. `Parser`
-sets it after constructing the view (`MessageView` befriends `template <access_mode> friend class
-Parser;`, so no public constructor changes). The defaulted move carries it; copy is already deleted.
+sets it after constructing the view (`MessageView` gains the declaration `template <access_mode>
+friend class Parser;` — it has none today — so no public constructor changes). The defaulted move carries it; copy is already deleted.
 
 **Why a pointer, not a `shared_ptr`:** a by-value `shared_ptr` costs an atomic increment/decrement per
 inbound message, on a cache line shared by sessions sharing a snapshot; the pointer costs a store. The
@@ -191,16 +203,17 @@ Parser(detail::owned_route_key, SP&&) noexcept
   `dict::detail::snapshot_key` (`dictionary_snapshot.hpp`) has a private constructor and one friend,
   while this key is constructible by anyone, so tests and benches can name it. What makes it non-API
   is the repo's `detail` convention. `.specify/api-contract.md` §3.3 classifies `fixpp::detail::*`
-  and `<module>/detail/` headers as Internal; a nested `detail` namespace inside an installed module
-  header is not named there literally, and follows the in-tree precedent instead:
+  and `<module>/detail/` headers as Internal, and after R-E names nested `<module>::detail`
+  namespaces and tags such as `owned_route_key` there explicitly (they are installed but not for
+  clients). The in-tree precedent agrees:
   `fixpp::dict::detail::owning_message_handle_from_frame` in the installed `reify.hpp`, and the
   existing `namespace detail` blocks in `wire/parser.hpp` and `wire/view.hpp`. `explicit` forces the
   spelling `detail::owned_route_key{}` at every call.
-- **Lvalue only.** `owner_` stores the argument's address, so a temporary would dangle. The
+- **Lvalue only** (witness T-7). `owner_` stores the argument's address, so a temporary would dangle. The
   forwarding reference plus the `is_lvalue_reference_v` conjunct rejects both const and non-const
   rvalues. The deleted overload is **redundant** with that conjunct (each alone rejects rvalues,
   measured on clang 22 and GCC) and is kept only for its clearer "deleted function" diagnostic.
-- **Exact type (`same_as`).** A `shared_ptr<table_view>` lvalue binds `SP&&` directly. Without the
+- **Exact type (`same_as`, witness T-7).** A `shared_ptr<table_view>` lvalue binds `SP&&` directly. Without the
   constraint the error sits in the member initialiser, outside the immediate context, so
   `is_constructible_v` would report `true` for a construction that does not compile.
 - The existing borrowed constructor takes one argument, so the two never compete. Null owner is a
@@ -233,7 +246,7 @@ It returns:
    move cost). May throw `bad_alloc`, like `membership_copy()` (its FQ-1 note).
 3. **Dict-free:** `nullptr`.
 
-**Arm 1's identity check** defends one misuse: an owner object reassigned while its old table is
+Each arm is witnessed by T-8. **Arm 1's identity check** defends one misuse: an owner object reassigned while its old table is
 alive — the check misses and arm 2 copies the old table, which is the one the view was parsed
 against. It does **not** make a dead or reassigned owner safe (reading a destroyed owner is UB before
 the comparison; a dead old table already dangled; a new table at the dead one's address passes, ABA).
@@ -343,7 +356,7 @@ A `shared_ptr`'s pointee never relocates, and owner objects are not reassigned w
 | Route | `inbound_tv_` is | A live handle or clone pins |
 |---|---|---|
 | C++ `Session`, no `dict_snapshot` | `make_shared<const table_view>(dictionary->as_table_view())` | the table only |
-| C++ `Session` with `dict_snapshot`; every C-ABI session | a copy of the snapshot's own table owner (D-4) | the table only — not the snapshot, not the `Dictionary` (T-13, T-19) |
+| C++ `Session` with `dict_snapshot`; every C-ABI session | a copy of the snapshot's own table owner (D-4) | the table only — not the snapshot; the handle does not pin the `Dictionary` (T-19; C++ route T-13). On the C ABI the session shell pins it regardless (next bullets) |
 | Borrowed `Parser{tv}` | none | its own deep copy (unchanged) |
 
 - The pinned table is self-contained (§6.1), so handles and clones carry no load-resource obligation.
@@ -359,10 +372,8 @@ A `shared_ptr`'s pointee never relocates, and owner objects are not reassigned w
   on the C route, not witnessed; the C route's no-alias property rests on `fixpp_session_open` going
   through `shared_dictionary_view` (T-11, T-19). Owner ruling Q-6: not changed here; the retained-shell
   cost is filed separately as fixpp#501.
-- D-5 closes the two load-resource paths that remain (§7.1): a `fixpp_dict_t` never attached to a
-  session, destroyed into its load-time default resource; and a session-attached `Dictionary` whose
-  live storage sits for the process lifetime in a host resource the host may tear down. An outbound
-  `fixpp_msg::dict_` never drops the last reference while the session shell holds one.
+- The two load-resource paths that remain on the C ABI are closed by D-5; the one statement of them
+  is §7.1.
 - **Memory per handle:** before, one full table copy on the global heap; after, on the owned route,
   one refcount. A session closed while handles live keeps its table alive until the last handle dies
   — the pin O-1 accepted.
@@ -518,7 +529,7 @@ deduced return and type aliases. After R-C:
 - **Scope: tree-wide** (`src/ include/ bindings/ tools/ tests/`), decided: it costs nothing today,
   scratch-copy mutants are never committed, and a test needing an alias would need an allowlist.
 - The `G2 DEAD` liveness line (`-ge 1`) is deleted (the flipped tree fails it by design); T-18's
-  seeded positives replace it. The "(in the factory: N, elsewhere: M)" split and assertion (b)
+  seeded positives replace it. The "(in the factory: N, elsewhere: M)" split and G2's assertion (b)
   collapse into the one count. G1 is unchanged.
 - **Spelling rule for this change (code, comments and self-test alike).** G2 does not strip comments
   and has no self-exclusion. Safe: copying or assigning a `shared_ptr`, and `std::make_shared<const
@@ -581,7 +592,12 @@ deduced return and type aliases. After R-C:
   `tests/capi/version_test.cpp`'s exact-version cell (name and minor) and `CompositeMacroValue`;
   Tier 2 prose pins such as `src/capi/version.cpp`'s header and `version.h`'s narrative. No error
   code is minted, so `introducing_minor()` and `tools/abi_history/error_codes_v1.txt` do not change.
-- **Freeze manifest** (`tools/capi_freeze.sha256`, gate `tools/check_capi_freeze.sh`): edit `dict.h`
+  Classification of two hits that do **not** move: a `FIXPP_VERSION_MINOR` hit is the **library
+  track**, not bumped (R-F: pre-release, `FIXPP_VERSION_*` and the CMake `project()` `VERSION` stay at
+  0.0.1; both tracks reset to 1.0.0 at v1.0); `include/fix/c_api.h`'s stale "0.2.0" comment is
+  pre-existing and out of scope, left as is. Witness for the re-pin: T-21.
+- **Freeze manifest** (`tools/capi_freeze.sha256`, gate `tools/check_capi_freeze.sh`; recorded as
+  T-21): edit `dict.h`
   and `version.h`; the gate must **fail** on exactly those headers (positive control;
   `include/fix/c_api.h` carries no C-ABI version literal, so it is not among them); replace those two
   manifest lines with `sha256sum include/fix/c_api/dict.h include/fix/c_api/version.h`; the gate must
@@ -608,7 +624,7 @@ The Python binding wraps `dict_load_from_xml` and gets the fix transparently
 | `table_view` refcounted internally | Would share the validator's SC-007 by-value copy too, and change #456's sealed type |
 | (i) A table-only owner **copied** at `open()` | One resident table per snapshot-route session; (i′) gets the property without the copy |
 | (ii) D-5 alone | Closes the C half only; taken **with** D-4 for the outbound pin D-4 does not reach |
-| G2 as an AST-based check | Heavier, a new toolchain dependency in a required job, and still a spelling of the property; T-13's `weak_ptr` arms witness the property itself (PR #262's lesson: do not let a selector stand in for a test) |
+| G2 as an AST-based check | Heavier, a new toolchain dependency in a required job, and still a spelling of the property; T-13's `weak_ptr` arm (C++ twin) witnesses the property itself (PR #262's lesson: do not let a selector stand in for a test) |
 | A mallocnesia budget of 1 on the owned arm instead of D-1c | Needs a `--max-allocs` passthrough `fixpp_add_mallocnesia_test` lacks, and leaves "no allocation outside `mr`" false |
 | #493 via a shared `reparse_like` helper in `wire` | Sites come in two shapes (refusing `Parser::parse`, degrading raw constructor); a one-line accessor is the same single source of truth |
 | #493: a new dict-free `MessageView(frame, mr, Config)` constructor | The four-argument constructor with `none()` already is that route |
@@ -650,6 +666,10 @@ snapshot or its `Dictionary` alive.
 **C ABI (§7):** `dict.h`'s doc comment, `version.h`'s MINOR and the freeze manifest change; no
 prototype, error code or symbol-golden line. The Python binding exposes none of the C++ symbols above.
 
+**Library version (R-F):** the C++ layout breaks above do **not** bump `FIXPP_VERSION_*` or the CMake
+`project()` `VERSION` (0.0.1): pre-release, the library track is not bumped, and it resets to 1.0.0 at
+v1.0 together with the C-ABI version.
+
 ---
 
 ## 10. Tests — TDD order; each RED names the mutation that turns it red
@@ -659,6 +679,19 @@ failing to compile (record the error). Mutations run in a **scratch copy**, neve
 "Owned-route parse" = `Parser<Index>{wire::detail::owned_route_key{}, sp}` with `sp` kept alive as
 §3.1 requires.
 
+**Comparisons (no new `operator==`).** A `Config` compares member-wise (`max_offset_entries`,
+`max_group_entries_per_instance`). A `group_context` compares by `msg_type` **content** plus
+`depth` and the `parent_path` prefix `[0, depth)` — `msg_type` is a view into each message's own
+buffer, so pointer identity would differ between source and copy.
+
+**Registration (`[const §VII.8]`).** Isolation-safe cells join their module's existing grouped
+bucket. T-11, T-13, T-17, T-20 and §5's behavioural fallback (if built) are isolation-sensitive
+(threads, sanitizer arms, a global default resource, a TU-local `operator new`) and register as
+standalone binaries, each carrying the `495` label besides its module label. T-14 is standalone by
+construction (mallocnesia). The shared frame builder `make_oversized_frame_for_clone_test` moves from
+`tests/capi/message_write_test.cpp` to `tests/support/` so the C++ reify cells (T-2, T-4, T-5) and
+the C cells use one definition.
+
 ### #486
 - **T-1 — §5's `static_assert`.** RED on the MSVC leg, unfixed tree; Linux mutation `noexcept(false)`.
   Both recorded.
@@ -667,7 +700,7 @@ failing to compile (record the error). Mutations run in a **scratch copy**, neve
 - **T-2 — `ReifyEagerMaterialization.RaisedCapDictBackedSourceReifiesUnderItsOwnCaps`.** The
   4100-field `make_oversized_frame_for_clone_test` shape, parsed dict-backed at
   `max_offset_entries = 8192`, reified through the factory. Asserts a value;
-  `view().offsets().config()` equals the source's; `field_value(49) == "SENDERID"`; equal entry
+  `view().offsets().config()` equals the source's (member-wise); `field_value(49) == "SENDERID"`; equal entry
   counts. RED today: `wire_offset_table_full`. Mutation: S1 back to two arguments.
 - **T-3 — `MessageWrite.CloneDictBackedReparseCapExceededYieldsWireLimitExceeded`** renamed
   `…RaisedCapSourceClonesUnderItsOwnCaps`: `FIXPP_ERR_OK`, the clone's 49, equal entry counts;
@@ -675,8 +708,8 @@ failing to compile (record the error). Mutations run in a **scratch copy**, neve
 - **T-4 — dict-free fallbacks.** `MessageWrite.CloneDictFreeOversizedSourceStillReturnsOk` gains
   `fixpp_msg_get_string(clone, 49) == "SENDERID"`; a C++ twin reifies a dict-free raised-cap source
   and reads 49. Both also assert
-  `copy.offsets().group_context_for(t) == source.offsets().group_context_for(t)` for a
-  `Parser{}`-parsed source and any count tag `t`. RED today (empty copy). Mutations: S3, S4 each back
+  that `copy.offsets().group_context_for(t)` equals `source.offsets().group_context_for(t)` (by the
+  comparison rule above) for a `Parser{}`-parsed source and any count tag `t`. RED today (empty copy). Mutations: S3, S4 each back
   to two arguments (the context assertion also goes RED).
 - **T-5 — the whole `Config`, both directions.**
   - (a) **Raised:** a dict-backed source with raised `max_offset_entries` and raised
@@ -724,21 +757,26 @@ failing to compile (record the error). Mutations run in a **scratch copy**, neve
 - **T-9 — reify shares.** Owned-route source, reified: `handle.view().hooks().opaque_dict() == sp.get()`;
   reifying `handle.view()` again yields the same address. RED today. Mutation: arm 1 → arm 2.
 - **T-10 — clone shares.** Via `capi_internal.hpp`: `clone->owned_tv_.get() == sp.get()`, and a clone
-  of the clone shares. RED today (type mismatch, then address).
+  of the clone shares. RED today (type mismatch, then address). Mutation: the clone site seats
+  `owned_tv_` through arm 2 (a copy) instead of arm 1 — the address equality goes RED.
 - **T-11 — a pinned table outlives the `Dictionary` and its load arena** (ASan and TSan).
   - Setup: heap-allocate a `monotonic_buffer_resource` and its buffer (so a late deallocation is a
     heap-use-after-free, not stack-use-after-scope); load the `Dictionary` into it;
     `snap = make_dictionary_snapshot(dict)`, `sp = shared_dictionary_view(snap)`; owned-route parse of
     a NoLegs frame in a separate parse arena; reify into a handle arena that lives to the end; clone.
-    Destroy in order: source view, frame, parse arena; then `sp`, `dict`, `snap`; last the load arena.
-  - A second thread reads NoLegs, membership-bounded, from handle and clone, then drops both there.
+  - Sequencing: the second thread is started holding the handle and the clone, and blocks on a
+    `std::latch`. The main thread destroys everything else in order — source view, frame, parse arena;
+    then `sp`, `dict`, `snap`; last the load arena — and then counts the latch down. The second thread
+    reads NoLegs, membership-bounded, from handle and clone, drops both there, and the main thread
+    joins it.
   - Asserts: both reads succeed; ASan and TSan clean.
   - **RED arm (ASan):** the **alias mutant** — in `shared_dictionary_view`, take
     `table_view const* p = snap->view_owner().get();` before moving `snap`, then return the aliasing
     construction over `std::move(snap)` and `p`. The second thread's drop runs `~Dictionary` into the
     destroyed arena. (This mutant is also T-13's and T-19's.)
 - **T-12 — borrowed-route survival** (`GroupMembershipSurvivesSourceDestruction`, `Parser{tv}`),
-  unchanged and green: the borrowed route keeps its self-contained copy.
+  unchanged and green: the borrowed route keeps its self-contained copy. A **regression pin by
+  design** (GREEN before and after); it has no RED of its own in this change.
 - **T-13 — shipped route, real dispatch** (066 Decision 6). Two twins; each asserts on the
   **unmutated** tree first, so a false RED is loud before any mutant runs.
   - **C++ twin.** A `Session` given `SessionConfig::dict_snapshot`; `Application::fromApp` reifies two
@@ -751,9 +789,8 @@ failing to compile (record the error). Mutations run in a **scratch copy**, neve
   - **C twin** (engine loopback). Load via `fixpp_dict_load_from_xml`. The recv callback clones two
     inbound handles; assert their `owned_tv_` compare equal and equal `sess->tv_` (sharing). Then
     destroy the engine, every session config, and the test's `fixpp_dict_t`, and read a group from
-    each clone under ASan. **No `weak.expired()` assertion:** on the C ABI the retained session shell
-    holds the `Dictionary` for the process lifetime (§3.4, owner ruling Q-6), so expiry is
-    unsatisfiable on the fixed tree.
+    each clone under ASan. **No `weak.expired()` assertion:** expiry is moot on the C route (§3.4,
+    Q-6).
   - Mutations: revert `pd_parser` to `{*inbound_tv_}` (address equality RED in both twins); the T-11
     alias mutant (`weak.expired()` RED in the C++ twin).
 - **T-14 — the owned route performs no global-heap allocation.**
@@ -781,7 +818,9 @@ failing to compile (record the error). Mutations run in a **scratch copy**, neve
   `wire_alloc_guard_test_mallocnesia` covers the dict-free path. ⚠️ No mallocnesia gate covers
   `Session` dispatch itself (`alloc_guard_dispatch` / `alloc_guard_session` are deliberately ungated:
   their windows wrap `co_spawn` / `ioc.run()`); this change stores one more pointer and does not
-  widen that gap.
+  widen that gap. Mutation: the owned `parse()` path allocates on the global heap (e.g. it seats the
+  view's owner through a `std::make_shared` table copy instead of the owner's address) — the owned
+  arm's counter goes RED.
 - **T-16 — OOM recalibration by phase.**
   - **Population recipe** (every factory / `dict::reify` / `from_frame` call made under a bounded or
     failing `mr`, not one lever):
@@ -867,7 +906,9 @@ failing to compile (record the error). Mutations run in a **scratch copy**, neve
   fix → the loader has a `get_default_resource()` fallback for retained storage: a finding in the
   loader.
 - **T-21 — C-ABI version and freeze pins:** §7.2's pin population updated; its fail-then-pass freeze
-  sequence recorded in the verify record.
+  sequence recorded in the verify record. Mutations: `FIXPP_C_ABI_VERSION_MINOR` back to 7 — the
+  exact-version cell in `tests/capi/version_test.cpp` goes RED; `dict.h` edited without re-pinning
+  its manifest line — `tools/check_capi_freeze.sh` fails on that header.
 
 ---
 
@@ -888,9 +929,20 @@ Baseline on `3f200360` **before any edit** (owner).
 - ⚠️ **Attributing a reading on that row:** its 4 KiB `reify_buf` arena has a `new_delete` upstream.
   If the impl no longer fits under D-1c the row spills to the heap, and that shows as a D-1c cost.
   Check spill before attributing a +5% reading; a slowdown past +5% goes to non-author approval.
-- **New rows' setup checks** (`SkipWithError`): `parsed->offsets().entries().size() >= 20`; a stack
-  arena with `null_memory_resource()` upstream sized with a stated margin (overflow is a refusal, not
-  a silent heap allocation in the timed loop; `k20TagBufSz` is not assumed to fit).
+- **New rows' setup checks** (`SkipWithError`): `parsed->offsets().entries().size() >= 20`; one
+  untimed reify must succeed and, on the owned row, `handle.view().hooks().opaque_dict()` must equal
+  the owner's pointer (proves the timed loop reaches the owned path, not an early return); the stack
+  arena has `null_memory_resource()` upstream, so an overflow is a refusal, not a silent heap
+  allocation in the timed loop (`k20TagBufSz` is not assumed to fit).
+- **Arena margin rule:** the arena is sized at **twice** the bytes one untimed reify draws from a
+  counting resource over the same frame, measured in setup; setup fails with `SkipWithError` if the
+  measured draw exceeds half the arena.
+- **Pre-registered disposition** if `BM_Reify_DictBacked_Owned_20field` reads **above 1.2 µs** on the
+  reference machine (this dev box: WSL2, pinned CPU 3, `linux-clang-release`): it escalates to the
+  owner for a ruling — either NFR-003-3 is narrowed further or the design is revisited. It is not
+  waived by the implementer.
+- `bench/ci-suite.txt` gains a comment line (no CMake change) stating what the borrowed route is held
+  to: no regression against the merge-base on `BM_Reify_DictBacked_20tag`.
 - `bench/wire/parser_bench` also runs base-vs-head (`MessageView` grew, `Parser` stores a pointer);
   it is CI-`paired`.
 - **Procedure:** `linux-clang-release`, A-B-A-B, min-per-tree, one machine; raw JSON in the verify
@@ -902,7 +954,8 @@ Baseline on `3f200360` **before any edit** (owner).
 ## 12. Spec, B&L, catalogue, brain and comment deltas
 
 **NFR-003-3** (`specs/003-dictionary-codegen/spec.md`), amended in place with an *"Amended
-(fixpp#495, 2026-09-…)"* note, scoped to `dict::reify` only:
+(fixpp#495, <date>)"* note — the date is the implementation commit's, filled in then — scoped to
+`dict::reify` only:
 > ≤ 1.2 µs (20-tag), and no allocation outside `mr`, when `dict::reify` consumes a view delivered by
 > the shipped `Session` dispatch path, or the `view()` of a handle derived from one. When it consumes
 > a view the caller parsed through a borrowed `Parser{tv}`, `dict::reify` deep-copies the membership
@@ -924,13 +977,12 @@ own control block, and G2 asserts zero matches of its enumerated spellings."*
 **B&L** (`spec/behaviors-and-limitations.md`), new section; each row names its witness:
 - **`B-495-1`** — on the shipped dispatch path, `dict::reify` and `fixpp_msg_clone` share the source's
   table by reference count; a live handle or clone keeps that table alive, never the `Dictionary`
-  (C++ route). On the C ABI the session shell holds the `Dictionary` for the process lifetime
-  (pre-existing; cost filed separately as fixpp#501), so there only the sharing is claimed.
+  (C++ route). On the C ABI only the sharing is claimed (why: §3.4, Q-6; cost filed as fixpp#501).
   *Witness: T-9, T-10, T-13 (C++ twin: sharing + expiry; C twin: sharing).*
 - **`L-495-1`** — a source parsed through a borrowed `Parser{tv}` still deep-copies the table per
   handle, above NFR-003-3's ceiling and scoped out of it. *Witness: T-12; §11 borrowed rows.*
-- **`B-495-2`** (D-4) — a `dictionary_snapshot`'s table outlives the snapshot while a view of it is
-  held; the snapshot's `Dictionary` does not. *Witness: T-19(a), T-11.*
+- **`B-495-2`** (D-4) — a held view of a `dictionary_snapshot`'s table does not keep the snapshot or
+  its `Dictionary` alive; the table itself lives as long as the view. *Witness: T-19(a), T-11.*
 - **`B-495-3`** (D-5), **BREAKING (C-ABI 1.8)** — `fixpp_dict_load_from_xml` allocates from
   `std::pmr::new_delete_resource()`; a host's installed default resource no longer backs a C
   dictionary. *Witness: T-20.*
@@ -940,15 +992,15 @@ own control block, and G2 asserts zero matches of its enumerated spellings."*
   copy); a dict-free copy's root group context matches the parsed-source form;
   `FIXPP_ERR_WIRE_LIMIT_EXCEEDED` from clone is reachable only from a source whose own build failed.
   *Witness: T-2, T-3, T-4, T-5(a)/(b), T-6.*
-- **`B-486-1`** — `dictionary_driven_validator`'s constructor is `noexcept` exactly where
-  `table_view`'s move is nothrow; on MSVC an allocation failure in it propagates as `bad_alloc`.
-  *Witness: T-1.*
+- **`B-486-1`** — `dictionary_driven_validator`'s constructor is specified
+  `noexcept(std::is_nothrow_move_constructible_v<table_view>)`: `noexcept` exactly where `table_view`'s
+  move is nothrow, so on a toolchain whose move can throw (MSVC) the constructor does not promise
+  `noexcept`. The row claims the specification only. *Witness: T-1.*
 - **`L-458-2`** moves to `spec/behaviors-and-limitations-closed.md`, resolved by fixpp#493.
 - **`L-456-2`** stays live; its ⚠️ paragraph changes: the validator leaves "who already paid it" (now
   conditional, fixpp#486); `optional::emplace` stays as a generic move path, scoped *"no production
-  copy site uses it after fixpp#495"* (`grep -rnE "optional<.*table_view|owned_tv_\.emplace" src include tests`
-  should then show only `tests/dictionary/table_view_test.cpp`, `tests/wire/dict_hooks_custom_pair_test.cpp`
-  and `table_view.hpp`'s note); the snapshot's member move is replaced by its move into the
+  copy site uses it after fixpp#495"*. Condition: `grep -rnE "optional<.*table_view|owned_tv_\.emplace" src include`
+  has no hit outside a comment (`tests/` hits are generic move-path tests, allowed); the snapshot's member move is replaced by its move into the
   `make_shared` block (same count). Borrowed arm 2 adds no move path.
 
 **Catalogue** (`spec/feature-catalogue.md`): dated notes on CA-009 (clone), the wire rows carrying the
@@ -960,6 +1012,16 @@ route and table pin; the ⚠️ residuals line drops `L-458-2`; its `.specify/21
 entries flag the alias design (incl. §5b's "third owner") as **superseded in part** by this note.
 `brain/components/c-api.md` — the clone entry likewise, and the loader entry for D-5. Each component
 index lists this note.
+
+**`.specify/api-contract.md` and `.specify/architecture.md` (R-E, R-F):**
+- api-contract §2's Internal tier and its §3.3 "Detail headers …" sentence: `detail/` headers are
+  **installed** (public headers include them) and are not for clients; drop "excluded from the
+  install set". The Internal class names nested `<module>::detail` namespaces in installed headers
+  and `detail` tags such as `wire::detail::owned_route_key` explicitly.
+- architecture §9.1's "Detail headers are excluded from the install set" gets the same correction.
+- api-contract §4 gains the library-track pre-release clause: before the first public release a C++
+  layout or signature break does not bump `FIXPP_VERSION_*` or the CMake `project()` `VERSION`;
+  both tracks reset to 1.0.0 at v1.0.
 
 **Superseding header comments** (parent `CLAUDE.md` rule): `impl::owned_tv_`; `fixpp_msg::owned_tv_`;
 `membership_copy()`'s "the ONE accessor" comment; `Session::inbound_tv_` (with §2.6's invariant);
@@ -986,9 +1048,16 @@ obeys §6.4's spelling rule.
 
 Builds are owner-approved before they run (`[const §XVII.7]`); check `df -h /mnt/e` first.
 
-1. **`linux-clang-debug`, targeted:**
-   `ctest -R 'Reify|reify|MessageWrite|Clone|SharedMembership|validator|dict066|alloc_guard|DictionarySnapshot|SessionTableViewReuse|CapiGroupDelimiterCtx|CapiDictionary|version'`,
-   then the full `ctest -L` sets for `dictionary`, `capi`, `session`, `wire`.
+1. **`linux-clang-debug`, targeted, by label (`[const §VII.8]`: `ctest -L`, never `-R`).** The cells
+   land in these ctest buckets: `dictionary_reify_tests` (T-2, T-4 twin, T-5, T-9, T-16; label
+   `dictionary`), `dictionary_pure_tests` (T-19(a); `dictionary`), `dictionary_reify_membership_copy_oom_test`
+   (T-16(b); `066`), `wire_pure_tests` (T-1, T-7, T-8; `wire`), `capi_message_write` (T-3, T-4, T-6,
+   T-10; `capi`), `capi_dict066_clone_membership_copy_oom` (T-16(b); `066`), `capi_pure_tests`
+   (T-19(c), T-21; `capi`), `session_table_view_reuse` (T-19(b),(d); `session`),
+   `dict066_grouped_read_alloc_guard` (T-15; `alloc_guard`), and the new standalone binaries
+   (T-11, T-13, T-14, T-17, T-20), each labelled `495`. Run
+   `ctest -L '495|dictionary|capi|session|wire|alloc_guard|066'`. A bucket's final name and label are
+   re-derived from `ctest --show-only=json-v1` after registration.
 2. **Mallocnesia, point 1** (owner): after implementation, before `/simplify` and the verify record,
    on the Linux non-sanitizer preset (`build/<preset>/lib/libmallocnesia.so`):
    - `python3 tools/check_mallocnesia_population.py --build-dir build/<preset> --min-gates 20`
@@ -1000,8 +1069,11 @@ Builds are owner-approved before they run (`[const §XVII.7]`); check `df -h /mn
 4. **Bench:** §11, `linux-clang-release`, against the pre-edit baseline.
 5. **Coverage:** `linux-clang-coverage`, targeted, over the changed functions in `reify.cpp`,
    `message_write.cpp`, `parser.hpp`, `offset_table.hpp`, `dictionary_snapshot.cpp`,
-   `src/capi/dictionary.cpp`; every new branch covered, incl. `shared_membership()`'s
-   reassigned-owner arm.
+   `dictionary_snapshot.hpp`, `src/capi/dictionary.cpp`, `session.cpp` and `validator.hpp`; every new
+   branch covered, incl. `shared_membership()`'s reassigned-owner arm. **`[const §IX.1]` waiver,
+   pre-registered:** `detail::checked_owner`'s `assert(owner)` false branch is a violated precondition
+   (a debug abort), not exercised by any cell; covering it needs a death test for a `detail`
+   precondition, which this note does not add.
 6. **MSVC local** (parent repo `research/G19-fix-fpml-iso20022/msvc-local-build-procedure.md`; toolset
    from `CMakeCache.txt`'s `CMAKE_LINKER`): T-1 fails to compile unfixed and compiles fixed (decides
    Q-2); T-16's cells run on `windows-msvc-release`.
@@ -1070,3 +1142,4 @@ supersedes; `.specify/456-table-view-seal.md`'s no-assignment rule; `.specify/ap
 - Round 1 applied 2026-09-23: Codex P1=3 P2=4 P3=3; Opus post-judging P1=1 P2=5 P3=8; rewrite addresses root causes 1-4 + owner rulings R-A..R-D (Fable consult b13-reify-handle-pins-dictionary-resource). Reviews: `research/G19-fix-fpml-iso20022/research/reviews/codex_495_493_486_1_dict-reify-copy_review.md`, `research/G19-fix-fpml-iso20022/research/reviews/opus_495_493_486_1_dict-reify-copy_triage.md` (parent repo).
 - Round 2 applied 2026-09-23: Codex P1=0 P2=5 P3=4; Opus post-judging P1=0 P2=4 P3=11; rewrite addresses root causes A-D + P3s + consolidation. Reviews: `research/G19-fix-fpml-iso20022/research/reviews/codex_495_493_486_2_dict-reify-copy_review.md`, `research/G19-fix-fpml-iso20022/research/reviews/opus_495_493_486_2_dict-reify-copy_triage.md` (parent repo).
 - Round 3 2026-09-23: Codex P1=0 P2=0 P3=2; Opus post-judging P1=0 P2=1 P3=4; rewrite cap reached; owner ruled "amend, no re-review" — text-only amendment of N-1 (C expiry assertion dropped, §3.4/B-495-1 narrowed), T-6 mutation, whitespace, N-2, N-3. Reviews: `research/G19-fix-fpml-iso20022/research/reviews/codex_495_493_486_3_dict-reify-copy_review.md`, `research/G19-fix-fpml-iso20022/research/reviews/opus_495_493_486_3_dict-reify-copy_triage.md` (parent repo).
+- Post-Gate-A `/analyze` applied 2026-09-23 (text only; no design change).
