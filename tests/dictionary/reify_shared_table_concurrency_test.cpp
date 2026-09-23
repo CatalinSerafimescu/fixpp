@@ -24,13 +24,13 @@
 #include <fixpp/wire/message_view_contract.hpp>
 #include <memory>
 #include <memory_resource>
-#include <span>
 #include <thread>
 #include <vector>
 
 #include "support/app_message_read_scaffold.hpp"
 #include "support/fix44_dictionary.hpp"
 #include "support/fix44_group_frame_bodies.hpp"
+#include "support/frame_view_factory.hpp"
 
 namespace {
 
@@ -55,14 +55,10 @@ TEST(ReifySharedTableConcurrency, TwoThreadsReadOneSharedTable) {
     auto const frame = fixpp_test_support::make_execution_report_frame(
         fixpp_test_support::execution_report_two_legs_trailing_suffix(), /*seq=*/3, "S", "T");
     std::pmr::monotonic_buffer_resource parse_arena;
-    fixpp::wire::pmr_carry_buffer carry{frame.size(), &parse_arena};
-    fixpp::wire::Framer framer{};
-    fixpp::wire::frame_view fvs[1]{};
-    auto framed = framer.feed(std::span<const std::byte>{frame.data(), frame.size()}, carry,
-                              std::span<fixpp::wire::frame_view>{fvs, 1});
-    ASSERT_TRUE(framed.has_value() && !framed->empty());
+    auto const fv = fixpp::wire::test::make_frame_view(frame);
+    ASSERT_TRUE(fv.has_value());
     fixpp::wire::Parser<access_mode::Index> parser{fixpp::wire::detail::owned_route_key{}, sp};
-    auto src = parser.parse(fvs[0], &parse_arena);
+    auto src = parser.parse(*fv, &parse_arena);
     ASSERT_TRUE(src.has_value());
 
     std::pmr::monotonic_buffer_resource mr_a;

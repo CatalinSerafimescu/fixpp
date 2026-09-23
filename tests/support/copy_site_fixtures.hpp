@@ -6,37 +6,31 @@
 // C clone cells and the C++ reify cells, so both sides copy the same shape; list
 // the consumers with `grep -rln copy_site_fixtures.hpp tests`.
 //
-// The frames carry a computed CheckSum, so they pass the Framer the reify factory
-// re-frames its copy with, as well as `fixpp::wire::test::make_frame_view`
-// (frame_view_factory.hpp), which the C clone cells slice them with.
+// The frames carry a computed CheckSum (reify_test_frame.hpp's `assemble_frame`), so
+// they pass the Framer the reify factory re-frames its copy with.
+//
+// Consumers must define FIXPP_DICT_DATA_DIR (fix44_dictionary.hpp).
 #pragma once
 
 #include <algorithm>
-#include <array>
 #include <cstddef>
-#include <cstdio>
-#include <cstring>
+#include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/table_view.hpp>
 #include <fixpp/wire/group_view.hpp>    // wire::group_context
 #include <fixpp/wire/offset_table.hpp>  // wire::OffsetTable::Config
+#include <fixpp/wire/parser.hpp>
+#include <memory>
+#include <memory_resource>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
-namespace fixpp::test_support {
+#include "support/fix44_dictionary.hpp"
+#include "support/frame_view_factory.hpp"
+#include "support/reify_test_frame.hpp"  // assemble_frame
 
-// FIX.4.4 frame around `body`: `8=FIX.4.4|9=<len>|<body>10=<sum>|`.
-[[nodiscard]] inline std::vector<std::byte> make_raw_fix44_frame(std::string const& body) {
-    std::string const pre = "8=FIX.4.4\x01" + ("9=" + std::to_string(body.size()) + "\x01") + body;
-    unsigned sum = 0;
-    for (unsigned char const c : pre) {
-        sum += c;
-    }
-    std::array<char, 8> chk{};
-    std::snprintf(chk.data(), chk.size(), "10=%03u\x01", sum % 256U);
-    std::string const full = pre + chk.data();
-    std::vector<std::byte> out(full.size());
-    std::memcpy(out.data(), full.data(), full.size());
-    return out;
-}
+namespace fixpp::test_support {
 
 // MsgType(35)=D, a marker field SenderCompID(49)=SENDERID, then `n_occurrences`
 // repeats of a plain non-group tag (1=x). Once `n_occurrences + 2` exceeds
@@ -49,7 +43,7 @@ namespace fixpp::test_support {
     for (int i = 0; i < n_occurrences; ++i) {
         body += "1=x\x01";
     }
-    return make_raw_fix44_frame(body);
+    return assemble_frame("8=FIX.4.4\x01", body);
 }
 
 // MsgType(35)=D with SenderCompID(49)=SENDERID and one NoPartyIDs(453) instance:
@@ -68,7 +62,7 @@ namespace fixpp::test_support {
         body += "447=D\x01";
     }
     body += "452=1\x01";
-    return make_raw_fix44_frame(body);
+    return assemble_frame("8=FIX.4.4\x01", body);
 }
 
 // Member-wise comparisons: the types carry no operator== (note §10
@@ -86,6 +80,63 @@ namespace fixpp::test_support {
     return a.msg_type == b.msg_type && a.depth == b.depth &&
            std::equal(a.parent_path.begin(), a.parent_path.begin() + a.depth,
                       b.parent_path.begin());
+}
+
+// A copy-site SOURCE view: `frame` parsed under `cfg`, dict-backed over FIX44
+// when `dict_backed`, else through a dict-free `Parser{}`. Every dependency (the
+// Dictionary, its table, the frame bytes, the parse arena) is a member, so the
+// view lives as long as the fixture. Callers ASSERT ok() before view().
+class copy_site_source {
+public:
+    copy_site_source(std::vector<std::byte> frame, fixpp::wire::OffsetTable::Config cfg,
+                     bool dict_backed)
+        : frame_(std::move(frame)) {
+        if (dict_backed) {
+            dict_ = make_fix44_dictionary();
+            tv_.emplace(dict_->as_table_view());
+        }
+        auto fv = fixpp::wire::test::make_frame_view(frame_);
+        if (!fv.has_value()) {
+            return;
+        }
+        fv_ = *fv;
+        std::optional<fixpp::wire::Parser<fixpp::wire::access_mode::Index>> parser;
+        if (tv_) {
+            parser.emplace(*tv_);
+        } else {
+            parser.emplace();
+        }
+        if (auto parsed = parser->parse(fv_, &arena_, cfg); parsed.has_value()) {
+            mv_.emplace(std::move(*parsed));
+        }
+    }
+    copy_site_source(copy_site_source const&) = delete;
+    copy_site_source& operator=(copy_site_source const&) = delete;
+    copy_site_source(copy_site_source&&) = delete;
+    copy_site_source& operator=(copy_site_source&&) = delete;
+    ~copy_site_source() = default;
+
+    [[nodiscard]] bool ok() const noexcept { return mv_.has_value(); }
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    [[nodiscard]] fixpp::wire::MessageView<fixpp::wire::access_mode::Index> const& view()
+        const noexcept {
+        return *mv_;
+    }
+
+private:
+    std::shared_ptr<const fixpp::dict::Dictionary> dict_;
+    std::optional<fixpp::dict::table_view> tv_;
+    std::vector<std::byte> frame_;
+    std::pmr::monotonic_buffer_resource arena_;
+    fixpp::wire::frame_view fv_{};
+    std::optional<fixpp::wire::MessageView<fixpp::wire::access_mode::Index>> mv_;
+};
+
+// The marker field every copy-site frame carries: SenderCompID(49)=SENDERID.
+[[nodiscard]] inline bool reads_sender_id(
+    fixpp::wire::MessageView<fixpp::wire::access_mode::Index> const& v) {
+    auto f = v.get(49);
+    return f.has_value() && f->as_string() == "SENDERID";
 }
 
 }  // namespace fixpp::test_support

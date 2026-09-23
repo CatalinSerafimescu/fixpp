@@ -154,8 +154,7 @@ bool slice_has_tag(fixpp::wire::group_slice const& s, std::uint16_t tag) {
 // builds (fixpp#495, `.specify/495-493-486-dict-reify-copy.md` §2.6, T-15).
 template <class ReadFn>
 bool parse_and_read(fixpp::dict::table_view const& tv, std::vector<std::byte> const& raw,
-                    ReadFn&& read,
-                    std::shared_ptr<const fixpp::dict::table_view> const* owner = nullptr) {
+                    ReadFn&& read, std::shared_ptr<const fixpp::dict::table_view> const* owner) {
     std::array<std::byte, kInboundParseArena> pa_buf{};
     std::pmr::monotonic_buffer_resource pa_mr{pa_buf.data(), pa_buf.size(),
                                               ::fixpp::detail::arena_upstream()};
@@ -223,22 +222,15 @@ TEST(Dict066GroupedReadAllocGuard, TopLevelGroupParseAndReadZeroGlobalHeap) {
     };
 
     // Warm-up (outside the window): prime any first-call lazy-init state.
-    ASSERT_TRUE(parse_and_read(tv, raw, do_read));
-
-#if !FIXPP_SANITIZER_REPLACES_NEW
-    g_alloc_count.store(0, std::memory_order_relaxed);
-#endif
-    if (alloc_guard_start) alloc_guard_start();
-
-    bool ok = parse_and_read(tv, raw, do_read);
-
-    if (alloc_guard_end) alloc_guard_end();
-
+    ASSERT_TRUE(parse_and_read(tv, raw, do_read, nullptr));
+    auto const [ok, allocs] = measured(tv, raw, do_read, nullptr);
     EXPECT_TRUE(ok);
 #if !FIXPP_SANITIZER_REPLACES_NEW
-    EXPECT_EQ(g_alloc_count.load(std::memory_order_relaxed), 0)
+    EXPECT_EQ(allocs, 0)
         << "top-level dict-backed group parse+read must not touch the global heap "
            "(FR-004: table_view built once, per-message reads from the stack arena)";
+#else
+    (void)allocs;
 #endif
 
     // fixpp#495 T-15: the OWNED route, as parse_and_dispatch_ builds it
@@ -306,22 +298,14 @@ TEST(Dict066GroupedReadAllocGuard, NestedGroupParseAndReadZeroGlobalHeap) {
     };
 
     // Warm-up (outside the window).
-    ASSERT_TRUE(parse_and_read(tv, raw, do_read));
-
-#if !FIXPP_SANITIZER_REPLACES_NEW
-    g_alloc_count.store(0, std::memory_order_relaxed);
-#endif
-    if (alloc_guard_start) alloc_guard_start();
-
-    bool ok = parse_and_read(tv, raw, do_read);
-
-    if (alloc_guard_end) alloc_guard_end();
-
+    ASSERT_TRUE(parse_and_read(tv, raw, do_read, nullptr));
+    auto const [ok, allocs] = measured(tv, raw, do_read, nullptr);
     EXPECT_TRUE(ok);
 #if !FIXPP_SANITIZER_REPLACES_NEW
-    EXPECT_EQ(g_alloc_count.load(std::memory_order_relaxed), 0)
-        << "nested descent through the flipped dict-backed session-inbound path "
-           "must not touch the global heap (sub-views draw only from the arena)";
+    EXPECT_EQ(allocs, 0) << "nested descent through the flipped dict-backed session-inbound path "
+                            "must not touch the global heap (sub-views draw only from the arena)";
+#else
+    (void)allocs;
 #endif
 
     // fixpp#495 T-15: the OWNED route, as parse_and_dispatch_ builds it

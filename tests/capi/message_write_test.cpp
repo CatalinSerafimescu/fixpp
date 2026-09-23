@@ -2363,10 +2363,22 @@ TEST(MessageWrite, CloneNullAndDeadHandleErrors) {
 // whose OWN build failed (T-6). The frame builders are shared with the C++ reify
 // cells (tests/support/copy_site_fixtures.hpp).
 
+using fixpp::test_support::copy_site_source;
 using fixpp::test_support::make_long_party_instance_frame;
 using fixpp::test_support::make_oversized_frame_for_clone_test;
 using fixpp::test_support::same_config;
 using fixpp::test_support::same_group_context;
+
+namespace {
+// The copy-site marker field through the C read API: fixpp_msg_get_string(msg, 49)
+// is OK and reads "SENDERID". Non-fatal, so the caller's later checks still run.
+void expect_sender_id(const fixpp_msg_t* msg) {
+    const char* sv = nullptr;
+    size_t sv_len = 0;
+    EXPECT_EQ(fixpp_msg_get_string(msg, 49, &sv, &sv_len), FIXPP_ERR_OK);
+    EXPECT_EQ(std::string_view(sv == nullptr ? "" : sv, sv_len), "SENDERID");
+}
+}  // namespace
 
 // T-10 (fixpp#495, `.specify/495-493-486-dict-reify-copy.md` §2.4): a clone of an
 // owned-route view SHARES the owner's table, and a clone of that clone shares it
@@ -2412,27 +2424,17 @@ TEST(MessageWrite, CloneOfOwnedRouteViewSharesTheTable) {
 // the clone reads the marker field, keeps the source's entry count and Config, and
 // that the source stays intact (FR-005's post-condition, unchanged).
 TEST(MessageWrite, CloneDictBackedRaisedCapSourceClonesUnderItsOwnCaps) {
-    using fixpp::wire::access_mode;
-    using fixpp::wire::OffsetTable;
-
-    auto dict = fixpp::test_support::make_fix44_dictionary();
-    auto tv = dict->as_table_view();
-
     // Past the default entry cap, admitted here by a raised cap so the SOURCE
     // itself is valid.
-    auto src_buf = make_oversized_frame_for_clone_test(4100);
-    auto fv = fixpp::wire::test::make_frame_view(src_buf);
-    ASSERT_TRUE(fv.has_value());
-
-    std::pmr::monotonic_buffer_resource arena;
-    fixpp::wire::Parser<access_mode::Index> parser{tv};
-    OffsetTable::Config raised_cfg{.max_offset_entries = 8192};
-    auto mv_src = parser.parse(*fv, &arena, raised_cfg);
-    ASSERT_TRUE(mv_src.has_value());
+    copy_site_source src{make_oversized_frame_for_clone_test(4100),
+                         {.max_offset_entries = 8192},
+                         /*dict_backed=*/true};
+    ASSERT_TRUE(src.ok());
+    auto const* mv_src = &src.view();
     ASSERT_TRUE(mv_src->is_dict_backed());
 
     InboundHandleForWrite h;
-    h.msg.view = &(*mv_src);
+    h.msg.view = mv_src;
 
     auto assert_source_intact = [&] {
         const char* mt = nullptr;
@@ -2440,23 +2442,14 @@ TEST(MessageWrite, CloneDictBackedRaisedCapSourceClonesUnderItsOwnCaps) {
         ASSERT_EQ(fixpp_msg_get_msg_type(h.ptr(), &mt, &mt_len), FIXPP_ERR_OK);
         ASSERT_NE(mt, nullptr);
         EXPECT_EQ(std::string_view(mt, mt_len), "D");
-
-        const char* sv = nullptr;
-        size_t sv_len = 0;
-        ASSERT_EQ(fixpp_msg_get_string(h.ptr(), 49, &sv, &sv_len), FIXPP_ERR_OK);
-        ASSERT_NE(sv, nullptr);
-        EXPECT_EQ(std::string_view(sv, sv_len), "SENDERID");
+        expect_sender_id(h.ptr());
     };
     assert_source_intact();
 
     fixpp_msg_t* clone_out = nullptr;
     ASSERT_EQ(fixpp_msg_clone(h.ptr(), &clone_out), FIXPP_ERR_OK);
     ASSERT_NE(clone_out, nullptr);
-
-    const char* sv = nullptr;
-    size_t sv_len = 0;
-    EXPECT_EQ(fixpp_msg_get_string(clone_out, 49, &sv, &sv_len), FIXPP_ERR_OK);
-    EXPECT_EQ(std::string_view(sv == nullptr ? "" : sv, sv_len), "SENDERID");
+    expect_sender_id(clone_out);
 
     const auto* clone_view = reinterpret_cast<const fixpp_msg*>(clone_out)->view;
     ASSERT_NE(clone_view, nullptr);
@@ -2476,31 +2469,20 @@ TEST(MessageWrite, CloneDictBackedRaisedCapSourceClonesUnderItsOwnCaps) {
 // and every read reported absent behind an OK — and its root group context
 // matches the source's.
 TEST(MessageWrite, CloneDictFreeOversizedSourceStillReturnsOk) {
-    using fixpp::wire::access_mode;
-    using fixpp::wire::OffsetTable;
-
-    auto src_buf = make_oversized_frame_for_clone_test(4100);
-    auto fv = fixpp::wire::test::make_frame_view(src_buf);
-    ASSERT_TRUE(fv.has_value());
-
-    std::pmr::monotonic_buffer_resource arena;
-    fixpp::wire::Parser<access_mode::Index> parser_free{};  // no table_view → dict-free
-    OffsetTable::Config raised_cfg{.max_offset_entries = 8192};
-    auto mv_src = parser_free.parse(*fv, &arena, raised_cfg);
-    ASSERT_TRUE(mv_src.has_value());
+    copy_site_source src{make_oversized_frame_for_clone_test(4100),
+                         {.max_offset_entries = 8192},
+                         /*dict_backed=*/false};  // no table_view → dict-free
+    ASSERT_TRUE(src.ok());
+    auto const* mv_src = &src.view();
     ASSERT_FALSE(mv_src->is_dict_backed());
 
     InboundHandleForWrite h;
-    h.msg.view = &(*mv_src);
+    h.msg.view = mv_src;
 
     fixpp_msg_t* clone_out = nullptr;
     EXPECT_EQ(fixpp_msg_clone(h.ptr(), &clone_out), FIXPP_ERR_OK);
     ASSERT_NE(clone_out, nullptr);
-
-    const char* sv = nullptr;
-    size_t sv_len = 0;
-    EXPECT_EQ(fixpp_msg_get_string(clone_out, 49, &sv, &sv_len), FIXPP_ERR_OK);
-    EXPECT_EQ(std::string_view(sv == nullptr ? "" : sv, sv_len), "SENDERID");
+    expect_sender_id(clone_out);
 
     const auto* clone_view = reinterpret_cast<const fixpp_msg*>(clone_out)->view;
     ASSERT_NE(clone_view, nullptr);
@@ -2516,26 +2498,15 @@ TEST(MessageWrite, CloneDictFreeOversizedSourceStillReturnsOk) {
 // raises both caps and carries one NoPartyIDs instance longer than the default
 // per-instance cap; the clone must read that group as the source does.
 TEST(MessageWrite, CloneKeepsRaisedGroupInstanceCap) {
-    using fixpp::wire::access_mode;
-    using fixpp::wire::OffsetTable;
-
-    auto dict = fixpp::test_support::make_fix44_dictionary();
-    auto tv = dict->as_table_view();
-    auto src_buf = make_long_party_instance_frame(4200);
-    auto fv = fixpp::wire::test::make_frame_view(src_buf);
-    ASSERT_TRUE(fv.has_value());
-
-    std::pmr::monotonic_buffer_resource arena;
-    fixpp::wire::Parser<access_mode::Index> parser{tv};
-    OffsetTable::Config const raised{.max_offset_entries = 16384,
-                                     .max_group_entries_per_instance = 8192};
-    auto mv_src = parser.parse(*fv, &arena, raised);
-    ASSERT_TRUE(mv_src.has_value());
-    ASSERT_TRUE(mv_src->offsets().group(453).has_value())
+    copy_site_source src{make_long_party_instance_frame(4200),
+                         {.max_offset_entries = 16384, .max_group_entries_per_instance = 8192},
+                         /*dict_backed=*/true};
+    ASSERT_TRUE(src.ok());
+    ASSERT_TRUE(src.view().offsets().group(453).has_value())
         << "precondition: the source reads its long instance under its raised caps";
 
     InboundHandleForWrite h;
-    h.msg.view = &(*mv_src);
+    h.msg.view = &src.view();
     fixpp_msg_t* clone_out = nullptr;
     ASSERT_EQ(fixpp_msg_clone(h.ptr(), &clone_out), FIXPP_ERR_OK);
     ASSERT_NE(clone_out, nullptr);
@@ -2552,27 +2523,17 @@ TEST(MessageWrite, CloneKeepsRaisedGroupInstanceCap) {
 // clone must fail the same group read with the same error, where a default-cap
 // re-parse would succeed.
 TEST(MessageWrite, CloneKeepsLoweredGroupInstanceCap) {
-    using fixpp::wire::access_mode;
-    using fixpp::wire::OffsetTable;
-
-    auto dict = fixpp::test_support::make_fix44_dictionary();
-    auto tv = dict->as_table_view();
-    auto src_buf = make_long_party_instance_frame(1);  // one instance of three entries
-    auto fv = fixpp::wire::test::make_frame_view(src_buf);
-    ASSERT_TRUE(fv.has_value());
-
-    std::pmr::monotonic_buffer_resource arena;
-    fixpp::wire::Parser<access_mode::Index> parser{tv};
-    OffsetTable::Config const lowered{.max_group_entries_per_instance = 2};
-    auto mv_src = parser.parse(*fv, &arena, lowered);
-    ASSERT_TRUE(mv_src.has_value());
-    ASSERT_TRUE(mv_src->get(49).has_value()) << "precondition: the source reads its scalars";
-    auto const src_group = mv_src->offsets().group(453);
+    copy_site_source src{make_long_party_instance_frame(1),  // one instance of three entries
+                         {.max_group_entries_per_instance = 2},
+                         /*dict_backed=*/true};
+    ASSERT_TRUE(src.ok());
+    ASSERT_TRUE(src.view().get(49).has_value()) << "precondition: the source reads its scalars";
+    auto const src_group = src.view().offsets().group(453);
     ASSERT_FALSE(src_group.has_value())
         << "precondition: the lowered cap fails the source's group read";
 
     InboundHandleForWrite h;
-    h.msg.view = &(*mv_src);
+    h.msg.view = &src.view();
     fixpp_msg_t* clone_out = nullptr;
     ASSERT_EQ(fixpp_msg_clone(h.ptr(), &clone_out), FIXPP_ERR_OK);
     ASSERT_NE(clone_out, nullptr);

@@ -114,6 +114,11 @@ private:
     std::optional<MV> mv_;
 };
 
+constexpr resolved_message_version kAppV44Rmv{.k = resolved_message_version::kind::application,
+                                              .session = session_version::v44,
+                                              .application = application_version::v44,
+                                              ._reserved = 0};
+
 // fixpp#495 D-1c (`.specify/495-493-486-dict-reify-copy.md` §2.5, §10 T-16): the
 // number of `mr` calls the reify factory makes BEFORE it copies the frame bytes —
 // the handle's impl. Derived at run time from an empty default view, on the
@@ -122,13 +127,9 @@ private:
 // fails and never an ordinal.
 // Returns 0 if the probe itself fails, which every caller treats as a failure.
 [[nodiscard]] std::size_t impl_mr_calls() {
-    constexpr resolved_message_version rmv{.k = resolved_message_version::kind::application,
-                                           .session = session_version::v44,
-                                           .application = application_version::v44,
-                                           ._reserved = 0};
     std::pmr::monotonic_buffer_resource upstream;
     fixpp::test_support::failing_pmr_resource probe{&upstream, /*fail_on_call_n=*/0};
-    auto h = fixpp::dict::detail::owning_message_handle_from_frame(rmv, MV{}, &probe);
+    auto h = fixpp::dict::detail::owning_message_handle_from_frame(kAppV44Rmv, MV{}, &probe);
     return h.has_value() ? probe.allocate_calls() : 0U;
 }
 
@@ -815,48 +816,14 @@ TEST(ReifyAsTyped, AbsentMsgTypeRejected) {
 // ═════════════════════════════════════════════════════════════════════════════
 
 // A dict-backed source MessageView<Index> over a v44 NewOrderSingle
-// (make_nos_frame()), backed by the real FIX44 dictionary. Every dependency
-// (dict, table_view, frame bytes, parse arena) is kept alive for the
-// fixture's own lifetime — mirrors reify_membership_identity_test.cpp's
-// source-construction pattern.
-class DictBackedNosFixture {
+// (make_nos_frame()) under the default caps, backed by the real FIX44 dictionary:
+// the shared copy-site fixture (tests/support/copy_site_fixtures.hpp) with this
+// frame. Callers ASSERT ok() first.
+class DictBackedNosFixture : public fixpp::test_support::copy_site_source {
 public:
     DictBackedNosFixture()
-        : dict_(fixpp::test_support::make_fix44_dictionary()),
-          tv_(dict_->as_table_view()),
-          frame_(fixpp::test_support::make_nos_frame()) {
-        fixpp::wire::pmr_carry_buffer carry{frame_.size(), &arena_};
-        fixpp::wire::Framer framer{};
-        auto framed = framer.feed(std::span<const std::byte>{frame_.data(), frame_.size()}, carry,
-                                  std::span<fixpp::wire::frame_view>{fvs_, 1});
-        if (!framed.has_value() || framed->empty()) {
-            return;
-        }
-        fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{tv_};
-        auto parsed = parser.parse(fvs_[0], &arena_);
-        if (!parsed.has_value()) {
-            return;
-        }
-        mv_.emplace(std::move(*parsed));
-    }
-    [[nodiscard]] bool ok() const noexcept { return mv_.has_value(); }
-    // Every caller ASSERTs ok() first, as with ReifyFixture above.
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    [[nodiscard]] MV const& view() const noexcept { return *mv_; }
-
-private:
-    std::shared_ptr<const fixpp::dict::Dictionary> dict_;
-    fixpp::dict::table_view tv_;
-    std::vector<std::byte> frame_;
-    std::pmr::monotonic_buffer_resource arena_;
-    fixpp::wire::frame_view fvs_[1]{};
-    std::optional<MV> mv_;
+        : copy_site_source{fixpp::test_support::make_nos_frame(), {}, /*dict_backed=*/true} {}
 };
-
-constexpr resolved_message_version kAppV44Rmv{.k = resolved_message_version::kind::application,
-                                              .session = session_version::v44,
-                                              .application = application_version::v44,
-                                              ._reserved = 0};
 
 // T059 arm (i-a): a dict-free source, healthy allocator — succeeds, not
 // dict-backed, OffsetTable build_status ok. Without this arm (and (i-b) and
@@ -959,58 +926,15 @@ TEST(ReifyEagerMaterialization, SpuriousHitControl_DeepCopyOomStillYieldsDictRei
 // (`.specify/495-493-486-dict-reify-copy.md` §4 / §10 T-2, T-4, T-5).
 // ═════════════════════════════════════════════════════════════════════════════
 
-// A source view parsed from `frame` under `cfg`, dict-backed over FIX44 when
-// `dict_backed`, else through a dict-free `Parser{}`. Every dependency lives as a
-// member, as in DictBackedNosFixture above.
-class CopySiteSource {
-public:
-    CopySiteSource(std::vector<std::byte> frame, fixpp::wire::OffsetTable::Config cfg,
-                   bool dict_backed)
-        : frame_(std::move(frame)) {
-        if (dict_backed) {
-            dict_ = fixpp::test_support::make_fix44_dictionary();
-            tv_.emplace(dict_->as_table_view());
-        }
-        fixpp::wire::pmr_carry_buffer carry{frame_.size(), &arena_};
-        fixpp::wire::Framer framer{};
-        auto framed = framer.feed(std::span<const std::byte>{frame_.data(), frame_.size()}, carry,
-                                  std::span<fixpp::wire::frame_view>{fvs_, 1});
-        if (!framed.has_value() || framed->empty()) {
-            return;
-        }
-        // Two branches, not a lambda: parse() is lifetimebound to its Parser.
-        if (tv_) {
-            fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{*tv_};
-            if (auto parsed = parser.parse(fvs_[0], &arena_, cfg); parsed.has_value()) {
-                mv_.emplace(std::move(*parsed));
-            }
-        } else {
-            fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{};
-            if (auto parsed = parser.parse(fvs_[0], &arena_, cfg); parsed.has_value()) {
-                mv_.emplace(std::move(*parsed));
-            }
-        }
-    }
-    [[nodiscard]] bool ok() const noexcept { return mv_.has_value(); }
-    // Every caller ASSERTs ok() first.
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    [[nodiscard]] MV const& view() const noexcept { return *mv_; }
-
-private:
-    std::shared_ptr<const fixpp::dict::Dictionary> dict_;
-    std::optional<fixpp::dict::table_view> tv_;
-    std::vector<std::byte> frame_;
-    std::pmr::monotonic_buffer_resource arena_;
-    fixpp::wire::frame_view fvs_[1]{};
-    std::optional<MV> mv_;
-};
+using fixpp::test_support::copy_site_source;
+using fixpp::test_support::reads_sender_id;
 
 // T-2: a dict-backed source parsed under a RAISED entry cap reifies; the copy
 // carries the source's Config, reads the marker field, and keeps every entry.
 TEST(ReifyEagerMaterialization, RaisedCapDictBackedSourceReifiesUnderItsOwnCaps) {
-    CopySiteSource src{fixpp::test_support::make_oversized_frame_for_clone_test(4100),
-                       {.max_offset_entries = 8192},
-                       /*dict_backed=*/true};
+    copy_site_source src{fixpp::test_support::make_oversized_frame_for_clone_test(4100),
+                         {.max_offset_entries = 8192},
+                         /*dict_backed=*/true};
     ASSERT_TRUE(src.ok()) << "precondition: the raised cap admits the source";
     ASSERT_TRUE(src.view().is_dict_backed());
 
@@ -1019,9 +943,7 @@ TEST(ReifyEagerMaterialization, RaisedCapDictBackedSourceReifiesUnderItsOwnCaps)
     ASSERT_TRUE(r.has_value()) << "the copy must re-parse under the source's raised cap";
     EXPECT_TRUE(fixpp::test_support::same_config(r->view().offsets().config(),
                                                  src.view().offsets().config()));
-    auto sender = r->field_value(49);
-    ASSERT_TRUE(sender.has_value());
-    EXPECT_EQ(sender->as_string(), "SENDERID");
+    EXPECT_TRUE(reads_sender_id(r->view()));
     EXPECT_EQ(r->view().offsets().entries().size(), src.view().offsets().entries().size());
 }
 
@@ -1030,9 +952,9 @@ TEST(ReifyEagerMaterialization, RaisedCapDictBackedSourceReifiesUnderItsOwnCaps)
 // build failed and every read reported absent) and seeds the same root group
 // context as a Parser{}-parsed source.
 TEST(ReifyEagerMaterialization, RaisedCapDictFreeSourceReifiesReadable) {
-    CopySiteSource src{fixpp::test_support::make_oversized_frame_for_clone_test(4100),
-                       {.max_offset_entries = 8192},
-                       /*dict_backed=*/false};
+    copy_site_source src{fixpp::test_support::make_oversized_frame_for_clone_test(4100),
+                         {.max_offset_entries = 8192},
+                         /*dict_backed=*/false};
     ASSERT_TRUE(src.ok());
     ASSERT_FALSE(src.view().is_dict_backed());
 
@@ -1041,11 +963,7 @@ TEST(ReifyEagerMaterialization, RaisedCapDictFreeSourceReifiesReadable) {
     ASSERT_TRUE(r.has_value());
     EXPECT_FALSE(r->view().is_dict_backed());
     // Non-fatal, so the context assertion below runs even when the copy is empty.
-    auto sender = r->field_value(49);
-    EXPECT_TRUE(sender.has_value()) << "the dict-free copy must be readable, not empty";
-    if (sender.has_value()) {
-        EXPECT_EQ(sender->as_string(), "SENDERID");
-    }
+    EXPECT_TRUE(reads_sender_id(r->view())) << "the dict-free copy must be readable, not empty";
     constexpr std::uint16_t kNoPartyIDs = 453;  // any count tag
     EXPECT_TRUE(fixpp::test_support::same_group_context(
         r->view().offsets().group_context_for(kNoPartyIDs),
@@ -1055,9 +973,9 @@ TEST(ReifyEagerMaterialization, RaisedCapDictFreeSourceReifiesReadable) {
 // T-5(a): the whole Config travels. Both caps raised, one NoPartyIDs instance
 // longer than the default per-instance cap; the copy reads that group.
 TEST(ReifyEagerMaterialization, CopyKeepsRaisedGroupInstanceCap) {
-    CopySiteSource src{fixpp::test_support::make_long_party_instance_frame(4200),
-                       {.max_offset_entries = 16384, .max_group_entries_per_instance = 8192},
-                       /*dict_backed=*/true};
+    copy_site_source src{fixpp::test_support::make_long_party_instance_frame(4200),
+                         {.max_offset_entries = 16384, .max_group_entries_per_instance = 8192},
+                         /*dict_backed=*/true};
     ASSERT_TRUE(src.ok());
     ASSERT_TRUE(src.view().offsets().group(453).has_value())
         << "precondition: the source reads its long instance under its raised caps";
@@ -1073,9 +991,9 @@ TEST(ReifyEagerMaterialization, CopyKeepsRaisedGroupInstanceCap) {
 // scalars and fails its group read (the cap is lazy); the copy must do the same,
 // with the same error, where a default-cap re-parse would read the group.
 TEST(ReifyEagerMaterialization, CopyKeepsLoweredGroupInstanceCap) {
-    CopySiteSource src{fixpp::test_support::make_long_party_instance_frame(1),
-                       {.max_group_entries_per_instance = 2},
-                       /*dict_backed=*/true};
+    copy_site_source src{fixpp::test_support::make_long_party_instance_frame(1),
+                         {.max_group_entries_per_instance = 2},
+                         /*dict_backed=*/true};
     ASSERT_TRUE(src.ok());
     ASSERT_TRUE(src.view().get(49).has_value()) << "precondition: the source reads its scalars";
     auto const src_group = src.view().offsets().group(453);
@@ -1103,15 +1021,11 @@ TEST(ReifySharesOwnedTable, HandleAndItsReifyShareTheOwnersTable) {
         std::make_shared<const fixpp::dict::table_view>(dict->as_table_view());
     auto const frame = fixpp::test_support::make_nos_frame();
     std::pmr::monotonic_buffer_resource arena;
-    fixpp::wire::pmr_carry_buffer carry{frame.size(), &arena};
-    fixpp::wire::Framer framer{};
-    fixpp::wire::frame_view fvs[1]{};
-    auto framed = framer.feed(std::span<const std::byte>{frame.data(), frame.size()}, carry,
-                              std::span<fixpp::wire::frame_view>{fvs, 1});
-    ASSERT_TRUE(framed.has_value() && !framed->empty());
+    auto const fv = fixpp::wire::test::make_frame_view(frame);
+    ASSERT_TRUE(fv.has_value());
     fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{
         fixpp::wire::detail::owned_route_key{}, sp};
-    auto mv = parser.parse(fvs[0], &arena);
+    auto mv = parser.parse(*fv, &arena);
     ASSERT_TRUE(mv.has_value());
 
     std::pmr::monotonic_buffer_resource mr;
