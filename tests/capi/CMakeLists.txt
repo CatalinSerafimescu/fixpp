@@ -366,10 +366,12 @@ set_tests_properties(capi_dictionary_load PROPERTIES LABELS "capi;052;080")
 
 # fixpp#495 D-5 T-20 (`.specify/495-493-486-dict-reify-copy.md` §10): the C loader
 # retains nothing in the host's default resource. Standalone: it installs a
-# process-wide default resource. Public headers only.
+# process-wide default resource. Its positive control loads through the C++
+# `dict::load_any` with the host resource, hence `fixpp_dictionary`.
 add_executable(capi_dict495_loader_default_resource_test dict495_loader_default_resource_test.cpp)
 target_link_libraries(capi_dict495_loader_default_resource_test PRIVATE
   fixpp_capi
+  fixpp_dictionary
   GTest::gtest
   GTest::gtest_main
 )

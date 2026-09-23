@@ -12,6 +12,11 @@
 // `new_delete_resource()` means a `get_default_resource()` fallback for retained
 // storage elsewhere in the loader: a finding in the loader.
 //
+// Positive control (`InstalledDefaultResourceSeesALoaderThatUsesIt`): the same
+// resource, fed by a load that DOES use `get_default_resource()`, must read
+// non-zero while that Dictionary lives. If it does not, the zero above is
+// vacuous: the instrument cannot see a loader's retained storage.
+//
 // Standalone (`[const §VII.8]`): it replaces the process-wide default resource.
 
 #include <gtest/gtest.h>
@@ -21,6 +26,7 @@
 #include <string>
 
 #include "fix/c_api/dict.h"
+#include "fixpp/dict/load_any.hpp"
 
 namespace {
 
@@ -74,6 +80,22 @@ TEST(CapiDictionary, LoadDoesNotRetainInstalledDefaultResource) {
         fixpp_dict_destroy(dict);
     }
     EXPECT_EQ(host.held(), 0U);
+}
+
+TEST(CapiDictionary, InstalledDefaultResourceSeesALoaderThatUsesIt) {
+    held_bytes_resource host;
+    {
+        default_resource_guard const guard{&host};
+        std::string const path = std::string(FIXPP_DICT_DATA_DIR) + "/FIX44.xml";
+        {
+            // A loader that takes the host's default resource.
+            auto const dict = fixpp::dict::load_any(path, std::pmr::get_default_resource());
+            EXPECT_GT(host.held(), 0U)
+                << "held_bytes_resource must see a Dictionary loaded through it; otherwise "
+                   "LoadDoesNotRetainInstalledDefaultResource's zero proves nothing";
+        }
+        EXPECT_EQ(host.held(), 0U) << "a destroyed Dictionary must return what it held";
+    }
 }
 
 }  // namespace
