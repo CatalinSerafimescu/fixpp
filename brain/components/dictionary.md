@@ -14,6 +14,11 @@ refs:
   - .specify/495-493-486-dict-reify-copy.md
   - .specify/456-table-view-seal.md
   - .specify/447-458-452-capi-refusals.md
+  - specs/090-capi-refusals/contracts/msg-clone.md
+  - specs/090-capi-refusals/data-model.md
+  - specs/090-capi-refusals/quickstart.md
+  - specs/090-capi-refusals/spec.md
+  - specs/090-capi-refusals/tasks.md
   - spec/behaviors-and-limitations.md
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/2c-codegen.md
@@ -259,6 +264,16 @@ direct C++ caller. The C-ABI twin is `fixpp_msg_clone`; see [`c-api.md`](./c-api
   a public owned route (R-A keeps it `detail`), a `shared_ptr` by value on every view (an atomic
   pair per inbound message), and the owner token inside `dict_hooks` (size-pinned `entry_context`).
   A view parsed through a borrowed `Parser{tv}` still copies (`L-495-1`).
+- ⚠️ **Superseded in part (fixpp#493):** 090 made a dict-backed clone of a raised-cap source
+  refuse with `FIXPP_ERR_WIRE_LIMIT_EXCEEDED`. Frozen 090 records that still describe that
+  refusal, flagged here and not edited (frozen `specs/` are not rewritten):
+  `specs/090-capi-refusals/contracts/msg-clone.md` §4 and `data-model.md` §4.1 (the
+  `wire_offset_table_full` "raised-cap route" row), `quickstart.md` V5, `spec.md` User Story 3's
+  *Independent Test*, and `tasks.md` US3 / T047 all describe a source parsed at a raised
+  `max_offset_entries` making a dict-backed `fixpp_msg_clone` return
+  `FIXPP_ERR_WIRE_LIMIT_EXCEEDED`. Since #493 that clone succeeds under the source's own caps:
+  `.specify/495-493-486-dict-reify-copy.md` §4 and T-3. The code still comes back for a source
+  whose own build failed at the default cap (T-6).
 - ⚠️ **Open residuals:** `L-458-1` covers a dict-backed build that under-indexes near the probe cap
   while reporting success; `L-495-1` the borrowed-route copy. Check the live B&L file before
   treating either as open.

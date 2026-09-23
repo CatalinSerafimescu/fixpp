@@ -13,7 +13,11 @@ refs:
   - .specify/2i-capi.md
   - .specify/447-458-452-capi-refusals.md
   - .specify/495-493-486-dict-reify-copy.md
+  - specs/090-capi-refusals/contracts/msg-clone.md
+  - specs/090-capi-refusals/data-model.md
+  - specs/090-capi-refusals/quickstart.md
   - specs/090-capi-refusals/spec.md
+  - specs/090-capi-refusals/tasks.md
   - spec/behaviors-and-limitations.md
   - tools/check_layers.py
   - .github/workflows/abi-golden.yml
@@ -133,6 +137,14 @@ All three changed a call that used to succeed, so under `[const §X.7]` they are
 a clone) now SHARES the source's membership table instead of copying it, and re-parses under the
 source's `OffsetTable::Config`, so the raised-cap refusal described above no longer occurs for a
 source whose own build succeeded (`L-458-2` resolved). See `.specify/495-493-486-dict-reify-copy.md`.
+Frozen 090 records that still describe that refusal, flagged here and not edited (frozen `specs/`
+are not rewritten): `specs/090-capi-refusals/contracts/msg-clone.md` §4 and `data-model.md` §4.1
+(the `wire_offset_table_full` "raised-cap route" row), `quickstart.md` V5, `spec.md` User Story 3's
+*Independent Test*, and `tasks.md` US3 / T047 all describe a source parsed at a raised
+`max_offset_entries` making a dict-backed `fixpp_msg_clone` return `FIXPP_ERR_WIRE_LIMIT_EXCEEDED`.
+Since #493 that clone succeeds under the source's own caps:
+`.specify/495-493-486-dict-reify-copy.md` §4 and T-3. The code still comes back for a source whose
+own build failed at the default cap (T-6).
 
 ## C-ABI 1.8: the dictionary loader stops using the host's default resource (fixpp#495 D-5)
 

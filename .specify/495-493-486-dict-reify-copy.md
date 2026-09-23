@@ -861,7 +861,8 @@ the C cells use one definition.
     allocations fit the chunk already acquired; recalibrate at implementation if the witness below
     shows otherwise. That test's header derivation (the function does only `return handle;` after the
     copy) is stale since #458 D-4 moved the eager re-parse into the factory; fixed at implementation.
-    Witness (libstdc++): a `gdb` backtrace at each armed ordinal lands inside `table_view`'s copy
+    Both cells are libstdc++-only (`FIXPP_OOM_WITNESS_ENABLED` requires `__GLIBCXX__`); other STLs
+    compile them out. Witness (libstdc++): a `gdb` backtrace at each armed ordinal lands inside `table_view`'s copy
     constructor. Mutation: the prvalue spelling
     `make_shared<const table_view>(membership_copy())` — the ordinal lands in `__allocate_shared`.
   - `FIXPP_SKIP_ON_MSVC_DEBUG_ARENA` still applies on MSVC debug throughout.
@@ -1092,7 +1093,9 @@ Builds are owner-approved before they run (`[const §XVII.7]`); check `df -h /mn
    precondition, which this note does not add.
 6. **MSVC local** (parent repo `research/G19-fix-fpml-iso20022/msvc-local-build-procedure.md`; toolset
    from `CMakeCache.txt`'s `CMAKE_LINKER`): T-1 fails to compile unfixed and compiles fixed (decides
-   Q-2); T-16's cells run on `windows-msvc-release`.
+   Q-2); T-16(a)'s cells run on `windows-msvc-release`. T-16(b)'s OOM witnesses are libstdc++-only
+   (`FIXPP_OOM_WITNESS_ENABLED` requires `__GLIBCXX__`, a guard that predates this note): on MSVC
+   their binaries link no test case, so an MSVC "passed" carries no information for them.
 7. **Gates:** `bash tools/test_dictionary_snapshot_exclusivity_gate.sh` (T-18's seeds RED with
    `G2 FAIL`, clean copy green); `bash tools/check_dictionary_snapshot_exclusivity.sh`
    (`G2 matches of the enumerated spellings = 0`, G1 lines unchanged); `bash tools/check_capi_freeze.sh`
