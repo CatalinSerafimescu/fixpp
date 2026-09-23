@@ -51,7 +51,9 @@
 #include <fixpp/dict/version_profile.hpp>
 #include <fixpp/dict/xml_loader.hpp>
 #include <fixpp/wire/message_view_contract.hpp>
+#include <memory>
 #include <memory_resource>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -197,5 +199,149 @@ static void BM_Reify_DictBacked_20tag(benchmark::State& state) {
     }
 }
 BENCHMARK(BM_Reify_DictBacked_20tag);
+
+// ── fixpp#495 rows (`.specify/495-493-486-dict-reify-copy.md` §11) ─────────────
+// Both rows reify the SAME v44 NewOrderSingle, whose body carries at least 20
+// fields the FIX44 table accepts for MsgType D (checked in setup). The OWNED row
+// parses it on Parser's owned route, as the Session dispatch path does, so
+// dict::reify shares the table: it is NFR-003-3's 1.2 µs ceiling row. The
+// BORROWED row parses it through Parser{tv}, so dict::reify deep-copies the table:
+// informational only (the copy's cost on this frame), not a regression witness —
+// BM_Reify_DictBacked_20tag is that.
+//
+// Setup checks (SkipWithError): the frame parses with >= 20 entries, >= 20 of them
+// valid for D; one untimed reify succeeds and, on the owned row, shares the
+// owner's table (the timed loop reaches the owned path, not an early return); and
+// the arena margin rule holds — one untimed reify's draw from a counting resource
+// over this frame must fit HALF of the timed loop's arena. That arena has
+// `null_memory_resource()` upstream, so an overflow in the timed loop is a refusal
+// (caught below), never a silent heap allocation.
+namespace {
+
+constexpr std::size_t kNfr495Arena = 16U * 1024U;
+
+// Counts the bytes drawn from it; forwards to new_delete_resource().
+class drawn_bytes_resource final : public std::pmr::memory_resource {
+public:
+    [[nodiscard]] std::size_t drawn() const noexcept { return drawn_; }
+
+private:
+    void* do_allocate(std::size_t bytes, std::size_t align) override {
+        drawn_ += bytes;
+        return std::pmr::new_delete_resource()->allocate(bytes, align);
+    }
+    void do_deallocate(void* p, std::size_t bytes, std::size_t align) override {
+        std::pmr::new_delete_resource()->deallocate(p, bytes, align);
+    }
+    [[nodiscard]] bool do_is_equal(std::pmr::memory_resource const& o) const noexcept override {
+        return this == &o;
+    }
+    std::size_t drawn_ = 0;
+};
+
+// A v44 NewOrderSingle whose body carries >= 20 fields; BodyLength + CheckSum
+// computed.
+std::vector<std::byte> make_nos_20field_frame() {
+    std::string const body =
+        std::string("35=D\x01") + "34=1\x01" + "49=S\x01" + "52=20240101-00:00:00.000\x01" +
+        "56=T\x01" + "1=ACCT\x01" + "11=ORD1\x01" + "15=USD\x01" + "18=G\x01" + "21=1\x01" +
+        "22=4\x01" + "38=100\x01" + "40=2\x01" + "44=10.5\x01" + "48=US0378331005\x01" +
+        "54=1\x01" + "55=AAPL\x01" + "58=bench\x01" + "59=0\x01" + "60=20240101-00:00:00.000\x01" +
+        "100=XNAS\x01" + "110=10\x01" + "207=XNAS\x01";
+    std::string const pre =
+        std::string("8=FIX.4.4\x01") + "9=" + std::to_string(body.size()) + "\x01" + body;
+    unsigned sum = 0;
+    for (unsigned char c : pre) {
+        sum += c;
+    }
+    std::array<char, 8> chk{};
+    std::snprintf(chk.data(), chk.size(), "10=%03u\x01", sum % 256U);
+    std::string const full = pre + chk.data();
+    std::vector<std::byte> out(full.size());
+    std::memcpy(out.data(), full.data(), full.size());
+    return out;
+}
+
+void reify_20field(benchmark::State& state, bool owned) {
+    auto const dict_path = std::filesystem::path{FIXPP_DICT_DATA_DIR} / "FIX44.xml";
+    auto dict_mr = std::make_unique<std::pmr::monotonic_buffer_resource>();
+    auto const dictionary = fixpp::dict::XmlLoader{}.load(dict_path, dict_mr.get());
+    std::shared_ptr<const fixpp::dict::table_view> const sp =
+        std::make_shared<const fixpp::dict::table_view>(dictionary.as_table_view());
+
+    auto const frame_bytes = make_nos_20field_frame();
+    std::pmr::monotonic_buffer_resource frame_mr;
+    fixpp::wire::pmr_carry_buffer carry{frame_bytes.size(), &frame_mr};
+    fixpp::wire::Framer framer{};
+    fixpp::wire::frame_view fvs[1]{};
+    auto framed = framer.feed(std::span<const std::byte>{frame_bytes.data(), frame_bytes.size()},
+                              carry, std::span<fixpp::wire::frame_view>{fvs, 1});
+    if (!framed.has_value() || framed->empty()) {
+        state.SkipWithError("setup: Framer::feed did not produce a frame");
+        return;
+    }
+    std::optional<fixpp::wire::Parser<fixpp::wire::access_mode::Index>> parser;
+    if (owned) {
+        parser.emplace(fixpp::wire::detail::owned_route_key{}, sp);
+    } else {
+        parser.emplace(*sp);
+    }
+    auto parsed = parser->parse(fvs[0], &frame_mr);
+    if (!parsed.has_value()) {
+        state.SkipWithError("setup: dict-backed parse of the source frame failed");
+        return;
+    }
+    std::size_t valid_for_d = 0;
+    for (auto const& e : parsed->offsets().entries()) {
+        valid_for_d += sp->field_valid_for("D", e.tag) ? 1U : 0U;
+    }
+    if (parsed->offsets().entries().size() < 20U || valid_for_d < 20U) {
+        state.SkipWithError("setup: the frame must carry >= 20 fields valid for MsgType D");
+        return;
+    }
+
+    fixpp::dict::version_profile profile{};
+    profile.default_appl = fixpp::dict::application_version::v44;
+    {
+        drawn_bytes_resource counting;
+        auto probe = fixpp::dict::reify(*parsed, profile, &counting);
+        if (!probe.has_value()) {
+            state.SkipWithError("setup: an untimed dict::reify() refused the source frame");
+            return;
+        }
+        if (owned && probe->view().hooks().opaque_dict() != sp.get()) {
+            state.SkipWithError("setup: the owned row did not reach the owned path");
+            return;
+        }
+        if (counting.drawn() * 2U > kNfr495Arena) {
+            state.SkipWithError("setup: arena margin rule violated (draw exceeds half the arena)");
+            return;
+        }
+    }
+
+    std::array<std::byte, kNfr495Arena> buf{};
+    for (auto _ : state) {
+        std::pmr::monotonic_buffer_resource arena{buf.data(), buf.size(),
+                                                  std::pmr::null_memory_resource()};
+        auto r = fixpp::dict::reify(*parsed, profile, &arena);
+        if (!r.has_value()) {
+            state.SkipWithError("dict::reify() refused in the timed loop (arena overflow?)");
+            break;
+        }
+        benchmark::DoNotOptimize(r);
+    }
+}
+
+}  // namespace
+
+static void BM_Reify_DictBacked_Owned_20field(benchmark::State& state) {
+    reify_20field(state, /*owned=*/true);
+}
+BENCHMARK(BM_Reify_DictBacked_Owned_20field);
+
+static void BM_Reify_DictBacked_Borrowed_20field(benchmark::State& state) {
+    reify_20field(state, /*owned=*/false);
+}
+BENCHMARK(BM_Reify_DictBacked_Borrowed_20field);
 
 BENCHMARK_MAIN();
