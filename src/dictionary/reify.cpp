@@ -16,11 +16,12 @@
 // of the build-tree _dispatch/*.hpp headers). This shipped TU therefore never
 // #includes a build-tree header — NFR-003-8 is satisfied literally.
 //
-// owning_message_handle (057): a live byte-storage handle — {version, bytes_
-// deep-copied frame, eagerly materialised view_cache_}. NOT type-erased; as<Msg>()
-// stays T059-stubbed (out of scope). Construction is the single hand-written
-// factory detail::owning_message_handle_from_frame (research D-2 / contract
-// C-2), defined out-of-line here (the handle is a heap pimpl).
+// owning_message_handle (057): a live byte-storage handle (members: `impl`
+// below). NOT type-erased; as<Msg>() stays T059-stubbed (out of scope).
+// Construction is the single hand-written factory
+// detail::owning_message_handle_from_frame (research D-2 / contract C-2),
+// defined out-of-line here (the handle is a pimpl whose impl is allocated from
+// `mr`, fixpp#495 D-1c).
 #include <cstdint>
 #include <expected>
 #include <fixpp/core/error.hpp>

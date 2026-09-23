@@ -167,8 +167,8 @@ friend class Parser;` — it has none today — so no public constructor changes
 **Why a pointer, not a `shared_ptr`:** a by-value `shared_ptr` costs an atomic increment/decrement per
 inbound message, on a cache line shared by sessions sharing a snapshot; the pointer costs a store. The
 price is a lifetime dependency on the owner object, confined by §3.1. `sizeof(MessageView<Index>)`
-and `sizeof(MessageView<Iter>)` grow by one pointer; C-1's grep finds no pin on either (re-run before
-implementing).
+grows by one pointer; `MessageView<Iter>` does not (empty `[[no_unique_address]]` member); C-1's grep finds no pin on
+either (re-run before implementing).
 
 ### 2.2 `Parser`'s owning constructor, behind a `detail` tag (R-A)
 
@@ -287,9 +287,9 @@ containers and `unk_items_` (the zero-cap carry and the framer allocate nothing;
 **Change:** the impl is allocated with `std::pmr::polymorphic_allocator<>{mr}.new_object<impl>(mr)`.
 `~owning_message_handle` and the move-assignment's release go through one private helper that recovers
 the resource from `pimpl_->bytes_.get_allocator().resource()` **before** destroying the impl, then
-calls `delete_object`. `mr` must already outlive the handle, since its parsed view lives there, so no
-new lifetime obligation arises. A monotonic `mr` reclaims the impl only on `release()`, as for
-`bytes_`.
+calls `delete_object`. `mr` must already outlive the handle, since its parsed view lives there; new:
+destruction now READS the impl from `mr`'s storage, so a monotonic `mr` must not be `release()`d before
+the handle is destroyed (stated in `reify.hpp`). It reclaims the impl only on `release()`, as `bytes_`.
 
 **Effect on OOM tests:** the impl becomes the first `mr` call, so every cell that fails a bounded or
 failing `mr` through the factory now lands on a different allocation. T-16 derives that population
@@ -993,6 +993,8 @@ own control block, and G2 asserts zero matches of its enumerated spellings."*
 - **`B-495-3`** (D-5), **BREAKING (C-ABI 1.8)** — `fixpp_dict_load_from_xml` allocates from
   `std::pmr::new_delete_resource()`; a host's installed default resource no longer backs a C
   dictionary. *Witness: T-20.*
+- **`B-495-4`** (D-1c) — a reify handle's impl comes from `mr`, so `mr`'s storage must stay valid until
+  the handle is destroyed (§2.5). *Witness: T-16 (impl is `mr`'s first call), T-14; the hazard is unwitnessed.*
 - **`B-493-1`** — clone and reify re-parse under the source's `OffsetTable::Config`, so a copy keeps
   **both raised and lowered** caps, including a lazy group-read failure under a lowered group cap. A
   raised-cap source now copies, including through the dict-free fallbacks (which returned an empty
