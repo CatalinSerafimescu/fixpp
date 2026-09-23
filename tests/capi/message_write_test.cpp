@@ -50,6 +50,7 @@
 #include <fixpp/dict/table_view.hpp>
 #include <fixpp/wire/parser.hpp>
 
+#include "support/copy_site_fixtures.hpp"  // fixpp#493: shared copy-site frames + comparisons
 #include "support/fix44_dictionary.hpp"  // fixpp#458 (090) US3 clone-refusal cells
 #include "support/frame_view_factory.hpp"
 
@@ -2353,53 +2354,33 @@ TEST(MessageWrite, CloneNullAndDeadHandleErrors) {
     }
 }
 
-// ── fixpp_msg_clone refuses a failed dict-backed re-parse (fixpp#458, D-3) ────
+// ── fixpp_msg_clone re-parses under its SOURCE's caps (fixpp#493) ─────────────
 //
-// T047/T048/T049 (part): contracts/msg-clone.md §1/§4; data-model.md EC-3/§4.1;
-// spec.md FR-005/FR-006/SC-004/SC-005; quickstart.md V5.
-//
-// A dict-backed CLONE's re-parse always goes through the DEFAULT-cap 2-arg
-// `Parser::parse(frame, mr)` overload (message_write.cpp's
-// `clone_parser.parse(fv, clone_mr)`). Building a SOURCE whose own view was
-// parsed at a RAISED cap admits more entries than the clone's re-parse will
-// accept, so the re-parse fails on frame shape alone — allocator-free and
-// sanitizer-safe (the raised-cap route, preferred over allocator injection
-// per quickstart.md V5).
+// `.specify/495-493-486-dict-reify-copy.md` §4 / §10 T-3..T-6. A clone's re-parse
+// passes the source's `OffsetTable::Config`, so a source parsed under a raised cap
+// clones, a source parsed under a lowered group cap keeps failing its group read in
+// the copy, and the one remaining clone -> WIRE_LIMIT_EXCEEDED route is a source
+// whose OWN build failed (T-6). The frame builders are shared with the C++ reify
+// cells (tests/support/copy_site_fixtures.hpp).
 
-namespace {
+using fixpp::test_support::make_long_party_instance_frame;
+using fixpp::test_support::make_oversized_frame_for_clone_test;
+using fixpp::test_support::same_config;
+using fixpp::test_support::same_group_context;
 
-// A dict-backed-shaped frame: MsgType(35)=D, a marker field (49), then
-// `n_occurrences` repeats of a plain non-group tag (1=x). 4100 repeats plus
-// the two header fields (4102 total) exceeds offset_table.hpp's
-// default_max_offset_entries (4096) — the same DoS-cap mechanism
-// WireOffsetTable.DoSCapOffsetTableFull (tests/wire/offset_table_test.cpp)
-// exercises, reused here over a dict-backed table_view.
-std::vector<std::byte> make_oversized_frame_for_clone_test(int n_occurrences) {
-    std::string body =
-        "35=D\x01"
-        "49=SENDERID\x01";
-    for (int i = 0; i < n_occurrences; ++i) {
-        body += "1=x\x01";
-    }
-    return make_raw_frame_for_write_test(body);
-}
-
-}  // namespace
-
-// T047 (V5 / FR-005 / SC-004): the raised-cap route. Assert the EXACT code
-// (never `!= FIXPP_ERR_OK`), `*clone_out == NULL`, AND (FR-005's post-
-// condition) that the source handle is unchanged and still usable — a field
-// lookup that succeeded before the refused clone still succeeds after it,
-// with the same value.
-TEST(MessageWrite, CloneDictBackedReparseCapExceededYieldsWireLimitExceeded) {
+// T-3 (fixpp#493): a dict-backed source parsed under a RAISED entry cap clones —
+// the clone's re-parse inherits the source's Config instead of the default. Asserts
+// the clone reads the marker field, keeps the source's entry count and Config, and
+// that the source stays intact (FR-005's post-condition, unchanged).
+TEST(MessageWrite, CloneDictBackedRaisedCapSourceClonesUnderItsOwnCaps) {
     using fixpp::wire::access_mode;
     using fixpp::wire::OffsetTable;
 
     auto dict = fixpp::test_support::make_fix44_dictionary();
     auto tv = dict->as_table_view();
 
-    // 4102 entries total: past the default 4096 cap the clone's re-parse
-    // uses, admitted here by a raised cap so the SOURCE itself is valid.
+    // Past the default entry cap, admitted here by a raised cap so the SOURCE
+    // itself is valid.
     auto src_buf = make_oversized_frame_for_clone_test(4100);
     auto fv = fixpp::wire::test::make_frame_view(src_buf);
     ASSERT_TRUE(fv.has_value());
@@ -2427,19 +2408,34 @@ TEST(MessageWrite, CloneDictBackedReparseCapExceededYieldsWireLimitExceeded) {
         ASSERT_NE(sv, nullptr);
         EXPECT_EQ(std::string_view(sv, sv_len), "SENDERID");
     };
-    assert_source_intact();  // pre-condition: the lookup succeeds BEFORE the refusal
+    assert_source_intact();
 
     fixpp_msg_t* clone_out = nullptr;
-    EXPECT_EQ(fixpp_msg_clone(h.ptr(), &clone_out), FIXPP_ERR_WIRE_LIMIT_EXCEEDED);
-    EXPECT_EQ(clone_out, nullptr);
+    ASSERT_EQ(fixpp_msg_clone(h.ptr(), &clone_out), FIXPP_ERR_OK);
+    ASSERT_NE(clone_out, nullptr);
 
-    assert_source_intact();  // FR-005: source unchanged and still usable AFTER the refusal
+    const char* sv = nullptr;
+    size_t sv_len = 0;
+    EXPECT_EQ(fixpp_msg_get_string(clone_out, 49, &sv, &sv_len), FIXPP_ERR_OK);
+    EXPECT_EQ(std::string_view(sv == nullptr ? "" : sv, sv_len), "SENDERID");
+
+    const auto* clone_view = reinterpret_cast<const fixpp_msg*>(clone_out)->view;
+    ASSERT_NE(clone_view, nullptr);
+    EXPECT_TRUE(clone_view->is_dict_backed());
+    EXPECT_EQ(clone_view->offsets().entries().size(), mv_src->offsets().entries().size());
+    EXPECT_TRUE(same_config(clone_view->offsets().config(), mv_src->offsets().config()));
+
+    EXPECT_EQ(fixpp_msg_destroy(clone_out), FIXPP_ERR_OK);
+    assert_source_intact();
 }
 
 // T048 — the mandatory spurious-hit control for seam 3 (V5's control): clone
-// the SAME oversized source from a DICT-FREE handle. It must still return
+// the SAME oversized source from a DICT-FREE handle. It must return
 // FIXPP_ERR_OK, because no dict-backed re-parse is attempted and nothing can
-// fail. Without this arm, "refuse whenever the source is big" would pass.
+// fail. T-4 (fixpp#493): the dict-free fallback re-parses under the source's
+// Config too, so the clone is READABLE — before, its default-cap build failed
+// and every read reported absent behind an OK — and its root group context
+// matches the source's.
 TEST(MessageWrite, CloneDictFreeOversizedSourceStillReturnsOk) {
     using fixpp::wire::access_mode;
     using fixpp::wire::OffsetTable;
@@ -2461,7 +2457,131 @@ TEST(MessageWrite, CloneDictFreeOversizedSourceStillReturnsOk) {
     fixpp_msg_t* clone_out = nullptr;
     EXPECT_EQ(fixpp_msg_clone(h.ptr(), &clone_out), FIXPP_ERR_OK);
     ASSERT_NE(clone_out, nullptr);
+
+    const char* sv = nullptr;
+    size_t sv_len = 0;
+    EXPECT_EQ(fixpp_msg_get_string(clone_out, 49, &sv, &sv_len), FIXPP_ERR_OK);
+    EXPECT_EQ(std::string_view(sv == nullptr ? "" : sv, sv_len), "SENDERID");
+
+    const auto* clone_view = reinterpret_cast<const fixpp_msg*>(clone_out)->view;
+    ASSERT_NE(clone_view, nullptr);
+    EXPECT_FALSE(clone_view->is_dict_backed());
+    // Any count tag: the context is the stored root context pushed with that tag.
+    constexpr std::uint16_t kNoPartyIDs = 453;
+    EXPECT_TRUE(same_group_context(clone_view->offsets().group_context_for(kNoPartyIDs),
+                                   mv_src->offsets().group_context_for(kNoPartyIDs)));
     EXPECT_EQ(fixpp_msg_destroy(clone_out), FIXPP_ERR_OK);
+}
+
+// T-5(a) (fixpp#493): the WHOLE Config travels, not only the entry cap. The source
+// raises both caps and carries one NoPartyIDs instance longer than the default
+// per-instance cap; the clone must read that group as the source does.
+TEST(MessageWrite, CloneKeepsRaisedGroupInstanceCap) {
+    using fixpp::wire::access_mode;
+    using fixpp::wire::OffsetTable;
+
+    auto dict = fixpp::test_support::make_fix44_dictionary();
+    auto tv = dict->as_table_view();
+    auto src_buf = make_long_party_instance_frame(4200);
+    auto fv = fixpp::wire::test::make_frame_view(src_buf);
+    ASSERT_TRUE(fv.has_value());
+
+    std::pmr::monotonic_buffer_resource arena;
+    fixpp::wire::Parser<access_mode::Index> parser{tv};
+    OffsetTable::Config const raised{.max_offset_entries = 16384,
+                                     .max_group_entries_per_instance = 8192};
+    auto mv_src = parser.parse(*fv, &arena, raised);
+    ASSERT_TRUE(mv_src.has_value());
+    ASSERT_TRUE(mv_src->offsets().group(453).has_value())
+        << "precondition: the source reads its long instance under its raised caps";
+
+    InboundHandleForWrite h;
+    h.msg.view = &(*mv_src);
+    fixpp_msg_t* clone_out = nullptr;
+    ASSERT_EQ(fixpp_msg_clone(h.ptr(), &clone_out), FIXPP_ERR_OK);
+    ASSERT_NE(clone_out, nullptr);
+
+    const fixpp_group_t* grp = nullptr;
+    size_t count = 0;
+    EXPECT_EQ(fixpp_msg_get_group(clone_out, 453, &grp, &count), FIXPP_ERR_OK);
+    EXPECT_EQ(count, 1U);
+    EXPECT_EQ(fixpp_msg_destroy(clone_out), FIXPP_ERR_OK);
+}
+
+// T-5(b) (fixpp#493): a LOWERED per-instance group cap travels too. The source
+// reads its scalars but fails its group read (the cap is enforced lazily); the
+// clone must fail the same group read with the same error, where a default-cap
+// re-parse would succeed.
+TEST(MessageWrite, CloneKeepsLoweredGroupInstanceCap) {
+    using fixpp::wire::access_mode;
+    using fixpp::wire::OffsetTable;
+
+    auto dict = fixpp::test_support::make_fix44_dictionary();
+    auto tv = dict->as_table_view();
+    auto src_buf = make_long_party_instance_frame(1);  // one instance of three entries
+    auto fv = fixpp::wire::test::make_frame_view(src_buf);
+    ASSERT_TRUE(fv.has_value());
+
+    std::pmr::monotonic_buffer_resource arena;
+    fixpp::wire::Parser<access_mode::Index> parser{tv};
+    OffsetTable::Config const lowered{.max_group_entries_per_instance = 2};
+    auto mv_src = parser.parse(*fv, &arena, lowered);
+    ASSERT_TRUE(mv_src.has_value());
+    ASSERT_TRUE(mv_src->get(49).has_value()) << "precondition: the source reads its scalars";
+    auto const src_group = mv_src->offsets().group(453);
+    ASSERT_FALSE(src_group.has_value())
+        << "precondition: the lowered cap fails the source's group read";
+
+    InboundHandleForWrite h;
+    h.msg.view = &(*mv_src);
+    fixpp_msg_t* clone_out = nullptr;
+    ASSERT_EQ(fixpp_msg_clone(h.ptr(), &clone_out), FIXPP_ERR_OK);
+    ASSERT_NE(clone_out, nullptr);
+
+    const auto* clone_view = reinterpret_cast<const fixpp_msg*>(clone_out)->view;
+    ASSERT_NE(clone_view, nullptr);
+    EXPECT_TRUE(clone_view->get(49).has_value());
+    auto const clone_group = clone_view->offsets().group(453);
+    EXPECT_FALSE(clone_group.has_value()) << "the copy must keep the source's lowered cap";
+    if (!clone_group.has_value()) {
+        EXPECT_EQ(clone_group.error(), src_group.error());
+    }
+    EXPECT_EQ(fixpp_msg_destroy(clone_out), FIXPP_ERR_OK);
+}
+
+// T-6 (fixpp#493, regression pin): after T-3 turned the raised-cap route into a
+// success, the remaining clone -> WIRE_LIMIT_EXCEEDED route is a source whose OWN
+// build failed at its own (default) cap. The source is built through the raw
+// dict-backed MessageView constructor, which skips build_status(), exactly the
+// lever CloneDictBackedReparseMalformedFieldYieldsWireInvalidFrame below uses.
+TEST(MessageWrite, CloneOfUnbuiltOversizedSourceYieldsWireLimitExceeded) {
+    using fixpp::wire::access_mode;
+    using fixpp::wire::dict_hooks;
+    using fixpp::wire::MessageView;
+
+    auto dict = fixpp::test_support::make_fix44_dictionary();
+    auto tv = dict->as_table_view();
+    auto src_buf = make_oversized_frame_for_clone_test(4100);
+    auto fv = fixpp::wire::test::make_frame_view(src_buf);
+    ASSERT_TRUE(fv.has_value());
+
+    std::pmr::monotonic_buffer_resource arena;
+    MessageView<access_mode::Index> mv_src{*fv, &arena, dict_hooks::for_table_view(tv)};
+    ASSERT_TRUE(mv_src.is_dict_backed());
+    ASSERT_FALSE(mv_src.offsets().build_status().has_value())
+        << "precondition: the source's own default-cap build failed";
+
+    InboundHandleForWrite h;
+    h.msg.view = &mv_src;
+    const char* mt = nullptr;
+    size_t mt_len = 0;
+    ASSERT_EQ(fixpp_msg_get_msg_type(h.ptr(), &mt, &mt_len), FIXPP_ERR_TAG_NOT_FOUND);
+
+    fixpp_msg_t* clone_out = nullptr;
+    EXPECT_EQ(fixpp_msg_clone(h.ptr(), &clone_out), FIXPP_ERR_WIRE_LIMIT_EXCEEDED);
+    EXPECT_EQ(clone_out, nullptr);
+    EXPECT_EQ(fixpp_msg_get_msg_type(h.ptr(), &mt, &mt_len), FIXPP_ERR_TAG_NOT_FOUND)
+        << "the source is unchanged by the refusal";
 }
 
 // T049 (part 1 of 2 — see dict066_clone_membership_copy_oom_test.cpp for the

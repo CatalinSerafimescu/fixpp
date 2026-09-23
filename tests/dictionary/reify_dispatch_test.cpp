@@ -59,6 +59,7 @@
 #include <utility>
 #include <vector>
 
+#include "support/copy_site_fixtures.hpp"   // fixpp#493: shared copy-site frames + comparisons
 #include "support/failing_pmr_resource.hpp"  // 057: view()-OOM degrade witness
 #include "support/fix44_dictionary.hpp"  // 090-capi-refusals US4: dict-backed source (T058/T059/T062)
 #include "support/msvc_debug_arena_skip.hpp"
@@ -894,6 +895,143 @@ TEST(ReifyEagerMaterialization, SpuriousHitControl_DeepCopyOomStillYieldsDictRei
     EXPECT_EQ(r.error(), fixpp::core::error::dict_reify_oom)
         << "control: failing the bytes_ deep copy (call #1) must still yield the pre-existing "
            "dict_reify_oom sentinel, not EC-8's re-parse refusal";
+}
+
+
+// ═════════════════════════════════════════════════════════════════════════════
+// fixpp#493 — the reify factory re-parses under its SOURCE's caps
+// (`.specify/495-493-486-dict-reify-copy.md` §4 / §10 T-2, T-4, T-5).
+// ═════════════════════════════════════════════════════════════════════════════
+
+// A source view parsed from `frame` under `cfg`, dict-backed over FIX44 when
+// `dict_backed`, else through a dict-free `Parser{}`. Every dependency lives as a
+// member, as in DictBackedNosFixture above.
+class CopySiteSource {
+public:
+    CopySiteSource(std::vector<std::byte> frame, fixpp::wire::OffsetTable::Config cfg,
+                   bool dict_backed)
+        : frame_(std::move(frame)) {
+        if (dict_backed) {
+            dict_ = fixpp::test_support::make_fix44_dictionary();
+            tv_.emplace(dict_->as_table_view());
+        }
+        fixpp::wire::pmr_carry_buffer carry{frame_.size(), &arena_};
+        fixpp::wire::Framer framer{};
+        auto framed = framer.feed(std::span<const std::byte>{frame_.data(), frame_.size()}, carry,
+                                  std::span<fixpp::wire::frame_view>{fvs_, 1});
+        if (!framed.has_value() || framed->empty()) {
+            return;
+        }
+        // Two branches, not a lambda: parse() is lifetimebound to its Parser.
+        if (tv_) {
+            fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{*tv_};
+            if (auto parsed = parser.parse(fvs_[0], &arena_, cfg); parsed.has_value()) {
+                mv_.emplace(std::move(*parsed));
+            }
+        } else {
+            fixpp::wire::Parser<fixpp::wire::access_mode::Index> parser{};
+            if (auto parsed = parser.parse(fvs_[0], &arena_, cfg); parsed.has_value()) {
+                mv_.emplace(std::move(*parsed));
+            }
+        }
+    }
+    [[nodiscard]] bool ok() const noexcept { return mv_.has_value(); }
+    // Every caller ASSERTs ok() first.
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    [[nodiscard]] MV const& view() const noexcept { return *mv_; }
+
+private:
+    std::shared_ptr<const fixpp::dict::Dictionary> dict_;
+    std::optional<fixpp::dict::table_view> tv_;
+    std::vector<std::byte> frame_;
+    std::pmr::monotonic_buffer_resource arena_;
+    fixpp::wire::frame_view fvs_[1]{};
+    std::optional<MV> mv_;
+};
+
+// T-2: a dict-backed source parsed under a RAISED entry cap reifies; the copy
+// carries the source's Config, reads the marker field, and keeps every entry.
+TEST(ReifyEagerMaterialization, RaisedCapDictBackedSourceReifiesUnderItsOwnCaps) {
+    CopySiteSource src{fixpp::test_support::make_oversized_frame_for_clone_test(4100),
+                       {.max_offset_entries = 8192},
+                       /*dict_backed=*/true};
+    ASSERT_TRUE(src.ok()) << "precondition: the raised cap admits the source";
+    ASSERT_TRUE(src.view().is_dict_backed());
+
+    std::pmr::monotonic_buffer_resource mr;
+    auto r = fixpp::dict::detail::owning_message_handle_from_frame(kAppV44Rmv, src.view(), &mr);
+    ASSERT_TRUE(r.has_value()) << "the copy must re-parse under the source's raised cap";
+    EXPECT_TRUE(fixpp::test_support::same_config(r->view().offsets().config(),
+                                                 src.view().offsets().config()));
+    auto sender = r->field_value(49);
+    ASSERT_TRUE(sender.has_value());
+    EXPECT_EQ(sender->as_string(), "SENDERID");
+    EXPECT_EQ(r->view().offsets().entries().size(), src.view().offsets().entries().size());
+}
+
+// T-4 (C++ twin of MessageWrite.CloneDictFreeOversizedSourceStillReturnsOk): the
+// dict-free fallback re-parses under the source's Config (before, its default-cap
+// build failed and every read reported absent) and seeds the same root group
+// context as a Parser{}-parsed source.
+TEST(ReifyEagerMaterialization, RaisedCapDictFreeSourceReifiesReadable) {
+    CopySiteSource src{fixpp::test_support::make_oversized_frame_for_clone_test(4100),
+                       {.max_offset_entries = 8192},
+                       /*dict_backed=*/false};
+    ASSERT_TRUE(src.ok());
+    ASSERT_FALSE(src.view().is_dict_backed());
+
+    std::pmr::monotonic_buffer_resource mr;
+    auto r = fixpp::dict::detail::owning_message_handle_from_frame(kAppV44Rmv, src.view(), &mr);
+    ASSERT_TRUE(r.has_value());
+    EXPECT_FALSE(r->view().is_dict_backed());
+    auto sender = r->field_value(49);
+    ASSERT_TRUE(sender.has_value()) << "the dict-free copy must be readable, not empty";
+    EXPECT_EQ(sender->as_string(), "SENDERID");
+    constexpr std::uint16_t kNoPartyIDs = 453;  // any count tag
+    EXPECT_TRUE(fixpp::test_support::same_group_context(
+        r->view().offsets().group_context_for(kNoPartyIDs),
+        src.view().offsets().group_context_for(kNoPartyIDs)));
+}
+
+// T-5(a): the whole Config travels. Both caps raised, one NoPartyIDs instance
+// longer than the default per-instance cap; the copy reads that group.
+TEST(ReifyEagerMaterialization, CopyKeepsRaisedGroupInstanceCap) {
+    CopySiteSource src{
+        fixpp::test_support::make_long_party_instance_frame(4200),
+        {.max_offset_entries = 16384, .max_group_entries_per_instance = 8192},
+        /*dict_backed=*/true};
+    ASSERT_TRUE(src.ok());
+    ASSERT_TRUE(src.view().offsets().group(453).has_value())
+        << "precondition: the source reads its long instance under its raised caps";
+
+    std::pmr::monotonic_buffer_resource mr;
+    auto r = fixpp::dict::detail::owning_message_handle_from_frame(kAppV44Rmv, src.view(), &mr);
+    ASSERT_TRUE(r.has_value());
+    EXPECT_TRUE(r->view().offsets().group(453).has_value())
+        << "the copy must keep the source's raised per-instance group cap";
+}
+
+// T-5(b): a LOWERED per-instance group cap travels too. The source reads its
+// scalars and fails its group read (the cap is lazy); the copy must do the same,
+// with the same error, where a default-cap re-parse would read the group.
+TEST(ReifyEagerMaterialization, CopyKeepsLoweredGroupInstanceCap) {
+    CopySiteSource src{fixpp::test_support::make_long_party_instance_frame(1),
+                       {.max_group_entries_per_instance = 2},
+                       /*dict_backed=*/true};
+    ASSERT_TRUE(src.ok());
+    ASSERT_TRUE(src.view().get(49).has_value()) << "precondition: the source reads its scalars";
+    auto const src_group = src.view().offsets().group(453);
+    ASSERT_FALSE(src_group.has_value()) << "precondition: the lowered cap fails the group read";
+
+    std::pmr::monotonic_buffer_resource mr;
+    auto r = fixpp::dict::detail::owning_message_handle_from_frame(kAppV44Rmv, src.view(), &mr);
+    ASSERT_TRUE(r.has_value()) << "a lazy group cap does not refuse the copy's build";
+    EXPECT_TRUE(r->field_value(49).has_value());
+    auto const copy_group = r->view().offsets().group(453);
+    EXPECT_FALSE(copy_group.has_value()) << "the copy must keep the source's lowered cap";
+    if (!copy_group.has_value()) {
+        EXPECT_EQ(copy_group.error(), src_group.error());
+    }
 }
 
 }  // namespace
