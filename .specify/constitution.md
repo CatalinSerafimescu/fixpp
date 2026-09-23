@@ -36,7 +36,9 @@ Sync Impact Report — v2.0 → v3.0 (2026-09-23) — PROPOSED (Codex Gate A, th
     definition, /gate-b, the edit guard) are outside this repository.
   Review and sign-off: pending — Codex Gate A on this branch (round 1: NOT CONVERGED, 1 P1 / 4 P2 /
     3 P3; round 2: NOT CONVERGED, 0 P1 / 3 P2 / 1 P3 — A-2, A-4 and A-7 were only partly closed by
-    the round-1 revision), then the owner's sign-off. PR: not yet opened.
+    the round-1 revision; round 3: NOT CONVERGED, 0 P1 / 2 P2, both in the parent edit guard — file-type
+    classification and an owner override, removed by owner decision), then the owner's sign-off.
+    PR: not yet opened.
 -->
 <!--
 Sync Impact Report — v1.0 → v2.0 (2026-09-15) — RATIFIED

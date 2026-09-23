@@ -300,8 +300,8 @@ sound, matches memory. Disposition (user-approved 2026-05-17):
   (1) the orchestrator never implements — `/speckit-implement` step 5a loses its
   "MAY implement directly" carve-out, and a parent-root PreToolUse hook
   (`.claude/scripts/pretooluse-orchestrator-library-edit-guard.sh`) blocks
-  main-session edits to library code in every worktree, with an owner-only
-  override; (2) a comment-claim lint (`.claude/scripts/check-comment-claims.py`,
+  main-session edits to library code in every worktree (classified by file
+  type, no override — an owner-directed change still goes to the implementer); (2) a comment-claim lint (`.claude/scripts/check-comment-claims.py`,
   parent root) that flags added comment lines recording a result instead of a
   condition. The implementer runs it before reporting and the orchestrator
   re-runs it between phases (step 10) and after every Gate B fixer round

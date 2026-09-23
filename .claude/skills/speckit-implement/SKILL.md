@@ -212,7 +212,8 @@ You **MUST** consider the user input before proceeding (if not empty).
    agent escalates, answer the question and resume the same agent
    (SendMessage) or spawn a fresh one with the answer in its brief. A
    parent-root PreToolUse hook blocks main-session edits to library
-   code; only the owner's override file lifts it (pipeline.md [L]).
+   code, with no override: an owner-directed change is still briefed
+   to the agent (pipeline.md [L]).
 
    **Between phases — CodeGraph freshness gate.** After each phase
    agent returns, BEFORE spawning the next phase's agent (or before
