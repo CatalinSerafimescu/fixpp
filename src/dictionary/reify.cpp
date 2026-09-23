@@ -194,7 +194,9 @@ core::expected_t<owning_message_handle> owning_message_handle_from_frame(
             // already exercise — no duplicated classify_fn/group_member_fn.
             if (handle.pimpl_->owned_tv_) {
                 wire::Parser<wire::access_mode::Index> parser{*handle.pimpl_->owned_tv_};
-                auto parsed = parser.parse((*framed)[0], mr);
+                // fixpp#493 (`.specify/495-493-486-dict-reify-copy.md` §4): re-parse
+                // under the SOURCE's caps, so a raised or lowered cap survives the copy.
+                auto parsed = parser.parse((*framed)[0], mr, view.offsets().config());
                 if (!parsed) {
                     // fixpp#458 (090-capi-refusals) D-4: a dict-backed source
                     // whose re-parse of the copied frame fails now REFUSES
@@ -210,10 +212,14 @@ core::expected_t<owning_message_handle> owning_message_handle_from_frame(
                 handle.pimpl_->view_cache_.emplace(std::move(*parsed));
             } else {
                 // Dict-free source (data-model.md §2.2 B, RETAINED): the
-                // dict-free 2-arg ctor never refuses -- OffsetTable::build
+                // dict-free constructor never refuses -- OffsetTable::build
                 // catches std::bad_alloc internally and degrades in place,
                 // publicly reported via view().offsets().build_status().
-                handle.pimpl_->view_cache_.emplace((*framed)[0], mr);
+                // fixpp#493: it takes the source's caps too, through the
+                // four-argument form with `dict_hooks::none()`, which also seeds
+                // the root group context as a Parser{}-parsed source has it.
+                handle.pimpl_->view_cache_.emplace((*framed)[0], mr, view.offsets().config(),
+                                                   wire::dict_hooks::none());
             }
         } else {
             // Span frames to nothing, including a zero-byte span

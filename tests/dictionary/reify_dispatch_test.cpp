@@ -984,9 +984,12 @@ TEST(ReifyEagerMaterialization, RaisedCapDictFreeSourceReifiesReadable) {
     auto r = fixpp::dict::detail::owning_message_handle_from_frame(kAppV44Rmv, src.view(), &mr);
     ASSERT_TRUE(r.has_value());
     EXPECT_FALSE(r->view().is_dict_backed());
+    // Non-fatal, so the context assertion below runs even when the copy is empty.
     auto sender = r->field_value(49);
-    ASSERT_TRUE(sender.has_value()) << "the dict-free copy must be readable, not empty";
-    EXPECT_EQ(sender->as_string(), "SENDERID");
+    EXPECT_TRUE(sender.has_value()) << "the dict-free copy must be readable, not empty";
+    if (sender.has_value()) {
+        EXPECT_EQ(sender->as_string(), "SENDERID");
+    }
     constexpr std::uint16_t kNoPartyIDs = 453;  // any count tag
     EXPECT_TRUE(fixpp::test_support::same_group_context(
         r->view().offsets().group_context_for(kNoPartyIDs),
