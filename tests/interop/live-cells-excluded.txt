@@ -86,8 +86,9 @@ qfcpp-no-possdup-injection Fix44/PossDupReplaySurvives.ReplayedPossDupFrameDoesN
 
 # ── unregistered-tracked ─────────────────────────────────────────────────────
 # NOT a design decision — a KNOWN GAP with an issue. No cell selects these on ANY
-# engine, so they have never run live, and in two cases spec/feature-catalogue.md
-# claims otherwise. Tracked by fixpp#472, which is where the dispositions belong.
+# engine, so they have never run live; spec/feature-catalogue.md says so on the rows
+# that cite these suites (#472 corrected rows that called them live). Tracked by
+# fixpp#503, which is where the dispositions belong.
 #
 # STRUCTURAL CONDITION (re-derived by the checker): NO param of this Suite.Case is
 # covered. If one ever is, the case has stopped being "runs nowhere" and the entry
