@@ -484,21 +484,57 @@ rejection now assert verbatim emit.
   **C-ABI 1.9 BREAKING** under `[const §X.7]`:
   - `FIXPP_C_ABI_VERSION_MINOR` becomes 9 in `include/fix/c_api/version.h`, with a history comment
     naming 091/fixpp#418.
-  - `fixpp_msg_commit` (`include/fix/c_api/message.h`) and `fixpp_dict_load_from_xml`
-    (`include/fix/c_api/dict.h`) each carry a BREAKING (1.9) note. It says that a Length+Data pair a
-    loaded dictionary declares only inside a component or group is now a dictionary pair, so it is
-    checked at commit and honoured by the setters and scanners.
-  - B-091-4 is marked BREAKING. Its BREAKING effects are the commit refusal and the inbound
-    scanners now reading such a Data by count (an inbound message with a malformed pair of that
-    kind, which parsed before, is now refused). The **additive** widenings, each a failure turned
-    into a success, are listed next to them: `fixpp_msg_set_data` and `fixpp_entry_set_data` now
+  - The affected population is **derived**, not listed by example: research.md R-11's *C-ABI 1.9
+    population recipe* is re-run and every export is classified. It is carried out under the
+    round-3 ruling and needs no further owner decision. Every note below says that a Length+Data
+    pair a loaded dictionary declares only inside a component or group is now a dictionary pair,
+    then names that declaration's own effect. §X.7 classes a success turned into a failure as
+    BREAKING whatever the documentation said.
+    - **BREAKING (1.9) notes on declarations:**
+      - `fixpp_dict_load_from_xml` (`include/fix/c_api/dict.h`), the root cause: same return code,
+        but the dictionary it yields now carries the pair;
+      - `fixpp_msg_commit` (`include/fix/c_api/message.h`): a malformed pair of that kind returned
+        `FIXPP_ERR_OK` and now returns `FIXPP_ERR_WIRE_CONFORMANCE`;
+      - `fixpp_session_send` (`include/fix/c_api/session.h`), through `Session::send_impl`'s
+        `length_data_carry` scan over the session dictionary's hooks: a malformed pair of that kind
+        returned `FIXPP_ERR_OK` and now returns `FIXPP_ERR_APP_PAYLOAD_MALFORMED`; and a count that
+        covers a following field (e.g. 43, 122 or a header-class tag) is now transmitted verbatim
+        as Data, not excised or reordered;
+      - `fixpp_session_register_callback` (`include/fix/c_api/session.h`), the `fixpp_recv_cb`
+        delivery contract: an inbound message carrying a malformed pair of that kind, delivered
+        before, is now dropped as a parse error by `Session::parse_and_dispatch_` (the count's end
+        byte is not SOH, `OffsetTable::build` refuses), silently and with no Reject;
+      - the **inbound reader family**, as **one** BREAKING (1.9) paragraph in `message.h`'s shared
+        accessor preamble ("Return codes common to all accessors"), not a marker per reader. It
+        names `fixpp_msg_get_{string,bytes,int,double,decimal}`, `fixpp_msg_has_tag`,
+        `fixpp_msg_field_count`, `fixpp_msg_field_at`, `fixpp_msg_get_group`,
+        `fixpp_group_get_field_{string,int,double,decimal}` and `fixpp_group_get_nested_group`,
+        says it covers the inbound, clone and toApp views (the last is what
+        `fixpp_session_register_send_callback` exposes), and says a counted Data of such a pair can
+        absorb fields these readers used to return (a getter that returned `FIXPP_ERR_OK` can now
+        return `FIXPP_ERR_TAG_NOT_FOUND`; `field_at` can go out of range; `has_tag` and
+        `field_count` change value).
+    - **BREAKING with no carrying declaration**, recorded in the `version.h` history comment
+      (§X.7): a frame a pre-1.9 engine stored with a malformed pair of that kind now fails replay
+      (`build_replay_frame`) and is gap-filled rather than resent; the session's header and Logon
+      scans (`scan_frame_header`, `interpret_logon` in `admin_messages.cpp`, the store's
+      `frame_has_genuine_tag554` masking) read such a Data by count.
+    - **Additive** (failure turned into success; no §X.7 marker, listed in B-091-4): the widenings
+      named in the next bullet.
+    - **UNCHANGED:** every other export. The condition is the recipe's step 5: no path to its steps
+      1–4, that is, no pair lookup at call time and no read of a view the pair-aware parse built;
+      any pair effect of the values such an export writes surfaces at `fixpp_msg_commit`.
+  - B-091-4 is marked BREAKING and names the BREAKING effects above. The **additive** widenings,
+    each a failure turned into a success, are listed next to them: `fixpp_msg_set_data` and `fixpp_entry_set_data` now
     accept such a pair; `fixpp_msg_set_string` and `fixpp_entry_set_string` no longer refuse an
     SOH-bearing value for its Data tag (both gate that refusal on `length_tag_for_data(tag) == 0`);
     and a correctly Length-prefixed, SOH-bearing Data of that pair, written through any setter,
-    which failed commit with `FIXPP_ERR_WIRE_CONFORMANCE` before, now commits.
+    which failed commit with `FIXPP_ERR_WIRE_CONFORMANCE` before, now commits; and the same
+    well-formed, SOH-bearing Data sent through `fixpp_session_send`, which returned
+    `FIXPP_ERR_APP_PAYLOAD_MALFORMED` before, now returns `FIXPP_ERR_OK`.
   - The PR description carries the BREAKING declaration.
-  - No symbol, signature or error code changes. The refusal uses the existing
-    `FIXPP_ERR_WIRE_CONFORMANCE` (FR-004a).
+  - No symbol, signature or error code changes. The refusals use the existing
+    `FIXPP_ERR_WIRE_CONFORMANCE` and `FIXPP_ERR_APP_PAYLOAD_MALFORMED` (FR-004a).
   - A C-ABI test loads a synthetic dictionary whose custom pair is declared adjacently only inside a
     component, under C-2.5a's non-adjacency conditions (plan Phase 0b names the load path and the
     setters). It commits a malformed instance of that pair through `fixpp_msg_commit` and asserts
@@ -508,6 +544,15 @@ rejection now assert verbatim emit.
   - The test asserts only that post-change value. It is written first and shown RED on the unfixed
     loader, where the result is `FIXPP_ERR_OK`; that pre-change form is recorded in the commit, so
     the RED → GREEN step witnesses the break rather than only the new state.
+  - Two more witnesses, each written first and RED on the unfixed loader (plan Phase 0b):
+    - **send:** on a loopback session (`tests/capi/capi_loopback_support.hpp`) whose session
+      dictionary is a full shipped dictionary with one injected component-only custom pair,
+      `fixpp_session_send` of a malformed instance (`35=D␁5001=2␁5002=abc␁`) asserts
+      `FIXPP_ERR_APP_PAYLOAD_MALFORMED`; the unfixed loader returns `FIXPP_ERR_OK`;
+    - **inbound drop:** a fixpp 1.9 peer cannot send the malformed frame, so this witness is at the
+      session/wire layer: `Parser<Index>` over the synthetic dictionary's `table_view` refuses the
+      malformed frame; the unfixed loader parses it as two plain fields. It proves the effect the
+      `fixpp_session_register_callback` note documents.
   - The `[const §X.6]` controls for a breaking C-ABI change apply.
 
 ### Key Entities

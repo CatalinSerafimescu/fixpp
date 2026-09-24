@@ -160,8 +160,7 @@ INV-5). That walk is extended: for each container (the top-level `entries_`, and
 `group_instance::fields`) it feeds every node, in order, to a `wire::length_data_checker` built from
 `hooks_`, then calls `finish()`.
 - A scalar node is fed as `observe(tag, value_bytes)`.
-- A group node is fed as `observe(no_tag, {})`. A NumInGroup tag is never a pair tag, so it passes,
-  unless a Length is waiting, in which case adjacency is broken and the check correctly fails.
+- A group node is fed as `observe(no_tag, {})`.
 
 Any failure → `wire_invalid_field_format`, `out` untouched.
 
@@ -482,7 +481,8 @@ groups inside those containers belong to the new group walk.
   `fixpp_entry_set_string` at set time; any setter at commit when the value is correctly
   Length-prefixed), and the C-ABI and `body_builder` commit checks check it. Arguably a correction (the dictionary
   declares the adjacency), but a wire-behaviour change on a public API: disclosed in B-091-4 and
-  witnessed by C-2.5a.
+  witnessed by C-2.5a; its C-ABI half is FR-019's population, derived by the recipe below and
+  witnessed by FR-019's tests.
 - **Why a synthetic witness.** On the shipped dictionaries, "break on a non-field child" and "skip
   it" yield the same pair set (Opus Gate A r2, measured; re-derive with the model recipe below run
   in both modes), so an implementation reusing the message walk's skip would pass every shipped-
@@ -522,6 +522,32 @@ standard-pair set is non-empty and prints it, so a wrong path, an empty `message
 Length-type filter fails rather than passes; a quickstart §3 mutant emptying one non-FIX50SP2 leg's
 probe shows that assertion able to fire. The union test stays and continues to catch an
 **over**-pairing (a non-standard row).
+
+**C-ABI 1.9 population recipe (FR-019; re-derive at the implementation head, do not trust a
+recorded list or count).** Loop 3 round 1 (Opus judging) derived it; `codegraph_callers` may replace
+the greps. Run in the library root:
+1. **Pair-sensitive primitives:** `grep -rnE
+   "session_hooks|pair_hooks|for_table_view|length_data_carry|length_data_checker|has_nonstandard_pair|length_pair_data_tag|length_tag_for_data"
+   src include`. Keep the files on a runtime path (`src/capi/*`, `src/session/*`,
+   `include/fixpp/session/*`, `include/fixpp/wire/{parser,validator}.hpp`,
+   `src/wire/offset_table.cpp`); `src/dictionary/*` is the loader, the root cause.
+2. **C-ABI direct callers:** `grep -nE "pair_hooks|soh_outside_data|check_length_data"
+   src/capi/message_write.cpp`, each hit mapped to its enclosing `FIXPP_API_EXPORT` function
+   (`soh_outside_data` and `check_length_data` are static helpers: map their callers).
+3. **C-ABI → session:** `grep -rnE "engine_->send\(" src/capi` (the exports that reach
+   `Session::send_impl`).
+4. **C-ABI → inbound view:** every `FIXPP_API_EXPORT` in `src/capi/message_read.cpp` reads a view
+   `Session::parse_and_dispatch_` built with the session dictionary, or a clone sharing its
+   membership; delivery itself is `fixpp_session_register_callback`, and the toApp view is
+   `fixpp_session_register_send_callback` (same `parse_and_dispatch_`).
+5. **The rest:** every other `FIXPP_API_EXPORT` in `include/fix/c_api/*.h` is checked for a path to
+   steps 1–4 and classified.
+
+**Classification** (`[const §X.7]`): a success turned into a failure is BREAKING whatever the
+documentation said; a failure turned into a success, or a change in output the documentation leaves
+unspecified, is additive. A declaration that is BREAKING has its note name every effect it shows. An effect reached only through engine internals
+with no declaration of its own goes in the `version.h` history comment. The classes and their
+members are FR-019's.
 
 **Alternatives rejected (owner).** (a) Couple from the standard table in codegen while leaving the
 loader: fixes builders but leaves the dictionary API answering wrong on FIX50SP2. (c) Scope the five

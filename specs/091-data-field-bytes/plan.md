@@ -18,8 +18,9 @@ already does.
 The QuickFIX XML loader's pair detection descends into components and groups (Gate A r1 ruling 2,
 FR-017), coupling five FIX 5.0 SP2 standard pairs it missed; a per-dictionary drift arm (FR-018)
 keeps each dictionary in step with the standard table. For a user-loaded dictionary that declares a
-custom pair only inside a component or group, the loader change turns a C-ABI commit that succeeded
-into a refusal, so 091 ships **C-ABI 1.9 BREAKING** (Gate A r3 ruling, FR-019). It adds no C-ABI symbol.
+custom pair only inside a component or group, the loader change turns C-ABI calls that succeeded
+into failures (the recipe-derived population is FR-019's), so 091 ships **C-ABI 1.9 BREAKING**
+(Gate A r3 ruling, FR-019). It adds no C-ABI symbol.
 
 The code generator:
 - routes every coupled member through the new operation in both the top-level and nested arms, with a
@@ -77,7 +78,7 @@ gated on a noise-floor precondition read from the base legs (R-10, quickstart §
 | **VI** 100 % FIX rule | yes | §VI.5: Normative References list `[FIX50SP2 §3.3] Field data types` (coverage index ↔ W-008); TagValue v1.0 is informative (no coverage-index entry). W-008's evidence is amended in the Ledger phase. The interop residual is disclosed (FR-009a, by extending L-426-3) |
 | **VII** testing | yes | TDD order: drift arm RED, then loader; RED stage-one flip, then implementation; C-1 RED, then GREEN. Every C-1/C-2 clause maps to a named test; each mutant in quickstart §3 names an existing test shown RED. §VII.8: every touched ctest entry gets label `091` and the recipe selects with `-L` and gates on the checked-in `expected-ctest-091.txt` manifest (quickstart §2); `wire_body_builder_test` stays standalone (§8 exemption: in-TU global `operator new` counter) |
 | **IX** coverage / sanitizers / static analysis | yes | Every new line in `body_builder.cpp` covered. ASan/UBSan presets run in `/speckit-verify`. clang-tidy on the changed `src/`, `include/` **and `tools/codegen/`** files (#265) |
-| **X** C-ABI | **yes — §X.7 BREAKING, 1.9** (Gate A r3 owner ruling, FR-019) | No symbol, signature or error code is added or changed (FR-004a). FR-017 changes what an existing call returns: `fixpp_msg_commit` refuses a custom pair that a user dictionary declares only inside a component or group, where before it returned `FIXPP_ERR_OK`. Per §X.7 (pre-release regime):<br>• bump `FIXPP_C_ABI_VERSION_MINOR` 8 → 9;<br>• add BREAKING (1.9) markers on `fixpp_msg_commit` (`message.h`) and `fixpp_dict_load_from_xml` (`dict.h`), in the PR description and in B-091-4;<br>• update every in-repo version consumer in the same PR (Phase 0b).<br>§X.6: all four Appendix A controls apply — `/clarify` ✅ (r3 session), `/analyze` (after `/speckit-tasks`), Gate A, and **user `/plan` sign-off** (⏳ required before `/speckit-tasks`) |
+| **X** C-ABI | **yes — §X.7 BREAKING, 1.9** (Gate A r3 owner ruling, FR-019) | No symbol, signature or error code is added or changed (FR-004a). FR-017 changes what existing calls return for a custom pair that a user dictionary declares only inside a component or group. The affected population is derived by research.md R-11's *C-ABI 1.9 population recipe* and classified in FR-019. Per §X.7 (pre-release regime):<br>• bump `FIXPP_C_ABI_VERSION_MINOR` 8 → 9;<br>• add BREAKING (1.9) markers on `fixpp_dict_load_from_xml` (`dict.h`), `fixpp_msg_commit` (`message.h`), `fixpp_session_send` and `fixpp_session_register_callback` (`session.h`), and one shared paragraph for the inbound reader family in `message.h`'s accessor preamble; the effects with no carrying declaration go in the `version.h` history comment; all of them also in the PR description and in B-091-4;<br>• update every in-repo version consumer in the same PR (Phase 0b).<br>§X.6: all four Appendix A controls apply — `/clarify` ✅ (r3 session), `/analyze` (after `/speckit-tasks`), Gate A, and **user `/plan` sign-off** (⏳ required before `/speckit-tasks`) |
 | **XI** concurrency | no | No threading change. `send_impl` is read, not modified (R-9) |
 | **XIX** documentation | yes | B&L rows, brain `wire.md` (the Length+Data section's "#418 must reuse" line becomes "did"), `CLAUDE-history.md` at close-out. §5: *dated 2026-09-24*, no Doxygen pipeline existed (re-derive: `find . -maxdepth 3 -name 'Doxyfile*'`; if it finds one, regenerate it); the tracked hand-written `docs/src/*.md` pages are grepped with `git grep -n -e body_builder -e length_pair -e 'Length+Data' -- docs/src` in the Ledger phase and any hit is updated. The API contract (refusals incl. handle checks, atomicity limits, `dict_hooks` lifetime) lives in the `body_builder.hpp` comments, C-1 |
 
@@ -110,12 +111,14 @@ specs/091-data-field-bytes/
 include/fixpp/wire/body_builder.hpp     # field_data, set_data, ctor(dict_hooks) + lifetime comment, hooks_
 src/wire/body_builder.cpp               # R-3 append+rollback, constexpr is_framing_tag + static_assert; R-4 combined walk
 src/dictionary/xml_loader.cpp           # R-11 secondary walk into <component>/<group> (stated visit order); delete false comment; header names the decision
-include/fix/c_api/version.h             # FR-019: FIXPP_C_ABI_VERSION_MINOR 8 → 9, re-authored trailing comment naming 091/fixpp#418
-include/fix/c_api/message.h             # FR-019: BREAKING (1.9) note on fixpp_msg_commit
+include/fix/c_api/version.h             # FR-019: FIXPP_C_ABI_VERSION_MINOR 8 → 9, re-authored trailing comment naming 091/fixpp#418 + the no-carrier effects (replay gap-fill, header/Logon scans)
+include/fix/c_api/message.h             # FR-019: BREAKING (1.9) note on fixpp_msg_commit; one BREAKING (1.9) reader-family paragraph in the accessor preamble
 include/fix/c_api/dict.h                # FR-019: BREAKING (1.9) note on fixpp_dict_load_from_xml
-tools/capi_freeze.sha256                # re-pinned for message.h, dict.h, version.h (gate tools/check_capi_freeze.sh)
+include/fix/c_api/session.h             # FR-019: BREAKING (1.9) notes on fixpp_session_send and fixpp_session_register_callback
+tools/capi_freeze.sha256                # re-pinned for message.h, dict.h, session.h, version.h (gate tools/check_capi_freeze.sh)
 tests/capi/version_test.cpp (+ every hit of the Phase 0b grep)   # exact-version pins → 1.9
-tests/capi/...                          # FR-019 C-ABI before/after test: synthetic component-only custom pair
+tests/capi/...                          # FR-019 C-ABI before/after test: synthetic component-only custom pair; + the fixpp_session_send assertion (loopback harness)
+tests/wire/dict_hooks_custom_pair_test.cpp or tests/session/length_data_session_scanner_test.cpp   # FR-019 inbound-drop witness (Parser<Index> over the synthetic table_view)
 tools/codegen/fixpp-codegen/
 ├── emit_builders.cpp                   # R-7 coupled arms + static_assert; R-8 message_encoding
 └── gen_util.hpp                        # stale "already String" comment
@@ -136,7 +139,7 @@ tests/session/...                               # R-9 send_impl header-pair witn
 tests/interop/conversation/support/conv_wire.hpp, conv_cell_test.cpp   # #418 comments reworded (FR-016)
 include/fixpp/wire/length_data_check.hpp        # "#418 is meant to be its second caller" → past tense (FR-016)
 spec/behaviors-and-limitations{,-closed}.md     # L-067-2 move; delete the "L-067-2 is unchanged" bullet; B-091-1..4; extend L-426-3
-spec/feature-catalogue.md                       # W-008 evidence; CA-011 C-ABI 1.9 note
+spec/feature-catalogue.md                       # W-008 evidence; C-ABI 1.9 note on every CA row listing a declaration FR-019 marks
 brain/components/wire.md                        # Length+Data section update
 brain/components/c-api.md                       # C-ABI 1.9 entry (FR-019)
 ```
@@ -182,14 +185,19 @@ brain/components/c-api.md                       # C-ABI 1.9 entry (FR-019)
      - On the unfixed loader the result is `FIXPP_ERR_OK`, recorded in the commit as the pre-change form.
      - After FR-017 it is `FIXPP_ERR_WIRE_CONFORMANCE`. The test asserts only that post-change value (FR-019), so it goes RED → GREEN across phase 0.
      - A well-formed instance commits `FIXPP_ERR_OK` both before and after (no over-refusal).
-   - **Bump:** `FIXPP_C_ABI_VERSION_MINOR` 8 → 9 with a re-authored trailing comment. Add the BREAKING (1.9) notes in `message.h` and `dict.h`.
+   - **`fixpp_session_send` witness, written first** (FR-019), in the same fixture's bucket:
+     - **Construction:** the session dictionary is a full shipped dictionary (e.g. FIX 4.4 XML) with one injected `<component>` declaring 5001/5002 adjacently, referenced from message `D` so both tags are in its expansion; a session dictionary is required because the session must log on. The harness is `tests/capi/capi_loopback_support.hpp`.
+     - **Preconditions (else it is not RED on the unfixed loader):** C-2.5a's non-adjacency conditions, including `<fields>` order in the base XML; and the payload must return `FIXPP_ERR_OK` on the unfixed loader, not some other refusal.
+     - `fixpp_session_send` of `35=D␁5001=2␁5002=abc␁` asserts `FIXPP_ERR_APP_PAYLOAD_MALFORMED`. On the unfixed loader it is `FIXPP_ERR_OK`, recorded in the commit as the pre-change form; RED → GREEN across phase 0.
+   - **Inbound-drop witness, written first** (FR-019): a fixpp 1.9 peer cannot send the malformed frame, so it sits at the session/wire layer, in `tests/wire/dict_hooks_custom_pair_test.cpp` (`wire_dict_tests`) or `tests/session/length_data_session_scanner_test.cpp` (then its entry joins the quickstart §2 manifest). `Parser<Index>` over the synthetic dictionary's `table_view` refuses the malformed frame; on the unfixed loader it parses as two plain fields (RED). It proves the effect the `fixpp_session_register_callback` note documents.
+   - **Bump:** `FIXPP_C_ABI_VERSION_MINOR` 8 → 9 with a re-authored trailing comment that also carries FR-019's no-carrier effects. Add the BREAKING (1.9) notes FR-019 classifies: `dict.h`, `message.h` (commit + the one reader-family paragraph) and `session.h` (send + register_callback). Re-run R-11's population recipe at the implementation head first; a declaration it adds that FR-019 does not name is a planned edit, not a silent omission.
    - **Consumers:** run `git grep -ln "VERSION_MINOR\|0x010800\|1_8_0\|(8U << 8U)" -- . ':!specs'` and classify each hit; most compare against the macro and move automatically.
      - Hard pins it must surface: `tests/capi/version_test.cpp`'s exact-version cell and `CompositeMacroValue`, plus the `version.h` narrative.
      - `version_test.cpp`'s header comment enumerates each post-freeze minor by ordinal. Delete that ordinal enumeration rather than extending it (a comment records a procedure, not a result); keep the rule it explains.
      - The Python binding exports the name only (`bindings/python/fixpp.i`); confirm it has no value assertion.
      - No error code is minted, so `introducing_minor()` and `tools/abi_history/error_codes_v1.txt` do not change.
      - The library track `FIXPP_VERSION_*` is not bumped.
-   - **Freeze manifest:** `tools/check_capi_freeze.sh` must fail on exactly `message.h`, `dict.h` and `version.h` (positive control), then pass after the re-pin.
+   - **Freeze manifest:** `tools/check_capi_freeze.sh` must fail on exactly `message.h`, `dict.h`, `session.h` and `version.h` (positive control), then pass after the re-pin.
    - **Mutant:** `FIXPP_C_ABI_VERSION_MINOR` back to 8 must turn the version test RED.
 1. **Stage-one carry-over, then flip (RED).** Bring `68c8c769`'s test hunk onto the branch, **tests
    only**, without the superseded design note.
@@ -225,8 +233,8 @@ brain/components/c-api.md                       # C-ABI 1.9 entry (FR-019)
    426-428 note itself is not edited). The follow-up *verifiable session binding for dictionary
    pairs, option (b)* is fixpp#505, cited in B-091-3. Article XIX §5 docs grep (Constitution Check).
    C-ABI 1.9 doc surfaces, as the 1.8 precedent updated them: a C-ABI 1.9 entry in
-   `brain/components/c-api.md` beside its C-ABI 1.8 section, and a C-ABI 1.9 BREAKING note on the
-   CA-011 row of `spec/feature-catalogue.md` (data-model ledger table).
+   `brain/components/c-api.md` beside its C-ABI 1.8 section, and a C-ABI 1.9 BREAKING note on every
+   `spec/feature-catalogue.md` CA row that lists a declaration FR-019 marks (data-model ledger table).
    Close-out check: the R-4 follow-up is fixpp#506 (filed 2026-09-24; research.md R-4 and the
    Parked list in `issue-batches.md` both cite it). Confirm it is still open, or record its fix, before
    091 closes.
@@ -328,3 +336,18 @@ them:
 - Reviews: research/reviews/codex_091-data-field-bytes_gate_a_L2_3_review.md,
   research/reviews/opus_091-data-field-bytes_gate_a_L2_3_adversarial_review.md.
 - A fresh `/gate-a` loop (loop 3) follows.
+
+### Loop 3 round 1 — disagreements
+
+None. No Opus-judged finding was marked Disagree. Narrowings, recorded so later rounds do not
+re-raise them:
+- **Codex P1-1 downgraded to P2** (Opus judging): the owner's round-3 ruling already covers the
+  break; the missing declarations are bookkeeping inside it and need no owner decision. The
+  population was widened beyond Codex's (inbound delivery, the reader family, the `version.h`
+  no-carrier effects) and is now recipe-derived (R-11), not listed by example.
+- **No 1.9 notes on the additive setters** (Opus judging): §X.7 does not require a marker for a
+  failure turned into a success; B-091-4 lists them.
+- **Codex P3-1's replacement text not adopted** (Opus judging): the false sentence is deleted, not
+  replaced, since a replacement is a new claim.
+
+- Loop 3 round 1 applied 2026-09-24: Codex P1=1 P2=0 P3=1; Opus post-judging P1=0 P2=1 P3=1; rewrite completes the C-ABI 1.9 declaration population (recipe-derived) + R-4 sentence deleted. Reviews: research/reviews/codex_091-data-field-bytes_gate_a_L3_review.md, research/reviews/opus_091-data-field-bytes_gate_a_L3_adversarial_review.md.
