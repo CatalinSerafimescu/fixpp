@@ -427,7 +427,7 @@ only then made GREEN.
   - a dictionary re-pairing a standard tag (95 → 5002) is ignored in favour of the standard pair
     (L-426-2).
   The table view outlives the builder. RED at first.
-- [ ] T024 Via `phase-implementer`, implement in `include/fixpp/wire/body_builder.hpp` and
+- [X] T024 Via `phase-implementer`, implement in `include/fixpp/wire/body_builder.hpp` and
   `src/wire/body_builder.cpp` (R-1…R-4, data-model).
   - **Header.**
     - Add `#include "dict_hooks.hpp"`; no dictionary include.
@@ -473,7 +473,7 @@ only then made GREEN.
     `dict_hooks` argument (hooks built outside the window), `field_data`, a group entry's
     `set_data`, and commit. Assert a delta of 0. Show it RED with a mutant that heap-allocates in
     `append_data_field`.
-- [ ] T025 Via `phase-implementer`, update `include/fixpp/wire/length_data_check.hpp`'s header
+- [X] T025 Via `phase-implementer`, update `include/fixpp/wire/length_data_check.hpp`'s header
   comment: "#418 is meant to be its second caller" becomes past tense (the builder is the second
   caller), with no count added (FR-016).
 - [ ] T026 Via `phase-implementer`, run the Foundational mutants from quickstart §3 in a scratch copy.
