@@ -74,9 +74,10 @@
  *    - the session's header and Logon scans (scan_frame_header, interpret_logon,
  *      the store's frame_has_genuine_tag554 masking) read such a Data by count.
  *      interpret_logon refuses a Logon carrying a malformed count, whether of
- *      a component/group-only pair or of a standard pair such as 95/96 (so
- *      shipped dictionaries are affected too): a Logon of that shape that
- *      was accepted is now refused. Observers: on either role
+ *      a component/group-only pair or of a standard pair such as
+ *      RawDataLength(95) and RawData(96) (so shipped dictionaries are
+ *      affected too): a Logon of that shape that was accepted is now
+ *      refused. Observers: on either role
  *      fixpp_session_is_established stays false, and fixpp_session_close
  *      returns FIXPP_ERR_THREAD_SESSION_LIFECYCLE, not FIXPP_ERR_OK.
  *  No error code is added. */
