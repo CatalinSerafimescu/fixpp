@@ -226,7 +226,7 @@ only then made GREEN.
     `field`/`set_int` on Length tags 2494, 2815, 43109, 43110 and 43111.
   - Run `git grep -nE '<those names>' -- src tests bench bindings docs examples include tools`.
   - Every hit becomes a planned edit in T014. Record the grep and its result in the commit.
-- [ ] T012 Via `phase-implementer`, extend `LoaderState::detect_length_pairs` in
+- [X] T012 Via `phase-implementer`, extend `LoaderState::detect_length_pairs` in
   `src/dictionary/xml_loader.cpp` (R-11).
   - **The new walk** visits every `<component>` definition and every `<group>` at any depth,
     whatever its parent (`<header>`, `<trailer>`, `<message>`, `<component>` or another
@@ -243,7 +243,7 @@ only then made GREEN.
     secondary walk descends into components and groups".
   - GREEN on T006–T010. `HeaderEqualsShippedDictionaryUnion` stays GREEN, so there is no
     over-pairing: no non-standard row on any shipped dictionary.
-- [ ] T013 Via `phase-implementer`, run codegen freshness and rebaseline the read-tier pins in
+- [X] T013 Via `phase-implementer`, run codegen freshness and rebaseline the read-tier pins in
   `tests/codegen/read_tier_byte_diff_test.cmake` (C-2.5).
   - **Rebaseline exactly** `_expected_v50sp2_Fields.hpp` and `_expected_v50sp2_Validator.hpp`, with
     a banner paragraph in the fixpp#427 style giving both re-derivation recipes relative to the
@@ -263,7 +263,7 @@ only then made GREEN.
   - **Stop condition:** if any other pin moves — in particular `v50sp2/Messages.hpp`, which also
     corroborates `specs/003-dictionary-codegen/contracts/golden/v50sp2_Messages.golden.hpp` — stop
     and report to the owner (spec Assumptions).
-- [ ] T014 Via `phase-implementer`, regenerate the 078 **v50sp2** builder goldens under
+- [X] T014 Via `phase-implementer`, regenerate the 078 **v50sp2** builder goldens under
   `specs/078-precompiled-builder-libs/contracts/golden/v50sp2/` as an **intermediate** diff (old
   emitter, fixed loader). Only the five newly coupled pairs may change:
   - their Length members are deleted;
