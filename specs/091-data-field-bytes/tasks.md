@@ -952,6 +952,10 @@ FR-019, SC-006).
   - `local build: green on linux-clang-debug @ <git-sha>` (`[const §XVII.7]`), with the SHA T065
     verified;
   - a `## Gates` section, and a `## Gate B …` heading for the Gate B record;
+  - under `## Gates`, the record backing `gate-a-done`: `.specify/decisions/091-data-field-bytes-gatea.md`
+    (loop 3 round 3 converged Opus-only, owner-accepted without the Codex pass). If Gate B rules
+    that `[const §XVII.8]`'s "Codex convergence record" is not met, ask the owner before labelling;
+    never choose between `gate-a-done` and `gate-a-waived` unilaterally;
   - `Closes #418` as the ONLY closing keyword.
   Before opening, grep the body AND every commit message on the branch
   (`git log origin/main..HEAD --format=%B`) for `close[sd]?|fix(e[sd])?|resolve[sd]?` next to
