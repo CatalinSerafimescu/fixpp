@@ -90,7 +90,7 @@ add_test(NAME dictionary_pure_tests COMMAND dictionary_pure_tests)
 # 083 joins this bucket with loader_disposition_test (T035/T042, the FR-006 /
 # FR-006a / FR-023 dispositions) — labelled `083` so the feature selector
 # reaches it, same rationale as wire_dict_tests above.
-set_tests_properties(dictionary_pure_tests PROPERTIES LABELS "dictionary;075;083")
+set_tests_properties(dictionary_pure_tests PROPERTIES LABELS "dictionary;075;083;091")
 
 # ── Standalone: isolation-sensitive dictionary tests (FR-002) ─────────────────
 # Each keeps its own executable + add_test(NAME <target>) so its name, labels,

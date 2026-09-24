@@ -1,8 +1,7 @@
 # tests/wire/CMakeLists.txt — 004-wire-codec test suite.
 # 068-test-binary-grouping: isolation-safe wire tests are grouped into
-# whole-binary add_test executables (bucketed by shared link-deps; none of
-# the 34 carry LABELS, so `-L`/`-R '^wire_'` selection is untouched at the
-# binary-name level). test_body_builder.cpp (in-TU global operator new/
+# whole-binary add_test executables (bucketed by shared link-deps).
+# test_body_builder.cpp (in-TU global operator new/
 # operator new[] allocation counter) stays standalone. Dispositions in
 # specs/068-test-binary-grouping/dispositions.md.
 find_package(GTest CONFIG REQUIRED)
@@ -88,6 +87,8 @@ set_tests_properties(wire_pure_tests PROPERTIES LABELS "079;wire")
 # ── Standalone: 061-slim body-builder alloc gate (FR-002) ────────────────────
 # in-TU global ::operator new / ::operator new[] allocation counter (D3).
 add_wire_test(wire_body_builder_test test_body_builder.cpp)            # 061-slim T005/T006
+# 091-data-field-bytes: label so the feature selector `ctest -L '^091$'` reaches it.
+set_tests_properties(wire_body_builder_test PROPERTIES LABELS "091")
 
 # ── Grouped bucket: codegen-gated wire tests (3 .cpp → 1 binary) ─────────────
 # Each needs the build-tree generated fixpp/v<XX>/Messages.hpp or Reify.hpp;
@@ -159,7 +160,7 @@ add_test(NAME wire_dict_tests COMMAND wire_dict_tests)
 # them: 081 shipped with this exact hole (its #203 accept witnesses sat in this
 # same bucket, unreachable by the feature selector, and only the unfiltered
 # debug leg ran them).
-set_tests_properties(wire_dict_tests PROPERTIES LABELS "075;083;wire")
+set_tests_properties(wire_dict_tests PROPERTIES LABELS "075;083;wire;091")
 # 083 T021 (W-10a leg 4, contracts/typed_read_splitter.md): a BACKSTOP, never
 # the discriminator. Leg 4's depth-capped chain fixture drives
 # consume_group_extent's outer loop with an attacker-shaped declared count; an

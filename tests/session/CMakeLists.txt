@@ -2649,7 +2649,7 @@ if(TARGET fixpp_codegen_generate)
   )
   add_test(NAME test_067_builder_roundtrip COMMAND test_067_builder_roundtrip)
   set_tests_properties(test_067_builder_roundtrip PROPERTIES
-    LABELS "067;us1;roundtrip;069;all_families;failclosed")
+    LABELS "067;us1;roundtrip;069;all_families;failclosed;091")
 
   add_executable(test_067_builder_failclosed
     test_067_builder_failclosed.cpp
@@ -2673,7 +2673,7 @@ if(TARGET fixpp_codegen_generate)
   )
   add_test(NAME test_067_builder_failclosed COMMAND test_067_builder_failclosed)
   set_tests_properties(test_067_builder_failclosed PROPERTIES
-    LABELS "067;us1;failclosed;069;all_families;us1_smoke")
+    LABELS "067;us1;failclosed;069;all_families;us1_smoke;091")
 
   # ── 067-codegen-writer-emitter T022 [US3] [TESTS-FIRST] — validate_<Msg>
   # required-presence witnesses. Constructs each message via build_<Msg> then
@@ -2809,7 +2809,7 @@ if(TARGET fixpp_codegen_generate)
   add_test(NAME test_077_allversions_builder_roundtrip
     COMMAND test_077_allversions_builder_roundtrip)
   set_tests_properties(test_077_allversions_builder_roundtrip PROPERTIES
-    LABELS "077;us2;builder-roundtrip;v50sp2")
+    LABELS "077;us2;builder-roundtrip;v50sp2;091")
 
   # vlatest half of T016 -- kept in a SEPARATE TU/executable from the v50sp2
   # one above (not one combined "allversions" TU): compiling both the ~75MB
@@ -2847,7 +2847,7 @@ if(TARGET fixpp_codegen_generate)
     add_test(NAME test_077_allversions_builder_roundtrip_vlatest
       COMMAND test_077_allversions_builder_roundtrip_vlatest)
     set_tests_properties(test_077_allversions_builder_roundtrip_vlatest PROPERTIES
-      LABELS "077;us2;builder-roundtrip;vlatest")
+      LABELS "077;us2;builder-roundtrip;vlatest;091")
   endif()
 
   # ── 078-precompiled-builder-libs T021 [US1]: byte-identical wire round-trip

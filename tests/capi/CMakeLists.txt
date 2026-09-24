@@ -115,7 +115,7 @@ add_test(NAME capi_pure_tests COMMAND capi_pure_tests)
 # retired), so an unlabelled bucket meant the ABI gate was not in the ABI
 # label. Labelled `capi` (the bucket-wide selector) + `083` (feature-scoped),
 # matching the convention the sibling capi buckets already use.
-set_tests_properties(capi_pure_tests PROPERTIES LABELS "capi;083;abi")
+set_tests_properties(capi_pure_tests PROPERTIES LABELS "capi;083;abi;091")
 
 # T004 (US1, SC-004) — 051 error-block foundational oracle (translate re-point +
 # strerror + per-code-minor downgrade).  T022 (US5) appends live end-to-end arms
@@ -240,7 +240,7 @@ target_link_libraries(capi_length_data_test PRIVATE
 )
 target_include_directories(capi_length_data_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
 add_test(NAME capi_length_data COMMAND capi_length_data_test)
-set_tests_properties(capi_length_data PROPERTIES LABELS "capi;426;428;length-data")
+set_tests_properties(capi_length_data PROPERTIES LABELS "capi;426;428;length-data;091")
 
 # message_read_failloud_test — 073 (L-065-2, #184) T006: nested-read
 # arena-exhaustion fail-loud witness (RED-first against pristine source).

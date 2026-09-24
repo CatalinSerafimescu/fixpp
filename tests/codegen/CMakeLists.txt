@@ -549,7 +549,7 @@ add_test(
     -P "${CMAKE_CURRENT_SOURCE_DIR}/read_tier_byte_diff_test.cmake"
 )
 set_tests_properties("fixpp::dict::read-tier-byte-diff" PROPERTIES
-  LABELS "codegen;077;read-tier-byte-diff")
+  LABELS "codegen;077;read-tier-byte-diff;091")
 
 # 078-precompiled-builder-libs T002 (research.md R2a — Phase-0 BLOCKING
 # prerequisite): hand-written ~30-line ODR / builder⟂validator (SC-003) probe.
