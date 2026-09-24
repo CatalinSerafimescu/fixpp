@@ -290,12 +290,12 @@ only then made GREEN.
     that changed, or a declaration the recipe adds that FR-019 does not name, is a planned edit of
     FR-019 and Appendix A: the orchestrator edits the `.md`, and the implementer edits the header in
     T019. It is never a silent omission.
-- [ ] T017 Via `phase-implementer`, write the 1.9 expectation first (`[const §VII.3]`). In
+- [X] T017 Via `phase-implementer`, write the 1.9 expectation first (`[const §VII.3]`). In
   `tests/capi/version_test.cpp`, set the exact-version cell and `CompositeMacroValue` to 1.9, and
   **delete** the header comment's enumeration of post-freeze minors by ordinal (keep the rule it
   explains). Run `capi_pure_tests` against the unbumped `version.h` (minor 8): it must be **RED** on
   exactly those cells. Quote the RED in the commit. T018 turns it GREEN.
-- [ ] T018 Via `phase-implementer`, set `FIXPP_C_ABI_VERSION_MINOR` 8 → 9 in
+- [X] T018 Via `phase-implementer`, set `FIXPP_C_ABI_VERSION_MINOR` 8 → 9 in
   `include/fix/c_api/version.h`, with a re-authored trailing history comment.
   - It names 091/fixpp#418 and the §X.7 BREAKING declaration.
   - It carries FR-019's effects that have no carrying declaration:
@@ -309,7 +309,7 @@ only then made GREEN.
       both as observers.
   - No error code is minted. `introducing_minor()`, `tools/abi_history/error_codes_v1.txt` and the
     library track `FIXPP_VERSION_*` do not change.
-- [ ] T019 Via `phase-implementer`, add the BREAKING (1.9) notes FR-019 classifies. Each note says
+- [X] T019 Via `phase-implementer`, add the BREAKING (1.9) notes FR-019 classifies. Each note says
   that a Length+Data pair a loaded dictionary declares only inside a component or group is now a
   dictionary pair, then names that declaration's own effect, in the words of FR-019 / Appendix A.
   - `include/fix/c_api/dict.h`: `fixpp_dict_load_from_xml` (the root cause).
@@ -334,7 +334,7 @@ only then made GREEN.
       Reject).
   - No note goes on `fixpp_msg_set_string`/`fixpp_entry_set_string`: their change is additive only,
     so B-091-4 carries it.
-- [ ] T020 Via `phase-implementer`, update the version consumers.
+- [X] T020 Via `phase-implementer`, update the version consumers.
   - Run `git grep -ln "VERSION_MINOR\|0x010800\|1_8_0\|(8U << 8U)" -- . ':!specs'` and classify
     each hit.
   - Update the remaining hard pins (the `version.h` narrative, any other exact-value hit). The
@@ -344,7 +344,7 @@ only then made GREEN.
     and `tests/interop/`. Record "none affected" or a planned edit for each hit; a hit under
     `bindings/python/` also runs `pytest bindings/python/tests/` (after the owner build ask).
   - Confirm `bindings/python/fixpp.i` exports the name only, with no value assertion.
-- [ ] T021 Via `phase-implementer`, update the freeze manifest.
+- [X] T021 Via `phase-implementer`, update the freeze manifest.
   - `tools/check_capi_freeze.sh` must first **fail on exactly** `message.h`, `dict.h`, `session.h`
     and `version.h` (positive control, output quoted).
   - Then re-pin `tools/capi_freeze.sha256`, and the script passes.
