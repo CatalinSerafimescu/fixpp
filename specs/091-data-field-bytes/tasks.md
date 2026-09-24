@@ -541,33 +541,75 @@ only then made GREEN.
       byte), then `98=0`, the shape a conforming peer's Logon has.
     - The fix has landed, so their RED on the unfixed code is shown by T026's `break` mutant, which
       must turn each of them RED; record it with T026.
+  - **Equality-boundary pair, function level, over the standard table (no hooks argument)** (scoped
+    Gate A round 2, P3-1). The body is `35=A␁34=1␁49=TW␁52=…␁56=ISLD␁108=30␁98=0␁95=<N>␁96=x␁`: every
+    field `interpret_logon` validates comes before `95`, and RawData(96) is the last body field, so
+    its counted extent runs into the trailer. Frame it with `make_frame` after N is chosen (N is
+    inside the body, so BodyLength is computed from the final body). Let R be the number of bytes
+    from the first byte of 96's value to the end of the framed message, trailer included, measured
+    on the framed bytes, not hard-coded:
+    - `InterpretLogonMalformedCount.CountReachingTheFrameEndIsRefused`: N = R, so the counted extent
+      reaches the end of the frame; refused with `session_invalid_logon`;
+    - `InterpretLogonMalformedCount.TwinCountEndingOnTheFinalSohIsAccepted`: N = R − 1, so the byte
+      after the counted extent is the trailer's final SOH; accepted.
+    - Each cell asserts, on its final framed bytes, that R equals its N (first cell) or N + 1
+      (second), so a change to the framing helper cannot move the boundary silently.
+    - The first pins FR-020 item 3's "reaches" through the session function; the second pins "the
+      whole framed message, trailer included" (a scan over the body alone would refuse it). The
+      second is a `Twin*` cell, GREEN before and after the fix. The first must turn RED under
+      T026's `break` mutant, since every field `interpret_logon` validates precedes the count, so a
+      scan that stops there accepts the Logon; record it with T026.
+    - A `>=` → `>` mutant in `counted_value_end` does not reach these cells: the static assertion
+      in `include/fixpp/wire/length_data_carry.hpp` that a count reaching the end of the buffer is
+      malformed (`counted_value_end(detail::counted_value_end_probe, 0, 4)`) rejects it at compile
+      time (T026 records that build failure). This pair is the runtime witness at `interpret_logon`.
   - GREEN: the unfiltered `session_length_data_scanner` binary passes. Record the cells, the command
     and the result in `.specify/decisions/091-data-field-bytes-evidence.md` §*FR-020 GREEN
     (T071–T072)*, as a dated addendum.
 - [ ] T075 Via `phase-implementer`, align the header and source comments with FR-020 as rewritten by
-  the scoped Gate A round 1, with the freeze re-pin:
+  the scoped Gate A rounds 1 and 2, with the freeze re-pin. The short form is FR-020's, verbatim: *a
+  Length immediately followed by its paired Data whose counted extent reaches or passes the end of
+  the whole framed message, or whose following byte is not SOH*.
   - `include/fix/c_api/version.h` 1.9 history: replace "interpret_logon refuses a Logon carrying a
-    malformed count" with the short form (a Logon in which a Length is immediately followed by its
-    paired Data whose count overruns the frame or does not end on SOH), keeping the spelling
+    malformed count" with the short form, keeping the spelling
     `RawDataLength(95) and RawData(96)` (a slash-joined number pair trips the comment lint's ratio
     rule, `03bc2d4a`). Replace the two-observer sentence with the class (every call whose result
     depends on the session having logged on) and its members: `fixpp_session_is_established` stays
     false; `fixpp_session_close`, once the refused session has drained, returns
     `FIXPP_ERR_THREAD_SESSION_LIFECYCLE`, not `FIXPP_ERR_OK`; `fixpp_session_send` on that session
     returns `FIXPP_ERR_SESSION_INVALID_STATE`, not `FIXPP_ERR_OK`; neither the receive callback nor
-    the toApp callback (`fixpp_session_register_send_callback`) is ever invoked for it.
-  - `include/fix/c_api/session.h`: `fixpp_session_send`'s BREAKING (C-ABI 1.9) note gains the FR-020
-    clause (a send on a session whose Logon was refused under FR-020, issued after that Logon, which
-    returned `FIXPP_ERR_OK`, now returns `FIXPP_ERR_SESSION_INVALID_STATE`; its existing sentence
-    "For a send this refuses, the toApp callback … is not invoked" is extended to cover this
-    refusal too, since `Session::send` refuses at its Active precondition before `send_impl`), and
-    `fixpp_session_register_callback`'s note gains its clause (inbound application messages on that
-    session, delivered before, are never delivered). Each clause states the refused-Logon shape by
-    the short form, not "a malformed count".
+    the toApp callback (`fixpp_session_register_send_callback`) is ever invoked for it. The
+    history keeps the consolidated list; it is no longer the only carrier of any of these five.
+  - `include/fix/c_api/session.h`: each of the five observer declarations' documentation carries a
+    BREAKING (C-ABI 1.9) FR-020 clause (`[const §X.7]`: "each affected declaration"). Each clause
+    states the refused-Logon shape by the short form, not "a malformed count", and says it holds on
+    either role:
+    - `fixpp_session_close`: once a session whose Logon was refused under FR-020 has drained, close
+      returns `FIXPP_ERR_THREAD_SESSION_LIFECYCLE` where it returned `FIXPP_ERR_OK` (the existing
+      reaped-session paragraph stays; the clause names the drained precondition);
+    - `fixpp_session_is_established`: for that session it stays false where it became true;
+    - `fixpp_session_send`: its existing BREAKING note gains the clause (a send on that session,
+      issued after that Logon, which returned `FIXPP_ERR_OK`, now returns
+      `FIXPP_ERR_SESSION_INVALID_STATE`); its existing sentence "For a send this refuses, the toApp
+      callback … is not invoked" is extended to cover this refusal too, since `Engine::send` refuses
+      at its Active check on the session strand before it calls `Session::send`, so the send never
+      reaches `send_impl`, which builds the toApp view;
+    - `fixpp_session_register_callback`: its existing note gains the clause (inbound application
+      messages on that session, delivered before, are never delivered);
+    - `fixpp_session_register_send_callback`: it has no BREAKING note today; add one naming both of
+      its effects, since a BREAKING note names every effect its declaration shows (research.md R-11
+      Classification): FR-019's (for a send `fixpp_session_send` refuses because of a malformed
+      pair, the callback is not invoked) and FR-020's (on that session the callback, invoked before
+      for each send, is never invoked). The view's content effect stays in the reader paragraph.
   - `include/fixpp/session/admin_messages.hpp` (`interpret_logon`'s comment) and the refusal comment
-    in `src/session/admin_messages.cpp`'s `interpret_logon`: state the armed condition (the count
-    applies only when the next field is the Length's paired Data), so neither reads as "any Length
-    count". Delete any sentence the change falsifies; add no count or list of sites.
+    in `src/session/admin_messages.cpp`'s `interpret_logon`: state the refused shape by the short
+    form (the refusal comment's "it runs past the frame" omits the equality boundary) and the armed
+    condition (the count applies only when the next field is the Length's paired Data), so neither
+    reads as "any Length count". Delete any sentence the change falsifies; add no count or list of
+    sites.
+  - Before writing a clause, re-read the source its mechanism names (`Engine::send` in
+    `src/session/engine.cpp`, `counted_value_end` in `include/fixpp/wire/length_data_carry.hpp`);
+    a clause that disagrees with the source goes to the orchestrator, not into the header.
   - Run `tools/check_capi_freeze.sh`: it must fail on exactly `version.h` and `session.h`, then
     re-pin `tools/capi_freeze.sha256` and pass. Run
     `.claude/scripts/check-comment-claims.py --root <tree> --base origin/main` on the result.
@@ -582,7 +624,8 @@ only then made GREEN.
   scope rests on this population.
 
 - [ ] T026 Via `phase-implementer`, run the Foundational mutants from quickstart §3 in a scratch copy.
-  Each one must be RED on the named test, then GREEN after revert:
+  Each one must be RED on the named test (or, for a compile-time kill, fail to build), then GREEN
+  after revert:
   - "the new walk skips non-field children instead of breaking" → C-2.5a arm (iii) (T007);
   - "the new walk visits only components and their direct `<group>` children" → arms (v) and (vi);
   - "groups are walked depth-first, right after their container" → arm (vii), all three placements;
@@ -599,13 +642,21 @@ only then made GREEN.
   - "`FIXPP_C_ABI_VERSION_MINOR` set back to 8" → `tests/capi/version_test.cpp`'s exact-version cell;
   - "`interpret_logon` breaks at a malformed count instead of refusing" (FR-020) → every T070 RED
     cell, on the function and on both arms, the inverted pin
-    `LengthDataSessionScanner.InterpretLogonRefusesAMalformedCount`, and every T074 arm cell;
-    every twin stays GREEN (the exact list is quickstart §3's row);
+    `LengthDataSessionScanner.InterpretLogonRefusesAMalformedCount`, every T074 arm cell, and
+    T074's `InterpretLogonMalformedCount.CountReachingTheFrameEndIsRefused`; every twin stays GREEN
+    (the exact list is quickstart §3's row);
   - "the carry applies a pending count whatever the next field's tag" (`length_data_carry::read_value`
     drops the `data_tag_ == tag` test) (FR-020) → T074's
     `TwinOrphanOverrunningLengthWithZeroEncryptMethodIsAccepted`;
   - the same mutant combined with the `break` mutant above → T074's
-    `OrphanOverrunningLengthDoesNotHideEncryptMethod`.
+    `OrphanOverrunningLengthDoesNotHideEncryptMethod`;
+  - "`counted_value_end` accepts a count that reaches the end of the buffer" (`count >=` → `count >`
+    in its bound) (FR-020) → the build: the static assertion in
+    `include/fixpp/wire/length_data_carry.hpp` that a count reaching the end of the buffer is
+    malformed (`counted_value_end(detail::counted_value_end_probe, 0, 4)`) must fail to compile.
+    Apply it in the scratch copy, build `session_length_data_scanner`, and record the diagnostic's
+    first line; this is a compile-time kill, and T074's equality-boundary pair is the runtime
+    witness.
   Record each mutant, command and RED line in `.specify/decisions/091-data-field-bytes-evidence.md`
   §*Mutants*.
 - [ ] T027 Run the **full** `ctest --test-dir build/linux-clang-debug --output-on-failure`, after
@@ -932,9 +983,11 @@ FR-019, SC-006).
     call appends where the C-ABI upserts.
   - **B-426-2:** its "every later field stays absent" no longer holds for a Logon: under FR-020
     `interpret_logon` refuses a Logon in which a Length is immediately followed by its paired Data
-    whose count overruns the frame or does not end on SOH (an orphan Length is read as a plain
-    value), and the refusal code is always `session_invalid_logon` (a Logon whose 49 or 56 follows
-    such a count, whatever its value, returned `session_compid_mismatch` before). Amend the row, citing FR-020.
+    whose counted extent reaches or passes the end of the whole framed message, or whose following
+    byte is not SOH (an orphan Length is read as a plain value), and the refusal code is always
+    `session_invalid_logon` (a Logon whose 49 or 56 follows such a count returned
+    `session_compid_mismatch` before where that expected CompID was non-empty, and could be accepted
+    where it was empty). Amend the row, citing FR-020.
   - **B-091-4, marked BREAKING (C-ABI 1.9):** data-model.md's row text. It covers the v50sp2 source
     break in both shapes (a compile error for designated or member access; a silent shift for a
     positional aggregate), the user-loaded-dictionary effects, the recipe-derived BREAKING
@@ -1084,8 +1137,9 @@ FR-019, SC-006).
 - [ ] T066 **`CLAUDE-history.md` entry** (Article XIX, plan Constitution Check): via `phase-implementer`
   (the edit guard decides the file class), add a newest-first 091 entry to the library's
   `CLAUDE-history.md` naming the feature, the PR, `Closes #418`, C-ABI 1.9 BREAKING, the FR-020
-  `[const §XII.7]` fail-open fix (a Length immediately followed by its paired Data whose count
-  overruns the frame or does not end on SOH now refuses the Logon; it affects shipped dictionaries
+  `[const §XII.7]` fail-open fix (a Length immediately followed by its paired Data whose counted
+  extent reaches or passes the end of the whole framed message, or whose following byte is not SOH,
+  now refuses the Logon; it affects shipped dictionaries
   through RawDataLength(95) and RawData(96)) and the
   follow-ups #505/#506. Update `CLAUDE.md`'s "Last merged FEATURE" pointer only at merge.
 - [ ] T067 **PR description** (FR-019, plan phase 7). The body carries:
@@ -1093,7 +1147,8 @@ FR-019, SC-006).
     and data-model.md Appendix A;
   - the v50sp2 source break (FR-011 carve-out);
   - the FR-020 fix: `interpret_logon` refuses a Logon in which a Length is immediately followed by
-    its paired Data whose count overruns the frame or does not end on SOH, closing a
+    its paired Data whose counted extent reaches or passes the end of the whole framed message, or
+    whose following byte is not SOH, closing a
     `[const §XII.7]` fail-open reachable on `main` through RawDataLength(95) and RawData(96); its
     C-ABI observers are every call whose result depends on the session having logged on
     (`fixpp_session_is_established`, `fixpp_session_close`, `fixpp_session_send`, the receive

@@ -547,19 +547,23 @@ the greps. Run in the library root:
    logged on, since FR-020 changes whether a Logon is accepted, not what any call does. Derive them
    from the three places the logged-on state is read: `grep -nE "established|ever_established"
    src/capi` (the latches `CapiApplication::onLogon` sets), each hit mapped to its enclosing
-   `FIXPP_API_EXPORT` function; the exports of step 3, which reach `Session::send`'s Active
-   precondition; and both delivery exports of step 4: `fixpp_session_register_callback`, since
+   `FIXPP_API_EXPORT` function; the exports of step 3, since `Engine::send` refuses at its Active
+   check on the session strand before it calls `Session::send` (whose own Active precondition is
+   the backstop); and both delivery exports of step 4: `fixpp_session_register_callback`, since
    `Session` dispatches `fromApp` only in its LogonReceived/Active arm, and
-   `fixpp_session_register_send_callback`, since `Session::send` refuses at its Active precondition
-   before `send_impl` builds the toApp view. Each member's row in
-   data-model.md Appendix A names the FR-020 effect, and its carrier is its own BREAKING note when it
-   has one, plus the `version.h` history.
+   `fixpp_session_register_send_callback`, since that `Engine::send` refusal comes before the send
+   reaches `send_impl`, which builds the toApp view. Each member's row in data-model.md Appendix A
+   names the FR-020 effect. Its carrier follows the Classification paragraph below: a member with
+   a declaration carries the FR-020 clause in that declaration's own BREAKING (1.9) note, plus the
+   `version.h` history; only a member with no declaration of its own would be carried by the
+   `version.h` history alone.
 
 **Classification** (`[const §X.7]`): a success turned into a failure is BREAKING whatever the
 documentation said; a failure turned into a different failure is BREAKING (§X.7: a result other
 than the one documented for that input); a failure turned into a success, or a change in output the
-documentation leaves unspecified, is additive. A declaration that is BREAKING has its note name every effect it shows. An effect reached only through engine internals
-with no declaration of its own goes in the `version.h` history comment. The classes are FR-019's;
+documentation leaves unspecified, is additive. A declaration that is BREAKING has its note name every effect it shows (§X.7: "in the documentation of each affected
+declaration"). An effect reached only through engine internals with no declaration of its own goes in the `version.h`
+history comment (§X.7: "where no declaration carries the change"). The classes are FR-019's;
 the per-export result is data-model.md Appendix A, whose row set plan Phase 0b diffs against
 `tests/abi/golden/fixpp_capi_symbols.txt` (the diff proves the row set only; this recipe re-verifies
 each row's class).
