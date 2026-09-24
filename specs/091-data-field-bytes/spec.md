@@ -289,7 +289,9 @@ rejection now assert verbatim emit.
   (`std::optional<std::string_view>`), so existing application code that sets it still compiles.
 - **FR-011a**: For every message whose body can carry an `Encoded*` field, the generated Args MUST
   gain an optional `message_encoding` member. An `Encoded*` field is the Data half of a pair whose FIX
-  field name begins with `Encoded`; the set is derived from the dictionary, not hand-listed. When the
+  field name **contains** `Encoded`, so FIX 5.0 SP2's `DerivativeEncodedIssuer(1278)`,
+  `DerivativeEncodedSecurityDesc(1281)` and `InstrumentScopeEncodedSecurityDesc(1621)` are included,
+  though a "begins with" rule misses them. The set is derived from the dictionary, not hand-listed. When the
   member is set, the builder emits it as `MessageEncoding(347)` in the payload. `Session::send_impl`
   already moves header-class tags ahead of the body (fixpp#422), so no session change is needed.
   The builder does **not** enforce FIX 4.4's "required if any Encoded fields are present": the

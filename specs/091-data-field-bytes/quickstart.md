@@ -38,6 +38,7 @@ Expected:
 | the second-append rollback is removed (Length survives a failed Data append) | C-1.5 |
 | the emitter passes `item.tag` instead of `item.data_tag` | the v44 builder build (C-2.2 `static_assert`) |
 | the emitter changes only the top-level arm | the nested-group case of C-1.2 via a generated builder |
+| the `message_encoding` selection uses "begins with `Encoded`" | the C-2.3 v50sp2 witness (a message whose only encoded field is `DerivativeEncoded*` / `InstrumentScopeEncoded*`) |
 
 ## 4. Golden regeneration check
 
@@ -49,6 +50,10 @@ C-2.4 (diff filter; read-tier SHA-256 pins unchanged).
 A test sends a message carrying XmlData(212/213) with SOH in the value through `Session::send_impl`,
 then re-parses the emitted frame. Expected: 212 and 213 are adjacent in the header, and the 213
 value round-trips.
+
+A second test sends a generated-builder message with `message_encoding` and a non-ASCII
+`encoded_text` through `send_impl`. Expected: `347` sits in the header, and `354`/`355` are in the
+body with their verbatim bytes.
 
 ## 6. Performance (SC-005)
 

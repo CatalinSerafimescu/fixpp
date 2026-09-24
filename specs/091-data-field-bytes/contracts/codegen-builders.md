@@ -41,7 +41,11 @@ if (item.m) {
 ## C-2.3 `message_encoding` (FR-011a)
 
 - **Which messages.** Those where any member at any depth is the Data half of a pair whose field name
-  begins with `Encoded`. The set is derived from the IR, not hand-listed.
+  **contains** `Encoded`. The set is derived from the IR, not hand-listed.
+  - **Witness:** a v50sp2 message whose only encoded field is one of `DerivativeEncodedIssuer(1278)`,
+    `DerivativeEncodedSecurityDesc(1281)` or `InstrumentScopeEncodedSecurityDesc(1621)` has the
+    member. The implementer names the message by census.
+  - **The mutant:** a "begins with" rule must turn that witness RED.
 - **The member.** Top-level Args gain `std::optional<std::string_view> message_encoding;`, appended
   **last**.
 - **The emit.** When set, the builder emits `bb.field(347, *args.message_encoding)` as the **first**

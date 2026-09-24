@@ -122,11 +122,13 @@ Any failure → `wire_invalid_field_format`, `out` untouched.
 
 **Consequence to disclose (B&L).** A hand-written C++ caller that today emits a malformed pair
 through `field()` gets `wire_invalid_field_format` at commit, where before it produced a malformed
-frame. The measured blast radius, recipe
-`git grep -n "field(\(90\|91\|95\|96\|212\|213\|354\|355\)\b" -- src tests bench bindings`, shows
-**no C++ `body_builder` caller** writing a pair by hand. Every hit is in the C-ABI test file
-`tests/capi/length_data_setters_test.cpp`, which is a separate code path. Re-derive with the full
-ctest run at implementation. This is still a behaviour change for external C++ callers, so it gets a
+frame. A literal-tag grep,
+`git grep -n "field(\(90\|91\|95\|96\|212\|213\|354\|355\)\b" -- src tests bench bindings`, finds
+**no C++ `body_builder` caller that writes one of those pairs with a literal tag number**. Every hit
+is in the C-ABI test file `tests/capi/length_data_setters_test.cpp`, which is a separate code path.
+⚠️ The grep cannot see a caller that uses a named constant or a computed tag, so it is **not** a
+blast-radius proof. The real measurement is the full ctest run once the commit check lands: any
+newly failing test is a caller the grep missed. This is still a behaviour change for external C++ callers, so it gets a
 B-091-* row.
 
 ## R-5 — Golden regeneration population
@@ -147,14 +149,21 @@ for v in v42 v44 v50sp2 vlatest; do echo "$v files=$(find $G/$v -type f | wc -l)
 | vlatest | 1445 | **320** (was 0 before #427) |
 
 - **FR-011a widens the diff beyond these counts.** Every message that can carry an `Encoded*` field
-  gains a `message_encoding` Args member (R-8). Measured over the QuickFIX XML, recursing through
-  components and groups:
+  gains a `message_encoding` Args member (R-8). The census works like this:
+  - It is measured over the QuickFIX XML, recursing through components and groups.
+  - "Encoded field" means a standard-table Data half whose name **contains** `Encoded`.
+  - Positive control: a "begins with `Encoded`" rule was run beside it, and misses exactly
+    `DerivativeEncodedIssuer`, `DerivativeEncodedSecurityDesc` and
+    `InstrumentScopeEncodedSecurityDesc` in FIX50SP2.
+  - False-hit check: the Data halves **not** selected were read by eye. They are the XML, signature,
+    password and formula fields (`RawData`, `XmlData`, `SecureData`, `Signature`, `*SecurityXML`,
+    `EncryptedPassword`, `*PaymentStreamFormula*`), none of them encoded text.
 
-  | Dictionary | App messages with an `Encoded*` field |
-  |---|---|
-  | FIX42 | 37 of 39 |
-  | FIX44 | 77 of 85 |
-  | FIX50SP2 | 141 of 156 |
+  | Dictionary | Data halves selected | App messages with an `Encoded*` field |
+  |---|---|---|
+  | FIX42 | 10 | 37 of 39 |
+  | FIX44 | 12 | 77 of 85 |
+  | FIX50SP2 | 67 | 142 of 156 (the prefix rule gave 141) |
 
 - **Digest pins are not expected to move.** The SHA-256 pins in
   `tests/codegen/read_tier_byte_diff_test.cmake` cover the read-tier `Fields`/`Messages`/`Reify`/
@@ -228,7 +237,8 @@ half's kind "is already String" is updated.
 
 **Decision.**
 - **Which messages.** The generator computes, per message, whether any member at any depth is the
-  Data half of a pair whose `FieldIR` name starts with `Encoded`. The recursion walks the same
+  Data half of a pair whose `FieldIR` name **contains** `Encoded` ("starts with" misses three FIX50SP2
+  fields, R-5). The recursion walks the same
   `group_order` tree `resolve_level` walks.
 - **The member.** For those messages it adds `std::optional<std::string_view> message_encoding;` to
   the top-level Args.
@@ -290,6 +300,17 @@ medians) gave per-case median deltas of **+0.07 %, +0.57 %, −0.09 %, +0.51 %**
 - Compare the per-tree **minimum** of the medians. Budget +3 % on `NoGroup` / `WithGroup` / `Raw`.
   `AsciiEncodedText` is reported but exempt: it is the path this feature changes on purpose.
 - Over budget → report to the owner (SC-005), never silently relax.
+
+**Compile-time surface.** Every builder translation unit gains the per-call-site `static_assert`s
+(R-7) and `dict_hooks.hpp` through `body_builder.hpp`. That matters most for `vlatest`, the largest
+generated tier. Re-measure with the existing `bench/codegen/vlatest_builders_compile_bench`, before
+and after, and report the delta; it has no budget. Measuring here keeps CI from being the first to
+see it.
+
+**Not affected: the `nm` symbol witnesses** (`tests/codegen/test_078_nm_*`). Their patterns in
+`tests/codegen/CMakeLists.txt` pin `fixpp::v44::build_*` / `validate_*` / `writer_traits` only,
+never `body_builder` members, so switching to `field_data`/`set_data` moves none of them. Recipe:
+`grep -n 'FIXPP_PRESENT\|FIXPP_ABSENT\|FIXPP_UNDEFINED_PRESENT' tests/codegen/CMakeLists.txt`.
 
 **CI registration.** The bench is added to `bench/ci-suite.txt`. It is a candidate-only addition
 under Article VIII §2a, so it is execution- and schema-gated this PR.

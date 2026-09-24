@@ -115,16 +115,27 @@ brain/components/wire.md                        # Length+Data section update
 
 ## Phasing (input to /speckit-tasks)
 
-1. **Stage-one carry-over.** Bring `68c8c769`'s test hunk onto the branch, **tests only**, without
-   the superseded design note. Re-run the four pins GREEN on the current base, then re-prove them RED
-   under a widened-guard mutant in a scratch copy.
-2. **`body_builder` API + commit check** (C-1). Written RED first; the stage-one pins stay RED, since
-   they assert rejection until phase 4.
+1. **Stage-one carry-over, then flip (RED).** Bring `68c8c769`'s test hunk onto the branch, **tests
+   only**, without the superseded design note.
+   - Re-run the four rejection pins on the current base: they must be GREEN, confirming the
+     limitation still behaves as pinned.
+   - **Flip them in the same phase** to assert success, verbatim bytes and a re-parse. They are now
+     **RED** against today's builder, which is the TDD red step.
+   - Phase 3's codegen change is what turns them GREEN.
+   - The pre-flip rejection form is recorded in the commit, so the limitation's pinned-then-fixed
+     history stays visible.
+2. **`body_builder` API + commit check** (C-1). The C-1 unit tests are written RED first, then
+   implemented to GREEN. The flipped pins stay RED: the generated builder still routes through
+   `field()`.
 3. **Codegen** (C-2.1, C-2.3). Regenerate goldens; run the C-2.2 census and C-2.4 diff filter;
-   confirm the digest pins.
-4. **Flip the stage-one pins** to success + re-parse. The quickstart §3 mutants.
+   confirm the digest pins. The flipped pins turn **GREEN** here.
+4. **Mutants** (quickstart §3), each in a scratch copy, each proven RED.
 5. **Session witnesses** (R-9 header pair, R-6 Length-delimited group) and the v50sp2/vlatest
-   builder round trips.
+   builder round trips. The **`message_encoding` witness lives here, on the `send_impl` path**:
+   - 347 is a header tag, so a body-only build-and-validate round trip may refuse it as undeclared
+     in the message;
+   - through `send_impl` it must land in the header and re-parse.
+   - The compile-time surface is re-measured with `vlatest_builders_compile_bench` (R-10).
 6. **Paired bench** (quickstart §6); `ci-suite.txt` row.
 7. **Ledger + brain** (FR-016, B-091-*, L-091-1).
 
