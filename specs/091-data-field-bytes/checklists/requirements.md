@@ -13,7 +13,7 @@
 
 ## Requirement Completeness
 
-- [x] No [NEEDS CLARIFICATION] markers remain — *FR-008 and FR-009 resolved by owner 2026-09-24 (see spec Clarifications)*
+- [x] No [NEEDS CLARIFICATION] markers remain — *FR-008 and FR-009 resolved by owner 2026-09-24; FR-009 revised and FR-011/FR-017/FR-018 added by the Gate A round-1 owner rulings (see spec Clarifications)*
 - [x] Requirements are testable and unambiguous
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
