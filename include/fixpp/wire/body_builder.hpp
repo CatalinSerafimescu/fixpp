@@ -50,7 +50,9 @@
 //     decimal_t::format at write time), INV-4 (all-or-nothing: any open
 //     group / over-cap / undersized `out` -> typed error, `out` untouched),
 //     INV-5 (each emitted group instance non-empty + delimiter-first —
-//     author-supplied delimiter_tag, no wire->dictionary edge).
+//     author-supplied delimiter_tag, no wire->dictionary edge), and INV-6
+//     (091 (#418): every Length+Data pair in each container, per the hooks
+//     given at construction, is well formed — wire::length_data_checker).
 //   - Serializes count-precedence (`No<Group>=<N>` before the N instances).
 //   - Fixed internal scratch cap of 3800 B (kBodyCap, TU-local in
 //     body_builder.cpp, value-equal to the C-ABI kFrameCap at
@@ -76,6 +78,8 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include "dict_hooks.hpp"
 
 namespace fixpp::wire {
 
@@ -129,6 +133,20 @@ public:
     [[nodiscard]] fixpp::core::expected_t<void> set_decimal(std::uint16_t tag,
                                                             const fixpp::decimal_t& v) noexcept;
 
+    // 091 (#418). Appends <Length>=<octet count> then <data_tag>=<value> to this
+    // entry, both or neither. The same handle checks as set_string come first.
+    // The Length tag is the STANDARD pair's (core/length_data_pairs.hpp), whatever
+    // hooks the owning builder holds: a tag that only a dictionary pairs is refused.
+    // `value` is copied verbatim; any octet 0x00-0xFF is accepted (no printable-
+    // content guard). On failure the entry is back at its pre-call size; arena
+    // capacity the failed call consumed is not reclaimed, as for every append.
+    // Refusals: a default, stale or not-innermost handle -> wire_invalid_field_format;
+    // a framing tag or an empty value -> wire_field_value_out_of_range; a tag the
+    // standard table does not name as a Data tag -> wire_unexpected_tag; arena
+    // exhaustion -> wire_frame_too_large.
+    [[nodiscard]] fixpp::core::expected_t<void> set_data(std::uint16_t data_tag,
+                                                         std::span<const std::byte> value) noexcept;
+
     // Nested group inside this entry (data-model §1 row 21).
     [[nodiscard]] fixpp::core::expected_t<group_handle> group_begin(
         std::uint16_t no_tag, std::uint16_t delimiter_tag) noexcept;
@@ -144,7 +162,13 @@ private:
 // body_builder — body-only FIX serializer (data-model.md §1).
 class body_builder {
 public:
-    explicit body_builder(std::string_view msg_type) noexcept;
+    // `hooks` is read by commit()'s Length+Data pair check only (INV-6), so a pair
+    // written by hand through field()/set_string is checked against the dictionary's
+    // own pairs too; field_data/set_data never read it. Precondition: a bundle from
+    // `dict_hooks::for_table_view(tv)` points at `tv`, which must outlive this
+    // builder (dict_hooks.hpp lifetime rule).
+    explicit body_builder(std::string_view msg_type,
+                          dict_hooks hooks = dict_hooks::none()) noexcept;
 
     body_builder(const body_builder&) = delete;
     body_builder& operator=(const body_builder&) = delete;
@@ -160,6 +184,19 @@ public:
     [[nodiscard]] fixpp::core::expected_t<void> field(std::uint16_t tag,
                                                       const fixpp::decimal_t& v) noexcept;
 
+    // 091 (#418). Appends <Length>=<octet count> then <data_tag>=<value> at the top
+    // level, both or neither. The Length tag is the STANDARD pair's
+    // (core/length_data_pairs.hpp), whatever hooks this builder holds: a tag that
+    // only a dictionary pairs is refused. `value` is copied verbatim; any octet
+    // 0x00-0xFF is accepted (no printable-content guard). On failure the body is
+    // back at its pre-call size; arena capacity the failed call consumed is not
+    // reclaimed, as for every append. A repeated call appends a second pair.
+    // Refusals: a framing tag or an empty value -> wire_field_value_out_of_range;
+    // a tag the standard table does not name as a Data tag -> wire_unexpected_tag;
+    // arena exhaustion -> wire_frame_too_large.
+    [[nodiscard]] fixpp::core::expected_t<void> field_data(
+        std::uint16_t data_tag, std::span<const std::byte> value) noexcept;
+
     // Open a top-level repeating group. `delimiter_tag` is the group's
     // first-field tag; the AUTHOR supplies it (no dictionary lookup) and
     // commit() enforces it (INV-5).
@@ -170,7 +207,9 @@ public:
     [[nodiscard]] fixpp::core::expected_t<void> group_end(group_handle handle) noexcept;
 
     // Validate + serialize into `out`, atomically (INV-4): `out` is untouched
-    // on any failure path. Returns the written body subspan on success.
+    // on any failure path. Returns the written body subspan on success. A
+    // malformed Length+Data pair in any container (INV-6, per the hooks given at
+    // construction) -> wire_invalid_field_format.
     [[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> commit(
         std::span<std::byte> out [[clang::lifetimebound]]) noexcept;
 
@@ -254,21 +293,31 @@ private:
     static fixpp::core::expected_t<void> append_decimal_field(std::pmr::vector<entry_node>& into,
                                                               std::uint16_t tag,
                                                               const fixpp::decimal_t& v) noexcept;
+    // field_data/set_data after their handle checks: the refusals, then the
+    // Length node and the Data node, rolling both back on arena exhaustion.
+    static fixpp::core::expected_t<void> append_data_field(
+        std::pmr::vector<entry_node>& into, std::uint16_t data_tag,
+        std::span<const std::byte> value) noexcept;
 
     fixpp::core::expected_t<entry_handle> add_entry_impl(const group_handle& g) noexcept;
     fixpp::core::expected_t<group_handle> entry_group_begin_impl(
         const entry_handle& e, std::uint16_t no_tag, std::uint16_t delimiter_tag) noexcept;
 
     // INV-5: every group instance (recursive) is non-empty and delimiter-
-    // first.
+    // first. INV-6 (091 (#418)): each container, fed in serialisation order to
+    // its own length_data_checker built from `hooks`, holds only well-formed
+    // Length+Data pairs; a group node is fed with an EMPTY value, never its
+    // count digits, so a group tagged with either half of a pair is refused.
     static fixpp::core::expected_t<void> validate_group_grammar(
-        const std::pmr::vector<entry_node>& entries) noexcept;
+        const std::pmr::vector<entry_node>& entries, const dict_hooks& hooks) noexcept;
 
     static std::size_t compute_size(const std::pmr::vector<entry_node>& entries) noexcept;
     static void serialize_entries(std::byte* buf, std::size_t& pos,
                                   const std::pmr::vector<entry_node>& entries) noexcept;
 
     std::string msg_type_;
+    // Read by commit() only (INV-6). See the constructor's lifetime precondition.
+    dict_hooks hooks_;
 
     // ── Zero-global-heap arena (061-slim rework) ────────────────────────────
     // Fixed internal scratch for the intermediate accumulation TREE (entry

@@ -1458,3 +1458,67 @@ TEST(BodyBuilderDataField, C1_11_TwoCallsAppendTwoPairs) {
                                  "354=3\x01"
                                  "355=cde\x01"});
 }
+
+// ── T024 zero global ::operator new on the new paths ────────────────────────
+// Same gate as NoGlobalHeap_CountingNew, over construction with a dict_hooks
+// argument, field_data, a group entry's set_data, and a commit that runs the
+// INV-6 pair walk. The hooks value is built before the window. This binary links
+// no dictionary and does not define FIXPP_TEST_HOOKS, so none() is the only
+// bundle it can build; the builder copies whichever bundle it is given by value.
+TEST(BodyBuilderDataField, NoGlobalHeap_FieldDataSetDataCommit) {
+#if FIXPP_SANITIZER_REPLACES_NEW
+    GTEST_SKIP() << "global operator new replacement is incompatible with ASan "
+                    "(alloc-dealloc-mismatch) and TSan (multiple-definition of operator new); "
+                    "the zero-alloc witness runs in debug/release/ubsan, with mallocnesia "
+                    "LD_PRELOAD as the CI-tier cross-check";
+#elif defined(_ITERATOR_DEBUG_LEVEL) && _ITERATOR_DEBUG_LEVEL != 0
+    // MSVC debug STL only: see NoGlobalHeap_CountingNew for the _Container_proxy cause.
+    GTEST_SKIP() << "MSVC debug STL allocates a per-container _Container_proxy via global "
+                    "operator new at pmr-vector construction (debug-STL artifact); the "
+                    "heap-free builder contract is covered on all non-MSVC-debug lanes and "
+                    "by the mallocnesia LD_PRELOAD cross-check";
+#else
+    std::array<std::byte, kBufSize> buf{};
+    fixpp::wire::dict_hooks const hooks = fixpp::wire::dict_hooks::none();
+    std::array<std::byte, 3> const top{std::byte{0x41}, std::byte{0x01}, std::byte{0xFF}};
+    std::array<std::byte, 2> const nested{std::byte{0x00}, std::byte{0x80}};
+
+    // -- Zero-alloc window --
+    long const before = g_bb_alloc_count.load(std::memory_order_relaxed);
+
+    body_builder bb{"X", hooks};
+    auto const top_r = bb.field_data(355, std::span<const std::byte>{top});
+    auto g = bb.group_begin(kOuterNo, kOuterDelim);
+    auto e = g.has_value() ? g->add_entry() : expected_t<entry_handle>{std::unexpected(g.error())};
+    auto const delim_r = e.has_value() ? e->set_string(kOuterDelim, "A1")
+                                       : expected_t<void>{std::unexpected(e.error())};
+    auto const nested_r = e.has_value() ? e->set_data(91, std::span<const std::byte>{nested})
+                                        : expected_t<void>{std::unexpected(e.error())};
+    auto const end_r =
+        g.has_value() ? bb.group_end(*g) : expected_t<void>{std::unexpected(g.error())};
+    auto const r = bb.commit(std::span<std::byte>{buf});
+
+    long const after = g_bb_alloc_count.load(std::memory_order_relaxed);
+    // -- End zero-alloc window --
+
+    ASSERT_TRUE(top_r.has_value());
+    ASSERT_TRUE(g.has_value());
+    ASSERT_TRUE(e.has_value());
+    ASSERT_TRUE(delim_r.has_value());
+    ASSERT_TRUE(nested_r.has_value());
+    ASSERT_TRUE(end_r.has_value());
+    ASSERT_TRUE(r.has_value()) << "commit must succeed for the alloc witness to be meaningful";
+    EXPECT_EQ(bytes_to_string(*r), std::string("35=X\x01"
+                                               "354=3\x01"
+                                               "355=A\x01\xFF\x01"
+                                               "78=1\x01"
+                                               "79=A1\x01"
+                                               "90=2\x01"
+                                               "91=\x00\x80\x01",
+                                               41));
+    EXPECT_EQ(after, before)
+        << "construction with dict_hooks + field_data()/set_data()/commit() must not call "
+           "global ::operator new (alloc delta = "
+        << (after - before) << ")";
+#endif  // FIXPP_SANITIZER_REPLACES_NEW
+}
