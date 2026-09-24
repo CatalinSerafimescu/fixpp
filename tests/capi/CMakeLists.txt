@@ -232,13 +232,16 @@ set_tests_properties(capi_message_read PROPERTIES LABELS "capi;051")
 # fixpp#428 / #426 (design .specify/426-428-length-data-pairs.md §5, §6): the C-ABI
 # Length+Data setters and commit-time pair rule, and a two-engine loopback whose
 # EncodedText holds SOH through send, receive and clone.
-add_executable(capi_length_data_test length_data_setters_test.cpp length_data_send_recv_test.cpp)
+add_executable(capi_length_data_test length_data_setters_test.cpp length_data_send_recv_test.cpp
+  length_data_component_pair_test.cpp)  # 091 T008/T009 (FR-019)
 target_link_libraries(capi_length_data_test PRIVATE
   fixpp_capi
   GTest::gtest
   GTest::gtest_main
 )
 target_include_directories(capi_length_data_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
+target_compile_definitions(capi_length_data_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")  # 091 T009: FIX44.xml
 add_test(NAME capi_length_data COMMAND capi_length_data_test)
 set_tests_properties(capi_length_data PROPERTIES LABELS "capi;426;428;length-data;091")
 
