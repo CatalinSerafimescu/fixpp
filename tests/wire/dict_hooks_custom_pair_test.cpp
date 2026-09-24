@@ -943,3 +943,117 @@ TEST(DictHooksCustomPair, ZeroIsRefusedAtDeclarationBeforeAPairCanForm) {
             << e.what();
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// 091 (fixpp#418) FR-019 — inbound drop and reader witnesses over a dictionary
+// whose custom pair 5001/5002 is adjacent ONLY inside a <component>
+// definition: not adjacent in <fields> (Text(58) sits between them) and never
+// a direct <field> child of a message, header or trailer. The same shape as
+// tests/capi/length_data_component_pair_test.cpp's dictionary.
+namespace {
+
+constexpr std::string_view kComponentOnlyPairXml =
+    R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+    R"(<fields>)"
+    R"(<field number='8' name='BeginString' type='STRING'/>)"
+    R"(<field number='9' name='BodyLength' type='INT'/>)"
+    R"(<field number='10' name='CheckSum' type='STRING'/>)"
+    R"(<field number='11' name='ClOrdID' type='STRING'/>)"
+    R"(<field number='35' name='MsgType' type='STRING'/>)"
+    R"(<field number='5001' name='CustomPairLen' type='LENGTH'/>)"
+    R"(<field number='58' name='Text' type='STRING'/>)"
+    R"(<field number='5002' name='CustomPairData' type='DATA'/>)"
+    R"(</fields>)"
+    R"(<components>)"
+    R"(<component name='CustomPair'>)"
+    R"(<field name='CustomPairLen' required='N'/>)"
+    R"(<field name='CustomPairData' required='N'/>)"
+    R"(</component>)"
+    R"(</components>)"
+    R"(<messages>)"
+    R"(<message name='NewOrderSingle' msgtype='D' msgcat='app'>)"
+    R"(<field name='ClOrdID' required='N'/>)"
+    R"(<component name='CustomPair' required='N'/>)"
+    R"(</message>)"
+    R"(</messages></fix>)";
+
+// '|' stands for SOH, so no hex escape can swallow the digits that follow it.
+std::string soh(std::string_view s) {
+    std::string out{s};
+    for (char& c : out) {
+        if (c == '|') {
+            c = '\x01';
+        }
+    }
+    return out;
+}
+
+}  // namespace
+
+// A Data count that does not end on SOH: the frame is refused.
+TEST(DictHooksComponentPair, DataCountNotEndingOnSohIsRefused) {
+    std::pmr::monotonic_buffer_resource dict_mr;
+    auto tv =
+        fixpp::dict::XmlLoader{}.load_from_string(kComponentOnlyPairXml, &dict_mr).as_table_view();
+    auto buf = make_raw_frame(soh("35=D|5001=2|5002=abc|"));
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value()) << "make_frame_view failed";
+
+    Parser<access_mode::Index> parser{tv};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parser.parse(*fv, &arena);
+    EXPECT_FALSE(mv.has_value())
+        << "a 5002 whose 5001 count lands on a non-SOH byte must be refused; it parsed with "
+        << "5002 "
+        << (mv.has_value() && mv->offsets().find(5002).has_value() ? "present" : "absent");
+}
+
+// Reader, 1137: the 8-byte Data value "a<SOH>1137=9" carries a forged
+// ApplVerID; parse succeeds and no 1137 field is read.
+TEST(DictHooksComponentPair, ForgedApplVerIdInsideDataIsNotRead) {
+    std::pmr::monotonic_buffer_resource dict_mr;
+    auto tv =
+        fixpp::dict::XmlLoader{}.load_from_string(kComponentOnlyPairXml, &dict_mr).as_table_view();
+    std::string const data = soh("a|1137=9");
+    ASSERT_EQ(data.size(), 8U);
+    auto buf = make_raw_frame(soh("35=D|5001=8|5002=") + data + soh("|11=ORD1|"));
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value()) << "make_frame_view failed";
+
+    Parser<access_mode::Index> parser{tv};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parser.parse(*fv, &arena);
+    EXPECT_TRUE(mv.has_value()) << "parse must return a value";
+    if (mv.has_value()) {
+        auto const f1137 = mv->offsets().find(1137);
+        EXPECT_FALSE(f1137.has_value())
+            << "1137 inside the 5002 value was read as a field, value \""
+            << std::string_view{reinterpret_cast<char const*>(mv->bytes().data() +
+                                                              (f1137 ? f1137->offset : 0)),
+                                f1137 ? f1137->length : 0}
+            << '"';
+    }
+}
+
+// Reader, msg_type: 5001/5002 precede MsgType, and the 6-byte Data value
+// "a<SOH>35=D" carries a forged MsgType; parse succeeds and msg_type() is empty.
+TEST(DictHooksComponentPair, ForgedMsgTypeInsideDataIsNotRead) {
+    std::pmr::monotonic_buffer_resource dict_mr;
+    auto tv =
+        fixpp::dict::XmlLoader{}.load_from_string(kComponentOnlyPairXml, &dict_mr).as_table_view();
+    std::string const data = soh("a|35=D");
+    ASSERT_EQ(data.size(), 6U);
+    auto buf =
+        make_raw_frame(soh("5001=6|5002=") + data + soh("|34=2|49=S|56=T|52=20260924-00:00:00|"));
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value()) << "make_frame_view failed";
+
+    Parser<access_mode::Index> parser{tv};
+    std::pmr::monotonic_buffer_resource arena;
+    auto mv = parser.parse(*fv, &arena);
+    EXPECT_TRUE(mv.has_value()) << "parse must return a value";
+    if (mv.has_value()) {
+        EXPECT_TRUE(mv->msg_type().empty())
+            << "35=D inside the 5002 value was read as MsgType \"" << mv->msg_type() << '"';
+    }
+}
