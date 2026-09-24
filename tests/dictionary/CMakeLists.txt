@@ -33,6 +33,7 @@ add_executable(dictionary_pure_tests
   ref_shape_test.cpp
   loader_disposition_test.cpp     # 083 T035/T042: FR-006 / FR-006a / FR-023 dispositions
   xml_loader_test.cpp
+  xml_loader_component_group_pairs_test.cpp  # 091 T007: C-2.5a component/group pairing
   xml_loader_enum_test.cpp        # 075 T012/T013: enum-value parse + loader strictness
   xml_enum_codeset_test.cpp       # 075 T028: enum_values() census + exposure witness
   round_trip_test.cpp
