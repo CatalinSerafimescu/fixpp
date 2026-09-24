@@ -2,9 +2,10 @@
 //
 // tests/interop/happy/hp_fix44_restart_resume_test.cpp — 029 T002 [Setup] / T014 [Polish]
 //
-// Live restart-resume interop cells — both roles (W10 / SC-001 / SC-002 / SC-004).
+// Restart-resume interop cells — both roles (W10 / SC-001 / SC-002 / SC-004).
+// NOT LIVE — see "NOT LIVE" below and fixpp#503.
 //
-// T014 (Polish): both-role live cells: restart a fixpp initiator (and separately
+// T014 (Polish): both-role cells: restart a fixpp initiator (and separately
 //   an acceptor) mid-session vs a running QFcpp/QFJ peer; resumes both counters
 //   from the persisted FileStore; peer-ahead inbound recovers via ResendRequest
 //   (enable_next_expected_msg_seq_num=true on the fixpp side so behind-side
@@ -29,12 +30,18 @@
 //
 // This is the "post-restart" leg of the interop matrix.  The pre-restart session
 // that advance seqnums is a parent-repo harness orchestration concern (cross-repo
-// follow-up, outside this submodule).  Locally — without a counterparty — these
-// cells SKIP via INTEROP_REQUIRE_COUNTERPARTY.  The four acceptance assertions are
-// present and substantive: they fire only on the counterparty-PRESENT path.
+// follow-up, outside this submodule).
 //
-// LIVE CELLS: require a counterparty. INTEROP_REQUIRE_COUNTERPARTY skips with
-// reason when the counterparty port env is absent (FR-023). Never a silent pass.
+// NOT LIVE: no harness cell selects this suite (any of its three cell groups). Its
+// ids are in the `unregistered-tracked` group of tests/interop/live-cells-excluded.txt,
+// and making it live needs the harness, counterparty and fixpp-side mechanics that
+// fixpp#503 lists. The resume checks (b) and (c) cannot fail on a fresh Logon exchange:
+// kMinResumedSeqnum is met by both counters after any single Logon, so they do not
+// distinguish a resume from a fresh session until the threshold is seeded from a
+// prior run (fixpp#503).
+//
+// Without a counterparty, INTEROP_REQUIRE_COUNTERPARTY skips with reason when the
+// counterparty port env is absent (FR-023). Never a silent pass.
 //
 // Parent harness MUST configure the counterparty with (cross-repo follow-up):
 //   QFcpp: EnableNextExpectedMsgSeqNum=Y + PersistMessages=Y in the session config
@@ -90,7 +97,7 @@ std::string restart_resume_acceptor_name(const ::testing::TestParamInfo<Counterp
 
 // ── Cell 1: RestartResume_Initiator ──────────────────────────────────────────
 //
-// fixpp INITIATOR with a persistent FileStore restarts and connects to a live
+// fixpp INITIATOR with a persistent FileStore restarts and connects to a
 // counterparty acceptor; both counters resume from the persisted store.
 //
 // Acceptance assertions (counterparty-PRESENT path):
@@ -167,7 +174,7 @@ TEST_P(RestartResume_Initiator, BothCountersResumeFromStore) {
     // Witness (b): outbound seqnum resumed from the persisted store — > 1.
     // The pre-restart session advanced the fixpp outbound counter; the hydrate-
     // on-open path loaded that value into the manager before the Logon was sent.
-    // If the counter were reset to 1 (no hydrate), this assertion would fail.
+    // Also holds after any fresh Logon (kMinResumedSeqnum); see NOT LIVE header and fixpp#503.
     EXPECT_GE(mgr.peek_outbound(), kMinResumedSeqnum)
         << "outbound seqnum was not resumed from the persisted store (got " << mgr.peek_outbound()
         << "); expected >= " << kMinResumedSeqnum
@@ -176,8 +183,8 @@ TEST_P(RestartResume_Initiator, BothCountersResumeFromStore) {
     // Witness (c): inbound seqnum resumed from the persisted store — > 1.
     // The pre-restart session durably tracked received messages via
     // persist_inbound_advance_(); the hydrate-on-open path loaded that value.
-    // If the inbound counter were not durably tracked and resumed, next_inbound
-    // would still be 1 after restart.
+    // This also holds after any fresh Logon (kMinResumedSeqnum); the seeded
+    // inbound threshold's tracking issue is fixpp#503, as noted in the NOT LIVE header.
     EXPECT_GE(mgr.next_inbound_unsafe(), kMinResumedSeqnum)
         << "inbound seqnum was not resumed from the persisted store (got "
         << mgr.next_inbound_unsafe() << "); expected >= " << kMinResumedSeqnum
@@ -287,7 +294,8 @@ INSTANTIATE_TEST_SUITE_P(AllCounterparties, RestartResume_Acceptor,
 
 // ── Cell 3: StandbyRehydrate_Initiator ───────────────────────────────────────
 //
-// 025-refresh-on-logon standby re-hydrate live cell (T041 Polish).
+// 025-refresh-on-logon standby re-hydrate cell (T041 Polish). Not live: see the
+// "NOT LIVE" paragraph in the file header (fixpp#503).
 //
 // A fixpp initiator configured as a STANDBY (refresh_on_logon=true,
 // bilateral_lenient, persistent FileStore) connects vs a QFcpp/QFJ acceptor

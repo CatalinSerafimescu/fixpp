@@ -182,16 +182,20 @@ unconstructible; the IDENTITY half — re-seating the object a bundle latched ag
 `std::optional<table_view>::emplace` — does not (Gate B round 1 finding).** §5c and §5d decide what
 happens to it, as a disclosure rather than a cleanup.
 
-### 2a. The two instruments used throughout this document — CHECKED IN, and hardened
+### 2a. The two instruments used throughout this document — CHECKED IN until fixpp#498, and hardened
 
 Rather than grep for mutator names, this gate **simulates the seal and compiles the tree against
-it**. Both instruments ship with this change, under `tools/`, because *a design-time instrument that
+it**. Both instruments shipped with this change (removed by fixpp#498; see the note below), under `tools/`, because *a design-time instrument that
 is not preserved cannot be re-run by a reviewer*:
 
 | instrument | what it answers |
 |---|---|
 | `tools/table_view_seal_sweep.py` | which TUs stop compiling under the seal, and with how many diagnostics |
 | `tools/table_view_mutation_scope.py` | which mutated `table_view` declarations are pure build-then-use, which interleave — and whether **every** mutator call in a scanned file is attributed to a declaration it found (the attribution guard, §5d) |
+
+> **2026-09-24 — both tools removed by fixpp#498.** Nothing ran them; the seal is enforced by
+> `tests/dictionary/table_view_seal_compile_test.cpp`. The procedure below is kept as written; recover
+> the scripts from git history (`git log --diff-filter=D -- tools/table_view_seal_sweep.py`).
 
 ⚠️ **v0.1 quoted both instruments' output without shipping either, and described the sweep's control
 rule as something the script did not do.** Every figure it quoted was re-run by the adversarial

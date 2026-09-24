@@ -10,17 +10,19 @@
 // Why a mock cell cannot substitute (research.md D-6.10): mock_transport's
 // read composes an asio::steady_timer wait, which honours `total` natively —
 // so a mock-driven cell is green EXACTLY where a real asio::ssl::stream
-// hangs. asio_tls_transport::async_read_some's SSL composed op is built with
-// a one-argument reset_cancellation_state(enable_total_cancellation()) at
-// src/transport/asio_tls_transport.cpp's async_read_some reset_cancellation_state call — the
-// terminal-only IN filter is honoured by the SSL composed op's internal state, but there is no OUT
-// filter mapping `total` back to `terminal`, so an emitted `total` is
-// silently dropped and the read never aborts. FR-018 (task T029, NOT landed
-// by this file) replaces the one-argument reset with a two-argument OUT-
-// mapping form. This file's RED basis is the CURRENT (un-mapped) tree — see
-// research.md D-6.13(b) and tasks.md T025: no revert is needed, because
-// asio_tls_transport.cpp's async_read_some reset_cancellation_state call is already at the
-// one-argument form.
+// hangs. The SSL composed op's internal cancellation state is terminal-only,
+// so asio_tls_transport::async_read_some (src/transport/asio_tls_transport.cpp)
+// installs the two-argument reset_cancellation_state(enable_total_cancellation(),
+// <OUT filter>) form, whose OUT filter maps any accepted cancellation to
+// `terminal` for the forwarded child op (FR-018, task T029). Without that OUT
+// mapping — the one-argument reset_cancellation_state(enable_total_cancellation()),
+// or no reset at all — an emitted `total` is silently dropped and the read
+// never aborts.
+//
+// This file is a REGRESSION PIN on that guard. To re-derive its RED: revert
+// async_read_some's reset_cancellation_state call to the one-argument form (or
+// delete it), rebuild this target, and run it through ctest — both legs must
+// fail on the A2 watchdog assertion, not on the ctest TIMEOUT.
 //
 // Two legs (research.md D-6.10a — a single joined leg cannot assert an exact
 // error value, because BOTH the read arm and the deadline arm inside
@@ -249,7 +251,7 @@ TEST(FirstFrameTotalCancelTls, LegA_JoinedHelper_CancellationAttributable) {
         },
         asio::bind_cancellation_slot(signal.slot(), [&](std::exception_ptr ep) { thrown = ep; }));
 
-    // Watchdog — converts the un-mapped build's hang into a bounded, captured
+    // Watchdog — converts an un-mapped build's hang into a bounded, captured
     // assertion failure (A2) instead of a ctest TIMEOUT kill.
     bool watchdog_fired = false;
     asio::steady_timer watchdog{ioc.get_executor()};
@@ -283,17 +285,18 @@ TEST(FirstFrameTotalCancelTls, LegA_JoinedHelper_CancellationAttributable) {
 
     ASSERT_FALSE(thrown) << "LegA: the wrapper coroutine threw.";
 
-    // A2 — THE RED assertion. Under the un-mapped build, total dies inside
+    // A2 — THE RED assertion. Under an un-mapped build, total dies inside
     // the SSL composed op's terminal-only state; the read never aborts; only
     // the watchdog's close() eventually unblocks it.
     EXPECT_FALSE(watchdog_fired)
         << "T6 leg A (SC-018/FR-018): watchdog fired — Engine::stop()'s cancellation_type::total "
-        << "did not abort the in-flight TLS read within 1000ms. asio_tls_transport.cpp's "
-           "async_read_some reset_cancellation_state call is "
-        << "still the one-argument reset_cancellation_state(enable_total_cancellation()); the "
-        << "SSL composed op's internal state is terminal-only, so an emitted `total` is silently "
-        << "dropped and the read hangs until this test's watchdog force-closes the socket. "
-        << "Fixed by T029 (a two-argument OUT-mapping reset). Elapsed emit-to-completion: "
+        << "did not abort the in-flight TLS read within 1000ms. Check asio_tls_transport.cpp's "
+           "async_read_some reset_cancellation_state call: it must be the two-argument "
+        << "OUT-mapping form (FR-018/T029), not the one-argument "
+        << "reset_cancellation_state(enable_total_cancellation()) or absent; the SSL composed "
+        << "op's internal state is terminal-only, so an un-mapped `total` is silently dropped and "
+        << "the read hangs until this test's watchdog force-closes the socket. "
+        << "Elapsed emit-to-completion: "
         << std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count() << "ms.";
     if (watchdog_fired) return;  // A3-A/A4 are meaningless once the watchdog force-closed the read.
 

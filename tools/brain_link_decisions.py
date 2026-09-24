@@ -48,6 +48,8 @@ def propose(root, parent):
     for f in sorted(glob.glob(os.path.join(root, "brain", "**", "*.md"), recursive=True)):
         if os.path.basename(f) == "index.md":
             continue                      # a routing index must stay one hop, not accumulate
+        if os.path.basename(f) == "log.md":
+            continue                      # a chronological log names bundles in passing, not as its subject
         t = io.open(f, encoding="utf-8").read()
         if not t.startswith("---"):
             continue
@@ -65,40 +67,51 @@ def propose(root, parent):
     return out
 
 
-def self_test(root, parent):
-    """Both directions. A proposer only ever run against under-linked pages proves
-    it can speak; it does not prove it can stay quiet."""
-    r = propose(root, parent)
-    if r is None:
-        print("self-test: could not see the records -- inconclusive, not clean", file=sys.stderr)
-        return 2
-    ok = True
-    # the tree is currently linked, so a second run must propose nothing
-    if r:
-        ok = False
-        print(f"  FAIL  want=0 got={len(r)}  already-linked tree -> no proposals")
-    else:
-        print("  ok    want=0 got=0  already-linked tree -> no proposals")
-    # seeded control: a page naming a bundle with no refs_external must propose
-    import tempfile, shutil
+def self_test():
+    """Both directions, on a FIXED fixture -- neither the real brain nor the private
+    parent. A proposer only ever run against under-linked pages proves it can speak;
+    it does not prove it can stay quiet. Live freshness is the no-flag run's job."""
+    import contextlib, subprocess, tempfile, shutil
     d = tempfile.mkdtemp()
-    shutil.copytree(os.path.join(root, "specs"), os.path.join(d, "specs"),
-                    ignore=lambda *a: [x for x in a[1] if x != "."] if False else [])
-    os.makedirs(os.path.join(d, "brain", "components"), exist_ok=True)
-    bundle = sorted(n for n in os.listdir(os.path.join(root, "specs"))
-                    if re.match(r"\d{3}-", n) and
-                    os.path.exists(os.path.join(parent, D, "speckit", n + "-gatea.md")))[0]
-    io.open(os.path.join(d, "brain", "components", "seed.md"), "w", encoding="utf-8").write(
-        f"---\ntype: Component Decision Map\nstatus: stable\nrefs:\n  - x\n---\n\n"
-        f"# S\n\nThis page discusses `{bundle}` and nothing else.\n")
-    s = propose(d, parent)
-    if s and any(bundle in x for v in s.values() for x in v):
-        print(f"  ok    seeded page naming {bundle} -> proposed")
-    else:
-        ok = False
-        print(f"  FAIL  seeded page naming {bundle} -> NOTHING proposed")
+    root, parent = os.path.join(d, "root"), os.path.join(d, "parent")
+    b, rec = "042-fixture-bundle", f"{D}/speckit/042-fixture-bundle-gatea.md"
+
+    def w(p, s):
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        io.open(p, "w", encoding="utf-8").write(s)
+
+    def page(name, refs_ext=""):
+        w(os.path.join(root, "brain", name), "---\ntype: T\nrefs:\n  - x\n"
+          f"{refs_ext}---\n\n# S\n\nThis page discusses `{b}` and `2c-fixture.md`.\n")
+
+    os.makedirs(os.path.join(root, "specs", b))
+    page("components/linked.md",
+         f"refs_external:\n  - {rec}\n  - {D}/2c-fixture-convergence.md\n")
+    page("components/seed.md")
+    page("log.md")
+    with contextlib.redirect_stderr(io.StringIO()):
+        none = propose(root, parent)      # parent has no records dir yet
+    cli = subprocess.run([sys.executable, os.path.abspath(__file__), "--root", root,
+                          "--parent", parent], capture_output=True).returncode
+    w(os.path.join(parent, rec), "x\n")
+    w(os.path.join(parent, D, "2c-fixture-convergence.md"), "x\n")
+    r = propose(root, parent)
     shutil.rmtree(d)
-    print("self-test:", "2/2 pass" if ok else "FAILED")
+    if r is None:
+        print("self-test: could not see the fixture records -- inconclusive, not clean",
+              file=sys.stderr)
+        return 2
+    want = [rec, f"{D}/2c-fixture-convergence.md"]
+    arms = [("already-linked page -> no proposals", "brain/components/linked.md" not in r),
+            ("seeded page naming bundle + design doc -> both proposed",
+             r.get("brain/components/seed.md") == want),
+            ("log.md naming the bundle -> not proposed", "brain/log.md" not in r),
+            ("records dir missing -> None (inconclusive), not {}", none is None),
+            ("records dir missing -> CLI exits 2, not 0", cli == 2)]
+    for name, ok in arms:
+        print(f"  {'ok  ' if ok else 'FAIL'}  {name}")
+    ok = all(a[1] for a in arms)
+    print("self-test:", f"{len(arms)}/{len(arms)} pass" if ok else "FAILED")
     return 0 if ok else 1
 
 
@@ -111,7 +124,7 @@ def main():
     a = ap.parse_args()
     parent = a.parent or os.path.normpath(os.path.join(a.root, "../../.."))
     if a.self_test:
-        sys.exit(self_test(a.root, parent))
+        sys.exit(self_test())
     r = propose(a.root, parent)
     if r is None:
         sys.exit(2)

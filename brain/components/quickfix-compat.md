@@ -15,6 +15,7 @@ refs:
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/2e-msgstore.md
   - research/G19-fix-fpml-iso20022/decisions/architecture.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/089-quickfix-interop-conversation-gatea.md
 codegraph_entry: [cfg_loader]
 ---
 

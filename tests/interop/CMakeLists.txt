@@ -487,11 +487,11 @@ else()
         "tests/interop: fixpp_codegen_generate not available; skipping business message interop test")
 endif()
 
-# ── 027 live NextExpectedMsgSeqNum(789) interop cells — T002 (Setup) + T022 (Polish) ──
-# T002: skeleton with skip-without-counterparty guard; body is a stub for now.
-# T022: full both-role live cells (initiator + acceptor); parent harness MUST
-#   configure the counterparty with EnableNextExpectedMsgSeqNum=Y.
-# Cells skip-with-reason when no counterparty (FR-023); CI always green.
+# ── 027 NextExpectedMsgSeqNum(789) interop cells — T002 (Setup) + T022 (Polish) ──
+# Initiator and acceptor suites are the parent harness's selected NE cells.
+# They run fresh sessions with no seeded gap; witness 789 negotiation and in-sync honour.
+# C10's X<N gap arm and NextExpectedBidirectional are NOT live; fixpp#503 owns them.
+# Counterparty must advertise 789; absent counterparties skip with a reason (FR-023).
 # Anchors: tasks.md T002/T022; contracts C10; SC-005/FR-001/FR-002.
 fixpp_add_interop_test(
     NAME interop_027_next_expected_msgseqnum_test
@@ -518,12 +518,12 @@ fixpp_add_interop_test(
     TLS
 )
 
-# ── 029 live restart-resume interop cells — T002 (Setup) + T014 (Polish) ─────
-# T002: skeleton with skip-without-counterparty guard; body stubs GTEST_SKIP for now.
-# T014: full both-role live cells: fixpp-initiator/acceptor restarts vs a running
-#   QFcpp/QFJ peer; resumes both seqnum counters from the persisted FileStore;
-#   peer-ahead inbound recovers via ResendRequest (enable_next_expected_msg_seq_num=true).
-# Cells skip-with-reason when no counterparty (FR-023); CI always green.
+# ── 029 restart-resume interop suites — T002 (Setup) + T014 (Polish); NOT live ─────
+# This target registers the executable only; no parent-harness cell selects these suites.
+# Suites: RestartResume_Initiator, RestartResume_Acceptor, StandbyRehydrate_Initiator.
+# NOT live: their ids are unregistered-tracked in live-cells-excluded.txt.
+# The prior-run step and persistent stores they need: the tracking issue is fixpp#503.
+# Without a counterparty, every case skips with a reason (FR-023).
 # Knob state: enable_next_expected_msg_seq_num=true on the fixpp side so the Logon
 #   gate's behind-side tolerance admits a peer-ahead inbound (SC-004, W5, L-029-1).
 # Anchors: tasks.md T002/T014; contracts/seqnum-hydrate.md C2/C3; spec.md SC-001/SC-002.

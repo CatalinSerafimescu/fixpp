@@ -673,7 +673,7 @@ Notes that supplement specific catalogue rows (`feature-catalogue.md`) without r
 >
 > **Test files.**
 > - `tests/session/test_persistent_seqnum_hydrate.cpp` — W1–W14 witnesses (outbound resume, inbound durable track + resume, deliver-then-persist ordering, both-direction acceptor cold resume, post-GapFill lower bound, inbound persist failure fatal, non-persistent no-op, one-shot + happens-before, reset-wins, seed-withheld-on-141, hydrated 789 advertisement, validate-off 35=4 persist split, custom-store discriminator, hydrate read-failure fatal, no-heap under mallocnesia).
-> - `tests/interop/happy/hp_fix44_restart_resume_test.cpp` — live both-role restart-resume cell (skip-without-counterparty; assertions (a)–(d): Active reached, outbound resumed > 1, inbound resumed > 1, no fatal).
+> - `tests/interop/happy/hp_fix44_restart_resume_test.cpp` — both-role restart-resume suites, **NOT live**: no harness cell selects them (they need a prior-run step and persistent stores the single-cell harness lacks — fixpp#503; skip-without-counterparty; assertions (a)–(d): Active reached, outbound resumed > 1, inbound resumed > 1, no fatal).
 >
 > **Normative refs.** `[FIX-SL §4.1]` (sequence numbers); `[FIX-SL §4.3.12]` (synchronization after logon); `[FIX-SL §4.8.x]` (ResendRequest / SequenceReset recovery — at-least-once restart via INV-H1 lower bound). No new wire field, error slot, codegen, or C-ABI surface.
 >
@@ -686,7 +686,7 @@ Notes that supplement specific catalogue rows (`feature-catalogue.md`) without r
 > | `ensure_hydrated_()` (inbound seed + Logon-gate-aware withheld) | W4, W9b, W11 |
 > | `persist_inbound_advance_()` (PERSIST sites) | W2 (durable track + resume), W3 (deliver-then-persist ordering), W6 (persist failure fatal), W12 (validate-off 35=4 split) |
 > | `yields_persistent_store()` / `store_is_persistent_` | W7 (non-persistent no-op — memory + null), W13 (custom-store discriminator) |
-> | Full interop path | `hp_fix44_restart_resume_test.cpp` (W10 — both-role live restart-resume) |
+> | Full interop path | `hp_fix44_restart_resume_test.cpp` (W10 — both-role restart-resume; **NOT live**, no harness cell — fixpp#503) |
 
 ---
 
