@@ -17,7 +17,7 @@
 // tree-consistency gate. Each golden carries its own copy of the row, so each
 // is asserted by its own TEST.
 //
-// To prove this gate can go RED: change one byte of main.cpp in the tree and
+// To prove this gate can fail: change one byte of main.cpp in the tree and
 // run the binary (paths are read at runtime, no rebuild) — both TESTs must
 // fail; then restore main.cpp byte-exact (it is digest-bound and `-text`).
 
