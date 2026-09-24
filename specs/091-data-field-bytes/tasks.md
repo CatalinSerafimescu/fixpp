@@ -59,12 +59,12 @@ only then made GREEN.
 
 **Purpose**: pre-flight, before-measurements, the ctest manifest, and the stage-one TDD anchors.
 
-- [ ] T001 Pre-flight in the library root. `git rev-parse --abbrev-ref HEAD` prints
+- [X] T001 Pre-flight in the library root. `git rev-parse --abbrev-ref HEAD` prints
   `091-data-field-bytes`, and `git status --short` is empty. Run `git fetch --all --prune` and
   record `git merge-base HEAD origin/main`. `df -h /mnt/e` shows room for a `-debug` rebuild. Confirm
   `git diff --stat origin/main...HEAD -- src include tools cmake` is empty; production code is still
   `main`'s, which is what T002 depends on.
-- [ ] T002 Before any edit under `src/`, `include/` or `tools/`, measure the compile-time surface
+- [X] T002 Before any edit under `src/`, `include/` or `tools/`, measure the compile-time surface
   "before" figure with `bench/codegen/vlatest_builders_compile_bench/compile_bench.sh`
   (R-10). Record the command, toolchain and figures in
   `.specify/decisions/091-data-field-bytes-evidence.md` §*Compile-time surface*. The figure is
