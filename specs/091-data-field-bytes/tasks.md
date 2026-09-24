@@ -507,7 +507,7 @@ only then made GREEN.
     plus every test that `codegraph_callers interpret_logon` reaches); a Logon built through a
     helper is invisible to a lexical grep, so the full run is the blast-radius check. Any other
     failure goes to the orchestrator.
-- [ ] T072 Via `phase-implementer`, update the `include/fix/c_api/version.h` 1.9 history comment
+- [X] T072 Via `phase-implementer`, update the `include/fix/c_api/version.h` 1.9 history comment
   (FR-019 as amended): the Logon effect is now FR-020's — a Logon carrying a malformed count, of a
   component/group-only pair or of a standard pair such as 95/96, is refused — replacing the
   "a required field follows the count" wording; the observers stay, on either role (the C-ABI
