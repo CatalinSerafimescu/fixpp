@@ -422,10 +422,11 @@ rejection now assert verbatim emit.
   deliberately mis-wired output as a violation).
 - **FR-013**: The checked-in golden builder fixtures MUST be regenerated for every dictionary version
   whose output changes, including `vlatest`. The diff MUST contain only these transformations, and
-  it MUST be validated structurally against an IR-derived expected manifest, not by a token filter
+  it MUST be validated structurally against an expected manifest derived independently of the
+  generator (C-2.2's census), not by a token filter
   (C-2.4):
   - (a) every coupled call site rerouted from the two-call form to one `field_data`/`set_data` call;
-  - (b) the `message_encoding` member and its emit (FR-011a) on exactly the IR-selected messages;
+  - (b) the `message_encoding` member and its emit (FR-011a) on exactly the messages FR-011a's rule selects;
   - (c) on v50sp2 only, the five newly coupled pairs (FR-017): their Length member deleted, their Data
     member coupled, and their two separate emits replaced by one coupled call at the Length's
     position.
@@ -465,7 +466,7 @@ rejection now assert verbatim emit.
   **user-loaded** dictionary (`XmlLoader` is a public runtime API), a non-standard pair declared
   adjacently only inside a component or group becomes a dictionary pair, so `has_nonstandard_pair()`
   can flip, scanners read its Data by count, `fixpp_msg_set_data` and both commit checks honour
-  it, and the SOH-in-value refusal no longer applies to its Data tag (`fixpp_msg_set_string` / `fixpp_entry_set_string` at set time; any setter at commit when the value is correctly Length-prefixed) (B-091-4). Through the C-ABI this is a breaking change, C-ABI 1.9 (FR-019). The new containers are visited in the order R-11 states, and `mark_pair`'s existing
+  it, and the SOH-in-value refusal no longer applies to its Data tag (`fixpp_msg_set_string` / `fixpp_entry_set_string` at set time; any setter at commit when the value is correctly Length-prefixed; `fixpp_session_send` of such a well-formed Data) (B-091-4). Through the C-ABI this is a breaking change, C-ABI 1.9 (FR-019). The new containers are visited in the order R-11 states, and `mark_pair`'s existing
   first-writer rule settles a Length adjacent to two Data fields; a synthetic-dictionary test pins
   the component, group-in-component, group-under-message, group-in-group, group-under-header,
   group-under-trailer, break-on-non-field, first-writer and visit-order cases (C-2.5a). What moves on
@@ -607,7 +608,8 @@ rejection now assert verbatim emit.
   injection-guard test passes unedited, and the new operation, through both `field_data` and
   `set_data`, refuses every non-Data tag tried (C-1.4).
 - **SC-003**: The coupled call sites in regenerated builder output equal, exactly, the expected set
-  derived from the IR against the standard table — every (message, structural path, Length tag, Data
+  derived from the dictionary sources, independently of the generator (C-2.2), against the standard
+  table — every (message, structural path, Length tag, Data
   tag, arm) — and 0 non-Data fields use the atomic operation (census C-2.2, proven able to fire on the
   output of the new emitter over the unfixed loader, which must be reported missing exactly the five
   R-11 pairs).

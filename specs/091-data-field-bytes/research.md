@@ -214,7 +214,8 @@ for v in v42 v44 v50sp2 vlatest; do echo "$v files=$(find $G/$v -type f | wc -l)
 
 ⚠️ This population is defined by the **old emitter's coupling decision**, so it cannot see a standard
 pair the loader never coupled (R-11). It sizes the diff; it is not the census. The census (C-2.2)
-takes its expected set from the IR against the standard table.
+takes its expected set from the dictionary sources, independently of the generator, against the
+standard table.
 
 - **FR-011a widens the diff.** Every message that can carry an `Encoded*` field gains a
   `message_encoding` Args member (R-8). Census recipe: over the QuickFIX XML, recursing through
@@ -305,7 +306,8 @@ static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(<data_tag>) 
 the old emitter's coupling decision and hides a lost call site in a file that keeps another. The
 census instead:
 - derives the **expected** multiset of (message, structural path, Length tag, Data tag, top/nested
-  arm) from the IR, taking pair-ness from `core::detail::standard_length_data_pairs` — **not** from
+  arm) from the dictionary sources by a walker independent of the generator (not its IR or
+  `resolve_level`), taking pair-ness from `core::detail::standard_length_data_pairs` — **not** from
   `FieldRef::length_pair_data_tag` — for every standard pair whose two halves appear at one level;
 - parses the **actual** multiset from the regenerated call sites (`field_data(`/`set_data(` plus the
   preceding `static_assert`'s Length tag);
@@ -476,7 +478,7 @@ groups inside those containers belong to the new group walk.
   callback on every scanner, inbound parsing reads the Data by count, `fixpp_msg_set_data` accepts
   it, the SOH-in-value refusal no longer applies to its Data tag (`fixpp_msg_set_string` /
   `fixpp_entry_set_string` at set time; any setter at commit when the value is correctly
-  Length-prefixed), and the C-ABI and `body_builder` commit checks check it. Arguably a correction (the dictionary
+  Length-prefixed; `fixpp_session_send` of such a well-formed Data), and the C-ABI and `body_builder` commit checks check it. Arguably a correction (the dictionary
   declares the adjacency), but a wire-behaviour change on a public API: disclosed in B-091-4 and
   witnessed by C-2.5a; its C-ABI half is FR-019's population, derived by the recipe below and
   witnessed by FR-019's tests.

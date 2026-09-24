@@ -27,8 +27,10 @@ registration, and writes the manifest from the names it registers. The entries i
 role: `wire_body_builder_test` (standalone, §VII.8-exempt: in-TU global `operator new` counter; C-1
 except C-1.9); `wire_dict_tests` (C-1.9, the per-dictionary drift arm); the C-2.5a loader test under
 `tests/dictionary/`; `test_067_builder_failclosed` (the flipped `_418` pins); the entry holding the
-C-2.6 witnesses; `fixpp::dict::read-tier-byte-diff`; the C-2.2 census and C-2.3 test under
-`tests/codegen/`; the §5 session witnesses; the C-ABI exact-version bucket (`capi_pure_tests`, which
+C-2.6 witnesses; `fixpp::dict::read-tier-byte-diff`; the C-2.2 census under `tests/codegen/` (which
+also checks the C-2.3 `message_encoding` set); the C-2.3 `requires` presence checks in the builder
+round-trip entries (`test_067_builder_roundtrip`, `test_077_allversions_builder_roundtrip`); the §5
+session witnesses; the C-ABI exact-version bucket (`capi_pure_tests`, which
 holds `version_test.cpp`); the FR-019 C-ABI before/after test's bucket (for example
 `capi_length_data`, or whichever entry tasks registers it in), including its `fixpp_session_send`
 assertion's entry if that lands elsewhere; the FR-019 inbound-drop witness's entry (`wire_dict_tests`
@@ -98,7 +100,8 @@ Each row names an existing test that must be shown RED, then GREEN after reverti
 ## 4. Golden regeneration check
 
 Follow `contracts/codegen-builders.md`:
-- C-2.2 (exact IR-vs-standard-table census plus orphan-half check, control (a) proven on the
+- C-2.2 (exact census of the dictionary sources, walked independently of the generator, against the
+  standard table, plus orphan-half check, control (a) proven on the
   new-emitter/unfixed-loader output first);
 - C-2.4 (structural residual diff, proven RED with an injected stray emit);
 - C-2.5 (exactly `v50sp2/Fields.hpp` and `v50sp2/Validator.hpp` rebaselined, each with its

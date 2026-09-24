@@ -352,8 +352,9 @@ only then made GREEN.
     `set_data` in a group entry. A re-parse through the inbound parser recovers exactly `{b}` as tag
     355. If `wire_body_builder_test` cannot parse without `fixpp_dictionary`, use the
     dictionary-free `Parser` path.
-  - **C-1.3** N ≥ 10 octets, and the largest N that still commits: derive it in the test from
-    `kBodyCap` minus the body's known overhead (never a literal). `354=<N>` with no leading zeros.
+  - **C-1.3** N ≥ 10 octets, and the largest N that still commits, with N + 1 refused
+    `wire_frame_too_large` at commit. Find the boundary in the test (never a literal; `kBodyCap` is
+    TU-local in `src/wire/body_builder.cpp` and cannot be named). `354=<N>` with no leading zeros.
   - **C-1.1 variants (spec Edge Cases):** a pair whose Data tag is below its Length tag
     (`field_data(89, …)` → `93=<n>␁89=…`) and a non-adjacent pair (`field_data(1527, …)` →
     `1525=<n>␁1527=…`, per the standard table) commit with the Length first.
@@ -507,7 +508,8 @@ are the four flipped `_418` pins, plus C-2.6.
   `tests/codegen/CMakeLists.txt`.
   - **Standalone, as the `[const §VII.8]` exact-set completeness-gate exemption.** It carries label
     `091` and links `fixpp_dictionary`. Say why in the CMakeLists comment.
-  - **Expected** multiset, per shipped dictionary version (v42, v44, v50sp2, vlatest), from the IR:
+  - **Expected** multiset, per shipped dictionary version (v42, v44, v50sp2, vlatest), from the
+    dictionary sources (walker below):
     every (message, structural path, Length tag, Data tag, arm ∈ {top, nested}) where
     Length/Data is a row of `core::detail::standard_length_data_pairs` and both appear at that
     level. Pair-ness comes **never** from `FieldRef::length_pair_data_tag`.
@@ -521,8 +523,8 @@ are the four flipped `_418` pins, plus C-2.6.
   - **Orphan-half check:** in every regenerated version, zero calls to `field(T, …)` or
     `set_<kind>(T, …)` other than `field_data`/`set_data` for any tag T of the standard table. Keyed
     on the call name and the tag, never on a local's name.
-  - **Message-encoding set:** the messages whose Args carry `message_encoding` equal the IR-selected
-    set (T033's rule). The member is last, and its emit is the first body statement.
+  - **Message-encoding set:** the messages whose Args carry `message_encoding` equal the set that
+    T033's rule selects, recomputed on the census's own walk. The member is last, and its emit is the first body statement.
   - **Expected-set source (non-circular):** an independent walker over `dictionaries/*.xml` (pugixml,
     as `codegen_vlatest_census_test` does) and the Orchestra FIX Latest XML for vlatest, never
     `tools/codegen/fixpp-codegen/ir.cpp` or the emitter's own `resolve_level`, so the census cannot

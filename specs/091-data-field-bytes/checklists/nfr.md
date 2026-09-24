@@ -14,47 +14,47 @@ whether each is quantified, measurable and procedurally sound.
 
 ## Performance — clarity and measurability
 
-- [ ] CHK001 - Is SC-005's budget quantified: a percentage, a direction (one-sided slowdown), which cases are gated, and which case is reported only? [Clarity, Spec §SC-005, research R-10]
-- [ ] CHK002 - Is the comparand's **source** defined unambiguously (production code equal to the merge-base), and is the empty `git diff --stat <merge-base> -- src include tools cmake` stated as the check that proves it? [Clarity, Spec Clarifications Gate A r2]
-- [ ] CHK003 - Is the statistic defined (minimum of per-leg medians, per tree), with the number of A-B pairs, repetitions, min-time and CPU pinning? [Measurability, quickstart §6]
-- [ ] CHK004 - Is the noise-floor precondition specified: how it is computed, from which legs, the 1 % threshold with its rationale, and the "inconclusive → owner" outcome? [Measurability, quickstart §6, plan Gate A r2]
-- [ ] CHK005 - Is the over-budget outcome specified: it goes back to the owner, and is never relaxed silently? [Completeness, Spec §SC-005]
-- [ ] CHK006 - Is it required that the benchmark cases **check the exact body they time**? Are the prechecks' own liveness mutants specified? [Measurability, research R-10, quickstart §3]
-- [ ] CHK007 - Is the base build's configuration required to equal the candidate's (the same `-D` options including `FIXPP_BUILD_BENCH`, the same toolchain and Conan profile), with a stated check? [Completeness, Gap → tasks T055]
-- [ ] CHK008 - Is "every leg must exist" stated as a fail condition, so a missing or empty JSON cannot be skipped? [Measurability, quickstart §6]
-- [ ] CHK009 - Is the paired `xml_loader_bench` obligation stated with its own budget (Article VIII §2, ≤ +5 %) and approval path, separate from SC-005's 3 %? [Completeness, plan Constitution Check VIII]
-- [ ] CHK010 - Is the CI registration of `builder_bench` specified: the tier-2 value `no`, and why `paired` is avoided (§2a irreversibility)? [Clarity, research R-10]
-- [ ] CHK011 - Is the frozen baseline binary's role restricted to a drift cross-check and never the comparand, and is that restriction stated? [Consistency, quickstart §6]
+- [x] CHK001 - Is SC-005's budget quantified: a percentage, a direction (one-sided slowdown), which cases are gated, and which case is reported only? [Clarity, Spec §SC-005, research R-10] — PASS: SC-005 (spec.md: at most 3 % slower, one-sided); research.md R-10 Comparison method (gated NoGroup/WithGroup/Raw, AsciiEncodedText reported and exempt); quickstart §6 Verdict.
+- [x] CHK002 - Is the comparand's **source** defined unambiguously (production code equal to the merge-base), and is the empty `git diff --stat <merge-base> -- src include tools cmake` stated as the check that proves it? [Clarity, Spec Clarifications Gate A r2] — PASS: spec Clarifications Session 2026-09-24 (Gate A round 2) fixes the source (production code equal to unmodified `main`) and the empty `git diff --stat <merge-base> ... -- src include tools cmake` check; quickstart §6 base bullet and script line.
+- [x] CHK003 - Is the statistic defined (minimum of per-leg medians, per tree), with the number of A-B pairs, repetitions, min-time and CPU pinning? [Measurability, quickstart §6] — PASS: quickstart §6 script (4 A-B pairs, `--benchmark_repetitions=15`, `--benchmark_min_time=0.2s`, `taskset -c 3`) and Verdict (per-tree minimum of medians); research.md R-10 Comparison method.
+- [x] CHK004 - Is the noise-floor precondition specified: how it is computed, from which legs, the 1 % threshold with its rationale, and the "inconclusive → owner" outcome? [Measurability, quickstart §6, plan Gate A r2] — PASS: quickstart §6 Precondition (per case (max-min)/min of base-leg medians, max over NoGroup/WithGroup/Raw, 1 % threshold = budget/3, above it inconclusive -> owner); research.md R-10 Noise-floor precondition.
+- [x] CHK005 - Is the over-budget outcome specified: it goes back to the owner, and is never relaxed silently? [Completeness, Spec §SC-005] — PASS: SC-005 ("the measured figure goes back to the owner ... not silently relaxed"); quickstart §6 ("Over budget -> back to the owner ... Never silently relax"); tasks T055.
+- [x] CHK006 - Is it required that the benchmark cases **check the exact body they time**? Are the prechecks' own liveness mutants specified? [Measurability, research R-10, quickstart §3] — PASS: research.md R-10 Instrument (NoGroup/WithGroup/Raw MUST pre-check the exact body, `kWithGroupBody`/`kRawBody` pinned) and its one-line mutants; quickstart §3 last row (`SkipWithError`); tasks T053.
+- [x] CHK007 - Is the base build's configuration required to equal the candidate's (the same `-D` options including `FIXPP_BUILD_BENCH`, the same toolchain and Conan profile), with a stated check? [Completeness, Gap → tasks T055] — PASS: quickstart §6 script comment (candidate's own `-D` options incl. `-DFIXPP_BUILD_BENCH=ON`, own `conan install`, diff the two CMakeCache.txt files' FIXPP_*/CMAKE_BUILD_TYPE/compiler entries, any difference stops); tasks T055 Base configure.
+- [x] CHK008 - Is "every leg must exist" stated as a fail condition, so a missing or empty JSON cannot be skipped? [Measurability, quickstart §6] — PASS: quickstart §6 "Every leg must exist" (missing/empty JSON or a leg lacking any case fails the run, never skipped); research.md R-10 ("a missing or empty leg fails the run"); tasks T055.
+- [x] CHK009 - Is the paired `xml_loader_bench` obligation stated with its own budget (Article VIII §2, ≤ +5 %) and approval path, separate from SC-005's 3 %? [Completeness, plan Constitution Check VIII] — PASS: plan Constitution Check VIII row (paired `xml_loader_bench`, slowdown <= +5 %, over it -> §2 approval path, never self-declared); research.md R-10 `xml_loader_bench`; quickstart §6 last paragraph; tasks T056. Matches .specify/constitution.md §VIII.2.
+- [x] CHK010 - Is the CI registration of `builder_bench` specified: the tier-2 value `no`, and why `paired` is avoided (§2a irreversibility)? [Clarity, research R-10] — PASS: research.md R-10 CI registration (tier-2 `no`, chosen because §2a makes `paired` irreversible); plan Constitution Check VIII row; tasks T054.
+- [x] CHK011 - Is the frozen baseline binary's role restricted to a drift cross-check and never the comparand, and is that restriction stated? [Consistency, quickstart §6] — PASS: quickstart §6 (frozen `builder_bench.base` "is a drift cross-check only, **never** the comparand"); research.md R-10 Base third bullet; tasks T055 last bullet.
 
 ## Allocation & resource discipline
 
-- [ ] CHK012 - Is "no allocation added on the hot path" stated as a requirement, with the arena as the only allowed source? [Clarity, Spec Assumptions, plan Constraints]
-- [ ] CHK013 - Is the non-reclamation of arena capacity after a failed call stated as an accepted property, disclosed in the API comment, rather than left implicit? [Completeness, Spec §FR-006, research R-3]
-- [ ] CHK014 - Is the unchanged size-cap behaviour (`kBodyCap`, `kArenaCap`) stated? Is its consequence stated: a large non-ASCII value may now fail for size instead of content? [Completeness, Spec Assumptions]
-- [ ] CHK015 - Is the B15/#497 blind-spot interaction (over-aligned allocation, MSan/LSan) addressed? Either it is ruled not engaged, with the reason, or there is a requirement. [Coverage, plan Constitution Check VIII/XV]
+- [x] CHK012 - Is "no allocation added on the hot path" stated as a requirement, with the arena as the only allowed source? [Clarity, Spec Assumptions, plan Constraints] — PASS: spec Assumptions ("No allocation is added on the builder's hot path; the operation uses the builder's existing fixed arena"); plan Constraints (zero global heap, null-upstream arena); tasks T023.
+- [x] CHK013 - Is the non-reclamation of arena capacity after a failed call stated as an accepted property, disclosed in the API comment, rather than left implicit? [Completeness, Spec §FR-006, research R-3] — PASS: FR-006 (spec.md, not reclaimed, MUST be stated in the API comment); research.md R-3 "What INV-4 does not promise"; data-model INV-4.
+- [x] CHK014 - Is the unchanged size-cap behaviour (`kBodyCap`, `kArenaCap`) stated? Is its consequence stated: a large non-ASCII value may now fail for size instead of content? [Completeness, Spec Assumptions] — PASS: spec Assumptions ("The size caps (`kBodyCap`, `kArenaCap`) are unchanged. A large non-ASCII value that was refused for its content may now be refused for its size"); Out of scope.
+- [x] CHK015 - Is the B15/#497 blind-spot interaction (over-aligned allocation, MSan/LSan) addressed? Either it is ruled not engaged, with the reason, or there is a requirement. [Coverage, plan Constitution Check VIII/XV] — PASS: plan Constitution Check VIII/XV row rules B15 (#497) blind spots not engaged (no over-aligned type added), and plan Constraints add no allocation at all (arena only), so no new allocation exists for an MSan/LSan blind spot to miss.
 
 ## Compile-time surface
 
-- [ ] CHK016 - Is the compile-time cost of the per-call-site `static_assert`s and the new include measured by a named instrument, with a "before" figure that can still be taken? [Measurability, research R-10]
-- [ ] CHK017 - Is it stated that the compile-time delta has **no budget**, only a reporting obligation, and is that choice explicit rather than an omission? [Clarity, research R-10]
+- [x] CHK016 - Is the compile-time cost of the per-call-site `static_assert`s and the new include measured by a named instrument, with a "before" figure that can still be taken? [Measurability, research R-10] — PASS: research.md R-10 Compile-time surface names `bench/codegen/vlatest_builders_compile_bench` before/after; tasks T002 takes the "before" figure before any production edit (with the merge-base-worktree fallback), T040 the "after".
+- [x] CHK017 - Is it stated that the compile-time delta has **no budget**, only a reporting obligation, and is that choice explicit rather than an omission? [Clarity, research R-10] — PASS: research.md R-10 Compile-time surface ("report the delta; it has no budget") with the stated reason (keep CI from being first to see it); tasks T040.
 
 ## Fuzzing, sanitizers, coverage, static analysis
 
-- [ ] CHK018 - Is a fuzz obligation stated for the changed loader: the harness, the duration, and seeds that reach the new component/group walk? Is its classification as "parser-touching" settled? [Gap, `[const §VII.7]`, tasks T058]
-- [ ] CHK019 - Is the coverage requirement stated per changed file: every new line in `body_builder.cpp` and in the new loader walk? [Measurability, plan Constitution Check IX]
-- [ ] CHK020 - Is the sanitizer matrix named completely (ASan, UBSan, TSan) rather than as a subset? [Completeness, `[const §IX.2]`]
-- [ ] CHK021 - Is the static-analysis scope stated as changed files under `src/`, `include/` **and `tools/codegen/`** (#265), with all four tools (clang-tidy, clang-format, cppcheck, IWYU) and the changed-lines rule? [Completeness, `[const §IX.4]`]
-- [ ] CHK022 - Is the MSVC leg's obligation stated, and is the cost of skipping it required to be written plainly, never as "CI covers it"? [Completeness, tasks T045]
+- [x] CHK018 - Is a fuzz obligation stated for the changed loader: the harness, the duration, and seeds that reach the new component/group walk? Is its classification as "parser-touching" settled? [Gap, `[const §VII.7]`, tasks T058] — SPEC-FIXED: plan.md Constitution Check VII row now states §VII.7 applicability (the QuickFIX XML loader is parser-touching; FR-017 changes it; existing harness `fuzz_dict_xml_loader` runs >= 10 min with seeds reaching the new walk, tasks T058). Harness verified at tests/fuzz/fuzz_dict_xml_loader.cpp (tests/fuzz/CMakeLists.txt); T058's 600 s matches §VII.7's >= 10 min.
+- [x] CHK019 - Is the coverage requirement stated per changed file: every new line in `body_builder.cpp` and in the new loader walk? [Measurability, plan Constitution Check IX] — SPEC-FIXED: plan.md Constitution Check IX row named coverage for `body_builder.cpp` only; now names every new line in `src/wire/body_builder.cpp` and in the new loader walk in `src/dictionary/xml_loader.cpp` (as tasks T064 already did).
+- [x] CHK020 - Is the sanitizer matrix named completely (ASan, UBSan, TSan) rather than as a subset? [Completeness, `[const §IX.2]`] — SPEC-FIXED: plan.md Constitution Check IX row said "ASan/UBSan presets" (a subset of .specify/constitution.md §IX.2's Tier 1 ASan, UBSan, TSan); now names all three (tasks T064 already did).
+- [x] CHK021 - Is the static-analysis scope stated as changed files under `src/`, `include/` **and `tools/codegen/`** (#265), with all four tools (clang-tidy, clang-format, cppcheck, IWYU) and the changed-lines rule? [Completeness, `[const §IX.4]`] — SPEC-FIXED: plan.md Constitution Check IX row named clang-tidy only; now names clang-tidy, clang-format, cppcheck and IWYU (§IX.4) on changed `src/`, `include/` and `tools/codegen/` files (#265) with the changed-lines rule, matching tasks T059.
+- [x] CHK022 - Is the MSVC leg's obligation stated, and is the cost of skipping it required to be written plainly, never as "CI covers it"? [Completeness, tasks T045] — PASS: tasks T045 (C-1.5 on MSVC; if the leg cannot run, a waiver with its cost stated plainly, "CI's MSVC matrix runs only once both gate labels land", not "CI covers it"); C-1.5 "on every platform" (contracts/body-builder-data.md).
 
 ## Build resource governance
 
-- [ ] CHK023 - Is the `[const §XVII.7]` resource gate (owner ask before any build) reflected in the procedures that build: codegen freshness, the bench base, fuzz and verify? [Consistency, tasks Execution rules]
-- [ ] CHK024 - Are disk-placement constraints stated for the heavy builds? These are the E: debug tree, the F: vhdx for release and the bench base, and `setsid nohup` with a done marker. [Completeness, quickstart §6, tasks Execution rules]
+- [x] CHK023 - Is the `[const §XVII.7]` resource gate (owner ask before any build) reflected in the procedures that build: codegen freshness, the bench base, fuzz and verify? [Consistency, tasks Execution rules] — PASS: tasks Execution rules "Builds need an owner ask (`[const §XVII.7]` resource gate)" naming codegen freshness, T026, the bench base (T055/T056), fuzz and `/speckit-verify`; rule verified at .specify/constitution.md §XVII.7 "Resource gate"; tasks T064 repeats it for the §7 build.
+- [x] CHK024 - Are disk-placement constraints stated for the heavy builds? These are the E: debug tree, the F: vhdx for release and the bench base, and `setsid nohup` with a done marker. [Completeness, quickstart §6, tasks Execution rules] — PASS: quickstart header (`df -h /mnt/e` before a -debug rebuild) and §6 (base worktree and output under `/mnt/wsl/fixppbuild`); tasks Execution rules "Disk and build trees" (E: debug tree, release symlink to the F: vhdx, `setsid nohup` + `.done` marker).
 
 ## Dependencies & Assumptions
 
-- [ ] CHK025 - Is the assumption behind the 1 % noise threshold labelled as a dated measurement that informs the threshold only? Is it kept distinct from the precondition itself? [Assumption, research R-10]
-- [ ] CHK026 - Is it stated that the final bench source must compile against the merge-base API, with a stop condition if it cannot? [Dependency, quickstart §6]
+- [x] CHK025 - Is the assumption behind the 1 % noise threshold labelled as a dated measurement that informs the threshold only? Is it kept distinct from the precondition itself? [Assumption, research R-10] — PASS: research.md R-10 dated A/A measurement "informs the threshold only; it is not the precondition"; quickstart §6 Precondition kept separate.
+- [x] CHK026 - Is it stated that the final bench source must compile against the merge-base API, with a stop condition if it cannot? [Dependency, quickstart §6] — PASS: quickstart §6 base bullet ("The final bench source MUST compile against the merge-base API ... if it cannot, stop and report to the owner"); tasks T053 last bullet.
 
 ## Notes
 
@@ -62,3 +62,57 @@ whether each is quantified, measurable and procedurally sound.
 - Leave items unchecked when they still require clarification, correction, or reviewer evaluation.
 - `/speckit-implement` reads checklist checkbox state as a gate and must not modify markers.
 - Dispositions are recorded inline by `/speckit-checklist-audit`.
+
+## Audit Result
+
+| Disposition | Count |
+|---|---|
+| PASS | 22 |
+| SPEC-FIXED | 4 |
+| DD-DECIDED | 0 |
+| WAIVED | 0 |
+| **Total** | 26 |
+
+### SPEC-FIXED items
+- CHK018 — the plan Constitution Check VII row now states that §VII.7 applies. Affected: `plan.md` Constitution Check, row VII. The row says:
+  - the loader is parser-touching;
+  - its existing harness, `fuzz_dict_xml_loader`, runs for at least 10 min;
+  - the seeds reach the new walk (T058).
+- CHK019, CHK020, CHK021 — one edit to the plan Constitution Check IX row closes all three. Affected: `plan.md` Constitution Check, row IX. The row now names:
+  - coverage of `src/dictionary/xml_loader.cpp`'s new walk, beside `src/wire/body_builder.cpp`;
+  - the sanitizers ASan, UBSan **and TSan** (§IX.2);
+  - clang-tidy, clang-format, cppcheck and IWYU (§IX.4), with the changed-lines rule.
+
+### DD-DECIDED items
+- none. No item re-opened an owner ruling.
+
+### WAIVED items
+- none.
+
+These constitution clauses were read in `.specify/constitution.md`:
+- §VII.7;
+- §VIII.2 and §2a;
+- §IX.1, §IX.2 and §IX.4;
+- §XVII.7 "Resource gate".
+
+Anchors spot-verified. In `.specify/426-428-length-data-pairs.md`, signed-off revision v4, 2026-09-15 (scoped Gate A converged at round 5), these three resolve:
+- **O-4**: the owner-decision bullet in the status header;
+- **§3**: the heading `## 3. D-2 — dictionary pairs through one bundled hook value (O-3)`;
+- **§5.3**: the heading `### 5.3 Commit-time conformance`.
+
+`L-426-2` is not a section of that document. It resolves as the live B&L row L-426-2 in `spec/behaviors-and-limitations.md`, whose content is the document's §7 bullet and §3 r3 R3-1.
+
+Also verified:
+- B-426-3, L-426-3 and L-067-2 are live in `spec/behaviors-and-limitations.md`.
+- `[FIX50SP2 §3.3]` resolves in `spec/coverage-index.md` (the W-008 entry) and in `spec/feature-catalogue.md` (row W-008).
+- In `.specify/constitution.md`, these resolve:
+  - `[const §XVI.3]` (clarify mandatory for wire and codegen);
+  - `[const §XVII.1]` (Gate A triggers: public C++ API, codegen layout);
+  - `[const §X.7]`.
+
+On the brain pages:
+- `brain/components/wire.md` and `brain/components/dictionary.md` flag no part of 426-428 as superseded.
+- `wire.md` flags only the document's per-dictionary drift claim, which the spec does not cite as authority.
+- No `brain/components/codegen.md` exists.
+
+`.specify/418-data-field-bytes.md` is treated as superseded input, not as authority (spec Context).

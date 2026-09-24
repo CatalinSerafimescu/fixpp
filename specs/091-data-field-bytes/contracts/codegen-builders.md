@@ -41,10 +41,16 @@ if (item.m) {
    - **Positive control:** an emitter mutant passing `item.tag` for `D` must fail to compile the v44
      builders. Run it in a scratch copy, never in the PR worktree.
 2. **Exact completeness census** (a test under `tests/codegen/`, labelled `091`).
-   - **Expected** multiset, derived from the IR per shipped dictionary version: every
+   - **Expected** multiset, derived per shipped dictionary version from the dictionary source (the
+     QuickFIX XML; the Orchestra XML for vlatest) by a walker independent of `fixpp-codegen` — never
+     its IR (`ir.cpp`) or the emitter's `resolve_level`, so the census cannot inherit the emitter's
+     coupling decision: every
      (message, structural path, Length tag, Data tag, arm ∈ {top, nested}) where the Length and Data
      tags are a row of `core::detail::standard_length_data_pairs` and both appear at that level.
      Pair-ness comes from the standard table, **never** from `FieldRef::length_pair_data_tag`.
+     **A level** is one generated Args struct: a message's top level or one group entry. Component
+     references expand in place into the enclosing level (the same expansion the generated Args
+     use); each `<group>` starts a new level.
    - **Actual** multiset, parsed from the regenerated builder sources: each `field_data(D, …)` /
      `set_data(D, …)` call with its owning message, its structural path (the enclosing group chain)
      and the Length tag of the `static_assert` preceding it. **Unit:** every message has both a
@@ -97,7 +103,7 @@ if (item.m) {
   inside a group or a deleted `r_len` with no replacement would pass):
   - (a) and (c): the C-2.2 census over the regenerated output, plus a check that every removed
     two-call site in the old golden has exactly one corresponding coupled call in the new one;
-  - (b): the set of messages whose Args carry `message_encoding` equals the IR-selected set (C-2.3),
+  - (b): the set of messages whose Args carry `message_encoding` equals the set C-2.3's rule selects, recomputed on the census's own walk,
     the member is the last Args member, and its emit is the first body statement;
   - after normalising (a)–(c) out of both sides (rewrite each old two-call site to its coupled form,
     delete the `message_encoding` member/emit, delete the (c) Length members), old and new must be

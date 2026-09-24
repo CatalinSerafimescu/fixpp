@@ -17,62 +17,62 @@ before `/speckit-implement`)
 
 ## Requirement Completeness
 
-- [ ] CHK001 - Are both the signature and the `noexcept` guarantee of `field_data` and `set_data` specified, including the parameter types (`std::uint16_t`, `std::span<const std::byte>`) and the return type? [Completeness, Spec §FR-001, §FR-002, C-1 Declarations]
-- [ ] CHK002 - Is the full refusal set enumerated for **both** surfaces, including the `set_data`-only handle checks (no owner, not innermost, stale after `group_end`)? [Completeness, Spec §FR-004, C-1.4b]
-- [ ] CHK003 - Is the refusal **order** specified as normative (handle → framing → pair lookup → empty → append), so that a value failing two checks has one defined error? [Completeness, research R-3, data-model refusal table]
-- [ ] CHK004 - Is the Length value's textual form fully specified: decimal, no leading zeros, no sign, and its behaviour for a multi-digit count? [Completeness, Spec §FR-001, Edge Cases, C-1.3]
-- [ ] CHK005 - Is the position of the appended pair specified (at the call's position in the container, Length immediately before Data), including for pairs whose Data tag is numerically below its Length (93→89) or non-adjacent in the table (1525→1527)? [Completeness, Spec Edge Cases, C-1.1]
-- [ ] CHK006 - Does the spec state what the API comment MUST disclose, and is that list complete: standard-only set time, verbatim copy, rollback-to-size, non-reclaimed arena capacity, hooks read by commit only, lifetime precondition? [Completeness, Spec §FR-006, C-1 Declarations]
-- [ ] CHK007 - Are requirements stated for the defaulted constructor parameter's source compatibility: existing one-argument callers compile unchanged, and `explicit` is preserved? [Completeness, research R-2, Spec §SC-004]
-- [ ] CHK008 - Is the `dict_hooks` lifetime precondition stated as a caller obligation, with the unsafe pattern named (hooks from a `table_view` that dies before the builder)? [Completeness, C-1 Lifetime]
-- [ ] CHK009 - Are commit-time (INV-6) requirements defined for **every** malformation class: Data without its Length, Length without its Data, a non-positive or non-decimal Length, a count/octet mismatch, and a group node between the halves? [Completeness, Spec §FR-008, C-1.7]
-- [ ] CHK010 - Is the treatment of a **group node whose `no_tag` is a pair half** specified, including the normative "empty value" feed that makes it refuse? [Completeness, research R-4, C-1.7]
+- [x] CHK001 - Are both the signature and the `noexcept` guarantee of `field_data` and `set_data` specified, including the parameter types (`std::uint16_t`, `std::span<const std::byte>`) and the return type? [Completeness, Spec §FR-001, §FR-002, C-1 Declarations] — PASS: both signatures `[[nodiscard]] expected_t<void> field_data/set_data(std::uint16_t, std::span<const std::byte>) noexcept` pinned in contracts/body-builder-data.md; spec.md (FR-001/FR-002); data-model.md.
+- [x] CHK002 - Is the full refusal set enumerated for **both** surfaces, including the `set_data`-only handle checks (no owner, not innermost, stale after `group_end`)? [Completeness, Spec §FR-004, C-1.4b] — PASS: spec.md (FR-004 + FR-004a list every refusal incl. the `set_data` no-owner / not-innermost checks); C-1.4b (body-builder-data.md) adds the stale `group_end` handle; data-model.md refusal table.
+- [x] CHK003 - Is the refusal **order** specified as normative (handle → framing → pair lookup → empty → append), so that a value failing two checks has one defined error? [Completeness, research R-3, data-model refusal table] — PASS: research.md R-3 is a Decision ("do everything in this order", steps 1-5, all refusals before any append); data-model.md rows follow it; tasks T023 fixes the same order.
+- [x] CHK004 - Is the Length value's textual form fully specified: decimal, no leading zeros, no sign, and its behaviour for a multi-digit count? [Completeness, Spec §FR-001, Edge Cases, C-1.3] — PASS: FR-001 (spec.md, decimal octet count); Edge Cases spec.md (no leading zeros, multi-digit); C-1.3 (body-builder-data.md). A count is unsigned by construction (derived from span size), so no sign can arise.
+- [x] CHK005 - Is the position of the appended pair specified (at the call's position in the container, Length immediately before Data), including for pairs whose Data tag is numerically below its Length (93→89) or non-adjacent in the table (1525→1527)? [Completeness, Spec Edge Cases, C-1.1] — PASS: FR-001 "immediately followed" (spec.md); C-1.1 "at the position of the call" (body-builder-data.md); Edge Cases spec.md (93->89, 2372->2371, 1525->1527, 1678->1697: Length first); tasks T021 C-1.1 variants (89/93, 1525/1527).
+- [x] CHK006 - Does the spec state what the API comment MUST disclose, and is that list complete: standard-only set time, verbatim copy, rollback-to-size, non-reclaimed arena capacity, hooks read by commit only, lifetime precondition? [Completeness, Spec §FR-006, C-1 Declarations] — PASS: C-1 declaration comments (body-builder-data.md, 26-28) carry all six: standard-only set time, verbatim copy, rollback to pre-call size, non-reclaimed arena capacity, hooks read by commit only, lifetime precondition; FR-006 (spec.md) mandates the non-reclamation sentence; tasks T023 lists the same six.
+- [x] CHK007 - Are requirements stated for the defaulted constructor parameter's source compatibility: existing one-argument callers compile unchanged, and `explicit` is preserved? [Completeness, research R-2, Spec §SC-004] — PASS: research.md R-2 (defaulted param, `explicit` kept); data-model.md (existing one-argument callers compile unchanged); tasks T023 (already `explicit` with one argument); verified current ctor `explicit body_builder(std::string_view) noexcept` at include/fixpp/wire/body_builder.hpp.
+- [x] CHK008 - Is the `dict_hooks` lifetime precondition stated as a caller obligation, with the unsafe pattern named (hooks from a `table_view` that dies before the builder)? [Completeness, C-1 Lifetime] — PASS: C-1 Lifetime paragraph (body-builder-data.md) states the MUST-outlive caller obligation and names the hazard (a `for_table_view` bundle holds an unowned `table_view` address); consistent with include/fixpp/wire/dict_hooks.hpp ("must outlive every holder").
+- [x] CHK009 - Are commit-time (INV-6) requirements defined for **every** malformation class: Data without its Length, Length without its Data, a non-positive or non-decimal Length, a count/octet mismatch, and a group node between the halves? [Completeness, Spec §FR-008, C-1.7] — PASS: FR-008 (spec.md) lists Data without Length, Length without Data, non-positive/non-decimal Length, count mismatch; C-1.7 (body-builder-data.md) adds the group-node-between-halves case and the `"0"` Length case.
+- [x] CHK010 - Is the treatment of a **group node whose `no_tag` is a pair half** specified, including the normative "empty value" feed that makes it refuse? [Completeness, research R-4, C-1.7] — PASS: research.md R-4 makes `observe(no_tag, {})` normative (Gate A r3) with the reason; C-1.7 group `no_tag` 354/355 cases (body-builder-data.md); quickstart §3 count-digits mutant row.
 
 ## Requirement Clarity
 
-- [ ] CHK011 - Is "the Data half of a standard pair" defined by reference to one authoritative artifact (`include/fixpp/core/length_data_pairs.hpp` through `dict_hooks::none()`), with no second list? [Clarity, Spec §FR-003, §FR-009]
-- [ ] CHK012 - Is "both or neither" defined in observable terms (a later commit serializes byte-identically to a builder that never made the call), given that `body_builder` exposes no size accessor? [Clarity, Spec §FR-006, C-1 oracle]
-- [ ] CHK013 - Is "any octet `0x00–0xFF`" unambiguous about which guard is lifted (INV-2's content conjunct only) and which still applies (the framing check on the Data tag)? [Clarity, Spec §FR-005, §FR-004]
-- [ ] CHK014 - Is "innermost open entry" defined precisely enough to classify an outer entry's handle while a nested group is open? [Clarity, C-1.4b]
-- [ ] CHK015 - Is each refusal mapped to exactly one existing `core::error` variant, with no condition mapped to two? [Clarity, Spec §FR-004a]
-- [ ] CHK016 - Is "a value near the body cap" in C-1.3 quantified, or derived from `kBodyCap` by a stated rule? [Ambiguity, C-1.3]
+- [x] CHK011 - Is "the Data half of a standard pair" defined by reference to one authoritative artifact (`include/fixpp/core/length_data_pairs.hpp` through `dict_hooks::none()`), with no second list? [Clarity, Spec §FR-003, §FR-009] — PASS: FR-003 (spec.md) + FR-009 set time (spec.md) resolve through `dict_hooks::none().length_tag_for_data`, i.e. core/length_data_pairs.hpp; data-model.md; verified include/fixpp/wire/dict_hooks.hpp answers standard tags from `detail::standard_length_tag_for_data` alone. No second list anywhere in the bundle.
+- [x] CHK012 - Is "both or neither" defined in observable terms (a later commit serializes byte-identically to a builder that never made the call), given that `body_builder` exposes no size accessor? [Clarity, Spec §FR-006, C-1 oracle] — PASS: FR-006 (spec.md) "a later commit serializes exactly what it would have without the call"; C-1 oracle paragraph (body-builder-data.md) states the commit-and-byte-compare form and why (no size accessor); research.md R-3 Oracle.
+- [x] CHK013 - Is "any octet `0x00–0xFF`" unambiguous about which guard is lifted (INV-2's content conjunct only) and which still applies (the framing check on the Data tag)? [Clarity, Spec §FR-005, §FR-004] — PASS: FR-005 (spec.md) lifts only the printable-content guard; FR-004/FR-004a keep the framing refusal on the Data tag (spec.md, 338-339); data-model INV-2 row stays on `field`/`set_string` only.
+- [x] CHK014 - Is "innermost open entry" defined precisely enough to classify an outer entry's handle while a nested group is open? [Clarity, C-1.4b] — PASS: C-1.4b third case (body-builder-data.md) classifies an outer entry's handle while a nested entry is innermost as refused; the rule is `set_string`'s existing `is_innermost_open` check (src/wire/body_builder.cpp, include/fixpp/wire/body_builder.hpp), reused by name in FR-004a and data-model.md.
+- [x] CHK015 - Is each refusal mapped to exactly one existing `core::error` variant, with no condition mapped to two? [Clarity, Spec §FR-004a] — PASS: FR-004a (spec.md) and data-model.md map each condition to exactly one existing variant; all four variants verified present in include/fixpp/core/error.hpp.
+- [x] CHK016 - Is "a value near the body cap" in C-1.3 quantified, or derived from `kBodyCap` by a stated rule? [Ambiguity, C-1.3] — SPEC-FIXED: C-1.3 (contracts/body-builder-data.md) now states the boundary rule "the largest N that commits, bounded by N + 1 refused `wire_frame_too_large` at commit", found by the test, not a literal; tasks.md T021 C-1.3 bullet aligned. Reason: `kBodyCap` is TU-local (src/wire/body_builder.cpp), so T021's "derive from `kBodyCap`" was not implementable by name.
 
 ## Requirement Consistency
 
-- [ ] CHK017 - Is the set-time pair set provably a **subset** of the commit-time pair set for every `dict_hooks` value (INV-8), so nothing `field_data` appends can be refused at commit? [Consistency, Spec §FR-009, data-model INV-8]
-- [ ] CHK018 - Do the C-ABI divergences (set-time dictionary pairs; append vs upsert on a repeated call) appear consistently in FR-009, C-1.11, research R-1 and B-091-3? [Consistency, Spec §FR-009, C-1.11]
-- [ ] CHK019 - Are the error codes for the same condition consistent between the C++ surface (FR-004a) and what existing `field()`/`set_string` return (e.g. a framing tag → `wire_field_value_out_of_range`)? [Consistency, Spec §FR-004a]
-- [ ] CHK020 - Is `set_data`'s handle-check error (`wire_invalid_field_format`) consistent with `set_string`'s, and is it distinct from the commit-time INV-6 error only by stage, not by code? [Consistency, Spec §FR-004a]
-- [ ] CHK021 - Are FR-007's "INV-2 unchanged for every tag" and FR-005's "no content guard on the Data operation" reconciled for the string path on a Data tag (`field(355, "A\x01B")` still refused)? [Consistency, C-1.6]
+- [x] CHK017 - Is the set-time pair set provably a **subset** of the commit-time pair set for every `dict_hooks` value (INV-8), so nothing `field_data` appends can be refused at commit? [Consistency, Spec §FR-009, data-model INV-8] — PASS: FR-009 (spec.md) + data-model INV-8; verified in code: every `dict_hooks` answers a standard tag from the standard table before any dictionary callback (include/fixpp/wire/dict_hooks.hpp `data_tag_for_length` and `length_tag_for_data`), and the checker is built from those hooks (include/fixpp/wire/length_data_check.hpp), so a standard pair `field_data` appends is judged by the standard table at commit for any hooks.
+- [x] CHK018 - Do the C-ABI divergences (set-time dictionary pairs; append vs upsert on a repeated call) appear consistently in FR-009, C-1.11, research R-1 and B-091-3? [Consistency, Spec §FR-009, C-1.11] — PASS: both divergences appear identically in FR-009 (spec.md), C-1.11 (body-builder-data.md), research.md R-1 and data-model.md (B-091-3).
+- [x] CHK019 - Are the error codes for the same condition consistent between the C++ surface (FR-004a) and what existing `field()`/`set_string` return (e.g. a framing tag → `wire_field_value_out_of_range`)? [Consistency, Spec §FR-004a] — PASS: FR-004a framing -> `wire_field_value_out_of_range` matches `append_string_field`/`append_int_field` today (src/wire/body_builder.cpp); empty value uses the same code.
+- [x] CHK020 - Is `set_data`'s handle-check error (`wire_invalid_field_format`) consistent with `set_string`'s, and is it distinct from the commit-time INV-6 error only by stage, not by code? [Consistency, Spec §FR-004a] — PASS: `set_string` returns `wire_invalid_field_format` for no owner / not innermost (src/wire/body_builder.cpp), matching FR-004a; data-model.md refusal table shows the same code distinguished by the Stage column (set vs commit).
+- [x] CHK021 - Are FR-007's "INV-2 unchanged for every tag" and FR-005's "no content guard on the Data operation" reconciled for the string path on a Data tag (`field(355, "A\x01B")` still refused)? [Consistency, C-1.6] — PASS: C-1.6 (body-builder-data.md) pins `field(355, "A\x01B")` still refused; FR-005 scopes the lift to the Data operation, FR-007 (spec.md) keeps INV-2 on the string path for every tag.
 
 ## Scenario & Edge Case Coverage
 
-- [ ] CHK022 - Are requirements defined for a repeated `field_data` call on the same tag (append-not-upsert), and is the resulting two-pair message's commit outcome stated? [Coverage, Edge Case, C-1.11]
-- [ ] CHK023 - Are requirements defined for a group whose delimiter is a Length tag, so that the atomic operation still satisfies delimiter-first (INV-5)? [Coverage, Spec Edge Cases, C-1.10]
-- [ ] CHK024 - Is the behaviour specified for a hand-written pair written through `field()`/`set_string` alongside, or instead of, the Data operation? [Coverage, Spec Edge Cases, §FR-008]
-- [ ] CHK025 - Are requirements stated for arena exhaustion on the **Data** half after the Length half succeeded, as distinct from exhaustion on the first append? [Coverage, Exception Flow, C-1.5]
-- [ ] CHK026 - Is the body-cap failure at **commit** (arena not exhausted) specified, including that a second commit returns the same error (commit does not mutate)? [Coverage, Exception Flow, C-1.5]
-- [ ] CHK027 - Is the per-container scope of the pair check specified (a Length at the end of one instance does not pair with a Data at the start of the next)? [Coverage, C-1.8]
-- [ ] CHK028 - Is a Data tag the message does not declare explicitly left to the validator and generated builders (a non-goal), rather than silently undefined? [Coverage, C-1 Non-goals]
+- [x] CHK022 - Are requirements defined for a repeated `field_data` call on the same tag (append-not-upsert), and is the resulting two-pair message's commit outcome stated? [Coverage, Edge Case, C-1.11] — PASS: C-1.11 (body-builder-data.md) append-not-upsert, both pairs well-formed so commit accepts; Edge Cases spec.md.
+- [x] CHK023 - Are requirements defined for a group whose delimiter is a Length tag, so that the atomic operation still satisfies delimiter-first (INV-5)? [Coverage, Spec Edge Cases, C-1.10] — PASS: C-1.10 (body-builder-data.md); research.md R-6 Decision (Length node appended first satisfies INV-5); Edge Cases spec.md.
+- [x] CHK024 - Is the behaviour specified for a hand-written pair written through `field()`/`set_string` alongside, or instead of, the Data operation? [Coverage, Spec Edge Cases, §FR-008] — PASS: Edge Cases spec.md; FR-008 (spec.md, well-formed hand-written ASCII pairs pass); C-1.7 hand-written well-formed commit (body-builder-data.md).
+- [x] CHK025 - Are requirements stated for arena exhaustion on the **Data** half after the Length half succeeded, as distinct from exhaustion on the first append? [Coverage, Exception Flow, C-1.5] — PASS: C-1.5 Arrangement + Arrangement witness (body-builder-data.md) require the Length append to succeed and the Data allocation to fail; research.md R-3 pops the Length on second-append failure.
+- [x] CHK026 - Is the body-cap failure at **commit** (arena not exhausted) specified, including that a second commit returns the same error (commit does not mutate)? [Coverage, Exception Flow, C-1.5] — PASS: C-1.5 last bullet (body-builder-data.md) and US3 AS-3 (spec.md): `out` untouched, second commit returns the same error.
+- [x] CHK027 - Is the per-container scope of the pair check specified (a Length at the end of one instance does not pair with a Data at the start of the next)? [Coverage, C-1.8] — PASS: C-1.8 (body-builder-data.md); FR-008 "any one repeating-group entry" (spec.md); research.md R-4 per-container checker + `finish()`.
+- [x] CHK028 - Is a Data tag the message does not declare explicitly left to the validator and generated builders (a non-goal), rather than silently undefined? [Coverage, C-1 Non-goals] — PASS: C-1 Non-goals (body-builder-data.md last bullet): per-message membership stays with the generated builders and the validator.
 
 ## Security (injection guard)
 
-- [ ] CHK029 - Is the injection argument stated as a requirement chain: SOH can reach the wire only in a standard Data tag, which every fixpp scanner reads by count, whatever dictionary it holds? [Completeness, Spec §FR-009 "Why this closes the injection path"]
-- [ ] CHK030 - Is SC-002's "0 new ways" measurable: which existing tests must pass **unedited**, and which new refusals must be shown on both surfaces? [Measurability, Spec §SC-002, §FR-007]
-- [ ] CHK031 - Is the dictionary-only Data tag refusal (`field_data(5002, …)` with hooks that pair it) stated for both surfaces, with the SOH-bearing payload that motivates it? [Coverage, Spec US2 AS-4, C-1.9]
-- [ ] CHK032 - Is the interop residual (QuickFIX splits a SOH-bearing Data unless Length = Data − 1, or the tag is XmlData(213)) disclosed as a requirement on the B&L file rather than enforced? [Completeness, Spec §FR-009a]
+- [x] CHK029 - Is the injection argument stated as a requirement chain: SOH can reach the wire only in a standard Data tag, which every fixpp scanner reads by count, whatever dictionary it holds? [Completeness, Spec §FR-009 "Why this closes the injection path"] — PASS: FR-009 "Why this closes the injection path" (spec.md); research.md R-2 Rationale. Chain verified against include/fixpp/wire/dict_hooks.hpp (standard tags answered by the table whatever the hooks).
+- [x] CHK030 - Is SC-002's "0 new ways" measurable: which existing tests must pass **unedited**, and which new refusals must be shown on both surfaces? [Measurability, Spec §SC-002, §FR-007] — PASS: SC-002 (spec.md) + FR-007 name `SohInValue_RejectedBeforeAnyByteReachesOut` unedited; tasks T041 makes the unedited set measurable (`git diff origin/main` over tests/wire/test_body_builder.cpp and tests/session/test_067_builder_failclosed.cpp touches only new tests and the four flipped pins); C-1.4 runs every refusal on both surfaces.
+- [x] CHK031 - Is the dictionary-only Data tag refusal (`field_data(5002, …)` with hooks that pair it) stated for both surfaces, with the SOH-bearing payload that motivates it? [Coverage, Spec US2 AS-4, C-1.9] — PASS: US2 AS-4 (spec.md); C-1.9 first bullet (body-builder-data.md) with payload `"abc\x01" "1=EVIL"` through `field_data` and `set_data`.
+- [x] CHK032 - Is the interop residual (QuickFIX splits a SOH-bearing Data unless Length = Data − 1, or the tag is XmlData(213)) disclosed as a requirement on the B&L file rather than enforced? [Completeness, Spec §FR-009a] — PASS: FR-009a (spec.md) requires extending L-426-3 (live, spec/behaviors-and-limitations.md), disclosed not enforced, no near-copy row; data-model.md.
 
 ## Acceptance Criteria Quality
 
-- [ ] CHK033 - Is every C-1 clause traceable to at least one FR, and every FR-001…FR-009 to at least one C-1 clause? [Traceability, C-1, Spec §FR-001…FR-009]
-- [ ] CHK034 - For each group-tag case in C-1.7/C-1.9, is a committing twin specified so the refusal is attributable to INV-6 and not INV-5 (both return `wire_invalid_field_format`)? [Measurability, C-1.7]
-- [ ] CHK035 - Is the C-1.5 arrangement witness (the twin accepts the Length half) required on every platform, given outer-vector regrowth differs by STL? [Measurability, C-1.5]
+- [x] CHK033 - Is every C-1 clause traceable to at least one FR, and every FR-001…FR-009 to at least one C-1 clause? [Traceability, C-1, Spec §FR-001…FR-009] — PASS: traced. C-1.1/C-1.3->FR-001; C-1.2->FR-005/SC-001; C-1.4->FR-002/FR-003/FR-004/FR-004a; C-1.4b->FR-004; C-1.5->FR-006; C-1.6->FR-007; C-1.7/C-1.8->FR-008; C-1.9->FR-009; C-1.10/C-1.11->Edge Cases + FR-001. Every FR-001...FR-009 has at least one clause.
+- [x] CHK034 - For each group-tag case in C-1.7/C-1.9, is a committing twin specified so the refusal is attributable to INV-6 and not INV-5 (both return `wire_invalid_field_format`)? [Measurability, C-1.7] — PASS: C-1.7 "Group-tag cases need a committing twin" (body-builder-data.md) covers C-1.7 and C-1.9 explicitly; C-1.9's group case names its twin; tasks T021/T022 repeat it.
+- [x] CHK035 - Is the C-1.5 arrangement witness (the twin accepts the Length half) required on every platform, given outer-vector regrowth differs by STL? [Measurability, C-1.5] — PASS: C-1.5 Arrangement witness "on every platform" with the STL-regrowth reason (body-builder-data.md); tasks T045 runs it on MSVC or records the waiver with its cost stated plainly.
 
 ## Dependencies & Assumptions
 
-- [ ] CHK036 - Is the assumption "no allocation added on the hot path" stated with its fallback (B15/#497 ordering) if planning finds otherwise? [Assumption, Spec Assumptions]
-- [ ] CHK037 - Is the reuse of `wire::length_data_checker` (O-4) stated as a MUST, with the "fifteenth private copy" defect it prevents named? [Dependency, Spec Context, §FR-008]
-- [ ] CHK038 - Is FR-008's behaviour change for hand-written C++ callers bounded (who can be affected, and what the blast-radius grep cannot see) and routed to a B&L entry? [Assumption, research R-4, Spec §FR-008]
+- [x] CHK036 - Is the assumption "no allocation added on the hot path" stated with its fallback (B15/#497 ordering) if planning finds otherwise? [Assumption, Spec Assumptions] — PASS: Assumptions (spec.md, "No allocation is added on the builder's hot path ... If planning finds otherwise, B15 (#497) ... ordering applies"); plan Constraints (zero global heap, arena only) and Constitution Check VIII/XV row.
+- [x] CHK037 - Is the reuse of `wire::length_data_checker` (O-4) stated as a MUST, with the "fifteenth private copy" defect it prevents named? [Dependency, Spec Context, §FR-008] — PASS: Context (spec.md) names O-4 and the "fifteenth private copy" defect; FR-008 (spec.md) "applied by that same checker". Anchor O-4 verified at .specify/426-428-length-data-pairs.md (v4, 2026-09-15).
+- [x] CHK038 - Is FR-008's behaviour change for hand-written C++ callers bounded (who can be affected, and what the blast-radius grep cannot see) and routed to a B&L entry? [Assumption, research R-4, Spec §FR-008] — PASS: research.md R-4 "Consequence to disclose" bounds it (literal-tag grep, stated blind spot for named constants/computed tags and for generated code) and routes it to a B-091-* row; FR-008 requires the B&L entry; data-model.md (B-091-1); tasks T046.
 
 ## Notes
 
@@ -81,3 +81,57 @@ before `/speckit-implement`)
 - `/speckit-implement` reads checklist checkbox state as a gate and must not modify markers.
 - `checklists/requirements.md` has a separate built-in lifecycle maintained by `/speckit-specify` and `/speckit-clarify`.
 - Dispositions (PASS / SPEC-FIXED / DD-DECIDED §X / WAIVED:<reason>) are recorded inline by `/speckit-checklist-audit`.
+
+## Audit Result
+
+| Disposition | Count |
+|---|---|
+| PASS | 37 |
+| SPEC-FIXED | 1 |
+| DD-DECIDED | 0 |
+| WAIVED | 0 |
+| **Total** | 38 |
+
+### SPEC-FIXED items
+- CHK016 — C-1.3's "a value near the body cap" is replaced by a boundary rule:
+  - the largest N that commits, with N + 1 refused `wire_frame_too_large` at commit;
+  - the test finds the boundary itself. `kBodyCap` is TU-local in `src/wire/body_builder.cpp`, so a test cannot name it.
+
+  Affected: `contracts/body-builder-data.md` C-1.3, and the C-1.3 bullet of `tasks.md` T021.
+
+### DD-DECIDED items
+- none. No item re-opened an owner ruling.
+
+### WAIVED items
+- none.
+
+Realizability sub-check: `dict_hooks`, which `body_builder` holds by value, is a complete type in `include/fixpp/wire/dict_hooks.hpp`. Clean. Evidence:
+- It holds five pointer members.
+- `static_assert(std::is_trivially_copyable_v<dict_hooks>)` holds.
+- `none()` and `length_tag_for_data` are constexpr.
+- It includes only `length_data_pairs.hpp` and std headers.
+- `table_view` and `group_context` appear only in pointer and reference signatures.
+
+So `body_builder.hpp` gains no dictionary include.
+
+Anchors spot-verified. In `.specify/426-428-length-data-pairs.md`, signed-off revision v4, 2026-09-15 (scoped Gate A converged at round 5), these three resolve:
+- **O-4**: the owner-decision bullet in the status header;
+- **§3**: the heading `## 3. D-2 — dictionary pairs through one bundled hook value (O-3)`;
+- **§5.3**: the heading `### 5.3 Commit-time conformance`.
+
+`L-426-2` is not a section of that document. It resolves as the live B&L row L-426-2 in `spec/behaviors-and-limitations.md`, whose content is the document's §7 bullet and §3 r3 R3-1.
+
+Also verified:
+- B-426-3, L-426-3 and L-067-2 are live in `spec/behaviors-and-limitations.md`.
+- `[FIX50SP2 §3.3]` resolves in `spec/coverage-index.md` (the W-008 entry) and in `spec/feature-catalogue.md` (row W-008).
+- In `.specify/constitution.md`, these resolve:
+  - `[const §XVI.3]` (clarify mandatory for wire and codegen);
+  - `[const §XVII.1]` (Gate A triggers: public C++ API, codegen layout);
+  - `[const §X.7]`.
+
+On the brain pages:
+- `brain/components/wire.md` and `brain/components/dictionary.md` flag no part of 426-428 as superseded.
+- `wire.md` flags only the document's per-dictionary drift claim, which the spec does not cite as authority.
+- No `brain/components/codegen.md` exists.
+
+`.specify/418-data-field-bytes.md` is treated as superseded input, not as authority (spec Context).

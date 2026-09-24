@@ -16,50 +16,50 @@ population recipe)
 
 ## Requirement Completeness
 
-- [ ] CHK001 - Is the triggering condition stated precisely: a user-loaded dictionary whose custom Length+Data pair is adjacent **only** inside a `<component>` or `<group>`? And is the complement stated: shipped dictionaries have no inbound effect? [Completeness, Spec §FR-017, §FR-019]
-- [ ] CHK002 - Is the affected population **derived by a recipe** (R-11 steps 1–5) rather than listed by example, and is the recipe re-run required at the implementation head? [Completeness, Spec §FR-019, research R-11]
-- [ ] CHK003 - Does Appendix A classify **every** exported symbol? Is its row set gated as equal to `tests/abi/golden/fixpp_capi_symbols.txt`, with positive controls for a deleted row and an extra symbol? [Completeness, data-model Appendix A, tasks T016]
-- [ ] CHK004 - Are all three `[const §X.7]` classes (success → failure, documented result changed, failure → different failure) applied, not only success → failure? [Completeness, research R-11 Classification]
-- [ ] CHK005 - For each BREAKING declaration, does the note requirement name **that declaration's own effect**, with no generic sentence shared across all of them? [Completeness, Spec §FR-019]
-- [ ] CHK006 - Are the effects with **no carrying declaration** enumerated, and is their carrier specified (the `version.h` history comment)? The effects are: replay gap-fill, header/Logon scans, and `is_established`/`close` as observers. [Completeness, Spec §FR-019]
-- [ ] CHK007 - Is the inbound reader family specified as **one** shared paragraph in `message.h`'s accessor preamble, with its members named and the three views (inbound, clone, toApp) covered? [Completeness, Spec §FR-019]
-- [ ] CHK008 - Are the §X.7 procedural obligations all stated? [Completeness, plan Phase 0b]
+- [x] CHK001 - Is the triggering condition stated precisely: a user-loaded dictionary whose custom Length+Data pair is adjacent **only** inside a `<component>` or `<group>`? And is the complement stated: shipped dictionaries have no inbound effect? [Completeness, Spec §FR-017, §FR-019] — PASS: FR-017 (spec.md) states the trigger (a user-loaded dictionary's non-standard pair adjacent only inside a component or group) and the complement (spec.md, shipped dictionaries: inbound unaffected); FR-019 (spec.md); Clarifications Gate A r3.
+- [x] CHK002 - Is the affected population **derived by a recipe** (R-11 steps 1–5) rather than listed by example, and is the recipe re-run required at the implementation head? [Completeness, Spec §FR-019, research R-11] — PASS: FR-019 (spec.md) requires the population be derived by research.md R-11's recipe (steps 1-5, "C-ABI 1.9 population recipe"), "re-derive at the implementation head"; plan phase 0b and tasks T016 re-run it.
+- [x] CHK003 - Does Appendix A classify **every** exported symbol? Is its row set gated as equal to `tests/abi/golden/fixpp_capi_symbols.txt`, with positive controls for a deleted row and an extra symbol? [Completeness, data-model Appendix A, tasks T016] — PASS: data-model.md Appendix A row set gated equal to tests/abi/golden/fixpp_capi_symbols.txt; extractor reads first cell only; positive controls (deleted row, extra symbol) in plan phase 0b and tasks T016. Re-ran the diff recipe at HEAD 02c437b7: prints nothing.
+- [x] CHK004 - Are all three `[const §X.7]` classes (success → failure, documented result changed, failure → different failure) applied, not only success → failure? [Completeness, research R-11 Classification] — PASS: research.md R-11 Classification (success->failure; failure->different failure; failure->success additive) and data-model.md Appendix A classes (B covers all three §X.7 cases, incl. "a documented result changed"); consistent with .specify/constitution.md §X.7 "Breaking change" definition.
+- [x] CHK005 - For each BREAKING declaration, does the note requirement name **that declaration's own effect**, with no generic sentence shared across all of them? [Completeness, Spec §FR-019] — PASS: FR-019 (spec.md: "Every note below says ... then names that declaration's own effect"); each BREAKING bullet in FR-019 carries its own effect; tasks T018 repeats the per-declaration rule.
+- [x] CHK006 - Are the effects with **no carrying declaration** enumerated, and is their carrier specified (the `version.h` history comment)? The effects are: replay gap-fill, header/Logon scans, and `is_established`/`close` as observers. [Completeness, Spec §FR-019] — PASS: FR-019 "BREAKING with no carrying declaration" bullet enumerates replay gap-fill, header/Logon scans and `is_established`/`close` as observers, carrier the `version.h` history comment; tasks T017.
+- [x] CHK007 - Is the inbound reader family specified as **one** shared paragraph in `message.h`'s accessor preamble, with its members named and the three views (inbound, clone, toApp) covered? [Completeness, Spec §FR-019] — PASS: FR-019 inbound reader family bullet: one paragraph in `message.h`'s "Return codes common to all accessors" preamble, members named, inbound/clone/toApp views covered; tasks T018.
+- [x] CHK008 - Are the §X.7 procedural obligations all stated? [Completeness, plan Phase 0b] — PASS: all five §X.7 obligations stated: MINOR 8->9 and history comment naming 091/fixpp#418 (FR-019 first bullet; tasks T017); every in-repo consumer (plan phase 0b Consumers; tasks T019); freeze manifest re-pin (plan phase 0b; tasks T020); PR-description declaration (FR-019 "The PR description carries the BREAKING declaration"; tasks T066). The B&L delta is B-091-4 (data-model.md).
   - `FIXPP_C_ABI_VERSION_MINOR` 8 → 9;
   - a history comment naming 091/fixpp#418;
   - every in-repo version consumer updated;
   - the freeze manifest re-pinned;
   - the PR-description BREAKING declaration.
-- [ ] CHK009 - Are the §X.7 pre-checks specified as preconditions to the bump (no GitHub Release, no open PR touching `version.h`, no branch already at 9, `origin/main` at 8 as the positive control)? [Completeness, plan Phase 0b]
-- [ ] CHK010 - Is it stated what does NOT change? No symbol, signature or error code; `introducing_minor()`, `error_codes_v1.txt` and `FIXPP_VERSION_*` untouched. [Completeness, Spec §FR-004a, §FR-019]
+- [x] CHK009 - Are the §X.7 pre-checks specified as preconditions to the bump (no GitHub Release, no open PR touching `version.h`, no branch already at 9, `origin/main` at 8 as the positive control)? [Completeness, plan Phase 0b] — PASS: plan phase 0b Pre-checks (no GitHub Release, no open PR touching version.h, no branch at 9, positive control `origin/main` at 8); tasks T015 makes them preconditions to T017 ("Any failure goes to the owner before T017").
+- [x] CHK010 - Is it stated what does NOT change? No symbol, signature or error code; `introducing_minor()`, `error_codes_v1.txt` and `FIXPP_VERSION_*` untouched. [Completeness, Spec §FR-004a, §FR-019] — PASS: FR-019 ("No symbol, signature or error code changes", FR-004a); plan phase 0b Consumers (`introducing_minor()`, `tools/abi_history/error_codes_v1.txt` and `FIXPP_VERSION_*` untouched); tasks T017.
 
 ## Requirement Clarity
 
-- [ ] CHK011 - Is the difference between a BREAKING marker and an additive widening defined by a rule (failure → success is additive), so that `fixpp_msg_set_string`/`fixpp_entry_set_string` carry no note while `fixpp_msg_set_data`/`fixpp_entry_set_data` do? [Clarity, research R-11 Classification, plan Gate A L3 r2]
-- [ ] CHK012 - Is the `fixpp_msg_set_data` failure → different-failure case stated with its before and after codes (`FIXPP_ERR_TYPE_MISMATCH` → e.g. `FIXPP_ERR_WIRE_CONFORMANCE` for `len == 0`)? Is the ordering precondition stated (`len == 0` precedes the `DICT_CONFIG` check)? [Clarity, Spec §FR-019, plan Phase 0b]
-- [ ] CHK013 - Is the `fixpp_msg_get_msg_type` reachability condition (a pair before 35 while `validate_inbound_messages` is unset) stated as a re-derivable condition rather than a recorded result? [Clarity, Spec §FR-019]
-- [ ] CHK014 - Is the `fixpp_session_close`/`is_established` effect stated conditionally (initiator path, a required field after a malformed count) and not overclaimed as a return-code change of the call itself? [Clarity, Spec §FR-019, plan Gate A L3 r2]
+- [x] CHK011 - Is the difference between a BREAKING marker and an additive widening defined by a rule (failure → success is additive), so that `fixpp_msg_set_string`/`fixpp_entry_set_string` carry no note while `fixpp_msg_set_data`/`fixpp_entry_set_data` do? [Clarity, research R-11 Classification, plan Gate A L3 r2] — PASS: research.md R-11 Classification rule (failure->success additive); plan Gate A Loop 3 r2 record; data-model.md Appendix A classes set_string rows A, set_data rows B + A; tasks T018 ("No note goes on `fixpp_msg_set_string`/`fixpp_entry_set_string`").
+- [x] CHK012 - Is the `fixpp_msg_set_data` failure → different-failure case stated with its before and after codes (`FIXPP_ERR_TYPE_MISMATCH` → e.g. `FIXPP_ERR_WIRE_CONFORMANCE` for `len == 0`)? Is the ordering precondition stated (`len == 0` precedes the `DICT_CONFIG` check)? [Clarity, Spec §FR-019, plan Phase 0b] — PASS: FR-019 set_data bullet gives before (`FIXPP_ERR_TYPE_MISMATCH`) and after (`FIXPP_ERR_WIRE_CONFORMANCE` for `len == 0`); ordering precondition in plan phase 0b and tasks T008. Verified in code: src/capi/message_write.cpp (`len == 0`) precedes the `FIXPP_ERR_DICT_CONFIG` declaration check in `fixpp_msg_set_data`.
+- [x] CHK013 - Is the `fixpp_msg_get_msg_type` reachability condition (a pair before 35 while `validate_inbound_messages` is unset) stated as a re-derivable condition rather than a recorded result? [Clarity, Spec §FR-019] — PASS: FR-019 reader bullet states the condition (pair before 35, reachable while `validate_inbound_messages` is unset) with the recipe "re-derive by grepping `validate_inbound_messages` in `src/capi`"; tasks T018 keeps the recipe, not a result.
+- [x] CHK014 - Is the `fixpp_session_close`/`is_established` effect stated conditionally (initiator path, a required field after a malformed count) and not overclaimed as a return-code change of the call itself? [Clarity, Spec §FR-019, plan Gate A L3 r2] — PASS: FR-019 no-carrier bullet is conditional (a Logon whose required field follows a malformed count; initiator path), and data-model.md Appendix A `fixpp_session_close` row says "the change is in the handshake, not the call". Note: plan Gate A Loop 3 r2 record ("no return-code change claimed") is a superseded round record, not current text; left unedited.
 
 ## Requirement Consistency
 
-- [ ] CHK015 - Is the BREAKING population identical across FR-019, plan Phase 0b's notes list, data-model B-091-4 and Appendix A's class-B rows? [Consistency]
-- [ ] CHK016 - Are the additive widenings listed identically in FR-017, FR-019, B-091-4 and R-11? They are: the two string setters, the commit-time SOH check, and `fixpp_session_send` of a well-formed SOH Data. [Consistency, plan Gate A L2 r2]
-- [ ] CHK017 - Is the C-ABI's group-node count-digits feed (fixpp#506) consistently scoped **out** of 1.9, as a follow-up and not a silent fix? [Consistency, research R-4, plan Gate A L2 r1]
-- [ ] CHK018 - Do the CA rows of `spec/feature-catalogue.md` that must gain a 1.9 note follow from a stated matching rule (Appendix A class-B rows whose carrier is a declaration note or the reader paragraph), not from a hand list? [Consistency, data-model ledger]
+- [x] CHK015 - Is the BREAKING population identical across FR-019, plan Phase 0b's notes list, data-model B-091-4 and Appendix A's class-B rows? [Consistency] — PASS: compared member by member: FR-019's marked declarations + 16-member reader paragraph + no-carrier effects equal plan Constitution Check X row / phase 0b Bump list, data-model.md B-091-4, and Appendix A's class-B rows (incl. `fixpp_session_register_send_callback` "B (covered)" via reader paragraph + send note).
+- [x] CHK016 - Are the additive widenings listed identically in FR-017, FR-019, B-091-4 and R-11? They are: the two string setters, the commit-time SOH check, and `fixpp_session_send` of a well-formed SOH Data. [Consistency, plan Gate A L2 r2] — SPEC-FIXED: FR-017 (spec.md) and research.md R-11 "Inbound, user-loaded dictionaries" bullet listed the string setters and commit but omitted `fixpp_session_send` of a well-formed SOH-bearing Data, which FR-019 and B-091-4 list; appended "`fixpp_session_send` of such a well-formed Data" to both parentheticals.
+- [x] CHK017 - Is the C-ABI's group-node count-digits feed (fixpp#506) consistently scoped **out** of 1.9, as a follow-up and not a silent fix? [Consistency, research R-4, plan Gate A L2 r1] — PASS: research.md R-4 (C-ABI group path is a separate pre-existing defect, fixpp#506, not 091 scope); plan Loop 2 r1 record (N-4 follow-up, folding stays an owner option not taken); plan phase 7 close-out check; tasks T062.
+- [x] CHK018 - Do the CA rows of `spec/feature-catalogue.md` that must gain a 1.9 note follow from a stated matching rule (Appendix A class-B rows whose carrier is a declaration note or the reader paragraph), not from a hand list? [Consistency, data-model ledger] — PASS: data-model.md ledger row for CA rows states the matching rule (Appendix A class-B rows whose carrier is a declaration note or the reader paragraph, matched against each CA row's listed functions); tasks T049 re-derives it.
 
 ## Acceptance Criteria Quality (witnesses)
 
-- [ ] CHK019 - Is each BREAKING witness required to be written first and shown RED on the unfixed loader, with the pre-change value recorded in the commit? This covers commit, send, inbound drop, and the two readers. [Measurability, Spec §FR-019]
-- [ ] CHK020 - Are the witness constructions' preconditions stated so the RED lands on the intended call? These are: C-2.5a non-adjacency; no SOH in the malformed value; no reuse of `kLengthDataFix42Xml`; the load path through `fixpp_dict_load_from_xml`. [Measurability, plan Phase 0b]
-- [ ] CHK021 - Do the reader witnesses assert **both** a successful `parse()` and the absorbed field, so a parse refusal cannot pass as absorption? [Measurability, Spec §FR-019]
-- [ ] CHK022 - Is there a requirement that the version bump itself is witnessed (a mutant back to 8 turns the version test RED)? [Measurability, quickstart §3]
-- [ ] CHK023 - Is the freeze-manifest check specified two-sided (fails on exactly the four headers before the re-pin; passes after)? [Measurability, plan Phase 0b]
-- [ ] CHK024 - Is an inbound-drop effect that no 1.9 peer can produce justified as witnessed at the wire layer rather than end-to-end, and is that substitution stated? [Clarity, Spec §FR-019 "inbound drop"]
+- [x] CHK019 - Is each BREAKING witness required to be written first and shown RED on the unfixed loader, with the pre-change value recorded in the commit? This covers commit, send, inbound drop, and the two readers. [Measurability, Spec §FR-019] — PASS: FR-019 ("written first and shown RED on the unfixed loader ... pre-change form is recorded in the commit") plus the send / inbound-drop / reader witnesses each "written first and RED on the unfixed loader"; tasks T008-T010 and Execution rules (RED form in the commit message).
+- [x] CHK020 - Are the witness constructions' preconditions stated so the RED lands on the intended call? These are: C-2.5a non-adjacency; no SOH in the malformed value; no reuse of `kLengthDataFix42Xml`; the load path through `fixpp_dict_load_from_xml`. [Measurability, plan Phase 0b] — PASS: plan phase 0b Construction/Preconditions/Load path/Setters (C-2.5a non-adjacency, no SOH in the malformed value, no `kLengthDataFix42Xml`, `fixpp_dict_load_from_xml` via temp file); tasks T008 (adds the non-null `bytes` precondition), T009.
+- [x] CHK021 - Do the reader witnesses assert **both** a successful `parse()` and the absorbed field, so a parse refusal cannot pass as absorption? [Measurability, Spec §FR-019] — PASS: FR-019 readers bullet ("`parse()` each asserts a value (so a parse refusal cannot pass as an absorbed field)"); plan phase 0b Reader witnesses; tasks T010.
+- [x] CHK022 - Is there a requirement that the version bump itself is witnessed (a mutant back to 8 turns the version test RED)? [Measurability, quickstart §3] — PASS: quickstart §3 row "`FIXPP_C_ABI_VERSION_MINOR` is set back to 8" -> version_test exact-version cell; plan phase 0b Mutant; tasks T025.
+- [x] CHK023 - Is the freeze-manifest check specified two-sided (fails on exactly the four headers before the re-pin; passes after)? [Measurability, plan Phase 0b] — PASS: plan phase 0b Freeze manifest (fail on exactly `message.h`, `dict.h`, `session.h`, `version.h`, then pass after re-pin); tasks T020.
+- [x] CHK024 - Is an inbound-drop effect that no 1.9 peer can produce justified as witnessed at the wire layer rather than end-to-end, and is that substitution stated? [Clarity, Spec §FR-019 "inbound drop"] — PASS: FR-019 inbound-drop bullet states the substitution and why ("a fixpp 1.9 peer cannot send the malformed frame, so this witness is at the session/wire layer") and what it proves; plan phase 0b; tasks T010.
 
 ## Governance (§X.6)
 
-- [ ] CHK025 - Are all four §X.6 controls for a breaking C-ABI change listed with their status: `/clarify`, `/analyze`, Gate A, and the user's `/plan` sign-off? [Completeness, plan Constitution Check Article X]
-- [ ] CHK026 - Is the owner ruling that accepted 1.9 BREAKING recorded with the alternative that was rejected (a walk marking only standard pairs) and why? [Traceability, Spec Clarifications Gate A r3]
-- [ ] CHK027 - Is the relation to the pre-release regime stated? §X.7 allows a MINOR bump before the first GitHub Release, and the version resets at the first release. [Assumption, plan Constitution Check]
+- [x] CHK025 - Are all four §X.6 controls for a breaking C-ABI change listed with their status: `/clarify`, `/analyze`, Gate A, and the user's `/plan` sign-off? [Completeness, plan Constitution Check Article X] — PASS: plan Constitution Check X row lists `/clarify` (done, r3 session), `/analyze` (after `/speckit-tasks`), Gate A (XVII row: converged loop 3 r3) and user `/plan` sign-off (done 2026-09-24); plan Gate A Loop 3 r3 records the sign-off. Consistent with .specify/constitution.md §X.6.
+- [x] CHK026 - Is the owner ruling that accepted 1.9 BREAKING recorded with the alternative that was rejected (a walk marking only standard pairs) and why? [Traceability, Spec Clarifications Gate A r3] — PASS: spec Clarifications Session 2026-09-24 (Gate A round 3) records the owner ruling and the rejected alternative (a component/group walk marking only standard-table pairs) with its reason (leaves the loader's answer wrong for the user's dictionary).
+- [x] CHK027 - Is the relation to the pre-release regime stated? §X.7 allows a MINOR bump before the first GitHub Release, and the version resets at the first release. [Assumption, plan Constitution Check] — PASS: plan Constitution Check X row ("Per §X.7 (pre-release regime)") and Result paragraph ("sanctioned by §X.7's pre-release clause"); tasks T015's `gh release list --exclude-drafts` check is the regime precondition. The reset to 1.0.0 at the first public release is §X.7's own release-PR obligation (.specify/constitution.md §X.7 last paragraph), not 091 work.
 
 ## Notes
 
@@ -67,3 +67,50 @@ population recipe)
 - Leave items unchecked when they still require clarification, correction, or reviewer evaluation.
 - `/speckit-implement` reads checklist checkbox state as a gate and must not modify markers.
 - Dispositions are recorded inline by `/speckit-checklist-audit`.
+
+## Audit Result
+
+| Disposition | Count |
+|---|---|
+| PASS | 26 |
+| SPEC-FIXED | 1 |
+| DD-DECIDED | 0 |
+| WAIVED | 0 |
+| **Total** | 27 |
+
+### SPEC-FIXED items
+- CHK016 — `fixpp_session_send` of a well-formed SOH-bearing Data is added to the list of additive widenings in two places, matching FR-019 and B-091-4. Affected:
+  - `spec.md` FR-017;
+  - `research.md` R-11, in the "Inbound, user-loaded dictionaries" bullet.
+
+### DD-DECIDED items
+- none. No item re-opened an owner ruling.
+
+### WAIVED items
+- none.
+
+Two checks against the source, at HEAD `02c437b7`:
+- The Appendix A row-set recipe was re-run. The diff printed nothing.
+- In `src/capi/message_write.cpp`, `fixpp_msg_set_data`'s `len == 0` refusal precedes its `FIXPP_ERR_DICT_CONFIG` check.
+
+Anchors spot-verified. In `.specify/426-428-length-data-pairs.md`, signed-off revision v4, 2026-09-15 (scoped Gate A converged at round 5), these three resolve:
+- **O-4**: the owner-decision bullet in the status header;
+- **§3**: the heading `## 3. D-2 — dictionary pairs through one bundled hook value (O-3)`;
+- **§5.3**: the heading `### 5.3 Commit-time conformance`.
+
+`L-426-2` is not a section of that document. It resolves as the live B&L row L-426-2 in `spec/behaviors-and-limitations.md`, whose content is the document's §7 bullet and §3 r3 R3-1.
+
+Also verified:
+- B-426-3, L-426-3 and L-067-2 are live in `spec/behaviors-and-limitations.md`.
+- `[FIX50SP2 §3.3]` resolves in `spec/coverage-index.md` (the W-008 entry) and in `spec/feature-catalogue.md` (row W-008).
+- In `.specify/constitution.md`, these resolve:
+  - `[const §XVI.3]` (clarify mandatory for wire and codegen);
+  - `[const §XVII.1]` (Gate A triggers: public C++ API, codegen layout);
+  - `[const §X.7]`.
+
+On the brain pages:
+- `brain/components/wire.md` and `brain/components/dictionary.md` flag no part of 426-428 as superseded.
+- `wire.md` flags only the document's per-dictionary drift claim, which the spec does not cite as authority.
+- No `brain/components/codegen.md` exists.
+
+`.specify/418-data-field-bytes.md` is treated as superseded input, not as authority (spec Context).

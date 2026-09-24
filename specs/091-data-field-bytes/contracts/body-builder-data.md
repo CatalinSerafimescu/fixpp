@@ -62,8 +62,10 @@ the call. `body_builder` exposes no size accessor, so this is the observable for
 - **C-1.2 every octet.** For every `b` in `0x00–0xFF`, `field_data(355, {b})` commits, and a re-parse
   through the inbound parser recovers exactly `{b}` as tag 355. The same holds through `set_data` in
   a group entry. (SC-001's generated-builder witnesses are C-2.6.)
-- **C-1.3 multi-digit Length.** A value of N octets (N ≥ 10, and a value near the body cap) emits
-  `354=<N>` with no leading zeros.
+- **C-1.3 multi-digit Length.** A value of N octets (N ≥ 10, and the largest N that commits, bounded
+  by N + 1 being refused `wire_frame_too_large` at commit) emits `354=<N>` with no leading zeros.
+  The boundary is found by the test, not written as a literal: the body cap `kBodyCap` is TU-local
+  in `src/wire/body_builder.cpp`, so a test cannot name it.
 - **C-1.4 refusals, on both surfaces.** Each case below runs twice: once through `field_data` at the
   top level, and once through `set_data` on a **live innermost entry** (a group opened, an entry
   added, and its delimiter field already set, so the instance is non-empty and delimiter-first and
