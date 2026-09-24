@@ -31,6 +31,11 @@ extern "C" {
  * the result to fixpp_session_config_set_dictionary (which copies the shared_ptr),
  * then call fixpp_dict_destroy on your handle.
  *
+ * BREAKING (C-ABI 1.9): a Length+Data pair a loaded dictionary declares only
+ * inside a component or group is now a dictionary pair. This is the root cause
+ * of every other 1.9 note: the return code is the same, but the dictionary this
+ * call yields now carries the pair.
+ *
  * THUNK: construction-time — catches all exceptions thrown by XmlLoader
  * (xml_parse_error / unknown_version_error / xml_oom_error on bad or missing
  * input) and maps them to FIXPP_ERR_CAPI_CONFIG_INVALID; no exception escapes

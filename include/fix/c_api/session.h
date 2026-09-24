@@ -276,6 +276,15 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_acceptor_bound_endpoint(fixpp_sessi
  * (read-only during the call; the engine deep-copies); the caller may free/reuse
  * on return. Honours durable-before-transmit by reference (FR-009).
  *
+ * BREAKING (C-ABI 1.9): a Length+Data pair a loaded dictionary declares only
+ * inside a component or group is now a dictionary pair. A payload carrying a
+ * malformed pair of that kind, which returned FIXPP_ERR_OK, now returns
+ * FIXPP_ERR_APP_PAYLOAD_MALFORMED with no transmit; a count that covers a
+ * following field (e.g. 43, 122 or a header-class tag) is now transmitted
+ * verbatim as Data, not excised or reordered. For a send this refuses, the
+ * toApp callback (fixpp_session_register_send_callback) is not invoked: the
+ * refusal comes before the send path builds its toApp view.
+ *
  * Reentrancy: thread-safe — callable from any consumer thread (the any-thread
  * Engine::send contract) EXCEPT from inside the receive callback, where the
  * blocking wrapper deadlocks (FR-013a; recorded Gate-A deviation from
@@ -295,6 +304,12 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_send(fixpp_session_t* session,
  * subsequent inbound application message the engine invokes `cb` with an inbound
  * fixpp_msg_t and `userdata`. See fixpp_recv_cb for the dispatch-window lifetime
  * and the no-blocking-call-from-callback rule (FR-013a).
+ *
+ * BREAKING (C-ABI 1.9): a Length+Data pair a loaded dictionary declares only
+ * inside a component or group is now a dictionary pair. An inbound message
+ * carrying a malformed pair of that kind, which was delivered to `cb` before,
+ * is now dropped as a parse error, silently: `cb` is not invoked and no Reject
+ * is sent.
  *
  * Reentrancy: single-thread. THUNK: construction-time.
  */
