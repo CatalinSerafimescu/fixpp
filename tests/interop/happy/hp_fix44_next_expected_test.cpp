@@ -249,12 +249,12 @@ INSTANTIATE_TEST_SUITE_P(AllCounterparties, NextExpectedAcceptor,
 // at-logon gap; each proactively resends the other's missing range; zero
 // ResendRequest from either party; session reaches Active.
 //
-// In-process witness: FSM reaches Active; outbound seqnum advanced past the Logon
-// (proves fixpp sent at least one message before the reconnect gap, and resumed).
+// In-process witness: FSM reaches Active; outbound seqnum advanced past the Logon.
+// Both also hold after any gap-free Logon; fixpp#503 must seed gaps to distinguish recovery.
 //
 // The wire-level assertion (no ResendRequest from either side, all missed messages
-// delivered in order) is left to the parent proxy golden diff, which cannot run it
-// while no harness cell selects this suite (see Cell 3 in the file header).
+// delivered in order) is left to the parent harness's golden compare of the bilateral
+// counterparty transcript, which cannot run it while no harness cell selects this suite.
 //
 // Parent harness cross-repo note: both sides must have EnableNextExpectedMsgSeqNum=Y
 // AND the counterparty must have a prior outbound gap (i.e. the parent harness must
@@ -294,14 +294,14 @@ TEST_P(NextExpectedBidirectional, BothGapsRecoverNoResendRequest) {
 
     fx.start();
 
-    // Witness: FSM reaches Active — the bidirectional proactive resend completed.
+    // Witness: FSM reaches Active; see the Cell 3 witness limits above.
     const auto reached = hp::drive_to_active(fx, id, 5s);
     EXPECT_EQ(reached, fsm_state::Active)
         << "session did not reach Active (bidirectional) against "
         << hp::counterparty_token(counterparty)
         << "; both sides must have EnableNextExpectedMsgSeqNum=Y and a prior gap";
 
-    // Both gaps recovered → seqnum advanced past Logon.
+    // Check: outbound seqnum advanced past the Logon.
     auto s = fx.engine().lookup(id);
     ASSERT_NE(s, nullptr) << "session not established";
     EXPECT_GT(s->seqnum_mgr_test_access().peek_outbound(), fixpp::session::seqnum_t{1})
