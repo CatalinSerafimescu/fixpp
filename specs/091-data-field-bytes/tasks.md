@@ -28,6 +28,10 @@ only then made GREEN.
   `build/linux-clang-debug` (it sits on E:). `build/linux-clang-release` is a symlink to
   `/mnt/wsl/fixppbuild/build/main-clang-release`. Run long builds with `setsid nohup`, plus a
   `.done` marker.
+- **Builds need an owner ask (`[const §XVII.7]` resource gate).** Before dispatching any task that
+  configures, builds, rebuilds or runs `conan install` (codegen freshness, T026, the bench base in
+  T055/T056, fuzz, `/speckit-verify`), the orchestrator asks the owner with `AskUserQuestion`. One
+  approval may cover a named phase; record it in the evidence file. Never auto-run a build.
 - **Never `git checkout`/`git switch` in this checkout.** The bench base (T055) is its own
   detached worktree under `/mnt/wsl/fixppbuild`.
 - **Comments record a procedure, never a result** (no counts, offsets or pasted output). Every
@@ -36,8 +40,8 @@ only then made GREEN.
 - **Labels.** Every ctest entry a task adds to or edits gets label `091` in the CMakeLists that
   registers it. `expected-ctest-091.txt` (T003) is the gate.
 - **Evidence file.** Mutant, bench, compile-surface and golden-residual evidence goes to
-  `.specify/decisions/091-data-field-bytes-evidence.md` (a sibling of the verify record; `/speckit-verify` produces its own record in T062 and
-  cites this file). Never write into the verify record before T062 creates it.
+  `.specify/decisions/091-data-field-bytes-evidence.md` (a sibling of the verify record; `/speckit-verify` produces its own record in T064 and
+  cites this file). Never write into the verify record before T064 creates it.
 - **Commit after each task or logical group**; the RED form of each TDD step goes in its commit
   message (FR-019, plan phase 1).
 
@@ -83,9 +87,9 @@ only then made GREEN.
     comment (the clause beginning "none of
     the 34 carry LABELS"); it was already false (`wire_pure_tests` and
     `wire_dict_tests` carry labels). Delete it; do not replace it with a count.
-  - `codegen_091_data_census_test` and `session_091_data_send` are registered by T033 and T038. Until
+  - `codegen_091_data_census_test` and `session_091_data_send` are registered by T027 and T038. Until
     then, the quickstart §2 gate is expected to report them missing.
-  - Positive control: before T033, the gate's `diff "$R/expected.txt" "$R/labelled.txt"` line must
+  - Positive control: before T027, the gate's `diff "$R/expected.txt" "$R/labelled.txt"` line must
     report exactly those two names missing from the labelled side (the gate exits there, before
     `comm -23`).
 - [ ] T004 Via `phase-implementer`, carry over the stage-one pins, **tests only**. Apply the
@@ -108,7 +112,7 @@ only then made GREEN.
   - `SohInValue_RejectedBeforeAnyByteReachesOut` stays byte-identical: `git diff origin/main --
     tests/session/test_067_builder_failclosed.cpp` shows no edit inside that `TEST` body (FR-007).
   - All four are now **RED** against today's builder. Commit with the RED output quoted. They turn
-    GREEN in US1 (T032).
+    GREEN in US1 (T035).
 
 ---
 
@@ -179,7 +183,9 @@ only then made GREEN.
     commits `FIXPP_ERR_OK`, before and after (no over-refusal).
   - **Additive widening** (post-change only): `fixpp_msg_set_int(5001, 3)` +
     `fixpp_msg_set_string(5002, "a\x01b")`. The set call and the commit both return `FIXPP_ERR_OK`.
-  - **`set_data` failure → different failure:** `fixpp_msg_set_data(5002, bytes, 0)` asserts
+  - **`set_data` failure → different failure:** `fixpp_msg_set_data(5002, bytes, 0)`, with
+    `bytes` a **non-null** pointer (a null pointer returns `FIXPP_ERR_NULL_HANDLE` first and would
+    be RED for the wrong reason), asserts
     `FIXPP_ERR_WIRE_CONFORMANCE`. First re-derive in `src/capi/message_write.cpp` that
     `fixpp_msg_set_data`'s `len == 0` refusal precedes its `FIXPP_ERR_DICT_CONFIG` declaration check;
     if it does not, the GREEN value is that check's answer, and this goes back to the orchestrator
@@ -227,7 +233,9 @@ only then made GREEN.
     `<component>` definitions in document order, then `<group>` elements in document order.
     `mark_pair` stays first-writer-wins.
   - **Delete** the false comment "In practice the global-fields path already captures all standard
-    pairs". Do not replace it.
+    pairs". Then re-read the function's whole header comment and delete every other sentence the new
+    walk falsifies (e.g. "the secondary walk retains the original coverage", "the old per-container
+    walk never descended into `<component>` nodes"). Do not replace any of them with a new claim.
   - The function's header comment names the superseding decision: "091 (fixpp#418) Gate A r1 —
     secondary walk descends into components and groups".
   - GREEN on T006–T010. `HeaderEqualsShippedDictionaryUnion` stays GREEN, so there is no
@@ -258,7 +266,7 @@ only then made GREEN.
   - their Length members are deleted;
   - they become coupled in the old two-call form (`r_len` + `r_data`).
   Apply every T011 hit as an edit. The diff is reviewed and committed on its own. It is **not**
-  C-2.2's control (a) (that control is T053).
+  C-2.2's control (a) (that control is T036).
 
 ### 2b — C-ABI 1.9 BREAKING (FR-019, `[const §X.7]`), same PR
 
@@ -344,7 +352,11 @@ only then made GREEN.
     `set_data` in a group entry. A re-parse through the inbound parser recovers exactly `{b}` as tag
     355. If `wire_body_builder_test` cannot parse without `fixpp_dictionary`, use the
     dictionary-free `Parser` path.
-  - **C-1.3** N ≥ 10 octets, and a value near `kBodyCap`: `354=<N>` with no leading zeros.
+  - **C-1.3** N ≥ 10 octets, and the largest N that still commits: derive it in the test from
+    `kBodyCap` minus the body's known overhead (never a literal). `354=<N>` with no leading zeros.
+  - **C-1.1 variants (spec Edge Cases):** a pair whose Data tag is below its Length tag
+    (`field_data(89, …)` → `93=<n>␁89=…`) and a non-adjacent pair (`field_data(1527, …)` →
+    `1525=<n>␁1527=…`, per the standard table) commit with the Length first.
   - **C-1.4, on both surfaces:** once through `field_data`, and once through `set_data` on a **live
     innermost entry** (group opened, entry added, delimiter already set; the no-call twin commits
     OK). Codes are FR-004a's, verbatim:
@@ -384,7 +396,7 @@ only then made GREEN.
     `set_data(42684, …)`, commits.
   - **C-1.11** `field_data(355, …)` twice appends two well-formed pairs; commit accepts.
   - Record the RED build output in the commit.
-- [ ] T022 [P] Via `phase-implementer`, add C-1.9 (dictionary pairs, FR-009) to
+- [ ] T022 Via `phase-implementer`, add C-1.9 (dictionary pairs, FR-009) to
   `tests/wire/dict_hooks_custom_pair_test.cpp` (`wire_dict_tests`), as the outbound twin of its
   inbound cases. With a builder constructed from `dict_hooks::for_table_view(tv)` of a dictionary
   that declares (5001, 5002):
@@ -466,8 +478,9 @@ only then made GREEN.
   codegen freshness.
   - The loader change moves FIX 5.0 SP2 answers that unlabelled tests read: the `table_view`
     differential, `length_data_table_test`, and the codegen determinism golden.
-  - Any failure outside the intended moves (T013, T014) goes back to the orchestrator; do not "fix"
-    a test to match without a ruling.
+  - Expected failures, by name: the four flipped `DataField_EncodedText_*_418` pins (T005), which
+    stay RED until T035. Any other failure outside the intended moves (T013, T014) goes back to the
+    orchestrator; do not "fix" a test to match without a ruling.
 
 **Checkpoint**:
 - The loader pairs the five v50sp2 pairs, and every drift leg is GREEN and non-empty.
@@ -487,78 +500,9 @@ only then made GREEN.
 and `0xFF` in turn: success, exact bytes for 354/355, and a re-parse yields identical octets. These
 are the four flipped `_418` pins, plus C-2.6.
 
-### Tests for User Story 1 (write first; RED until T032)
+### Tests for User Story 1 (write first; RED until T035)
 
-- [ ] T027 [P] [US1] Via `phase-implementer`, add the C-2.6 exhaustive witnesses to
-  `tests/session/test_067_builder_roundtrip.cpp` (`test_067_builder_roundtrip`: wire + dictionary +
-  v44 builders).
-  - Two parameterized tests over every octet `0x00–0xFF`. Each asserts the raw frame boundaries
-    (Length value `1`, the Data octet verbatim) and that a re-parse through the inbound parser
-    recovers the octet.
-    - **top level:** v44 `NewOrderSingle` with `encoded_text = {b}`;
-    - **nested:** a coupled member inside a v44 repeating-group entry (e.g.
-      `EncodedLegIssuer(618/619)` in a leg group).
-  - Name the message and group from the C-2.2 census (T038), and cite that census, not a remembered
-    name.
-  - RED at first: the Data goes through `set_string`.
-- [ ] T028 [P] [US1] Via `phase-implementer`, add the C-2.3 compile-time presence checks.
-  - Each check is a `constexpr bool` computed from a `requires` expression and asserted with
-    `EXPECT_TRUE`/`EXPECT_FALSE`, never a `static_assert`: a compile error would stop the whole
-    binary and hide T027's runtime RED.
-  - In `tests/session/test_067_builder_roundtrip.cpp`:
-    - `fixpp::v44::NewOrderSingleArgs` has `message_encoding`, and it is the **last** member (R-8);
-    - one v44 message with no `Encoded*` field has **no** `message_encoding` member. The census
-      (T038) names it, e.g. an app message; `Heartbeat` only if it is in the generated set.
-  - In `tests/session/test_077_allversions_builder_roundtrip.cpp`, the same checks for v50sp2:
-    - a message whose **only** encoded field is `DerivativeEncodedIssuer(1278)`,
-      `DerivativeEncodedSecurityDesc(1281)` or `InstrumentScopeEncodedSecurityDesc(1621)` **has**
-      the member (named by census);
-    - one v50sp2 message with no `Encoded*` field has none.
-  - RED (a test failure, not a build failure) at first.
-
-### Implementation for User Story 1
-
-- [ ] T029 [US1] Via `phase-implementer`, update the emitter's coupled arms in
-  `tools/codegen/fixpp-codegen/emit_builders.cpp` (C-2.1, R-7).
-  - In `emit_level_body`'s coupled branch, **both** arms emit exactly the C-2.1 shape:
-    - `static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(D) == L);`
-    - then `auto r_pair = bb.field_data(D, ::std::as_bytes(::std::span{*args.m}));` at the top level,
-      or `<ehN>.set_data(D, …)` nested;
-    - `if (!r_pair) return ::std::unexpected(r_pair.error());`.
-  - No `field(L, …)`/`set_int(L, …)` is emitted for a coupled item, and the token `r_data` disappears
-    from the output.
-  - The Args member keeps `std::optional<std::string_view>` (FR-011, SC-004: existing ASCII callers
-    compile and behave identically, except the owner-ratified v50sp2 carve-out of T014).
-  - `tools/codegen/fixpp-codegen/gen_util.hpp`: update the stale "is already String" comment on the
-    Data half's kind. No new `TypeKind`.
-- [ ] T030 [US1] Via `phase-implementer`, add `message_encoding` to
-  `tools/codegen/fixpp-codegen/emit_builders.cpp` (C-2.3, R-8).
-  - **Selection:** per message, true when any member at any depth (the `group_order` tree
-    `resolve_level` walks) is the Data half of a **standard** pair
-    (`core::detail::standard_length_data_pairs`) whose `FieldIR` name **contains** `Encoded`.
-  - **Member:** top-level Args gain `std::optional<std::string_view> message_encoding;`, appended
-    **last**.
-  - **Emit:** `bb.field(347, *args.message_encoding)`, when set, as the **first** body statement,
-    before any other member. Top level only.
-  - Accessor collisions go through the existing `uniquify_accessor`.
-  - Not enforced: FIX 4.4's "required if any Encoded fields" stays the caller's decision.
-- [ ] T031 [US1] Via `phase-implementer`, run codegen freshness (quickstart §1) and regenerate the 078
-  builder goldens for **v42, v44, v50sp2 and vlatest** under
-  `specs/078-precompiled-builder-libs/contracts/golden/{v42,v44,v50sp2,vlatest}/`. The v50sp2 goldens
-  start from T014's intermediate state.
-  - Size the diff with R-5's recipe (re-run it; do not reuse a figure).
-  - Every other read-tier pin in `fixpp::dict::read-tier-byte-diff` is unchanged. Only T013's two
-    have moved; anything else is a stop (spec Assumptions).
-- [ ] T032 [US1] Build, then run `test_067_builder_failclosed`, `test_067_builder_roundtrip` and
-  `test_077_allversions_builder_roundtrip`.
-  - The four flipped `_418` pins (T005), the C-2.6 witnesses (T027) and the C-2.3 checks (T028) turn
-    **GREEN**.
-  - `SohInValue_RejectedBeforeAnyByteReachesOut` still passes, unedited.
-  - Quote the before/after in the commit (FR-014, SC-001).
-
-### Census, goldens and FIX Latest for User Story 1
-
-- [ ] T033 [US1] Via `phase-implementer`, create the **exact completeness census** (C-2.2, FR-010,
+- [ ] T027 [US1] Via `phase-implementer`, create the **exact completeness census** (C-2.2, FR-010,
   FR-012, SC-003) as a new standalone executable `codegen_091_data_census_test` in
   `tests/codegen/CMakeLists.txt`.
   - **Standalone, as the `[const §VII.8]` exact-set completeness-gate exemption.** It carries label
@@ -578,10 +522,108 @@ are the four flipped `_418` pins, plus C-2.6.
     `set_<kind>(T, …)` other than `field_data`/`set_data` for any tag T of the standard table. Keyed
     on the call name and the tag, never on a local's name.
   - **Message-encoding set:** the messages whose Args carry `message_encoding` equal the IR-selected
-    set (T030's rule). The member is last, and its emit is the first body statement.
-  - It takes the generated-source root as an argument (default `${FIXPP_CODEGEN_OUT}`), so the T034
+    set (T033's rule). The member is last, and its emit is the first body statement.
+  - **Expected-set source (non-circular):** an independent walker over `dictionaries/*.xml` (pugixml,
+    as `codegen_vlatest_census_test` does) and the Orchestra FIX Latest XML for vlatest, never
+    `tools/codegen/fixpp-codegen/ir.cpp` or the emitter's own `resolve_level`, so the census cannot
+    inherit the emitter's coupling decision. Its structural path must follow the same component
+    expansion the generated Args use.
+  - **Written before the emitter change (TDD):** on the old emitter every expected tuple is missing,
+    so it is RED; quote that output. It turns GREEN at T034. Control (a) (T036) needs the new emitter.
+  - It takes the generated-source root as an argument (default `${FIXPP_CODEGEN_OUT}`), so the T036
     controls can point it at a mutant's output.
-- [ ] T034 [US1] Show that the census can fire (C-2.2 positive controls) **before** relying on it.
+- [ ] T028 [P] [US1] Via `phase-implementer`, add the C-2.6 exhaustive witnesses to
+  `tests/session/test_067_builder_roundtrip.cpp` (`test_067_builder_roundtrip`: wire + dictionary +
+  v44 builders).
+  - Two parameterized tests over every octet `0x00–0xFF`. Each asserts the raw frame boundaries
+    (Length value `1`, the Data octet verbatim) and that a re-parse through the inbound parser
+    recovers the octet.
+    - **top level:** v44 `NewOrderSingle` with `encoded_text = {b}`;
+    - **nested:** a coupled member inside a v44 repeating-group entry (e.g.
+      `EncodedLegIssuer(618/619)` in a leg group).
+  - Name the message and group from the C-2.2 census (T027, run on the old emitter, which lists the
+    expected tuples), and cite that census, not a remembered name.
+  - RED at first: the Data goes through `set_string`.
+- [ ] T029 [P] [US1] Via `phase-implementer`, add the C-2.3 compile-time presence checks.
+  - Each check is a `constexpr bool` computed from a `requires` expression and asserted with
+    `EXPECT_TRUE`/`EXPECT_FALSE`, never a `static_assert`: a compile error would stop the whole
+    binary and hide T028's runtime RED.
+  - In `tests/session/test_067_builder_roundtrip.cpp`:
+    - `fixpp::v44::NewOrderSingleArgs` has `message_encoding` (its position, last, is T027's
+      parse check; a `requires` expression cannot see member order);
+    - one v44 message with no `Encoded*` field has **no** `message_encoding` member. The census
+      (T027) names it, e.g. an app message; `Heartbeat` only if it is in the generated set.
+  - In `tests/session/test_077_allversions_builder_roundtrip.cpp`, the same checks for v50sp2:
+    - a message whose **only** encoded field is `DerivativeEncodedIssuer(1278)`,
+      `DerivativeEncodedSecurityDesc(1281)` or `InstrumentScopeEncodedSecurityDesc(1621)` **has**
+      the member (named by census);
+    - one v50sp2 message with no `Encoded*` field has none.
+  - v42 and vlatest have no per-version negative here; T027's set equality discharges C-2.3's
+    "one message per version" for them (recorded in the evidence file).
+  - RED (a test failure, not a build failure) at first.
+
+- [ ] T030 [P] [US1] Via `phase-implementer`, add the v50sp2 Length-delimited group witness (R-6) to
+  `tests/session/test_077_allversions_builder_roundtrip.cpp`.
+  - Build one `NoPaymentStreamFormulas` entry (delimiter `PaymentStreamFormulaLength` 43109) whose
+    Data holds SOH. Assert commit success, `43109=<octet count>` first in the entry, and a re-parse
+    that recovers the Data.
+  - Written after T014 and before T032: on T014's intermediate goldens the uncoupled Data member goes
+    through `set_string`, which refuses SOH. Run it and quote that RED; it turns GREEN at T035.
+- [ ] T031 [P] [US1] Via `phase-implementer`, add a vlatest coupled-pair round trip to
+  `tests/session/test_077_allversions_builder_roundtrip_vlatest.cpp`.
+  - Use one vlatest message with a coupled Data member whose value holds SOH and `0xFF`. Assert
+    verbatim emit, Length = octet count, and a re-parse (spec Edge Cases, "FIX Latest").
+  - Written before T032 and run RED (the old two-call form routes the Data through `set_string`);
+    quote it. It turns GREEN at T035.
+  - The test is gated on `FIXPP_CODEGEN_FIX_LATEST`, which is ON by default and in
+    `linux-clang-debug`.
+
+### Implementation for User Story 1
+
+- [ ] T032 [US1] Via `phase-implementer`, update the emitter's coupled arms in
+  `tools/codegen/fixpp-codegen/emit_builders.cpp` (C-2.1, R-7).
+  - In `emit_level_body`'s coupled branch, **both** arms emit exactly the C-2.1 shape:
+    - `static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(D) == L);`
+    - then `auto r_pair = bb.field_data(D, ::std::as_bytes(::std::span{*args.m}));` at the top level,
+      or `<ehN>.set_data(D, …)` nested;
+    - `if (!r_pair) return ::std::unexpected(r_pair.error());`.
+  - No `field(L, …)`/`set_int(L, …)` is emitted for a coupled item, and the token `r_data` disappears
+    from the output.
+  - The Args member keeps `std::optional<std::string_view>` (FR-011, SC-004: existing ASCII callers
+    compile and behave identically, except the owner-ratified v50sp2 carve-out of T014).
+  - `tools/codegen/fixpp-codegen/gen_util.hpp`: update the stale "is already String" comment on the
+    Data half's kind. No new `TypeKind`.
+- [ ] T033 [US1] Via `phase-implementer`, add `message_encoding` to
+  `tools/codegen/fixpp-codegen/emit_builders.cpp` (C-2.3, R-8).
+  - **Selection:** per message, true when any member at any depth (the `group_order` tree
+    `resolve_level` walks) is the Data half of a **standard** pair
+    (`core::detail::standard_length_data_pairs`) whose `FieldIR` name **contains** `Encoded`.
+  - **Member:** top-level Args gain `std::optional<std::string_view> message_encoding;`, appended
+    **last**.
+  - **Emit:** `bb.field(347, *args.message_encoding)`, when set, as the **first** body statement,
+    before any other member. Top level only.
+  - Accessor collisions go through the existing `uniquify_accessor`.
+  - Not enforced: FIX 4.4's "required if any Encoded fields" stays the caller's decision.
+- [ ] T034 [US1] Via `phase-implementer`, run codegen freshness (quickstart §1) and regenerate the 078
+  builder goldens for **v42, v44, v50sp2 and vlatest** under
+  `specs/078-precompiled-builder-libs/contracts/golden/{v42,v44,v50sp2,vlatest}/`. The v50sp2 goldens
+  start from T014's intermediate state.
+  - Size the diff with R-5's recipe (re-run it; do not reuse a figure).
+  - Every other read-tier pin in `fixpp::dict::read-tier-byte-diff` is unchanged. Only T013's two
+    have moved; anything else is a stop (spec Assumptions).
+- [ ] T035 [US1] Build, then run `test_067_builder_failclosed`, `test_067_builder_roundtrip` and
+  `test_077_allversions_builder_roundtrip`.
+  - The four flipped `_418` pins (T005), the C-2.6 witnesses (T028) and the C-2.3 checks (T029) turn
+    **GREEN**.
+  - `SohInValue_RejectedBeforeAnyByteReachesOut` still passes, unedited.
+  - SC-004's witnesses are the existing ASCII round trips, unedited and GREEN: the seeds in
+    `tests/session/test_067_seeds.hpp` driven by `test_067_builder_roundtrip.cpp`, and
+    `test_077_allversions_builder_roundtrip.cpp`'s pre-existing cases.
+  - Quote the before/after in the commit (FR-014, SC-001, SC-004).
+
+### Census, goldens and FIX Latest for User Story 1
+
+- [ ] T036 [US1] Show that the census can fire (C-2.2 positive controls) **before** relying on it.
   Each control runs in a scratch copy, output quoted:
   - **(a)** Run the census over the output of the "loader walk removed" mutant: the new emitter over
     the unfixed loader.
@@ -590,53 +632,43 @@ are the four flipped `_418` pins, plus C-2.6.
     - The pre-change goldens are **not** this control: they hold no coupled call at all.
   - **(b)** Delete one coupled emission from a regenerated golden: reported missing.
   - **(c)** Move one call site from the nested arm to the top arm: reported as a wrong arm.
-- [ ] T035 [US1] Via `phase-implementer`, validate the goldens **structurally** (C-2.4, FR-013)
+- [ ] T037 [US1] Via `phase-implementer`, validate the goldens **structurally** (C-2.4, FR-013)
   with a script `tests/codegen/golden_091_residual_diff.py`. It is not registered in ctest; it runs
   against `origin/main`'s goldens and the regenerated ones.
-  - **(a) and (c):** T033's census, plus a check that every removed two-call site in the old golden
+  - **(a) and (c):** T027's census, plus a check that every removed two-call site in the old golden
     has exactly one corresponding coupled call in the new one.
-  - **(b):** the `message_encoding` set, member position and emit position match (T033).
+  - **(b):** the `message_encoding` set, member position and emit position match (T027).
   - **Residual:** normalise (a)–(c) out of both sides (rewrite each old two-call site to its coupled
     form; delete the `message_encoding` member and emit; delete the (c) Length members). Old and new
     must then be **byte-identical**, and that empty residual is the check.
   - **Positive control:** inject a stray `bb.field(347, …)` inside a group body of one regenerated
     golden; the residual must be non-empty.
   - Record the commands and output in `.specify/decisions/091-data-field-bytes-evidence.md`.
-- [ ] T036 [P] [US1] Via `phase-implementer`, add the v50sp2 Length-delimited group witness (R-6) to
-  `tests/session/test_077_allversions_builder_roundtrip.cpp`.
-  - Build one `NoPaymentStreamFormulas` entry (delimiter `PaymentStreamFormulaLength` 43109) whose
-    Data holds SOH. Assert commit success, `43109=<octet count>` first in the entry, and a re-parse
-    that recovers the Data.
-  - Record in the commit that the RED form (on T014's intermediate goldens, the uncoupled Data
-    member through `set_string`) refused it.
-- [ ] T037 [P] [US1] Via `phase-implementer`, add a vlatest coupled-pair round trip to
-  `tests/session/test_077_allversions_builder_roundtrip_vlatest.cpp`.
-  - Use one vlatest message with a coupled Data member whose value holds SOH and `0xFF`. Assert
-    verbatim emit, Length = octet count, and a re-parse (spec Edge Cases, "FIX Latest").
-  - The test is gated on `FIXPP_CODEGEN_FIX_LATEST`, which is ON by default and in
-    `linux-clang-debug`.
 - [ ] T038 [US1] Via `phase-implementer`, add a new executable `session_091_data_send` from a new file
   `tests/session/test_091_data_send.cpp`, registered in `tests/session/CMakeLists.txt` with label
   `091`.
   - It links `fixpp_session`, `fixpp_mock_clock`, `fixpp::builders::v44` and `session_test_support`,
     with `FIXPP_TEST_HOOKS`.
-  - **Why a new executable (`[const §VII.8]`):** no existing grouped bucket links the session layer,
-    the test hooks and the v44 builder library together. `session_pure_tests` does not link the
-    builders; `test_067_*` do not link `fixpp_session`. Say so in the CMakeLists comment.
+  - **Why a new executable (`[const §VII.8]`):** it needs `FIXPP_TEST_HOOKS` + `fixpp_mock_clock` +
+    `fixpp::builders::v44` together. The CMakeLists comment states that condition only, never a list
+    of what other targets link (a result that goes stale).
   - **Witness 1, XmlData:** send a message carrying XmlData(212/213), with SOH in the value, through
     `send_impl`, then re-parse the emitted frame. 212 and 213 are adjacent, Length first, in the
-    header, and the 213 value round-trips.
+    header, and the 213 value round-trips. Add the same case for SecureData(90/91).
   - **Witness 2, message_encoding:** a generated `NewOrderSingle` with `message_encoding` and a
     non-ASCII `encoded_text` through `send_impl`. `347` sits in the header, and `354`/`355` are in
     the body with their verbatim bytes.
+  - **Liveness (no production change backs these):** in a scratch copy, the mutant "`send_impl`
+    classifies a counted field by its own tag instead of inheriting `prev_header`" must turn
+    witness 1 RED. For witness 2, record the pre-T033 build failure (the member does not exist).
   - T003's manifest entry `session_091_data_send` now resolves. This is plan phase 5 (R-9, quickstart §5), and it closes US1's `args.message_encoding` scenario.
 - [ ] T039 [US1] Via `phase-implementer`, run the US1 mutants from quickstart §3 in a scratch copy:
   - "the emitter passes `item.tag` instead of `item.data_tag`" → the v44 builder build fails on the
     C-2.2 `static_assert`;
-  - "the emitter changes only the top-level arm" → the C-2.6 **nested** 256-value witness (T027),
-    and T033's census (wrong arm);
-  - "the `message_encoding` selection uses 'begins with `Encoded`'" → T028's v50sp2 witness, and
-    T033's message-encoding set;
+  - "the emitter changes only the top-level arm" → the C-2.6 **nested** 256-value witness (T028),
+    and T027's census (wrong arm);
+  - "the `message_encoding` selection uses 'begins with `Encoded`'" → T029's v50sp2 witness, and
+    T027's message-encoding set;
   - "`field_data` routes through `append_string_field`" (re-applies the content guard, FR-015) → the
     four `_418` success cases, and C-1.2.
   Record them in `.specify/decisions/091-data-field-bytes-evidence.md` §*Mutants*.
@@ -681,7 +713,7 @@ C-1.9 refusal arms pass, and each is shown able to fail.
     pass through UB;
   - "`set_data` omits `is_innermost_open`" → C-1.4b outer handle and closed-group handle.
   Record them in `.specify/decisions/091-data-field-bytes-evidence.md` §*Mutants*.
-- [ ] T043 [US2] Confirm FR-012 / SC-002 from T033/T034: the census reports zero `field_data`/
+- [ ] T043 [US2] Confirm FR-012 / SC-002 from T027/T036: the census reports zero `field_data`/
   `set_data` on a tag outside the standard Data set, on every version. Cite control (b)/(c) as the
   proof that it can fire, and the `static_assert` positive control (T039, first bullet) as the
   per-call-site guard.
@@ -717,10 +749,10 @@ rollback on arena exhaustion and on the body cap (C-1.1–C-1.11 except C-1.9; C
   stated plainly ("CI's MSVC matrix runs only once both gate labels land"), not as "CI covers it".
 - [ ] T046 [US3] Blast radius of FR-008 for hand-written callers (R-4).
   - Re-run `git grep -n "field(\(90\|91\|95\|96\|212\|213\|354\|355\)\b" -- src tests bench bindings`.
-  - Confirm that the full ctest run (T026, T062) raised no `wire_invalid_field_format` from a
+  - Confirm that the full ctest run (T026, T064) raised no `wire_invalid_field_format` from a
     pre-existing caller.
   - Record the grep and its stated blind spot (named constants, computed tags) in `.specify/decisions/091-data-field-bytes-evidence.md`. The
-    blind spot is covered structurally by T033, and disclosed as B-091-1.
+    blind spot is covered structurally by T027, and disclosed as B-091-1.
 
 **Checkpoint**: US3 holds independently, and every contract clause has a live test.
 
@@ -773,6 +805,9 @@ FR-019, SC-006).
 - [ ] T050 [P] [US4] Brain updates, orchestrator-authored:
   - `brain/components/wire.md` §*Length+Data pairs*: "#418's `body_builder` must reuse" becomes past
     tense, and the loader/drift-arm change is noted.
+  - `brain/components/dictionary.md`: the loader walk's present-tense "never entered `<component>` or
+    `<group>`" and any "shipped as C-ABI 1.9" wording are re-read against the merged code; and
+    `wire.md`'s "Until that merges, treat the claim as unproven" is reworded.
   - `brain/components/c-api.md`: a C-ABI 1.9 entry beside the 1.8 section, naming FR-019's
     population and its recipe (R-11, Appendix A).
   - Record that `.specify/426-428-length-data-pairs.md`'s "the drift test keeps the two in step" was
@@ -785,7 +820,8 @@ FR-019, SC-006).
   - Run `git grep -nE '#418|fixpp ?#418' -- . ':!specs/091-data-field-bytes'` (not a bare `418`,
     which matches FIX tag 418).
   - Every hit is past tense or a history reference, and none describes the gap as open.
-  - Positive control: before T047/T048 the same grep lists the `conv_wire.hpp`, `conv_cell_test.cpp`,
+  - Positive control: the same grep against `origin/main` (`git grep -nE '#418|fixpp ?#418' origin/main
+    -- . ':!specs/091-data-field-bytes'`) lists the `conv_wire.hpp`, `conv_cell_test.cpp`,
     `length_data_check.hpp` and B&L sites.
 
 **Checkpoint**: SC-006 holds. The ledger, catalogue and brain match the code.
@@ -812,6 +848,11 @@ FR-019, SC-006).
     `bench/wire/builder_bench.cpp` and `bench/wire/CMakeLists.txt` copied in.
     - `git -C "$W" diff --stat "$MB" -- src include tools cmake` prints nothing;
     - `status --porcelain` lists exactly those two files.
+  - **Base configure:** the same `-D` options as the candidate's `CMakeCache.txt` (including
+    `-DFIXPP_BUILD_BENCH=ON`, which no preset sets), the same Conan toolchain (run its own
+    `conan install`), building both `builder_bench` and `xml_loader_bench`. Precheck: diff the two
+    caches' `FIXPP_*` and `CMAKE_BUILD_TYPE`/compiler entries; any difference other than the source
+    dir stops the run.
   - **Candidate:** `linux-clang-release`, after codegen freshness.
   - **Run:** A-B-A-B × 4, `taskset -c 3`, into a fresh `mktemp -d -p /mnt/wsl/fixppbuild` output
     directory. Every leg must exist and hold all four cases.
@@ -828,45 +869,58 @@ FR-019, SC-006).
     self-declared.
   - Then `git worktree remove --force /mnt/wsl/fixppbuild/091-base-wt`.
 
+### Simplify and fuzz
+
+- [ ] T057 Run `/simplify` over the branch diff (`[const §XVI.7]`, pipeline step 11); fixes go through
+  `phase-implementer`. Every later check (T059 onward) runs on the post-simplify head.
+- [ ] T058 Fuzz the changed loader (`[const §VII.7]`): build `fuzz_dict_xml_loader`
+  (`tests/fuzz/fuzz_dict_xml_loader.cpp`) under `linux-clang-asan` (`FIXPP_BUILD_FUZZ=ON`), add seeds
+  with nested `<group>`s, `<group>`s under `<header>`/`<trailer>` and component-only Length/Data
+  pairs, and run it for ≥ 600 s. Record the command, corpus and result in the evidence file; name
+  the target to `/speckit-verify` (T064, `--fuzz-duration=600`) so it is not marked N/A.
+
 ### Static analysis, claims and citations
 
-- [ ] T057 Run clang-tidy and clang-format on every changed file under `src/`, `include/` **and
+- [ ] T059 Run clang-tidy, clang-format, cppcheck and IWYU (`[const §IX.4]`) on every changed file under `src/`, `include/` **and
   `tools/codegen/`** (#265). Never format `specs/` or `include/fix/c_api/*.h`. Any finding on a
   changed line is fixed by `phase-implementer`.
-- [ ] T058 Run `python3 /home/catalin/Work/Programming/Antreprenoriat/.claude/scripts/check-comment-claims.py
+- [ ] T060 Run `python3 /home/catalin/Work/Programming/Antreprenoriat/.claude/scripts/check-comment-claims.py
   --root <tree> --base origin/main`, with `<tree>` the worktree that owns this branch (absolute
   path, so it also works from a parallel worktree).
   - Read every hit in the comments this feature authored: the `version.h` history, the BREAKING
     notes, the read-tier banner, the `body_builder.hpp` contract comments and the CMakeLists
     comments. Also read the strings the script cannot see.
   - A claim that records a result is deleted, not replaced.
-- [ ] T059 Run `python3 tools/check_line_citations.py --shift-audit origin/main..HEAD`. For a hit on
+- [ ] T061 Run `python3 tools/check_line_citations.py --shift-audit origin/main..HEAD`. For a hit on
   the checker's own fixture strings, apply the `# citation-ok` pragma.
 
 ### Close-out checks
 
-- [ ] T060 Confirm fixpp#506 is still open (`gh issue view 506 --json state`), or record its fix,
+- [ ] T062 Confirm fixpp#506 is still open (`gh issue view 506 --json state`), or record its fix,
   before 091 closes (plan phase 7). Confirm fixpp#505 is open and cited in B-091-3.
-- [ ] T061 Run the quickstart §2 label gate. It must pass: the label set equals the manifest, and
-  every manifest entry is a registered test. Then run `ctest -L '^091$' --output-on-failure`, all
+- [ ] T063 Run the quickstart §2 label gate. It must pass: the label set equals the manifest, and
+  every manifest entry is a registered test. Then run `ctest --test-dir build/linux-clang-debug -L '^091$' --output-on-failure`, all
   GREEN.
-- [ ] T062 Run `/speckit-verify` (mandatory after `/speckit-implement`, Article XVII §8). It produces
+- [ ] T064 Run `/speckit-verify` (mandatory after `/speckit-implement`, Article XVII §8). It produces
   `.specify/decisions/091-data-field-bytes-verify.md`. The record cites
-  `.specify/decisions/091-data-field-bytes-evidence.md`, which T002, T025, T035, T039–T046, T055 and
-  T056 wrote; its discriminating-witness rows point there rather than restating it.
-  - It covers the ASan and UBSan presets, coverage (every new line in `src/wire/body_builder.cpp`
+  `.specify/decisions/091-data-field-bytes-evidence.md`, which T002, T025, T037, T038, T039, T040,
+  T041, T042, T044, T046, T055, T056 and T058 wrote (T045 too, if it records a waiver); its discriminating-witness rows point there rather than restating it.
+  - It covers /speckit-verify's full preset matrix (ASan, UBSan, TSan, …) and the MSVC leg,
+    coverage (every new line in `src/wire/body_builder.cpp`
     and the new loader walk in `src/dictionary/xml_loader.cpp`), clang-tidy and ABI hygiene.
   - It includes the full `ctest --test-dir build/linux-clang-debug` run.
   - ⚠️ The §7 full build needs an owner ASK, even as gate evidence.
 
-- [ ] T063 **`CLAUDE-history.md` entry** (Article XIX, plan Constitution Check): via `phase-implementer`
+- [ ] T065 **`CLAUDE-history.md` entry** (Article XIX, plan Constitution Check): via `phase-implementer`
   (the edit guard decides the file class), add a newest-first 091 entry to the library's
   `CLAUDE-history.md` naming the feature, the PR, `Closes #418`, C-ABI 1.9 BREAKING and the
   follow-ups #505/#506. Update `CLAUDE.md`'s "Last merged FEATURE" pointer only at merge.
-- [ ] T064 **PR description** (FR-019, plan phase 7). The body carries:
+- [ ] T066 **PR description** (FR-019, plan phase 7). The body carries:
   - the `[const §X.7]` **C-ABI 1.9 BREAKING** declaration: FR-019's population, pointing at B-091-4
     and data-model.md Appendix A;
   - the v50sp2 source break (FR-011 carve-out);
+  - `local build: green on linux-clang-debug @ <git-sha>` (`[const §XVII.7]`), with the SHA T064
+    verified;
   - a `## Gates` section, and a `## Gate B …` heading for the Gate B record;
   - `Closes #418` as the ONLY closing keyword.
   Before opening, grep the body AND every commit message on the branch
@@ -876,13 +930,13 @@ FR-019, SC-006).
 
 ### Mandatory close-out tasks (Gate-B preconditions, Article XVII §8)
 
-- [ ] T065 [P] **Catalogue close-out.**
+- [ ] T067 [P] **Catalogue close-out.**
   - Flip every feature-owned OFFICIAL row in `spec/feature-catalogue.md` to `done` with this PR as
     evidence. That covers W-008, which gains 091's evidence (T049), and any row 091 owns; the CA
     rows carry the 1.9 note from T049.
   - Add or update the matching `spec/coverage-index.md` entry: `[FIX50SP2 §3.3] Field data types` ↔
     W-008, naming this feature's witnesses (the `_418` pins, C-2.6, C-1.2).
-- [ ] T066 **Feature-completeness audit (the FINAL task).** Assert against the merged tree:
+- [ ] T068 **Feature-completeness audit (the FINAL task).** Assert against the merged tree:
   - (i) every `tasks.md` row is `[X]` or carries an explicit waiver rationale;
   - (ii) every FR-001…FR-019 (including FR-004a, FR-009a and FR-011a) and SC-001…SC-006 maps to a
     landed test AND a landed implementation;
@@ -906,27 +960,27 @@ FR-019, SC-006).
   - 2a: T006–T010 are written RED first → T011 → T012 → T013 → T014.
   - 2b: T015 → T016 → T017 → T018 → T019 → T020. It can run beside 2a, but T008–T010 are its RED
     witnesses, and their GREEN needs T012.
-  - 2c: T021 and T022 (RED) → T023 → T024. It needs no 2a/2b task and can run beside them.
+  - 2c: T021 and T022 (RED) → T023 → T024. It needs no 2a/2b task and can run beside them, except
+    T010 → T022 (same file).
   - Then T025 (needs T006–T012 and T019), then T026 (needs everything above).
   - **Blocks all stories.**
 - **US1 (Phase 3):** needs the Foundational checkpoint.
-  - T027, T028 → T029 → T030 → T031 → T032;
-  - T033 → T034 → T035;
-  - T036 and T037 need T031;
-  - T039 needs T033;
-  - T038 needs T029–T031 (a generated `message_encoding`);
-  - T040 needs T031.
-- **US2 (Phase 4):** needs Foundational (C-1 exists) and T033/T034 (for T043). Independent of US3.
+  - T027 (census, RED) → T028, T029, T030, T031 (RED) → T032 → T033 → T034 → T035 (all GREEN);
+  - T034 → T036 → T037;
+  - T039 needs T027;
+  - T038 needs T032–T034 (a generated `message_encoding`);
+  - T040 needs T034.
+- **US2 (Phase 4):** needs Foundational (C-1 exists) and T027/T036 (for T043). Independent of US3.
 - **US3 (Phase 5):** needs Foundational only. It can run beside US1 and US2.
 - **US4 (Phase 6):** needs US1 through US3 landed (the ledger describes shipped behaviour). T047 and
   T048 must precede T052's final sweep.
-- **Polish (Phase 7):** T061 needs every
+- **Polish (Phase 7):** T063 needs every
   manifest-listed entry registered.
 - **Polish (Phase 7), order:**
-  - T053 → T054 → T055 → T056;
-  - T057–T060 after all code tasks;
-  - T062 after T057–T060;
-  - T065 → T066. T066 is last.
+  - T053 → T054 → T055 → T056 → T057 (simplify) → T058 (fuzz);
+  - T059–T062 after T057;
+  - T064 after T059–T062;
+  - T067 → T068. T068 is last.
 
 ### User story dependencies
 
@@ -950,8 +1004,8 @@ GREEN, and then the mutants in a scratch copy. There is no GREEN claim without i
   T010 (`dict_hooks_custom_pair_test.cpp`) are separate files and can be written together.
 - **Foundational 2c ‖ 2a:** T021 (`test_body_builder.cpp`) and T022 (`dict_hooks_custom_pair_test.cpp`,
   after T010, same file) can be written alongside 2a.
-- **US1:** T027 ‖ T028 (different sections; merge-safe if split by file: T028's v50sp2 half is in
-  `test_077_allversions_builder_roundtrip.cpp`). T036 ‖ T037 (different files).
+- **US1:** after T027, T028 ‖ T030 ‖ T031 (different files); T029 shares a file with T028 (v44 half)
+  and T030 (v50sp2 half), so run it after them.
 - **US2 ‖ US3:** their mutant tasks, T042 and T044, touch disjoint scratch copies.
 - **US4:** T049 ‖ T050 (different files).
 
@@ -963,9 +1017,9 @@ phase-implementer: T008/T009 C-ABI 1.9 → tests/capi/length_data_component_pair
 phase-implementer: T021 C-1 clauses    → tests/wire/test_body_builder.cpp
 
 # US1 witnesses together:
-phase-implementer: T027 C-2.6          → tests/session/test_067_builder_roundtrip.cpp
-phase-implementer: T036 R-6 v50sp2     → tests/session/test_077_allversions_builder_roundtrip.cpp
-phase-implementer: T037 vlatest        → tests/session/test_077_allversions_builder_roundtrip_vlatest.cpp
+phase-implementer: T028 C-2.6          → tests/session/test_067_builder_roundtrip.cpp
+phase-implementer: T030 R-6 v50sp2     → tests/session/test_077_allversions_builder_roundtrip.cpp
+phase-implementer: T031 vlatest        → tests/session/test_077_allversions_builder_roundtrip_vlatest.cpp
 ```
 
 ---
@@ -976,7 +1030,7 @@ phase-implementer: T037 vlatest        → tests/session/test_077_allversions_bu
 
 1. Setup (T001–T005): the four `_418` pins are RED anchors.
 2. Foundational (T006–T026): the loader, C-ABI 1.9 and the `body_builder` API are all GREEN.
-3. US1 (T027–T040): the generated builders send any octet, including through `send_impl` (T038).
+3. US1 (T028–T040): the generated builders send any octet, including through `send_impl` (T038).
 4. **Stop and validate:** the four `_418` pins and C-2.6 are GREEN, the census is exact, and the
    residual is empty.
 

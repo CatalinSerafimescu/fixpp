@@ -92,6 +92,7 @@ Each row names an existing test that must be shown RED, then GREEN after reverti
 | `set_data` resolves through `hooks_` instead of the standard table | C-1.9's `set_data(5002, …)` arm |
 | `set_data` omits the owner check | C-1.4b default handle (under ASan it must fail, not UB-pass) |
 | `set_data` omits `is_innermost_open` | C-1.4b outer handle and closed-group handle |
+| `send_impl` classifies a counted field by its own tag instead of inheriting `prev_header` | the §5 XmlData(212/213) and SecureData(90/91) `send_impl` witnesses |
 | `builder_bench`'s WithGroup / Raw case builds a body missing one scalar field (both cases), or one of the three `kParties` entries (WithGroup), with the exact prechecks in place | that case reports `SkipWithError` (run before the §6 measurement) |
 
 ## 4. Golden regeneration check
@@ -140,7 +141,9 @@ git worktree add --detach "$W" "$MB"
 for f in bench/wire/builder_bench.cpp bench/wire/CMakeLists.txt; do git show HEAD:$f > "$W/$f"; done
 git -C "$W" diff --stat "$MB" -- src include tools cmake   # must print nothing
 git -C "$W" status --porcelain   # must list exactly the two bench files above, nothing else
-# configure + build builder_bench in $W with the same preset (linux-clang-release) and toolchain
+# configure + build builder_bench AND xml_loader_bench in $W with the candidate's own -D options
+# (incl. -DFIXPP_BUILD_BENCH=ON, which no preset sets) and its own conan install; diff the two
+# CMakeCache.txt files' FIXPP_* / CMAKE_BUILD_TYPE / compiler entries first: any difference stops
 B=$W/build/linux-clang-release/bench/wire/builder_bench
 C=build/linux-clang-release/bench/wire/builder_bench
 O=$(mktemp -d -p /mnt/wsl/fixppbuild 091-ab.XXXX)          # fresh per session; never a reused path
