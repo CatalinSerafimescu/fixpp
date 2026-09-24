@@ -185,6 +185,35 @@ FIX Latest (B-427-1). The standard pair table (`include/fixpp/core/length_data_p
 is drift-tested against the union of all ten dictionaries. A dictionary's own pair matters
 only when neither of its tags is standard (B-426-3).
 
+⚠️ **The QuickFIX-XML loader pairs by ADJACENCY, and its container walk never entered
+`<component>` or `<group>`** (found at 091's Gate A, fixpp#418). `LoaderState::detect_length_pairs`
+pairs a LENGTH with the DATA/XMLDATA that immediately follows it in two places only:
+- in `<fields>` declaration order;
+- among the direct `<field>` children of `<header>`, `<trailer>` and each `<message>`.
+
+FIX 5.0 SP2 declares some standard pairs adjacently only inside components or groups, with their
+`<fields>` order inverted or far apart. The loader therefore reported no pair for them, and codegen,
+which couples only what the loader reports, emitted them as two independent Args members. One of
+those messages emits Data before Length.
+
+The union drift test could not see this, because Orchestra supplies every pair; see
+[`wire`](wire.md). Re-derive the affected set with 091's `research.md` R-11 recipe rather than from
+this page.
+
+Decisions (owner, 091 Gate A):
+- **Fix the loader, not codegen.** Coupling in codegen from the standard table would have left the
+  v50sp2 `Fields`/`Validator` tables silently missing the pairs, and added a second source of pair
+  truth.
+- **The walk recurses into every `<group>`, whatever its parent** (header, trailer, message,
+  component or group), and a non-field child breaks adjacency in the new containers. Reviewers kept
+  finding one more parent the witnesses did not cover. The class closed only when the witness set was
+  derived from the complete set of parents found in `dictionaries/*.xml` plus what the schema allows.
+  Listing examples did not close it.
+- **The change reaches user-loaded dictionaries too.** A custom pair declared only inside a component
+  becomes a dictionary pair, and a C-ABI commit that used to succeed now refuses. It shipped as
+  **C-ABI 1.9 BREAKING** (`[const §X.7]`), not scoped out, so the loader's answer stays right for the
+  dictionary the user wrote.
+
 ⚠️ **The table lives in `core`, not `wire`.** `table_view` must classify a tag, and the
 dictionary layer may not include wire ([arch §2.3]); `include/fixpp/wire/length_data_pairs.hpp`
 survives as a re-export of the same names, so a reader who follows an older pointer lands on

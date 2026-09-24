@@ -202,6 +202,31 @@ What was rejected:
 scanners share `length_data_carry::read_value`. #418's `body_builder` must reuse
 `length_data_pairs.hpp` and `length_data_checker`, not add a fifteenth copy.
 
+⚠️ **The 426-428 note's "the drift test keeps the two in step" is true of the UNION only, not of
+each dictionary** (found at 091's Gate A). The note is
+`.specify/426-428-length-data-pairs.md`, in its codegen paragraph.
+- `HeaderEqualsShippedDictionaryUnion` compares the standard table with the union of the pairs from
+  every shipped dictionary. Orchestra's `lengthId` supplies every pair, so the union matches even
+  when one QuickFIX-XML dictionary's loader misses some.
+- The FIX 5.0 SP2 loader did miss some, and the generated v50sp2 builders then left those pairs
+  uncoupled. Why it happened is on the [`dictionary`](dictionary.md) page.
+- Feature 091 adds a per-dictionary drift arm (FR-018). Until that merges, treat the claim as
+  unproven for any single dictionary.
+- Re-derive the gap: run 091's `research.md` R-11 recipe, or compare `Dictionary::length_pair_data_tag`
+  per dictionary against the standard table for the pairs whose tags appear in that dictionary's
+  message expansions.
+
+**The set-time pair set is the standard table only (091, owner ruling).** `body_builder::field_data`
+does not accept a pair that only the dictionary declares. `send_impl` scans with the **session's**
+dictionary, so hooks a caller supplies at construction could make SOH legal in a tag that the
+sending session treats as plain. The value would then split on the wire, e.g. `1=EVIL`. The C-ABI
+avoids this because it takes its pairs from its own session. Dictionary pairs are still checked at
+commit. The binding that would lift the restriction is fixpp#505.
+
+**A group node is fed to the pair checker as `observe(no_tag, {})`** in 091's `body_builder`. The
+empty value is what refuses a group whose tag is one half of a pair. Feeding the count digits, as
+the C-ABI commit does, lets a group tagged 354 pose as a Length. That C-ABI defect is fixpp#506.
+
 **Where the table lives, and why the callback is conditional.** The standard table is
 `include/fixpp/core/length_data_pairs.hpp` — `table_view` must classify a tag and the dictionary
 layer may not include wire ([arch §2.3]); the wire header of the same name re-exports it.
