@@ -81,6 +81,20 @@ census predates #427.
   - **Usage.** No public venue rules of engagement defining a custom Length+Data pair were found.
     That is "not found", not "absent".
 
+### Session 2026-09-24 (`/speckit-clarify`)
+
+- Q: How much extra build time may the commit-time pair check add to a typical message with no Data
+  field? → A: **at most 3 %** on a representative builder benchmark, against a baseline taken on
+  unmodified `main` before any edit; if the design cannot meet it, the figure goes back to the owner
+  (SC-005).
+- Q: Which error does the Data operation and the commit check return on refusal? → A: **existing
+  wire errors, no new variant**, so the C-ABI error map is not touched (FR-004a).
+- Q: Should generated-builder users get a way to set `MessageEncoding(347)` when they send an
+  `Encoded*` field? → A: **Yes: an optional `message_encoding` Args member**, emitted as `347` in
+  the payload and moved to the header by `send_impl`, and not enforced (FR-011a). Found during
+  clarify: no builder, session or C-ABI surface sets 347 today, and US-1's reference to
+  `args.message_encoding` described a member that did not exist.
+
 ---
 
 ## User Scenarios & Testing *(mandatory)*
@@ -90,8 +104,8 @@ generated `build_<Msg>(Args)` functions or `wire::body_builder` by hand.
 
 ### User Story 1 - Send non-ASCII text in an encoded Data field through a generated builder (Priority: P1)
 
-An application author sets `args.encoded_text` (and `args.message_encoding`) on a generated Args
-struct to a value holding bytes outside printable ASCII — UTF-8, Shift-JIS, or a value containing
+An application author sets `args.encoded_text` and `args.message_encoding` (FR-011a) on a generated
+Args struct to a value holding bytes outside printable ASCII — UTF-8, Shift-JIS, or a value containing
 SOH — and calls the generated builder. The message is built; `EncodedTextLen(354)` equals the value's
 octet count; `EncodedText(355)` carries the bytes verbatim; a reader re-parsing the frame recovers the
 same bytes.
@@ -204,6 +218,11 @@ rejection now assert verbatim emit.
 - **A dictionary declares a pair whose tags are outside the standard table**: honoured (FR-009).
   A dictionary pair that reuses a standard tag is ignored in favour of the standard pair (L-426-2).
 - **A dictionary pair whose Length half is a framing tag**: refused (FR-004), as the C-ABI does.
+- **Header-class pairs sent through the session** (`SecureDataLen/SecureData` 90/91,
+  `XmlDataLen/XmlData` 212/213, and `MessageEncoding(347)` from FR-011a): `send_impl` moves
+  header-class tags ahead of the body. A pair MUST stay adjacent, Length first, and a Data value
+  containing SOH MUST NOT be split by that reordering scan. A witness drives such a message through
+  `send_impl` and re-parses the frame.
 - **FIX Latest (`vlatest`) builders**: after #427 they carry their coupled pairs and must route the
   same way.
 
@@ -223,6 +242,13 @@ rejection now assert verbatim emit.
   wire layer's existing pair lookup) — never from a list private to the builder.
 - **FR-004**: The operation MUST refuse, appending nothing: a tag that is not the Data half of a known
   pair; a framing tag, as either half; and an empty value.
+- **FR-004a**: Refusals MUST use existing `core::error` wire variants. No new variant may be added,
+  so the C-ABI error map and its expected-error table stay unchanged:
+  - a framing tag, as either half → `wire_field_value_out_of_range`, which is what `field()`
+    returns for a framing tag today;
+  - a tag that is not the Data half of a known pair → `wire_unexpected_tag`;
+  - an empty value → `wire_field_value_out_of_range`;
+  - a malformed pair found at commit (FR-008) → `wire_invalid_field_format`.
 - **FR-005**: The octets MUST NOT be subject to the printable-ASCII content guard. Any octet value
   `0x00–0xFF` is accepted.
 - **FR-006**: A failure at any point (arena exhaustion, body cap, refusal) MUST leave the builder as
@@ -261,6 +287,14 @@ rejection now assert verbatim emit.
   entry. Neither the generated code nor the generator may emit the Length half separately.
 - **FR-011**: The generated Args member for a coupled pair MUST keep its current C++ type
   (`std::optional<std::string_view>`), so existing application code that sets it still compiles.
+- **FR-011a**: For every message whose body can carry an `Encoded*` field, the generated Args MUST
+  gain an optional `message_encoding` member. An `Encoded*` field is the Data half of a pair whose FIX
+  field name begins with `Encoded`; the set is derived from the dictionary, not hand-listed. When the
+  member is set, the builder emits it as `MessageEncoding(347)` in the payload. `Session::send_impl`
+  already moves header-class tags ahead of the body (fixpp#422), so no session change is needed.
+  The builder does **not** enforce FIX 4.4's "required if any Encoded fields are present": the
+  caller decides. That this is not enforced MUST be recorded in the B&L file.
+  *(Owner decision 2026-09-24.)*
 - **FR-012**: The generator MUST never route a non-Data field through the new operation. This MUST be
   checked by a census over generated output that is first shown able to fire (it reports a
   deliberately mis-wired output as a violation).
@@ -299,8 +333,10 @@ rejection now assert verbatim emit.
   operation, and 0 non-Data fields do (census, proven able to fire).
 - **SC-004**: Existing application code that sets a coupled Args member compiles and behaves
   identically for ASCII values (no source change needed).
-- **SC-005**: Building a message with no Data field costs no more than before (builder benchmark
-  within noise of the `main` baseline taken before implementation).
+- **SC-005**: Building a representative message with no Data field (a `NewOrderSingle` with and
+  without a repeating group) is at most **3 %** slower than the baseline taken on unmodified `main`
+  before any code edit, measured on the same builder benchmark. If the design cannot meet 3 %, the
+  measured figure goes back to the owner for review. The target is not silently relaxed.
 - **SC-006**: L-067-2 is closed, with its evidence in the closed file, and no live limitation row
   claims the gap.
 
