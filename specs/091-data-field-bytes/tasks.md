@@ -70,7 +70,7 @@ only then made GREEN.
   `.specify/decisions/091-data-field-bytes-evidence.md` §*Compile-time surface*. The figure is
   unrecoverable after the first production edit. If T001 finds a production diff, measure from
   the merge-base worktree instead and say so.
-- [ ] T003 Via `phase-implementer`: create `specs/091-data-field-bytes/expected-ctest-091.txt`, one
+- [X] T003 Via `phase-implementer`: create `specs/091-data-field-bytes/expected-ctest-091.txt`, one
   ctest name per line, sorted:
   `capi_length_data`, `capi_pure_tests`, `codegen_091_data_census_test`, `dictionary_pure_tests`,
   `fixpp::dict::read-tier-byte-diff`, `session_091_data_send`, `test_067_builder_failclosed`,
@@ -95,7 +95,7 @@ only then made GREEN.
   - Positive control: before T028, the gate's `diff "$R/expected.txt" "$R/labelled.txt"` line must
     report exactly those two names missing from the labelled side (the gate exits there, before
     `comm -23`).
-- [ ] T004 Via `phase-implementer`, carry over the stage-one pins, **tests only**. Apply the
+- [X] T004 Via `phase-implementer`, carry over the stage-one pins, **tests only**. Apply the
   `tests/session/test_067_builder_failclosed.cpp` hunk of `68c8c769`
   (`git show 68c8c769 -- tests/session/test_067_builder_failclosed.cpp`) onto this branch; do NOT
   bring `.specify/418-data-field-bytes.md`.
@@ -104,7 +104,7 @@ only then made GREEN.
   - Show each one RED under a mutant that widens `is_printable`'s range, in a scratch copy.
   - Commit this form on its own ("stage-one carry-over, rejection form, GREEN"), so the
     pinned-then-fixed history stays visible (FR-014, plan phase 1).
-- [ ] T005 Via `phase-implementer`, flip the four pins in
+- [X] T005 Via `phase-implementer`, flip the four pins in
   `tests/session/test_067_builder_failclosed.cpp` to assert:
   - success;
   - `EncodedTextLen(354)` equals the octet count;
@@ -220,7 +220,7 @@ only then made GREEN.
     `a␁35=D` is the 6-byte Data. Assert that `parse()` returns a value AND that `msg_type()` is
     empty. On the unfixed loader it is `"D"` (RED).
   - Each reader witness asserts both halves, so a parse refusal cannot pass as an absorbed field.
-- [ ] T011 Blast radius of the deleted v50sp2 Length members (FR-011 carve-out).
+- [X] T011 Blast radius of the deleted v50sp2 Length members (FR-011 carve-out).
   - Re-derive the accessor names from the pre-change goldens under
     `specs/078-precompiled-builder-libs/contracts/golden/v50sp2/`: the members emitted as
     `field`/`set_int` on Length tags 2494, 2815, 43109, 43110 and 43111.
@@ -273,7 +273,7 @@ only then made GREEN.
 
 ### 2b — C-ABI 1.9 BREAKING (FR-019, `[const §X.7]`), same PR
 
-- [ ] T015 C-ABI pre-checks (plan phase 0b):
+- [X] T015 C-ABI pre-checks (plan phase 0b):
   - `gh release list --exclude-drafts` prints nothing, so the §X.7 pre-release regime applies;
   - no open PR touches `include/fix/c_api/version.h` (`gh pr list --state open --json number,files`,
     filtered);
@@ -281,7 +281,7 @@ only then made GREEN.
     for-each-ref --format='%(refname)' refs/heads refs/remotes) -- include/fix/c_api/version.h`
     shows no branch already at 9. Positive control: `origin/main` shows 8.
   Any failure goes to the owner before T018.
-- [ ] T016 Appendix A row-set gate and class re-verification (data-model.md Appendix A, R-11).
+- [X] T016 Appendix A row-set gate and class re-verification (data-model.md Appendix A, R-11).
   - Run Appendix A's `diff` recipe from the library root; it must print nothing.
   - Positive controls, each shown to print the symbol:
     - delete the `fixpp_msg_get_string` row from a scratch copy of `data-model.md`;

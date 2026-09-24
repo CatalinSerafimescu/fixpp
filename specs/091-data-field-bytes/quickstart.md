@@ -18,7 +18,7 @@ not track the emitter binary.
 ## 2. Functional witnesses (Article VII §8: select by label)
 
 Every ctest entry this feature adds to or edits carries the label `091` (set in the CMakeLists that
-registers it; the wire tests carry no label today). The expected population is the **set of ctest
+registers it, appended to any existing labels). The expected population is the **set of ctest
 names**, not a count, and it is a **checked-in manifest**:
 `specs/091-data-field-bytes/expected-ctest-091.txt`, one ctest name per line.
 
