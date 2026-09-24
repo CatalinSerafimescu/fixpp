@@ -476,6 +476,43 @@ only then made GREEN.
 - [X] T025 Via `phase-implementer`, update `include/fixpp/wire/length_data_check.hpp`'s header
   comment: "#418 is meant to be its second caller" becomes past tense (the builder is the second
   caller), with no count added (FR-016).
+### 2d — `interpret_logon` refuses a malformed count (FR-020, owner ruling 2026-09-24), tests first
+
+- [X] T070 Via `phase-implementer`, the FR-020 RED witnesses in
+  `tests/session/length_data_session_scanner_test.cpp` (`session_length_data_scanner`, labelled
+  `091` and added to `expected-ctest-091.txt` here).
+  - `InterpretLogonMalformedCount.*`: the function directly, over the standard pair 95/96 (count
+    ending on a non-SOH byte then `98=2`; count running past the frame then `98=2`; a malformed count
+    followed only by `98=0`, so after the fix the refusal can come only from the count) and over a
+    component-only custom pair through `dict_hooks::for_table_view` (then `98=2`). Each is accepted
+    today: RED.
+  - `LogonArmMalformedCount.*`: the acceptor (NotConnected) and initiator (LogonSent) arms reach
+    Active today on the malformed-count Logon: RED.
+  - Twins, GREEN before and after: well-formed count + `98=2` refused; + `98=0` accepted; no count +
+    `98=2` refused; the custom-pair frame without the dictionary refused; and each arm's two
+    well-formed controls.
+  - The C-ABI observer was not written: `capi_loopback_support.hpp` pairs two engines and cannot
+    inject a hand-built Logon; the arms above are the handshake witnesses.
+  - Pre-registered table and observations: evidence file §*interpret_logon fail-open — RED (T070)*.
+- [ ] T071 Via `phase-implementer`, implement FR-020 in `src/session/admin_messages.cpp`'s
+  `interpret_logon`: a malformed count returns `core::error::session_invalid_logon` instead of
+  breaking out of the scan. No new error code.
+  - Replace the `break`'s comment with the condition and a pointer to FR-020; delete any sentence
+    of the function's comments the change falsifies.
+  - Invert `LengthDataSessionScanner.InterpretLogonStopsAtAMalformedCount` to assert the refusal
+    (FR-020 is its authority); edit no other pre-existing test without an orchestrator ruling.
+  - GREEN: the unfiltered `session_length_data_scanner` binary passes, and the T070 twins still
+    hold. Then run the full session suite (`ctest --test-dir build/linux-clang-debug -R '^session_'`
+    plus every test that `codegraph_callers interpret_logon` reaches); a Logon built through a
+    helper is invisible to a lexical grep, so the full run is the blast-radius check. Any other
+    failure goes to the orchestrator.
+- [ ] T072 Via `phase-implementer`, update the `include/fix/c_api/version.h` 1.9 history comment
+  (FR-019 as amended): the Logon effect is now FR-020's — a Logon carrying a malformed count, of a
+  component/group-only pair or of a standard pair such as 95/96, is refused — replacing the
+  "a required field follows the count" wording; the observers stay. Re-run
+  `tools/check_capi_freeze.sh` (it must fail on exactly `version.h`, then re-pin
+  `tools/capi_freeze.sha256` and pass).
+
 - [ ] T026 Via `phase-implementer`, run the Foundational mutants from quickstart §3 in a scratch copy.
   Each one must be RED on the named test, then GREEN after revert:
   - "the new walk skips non-field children instead of breaking" → C-2.5a arm (iii) (T007);
@@ -491,7 +528,9 @@ only then made GREEN.
     - T009 (`FIXPP_ERR_OK` again);
     - T010's inbound-drop witness and both reader witnesses; plus the T006 FIX50SP2 leg and C-2.5a
       arms (i), (ii), (iv), (v), (vi), (vii) and (viii);
-  - "`FIXPP_C_ABI_VERSION_MINOR` set back to 8" → `tests/capi/version_test.cpp`'s exact-version cell.
+  - "`FIXPP_C_ABI_VERSION_MINOR` set back to 8" → `tests/capi/version_test.cpp`'s exact-version cell;
+  - "`interpret_logon` breaks at a malformed count instead of refusing" (FR-020) → every T070 RED
+    cell, on the function and on both arms.
   Record each mutant, command and RED line in `.specify/decisions/091-data-field-bytes-evidence.md`
   §*Mutants*.
 - [ ] T027 Run the **full** `ctest --test-dir build/linux-clang-debug --output-on-failure`, after
@@ -814,6 +853,8 @@ FR-019, SC-006).
   - **B-091-3:** the set-time vs C-ABI divergences. A dictionary-only Data tag is refused by
     `field_data`/`set_data` but accepted by `fixpp_msg_set_data` (follow-up fixpp#505). A repeated
     call appends where the C-ABI upserts.
+  - **B-426-2:** its "every later field stays absent" no longer holds for a Logon: under FR-020
+    `interpret_logon` refuses a Logon carrying a malformed count. Amend the row, citing FR-020.
   - **B-091-4, marked BREAKING (C-ABI 1.9):** data-model.md's row text. It covers the v50sp2 source
     break in both shapes (a compile error for designated or member access; a silent shift for a
     positional aggregate), the user-loaded-dictionary effects, the recipe-derived BREAKING
@@ -977,7 +1018,7 @@ FR-019, SC-006).
     W-008, naming this feature's witnesses (the `_418` pins, C-2.6, C-1.2).
 - [ ] T069 **Feature-completeness audit (the FINAL task).** Assert against the merged tree:
   - (i) every `tasks.md` row is `[X]` or carries an explicit waiver rationale;
-  - (ii) every FR-001…FR-019 (including FR-004a, FR-009a and FR-011a) and SC-001…SC-006 maps to a
+  - (ii) every FR-001…FR-020 (including FR-004a, FR-009a and FR-011a) and SC-001…SC-006 maps to a
     landed test AND a landed implementation;
   - (iii) every feature-owned OFFICIAL catalogue row is `done`, with a matching `coverage-index.md`
     entry.
@@ -1001,7 +1042,8 @@ FR-019, SC-006).
     witnesses, and their GREEN needs T012.
   - 2c: T022 and T023 (RED) → T024 → T025. It needs no 2a/2b task and can run beside them, except
     T010 → T023 (same file).
-  - Then T026 (needs T006–T012 and T020), then T027 (needs everything above).
+  - 2d: T070 (RED) → T071 (GREEN) → T072. It needs T018 (the `version.h` comment T072 edits).
+  - Then T026 (needs T006–T012, T020 and T071), then T027 (needs everything above).
   - **Blocks all stories.**
 - **US1 (Phase 3):** needs the Foundational checkpoint.
   - T028 (census, RED) → T029, T030, T031, T032 (RED) → T033 → T034 → T035 → T036 (all GREEN);

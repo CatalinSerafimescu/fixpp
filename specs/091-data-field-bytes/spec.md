@@ -18,7 +18,9 @@ Out of scope: C-ABI, Python, the size caps, STRING fields admitting high-bit byt
 
 > **Superseded in part by the Gate A rulings** (Clarifications):
 > - the seven v50sp2 Length members are deleted (the FR-011 carve-out);
-> - FR-017's C-ABI behaviour change is in scope as C-ABI 1.9 BREAKING (FR-019).
+> - FR-017's C-ABI behaviour change is in scope as C-ABI 1.9 BREAKING (FR-019);
+> - `interpret_logon` refuses a Logon carrying a malformed Length count (FR-020, owner ruling during
+>   `/speckit-implement`).
 >
 > Only new C-ABI surface stays out of scope. The quote above is the original input, kept verbatim.
 
@@ -163,6 +165,19 @@ census predates #427.
   marks B-091-4 BREAKING, and adds a C-ABI test that pins the refusal (FR-019). The alternative,
   a component/group walk that marks only standard-table pairs, is rejected: it would leave the
   loader's answer wrong for the dictionary the user wrote. (Population since derived: FR-019.)
+
+### Session 2026-09-24 (`/speckit-implement`, after T021)
+
+- Q: `interpret_logon` stops scanning at a malformed Length count and validates only the fields it
+  saw, so an `EncryptMethod(98)` other than `0` placed after the count is never seen and the Logon is
+  accepted — contrary to `[const §XII.7]`. It is reachable on `main` through the standard pair
+  RawDataLength(95)/RawData(96), and FR-017 widens it to component/group-only pairs of a user-loaded
+  dictionary. Measured, not only read: the T070 witnesses show the Logon accepted on the function,
+  the acceptor arm and the initiator arm. How does 091 handle it? → A: **Fold the fix into 091**
+  (owner ruling). `interpret_logon` refuses a Logon carrying any malformed count (FR-020). The other
+  `length_data_carry` scan sites were enumerated (evidence file §*Malformed-count scan sites*); each
+  fails closed or is equivalent to the peer omitting the later fields, so the fix is scoped to
+  `interpret_logon`.
 
 ---
 
@@ -462,7 +477,8 @@ rejection now assert verbatim emit.
   trailer and messages is unchanged, and the groups inside them belong to the new group walk, R-11). For FIX 5.0 SP2 this adds exactly the five
   standard pairs named in Clarifications; it MUST add no non-standard pair for any shipped dictionary
   (the union drift test fails otherwise). For the shipped dictionaries inbound parsing is
-  unaffected (every scanner resolves standard tags from the standard table alone). For a
+  unaffected (every scanner resolves standard tags from the standard table alone; FR-020 separately
+  changes the Logon verdict when a count is malformed). For a
   **user-loaded** dictionary (`XmlLoader` is a public runtime API), a non-standard pair declared
   adjacently only inside a component or group becomes a dictionary pair, so `has_nonstandard_pair()`
   can flip, scanners read its Data by count, `fixpp_msg_set_data` and both commit checks honour
@@ -529,18 +545,20 @@ rejection now assert verbatim emit.
         tag 8 being fixed first by the Framer; `fixpp_msg_get_msg_type` can return
         `FIXPP_ERR_TAG_NOT_FOUND` when such a pair precedes 35, which is reachable while the
         session's `validate_inbound_messages` is unset, since that header-order check is the only
-        rule placing 35 third; re-derive by grepping `validate_inbound_messages` in `src/capi`).
+        rule placing 35 third; re-derive by grepping `validate_inbound_messages` in `src/capi` —
+        an empty result means no C-ABI setter exists, so read its default in
+        `include/fixpp/session/session_config.hpp`).
     - **BREAKING with no carrying declaration**, recorded in the `version.h` history comment
       (§X.7): a frame a pre-1.9 engine stored with a malformed pair of that kind now fails replay
       (`build_replay_frame`) and is gap-filled rather than resent; the session's header and Logon
       scans (`scan_frame_header`, `interpret_logon` in `admin_messages.cpp`, the store's
-      `frame_has_genuine_tag554` masking) read such a Data by count. `interpret_logon` stops at a
-      malformed count, so a Logon in which a required field (HeartBtInt(108), or 35/49/56 when out
-      of order) follows the malformed count is refused by `interpret_logon`; on the initiator path
+      `frame_has_genuine_tag554` masking) read such a Data by count. Under FR-020 `interpret_logon`
+      refuses a Logon carrying a malformed count, of such a pair or of a standard pair (95/96, so
+      shipped dictionaries are affected too); a Logon of that shape that was accepted is now
+      refused, so on either arm the session is not established, and on the initiator path
       `fixpp_session_is_established` stays `false` and `fixpp_session_close` returns
       `FIXPP_ERR_THREAD_SESSION_LIFECYCLE`, not `FIXPP_ERR_OK`. The history comment names both
-      declarations as observers of this handshake effect (re-derive the required fields from
-      `interpret_logon`'s validation steps).
+      declarations as observers of this handshake effect.
     - **Additive** (failure turned into success; no §X.7 marker, listed in B-091-4): the widenings
       named in the next bullet.
     - **UNCHANGED:** every other export, classified row by row in data-model.md Appendix A. The
@@ -587,6 +605,26 @@ rejection now assert verbatim emit.
       `8=…␁9=…␁5001=6␁5002=a␁35=D␁…`, where `msg_type()` is `"D"` on the unfixed loader (RED) and
       empty after FR-017 (GREEN), proving the `fixpp_msg_get_msg_type` effect.
   - The `[const §X.6]` controls for a breaking C-ABI change apply.
+- **FR-020** (owner ruling 2026-09-24, during `/speckit-implement`): `session::interpret_logon` MUST
+  refuse with the existing `core::error::session_invalid_logon` a Logon in which any Length count is
+  malformed (the count runs past the frame, or the counted value is not followed by SOH), whichever
+  table supplies the pair (the standard table or the session dictionary's hooks). It MUST NOT stop
+  and validate a prefix: nothing after a malformed count can be trusted, so the only sound verdict
+  is refusal. This closes a `[const §XII.7]` fail-open in which an `EncryptMethod(98)` other than `0`
+  placed after the count was never seen.
+  - No error code, symbol or signature changes (FR-004a). The C-ABI effect is carried by FR-019's
+    `version.h` history (the `fixpp_session_is_established` / `fixpp_session_close` observers).
+  - Witnesses (tasks T070, written first and RED on the unfixed code): the function directly, over a
+    standard pair (count ending on a non-SOH byte; count running past the frame; a malformed count
+    followed only by `98=0`) and over a component-only custom pair through the session dictionary's
+    hooks; and the acceptor (NotConnected) and initiator (LogonSent) arms, where the Logon reaches
+    Active today and must not after the fix. Twins that hold before and after: a well-formed count
+    with `98=2` is refused, with `98=0` accepted; `98=2` with no count is refused; the custom-pair
+    frame without the dictionary is refused.
+  - The pre-existing test that pins the old acceptance
+    (`LengthDataSessionScanner.InterpretLogonStopsAtAMalformedCount`, the #426 "every later field
+    stays absent" case) is inverted to assert the refusal; the ruling above is its authority.
+  - No other `length_data_carry` scan site changes (Clarifications, this session).
 
 ### Key Entities
 
