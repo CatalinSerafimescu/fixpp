@@ -58,7 +58,9 @@ the call. `body_builder` exposes no size accessor, so this is the observable for
 `dict_hooks_custom_pair_test.cpp` as its outbound twin.
 
 - **C-1.1 success.** `field_data(355, {0x41,0x01,0x42})` then `commit` yields a body containing
-  `354=3<SOH>355=A<SOH>B<SOH>`, in that order, at the position of the call.
+  `354=3<SOH>355=A<SOH>B<SOH>`, in that order, at the position of the call. The Length is emitted
+  first also for a pair whose Data tag is below its Length tag (`field_data(89, …)` → `93=<n>` then
+  `89=…`) and for a pair not adjacent in tag order (`field_data(1527, …)` → `1525=<n>` then `1527=…`).
 - **C-1.2 every octet.** For every `b` in `0x00–0xFF`, `field_data(355, {b})` commits, and a re-parse
   through the inbound parser recovers exactly `{b}` as tag 355. The same holds through `set_data` in
   a group entry. (SC-001's generated-builder witnesses are C-2.6.)
@@ -98,6 +100,9 @@ the call. `body_builder` exposes no size accessor, so this is the observable for
     state is deterministic) MUST accept `field(354, std::int64_t{N})`, where N is the Data size — so
     the Length half fits and the failure is on the Data half. Assert this in the same test, on every
     platform (outer-vector regrowth differs by STL, so a Linux-only RED proof does not cover MSVC).
+  - **The no-call twin MUST itself commit OK** (asserted): the pre-fill keeps the body under the
+    body cap, else the oracle compares two `wire_frame_too_large` commits and cannot see a stray
+    Length.
   - `field_data` returns `wire_frame_too_large`; the oracle holds (the stray Length would either
     make commit fail INV-6 or change the bytes).
   - **Nested twin (`set_data`).** The same arrangement inside a live innermost entry (non-empty,

@@ -195,9 +195,10 @@ brain/components/c-api.md                       # C-ABI 1.9 entry (FR-019)
      - `…5001=8␁5002=a␁1137=9␁…` (`a␁1137=9` is the 8-byte Data): tag 1137 reads `"9"` on the unfixed loader (RED) and is absent after FR-017 (GREEN); proves `fixpp_msg_version`;
      - `8=…␁9=…␁5001=6␁5002=a␁35=D␁34=…␁49=…␁56=…␁52=…␁…` (`a␁35=D` is the 6-byte Data): `msg_type()` is `"D"` on the unfixed loader (RED) and empty after FR-017 (GREEN); proves `fixpp_msg_get_msg_type`.
    - **Appendix A row-set gate:** run data-model.md Appendix A's `diff` recipe; it must print nothing. Positive controls, each shown to print the symbol: delete one row whose symbol other rows also name (e.g. `fixpp_msg_get_string`) from a scratch copy of `data-model.md`; append a fake symbol to a scratch copy of the golden file. Re-verify each row's class with R-11's recipe at the implementation head; a changed class is a planned edit of FR-019 and the appendix.
+   - **Version pin first (`[const §VII.3]`):** `tests/capi/version_test.cpp`'s exact-version cell and `CompositeMacroValue` are set to 1.9 and shown RED against the unbumped minor 8, before the bump.
    - **Bump:** `FIXPP_C_ABI_VERSION_MINOR` 8 → 9 with a re-authored trailing comment that also carries FR-019's no-carrier effects, naming `fixpp_session_is_established` and `fixpp_session_close` as observers of the Logon-scan effect: a Logon in which a required field follows a malformed count is refused by `interpret_logon`, so on the initiator path `is_established` stays `false` and `close` returns `FIXPP_ERR_THREAD_SESSION_LIFECYCLE`, not `FIXPP_ERR_OK` (FR-019). Add the BREAKING (1.9) notes FR-019 classifies: `dict.h`, `message.h` (commit, `fixpp_msg_set_data`, `fixpp_entry_set_data`, and the one reader-family paragraph incl. `fixpp_msg_version` and `fixpp_msg_get_msg_type`) and `session.h` (send, with its toApp clause, + register_callback). Re-run R-11's population recipe at the implementation head first; a declaration it adds that FR-019 does not name is a planned edit, not a silent omission.
    - **Consumers:** run `git grep -ln "VERSION_MINOR\|0x010800\|1_8_0\|(8U << 8U)" -- . ':!specs'` and classify each hit; most compare against the macro and move automatically.
-     - Hard pins it must surface: `tests/capi/version_test.cpp`'s exact-version cell and `CompositeMacroValue`, plus the `version.h` narrative.
+     - Hard pins it must surface: the `version.h` narrative and any other exact-value hit (the `version_test.cpp` pins were written first, above).
      - `version_test.cpp`'s header comment enumerates each post-freeze minor by ordinal. Delete that ordinal enumeration rather than extending it (a comment records a procedure, not a result); keep the rule it explains.
      - The Python binding exports the name only (`bindings/python/fixpp.i`); confirm it has no value assertion.
      - No error code is minted, so `introducing_minor()` and `tools/abi_history/error_codes_v1.txt` do not change.
@@ -220,8 +221,8 @@ brain/components/c-api.md                       # C-ABI 1.9 entry (FR-019)
    the C-2.4 structural residual diff; confirm the read-tier pins (only the two C-2.5 moves). The
    flipped pins and the C-2.6 witnesses turn **GREEN** here.
 4. **Mutants** (quickstart §3), each in a scratch copy, each proven RED on its named test.
-5. **Session witnesses** (R-9 header pair, R-6 Length-delimited group, now buildable on v50sp2 after
-   phase 0) and the v50sp2/vlatest builder round trips. The **`message_encoding` witness lives here,
+5. **Session witnesses** (R-9 header pair). The R-6 Length-delimited group and the v50sp2/vlatest
+   builder round trips are written RED before phase 3's emitter change (tasks US1), not here. The **`message_encoding` witness lives here,
    on the `send_impl` path**:
    - 347 is a header tag, so a body-only build-and-validate round trip may refuse it as undeclared
      in the message;

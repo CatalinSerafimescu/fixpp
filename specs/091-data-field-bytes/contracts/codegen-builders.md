@@ -77,8 +77,9 @@ if (item.m) {
 
 ## C-2.3 `message_encoding` (FR-011a)
 
-- **Which messages.** Those where any member at any depth is the Data half of a pair whose field name
-  **contains** `Encoded`. The set is derived from the IR, not hand-listed.
+- **Which messages.** Those where any member at any depth is the Data half of a **standard** pair
+  (`core::detail::standard_length_data_pairs`) whose field name **contains** `Encoded`. The emitter
+  derives the set from its IR; the census (C-2.2) recomputes it on its own walk. Never hand-listed.
   - **Witness:** a v50sp2 message whose only encoded field is one of `DerivativeEncodedIssuer(1278)`,
     `DerivativeEncodedSecurityDesc(1281)` or `InstrumentScopeEncodedSecurityDesc(1621)` has the
     member. The implementer names the message by census.

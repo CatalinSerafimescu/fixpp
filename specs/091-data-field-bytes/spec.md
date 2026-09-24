@@ -408,7 +408,7 @@ rejection now assert verbatim emit.
   designated-initializer or member-access caller gets a compile error; a positional
   aggregate-initializer caller may silently shift into the next member.
 - **FR-011a**: For every message whose body can carry an `Encoded*` field, the generated Args MUST
-  gain an optional `message_encoding` member. An `Encoded*` field is the Data half of a pair whose FIX
+  gain an optional `message_encoding` member. An `Encoded*` field is the Data half of a standard pair (the standard table) whose FIX
   field name **contains** `Encoded`, so FIX 5.0 SP2's `DerivativeEncodedIssuer(1278)`,
   `DerivativeEncodedSecurityDesc(1281)` and `InstrumentScopeEncodedSecurityDesc(1621)` are included,
   though a "begins with" rule misses them. The set is derived from the dictionary, not hand-listed. When the
