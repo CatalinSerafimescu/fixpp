@@ -78,8 +78,10 @@
  *      RawDataLength(95) and RawData(96) (so shipped dictionaries are
  *      affected too): a Logon of that shape that was accepted is now
  *      refused. Observers: on either role
- *      fixpp_session_is_established stays false, and fixpp_session_close
- *      returns FIXPP_ERR_THREAD_SESSION_LIFECYCLE, not FIXPP_ERR_OK.
+ *      fixpp_session_is_established stays false, and fixpp_session_close,
+ *      once the refused session has drained (its lifecycle-return branch is
+ *      reached only for a drained or never-published session), returns
+ *      FIXPP_ERR_THREAD_SESSION_LIFECYCLE, not FIXPP_ERR_OK.
  *  No error code is added. */
 #define FIXPP_C_ABI_VERSION_MAJOR 1
 #define FIXPP_C_ABI_VERSION_MINOR 9 /* 1.9: component/group-only Length+Data pairs (fixpp#418) */
