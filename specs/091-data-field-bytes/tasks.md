@@ -131,7 +131,7 @@ only then made GREEN.
 
 ### 2a — Loader pairing (FR-017, FR-018, C-2.5, C-2.5a), tests first
 
-- [ ] T006 [P] Via `phase-implementer`, add the **per-dictionary drift arm** to
+- [X] T006 [P] Via `phase-implementer`, add the **per-dictionary drift arm** to
   `tests/wire/length_data_pairs_drift_test.cpp` (`wire_dict_tests`), beside
   `HeaderEqualsShippedDictionaryUnion`, which stays unchanged.
   - One arm per shipped dictionary, Orchestra FIX Latest included.
@@ -143,7 +143,7 @@ only then made GREEN.
   - Run it on the unfixed loader. It must be **RED for FIX50SP2 with exactly the five pairs**
     2494→2493, 2815→2814, 43109→42684, 43110→42486 and 43111→42982, and GREEN on every other leg.
     Quote the RED output in the commit.
-- [ ] T007 [P] Via `phase-implementer`, add the C-2.5a synthetic-XML loader test as a new file
+- [X] T007 [P] Via `phase-implementer`, add the C-2.5a synthetic-XML loader test as a new file
   `tests/dictionary/xml_loader_component_group_pairs_test.cpp`, joined to `dictionary_pure_tests`
   in `tests/dictionary/CMakeLists.txt` (`[const §VII.8]`, isolation-safe; T003 labels that bucket).
   - It uses `XmlLoader::load_from_string`, with one custom LENGTH/DATA pair per arm and **distinct
@@ -171,7 +171,7 @@ only then made GREEN.
       (b) `<trailer>` → paired.
   - Run on the unfixed loader. (i), (ii), (iv), (v), (vi), every (vii) placement and both (viii)
     placements must be **RED**. (iii) is GREEN by construction; T026 proves it can fail.
-- [ ] T008 [P] Via `phase-implementer`, add the FR-019 C-ABI before/after test as a new file
+- [X] T008 [P] Via `phase-implementer`, add the FR-019 C-ABI before/after test as a new file
   `tests/capi/length_data_component_pair_test.cpp`. Join it to `capi_length_data_test` in
   `tests/capi/CMakeLists.txt` (the Length+Data bucket; T003 labels it).
   - **Dictionary and load path.** A synthetic XML declares a custom pair (e.g. 5001/5002)
@@ -196,7 +196,7 @@ only then made GREEN.
   - Run on the unfixed loader. The malformed commit returns `FIXPP_ERR_OK`, `set_string` refuses the
     SOH value (expected, not the pinned RED), and `set_data(len = 0)` returns
     `FIXPP_ERR_TYPE_MISMATCH`. The commit message records these as the pre-change form.
-- [ ] T009 Via `phase-implementer`, add the FR-019 `fixpp_session_send` witness in the same file as
+- [X] T009 Via `phase-implementer`, add the FR-019 `fixpp_session_send` witness in the same file as
   T008, `tests/capi/length_data_component_pair_test.cpp`.
   - Harness: `tests/capi/capi_loopback_support.hpp`.
   - Session dictionary: a full shipped dictionary (e.g. the FIX 4.4 XML) with one injected
@@ -208,7 +208,7 @@ only then made GREEN.
   - If the loopback harness cannot link into `capi_length_data_test`, register the assertion in the
     bucket that holds `capi_loopback_support.hpp` users, give it label `091`, and add its name to
     `expected-ctest-091.txt`.
-- [ ] T010 [P] Via `phase-implementer`, add the FR-019 inbound-drop and reader witnesses to
+- [X] T010 [P] Via `phase-implementer`, add the FR-019 inbound-drop and reader witnesses to
   `tests/wire/dict_hooks_custom_pair_test.cpp` (`wire_dict_tests`). Use `Parser<Index>` over the
   `table_view` of the T008-style synthetic dictionary, loaded with `load_from_string`.
   - **Inbound drop.** The malformed frame (Data 5002 whose count does not end on SOH) is refused. On
