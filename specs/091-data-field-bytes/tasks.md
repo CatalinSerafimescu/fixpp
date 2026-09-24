@@ -2,7 +2,7 @@
 
 **Feature**: `091-data-field-bytes` (fixpp#418, batch B8) | **Branch**: `091-data-field-bytes`
 
-**Input**: `specs/091-data-field-bytes/` — spec.md (FR-001…FR-019, SC-001…SC-006), plan.md (phases 0–7),
+**Input**: `specs/091-data-field-bytes/` — spec.md (FR-001…FR-020, SC-001…SC-006), plan.md (phases 0–7),
 research.md (R-1…R-11), data-model.md (INV-2…INV-8, refusal table, ledger, Appendix A),
 contracts/body-builder-data.md (C-1), contracts/codegen-builders.md (C-2), quickstart.md (§1–§6).
 
@@ -509,7 +509,8 @@ only then made GREEN.
 - [ ] T072 Via `phase-implementer`, update the `include/fix/c_api/version.h` 1.9 history comment
   (FR-019 as amended): the Logon effect is now FR-020's — a Logon carrying a malformed count, of a
   component/group-only pair or of a standard pair such as 95/96, is refused — replacing the
-  "a required field follows the count" wording; the observers stay. Re-run
+  "a required field follows the count" wording; the observers stay, on either role (the C-ABI
+  latches are set by `onLogon` whatever the role). Re-run
   `tools/check_capi_freeze.sh` (it must fail on exactly `version.h`, then re-pin
   `tools/capi_freeze.sha256` and pass).
 
@@ -545,6 +546,7 @@ only then made GREEN.
 - The loader pairs the five v50sp2 pairs, and every drift leg is GREEN and non-empty.
 - C-ABI 1.9 is declared, re-pinned and witnessed RED → GREEN.
 - `field_data`/`set_data` and the commit check are GREEN on C-1.
+- `interpret_logon` refuses a malformed count (FR-020): the T070 cells are GREEN and their twins hold.
 - The four flipped `_418` pins are still RED: the generated builder still routes through `field()`.
 
 ---
@@ -875,6 +877,9 @@ FR-019, SC-006).
     `wire.md`'s "Until that merges, treat the claim as unproven" is reworded.
   - `brain/components/c-api.md`: a C-ABI 1.9 entry beside the 1.8 section, naming FR-019's
     population and its recipe (R-11, Appendix A).
+  - `brain/components/wire.md`'s "one malformed-count policy for every scanner … must stop" line:
+    name FR-020 as superseding `.specify/426-428-length-data-pairs.md` §4's policy for
+    `interpret_logon` (the design doc is not edited; the brain page flags it, #334).
   - Record that `.specify/426-428-length-data-pairs.md`'s "the drift test keeps the two in step" was
     stale per dictionary and is made true by FR-018. The 426-428 note itself is not edited.
 - [ ] T051 [US4] Article XIX §5 docs check:
@@ -955,6 +960,14 @@ FR-019, SC-006).
   the `linux-clang-debug` manifest. Record the command, corpus and result in the evidence file; name
   the target to `/speckit-verify` (T065, `--fuzz-duration=600`) so it is not marked N/A.
 
+- [ ] T073 Via `phase-implementer`, extend the seeds of `fuzz_session_recovery_admin_parse`
+  (`tests/fuzz/fuzz_session_recovery_admin_parse.cpp`, which reaches `interpret_logon` through
+  `Session::on_inbound_frame`; precedent 027 T026) for FR-020: Logons with a 95/96 count running
+  past the frame, a count ending on a non-SOH byte, and `98=2` after a malformed count. Build under
+  `linux-clang-asan` (`FIXPP_BUILD_FUZZ=ON`), run ≥ 600 s, commit the seeds to its corpus directory,
+  record the command, corpus and result in the evidence file, and name the target to
+  `/speckit-verify` (T065) beside `fuzz_dict_xml_loader`.
+
 ### Static analysis, claims and citations
 
 - [ ] T060 Run clang-tidy, clang-format, cppcheck and IWYU (`[const §IX.4]`) on every changed file under `src/`, `include/` **and
@@ -982,19 +995,23 @@ FR-019, SC-006).
   `.specify/decisions/091-data-field-bytes-evidence.md`, which every task whose body says "record … in" that file wrote; its
   discriminating-witness rows point there rather than restating it.
   - It covers /speckit-verify's full preset matrix (ASan, UBSan, TSan, …) and the MSVC leg,
-    coverage (every new line in `src/wire/body_builder.cpp`
-    and the new loader walk in `src/dictionary/xml_loader.cpp`), clang-tidy and ABI hygiene.
+    coverage (every new line in `src/wire/body_builder.cpp`,
+    the new loader walk in `src/dictionary/xml_loader.cpp` and `interpret_logon`'s changed lines in
+    `src/session/admin_messages.cpp`), clang-tidy and ABI hygiene.
   - It includes the full `ctest --test-dir build/linux-clang-debug` run.
   - ⚠️ The §7 full build needs an owner ASK, even as gate evidence.
 
 - [ ] T066 **`CLAUDE-history.md` entry** (Article XIX, plan Constitution Check): via `phase-implementer`
   (the edit guard decides the file class), add a newest-first 091 entry to the library's
-  `CLAUDE-history.md` naming the feature, the PR, `Closes #418`, C-ABI 1.9 BREAKING and the
+  `CLAUDE-history.md` naming the feature, the PR, `Closes #418`, C-ABI 1.9 BREAKING, the FR-020
+  `[const §XII.7]` fail-open fix (it affects shipped dictionaries through 95/96) and the
   follow-ups #505/#506. Update `CLAUDE.md`'s "Last merged FEATURE" pointer only at merge.
 - [ ] T067 **PR description** (FR-019, plan phase 7). The body carries:
   - the `[const §X.7]` **C-ABI 1.9 BREAKING** declaration: FR-019's population, pointing at B-091-4
     and data-model.md Appendix A;
   - the v50sp2 source break (FR-011 carve-out);
+  - the FR-020 fix: `interpret_logon` refuses a Logon carrying a malformed count, closing a
+    `[const §XII.7]` fail-open reachable on `main` through 95/96;
   - `local build: green on linux-clang-debug @ <git-sha>` (`[const §XVII.7]`), with the SHA T065
     verified;
   - a `## Gates` section, and a `## Gate B …` heading for the Gate B record;
@@ -1058,7 +1075,7 @@ FR-019, SC-006).
   manifest-listed entry registered.
 - **Polish (Phase 7), order:**
   - T053 (simplify, first, so every measurement is of the final candidate) → T054 (compile-surface
-    "after") → T055 → T056 → T057 → T058 → T059 (fuzz);
+    "after") → T055 → T056 → T057 → T058 → T059 → T073 (fuzz);
   - T060–T063 after T053;
   - T065 after T060–T063;
   - T068 → T069. T069 is last.
@@ -1110,7 +1127,7 @@ phase-implementer: T032 vlatest        → tests/session/test_077_allversions_bu
 ### MVP (US1)
 
 1. Setup (T001–T005): the four `_418` pins are RED anchors.
-2. Foundational (T006–T027): the loader, C-ABI 1.9 and the `body_builder` API are all GREEN.
+2. Foundational (T006–T027, T070–T072): the loader, C-ABI 1.9 and the `body_builder` API are all GREEN.
 3. US1 (T028–T040): the generated builders send any octet, including through `send_impl` (T039).
 4. **Stop and validate:** the four `_418` pins and C-2.6 are GREEN, the census is exact, and the
    residual is empty.

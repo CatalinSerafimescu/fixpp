@@ -292,6 +292,9 @@ rejection now assert verbatim emit.
 
 ### Edge Cases
 
+- A Logon carrying a malformed Length count (the count runs past the frame, or the counted value is
+  not followed by SOH) is refused, whatever follows it (FR-020).
+
 - **SOH as the last octet of the value**: the frame still parses, because the reader uses the Length,
   not the next SOH.
 - **A value longer than 9 999 octets / multi-digit Length**: the Length is the decimal octet count
@@ -497,7 +500,8 @@ rejection now assert verbatim emit.
   prints it, so a leg whose probe collects nothing fails rather than passes; Orchestra FIX Latest is
   one of the arms. That non-empty assertion is shown RED on a non-FIX50SP2 leg by a mutant
   (quickstart §3).
-- **FR-019** (owner decision, Gate A round 3): FR-017's effect on the C-ABI MUST be shipped as
+- **FR-019** (owner decision, Gate A round 3; widened by FR-020): FR-017's and FR-020's effects on
+  the C-ABI MUST be shipped as
   **C-ABI 1.9 BREAKING** under `[const §X.7]`:
   - `FIXPP_C_ABI_VERSION_MINOR` becomes 9 in `include/fix/c_api/version.h`, with a history comment
     naming 091/fixpp#418.
@@ -555,9 +559,9 @@ rejection now assert verbatim emit.
       `frame_has_genuine_tag554` masking) read such a Data by count. Under FR-020 `interpret_logon`
       refuses a Logon carrying a malformed count, of such a pair or of a standard pair (95/96, so
       shipped dictionaries are affected too); a Logon of that shape that was accepted is now
-      refused, so on either arm the session is not established, and on the initiator path
-      `fixpp_session_is_established` stays `false` and `fixpp_session_close` returns
-      `FIXPP_ERR_THREAD_SESSION_LIFECYCLE`, not `FIXPP_ERR_OK`. The history comment names both
+      refused, so on either role (the C-ABI's `established` / `ever_established` latches are set
+      by `onLogon` whatever the role) `fixpp_session_is_established` stays `false` and
+      `fixpp_session_close` returns `FIXPP_ERR_THREAD_SESSION_LIFECYCLE`, not `FIXPP_ERR_OK`. The history comment names both
       declarations as observers of this handshake effect.
     - **Additive** (failure turned into success; no §X.7 marker, listed in B-091-4): the widenings
       named in the next bullet.
@@ -694,13 +698,16 @@ rejection now assert verbatim emit.
 - `spec/behaviors-and-limitations.md` — L-067-2 (live until this feature closes it).
 - `.specify/constitution.md` — `[const §XVII.1]` (Gate A for a public C++ API change),
   `[const §XVI.3]` (clarify mandatory for wire/codegen), `[const §X.7]` (a call that used to
-  succeed and now fails is BREAKING — FR-019).
+  succeed and now fails is BREAKING — FR-019), `[const §X.6]` (the controls for a breaking C-ABI
+  change), `[const §XII.7]` (application-layer encryption is refused: `EncryptMethod(98)` other than
+  `0` — FR-020).
 
 ## Explicitly out of scope
 
 - **New C-ABI surface.** The C-ABI already has `fixpp_msg_set_data` / `fixpp_entry_set_data`, so
   091 adds no C-ABI symbol, signature or error code. Its only C-ABI effect is FR-019's behaviour
-  change (C-ABI 1.9 BREAKING), which follows from the loader fix and is in scope.
+  change (C-ABI 1.9 BREAKING), which follows from the loader fix (FR-017) and the `interpret_logon`
+  fix (FR-020) and is in scope.
 - **Set-time C++ support for dictionary-declared pairs** — follow-up *verifiable session binding for
   dictionary pairs, option (b)* (fixpp#505), for C-ABI parity on custom pairs.
 - **Codegen over a custom dictionary** (FR-009): unsupported.

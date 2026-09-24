@@ -468,7 +468,7 @@ groups inside those containers belong to the new group walk.
   is visited before any group, a Length adjacent to Data A inside a group and to Data B in a
   component pairs with B wherever the group sits (C-2.5a arm (vii)); a depth-first walk that visits
   a group right after its container would differ, and arm (vii) is the witness.
-- **Inbound, shipped dictionaries: unaffected.** Every scanner resolves via
+- **Inbound, shipped dictionaries: unaffected (the Logon verdict on a malformed count changes separately under FR-020; evidence file §*Malformed-count scan sites* records why only `interpret_logon` changes and why "validate the prefix" was rejected).** Every scanner resolves via
   `dict_hooks::data_tag_for_length`, which answers a standard tag from the table alone
   (`include/fixpp/wire/dict_hooks.hpp`); the five pairs are standard, so on the shipped dictionaries
   `table_view::has_nonstandard_pair()` does not flip.

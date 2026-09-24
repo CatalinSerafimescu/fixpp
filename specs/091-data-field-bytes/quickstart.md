@@ -34,7 +34,8 @@ session witnesses; the C-ABI exact-version bucket (`capi_pure_tests`, which
 holds `version_test.cpp`); the FR-019 C-ABI before/after test's bucket (for example
 `capi_length_data`, or whichever entry tasks registers it in), including its `fixpp_session_send`
 assertion's entry if that lands elsewhere; the FR-019 inbound-drop witness's entry (`wire_dict_tests`
-if it lands in `dict_hooks_custom_pair_test.cpp`, else the session entry that holds it). Gate A fixes the gate below, which cannot pass with a
+if it lands in `dict_hooks_custom_pair_test.cpp`, else the session entry that holds it); the FR-020
+`interpret_logon` witnesses (`session_length_data_scanner`). Gate A fixes the gate below, which cannot pass with a
 placeholder: a placeholder is not a registered ctest name.
 
 ```bash
@@ -75,6 +76,8 @@ Each row names an existing test that must be shown RED, then GREEN after reverti
 | the commit pair check is deleted | C-1.7; C-1.9's "malformed hand-written custom pair refused" arm |
 | a group node is fed as `observe(no_tag, <count digits>)` instead of `observe(no_tag, {})` | C-1.7's "group `no_tag` 354 + sibling one-byte 355" case |
 | `FIXPP_C_ABI_VERSION_MINOR` is set back to 8 | `tests/capi/version_test.cpp` exact-version cell (FR-019) |
+| `interpret_logon` breaks at a malformed count instead of refusing | every T070 RED cell: `InterpretLogonMalformedCount.*` and both `LogonArmMalformedCount.*MalformedCount*` arms (FR-020) |
+| the commit pair check walks the serialised order across containers instead of per container | C-1.8 |
 | the loader's component/group walk is removed (C-ABI view) | the FR-019 C-ABI test (the malformed component-only custom pair commits `FIXPP_ERR_OK` again); its additive-widening assertion (`fixpp_msg_set_string` refuses the SOH-bearing Data value again); its `fixpp_msg_set_data(5002, len = 0)` assertion (`FIXPP_ERR_TYPE_MISMATCH` again); its `fixpp_session_send` assertion (the malformed payload sends `FIXPP_ERR_OK` again); the FR-019 inbound-drop witness (`Parser<Index>` accepts the malformed frame again); both FR-019 reader witnesses (tag 1137 reads `"9"` again; `msg_type()` is `"D"` again) |
 | `field_data` appends Data before Length | C-1.1, C-1.10 |
 | the second-append rollback is removed (Length survives a failed Data append) | C-1.5 (its commit-and-byte-compare oracle; the stray Length fails INV-6 or changes the bytes) |
