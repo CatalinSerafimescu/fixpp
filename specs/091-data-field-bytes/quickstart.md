@@ -79,10 +79,11 @@ Each row names an existing test that must be shown RED, then GREEN after reverti
 | the emitter passes `item.tag` instead of `item.data_tag` | the v44 builder build (C-2.2 `static_assert`) |
 | the emitter changes only the top-level arm | C-2.6 **nested** 256-value witness; C-2.2 census (wrong arm) |
 | the `message_encoding` selection uses "begins with `Encoded`" | the C-2.3 v50sp2 witness (a message whose only encoded field is `DerivativeEncoded*` / `InstrumentScopeEncoded*`) |
-| the loader's component/group walk is removed ("loader walk removed": the new emitter over the unfixed loader) | the per-dictionary drift arm (FIX50SP2, the five pairs); C-2.2 census control (a) and the orphan-half check on v50sp2; C-2.5a arms (i), (ii), (iv), (v), (vi), (vii) |
+| the loader's component/group walk is removed ("loader walk removed": the new emitter over the unfixed loader) | the per-dictionary drift arm (FIX50SP2, the five pairs); C-2.2 census control (a) and the orphan-half check on v50sp2; C-2.5a arms (i), (ii), (iv), (v), (vi), (vii), (viii) |
 | the new walk skips non-field children instead of breaking | C-2.5a arm (iii) |
 | the new walk visits only components and their direct `<group>` children | C-2.5a arms (v) and (vi) |
-| groups are walked depth-first, right after their container, instead of after all component definitions | C-2.5a arm (vii), both placements |
+| groups are walked depth-first, right after their container, instead of after all component definitions | C-2.5a arm (vii), all placements |
+| the group walk is entered only from messages and component definitions | C-2.5a arm (viii) (a) and (b), and arm (vii)(c) |
 | one non-FIX50SP2 drift leg's probe returns nothing (e.g. FIX44's `message_fields()` result emptied) | that leg's non-empty assertion (FR-018) |
 | `set_data` skips pair resolution (forwards straight to `append_bytes_field`) | C-1.4's `set_data` arms for tags 11 (the SOH-bearing payload) and 354; C-1.9's `set_data(5002, …)` arm |
 | `set_data` skips the second-append rollback (Length survives a failed Data append) | C-1.5's nested `set_data` twin (its commit-and-byte-compare oracle) |

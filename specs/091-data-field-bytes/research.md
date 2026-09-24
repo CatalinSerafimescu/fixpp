@@ -454,11 +454,12 @@ dictionaries the §2 drift test is what keeps the two in step") is therefore a *
 per dictionary; this feature makes it true (FR-018). The 426-428 note itself is not edited.
 
 **Decision.** Extend the secondary walk to every `<component>` definition and every `<group>` at any
-depth. The group walk is **recursive to any depth**: it reaches a group directly under a
-`<message>`, a group in a component, and a group nested in another group, however deep. **In those new containers, adjacency is broken by any non-`<field>` child** (a component
+depth. The group walk is **recursive to any depth** and covers every `<group>` under `<fix>`, whatever
+its parent: `<header>`, `<trailer>`, `<message>`, `<component>` or another `<group>`, however deep. **In those new containers, adjacency is broken by any non-`<field>` child** (a component
 reference or nested group between two fields), which is the semantics the model below uses. The
-existing header/trailer/message walk (`container.children("field")`, which *skips* non-field
-siblings) is left **unchanged**, so no pair it records today can be lost.
+existing direct-`<field>` walk of header, trailer and messages (`container.children("field")`, which
+*skips* non-field siblings) is left **unchanged**, so no pair it records today can be lost. The
+groups inside those containers belong to the new group walk.
 - The loader's primary-walk comment "In practice the global-fields path already captures all
   standard pairs" is false and is **deleted**; the function's header comment names the superseding
   decision ("091 (fixpp#418) Gate A r1 — secondary walk descends into components and groups").
@@ -488,7 +489,8 @@ siblings) is left **unchanged**, so no pair it records today can be lost.
   dictionary test. Only C-2.5a arm (iii) observes the rule. The same holds for **depth**: a
   walk over components and only their direct `<group>` children can yield the same pair set on
   every shipped dictionary as the recursive walk (re-derive by running the model recipe below in
-  both modes), so only C-2.5a arms (v) and (vi) observe "any depth".
+  both modes). So only the C-2.5a arms that place a pair in a group whose parent is not a component
+observe "any depth".
 - **What moves.** `Dictionary::length_pair_data_tag`, `table_view::length_pair_data_tag` and
   `FieldRef::length_pair_data_tag` on FIX 5.0 SP2 now report the five pairs (a correction, disclosed
   in the B&L file); codegen couples them in the v50sp2 goldens; the caller-set Length members are

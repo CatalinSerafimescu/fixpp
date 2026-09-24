@@ -126,7 +126,7 @@ tests/session/test_067_builder_failclosed.cpp   # stage-one pins brought over (6
 tests/wire/test_body_builder.cpp                # C-1 clauses except C-1.9
 tests/wire/dict_hooks_custom_pair_test.cpp      # C-1.9 (wire_dict_tests), outbound twin of the inbound cases
 tests/wire/length_data_pairs_drift_test.cpp     # FR-018 per-dictionary drift arm incl. Orchestra, non-empty assert per leg (wire_dict_tests)
-tests/dictionary/...                            # C-2.5a synthetic-XML loader test, arms (i)-(vii), label 091
+tests/dictionary/...                            # C-2.5a synthetic-XML loader test, arms (i)-(viii), label 091
 tests/wire/CMakeLists.txt, tests/session/CMakeLists.txt, tests/codegen/CMakeLists.txt   # label 091 on touched entries; delete tests/wire's false "none … carry LABELS" banner claim
 tests/capi/CMakeLists.txt, tests/dictionary/CMakeLists.txt   # label 091 on the C-ABI exact-version bucket, the FR-019 test's bucket and the C-2.5a loader test's entry (quickstart §2)
 tests/codegen/read_tier_byte_diff_test.cmake    # rebaseline v50sp2 Fields/Validator + recipe banner; #427 recipe chained; stale 082/header result text deleted; _baseline_desc + summary text (C-2.5)
@@ -148,10 +148,10 @@ brain/components/c-api.md                       # C-ABI 1.9 entry (FR-019)
 0. **Loader pairing (FR-017/FR-018), TDD.**
    - Write the per-dictionary drift arm first; show it **RED** on the unfixed loader with exactly the
      five FIX50SP2 pairs named. Every leg (Orchestra included) asserts a non-empty, printed probe set.
-   - Write C-2.5a (synthetic XML) first too: arms (i), (ii), (iv), (v), (vi), (vii) RED on the unfixed
-     loader; arm (iii) is GREEN there by construction and is made live by the skip-instead-of-break
+   - Write C-2.5a (synthetic XML) first too: arms (i), (ii), (iv), (v), (vi), (vii) (all placements), (viii) RED on
+     the unfixed loader; arm (iii) is GREEN there by construction and is made live by the skip-instead-of-break
      mutant, (v)/(vi) by the components-and-direct-groups-only mutant and (vii) by the depth-first
-     order mutant (quickstart §3).
+     order mutant, and (viii) by the messages-and-components-only entry mutant (quickstart §3).
    - Extend the loader walk (R-11); the arm turns GREEN and the union test stays GREEN (no
      over-pairing).
    - Regenerate; rebaseline the two v50sp2 read-tier pins with their recipes run (C-2.5). Any other
@@ -227,6 +227,9 @@ brain/components/c-api.md                       # C-ABI 1.9 entry (FR-019)
    C-ABI 1.9 doc surfaces, as the 1.8 precedent updated them: a C-ABI 1.9 entry in
    `brain/components/c-api.md` beside its C-ABI 1.8 section, and a C-ABI 1.9 BREAKING note on the
    CA-011 row of `spec/feature-catalogue.md` (data-model ledger table).
+   Close-out check: the R-4 follow-up is fixpp#506 (filed 2026-09-24; research.md R-4 and the
+   Parked list in `issue-batches.md` both cite it). Confirm it is still open, or record its fix, before
+   091 closes.
    In `tests/codegen/read_tier_byte_diff_test.cmake` (C-2.5): the #427 banner's recipe is re-stated
    as chained (apply 091's Validator recipe first, then #427's); the 082 banner's and the header's
    "byte-identical" / "every other artifact" results are deleted and point at the 091 banner rather
@@ -305,3 +308,23 @@ them:
   copy of the setter list (FR-017, FR-019, B-091-4, R-11) is updated.
 
 - Loop 2 round 2 applied 2026-09-24: Codex P1=0 P2=1 P3=3; Opus post-judging P1=0 P2=1 P3=4; rewrite addresses loader depth arms (v)/(vi) + all P3s. Reviews: research/reviews/codex_091-data-field-bytes_gate_a_L2_2_review.md, research/reviews/opus_091-data-field-bytes_gate_a_L2_2_adversarial_review.md.
+
+### Loop 2 round 3 — exhausted; owner path
+
+- Loop 2 round 3 was reviewed on 2026-09-24:
+  - Codex P1=0 P2=1 P3=2; Opus post-judging P1=0 P2=1 P3=2.
+  - The open P2 is that C-2.5a had no witness for groups owned by `<header>` or `<trailer>`.
+- The owner chose "re-run `/speckit-clarify` then `/speckit-plan`". `/speckit-clarify` found no
+  critical ambiguity.
+- The `/speckit-plan` refresh, applied 2026-09-24:
+  - C-2.5, R-11 and FR-017 now cover every `<group>` whatever its parent.
+  - C-2.5a gains arm (viii) (header and trailer groups) and placement (vii)(c).
+  - Quickstart §3 gains the mutant "group walk entered only from messages and components".
+  - The spec Input block gets a note saying the Gate A rulings supersede it in part.
+  - Phase 7 gets a close-out check for fixpp#506.
+- The witness set is now derived from the complete set of group parents: the parents measured
+  across `dictionaries/*.xml`, plus the trailer, which the schema allows. It is no longer listed by
+  example.
+- Reviews: research/reviews/codex_091-data-field-bytes_gate_a_L2_3_review.md,
+  research/reviews/opus_091-data-field-bytes_gate_a_L2_3_adversarial_review.md.
+- A fresh `/gate-a` loop (loop 3) follows.

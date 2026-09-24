@@ -108,9 +108,9 @@ if (item.m) {
 ## C-2.5 Loader pairing and read-tier pins (FR-017, FR-018)
 
 - **Loader.** `LoaderState::detect_length_pairs`'s secondary walk additionally visits every
-  `<component>` definition and every `<group>` at any depth (recursively: groups under messages,
-  under components and under other groups); in those containers adjacency is broken
-  by any non-`<field>` child. The existing header/trailer/message walk is unchanged (R-11). Visit
+  `<component>` definition and every `<group>` at any depth (every `<group>` under `<fix>`,
+  whatever its parent: `<header>`, `<trailer>`, `<message>`, `<component>` or another `<group>`); in those containers adjacency is broken
+  by any non-`<field>` child. The existing direct-`<field>` walk of header, trailer and messages is unchanged; the groups inside them belong to the new group walk (R-11). Visit
   order (R-11): `<fields>`, then header, trailer, messages (as today), then `<component>` definitions
   in document order, then `<group>` elements in document order; a conflict is settled by
   `mark_pair`'s existing first-writer rule. The false "global-fields path already captures all
@@ -171,13 +171,19 @@ loader's message walk reads a container; so the unfixed loader does not pair the
   because every component definition is visited before any group. Two placements of the group, each
   with its own tags so the first-writer rule cannot leak between arms: (a) the group is a direct
   child of a `<message>`; (b) the group sits in an earlier component C1 and Data B in a later
-  component C2.
+  component C2; (c) the group is a direct child of `<header>` and Data B sits as direct fields of a
+  component → paired with B;
+- **(viii)** a pair adjacent only inside a `<group>` that is a direct child of (a) `<header>` and
+  (b) `<trailer>`. Each placement has its own tags, and both tags live only inside that group,
+  under the global non-adjacency preconditions above → paired.
 
-TDD: (i), (ii), (iv), (v), (vi) and (vii) are RED on the unfixed loader. (iii) is GREEN there by
+TDD: (i), (ii), (iv), (v), (vi), (vii) (all placements) and (viii) are RED on the unfixed loader. (iii) is GREEN there by
 construction; its liveness comes from the quickstart §3 mutant "the new walk skips non-field
 children instead of breaking", which must turn it RED. (v) and (vi) are made depth-discriminating by
 the mutant "the new walk visits only components and their direct `<group>` children", and (vii)
 order-discriminating by the mutant "groups are walked depth-first, right after their container";
+(viii) is made parent-discriminating by the mutant "the group walk is entered only from messages and
+component definitions";
 each must turn its arms RED.
 
 ## C-2.6 Generated-builder exhaustive witnesses (SC-001)

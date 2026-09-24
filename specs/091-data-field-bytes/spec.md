@@ -16,6 +16,12 @@ through the new operation; the Args member type stays source-compatible. Regener
 builder fixtures. Stage-1 pins are brought over and flipped. L-067-2 moves to the closed B&L file.
 Out of scope: C-ABI, Python, the size caps, STRING fields admitting high-bit bytes."
 
+> **Superseded in part by the Gate A rulings** (Clarifications):
+> - the seven v50sp2 Length members are deleted (the FR-011 carve-out);
+> - FR-017's C-ABI behaviour change is in scope as C-ABI 1.9 BREAKING (FR-019).
+>
+> Only new C-ABI surface stays out of scope. The quote above is the original input, kept verbatim.
+
 **Issue**: fixpp#418 (batch B8 in the parent's `phases/phase-4/issue-batches.md`).
 
 ---
@@ -451,8 +457,8 @@ rejection now assert verbatim emit.
   with the DATA/XMLDATA field that immediately follows it inside **every** container that lists
   fields — header, trailer, each message, each `<component>` definition and each `<group>` at any
   depth — in addition to its `<fields>`-order rule (in the newly visited component and group
-  containers a non-`<field>` child breaks adjacency; the existing header/trailer/message walk is
-  unchanged, R-11). For FIX 5.0 SP2 this adds exactly the five
+  containers a non-`<field>` child breaks adjacency; the existing direct-`<field>` walk of header,
+  trailer and messages is unchanged, and the groups inside them belong to the new group walk, R-11). For FIX 5.0 SP2 this adds exactly the five
   standard pairs named in Clarifications; it MUST add no non-standard pair for any shipped dictionary
   (the union drift test fails otherwise). For the shipped dictionaries inbound parsing is
   unaffected (every scanner resolves standard tags from the standard table alone). For a
@@ -461,8 +467,8 @@ rejection now assert verbatim emit.
   can flip, scanners read its Data by count, `fixpp_msg_set_data` and both commit checks honour
   it, and the SOH-in-value refusal no longer applies to its Data tag (`fixpp_msg_set_string` / `fixpp_entry_set_string` at set time; any setter at commit when the value is correctly Length-prefixed) (B-091-4). Through the C-ABI this is a breaking change, C-ABI 1.9 (FR-019). The new containers are visited in the order R-11 states, and `mark_pair`'s existing
   first-writer rule settles a Length adjacent to two Data fields; a synthetic-dictionary test pins
-  the component, group-in-component, group-under-message, group-in-group, break-on-non-field,
-  first-writer and visit-order cases (C-2.5a). What moves on
+  the component, group-in-component, group-under-message, group-in-group, group-under-header,
+  group-under-trailer, break-on-non-field, first-writer and visit-order cases (C-2.5a). What moves on
   the shipped set is the dictionary's own answer
   (`Dictionary::length_pair_data_tag`, `table_view::length_pair_data_tag`, `FieldRef`) on FIX 5.0
   SP2, and the two read-tier pins `v50sp2/Fields.hpp` and `v50sp2/Validator.hpp`, which are
