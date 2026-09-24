@@ -22,11 +22,16 @@ custom pair only inside a component or group, the loader change turns C-ABI call
 into failures (the recipe-derived population is FR-019's), so 091 ships **C-ABI 1.9 BREAKING**
 (Gate A r3 ruling, FR-019). It adds no C-ABI symbol.
 
-`session::interpret_logon` refuses a Logon carrying a malformed Length count (FR-020, owner ruling
-during `/speckit-implement`). It used to stop at the count and validate only what it had seen, so an
-`EncryptMethod(98)` other than `0` after the count passed the `[const §XII.7]` gate; reachable on
-`main` through RawDataLength(95)/RawData(96) and widened by FR-017. Its C-ABI effect joins FR-019's
-`version.h` history for both roles, shipped dictionaries included.
+`session::interpret_logon` refuses a Logon in which a Length is immediately followed by its paired
+Data whose count overruns the frame or does not end on SOH (FR-020 states the exact three-part
+predicate; owner ruling during `/speckit-implement`). It used to stop at the count and validate only
+what it had seen, so an `EncryptMethod(98)` other than `0` after the count passed the
+`[const §XII.7]` gate; reachable on `main` through RawDataLength(95) and RawData(96), and widened by
+FR-017. An orphan Length, whose next field is not its paired Data, is read as a plain value, so a
+later 98 is still seen. Its C-ABI effect, for both roles and shipped dictionaries included, reaches
+every C-ABI call whose result depends on the session having logged on (FR-020, R-11 step 6): the
+`version.h` history, and the FR-020 clause in the `fixpp_session_send` and
+`fixpp_session_register_callback` notes.
 
 The code generator:
 - routes every coupled member through the new operation in both the top-level and nested arms, with a
@@ -77,19 +82,21 @@ gated on a noise-floor precondition read from the base legs (R-10, quickstart §
 | Article | Applies? | Status |
 |---|---|---|
 | **XVI §3** clarify for wire/codegen | yes | ✅ `/speckit-clarify` ran 2026-09-24 (3 Q); specify-time owner decisions FR-008/FR-009 recorded; Gate A r1 owner rulings recorded (Clarifications, Session 2026-09-24 (Gate A round 1)); Gate A r3 C-ABI ruling recorded by `/speckit-clarify` (Session 2026-09-24 (Gate A round 3), FR-019) |
-| **XVII §1** Gate A: public C++ API + codegen layout | **yes, both triggers** | ✅ Gate A converged (loop 3 r3, owner-accepted without Codex). FR-020 (added during implement) gets a **scoped Gate A round** on its delta (owner ruling 2026-09-24), recorded in §Gate A below |
-| **XII §7** no application-layer encryption | **yes (FR-020)** | `interpret_logon` refuses a Logon carrying a malformed count, so an `EncryptMethod(98)` ≠ `0` cannot hide behind one. Witnesses T070 (RED first), fix T071, mutant T026 |
+| **XVII §1** Gate A: public C++ API + codegen layout | **yes, both triggers** | ✅ Gate A converged (loop 3 r3, owner-accepted without Codex). FR-020 (added during implement): **scoped Gate A IN PROGRESS** on its delta (owner ruling 2026-09-24); round 1 is recorded in §Gate A below, and this cell turns ✅ only when a scoped round's record shows convergence |
+| **XII §7** no application-layer encryption | **yes (FR-020)** | `interpret_logon` refuses a Logon in which a Length is immediately followed by its paired Data whose count overruns the frame or does not end on SOH, so an `EncryptMethod(98)` ≠ `0` cannot hide behind one; an orphan Length is read as a plain value, so it hides nothing. Witnesses T070 (RED first) and T074 (orphan pins and arm cells), fix T071, mutants T026 |
 | **XVI §6** orchestrator does not implement | yes | Code, tests, bench and generated goldens go through `phase-implementer`. The orchestrator authors only the spec bundle, B&L text and brain |
 | **VIII §1–2** bench + paired regression budget | yes | `builder_bench` added (`4749f589`); its WithGroup and Raw prechecks are made exact before the paired run (R-10). This feature's own budget (+3 %) is stricter than the constitutional +5 %. Added to `bench/ci-suite.txt` as a candidate-only row (§2a) with tier-2 value **`no`** — the reversible choice, since §2a makes `paired` irreversible. FR-017 engages the **paired** `bench/dictionary/xml_loader_bench` (FIX50SP2 load): measure it A-B-A-B before pushing, with the quickstart §6 procedure; pass condition the §2 budget (a slowdown ≤ +5 %), and over it → the §2 approval path, never self-declared |
 | **VIII / XV** zero-allocation discipline | yes | New nodes use the builder's arena. No `new`/`malloc`. B15 (#497) blind spots (over-aligned allocation, MSan/LSan) are not engaged: no over-aligned type is added |
 | **VI** 100 % FIX rule | yes | §VI.5: Normative References list `[FIX50SP2 §3.3] Field data types` (coverage index ↔ W-008); TagValue v1.0 is informative (no coverage-index entry). W-008's evidence is amended in the Ledger phase. The interop residual is disclosed (FR-009a, by extending L-426-3) |
 | **VII** testing | yes | TDD order: drift arm RED, then loader; RED stage-one flip, then implementation; C-1 RED, then GREEN. Every C-1/C-2 clause maps to a named test; each mutant in quickstart §3 names an existing test shown RED. §VII.8: every touched ctest entry gets label `091` and the recipe selects with `-L` and gates on the checked-in `expected-ctest-091.txt` manifest (quickstart §2); `wire_body_builder_test` stays standalone (§8 exemption: in-TU global `operator new` counter). §VII.7: the QuickFIX XML loader is parser-touching and FR-017 changes it, so its existing harness `fuzz_dict_xml_loader` runs ≥ 10 min with seeds that reach the new component/group walk (task T059); FR-020 changes `interpret_logon`, which `fuzz_session_recovery_admin_parse` reaches, so its seeds gain malformed-count Logons (task T073) |
 | **IX** coverage / sanitizers / static analysis | yes | Every new line in `src/wire/body_builder.cpp`, in the new loader walk in `src/dictionary/xml_loader.cpp` and in `interpret_logon`'s changed lines in `src/session/admin_messages.cpp` covered (§IX.1). ASan, UBSan and TSan presets (§IX.2) run in `/speckit-verify`. clang-tidy, clang-format, cppcheck and IWYU (§IX.4) on the changed `src/`, `include/` **and `tools/codegen/`** files (#265); any finding on a changed line is fixed (task T060) |
-| **X** C-ABI | **yes — §X.7 BREAKING, 1.9** (Gate A r3 owner ruling, FR-019) | No symbol, signature or error code is added or changed (FR-004a). FR-017 changes what existing calls return for a custom pair that a user dictionary declares only inside a component or group; FR-020 changes the Logon verdict for a malformed count of any pair (standard 95/96 included), observed through `fixpp_session_is_established` / `fixpp_session_close` on either role. The affected population is derived by research.md R-11's *C-ABI 1.9 population recipe* and classified in data-model.md Appendix A (FR-019). Per §X.7 (pre-release regime):<br>• bump `FIXPP_C_ABI_VERSION_MINOR` 8 → 9;<br>• add BREAKING (1.9) markers on `fixpp_dict_load_from_xml` (`dict.h`), `fixpp_msg_commit`, `fixpp_msg_set_data` and `fixpp_entry_set_data` (`message.h`), `fixpp_session_send` and `fixpp_session_register_callback` (`session.h`), and one shared paragraph for the inbound reader family in `message.h`'s accessor preamble (its members include `fixpp_msg_version` and `fixpp_msg_get_msg_type`; data-model.md Appendix A classifies every export); the effects with no carrying declaration go in the `version.h` history comment; all of them also in the PR description and in B-091-4;<br>• update every in-repo version consumer in the same PR (Phase 0b).<br>§X.6: all four Appendix A controls apply — `/clarify` ✅ (r3 session; FR-020: the implement-session entry), `/analyze` (after `/speckit-tasks`; re-run after FR-020), Gate A (FR-020: scoped round), and **user `/plan` sign-off** (✅ 2026-09-24; FR-020: re-sign-off of this amended plan) |
+| **X** C-ABI | **yes — §X.7 BREAKING, 1.9** (Gate A r3 owner ruling, FR-019) | No symbol, signature or error code is added or changed (FR-004a). FR-017 changes what existing calls return for a custom pair that a user dictionary declares only inside a component or group; FR-020 changes the Logon verdict when a Length is immediately followed by its paired Data whose count overruns the frame or does not end on SOH, for any pair (standard RawDataLength(95) and RawData(96) included), observed on either role by every C-ABI call whose result depends on the session having logged on (`fixpp_session_is_established`, `fixpp_session_close`, `fixpp_session_send`, and the `fixpp_session_register_callback` and `fixpp_session_register_send_callback` callbacks; R-11 step 6 derives the set). The affected population is derived by research.md R-11's *C-ABI 1.9 population recipe* and classified in data-model.md Appendix A (FR-019). Per §X.7 (pre-release regime):<br>• bump `FIXPP_C_ABI_VERSION_MINOR` 8 → 9;<br>• add BREAKING (1.9) markers on `fixpp_dict_load_from_xml` (`dict.h`), `fixpp_msg_commit`, `fixpp_msg_set_data` and `fixpp_entry_set_data` (`message.h`), `fixpp_session_send` and `fixpp_session_register_callback` (`session.h`), and one shared paragraph for the inbound reader family in `message.h`'s accessor preamble (its members include `fixpp_msg_version` and `fixpp_msg_get_msg_type`; data-model.md Appendix A classifies every export); the effects with no carrying declaration go in the `version.h` history comment; all of them also in the PR description and in B-091-4;<br>• update every in-repo version consumer in the same PR (Phase 0b).<br>§X.6: all four Appendix A controls apply, each with its own status per phase:<br>• `/clarify`: 091 ✅ (r3 session); FR-020 ✅ (Clarifications, Session 2026-09-24 (`/speckit-implement`, after T021));<br>• `/analyze`: 091 ✅ (after `/speckit-tasks`); FR-020 ✅ (re-run after FR-020, findings remediated in `f31059d5`);<br>• Gate A: 091 ✅ (loop 3 r3); FR-020 **IN PROGRESS** (scoped round 1, §Gate A below);<br>• **user `/plan` sign-off**: 091 ✅ 2026-09-24; FR-020 **PENDING** (re-sign-off of this amended plan, after the scoped Gate A converges, since the signed text changes with each round) |
 | **XI** concurrency | no | No threading change. `send_impl` is read, not modified (R-9) |
 | **XIX** documentation | yes | B&L rows, brain `wire.md` (the Length+Data section's "#418 must reuse" line becomes "did"), `CLAUDE-history.md` at close-out. §5: *dated 2026-09-24*, no Doxygen pipeline existed (re-derive: `find . -maxdepth 3 -name 'Doxyfile*'`; if it finds one, regenerate it); the tracked hand-written `docs/src/*.md` pages are grepped with `git grep -n -e body_builder -e length_pair -e 'Length+Data' -- docs/src` in the Ledger phase and any hit is updated. The API contract (refusals incl. handle checks, atomicity limits, `dict_hooks` lifetime) lives in the `body_builder.hpp` comments, C-1 |
 
-**Result:** no violations. Gate A is **required** (not waivable by triviality: a public API plus a
+**Result:** no violations (a pending §X.6 control is not a violation; the FR-020 controls above that
+are IN PROGRESS or PENDING stay open until their records exist, and T067 asks the owner before
+labelling while any is open). Gate A is **required** (not waivable by triviality: a public API plus a
 codegen layout change). The declared C-ABI break is sanctioned by §X.7's pre-release clause. It is not a
 violation, but it adds the §X.6 user `/plan` sign-off.
 
@@ -117,7 +124,7 @@ specs/091-data-field-bytes/
 ```text
 include/fixpp/wire/body_builder.hpp     # field_data, set_data, ctor(dict_hooks) + lifetime comment, hooks_
 src/wire/body_builder.cpp               # R-3 append+rollback, constexpr is_framing_tag + static_assert; R-4 combined walk
-src/session/admin_messages.cpp          # FR-020: interpret_logon refuses a malformed count (session_invalid_logon)
+src/session/admin_messages.cpp          # FR-020: interpret_logon refuses a malformed paired count (session_invalid_logon)
 src/dictionary/xml_loader.cpp           # R-11 secondary walk into <component>/<group> (stated visit order); delete false comment; header names the decision
 include/fix/c_api/version.h             # FR-019: FIXPP_C_ABI_VERSION_MINOR 8 → 9, re-authored trailing comment naming 091/fixpp#418 + the no-carrier effects (replay gap-fill, header/Logon scans; is_established/close as observers of the FR-020 Logon refusal, either role)
 include/fix/c_api/message.h             # FR-019: BREAKING (1.9) notes on fixpp_msg_commit, fixpp_msg_set_data, fixpp_entry_set_data; one BREAKING (1.9) reader-family paragraph in the accessor preamble (incl. fixpp_msg_version, fixpp_msg_get_msg_type)
@@ -204,7 +211,7 @@ brain/components/c-api.md                       # C-ABI 1.9 entry (FR-019)
      - `8=…␁9=…␁5001=6␁5002=a␁35=D␁34=…␁49=…␁56=…␁52=…␁…` (`a␁35=D` is the 6-byte Data): `msg_type()` is `"D"` on the unfixed loader (RED) and empty after FR-017 (GREEN); proves `fixpp_msg_get_msg_type`.
    - **Appendix A row-set gate:** run data-model.md Appendix A's `diff` recipe; it must print nothing. Positive controls, each shown to print the symbol: delete one row whose symbol other rows also name (e.g. `fixpp_msg_get_string`) from a scratch copy of `data-model.md`; append a fake symbol to a scratch copy of the golden file. Re-verify each row's class with R-11's recipe at the implementation head; a changed class is a planned edit of FR-019 and the appendix.
    - **Version pin first (`[const §VII.3]`):** `tests/capi/version_test.cpp`'s exact-version cell and `CompositeMacroValue` are set to 1.9 and shown RED against the unbumped minor 8, before the bump.
-   - **Bump:** `FIXPP_C_ABI_VERSION_MINOR` 8 → 9 with a re-authored trailing comment that also carries FR-019's no-carrier effects, naming `fixpp_session_is_established` and `fixpp_session_close` as observers of the Logon effect: under FR-020 a Logon carrying a malformed count (of a component/group-only pair, or of a standard pair such as 95/96) is refused by `interpret_logon`, so on either role `is_established` stays `false` and `close` returns `FIXPP_ERR_THREAD_SESSION_LIFECYCLE`, not `FIXPP_ERR_OK` (FR-019; the text is rewritten by task T072). Add the BREAKING (1.9) notes FR-019 classifies: `dict.h`, `message.h` (commit, `fixpp_msg_set_data`, `fixpp_entry_set_data`, and the one reader-family paragraph incl. `fixpp_msg_version` and `fixpp_msg_get_msg_type`) and `session.h` (send, with its toApp clause, + register_callback). Re-run R-11's population recipe at the implementation head first; a declaration it adds that FR-019 does not name is a planned edit, not a silent omission.
+   - **Bump:** `FIXPP_C_ABI_VERSION_MINOR` 8 → 9 with a re-authored trailing comment that also carries FR-019's no-carrier effects, naming every observer of the Logon effect: under FR-020 a Logon in which a Length is immediately followed by its paired Data whose count overruns the frame or does not end on SOH (of a component/group-only pair, or of a standard pair such as RawDataLength(95) and RawData(96)) is refused by `interpret_logon`, so on either role `is_established` stays `false`, `close`, once the refused session has drained, returns `FIXPP_ERR_THREAD_SESSION_LIFECYCLE`, not `FIXPP_ERR_OK`, `send` on that session returns `FIXPP_ERR_SESSION_INVALID_STATE`, not `FIXPP_ERR_OK`, and neither the receive callback nor the toApp callback is ever invoked for it (FR-019, FR-020; the text was rewritten by task T072 and is narrowed and widened to this form by task T075). Add the BREAKING (1.9) notes FR-019 classifies: `dict.h`, `message.h` (commit, `fixpp_msg_set_data`, `fixpp_entry_set_data`, and the one reader-family paragraph incl. `fixpp_msg_version` and `fixpp_msg_get_msg_type`) and `session.h` (send, with its toApp clause, + register_callback; both gain the FR-020 clause, task T075). Re-run R-11's population recipe at the implementation head first; a declaration it adds that FR-019 does not name is a planned edit, not a silent omission.
    - **Consumers:** run `git grep -ln "VERSION_MINOR\|0x010800\|1_8_0\|(8U << 8U)" -- . ':!specs'` and classify each hit; most compare against the macro and move automatically.
      - Hard pins it must surface: the `version.h` narrative and any other exact-value hit (the `version_test.cpp` pins were written first, above).
      - `version_test.cpp`'s header comment enumerates each post-freeze minor by ordinal. Delete that ordinal enumeration rather than extending it (a comment records a procedure, not a result); keep the rule it explains.
@@ -222,12 +229,18 @@ brain/components/c-api.md                       # C-ABI 1.9 entry (FR-019)
    - Phase 3's codegen change is what turns them GREEN.
    - The pre-flip rejection form is recorded in the commit, so the limitation's pinned-then-fixed
      history stays visible.
-2a. **`interpret_logon` refuses a malformed count (FR-020, tasks §2d).** Owner ruling during
-   `/speckit-implement`. Witnesses first (T070): the function over 95/96 and over a component-only
-   custom pair, and both Logon arms, each accepted on the unfixed code (RED), with twins that hold
-   before and after. Then the fix (T071): the malformed-count `break` returns
-   `session_invalid_logon`; the #426 pin that asserted acceptance is inverted. Then the `version.h`
-   text and freeze re-pin (T072). Scoped Gate A round on this delta before T026. The other
+2a. **`interpret_logon` refuses a malformed paired count (FR-020, tasks §2d).** Owner ruling during
+   `/speckit-implement`. The refused shape is FR-020's three-part predicate:
+   a Length immediately followed by its paired Data whose count overruns the frame or does not end
+   on SOH; an orphan Length is read as a plain value. Witnesses first (T070): the function over
+   RawDataLength(95) and RawData(96) and over a component-only custom pair, and both Logon arms,
+   each accepted on the unfixed code (RED), with twins that hold before and after. Then the fix
+   (T071): the malformed-count `break` returns `session_invalid_logon`; the #426 pin that asserted
+   acceptance is inverted. Then the `version.h` text and freeze re-pin (T072). The scoped Gate A
+   round 1 adds: the orphan-Length pins and the per-role arm cells (T074); the `version.h`,
+   `session.h` and `admin_messages.hpp` text narrowed to the predicate and widened to the derived
+   observer set, with the freeze re-pin (T075); and the complement scan-site recipe (T076). Scoped
+   Gate A converges before T026. The other
    `length_data_carry` scan sites stay as they are (evidence file §*Malformed-count scan sites*).
 2. **`body_builder` API + commit check** (C-1, including C-1.4b handle checks). The C-1 unit tests are written RED first, then
    implemented to GREEN. The flipped pins stay RED: the generated builder still routes through
@@ -392,3 +405,29 @@ None. No Opus-judged finding was marked Disagree. Recorded so later rounds do no
 ### Loop 3 round 3 — converged
 
 - Loop 3 round 3 reviewed 2026-09-24 (Opus-only by owner decision; Codex 5h quota exhausted; owner accepted the loop without the Codex pass): Opus P1=0 P2=0 P3=6 — CONVERGED. All six P3s applied 2026-09-24. Owner signed off Gate A and the plan ([const §X.6]) 2026-09-24. Review: research/reviews/opus_091-data-field-bytes_gate_a_L3_3_adversarial_review.md.
+
+### Scoped FR-020 round 1 — disagreements
+
+Opus (source of truth) marked two points of the Codex pass Disagree; Codex's fix is not applied for
+either:
+- **Codex P1-2's severity (P1 → P2).** The X row listed the FR-020 re-sign-off without a date, so it
+  asserted no false completion; the `**Result:** no violations` line is about constitutional
+  violations, not pending controls. Still a plausible misreading of a mandatory `[const §X.6]`
+  control, so it is fixed as P2: one status per control per phase in the X row.
+- **Codex's "leave the analyze re-run pending".** `/speckit-analyze` was re-run after FR-020 and its
+  findings remediated in `f31059d5`; the X row records it ✅, not pending.
+
+Recorded so later rounds do not re-raise them:
+- **Codex P1-1 taken with Opus's precision edits** (a confirmation, not a disagreement): "reaches or
+  passes" the frame end, not "runs past"; the frame is the whole framed message.
+- **No new behaviour for an orphan Length.** An unapplied count consumes no bytes, so the text is
+  narrowed to the shipped predicate rather than the code widened to the old text.
+- **Checklist dispositions left to the checklist-auditor.** `checklists/abi.md` CHK001, CHK014 and
+  `checklists/codegen-loader.md` CHK023 PASS conditions FR-020 falsifies ("initiator path, a required
+  field after a malformed count"; "shipped dictionaries have no inbound effect"). The checklists are
+  reviewer-owned and not edited here; the checklist-auditor re-dispositions them (SPEC-FIXED, FR-020
+  note) before Gate B.
+- **The misnamed cell is not renamed.** `InterpretLogonMalformedCount.MalformedCountRefusesTheLogonWithNothingAfterIt`
+  has `98=0` after the count; quickstart §3 names it, and renaming is an optional code edit.
+
+- Scoped FR-020 round 1 applied 2026-09-25: Codex P1=2 P2=0 P3=1; Opus post-judging P1=1 P2=3 P3=7; rewrite addresses root causes #1 (FR-020 defined by the failure, not the arming: the three-part armed-pair predicate stated once, one short form carried to FR-019, B-426-2, B-091-4, Appendix A, plan and the Edge Case, orphan-Length pins T074, header text T075), #2 (control status per row, not per control: per-control §X.6 statuses, XVII §1 row IN PROGRESS, T067 cites this round), #3 (observer population listed by example: derived class, R-11 step 6, Appendix A `fixpp_session_send`/`fixpp_session_register_callback` rows, header clauses T075) + all P3s (quickstart mutant row by name, `close` drained precondition in plan phase 0b, C++ `session_compid_mismatch` → `session_invalid_logon` note, C-1.8 last-instance wording, complement scan-site recipe T076, arm cells T074, checklist items handed to the checklist-auditor). Reviews: research/reviews/codex_091-data-field-bytes_gate_a_FR020_review.md, research/reviews/opus_091-data-field-bytes_gate_a_FR020_adversarial_review.md.

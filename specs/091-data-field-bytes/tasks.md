@@ -476,7 +476,7 @@ only then made GREEN.
 - [X] T025 Via `phase-implementer`, update `include/fixpp/wire/length_data_check.hpp`'s header
   comment: "#418 is meant to be its second caller" becomes past tense (the builder is the second
   caller), with no count added (FR-016).
-### 2d — `interpret_logon` refuses a malformed count (FR-020, owner ruling 2026-09-24), tests first
+### 2d — `interpret_logon` refuses a malformed paired count (FR-020, owner ruling 2026-09-24), tests first
 
 - [X] T070 Via `phase-implementer`, the FR-020 RED witnesses in
   `tests/session/length_data_session_scanner_test.cpp` (`session_length_data_scanner`, labelled
@@ -516,6 +516,70 @@ only then made GREEN.
   re-pin). Re-run
   `tools/check_capi_freeze.sh` (it must fail on exactly `version.h`, then re-pin
   `tools/capi_freeze.sha256` and pass).
+- [ ] T074 Via `phase-implementer`, add the FR-020 witnesses the scoped Gate A round 1 found missing
+  to `tests/session/length_data_session_scanner_test.cpp` (`session_length_data_scanner`, already
+  labelled `091` and in `expected-ctest-091.txt`; a manifest change is needed only if a new ctest
+  entry is registered).
+  - **Orphan-Length pins, function level, over the standard table (no hooks argument).** The Logon
+    body is T070's `logon_body_with_count` shape with the `96=x␁` field removed, so `95=999␁` is
+    followed directly by `98=…␁` and the count is never applied:
+    - `InterpretLogonMalformedCount.OrphanOverrunningLengthDoesNotHideEncryptMethod`: `…108=30␁95=999␁98=2␁`
+      is refused with `session_invalid_logon`;
+    - `InterpretLogonMalformedCount.TwinOrphanOverrunningLengthWithZeroEncryptMethodIsAccepted`:
+      `…108=30␁95=999␁98=0␁` is accepted.
+    - Both are GREEN on arrival (not RED witnesses). Each is proven by its own mutant in T026
+      (quickstart §3 rows "the carry applies a pending count whatever the next field's tag", alone
+      and combined with the `break` mutant).
+  - **Arm cells, both roles**, in the `LogonArmMalformedCount` fixture (`state_after_peer_logon`),
+    asserting the session is not established exactly as the existing
+    `AcceptorMalformedCountDoesNotHideEncryptMethod` / `InitiatorMalformedCountDoesNotHideEncryptMethod`
+    cells do:
+    - `AcceptorCountRunningPastTheFrameIsNotEstablished` and
+      `InitiatorCountRunningPastTheFrameIsNotEstablished`: count `999`, then `98=2`;
+    - `AcceptorMalformedCountWithZeroEncryptMethodIsNotEstablished` and
+      `InitiatorMalformedCountWithZeroEncryptMethodIsNotEstablished`: count `2` (ends on a non-SOH
+      byte), then `98=0`, the shape a conforming peer's Logon has.
+    - The fix has landed, so their RED on the unfixed code is shown by T026's `break` mutant, which
+      must turn each of them RED; record it with T026.
+  - GREEN: the unfiltered `session_length_data_scanner` binary passes. Record the cells, the command
+    and the result in `.specify/decisions/091-data-field-bytes-evidence.md` §*FR-020 GREEN
+    (T071–T072)*, as a dated addendum.
+- [ ] T075 Via `phase-implementer`, align the header and source comments with FR-020 as rewritten by
+  the scoped Gate A round 1, with the freeze re-pin:
+  - `include/fix/c_api/version.h` 1.9 history: replace "interpret_logon refuses a Logon carrying a
+    malformed count" with the short form (a Logon in which a Length is immediately followed by its
+    paired Data whose count overruns the frame or does not end on SOH), keeping the spelling
+    `RawDataLength(95) and RawData(96)` (a slash-joined number pair trips the comment lint's ratio
+    rule, `03bc2d4a`). Replace the two-observer sentence with the class (every call whose result
+    depends on the session having logged on) and its members: `fixpp_session_is_established` stays
+    false; `fixpp_session_close`, once the refused session has drained, returns
+    `FIXPP_ERR_THREAD_SESSION_LIFECYCLE`, not `FIXPP_ERR_OK`; `fixpp_session_send` on that session
+    returns `FIXPP_ERR_SESSION_INVALID_STATE`, not `FIXPP_ERR_OK`; neither the receive callback nor
+    the toApp callback (`fixpp_session_register_send_callback`) is ever invoked for it.
+  - `include/fix/c_api/session.h`: `fixpp_session_send`'s BREAKING (C-ABI 1.9) note gains the FR-020
+    clause (a send on a session whose Logon was refused under FR-020, issued after that Logon, which
+    returned `FIXPP_ERR_OK`, now returns `FIXPP_ERR_SESSION_INVALID_STATE`; its existing sentence
+    "For a send this refuses, the toApp callback … is not invoked" is extended to cover this
+    refusal too, since `Session::send` refuses at its Active precondition before `send_impl`), and
+    `fixpp_session_register_callback`'s note gains its clause (inbound application messages on that
+    session, delivered before, are never delivered). Each clause states the refused-Logon shape by
+    the short form, not "a malformed count".
+  - `include/fixpp/session/admin_messages.hpp` (`interpret_logon`'s comment) and the refusal comment
+    in `src/session/admin_messages.cpp`'s `interpret_logon`: state the armed condition (the count
+    applies only when the next field is the Length's paired Data), so neither reads as "any Length
+    count". Delete any sentence the change falsifies; add no count or list of sites.
+  - Run `tools/check_capi_freeze.sh`: it must fail on exactly `version.h` and `session.h`, then
+    re-pin `tools/capi_freeze.sha256` and pass. Run
+    `.claude/scripts/check-comment-claims.py --root <tree> --base origin/main` on the result.
+- [ ] T076 Via `phase-implementer`, record in `.specify/decisions/091-data-field-bytes-evidence.md`
+  §*Malformed-count scan sites* (dated addendum) the complement recipe for the scan-site population:
+  `grep -rn 'data_tag_for_length\|counted_value_end' src include` beside the existing
+  `grep -rn 'read_value(' src include`. Classify each site it adds, from source, as a refusal gate
+  or a reader, and state what it does at a malformed count (candidates to check: `OffsetTable::build`,
+  `MessageView`'s `field_iterator::advance` and its `src/` users, `length_data_checker`, and
+  `Session::validate_inbound_`'s parse-failure path, which falls through to `interpret_logon`). A
+  site that is a refusal gate and fails open at a malformed count goes to the orchestrator; FR-020's
+  scope rests on this population.
 
 - [ ] T026 Via `phase-implementer`, run the Foundational mutants from quickstart §3 in a scratch copy.
   Each one must be RED on the named test, then GREEN after revert:
@@ -534,7 +598,14 @@ only then made GREEN.
       arms (i), (ii), (iv), (v), (vi), (vii) and (viii);
   - "`FIXPP_C_ABI_VERSION_MINOR` set back to 8" → `tests/capi/version_test.cpp`'s exact-version cell;
   - "`interpret_logon` breaks at a malformed count instead of refusing" (FR-020) → every T070 RED
-    cell, on the function and on both arms.
+    cell, on the function and on both arms, the inverted pin
+    `LengthDataSessionScanner.InterpretLogonRefusesAMalformedCount`, and every T074 arm cell;
+    every twin stays GREEN (the exact list is quickstart §3's row);
+  - "the carry applies a pending count whatever the next field's tag" (`length_data_carry::read_value`
+    drops the `data_tag_ == tag` test) (FR-020) → T074's
+    `TwinOrphanOverrunningLengthWithZeroEncryptMethodIsAccepted`;
+  - the same mutant combined with the `break` mutant above → T074's
+    `OrphanOverrunningLengthDoesNotHideEncryptMethod`.
   Record each mutant, command and RED line in `.specify/decisions/091-data-field-bytes-evidence.md`
   §*Mutants*.
 - [ ] T027 Run the **full** `ctest --test-dir build/linux-clang-debug --output-on-failure`, after
@@ -549,7 +620,8 @@ only then made GREEN.
 - The loader pairs the five v50sp2 pairs, and every drift leg is GREEN and non-empty.
 - C-ABI 1.9 is declared, re-pinned and witnessed RED → GREEN.
 - `field_data`/`set_data` and the commit check are GREEN on C-1.
-- `interpret_logon` refuses a malformed count (FR-020): the T070 cells are GREEN and their twins hold.
+- `interpret_logon` refuses a malformed paired count (FR-020): the T070 and T074 cells are GREEN and
+  their twins hold.
 - The four flipped `_418` pins are still RED: the generated builder still routes through `field()`.
 
 ---
@@ -859,7 +931,10 @@ FR-019, SC-006).
     `field_data`/`set_data` but accepted by `fixpp_msg_set_data` (follow-up fixpp#505). A repeated
     call appends where the C-ABI upserts.
   - **B-426-2:** its "every later field stays absent" no longer holds for a Logon: under FR-020
-    `interpret_logon` refuses a Logon carrying a malformed count. Amend the row, citing FR-020.
+    `interpret_logon` refuses a Logon in which a Length is immediately followed by its paired Data
+    whose count overruns the frame or does not end on SOH (an orphan Length is read as a plain
+    value), and the refusal code is always `session_invalid_logon` (a Logon whose 49 or 56 follows
+    such a count, whatever its value, returned `session_compid_mismatch` before). Amend the row, citing FR-020.
   - **B-091-4, marked BREAKING (C-ABI 1.9):** data-model.md's row text. It covers the v50sp2 source
     break in both shapes (a compile error for designated or member access; a silent shift for a
     positional aggregate), the user-loaded-dictionary effects, the recipe-derived BREAKING
@@ -965,8 +1040,10 @@ FR-019, SC-006).
 
 - [ ] T073 Via `phase-implementer`, extend the seeds of `fuzz_session_recovery_admin_parse`
   (`tests/fuzz/fuzz_session_recovery_admin_parse.cpp`, which reaches `interpret_logon` through
-  `Session::on_inbound_frame`; precedent 027 T026) for FR-020: Logons with a 95/96 count running
-  past the frame, a count ending on a non-SOH byte, and `98=2` after a malformed count. Build under
+  `Session::on_inbound_frame`; precedent 027 T026) for FR-020: Logons in which RawDataLength(95) is
+  immediately followed by RawData(96) with a count running past the frame, with a count ending on a
+  non-SOH byte, and with `98=2` after such a count; and an orphan `95=999` followed directly by
+  `98=2` (no 96). Build under
   `linux-clang-asan` (`FIXPP_BUILD_FUZZ=ON`), run ≥ 600 s, commit the seeds to its corpus directory,
   record the command, corpus and result in the evidence file, and name the target to
   `/speckit-verify` (T065) beside `fuzz_dict_xml_loader`.
@@ -1007,19 +1084,31 @@ FR-019, SC-006).
 - [ ] T066 **`CLAUDE-history.md` entry** (Article XIX, plan Constitution Check): via `phase-implementer`
   (the edit guard decides the file class), add a newest-first 091 entry to the library's
   `CLAUDE-history.md` naming the feature, the PR, `Closes #418`, C-ABI 1.9 BREAKING, the FR-020
-  `[const §XII.7]` fail-open fix (it affects shipped dictionaries through 95/96) and the
+  `[const §XII.7]` fail-open fix (a Length immediately followed by its paired Data whose count
+  overruns the frame or does not end on SOH now refuses the Logon; it affects shipped dictionaries
+  through RawDataLength(95) and RawData(96)) and the
   follow-ups #505/#506. Update `CLAUDE.md`'s "Last merged FEATURE" pointer only at merge.
 - [ ] T067 **PR description** (FR-019, plan phase 7). The body carries:
   - the `[const §X.7]` **C-ABI 1.9 BREAKING** declaration: FR-019's population, pointing at B-091-4
     and data-model.md Appendix A;
   - the v50sp2 source break (FR-011 carve-out);
-  - the FR-020 fix: `interpret_logon` refuses a Logon carrying a malformed count, closing a
-    `[const §XII.7]` fail-open reachable on `main` through 95/96;
+  - the FR-020 fix: `interpret_logon` refuses a Logon in which a Length is immediately followed by
+    its paired Data whose count overruns the frame or does not end on SOH, closing a
+    `[const §XII.7]` fail-open reachable on `main` through RawDataLength(95) and RawData(96); its
+    C-ABI observers are every call whose result depends on the session having logged on
+    (`fixpp_session_is_established`, `fixpp_session_close`, `fixpp_session_send`, the receive
+    callback and the toApp callback);
   - `local build: green on linux-clang-debug @ <git-sha>` (`[const §XVII.7]`), with the SHA T065
     verified;
   - a `## Gates` section, and a `## Gate B …` heading for the Gate B record;
-  - under `## Gates`, the record backing `gate-a-done`: `.specify/decisions/091-data-field-bytes-gatea.md`
-    (loop 3 round 3 converged Opus-only, owner-accepted without the Codex pass). If Gate B rules
+  - under `## Gates`, the records backing `gate-a-done`: `.specify/decisions/091-data-field-bytes-gatea.md`
+    (loop 3 round 3 converged Opus-only, owner-accepted without the Codex pass), and the FR-020
+    scoped Gate A: plan.md §Gate A's *Scoped FR-020 round …* entries and their review files
+    (`research/reviews/codex_091-data-field-bytes_gate_a_FR020_review.md`,
+    `research/reviews/opus_091-data-field-bytes_gate_a_FR020_adversarial_review.md`, and any later
+    round's), plus the owner's FR-020 plan re-sign-off (`[const §X.6]`). If the scoped round has not
+    converged or the re-sign-off is still pending (plan.md Constitution Check, X row), ask the owner
+    before labelling. If Gate B rules
     that `[const §XVII.8]`'s "Codex convergence record" is not met, ask the owner before labelling;
     never choose between `gate-a-done` and `gate-a-waived` unilaterally;
   - `Closes #418` as the ONLY closing keyword.
@@ -1063,7 +1152,11 @@ FR-019, SC-006).
   - 2c: T022 and T023 (RED) → T024 → T025. It needs no 2a/2b task and can run beside them, except
     T010 → T023 (same file).
   - 2d: T070 (RED) → T071 (GREEN) → T072. It needs T018 (the `version.h` comment T072 edits).
-  - Then T026 (needs T006–T012, T020 and T071), then T027 (needs everything above).
+    Then T074, T075 (after T072: the same `version.h` comment and freeze pin) and T076, from the
+    scoped Gate A round 1; they can run beside each other, except T074 → T076 (both append to the
+    evidence file).
+  - Then T026 (needs T006–T012, T020, T071 and T074), then T027 (needs everything above, T075 and
+    T076 included).
   - **Blocks all stories.**
 - **US1 (Phase 3):** needs the Foundational checkpoint.
   - T028 (census, RED) → T029, T030, T031, T032 (RED) → T033 → T034 → T035 → T036 (all GREEN);
@@ -1130,7 +1223,7 @@ phase-implementer: T032 vlatest        → tests/session/test_077_allversions_bu
 ### MVP (US1)
 
 1. Setup (T001–T005): the four `_418` pins are RED anchors.
-2. Foundational (T006–T027, T070–T072): the loader, C-ABI 1.9 and the `body_builder` API are all GREEN.
+2. Foundational (T006–T027, T070–T072, T074–T076): the loader, C-ABI 1.9 and the `body_builder` API are all GREEN.
 3. US1 (T028–T040): the generated builders send any octet, including through `send_impl` (T039).
 4. **Stop and validate:** the four `_418` pins and C-2.6 are GREEN, the census is exact, and the
    residual is empty.

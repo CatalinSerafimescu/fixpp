@@ -143,8 +143,10 @@ the call. `body_builder` exposes no size accessor, so this is the observable for
 - **C-1.8 per-container.** The check runs separately in the top level and in each group instance. A
   Length at the end of a group instance does not pair with a Data that follows the group in the
   enclosing container (top level, and an outer entry holding the nested group): refused
-  `wire_invalid_field_format`. Its committing twin places the pair inside the instance and
-  serialises to the same bytes, so only a per-container check separates them. (The "Data at the
+  `wire_invalid_field_format`. When the Length ends the group's last instance and the Data is the
+  first field after the group, its committing twin places the pair inside that instance and
+  serialises to the same bytes, so only a per-container check separates them (otherwise the next
+  instance's delimiter, or an intervening field, separates the two in the serialised order too). (The "Data at the
   start of the next instance" form has no committing twin: INV-5 makes every instance start with
   its delimiter, so that instance would itself start with an unpaired Data.)
 - **C-1.9 dictionary pairs (FR-009), in `wire_dict_tests`.** With a builder constructed from the

@@ -541,7 +541,19 @@ the greps. Run in the library root:
    `fixpp_session_register_send_callback` (same `parse_and_dispatch_`).
 5. **The rest:** every other symbol of `tests/abi/golden/fixpp_capi_symbols.txt` (the authority
    data-model.md Appendix A is gated on; it includes declarations with no `FIXPP_API_EXPORT` and
-   those outside `include/fix/c_api/`) is checked for a path to steps 1–4 and classified.
+   those outside `include/fix/c_api/`) is checked for a path to steps 1–4, and against step 6, and
+   classified.
+6. **Handshake observers (FR-020):** every C-ABI export whose result depends on the session having
+   logged on, since FR-020 changes whether a Logon is accepted, not what any call does. Derive them
+   from the three places the logged-on state is read: `grep -nE "established|ever_established"
+   src/capi` (the latches `CapiApplication::onLogon` sets), each hit mapped to its enclosing
+   `FIXPP_API_EXPORT` function; the exports of step 3, which reach `Session::send`'s Active
+   precondition; and both delivery exports of step 4: `fixpp_session_register_callback`, since
+   `Session` dispatches `fromApp` only in its LogonReceived/Active arm, and
+   `fixpp_session_register_send_callback`, since `Session::send` refuses at its Active precondition
+   before `send_impl` builds the toApp view. Each member's row in
+   data-model.md Appendix A names the FR-020 effect, and its carrier is its own BREAKING note when it
+   has one, plus the `version.h` history.
 
 **Classification** (`[const §X.7]`): a success turned into a failure is BREAKING whatever the
 documentation said; a failure turned into a different failure is BREAKING (§X.7: a result other
