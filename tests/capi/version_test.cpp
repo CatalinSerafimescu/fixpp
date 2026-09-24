@@ -23,7 +23,7 @@ TEST(CapiVersion, CApiVersionMatchesPatchMacro) {
     EXPECT_EQ(v.patch, static_cast<uint16_t>(FIXPP_C_ABI_VERSION_PATCH));
 }
 
-// Concrete value assertion: pins the current C-ABI version. The 0->1 GA freeze
+// Concrete value assertion: pins the current C-ABI version. The GA freeze
 // PRESERVED MINOR (it did not reset it to 0) so the minor-keyed forward-compat
 // downgrade stays coherent: a reset would place the version below the
 // introducing_minor of already-published codes. Every later C-ABI change bumps
