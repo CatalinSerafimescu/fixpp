@@ -193,6 +193,10 @@ is not preserved cannot be re-run by a reviewer*:
 | `tools/table_view_seal_sweep.py` | which TUs stop compiling under the seal, and with how many diagnostics |
 | `tools/table_view_mutation_scope.py` | which mutated `table_view` declarations are pure build-then-use, which interleave — and whether **every** mutator call in a scanned file is attributed to a declaration it found (the attribution guard, §5d) |
 
+> **2026-09-24 — both tools removed by fixpp#498.** Nothing ran them; the seal is enforced by
+> `tests/dictionary/table_view_seal_compile_test.cpp`. The procedure below is kept as written; recover
+> the scripts from git history (`git log --diff-filter=D -- tools/table_view_seal_sweep.py`).
+
 ⚠️ **v0.1 quoted both instruments' output without shipping either, and described the sweep's control
 rule as something the script did not do.** Every figure it quoted was re-run by the adversarial
 review and reproduced exactly — the defect was never in the arithmetic. It was that the numbers
