@@ -363,9 +363,6 @@ Read in `src/session/session.cpp` (`Session::send_impl`, the fixpp#422 "header p
 **No session change is needed.** A witness test drives an XmlData(212/213) value holding SOH
 through `send_impl` and re-parses the frame (spec edge case).
 
-**Known bound.** The carry uses the standard table. A dictionary-only pair in the **header** is the
-L-426-1 residual and is out of scope.
-
 ## R-10 — Performance baseline (SC-005)
 
 *Revised at Gate A round 2 (RC-B): the instrument was frozen at `4749f589` before the design
@@ -540,8 +537,9 @@ the greps. Run in the library root:
    `Session::parse_and_dispatch_` built with the session dictionary, or a clone sharing its
    membership; delivery itself is `fixpp_session_register_callback`, and the toApp view is
    `fixpp_session_register_send_callback` (same `parse_and_dispatch_`).
-5. **The rest:** every other `FIXPP_API_EXPORT` in `include/fix/c_api/*.h` is checked for a path to
-   steps 1–4 and classified.
+5. **The rest:** every other symbol of `tests/abi/golden/fixpp_capi_symbols.txt` (the authority
+   data-model.md Appendix A is gated on; it includes declarations with no `FIXPP_API_EXPORT` and
+   those outside `include/fix/c_api/`) is checked for a path to steps 1–4 and classified.
 
 **Classification** (`[const §X.7]`): a success turned into a failure is BREAKING whatever the
 documentation said; a failure turned into a different failure is BREAKING (§X.7: a result other

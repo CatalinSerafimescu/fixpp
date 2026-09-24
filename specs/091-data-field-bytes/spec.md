@@ -162,7 +162,7 @@ census predates #427.
   (`include/fix/c_api/message.h`) and on `fixpp_dict_load_from_xml` (`include/fix/c_api/dict.h`),
   marks B-091-4 BREAKING, and adds a C-ABI test that pins the refusal (FR-019). The alternative,
   a component/group walk that marks only standard-table pairs, is rejected: it would leave the
-  loader's answer wrong for the dictionary the user wrote.
+  loader's answer wrong for the dictionary the user wrote. (Population since derived: FR-019.)
 
 ---
 
@@ -534,10 +534,12 @@ rejection now assert verbatim emit.
       (`build_replay_frame`) and is gap-filled rather than resent; the session's header and Logon
       scans (`scan_frame_header`, `interpret_logon` in `admin_messages.cpp`, the store's
       `frame_has_genuine_tag554` masking) read such a Data by count. `interpret_logon` stops at a
-      malformed count, so a required Logon field after it is not read; the history comment names
-      `fixpp_session_is_established` and `fixpp_session_close` as the declarations that would
-      observe this **if** the missing field makes the handshake refuse. That refusal is not traced,
-      so no return-code change is asserted for them.
+      malformed count, so a Logon in which a required field (HeartBtInt(108), or 35/49/56 when out
+      of order) follows the malformed count is refused by `interpret_logon`; on the initiator path
+      `fixpp_session_is_established` stays `false` and `fixpp_session_close` returns
+      `FIXPP_ERR_THREAD_SESSION_LIFECYCLE`, not `FIXPP_ERR_OK`. The history comment names both
+      declarations as observers of this handshake effect (re-derive the required fields from
+      `interpret_logon`'s validation steps).
     - **Additive** (failure turned into success; no §X.7 marker, listed in B-091-4): the widenings
       named in the next bullet.
     - **UNCHANGED:** every other export, classified row by row in data-model.md Appendix A. The

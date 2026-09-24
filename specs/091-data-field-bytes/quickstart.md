@@ -73,7 +73,7 @@ Each row names an existing test that must be shown RED, then GREEN after reverti
 | the commit pair check is deleted | C-1.7; C-1.9's "malformed hand-written custom pair refused" arm |
 | a group node is fed as `observe(no_tag, <count digits>)` instead of `observe(no_tag, {})` | C-1.7's "group `no_tag` 354 + sibling one-byte 355" case |
 | `FIXPP_C_ABI_VERSION_MINOR` is set back to 8 | `tests/capi/version_test.cpp` exact-version cell (FR-019) |
-| the loader's component/group walk is removed (C-ABI view) | the FR-019 C-ABI test (the malformed component-only custom pair commits `FIXPP_ERR_OK` again); its `fixpp_session_send` assertion (the malformed payload sends `FIXPP_ERR_OK` again); the FR-019 inbound-drop witness (`Parser<Index>` accepts the malformed frame again) |
+| the loader's component/group walk is removed (C-ABI view) | the FR-019 C-ABI test (the malformed component-only custom pair commits `FIXPP_ERR_OK` again); its additive-widening assertion (`fixpp_msg_set_string` refuses the SOH-bearing Data value again); its `fixpp_msg_set_data(5002, len = 0)` assertion (`FIXPP_ERR_TYPE_MISMATCH` again); its `fixpp_session_send` assertion (the malformed payload sends `FIXPP_ERR_OK` again); the FR-019 inbound-drop witness (`Parser<Index>` accepts the malformed frame again); both FR-019 reader witnesses (tag 1137 reads `"9"` again; `msg_type()` is `"D"` again) |
 | `field_data` appends Data before Length | C-1.1, C-1.10 |
 | the second-append rollback is removed (Length survives a failed Data append) | C-1.5 (its commit-and-byte-compare oracle; the stray Length fails INV-6 or changes the bytes) |
 | `field_data` resolves through `hooks_` instead of the standard table | C-1.9's "`field_data(5002, …)` refused" arm |
