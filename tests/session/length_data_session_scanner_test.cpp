@@ -191,7 +191,9 @@ TEST(LengthDataSessionScanner, ScanFrameHeaderStopsAtACountEndingOnANonSohByte) 
     EXPECT_EQ(h.msg_seq_num, "5");
 }
 
-TEST(LengthDataSessionScanner, InterpretLogonStopsAtAMalformedCount) {
+// Every field interpret_logon validates precedes the count, so the count is the only
+// thing that can refuse this Logon (091 FR-020).
+TEST(LengthDataSessionScanner, InterpretLogonRefusesAMalformedCount) {
     auto const frame = make_frame(
         "35=A\x01"
         "34=1\x01"
@@ -205,8 +207,8 @@ TEST(LengthDataSessionScanner, InterpretLogonStopsAtAMalformedCount) {
         "554=late\x01");
     auto const r = interpret_logon(std::span<const std::byte>{frame}, /*expected_sender=*/"TW",
                                    /*expected_target=*/"ISLD", /*expected_begin=*/"FIX.4.4");
-    ASSERT_TRUE(r.has_value());
-    EXPECT_FALSE(r->password.has_value()) << "a field after a malformed count must not be read";
+    ASSERT_FALSE(r.has_value()) << "a Logon carrying a malformed 95 count was accepted";
+    EXPECT_EQ(r.error(), fixpp::core::error::session_invalid_logon);
 }
 
 // On a malformed count the Password walk cannot know where the value ends, so from that
@@ -243,8 +245,8 @@ TEST(LengthDataSessionScanner, MaskTag554SkipsAFieldWhoseTagIsNotDigits) {
 
 // ── A malformed count must not hide a later EncryptMethod(98) (T070) ─────────
 //
-// interpret_logon stops reading at a malformed Length count (one that runs past the
-// frame, or whose counted value is not followed by SOH). Every cell below shares one
+// A Length count is malformed when it runs past the frame, or when its counted value
+// is not followed by SOH. Every cell below shares one
 // Logon body and varies only the count digit L and the 98 value E, so a refusal of a
 // malformed-count cell cannot come from anything but the count: the L=1 twins, one
 // byte away, are the shape controls. With L=2 the counted value is "x" SOH and the
