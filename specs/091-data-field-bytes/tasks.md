@@ -494,12 +494,13 @@ only then made GREEN.
   - The C-ABI observer was not written: `capi_loopback_support.hpp` pairs two engines and cannot
     inject a hand-built Logon; the arms above are the handshake witnesses.
   - Pre-registered table and observations: evidence file §*interpret_logon fail-open — RED (T070)*.
-- [ ] T071 Via `phase-implementer`, implement FR-020 in `src/session/admin_messages.cpp`'s
+- [X] T071 Via `phase-implementer`, implement FR-020 in `src/session/admin_messages.cpp`'s
   `interpret_logon`: a malformed count returns `core::error::session_invalid_logon` instead of
   breaking out of the scan. No new error code.
   - Replace the `break`'s comment with the condition and a pointer to FR-020; delete any sentence
     of the function's comments the change falsifies.
-  - Invert `LengthDataSessionScanner.InterpretLogonStopsAtAMalformedCount` to assert the refusal
+  - Invert `LengthDataSessionScanner.InterpretLogonStopsAtAMalformedCount` (renamed
+    `InterpretLogonRefusesAMalformedCount`) to assert the refusal
     (FR-020 is its authority); edit no other pre-existing test without an orchestrator ruling.
   - GREEN: the unfiltered `session_length_data_scanner` binary passes, and the T070 twins still
     hold. Then run the full session suite (`ctest --test-dir build/linux-clang-debug -R '^session_'`
@@ -510,7 +511,9 @@ only then made GREEN.
   (FR-019 as amended): the Logon effect is now FR-020's — a Logon carrying a malformed count, of a
   component/group-only pair or of a standard pair such as 95/96, is refused — replacing the
   "a required field follows the count" wording; the observers stay, on either role (the C-ABI
-  latches are set by `onLogon` whatever the role). Re-run
+  latches are set by `onLogon` whatever the role). The `close` observer holds once the refused
+  session has drained; `version.h` says so (a follow-up edit after `03bc2d4a`, with the freeze
+  re-pin). Re-run
   `tools/check_capi_freeze.sh` (it must fail on exactly `version.h`, then re-pin
   `tools/capi_freeze.sha256` and pass).
 

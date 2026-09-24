@@ -561,7 +561,9 @@ rejection now assert verbatim emit.
       shipped dictionaries are affected too); a Logon of that shape that was accepted is now
       refused, so on either role (the C-ABI's `established` / `ever_established` latches are set
       by `onLogon` whatever the role) `fixpp_session_is_established` stays `false` and
-      `fixpp_session_close` returns `FIXPP_ERR_THREAD_SESSION_LIFECYCLE`, not `FIXPP_ERR_OK`. The history comment names both
+      `fixpp_session_close`, once the refused session has drained (its lifecycle-return branch is
+      reached only for a drained or never-published session), returns
+      `FIXPP_ERR_THREAD_SESSION_LIFECYCLE`, not `FIXPP_ERR_OK`. The history comment names both
       declarations as observers of this handshake effect.
     - **Additive** (failure turned into success; no §X.7 marker, listed in B-091-4): the widenings
       named in the next bullet.
@@ -626,7 +628,8 @@ rejection now assert verbatim emit.
     with `98=2` is refused, with `98=0` accepted; `98=2` with no count is refused; the custom-pair
     frame without the dictionary is refused.
   - The pre-existing test that pins the old acceptance
-    (`LengthDataSessionScanner.InterpretLogonStopsAtAMalformedCount`, the #426 "every later field
+    (`LengthDataSessionScanner.InterpretLogonStopsAtAMalformedCount`, renamed
+    `InterpretLogonRefusesAMalformedCount` when inverted; the #426 "every later field
     stays absent" case) is inverted to assert the refusal; the ruling above is its authority.
   - No other `length_data_carry` scan site changes (Clarifications, this session).
 
