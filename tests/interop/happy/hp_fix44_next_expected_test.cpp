@@ -2,10 +2,11 @@
 //
 // tests/interop/happy/hp_fix44_next_expected_test.cpp — 027 T002 [Setup] / T022 [Polish]
 //
-// Live NextExpectedMsgSeqNum(789) interop cells — both roles (C10 / SC-005).
+// NextExpectedMsgSeqNum(789) interop cells — both roles (C10 / SC-005).
+// Cells 1–2 are live; Cell 3 is NOT live (see Cell 3 below and fixpp#503).
 //
 // T022 (Polish): fixpp with enable_next_expected_msg_seq_num=true against a live
-//   QFcpp/QFJ counterparty configured with EnableNextExpectedMsgSeqNum=Y.
+//   QFcpp/QFJ counterparty configured with EnableNextExpectedMsgSeqNum=Y (Cells 1–2).
 //
 //   Cell 1 — NextExpectedInitiator / ProactiveResendNoResendRequest:
 //     fixpp INITIATOR: sends 789 in its Logon; the counterparty ACCEPTOR
@@ -26,10 +27,13 @@
 //     Both fixpp (initiator or acceptor role) and the counterparty have a gap.
 //     Each side proactively resends its missing range; zero ResendRequest from either
 //     party; session reaches Active. Witness: Active reached + seqnum advanced.
-//     The bidirectional gap recovery is asserted end-to-end by the parent harness.
+//     NOT LIVE: no harness cell selects this suite. Its ids are in the
+//     `unregistered-tracked` group of tests/interop/live-cells-excluded.txt, and
+//     making it live needs the gap-induction mechanics that fixpp#503 lists.
 //
-// LIVE CELLS: require a counterparty. INTEROP_REQUIRE_COUNTERPARTY skips with
-// reason when the counterparty port env is absent (FR-023). Never a silent pass.
+// LIVE CELLS (Cells 1–2 only): require a counterparty. INTEROP_REQUIRE_COUNTERPARTY
+// skips with reason when the counterparty port env is absent (FR-023). Never a silent
+// pass.
 //
 // Parent harness MUST configure the counterparty with (cross-repo follow-up):
 //   QFcpp: EnableNextExpectedMsgSeqNum=Y in the session config
@@ -234,7 +238,8 @@ INSTANTIATE_TEST_SUITE_P(AllCounterparties, NextExpectedAcceptor,
 // (proves fixpp sent at least one message before the reconnect gap, and resumed).
 //
 // The wire-level assertion (no ResendRequest from either side, all missed messages
-// delivered in order) is asserted by the parent proxy golden diff.
+// delivered in order) is left to the parent proxy golden diff, which cannot run it
+// while no harness cell selects this suite (see Cell 3 in the file header).
 //
 // Parent harness cross-repo note: both sides must have EnableNextExpectedMsgSeqNum=Y
 // AND the counterparty must have a prior outbound gap (i.e. the parent harness must
