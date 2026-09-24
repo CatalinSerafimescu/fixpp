@@ -4,6 +4,7 @@ codegen_091_data_census_test
 dictionary_pure_tests
 fixpp::dict::read-tier-byte-diff
 session_091_data_send
+session_length_data_scanner
 test_067_builder_failclosed
 test_067_builder_roundtrip
 test_077_allversions_builder_roundtrip

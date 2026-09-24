@@ -726,7 +726,7 @@ target_include_directories(session_length_data_scanner PRIVATE
   "${CMAKE_SOURCE_DIR}/src"
 )
 set_tests_properties(session_length_data_scanner PROPERTIES
-  LABELS "426;length-data;scanner")
+  LABELS "426;length-data;scanner;091")
 # §VIII.5 zero-alloc gate for those scanners: re-runs ONLY the NoHeap cell under the
 # mallocnesia LD_PRELOAD via check_alloc.py (mirrors credential_store_redaction_mallocnesia).
 # registered on every FIXPP_MALLOCNESIA_SUPPORTED configuration since
