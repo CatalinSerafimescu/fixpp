@@ -182,10 +182,10 @@ unconstructible; the IDENTITY half — re-seating the object a bundle latched ag
 `std::optional<table_view>::emplace` — does not (Gate B round 1 finding).** §5c and §5d decide what
 happens to it, as a disclosure rather than a cleanup.
 
-### 2a. The two instruments used throughout this document — CHECKED IN, and hardened
+### 2a. The two instruments used throughout this document — CHECKED IN until fixpp#498, and hardened
 
 Rather than grep for mutator names, this gate **simulates the seal and compiles the tree against
-it**. Both instruments ship with this change, under `tools/`, because *a design-time instrument that
+it**. Both instruments shipped with this change (removed by fixpp#498; see the note below), under `tools/`, because *a design-time instrument that
 is not preserved cannot be re-run by a reviewer*:
 
 | instrument | what it answers |
