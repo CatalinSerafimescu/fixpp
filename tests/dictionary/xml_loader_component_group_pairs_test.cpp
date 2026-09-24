@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // tests/dictionary/xml_loader_component_group_pairs_test.cpp — 091 (fixpp#418), C-2.5a
 //
-// `XmlLoader::detect_length_pairs` over a user-loaded dictionary: a LENGTH/DATA
-// pair that is adjacent only inside a `<component>` definition or a `<group>`
-// (at any depth, whatever its parent) is paired; a non-`<field>` child between
+// The arms require, of `XmlLoader::detect_length_pairs` over a user-loaded
+// dictionary: a LENGTH/DATA pair adjacent only inside a `<component>` or a
+// `<group>` (any depth, any parent) is paired; a non-`<field>` child between
 // the two breaks adjacency; conflicts are settled by the visit order
 // `<fields>`, header/trailer/messages, component definitions, then groups, with
 // the first writer winning (specs/091-data-field-bytes/contracts/codegen-builders.md

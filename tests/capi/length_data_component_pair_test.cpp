@@ -9,15 +9,15 @@
 // component alone (contracts/codegen-builders.md C-2.5a's global
 // preconditions).
 //
-// T008 (outbound message API): a Data value written without its Length is
-// refused at commit; a well-formed pair commits; a SOH-bearing value on the
-// Data tag is accepted; fixpp_msg_set_data with len == 0 is refused as a
-// malformed value (its len == 0 check precedes the declaration check in
-// src/capi/message_write.cpp — re-derive by reading fixpp_msg_set_data).
+// T008 (outbound message API) requires: a Data value written without its
+// Length is refused at commit; a well-formed pair commits; a SOH-bearing value
+// on the Data tag is accepted; fixpp_msg_set_data with len == 0 is refused as a
+// malformed value. That last expectation holds only while fixpp_msg_set_data
+// checks len == 0 before its declaration loop; re-derive by reading it.
 //
-// T009 (session send): over a shipped FIX 4.4 dictionary with the same
-// component injected and referenced from NewOrderSingle, a payload whose Data
-// count does not end on SOH is refused as malformed.
+// T009 (session send) requires: over a shipped FIX 4.4 dictionary with the
+// same component injected and referenced from NewOrderSingle, a payload whose
+// Data count does not end on SOH is refused as malformed.
 
 #include <gtest/gtest.h>
 #include <unistd.h>
@@ -183,7 +183,6 @@ TEST(CapiComponentPair, DataWithoutItsLengthIsRefusedAtCommit) {
     ComponentPairMsg f;
     ASSERT_NE(f.msg, nullptr);
     std::string const value = "abc";
-    ASSERT_EQ(f.set_string(11, "ORD1"), FIXPP_ERR_OK);
     ASSERT_EQ(f.set_string(5002, value), FIXPP_ERR_OK);
     std::string payload;
     EXPECT_EQ(f.commit(payload), FIXPP_ERR_WIRE_CONFORMANCE)
