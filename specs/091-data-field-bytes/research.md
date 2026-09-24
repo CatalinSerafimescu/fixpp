@@ -544,10 +544,13 @@ the greps. Run in the library root:
    steps 1–4 and classified.
 
 **Classification** (`[const §X.7]`): a success turned into a failure is BREAKING whatever the
-documentation said; a failure turned into a success, or a change in output the documentation leaves
-unspecified, is additive. A declaration that is BREAKING has its note name every effect it shows. An effect reached only through engine internals
-with no declaration of its own goes in the `version.h` history comment. The classes and their
-members are FR-019's.
+documentation said; a failure turned into a different failure is BREAKING (§X.7: a result other
+than the one documented for that input); a failure turned into a success, or a change in output the
+documentation leaves unspecified, is additive. A declaration that is BREAKING has its note name every effect it shows. An effect reached only through engine internals
+with no declaration of its own goes in the `version.h` history comment. The classes are FR-019's;
+the per-export result is data-model.md Appendix A, whose row set plan Phase 0b diffs against
+`tests/abi/golden/fixpp_capi_symbols.txt` (the diff proves the row set only; this recipe re-verifies
+each row's class).
 
 **Alternatives rejected (owner).** (a) Couple from the standard table in codegen while leaving the
 loader: fixes builders but leaves the dictionary API answering wrong on FIX50SP2. (c) Scope the five

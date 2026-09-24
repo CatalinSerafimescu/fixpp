@@ -488,8 +488,10 @@ rejection now assert verbatim emit.
     population recipe* is re-run and every export is classified. It is carried out under the
     round-3 ruling and needs no further owner decision. Every note below says that a Length+Data
     pair a loaded dictionary declares only inside a component or group is now a dictionary pair,
-    then names that declaration's own effect. §X.7 classes a success turned into a failure as
-    BREAKING whatever the documentation said.
+    then names that declaration's own effect. §X.7 classes a success turned into a failure, and a
+    failure turned into a different failure, as BREAKING whatever the documentation said. The
+    per-export classification is data-model.md Appendix A, whose Symbol column equals
+    `tests/abi/golden/fixpp_capi_symbols.txt` (plan Phase 0b checks it).
     - **BREAKING (1.9) notes on declarations:**
       - `fixpp_dict_load_from_xml` (`include/fix/c_api/dict.h`), the root cause: same return code,
         but the dictionary it yields now carries the pair;
@@ -499,7 +501,15 @@ rejection now assert verbatim emit.
         `length_data_carry` scan over the session dictionary's hooks: a malformed pair of that kind
         returned `FIXPP_ERR_OK` and now returns `FIXPP_ERR_APP_PAYLOAD_MALFORMED`; and a count that
         covers a following field (e.g. 43, 122 or a header-class tag) is now transmitted verbatim
-        as Data, not excised or reordered;
+        as Data, not excised or reordered; for a send it refuses, the toApp callback
+        (`fixpp_session_register_send_callback`) is not invoked, since `send_impl` returns the
+        refusal before its toApp parse;
+      - `fixpp_msg_set_data` and `fixpp_entry_set_data` (`include/fix/c_api/message.h`), failure →
+        different failure: for the Data tag of such a pair, the unfixed loader left it unpaired and
+        the call returned `FIXPP_ERR_TYPE_MISMATCH`; now that refusal no longer fires and the call
+        reaches the later refusals its declaration documents, e.g. `FIXPP_ERR_WIRE_CONFORMANCE` for
+        `len == 0` (both), or `FIXPP_ERR_DICT_CONFIG` for a half not declared for the MsgType
+        (`fixpp_msg_set_data`). Their success widening stays additive (the B-091-4 bullet below);
       - `fixpp_session_register_callback` (`include/fix/c_api/session.h`), the `fixpp_recv_cb`
         delivery contract: an inbound message carrying a malformed pair of that kind, delivered
         before, is now dropped as a parse error by `Session::parse_and_dispatch_` (the count's end
@@ -507,26 +517,37 @@ rejection now assert verbatim emit.
       - the **inbound reader family**, as **one** BREAKING (1.9) paragraph in `message.h`'s shared
         accessor preamble ("Return codes common to all accessors"), not a marker per reader. It
         names `fixpp_msg_get_{string,bytes,int,double,decimal}`, `fixpp_msg_has_tag`,
+        `fixpp_msg_version`, `fixpp_msg_get_msg_type`,
         `fixpp_msg_field_count`, `fixpp_msg_field_at`, `fixpp_msg_get_group`,
         `fixpp_group_get_field_{string,int,double,decimal}` and `fixpp_group_get_nested_group`,
         says it covers the inbound, clone and toApp views (the last is what
         `fixpp_session_register_send_callback` exposes), and says a counted Data of such a pair can
         absorb fields these readers used to return (a getter that returned `FIXPP_ERR_OK` can now
         return `FIXPP_ERR_TAG_NOT_FOUND`; `field_at` can go out of range; `has_tag` and
-        `field_count` change value).
+        `field_count` change value; `fixpp_msg_version`'s `appl_ver_id` member can become null,
+        tag 8 being fixed first by the Framer; `fixpp_msg_get_msg_type` can return
+        `FIXPP_ERR_TAG_NOT_FOUND` when such a pair precedes 35, which is reachable while the
+        session's `validate_inbound_messages` is unset, since that header-order check is the only
+        rule placing 35 third; re-derive by grepping `validate_inbound_messages` in `src/capi`).
     - **BREAKING with no carrying declaration**, recorded in the `version.h` history comment
       (§X.7): a frame a pre-1.9 engine stored with a malformed pair of that kind now fails replay
       (`build_replay_frame`) and is gap-filled rather than resent; the session's header and Logon
       scans (`scan_frame_header`, `interpret_logon` in `admin_messages.cpp`, the store's
-      `frame_has_genuine_tag554` masking) read such a Data by count.
+      `frame_has_genuine_tag554` masking) read such a Data by count. `interpret_logon` stops at a
+      malformed count, so a required Logon field after it is not read; the history comment names
+      `fixpp_session_is_established` and `fixpp_session_close` as the declarations that would
+      observe this **if** the missing field makes the handshake refuse. That refusal is not traced,
+      so no return-code change is asserted for them.
     - **Additive** (failure turned into success; no §X.7 marker, listed in B-091-4): the widenings
       named in the next bullet.
-    - **UNCHANGED:** every other export. The condition is the recipe's step 5: no path to its steps
-      1–4, that is, no pair lookup at call time and no read of a view the pair-aware parse built;
-      any pair effect of the values such an export writes surfaces at `fixpp_msg_commit`.
+    - **UNCHANGED:** every other export, classified row by row in data-model.md Appendix A. The
+      condition is the recipe's step 5: no path to its steps 1–4, that is, no pair lookup at call
+      time and no read of a view the pair-aware parse built; any pair effect of the values such an
+      export writes surfaces at `fixpp_msg_commit`.
   - B-091-4 is marked BREAKING and names the BREAKING effects above. The **additive** widenings,
-    each a failure turned into a success, are listed next to them: `fixpp_msg_set_data` and `fixpp_entry_set_data` now
-    accept such a pair; `fixpp_msg_set_string` and `fixpp_entry_set_string` no longer refuse an
+    each a failure turned into a success, are listed next to them: `fixpp_msg_set_data` and
+    `fixpp_entry_set_data` now accept a well-formed such pair (their failure → different failure
+    case is BREAKING, above); `fixpp_msg_set_string` and `fixpp_entry_set_string` no longer refuse an
     SOH-bearing value for its Data tag (both gate that refusal on `length_tag_for_data(tag) == 0`);
     and a correctly Length-prefixed, SOH-bearing Data of that pair, written through any setter,
     which failed commit with `FIXPP_ERR_WIRE_CONFORMANCE` before, now commits; and the same
@@ -540,11 +561,14 @@ rejection now assert verbatim emit.
     setters). It commits a malformed instance of that pair through `fixpp_msg_commit` and asserts
     `FIXPP_ERR_WIRE_CONFORMANCE`. A focused assertion in the same fixture pins the additive
     widening: a well-formed instance whose Data holds SOH, written with `fixpp_msg_set_string`, is
-    accepted at set time and commits `FIXPP_ERR_OK` after FR-017 (plan Phase 0b).
+    accepted at set time and commits `FIXPP_ERR_OK` after FR-017 (plan Phase 0b). A second focused
+    assertion pins the `set_data` failure → different failure: `fixpp_msg_set_data(5002, len = 0)`
+    returns `FIXPP_ERR_TYPE_MISMATCH` on the unfixed loader (RED) and `FIXPP_ERR_WIRE_CONFORMANCE`
+    after FR-017 (GREEN).
   - The test asserts only that post-change value. It is written first and shown RED on the unfixed
     loader, where the result is `FIXPP_ERR_OK`; that pre-change form is recorded in the commit, so
     the RED → GREEN step witnesses the break rather than only the new state.
-  - Two more witnesses, each written first and RED on the unfixed loader (plan Phase 0b):
+  - More witnesses, each written first and RED on the unfixed loader (plan Phase 0b):
     - **send:** on a loopback session (`tests/capi/capi_loopback_support.hpp`) whose session
       dictionary is a full shipped dictionary with one injected component-only custom pair,
       `fixpp_session_send` of a malformed instance (`35=D␁5001=2␁5002=abc␁`) asserts
@@ -552,7 +576,13 @@ rejection now assert verbatim emit.
     - **inbound drop:** a fixpp 1.9 peer cannot send the malformed frame, so this witness is at the
       session/wire layer: `Parser<Index>` over the synthetic dictionary's `table_view` refuses the
       malformed frame; the unfixed loader parses it as two plain fields. It proves the effect the
-      `fixpp_session_register_callback` note documents.
+      `fixpp_session_register_callback` note documents;
+    - **readers:** at the same layer and over the same synthetic table, two frames whose
+      `parse()` each asserts a value (so a parse refusal cannot pass as an absorbed field):
+      `…5001=8␁5002=a␁1137=9␁…`, where tag 1137 reads `"9"` on the unfixed loader (RED) and is
+      absent after FR-017 (GREEN), proving the `fixpp_msg_version` effect; and
+      `8=…␁9=…␁5001=6␁5002=a␁35=D␁…`, where `msg_type()` is `"D"` on the unfixed loader (RED) and
+      empty after FR-017 (GREEN), proving the `fixpp_msg_get_msg_type` effect.
   - The `[const §X.6]` controls for a breaking C-ABI change apply.
 
 ### Key Entities
