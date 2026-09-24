@@ -2655,12 +2655,16 @@ if(TARGET fixpp_codegen_generate)
     test_067_builder_failclosed.cpp
     # 069-v44-all-families T008 [US1] — joins this existing binary (Article
     # VII §8: no new executable, no gtest_discover_tests); needs only
-    # fixpp_wire, same as the failclosed witnesses above.
+    # fixpp_wire.
     test_069_us1_smoke.cpp
   )
   add_dependencies(test_067_builder_failclosed fixpp_codegen_generate)
+  # fixpp_dictionary + FIXPP_DICT_DATA_DIR: the 091 `_418` Data-field pins
+  # re-parse the built frame through the dict-aware read scaffold
+  # (app_message_read_scaffold.hpp's load_fix44()).
   target_link_libraries(test_067_builder_failclosed PRIVATE
     fixpp_wire
+    fixpp_dictionary
     fixpp::builders::v44
     fixpp::validators::v44
     GTest::gtest
@@ -2670,6 +2674,9 @@ if(TARGET fixpp_codegen_generate)
     "${_067_CODEGEN_INC}"
     "${CMAKE_SOURCE_DIR}/tests"
     "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  target_compile_definitions(test_067_builder_failclosed PRIVATE
+    "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
   )
   add_test(NAME test_067_builder_failclosed COMMAND test_067_builder_failclosed)
   set_tests_properties(test_067_builder_failclosed PROPERTIES
