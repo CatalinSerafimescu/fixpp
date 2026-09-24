@@ -73,10 +73,10 @@
  *      fails replay (build_replay_frame) and is gap-filled rather than resent;
  *    - the session's header and Logon scans (scan_frame_header, interpret_logon,
  *      the store's frame_has_genuine_tag554 masking) read such a Data by count.
- *      interpret_logon stops at a malformed count, so a Logon in which a field
- *      its validation steps require (e.g. HeartBtInt(108); re-derive the set
- *      from those steps in src/session/admin_messages.cpp) follows the
- *      malformed count is refused. Observers: on the initiator path
+ *      interpret_logon refuses a Logon carrying a malformed count, whether of
+ *      a component/group-only pair or of a standard pair such as 95/96 (so
+ *      shipped dictionaries are affected too): a Logon of that shape that
+ *      was accepted is now refused. Observers: on either role
  *      fixpp_session_is_established stays false, and fixpp_session_close
  *      returns FIXPP_ERR_THREAD_SESSION_LIFECYCLE, not FIXPP_ERR_OK.
  *  No error code is added. */
