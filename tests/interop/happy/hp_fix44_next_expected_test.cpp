@@ -4,24 +4,36 @@
 //
 // NextExpectedMsgSeqNum(789) interop cells — both roles (C10 / SC-005).
 // Cells 1–2 are live; Cell 3 is NOT live (see Cell 3 below and fixpp#503).
+// The live cells seed no at-logon gap, so the X<N proactive-resend arm (resend of
+// [X, N-1], missed-message delivery) is NOT exercised live in either role; they
+// witness 789 negotiation and the in-sync honour arm (no resend) only. Making the
+// gap arm live is fixpp#503.
 //
 // T022 (Polish): fixpp with enable_next_expected_msg_seq_num=true against a live
 //   QFcpp/QFJ counterparty configured with EnableNextExpectedMsgSeqNum=Y (Cells 1–2).
 //
 //   Cell 1 — NextExpectedInitiator / ProactiveResendNoResendRequest:
-//     fixpp INITIATOR: sends 789 in its Logon; the counterparty ACCEPTOR
-//     proactively resends [X, N-1] if it has a gap; zero ResendRequest on the wire;
-//     session reaches Active; all missed messages delivered in order.
-//     Witness: FSM reaches Active (the proactive-resend hand-shake completed).
-//     The absence of ResendRequest on the wire is asserted by the parent proxy capture.
+//     fixpp INITIATOR: sends 789 in its Logon to a fresh counterparty ACCEPTOR that
+//     also advertises 789; no gap is seeded, so the session is in sync and neither
+//     side resends. The counterparty's proactive [X, N-1] resend is NOT exercised
+//     live (fixpp#503).
+//     Witness: FSM reaches Active; outbound seqnum advanced past the Logon.
+//     Any unexpected ResendRequest (35=2) or GapFill fails the cell's parent golden
+//     compare of the counterparty transcript.
 //
 //   Cell 2 — NextExpectedAcceptor / ProactiveResendNoResendRequest:
-//     fixpp ACCEPTOR: receives a Logon with 789=X from the counterparty INITIATOR;
-//     proactively resends [X, N-1] after the reply Logon; zero ResendRequest;
-//     session reaches Active.
+//     fixpp ACCEPTOR: receives a Logon with 789 from a fresh counterparty INITIATOR
+//     and advertises its own 789 in the reply Logon; no gap is seeded, so fixpp
+//     takes the in-sync honour arm and resends nothing. fixpp's proactive
+//     [X, N-1] resend is NOT exercised live (fixpp#503).
 //     Witness: FSM reaches Active; outbound seqnum advanced past Logon
 //     (indicating the acceptor's initial Logon reply was emitted successfully).
-//     The absence of ResendRequest is asserted by the parent proxy capture.
+//     Any unexpected ResendRequest (35=2) or GapFill fails the cell's parent golden
+//     compare of the counterparty transcript.
+//
+//   The TEST_P name ProactiveResendNoResendRequest is historical: it names the
+//   intended gap property, not what the live cells exercise. It is kept because the
+//   parent harness's gtest filters key on it.
 //
 //   Cell 3 — NextExpectedBidirectional / BothGapsRecoverNoResendRequest:
 //     Both fixpp (initiator or acceptor role) and the counterparty have a gap.
@@ -38,9 +50,10 @@
 // Parent harness MUST configure the counterparty with (cross-repo follow-up):
 //   QFcpp: EnableNextExpectedMsgSeqNum=Y in the session config
 //   QFJ:   EnableNextExpectedMsgSeqNum=Y in the session settings
-// Without this, the counterparty will not send tag 789 on its Logon and will
-// fall back to ResendRequest recovery — the cells skip cleanly when no live
-// counterparty env is present, and will test the fast-resume when it is.
+// Without this, the counterparty will not send tag 789 on its Logon. The cells skip
+// cleanly when no live counterparty env is present. With one present they witness
+// 789 negotiation and in-sync honour; fast-resume of a gap is not exercised live,
+// because no gap is seeded (fixpp#503).
 //
 // Anchors: tasks.md T002 (Setup skeleton), T022 (Polish full); contracts C10;
 //          FR-001/002/003/004/007/SC-001/SC-003/SC-005.
@@ -92,19 +105,19 @@ std::string next_expected_bidirectional_name(const ::testing::TestParamInfo<Coun
 //
 // fixpp INITIATOR with enable_next_expected_msg_seq_num=true connects to a live
 // counterparty acceptor. Witness: FSM reaches Active (the knob-on Logon exchange
-// completed, including any proactive resend the counterparty performed).
+// completed). No gap is seeded, so no proactive resend is exercised live
+// (fixpp#503).
 //
-// Wire-level assertion (zero ResendRequest): asserted by the parent proxy capture
-// from the parent-repo phase-9-harness/ golden diff. This in-process witness
-// asserts the session-FSM outcome (Active reached within the watchdog).
+// Wire-level check: any unexpected ResendRequest (35=2) or GapFill fails the parent
+// harness's golden compare of the counterparty transcript (parent-repo
+// phase-9-harness/). This in-process witness asserts the session-FSM outcome
+// (Active reached within the watchdog).
 //
 // Parent harness cross-repo note: the counterparty acceptor MUST be configured
 // with EnableNextExpectedMsgSeqNum=Y (QFcpp/QFJ session config). Without it the
-// counterparty will not send 789, and the at-logon gap (if any) will not
-// fast-recover — the session may still reach Active via the existing ResendRequest
-// path, but that is NOT the fast-resume property under test. The parent-harness
-// config delta is a cross-repo follow-up (parent phase-9-harness/ counterparty
-// config, outside this submodule).
+// counterparty will not send 789, and the cell no longer witnesses the 789
+// exchange. The parent-harness config delta is a cross-repo follow-up (parent
+// phase-9-harness/ counterparty config, outside this submodule).
 
 class NextExpectedInitiator : public ::testing::TestWithParam<Counterparty> {};
 
@@ -129,7 +142,7 @@ TEST_P(NextExpectedInitiator, ProactiveResendNoResendRequest) {
     fixpp::interop::InteropEngineFixture fx;
     auto cfg = hp::make_session_config(Role::fixpp_initiator, "FIX.4.4", factory,
                                        fx.ioc().get_executor(), *endpoint);
-    // Enable NextExpectedMsgSeqNum(789) — both sides must have this on for fast-resume.
+    // Enable NextExpectedMsgSeqNum(789) — both sides must have this on to exchange 789.
     cfg.enable_next_expected_msg_seq_num = true;
 
     const auto id = fixpp::session::SessionId::from_config(cfg);
@@ -165,11 +178,13 @@ INSTANTIATE_TEST_SUITE_P(AllCounterparties, NextExpectedInitiator,
 //
 // fixpp ACCEPTOR with enable_next_expected_msg_seq_num=true binds a port and
 // waits for the counterparty INITIATOR to connect. The counterparty sends 789 in
-// its Logon; fixpp responds with its own 789 in the acceptor reply and proactively
-// resends [X, N-1] (C4 / RC#4 ordering). Witness: FSM reaches Active + outbound
-// seqnum advanced past the reply Logon.
+// its Logon; fixpp responds with its own 789 in the acceptor reply. No gap is
+// seeded, so fixpp's proactive [X, N-1] resend after the reply (C4 / RC#4
+// ordering) is NOT exercised live (fixpp#503). Witness: FSM reaches Active +
+// outbound seqnum advanced past the reply Logon.
 //
-// The absence of ResendRequest on the wire is asserted by the parent proxy capture.
+// Any unexpected ResendRequest (35=2) or GapFill fails the parent harness's golden
+// compare of the counterparty transcript.
 //
 // Parent harness cross-repo note: counterparty initiator MUST be configured with
 // EnableNextExpectedMsgSeqNum=Y. See parent-repo phase-9-harness/ config (cross-repo
@@ -197,7 +212,7 @@ TEST_P(NextExpectedAcceptor, ProactiveResendNoResendRequest) {
     fixpp::interop::InteropEngineFixture fx;
     auto cfg = hp::make_session_config(Role::fixpp_acceptor, "FIX.4.4", factory,
                                        fx.ioc().get_executor(), *endpoint);
-    // Enable NextExpectedMsgSeqNum(789) — both sides must have this on for fast-resume.
+    // Enable NextExpectedMsgSeqNum(789) — both sides must have this on to exchange 789.
     cfg.enable_next_expected_msg_seq_num = true;
 
     const auto id = fixpp::session::SessionId::from_config(cfg);
