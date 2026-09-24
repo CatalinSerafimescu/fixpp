@@ -141,7 +141,12 @@ the call. `body_builder` exposes no size accessor, so this is the observable for
     tag and the sibling turned into a well-formed pair (a bare sibling 355 fails INV-6 on its own);
   - "group whose `no_tag` is 355": the group's `no_tag` changed to a non-pair tag.
 - **C-1.8 per-container.** The check runs separately in the top level and in each group instance. A
-  Length at the end of one instance does not pair with a Data at the start of the next.
+  Length at the end of a group instance does not pair with a Data that follows the group in the
+  enclosing container (top level, and an outer entry holding the nested group): refused
+  `wire_invalid_field_format`. Its committing twin places the pair inside the instance and
+  serialises to the same bytes, so only a per-container check separates them. (The "Data at the
+  start of the next instance" form has no committing twin: INV-5 makes every instance start with
+  its delimiter, so that instance would itself start with an unpaired Data.)
 - **C-1.9 dictionary pairs (FR-009), in `wire_dict_tests`.** With a builder constructed from the
   hooks of a dictionary that declares a pair (5001, 5002):
   - `field_data(5002, "abc\x01" "1=EVIL")` is **refused** (`wire_unexpected_tag`), nothing appended

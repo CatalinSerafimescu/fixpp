@@ -351,7 +351,7 @@ only then made GREEN.
 
 ### 2c — `body_builder` operation and commit check (C-1, FR-001…FR-009), tests first
 
-- [ ] T022 Via `phase-implementer`, write the C-1 unit tests in `tests/wire/test_body_builder.cpp`
+- [X] T022 Via `phase-implementer`, write the C-1 unit tests in `tests/wire/test_body_builder.cpp`
   (`wire_body_builder_test`, standalone, `[const §VII.8]`-exempt because of its in-TU global
   `operator new` counter). They are **RED** at first (the members do not exist).
   - **Oracle for every refusal and rollback case:** commit, and require the body to be
@@ -405,13 +405,14 @@ only then made GREEN.
     - A hand-written `field(354, int 3)` + `field(355, "abc")` commits.
     - Every group-tag case has instances that are non-empty and delimiter-first, and a **committing
       twin** exactly as C-1.7 specifies, so the refusal is proven to be INV-6's, not INV-5's.
-  - **C-1.8** per-container: a Length ending one instance does not pair with a Data starting the
-    next.
+  - **C-1.8** per-container: a Length ending a group instance does not pair with a Data that
+    follows the group in the enclosing container (top level and nested), with a committing twin
+    of identical bytes (contract C-1.8).
   - **C-1.10** an entry of a group whose `delimiter_tag` is 43109, populated by
     `set_data(42684, …)`, commits.
   - **C-1.11** `field_data(355, …)` twice appends two well-formed pairs; commit accepts.
   - Record the RED build output in the commit.
-- [ ] T023 Via `phase-implementer`, add C-1.9 (dictionary pairs, FR-009) to
+- [X] T023 Via `phase-implementer`, add C-1.9 (dictionary pairs, FR-009) to
   `tests/wire/dict_hooks_custom_pair_test.cpp` (`wire_dict_tests`), as the outbound twin of its
   inbound cases. With a builder constructed from `dict_hooks::for_table_view(tv)` of a dictionary
   that declares (5001, 5002):
