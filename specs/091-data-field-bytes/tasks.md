@@ -35,6 +35,9 @@ only then made GREEN.
   lead, not an input.
 - **Labels.** Every ctest entry a task adds to or edits gets label `091` in the CMakeLists that
   registers it. `expected-ctest-091.txt` (T003) is the gate.
+- **Evidence file.** Mutant, bench, compile-surface and golden-residual evidence goes to
+  `.specify/decisions/091-data-field-bytes-evidence.md` (a sibling of the verify record; `/speckit-verify` produces its own record in T062 and
+  cites this file). Never write into the verify record before T062 creates it.
 - **Commit after each task or logical group**; the RED form of each TDD step goes in its commit
   message (FR-019, plan phase 1).
 
@@ -57,7 +60,7 @@ only then made GREEN.
 - [ ] T002 Before any edit under `src/`, `include/` or `tools/`, measure the compile-time surface
   "before" figure with `bench/codegen/vlatest_builders_compile_bench/compile_bench.sh`
   (R-10). Record the command, toolchain and figures in
-  `.specify/decisions/091-data-field-bytes-verify.md` §*Compile-time surface*. The figure is
+  `.specify/decisions/091-data-field-bytes-evidence.md` §*Compile-time surface*. The figure is
   unrecoverable after the first production edit. If T001 finds a production diff, measure from
   the merge-base worktree instead and say so.
 - [ ] T003 Via `phase-implementer`: create `specs/091-data-field-bytes/expected-ctest-091.txt`, one
@@ -76,12 +79,15 @@ only then made GREEN.
       `test_077_allversions_builder_roundtrip` and `test_077_allversions_builder_roundtrip_vlatest`
       in `tests/session/CMakeLists.txt`;
     - `capi_pure_tests` and `capi_length_data` in `tests/capi/CMakeLists.txt`.
-  - In the same edit, **delete** the false banner claim in `tests/wire/CMakeLists.txt` lines 3–5
-    ("none of the 34 carry LABELS …"); it was already false (`wire_pure_tests` and
+  - In the same edit, **delete** the false banner claim in `tests/wire/CMakeLists.txt`'s header
+    comment (the clause beginning "none of
+    the 34 carry LABELS"); it was already false (`wire_pure_tests` and
     `wire_dict_tests` carry labels). Delete it; do not replace it with a count.
   - `codegen_091_data_census_test` and `session_091_data_send` are registered by T033 and T038. Until
     then, the quickstart §2 gate is expected to report them missing.
-  - Positive control: before T033, the gate's `comm -23` line must print exactly those two names.
+  - Positive control: before T033, the gate's `diff "$R/expected.txt" "$R/labelled.txt"` line must
+    report exactly those two names missing from the labelled side (the gate exits there, before
+    `comm -23`).
 - [ ] T004 Via `phase-implementer`, carry over the stage-one pins, **tests only**. Apply the
   `tests/session/test_067_builder_failclosed.cpp` hunk of `68c8c769`
   (`git show 68c8c769 -- tests/session/test_067_builder_failclosed.cpp`) onto this branch; do NOT
@@ -454,7 +460,7 @@ only then made GREEN.
     - T010's inbound-drop witness and both reader witnesses; plus the T006 FIX50SP2 leg and C-2.5a
       arms (i), (ii), (iv), (v), (vi), (vii) and (viii);
   - "`FIXPP_C_ABI_VERSION_MINOR` set back to 8" → `tests/capi/version_test.cpp`'s exact-version cell.
-  Record each mutant, command and RED line in `.specify/decisions/091-data-field-bytes-verify.md`
+  Record each mutant, command and RED line in `.specify/decisions/091-data-field-bytes-evidence.md`
   §*Mutants*.
 - [ ] T026 Run the **full** `ctest --test-dir build/linux-clang-debug --output-on-failure`, after
   codegen freshness.
@@ -496,7 +502,10 @@ are the four flipped `_418` pins, plus C-2.6.
     name.
   - RED at first: the Data goes through `set_string`.
 - [ ] T028 [P] [US1] Via `phase-implementer`, add the C-2.3 compile-time presence checks.
-  - In `tests/session/test_067_builder_roundtrip.cpp`, a `requires`-expression test:
+  - Each check is a `constexpr bool` computed from a `requires` expression and asserted with
+    `EXPECT_TRUE`/`EXPECT_FALSE`, never a `static_assert`: a compile error would stop the whole
+    binary and hide T027's runtime RED.
+  - In `tests/session/test_067_builder_roundtrip.cpp`:
     - `fixpp::v44::NewOrderSingleArgs` has `message_encoding`, and it is the **last** member (R-8);
     - one v44 message with no `Encoded*` field has **no** `message_encoding` member. The census
       (T038) names it, e.g. an app message; `Heartbeat` only if it is in the generated set.
@@ -505,7 +514,7 @@ are the four flipped `_418` pins, plus C-2.6.
       `DerivativeEncodedSecurityDesc(1281)` or `InstrumentScopeEncodedSecurityDesc(1621)` **has**
       the member (named by census);
     - one v50sp2 message with no `Encoded*` field has none.
-  - RED (fails to compile) at first; confine the RED to these new tests.
+  - RED (a test failure, not a build failure) at first.
 
 ### Implementation for User Story 1
 
@@ -592,7 +601,7 @@ are the four flipped `_418` pins, plus C-2.6.
     must then be **byte-identical**, and that empty residual is the check.
   - **Positive control:** inject a stray `bb.field(347, …)` inside a group body of one regenerated
     golden; the residual must be non-empty.
-  - Record the commands and output in the verify doc.
+  - Record the commands and output in `.specify/decisions/091-data-field-bytes-evidence.md`.
 - [ ] T036 [P] [US1] Via `phase-implementer`, add the v50sp2 Length-delimited group witness (R-6) to
   `tests/session/test_077_allversions_builder_roundtrip.cpp`.
   - Build one `NoPaymentStreamFormulas` entry (delimiter `PaymentStreamFormulaLength` 43109) whose
@@ -630,10 +639,10 @@ are the four flipped `_418` pins, plus C-2.6.
     T033's message-encoding set;
   - "`field_data` routes through `append_string_field`" (re-applies the content guard, FR-015) → the
     four `_418` success cases, and C-1.2.
-  Record them in the verify doc §*Mutants*.
+  Record them in `.specify/decisions/091-data-field-bytes-evidence.md` §*Mutants*.
 - [ ] T040 [US1] After codegen freshness, re-measure the compile-time surface "after" figure with
   `bench/codegen/vlatest_builders_compile_bench/compile_bench.sh`, same command and toolchain as
-  T002. Report the delta in the verify doc; it has no budget (R-10).
+  T002. Report the delta in `.specify/decisions/091-data-field-bytes-evidence.md`; it has no budget (R-10).
 
 **Checkpoint**:
 - US1 works independently: the four `_418` pins, C-2.6 top and nested, and the R-6 and vlatest round
@@ -658,7 +667,7 @@ C-1.9 refusal arms pass, and each is shown able to fail.
   inside that `TEST` body, and every pre-existing injection-guard test in
   `tests/wire/test_body_builder.cpp` and `tests/session/test_067_builder_failclosed.cpp` is unedited
   (`git diff origin/main` hunks touch only new tests and the four flipped pins). Record both diffs in
-  the verify doc.
+  `.specify/decisions/091-data-field-bytes-evidence.md`.
 - [ ] T042 [US2] Via `phase-implementer`, run the guard mutants from quickstart §3 in a scratch copy.
   Each is RED on the named arm, then GREEN after revert:
   - "`set_data` skips pair resolution (forwards straight to `append_bytes_field`)" → C-1.4's
@@ -671,7 +680,7 @@ C-1.9 refusal arms pass, and each is shown able to fail.
   - "`set_data` omits the owner check" → C-1.4b default handle. Run it under ASan: it must fail, not
     pass through UB;
   - "`set_data` omits `is_innermost_open`" → C-1.4b outer handle and closed-group handle.
-  Record them in the verify doc §*Mutants*.
+  Record them in `.specify/decisions/091-data-field-bytes-evidence.md` §*Mutants*.
 - [ ] T043 [US2] Confirm FR-012 / SC-002 from T033/T034: the census reports zero `field_data`/
   `set_data` on a tag outside the standard Data set, on every version. Cite control (b)/(c) as the
   proof that it can fire, and the `static_assert` positive control (T039, first bullet) as the
@@ -701,7 +710,7 @@ rollback on arena exhaustion and on the body cap (C-1.1–C-1.11 except C-1.9; C
     C-1.7's "group `no_tag` 354 + sibling one-byte 355" case;
   - "commit's checker is built from `none()` instead of `hooks_`" → C-1.9's "malformed custom pair
     refused at commit" arm.
-  Record them in the verify doc §*Mutants*.
+  Record them in `.specify/decisions/091-data-field-bytes-evidence.md` §*Mutants*.
 - [ ] T045 [US3] Run C-1.5 on **MSVC** (`windows-msvc-debug` in the MSVC sandbox, per
   `phases/phase-4/parallel-worktrees.md`). The arrangement witness must hold there too, because
   outer-vector regrowth differs by STL. If the MSVC leg cannot run, record a waiver with its cost
@@ -710,7 +719,7 @@ rollback on arena exhaustion and on the body cap (C-1.1–C-1.11 except C-1.9; C
   - Re-run `git grep -n "field(\(90\|91\|95\|96\|212\|213\|354\|355\)\b" -- src tests bench bindings`.
   - Confirm that the full ctest run (T026, T062) raised no `wire_invalid_field_format` from a
     pre-existing caller.
-  - Record the grep and its stated blind spot (named constants, computed tags) in the verify doc. The
+  - Record the grep and its stated blind spot (named constants, computed tags) in `.specify/decisions/091-data-field-bytes-evidence.md`. The
     blind spot is covered structurally by T033, and disclosed as B-091-1.
 
 **Checkpoint**: US3 holds independently, and every contract clause has a live test.
@@ -811,7 +820,7 @@ FR-019, SC-006).
   - **Verdict:** NoGroup, WithGroup and Raw each ≤ +3 % (minimum of medians). AsciiEncodedText is
     reported only.
   - Over budget → the owner, with the floor and the per-leg figures. Never relax it.
-  - Record everything in the verify doc §*SC-005*.
+  - Record everything in `.specify/decisions/091-data-field-bytes-evidence.md` §*SC-005*.
   - `/mnt/wsl/fixppbuild/091-baseline/builder_bench.base` is a drift cross-check only.
 - [ ] T056 Run the paired `bench/dictionary/xml_loader_bench` A-B-A-B (FIX50SP2 load) against the same
   base worktree, same procedure.
@@ -824,8 +833,9 @@ FR-019, SC-006).
 - [ ] T057 Run clang-tidy and clang-format on every changed file under `src/`, `include/` **and
   `tools/codegen/`** (#265). Never format `specs/` or `include/fix/c_api/*.h`. Any finding on a
   changed line is fixed by `phase-implementer`.
-- [ ] T058 Run `python3 ../../../../.claude/scripts/check-comment-claims.py --root . --base
-  origin/main` from the library root; the script lives in the parent repo's `.claude/scripts/`.
+- [ ] T058 Run `python3 /home/catalin/Work/Programming/Antreprenoriat/.claude/scripts/check-comment-claims.py
+  --root <tree> --base origin/main`, with `<tree>` the worktree that owns this branch (absolute
+  path, so it also works from a parallel worktree).
   - Read every hit in the comments this feature authored: the `version.h` history, the BREAKING
     notes, the read-tier banner, the `body_builder.hpp` contract comments and the CMakeLists
     comments. Also read the strings the script cannot see.
@@ -841,22 +851,38 @@ FR-019, SC-006).
   every manifest entry is a registered test. Then run `ctest -L '^091$' --output-on-failure`, all
   GREEN.
 - [ ] T062 Run `/speckit-verify` (mandatory after `/speckit-implement`, Article XVII §8). It produces
-  `.specify/decisions/091-data-field-bytes-verify.md`, with the sections T002/T025/T035/T039–T046/
-  T055/T056 wrote.
+  `.specify/decisions/091-data-field-bytes-verify.md`. The record cites
+  `.specify/decisions/091-data-field-bytes-evidence.md`, which T002, T025, T035, T039–T046, T055 and
+  T056 wrote; its discriminating-witness rows point there rather than restating it.
   - It covers the ASan and UBSan presets, coverage (every new line in `src/wire/body_builder.cpp`
     and the new loader walk in `src/dictionary/xml_loader.cpp`), clang-tidy and ABI hygiene.
   - It includes the full `ctest --test-dir build/linux-clang-debug` run.
   - ⚠️ The §7 full build needs an owner ASK, even as gate evidence.
 
+- [ ] T063 **`CLAUDE-history.md` entry** (Article XIX, plan Constitution Check): via `phase-implementer`
+  (the edit guard decides the file class), add a newest-first 091 entry to the library's
+  `CLAUDE-history.md` naming the feature, the PR, `Closes #418`, C-ABI 1.9 BREAKING and the
+  follow-ups #505/#506. Update `CLAUDE.md`'s "Last merged FEATURE" pointer only at merge.
+- [ ] T064 **PR description** (FR-019, plan phase 7). The body carries:
+  - the `[const §X.7]` **C-ABI 1.9 BREAKING** declaration: FR-019's population, pointing at B-091-4
+    and data-model.md Appendix A;
+  - the v50sp2 source break (FR-011 carve-out);
+  - a `## Gates` section, and a `## Gate B …` heading for the Gate B record;
+  - `Closes #418` as the ONLY closing keyword.
+  Before opening, grep the body AND every commit message on the branch
+  (`git log origin/main..HEAD --format=%B`) for `close[sd]?|fix(e[sd])?|resolve[sd]?` next to
+  `#50[56]` or any number other than 418. A negated keyword still links. After opening, check
+  `closingIssuesReferences` lists only #418.
+
 ### Mandatory close-out tasks (Gate-B preconditions, Article XVII §8)
 
-- [ ] T063 [P] **Catalogue close-out.**
+- [ ] T065 [P] **Catalogue close-out.**
   - Flip every feature-owned OFFICIAL row in `spec/feature-catalogue.md` to `done` with this PR as
     evidence. That covers W-008, which gains 091's evidence (T049), and any row 091 owns; the CA
     rows carry the 1.9 note from T049.
   - Add or update the matching `spec/coverage-index.md` entry: `[FIX50SP2 §3.3] Field data types` ↔
     W-008, naming this feature's witnesses (the `_418` pins, C-2.6, C-1.2).
-- [ ] T064 **Feature-completeness audit (the FINAL task).** Assert against the merged tree:
+- [ ] T066 **Feature-completeness audit (the FINAL task).** Assert against the merged tree:
   - (i) every `tasks.md` row is `[X]` or carries an explicit waiver rationale;
   - (ii) every FR-001…FR-019 (including FR-004a, FR-009a and FR-011a) and SC-001…SC-006 maps to a
     landed test AND a landed implementation;
@@ -900,7 +926,7 @@ FR-019, SC-006).
   - T053 → T054 → T055 → T056;
   - T057–T060 after all code tasks;
   - T062 after T057–T060;
-  - T063 → T064. T064 is last.
+  - T065 → T066. T066 is last.
 
 ### User story dependencies
 
@@ -971,6 +997,5 @@ carries all of it: C-ABI 1.9 must ship in the same PR as the loader change (plan
 
 - `[P]` means different files and no incomplete dependency.
 - `[USn]` traces a task to its story. Setup, Foundational and Polish carry none.
-- Coverage: every C-1 clause (C-1.1…C-1.11, C-1.4b), every C-2 clause (C-2.1…C-2.6, C-2.5a
-  (i)–(viii), (vii)(a–c)) and every quickstart §3 mutant row is assigned to exactly one task above.
-  `/speckit-analyze` re-checks that mechanically.
+- Coverage of the C-1/C-2 clauses, the C-2.5a arms and the quickstart §3 mutant rows is
+  re-checked mechanically by `/speckit-analyze`; this file records no count.
