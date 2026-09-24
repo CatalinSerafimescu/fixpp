@@ -174,7 +174,7 @@ TEST_P(RestartResume_Initiator, BothCountersResumeFromStore) {
     // Witness (b): outbound seqnum resumed from the persisted store — > 1.
     // The pre-restart session advanced the fixpp outbound counter; the hydrate-
     // on-open path loaded that value into the manager before the Logon was sent.
-    // If the counter were reset to 1 (no hydrate), this assertion would fail.
+    // Also holds after any fresh Logon (kMinResumedSeqnum); see NOT LIVE header and fixpp#503.
     EXPECT_GE(mgr.peek_outbound(), kMinResumedSeqnum)
         << "outbound seqnum was not resumed from the persisted store (got " << mgr.peek_outbound()
         << "); expected >= " << kMinResumedSeqnum
@@ -183,8 +183,8 @@ TEST_P(RestartResume_Initiator, BothCountersResumeFromStore) {
     // Witness (c): inbound seqnum resumed from the persisted store — > 1.
     // The pre-restart session durably tracked received messages via
     // persist_inbound_advance_(); the hydrate-on-open path loaded that value.
-    // If the inbound counter were not durably tracked and resumed, next_inbound
-    // would still be 1 after restart.
+    // This also holds after any fresh Logon (kMinResumedSeqnum); the seeded
+    // inbound threshold's tracking issue is fixpp#503, as noted in the NOT LIVE header.
     EXPECT_GE(mgr.next_inbound_unsafe(), kMinResumedSeqnum)
         << "inbound seqnum was not resumed from the persisted store (got "
         << mgr.next_inbound_unsafe() << "); expected >= " << kMinResumedSeqnum
