@@ -41,6 +41,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -48,6 +49,7 @@
 #include <fixpp/dict/reify.hpp>
 #include <fixpp/dict/table_view.hpp>
 #include <fixpp/dict/xml_loader.hpp>
+#include <fixpp/wire/body_builder.hpp>
 #include <fixpp/wire/dict_hooks.hpp>
 #include <fixpp/wire/offset_table.hpp>
 #include <fixpp/wire/parser.hpp>
@@ -58,6 +60,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "support/frame_view_factory.hpp"
@@ -1055,5 +1058,225 @@ TEST(DictHooksComponentPair, ForgedMsgTypeInsideDataIsNotRead) {
     if (mv.has_value()) {
         EXPECT_TRUE(mv->msg_type().empty())
             << "35=D inside the 5002 value was read as MsgType \"" << mv->msg_type() << '"';
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// 091 (fixpp#418) C-1.9 — the outbound twin of the cases above: a
+// wire::body_builder constructed with the hooks of a dictionary that declares
+// the pair (5001, 5002). Set time uses the standard pair table only, whatever
+// hooks the builder holds; commit()'s pair check reads the builder's hooks.
+// Clause text: specs/091-data-field-bytes/contracts/body-builder-data.md.
+// Each table_view is declared before the hooks built from it, and both before
+// the builder, so the view outlives the builder (dict_hooks.hpp lifetime rule).
+namespace {
+
+namespace c19 {
+
+using fixpp::core::error;
+using fixpp::core::expected_t;
+using fixpp::wire::body_builder;
+
+constexpr std::size_t kBufSize = 8192;
+
+std::span<const std::byte> octets(std::string_view sv) {
+    return std::span<const std::byte>{reinterpret_cast<const std::byte*>(sv.data()), sv.size()};
+}
+
+table_view make_pair_dict(std::uint16_t length_tag, std::uint16_t data_tag) {
+    table_view_builder tvb;
+    tvb.set_length_pair_data_tag(length_tag, data_tag);
+    return std::move(tvb).build();
+}
+
+expected_t<std::string> commit_body(body_builder& b) {
+    std::array<std::byte, kBufSize> buf{};
+    auto r = b.commit(std::span<std::byte>{buf});
+    if (!r.has_value()) return std::unexpected(r.error());
+    return std::string{reinterpret_cast<char const*>(r->data()), r->size()};
+}
+
+// The commit is refused with `want` and leaves `out` untouched.
+void expect_commit_refused(body_builder& b, error want) {
+    std::array<std::byte, kBufSize> buf{};
+    buf.fill(std::byte{0xAB});
+    auto r = b.commit(std::span<std::byte>{buf});
+    ASSERT_FALSE(r.has_value()) << "commit accepted the body";
+    EXPECT_EQ(r.error(), want);
+    for (auto const byte : buf) {
+        ASSERT_EQ(byte, std::byte{0xAB}) << "out must be untouched on a refused commit";
+    }
+}
+
+// A closed group `no_tag` (delimiter AllocAccount(79)) with one populated instance.
+void add_populated_group(body_builder& b, std::uint16_t no_tag) {
+    auto g = b.group_begin(no_tag, 79);
+    ASSERT_TRUE(g.has_value());
+    auto e = g->add_entry();
+    ASSERT_TRUE(e.has_value());
+    ASSERT_TRUE(e->set_string(79, "A1").has_value());
+    ASSERT_TRUE(b.group_end(*g).has_value());
+}
+
+}  // namespace c19
+
+}  // namespace
+
+TEST(DictPairBodyBuilder, C1_9_DictionaryOnlyDataTagIsRefusedAtSetTimeOnBothSurfaces) {
+    using namespace c19;
+    table_view const tv = make_pair_dict(5001, 5002);
+    auto const hooks = dict_hooks::for_table_view(tv);
+    ASSERT_EQ(hooks.length_tag_for_data(5002), 5001U)
+        << "precondition: the hooks really do pair 5001 with 5002";
+    std::string_view const value{
+        "abc\x01"
+        "1=EVIL"};
+
+    {
+        SCOPED_TRACE("field_data at the top level");
+        body_builder subject{"X", hooks};
+        body_builder twin{"X", hooks};
+        ASSERT_TRUE(subject.field(11, std::string_view{"ORD1"}).has_value());
+        ASSERT_TRUE(twin.field(11, std::string_view{"ORD1"}).has_value());
+        auto const r = subject.field_data(5002, octets(value));
+        ASSERT_FALSE(r.has_value()) << "a dictionary-only Data tag was accepted at set time";
+        EXPECT_EQ(r.error(), error::wire_unexpected_tag);
+        auto const twin_body = commit_body(twin);
+        ASSERT_TRUE(twin_body.has_value()) << "the no-call twin must commit";
+        auto const subject_body = commit_body(subject);
+        ASSERT_TRUE(subject_body.has_value()) << "the subject must commit after the refused call";
+        EXPECT_EQ(*subject_body, *twin_body);
+    }
+    {
+        SCOPED_TRACE("set_data on a live innermost entry");
+        body_builder subject{"X", hooks};
+        body_builder twin{"X", hooks};
+        auto sg = subject.group_begin(78, 79);
+        auto tg = twin.group_begin(78, 79);
+        ASSERT_TRUE(sg.has_value());
+        ASSERT_TRUE(tg.has_value());
+        auto se = sg->add_entry();
+        auto te = tg->add_entry();
+        ASSERT_TRUE(se.has_value());
+        ASSERT_TRUE(te.has_value());
+        ASSERT_TRUE(se->set_string(79, "A1").has_value());
+        ASSERT_TRUE(te->set_string(79, "A1").has_value());
+        auto const r = se->set_data(5002, octets(value));
+        ASSERT_FALSE(r.has_value()) << "a dictionary-only Data tag was accepted at set time";
+        EXPECT_EQ(r.error(), error::wire_unexpected_tag);
+        ASSERT_TRUE(subject.group_end(*sg).has_value());
+        ASSERT_TRUE(twin.group_end(*tg).has_value());
+        auto const twin_body = commit_body(twin);
+        ASSERT_TRUE(twin_body.has_value()) << "the no-call twin must commit";
+        auto const subject_body = commit_body(subject);
+        ASSERT_TRUE(subject_body.has_value()) << "the subject must commit after the refused call";
+        EXPECT_EQ(*subject_body, *twin_body);
+    }
+}
+
+TEST(DictPairBodyBuilder, C1_9_HandWrittenDictionaryPairIsCheckedAtCommit) {
+    using namespace c19;
+    table_view const tv = make_pair_dict(5001, 5002);
+    auto const hooks = dict_hooks::for_table_view(tv);
+    ASSERT_EQ(hooks.data_tag_for_length(5001), 5002U)
+        << "precondition: the hooks really do pair 5001 with 5002";
+
+    {
+        SCOPED_TRACE("well-formed 5001=3 5002=abc");
+        body_builder bb{"X", hooks};
+        ASSERT_TRUE(bb.field(5001, std::int64_t{3}).has_value());
+        ASSERT_TRUE(bb.field(5002, std::string_view{"abc"}).has_value());
+        auto const body = commit_body(bb);
+        ASSERT_TRUE(body.has_value()) << "error " << static_cast<int>(body.error());
+        EXPECT_EQ(*body, std::string{"35=X\x01"
+                                     "5001=3\x01"
+                                     "5002=abc\x01"});
+    }
+    {
+        SCOPED_TRACE("5001=4 with a 3-octet 5002");
+        body_builder bb{"X", hooks};
+        ASSERT_TRUE(bb.field(5001, std::int64_t{4}).has_value());
+        ASSERT_TRUE(bb.field(5002, std::string_view{"abc"}).has_value());
+        expect_commit_refused(bb, error::wire_invalid_field_format);
+    }
+    {
+        SCOPED_TRACE("5002 with no preceding 5001");
+        body_builder bb{"X", hooks};
+        ASSERT_TRUE(bb.field(5002, std::string_view{"abc"}).has_value());
+        expect_commit_refused(bb, error::wire_invalid_field_format);
+    }
+}
+
+// The hooks are what the commit check reads: without them 5001 and 5002 are
+// plain tags and the same malformed pairs commit.
+TEST(DictPairBodyBuilder, C1_9_SameMalformedPairCommitsOnADefaultBuilder) {
+    using namespace c19;
+    {
+        SCOPED_TRACE("5001=4 with a 3-octet 5002");
+        body_builder bb{"X"};
+        ASSERT_TRUE(bb.field(5001, std::int64_t{4}).has_value());
+        ASSERT_TRUE(bb.field(5002, std::string_view{"abc"}).has_value());
+        auto const body = commit_body(bb);
+        ASSERT_TRUE(body.has_value()) << "error " << static_cast<int>(body.error());
+    }
+    {
+        SCOPED_TRACE("5002 with no preceding 5001");
+        body_builder bb{"X"};
+        ASSERT_TRUE(bb.field(5002, std::string_view{"abc"}).has_value());
+        auto const body = commit_body(bb);
+        ASSERT_TRUE(body.has_value()) << "error " << static_cast<int>(body.error());
+    }
+}
+
+TEST(DictPairBodyBuilder, C1_9_GroupWhoseNoTagIsTheDictionaryLengthIsRefused) {
+    using namespace c19;
+    table_view const tv = make_pair_dict(5001, 5002);
+    auto const hooks = dict_hooks::for_table_view(tv);
+    ASSERT_EQ(hooks.data_tag_for_length(5001), 5002U)
+        << "precondition: the hooks really do pair 5001 with 5002";
+
+    body_builder subject{"X", hooks};
+    add_populated_group(subject, 5001);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    expect_commit_refused(subject, error::wire_invalid_field_format);
+
+    // Committing twin: the no_tag changed to a non-pair tag.
+    body_builder twin{"X", hooks};
+    add_populated_group(twin, 78);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    auto const body = commit_body(twin);
+    ASSERT_TRUE(body.has_value()) << "error " << static_cast<int>(body.error());
+}
+
+// L-426-2: a dictionary re-pairing the standard RawDataLength(95) with 5002 is
+// ignored; the standard pair 95 -> RawData(96) governs the commit check.
+TEST(DictPairBodyBuilder, C1_9_DictionaryRepairingAStandardLengthIsIgnored) {
+    using namespace c19;
+    table_view const tv = make_pair_dict(95, 5002);
+    ASSERT_EQ(tv.length_pair_data_tag(95), 5002U)
+        << "precondition: the dictionary really did register the conflicting pair";
+    auto const hooks = dict_hooks::for_table_view(tv);
+
+    {
+        SCOPED_TRACE("95=3 5002=abc: honoured only if the dictionary pair were");
+        body_builder bb{"X", hooks};
+        ASSERT_TRUE(bb.field(95, std::int64_t{3}).has_value());
+        ASSERT_TRUE(bb.field(5002, std::string_view{"abc"}).has_value());
+        expect_commit_refused(bb, error::wire_invalid_field_format);
+    }
+    {
+        SCOPED_TRACE("95=3 96=abc: the standard pair");
+        body_builder bb{"X", hooks};
+        ASSERT_TRUE(bb.field(95, std::int64_t{3}).has_value());
+        ASSERT_TRUE(bb.field(96, std::string_view{"abc"}).has_value());
+        auto const body = commit_body(bb);
+        ASSERT_TRUE(body.has_value()) << "error " << static_cast<int>(body.error());
+    }
+    {
+        SCOPED_TRACE("a lone 5002 is a plain tag");
+        body_builder bb{"X", hooks};
+        ASSERT_TRUE(bb.field(5002, std::string_view{"abc"}).has_value());
+        auto const body = commit_body(bb);
+        ASSERT_TRUE(body.has_value()) << "error " << static_cast<int>(body.error());
     }
 }
