@@ -9,7 +9,7 @@
 # invocation, then SHA256-diffs each artifact against its expected baseline.
 # 077 touches ONLY emit_builders.cpp (+ cmake/Codegen.cmake driver wiring) --
 # the read emitters (emit_messages.cpp / fields / validator / reify) were
-# untouched by 077, so all 16 were byte-identical pre/post at T001.
+# untouched by 077.
 #
 # 082-structural-group-detection (T026/T028) intentionally rebaselines TWO of
 # the 16 -- v42/Messages.hpp and v42/Reify.hpp -- to 082-approved hashes (see
@@ -19,10 +19,13 @@
 # scan Length+Data pairs over tags [1, 2500] only, silently dropping every
 # FIX50SP2 pair above that ceiling from `length_data_pairs`. It now enumerates
 # the dictionary's message expansions, which have no ceiling. Re-derive that this
-# is the only change: take the regenerated file, delete every
-# `length_data_pairs` row whose Length tag is above 2500, set the array extent
-# to the remaining row count, and sha256 it -- the result is the pre-077 T001
-# hash `f550123a...`.
+# is the only change by CHAINING: apply the 091 Validator.hpp recipe (091 banner
+# below) to the regenerated file first; then delete every `length_data_pairs`
+# row whose Length tag is above 2500, set the array extent to the remaining row
+# claim-ok: the hash below is the recipe's target pin, re-derived by running the recipe
+# count, and sha256 it -- the result is the pre-077 T001 hash `f550123a...`.
+# The 091 step comes first because one of 091's pairs has a Length tag at or
+# below 2500, which #427's step alone does not delete.
 #
 # fixpp#426 (design §3, D-2) intentionally rebaselines all FOUR Messages.hpp
 # hashes (v42/v44/v50sp2/vt11). `dict_hooks` replaces the separate
@@ -37,9 +40,29 @@
 # Reify/Validator.hpp contain no `get`/`nested_group_slices` call sites, so
 # this change cannot move their hashes.
 #
-# Every other artifact remains gated against the pre-077 T001 baseline. A
-# mismatch on any of the 16, against its own baseline, is a real read-tier
-# regression (FR-009), not noise.
+# 091-data-field-bytes (fixpp#418) intentionally rebaselines v50sp2/Fields.hpp
+# and v50sp2/Validator.hpp. The QuickFIX-XML loader's Length+Data secondary walk
+# now also descends into <component> definitions and <group>s
+# (specs/091-data-field-bytes/research.md R-11), so FIX50SP2 pairs declared
+# adjacently only there are now paired. Re-derive that this is the only change,
+# relative to the current pins:
+#   - Validator.hpp: take the regenerated file, delete the `length_data_pairs`
+#     rows `{ 2494, 2493 }`, `{ 2815, 2814 }`, `{ 43109, 42684 }`,
+#     `{ 43110, 42486 }` and `{ 43111, 42982 }`, set the array extent to the
+#     remaining row count, and sha256 it -- the result is the pre-091
+#     (fixpp#427-approved) hash
+#     claim-ok: the hash below is the recipe's target pin, re-derived by running the recipe
+#     `536c2f22...`.
+#   - Fields.hpp: take the regenerated file, zero the `length_pair_data_tag`
+#     column of every `FieldRef` row whose tag is 2494, 2815, 43109, 43110 or
+#     43111, and sha256 it -- the result is the pre-091 (pre-077 T001) hash
+#     claim-ok: the hash below is the recipe's target pin, re-derived by running the recipe
+#     `34079b2d...`.
+#
+# Which baseline each artifact is gated against is named by the banners above
+# and the 082 banner below; see the 091 banner for the v50sp2 pins. A mismatch
+# on any of the 16, against its own baseline, is a real read-tier regression
+# (FR-009), not noise.
 #
 # Baseline hashes below were captured 2026-07-16 (T001) on pre-077 HEAD
 # 455737c3 via:
@@ -98,10 +121,7 @@ set(_expected_v42_Fields.hpp     c8bb64b1be70acdfae7e8efcfeba8c512b19910ed9987eb
 # accessor, and the 18th (136 NoMiscFees) is a NESTED group that never had a
 # top-level accessor to trade. Old golden had 0 `G_` structs.
 #
-# The other 14 hashes are DELIBERATELY UNTOUCHED and must stay so -- they are what
-# keeps this gate discriminating, and they are also T027's/FR-016a's assertions:
-# v42 Fields/Validator byte-identical (FieldRef::type is not modified, D-4) and all
-# 12 v44/v50sp2/vt11 artifacts byte-identical. All 14 re-verified OK at this commit.
+# Later rebaselines are named in their own banners -- see the 091 banner above.
 #
 # These two values were measured AFTER the FR-023 amendment and the Orchestra
 # diagnostic fix, and are bit-identical to a pre-amendment run -- i.e. that loader
@@ -116,10 +136,10 @@ set(_expected_v44_Fields.hpp     e39f240770bc4115c80fc425da35ebb20619502fe633bb3
 set(_expected_v44_Messages.hpp   2e4cb0827eca8aa4a1572d451022b4c4ab78ef55cff2153101defca97c45b263)  # fixpp#426 (banner)
 set(_expected_v44_Reify.hpp      98eb06542f2dbfb8e424b502a6d077959a34f61e49be4b03f411e73e75825196)
 set(_expected_v44_Validator.hpp  ad49a4ec2d2441e6d15181b48fa42ab30d9a2226d41476bfdd9007f5d942e9c0)
-set(_expected_v50sp2_Fields.hpp    34079b2d538d3604f865911300eef5d8c76451e3e615b4152576d173bce044a7)
+set(_expected_v50sp2_Fields.hpp    c8b224285b5617b8a29ec8c79fa5478ee9de6e6910cae37dd2fa43a10e66bd9c)  # 091 (banner)
 set(_expected_v50sp2_Messages.hpp  206f56d119be8fb096d753ab681a72c76d2ef3310908d8e8340f43ca112b5971)  # fixpp#426 (banner)
 set(_expected_v50sp2_Reify.hpp     c73e5253cfe5617565df979eeb71d8b5bd5e62a9b2e379b4f8a7f2a350f6cd36)
-set(_expected_v50sp2_Validator.hpp 536c2f22ca804139e572c22f852aed63f5439b3737320dd94a99cd075e2572e8)  # fixpp#427 (banner)
+set(_expected_v50sp2_Validator.hpp c68b15b6c075c271144f7a5b725237bac211880e88a91575708eb99ae90c0c9f)  # 091 (banner)
 set(_expected_vt11_Fields.hpp    18974c06c4608bef154c0c3b08db71c9a2e9290861bfbceb9abb26239d786cd4)
 set(_expected_vt11_Messages.hpp  8bdd4a770b2db391ed0fdc1781658b01ce3e66fd1d58114f8909e45c3ac3b9a4)  # fixpp#426 (banner)
 set(_expected_vt11_Reify.hpp     7532e100be52686a804f31dc66f5614651e356614c190a5e0795255bf9e0fb42)
@@ -146,7 +166,7 @@ if(NOT _codegen_rc EQUAL 0)
 endif()
 
 # ── Recursive byte-diff (via SHA256) vs each artifact's own baseline: the T001
-# baseline, or the 082- / fixpp#427-approved hash named in the banner ───────
+# baseline, or the 082- / 091-approved hash named in the banner ────────────
 
 set(_PASS_COUNT 0)
 set(_FAIL_COUNT 0)
@@ -164,14 +184,15 @@ foreach(_ns IN ITEMS v42 v44 v50sp2 vt11)
     endif()
 
     # 082-structural-group-detection T026/T028 rebaselined v42/Messages.hpp and
-    # v42/Reify.hpp (see the banner above) -- their "expected" hash is the
-    # 082-approved one, not the pre-077 T001 baseline every other artifact
-    # still carries. Name the right baseline in the failure text so a v42
-    # divergence is not mis-described as a T001 regression.
+    # v42/Reify.hpp, and 091 rebaselined v50sp2/Fields.hpp and
+    # v50sp2/Validator.hpp (see the banners above) -- their "expected" hash is
+    # the 082- or 091-approved one, not the pre-077 T001 baseline. Name the
+    # right baseline in the failure text so such a divergence is not
+    # mis-described as a T001 regression.
     if(_ns STREQUAL "v42" AND (_artifact STREQUAL "Messages.hpp" OR _artifact STREQUAL "Reify.hpp"))
       set(_baseline_desc "its 082-approved baseline")
-    elseif(_ns STREQUAL "v50sp2" AND _artifact STREQUAL "Validator.hpp")
-      set(_baseline_desc "its fixpp#427-approved baseline")
+    elseif(_ns STREQUAL "v50sp2" AND (_artifact STREQUAL "Fields.hpp" OR _artifact STREQUAL "Validator.hpp"))
+      set(_baseline_desc "its 091-approved baseline")
     else()
       set(_baseline_desc "the pre-077 T001 baseline")
     endif()
@@ -203,13 +224,13 @@ if(_FAIL_COUNT GREATER 0)
   message(FATAL_ERROR
     "[T022] fixpp::dict::read-tier-byte-diff FAILED (${_FAIL_COUNT} artifact(s) diverged from "
     "their own baseline -- the pre-077 T001 baseline, or the 082-approved baseline for "
-    "v42/Messages.hpp and v42/Reify.hpp, or the fixpp#427-approved baseline for "
-    "v50sp2/Validator.hpp -- FR-009/SC-005 violated; this is a real "
+    "v42/Messages.hpp and v42/Reify.hpp, or the 091-approved baseline for "
+    "v50sp2/Fields.hpp and v50sp2/Validator.hpp -- FR-009/SC-005 violated; this is a real "
     "read-tier regression, not test noise -- see above, per-artifact messages name the correct "
     "baseline).")
 else()
   message(STATUS "[T022] fixpp::dict::read-tier-byte-diff PASSED "
     "(every artifact byte-identical to its own baseline: the pre-077 T001 baseline, or the "
-    "082-approved hashes for v42/Messages.hpp and v42/Reify.hpp, or the fixpp#427-approved "
-    "hash for v50sp2/Validator.hpp).")
+    "082-approved hashes for v42/Messages.hpp and v42/Reify.hpp, or the 091-approved "
+    "hashes for v50sp2/Fields.hpp and v50sp2/Validator.hpp).")
 endif()
