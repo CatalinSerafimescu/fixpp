@@ -134,6 +134,17 @@ bool frame_has_141Y(const std::vector<std::byte>& frame) {
     return sv.contains(needle);
 }
 
+// frame_msg_type_is: check whether a raw FIX frame carries MsgType(35)=<msg_type>.
+// SOH-anchored on both sides so a tag ending in 35 (e.g. 135=A) cannot match.
+bool frame_msg_type_is(const std::vector<std::byte>& frame, std::string_view msg_type) {
+    std::string needle(1, '\x01');
+    needle += "35=";
+    needle += msg_type;
+    needle += '\x01';
+    const auto* data = reinterpret_cast<const char*>(frame.data());
+    return std::string_view(data, frame.size()).contains(needle);
+}
+
 }  // namespace
 
 // ── Test fixture ──────────────────────────────────────────────────────────────
@@ -512,14 +523,21 @@ TEST_F(ResetSeqnumPolicyMatrixTest, Unilateral_Acceptor_ReplyDoesNotContain141Y)
     auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
     ASSERT_TRUE(feed(sess, logon_with_reset).has_value());
 
-    // At least one outbound frame must have been captured (the reply Logon);
-    // otherwise the loop below runs zero times and proves nothing.
-    ASSERT_FALSE(capture.frames.empty())
-        << "unilateral acceptor: expected an outbound reply Logon frame.";
+    // The 141 check below must run on the reply LOGON, not on whatever frame was
+    // captured: a non-Logon reply (Logout, Heartbeat, Reject) carries no 141 and would
+    // satisfy an any-frame check while no reply Logon was sent at all.
+    std::vector<const std::vector<std::byte>*> reply_logons;
+    for (const auto& f : capture.frames) {
+        if (frame_msg_type_is(f, "A")) reply_logons.push_back(&f);
+    }
+    ASSERT_EQ(reply_logons.size(), 1U)
+        << "unilateral acceptor: expected exactly one outbound reply Logon (35=A) frame.";
+    EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active)
+        << "unilateral acceptor: must reach Active after replying to a 141=Y Logon.";
     // unilateral: outbound 141 is config-driven, NOT mirror-driven (FR-017:149).
     // The reply Logon must NOT echo 141=Y just because the peer sent it.
-    for (const auto& f : capture.frames) {
-        EXPECT_FALSE(frame_has_141Y(f))
+    for (const auto* f : reply_logons) {
+        EXPECT_FALSE(frame_has_141Y(*f))
             << "unilateral acceptor: reply Logon must NOT carry 141=Y "
             << "(FR-017:149 — outbound 141 is config-driven, not mirror-driven).";
     }
