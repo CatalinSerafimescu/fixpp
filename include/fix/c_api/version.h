@@ -61,8 +61,27 @@
  *
  *  This is the C-ABI SURFACE version only — fixpp_library_version() (the C++
  *  SemVer) is unaffected. Byte-frozen by tools/check_capi_freeze.sh (NBC-1). */
+
+/*  1.9 (BREAKING, [const §X.7]; 091, fixpp#418): a Length+Data pair a loaded
+ *  dictionary declares only inside a component or group is now a dictionary
+ *  pair. The effects that have a carrying declaration are noted on it (dict.h
+ *  fixpp_dict_load_from_xml; message.h fixpp_msg_commit, fixpp_msg_set_data,
+ *  fixpp_entry_set_data and the accessor preamble; session.h
+ *  fixpp_session_send, fixpp_session_register_callback). The effects with no
+ *  carrying declaration are recorded here:
+ *    - a frame a pre-1.9 engine stored with a malformed pair of that kind now
+ *      fails replay (build_replay_frame) and is gap-filled rather than resent;
+ *    - the session's header and Logon scans (scan_frame_header, interpret_logon,
+ *      the store's frame_has_genuine_tag554 masking) read such a Data by count.
+ *      interpret_logon stops at a malformed count, so a Logon in which a field
+ *      its validation steps require (e.g. HeartBtInt(108); re-derive the set
+ *      from those steps in src/session/admin_messages.cpp) follows the
+ *      malformed count is refused. Observers: on the initiator path
+ *      fixpp_session_is_established stays false, and fixpp_session_close
+ *      returns FIXPP_ERR_THREAD_SESSION_LIFECYCLE, not FIXPP_ERR_OK.
+ *  No error code is added. */
 #define FIXPP_C_ABI_VERSION_MAJOR 1
-#define FIXPP_C_ABI_VERSION_MINOR 8 /* 1.8: the dictionary loader's resource (fixpp#495) */
+#define FIXPP_C_ABI_VERSION_MINOR 9 /* 1.9: component/group-only Length+Data pairs (fixpp#418) */
 #define FIXPP_C_ABI_VERSION_PATCH 0
 
 /** Composite: (MAJOR<<16)|(MINOR<<8)|PATCH — single-integer compatibility check. */
