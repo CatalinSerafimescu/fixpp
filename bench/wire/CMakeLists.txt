@@ -168,3 +168,22 @@ target_link_libraries(typed_read_group_bench PRIVATE
 set_target_properties(typed_read_group_bench PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bench/wire"
 )
+
+# ── 091 (#418) SC-005: builder_bench ─────────────────────────────────────────
+# Outbound builder latency: generated v44 build_NewOrderSingle (precompiled
+# fixpp::builders::v44 lib) and fixpp::wire::body_builder directly. Same
+# link/include shape as tests/session test_067_builder_failclosed.
+add_executable(builder_bench builder_bench.cpp)
+add_dependencies(builder_bench fixpp_codegen_generate)
+target_link_libraries(builder_bench PRIVATE
+  fixpp_wire
+  fixpp::builders::v44
+  benchmark::benchmark
+  benchmark::benchmark_main
+)
+target_include_directories(builder_bench PRIVATE
+  "${CMAKE_BINARY_DIR}/_codegen/include"
+)
+set_target_properties(builder_bench PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bench/wire"
+)
