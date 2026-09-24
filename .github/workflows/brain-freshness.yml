@@ -54,6 +54,12 @@ jobs:
         # that reports clean because it could not report anything else.
         run: python3 tools/check_brain.py --self-test
 
+      - name: "Prove the refs_external link proposer can report non-zero (#454)"
+        # Fixture-only: it builds its own brain tree and records dir, so it needs
+        # neither the private parent nor the live pages. Live freshness (every
+        # named record linked) needs the parent and stays a local run.
+        run: python3 tools/brain_link_decisions.py --self-test
+
       - name: Gate
         # refs only. refs_external point at the PRIVATE parent repo, which is
         # absent from this checkout — checking them here would fail on every page

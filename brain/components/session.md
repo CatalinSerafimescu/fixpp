@@ -13,11 +13,13 @@ refs:
   - spec/behaviors-and-limitations.md
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/005-session-establishment-fsm-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/013-session-reconnect-binding-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/024-reset-refresh-on-logon-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/025-refresh-on-logon-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/027-next-expected-msgseqnum-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/029-persistent-seqnum-hydrate-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/033-fixt-fix50sp2-session-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/037-resend-reply-possdup-tags-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/042-fixt-version-serviceability-guard-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/090-capi-refusals-gatea.md
 codegraph_entry: [Session, fsm_state, SeqnumManager, Engine, on_inbound_frame]

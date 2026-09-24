@@ -26,6 +26,8 @@ refs:
   - spec/behaviors-and-limitations.md
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/2c-codegen.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/002-dictionary-xml-loader-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/057-behavioral-reify-unblock-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/090-capi-refusals-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/090-capi-refusals-implement-log.md
 codegraph_entry: [Dictionary, xml_loader, orchestra_loader, field_traits, version_registry, table_view_builder]
