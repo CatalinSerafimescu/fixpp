@@ -207,6 +207,26 @@ target_compile_definitions(enum_golden_manifest_test PRIVATE
 add_test(NAME enum_golden_manifest_test COMMAND enum_golden_manifest_test)
 set_tests_properties(enum_golden_manifest_test PROPERTIES LABELS "075;golden;manifest")
 
+# ── Standalone: fixpp#412 QuickFIX required-set golden generator-source pin ──
+# The required-set sibling of enum_golden_manifest_test's
+# GeneratorSourceHashMatches: SHA-1 of tools/quickfix_required_golden/main.cpp
+# against the generator_source_hash row of golden.csv AND golden_groups.csv.
+# Same isolation rationale and label set as the enum gate above; links NO
+# QuickFIX and never touches reference-engines/.
+add_executable(required_golden_manifest_test required_golden_manifest_test.cpp)
+target_link_libraries(required_golden_manifest_test PRIVATE
+  OpenSSL::Crypto
+  GTest::gtest
+  GTest::gtest_main
+)
+target_compile_definitions(required_golden_manifest_test PRIVATE
+  "FIXPP_REQUIRED_GOLDEN_CSV=\"${CMAKE_SOURCE_DIR}/tools/quickfix_required_golden/golden.csv\""
+  "FIXPP_REQUIRED_GOLDEN_GROUPS_CSV=\"${CMAKE_SOURCE_DIR}/tools/quickfix_required_golden/golden_groups.csv\""
+  "FIXPP_REQUIRED_GOLDEN_MAIN_CPP=\"${CMAKE_SOURCE_DIR}/tools/quickfix_required_golden/main.cpp\""
+)
+add_test(NAME required_golden_manifest_test COMMAND required_golden_manifest_test)
+set_tests_properties(required_golden_manifest_test PROPERTIES LABELS "079;golden;manifest")
+
 # ── Standalone: 075 T031 QuickFIX enum-golden PARITY gate (SC-009) ──────────
 # Isolation-sensitive per [const §VII.8] (a data-driven exact gate consuming
 # the checked-in golden + manifest) — stays standalone rather than joining
