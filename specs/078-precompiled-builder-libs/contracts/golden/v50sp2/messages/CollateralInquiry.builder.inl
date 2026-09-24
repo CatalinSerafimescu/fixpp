@@ -3349,13 +3349,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_CollateralInqui
             auto en59 = gh59->add_entry();
             if (!en59) return ::std::unexpected(en59.error());
             auto& eh59 = *en59;
-    if (item59.leg_payment_stream_formula_length) {
-        auto r = eh59.set_int(43110, *item59.leg_payment_stream_formula_length);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item59.leg_payment_stream_formula) {
-        auto r = eh59.set_string(42486, *item59.leg_payment_stream_formula);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh59.set_int(43110, static_cast<::std::int64_t>(item59.leg_payment_stream_formula->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh59.set_string(42486, *item59.leg_payment_stream_formula);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item59.leg_payment_stream_formula_desc) {
         auto r = eh59.set_string(42487, *item59.leg_payment_stream_formula_desc);
@@ -6213,13 +6211,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_CollateralInqui
         auto r = eh8.set_string(2505, *item8.leg_documentation_text);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item8.encoded_leg_documentation_text_len) {
-        auto r = eh8.set_int(2494, *item8.encoded_leg_documentation_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item8.encoded_leg_documentation_text) {
-        auto r = eh8.set_string(2493, *item8.encoded_leg_documentation_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh8.set_int(2494, static_cast<::std::int64_t>(item8.encoded_leg_documentation_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh8.set_string(2493, *item8.encoded_leg_documentation_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item8.leg_termination_type) {
         auto r = eh8.set_int(2514, *item8.leg_termination_type);
@@ -9354,13 +9350,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_CollateralInqui
             auto en168 = gh168->add_entry();
             if (!en168) return ::std::unexpected(en168.error());
             auto& eh168 = *en168;
-    if (item168.underlying_payment_stream_formula_length) {
-        auto r = eh168.set_int(43111, *item168.underlying_payment_stream_formula_length);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item168.underlying_payment_stream_formula) {
-        auto r = eh168.set_string(42982, *item168.underlying_payment_stream_formula);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh168.set_int(43111, static_cast<::std::int64_t>(item168.underlying_payment_stream_formula->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh168.set_string(42982, *item168.underlying_payment_stream_formula);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item168.underlying_payment_stream_formula_desc) {
         auto r = eh168.set_string(42983, *item168.underlying_payment_stream_formula_desc);
@@ -15072,13 +15066,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_CollateralInqui
             auto en274 = gh274->add_entry();
             if (!en274) return ::std::unexpected(en274.error());
             auto& eh274 = *en274;
-    if (item274.payment_stream_formula_length) {
-        auto r = eh274.set_int(43109, *item274.payment_stream_formula_length);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item274.payment_stream_formula) {
-        auto r = eh274.set_string(42684, *item274.payment_stream_formula);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh274.set_int(43109, static_cast<::std::int64_t>(item274.payment_stream_formula->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh274.set_string(42684, *item274.payment_stream_formula);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item274.payment_stream_formula_desc) {
         auto r = eh274.set_string(42685, *item274.payment_stream_formula_desc);

@@ -3414,13 +3414,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_PositionTransfe
             auto en58 = gh58->add_entry();
             if (!en58) return ::std::unexpected(en58.error());
             auto& eh58 = *en58;
-    if (item58.underlying_payment_stream_formula_length) {
-        auto r = eh58.set_int(43111, *item58.underlying_payment_stream_formula_length);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item58.underlying_payment_stream_formula) {
-        auto r = eh58.set_string(42982, *item58.underlying_payment_stream_formula);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh58.set_int(43111, static_cast<::std::int64_t>(item58.underlying_payment_stream_formula->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh58.set_string(42982, *item58.underlying_payment_stream_formula);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item58.underlying_payment_stream_formula_desc) {
         auto r = eh58.set_string(42983, *item58.underlying_payment_stream_formula_desc);
@@ -8965,13 +8963,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_PositionTransfe
             auto en161 = gh161->add_entry();
             if (!en161) return ::std::unexpected(en161.error());
             auto& eh161 = *en161;
-    if (item161.payment_stream_formula_length) {
-        auto r = eh161.set_int(43109, *item161.payment_stream_formula_length);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item161.payment_stream_formula) {
-        auto r = eh161.set_string(42684, *item161.payment_stream_formula);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh161.set_int(43109, static_cast<::std::int64_t>(item161.payment_stream_formula->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh161.set_string(42684, *item161.payment_stream_formula);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item161.payment_stream_formula_desc) {
         auto r = eh161.set_string(42685, *item161.payment_stream_formula_desc);

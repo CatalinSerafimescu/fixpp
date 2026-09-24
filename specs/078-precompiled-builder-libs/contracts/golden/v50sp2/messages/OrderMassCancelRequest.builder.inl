@@ -4256,13 +4256,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_OrderMassCancel
             auto en68 = gh68->add_entry();
             if (!en68) return ::std::unexpected(en68.error());
             auto& eh68 = *en68;
-    if (item68.payment_stream_formula_length) {
-        auto r = eh68.set_int(43109, *item68.payment_stream_formula_length);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item68.payment_stream_formula) {
-        auto r = eh68.set_string(42684, *item68.payment_stream_formula);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh68.set_int(43109, static_cast<::std::int64_t>(item68.payment_stream_formula->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh68.set_string(42684, *item68.payment_stream_formula);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item68.payment_stream_formula_desc) {
         auto r = eh68.set_string(42685, *item68.payment_stream_formula_desc);
@@ -8015,13 +8013,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_OrderMassCancel
             auto en139 = gh139->add_entry();
             if (!en139) return ::std::unexpected(en139.error());
             auto& eh139 = *en139;
-    if (item139.underlying_payment_stream_formula_length) {
-        auto r = eh139.set_int(43111, *item139.underlying_payment_stream_formula_length);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item139.underlying_payment_stream_formula) {
-        auto r = eh139.set_string(42982, *item139.underlying_payment_stream_formula);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh139.set_int(43111, static_cast<::std::int64_t>(item139.underlying_payment_stream_formula->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh139.set_string(42982, *item139.underlying_payment_stream_formula);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item139.underlying_payment_stream_formula_desc) {
         auto r = eh139.set_string(42983, *item139.underlying_payment_stream_formula_desc);

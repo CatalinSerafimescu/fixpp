@@ -4296,13 +4296,11 @@ namespace fixpp::v50sp2 {
             auto en69 = gh69->add_entry();
             if (!en69) return ::std::unexpected(en69.error());
             auto& eh69 = *en69;
-    if (item69.payment_stream_formula_length) {
-        auto r = eh69.set_int(43109, *item69.payment_stream_formula_length);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item69.payment_stream_formula) {
-        auto r = eh69.set_string(42684, *item69.payment_stream_formula);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh69.set_int(43109, static_cast<::std::int64_t>(item69.payment_stream_formula->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh69.set_string(42684, *item69.payment_stream_formula);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item69.payment_stream_formula_desc) {
         auto r = eh69.set_string(42685, *item69.payment_stream_formula_desc);
@@ -8055,13 +8053,11 @@ namespace fixpp::v50sp2 {
             auto en140 = gh140->add_entry();
             if (!en140) return ::std::unexpected(en140.error());
             auto& eh140 = *en140;
-    if (item140.underlying_payment_stream_formula_length) {
-        auto r = eh140.set_int(43111, *item140.underlying_payment_stream_formula_length);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item140.underlying_payment_stream_formula) {
-        auto r = eh140.set_string(42982, *item140.underlying_payment_stream_formula);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh140.set_int(43111, static_cast<::std::int64_t>(item140.underlying_payment_stream_formula->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh140.set_string(42982, *item140.underlying_payment_stream_formula);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item140.underlying_payment_stream_formula_desc) {
         auto r = eh140.set_string(42983, *item140.underlying_payment_stream_formula_desc);

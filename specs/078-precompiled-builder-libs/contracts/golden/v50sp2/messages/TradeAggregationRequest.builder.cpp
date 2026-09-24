@@ -2892,13 +2892,11 @@ namespace fixpp::v50sp2 {
             auto en49 = gh49->add_entry();
             if (!en49) return ::std::unexpected(en49.error());
             auto& eh49 = *en49;
-    if (item49.payment_stream_formula_length) {
-        auto r = eh49.set_int(43109, *item49.payment_stream_formula_length);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item49.payment_stream_formula) {
-        auto r = eh49.set_string(42684, *item49.payment_stream_formula);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh49.set_int(43109, static_cast<::std::int64_t>(item49.payment_stream_formula->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh49.set_string(42684, *item49.payment_stream_formula);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item49.payment_stream_formula_desc) {
         auto r = eh49.set_string(42685, *item49.payment_stream_formula_desc);

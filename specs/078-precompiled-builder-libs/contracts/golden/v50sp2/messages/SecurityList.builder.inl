@@ -2967,13 +2967,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityList(::
             auto en51 = gh51->add_entry();
             if (!en51) return ::std::unexpected(en51.error());
             auto& eh51 = *en51;
-    if (item51.payment_stream_formula_length) {
-        auto r = eh51.set_int(43109, *item51.payment_stream_formula_length);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item51.payment_stream_formula) {
-        auto r = eh51.set_string(42684, *item51.payment_stream_formula);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh51.set_int(43109, static_cast<::std::int64_t>(item51.payment_stream_formula->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh51.set_string(42684, *item51.payment_stream_formula);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item51.payment_stream_formula_desc) {
         auto r = eh51.set_string(42685, *item51.payment_stream_formula_desc);
@@ -9484,13 +9482,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityList(::
             auto en178 = gh178->add_entry();
             if (!en178) return ::std::unexpected(en178.error());
             auto& eh178 = *en178;
-    if (item178.underlying_payment_stream_formula_length) {
-        auto r = eh178.set_int(43111, *item178.underlying_payment_stream_formula_length);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item178.underlying_payment_stream_formula) {
-        auto r = eh178.set_string(42982, *item178.underlying_payment_stream_formula);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh178.set_int(43111, static_cast<::std::int64_t>(item178.underlying_payment_stream_formula->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh178.set_string(42982, *item178.underlying_payment_stream_formula);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item178.underlying_payment_stream_formula_desc) {
         auto r = eh178.set_string(42983, *item178.underlying_payment_stream_formula_desc);
@@ -15286,13 +15282,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityList(::
             auto en286 = gh286->add_entry();
             if (!en286) return ::std::unexpected(en286.error());
             auto& eh286 = *en286;
-    if (item286.leg_payment_stream_formula_length) {
-        auto r = eh286.set_int(43110, *item286.leg_payment_stream_formula_length);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item286.leg_payment_stream_formula) {
-        auto r = eh286.set_string(42486, *item286.leg_payment_stream_formula);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh286.set_int(43110, static_cast<::std::int64_t>(item286.leg_payment_stream_formula->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh286.set_string(42486, *item286.leg_payment_stream_formula);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item286.leg_payment_stream_formula_desc) {
         auto r = eh286.set_string(42487, *item286.leg_payment_stream_formula_desc);

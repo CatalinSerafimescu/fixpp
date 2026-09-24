@@ -3005,13 +3005,11 @@ namespace fixpp::v50sp2 {
             auto en52 = gh52->add_entry();
             if (!en52) return ::std::unexpected(en52.error());
             auto& eh52 = *en52;
-    if (item52.payment_stream_formula_length) {
-        auto r = eh52.set_int(43109, *item52.payment_stream_formula_length);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item52.payment_stream_formula) {
-        auto r = eh52.set_string(42684, *item52.payment_stream_formula);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh52.set_int(43109, static_cast<::std::int64_t>(item52.payment_stream_formula->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh52.set_string(42684, *item52.payment_stream_formula);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item52.payment_stream_formula_desc) {
         auto r = eh52.set_string(42685, *item52.payment_stream_formula_desc);
@@ -9018,13 +9016,11 @@ namespace fixpp::v50sp2 {
             auto en165 = gh165->add_entry();
             if (!en165) return ::std::unexpected(en165.error());
             auto& eh165 = *en165;
-    if (item165.leg_payment_stream_formula_length) {
-        auto r = eh165.set_int(43110, *item165.leg_payment_stream_formula_length);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item165.leg_payment_stream_formula) {
-        auto r = eh165.set_string(42486, *item165.leg_payment_stream_formula);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh165.set_int(43110, static_cast<::std::int64_t>(item165.leg_payment_stream_formula->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh165.set_string(42486, *item165.leg_payment_stream_formula);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item165.leg_payment_stream_formula_desc) {
         auto r = eh165.set_string(42487, *item165.leg_payment_stream_formula_desc);
@@ -11882,13 +11878,11 @@ namespace fixpp::v50sp2 {
         auto r = eh114.set_string(2505, *item114.leg_documentation_text);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item114.encoded_leg_documentation_text_len) {
-        auto r = eh114.set_int(2494, *item114.encoded_leg_documentation_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item114.encoded_leg_documentation_text) {
-        auto r = eh114.set_string(2493, *item114.encoded_leg_documentation_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh114.set_int(2494, static_cast<::std::int64_t>(item114.encoded_leg_documentation_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh114.set_string(2493, *item114.encoded_leg_documentation_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item114.leg_termination_type) {
         auto r = eh114.set_int(2514, *item114.leg_termination_type);
@@ -14995,13 +14989,11 @@ namespace fixpp::v50sp2 {
             auto en274 = gh274->add_entry();
             if (!en274) return ::std::unexpected(en274.error());
             auto& eh274 = *en274;
-    if (item274.underlying_payment_stream_formula_length) {
-        auto r = eh274.set_int(43111, *item274.underlying_payment_stream_formula_length);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item274.underlying_payment_stream_formula) {
-        auto r = eh274.set_string(42982, *item274.underlying_payment_stream_formula);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh274.set_int(43111, static_cast<::std::int64_t>(item274.underlying_payment_stream_formula->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh274.set_string(42982, *item274.underlying_payment_stream_formula);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item274.underlying_payment_stream_formula_desc) {
         auto r = eh274.set_string(42983, *item274.underlying_payment_stream_formula_desc);

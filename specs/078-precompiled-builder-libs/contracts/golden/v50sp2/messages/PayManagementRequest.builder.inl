@@ -1398,12 +1398,10 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_PayManagementRe
         if (!r) return ::std::unexpected(r.error());
     }
     if (args.encoded_post_trade_payment_desc) {
-        auto r = bb.field(2814, *args.encoded_post_trade_payment_desc);
-        if (!r) return ::std::unexpected(r.error());
-    }
-    if (args.encoded_post_trade_payment_desc_len) {
-        auto r = bb.field(2815, *args.encoded_post_trade_payment_desc_len);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = bb.field(2815, static_cast<::std::int64_t>(args.encoded_post_trade_payment_desc->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = bb.field(2814, *args.encoded_post_trade_payment_desc);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (args.post_trade_payment_account) {
         auto r = bb.field(2816, *args.post_trade_payment_account);
@@ -3007,13 +3005,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_PayManagementRe
             auto en51 = gh51->add_entry();
             if (!en51) return ::std::unexpected(en51.error());
             auto& eh51 = *en51;
-    if (item51.payment_stream_formula_length) {
-        auto r = eh51.set_int(43109, *item51.payment_stream_formula_length);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item51.payment_stream_formula) {
-        auto r = eh51.set_string(42684, *item51.payment_stream_formula);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh51.set_int(43109, static_cast<::std::int64_t>(item51.payment_stream_formula->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh51.set_string(42684, *item51.payment_stream_formula);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item51.payment_stream_formula_desc) {
         auto r = eh51.set_string(42685, *item51.payment_stream_formula_desc);

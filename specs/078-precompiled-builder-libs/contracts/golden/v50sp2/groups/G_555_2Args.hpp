@@ -294,7 +294,6 @@ struct G_555_2Args {
     ::std::optional<::std::string_view> leg_credit_support_agreement_id{};
     ::std::optional<::std::string_view> leg_governing_law{};
     ::std::optional<::std::string_view> leg_documentation_text{};
-    ::std::optional<::std::int64_t> encoded_leg_documentation_text_len{};
     ::std::optional<::std::string_view> encoded_leg_documentation_text{};
     ::std::optional<::std::int64_t> leg_termination_type{};
     ::std::optional<::std::string_view> leg_start_date{};

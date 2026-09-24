@@ -203,7 +203,6 @@ struct PayManagementRequestArgs {
     ::std::optional<::std::int64_t> pay_request_trans_type{};
     ::std::optional<::std::string_view> pay_request_id{};
     ::std::optional<::std::string_view> encoded_post_trade_payment_desc{};
-    ::std::optional<::std::int64_t> encoded_post_trade_payment_desc_len{};
     ::std::optional<::std::string_view> post_trade_payment_account{};
     ::std::optional<::fixpp::decimal_t> post_trade_payment_amount{};
     ::std::optional<::std::string_view> post_trade_payment_currency{};

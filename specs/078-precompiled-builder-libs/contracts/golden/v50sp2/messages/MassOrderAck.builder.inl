@@ -3221,13 +3221,11 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_MassOrderAck(::
             auto en53 = gh53->add_entry();
             if (!en53) return ::std::unexpected(en53.error());
             auto& eh53 = *en53;
-    if (item53.payment_stream_formula_length) {
-        auto r = eh53.set_int(43109, *item53.payment_stream_formula_length);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item53.payment_stream_formula) {
-        auto r = eh53.set_string(42684, *item53.payment_stream_formula);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh53.set_int(43109, static_cast<::std::int64_t>(item53.payment_stream_formula->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh53.set_string(42684, *item53.payment_stream_formula);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item53.payment_stream_formula_desc) {
         auto r = eh53.set_string(42685, *item53.payment_stream_formula_desc);

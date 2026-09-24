@@ -3123,13 +3123,11 @@ namespace fixpp::v50sp2 {
             auto en52 = gh52->add_entry();
             if (!en52) return ::std::unexpected(en52.error());
             auto& eh52 = *en52;
-    if (item52.leg_payment_stream_formula_length) {
-        auto r = eh52.set_int(43110, *item52.leg_payment_stream_formula_length);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item52.leg_payment_stream_formula) {
-        auto r = eh52.set_string(42486, *item52.leg_payment_stream_formula);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh52.set_int(43110, static_cast<::std::int64_t>(item52.leg_payment_stream_formula->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh52.set_string(42486, *item52.leg_payment_stream_formula);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item52.leg_payment_stream_formula_desc) {
         auto r = eh52.set_string(42487, *item52.leg_payment_stream_formula_desc);
@@ -5987,13 +5985,11 @@ namespace fixpp::v50sp2 {
         auto r = eh1.set_string(2505, *item1.leg_documentation_text);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item1.encoded_leg_documentation_text_len) {
-        auto r = eh1.set_int(2494, *item1.encoded_leg_documentation_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item1.encoded_leg_documentation_text) {
-        auto r = eh1.set_string(2493, *item1.encoded_leg_documentation_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh1.set_int(2494, static_cast<::std::int64_t>(item1.encoded_leg_documentation_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh1.set_string(2493, *item1.encoded_leg_documentation_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item1.leg_termination_type) {
         auto r = eh1.set_int(2514, *item1.leg_termination_type);
@@ -9120,13 +9116,11 @@ namespace fixpp::v50sp2 {
             auto en161 = gh161->add_entry();
             if (!en161) return ::std::unexpected(en161.error());
             auto& eh161 = *en161;
-    if (item161.underlying_payment_stream_formula_length) {
-        auto r = eh161.set_int(43111, *item161.underlying_payment_stream_formula_length);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item161.underlying_payment_stream_formula) {
-        auto r = eh161.set_string(42982, *item161.underlying_payment_stream_formula);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh161.set_int(43111, static_cast<::std::int64_t>(item161.underlying_payment_stream_formula->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh161.set_string(42982, *item161.underlying_payment_stream_formula);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item161.underlying_payment_stream_formula_desc) {
         auto r = eh161.set_string(42983, *item161.underlying_payment_stream_formula_desc);
@@ -14659,13 +14653,11 @@ namespace fixpp::v50sp2 {
             auto en264 = gh264->add_entry();
             if (!en264) return ::std::unexpected(en264.error());
             auto& eh264 = *en264;
-    if (item264.payment_stream_formula_length) {
-        auto r = eh264.set_int(43109, *item264.payment_stream_formula_length);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item264.payment_stream_formula) {
-        auto r = eh264.set_string(42684, *item264.payment_stream_formula);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh264.set_int(43109, static_cast<::std::int64_t>(item264.payment_stream_formula->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh264.set_string(42684, *item264.payment_stream_formula);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item264.payment_stream_formula_desc) {
         auto r = eh264.set_string(42685, *item264.payment_stream_formula_desc);

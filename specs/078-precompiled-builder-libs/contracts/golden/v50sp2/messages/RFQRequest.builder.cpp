@@ -2962,13 +2962,11 @@ namespace fixpp::v50sp2 {
             auto en51 = gh51->add_entry();
             if (!en51) return ::std::unexpected(en51.error());
             auto& eh51 = *en51;
-    if (item51.payment_stream_formula_length) {
-        auto r = eh51.set_int(43109, *item51.payment_stream_formula_length);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item51.payment_stream_formula) {
-        auto r = eh51.set_string(42684, *item51.payment_stream_formula);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh51.set_int(43109, static_cast<::std::int64_t>(item51.payment_stream_formula->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh51.set_string(42684, *item51.payment_stream_formula);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item51.payment_stream_formula_desc) {
         auto r = eh51.set_string(42685, *item51.payment_stream_formula_desc);
@@ -8786,13 +8784,11 @@ namespace fixpp::v50sp2 {
             auto en157 = gh157->add_entry();
             if (!en157) return ::std::unexpected(en157.error());
             auto& eh157 = *en157;
-    if (item157.underlying_payment_stream_formula_length) {
-        auto r = eh157.set_int(43111, *item157.underlying_payment_stream_formula_length);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item157.underlying_payment_stream_formula) {
-        auto r = eh157.set_string(42982, *item157.underlying_payment_stream_formula);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh157.set_int(43111, static_cast<::std::int64_t>(item157.underlying_payment_stream_formula->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh157.set_string(42982, *item157.underlying_payment_stream_formula);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item157.underlying_payment_stream_formula_desc) {
         auto r = eh157.set_string(42983, *item157.underlying_payment_stream_formula_desc);
@@ -14561,13 +14557,11 @@ namespace fixpp::v50sp2 {
             auto en264 = gh264->add_entry();
             if (!en264) return ::std::unexpected(en264.error());
             auto& eh264 = *en264;
-    if (item264.leg_payment_stream_formula_length) {
-        auto r = eh264.set_int(43110, *item264.leg_payment_stream_formula_length);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item264.leg_payment_stream_formula) {
-        auto r = eh264.set_string(42486, *item264.leg_payment_stream_formula);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh264.set_int(43110, static_cast<::std::int64_t>(item264.leg_payment_stream_formula->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh264.set_string(42486, *item264.leg_payment_stream_formula);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item264.leg_payment_stream_formula_desc) {
         auto r = eh264.set_string(42487, *item264.leg_payment_stream_formula_desc);
@@ -17425,13 +17419,11 @@ namespace fixpp::v50sp2 {
         auto r = eh213.set_string(2505, *item213.leg_documentation_text);
         if (!r) return ::std::unexpected(r.error());
     }
-    if (item213.encoded_leg_documentation_text_len) {
-        auto r = eh213.set_int(2494, *item213.encoded_leg_documentation_text_len);
-        if (!r) return ::std::unexpected(r.error());
-    }
     if (item213.encoded_leg_documentation_text) {
-        auto r = eh213.set_string(2493, *item213.encoded_leg_documentation_text);
-        if (!r) return ::std::unexpected(r.error());
+        auto r_len = eh213.set_int(2494, static_cast<::std::int64_t>(item213.encoded_leg_documentation_text->size()));
+        if (!r_len) return ::std::unexpected(r_len.error());
+        auto r_data = eh213.set_string(2493, *item213.encoded_leg_documentation_text);
+        if (!r_data) return ::std::unexpected(r_data.error());
     }
     if (item213.leg_termination_type) {
         auto r = eh213.set_int(2514, *item213.leg_termination_type);
