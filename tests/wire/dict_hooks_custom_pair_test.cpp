@@ -946,7 +946,7 @@ TEST(DictHooksCustomPair, ZeroIsRefusedAtDeclarationBeforeAPairCanForm) {
 
 // ─────────────────────────────────────────────────────────────────────────
 // 091 (fixpp#418) FR-019 — inbound drop and reader witnesses over a dictionary
-// whose custom pair 5001/5002 is adjacent ONLY inside a <component>
+// whose custom pair (5001, 5002) is adjacent ONLY inside a <component>
 // definition: not adjacent in <fields> (Text(58) sits between them) and never
 // a direct <field> child of a message, header or trailer. The same shape as
 // tests/capi/length_data_component_pair_test.cpp's dictionary.
@@ -1035,7 +1035,7 @@ TEST(DictHooksComponentPair, ForgedApplVerIdInsideDataIsNotRead) {
     }
 }
 
-// Reader, msg_type: 5001/5002 precede MsgType, and the 6-byte Data value
+// Reader, msg_type: 5001 and 5002 precede MsgType, and the 6-byte Data value
 // "a<SOH>35=D" carries a forged MsgType; parse succeeds and msg_type() is empty.
 TEST(DictHooksComponentPair, ForgedMsgTypeInsideDataIsNotRead) {
     std::pmr::monotonic_buffer_resource dict_mr;

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // tests/capi/length_data_component_pair_test.cpp — 091 (fixpp#418), FR-019
 //
-// C-ABI witnesses for a dictionary whose custom LENGTH/DATA pair (5001/5002) is
+// C-ABI witnesses for a dictionary whose custom LENGTH/DATA pair (5001, 5002) is
 // adjacent ONLY inside a <component> definition, loaded through
 // fixpp_dict_load_from_xml (the entry point dict.h's BREAKING note marks). The
 // two fields are not adjacent in <fields> order and are never direct <field>
@@ -237,7 +237,7 @@ bool inject(std::string& s, std::string_view anchor, std::string_view insert, bo
     return true;
 }
 
-// The shipped FIX 4.4 dictionary with component CustomPair (5001/5002)
+// The shipped FIX 4.4 dictionary with component CustomPair (5001, 5002)
 // declared first under <components> and referenced first in NewOrderSingle.
 // 5001 is declared first in <fields> and 5002 last, so they are not adjacent
 // there. The shipped file is single-quoted; the anchors use its spelling.
