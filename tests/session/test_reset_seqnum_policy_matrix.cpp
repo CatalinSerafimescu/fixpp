@@ -512,6 +512,10 @@ TEST_F(ResetSeqnumPolicyMatrixTest, Unilateral_Acceptor_ReplyDoesNotContain141Y)
     auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
     ASSERT_TRUE(feed(sess, logon_with_reset).has_value());
 
+    // At least one outbound frame must have been captured (the reply Logon);
+    // otherwise the loop below runs zero times and proves nothing.
+    ASSERT_FALSE(capture.frames.empty())
+        << "unilateral acceptor: expected an outbound reply Logon frame.";
     // unilateral: outbound 141 is config-driven, NOT mirror-driven (FR-017:149).
     // The reply Logon must NOT echo 141=Y just because the peer sent it.
     for (const auto& f : capture.frames) {

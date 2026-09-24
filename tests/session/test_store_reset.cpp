@@ -132,10 +132,14 @@ TEST(StoreResetMemory, DoubleResetIsIdempotent) {
             auto store = make_memory_store();
             auto script = make_store_script(3, direction_t::inbound);
             for (const auto& s : script) {
-                // Only the post-reset counter is asserted below; a failed
-                // pre-reset store is not otherwise observable in this test.
-                (void)co_await store.store(s.seq, std::span<const std::byte>(s.frame_bytes), s.dir);
+                auto sr =
+                    co_await store.store(s.seq, std::span<const std::byte>(s.frame_bytes), s.dir);
+                EXPECT_TRUE(sr.has_value()) << "setup store of seq " << s.seq << " failed";
             }
+            // Premise: the counter has advanced past 1, so the post-reset check
+            // below observes a rewind rather than an untouched empty store.
+            auto pre = co_await store.next_seqnum(direction_t::inbound, false);
+            EXPECT_EQ(pre.value_or(0), script.size() + 1);
             auto r1 = co_await store.reset();
             EXPECT_TRUE(r1.has_value());
             auto r2 = co_await store.reset();
