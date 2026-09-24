@@ -32,6 +32,9 @@ only then made GREEN.
   configures, builds, rebuilds or runs `conan install` (codegen freshness, T027, the bench base in
   T057/T058, fuzz, `/speckit-verify`), the orchestrator asks the owner with `AskUserQuestion`. One
   approval may cover a named phase; record it in the evidence file. Never auto-run a build.
+  **Owner ruling 2026-09-24: blanket approval for every build 091 needs** (every phase, the bench
+  base, fuzz and `/speckit-verify`), so no per-phase ask is needed. Copy this ruling into the
+  evidence file when T002 creates it. The disk and placement rules below still apply.
 - **Never `git checkout`/`git switch` in this checkout.** The bench base (T057) is its own
   detached worktree under `/mnt/wsl/fixppbuild`.
 - **Comments record a procedure, never a result** (no counts, offsets or pasted output). Every
@@ -901,7 +904,8 @@ FR-019, SC-006).
 
 ### Fuzz
 
-- [ ] T059 Fuzz the changed loader (`[const §VII.7]`): build `fuzz_dict_xml_loader`
+- [ ] T059 Fuzz the changed loader (`[const §VII.7]`; owner ruling 2026-09-24: the dictionary XML
+  loader is in scope for §VII.7, and this run is required): build `fuzz_dict_xml_loader`
   (`tests/fuzz/fuzz_dict_xml_loader.cpp`) under `linux-clang-asan` (`FIXPP_BUILD_FUZZ=ON`), add seeds
   with nested `<group>`s, `<group>`s under `<header>`/`<trailer>` and component-only Length/Data
   pairs, and run it for ≥ 600 s. Seeds are committed to `tests/fuzz/corpus/dict_xml_loader/`; its
