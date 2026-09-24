@@ -154,13 +154,13 @@ TEST_P(LengthDataPairsPerDictionary, EveryProbedStandardPairIsPairedByTheLoader)
 
 INSTANTIATE_TEST_SUITE_P(
     ShippedDictionaries, LengthDataPairsPerDictionary,
-    ::testing::Values(drift_leg{"FIX40", "FIX40.xml", false}, drift_leg{"FIX41", "FIX41.xml", false},
-                      drift_leg{"FIX42", "FIX42.xml", false}, drift_leg{"FIX43", "FIX43.xml", false},
-                      drift_leg{"FIX44", "FIX44.xml", false}, drift_leg{"FIX50", "FIX50.xml", false},
-                      drift_leg{"FIX50SP1", "FIX50SP1.xml", false},
-                      drift_leg{"FIX50SP2", "FIX50SP2.xml", false},
-                      drift_leg{"FIXT11", "FIXT11.xml", false},
-                      drift_leg{"OrchestraFIXLatest", "orchestra/OrchestraFIXLatest.xml", true}),
+    ::testing::Values(
+        drift_leg{"FIX40", "FIX40.xml", false}, drift_leg{"FIX41", "FIX41.xml", false},
+        drift_leg{"FIX42", "FIX42.xml", false}, drift_leg{"FIX43", "FIX43.xml", false},
+        drift_leg{"FIX44", "FIX44.xml", false}, drift_leg{"FIX50", "FIX50.xml", false},
+        drift_leg{"FIX50SP1", "FIX50SP1.xml", false}, drift_leg{"FIX50SP2", "FIX50SP2.xml", false},
+        drift_leg{"FIXT11", "FIXT11.xml", false},
+        drift_leg{"OrchestraFIXLatest", "orchestra/OrchestraFIXLatest.xml", true}),
     [](::testing::TestParamInfo<drift_leg> const& info) { return std::string{info.param.name}; });
 
 // Pins that do not need a dictionary. They name the cases a hand-written table has

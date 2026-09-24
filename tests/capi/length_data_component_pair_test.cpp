@@ -20,6 +20,7 @@
 // count does not end on SOH is refused as malformed.
 
 #include <gtest/gtest.h>
+#include <unistd.h>
 
 #include <cstdint>
 #include <cstring>
@@ -29,7 +30,6 @@
 #include <memory_resource>
 #include <string>
 #include <string_view>
-#include <unistd.h>
 
 #include "capi_loopback_support.hpp"
 #include "fix/c_api/dict.h"
@@ -109,10 +109,9 @@ constexpr std::string_view kComponentPairFix42Xml = R"xml(
 // fixpp_dict_load_from_xml, and removes the file.
 fixpp_dict_t* load_dict_from_xml_file(std::string_view xml) {
     auto const* info = ::testing::UnitTest::GetInstance()->current_test_info();
-    std::filesystem::path const path =
-        std::filesystem::temp_directory_path() /
-        ("fixpp_091_" + std::to_string(::getpid()) + "_" + info->test_suite_name() + "_" +
-         info->name() + ".xml");
+    std::filesystem::path const path = std::filesystem::temp_directory_path() /
+                                       ("fixpp_091_" + std::to_string(::getpid()) + "_" +
+                                        info->test_suite_name() + "_" + info->name() + ".xml");
     {
         std::ofstream out(path, std::ios::binary | std::ios::trunc);
         out.write(xml.data(), static_cast<std::streamsize>(xml.size()));
@@ -188,8 +187,7 @@ TEST(CapiComponentPair, DataWithoutItsLengthIsRefusedAtCommit) {
     ASSERT_EQ(f.set_string(5002, value), FIXPP_ERR_OK);
     std::string payload;
     EXPECT_EQ(f.commit(payload), FIXPP_ERR_WIRE_CONFORMANCE)
-        << "a Data field with no Length before it must be refused; committed payload: "
-        << payload;
+        << "a Data field with no Length before it must be refused; committed payload: " << payload;
 }
 
 TEST(CapiComponentPair, WellFormedPairCommits) {
@@ -312,9 +310,9 @@ TEST(CapiComponentPairSend, DataCountNotEndingOnSohIsRefused) {
     EXPECT_TRUE(wait_for_established(acc_h));
 
     std::string const payload = soh("35=D|5001=2|5002=abc|");
-    EXPECT_EQ(fixpp_session_send(ini_h, reinterpret_cast<const uint8_t*>(payload.data()),
-                                 payload.size()),
-              FIXPP_ERR_APP_PAYLOAD_MALFORMED);
+    EXPECT_EQ(
+        fixpp_session_send(ini_h, reinterpret_cast<const uint8_t*>(payload.data()), payload.size()),
+        FIXPP_ERR_APP_PAYLOAD_MALFORMED);
 
     EXPECT_EQ(fixpp_session_close(ini_h), FIXPP_ERR_OK);
     EXPECT_EQ(fixpp_session_close(acc_h), FIXPP_ERR_OK);
