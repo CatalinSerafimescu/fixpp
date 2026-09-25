@@ -316,6 +316,8 @@ rejection now assert verbatim emit.
   later `EncryptMethod(98)` is still seen.
 - **A C-ABI group whose count tag is a pair half** (a Length or a Data under the handle's pairs;
   reachable where `fixpp_msg_group_begin` / `fixpp_entry_group_begin` accept such a tag, FR-021):
+  once the handle, open-builder and group-grammar checks pass (an empty instance or, on a
+  dictionary session, a delimiter or context miss is `FIXPP_ERR_TYPE_MISMATCH` first, as before),
   `fixpp_msg_commit` refuses it with `FIXPP_ERR_WIRE_CONFORMANCE`, whatever its instance count and
   whatever sits next to it, exactly as `body_builder::commit` refuses the C++ twin (C-1.7). Before
   FR-021 it was refused unless its count digits completed the pair: a group tagged 354 with one
@@ -752,8 +754,10 @@ rejection now assert verbatim emit.
     or the standard table alone when the session has none): a Length tag fails on its empty count,
     and a Data tag fails either as a Data not immediately preceded by its Length or, when its Length
     is immediately before it, on its empty value. So a group whose count tag is a pair half is never
-    read as that pair's half, and `fixpp_msg_commit` returns `FIXPP_ERR_WIRE_CONFORMANCE` for it
-    whatever its instance count and neighbours. Before FR-021 the same group was refused unless its
+    read as that pair's half, and, once the handle, open-builder and group-grammar checks pass (an
+    empty instance or, on a dictionary session, a delimiter or context miss is
+    `FIXPP_ERR_TYPE_MISMATCH` first, as before), `fixpp_msg_commit` returns
+    `FIXPP_ERR_WIRE_CONFORMANCE` for it whatever its instance count and neighbours. Before FR-021 the same group was refused unless its
     count digits completed the pair; those are the commits that change, from `FIXPP_ERR_OK` to
     `FIXPP_ERR_WIRE_CONFORMANCE`. These shapes witness it (they are witnesses, not the population):
     - **Length shape** (measured, evidence file §*/simplify (T053)*, M1): a group tagged 354 with
@@ -775,11 +779,14 @@ rejection now assert verbatim emit.
       tag its own pairs treat as a pair half (the handle's `dict_` and its `table_view` come from
       the same session dictionary, null together). *Dated 2026-09-25:* no shipped QuickFIX
       dictionary declares such a group. Re-derive by intersecting, for each `dictionaries/*.xml`,
-      the fields named by `<group name=…>` with the standard-pair tags of
-      `include/fixpp/core/length_data_pairs.hpp` and with the fields typed LENGTH, DATA or XMLDATA;
-      positive control: add a known count tag (e.g. 453) to the probe set and see it reported.
-      Whether a user dictionary can declare one depends on the loader accepting it, which is not
-      measured here; the condition, not a population, is what this requirement states. Where it
+      the fields named by `<group name=…>` with the **union** of the standard-pair tags of
+      `include/fixpp/core/length_data_pairs.hpp` and the fields typed LENGTH, DATA or XMLDATA;
+      positive control, per file: add that file's first `<group name=…>` field to the probe set and
+      see it reported. The QuickFIX XML loader does not check a `<group>` count field's type
+      (`expand_field_list`'s `<group>` arm in `src/dictionary/xml_loader.cpp` copies the field's
+      declared type without requiring NUMINGROUP), so a user dictionary can declare such a group;
+      T078's dictionary cell (`EmptyGroupTaggedAsADictionaryDataDoesNotCompleteThePair`) measures
+      it. The condition, not a population, is what this requirement states. Where it
       holds, a group with **zero instances** is the shape most easily reached there: at commit,
       `validate_group_grammar` runs its `group_first_field_exact` context lookup only for a group
       with at least one instance (`dict && !e.instances.empty()`), so a zero-instance group meets
@@ -807,15 +814,20 @@ rejection now assert verbatim emit.
     FR-021 is what makes that sentence true, so it supersedes no recorded decision of that note;
     it supersedes research.md R-4's "not 091 scope" for the C-ABI group path.
   - Witnesses (task T078, written first and RED on the unfixed code, in
-    `tests/capi/length_data_setters_test.cpp`, `capi_length_data`, on the no-dictionary fixture):
-    the Length shape and the Data shape at the top level, the Data shape with a zero-instance group
-    (`EmptyGroupTaggedAsTheDataDoesNotCompleteThePair`), and the Length shape nested in a group
-    instance, each asserting `FIXPP_ERR_WIRE_CONFORMANCE` (today `FIXPP_ERR_OK`). Twins that hold
+    `tests/capi/length_data_setters_test.cpp`, `capi_length_data`, on the no-dictionary fixture
+    except where named): the Length shape and the Data shape at the top level, the Data shape with a
+    zero-instance group (`EmptyGroupTaggedAsTheDataDoesNotCompleteThePair`), the same zero-instance
+    Data shape on a dictionary session whose custom pair's Data tag is declared a group
+    (`EmptyGroupTaggedAsADictionaryDataDoesNotCompleteThePair`, its own fixture XML), and the Length
+    shape nested in a group instance, each asserting `FIXPP_ERR_WIRE_CONFORMANCE` (today `FIXPP_ERR_OK`). Twins that hold
     before and after: the same group with a non-pair count tag and the same bare sibling Data is
     refused (an orphan Data); that group with no sibling commits; a well-formed pair next to a
     group commits; and a lone pair-half group with no neighbour is refused, for the Length
     (`TwinLonePairLengthGroupIsRefused`) and the Data (`TwinLonePairDataGroupIsRefused`), which is
-    what separates feeding the group's own tag from feeding a non-pair tag.
+    what separates feeding the group's own tag from feeding a non-pair tag; and a Length before a
+    zero-instance non-pair group, then its Data, is refused
+    (`TwinLengthBeforeAnEmptyNonPairGroupIsRefused`), which is what shows a zero-instance group node
+    is still fed.
 
 ### Key Entities
 

@@ -132,7 +132,8 @@ the call. `body_builder` exposes no size accessor, so this is the observable for
 
   **The C-ABI applies the same group-node rule** (FR-021): `fixpp_msg_commit`'s `check_length_data`
   (`src/capi/message_write.cpp`) feeds a group node an empty value too, so a group whose count tag is
-  a pair half is refused there with `FIXPP_ERR_WIRE_CONFORMANCE`. Its witnesses are C-ABI tests
+  a pair half fails the pair check there (`FIXPP_ERR_WIRE_CONFORMANCE`, once the C-ABI's handle and
+  group-grammar checks pass). Its witnesses are C-ABI tests
   (tasks T078), not C-1 tests.
 
   **Group-tag cases need a committing twin.** INV-5 and INV-6 both return

@@ -688,7 +688,7 @@ fuzz task is added (re-derive: `git grep -ln -e fixpp_msg_commit -e fixpp_msg_gr
 
 - [ ] T078 Via `phase-implementer`, the FR-021 RED witnesses in `tests/capi/length_data_setters_test.cpp`
   (`capi_length_data`, already labelled `091` and in `expected-ctest-091.txt`; no manifest change
-  unless a new ctest entry is registered). Every cell uses `DictFreeFixture` (a session with no
+  unless a new ctest entry is registered). Every cell except the dictionary cell below uses `DictFreeFixture` (a session with no
   dictionary, so the pairs are the standard table alone and a group opens on any non-framing tag),
   `ASSERT`s `FIXPP_ERR_OK` on every setup call so a RED cannot land on the wrong call, and gives each
   group instance a non-pair first field (e.g. `79=A1`), so no cell can pass through INV-4
@@ -708,6 +708,26 @@ fuzz task is added (re-derive: `git grep -ln -e fixpp_msg_commit -e fixpp_msg_gr
       one-byte Data. Confirm the unfixed code returns `FIXPP_ERR_OK` by running it before writing it
       as RED (a zero-instance group may be refused or serialised differently elsewhere); a
       non-`OK` result goes to the orchestrator;
+    - `CapiCommitGroupNode.EmptyGroupTaggedAsADictionaryDataDoesNotCompleteThePair` (Gate A FR-021
+      r1, Codex P2): on a session whose dictionary is a **new** fixture XML constant (e.g.
+      `kGroupOnPairHalfFix42Xml` in `tests/capi/length_data_capi_support.hpp`; **do not modify**
+      `kLengthDataFix42Xml`, whose other cells would then meet a group collision on 5002). It
+      declares 5001 LENGTH immediately followed by 5002 DATA in `<fields>` (so the loader pairs them
+      by adjacency), and a NewOrderSingle carrying the 5001 field and a `<group>` named after 5002
+      with a non-pair first member. Preconditions, each asserted two-sided before the RED:
+      - the load succeeds (`FIXPP_ERR_OK`) and yields the custom pair 5001→5002 (asserted through
+        the C++ `table_view`'s pair lookup, or an equivalent the file already uses), where a
+        dictionary without the adjacency would not pair them;
+      - `group_first_field(5002) != 0`: `fixpp_msg_group_begin(msg, 5002, …)` returns
+        `FIXPP_ERR_OK`, while on the same session `fixpp_msg_group_begin(msg, 5001, …)`, a tag the
+        dictionary declares no group for, returns `FIXPP_ERR_TYPE_MISMATCH`, so the acceptance is
+        the dictionary's answer and not an absent gate.
+      Then `fixpp_msg_set_bytes(msg, 5001, "1", 1)`, `fixpp_msg_group_begin(msg, 5002)` and
+      `fixpp_msg_group_end` with no entry (a zero-instance group needs no delimiter or context
+      setup). On the unfixed code commit returns `FIXPP_ERR_OK` (the digit `0` satisfies the awaited
+      one-byte 5002); after the fix, `FIXPP_ERR_WIRE_CONFORMANCE`. If the load or `group_begin`
+      precondition fails, the cell does not go into the file: it goes to the orchestrator, and
+      FR-021's dictionary branch is restated as unreachable, measured (T078);
     - `CapiCommitGroupNode.NestedGroupTaggedAsALengthDoesNotCompleteThePair`: inside one instance of
       a group tagged 78, `fixpp_entry_group_begin(354)` with one instance, then
       `fixpp_entry_set_string(355, "x", 1)` on the outer entry (there is no `fixpp_entry_set_bytes`),
@@ -726,7 +746,11 @@ fuzz task is added (re-derive: `git grep -ln -e fixpp_msg_commit -e fixpp_msg_gr
       whose Data never comes) and after (an empty count);
     - `CapiCommitGroupNode.TwinLonePairDataGroupIsRefused` (analyze E1): a group tagged 355 with
       one instance `79=A1` and nothing else; refused `FIXPP_ERR_WIRE_CONFORMANCE` before and after
-      (a Data not preceded by its Length).
+      (a Data not preceded by its Length);
+    - `CapiCommitGroupNode.TwinLengthBeforeAnEmptyNonPairGroupIsRefused` (Gate A FR-021 r1, P2-1):
+      `fixpp_msg_set_int(354, 1)`, then `fixpp_msg_group_begin(78)` and `fixpp_msg_group_end` with
+      no entry, then `fixpp_msg_set_bytes(355, "x", 1)`; refused `FIXPP_ERR_WIRE_CONFORMANCE` before
+      (`observe(78, "0")` while 355 is awaited) and after (`observe(78, {})`).
   - Before writing, re-read `check_length_data` and `length_data_checker::observe`
     (`include/fixpp/wire/length_data_check.hpp`) and confirm each RED cell's pre-change `FIXPP_ERR_OK`
     by running it; a cell that is not RED on the unfixed code goes to the orchestrator, not into the
@@ -753,11 +777,13 @@ fuzz task is added (re-derive: `git grep -ln -e fixpp_msg_commit -e fixpp_msg_gr
     the Length or the Data half of a pair (the FIX standard's, or the session dictionary's) is not
     read as that half; such a group, which returned `FIXPP_ERR_OK` when its instance-count digits
     completed the pair, now returns `FIXPP_ERR_WIRE_CONFORMANCE`. Extend its
-    `FIXPP_ERR_WIRE_CONFORMANCE` return-code line with that case, so the documented refusals cover
-    it.
+    `FIXPP_ERR_WIRE_CONFORMANCE` return-code line with that case, tagged in line
+    `(1.9, BREAKING)`, as `fixpp_msg_remove_tag`'s `(1.7, BREAKING)` clause is, so the line's older
+    `(1.6, BREAKING)` label does not date it.
   - `include/fix/c_api/version.h` 1.9 history: one FR-021 sentence naming `fixpp_msg_commit` and
     the same condition, saying that it is independent of the loader change (the history's opening
-    cause) and applies to standard pairs on any session, a session with no dictionary included.
+    cause), applies to standard pairs, and is reachable on every session with no dictionary, and on
+    a dictionary session only where that dictionary declares a group on a pair-half tag.
   - No other declaration changes (FR-021's classification: `fixpp_msg_group_begin`,
     `fixpp_entry_group_begin`, the setters and `fixpp_session_send` return what they did). Before
     writing, re-read the source T079 left; a clause that disagrees with it goes to the orchestrator.
@@ -771,10 +797,18 @@ fuzz task is added (re-derive: `git grep -ln -e fixpp_msg_commit -e fixpp_msg_gr
     cells (`CapiCommitGroupNode.GroupTaggedAsALengthDoesNotCompleteThePair`,
     `.GroupTaggedAsTheDataDoesNotCompleteThePair`,
     `.EmptyGroupTaggedAsTheDataDoesNotCompleteThePair`,
+    `.EmptyGroupTaggedAsADictionaryDataDoesNotCompleteThePair`,
     `.NestedGroupTaggedAsALengthDoesNotCompleteThePair`); every `Twin*` cell stays GREEN;
   - "`check_length_data` does not observe a group node at all" (the node skipped, not fed) →
     `CapiCommitPairs.RefusesALengthSeparatedFromItsDataByAGroup`, since a skipped group lets a
-    Length pair with a Data after it; this shows the fix feeds the node rather than dropping it;
+    Length pair with a Data after it; this shows the fix feeds the node rather than dropping it.
+    That cell's group has one instance, so it kills only the unconditional skip;
+  - "`check_length_data` skips a zero-instance group node (`if (e.instances.empty()) continue;`)"
+    (Gate A FR-021 r1, P2-1) → `CapiCommitGroupNode.TwinLengthBeforeAnEmptyNonPairGroupIsRefused`,
+    which commits `35=D␁354=1␁78=0␁355=x␁` under it;
+  - "`check_length_data` feeds `{}` only for a group tag that `dict_hooks::none()` pairs, and the
+    count digits for a dictionary-only pair half" (Gate A FR-021 r1, Codex P2) →
+    `CapiCommitGroupNode.EmptyGroupTaggedAsADictionaryDataDoesNotCompleteThePair`;
   - "`check_length_data` feeds a group node under a non-pair tag (`observe(0, {})`) instead of its
     own tag" (analyze E1) → `CapiCommitGroupNode.TwinLonePairLengthGroupIsRefused` and
     `.TwinLonePairDataGroupIsRefused`, which commit under it; this shows the group's own tag is
@@ -1329,7 +1363,7 @@ FR-019, SC-006).
   (`git log origin/main..HEAD --format=%B`) for `close[sd]?|fix(e[sd])?|resolve[sd]?` next to
   `#50[56]` or any number other than 418 (other than #506 if the T063 ruling allows it). A negated
   keyword still links. After opening, check
-  `closingIssuesReferences` lists only #418.
+  `closingIssuesReferences` lists only #418, plus #506 if and only if the T063 ruling added it.
 
 ### Mandatory close-out tasks (Gate-B preconditions, Article XVII §8)
 

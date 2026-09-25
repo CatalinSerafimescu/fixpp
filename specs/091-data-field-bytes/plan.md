@@ -43,7 +43,8 @@ session with no dictionary, a group tagged 354 with one instance followed by a o
 committed. That commit, and every other one in which a pair-half group's count digits completed
 the pair, now returns `FIXPP_ERR_WIRE_CONFORMANCE`: a success turned into a failure, so it joins
 C-ABI 1.9's BREAKING population through `fixpp_msg_commit`'s own note and the `version.h`
-history (tasks §2e). Its controls are **pending** (Constitution Check, X row).
+history (tasks §2e). Its `/clarify` and `/speckit-analyze` controls are ✅; the scoped Gate A round
+and the owner's plan re-sign-off are **pending** (Constitution Check, X row).
 
 The code generator:
 - routes every coupled member through the new operation in both the top-level and nested arms, with a
@@ -271,8 +272,8 @@ brain/components/wire.md (group-node paragraph)  # FR-021 repairs the defect fix
    `observe(tag, {})`, and its header comment names FR-021 as the superseding decision. Then the
    `message.h` FR-021 clause and return-code line, the `version.h` sentence and the freeze re-pin
    (T080); the mutant that restores the count digits (T081); and the ledger, catalogue and brain
-   text (T082). The scoped Gate A round on the FR-021 delta, the `/speckit-analyze` re-run and the
-   owner's plan re-sign-off precede T078 (Constitution Check, X row).
+   text (T082). The `/speckit-analyze` re-run is done (✅ 2026-09-25); the scoped Gate A round on
+   the FR-021 delta and the owner's plan re-sign-off precede T078 (Constitution Check, X row).
 2. **`body_builder` API + commit check** (C-1, including C-1.4b handle checks). The C-1 unit tests are written RED first, then
    implemented to GREEN. The flipped pins stay RED: the generated builder still routes through
    `field()`.
@@ -517,5 +518,19 @@ Recorded so later rounds do not re-raise them:
   E2 the zero-instance Data-shape cell and its reachability condition; F1 Polish order; F2 FR-019's
   lead and the `version.h` sentence; F3 the 2e dependency line; F4 the fuzz re-derivation grep with
   a positive control; F5 T061's comment list). ✅
-- Status: **pending**. The scoped Gate A round has not run and the owner has not re-signed the plan.
-  T078 does not start until both are recorded here and in the X row.
+- Scoped FR-021 round 1 applied 2026-09-25: Codex P1=1 P2=1 P3=0; Opus post-judging P1=0 P2=2 P3=5
+  (Codex P1 downgraded to P3-1: the declaration states the change on its `FIXPP_ERR_OK` population
+  and is exact; only the normative "whatever its instance count" prose overstated). Rewrite: the
+  dictionary-backed RED cell `EmptyGroupTaggedAsADictionaryDataDoesNotCompleteThePair` with its own
+  XML constant and two-sided preconditions, plus its "standard-only empty feed" mutant (Codex P2);
+  the twin `TwinLengthBeforeAnEmptyNonPairGroupIsRefused` plus the zero-instance skip mutant
+  (P2-1); the grammar-precedence qualification in FR-021, the Edge Case, B-091-4 and C-1.7 (P3-1);
+  T080's in-line `(1.9, BREAKING)` tag and the `version.h` reachability wording (P3-2); T067's
+  `closingIssuesReferences` check conditioned on T063 (P3-3); the probe recipe's union and
+  per-file control, and the loader-acceptance sentence replaced by the measured condition (P3-4);
+  the plan Summary's control status (P3-5). Reviews:
+  research/reviews/codex_091-data-field-bytes_gate_a_FR021_review.md,
+  research/reviews/opus_091-data-field-bytes_gate_a_FR021_adversarial_review.md.
+- Status: **pending** (round 1 did not converge; the next round reviews this rewrite). The owner has
+  not re-signed the plan. T078 does not start until the round converges and the re-sign-off is
+  recorded here and in the X row.
