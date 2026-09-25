@@ -1225,7 +1225,7 @@ FR-019, SC-006).
 
 ### Performance (SC-005, Article VIII; plan phase 6)
 
-- [ ] T055 Via `phase-implementer`, make `bench/wire/builder_bench.cpp`'s WithGroup and Raw prechecks
+- [X] T055 Via `phase-implementer`, make `bench/wire/builder_bench.cpp`'s WithGroup and Raw prechecks
   exact.
   - Pin complete `kWithGroupBody` and `kRawBody` (as `kNoGroupBody` is) and compare exactly.
   - Show each case's one-line mutant producing `SkipWithError`: drop one scalar field (both cases);
@@ -1233,7 +1233,7 @@ FR-019, SC-006).
     `.specify/decisions/091-data-field-bytes-evidence.md`.
   - The final bench source must compile against the merge-base API; it may not call
     `field_data`/`set_data`.
-- [ ] T056 Via `phase-implementer`, add the `builder_bench` row to `bench/ci-suite.txt` with tier-2
+- [X] T056 Via `phase-implementer`, add the `builder_bench` row to `bench/ci-suite.txt` with tier-2
   value **`no`** (Article VIII §2a candidate-only; `paired` is irreversible), in the file's existing
   row format.
 - [ ] T057 Run the paired SC-005 run, following quickstart §6 exactly.
