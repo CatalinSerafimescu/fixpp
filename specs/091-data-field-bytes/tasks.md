@@ -1044,7 +1044,7 @@ FR-019, SC-006).
 
 ### Simplify (before any measurement)
 
-- [ ] T053 Run `/simplify` over the branch diff (`[const §XVI.7]`, pipeline step 11); fixes go through
+- [X] T053 Run `/simplify` over the branch diff (`[const §XVI.7]`, pipeline step 11); fixes go through
   `phase-implementer`. Every later check (T060 onward) runs on the post-simplify head.
 - [ ] T054 After `/simplify` (T053) and codegen freshness, re-measure the compile-time surface "after" figure with
   `bench/codegen/vlatest_builders_compile_bench/compile_bench.sh`, same command and toolchain as
