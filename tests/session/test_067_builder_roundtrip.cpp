@@ -1424,6 +1424,45 @@ TEST_P(DataFieldOctet091, Nested_NewOrderMultileg_NoLegs_EncodedLegIssuer) {
 
 INSTANTIATE_TEST_SUITE_P(AllOctets, DataFieldOctet091, ::testing::Range(0, 256), octet_name_091);
 
+// ── 091-data-field-bytes T036 [US1]: AS-4, a coupled member left unset ───
+// With the coupled member (and message_encoding) unset, neither the Length
+// nor the Data half is emitted. The expected body is spelled out in full, so
+// a stray Length or Data half, or a MessageEncoding(347), fails the comparison.
+TEST(DataFieldUnset091, TopLevel_NewOrderSingle_EncodedTextUnset_NeitherHalfEmitted) {
+    fixpp::v44::NewOrderSingleArgs args{};
+    args.cl_ord_id = "C1";
+    args.side = '1';
+    args.symbol = "IBM";
+
+    std::array<std::byte, 1024> out{};
+    auto built = fixpp::v44::build_NewOrderSingle(std::span<std::byte>{out}, args);
+    ASSERT_TRUE(built.has_value()) << fixpp::core::to_string(built.error());
+    EXPECT_EQ(bytes_to_string(*built), std::string{"35=D\x01"
+                                                   "11=C1\x01"
+                                                   "54=1\x01"
+                                                   "55=IBM\x01"});
+}
+
+TEST(DataFieldUnset091, Nested_NewOrderMultileg_EncodedLegIssuerUnset_NeitherHalfEmitted) {
+    fixpp::v44::groups::G_555_4Args leg{};
+    leg.leg_symbol = "LEG";
+    std::array<fixpp::v44::groups::G_555_4Args, 1> legs{leg};
+
+    fixpp::v44::NewOrderMultilegArgs args{};
+    args.cl_ord_id = "C1";
+    args.side = '1';
+    args.legs = std::span<const fixpp::v44::groups::G_555_4Args>{legs};
+
+    std::array<std::byte, 2048> out{};
+    auto built = fixpp::v44::build_NewOrderMultileg(std::span<std::byte>{out}, args);
+    ASSERT_TRUE(built.has_value()) << fixpp::core::to_string(built.error());
+    EXPECT_EQ(bytes_to_string(*built), std::string{"35=AB\x01"
+                                                   "11=C1\x01"
+                                                   "54=1\x01"
+                                                   "555=1\x01"
+                                                   "600=LEG\x01"});
+}
+
 // ── 091-data-field-bytes T030 [US1]: C-2.3 message_encoding presence ─────
 // Each check is a constexpr bool computed from a requires-expression and
 // asserted at run time, so an absent member is a test failure rather than a
