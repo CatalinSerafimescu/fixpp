@@ -163,7 +163,7 @@ inline constexpr std::string_view kFramingLengthPairFix42Xml = R"xml(
 
 // A dictionary that declares a repeating group on a pair half (091 FR-021): CustomDataLen
 // (5001, LENGTH) is declared immediately before CustomData (5002, DATA) in <fields>, so the
-// XmlLoader pairs 5001 -> 5002 by adjacency, and NewOrderSingle ("D") carries 5001 and a
+// XmlLoader pairs 5001 with 5002 by adjacency, and NewOrderSingle ("D") carries 5001 and a
 // <group> named after 5002 whose first member, AllocAccount(79), is not a pair half.
 inline constexpr std::string_view kGroupOnPairHalfFix42Xml = R"xml(
 <fix major="4" minor="2">

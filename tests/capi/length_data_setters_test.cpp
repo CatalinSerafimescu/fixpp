@@ -645,7 +645,7 @@ TEST(CapiCommitGroupNode, EmptyGroupTaggedAsTheDataDoesNotCompleteThePair) {
     EXPECT_FALSE(c.has_payload) << "payload [" << c.shown << "]";
 }
 
-// The Data shape on a dictionary session whose dictionary pairs 5001 -> 5002 and declares
+// The Data shape on a dictionary session whose dictionary pairs 5001 with 5002 and declares
 // a group on 5002. The preconditions establish, two-sided, that the dictionary pairs the
 // tags and that it (not an absent gate) accepts the group; they run on a separate
 // dictionary load and on a control message, never on the message under test.
@@ -655,7 +655,7 @@ TEST(CapiCommitGroupNode, EmptyGroupTaggedAsADictionaryDataDoesNotCompleteThePai
     ASSERT_NE(f.sess, nullptr);
     ASSERT_NE(f.msg, nullptr);
 
-    // Pair: the same document, loaded again, pairs 5001 -> 5002 in both directions, and a
+    // Pair: the same document, loaded again, pairs 5001 with 5002 in both directions, and a
     // declared field that is not LENGTH pairs nothing.
     {
         constexpr std::size_t kBufSize = 128U * 1024U;
@@ -740,7 +740,7 @@ TEST(CapiCommitGroupNode, TwinWellFormedPairNextToAGroupCommits) {
     EXPECT_EQ(c.shown, "35=D|78=1|79=A1|354=1|355=x|");
 }
 
-// A group tagged 354 and nothing else: as a Length it has no Data after it.
+// A message holding only a group tagged 354: as a Length it has no Data after it.
 TEST(CapiCommitGroupNode, TwinLonePairLengthGroupIsRefused) {
     DictFreeFixture f;
     ASSERT_NO_FATAL_FAILURE(add_one_instance_group(f.msg, 354));
@@ -749,7 +749,7 @@ TEST(CapiCommitGroupNode, TwinLonePairLengthGroupIsRefused) {
     EXPECT_FALSE(c.has_payload) << "payload [" << c.shown << "]";
 }
 
-// A group tagged 355 and nothing else: as a Data it is not preceded by its Length.
+// A message holding only a group tagged 355: as a Data it is not preceded by its Length.
 TEST(CapiCommitGroupNode, TwinLonePairDataGroupIsRefused) {
     DictFreeFixture f;
     ASSERT_NO_FATAL_FAILURE(add_one_instance_group(f.msg, 355));
