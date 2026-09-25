@@ -103,7 +103,15 @@ cmake --preset linux-clang-debug -DFIXPP_CODEGEN_V44_FAMILIES=official
 > tag-keyed path. **Source-API note:** the v44 nested-group `Args` type names
 > changed from message-rooted (`NewOrderListOrdersArgs`) to shared
 > (`groups::G_73_1Args`) — a deliberate pre-1.0 break with no aliases; top-level
-> `<Msg>Args` names are unchanged. **Since 078**, this dedup is unchanged but the
+> `<Msg>Args` names are unchanged. **Since 091 (fixpp#418)**, a coupled
+> Length+Data member is emitted through `wire::body_builder::field_data` /
+> `entry_handle::set_data`, which derive the Length and carry any octet verbatim;
+> an empty value is refused. A hand-writer on the runtime `wire::body_builder` path
+> uses the same calls for a Data field, and `commit` refuses a malformed pair. On
+> `v50sp2`, the separate Length member of each pair the loader now pairs inside a
+> component or group is deleted with no alias, and a message that can carry an
+> `Encoded*` field gains a trailing `message_encoding` member (B&L B-091-2,
+> B-091-4, B-091-5). **Since 078**, this dedup is unchanged but the
 > emitted *packaging* is a precompiled per-version library + slim per-message
 > headers rather than one monolithic `Builders.hpp` — see the next section.
 
