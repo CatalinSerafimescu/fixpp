@@ -833,7 +833,7 @@ fuzz task is added (re-derive: `git grep -ln -e fixpp_msg_commit -e fixpp_msg_gr
     `.TwinLonePairDataGroupIsRefused`, which commit under it; this shows the group's own tag is
     what the check reads.
   Record each mutant, command and RED line in the evidence file §*Mutants*, as a dated addendum.
-- [ ] T082 Orchestrator-authored text (T079 landed, so the ledger describes shipped behaviour):
+- [X] T082 Orchestrator-authored text (T079 landed, so the ledger describes shipped behaviour):
   - `spec/behaviors-and-limitations.md` B-091-4 (the live text): add FR-021's effect as data-model.md's
     B-091-4 row states it: the condition (a group whose count tag is a pair half is refused at
     `fixpp_msg_commit`, where it committed when its count digits completed the pair), the
@@ -1304,8 +1304,8 @@ FR-019, SC-006).
 ### Close-out checks
 
 - [ ] T063 Record fixpp#506's fix before 091 closes (plan phase 7): FR-021 fixes it (owner ruling
-  2026-09-25); name the §2e commits and the T078 cells in the evidence file, and update the parent's
-  `phases/phase-4/issue-batches.md` Parked entry for #506. **Owner ruling 2026-09-25: #506 closes through this PR**
+  2026-09-25); name the §2e commits and the T078 cells in the evidence file, and confirm the parent's
+  `phases/phase-4/issue-batches.md` Parked entry for #506 (updated early at T082, parent `f126dde`). **Owner ruling 2026-09-25: #506 closes through this PR**
   (FR-021 delivers its whole Expected and Test sections). T067 carries its closing keyword. Confirm fixpp#505 is open and cited in B-091-3.
 - [ ] T064 Run the quickstart §2 label gate. It must pass: the label set equals the manifest, and
   every manifest entry is a registered test. Then run `ctest --test-dir build/linux-clang-debug -L '^091$' --output-on-failure`, all
