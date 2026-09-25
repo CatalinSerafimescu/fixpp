@@ -566,7 +566,7 @@ only then made GREEN.
   - GREEN: the unfiltered `session_length_data_scanner` binary passes. Record the cells, the command
     and the result in `.specify/decisions/091-data-field-bytes-evidence.md` §*FR-020 GREEN
     (T071–T072)*, as a dated addendum.
-- [ ] T075 Via `phase-implementer`, align the header and source comments with FR-020 as rewritten by
+- [X] T075 Via `phase-implementer`, align the header and source comments with FR-020 as rewritten by
   the scoped Gate A rounds 1 and 2, with the freeze re-pin. The short form is FR-020's, verbatim: *a
   Length immediately followed by its paired Data whose counted extent reaches or passes the end of
   the whole framed message, or whose following byte is not SOH*.
