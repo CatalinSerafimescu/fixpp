@@ -414,16 +414,8 @@ void emit_level_body(TemplateWriter& w, LevelPlan const& plan, std::string const
     // the FIRST body statement, so it is ordered ahead of every other item here.
     std::vector<LevelItem const*> order;
     order.reserve(plan.size());
-    for (auto const& item : plan) {
-        if (item.message_encoding) {
-            order.push_back(&item);
-        }
-    }
-    for (auto const& item : plan) {
-        if (!item.message_encoding) {
-            order.push_back(&item);
-        }
-    }
+    for (auto const& item : plan) order.push_back(&item);
+    std::ranges::stable_partition(order, [](LevelItem const* i) { return i->message_encoding; });
     for (LevelItem const* item_ptr : order) {
         LevelItem const& item = *item_ptr;
         if (!item.is_group) {
