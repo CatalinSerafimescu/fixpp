@@ -714,20 +714,33 @@ fuzz task is added (re-derive: `git grep -ln -e fixpp_msg_commit -e fixpp_msg_gr
       `kLengthDataFix42Xml`, whose other cells would then meet a group collision on 5002). It
       declares 5001 LENGTH immediately followed by 5002 DATA in `<fields>` (so the loader pairs them
       by adjacency), and a NewOrderSingle carrying the 5001 field and a `<group>` named after 5002
-      with a non-pair first member. Preconditions, each asserted two-sided before the RED:
-      - the load succeeds (`FIXPP_ERR_OK`) and yields the custom pair 5001→5002 (asserted through
-        the C++ `table_view`'s pair lookup, or an equivalent the file already uses), where a
-        dictionary without the adjacency would not pair them;
-      - `group_first_field(5002) != 0`: `fixpp_msg_group_begin(msg, 5002, …)` returns
-        `FIXPP_ERR_OK`, while on the same session `fixpp_msg_group_begin(msg, 5001, …)`, a tag the
-        dictionary declares no group for, returns `FIXPP_ERR_TYPE_MISMATCH`, so the acceptance is
-        the dictionary's answer and not an absent gate.
-      Then `fixpp_msg_set_bytes(msg, 5001, "1", 1)`, `fixpp_msg_group_begin(msg, 5002)` and
-      `fixpp_msg_group_end` with no entry (a zero-instance group needs no delimiter or context
-      setup). On the unfixed code commit returns `FIXPP_ERR_OK` (the digit `0` satisfies the awaited
-      one-byte 5002); after the fix, `FIXPP_ERR_WIRE_CONFORMANCE`. If the load or `group_begin`
-      precondition fails, the cell does not go into the file: it goes to the orchestrator, and
-      FR-021's dictionary branch is restated as unreachable, measured (T078);
+      with a non-pair first member. Preconditions, each asserted two-sided before the RED, none of them on the RED message:
+      - **Load.** `make_length_data_session_cfg(…, kGroupOnPairHalfFix42Xml)` returns without
+        throwing (the loader is C++ `XmlLoader::load_from_string`, which throws on a rejected
+        document and returns no C error code). Its `fixpp_session_config_set_dictionary` returns
+        `FIXPP_ERR_OK` (the helper already `EXPECT`s it), and the session opens with `FIXPP_ERR_OK`.
+      - **Pair.** In the test body, load the same constant a second time through
+        `fixpp::dict::XmlLoader{}.load_from_string` and `ASSERT` that `length_pair_data_tag(5001) ==
+        5002` on the `Dictionary`, and that `as_table_view().data_pair_length_tag(5002) == 5001`.
+        Negative arm: `length_pair_data_tag` of a declared non-LENGTH field of the same XML is `0`.
+        Do **not** observe the pair through `fixpp_msg_set_data(…, 5002, …)`: on this XML it returns
+        `FIXPP_ERR_TYPE_MISMATCH` through `is_group_collision`, because 5002 is a group count,
+        whatever the pair.
+      - **Group.** On a throwaway control message `ctl` of the same session, which is never
+        committed: `fixpp_msg_group_begin(ctl, 5002, &b)` returns `FIXPP_ERR_OK`, then
+        `fixpp_msg_group_end(ctl, b)`; and `fixpp_msg_group_begin(ctl, 5001, &b2)` returns
+        `FIXPP_ERR_TYPE_MISMATCH`, since the dictionary declares no group on 5001. That shows the
+        acceptance is the dictionary's answer and not an absent gate.
+
+      **RED**, on a fresh message `msg` whose only calls are these:
+      `fixpp_msg_set_bytes(msg, 5001, "1", 1)` (`ASSERT` `FIXPP_ERR_OK`),
+      `fixpp_msg_group_begin(msg, 5002, &g)` (`ASSERT` `FIXPP_ERR_OK`), `fixpp_msg_group_end(msg, g)`
+      with no entry (a zero-instance group needs no delimiter or context setup), then
+      `fixpp_msg_commit`. On the unfixed code commit returns `FIXPP_ERR_OK` (the digit `0` satisfies
+      the awaited one-byte 5002); after the fix it returns `FIXPP_ERR_WIRE_CONFORMANCE`. Any
+      precondition that fails, or a commit that is not `FIXPP_ERR_OK` on the unfixed code, goes to
+      the orchestrator with the observed codes. The cell does not go into the file, and this task
+      draws no conclusion about FR-021's dictionary branch;
     - `CapiCommitGroupNode.NestedGroupTaggedAsALengthDoesNotCompleteThePair`: inside one instance of
       a group tagged 78, `fixpp_entry_group_begin(354)` with one instance, then
       `fixpp_entry_set_string(355, "x", 1)` on the outer entry (there is no `fixpp_entry_set_bytes`),
@@ -808,7 +821,13 @@ fuzz task is added (re-derive: `git grep -ln -e fixpp_msg_commit -e fixpp_msg_gr
     which commits `35=D␁354=1␁78=0␁355=x␁` under it;
   - "`check_length_data` feeds `{}` only for a group tag that `dict_hooks::none()` pairs, and the
     count digits for a dictionary-only pair half" (Gate A FR-021 r1, Codex P2) →
-    `CapiCommitGroupNode.EmptyGroupTaggedAsADictionaryDataDoesNotCompleteThePair`;
+    `CapiCommitGroupNode.EmptyGroupTaggedAsADictionaryDataDoesNotCompleteThePair`. Not covered,
+    recorded (Gate A FR-021 r2, P3-2): a mutant that feeds count digits only for a **dictionary
+    Length** half survives (the dictionary cell is Data-side and zero-instance; a Length-side kill
+    needs a one-instance group with delimiter setup, since a zero-instance node's `"0"` is refused
+    as a zero count either way). No cell is added: killing it needs a condition on both the pair's
+    side and its source, which no plausible implementation of FR-021 has. Recorded as a residual in
+    the evidence file §*Mutants*, not run;
   - "`check_length_data` feeds a group node under a non-pair tag (`observe(0, {})`) instead of its
     own tag" (analyze E1) → `CapiCommitGroupNode.TwinLonePairLengthGroupIsRefused` and
     `.TwinLonePairDataGroupIsRefused`, which commit under it; this shows the group's own tag is

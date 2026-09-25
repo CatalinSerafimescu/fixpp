@@ -531,6 +531,21 @@ Recorded so later rounds do not re-raise them:
   the plan Summary's control status (P3-5). Reviews:
   research/reviews/codex_091-data-field-bytes_gate_a_FR021_review.md,
   research/reviews/opus_091-data-field-bytes_gate_a_FR021_adversarial_review.md.
-- Status: **pending** (round 1 did not converge; the next round reviews this rewrite). The owner has
+- Scoped FR-021 round 2 applied 2026-09-25: Codex P1=0 P2=1 P3=0; Opus post-judging P1=0 P2=1 P3=2
+  (Codex P2 accepted and re-grounded: besides the RED message mutated by its own `group_begin`
+  precondition, the pair precondition's `set_data` route returns `FIXPP_ERR_TYPE_MISMATCH` through
+  `is_group_collision` on this XML, and the task's pre-written "unreachable, measured" fallback
+  would have turned that into a false spec sentence). Rewrite 2: the T078 dictionary-cell bullet
+  replaced with the Opus text (load observed as no throw + `set_dictionary` OK + session open; the
+  pair through a separate C++ load, `Dictionary::length_pair_data_tag` and
+  `as_table_view().data_pair_length_tag` with a negative arm, the `set_data` route forbidden;
+  group preconditions on a throwaway `ctl` message; RED on a fresh `msg`; any failure goes to the
+  orchestrator with the observed codes, no pre-written conclusion) (P2); the probe recipe's per-file
+  non-zero count of typed LENGTH/DATA/XMLDATA fields (P3-1); the dictionary-Length-half mutant
+  recorded as a residual in T081, no cell added (P3-2). Reviews:
+  research/reviews/codex_091-data-field-bytes_gate_a_FR021_2_review.md,
+  research/reviews/opus_091-data-field-bytes_gate_a_FR021_2_adversarial_review.md.
+- Status: **pending** (round 2 did not converge; the next round reviews this rewrite, the last one
+  `/gate-a` allows). The owner has
   not re-signed the plan. T078 does not start until the round converges and the re-sign-off is
   recorded here and in the X row.

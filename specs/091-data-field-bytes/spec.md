@@ -782,7 +782,9 @@ rejection now assert verbatim emit.
       the fields named by `<group name=…>` with the **union** of the standard-pair tags of
       `include/fixpp/core/length_data_pairs.hpp` and the fields typed LENGTH, DATA or XMLDATA;
       positive control, per file: add that file's first `<group name=…>` field to the probe set and
-      see it reported. The QuickFIX XML loader does not check a `<group>` count field's type
+      see it reported, and print and assert, per file, a non-zero count of fields typed LENGTH,
+      DATA or XMLDATA (every shipped `dictionaries/*.xml` declares some), so a zero-parse of the
+      typed side cannot pass as "0 hits". The QuickFIX XML loader does not check a `<group>` count field's type
       (`expand_field_list`'s `<group>` arm in `src/dictionary/xml_loader.cpp` copies the field's
       declared type without requiring NUMINGROUP), so a user dictionary can declare such a group;
       T078's dictionary cell (`EmptyGroupTaggedAsADictionaryDataDoesNotCompleteThePair`) measures
