@@ -319,6 +319,8 @@ private:
                                   const std::pmr::vector<entry_node>& entries) noexcept;
 
     std::string msg_type_;
+    // Read by commit() only (INV-6). See the constructor's lifetime precondition.
+    dict_hooks hooks_;
 
     // ── Zero-global-heap arena (061-slim rework) ────────────────────────────
     // Fixed internal scratch for the intermediate accumulation TREE (entry
@@ -344,9 +346,6 @@ private:
     // ~68 B of arena per open group for state never re-resolved from the stack.
     std::pmr::vector<std::uint32_t> open_stack_{&arena_};
     std::uint32_t next_open_seq_ = 1;
-    // Read by commit() only (INV-6). See the constructor's lifetime precondition.
-    // Declared after the arena so the arena keeps its offset in the object.
-    dict_hooks hooks_;
     // False only while no appended node (scalar or group) carries a tag the
     // standard pair table names and `hooks_` has no dictionary pair callback.
     // Every lookup of INV-6 then answers 0, so commit() skips the pair check
