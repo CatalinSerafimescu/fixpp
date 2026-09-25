@@ -35,7 +35,7 @@
 #      messages whose member was deleted are exactly those whose emit was
 #      deleted from both the .builder.cpp and the .builder.inl.
 #   4. The C-2.2 census (codegen_091_data_census_test) over the new goldens,
-#      when its binary is available: (a), (c) and (b)'s message set.
+#      (a), (c) and (b)'s message set. A missing census binary is exit 2.
 #
 # Usage:
 #   python3 tests/codegen/golden_091_residual_diff.py \
@@ -402,7 +402,10 @@ def main():
                 failed = True
                 print(r.stdout[-4000:])
         else:
-            print(f"[census] SKIPPED: no binary at {args.census_bin}")
+            # (a) and (c) are defined as the census plus the correspondence
+            # check, so a run without the census could not check them.
+            die(f"no census binary at {args.census_bin}; build "
+                "codegen_091_data_census_test or pass --census-bin")
 
         print("RESULT: " + ("FAIL" if failed else "PASS"))
         return 1 if failed else 0
