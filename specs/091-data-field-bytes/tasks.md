@@ -686,7 +686,7 @@ re-signed the plan (plan.md Constitution Check, X row; §Gate A, *Scoped FR-021 
 `.specify/decisions/091-data-field-bytes-gatea.md` §"Addendum — scoped Gate A round on FR-021 (2026-09-25)"). T078 may start. No fuzz harness reaches `fixpp_msg_commit` and FR-021 changes no parser, so no
 fuzz task is added (re-derive: `git grep -ln -e fixpp_msg_commit -e fixpp_msg_group_begin -- '*fuzz*'` (empty; a hit reopens this), positive control `git grep -ln -e on_inbound_frame -- '*fuzz*'`, which must list `tests/fuzz/fuzz_session_recovery_admin_parse.cpp`).
 
-- [ ] T078 Via `phase-implementer`, the FR-021 RED witnesses in `tests/capi/length_data_setters_test.cpp`
+- [X] T078 Via `phase-implementer`, the FR-021 RED witnesses in `tests/capi/length_data_setters_test.cpp`
   (`capi_length_data`, already labelled `091` and in `expected-ctest-091.txt`; no manifest change
   unless a new ctest entry is registered). Every cell except the dictionary cell below uses `DictFreeFixture` (a session with no
   dictionary, so the pairs are the standard table alone and a group opens on any non-framing tag),
@@ -770,7 +770,7 @@ fuzz task is added (re-derive: `git grep -ln -e fixpp_msg_commit -e fixpp_msg_gr
     file.
   - Record the pre-registered table (cell, expected before, expected after) and the observed RED in
     `.specify/decisions/091-data-field-bytes-evidence.md` §*FR-021 RED (T078)*.
-- [ ] T079 Via `phase-implementer`, implement FR-021 in `src/capi/message_write.cpp`'s
+- [X] T079 Via `phase-implementer`, implement FR-021 in `src/capi/message_write.cpp`'s
   `check_length_data`: a group node is fed as `checker.observe(e.tag, {})`, with an empty span, as
   `body_builder::commit` does (R-4), and the instance recursion is unchanged. Delete the count-digit
   buffer and the `std::to_chars` call, and any include only they used.
@@ -783,7 +783,7 @@ fuzz task is added (re-derive: `git grep -ln -e fixpp_msg_commit -e fixpp_msg_gr
     (a group built through a helper is invisible to a lexical grep; the full run is the blast-radius
     check). Any other failure goes to the orchestrator; edit no pre-existing test without a ruling.
   - Record the cells, commands and results in the evidence file §*FR-021 GREEN (T079–T080)*.
-- [ ] T080 Via `phase-implementer`, the FR-021 declaration text and the freeze re-pin
+- [X] T080 Via `phase-implementer`, the FR-021 declaration text and the freeze re-pin
   (`[const §X.7]`: "each affected declaration"):
   - `include/fix/c_api/message.h`, `fixpp_msg_commit`: a BREAKING (C-ABI 1.9) FR-021 clause beside
     the existing FR-019 one (whose cause, the loader, is a different one): a group whose count tag is
@@ -803,7 +803,7 @@ fuzz task is added (re-derive: `git grep -ln -e fixpp_msg_commit -e fixpp_msg_gr
   - Run `tools/check_capi_freeze.sh`: it must fail on exactly `message.h` and `version.h`, then
     re-pin `tools/capi_freeze.sha256` and pass. Run
     `.claude/scripts/check-comment-claims.py --root <tree> --base origin/main` on the result.
-- [ ] T081 Via `phase-implementer`, run the FR-021 mutants from quickstart §3 in a scratch copy (the
+- [X] T081 Via `phase-implementer`, run the FR-021 mutants from quickstart §3 in a scratch copy (the
   T026 procedure: RED on the named cells, GREEN after revert, a clean `git diff` of the scratch
   copy against the PR head):
   - "`check_length_data` feeds a group node its instance-count digits again" → the T078 RED
