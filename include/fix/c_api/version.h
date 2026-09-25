@@ -67,21 +67,27 @@
  *  pair. The effects that have a carrying declaration are noted on it (dict.h
  *  fixpp_dict_load_from_xml; message.h fixpp_msg_commit, fixpp_msg_set_data,
  *  fixpp_entry_set_data and the accessor preamble; session.h
- *  fixpp_session_send, fixpp_session_register_callback). The effects with no
- *  carrying declaration are recorded here:
+ *  fixpp_session_send, fixpp_session_register_callback,
+ *  fixpp_session_register_send_callback). The effects with no carrying
+ *  declaration are recorded here:
  *    - a frame a pre-1.9 engine stored with a malformed pair of that kind now
  *      fails replay (build_replay_frame) and is gap-filled rather than resent;
  *    - the session's header and Logon scans (scan_frame_header, interpret_logon,
  *      the store's frame_has_genuine_tag554 masking) read such a Data by count.
- *      interpret_logon refuses a Logon carrying a malformed count, whether of
- *      a component/group-only pair or of a standard pair such as
- *      RawDataLength(95) and RawData(96) (so shipped dictionaries are
- *      affected too): a Logon of that shape that was accepted is now
- *      refused. Observers: on either role
- *      fixpp_session_is_established stays false, and fixpp_session_close,
- *      once the refused session has drained (its lifecycle-return branch is
- *      reached only for a drained or never-published session), returns
- *      FIXPP_ERR_THREAD_SESSION_LIFECYCLE, not FIXPP_ERR_OK.
+ *  interpret_logon refuses a Logon carrying a Length immediately followed by
+ *  its paired Data whose counted extent reaches or passes the end of the
+ *  whole framed message, or whose following byte is not SOH, whether of a
+ *  component/group-only pair or of a standard pair such as
+ *  RawDataLength(95) and RawData(96) (so shipped dictionaries are affected
+ *  too): a Logon of that shape that was accepted is now refused, on either
+ *  role. The observers are every call whose result depends on the session
+ *  having logged on; each also carries its own note in session.h:
+ *  fixpp_session_is_established stays false; fixpp_session_close, once the
+ *  refused session has drained, returns FIXPP_ERR_THREAD_SESSION_LIFECYCLE,
+ *  not FIXPP_ERR_OK; fixpp_session_send on that session returns
+ *  FIXPP_ERR_SESSION_INVALID_STATE, not FIXPP_ERR_OK; neither the receive
+ *  callback (fixpp_session_register_callback) nor the toApp callback
+ *  (fixpp_session_register_send_callback) is ever invoked for it.
  *  No error code is added. */
 #define FIXPP_C_ABI_VERSION_MAJOR 1
 #define FIXPP_C_ABI_VERSION_MINOR 9 /* 1.9: component/group-only Length+Data pairs (fixpp#418) */

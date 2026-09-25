@@ -102,9 +102,11 @@ struct logon_interpret_result {
 // extend them beyond the frame's lifetime.
 // fixpp#426: a Data value counted by its Length (via `hooks`: the session's
 // dictionary, or the standard table alone) is read as one value, so a
-// `<SOH>554=` inside RawData is not a Password. A malformed count (it runs past the
-// frame, or its value is not followed by SOH) refuses the Logon with
-// session_invalid_logon (091 FR-020).
+// `<SOH>554=` inside RawData is not a Password. A Length immediately followed by
+// its paired Data whose counted extent reaches or passes the end of the whole
+// framed message, or whose following byte is not SOH, refuses the Logon with
+// session_invalid_logon (091 FR-020). A Length whose next field is not its
+// paired Data is read as a plain value; its count is never applied.
 // [033 T007 / data-model E5; 005 T021]
 [[nodiscard]] fixpp::core::expected_t<logon_interpret_result> interpret_logon(
     std::span<const std::byte> frame, std::string_view expected_sender,

@@ -377,9 +377,12 @@ namespace {
             auto const value =
                 carry.read_value(frame, vstart, static_cast<std::uint16_t>(tag), hooks);
             if (!value) {
-                // A malformed count (it runs past the frame, or its value is not followed
-                // by SOH): nothing after it can be trusted, so the Logon is refused rather
-                // than a prefix validated. 091 FR-020; supersedes fixpp#426's stop.
+                // A Length immediately followed by its paired Data whose counted extent
+                // reaches or passes the end of the whole framed message, or whose following
+                // byte is not SOH (read_value applies a count only to the field right after
+                // its Length, when that field is the Length's paired Data): nothing after it
+                // can be trusted, so the Logon is refused rather than a prefix validated.
+                // 091 FR-020; supersedes fixpp#426's stop.
                 return std::unexpected(fixpp::core::error::session_invalid_logon);
             }
             i = value->end;
