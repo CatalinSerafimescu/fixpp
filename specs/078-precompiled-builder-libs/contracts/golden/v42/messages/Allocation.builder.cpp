@@ -8,6 +8,10 @@ namespace fixpp::v42 {
 
 ::fixpp::core::expected_t<::std::span<::std::byte>> build_Allocation(::std::span<::std::byte> out, AllocationArgs const& args) noexcept {
     ::fixpp::wire::body_builder bb{"J"};
+    if (args.message_encoding) {
+        auto r = bb.field(347, *args.message_encoding);
+        if (!r) return ::std::unexpected(r.error());
+    }
     if (args.avg_px) {
         auto r = bb.field(6, *args.avg_px);
         if (!r) return ::std::unexpected(r.error());
@@ -155,10 +159,9 @@ namespace fixpp::v42 {
         if (!r) return ::std::unexpected(r.error());
     }
     if (item1.encoded_alloc_text) {
-        auto r_len = eh1.set_int(360, static_cast<::std::int64_t>(item1.encoded_alloc_text->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh1.set_string(361, *item1.encoded_alloc_text);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(361) == 360);
+        auto r_pair = eh1.set_data(361, ::std::as_bytes(::std::span{*item1.encoded_alloc_text}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item1.exec_broker) {
         auto r = eh1.set_string(76, *item1.exec_broker);
@@ -331,22 +334,19 @@ namespace fixpp::v42 {
         if (!r) return ::std::unexpected(r.error());
     }
     if (args.encoded_issuer) {
-        auto r_len = bb.field(348, static_cast<::std::int64_t>(args.encoded_issuer->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = bb.field(349, *args.encoded_issuer);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(349) == 348);
+        auto r_pair = bb.field_data(349, ::std::as_bytes(::std::span{*args.encoded_issuer}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (args.encoded_security_desc) {
-        auto r_len = bb.field(350, static_cast<::std::int64_t>(args.encoded_security_desc->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = bb.field(351, *args.encoded_security_desc);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(351) == 350);
+        auto r_pair = bb.field_data(351, ::std::as_bytes(::std::span{*args.encoded_security_desc}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (args.encoded_text) {
-        auto r_len = bb.field(354, static_cast<::std::int64_t>(args.encoded_text->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = bb.field(355, *args.encoded_text);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(355) == 354);
+        auto r_pair = bb.field_data(355, ::std::as_bytes(::std::span{*args.encoded_text}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (args.gross_trade_amt) {
         auto r = bb.field(381, *args.gross_trade_amt);

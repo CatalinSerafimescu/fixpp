@@ -67,6 +67,7 @@ struct DerivativeSecurityListArgs {
     ::std::optional<::std::span<const groups::G_887Args>> underlying_stips{};
     ::std::optional<bool> last_fragment{};
     ::std::optional<::std::string_view> underlying_strike_currency{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v44

@@ -19,6 +19,7 @@ struct ListCancelRequestArgs {
     ::std::optional<::std::string_view> trade_date{};
     ::std::optional<::std::string_view> trade_origination_date{};
     ::std::optional<::std::string_view> encoded_text{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v44

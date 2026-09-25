@@ -29,6 +29,7 @@ struct QuoteAckArgs {
     ::std::optional<::std::string_view> secondary_quote_id{};
     ::std::optional<::std::int64_t> quote_ack_status{};
     ::std::optional<::std::span<const groups::G_2706Args>> quote_attributes{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v50sp2

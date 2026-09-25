@@ -29,6 +29,7 @@ struct PartyDetailsListReportArgs {
     ::std::optional<::std::int64_t> tot_no_parties{};
     ::std::optional<::std::string_view> encoded_reject_text{};
     ::std::optional<::std::span<const groups::G_1671Args>> party_details{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

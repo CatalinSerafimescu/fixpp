@@ -27,6 +27,7 @@ struct ListStatusArgs {
     ::std::optional<bool> last_fragment{};
     ::std::optional<::std::int64_t> contingency_type{};
     ::std::optional<::std::int64_t> list_reject_reason{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

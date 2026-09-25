@@ -8,6 +8,10 @@ namespace fixpp::vlatest {
 
 ::fixpp::core::expected_t<::std::span<::std::byte>> build_PartyRiskLimitsReportAck(::std::span<::std::byte> out, PartyRiskLimitsReportAckArgs const& args) noexcept {
     ::fixpp::wire::body_builder bb{"DE"};
+    if (args.message_encoding) {
+        auto r = bb.field(347, *args.message_encoding);
+        if (!r) return ::std::unexpected(r.error());
+    }
     if (args.text) {
         auto r = bb.field(58, *args.text);
         if (!r) return ::std::unexpected(r.error());
@@ -17,20 +21,18 @@ namespace fixpp::vlatest {
         if (!r) return ::std::unexpected(r.error());
     }
     if (args.encoded_text) {
-        auto r_len = bb.field(354, static_cast<::std::int64_t>(args.encoded_text->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = bb.field(355, *args.encoded_text);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(355) == 354);
+        auto r_pair = bb.field_data(355, ::std::as_bytes(::std::span{*args.encoded_text}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (args.reject_text) {
         auto r = bb.field(1328, *args.reject_text);
         if (!r) return ::std::unexpected(r.error());
     }
     if (args.encoded_reject_text) {
-        auto r_len = bb.field(1664, static_cast<::std::int64_t>(args.encoded_reject_text->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = bb.field(1665, *args.encoded_reject_text);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(1665) == 1664);
+        auto r_pair = bb.field_data(1665, ::std::as_bytes(::std::span{*args.encoded_reject_text}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (args.risk_limit_request_id) {
         auto r = bb.field(1666, *args.risk_limit_request_id);
@@ -434,10 +436,9 @@ namespace fixpp::vlatest {
         if (!r) return ::std::unexpected(r.error());
     }
     if (item13.instrument_scope_encoded_security_desc) {
-        auto r_len = eh13.set_int(1620, static_cast<::std::int64_t>(item13.instrument_scope_encoded_security_desc->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh13.set_string(1621, *item13.instrument_scope_encoded_security_desc);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(1621) == 1620);
+        auto r_pair = eh13.set_data(1621, ::std::as_bytes(::std::span{*item13.instrument_scope_encoded_security_desc}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item13.instrument_scope_settl_type) {
         auto r = eh13.set_string(1557, *item13.instrument_scope_settl_type);

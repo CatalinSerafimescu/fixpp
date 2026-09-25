@@ -69,6 +69,7 @@ struct SecurityStatusRequestArgs {
     ::std::optional<::std::int64_t> cp_program{};
     ::std::optional<::std::string_view> cp_reg_type{};
     ::std::optional<::std::string_view> strike_currency{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v44

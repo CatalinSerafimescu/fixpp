@@ -18,6 +18,7 @@ struct ListStrikePriceArgs {
     ::std::optional<::std::int64_t> tot_no_strikes{};
     ::std::optional<::std::span<const groups::G_428Args>> strikes{};
     ::std::optional<bool> last_fragment{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v50sp2

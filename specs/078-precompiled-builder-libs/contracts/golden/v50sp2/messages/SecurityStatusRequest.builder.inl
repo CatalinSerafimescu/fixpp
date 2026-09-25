@@ -9,6 +9,10 @@ namespace fixpp::v50sp2 {
 
 inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusRequest(::std::span<::std::byte> out, SecurityStatusRequestArgs const& args) noexcept {
     ::fixpp::wire::body_builder bb{"e"};
+    if (args.message_encoding) {
+        auto r = bb.field(347, *args.message_encoding);
+        if (!r) return ::std::unexpected(r.error());
+    }
     if (args.currency) {
         auto r = bb.field(15, *args.currency);
         if (!r) return ::std::unexpected(r.error());
@@ -114,16 +118,14 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (args.encoded_issuer) {
-        auto r_len = bb.field(348, static_cast<::std::int64_t>(args.encoded_issuer->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = bb.field(349, *args.encoded_issuer);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(349) == 348);
+        auto r_pair = bb.field_data(349, ::std::as_bytes(::std::span{*args.encoded_issuer}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (args.encoded_security_desc) {
-        auto r_len = bb.field(350, static_cast<::std::int64_t>(args.encoded_security_desc->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = bb.field(351, *args.encoded_security_desc);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(351) == 350);
+        auto r_pair = bb.field_data(351, ::std::as_bytes(::std::span{*args.encoded_security_desc}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (args.security_alt_id) {
         auto gh0 = bb.group_begin(454, 455);
@@ -477,10 +479,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item1.encoded_leg_option_expiration_desc) {
-        auto r_len = eh1.set_int(2179, static_cast<::std::int64_t>(item1.encoded_leg_option_expiration_desc->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh1.set_string(2180, *item1.encoded_leg_option_expiration_desc);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(2180) == 2179);
+        auto r_pair = eh1.set_data(2180, ::std::as_bytes(::std::span{*item1.encoded_leg_option_expiration_desc}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item1.leg_issue_date) {
         auto r = eh1.set_string(249, *item1.leg_issue_date);
@@ -731,10 +732,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item1.encoded_leg_issuer) {
-        auto r_len = eh1.set_int(618, static_cast<::std::int64_t>(item1.encoded_leg_issuer->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh1.set_string(619, *item1.encoded_leg_issuer);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(619) == 618);
+        auto r_pair = eh1.set_data(619, ::std::as_bytes(::std::span{*item1.encoded_leg_issuer}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item1.leg_financial_instrument_short_name) {
         auto r = eh1.set_string(2740, *item1.leg_financial_instrument_short_name);
@@ -745,26 +745,23 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item1.encoded_leg_financial_instrument_full_name) {
-        auto r_len = eh1.set_int(2718, static_cast<::std::int64_t>(item1.encoded_leg_financial_instrument_full_name->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh1.set_string(2719, *item1.encoded_leg_financial_instrument_full_name);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(2719) == 2718);
+        auto r_pair = eh1.set_data(2719, ::std::as_bytes(::std::span{*item1.encoded_leg_financial_instrument_full_name}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item1.leg_security_desc) {
         auto r = eh1.set_string(620, *item1.leg_security_desc);
         if (!r) return ::std::unexpected(r.error());
     }
     if (item1.encoded_leg_security_desc) {
-        auto r_len = eh1.set_int(621, static_cast<::std::int64_t>(item1.encoded_leg_security_desc->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh1.set_string(622, *item1.encoded_leg_security_desc);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(622) == 621);
+        auto r_pair = eh1.set_data(622, ::std::as_bytes(::std::span{*item1.encoded_leg_security_desc}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item1.leg_security_xml) {
-        auto r_len = eh1.set_int(1871, static_cast<::std::int64_t>(item1.leg_security_xml->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh1.set_string(1872, *item1.leg_security_xml);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(1872) == 1871);
+        auto r_pair = eh1.set_data(1872, ::std::as_bytes(::std::span{*item1.leg_security_xml}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item1.leg_security_xml_schema) {
         auto r = eh1.set_string(1873, *item1.leg_security_xml_schema);
@@ -870,10 +867,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item5.encoded_leg_event_text) {
-        auto r_len = eh5.set_int(2074, static_cast<::std::int64_t>(item5.encoded_leg_event_text->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh5.set_string(2075, *item5.encoded_leg_event_text);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(2075) == 2074);
+        auto r_pair = eh5.set_data(2075, ::std::as_bytes(::std::span{*item5.encoded_leg_event_text}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
         }
         auto ge5 = bb.group_end(*gh5);
@@ -1517,10 +1513,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item24.encoded_leg_market_disruption_fallback_underlier_security_desc) {
-        auto r_len = eh24.set_int(41476, static_cast<::std::int64_t>(item24.encoded_leg_market_disruption_fallback_underlier_security_desc->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh24.set_string(41477, *item24.encoded_leg_market_disruption_fallback_underlier_security_desc);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(41477) == 41476);
+        auto r_pair = eh24.set_data(41477, ::std::as_bytes(::std::span{*item24.encoded_leg_market_disruption_fallback_underlier_security_desc}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item24.leg_market_disruption_fallback_open_units) {
         auto r = eh24.set_decimal(41478, *item24.leg_market_disruption_fallback_open_units);
@@ -1555,10 +1550,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item1.encoded_leg_exercise_desc) {
-        auto r_len = eh1.set_int(41482, static_cast<::std::int64_t>(item1.encoded_leg_exercise_desc->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh1.set_string(41483, *item1.encoded_leg_exercise_desc);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(41483) == 41482);
+        auto r_pair = eh1.set_data(41483, ::std::as_bytes(::std::span{*item1.encoded_leg_exercise_desc}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item1.leg_automatic_exercise_indicator) {
         auto r = eh1.set_char(41484, (*item1.leg_automatic_exercise_indicator) ? 'Y' : 'N');
@@ -1966,10 +1960,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item30.encoded_leg_stream_commodity_desc) {
-        auto r_len = eh30.set_int(41653, static_cast<::std::int64_t>(item30.encoded_leg_stream_commodity_desc->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh30.set_string(41654, *item30.encoded_leg_stream_commodity_desc);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(41654) == 41653);
+        auto r_pair = eh30.set_data(41654, ::std::as_bytes(::std::span{*item30.encoded_leg_stream_commodity_desc}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item30.leg_stream_commodity_delivery_pricing_region) {
         auto r = eh30.set_string(42588, *item30.leg_stream_commodity_delivery_pricing_region);
@@ -3123,10 +3116,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
             if (!en52) return ::std::unexpected(en52.error());
             auto& eh52 = *en52;
     if (item52.leg_payment_stream_formula) {
-        auto r_len = eh52.set_int(43110, static_cast<::std::int64_t>(item52.leg_payment_stream_formula->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh52.set_string(42486, *item52.leg_payment_stream_formula);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(42486) == 43110);
+        auto r_pair = eh52.set_data(42486, ::std::as_bytes(::std::span{*item52.leg_payment_stream_formula}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item52.leg_payment_stream_formula_desc) {
         auto r = eh52.set_string(42487, *item52.leg_payment_stream_formula_desc);
@@ -3137,10 +3129,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!ge52) return ::std::unexpected(ge52.error());
     }
     if (item30.leg_payment_stream_formula_image) {
-        auto r_len = eh30.set_int(42451, static_cast<::std::int64_t>(item30.leg_payment_stream_formula_image->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh30.set_string(42452, *item30.leg_payment_stream_formula_image);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(42452) == 42451);
+        auto r_pair = eh30.set_data(42452, ::std::as_bytes(::std::span{*item30.leg_payment_stream_formula_image}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item30.leg_dividend_reinvestment_indicator) {
         auto r = eh30.set_char(42337, (*item30.leg_dividend_reinvestment_indicator) ? 'Y' : 'N');
@@ -4741,10 +4732,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item78.encoded_leg_delivery_stream_cycle_desc) {
-        auto r_len = eh78.set_int(41458, static_cast<::std::int64_t>(item78.encoded_leg_delivery_stream_cycle_desc->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh78.set_string(41459, *item78.encoded_leg_delivery_stream_cycle_desc);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(41459) == 41458);
+        auto r_pair = eh78.set_data(41459, ::std::as_bytes(::std::span{*item78.encoded_leg_delivery_stream_cycle_desc}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
         }
         auto ge78 = bb.group_end(*gh78);
@@ -4916,10 +4906,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item30.encoded_leg_stream_text) {
-        auto r_len = eh30.set_int(40978, static_cast<::std::int64_t>(item30.encoded_leg_stream_text->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh30.set_string(40979, *item30.encoded_leg_stream_text);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(40979) == 40978);
+        auto r_pair = eh30.set_data(40979, ::std::as_bytes(::std::span{*item30.encoded_leg_stream_text}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
         }
         auto ge30 = bb.group_end(*gh30);
@@ -5357,10 +5346,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item82.encoded_leg_provision_text) {
-        auto r_len = eh82.set_int(40980, static_cast<::std::int64_t>(item82.encoded_leg_provision_text->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh82.set_string(40981, *item82.encoded_leg_provision_text);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(40981) == 40980);
+        auto r_pair = eh82.set_data(40981, ::std::as_bytes(::std::span{*item82.encoded_leg_provision_text}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item82.leg_provision_party_i_ds) {
         auto gh91 = eh82.group_begin(40533, 40534);
@@ -5447,10 +5435,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item94.encoded_leg_additional_term_bond_desc) {
-        auto r_len = eh94.set_int(41320, static_cast<::std::int64_t>(item94.encoded_leg_additional_term_bond_desc->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh94.set_string(41321, *item94.encoded_leg_additional_term_bond_desc);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(41321) == 41320);
+        auto r_pair = eh94.set_data(41321, ::std::as_bytes(::std::span{*item94.encoded_leg_additional_term_bond_desc}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item94.leg_additional_term_bond_currency) {
         auto r = eh94.set_string(41322, *item94.leg_additional_term_bond_currency);
@@ -5461,10 +5448,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item94.encoded_leg_additional_term_bond_issuer) {
-        auto r_len = eh94.set_int(41324, static_cast<::std::int64_t>(item94.encoded_leg_additional_term_bond_issuer->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh94.set_string(41325, *item94.encoded_leg_additional_term_bond_issuer);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(41325) == 41324);
+        auto r_pair = eh94.set_data(41325, ::std::as_bytes(::std::span{*item94.encoded_leg_additional_term_bond_issuer}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item94.leg_additional_term_bond_seniority) {
         auto r = eh94.set_string(41326, *item94.leg_additional_term_bond_seniority);
@@ -5985,10 +5971,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item1.encoded_leg_documentation_text) {
-        auto r_len = eh1.set_int(2494, static_cast<::std::int64_t>(item1.encoded_leg_documentation_text->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh1.set_string(2493, *item1.encoded_leg_documentation_text);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(2493) == 2494);
+        auto r_pair = eh1.set_data(2493, ::std::as_bytes(::std::span{*item1.encoded_leg_documentation_text}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item1.leg_termination_type) {
         auto r = eh1.set_int(2514, *item1.leg_termination_type);
@@ -6085,10 +6070,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item109.underlying_security_xml) {
-        auto r_len = eh109.set_int(1874, static_cast<::std::int64_t>(item109.underlying_security_xml->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh109.set_string(1875, *item109.underlying_security_xml);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(1875) == 1874);
+        auto r_pair = eh109.set_data(1875, ::std::as_bytes(::std::span{*item109.underlying_security_xml}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item109.underlying_security_xml_schema) {
         auto r = eh109.set_string(1876, *item109.underlying_security_xml_schema);
@@ -6315,10 +6299,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item109.encoded_underlying_issuer) {
-        auto r_len = eh109.set_int(362, static_cast<::std::int64_t>(item109.encoded_underlying_issuer->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh109.set_string(363, *item109.encoded_underlying_issuer);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(363) == 362);
+        auto r_pair = eh109.set_data(363, ::std::as_bytes(::std::span{*item109.encoded_underlying_issuer}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item109.underlying_financial_instrument_short_name) {
         auto r = eh109.set_string(2742, *item109.underlying_financial_instrument_short_name);
@@ -6329,10 +6312,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item109.encoded_underlying_financial_instrument_full_name) {
-        auto r_len = eh109.set_int(2721, static_cast<::std::int64_t>(item109.encoded_underlying_financial_instrument_full_name->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh109.set_string(2722, *item109.encoded_underlying_financial_instrument_full_name);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(2722) == 2721);
+        auto r_pair = eh109.set_data(2722, ::std::as_bytes(::std::span{*item109.encoded_underlying_financial_instrument_full_name}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item109.underlying_index_curve_unit) {
         auto r = eh109.set_string(2723, *item109.underlying_index_curve_unit);
@@ -6347,10 +6329,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item109.encoded_underlying_security_desc) {
-        auto r_len = eh109.set_int(364, static_cast<::std::int64_t>(item109.encoded_underlying_security_desc->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh109.set_string(365, *item109.encoded_underlying_security_desc);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(365) == 364);
+        auto r_pair = eh109.set_data(365, ::std::as_bytes(::std::span{*item109.encoded_underlying_security_desc}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item109.underlying_cp_program) {
         auto r = eh109.set_int(877, *item109.underlying_cp_program);
@@ -6609,10 +6590,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item114.encoded_underlying_event_text) {
-        auto r_len = eh114.set_int(2072, static_cast<::std::int64_t>(item114.encoded_underlying_event_text->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh114.set_string(2073, *item114.encoded_underlying_event_text);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(2073) == 2072);
+        auto r_pair = eh114.set_data(2073, ::std::as_bytes(::std::span{*item114.encoded_underlying_event_text}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
         }
         auto ge114 = bb.group_end(*gh114);
@@ -6659,10 +6639,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item109.encoded_underlying_option_expiration_desc) {
-        auto r_len = eh109.set_int(2287, static_cast<::std::int64_t>(item109.encoded_underlying_option_expiration_desc->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh109.set_string(2288, *item109.encoded_underlying_option_expiration_desc);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(2288) == 2287);
+        auto r_pair = eh109.set_data(2288, ::std::as_bytes(::std::span{*item109.encoded_underlying_option_expiration_desc}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item109.underlying_product_complex) {
         auto r = eh109.set_string(2007, *item109.underlying_product_complex);
@@ -7506,10 +7485,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item133.encoded_underlying_market_disruption_fallback_underlier_security_desc) {
-        auto r_len = eh133.set_int(41873, static_cast<::std::int64_t>(item133.encoded_underlying_market_disruption_fallback_underlier_security_desc->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh133.set_string(41874, *item133.encoded_underlying_market_disruption_fallback_underlier_security_desc);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(41874) == 41873);
+        auto r_pair = eh133.set_data(41874, ::std::as_bytes(::std::span{*item133.encoded_underlying_market_disruption_fallback_underlier_security_desc}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item133.underlying_market_disruption_fallback_open_units) {
         auto r = eh133.set_decimal(41875, *item133.underlying_market_disruption_fallback_open_units);
@@ -7544,10 +7522,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item109.encoded_underlying_exercise_desc) {
-        auto r_len = eh109.set_int(41811, static_cast<::std::int64_t>(item109.encoded_underlying_exercise_desc->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh109.set_string(41812, *item109.encoded_underlying_exercise_desc);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(41812) == 41811);
+        auto r_pair = eh109.set_data(41812, ::std::as_bytes(::std::span{*item109.encoded_underlying_exercise_desc}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item109.underlying_automatic_exercise_indicator) {
         auto r = eh109.set_char(41813, (*item109.underlying_automatic_exercise_indicator) ? 'Y' : 'N');
@@ -7955,10 +7932,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item139.encoded_underlying_stream_commodity_desc) {
-        auto r_len = eh139.set_int(41969, static_cast<::std::int64_t>(item139.encoded_underlying_stream_commodity_desc->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh139.set_string(41970, *item139.encoded_underlying_stream_commodity_desc);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(41970) == 41969);
+        auto r_pair = eh139.set_data(41970, ::std::as_bytes(::std::span{*item139.encoded_underlying_stream_commodity_desc}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item139.underlying_stream_commodity_delivery_pricing_region) {
         auto r = eh139.set_string(42589, *item139.underlying_stream_commodity_delivery_pricing_region);
@@ -9112,10 +9088,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
             if (!en161) return ::std::unexpected(en161.error());
             auto& eh161 = *en161;
     if (item161.underlying_payment_stream_formula) {
-        auto r_len = eh161.set_int(43111, static_cast<::std::int64_t>(item161.underlying_payment_stream_formula->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh161.set_string(42982, *item161.underlying_payment_stream_formula);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(42982) == 43111);
+        auto r_pair = eh161.set_data(42982, ::std::as_bytes(::std::span{*item161.underlying_payment_stream_formula}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item161.underlying_payment_stream_formula_desc) {
         auto r = eh161.set_string(42983, *item161.underlying_payment_stream_formula_desc);
@@ -9126,10 +9101,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!ge161) return ::std::unexpected(ge161.error());
     }
     if (item139.underlying_payment_stream_formula_image) {
-        auto r_len = eh139.set_int(42947, static_cast<::std::int64_t>(item139.underlying_payment_stream_formula_image->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh139.set_string(42948, *item139.underlying_payment_stream_formula_image);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(42948) == 42947);
+        auto r_pair = eh139.set_data(42948, ::std::as_bytes(::std::span{*item139.underlying_payment_stream_formula_image}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item139.underlying_dividend_reinvestment_indicator) {
         auto r = eh139.set_char(42826, (*item139.underlying_dividend_reinvestment_indicator) ? 'Y' : 'N');
@@ -10730,10 +10704,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item187.encoded_underlying_delivery_stream_cycle_desc) {
-        auto r_len = eh187.set_int(41806, static_cast<::std::int64_t>(item187.encoded_underlying_delivery_stream_cycle_desc->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh187.set_string(41807, *item187.encoded_underlying_delivery_stream_cycle_desc);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(41807) == 41806);
+        auto r_pair = eh187.set_data(41807, ::std::as_bytes(::std::span{*item187.encoded_underlying_delivery_stream_cycle_desc}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
         }
         auto ge187 = bb.group_end(*gh187);
@@ -10905,10 +10878,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item139.encoded_underlying_stream_text) {
-        auto r_len = eh139.set_int(40988, static_cast<::std::int64_t>(item139.encoded_underlying_stream_text->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh139.set_string(40989, *item139.encoded_underlying_stream_text);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(40989) == 40988);
+        auto r_pair = eh139.set_data(40989, ::std::as_bytes(::std::span{*item139.encoded_underlying_stream_text}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
         }
         auto ge139 = bb.group_end(*gh139);
@@ -11346,10 +11318,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item191.encoded_underlying_provision_text) {
-        auto r_len = eh191.set_int(42171, static_cast<::std::int64_t>(item191.encoded_underlying_provision_text->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh191.set_string(42172, *item191.encoded_underlying_provision_text);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(42172) == 42171);
+        auto r_pair = eh191.set_data(42172, ::std::as_bytes(::std::span{*item191.encoded_underlying_provision_text}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item191.underlying_provision_party_i_ds) {
         auto gh200 = eh191.group_begin(42173, 42174);
@@ -11436,10 +11407,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item203.encoded_underlying_additional_term_bond_desc) {
-        auto r_len = eh203.set_int(41710, static_cast<::std::int64_t>(item203.encoded_underlying_additional_term_bond_desc->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh203.set_string(41711, *item203.encoded_underlying_additional_term_bond_desc);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(41711) == 41710);
+        auto r_pair = eh203.set_data(41711, ::std::as_bytes(::std::span{*item203.encoded_underlying_additional_term_bond_desc}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item203.underlying_additional_term_bond_currency) {
         auto r = eh203.set_string(41712, *item203.underlying_additional_term_bond_currency);
@@ -11450,10 +11420,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item203.encoded_underlying_additional_term_bond_issuer) {
-        auto r_len = eh203.set_int(42025, static_cast<::std::int64_t>(item203.encoded_underlying_additional_term_bond_issuer->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh203.set_string(42026, *item203.encoded_underlying_additional_term_bond_issuer);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(42026) == 42025);
+        auto r_pair = eh203.set_data(42026, ::std::as_bytes(::std::span{*item203.encoded_underlying_additional_term_bond_issuer}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item203.underlying_additional_term_bond_seniority) {
         auto r = eh203.set_string(42027, *item203.underlying_additional_term_bond_seniority);
@@ -11986,10 +11955,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item217.encoded_event_text) {
-        auto r_len = eh217.set_int(1578, static_cast<::std::int64_t>(item217.encoded_event_text->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh217.set_string(1579, *item217.encoded_event_text);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(1579) == 1578);
+        auto r_pair = eh217.set_data(1579, ::std::as_bytes(::std::span{*item217.encoded_event_text}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
         }
         auto ge217 = bb.group_end(*gh217);
@@ -12173,10 +12141,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (args.security_xml) {
-        auto r_len = bb.field(1184, static_cast<::std::int64_t>(args.security_xml->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = bb.field(1185, *args.security_xml);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(1185) == 1184);
+        auto r_pair = bb.field_data(1185, ::std::as_bytes(::std::span{*args.security_xml}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (args.security_xml_schema) {
         auto r = bb.field(1186, *args.security_xml_schema);
@@ -12739,10 +12706,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (args.encoded_documentation_text) {
-        auto r_len = bb.field(1525, static_cast<::std::int64_t>(args.encoded_documentation_text->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = bb.field(1527, *args.encoded_documentation_text);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(1527) == 1525);
+        auto r_pair = bb.field_data(1527, ::std::as_bytes(::std::span{*args.encoded_documentation_text}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (args.swap_sub_class) {
         auto r = bb.field(1575, *args.swap_sub_class);
@@ -12812,10 +12778,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!ge233) return ::std::unexpected(ge233.error());
     }
     if (args.encoded_option_expiration_desc) {
-        auto r_len = bb.field(1678, static_cast<::std::int64_t>(args.encoded_option_expiration_desc->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = bb.field(1697, *args.encoded_option_expiration_desc);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(1697) == 1678);
+        auto r_pair = bb.field_data(1697, ::std::as_bytes(::std::span{*args.encoded_option_expiration_desc}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (args.short_sale_restriction) {
         auto r = bb.field(1687, *args.short_sale_restriction);
@@ -13120,10 +13085,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (args.encoded_financial_instrument_full_name) {
-        auto r_len = bb.field(2715, static_cast<::std::int64_t>(args.encoded_financial_instrument_full_name->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = bb.field(2716, *args.encoded_financial_instrument_full_name);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(2716) == 2715);
+        auto r_pair = bb.field_data(2716, ::std::as_bytes(::std::span{*args.encoded_financial_instrument_full_name}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (args.floating_rate_index_curve_period) {
         auto r = bb.field(2728, *args.floating_rate_index_curve_period);
@@ -13274,10 +13238,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item239.encoded_additional_term_bond_desc) {
-        auto r_len = eh239.set_int(40004, static_cast<::std::int64_t>(item239.encoded_additional_term_bond_desc->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh239.set_string(40005, *item239.encoded_additional_term_bond_desc);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(40005) == 40004);
+        auto r_pair = eh239.set_data(40005, ::std::as_bytes(::std::span{*item239.encoded_additional_term_bond_desc}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item239.additional_term_bond_currency) {
         auto r = eh239.set_string(40006, *item239.additional_term_bond_currency);
@@ -13288,10 +13251,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item239.encoded_additional_term_bond_issuer) {
-        auto r_len = eh239.set_int(40008, static_cast<::std::int64_t>(item239.encoded_additional_term_bond_issuer->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh239.set_string(40009, *item239.encoded_additional_term_bond_issuer);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(40009) == 40008);
+        auto r_pair = eh239.set_data(40009, ::std::as_bytes(::std::span{*item239.encoded_additional_term_bond_issuer}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item239.additional_term_bond_seniority) {
         auto r = eh239.set_string(40010, *item239.additional_term_bond_seniority);
@@ -13662,10 +13624,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item246.encoded_stream_commodity_desc) {
-        auto r_len = eh246.set_int(41256, static_cast<::std::int64_t>(item246.encoded_stream_commodity_desc->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh246.set_string(41257, *item246.encoded_stream_commodity_desc);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(41257) == 41256);
+        auto r_pair = eh246.set_data(41257, ::std::as_bytes(::std::span{*item246.encoded_stream_commodity_desc}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item246.stream_commodity_delivery_pricing_region) {
         auto r = eh246.set_string(42587, *item246.stream_commodity_delivery_pricing_region);
@@ -14819,10 +14780,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
             if (!en268) return ::std::unexpected(en268.error());
             auto& eh268 = *en268;
     if (item268.payment_stream_formula) {
-        auto r_len = eh268.set_int(43109, static_cast<::std::int64_t>(item268.payment_stream_formula->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh268.set_string(42684, *item268.payment_stream_formula);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(42684) == 43109);
+        auto r_pair = eh268.set_data(42684, ::std::as_bytes(::std::span{*item268.payment_stream_formula}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item268.payment_stream_formula_desc) {
         auto r = eh268.set_string(42685, *item268.payment_stream_formula_desc);
@@ -14833,10 +14793,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!ge268) return ::std::unexpected(ge268.error());
     }
     if (item246.payment_stream_formula_image) {
-        auto r_len = eh246.set_int(42652, static_cast<::std::int64_t>(item246.payment_stream_formula_image->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh246.set_string(42653, *item246.payment_stream_formula_image);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(42653) == 42652);
+        auto r_pair = eh246.set_data(42653, ::std::as_bytes(::std::span{*item246.payment_stream_formula_image}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item246.dividend_reinvestment_indicator) {
         auto r = eh246.set_char(42245, (*item246.dividend_reinvestment_indicator) ? 'Y' : 'N');
@@ -16437,10 +16396,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item294.encoded_delivery_stream_cycle_desc) {
-        auto r_len = eh294.set_int(41083, static_cast<::std::int64_t>(item294.encoded_delivery_stream_cycle_desc->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh294.set_string(41084, *item294.encoded_delivery_stream_cycle_desc);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(41084) == 41083);
+        auto r_pair = eh294.set_data(41084, ::std::as_bytes(::std::span{*item294.encoded_delivery_stream_cycle_desc}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
         }
         auto ge294 = bb.group_end(*gh294);
@@ -16612,10 +16570,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item246.encoded_stream_text) {
-        auto r_len = eh246.set_int(40982, static_cast<::std::int64_t>(item246.encoded_stream_text->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh246.set_string(40983, *item246.encoded_stream_text);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(40983) == 40982);
+        auto r_pair = eh246.set_data(40983, ::std::as_bytes(::std::span{*item246.encoded_stream_text}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
         }
         auto ge246 = bb.group_end(*gh246);
@@ -17053,10 +17010,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item298.encoded_provision_text) {
-        auto r_len = eh298.set_int(40986, static_cast<::std::int64_t>(item298.encoded_provision_text->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh298.set_string(40987, *item298.encoded_provision_text);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(40987) == 40986);
+        auto r_pair = eh298.set_data(40987, ::std::as_bytes(::std::span{*item298.encoded_provision_text}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item298.provision_party_i_ds) {
         auto gh307 = eh298.group_begin(40174, 40175);
@@ -17390,10 +17346,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (item319.encoded_market_disruption_fallback_underlier_security_desc) {
-        auto r_len = eh319.set_int(41101, static_cast<::std::int64_t>(item319.encoded_market_disruption_fallback_underlier_security_desc->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh319.set_string(41102, *item319.encoded_market_disruption_fallback_underlier_security_desc);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(41102) == 41101);
+        auto r_pair = eh319.set_data(41102, ::std::as_bytes(::std::span{*item319.encoded_market_disruption_fallback_underlier_security_desc}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item319.market_disruption_fallback_open_units) {
         auto r = eh319.set_decimal(41103, *item319.market_disruption_fallback_open_units);
@@ -17416,10 +17371,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_SecurityStatusR
         if (!r) return ::std::unexpected(r.error());
     }
     if (args.encoded_exercise_desc) {
-        auto r_len = bb.field(41107, static_cast<::std::int64_t>(args.encoded_exercise_desc->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = bb.field(41108, *args.encoded_exercise_desc);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(41108) == 41107);
+        auto r_pair = bb.field_data(41108, ::std::as_bytes(::std::span{*args.encoded_exercise_desc}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (args.automatic_exercise_indicator) {
         auto r = bb.field(41109, (*args.automatic_exercise_indicator) ? 'Y' : 'N');

@@ -86,6 +86,7 @@ struct AssignmentReportArgs {
     ::std::optional<::std::string_view> cp_reg_type{};
     ::std::optional<bool> last_rpt_requested{};
     ::std::optional<::std::string_view> strike_currency{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v44

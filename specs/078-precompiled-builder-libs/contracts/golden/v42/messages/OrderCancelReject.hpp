@@ -27,6 +27,7 @@ struct OrderCancelRejectArgs {
     ::std::optional<::std::string_view> secondary_order_id{};
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<char> cxl_rej_response_to{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v42

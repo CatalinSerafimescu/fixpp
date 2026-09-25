@@ -29,6 +29,7 @@ struct PartyEntitlementsReportArgs {
     ::std::optional<::std::string_view> entitlement_request_id{};
     ::std::optional<::std::string_view> entitlement_report_id{};
     ::std::optional<::std::span<const groups::G_1772_1Args>> party_entitlements{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v50sp2

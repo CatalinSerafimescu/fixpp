@@ -21,6 +21,7 @@ struct MarketDataRequestRejectArgs {
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::std::span<const groups::G_453Args>> party_i_ds{};
     ::std::optional<::std::span<const groups::G_816Args>> alt_md_source{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v50sp2

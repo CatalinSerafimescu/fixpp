@@ -9,6 +9,10 @@ namespace fixpp::vlatest {
 
 inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_PartyActionRequest(::std::span<::std::byte> out, PartyActionRequestArgs const& args) noexcept {
     ::fixpp::wire::body_builder bb{"DH"};
+    if (args.message_encoding) {
+        auto r = bb.field(347, *args.message_encoding);
+        if (!r) return ::std::unexpected(r.error());
+    }
     if (args.text) {
         auto r = bb.field(58, *args.text);
         if (!r) return ::std::unexpected(r.error());
@@ -18,10 +22,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_PartyActionRequ
         if (!r) return ::std::unexpected(r.error());
     }
     if (args.encoded_text) {
-        auto r_len = bb.field(354, static_cast<::std::int64_t>(args.encoded_text->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = bb.field(355, *args.encoded_text);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(355) == 354);
+        auto r_pair = bb.field_data(355, ::std::as_bytes(::std::span{*args.encoded_text}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     {
         auto gh0 = bb.group_begin(453, 448);
@@ -276,10 +279,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_PartyActionRequ
         if (!r) return ::std::unexpected(r.error());
     }
     if (args.instrument_scope_encoded_security_desc) {
-        auto r_len = bb.field(1620, static_cast<::std::int64_t>(args.instrument_scope_encoded_security_desc->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = bb.field(1621, *args.instrument_scope_encoded_security_desc);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(1621) == 1620);
+        auto r_pair = bb.field_data(1621, ::std::as_bytes(::std::span{*args.instrument_scope_encoded_security_desc}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (args.requesting_party_i_ds) {
         auto gh8 = bb.group_begin(1657, 1658);

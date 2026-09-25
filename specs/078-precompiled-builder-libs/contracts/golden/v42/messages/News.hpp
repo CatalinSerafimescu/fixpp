@@ -25,6 +25,7 @@ struct NewsArgs {
     ::std::optional<::std::string_view> url_link{};
     ::std::optional<::std::span<const groups::G_215Args>> routing_i_ds{};
     ::std::optional<::std::string_view> encoded_headline{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v42

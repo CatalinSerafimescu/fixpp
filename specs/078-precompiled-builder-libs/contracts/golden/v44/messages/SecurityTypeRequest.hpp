@@ -21,6 +21,7 @@ struct SecurityTypeRequestArgs {
     ::std::optional<::std::int64_t> product{};
     ::std::optional<::std::string_view> trading_session_sub_id{};
     ::std::optional<::std::string_view> security_sub_type{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v44

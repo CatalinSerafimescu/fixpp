@@ -94,6 +94,7 @@ struct TradeCaptureReportAckArgs {
     ::std::optional<::std::string_view> secondary_trade_report_ref_id{};
     ::std::optional<::std::int64_t> trd_rpt_status{};
     ::std::optional<::std::string_view> strike_currency{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v44

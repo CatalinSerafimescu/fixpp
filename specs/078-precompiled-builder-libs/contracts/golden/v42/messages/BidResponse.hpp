@@ -17,6 +17,7 @@ struct BidResponseArgs {
     ::std::optional<::std::string_view> bid_id{};
     ::std::optional<::std::string_view> client_bid_id{};
     ::std::span<const groups::G_420_2Args> bid_components{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v42

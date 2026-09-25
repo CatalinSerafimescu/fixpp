@@ -18,6 +18,7 @@ struct PayManagementReportAckArgs {
     ::std::optional<::std::string_view> pay_report_id{};
     ::std::optional<::std::int64_t> pay_dispute_reason{};
     ::std::optional<::std::int64_t> pay_report_status{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v50sp2

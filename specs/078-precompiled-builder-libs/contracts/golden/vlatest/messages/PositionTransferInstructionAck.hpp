@@ -29,6 +29,7 @@ struct PositionTransferInstructionAckArgs {
     ::std::optional<::std::int64_t> transfer_scope{};
     ::std::optional<::std::int64_t> transfer_status{};
     ::std::optional<::std::int64_t> transfer_reject_reason{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

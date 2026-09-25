@@ -8,15 +8,18 @@ namespace fixpp::v50sp2 {
 
 ::fixpp::core::expected_t<::std::span<::std::byte>> build_PartyEntitlementsDefinitionRequest(::std::span<::std::byte> out, PartyEntitlementsDefinitionRequestArgs const& args) noexcept {
     ::fixpp::wire::body_builder bb{"DA"};
+    if (args.message_encoding) {
+        auto r = bb.field(347, *args.message_encoding);
+        if (!r) return ::std::unexpected(r.error());
+    }
     if (args.text) {
         auto r = bb.field(58, *args.text);
         if (!r) return ::std::unexpected(r.error());
     }
     if (args.encoded_text) {
-        auto r_len = bb.field(354, static_cast<::std::int64_t>(args.encoded_text->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = bb.field(355, *args.encoded_text);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(355) == 354);
+        auto r_pair = bb.field_data(355, ::std::as_bytes(::std::span{*args.encoded_text}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (args.requesting_party_i_ds) {
         auto gh0 = bb.group_begin(1657, 1658);
@@ -439,10 +442,9 @@ namespace fixpp::v50sp2 {
         if (!r) return ::std::unexpected(r.error());
     }
     if (item14.instrument_scope_encoded_security_desc) {
-        auto r_len = eh14.set_int(1620, static_cast<::std::int64_t>(item14.instrument_scope_encoded_security_desc->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh14.set_string(1621, *item14.instrument_scope_encoded_security_desc);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(1621) == 1620);
+        auto r_pair = eh14.set_data(1621, ::std::as_bytes(::std::span{*item14.instrument_scope_encoded_security_desc}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item14.instrument_scope_settl_type) {
         auto r = eh14.set_string(1557, *item14.instrument_scope_settl_type);

@@ -22,6 +22,7 @@ struct PartyDetailsDefinitionRequestAckArgs {
     ::std::optional<::std::span<const groups::G_1676_2Args>> party_updates{};
     ::std::optional<::std::int64_t> party_detail_request_result{};
     ::std::optional<::std::int64_t> party_detail_request_status{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

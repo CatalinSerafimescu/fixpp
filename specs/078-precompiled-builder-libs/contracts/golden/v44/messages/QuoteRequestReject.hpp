@@ -20,6 +20,7 @@ struct QuoteRequestRejectArgs {
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::std::string_view> rfq_req_id{};
     ::std::optional<::std::int64_t> quote_request_reject_reason{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v44

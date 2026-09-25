@@ -8,6 +8,10 @@ namespace fixpp::v50sp2 {
 
 ::fixpp::core::expected_t<::std::span<::std::byte>> build_PartyDetailsListReport(::std::span<::std::byte> out, PartyDetailsListReportArgs const& args) noexcept {
     ::fixpp::wire::body_builder bb{"CG"};
+    if (args.message_encoding) {
+        auto r = bb.field(347, *args.message_encoding);
+        if (!r) return ::std::unexpected(r.error());
+    }
     if (args.text) {
         auto r = bb.field(58, *args.text);
         if (!r) return ::std::unexpected(r.error());
@@ -17,10 +21,9 @@ namespace fixpp::v50sp2 {
         if (!r) return ::std::unexpected(r.error());
     }
     if (args.encoded_text) {
-        auto r_len = bb.field(354, static_cast<::std::int64_t>(args.encoded_text->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = bb.field(355, *args.encoded_text);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(355) == 354);
+        auto r_pair = bb.field_data(355, ::std::as_bytes(::std::span{*args.encoded_text}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (args.last_fragment) {
         auto r = bb.field(893, (*args.last_fragment) ? 'Y' : 'N');
@@ -63,10 +66,9 @@ namespace fixpp::v50sp2 {
         if (!r) return ::std::unexpected(r.error());
     }
     if (args.encoded_reject_text) {
-        auto r_len = bb.field(1664, static_cast<::std::int64_t>(args.encoded_reject_text->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = bb.field(1665, *args.encoded_reject_text);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(1665) == 1664);
+        auto r_pair = bb.field_data(1665, ::std::as_bytes(::std::span{*args.encoded_reject_text}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (args.party_details) {
         auto gh0 = bb.group_begin(1671, 1691);

@@ -21,6 +21,7 @@ struct ListCancelRequestArgs {
     ::std::optional<::std::string_view> trade_origination_date{};
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::std::span<const groups::G_453Args>> party_i_ds{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

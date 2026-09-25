@@ -20,6 +20,7 @@ struct TradingSessionListArgs {
     ::std::optional<::std::int64_t> appl_seq_num{};
     ::std::optional<::std::int64_t> appl_last_seq_num{};
     ::std::optional<bool> appl_resend_flag{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

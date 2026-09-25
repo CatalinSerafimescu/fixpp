@@ -27,6 +27,7 @@ struct EmailArgs {
     ::std::optional<::std::string_view> email_thread_id{};
     ::std::optional<::std::span<const groups::G_215Args>> routing_i_ds{};
     ::std::optional<::std::string_view> encoded_subject{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v42

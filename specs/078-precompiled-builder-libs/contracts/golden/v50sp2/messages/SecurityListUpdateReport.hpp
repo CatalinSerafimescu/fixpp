@@ -37,6 +37,7 @@ struct SecurityListUpdateReportArgs {
     ::std::optional<::std::string_view> encoded_security_list_desc{};
     ::std::optional<::std::int64_t> security_list_type{};
     ::std::optional<::std::int64_t> security_list_type_source{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v50sp2

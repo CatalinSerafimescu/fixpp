@@ -18,6 +18,7 @@ struct StreamAssignmentReportArgs {
     ::std::optional<::std::int64_t> stream_asgn_req_type{};
     ::std::optional<::std::span<const groups::G_1499_2Args>> asgn_reqs{};
     ::std::optional<::std::string_view> stream_asgn_rpt_id{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

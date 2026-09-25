@@ -17,6 +17,7 @@ struct RFQRequestArgs {
     ::std::span<const groups::G_146_3Args> related_sym{};
     ::std::optional<char> subscription_request_type{};
     ::std::optional<::std::string_view> rfq_req_id{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v44

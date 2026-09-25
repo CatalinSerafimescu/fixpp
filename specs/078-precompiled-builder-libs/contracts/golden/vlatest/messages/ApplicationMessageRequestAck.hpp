@@ -24,6 +24,7 @@ struct ApplicationMessageRequestAckArgs {
     ::std::optional<::std::int64_t> appl_total_message_count{};
     ::std::optional<::std::span<const groups::G_1351_2Args>> appl_i_ds{};
     ::std::optional<::std::string_view> appl_response_id{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

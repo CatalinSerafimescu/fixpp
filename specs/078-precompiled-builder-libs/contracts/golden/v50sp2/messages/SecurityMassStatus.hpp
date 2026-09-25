@@ -59,6 +59,7 @@ struct SecurityMassStatusArgs {
     ::std::optional<::std::int64_t> mass_halt_reason{};
     ::std::optional<bool> fast_market_indicator{};
     ::std::optional<::std::string_view> instrument_scope_upi_code{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v50sp2

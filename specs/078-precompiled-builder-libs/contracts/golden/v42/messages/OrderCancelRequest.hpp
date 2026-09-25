@@ -45,6 +45,7 @@ struct OrderCancelRequestArgs {
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::std::string_view> compliance_id{};
     ::std::optional<bool> solicited_flag{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v42

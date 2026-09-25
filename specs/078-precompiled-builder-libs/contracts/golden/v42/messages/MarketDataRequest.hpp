@@ -22,6 +22,7 @@ struct MarketDataRequestArgs {
     ::std::optional<::std::int64_t> md_update_type{};
     ::std::optional<bool> aggregated_book{};
     ::std::span<const groups::G_267Args> md_entry_types{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v42

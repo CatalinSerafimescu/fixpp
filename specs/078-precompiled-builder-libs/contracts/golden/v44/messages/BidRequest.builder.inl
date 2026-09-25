@@ -9,6 +9,10 @@ namespace fixpp::v44 {
 
 inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_BidRequest(::std::span<::std::byte> out, BidRequestArgs const& args) noexcept {
     ::fixpp::wire::body_builder bb{"k"};
+    if (args.message_encoding) {
+        auto r = bb.field(347, *args.message_encoding);
+        if (!r) return ::std::unexpected(r.error());
+    }
     if (args.currency) {
         auto r = bb.field(15, *args.currency);
         if (!r) return ::std::unexpected(r.error());
@@ -26,10 +30,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_BidRequest(::st
         if (!r) return ::std::unexpected(r.error());
     }
     if (args.encoded_text) {
-        auto r_len = bb.field(354, static_cast<::std::int64_t>(args.encoded_text->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = bb.field(355, *args.encoded_text);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(355) == 354);
+        auto r_pair = bb.field_data(355, ::std::as_bytes(::std::span{*args.encoded_text}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (args.bid_request_trans_type) {
         auto r = bb.field(374, *args.bid_request_trans_type);

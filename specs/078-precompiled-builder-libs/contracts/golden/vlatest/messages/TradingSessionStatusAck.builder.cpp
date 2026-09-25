@@ -8,6 +8,10 @@ namespace fixpp::vlatest {
 
 ::fixpp::core::expected_t<::std::span<::std::byte>> build_TradingSessionStatusAck(::std::span<::std::byte> out, TradingSessionStatusAckArgs const& args) noexcept {
     ::fixpp::wire::body_builder bb{"ES"};
+    if (args.message_encoding) {
+        auto r = bb.field(347, *args.message_encoding);
+        if (!r) return ::std::unexpected(r.error());
+    }
     if (args.transact_time) {
         auto r = bb.field(60, *args.transact_time);
         if (!r) return ::std::unexpected(r.error());
@@ -17,10 +21,9 @@ namespace fixpp::vlatest {
         if (!r) return ::std::unexpected(r.error());
     }
     if (args.encoded_reject_text) {
-        auto r_len = bb.field(1664, static_cast<::std::int64_t>(args.encoded_reject_text->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = bb.field(1665, *args.encoded_reject_text);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(1665) == 1664);
+        auto r_pair = bb.field_data(1665, ::std::as_bytes(::std::span{*args.encoded_reject_text}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (args.trading_session_status_report_id) {
         auto r = bb.field(3112, *args.trading_session_status_report_id);

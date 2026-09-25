@@ -18,6 +18,7 @@ struct StreamAssignmentReportACKArgs {
     ::std::optional<::std::string_view> stream_asgn_rpt_id{};
     ::std::optional<::std::int64_t> stream_asgn_rej_reason{};
     ::std::optional<::std::int64_t> stream_asgn_ack_type{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v50sp2

@@ -23,6 +23,7 @@ struct SettlementInstructionsArgs {
     ::std::optional<::std::span<const groups::G_778Args>> settl_inst{};
     ::std::optional<::std::string_view> settl_inst_req_id{};
     ::std::optional<::std::int64_t> settl_inst_req_rej_code{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

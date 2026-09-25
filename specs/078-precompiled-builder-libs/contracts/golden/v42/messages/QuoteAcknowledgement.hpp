@@ -22,6 +22,7 @@ struct QuoteAcknowledgementArgs {
     ::std::optional<::std::int64_t> quote_reject_reason{};
     ::std::optional<::std::int64_t> quote_response_level{};
     ::std::optional<::std::string_view> trading_session_id{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v42

@@ -9,6 +9,10 @@ namespace fixpp::v44 {
 
 inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_DerivativeSecurityListRequest(::std::span<::std::byte> out, DerivativeSecurityListRequestArgs const& args) noexcept {
     ::fixpp::wire::body_builder bb{"z"};
+    if (args.message_encoding) {
+        auto r = bb.field(347, *args.message_encoding);
+        if (!r) return ::std::unexpected(r.error());
+    }
     if (args.currency) {
         auto r = bb.field(15, *args.currency);
         if (!r) return ::std::unexpected(r.error());
@@ -114,22 +118,19 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_DerivativeSecur
         if (!r) return ::std::unexpected(r.error());
     }
     if (args.encoded_text) {
-        auto r_len = bb.field(354, static_cast<::std::int64_t>(args.encoded_text->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = bb.field(355, *args.encoded_text);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(355) == 354);
+        auto r_pair = bb.field_data(355, ::std::as_bytes(::std::span{*args.encoded_text}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (args.encoded_underlying_issuer) {
-        auto r_len = bb.field(362, static_cast<::std::int64_t>(args.encoded_underlying_issuer->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = bb.field(363, *args.encoded_underlying_issuer);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(363) == 362);
+        auto r_pair = bb.field_data(363, ::std::as_bytes(::std::span{*args.encoded_underlying_issuer}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (args.encoded_underlying_security_desc) {
-        auto r_len = bb.field(364, static_cast<::std::int64_t>(args.encoded_underlying_security_desc->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = bb.field(365, *args.encoded_underlying_security_desc);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(365) == 364);
+        auto r_pair = bb.field_data(365, ::std::as_bytes(::std::span{*args.encoded_underlying_security_desc}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (args.underlying_coupon_rate) {
         auto r = bb.field(435, *args.underlying_coupon_rate);

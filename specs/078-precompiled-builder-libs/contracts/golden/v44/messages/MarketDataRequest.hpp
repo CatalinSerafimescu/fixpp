@@ -29,6 +29,7 @@ struct MarketDataRequestArgs {
     ::std::optional<bool> md_implicit_delete{};
     ::std::optional<::std::int64_t> appl_queue_max{};
     ::std::optional<::std::int64_t> appl_queue_action{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v44

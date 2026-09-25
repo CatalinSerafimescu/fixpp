@@ -21,6 +21,7 @@ struct QuoteRequestArgs {
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<char> order_capacity{};
     ::std::optional<::std::string_view> rfq_req_id{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v44

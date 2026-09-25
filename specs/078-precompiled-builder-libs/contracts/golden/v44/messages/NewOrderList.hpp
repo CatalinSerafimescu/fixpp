@@ -32,6 +32,7 @@ struct NewOrderListArgs {
     ::std::optional<::fixpp::decimal_t> allowable_one_sidedness_value{};
     ::std::optional<::std::string_view> allowable_one_sidedness_curr{};
     ::std::optional<bool> last_fragment{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v44

@@ -40,6 +40,7 @@ struct NewsArgs {
     ::std::optional<::std::int64_t> news_category{};
     ::std::optional<::std::string_view> language_code{};
     ::std::optional<::std::span<const groups::G_1475Args>> news_ref_i_ds{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v50sp2

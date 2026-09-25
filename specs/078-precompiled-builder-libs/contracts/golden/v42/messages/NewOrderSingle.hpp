@@ -83,6 +83,7 @@ struct NewOrderSingleArgs {
     ::std::optional<::std::string_view> expire_date{};
     ::std::optional<::std::string_view> clearing_firm{};
     ::std::optional<::std::string_view> clearing_account{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v42

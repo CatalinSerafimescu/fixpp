@@ -31,6 +31,7 @@ struct MarketDataIncrementalRefreshArgs {
     ::std::optional<bool> appl_resend_flag{};
     ::std::optional<::std::string_view> md_sub_feed_type{};
     ::std::optional<::std::string_view> md_msg_id{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

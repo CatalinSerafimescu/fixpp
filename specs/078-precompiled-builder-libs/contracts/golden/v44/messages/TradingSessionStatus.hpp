@@ -29,6 +29,7 @@ struct TradingSessionStatusArgs {
     ::std::optional<::fixpp::decimal_t> total_volume_traded{};
     ::std::optional<::std::int64_t> trad_ses_status_rej_reason{};
     ::std::optional<::std::string_view> trading_session_sub_id{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v44

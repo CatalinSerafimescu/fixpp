@@ -58,6 +58,7 @@ struct PartyActionReportArgs {
     ::std::optional<::std::int64_t> party_action_reject_reason{};
     ::std::optional<::std::string_view> effective_business_date{};
     ::std::optional<::std::string_view> instrument_scope_upi_code{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v50sp2

@@ -8,6 +8,10 @@ namespace fixpp::v44 {
 
 ::fixpp::core::expected_t<::std::span<::std::byte>> build_Confirmation(::std::span<::std::byte> out, ConfirmationArgs const& args) noexcept {
     ::fixpp::wire::body_builder bb{"AK"};
+    if (args.message_encoding) {
+        auto r = bb.field(347, *args.message_encoding);
+        if (!r) return ::std::unexpected(r.error());
+    }
     if (args.avg_px) {
         auto r = bb.field(6, *args.avg_px);
         if (!r) return ::std::unexpected(r.error());
@@ -437,22 +441,19 @@ namespace fixpp::v44 {
         if (!r) return ::std::unexpected(r.error());
     }
     if (args.encoded_issuer) {
-        auto r_len = bb.field(348, static_cast<::std::int64_t>(args.encoded_issuer->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = bb.field(349, *args.encoded_issuer);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(349) == 348);
+        auto r_pair = bb.field_data(349, ::std::as_bytes(::std::span{*args.encoded_issuer}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (args.encoded_security_desc) {
-        auto r_len = bb.field(350, static_cast<::std::int64_t>(args.encoded_security_desc->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = bb.field(351, *args.encoded_security_desc);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(351) == 350);
+        auto r_pair = bb.field_data(351, ::std::as_bytes(::std::span{*args.encoded_security_desc}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (args.encoded_text) {
-        auto r_len = bb.field(354, static_cast<::std::int64_t>(args.encoded_text->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = bb.field(355, *args.encoded_text);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(355) == 354);
+        auto r_pair = bb.field_data(355, ::std::as_bytes(::std::span{*args.encoded_text}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (args.gross_trade_amt) {
         auto r = bb.field(381, *args.gross_trade_amt);
@@ -706,20 +707,18 @@ namespace fixpp::v44 {
         if (!r) return ::std::unexpected(r.error());
     }
     if (item11.encoded_leg_issuer) {
-        auto r_len = eh11.set_int(618, static_cast<::std::int64_t>(item11.encoded_leg_issuer->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh11.set_string(619, *item11.encoded_leg_issuer);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(619) == 618);
+        auto r_pair = eh11.set_data(619, ::std::as_bytes(::std::span{*item11.encoded_leg_issuer}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item11.leg_security_desc) {
         auto r = eh11.set_string(620, *item11.leg_security_desc);
         if (!r) return ::std::unexpected(r.error());
     }
     if (item11.encoded_leg_security_desc) {
-        auto r_len = eh11.set_int(621, static_cast<::std::int64_t>(item11.encoded_leg_security_desc->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh11.set_string(622, *item11.encoded_leg_security_desc);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(622) == 621);
+        auto r_pair = eh11.set_data(622, ::std::as_bytes(::std::span{*item11.encoded_leg_security_desc}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item11.leg_ratio_qty) {
         auto r = eh11.set_decimal(623, *item11.leg_ratio_qty);
@@ -960,20 +959,18 @@ namespace fixpp::v44 {
         if (!r) return ::std::unexpected(r.error());
     }
     if (item13.encoded_underlying_issuer) {
-        auto r_len = eh13.set_int(362, static_cast<::std::int64_t>(item13.encoded_underlying_issuer->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh13.set_string(363, *item13.encoded_underlying_issuer);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(363) == 362);
+        auto r_pair = eh13.set_data(363, ::std::as_bytes(::std::span{*item13.encoded_underlying_issuer}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item13.underlying_security_desc) {
         auto r = eh13.set_string(307, *item13.underlying_security_desc);
         if (!r) return ::std::unexpected(r.error());
     }
     if (item13.encoded_underlying_security_desc) {
-        auto r_len = eh13.set_int(364, static_cast<::std::int64_t>(item13.encoded_underlying_security_desc->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh13.set_string(365, *item13.encoded_underlying_security_desc);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(365) == 364);
+        auto r_pair = eh13.set_data(365, ::std::as_bytes(::std::span{*item13.encoded_underlying_security_desc}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (item13.underlying_cp_program) {
         auto r = eh13.set_string(877, *item13.underlying_cp_program);

@@ -17,6 +17,7 @@ struct StreamAssignmentRequestArgs {
     ::std::optional<::std::string_view> stream_asgn_req_id{};
     ::std::optional<::std::int64_t> stream_asgn_req_type{};
     ::std::optional<::std::span<const groups::G_1499_1Args>> asgn_reqs{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v50sp2

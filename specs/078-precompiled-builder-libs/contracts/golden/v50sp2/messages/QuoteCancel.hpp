@@ -31,6 +31,7 @@ struct QuoteCancelArgs {
     ::std::optional<::std::string_view> quote_msg_id{};
     ::std::optional<::std::span<const groups::G_1461Args>> target_party_i_ds{};
     ::std::optional<::std::string_view> secondary_quote_id{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v50sp2

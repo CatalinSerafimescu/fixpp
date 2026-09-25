@@ -34,6 +34,7 @@ struct SecurityStatusRequestArgs {
     ::std::optional<::std::string_view> trading_session_id{};
     ::std::optional<::std::string_view> encoded_issuer{};
     ::std::optional<::std::string_view> encoded_security_desc{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v42
