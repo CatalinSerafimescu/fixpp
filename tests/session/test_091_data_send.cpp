@@ -37,6 +37,8 @@
 #include <cstdint>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/xml_loader.hpp>
 #include <fixpp/session/seqnum.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
@@ -105,10 +107,8 @@ struct Reparsed {
     }
 };
 
-Reparsed reparse(std::vector<std::byte> const& frame) {
+Reparsed reparse(std::vector<std::byte> const& frame, fixpp::dict::table_view const& tv) {
     std::pmr::monotonic_buffer_resource arena{16384};
-    fixpp::dict::Dictionary dict = fixpp_test_support::load_fix44(&arena);
-    fixpp::dict::table_view tv = dict.as_table_view();
     auto mv = fixpp_test_support::parse_dict(frame, tv, &arena);
     Reparsed r;
     for (auto const& e : mv.offsets().entries()) {
@@ -116,6 +116,67 @@ Reparsed reparse(std::vector<std::byte> const& frame) {
         r.values.emplace_back(reinterpret_cast<char const*>(frame.data()) + e.offset, e.length);
     }
     return r;
+}
+
+Reparsed reparse(std::vector<std::byte> const& frame) {
+    std::pmr::monotonic_buffer_resource arena{16384};
+    fixpp::dict::Dictionary dict = fixpp_test_support::load_fix44(&arena);
+    return reparse(frame, dict.as_table_view());
+}
+
+// A dictionary declaring one custom Length+Data pair whose halves classify
+// differently in send_impl's header partition: the Length 5001 is a body tag,
+// the Data 142 (SenderLocationID) is in the header set, and neither is a
+// standard pair tag, so the pair comes from this dictionary alone. The
+// adjacency inside the message is what XmlLoader pairs.
+constexpr std::string_view kStraddlingPairXml = R"xml(
+<fix major="4" minor="4">
+  <header>
+    <field number="8"  name="BeginString"  required="Y"/>
+    <field number="9"  name="BodyLength"   required="Y"/>
+    <field number="35" name="MsgType"      required="Y"/>
+    <field number="49" name="SenderCompID" required="Y"/>
+    <field number="56" name="TargetCompID" required="Y"/>
+    <field number="34" name="MsgSeqNum"    required="Y"/>
+    <field number="52" name="SendingTime"  required="Y"/>
+  </header>
+  <trailer>
+    <field number="10" name="CheckSum" required="Y"/>
+  </trailer>
+  <messages>
+    <message name="NewOrderSingle" msgtype="D" msgcat="app">
+      <field number="11"   name="ClOrdID"          required="N"/>
+      <field number="54"   name="Side"             required="N"/>
+      <field number="5001" name="CustomLen"        required="N"/>
+      <field number="142"  name="SenderLocationID" required="N"/>
+      <field number="55"   name="Symbol"           required="N"/>
+    </message>
+  </messages>
+  <fields>
+    <field number="8"    name="BeginString"      type="STRING"/>
+    <field number="9"    name="BodyLength"       type="INT"/>
+    <field number="35"   name="MsgType"          type="STRING"/>
+    <field number="49"   name="SenderCompID"     type="STRING"/>
+    <field number="56"   name="TargetCompID"     type="STRING"/>
+    <field number="34"   name="MsgSeqNum"        type="INT"/>
+    <field number="52"   name="SendingTime"      type="UTCTIMESTAMP"/>
+    <field number="10"   name="CheckSum"         type="STRING"/>
+    <field number="11"   name="ClOrdID"          type="STRING"/>
+    <field number="54"   name="Side"             type="CHAR"/>
+    <field number="55"   name="Symbol"           type="STRING"/>
+    <field number="5001" name="CustomLen"        type="LENGTH"/>
+    <field number="142"  name="SenderLocationID" type="DATA"/>
+  </fields>
+</fix>
+)xml";
+
+// Same ownership shape as make_minimal_dictionary (tests/support).
+std::shared_ptr<const fixpp::dict::Dictionary> make_straddling_pair_dictionary() {
+    auto mr = std::make_shared<std::pmr::monotonic_buffer_resource>(64U * 1024U);
+    auto* d = new fixpp::dict::Dictionary{
+        fixpp::dict::XmlLoader{}.load_from_string(kStraddlingPairXml, mr.get())};
+    return std::shared_ptr<const fixpp::dict::Dictionary>{
+        d, [mr](fixpp::dict::Dictionary const* p) { delete p; }};
 }
 
 class DataSend091 : public ::testing::Test {
@@ -134,14 +195,14 @@ protected:
         engine.executor = ioc.get_executor();
     }
 
-    SessionConfig make_cfg() {
+    SessionConfig make_cfg(std::shared_ptr<const fixpp::dict::Dictionary> dict = nullptr) {
         SessionConfig cfg;
         cfg.sender_comp_id = "ISLD";
         cfg.target_comp_id = "TW";
         cfg.begin_string = "FIX.4.4";
         cfg.heartbeat_interval = 0s;
         cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
-        cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+        cfg.dictionary = dict ? std::move(dict) : fixpp::test_support::make_minimal_dictionary();
         cfg.executor_override = ioc.get_executor();
         cfg.reset_seqnum_policy_field = reset_seqnum_policy::bilateral_lenient;
         cfg.transport_send = [this](std::span<const std::byte> frame) {
@@ -191,8 +252,9 @@ protected:
     // Sends `payload` on an Active session and returns the one transmitted
     // frame; asserts the send consumed exactly one outbound MsgSeqNum and that
     // the frame carries it.
-    std::vector<std::byte> send_one(std::span<const std::byte> payload, char const* label) {
-        Session sess(engine, make_cfg());
+    std::vector<std::byte> send_one(std::span<const std::byte> payload, char const* label,
+                                    std::shared_ptr<const fixpp::dict::Dictionary> dict = nullptr) {
+        Session sess(engine, make_cfg(std::move(dict)));
         drive_to_active(sess);
         if (HasFatalFailure()) return {};
         seqnum_t const before = sess.seqnum_mgr_test_access().peek_outbound();
@@ -246,6 +308,33 @@ TEST_F(HeaderPairSend091, XmlData_212_213_WithSohInValue_MovedIntoTheHeaderToget
 
 TEST_F(HeaderPairSend091, SecureData_90_91_WithSohInValue_MovedIntoTheHeaderTogether) {
     expect_header_pair_moved_together(90, 91);
+}
+
+// ── Witness 1c: a dictionary pair whose halves classify differently ──
+
+// The Data half is a header-set tag but must travel with its body-class
+// Length: a counted field inherits its Length's classification, so the pair
+// stays adjacent, Length first, in the body. This is the input on which that
+// inheritance differs from classifying the Data by its own tag.
+TEST_F(DataSend091, DictionaryPair_BodyLengthHeaderSetData_StaysTogetherInTheBody) {
+    auto const dict = make_straddling_pair_dictionary();
+    auto const tv = dict->as_table_view();
+    ASSERT_EQ(tv.length_pair_data_tag(5001), 142U) << "the dictionary must pair 5001 with 142";
+
+    std::string const value = std::string{"<x a=\"1\">"} + '\x01' + "34=99" + '\x01' + "10=000</x>";
+    std::string const payload = std::string{"35=D"} + '\x01' + "11=ORD" + '\x01' + "54=1" + '\x01' +
+                                "5001=" + std::to_string(value.size()) + '\x01' + "142=" + value +
+                                '\x01' + "55=AAPL" + '\x01';
+    auto const bytes = to_bytes(payload);
+    auto const frame = send_one(bytes, "DictionaryPair_BodyLengthHeaderSetData", dict);
+    ASSERT_FALSE(frame.empty());
+
+    Reparsed const rp = reparse(frame, tv);
+    std::vector<std::uint32_t> const expected_tags{8,  9,  35,   34,  49, 52, 56,
+                                                   11, 54, 5001, 142, 55, 10};
+    EXPECT_EQ(rp.tags, expected_tags) << "the pair must stay adjacent, Length first, in the body";
+    EXPECT_EQ(rp.value_of(5001), std::to_string(value.size()));
+    EXPECT_EQ(rp.value_of(142), value) << "the Data value must re-parse verbatim";
 }
 
 // ── Witness 2: a generated builder's message_encoding + non-ASCII encoded_text ──
