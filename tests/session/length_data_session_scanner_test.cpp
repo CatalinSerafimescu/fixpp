@@ -245,8 +245,9 @@ TEST(LengthDataSessionScanner, MaskTag554SkipsAFieldWhoseTagIsNotDigits) {
 
 // ── A malformed count must not hide a later EncryptMethod(98) (T070) ─────────
 //
-// A Length count is malformed when it runs past the frame, or when its counted value
-// is not followed by SOH. Every cell below shares one
+// A malformed count is a Length immediately followed by its paired Data whose counted
+// extent reaches or passes the end of the whole framed message, or whose following
+// byte is not SOH. Every cell below shares one
 // Logon body and varies only the count digit L and the 98 value E, so a refusal of a
 // malformed-count cell cannot come from anything but the count: the L=1 twins, one
 // byte away, are the shape controls. With L=2 the counted value is "x" SOH and the
@@ -324,6 +325,136 @@ TEST(InterpretLogonMalformedCount, TwinNoCountWithNonZeroEncryptMethodIsRefused)
     auto const r = interpret_logon(std::span<const std::byte>{frame}, "TW", "ISLD", "FIX.4.4");
     ASSERT_FALSE(r.has_value());
     EXPECT_EQ(r.error(), fixpp::core::error::session_invalid_logon);
+}
+
+// ── An orphan Length: its next field is not its paired Data (FR-020) ────────
+//
+// The count cells' body with 96=x removed, so 95=999 is followed directly by 98. The
+// carry applies a count only to the Length's paired Data, so 98 is read as a plain
+// field and its value decides the Logon.
+namespace {
+
+std::vector<std::byte> orphan_length_logon(std::string_view encrypt_method) {
+    std::string body = logon_body_with_count("TW", "ISLD", "999", encrypt_method);
+    auto const data = body.find("96=x\x01");
+    EXPECT_NE(data, std::string::npos) << "the count cells' body no longer carries 96=x";
+    if (data != std::string::npos) {
+        body.erase(data, std::string_view{"96=x\x01"}.size());
+    }
+    auto frame = make_frame(body);
+    EXPECT_NE(as_sv(frame).find(std::string{"95=999\x01"
+                                            "98="} +
+                                std::string{encrypt_method} + "\x01"),
+              std::string_view::npos)
+        << "the Length must be followed directly by 98: " << as_sv(frame);
+    return frame;
+}
+
+}  // namespace
+
+TEST(InterpretLogonMalformedCount, OrphanOverrunningLengthDoesNotHideEncryptMethod) {
+    auto const frame = orphan_length_logon("2");
+    auto const r = interpret_logon(std::span<const std::byte>{frame}, /*expected_sender=*/"TW",
+                                   /*expected_target=*/"ISLD", /*expected_begin=*/"FIX.4.4");
+    ASSERT_FALSE(r.has_value()) << "a Logon with 98=2 after an orphan 95 was accepted";
+    EXPECT_EQ(r.error(), fixpp::core::error::session_invalid_logon);
+}
+
+TEST(InterpretLogonMalformedCount, TwinOrphanOverrunningLengthWithZeroEncryptMethodIsAccepted) {
+    auto const frame = orphan_length_logon("0");
+    auto const r = interpret_logon(std::span<const std::byte>{frame}, /*expected_sender=*/"TW",
+                                   /*expected_target=*/"ISLD", /*expected_begin=*/"FIX.4.4");
+    EXPECT_TRUE(r.has_value()) << "error " << (r ? 0 : static_cast<int>(r.error()));
+}
+
+// ── The equality boundary of a count, on the whole framed message (FR-020) ──
+//
+// Every field interpret_logon validates precedes 95, and RawData(96) is the last body
+// field, so its counted extent runs into the trailer. R is the number of bytes from the
+// first byte of 96's value to the end of the framed message, trailer included. The count
+// N moves only BodyLength, which precedes 96, so R is taken from a first framing, and
+// each cell re-measures R and re-reads N on its final framed bytes.
+namespace {
+
+std::string boundary_logon_body(std::size_t count) {
+    return "35=A\x01"
+           "34=1\x01"
+           "49=TW\x01"
+           "52=20240101-00:00:00.000\x01"
+           "56=ISLD\x01"
+           "108=30\x01"
+           "98=0\x01"
+           "95=" +
+           std::to_string(count) +
+           "\x01"
+           "96=x\x01";
+}
+
+// Bytes from the first byte of 96's value to the end of `frame`; npos when the
+// SOH-anchored 96= is missing or not unique.
+std::size_t bytes_from_raw_data_value_to_end(std::vector<std::byte> const& frame) {
+    auto const sv = as_sv(frame);
+    auto const anchor = std::string_view{
+        "\x01"
+        "96="};
+    auto const pos = sv.find(anchor);
+    if (pos == std::string_view::npos || pos != sv.rfind(anchor)) {
+        return std::string_view::npos;
+    }
+    return sv.size() - (pos + anchor.size());
+}
+
+// The count 95 carries in `frame`, parsed from the framed bytes; npos when absent.
+std::size_t count_in_frame(std::vector<std::byte> const& frame) {
+    auto const sv = as_sv(frame);
+    auto const anchor = std::string_view{
+        "\x01"
+        "95="};
+    auto const pos = sv.find(anchor);
+    if (pos == std::string_view::npos) {
+        return std::string_view::npos;
+    }
+    auto const digits = sv.substr(pos + anchor.size());
+    auto const soh = digits.find('\x01');
+    if (soh == std::string_view::npos || soh == 0) {
+        return std::string_view::npos;
+    }
+    return std::stoul(std::string{digits.substr(0, soh)});
+}
+
+// Frames the boundary body with the count R - `below`, R taken from a first framing.
+std::vector<std::byte> boundary_logon(std::size_t below) {
+    auto const r = bytes_from_raw_data_value_to_end(make_frame(boundary_logon_body(0)));
+    EXPECT_NE(r, std::string_view::npos);
+    EXPECT_GT(r, below);
+    return make_frame(boundary_logon_body(r - below));
+}
+
+}  // namespace
+
+TEST(InterpretLogonMalformedCount, CountReachingTheFrameEndIsRefused) {
+    auto const frame = boundary_logon(0);
+    auto const n = count_in_frame(frame);
+    ASSERT_NE(n, std::string_view::npos) << as_sv(frame);
+    // R == N on the final framed bytes: the counted extent reaches the end of the frame.
+    ASSERT_EQ(bytes_from_raw_data_value_to_end(frame), n) << as_sv(frame);
+    auto const r = interpret_logon(std::span<const std::byte>{frame}, /*expected_sender=*/"TW",
+                                   /*expected_target=*/"ISLD", /*expected_begin=*/"FIX.4.4");
+    ASSERT_FALSE(r.has_value()) << "a Logon whose 95 count reaches the frame end was accepted";
+    EXPECT_EQ(r.error(), fixpp::core::error::session_invalid_logon);
+}
+
+TEST(InterpretLogonMalformedCount, TwinCountEndingOnTheFinalSohIsAccepted) {
+    auto const frame = boundary_logon(1);
+    auto const n = count_in_frame(frame);
+    ASSERT_NE(n, std::string_view::npos) << as_sv(frame);
+    // R == N + 1 on the final framed bytes: the byte after the counted extent is the
+    // trailer's final SOH.
+    ASSERT_EQ(bytes_from_raw_data_value_to_end(frame), n + 1) << as_sv(frame);
+    ASSERT_EQ(as_sv(frame).back(), '\x01');
+    auto const r = interpret_logon(std::span<const std::byte>{frame}, /*expected_sender=*/"TW",
+                                   /*expected_target=*/"ISLD", /*expected_begin=*/"FIX.4.4");
+    EXPECT_TRUE(r.has_value()) << "error " << (r ? 0 : static_cast<int>(r.error()));
 }
 
 // A dictionary whose custom pair (5001, 5002) is adjacent ONLY inside a <component>
@@ -530,6 +661,31 @@ TEST_F(LogonArmMalformedCount, InitiatorTwinWellFormedCountNonZeroEncryptMethodI
 TEST_F(LogonArmMalformedCount, InitiatorMalformedCountDoesNotHideEncryptMethod) {
     EXPECT_NE(state_after_peer_logon(session_role::initiator, "2", "2"), fsm_state::Active)
         << "the initiator established on a Logon ack with 98=2 after a malformed 95 count";
+}
+
+TEST_F(LogonArmMalformedCount, AcceptorCountRunningPastTheFrameIsNotEstablished) {
+    auto const s = state_after_peer_logon(session_role::acceptor, "999", "2");
+    EXPECT_NE(s, fsm_state::Active)
+        << "the acceptor established on a Logon with 98=2 after an overrunning 95 count";
+    EXPECT_NE(s, fsm_state::LogonReceived);
+}
+
+TEST_F(LogonArmMalformedCount, InitiatorCountRunningPastTheFrameIsNotEstablished) {
+    EXPECT_NE(state_after_peer_logon(session_role::initiator, "999", "2"), fsm_state::Active)
+        << "the initiator established on a Logon ack with 98=2 after an overrunning 95 count";
+}
+
+// 98=0 is the shape a conforming peer's Logon has, so only the count can refuse it.
+TEST_F(LogonArmMalformedCount, AcceptorMalformedCountWithZeroEncryptMethodIsNotEstablished) {
+    auto const s = state_after_peer_logon(session_role::acceptor, "2", "0");
+    EXPECT_NE(s, fsm_state::Active)
+        << "the acceptor established on a Logon carrying a malformed 95 count";
+    EXPECT_NE(s, fsm_state::LogonReceived);
+}
+
+TEST_F(LogonArmMalformedCount, InitiatorMalformedCountWithZeroEncryptMethodIsNotEstablished) {
+    EXPECT_NE(state_after_peer_logon(session_role::initiator, "2", "0"), fsm_state::Active)
+        << "the initiator established on a Logon ack carrying a malformed 95 count";
 }
 
 // ── Zero global allocations (constitution §VIII.5) ───────────────────────────
