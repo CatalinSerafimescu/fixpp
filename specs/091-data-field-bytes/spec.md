@@ -539,6 +539,9 @@ rejection now assert verbatim emit.
         delivery contract: an inbound message carrying a malformed pair of that kind, delivered
         before, is now dropped as a parse error by `Session::parse_and_dispatch_` (the count's end
         byte is not SOH, `OffsetTable::build` refuses), silently and with no Reject;
+      - `fixpp_session_register_send_callback` (`include/fix/c_api/session.h`): for a send
+        `fixpp_session_send` refuses because of such a malformed pair, the toApp callback is not
+        invoked (its own note, task T075; the view's content effect stays in the reader paragraph);
       - the **inbound reader family**, as **one** BREAKING (1.9) paragraph in `message.h`'s shared
         accessor preamble ("Return codes common to all accessors"), not a marker per reader. It
         names `fixpp_msg_get_{string,bytes,int,double,decimal}`, `fixpp_msg_has_tag`,
@@ -570,7 +573,8 @@ rejection now assert verbatim emit.
       observers are every C-ABI call whose result depends on the session having logged on (FR-020
       lists them; research.md R-11 step 6 derives them). Each observer has a declaration in
       `session.h`, so each carries its own BREAKING (1.9) FR-020 clause (`[const §X.7]`: "each
-      affected declaration"), and the `version.h` history names every one of them too.
+      affected declaration"), and `fixpp_session_register_send_callback`'s note also carries its
+      FR-019 carry-refusal clause; the `version.h` history names every one of them too.
     - **Additive** (failure turned into success; no §X.7 marker, listed in B-091-4): the widenings
       named in the next bullet.
     - **UNCHANGED:** every other export, classified row by row in data-model.md Appendix A. The

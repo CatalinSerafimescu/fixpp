@@ -1123,6 +1123,17 @@ FR-019, SC-006).
 - [ ] T064 Run the quickstart §2 label gate. It must pass: the label set equals the manifest, and
   every manifest entry is a registered test. Then run `ctest --test-dir build/linux-clang-debug -L '^091$' --output-on-failure`, all
   GREEN.
+- [ ] T077 Via the `checklist-auditor` (the checklists are reviewer-owned), audit the checklists
+  against the FR-020 delta **by complement** (scoped Gate A round 3, P3-3): grep every domain
+  checklist under `checklists/` for items whose subject FR-020, FR-019, B-091-4 or data-model.md
+  Appendix A changed, and re-disposition each hit (SPEC-FIXED / DD-DECIDED / WAIVED, with the
+  FR-020 note).
+  - Derive the population by a complement grep, not by example:
+    `grep -nE 'interpret_logon|\b98\b|EncryptMethod|malformed|fixpp_session_|is_established|register_|session\.h|version\.h|§X\.7|§XII\.7|FR-019|FR-020|B-091-4|Appendix A|carrying declaration|covered|shipped dictionar|observer' specs/091-data-field-bytes/checklists/*.md`,
+    then read each hit's PASS condition against the current spec, plan, data-model and tasks.
+  - Items known at Gate A: `abi.md` CHK001, CHK006, CHK014, CHK015 and `codegen-loader.md` CHK023.
+    Before trusting the grep, confirm it hits every one of them; if one is missed, widen the terms
+    until it is hit. The known list is the positive control, not the population.
 - [ ] T065 Run `/speckit-verify` (mandatory after `/speckit-implement`, Article XVII §8). It produces
   `.specify/decisions/091-data-field-bytes-verify.md`. The record cites
   `.specify/decisions/091-data-field-bytes-evidence.md`, which every task whose body says "record … in" that file wrote; its
@@ -1161,7 +1172,9 @@ FR-019, SC-006).
     scoped Gate A: plan.md §Gate A's *Scoped FR-020 round …* entries and their review files
     (`research/reviews/codex_091-data-field-bytes_gate_a_FR020_review.md`,
     `research/reviews/opus_091-data-field-bytes_gate_a_FR020_adversarial_review.md`, and any later
-    round's), plus the owner's FR-020 plan re-sign-off (`[const §X.6]`). If the scoped round has not
+    round's), plus the owner's FR-020 plan re-sign-off (`[const §X.6]`). The FR-020 Gate A record
+    is `.specify/decisions/091-data-field-bytes-gatea.md` §"Addendum — scoped Gate A round on
+    FR-020 (2026-09-25)" (converged round 3; owner re-sign-off 2026-09-25). If the scoped round has not
     converged or the re-sign-off is still pending (plan.md Constitution Check, X row), ask the owner
     before labelling. If Gate B rules
     that `[const §XVII.8]`'s "Codex convergence record" is not met, ask the owner before labelling;
@@ -1228,7 +1241,8 @@ FR-019, SC-006).
   - T053 (simplify, first, so every measurement is of the final candidate) → T054 (compile-surface
     "after") → T055 → T056 → T057 → T058 → T059 → T073 (fuzz);
   - T060–T063 after T053;
-  - T065 after T060–T063;
+  - T077 (checklist audit of the FR-020 delta) before T065;
+  - T065 after T060–T063 and T077;
   - T068 → T069. T069 is last.
 
 ### User story dependencies
