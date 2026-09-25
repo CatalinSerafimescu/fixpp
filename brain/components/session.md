@@ -157,6 +157,10 @@ agent correctly treated this as a shortlist and re-derived, which is the intende
   capability-partitioned subset ships. Do not read the size of this family as completeness.
 - **`L-005-5` — `OnBehalfOfCompID(115)` / `DeliverToCompID(128)` third-party addressing is not
   implemented.**
+- **fixpp#507 (batch B18), an open follow-up, not a B&L row:** the session acts on the header fields of
+  a garbled inbound frame (a malformed Length count, or a garbled tag) instead of disregarding it, contrary
+  to FIX Session §4.5.2. Found by 091's T076 and filed out of #418's scope; 091 fixed the Logon case only
+  (FR-020). Check the issue's state before treating it as open.
 
 ⚠️ **A limitation is open only if it is in the LIVE B&L file.** Resolved rows move to
 `spec/behaviors-and-limitations-closed.md`, so a repo-wide `grep L-0NN-` reports closed ones as open.

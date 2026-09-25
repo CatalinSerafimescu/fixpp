@@ -197,21 +197,39 @@ What was rejected:
   group oracles: the mismatched-pairing shape of the #384 section above.
 - **One malformed-count policy for every scanner** (design §4). A header scan must stop, a replay
   must gap-fill, and a Password masker must over-mask rather than miss (B-426-2).
+  ⚠️ **Superseded for `interpret_logon` by 091 FR-020** (owner ruling 2026-09-24). A stop there
+  hid a later `EncryptMethod(98)`, a `[const §XII.7]` fail-open reachable through the standard pair
+  95/96. `interpret_logon` now refuses a Logon in which a Length is immediately followed by its
+  paired Data whose counted extent reaches or passes the end of the whole framed message, or whose
+  following byte is not SOH. `.specify/426-428-length-data-pairs.md` §4 still gives the stop for
+  `interpret_logon`; it is flagged here and not edited. The other scanners keep §4's policy: each
+  fails closed or equals the peer omitting the later fields (091 evidence §*Malformed-count scan
+  sites*). Re-derive from `src/session/admin_messages.cpp` `interpret_logon`.
 
 `OffsetTable::build` and `field_iterator` keep their own carries (hot path). The six session
-scanners share `length_data_carry::read_value`. #418's `body_builder` must reuse
-`length_data_pairs.hpp` and `length_data_checker`, not add a fifteenth copy.
+scanners share `length_data_carry::read_value`. 091 (#418)'s `body_builder` reused
+`length_data_pairs.hpp` and `length_data_checker` rather than add another copy: `field_data` /
+`set_data` take the Length from the standard table, and `commit` runs one `length_data_checker`
+per container (`src/wire/body_builder.cpp` `validate_group_grammar`). The same feature changed the
+QuickFIX-XML loader to pair inside components and groups (FR-017; see [`dictionary`](dictionary.md))
+and added a drift arm per shipped dictionary (FR-018, below).
 
-⚠️ **The 426-428 note's "the drift test keeps the two in step" is true of the UNION only, not of
-each dictionary** (found at 091's Gate A). The note is
+⚠️ **The 426-428 note's "the drift test keeps the two in step" was true of the UNION only, not of
+each dictionary, until 091** (found at 091's Gate A; FR-018 makes it true per dictionary). The note
+is not edited; it is flagged here (#334). The note is
 `.specify/426-428-length-data-pairs.md`, in its codegen paragraph.
 - `HeaderEqualsShippedDictionaryUnion` compares the standard table with the union of the pairs from
   every shipped dictionary. Orchestra's `lengthId` supplies every pair, so the union matches even
   when one QuickFIX-XML dictionary's loader misses some.
 - The FIX 5.0 SP2 loader did miss some, and the generated v50sp2 builders then left those pairs
   uncoupled. Why it happened is on the [`dictionary`](dictionary.md) page.
-- Feature 091 adds a per-dictionary drift arm (FR-018). Until that merges, treat the claim as
-  unproven for any single dictionary.
+- Feature 091 adds the per-dictionary drift arm (FR-018):
+  `LengthDataPairsPerDictionary.EveryProbedStandardPairIsPairedByTheLoader` in
+  `tests/wire/length_data_pairs_drift_test.cpp`. Its legs are a hand-written list, Orchestra FIX
+  Latest included: compare its `INSTANTIATE_TEST_SUITE_P` list with `dictionaries/` before trusting
+  it for a dictionary. Each leg also asserts that its probed set is non-empty. It lands with the loader
+  fix (FR-017) that makes it pass. Where that test is absent from the tree you are reading, treat
+  the claim as unproven for any single dictionary.
 - Re-derive the gap: run 091's `research.md` R-11 recipe, or compare `Dictionary::length_pair_data_tag`
   per dictionary against the standard table for the pairs whose tags appear in that dictionary's
   message expansions.
