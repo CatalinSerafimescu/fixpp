@@ -87,7 +87,7 @@ Each row names an existing test that must be shown RED (or, for a compile-time k
 | `field_data` resolves through `hooks_` instead of the standard table | C-1.9's "`field_data(5002, …)` refused" arm |
 | commit's checker is built from `none()` instead of `hooks_` | C-1.9's "malformed custom pair refused at commit" arm |
 | the emitter passes `item.tag` instead of `item.data_tag` | the v44 builder build (C-2.2 `static_assert`) |
-| the emitter changes only the top-level arm | C-2.6 **nested** 256-value witness; C-2.2 census (wrong arm) |
+| the emitter changes only the top-level arm | C-2.6 **nested** 256-value witness; C-2.2 census (missing sites and orphan halves) |
 | the `message_encoding` selection uses "begins with `Encoded`" | the C-2.3 v50sp2 witness (a message whose only encoded field is `DerivativeEncoded*` / `InstrumentScopeEncoded*`) |
 | the loader's component/group walk is removed ("loader walk removed": the new emitter over the unfixed loader) | the per-dictionary drift arm (FIX50SP2, the five pairs); C-2.2 census control (a) and the orphan-half check on v50sp2; C-2.5a arms (i), (ii), (iv), (v), (vi), (vii), (viii) |
 | the new walk skips non-field children instead of breaking | C-2.5a arm (iii) |
@@ -100,7 +100,7 @@ Each row names an existing test that must be shown RED (or, for a compile-time k
 | `set_data` resolves through `hooks_` instead of the standard table | C-1.9's `set_data(5002, …)` arm |
 | `set_data` omits the owner check | C-1.4b default handle (under ASan it must fail, not UB-pass) |
 | `set_data` omits `is_innermost_open` | C-1.4b outer handle and closed-group handle |
-| `send_impl` classifies a counted field by its own tag instead of inheriting `prev_header` | the §5 XmlData(212/213) and SecureData(90/91) `send_impl` witnesses |
+| `send_impl` classifies a counted field by its own tag instead of inheriting `prev_header` | the §5 dictionary-pair `send_impl` witness whose Length and Data classify differently (the standard 212/213 and 90/91 pairs cannot tell the two apart) |
 | `builder_bench`'s WithGroup / Raw case builds a body missing one scalar field (both cases), or one of the three `kParties` entries (WithGroup), with the exact prechecks in place | that case reports `SkipWithError` (run before the §6 measurement) |
 
 ## 4. Golden regeneration check

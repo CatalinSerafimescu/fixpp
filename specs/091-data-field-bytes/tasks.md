@@ -816,7 +816,7 @@ are the four flipped `_418` pins, plus C-2.6.
 
 ### Census, goldens and FIX Latest for User Story 1
 
-- [ ] T037 [US1] Show that the census can fire (C-2.2 positive controls) **before** relying on it.
+- [X] T037 [US1] Show that the census can fire (C-2.2 positive controls) **before** relying on it.
   Each control runs in a scratch copy, output quoted:
   - **(a)** Run the census over the output of the "loader walk removed" mutant: the new emitter over
     the unfixed loader.
@@ -826,7 +826,7 @@ are the four flipped `_418` pins, plus C-2.6.
   - **(b)** Delete one coupled emission from a regenerated golden: reported missing.
   - **(c)** Move one call site from the nested arm to the top arm: reported as a wrong arm.
   - Record the three controls' output in `.specify/decisions/091-data-field-bytes-evidence.md`.
-- [ ] T038 [US1] Via `phase-implementer`, validate the goldens **structurally** (C-2.4, FR-013)
+- [X] T038 [US1] Via `phase-implementer`, validate the goldens **structurally** (C-2.4, FR-013)
   with a script `tests/codegen/golden_091_residual_diff.py`. It is not registered in ctest; it runs
   against `origin/main`'s goldens and the regenerated ones.
   - **(a) and (c):** T028's census, plus a check that every removed two-call site in the old golden
@@ -838,7 +838,7 @@ are the four flipped `_418` pins, plus C-2.6.
   - **Positive control:** inject a stray `bb.field(347, …)` inside a group body of one regenerated
     golden; the residual must be non-empty.
   - Record the commands and output in `.specify/decisions/091-data-field-bytes-evidence.md`.
-- [ ] T039 [US1] Via `phase-implementer`, add a new executable `session_091_data_send` from a new file
+- [X] T039 [US1] Via `phase-implementer`, add a new executable `session_091_data_send` from a new file
   `tests/session/test_091_data_send.cpp`, registered in `tests/session/CMakeLists.txt` with label
   `091`.
   - It links `fixpp_session`, `fixpp_mock_clock`, `fixpp::builders::v44` and `session_test_support`,
@@ -854,14 +854,18 @@ are the four flipped `_418` pins, plus C-2.6.
     the body with their verbatim bytes.
   - **Liveness (no production change backs these):** in a scratch copy, the mutant "`send_impl`
     classifies a counted field by its own tag instead of inheriting `prev_header`" must turn
-    witness 1 RED. For witness 2, reproduce the pre-T034 build failure (the member does not exist) in a scratch
+    witness 1 RED. The standard header pairs cannot do this, since both halves of 90/91 and
+    212/213 are header-class. Witness 1 therefore includes a session-dictionary pair whose Length
+    is body-class and whose Data is a header-set, non-pair tag: the input on which the two
+    classifications differ (added at T039, 2026-09-25). For witness 2, reproduce the pre-T034 build failure (the member does not exist) in a scratch
     copy at the pre-T034 commit, and quote it. Record both liveness results in `.specify/decisions/091-data-field-bytes-evidence.md`.
   - T003's manifest entry `session_091_data_send` now resolves. This is plan phase 5 (R-9, quickstart §5), and it closes US1's `args.message_encoding` scenario.
-- [ ] T040 [US1] Via `phase-implementer`, run the US1 mutants from quickstart §3 in a scratch copy:
+- [X] T040 [US1] Via `phase-implementer`, run the US1 mutants from quickstart §3 in a scratch copy:
   - "the emitter passes `item.tag` instead of `item.data_tag`" → the v44 builder build fails on the
     C-2.2 `static_assert`;
   - "the emitter changes only the top-level arm" → the C-2.6 **nested** 256-value witness (T029),
-    and T028's census (wrong arm);
+    and T028's census (missing sites plus orphan halves: the nested arm keeps the two-call form;
+    control (c) of T037 is the wrong-arm report);
   - "the `message_encoding` selection uses 'begins with `Encoded`'" → T030's v50sp2 witness, and
     T028's message-encoding set;
   - "`field_data` routes through `append_string_field`" (re-applies the content guard, FR-015) → the
