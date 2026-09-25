@@ -93,7 +93,9 @@ bench/wire/offset_table_footprint_bench     none:no-gb-baseline-recorded        
 bench/wire/validate_group_bench             none:hand-authored-record-no-cpu_time-field      no
 bench/wire/fix42_group_parse_bench          none:hand-authored-record-no-cpu_time-field      no
 bench/wire/typed_read_group_bench           none:hand-authored-record-no-cpu_time-field      no
-# builder_bench: tier-2 `no` as an Article VIII §2a candidate (`paired` is irreversible); feature 091's SC-005 paired comparison is the manual procedure in specs/091-data-field-bytes/quickstart.md §6.
+# builder_bench: tier-2 `no` as an Article VIII §2a candidate (`paired` is
+# irreversible). Feature 091's SC-005 paired comparison is the manual procedure
+# in specs/091-data-field-bytes/quickstart.md, section "Performance (SC-005)".
 bench/wire/builder_bench                    none:no-gb-baseline-recorded                     no
 
 # ── sync (uncontended only — one coroutine, no contender) ────────────────────
