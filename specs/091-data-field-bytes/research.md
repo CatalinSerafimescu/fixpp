@@ -209,8 +209,12 @@ The population is re-derived, never pinned. Recipe for the files the old emitter
 
 ```bash
 G=specs/078-precompiled-builder-libs/contracts/golden
-for v in v42 v44 v50sp2 vlatest; do echo "$v files=$(find $G/$v -type f | wc -l) coupled=$(grep -rl r_data $G/$v | wc -l)"; done
+for v in v42 v44 v50sp2 vlatest; do echo "$v files=$(find $G/$v -type f | wc -l) coupled=$(grep -rlw r_data $G/$v | wc -l)"; done
 ```
+
+`-w` is required: after 091 every generated `static_assert` names `length_tag_for_data`, which
+contains `r_data`, so a plain `grep -rl` matches every coupled file before and after the change
+and cannot see it (found at T035).
 
 ⚠️ This population is defined by the **old emitter's coupling decision**, so it cannot see a standard
 pair the loader never coupled (R-11). It sizes the diff; it is not the census. The census (C-2.2)

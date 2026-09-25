@@ -769,7 +769,7 @@ are the four flipped `_418` pins, plus C-2.6.
 
 ### Implementation for User Story 1
 
-- [ ] T033 [US1] Via `phase-implementer`, update the emitter's coupled arms in
+- [X] T033 [US1] Via `phase-implementer`, update the emitter's coupled arms in
   `tools/codegen/fixpp-codegen/emit_builders.cpp` (C-2.1, R-7).
   - In `emit_level_body`'s coupled branch, **both** arms emit exactly the C-2.1 shape:
     - `static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(D) == L);`
@@ -782,7 +782,7 @@ are the four flipped `_418` pins, plus C-2.6.
     compile and behave identically, except the owner-ratified v50sp2 carve-out of T014).
   - `tools/codegen/fixpp-codegen/gen_util.hpp`: update the stale "is already String" comment on the
     Data half's kind. No new `TypeKind`.
-- [ ] T034 [US1] Via `phase-implementer`, add `message_encoding` to
+- [X] T034 [US1] Via `phase-implementer`, add `message_encoding` to
   `tools/codegen/fixpp-codegen/emit_builders.cpp` (C-2.3, R-8).
   - **Selection:** per message, true when any member at any depth (the `group_order` tree
     `resolve_level` walks) is the Data half of a **standard** pair
@@ -793,14 +793,14 @@ are the four flipped `_418` pins, plus C-2.6.
     before any other member. Top level only.
   - Accessor collisions go through the existing `uniquify_accessor`.
   - Not enforced: FIX 4.4's "required if any Encoded fields" stays the caller's decision.
-- [ ] T035 [US1] Via `phase-implementer`, run codegen freshness (quickstart §1) and regenerate the 078
+- [X] T035 [US1] Via `phase-implementer`, run codegen freshness (quickstart §1) and regenerate the 078
   builder goldens for **v42, v44, v50sp2 and vlatest** under
   `specs/078-precompiled-builder-libs/contracts/golden/{v42,v44,v50sp2,vlatest}/`. The v50sp2 goldens
   start from T014's intermediate state.
   - Size the diff with R-5's recipe (re-run it; do not reuse a figure).
   - Every other read-tier pin in `fixpp::dict::read-tier-byte-diff` is unchanged. Only T013's two
     have moved; anything else is a stop (spec Assumptions).
-- [ ] T036 [US1] Build, then run `test_067_builder_failclosed`, `test_067_builder_roundtrip`,
+- [X] T036 [US1] Build, then run `test_067_builder_failclosed`, `test_067_builder_roundtrip`,
   `test_077_allversions_builder_roundtrip`, `test_077_allversions_builder_roundtrip_vlatest` and
   `codegen_091_data_census_test`.
   - The four flipped `_418` pins (T005), the census (T028), the C-2.6 witnesses (T029), the C-2.3
@@ -978,6 +978,12 @@ FR-019, SC-006).
     QuickFIX/n splits unless the tag is XmlData(213). No near-copy row.
   - **B-091-1:** `body_builder::commit` refuses a malformed hand-written pair
     (`wire_invalid_field_format`), a behaviour change for hand-written C++ callers.
+  - **Carried from T036 (2026-09-25): an empty coupled member on a generated builder.** Before 091,
+    a coupled member set to `""` emitted `<Length>=0` and an empty Data. Now `field_data`/`set_data`
+    refuse it with `wire_field_value_out_of_range` (spec Edge Cases, "An empty Data value is
+    refused"; data-model set-time table). This is a behaviour change for generated-builder callers
+    that SC-004's "ASCII callers behave identically" does not cover. Give it its own row, or fold it
+    into B-091-1's text, and cite the Edge Case.
   - **B-091-2:** `message_encoding` is available but not enforced when an `Encoded*` field is set.
   - **B-091-3:** the set-time vs C-ABI divergences. A dictionary-only Data tag is refused by
     `field_data`/`set_data` but accepted by `fixpp_msg_set_data` (follow-up fixpp#505). A repeated
