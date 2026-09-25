@@ -307,8 +307,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_acceptor_bound_endpoint(fixpp_sessi
  * FIXPP_ERR_SESSION_INVALID_STATE, translated for the consumer's ABI minor
  * (fixpp_engine_create). For a send either change refuses, the
  * toApp callback (fixpp_session_register_send_callback) is not invoked: the
- * pair refusal comes before the send path builds its toApp view, and the
- * FR-020 refusal comes at the engine's Active check, before the send reaches
+ * pair refusal comes before the send path builds its toApp view, and a send
+ * on that session is refused at the engine's Active check, before it reaches
  * that path.
  *
  * Reentrancy: thread-safe — callable from any consumer thread (the any-thread
