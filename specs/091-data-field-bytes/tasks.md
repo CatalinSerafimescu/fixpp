@@ -939,7 +939,7 @@ rollback on arena exhaustion and on the body cap (C-1.1–C-1.11 except C-1.9; C
   - "commit's checker is built from `none()` instead of `hooks_`" → C-1.9's "malformed custom pair
     refused at commit" arm.
   Record them in `.specify/decisions/091-data-field-bytes-evidence.md` §*Mutants*.
-- [ ] T045 [US3] Run C-1.5 on **MSVC** (`windows-msvc-debug` in the MSVC sandbox, per
+- [X] T045 [US3] Run C-1.5 on **MSVC** (`windows-msvc-debug` in the MSVC sandbox, per
   `phases/phase-4/parallel-worktrees.md`). The arrangement witness must hold there too, because
   outer-vector regrowth differs by STL. If the MSVC leg cannot run, record a waiver with its cost
   stated plainly ("CI's MSVC matrix runs only once both gate labels land"), not as "CI covers it".
