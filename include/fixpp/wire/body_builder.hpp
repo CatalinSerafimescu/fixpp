@@ -280,24 +280,24 @@ private:
     // Core append: emplace one scalar entry and assign its pre-encoded value
     // bytes, rolling back the node on arena exhaustion (std::bad_alloc ->
     // wire_frame_too_large). Callers pre-validate (framing-tag reject + value
-    // validation); this helper does NOT re-validate.
-    static fixpp::core::expected_t<void> append_bytes_field(
-        std::pmr::vector<entry_node>& into, std::uint16_t tag,
-        std::span<const std::byte> value) noexcept;
-    static fixpp::core::expected_t<void> append_string_field(std::pmr::vector<entry_node>& into,
-                                                             std::uint16_t tag,
-                                                             std::string_view v) noexcept;
-    static fixpp::core::expected_t<void> append_int_field(std::pmr::vector<entry_node>& into,
-                                                          std::uint16_t tag,
-                                                          std::int64_t v) noexcept;
-    static fixpp::core::expected_t<void> append_decimal_field(std::pmr::vector<entry_node>& into,
-                                                              std::uint16_t tag,
-                                                              const fixpp::decimal_t& v) noexcept;
+    // validation); this helper does NOT re-validate. Every scalar node is
+    // appended here, so this is where its tag is noted for the pair check.
+    fixpp::core::expected_t<void> append_bytes_field(std::pmr::vector<entry_node>& into,
+                                                     std::uint16_t tag,
+                                                     std::span<const std::byte> value) noexcept;
+    fixpp::core::expected_t<void> append_string_field(std::pmr::vector<entry_node>& into,
+                                                      std::uint16_t tag,
+                                                      std::string_view v) noexcept;
+    fixpp::core::expected_t<void> append_int_field(std::pmr::vector<entry_node>& into,
+                                                   std::uint16_t tag, std::int64_t v) noexcept;
+    fixpp::core::expected_t<void> append_decimal_field(std::pmr::vector<entry_node>& into,
+                                                       std::uint16_t tag,
+                                                       const fixpp::decimal_t& v) noexcept;
     // field_data/set_data after their handle checks: the refusals, then the
     // Length node and the Data node, rolling both back on arena exhaustion.
-    static fixpp::core::expected_t<void> append_data_field(
-        std::pmr::vector<entry_node>& into, std::uint16_t data_tag,
-        std::span<const std::byte> value) noexcept;
+    fixpp::core::expected_t<void> append_data_field(std::pmr::vector<entry_node>& into,
+                                                    std::uint16_t data_tag,
+                                                    std::span<const std::byte> value) noexcept;
 
     fixpp::core::expected_t<entry_handle> add_entry_impl(const group_handle& g) noexcept;
     fixpp::core::expected_t<group_handle> entry_group_begin_impl(
@@ -308,6 +308,9 @@ private:
     // its own length_data_checker built from `hooks`, holds only well-formed
     // Length+Data pairs; a group node is fed with an EMPTY value, never its
     // count digits, so a group tagged with either half of a pair is refused.
+    // With CheckPairs false only INV-5 is walked; commit() picks it from
+    // `pair_check_needed_`.
+    template <bool CheckPairs>
     static fixpp::core::expected_t<void> validate_group_grammar(
         const std::pmr::vector<entry_node>& entries, const dict_hooks& hooks) noexcept;
 
@@ -316,8 +319,6 @@ private:
                                   const std::pmr::vector<entry_node>& entries) noexcept;
 
     std::string msg_type_;
-    // Read by commit() only (INV-6). See the constructor's lifetime precondition.
-    dict_hooks hooks_;
 
     // ── Zero-global-heap arena (061-slim rework) ────────────────────────────
     // Fixed internal scratch for the intermediate accumulation TREE (entry
@@ -343,6 +344,16 @@ private:
     // ~68 B of arena per open group for state never re-resolved from the stack.
     std::pmr::vector<std::uint32_t> open_stack_{&arena_};
     std::uint32_t next_open_seq_ = 1;
+    // Read by commit() only (INV-6). See the constructor's lifetime precondition.
+    // Declared after the arena so the arena keeps its offset in the object.
+    dict_hooks hooks_;
+    // False only while no appended node (scalar or group) carries a tag the
+    // standard pair table names and `hooks_` has no dictionary pair callback.
+    // Every lookup of INV-6 then answers 0, so commit() skips the pair check
+    // with the same result. Noted by note_tag() before every node append.
+    bool pair_check_needed_ = false;
+
+    void note_tag(std::uint16_t tag) noexcept;
 };
 
 }  // namespace fixpp::wire

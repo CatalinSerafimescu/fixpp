@@ -100,8 +100,17 @@ body_builder::group_instance& body_builder::group_instance::operator=(group_inst
 
 // ── ctor ───────────────────────────────────────────────────────────────────
 
+// A dictionary pair callback can name any tag, so its presence alone makes the
+// pair check necessary.
 body_builder::body_builder(std::string_view msg_type, dict_hooks hooks) noexcept
-    : msg_type_(msg_type), hooks_(hooks) {}
+    : msg_type_(msg_type), hooks_(hooks), pair_check_needed_(hooks.length_pair_fn() != nullptr) {}
+
+// The bit table covers every 16-bit tag, so it is read without a range check or a
+// branch: this runs on every append.
+void body_builder::note_tag(std::uint16_t tag) noexcept {
+    pair_check_needed_ |=
+        ((core::detail::standard_pair_tag_bits[tag >> 6U] >> (tag & 63U)) & 1U) != 0;
+}
 
 // ── shared validated-append helpers ─────────────────────────────────────────
 
@@ -124,6 +133,7 @@ body_builder::body_builder(std::string_view msg_type, dict_hooks hooks) noexcept
 expected_t<void> body_builder::append_bytes_field(std::pmr::vector<entry_node>& into,
                                                   std::uint16_t tag,
                                                   std::span<const std::byte> value) noexcept {
+    note_tag(tag);
     std::size_t size_before = into.size();
     try {
         into.emplace_back(into.get_allocator().resource());
@@ -239,6 +249,7 @@ expected_t<group_handle> body_builder::group_begin(std::uint16_t no_tag,
                                                    std::uint16_t delimiter_tag) noexcept {
     if (is_framing_tag(no_tag)) return std::unexpected(error::wire_field_value_out_of_range);
 
+    note_tag(no_tag);
     std::size_t entries_before = entries_.size();
     std::size_t stack_before = open_stack_.size();
     try {
@@ -289,6 +300,7 @@ expected_t<group_handle> body_builder::entry_group_begin_impl(
             error::wire_frame_too_large);  // LCOV_EXCL_LINE — defensive bound; 061-slim
                                            // nests <= 3 levels, well under kMaxGroupNestDepth
 
+    note_tag(no_tag);
     group_instance* inst = resolve_instance(e);
     std::size_t fields_before = inst->fields.size();
     std::size_t stack_before = open_stack_.size();
@@ -342,8 +354,8 @@ expected_t<void> entry_handle::set_string(std::uint16_t tag, std::string_view v)
     if (group_.owner_ == nullptr) return std::unexpected(error::wire_invalid_field_format);
     if (!group_.owner_->is_innermost_open(group_.open_seq_))
         return std::unexpected(error::wire_invalid_field_format);
-    return body_builder::append_string_field(group_.owner_->resolve_instance(*this)->fields, tag,
-                                             v);
+    return group_.owner_->append_string_field(group_.owner_->resolve_instance(*this)->fields, tag,
+                                              v);
 }
 
 expected_t<void> entry_handle::set_char(std::uint16_t tag, char c) noexcept {
@@ -354,15 +366,15 @@ expected_t<void> entry_handle::set_int(std::uint16_t tag, std::int64_t v) noexce
     if (group_.owner_ == nullptr) return std::unexpected(error::wire_invalid_field_format);
     if (!group_.owner_->is_innermost_open(group_.open_seq_))
         return std::unexpected(error::wire_invalid_field_format);
-    return body_builder::append_int_field(group_.owner_->resolve_instance(*this)->fields, tag, v);
+    return group_.owner_->append_int_field(group_.owner_->resolve_instance(*this)->fields, tag, v);
 }
 
 expected_t<void> entry_handle::set_decimal(std::uint16_t tag, const fixpp::decimal_t& v) noexcept {
     if (group_.owner_ == nullptr) return std::unexpected(error::wire_invalid_field_format);
     if (!group_.owner_->is_innermost_open(group_.open_seq_))
         return std::unexpected(error::wire_invalid_field_format);
-    return body_builder::append_decimal_field(group_.owner_->resolve_instance(*this)->fields, tag,
-                                              v);
+    return group_.owner_->append_decimal_field(group_.owner_->resolve_instance(*this)->fields, tag,
+                                               v);
 }
 
 // The handle checks come before any group or instance resolution (R-3 step 1):
@@ -372,8 +384,8 @@ expected_t<void> entry_handle::set_data(std::uint16_t data_tag,
     if (group_.owner_ == nullptr) return std::unexpected(error::wire_invalid_field_format);
     if (!group_.owner_->is_innermost_open(group_.open_seq_))
         return std::unexpected(error::wire_invalid_field_format);
-    return body_builder::append_data_field(group_.owner_->resolve_instance(*this)->fields, data_tag,
-                                           value);
+    return group_.owner_->append_data_field(group_.owner_->resolve_instance(*this)->fields,
+                                            data_tag, value);
 }
 
 expected_t<group_handle> entry_handle::group_begin(std::uint16_t no_tag,
@@ -389,22 +401,27 @@ expected_t<group_handle> entry_handle::group_begin(std::uint16_t no_tag,
 // is fed as observe(no_tag, {}): the EMPTY value is normative, since it is what
 // makes the checker refuse a group tagged with either half of a pair.
 
+template <bool CheckPairs>
 expected_t<void> body_builder::validate_group_grammar(const std::pmr::vector<entry_node>& entries,
                                                       const dict_hooks& hooks) noexcept {
-    length_data_checker pairs{hooks};
+    [[maybe_unused]] length_data_checker pairs{hooks};
     for (const auto& e : entries) {
-        if (!pairs.observe(e.tag, e.is_group ? std::span<const std::byte>{}
-                                             : std::span<const std::byte>{e.value_bytes}))
-            return std::unexpected(error::wire_invalid_field_format);
+        if constexpr (CheckPairs) {
+            if (!pairs.observe(e.tag, e.is_group ? std::span<const std::byte>{}
+                                                 : std::span<const std::byte>{e.value_bytes}))
+                return std::unexpected(error::wire_invalid_field_format);
+        }
         if (!e.is_group) continue;
         for (const auto& inst : e.instances) {
             if (inst.fields.empty()) return std::unexpected(error::wire_invalid_field_format);
             if (inst.fields.front().tag != e.delimiter_tag)
                 return std::unexpected(error::wire_invalid_field_format);
-            if (auto r = validate_group_grammar(inst.fields, hooks); !r) return r;
+            if (auto r = validate_group_grammar<CheckPairs>(inst.fields, hooks); !r) return r;
         }
     }
-    if (!pairs.finish()) return std::unexpected(error::wire_invalid_field_format);
+    if constexpr (CheckPairs) {
+        if (!pairs.finish()) return std::unexpected(error::wire_invalid_field_format);
+    }
     return {};
 }
 
@@ -459,7 +476,10 @@ expected_t<std::span<std::byte>> body_builder::commit(std::span<std::byte> out) 
 
     // INV-5: every group instance is non-empty and delimiter-first; INV-6: every
     // Length+Data pair in each container is well formed.
-    if (auto r = validate_group_grammar(entries_, hooks_); !r) return std::unexpected(r.error());
+    if (auto r = pair_check_needed_ ? validate_group_grammar<true>(entries_, hooks_)
+                                    : validate_group_grammar<false>(entries_, hooks_);
+        !r)
+        return std::unexpected(r.error());
 
     // C1/INV-2: the MsgType(35) framing value gets the same clean-value guard
     // every other field value gets ([RC#2: gate-b/r2]) — is_clean_field_value("")

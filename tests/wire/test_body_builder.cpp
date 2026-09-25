@@ -1283,6 +1283,42 @@ TEST(BodyBuilderDataField, C1_7_GroupWhoseNoTagIsTheDataTag) {
     expect_commit_ok(twin);
 }
 
+// The same refusal for a group opened inside an entry, where the nested no_tag is
+// the only pair tag anywhere in the message.
+TEST(BodyBuilderDataField, C1_7_NestedGroupWhoseNoTagIsTheDataTag) {
+    body_builder subject{"X"};
+    scene s;
+    arrange_live_entry(subject, s);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    auto ig = s.outer_entry.group_begin(355, kInnerDelim);
+    ASSERT_TRUE(ig.has_value());
+    auto ie = ig->add_entry();
+    ASSERT_TRUE(ie.has_value());
+    ASSERT_TRUE(ie->set_string(kInnerDelim, "P1").has_value());
+    ASSERT_TRUE(subject.group_end(*ig).has_value());
+    ASSERT_TRUE(subject.group_end(s.outer).has_value());
+    expect_commit_refused(subject, error::wire_invalid_field_format);
+
+    // Committing twin: the nested no_tag changed to a non-pair tag.
+    body_builder twin{"X"};
+    scene ts;
+    arrange_live_entry(twin, ts);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    auto tig = ts.outer_entry.group_begin(kInnerNo, kInnerDelim);
+    ASSERT_TRUE(tig.has_value());
+    auto tie = tig->add_entry();
+    ASSERT_TRUE(tie.has_value());
+    ASSERT_TRUE(tie->set_string(kInnerDelim, "P1").has_value());
+    ASSERT_TRUE(twin.group_end(*tig).has_value());
+    ASSERT_TRUE(twin.group_end(ts.outer).has_value());
+    auto const body = expect_commit_ok(twin);
+    EXPECT_EQ(body, std::string{"35=X\x01"
+                                "78=1\x01"
+                                "79=A1\x01"
+                                "453=1\x01"
+                                "448=P1\x01"});
+}
+
 TEST(BodyBuilderDataField, C1_7_HandWrittenWellFormedPairCommits) {
     body_builder bb{"X"};
     ASSERT_TRUE(bb.field(354, std::int64_t{3}).has_value());
