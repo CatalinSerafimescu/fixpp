@@ -660,7 +660,7 @@ only then made GREEN.
     witness.
   Record each mutant, command and RED line in `.specify/decisions/091-data-field-bytes-evidence.md`
   §*Mutants*.
-- [ ] T027 Run the **full** `ctest --test-dir build/linux-clang-debug --output-on-failure`, after
+- [X] T027 Run the **full** `ctest --test-dir build/linux-clang-debug --output-on-failure`, after
   codegen freshness.
   - The loader change moves FIX 5.0 SP2 answers that unlabelled tests read: the `table_view`
     differential, `length_data_table_test`, and the codegen determinism golden.
