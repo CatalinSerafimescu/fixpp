@@ -179,20 +179,12 @@ expected_t<void> body_builder::append_data_field(std::pmr::vector<entry_node>& i
     if (length_tag == 0) return std::unexpected(error::wire_unexpected_tag);
     if (value.empty()) return std::unexpected(error::wire_field_value_out_of_range);
 
-    char buf[24];
-    auto res = std::to_chars(buf, buf + sizeof(buf), value.size());
-    if (res.ec != std::errc{})
-        return std::unexpected(
-            error::wire_invalid_field_format);  // LCOV_EXCL_LINE — size_t always fits 24 chars
-    const auto* bdata = reinterpret_cast<const std::byte*>(buf);
-
-    std::size_t const size_before = into.size();
-    if (auto r =
-            append_bytes_field(into, length_tag, {bdata, static_cast<std::size_t>(res.ptr - buf)});
-        !r)
+    if (auto r = append_int_field(into, length_tag, static_cast<std::int64_t>(value.size())); !r)
         return r;
+    // A failed append_bytes_field has already removed any node of its own, so the
+    // Length node is the only one left to pop.
     if (auto r = append_bytes_field(into, data_tag, value); !r) {
-        while (into.size() > size_before) into.pop_back();
+        into.pop_back();
         return r;
     }
     return {};
@@ -401,13 +393,10 @@ expected_t<void> body_builder::validate_group_grammar(const std::pmr::vector<ent
                                                       const dict_hooks& hooks) noexcept {
     length_data_checker pairs{hooks};
     for (const auto& e : entries) {
-        if (!e.is_group) {
-            if (!pairs.observe(e.tag, e.value_bytes))
-                return std::unexpected(error::wire_invalid_field_format);
-            continue;
-        }
-        if (!pairs.observe(e.tag, std::span<const std::byte>{}))
+        if (!pairs.observe(e.tag, e.is_group ? std::span<const std::byte>{}
+                                             : std::span<const std::byte>{e.value_bytes}))
             return std::unexpected(error::wire_invalid_field_format);
+        if (!e.is_group) continue;
         for (const auto& inst : e.instances) {
             if (inst.fields.empty()) return std::unexpected(error::wire_invalid_field_format);
             if (inst.fields.front().tag != e.delimiter_tag)
