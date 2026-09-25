@@ -35,6 +35,16 @@ every C-ABI call whose result depends on the session having logged on (FR-020, R
 (`fixpp_session_close`, `fixpp_session_is_established`, `fixpp_session_send`,
 `fixpp_session_register_callback`, `fixpp_session_register_send_callback`).
 
+`fixpp_msg_commit`'s Length+Data check (`check_length_data`, `src/capi/message_write.cpp`) feeds a
+group node to the pair checker with an empty value, as `body_builder::commit` does (FR-021, owner
+ruling 2026-09-25 during `/speckit-implement`; it folds in fixpp#506). It used to feed the group's
+instance-count digits, so a group whose count tag is a pair half could complete the pair: on a
+session with no dictionary, a group tagged 354 with one instance followed by a one-byte 355
+committed. That commit, and every other one in which a pair-half group's count digits completed
+the pair, now returns `FIXPP_ERR_WIRE_CONFORMANCE`: a success turned into a failure, so it joins
+C-ABI 1.9's BREAKING population through `fixpp_msg_commit`'s own note and the `version.h`
+history (tasks §2e). Its controls are **pending** (Constitution Check, X row).
+
 The code generator:
 - routes every coupled member through the new operation in both the top-level and nested arms, with a
   per-call-site `static_assert` census;
@@ -84,21 +94,22 @@ gated on a noise-floor precondition read from the base legs (R-10, quickstart §
 | Article | Applies? | Status |
 |---|---|---|
 | **XVI §3** clarify for wire/codegen | yes | ✅ `/speckit-clarify` ran 2026-09-24 (3 Q); specify-time owner decisions FR-008/FR-009 recorded; Gate A r1 owner rulings recorded (Clarifications, Session 2026-09-24 (Gate A round 1)); Gate A r3 C-ABI ruling recorded by `/speckit-clarify` (Session 2026-09-24 (Gate A round 3), FR-019) |
-| **XVII §1** Gate A: public C++ API + codegen layout | **yes, both triggers** | ✅ Gate A converged (loop 3 r3, owner-accepted without Codex). FR-020 (added during implement): ✅ scoped Gate A converged round 3 (2026-09-25); plan re-sign-off by owner 2026-09-25 (`.specify/decisions/091-data-field-bytes-gatea.md` §"Addendum — scoped Gate A round on FR-020 (2026-09-25)"; rounds in §Gate A below) |
+| **XVII §1** Gate A: public C++ API + codegen layout | **yes, both triggers** | ✅ Gate A converged (loop 3 r3, owner-accepted without Codex). FR-020 (added during implement): ✅ scoped Gate A converged round 3 (2026-09-25); plan re-sign-off by owner 2026-09-25 (`.specify/decisions/091-data-field-bytes-gatea.md` §"Addendum — scoped Gate A round on FR-020 (2026-09-25)"; rounds in §Gate A below). FR-021 (added during implement, 2026-09-25): **PENDING** scoped Gate A (§Gate A, *Scoped FR-021 round — pending*); plan re-sign-off by owner **PENDING** |
 | **XII §7** no application-layer encryption | **yes (FR-020)** | `interpret_logon` refuses a Logon in which a Length is immediately followed by its paired Data whose counted extent reaches or passes the end of the whole framed message, or whose following byte is not SOH, so an `EncryptMethod(98)` ≠ `0` cannot hide behind one; an orphan Length is read as a plain value, so it hides nothing. Witnesses T070 (RED first) and T074 (orphan pins, arm cells and the equality-boundary pair), fix T071, mutants T026 |
 | **XVI §6** orchestrator does not implement | yes | Code, tests, bench and generated goldens go through `phase-implementer`. The orchestrator authors only the spec bundle, B&L text and brain |
 | **VIII §1–2** bench + paired regression budget | yes | `builder_bench` added (`4749f589`); its WithGroup and Raw prechecks are made exact before the paired run (R-10). This feature's own budget (+3 %) is stricter than the constitutional +5 %. Added to `bench/ci-suite.txt` as a candidate-only row (§2a) with tier-2 value **`no`** — the reversible choice, since §2a makes `paired` irreversible. FR-017 engages the **paired** `bench/dictionary/xml_loader_bench` (FIX50SP2 load): measure it A-B-A-B before pushing, with the quickstart §6 procedure; pass condition the §2 budget (a slowdown ≤ +5 %), and over it → the §2 approval path, never self-declared |
 | **VIII / XV** zero-allocation discipline | yes | New nodes use the builder's arena. No `new`/`malloc`. B15 (#497) blind spots (over-aligned allocation, MSan/LSan) are not engaged: no over-aligned type is added |
 | **VI** 100 % FIX rule | yes | §VI.5: Normative References list `[FIX50SP2 §3.3] Field data types` (coverage index ↔ W-008); TagValue v1.0 is informative (no coverage-index entry). W-008's evidence is amended in the Ledger phase. The interop residual is disclosed (FR-009a, by extending L-426-3) |
-| **VII** testing | yes | TDD order: drift arm RED, then loader; RED stage-one flip, then implementation; C-1 RED, then GREEN. Every C-1/C-2 clause maps to a named test; each mutant in quickstart §3 names an existing test shown RED. §VII.8: every touched ctest entry gets label `091` and the recipe selects with `-L` and gates on the checked-in `expected-ctest-091.txt` manifest (quickstart §2); `wire_body_builder_test` stays standalone (§8 exemption: in-TU global `operator new` counter). §VII.7: the QuickFIX XML loader is parser-touching and FR-017 changes it, so its existing harness `fuzz_dict_xml_loader` runs ≥ 10 min with seeds that reach the new component/group walk (task T059); FR-020 changes `interpret_logon`, which `fuzz_session_recovery_admin_parse` reaches, so its seeds gain malformed-count Logons (task T073) |
-| **IX** coverage / sanitizers / static analysis | yes | Every new line in `src/wire/body_builder.cpp`, in the new loader walk in `src/dictionary/xml_loader.cpp` and in `interpret_logon`'s changed lines in `src/session/admin_messages.cpp` covered (§IX.1). ASan, UBSan and TSan presets (§IX.2) run in `/speckit-verify`. clang-tidy, clang-format, cppcheck and IWYU (§IX.4) on the changed `src/`, `include/` **and `tools/codegen/`** files (#265); any finding on a changed line is fixed (task T060) |
-| **X** C-ABI | **yes — §X.7 BREAKING, 1.9** (Gate A r3 owner ruling, FR-019) | No symbol, signature or error code is added or changed (FR-004a). FR-017 changes what existing calls return for a custom pair that a user dictionary declares only inside a component or group; FR-020 changes the Logon verdict when a Length is immediately followed by its paired Data whose counted extent reaches or passes the end of the whole framed message, or whose following byte is not SOH, for any pair (standard RawDataLength(95) and RawData(96) included), observed on either role by every C-ABI call whose result depends on the session having logged on (`fixpp_session_is_established`, `fixpp_session_close`, `fixpp_session_send`, and the `fixpp_session_register_callback` and `fixpp_session_register_send_callback` callbacks; R-11 step 6 derives the set). The affected population is derived by research.md R-11's *C-ABI 1.9 population recipe* and classified in data-model.md Appendix A (FR-019). Per §X.7 (pre-release regime):<br>• bump `FIXPP_C_ABI_VERSION_MINOR` 8 → 9;<br>• add BREAKING (1.9) markers on `fixpp_dict_load_from_xml` (`dict.h`), `fixpp_msg_commit`, `fixpp_msg_set_data` and `fixpp_entry_set_data` (`message.h`), `fixpp_session_send` and `fixpp_session_register_callback` (`session.h`, FR-019 and FR-020 clauses), `fixpp_session_register_send_callback` (`session.h`, FR-019 carry-refusal and FR-020 clauses), `fixpp_session_close` and `fixpp_session_is_established` (`session.h`, FR-020 clause; each affected declaration carries its own marker, and the loop 3 round 2 basis for keeping these two in `version.h` alone, conditional observers with no return-code change claimed, no longer holds under FR-020), and one shared paragraph for the inbound reader family in `message.h`'s accessor preamble (its members include `fixpp_msg_version` and `fixpp_msg_get_msg_type`; data-model.md Appendix A classifies every export); the effects with no carrying declaration (replay gap-fill, the header and Logon scans) go in the `version.h` history comment, which also names every FR-020 observer; all of them also in the PR description and in B-091-4;<br>• update every in-repo version consumer in the same PR (Phase 0b).<br>§X.6: all four Appendix A controls apply, each with its own status per phase:<br>• `/clarify`: 091 ✅ (r3 session); FR-020 ✅ (Clarifications, Session 2026-09-24 (`/speckit-implement`, after T021));<br>• `/analyze`: 091 ✅ (after `/speckit-tasks`); FR-020 ✅ (re-run after FR-020, findings remediated in `f31059d5`);<br>• Gate A: 091 ✅ (loop 3 r3); FR-020 ✅ scoped Gate A converged round 3 (2026-09-25), §Gate A below;<br>• **user `/plan` sign-off**: 091 ✅ 2026-09-24; FR-020 ✅ plan re-sign-off by owner 2026-09-25 (both FR-020 entries: `.specify/decisions/091-data-field-bytes-gatea.md` §"Addendum — scoped Gate A round on FR-020 (2026-09-25)") |
+| **VII** testing | yes | TDD order: drift arm RED, then loader; RED stage-one flip, then implementation; C-1 RED, then GREEN. Every C-1/C-2 clause maps to a named test; each mutant in quickstart §3 names an existing test shown RED. §VII.8: every touched ctest entry gets label `091` and the recipe selects with `-L` and gates on the checked-in `expected-ctest-091.txt` manifest (quickstart §2); `wire_body_builder_test` stays standalone (§8 exemption: in-TU global `operator new` counter). §VII.7: the QuickFIX XML loader is parser-touching and FR-017 changes it, so its existing harness `fuzz_dict_xml_loader` runs ≥ 10 min with seeds that reach the new component/group walk (task T059); FR-020 changes `interpret_logon`, which `fuzz_session_recovery_admin_parse` reaches, so its seeds gain malformed-count Logons (task T073); FR-021 changes no parser and no fuzz harness reaches `fixpp_msg_commit` (re-derive: `grep -ln 'fixpp_msg_commit' tests/fuzz`; a hit reopens this), so it adds no fuzz task |
+| **IX** coverage / sanitizers / static analysis | yes | Every new line in `src/wire/body_builder.cpp`, in the new loader walk in `src/dictionary/xml_loader.cpp` in `interpret_logon`'s changed lines in `src/session/admin_messages.cpp` and in `check_length_data`'s changed lines in `src/capi/message_write.cpp` (FR-021) covered (§IX.1). ASan, UBSan and TSan presets (§IX.2) run in `/speckit-verify`. clang-tidy, clang-format, cppcheck and IWYU (§IX.4) on the changed `src/`, `include/` **and `tools/codegen/`** files (#265); any finding on a changed line is fixed (task T060) |
+| **X** C-ABI | **yes — §X.7 BREAKING, 1.9** (Gate A r3 owner ruling, FR-019) | No symbol, signature or error code is added or changed (FR-004a). FR-017 changes what existing calls return for a custom pair that a user dictionary declares only inside a component or group; FR-020 changes the Logon verdict when a Length is immediately followed by its paired Data whose counted extent reaches or passes the end of the whole framed message, or whose following byte is not SOH, for any pair (standard RawDataLength(95) and RawData(96) included), observed on either role by every C-ABI call whose result depends on the session having logged on (`fixpp_session_is_established`, `fixpp_session_close`, `fixpp_session_send`, and the `fixpp_session_register_callback` and `fixpp_session_register_send_callback` callbacks; R-11 step 6 derives the set); FR-021 changes what `fixpp_msg_commit` returns for a group whose count tag is a pair half (`FIXPP_ERR_OK` → `FIXPP_ERR_WIRE_CONFORMANCE` where its count digits completed the pair; R-11 step 2 maps `check_length_data` to `fixpp_msg_commit` alone). The affected population is derived by research.md R-11's *C-ABI 1.9 population recipe* and classified in data-model.md Appendix A (FR-019). Per §X.7 (pre-release regime):<br>• bump `FIXPP_C_ABI_VERSION_MINOR` 8 → 9;<br>• add BREAKING (1.9) markers on `fixpp_dict_load_from_xml` (`dict.h`), `fixpp_msg_commit`, `fixpp_msg_set_data` and `fixpp_entry_set_data` (`message.h`), `fixpp_session_send` and `fixpp_session_register_callback` (`session.h`, FR-019 and FR-020 clauses), `fixpp_session_register_send_callback` (`session.h`, FR-019 carry-refusal and FR-020 clauses), `fixpp_session_close` and `fixpp_session_is_established` (`session.h`, FR-020 clause; each affected declaration carries its own marker, and the loop 3 round 2 basis for keeping these two in `version.h` alone, conditional observers with no return-code change claimed, no longer holds under FR-020), an FR-021 clause on `fixpp_msg_commit` (`message.h`, beside its FR-019 clause, and the group case in its `FIXPP_ERR_WIRE_CONFORMANCE` return-code line; task T080), and one shared paragraph for the inbound reader family in `message.h`'s accessor preamble (its members include `fixpp_msg_version` and `fixpp_msg_get_msg_type`; data-model.md Appendix A classifies every export); the effects with no carrying declaration (replay gap-fill, the header and Logon scans) go in the `version.h` history comment, which also names every FR-020 observer and gains an FR-021 sentence; all of them also in the PR description and in B-091-4;<br>• update every in-repo version consumer in the same PR (Phase 0b).<br>§X.6: all four Appendix A controls apply, each with its own status per phase:<br>• `/clarify`: 091 ✅ (r3 session); FR-020 ✅ (Clarifications, Session 2026-09-24 (`/speckit-implement`, after T021)); FR-021 ✅ (Clarifications, Session 2026-09-25 (`/speckit-implement`, after T053): the owner ruling);<br>• `/analyze`: 091 ✅ (after `/speckit-tasks`); FR-020 ✅ (re-run after FR-020, findings remediated in `f31059d5`); FR-021 **PENDING** (re-run after this delta);<br>• Gate A: 091 ✅ (loop 3 r3); FR-020 ✅ scoped Gate A converged round 3 (2026-09-25), §Gate A below; FR-021 **PENDING** (scoped round, §Gate A below);<br>• **user `/plan` sign-off**: 091 ✅ 2026-09-24; FR-020 ✅ plan re-sign-off by owner 2026-09-25 (both FR-020 entries: `.specify/decisions/091-data-field-bytes-gatea.md` §"Addendum — scoped Gate A round on FR-020 (2026-09-25)"); FR-021 **PENDING** (owner plan re-sign-off after the scoped round converges) |
 | **XI** concurrency | no | No threading change. `send_impl` is read, not modified (R-9) |
 | **XIX** documentation | yes | B&L rows, brain `wire.md` (the Length+Data section's "#418 must reuse" line becomes "did"), `CLAUDE-history.md` at close-out. §5: *dated 2026-09-24*, no Doxygen pipeline existed (re-derive: `find . -maxdepth 3 -name 'Doxyfile*'`; if it finds one, regenerate it); the tracked hand-written `docs/src/*.md` pages are grepped with `git grep -n -e body_builder -e length_pair -e 'Length+Data' -- docs/src` in the Ledger phase and any hit is updated. The API contract (refusals incl. handle checks, atomicity limits, `dict_hooks` lifetime) lives in the `body_builder.hpp` comments, C-1 |
 
 **Result:** no violations (a pending §X.6 control is not a violation; the FR-020 controls above are
-closed by the scoped Gate A round 3 and the owner's plan re-sign-off of 2026-09-25, and T067 still
-asks the owner before labelling if any control it checks is open). Gate A is **required** (not waivable by triviality: a public API plus a
+closed by the scoped Gate A round 3 and the owner's plan re-sign-off of 2026-09-25; the FR-021
+controls, `/speckit-analyze`, the scoped Gate A round and the owner's plan re-sign-off, are
+**PENDING**, and T067 asks the owner before labelling if any control it checks is open). Gate A is **required** (not waivable by triviality: a public API plus a
 codegen layout change). The declared C-ABI break is sanctioned by §X.7's pre-release clause. It is not a
 violation, but it adds the §X.6 user `/plan` sign-off.
 
@@ -126,15 +137,17 @@ specs/091-data-field-bytes/
 ```text
 include/fixpp/wire/body_builder.hpp     # field_data, set_data, ctor(dict_hooks) + lifetime comment, hooks_
 src/wire/body_builder.cpp               # R-3 append+rollback, constexpr is_framing_tag + static_assert; R-4 combined walk
+src/capi/message_write.cpp              # FR-021 (T079): check_length_data feeds a group node an empty value; its header comment names FR-021 as the superseding decision
 src/session/admin_messages.cpp          # FR-020: interpret_logon refuses a malformed paired count (session_invalid_logon); T075: the refusal comment states the short form and the armed condition
 src/dictionary/xml_loader.cpp           # R-11 secondary walk into <component>/<group> (stated visit order); delete false comment; header names the decision
-include/fix/c_api/version.h             # FR-019: FIXPP_C_ABI_VERSION_MINOR 8 → 9, re-authored trailing comment naming 091/fixpp#418 + the no-carrier effects (replay gap-fill, header/Logon scans) and every observer of the FR-020 Logon refusal, either role (each also has its own session.h clause)
-include/fix/c_api/message.h             # FR-019: BREAKING (1.9) notes on fixpp_msg_commit, fixpp_msg_set_data, fixpp_entry_set_data; one BREAKING (1.9) reader-family paragraph in the accessor preamble (incl. fixpp_msg_version, fixpp_msg_get_msg_type)
+include/fix/c_api/version.h             # FR-019: FIXPP_C_ABI_VERSION_MINOR 8 → 9, re-authored trailing comment naming 091/fixpp#418 + the no-carrier effects (replay gap-fill, header/Logon scans) and every observer of the FR-020 Logon refusal, either role (each also has its own session.h clause); T080: an FR-021 sentence (fixpp_msg_commit refuses a group whose count tag is a pair half)
+include/fix/c_api/message.h             # FR-019: BREAKING (1.9) notes on fixpp_msg_commit, fixpp_msg_set_data, fixpp_entry_set_data; one BREAKING (1.9) reader-family paragraph in the accessor preamble (incl. fixpp_msg_version, fixpp_msg_get_msg_type); T080: an FR-021 clause on fixpp_msg_commit + the group case in its FIXPP_ERR_WIRE_CONFORMANCE line
 include/fix/c_api/dict.h                # FR-019: BREAKING (1.9) note on fixpp_dict_load_from_xml
 include/fix/c_api/session.h             # FR-019: BREAKING (1.9) notes on fixpp_session_send (incl. toApp not invoked on refusal) and fixpp_session_register_callback; T075: a BREAKING (1.9) §X.7 FR-020 clause on each of the five observer declarations (fixpp_session_is_established, fixpp_session_close with its drained precondition, fixpp_session_send, fixpp_session_register_callback, fixpp_session_register_send_callback), and fixpp_session_register_send_callback's own note, which carries its FR-019 carry-refusal clause too
 include/fixpp/session/admin_messages.hpp # FR-020 (T075): comment/doc only; interpret_logon's comment states the short form and the armed condition
-tools/capi_freeze.sha256                # re-pinned for message.h, dict.h, session.h, version.h (gate tools/check_capi_freeze.sh)
+tools/capi_freeze.sha256                # re-pinned for message.h, dict.h, session.h, version.h (gate tools/check_capi_freeze.sh); T080 re-pins message.h and version.h
 tests/capi/version_test.cpp (+ every hit of the Phase 0b grep)   # exact-version pins → 1.9
+tests/capi/length_data_setters_test.cpp # FR-021 (T078): RED witnesses on the no-dictionary fixture (Length shape, Data shape, nested) + twins (capi_length_data)
 tests/capi/...                          # FR-019 C-ABI before/after test: synthetic component-only custom pair; + the fixpp_session_send assertion (loopback harness)
 tests/wire/dict_hooks_custom_pair_test.cpp or tests/session/length_data_session_scanner_test.cpp   # FR-019 inbound-drop witness (Parser<Index> over the synthetic table_view)
 tools/codegen/fixpp-codegen/
@@ -159,7 +172,8 @@ include/fixpp/wire/length_data_check.hpp        # "#418 is meant to be its secon
 spec/behaviors-and-limitations{,-closed}.md     # L-067-2 move; delete the "L-067-2 is unchanged" bullet; B-091-1..4; extend L-426-3
 spec/feature-catalogue.md                       # W-008 evidence; C-ABI 1.9 note on every CA row listing a declaration FR-019 marks
 brain/components/wire.md                        # Length+Data section update
-brain/components/c-api.md                       # C-ABI 1.9 entry (FR-019)
+brain/components/c-api.md                       # C-ABI 1.9 entry (FR-019); FR-021's fixpp_msg_commit effect (T082)
+brain/components/wire.md (group-node paragraph)  # FR-021 repairs the defect fixpp#506 tracks: the C-ABI feeds a group node an empty value too (T082)
 ```
 
 **Structure Decision**: existing single-library layout. No new target except `builder_bench`.
@@ -246,6 +260,19 @@ brain/components/c-api.md                       # C-ABI 1.9 entry (FR-019)
    an FR-020 clause on every observer declaration (T075); and the complement scan-site recipe (T076). Scoped
    Gate A converges before T026. The other
    `length_data_carry` scan sites stay as they are (evidence file §*Malformed-count scan sites*).
+2e. **The C-ABI commit feeds a group node an empty value (FR-021, tasks §2e).** Owner ruling
+   2026-09-25, during `/speckit-implement`, after `/simplify` (T053) measured the defect (evidence
+   file §*/simplify (T053)*, M1). It lands after T053 and before T054, so every later measurement
+   is of the final candidate. Witnesses first (T078), in `tests/capi/length_data_setters_test.cpp`
+   on the no-dictionary fixture: the Length shape (a group tagged 354 with one instance, then a
+   one-byte 355), the Data shape (`354=1`, then a group tagged 355 with one instance) and the Length
+   shape nested in a group instance, each committing `FIXPP_ERR_OK` on the unfixed code (RED), with
+   twins that hold before and after. Then the fix (T079): `check_length_data` feeds a group node
+   `observe(tag, {})`, and its header comment names FR-021 as the superseding decision. Then the
+   `message.h` FR-021 clause and return-code line, the `version.h` sentence and the freeze re-pin
+   (T080); the mutant that restores the count digits (T081); and the ledger, catalogue and brain
+   text (T082). The scoped Gate A round on the FR-021 delta, the `/speckit-analyze` re-run and the
+   owner's plan re-sign-off precede T078 (Constitution Check, X row).
 2. **`body_builder` API + commit check** (C-1, including C-1.4b handle checks). The C-1 unit tests are written RED first, then
    implemented to GREEN. The flipped pins stay RED: the generated builder still routes through
    `field()`.
@@ -274,8 +301,10 @@ brain/components/c-api.md                       # C-ABI 1.9 entry (FR-019)
    `brain/components/c-api.md` beside its C-ABI 1.8 section, and a C-ABI 1.9 BREAKING note on every
    `spec/feature-catalogue.md` CA row that lists a declaration FR-019 marks, reader-paragraph members such as `fixpp_msg_version` and `fixpp_msg_get_msg_type` included (data-model ledger table).
    Close-out check: the R-4 follow-up is fixpp#506 (filed 2026-09-24; research.md R-4 and the
-   Parked list in `issue-batches.md` both cite it). Confirm it is still open, or record its fix, before
-   091 closes.
+   Parked list in `issue-batches.md` both cite it). FR-021 fixes it (owner ruling 2026-09-25), so
+   T063 records the fix; whether #506 closes through the PR or by hand after merge is an owner
+   decision, asked before T067 labels (T067 keeps `Closes #418` as the only closing keyword unless
+   the owner rules otherwise).
    In `tests/codegen/read_tier_byte_diff_test.cmake` (C-2.5): the #427 banner's recipe is re-stated
    as chained (apply 091's Validator recipe first, then #427's); the 082 banner's and the header's
    "byte-identical" / "every other artifact" results are deleted and point at the 091 banner rather
@@ -470,3 +499,18 @@ Recorded so later rounds do not re-raise them:
 ### Scoped FR-020 round 3 — converged
 
 - Scoped FR-020 round 3 reviewed 2026-09-25: Codex P1=0 P2=0 P3=0 (PASS); Opus post-judging P1=0 P2=0 P3=3 — CONVERGED. The three P3s applied as text (loop 3 r3 precedent): the plan source-tree rows (the five `session.h` observer clauses; the `admin_messages.hpp` row; `admin_messages.cpp` named in phase 2a); FR-019's own-note list and B-091-4 gain `fixpp_session_register_send_callback`'s FR-019 carry-refusal note; new task T077 (checklist audit of the FR-020 delta by complement). Opus disagreed with Codex's "zero findings" (the P3s are what a complement grep over the bundle and `checklists/` finds), not with its PASS; Opus confirmed round 2's CompID ruling on the source. Owner plan re-sign-off (`[const §X.6]`) 2026-09-25. Record: `.specify/decisions/091-data-field-bytes-gatea.md` §"Addendum — scoped Gate A round on FR-020 (2026-09-25)". Reviews: research/reviews/codex_091-data-field-bytes_gate_a_FR020_3_review.md, research/reviews/opus_091-data-field-bytes_gate_a_FR020_3_adversarial_review.md.
+
+### Scoped FR-021 round — pending
+
+- FR-021 added 2026-09-25 by owner ruling during `/speckit-implement` (Clarifications, Session
+  2026-09-25 (`/speckit-implement`, after T053)): `fixpp_msg_commit`'s `check_length_data` feeds a
+  group node an empty value, as `body_builder::commit` does. The owner took the option loop 2
+  round 1's N-4 left open ("folding its fix into C-ABI 1.9 stays an owner option, not taken
+  here"); that record stays as written, and R-4's "not 091 scope" is superseded by FR-021.
+- Scope of the round: the FR-021 delta in spec.md (FR-021, the FR-019 `fixpp_msg_commit` bullet,
+  the Edge Case, the Clarifications entry), data-model.md (B-091-4, the catalogue and brain ledger
+  rows, Appendix A's `fixpp_msg_commit`, `fixpp_msg_group_begin`, `fixpp_entry_group_begin` and
+  `fixpp_session_send` rows), this plan (Summary, Constitution Check, source tree, phase 2e),
+  tasks.md §2e and its hooks, quickstart §3, research.md R-4 and contracts C-1.7.
+- Status: **pending**. Not reviewed; no `/speckit-analyze` re-run and no owner plan re-sign-off yet.
+  T078 does not start until each of them is recorded here and in the X row.

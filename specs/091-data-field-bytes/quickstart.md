@@ -35,7 +35,8 @@ holds `version_test.cpp`); the FR-019 C-ABI before/after test's bucket (for exam
 `capi_length_data`, or whichever entry tasks registers it in), including its `fixpp_session_send`
 assertion's entry if that lands elsewhere; the FR-019 inbound-drop witness's entry (`wire_dict_tests`
 if it lands in `dict_hooks_custom_pair_test.cpp`, else the session entry that holds it); the FR-020
-`interpret_logon` witnesses (`session_length_data_scanner`). Gate A fixes the gate below, which cannot pass with a
+`interpret_logon` witnesses (`session_length_data_scanner`); the FR-021 C-ABI group-node witnesses
+(`capi_length_data`, which holds `tests/capi/length_data_setters_test.cpp`). Gate A fixes the gate below, which cannot pass with a
 placeholder: a placeholder is not a registered ctest name.
 
 ```bash
@@ -75,6 +76,8 @@ Each row names an existing test that must be shown RED (or, for a compile-time k
 | `field_data` routes through `append_string_field` (re-applies the content guard) | the four `_418` success cases; C-1.2 |
 | the commit pair check is deleted | C-1.7; C-1.9's "malformed hand-written custom pair refused" arm |
 | a group node is fed as `observe(no_tag, <count digits>)` instead of `observe(no_tag, {})` | C-1.7's "group `no_tag` 354 + sibling one-byte 355" case |
+| `check_length_data` (`src/capi/message_write.cpp`) feeds a group node its instance-count digits again, instead of an empty value | FR-021, by name: `CapiCommitGroupNode.GroupTaggedAsALengthDoesNotCompleteThePair`, `.GroupTaggedAsTheDataDoesNotCompleteThePair` and `.NestedGroupTaggedAsALengthDoesNotCompleteThePair` (T078). Every `CapiCommitGroupNode.Twin*` cell stays GREEN |
+| `check_length_data` does not observe a group node at all (the node skipped rather than fed an empty value) | `CapiCommitPairs.RefusesALengthSeparatedFromItsDataByAGroup` (a skipped group lets the Length pair with the Data after it); FR-021 (T081) |
 | `FIXPP_C_ABI_VERSION_MINOR` is set back to 8 | `tests/capi/version_test.cpp` exact-version cell (FR-019) |
 | `interpret_logon` breaks at a malformed count instead of refusing | FR-020, by name (not by suite glob): the function cells `InterpretLogonMalformedCount.CountEndingOnANonSohByteDoesNotHideEncryptMethod`, `.CountRunningPastTheFrameDoesNotHideEncryptMethod`, `.MalformedCountRefusesTheLogonWithNothingAfterIt` (its count is followed by `98=0`) and `.ComponentOnlyPairCountDoesNotHideEncryptMethod`; the two T070 arm cells `LogonArmMalformedCount.AcceptorMalformedCountDoesNotHideEncryptMethod` and `.InitiatorMalformedCountDoesNotHideEncryptMethod`; T074's arm cells (`LogonArmMalformedCount.{Acceptor,Initiator}CountRunningPastTheFrameIsNotEstablished`, `.{Acceptor,Initiator}MalformedCountWithZeroEncryptMethodIsNotEstablished`); T074's function cell `InterpretLogonMalformedCount.CountReachingTheFrameEndIsRefused`; and, separately, the inverted pin `LengthDataSessionScanner.InterpretLogonRefusesAMalformedCount`. Every twin (the `Twin*` cells of both suites) and both T074 orphan pins stay GREEN |
 | the carry applies a pending count whatever the next field's tag (`length_data_carry::read_value` drops the `data_tag_ == tag` test) | FR-020's orphan pin `InterpretLogonMalformedCount.TwinOrphanOverrunningLengthWithZeroEncryptMethodIsAccepted` (T074) |

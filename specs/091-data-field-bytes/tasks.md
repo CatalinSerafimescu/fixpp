@@ -2,7 +2,7 @@
 
 **Feature**: `091-data-field-bytes` (fixpp#418, batch B8) | **Branch**: `091-data-field-bytes`
 
-**Input**: `specs/091-data-field-bytes/` — spec.md (FR-001…FR-020, SC-001…SC-006), plan.md (phases 0–7),
+**Input**: `specs/091-data-field-bytes/` — spec.md (FR-001…FR-021, SC-001…SC-006), plan.md (phases 0–7),
 research.md (R-1…R-11), data-model.md (INV-2…INV-8, refusal table, ledger, Appendix A),
 contracts/body-builder-data.md (C-1), contracts/codegen-builders.md (C-2), quickstart.md (§1–§6).
 
@@ -676,6 +676,108 @@ only then made GREEN.
   their twins hold.
 - The four flipped `_418` pins are still RED: the generated builder still routes through `field()`.
 
+### 2e — The C-ABI commit feeds a group node an empty value (FR-021, owner ruling 2026-09-25), tests first
+
+Added during `/speckit-implement`, after `/simplify` (T053) measured the defect (evidence file
+§*/simplify (T053)*, M1). It is Foundational in kind but runs **after T053 and before T054**, so every
+later measurement is of the final candidate. **Entry condition:** the scoped Gate A round on the
+FR-021 delta has converged, `/speckit-analyze` has been re-run, and the owner has re-signed the plan
+(plan.md Constitution Check, X row; §Gate A, *Scoped FR-021 round*). Until each is recorded, T078
+does not start. No fuzz harness reaches `fixpp_msg_commit` and FR-021 changes no parser, so no
+fuzz task is added (re-derive: `grep -ln 'fixpp_msg_commit' tests/fuzz`; a hit reopens this).
+
+- [ ] T078 Via `phase-implementer`, the FR-021 RED witnesses in `tests/capi/length_data_setters_test.cpp`
+  (`capi_length_data`, already labelled `091` and in `expected-ctest-091.txt`; no manifest change
+  unless a new ctest entry is registered). Every cell uses `DictFreeFixture` (a session with no
+  dictionary, so the pairs are the standard table alone and a group opens on any non-framing tag),
+  `ASSERT`s `FIXPP_ERR_OK` on every setup call so a RED cannot land on the wrong call, and gives each
+  group instance a non-pair first field (e.g. `79=A1`), so no cell can pass through INV-4
+  (`FIXPP_ERR_TYPE_MISMATCH`, a different code).
+  - **RED cells** (each asserts `fixpp_msg_commit` returns `FIXPP_ERR_WIRE_CONFORMANCE` and yields no
+    payload; on the unfixed code each returns `FIXPP_ERR_OK`, and the emitted bytes go into the
+    commit message as the pre-change form):
+    - `CapiCommitGroupNode.GroupTaggedAsALengthDoesNotCompleteThePair` (the Length shape, M1):
+      `fixpp_msg_group_begin(354)`, one instance, `fixpp_msg_group_end`, then
+      `fixpp_msg_set_bytes(355, "x", 1)`; today it emits `35=D␁354=1␁79=A1␁355=x␁`;
+    - `CapiCommitGroupNode.GroupTaggedAsTheDataDoesNotCompleteThePair` (the Data shape):
+      `fixpp_msg_set_int(354, 1)`, then `fixpp_msg_group_begin(355)` with one instance; today
+      `observe(355, "1")` satisfies the awaited one-byte Data;
+    - `CapiCommitGroupNode.NestedGroupTaggedAsALengthDoesNotCompleteThePair`: inside one instance of
+      a group tagged 78, `fixpp_entry_group_begin(354)` with one instance, then
+      `fixpp_entry_set_string(355, "x", 1)` on the outer entry (there is no `fixpp_entry_set_bytes`),
+      so the shape sits in a group instance, which `check_length_data` checks as its own container.
+  - **Twins, GREEN before and after** (same fixture, same instance contents):
+    - `CapiCommitGroupNode.TwinNonPairGroupWithABareSiblingDataIsRefused`: the Length-shape cell
+      with the group tagged 78; refused `FIXPP_ERR_WIRE_CONFORMANCE` (an orphan Data), before and
+      after;
+    - `CapiCommitGroupNode.TwinNonPairGroupAloneCommits`: that group tagged 78 with no sibling;
+      commits `FIXPP_ERR_OK`;
+    - `CapiCommitGroupNode.TwinWellFormedPairNextToAGroupCommits`: the group tagged 78, then
+      `fixpp_msg_set_data(355, "x", 1)`; commits `FIXPP_ERR_OK` with the bytes
+      `…78=1␁79=A1␁354=1␁355=x␁`.
+  - Before writing, re-read `check_length_data` and `length_data_checker::observe`
+    (`include/fixpp/wire/length_data_check.hpp`) and confirm each RED cell's pre-change `FIXPP_ERR_OK`
+    by running it; a cell that is not RED on the unfixed code goes to the orchestrator, not into the
+    file.
+  - Record the pre-registered table (cell, expected before, expected after) and the observed RED in
+    `.specify/decisions/091-data-field-bytes-evidence.md` §*FR-021 RED (T078)*.
+- [ ] T079 Via `phase-implementer`, implement FR-021 in `src/capi/message_write.cpp`'s
+  `check_length_data`: a group node is fed as `checker.observe(e.tag, {})`, with an empty span, as
+  `body_builder::commit` does (R-4), and the instance recursion is unchanged. Delete the count-digit
+  buffer and the `std::to_chars` call, and any include only they used.
+  - Rewrite the function's header comment: state the rule as a condition (a group node is fed an
+    empty value, so a group whose count tag is a pair half fails the check, and a Length right
+    before any group is a Length not followed by its Data), and name the superseding decision in
+    it ("091 FR-021 (fixpp#506)"). Add no count, list of shapes or line citation.
+  - GREEN: the unfiltered `capi_length_data` binary passes, every T078 RED cell is GREEN and
+    the twins still hold. Then the full `ctest --test-dir build/linux-clang-debug --output-on-failure`
+    (a group built through a helper is invisible to a lexical grep; the full run is the blast-radius
+    check). Any other failure goes to the orchestrator; edit no pre-existing test without a ruling.
+  - Record the cells, commands and results in the evidence file §*FR-021 GREEN (T079–T080)*.
+- [ ] T080 Via `phase-implementer`, the FR-021 declaration text and the freeze re-pin
+  (`[const §X.7]`: "each affected declaration"):
+  - `include/fix/c_api/message.h`, `fixpp_msg_commit`: a BREAKING (C-ABI 1.9) FR-021 clause beside
+    the existing FR-019 one (whose cause, the loader, is a different one): a group whose count tag is
+    the Length or the Data half of a pair (the FIX standard's, or the session dictionary's) is not
+    read as that half; such a group, which returned `FIXPP_ERR_OK` when its instance-count digits
+    completed the pair, now returns `FIXPP_ERR_WIRE_CONFORMANCE`. Extend its
+    `FIXPP_ERR_WIRE_CONFORMANCE` return-code line with that case, so the documented refusals cover
+    it.
+  - `include/fix/c_api/version.h` 1.9 history: one FR-021 sentence naming `fixpp_msg_commit` and
+    the same condition.
+  - No other declaration changes (FR-021's classification: `fixpp_msg_group_begin`,
+    `fixpp_entry_group_begin`, the setters and `fixpp_session_send` return what they did). Before
+    writing, re-read the source T079 left; a clause that disagrees with it goes to the orchestrator.
+  - Run `tools/check_capi_freeze.sh`: it must fail on exactly `message.h` and `version.h`, then
+    re-pin `tools/capi_freeze.sha256` and pass. Run
+    `.claude/scripts/check-comment-claims.py --root <tree> --base origin/main` on the result.
+- [ ] T081 Via `phase-implementer`, run the FR-021 mutants from quickstart §3 in a scratch copy (the
+  T026 procedure: RED on the named cells, GREEN after revert, a clean `git diff` of the scratch
+  copy against the PR head):
+  - "`check_length_data` feeds a group node its instance-count digits again" → the T078 RED
+    cells (`CapiCommitGroupNode.GroupTaggedAsALengthDoesNotCompleteThePair`,
+    `.GroupTaggedAsTheDataDoesNotCompleteThePair`,
+    `.NestedGroupTaggedAsALengthDoesNotCompleteThePair`); every `Twin*` cell stays GREEN;
+  - "`check_length_data` does not observe a group node at all" (the node skipped, not fed) →
+    `CapiCommitPairs.RefusesALengthSeparatedFromItsDataByAGroup`, since a skipped group lets a
+    Length pair with a Data after it; this shows the fix feeds the node rather than dropping it.
+  Record each mutant, command and RED line in the evidence file §*Mutants*, as a dated addendum.
+- [ ] T082 Orchestrator-authored text (T079 landed, so the ledger describes shipped behaviour):
+  - `spec/behaviors-and-limitations.md` B-091-4 (the live text): add FR-021's effect as data-model.md's
+    B-091-4 row states it: the condition (a group whose count tag is a pair half is refused at
+    `fixpp_msg_commit`, where it committed when its count digits completed the pair), the
+    shapes as witnesses, the reachability condition (every session with no dictionary; a dictionary
+    session only where that dictionary's `group_first_field` is nonzero for a pair-half tag), and
+    that `fixpp_session_send` of such a payload is unchanged;
+  - `spec/feature-catalogue.md`: every CA row naming `fixpp_msg_commit`, derived by **reading**
+    each row's function list (CA-009 abbreviates it as `set_*/remove_tag/commit/…`, so a grep for
+    `fixpp_msg_commit` misses it), gains FR-021's effect in its C-ABI 1.9 note;
+  - `brain/components/wire.md`: the group-node paragraph's "That C-ABI defect is fixpp#506" →
+    FR-021 fixed it, and the C-ABI commit now feeds a group node an empty value too;
+    `brain/components/c-api.md`: the C-ABI 1.9 entry gains `fixpp_msg_commit`'s FR-021 effect;
+  - the parent's `phases/phase-4/issue-batches.md` Parked entry for #506 is updated at close-out
+    (T063), not here.
+
 ---
 
 ## Phase 3: User Story 1 — Send non-ASCII text in an encoded Data field through a generated builder (Priority: P1) 🎯 MVP
@@ -1129,20 +1231,25 @@ FR-019, SC-006).
 
 ### Close-out checks
 
-- [ ] T063 Confirm fixpp#506 is still open (`gh issue view 506 --json state`), or record its fix,
-  before 091 closes (plan phase 7). Confirm fixpp#505 is open and cited in B-091-3.
+- [ ] T063 Record fixpp#506's fix before 091 closes (plan phase 7): FR-021 fixes it (owner ruling
+  2026-09-25); name the §2e commits and the T078 cells in the evidence file, and update the parent's
+  `phases/phase-4/issue-batches.md` Parked entry for #506. Whether #506 closes through this PR or
+  by hand after merge is an owner decision: ask before T067 labels, and never add a closing keyword
+  for it unasked. Confirm fixpp#505 is open and cited in B-091-3.
 - [ ] T064 Run the quickstart §2 label gate. It must pass: the label set equals the manifest, and
   every manifest entry is a registered test. Then run `ctest --test-dir build/linux-clang-debug -L '^091$' --output-on-failure`, all
   GREEN.
 - [ ] T077 Via the `checklist-auditor` (the checklists are reviewer-owned), audit the checklists
-  against the FR-020 delta **by complement** (scoped Gate A round 3, P3-3): grep every domain
-  checklist under `checklists/` for items whose subject FR-020, FR-019, B-091-4 or data-model.md
-  Appendix A changed, and re-disposition each hit (SPEC-FIXED / DD-DECIDED / WAIVED, with the
-  FR-020 note).
+  against the FR-020 and FR-021 deltas **by complement** (scoped Gate A round 3, P3-3; FR-021 added
+  2026-09-25): grep every domain checklist under `checklists/` for items whose subject FR-020,
+  FR-021, FR-019, B-091-4, research.md R-4, contract C-1.7 or data-model.md Appendix A changed, and
+  re-disposition each hit (SPEC-FIXED / DD-DECIDED / WAIVED, with the FR-020 or FR-021 note).
   - Derive the population by a complement grep, not by example:
-    `grep -nE 'interpret_logon|\b98\b|EncryptMethod|malformed|fixpp_session_|is_established|register_|session\.h|version\.h|§X\.7|§XII\.7|FR-019|FR-020|B-091-4|Appendix A|carrying declaration|covered|shipped dictionar|observer' specs/091-data-field-bytes/checklists/*.md`,
+    `grep -nE 'interpret_logon|\b98\b|EncryptMethod|malformed|fixpp_session_|is_established|register_|session\.h|version\.h|§X\.7|§XII\.7|FR-019|FR-020|FR-021|B-091-4|Appendix A|carrying declaration|covered|shipped dictionar|observer|check_length_data|count.digits|group node|no_tag|#?506|R-4|C-1\.7' specs/091-data-field-bytes/checklists/*.md`,
     then read each hit's PASS condition against the current spec, plan, data-model and tasks.
-  - Items known at Gate A: `abi.md` CHK001, CHK006, CHK014, CHK015 and `codegen-loader.md` CHK023.
+  - Items known at Gate A: `abi.md` CHK001, CHK006, CHK014, CHK015 and `codegen-loader.md` CHK023;
+    for FR-021, `abi.md` CHK017 (it passes on the #506 fix being scoped **out** of 1.9, which
+    FR-021 reverses) and `api.md` CHK010 (the group-node empty-value rule, now on both writers).
     Before trusting the grep, confirm it hits every one of them; if one is missed, widen the terms
     until it is hit. The known list is the positive control, not the population.
 - [ ] T065 Run `/speckit-verify` (mandatory after `/speckit-implement`, Article XVII §8). It produces
@@ -1151,8 +1258,9 @@ FR-019, SC-006).
   discriminating-witness rows point there rather than restating it.
   - It covers /speckit-verify's full preset matrix (ASan, UBSan, TSan, …) and the MSVC leg,
     coverage (every new line in `src/wire/body_builder.cpp`,
-    the new loader walk in `src/dictionary/xml_loader.cpp` and `interpret_logon`'s changed lines in
-    `src/session/admin_messages.cpp`), clang-tidy and ABI hygiene.
+    the new loader walk in `src/dictionary/xml_loader.cpp`, `interpret_logon`'s changed lines in
+    `src/session/admin_messages.cpp` and `check_length_data`'s changed lines in
+    `src/capi/message_write.cpp` (FR-021)), clang-tidy and ABI hygiene.
   - It includes the full `ctest --test-dir build/linux-clang-debug` run.
   - ⚠️ The §7 full build needs an owner ASK, even as gate evidence.
 
@@ -1162,8 +1270,8 @@ FR-019, SC-006).
   `[const §XII.7]` fail-open fix (a Length immediately followed by its paired Data whose counted
   extent reaches or passes the end of the whole framed message, or whose following byte is not SOH,
   now refuses the Logon; it affects shipped dictionaries
-  through RawDataLength(95) and RawData(96)) and the
-  follow-ups #505/#506. Update `CLAUDE.md`'s "Last merged FEATURE" pointer only at merge.
+  through RawDataLength(95) and RawData(96)), the FR-021 C-ABI commit fix (a group whose count tag
+  is a pair half is refused; FR-021 repairs the defect issue 506 tracks) and the follow-up #505. Update `CLAUDE.md`'s "Last merged FEATURE" pointer only at merge.
 - [ ] T067 **PR description** (FR-019, plan phase 7). The body carries:
   - the `[const §X.7]` **C-ABI 1.9 BREAKING** declaration: FR-019's population, pointing at B-091-4
     and data-model.md Appendix A;
@@ -1175,6 +1283,11 @@ FR-019, SC-006).
     C-ABI observers are every call whose result depends on the session having logged on
     (`fixpp_session_is_established`, `fixpp_session_close`, `fixpp_session_send`, the receive
     callback and the toApp callback);
+  - the FR-021 fix: `fixpp_msg_commit` feeds a group node an empty value to the Length+Data check, so
+    a group whose count tag is a pair half, which committed `FIXPP_ERR_OK` when its instance-count
+    digits completed the pair, now returns `FIXPP_ERR_WIRE_CONFORMANCE` (C-ABI 1.9 BREAKING, reachable
+    on every session with no dictionary); FR-021 repairs the defect issue 506 tracks, and how that
+    issue closes follows the owner's T063 ruling (write no closing verb next to its number);
   - `local build: green on linux-clang-debug @ <git-sha>` (`[const §XVII.7]`), with the SHA T065
     verified;
   - a `## Gates` section, and a `## Gate B …` heading for the Gate B record;
@@ -1185,15 +1298,18 @@ FR-019, SC-006).
     `research/reviews/opus_091-data-field-bytes_gate_a_FR020_adversarial_review.md`, and any later
     round's), plus the owner's FR-020 plan re-sign-off (`[const §X.6]`). The FR-020 Gate A record
     is `.specify/decisions/091-data-field-bytes-gatea.md` §"Addendum — scoped Gate A round on
-    FR-020 (2026-09-25)" (converged round 3; owner re-sign-off 2026-09-25). If the scoped round has not
-    converged or the re-sign-off is still pending (plan.md Constitution Check, X row), ask the owner
+    FR-020 (2026-09-25)" (converged round 3; owner re-sign-off 2026-09-25). Likewise the FR-021
+    scoped Gate A: plan.md §Gate A's *Scoped FR-021 round …* entries, their review files, and the
+    owner's FR-021 plan re-sign-off. If either scoped round has not
+    converged or either re-sign-off is still pending (plan.md Constitution Check, X row), ask the owner
     before labelling. If Gate B rules
     that `[const §XVII.8]`'s "Codex convergence record" is not met, ask the owner before labelling;
     never choose between `gate-a-done` and `gate-a-waived` unilaterally;
-  - `Closes #418` as the ONLY closing keyword.
+  - `Closes #418` as the ONLY closing keyword, unless the owner's T063 ruling adds #506.
   Before opening, grep the body AND every commit message on the branch
   (`git log origin/main..HEAD --format=%B`) for `close[sd]?|fix(e[sd])?|resolve[sd]?` next to
-  `#50[56]` or any number other than 418. A negated keyword still links. After opening, check
+  `#50[56]` or any number other than 418 (other than #506 if the T063 ruling allows it). A negated
+  keyword still links. After opening, check
   `closingIssuesReferences` lists only #418.
 
 ### Mandatory close-out tasks (Gate-B preconditions, Article XVII §8)
@@ -1206,7 +1322,7 @@ FR-019, SC-006).
     W-008, naming this feature's witnesses (the `_418` pins, C-2.6, C-1.2).
 - [ ] T069 **Feature-completeness audit (the FINAL task).** Assert against the merged tree:
   - (i) every `tasks.md` row is `[X]` or carries an explicit waiver rationale;
-  - (ii) every FR-001…FR-020 (including FR-004a, FR-009a and FR-011a) and SC-001…SC-006 maps to a
+  - (ii) every FR-001…FR-021 (including FR-004a, FR-009a and FR-011a) and SC-001…SC-006 maps to a
     landed test AND a landed implementation;
   - (iii) every feature-owned OFFICIAL catalogue row is `done`, with a matching `coverage-index.md`
     entry.
@@ -1249,10 +1365,11 @@ FR-019, SC-006).
 - **Polish (Phase 7):** T064 needs every
   manifest-listed entry registered.
 - **Polish (Phase 7), order:**
-  - T053 (simplify, first, so every measurement is of the final candidate) → T054 (compile-surface
-    "after") → T055 → T056 → T057 → T058 → T059 → T073 (fuzz);
+  - T053 (simplify, first, so every measurement is of the final candidate) → §2e (FR-021: its entry
+    condition, then T078 (RED) → T079 (GREEN) → T080 → T081, and T082 after T079) → T054
+    (compile-surface "after") → T055 → T056 → T057 → T058 → T059 → T073 (fuzz);
   - T060–T063 after T053;
-  - T077 (checklist audit of the FR-020 delta) before T065;
+  - T077 (checklist audit of the FR-020 and FR-021 deltas) after T082 and before T065;
   - T065 after T060–T063 and T077;
   - T068 → T069. T069 is last.
 

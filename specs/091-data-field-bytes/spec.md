@@ -21,7 +21,10 @@ Out of scope: C-ABI, Python, the size caps, STRING fields admitting high-bit byt
 > - FR-017's C-ABI behaviour change is in scope as C-ABI 1.9 BREAKING (FR-019);
 > - `interpret_logon` refuses a Logon in which a Length is immediately followed by its paired Data
 >   whose counted extent reaches or passes the end of the whole framed message, or whose following
->   byte is not SOH (FR-020, owner ruling during `/speckit-implement`).
+>   byte is not SOH (FR-020, owner ruling during `/speckit-implement`);
+> - `fixpp_msg_commit`'s Length+Data check feeds a group node an empty value, as `body_builder`
+>   does, so a group whose count tag is a pair half is never read as that half (FR-021, owner ruling
+>   2026-09-25, during `/speckit-implement`; it folds in fixpp#506).
 >
 > Only new C-ABI surface stays out of scope. The quote above is the original input, kept verbatim.
 
@@ -180,6 +183,19 @@ census predates #427.
   fails closed or is equivalent to the peer omitting the later fields, so the fix is scoped to
   `interpret_logon`.
 
+### Session 2026-09-25 (`/speckit-implement`, after T053)
+
+- Q: The C-ABI commit check `check_length_data` (`src/capi/message_write.cpp`) feeds a group node
+  to `wire::length_data_checker::observe` with the group's instance-count digits as its value,
+  where `body_builder::commit` feeds an empty value (R-4 and C-1.7 make the empty value normative,
+  because count digits can complete a pair). Measured, not only read (evidence file §*/simplify
+  (T053)*, M1): on a session with no dictionary, `fixpp_msg_group_begin(354)` with one instance,
+  then `fixpp_msg_set_bytes(355, "x")`, commits `FIXPP_ERR_OK` and emits
+  `35=D␁354=1␁79=A1␁355=x␁`. R-4 recorded this as the pre-existing follow-up fixpp#506, outside
+  091. How does 091 handle it? → A: **Fold the fix into 091** (owner ruling 2026-09-25): FR-021.
+  The delta (FR-021 and its plan, tasks, data-model, quickstart, research and contract edits) goes
+  through a **scoped Gate A round**, as FR-020's did.
+
 ---
 
 ## User Scenarios & Testing *(mandatory)*
@@ -298,6 +314,13 @@ rejection now assert verbatim emit.
   whatever follows it (FR-020). An orphan Length, one whose
   next field is not its paired Data, is read as a plain value; its count is never applied, so a
   later `EncryptMethod(98)` is still seen.
+- **A C-ABI group whose count tag is a pair half** (a Length or a Data under the handle's pairs;
+  reachable where `fixpp_msg_group_begin` / `fixpp_entry_group_begin` accept such a tag, FR-021):
+  `fixpp_msg_commit` refuses it with `FIXPP_ERR_WIRE_CONFORMANCE`, whatever its instance count and
+  whatever sits next to it, exactly as `body_builder::commit` refuses the C++ twin (C-1.7). Before
+  FR-021 it was refused unless its count digits completed the pair: a group tagged 354 with one
+  instance followed by a one-byte 355 (the Length shape), or a `354=1` followed by a group tagged
+  355 with a one-digit instance count (the Data shape), committed.
 
 - **SOH as the last octet of the value**: the frame still parses, because the reader uses the Length,
   not the next SOH.
@@ -504,8 +527,8 @@ rejection now assert verbatim emit.
   prints it, so a leg whose probe collects nothing fails rather than passes; Orchestra FIX Latest is
   one of the arms. That non-empty assertion is shown RED on a non-FIX50SP2 leg by a mutant
   (quickstart §3).
-- **FR-019** (owner decision, Gate A round 3; widened by FR-020): FR-017's and FR-020's effects on
-  the C-ABI MUST be shipped as
+- **FR-019** (owner decision, Gate A round 3; widened by FR-020 and FR-021): FR-017's, FR-020's
+  and FR-021's effects on the C-ABI MUST be shipped as
   **C-ABI 1.9 BREAKING** under `[const §X.7]`:
   - `FIXPP_C_ABI_VERSION_MINOR` becomes 9 in `include/fix/c_api/version.h`, with a history comment
     naming 091/fixpp#418.
@@ -521,7 +544,9 @@ rejection now assert verbatim emit.
       - `fixpp_dict_load_from_xml` (`include/fix/c_api/dict.h`), the root cause: same return code,
         but the dictionary it yields now carries the pair;
       - `fixpp_msg_commit` (`include/fix/c_api/message.h`): a malformed pair of that kind returned
-        `FIXPP_ERR_OK` and now returns `FIXPP_ERR_WIRE_CONFORMANCE`;
+        `FIXPP_ERR_OK` and now returns `FIXPP_ERR_WIRE_CONFORMANCE`; and, as its own FR-021 clause,
+        a group whose count tag is a pair half, which committed when its instance-count digits
+        completed the pair, now returns `FIXPP_ERR_WIRE_CONFORMANCE` (FR-021);
       - `fixpp_session_send` (`include/fix/c_api/session.h`), through `Session::send_impl`'s
         `length_data_carry` scan over the session dictionary's hooks: a malformed pair of that kind
         returned `FIXPP_ERR_OK` and now returns `FIXPP_ERR_APP_PAYLOAD_MALFORMED`; and a count that
@@ -716,6 +741,72 @@ rejection now assert verbatim emit.
     re-derive with `grep -rn 'read_value(' src include` together with its complement,
     `grep -rn 'data_tag_for_length\|counted_value_end' src include`, and classify each site as a
     refusal gate or a reader (task T076 records the recipe and the classification).
+- **FR-021** (owner ruling 2026-09-25, during `/speckit-implement`; folds in fixpp#506):
+  `fixpp_msg_commit`'s Length+Data check, `check_length_data` (`src/capi/message_write.cpp`), MUST
+  feed a group node to `wire::length_data_checker::observe` with an **empty** value, as
+  `body_builder::commit` does (R-4, C-1.7), at every depth. It MUST NOT feed the group's
+  instance-count digits.
+  - **Effect, as a condition.** With an empty value, `observe` refuses a group node whose count tag
+    is a pair half under the handle's pairs (`pair_hooks`: the session dictionary's `table_view`,
+    or the standard table alone when the session has none): a Length tag fails on its empty count,
+    and a Data tag fails either as a Data not immediately preceded by its Length or, when its Length
+    is immediately before it, on its empty value. So a group whose count tag is a pair half is never
+    read as that pair's half, and `fixpp_msg_commit` returns `FIXPP_ERR_WIRE_CONFORMANCE` for it
+    whatever its instance count and neighbours. Before FR-021 the same group was refused unless its
+    count digits completed the pair; those are the commits that change, from `FIXPP_ERR_OK` to
+    `FIXPP_ERR_WIRE_CONFORMANCE`. These shapes witness it (they are witnesses, not the population):
+    - **Length shape** (measured, evidence file §*/simplify (T053)*, M1): a group tagged 354 with
+      one instance, then a one-byte 355: `35=D␁354=1␁79=A1␁355=x␁` was emitted;
+    - **Data shape** (from `observe`'s source): `354=1`, then a group tagged 355 whose
+      instance-count digits number one: `observe(355, "1")` after `354=1` satisfied the awaited
+      Data's byte count.
+    A group node whose count tag is not a pair half is unaffected: it passes `observe` with either
+    value, and a Length right before it is still a Length not followed by its Data.
+  - **Reachability, as a condition** (`src/capi/message_write.cpp`). `fixpp_msg_group_begin` and
+    `fixpp_entry_group_begin` refuse a count tag only when it is a framing tag, or when the handle
+    carries a dictionary (`h->dict_`) and that dictionary's `group_first_field(tag)` is 0. So the
+    effect is reachable:
+    - on **every session with no dictionary**, where any non-framing tag, pair halves included,
+      opens a group, at the top level and nested (`fixpp_entry_group_begin`, with the sibling half
+      written by an entry setter, since `check_length_data` checks each group instance as its own
+      container with the same group-node rule);
+    - on a **dictionary session** only where that dictionary's `group_first_field` is nonzero for a
+      tag its own pairs treat as a pair half (the handle's `dict_` and its `table_view` come from
+      the same session dictionary, null together). *Dated 2026-09-25:* no shipped QuickFIX
+      dictionary declares such a group. Re-derive by intersecting, for each `dictionaries/*.xml`,
+      the fields named by `<group name=…>` with the standard-pair tags of
+      `include/fixpp/core/length_data_pairs.hpp` and with the fields typed LENGTH, DATA or XMLDATA;
+      positive control: add a known count tag (e.g. 453) to the probe set and see it reported.
+      Whether a user dictionary can declare one depends on the loader accepting it, which is not
+      measured here; the condition, not a population, is what this requirement states.
+  - **C-ABI effect** (FR-019, `[const §X.7]`: a success turned into a failure is BREAKING). The
+    population follows research.md R-11's recipe: step 2 maps `check_length_data` to its only
+    exported caller, `fixpp_msg_commit`, whose documented result changes, so its declaration in
+    `include/fix/c_api/message.h` gains its own BREAKING (C-ABI 1.9) FR-021 clause beside the
+    existing FR-019 one, and its `FIXPP_ERR_WIRE_CONFORMANCE` return-code line gains the group case;
+    the `version.h` 1.9 history gains an FR-021 sentence. Every other export is unchanged for
+    FR-021, classified in data-model.md Appendix A:
+    - `fixpp_msg_group_begin`, `fixpp_entry_group_begin` and the setters that write the sibling
+      half return what they returned before; the effect of what they wrote surfaces at
+      `fixpp_msg_commit` (R-11 step 5);
+    - `fixpp_session_send` takes the caller's bytes and never runs `check_length_data`, and FR-021
+      changes nothing on its path, so for any given payload its result is unchanged. Separately,
+      why such a payload is accepted today: its `send_impl` scan (`length_data_carry`) disarms a
+      pending count when the next field is not the Length's Data and reads an unarmed Data tag as a
+      plain field. So a payload of either shape that a pre-FR-021 commit produced, or that a caller
+      assembles by hand, is sent as before (disclosed in B-091-4, not changed here).
+  - No error code, symbol or signature changes (FR-004a).
+  - `.specify/426-428-length-data-pairs.md` §5.3 prescribes feeding "each container's entries" and
+    says both writers "refuse exactly the same pairs"; it does not say how a group node is fed.
+    FR-021 is what makes that sentence true, so it supersedes no recorded decision of that note;
+    it supersedes research.md R-4's "not 091 scope" for the C-ABI group path.
+  - Witnesses (task T078, written first and RED on the unfixed code, in
+    `tests/capi/length_data_setters_test.cpp`, `capi_length_data`, on the no-dictionary fixture):
+    the Length shape and the Data shape at the top level, and the Length shape nested in a group
+    instance, each asserting `FIXPP_ERR_WIRE_CONFORMANCE` (today `FIXPP_ERR_OK`). Twins that hold
+    before and after: the same group with a non-pair count tag and the same bare sibling Data is
+    refused (an orphan Data); that group with no sibling commits; a well-formed pair next to a
+    group commits.
 
 ### Key Entities
 
@@ -793,8 +884,8 @@ rejection now assert verbatim emit.
 
 - **New C-ABI surface.** The C-ABI already has `fixpp_msg_set_data` / `fixpp_entry_set_data`, so
   091 adds no C-ABI symbol, signature or error code. Its only C-ABI effect is FR-019's behaviour
-  change (C-ABI 1.9 BREAKING), which follows from the loader fix (FR-017) and the `interpret_logon`
-  fix (FR-020) and is in scope.
+  change (C-ABI 1.9 BREAKING), which follows from the loader fix (FR-017), the `interpret_logon`
+  fix (FR-020) and the C-ABI commit's group-node fix (FR-021) and is in scope.
 - **Set-time C++ support for dictionary-declared pairs** — follow-up *verifiable session binding for
   dictionary pairs, option (b)* (fixpp#505), for C-ABI parity on custom pairs.
 - **Codegen over a custom dictionary** (FR-009): unsupported.

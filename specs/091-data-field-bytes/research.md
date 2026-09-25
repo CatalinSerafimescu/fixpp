@@ -186,6 +186,9 @@ Any failure → `wire_invalid_field_format`, `out` untouched.
   tagged 354 with one instance plus a sibling one-byte 355 commits through the C-ABI (reachable on a
   dictionary-free session, which opens groups on any tag). Follow-up, fixpp#506:
   *C-ABI commit feeds a group node's count digits to the Length+Data check*.
+  **Superseded by FR-021** (owner ruling 2026-09-25, during `/speckit-implement`): the C-ABI group
+  path is folded into 091, and `check_length_data` feeds a group node an empty value too (spec.md
+  FR-021, tasks §2e). The paragraph above is kept as the record of the scoping it replaced.
 - The recursion depth is the one the INV-5 walk already uses. No new stack shape.
 
 **Alternative rejected.** A separate second walk: twice the tree traversal for no benefit.
