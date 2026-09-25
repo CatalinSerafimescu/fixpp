@@ -295,7 +295,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_acceptor_bound_endpoint(fixpp_sessi
  * BREAKING (C-ABI 1.9): a Length+Data pair a loaded dictionary declares only
  * inside a component or group is now a dictionary pair. A payload carrying a
  * malformed pair of that kind, which returned FIXPP_ERR_OK, now returns
- * FIXPP_ERR_APP_PAYLOAD_MALFORMED with no transmit; a count that covers a
+ * FIXPP_ERR_APP_PAYLOAD_MALFORMED, translated for the consumer's ABI minor
+ * (fixpp_engine_create), with no transmit; a count that covers a
  * following field (e.g. 43, 122 or a header-class tag) is now transmitted
  * verbatim as Data, not excised or reordered. Also (091 FR-020), a Logon
  * carrying a Length immediately followed by its paired Data whose counted
@@ -303,7 +304,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_acceptor_bound_endpoint(fixpp_sessi
  * following byte is not SOH (standard pairs included), which was accepted, is
  * now refused, on either role; a send on that session, issued after that
  * Logon, which returned FIXPP_ERR_OK, now returns
- * FIXPP_ERR_SESSION_INVALID_STATE. For a send either change refuses, the
+ * FIXPP_ERR_SESSION_INVALID_STATE, translated for the consumer's ABI minor
+ * (fixpp_engine_create). For a send either change refuses, the
  * toApp callback (fixpp_session_register_send_callback) is not invoked: the
  * pair refusal comes before the send path builds its toApp view, and the
  * FR-020 refusal comes at the engine's Active check, before the send reaches

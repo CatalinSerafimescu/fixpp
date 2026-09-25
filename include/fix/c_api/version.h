@@ -85,7 +85,8 @@
  *  fixpp_session_is_established stays false; fixpp_session_close, once the
  *  refused session has drained, returns FIXPP_ERR_THREAD_SESSION_LIFECYCLE,
  *  not FIXPP_ERR_OK; fixpp_session_send on that session returns
- *  FIXPP_ERR_SESSION_INVALID_STATE, not FIXPP_ERR_OK; neither the receive
+ *  FIXPP_ERR_SESSION_INVALID_STATE, translated for the consumer's ABI minor
+ *  (fixpp_engine_create), not FIXPP_ERR_OK; neither the receive
  *  callback (fixpp_session_register_callback) nor the toApp callback
  *  (fixpp_session_register_send_callback) is ever invoked for it.
  *  No error code is added. */
