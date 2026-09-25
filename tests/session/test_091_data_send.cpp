@@ -10,14 +10,14 @@
 // and a SOH inside the value never splits it. No production change backs this
 // file; it witnesses the path end to end:
 //
-//   Witness 1 (XmlData 212/213, SecureData 90/91): a payload whose pair
+//   Witness 1 (XmlData 212+213, SecureData 90+91): a payload whose pair
 //   follows body fields and whose Data value holds SOH goes out with the pair
 //   adjacent, Length first, inside the header, and the value re-parses
 //   verbatim through the dictionary-aware Parser<Index>.
 //
 //   Witness 2 (message_encoding): a generated fixpp::v44 NewOrderSingle with
 //   `message_encoding` and a non-ASCII `encoded_text` goes out with 347 in the
-//   header and 354/355 in the body, the Data bytes verbatim.
+//   header and 354+355 in the body, the Data bytes verbatim.
 //
 // Each witness pins the complete wire tag order of the transmitted frame as
 // the production parser reads it, and the outbound MsgSeqNum consumed by the
@@ -127,7 +127,7 @@ protected:
 
     void SetUp() override {
         using namespace std::chrono;
-        auto utc = system_clock::time_point{} + seconds{1704067200};  // 2024-01-01
+        auto utc = system_clock::time_point{} + seconds{1704067200};
         auto stp = fixpp::core::steady_time_point{} + seconds{0};
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
         engine.clock = clock;
