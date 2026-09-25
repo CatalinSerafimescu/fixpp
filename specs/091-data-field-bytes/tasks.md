@@ -623,14 +623,15 @@ only then made GREEN.
   site that is a refusal gate and fails open at a malformed count goes to the orchestrator; FR-020's
   scope rests on this population.
 
-- [ ] T026 Via `phase-implementer`, run the Foundational mutants from quickstart §3 in a scratch copy.
+- [X] T026 Via `phase-implementer`, run the Foundational mutants from quickstart §3 in a scratch copy.
   Each one must be RED on the named test (or, for a compile-time kill, fail to build), then GREEN
   after revert:
   - "the new walk skips non-field children instead of breaking" → C-2.5a arm (iii) (T007);
   - "the new walk visits only components and their direct `<group>` children" → arms (v) and (vi);
   - "groups are walked depth-first, right after their container" → arm (vii), all three placements;
   - "the group walk is entered only from messages and component definitions" → arm (viii) (a) and
-    (b), and arm (vii)(c);
+    (b) (arm (vii)(c) cannot die here: a walk that skips header groups never records group A's
+    pair, so component B wins as the arm expects; the depth-first row above kills it);
   - "one non-FIX50SP2 drift leg's probe returns nothing" (e.g. FIX44's `message_fields()` result
     emptied) → that leg's non-empty assertion (T006);
   - "the loader's component/group walk is removed" (C-ABI view) → all of these:

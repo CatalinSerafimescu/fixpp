@@ -93,7 +93,7 @@ Each row names an existing test that must be shown RED (or, for a compile-time k
 | the new walk skips non-field children instead of breaking | C-2.5a arm (iii) |
 | the new walk visits only components and their direct `<group>` children | C-2.5a arms (v) and (vi) |
 | groups are walked depth-first, right after their container, instead of after all component definitions | C-2.5a arm (vii), all placements |
-| the group walk is entered only from messages and component definitions | C-2.5a arm (viii) (a) and (b), and arm (vii)(c) |
+| the group walk is entered only from messages and component definitions | C-2.5a arm (viii) (a) and (b); not (vii)(c), which a walk skipping header groups passes (the depth-first row kills it) |
 | one non-FIX50SP2 drift leg's probe returns nothing (e.g. FIX44's `message_fields()` result emptied) | that leg's non-empty assertion (FR-018) |
 | `set_data` skips pair resolution (forwards straight to `append_bytes_field`) | C-1.4's `set_data` arms for tags 11 (the SOH-bearing payload) and 354; C-1.9's `set_data(5002, …)` arm |
 | `set_data` skips the second-append rollback (Length survives a failed Data append) | C-1.5's nested `set_data` twin (its commit-and-byte-compare oracle) |
