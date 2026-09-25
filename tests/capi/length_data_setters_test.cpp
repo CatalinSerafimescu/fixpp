@@ -17,7 +17,11 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
+#include <cstddef>
 #include <cstring>
+#include <memory>
+#include <memory_resource>
 #include <string>
 #include <string_view>
 
@@ -554,4 +558,216 @@ TEST(CapiCommitPairs, RulesApplyInsideAGroupInstance) {
     fixpp_error_t rc{};
     (void)f.commit(rc);
     EXPECT_EQ(rc, FIXPP_ERR_WIRE_CONFORMANCE);
+}
+
+// ── 091 FR-021: the commit check feeds a group node an empty value ──────────
+//
+// A group's count field is one field of its container, and `check_length_data` feeds
+// it to the pair check with an empty value, as `body_builder::commit` does. So a group
+// whose count tag is a pair half is never read as that half: as a Length its empty count
+// is refused, and as a Data it is either not preceded by its Length or, when it is, its
+// value is empty. A group whose count tag is not a pair half passes, and a Length right
+// before it is still a Length not followed by its Data. Every group instance starts with
+// a non-pair field (79), so no cell here reaches INV-4's FIXPP_ERR_TYPE_MISMATCH.
+
+namespace {
+
+// A commit's return code and payload. `shown` renders the payload with SOH as '|'
+// (or "<none>"), so a failure message carries the bytes a commit produced.
+struct Committed {
+    fixpp_error_t rc{};
+    bool has_payload = false;
+    std::string shown;
+};
+
+Committed commit_msg(fixpp_msg_t* msg) {
+    const uint8_t* p = nullptr;
+    size_t n = 0;
+    Committed c;
+    c.rc = fixpp_msg_commit(msg, &p, &n);
+    c.has_payload = p != nullptr || n != 0;
+    if (p == nullptr) {
+        c.shown = "<none>";
+    } else {
+        c.shown.assign(reinterpret_cast<const char*>(p), n);
+        for (auto& ch : c.shown) {
+            if (ch == '\x01') ch = '|';
+        }
+    }
+    return c;
+}
+
+// Opens a group on `tag` in the message with one instance holding 79=A1, and closes it.
+void add_one_instance_group(fixpp_msg_t* msg, uint16_t tag) {
+    fixpp_group_builder_t* gb = nullptr;
+    ASSERT_EQ(fixpp_msg_group_begin(msg, tag, &gb), FIXPP_ERR_OK);
+    fixpp_entry_t* e = nullptr;
+    ASSERT_EQ(fixpp_group_builder_add_entry(gb, &e), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_entry_set_string(e, 79, "A1", 2), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_msg_group_end(msg, gb), FIXPP_ERR_OK);
+}
+
+struct MsgDeleter {
+    void operator()(fixpp_msg_t* m) const noexcept { fixpp_msg_destroy(m); }
+};
+
+}  // namespace
+
+// The Length shape: a group tagged 354 with one instance, then a one-byte 355.
+TEST(CapiCommitGroupNode, GroupTaggedAsALengthDoesNotCompleteThePair) {
+    DictFreeFixture f;
+    ASSERT_NO_FATAL_FAILURE(add_one_instance_group(f.msg, 354));
+    ASSERT_EQ(fixpp_msg_set_bytes(f.msg, 355, as_u8("x"), 1), FIXPP_ERR_OK);
+    auto const c = commit_msg(f.msg);
+    EXPECT_EQ(c.rc, FIXPP_ERR_WIRE_CONFORMANCE) << "payload [" << c.shown << "]";
+    EXPECT_FALSE(c.has_payload) << "payload [" << c.shown << "]";
+}
+
+// The Data shape: 354=1, then a group tagged 355 with one instance.
+TEST(CapiCommitGroupNode, GroupTaggedAsTheDataDoesNotCompleteThePair) {
+    DictFreeFixture f;
+    ASSERT_EQ(fixpp_msg_set_int(f.msg, 354, 1), FIXPP_ERR_OK);
+    ASSERT_NO_FATAL_FAILURE(add_one_instance_group(f.msg, 355));
+    auto const c = commit_msg(f.msg);
+    EXPECT_EQ(c.rc, FIXPP_ERR_WIRE_CONFORMANCE) << "payload [" << c.shown << "]";
+    EXPECT_FALSE(c.has_payload) << "payload [" << c.shown << "]";
+}
+
+// The Data shape with zero instances: 354=1, then an empty group tagged 355.
+TEST(CapiCommitGroupNode, EmptyGroupTaggedAsTheDataDoesNotCompleteThePair) {
+    DictFreeFixture f;
+    ASSERT_EQ(fixpp_msg_set_int(f.msg, 354, 1), FIXPP_ERR_OK);
+    fixpp_group_builder_t* gb = nullptr;
+    ASSERT_EQ(fixpp_msg_group_begin(f.msg, 355, &gb), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_msg_group_end(f.msg, gb), FIXPP_ERR_OK);
+    auto const c = commit_msg(f.msg);
+    EXPECT_EQ(c.rc, FIXPP_ERR_WIRE_CONFORMANCE) << "payload [" << c.shown << "]";
+    EXPECT_FALSE(c.has_payload) << "payload [" << c.shown << "]";
+}
+
+// The Data shape on a dictionary session whose dictionary pairs 5001 -> 5002 and declares
+// a group on 5002. The preconditions establish, two-sided, that the dictionary pairs the
+// tags and that it (not an absent gate) accepts the group; they run on a separate
+// dictionary load and on a control message, never on the message under test.
+TEST(CapiCommitGroupNode, EmptyGroupTaggedAsADictionaryDataDoesNotCompleteThePair) {
+    // Load: the session over the new dictionary opens (the fixture EXPECTs every step).
+    Fixture f("D", kGroupOnPairHalfFix42Xml);
+    ASSERT_NE(f.sess, nullptr);
+    ASSERT_NE(f.msg, nullptr);
+
+    // Pair: the same document, loaded again, pairs 5001 -> 5002 in both directions, and a
+    // declared field that is not LENGTH pairs nothing.
+    {
+        constexpr std::size_t kBufSize = 128U * 1024U;
+        auto buf = std::make_unique<std::array<std::byte, kBufSize>>();
+        std::pmr::monotonic_buffer_resource mr{buf->data(), buf->size()};
+        fixpp::dict::Dictionary const dict =
+            fixpp::dict::XmlLoader{}.load_from_string(kGroupOnPairHalfFix42Xml, &mr);
+        auto const tv = dict.as_table_view();
+        ASSERT_EQ(dict.length_pair_data_tag(5001), 5002);
+        ASSERT_EQ(tv.data_pair_length_tag(5002), 5001);
+        ASSERT_EQ(dict.length_pair_data_tag(11), 0);
+    }
+
+    // Group: on a control message, never committed, the dictionary accepts a group on 5002
+    // and refuses one on 5001, which it declares no group for.
+    {
+        fixpp_msg_t* raw = nullptr;
+        ASSERT_EQ(fixpp_msg_create_outbound(f.sess, "D", 1, &raw), FIXPP_ERR_OK);
+        std::unique_ptr<fixpp_msg_t, MsgDeleter> const ctl{raw};
+        fixpp_group_builder_t* b = nullptr;
+        ASSERT_EQ(fixpp_msg_group_begin(ctl.get(), 5002, &b), FIXPP_ERR_OK);
+        ASSERT_EQ(fixpp_msg_group_end(ctl.get(), b), FIXPP_ERR_OK);
+        fixpp_group_builder_t* b2 = nullptr;
+        ASSERT_EQ(fixpp_msg_group_begin(ctl.get(), 5001, &b2), FIXPP_ERR_TYPE_MISMATCH);
+    }
+
+    ASSERT_EQ(fixpp_msg_set_bytes(f.msg, 5001, as_u8("1"), 1), FIXPP_ERR_OK);
+    fixpp_group_builder_t* g = nullptr;
+    ASSERT_EQ(fixpp_msg_group_begin(f.msg, 5002, &g), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_msg_group_end(f.msg, g), FIXPP_ERR_OK);
+    auto const c = commit_msg(f.msg);
+    EXPECT_EQ(c.rc, FIXPP_ERR_WIRE_CONFORMANCE) << "payload [" << c.shown << "]";
+    EXPECT_FALSE(c.has_payload) << "payload [" << c.shown << "]";
+}
+
+// The Length shape inside a group instance, which is checked as its own container: in an
+// instance of a group tagged 78, a nested group tagged 354, then a one-byte 355.
+TEST(CapiCommitGroupNode, NestedGroupTaggedAsALengthDoesNotCompleteThePair) {
+    DictFreeFixture f;
+    fixpp_group_builder_t* gb = nullptr;
+    ASSERT_EQ(fixpp_msg_group_begin(f.msg, 78, &gb), FIXPP_ERR_OK);
+    fixpp_entry_t* e = nullptr;
+    ASSERT_EQ(fixpp_group_builder_add_entry(gb, &e), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_entry_set_string(e, 79, "A1", 2), FIXPP_ERR_OK);
+    fixpp_group_builder_t* nested = nullptr;
+    ASSERT_EQ(fixpp_entry_group_begin(e, 354, &nested), FIXPP_ERR_OK);
+    fixpp_entry_t* ne = nullptr;
+    ASSERT_EQ(fixpp_group_builder_add_entry(nested, &ne), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_entry_set_string(ne, 79, "A1", 2), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_msg_group_end(f.msg, nested), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_entry_set_string(e, 355, "x", 1), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_msg_group_end(f.msg, gb), FIXPP_ERR_OK);
+    auto const c = commit_msg(f.msg);
+    EXPECT_EQ(c.rc, FIXPP_ERR_WIRE_CONFORMANCE) << "payload [" << c.shown << "]";
+    EXPECT_FALSE(c.has_payload) << "payload [" << c.shown << "]";
+}
+
+// Twin of the Length shape with the group tagged 78: the 355 is an orphan Data.
+TEST(CapiCommitGroupNode, TwinNonPairGroupWithABareSiblingDataIsRefused) {
+    DictFreeFixture f;
+    ASSERT_NO_FATAL_FAILURE(add_one_instance_group(f.msg, 78));
+    ASSERT_EQ(fixpp_msg_set_bytes(f.msg, 355, as_u8("x"), 1), FIXPP_ERR_OK);
+    auto const c = commit_msg(f.msg);
+    EXPECT_EQ(c.rc, FIXPP_ERR_WIRE_CONFORMANCE) << "payload [" << c.shown << "]";
+    EXPECT_FALSE(c.has_payload) << "payload [" << c.shown << "]";
+}
+
+TEST(CapiCommitGroupNode, TwinNonPairGroupAloneCommits) {
+    DictFreeFixture f;
+    ASSERT_NO_FATAL_FAILURE(add_one_instance_group(f.msg, 78));
+    auto const c = commit_msg(f.msg);
+    EXPECT_EQ(c.rc, FIXPP_ERR_OK) << "payload [" << c.shown << "]";
+    EXPECT_EQ(c.shown, "35=D|78=1|79=A1|");
+}
+
+TEST(CapiCommitGroupNode, TwinWellFormedPairNextToAGroupCommits) {
+    DictFreeFixture f;
+    ASSERT_NO_FATAL_FAILURE(add_one_instance_group(f.msg, 78));
+    ASSERT_EQ(fixpp_msg_set_data(f.msg, 355, as_u8("x"), 1), FIXPP_ERR_OK);
+    auto const c = commit_msg(f.msg);
+    EXPECT_EQ(c.rc, FIXPP_ERR_OK) << "payload [" << c.shown << "]";
+    EXPECT_EQ(c.shown, "35=D|78=1|79=A1|354=1|355=x|");
+}
+
+// A group tagged 354 and nothing else: as a Length it has no Data after it.
+TEST(CapiCommitGroupNode, TwinLonePairLengthGroupIsRefused) {
+    DictFreeFixture f;
+    ASSERT_NO_FATAL_FAILURE(add_one_instance_group(f.msg, 354));
+    auto const c = commit_msg(f.msg);
+    EXPECT_EQ(c.rc, FIXPP_ERR_WIRE_CONFORMANCE) << "payload [" << c.shown << "]";
+    EXPECT_FALSE(c.has_payload) << "payload [" << c.shown << "]";
+}
+
+// A group tagged 355 and nothing else: as a Data it is not preceded by its Length.
+TEST(CapiCommitGroupNode, TwinLonePairDataGroupIsRefused) {
+    DictFreeFixture f;
+    ASSERT_NO_FATAL_FAILURE(add_one_instance_group(f.msg, 355));
+    auto const c = commit_msg(f.msg);
+    EXPECT_EQ(c.rc, FIXPP_ERR_WIRE_CONFORMANCE) << "payload [" << c.shown << "]";
+    EXPECT_FALSE(c.has_payload) << "payload [" << c.shown << "]";
+}
+
+// 354=1, then an empty group tagged 78, then a one-byte 355: the Length is followed by the
+// group's count field, not by its Data, whatever value that count field is fed.
+TEST(CapiCommitGroupNode, TwinLengthBeforeAnEmptyNonPairGroupIsRefused) {
+    DictFreeFixture f;
+    ASSERT_EQ(fixpp_msg_set_int(f.msg, 354, 1), FIXPP_ERR_OK);
+    fixpp_group_builder_t* gb = nullptr;
+    ASSERT_EQ(fixpp_msg_group_begin(f.msg, 78, &gb), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_msg_group_end(f.msg, gb), FIXPP_ERR_OK);
+    ASSERT_EQ(fixpp_msg_set_bytes(f.msg, 355, as_u8("x"), 1), FIXPP_ERR_OK);
+    auto const c = commit_msg(f.msg);
+    EXPECT_EQ(c.rc, FIXPP_ERR_WIRE_CONFORMANCE) << "payload [" << c.shown << "]";
+    EXPECT_FALSE(c.has_payload) << "payload [" << c.shown << "]";
 }
