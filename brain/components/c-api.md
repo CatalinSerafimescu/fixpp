@@ -180,6 +180,12 @@ three kinds of carrier:
   inbound readers (`fixpp_msg_get_*`, `fixpp_msg_has_tag`, `fixpp_msg_version`,
   `fixpp_msg_get_msg_type`, `fixpp_msg_field_count`, `fixpp_msg_field_at`, `fixpp_msg_get_group`,
   `fixpp_group_get_field_*`, `fixpp_group_get_nested_group`) over the inbound, clone and toApp views.
+- **FR-021, a separate cause (fixpp#506):** `fixpp_msg_commit` now checks a group's count field with
+  an empty value, as `body_builder::commit` does, so a group whose count tag is a pair half no longer
+  commits when its count digits complete the pair. It carries its own clause on `fixpp_msg_commit` in
+  `message.h` and a sentence in `version.h`'s 1.9 history. Every other export is unchanged for it:
+  the group-begin calls and setters return what they did, and `fixpp_session_send` never runs the
+  commit check.
 - **No carrying declaration**, recorded in `version.h`'s 1.9 history: replay gap-fills a stored
   pre-1.9 frame with such a malformed pair, and the session's header and Logon scans read such a Data
   by count.

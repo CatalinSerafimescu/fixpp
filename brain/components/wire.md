@@ -248,7 +248,9 @@ commit. The binding that would lift the restriction is fixpp#505.
 
 **A group node is fed to the pair checker as `observe(no_tag, {})`** in 091's `body_builder`. The
 empty value is what refuses a group whose tag is one half of a pair. Feeding the count digits, as
-the C-ABI commit does, lets a group tagged 354 pose as a Length. That C-ABI defect is fixpp#506.
+the C-ABI commit did, let a group tagged 354 pose as a Length. That C-ABI defect was fixpp#506, and
+091 FR-021 is its repair: `check_length_data` (`src/capi/message_write.cpp`) now feeds a group node
+an empty value too, so both writers refuse the same group shapes (C-ABI 1.9, B&L `B-091-4`).
 
 **Where the table lives, and why the callback is conditional.** The standard table is
 `include/fixpp/core/length_data_pairs.hpp` — `table_view` must classify a tag and the dictionary
