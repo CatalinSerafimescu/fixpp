@@ -27,9 +27,11 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/core/decimal_alias.hpp>
+#include <fixpp/core/error.hpp>
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/xml_loader.hpp>
 #include <fixpp/v50sp2/Messages.hpp>
@@ -3561,4 +3563,91 @@ TEST_F(AllVersionsRoundtrip077V50SP2, DerivativeSecurityListRequest) {
     expect_decimal(mv, 245, "10.5", &read_arena, "underlying_repurchase_rate");
     expect_decimal(mv, 246, "10.5", &read_arena, "underlying_factor");
     expect_text(mv, 263, "1", "subscription_request_type");
+}
+
+// ── 091-data-field-bytes T030 [US1]: C-2.3 message_encoding presence, v50sp2 ─
+// constexpr bools from requires-expressions, asserted at run time so an
+// absent member is a test failure, not a compile error. The messages come
+// from the C-2.2 census dump (`codegen_091_data_census_test --census-dump`):
+//   SecurityMassStatusRequest is an ONLY_NOT_PREFIX_ENCODED row for v50sp2
+//   (its Encoded* fields all contain "Encoded" without beginning with it, so
+//   a "begins with" rule would miss it);
+//   TradingSessionListRequest is a NO_ENCODED row for v50sp2.
+namespace {
+
+template <typename A>
+constexpr bool has_message_encoding_091 = requires(A const& a) { a.message_encoding; };
+
+template <typename A>
+constexpr bool message_encoding_is_optional_string_view_091 = requires(A const& a) {
+    { a.message_encoding } -> std::same_as<std::optional<std::string_view> const&>;
+};
+
+}  // namespace
+
+TEST(MessageEncodingPresence091, V50SP2_SecurityMassStatusRequest_HasMember) {
+    EXPECT_TRUE(has_message_encoding_091<fixpp::v50sp2::SecurityMassStatusRequestArgs>);
+    EXPECT_TRUE(
+        message_encoding_is_optional_string_view_091<fixpp::v50sp2::SecurityMassStatusRequestArgs>);
+}
+
+TEST(MessageEncodingPresence091, V50SP2_TradingSessionListRequest_HasNoMember) {
+    EXPECT_FALSE(has_message_encoding_091<fixpp::v50sp2::TradingSessionListRequestArgs>);
+}
+
+// ── 091-data-field-bytes T031 [US1]: R-6 Length-delimited group witness ──
+// (specs/091-data-field-bytes/research.md R-6.) NoPaymentStreamFormulas(42683)
+// is delimited by its Length tag PaymentStreamFormulaLength(43109). One entry
+// whose Data PaymentStreamFormula(42684) holds SOH must commit, carry
+// 43109=<octet count> first in the entry directly followed by 42684 verbatim,
+// and re-parse to the same octets. The message comes from the C-2.2 census
+// dump: Advertisement, path 40049.42683 (NoStreams, then
+// NoPaymentStreamFormulas), L=43109 D=42684.
+TEST_F(AllVersionsRoundtrip077V50SP2, PaymentStreamFormula_LengthDelimitedGroup_Soh_091) {
+    std::string const formula = std::string{"x"} + '\x01' + "y";
+
+    fixpp::v50sp2::groups::G_42683Args formula_entry{};
+    formula_entry.payment_stream_formula = formula;
+    std::array<fixpp::v50sp2::groups::G_42683Args, 1> formulas{formula_entry};
+
+    fixpp::v50sp2::groups::G_40049Args stream{};
+    stream.stream_type = 1;  // NoStreams(40049) entry delimiter StreamType(40050)
+    stream.payment_stream_formulas = std::span<const fixpp::v50sp2::groups::G_42683Args>{formulas};
+    std::array<fixpp::v50sp2::groups::G_40049Args, 1> streams{stream};
+
+    fixpp::v50sp2::AdvertisementArgs args{};
+    args.adv_id = "ADV-091";
+    args.streams = std::span<const fixpp::v50sp2::groups::G_40049Args>{streams};
+
+    auto built = fixpp::v50sp2::build_Advertisement(out, args);
+    ASSERT_TRUE(built.has_value()) << "build_Advertisement refused an SOH-bearing "
+                                      "PaymentStreamFormula(42684): "
+                                   << fixpp::core::to_string(built.error());
+    std::string const body = bytes_to_string(*built);
+    std::string const run =
+        std::string{
+            "\x01"
+            "42683=1\x01"
+            "43109="} +
+        std::to_string(formula.size()) + "\x01" + "42684=" + formula + "\x01";
+    EXPECT_NE(body.find(run), std::string::npos)
+        << "the NoPaymentStreamFormulas entry must open on PaymentStreamFormulaLength(43109) = the "
+           "octet count, directly followed by PaymentStreamFormula(42684) verbatim";
+
+    std::vector<std::byte> const frame = make_frame("FIX.5.0SP2", body);
+    auto const mv = parse_dict(frame, *tv_, &read_arena);
+    ASSERT_FALSE(::testing::Test::HasFailure()) << "dict-aware re-parse failed";
+    fixpp::v50sp2::Advertisement fw{mv};
+    auto streams_r = fw.streams();
+    ASSERT_EQ(streams_r.size(), 1U) << "re-parse must see one NoStreams entry";
+    auto stream0 = streams_r[0];
+    auto formulas_r = stream0.payment_stream_formulas();
+    ASSERT_EQ(formulas_r.size(), 1U) << "re-parse must see one NoPaymentStreamFormulas entry";
+    auto formula0 = formulas_r[0];
+    auto len = formula0.payment_stream_formula_length();
+    ASSERT_TRUE(len.has_value()) << "re-parse lost PaymentStreamFormulaLength(43109)";
+    EXPECT_EQ(*len, static_cast<std::int32_t>(formula.size()));
+    auto data = formula0.payment_stream_formula();
+    ASSERT_TRUE(data.has_value()) << "re-parse lost PaymentStreamFormula(42684)";
+    EXPECT_EQ(*data, formula) << "re-parse must recover the octets verbatim";
 }
