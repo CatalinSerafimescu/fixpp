@@ -67,9 +67,8 @@ namespace {
 constexpr auto kWindow = 200ms;
 
 std::vector<std::byte> to_bytes(std::string_view sv) {
-    std::vector<std::byte> out(sv.size());
-    for (std::size_t i = 0; i < sv.size(); ++i) out[i] = static_cast<std::byte>(sv[i]);
-    return out;
+    auto const bytes = std::as_bytes(std::span{sv});
+    return {bytes.begin(), bytes.end()};
 }
 
 std::vector<std::byte> make_fix44_frame(std::string_view body) {

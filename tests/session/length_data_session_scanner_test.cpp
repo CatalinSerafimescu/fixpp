@@ -36,6 +36,7 @@
 #include "session/scan_first_frame_ids.hpp"
 #include "session/scan_frame_header.hpp"
 #include "support/alloc_guard_markers.hpp"
+#include "support/extract_tag.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -406,20 +407,11 @@ std::size_t bytes_from_raw_data_value_to_end(std::vector<std::byte> const& frame
 
 // The count 95 carries in `frame`, parsed from the framed bytes; npos when absent.
 std::size_t count_in_frame(std::vector<std::byte> const& frame) {
-    auto const sv = as_sv(frame);
-    auto const anchor = std::string_view{
-        "\x01"
-        "95="};
-    auto const pos = sv.find(anchor);
-    if (pos == std::string_view::npos) {
+    auto const digits = fixpp::test_support::extract_tag(frame, 95);
+    if (digits.empty()) {
         return std::string_view::npos;
     }
-    auto const digits = sv.substr(pos + anchor.size());
-    auto const soh = digits.find('\x01');
-    if (soh == std::string_view::npos || soh == 0) {
-        return std::string_view::npos;
-    }
-    return std::stoul(std::string{digits.substr(0, soh)});
+    return std::stoul(digits);
 }
 
 // Frames the boundary body with the count R - `below`, R taken from a first framing.
