@@ -195,10 +195,11 @@ inline constexpr std::string_view kMessageView =
 // routes to Char — FIX Boolean is the literal wire byte `Y`/`N`
 // (`x ? 'Y' : 'N'`), never the int64 `1`/`0` path (FR-007a). Skip
 // (DialectExtension) has no setter — the emitter omits it entirely. The
-// Length+Data pair is NOT a TypeKind of its own: the DATA half's `kind_of()`
-// is already String (auto-derived Length is emitted alongside it, coupled,
-// by the emitter's Length+Data pairing logic — data-model.md §1.1/§3), so
-// this map does not need a distinct case for it.
+// Length+Data pair is NOT a TypeKind of its own and never reaches this map:
+// the emitter folds a coupled pair into one `optional<string_view>` Args
+// member (TypeKind::String) and writes it through body_builder::field_data /
+// entry_handle::set_data, which derive the Length from the octet count
+// (091 (#418) C-2.1), not through the String setter this map selects.
 enum class BuilderCallKind { String, Char, Int32, Decimal, None };
 
 inline BuilderCallKind builder_call_kind(TypeKind k) noexcept {
