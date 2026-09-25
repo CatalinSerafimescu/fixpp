@@ -516,7 +516,7 @@ only then made GREEN.
   re-pin). Re-run
   `tools/check_capi_freeze.sh` (it must fail on exactly `version.h`, then re-pin
   `tools/capi_freeze.sha256` and pass).
-- [ ] T074 Via `phase-implementer`, add the FR-020 witnesses the scoped Gate A round 1 found missing
+- [X] T074 Via `phase-implementer`, add the FR-020 witnesses the scoped Gate A round 1 found missing
   to `tests/session/length_data_session_scanner_test.cpp` (`session_length_data_scanner`, already
   labelled `091` and in `expected-ctest-091.txt`; a manifest change is needed only if a new ctest
   entry is registered).
@@ -613,7 +613,7 @@ only then made GREEN.
   - Run `tools/check_capi_freeze.sh`: it must fail on exactly `version.h` and `session.h`, then
     re-pin `tools/capi_freeze.sha256` and pass. Run
     `.claude/scripts/check-comment-claims.py --root <tree> --base origin/main` on the result.
-- [ ] T076 Via `phase-implementer`, record in `.specify/decisions/091-data-field-bytes-evidence.md`
+- [X] T076 Via `phase-implementer`, record in `.specify/decisions/091-data-field-bytes-evidence.md`
   §*Malformed-count scan sites* (dated addendum) the complement recipe for the scan-site population:
   `grep -rn 'data_tag_for_length\|counted_value_end' src include` beside the existing
   `grep -rn 'read_value(' src include`. Classify each site it adds, from source, as a refusal gate
