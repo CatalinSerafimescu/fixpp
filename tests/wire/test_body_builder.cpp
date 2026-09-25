@@ -57,6 +57,7 @@
 #include <utility>
 #include <vector>
 
+#include "support/body_builder_test_helpers.hpp"
 #include "support/frame_view_factory.hpp"
 
 // -- Global operator new counter --------------------------------------------
@@ -116,8 +117,7 @@ namespace {
 
 using fixpp::decimal_t;
 using fixpp::wire::body_builder;
-
-constexpr std::size_t kBufSize = 8192;
+using namespace fixpp::test_support::body_builder_helpers;
 
 // Parse a decimal_t from an ASCII literal (no string-literal ctor, matches
 // tests/session/test_business_messages_build.cpp precedent).
@@ -127,20 +127,6 @@ decimal_t make_decimal(std::string_view sv, std::pmr::memory_resource* mr) {
     auto r = decimal_t::parse(bytes, mr);
     EXPECT_TRUE(r.has_value()) << "make_decimal failed for: " << sv;
     return r.value_or(decimal_t{});
-}
-
-std::string bytes_to_string(std::span<const std::byte> b) {
-    return std::string{reinterpret_cast<const char*>(b.data()), b.size()};
-}
-
-// Fill a byte span with a sentinel pattern so INV-4 "untouched on failure"
-// can be asserted by comparing before/after.
-void fill_sentinel(std::span<std::byte> s) {
-    for (auto& b : s) b = std::byte{0xABU};
-}
-
-bool all_sentinel(std::span<const std::byte> s) {
-    return std::ranges::all_of(s, [](std::byte b) { return b == std::byte{0xABU}; });
 }
 
 }  // namespace
@@ -765,29 +751,6 @@ constexpr std::uint16_t kInnerNo = 453;
 constexpr std::uint16_t kInnerDelim = 448;
 constexpr std::uint16_t kTextTag = 58;
 
-std::span<const std::byte> octets(std::string_view sv) {
-    return std::span<const std::byte>{reinterpret_cast<const std::byte*>(sv.data()), sv.size()};
-}
-
-// Commits `b` and returns the body as a string, or the commit's error.
-expected_t<std::string> commit_body(body_builder& b) {
-    std::array<std::byte, kBufSize> buf{};
-    auto r = b.commit(std::span<std::byte>{buf});
-    if (!r.has_value()) return std::unexpected(r.error());
-    return bytes_to_string(*r);
-}
-
-// The commit is refused with `want` and leaves `out` untouched.
-void expect_commit_refused(body_builder& b, error want) {
-    std::array<std::byte, kBufSize> buf{};
-    fill_sentinel(std::span<std::byte>{buf});
-    auto r = b.commit(std::span<std::byte>{buf});
-    ASSERT_FALSE(r.has_value()) << "commit accepted the body: " << bytes_to_string(*r);
-    EXPECT_EQ(r.error(), want);
-    EXPECT_TRUE(all_sentinel(std::span<const std::byte>{buf}))
-        << "out must be untouched on a refused commit";
-}
-
 // The handles an arrangement leaves behind for the call under test.
 struct scene {
     group_handle outer;
@@ -851,16 +814,6 @@ void expect_refused_and_rolled_back(Arrange arrange, Call call, Finish finish, e
         << "the subject must commit after the refused call; error "
         << static_cast<int>(subject_body.error());
     EXPECT_EQ(*subject_body, *twin_body);
-}
-
-// Adds a closed group `no_tag` (delimiter 79) with one populated instance.
-void add_populated_group(body_builder& b, std::uint16_t no_tag) {
-    auto g = b.group_begin(no_tag, kOuterDelim);
-    ASSERT_TRUE(g.has_value());
-    auto e = g->add_entry();
-    ASSERT_TRUE(e.has_value());
-    ASSERT_TRUE(e->set_string(kOuterDelim, "A1").has_value());
-    ASSERT_TRUE(b.group_end(*g).has_value());
 }
 
 // Frames `body` (8=, 9=, and a fixed 10=000, which the test frame factory does
@@ -998,14 +951,13 @@ TEST(BodyBuilderDataField, C1_1_PairAppendedLengthFirstAtCallPosition) {
     std::array<std::byte, 3> const v{std::byte{0x41}, std::byte{0x01}, std::byte{0x42}};
     ASSERT_TRUE(bb.field_data(355, std::span<const std::byte>{v}).has_value());
     ASSERT_TRUE(bb.field(kTextTag, std::string_view{"Z"}).has_value());
-    auto const body = commit_body(bb);
-    ASSERT_TRUE(body.has_value());
-    EXPECT_EQ(*body, std::string{"35=X\x01"
-                                 "11=A\x01"
-                                 "354=3\x01"
-                                 "355=A\x01"
-                                 "B\x01"
-                                 "58=Z\x01"});
+    auto const body = expect_commit_ok(bb);
+    EXPECT_EQ(body, std::string{"35=X\x01"
+                                "11=A\x01"
+                                "354=3\x01"
+                                "355=A\x01"
+                                "B\x01"
+                                "58=Z\x01"});
 }
 
 // ── C-1.1 variants: Data tag below its Length tag; a non-adjacent pair ─────
@@ -1013,20 +965,18 @@ TEST(BodyBuilderDataField, C1_1_InvertedAndNonAdjacentPairsEmitLengthFirst) {
     {
         body_builder bb{"X"};
         ASSERT_TRUE(bb.field_data(89, octets("sig")).has_value());
-        auto const body = commit_body(bb);
-        ASSERT_TRUE(body.has_value());
-        EXPECT_EQ(*body, std::string{"35=X\x01"
-                                     "93=3\x01"
-                                     "89=sig\x01"});
+        auto const body = expect_commit_ok(bb);
+        EXPECT_EQ(body, std::string{"35=X\x01"
+                                    "93=3\x01"
+                                    "89=sig\x01"});
     }
     {
         body_builder bb{"X"};
         ASSERT_TRUE(bb.field_data(1527, octets("doc")).has_value());
-        auto const body = commit_body(bb);
-        ASSERT_TRUE(body.has_value());
-        EXPECT_EQ(*body, std::string{"35=X\x01"
-                                     "1525=3\x01"
-                                     "1527=doc\x01"});
+        auto const body = expect_commit_ok(bb);
+        EXPECT_EQ(body, std::string{"35=X\x01"
+                                    "1525=3\x01"
+                                    "1527=doc\x01"});
     }
 }
 
@@ -1040,9 +990,8 @@ TEST(BodyBuilderDataField, C1_2_EveryOctetRoundTripsThroughTheParser) {
         body_builder top{"X"};
         ASSERT_TRUE(top.field_data(355, std::span<const std::byte>{v}).has_value());
         ASSERT_TRUE(top.field(kTextTag, std::string_view{"END"}).has_value());
-        auto const top_body = commit_body(top);
-        ASSERT_TRUE(top_body.has_value());
-        auto const top_fields = reparse(*top_body);
+        auto const top_body = expect_commit_ok(top);
+        auto const top_fields = reparse(top_body);
         EXPECT_EQ(values_of(top_fields, 354), std::vector<std::string>{"1"});
         EXPECT_EQ(values_of(top_fields, 355), std::vector<std::string>{want});
         EXPECT_EQ(values_of(top_fields, kTextTag), std::vector<std::string>{"END"});
@@ -1054,9 +1003,8 @@ TEST(BodyBuilderDataField, C1_2_EveryOctetRoundTripsThroughTheParser) {
         ASSERT_TRUE(s.outer_entry.set_data(355, std::span<const std::byte>{v}).has_value());
         finish_live_entry(nested, s);
         ASSERT_FALSE(::testing::Test::HasFatalFailure());
-        auto const nested_body = commit_body(nested);
-        ASSERT_TRUE(nested_body.has_value());
-        auto const nested_fields = reparse(*nested_body);
+        auto const nested_body = expect_commit_ok(nested);
+        auto const nested_fields = reparse(nested_body);
         EXPECT_EQ(values_of(nested_fields, 354), std::vector<std::string>{"1"});
         EXPECT_EQ(values_of(nested_fields, 355), std::vector<std::string>{want});
         EXPECT_EQ(values_of(nested_fields, kTextTag), std::vector<std::string>{"END"});
@@ -1070,9 +1018,8 @@ TEST(BodyBuilderDataField, C1_3_MultiDigitLengthUpToTheCommitBoundary) {
         body_builder bb{"X"};
         std::string const v(10, 'v');
         ASSERT_TRUE(bb.field_data(355, octets(v)).has_value());
-        auto const body = commit_body(bb);
-        ASSERT_TRUE(body.has_value());
-        EXPECT_EQ(*body,
+        auto const body = expect_commit_ok(bb);
+        EXPECT_EQ(body,
                   "35=X\x01"
                   "354=10\x01"
                   "355=" +
@@ -1100,9 +1047,8 @@ TEST(BodyBuilderDataField, C1_3_MultiDigitLengthUpToTheCommitBoundary) {
     body_builder bb{"X"};
     std::string const v(largest, 'v');
     ASSERT_TRUE(bb.field_data(355, octets(v)).has_value());
-    auto const body = commit_body(bb);
-    ASSERT_TRUE(body.has_value());
-    EXPECT_EQ(*body,
+    auto const body = expect_commit_ok(bb);
+    EXPECT_EQ(body,
               "35=X\x01"
               "354=" +
                   std::to_string(largest) +
@@ -1303,8 +1249,7 @@ TEST(BodyBuilderDataField, C1_7_GroupNodeBetweenLengthAndData) {
     ASSERT_TRUE(twin.field(355, std::string_view{"abc"}).has_value());
     add_populated_group(twin, kOuterNo);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
-    auto const body = commit_body(twin);
-    ASSERT_TRUE(body.has_value()) << "error " << static_cast<int>(body.error());
+    expect_commit_ok(twin);
 }
 
 // The pair check reads a group node with an EMPTY value (R-4): fed its count digits
@@ -1322,8 +1267,7 @@ TEST(BodyBuilderDataField, C1_7_GroupWhoseNoTagIsTheLengthTag) {
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
     ASSERT_TRUE(twin.field(354, std::int64_t{1}).has_value());
     ASSERT_TRUE(twin.field(355, std::string_view{"x"}).has_value());
-    auto const body = commit_body(twin);
-    ASSERT_TRUE(body.has_value()) << "error " << static_cast<int>(body.error());
+    expect_commit_ok(twin);
 }
 
 TEST(BodyBuilderDataField, C1_7_GroupWhoseNoTagIsTheDataTag) {
@@ -1336,19 +1280,17 @@ TEST(BodyBuilderDataField, C1_7_GroupWhoseNoTagIsTheDataTag) {
     body_builder twin{"X"};
     add_populated_group(twin, kOuterNo);
     ASSERT_FALSE(::testing::Test::HasFatalFailure());
-    auto const body = commit_body(twin);
-    ASSERT_TRUE(body.has_value()) << "error " << static_cast<int>(body.error());
+    expect_commit_ok(twin);
 }
 
 TEST(BodyBuilderDataField, C1_7_HandWrittenWellFormedPairCommits) {
     body_builder bb{"X"};
     ASSERT_TRUE(bb.field(354, std::int64_t{3}).has_value());
     ASSERT_TRUE(bb.field(355, std::string_view{"abc"}).has_value());
-    auto const body = commit_body(bb);
-    ASSERT_TRUE(body.has_value()) << "error " << static_cast<int>(body.error());
-    EXPECT_EQ(*body, std::string{"35=X\x01"
-                                 "354=3\x01"
-                                 "355=abc\x01"});
+    auto const body = expect_commit_ok(bb);
+    EXPECT_EQ(body, std::string{"35=X\x01"
+                                "354=3\x01"
+                                "355=abc\x01"});
 }
 
 // ── C-1.8 the pair check runs per container ─────────────────────────────────
@@ -1378,13 +1320,12 @@ TEST(BodyBuilderDataField, C1_8_LengthEndingAnInstanceDoesNotPairAcrossContainer
         ASSERT_TRUE(te->set_int(354, 1).has_value());
         ASSERT_TRUE(te->set_string(355, "x").has_value());
         ASSERT_TRUE(twin.group_end(*tg).has_value());
-        auto const body = commit_body(twin);
-        ASSERT_TRUE(body.has_value()) << "error " << static_cast<int>(body.error());
-        EXPECT_EQ(*body, std::string{"35=X\x01"
-                                     "78=1\x01"
-                                     "79=A1\x01"
-                                     "354=1\x01"
-                                     "355=x\x01"});
+        auto const body = expect_commit_ok(twin);
+        EXPECT_EQ(body, std::string{"35=X\x01"
+                                    "78=1\x01"
+                                    "79=A1\x01"
+                                    "354=1\x01"
+                                    "355=x\x01"});
     }
     {
         SCOPED_TRACE("Length ends a nested group's instance; Data is the outer entry's next field");
@@ -1416,15 +1357,14 @@ TEST(BodyBuilderDataField, C1_8_LengthEndingAnInstanceDoesNotPairAcrossContainer
         ASSERT_TRUE(tie->set_string(355, "x").has_value());
         ASSERT_TRUE(twin.group_end(*tig).has_value());
         ASSERT_TRUE(twin.group_end(ts.outer).has_value());
-        auto const body = commit_body(twin);
-        ASSERT_TRUE(body.has_value()) << "error " << static_cast<int>(body.error());
-        EXPECT_EQ(*body, std::string{"35=X\x01"
-                                     "78=1\x01"
-                                     "79=A1\x01"
-                                     "453=1\x01"
-                                     "448=P1\x01"
-                                     "354=1\x01"
-                                     "355=x\x01"});
+        auto const body = expect_commit_ok(twin);
+        EXPECT_EQ(body, std::string{"35=X\x01"
+                                    "78=1\x01"
+                                    "79=A1\x01"
+                                    "453=1\x01"
+                                    "448=P1\x01"
+                                    "354=1\x01"
+                                    "355=x\x01"});
     }
 }
 
@@ -1437,12 +1377,11 @@ TEST(BodyBuilderDataField, C1_10_LengthDelimitedEntryCommits) {
     ASSERT_TRUE(e.has_value());
     ASSERT_TRUE(e->set_data(42684, octets("f(x)")).has_value());
     ASSERT_TRUE(bb.group_end(*g).has_value());
-    auto const body = commit_body(bb);
-    ASSERT_TRUE(body.has_value()) << "error " << static_cast<int>(body.error());
-    EXPECT_EQ(*body, std::string{"35=X\x01"
-                                 "78=1\x01"
-                                 "43109=4\x01"
-                                 "42684=f(x)\x01"});
+    auto const body = expect_commit_ok(bb);
+    EXPECT_EQ(body, std::string{"35=X\x01"
+                                "78=1\x01"
+                                "43109=4\x01"
+                                "42684=f(x)\x01"});
 }
 
 // ── C-1.11 a second call appends a second pair ──────────────────────────────
@@ -1450,13 +1389,12 @@ TEST(BodyBuilderDataField, C1_11_TwoCallsAppendTwoPairs) {
     body_builder bb{"X"};
     ASSERT_TRUE(bb.field_data(355, octets("ab")).has_value());
     ASSERT_TRUE(bb.field_data(355, octets("cde")).has_value());
-    auto const body = commit_body(bb);
-    ASSERT_TRUE(body.has_value()) << "error " << static_cast<int>(body.error());
-    EXPECT_EQ(*body, std::string{"35=X\x01"
-                                 "354=2\x01"
-                                 "355=ab\x01"
-                                 "354=3\x01"
-                                 "355=cde\x01"});
+    auto const body = expect_commit_ok(bb);
+    EXPECT_EQ(body, std::string{"35=X\x01"
+                                "354=2\x01"
+                                "355=ab\x01"
+                                "354=3\x01"
+                                "355=cde\x01"});
 }
 
 // ── T024 zero global ::operator new on the new paths ────────────────────────

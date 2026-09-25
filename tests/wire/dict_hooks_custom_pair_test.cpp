@@ -41,7 +41,6 @@
 
 #include <gtest/gtest.h>
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -63,6 +62,7 @@
 #include <utility>
 #include <vector>
 
+#include "support/body_builder_test_helpers.hpp"
 #include "support/frame_view_factory.hpp"
 #include "support/wire_test_hooks.hpp"  // fixpp#426 r11 T-1: the nested-cache introspection seam
 
@@ -1074,48 +1074,13 @@ namespace {
 namespace c19 {
 
 using fixpp::core::error;
-using fixpp::core::expected_t;
 using fixpp::wire::body_builder;
-
-constexpr std::size_t kBufSize = 8192;
-
-std::span<const std::byte> octets(std::string_view sv) {
-    return std::span<const std::byte>{reinterpret_cast<const std::byte*>(sv.data()), sv.size()};
-}
+using namespace fixpp::test_support::body_builder_helpers;
 
 table_view make_pair_dict(std::uint16_t length_tag, std::uint16_t data_tag) {
     table_view_builder tvb;
     tvb.set_length_pair_data_tag(length_tag, data_tag);
     return std::move(tvb).build();
-}
-
-expected_t<std::string> commit_body(body_builder& b) {
-    std::array<std::byte, kBufSize> buf{};
-    auto r = b.commit(std::span<std::byte>{buf});
-    if (!r.has_value()) return std::unexpected(r.error());
-    return std::string{reinterpret_cast<char const*>(r->data()), r->size()};
-}
-
-// The commit is refused with `want` and leaves `out` untouched.
-void expect_commit_refused(body_builder& b, error want) {
-    std::array<std::byte, kBufSize> buf{};
-    buf.fill(std::byte{0xAB});
-    auto r = b.commit(std::span<std::byte>{buf});
-    ASSERT_FALSE(r.has_value()) << "commit accepted the body";
-    EXPECT_EQ(r.error(), want);
-    for (auto const byte : buf) {
-        ASSERT_EQ(byte, std::byte{0xAB}) << "out must be untouched on a refused commit";
-    }
-}
-
-// A closed group `no_tag` (delimiter AllocAccount(79)) with one populated instance.
-void add_populated_group(body_builder& b, std::uint16_t no_tag) {
-    auto g = b.group_begin(no_tag, 79);
-    ASSERT_TRUE(g.has_value());
-    auto e = g->add_entry();
-    ASSERT_TRUE(e.has_value());
-    ASSERT_TRUE(e->set_string(79, "A1").has_value());
-    ASSERT_TRUE(b.group_end(*g).has_value());
 }
 
 }  // namespace c19
