@@ -966,12 +966,12 @@ FR-019, SC-006).
 - `git grep -nE '#418|fixpp ?#418' -- . ':!specs/091-data-field-bytes'` finds no text describing the
   gap as open.
 
-- [ ] T047 [US4] Via `phase-implementer`, reword the comments FR-016 names:
+- [X] T047 [US4] Via `phase-implementer`, reword the comments FR-016 names:
   - `tests/interop/conversation/support/conv_wire.hpp` (the hand-built-frame route);
   - `tests/interop/conversation/conv_cell_test.cpp` (B-05).
   Both stay on their hook. The comment says why: moving B-05 needs a counterparty republish (spec
   Assumptions). It no longer says that #418 is open. No behaviour change.
-- [ ] T048 [US4] Ledger edits in `spec/behaviors-and-limitations.md` and
+- [X] T048 [US4] Ledger edits in `spec/behaviors-and-limitations.md` and
   `spec/behaviors-and-limitations-closed.md` (orchestrator-authored `.md`). Assign the final row IDs
   against the live file.
   - **Move** L-067-2 to the closed file, citing stage-one `68c8c769` and this PR.
@@ -1004,14 +1004,14 @@ FR-019, SC-006).
     positional aggregate), the user-loaded-dictionary effects, the recipe-derived BREAKING
     population, and the additive widenings.
   - No citation of a line number; cite files and symbols.
-- [ ] T049 [P] [US4] `spec/feature-catalogue.md` edits.
+- [X] T049 [P] [US4] `spec/feature-catalogue.md` edits.
   - W-008's evidence column gains this feature.
   - A C-ABI 1.9 BREAKING note, in the style of CA-011's 1.8 note, on every CA row that lists a
     declaration FR-019 marks, reader-paragraph members included.
   - Re-derive the rows: match each Appendix A class-B row whose carrier is a declaration note or the
     reader paragraph against each CA row's listed functions. The root cause is the
     `fixpp_dict_load_from_xml` row, CA-011.
-- [ ] T050 [P] [US4] Brain updates, orchestrator-authored:
+- [X] T050 [P] [US4] Brain updates, orchestrator-authored:
   - `brain/components/wire.md` §*Length+Data pairs*: "#418's `body_builder` must reuse" becomes past
     tense, and the loader/drift-arm change is noted.
   - `brain/components/dictionary.md`: the loader walk's present-tense "never entered `<component>` or
@@ -1024,11 +1024,11 @@ FR-019, SC-006).
     `interpret_logon` (the design doc is not edited; the brain page flags it, #334).
   - Record that `.specify/426-428-length-data-pairs.md`'s "the drift test keeps the two in step" was
     stale per dictionary and is made true by FR-018. The 426-428 note itself is not edited.
-- [ ] T051 [US4] Article XIX §5 docs check:
+- [X] T051 [US4] Article XIX §5 docs check:
   - run `find . -maxdepth 3 -name 'Doxyfile*'`, and if one exists, regenerate it;
   - run `git grep -n -e body_builder -e length_pair -e 'Length+Data' -- docs/src`, and update any
     hit (`.md` is orchestrator-authored).
-- [ ] T052 [US4] FR-016 sweep.
+- [X] T052 [US4] FR-016 sweep.
   - Run `git grep -nE '#418|fixpp ?#418' -- . ':!specs/091-data-field-bytes'` (not a bare `418`,
     which matches FIX tag 418).
   - Every hit is past tense or a history reference, and none describes the gap as open.

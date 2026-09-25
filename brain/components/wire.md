@@ -218,6 +218,11 @@ and added a drift arm per shipped dictionary (FR-018, below).
 each dictionary, until 091** (found at 091's Gate A; FR-018 makes it true per dictionary). The note
 is not edited; it is flagged here (#334). The note is
 `.specify/426-428-length-data-pairs.md`, in its codegen paragraph.
+
+⚠️ **The same note's "#418 is unchanged: C++ `body_builder` still cannot emit a non-ASCII Data value
+(L-067-2)" stopped being true with 091.** `body_builder::field_data` and `entry_handle::set_data`
+now carry any octet, and L-067-2 is closed (B-091-5). The note is a dated record and is not edited;
+read that sentence as history (#334).
 - `HeaderEqualsShippedDictionaryUnion` compares the standard table with the union of the pairs from
   every shipped dictionary. Orchestra's `lengthId` supplies every pair, so the union matches even
   when one QuickFIX-XML dictionary's loader misses some.
