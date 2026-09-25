@@ -13,10 +13,11 @@
 // the after-run needs a regenerated tree: build the fixpp-codegen target,
 // remove build/<preset>/_codegen, then rebuild this target.
 //
-// Every case first builds once outside the timed loop and checks a body
-// substring that only the intended path produces; on a mismatch it calls
-// SkipWithError, so a case that would time an early error exit reports an
-// error instead of a number.
+// Every case first builds once outside the timed loop and checks the body; on
+// a mismatch it calls SkipWithError, so a case that would time an early error
+// exit, or a different message, reports an error instead of a number.
+// NoGroup, WithGroup and Raw compare the whole body against a spelled-out
+// constant; AsciiEncodedText checks a substring that only its path produces.
 
 #include <benchmark/benchmark.h>
 
@@ -149,15 +150,35 @@ static void BM_Build_NOS_NoGroup(benchmark::State& state) {
 }
 BENCHMARK(BM_Build_NOS_NoGroup);
 
-// Same scalars plus the Parties (NoPartyIDs 453) repeating group.
+// Same scalars plus the Parties (NoPartyIDs 453) repeating group, all three
+// kParties entries. Pinned exactly, spelled out independently of kNoGroupBody.
+constexpr std::string_view kWithGroupBody =
+    "35=D\x01"
+    "1=ACC001\x01"
+    "11=ORD12345678\x01"
+    "38=100\x01"
+    "40=2\x01"
+    "44=150.25\x01"
+    "54=1\x01"
+    "55=AAPL\x01"
+    "58=BenchOrder\x01"
+    "59=0\x01"
+    "60=20260516-09:30:00.000\x01"
+    "453=3\x01"
+    "448=EXECBROKER1\x01"
+    "447=D\x01"
+    "452=1\x01"
+    "448=CLEARFIRM22\x01"
+    "447=D\x01"
+    "452=4\x01"
+    "448=TRADER333\x01"
+    "447=D\x01"
+    "452=11\x01";
+
 static void BM_Build_NOS_WithGroup(benchmark::State& state) {
     auto args = base_args();
     args.party_i_ds = std::span<const G_453Args>{kParties};
-    run_nos(state, args,
-            "\x01"
-            "453=3\x01"
-            "448=EXECBROKER1\x01",
-            "");
+    run_nos(state, args, kWithGroupBody, "", /*exact=*/true);
 }
 BENCHMARK(BM_Build_NOS_WithGroup);
 
@@ -174,7 +195,21 @@ static void BM_Build_NOS_AsciiEncodedText(benchmark::State& state) {
 }
 BENCHMARK(BM_Build_NOS_AsciiEncodedText);
 
-// body_builder driven directly: flat field() calls, then commit().
+// body_builder driven directly: flat field() calls, then commit(). Pinned
+// exactly, spelled out independently of kNoGroupBody.
+constexpr std::string_view kRawBody =
+    "35=D\x01"
+    "1=ACC001\x01"
+    "11=ORD12345678\x01"
+    "38=100\x01"
+    "40=2\x01"
+    "44=150.25\x01"
+    "54=1\x01"
+    "55=AAPL\x01"
+    "58=BenchOrder\x01"
+    "59=0\x01"
+    "60=20260516-09:30:00.000\x01";
+
 static void BM_BodyBuilder_Raw_10Fields(benchmark::State& state) {
     std::array<std::byte, 4096> out{};
     const auto& q = qty();
@@ -198,9 +233,12 @@ static void BM_BodyBuilder_Raw_10Fields(benchmark::State& state) {
     };
     {
         auto r = build();
-        if (!r || as_sv(*r).find("\x01"
-                                 "60=20260516-09:30:00.000\x01") == std::string_view::npos) {
-            state.SkipWithError("body_builder precheck failed");
+        if (!r) {
+            state.SkipWithError("body_builder precheck: build failed");
+            return;
+        }
+        if (as_sv(*r) != kRawBody) {
+            state.SkipWithError("body_builder precheck: body differs from the expected bytes");
             return;
         }
     }
