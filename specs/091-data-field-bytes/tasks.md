@@ -1338,9 +1338,11 @@ FR-019, SC-006).
     merge in. Every changed line named above must be covered, or assessed line by line
     (`[const §IX.1]`).
   - **Allocation gate (mallocnesia, `[const §VIII.5]`)** (owner request 2026-09-25):
-    - The interceptor is the CMake target `build/<preset>/lib/libmallocnesia.so` (fixpp#448). The
-      skill's `tools/mallocnesia/` and `/usr/local/lib` probe is stale, and a
-      "SKIPPED (interceptor missing)" result from that probe is not accepted.
+    - The interceptor is the CMake target `mallocnesia`, built into
+      `build/<preset>/lib/libmallocnesia.so` (fixpp#448). Follow `/speckit-verify` Step 6, which
+      mirrors tier1: `tools/check_mallocnesia_population.py --min-gates <tier1's floor>`, then
+      `ctest --preset linux-clang-release -L mallocnesia --no-tests=error`, with
+      `mallocnesia_positive_control` passing. "SKIPPED (interceptor missing)" is not accepted.
     - Run every `*_mallocnesia` ctest twin the branch touches, including
       `session_length_data_scanner_mallocnesia` and the `capi_*_mallocnesia` twins, and
       `tools/check_alloc.py` where a guard target exists.
