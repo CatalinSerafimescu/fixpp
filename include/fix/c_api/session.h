@@ -232,9 +232,9 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_open(fixpp_engine_t* engine,
  * of the whole framed message, or whose following byte is not SOH (standard
  * pairs included), which was accepted, is now refused, on either role. Once a
  * session whose Logon was refused that way has drained, close returns
- * FIXPP_ERR_THREAD_SESSION_LIFECYCLE where it returned FIXPP_ERR_OK: that
- * session never established, so it is not the established-then-reaped case
- * above.
+ * FIXPP_ERR_THREAD_SESSION_LIFECYCLE, translated for the consumer's ABI minor
+ * (fixpp_engine_create), where it returned FIXPP_ERR_OK: that session never
+ * established, so it is not the established-then-reaped case above.
  *
  * Reentrancy: single-thread — non-callback / non-session-strand caller only; no
  * concurrent close on the same handle (the thunk posts onto the session domain
