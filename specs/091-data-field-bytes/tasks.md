@@ -1219,7 +1219,7 @@ FR-019, SC-006).
 
 - [X] T053 Run `/simplify` over the branch diff (`[const §XVI.7]`, pipeline step 11); fixes go through
   `phase-implementer`. Every later check (T060 onward) runs on the post-simplify head.
-- [ ] T054 After `/simplify` (T053) and codegen freshness, re-measure the compile-time surface "after" figure with
+- [X] T054 After `/simplify` (T053) and codegen freshness, re-measure the compile-time surface "after" figure with
   `bench/codegen/vlatest_builders_compile_bench/compile_bench.sh`, same command and toolchain as
   T002. Report the delta in `.specify/decisions/091-data-field-bytes-evidence.md`; it has no budget (R-10).
 
@@ -1303,11 +1303,11 @@ FR-019, SC-006).
 
 ### Close-out checks
 
-- [ ] T063 Record fixpp#506's fix before 091 closes (plan phase 7): FR-021 fixes it (owner ruling
+- [X] T063 Record fixpp#506's fix before 091 closes (plan phase 7): FR-021 fixes it (owner ruling
   2026-09-25); name the §2e commits and the T078 cells in the evidence file, and confirm the parent's
   `phases/phase-4/issue-batches.md` Parked entry for #506 (updated early at T082, parent `f126dde`). **Owner ruling 2026-09-25: #506 closes through this PR**
   (FR-021 delivers its whole Expected and Test sections). T067 carries its closing keyword. Confirm fixpp#505 is open and cited in B-091-3.
-- [ ] T064 Run the quickstart §2 label gate. It must pass: the label set equals the manifest, and
+- [X] T064 Run the quickstart §2 label gate. It must pass: the label set equals the manifest, and
   every manifest entry is a registered test. Then run `ctest --test-dir build/linux-clang-debug -L '^091$' --output-on-failure`, all
   GREEN.
 - [ ] T077 Via the `checklist-auditor` (the checklists are reviewer-owned), audit the checklists
