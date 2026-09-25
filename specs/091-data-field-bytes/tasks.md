@@ -890,13 +890,13 @@ are the four flipped `_418` pins, plus C-2.6.
 **Independent test**: `SohInValue_RejectedBeforeAnyByteReachesOut` passes unedited. The C-1.4 and
 C-1.9 refusal arms pass, and each is shown able to fail.
 
-- [ ] T041 [US2] Prove `SohInValue_RejectedBeforeAnyByteReachesOut` is byte-identical (FR-007,
+- [X] T041 [US2] Prove `SohInValue_RejectedBeforeAnyByteReachesOut` is byte-identical (FR-007,
   SC-002). `git diff origin/main -- tests/session/test_067_builder_failclosed.cpp` shows no hunk
   inside that `TEST` body, and every pre-existing injection-guard test in
   `tests/wire/test_body_builder.cpp` and `tests/session/test_067_builder_failclosed.cpp` is unedited
   (`git diff origin/main` hunks touch only new tests and the four flipped pins). Record both diffs in
   `.specify/decisions/091-data-field-bytes-evidence.md`.
-- [ ] T042 [US2] Via `phase-implementer`, run the guard mutants from quickstart §3 in a scratch copy.
+- [X] T042 [US2] Via `phase-implementer`, run the guard mutants from quickstart §3 in a scratch copy.
   Each is RED on the named arm, then GREEN after revert:
   - "`set_data` skips pair resolution (forwards straight to `append_bytes_field`)" → C-1.4's
     `set_data` arms for tag 11 (the SOH-bearing payload) and tag 354; C-1.9's `set_data(5002, …)`
@@ -909,7 +909,7 @@ C-1.9 refusal arms pass, and each is shown able to fail.
     pass through UB;
   - "`set_data` omits `is_innermost_open`" → C-1.4b outer handle and closed-group handle.
   Record them in `.specify/decisions/091-data-field-bytes-evidence.md` §*Mutants*.
-- [ ] T043 [US2] Confirm FR-012 / SC-002 from T028/T037: the census reports zero `field_data`/
+- [X] T043 [US2] Confirm FR-012 / SC-002 from T028/T037: the census reports zero `field_data`/
   `set_data` on a tag outside the standard Data set, on every version. Cite control (b)/(c) as the
   proof that it can fire, and the `static_assert` positive control (T040, first bullet) as the
   per-call-site guard.
@@ -927,7 +927,7 @@ neither, and malformed hand-written pairs are refused at commit (FR-001, FR-002,
 rollback on arena exhaustion and on the body cap (C-1.1–C-1.11 except C-1.9; C-1.9 is in
 `wire_dict_tests`).
 
-- [ ] T044 [US3] Via `phase-implementer`, run the contract mutants from quickstart §3 in a scratch
+- [X] T044 [US3] Via `phase-implementer`, run the contract mutants from quickstart §3 in a scratch
   copy:
   - "`field_data` appends Data before Length" → C-1.1 and C-1.10;
   - "the second-append rollback is removed" → C-1.5 (its commit-and-byte-compare oracle);
@@ -943,7 +943,7 @@ rollback on arena exhaustion and on the body cap (C-1.1–C-1.11 except C-1.9; C
   `phases/phase-4/parallel-worktrees.md`). The arrangement witness must hold there too, because
   outer-vector regrowth differs by STL. If the MSVC leg cannot run, record a waiver with its cost
   stated plainly ("CI's MSVC matrix runs only once both gate labels land"), not as "CI covers it".
-- [ ] T046 [US3] Blast radius of FR-008 for hand-written callers (R-4).
+- [X] T046 [US3] Blast radius of FR-008 for hand-written callers (R-4).
   - Re-run `git grep -n "field(\(90\|91\|95\|96\|212\|213\|354\|355\)\b" -- src tests bench bindings`.
   - Confirm that the full ctest run of T027 raised no `wire_invalid_field_format` from a
     pre-existing caller (T065 repeats the check at the verify head).
