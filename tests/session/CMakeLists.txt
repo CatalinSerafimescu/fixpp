@@ -2682,6 +2682,38 @@ if(TARGET fixpp_codegen_generate)
   set_tests_properties(test_067_builder_failclosed PROPERTIES
     LABELS "067;us1;failclosed;069;all_families;us1_smoke;091")
 
+  # ── 091-data-field-bytes T039 [US1] — Length+Data pairs through
+  # Session::send_impl (quickstart §5, research R-9). Its own executable under
+  # [const §VII.8]: it needs FIXPP_TEST_HOOKS, fixpp_mock_clock and
+  # fixpp::builders::v44 together in one binary.
+  add_executable(session_091_data_send
+    test_091_data_send.cpp
+    $<TARGET_OBJECTS:session_test_support>  # extract_field
+  )
+  add_dependencies(session_091_data_send fixpp_codegen_generate)
+  target_link_libraries(session_091_data_send PRIVATE
+    fixpp_session
+    fixpp_mock_clock
+    fixpp_dictionary
+    fixpp::builders::v44
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(session_091_data_send PRIVATE
+    "${_067_CODEGEN_INC}"
+    "${CMAKE_SOURCE_DIR}/tests"
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  target_compile_definitions(session_091_data_send PRIVATE
+    FIXPP_TEST_HOOKS  # Session::seqnum_mgr_test_access
+    "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""  # load_fix44 (re-parse)
+  )
+  add_test(NAME session_091_data_send COMMAND session_091_data_send)
+  set_tests_properties(session_091_data_send PROPERTIES
+    LABELS "091"
+    ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+    TIMEOUT 120)
+
   # ── 067-codegen-writer-emitter T022 [US3] [TESTS-FIRST] — validate_<Msg>
   # required-presence witnesses. Constructs each message via build_<Msg> then
   # exercises validate_<Msg>, so it links BOTH prebuilt v44 libs
