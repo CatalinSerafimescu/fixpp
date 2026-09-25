@@ -680,10 +680,10 @@ only then made GREEN.
 
 Added during `/speckit-implement`, after `/simplify` (T053) measured the defect (evidence file
 §*/simplify (T053)*, M1). It is Foundational in kind but runs **after T053 and before T054**, so every
-later measurement is of the final candidate. **Entry condition:** the scoped Gate A round on the
-FR-021 delta has converged, `/speckit-analyze` has been re-run (✅ 2026-09-25), and the owner has re-signed the plan
-(plan.md Constitution Check, X row; §Gate A, *Scoped FR-021 round*). Until each is recorded, T078
-does not start. No fuzz harness reaches `fixpp_msg_commit` and FR-021 changes no parser, so no
+later measurement is of the final candidate. **Entry condition (met 2026-09-25):** the scoped Gate A round on
+the FR-021 delta has converged (round 3), `/speckit-analyze` has been re-run, and the owner has
+re-signed the plan (plan.md Constitution Check, X row; §Gate A, *Scoped FR-021 round*;
+`.specify/decisions/091-data-field-bytes-gatea.md` §"Addendum — scoped Gate A round on FR-021 (2026-09-25)"). T078 may start. No fuzz harness reaches `fixpp_msg_commit` and FR-021 changes no parser, so no
 fuzz task is added (re-derive: `git grep -ln -e fixpp_msg_commit -e fixpp_msg_group_begin -- '*fuzz*'` (empty; a hit reopens this), positive control `git grep -ln -e on_inbound_frame -- '*fuzz*'`, which must list `tests/fuzz/fuzz_session_recovery_admin_parse.cpp`).
 
 - [ ] T078 Via `phase-implementer`, the FR-021 RED witnesses in `tests/capi/length_data_setters_test.cpp`
@@ -1372,7 +1372,8 @@ FR-019, SC-006).
     is `.specify/decisions/091-data-field-bytes-gatea.md` §"Addendum — scoped Gate A round on
     FR-020 (2026-09-25)" (converged round 3; owner re-sign-off 2026-09-25). Likewise the FR-021
     scoped Gate A: plan.md §Gate A's *Scoped FR-021 round …* entries, their review files, and the
-    owner's FR-021 plan re-sign-off. If either scoped round has not
+    owner's FR-021 plan re-sign-off; the FR-021 Gate A record is
+    `.specify/decisions/091-data-field-bytes-gatea.md` §"Addendum — scoped Gate A round on FR-021 (2026-09-25)" (converged round 3; owner re-sign-off 2026-09-25). If either scoped round has not
     converged or either re-sign-off is still pending (plan.md Constitution Check, X row), ask the owner
     before labelling. If Gate B rules
     that `[const §XVII.8]`'s "Codex convergence record" is not met, ask the owner before labelling;
