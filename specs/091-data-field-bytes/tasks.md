@@ -1305,9 +1305,8 @@ FR-019, SC-006).
 
 - [ ] T063 Record fixpp#506's fix before 091 closes (plan phase 7): FR-021 fixes it (owner ruling
   2026-09-25); name the §2e commits and the T078 cells in the evidence file, and update the parent's
-  `phases/phase-4/issue-batches.md` Parked entry for #506. Whether #506 closes through this PR or
-  by hand after merge is an owner decision: ask before T067 labels, and never add a closing keyword
-  for it unasked. Confirm fixpp#505 is open and cited in B-091-3.
+  `phases/phase-4/issue-batches.md` Parked entry for #506. **Owner ruling 2026-09-25: #506 closes through this PR**
+  (FR-021 delivers its whole Expected and Test sections). T067 carries its closing keyword. Confirm fixpp#505 is open and cited in B-091-3.
 - [ ] T064 Run the quickstart §2 label gate. It must pass: the label set equals the manifest, and
   every manifest entry is a registered test. Then run `ctest --test-dir build/linux-clang-debug -L '^091$' --output-on-failure`, all
   GREEN.
@@ -1358,8 +1357,10 @@ FR-019, SC-006).
   - the FR-021 fix: `fixpp_msg_commit` feeds a group node an empty value to the Length+Data check, so
     a group whose count tag is a pair half, which committed `FIXPP_ERR_OK` when its instance-count
     digits completed the pair, now returns `FIXPP_ERR_WIRE_CONFORMANCE` (C-ABI 1.9 BREAKING, reachable
-    on every session with no dictionary); FR-021 repairs the defect issue 506 tracks, and how that
-    issue closes follows the owner's T063 ruling (write no closing verb next to its number);
+    on every session with no dictionary); FR-021 repairs the defect issue 506 tracks, and the body
+    closes it (owner ruling 2026-09-25, T063): one affirmative `Closes #506` line beside
+    `Closes #418`, and no negated sentence anywhere that mentions either number (a closing keyword
+    fires inside a negation);
   - `local build: green on linux-clang-debug @ <git-sha>` (`[const §XVII.7]`), with the SHA T065
     verified;
   - a `## Gates` section, and a `## Gate B …` heading for the Gate B record;
@@ -1383,7 +1384,7 @@ FR-019, SC-006).
   (`git log origin/main..HEAD --format=%B`) for `close[sd]?|fix(e[sd])?|resolve[sd]?` next to
   `#50[56]` or any number other than 418 (other than #506 if the T063 ruling allows it). A negated
   keyword still links. After opening, check
-  `closingIssuesReferences` lists only #418, plus #506 if and only if the T063 ruling added it.
+  `closingIssuesReferences` lists exactly #418 and #506 (T063 ruling), and nothing else.
 
 ### Mandatory close-out tasks (Gate-B preconditions, Article XVII §8)
 
