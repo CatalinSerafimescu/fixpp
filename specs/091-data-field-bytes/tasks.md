@@ -1333,6 +1333,21 @@ FR-019, SC-006).
     `src/session/admin_messages.cpp` and `check_length_data`'s changed lines in
     `src/capi/message_write.cpp` (FR-021)), clang-tidy and ABI hygiene.
   - It includes the full `ctest --test-dir build/linux-clang-debug` run.
+  - **Coverage** runs on `linux-clang-coverage` (its build tree lives on the F: vhdx through the
+    `build/` symlink, not on E:). The `.profraw` files are purged first, so no stale profile can
+    merge in. Every changed line named above must be covered, or assessed line by line
+    (`[const §IX.1]`).
+  - **Allocation gate (mallocnesia, `[const §VIII.5]`)** (owner request 2026-09-25):
+    - The interceptor is the CMake target `build/<preset>/lib/libmallocnesia.so` (fixpp#448). The
+      skill's `tools/mallocnesia/` and `/usr/local/lib` probe is stale, and a
+      "SKIPPED (interceptor missing)" result from that probe is not accepted.
+    - Run every `*_mallocnesia` ctest twin the branch touches, including
+      `session_length_data_scanner_mallocnesia` and the `capi_*_mallocnesia` twins, and
+      `tools/check_alloc.py` where a guard target exists.
+    - For each, record evidence that the interceptor **took effect** (LOADED is not INTERPOSED): a
+      line the override writes, or a planted allocation that it catches.
+    - Also record the `NoGlobalHeap_FieldDataSetDataCommit` result on the Linux lanes, and the MSVC
+      debug skip of that test (the `_ITERATOR_DEBUG_LEVEL` guard; evidence §US3 on MSVC).
   - ⚠️ The §7 full build needs an owner ASK, even as gate evidence.
 
 - [ ] T066 **`CLAUDE-history.md` entry** (Article XIX, plan Constitution Check): via `phase-implementer`
