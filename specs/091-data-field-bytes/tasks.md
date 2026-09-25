@@ -690,7 +690,7 @@ are the four flipped `_418` pins, plus C-2.6.
 
 ### Tests for User Story 1 (write first; RED until T036)
 
-- [ ] T028 [US1] Via `phase-implementer`, create the **exact completeness census** (C-2.2, FR-010,
+- [X] T028 [US1] Via `phase-implementer`, create the **exact completeness census** (C-2.2, FR-010,
   FR-012, SC-003) as a new standalone executable `codegen_091_data_census_test` in
   `tests/codegen/CMakeLists.txt`.
   - **Standalone, as the `[const §VII.8]` exact-set completeness-gate exemption.** It carries label
@@ -721,7 +721,7 @@ are the four flipped `_418` pins, plus C-2.6.
     so it is RED; quote that output. It turns GREEN at T035. Control (a) (T037) needs the new emitter.
   - It takes the generated-source root as an argument (default `${FIXPP_CODEGEN_OUT}`), so the T037
     controls can point it at a mutant's output.
-- [ ] T029 [P] [US1] Via `phase-implementer`, add the C-2.6 exhaustive witnesses to
+- [X] T029 [P] [US1] Via `phase-implementer`, add the C-2.6 exhaustive witnesses to
   `tests/session/test_067_builder_roundtrip.cpp` (`test_067_builder_roundtrip`: wire + dictionary +
   v44 builders).
   - Two parameterized tests over every octet `0x00–0xFF`. Each asserts the raw frame boundaries
@@ -733,7 +733,7 @@ are the four flipped `_418` pins, plus C-2.6.
   - Name the message and group from the C-2.2 census (T028, run on the old emitter, which lists the
     expected tuples), and cite that census, not a remembered name.
   - RED at first: the Data goes through `set_string`.
-- [ ] T030 [US1] Via `phase-implementer`, add the C-2.3 compile-time presence checks.
+- [X] T030 [US1] Via `phase-implementer`, add the C-2.3 compile-time presence checks.
   - Each check is a `constexpr bool` computed from a `requires` expression and asserted with
     `EXPECT_TRUE`/`EXPECT_FALSE`, never a `static_assert`: a compile error would stop the whole
     binary and hide T029's runtime RED.
@@ -751,14 +751,14 @@ are the four flipped `_418` pins, plus C-2.6.
     "one message per version" for them (recorded in the evidence file).
   - RED (a test failure, not a build failure) at first.
 
-- [ ] T031 [P] [US1] Via `phase-implementer`, add the v50sp2 Length-delimited group witness (R-6) to
+- [X] T031 [P] [US1] Via `phase-implementer`, add the v50sp2 Length-delimited group witness (R-6) to
   `tests/session/test_077_allversions_builder_roundtrip.cpp`.
   - Build one `NoPaymentStreamFormulas` entry (delimiter `PaymentStreamFormulaLength` 43109) whose
     Data holds SOH. Assert commit success, `43109=<octet count>` first in the entry, and a re-parse
     that recovers the Data.
   - Written after T014 and before T033: on T014's intermediate goldens the pair is coupled in the old two-call
     form, and the Data half still takes the string path (`set_string`), which refuses SOH. Run it and quote that RED; it turns GREEN at T036.
-- [ ] T032 [P] [US1] Via `phase-implementer`, add a vlatest coupled-pair round trip to
+- [X] T032 [P] [US1] Via `phase-implementer`, add a vlatest coupled-pair round trip to
   `tests/session/test_077_allversions_builder_roundtrip_vlatest.cpp`.
   - Use one vlatest message with a coupled Data member whose value holds SOH and `0xFF`. Assert
     verbatim emit, Length = octet count, and a re-parse (spec Edge Cases, "FIX Latest").
