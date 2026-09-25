@@ -90,6 +90,14 @@
  *  (fixpp_engine_create), not FIXPP_ERR_OK; neither the receive
  *  callback (fixpp_session_register_callback) nor the toApp callback
  *  (fixpp_session_register_send_callback) is ever invoked for it.
+ *  Independently of the loader change that opens this entry (FR-021,
+ *  fixpp#506), fixpp_msg_commit checks a group's count field as a field with
+ *  an empty value, so a group whose count tag is the Length or the Data half
+ *  of a pair, a standard pair or one the session dictionary declares, which
+ *  returned FIXPP_ERR_OK when its instance-count digits completed the pair,
+ *  now returns FIXPP_ERR_WIRE_CONFORMANCE; this is reachable on every session
+ *  with no dictionary, and on a dictionary session only where that dictionary
+ *  declares a group on a tag that is a pair half.
  *  No error code is added. */
 #define FIXPP_C_ABI_VERSION_MAJOR 1
 #define FIXPP_C_ABI_VERSION_MINOR 9 /* 1.9: component/group-only Length+Data pairs (fixpp#418) */

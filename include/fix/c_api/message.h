@@ -496,6 +496,13 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_remove_tag(fixpp_msg_t* msg, uint16_t t
  *  that kind, which returned FIXPP_ERR_OK, now returns
  *  FIXPP_ERR_WIRE_CONFORMANCE.
  *
+ *  BREAKING (C-ABI 1.9, FR-021), a cause separate from the loader's above: a
+ *  group's count field is checked as a field with an empty value, so a group
+ *  whose count tag is the Length or the Data half of a pair (the FIX
+ *  standard's, or the session dictionary's) is not read as that half. Such a
+ *  group, which returned FIXPP_ERR_OK when its instance-count digits completed
+ *  the pair, now returns FIXPP_ERR_WIRE_CONFORMANCE.
+ *
  *  Return codes:
  *    FIXPP_ERR_OK              -- success
  *    FIXPP_ERR_NULL_HANDLE     -- msg or payload_out or len_out is NULL
@@ -508,8 +515,10 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_remove_tag(fixpp_msg_t* msg, uint16_t t
  *                                     its Length, a Length not immediately before its
  *                                     Data, a Length that is not positive ASCII digits
  *                                     equal to the Data byte count (leading zeros are
- *                                     accepted), an empty Data value, or SOH in a field
- *                                     that is not a Data field
+ *                                     accepted), an empty Data value, SOH in a field
+ *                                     that is not a Data field, or (1.9, BREAKING) a
+ *                                     group whose count tag is the Length or the Data
+ *                                     half of a pair
  *
  *  Reentrancy: requires-session-lock
  */
