@@ -534,9 +534,10 @@ rejection now assert verbatim emit.
     naming 091/fixpp#418.
   - The affected population is **derived**, not listed by example: research.md R-11's *C-ABI 1.9
     population recipe* is re-run and every export is classified. It is carried out under the
-    round-3 ruling and needs no further owner decision. Every note below says that a Length+Data
-    pair a loaded dictionary declares only inside a component or group is now a dictionary pair,
-    then names that declaration's own effect. §X.7 classes a success turned into a failure, and a
+    round-3 ruling and needs no further owner decision. Every FR-017 note below says that a
+    Length+Data pair a loaded dictionary declares only inside a component or group is now a
+    dictionary pair, then names that declaration's own effect; the FR-020 and FR-021 clauses state
+    their own cause. §X.7 classes a success turned into a failure, and a
     failure turned into a different failure, as BREAKING whatever the documentation said. The
     per-export classification is data-model.md Appendix A, whose Symbol column equals
     `tests/abi/golden/fixpp_capi_symbols.txt` (plan Phase 0b checks it).
@@ -778,7 +779,12 @@ rejection now assert verbatim emit.
       `include/fixpp/core/length_data_pairs.hpp` and with the fields typed LENGTH, DATA or XMLDATA;
       positive control: add a known count tag (e.g. 453) to the probe set and see it reported.
       Whether a user dictionary can declare one depends on the loader accepting it, which is not
-      measured here; the condition, not a population, is what this requirement states.
+      measured here; the condition, not a population, is what this requirement states. Where it
+      holds, a group with **zero instances** is the shape most easily reached there: at commit,
+      `validate_group_grammar` runs its `group_first_field_exact` context lookup only for a group
+      with at least one instance (`dict && !e.instances.empty()`), so a zero-instance group meets
+      no delimiter or context check before `check_length_data`, and its count digits (`0`) could
+      complete a one-byte Data before FR-021.
   - **C-ABI effect** (FR-019, `[const §X.7]`: a success turned into a failure is BREAKING). The
     population follows research.md R-11's recipe: step 2 maps `check_length_data` to its only
     exported caller, `fixpp_msg_commit`, whose documented result changes, so its declaration in
@@ -802,11 +808,14 @@ rejection now assert verbatim emit.
     it supersedes research.md R-4's "not 091 scope" for the C-ABI group path.
   - Witnesses (task T078, written first and RED on the unfixed code, in
     `tests/capi/length_data_setters_test.cpp`, `capi_length_data`, on the no-dictionary fixture):
-    the Length shape and the Data shape at the top level, and the Length shape nested in a group
+    the Length shape and the Data shape at the top level, the Data shape with a zero-instance group
+    (`EmptyGroupTaggedAsTheDataDoesNotCompleteThePair`), and the Length shape nested in a group
     instance, each asserting `FIXPP_ERR_WIRE_CONFORMANCE` (today `FIXPP_ERR_OK`). Twins that hold
     before and after: the same group with a non-pair count tag and the same bare sibling Data is
     refused (an orphan Data); that group with no sibling commits; a well-formed pair next to a
-    group commits.
+    group commits; and a lone pair-half group with no neighbour is refused, for the Length
+    (`TwinLonePairLengthGroupIsRefused`) and the Data (`TwinLonePairDataGroupIsRefused`), which is
+    what separates feeding the group's own tag from feeding a non-pair tag.
 
 ### Key Entities
 

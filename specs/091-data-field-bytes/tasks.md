@@ -681,10 +681,10 @@ only then made GREEN.
 Added during `/speckit-implement`, after `/simplify` (T053) measured the defect (evidence file
 §*/simplify (T053)*, M1). It is Foundational in kind but runs **after T053 and before T054**, so every
 later measurement is of the final candidate. **Entry condition:** the scoped Gate A round on the
-FR-021 delta has converged, `/speckit-analyze` has been re-run, and the owner has re-signed the plan
+FR-021 delta has converged, `/speckit-analyze` has been re-run (✅ 2026-09-25), and the owner has re-signed the plan
 (plan.md Constitution Check, X row; §Gate A, *Scoped FR-021 round*). Until each is recorded, T078
 does not start. No fuzz harness reaches `fixpp_msg_commit` and FR-021 changes no parser, so no
-fuzz task is added (re-derive: `grep -ln 'fixpp_msg_commit' tests/fuzz`; a hit reopens this).
+fuzz task is added (re-derive: `git grep -ln -e fixpp_msg_commit -e fixpp_msg_group_begin -- '*fuzz*'` (empty; a hit reopens this), positive control `git grep -ln -e on_inbound_frame -- '*fuzz*'`, which must list `tests/fuzz/fuzz_session_recovery_admin_parse.cpp`).
 
 - [ ] T078 Via `phase-implementer`, the FR-021 RED witnesses in `tests/capi/length_data_setters_test.cpp`
   (`capi_length_data`, already labelled `091` and in `expected-ctest-091.txt`; no manifest change
@@ -702,6 +702,12 @@ fuzz task is added (re-derive: `grep -ln 'fixpp_msg_commit' tests/fuzz`; a hit r
     - `CapiCommitGroupNode.GroupTaggedAsTheDataDoesNotCompleteThePair` (the Data shape):
       `fixpp_msg_set_int(354, 1)`, then `fixpp_msg_group_begin(355)` with one instance; today
       `observe(355, "1")` satisfies the awaited one-byte Data;
+    - `CapiCommitGroupNode.EmptyGroupTaggedAsTheDataDoesNotCompleteThePair` (analyze E2): the Data
+      shape with **zero** instances: `fixpp_msg_set_int(354, 1)`, then `fixpp_msg_group_begin(355)`
+      and `fixpp_msg_group_end` with no entry; today `observe(355, "0")` satisfies the awaited
+      one-byte Data. Confirm the unfixed code returns `FIXPP_ERR_OK` by running it before writing it
+      as RED (a zero-instance group may be refused or serialised differently elsewhere); a
+      non-`OK` result goes to the orchestrator;
     - `CapiCommitGroupNode.NestedGroupTaggedAsALengthDoesNotCompleteThePair`: inside one instance of
       a group tagged 78, `fixpp_entry_group_begin(354)` with one instance, then
       `fixpp_entry_set_string(355, "x", 1)` on the outer entry (there is no `fixpp_entry_set_bytes`),
@@ -714,7 +720,13 @@ fuzz task is added (re-derive: `grep -ln 'fixpp_msg_commit' tests/fuzz`; a hit r
       commits `FIXPP_ERR_OK`;
     - `CapiCommitGroupNode.TwinWellFormedPairNextToAGroupCommits`: the group tagged 78, then
       `fixpp_msg_set_data(355, "x", 1)`; commits `FIXPP_ERR_OK` with the bytes
-      `…78=1␁79=A1␁354=1␁355=x␁`.
+      `…78=1␁79=A1␁354=1␁355=x␁`;
+    - `CapiCommitGroupNode.TwinLonePairLengthGroupIsRefused` (analyze E1): a group tagged 354 with
+      one instance `79=A1` and nothing else; refused `FIXPP_ERR_WIRE_CONFORMANCE` before (a Length
+      whose Data never comes) and after (an empty count);
+    - `CapiCommitGroupNode.TwinLonePairDataGroupIsRefused` (analyze E1): a group tagged 355 with
+      one instance `79=A1` and nothing else; refused `FIXPP_ERR_WIRE_CONFORMANCE` before and after
+      (a Data not preceded by its Length).
   - Before writing, re-read `check_length_data` and `length_data_checker::observe`
     (`include/fixpp/wire/length_data_check.hpp`) and confirm each RED cell's pre-change `FIXPP_ERR_OK`
     by running it; a cell that is not RED on the unfixed code goes to the orchestrator, not into the
@@ -744,7 +756,8 @@ fuzz task is added (re-derive: `grep -ln 'fixpp_msg_commit' tests/fuzz`; a hit r
     `FIXPP_ERR_WIRE_CONFORMANCE` return-code line with that case, so the documented refusals cover
     it.
   - `include/fix/c_api/version.h` 1.9 history: one FR-021 sentence naming `fixpp_msg_commit` and
-    the same condition.
+    the same condition, saying that it is independent of the loader change (the history's opening
+    cause) and applies to standard pairs on any session, a session with no dictionary included.
   - No other declaration changes (FR-021's classification: `fixpp_msg_group_begin`,
     `fixpp_entry_group_begin`, the setters and `fixpp_session_send` return what they did). Before
     writing, re-read the source T079 left; a clause that disagrees with it goes to the orchestrator.
@@ -757,10 +770,15 @@ fuzz task is added (re-derive: `grep -ln 'fixpp_msg_commit' tests/fuzz`; a hit r
   - "`check_length_data` feeds a group node its instance-count digits again" → the T078 RED
     cells (`CapiCommitGroupNode.GroupTaggedAsALengthDoesNotCompleteThePair`,
     `.GroupTaggedAsTheDataDoesNotCompleteThePair`,
+    `.EmptyGroupTaggedAsTheDataDoesNotCompleteThePair`,
     `.NestedGroupTaggedAsALengthDoesNotCompleteThePair`); every `Twin*` cell stays GREEN;
   - "`check_length_data` does not observe a group node at all" (the node skipped, not fed) →
     `CapiCommitPairs.RefusesALengthSeparatedFromItsDataByAGroup`, since a skipped group lets a
-    Length pair with a Data after it; this shows the fix feeds the node rather than dropping it.
+    Length pair with a Data after it; this shows the fix feeds the node rather than dropping it;
+  - "`check_length_data` feeds a group node under a non-pair tag (`observe(0, {})`) instead of its
+    own tag" (analyze E1) → `CapiCommitGroupNode.TwinLonePairLengthGroupIsRefused` and
+    `.TwinLonePairDataGroupIsRefused`, which commit under it; this shows the group's own tag is
+    what the check reads.
   Record each mutant, command and RED line in the evidence file §*Mutants*, as a dated addendum.
 - [ ] T082 Orchestrator-authored text (T079 landed, so the ledger describes shipped behaviour):
   - `spec/behaviors-and-limitations.md` B-091-4 (the live text): add FR-021's effect as data-model.md's
@@ -1223,8 +1241,9 @@ FR-019, SC-006).
   --root <tree> --base origin/main`, with `<tree>` the worktree that owns this branch (absolute
   path, so it also works from a parallel worktree).
   - Read every hit in the comments this feature authored: the `version.h` history, the BREAKING
-    notes, the read-tier banner, the `body_builder.hpp` contract comments and the CMakeLists
-    comments. Also read the strings the script cannot see.
+    notes, the read-tier banner, the `body_builder.hpp` contract comments, the CMakeLists
+    comments, the `check_length_data` header comment (FR-021) and the `interpret_logon` comments
+    (FR-020). Also read the strings the script cannot see.
   - A claim that records a result is deleted, not replaced.
 - [ ] T062 Run `python3 tools/check_line_citations.py --shift-audit origin/main..HEAD`. For a hit on
   the checker's own fixture strings, apply the `# citation-ok` pragma.
@@ -1353,6 +1372,7 @@ FR-019, SC-006).
   - Then T026 (needs T006–T012, T020, T071 and T074), then T027 (needs everything above, T075 and
     T076 included).
   - **Blocks all stories.**
+  - 2e runs in Polish after T053 (see Polish order) and blocks no story.
 - **US1 (Phase 3):** needs the Foundational checkpoint.
   - T028 (census, RED) → T029, T030, T031, T032 (RED) → T033 → T034 → T035 → T036 (all GREEN);
   - T035 → T037 → T038;
@@ -1368,7 +1388,7 @@ FR-019, SC-006).
   - T053 (simplify, first, so every measurement is of the final candidate) → §2e (FR-021: its entry
     condition, then T078 (RED) → T079 (GREEN) → T080 → T081, and T082 after T079) → T054
     (compile-surface "after") → T055 → T056 → T057 → T058 → T059 → T073 (fuzz);
-  - T060–T063 after T053;
+  - T060–T063 after T081 and T082 (so after §2e);
   - T077 (checklist audit of the FR-020 and FR-021 deltas) after T082 and before T065;
   - T065 after T060–T063 and T077;
   - T068 → T069. T069 is last.
