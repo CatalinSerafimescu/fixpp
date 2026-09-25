@@ -32,9 +32,11 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/core/decimal_alias.hpp>
+#include <fixpp/core/error.hpp>
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/v44/Messages.hpp>
 #include <fixpp/v44/all.hpp>  // GENERATED (Phase 3b) — build_<Msg>/<Msg>Args/registry
@@ -1300,4 +1302,152 @@ TEST(BuilderRoundtrip067, MassQuoteGrouped) {
                       "set.entry.bid_px");
     expect_eq_decimal(entry0.offer_px(&read_arena), seed.set.entry.offer_px, &read_arena,
                       "set.entry.offer_px");
+}
+
+// ── 091-data-field-bytes T029 [US1]: C-2.6 exhaustive octet witnesses ────
+// (specs/091-data-field-bytes/contracts/codegen-builders.md C-2.6, SC-001.)
+// Every octet 0x00-0xFF through one coupled Length+Data member, at the top
+// level and inside a repeating-group entry. Each asserts the raw frame
+// boundaries as one contiguous in-order run (Length value 1, the Data octet
+// verbatim) and a re-parse through the dict-aware inbound parser.
+//
+// The message and group come from the C-2.2 census
+// (`codegen_091_data_census_test --census-dump`, EXPECTED rows for v44):
+//   top level: NewOrderSingle, path -, L=354 D=355 (EncodedText);
+//   nested:    NewOrderMultileg, path 555 (NoLegs), L=618 D=619
+//              (EncodedLegIssuer).
+// Re-derive by running the census with --census-dump and filtering the
+// EXPECTED rows on v44 and those tags.
+namespace {
+
+std::string octet_091(int b) {
+    return std::string(1, static_cast<char>(static_cast<unsigned char>(b)));
+}
+
+std::string octet_name_091(::testing::TestParamInfo<int> const& info) {
+    static constexpr char kHex[] = "0123456789ABCDEF";
+    std::string n = "x";
+    n += kHex[(info.param >> 4) & 0xF];
+    n += kHex[info.param & 0xF];
+    return n;
+}
+
+}  // namespace
+
+class DataFieldOctet091 : public ::testing::TestWithParam<int> {};
+
+TEST_P(DataFieldOctet091, TopLevel_NewOrderSingle_EncodedText) {
+    std::string const octet = octet_091(GetParam());
+    std::pmr::monotonic_buffer_resource arena{4096};
+    fixpp::v44::NewOrderSingleArgs args{};
+    args.cl_ord_id = "ORD-091";
+    args.symbol = "MSFT";
+    args.side = '1';
+    args.order_qty = make_decimal("10", &arena);
+    args.price = make_decimal("99.5", &arena);
+    args.encoded_text = octet;
+
+    std::array<std::byte, 1024> out{};
+    auto built = fixpp::v44::build_NewOrderSingle(std::span<std::byte>{out}, args);
+    ASSERT_TRUE(built.has_value()) << "build_NewOrderSingle refused octet 0x" << std::hex
+                                   << GetParam() << ": " << fixpp::core::to_string(built.error());
+    std::string const body = bytes_to_string(*built);
+    std::string const run =
+        std::string{
+            "\x01"
+            "354=1\x01"
+            "355="} +
+        octet + "\x01";
+    EXPECT_NE(body.find(run), std::string::npos)
+        << "EncodedTextLen(354)=1 must be followed directly by EncodedText(355) holding the octet";
+
+    std::pmr::monotonic_buffer_resource read_arena{8192};
+    fixpp::dict::Dictionary dict = fixpp_test_support::load_fix44(&read_arena);
+    fixpp::dict::table_view tv = dict.as_table_view();
+    std::vector<std::byte> frame = fixpp_test_support::make_frame("FIX.4.4", body);
+    auto mv = fixpp_test_support::parse_dict(frame, tv, &read_arena);
+    ASSERT_FALSE(::testing::Test::HasFailure()) << "dict-aware re-parse failed";
+    auto len = mv.get(354);
+    ASSERT_TRUE(len.has_value()) << "re-parse lost EncodedTextLen(354)";
+    EXPECT_EQ(len->as_string(), "1");
+    auto data = mv.get(355);
+    ASSERT_TRUE(data.has_value()) << "re-parse lost EncodedText(355)";
+    EXPECT_EQ(data->as_string(), octet) << "re-parse must recover the octet verbatim";
+}
+
+TEST_P(DataFieldOctet091, Nested_NewOrderMultileg_NoLegs_EncodedLegIssuer) {
+    std::string const octet = octet_091(GetParam());
+    fixpp::v44::groups::G_555_4Args leg{};
+    leg.leg_symbol = "LEG";  // NoLegs(555) entry delimiter LegSymbol(600)
+    leg.encoded_leg_issuer = octet;
+    std::array<fixpp::v44::groups::G_555_4Args, 1> legs{leg};
+
+    fixpp::v44::NewOrderMultilegArgs args{};
+    args.cl_ord_id = "ORD-091";
+    args.side = '1';
+    args.legs = std::span<const fixpp::v44::groups::G_555_4Args>{legs};
+
+    std::array<std::byte, 2048> out{};
+    auto built = fixpp::v44::build_NewOrderMultileg(std::span<std::byte>{out}, args);
+    ASSERT_TRUE(built.has_value()) << "build_NewOrderMultileg refused octet 0x" << std::hex
+                                   << GetParam() << ": " << fixpp::core::to_string(built.error());
+    std::string const body = bytes_to_string(*built);
+    std::string const run =
+        std::string{
+            "\x01"
+            "555=1\x01"
+            "600=LEG\x01"
+            "618=1\x01"
+            "619="} +
+        octet + "\x01";
+    EXPECT_NE(body.find(run), std::string::npos)
+        << "the NoLegs entry must open on LegSymbol(600), then EncodedLegIssuerLen(618)=1 "
+           "directly followed by EncodedLegIssuer(619) holding the octet";
+
+    std::pmr::monotonic_buffer_resource read_arena{8192};
+    fixpp::dict::Dictionary dict = fixpp_test_support::load_fix44(&read_arena);
+    fixpp::dict::table_view tv = dict.as_table_view();
+    std::vector<std::byte> frame = fixpp_test_support::make_frame("FIX.4.4", body);
+    auto mv = fixpp_test_support::parse_dict(frame, tv, &read_arena);
+    ASSERT_FALSE(::testing::Test::HasFailure()) << "dict-aware re-parse failed";
+    fixpp::v44::NewOrderMultileg fw{mv};
+    auto legs_r = fw.legs();
+    ASSERT_EQ(legs_r.size(), 1U) << "re-parse must see one NoLegs entry";
+    auto leg0 = legs_r[0];
+    auto len = leg0.encoded_leg_issuer_len();
+    ASSERT_TRUE(len.has_value()) << "re-parse lost EncodedLegIssuerLen(618)";
+    EXPECT_EQ(*len, 1);
+    auto data = leg0.encoded_leg_issuer();
+    ASSERT_TRUE(data.has_value()) << "re-parse lost EncodedLegIssuer(619)";
+    EXPECT_EQ(*data, octet) << "re-parse must recover the octet verbatim";
+}
+
+INSTANTIATE_TEST_SUITE_P(AllOctets, DataFieldOctet091, ::testing::Range(0, 256), octet_name_091);
+
+// ── 091-data-field-bytes T030 [US1]: C-2.3 message_encoding presence ─────
+// Each check is a constexpr bool computed from a requires-expression and
+// asserted at run time, so an absent member is a test failure rather than a
+// compile error that would stop this binary. Member order (last) is the C-2.2
+// census's check; a requires-expression cannot see it.
+namespace {
+
+template <typename A>
+constexpr bool has_message_encoding_091 = requires(A const& a) { a.message_encoding; };
+
+template <typename A>
+constexpr bool message_encoding_is_optional_string_view_091 = requires(A const& a) {
+    { a.message_encoding } -> std::same_as<std::optional<std::string_view> const&>;
+};
+
+}  // namespace
+
+TEST(MessageEncodingPresence091, V44_NewOrderSingle_HasMember) {
+    EXPECT_TRUE(has_message_encoding_091<fixpp::v44::NewOrderSingleArgs>);
+    EXPECT_TRUE(message_encoding_is_optional_string_view_091<fixpp::v44::NewOrderSingleArgs>);
+}
+
+// A v44 message with no Encoded* field at any depth: a NO_ENCODED row of the
+// census dump for v44.
+TEST(MessageEncodingPresence091, V44_TradingSessionStatusRequest_HasNoMember) {
+    EXPECT_FALSE(has_message_encoding_091<fixpp::v44::TradingSessionStatusRequestArgs>);
 }
