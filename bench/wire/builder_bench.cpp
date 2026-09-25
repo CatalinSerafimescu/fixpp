@@ -7,11 +7,14 @@
 // caller-owned buffer per iteration; all inputs are prepared once, outside
 // the timed loop.
 //
-// Feature 091 (fixpp #418) SC-005 comparand: run this binary before and after
-// the change and compare BM_Build_NOS_NoGroup (the representative message
-// with no Data field). The generated builder comes from codegen output, so
-// the after-run needs a regenerated tree: build the fixpp-codegen target,
-// remove build/<preset>/_codegen, then rebuild this target.
+// Feature 091 (fixpp #418) SC-005 comparand: run this binary from a base tree
+// at the merge base and from the changed tree, paired as the feature
+// quickstart's "Performance (SC-005)" section describes. The verdict covers
+// BM_Build_NOS_NoGroup, BM_Build_NOS_WithGroup and BM_BodyBuilder_Raw_10Fields;
+// BM_Build_NOS_AsciiEncodedText is reported only. The generated builder comes
+// from codegen output, so the changed-tree run needs a regenerated tree: build
+// the fixpp-codegen target, remove build/<preset>/_codegen, then rebuild this
+// target.
 //
 // Every case first builds once outside the timed loop and checks the body; on
 // a mismatch it calls SkipWithError, so a case that would time an early error
