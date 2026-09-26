@@ -1,4 +1,5 @@
 capi_length_data
+capi_logon_malformed_count
 capi_pure_tests
 codegen_091_data_census_test
 dictionary_pure_tests

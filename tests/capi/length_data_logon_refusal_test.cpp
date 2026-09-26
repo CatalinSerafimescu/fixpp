@@ -49,13 +49,13 @@
 #include <utility>
 #include <vector>
 
+#include "capi_drain_support.hpp"
 #include "capi_internal.hpp"
 #include "capi_loopback_support.hpp"
 #include "fix/c_api/engine.h"
 #include "fix/c_api/session.h"
 #include "fix/c_api/version.h"
 #include "fixpp/core/fix_time.hpp"
-#include "fixpp/session/session.hpp"
 #include "support/wait_until.hpp"
 
 using namespace std::chrono_literals;

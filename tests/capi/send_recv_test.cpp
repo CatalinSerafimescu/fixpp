@@ -40,6 +40,7 @@
 #include "fix/c_api/engine.h"
 #include "fix/c_api/session.h"
 // (FIXPP_TEST_HOOKS-gated decl, used by the #151 reaped tests)
+#include "capi_drain_support.hpp"
 #include "capi_loopback_support.hpp"
 #include "support/wait_until.hpp"
 

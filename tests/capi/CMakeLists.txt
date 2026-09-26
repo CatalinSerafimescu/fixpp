@@ -154,19 +154,20 @@ add_test(NAME capi_lifecycle_negative COMMAND capi_lifecycle_negative_test)
 
 # T028/T029/T030 (US3, SC-001/SC-008/FR-013a) — headline two-C-ABI-engine
 # plaintext round-trip with the drain-thread reply path.
-add_executable(capi_send_recv_test send_recv_test.cpp)
+add_executable(capi_send_recv_test send_recv_test.cpp length_data_logon_refusal_test.cpp)
 target_link_libraries(capi_send_recv_test PRIVATE
   fixpp_capi
   GTest::gtest
   GTest::gtest_main
 )
 target_include_directories(capi_send_recv_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
-# Issue #151: the reaped-close tests use session_test_access::is_drained
-# (tests/support/session_test_access.hpp) to wait DETERMINISTICALLY for the acceptor to reach
+# Issue #151: the reaped-close tests use the FIXPP_TEST_HOOKS Session accessor
+# is_drained_for_test() to wait DETERMINISTICALLY for the acceptor to reach
 # closed_drained (avoiding a sleep that races the `closing` window) and the
 # set_session_ever_established seam (capi_internal.hpp gated decl). ODR-safe: both
 # FIXPP_TEST_HOOKS blocks are methods/decls only — no gated data members — so the
 # struct layouts match the non-hooks library (same pattern as capi_error_live_test).
+# 091 FR-020: length_data_logon_refusal_test.cpp reads the same accessor (issue #511).
 target_compile_definitions(capi_send_recv_test PRIVATE FIXPP_TEST_HOOKS)
 # Split into two ctest entries so WILL_FAIL is scoped ONLY to the deliberate
 # ASan UAF witness (T029), not to the positive round-trip tests (CA-006/007).
@@ -181,10 +182,13 @@ target_compile_definitions(capi_send_recv_test PRIVATE FIXPP_TEST_HOOKS)
 #   negative entry exits 0 (no WILL_FAIL needed outside ASan).
 add_test(NAME capi_send_recv_positive
     COMMAND capi_send_recv_test
-        --gtest_filter=-CapiSendRecv.InboundHandleUseAfterReturnCaughtUnderAsan)
+        --gtest_filter=-CapiSendRecv.InboundHandleUseAfterReturnCaughtUnderAsan:CapiLogonMalformedCount.*)
 add_test(NAME capi_send_recv_uaf_negative
     COMMAND capi_send_recv_test
         --gtest_filter=CapiSendRecv.InboundHandleUseAfterReturnCaughtUnderAsan)
+add_test(NAME capi_logon_malformed_count
+    COMMAND capi_send_recv_test --gtest_filter=CapiLogonMalformedCount.*)
+set_tests_properties(capi_logon_malformed_count PROPERTIES LABELS "capi;091")
 if(FIXPP_ENABLE_ASAN)
     set_tests_properties(capi_send_recv_uaf_negative PROPERTIES WILL_FAIL TRUE)
 endif()
@@ -233,8 +237,7 @@ set_tests_properties(capi_message_read PROPERTIES LABELS "capi;051")
 # Length+Data setters and commit-time pair rule, and a two-engine loopback whose
 # EncodedText holds SOH through send, receive and clone.
 add_executable(capi_length_data_test length_data_setters_test.cpp length_data_send_recv_test.cpp
-  length_data_component_pair_test.cpp  # 091 T008/T009 (FR-019)
-  length_data_logon_refusal_test.cpp)  # 091 FR-020 C-ABI observers
+  length_data_component_pair_test.cpp)  # 091 T008/T009 (FR-019)
 target_link_libraries(capi_length_data_test PRIVATE
   fixpp_capi
   GTest::gtest
