@@ -1323,7 +1323,7 @@ FR-019, SC-006).
     FR-021 reverses) and `api.md` CHK010 (the group-node empty-value rule, now on both writers).
     Before trusting the grep, confirm it hits every one of them; if one is missed, widen the terms
     until it is hit. The known list is the positive control, not the population.
-- [ ] T065 Run `/speckit-verify` (mandatory after `/speckit-implement`, Article XVII §8). It produces
+- [X] T065 Run `/speckit-verify` (mandatory after `/speckit-implement`, Article XVII §8). It produces
   `.specify/decisions/091-data-field-bytes-verify.md`. The record cites
   `.specify/decisions/091-data-field-bytes-evidence.md`, which every task whose body says "record … in" that file wrote; its
   discriminating-witness rows point there rather than restating it.
