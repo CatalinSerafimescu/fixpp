@@ -662,7 +662,7 @@ bool carries_encoded_data(MessageIR const& m,
             continue;
         }
         auto const fit = field_by_tag.find(gm.tag);
-        if (fit != field_by_tag.end() && fit->second->name.find("Encoded") != std::string::npos) {
+        if (fit != field_by_tag.end() && fit->second->name.contains("Encoded")) {
             return true;
         }
     }

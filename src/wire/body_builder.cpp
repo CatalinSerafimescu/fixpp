@@ -29,6 +29,7 @@
 #include <cstring>
 #include <fixpp/core/length_data_pairs.hpp>
 #include <fixpp/wire/body_builder.hpp>
+#include <fixpp/wire/dict_hooks.hpp>
 #include <fixpp/wire/length_data_check.hpp>
 #include <new>
 
