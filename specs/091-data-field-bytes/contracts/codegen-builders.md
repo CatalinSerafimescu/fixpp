@@ -183,6 +183,12 @@ loader's message walk reads a container; so the unfixed loader does not pair the
 - **(viii)** a pair adjacent only inside a `<group>` that is a direct child of (a) `<header>` and
   (b) `<trailer>`. Each placement has its own tags, and both tags live only inside that group,
   under the global non-adjacency preconditions above → paired.
+- **(ix)** (added at `/speckit-verify`, 2026-09-26) non-element nodes are not children in the
+  dictionary schema: a non-whitespace text node between the Length and Data `<field>` refs does
+  **not** break adjacency, in (a) a `<component>` definition and (b) a `<group>` that is a direct
+  child of a `<message>` → paired. Comments and whitespace-only text never reach the walk, because
+  pugixml's default parse flags drop them. Only an element that is not a `<field>` breaks adjacency,
+  as in (iii).
 
 TDD: (i), (ii), (iv), (v), (vi), (vii) (all placements) and (viii) are RED on the unfixed loader. (iii) is GREEN there by
 construction; its liveness comes from the quickstart §3 mutant "the new walk skips non-field
