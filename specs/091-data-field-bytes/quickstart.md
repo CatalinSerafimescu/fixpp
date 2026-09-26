@@ -107,11 +107,11 @@ Each row names an existing test that must be shown RED (or, for a compile-time k
 | `set_data` omits the owner check | C-1.4b default handle (under ASan it must fail, not UB-pass) |
 | `set_data` omits `is_innermost_open` | C-1.4b outer handle and closed-group handle |
 | `send_impl` classifies a counted field by its own tag instead of inheriting `prev_header` | the §5 dictionary-pair `send_impl` witness whose Length and Data classify differently (the standard 212/213 and 90/91 pairs cannot tell the two apart) |
-| SC-005 fix: `pair_check_needed_` is never set (constructor and `note_tag()` both leave it false) | `BodyBuilderDataField.C1_7_MalformedHandWrittenPairsAreRefusedAtCommit`, `.C1_7_GroupWhoseNoTagIsTheDataTag`, `DictPairBodyBuilder.C1_9_HandWrittenDictionaryPairIsCheckedAtCommit` |
+| SC-005 fix: `pair_check_needed_` is never set (constructor and `note_tag()` both leave it false) | `BodyBuilderDataField.C1_7_MalformedHandWrittenPairsAreRefusedAtCommit`, `.C1_7_GroupWhoseNoTagIsTheDataTag`, `DictPairBodyBuilder.C1_9_HandWrittenDictionaryPairIsCheckedAtCommit`; more tests also kill it — the measured list is in the evidence §*SC-005 fix mutants, measured kill lists* |
 | SC-005 fix: `group_begin` does not call `note_tag` | `BodyBuilderDataField.C1_7_GroupWhoseNoTagIsTheDataTag` (a top-level group whose `no_tag` is the only pair tag) |
 | SC-005 fix: `entry_group_begin_impl` does not call `note_tag` | `BodyBuilderDataField.C1_7_NestedGroupWhoseNoTagIsTheDataTag` (a nested group whose `no_tag` is the only pair tag) |
 | SC-005 fix: the constructor ignores the hooks' dictionary pair callback (`pair_check_needed_` starts false) | `DictPairBodyBuilder.C1_9_HandWrittenDictionaryPairIsCheckedAtCommit` and `.C1_9_GroupWhoseNoTagIsTheDictionaryLengthIsRefused` (tags only the dictionary pairs) |
-| SC-005 fix: `append_bytes_field` does not call `note_tag` | `BodyBuilderDataField.C1_7_MalformedHandWrittenPairsAreRefusedAtCommit` and `.C1_7_GroupNodeBetweenLengthAndData` (the pair tags reach the builder only as scalars) |
+| SC-005 fix: `append_bytes_field` does not call `note_tag` | `BodyBuilderDataField.C1_7_MalformedHandWrittenPairsAreRefusedAtCommit` and `.C1_7_GroupNodeBetweenLengthAndData` (the pair tags reach the builder only as scalars); more tests also kill it — the measured list is in the evidence §*SC-005 fix mutants, measured kill lists* |
 | `builder_bench`'s WithGroup / Raw case builds a body missing one scalar field (both cases), or one of the three `kParties` entries (WithGroup), with the exact prechecks in place | that case reports `SkipWithError` (run before the §6 measurement) |
 
 ## 4. Golden regeneration check
