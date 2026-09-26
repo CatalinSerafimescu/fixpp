@@ -1236,7 +1236,7 @@ FR-019, SC-006).
 - [X] T056 Via `phase-implementer`, add the `builder_bench` row to `bench/ci-suite.txt` with tier-2
   value **`no`** (Article VIII §2a candidate-only; `paired` is irreversible), in the file's existing
   row format.
-- [ ] T057 Run the paired SC-005 run, following quickstart §6 exactly.
+- [X] T057 Run the paired SC-005 run, following quickstart §6 exactly.
   - **Base:** a detached worktree at `/mnt/wsl/fixppbuild/091-base-wt`, at the current
     `git merge-base HEAD origin/main` (after `git fetch`), with only the final
     `bench/wire/builder_bench.cpp` and `bench/wire/CMakeLists.txt` copied in.
