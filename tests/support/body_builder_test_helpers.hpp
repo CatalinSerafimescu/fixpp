@@ -12,6 +12,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <fixpp/core/error.hpp>
 #include <fixpp/wire/body_builder.hpp>
 #include <span>

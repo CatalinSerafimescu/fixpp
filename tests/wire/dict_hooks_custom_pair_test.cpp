@@ -44,6 +44,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <fixpp/core/error.hpp>
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/reify.hpp>
 #include <fixpp/dict/table_view.hpp>

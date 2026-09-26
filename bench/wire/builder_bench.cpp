@@ -26,12 +26,15 @@
 
 #include <array>
 #include <cstddef>
-#include <cstdint>
+#include <expected>
 #include <fixpp/core/decimal_alias.hpp>
+#include <fixpp/core/error.hpp>
 #include <fixpp/v44/messages/NewOrderSingle.hpp>
 #include <fixpp/wire/body_builder.hpp>
 #include <memory_resource>
+#include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 
 namespace {
@@ -106,11 +109,11 @@ bool precheck(benchmark::State& state, const NewOrderSingleArgs& args, std::span
         state.SkipWithError("precheck: body differs from the expected bytes");
         return false;
     }
-    if (body.find(must_have) == std::string_view::npos) {
+    if (!body.contains(must_have)) {
         state.SkipWithError("precheck: expected path marker absent from body");
         return false;
     }
-    if (!must_not_have.empty() && body.find(must_not_have) != std::string_view::npos) {
+    if (!must_not_have.empty() && body.contains(must_not_have)) {
         state.SkipWithError("precheck: unexpected marker present in body");
         return false;
     }
@@ -121,6 +124,8 @@ void run_nos(benchmark::State& state, const NewOrderSingleArgs& args, std::strin
              std::string_view must_not_have, bool exact = false) {
     std::array<std::byte, 4096> out{};
     if (!precheck(state, args, out, must_have, must_not_have, exact)) return;
+    // `_` is the google-benchmark loop idiom: the loop runs for the iteration, not the value.
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
     for (auto _ : state) {
         auto r = fixpp::v44::build_NewOrderSingle(std::span<std::byte>{out}, args);
         benchmark::DoNotOptimize(r);
@@ -245,6 +250,8 @@ static void BM_BodyBuilder_Raw_10Fields(benchmark::State& state) {
             return;
         }
     }
+    // `_` is the google-benchmark loop idiom: the loop runs for the iteration, not the value.
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
     for (auto _ : state) {
         auto r = build();
         benchmark::DoNotOptimize(r);

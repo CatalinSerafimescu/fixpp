@@ -42,6 +42,8 @@ TEST(CapiVersion, CompositeMacroValue) {
                                   static_cast<uint32_t>(FIXPP_C_ABI_VERSION_PATCH);
     EXPECT_EQ(static_cast<uint32_t>(FIXPP_C_ABI_VERSION), expected);
     // Exact numeric value of the version CApiVersionIsExactly_* pins
+    // The `| 0U` spells out the PATCH term of the (MAJOR<<16)|(MINOR<<8)|PATCH encoding.
+    // cppcheck-suppress badBitmaskCheck
     EXPECT_EQ(static_cast<uint32_t>(FIXPP_C_ABI_VERSION), uint32_t{(1U << 16U) | (9U << 8U) | 0U});
 }
 

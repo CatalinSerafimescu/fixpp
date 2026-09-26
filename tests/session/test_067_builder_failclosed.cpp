@@ -34,7 +34,11 @@
 #include <cstddef>
 #include <fixpp/core/decimal_alias.hpp>
 #include <fixpp/core/error.hpp>
+#include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/table_view.hpp>
 #include <fixpp/v44/all.hpp>  // GENERATED (Phase 3b)
+#include <fixpp/wire/field_view.hpp>
+#include <fixpp/wire/parser.hpp>
 #include <memory_resource>
 #include <span>
 #include <string>
@@ -211,12 +215,14 @@ void expect_encoded_text_emitted_verbatim(std::string_view octets) {
     std::string const body = bytes_to_string(*r);
 
     // One contiguous, in-order subsequence: Length, then Data, nothing between.
-    std::string const pair = std::string{"\x01"
-                                         "354="} +
-                             std::to_string(octets.size()) +
-                             "\x01"
-                             "355=" +
-                             std::string{octets} + "\x01";
+    std::string const pair =
+        std::string{
+            "\x01"
+            "354="} +
+        std::to_string(octets.size()) +
+        "\x01"
+        "355=" +
+        std::string{octets} + "\x01";
     EXPECT_NE(body.find(pair), std::string::npos)
         << "EncodedTextLen(354) must equal the octet count and be followed directly by "
            "EncodedText(355) carrying the octets verbatim";

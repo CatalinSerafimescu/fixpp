@@ -36,17 +36,17 @@
 
 #include <gtest/gtest.h>
 
-#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <expected>
 #include <fixpp/core/decimal_alias.hpp>
 #include <fixpp/core/error.hpp>
-#include <fixpp/dict/table_view.hpp>
 #include <fixpp/wire/body_builder.hpp>
+#include <fixpp/wire/dict_hooks.hpp>
 #include <fixpp/wire/parser.hpp>
 #include <memory_resource>
 #include <new>
@@ -920,18 +920,18 @@ std::size_t largest_committing_text_value() {
 // For each count the filler is the largest one whose no-call twin commits.
 std::optional<prefill_plan> find_exhausting_prefill(bool nested, std::size_t n) {
     for (std::size_t count = 0; count <= kBufSize; ++count) {
-        if (!prefill_commits({nested, count, 0})) break;
+        if (!prefill_commits({.nested = nested, .count = count, .filler = 0})) break;
         std::size_t lo = 0;
         std::size_t hi = n;
         while (lo < hi) {
-            std::size_t const mid = lo + (hi - lo + 1) / 2;
-            if (prefill_commits({nested, count, mid})) {
+            std::size_t const mid = lo + ((hi - lo + 1) / 2);
+            if (prefill_commits({.nested = nested, .count = count, .filler = mid})) {
                 lo = mid;
             } else {
                 hi = mid - 1;
             }
         }
-        prefill_plan const p{nested, count, lo};
+        prefill_plan const p{.nested = nested, .count = count, .filler = lo};
         body_builder probe{"X"};
         scene s;
         if (!apply_prefill(probe, p, s)) continue;
@@ -1066,13 +1066,23 @@ TEST(BodyBuilderDataField, C1_4_RefusalsOnBothSurfacesRollBack) {
         std::string_view what;
     };
     refusal_case const cases[] = {
-        {11,
-         std::string_view{"A\x01"
-                          "1=EVIL"},
-         error::wire_unexpected_tag, "non-Data tag 11"},
-        {354, std::string_view{"abc"}, error::wire_unexpected_tag, "Length half 354"},
-        {8, std::string_view{"abc"}, error::wire_field_value_out_of_range, "framing tag 8"},
-        {355, std::string_view{}, error::wire_field_value_out_of_range, "empty value"},
+        {.tag = 11,
+         .value = std::string_view{"A\x01"
+                                   "1=EVIL"},
+         .want = error::wire_unexpected_tag,
+         .what = "non-Data tag 11"},
+        {.tag = 354,
+         .value = std::string_view{"abc"},
+         .want = error::wire_unexpected_tag,
+         .what = "Length half 354"},
+        {.tag = 8,
+         .value = std::string_view{"abc"},
+         .want = error::wire_field_value_out_of_range,
+         .what = "framing tag 8"},
+        {.tag = 355,
+         .value = std::string_view{},
+         .want = error::wire_field_value_out_of_range,
+         .what = "empty value"},
     };
     for (auto const& c : cases) {
         expect_refused_and_rolled_back(
@@ -1146,9 +1156,11 @@ TEST(BodyBuilderDataField, C1_5_ArenaExhaustionOnTheDataHalfRollsBackBothSurface
     for (bool const nested : {false, true}) {
         SCOPED_TRACE(nested ? "set_data in a live innermost entry" : "field_data at the top level");
         auto const plan = find_exhausting_prefill(nested, n);
-        ASSERT_TRUE(plan.has_value())
-            << "no pre-fill both exhausts the arena and keeps the body under the body cap "
-               "(C-1.5 contract change)";
+        if (!plan.has_value()) {
+            GTEST_FAIL()
+                << "no pre-fill both exhausts the arena and keeps the body under the body cap "
+                   "(C-1.5 contract change)";
+        }
 
         // Arrangement witness: the Length half fits after the identical pre-fill.
         {

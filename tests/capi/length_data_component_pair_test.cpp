@@ -30,14 +30,18 @@
 #include <memory_resource>
 #include <string>
 #include <string_view>
+#include <system_error>
 
 #include "capi_loopback_support.hpp"
 #include "fix/c_api/dict.h"
 #include "fix/c_api/engine.h"
+#include "fix/c_api/error.h"
+#include "fix/c_api/handles.h"
 #include "fix/c_api/message.h"
 #include "fix/c_api/session.h"
 #include "fix/c_api/version.h"
 #include "fixpp/dict/dictionary.hpp"
+#include "fixpp/dict/field_ref.hpp"
 #include "fixpp/dict/xml_loader.hpp"
 
 using namespace fixpp::capi_test;
@@ -163,9 +167,13 @@ struct ComponentPairMsg {
     ComponentPairMsg(ComponentPairMsg const&) = delete;
     ComponentPairMsg& operator=(ComponentPairMsg const&) = delete;
 
+    // Writes to the message `msg` points at; const would misstate that.
+    // NOLINTNEXTLINE(readability-make-member-function-const)
     fixpp_error_t set_string(uint16_t tag, std::string_view v) {
         return fixpp_msg_set_string(msg, tag, v.data(), v.size());
     }
+    // Writes to the message `msg` points at; const would misstate that.
+    // NOLINTNEXTLINE(readability-make-member-function-const)
     fixpp_error_t commit(std::string& payload) {
         const uint8_t* p = nullptr;
         size_t n = 0;

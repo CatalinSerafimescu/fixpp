@@ -35,17 +35,28 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
+#include <fixpp/core/clock.hpp>
 #include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/table_view.hpp>
 #include <fixpp/dict/xml_loader.hpp>
+#include <fixpp/service/control_plane_factory.hpp>
+#include <fixpp/session/security_profile.hpp>
 #include <fixpp/session/seqnum.hpp>
+#include <fixpp/session/seqnum_manager.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
 #include <fixpp/v44/all.hpp>  // GENERATED -- build_NewOrderSingle / NewOrderSingleArgs
+#include <fixpp/wire/offset_table.hpp>
+#include <fixpp/wire/parser.hpp>
+#include <functional>
 #include <memory>
 #include <memory_resource>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -169,13 +180,17 @@ constexpr std::string_view kStraddlingPairXml = R"xml(
 </fix>
 )xml";
 
-// Same ownership shape as make_minimal_dictionary (tests/support).
+// One allocation owns the arena and the dictionary built in it. Members are
+// destroyed in reverse declaration order, so the dictionary goes before its arena.
+struct StraddlingPairDictionary {
+    std::pmr::monotonic_buffer_resource mr{64U * 1024U};
+    fixpp::dict::Dictionary dict{
+        fixpp::dict::XmlLoader{}.load_from_string(kStraddlingPairXml, &mr)};
+};
+
 std::shared_ptr<const fixpp::dict::Dictionary> make_straddling_pair_dictionary() {
-    auto mr = std::make_shared<std::pmr::monotonic_buffer_resource>(64U * 1024U);
-    auto* d = new fixpp::dict::Dictionary{
-        fixpp::dict::XmlLoader{}.load_from_string(kStraddlingPairXml, mr.get())};
-    return std::shared_ptr<const fixpp::dict::Dictionary>{
-        d, [mr](fixpp::dict::Dictionary const* p) { delete p; }};
+    auto owner = std::make_shared<StraddlingPairDictionary>();
+    return {owner, &owner->dict};
 }
 
 class DataSend091 : public ::testing::Test {

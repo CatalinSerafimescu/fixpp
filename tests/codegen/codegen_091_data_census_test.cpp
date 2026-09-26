@@ -59,11 +59,14 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <cstdint>
+#include <array>
+#include <cstddef>
+#include <exception>
 #include <filesystem>
 #include <fixpp/core/length_data_pairs.hpp>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <map>
 #include <optional>
 #include <pugixml.hpp>
@@ -73,6 +76,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #ifndef FIXPP_DICT_DATA_DIR
@@ -86,8 +90,16 @@ namespace {
 
 namespace fs = std::filesystem;
 
-std::string g_gen_root = FIXPP_CODEGEN_OUT;  // NOLINT(cert-err58-cpp)
-bool g_dump = false;
+struct CensusOptions {
+    std::string gen_root = FIXPP_CODEGEN_OUT;
+    bool dump = false;
+};
+
+// main() sets these from argv before RUN_ALL_TESTS(); the arms only read them.
+CensusOptions& options() {
+    static CensusOptions o;
+    return o;
+}
 
 // (message, structural path, Length tag, Data tag, arm)
 using Site = std::tuple<std::string, std::string, int, int, std::string>;
@@ -216,7 +228,9 @@ ExpectedVersion expected_legacy(std::string const& xml_file, std::set<std::strin
         std::string const msgcat = m.attribute("msgcat").as_string();
         std::string const msg_type = m.attribute("msgtype").as_string();
         if (msgcat != "app" && msgcat != "admin") {
-            throw std::runtime_error(path + ": message " + msg_type + " has no app/admin msgcat");
+            std::string what = path;
+            what.append(": message ").append(msg_type).append(" has no app/admin msgcat");
+            throw std::runtime_error(what);
         }
         if (msgcat != "app" || exclude.contains(msg_type)) continue;
         std::string const name = m.attribute("name").as_string();
@@ -319,7 +333,7 @@ std::set<int> encoded_data_tags(ExpectedVersion const& ev) {
     std::set<int> out;
     for (auto const& [data, len] : standard().data_to_length) {
         auto it = ev.field_name.find(data);
-        if (it != ev.field_name.end() && it->second.find("Encoded") != std::string::npos) {
+        if (it != ev.field_name.end() && it->second.contains("Encoded")) {
             out.insert(data);
         }
     }
@@ -361,7 +375,9 @@ std::vector<Call> scan_calls(std::string_view line) {
         std::size_t j = i + 1;
         while (j < line.size() && is_ident(line[j])) ++j;
         if (j == i + 1 || j >= line.size() || line[j] != '(') continue;
-        Call c{std::string(line.substr(i + 1, j - i - 1)), -1, std::string_view::npos};
+        Call c{.name = std::string(line.substr(i + 1, j - i - 1)),
+               .first_int = -1,
+               .close_paren = std::string_view::npos};
         std::size_t k = j + 1;
         while (k < line.size() && line[k] == ' ') ++k;
         std::size_t const digits = k;
@@ -397,7 +413,7 @@ void scan_builder_file(fs::path const& file, std::string const& msg, ScanResult&
     };
     while (std::getline(in, line)) {
         ++lineno;
-        bool const is_static_assert = line.find("static_assert(") != std::string::npos;
+        bool const is_static_assert = line.contains("static_assert(");
         for (Call const& c : scan_calls(line)) {
             if (c.name == "group_begin") {
                 if (c.first_int < 0)
@@ -422,7 +438,7 @@ void scan_builder_file(fs::path const& file, std::string const& msg, ScanResult&
                 }
                 if (pending)
                     out.anomalies.push_back("static_assert not followed by its call: " + where());
-                pending = Pending{c.first_int, length};
+                pending = Pending{.data = c.first_int, .length = length};
             } else if (c.name == "field_data" || c.name == "set_data") {
                 int length = 0;
                 if (!pending) {
@@ -449,7 +465,7 @@ void scan_builder_file(fs::path const& file, std::string const& msg, ScanResult&
 }
 
 fs::path messages_dir(std::string const& ver) {
-    return fs::path(g_gen_root) / "fixpp" / ver / "messages";
+    return fs::path(options().gen_root) / "fixpp" / ver / "messages";
 }
 
 std::vector<std::string> builder_messages(std::string const& ver) {
@@ -486,7 +502,7 @@ ArgsShape read_args_shape(std::string const& ver, std::string const& msg) {
     ArgsShape s;
     while (std::getline(in, line)) {
         if (!inside) {
-            inside = line.find(open) != std::string::npos;
+            inside = line.contains(open);
             continue;
         }
         if (line.starts_with("};")) break;
@@ -518,22 +534,19 @@ bool message_encoding_emitted_first(std::string const& ver, std::string const& m
     int step = 0;
     while (std::getline(in, line)) {
         if (!after_decl) {
-            after_decl = line.find("::fixpp::wire::body_builder bb") != std::string::npos;
+            after_decl = line.contains("::fixpp::wire::body_builder bb");
             continue;
         }
         if (line.find_first_not_of(" \t") == std::string::npos) continue;
         if (step == 0) {
-            if (line.find("if (args.message_encoding)") == std::string::npos) return false;
+            if (!line.contains("if (args.message_encoding)")) return false;
             step = 1;
             continue;
         }
-        for (Call const& c : scan_calls(line)) {
-            if (c.name == "field" && c.first_int == 347 &&
-                line.find("*args.message_encoding") != std::string::npos) {
-                return true;
-            }
-        }
-        return false;
+        return std::ranges::any_of(scan_calls(line), [&line](Call const& c) {
+            return c.name == "field" && c.first_int == 347 &&
+                   line.contains("*args.message_encoding");
+        });
     }
     return false;
 }
@@ -678,6 +691,9 @@ TEST_P(DataCensus091, NoCallOutsideExpectedDataTags) {
     Census const* c = nullptr;
     ASSERT_NO_THROW(c = &census_for(GetParam()));
     std::set<int> expected_data;
+    // The analyzer takes the path where ASSERT_NO_THROW skips its statement (it cannot see
+    // that testing::internal::AlwaysTrue() returns true), so it reads `c` as still null.
+    // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
     for (auto const& [s, n] : c->expected.sites) expected_data.insert(std::get<3>(s));
     std::vector<std::string> bad;
     for (auto const& [s, n] : c->cpp.sites) {
@@ -708,6 +724,9 @@ TEST_P(DataCensus091, NoOrphanStandardPairHalf) {
     Census const* c = nullptr;
     ASSERT_NO_THROW(c = &census_for(GetParam()));
     std::set<std::string> tags;
+    // The analyzer takes the path where ASSERT_NO_THROW skips its statement (it cannot see
+    // that testing::internal::AlwaysTrue() returns true), so it reads `c` as still null.
+    // NOLINTNEXTLINE(clang-analyzer-core.NullDereference)
     for (std::string const& o : c->cpp.orphans) {
         auto const open = o.rfind('(');
         auto const comma = o.find(',', open);
@@ -726,6 +745,9 @@ TEST_P(DataCensus091, NoOrphanStandardPairHalf) {
 TEST_P(DataCensus091, MessageEncodingSetShapeAndPosition) {
     Census const* c = nullptr;
     ASSERT_NO_THROW(c = &census_for(GetParam()));
+    // The analyzer takes the path where ASSERT_NO_THROW skips its statement (it cannot see
+    // that testing::internal::AlwaysTrue() returns true), so it reads `c` as still null.
+    // NOLINTNEXTLINE(clang-analyzer-core.NonNullParamChecker)
     std::set<std::string> const selected = message_encoding_selection(c->expected);
     std::set<std::string> carrying;
     std::vector<std::string> not_last;
@@ -755,13 +777,13 @@ TEST_P(DataCensus091, MessageEncodingSetShapeAndPosition) {
 
 std::vector<VersionSpec> versions() {
     std::vector<VersionSpec> v{
-        {"v42", "FIX42.xml", {}},
+        {.ver = "v42", .xml = "FIX42.xml", .exclude = {}},
         // 069 N-002/N-003: the v44 builder set omits these application MsgTypes.
-        {"v44", "FIX44.xml", {"BE", "BF", "BW", "BX", "BY"}},
-        {"v50sp2", "FIX50SP2.xml", {}},
+        {.ver = "v44", .xml = "FIX44.xml", .exclude = {"BE", "BF", "BW", "BX", "BY"}},
+        {.ver = "v50sp2", .xml = "FIX50SP2.xml", .exclude = {}},
     };
 #ifdef FIXPP_091_CENSUS_HAS_VLATEST
-    v.push_back({"vlatest", "", {}});
+    v.push_back({.ver = "vlatest", .xml = "", .exclude = {}});
 #endif
     return v;
 }
@@ -778,16 +800,16 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         std::string_view const a = argv[i];
         if (a == "--census-dump") {
-            g_dump = true;
+            options().dump = true;
         } else if (!a.starts_with("-")) {
-            g_gen_root = std::string(a);
+            options().gen_root = std::string(a);
         } else {
             std::cerr << "unknown argument: " << a << "\n";
             return 2;
         }
     }
-    std::cout << "[census] generated root: " << g_gen_root << "\n";
-    if (g_dump) {
+    std::cout << "[census] generated root: " << options().gen_root << "\n";
+    if (options().dump) {
         try {
             for (VersionSpec const& spec : versions()) dump(spec, census_for(spec));
         } catch (std::exception const& e) {

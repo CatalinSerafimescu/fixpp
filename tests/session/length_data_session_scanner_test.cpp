@@ -16,12 +16,16 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <expected>
+#include <fixpp/core/clock.hpp>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/dict/xml_loader.hpp>
+#include <fixpp/service/control_plane_factory.hpp>
 #include <fixpp/session/admin_messages.hpp>
 #include <fixpp/session/logon_credentials.hpp>
+#include <fixpp/session/security_profile.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
@@ -31,6 +35,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "session/scan_first_frame_ids.hpp"

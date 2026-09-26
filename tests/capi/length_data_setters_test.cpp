@@ -20,6 +20,9 @@
 #include <array>
 #include <cstddef>
 #include <cstring>
+#include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/table_view.hpp>
+#include <fixpp/dict/xml_loader.hpp>
 #include <memory>
 #include <memory_resource>
 #include <string>

@@ -40,6 +40,8 @@
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/v44/Messages.hpp>
 #include <fixpp/v44/all.hpp>  // GENERATED (Phase 3b) — build_<Msg>/<Msg>Args/registry
+#include <fixpp/wire/field_view.hpp>
+#include <ios>
 #include <memory_resource>
 #include <optional>
 #include <span>
@@ -1320,9 +1322,7 @@ TEST(BuilderRoundtrip067, MassQuoteGrouped) {
 // EXPECTED rows on v44 and those tags.
 namespace {
 
-std::string octet_091(int b) {
-    return std::string(1, static_cast<char>(static_cast<unsigned char>(b)));
-}
+std::string octet_091(int b) { return {static_cast<char>(static_cast<unsigned char>(b))}; }
 
 std::string octet_name_091(::testing::TestParamInfo<int> const& info) {
     static constexpr char kHex[] = "0123456789ABCDEF";
