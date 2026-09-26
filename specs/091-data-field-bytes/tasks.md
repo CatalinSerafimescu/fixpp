@@ -1257,7 +1257,7 @@ FR-019, SC-006).
   - Over budget → the owner, with the floor and the per-leg figures. Never relax it.
   - Record everything in `.specify/decisions/091-data-field-bytes-evidence.md` §*SC-005*.
   - `/mnt/wsl/fixppbuild/091-baseline/builder_bench.base` is a drift cross-check only.
-- [ ] T058 Run the paired `bench/dictionary/xml_loader_bench` A-B-A-B (FIX50SP2 load) against the same
+- [X] T058 Run the paired `bench/dictionary/xml_loader_bench` A-B-A-B (FIX50SP2 load) against the same
   base worktree, same procedure.
   - Pass condition: a slowdown ≤ +5 % (Article VIII §2). Over it → the §2 approval path, never
     self-declared.
@@ -1378,6 +1378,9 @@ FR-019, SC-006).
     closes it (owner ruling 2026-09-25, T063): one affirmative `Closes #506` line beside
     `Closes #418`, and no negated sentence anywhere that mentions either number (a closing keyword
     fires inside a negation);
+  - the SC-005 and loader-bench results, including the owner rulings (T057 passes on the fix
+    `1fe2a063`; T058 passes on FIX50SP2 +3.05 %), the report-only AsciiEncodedText build delta, and
+    the report-only FIX44/FIX42 load deltas (evidence §xml_loader_bench);
   - `local build: green on linux-clang-debug @ <git-sha>` (`[const §XVII.7]`), with the SHA T065
     verified;
   - a `## Gates` section, and a `## Gate B …` heading for the Gate B record;
