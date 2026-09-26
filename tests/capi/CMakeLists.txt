@@ -169,13 +169,15 @@ target_include_directories(capi_send_recv_test PRIVATE ${FIXPP_CAPI_FEATURE_B_IN
 # struct layouts match the non-hooks library (same pattern as capi_error_live_test).
 # 091 FR-020: length_data_logon_refusal_test.cpp reads the same accessor (issue #511).
 target_compile_definitions(capi_send_recv_test PRIVATE FIXPP_TEST_HOOKS)
-# Split into two ctest entries so WILL_FAIL is scoped ONLY to the deliberate
+# Split into separate ctest entries so WILL_FAIL is scoped ONLY to the deliberate
 # ASan UAF witness (T029), not to the positive round-trip tests (CA-006/007).
 # A binary-wide WILL_FAIL would invert a real ASan failure in the positive tests
 # into a pass, silently masking CA-006/007 ASan coverage.
 #
-# capi_send_recv_positive — all tests EXCEPT the ASan UAF witness: must PASS
-#   normally, including under ASan (no WILL_FAIL).
+# capi_send_recv_positive — all tests EXCEPT the ASan UAF witness and the 091
+#   FR-020 logon-refusal cells (CapiLogonMalformedCount.*, which run only in
+#   capi_logon_malformed_count): must PASS normally, including under ASan
+#   (no WILL_FAIL).
 # capi_send_recv_uaf_negative — ONLY the ASan witness: WILL_FAIL under ASan
 #   (the process aborts on the deliberate stack-use-after-return); the test is
 #   #if-guarded in the source, so without ASan it does not exist and the
