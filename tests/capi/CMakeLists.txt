@@ -161,8 +161,8 @@ target_link_libraries(capi_send_recv_test PRIVATE
   GTest::gtest_main
 )
 target_include_directories(capi_send_recv_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
-# Issue #151: the reaped-close tests use the FIXPP_TEST_HOOKS Session accessor
-# is_drained_for_test() to wait DETERMINISTICALLY for the acceptor to reach
+# Issue #151: the reaped-close tests use session_test_access::is_drained
+# (tests/support/session_test_access.hpp) to wait DETERMINISTICALLY for the acceptor to reach
 # closed_drained (avoiding a sleep that races the `closing` window) and the
 # set_session_ever_established seam (capi_internal.hpp gated decl). ODR-safe: both
 # FIXPP_TEST_HOOKS blocks are methods/decls only — no gated data members — so the
@@ -241,13 +241,8 @@ target_link_libraries(capi_length_data_test PRIVATE
   GTest::gtest_main
 )
 target_include_directories(capi_length_data_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
-# FIXPP_TEST_HOOKS: length_data_logon_refusal_test.cpp waits on
-# Session::is_drained_for_test through wait_for_acceptor_drained
-# (capi_loopback_support.hpp). ODR-safe for the reason given at
-# capi_send_recv_test: the gated blocks are methods/decls only.
 target_compile_definitions(capi_length_data_test PRIVATE
-  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""  # 091 T009: FIX44.xml
-  FIXPP_TEST_HOOKS)
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")  # 091 T009: FIX44.xml
 add_test(NAME capi_length_data COMMAND capi_length_data_test)
 set_tests_properties(capi_length_data PROPERTIES LABELS "capi;426;428;length-data;091")
 
