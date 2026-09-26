@@ -1352,7 +1352,7 @@ FR-019, SC-006).
       debug skip of that test (the `_ITERATOR_DEBUG_LEVEL` guard; evidence §US3 on MSVC).
   - ⚠️ The §7 full build needs an owner ASK, even as gate evidence.
 
-- [ ] T066 **`CLAUDE-history.md` entry** (Article XIX, plan Constitution Check): via `phase-implementer`
+- [X] T066 **`CLAUDE-history.md` entry** (Article XIX, plan Constitution Check): via `phase-implementer`
   (the edit guard decides the file class), add a newest-first 091 entry to the library's
   `CLAUDE-history.md` naming the feature, the PR, `Closes #418`, C-ABI 1.9 BREAKING, the FR-020
   `[const §XII.7]` fail-open fix (a Length immediately followed by its paired Data whose counted
@@ -1360,7 +1360,7 @@ FR-019, SC-006).
   now refuses the Logon; it affects shipped dictionaries
   through RawDataLength(95) and RawData(96)), the FR-021 C-ABI commit fix (a group whose count tag
   is a pair half is refused; FR-021 repairs the defect issue 506 tracks) and the follow-up #505. Update `CLAUDE.md`'s "Last merged FEATURE" pointer only at merge.
-- [ ] T067 **PR description** (FR-019, plan phase 7). The body carries:
+- [X] T067 **PR description** (FR-019, plan phase 7). The body carries:
   - the `[const §X.7]` **C-ABI 1.9 BREAKING** declaration: FR-019's population, pointing at B-091-4
     and data-model.md Appendix A;
   - the v50sp2 source break (FR-011 carve-out);
