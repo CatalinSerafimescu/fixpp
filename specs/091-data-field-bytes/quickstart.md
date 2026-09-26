@@ -191,5 +191,6 @@ Over budget → back to the owner, with the floor and the per-leg figures. Never
 
 **`xml_loader_bench` (FR-017 engages this paired row).** Same procedure, same session shape, with the
 base worktree above (no bench copy needed): A-B-A-B of `bench/dictionary/xml_loader_bench`. Pass
-condition: Article VIII §2's budget (a slowdown ≤ +5 %). Over it → the §2 approval path, never
-self-declared.
+condition: Article VIII §2's budget (a slowdown ≤ +5 %) on the FIX50SP2 load, the verdict case; the
+binary's other dictionary loads are reported only (owner ruling 2026-09-26; disclosed in B-091-4's
+*Load cost* bullet). Over it → the §2 approval path, never self-declared.

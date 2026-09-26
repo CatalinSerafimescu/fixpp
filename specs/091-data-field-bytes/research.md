@@ -421,9 +421,11 @@ it is not the precondition.
 - Over budget → report to the owner (SC-005), never silently relax.
 
 **`xml_loader_bench`.** FR-017 adds a walk over every component and group, and
-`bench/dictionary/xml_loader_bench` is a `paired` row in `bench/ci-suite.txt` timing the FIX50SP2
-load. It is measured A-B-A-B with the same base worktree before pushing; pass condition Article VIII
-§2's budget (a slowdown ≤ +5 %), over it → the §2 approval path.
+`bench/dictionary/xml_loader_bench` is a `paired` row in `bench/ci-suite.txt`. Its FIX50SP2 load is
+the verdict case; its other dictionary loads are reported only (owner ruling 2026-09-26; their cost
+is disclosed in B-091-4's *Load cost* bullet). It is measured A-B-A-B with the same base worktree
+before pushing; pass condition Article VIII §2's budget (a slowdown ≤ +5 %) on the verdict case,
+over it → the §2 approval path.
 
 **Compile-time surface.** Every builder translation unit gains the per-call-site `static_assert`s
 (R-7) and `dict_hooks.hpp` through `body_builder.hpp`. That matters most for `vlatest`, the largest
