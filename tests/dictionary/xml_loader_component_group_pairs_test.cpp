@@ -9,6 +9,11 @@
 // the first writer winning (specs/091-data-field-bytes/contracts/codegen-builders.md
 // C-2.5a, research.md R-11).
 //
+// Those documents' examples of a breaking child are elements. That a text node
+// between the two fields is ignored rather than breaking adjacency is stated by
+// the strict-walk comment in `detect_length_pairs`, not by the contract; arms
+// (ix)a and (ix)b witness it.
+//
 // Every arm loads its own document with its own tags, so the first-writer rule
 // cannot leak between arms. In every arm the two fields are NOT adjacent in
 // `<fields>` order (a filler field sits between them) and are NOT consecutive
@@ -392,4 +397,59 @@ TEST(XmlLoaderComponentGroupPairs, VIIIb_AdjacentInsideGroupInTrailerIsPaired) {
         GTEST_FAIL() << "load() returned no dictionary";
     }
     EXPECT_EQ(d->length_pair_data_tag(6021), 6022U);
+}
+
+// (ix)a a text node between the two fields inside a <component> definition does
+// not break adjacency: the strict walk skips non-element children. The element
+// counterpart that does break it is arm (iii). pugixml's default parse drops
+// comments and whitespace-only text, so the separator is non-whitespace text.
+TEST(XmlLoaderComponentGroupPairs, IXa_TextNodeBetweenInsideComponentKeepsPair) {
+    std::string const xml = doc({
+        "<fields>",
+        kFillerFields,
+        "<field number='6031' name='LenIXa' type='LENGTH'/>",
+        "<field number='6092' name='FillIXa' type='STRING'/>",
+        "<field number='6032' name='DataIXa' type='DATA'/>",
+        "</fields>",
+        "<components>",
+        "<component name='CIXa'><field name='LenIXa' required='N'/>x",
+        "<field name='DataIXa' required='N'/></component>",
+        "</components>",
+        "<messages><message name='MIXa' msgtype='D' msgcat='app'>",
+        "<field name='ClOrdID' required='N'/><component name='CIXa' required='N'/>",
+        "</message></messages>",
+    });
+    std::pmr::monotonic_buffer_resource mr;
+    auto const d = load(xml, &mr);
+    if (!d.has_value()) {
+        GTEST_FAIL() << "load() returned no dictionary";
+    }
+    EXPECT_EQ(d->length_pair_data_tag(6031), 6032U);
+}
+
+// (ix)b the same inside a <group> that is a direct child of a <message>, so
+// only the group walk can form the pair; the text node is also a non-element
+// node that the group pre-order search visits.
+TEST(XmlLoaderComponentGroupPairs, IXb_TextNodeBetweenInsideGroupKeepsPair) {
+    std::string const xml = doc({
+        "<fields>",
+        kFillerFields,
+        "<field number='6041' name='LenIXb' type='LENGTH'/>",
+        "<field number='6093' name='FillIXb' type='STRING'/>",
+        "<field number='6042' name='DataIXb' type='DATA'/>",
+        "<field number='7041' name='NoIXb' type='NUMINGROUP'/>",
+        "</fields>",
+        "<components/>",
+        "<messages><message name='MIXb' msgtype='D' msgcat='app'>",
+        "<field name='Text' required='N'/>",
+        "<group name='NoIXb' required='N'><field name='ClOrdID' required='N'/>",
+        "<field name='LenIXb' required='N'/>x<field name='DataIXb' required='N'/></group>",
+        "</message></messages>",
+    });
+    std::pmr::monotonic_buffer_resource mr;
+    auto const d = load(xml, &mr);
+    if (!d.has_value()) {
+        GTEST_FAIL() << "load() returned no dictionary";
+    }
+    EXPECT_EQ(d->length_pair_data_tag(6041), 6042U);
 }
