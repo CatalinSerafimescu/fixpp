@@ -20,7 +20,6 @@
 // Data count does not end on SOH is refused as malformed.
 
 #include <gtest/gtest.h>
-#include <unistd.h>
 
 #include <cstdint>
 #include <cstring>
@@ -43,6 +42,7 @@
 #include "fixpp/dict/dictionary.hpp"
 #include "fixpp/dict/field_ref.hpp"
 #include "fixpp/dict/xml_loader.hpp"
+#include "support/temp_dir.hpp"  // fixpp::test_support::current_pid (portable getpid)
 
 using namespace fixpp::capi_test;
 
@@ -113,15 +113,16 @@ constexpr std::string_view kComponentPairFix42Xml = R"xml(
 // fixpp_dict_load_from_xml, and removes the file.
 fixpp_dict_t* load_dict_from_xml_file(std::string_view xml) {
     auto const* info = ::testing::UnitTest::GetInstance()->current_test_info();
+    auto const pid = fixpp::test_support::current_pid();
     std::filesystem::path const path = std::filesystem::temp_directory_path() /
-                                       ("fixpp_091_" + std::to_string(::getpid()) + "_" +
+                                       ("fixpp_091_" + std::to_string(pid) + "_" +
                                         info->test_suite_name() + "_" + info->name() + ".xml");
     {
         std::ofstream out(path, std::ios::binary | std::ios::trunc);
         out.write(xml.data(), static_cast<std::streamsize>(xml.size()));
     }
     fixpp_dict_t* d = nullptr;
-    EXPECT_EQ(fixpp_dict_load_from_xml(path.c_str(), &d), FIXPP_ERR_OK);
+    EXPECT_EQ(fixpp_dict_load_from_xml(path.string().c_str(), &d), FIXPP_ERR_OK);
     std::error_code ec;
     std::filesystem::remove(path, ec);
     return d;
