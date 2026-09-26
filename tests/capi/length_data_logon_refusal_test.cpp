@@ -39,6 +39,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <future>
 #include <initializer_list>
 #include <memory>
 #include <span>
@@ -148,7 +149,9 @@ std::string peer_bytes(std::string_view raw_data_length) {
 
 // Reads the session's FSM state on its strand until it is Active or Disconnected,
 // the two states the acceptor's Logon arm leaves it in. Returns the last state
-// read, or NotConnected if the session was never found.
+// read, or NotConnected if the session was never found. Each read is waited on no
+// later than `budget` and holds only a weak_ptr, so a read the strand never runs
+// is abandoned without keeping the Session alive.
 fixpp::session::fsm_state settled_logon_state(fixpp_engine_t* engine,
                                               fixpp::session::SessionId const& id,
                                               std::chrono::milliseconds budget) {
@@ -160,10 +163,15 @@ fixpp::session::fsm_state settled_logon_state(fixpp_engine_t* engine,
         if (e->state_ != nullptr && e->state_->engine_.has_value()) {
             std::shared_ptr<fixpp::session::Session> sess = e->state_->engine_->lookup(id);
             if (sess != nullptr) {
+                std::weak_ptr<fixpp::session::Session> const weak = sess;
                 auto fut = asio::co_spawn(
                     sess->executor().underlying(),
-                    [sess]() -> asio::awaitable<fsm_state> { co_return sess->state(); },
+                    [weak]() -> asio::awaitable<fsm_state> {
+                        if (auto s = weak.lock()) co_return s->state();
+                        co_return fsm_state::NotConnected;
+                    },
                     asio::use_future);
+                if (fut.wait_until(until) != std::future_status::ready) return last;
                 last = fut.get();
                 if (last == fsm_state::Active || last == fsm_state::Disconnected) return last;
             }
