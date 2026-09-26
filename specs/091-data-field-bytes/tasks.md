@@ -1390,8 +1390,8 @@ FR-019, SC-006).
     orchestrator hands the owner a ready line to post themselves, e.g.
     `! gh pr comment <PR> --repo CatalinSerafimescu/fixpp --body "Owner ratification [const §VIII.2]: I accept the xml_loader_bench FIX44 (+6.04 %) and FIX42 (+11.35 %) load slowdowns and the builder_bench AsciiEncodedText (+13 %) slowdown, on the paired measurements and rationale in .specify/decisions/091-data-field-bytes-evidence.md §xml_loader_bench and §SC-005."`,
     and **never posts it on the owner's behalf**. Then it verifies with
-    `gh api repos/CatalinSerafimescu/fixpp/issues/<PR>/comments` that a comment exists whose `.user.login` is
-    the owner's login and whose body names FIX44, FIX42 and AsciiEncodedText. The session's `gh` is
+    `gh api --paginate repos/CatalinSerafimescu/fixpp/issues/<PR>/comments` that a comment exists whose
+    `.user.login` is `CatalinSerafimescu` and whose body names FIX44, FIX42 and AsciiEncodedText. The session's `gh` is
     authenticated as the owner, so the login check proves the account, not who typed it; the
     never-post-on-their-behalf rule is what that check rests on. No such comment → do not label;
   - `local build: green on linux-clang-debug @ <git-sha>` (`[const §XVII.7]`), with the SHA T065
