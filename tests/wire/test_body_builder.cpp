@@ -942,6 +942,34 @@ std::optional<prefill_plan> find_exhausting_prefill(bool nested, std::size_t n) 
     return std::nullopt;
 }
 
+// Searches for a pre-fill whose no-call twin commits and after which a
+// hand-written Length half of value `n` is itself refused for arena exhaustion.
+// That Length append is the same call the operation makes first, so a plan
+// found here makes the operation fail on its Length half, before any Data node.
+// For each count the filler is the largest one whose no-call twin commits.
+std::optional<prefill_plan> find_length_exhausting_prefill(bool nested, std::size_t n) {
+    for (std::size_t count = 0; count <= kBufSize; ++count) {
+        if (!prefill_commits({.nested = nested, .count = count, .filler = 0})) break;
+        std::size_t lo = 0;
+        std::size_t hi = kBufSize;
+        while (lo < hi) {
+            std::size_t const mid = lo + ((hi - lo + 1) / 2);
+            if (prefill_commits({.nested = nested, .count = count, .filler = mid})) {
+                lo = mid;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        prefill_plan const p{.nested = nested, .count = count, .filler = lo};
+        body_builder probe{"X"};
+        scene s;
+        if (!apply_prefill(probe, p, s)) continue;
+        auto const length = put_int(probe, nested, s, 354, static_cast<std::int64_t>(n));
+        if (!length.has_value() && length.error() == error::wire_frame_too_large) return p;
+    }
+    return std::nullopt;
+}
+
 }  // namespace
 
 // ── C-1.1 success: the pair lands at the position of the call ──────────────
@@ -1185,6 +1213,56 @@ TEST(BodyBuilderDataField, C1_5_ArenaExhaustionOnTheDataHalfRollsBackBothSurface
         auto const r = nested ? subject_scene.outer_entry.set_data(355, octets(value))
                               : subject.field_data(355, octets(value));
         ASSERT_FALSE(r.has_value()) << "the Data half was accepted";
+        EXPECT_EQ(r.error(), error::wire_frame_too_large);
+        ASSERT_TRUE(close_prefill(subject, *plan, subject_scene));
+        auto const subject_body = commit_body(subject);
+        ASSERT_TRUE(subject_body.has_value())
+            << "the subject must commit; error " << static_cast<int>(subject_body.error());
+        EXPECT_EQ(*subject_body, *twin_body);
+    }
+}
+
+// ── C-1.5 rollback when the Length half exhausts the arena (FR-006) ────────
+// The operation appends its Length node first; when that append runs the arena
+// out, no Data node is attempted and the builder is left as it was. The
+// pre-fill is searched for, as in the Data-half cell above.
+TEST(BodyBuilderDataField, C1_5_ArenaExhaustionOnTheLengthHalfRollsBackBothSurfaces) {
+    std::string const value = "abc";
+
+    for (bool const nested : {false, true}) {
+        SCOPED_TRACE(nested ? "set_data in a live innermost entry" : "field_data at the top level");
+        auto const plan = find_length_exhausting_prefill(nested, value.size());
+        if (!plan.has_value()) {
+            GTEST_FAIL() << "no committing pre-fill makes the Length half exhaust the arena";
+        }
+
+        // Arrangement witness: after the identical pre-fill the Length half alone
+        // is refused, so the operation's failure is on its Length half.
+        {
+            body_builder witness{"X"};
+            scene s;
+            ASSERT_TRUE(apply_prefill(witness, *plan, s));
+            auto const length =
+                put_int(witness, nested, s, 354, static_cast<std::int64_t>(value.size()));
+            ASSERT_FALSE(length.has_value())
+                << "the Length half must not fit, so the failure is on the Length half";
+            EXPECT_EQ(length.error(), error::wire_frame_too_large);
+        }
+
+        // The no-call twin commits.
+        body_builder twin{"X"};
+        scene twin_scene;
+        ASSERT_TRUE(apply_prefill(twin, *plan, twin_scene));
+        ASSERT_TRUE(close_prefill(twin, *plan, twin_scene));
+        auto const twin_body = commit_body(twin);
+        ASSERT_TRUE(twin_body.has_value()) << "the no-call twin must commit";
+
+        body_builder subject{"X"};
+        scene subject_scene;
+        ASSERT_TRUE(apply_prefill(subject, *plan, subject_scene));
+        auto const r = nested ? subject_scene.outer_entry.set_data(355, octets(value))
+                              : subject.field_data(355, octets(value));
+        ASSERT_FALSE(r.has_value()) << "the operation was accepted";
         EXPECT_EQ(r.error(), error::wire_frame_too_large);
         ASSERT_TRUE(close_prefill(subject, *plan, subject_scene));
         auto const subject_body = commit_body(subject);
