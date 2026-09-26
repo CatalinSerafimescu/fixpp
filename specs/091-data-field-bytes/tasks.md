@@ -1421,13 +1421,13 @@ FR-019, SC-006).
 
 ### Mandatory close-out tasks (Gate-B preconditions, Article XVII §8)
 
-- [ ] T068 [P] **Catalogue close-out.**
+- [X] T068 [P] **Catalogue close-out.**
   - Flip every feature-owned OFFICIAL row in `spec/feature-catalogue.md` to `done` with this PR as
     evidence. That covers W-008, which gains 091's evidence (T049), and any row 091 owns; the CA
     rows carry the 1.9 note from T049.
   - Add or update the matching `spec/coverage-index.md` entry: `[FIX50SP2 §3.3] Field data types` ↔
     W-008, naming this feature's witnesses (the `_418` pins, C-2.6, C-1.2).
-- [ ] T069 **Feature-completeness audit (the FINAL task).** Assert against the merged tree:
+- [X] T069 **Feature-completeness audit (the FINAL task).** Assert against the merged tree:
   - (i) every `tasks.md` row is `[X]` or carries an explicit waiver rationale;
   - (ii) every FR-001…FR-021 (including FR-004a, FR-009a and FR-011a) and SC-001…SC-006 maps to a
     landed test AND a landed implementation;
