@@ -12,6 +12,7 @@
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/use_future.hpp>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdio>
@@ -24,6 +25,7 @@
 #include <fixpp/dict/xml_loader.hpp>
 #include <fixpp/service/control_plane_factory.hpp>
 #include <fixpp/session/admin_messages.hpp>
+#include <fixpp/session/application.hpp>
 #include <fixpp/session/logon_credentials.hpp>
 #include <fixpp/session/security_profile.hpp>
 #include <fixpp/session/session.hpp>
@@ -550,10 +552,26 @@ TEST(InterpretLogonMalformedCount, TwinWellFormedComponentPairWithNonZeroEncrypt
 // tests/session/logon_handshake_test.cpp's LogonHandshakeTest. On each arm the
 // L=1/E=0 twin must reach Active and the L=1/E=2 twin must not, or the harness does
 // not discriminate and the malformed-count cell means nothing.
+//
+// Each cell also counts Application::onLogon. The C-ABI's established and
+// ever-established latches are written from onLogon (CapiApplication, on either
+// role), and a final-state check cannot tell "never Active" from "Active, then
+// left"; a refused cell must therefore see no onLogon at all.
 class LogonArmMalformedCount : public ::testing::Test {
 protected:
+    struct LogonRecorder : fixpp::session::Application {
+        std::atomic<int> on_logon{0};
+        void onLogon(const SessionId& /*id*/) override { on_logon.fetch_add(1); }
+    };
+
+    struct arm_outcome {
+        fsm_state state;
+        int on_logon;
+    };
+
     asio::io_context ioc;
     std::shared_ptr<fixpp::core::mock_clock> clock;
+    std::shared_ptr<LogonRecorder> recorder = std::make_shared<LogonRecorder>();
     fixpp::core::EngineConfig engine{};
 
     void SetUp() override {
@@ -564,6 +582,7 @@ protected:
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
         engine.clock = clock;
         engine.executor = ioc.get_executor();
+        engine.application = recorder;
     }
 
     SessionConfig make_cfg(session_role role) {
@@ -615,9 +634,10 @@ protected:
         return out;
     }
 
-    // Opens a session in `role`, feeds the peer Logon, and returns the state after it.
-    fsm_state state_after_peer_logon(session_role role, std::string_view length,
-                                     std::string_view encrypt_method) {
+    // Opens a session in `role`, feeds the peer Logon, and returns the state after it
+    // together with the number of onLogon calls the session made.
+    arm_outcome state_after_peer_logon(session_role role, std::string_view length,
+                                       std::string_view encrypt_method) {
         Session sess(engine, make_cfg(role));
         EXPECT_TRUE(run_sync(sess.open(), "LogonArmMalformedCount::open").has_value());
         fsm_state const expected_before =
@@ -626,63 +646,79 @@ protected:
         auto const frame = peer_logon(role, length, encrypt_method);
         (void)run_sync(sess.on_inbound_frame(std::span<const std::byte>{frame}),
                        "LogonArmMalformedCount::feed");
-        return sess.state();
+        return {.state = sess.state(), .on_logon = recorder->on_logon.load()};
     }
 };
 
 TEST_F(LogonArmMalformedCount, AcceptorTwinWellFormedCountZeroEncryptMethodReachesActive) {
-    EXPECT_EQ(state_after_peer_logon(session_role::acceptor, "1", "0"), fsm_state::Active);
+    auto const o = state_after_peer_logon(session_role::acceptor, "1", "0");
+    EXPECT_EQ(o.state, fsm_state::Active);
+    EXPECT_EQ(o.on_logon, 1);
 }
 
 TEST_F(LogonArmMalformedCount, AcceptorTwinWellFormedCountNonZeroEncryptMethodIsNotEstablished) {
-    auto const s = state_after_peer_logon(session_role::acceptor, "1", "2");
-    EXPECT_NE(s, fsm_state::Active);
-    EXPECT_NE(s, fsm_state::LogonReceived);
+    auto const o = state_after_peer_logon(session_role::acceptor, "1", "2");
+    EXPECT_NE(o.state, fsm_state::Active);
+    EXPECT_NE(o.state, fsm_state::LogonReceived);
+    EXPECT_EQ(o.on_logon, 0);
 }
 
 TEST_F(LogonArmMalformedCount, AcceptorMalformedCountDoesNotHideEncryptMethod) {
-    auto const s = state_after_peer_logon(session_role::acceptor, "2", "2");
-    EXPECT_NE(s, fsm_state::Active)
+    auto const o = state_after_peer_logon(session_role::acceptor, "2", "2");
+    EXPECT_NE(o.state, fsm_state::Active)
         << "the acceptor established on a Logon with 98=2 after a malformed 95 count";
-    EXPECT_NE(s, fsm_state::LogonReceived);
+    EXPECT_NE(o.state, fsm_state::LogonReceived);
+    EXPECT_EQ(o.on_logon, 0) << "onLogon fired for a Logon with a malformed 95 count";
 }
 
 TEST_F(LogonArmMalformedCount, InitiatorTwinWellFormedCountZeroEncryptMethodReachesActive) {
-    EXPECT_EQ(state_after_peer_logon(session_role::initiator, "1", "0"), fsm_state::Active);
+    auto const o = state_after_peer_logon(session_role::initiator, "1", "0");
+    EXPECT_EQ(o.state, fsm_state::Active);
+    EXPECT_EQ(o.on_logon, 1);
 }
 
 TEST_F(LogonArmMalformedCount, InitiatorTwinWellFormedCountNonZeroEncryptMethodIsNotEstablished) {
-    EXPECT_NE(state_after_peer_logon(session_role::initiator, "1", "2"), fsm_state::Active);
+    auto const o = state_after_peer_logon(session_role::initiator, "1", "2");
+    EXPECT_NE(o.state, fsm_state::Active);
+    EXPECT_EQ(o.on_logon, 0);
 }
 
 TEST_F(LogonArmMalformedCount, InitiatorMalformedCountDoesNotHideEncryptMethod) {
-    EXPECT_NE(state_after_peer_logon(session_role::initiator, "2", "2"), fsm_state::Active)
+    auto const o = state_after_peer_logon(session_role::initiator, "2", "2");
+    EXPECT_NE(o.state, fsm_state::Active)
         << "the initiator established on a Logon ack with 98=2 after a malformed 95 count";
+    EXPECT_EQ(o.on_logon, 0) << "onLogon fired for a Logon ack with a malformed 95 count";
 }
 
 TEST_F(LogonArmMalformedCount, AcceptorCountRunningPastTheFrameIsNotEstablished) {
-    auto const s = state_after_peer_logon(session_role::acceptor, "999", "2");
-    EXPECT_NE(s, fsm_state::Active)
+    auto const o = state_after_peer_logon(session_role::acceptor, "999", "2");
+    EXPECT_NE(o.state, fsm_state::Active)
         << "the acceptor established on a Logon with 98=2 after an overrunning 95 count";
-    EXPECT_NE(s, fsm_state::LogonReceived);
+    EXPECT_NE(o.state, fsm_state::LogonReceived);
+    EXPECT_EQ(o.on_logon, 0) << "onLogon fired for a Logon with an overrunning 95 count";
 }
 
 TEST_F(LogonArmMalformedCount, InitiatorCountRunningPastTheFrameIsNotEstablished) {
-    EXPECT_NE(state_after_peer_logon(session_role::initiator, "999", "2"), fsm_state::Active)
+    auto const o = state_after_peer_logon(session_role::initiator, "999", "2");
+    EXPECT_NE(o.state, fsm_state::Active)
         << "the initiator established on a Logon ack with 98=2 after an overrunning 95 count";
+    EXPECT_EQ(o.on_logon, 0) << "onLogon fired for a Logon ack with an overrunning 95 count";
 }
 
 // 98=0 is the shape a conforming peer's Logon has, so only the count can refuse it.
 TEST_F(LogonArmMalformedCount, AcceptorMalformedCountWithZeroEncryptMethodIsNotEstablished) {
-    auto const s = state_after_peer_logon(session_role::acceptor, "2", "0");
-    EXPECT_NE(s, fsm_state::Active)
+    auto const o = state_after_peer_logon(session_role::acceptor, "2", "0");
+    EXPECT_NE(o.state, fsm_state::Active)
         << "the acceptor established on a Logon carrying a malformed 95 count";
-    EXPECT_NE(s, fsm_state::LogonReceived);
+    EXPECT_NE(o.state, fsm_state::LogonReceived);
+    EXPECT_EQ(o.on_logon, 0) << "onLogon fired for a Logon carrying a malformed 95 count";
 }
 
 TEST_F(LogonArmMalformedCount, InitiatorMalformedCountWithZeroEncryptMethodIsNotEstablished) {
-    EXPECT_NE(state_after_peer_logon(session_role::initiator, "2", "0"), fsm_state::Active)
+    auto const o = state_after_peer_logon(session_role::initiator, "2", "0");
+    EXPECT_NE(o.state, fsm_state::Active)
         << "the initiator established on a Logon ack carrying a malformed 95 count";
+    EXPECT_EQ(o.on_logon, 0) << "onLogon fired for a Logon ack carrying a malformed 95 count";
 }
 
 // ── Zero global allocations (constitution §VIII.5) ───────────────────────────

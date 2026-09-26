@@ -40,6 +40,14 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/wait_until.hpp"
 
+#ifdef FIXPP_TEST_HOOKS
+#include <asio/co_spawn.hpp>
+#include <asio/use_future.hpp>
+#include <memory>
+
+#include "fixpp/session/session.hpp"  // Session::is_drained_for_test (FIXPP_TEST_HOOKS)
+#endif
+
 namespace fixpp::capi_test {
 
 // A test-owned fixpp_dict handle over the minimal FIX 4.2 dictionary (L-050-1).
@@ -177,5 +185,38 @@ inline fixpp::session::SessionId session_id_of(fixpp_session_config_t* cfg) {
     auto* internal = reinterpret_cast<fixpp_session_config*>(cfg);
     return fixpp::session::SessionId::from_config(internal->cfg);
 }
+
+#ifdef FIXPP_TEST_HOOKS
+// Issue #151: poll the engine's RETAINED Session (a reaped session stays in lookup)
+// until it reaches lifecycle::closed_drained — the deterministic signal that
+// Session::close will return session_already_closed. is_established/onLogout fires on
+// the Active→!Active edge BEFORE closed_drained, so a fixed sleep races the `closing`
+// window; this waits on the real terminal state instead. Self-bounded by `deadline`.
+//
+// state_ is a plain enum, SINGLE-WRITER on the session strand (the worker mutates it
+// in Session::close), so it must be READ ON THAT STRAND — an off-strand read is a data
+// race (TSan-confirmed). The read is hopped onto sess->executor() (the same strand the
+// worker uses), then blocked on via use_future; the test thread never touches state_.
+inline bool wait_for_acceptor_drained(
+    fixpp_engine_t* engine, const fixpp::session::SessionId& id,
+    std::chrono::milliseconds deadline = std::chrono::milliseconds{5000}) {
+    auto* e = reinterpret_cast<fixpp_engine*>(engine);
+    const auto until = std::chrono::steady_clock::now() + deadline;
+    for (;;) {
+        if (e->state_ != nullptr && e->state_->engine_.has_value()) {
+            std::shared_ptr<fixpp::session::Session> sess = e->state_->engine_->lookup(id);
+            if (sess != nullptr) {
+                auto fut = asio::co_spawn(
+                    sess->executor().underlying(),
+                    [sess]() -> asio::awaitable<bool> { co_return sess->is_drained_for_test(); },
+                    asio::use_future);
+                if (fut.get()) return true;
+            }
+        }
+        if (std::chrono::steady_clock::now() >= until) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds{2});
+    }
+}
+#endif  // FIXPP_TEST_HOOKS
 
 }  // namespace fixpp::capi_test

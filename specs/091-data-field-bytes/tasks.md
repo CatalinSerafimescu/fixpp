@@ -491,8 +491,8 @@ only then made GREEN.
   - Twins, GREEN before and after: well-formed count + `98=2` refused; + `98=0` accepted; no count +
     `98=2` refused; the custom-pair frame without the dictionary refused; and each arm's two
     well-formed controls.
-  - The C-ABI observer was not written: `capi_loopback_support.hpp` pairs two engines and cannot
-    inject a hand-built Logon; the arms above are the handshake witnesses.
+  - C-ABI observers: `tests/capi/length_data_logon_refusal_test.cpp` `CapiLogonMalformedCount.*` (a
+    C-ABI acceptor, raw TCP peer); the `onLogon` latch writer, both roles: `LogonArmMalformedCount.*`.
   - Pre-registered table and observations: evidence file §*interpret_logon fail-open — RED (T070)*.
 - [X] T071 Via `phase-implementer`, implement FR-020 in `src/session/admin_messages.cpp`'s
   `interpret_logon`: a malformed count returns `core::error::session_invalid_logon` instead of

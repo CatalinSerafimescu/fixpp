@@ -1,0 +1,307 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// tests/capi/length_data_logon_refusal_test.cpp — 091 (fixpp#418) FR-020, C-ABI observers
+//
+// A C-ABI acceptor engine faces a raw TCP peer that writes a hand-built Logon and
+// then one application message (35=D, 34=2) in a single write. The Logon carries
+// RawDataLength(95) and RawData(96) and then EncryptMethod(98)=0, so the count is
+// the only thing that can refuse it: 95=2 makes the counted value end on a byte
+// that is not SOH (FR-020), 95=1 is the well-formed twin.
+//
+// FR-020's C-ABI effects (include/fix/c_api/session.h, the FR-020 clause on each
+// declaration) are asserted in two phases, because after the drain the session
+// is not Active on either code path (where it was Active, onLogout has cleared
+// `established`), so is_established, send and the toApp count no longer
+// discriminate there:
+//   1. once the acceptor's Logon arm has settled, while the peer is still
+//      connected: fixpp_session_is_established, fixpp_session_send and the
+//      toApp callback count;
+//   2. after the peer disconnects and the session has drained: the receive
+//      callback count and fixpp_session_close.
+//
+// The Logon arm settles in Active or Disconnected; the barrier reads the
+// session's state on its own strand (an off-strand read is a data race, see
+// Engine::send) and waits for one of those two.
+//
+// Anchors: specs/091-data-field-bytes/spec.md FR-020 (C-ABI effect);
+//          data-model.md Appendix A; spec/behaviors-and-limitations.md B-091-4.
+
+#include <gtest/gtest.h>
+
+#include <asio/buffer.hpp>
+#include <asio/co_spawn.hpp>
+#include <asio/io_context.hpp>
+#include <asio/ip/address.hpp>
+#include <asio/ip/tcp.hpp>
+#include <asio/use_future.hpp>
+#include <asio/write.hpp>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <cstdio>
+#include <ctime>
+#include <initializer_list>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <thread>
+#include <utility>
+#include <vector>
+
+#include "capi_internal.hpp"
+#include "capi_loopback_support.hpp"
+#include "fix/c_api/engine.h"
+#include "fix/c_api/session.h"
+#include "fix/c_api/version.h"
+#include "fixpp/session/session.hpp"
+#include "support/wait_until.hpp"
+
+using namespace std::chrono_literals;
+using namespace fixpp::capi_test;
+
+namespace {
+
+constexpr char const* kAcceptorCompId = "ACC-LR";
+constexpr char const* kPeerCompId = "INI-LR";
+
+// The HeartBtInt configured on the acceptor and carried in the peer's 108=. A
+// heartbeat-driven path is the earliest that can move an Active session off
+// Active, so the whole observation window must stay below one interval.
+constexpr int kHeartBtIntSeconds = 30;
+constexpr std::chrono::milliseconds kHeartBtInt{kHeartBtIntSeconds * 1000};
+
+// The accept loop's bound on reading the first frame (src/session/engine.cpp,
+// kFirstFrameDeadline), spelled here independently. A frame that is never routed
+// leaves the session NotConnected, so this deadline cannot settle the barrier;
+// past it the frame has either been routed or dropped.
+constexpr std::chrono::milliseconds kFirstFrameDeadline{5000};
+
+constexpr std::chrono::milliseconds kSettleBudget = kFirstFrameDeadline;
+constexpr std::chrono::milliseconds kDrainBudget = kHeartBtInt / 4;
+constexpr std::chrono::milliseconds kBoundPortBudget = kFirstFrameDeadline;
+static_assert(kSettleBudget + kDrainBudget < kHeartBtInt,
+              "the observation window must end before a heartbeat-driven path can fire");
+
+// SendingTime(52) from the real clock: the C-ABI engine runs a real-time clock and
+// the acceptor checks SendingTime against it.
+std::string utc_now_sending_time() {
+    std::time_t const t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    std::tm tm{};
+    gmtime_r(&t, &tm);
+    char buf[32];
+    std::strftime(buf, sizeof(buf), "%Y%m%d-%H:%M:%S.000", &tm);
+    return buf;
+}
+
+std::string frame_fix42(std::string const& body) {
+    std::string full =
+        "8=FIX.4.2\x01"
+        "9=" +
+        std::to_string(body.size()) + "\x01" + body;
+    unsigned int cs = 0;
+    for (unsigned char c : full) {
+        cs += c;
+    }
+    char csbuf[4];
+    std::snprintf(csbuf, sizeof(csbuf), "%03u", cs & 0xFFU);
+    return full + "10=" + csbuf + "\x01";
+}
+
+// `tag=value<SOH>` for each pair, in order.
+std::string fix_fields(std::initializer_list<std::pair<int, std::string>> fields) {
+    std::string out;
+    for (auto const& [tag, value] : fields) {
+        out += std::to_string(tag) + "=" + value + "\x01";
+    }
+    return out;
+}
+
+// The peer's Logon then one NewOrderSingle, back to back; only `raw_data_length`
+// differs between the refused cell and its twin.
+std::string peer_bytes(std::string_view raw_data_length) {
+    std::string const ts = utc_now_sending_time();
+    std::string const logon = frame_fix42(fix_fields({{35, "A"},
+                                                      {34, "1"},
+                                                      {49, kPeerCompId},
+                                                      {52, ts},
+                                                      {56, kAcceptorCompId},
+                                                      {108, std::to_string(kHeartBtIntSeconds)},
+                                                      {95, std::string{raw_data_length}},
+                                                      {96, "x"},
+                                                      {98, "0"}}));
+    std::string const order = frame_fix42(fix_fields({{35, "D"},
+                                                      {34, "2"},
+                                                      {49, kPeerCompId},
+                                                      {52, ts},
+                                                      {56, kAcceptorCompId},
+                                                      {11, "ORD1"},
+                                                      {55, "TESTSYM"},
+                                                      {54, "1"},
+                                                      {38, "100"},
+                                                      {40, "1"}}));
+    return logon + order;
+}
+
+// Reads the session's FSM state on its strand until it is Active or Disconnected,
+// the two states the acceptor's Logon arm leaves it in. Returns the last state
+// read, or NotConnected if the session was never found.
+fixpp::session::fsm_state settled_logon_state(fixpp_engine_t* engine,
+                                              fixpp::session::SessionId const& id,
+                                              std::chrono::milliseconds budget) {
+    using fixpp::session::fsm_state;
+    auto* e = reinterpret_cast<fixpp_engine*>(engine);
+    auto const until = std::chrono::steady_clock::now() + budget;
+    fsm_state last = fsm_state::NotConnected;
+    for (;;) {
+        if (e->state_ != nullptr && e->state_->engine_.has_value()) {
+            std::shared_ptr<fixpp::session::Session> sess = e->state_->engine_->lookup(id);
+            if (sess != nullptr) {
+                auto fut = asio::co_spawn(
+                    sess->executor().underlying(),
+                    [sess]() -> asio::awaitable<fsm_state> { co_return sess->state(); },
+                    asio::use_future);
+                last = fut.get();
+                if (last == fsm_state::Active || last == fsm_state::Disconnected) return last;
+            }
+        }
+        if (std::chrono::steady_clock::now() >= until) return last;
+        std::this_thread::sleep_for(std::chrono::milliseconds{2});
+    }
+}
+
+struct Counts {
+    std::atomic<int> received{0};
+    std::atomic<int> to_app{0};
+};
+
+void on_receive(const fixpp_msg_t* /*inbound*/, void* ud) {
+    static_cast<Counts*>(ud)->received.fetch_add(1);
+}
+
+fixpp_toapp_verdict on_to_app(const fixpp_msg_t* /*outbound*/, void* ud) {
+    static_cast<Counts*>(ud)->to_app.fetch_add(1);
+    return FIXPP_TOAPP_SEND;
+}
+
+// One acceptor engine and its session, started, with a connected raw peer that
+// has written `peer_bytes(raw_data_length)`.
+struct AcceptorCell {
+    fixpp_engine_t* engine = nullptr;
+    fixpp_session_t* session = nullptr;
+    fixpp::session::SessionId id{};
+    Counts counts;
+    asio::io_context peer_ioc;
+    asio::ip::tcp::socket peer{peer_ioc};
+    bool ready = false;
+
+    explicit AcceptorCell(std::string_view raw_data_length) {
+        // Consumer minor 9: the 1.9 codes are returned untranslated.
+        if (fixpp_engine_create(make_engine_cfg(), FIXPP_C_ABI_VERSION_MAJOR, 9, &engine) !=
+            FIXPP_ERR_OK) {
+            ADD_FAILURE() << "fixpp_engine_create failed";
+            return;
+        }
+        fixpp_session_config_t* cfg =
+            make_session_cfg(kAcceptorCompId, kPeerCompId, FIXPP_ROLE_ACCEPTOR);
+        EXPECT_EQ(fixpp_session_config_set_heartbeat_seconds(cfg, kHeartBtIntSeconds),
+                  FIXPP_ERR_OK);
+        set_loopback_endpoint(cfg, "127.0.0.1", 0);
+        id = session_id_of(cfg);
+        if (fixpp_session_open(engine, cfg, &session) != FIXPP_ERR_OK) {
+            ADD_FAILURE() << "fixpp_session_open failed";
+            return;
+        }
+        EXPECT_EQ(fixpp_session_register_callback(session, on_receive, &counts), FIXPP_ERR_OK);
+        EXPECT_EQ(fixpp_session_register_send_callback(session, on_to_app, &counts), FIXPP_ERR_OK);
+        if (fixpp_engine_start(engine) != FIXPP_ERR_OK) {
+            ADD_FAILURE() << "fixpp_engine_start failed";
+            return;
+        }
+        std::uint16_t port = 0;
+        if (!fixpp::test_support::wait_until_observed(
+                [&] {
+                    return fixpp_session_acceptor_bound_endpoint(session, &port) == FIXPP_ERR_OK &&
+                           port != 0;
+                },
+                kBoundPortBudget)) {
+            ADD_FAILURE() << "the acceptor never bound a port";
+            return;
+        }
+        std::error_code ec;
+        peer.connect({asio::ip::make_address("127.0.0.1"), port}, ec);
+        if (ec) {
+            ADD_FAILURE() << "peer connect: " << ec.message();
+            return;
+        }
+        std::string const bytes = peer_bytes(raw_data_length);
+        asio::write(peer, asio::buffer(bytes), ec);
+        if (ec) {
+            ADD_FAILURE() << "peer write: " << ec.message();
+            return;
+        }
+        ready = true;
+    }
+
+    void disconnect_peer() {
+        std::error_code ec;
+        peer.shutdown(asio::ip::tcp::socket::shutdown_both, ec);
+        peer.close(ec);
+    }
+
+    ~AcceptorCell() {
+        disconnect_peer();
+        if (engine != nullptr) fixpp_engine_destroy(engine);
+    }
+
+    AcceptorCell(AcceptorCell const&) = delete;
+    AcceptorCell& operator=(AcceptorCell const&) = delete;
+};
+
+}  // namespace
+
+TEST(CapiLogonMalformedCount, AcceptorMalformedCountIsRefusedOnEveryObserver) {
+    AcceptorCell cell{"2"};
+    ASSERT_TRUE(cell.ready);
+
+    auto const settled = settled_logon_state(cell.engine, cell.id, kSettleBudget);
+    ASSERT_TRUE(settled == fixpp::session::fsm_state::Active ||
+                settled == fixpp::session::fsm_state::Disconnected)
+        << "the Logon arm did not settle within the budget";
+
+    // Phase 1: the peer is still connected.
+    bool established = true;
+    EXPECT_EQ(fixpp_session_is_established(cell.session, &established), FIXPP_ERR_OK);
+    EXPECT_FALSE(established) << "the session established on a Logon with a malformed 95 count";
+    auto const payload = make_app_payload("OUT1");
+    EXPECT_EQ(fixpp_session_send(cell.session, payload.data(), payload.size()),
+              FIXPP_ERR_SESSION_INVALID_STATE);
+    EXPECT_EQ(cell.counts.to_app.load(), 0) << "toApp fired on a refused session";
+
+    // Phase 2: the peer disconnects and the session drains.
+    cell.disconnect_peer();
+    EXPECT_TRUE(wait_for_acceptor_drained(cell.engine, cell.id, kDrainBudget))
+        << "the acceptor did not drain after the peer disconnected";
+    EXPECT_EQ(cell.counts.received.load(), 0)
+        << "the peer's application message was delivered on a refused session";
+    EXPECT_EQ(fixpp_session_close(cell.session), FIXPP_ERR_THREAD_SESSION_LIFECYCLE);
+}
+
+TEST(CapiLogonMalformedCount, AcceptorWellFormedCountEstablishesOnEveryObserver) {
+    AcceptorCell cell{"1"};
+    ASSERT_TRUE(cell.ready);
+
+    EXPECT_EQ(settled_logon_state(cell.engine, cell.id, kSettleBudget),
+              fixpp::session::fsm_state::Active);
+
+    bool established = false;
+    EXPECT_EQ(fixpp_session_is_established(cell.session, &established), FIXPP_ERR_OK);
+    EXPECT_TRUE(established);
+    auto const payload = make_app_payload("OUT1");
+    EXPECT_EQ(fixpp_session_send(cell.session, payload.data(), payload.size()), FIXPP_ERR_OK);
+    EXPECT_EQ(cell.counts.to_app.load(), 1);
+
+    cell.disconnect_peer();
+    EXPECT_TRUE(wait_for_acceptor_drained(cell.engine, cell.id, kDrainBudget))
+        << "the acceptor did not drain after the peer disconnected";
+    EXPECT_EQ(cell.counts.received.load(), 1);
+    EXPECT_EQ(fixpp_session_close(cell.session), FIXPP_ERR_OK);
+}
