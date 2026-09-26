@@ -1,6 +1,6 @@
 78aae803c7e4f15a6727b15e1189f82e44e50889716ad3a7758caaa1313d2697  include/fix/c_api.h
 c1587db8f19a456e02df9da19760d4c0871a2209866fd5ea4e2569ef21c23a03  include/fix/c_api/decimal.h
-7ab5803caf3ca77d3bb423b8c8d3fad8c34d56e76d348813eeb623fe3284645e  include/fix/c_api/dict.h
+90ee764c107474b5c6ac0ffe748a56fa9151cc65a591618476367f6aa0d1a15e  include/fix/c_api/dict.h
 a18526750f3212e88ba9ad12d5b8671dfae0e40b9cbb61b93104dd8836f02f98  include/fix/c_api/engine.h
 e2a3d11370256c13d564f20499dffa53a6088b830aacb1688a4092bc180e7c3d  include/fix/c_api/error.h
 cbf18ac834e95d216eb08d9d6f4a8a71d96e4c0d0c12096f68fa53a00cdf8d35  include/fix/c_api/export.h

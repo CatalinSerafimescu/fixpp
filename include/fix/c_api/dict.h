@@ -32,9 +32,9 @@ extern "C" {
  * then call fixpp_dict_destroy on your handle.
  *
  * BREAKING (C-ABI 1.9): a Length+Data pair a loaded dictionary declares only
- * inside a component or group is now a dictionary pair. This is the root cause
- * of every other 1.9 note: the return code is the same, but the dictionary this
- * call yields now carries the pair.
+ * inside a component or group is now a dictionary pair; the other 1.9 notes
+ * about such a pair follow from it (FR-020 and FR-021 are separate causes). The
+ * return code is the same, but the dictionary this call yields carries the pair.
  *
  * THUNK: construction-time — catches all exceptions thrown by XmlLoader
  * (xml_parse_error / unknown_version_error / xml_oom_error on bad or missing
