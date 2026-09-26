@@ -27,6 +27,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <asio/buffer.hpp>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
@@ -38,9 +39,9 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
-#include <ctime>
 #include <initializer_list>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -52,6 +53,7 @@
 #include "fix/c_api/engine.h"
 #include "fix/c_api/session.h"
 #include "fix/c_api/version.h"
+#include "fixpp/core/fix_time.hpp"
 #include "fixpp/session/session.hpp"
 #include "support/wait_until.hpp"
 
@@ -84,12 +86,15 @@ static_assert(kSettleBudget + kDrainBudget < kHeartBtInt,
 // SendingTime(52) from the real clock: the C-ABI engine runs a real-time clock and
 // the acceptor checks SendingTime against it.
 std::string utc_now_sending_time() {
-    std::time_t const t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-    std::tm tm{};
-    gmtime_r(&t, &tm);
-    char buf[32];
-    std::strftime(buf, sizeof(buf), "%Y%m%d-%H:%M:%S.000", &tm);
-    return buf;
+    std::array<char, 32> buf{};
+    auto r = fixpp::core::utc_time_to_fix_string(std::chrono::system_clock::now(),
+                                                 fixpp::core::fix_time_precision::millis,
+                                                 std::span<char>{buf});
+    if (!r) {
+        ADD_FAILURE() << "utc_time_to_fix_string failed";
+        return {};
+    }
+    return std::string{r->data(), r->size()};
 }
 
 std::string frame_fix42(std::string const& body) {
