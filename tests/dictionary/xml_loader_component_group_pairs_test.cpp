@@ -9,10 +9,9 @@
 // the first writer winning (specs/091-data-field-bytes/contracts/codegen-builders.md
 // C-2.5a, research.md R-11).
 //
-// Those documents' examples of a breaking child are elements. That a text node
-// between the two fields is ignored rather than breaking adjacency is stated by
-// the strict-walk comment in `detect_length_pairs`, not by the contract; arms
-// (ix)a and (ix)b witness it.
+// Arms (ix)a and (ix)b witness C-2.5a (ix): a non-element node between the two
+// fields (a non-whitespace text node) is ignored, and only a non-`<field>`
+// element breaks adjacency.
 //
 // Every arm loads its own document with its own tags, so the first-writer rule
 // cannot leak between arms. In every arm the two fields are NOT adjacent in
