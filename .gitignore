@@ -152,6 +152,7 @@ tests/config/fuzz/corpus/*
 !tests/fuzz/corpus/file_cert_source/
 !tests/fuzz/corpus/orchestra_loader/
 !tests/fuzz/corpus/session_cancellation/
+!tests/fuzz/corpus/session_recovery_admin_parse/
 !tests/fuzz/corpus/transport_read_path/
 !tests/fuzz/corpus/wire_nested_slice/
 # ⚠️ ONE LINE PER SHIPPED CORPUS, and tests/fuzz/CMakeLists.txt now FATALs on a
