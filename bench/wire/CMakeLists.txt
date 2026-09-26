@@ -171,8 +171,7 @@ set_target_properties(typed_read_group_bench PROPERTIES
 
 # ── 091 (#418) SC-005: builder_bench ─────────────────────────────────────────
 # Outbound builder latency: generated v44 build_NewOrderSingle (precompiled
-# fixpp::builders::v44 lib) and fixpp::wire::body_builder directly. Same
-# link/include shape as tests/session test_067_builder_failclosed.
+# fixpp::builders::v44 lib) and fixpp::wire::body_builder directly.
 add_executable(builder_bench builder_bench.cpp)
 add_dependencies(builder_bench fixpp_codegen_generate)
 target_link_libraries(builder_bench PRIVATE

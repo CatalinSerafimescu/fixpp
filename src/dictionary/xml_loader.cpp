@@ -746,8 +746,7 @@ void LoaderState::detect_length_pairs(pugi::xml_node const& root) {
     // any LENGTH/DATA adjacency NOT present in the global <fields> block
     // (e.g., inline field reordering in message bodies).
     //
-    // claim-ok: names the superseding decision (R-11), a pointer, not a history record
-    // 091 (fixpp#418) Gate A r1 — secondary walk descends into components and groups.
+    // 091 (fixpp#418): the secondary walk descends into components and groups.
     // The adjacency rule and the visit order of the new containers are
     // specs/091-data-field-bytes/research.md R-11.
     auto const mark_pair = [&](std::uint16_t length_tag, std::uint16_t data_tag) {

@@ -61,7 +61,7 @@
 #
 # Which baseline each artifact is gated against is named by the banners above
 # and the 082 banner below; see the 091 banner for the v50sp2 pins. A mismatch
-# on any of the 16, against its own baseline, is a real read-tier regression
+# on any artifact, against its own baseline, is a real read-tier regression
 # (FR-009), not noise.
 #
 # Baseline hashes below were captured 2026-07-16 (T001) on pre-077 HEAD
