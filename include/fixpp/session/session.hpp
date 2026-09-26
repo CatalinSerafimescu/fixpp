@@ -961,10 +961,10 @@ private:
     friend class ReconnectFsm;
 
     // Test-only read access to private state, defined once in
-    // tests/support/session_test_access.hpp. The declaration is unconditional so
-    // the class is the same token sequence in every TU; an `#ifdef
-    // FIXPP_TEST_HOOKS`-gated member would give test TUs and the library two
-    // definitions of Session in one program (see asio_tls_transport.hpp's
+    // tests/support/session_test_access.hpp. This friend does not depend on
+    // FIXPP_TEST_HOOKS, so a TU that reaches private state through it need not
+    // define the macro; defining the macro changes this class's definition in
+    // that TU (see the note at asio_tls_transport.hpp's
     // asio_tls_transport_test_access). Adds no member, so layout is unchanged.
     friend struct session_test_access;
 
