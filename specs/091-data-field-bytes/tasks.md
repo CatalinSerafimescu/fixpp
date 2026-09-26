@@ -1378,9 +1378,22 @@ FR-019, SC-006).
     closes it (owner ruling 2026-09-25, T063): one affirmative `Closes #506` line beside
     `Closes #418`, and no negated sentence anywhere that mentions either number (a closing keyword
     fires inside a negation);
-  - the SC-005 and loader-bench results, including the owner rulings (T057 passes on the fix
-    `1fe2a063`; T058 passes on FIX50SP2 +3.05 %), the report-only AsciiEncodedText build delta, and
-    the report-only FIX44/FIX42 load deltas (evidence §xml_loader_bench);
+  - the SC-005 and loader-bench results (noise-floor precondition not met on either run; passed by
+    owner ruling 2026-09-26), including the owner rulings (T057 passes on the fix `1fe2a063`; T058
+    passes on FIX50SP2 +3.05 %), the AsciiEncodedText build delta (+13 %), and the FIX44/FIX42 load
+    deltas (+6.04 % and +11.35 %, about 0.1–0.3 ms per load; evidence §xml_loader_bench), which
+    exceed +5 % and take `[const §VIII.2]`'s approval path (next bullet);
+  - **`[const §VIII.2]` ratification, before labelling.** A slowdown over +5 % on a paired bench
+    needs the paired measurement, a rationale, and an owner statement in the PR THREAD; a claim in
+    the PR body does not count. The PR thread must carry the owner's ratification covering the
+    FIX44 and FIX42 `xml_loader_bench` loads and `builder_bench`'s AsciiEncodedText case. The
+    orchestrator hands the owner a ready line to post themselves, e.g.
+    `! gh pr comment <PR> --repo CatalinSerafimescu/fixpp --body "Owner ratification [const §VIII.2]: I accept the xml_loader_bench FIX44 (+6.04 %) and FIX42 (+11.35 %) load slowdowns and the builder_bench AsciiEncodedText (+13 %) slowdown, on the paired measurements and rationale in .specify/decisions/091-data-field-bytes-evidence.md §xml_loader_bench and §SC-005."`,
+    and **never posts it on the owner's behalf**. Then it verifies with
+    `gh api repos/CatalinSerafimescu/fixpp/issues/<PR>/comments` that a comment exists whose `.user.login` is
+    the owner's login and whose body names FIX44, FIX42 and AsciiEncodedText. The session's `gh` is
+    authenticated as the owner, so the login check proves the account, not who typed it; the
+    never-post-on-their-behalf rule is what that check rests on. No such comment → do not label;
   - `local build: green on linux-clang-debug @ <git-sha>` (`[const §XVII.7]`), with the SHA T065
     verified;
   - a `## Gates` section, and a `## Gate B …` heading for the Gate B record;
@@ -1399,12 +1412,12 @@ FR-019, SC-006).
     before labelling. If Gate B rules
     that `[const §XVII.8]`'s "Codex convergence record" is not met, ask the owner before labelling;
     never choose between `gate-a-done` and `gate-a-waived` unilaterally;
-  - `Closes #418` as the ONLY closing keyword, unless the owner's T063 ruling adds #506.
+  - `Closes #418` and `Closes #506` as the ONLY closing keywords (owner ruling 2026-09-25, T063).
   Before opening, grep the body AND every commit message on the branch
   (`git log origin/main..HEAD --format=%B`) for `close[sd]?|fix(e[sd])?|resolve[sd]?` next to
-  `#50[56]` or any number other than 418 (other than #506 if the T063 ruling allows it). A negated
-  keyword still links. After opening, check
-  `closingIssuesReferences` lists exactly #418 and #506 (T063 ruling), and nothing else.
+  #505 or any number other than 418 and 506; #506 is exempt from this grep. #505 stays open (B-091-3
+  cites it), so a hit on it is a defect. A negated keyword still links. After opening, check
+  `closingIssuesReferences` lists exactly #418 and #506, and nothing else.
 
 ### Mandatory close-out tasks (Gate-B preconditions, Article XVII §8)
 

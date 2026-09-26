@@ -126,7 +126,10 @@ the call. `body_builder` exposes no size accessor, so this is the observable for
   - a group whose `no_tag` is 354, with one instance, followed by a sibling `field(355, "x")` (one
     byte). This is refused because the group node is fed with an empty value (R-4). Feeding the
     count digits would accept it;
-  - a group whose `no_tag` is 355.
+  - a group whose `no_tag` is 355;
+  - a group opened inside an entry (`entry_handle::group_begin`) whose `no_tag` is 355, the only
+    pair tag in the message. It pins the pair check's skip rule (research.md R-4, SC-005 addendum):
+    the nested group's append must be noted too.
 
   A hand-written, well-formed `field(354, int 3)` + `field(355, "abc")` commits.
 
@@ -145,7 +148,8 @@ the call. `body_builder` exposes no size accessor, so this is the observable for
     `field(354, int 3)` + `field(355, "abc")`;
   - "group whose `no_tag` is 354 + sibling one-byte 355": the group's `no_tag` changed to a non-pair
     tag and the sibling turned into a well-formed pair (a bare sibling 355 fails INV-6 on its own);
-  - "group whose `no_tag` is 355": the group's `no_tag` changed to a non-pair tag.
+  - "group whose `no_tag` is 355": the group's `no_tag` changed to a non-pair tag;
+  - "nested group whose `no_tag` is 355": the nested group's `no_tag` changed to a non-pair tag.
 - **C-1.8 per-container.** The check runs separately in the top level and in each group instance. A
   Length at the end of a group instance does not pair with a Data that follows the group in the
   enclosing container (top level, and an outer entry holding the nested group): refused

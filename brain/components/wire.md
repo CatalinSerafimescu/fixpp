@@ -210,7 +210,10 @@ What was rejected:
 scanners share `length_data_carry::read_value`. 091 (#418)'s `body_builder` reused
 `length_data_pairs.hpp` and `length_data_checker` rather than add another copy: `field_data` /
 `set_data` take the Length from the standard table, and `commit` runs one `length_data_checker`
-per container (`src/wire/body_builder.cpp` `validate_group_grammar`). The same feature changed the
+per container (`src/wire/body_builder.cpp` `validate_group_grammar`). `commit` skips that pair walk
+while `pair_check_needed_` is clear, i.e. while no appended node carries a standard pair tag and the
+hooks carry no dictionary callback; why that gives the same result, and the cost that motivated it,
+is 091 `research.md` R-4's SC-005 addendum (fix `1fe2a063`). The same feature changed the
 QuickFIX-XML loader to pair inside components and groups (FR-017; see [`dictionary`](dictionary.md))
 and added a drift arm per shipped dictionary (FR-018, below).
 

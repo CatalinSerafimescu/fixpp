@@ -107,6 +107,11 @@ Each row names an existing test that must be shown RED (or, for a compile-time k
 | `set_data` omits the owner check | C-1.4b default handle (under ASan it must fail, not UB-pass) |
 | `set_data` omits `is_innermost_open` | C-1.4b outer handle and closed-group handle |
 | `send_impl` classifies a counted field by its own tag instead of inheriting `prev_header` | the §5 dictionary-pair `send_impl` witness whose Length and Data classify differently (the standard 212/213 and 90/91 pairs cannot tell the two apart) |
+| SC-005 fix: `pair_check_needed_` is never set (constructor and `note_tag()` both leave it false) | `BodyBuilderDataField.C1_7_MalformedHandWrittenPairsAreRefusedAtCommit`, `.C1_7_GroupWhoseNoTagIsTheDataTag`, `DictPairBodyBuilder.C1_9_HandWrittenDictionaryPairIsCheckedAtCommit` |
+| SC-005 fix: `group_begin` does not call `note_tag` | `BodyBuilderDataField.C1_7_GroupWhoseNoTagIsTheDataTag` (a top-level group whose `no_tag` is the only pair tag) |
+| SC-005 fix: `entry_group_begin_impl` does not call `note_tag` | `BodyBuilderDataField.C1_7_NestedGroupWhoseNoTagIsTheDataTag` (a nested group whose `no_tag` is the only pair tag) |
+| SC-005 fix: the constructor ignores the hooks' dictionary pair callback (`pair_check_needed_` starts false) | `DictPairBodyBuilder.C1_9_HandWrittenDictionaryPairIsCheckedAtCommit` and `.C1_9_GroupWhoseNoTagIsTheDictionaryLengthIsRefused` (tags only the dictionary pairs) |
+| SC-005 fix: `append_bytes_field` does not call `note_tag` | `BodyBuilderDataField.C1_7_MalformedHandWrittenPairsAreRefusedAtCommit` and `.C1_7_GroupNodeBetweenLengthAndData` (the pair tags reach the builder only as scalars) |
 | `builder_bench`'s WithGroup / Raw case builds a body missing one scalar field (both cases), or one of the three `kParties` entries (WithGroup), with the exact prechecks in place | that case reports `SkipWithError` (run before the §6 measurement) |
 
 ## 4. Golden regeneration check
@@ -191,6 +196,11 @@ Over budget → back to the owner, with the floor and the per-leg figures. Never
 
 **`xml_loader_bench` (FR-017 engages this paired row).** Same procedure, same session shape, with the
 base worktree above (no bench copy needed): A-B-A-B of `bench/dictionary/xml_loader_bench`. Pass
-condition: Article VIII §2's budget (a slowdown ≤ +5 %) on the FIX50SP2 load, the verdict case; the
-binary's other dictionary loads are reported only (owner ruling 2026-09-26; disclosed in B-091-4's
-*Load cost* bullet). Over it → the §2 approval path, never self-declared.
+condition: Article VIII §2's budget (a slowdown ≤ +5 %). The FIX50SP2 load is the pass case. The
+row is `paired` and `tools/bench_compare.py` compares every case in it, so the binary's other loads
+are held to the same budget: the FIX44 and FIX42 loads exceed +5 % (+6.04 % and +11.35 %, measured
+2026-09-26) and take `[const §VIII.2]`'s approval path: the paired measurement plus the rationale in
+evidence §xml_loader_bench, plus the owner's ratification in the PR thread (tasks T067), never
+self-declared and never a claim in the PR body. That ratification also covers `builder_bench`'s
+AsciiEncodedText delta (+13 %; a tier-2 `no` row, not a paired case). The load cost is disclosed in
+B-091-4's *Load cost* bullet.

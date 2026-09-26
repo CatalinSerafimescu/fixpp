@@ -191,6 +191,25 @@ Any failure → `wire_invalid_field_format`, `out` untouched.
   FR-021, tasks §2e). The paragraph above is kept as the record of the scoping it replaced.
 - The recursion depth is the one the INV-5 walk already uses. No new stack shape.
 
+**Amended by the SC-005 fix `1fe2a063` (T057, 2026-09-26).**
+- *Attribution (measured).* The unconditional per-scalar walk above cost every commit two
+  out-of-line `dict_hooks` lookups per entry (`length_tag_for_data`, `data_tag_for_length`, from
+  `observe`), +8–9 % on `builder_bench` Raw / NoGroup / WithGroup, over SC-005's +3 %. A scratch
+  stub without observe/finish removed it (evidence §SC-005 (T057)).
+- *Skip rule.* `body_builder` holds a private `pair_check_needed_`, set at construction when
+  `hooks.length_pair_fn()` is non-null, and by `note_tag()` on every node append whose tag is a
+  standard pair half (`append_bytes_field`, which every scalar append reaches; `group_begin`;
+  `entry_group_begin_impl`). `commit` runs the combined INV-5 + pair walk when the flag is set, and
+  the INV-5 walk alone when it is clear (`validate_group_grammar<CheckPairs>`).
+- *Equivalence.* With the flag clear, no node carries a standard pair tag and the hooks have no
+  dictionary callback, so both lookups return 0 for every node. `observe` returns false only after a
+  non-zero lookup (the Data-tag test, or an armed Length), and `finish` returns false only after a
+  failed `observe` or an armed Length. So with the flag clear every `observe`/`finish` would return
+  true, and skipping them gives the same result. With the flag set, the walk is the one described
+  above, unchanged.
+- *Pins.* C-1.7's nested case (`BodyBuilderDataField.C1_7_NestedGroupWhoseNoTagIsTheDataTag`) and
+  the flag mutants in quickstart §3.
+
 **Alternative rejected.** A separate second walk: twice the tree traversal for no benefit.
 
 **Consequence to disclose (B&L).** A hand-written C++ caller that today emits a malformed pair
@@ -422,10 +441,14 @@ it is not the precondition.
 
 **`xml_loader_bench`.** FR-017 adds a walk over every component and group, and
 `bench/dictionary/xml_loader_bench` is a `paired` row in `bench/ci-suite.txt`. Its FIX50SP2 load is
-the verdict case; its other dictionary loads are reported only (owner ruling 2026-09-26; their cost
-is disclosed in B-091-4's *Load cost* bullet). It is measured A-B-A-B with the same base worktree
-before pushing; pass condition Article VIII §2's budget (a slowdown ≤ +5 %) on the verdict case,
-over it → the §2 approval path.
+the ≤ +5 % pass case (Article VIII §2's budget), measured A-B-A-B with the same base worktree
+before pushing. `tools/bench_compare.py` compares every case of a `paired` row, so the other loads
+are not exempt from the budget: the FIX44 and FIX42 loads exceed +5 % (+6.04 % and +11.35 %,
+measured 2026-09-26, evidence §xml_loader_bench) and take `[const §VIII.2]`'s approval path. That
+path is the paired measurement plus the rationale in evidence §xml_loader_bench, plus the owner's
+ratification in the PR thread (tasks T067), never a claim in the PR body. Their cost is disclosed
+in B-091-4's *Load cost* bullet. The `builder_bench` AsciiEncodedText delta (+13 %, on a tier-2
+`no` row, so not a paired case) joins the same ratification.
 
 **Compile-time surface.** Every builder translation unit gains the per-call-site `static_assert`s
 (R-7) and `dict_hooks.hpp` through `body_builder.hpp`. That matters most for `vlatest`, the largest
