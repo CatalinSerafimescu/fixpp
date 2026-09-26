@@ -1266,7 +1266,7 @@ FR-019, SC-006).
 
 ### Fuzz
 
-- [ ] T059 Fuzz the changed loader (`[const §VII.7]`; owner ruling 2026-09-24: the dictionary XML
+- [X] T059 Fuzz the changed loader (`[const §VII.7]`; owner ruling 2026-09-24: the dictionary XML
   loader is in scope for §VII.7, and this run is required): build `fuzz_dict_xml_loader`
   (`tests/fuzz/fuzz_dict_xml_loader.cpp`) under `linux-clang-asan` (`FIXPP_BUILD_FUZZ=ON`), add seeds
   with nested `<group>`s, `<group>`s under `<header>`/`<trailer>` and component-only Length/Data
@@ -1275,7 +1275,7 @@ FR-019, SC-006).
   the `linux-clang-debug` manifest. Record the command, corpus and result in the evidence file; name
   the target to `/speckit-verify` (T065, `--fuzz-duration=600`) so it is not marked N/A.
 
-- [ ] T073 Via `phase-implementer`, extend the seeds of `fuzz_session_recovery_admin_parse`
+- [X] T073 Via `phase-implementer`, extend the seeds of `fuzz_session_recovery_admin_parse`
   (`tests/fuzz/fuzz_session_recovery_admin_parse.cpp`, which reaches `interpret_logon` through
   `Session::on_inbound_frame`; precedent 027 T026) for FR-020: Logons in which RawDataLength(95) is
   immediately followed by RawData(96) with a count running past the frame, with a count ending on a
@@ -1287,10 +1287,10 @@ FR-019, SC-006).
 
 ### Static analysis, claims and citations
 
-- [ ] T060 Run clang-tidy, clang-format, cppcheck and IWYU (`[const §IX.4]`) on every changed file under `src/`, `include/` **and
+- [X] T060 Run clang-tidy, clang-format, cppcheck and IWYU (`[const §IX.4]`) on every changed file under `src/`, `include/` **and
   `tools/codegen/`** (#265). Never format `specs/` or `include/fix/c_api/*.h`. Any finding on a
   changed line is fixed by `phase-implementer`.
-- [ ] T061 Run `python3 /home/catalin/Work/Programming/Antreprenoriat/.claude/scripts/check-comment-claims.py
+- [X] T061 Run `python3 /home/catalin/Work/Programming/Antreprenoriat/.claude/scripts/check-comment-claims.py
   --root <tree> --base origin/main`, with `<tree>` the worktree that owns this branch (absolute
   path, so it also works from a parallel worktree).
   - Read every hit in the comments this feature authored: the `version.h` history, the BREAKING
@@ -1298,7 +1298,7 @@ FR-019, SC-006).
     comments, the `check_length_data` header comment (FR-021) and the `interpret_logon` comments
     (FR-020). Also read the strings the script cannot see.
   - A claim that records a result is deleted, not replaced.
-- [ ] T062 Run `python3 tools/check_line_citations.py --shift-audit origin/main..HEAD`. For a hit on
+- [X] T062 Run `python3 tools/check_line_citations.py --shift-audit origin/main..HEAD`. For a hit on
   the checker's own fixture strings, apply the `# citation-ok` pragma.
 
 ### Close-out checks
@@ -1310,7 +1310,7 @@ FR-019, SC-006).
 - [X] T064 Run the quickstart §2 label gate. It must pass: the label set equals the manifest, and
   every manifest entry is a registered test. Then run `ctest --test-dir build/linux-clang-debug -L '^091$' --output-on-failure`, all
   GREEN.
-- [ ] T077 Via the `checklist-auditor` (the checklists are reviewer-owned), audit the checklists
+- [X] T077 Via the `checklist-auditor` (the checklists are reviewer-owned), audit the checklists
   against the FR-020 and FR-021 deltas **by complement** (scoped Gate A round 3, P3-3; FR-021 added
   2026-09-25): grep every domain checklist under `checklists/` for items whose subject FR-020,
   FR-021, FR-019, B-091-4, research.md R-4, contract C-1.7 or data-model.md Appendix A changed, and
