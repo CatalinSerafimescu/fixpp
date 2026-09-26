@@ -22,8 +22,8 @@
 # is the only change by CHAINING: apply the 091 Validator.hpp recipe (091 banner
 # below) to the regenerated file first; then delete every `length_data_pairs`
 # row whose Length tag is above 2500, set the array extent to the remaining row
-# claim-ok: the hash below is the recipe's target pin, re-derived by running the recipe
-# count, and sha256 it -- the result is the pre-077 T001 hash `f550123a...`.
+# count, and sha256 it; it must equal the value `_expected_v50sp2_Validator.hpp`
+# carried before fixpp#427 (the pre-077 T001 pin).
 # The 091 step comes first because one of 091's pairs has a Length tag at or
 # below 2500, which #427's step alone does not delete.
 #
@@ -49,15 +49,14 @@
 #   - Validator.hpp: take the regenerated file, delete the `length_data_pairs`
 #     rows `{ 2494, 2493 }`, `{ 2815, 2814 }`, `{ 43109, 42684 }`,
 #     `{ 43110, 42486 }` and `{ 43111, 42982 }`, set the array extent to the
-#     remaining row count, and sha256 it -- the result is the pre-091
-#     (fixpp#427-approved) hash
-#     claim-ok: the hash below is the recipe's target pin, re-derived by running the recipe
-#     `536c2f22...`.
+#     remaining row count, and sha256 it; it must equal the value
+#     `_expected_v50sp2_Validator.hpp` carried before 091 (fixpp#427's pin).
 #   - Fields.hpp: take the regenerated file, zero the `length_pair_data_tag`
 #     column of every `FieldRef` row whose tag is 2494, 2815, 43109, 43110 or
-#     43111, and sha256 it -- the result is the pre-091 (pre-077 T001) hash
-#     claim-ok: the hash below is the recipe's target pin, re-derived by running the recipe
-#     `34079b2d...`.
+#     43111, and sha256 it; it must equal the value `_expected_v50sp2_Fields.hpp`
+#     carried before 091 (the pre-077 T001 pin).
+# Each earlier value of a pin: `git log -p -G'_expected_v50sp2_<artifact>' --
+# tests/codegen/read_tier_byte_diff_test.cmake`.
 #
 # Which baseline each artifact is gated against is named by the banners above
 # and the 082 banner below; see the 091 banner for the v50sp2 pins. A mismatch
