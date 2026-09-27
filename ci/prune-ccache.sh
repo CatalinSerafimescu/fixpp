@@ -3,7 +3,7 @@
 # current tag. Thin wrapper — all the logic, and all the evidence behind it,
 # lives in ci/prune-compiler-cache.sh.
 #
-#   ci/prune-ccache.sh linux-clang-libc++ ccache-linux-clang-libcxx-clang22-15dc124f-f0a1b2c3d
+#   ci/prune-ccache.sh linux-clang-libc++ ccache-linux-clang-libcxx-clang22-15dc124f-f0a1b2c3d  # claim-ok: an example tag in a usage line, not a SHA
 #   DRY_RUN=1 ci/prune-ccache.sh linux-clang-libc++ ''     # list, delete nothing
 #
 # ⚠️ THE TAG GRAMMAR IS NOT RESTATED HERE. It comes from `ccache_tag_regex` in

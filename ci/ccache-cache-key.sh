@@ -27,7 +27,7 @@
 # up. The tag therefore has to be as STABLE as possible so a PR leg can pull
 # what main last published; ccache then decides, per TU, what still applies.
 #
-# ⚠️ AMENDED BY #482 (flag surface added to the tag): "as stable as possible"
+# ⚠️ AMENDED BY #482 (flag surface added to the tag): "as stable as possible"  # claim-ok: supersede pointer naming the decision that amends this rule
 # now means stable across SOURCE edits, not across FLAG edits. Source files are
 # still never hashed, so a PR that moves no flag still pulls what main last
 # published. See the next section.
@@ -482,7 +482,7 @@ ccache_tag_regex() {
   # classifier only to a grammar a real producer emitted. Without it those tags
   # would stop being recognised, and an unrecognised tag is skipped silently
   # and kept forever (see the bare `wheel-manylinux228` note above). With it,
-  # each lane's first seed after #482 reaps its own old tag. Drop the `?` once
+  # each lane's first seed after #482 reaps its own old tag. Drop the `?` once  # claim-ok: condition on which producer form the optional suffix admits
   # a GHCR listing shows no suffix-less ccache tag left.
   local flags='(-f[0-9a-f]{8})?'
 

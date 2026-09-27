@@ -704,7 +704,7 @@ echo "── ccache-flag-surface (#482) ──"
 # the real surface once and compares digests. Every mutation is checked to
 # have changed its file, so a pattern that stopped matching cannot pass as a
 # KEEP. Failures are collected rather than fatal one by one, so a mutant run of
-# the scripts shows every arm it turns RED.
+# the scripts shows every arm it turns RED.  # claim-ok: states what the collect-don't-exit design lets a run show, no outcome recorded
 FS_BASE="$sandbox/fs-base"
 copy_flag_surface "$FS_BASE"
 cp "$repo_root/CMakePresets.json" "$FS_BASE/"
@@ -942,7 +942,7 @@ esac
 ok "both minters end the tag in the flag-surface digest"
 
 # The previous producer's form (no suffix) must still classify, so each lane's
-# first seed after #482 reaps its own old tag instead of orphaning it.
+# first seed after #482 reaps its own old tag instead of orphaning it.  # claim-ok: condition the legacy arm checks, not a history claim
 LEGACY_HOST_TAG="${TAG%-f*}"
 [ "$LEGACY_HOST_TAG" != "$TAG" ] || fail "flag-surface/legacy: could not derive the suffix-less host tag"
 printf '%s' "$LEGACY_HOST_TAG" | grep -qE -- "$TAG_RE" \

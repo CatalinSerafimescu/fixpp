@@ -88,7 +88,7 @@ endfunction()
 # FIXPP_WERROR. When this gate was written, that lane's cache identity did not
 # cover the flag surface, so ungated it would have breached its floor on a HIT.
 #
-# ⚠️ AMENDED BY #482 (flag surface added to the ccache tag): every ccache tag,
+# ⚠️ AMENDED BY #482 (flag surface added to the ccache tag): every ccache tag,  # claim-ok: supersede pointer naming the decision that amends this gate
 # the wheel lane's included, now carries a digest of the compile-flag surface
 # (ci/ccache-flag-surface.py), and this block's condition is part of it.
 # Deleting the gate now ROTATES the tags: the restore MISSes, the floor exempts
@@ -102,7 +102,7 @@ endfunction()
 #   grep -rn "ccache-stats.sh" .github/workflows/   # which callers pass a floor
 # and check that lane's compiler and FIXPP_WERROR. If no floored lane is GNU any
 # more, DELETE the gate -- an unconditional suppression is the better mechanism.
-# Deleting it while such a lane exists is also safe since #482; the price is
+# Deleting it while such a lane exists is also safe since #482; the price is  # claim-ok: condition (the flag digest is in the tag), not history
 # the one cold build above.
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND FIXPP_WERROR)
   include(CheckCXXSourceCompiles)
