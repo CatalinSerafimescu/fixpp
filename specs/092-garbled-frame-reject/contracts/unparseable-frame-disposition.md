@@ -63,9 +63,13 @@ In every `on_inbound_frame` path:
   session.
 - **"Any other" includes 3 (Reject) and 5 (Logout).** For a faulty frame this supersedes the
   published no-reject-loop exemption (below).
-- **D-5 is exactly #423's rule.** `consume_rejected_seqnum_(seq, msg_type)` excludes `A` and `4`,
-  gates on `check_inbound`, closes a filled resend gap, and persists. It runs before the Reject, as
-  at the 041 validate gate.
+- **D-5 is exactly #423's rule.** The disposer calls
+  `consume_rejected_seqnum_(parse_seqnum(hdr.fault_ref_seq_num), hdr.fault_ref_msg_type)`, never
+  `hdr.msg_type` (FR-004), so its `A` and `4` exclusions and the 372 value both come from
+  `fault_ref_msg_type`. It gates on `check_inbound`, closes a filled resend gap, and persists. It
+  runs before the Reject, as at the 041 validate gate, and a failed persist disconnects with no
+  Reject (FR-013). Both are pinned by the `092 disposer (D-5)` case in #423's two persistence
+  tables (quickstart §1 "D-5 persistence").
 - **D-4 during AwaitingResend** leaves the gap open. The disclosed outcome is in C-5 L-2.
 - **Liveness.** In Active, D-4, D-5 and D-6 refresh the inbound-liveness timestamp that any received
   message refreshes today. These frames are received and are not garbled (SL2020's heartbeat-timer
@@ -111,7 +115,8 @@ answers one peer frame. The bound cell is quickstart §1 "reject-loop bound".
 - **I-4** Scan fault ⇔ `OffsetTable::build` encoding failure, under the session's hooks and under
   `dict_hooks::none()`. For a fault-free frame, `fault_ref_seq_num` equals the value of the first
   `entries()` element with tag 34, and `msg_type_is_third` equals "the third `entries()` element has
-  tag 35" (research R-2). The oracle is `entries()`, never `find(34)`: the overlay can leave an
+  tag 35", and `fault_ref_msg_type` equals the value of the third `entries()` element when that
+  element has tag 35, else empty (research R-2). The oracle is `entries()`, never `find(34)`: the overlay can leave an
   occurrence unindexed while the build succeeds.
 - **I-5** A late parse failure is never "success" or "no reject": the session closes (C-6).
 - **I-6** The C-2 disposition is identical with inbound validation on and off, with
@@ -121,9 +126,11 @@ answers one peer frame. The bound cell is quickstart §1 "reject-loop bound".
 ## C-4 — Public surface deltas
 
 **C++ (additive, source-compatible):**
-- `build_reject(…, std::string_view text)` is a new overload in
-  `include/fixpp/session/admin_messages.hpp`. The existing overload is unchanged in signature and in
-  its output bytes.
+- `build_reject_with_text(…, std::string_view text)` is a new function in
+  `include/fixpp/session/admin_messages.hpp`. `build_reject` stays a single declaration, unchanged
+  in signature and in its output bytes; it delegates to `build_reject_with_text` with an empty text.
+  No name gains a second declaration, so every existing call and every use of `build_reject`'s
+  name compiles as before.
 - `admin_messages.hpp`'s no-reject-loop sentence is rewritten to the scoped rule above. The rewrite carries a
   header comment naming the ruling that supersedes it.
 - `fixpp::wire::field_fault` (E-0) is new in `include/fixpp/wire/tag_scan.hpp`.
@@ -161,7 +168,9 @@ answers one peer frame. The bound cell is quickstart §1 "reject-loop bound".
 - **L-4: TC2020 Scenario 17d is not followed.** A malformed SignatureLength(93)/Signature(89) pair
   gets 373=5 (the owner ruling's Length+Data code), not 17d's 8 (Signature problem).
 - **L-6: a late parse failure closes the session (C-6).** A well-formed frame that exhausts the
-  parse arena, silently consumed today, now ends the session. The cell pins it per late site.
+  parse arena, silently consumed today, now ends the session. The cell pins it per late site,
+  including whether a reconnect's NextNumIn includes the closed-on frame (resend requested, or the
+  number consumed).
 
 (L-3 and L-5 were deleted in Gate A round 2, and the numbers are not reused.)
 
@@ -179,8 +188,10 @@ each call and classify it by the provenance of the bytes it parses: bytes receiv
 are a late inbound site; a frame fixpp built (the outbound admin and toApp sites, whatever arena they
 use) is not. The validate gate in every state arm is in the population.
 
-**One action at every late inbound site:** `close(close_mode::terminal)`, no Reject, the callback not
-invoked, and the frame never read as success or "no reject". Where the call's result is not bound
+**One action at every late inbound site:** `close(close_mode::terminal)`, no Reject, the parse
+target's receive callback (`fromAdmin`/`fromApp`) not invoked, and the frame never read as success
+or "no reject". `onLogout` from the close, and callbacks already fired earlier at the site (e.g.
+`toAdmin` for the Logout handler's confirming Logout), are out of scope of that clause. Where the call's result is not bound
 today, it is bound. There is no per-site table.
 - At a pre-Active validate gate the close ends the connection as a refusal does, so SC-006's
   deletion proof also runs with this close deleted. `Session::close` is keyed on the session's
@@ -194,5 +205,8 @@ today, it is bound. There is no per-site table.
   fixpp#515.
 - **Disclosed cost** (C-5 L-6): a well-formed frame that exhausts the arena, silently consumed
   today, now ends the session. Whether a reconnect re-requests the frame depends on whether the
-  site's advance was persisted before the close; each late-site cell pins the observed outcome.
+  site's advance was persisted before the close. Each late-site cell reconnects after the close,
+  over a persistent store that survives it, and asserts whether NextNumIn includes the closed-on
+  frame: the peer's resend is requested, or the number was consumed. That pins today's per-site
+  outcome, which C-5 L-6 records; any change is fixpp#515's.
   It is a fail-closed change, classified under research R-8's recipe.

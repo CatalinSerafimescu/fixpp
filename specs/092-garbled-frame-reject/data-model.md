@@ -84,13 +84,16 @@ because the differential instrument compares them there (C-3 I-4).
 ## E-3 — Dispatch result and late parse failure (private)
 
 `parse_and_dispatch_` returns `core::expected_t<void>` today, and a parse failure returns success.
-It gains a distinct way to say "the parse failed and the callback did not run": a private result
+It gains a distinct way to say "the parse failed and the parse target's receive callback
+(`fromAdmin`/`fromApp`) did not run": a private result
 enum, or a private sentinel `core::error` that never leaves the session. `validate_inbound_` returns
 `std::optional<RejectDecision>` today, and a parse failure returns `nullopt`, which its callers read
 as "no reject". It gains a third outcome, "parse failed".
 
 Every late inbound call site of either treats "parse failed" as **terminal**: it closes the
-session (`close(close_mode::terminal)`), sends no Reject and returns (contract C-6). There is one
+session (`close(close_mode::terminal)`), sends no Reject, does not invoke that receive callback
+(`onLogout` from the close and callbacks fired earlier at the site are out of scope), and returns
+(contract C-6). There is one
 action, not a per-site table. The call sites that parse a frame fixpp built are unchanged. The site
 population and its derivation are in contract C-6 and research R-4.
 

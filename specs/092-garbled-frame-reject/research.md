@@ -103,20 +103,22 @@ succeeds. Three instruments enforce this.
      - an unrelated tag after a Length, which discards the pending pair;
      - the standard static pairs under `dict_hooks::none()`;
      - a duplicate 34 and a duplicate 35 (`fault_ref_seq_num` equals the first `entries()` 34;
-       `msg_seq_num` and `msg_type` still equal today's last-wins values);
+       `fault_ref_msg_type` equals the third element's value; `msg_seq_num` and `msg_type` still
+       equal today's last-wins values);
      - a fault-free frame whose third field is not 35 (`msg_type_is_third` false on both sides).
    - **Proof that it can fail, per mutation family.** In a scratch copy, seed one disagreement per
      family and watch that family go RED. The families are: the non-digit check, the overflow
      check, the empty-tag check, the no-`=` check, the non-SOH check, the end-equals-size check,
-     and the `fault_ref_seq_num` first-34 selection. One planted disagreement does not prove the
-     others can fail.
+     the `fault_ref_seq_num` first-34 selection, and the `fault_ref_msg_type` third-field
+     selection. One planted disagreement does not prove the others can fail.
 2. **A fuzz assertion** in `tests/fuzz/fuzz_session_recovery_admin_parse.cpp`. The harness today
    builds a whole `Session` over a FIX.4.2 minimal dictionary and has no dictionary-only pair. The
    092 arm:
    - calls `scan_frame_header` and `OffsetTable::build` directly on each input, under both hook
      sets, with a dictionary that declares a dictionary-only pair;
    - traps (`__builtin_trap`) on any encoding disagreement and, for a fault-free input, on a
-     `fault_ref_seq_num` or third-field disagreement with `entries()`;
+     `fault_ref_seq_num`, `msg_type_is_third` or `fault_ref_msg_type` disagreement with
+     `entries()`;
    - skips **only** inputs whose `OffsetTable` status is `wire_offset_table_full` or
      `out_of_memory`, and counts them, so a fuzz run that skipped everything is visible;
    - is proven by one planted disagreement.
@@ -165,7 +167,8 @@ validate gate and Guards 2–5 (contract C-1).
 
 **Decision (owner ruling O-2).** After step 3 (contract C-1), an inbound parse only ever sees a frame
 the scan found fault-free. A failure there is a resource failure or an I-4 breach. Every late
-inbound site takes one action: `close(close_mode::terminal)`, no Reject, no callback. There is no
+inbound site takes one action: `close(close_mode::terminal)`, no Reject, and the parse target's
+receive callback (`fromAdmin`/`fromApp`) not invoked (contract C-6 scopes it). There is no
 per-site Reject table and no residual reason code. The proper disposition of a resource failure is
 fixpp#515.
 
@@ -218,24 +221,26 @@ absence of any effect.
 ## R-5 — Reject Text(58) and RefMsgType(372)
 
 **Decision.**
-- **The overload.** A new overload of `build_reject` (`include/fixpp/session/admin_messages.hpp`,
-  public) takes a trailing `std::string_view text`, emitted as 58 when non-empty. The existing
-  overload delegates to it with an empty text. `emit_session_reject_` gains the matching parameter.
+- **The builder.** A new function, `build_reject_with_text(…, std::string_view text)`
+  (`include/fixpp/session/admin_messages.hpp`, public), takes `build_reject`'s parameters plus a
+  trailing `text`, emitted as 58 when non-empty. `build_reject` stays a single declaration and
+  delegates to it with an empty text. `emit_session_reject_` gains the matching parameter.
 - **The Text** is one of two **compile-time constant strings**: one for `malformed_tag` and one for
   `length_data_mismatch`. It carries no offset and no peer bytes,
   so its length is fixed.
 - **372.** The disposition passes `hdr.fault_ref_msg_type` as 372 only when it is no longer than the longest
-  MsgType any shipped dictionary defines; otherwise it passes an empty 372, which `build_reject`
-  omits. The bound is a named constant, and a unit test recomputes it from `dictionaries/*.xml` so
-  it cannot drift. With 58 fixed and 372 bounded, no peer-controlled byte can make `build_reject`
-  fail.
+  MsgType any shipped dictionary defines; otherwise it passes an empty 372, which
+  `build_reject_with_text` omits. The bound is a named constant, and a unit test recomputes it from `dictionaries/*.xml` so
+  it cannot drift. With 58 fixed and 372 bounded, no peer-controlled byte can make
+  `build_reject_with_text` fail.
   - That matters because `emit_session_reject_` treats a build failure as success, and D-5 has
     already consumed and persisted the number, which would give "consumed, never Rejected": the
     silent-loss class 092 closes.
   - A cell sends a faulty frame with an over-long MsgType and asserts that the Reject is sent
     without 372.
 
-**Rationale.** Additive and source-compatible. Rejects already emitted keep byte-identical output
+**Rationale.** Additive and source-compatible: a new name, and `build_reject` keeps its single
+declaration, so no existing call or use of its name changes meaning. Rejects already emitted keep byte-identical output
 (no 58), so no existing golden changes. The public-header change is a Gate A trigger in any case.
 The pre-existing `emit_session_reject_` silent-success on a build failure caused by *local*
 configuration is unchanged, and is out of scope.
@@ -419,9 +424,9 @@ emit. `bench/baselines/session/` holds several session baselines (list them with
     coroutine-frame cost (R-3), which a scan-only bench cannot.
 - **CI.** Both are added to `bench/ci-suite.txt`, with a tier-3 comparand, so the CI bench gate runs
   them. A bench missing from that list has no execution gate.
-- **Local.** A local paired run follows `[const §VIII.2]`: a clean merge-base worktree carrying only
-  the bench commit, and the candidate, built on one machine, run A-B-A-B, compared min-per-tree.
-  The budget is +5%.
+- **Local.** A local paired run follows `[const §VIII.2]`: a clean merge-base worktree with only
+  the bench commit cherry-picked onto it, and the candidate, built on one machine, run A-B-A-B,
+  compared min-per-tree. Both SHAs and the bench commit's patch-id are recorded. The budget is +5%.
 - The clean path adds one inline compare per frame and trades nothing else. The B13 lesson is to
   measure, not assume.
 

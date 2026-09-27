@@ -34,7 +34,9 @@ Framer failure stays session-fatal (`L-004-4`); its §4.5.2 disregard is fixpp#5
 O-1). A differential corpus and a fuzz arm pin the scan/parse agreement.
 
 `dictionary_driven_validator::validate`'s silent stop becomes a reject through a field-iterator
-fault record and two new `core::error` values. The Logon refusal ships as **C-ABI 1.10 BREAKING**.
+fault record and two new `core::error` values. The Reject's fixed Text(58) goes through a new
+public builder, `build_reject_with_text`, to which `build_reject` delegates. The Logon refusal ships
+as **C-ABI 1.10 BREAKING**.
 
 Design decisions: [research.md](./research.md). The behaviour contract:
 [contracts/unparseable-frame-disposition.md](./contracts/unparseable-frame-disposition.md).
@@ -78,7 +80,7 @@ R-9).
 - `src/session/scan_frame_header.hpp`;
 - `session.cpp`: 4 state arms, 1 new coroutine, the fail-closed close at every late inbound parse
   site, and the replay classification guard (R-12);
-- `admin_messages.{hpp,cpp}`: one overload and the no-reject-loop sentence;
+- `admin_messages.{hpp,cpp}`: the new `build_reject_with_text` and the no-reject-loop sentence;
 - `parser.hpp`, `tag_scan.hpp`, `validator.hpp`, `core/error.hpp`, `reject_reason_map.hpp` and
   `src/capi/error.cpp` (FR-012);
 - the C-ABI 1.10 carriers: `version.h`, `session.h` and the freeze manifest.
@@ -98,7 +100,7 @@ Plus tests, two benches and docs.
 | VIII §2 perf | paired merge-base A-B-A-B, +5% budget | Two benches land bench-only first and are listed in `bench/ci-suite.txt` (R-9) |
 | VIII §5 zero-alloc | no heap between parse and callback | Held: plain members, an inline branch, a constant Text |
 | IX sanitizers / coverage | per-line coverage assessment | `/speckit-verify` matrix. The fault branches are covered by the corpus and the cells |
-| X ABI | C-ABI changes versioned; public C++ API additive | **Yes — `[const §X.7]` BREAKING, C-ABI 1.10** (owner ruling 2026-09-27, FR-017). No symbol, signature or error code is added. The change is in which Logons are accepted, plus D-3's disconnect, observed by the calls research R-8's recipe derives. The procedure is Phase 0b. The C++ additions are source-compatible (contract C-4). `§X.6` Appendix A controls: `/clarify` ✅ (Session 2026-09-27 and Gate A round 1 rulings); `/analyze` ⏳ after `/speckit-tasks`; Gate A ⏳ (round 2 applied, see §Gate A); user `/plan` sign-off ⏳ after Gate A converges |
+| X ABI | C-ABI changes versioned; public C++ API additive | **Yes — `[const §X.7]` BREAKING, C-ABI 1.10** (owner ruling 2026-09-27, FR-017). No symbol, signature or error code is added. The change is in which Logons are accepted, plus D-3's disconnect, observed by the calls research R-8's recipe derives. The procedure is Phase 0b. The C++ additions are source-compatible: `build_reject_with_text` is a new name and `build_reject` keeps its single declaration (contract C-4). `§X.6` Appendix A controls: `/clarify` ✅ (Session 2026-09-27 and Gate A round 1 rulings); `/analyze` ⏳ after `/speckit-tasks`; Gate A ⏳ (round 2 applied, see §Gate A); user `/plan` sign-off ⏳ after Gate A converges |
 | XI concurrency | — | Not touched: the disposition runs inside the existing per-session strand coroutine |
 | XII security | fail closed | This feature *closes* fail-opens: acting on unparsed bytes, and accepting a Logon with a malformed tag |
 | XVI §3–4 | `/clarify` and `/analyze` mandatory (session FSM, error semantics, parser) | `/clarify` done; `/analyze` due after `/tasks` |
@@ -146,9 +148,9 @@ src/session/
 ├── session.cpp                # inline fault branch + dispose_unparseable_ (R-3); NotConnected scan hoist;
 │                              #   fail-closed close at every late inbound parse site (C-6); liveness (FR-018);
 │                              #   replay gap-fills a stored frame with no 35 (R-12)
-└── admin_messages.cpp         # build_reject Text overload (R-5)
+└── admin_messages.cpp         # build_reject_with_text; build_reject delegates (R-5)
 include/fixpp/session/
-├── admin_messages.hpp         # overload declaration; no-reject-loop sentence scoped + ruling-naming comment
+├── admin_messages.hpp         # build_reject_with_text declaration; no-reject-loop sentence scoped + ruling-naming comment
 └── session.hpp                # private declarations
 include/fixpp/wire/
 ├── tag_scan.hpp               # E-0 field_fault
@@ -224,12 +226,17 @@ apart from new test sources, two bench sources and the fuzz arm.
 2. **Disposition** (R-3, contract C-2): RED cells for every row, then the inline branch and
    `dispose_unparseable_` in the 4 arms, and the NotConnected hoist. T076 goes green.
    Mechanism-deletion proofs per arm, run twice: with the late-site close, and with it deleted too
-   (SC-006).
-3. **Reject Text and 372 bound** (R-5): the overload with byte-identical output for the old
-   overload (existing goldens unchanged); the dictionary-derived 372 bound and its recomputing test.
+   (SC-006). The D-5 call passes `hdr.fault_ref_msg_type`, with its duplicate-35 cell. The D-5
+   persistence case `092 disposer (D-5)` is added to both #423 tables in
+   `tests/session/test_persistent_seqnum_hydrate.cpp`, each shown RED in a scratch copy (quickstart
+   §1 "D-5 persistence").
+3. **Reject Text and 372 bound** (R-5): `build_reject_with_text`, with `build_reject` delegating
+   and its output byte-identical (existing goldens unchanged); the dictionary-derived 372 bound and
+   its recomputing test.
 4. **Late-site close** (R-4, contract C-6): the "parse failed" results of `parse_and_dispatch_` and
    `validate_inbound_`; `close(close_mode::terminal)` at every late inbound site; one RED cell per
-   site, using a real well-formed frame above the measured ceiling (no test hook). Also the replay
+   site, using a real well-formed frame above the measured ceiling (no test hook), which also
+   reconnects and pins whether NextNumIn includes the closed-on frame. Also the replay
    guard and its cell (R-12).
 5. **Validator fault** (R-7, FR-012): the E-0 enum, the E-4 accessors, the E-5 validator change,
    the E-6 errors, the C mapping and every R-7 pin; the cells.
@@ -249,7 +256,8 @@ Re-run after the Gate A round 2 artifacts: **PASS**.
 - **No allocation and no new concurrency** are added. The clean path gains one inline compare.
 - **C-ABI 1.10** is a declared BREAKING pre-release change (`[const §X.7]`), and the Appendix A
   controls are tracked in the Constitution Check.
-- **The public C++ changes** are source-compatible (contract C-4).
+- **The public C++ changes** are source-compatible: `build_reject_with_text` is a new name, and
+  `build_reject` keeps its single declaration (contract C-4).
 
 Items still open, and where they are routed:
 - **The §4.5.2 disregard of a Framer failure, a fault-free frame whose third field is not 35, and
@@ -268,6 +276,7 @@ pre-release procedure, owner-ruled.
 
 - Round 1 applied 2026-09-27: Codex P1=5 P2=6 P3=2; Opus post-judging P1=3 P2=4 P3=13; rewrite addresses root causes #1–#5; owner rulings: C-ABI 1.10 BREAKING, FR-012 kept and fully specified. Reviews: research/reviews/codex_092-garbled-frame-reject_gate_a_review.md, research/reviews/opus_092-garbled-frame-reject_gate_a_adversarial_review.md.
 - Round 2 applied 2026-09-27: Codex P1=5 P2=2 P3=1; Opus post-judging P1=2 P2=1 P3=1; rewrite addresses root causes A, B, C and R2-008; owner rulings O-1 (framing disregard → #514, 092 keeps L-004-4) and O-2 (resource case → #515, late sites fail-closed). Reviews: research/reviews/codex_092-garbled-frame-reject_gate_a_2_review.md, research/reviews/opus_092-garbled-frame-reject_gate_a_2_adversarial_review.md.
+- Round 3 exhausted 2026-09-27: Codex P1=0 P2=3 P3=3; Opus post-judging P1=0 P2=2 P3=4. Owner chose "re-run /clarify then /plan": spec.md Clarifications "Session 2026-09-27 (after Gate A round 3)" answered R3-001..R3-005; this plan refresh applies them plus R3-006. Reviews: research/reviews/codex_092-garbled-frame-reject_gate_a_3_review.md, research/reviews/opus_092-garbled-frame-reject_gate_a_3_adversarial_review.md. Next: a fresh /gate-a loop.
 
 ### Round 1 — how each root cause was addressed
 
