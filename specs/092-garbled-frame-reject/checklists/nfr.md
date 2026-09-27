@@ -10,45 +10,45 @@
 
 ## Performance & allocation
 
-- [ ] CHK001 Is the performance budget quantified (+5 %, one-sided, paired merge-base A-B-A-B, min-per-tree) and bound to named benches that cover both the scan and the inline branch plus FR-019's compare? [Measurability, Plan §Performance Goals, Research §R-9]
-- [ ] CHK002 Is the requirement that the baseline be taken before any production edit stated, with the procedure that makes it reconstructable (bench-only commit, patch-id, both SHAs)? [Completeness, Quickstart §0]
-- [ ] CHK003 Is the zero-allocation constraint between parse and callback stated for the fault path (plain members, inline branch, constant Text, bounded 372 in the existing stack buffer)? [Completeness, Plan §Constraints, `[const §VIII.5]`]
-- [ ] CHK004 Is the absence of a coroutine frame on the clean path stated as a requirement with its instrument (the `on_inbound_frame` bench)? [Measurability, Research §R-3, §R-9]
-- [ ] CHK005 Is the new cost on the NotConnected refusal path (one scan where there was none) stated and bounded? [Clarity, Research §R-3]
-- [ ] CHK006 Is `noexcept` required on the scan and dispose paths? [Completeness, Plan §Constraints]
+- [x] CHK001 Is the performance budget quantified (+5 %, one-sided, paired merge-base A-B-A-B, min-per-tree) and bound to named benches that cover both the scan and the inline branch plus FR-019's compare? [Measurability, Plan §Performance Goals, Research §R-9] — PASS: plan Performance Goals and R-9: +5% one-sided per [const §VIII.2], paired merge-base A-B-A-B, min-per-tree, over scan_frame_header_bench and the on_inbound_frame bench (the latter covers the inline branch and FR-019's compare, R-9/R-14); both in bench/ci-suite.txt (T002)
+- [x] CHK002 Is the requirement that the baseline be taken before any production edit stated, with the procedure that makes it reconstructable (bench-only commit, patch-id, both SHAs)? [Completeness, Quickstart §0] — PASS: quickstart §0.1 and T001–T004: bench-only commit first, clean merge-base worktree with only that commit cherry-picked, both SHAs and the patch-id recorded, "It cannot be reconstructed after the edit"
+- [x] CHK003 Is the zero-allocation constraint between parse and callback stated for the fault path (plain members, inline branch, constant Text, bounded 372 in the existing stack buffer)? [Completeness, Plan §Constraints, `[const §VIII.5]`] — PASS: plan Constraints [const §VIII.5]: plain members, inline branch, compile-time constant Text, bounded 372 in the existing 512-byte stack buffer (R-5); the fault path invokes no fromApp callback, and T078 runs the mallocnesia allocation gate
+- [x] CHK004 Is the absence of a coroutine frame on the clean path stated as a requirement with its instrument (the `on_inbound_frame` bench)? [Measurability, Research §R-3, §R-9] — PASS: R-3 requires the inline branch so the clean path has no coroutine frame; R-9 names the on_inbound_frame bench as the only instrument that sees it, backed by T078's allocation gate
+- [x] CHK005 Is the new cost on the NotConnected refusal path (one scan where there was none) stated and bounded? [Clarity, Research §R-3] — PASS: R-3 NotConnected: "On the refusal path it now scans once where it scanned zero times. That cost is new, is paid on the pre-Logon path only" — bounded to one scan per frame on a path that refuses and disconnects
+- [x] CHK006 Is `noexcept` required on the scan and dispose paths? [Completeness, Plan §Constraints] — PASS: plan Constraints "noexcept on the scan and dispose paths"; E-4 accessors declared noexcept
 
 ## Fuzzing & agreement instruments
 
-- [ ] CHK007 Is the scan-vs-`OffsetTable` agreement (I-4) defined with an exact oracle (`entries()`, never `find(34)`) and under both hook sets? [Clarity, Contract §C-3 I-4, Research §R-2]
-- [ ] CHK008 Does the differential corpus requirement include accepted controls, clean-seed preconditions, and a planted disagreement per mutation family? [Completeness, Research §R-2]
-- [ ] CHK009 Is the fuzz arm's skip set restricted to named resource statuses, with a skip count required so a run that skipped everything is visible? [Measurability, Research §R-2]
-- [ ] CHK010 Are both directions of the iterator/`OffsetTable` agreement required in `fuzz_wire_validator`, with the reason the "build succeeds ⇒ no fault" direction matters for live traffic? [Completeness, Research §R-7]
-- [ ] CHK011 Is the #508 caveat (no coverage feedback from library code) stated so the fuzz arm is not claimed as proof? [Assumption, Research §R-2]
-- [ ] CHK012 Is the fuzz duration requirement (≥ 10 min, `[const §VII.7]`) stated for each fuzz target 092 touches? [Measurability, Plan §Constitution Check VII §7]
+- [x] CHK007 Is the scan-vs-`OffsetTable` agreement (I-4) defined with an exact oracle (`entries()`, never `find(34)`) and under both hook sets? [Clarity, Contract §C-3 I-4, Research §R-2] — PASS: contract C-3 I-4 and R-2: oracle is entries() (never find(34), with the kMaxBuildProbe reason, verified in src/wire/offset_table.cpp) and every case runs under the dictionary hooks and dict_hooks::none()
+- [x] CHK008 Does the differential corpus requirement include accepted controls, clean-seed preconditions, and a planted disagreement per mutation family? [Completeness, Research §R-2] — PASS: R-2 §1 specifies accepted controls (8 kinds), each seed asserted clean before mutation, and one planted disagreement per mutation family (8 families); T013/T014
+- [x] CHK009 Is the fuzz arm's skip set restricted to named resource statuses, with a skip count required so a run that skipped everything is visible? [Measurability, Research §R-2] — PASS: R-2 §2: skips only wire_offset_table_full or out_of_memory and counts them "so a fuzz run that skipped everything is visible"; T066/T068 report the count
+- [x] CHK010 Are both directions of the iterator/`OffsetTable` agreement required in `fuzz_wire_validator`, with the reason the "build succeeds ⇒ no fault" direction matters for live traffic? [Completeness, Research §R-7] — PASS: R-7 Fuzz: both directions in fuzz_wire_validator, with the reason that a spurious fault would make validate reject a parseable message at the validate gate and a forced-miss arm cannot catch it; each direction proven by a planted disagreement (T067/T068)
+- [x] CHK011 Is the #508 caveat (no coverage feedback from library code) stated so the fuzz arm is not claimed as proof? [Assumption, Research §R-2] — PASS: R-2 "Caveat #508: … this arm is a backstop, not proof"; T068 states the caveat
+- [x] CHK012 Is the fuzz duration requirement (≥ 10 min, `[const §VII.7]`) stated for each fuzz target 092 touches? [Measurability, Plan §Constitution Check VII §7] — PASS: quickstart §2 Fuzz (≥ 10 min, Article VII §7) and T068 "run each target ≥ 600 s" over both touched targets (fuzz_session_recovery_admin_parse, fuzz_wire_validator); [const §VII.7] verified
 
 ## Witness quality (instruments that can go RED)
 
-- [ ] CHK013 Is every witness required to use an input the pre-feature code mishandles (a malformed tag for Logon rows, a Logout for LogoutSent), so it can go RED? [Measurability, Spec §SC-006]
-- [ ] CHK014 Is the mechanism-deletion proof required per state arm, and repeated with the late-site close also deleted? [Completeness, Spec §SC-006]
-- [ ] CHK015 Are the cells that are green by design (controls, inherited-outcome pins) distinguished from witnesses, each with its own named proof? [Clarity, Tasks §Phase 3 preamble]
-- [ ] CHK016 Are exact 373/371/45/372 assertions required on every Reject cell? [Measurability, Spec §SC-002, §SC-006]
-- [ ] CHK017 Is the FR-019 deletion proof specified per mechanism (the bound, Guard 4's branch, `consume_rejected_seqnum_`'s branch), with which cells each must turn RED and which stay green and why? [Completeness, Research §R-14]
-- [ ] CHK018 Is the SC-010 precondition (Active and NextNumIn = seqnum_max before the frame) required, so a disconnect from another cause cannot satisfy the cell? [Clarity, Spec §SC-010]
-- [ ] CHK019 Is the late-site witness required to use a real well-formed frame above a measured ceiling, with the platforms where that trigger does not apply (a heap-backed arena upstream) addressed? [Coverage, Research §R-4, Tasks §T038]
-- [ ] CHK020 Is the SC-007 peer's behaviour specified by reference to the QuickFIX source it emulates (`nextReject`, resend replay with 43=Y and 122), so "no stall" is testable in-process? [Measurability, Spec §SC-007]
+- [x] CHK013 Is every witness required to use an input the pre-feature code mishandles (a malformed tag for Logon rows, a Logout for LogoutSent), so it can go RED? [Measurability, Spec §SC-006] — PASS: SC-006 requires each witness to be an input pre-feature code mishandles (malformed tag for Logon rows, Logout for LogoutSent); T025 and quickstart D-1/D-2, D-9
+- [x] CHK014 Is the mechanism-deletion proof required per state arm, and repeated with the late-site close also deleted? [Completeness, Spec §SC-006] — PASS: SC-006 "The deletion proof is run twice: with the late-site close present, and with it also deleted"; T065 per state arm
+- [x] CHK015 Are the cells that are green by design (controls, inherited-outcome pins) distinguished from witnesses, each with its own named proof? [Clarity, Tasks §Phase 3 preamble] — PASS: tasks Phase 3 preamble lists the expected-green-with-T026-reverted cells (T031 D-5 liveness half, T032, T034 MaxMessageSize, T051 controls), each with its own proof, marked pin/control in its test comment
+- [x] CHK016 Are exact 373/371/45/372 assertions required on every Reject cell? [Measurability, Spec §SC-002, §SC-006] — PASS: SC-002/SC-006 require exact 373 and 371; quickstart §1 adds RefSeqNum; tasks Execution rules require 373, 371 (or absence), 45 and 372 on every Reject cell
+- [x] CHK017 Is the FR-019 deletion proof specified per mechanism (the bound, Guard 4's branch, `consume_rejected_seqnum_`'s branch), with which cells each must turn RED and which stay green and why? [Completeness, Research §R-14] — PASS: R-14 "Deletion proofs" and quickstart §2: per mechanism (bound, Guard 4 branch, consume_rejected_seqnum_ branch), which cells go RED, and why the plain application cell stays green (too-low fatal arm); T054
+- [x] CHK018 Is the SC-010 precondition (Active and NextNumIn = seqnum_max before the frame) required, so a disconnect from another cause cannot satisfy the cell? [Clarity, Spec §SC-010] — PASS: SC-010 first assertion (Active and NextNumIn 4294967295 after the SequenceReset); R-14 "so that a disconnect from any other cause cannot satisfy the cell"
+- [x] CHK019 Is the late-site witness required to use a real well-formed frame above a measured ceiling, with the platforms where that trigger does not apply (a heap-backed arena upstream) addressed? [Coverage, Research §R-4, Tasks §T038] — PASS: R-4 and T038: a real well-formed frame above T006's measured ceiling, guarded at runtime on arena_upstream() == null_memory_resource() with GTEST_SKIP (verified: pmr_arena_upstream.hpp returns new_delete_resource under MSVC iterator debugging), or the offset-table-cap trigger if T006 finds one
+- [x] CHK020 Is the SC-007 peer's behaviour specified by reference to the QuickFIX source it emulates (`nextReject`, resend replay with 43=Y and 122), so "no stall" is testable in-process? [Measurability, Spec §SC-007] — PASS: SC-007 defines the peer by QuickFIX's nextReject and the resend replay with 43=Y and 122; T041 cites the source by symbol; the live cell is a B17 follow-up (T042)
 
 ## Test placement & selection
 
-- [ ] CHK021 Is the #511 rule (never add `FIXPP_TEST_HOOKS` to a new target; counter-reading cells go to existing hooked targets) stated with the list of targets used? [Completeness, Quickstart §1, Plan §Structure Decision]
-- [ ] CHK022 Is label selection (`ctest -L 092`, APPEND, never overwrite) required, with a manifest-equality gate that can report a missing label? [Measurability, Quickstart §1, Tasks §T007]
-- [ ] CHK023 Is the standalone-vs-grouped decision for the new session target justified against `[const §VII.8]`'s isolation-sensitive criteria? [Consistency, Plan §Testing]
-- [ ] CHK024 Is a timeout requirement stated for the new target that accounts for the slowest sanitizer and MSVC lanes? [Gap, Tasks §T076]
+- [x] CHK021 Is the #511 rule (never add `FIXPP_TEST_HOOKS` to a new target; counter-reading cells go to existing hooked targets) stated with the list of targets used? [Completeness, Quickstart §1, Plan §Structure Decision] — PASS: quickstart §1, plan Structure Decision and tasks Execution rules state the #511 rule and list the hooked targets (session_validation_compat_toggles, session_persistent_seqnum_hydrate, store_fail_reconcile, session_store_tests, capi_send_recv_test — each verified to define FIXPP_TEST_HOOKS in tests/*/CMakeLists.txt)
+- [x] CHK022 Is label selection (`ctest -L 092`, APPEND, never overwrite) required, with a manifest-equality gate that can report a missing label? [Measurability, Quickstart §1, Tasks §T007] — PASS: quickstart §1 (APPEND, never set_tests_properties LABELS) and T007's expected-ctest-092.txt manifest-equality gate with a positive control (two names reported missing before T021/T060); T008 extends it for re-derived members
+- [x] CHK023 Is the standalone-vs-grouped decision for the new session target justified against `[const §VII.8]`'s isolation-sensitive criteria? [Consistency, Plan §Testing] — PASS: T005 justifies the standalone target against [const §VII.8] (coroutines on an io_context with timers, not pure single-threaded; neighbour session_validate_gate_inbound standalone for the same reason), and requires the reason in the CMakeLists comment
+- [x] CHK024 Is a timeout requirement stated for the new target that accounts for the slowest sanitizer and MSVC lanes? [Gap, Tasks §T076] — PASS: T076 measures the new target's wall time on every sanitizer lane and MSVC and sets TIMEOUT from the slowest with headroom (inherited 120 s default; wire_dict_tests precedent 1800 s)
 
 ## Dependencies & assumptions
 
-- [ ] CHK025 Is the parse-arena ceiling required to be measured (per preset, with SHA) rather than derived, and is its use limited to building the late-site cells? [Assumption, Research §R-4]
-- [ ] CHK026 Is the assumption that the counterparty runs default settings (QuickFIX processes a Reject as admin and advances) stated and scoped to the SC-007 peer? [Assumption, Spec §A-6]
-- [ ] CHK027 Are the owner build-approval requirement (`[const §XVII.7]`) and the sanitizer/coverage matrix of `/speckit-verify` stated as prerequisites of acceptance? [Completeness, Plan §Constitution Check XVII §7]
+- [x] CHK025 Is the parse-arena ceiling required to be measured (per preset, with SHA) rather than derived, and is its use limited to building the late-site cells? [Assumption, Research §R-4] — PASS: R-4 "The ceiling is measured, not derived, only to build the late-site cells", per Linux preset with the SHA (T006); the per-lane cap is fixpp#515's
+- [x] CHK026 Is the assumption that the counterparty runs default settings (QuickFIX processes a Reject as admin and advances) stated and scoped to the SC-007 peer? [Assumption, Spec §A-6] — PASS: spec A-6 states QuickFIX J/C++ default settings (Reject processed as admin, counter advanced); SC-007 and Clarifications Q4 scope its use to the in-process scripted peer, the live cell deferred to B17
+- [x] CHK027 Are the owner build-approval requirement (`[const §XVII.7]`) and the sanitizer/coverage matrix of `/speckit-verify` stated as prerequisites of acceptance? [Completeness, Plan §Constitution Check XVII §7] — PASS: plan Constitution Check XVII §7 ("ASK before each build") and quickstart header; T078 requires /speckit-verify's full preset matrix, coverage and allocation gate; tasks Execution rules require the owner ask ([const §XVII.7] verified)
 
 ## Notes
 
@@ -56,3 +56,24 @@
 - Leave items unchecked when they still require clarification, correction, or reviewer evaluation
 - `/speckit-implement` reads checklist checkbox state as a gate and must not modify markers
 - `checklists/requirements.md` has a separate built-in lifecycle maintained by `/speckit-specify` and `/speckit-clarify`
+
+## Audit Result
+
+| Disposition | Count |
+|---|---|
+| PASS | 27 |
+| SPEC-FIXED | 0 |
+| DD-DECIDED | 0 |
+| WAIVED | 0 |
+| **Total** | 27 |
+
+### SPEC-FIXED items
+- none.
+
+### DD-DECIDED items
+- none.
+
+### WAIVED items
+- none.
+
+Anchors spot-verified: no Phase-2 design-doc anchor (issue-driven feature); authority = owner ruling on fixpp#507 (issue comments 5855333315 and 5856425788, read via `gh api` 2026-09-27) plus spec.md Clarifications. Cited anchors resolve at a0878eab: `[const §VII.3]`, `§VII.7`, `§VII.8`, `§VIII.2`, `§VIII.5`, `§IX.1`, `§IX.4`, `§X.4`, `§X.6`, `§X.7`, `§XVI.6`, `§XVI.7`, `§XVII.7` in `.specify/constitution.md`; `[2e §6.7]` at `.specify/2e-msgstore.md` "### 6.7 Errors introduced by this design"; 091 R-11 C-ABI 1.9 population recipe (steps 1–6 + Classification) in `specs/091-data-field-bytes/research.md`.

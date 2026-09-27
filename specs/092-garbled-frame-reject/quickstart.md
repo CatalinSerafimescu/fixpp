@@ -107,7 +107,8 @@ Expected after the change:
   decided on `fault_ref_msg_type` (D), never the last-wins 4: NextNumIn advances, the Reject carries
   372=D, and N+1 is then delivered with no ResendRequest.
 - **MaxMessageSize** (C-1 step 1b): an oversized faulty frame in Active ends in Disconnected.
-- **Liveness** (FR-018): a D-5 frame in Active refreshes inbound liveness, and a D-7 frame does not.
+- **Liveness** (FR-018): a D-5 frame and a D-6 frame in Active refresh inbound liveness, and a D-7
+  frame does not.
 - **372 bound** (R-5): a faulty frame with an over-long MsgType draws a Reject without 372, and the
   number is not silently consumed.
 - **Reject-loop bound** (contract C-2): a scripted peer answers each fixpp Reject with a malformed

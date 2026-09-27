@@ -10,41 +10,41 @@
 
 ## C-ABI 1.10 declaration
 
-- [ ] CHK001 Is the set of C-visible effects derived by a named recipe (091's R-11 steps 1–6) rather than listed by example, with a classification rule for each candidate? [Completeness, Spec §FR-017, Research §R-8]
-- [ ] CHK002 Is each candidate effect in R-8's table given a proposed class with the observer whose result changes (`is_established`, `send`, `close`, both callbacks)? [Clarity, Research §R-8]
-- [ ] CHK003 Are the effects that have no carrying declaration (the D-7 reversal, the LogoutSent confirmation, the late-site close, the FR-019 close) required to appear in the `version.h` history? [Completeness, Research §R-8]
-- [ ] CHK004 Is the rewrite of `fixpp_session_register_callback`'s 1.9 sentence ("no Reject is sent") required, with the new wording's scope stated? [Completeness, Spec §FR-014]
-- [ ] CHK005 Are the preconditions for taking MINOR 10 (no published release; no other ref already at 10) stated as checks with a positive control? [Clarity, Research §R-8]
-- [ ] CHK006 Is the pre-release justification (`[const §X.7]`) and the precedent (091's 1.9) cited, so BREAKING is a sanctioned change and not a violation? [Traceability, Plan §Constitution Check X]
-- [ ] CHK007 Is it stated what 1.10 does NOT touch (no symbol, signature or error code added; `CHANGELOG.md`, `introducing_minor`, `error_codes_v1.txt` untouched) and why? [Completeness, Research §R-8]
-- [ ] CHK008 Is the classification of `fixpp_session_close`'s latency change in LogoutSent (additive vs BREAKING) made conditional on a named documentation check? [Clarity, Research §R-8]
+- [x] CHK001 Is the set of C-visible effects derived by a named recipe (091's R-11 steps 1–6) rather than listed by example, with a classification rule for each candidate? [Completeness, Spec §FR-017, Research §R-8] — PASS: research R-8 "Population recipe" re-runs 091's R-11 steps 1–6 and classifies every export by its Classification paragraph (verified: specs/091-data-field-bytes/research.md R-11 holds the six-step C-ABI 1.9 recipe and the Classification paragraph under [const §X.7]); T020 records it
+- [x] CHK002 Is each candidate effect in R-8's table given a proposed class with the observer whose result changes (`is_established`, `send`, `close`, both callbacks)? [Clarity, Research §R-8] — PASS: R-8's candidate table gives each effect a proposed class and the observer whose result changes (is_established true→false, send OK→FIXPP_ERR_SESSION_INVALID_STATE, close latency, cb), or states it is not C-visible/unreachable from C
+- [x] CHK003 Are the effects that have no carrying declaration (the D-7 reversal, the LogoutSent confirmation, the late-site close, the FR-019 close) required to appear in the `version.h` history? [Completeness, Research §R-8] — SPEC-FIXED: plan Phase 0b's bump bullet listed only the D-7 reversal and the LogoutSent confirmation as undeclared effects (readable as exhaustive); it now names every effect R-8's classification leaves with no carrying declaration, with the late-site close and the FR-019 close as examples (plan.md Implementation phases 0b "Bump"); R-8 "What 1.10 touches" and T023 were already generic
+- [x] CHK004 Is the rewrite of `fixpp_session_register_callback`'s 1.9 sentence ("no Reject is sent") required, with the new wording's scope stated? [Completeness, Spec §FR-014] — SPEC-FIXED: the rewrite of the 1.9 sentence was required (FR-014, R-8) but its new scope was not stated; research R-8's table row now requires keeping the 1.9 record intact (component/group-only pair delivered→dropped; 091 FR-020 Logon half) and replacing only the "silently … no Reject is sent" outcome with cb-not-invoked plus a C-2 Reject (D-5/D-6) or disregard (D-7/D-8), pointing to 1.10 (research.md R-8 table)
+- [x] CHK005 Are the preconditions for taking MINOR 10 (no published release; no other ref already at 10) stated as checks with a positive control? [Clarity, Research §R-8] — PASS: R-8 "Preconditions": `gh release list --exclude-drafts` empty, and a for-each-ref grep over every ref for MINOR with positive control origin/main=9, re-run before the bump (T019)
+- [x] CHK006 Is the pre-release justification (`[const §X.7]`) and the precedent (091's 1.9) cited, so BREAKING is a sanctioned change and not a violation? [Traceability, Plan §Constitution Check X] — PASS: plan Constitution Check X cites [const §X.7] (verified: constitution Article X item 7 permits a declared pre-release breaking change bumping MINOR) and R-8 cites 091's 1.9 precedent (932dd1cd); Complexity Tracking records it as sanctioned
+- [x] CHK007 Is it stated what 1.10 does NOT touch (no symbol, signature or error code added; `CHANGELOG.md`, `introducing_minor`, `error_codes_v1.txt` untouched) and why? [Completeness, Research §R-8] — PASS: contract C-4 "No symbol, signature or error code is added"; R-8 "Not touched, and why": CHANGELOG.md not a carrier (091's --stat), introducing_minor and error_codes_v1.txt untouched because no C code is added
+- [x] CHK008 Is the classification of `fixpp_session_close`'s latency change in LogoutSent (additive vs BREAKING) made conditional on a named documentation check? [Clarity, Research §R-8] — PASS: R-8 table row: additive only "if the recipe confirms fixpp_session_close's documentation leaves timing unspecified. Otherwise BREAKING on close"; T020 records the classification
 
 ## Public C++ surface
 
-- [ ] CHK009 Is `build_reject_with_text` specified as a new name with `build_reject` kept as a single, unchanged declaration, so source compatibility holds without qualification? [Consistency, Contract §C-4, Spec §Clarifications R3-002]
-- [ ] CHK010 Is byte-identity of `build_reject`'s existing output stated as a requirement (existing goldens unchanged)? [Measurability, Research §R-5]
-- [ ] CHK011 Is `field_fault`'s placement, underlying type and enumerator values specified, with the reason it is shared by both readers? [Completeness, Data-model §E-0]
-- [ ] CHK012 Are `field_iterator::fault()` / `fault_length_tag()` semantics (sticky, first fault) specified, and is "what the iterator yields does not change" stated with the C-ABI reason (`scan_slice_for_tag`)? [Clarity, Data-model §E-4]
-- [ ] CHK013 Is every stop and tolerance in `advance()` (S0–S4, T1–T3) mapped to a fault kind, derived by a stated reading procedure? [Completeness, Data-model §E-4]
-- [ ] CHK014 Is the `sizeof(field_iterator)` growth declared as source-compatible but not layout-neutral? [Clarity, Contract §C-4]
-- [ ] CHK015 Is `check_inbound`'s new `store_seqnum_overflow` return declared as a public behaviour change, with its header comment requirement (replace, not append, the stale "Logout-with-text" sentence)? [Completeness, Contract §C-4, Research §R-14]
-- [ ] CHK016 Is it stated that no `SessionEvent` alternative is added, with the reason (exhaustive `std::visit` source break)? [Completeness, Research §R-4]
+- [x] CHK009 Is `build_reject_with_text` specified as a new name with `build_reject` kept as a single, unchanged declaration, so source compatibility holds without qualification? [Consistency, Contract §C-4, Spec §Clarifications R3-002] — PASS: contract C-4, R-5 and Clarifications R3-002: build_reject_with_text is a new name, build_reject stays a single declaration unchanged in signature and output and delegates with empty text; T017
+- [x] CHK010 Is byte-identity of `build_reject`'s existing output stated as a requirement (existing goldens unchanged)? [Measurability, Research §R-5] — PASS: R-5 Rationale "Rejects already emitted keep byte-identical output (no 58), so no existing golden changes"; T016 runs the existing golden cells unchanged
+- [x] CHK011 Is `field_fault`'s placement, underlying type and enumerator values specified, with the reason it is shared by both readers? [Completeness, Data-model §E-0] — PASS: data-model E-0 pins `enum class field_fault : std::uint8_t { none = 0, malformed_tag = 1, length_data_mismatch = 2 }` in include/fixpp/wire/tag_scan.hpp, shared because both readers already include tag_scan.hpp (verified: parser.hpp and src/session/scan_frame_header.hpp include it)
+- [x] CHK012 Are `field_iterator::fault()` / `fault_length_tag()` semantics (sticky, first fault) specified, and is "what the iterator yields does not change" stated with the C-ABI reason (`scan_slice_for_tag`)? [Clarity, Data-model §E-4] — PASS: data-model E-4 declares fault() "sticky: the first fault any advance() observed" and fault_length_tag(); "What the iterator yields does not change" with the scan_slice_for_tag reason (verified in src/capi/message_read.cpp)
+- [x] CHK013 Is every stop and tolerance in `advance()` (S0–S4, T1–T3) mapped to a fault kind, derived by a stated reading procedure? [Completeness, Data-model §E-4] — PASS: E-4's S0–S4/T1–T3 table is derived by reading every `done_ = true` and early return in advance() against OffsetTable::build's writers; spot-verified against include/fixpp/wire/parser.hpp at head (non-digit, accumulate_tag_digit refusal, no `=`, non-SOH boundary stops; empty tag, clamp, end==size tolerances)
+- [x] CHK014 Is the `sizeof(field_iterator)` growth declared as source-compatible but not layout-neutral? [Clarity, Contract §C-4] — PASS: contract C-4 "sizeof(field_iterator) grows, so the change is source-compatible, not layout-neutral"; plan "What changes for whom"
+- [x] CHK015 Is `check_inbound`'s new `store_seqnum_overflow` return declared as a public behaviour change, with its header comment requirement (replace, not append, the stale "Logout-with-text" sentence)? [Completeness, Contract §C-4, Research §R-14] — PASS: contract C-4 declares check_inbound's store_seqnum_overflow return as a public, source-compatible behaviour change; research R-14 "Public surface" requires replacing (not appending to) the "Logout-with-text" sentence (verified present at include/fixpp/session/seqnum_manager.hpp); T053 carries it
+- [x] CHK016 Is it stated that no `SessionEvent` alternative is added, with the reason (exhaustive `std::visit` source break)? [Completeness, Research §R-4] — PASS: research R-4 "No log line" and contract C-4: no SessionEvent alternative because it would break every exhaustive std::visit over the public variant
 
 ## Error surface (FR-012)
 
-- [ ] CHK017 Are the new enumerators' slots (132, 133) specified as appended after the last existing value with explicit values (`[const §X.4]`)? [Clarity, Data-model §E-6]
-- [ ] CHK018 Is the `reject_reason_map` mapping (132→0, 133→5) and the C mapping (both → `FIXPP_ERR_WIRE_INVALID_FRAME`) specified, including why no C code is added? [Completeness, Data-model §E-6]
-- [ ] CHK019 Is the layer-dependence of the over-0xFFFF mapping (`wire_tag_out_of_range` vs `wire_invalid_tag_number`) disclosed with a pinning requirement? [Consistency, Data-model §E-6]
-- [ ] CHK020 Is the population of pins that enumerate or bound `core::error` derived by command, with each member's required move stated (expressed from the last 092 enumerator, not a literal)? [Completeness, Research §R-7]
-- [ ] CHK021 Is the validator's ordering requirement (fault check before field checks, and after the loop) stated with the observable reason (T1 would otherwise surface as 373=2)? [Clarity, Data-model §E-5]
-- [ ] CHK022 Is the `*ref_tag_out` contract specified per fault kind (untouched vs the Length tag)? [Clarity, Spec §FR-012]
-- [ ] CHK023 Is the reachability of FR-012 stated (public API only; no session or C-ABI caller), so its scope is not over- or under-claimed? [Clarity, Spec §FR-012, Research §R-7]
+- [x] CHK017 Are the new enumerators' slots (132, 133) specified as appended after the last existing value with explicit values (`[const §X.4]`)? [Clarity, Data-model §E-6] — PASS: data-model E-6 "Slots": 132 and 133 appended at the next contiguous slots after app_payload_malformed = 131 with explicit values per [const §X.4] (verified 131 is the last enumerator at head)
+- [x] CHK018 Is the `reject_reason_map` mapping (132→0, 133→5) and the C mapping (both → `FIXPP_ERR_WIRE_INVALID_FRAME`) specified, including why no C code is added? [Completeness, Data-model §E-6] — PASS: E-6 table and "C mapping": 132→0, 133→5 in reject_reason_map; both → FIXPP_ERR_WIRE_INVALID_FRAME (the code wire_invalid_field_format already maps to, verified in src/capi/error.cpp); no C code added because the validator has no C-ABI caller (git grep over src/capi empty, verified)
+- [x] CHK019 Is the layer-dependence of the over-0xFFFF mapping (`wire_tag_out_of_range` vs `wire_invalid_tag_number`) disclosed with a pinning requirement? [Consistency, Data-model §E-6] — PASS: E-6 discloses the mapping is not layer-independent (wire_tag_out_of_range → FIXPP_ERR_WIRE_LIMIT_EXCEEDED, verified in translate; wire_invalid_tag_number → INVALID_FRAME) and one cell pins both (quickstart; T061)
+- [x] CHK020 Is the population of pins that enumerate or bound `core::error` derived by command, with each member's required move stated (expressed from the last 092 enumerator, not a literal)? [Completeness, Research §R-7] — PASS: research R-7 derives the pin population with three git grep commands and states each member's move, the boundary pins "expressed from the last 092 enumerator rather than as a literal"; T059 re-derives at the implementation head
+- [x] CHK021 Is the validator's ordering requirement (fault check before field checks, and after the loop) stated with the observable reason (T1 would otherwise surface as 373=2)? [Clarity, Data-model §E-5] — PASS: data-model E-5: fault checked at the top of each iteration and after the loop, because T1's yielded tag 0 would otherwise fail the unexpected-tag check first and surface as 373=2 (verified wire_unexpected_tag → 2 in reject_reason_map.hpp)
+- [x] CHK022 Is the `*ref_tag_out` contract specified per fault kind (untouched vs the Length tag)? [Clarity, Spec §FR-012] — PASS: FR-012 and E-5: malformed_tag leaves *ref_tag_out untouched; length_data_mismatch writes fault_length_tag()
+- [x] CHK023 Is the reachability of FR-012 stated (public API only; no session or C-ABI caller), so its scope is not over- or under-claimed? [Clarity, Spec §FR-012, Research §R-7] — PASS: FR-012 last sentence and R-7 Rationale: reachable only through the public API (a directly constructed MessageView whose build failed, or differing hooks); no session reach (R-3 decides first) and no C-ABI caller (R-8 row, git grep verified empty)
 
 ## Documentation carriers
 
-- [ ] CHK024 Is the set of text sites stating the old behaviour derived by command, with each site's required change (rewrite vs append, ruling-naming header comment)? [Completeness, Spec §FR-014, Research §R-13]
-- [ ] CHK025 Are the B&L rows required for every C-5 disclosure and the BREAKING declaration, each tied to a cell? [Traceability, Contract §C-5]
-- [ ] CHK026 Is the PR description's BREAKING declaration and its single closing keyword (#507, with #514/#515 as follow-ups) specified? [Completeness, Spec §FR-017]
+- [x] CHK024 Is the set of text sites stating the old behaviour derived by command, with each site's required change (rewrite vs append, ruling-naming header comment)? [Completeness, Spec §FR-014, Research §R-13] — PASS: research R-13 derives the sites with a git grep and states per site the change (C-ABI sentence rewrite; admin_messages.hpp scoped rewrite with ruling-naming header comment; #423 refs gain a pointer; brain session.md rewritten, not appended); T072 and T071 re-derive via T008
+- [x] CHK025 Are the B&L rows required for every C-5 disclosure and the BREAKING declaration, each tied to a cell? [Traceability, Contract §C-5] — PASS: contract C-5 heading "behaviours-and-limitations rows, each pinned by a cell" (L-1, L-2, L-4, L-6, L-7); T070 requires each row to name its cell and adds the C-ABI 1.10 BREAKING row, whose witnesses are T021/T045 (SC-004) and T022/T023 (SC-009)
+- [x] CHK026 Is the PR description's BREAKING declaration and its single closing keyword (#507, with #514/#515 as follow-ups) specified? [Completeness, Spec §FR-017] — PASS: FR-017 requires the declaration in the PR description; T080 specifies the §X.7 BREAKING declaration, `Closes #507` as the only closing keyword, #514/#515 named as follow-ups with a positive-controlled grep over body and commit messages
 
 ## Notes
 
@@ -52,3 +52,25 @@
 - Leave items unchecked when they still require clarification, correction, or reviewer evaluation
 - `/speckit-implement` reads checklist checkbox state as a gate and must not modify markers
 - `checklists/requirements.md` has a separate built-in lifecycle maintained by `/speckit-specify` and `/speckit-clarify`
+
+## Audit Result
+
+| Disposition | Count |
+|---|---|
+| PASS | 24 |
+| SPEC-FIXED | 2 |
+| DD-DECIDED | 0 |
+| WAIVED | 0 |
+| **Total** | 26 |
+
+### SPEC-FIXED items
+- CHK003 — plan Phase 0b's history-comment list of undeclared effects made non-exhaustive and derived from R-8's classification, naming the late-site close and the FR-019 close as examples; affected: `plan.md:Implementation phases 0b "Bump"`.
+- CHK004 — scope of the `fixpp_session_register_callback` 1.9-sentence rewrite stated (keep the 1.9 record; replace only the "no Reject is sent" outcome with the C-2 Reject/disregard; point to 1.10); affected: `research.md:R-8 table`.
+
+### DD-DECIDED items
+- none.
+
+### WAIVED items
+- none.
+
+Anchors spot-verified: no Phase-2 design-doc anchor (issue-driven feature); authority = owner ruling on fixpp#507 (issue comments 5855333315 and 5856425788, read via `gh api` 2026-09-27) plus spec.md Clarifications. Cited anchors resolve at a0878eab: `[const §VII.3]`, `§VII.7`, `§VII.8`, `§VIII.2`, `§VIII.5`, `§IX.1`, `§IX.4`, `§X.4`, `§X.6`, `§X.7`, `§XVI.6`, `§XVI.7`, `§XVII.7` in `.specify/constitution.md`; `[2e §6.7]` at `.specify/2e-msgstore.md` "### 6.7 Errors introduced by this design"; 091 R-11 C-ABI 1.9 population recipe (steps 1–6 + Classification) in `specs/091-data-field-bytes/research.md`.

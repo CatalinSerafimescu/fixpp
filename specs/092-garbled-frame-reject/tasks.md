@@ -462,11 +462,15 @@ control in its test comment.
     Reject.
 - [ ] T031 [US1] Via `phase-implementer`, the liveness cells (FR-018) in
   `tests/session/unparseable_frame_disposition_test.cpp`: in Active, a D-5 frame refreshes inbound
-  liveness (a TestRequest is not sent at the interval it would be without it), and a D-7 frame does
-  not.
+  liveness (a TestRequest is not sent at the interval it would be without it), a D-6 frame (too-high
+  34) refreshes it too, and a D-7 frame does not.
   - **RED proof:** the D-5 half is green with T026 reverted (Guard 4 refreshes today). Its proof is a
     named mutant in a scratch copy: T026's disposer without the D-4/D-5/D-6 liveness refresh → the
     D-5 cell RED. Record it in the evidence file.
+  - The D-6 cell is RED with T026 reverted (a too-high frame leaves through the too-high arm before
+    the Active refresh). Its named mutant: T026's disposer refreshing only in the D-5 branch → the
+    D-6 cell RED. Each liveness cell also asserts the session is still Active at the interval, so a
+    disconnect cannot satisfy "no TestRequest sent".
 - [ ] T032 [US1] Via `phase-implementer`, the D-4 knob-off arm in
   `tests/session/test_validation_compat_toggles.cpp` (target `session_validation_compat_toggles`,
   already hooked; label from T007): with `validate_sequence_numbers` off, a faulty SequenceReset at N

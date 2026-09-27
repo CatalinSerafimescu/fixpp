@@ -2,7 +2,7 @@
 
 Terms (spec.md "Terminology"): a **framed but unparseable** frame passes the Framer and fails the
 full parse; **garbled** is reserved for the FIX-SL 2020 §4.5.2 framing criteria; **disregard** is the
-named disposition "no Reject, no advance, no disconnect", applied by 092 only to scan-faulty frames
+named disposition "no Reject, no advance, no disconnect" (and no liveness refresh, FR-018), applied by 092 only to scan-faulty frames
 (contract C-2). A Framer failure stays session-fatal (`L-004-4`; its disregard is fixpp#514).
 
 ## E-0 — `field_fault` (public, additive, `include/fixpp/wire/tag_scan.hpp`)

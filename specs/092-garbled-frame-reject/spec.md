@@ -30,7 +30,8 @@ predates the terminology below and is kept.
   scan found fault-free (a resource failure, or an I-4 breach). Only FR-016 governs it: the session
   closes. Effects that ran before that parse are not undone, and moving the decision ahead of them is
   fixpp#515 (owner ruling O-2).
-- **Disregard** is the named disposition "no Reject, no advance, no disconnect". In 092 it applies
+- **Disregard** is the named disposition "no Reject, no advance, no disconnect", and no inbound
+  liveness refresh (FR-018). In 092 it applies
   to a framed but unparseable frame, in LogonReceived/Active, whose third field is not MsgType (ruling
   row 1, criterion 3) or whose MsgSeqNum was not read before the failure point (row 5, "Ignore, as
   garbled"), and to such a frame in LogoutSent. A frame that fails a framing check **the Framer
@@ -318,7 +319,7 @@ the missing number, and the session stays connected.
   the frame as if the flag were absent.
 - **A Reject (35=3) or Logout (35=5) that fails the parse** follows FR-003/FR-004. For a frame that
   fails the parse this supersedes the no-reject-loop exemption, which still holds for a well-formed
-  Reject or Logout that fails validation. A loop needs a peer that garbles every Reject it sends
+  Reject or Logout that fails validation or SendingTime. A loop needs a peer that garbles every Reject it sends
   and also rejects Rejects, and each fixpp Reject answers one peer frame (contract C-2).
 - **A duplicate MsgSeqNum(34) on a frame that fails the parse**: the Reject is addressed from the
   first well-formed 34 before the failure point (data-model E-1). A fault-free frame is sequenced
@@ -353,7 +354,9 @@ the missing number, and the session stays connected.
 - **FR-001**: The `Session` MUST NOT act on any field of an inbound frame that passes framing but
   fails the parse (Terminology), on any admin, application, or pre-Active path. There is one exception:
   MsgSeqNum(34), MsgType(35), and whether the third field is MsgType(35) MAY be read, from bytes
-  before the failure point, only to address and account for the Reject (FR-003 to FR-006). A parse
+  before the failure point, only to address and account for the Reject (FR-003 to FR-006). The scan's
+  fault record (its fault kind and, for shape (A), the Length tag, data-model E-1) MAY be read only to
+  fill 373 and 371 (FR-007); its `fault_offset` is never read by the session. A parse
   failure MUST NOT read as "no reject" or "dispatch succeeded". Out of this requirement's scope: the
   engine's first-frame routing read of BeginString(8), SenderCompID(49) and TargetCompID(56), which
   selects the session before any `Session` exists. For a faulty Logon its outcome is still refusal
@@ -469,7 +472,11 @@ the missing number, and the session stays connected.
 
   The affected declarations are derived by 091's population recipe (research R-8).
 - **FR-018**: In Active, a frame answered with a Reject under FR-003 MUST refresh inbound liveness,
-  as any received message does. A disregarded frame MUST NOT.
+  because it is a received, non-garbled message (SL2020's heartbeat-timer row: "ANY inbound message
+  (non-garbled)"). A disregarded frame MUST NOT. This does not follow today's code: fixpp refreshes
+  liveness only on the Active path after Guard 4, so a well-formed frame Rejected or diverted before
+  it (a #423 Reject site, the Reset arm, the too-high arm) does not refresh, and 092 leaves that
+  unchanged (re-derive with `grep -n "last_inbound_steady_ =" src/session/session.cpp`).
 - **FR-019**: NextNumIn MUST never wrap past seqnum_max (the `seqnum_t` bound; invariant I-8, which
   the outbound counter already enforces). An inbound message whose MsgSeqNum equals NextNumIn =
   seqnum_max cannot be consumed, because no next value exists. Every path that would consume it MUST

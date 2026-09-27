@@ -7,7 +7,7 @@ and from quickstart §1's cell list). Definitions:
 - **Field 3 is 35** is `hdr.msg_type_is_third`.
 - **34 read** is `parse_seqnum(hdr.fault_ref_seq_num) > 0` (E-1).
 - **35 value** is `hdr.fault_ref_msg_type` (E-1), never the last-wins `hdr.msg_type`.
-- **Disregard** means no Reject, no advance, no disconnect. 092 applies it only to scan-faulty frames
+- **Disregard** means no Reject, no advance, no disconnect, and no inbound-liveness refresh (FR-018). 092 applies it only to scan-faulty frames
   (owner ruling row 1 for criterion 3, row 5), never to a Framer failure (C-1 step 1).
 
 ## C-1 — Decision order
@@ -74,10 +74,13 @@ In every `on_inbound_frame` path:
   fails with `store_seqnum_overflow`, and `consume_rejected_seqnum_` takes the silent Disconnected
   transition (FR-019, I-7). The same holds at every #423 Reject site.
 - **D-4 during AwaitingResend** leaves the gap open. The disclosed outcome is in C-5 L-2.
-- **Liveness.** In Active, D-4, D-5 and D-6 refresh the inbound-liveness timestamp that any received
-  message refreshes today. These frames are received and are not garbled (SL2020's heartbeat-timer
-  row: "ANY inbound message (non-garbled)"). The disregard rows do not refresh it. LogonReceived
-  refreshes nothing today and still does not.
+- **Liveness.** In Active, D-4, D-5 and D-6 refresh the inbound-liveness timestamp. These frames are
+  received and are not garbled (SL2020's heartbeat-timer row: "ANY inbound message (non-garbled)").
+  The disregard rows do not refresh it. LogonReceived refreshes nothing today and still does not.
+  Today's code refreshes it only on the Active path after Guard 4, so a well-formed frame that a
+  #423 site Rejects, the Reset arm applies, or the too-high arm diverts does not refresh it; 092 does
+  not change that. D-4 and D-6 therefore refresh where their well-formed twins do not (re-derive with
+  `grep -n "last_inbound_steady_ =" src/session/session.cpp`).
 
 **Reject contents (D-4, D-5, D-6):**
 - 45 = the MsgSeqNum read (`fault_ref_seq_num`).
@@ -104,7 +107,9 @@ answers one peer frame. The bound cell is quickstart §1 "reject-loop bound".
 ## C-3 — Invariants (each a test)
 
 - **I-1** On a faulty frame, no handler reads any `hdr` field other than 34, 35 and
-  `msg_type_is_third`. That excludes SequenceReset, Logout, TestRequest, ResendRequest, Heartbeat,
+  `msg_type_is_third` (as `fault_ref_seq_num` / `fault_ref_msg_type`), and the fault record's
+  `fault` and `fault_length_tag`, which fill only 373 and 371 (FR-007); `fault_offset` is
+  instrument-only. That excludes SequenceReset, Logout, TestRequest, ResendRequest, Heartbeat,
   PossDup, identity and SendingTime. Witnesses:
   - the T076 probe (NewSeqNo not applied);
   - no Heartbeat for a faulty TestRequest;

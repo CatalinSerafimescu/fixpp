@@ -236,8 +236,9 @@ target.
    - **Version pin first** (`[const §VII.3]`): `version_test.cpp`'s exact-version cell and
      `CompositeMacroValue` are set to 1.10 and shown RED against 9.
    - **Bump**: `FIXPP_C_ABI_VERSION_MINOR` 9 → 10, with a history comment naming 092/fixpp#507, every
-     observer, and the effects with no carrying declaration (the D-7 reversal; the LogoutSent
-     confirmation, if the recipe keeps it additive).
+     observer, and every effect research R-8's classification leaves with no carrying declaration
+     (for example the D-7 reversal; the LogoutSent confirmation, if the recipe keeps it additive; the
+     late-site close and the FR-019 close, wherever the recipe gives them no per-declaration clause).
    - **Declarations**: a BREAKING (C-ABI 1.10; 092) clause on each affected `session.h`
      declaration, and a rewrite of `fixpp_session_register_callback`'s 1.9 "no Reject is sent"
      sentence.
