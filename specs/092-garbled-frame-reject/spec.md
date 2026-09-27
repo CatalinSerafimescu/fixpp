@@ -354,9 +354,10 @@ the missing number, and the session stays connected.
 - **FR-001**: The `Session` MUST NOT act on any field of an inbound frame that passes framing but
   fails the parse (Terminology), on any admin, application, or pre-Active path. There is one exception:
   MsgSeqNum(34), MsgType(35), and whether the third field is MsgType(35) MAY be read, from bytes
-  before the failure point, only to address and account for the Reject (FR-003 to FR-006). The scan's
-  fault record (its fault kind and, for shape (A), the Length tag, data-model E-1) MAY be read only to
-  fill 373 and 371 (FR-007); its `fault_offset` is never read by the session. A parse
+  before the failure point, only to address and account for the Reject (FR-003 to FR-006) and to
+  select FR-009's Logon refusal for a faulty Logon while Active (D-3). The scan's fault record (its
+  fault kind and, for shape (A), the Length tag, data-model E-1) MAY be read only to detect the fault
+  and to fill 373 and 371 (FR-007); its `fault_offset` is never read by the session. A parse
   failure MUST NOT read as "no reject" or "dispatch succeeded". Out of this requirement's scope: the
   engine's first-frame routing read of BeginString(8), SenderCompID(49) and TargetCompID(56), which
   selects the session before any `Session` exists. For a faulty Logon its outcome is still refusal

@@ -106,10 +106,10 @@ Plus tests, two benches and docs.
 
 | Article | Requirement | Status |
 |---|---|---|
-| VII §3–4 TDD | failing test first, no code without a test | Planned. Every C-2 row, every late parse site (C-6) and every C-3 invariant is a RED-first cell, and T076 is the anchor RED. Each RED witness is an input the pre-feature code mishandles (quickstart §1) |
+| VII §3–4 TDD | failing test first, no code without a test | Planned. Every C-2 row, every late parse site (C-6) and every C-3 invariant is a RED-first cell, and the #507 reproducer (T005, #507's T076 table) is the anchor RED. Each RED witness is an input the pre-feature code mishandles (quickstart §1) |
 | VII §5 conformance | the FIX-TC corpus must pass | TC 2d / 3b / 3c unchanged: terminal (`L-004-4`, which diverges from TC 2d; FR-008). Their disregard is fixpp#514. TC 14-class Rejects gain siblings (0 / 5). TC2020 17d's 373=8 is a disclosed deviation (contract C-5 L-4). Check for any existing TC cell asserting silence on a parse failure (research R-10) |
 | VII §7 fuzz | parser-touching code needs a fuzz harness | The scan is parser-touching, so an equivalence arm goes in the existing harness (R-2). The field iterator's fault record is covered by `fuzz_wire_validator` gaining a fault-kind assertion. #508 caveat disclosed |
-| VII §8 test grouping | new isolation-safe tests go into a grouped bucket, selected by label | Planned (`092` label) |
+| VII §8 test grouping | new isolation-safe tests go into a grouped bucket, selected by label | Planned (`092` label). Pure cells go in existing buckets; `session_unparseable_frame_disposition` stays standalone because it is isolation-sensitive (coroutine and timer cells) |
 | VIII §2 perf | paired merge-base A-B-A-B, +5% budget | Two benches land bench-only first and are listed in `bench/ci-suite.txt` (R-9) |
 | VIII §5 zero-alloc | no heap between parse and callback | Held: plain members, an inline branch, a constant Text |
 | IX sanitizers / coverage | per-line coverage assessment | `/speckit-verify` matrix. The fault branches are covered by the corpus and the cells |
@@ -182,7 +182,7 @@ include/fix/c_api/session.h    # BREAKING (1.10) clauses; register_callback text
 include/fix/c_api/error.h      # only if it lists WIRE_INVALID_FRAME's core members (R-7)
 tools/capi_freeze.sha256       # re-pinned
 tests/session/
-├── unparseable_frame_disposition_test.cpp   # NEW: C-2, C-3, C-6, T076 flipped, SC-007 peer
+├── unparseable_frame_disposition_test.cpp   # NEW: C-2, C-3, C-6, #507 reproducer flipped, SC-007 peer
 ├── scan_frame_header_fault_test.cpp         # NEW: E-1 kinds + the differential corpus (I-4)
 ├── scan_frame_header_overflow_test.cpp      # R-10
 ├── length_data_session_scanner_test.cpp     # R-10
@@ -221,7 +221,7 @@ target.
 
 0. **Baselines (before any production edit)**:
    - the bench-only commit (both benches), run paired against the merge-base (R-9);
-   - the T076 RED reproducer as a real test (expected RED against the new assertions);
+   - the #507 reproducer (#507's T076 table) as a real test (expected RED against the new assertions);
    - the parse-arena ceiling measurement on the Linux presets the late-site cells run on (R-4).
 0b. **C-ABI 1.10 BREAKING (FR-017)**, in the same PR. The procedure is 091's 1.9 procedure,
    re-derived:
@@ -253,7 +253,7 @@ target.
    a duplicate-34 cell proving clean frames stay last-wins, then the scan change. Then the differential corpus with its accepted controls (I-4), each mutation
    family proven able to fail with a seeded disagreement.
 2. **Disposition** (R-3, contract C-2): RED cells for every row, then the inline branch and
-   `dispose_unparseable_` in the 4 arms, and the NotConnected hoist. T076 goes green.
+   `dispose_unparseable_` in the 4 arms, and the NotConnected hoist. The #507 reproducer goes green.
    Mechanism-deletion proofs per arm, run twice: with the late-site close, and with it deleted too
    (SC-006). The D-5 call passes `hdr.fault_ref_msg_type`, with its duplicate-35 cell. The D-5
    persistence case `092 disposer (D-5)` is added to both #423 tables in

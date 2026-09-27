@@ -108,10 +108,10 @@ answers one peer frame. The bound cell is quickstart §1 "reject-loop bound".
 
 - **I-1** On a faulty frame, no handler reads any `hdr` field other than 34, 35 and
   `msg_type_is_third` (as `fault_ref_seq_num` / `fault_ref_msg_type`), and the fault record's
-  `fault` and `fault_length_tag`, which fill only 373 and 371 (FR-007); `fault_offset` is
+  `fault` and `fault_length_tag`, read only to detect the fault and to fill 373 and 371 (FR-007); `fault_offset` is
   instrument-only. That excludes SequenceReset, Logout, TestRequest, ResendRequest, Heartbeat,
   PossDup, identity and SendingTime. Witnesses:
-  - the T076 probe (NewSeqNo not applied);
+  - the #507 reproducer's probe (#507's T076 table; NewSeqNo not applied);
   - no Heartbeat for a faulty TestRequest;
   - no retransmission for a faulty ResendRequest;
   - no Logout reply for a faulty Logout.

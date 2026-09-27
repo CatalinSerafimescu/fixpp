@@ -185,7 +185,7 @@ the population snapshots, and the label manifest (plan phase 0, quickstart §0).
   - R-13 text sites: the `git grep` of research R-13.
   - The C-2 pre-Active refusal source:
     `grep -n "No MsgType discrimination\|out-of-scope admin" src/session/session.cpp`.
-  - Every member these commands add whose edit lands in a ctest entry missing from
+  - Via `phase-implementer` (after T007 exists): every member these commands add whose edit lands in a ctest entry missing from
     `expected-ctest-092.txt` extends the manifest (and gets its APPEND label), recorded here.
   - `FrameHeader` size pins:
     `git grep -n "sizeof(FrameHeader)\|sizeof(fixpp::session::detail::FrameHeader)\|FrameHeader) ==" -- src tests bench`.
@@ -343,7 +343,7 @@ C-2 row, and the rows are one function, so the mechanism lands here with one anc
 - [ ] T024 Via `phase-implementer`, add a **BREAKING (C-ABI 1.10; 092)** clause to each affected
   declaration in `include/fix/c_api/session.h` (T020's set), and rewrite
   `fixpp_session_register_callback`'s 1.9 sentence ("dropped as a parse error, silently … no Reject
-  is sent"). Where `include/fix/c_api/error.h` lists the core errors `WIRE_INVALID_FRAME` coalesces,
+  is sent") within the scope research R-8's table row states. Where `include/fix/c_api/error.h` lists the core errors `WIRE_INVALID_FRAME` coalesces,
   that list is updated in T059, not here. Re-pin `tools/capi_freeze.sha256` with
   `tools/check_capi_freeze.sh`. Never run a formatter on `include/fix/c_api/*.h`.
 
@@ -423,7 +423,8 @@ new cells in a scratch copy with T026 reverted, shows them RED for their stated 
 that RED in the commit message. T065's per-arm deletion is the finer SC-006 proof on top of it.
 **Expected green with T026 reverted, each with its own proof:** T031's D-5 liveness half (its named
 mutant); T032 (pins an inherited outcome); T034's MaxMessageSize cell (a control: the size guard runs
-before the state switch); T051's non-consuming controls (controls by design). Mark each as a pin or
+before the state switch); T051's well-formed Reset-mode control (a control by design; the faulty-frame controls depend on
+T026 and are not expected green without it). Mark each as a pin or
 control in its test comment.
 
 - [ ] T027 [US1] Via `phase-implementer`, the I-1 witnesses in
@@ -473,7 +474,7 @@ control in its test comment.
     disconnect cannot satisfy "no TestRequest sent".
 - [ ] T032 [US1] Via `phase-implementer`, the D-4 knob-off arm in
   `tests/session/test_validation_compat_toggles.cpp` (target `session_validation_compat_toggles`,
-  already hooked; label from T007): with `validate_sequence_numbers` off, a faulty SequenceReset at N
+  already hooked; label from T007): with `validate_sequence_numbers` off, a faulty **Reset-mode** SequenceReset at N
   leaves `seqnum_mgr_test_access().next_inbound_unsafe() == N`, and later frames are delivered
   without advancing (the inherited outcome, research R-4).
 - [ ] T033 [US1] Via `phase-implementer`, the FR-011 / I-6 matrix for the admin rows in
@@ -669,7 +670,8 @@ round 2). The D-5 cell needs Phase 2d.
     assert Disconnected and `next_inbound_unsafe()` still 4294967295;
   - **non-consuming controls** (L2R3-001): at NextNumIn = 4294967295, each of these leaves the
     session Active and NextNumIn at 4294967295, because none consumes it: a Reset-mode
-    SequenceReset with NewSeqNo = 4294967295; a faulty SequenceReset at 4294967295 (D-4); a faulty
+    SequenceReset with NewSeqNo = 4294967295; a faulty Reset-mode SequenceReset at 4294967295 with NewSeqNo =
+    4294967295 (D-4); a faulty
     frame at another number (D-6); a D-7 frame. (A faulty Logon is D-3, which disconnects by design,
     so it is not a control.)
   RED today for the Guard 4, #423 and pre-Active cells (the counter wraps and the session stays
@@ -858,14 +860,20 @@ it in 092.
 
 ### Close-out checks
 
-- [ ] T076 Measure `session_unparseable_frame_disposition`'s wall time on every sanitizer lane
+- [ ] T076 Via `phase-implementer` for the TIMEOUT edit: measure `session_unparseable_frame_disposition`'s wall time on every sanitizer lane
   `/speckit-verify` runs and on MSVC, and set its TIMEOUT from the slowest with headroom (the
-  inherited 120 s is a threading-test default; `wire_dict_tests` needed 1800 s on msvc-asan). Name
-  the existing `L-004-4` Framer-failure regression test (`grep -rn "L-004-4" tests`) as FR-008's
-  witness in the evidence file and run it. Then run T007's label gate; it must pass (the labelled set equals the manifest, every entry
+  inherited 120 s is a threading-test default; `wire_dict_tests` needed 1800 s on msvc-asan). Then run T007's label gate; it must pass (the labelled set equals the manifest, every entry
   registered). Then `ctest --test-dir build/linux-clang-debug -L '^092$' --output-on-failure`, all
   GREEN, and the full session suite plus `pytest bindings/python/tests/`, passing except the tests
   R-7 and R-10 list as intentionally updated.
+- [ ] T083 Via `phase-implementer`, FR-008's witness (no test pins it today: `grep -rln "L-004-4"
+  tests` is empty, and `OverCapacityFrameClosesSession` covers carry overflow only). In
+  `tests/session/engine_readpump_test.cpp` (target `engine_readpump_test`, already hooked; ctest
+  `engine_readpump`), add cells that feed an **established** session a frame with a bad CheckSum, one
+  with a wrong BodyLength and one with a bad BeginString, and assert the session closes (`L-004-4`).
+  These are pins, green today; their proof is a mutant in a scratch copy (a read pump that continues
+  after a Framer error) that turns each RED. Add `engine_readpump` to `expected-ctest-092.txt` with an
+  APPEND label. Record the mutant in the evidence file.
 - [ ] T077 Via the `checklist-auditor`, re-disposition any checklist item whose subject changed
   during implementation (a deviation recorded in the evidence file). Derive the population by a
   complement grep over `specs/092-garbled-frame-reject/checklists/*.md` for every FR, C-2 row and
@@ -927,8 +935,8 @@ it in 092.
 ### Phase dependencies
 
 - **Setup (Phase 1):** T001 → T002 → T003 → T004 must precede every production edit. T005 needs
-  only T001. T006 and T008 need only T001. T005 → T007 (T007's positive control assumes T005's
-  target is registered).
+  only T001. T006 needs only T001. T005 → T007 → T008 (T007's positive control assumes T005's
+  target is registered; T008 may extend the manifest, so the control is re-stated after it).
 - **Foundational (Phase 2):** depends on Setup.
   - 2a: T009 (RED) → T010 → T011 → T012; T013 after T011 → T014; T015 after T011 (the stop-first
     scan is what makes replay unsafe).
@@ -945,13 +953,12 @@ it in 092.
 - **Phase 7 (FR-019):** T050 ‖ T051 ‖ T052 (RED) → T053 → T054. Needs Phase 2 (the D-5 cell).
   Independent of the stories otherwise.
 - **Phase 8 (FR-012):** T055 (RED) → T056; T057 (RED) needs T056; T060 and T061 are written
-  **before** T058 and committed with their compile-RED; then T058 → T059 → T062 → T063 (T060/T061
-  GREEN at T059). Needs only T010 (the shared enum). It can run beside every story.
+  **before** T058 and committed with their compile-RED; then T058 → T059 → T062 → T063 (T060 and T061's `translate` half GREEN at T059; T061's validator half GREEN at T062). Needs only T010 (the shared enum). It can run beside every story.
 - **Polish (Phase 9):** needs every phase above.
   - T064 first; then T065, T066 → T067 → T068, T069;
   - T070–T072 after T064 (they describe the final code);
   - T073–T075 after T072;
-  - T076 after T073–T075; T077 before T078; T078 after T076;
+  - T083 (FR-008 pin, listed before T077) after T064; T076 after T073–T075 and T083; T077 before T078; T078 after T076;
   - T079, T080 after T078;
   - T081 → T082. T082 is last.
 
@@ -972,8 +979,9 @@ Phase 7's bound; Phase 8's validator check) follows RED → implement → GREEN 
 
 ## Parallel opportunities
 
-- **Setup:** after T001, T006 and T008 run beside T005 → T007 (T005 and T007 both edit
-  `tests/session/CMakeLists.txt`; T006 writes nothing committed).
+- **Setup:** after T001, T006 runs beside T005 → T007 → T008 (T005 and T007 both edit
+  `tests/session/CMakeLists.txt`; T008 may extend T007's manifest, so T007's positive control is
+  re-stated after T008; T006 writes nothing committed).
 - **Foundational:** 2a's T009 ‖ 2b's T016 ‖ 2c's T021/T022 (different files). T013 shares T009's
   file, so it runs after it.
 - **Phase 7 ‖ Phase 8 ‖ the stories**, after the checkpoint: Phase 8 touches only wire, core and

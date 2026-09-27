@@ -12,7 +12,7 @@ owner's approval first (`[const §XVII.7]` resource gate).
      candidate tree, on one machine.
    - Record the paired A-B-A-B result (min-per-tree) with both SHAs and the bench commit's
      patch-id. It cannot be reconstructed after the edit.
-2. **RED reproduction**: add #507's T076 reproducer (from the issue body) as a real test and run it.
+2. **RED reproduction**: add #507's reproducer (the issue body's T076 table) as a real test and run it.
    - Expected today: cells (b), (c), (e) and (f) all show `probe(34=500): resend=0` (reset applied).
 3. **Parse-arena ceiling** (research R-4): find the smallest field count at which a well-formed
    NewOrderSingle fails `Parser<Index>::parse` in the inbound arena, on the Linux presets the cells
@@ -49,7 +49,7 @@ below are:
 **Every Reject cell asserts the exact 373 and 371 and the RefSeqNum.**
 
 Expected after the change:
-- **T076 flipped**: all four framed-but-unparseable cells draw a Reject for the SequenceReset
+- **#507 reproducer flipped** (#507's T076 table): all four framed-but-unparseable cells draw a Reject for the SequenceReset
   (45=2, 372=4, and 373=0 with no 371 or 373=5 with 371 = the Length tag). The probe at 500 draws a
   ResendRequest (SC-001).
 - **D-5 advance witness**: a faulty application message at N, then a conformant one at N+1. The
@@ -77,7 +77,7 @@ Expected after the change:
     its error, turns `RejectedInSequence_PersistFailure_Fatal` RED. Outbound store-before-emit
     needs no new case: it is `emit_session_reject_`'s unchanged body.
 - **D-4 no-advance witness**: the same pair with a faulty SequenceReset at N. The next message draws
-  a ResendRequest. With `validate_sequence_numbers` off, the cell pins the inherited outcome: the
+  a ResendRequest. With `validate_sequence_numbers` off and a Reset-mode SequenceReset, the cell pins the inherited outcome: the
   counter stays at N, asserted directly as `next_inbound_unsafe() == N` in the same
   `test_validation_compat_toggles.cpp` cell group, and later frames are
   delivered without advancing (research R-4).
@@ -163,7 +163,7 @@ Expected after the change:
     - a faulty application frame (D-5).
 
     Non-consuming controls leave the session Active and NextNumIn at 4294967295: a Reset-mode
-    SequenceReset with NewSeqNo = 4294967295, a faulty SequenceReset (D-4), a faulty frame at another
+    SequenceReset with NewSeqNo = 4294967295, a faulty Reset-mode SequenceReset with NewSeqNo = 4294967295 (D-4), a faulty frame at another
     number (D-6), and a D-7 frame.
   - **Knob-off arm** (memory store): with `validate_sequence_numbers` off, the Reset-mode
     SequenceReset is not applied. So this arm seeds NextNumIn with
@@ -193,7 +193,8 @@ Expected after the change:
   and confirm that arm's cells go RED. Repeat with the late-site close (C-6) also deleted, so a
   refusal cell kept green by a late-site close is exposed.
 - **Inbound bound deletion** (FR-019, research R-14), each in a scratch copy:
-  - delete the bound in `check_inbound`: every FR-019 cell goes RED, the pre-Active arm included;
+  - delete the bound in `check_inbound`: every **consuming** FR-019 cell goes RED, the pre-Active
+    arm included (the non-consuming controls stay green by design);
   - delete Guard 4's overflow branch: the Heartbeat, PossDup and knob-off cells go RED. The plain
     application cell stays green, because the too-low fatal arm catches it, so it is not that
     branch's witness;
