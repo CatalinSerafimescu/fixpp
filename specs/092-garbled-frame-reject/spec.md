@@ -219,15 +219,16 @@ the missing number, and the session stays connected.
 - **FR-002**: A parse failure MUST be decided before any handler or guard acts on the frame: before
   the identity (BeginString/CompID) and SendingTime guards, and before the SequenceReset, Logout, TestRequest, ResendRequest, Heartbeat and application handlers, and before
   the sequence-gap, too-low and PossDup arms.
-- **FR-003**: When MsgSeqNum(34) was read from well-formed bytes before the failure point, and the
-  message is not a Logon, the session MUST send a session Reject(35=3) with RefSeqNum(45) =
+- **FR-003**: When MsgSeqNum(34) and MsgType(35) were both read from well-formed bytes before the
+  failure point, and the message is not a Logon, the session MUST send a session Reject(35=3) with RefSeqNum(45) =
   that MsgSeqNum and RefMsgType(372) = the MsgType read, and a Text(58) that names the defect.
 - **FR-004**: The Reject in FR-003 MUST advance NextNumIn exactly when MsgSeqNum equals the expected
   number and the message is not a SequenceReset. This reuses #423's rows unchanged.
 - **FR-005**: When MsgSeqNum differs from the expected number, the Reject MUST NOT advance NextNumIn
   and MUST NOT by itself trigger a ResendRequest or a disconnect.
-- **FR-006**: When MsgSeqNum(34) was not read from well-formed bytes before the failure point, the
-  frame MUST be ignored as garbled: no Reject, no advance, no disconnect, and a log entry.
+- **FR-006**: When MsgSeqNum(34) or MsgType(35) was not read from well-formed bytes before the
+  failure point (the Framer does not enforce 35 as the third field; research R-11), the frame MUST
+  be ignored as garbled: no Reject, no advance, no disconnect, and a log entry.
 - **FR-007**: SessionRejectReason(373) MUST be 0 (Invalid tag number) with RefTagID(371) omitted for
   shape (B). For shape (A) it MUST be 5 (Value is incorrect (out of range) for this tag), with
   RefTagID(371) = the Length tag. The reason mapping MUST express
