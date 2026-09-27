@@ -27,6 +27,28 @@
 # up. The tag therefore has to be as STABLE as possible so a PR leg can pull
 # what main last published; ccache then decides, per TU, what still applies.
 #
+# ⚠️ AMENDED BY #482 (flag surface added to the tag): "as stable as possible"
+# now means stable across SOURCE edits, not across FLAG edits. Source files are
+# still never hashed, so a PR that moves no flag still pulls what main last
+# published. See the next section.
+#
+# ── WHY THE COMPILE-FLAG SURFACE IS IN THE TAG (#482) ────────────────────────
+#
+# The same cost argument as the compiler identity below, plus the failure it
+# caused. A global flag moves EVERY command line, so each entry misses inside
+# ccache while the tag still exists: the restore reports a HIT, the hit rate
+# collapses, and the fatal floor in ci/ccache-stats.sh fails the lane. The lane
+# could not rotate its own key because nothing in the key saw the flag move,
+# and the remedy was to delete GHCR tags by hand. With the flag surface in the
+# tag, that commit's restore is a MISS, the floor's MISS exemption applies, and
+# the next push:main / dispatch on main seeds the new tag.
+#
+# The surface is a NORMALIZED EXTRACT, not file bytes: comments, layout and
+# option docstrings are dropped, so a comment-only or whitespace edit keeps the
+# tag and only a flag edit rotates it. What is extracted, what is NOT, and why,
+# is in ci/ccache-flag-surface.py's header. `ccache_flag_digest` below is the
+# one function both minters take it from.
+#
 # ── WHY THE COMPILER IDENTITY IS STILL IN THE TAG ────────────────────────────
 #
 # Not for correctness — for cost, and for one diagnostic.
@@ -71,9 +93,39 @@ ccache_preset_family() {
   esac
 }
 
+# Resolved when this file is SOURCED, so it names the helper beside THIS file,
+# not beside whichever script sourced it.
+_CCACHE_KEY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ccache_flag_digest <host|wheel> <preset-or-lane>
+#
+# Sets: CCACHE_CACHE_FLAGS — 8 lowercase hex over the lane's compile-flag
+# surface (#482), read relative to the cwd (the library root, as for
+# CMakePresets.json). Returns 1 if the surface cannot be extracted. Every
+# minter takes the digest from here and from nowhere else, so restore and seed
+# cannot disagree about it.
+#
+# ⚠️ A FAILED OR EMPTY EXTRACT IS A FAILURE, NOT A DEFAULT. A constant digest
+# is a key that never rotates, which is the defect this exists to remove, and
+# restore and seed would agree on it. It degrades to "no cache this run", like
+# every other failure in this file.
+ccache_flag_digest() {
+  local surface
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "ccache-cache: python3 not found — cannot extract the compile-flag surface for '$2'." >&2
+    return 1
+  fi
+  if ! surface="$(python3 "$_CCACHE_KEY_DIR/ccache-flag-surface.py" "$1" "$2")" || [ -z "$surface" ]; then
+    echo "ccache-cache: could not extract the compile-flag surface for '$2' (see ci/ccache-flag-surface.py)." >&2
+    return 1
+  fi
+  CCACHE_CACHE_FLAGS="$(printf '%s\n' "$surface" | sha256sum | cut -c1-8)"
+}
+
 # ccache_cache_key <preset>
 #
-# Sets: CCACHE_CACHE_TAG, CCACHE_CACHE_COMPILER, CCACHE_CACHE_TOOLSET.
+# Sets: CCACHE_CACHE_TAG, CCACHE_CACHE_COMPILER, CCACHE_CACHE_TOOLSET,
+# CCACHE_CACHE_FLAGS.
 # Returns 1 if the compiler behind the preset cannot be identified.
 #
 # Note the asymmetry with conan-cache-key.sh, and that it is deliberate: there,
@@ -199,7 +251,8 @@ ccache_cache_key() {
   # be sanitized — `linux-clang-libc++-asan` → `linux-clang-libcxx-asan`. Same
   # substitution and the same reason as conan-cache-key.sh's `CONAN_CACHE_TAG` line; keep the two in
   # agreement if either ever changes.
-  CCACHE_CACHE_TAG="ccache-${preset//+/x}-${CCACHE_CACHE_TOOLSET}"
+  ccache_flag_digest host "$preset" || return 1
+  CCACHE_CACHE_TAG="ccache-${preset//+/x}-${CCACHE_CACHE_TOOLSET}-f${CCACHE_CACHE_FLAGS}"
 }
 
 # ── CONTAINER LANES ──────────────────────────────────────────────────────────
@@ -226,7 +279,7 @@ ccache_cache_key() {
 # ⚠️ THIS ENABLES A MANUAL PRUNE; IT DOES NOT MAKE ONE HAPPEN. Do not read the
 # line above as "the old tags will be cleaned up". The workflow prunes exactly
 # the lane it just SEEDED, and `ccache_tag_regex` is per-lane and anchored, so
-# `^ccache-wheel-manylinux228-cp312-[0-9a-f]{8}$` does not match
+# `^ccache-wheel-manylinux228-cp312-[0-9a-f]{8}(-f[0-9a-f]{8})?$` does not match
 # `ccache-wheel-manylinux228-012f4a50`. Nothing automatic will ever look at the
 # pre-ABI-tag versions again. Reaping them is a deliberate act:
 #
@@ -245,7 +298,8 @@ ccache_lane_is_container() {
 
 # ccache_container_cache_key <lane> <digest-pinned image ref>
 #
-# Sets: CCACHE_CACHE_TAG, CCACHE_CACHE_COMPILER, CCACHE_CACHE_TOOLSET.
+# Sets: CCACHE_CACHE_TAG, CCACHE_CACHE_COMPILER, CCACHE_CACHE_TOOLSET,
+# CCACHE_CACHE_FLAGS.
 # Returns 1 if the lane or the image reference is unusable.
 #
 # ── WHY THIS EXISTS SEPARATELY FROM ccache_cache_key ─────────────────────────
@@ -311,9 +365,12 @@ ccache_container_cache_key() {
     return 1
   fi
 
+  # The image digest identifies the toolchain, not the flags the wheel build
+  # hands it; those come from the flag surface, as on the host lanes (#482).
+  ccache_flag_digest wheel "$lane" || return 1
   CCACHE_CACHE_COMPILER="$ref"
   CCACHE_CACHE_TOOLSET="${digest:0:8}"
-  CCACHE_CACHE_TAG="ccache-${lane}-${CCACHE_CACHE_TOOLSET}"
+  CCACHE_CACHE_TAG="ccache-${lane}-${CCACHE_CACHE_TOOLSET}-f${CCACHE_CACHE_FLAGS}"
 }
 
 # ccache_resolve_key <lane> [<image-ref>]
@@ -400,7 +457,7 @@ ccache_tag_regex() {
   # DELETE, and this repo's precedent is strictest exactly there.
   # ── ONE GRAMMAR PER MINTER, BRANCHED — NOT ONE LOOSENED GRAMMAR FOR BOTH ────
   #
-  # A container lane's tag is `ccache-<lane>-<digest8>`: no `<family><major>`
+  # A container lane's tag is `ccache-<lane>-<digest8>-f<flags8>`: no `<family><major>`
   # component at all, because `ccache_container_cache_key` mints no such thing.
   #
   # ⚠️ The tempting shortcut — relaxing the host grammar to
@@ -411,13 +468,25 @@ ccache_tag_regex() {
   # reasoning this file rejects for keying decisions two functions up; it is not
   # more acceptable when the consequence is deletion. Each branch stays anchored
   # to exactly what its own producer can emit.
+  #
+  # ── THE FLAG SUFFIX IS OPTIONAL: THE BARE FORM IS THE PREVIOUS PRODUCER ─────
+  #
+  # Every minter appends `-f<8 hex>` (#482). The suffix-less form is exactly
+  # what the minters produced before that, so accepting it widens the
+  # classifier only to a grammar a real producer emitted. Without it those tags
+  # would stop being recognised, and an unrecognised tag is skipped silently
+  # and kept forever (see the bare `wheel-manylinux228` note above). With it,
+  # each lane's first seed after #482 reaps its own old tag. Drop the `?` once
+  # a GHCR listing shows no suffix-less ccache tag left.
+  local flags='(-f[0-9a-f]{8})?'
+
   if ccache_lane_is_container "$preset"; then
-    CCACHE_TAG_RE="^ccache-${safe}-[0-9a-f]{8}\$"
+    CCACHE_TAG_RE="^ccache-${safe}-[0-9a-f]{8}${flags}\$"
     return 0
   fi
 
   # The host grammar is branched by family too, and for the same reason: each
   # branch accepts exactly its own family's literal, never `(clang|gcc)`.
   # The family comes from ccache_preset_family, the same function the minter uses.
-  CCACHE_TAG_RE="^ccache-${safe}-$(ccache_preset_family "$preset")([0-9]+|unknown)-[0-9a-f]{8}\$"
+  CCACHE_TAG_RE="^ccache-${safe}-$(ccache_preset_family "$preset")([0-9]+|unknown)-[0-9a-f]{8}${flags}\$"
 }

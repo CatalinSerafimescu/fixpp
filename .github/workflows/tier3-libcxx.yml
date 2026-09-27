@@ -486,8 +486,8 @@ jobs:
       # The Conan tag is content-derived, so a branch that changes conanfile.py
       # or a profile gets a DIFFERENT tag and cannot collide. The ccache tag is
       # deliberately coarse and ROLLING (ci/ccache-cache-key.sh) so a PR leg can
-      # pull what main published — which means EVERY branch computes the SAME tag
-      # whatever it changed, and a dispatch from a feature branch would write to
+      # pull what main published — so EVERY branch moving no compile flag (#482)
+      # computes the SAME tag, and a dispatch from a feature branch would write to
       # exactly the artifact main reads next. Not a correctness risk (ccache
       # hashes compilation inputs internally, so a foreign entry is a MISS, never
       # a wrong object) — a cost one: main's warm cache replaced by a branch's.

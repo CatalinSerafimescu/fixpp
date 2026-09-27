@@ -1311,7 +1311,7 @@ commit — do not relax this to a substring or regex."
 
   seed_if="$(echo "$seed_step" | jq -r '.["if"] // ""')"
   [ "$seed_if" = "$EXPECTED_WHEEL_SEED_IF" ] \
-    || fail "$case_id: the wheel seed guard is \`$seed_if\`, expected exactly \`$EXPECTED_WHEEL_SEED_IF\`. The main-ref restriction is load-bearing here: every branch computes the same rolling tag, so a missing \`github.ref == 'refs/heads/main'\` turns any dispatch into an overwrite of main's warm cache."
+    || fail "$case_id: the wheel seed guard is \`$seed_if\`, expected exactly \`$EXPECTED_WHEEL_SEED_IF\`. The main-ref restriction is load-bearing here: every branch that moves no compile flag computes the same rolling tag, so a missing \`github.ref == 'refs/heads/main'\` turns any dispatch into an overwrite of main's warm cache."
 }
 
 # The host restore/stats/seed steps and the container's bind mount all read the
