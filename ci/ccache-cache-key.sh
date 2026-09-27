@@ -101,9 +101,10 @@ _CCACHE_KEY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 #
 # Sets: CCACHE_CACHE_FLAGS — 8 lowercase hex over the lane's compile-flag
 # surface (#482), read relative to the cwd (the library root, as for
-# CMakePresets.json). Returns 1 if the surface cannot be extracted. Every
-# minter takes the digest from here and from nowhere else, so restore and seed
-# cannot disagree about it.
+# CMakePresets.json). Returns 1 if the surface cannot be extracted, and then
+# also sets CCACHE_CACHE_FLAGS_FAILED=1, so a caller can tell this failure from
+# an unidentified compiler (both return 1). Every minter takes the digest from
+# here and from nowhere else, so restore and seed cannot disagree about it.
 #
 # ⚠️ A FAILED OR EMPTY EXTRACT IS A FAILURE, NOT A DEFAULT. A constant digest
 # is a key that never rotates, which is the defect this exists to remove, and
@@ -111,12 +112,15 @@ _CCACHE_KEY_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # every other failure in this file.
 ccache_flag_digest() {
   local surface
+  CCACHE_CACHE_FLAGS_FAILED=0
   if ! command -v python3 >/dev/null 2>&1; then
     echo "ccache-cache: python3 not found — cannot extract the compile-flag surface for '$2'." >&2
+    CCACHE_CACHE_FLAGS_FAILED=1
     return 1
   fi
   if ! surface="$(python3 "$_CCACHE_KEY_DIR/ccache-flag-surface.py" "$1" "$2")" || [ -z "$surface" ]; then
     echo "ccache-cache: could not extract the compile-flag surface for '$2' (see ci/ccache-flag-surface.py)." >&2
+    CCACHE_CACHE_FLAGS_FAILED=1
     return 1
   fi
   CCACHE_CACHE_FLAGS="$(printf '%s\n' "$surface" | sha256sum | cut -c1-8)"
@@ -126,7 +130,8 @@ ccache_flag_digest() {
 #
 # Sets: CCACHE_CACHE_TAG, CCACHE_CACHE_COMPILER, CCACHE_CACHE_TOOLSET,
 # CCACHE_CACHE_FLAGS.
-# Returns 1 if the compiler behind the preset cannot be identified.
+# Returns 1 if the compiler behind the preset cannot be identified, or if its
+# compile-flag surface cannot be extracted (see ccache_flag_digest).
 #
 # Note the asymmetry with conan-cache-key.sh, and that it is deliberate: there,
 # an unidentifiable toolset is a SAFETY failure and seed ABORTS. Here it is only
@@ -391,6 +396,7 @@ ccache_container_cache_key() {
 # silent pruner skip (see its header), never a wrongful delete. Reject the
 # shape mismatch here, loudly, instead of letting it reach GHCR.
 ccache_resolve_key() {
+  CCACHE_CACHE_FLAGS_FAILED=0
   if ccache_lane_is_container "$1"; then
     if [ -z "${2-}" ]; then
       echo "ccache-cache: '$1' is a container lane but no digest-pinned image reference was given; its identity cannot come from a host compiler probe." >&2
