@@ -161,7 +161,7 @@ specs/092-garbled-frame-reject/
 src/session/
 ├── scan_frame_header.hpp      # E-1: first fault, positional 35, fault_ref_seq_num / fault_ref_msg_type (R-1)
 ├── session.cpp                # inline fault branch + dispose_unparseable_ (R-3); NotConnected scan hoist;
-│                              #   fail-closed close at every late inbound parse site (C-6); liveness (FR-018);
+│                              #   fail-closed close at every late inbound parse site (C-6); no liveness writer (FR-018);
 │                              #   replay gap-fills a stored frame with no 35 (R-12); Guard 4 and
 │                              #   consume_rejected_seqnum_ overflow branches (FR-019, R-14)
 ├── admin_messages.cpp         # build_reject_with_text; build_reject delegates (R-5)

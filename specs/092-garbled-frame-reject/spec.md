@@ -30,8 +30,8 @@ predates the terminology below and is kept.
   scan found fault-free (a resource failure, or an I-4 breach). Only FR-016 governs it: the session
   closes. Effects that ran before that parse are not undone, and moving the decision ahead of them is
   fixpp#515 (owner ruling O-2).
-- **Disregard** is the named disposition "no Reject, no advance, no disconnect", and no inbound
-  liveness refresh (FR-018). In 092 it applies
+- **Disregard** is the named disposition "no Reject, no advance, no disconnect". Like every
+  faulty-frame disposition, it does not refresh inbound liveness (FR-018). In 092 it applies
   to a framed but unparseable frame, in LogonReceived/Active, whose third field is not MsgType (ruling
   row 1, criterion 3) or whose MsgSeqNum was not read before the failure point (row 5, "Ignore, as
   garbled"), and to such a frame in LogoutSent. A frame that fails a framing check **the Framer
@@ -179,6 +179,17 @@ fix-rs, venue specs, and a Fable consult. The ruling:
   number wraps it. This already happens today at Guard 4 and at #423's Reject sites, and D-5 inherits
   it. Keep it out of 092? → A: **Fold into 092**: 092 enforces the inbound bound (invariant I-8 on
   the inbound side). (FR-019; research R-14.)
+
+### Session 2026-09-27 (after /speckit-analyze and the checklist audit)
+
+- Q: Does a faulty frame answered with a Reject (D-4, D-5, D-6) refresh inbound liveness in Active,
+  as Gate A's FR-018 said? → A: **No. No faulty-frame disposition refreshes it** (FR-018 rewritten).
+  The owner delegated the question to a Fable consult (trigger 1). The verdict, with every
+  verification re-run: fixpp's only Active refresh is after Guard 4, so today a well-formed #423
+  Reject, Reset-mode SequenceReset, too-high frame, or inbound 35=3/35=5 does not refresh. A
+  refreshing faulty frame would invert that, keep alive a peer that sends only faulty frames, and
+  match neither QuickFIX/C++ nor QuickFIX/J (only QuickFIX/Go, which refreshes on every frame,
+  garbage included).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -472,12 +483,16 @@ the missing number, and the session stays connected.
   - the declaration carried in the PR description and in the behaviours-and-limitations delta.
 
   The affected declarations are derived by 091's population recipe (research R-8).
-- **FR-018**: In Active, a frame answered with a Reject under FR-003 MUST refresh inbound liveness,
-  because it is a received, non-garbled message (SL2020's heartbeat-timer row: "ANY inbound message
-  (non-garbled)"). A disregarded frame MUST NOT. This does not follow today's code: fixpp refreshes
-  liveness only on the Active path after Guard 4, so a well-formed frame Rejected or diverted before
-  it (a #423 Reject site, the Reset arm, the too-high arm) does not refresh, and 092 leaves that
-  unchanged (re-derive with `grep -n "last_inbound_steady_ =" src/session/session.cpp`).
+- **FR-018**: 092 adds no writer of the inbound-liveness timestamp. No faulty-frame disposition,
+  Rejected (D-4, D-5, D-6) or disregarded, refreshes inbound liveness. The refresh stays where it is
+  today: the single Active-path site after Guard 4 and after the Active arm's early returns (re-derive
+  with `grep -n "last_inbound_steady_ =" src/session/session.cpp`, then read every `co_return`
+  between Guard 4 and that site). So in Active a TestRequest is sent at the interval whatever faulty
+  traffic arrived, and the grace window is answered only by a well-formed Heartbeat (the pending
+  TestRequest id is cleared only there). This follows QuickFIX/C++ and QuickFIX/J, which do not
+  refresh on a frame Rejected for a structural fault, and TC2020 §4.5.13 k, which allows such a frame
+  to be treated as garbled. Adopting SL2020's heartbeat row ("ANY inbound message (non-garbled)")
+  for every inbound frame would move that one site for all frames, and is out of 092's scope.
 - **FR-019**: NextNumIn MUST never wrap past seqnum_max (the `seqnum_t` bound; invariant I-8, which
   the outbound counter already enforces). An inbound message whose MsgSeqNum equals NextNumIn =
   seqnum_max cannot be consumed, because no next value exists. Every path that would consume it MUST

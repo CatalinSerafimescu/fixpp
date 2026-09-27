@@ -363,10 +363,8 @@ C-2 row, and the rows are one function, so the mechanism lands here with one anc
   - D-4: Active, a faulty SequenceReset (Reset, NewSeqNo=500) at N → Reject; a conformant message at
     N+1 then draws a ResendRequest (no advance, NewSeqNo not applied).
   - D-5: Active, a faulty NewOrderSingle at N → Reject (45=N, 372=D); `fromApp` not invoked; a
-    conformant message at N+1 is delivered with no ResendRequest (advance witnessed); and inbound
-    liveness is refreshed (no TestRequest at the interval it would be sent without the frame,
-    FR-018). The liveness half is green before the feature (Guard 4 refreshes today), so its RED is
-    T031's named mutant; the cell as a whole is RED today on the missing Reject.
+    conformant message at N+1 is delivered with no ResendRequest (advance witnessed). Liveness is
+    T031's, not this cell's.
   - D-6: Active, a faulty NewOrderSingle at N+5 → Reject (45=N+5), no ResendRequest, NextNumIn
     unchanged (a conformant message at N is then delivered with no ResendRequest).
   Also the two `coverage_adversarial_test.cpp` cells T012 renamed. Run: RED. Commit with the RED
@@ -386,7 +384,7 @@ C-2 row, and the rows are one function, so the mechanism lands here with one anc
     `hdr.fault_ref_msg_type` (I-1). "34 read" is `parse_seqnum(hdr.fault_ref_seq_num) > 0`.
     - D-1/D-2/D-3: `record_state_transition_(fsm_state::Disconnected)`, the action the arm takes when
       `interpret_logon` refuses; no Reject, no Logout.
-    - D-9, D-8, D-7: disregard (no Reject, no advance, no disconnect, no liveness refresh).
+    - D-9, D-8, D-7: disregard (no Reject, no advance, no disconnect).
     - D-5: `consume_rejected_seqnum_(parse_seqnum(hdr.fault_ref_seq_num), hdr.fault_ref_msg_type)`
       (never `hdr.msg_type`), and on its failure `co_return` the failure before any Reject; then
       the Reject.
@@ -396,8 +394,8 @@ C-2 row, and the rows are one function, so the mechanism lands here with one anc
       `fault_ref_seq_num`; 372 = `fault_ref_msg_type` when within T018's bound, else empty; 373 = 0
       with 371 omitted for `malformed_tag`, 373 = 5 with 371 = `fault_length_tag` for
       `length_data_mismatch`; 58 = T018's fixed Text for the kind.
-    - D-4/D-5/D-6 in Active refresh inbound liveness as any received message does; the disregard
-      rows do not; LogonReceived refreshes nothing, as today (FR-018).
+    - No row writes the inbound-liveness timestamp (FR-018): the disposer adds no
+      `last_inbound_steady_` write.
   - Rewrite the #423 ruling references at the validate gate with a pointer to the 2026-09-27
     revision of row 4 (R-13), naming the ruling in the header comment where a decision is
     superseded.
@@ -421,8 +419,8 @@ The anchors landed in 2d, so the cells below would be GREEN on arrival. **RED fi
 (`[const §VII.3–4]`; plan Constitution Check VII): before committing, each cell-writing task runs its
 new cells in a scratch copy with T026 reverted, shows them RED for their stated reason, and quotes
 that RED in the commit message. T065's per-arm deletion is the finer SC-006 proof on top of it.
-**Expected green with T026 reverted, each with its own proof:** T031's D-5 liveness half (its named
-mutant); T032 (pins an inherited outcome); T034's MaxMessageSize cell (a control: the size guard runs
+**Expected green with T026 reverted, each with its own proof:** T031's D-4, D-6 and D-7 cells (the
+forced-hit mutant); T032 (pins an inherited outcome); T034's MaxMessageSize cell (a control: the size guard runs
 before the state switch); T051's well-formed Reset-mode control (a control by design; the faulty-frame controls depend on
 T026 and are not expected green without it). Mark each as a pin or
 control in its test comment.
@@ -462,16 +460,16 @@ control in its test comment.
     number of malformed frames the peer sent, and fixpp originates none in reply to a well-formed
     Reject.
 - [ ] T031 [US1] Via `phase-implementer`, the liveness cells (FR-018) in
-  `tests/session/unparseable_frame_disposition_test.cpp`: in Active, a D-5 frame refreshes inbound
-  liveness (a TestRequest is not sent at the interval it would be without it), a D-6 frame (too-high
-  34) refreshes it too, and a D-7 frame does not.
-  - **RED proof:** the D-5 half is green with T026 reverted (Guard 4 refreshes today). Its proof is a
-    named mutant in a scratch copy: T026's disposer without the D-4/D-5/D-6 liveness refresh → the
-    D-5 cell RED. Record it in the evidence file.
-  - The D-6 cell is RED with T026 reverted (a too-high frame leaves through the too-high arm before
-    the Active refresh). Its named mutant: T026's disposer refreshing only in the D-5 branch → the
-    D-6 cell RED. Each liveness cell also asserts the session is still Active at the interval, so a
-    disconnect cannot satisfy "no TestRequest sent".
+  `tests/session/unparseable_frame_disposition_test.cpp`. In Active, send only faulty frames of one
+  row for a full heartbeat interval: one cell each for D-4, D-5 (a faulty application frame and a
+  faulty Reject(3)), D-6 and D-7. Each asserts the session is still Active up to the interval, and
+  then that a TestRequest **is** sent at it. One cell then answers with a well-formed Heartbeat and
+  asserts the session stays Active; one sends nothing more and asserts the grace-window disconnect.
+  - **RED:** the D-5 application cell is RED with T026 reverted (the faulty frame passes Guard 4 and
+    refreshes today, so no TestRequest is sent). The faulty-Reject(3) cell and the D-4, D-6 and D-7
+    cells are green with T026 reverted. Their proof is the forced-hit mutant in a scratch copy: a
+    disposer that writes `last_inbound_steady_` in each row turns each cell RED. Record it in the
+    evidence file.
 - [ ] T032 [US1] Via `phase-implementer`, the D-4 knob-off arm in
   `tests/session/test_validation_compat_toggles.cpp` (target `session_validation_compat_toggles`,
   already hooked; label from T007): with `validate_sequence_numbers` off, a faulty **Reset-mode** SequenceReset at N

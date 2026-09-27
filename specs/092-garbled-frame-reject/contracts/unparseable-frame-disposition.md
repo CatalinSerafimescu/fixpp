@@ -7,7 +7,7 @@ and from quickstart §1's cell list). Definitions:
 - **Field 3 is 35** is `hdr.msg_type_is_third`.
 - **34 read** is `parse_seqnum(hdr.fault_ref_seq_num) > 0` (E-1).
 - **35 value** is `hdr.fault_ref_msg_type` (E-1), never the last-wins `hdr.msg_type`.
-- **Disregard** means no Reject, no advance, no disconnect, and no inbound-liveness refresh (FR-018). 092 applies it only to scan-faulty frames
+- **Disregard** means no Reject, no advance, no disconnect. (No faulty-frame row refreshes inbound liveness, FR-018.) 092 applies it only to scan-faulty frames
   (owner ruling row 1 for criterion 3, row 5), never to a Framer failure (C-1 step 1).
 
 ## C-1 — Decision order
@@ -74,13 +74,12 @@ In every `on_inbound_frame` path:
   fails with `store_seqnum_overflow`, and `consume_rejected_seqnum_` takes the silent Disconnected
   transition (FR-019, I-7). The same holds at every #423 Reject site.
 - **D-4 during AwaitingResend** leaves the gap open. The disclosed outcome is in C-5 L-2.
-- **Liveness.** In Active, D-4, D-5 and D-6 refresh the inbound-liveness timestamp. These frames are
-  received and are not garbled (SL2020's heartbeat-timer row: "ANY inbound message (non-garbled)").
-  The disregard rows do not refresh it. LogonReceived refreshes nothing today and still does not.
-  Today's code refreshes it only on the Active path after Guard 4, so a well-formed frame that a
-  #423 site Rejects, the Reset arm applies, or the too-high arm diverts does not refresh it; 092 does
-  not change that. D-4 and D-6 therefore refresh where their well-formed twins do not (re-derive with
-  `grep -n "last_inbound_steady_ =" src/session/session.cpp`).
+- **Liveness.** No row refreshes the inbound-liveness timestamp (FR-018): not the Reject rows D-4,
+  D-5 and D-6, and not the disregard rows. 092 adds no writer. The existing refresh stays the single
+  Active-path site after Guard 4 and after the Active arm's early returns (re-derive with
+  `grep -n "last_inbound_steady_ =" src/session/session.cpp`, then read every `co_return` between
+  Guard 4 and it). In Active a TestRequest is therefore sent at the interval whatever faulty traffic
+  arrived, and only a well-formed Heartbeat answers it.
 
 **Reject contents (D-4, D-5, D-6):**
 - 45 = the MsgSeqNum read (`fault_ref_seq_num`).
