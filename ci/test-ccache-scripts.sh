@@ -769,6 +769,11 @@ host_arm rotate 'cxx-standard' CMakeLists.txt \
   'set(CMAKE_CXX_STANDARD 23)' 'set(CMAKE_CXX_STANDARD 26)'
 wheel_arm rotate 'option-default' cmake/Helpers.cmake \
   'option(FIXPP_WERROR "Treat compile warnings as errors" OFF)' 'option(FIXPP_WERROR "Treat compile warnings as errors" ON)'
+# An option no kept line reads (it gates only an add_subdirectory()), so the
+# variable closure never reaches it; only the option() rule keeps it.
+host_arm rotate 'option-default-outside-closure' cmake/ProjectOptions.cmake \
+  'option(FIXPP_BUILD_FUZZ    "Build libFuzzer harnesses (Clang only)"   OFF)' \
+  'option(FIXPP_BUILD_FUZZ    "Build libFuzzer harnesses (Clang only)"   ON)'
 host_arm rotate 'inherited-preset-cache-variable' CMakePresets.json \
   '"FIXPP_WERROR": "ON"' '"FIXPP_WERROR": "OFF"'
 host_arm rotate 'conan-profile-cxxflags' "conan/profiles/$FS_HOST" \

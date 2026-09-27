@@ -55,7 +55,8 @@ only the commands that can change a compile command line are kept:
 A variable written other than by `set`/`unset`/`option`/`string`/`list` (a
 value computed by another command, or inside a function that is not itself
 kept), a CMake file reached other than through `include()` of cmake/*.cmake or
-`add_subdirectory()`, `-D`/environment passed by a workflow step other than the
+an `add_subdirectory()` in a CMakeLists.txt (one in a cmake/*.cmake module is
+not followed), `-D`/environment passed by a workflow step other than the
 wheel's `CIBW_ENVIRONMENT`, and header CONTENT.
 A trailing comment on a cibw-before-all.sh command line is hashed as part of
 that line, which only over-rotates. When a floored lane breaches on a HIT,
