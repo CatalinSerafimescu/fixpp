@@ -14,20 +14,20 @@ owner's approval first (`[const §XVII.7]` resource gate).
 2. **RED reproduction**: add #507's T076 reproducer (from the issue body) as a real test and run it.
    - Expected today: cells (b), (c), (e) and (f) all show `probe(34=500): resend=0` (reset applied).
 3. **Parse-arena ceiling** (research R-4): find the smallest field count at which a well-formed
-   NewOrderSingle fails `Parser<Index>::parse` in the inbound arena, on the release and debug
-   presets. Record it with the SHA. The residual cells use a frame above it.
+   NewOrderSingle fails `Parser<Index>::parse` in the inbound arena, on the Linux presets the cells
+   run on. Record it with the SHA. The late-site cells (contract C-6) use a frame above it. The
+   per-lane measurement is fixpp#515's.
 4. **C-ABI preconditions** (plan Phase 0b):
    - `gh release list --exclude-drafts` is empty;
    - no ref defines MINOR 10 yet.
 
-## 1. The behaviour cells (contract C-2, C-2b, C-3, C-5)
+## 1. The behaviour cells (contract C-2, C-3, C-5, C-6)
 
 Select tests by label, never `-R` (`[const §VII.8]`). The new cells live in
 `tests/session/unparseable_frame_disposition_test.cpp`, registered beside
 `session_validate_gate_inbound` with a `092` label (`ctest -L 092`).
 
-**Every Reject cell asserts the exact 373 and 371 and the RefSeqNum.** A residual Reject (373=3, no
-371) must not satisfy a C-2 cell (SC-006).
+**Every Reject cell asserts the exact 373 and 371 and the RefSeqNum.**
 
 Expected after the change:
 - **T076 flipped**: all four framed-but-unparseable cells draw a Reject for the SequenceReset
@@ -46,8 +46,8 @@ Expected after the change:
   (SC-005).
 - **D-8**: the mixed defect `8|9|49=…|35=D|34=N|9x9=1|…|10`, and a frame whose third field is the
   malformed one. Each is disregarded in Active and in LogonReceived. The same frames in
-  NotConnected and in LogonSent are refused, and the cell asserts that the session ends (no
-  pre-Active timer would end a disregarded one, contract C-2).
+  NotConnected and in LogonSent are refused, as today, and the cell asserts that the session ends
+  (contract C-2; the pre-Active disregard is fixpp#514).
 - **D-1 / D-2**: a Logon with a malformed **tag** (a malformed count is already refused by 091 and
   cannot go RED) is refused as acceptor and as initiator, on FIX.4.2, FIX.4.4 and FIXT.1.1 (SC-004).
   A faulty non-Logon in NotConnected and in LogonSent is refused too.
@@ -59,9 +59,9 @@ Expected after the change:
   share Active's cells.
 - **AwaitingResend**: a faulty in-sequence application message that fills the gap closes it (D-5
   through `consume_rejected_seqnum_`). The faulty GapFill case is C-5 L-2 below.
-- **Duplicates** (I-3, I-4, C-5 L-5): `34=99|35=D|34=2|9x9=1` at expected 2 is D-6 (first 34 wins).
-  A fault-free NewOrderSingle `34=1|…|34=5` at expected 5 is now too-low and ends in Disconnected,
-  where it was delivered. The same shape as a Heartbeat is ignored.
+- **Duplicates** (I-3, E-1): `34=99|35=D|34=2|9x9=1` at expected 2 is D-6 (the Reject is addressed
+  from `fault_ref_seq_num`, 99). A fault-free NewOrderSingle `34=1|…|34=5` at expected 5 is
+  delivered, as today (last-wins kept).
 - **MaxMessageSize** (C-1 step 1b): an oversized faulty frame in Active ends in Disconnected.
 - **Liveness** (FR-018): a D-5 frame in Active refreshes inbound liveness, and a D-7 frame does not.
 - **372 bound** (R-5): a faulty frame with an over-long MsgType draws a Reject without 372, and the
@@ -69,23 +69,22 @@ Expected after the change:
 - **Reject-loop bound** (contract C-2): a scripted peer answers each fixpp Reject with a malformed
   Reject. The number of fixpp Rejects equals the number of malformed frames the peer sent, and
   fixpp originates none in reply to a well-formed Reject.
-- **Residual sites** (C-2b, SC-008): one cell per inbound parse site, with a well-formed frame above
-  the measured ceiling. Each asserts:
-  - 373=3 and no 371;
-  - persist before Reject at the post-Guard-4 sites;
-  - no handler effect (no Heartbeat, no Logout reply, no NewSeqNo applied);
-  - refusal at the pre-Active validate gates.
-
-  The knob-off GapFill cell asserts the recorded deviation (+1 kept, NewSeqNo not applied).
-- **Masking and replay** (R-12): a stored frame with a fault after its 35 still classifies as it
-  did.
+- **Late sites** (C-6, SC-008): one cell per late inbound parse site that contract C-6's command
+  derives, with a well-formed frame above the measured ceiling. Each asserts that the session
+  closes, no Reject is sent and the callback is not invoked. It goes RED when that site's close is
+  deleted. No cell asserts that an effect taken before the site's parse (for example the Logout
+  reply) is absent.
+- **Replay** (R-12): an **admin** frame with a fault in field 2, stored through a custom
+  MessageStore, is gap-filled on resend and not resent. RED against stop-first without the guard.
+- **C mapping for a tag above 0xFFFF** (data-model E-6, R2-008): `translate` gives
+  `FIXPP_ERR_WIRE_LIMIT_EXCEEDED` for `OffsetTable::build`'s `wire_tag_out_of_range`, and
+  `FIXPP_ERR_WIRE_INVALID_FRAME` for the validator's `wire_invalid_tag_number` on the same bytes.
 - **Disclosed outcomes** (C-5):
   - **L-1**: a replaying peer and a deterministically malformed frame faulty before 34. The observed
     resend loop is pinned.
   - **L-2**: a faulty GapFill during AwaitingResend. The disconnect sequence is pinned.
-  - **L-3**: a well-formed Heartbeat above the ceiling, in Active. It is processed with no
-    Application registered, and Rejected with 373=3 with one.
   - **L-4**: a malformed 93/89 pair draws 373=5.
+  - **L-6**: covered by the late-site cells above.
 - **C-ABI** (FR-017, SC-004, SC-009):
   - the `tests/capi` malformed-tag Logon refusal on every observer, both roles;
   - `version_test.cpp` at 1.10.
@@ -95,10 +94,11 @@ Expected after the change:
 - **Differential** (C-3 I-4): run the scan-vs-`OffsetTable` mutation corpus and its accepted
   controls. Every seed is asserted clean before mutation. Then, in a scratch copy, seed one
   disagreement **per mutation family** (non-digit, overflow, empty tag, no `=`, non-SOH,
-  end-equals-size, first-wins) and confirm that family goes RED.
+  end-equals-size, the `fault_ref_seq_num` first-34 selection) and confirm that family goes RED.
+  Header values are compared against `entries()`, never `find(34)`.
 - **Mechanism deletion** (SC-006): in a scratch copy, delete the inline fault branch in one state arm
-  and confirm that arm's cells go RED. Repeat with the residual path also deleted, so a cell kept
-  green by a residual Reject is exposed.
+  and confirm that arm's cells go RED. Repeat with the late-site close (C-6) also deleted, so a
+  refusal cell kept green by a late-site close is exposed.
 - **Fuzz**: `fuzz_session_recovery_admin_parse` with the equivalence arm, for the Article VII §7 time
   (≥ 10 min). Report the skipped-resource-status count. Plant a disagreement once to prove the trap
   fires.

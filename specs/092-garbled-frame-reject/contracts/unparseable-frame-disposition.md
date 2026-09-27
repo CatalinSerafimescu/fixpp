@@ -5,14 +5,17 @@ and from quickstart §1's cell list). Definitions:
 - **Fault** is the header scan's first-fault record (data-model.md E-1).
 - **Read** means read from well-formed bytes before the fault.
 - **Field 3 is 35** is `hdr.msg_type_is_third`.
-- **34 read** is `parse_seqnum(first 34) > 0` (E-1).
-- **Disregard** means no Reject, no advance, no disconnect (owner ruling rows 1 and 5).
+- **34 read** is `parse_seqnum(hdr.fault_ref_seq_num) > 0` (E-1).
+- **35 value** is `hdr.fault_ref_msg_type` (E-1), never the last-wins `hdr.msg_type`.
+- **Disregard** means no Reject, no advance, no disconnect. 092 applies it only to scan-faulty frames
+  (owner ruling row 1 for criterion 3, row 5), never to a Framer failure (C-1 step 1).
 
 ## C-1 — Decision order
 
 In every `on_inbound_frame` path:
 
-1. The Framer (unchanged). A §4.5.2 framing failure it detects is disregarded (FR-008).
+1. The Framer (unchanged). A §4.5.2 framing failure it detects ends the session, as today
+   (`L-004-4`; FR-008). Its disregard is fixpp#514.
    - **1b.** In Active only, the negotiated MaxMessageSize(383) guard runs **before** the state
      switch (unchanged). It reads only `frame.size()`, which the Framer validated through
      BodyLength, and no field of the frame, so it does not violate FR-001. An oversized frame is
@@ -23,8 +26,8 @@ In every `on_inbound_frame` path:
    the arm returns. No later step runs. The fault-free path takes one inline compare (E-2).
 4. Everything else is unchanged: the validate gate, Guard 2 (identity), Guard 3 (SendingTime), the
    SequenceReset Reset arm, Guard 4 (seqnum class), handlers and dispatch.
-   - A parse inside step 4 can still fail on a frame the scan found fault-free (a **residual**
-     failure). That is C-2b.
+   - A parse inside step 4 can still fail on a frame the scan found fault-free (a **late parse
+     failure**). That is C-6: the session closes.
 
 ## C-2 — Disposition of a faulty frame (the rows are evaluated top to bottom)
 
@@ -42,17 +45,21 @@ In every `on_inbound_frame` path:
 
 - **When field 3 is itself the faulting field**, field 3 is not 35, so D-8 applies in
   LogonReceived/Active.
-- **Pre-Active, D-1/D-2 refuse whatever field 3 is.** Clarification Q3 ("whatever its MsgType")
-  governs there, and disregarding would leave the connection open with nothing to end it:
-  - `run_read_pump` (`src/session/engine.cpp`) reads until EOF;
-  - the liveness loop starts only on the first transition to Active;
-  - the acceptor's only deadline, `kFirstFrameDeadline`, bounds reading the first frame before
-    `on_inbound_frame` runs;
-  - no logon-reply timer exists for LogonSent.
+- **Pre-Active, D-1/D-2 refuse whatever field 3 is: today's handling, kept** (owner ruling O-1).
+  Both pre-Active arms already refuse every input that is not a valid Logon:
+  - the NotConnected arm of `Session::on_inbound_frame`: its comment "No MsgType discrimination:
+    every refusal on this row lands in Disconnected";
+  - the LogonSent arm: its refusal of "Heartbeat/TestRequest/Reject/out-of-scope admin / invalid
+    MsgType" inbound.
 
-  Re-derive with `grep -n -i "timeout\|deadline" src/session/engine.cpp` and
-  `grep -n "run_liveness_loop" src/session/session.cpp`. A fault-free frame whose field 3 is not 35
-  is out of scope (research R-11). LogoutSent disregards (D-9) because its logout timeout ends the
+  Re-derive with `grep -n "No MsgType discrimination\|out-of-scope admin" src/session/session.cpp`.
+  Every Framer failure pre-Active is session-fatal too (`L-004-4`). A pre-Active disregard of a
+  frame whose field 3 is not 35 is **fixpp#514**. It needs an establishment timeout: the liveness
+  loop starts only on the first transition to Active, `kFirstFrameDeadline` bounds only the first
+  read, and LogonSent has no logon-reply timer (re-derive with
+  `grep -n -i "timeout\|deadline" src/session/engine.cpp` and
+  `grep -n "run_liveness_loop" src/session/session.cpp`). A fault-free frame whose field 3 is not
+  35 is also #514 (research R-11). LogoutSent disregards (D-9) because its logout timeout ends the
   session.
 - **"Any other" includes 3 (Reject) and 5 (Logout).** For a faulty frame this supersedes the
   published no-reject-loop exemption (below).
@@ -66,8 +73,8 @@ In every `on_inbound_frame` path:
   refreshes nothing today and still does not.
 
 **Reject contents (D-4, D-5, D-6):**
-- 45 = the MsgSeqNum read.
-- 372 = the MsgType read, omitted when it is longer than the longest MsgType any shipped dictionary
+- 45 = the MsgSeqNum read (`fault_ref_seq_num`).
+- 372 = the MsgType read (`fault_ref_msg_type`), omitted when it is longer than the longest MsgType any shipped dictionary
   defines. That bound is derived from `dictionaries/*.xml` by a test, not written as a number
   (research R-5). A peer-controlled 372 therefore cannot overflow the Reject's 512-byte buffer and
   leave the number consumed with no Reject sent.
@@ -87,43 +94,6 @@ malformed Reject (35=3) or Logout (35=5) is Rejected under D-5/D-6.
 peer that both garbles every Reject it sends and rejects Rejects, and even then each fixpp Reject
 answers one peer frame. The bound cell is quickstart §1 "reject-loop bound".
 
-## C-2b — Residual parse failure (the scan found no fault, a later parse failed)
-
-Causes: a resource failure (`wire_offset_table_full`; arena exhaustion surfacing as `out_of_memory`
-from the 16 KiB stack arena, whose upstream is `null_memory_resource()` on every non-MSVC-debug
-build; a Framer re-feed failure) or an I-4 disagreement. The frame is fault-free per the scan, so
-field 3 and 34 are as the scan read them.
-
-The same rows apply, with a single residual reason:
-- **373 = 3, 371 omitted**, and 58 names the local cause.
-- 3 is inside every supported profile's SessionRejectReason domain. It is the existing fail-closed
-  catch-all of `wire_error_to_session_reject_reason`, and it differs from 0 and 5, so a residual
-  Reject is distinguishable from a C-2 Reject.
-- 99 is rejected: it is outside FIX.4.2's domain.
-
-Each site is terminal (E-3). The per-site action depends on whether `check_inbound` already ran:
-
-| Site (enclosing branch) | `check_inbound` already ran? | Action |
-|---|---|---|
-| validate gate, NotConnected arm | no | Logon refusal (as D-1) |
-| validate gate, LogonSent arm | no | Logon refusal (as D-2) |
-| validate gate, LogonReceived/Active arm | no | the C-2 row for (field 3, 34, 35): D-3, D-4, D-5 (`consume_rejected_seqnum_` then Reject), D-6, or D-7/D-8 |
-| SequenceReset-Reset `fromAdmin` (Application registered) | no (before Guard 4) | Reject; no advance; NewSeqNo not applied |
-| too-low PossDup redeliver (`redeliver_poss_dup` and an Application) | yes, refused | Reject; no advance |
-| `validate_sequence_numbers` off, out-of-sequence deliver | yes, refused | Reject; no advance |
-| `validate_sequence_numbers` off, GapFill `fromAdmin` | yes, **advanced** | `persist_inbound_advance_`, then Reject; NewSeqNo not applied (knob-off never applies it). The +1 is kept: research R-4 records this deviation and why |
-| Logout `fromAdmin` (Application registered) | yes, advanced | `persist_inbound_advance_`, then Reject; the Logout handler does not run (no reply, no disconnect) |
-| generic admin `fromAdmin` (Active, Application registered) | yes, advanced | `persist_inbound_advance_`, then Reject; the Heartbeat, TestRequest and ResendRequest handlers do not run |
-| `fromApp` | yes, advanced | `persist_inbound_advance_`, then Reject; no BusinessMessageReject; the fall-through persist does not run twice |
-
-Where `check_inbound` already advanced the counter, `consume_rejected_seqnum_` would call it again,
-be refused, and persist nothing. Those sites therefore persist directly, as the existing
-callback-reject path already does.
-
-Frames that never parse have no parse to fail, so C-2b cannot fire on them. Only I-4 guards them.
-The population is in research R-4, and whether it parses depends on the Application registration
-and the validation knob (C-5 L-3).
-
 ## C-3 — Invariants (each a test)
 
 - **I-1** On a faulty frame, no handler reads any `hdr` field other than 34, 35 and
@@ -135,18 +105,18 @@ and the validation knob (C-5 L-3).
   - no Logout reply for a faulty Logout.
 - **I-2** An application frame with a fault never reaches the application callback, and is never
   persisted as received without a Reject.
-- **I-3** A fault-free frame is dispositioned exactly as before this feature, except a frame
-  carrying a second 34 or 35, whose scan now selects the first occurrence (E-1). The regression
-  suite, a duplicate-34 cell and the paired bench cover it.
+- **I-3** A fault-free frame is dispositioned exactly as before this feature, byte for byte: the
+  scan keeps last-wins for every existing member (E-1). The regression suite, a duplicate-34 cell and
+  the paired bench cover it.
 - **I-4** Scan fault ⇔ `OffsetTable::build` encoding failure, under the session's hooks and under
-  `dict_hooks::none()`. For a fault-free frame, the scan's first 34 equals `OffsetTable::find(34)`,
-  and `msg_type_is_third` equals "the third `entries()` element has tag 35" (research R-2).
-- **I-5** A residual parse failure is never "success" or "no reject": it takes its C-2b row and is
-  terminal.
-- **I-6** Behaviour is identical with inbound validation on and off, with `validate_sequence_numbers`
-  on and off, on FIX.4.2, FIX.4.4 and FIXT.1.1, and as acceptor and initiator (FR-011). This is
-  true for C-2. C-2b's reachability depends on the Application registration and the validation
-  knob (C-5 L-3).
+  `dict_hooks::none()`. For a fault-free frame, `fault_ref_seq_num` equals the value of the first
+  `entries()` element with tag 34, and `msg_type_is_third` equals "the third `entries()` element has
+  tag 35" (research R-2). The oracle is `entries()`, never `find(34)`: the overlay can leave an
+  occurrence unindexed while the build succeeds.
+- **I-5** A late parse failure is never "success" or "no reject": the session closes (C-6).
+- **I-6** The C-2 disposition is identical with inbound validation on and off, with
+  `validate_sequence_numbers` on and off, on FIX.4.2, FIX.4.4 and FIXT.1.1, and as acceptor and
+  initiator (FR-011).
 
 ## C-4 — Public surface deltas
 
@@ -167,7 +137,7 @@ and the validation knob (C-5 L-3).
 **C-ABI 1.10, BREAKING (`[const §X.7]`; owner ruling 2026-09-27, FR-017):**
 - No symbol, signature or error code is added.
 - What changes is which inbound Logons are accepted, plus D-3's disconnect of an established
-  session. Both are observed through the calls FR-020 of 091 named: `fixpp_session_is_established`,
+  session, plus C-6's close on a late parse failure at a dispatch site. Both are observed through the calls FR-020 of 091 named: `fixpp_session_is_established`,
   `fixpp_session_close`, `fixpp_session_send`, `fixpp_session_register_callback` and
   `fixpp_session_register_send_callback`.
 - The population is re-derived with 091's recipe (research R-8). The carriers and the procedure are
@@ -188,14 +158,41 @@ and the validation knob (C-5 L-3).
   5. After reconnect the same GapFill is replayed.
 
   The cell pins the outcome.
-- **L-3: the residual path depends on which paths parse.** A well-formed frame beyond the parse
-  arena's field ceiling fails the parse only on a path that parses. It is Rejected with 373=3
-  (C-2b) where it is parsed. It is processed normally where it is not: for example a Heartbeat with
-  no Application registered, or in LogonReceived, where the generic `fromAdmin` dispatch is
-  Active-only. The ceiling is measured (research R-4), not written down from a derivation.
 - **L-4: TC2020 Scenario 17d is not followed.** A malformed SignatureLength(93)/Signature(89) pair
   gets 373=5 (the owner ruling's Length+Data code), not 17d's 8 (Signature problem).
-- **L-5: a duplicate MsgSeqNum is read first-wins, on every frame.** A fault-free frame carrying two
-  34s is sequenced on the first, as the full parse indexes it, where it was sequenced on the last.
-  A frame whose first 34 is below the expected number and whose last 34 equals it is now too-low
-  and disconnected (a too-low Heartbeat is still ignored). The cell pins that outcome.
+- **L-6: a late parse failure closes the session (C-6).** A well-formed frame that exhausts the
+  parse arena, silently consumed today, now ends the session. The cell pins it per late site.
+
+(L-3 and L-5 were deleted in Gate A round 2, and the numbers are not reused.)
+
+## C-6 — Late parse failure: fail-closed (owner ruling O-2)
+
+A **late** parse site is an inbound parse that runs after step 3 (C-1), so it only ever sees a frame
+the scan found fault-free. A parse failure there is a resource failure (the arena or the
+offset-table cap, reachable with a large well-formed frame) or an I-4 breach. A Framer re-feed
+failure is not a cause: each re-feed is one exact frame into an empty default-constructed Framer.
+Re-derive with `grep -n "wire::Framer " src/session/session.cpp src/session/engine.cpp` and read
+each construction and its single `feed`.
+
+**Population.** `grep -n "parse_and_dispatch_(\|validate_inbound_(" src/session/session.cpp`. Read
+each call and classify it by the provenance of the bytes it parses: bytes received from the peer
+are a late inbound site; a frame fixpp built (the outbound admin and toApp sites, whatever arena they
+use) is not. The validate gate in every state arm is in the population.
+
+**One action at every late inbound site:** `close(close_mode::terminal)`, no Reject, the callback not
+invoked, and the frame never read as success or "no reject". Where the call's result is not bound
+today, it is bound. There is no per-site table.
+- At a pre-Active validate gate the close ends the connection as a refusal does, so SC-006's
+  deletion proof also runs with this close deleted. `Session::close` is keyed on the session's
+  lifecycle, not on its FSM state, so it acts pre-Active: `Session::open` already calls it before
+  any Logon, on an `onCreate` throw (re-derive with
+  `grep -n "close(fixpp::session::close_mode::terminal)" src/session/session.cpp`).
+- **Effects already taken are not undone.** Depending on the site, Guards 2 and 3, the Guard 4
+  advance, the resend-gap close, the liveness refresh, or the Logout handler's confirming Logout
+  (sent before its `fromAdmin` parse) have run. The close guarantees only that the frame is not
+  treated as delivered and the session does not continue. Moving the decision ahead of them is
+  fixpp#515.
+- **Disclosed cost** (C-5 L-6): a well-formed frame that exhausts the arena, silently consumed
+  today, now ends the session. Whether a reconnect re-requests the frame depends on whether the
+  site's advance was persisted before the close; each late-site cell pins the observed outcome.
+  It is a fail-closed change, classified under research R-8's recipe.

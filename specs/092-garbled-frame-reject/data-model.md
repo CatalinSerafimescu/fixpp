@@ -2,7 +2,8 @@
 
 Terms (spec.md "Terminology"): a **framed but unparseable** frame passes the Framer and fails the
 full parse; **garbled** is reserved for the FIX-SL 2020 §4.5.2 framing criteria; **disregard** is the
-named disposition "no Reject, no advance, no disconnect" (owner ruling rows 1 and 5).
+named disposition "no Reject, no advance, no disconnect", applied by 092 only to scan-faulty frames
+(contract C-2). A Framer failure stays session-fatal (`L-004-4`; its disregard is fixpp#514).
 
 ## E-0 — `field_fault` (public, additive, `include/fixpp/wire/tag_scan.hpp`)
 
@@ -38,12 +39,14 @@ New members, appended to the existing struct:
 | `fault_length_tag` | `std::uint16_t` | for `length_data_mismatch`, the tag of the field immediately before the faulting Data field (the Length that armed the carry: `length_data_carry::read_value` arms only from the previous field); else 0 |
 | `fault_offset` | `std::uint32_t` | byte offset of the faulting field's first byte. **Instrument only**: the differential corpus (research R-2) asserts it against the planted mutation. It is never emitted (the Reject Text is fixed, R-5) and never logged (there is no session logger, R-4) |
 | `msg_type_is_third` | `bool` | the third field of the frame is well-formed and its tag is 35. False when the third field is itself the faulting field, or when the scan faults before reaching it |
+| `fault_ref_seq_num` | `std::string_view` | the **first** well-formed 34 the scan meets, written once on first sight. Contract C-2 reads it only when `fault != none` |
+| `fault_ref_msg_type` | `std::string_view` | the third field's value when `msg_type_is_third` is true; else empty. Contract C-2 reads it only when `fault != none` |
 
-**Changed member semantics** (research R-1):
-- `msg_seq_num` becomes **first-wins**: the first well-formed 34 is kept and later ones are ignored,
-  as `OffsetTable` keeps the first occurrence. Today it is last-wins.
-- `msg_type` becomes **first-wins** for the same reason. When `msg_type_is_third` is true, it is
-  the third field's value.
+**Existing members keep today's semantics** (research R-1): `msg_seq_num` and `msg_type` stay
+last-wins, so a fault-free frame is scanned byte for byte as today (contract C-3 I-3). The two
+`fault_ref_*` members answer a different question, "which 34 and 35 address the Reject of a frame
+that has no parse", and only the disposition reads them. They are also written on fault-free frames,
+because the differential instrument compares them there (C-3 I-4).
 
 **Fault kinds, and which scan branch sets each:**
 - `malformed_tag`: the tag-digit loop sees a non-digit byte or `accumulate_tag_digit` refuses (tag
@@ -56,12 +59,11 @@ New members, appended to the existing struct:
 **Rules:**
 - On the first fault the scan returns immediately. Every member not yet assigned stays empty, so a
   field "read before the fault" is exactly a non-empty member.
-- **"34 read"** (used by contract C-2) means `parse_seqnum(msg_seq_num) > 0`: the first 34 lies
-  wholly before the fault and is a positive integer. A `34=abc` or `34=0` before the fault is not
-  "read" (D-7).
-- A frame with no fault leaves `fault == none`. Every member other than `msg_seq_num` and
-  `msg_type` is populated exactly as today. Those two differ from today only on a frame that
-  carries a second 34 or 35 (C-3 I-3's carve-out).
+- **"34 read"** (used by contract C-2) means `parse_seqnum(fault_ref_seq_num) > 0`: the first 34
+  lies wholly before the fault and is a positive integer. A `34=abc` or `34=0` before the fault is
+  not "read" (D-7).
+- A frame with no fault leaves `fault == none`, and every pre-existing member is populated exactly
+  as today.
 - `sizeof(FrameHeader)` grows. Size pins can live in `tests/` too: before changing it, run
   `git grep -n "sizeof(FrameHeader)\|sizeof(fixpp::session::detail::FrameHeader)\|FrameHeader) ==" -- src tests bench`.
 
@@ -79,7 +81,7 @@ New members, appended to the existing struct:
   block, so the arm scans once per frame, as today on the accept path (R-3).
 - The mapping from (state, `hdr`) to action is contract C-2.
 
-## E-3 — Dispatch result and residual parse failure (private)
+## E-3 — Dispatch result and late parse failure (private)
 
 `parse_and_dispatch_` returns `core::expected_t<void>` today, and a parse failure returns success.
 It gains a distinct way to say "the parse failed and the callback did not run": a private result
@@ -87,10 +89,10 @@ enum, or a private sentinel `core::error` that never leaves the session. `valida
 `std::optional<RejectDecision>` today, and a parse failure returns `nullopt`, which its callers read
 as "no reject". It gains a third outcome, "parse failed".
 
-Every inbound call site of either treats "parse failed" as **terminal**: it applies contract C-2b's
-row for that site and returns, so no handler, state change or later guard acts on the frame. The
-outbound call sites (`fire_to_admin_` and the two toApp sites) are unchanged, because they parse
-fixpp's own frames. The site population and its derivation are in research R-4.
+Every late inbound call site of either treats "parse failed" as **terminal**: it closes the
+session (`close(close_mode::terminal)`), sends no Reject and returns (contract C-6). There is one
+action, not a per-site table. The call sites that parse a frame fixpp built are unchanged. The site
+population and its derivation are in contract C-6 and research R-4.
 
 ## E-4 — Field-iterator fault record (public, additive, `include/fixpp/wire/parser.hpp`)
 
@@ -148,11 +150,14 @@ tolerant in what they yield, and they now report.
 
 - **Slots.** They are appended at the next contiguous slots after `app_payload_malformed = 131`, per
   `[const §X.4]` append-only, with explicit values.
-- **C mapping.** Both map to the C code `wire_invalid_field_format` already maps to, so the same
-  malformed bytes give one C code whichever C++ layer detects them. No C code is added, so
-  `introducing_minor` and `tools/abi_history/error_codes_v1.txt` are untouched. The mapping exists
-  for the total switch only: `git grep -n "dictionary_driven_validator\|validator_->validate\|\.validate(" -- src/capi`
-  finds no C-ABI caller of the validator.
+- **C mapping.** Both map to the C code `wire_invalid_field_format` already maps to. No C code is
+  added, so `introducing_minor` and `tools/abi_history/error_codes_v1.txt` are untouched. The
+  mapping exists for the total switch only:
+  `git grep -n "dictionary_driven_validator\|validator_->validate\|\.validate(" -- src/capi` finds no
+  C-ABI caller of the validator. The mapping is **not** layer-independent: a tag above 0xFFFF is
+  `wire_tag_out_of_range` from `OffsetTable::build` (→ `FIXPP_ERR_WIRE_LIMIT_EXCEEDED`) and
+  `wire_invalid_tag_number` from the validator (→ `FIXPP_ERR_WIRE_INVALID_FRAME`). One cell pins
+  both mappings for an over-0xFFFF tag (quickstart §1).
 - **Returned only by** `dictionary_driven_validator::validate` (E-5). `OffsetTable::build`'s codes
   are unchanged.
 - **Every pin that enumerates or bounds the error set moves with them.** The population and its

@@ -2,7 +2,7 @@
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning
 **Created**: 2026-09-27
-**Updated**: 2026-09-27 (Gate A round 1 rewrite)
+**Updated**: 2026-09-27 (Gate A round 2 rewrite)
 **Feature**: [spec.md](../spec.md)
 
 ## Content Quality
@@ -20,7 +20,7 @@
 - [x] Success criteria are technology-agnostic (no implementation details) — except SC-009 (the C-ABI version pin), which is the owner-ruled declaration itself
 - [x] All acceptance scenarios are defined
 - [x] Edge cases are identified
-- [x] Scope is clearly bounded
+- [x] Scope is clearly bounded — fixpp#514 and fixpp#515 are named out of scope (spec.md Assumptions)
 - [x] Dependencies and assumptions identified
 
 ## Feature Readiness
@@ -44,7 +44,10 @@
   wire parser). It is done. Session 2026-09-27 answered the reason code (FR-007), the wrong-CompID
   case (FR-002) and the pre-Active disposition (FR-009, FR-015), and nothing from it remains open.
   Gate A round 1 added two owner rulings (spec.md "Session 2026-09-27 (Gate A round 1)"): C-ABI 1.10
-  BREAKING (FR-017), and FR-012 kept and fully specified.
-- **Gate A** is required (Art. XVII §1: parser, session FSM, public C++ API and C ABI). Round 1 is
-  applied. Its status and the recorded disagreements are in plan.md §Gate A. The former open item
+  BREAKING (FR-017), and FR-012 kept and fully specified. Gate A round 2 added two more (spec.md
+  "Session 2026-09-27 (Gate A round 2)"): O-1, a Framer failure stays session-fatal and its
+  disregard is fixpp#514 (FR-008, FR-009); O-2, a late parse failure is fail-closed and the resource
+  case is fixpp#515 (FR-016).
+- **Gate A** is required (Art. XVII §1: parser, session FSM, public C++ API and C ABI). Rounds 1
+  and 2 are applied. Its status and the recorded disagreements are in plan.md §Gate A. The former open item
   A-4 (whether a C-ABI version note is needed) is resolved by the owner ruling.

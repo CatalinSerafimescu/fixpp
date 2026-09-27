@@ -16,7 +16,9 @@ record and header identification of data-model.md E-1.
 - It records the kind (`fixpp::wire::field_fault`, E-0), the Length tag for a
   `length_data_mismatch`, and the fault offset (for instruments only).
 - It records whether the **third field is a well-formed 35** (`msg_type_is_third`).
-- It keeps the **first** 34 and the first 35 instead of the last.
+- It records, in the fault record only, the **first** well-formed 34 (`fault_ref_seq_num`) and the
+  third field's 35 value (`fault_ref_msg_type`). The existing `msg_seq_num` and `msg_type` stay
+  last-wins, unchanged.
 
 **Rationale.**
 - The scan already walks every field of every inbound frame, with **the same dictionary hooks as the
@@ -35,17 +37,13 @@ record and header identification of data-model.md E-1.
     whose field 3 is not 35 to D-8 (disregard). The remaining rows then condition on 34 alone, as
     the ruling words them. Before Active, clarification Q3's refusal applies whatever field 3 is
     (contract C-2).
-- **First-wins.** `OffsetTable` keeps the first occurrence of a tag (its overlay insert skips a
-  duplicate), while the scan is last-wins today. The disposition addresses the Reject and advances
-  on 34, so it must select the same 34 the parse would. Otherwise `34=99|35=D|34=2|9x9=1` could be
-  advanced at 2. The change is scan-wide, so it also changes a fault-free frame that carries a
-  second 34 or 35. That is I-3's one carve-out, pinned by a cell. It is observable: a frame whose
-  first 34 is below the expected number and whose last 34 equals it is now too-low and
-  disconnected, where it was processed. R-8 classifies that for the C ABI, and contract C-5 L-5
-  discloses it. Both candidate values come from
-  the same authenticated peer, so no trust boundary is crossed either way. This aligns a divergence
-  that already existed for every duplicated header field.
-- **"34 read" is `parse_seqnum(first 34) > 0`.** `34=abc` is non-empty but `parse_seqnum` returns 0
+- **The Reject's 34 comes from the fault record, not from `msg_seq_num` (Gate A round 2, root
+  cause C).** `OffsetTable` keeps the first occurrence of a tag (its overlay insert skips a
+  duplicate), and the Reject must not be addressed from a later 34, or `34=99|35=D|34=2|9x9=1` could
+  be advanced at 2. But a faulty frame has no parse, so there is no "parser's 34" to agree with; the
+  need exists only on faulty frames. So the first 34 is recorded in `fault_ref_seq_num`, read only
+  when `fault != none`, and every clean frame is scanned exactly as today.
+- **"34 read" is `parse_seqnum(fault_ref_seq_num) > 0`.** `34=abc` is non-empty but `parse_seqnum` returns 0
   for it. A Reject with 45=0 would be meaningless, and the fault-free twin is disconnected by
   Guard 4's `seq == 0` check. So a non-numeric or zero 34 is "not read" (D-7).
 - **The header is private** (`src/session/`). Its only public dependency is the shared enum E-0.
@@ -57,15 +55,24 @@ record and header identification of data-model.md E-1.
   (`[const §VIII.5]`), and it would add a full parse on paths that do not parse today (R-4).
 - *Keep the scan skipping a malformed tag and only record that one occurred.* The fields after it
   would then be populated, which FR-001 forbids reading.
-- *Keep last-wins and add a separate first-34 member used only by the disposition.* It would give
-  two answers for "the frame's MsgSeqNum" inside one struct: the defect class #426 removed.
+- *Make the whole scan first-wins* (the round-1 decision, reverted in round 2). It changed fault-free
+  frames: `34=1|…|34=5` at expected 5 went from delivered to too-low and disconnected. That is an
+  unruled BREAKING candidate for a need that exists only on faulty frames.
+- *Detect a duplicate 34 as a fault, or send it to the disregard row.* The first changes clean
+  frames again; the second reinterprets ruling row 5 ("34 was NOT scanned").
+- (Round 1 rejected the adopted shape, a separate first-34 member, as "two answers for the frame's
+  MsgSeqNum". That objection does not apply: the fault-record member answers a different question,
+  and nothing reads it on a clean frame.)
 
 ## R-2 — The scan and the full parse must agree on what a fault is (C-3 I-4)
 
 **Decision.** The scan's fault set equals the `OffsetTable::build` encoding-failure set (data-model
 E-0 gives the derivation). Resource failures are excluded: `wire_offset_table_full` and
-`out_of_memory`. For a fault-free frame, the scan's first 34 and `msg_type_is_third` also equal what
-`OffsetTable` indexes. Three instruments enforce this.
+`out_of_memory`. For a fault-free frame, `fault_ref_seq_num` equals the value of the first `entries()`
+element with tag 34, and `msg_type_is_third` equals "the third `entries()` element has tag 35". The
+oracle is `entries()`, not `find(34)`: once an insert reaches `kMaxBuildProbe`
+(`src/wire/offset_table.cpp`), the overlay leaves the occurrence unindexed while the build still
+succeeds. Three instruments enforce this.
 
 1. **A differential unit test over a mutation corpus.**
    - **Seeds.** Well-formed frames for every admin MsgType the session handles and one application
@@ -95,28 +102,30 @@ E-0 gives the derivation). Resource failures are excluded: `wire_offset_table_fu
      - a Length tag as the last field before the trailer, with no Data after it;
      - an unrelated tag after a Length, which discards the pending pair;
      - the standard static pairs under `dict_hooks::none()`;
-     - a duplicate 34 and a duplicate 35 (first-wins agreement);
+     - a duplicate 34 and a duplicate 35 (`fault_ref_seq_num` equals the first `entries()` 34;
+       `msg_seq_num` and `msg_type` still equal today's last-wins values);
      - a fault-free frame whose third field is not 35 (`msg_type_is_third` false on both sides).
    - **Proof that it can fail, per mutation family.** In a scratch copy, seed one disagreement per
      family and watch that family go RED. The families are: the non-digit check, the overflow
      check, the empty-tag check, the no-`=` check, the non-SOH check, the end-equals-size check,
-     and first-wins. One planted disagreement does not prove the others can fail.
+     and the `fault_ref_seq_num` first-34 selection. One planted disagreement does not prove the
+     others can fail.
 2. **A fuzz assertion** in `tests/fuzz/fuzz_session_recovery_admin_parse.cpp`. The harness today
    builds a whole `Session` over a FIX.4.2 minimal dictionary and has no dictionary-only pair. The
    092 arm:
    - calls `scan_frame_header` and `OffsetTable::build` directly on each input, under both hook
      sets, with a dictionary that declares a dictionary-only pair;
-   - traps (`__builtin_trap`) on any encoding disagreement and on a first-34 or third-field
-     disagreement for a fault-free input;
+   - traps (`__builtin_trap`) on any encoding disagreement and, for a fault-free input, on a
+     `fault_ref_seq_num` or third-field disagreement with `entries()`;
    - skips **only** inputs whose `OffsetTable` status is `wire_offset_table_full` or
      `out_of_memory`, and counts them, so a fuzz run that skipped everything is visible;
    - is proven by one planted disagreement.
 
    Caveat #508: the fuzzers do not yet get coverage feedback from library code, so this arm is a
    backstop, not proof.
-3. **The residual path (R-4)** makes any disagreement that survives both a terminal Reject with
-   373=3, never "success". It is the last line. It cannot see a disagreement on a path that never
-   parses (R-4 table), so the first two instruments are the only guard there.
+3. **The late-site close (R-4, contract C-6)** turns any disagreement that survives both into a
+   terminal close, never "success". It is the last line. It cannot see a disagreement on a path
+   that never parses (R-4), so the first two instruments are the only guard there.
 
 **Rationale.** Two Length+Data readers exist: `wire::length_data_carry::read_value` (used by the
 scan) and the inline carry in `OffsetTable::build`. Two copies of one rule is the defect class #426
@@ -152,16 +161,13 @@ validate gate and Guards 2–5 (contract C-1).
   that reason ("the PASS path … is coroutine-frame-free and alloc-free"), and `[const §VIII.5]`
   forbids heap work between parse and callback.
 
-## R-4 — A residual parse failure is never "success" or "no reject" (C-2b; FR-016)
+## R-4 — A late parse failure is never "success": the session closes (contract C-6; FR-016)
 
-**Decision.** Owner ruling row 6 is read at face value: *any* parse failure, encoding or resource,
-is never acted on. A parse can still fail on a frame the scan found fault-free:
-- by a resource failure, which is **peer-reachable with a well-formed frame** (below);
-- by a Framer re-feed failure;
-- by an I-4 disagreement.
-
-Each such failure takes the same contract rows, keyed on the scan's field 3 and 34 (C-2b), with
-373=3. It is terminal at every inbound site.
+**Decision (owner ruling O-2).** After step 3 (contract C-1), an inbound parse only ever sees a frame
+the scan found fault-free. A failure there is a resource failure or an I-4 breach. Every late
+inbound site takes one action: `close(close_mode::terminal)`, no Reject, no callback. There is no
+per-site Reject table and no residual reason code. The proper disposition of a resource failure is
+fixpp#515.
 
 **Resource failures are live traffic, not a backstop.** Both inbound parse sites use a stack arena
 whose upstream is `std::pmr::null_memory_resource()` on every non-MSVC-debug build
@@ -170,68 +176,34 @@ its entries in that arena. `tests/session/test_066_arena_fit_test.cpp` states th
 overflow would surface as a parse failure, not a silent heap spill". The Framer admits frames far
 larger than the arena can index, so a legitimate large message fails the parse. Today such an
 application message is persisted, consumed and silently lost: #507's symptom by another trigger.
-- **The ceiling is measured, not derived.** Task: find the smallest field count of a well-formed
-  NewOrderSingle that fails `Parser<Index>::parse` in `kInboundParseArena`, on the Linux release
-  and debug presets. Record it with the SHA in the B&L row (C-5 L-3). The cells use a real
-  well-formed frame above it, so they need no test hook.
+After 092 it closes the session: fail-closed, disclosed (contract C-5 L-6) and classified for the C
+ABI (R-8).
+- **The ceiling is measured, not derived**, only to build the late-site cells: the smallest field
+  count of a well-formed frame that fails `Parser<Index>::parse` in `kInboundParseArena` on the Linux
+  presets the cells run on, recorded with the SHA. The per-lane measurement and the cap belong to
+  #515.
 
-**Population (derive, do not copy).**
-- `grep -n "parse_and_dispatch_(\|validate_inbound_(" src/session/session.cpp` lists every parse
-  site. Read each call's enclosing branch and whether `check_inbound` ran before it.
-- `parse_and_dispatch_`'s call sites split into three groups:
-  - **inbound**: SequenceReset-Reset `fromAdmin`, too-low PossDup redeliver, knob-off deliver,
-    knob-off GapFill, Logout `fromAdmin`, generic admin `fromAdmin`, `fromApp`;
-  - **outbound**: `fire_to_admin_`, the toApp of a BusinessMessageReject, and the toApp in the send
-    path;
-  - **validate gate**: `validate_inbound_` in the NotConnected, LogonSent and LogonReceived/Active
-    arms.
-- The inbound sites and their rows are contract C-2b. The outbound sites parse fixpp's own frames
-  and are unchanged.
+**Population (derive, do not copy).** Contract C-6 gives the command and the classification rule:
+every `parse_and_dispatch_` or `validate_inbound_` call whose bytes came from the peer is a late
+inbound site, whatever arena it names; a call that parses a frame fixpp built is not. The validate
+gate in every state arm is a late site; pre-Active its close amounts to a refusal.
+
+**What a late close does not do.** It cannot undo what ran before the parse: Guards 2 and 3, the
+Guard 4 advance, the resend-gap close, the liveness refresh, or the Logout handler's confirming
+Logout, which is sent before its `fromAdmin` parse. No row or invariant claims otherwise. Moving the
+decision ahead of those effects needs detection at step 3, which is #515's design.
 
 **Paths that act on scanned fields and never parse** ("guarded by I-4 only"). Derive them by
 reading each `hdr.msg_type == "…"` branch of the LogonReceived/Active arm
 (`grep -n 'hdr.msg_type == "' src/session/session.cpp`), and each of the other arms, for a
-`parse_and_dispatch_` that runs on every path through it. At the plan head these paths are:
-- SequenceReset-Reset with no Application;
-- GapFill with `validate_sequence_numbers` on, which persists and then applies `hdr.new_seqno`;
-- Heartbeat, TestRequest and ResendRequest with no Application, or in LogonReceived, where the
-  generic `fromAdmin` dispatch is Active-only;
-- Logout with no Application;
-- an inbound Reject;
-- the LogoutSent arm;
-- the Logon paths of NotConnected and LogonSent (`interpret_logon` is its own scanner).
-
-On these paths an encoding fault is caught by the scan, provided I-4 holds. A resource failure
-cannot occur, because nothing allocates a parse arena. That is **accepted**: running a full parse
-on them to look for a failure would add the arena and the parse this design exists to avoid (R-1).
-The consequence is disclosed as C-5 L-3.
+`parse_and_dispatch_` that runs on every path through it. On these paths an encoding fault is caught
+by the scan, provided I-4 holds. A resource failure cannot occur, because nothing allocates a parse
+arena. Whether a large well-formed frame fails at all therefore depends on the path; that dependence
+is #515's, not a disposition of this feature.
 
 **`validate_inbound_`.** Its "parse failed → `nullopt`" arms are literally ruling row 6's "reads as
-no reject". It gains the "parse failed" outcome (data-model E-3). In all three arms that outcome
-takes C-2b's validate-gate row: refusal pre-Active, and the C-2 row keyed on field 3 and 34 in
-LogonReceived/Active. Its comment calling that case "validation passes" is corrected.
-
-**Knob-off GapFill: the one deviation, recorded.** With `validate_sequence_numbers` off, the GapFill
-branch has already advanced the in-memory counter through `check_inbound` when its `fromAdmin`
-parse runs. Two choices were weighed:
-- *roll the advance back* with `seqnum_mgr_.set_next_inbound`;
-- *keep it*: persist, Reject, and never apply NewSeqNo.
-
-**Decision: keep it.** Reasons:
-1. The knob-off branch already treats a GapFill as a plain in-sequence message and never applies
-   NewSeqNo. The "a SequenceReset never advances" rule exists to stop an unparsed SequenceReset from
-   moving the counter through NewSeqNo, and that is not at stake here. The +1 comes from 34, which
-   the ruling lets the session read.
-2. Not persisting would leave memory and store disagreeing, which `persist_inbound_advance_` exists
-   to prevent.
-
-A non-advancing SequenceReset Reject under knob-off freezes the counter: every later frame is
-out of sequence and is delivered without advancing. That is pre-existing, through #423's
-SequenceReset row at the 041 validate gate, and D-4 inherits it with the knob off. It is not a
-reason for this deviation. The knob-off D-4 cell (quickstart §1) pins that outcome.
-
-This is reachable only with the knob off, an Application registered and a resource failure on a
-well-formed GapFill. It is disclosed in the B&L delta.
+no reject". It gains the "parse failed" outcome (data-model E-3), which takes the C-6 close in all
+three arms. Its comment calling that case "validation passes" is corrected.
 
 **No log line.** `src/session/session.cpp` includes no logger (`grep -n "#include" src/session/session.cpp`),
 and its "logged-then-proceed" comments denote `(void)` discards. The only operator-visible channel
@@ -249,10 +221,10 @@ absence of any effect.
 - **The overload.** A new overload of `build_reject` (`include/fixpp/session/admin_messages.hpp`,
   public) takes a trailing `std::string_view text`, emitted as 58 when non-empty. The existing
   overload delegates to it with an empty text. `emit_session_reject_` gains the matching parameter.
-- **The Text** is one of three **compile-time constant strings**: one for `malformed_tag`, one for
-  `length_data_mismatch`, and one for the residual failure. It carries no offset and no peer bytes,
+- **The Text** is one of two **compile-time constant strings**: one for `malformed_tag` and one for
+  `length_data_mismatch`. It carries no offset and no peer bytes,
   so its length is fixed.
-- **372.** The disposition passes `hdr.msg_type` as 372 only when it is no longer than the longest
+- **372.** The disposition passes `hdr.fault_ref_msg_type` as 372 only when it is no longer than the longest
   MsgType any shipped dictionary defines; otherwise it passes an empty 372, which `build_reject`
   omits. The bound is a named constant, and a unit test recomputes it from `dictionaries/*.xml` so
   it cannot drift. With 58 fixed and 372 bounded, no peer-controlled byte can make `build_reject`
@@ -274,13 +246,8 @@ configuration is unchanged, and is out of scope.
 - `malformed_tag` → 373=0 (Invalid tag number), 371 omitted.
 - `length_data_mismatch` → 373=5 (Value is incorrect (out of range) for this tag), 371 = the Length
   tag (clarification Q1; the ruling allows 5 or 6).
-- The residual failure (R-4) → 373=3, 371 omitted. 3 is valid in the SessionRejectReason domain of
-  FIX.4.2, FIX.4.4 and FIXT.1.1 (`dictionaries/FIX42.xml`, `FIX44.xml`, `FIXT11.xml`), and it is the
-  existing fail-closed catch-all of `wire_error_to_session_reject_reason`.
-  - Rejected: 99, which FIX.4.2 does not define.
-  - Rejected: a per-profile code, two codes for one condition.
-
-  The differentiator NEW-P2-F relies on is "3 with no 371", against "0" or "5 with 371".
+- A late parse failure (R-4) sends no Reject, so it has no reason code. (Round 1's 373=3 residual
+  Reject is deleted: 3 means "Undefined tag", which a local resource failure is not.)
 - 372 = the MsgType read before the fault, bounded as R-5 says.
 
 The session sets these codes directly from the scan's fault kind. `reject_reason_map` gains mappings
@@ -392,9 +359,8 @@ the recipe's step 6 (handshake observers) gives `fixpp_session_is_established`,
 | a faulty frame whose fault precedes 34, in Active, used to disconnect; it now stays connected and later messages reach `cb` (D-7) | additive (a failure turned into a success). Recorded in the `version.h` history |
 | a faulty Logout in LogoutSent no longer confirms, so `close` waits for the logout timeout | the return code is unchanged and the latency is undocumented, so additive, if the recipe confirms `fixpp_session_close`'s documentation leaves timing unspecified. Otherwise BREAKING on `close` |
 | a faulty application message is Rejected instead of silently consumed | not C-visible (`cb` is not invoked either way). But `fixpp_session_register_callback`'s 1.9 clause says "dropped as a parse error, silently … no Reject is sent", so that sentence is rewritten |
-| first-wins 34 on a **fault-free** frame with a duplicate 34 (R-1): e.g. `34=1|…|34=5` at expected 5 was in sequence under last-wins and is now too-low, so Guard 4 disconnects it (except a Heartbeat) | a BREAKING candidate where it ends an established session (`is_established` true → false, `send` OK → `FIXPP_ERR_SESSION_INVALID_STATE`); the recipe classifies it. It is also a B&L row (contract C-5 L-5) |
-| residual rows (C-2b) through the validate gate | unreachable from C: `git grep -n validate_inbound -- src/capi` shows no C setter for inbound validation |
-| residual rows at dispatch sites (e.g. a Logout residual now keeps the session up) | classified by the recipe |
+| a late parse failure (contract C-6) through the validate gate | unreachable from C: `git grep -n validate_inbound -- src/capi` shows no C setter for inbound validation |
+| a late parse failure at a dispatch site with a registered callback: a well-formed frame that exhausts the arena, silently consumed today, now ends the session (fail-closed, contract C-5 L-6) | a BREAKING candidate where it ends an established session (`is_established` true → false, `send` OK → `FIXPP_ERR_SESSION_INVALID_STATE`); the recipe classifies it |
 | FR-012's validator errors | unreachable from C (no `src/capi` caller of the validator, R-7), so no C effect |
 
 **What 1.10 touches.** Found from 091's bump (`git show --stat 932dd1cd`) and `[const §X.7]`. The
@@ -507,27 +473,33 @@ fault-free frame whose third field is not 35 is processed.
 **Decision.**
 - For a **faulty** frame, 092 decides criterion 3 itself. In LogonReceived/Active,
   `msg_type_is_third` false → D-8 (disregard), ahead of the 34-keyed rows (R-1). Before Active the
-  frame is refused whatever its third field (D-1/D-2), because no pre-Active timer would end a
-  disregarded connection (contract C-2 gives the derivation). In LogoutSent it is disregarded
-  (D-9).
+  frame is refused whatever its third field (D-1/D-2): both arms already refuse every input that is
+  not a valid Logon (contract C-2 cites the source). The pre-Active disregard needs an establishment
+  timeout and is fixpp#514 (owner ruling O-1). In LogoutSent it is disregarded (D-9).
 - A **fault-free** frame whose third field is not 35 is unchanged and out of scope: pre-existing,
-  and a separate issue filed at close-out.
+  and owned by fixpp#514.
 
 ## R-12 — The two non-inbound scan callers (masking and replay)
 
 **Finding.** `grep -n "scan_frame_header(" src/session/session.cpp` shows, besides the inbound state
 arms and the LogonSent arm's 1137-Reject RefSeqNum read, two callers that are not inbound
 disposition:
-- the credential-masking gate, which reads only `msg_type == "A"`;
-- stored-frame replay classification, which reads only `msg_type` through `is_admin_type`.
+- the credential-masking gate, which reads only `msg_type == "A"` on an **outbound** frame fixpp
+  built. fixpp writes fields 1 and 2 of every outbound frame, so stopping at a fault cannot change
+  its `msg_type`. No change.
+- stored-frame replay classification (`app_present` in the resend store walk), which reads
+  `msg_type` through `is_admin_type`. It classifies whatever bytes `MessageStore::retrieve` returns,
+  and the store is a public interface: `build_replay_frame`'s own comment allows for a frame that
+  "an older build or a custom MessageStore wrote". After stop-first, a stored **admin** frame with a
+  fault in field 1 or 2 scans with an empty `msg_type`, `is_admin_type("")` is false, and it would
+  be rebuilt and **resent** as application data, where today it is gap-filled. Resending an admin
+  message breaks FIX-SL §4.8.3.
 
-Both scan frames fixpp's own builders produced, where 35 is the third field. Stopping at a fault can
-drop only fields *after* the fault, so `msg_type` could change only if field 1 or 2 were malformed,
-and fixpp writes those. First-wins changes nothing for a frame with one 35.
-
-**Decision.** No code change at these callers. One cell: a stored frame with a fault after its 35
-still classifies as admin or application as before. `src/session/reconnect_fsm.cpp` names the scan
-only in a comment.
+**Decision.** At the replay site, a stored frame whose scan read no 35 (`msg_type` empty) is not
+`app_present`, so it is gap-filled: fail-safe, the same outcome as fixpp#424's unbuildable slot.
+One cell stores an **admin** frame with a fault in field 2 through a custom store and asserts a
+gap-fill and no resend. It is RED against stop-first without the guard. `src/session/reconnect_fsm.cpp`
+names the scan only in a comment.
 
 ## R-13 — Text that states the old behaviour (FR-014)
 

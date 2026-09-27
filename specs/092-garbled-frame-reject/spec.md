@@ -4,7 +4,7 @@
 
 **Created**: 2026-09-27
 
-**Status**: Draft (Gate A round 1 rewrite applied 2026-09-27)
+**Status**: Draft (Gate A round 2 rewrite applied 2026-09-27)
 
 **Input**: User description: "B18 / fixpp#507 — the session must never act on an inbound frame that
 passes framing but fails the parse; its disposition follows the owner ruling of 2026-09-27 (issue
@@ -24,10 +24,18 @@ predates the terminology below and is kept.
   8 not first or a bad profile; 9 not second or a wrong count; 35 not third; 10 not last or a bad
   value. This is the owner ruling's definition.
 - **Framed but unparseable** is the input this feature handles: a frame that passes the framing
-  checks the Framer performs and then fails the full parse.
-- **Disregard** is the named disposition "no Reject, no advance, no disconnect". The ruling applies
-  it to garbled frames (row 1) and to a framed but unparseable frame whose MsgSeqNum was not read
-  before the failure point (row 5, "Ignore, as garbled").
+  checks the Framer performs and in which the header scan finds an encoding fault (data-model E-1).
+  In this spec, "fails the parse" and "parse failure" mean that, unless a requirement says "late".
+  A **late parse failure** is a full parse that fails at a site after the fault branch on a frame the
+  scan found fault-free (a resource failure, or an I-4 breach). Only FR-016 governs it: the session
+  closes. Effects that ran before that parse are not undone, and moving the decision ahead of them is
+  fixpp#515 (owner ruling O-2).
+- **Disregard** is the named disposition "no Reject, no advance, no disconnect". In 092 it applies
+  to a framed but unparseable frame, in LogonReceived/Active, whose third field is not MsgType (ruling
+  row 1, criterion 3) or whose MsgSeqNum was not read before the failure point (row 5, "Ignore, as
+  garbled"), and to such a frame in LogoutSent. A frame that fails a framing check **the Framer
+  performs** is not disregarded: it ends the session, as today (`L-004-4`). Its §4.5.2 disregard is
+  fixpp#514 (owner ruling O-1).
 
 ## Context — what is broken, and what was already decided
 
@@ -56,6 +64,10 @@ the consumers):
 - If MsgSeqNum(34) lies after a malformed count, the scan never reaches it, and the session
   disconnects as if 34 were missing.
 - The Framer does not check that 35 is the third field (research R-11).
+- A frame that fails a check the Framer does perform (BeginString, BodyLength, CheckSum) ends the
+  session: `run_read_pump` stops the pump on a Framer failure (`L-004-4`). The ruling's row 1 said
+  "Unchanged" about an "Ignore" that fixpp never did; the owner's correction on #507 (Gate A round 2)
+  records this.
 
 **Already decided, not re-opened here.** The owner ruled on #507 on 2026-09-27, after research
 across the FIX primary documents, QuickFIX J/C++/n/Go source, OnixS, FIX Antenna, Artio, Fix8,
@@ -69,7 +81,8 @@ fix-rs, venue specs, and a Fable consult. The ruling:
   expected number, and Logon and SequenceReset never advance through the Reject path.
 - A frame whose MsgSeqNum(34) was not scanned before the failure point is disregarded (TC2020 17g).
 - Any parse failure: no field of the frame is ever acted on, and a parse failure must never read as
-  "no reject".
+  "no reject". For a resource failure of a well-formed frame, owner ruling O-2 (Gate A round 2)
+  narrows this within 092 to fail-closed (FR-016); the rest is fixpp#515.
 - Ignoring instead is rejected as the default. A deterministically malformed frame is resent
   identically on every ResendRequest, fixpp has no resend-loop guard, and B-423-1 records that
   stall, measured live against QuickFIX-cpp.
@@ -113,6 +126,21 @@ fix-rs, venue specs, and a Fable consult. The ruling:
   - the validator's behaviour and its test cells.
 
   (data-model.md E-0, E-4 to E-6; research R-7.)
+
+### Session 2026-09-27 (Gate A round 2)
+
+- Q (O-1): Ruling row 1 says a §4.5.2 framing failure is ignored, "Unchanged", but fixpp ends the
+  session on every Framer failure (`L-004-4`). Does 092 implement the §4.5.2 disregard? → A: **No:
+  implement §4.5.2 ignore — as its own issue, outside 092.** Within 092 a Framer-detected failure
+  (bad BeginString, BodyLength or CheckSum) keeps today's handling: session-fatal (`L-004-4`). Its
+  disregard is **fixpp#514**, which also owns a fault-free frame whose third field is not 35 and the
+  pre-Active establishment timeout a disregard needs. A framed but unparseable frame whose third
+  field is not 35 is disregarded in LogonReceived/Active (D-8, where the liveness loop runs) and
+  refused before Active, as today, until #514 adds the timeout (FR-008, FR-009).
+- Q (O-2): Does ruling row 6 ("any parse failure") cover a *resource* failure of a well-formed
+  frame, with a Reject? → A: **No: file the resource case separately** (**fixpp#515**). Within 092 a
+  parse failure at any late inbound site (on a frame the scan found fault-free) is **fail-closed: the
+  session closes**. It never reads as success, and there is no per-site Reject table (FR-016).
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -175,9 +203,10 @@ and is not delivered; the second is delivered with no ResendRequest.
    becomes N+1.
 2. **Given** the same session, **When** that message arrives at a MsgSeqNum above N, **Then** a Reject
    is sent, NextNumIn stays N, and the message is not delivered (FR-005).
-3. **Given** the same session with an Application registered, **When** a well-formed application message at N is too large for the
-   engine's parse arena (a resource failure, FR-016), **Then** it is not delivered, a Reject with
-   SessionRejectReason=3 and no RefTagID is sent, and NextNumIn becomes N+1.
+3. **Given** the same session with an Application registered, **When** a well-formed application
+   message at N is too large for the engine's parse arena (a resource failure, FR-016), **Then** it
+   is not delivered, no Reject is sent, and the session closes (fail-closed; its proper disposition
+   is fixpp#515).
 
 ---
 
@@ -247,8 +276,9 @@ the missing number, and the session stays connected.
   fails the parse this supersedes the no-reject-loop exemption, which still holds for a well-formed
   Reject or Logout that fails validation. A loop needs a peer that garbles every Reject it sends
   and also rejects Rejects, and each fixpp Reject answers one peer frame (contract C-2).
-- **A duplicate MsgSeqNum(34) or MsgType(35)**: the first occurrence counts, as the full parse
-  indexes it.
+- **A duplicate MsgSeqNum(34) on a frame that fails the parse**: the Reject is addressed from the
+  first well-formed 34 before the failure point (data-model E-1). A fault-free frame is sequenced
+  exactly as today.
 - **Wrong CompID or BeginString** on a frame that also fails the parse: no identity field of the
   frame is acted on (FR-001), even one read before the failure point. The frame gets FR-003 to
   FR-006, and the peer's next well-formed frame meets the identity check as usual.
@@ -259,26 +289,28 @@ the missing number, and the session stays connected.
   guard runs first (it reads only the frame length) and disconnects (FR-002).
 - **Before Active**: awaiting the first Logon (acceptor) or the Logon reply (initiator), any frame
   that fails the parse is refused through the Logon refusal path (FR-009), whatever its MsgType and
-  whatever its third field. Disregarding it would leave the connection open, because no pre-Active
-  timer would end it (contract C-2). In LogoutSent it is disregarded and not taken as the Logout
+  whatever its third field. Both arms already refuse every input that is not a valid Logon (contract
+  C-2). The pre-Active disregard of a frame whose third field is not 35 is fixpp#514, because it
+  needs an establishment timeout. In LogoutSent the frame is disregarded and not taken as the Logout
   reply, and the logout timeout runs as usual (FR-015).
-- **A frame that fails a framing criterion the Framer checks** (§4.5.2): unchanged. It is
-  disregarded (FR-008).
-- **A well-formed frame too large for the parse arena** (a resource failure): FR-016.
+- **A frame that fails a framing criterion the Framer checks** (§4.5.2): unchanged, which is
+  session-fatal (`L-004-4`, FR-008). Its disregard is fixpp#514.
+- **A well-formed frame too large for the parse arena** (a resource failure): the session closes
+  (FR-016). The proper disposition is fixpp#515.
 
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
 
 - **FR-001**: The `Session` MUST NOT act on any field of an inbound frame that passes framing but
-  fails the full parse, on any admin, application, or pre-Active path. There is one exception:
+  fails the parse (Terminology), on any admin, application, or pre-Active path. There is one exception:
   MsgSeqNum(34), MsgType(35), and whether the third field is MsgType(35) MAY be read, from bytes
   before the failure point, only to address and account for the Reject (FR-003 to FR-006). A parse
   failure MUST NOT read as "no reject" or "dispatch succeeded". Out of this requirement's scope: the
   engine's first-frame routing read of BeginString(8), SenderCompID(49) and TargetCompID(56), which
   selects the session before any `Session` exists. For a faulty Logon its outcome is still refusal
-  or close.
-- **FR-002**: A parse failure MUST be decided before any handler or guard acts on the frame:
+  or close. A late parse failure is governed by FR-016, not by this requirement.
+- **FR-002**: A parse failure (Terminology; not a late one, FR-016) MUST be decided before any handler or guard acts on the frame:
   - before the identity (BeginString/CompID) and SendingTime guards;
   - before the SequenceReset, Logout, TestRequest, ResendRequest, Heartbeat and application
     handlers;
@@ -311,33 +343,31 @@ the missing number, and the session stays connected.
 - **FR-007**: SessionRejectReason(373) MUST be:
   - 0 (Invalid tag number), with RefTagID(371) omitted, for shape (B);
   - 5 (Value is incorrect (out of range) for this tag), with RefTagID(371) = the Length tag, for
-    shape (A);
-  - 3, with RefTagID(371) omitted, for a residual failure (FR-016).
+    shape (A).
 
   The validator's reason mapping MUST express 0 and 5 (FR-012). Today both shapes map to 3.
-- **FR-008**: A frame that fails a framing criterion the Framer checks (BeginString, BodyLength,
-  CheckSum) keeps its current handling: disregarded. The Framer does not check criterion 3 (35 is
-  the third field). For a frame that also fails the parse, FR-006 (LogonReceived/Active), FR-009
-  (before Active) and FR-015 (LogoutSent) decide it. A fault-free
-  frame whose third field is not 35 keeps its current handling, which is out of scope (research
+- **FR-008**: A Framer-detected framing failure (BeginString, BodyLength, CheckSum) is handled as
+  today: session-fatal (`L-004-4`). Its §4.5.2 disregard is fixpp#514 (owner ruling O-1). The Framer
+  does not check criterion 3 (35 is the third field). For a frame that also fails the parse, FR-006
+  (LogonReceived/Active), FR-009 (before Active) and FR-015 (LogoutSent) decide it. A fault-free
+  frame whose third field is not 35 keeps its current handling; it belongs to fixpp#514 (research
   R-11).
 - **FR-009**: Any frame that passes framing but fails the parse while the session awaits the first
   Logon (acceptor) or the Logon reply (initiator) MUST be refused through the existing Logon refusal
-  path, whatever its MsgType and whatever its third field, for both shapes. Disregarding it there
-  would leave the connection open, because no pre-Active timer ends it (contract C-2). The
-  refusal is the arm's silent transition to Disconnected. No Reject and no Logout are sent. Once
+  path, whatever its MsgType and whatever its third field, for both shapes. Both arms already refuse
+  every input that is not a valid Logon (contract C-2 cites the source). The pre-Active disregard of
+  a frame whose third field is not 35 is fixpp#514, which adds the establishment timeout it needs.
+  The refusal is the arm's silent transition to Disconnected. No Reject and no Logout are sent. Once
   Active, a Logon that fails the parse (third field MsgType, MsgSeqNum read) is also refused this
   way, never Rejected.
 - **FR-010**: A SequenceReset (Reset or GapFill mode) that fails the parse MUST NOT change NextNumIn
   through NewSeqNo(36), whatever its MsgSeqNum.
-- **FR-011**: The disposition of a frame that fails the parse MUST NOT depend on any of:
+- **FR-011**: The disposition of a frame the header scan finds faulty MUST NOT depend on any of:
   - the inbound-validation setting;
   - the `validate_sequence_numbers` setting;
   - the session profile (FIX.4.2, FIX.4.4, FIXT.1.1);
   - the role (acceptor/initiator);
   - whether an Application is registered.
-
-  FR-016's residual path is the disclosed exception: it fires only where a parse runs.
 - **FR-012**: `dictionary_driven_validator::validate` MUST NOT report "conformant" for a message
   whose field walk met an encoding fault. It MUST return `wire_invalid_tag_number` (reason 0,
   RefTagID untouched) for a malformed tag, and `wire_length_data_mismatch` (reason 5, RefTagID = the
@@ -366,18 +396,14 @@ the missing number, and the session stays connected.
 - **FR-015**: In LogoutSent, a frame that passes framing but fails the parse MUST be disregarded: no
   Reject, no advance, and it MUST NOT be taken as the Logout reply. The logout timeout runs as
   usual.
-- **FR-016**: A parse that fails on a frame the header scan found fault-free (a **residual**
-  failure) MUST follow the same disposition. Its causes are a resource failure (the parse arena or
-  the offset-table cap), a Framer re-feed failure, or a scan/parse disagreement. The rules:
-  - the rows of FR-003 to FR-010, keyed on the scan's third field and MsgSeqNum, with reason 3;
-  - never as "success" or "no reject";
-  - terminal: no handler or state change follows it;
-  - with any inbound advance persisted before the Reject.
-
-  It applies at every inbound parse site: the validate gate in every state arm, and each
-  dispatch site. Research R-4 derives the site population, and contract C-2b gives each site's row.
-  The field-count ceiling at which a well-formed message starts failing MUST be measured and
-  disclosed.
+- **FR-016**: A parse that fails at a **late** inbound parse site (a site after the fault branch, on
+  a frame the header scan found fault-free) MUST be **fail-closed**: the session closes terminally,
+  sends no Reject, and does not invoke the callback. It never reads as "success" or "no reject".
+  Such a failure can only be a resource failure (the parse arena or the offset-table cap) or an I-4
+  breach. Every late site takes this one action. The site population is derived by command
+  (research R-4). Effects that ran before the late parse are not undone (contract C-6). The
+  disposition of a resource failure beyond fail-closed, and moving its decision ahead of the
+  guards, are fixpp#515 (owner ruling O-2).
 - **FR-017**: The change MUST be declared as **C-ABI 1.10, BREAKING** under `[const §X.7]`, with the
   same procedure 091 used for 1.9:
   - `FIXPP_C_ABI_VERSION_MINOR` 9 → 10, with a `version.h` history comment;
@@ -398,8 +424,9 @@ the missing number, and the session stays connected.
   MsgSeqNum(34) before the failure point, if it is a positive integer.
 - **Frame disposition**: one of:
   - *disregard* (FR-006, FR-008, FR-015);
-  - *Reject* (FR-003 to FR-005, FR-016);
-  - *Logon refusal* (FR-009).
+  - *Reject* (FR-003 to FR-005);
+  - *Logon refusal* (FR-009);
+  - *fail-closed close*, for a late parse failure (FR-016).
 
 ## Success Criteria *(mandatory)*
 
@@ -424,9 +451,9 @@ the missing number, and the session stays connected.
   ResendRequest.
 - **SC-006**: Each of SC-001 to SC-005 has a cell that goes RED when the disposition is removed from
   its state arm. The cell's witness is an input the pre-feature code mishandles: a malformed *tag*
-  for the Logon rows, a *Logout* for LogoutSent. Every Reject cell asserts the exact 373 and 371,
-  so a residual Reject (373=3, no 371) cannot keep a disposition cell green. The deletion proof is
-  run twice: with the residual path present, and with it also deleted.
+  for the Logon rows, a *Logout* for LogoutSent. Every Reject cell asserts the exact 373 and 371.
+  The deletion proof is run twice: with the late-site close (FR-016) present, and with it also
+  deleted, because a late-site close can keep a refusal cell green.
 - **SC-007**: A session that receives a malformed application message keeps delivering later
   messages: no stall of the B-423-1 kind on the Reject rows. It is proven in-process against a
   scripted peer that:
@@ -438,9 +465,9 @@ the missing number, and the session stays connected.
   The run drives one malformed frame at a too-high MsgSeqNum, so a gap forms and the resend must
   converge. The disregard rows' loop and the malformed-GapFill disconnect are pinned as disclosed
   outcomes (contract C-5). The live QuickFIX interop cell is a follow-up issue placed in B17.
-- **SC-008**: A well-formed application message above the measured parse ceiling is Rejected with
-  373=3 and not delivered. The in-sequence number is persisted before the Reject is sent. Residual
-  cells exist for the validate gate, the Logout, the generic admin and the `fromApp` sites.
+- **SC-008**: A well-formed frame above the measured parse ceiling, at each late inbound parse site
+  research R-4 derives, closes the session: no Reject, no callback, never read as success. Each
+  site's cell goes RED when that site's close is deleted.
 - **SC-009**: The C-ABI version test pins 1.10, is RED against 1.9, and turns RED again under a
   mutant back to 9.
 
@@ -471,5 +498,8 @@ the missing number, and the session stays connected.
   - a resend-loop guard;
   - LFIXT;
   - detecting a Length+Data mismatch in counterparties;
-  - a fault-free frame whose third field is not 35 (research R-11; a follow-up issue);
+  - the §4.5.2 disregard of a Framer-detected failure, a fault-free frame whose third field is not
+    35, and the pre-Active establishment timeout (fixpp#514, owner ruling O-1);
+  - the disposition of a resource failure of a well-formed frame beyond fail-closed (fixpp#515,
+    owner ruling O-2);
   - fuzz-harness coverage of library code (#508).

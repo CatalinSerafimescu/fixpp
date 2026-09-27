@@ -1,9 +1,9 @@
 # Implementation Plan: The session never acts on a frame it could not parse
 
-**Branch**: `092-garbled-frame-reject` | **Date**: 2026-09-27 (Gate A round 1 rewrite) | **Spec**: [spec.md](./spec.md)
+**Branch**: `092-garbled-frame-reject` | **Date**: 2026-09-27 (Gate A round 2 rewrite) | **Spec**: [spec.md](./spec.md)
 
 **Input**: Feature specification from `specs/092-garbled-frame-reject/spec.md` (clarified 2026-09-27;
-Gate A round 1 owner rulings integrated)
+Gate A round 1 and round 2 owner rulings integrated)
 
 ## Summary
 
@@ -12,7 +12,8 @@ A SequenceReset is applied. An application message is persisted and consumed, bu
 nor rejected. A Logon with a malformed tag is accepted.
 
 This feature makes the header scan (`scan_frame_header`) record its **first fault**, stop there,
-and identify the header **by position**: whether field 3 is 35, and the first 34. The scan already
+and identify the header **by position** in the fault record: whether field 3 is 35, its value, and
+the first 34. The scan's existing members keep today's last-wins semantics. The scan already
 runs in every LogonReceived/Active, LogonSent and LogoutSent frame, and is hoisted to the top of the
 NotConnected arm. Right after it, each state arm branches inline on the fault. Only then does it
 `co_await dispose_unparseable_`, which decides the frame per the owner ruling of 2026-09-27:
@@ -26,10 +27,11 @@ NotConnected arm. Right after it, each state arm branches inline on the fault. O
 
 Nothing after the fault is read, and nothing except 34, 35 and the field-3 bit is used.
 
-A parse can still fail on a fault-free frame, through resource exhaustion (reachable with a large
-well-formed message) or a scan/parse disagreement. Such a **residual** failure follows the same rows
-with reason 3 at every inbound parse site, terminally. A differential corpus and a fuzz arm pin the
-scan/parse agreement.
+A parse can still fail at a late inbound site on a fault-free frame, through resource exhaustion
+(reachable with a large well-formed message) or a scan/parse disagreement. Such a **late parse
+failure** closes the session (fail-closed, owner ruling O-2); its proper disposition is fixpp#515. A
+Framer failure stays session-fatal (`L-004-4`); its §4.5.2 disregard is fixpp#514 (owner ruling
+O-1). A differential corpus and a fuzz arm pin the scan/parse agreement.
 
 `dictionary_driven_validator::validate`'s silent stop becomes a reject through a field-iterator
 fault record and two new `core::error` values. The Logon refusal ships as **C-ABI 1.10 BREAKING**.
@@ -45,8 +47,7 @@ Design decisions: [research.md](./research.md). The behaviour contract:
 libFuzzer. No new dependency.
 
 **Storage**: The existing MessageStore. Every Reject is persisted like any outbound session message
-(FR-013). An advance is persisted through `consume_rejected_seqnum_` (#423, unchanged), or through
-`persist_inbound_advance_` at the residual sites where `check_inbound` already ran (contract C-2b).
+(FR-013). An advance is persisted through `consume_rejected_seqnum_` (#423, unchanged).
 
 **Testing**:
 - GoogleTest in the grouped session bucket (`ctest -L 092`) and the wire bucket for FR-012;
@@ -75,7 +76,8 @@ R-9).
 
 **Scale/Scope**:
 - `src/session/scan_frame_header.hpp`;
-- `session.cpp`: 4 state arms, 1 new coroutine, the residual handling at every inbound parse site;
+- `session.cpp`: 4 state arms, 1 new coroutine, the fail-closed close at every late inbound parse
+  site, and the replay classification guard (R-12);
 - `admin_messages.{hpp,cpp}`: one overload and the no-reject-loop sentence;
 - `parser.hpp`, `tag_scan.hpp`, `validator.hpp`, `core/error.hpp`, `reject_reason_map.hpp` and
   `src/capi/error.cpp` (FR-012);
@@ -89,19 +91,19 @@ Plus tests, two benches and docs.
 
 | Article | Requirement | Status |
 |---|---|---|
-| VII §3–4 TDD | failing test first, no code without a test | Planned. Every C-2 row, every C-2b site and every C-3 invariant is a RED-first cell, and T076 is the anchor RED. Each RED witness is an input the pre-feature code mishandles (quickstart §1) |
-| VII §5 conformance | the FIX-TC corpus must pass | TC 2d / 3b / 3c stay disregarded (framing, FR-008). TC 14-class Rejects gain siblings (0 / 5). TC2020 17d's 373=8 is a disclosed deviation (contract C-5 L-4). Check for any existing TC cell asserting silence on a parse failure (research R-10) |
+| VII §3–4 TDD | failing test first, no code without a test | Planned. Every C-2 row, every late parse site (C-6) and every C-3 invariant is a RED-first cell, and T076 is the anchor RED. Each RED witness is an input the pre-feature code mishandles (quickstart §1) |
+| VII §5 conformance | the FIX-TC corpus must pass | TC 2d / 3b / 3c unchanged: terminal (`L-004-4`, which diverges from TC 2d; FR-008). Their disregard is fixpp#514. TC 14-class Rejects gain siblings (0 / 5). TC2020 17d's 373=8 is a disclosed deviation (contract C-5 L-4). Check for any existing TC cell asserting silence on a parse failure (research R-10) |
 | VII §7 fuzz | parser-touching code needs a fuzz harness | The scan is parser-touching, so an equivalence arm goes in the existing harness (R-2). The field iterator's fault record is covered by `fuzz_wire_validator` gaining a fault-kind assertion. #508 caveat disclosed |
 | VII §8 test grouping | new isolation-safe tests go into a grouped bucket, selected by label | Planned (`092` label) |
 | VIII §2 perf | paired merge-base A-B-A-B, +5% budget | Two benches land bench-only first and are listed in `bench/ci-suite.txt` (R-9) |
 | VIII §5 zero-alloc | no heap between parse and callback | Held: plain members, an inline branch, a constant Text |
 | IX sanitizers / coverage | per-line coverage assessment | `/speckit-verify` matrix. The fault branches are covered by the corpus and the cells |
-| X ABI | C-ABI changes versioned; public C++ API additive | **Yes — `[const §X.7]` BREAKING, C-ABI 1.10** (owner ruling 2026-09-27, FR-017). No symbol, signature or error code is added. The change is in which Logons are accepted, plus D-3's disconnect, observed by the calls research R-8's recipe derives. The procedure is Phase 0b. The C++ additions are source-compatible (contract C-4). `§X.6` Appendix A controls: `/clarify` ✅ (Session 2026-09-27 and Gate A round 1 rulings); `/analyze` ⏳ after `/speckit-tasks`; Gate A ⏳ (round 1 applied, see §Gate A); user `/plan` sign-off ⏳ after Gate A converges |
+| X ABI | C-ABI changes versioned; public C++ API additive | **Yes — `[const §X.7]` BREAKING, C-ABI 1.10** (owner ruling 2026-09-27, FR-017). No symbol, signature or error code is added. The change is in which Logons are accepted, plus D-3's disconnect, observed by the calls research R-8's recipe derives. The procedure is Phase 0b. The C++ additions are source-compatible (contract C-4). `§X.6` Appendix A controls: `/clarify` ✅ (Session 2026-09-27 and Gate A round 1 rulings); `/analyze` ⏳ after `/speckit-tasks`; Gate A ⏳ (round 2 applied, see §Gate A); user `/plan` sign-off ⏳ after Gate A converges |
 | XI concurrency | — | Not touched: the disposition runs inside the existing per-session strand coroutine |
 | XII security | fail closed | This feature *closes* fail-opens: acting on unparsed bytes, and accepting a Logon with a malformed tag |
 | XVI §3–4 | `/clarify` and `/analyze` mandatory (session FSM, error semantics, parser) | `/clarify` done; `/analyze` due after `/tasks` |
 | XVI §6 | the orchestrator does not implement | Implementation is delegated to `phase-implementer`, with mutation proofs in a scratch copy |
-| XVII §1 Gate A | parser + session FSM + public C++ API + C-ABI → required | **Required before `/tasks`**; round 1 applied |
+| XVII §1 Gate A | parser + session FSM + public C++ API + C-ABI → required | **Required before `/tasks`**; round 2 applied |
 | XVII §7 | local build gate before PR; builds need owner approval | Planned; ASK before each build |
 
 **Result: PASS**, with the §X.7 BREAKING declaration as a sanctioned pre-release change, not a
@@ -111,13 +113,13 @@ violation. `gh release list --exclude-drafts` must be empty at Phase 0b.
 
 | Who | What changes | Declared where |
 |---|---|---|
-| The FIX counterparty | It receives a Reject (373=0, 5 or 3) where it got silence or a sequence effect. A malformed Reject or Logout is now Rejected. A faulty Logon is refused. A frame faulty before 34, or with field 3 not 35, is disregarded instead of disconnecting | B&L delta; spec FR-003 to FR-009, FR-016 |
-| A C-ABI consumer | A session whose Logon carries a malformed tag never establishes, and a faulty Logon while Active ends an established session. `is_established`, `close`, `send` and both callbacks observe it. A fault-free frame whose first 34 is too low and whose last 34 is expected now ends the session (first-wins, C-5 L-5), a candidate the recipe classifies. `fixpp_session_register_callback`'s "no Reject is sent" text is rewritten | **C-ABI 1.10 BREAKING**: `version.h` and a per-declaration `session.h` clause (research R-8, Phase 0b) |
+| The FIX counterparty | It receives a Reject (373=0 or 5) where it got silence or a sequence effect. A malformed Reject or Logout is now Rejected. A faulty Logon is refused. A frame faulty before 34, or with field 3 not 35, is disregarded in LogonReceived/Active instead of disconnecting. A well-formed frame that exhausts the parse arena ends the session where it was silently consumed | B&L delta; spec FR-003 to FR-009, FR-016 |
+| A C-ABI consumer | A session whose Logon carries a malformed tag never establishes, and a faulty Logon while Active ends an established session. `is_established`, `close`, `send` and both callbacks observe it. A well-formed frame that exhausts the parse arena at a dispatch site now ends the session (contract C-6), a candidate the recipe classifies. `fixpp_session_register_callback`'s "no Reject is sent" text is rewritten | **C-ABI 1.10 BREAKING**: `version.h` and a per-declaration `session.h` clause (research R-8, Phase 0b) |
 | A C++ consumer of `build_reject`'s documented rule | "a malformed Reject/Logout is never itself rejected" now holds only for well-formed frames | `admin_messages.hpp` sentence rewritten, with a header comment naming the ruling |
 | A C++ consumer of `dictionary_driven_validator` | `validate` returns two new errors where it returned success | contract C-4; B&L |
 | A C++ consumer of `field_iterator` | two new accessors; `sizeof` grows; the yield is unchanged | contract C-4 |
 | An exhaustive switch over `core::error` | two new enumerators (132, 133) | contract C-4; `[const §X.4]` append-only |
-| An operator | disclosed outcomes: the disregard-row resend loop, the malformed-GapFill disconnect, the parse-arena ceiling, TC 17d, first-wins duplicate 34 | contract C-5 L-1 to L-5, as B&L rows |
+| An operator | disclosed outcomes: the disregard-row resend loop, the malformed-GapFill disconnect, TC 17d, the fail-closed close on a late parse failure | contract C-5 L-1, L-2, L-4, L-6, as B&L rows |
 
 ## Project Structure
 
@@ -125,13 +127,13 @@ violation. `gh release list --exclude-drafts` must be empty at Phase 0b.
 
 ```text
 specs/092-garbled-frame-reject/
-├── spec.md              # clarified 2026-09-27; Gate A round 1 rulings
+├── spec.md              # clarified 2026-09-27; Gate A round 1 and round 2 rulings
 ├── plan.md              # this file
 ├── research.md          # R-1 … R-13
 ├── data-model.md        # E-0 fault enum … E-6 error enumerators
 ├── quickstart.md        # validation guide (baselines first)
 ├── contracts/
-│   └── unparseable-frame-disposition.md   # C-1 order, C-2 / C-2b tables, C-3 invariants, C-4 surface, C-5 disclosures
+│   └── unparseable-frame-disposition.md   # C-1 order, C-2 table, C-3 invariants, C-4 surface, C-5 disclosures, C-6 late-site close
 ├── checklists/requirements.md
 └── tasks.md             # /speckit-tasks (not created here)
 ```
@@ -140,9 +142,10 @@ specs/092-garbled-frame-reject/
 
 ```text
 src/session/
-├── scan_frame_header.hpp      # E-1: first fault, positional 35, first-wins 34/35 (R-1)
+├── scan_frame_header.hpp      # E-1: first fault, positional 35, fault_ref_seq_num / fault_ref_msg_type (R-1)
 ├── session.cpp                # inline fault branch + dispose_unparseable_ (R-3); NotConnected scan hoist;
-│                              #   residual handling at every inbound parse site (R-4); liveness (FR-018)
+│                              #   fail-closed close at every late inbound parse site (C-6); liveness (FR-018);
+│                              #   replay gap-fills a stored frame with no 35 (R-12)
 └── admin_messages.cpp         # build_reject Text overload (R-5)
 include/fixpp/session/
 ├── admin_messages.hpp         # overload declaration; no-reject-loop sentence scoped + ruling-naming comment
@@ -159,7 +162,7 @@ include/fix/c_api/session.h    # BREAKING (1.10) clauses; register_callback text
 include/fix/c_api/error.h      # only if it lists WIRE_INVALID_FRAME's core members (R-7)
 tools/capi_freeze.sha256       # re-pinned
 tests/session/
-├── unparseable_frame_disposition_test.cpp   # NEW: C-2, C-2b, C-3, T076 flipped, SC-007 peer
+├── unparseable_frame_disposition_test.cpp   # NEW: C-2, C-3, C-6, T076 flipped, SC-007 peer
 ├── scan_frame_header_fault_test.cpp         # NEW: E-1 kinds + the differential corpus (I-4)
 ├── scan_frame_header_overflow_test.cpp      # R-10
 ├── length_data_session_scanner_test.cpp     # R-10
@@ -175,7 +178,7 @@ tests/fuzz/fuzz_session_recovery_admin_parse.cpp   # R-2 arm
 bench/session/scan_frame_header_bench.cpp          # NEW, bench-only commit first (R-9)
 bench/session/<inbound on_inbound_frame bench>     # NEW, bench-only commit first (R-9)
 bench/ci-suite.txt                                 # both benches listed
-spec/behaviors-and-limitations.md                  # B-092-* + C-5 L-rows; #423 row 4 revision
+spec/behaviors-and-limitations.md                  # B-092-* + C-5 L-rows; #423 row 4 revision; row-1 note → L-004-4 / #514
 spec/feature-catalogue.md                          # CA rows for 1.10
 brain/components/{session,inbound-message-path,wire,errors,c-api}.md   # R-13
 ```
@@ -189,7 +192,7 @@ apart from new test sources, two bench sources and the fuzz arm.
 0. **Baselines (before any production edit)**:
    - the bench-only commit (both benches), run paired against the merge-base (R-9);
    - the T076 RED reproducer as a real test (expected RED against the new assertions);
-   - the parse-arena ceiling measurement (R-4).
+   - the parse-arena ceiling measurement on the Linux presets the late-site cells run on (R-4).
 0b. **C-ABI 1.10 BREAKING (FR-017)**, in the same PR. The procedure is 091's 1.9 procedure,
    re-derived:
    - **Preconditions** (research R-8):
@@ -215,42 +218,44 @@ apart from new test sources, two bench sources and the fuzz arm.
    - **Mutant**: MINOR back to 9 must turn the version test RED.
    - **Not touched**: `CHANGELOG.md`, which is not a carrier (R-8), and `introducing_minor`, since
      no code is added.
-1. **Scan fault record** (E-0, E-1): RED cells per fault kind, positional bit and first-wins, then
-   the scan change. Then the differential corpus with its accepted controls (I-4), each mutation
+1. **Scan fault record** (E-0, E-1): RED cells per fault kind, positional bit and `fault_ref_*`, plus
+   a duplicate-34 cell proving clean frames stay last-wins, then the scan change. Then the differential corpus with its accepted controls (I-4), each mutation
    family proven able to fail with a seeded disagreement.
 2. **Disposition** (R-3, contract C-2): RED cells for every row, then the inline branch and
    `dispose_unparseable_` in the 4 arms, and the NotConnected hoist. T076 goes green.
-   Mechanism-deletion proofs per arm, run twice: with the residual path, and with it deleted too
+   Mechanism-deletion proofs per arm, run twice: with the late-site close, and with it deleted too
    (SC-006).
 3. **Reject Text and 372 bound** (R-5): the overload with byte-identical output for the old
    overload (existing goldens unchanged); the dictionary-derived 372 bound and its recomputing test.
-4. **Residual path** (R-4, contract C-2b): the "parse failed" results of `parse_and_dispatch_` and
-   `validate_inbound_`; one RED cell per inbound site, using a real well-formed frame above the
-   measured ceiling (no test hook); the persist-before-Reject order at post-Guard-4 sites; the
-   knob-off GapFill deviation cell.
+4. **Late-site close** (R-4, contract C-6): the "parse failed" results of `parse_and_dispatch_` and
+   `validate_inbound_`; `close(close_mode::terminal)` at every late inbound site; one RED cell per
+   site, using a real well-formed frame above the measured ceiling (no test hook). Also the replay
+   guard and its cell (R-12).
 5. **Validator fault** (R-7, FR-012): the E-0 enum, the E-4 accessors, the E-5 validator change,
    the E-6 errors, the C mapping and every R-7 pin; the cells.
 6. **No-reject-loop supersession**: the `admin_messages.hpp` sentence and the malformed Reject/Logout cells;
    the reject-loop bound cell.
 7. **SC-007 scripted peer** (with resend replay) and the C-5 disclosed-outcome cells (L-1, L-2).
 8. **Fuzz arm** (R-2), with a planted disagreement proving the trap.
-9. **Docs** (R-13): B&L (the B-092-* rows, C-5 L-1 to L-5, the knob-off GapFill deviation, the
-   #423 row 4 revision); brain pages (the session page's "garbled" passage rewritten, not
-   appended); code comments with ruling-naming header comments where a decision is superseded
+9. **Docs** (R-13): B&L (the B-092-* rows, C-5 L-1, L-2, L-4, L-6, the #423 row 4 revision, and a
+   note that its row 1 describes an "Ignore" fixpp does not do, citing `L-004-4` and fixpp#514);
+   brain pages (the session page's "garbled" passage rewritten, not appended); code comments with ruling-naming header comments where a decision is superseded
    (parent CLAUDE.md); feature-catalogue CA rows.
 10. **Bench re-run** (paired, R-9); `/simplify`; `/speckit-verify`.
 
 ## Post-design Constitution re-check
 
-Re-run after the Gate A round 1 artifacts: **PASS**.
+Re-run after the Gate A round 2 artifacts: **PASS**.
 - **No allocation and no new concurrency** are added. The clean path gains one inline compare.
 - **C-ABI 1.10** is a declared BREAKING pre-release change (`[const §X.7]`), and the Appendix A
   controls are tracked in the Constitution Check.
 - **The public C++ changes** are source-compatible (contract C-4).
 
 Items still open, and where they are routed:
-- **A fault-free frame whose third field is not 35**, which is still not disregarded without
-  validation (R-11): file as a separate issue at close-out.
+- **The §4.5.2 disregard of a Framer failure, a fault-free frame whose third field is not 35, and
+  the pre-Active establishment timeout**: fixpp#514 (owner ruling O-1).
+- **The disposition of a resource failure of a well-formed frame beyond fail-closed**: fixpp#515
+  (owner ruling O-2).
 - **The two Length+Data readers stay duplicated.** Their agreement is pinned by instruments (R-2).
   Unifying them is a bench-sensitive wire-hot-path change, out of scope.
 
@@ -262,8 +267,13 @@ pre-release procedure, owner-ruled.
 ## Gate A
 
 - Round 1 applied 2026-09-27: Codex P1=5 P2=6 P3=2; Opus post-judging P1=3 P2=4 P3=13; rewrite addresses root causes #1–#5; owner rulings: C-ABI 1.10 BREAKING, FR-012 kept and fully specified. Reviews: research/reviews/codex_092-garbled-frame-reject_gate_a_review.md, research/reviews/opus_092-garbled-frame-reject_gate_a_adversarial_review.md.
+- Round 2 applied 2026-09-27: Codex P1=5 P2=2 P3=1; Opus post-judging P1=2 P2=1 P3=1; rewrite addresses root causes A, B, C and R2-008; owner rulings O-1 (framing disregard → #514, 092 keeps L-004-4) and O-2 (resource case → #515, late sites fail-closed). Reviews: research/reviews/codex_092-garbled-frame-reject_gate_a_2_review.md, research/reviews/opus_092-garbled-frame-reject_gate_a_2_adversarial_review.md.
 
 ### Round 1 — how each root cause was addressed
+
+*Historical record. Round 2 reverted or deleted several items below: global first-wins, contract
+C-2b and its residual reason 3, the knob-off GapFill deviation, and C-5 L-3 and L-5. See "Round 2"
+below.*
 
 - **#1 Positional header identification** (A1, A2, NEW-P3-A):
   - `msg_type_is_third`, first-wins 34/35, and "34 read" = `parse_seqnum > 0` (E-1, R-1);
@@ -319,6 +329,8 @@ pre-release procedure, owner-ruled.
 
 ### Round 1 — disagreements
 
+*Historical record; G092-A2's first-wins was reverted in round 2.*
+
 The Opus review marks no finding `Disagree`, so no Codex fix was refused outright. Where Opus's fix
 shape was applied **instead of** Codex's counter-proposal, the difference is recorded here:
 
@@ -342,3 +354,50 @@ shape was applied **instead of** Codex's counter-proposal, the difference is rec
 - **G092-A5 (malformed Reject).** Codex offered two options. The owner ruling's rows apply to every
   MsgType, so the supersession branch is taken. Opus corrected Codex's evidence:
   `NoRejectLoopOnInboundReject` feeds a well-formed Reject.
+
+### Round 2 — how each root cause was addressed
+
+- **A — §4.5.2 handling described from the ruling, not the source** (R2-001, R2-002, NEW-R2-A),
+  with owner ruling O-1:
+  - FR-008, C-1 step 1, the Terminology, the Edge case, the data-model preamble, the contract
+    definitions and Constitution Check VII §5 now say a Framer failure is session-fatal (`L-004-4`);
+    its disregard is fixpp#514;
+  - D-1/D-2 are grounded in the pre-Active arms' existing refusal of every non-Logon input (contract
+    C-2 cites the source), with the pre-Active disregard deferred to #514; D-8 is unchanged;
+  - the B&L docs task gains the row-1 note.
+- **B — late parse failures detected after guards and handlers acted** (R2-003, R2-004, R2-007,
+  NEW-R2-B, NEW-R2-C), with owner ruling O-2. Deleted: C-2b's per-site table and its
+  `persist_inbound_advance_` choreography, the knob-off GapFill +1 deviation, C-5 L-3, FR-011's
+  exception, the 373=3 residual Reject and its Text, and the Framer re-feed cause. Added: contract
+  C-6, one fail-closed action at every late inbound site, with the population named by a command,
+  the effects it cannot undo stated (including the Logout reply), and the cost disclosed as C-5 L-6
+  and classified in R-8. The field cap K is not added; it is #515's.
+- **C — scan semantics widened beyond need** (R2-005, R2-006): global first-wins reverted; the fault
+  record gains `fault_ref_seq_num` and `fault_ref_msg_type`, read only on a faulty frame; I-3's
+  carve-out, C-5 L-5 and R-8's first-wins row deleted; I-4 compares against `entries()`; replay
+  gap-fills a stored frame with no 35, with an admin-frame cell (R-12).
+- **R2-008**: E-6's layer-independence sentence deleted; an over-0xFFFF mapping cell added.
+
+### Round 2 — disagreements
+
+The Opus review marks no round-2 finding `Disagree`. Where a Codex counter-proposal was not taken,
+the reason is recorded here:
+
+- **G092-R2-001** (implement a bounded resync, or disclose the fatal deviation): the disclosure
+  branch is taken; the resync is fixpp#514 by owner ruling O-1.
+- **G092-R2-002** (evaluate criterion 3 before D-1/D-2 and disregard pre-Active): not taken. Owner
+  ruling O-1 keeps today's pre-Active refusal and defers the disregard, with the establishment
+  timeout it needs, to #514.
+- **G092-R2-003** (a synchronous parseability preflight before the guards): not taken. Owner ruling
+  O-2 moves the resource case to #515; within 092 every late site closes terminally.
+- **G092-R2-004** (move the GapFill check before `check_inbound`, or roll back transactionally): moot.
+  The knob-off +1 row is deleted, and a late failure closes the session.
+- **G092-R2-005** (an overlay-probe-exhaustion cell, or surface overlay exhaustion as a status): not
+  taken. I-4 compares against `entries()`, which is exact, so no `find` equivalence is claimed.
+- **G092-R2-006** (a tolerant replay-specific scan, or validating stored frames through the replay
+  builder): not taken. A stored frame with no 35 is gap-filled, the fail-safe outcome, with an
+  admin-frame cell.
+- **G092-R2-007** (a profile-aware fallback reason): moot. The residual Reject is deleted.
+- **G092-R2-008** (preserve the overflow-vs-format distinction in `field_fault`): not taken. The
+  claim is narrowed instead and the differing C codes are pinned by a cell; the validator has no C
+  caller.
