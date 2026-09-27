@@ -2124,6 +2124,22 @@ want_status 1 "floor-callers/mutant-floor-removed"
 want_out 'passes NO hit floor' "floor-callers/mutant-floor-removed"
 ok "MUTANT floor-removed — the #299 defect itself is detected (disposition present, floor absent)"
 
+# --list-floored-lanes (the real-tree arm's lane source) refuses rather than
+# print an empty or partial set. The sandbox now holds only the floorless copy.
+STATUS=0; OUT="$(python3 "$FLOORCHK" --list-floored-lanes "$WFSAND" 2>&1)" || STATUS=$?
+want_status 2 "floor-callers/list-none-floored"
+want_out 'no call site passes a floor' "floor-callers/list-none-floored"
+mutate_wf tier3-libcxx.yml '
+import sys,pathlib
+p=pathlib.Path(sys.argv[1]); s=p.read_text(encoding="utf-8")
+old="      matrix:\n        preset:\n"
+assert s.count(old) == 1, "anchor missing"
+p.write_text(s.replace(old,"      matrix:\n        include: []\n        preset:\n",1),encoding="utf-8")'
+STATUS=0; OUT="$(python3 "$FLOORCHK" --list-floored-lanes "$WFSAND" 2>&1)" || STATUS=$?
+want_status 2 "floor-callers/list-unexpandable-matrix"
+want_out 'cannot expand the floored lane' "floor-callers/list-unexpandable-matrix"
+ok "--list-floored-lanes refuses an empty set and a matrix it cannot expand"
+
 # Direction 2 — THE DEFECT WEARING A FIX'S CLOTHING: a floor added to a lane
 # whose argument 2 is an EMPTY literal. It looks enforced in the diff and can
 # never evaluate, because the fatal branch is gated on restore == 'true'.
