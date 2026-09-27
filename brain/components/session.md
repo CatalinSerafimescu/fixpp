@@ -165,6 +165,35 @@ agent correctly treated this as a shortlist and re-derived, which is the intende
 ⚠️ **A limitation is open only if it is in the LIVE B&L file.** Resolved rows move to
 `spec/behaviors-and-limitations-closed.md`, so a repo-wide `grep L-0NN-` reports closed ones as open.
 
+## Test access to private `Session` state — read before giving a test one
+
+`Session` lives in a PUBLIC header (`include/fixpp/session/session.hpp`). There is one accepted way for
+a test to read its private state, and three tempting ones that are each defects.
+
+- **Wrong: `FIXPP_TEST_HOOKS` on a new test target.** The macro adds inline members inside `Session`,
+  but the linked library is compiled without it. Two definitions of one class in one program is an ODR
+  violation: ill-formed, no diagnostic required. The pattern already exists on `main` and is tracked as
+  fixpp#511. Do not extend it to another target.
+- **Wrong: an unconditional `friend struct …_test_access;` in `session.hpp`.** Any consumer can
+  define that struct and read every private member, so it is a public-API change that needs a Gate A
+  ruling. The transports' friend (`src/transport/asio_{plain,tls}_transport.hpp`) is safe only because
+  those headers are private, and that does not carry over to `include/fixpp/`.
+- **Wrong: a widely included test helper that newly includes `session.hpp`.** Every hooked target
+  that includes the helper then gains a new divergent-definition edge.
+- **Right, in this order:**
+  1. Look for a public observable.
+  2. If the state is genuinely private (`closed_drained` is: only `Session::close` writes it, and no
+     public signal implies it), put the test in a target that already defines the macro and already
+     reaches the same gated headers, e.g. `capi_send_recv_test`. Prove it with a census of the
+     macro-gated headers the new TU reaches, diffed against the existing TU, with a seeded arm.
+  3. Keep the accessor-using helper in a narrow header that `#error`s without the macro
+     (`tests/capi/capi_drain_support.hpp`).
+
+**Why this page says so:** PR #510 (091) Gate B rounds 2 and 3 each moved the defect instead of removing
+it: first the macro on a new target, then the public friend plus the helper edge. Round 3's triage
+ended the loop by first asking whether private access was needed at all. The records are in the parent
+repo, `decisions/speckit/091-data-field-bytes-gateb.md`.
+
 ## Runtime flows
 
 [`engine-accept-path`](./engine-accept-path.md) · [`initiator-connect-path`](./initiator-connect-path.md) ·

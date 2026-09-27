@@ -6,6 +6,11 @@ status: stable
 
 # Log
 
+- **2026-09-27 — 091 (PR #510), test access to private `Session` state.** `components/session.md` gains
+  a section on how a test may read private `Session` state. It is not an unconditional friend in the
+  public header, and not `FIXPP_TEST_HOOKS` on a new target. The test goes in an already-hooked target,
+  proven by a census of the macro-gated headers it reaches. What was rejected, and why, is PR #510's
+  Gate B rounds 2–3. The pre-existing repo-wide pattern is fixpp#511.
 - **2026-09-23 — B13 (#495 / #493 / #486), a shared reify table, copies that keep their caps.**
   `components/dictionary.md`'s eager-reify section gains the owned route: a reify of a
   `Session`-dispatched view shares the table by reference count and pins the table only, never the
