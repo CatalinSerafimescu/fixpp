@@ -312,8 +312,11 @@ CLAUDE.md: a comment may record a procedure, not a result).
   `fault_length_tag()` and that the yielded sequence equals the pre-092 sequence. Each runs under
   the standard, dictionary-only and `none()` hooks.
 - **Validator.**
-  - One per fault kind over a view built with hooks that differ from the validator's (the only way
-    to reach it). Each asserts the returned error and `*ref_tag_out`.
+  - One per fault kind, reached through the public API. The malformed-tag cells construct
+    `MessageView<Index>` directly and assert its failed `build_status()` before validating (a
+    malformed tag fails `OffsetTable::build` whatever the hooks, so differing hooks cannot reach
+    it). The Length/Data cells build under one hook set and validate under a differing set. Each
+    asserts the returned error and `*ref_tag_out`.
   - A T1 cell asserting `wire_invalid_tag_number`, not `wire_unexpected_tag`.
   - Clean controls over well-formed messages whose view uses the validator's own hooks, one
     carrying a standard Length+Data pair and one a dictionary-only pair. Each asserts the result is

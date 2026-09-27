@@ -37,6 +37,12 @@ Expected after the change:
 - **D-5 advance witness**: a faulty application message at N, then a conformant one at N+1. The
   second is delivered with no ResendRequest (SC-003). Repeated for Reject(3) and Logout(5) as the
   faulty frame (the no-reject-loop supersession), and with `validate_sequence_numbers` off (FR-011).
+  With the knob off, delivery alone cannot witness the advance: a too-high frame is delivered
+  without advance and without a ResendRequest (Guard 4's knob-off S4 path). So the knob-off arm also
+  asserts the inbound counter directly through `SeqnumManager::next_inbound_unsafe()` (as
+  `tests/session/test_validation_compat_toggles.cpp` reads it): N+1 after the faulty frame and N+2
+  after the conformant one. It goes RED in a scratch copy when the disposer skips
+  `consume_rejected_seqnum_`.
 - **D-5 persistence** (FR-013, #423 precedent): a `092 disposer (D-5)` case, a faulty application
   frame at seq 2 (field 3 is 35, a malformed tag after 34), is added to both
   `PersistentSeqnumHydrate.RejectedInSequence_AdvanceIsPersisted` and
@@ -53,7 +59,8 @@ Expected after the change:
     needs no new case: it is `emit_session_reject_`'s unchanged body.
 - **D-4 no-advance witness**: the same pair with a faulty SequenceReset at N. The next message draws
   a ResendRequest. With `validate_sequence_numbers` off, the cell pins the inherited outcome: the
-  counter stays at N and later frames are delivered without advancing (research R-4).
+  counter stays at N, asserted directly as `next_inbound_unsafe() == N`, and later frames are
+  delivered without advancing (research R-4).
 - **D-6**: faulty frames at too-low and too-high 34, each with and without PossDupFlag=Y. Each gets a
   Reject, no advance, no ResendRequest and no too-low Logout.
 - **D-7**: a fault before 34, and a `34=abc` before the fault. Expected: no outbound message,

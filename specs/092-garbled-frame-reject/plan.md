@@ -1,9 +1,9 @@
 # Implementation Plan: The session never acts on a frame it could not parse
 
-**Branch**: `092-garbled-frame-reject` | **Date**: 2026-09-27 (Gate A round 2 rewrite) | **Spec**: [spec.md](./spec.md)
+**Branch**: `092-garbled-frame-reject` | **Date**: 2026-09-27 (post-round-3 clarify/plan refresh; Gate A loop 2) | **Spec**: [spec.md](./spec.md)
 
 **Input**: Feature specification from `specs/092-garbled-frame-reject/spec.md` (clarified 2026-09-27;
-Gate A round 1 and round 2 owner rulings integrated)
+Gate A round 1 and round 2 owner rulings integrated; post-round-3 clarify/plan refresh; Gate A loop 2)
 
 ## Summary
 
@@ -100,12 +100,12 @@ Plus tests, two benches and docs.
 | VIII §2 perf | paired merge-base A-B-A-B, +5% budget | Two benches land bench-only first and are listed in `bench/ci-suite.txt` (R-9) |
 | VIII §5 zero-alloc | no heap between parse and callback | Held: plain members, an inline branch, a constant Text |
 | IX sanitizers / coverage | per-line coverage assessment | `/speckit-verify` matrix. The fault branches are covered by the corpus and the cells |
-| X ABI | C-ABI changes versioned; public C++ API additive | **Yes — `[const §X.7]` BREAKING, C-ABI 1.10** (owner ruling 2026-09-27, FR-017). No symbol, signature or error code is added. The change is in which Logons are accepted, plus D-3's disconnect, observed by the calls research R-8's recipe derives. The procedure is Phase 0b. The C++ additions are source-compatible: `build_reject_with_text` is a new name and `build_reject` keeps its single declaration (contract C-4). `§X.6` Appendix A controls: `/clarify` ✅ (Session 2026-09-27 and Gate A round 1 rulings); `/analyze` ⏳ after `/speckit-tasks`; Gate A ⏳ (round 2 applied, see §Gate A); user `/plan` sign-off ⏳ after Gate A converges |
+| X ABI | C-ABI changes versioned; public C++ API additive | **Yes — `[const §X.7]` BREAKING, C-ABI 1.10** (owner ruling 2026-09-27, FR-017). No symbol, signature or error code is added. The change is in which Logons are accepted, plus D-3's disconnect, plus C-6's close at a dispatch site, observed by the calls research R-8's recipe derives. The procedure is Phase 0b. The C++ additions are source-compatible: `build_reject_with_text` is a new name and `build_reject` keeps its single declaration (contract C-4). `§X.6` Appendix A controls: `/clarify` ✅ (Session 2026-09-27 and Gate A round 1 rulings); `/analyze` ⏳ after `/speckit-tasks`; Gate A ⏳ (loop 2 in progress, see §Gate A); user `/plan` sign-off ⏳ after Gate A converges |
 | XI concurrency | — | Not touched: the disposition runs inside the existing per-session strand coroutine |
 | XII security | fail closed | This feature *closes* fail-opens: acting on unparsed bytes, and accepting a Logon with a malformed tag |
 | XVI §3–4 | `/clarify` and `/analyze` mandatory (session FSM, error semantics, parser) | `/clarify` done; `/analyze` due after `/tasks` |
 | XVI §6 | the orchestrator does not implement | Implementation is delegated to `phase-implementer`, with mutation proofs in a scratch copy |
-| XVII §1 Gate A | parser + session FSM + public C++ API + C-ABI → required | **Required before `/tasks`**; round 2 applied |
+| XVII §1 Gate A | parser + session FSM + public C++ API + C-ABI → required | **Required before `/tasks`**; loop 2 in progress (see §Gate A) |
 | XVII §7 | local build gate before PR; builds need owner approval | Planned; ASK before each build |
 
 **Result: PASS**, with the §X.7 BREAKING declaration as a sanctioned pre-release change, not a
@@ -252,7 +252,7 @@ apart from new test sources, two bench sources and the fuzz arm.
 
 ## Post-design Constitution re-check
 
-Re-run after the Gate A round 2 artifacts: **PASS**.
+Re-run after the Gate A round 2 artifacts: **PASS**. The post-round-3 refresh and Gate A loop 2 edits are text-only (no design change), so this re-check was not re-run for them.
 - **No allocation and no new concurrency** are added. The clean path gains one inline compare.
 - **C-ABI 1.10** is a declared BREAKING pre-release change (`[const §X.7]`), and the Appendix A
   controls are tracked in the Constitution Check.
@@ -277,6 +277,7 @@ pre-release procedure, owner-ruled.
 - Round 1 applied 2026-09-27: Codex P1=5 P2=6 P3=2; Opus post-judging P1=3 P2=4 P3=13; rewrite addresses root causes #1–#5; owner rulings: C-ABI 1.10 BREAKING, FR-012 kept and fully specified. Reviews: research/reviews/codex_092-garbled-frame-reject_gate_a_review.md, research/reviews/opus_092-garbled-frame-reject_gate_a_adversarial_review.md.
 - Round 2 applied 2026-09-27: Codex P1=5 P2=2 P3=1; Opus post-judging P1=2 P2=1 P3=1; rewrite addresses root causes A, B, C and R2-008; owner rulings O-1 (framing disregard → #514, 092 keeps L-004-4) and O-2 (resource case → #515, late sites fail-closed). Reviews: research/reviews/codex_092-garbled-frame-reject_gate_a_2_review.md, research/reviews/opus_092-garbled-frame-reject_gate_a_2_adversarial_review.md.
 - Round 3 exhausted 2026-09-27: Codex P1=0 P2=3 P3=3; Opus post-judging P1=0 P2=2 P3=4. Owner chose "re-run /clarify then /plan": spec.md Clarifications "Session 2026-09-27 (after Gate A round 3)" answered R3-001..R3-005; this plan refresh applies them plus R3-006. Reviews: research/reviews/codex_092-garbled-frame-reject_gate_a_3_review.md, research/reviews/opus_092-garbled-frame-reject_gate_a_3_adversarial_review.md. Next: a fresh /gate-a loop.
+- Loop 2, round 1 applied 2026-09-27: Codex P1=0 P2=1 P3=2; Opus post-judging P1=0 P2=2 P3=3; text edits only (L2R1-001 SC restatement, L2-NEW-A knob-off next_inbound assertion, P3 wording). Reviews: research/reviews/codex_092-garbled-frame-reject_gate_a_loop2_review.md, research/reviews/opus_092-garbled-frame-reject_gate_a_loop2_adversarial_review.md.
 
 ### Round 1 — how each root cause was addressed
 

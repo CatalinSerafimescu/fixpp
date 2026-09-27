@@ -144,7 +144,7 @@ answers one peer frame. The bound cell is quickstart §1 "reject-loop bound".
 **C-ABI 1.10, BREAKING (`[const §X.7]`; owner ruling 2026-09-27, FR-017):**
 - No symbol, signature or error code is added.
 - What changes is which inbound Logons are accepted, plus D-3's disconnect of an established
-  session, plus C-6's close on a late parse failure at a dispatch site. Both are observed through the calls FR-020 of 091 named: `fixpp_session_is_established`,
+  session, plus C-6's close on a late parse failure at a dispatch site. Each is observed through the calls FR-020 of 091 named: `fixpp_session_is_established`,
   `fixpp_session_close`, `fixpp_session_send`, `fixpp_session_register_callback` and
   `fixpp_session_register_send_callback`.
 - The population is re-derived with 091's recipe (research R-8). The carriers and the procedure are

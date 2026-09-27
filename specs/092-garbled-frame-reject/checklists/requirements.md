@@ -2,7 +2,7 @@
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning
 **Created**: 2026-09-27
-**Updated**: 2026-09-27 (Gate A round 2 rewrite)
+**Updated**: 2026-09-27 (post-round-3 clarify/plan refresh; Gate A loop 2, round 1)
 **Feature**: [spec.md](../spec.md)
 
 ## Content Quality
@@ -15,7 +15,7 @@
 ## Requirement Completeness
 
 - [x] No [NEEDS CLARIFICATION] markers remain
-- [x] Requirements are testable and unambiguous — the items once deferred are resolved in spec.md Clarifications: 373=5 for shape (A) (FR-007), Reject-only with no identity disconnect (FR-002), and the pre-Active disposition (FR-009, FR-015)
+- [x] Requirements are testable and unambiguous — the items once deferred are resolved in spec.md Clarifications: 373=5 for shape (A) (FR-007), Reject-only with no identity disconnect (FR-002), and the pre-Active disposition (FR-009, FR-015). Gate A loop 2 restated SC-002/SC-003 over contract C-2's columns (state, field 3 is 35, 34 read, MsgType), so no SC implies a Reject that C-2 does not send
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details) — except SC-009 (the C-ABI version pin), which is the owner-ruled declaration itself
 - [x] All acceptance scenarios are defined
@@ -47,7 +47,8 @@
   BREAKING (FR-017), and FR-012 kept and fully specified. Gate A round 2 added two more (spec.md
   "Session 2026-09-27 (Gate A round 2)"): O-1, a Framer failure stays session-fatal and its
   disregard is fixpp#514 (FR-008, FR-009); O-2, a late parse failure is fail-closed and the resource
-  case is fixpp#515 (FR-016).
+  case is fixpp#515 (FR-016). Session "2026-09-27 (after Gate A round 3)" answered R3-001..R3-005;
+  the plan refresh applied them plus R3-006 (plan.md §Gate A).
 - **Gate A** is required (Art. XVII §1: parser, session FSM, public C++ API and C ABI). Rounds 1
-  and 2 are applied. Its status and the recorded disagreements are in plan.md §Gate A. The former open item
+  and 2 are applied, round 3 was exhausted, and loop 2 round 1 is applied. Its status and the recorded disagreements are in plan.md §Gate A. The former open item
   A-4 (whether a C-ABI version note is needed) is resolved by the owner ruling.

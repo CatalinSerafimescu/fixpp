@@ -4,7 +4,7 @@
 
 **Created**: 2026-09-27
 
-**Status**: Draft (Gate A round 2 rewrite applied 2026-09-27)
+**Status**: Draft (post-round-3 clarify/plan refresh; Gate A loop 2, round 1 applied 2026-09-27)
 
 **Input**: User description: "B18 / fixpp#507 — the session must never act on an inbound frame that
 passes framing but fails the parse; its disposition follows the owner ruling of 2026-09-27 (issue
@@ -183,6 +183,11 @@ framing but fails the parse. The session must not change its sequence state, rep
 TestRequest, resend anything, or log out because of that frame's contents. It answers with a
 session Reject, so the counterparty learns the frame was malformed.
 
+Scope of User Stories 1 and 2 and of the Reject edge cases below: the session is in LogonReceived or
+Active, the frame's third field is MsgType(35), and its MsgSeqNum(34) was read before the fault
+(contract C-2 D-4 to D-6). A faulty Logon is User Story 3 (D-1 to D-3); a frame whose MsgSeqNum or
+MsgType position cannot be trusted is User Story 4 (D-7, D-8); LogoutSent is D-9.
+
 **Why this priority**: This is the defect #507 files. Acting on a frame fixpp itself judged
 malformed lets malformed bytes move the session's sequence numbers (a SequenceReset to 500 is
 applied today).
@@ -218,6 +223,8 @@ A counterparty sends an application message (e.g. NewOrderSingle) that passes fr
 parse. Today it is persisted as received and its sequence number consumed, but it is never delivered
 and never rejected. After this feature the counterparty receives a session Reject that identifies
 the message, and can resend it with a new MsgSeqNum (FIX-SL 2020 §4.5.4).
+
+The scope stated under User Story 1 applies.
 
 **Why this priority**: silent loss of a business message. Neither side learns of it.
 
@@ -390,7 +397,7 @@ the missing number, and the session stays connected.
   every input that is not a valid Logon (contract C-2 cites the source). The pre-Active disregard of
   a frame whose third field is not 35 is fixpp#514, which adds the establishment timeout it needs.
   The refusal is the arm's silent transition to Disconnected. No Reject and no Logout are sent. Once
-  Active, a Logon that fails the parse (third field MsgType, MsgSeqNum read) is also refused this
+  in LogonReceived or Active, a Logon that fails the parse (third field MsgType, MsgSeqNum read) is also refused this
   way, never Rejected.
 - **FR-010**: A SequenceReset (Reset or GapFill mode) that fails the parse MUST NOT change NextNumIn
   through NewSeqNo(36), whatever its MsgSeqNum.
@@ -410,8 +417,8 @@ the missing number, and the session stays connected.
   The Parser field iterator MUST report every such fault through a read-only accessor, without
   changing what it yields. The new error values, their C mapping and every oracle that enumerates
   errors are part of this requirement (data-model.md E-0, E-4 to E-6; research R-7). Today the
-  validator's silent stop is reachable only through the public API, when the view was built under
-  hooks that differ from the validator's.
+  validator's silent stop is reachable only through the public API: a directly constructed
+  `MessageView` whose build failed, or a view built under hooks that differ from the validator's.
 - **FR-013**: Every Reject sent under this feature MUST be persisted and emitted like any other
   outbound session Reject: sequence number assigned, toAdmin observed, stored before sent. Where
   the Reject advances NextNumIn (FR-004), the advance MUST be persisted BEFORE the Reject is emitted,
@@ -472,16 +479,21 @@ the missing number, and the session stays connected.
   malformed tag, validation on or off) draw a Reject for the SequenceReset, with the exact 373 and
   371 of FR-007. The probe at MsgSeqNum 500 draws a ResendRequest (the reset was not applied). Today
   all four apply the reset.
-- **SC-002**: For every admin message type, including Reject and Logout, and one application type, a
-  frame that fails the parse at the expected MsgSeqNum produces exactly one Reject and no other
-  outbound message. The application callback is never invoked for it. Each cell asserts the exact
-  373 and 371.
-- **SC-003**: A frame that fails the parse at the expected MsgSeqNum, followed by a conformant
-  message at the next MsgSeqNum, delivers the conformant message with no ResendRequest (advance
-  witnessed). The same pair with the malformed frame being a SequenceReset draws a ResendRequest (no
-  advance).
+- **SC-002**: In LogonReceived and in Active, a frame that fails the parse, whose third field is
+  MsgType(35) and whose MsgSeqNum was read and equals the expected number, produces exactly one
+  Reject and no other outbound message for every MsgType other than Logon(A) (contract C-2 D-4,
+  D-5), including Reject(3), Logout(5), SequenceReset(4) and one application type. The application
+  callback is never invoked for it. Each cell asserts the exact 373 and 371. A faulty Logon is
+  refused, never Rejected (D-3, SC-004). Before Active (D-1/D-2), in LogoutSent (D-9), and when
+  field 3 is not 35 or 34 was not read (D-7/D-8), no Reject is sent.
+- **SC-003**: Under the same conditions as SC-002, a faulty frame of any MsgType other than Logon(A)
+  or SequenceReset(4) (contract C-2 D-5), followed by a conformant message at the next MsgSeqNum,
+  delivers the conformant message with no ResendRequest (advance witnessed). The same pair with the
+  faulty frame being a SequenceReset (D-4) draws a ResendRequest (no advance).
 - **SC-004**: A Logon with a malformed tag is refused in 100% of cells: acceptor and initiator, all
-  three profiles. It is also observed through every C-ABI observer FR-017 names.
+  three profiles. It is also observed through every C-ABI observer FR-017 names. A faulty Logon in
+  LogonReceived or Active (third field MsgType, MsgSeqNum read) ends in a silent Disconnected with no
+  Reject (D-3).
 - **SC-005**: In Active, a frame whose malformed field precedes MsgSeqNum, or whose third field is
   not MsgType, leaves the session connected and draws no outbound message. The next valid message draws a
   ResendRequest.
@@ -502,7 +514,8 @@ the missing number, and the session stays connected.
   converge. The disregard rows' loop and the malformed-GapFill disconnect are pinned as disclosed
   outcomes (contract C-5). The live QuickFIX interop cell is a follow-up issue placed in B17.
 - **SC-008**: A well-formed frame above the measured parse ceiling, at each late inbound parse site
-  research R-4 derives, closes the session: no Reject, no callback, never read as success. Each
+  research R-4 derives, closes the session: no Reject, the parse target's receive callback (`fromAdmin`/`fromApp`) not
+  invoked (FR-016 scope), never read as success. Each
   site's cell goes RED when that site's close is deleted.
 - **SC-009**: The C-ABI version test pins 1.10, is RED against 1.9, and turns RED again under a
   mutant back to 9.
