@@ -61,6 +61,24 @@ venue specs, and a Fable consult):
 
 ---
 
+## Clarifications
+
+### Session 2026-09-27
+
+- Q: Which SessionRejectReason(373) does a malformed Length+Data pair carry? → A: **5** (Value is
+  incorrect (out of range) for this tag), with RefTagID(371) = the Length tag.
+- Q: If a wrong SenderCompID/TargetCompID was read before the failure point, does the session still
+  disconnect? → A: **No — Reject only.** The parse-failure disposition runs before the identity and
+  SendingTime guards, and no identity field of a failed frame is read.
+- Q: Before the session is Active, what happens to a frame that passes framing but fails the parse?
+  → A: **Awaiting the first Logon (acceptor) or the Logon reply (initiator): refuse and disconnect
+  through the Logon refusal path, whatever its MsgType. LogoutSent: ignore it (no Reject); it is not
+  taken as the Logout reply, and the logout timeout runs as usual.**
+- Q: How is SC-007 (no stall against QuickFIX) proven? → A: **In-process, with a scripted peer that
+  sends the raw malformed bytes and handles our Reject as QuickFIX's `nextReject` does (source-cited).
+  The live QuickFIX interop cell is a follow-up issue, placed in B17, which already republishes the
+  counterparty image.**
+
 ## User Scenarios & Testing *(mandatory)*
 
 The "user" is an operator running a fixpp session against a counterparty whose encoder produces a
@@ -89,8 +107,8 @@ applied), and the SequenceReset must have drawn a Reject.
    RefSeqNum=2, RefMsgType=4 and SessionRejectReason=0, does not advance NextNumIn, and does not apply
    NewSeqNo.
 2. **Given** the same session, **When** the same SequenceReset arrives with a malformed Length+Data
-   pair after MsgSeqNum, **Then** the outcome is the same, except SessionRejectReason is the
-   Length+Data code and RefTagID names the Length tag (FR-007).
+   pair after MsgSeqNum, **Then** the outcome is the same, except SessionRejectReason=5 and
+   RefTagID names the Length tag (FR-007).
 3. **Given** the same session, **When** a TestRequest that fails the parse arrives at the expected
    MsgSeqNum, **Then** no Heartbeat is sent in reply, a Reject is sent, and NextNumIn advances.
 4. **Given** the same session, **When** a ResendRequest that fails the parse arrives, **Then**
@@ -180,12 +198,13 @@ the missing number, and the session stays connected.
 - **A Reject that fails the parse** (35=3): it follows FR-003/FR-004. It is never answered with a
   Reject that triggers a Reject loop (the existing no-reject-on-inbound-Reject rule holds).
 - **Wrong CompID or BeginString** on a frame that also fails the parse: no identity field of the
-  frame is acted on (FR-001). Whether the identity check still runs on fields scanned before the
-  failure point is settled in `/speckit-clarify` (see Assumptions A-3).
+  frame is acted on (FR-001), even one read before the failure point. The frame gets FR-003–FR-006;
+  the peer's next well-formed frame meets the identity check as usual.
 - **More than one malformed field**: the first failure point decides FR-006 and the reason code.
-- **Before Active** (NotConnected, LogonSent, LogoutSent): a non-Logon frame that fails the parse is
-  never acted on; its disposition follows what that state already does with an unexpected frame,
-  and it is never answered with a Reject that consumes a sequence number before logon.
+- **Before Active**: awaiting the first Logon (acceptor) or the Logon reply (initiator), any frame
+  that fails the parse, whatever its MsgType, is refused through the Logon refusal path (FR-009).
+  In LogoutSent, it is ignored (no Reject) and is not taken as the Logout reply; the logout timeout
+  runs as usual (FR-015).
 - **A frame that fails framing** (§4.5.2): unchanged. Ignored, no Reject, no advance (FR-008).
 
 ## Requirements *(mandatory)*
@@ -197,8 +216,8 @@ the missing number, and the session stays connected.
   MsgSeqNum(34) and MsgType(35) MAY be read, from bytes before the failure point, only to address
   and account for the Reject (FR-003 to FR-006). A parse failure MUST NOT read as "no reject" or
   "dispatch succeeded".
-- **FR-002**: A parse failure MUST be decided before any handler acts on the frame: before the
-  SequenceReset, Logout, TestRequest, ResendRequest, Heartbeat and application handlers, and before
+- **FR-002**: A parse failure MUST be decided before any handler or guard acts on the frame: before
+  the identity (BeginString/CompID) and SendingTime guards, and before the SequenceReset, Logout, TestRequest, ResendRequest, Heartbeat and application handlers, and before
   the sequence-gap, too-low and PossDup arms.
 - **FR-003**: When MsgSeqNum(34) was read from well-formed bytes before the failure point, and the
   message is not a Logon, the session MUST send a session Reject(35=3) with RefSeqNum(45) =
@@ -210,13 +229,17 @@ the missing number, and the session stays connected.
 - **FR-006**: When MsgSeqNum(34) was not read from well-formed bytes before the failure point, the
   frame MUST be ignored as garbled: no Reject, no advance, no disconnect, and a log entry.
 - **FR-007**: SessionRejectReason(373) MUST be 0 (Invalid tag number) with RefTagID(371) omitted for
-  shape (B). For shape (A) it MUST be 5 (value incorrect for this tag) or 6 (incorrect data format),
-  chosen in `/speckit-clarify`, with RefTagID(371) = the Length tag. The reason mapping MUST express
+  shape (B). For shape (A) it MUST be 5 (Value is incorrect (out of range) for this tag), with
+  RefTagID(371) = the Length tag. The reason mapping MUST express
   both; today both shapes map to 3.
 - **FR-008**: A frame that fails a framing criterion (FIX-SL 2020 §4.5.2) keeps its current handling:
   ignored, no Reject, no advance.
-- **FR-009**: A Logon that passes framing but fails the parse MUST be refused through the existing
-  Logon refusal path, for both shapes, as acceptor and as initiator. No Reject is sent.
+- **FR-009**: Any frame that passes framing but fails the parse while the session awaits the first
+  Logon (acceptor) or the Logon reply (initiator) MUST be refused through the existing Logon refusal
+  path, whatever its MsgType, for both shapes. No Reject is sent. Once Active, a Logon that fails the
+  parse is also refused this way (never Rejected).
+- **FR-015**: In LogoutSent, a frame that passes framing but fails the parse MUST be ignored: no
+  Reject, no advance, and it MUST NOT be taken as the Logout reply. The logout timeout runs as usual.
 - **FR-010**: A SequenceReset (Reset or GapFill mode) that fails the parse MUST NOT change NextNumIn
   through NewSeqNo(36), whatever its MsgSeqNum.
 - **FR-011**: The behaviour MUST NOT depend on the inbound-validation setting, the session profile
@@ -235,8 +258,8 @@ the missing number, and the session stays connected.
 
 - **Failure point**: the byte position of the first field that could not be parsed. Only fields
   wholly before it can be read for FR-001's exception.
-- **Frame disposition**: one of *ignore as garbled* (FR-006, FR-008), *Reject* (FR-003–FR-005), or
-  *Logon refusal* (FR-009).
+- **Frame disposition**: one of *ignore as garbled* (FR-006, FR-008, FR-015), *Reject*
+  (FR-003–FR-005), or *Logon refusal* (FR-009).
 
 ## Success Criteria *(mandatory)*
 
@@ -258,8 +281,10 @@ the missing number, and the session stays connected.
   no outbound message; the next valid message draws a ResendRequest.
 - **SC-006**: Each of SC-001 to SC-005 has a cell that goes RED when the mechanism is removed. That
   includes a cell that would pass if the parse failure were silently treated as "no reject".
-- **SC-007**: Against the QuickFIX/J and QuickFIX C++ counterparties, a session that receives one
-  malformed application message keeps delivering later messages: no stall of the B-423-1 kind.
+- **SC-007**: A session that receives one malformed application message keeps delivering later
+  messages: no stall of the B-423-1 kind. It is proven in-process against a scripted peer that sends
+  the raw malformed bytes and handles the Reject as QuickFIX J/C++ do (their `nextReject`, cited by
+  source). The live QuickFIX interop cell is a follow-up issue placed in B17.
 
 ## Assumptions
 
@@ -267,9 +292,9 @@ the missing number, and the session stays connected.
   `/speckit-plan` matter; today it reports neither a failure nor where it stopped.
 - **A-2** The Reject path is the existing session Reject machinery, extended with a Text(58) input.
   Today it has none.
-- **A-3** A frame that fails the parse is dispositioned before the identity (CompID/BeginString) and
-  SendingTime guards, since those would act on its fields. Whether a wrong CompID read before the
-  failure point should still disconnect is a `/speckit-clarify` question.
+- **A-3** (Resolved in Clarifications, 2026-09-27.) A frame that fails the parse is dispositioned
+  before the identity and SendingTime guards; a wrong CompID read before the failure point does not
+  disconnect (FR-002).
 - **A-4** No new C-ABI entry point or configuration. Whether the peer-visible change needs a C-ABI
   version note is a Gate A question; the C-ABI surface itself does not change (the receive callback
   was already not invoked for such frames).
@@ -277,5 +302,6 @@ the missing number, and the session stays connected.
   frame advances past itself at the expected MsgSeqNum, so the B-423-1 loop does not arise.
 - **A-6** The interop counterparties run default settings. QuickFIX J/C++ both process an inbound
   Reject(35=3) as an admin message and advance their own counter.
-- Out of scope: a resend-loop guard; LFIXT; detecting a Length+Data mismatch in counterparties;
+- Out of scope: the live QuickFIX interop cell for SC-007 (a follow-up issue placed in B17, whose
+  counterparty-image republish it needs); a resend-loop guard; LFIXT; detecting a Length+Data mismatch in counterparties;
   fuzz-harness coverage of library code (#508).
