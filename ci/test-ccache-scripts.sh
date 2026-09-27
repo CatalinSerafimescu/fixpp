@@ -731,8 +731,10 @@ if s.count(old) != 1:
 open(p, "w", encoding="utf-8").write(s.replace(old, new))
 PY
   cmp -s "$FS_BASE/$4" "$t/$4" && fail "flag-arm '$2': the mutation left $4 unchanged"
-  base="$(flag_digest "$FS_BASE" "$3" "$FS_HOST_OR_LANE")"
-  mut="$(flag_digest "$t" "$3" "$FS_HOST_OR_LANE")"
+  # `|| true`: under set -e a failed extract would end the harness here with
+  # no message; the empty-digest check below names it instead.
+  base="$(flag_digest "$FS_BASE" "$3" "$FS_HOST_OR_LANE")" || true
+  mut="$(flag_digest "$t" "$3" "$FS_HOST_OR_LANE")" || true
   if [ -z "$base" ] || [ -z "$mut" ]; then
     ARM_FAILS="$ARM_FAILS
   $1/$2: no digest (base='$base' mutated='$mut')"
@@ -835,8 +837,8 @@ ok "every flag mechanism ROTATES the digest; comments, layout and non-flag code 
 # ── NON-EMPTY: the extract really contains the flags the arms reason about ──
 # A parser that silently dropped everything would print a constant, and every
 # KEEP arm above would pass on it.
-HOST_SURFACE="$(flag_surface "$FS_BASE" host "$FS_HOST")"
-WHEEL_SURFACE="$(flag_surface "$FS_BASE" wheel "$IDENT_LANE")"
+HOST_SURFACE="$(flag_surface "$FS_BASE" host "$FS_HOST")" || true
+WHEEL_SURFACE="$(flag_surface "$FS_BASE" wheel "$IDENT_LANE")" || true
 for want in '-Wno-attributes=clang::lifetimebound' '-fsanitize=address' 'set CMAKE_CXX_STANDARD 23' '-stdlib=libc++' '"FIXPP_WERROR": "ON"' \
     'src/log/CMakeLists.txt: target_compile_definitions fixpp_log PUBLIC FIXPP_LOG_MIN_LEVEL=${FIXPP_LOG_MIN_LEVEL}' \
     'set FIXPP_LOG_MIN_LEVEL 2 CACHE STRING'; do
