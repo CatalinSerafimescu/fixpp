@@ -3,11 +3,14 @@
 
     ci/ccache-flag-surface.py host <preset>   # a CMakePresets.json lane
     ci/ccache-flag-surface.py wheel <lane>    # a container (wheel) lane
+    ci/ccache-flag-surface.py --list-inputs   # the lane-independent input files
 
 Run from the library root. Prints a normalized text; ci/ccache-cache-key.sh
 (`ccache_flag_digest`) hashes it into the tag. Exits non-zero, printing why on
 stderr, when any input cannot be read or parsed. A partial surface would be a
 STABLE WRONG key that restore and seed agree on, so there is no fallback.
+`--list-inputs` prints the files every lane's extract reads (the per-lane
+preset and Conan profile are not in it), so a harness can copy exactly those.
 
 ── WHY A NORMALIZED EXTRACT, NOT THE FILES' BYTES ─────────────────────────────
 
@@ -17,35 +20,51 @@ rotate on a comment or whitespace edit (else every such edit costs each lane a
 cold re-seed). So the files are parsed, comments and layout are dropped, and
 only the commands that can change a compile command line are kept:
 
-  * CMake — the root CMakeLists.txt and every cmake/*.cmake (the root-scope
-    modules): flag commands (FLAG_COMMANDS), `set`/`unset`/`string`/`list` of a
-    flag variable (FLAG_VAR), property commands naming a flag property,
-    `option()` as name + default (its docstring is dropped), `include()`,
-    top-level `return()`, and any command that CALLS a flag-bearing function.
+  * CMake — the root CMakeLists.txt, every cmake/*.cmake (the root-scope
+    modules), and every CMakeLists.txt an `add_subdirectory()` reaches from the
+    root, followed whatever `if()` encloses it. Kept: flag commands
+    (FLAG_COMMANDS), `set`/`unset`/`string`/`list` of a flag variable
+    (FLAG_VAR), property commands naming a flag property, `option()` as name +
+    default (its docstring is dropped), `include()`, top-level `return()`, and
+    any command that CALLS a flag-bearing function.
     Each is emitted with every head of every enclosing if/elseif/else, loop
     and block, so an edit to a GATING CONDITION rotates the tag too.
     A function or macro is flag-bearing if its body holds any of the above or
     calls another flag-bearing one (fixpoint); its WHOLE normalized body is
     emitted, because control flow inside it (`return()`, `continue()`, an
     exemption check) decides where its flags land.
+    VARIABLE CLOSURE: every variable a kept line reads — as `${VAR}`, or as a
+    bare name in an if/elseif/while head — pulls in each directory-scope
+    `set`/`unset`/`option` of VAR and each `string`/`list` naming VAR, and so
+    on to a fixpoint, so a default set in one file and handed to a flag
+    command in another rotates the tag. A `set(... CACHE <type> <docstring>)`
+    drops its docstring, as `option()` does.
   * host lanes — the preset's cacheVariables and environment resolved through
     `inherits`, and conan/profiles/<preset> with comments dropped (its
     `tools.build:cxxflags` reach every first-party TU via the toolchain).
   * the wheel lane — the scikit-build and cibuildwheel keys of
-    bindings/python/pyproject.toml that feed the CMake command line.
+    bindings/python/pyproject.toml that feed the CMake command line;
+    bindings/python/cibw-before-all.sh with whole-line comments and blank lines
+    dropped (its `conan install` settings generate the wheel's toolchain file);
+    and the `CIBW_ENVIRONMENT` value of the `id: wheel_build` step in
+    .github/workflows/tier1.yml, read alone so the rest of that workflow never
+    rotates the wheel tag.
 
 ── WHAT IS NOT COVERED — a CONDITION to re-check, not an inventory ────────────
 
-Anything outside those files: flags set in a subdirectory CMakeLists (including
-a PUBLIC definition that propagates to dependents), flags reaching a flag
-command through a non-flag variable set elsewhere, `-D`/environment passed by a
-workflow step, Conan settings passed on a command line (the wheel's
-cibw-before-all.sh), and header CONTENT. When a floored lane breaches on a HIT,
+A variable written other than by `set`/`unset`/`option`/`string`/`list` (a
+value computed by another command, or inside a function that is not itself
+kept), a CMake file reached other than through `include()` of cmake/*.cmake or
+`add_subdirectory()`, `-D`/environment passed by a workflow step other than the
+wheel's `CIBW_ENVIRONMENT`, and header CONTENT.
+A trailing comment on a cibw-before-all.sh command line is hashed as part of
+that line, which only over-rotates. When a floored lane breaches on a HIT,
 check whether its cause lies in one of those; if it does, widen the surface
 here rather than dropping GHCR tags by hand.
 """
 
 import json
+import posixpath
 import re
 import sys
 from pathlib import Path
@@ -68,6 +87,11 @@ OPENERS = {"if": "endif", "foreach": "endforeach", "while": "endwhile",
            "block": "endblock", "function": "endfunction", "macro": "endmacro"}
 CLOSERS = set(OPENERS.values())
 BRANCHES = {"elseif", "else"}
+VAR_REF = re.compile(r"\$\{([^${}]+)\}")
+BARE_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+CIBW_BEFORE_ALL = "bindings/python/cibw-before-all.sh"
+WHEEL_WORKFLOW = ".github/workflows/tier1.yml"
+PYPROJECT = "bindings/python/pyproject.toml"
 
 
 class SurfaceError(Exception):
@@ -184,6 +208,11 @@ def fmt(cmd):
         # Name + default only: the docstring is prose, not a flag.
         default = args[2] if len(args) >= 3 else "OFF"
         return f"option {args[0]} {default}"
+    if name == "set" and "CACHE" in args[1:]:
+        # set(<var> <value>... CACHE <type> <docstring> [FORCE]): the
+        # docstring is prose, not a flag.
+        c = args.index("CACHE", 1)
+        args = args[:c + 2] + args[c + 3:]
     return " ".join([name] + args)
 
 
@@ -242,15 +271,69 @@ def calls_any(cmd, fns):
     return cmd[0] in fns or any(a.lower() in fns for a in cmd[1])
 
 
-def cmake_surface(files):
-    trees = []
-    for path in files:
-        try:
-            text = Path(path).read_text(encoding="utf-8")
-        except OSError as e:
-            raise SurfaceError(f"{path}: {e.strerror}") from None
-        trees.append((path, split_blocks(parse_cmake(text, path), path)))
+def assigns_any(cmd, names):
+    """A directory-scope write to a variable in `names` (the closure)."""
+    name, args = cmd
+    if name in ("set", "unset", "option"):
+        return bool(args) and args[0] in names
+    if name in ("string", "list"):
+        # The output variable's position depends on the sub-command.
+        return any(a in names for a in args)
+    return False
 
+
+def read_text(path):
+    """A file's text, or SurfaceError. A leading UTF-8 BOM is dropped (CMake
+    accepts one); any other undecodable byte is a failure, never a traceback."""
+    try:
+        return Path(path).read_text(encoding="utf-8-sig")
+    except OSError as e:
+        raise SurfaceError(f"{path}: {e.strerror}") from None
+    except UnicodeDecodeError as e:
+        raise SurfaceError(f"{path}: not UTF-8 ({e.reason} at byte {e.start})") from None
+
+
+def cmake_files():
+    """[(path, tree)]: the root CMakeLists.txt, cmake/*.cmake, then every
+    CMakeLists.txt reached through add_subdirectory() from the root.
+
+    add_subdirectory() is FOLLOWED rather than the tree globbed: a glob would
+    also see a build directory's _deps/, which exists when seed runs and not
+    when restore runs, and the two must compute the same key."""
+    files = [("CMakeLists.txt", None)] + [
+        (str(p), None) for p in sorted(Path("cmake").glob("*.cmake"))]
+    trees = []
+    for path, _ in files:
+        trees.append((path, split_blocks(parse_cmake(read_text(path), path), path)))
+    seen = {path for path, _ in trees}
+    i = 0
+    while i < len(trees):
+        path, tree = trees[i]
+        i += 1
+        if path != "CMakeLists.txt" and not path.endswith("/CMakeLists.txt"):
+            continue  # a cmake/*.cmake module is include()d, not a directory
+        for name, args in flat_commands(tree):
+            if name != "add_subdirectory":
+                continue
+            if not args:
+                raise SurfaceError(f"{path}: add_subdirectory() with no directory")
+            sub = args[0].strip('"')
+            if "$" in sub or posixpath.isabs(sub):
+                raise SurfaceError(
+                    f"{path}: add_subdirectory({args[0]}) is not a literal "
+                    "relative path, so the files it reaches cannot be listed")
+            child = posixpath.normpath(
+                posixpath.join(posixpath.dirname(path), sub, "CMakeLists.txt"))
+            if child.startswith("../"):
+                raise SurfaceError(f"{path}: add_subdirectory({args[0]}) leaves the tree")
+            if child in seen:
+                continue
+            seen.add(child)
+            trees.append((child, split_blocks(parse_cmake(read_text(child), child), child)))
+    return trees
+
+
+def cmake_surface(trees):
     # Every function/macro definition, wherever it sits.
     defs = {}
 
@@ -275,44 +358,66 @@ def cmake_surface(files):
                 flagfns.add(fname)
                 changed = True
 
-    out = []
+    def reads(cmd, refs):
+        """Add the variables `cmd` reads: every `${VAR}`, and, in an
+        if/elseif/while head, every argument that is a bare name (CMake
+        dereferences those itself)."""
+        for a in cmd[1]:
+            refs.update(m.group(1) for m in VAR_REF.finditer(a))
+            if cmd[0] in ("if", "elseif", "while") and BARE_NAME.fullmatch(a):
+                refs.add(a)
 
-    def emit_block_whole(block, indent):
+    def emit_block_whole(block, indent, out, refs):
         out.append(indent + fmt(block["head"]))
+        reads(block["head"], refs)
         for it in block["items"]:
             if isinstance(it, dict):
-                emit_block_whole(it, indent + "  ")
+                emit_block_whole(it, indent + "  ", out, refs)
             elif it[0] == "__branch__":
                 out.append(indent + fmt(it[1]))
+                reads(it[1], refs)
             else:
                 out.append(indent + "  " + fmt(it))
+                reads(it, refs)
         out.append(indent + block["close"])
 
-    def walk(path, items, ctx):
+    def walk(path, items, ctx, closure, out, refs):
         heads = []  # branch heads seen so far in the enclosing if-chain
         for it in items:
             if isinstance(it, dict):
                 head = it["head"]
                 if head[0] in ("function", "macro"):
                     if head[1] and head[1][0].lower() in flagfns:
+                        for h in ctx + heads:
+                            reads(h, refs)
                         emit_block_whole(it, f"{path}: " + "".join(
-                            h + " > " for h in ctx + heads))
+                            fmt(h) + " > " for h in ctx + heads), out, refs)
                     continue
-                walk(path, it["items"], ctx + heads + [fmt(head)])
+                walk(path, it["items"], ctx + heads + [head], closure, out, refs)
             elif it[0] == "__branch__":
                 # Only an if() body carries branch markers; every later branch
                 # depends on every earlier head of the same chain.
-                heads.append(fmt(it[1]))
+                heads.append(it[1])
             else:
                 # Function bodies are never walked here, so a return() seen
                 # here ends the FILE early and drops every flag after it.
                 if (is_direct_flag(it) or calls_any(it, flagfns)
-                        or it[0] == "return"):
-                    out.append(f"{path}: " + " > ".join(ctx + heads + [fmt(it)]))
+                        or it[0] == "return" or assigns_any(it, closure)):
+                    for c in ctx + heads + [it]:
+                        reads(c, refs)
+                    out.append(f"{path}: " + " > ".join(
+                        fmt(c) for c in ctx + heads + [it]))
 
-    for path, tree in trees:
-        walk(path, tree, [])
-    return out
+    # The variable closure: walk, collect every variable the kept lines read,
+    # walk again keeping the writes to those, until no new variable appears.
+    closure = set()
+    while True:
+        out, refs = [], set()
+        for path, tree in trees:
+            walk(path, tree, [], closure, out, refs)
+        if refs <= closure:
+            return out
+        closure |= refs
 
 
 # ── non-CMake inputs ─────────────────────────────────────────────────────────
@@ -355,7 +460,7 @@ def conan_profile(preset):
     if not path.is_file():
         return [f"conan-profile {preset}: absent"]
     lines = []
-    for raw in path.read_text(encoding="utf-8").splitlines():
+    for raw in read_text(path).splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
@@ -368,11 +473,10 @@ def conan_profile(preset):
 
 def wheel_pyproject():
     import tomllib
-    path = "bindings/python/pyproject.toml"
+    path = PYPROJECT
     try:
-        with open(path, "rb") as f:
-            cfg = tomllib.load(f)
-    except (OSError, ValueError) as e:
+        cfg = tomllib.loads(read_text(path))
+    except ValueError as e:
         raise SurfaceError(f"{path}: {e}") from None
     tool = cfg.get("tool", {})
     skb = tool.get("scikit-build", {})
@@ -391,19 +495,66 @@ def wheel_pyproject():
     return ["pyproject " + json.dumps(picked, sort_keys=True)]
 
 
+def wheel_before_all():
+    """cibw-before-all.sh minus whole-line comments, blank lines and layout."""
+    lines = []
+    for raw in read_text(CIBW_BEFORE_ALL).splitlines():
+        line = " ".join(raw.split())
+        if line and not line.startswith("#"):
+            lines.append(f"cibw-before-all: {line}")
+    return lines
+
+
+def wheel_cibw_environment():
+    """The CIBW_ENVIRONMENT value of the `id: wheel_build` step, read by text
+    so the extractor needs no YAML module and nothing else in the workflow
+    reaches the digest. Exactly one such step and one such key, on one line,
+    or a failure: a second key is the duplicate-key hazard the workflow warns
+    about, and a block scalar is a shape this reader does not parse."""
+    text = read_text(WHEEL_WORKFLOW).splitlines()
+    ids = [i for i, l in enumerate(text) if re.match(r"^\s*(?:-\s+)?id:\s*wheel_build\s*$", l)]
+    if len(ids) != 1:
+        raise SurfaceError(f"{WHEEL_WORKFLOW}: expected one 'id: wheel_build' step")
+    start = ids[0]
+    # The step's own keys sit at the id line's indent; a line indented less
+    # (the next `- ` step, or the next job) ends the step.
+    indent = len(text[start]) - len(text[start].lstrip(" -"))
+    j = start
+    while j > 0 and not text[j].lstrip().startswith("- "):
+        j -= 1
+    end = start + 1
+    while end < len(text):
+        l = text[end]
+        if l.strip() and not l.lstrip().startswith("#") and \
+                len(l) - len(l.lstrip(" ")) < indent:
+            break
+        end += 1
+    vals = [m.group(1) for l in text[j:end]
+            for m in [re.match(r"^\s*CIBW_ENVIRONMENT:\s*(.*?)\s*$", l)] if m]
+    if len(vals) != 1 or vals[0] in ("", "|", ">", "|-", ">-"):
+        raise SurfaceError(
+            f"{WHEEL_WORKFLOW}: expected one single-line CIBW_ENVIRONMENT in the wheel_build step")
+    return [f"cibw-environment {vals[0]}"]
+
+
 def main(argv):
-    if len(argv) != 3 or argv[1] not in ("host", "wheel") or not argv[2]:
-        print("usage: ccache-flag-surface.py host <preset> | wheel <lane>",
+    listing = argv[1:] == ["--list-inputs"]
+    if not listing and (len(argv) != 3 or argv[1] not in ("host", "wheel")
+                        or not argv[2]):
+        print("usage: ccache-flag-surface.py host <preset> | wheel <lane> | --list-inputs",
               file=sys.stderr)
         return 2
-    kind, name = argv[1], argv[2]
-    files = ["CMakeLists.txt"] + sorted(str(p) for p in Path("cmake").glob("*.cmake"))
     try:
-        lines = cmake_surface(files)
-        if kind == "host":
-            lines += resolved_preset(name) + conan_profile(name)
+        trees = cmake_files()
+        if listing:
+            lines = [p for p, _ in trees] + [PYPROJECT, CIBW_BEFORE_ALL, WHEEL_WORKFLOW]
         else:
-            lines += wheel_pyproject()
+            kind, name = argv[1], argv[2]
+            lines = cmake_surface(trees)
+            if kind == "host":
+                lines += resolved_preset(name) + conan_profile(name)
+            else:
+                lines += wheel_pyproject() + wheel_before_all() + wheel_cibw_environment()
     except SurfaceError as e:
         print(f"ccache-flag-surface: {e}", file=sys.stderr)
         return 1

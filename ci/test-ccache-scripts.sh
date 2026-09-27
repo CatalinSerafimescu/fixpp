@@ -116,12 +116,22 @@ JSON
 # The compile-flag surface both minters fold into the tag (#482) is read from
 # the cwd, so the sandbox carries a COPY of the real one. A copy, not a toy
 # fixture: the #482 arms below mutate it and must see the tree's real flag
-# mechanisms.
+# mechanisms. The file list comes from the tree's own extractor
+# (`--list-inputs`), never from a list kept here, so a file the surface starts
+# reading is copied, and mutated by the arms, without an edit to this harness.
+# It is the TREE's extractor, not $CI_DIR's, so an older or mutated ci/ can be
+# run against the same copy. The per-lane preset file and Conan profiles are
+# not in the list: the sandbox keeps its own synthetic CMakePresets.json.
+FLAG_INPUTS="$( cd "$repo_root" && python3 ci/ccache-flag-surface.py --list-inputs )" \
+  || fail "flag-surface/inputs: ci/ccache-flag-surface.py --list-inputs failed on the real tree (see its message above)"
+[ -n "$FLAG_INPUTS" ] || fail "flag-surface/inputs: ci/ccache-flag-surface.py --list-inputs listed nothing"
 copy_flag_surface() {  # $1 = destination root
-  mkdir -p "$1/cmake" "$1/bindings/python" "$1/conan/profiles"
-  cp "$repo_root/CMakeLists.txt" "$1/"
-  cp "$repo_root"/cmake/*.cmake "$1/cmake/"
-  cp "$repo_root/bindings/python/pyproject.toml" "$1/bindings/python/"
+  local f
+  mkdir -p "$1/conan/profiles"
+  while IFS= read -r f; do
+    mkdir -p "$1/$(dirname "$f")"
+    cp "$repo_root/$f" "$1/$f"
+  done <<< "$FLAG_INPUTS"
 }
 copy_flag_surface "$sandbox"
 
@@ -763,6 +773,22 @@ host_arm rotate 'conan-profile-cxxflags' "conan/profiles/$FS_HOST" \
   "CXXFLAGS=-stdlib=libc++${NL}" "CXXFLAGS=-stdlib=libc++ -O1${NL}"
 wheel_arm rotate 'pyproject-cmake-define' bindings/python/pyproject.toml \
   'CMAKE_CXX_SCAN_FOR_MODULES = "OFF"' 'CMAKE_CXX_SCAN_FOR_MODULES = "ON"'
+# A default set in the root and handed to a PUBLIC definition in a
+# subdirectory: needs both the subdirectory parse and the variable closure.
+host_arm rotate 'log-min-level-default' CMakeLists.txt \
+  'set(FIXPP_LOG_MIN_LEVEL 2 CACHE' 'set(FIXPP_LOG_MIN_LEVEL 3 CACHE'
+wheel_arm rotate 'log-min-level-default-wheel' CMakeLists.txt \
+  'set(FIXPP_LOG_MIN_LEVEL 2 CACHE' 'set(FIXPP_LOG_MIN_LEVEL 3 CACHE'
+host_arm rotate 'subdir-public-def' src/log/CMakeLists.txt \
+  'target_compile_definitions(fixpp_log PUBLIC FIXPP_LOG_MIN_LEVEL=${FIXPP_LOG_MIN_LEVEL})' \
+  'target_compile_definitions(fixpp_log PUBLIC FIXPP_LOG_MIN_LEVEL=${FIXPP_LOG_MIN_LEVEL} FIXPP_X=1)'
+# A variable read only as a bare name by an if() head that gates flags.
+wheel_arm rotate 'if-head-bare-name' bindings/python/CMakeLists.txt \
+  'set(FIXPP_PYTHON_SANITIZER "none" CACHE' 'set(FIXPP_PYTHON_SANITIZER "asan" CACHE'
+wheel_arm rotate 'cibw-conan-cxxflags' bindings/python/cibw-before-all.sh \
+  "  --build=missing" "  -c tools.build:cxxflags='[\"-O0\"]' \\${NL}  --build=missing"
+wheel_arm rotate 'cibw-environment' .github/workflows/tier1.yml \
+  'CCACHE_COMPRESSLEVEL=5"' 'CCACHE_COMPRESSLEVEL=5 CXXFLAGS=-O0"'
 
 # ── KEEP: comments, layout and non-flag code ──
 host_arm keep 'comment-inside-argument-list' cmake/Helpers.cmake \
@@ -787,6 +813,19 @@ host_arm keep 'conan-profile-comment' "conan/profiles/$FS_HOST" \
   '[settings]' "# a note${NL}[settings]"
 wheel_arm keep 'pyproject-comment' bindings/python/pyproject.toml \
   '# PKG-4: drive the existing bindings target.' '# PKG-4: reworded.'
+host_arm keep 'subdir-comment' src/log/CMakeLists.txt \
+  '# Default set in the top-level CMakeLists (build-type-conditional).' '# The default lives in the root CMakeLists.'
+host_arm keep 'subdir-add-source' src/log/CMakeLists.txt \
+  "  syslog_sink.cpp${NL})" "  syslog_sink.cpp${NL}  extra_sink.cpp${NL})"
+host_arm keep 'cache-docstring' CMakeLists.txt \
+  'set(FIXPP_LOG_MIN_LEVEL 2 CACHE STRING "Compile-time minimum log level (0=trace .. 5=fatal)")' \
+  'set(FIXPP_LOG_MIN_LEVEL 2 CACHE STRING "Minimum log level compiled in")'
+host_arm keep 'utf8-bom' cmake/Sanitizers.cmake \
+  '# cmake/Sanitizers.cmake' $'\xef\xbb\xbf# cmake/Sanitizers.cmake'
+wheel_arm keep 'cibw-comment' bindings/python/cibw-before-all.sh \
+  '# before any wheel build.' '# before the first wheel build.'
+wheel_arm keep 'tier1-outside-cibw-environment' .github/workflows/tier1.yml \
+  'mkdir -p /tmp/wheel-conan2' 'mkdir -p /tmp/wheel-conan2 /tmp/unrelated'
 
 if [ -n "$ARM_FAILS" ]; then
   fail "flag-surface arms went RED:$ARM_FAILS"
@@ -798,12 +837,16 @@ ok "every flag mechanism ROTATES the digest; comments, layout and non-flag code 
 # KEEP arm above would pass on it.
 HOST_SURFACE="$(flag_surface "$FS_BASE" host "$FS_HOST")"
 WHEEL_SURFACE="$(flag_surface "$FS_BASE" wheel "$IDENT_LANE")"
-for want in '-Wno-attributes=clang::lifetimebound' '-fsanitize=address' 'set CMAKE_CXX_STANDARD 23' '-stdlib=libc++' '"FIXPP_WERROR": "ON"'; do
-  printf '%s\n' "$HOST_SURFACE" | grep -qF -- "$want" \
+for want in '-Wno-attributes=clang::lifetimebound' '-fsanitize=address' 'set CMAKE_CXX_STANDARD 23' '-stdlib=libc++' '"FIXPP_WERROR": "ON"' \
+    'src/log/CMakeLists.txt: target_compile_definitions fixpp_log PUBLIC FIXPP_LOG_MIN_LEVEL=${FIXPP_LOG_MIN_LEVEL}' \
+    'set FIXPP_LOG_MIN_LEVEL 2 CACHE STRING'; do
+  grep -qF -- "$want" <<< "$HOST_SURFACE" \
     || fail "flag-surface/non-empty: the host extract of the real tree lacks '$want'"
 done
-for want in '-Wno-attributes=clang::lifetimebound' 'CMAKE_CXX_SCAN_FOR_MODULES' 'option FIXPP_WERROR OFF'; do
-  printf '%s\n' "$WHEEL_SURFACE" | grep -qF -- "$want" \
+for want in '-Wno-attributes=clang::lifetimebound' 'CMAKE_CXX_SCAN_FOR_MODULES' 'option FIXPP_WERROR OFF' \
+    'cibw-before-all: -s compiler=gcc -s compiler.version=14 -s compiler.cppstd=23' \
+    'cibw-environment "CONAN_HOME=/host-conan2'; do
+  grep -qF -- "$want" <<< "$WHEEL_SURFACE" \
     || fail "flag-surface/non-empty: the wheel extract of the real tree lacks '$want'"
 done
 ok "the extract of the real tree carries the flags, options and preset values the arms mutate"
@@ -819,7 +862,62 @@ rm -f "$t/CMakeLists.txt"; cp "$FS_BASE/cmake/Sanitizers.cmake" "$t/cmake/"
 if ( cd "$t" && . "$KEYSH" && ccache_container_cache_key 'wheel-manylinux228' "$PINNED_REF" ) >/dev/null 2>&1; then
   fail "flag-surface/fail-closed: the container minter produced a tag without a readable flag surface"
 fi
-ok "an unparsable or missing surface yields no digest and no tag"
+# A byte that is not UTF-8 is a named failure, not a traceback.
+t="$sandbox/fs-broken"; rm -rf "$t"; cp -r "$FS_BASE" "$t"
+printf '# caf\xe9\n' >> "$t/src/log/CMakeLists.txt"
+[ -z "$(flag_digest "$t" host "$FS_HOST")" ] \
+  || fail "flag-surface/fail-closed: a non-UTF-8 byte in a subdirectory CMakeLists.txt still produced a digest"
+err="$( cd "$t" && python3 "$CI_DIR/ccache-flag-surface.py" host "$FS_HOST" 2>&1 >/dev/null )" || true
+case "$err" in
+  *Traceback*|'') fail "flag-surface/fail-closed: a non-UTF-8 byte gave no named error: '$err'" ;;
+  *'src/log/CMakeLists.txt: not UTF-8'*) ;;
+  *) fail "flag-surface/fail-closed: a non-UTF-8 byte gave '$err', not a message naming the file" ;;
+esac
+# An add_subdirectory() whose path is a variable cannot be followed.
+t="$sandbox/fs-broken"; rm -rf "$t"; cp -r "$FS_BASE" "$t"
+printf 'add_subdirectory(${SOMEWHERE})\n' >> "$t/src/log/CMakeLists.txt"
+[ -z "$(flag_digest "$t" host "$FS_HOST")" ] \
+  || fail "flag-surface/fail-closed: an add_subdirectory() with a variable path still produced a digest"
+# A second CIBW_ENVIRONMENT in the wheel_build step (YAML keeps only the last).
+t="$sandbox/fs-broken"; rm -rf "$t"; cp -r "$FS_BASE" "$t"
+python3 - "$t/.github/workflows/tier1.yml" <<'PY' || fail "flag-surface/fail-closed: could not seed the duplicate CIBW_ENVIRONMENT"
+import sys
+p = sys.argv[1]
+s = open(p, encoding="utf-8").read()
+key = '          CIBW_ENVIRONMENT: "CONAN_HOME='
+if s.count(key) != 1:
+    sys.exit(1)
+open(p, "w", encoding="utf-8").write(s.replace(key, '          CIBW_ENVIRONMENT: "X=1"\n' + key))
+PY
+[ -z "$(flag_digest "$t" wheel "$IDENT_LANE")" ] \
+  || fail "flag-surface/fail-closed: a duplicate CIBW_ENVIRONMENT key still produced a wheel digest"
+ok "an unparsable, undecodable, unfollowable or ambiguous surface yields no digest and no tag"
+
+# ── THE REAL TREE EXTRACTS, for every floored lane ──────────────────────────
+# Restore and seed exit 0 when the surface cannot be extracted (a cache that is
+# down must not redden a green lane), so on the lane itself such a failure is
+# only a warning and an uncached run, every run, until someone reads it. THIS is
+# the arm that stops an input the extractor cannot read from reaching main: it
+# runs the extractor under test over the real tree for every lane that passes a
+# hit floor. The lane set comes from ci/assert-ccache-floor-callers.py, the walk
+# that checks those call sites, not from a list kept here.
+FLOORED="$( python3 "$repo_root/ci/assert-ccache-floor-callers.py" --list-floored-lanes "$repo_root/.github/workflows" )" \
+  || fail "flag-surface/real-tree-extracts: ci/assert-ccache-floor-callers.py --list-floored-lanes failed"
+real_lanes=0
+while IFS= read -r lane; do
+  case "$lane" in
+    '${{ steps.wheel_ident.outputs.lane }}') lane="$IDENT_LANE" ;;
+    *'${{'*) fail "flag-surface/real-tree-extracts: no resolution for the floored lane '$lane'" ;;
+  esac
+  if ( . "$KEYSH" && ccache_lane_is_container "$lane" ); then kind=wheel; else kind=host; fi
+  if ! err="$( cd "$repo_root" && python3 "$CI_DIR/ccache-flag-surface.py" "$kind" "$lane" 2>&1 >/dev/null )"; then
+    printf '%s\n' "$err" | sed 's/^/  | /'
+    fail "flag-surface/real-tree-extracts: ci/ccache-flag-surface.py cannot extract the real tree's surface for the floored lane '$lane' ($kind) — on CI that lane would run uncached on every run"
+  fi
+  real_lanes=$((real_lanes + 1))
+done <<< "$FLOORED"
+[ "$real_lanes" -gt 0 ] || fail "flag-surface/real-tree-extracts: no floored lane was checked"
+ok "the real tree's flag surface extracts for every floored lane"
 
 # ── THE TAG CARRIES THE DIGEST, and restore/seed/pruner agree on the new form ──
 # The rotate arms above are only worth anything if the TAG is what rotates.
@@ -1208,7 +1306,21 @@ rm -rf "$CDIR"
 CCACHE_DIR="$CDIR" run "$CI_DIR/restore-ccache.sh" fake-gone-compiler
 want_status 0 "restore/no-compiler"; want_hit false "restore/no-compiler"
 want_out 'compiler unidentified' "restore/no-compiler"
+want_no_out 'compile-flag surface of' "restore/no-compiler"
 ok "unidentifiable compiler — MISS, never fatal"
+
+# An unextractable flag surface: still exit 0 and a MISS (a cache that is down
+# must not redden the lane), but LOUD on the lane, and only for this cause.
+cp "$sandbox/cmake/Sanitizers.cmake" "$sandbox/Sanitizers.cmake.keep"
+printf 'add_compile_options(-Wall\n' >> "$sandbox/cmake/Sanitizers.cmake"
+rm -rf "$CDIR"
+CCACHE_DIR="$CDIR" run "$CI_DIR/restore-ccache.sh" fake-libc++
+mv "$sandbox/Sanitizers.cmake.keep" "$sandbox/cmake/Sanitizers.cmake"
+want_status 0 "restore/flag-surface-unreadable"; want_hit false "restore/flag-surface-unreadable"
+want_out '^::warning::ccache-cache: the compile-flag surface of .fake-libc++. could not be extracted' "restore/flag-surface-unreadable"
+want_out 'ccache-flag-surface: cmake/Sanitizers.cmake' "restore/flag-surface-unreadable"
+want_no_out 'ccache-cache HIT' "restore/flag-surface-unreadable"
+ok "unextractable flag surface — MISS, exit 0, and a ::warning:: naming the cause"
 
 # The rm -rf guard. `/tmp` is one component below the root: refused.
 CCACHE_DIR="/tmp" run "$CI_DIR/restore-ccache.sh" fake-libc++

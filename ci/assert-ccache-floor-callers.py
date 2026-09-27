@@ -2,6 +2,14 @@
 """Assert the ccache hit-floor opt-in is wired consistently at its CALL SITES.
 
     ci/assert-ccache-floor-callers.py [<workflow-dir>]
+    ci/assert-ccache-floor-callers.py --list-floored-lanes [<workflow-dir>]
+
+`--list-floored-lanes` prints, one per line, the lane of every call site that
+passes a floor, with `${{ matrix.<key> }}` expanded from the job's
+strategy.matrix. Any other expression is printed verbatim for the caller to
+resolve. It exits 2 on a matrix it cannot expand or on no floored lane at all,
+so ci/test-ccache-scripts.sh can take its lane set from this walk rather than
+from a list of its own.
 
 WHY THIS EXISTS (#299)
 
@@ -251,13 +259,33 @@ def record_violation(violations, where, preset, can_supply, floor, untraceable):
             f"enforced. Give the lane a real restore disposition, or pass no floor.")
 
 
+MATRIX_REF = re.compile(r"^\$\{\{\s*matrix\.(?P<key>[\w-]+)\s*\}\}$")
+
+
+def expand_lane(preset, job):
+    """-> [lane, ...] or None when `${{ matrix.<key> }}` cannot be expanded."""
+    m = MATRIX_REF.match(preset.strip())
+    if not m:
+        return [preset]
+    matrix = (job.get("strategy") or {}).get("matrix")
+    if not isinstance(matrix, dict) or "include" in matrix or "exclude" in matrix:
+        return None
+    values = matrix.get(m.group("key"))
+    if not isinstance(values, list) or not values or \
+            not all(isinstance(v, str) and v for v in values):
+        return None
+    return list(values)
+
+
 def main():
-    wf_dir = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ".github/workflows")
+    listing = len(sys.argv) > 1 and sys.argv[1] == "--list-floored-lanes"
+    argv = sys.argv[2:] if listing else sys.argv[1:]
+    wf_dir = pathlib.Path(argv[0] if argv else ".github/workflows")
     if not wf_dir.is_dir():
         print(f"::error::{wf_dir} is not a directory — the check could not run.")
         return 2
 
-    sites, violations = [], []
+    sites, violations, floored = [], [], []
     for path in sorted(wf_dir.glob("*.yml")):
         try:
             doc = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -285,6 +313,8 @@ def main():
 
                     where = f"{path.name}:{job_name}"
                     sites.append((where, preset, can_supply, floor))
+                    if floor:
+                        floored.append((where, preset, expand_lane(preset, job)))
                     record_violation(violations, where, preset, can_supply,
                                      floor, untraceable)
 
@@ -297,6 +327,21 @@ def main():
               "moved or this check's walk is broken. Refusing to report clean on an "
               "empty scan.")
         return 2
+
+    if listing:
+        lanes = []
+        for where, preset, expanded in floored:
+            if expanded is None:
+                print(f"::error::{where}: cannot expand the floored lane '{preset}' "
+                      "from the job's strategy.matrix.", file=sys.stderr)
+                return 2
+            lanes += [lane for lane in expanded if lane not in lanes]
+        if not lanes:
+            print("::error::no call site passes a floor, so there is no floored lane "
+                  "to list. Refusing to print an empty set.", file=sys.stderr)
+            return 2
+        print("\n".join(lanes))
+        return 0
 
     for where, preset, can_supply, floor in sites:
         state = f"floor={floor}" if floor else "no floor"
