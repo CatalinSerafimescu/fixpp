@@ -741,16 +741,14 @@ void LoaderState::detect_length_pairs(pugi::xml_node const& root) {
     // Primary detection path (Option B per triage §R2): walk the global
     // <fields> block in declaration order. Whenever a LENGTH-typed entry is
     // immediately followed by a DATA- or XMLDATA-typed entry, record the pair.
-    // This is the canonical FIX source per [FIX50SP2 §3.3] and captures
-    // component-internal pairs (e.g., EncodedLegIssuerLen(618)→
-    // EncodedLegIssuer(619) in InstrumentLeg) that were previously missed
-    // because the old per-container walk never descended into <component> nodes.
     //
     // Secondary path: walk header, trailer, and every <message> container for
     // any LENGTH/DATA adjacency NOT present in the global <fields> block
-    // (e.g., inline field reordering in message bodies). In practice the
-    // global-fields path already captures all standard pairs; the secondary
-    // walk retains the original coverage so no existing pair detection regresses.
+    // (e.g., inline field reordering in message bodies).
+    //
+    // 091 (fixpp#418): the secondary walk descends into components and groups.
+    // The adjacency rule and the visit order of the new containers are
+    // specs/091-data-field-bytes/research.md R-11.
     auto const mark_pair = [&](std::uint16_t length_tag, std::uint16_t data_tag) {
         // fixpp#426 (Gate B r9 R-3): zero is the "no pair" answer of every pair
         // accessor, so it can never be half of one. Refused HERE, at formation —
@@ -797,12 +795,26 @@ void LoaderState::detect_length_pairs(pugi::xml_node const& root) {
         }
     }
 
-    // Secondary: per-container walk (header, trailer, messages) for any pairs
-    // only visible in usage context (edge case; retains original coverage).
-    auto walk = [&](pugi::xml_node const& container) {
+    // Secondary: per-container walks. In the default mode (header, trailer,
+    // messages) only the <field> children are read, so anything between two of
+    // them is skipped. In strict mode (component definitions and groups) ANY
+    // non-<field> element child (a component reference, a nested <group>)
+    // breaks adjacency; non-element nodes (comments, text) are not children in
+    // the dictionary schema and are ignored.
+    auto walk = [&](pugi::xml_node const& container, bool strict) {
         std::uint16_t prev_tag = 0;
         bool prev_is_length = false;
-        for (auto const& c : container.children("field")) {
+        for (auto const& c : container.children()) {
+            bool const is_field = std::string_view{c.name()} == "field";
+            if (strict && c.type() != pugi::node_element) {
+                continue;
+            }
+            if (!is_field) {
+                if (strict) {
+                    prev_is_length = false;
+                }
+                continue;
+            }
             auto const cname = std::string{c.attribute("name").as_string("")};
             auto const it = by_name_.find(cname);
             if (it == by_name_.end()) {
@@ -819,10 +831,36 @@ void LoaderState::detect_length_pairs(pugi::xml_node const& root) {
             prev_is_length = (info.type == field_data_type::Length);
         }
     };
-    walk(root.child("header"));
-    walk(root.child("trailer"));
+    walk(root.child("header"), /*strict=*/false);
+    walk(root.child("trailer"), /*strict=*/false);
     for (auto const& m : root.child("messages").children("message")) {
-        walk(m);
+        walk(m, /*strict=*/false);
+    }
+
+    // Every <component> definition, in document order — before any group, so
+    // `mark_pair`'s first-writer rule lets a component's adjacency win over a
+    // group's (R-11 visit order).
+    for (auto const& comp : root.child("components").children("component")) {
+        walk(comp, /*strict=*/true);
+    }
+
+    // Every <group> under <fix>, whatever its parent and at any depth, in
+    // document (pre-)order. Iterative, so no recursion.
+    for (pugi::xml_node n = root.first_child(); n;) {
+        if (n.type() == pugi::node_element && std::string_view{n.name()} == "group") {
+            walk(n, /*strict=*/true);
+        }
+        if (pugi::xml_node const child = n.first_child()) {
+            n = child;
+            continue;
+        }
+        while (n != root && !n.next_sibling()) {
+            n = n.parent();
+        }
+        if (n == root) {
+            break;
+        }
+        n = n.next_sibling();
     }
 }
 

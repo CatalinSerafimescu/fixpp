@@ -33,6 +33,7 @@ struct MassQuoteArgs {
     ::std::optional<::std::int64_t> quote_model_type{};
     ::std::optional<::std::string_view> compliance_text{};
     ::std::optional<::std::int64_t> self_match_prevention_instruction{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

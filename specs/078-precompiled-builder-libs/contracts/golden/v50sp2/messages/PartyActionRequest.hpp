@@ -51,6 +51,7 @@ struct PartyActionRequestArgs {
     ::std::optional<::std::int64_t> party_action_type{};
     ::std::optional<bool> appl_test_message_indicator{};
     ::std::optional<::std::string_view> instrument_scope_upi_code{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v50sp2

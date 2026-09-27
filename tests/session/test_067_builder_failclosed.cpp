@@ -34,12 +34,18 @@
 #include <cstddef>
 #include <fixpp/core/decimal_alias.hpp>
 #include <fixpp/core/error.hpp>
+#include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/table_view.hpp>
 #include <fixpp/v44/all.hpp>  // GENERATED (Phase 3b)
+#include <fixpp/wire/field_view.hpp>
+#include <fixpp/wire/parser.hpp>
 #include <memory_resource>
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
+#include "support/app_message_read_scaffold.hpp"
 #include "support/test_067_seeds.hpp"
 
 namespace {
@@ -184,6 +190,72 @@ TEST(BuilderFailClosed067, LengthDataCoupling_AutoDerivedLengthBothEmitted) {
     ASSERT_NE(pos354, std::string::npos);
     ASSERT_NE(pos355, std::string::npos);
     EXPECT_LT(pos354, pos355) << "Length(354) must be emitted BEFORE Data(355), coupled";
+}
+
+// ── EncodedText(355), a Data field, carries any octet verbatim (FR-014,
+// specs/091-data-field-bytes/spec.md). Each case builds NewOrderSingle with a
+// single octet the String-field guard refuses, and asserts: the build
+// succeeds; EncodedTextLen(354) equals the octet count and is immediately
+// followed by EncodedText(355) holding the octets verbatim; and a re-parse
+// through the dict-aware Parser<Index> recovers the same octets.
+// SohInValue_RejectedBeforeAnyByteReachesOut above is a String field
+// (ClOrdID(11)): its refusal is permanent behaviour and stays as written
+// (FR-007).
+namespace {
+
+void expect_encoded_text_emitted_verbatim(std::string_view octets) {
+    std::pmr::monotonic_buffer_resource arena{4096};
+    auto args = make_valid_new_order_single_args(&arena);
+    args.encoded_text = octets;
+
+    std::array<std::byte, 1024> out{};
+    auto r = fixpp::v44::build_NewOrderSingle(std::span<std::byte>{out}, args);
+    ASSERT_TRUE(r.has_value()) << "EncodedText(355) must accept any octet; build refused with: "
+                               << fixpp::core::to_string(r.error());
+    std::string const body = bytes_to_string(*r);
+
+    // One contiguous, in-order subsequence: Length, then Data, nothing between.
+    std::string const pair =
+        std::string{
+            "\x01"
+            "354="} +
+        std::to_string(octets.size()) +
+        "\x01"
+        "355=" +
+        std::string{octets} + "\x01";
+    EXPECT_NE(body.find(pair), std::string::npos)
+        << "EncodedTextLen(354) must equal the octet count and be followed directly by "
+           "EncodedText(355) carrying the octets verbatim";
+
+    std::pmr::monotonic_buffer_resource read_arena{8192};
+    fixpp::dict::Dictionary dict = fixpp_test_support::load_fix44(&read_arena);
+    fixpp::dict::table_view tv = dict.as_table_view();
+    std::vector<std::byte> frame = fixpp_test_support::make_frame("FIX.4.4", body);
+    auto mv = fixpp_test_support::parse_dict(frame, tv, &read_arena);
+    auto len = mv.get(354);
+    ASSERT_TRUE(len.has_value()) << "re-parse lost EncodedTextLen(354)";
+    EXPECT_EQ(len->as_string(), std::to_string(octets.size()));
+    auto data = mv.get(355);
+    ASSERT_TRUE(data.has_value()) << "re-parse lost EncodedText(355)";
+    EXPECT_EQ(data->as_string(), octets) << "re-parse must recover the octets verbatim";
+}
+
+}  // namespace
+
+TEST(BuilderFailClosed067, DataField_EncodedText_SOH_EmittedVerbatim_418) {
+    expect_encoded_text_emitted_verbatim("\x01");  // SOH
+}
+
+TEST(BuilderFailClosed067, DataField_EncodedText_ControlByte_EmittedVerbatim_418) {
+    expect_encoded_text_emitted_verbatim("\x1f");  // Unit Separator, a control byte other than SOH
+}
+
+TEST(BuilderFailClosed067, DataField_EncodedText_0x80_EmittedVerbatim_418) {
+    expect_encoded_text_emitted_verbatim("\x80");  // high-bit byte, not a control byte
+}
+
+TEST(BuilderFailClosed067, DataField_EncodedText_0xFF_EmittedVerbatim_418) {
+    expect_encoded_text_emitted_verbatim("\xff");  // top of the byte range
 }
 
 // ── W-vs-X per-occurrence NoMDEntries(268) delimiter discrimination

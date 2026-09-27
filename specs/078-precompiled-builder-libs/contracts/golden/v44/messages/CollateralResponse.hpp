@@ -119,6 +119,7 @@ struct CollateralResponseArgs {
     ::std::optional<::fixpp::decimal_t> start_cash{};
     ::std::optional<::fixpp::decimal_t> end_cash{};
     ::std::optional<::std::string_view> strike_currency{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v44

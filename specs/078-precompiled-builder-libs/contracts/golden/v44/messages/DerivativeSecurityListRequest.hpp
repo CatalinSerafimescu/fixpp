@@ -69,6 +69,7 @@ struct DerivativeSecurityListRequestArgs {
     ::std::optional<::fixpp::decimal_t> underlying_end_value{};
     ::std::optional<::std::span<const groups::G_887Args>> underlying_stips{};
     ::std::optional<::std::string_view> underlying_strike_currency{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v44

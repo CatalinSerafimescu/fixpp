@@ -27,6 +27,7 @@ struct TradingSessionStatusArgs {
     ::std::optional<::std::string_view> trad_ses_end_time{};
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::fixpp::decimal_t> total_volume_traded{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v42

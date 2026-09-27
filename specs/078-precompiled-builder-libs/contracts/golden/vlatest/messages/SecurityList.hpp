@@ -36,6 +36,7 @@ struct SecurityListArgs {
     ::std::optional<::std::int64_t> security_list_type{};
     ::std::optional<::std::int64_t> security_list_type_source{};
     ::std::optional<::std::int64_t> security_reject_reason{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

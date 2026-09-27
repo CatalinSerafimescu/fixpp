@@ -44,6 +44,7 @@ struct BidRequestArgs {
     ::std::optional<::std::span<const groups::G_420_1Args>> bid_components{};
     ::std::optional<::std::string_view> strike_time{};
     ::std::optional<::std::string_view> currency_code_source{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v50sp2

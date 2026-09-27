@@ -1043,17 +1043,17 @@ static fixpp_error_t validate_group_grammar(const std::pmr::vector<AccumulatorEn
 //
 // Refuses a container, at any depth, whose Length+Data pairs are malformed or which
 // carries SOH outside a Data value, whichever setter wrote the fields. A group's
-// count field is one field of its container, so a Length right before a group is
-// a Length not followed by its Data; each instance is checked as its own container.
+// count field is one field of its container, fed to the checker with an empty
+// value, as `wire::body_builder::commit` does (091 FR-021 (fixpp#506), superseding
+// the feed of its instance-count digits). So a group whose count tag is a pair half
+// fails the check, and a Length right before any group is a Length not followed by
+// its Data. Each instance is checked as its own container.
 static fixpp_error_t check_length_data(const std::pmr::vector<AccumulatorEntry>& fields,
                                        const fixpp::wire::dict_hooks& hooks) noexcept {
     fixpp::wire::length_data_checker checker{hooks};
     for (const auto& e : fields) {
         if (e.is_group) {
-            char cb[16];
-            const auto* ce = std::to_chars(cb, cb + sizeof(cb), e.instances.size()).ptr;
-            if (!checker.observe(e.tag, {reinterpret_cast<const std::byte*>(cb),
-                                         static_cast<std::size_t>(ce - cb)})) {
+            if (!checker.observe(e.tag, {})) {
                 return FIXPP_ERR_WIRE_CONFORMANCE;
             }
             for (const auto& inst : e.instances) {

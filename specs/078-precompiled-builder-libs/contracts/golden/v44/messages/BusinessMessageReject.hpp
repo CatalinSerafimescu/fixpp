@@ -19,6 +19,7 @@ struct BusinessMessageRejectArgs {
     ::std::optional<::std::string_view> ref_msg_type{};
     ::std::optional<::std::string_view> business_reject_ref_id{};
     ::std::optional<::std::int64_t> business_reject_reason{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v44

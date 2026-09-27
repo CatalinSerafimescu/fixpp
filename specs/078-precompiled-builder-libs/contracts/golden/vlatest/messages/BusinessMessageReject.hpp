@@ -22,6 +22,7 @@ struct BusinessMessageRejectArgs {
     ::std::optional<::std::string_view> ref_appl_ver_id{};
     ::std::optional<::std::string_view> ref_cstm_appl_ver_id{};
     ::std::optional<::std::int64_t> ref_appl_ext_id{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

@@ -8,6 +8,10 @@ namespace fixpp::v50sp2 {
 
 ::fixpp::core::expected_t<::std::span<::std::byte>> build_ConfirmationAck(::std::span<::std::byte> out, ConfirmationAckArgs const& args) noexcept {
     ::fixpp::wire::body_builder bb{"AU"};
+    if (args.message_encoding) {
+        auto r = bb.field(347, *args.message_encoding);
+        if (!r) return ::std::unexpected(r.error());
+    }
     if (args.text) {
         auto r = bb.field(58, *args.text);
         if (!r) return ::std::unexpected(r.error());
@@ -21,10 +25,9 @@ namespace fixpp::v50sp2 {
         if (!r) return ::std::unexpected(r.error());
     }
     if (args.encoded_text) {
-        auto r_len = bb.field(354, static_cast<::std::int64_t>(args.encoded_text->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = bb.field(355, *args.encoded_text);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(355) == 354);
+        auto r_pair = bb.field_data(355, ::std::as_bytes(::std::span{*args.encoded_text}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (args.match_status) {
         auto r = bb.field(573, *args.match_status);
@@ -121,10 +124,9 @@ namespace fixpp::v50sp2 {
         if (!r) return ::std::unexpected(r.error());
     }
     if (item1.encoded_match_exception_text) {
-        auto r_len = eh1.set_int(2797, static_cast<::std::int64_t>(item1.encoded_match_exception_text->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh1.set_string(2798, *item1.encoded_match_exception_text);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(2798) == 2797);
+        auto r_pair = eh1.set_data(2798, ::std::as_bytes(::std::span{*item1.encoded_match_exception_text}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
         }
         auto ge1 = bb.group_end(*gh1);

@@ -20,6 +20,7 @@ struct ApplicationMessageReportArgs {
     ::std::optional<::std::span<const groups::G_1351_3Args>> appl_i_ds{};
     ::std::optional<::std::string_view> appl_report_id{};
     ::std::optional<::std::int64_t> appl_report_type{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v50sp2

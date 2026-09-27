@@ -31,6 +31,7 @@ struct PartyEntitlementsRequestArgs {
     ::std::optional<::std::string_view> entitlement_platform{};
     ::std::optional<::std::int64_t> entitlement_status{};
     ::std::optional<::std::span<const groups::G_2345Args>> entitlement_types{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v50sp2

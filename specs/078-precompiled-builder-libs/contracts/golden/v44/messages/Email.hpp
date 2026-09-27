@@ -31,6 +31,7 @@ struct EmailArgs {
     ::std::optional<::std::string_view> encoded_subject{};
     ::std::optional<::std::span<const groups::G_555_2Args>> legs{};
     ::std::optional<::std::span<const groups::G_711_1Args>> underlyings{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v44

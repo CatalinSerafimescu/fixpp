@@ -28,6 +28,7 @@ struct ConfirmationAckArgs {
     ::std::optional<::std::string_view> trade_confirmation_reference_id{};
     ::std::optional<::std::span<const groups::G_2772Args>> match_exceptions{};
     ::std::optional<::std::span<const groups::G_2781Args>> matching_data_points{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

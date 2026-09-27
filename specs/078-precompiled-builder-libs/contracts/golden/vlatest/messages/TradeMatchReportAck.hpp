@@ -24,6 +24,7 @@ struct TradeMatchReportAckArgs {
     ::std::optional<::std::string_view> encoded_reject_text{};
     ::std::optional<::std::int64_t> trade_match_ack_status{};
     ::std::optional<::std::int64_t> trade_match_reject_reason{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

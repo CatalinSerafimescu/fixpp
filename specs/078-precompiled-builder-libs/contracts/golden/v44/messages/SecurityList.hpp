@@ -20,6 +20,7 @@ struct SecurityListArgs {
     ::std::optional<::std::int64_t> tot_no_related_sym{};
     ::std::optional<::std::int64_t> security_request_result{};
     ::std::optional<bool> last_fragment{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v44

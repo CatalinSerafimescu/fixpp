@@ -880,8 +880,12 @@ TEST(Conversation, Cell) {
         return true;
     };
 
-    // B-05: fixpp #418 -- body_builder cannot carry EncodedText(355)'s 0xff
-    // byte (C-11), so this ONE step is sent as a hand-built frame through the
+    // B-05: body_builder::field() refuses EncodedText(355)'s 0xff byte (C-11).
+    // body_builder::field_data() (added by 091, fixpp #418) accepts it, but
+    // moving this step to the real builder changes an interop cell and so
+    // needs a counterparty republish -- a separate follow-up
+    // (specs/091-data-field-bytes/spec.md § Assumptions, the B-05 bullet).
+    // So this ONE step is still sent as a hand-built frame through the
     // FIXPP_TEST_HOOKS seam A-REJECT already uses (user decision 2026-09-11;
     // spec.md § Conversation census → the B-05 bullet). Its `sent` record
     // still comes from the intent file, never from the hand-built frame

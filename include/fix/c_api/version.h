@@ -61,8 +61,46 @@
  *
  *  This is the C-ABI SURFACE version only — fixpp_library_version() (the C++
  *  SemVer) is unaffected. Byte-frozen by tools/check_capi_freeze.sh (NBC-1). */
+
+/*  1.9 (BREAKING, [const §X.7]; 091, fixpp#418): a Length+Data pair a loaded
+ *  dictionary declares only inside a component or group is now a dictionary
+ *  pair. The effects that have a carrying declaration are noted on it (dict.h
+ *  fixpp_dict_load_from_xml; message.h fixpp_msg_commit, fixpp_msg_set_data,
+ *  fixpp_entry_set_data and the accessor preamble; session.h
+ *  fixpp_session_send, fixpp_session_register_callback,
+ *  fixpp_session_register_send_callback). The effects with no carrying
+ *  declaration are recorded here:
+ *    - a frame a pre-1.9 engine stored with a malformed pair of that kind now
+ *      fails replay (build_replay_frame) and is gap-filled rather than resent;
+ *    - the session's header and Logon scans (scan_frame_header, interpret_logon,
+ *      the store's frame_has_genuine_tag554 masking) read such a Data by count.
+ *  interpret_logon refuses a Logon carrying a Length immediately followed by
+ *  its paired Data whose counted extent reaches or passes the end of the
+ *  whole framed message, or whose following byte is not SOH, whether of a
+ *  component/group-only pair or of a standard pair such as
+ *  RawDataLength(95) and RawData(96) (so shipped dictionaries are affected
+ *  too): a Logon of that shape that was accepted is now refused, on either
+ *  role. The observers are every call whose result depends on the session
+ *  having logged on; each also carries its own note in session.h:
+ *  fixpp_session_is_established stays false; fixpp_session_close, once the
+ *  refused session has drained, returns FIXPP_ERR_THREAD_SESSION_LIFECYCLE,
+ *  translated for the consumer's ABI minor (fixpp_engine_create), not
+ *  FIXPP_ERR_OK; fixpp_session_send on that session returns
+ *  FIXPP_ERR_SESSION_INVALID_STATE, translated for the consumer's ABI minor
+ *  (fixpp_engine_create), not FIXPP_ERR_OK; neither the receive
+ *  callback (fixpp_session_register_callback) nor the toApp callback
+ *  (fixpp_session_register_send_callback) is ever invoked for it.
+ *  Independently of the loader change that opens this entry,
+ *  fixpp_msg_commit (FR-021, fixpp#506) checks a group's count field as a
+ *  field with an empty value, so a group whose count tag is the Length or the
+ *  Data half of a pair, a standard pair or one the session dictionary
+ *  declares, which returned FIXPP_ERR_OK when its instance-count digits completed the pair,
+ *  now returns FIXPP_ERR_WIRE_CONFORMANCE; this is reachable on every session
+ *  with no dictionary, and on a dictionary session only where that dictionary
+ *  declares a group on a tag that is a pair half.
+ *  No error code is added. */
 #define FIXPP_C_ABI_VERSION_MAJOR 1
-#define FIXPP_C_ABI_VERSION_MINOR 8 /* 1.8: the dictionary loader's resource (fixpp#495) */
+#define FIXPP_C_ABI_VERSION_MINOR 9 /* 1.9: component/group-only Length+Data pairs (fixpp#418) */
 #define FIXPP_C_ABI_VERSION_PATCH 0
 
 /** Composite: (MAJOR<<16)|(MINOR<<8)|PATCH — single-integer compatibility check. */

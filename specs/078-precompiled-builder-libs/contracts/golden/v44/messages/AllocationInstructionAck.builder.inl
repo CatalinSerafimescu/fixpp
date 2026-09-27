@@ -9,6 +9,10 @@ namespace fixpp::v44 {
 
 inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_AllocationInstructionAck(::std::span<::std::byte> out, AllocationInstructionAckArgs const& args) noexcept {
     ::fixpp::wire::body_builder bb{"P"};
+    if (args.message_encoding) {
+        auto r = bb.field(347, *args.message_encoding);
+        if (!r) return ::std::unexpected(r.error());
+    }
     if (args.text) {
         auto r = bb.field(58, *args.text);
         if (!r) return ::std::unexpected(r.error());
@@ -57,10 +61,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_AllocationInstr
         if (!r) return ::std::unexpected(r.error());
     }
     if (item0.encoded_alloc_text) {
-        auto r_len = eh0.set_int(360, static_cast<::std::int64_t>(item0.encoded_alloc_text->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh0.set_string(361, *item0.encoded_alloc_text);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(361) == 360);
+        auto r_pair = eh0.set_data(361, ::std::as_bytes(::std::span{*item0.encoded_alloc_text}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
         }
         auto ge0 = bb.group_end(*gh0);
@@ -79,10 +82,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_AllocationInstr
         if (!r) return ::std::unexpected(r.error());
     }
     if (args.encoded_text) {
-        auto r_len = bb.field(354, static_cast<::std::int64_t>(args.encoded_text->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = bb.field(355, *args.encoded_text);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(355) == 354);
+        auto r_pair = bb.field_data(355, ::std::as_bytes(::std::span{*args.encoded_text}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (args.party_i_ds) {
         auto gh1 = bb.group_begin(453, 448);

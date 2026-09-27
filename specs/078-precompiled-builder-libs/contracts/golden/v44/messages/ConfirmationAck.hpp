@@ -21,6 +21,7 @@ struct ConfirmationAckArgs {
     ::std::optional<::std::string_view> confirm_id{};
     ::std::optional<::std::int64_t> confirm_rej_reason{};
     ::std::optional<::std::int64_t> affirm_status{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v44

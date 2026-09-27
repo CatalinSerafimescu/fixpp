@@ -21,6 +21,7 @@ struct ApplicationMessageRequestArgs {
     ::std::optional<::std::string_view> appl_req_id{};
     ::std::optional<::std::int64_t> appl_req_type{};
     ::std::optional<::std::span<const groups::G_1351_1Args>> appl_i_ds{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

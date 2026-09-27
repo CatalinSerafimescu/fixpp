@@ -59,6 +59,7 @@ struct AllocationArgs {
     ::std::optional<::std::string_view> encoded_security_desc{};
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::fixpp::decimal_t> gross_trade_amt{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v42

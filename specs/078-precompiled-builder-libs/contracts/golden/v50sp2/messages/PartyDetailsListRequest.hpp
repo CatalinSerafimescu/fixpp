@@ -25,6 +25,7 @@ struct PartyDetailsListRequestArgs {
     ::std::optional<::std::span<const groups::G_1508Args>> requested_party_roles{};
     ::std::optional<::std::span<const groups::G_1514Args>> party_relationships{};
     ::std::optional<::std::span<const groups::G_1657Args>> requesting_party_i_ds{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v50sp2

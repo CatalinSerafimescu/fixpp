@@ -37,6 +37,7 @@ struct AlgoCertificateReportArgs {
     ::std::optional<::std::span<const groups::G_3028Args>> test_scenarios{};
     ::std::optional<::std::int64_t> test_suite_status{};
     ::std::optional<::std::int64_t> algo_certificate_report_type{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

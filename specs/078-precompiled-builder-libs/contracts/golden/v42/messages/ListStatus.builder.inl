@@ -9,6 +9,10 @@ namespace fixpp::v42 {
 
 inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_ListStatus(::std::span<::std::byte> out, ListStatusArgs const& args) noexcept {
     ::fixpp::wire::body_builder bb{"N"};
+    if (args.message_encoding) {
+        auto r = bb.field(347, *args.message_encoding);
+        if (!r) return ::std::unexpected(r.error());
+    }
     if (args.transact_time) {
         auto r = bb.field(60, *args.transact_time);
         if (!r) return ::std::unexpected(r.error());
@@ -61,10 +65,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_ListStatus(::st
         if (!r) return ::std::unexpected(r.error());
     }
     if (item0.encoded_text) {
-        auto r_len = eh0.set_int(354, static_cast<::std::int64_t>(item0.encoded_text->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = eh0.set_string(355, *item0.encoded_text);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(355) == 354);
+        auto r_pair = eh0.set_data(355, ::std::as_bytes(::std::span{*item0.encoded_text}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
         }
         auto ge0 = bb.group_end(*gh0);
@@ -91,10 +94,9 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_ListStatus(::st
         if (!r) return ::std::unexpected(r.error());
     }
     if (args.encoded_list_status_text) {
-        auto r_len = bb.field(445, static_cast<::std::int64_t>(args.encoded_list_status_text->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = bb.field(446, *args.encoded_list_status_text);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(446) == 445);
+        auto r_pair = bb.field_data(446, ::std::as_bytes(::std::span{*args.encoded_list_status_text}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     return bb.commit(out);
 }

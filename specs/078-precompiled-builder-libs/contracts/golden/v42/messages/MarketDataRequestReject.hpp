@@ -17,6 +17,7 @@ struct MarketDataRequestRejectArgs {
     ::std::optional<::std::string_view> md_req_id{};
     ::std::optional<char> md_req_rej_reason{};
     ::std::optional<::std::string_view> encoded_text{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v42

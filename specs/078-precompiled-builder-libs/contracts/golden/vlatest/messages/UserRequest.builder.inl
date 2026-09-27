@@ -10,10 +10,9 @@ namespace fixpp::vlatest {
 inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_UserRequest(::std::span<::std::byte> out, UserRequestArgs const& args) noexcept {
     ::fixpp::wire::body_builder bb{"BE"};
     if (args.raw_data) {
-        auto r_len = bb.field(95, static_cast<::std::int64_t>(args.raw_data->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = bb.field(96, *args.raw_data);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(96) == 95);
+        auto r_pair = bb.field_data(96, ::std::as_bytes(::std::span{*args.raw_data}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (args.username) {
         auto r = bb.field(553, *args.username);
@@ -40,16 +39,14 @@ inline ::fixpp::core::expected_t<::std::span<::std::byte>> build_UserRequest(::s
         if (!r) return ::std::unexpected(r.error());
     }
     if (args.encrypted_password) {
-        auto r_len = bb.field(1401, static_cast<::std::int64_t>(args.encrypted_password->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = bb.field(1402, *args.encrypted_password);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(1402) == 1401);
+        auto r_pair = bb.field_data(1402, ::std::as_bytes(::std::span{*args.encrypted_password}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     if (args.encrypted_new_password) {
-        auto r_len = bb.field(1403, static_cast<::std::int64_t>(args.encrypted_new_password->size()));
-        if (!r_len) return ::std::unexpected(r_len.error());
-        auto r_data = bb.field(1404, *args.encrypted_new_password);
-        if (!r_data) return ::std::unexpected(r_data.error());
+        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(1404) == 1403);
+        auto r_pair = bb.field_data(1404, ::std::as_bytes(::std::span{*args.encrypted_new_password}));
+        if (!r_pair) return ::std::unexpected(r_pair.error());
     }
     return bb.commit(out);
 }

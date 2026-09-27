@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // include/fixpp/wire/length_data_check.hpp — the Length+Data conformance rule for a
 // message being WRITTEN (fixpp#428, design `.specify/426-428-length-data-pairs.md`
-// §5.3; #418 is meant to be its second caller).
+// §5.3).
 //
 // Feed the fields of one container (the top level, or one repeating-group
 // instance) in the order they will be serialised, then call finish(). The checker

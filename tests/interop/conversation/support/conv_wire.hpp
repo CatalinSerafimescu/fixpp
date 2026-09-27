@@ -256,13 +256,17 @@ inline std::string fix_type_for_tag(int tag) {
     return it == kTypes.end() ? std::string() : it->second;
 }
 
-// ── the FIXPP_TEST_HOOKS hand-built-frame route (fixpp #418) ────────────────
+// ── the FIXPP_TEST_HOOKS hand-built-frame route ─────────────────────────────
 //
 // `fixpp::wire::body_builder::field()` accepts only printable ASCII
 // (`is_clean_field_value`, `0x20-0x7E` — src/wire/body_builder.cpp), so it
 // cannot carry a field like B-05's `EncodedText(355)` holding the byte
 // `0xff` (C-11; L-067-2; user decision 2026-09-11, spec.md § *Conversation
-// census* → the `B-05` bullet). This builds the FULL FRAME (header, body,
+// census* → the `B-05` bullet). `body_builder::field_data()` (added by 091,
+// fixpp #418) accepts such a Data value, but B-05 stays on this route: moving
+// it to the real builder changes an interop cell and so needs a counterparty
+// republish — a separate follow-up (specs/091-data-field-bytes/spec.md
+// § *Assumptions*, the B-05 bullet). This builds the FULL FRAME (header, body,
 // trailer) directly via `fixpp::wire::Writer` — which performs no such
 // content check, only wire mechanics — for a caller to hand to the session's
 // `FIXPP_TEST_HOOKS` seam (`Session::seqnum_mgr_test_access().assign_outbound()`
@@ -273,8 +277,8 @@ inline std::string fix_type_for_tag(int tag) {
 // ⚠️ **What this route does NOT exercise**: fixpp's own builder
 // (`body_builder`/`Engine::send()`). A witness produced this way is evidence
 // of the PEER's live decode (C-11's actual subject), never evidence that
-// fixpp can itself emit binary `DATA` content — that gap is fixpp #418,
-// tracked open, not closed by this route. `toApp` is also NOT invoked on
+// fixpp can itself emit binary `DATA` content — this route never exercises
+// `body_builder::field_data()`. `toApp` is also NOT invoked on
 // this path (`store_then_emit_test_access` bypasses the normal
 // `Engine::send()`/`fire_to_admin_` flow entirely), so a caller using this
 // route for a BUSINESS message must write its own `sent` record — never

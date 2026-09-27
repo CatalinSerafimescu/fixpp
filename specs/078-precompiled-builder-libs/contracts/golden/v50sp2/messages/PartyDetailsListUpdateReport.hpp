@@ -28,6 +28,7 @@ struct PartyDetailsListUpdateReportArgs {
     ::std::optional<::std::int64_t> tot_no_parties{};
     ::std::optional<::std::span<const groups::G_1657Args>> requesting_party_i_ds{};
     ::std::optional<::std::span<const groups::G_1676_1Args>> party_updates{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v50sp2

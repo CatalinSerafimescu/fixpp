@@ -24,6 +24,7 @@ struct ListStatusArgs {
     ::std::optional<::std::int64_t> list_order_status{};
     ::std::optional<::std::string_view> list_status_text{};
     ::std::optional<::std::string_view> encoded_list_status_text{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v42

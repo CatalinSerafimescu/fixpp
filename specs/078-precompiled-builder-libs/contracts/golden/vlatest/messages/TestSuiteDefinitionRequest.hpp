@@ -30,6 +30,7 @@ struct TestSuiteDefinitionRequestArgs {
     ::std::optional<::std::int64_t> test_suite_request_trans_type{};
     ::std::optional<::std::string_view> test_scenario_group_id{};
     ::std::optional<::std::span<const groups::G_3126Args>> test_suite_parameters{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

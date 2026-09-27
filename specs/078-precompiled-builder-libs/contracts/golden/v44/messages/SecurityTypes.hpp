@@ -25,6 +25,7 @@ struct SecurityTypesArgs {
     ::std::optional<::std::span<const groups::G_558Args>> security_types{};
     ::std::optional<::std::string_view> trading_session_sub_id{};
     ::std::optional<bool> last_fragment{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v44

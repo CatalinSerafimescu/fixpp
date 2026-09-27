@@ -208,7 +208,6 @@ struct PayManagementReportArgs {
     ::std::optional<::std::string_view> pay_request_id{};
     ::std::optional<::std::int64_t> pay_request_status{};
     ::std::optional<::std::string_view> encoded_post_trade_payment_desc{};
-    ::std::optional<::std::int64_t> encoded_post_trade_payment_desc_len{};
     ::std::optional<::std::string_view> post_trade_payment_account{};
     ::std::optional<::fixpp::decimal_t> post_trade_payment_amount{};
     ::std::optional<::std::string_view> post_trade_payment_currency{};
@@ -311,6 +310,7 @@ struct PayManagementReportArgs {
     ::std::optional<::std::string_view> settl_method_election_date_offset_unit{};
     ::std::optional<::std::int64_t> settl_method_election_date_offset_day_type{};
     ::std::optional<::std::string_view> settl_method_election_date_adjusted{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v50sp2

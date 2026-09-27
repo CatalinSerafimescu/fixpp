@@ -19,6 +19,7 @@ struct TestSuiteDefinitionRequestAckArgs {
     ::std::optional<::std::string_view> test_suite_request_id{};
     ::std::optional<::std::int64_t> test_suite_request_status{};
     ::std::optional<::std::span<const groups::G_3092Args>> test_gateway_details{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

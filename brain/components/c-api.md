@@ -26,6 +26,7 @@ refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/090-capi-refusals-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/090-capi-refusals-implement-log.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/090-capi-refusals-verify.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/091-data-field-bytes-gatea.md
 codegraph_entry: [fixpp_engine_t, fixpp_session_t, fixpp_msg_t, fixpp_strerror]
 constitution: ["§V.1", "§IV.2", "§X.1", "§X.4"]
 ---
@@ -155,6 +156,45 @@ alive — held for the process lifetime by a retained session shell, or destroye
 BREAKING under `[const §X.7]` because `dict.h` documents the resource and a host with a counting
 default resource observes the difference (`B-495-3`). Rejected: leaving it and documenting the hazard;
 it was closed together with D-4 (owner ruling R-D). The library version is not bumped (R-F).
+
+## C-ABI 1.9: component/group-only Length+Data pairs, and the Logon refusal (091, fixpp#418)
+
+Why BREAKING: 091's loader fix (FR-017) reaches user-loaded dictionaries. A custom pair declared
+adjacently only inside a `<component>` or `<group>` becomes a dictionary pair, so a
+`fixpp_msg_commit` that returned `FIXPP_ERR_OK` now returns `FIXPP_ERR_WIRE_CONFORMANCE`. The owner
+accepted a breaking MINOR at Gate A round 3. Rejected: a walk that marks only standard-table pairs,
+which would leave the loader's answer wrong for the dictionary the user wrote. FR-020 widened the
+break: `interpret_logon` now refuses a Logon with a malformed paired count, standard pairs included,
+so the calls that depend on the session having logged on change too.
+
+⭐ **The population is derived, not listed by example.** FR-019 runs research.md R-11's *C-ABI 1.9
+population recipe* over every export. `specs/091-data-field-bytes/data-model.md` Appendix A classifies
+each export as BREAKING, ADDITIVE or UNCHANGED, and its Symbol column must equal
+`tests/abi/golden/fixpp_capi_symbols.txt` (the diff recipe is in the appendix). The BREAKING set has
+three kinds of carrier:
+- **Declaration notes:** `fixpp_dict_load_from_xml` (`dict.h`, the root cause); `fixpp_msg_commit`,
+  `fixpp_msg_set_data` and `fixpp_entry_set_data` (`message.h`); `fixpp_session_send`,
+  `fixpp_session_register_callback` and `fixpp_session_register_send_callback` (`session.h`). The
+  FR-020 handshake observers carry their own clause in `session.h`: `fixpp_session_is_established`,
+  `fixpp_session_close`, `fixpp_session_send`, and the two callback registrations.
+- **One reader paragraph**, in `message.h`'s accessor preamble, not a marker per reader. It covers the
+  inbound readers (`fixpp_msg_get_*`, `fixpp_msg_has_tag`, `fixpp_msg_version`,
+  `fixpp_msg_get_msg_type`, `fixpp_msg_field_count`, `fixpp_msg_field_at`, `fixpp_msg_get_group`,
+  `fixpp_group_get_field_*`, `fixpp_group_get_nested_group`) over the inbound, clone and toApp views.
+- **FR-021, a separate cause (fixpp#506):** `fixpp_msg_commit` now checks a group's count field with
+  an empty value, as `body_builder::commit` does, so a group whose count tag is a pair half no longer
+  commits when its count digits complete the pair. It carries its own clause on `fixpp_msg_commit` in
+  `message.h` and a sentence in `version.h`'s 1.9 history. Every other export is unchanged for it:
+  the group-begin calls and setters return what they did, and `fixpp_session_send` never runs the
+  commit check.
+- **No carrying declaration**, recorded in `version.h`'s 1.9 history: replay gap-fills a stored
+  pre-1.9 frame with such a malformed pair, and the session's header and Logon scans read such a Data
+  by count.
+
+The widenings (a failure turned into a success) are ADDITIVE and carry no marker; B&L `B-091-4` lists
+them with the BREAKING effects. No symbol, signature or error code changed. Re-derive the population
+by re-running R-11's recipe at the head you are reading, and read `grep -n '1\.9' include/fix/c_api/*.h`
+for what each header now declares.
 
 ## ⚠️ What the ABI gate actually checks — and what it does not
 

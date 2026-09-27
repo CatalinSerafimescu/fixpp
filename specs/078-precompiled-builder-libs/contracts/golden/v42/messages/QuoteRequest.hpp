@@ -16,6 +16,7 @@ namespace fixpp::v42 {
 struct QuoteRequestArgs {
     ::std::optional<::std::string_view> quote_req_id{};
     ::std::span<const groups::G_146_2Args> related_sym{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v42

@@ -31,6 +31,7 @@ struct SecurityTypesArgs {
     ::std::optional<::std::string_view> market_id{};
     ::std::optional<::std::int64_t> appl_last_seq_num{};
     ::std::optional<bool> appl_resend_flag{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

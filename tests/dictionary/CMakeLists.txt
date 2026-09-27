@@ -33,6 +33,7 @@ add_executable(dictionary_pure_tests
   ref_shape_test.cpp
   loader_disposition_test.cpp     # 083 T035/T042: FR-006 / FR-006a / FR-023 dispositions
   xml_loader_test.cpp
+  xml_loader_component_group_pairs_test.cpp  # 091 T007: C-2.5a component/group pairing
   xml_loader_enum_test.cpp        # 075 T012/T013: enum-value parse + loader strictness
   xml_enum_codeset_test.cpp       # 075 T028: enum_values() census + exposure witness
   round_trip_test.cpp
@@ -90,7 +91,7 @@ add_test(NAME dictionary_pure_tests COMMAND dictionary_pure_tests)
 # 083 joins this bucket with loader_disposition_test (T035/T042, the FR-006 /
 # FR-006a / FR-023 dispositions) — labelled `083` so the feature selector
 # reaches it, same rationale as wire_dict_tests above.
-set_tests_properties(dictionary_pure_tests PROPERTIES LABELS "dictionary;075;083")
+set_tests_properties(dictionary_pure_tests PROPERTIES LABELS "dictionary;075;083;091")
 
 # ── Standalone: isolation-sensitive dictionary tests (FR-002) ─────────────────
 # Each keeps its own executable + add_test(NAME <target>) so its name, labels,

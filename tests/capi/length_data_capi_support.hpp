@@ -161,6 +161,54 @@ inline constexpr std::string_view kFramingLengthPairFix42Xml = R"xml(
 </fix>
 )xml";
 
+// A dictionary that declares a repeating group on a pair half (091 FR-021): CustomDataLen
+// (5001, LENGTH) is declared immediately before CustomData (5002, DATA) in <fields>, so the
+// XmlLoader pairs 5001 with 5002 by adjacency, and NewOrderSingle ("D") carries 5001 and a
+// <group> named after 5002 whose first member, AllocAccount(79), is not a pair half.
+inline constexpr std::string_view kGroupOnPairHalfFix42Xml = R"xml(
+<fix major="4" minor="2">
+  <header>
+    <field name="BeginString" required="Y"/>
+    <field name="BodyLength" required="Y"/>
+    <field name="MsgType" required="Y"/>
+    <field name="SenderCompID" required="Y"/>
+    <field name="TargetCompID" required="Y"/>
+    <field name="MsgSeqNum" required="Y"/>
+    <field name="SendingTime" required="Y"/>
+  </header>
+  <trailer>
+    <field name="CheckSum" required="Y"/>
+  </trailer>
+  <messages>
+    <message name="Heartbeat" msgtype="0" msgcat="admin">
+      <field name="TestReqID" required="N"/>
+    </message>
+    <message name="NewOrderSingle" msgtype="D" msgcat="app">
+      <field name="ClOrdID" required="N"/>
+      <field name="CustomDataLen" required="N"/>
+      <group name="CustomData" required="N">
+        <field name="AllocAccount" required="N"/>
+      </group>
+    </message>
+  </messages>
+  <fields>
+    <field number="8" name="BeginString" type="STRING"/>
+    <field number="9" name="BodyLength" type="LENGTH"/>
+    <field number="10" name="CheckSum" type="STRING"/>
+    <field number="11" name="ClOrdID" type="STRING"/>
+    <field number="34" name="MsgSeqNum" type="SEQNUM"/>
+    <field number="35" name="MsgType" type="STRING"/>
+    <field number="49" name="SenderCompID" type="STRING"/>
+    <field number="52" name="SendingTime" type="UTCTIMESTAMP"/>
+    <field number="56" name="TargetCompID" type="STRING"/>
+    <field number="79" name="AllocAccount" type="STRING"/>
+    <field number="112" name="TestReqID" type="STRING"/>
+    <field number="5001" name="CustomDataLen" type="LENGTH"/>
+    <field number="5002" name="CustomData" type="DATA"/>
+  </fields>
+</fix>
+)xml";
+
 // A plaintext session config over kLengthDataFix42Xml (L-050-1 dictionary seam).
 // The endpoint is set separately via set_loopback_endpoint (L-050-5).
 inline fixpp_session_config_t* make_length_data_session_cfg(

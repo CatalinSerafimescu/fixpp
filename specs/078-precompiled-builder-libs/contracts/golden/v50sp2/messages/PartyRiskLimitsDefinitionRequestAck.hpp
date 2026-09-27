@@ -22,6 +22,7 @@ struct PartyRiskLimitsDefinitionRequestAckArgs {
     ::std::optional<::std::span<const groups::G_1677_3Args>> party_risk_limits{};
     ::std::optional<::std::int64_t> risk_limit_request_result{};
     ::std::optional<::std::int64_t> risk_limit_request_status{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v50sp2

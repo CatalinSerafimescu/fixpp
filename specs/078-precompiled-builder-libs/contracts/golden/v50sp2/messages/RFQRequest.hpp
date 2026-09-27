@@ -20,6 +20,7 @@ struct RFQRequestArgs {
     ::std::optional<::std::span<const groups::G_453Args>> party_i_ds{};
     ::std::optional<::std::string_view> rfq_req_id{};
     ::std::optional<bool> private_quote{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v50sp2

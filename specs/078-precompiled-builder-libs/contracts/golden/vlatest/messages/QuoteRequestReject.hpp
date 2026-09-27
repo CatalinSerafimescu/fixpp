@@ -25,6 +25,7 @@ struct QuoteRequestRejectArgs {
     ::std::optional<::std::span<const groups::G_1116Args>> root_party_i_ds{};
     ::std::optional<bool> private_quote{};
     ::std::optional<::std::int64_t> respondent_type{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

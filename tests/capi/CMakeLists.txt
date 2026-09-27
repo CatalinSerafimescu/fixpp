@@ -115,7 +115,7 @@ add_test(NAME capi_pure_tests COMMAND capi_pure_tests)
 # retired), so an unlabelled bucket meant the ABI gate was not in the ABI
 # label. Labelled `capi` (the bucket-wide selector) + `083` (feature-scoped),
 # matching the convention the sibling capi buckets already use.
-set_tests_properties(capi_pure_tests PROPERTIES LABELS "capi;083;abi")
+set_tests_properties(capi_pure_tests PROPERTIES LABELS "capi;083;abi;091")
 
 # T004 (US1, SC-004) — 051 error-block foundational oracle (translate re-point +
 # strerror + per-code-minor downgrade).  T022 (US5) appends live end-to-end arms
@@ -154,7 +154,7 @@ add_test(NAME capi_lifecycle_negative COMMAND capi_lifecycle_negative_test)
 
 # T028/T029/T030 (US3, SC-001/SC-008/FR-013a) — headline two-C-ABI-engine
 # plaintext round-trip with the drain-thread reply path.
-add_executable(capi_send_recv_test send_recv_test.cpp)
+add_executable(capi_send_recv_test send_recv_test.cpp length_data_logon_refusal_test.cpp)
 target_link_libraries(capi_send_recv_test PRIVATE
   fixpp_capi
   GTest::gtest
@@ -167,24 +167,30 @@ target_include_directories(capi_send_recv_test PRIVATE ${FIXPP_CAPI_FEATURE_B_IN
 # set_session_ever_established seam (capi_internal.hpp gated decl). ODR-safe: both
 # FIXPP_TEST_HOOKS blocks are methods/decls only — no gated data members — so the
 # struct layouts match the non-hooks library (same pattern as capi_error_live_test).
+# 091 FR-020: length_data_logon_refusal_test.cpp reads the same accessor (issue #511).
 target_compile_definitions(capi_send_recv_test PRIVATE FIXPP_TEST_HOOKS)
-# Split into two ctest entries so WILL_FAIL is scoped ONLY to the deliberate
+# Split into separate ctest entries so WILL_FAIL is scoped ONLY to the deliberate
 # ASan UAF witness (T029), not to the positive round-trip tests (CA-006/007).
 # A binary-wide WILL_FAIL would invert a real ASan failure in the positive tests
 # into a pass, silently masking CA-006/007 ASan coverage.
 #
-# capi_send_recv_positive — all tests EXCEPT the ASan UAF witness: must PASS
-#   normally, including under ASan (no WILL_FAIL).
+# capi_send_recv_positive — all tests EXCEPT the ASan UAF witness and the 091
+#   FR-020 logon-refusal cells (CapiLogonMalformedCount.*, which run only in
+#   capi_logon_malformed_count): must PASS normally, including under ASan
+#   (no WILL_FAIL).
 # capi_send_recv_uaf_negative — ONLY the ASan witness: WILL_FAIL under ASan
 #   (the process aborts on the deliberate stack-use-after-return); the test is
 #   #if-guarded in the source, so without ASan it does not exist and the
 #   negative entry exits 0 (no WILL_FAIL needed outside ASan).
 add_test(NAME capi_send_recv_positive
     COMMAND capi_send_recv_test
-        --gtest_filter=-CapiSendRecv.InboundHandleUseAfterReturnCaughtUnderAsan)
+        --gtest_filter=-CapiSendRecv.InboundHandleUseAfterReturnCaughtUnderAsan:CapiLogonMalformedCount.*)
 add_test(NAME capi_send_recv_uaf_negative
     COMMAND capi_send_recv_test
         --gtest_filter=CapiSendRecv.InboundHandleUseAfterReturnCaughtUnderAsan)
+add_test(NAME capi_logon_malformed_count
+    COMMAND capi_send_recv_test --gtest_filter=CapiLogonMalformedCount.*)
+set_tests_properties(capi_logon_malformed_count PROPERTIES LABELS "capi;091")
 if(FIXPP_ENABLE_ASAN)
     set_tests_properties(capi_send_recv_uaf_negative PROPERTIES WILL_FAIL TRUE)
 endif()
@@ -232,15 +238,18 @@ set_tests_properties(capi_message_read PROPERTIES LABELS "capi;051")
 # fixpp#428 / #426 (design .specify/426-428-length-data-pairs.md §5, §6): the C-ABI
 # Length+Data setters and commit-time pair rule, and a two-engine loopback whose
 # EncodedText holds SOH through send, receive and clone.
-add_executable(capi_length_data_test length_data_setters_test.cpp length_data_send_recv_test.cpp)
+add_executable(capi_length_data_test length_data_setters_test.cpp length_data_send_recv_test.cpp
+  length_data_component_pair_test.cpp)  # 091 T008/T009 (FR-019)
 target_link_libraries(capi_length_data_test PRIVATE
   fixpp_capi
   GTest::gtest
   GTest::gtest_main
 )
 target_include_directories(capi_length_data_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
+target_compile_definitions(capi_length_data_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")  # 091 T009: FIX44.xml
 add_test(NAME capi_length_data COMMAND capi_length_data_test)
-set_tests_properties(capi_length_data PROPERTIES LABELS "capi;426;428;length-data")
+set_tests_properties(capi_length_data PROPERTIES LABELS "capi;426;428;length-data;091")
 
 # message_read_failloud_test — 073 (L-065-2, #184) T006: nested-read
 # arena-exhaustion fail-loud witness (RED-first against pristine source).

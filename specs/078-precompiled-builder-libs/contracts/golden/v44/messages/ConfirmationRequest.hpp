@@ -26,6 +26,7 @@ struct ConfirmationRequestArgs {
     ::std::optional<::std::string_view> secondary_alloc_id{};
     ::std::optional<::std::int64_t> alloc_account_type{};
     ::std::optional<::std::string_view> confirm_req_id{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v44

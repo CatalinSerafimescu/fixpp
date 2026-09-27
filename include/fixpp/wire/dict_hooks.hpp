@@ -63,6 +63,11 @@ public:
     [[nodiscard]] constexpr group_delim_fn_t group_delim_fn() const noexcept {
         return group_delim_;
     }
+    // Null when the dictionary declares no Length+Data pair of its own; the two
+    // lookups below then answer from the standard table alone.
+    [[nodiscard]] constexpr length_pair_fn_t length_pair_fn() const noexcept {
+        return length_pair_;
+    }
 
     // The Data tag counted by `length_tag`, or 0. The standard FIX pairs govern
     // any tag they name; a dictionary pair applies only when neither of its tags

@@ -28,6 +28,7 @@ struct MassQuoteAcknowledgementArgs {
     ::std::optional<::std::int64_t> quote_type{};
     ::std::optional<::std::int64_t> account_type{};
     ::std::optional<::std::int64_t> acct_id_source{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v44

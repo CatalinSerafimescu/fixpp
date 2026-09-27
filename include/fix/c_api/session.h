@@ -227,6 +227,15 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_open(fixpp_engine_t* engine,
  * logged on) returns FIXPP_ERR_THREAD_SESSION_LIFECYCLE. Either way the handle is
  * invalidated, so a subsequent close returns FIXPP_ERR_INVALID_HANDLE.
  *
+ * BREAKING (C-ABI 1.9; 091 FR-020): a Logon carrying a Length immediately
+ * followed by its paired Data whose counted extent reaches or passes the end
+ * of the whole framed message, or whose following byte is not SOH (standard
+ * pairs included), which was accepted, is now refused, on either role. Once a
+ * session whose Logon was refused that way has drained, close returns
+ * FIXPP_ERR_THREAD_SESSION_LIFECYCLE, translated for the consumer's ABI minor
+ * (fixpp_engine_create), where it returned FIXPP_ERR_OK: that session never
+ * established, so it is not the established-then-reaped case above.
+ *
  * Reentrancy: single-thread — non-callback / non-session-strand caller only; no
  * concurrent close on the same handle (the thunk posts onto the session domain
  * and BLOCKS, so a callback/strand caller deadlocks — FR-013a).
@@ -238,6 +247,13 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_close(fixpp_session_t* session);
  *
  * Writes *out_established = (Engine::lookup(id) != null && Session::is_open()).
  * A consumer waits on this before sending (open != connected).
+ *
+ * BREAKING (C-ABI 1.9; 091 FR-020): a Logon carrying a Length immediately
+ * followed by its paired Data whose counted extent reaches or passes the end
+ * of the whole framed message, or whose following byte is not SOH (standard
+ * pairs included), which was accepted, is now refused, on either role. For a
+ * session whose Logon was refused that way, *out_established stays false where
+ * it became true.
  *
  * Reentrancy: thread-safe. O(1) lock-free (atomic reader snapshot).
  */
@@ -276,6 +292,25 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_acceptor_bound_endpoint(fixpp_sessi
  * (read-only during the call; the engine deep-copies); the caller may free/reuse
  * on return. Honours durable-before-transmit by reference (FR-009).
  *
+ * BREAKING (C-ABI 1.9): a Length+Data pair a loaded dictionary declares only
+ * inside a component or group is now a dictionary pair. A payload carrying a
+ * malformed pair of that kind, which returned FIXPP_ERR_OK, now returns
+ * FIXPP_ERR_APP_PAYLOAD_MALFORMED, translated for the consumer's ABI minor
+ * (fixpp_engine_create), with no transmit; a count that covers a
+ * following field (e.g. 43, 122 or a header-class tag) is now transmitted
+ * verbatim as Data, not excised or reordered. Also (091 FR-020), a Logon
+ * carrying a Length immediately followed by its paired Data whose counted
+ * extent reaches or passes the end of the whole framed message, or whose
+ * following byte is not SOH (standard pairs included), which was accepted, is
+ * now refused, on either role; a send on that session, issued after that
+ * Logon, which returned FIXPP_ERR_OK, now returns
+ * FIXPP_ERR_SESSION_INVALID_STATE, translated for the consumer's ABI minor
+ * (fixpp_engine_create). For a send either change refuses, the
+ * toApp callback (fixpp_session_register_send_callback) is not invoked: the
+ * pair refusal comes before the send path builds its toApp view, and a send
+ * on that session is refused at the engine's Active check, before it reaches
+ * that path.
+ *
  * Reentrancy: thread-safe — callable from any consumer thread (the any-thread
  * Engine::send contract) EXCEPT from inside the receive callback, where the
  * blocking wrapper deadlocks (FR-013a; recorded Gate-A deviation from
@@ -296,6 +331,17 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_send(fixpp_session_t* session,
  * fixpp_msg_t and `userdata`. See fixpp_recv_cb for the dispatch-window lifetime
  * and the no-blocking-call-from-callback rule (FR-013a).
  *
+ * BREAKING (C-ABI 1.9): a Length+Data pair a loaded dictionary declares only
+ * inside a component or group is now a dictionary pair. An inbound message
+ * carrying a malformed pair of that kind, which was delivered to `cb` before,
+ * is now dropped as a parse error, silently: `cb` is not invoked and no Reject
+ * is sent. Also (091 FR-020), a Logon carrying a Length immediately followed
+ * by its paired Data whose counted extent reaches or passes the end of the
+ * whole framed message, or whose following byte is not SOH (standard pairs
+ * included), which was accepted, is now refused, on either role; inbound
+ * application messages on that session, delivered to `cb` before, are never
+ * delivered.
+ *
  * Reentrancy: single-thread. THUNK: construction-time.
  */
 FIXPP_API_EXPORT fixpp_error_t fixpp_session_register_callback(
@@ -315,6 +361,15 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_register_callback(
  * (app_callback_threw). ResendRequest retransmissions are NOT surfaced (L-019-4).
  *
  * `cb` may be NULL to deregister. Re-registration overwrites.
+ *
+ * BREAKING (C-ABI 1.9): a Length+Data pair a loaded dictionary declares only
+ * inside a component or group is now a dictionary pair. For a send
+ * fixpp_session_send refuses because of a malformed pair of that kind, `cb` is
+ * not invoked. Also (091 FR-020), a Logon carrying a Length immediately
+ * followed by its paired Data whose counted extent reaches or passes the end
+ * of the whole framed message, or whose following byte is not SOH (standard
+ * pairs included), which was accepted, is now refused, on either role; on that
+ * session `cb`, invoked before for each send, is never invoked.
  *
  * Reentrancy: single-thread. THUNK: construction-time. The installed callback
  * runs on the session strand (see fixpp_send_cb typedef; [contracts/toapp-callback.md]).

@@ -17,6 +17,7 @@ struct ListCancelRequestArgs {
     ::std::optional<::std::string_view> transact_time{};
     ::std::optional<::std::string_view> list_id{};
     ::std::optional<::std::string_view> encoded_text{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v42

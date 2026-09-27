@@ -103,6 +103,7 @@ struct ExecutionReportArgs {
     ::std::optional<::std::string_view> clearing_firm{};
     ::std::optional<::std::string_view> clearing_account{};
     ::std::optional<char> multi_leg_reporting_type{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v42

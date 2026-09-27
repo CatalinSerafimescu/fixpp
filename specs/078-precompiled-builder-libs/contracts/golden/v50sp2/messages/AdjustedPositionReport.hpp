@@ -26,6 +26,7 @@ struct AdjustedPositionReportArgs {
     ::std::optional<::std::int64_t> pos_req_type{};
     ::std::optional<::fixpp::decimal_t> settl_price{};
     ::std::optional<::fixpp::decimal_t> prior_settl_price{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v50sp2

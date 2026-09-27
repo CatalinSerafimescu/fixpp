@@ -32,6 +32,7 @@ struct AlgoCertificateRequestArgs {
     ::std::optional<::std::span<const groups::G_3028Args>> test_scenarios{};
     ::std::optional<::std::int64_t> algo_certificate_request_type{};
     ::std::optional<::std::string_view> test_scenario_group_id{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

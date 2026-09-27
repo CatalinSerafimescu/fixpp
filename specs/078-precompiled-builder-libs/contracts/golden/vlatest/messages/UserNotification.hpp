@@ -20,6 +20,7 @@ struct UserNotificationArgs {
     ::std::optional<::std::span<const groups::G_809Args>> usernames{};
     ::std::optional<::std::int64_t> user_status{};
     ::std::optional<::std::span<const groups::G_1610Args>> throttles{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

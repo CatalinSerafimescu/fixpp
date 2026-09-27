@@ -23,6 +23,7 @@ struct SecurityTypeRequestArgs {
     ::std::optional<::std::string_view> security_sub_type{};
     ::std::optional<::std::string_view> market_segment_id{};
     ::std::optional<::std::string_view> market_id{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v50sp2

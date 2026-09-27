@@ -1,8 +1,7 @@
 # tests/wire/CMakeLists.txt — 004-wire-codec test suite.
 # 068-test-binary-grouping: isolation-safe wire tests are grouped into
-# whole-binary add_test executables (bucketed by shared link-deps; none of
-# the 34 carry LABELS, so `-L`/`-R '^wire_'` selection is untouched at the
-# binary-name level). test_body_builder.cpp (in-TU global operator new/
+# whole-binary add_test executables (bucketed by shared link-deps).
+# test_body_builder.cpp (in-TU global operator new/
 # operator new[] allocation counter) stays standalone. Dispositions in
 # specs/068-test-binary-grouping/dispositions.md.
 find_package(GTest CONFIG REQUIRED)
@@ -88,6 +87,8 @@ set_tests_properties(wire_pure_tests PROPERTIES LABELS "079;wire")
 # ── Standalone: 061-slim body-builder alloc gate (FR-002) ────────────────────
 # in-TU global ::operator new / ::operator new[] allocation counter (D3).
 add_wire_test(wire_body_builder_test test_body_builder.cpp)            # 061-slim T005/T006
+# 091-data-field-bytes: label so the feature selector `ctest -L '^091$'` reaches it.
+set_tests_properties(wire_body_builder_test PROPERTIES LABELS "091")
 
 # ── Grouped bucket: codegen-gated wire tests (3 .cpp → 1 binary) ─────────────
 # Each needs the build-tree generated fixpp/v<XX>/Messages.hpp or Reify.hpp;
@@ -159,7 +160,7 @@ add_test(NAME wire_dict_tests COMMAND wire_dict_tests)
 # them: 081 shipped with this exact hole (its #203 accept witnesses sat in this
 # same bucket, unreachable by the feature selector, and only the unfiltered
 # debug leg ran them).
-set_tests_properties(wire_dict_tests PROPERTIES LABELS "075;083;wire")
+set_tests_properties(wire_dict_tests PROPERTIES LABELS "075;083;wire;091")
 # 083 T021 (W-10a leg 4, contracts/typed_read_splitter.md): a BACKSTOP, never
 # the discriminator. Leg 4's depth-capped chain fixture drives
 # consume_group_extent's outer loop with an attacker-shaped declared count; an
@@ -177,10 +178,15 @@ set_tests_properties(wire_dict_tests PROPERTIES LABELS "075;083;wire")
 # 3; it would otherwise have been a CI red on the PR). The cost is not 083's:
 # 081's Fix50Family/FixtHeaderValidateTest is 120.0 s of that 147.2 s, and 083's
 # three added files account for well under 30 s.
-# 600 keeps ~4x headroom over the measured tsan figure — enough for a CI runner
-# slower than this host — while still bounding a non-termination to minutes
-# rather than the job timeout, which is the whole point of having the property.
-set_tests_properties(wire_dict_tests PROPERTIES TIMEOUT 600)
+#
+# TSan is not the slowest preset for this bucket: Tier 2's windows-msvc-asan
+# runs it slower still, so that is the preset to size against. To re-derive,
+# read the wire_dict_tests wall time from that leg's ctest output in the
+# latest Tier 2 run. Keep this value equal to the ctest `--timeout` wedge
+# guard in .github/workflows/tier2.yml, and below the timeout-minutes of every
+# job that runs this bucket, so a non-termination is still bounded short of
+# the job timeout — which is the whole point of having the property.
+set_tests_properties(wire_dict_tests PROPERTIES TIMEOUT 1800)
 
 # ── Standalone: 075 T007 QuickFIX enum-golden manifest gate ─────────────────
 # Isolation-sensitive per [const §VII.8] (a data-driven exact-hash gate) —

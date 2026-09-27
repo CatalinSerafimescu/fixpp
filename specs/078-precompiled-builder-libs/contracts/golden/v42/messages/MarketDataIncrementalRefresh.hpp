@@ -16,6 +16,7 @@ namespace fixpp::v42 {
 struct MarketDataIncrementalRefreshArgs {
     ::std::optional<::std::string_view> md_req_id{};
     ::std::span<const groups::G_268_2Args> md_entries{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v42

@@ -30,6 +30,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/core/decimal_alias.hpp>
+#include <fixpp/core/error.hpp>
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/orchestra_loader.hpp>
 #include <fixpp/vlatest/Messages.hpp>
@@ -3892,4 +3893,45 @@ TEST_F(AllVersionsRoundtrip077Vlatest, DerivativeSecurityListRequest) {
     expect_decimal(mv, 245, "10.5", &read_arena, "underlying_repurchase_rate");
     expect_decimal(mv, 246, "10.5", &read_arena, "underlying_factor");
     expect_text(mv, 263, "1", "subscription_request_type");
+}
+
+// ── 091-data-field-bytes T032 [US1]: vlatest coupled-pair round trip ─────
+// (spec Edge Cases, "FIX Latest".) One vlatest message with a coupled Data
+// member whose value holds SOH and 0xFF: verbatim emit with the Length equal
+// to the octet count, as one contiguous in-order run, and a re-parse that
+// recovers the octets. The message comes from the C-2.2 census dump
+// (`codegen_091_data_census_test --census-dump`): an EXPECTED row for vlatest
+// NewOrderSingle, path -, L=354 D=355 (EncodedText). This binary is built only
+// when FIXPP_CODEGEN_FIX_LATEST is ON (tests/session/CMakeLists.txt).
+TEST_F(AllVersionsRoundtrip077Vlatest, NewOrderSingle_EncodedText_SohAnd0xFF_091) {
+    std::string const text = std::string{"x"} + '\x01' + 'y' + '\xff' + 'z';
+
+    fixpp::vlatest::NewOrderSingleArgs args{};
+    args.cl_ord_id = "ORD-091";
+    args.side = '1';
+    args.encoded_text = text;
+
+    auto built = fixpp::vlatest::build_NewOrderSingle(out, args);
+    ASSERT_TRUE(built.has_value()) << "build_NewOrderSingle refused an EncodedText(355) holding "
+                                      "SOH and 0xFF: "
+                                   << fixpp::core::to_string(built.error());
+    std::string const body = bytes_to_string(*built);
+    std::string const run =
+        std::string{
+            "\x01"
+            "354="} +
+        std::to_string(text.size()) + "\x01" + "355=" + text + "\x01";
+    EXPECT_NE(body.find(run), std::string::npos)
+        << "EncodedTextLen(354) must equal the octet count and be followed directly by "
+           "EncodedText(355) carrying the octets verbatim";
+
+    std::vector<std::byte> const frame = make_frame("FIXT.1.1", body);
+    auto const mv = parse_dict(frame, *tv_, &read_arena);
+    ASSERT_FALSE(::testing::Test::HasFailure()) << "dict-aware re-parse failed";
+    auto len = mv.get(354);
+    ASSERT_TRUE(len.has_value()) << "re-parse lost EncodedTextLen(354)";
+    EXPECT_EQ(len->as_string(), std::to_string(text.size()));
+    auto data = mv.get(355);
+    ASSERT_TRUE(data.has_value()) << "re-parse lost EncodedText(355)";
+    EXPECT_EQ(data->as_string(), text) << "re-parse must recover the octets verbatim";
 }

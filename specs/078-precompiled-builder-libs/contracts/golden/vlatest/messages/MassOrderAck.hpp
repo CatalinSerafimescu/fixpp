@@ -49,6 +49,7 @@ struct MassOrderAckArgs {
     ::std::optional<::std::int64_t> order_response_level{};
     ::std::optional<::std::span<const groups::G_2428_2Args>> order_entries{};
     ::std::optional<::std::int64_t> tot_no_order_entries{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

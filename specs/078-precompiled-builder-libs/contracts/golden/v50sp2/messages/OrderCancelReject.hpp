@@ -40,6 +40,7 @@ struct OrderCancelRejectArgs {
     ::std::optional<::std::string_view> reject_text{};
     ::std::optional<::std::string_view> encoded_reject_text{};
     ::std::optional<::std::int64_t> order_request_id{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v50sp2

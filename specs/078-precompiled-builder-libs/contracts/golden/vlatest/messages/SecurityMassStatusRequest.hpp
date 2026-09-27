@@ -44,6 +44,7 @@ struct SecurityMassStatusRequestArgs {
     ::std::optional<::std::string_view> instrument_scope_security_exchange{};
     ::std::optional<::std::string_view> instrument_scope_encoded_security_desc{};
     ::std::optional<::std::string_view> instrument_scope_upi_code{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

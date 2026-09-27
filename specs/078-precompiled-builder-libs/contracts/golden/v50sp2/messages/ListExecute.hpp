@@ -19,6 +19,7 @@ struct ListExecuteArgs {
     ::std::optional<::std::string_view> encoded_text{};
     ::std::optional<::std::string_view> bid_id{};
     ::std::optional<::std::string_view> client_bid_id{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v50sp2

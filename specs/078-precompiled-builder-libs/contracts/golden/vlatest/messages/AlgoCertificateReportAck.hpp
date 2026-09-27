@@ -18,6 +18,7 @@ struct AlgoCertificateReportAckArgs {
     ::std::optional<::std::string_view> algo_certificate_report_id{};
     ::std::optional<::std::int64_t> algo_certificate_report_status{};
     ::std::optional<::std::int64_t> algo_certificate_report_type{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

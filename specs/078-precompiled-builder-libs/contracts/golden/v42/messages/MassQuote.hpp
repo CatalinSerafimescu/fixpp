@@ -20,6 +20,7 @@ struct MassQuoteArgs {
     ::std::optional<::fixpp::decimal_t> def_offer_size{};
     ::std::span<const groups::G_296_2Args> quote_sets{};
     ::std::optional<::std::int64_t> quote_response_level{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v42

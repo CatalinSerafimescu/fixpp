@@ -80,6 +80,7 @@ struct MarketDefinitionUpdateReportArgs {
     ::std::optional<::std::span<const groups::G_2560Args>> flex_product_eligibilities{};
     ::std::optional<::std::string_view> currency_code_source{};
     ::std::optional<::std::string_view> trading_currency_code_source{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

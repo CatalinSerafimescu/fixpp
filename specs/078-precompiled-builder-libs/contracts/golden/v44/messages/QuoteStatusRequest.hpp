@@ -79,6 +79,7 @@ struct QuoteStatusRequestArgs {
     ::std::optional<::std::string_view> agreement_currency{};
     ::std::optional<::std::int64_t> delivery_type{};
     ::std::optional<::std::string_view> strike_currency{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v44

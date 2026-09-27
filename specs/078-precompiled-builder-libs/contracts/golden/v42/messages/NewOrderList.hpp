@@ -25,6 +25,7 @@ struct NewOrderListArgs {
     ::std::optional<::std::int64_t> prog_rpt_reqs{};
     ::std::optional<::std::int64_t> prog_period_interval{};
     ::std::optional<char> list_exec_inst_type{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v42

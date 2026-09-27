@@ -20,6 +20,7 @@ struct PartyDetailsDefinitionRequestArgs {
     ::std::optional<::std::string_view> party_details_list_request_id{};
     ::std::optional<::std::span<const groups::G_1657Args>> requesting_party_i_ds{};
     ::std::span<const groups::G_1676_1Args> party_updates{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

@@ -10,6 +10,7 @@ refs:
   - .specify/2b-wire.md
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/2b-wire.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/091-data-field-bytes-gatea.md
 codegraph_entry: [Framer, OffsetTable, MessageView, dictionary_driven_validator, wire_error_to_session_reject_reason]
 constitution: ["§VIII.5"]
 ---
@@ -197,10 +198,63 @@ What was rejected:
   group oracles: the mismatched-pairing shape of the #384 section above.
 - **One malformed-count policy for every scanner** (design §4). A header scan must stop, a replay
   must gap-fill, and a Password masker must over-mask rather than miss (B-426-2).
+  ⚠️ **Superseded for `interpret_logon` by 091 FR-020** (owner ruling 2026-09-24). A stop there
+  hid a later `EncryptMethod(98)`, a `[const §XII.7]` fail-open reachable through the standard pair
+  95/96. `interpret_logon` now refuses a Logon in which a Length is immediately followed by its
+  paired Data whose counted extent reaches or passes the end of the whole framed message, or whose
+  following byte is not SOH. `.specify/426-428-length-data-pairs.md` §4 still gives the stop for
+  `interpret_logon`; it is flagged here and not edited. The other scanners keep §4's policy: each
+  fails closed or equals the peer omitting the later fields (091 evidence §*Malformed-count scan
+  sites*). Re-derive from `src/session/admin_messages.cpp` `interpret_logon`.
 
 `OffsetTable::build` and `field_iterator` keep their own carries (hot path). The six session
-scanners share `length_data_carry::read_value`. #418's `body_builder` must reuse
-`length_data_pairs.hpp` and `length_data_checker`, not add a fifteenth copy.
+scanners share `length_data_carry::read_value`. 091 (#418)'s `body_builder` reused
+`length_data_pairs.hpp` and `length_data_checker` rather than add another copy: `field_data` /
+`set_data` take the Length from the standard table, and `commit` runs one `length_data_checker`
+per container (`src/wire/body_builder.cpp` `validate_group_grammar`). `commit` skips that pair walk
+while `pair_check_needed_` is clear, i.e. while no appended node carries a standard pair tag and the
+hooks carry no dictionary callback; why that gives the same result, and the cost that motivated it,
+is 091 `research.md` R-4's SC-005 addendum (fix `1fe2a063`). The same feature changed the
+QuickFIX-XML loader to pair inside components and groups (FR-017; see [`dictionary`](dictionary.md))
+and added a drift arm per shipped dictionary (FR-018, below).
+
+⚠️ **The 426-428 note's "the drift test keeps the two in step" was true of the UNION only, not of
+each dictionary, until 091** (found at 091's Gate A; FR-018 makes it true per dictionary). The note
+is not edited; it is flagged here (#334). The note is
+`.specify/426-428-length-data-pairs.md`, in its codegen paragraph.
+
+⚠️ **The same note's "#418 is unchanged: C++ `body_builder` still cannot emit a non-ASCII Data value
+(L-067-2)" stopped being true with 091.** `body_builder::field_data` and `entry_handle::set_data`
+now carry any octet, and L-067-2 is closed (B-091-5). The note is a dated record and is not edited;
+read that sentence as history (#334).
+- `HeaderEqualsShippedDictionaryUnion` compares the standard table with the union of the pairs from
+  every shipped dictionary. Orchestra's `lengthId` supplies every pair, so the union matches even
+  when one QuickFIX-XML dictionary's loader misses some.
+- The FIX 5.0 SP2 loader did miss some, and the generated v50sp2 builders then left those pairs
+  uncoupled. Why it happened is on the [`dictionary`](dictionary.md) page.
+- Feature 091 adds the per-dictionary drift arm (FR-018):
+  `LengthDataPairsPerDictionary.EveryProbedStandardPairIsPairedByTheLoader` in
+  `tests/wire/length_data_pairs_drift_test.cpp`. Its legs are a hand-written list, Orchestra FIX
+  Latest included: compare its `INSTANTIATE_TEST_SUITE_P` list with `dictionaries/` before trusting
+  it for a dictionary. Each leg also asserts that its probed set is non-empty. It lands with the loader
+  fix (FR-017) that makes it pass. Where that test is absent from the tree you are reading, treat
+  the claim as unproven for any single dictionary.
+- Re-derive the gap: run 091's `research.md` R-11 recipe, or compare `Dictionary::length_pair_data_tag`
+  per dictionary against the standard table for the pairs whose tags appear in that dictionary's
+  message expansions.
+
+**The set-time pair set is the standard table only (091, owner ruling).** `body_builder::field_data`
+does not accept a pair that only the dictionary declares. `send_impl` scans with the **session's**
+dictionary, so hooks a caller supplies at construction could make SOH legal in a tag that the
+sending session treats as plain. The value would then split on the wire, e.g. `1=EVIL`. The C-ABI
+avoids this because it takes its pairs from its own session. Dictionary pairs are still checked at
+commit. The binding that would lift the restriction is fixpp#505.
+
+**A group node is fed to the pair checker as `observe(no_tag, {})`** in 091's `body_builder`. The
+empty value is what refuses a group whose tag is one half of a pair. Feeding the count digits, as
+the C-ABI commit did, let a group tagged 354 pose as a Length. That C-ABI defect was fixpp#506, and
+091 FR-021 is its repair: `check_length_data` (`src/capi/message_write.cpp`) now feeds a group node
+an empty value too, so both writers refuse the same group shapes (C-ABI 1.9, B&L `B-091-4`).
 
 **Where the table lives, and why the callback is conditional.** The standard table is
 `include/fixpp/core/length_data_pairs.hpp` — `table_view` must classify a tag and the dictionary

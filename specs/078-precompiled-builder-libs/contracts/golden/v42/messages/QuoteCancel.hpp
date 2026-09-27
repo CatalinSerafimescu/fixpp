@@ -20,6 +20,7 @@ struct QuoteCancelArgs {
     ::std::optional<::std::int64_t> quote_cancel_type{};
     ::std::optional<::std::int64_t> quote_response_level{};
     ::std::optional<::std::string_view> trading_session_id{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v42

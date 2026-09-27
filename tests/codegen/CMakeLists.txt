@@ -192,6 +192,33 @@ add_test(NAME codegen_vlatest_census_test COMMAND codegen_vlatest_census_test)
 set_tests_properties(codegen_vlatest_census_test PROPERTIES
   LABELS "codegen;076;vlatest_census")
 
+# 091-data-field-bytes T028 [US1]: C-2.2/C-2.3 exact completeness census of
+# the generated builders' coupled Length+Data call sites. Standalone per
+# [const §VII.8]: it is an exact-set completeness gate over generated output,
+# and it has its own main() because it takes the generated-source root as an
+# argument (default ${FIXPP_CODEGEN_OUT}), so a mutant emitter's output can be
+# pointed at it. The expected set comes from an independent pugixml walk of
+# dictionaries/ (see the .cpp header); fixpp_dictionary supplies only the
+# include path of the standard pair table.
+add_executable(codegen_091_data_census_test codegen_091_data_census_test.cpp)
+add_dependencies(codegen_091_data_census_test fixpp_codegen_generate)
+target_link_libraries(codegen_091_data_census_test PRIVATE
+  fixpp_dictionary
+  pugixml::pugixml
+  GTest::gtest
+)
+target_compile_definitions(codegen_091_data_census_test PRIVATE
+  "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+  "FIXPP_CODEGEN_OUT=\"${FIXPP_CODEGEN_OUT}\""
+)
+if(FIXPP_CODEGEN_FIX_LATEST)
+  target_compile_definitions(codegen_091_data_census_test PRIVATE FIXPP_091_CENSUS_HAS_VLATEST)
+endif()
+add_test(NAME codegen_091_data_census_test
+  COMMAND codegen_091_data_census_test "${FIXPP_CODEGEN_OUT}")
+set_tests_properties(codegen_091_data_census_test PROPERTIES
+  LABELS "codegen;091")
+
 # 076-fix-latest-typed-codegen T014 [US2]: V-1b manifest<->class
 # consistency gate — pure text parsing of the shipped Messages.hpp (class
 # side, non-circular w.r.t. ir.cpp/emit_manifest.cpp) diffed against a
@@ -549,7 +576,7 @@ add_test(
     -P "${CMAKE_CURRENT_SOURCE_DIR}/read_tier_byte_diff_test.cmake"
 )
 set_tests_properties("fixpp::dict::read-tier-byte-diff" PROPERTIES
-  LABELS "codegen;077;read-tier-byte-diff")
+  LABELS "codegen;077;read-tier-byte-diff;091")
 
 # 078-precompiled-builder-libs T002 (research.md R2a — Phase-0 BLOCKING
 # prerequisite): hand-written ~30-line ODR / builder⟂validator (SC-003) probe.

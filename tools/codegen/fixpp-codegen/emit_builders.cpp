@@ -70,6 +70,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <fixpp/core/length_data_pairs.hpp>
 #include <fixpp/dict/field_ref.hpp>
 #include <stdexcept>
 #include <string>
@@ -180,6 +181,9 @@ struct LevelItem {
     // top-level items are the framing-excluded run (top_level_synthetic_
     // members), group items never carry a framing tag at all.
     bool required = false;
+    // 091 (#418) C-2.3: the top-level MessageEncoding(347) member, appended last to
+    // the Args struct and emitted first in the body (see emit_level_body).
+    bool message_encoding = false;
 
     // ── group ──
     // Reference to the shared plan this occurrence resolves to (filled by
@@ -406,7 +410,14 @@ void emit_args_struct(TemplateWriter& w, std::string const& type_name, LevelPlan
 void emit_level_body(TemplateWriter& w, LevelPlan const& plan, std::string const& accessor_expr,
                      std::string const& owner_expr, bool top_level, int& uid,
                      PlanIntern const& intern) {
-    for (auto const& item : plan) {
+    // 091 (#418) C-2.3: `message_encoding` is the LAST Args member but its emit is
+    // the FIRST body statement, so it is ordered ahead of every other item here.
+    std::vector<LevelItem const*> order;
+    order.reserve(plan.size());
+    for (auto const& item : plan) order.push_back(&item);
+    std::ranges::stable_partition(order, [](LevelItem const* i) { return i->message_encoding; });
+    for (LevelItem const* item_ptr : order) {
+        LevelItem const& item = *item_ptr;
         if (!item.is_group) {
             w.raw("    if (");
             w.raw(accessor_expr);
@@ -414,27 +425,27 @@ void emit_level_body(TemplateWriter& w, LevelPlan const& plan, std::string const
             w.raw(item.accessor);
             w.line(") {");
             if (item.coupled) {
-                std::string const len_call = top_level ? "bb.field(" : (owner_expr + ".set_int(");
-                std::string const data_call =
-                    top_level ? "bb.field(" : (owner_expr + ".set_string(");
-                w.raw("        auto r_len = ");
-                w.raw(len_call);
-                w.num(item.tag);
-                w.raw(", static_cast<::std::int64_t>(");
-                w.raw(accessor_expr);
-                w.raw(".");
-                w.raw(item.accessor);
-                w.line("->size()));");
-                w.line("        if (!r_len) return ::std::unexpected(r_len.error());");
-                w.raw("        auto r_data = ");
-                w.raw(data_call);
+                // 091 (#418) C-2.1: one call writes both halves, the Length derived from
+                // the octet count, so the Data value bypasses the printable-value guard.
+                // The static_assert fails the build if the standard table does not pair
+                // this Data tag with the Length tag the dictionary declared.
+                std::string const pair_call =
+                    top_level ? "bb.field_data(" : (owner_expr + ".set_data(");
+                w.raw(
+                    "        static_assert(::fixpp::wire::dict_hooks::none().length_tag_for_data(");
                 w.num(item.data_tag);
-                w.raw(", *");
+                w.raw(") == ");
+                w.num(item.tag);
+                w.line(");");
+                w.raw("        auto r_pair = ");
+                w.raw(pair_call);
+                w.num(item.data_tag);
+                w.raw(", ::std::as_bytes(::std::span{*");
                 w.raw(accessor_expr);
                 w.raw(".");
                 w.raw(item.accessor);
-                w.line(");");
-                w.line("        if (!r_data) return ::std::unexpected(r_data.error());");
+                w.line("}));");
+                w.line("        if (!r_pair) return ::std::unexpected(r_pair.error());");
             } else {
                 std::string const call =
                     top_level ? std::string{"bb.field("}
@@ -624,6 +635,40 @@ GroupOrderEntry const* find_group_entry(MessageIR const& m, std::vector<std::uin
     return nullptr;
 }
 
+// 091 (#418) C-2.3 / R-8: true when any member at any depth of the tree
+// resolve_level walks is the Data half of a STANDARD Length+Data pair
+// (core/length_data_pairs.hpp) whose field name contains "Encoded". Keyed on the
+// standard table, not on the dictionary's own pairing, and on "contains" rather
+// than "begins with" (FIX 5.0 SP2 has Encoded fields with a prefix).
+// NOLINTNEXTLINE(misc-no-recursion)
+bool carries_encoded_data(MessageIR const& m,
+                          std::unordered_map<std::uint16_t, FieldIR const*> const& field_by_tag,
+                          std::vector<std::uint16_t> const& path,
+                          std::vector<GroupOrderMember> const& members) {
+    for (auto const& gm : members) {
+        if (gm.is_group) {
+            GroupOrderEntry const* nested = find_group_entry(m, path, gm.tag);
+            if (nested == nullptr) {
+                continue;
+            }
+            std::vector<std::uint16_t> child_path = path;
+            child_path.push_back(gm.tag);
+            if (carries_encoded_data(m, field_by_tag, child_path, nested->members)) {
+                return true;
+            }
+            continue;
+        }
+        if (::fixpp::core::detail::standard_length_tag_for_data(gm.tag) == 0) {
+            continue;
+        }
+        auto const fit = field_by_tag.find(gm.tag);
+        if (fit != field_by_tag.end() && fit->second->name.contains("Encoded")) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Resolves ONE level's DECLARATION-order member list into a LevelPlan.
 // 077-builder-args-dedup T008 — PASS 1 (discovery): no longer emits
 // anything (the pre-077 message-rooted `emit_args_struct` inline call is
@@ -651,7 +696,7 @@ LevelPlan resolve_level(MessageIR const& m,
                         std::unordered_map<std::uint16_t, FieldIR const*> const& field_by_tag,
                         std::vector<std::uint16_t> const& path,
                         std::vector<GroupOrderMember> const& members, PlanIntern& intern,
-                        bool level_required = true) {
+                        bool level_required = true, bool add_message_encoding = false) {
     std::unordered_set<std::uint16_t> level_tags;
     for (auto const& gm : members) {
         level_tags.insert(gm.tag);
@@ -760,6 +805,17 @@ LevelPlan resolve_level(MessageIR const& m,
         item.kind = k;
         item.accessor = uniquify_accessor(used_accessors, to_accessor(f->name), gm.tag);
         item.required = (f->ref.rule == fixpp::dict::field_presence::Required) && level_required;
+        plan.push_back(std::move(item));
+    }
+    // 091 (#418) C-2.3: appended last so a positional aggregate initializer of the
+    // pre-091 members keeps its meaning (R-8). Never required (FR-011a).
+    if (add_message_encoding) {
+        LevelItem item;
+        item.is_group = false;
+        item.tag = 347;
+        item.kind = TypeKind::String;
+        item.message_encoding = true;
+        item.accessor = uniquify_accessor(used_accessors, "message_encoding", item.tag);
         plan.push_back(std::move(item));
     }
     return plan;
@@ -1326,7 +1382,10 @@ std::vector<EmittedFile> emit_builders(VersionIR const& ir, CoverageMode mode) {
         std::string const msg_id = to_identifier(m.name);
         std::vector<GroupOrderMember> const top_members =
             top_level_synthetic_members(ir, m, ir.header_trailer_tags);
-        LevelPlan plan = resolve_level(m, field_by_tag, /*path=*/{}, top_members, intern);
+        bool const add_message_encoding =
+            carries_encoded_data(m, field_by_tag, /*path=*/{}, top_members);
+        LevelPlan plan = resolve_level(m, field_by_tag, /*path=*/{}, top_members, intern,
+                                       /*level_required=*/true, add_message_encoding);
 
         registry_msg_types.push_back(m.msg_type);
         official_msg_ids.push_back(msg_id);

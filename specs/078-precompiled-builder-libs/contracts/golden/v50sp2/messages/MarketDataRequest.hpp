@@ -35,6 +35,7 @@ struct MarketDataRequestArgs {
     ::std::optional<::std::int64_t> md_quote_type{};
     ::std::optional<::std::span<const groups::G_1310_2Args>> market_segments{};
     ::std::optional<bool> fast_market_indicator{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v50sp2

@@ -104,6 +104,26 @@ typedef struct fixpp_resolved_msg_version {
  *                               OR wrong flavour (outbound handle, view==NULL)
  *   FIXPP_ERR_TAG_NOT_FOUND   — the tag is absent from the message
  *
+ * BREAKING (C-ABI 1.9): a Length+Data pair a loaded dictionary declares only
+ * inside a component or group is now a dictionary pair. This paragraph covers
+ * the readers fixpp_msg_get_{string,bytes,int,double,decimal}, fixpp_msg_has_tag,
+ * fixpp_msg_version, fixpp_msg_get_msg_type, fixpp_msg_field_count,
+ * fixpp_msg_field_at, fixpp_msg_get_group,
+ * fixpp_group_get_field_{string,int,double,decimal} and
+ * fixpp_group_get_nested_group, on the inbound, clone and toApp views (the last
+ * is what fixpp_session_register_send_callback exposes). A counted Data of such
+ * a pair can absorb fields these readers used to return: a getter that returned
+ * FIXPP_ERR_OK can now return FIXPP_ERR_TAG_NOT_FOUND, and fixpp_msg_get_group
+ * can report a changed instance count; fixpp_msg_field_at can go out of range;
+ * fixpp_msg_has_tag and fixpp_msg_field_count change value; fixpp_msg_version's
+ * appl_ver_id member can become NULL (tag 8 is fixed first by the Framer and
+ * cannot be absorbed); fixpp_msg_get_msg_type can return FIXPP_ERR_TAG_NOT_FOUND
+ * when such a pair precedes 35, which is reachable while the session's
+ * validate_inbound_messages is unset, since that header-order check is the only
+ * rule placing 35 third. To re-derive whether a C-ABI session can set it, grep
+ * validate_inbound_messages in src/capi, and read its default in
+ * include/fixpp/session/session_config.hpp.
+ *
  * Returned-pointer lifetime is HANDLE-FLAVOUR dependent: for an inbound / toApp
  * handle the aliases are valid ONLY within the receive/send callback (dispatch)
  * window; for a detached fixpp_msg_clone they are valid until fixpp_msg_destroy
@@ -398,6 +418,13 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_set_bytes(fixpp_msg_t* msg, uint16_t ta
  *  written; remove the stray half first. No existing field moves, so open group
  *  builders stay valid.
  *
+ *  BREAKING (C-ABI 1.9): a Length+Data pair a loaded dictionary declares only
+ *  inside a component or group is now a dictionary pair. For the Data tag of
+ *  such a pair this call returned FIXPP_ERR_TYPE_MISMATCH (the tag was not a
+ *  Data half); that refusal no longer fires, and the call reaches the later
+ *  refusals below, e.g. FIXPP_ERR_WIRE_CONFORMANCE for len == 0, or
+ *  FIXPP_ERR_DICT_CONFIG for a half not declared for this MsgType.
+ *
  *  Return codes:
  *    FIXPP_ERR_OK                        -- success
  *    FIXPP_ERR_NULL_HANDLE               -- msg or bytes is NULL
@@ -464,6 +491,18 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_remove_tag(fixpp_msg_t* msg, uint16_t t
  *  The payload is: 35=type SOH tag=value SOH ... (no framing tags 8/9/34/49/52/56/10).
  *  *payload_out aliases the per-message arena; valid until the next mutation or destroy.
  *
+ *  BREAKING (C-ABI 1.9): a Length+Data pair a loaded dictionary declares only
+ *  inside a component or group is now a dictionary pair. A malformed pair of
+ *  that kind, which returned FIXPP_ERR_OK, now returns
+ *  FIXPP_ERR_WIRE_CONFORMANCE.
+ *
+ *  BREAKING (C-ABI 1.9, FR-021), a cause separate from the loader's above: a
+ *  group's count field is checked as a field with an empty value, so a group
+ *  whose count tag is the Length or the Data half of a pair (the FIX
+ *  standard's, or the session dictionary's) is not read as that half. Such a
+ *  group, which returned FIXPP_ERR_OK when its instance-count digits completed
+ *  the pair, now returns FIXPP_ERR_WIRE_CONFORMANCE.
+ *
  *  Return codes:
  *    FIXPP_ERR_OK              -- success
  *    FIXPP_ERR_NULL_HANDLE     -- msg or payload_out or len_out is NULL
@@ -476,8 +515,10 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_msg_remove_tag(fixpp_msg_t* msg, uint16_t t
  *                                     its Length, a Length not immediately before its
  *                                     Data, a Length that is not positive ASCII digits
  *                                     equal to the Data byte count (leading zeros are
- *                                     accepted), an empty Data value, or SOH in a field
- *                                     that is not a Data field
+ *                                     accepted), an empty Data value, SOH in a field
+ *                                     that is not a Data field, or (1.9, BREAKING) a
+ *                                     group whose count tag is the Length or the Data
+ *                                     half of a pair
  *
  *  Reentrancy: requires-session-lock
  */
@@ -531,6 +572,12 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_entry_set_string(fixpp_entry_t* entry, uint
  *  on this group instance, except that no MsgType-grammar check runs (as for every
  *  entry setter) and a Data field that is the group's delimiter →
  *  FIXPP_ERR_TYPE_MISMATCH, since its Length would have to come first.
+ *  BREAKING (C-ABI 1.9): a Length+Data pair a loaded dictionary declares only
+ *  inside a component or group is now a dictionary pair. For the Data tag of
+ *  such a pair this call returned FIXPP_ERR_TYPE_MISMATCH (the tag was not a
+ *  Data half); that refusal no longer fires, and the call reaches the later
+ *  refusals of fixpp_msg_set_data's contract, e.g. FIXPP_ERR_WIRE_CONFORMANCE
+ *  for len == 0.
  *  FIXPP_ERR_INVALID_HANDLE, assessed-unreachable defence-in-depth
  *  ([const §IX.1], not BREAKING — msg-index-bounds.md), if the entry's
  *  resolved group or its resolved instance index is out of range.

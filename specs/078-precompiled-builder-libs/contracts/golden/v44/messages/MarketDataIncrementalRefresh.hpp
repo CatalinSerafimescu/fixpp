@@ -18,6 +18,7 @@ struct MarketDataIncrementalRefreshArgs {
     ::std::span<const groups::G_268_2Args> md_entries{};
     ::std::optional<::std::int64_t> appl_queue_depth{};
     ::std::optional<::std::int64_t> appl_queue_resolution{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v44

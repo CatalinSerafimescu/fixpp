@@ -33,6 +33,7 @@ struct EmailArgs {
     ::std::optional<::std::span<const groups::G_555_2Args>> legs{};
     ::std::optional<::std::span<const groups::G_711_1Args>> underlyings{};
     ::std::optional<::std::span<const groups::G_2104Args>> attachments{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v50sp2

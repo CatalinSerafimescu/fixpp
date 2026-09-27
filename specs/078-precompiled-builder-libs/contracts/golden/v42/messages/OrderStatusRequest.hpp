@@ -36,6 +36,7 @@ struct OrderStatusRequestArgs {
     ::std::optional<::fixpp::decimal_t> contract_multiplier{};
     ::std::optional<::std::string_view> encoded_issuer{};
     ::std::optional<::std::string_view> encoded_security_desc{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v42

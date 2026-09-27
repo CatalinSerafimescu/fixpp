@@ -27,7 +27,10 @@
 #include <algorithm>
 #include <charconv>
 #include <cstring>
+#include <fixpp/core/length_data_pairs.hpp>
 #include <fixpp/wire/body_builder.hpp>
+#include <fixpp/wire/dict_hooks.hpp>
+#include <fixpp/wire/length_data_check.hpp>
 #include <new>
 
 namespace fixpp::wire {
@@ -51,9 +54,20 @@ inline constexpr std::size_t kBodyCap = 3800;
 // message_write.cpp's kFramingTags.
 inline constexpr std::uint16_t kFramingTags[] = {8, 9, 34, 49, 52, 56, 10};
 
-[[nodiscard]] bool is_framing_tag(std::uint16_t tag) noexcept {
+[[nodiscard]] constexpr bool is_framing_tag(std::uint16_t tag) noexcept {
     return std::ranges::any_of(kFramingTags, [tag](std::uint16_t t) { return t == tag; });
 }
+
+// INV-7 (091 (#418)): field_data/set_data refuse a framing Data tag at set time and
+// derive the Length tag from the standard table, so the Length half is never
+// checked at run time. That is sound only while no standard pair names a framing
+// tag on either half; a table row that breaks it fails the build here.
+static_assert(std::ranges::none_of(core::detail::standard_length_data_pairs,
+                                   [](core::detail::length_data_pair const& p) {
+                                       return is_framing_tag(p.length_tag) ||
+                                              is_framing_tag(p.data_tag);
+                                   }),
+              "INV-7: a standard Length+Data pair names a framing tag");
 
 // Printable non-control ASCII (0x20..0x7E). Lift of business_messages.cpp's
 // is_printable.
@@ -87,7 +101,17 @@ body_builder::group_instance& body_builder::group_instance::operator=(group_inst
 
 // ── ctor ───────────────────────────────────────────────────────────────────
 
-body_builder::body_builder(std::string_view msg_type) noexcept : msg_type_(msg_type) {}
+// A dictionary pair callback can name any tag, so its presence alone makes the
+// pair check necessary.
+body_builder::body_builder(std::string_view msg_type, dict_hooks hooks) noexcept
+    : msg_type_(msg_type), hooks_(hooks), pair_check_needed_(hooks.length_pair_fn() != nullptr) {}
+
+// The bit table covers every 16-bit tag, so it is read without a range check or a
+// branch: this runs on every append.
+void body_builder::note_tag(std::uint16_t tag) noexcept {
+    pair_check_needed_ |=
+        ((core::detail::standard_pair_tag_bits[tag >> 6U] >> (tag & 63U)) & 1U) != 0;
+}
 
 // ── shared validated-append helpers ─────────────────────────────────────────
 
@@ -110,6 +134,7 @@ body_builder::body_builder(std::string_view msg_type) noexcept : msg_type_(msg_t
 expected_t<void> body_builder::append_bytes_field(std::pmr::vector<entry_node>& into,
                                                   std::uint16_t tag,
                                                   std::span<const std::byte> value) noexcept {
+    note_tag(tag);
     std::size_t size_before = into.size();
     try {
         into.emplace_back(into.get_allocator().resource());
@@ -152,6 +177,30 @@ expected_t<void> body_builder::append_decimal_field(std::pmr::vector<entry_node>
     return append_bytes_field(into, tag, {val_buf, *fmt_r});
 }
 
+// 091 (#418) R-3. The refusals all come before any append, so the only rollback
+// is for arena exhaustion. The two nodes are appended exactly as a hand-written
+// field(length, int) + field(data, ...) pair would be; if the Data append fails
+// the Length node is popped too, leaving `into` at its pre-call size.
+expected_t<void> body_builder::append_data_field(std::pmr::vector<entry_node>& into,
+                                                 std::uint16_t data_tag,
+                                                 std::span<const std::byte> value) noexcept {
+    if (is_framing_tag(data_tag)) return std::unexpected(error::wire_field_value_out_of_range);
+    // The standard table only, whatever hooks the builder holds (R-2, FR-009).
+    std::uint16_t const length_tag = dict_hooks::none().length_tag_for_data(data_tag);
+    if (length_tag == 0) return std::unexpected(error::wire_unexpected_tag);
+    if (value.empty()) return std::unexpected(error::wire_field_value_out_of_range);
+
+    if (auto r = append_int_field(into, length_tag, static_cast<std::int64_t>(value.size())); !r)
+        return r;
+    // A failed append_bytes_field has already removed any node of its own, so the
+    // Length node is the only one left to pop.
+    if (auto r = append_bytes_field(into, data_tag, value); !r) {
+        into.pop_back();
+        return r;
+    }
+    return {};
+}
+
 // ── flat fields ──────────────────────────────────────────────────────────
 
 expected_t<void> body_builder::field(std::uint16_t tag, std::string_view v) noexcept {
@@ -168,6 +217,11 @@ expected_t<void> body_builder::field(std::uint16_t tag, std::int64_t v) noexcept
 
 expected_t<void> body_builder::field(std::uint16_t tag, const fixpp::decimal_t& v) noexcept {
     return append_decimal_field(entries_, tag, v);
+}
+
+expected_t<void> body_builder::field_data(std::uint16_t data_tag,
+                                          std::span<const std::byte> value) noexcept {
+    return append_data_field(entries_, data_tag, value);
 }
 
 // ── handle resolution (reallocation-safe: index-path walk) ────────────────
@@ -196,6 +250,7 @@ expected_t<group_handle> body_builder::group_begin(std::uint16_t no_tag,
                                                    std::uint16_t delimiter_tag) noexcept {
     if (is_framing_tag(no_tag)) return std::unexpected(error::wire_field_value_out_of_range);
 
+    note_tag(no_tag);
     std::size_t entries_before = entries_.size();
     std::size_t stack_before = open_stack_.size();
     try {
@@ -246,6 +301,7 @@ expected_t<group_handle> body_builder::entry_group_begin_impl(
             error::wire_frame_too_large);  // LCOV_EXCL_LINE — defensive bound; 061-slim
                                            // nests <= 3 levels, well under kMaxGroupNestDepth
 
+    note_tag(no_tag);
     group_instance* inst = resolve_instance(e);
     std::size_t fields_before = inst->fields.size();
     std::size_t stack_before = open_stack_.size();
@@ -299,8 +355,8 @@ expected_t<void> entry_handle::set_string(std::uint16_t tag, std::string_view v)
     if (group_.owner_ == nullptr) return std::unexpected(error::wire_invalid_field_format);
     if (!group_.owner_->is_innermost_open(group_.open_seq_))
         return std::unexpected(error::wire_invalid_field_format);
-    return body_builder::append_string_field(group_.owner_->resolve_instance(*this)->fields, tag,
-                                             v);
+    return group_.owner_->append_string_field(group_.owner_->resolve_instance(*this)->fields, tag,
+                                              v);
 }
 
 expected_t<void> entry_handle::set_char(std::uint16_t tag, char c) noexcept {
@@ -311,15 +367,26 @@ expected_t<void> entry_handle::set_int(std::uint16_t tag, std::int64_t v) noexce
     if (group_.owner_ == nullptr) return std::unexpected(error::wire_invalid_field_format);
     if (!group_.owner_->is_innermost_open(group_.open_seq_))
         return std::unexpected(error::wire_invalid_field_format);
-    return body_builder::append_int_field(group_.owner_->resolve_instance(*this)->fields, tag, v);
+    return group_.owner_->append_int_field(group_.owner_->resolve_instance(*this)->fields, tag, v);
 }
 
 expected_t<void> entry_handle::set_decimal(std::uint16_t tag, const fixpp::decimal_t& v) noexcept {
     if (group_.owner_ == nullptr) return std::unexpected(error::wire_invalid_field_format);
     if (!group_.owner_->is_innermost_open(group_.open_seq_))
         return std::unexpected(error::wire_invalid_field_format);
-    return body_builder::append_decimal_field(group_.owner_->resolve_instance(*this)->fields, tag,
-                                              v);
+    return group_.owner_->append_decimal_field(group_.owner_->resolve_instance(*this)->fields, tag,
+                                               v);
+}
+
+// The handle checks come before any group or instance resolution (R-3 step 1):
+// they are the only guard in front of resolve_instance's unchecked indexing.
+expected_t<void> entry_handle::set_data(std::uint16_t data_tag,
+                                        std::span<const std::byte> value) noexcept {
+    if (group_.owner_ == nullptr) return std::unexpected(error::wire_invalid_field_format);
+    if (!group_.owner_->is_innermost_open(group_.open_seq_))
+        return std::unexpected(error::wire_invalid_field_format);
+    return group_.owner_->append_data_field(group_.owner_->resolve_instance(*this)->fields,
+                                            data_tag, value);
 }
 
 expected_t<group_handle> entry_handle::group_begin(std::uint16_t no_tag,
@@ -328,18 +395,33 @@ expected_t<group_handle> entry_handle::group_begin(std::uint16_t no_tag,
     return group_.owner_->entry_group_begin_impl(*this, no_tag, delimiter_tag);
 }
 
-// ── INV-5 grammar validation ────────────────────────────────────────────────
+// ── INV-5 grammar + INV-6 Length+Data pair validation ───────────────────────
+//
+// One walk (091 (#418) R-4). Each container gets its own checker, so a Length
+// ending a group instance cannot pair with a Data after the group. A group node
+// is fed as observe(no_tag, {}): the EMPTY value is normative, since it is what
+// makes the checker refuse a group tagged with either half of a pair.
 
-expected_t<void> body_builder::validate_group_grammar(
-    const std::pmr::vector<entry_node>& entries) noexcept {
+template <bool CheckPairs>
+expected_t<void> body_builder::validate_group_grammar(const std::pmr::vector<entry_node>& entries,
+                                                      const dict_hooks& hooks) noexcept {
+    [[maybe_unused]] length_data_checker pairs{hooks};
     for (const auto& e : entries) {
+        if constexpr (CheckPairs) {
+            if (!pairs.observe(e.tag, e.is_group ? std::span<const std::byte>{}
+                                                 : std::span<const std::byte>{e.value_bytes}))
+                return std::unexpected(error::wire_invalid_field_format);
+        }
         if (!e.is_group) continue;
         for (const auto& inst : e.instances) {
             if (inst.fields.empty()) return std::unexpected(error::wire_invalid_field_format);
             if (inst.fields.front().tag != e.delimiter_tag)
                 return std::unexpected(error::wire_invalid_field_format);
-            if (auto r = validate_group_grammar(inst.fields); !r) return r;
+            if (auto r = validate_group_grammar<CheckPairs>(inst.fields, hooks); !r) return r;
         }
+    }
+    if constexpr (CheckPairs) {
+        if (!pairs.finish()) return std::unexpected(error::wire_invalid_field_format);
     }
     return {};
 }
@@ -393,8 +475,12 @@ expected_t<std::span<std::byte>> body_builder::commit(std::span<std::byte> out) 
     // INV-4: any group still open (LIFO stack not empty) -> typed error.
     if (!open_stack_.empty()) return std::unexpected(error::wire_invalid_field_format);
 
-    // INV-5: every group instance is non-empty and delimiter-first.
-    if (auto r = validate_group_grammar(entries_); !r) return std::unexpected(r.error());
+    // INV-5: every group instance is non-empty and delimiter-first; INV-6: every
+    // Length+Data pair in each container is well formed.
+    if (auto r = pair_check_needed_ ? validate_group_grammar<true>(entries_, hooks_)
+                                    : validate_group_grammar<false>(entries_, hooks_);
+        !r)
+        return std::unexpected(r.error());
 
     // C1/INV-2: the MsgType(35) framing value gets the same clean-value guard
     // every other field value gets ([RC#2: gate-b/r2]) — is_clean_field_value("")

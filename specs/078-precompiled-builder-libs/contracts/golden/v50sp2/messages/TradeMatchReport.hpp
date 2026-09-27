@@ -34,6 +34,7 @@ struct TradeMatchReportArgs {
     ::std::optional<char> venue_type{};
     ::std::optional<::std::string_view> trade_match_timestamp{};
     ::std::optional<::std::span<const groups::G_1889Args>> instrmt_match_sides{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v50sp2

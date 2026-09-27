@@ -23,6 +23,7 @@ struct CollateralReportAckArgs {
     ::std::optional<::std::string_view> encoded_reject_text{};
     ::std::optional<::std::int64_t> coll_rpt_reject_reason{};
     ::std::optional<::std::int64_t> coll_rpt_status{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v50sp2

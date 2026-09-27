@@ -726,7 +726,7 @@ target_include_directories(session_length_data_scanner PRIVATE
   "${CMAKE_SOURCE_DIR}/src"
 )
 set_tests_properties(session_length_data_scanner PROPERTIES
-  LABELS "426;length-data;scanner")
+  LABELS "426;length-data;scanner;091")
 # §VIII.5 zero-alloc gate for those scanners: re-runs ONLY the NoHeap cell under the
 # mallocnesia LD_PRELOAD via check_alloc.py (mirrors credential_store_redaction_mallocnesia).
 # registered on every FIXPP_MALLOCNESIA_SUPPORTED configuration since
@@ -2649,18 +2649,22 @@ if(TARGET fixpp_codegen_generate)
   )
   add_test(NAME test_067_builder_roundtrip COMMAND test_067_builder_roundtrip)
   set_tests_properties(test_067_builder_roundtrip PROPERTIES
-    LABELS "067;us1;roundtrip;069;all_families;failclosed")
+    LABELS "067;us1;roundtrip;069;all_families;failclosed;091")
 
   add_executable(test_067_builder_failclosed
     test_067_builder_failclosed.cpp
     # 069-v44-all-families T008 [US1] — joins this existing binary (Article
     # VII §8: no new executable, no gtest_discover_tests); needs only
-    # fixpp_wire, same as the failclosed witnesses above.
+    # fixpp_wire.
     test_069_us1_smoke.cpp
   )
   add_dependencies(test_067_builder_failclosed fixpp_codegen_generate)
+  # fixpp_dictionary + FIXPP_DICT_DATA_DIR: the 091 `_418` Data-field pins
+  # re-parse the built frame through the dict-aware read scaffold
+  # (app_message_read_scaffold.hpp's load_fix44()).
   target_link_libraries(test_067_builder_failclosed PRIVATE
     fixpp_wire
+    fixpp_dictionary
     fixpp::builders::v44
     fixpp::validators::v44
     GTest::gtest
@@ -2671,9 +2675,44 @@ if(TARGET fixpp_codegen_generate)
     "${CMAKE_SOURCE_DIR}/tests"
     "${CMAKE_CURRENT_SOURCE_DIR}"
   )
+  target_compile_definitions(test_067_builder_failclosed PRIVATE
+    "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""
+  )
   add_test(NAME test_067_builder_failclosed COMMAND test_067_builder_failclosed)
   set_tests_properties(test_067_builder_failclosed PROPERTIES
-    LABELS "067;us1;failclosed;069;all_families;us1_smoke")
+    LABELS "067;us1;failclosed;069;all_families;us1_smoke;091")
+
+  # ── 091-data-field-bytes T039 [US1] — Length+Data pairs through
+  # Session::send_impl (quickstart §5, research R-9). Its own executable under
+  # [const §VII.8]: it needs FIXPP_TEST_HOOKS, fixpp_mock_clock and
+  # fixpp::builders::v44 together in one binary.
+  add_executable(session_091_data_send
+    test_091_data_send.cpp
+    $<TARGET_OBJECTS:session_test_support>  # extract_field
+  )
+  add_dependencies(session_091_data_send fixpp_codegen_generate)
+  target_link_libraries(session_091_data_send PRIVATE
+    fixpp_session
+    fixpp_mock_clock
+    fixpp_dictionary
+    fixpp::builders::v44
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(session_091_data_send PRIVATE
+    "${_067_CODEGEN_INC}"
+    "${CMAKE_SOURCE_DIR}/tests"
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+  )
+  target_compile_definitions(session_091_data_send PRIVATE
+    FIXPP_TEST_HOOKS  # Session::seqnum_mgr_test_access
+    "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""  # load_fix44 (re-parse)
+  )
+  add_test(NAME session_091_data_send COMMAND session_091_data_send)
+  set_tests_properties(session_091_data_send PROPERTIES
+    LABELS "091"
+    ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+    TIMEOUT 120)
 
   # ── 067-codegen-writer-emitter T022 [US3] [TESTS-FIRST] — validate_<Msg>
   # required-presence witnesses. Constructs each message via build_<Msg> then
@@ -2809,7 +2848,7 @@ if(TARGET fixpp_codegen_generate)
   add_test(NAME test_077_allversions_builder_roundtrip
     COMMAND test_077_allversions_builder_roundtrip)
   set_tests_properties(test_077_allversions_builder_roundtrip PROPERTIES
-    LABELS "077;us2;builder-roundtrip;v50sp2")
+    LABELS "077;us2;builder-roundtrip;v50sp2;091")
 
   # vlatest half of T016 -- kept in a SEPARATE TU/executable from the v50sp2
   # one above (not one combined "allversions" TU): compiling both the ~75MB
@@ -2847,7 +2886,7 @@ if(TARGET fixpp_codegen_generate)
     add_test(NAME test_077_allversions_builder_roundtrip_vlatest
       COMMAND test_077_allversions_builder_roundtrip_vlatest)
     set_tests_properties(test_077_allversions_builder_roundtrip_vlatest PROPERTIES
-      LABELS "077;us2;builder-roundtrip;vlatest")
+      LABELS "077;us2;builder-roundtrip;vlatest;091")
   endif()
 
   # ── 078-precompiled-builder-libs T021 [US1]: byte-identical wire round-trip

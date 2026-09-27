@@ -37,6 +37,7 @@ struct NewOrderListArgs {
     ::std::optional<::std::int64_t> contingency_type{};
     ::std::optional<::std::int64_t> throttle_inst{};
     ::std::optional<bool> list_manual_order_indicator{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

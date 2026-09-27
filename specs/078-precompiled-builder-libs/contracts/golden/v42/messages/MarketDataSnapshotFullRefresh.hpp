@@ -36,6 +36,7 @@ struct MarketDataSnapshotFullRefreshArgs {
     ::std::optional<::std::string_view> encoded_issuer{};
     ::std::optional<::std::string_view> encoded_security_desc{};
     ::std::optional<::fixpp::decimal_t> total_volume_traded{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v42

@@ -29,6 +29,7 @@ struct PartyRiskLimitsRequestArgs {
     ::std::optional<::std::string_view> risk_limit_request_id{};
     ::std::optional<::std::span<const groups::G_1668Args>> requested_risk_limit_type{};
     ::std::optional<::std::int64_t> risk_limit_request_type{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

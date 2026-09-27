@@ -332,6 +332,7 @@ struct SecurityRiskMetricsReportArgs {
     ::std::optional<::std::string_view> underlying_settl_method_election_date_offset_unit{};
     ::std::optional<::std::int64_t> underlying_settl_method_election_date_offset_day_type{};
     ::std::optional<::std::string_view> underlying_settl_method_election_date_adjusted{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

@@ -22,6 +22,7 @@ struct AllocationInstructionAckArgs {
     ::std::optional<::std::int64_t> alloc_rej_code{};
     ::std::optional<::std::string_view> client_id{};
     ::std::optional<::std::string_view> encoded_text{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v42

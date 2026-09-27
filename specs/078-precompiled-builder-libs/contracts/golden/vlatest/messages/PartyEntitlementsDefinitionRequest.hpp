@@ -20,6 +20,7 @@ struct PartyEntitlementsDefinitionRequestArgs {
     ::std::optional<::std::span<const groups::G_1657Args>> requesting_party_i_ds{};
     ::std::optional<::std::string_view> entitlement_request_id{};
     ::std::span<const groups::G_1772_2Args> party_entitlements{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

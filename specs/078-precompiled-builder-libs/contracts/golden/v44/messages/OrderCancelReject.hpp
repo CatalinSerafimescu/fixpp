@@ -33,6 +33,7 @@ struct OrderCancelRejectArgs {
     ::std::optional<::std::string_view> orig_ord_mod_time{};
     ::std::optional<bool> working_indicator{};
     ::std::optional<::std::int64_t> acct_id_source{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v44

@@ -23,6 +23,7 @@ struct TestActionRequestArgs {
     ::std::optional<::std::string_view> test_suite_request_id{};
     ::std::optional<::std::string_view> test_action_request_id{};
     ::std::optional<::std::int64_t> test_action_type{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest

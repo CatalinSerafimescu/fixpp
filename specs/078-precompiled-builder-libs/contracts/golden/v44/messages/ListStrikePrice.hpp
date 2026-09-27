@@ -20,6 +20,7 @@ struct ListStrikePriceArgs {
     ::std::span<const groups::G_428Args> strikes{};
     ::std::optional<::std::span<const groups::G_711_4Args>> underlyings{};
     ::std::optional<bool> last_fragment{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::v44

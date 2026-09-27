@@ -24,6 +24,7 @@ struct TestActionReportArgs {
     ::std::optional<::std::string_view> test_suite_request_id{};
     ::std::optional<::std::int64_t> test_suite_status{};
     ::std::optional<::std::string_view> test_action_report_id{};
+    ::std::optional<::std::string_view> message_encoding{};
 };
 
 }  // namespace fixpp::vlatest
