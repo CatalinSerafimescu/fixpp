@@ -499,12 +499,15 @@ the missing number, and the session stays connected.
 - **Header identification**: whether the third field is a well-formed MsgType(35), and the first
   MsgSeqNum(34) before the failure point, if it is a positive integer.
 - **Frame disposition**: one of:
-  - *disregard* (FR-006, FR-008, FR-015);
+  - *disregard* (FR-006, FR-015);
   - *Reject* (FR-003 to FR-005);
   - *Logon refusal* (FR-009);
   - *fail-closed close*, for a late parse failure (FR-016).
-- **Inbound sequence bound**: seqnum_max, the largest NextNumIn. A message at that number ends the
-  session instead of wrapping it (FR-019).
+- **Inbound sequence bound**: seqnum_max, the largest NextNumIn. The next message that would consume
+  NextNumIn at that number (Guard 4, a #423 site, D-5, a pre-Active Logon) ends the session instead
+  of wrapping it (FR-019). A message that does not consume it does not end the session: a Reset-mode
+  SequenceReset, D-4, D-6, the disregard rows, and a faulty frame whose `fault_ref_msg_type` is `A`
+  or `4`.
 
 ## Success Criteria *(mandatory)*
 
@@ -556,8 +559,8 @@ the missing number, and the session stays connected.
 - **SC-009**: The C-ABI version test pins 1.10, is RED against 1.9, and turns RED again under a
   mutant back to 9.
 - **SC-010**: A SequenceReset (Reset mode, NewSeqNo(36)=4294967295), then a frame at MsgSeqNum
-  4294967295, ends the session, on a non-persistent memory store and on a file store. Each cell
-  asserts:
+  4294967295 that would consume NextNumIn, ends the session, on a non-persistent memory store and on
+  a file store. Each cell asserts:
   - after the SequenceReset, the session is still Active and NextNumIn is 4294967295;
   - after the frame, the session is Disconnected and NextNumIn is still 4294967295, never 0;
   - no Reject and no other outbound message follows the frame, and it is not delivered.

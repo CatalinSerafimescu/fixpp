@@ -606,7 +606,9 @@ dispositions:
   - only then comes the too-low fatal arm.
 
   Each of those would keep a session alive whose next number does not exist. So an overflow test
-  comes first in that error branch and takes the Disconnected transition.
+  comes first in that error branch, takes the Disconnected transition, and returns
+  `store_seqnum_overflow` from `on_inbound_frame`, as `consume_rejected_seqnum_`'s branch and the
+  outbound I-8 callers do (so the read pump stops; the too-low arm's `ok` return is not the model).
 - **The acceptor Logon arm (NotConnected) and the initiator Logon-reply arm (LogonSent)** tolerate
   only `session_seqnum_too_high` with the next-expected knob on. Every other error, the overflow
   included, is already fatal. They need no edit, and they need a reading at the implementation head
@@ -623,7 +625,11 @@ keep the session open.
 **Public surface.** `SeqnumManager` is declared in the public `include/fixpp/session/seqnum_manager.hpp`.
 - `check_inbound` gains a returnable error, which is source-compatible (contract C-4).
 - Its header comment gains the overflow line and names 092/FR-019, per the parent rule on
-  superseding a decision.
+  superseding a decision. The comment's "Caller is responsible for the session-fatal disposition
+  (emitting Logout-with-text + disconnect) on any unexpected return" is **replaced**, not appended
+  to: it is already false (the too-low fatal arm and the pre-Active arms disconnect with no Logout).
+  The new text states per result: too-low and too-high keep their context-dependent handling at the
+  caller; `store_seqnum_overflow` requires FR-019's silent Disconnected.
 - The stale sentence in `seqnum_manager.cpp` that counts the callers is rewritten as the
   re-derivation command above, without a count.
 - The C-ABI effect is classified in R-8's table.
@@ -653,7 +659,11 @@ are also RED on today's tree.
   - NextNumIn still 4294967295;
   - no outbound frame after it, so no Reject;
   - no receive callback;
-  - on the FileStore, a durable inbound counter the frame did not move.
+  - on the FileStore, a durable inbound counter the frame did not move. `Session` exposes no store
+    accessor, so the cell reads it by reopening a `FileStore` over the fixture's `dir_` after the
+    session closes and calling `next_seqnum(inbound, false)`. This sub-assertion adds no RED power
+    on its own (with `consume_rejected_seqnum_` reverted the durable counter also stays); the
+    Disconnected and no-Reject assertions are the discriminating ones.
 
   The frame at the maximum is, in turn:
   - an application message;

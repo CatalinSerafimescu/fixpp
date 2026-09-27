@@ -149,7 +149,8 @@ Expected after the change:
     - `next_inbound_unsafe()` still 4294967295, never 0;
     - no outbound frame after it, so no Reject;
     - no `fromApp`/`fromAdmin`;
-    - on the FileStore, a durable inbound counter the frame did not move.
+    - on the FileStore, a durable inbound counter the frame did not move, read by reopening a
+      `FileStore` over the fixture's `dir_` after the session closes, `next_seqnum(inbound, false)`.
 
     The frame is, in turn:
     - an application message;

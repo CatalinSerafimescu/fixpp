@@ -185,8 +185,10 @@ answers one peer frame. The bound cell is quickstart §1 "reject-loop bound".
   parse arena, silently consumed today, now ends the session. The cell pins it per late site,
   including whether a reconnect's NextNumIn includes the closed-on frame (resend requested, or the
   number consumed).
-- **L-7: a session whose NextNumIn reaches seqnum_max ends at the next in-sequence message**
-  (FR-019). It used to wrap NextNumIn to 0 and continue. The session now goes silently to
+- **L-7: a session whose NextNumIn reaches seqnum_max ends at the next message that would consume
+  NextNumIn** (FR-019): Guard 4, a #423 site, D-5 or a pre-Active Logon. A Reset-mode
+  SequenceReset, D-4, D-6, the disregard rows and a faulty frame whose `fault_ref_msg_type` is `A`
+  or `4` do not consume it and do not end the session. It used to wrap NextNumIn to 0 and continue. The session now goes silently to
   Disconnected, with no Reject and no Logout. Where a reconnect resumes depends on the store, because
   the SequenceReset jump is not persisted (research R-14). 092 does not change that. The SC-010
   cells pin the close on both store kinds.
