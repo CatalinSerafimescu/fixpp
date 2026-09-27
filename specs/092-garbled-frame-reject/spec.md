@@ -142,6 +142,35 @@ fix-rs, venue specs, and a Fable consult. The ruling:
   parse failure at any late inbound site (on a frame the scan found fault-free) is **fail-closed: the
   session closes**. It never reads as success, and there is no per-site Reject table (FR-016).
 
+### Session 2026-09-27 (after Gate A round 3)
+
+- Q: When a faulty frame carries MsgType(35) twice (e.g. `35=D … 35=4 … 9x9=1`), which value
+  decides its disposition and fills RefMsgType(372), and must the tests check that value directly?
+  → A: **The third field's 35 (`fault_ref_msg_type`) everywhere.** The scan-vs-parse oracle (I-4),
+  the differential corpus and the fuzz arm compare it with the third `entries()` element. The
+  disposition passes it (never the last-wins `msg_type`) to the seqnum accounting. A duplicate-35
+  cell (`35=D…35=4…9x9=1` at the expected number) must be D-5: advance, and 372=D (R3-001).
+- Q: Is the D-5 ordering "persist the advance before the Reject; a failed persist disconnects with
+  no Reject" pinned the way #423 pinned every earlier Reject call site? → A: **Yes.** A
+  "092 disposer (D-5)" case is added to both #423 tables in
+  `tests/session/test_persistent_seqnum_hydrate.cpp`: `RejectedInSequence_AdvanceIsPersisted`
+  (durable inbound advances) and `RejectedInSequence_PersistFailure_Fatal` (Disconnected, durable
+  inbound unchanged, no Reject frame). Each goes RED in a scratch copy when the disposer emits first
+  or ignores its persist (R3-003).
+- Q: Is the Text-carrying Reject builder a new named function or a `build_reject` overload? → A: **A
+  new function, `build_reject_with_text(…, std::string_view text)`.** `build_reject` stays a single
+  declaration and delegates to it with an empty text (existing Reject bytes unchanged), so the public
+  change is additive and source-compatible without qualification (R3-002).
+- Q: After a late parse failure closes the session, what does each late-site cell assert about a
+  reconnect? → A: **The observed outcome, per site.** Each late-site cell reconnects after the close
+  and asserts whether NextNumIn includes the frame, and so whether the peer's resend is requested or
+  the number was consumed. It pins today's per-site behaviour, and B&L L-6 records it; any change is
+  #515's (R3-004).
+- Q: Which callbacks does "does not invoke the callback" cover for a late parse failure? → A: **Only
+  the parse target's receive callback** (`fromAdmin` for an admin frame, `fromApp` for an application
+  frame). Lifecycle callbacks the close fires (`onLogout`) and callbacks already fired earlier at that
+  site (e.g. `toAdmin` for a confirming Logout) are out of scope (R3-005).
+
 ## User Scenarios & Testing *(mandatory)*
 
 The "user" is an operator running a fixpp session against a counterparty whose encoder produces a
@@ -323,15 +352,18 @@ the missing number, and the session stays connected.
   before the failure point, and the message is not a Logon, the session MUST send a session
   Reject(35=3) with:
   - RefSeqNum(45) = that MsgSeqNum;
-  - RefMsgType(372) = the MsgType read (omitted when longer than any MsgType a shipped dictionary
-    defines, research R-5);
+  - RefMsgType(372) = the MsgType read, meaning the third field's value (`fault_ref_msg_type`), never
+    a later duplicate 35 (omitted when longer than any MsgType a shipped dictionary defines,
+    research R-5);
   - a fixed Text(58) that names the defect.
 
   This holds for every MsgType, including Reject(3) and Logout(5). For a frame that fails the parse
   it supersedes the published no-reject-loop rule ("a malformed Reject/Logout is never itself
   rejected").
 - **FR-004**: The Reject in FR-003 MUST advance NextNumIn exactly when MsgSeqNum equals the expected
-  number and the message is not a SequenceReset. This reuses #423's rows unchanged.
+  number and the message is not a SequenceReset. This reuses #423's rows unchanged. "The message"
+  and "MsgSeqNum" are the values the fault record holds (`fault_ref_msg_type`, `fault_ref_seq_num`),
+  never the scan's last-wins `msg_type`/`msg_seq_num`.
 - **FR-005**: When MsgSeqNum differs from the expected number, the Reject MUST NOT advance NextNumIn
   and MUST NOT by itself trigger a ResendRequest or a disconnect.
 - **FR-006**: In LogonReceived and Active, a frame that passes framing but fails the parse MUST be
@@ -381,7 +413,9 @@ the missing number, and the session stays connected.
   validator's silent stop is reachable only through the public API, when the view was built under
   hooks that differ from the validator's.
 - **FR-013**: Every Reject sent under this feature MUST be persisted and emitted like any other
-  outbound session Reject: sequence number assigned, toAdmin observed, stored before sent. No
+  outbound session Reject: sequence number assigned, toAdmin observed, stored before sent. Where
+  the Reject advances NextNumIn (FR-004), the advance MUST be persisted BEFORE the Reject is emitted,
+  and a failed persist MUST disconnect without sending the Reject (#423's rule, pinned per call site). No
   peer-controlled byte may make the Reject fail to build after its number was consumed (research
   R-5).
 - **FR-014**: The documented behaviour MUST be updated wherever it states the old one, found by the
@@ -398,10 +432,12 @@ the missing number, and the session stays connected.
   usual.
 - **FR-016**: A parse that fails at a **late** inbound parse site (a site after the fault branch, on
   a frame the header scan found fault-free) MUST be **fail-closed**: the session closes terminally,
-  sends no Reject, and does not invoke the callback. It never reads as "success" or "no reject".
+  sends no Reject, and does not invoke the parse target's receive callback (`fromAdmin`/`fromApp`;
+  `onLogout` from the close and callbacks fired earlier at the site are out of scope). It never reads as "success" or "no reject".
   Such a failure can only be a resource failure (the parse arena or the offset-table cap) or an I-4
   breach. Every late site takes this one action. The site population is derived by command
-  (research R-4). Effects that ran before the late parse are not undone (contract C-6). The
+  (research R-4). Effects that ran before the late parse are not undone (contract C-6). Each
+  late-site cell also reconnects and pins whether NextNumIn includes the closed-on frame. The
   disposition of a resource failure beyond fail-closed, and moving its decision ahead of the
   guards, are fixpp#515 (owner ruling O-2).
 - **FR-017**: The change MUST be declared as **C-ABI 1.10, BREAKING** under `[const §X.7]`, with the
