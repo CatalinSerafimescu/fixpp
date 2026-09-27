@@ -507,10 +507,11 @@ def wheel_before_all():
 
 def wheel_cibw_environment():
     """The CIBW_ENVIRONMENT value of the `id: wheel_build` step, read by text
-    so the extractor needs no YAML module and nothing else in the workflow
-    reaches the digest. Exactly one such step and one such key, on one line,
-    or a failure: a second key is the duplicate-key hazard the workflow warns
-    about, and a block scalar is a shape this reader does not parse."""
+    so the extractor needs no YAML module on the lane and the rest of the
+    workflow cannot reach the digest. Exactly one such step and one such key,
+    on one line, or a failure: a second key is the duplicate-key hazard the
+    workflow warns about, and a block scalar is a shape this reader does not
+    parse."""
     text = read_text(WHEEL_WORKFLOW).splitlines()
     ids = [i for i, l in enumerate(text) if re.match(r"^\s*(?:-\s+)?id:\s*wheel_build\s*$", l)]
     if len(ids) != 1:
@@ -519,6 +520,7 @@ def wheel_cibw_environment():
     # The step's own keys sit at the id line's indent; a line indented less
     # (the next `- ` step, or the next job) ends the step.
     indent = len(text[start]) - len(text[start].lstrip(" -"))
+    # The step starts at its `- ` line, which may sit above the id line.
     j = start
     while j > 0 and not text[j].lstrip().startswith("- "):
         j -= 1
