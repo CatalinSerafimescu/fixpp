@@ -144,7 +144,7 @@ Expected after the change:
 
     Each cell sends a SequenceReset (Reset mode, 36=4294967295). It then asserts that the session is
     Active and `next_inbound_unsafe() == 4294967295`. That precondition keeps a disconnect from any
-    other cause from satisfying the cell. It then sends one frame at 34=4294967295 and asserts:
+    other cause from satisfying the cell. It then sends one frame at 34=4294967295 that would consume NextNumIn, and asserts:
     - `fsm_state::Disconnected`;
     - `next_inbound_unsafe()` still 4294967295, never 0;
     - no outbound frame after it, so no Reject;
@@ -160,6 +160,10 @@ Expected after the change:
       Arm C Rejects through `consume_rejected_seqnum_`. It needs no dictionary, and the session
       survives it today;
     - a faulty application frame (D-5).
+
+    Non-consuming controls leave the session Active and NextNumIn at 4294967295: a Reset-mode
+    SequenceReset with NewSeqNo = 4294967295, a faulty SequenceReset (D-4), a faulty frame at another
+    number (D-6), and a D-7 frame.
   - **Knob-off arm** (memory store): with `validate_sequence_numbers` off, the Reset-mode
     SequenceReset is not applied. So this arm seeds NextNumIn with
     `seqnum_mgr_test_access().set_counters_for_test(4294967295, peek_outbound())`, passing the current

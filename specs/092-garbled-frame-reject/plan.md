@@ -58,7 +58,7 @@ libFuzzer. No new dependency.
 (FR-013). An advance is persisted through `consume_rejected_seqnum_` (#423, unchanged).
 
 **Testing**:
-- GoogleTest in the grouped session bucket (`ctest -L 092`) and the wire bucket for FR-012;
+- GoogleTest, selected by `ctest -L 092`: a standalone session target (coroutine and timer cells, isolation-sensitive under `[const §VII.8]`), existing hooked targets, and the wire bucket for FR-012;
 - a differential mutation corpus with accepted controls;
 - a fuzz arm in `fuzz_session_recovery_admin_parse`;
 - an in-process scripted peer that replays on ResendRequest (SC-007);
@@ -192,7 +192,9 @@ tests/session/
 ├── test_persistent_seqnum_hydrate.cpp       # + `092 disposer (D-5)` cases (existing hooked target)
 ├── test_store_fail_reconcile.cpp            # + FR-019 FileStore cells (existing hooked target)
 ├── seqnum_manager_test.cpp                  # + FR-019 unit cells (no hook needed)
-└── CMakeLists.txt                           # new grouped bucket, label 092; for each existing target above:
+└── CMakeLists.txt                           # new standalone target session_unparseable_frame_disposition, label 092
+                                             #   (coroutine + timer cells: isolation-sensitive under [const §VII.8]);
+                                             #   for each existing target above:
                                              #   set_property(TEST <target> APPEND PROPERTY LABELS 092)
                                              #   (never set_tests_properties, which overwrites the labels)
 tests/wire/                                  # E-4 iterator cells, E-5 validator cells

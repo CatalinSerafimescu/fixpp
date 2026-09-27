@@ -52,8 +52,12 @@ the bundle when these tasks were generated; the tasks that carry them are named 
   - `capi_send_recv_test` (`length_data_logon_refusal_test.cpp`).
 
   `unparseable_frame_disposition_test.cpp` is a new target and stays hook-free: no cell in it reads
-  the counter.
-- **Labels.** Every ctest entry a task adds or edits carries label `092`. On an existing entry, use
+  the counter. In it, "NextNumIn unchanged" or "NextNumIn advanced" is witnessed by the next
+  conformant frame: at the old number it is delivered with no ResendRequest (unchanged), or at the
+  next number (advanced); a gap draws a ResendRequest. T038's reconnect reads the durable counter by
+  reopening the `FileStore` and calling `next_seqnum(inbound, false)` (T052's recipe).
+- **Labels.** Every ctest entry whose cells a task adds or edits carries label `092` (an entry
+  whose only change is its `--gtest_filter`, such as `capi_send_recv_positive` in T021, does not). On an existing entry, use
   `set_property(TEST <name> APPEND PROPERTY LABELS 092)`. Never use `set_tests_properties(... LABELS
   ...)` on an existing entry: it overwrites the labels the entry has. `expected-ctest-092.txt`
   (T007) is the gate.
@@ -120,12 +124,17 @@ the population snapshots, and the label manifest (plan phase 0, quickstart §0).
     Report min-per-tree per case, both SHAs and T003's patch-id, in the evidence file §*Bench
     baseline*. It cannot be reconstructed after the edit.
   - Keep the base worktree for T069.
-- [ ] T005 Via `phase-implementer`, add #507's T076 reproducer (from the issue body,
-  `gh issue view 507 --repo CatalinSerafimescu/fixpp`) as a real test, `T076_*` cells in the new
+- [ ] T005 Via `phase-implementer`, add #507's reproducer (the table the issue body calls T076;
+  `gh issue view 507 --repo CatalinSerafimescu/fixpp`) as a real test, `Issue507Reproducer_*` cells in the new
   `tests/session/unparseable_frame_disposition_test.cpp`, with the new target registered by
   `add_threading_test(session_unparseable_frame_disposition unparseable_frame_disposition_test.cpp)`
   beside `session_validate_gate_inbound` in `tests/session/CMakeLists.txt`, labels `"092;session"`.
   No `FIXPP_TEST_HOOKS`.
+  - **Why standalone, not a grouped bucket (`[const §VII.8]`).** Its cells drive `Session`
+    coroutines on an io_context with timers (the logout timeout, the liveness interval, the resend
+    loop, the scripted peer), which is not the pure, single-threaded, stateless class §VII.8
+    groups. Its neighbour `session_validate_gate_inbound` is standalone for the same reason. Write
+    this reason in the CMakeLists comment above the registration.
   - The four framed-but-unparseable cells (malformed count or malformed tag, inbound validation on
     or off): a SequenceReset (Reset mode, NewSeqNo=500) at the expected MsgSeqNum 2, then a
     conformant Heartbeat at 500.
@@ -154,7 +163,8 @@ the population snapshots, and the label manifest (plan phase 0, quickstart §0).
   `session_unparseable_frame_disposition`, `session_validation_compat_toggles`,
   `store_fail_reconcile`, `wire_dict_tests`.
   - Append label `092` to each entry that already exists, with
-    `set_property(TEST <name> APPEND PROPERTY LABELS 092)` next to its registration.
+    `set_property(TEST <name> APPEND PROPERTY LABELS 092)` placed **after** the entry's last
+    `set_tests_properties(... LABELS ...)` (an APPEND placed before it is overwritten).
   - `capi_logon_malformed_tag` (T021), `error_092_completeness` (T060) and
     `session_unparseable_frame_disposition` (T005) are registered by their tasks.
   - The gate: `ctest --test-dir build/linux-clang-debug -N -L '^092$' | sed -n 's/.*Test *#[0-9]*: //p' | sort`
@@ -175,10 +185,12 @@ the population snapshots, and the label manifest (plan phase 0, quickstart §0).
   - R-13 text sites: the `git grep` of research R-13.
   - The C-2 pre-Active refusal source:
     `grep -n "No MsgType discrimination\|out-of-scope admin" src/session/session.cpp`.
+  - Every member these commands add whose edit lands in a ctest entry missing from
+    `expected-ctest-092.txt` extends the manifest (and gets its APPEND label), recorded here.
   - `FrameHeader` size pins:
     `git grep -n "sizeof(FrameHeader)\|sizeof(fixpp::session::detail::FrameHeader)\|FrameHeader) ==" -- src tests bench`.
 
-**Checkpoint**: benches baselined, T076 RED, the ceiling measured, the populations recorded.
+**Checkpoint**: benches baselined, the #507 reproducer (T005) RED, the ceiling measured, the populations recorded.
 
 ---
 
@@ -195,7 +207,7 @@ C-2 row, and the rows are one function, so the mechanism lands here with one anc
 
 - [ ] T009 [P] Via `phase-implementer`, write the RED cells for the scan fault record in the new
   `tests/session/scan_frame_header_fault_test.cpp`, added to the `session_pure_tests` bucket in
-  `tests/session/CMakeLists.txt` (pure: no thread pool, no hook). One cell per fault kind and site
+  `tests/session/CMakeLists.txt` (pure: no thread pool; the bucket is already hooked, so #511 is not engaged). One cell per fault kind and site
   in data-model E-1:
   - `malformed_tag`: a non-digit tag byte; a tag above 0xFFFF; no `=` before SOH; no `=` before the
     end of the buffer; an empty tag (`=` first);
@@ -332,7 +344,7 @@ C-2 row, and the rows are one function, so the mechanism lands here with one anc
   declaration in `include/fix/c_api/session.h` (T020's set), and rewrite
   `fixpp_session_register_callback`'s 1.9 sentence ("dropped as a parse error, silently … no Reject
   is sent"). Where `include/fix/c_api/error.h` lists the core errors `WIRE_INVALID_FRAME` coalesces,
-  that list is updated in T081, not here. Re-pin `tools/capi_freeze.sha256` with
+  that list is updated in T059, not here. Re-pin `tools/capi_freeze.sha256` with
   `tools/check_capi_freeze.sh`. Never run a formatter on `include/fix/c_api/*.h`.
 
 ### 2d — The disposition mechanism (C-1, C-2; R-3; E-2), anchor cells first
@@ -351,7 +363,10 @@ C-2 row, and the rows are one function, so the mechanism lands here with one anc
   - D-4: Active, a faulty SequenceReset (Reset, NewSeqNo=500) at N → Reject; a conformant message at
     N+1 then draws a ResendRequest (no advance, NewSeqNo not applied).
   - D-5: Active, a faulty NewOrderSingle at N → Reject (45=N, 372=D); `fromApp` not invoked; a
-    conformant message at N+1 is delivered with no ResendRequest (advance witnessed).
+    conformant message at N+1 is delivered with no ResendRequest (advance witnessed); and inbound
+    liveness is refreshed (no TestRequest at the interval it would be sent without the frame,
+    FR-018). The liveness half is green before the feature (Guard 4 refreshes today), so its RED is
+    T031's named mutant; the cell as a whole is RED today on the missing Reject.
   - D-6: Active, a faulty NewOrderSingle at N+5 → Reject (45=N+5), no ResendRequest, NextNumIn
     unchanged (a conformant message at N is then delivered with no ResendRequest).
   Also the two `coverage_adversarial_test.cpp` cells T012 renamed. Run: RED. Commit with the RED
@@ -389,7 +404,7 @@ C-2 row, and the rows are one function, so the mechanism lands here with one anc
   - T025 and T005 GREEN.
 
 **Checkpoint**: the scan records faults and agrees with `OffsetTable`; replay is fail-safe; the
-Reject builder carries Text; C-ABI 1.10 is declared; every C-2 row has a GREEN anchor; T076 is
+Reject builder carries Text; C-ABI 1.10 is declared; every C-2 row has a GREEN anchor; the #507 reproducer (T005) is
 flipped.
 
 ---
@@ -399,13 +414,17 @@ flipped.
 **Goal**: a faulty SequenceReset, Logout, TestRequest, ResendRequest or Heartbeat in LogonReceived or
 Active changes nothing but the Reject rows' NextNumIn accounting, and draws a Reject.
 
-**Independent Test**: T076 (T005) plus the per-handler I-1 witnesses below; a conformant Heartbeat at
+**Independent Test**: the #507 reproducer (T005) plus the per-handler I-1 witnesses below; a conformant Heartbeat at
 500 after the faulty SequenceReset draws a ResendRequest.
 
 The anchors landed in 2d, so the cells below would be GREEN on arrival. **RED first anyway**
 (`[const §VII.3–4]`; plan Constitution Check VII): before committing, each cell-writing task runs its
 new cells in a scratch copy with T026 reverted, shows them RED for their stated reason, and quotes
 that RED in the commit message. T065's per-arm deletion is the finer SC-006 proof on top of it.
+**Expected green with T026 reverted, each with its own proof:** T031's D-5 liveness half (its named
+mutant); T032 (pins an inherited outcome); T034's MaxMessageSize cell (a control: the size guard runs
+before the state switch); T051's non-consuming controls (controls by design). Mark each as a pin or
+control in its test comment.
 
 - [ ] T027 [US1] Via `phase-implementer`, the I-1 witnesses in
   `tests/session/unparseable_frame_disposition_test.cpp`, each in Active at the expected N:
@@ -426,7 +445,7 @@ that RED in the commit message. T065's per-arm deletion is the finer SC-006 proo
   by a conformant message at N+1 delivers it with no ResendRequest; the SequenceReset pair draws a
   ResendRequest.
 - [ ] T029 [US1] Via `phase-implementer`, the D-6 edge cells in
-  `tests/session/unparseable_frame_disposition_test.cpp`: faulty frames at too-low and too-high 34,
+  `tests/session/unparseable_frame_disposition_test.cpp`, in Active and in LogonReceived: faulty frames at too-low and too-high 34,
   each with and without PossDupFlag(43)=Y. Each draws a Reject, no advance, no ResendRequest and no
   too-low Logout. A faulty frame carrying a wrong CompID before the fault draws a Reject only, no
   disconnect (clarification Q2). A frame with two malformed fields reports the first one's reason.
@@ -445,6 +464,9 @@ that RED in the commit message. T065's per-arm deletion is the finer SC-006 proo
   `tests/session/unparseable_frame_disposition_test.cpp`: in Active, a D-5 frame refreshes inbound
   liveness (a TestRequest is not sent at the interval it would be without it), and a D-7 frame does
   not.
+  - **RED proof:** the D-5 half is green with T026 reverted (Guard 4 refreshes today). Its proof is a
+    named mutant in a scratch copy: T026's disposer without the D-4/D-5/D-6 liveness refresh → the
+    D-5 cell RED. Record it in the evidence file.
 - [ ] T032 [US1] Via `phase-implementer`, the D-4 knob-off arm in
   `tests/session/test_validation_compat_toggles.cpp` (target `session_validation_compat_toggles`,
   already hooked; label from T007): with `validate_sequence_numbers` off, a faulty SequenceReset at N
@@ -454,7 +476,9 @@ that RED in the commit message. T065's per-arm deletion is the finer SC-006 proo
   `tests/session/unparseable_frame_disposition_test.cpp`: T005's SequenceReset cell and the D-5
   TestRequest cell, repeated with inbound validation on and off, on FIX.4.2, FIX.4.4 and FIXT.1.1,
   as acceptor and initiator, and with and without an Application registered. The disposition is
-  identical in every cell.
+  identical in every cell. Also one cell per C-2 row (D-1 … D-9, the application D-5 included) with
+  inbound validation on and off, since the fault branch sits in front of the validate gate (C-3
+  I-6).
 
 **Checkpoint**: US1 complete: no admin handler acts on a faulty frame; every Reject is exact.
 
@@ -480,8 +504,10 @@ Reject (45=N) and is not delivered; the second is delivered with no ResendReques
   - AwaitingResend: a faulty in-sequence application message that fills the gap closes it (D-5
     through `consume_rejected_seqnum_`);
   - MaxMessageSize (C-1 step 1b): an oversized faulty frame in Active ends in Disconnected;
-  - the 372 bound (R-5): a faulty frame whose MsgType is longer than T018's bound draws a Reject
-    **without** 372, and the number is not consumed without a Reject.
+  - the 372 bound (R-5): a faulty frame at N whose MsgType is long enough to overflow the Reject's
+    512-byte buffer without the bound draws a Reject **without** 372, and NextNumIn advances only
+    with that Reject sent. Mutant in a scratch copy: the disposer passes the unbounded 372 → the
+    cell RED (the number consumed, no Reject). Record it in the evidence file.
 - [ ] T035 [US2] Via `phase-implementer`, the D-5 persistence cases (FR-013, R3-003) in
   `tests/session/test_persistent_seqnum_hydrate.cpp` (target `session_persistent_seqnum_hydrate`,
   already hooked; label from T007). Add a `092 disposer (D-5)` case, labelled by `Case::site` like
@@ -672,7 +698,8 @@ round 2). The D-5 cell needs Phase 2d.
     `check_inbound(` population the same way, in the evidence file.
   - T050, T051 and T052 GREEN.
 - [ ] T054 The three deletion proofs (quickstart §2 "Inbound bound deletion"), each in a scratch copy:
-  - delete the bound in `check_inbound`: every FR-019 cell goes RED, the pre-Active arm included;
+  - delete the bound in `check_inbound`: every **consuming** FR-019 cell goes RED, the pre-Active
+    arm included (the non-consuming controls stay green by design);
   - delete Guard 4's overflow branch: the Heartbeat, PossDup and knob-off cells go RED (the plain
     application cell stays green through the too-low fatal arm, so it is not that branch's witness);
   - revert `consume_rejected_seqnum_`'s overflow branch: the #423 and D-5 cells go RED (a Reject is
@@ -802,7 +829,7 @@ it in 092.
   #423 row 4 revision; and a note that #423 row 1 describes an "Ignore" fixpp does not do, citing
   `L-004-4` and fixpp#514. Run `/home/catalin/Work/Programming/Antreprenoriat/.claude/scripts/check_bl_delta.py` and record
   the delta in the evidence file.
-- [ ] T071 [P] `brain/components/session.md`: rewrite (not append to) the passage that calls #507's
+- [ ] T071 [P] Using T008's R-13 population for `brain/`: `brain/components/session.md`: rewrite (not append to) the passage that calls #507's
   frames "garbled … contrary to §4.5.2". `brain/components/inbound-message-path.md`, `wire.md`,
   `errors.md` and `c-api.md`: their decision sections gain the ruling, the rejected alternatives
   (ignore-by-default; 373=99; changing the iterator's yield; a per-site late Reject table), the
@@ -827,7 +854,11 @@ it in 092.
 
 ### Close-out checks
 
-- [ ] T076 Run T007's label gate; it must pass (the labelled set equals the manifest, every entry
+- [ ] T076 Measure `session_unparseable_frame_disposition`'s wall time on every sanitizer lane
+  `/speckit-verify` runs and on MSVC, and set its TIMEOUT from the slowest with headroom (the
+  inherited 120 s is a threading-test default; `wire_dict_tests` needed 1800 s on msvc-asan). Name
+  the existing `L-004-4` Framer-failure regression test (`grep -rn "L-004-4" tests`) as FR-008's
+  witness in the evidence file and run it. Then run T007's label gate; it must pass (the labelled set equals the manifest, every entry
   registered). Then `ctest --test-dir build/linux-clang-debug -L '^092$' --output-on-failure`, all
   GREEN, and the full session suite plus `pytest bindings/python/tests/`, passing except the tests
   R-7 and R-10 list as intentionally updated.
@@ -838,11 +869,9 @@ it in 092.
 - [ ] T078 Run `/speckit-verify` (mandatory after `/speckit-implement`, Article XVII §8). It produces
   `.specify/decisions/092-garbled-frame-reject-verify.md`, which cites the evidence file.
   - Its full preset matrix (ASan, UBSan, TSan, …) and the MSVC leg.
-  - Coverage on `linux-clang-coverage`, `.profraw` purged first: every changed line in
-    `src/session/scan_frame_header.hpp`, `src/session/session.cpp` (the fault branches,
-    `dispose_unparseable_`, the late-site closes, the overflow branches), `src/session/seqnum_manager.cpp`,
-    `src/session/admin_messages.cpp`, `include/fixpp/wire/parser.hpp` (the fault writes) and the
-    validator is covered or assessed line by line (`[const §IX.1]`).
+  - Coverage on `linux-clang-coverage`, `.profraw` purged first: every changed line in every file of
+    `git diff --name-only origin/main...HEAD -- src include` is covered or assessed line by line
+    (`[const §IX.1]`).
   - The allocation gate (mallocnesia, `[const §VIII.5]`): follow `/speckit-verify` Step 6, with
     `mallocnesia_positive_control` passing; for each `*_mallocnesia` twin the branch touches, record
     evidence the interceptor **took effect** (a line the override writes, or a planted allocation it
@@ -865,8 +894,10 @@ it in 092.
     record, and a `## Gate B …` heading for the Gate B record;
   - `Closes #507` as the **only** closing keyword. #514 and #515 are named as follow-ups in
     sentences with no closing keyword anywhere near them (a closing keyword fires inside a
-    negation). Before opening, grep the body AND `git log origin/main..HEAD --format=%B` for
-    `close[sd]?|fix(e[sd])?|resolve[sd]?` next to any number other than 507. After opening, check
+    negation). Before opening, run over the body AND `git log origin/main..HEAD --format=%B`:
+    `grep -inE '\b(close[sd]?|fix(e[sd])?|resolve[sd]?)\b[: ]+([a-z0-9_.-]+/[a-z0-9_.-]+)?#[0-9]+' | grep -v '#507\b'`,
+    which must print nothing. Positive control first: seed `Closes #514` into a scratch copy of the
+    body and show the grep hits it. After opening, check
     `closingIssuesReferences` is exactly [#507].
 
 ### Mandatory close-out tasks (Gate-B preconditions, Article XVII §8)
@@ -892,7 +923,8 @@ it in 092.
 ### Phase dependencies
 
 - **Setup (Phase 1):** T001 → T002 → T003 → T004 must precede every production edit. T005 needs
-  only T001. T006, T007 and T008 need only T001.
+  only T001. T006 and T008 need only T001. T005 → T007 (T007's positive control assumes T005's
+  target is registered).
 - **Foundational (Phase 2):** depends on Setup.
   - 2a: T009 (RED) → T010 → T011 → T012; T013 after T011 → T014; T015 after T011 (the stop-first
     scan is what makes replay unsafe).
@@ -908,8 +940,9 @@ it in 092.
   - US2: T038 (RED) needs T006 → T039 → T040. T035 → T036. T041 after T039.
 - **Phase 7 (FR-019):** T050 ‖ T051 ‖ T052 (RED) → T053 → T054. Needs Phase 2 (the D-5 cell).
   Independent of the stories otherwise.
-- **Phase 8 (FR-012):** T055 (RED) → T056; T057 (RED) needs T056; T058 → T059 → T060 → T061 →
-  T062 → T063. Needs only T010 (the shared enum). It can run beside every story.
+- **Phase 8 (FR-012):** T055 (RED) → T056; T057 (RED) needs T056; T060 and T061 are written
+  **before** T058 and committed with their compile-RED; then T058 → T059 → T062 → T063 (T060/T061
+  GREEN at T059). Needs only T010 (the shared enum). It can run beside every story.
 - **Polish (Phase 9):** needs every phase above.
   - T064 first; then T065, T066 → T067 → T068, T069;
   - T070–T072 after T064 (they describe the final code);
@@ -963,11 +996,11 @@ phase-implementer: T055 iterator cells     → tests/wire/field_iterator_fault_t
 
 ### MVP (US1)
 
-1. Setup (T001–T008): benches baselined, T076 RED, the ceiling measured, the populations recorded.
+1. Setup (T001–T008): benches baselined, the #507 reproducer (T005) RED, the ceiling measured, the populations recorded.
 2. Foundational (T009–T026): the scan fault record, the replay guard, the Text-carrying Reject,
    C-ABI 1.10, and the disposition with one GREEN anchor per C-2 row.
 3. US1 (T027–T033).
-4. **Stop and validate:** T076 is flipped (SC-001), no admin handler acts on a faulty frame, every
+4. **Stop and validate:** the #507 reproducer (T005) is flipped (SC-001), no admin handler acts on a faulty frame, every
    Reject is exact.
 
 ### Incremental delivery
