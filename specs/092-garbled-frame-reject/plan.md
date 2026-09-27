@@ -1,9 +1,10 @@
 # Implementation Plan: The session never acts on a frame it could not parse
 
-**Branch**: `092-garbled-frame-reject` | **Date**: 2026-09-27 (post-round-3 clarify/plan refresh; Gate A loop 2) | **Spec**: [spec.md](./spec.md)
+**Branch**: `092-garbled-frame-reject` | **Date**: 2026-09-27 (post-round-3 clarify/plan refresh; Gate A loop 2, round 2) | **Spec**: [spec.md](./spec.md)
 
 **Input**: Feature specification from `specs/092-garbled-frame-reject/spec.md` (clarified 2026-09-27;
-Gate A round 1 and round 2 owner rulings integrated; post-round-3 clarify/plan refresh; Gate A loop 2)
+Gate A round 1 and round 2 owner rulings integrated; post-round-3 clarify/plan refresh; Gate A loop 2,
+including the loop-2 round-2 ruling that folds in the inbound seqnum_max bound)
 
 ## Summary
 
@@ -38,6 +39,11 @@ fault record and two new `core::error` values. The Reject's fixed Text(58) goes 
 public builder, `build_reject_with_text`, to which `build_reject` delegates. The Logon refusal ships
 as **C-ABI 1.10 BREAKING**.
 
+By owner ruling (Gate A loop 2, round 2), 092 also enforces the inbound seqnum_max bound (FR-019).
+`SeqnumManager::check_inbound` refuses to advance NextNumIn from seqnum_max. Every caller then ends
+the session silently (Disconnected), before any Reject, delivery or drop. Today NextNumIn wraps to 0
+on any store (research R-14).
+
 Design decisions: [research.md](./research.md). The behaviour contract:
 [contracts/unparseable-frame-disposition.md](./contracts/unparseable-frame-disposition.md).
 
@@ -57,6 +63,9 @@ libFuzzer. No new dependency.
 - a fuzz arm in `fuzz_session_recovery_admin_parse`;
 - an in-process scripted peer that replays on ResendRequest (SC-007);
 - a `tests/capi` Logon-refusal witness and the version pin (FR-017);
+- cells that read the inbound counter go only into existing targets that already define
+  `FIXPP_TEST_HOOKS` (fixpp#511), labelled `092` with `set_property(... APPEND PROPERTY LABELS 092)`
+  (quickstart §1);
 - pytest unchanged except version consumers.
 
 **Target Platform**: Linux (clang/gcc, sanitizer lanes), Windows (MSVC), as for the library.
@@ -73,6 +82,8 @@ R-9).
 - `[const §VIII.5]` zero allocation between parse and callback. The fault record is plain members,
   the disposition branch is inline (no coroutine frame on the clean path, R-3), and the Reject Text
   is a compile-time constant built into the existing 512-byte stack buffer.
+- FR-019 adds one compare to `check_inbound`'s in-sequence branch, which every in-sequence inbound
+  message takes. It is measured by the `on_inbound_frame` bench (R-9).
 - `noexcept` on the scan and dispose paths.
 - Private headers stay private.
 
@@ -83,7 +94,9 @@ R-9).
 - `admin_messages.{hpp,cpp}`: the new `build_reject_with_text` and the no-reject-loop sentence;
 - `parser.hpp`, `tag_scan.hpp`, `validator.hpp`, `core/error.hpp`, `reject_reason_map.hpp` and
   `src/capi/error.cpp` (FR-012);
-- the C-ABI 1.10 carriers: `version.h`, `session.h` and the freeze manifest.
+- the C-ABI 1.10 carriers: `version.h`, `session.h` and the freeze manifest;
+- FR-019: `seqnum_manager.{hpp,cpp}` (the bound and its header comment), and in `session.cpp` Guard
+  4's overflow branch and `consume_rejected_seqnum_`'s overflow branch (R-14).
 
 Plus tests, two benches and docs.
 
@@ -100,7 +113,7 @@ Plus tests, two benches and docs.
 | VIII §2 perf | paired merge-base A-B-A-B, +5% budget | Two benches land bench-only first and are listed in `bench/ci-suite.txt` (R-9) |
 | VIII §5 zero-alloc | no heap between parse and callback | Held: plain members, an inline branch, a constant Text |
 | IX sanitizers / coverage | per-line coverage assessment | `/speckit-verify` matrix. The fault branches are covered by the corpus and the cells |
-| X ABI | C-ABI changes versioned; public C++ API additive | **Yes — `[const §X.7]` BREAKING, C-ABI 1.10** (owner ruling 2026-09-27, FR-017). No symbol, signature or error code is added. The change is in which Logons are accepted, plus D-3's disconnect, plus C-6's close at a dispatch site, observed by the calls research R-8's recipe derives. The procedure is Phase 0b. The C++ additions are source-compatible: `build_reject_with_text` is a new name and `build_reject` keeps its single declaration (contract C-4). `§X.6` Appendix A controls: `/clarify` ✅ (Session 2026-09-27 and Gate A round 1 rulings); `/analyze` ⏳ after `/speckit-tasks`; Gate A ⏳ (loop 2 in progress, see §Gate A); user `/plan` sign-off ⏳ after Gate A converges |
+| X ABI | C-ABI changes versioned; public C++ API additive | **Yes — `[const §X.7]` BREAKING, C-ABI 1.10** (owner ruling 2026-09-27, FR-017). No symbol, signature or error code is added. The change is in which Logons are accepted, plus D-3's disconnect, plus C-6's close at a dispatch site, plus FR-019's close at NextNumIn = seqnum_max, observed by the calls research R-8's recipe derives. The procedure is Phase 0b. The C++ additions are source-compatible: `build_reject_with_text` is a new name and `build_reject` keeps its single declaration (contract C-4). `§X.6` Appendix A controls: `/clarify` ✅ (Session 2026-09-27 and Gate A round 1 rulings); `/analyze` ⏳ after `/speckit-tasks`; Gate A ⏳ (loop 2 in progress, see §Gate A); user `/plan` sign-off ⏳ after Gate A converges |
 | XI concurrency | — | Not touched: the disposition runs inside the existing per-session strand coroutine |
 | XII security | fail closed | This feature *closes* fail-opens: acting on unparsed bytes, and accepting a Logon with a malformed tag |
 | XVI §3–4 | `/clarify` and `/analyze` mandatory (session FSM, error semantics, parser) | `/clarify` done; `/analyze` due after `/tasks` |
@@ -116,12 +129,14 @@ violation. `gh release list --exclude-drafts` must be empty at Phase 0b.
 | Who | What changes | Declared where |
 |---|---|---|
 | The FIX counterparty | It receives a Reject (373=0 or 5) where it got silence or a sequence effect. A malformed Reject or Logout is now Rejected. A faulty Logon is refused. A frame faulty before 34, or with field 3 not 35, is disregarded in LogonReceived/Active instead of disconnecting. A well-formed frame that exhausts the parse arena ends the session where it was silently consumed | B&L delta; spec FR-003 to FR-009, FR-016 |
-| A C-ABI consumer | A session whose Logon carries a malformed tag never establishes, and a faulty Logon while Active ends an established session. `is_established`, `close`, `send` and both callbacks observe it. A well-formed frame that exhausts the parse arena at a dispatch site now ends the session (contract C-6), a candidate the recipe classifies. `fixpp_session_register_callback`'s "no Reject is sent" text is rewritten | **C-ABI 1.10 BREAKING**: `version.h` and a per-declaration `session.h` clause (research R-8, Phase 0b) |
+| A C-ABI consumer | A session whose Logon carries a malformed tag never establishes, and a faulty Logon while Active ends an established session. `is_established`, `close`, `send` and both callbacks observe it. A well-formed frame that exhausts the parse arena at a dispatch site now ends the session (contract C-6), a candidate the recipe classifies. A session at NextNumIn = seqnum_max now ends where it wrapped (FR-019), another candidate. `fixpp_session_register_callback`'s "no Reject is sent" text is rewritten | **C-ABI 1.10 BREAKING**: `version.h` and a per-declaration `session.h` clause (research R-8, Phase 0b) |
 | A C++ consumer of `build_reject`'s documented rule | "a malformed Reject/Logout is never itself rejected" now holds only for well-formed frames | `admin_messages.hpp` sentence rewritten, with a header comment naming the ruling |
 | A C++ consumer of `dictionary_driven_validator` | `validate` returns two new errors where it returned success | contract C-4; B&L |
 | A C++ consumer of `field_iterator` | two new accessors; `sizeof` grows; the yield is unchanged | contract C-4 |
 | An exhaustive switch over `core::error` | two new enumerators (132, 133) | contract C-4; `[const §X.4]` append-only |
-| An operator | disclosed outcomes: the disregard-row resend loop, the malformed-GapFill disconnect, TC 17d, the fail-closed close on a late parse failure | contract C-5 L-1, L-2, L-4, L-6, as B&L rows |
+| An operator | disclosed outcomes: the disregard-row resend loop, the malformed-GapFill disconnect, TC 17d, the fail-closed close on a late parse failure, and the close at NextNumIn = seqnum_max | contract C-5 L-1, L-2, L-4, L-6, L-7, as B&L rows |
+| The FIX counterparty, at NextNumIn = seqnum_max | the session ends silently (Disconnected) on the in-sequence message at 4294967295, where NextNumIn used to wrap to 0 and the session continued (FR-019) | B&L row (C-5 L-7); C-ABI 1.10 history (research R-8) |
+| A C++ caller of `SeqnumManager::check_inbound` | it returns `store_seqnum_overflow` at seqnum_max instead of wrapping | contract C-4; `seqnum_manager.hpp` header comment naming 092/FR-019 |
 
 ## Project Structure
 
@@ -131,8 +146,8 @@ violation. `gh release list --exclude-drafts` must be empty at Phase 0b.
 specs/092-garbled-frame-reject/
 ├── spec.md              # clarified 2026-09-27; Gate A round 1 and round 2 rulings
 ├── plan.md              # this file
-├── research.md          # R-1 … R-13
-├── data-model.md        # E-0 fault enum … E-6 error enumerators
+├── research.md          # R-1 … R-14
+├── data-model.md        # E-0 fault enum … E-7 inbound seqnum bound
 ├── quickstart.md        # validation guide (baselines first)
 ├── contracts/
 │   └── unparseable-frame-disposition.md   # C-1 order, C-2 table, C-3 invariants, C-4 surface, C-5 disclosures, C-6 late-site close
@@ -147,10 +162,13 @@ src/session/
 ├── scan_frame_header.hpp      # E-1: first fault, positional 35, fault_ref_seq_num / fault_ref_msg_type (R-1)
 ├── session.cpp                # inline fault branch + dispose_unparseable_ (R-3); NotConnected scan hoist;
 │                              #   fail-closed close at every late inbound parse site (C-6); liveness (FR-018);
-│                              #   replay gap-fills a stored frame with no 35 (R-12)
-└── admin_messages.cpp         # build_reject_with_text; build_reject delegates (R-5)
+│                              #   replay gap-fills a stored frame with no 35 (R-12); Guard 4 and
+│                              #   consume_rejected_seqnum_ overflow branches (FR-019, R-14)
+├── admin_messages.cpp         # build_reject_with_text; build_reject delegates (R-5)
+└── seqnum_manager.cpp         # check_inbound: seqnum_max bound → store_seqnum_overflow (FR-019, R-14)
 include/fixpp/session/
 ├── admin_messages.hpp         # build_reject_with_text declaration; no-reject-loop sentence scoped + ruling-naming comment
+├── seqnum_manager.hpp         # check_inbound comment: overflow line naming 092/FR-019
 └── session.hpp                # private declarations
 include/fixpp/wire/
 ├── tag_scan.hpp               # E-0 field_fault
@@ -170,7 +188,13 @@ tests/session/
 ├── length_data_session_scanner_test.cpp     # R-10
 ├── coverage_adversarial_test.cpp            # R-10: two cells renamed + asserted
 ├── session_reject_test.cpp                  # + malformed-Reject cell beside the well-formed ones
-└── CMakeLists.txt                           # grouped bucket, label 092
+├── test_validation_compat_toggles.cpp       # + D-4/D-5 knob-off counter arms, FR-019 memory-store cells (existing hooked target; #511)
+├── test_persistent_seqnum_hydrate.cpp       # + `092 disposer (D-5)` cases (existing hooked target)
+├── test_store_fail_reconcile.cpp            # + FR-019 FileStore cells (existing hooked target)
+├── seqnum_manager_test.cpp                  # + FR-019 unit cells (no hook needed)
+└── CMakeLists.txt                           # new grouped bucket, label 092; for each existing target above:
+                                             #   set_property(TEST <target> APPEND PROPERTY LABELS 092)
+                                             #   (never set_tests_properties, which overwrites the labels)
 tests/wire/                                  # E-4 iterator cells, E-5 validator cells
 tests/core/test_092_error_completeness.cpp   # NEW (+ CMakeLists)
 tests/core/test_0{17,19,20}_error_completeness.cpp, tests/capi/{error_surface_test.cpp,expected_error_map.csv,abi_symbol_golden_test.cpp}  # R-7 pins
@@ -187,7 +211,9 @@ brain/components/{session,inbound-message-path,wire,errors,c-api}.md   # R-13
 
 **Structure Decision**: The single-project library layout above. All changes stay within the
 existing session, wire, core-error and C-ABI modules. There is no new module, target or dependency,
-apart from new test sources, two bench sources and the fuzz arm.
+apart from new test sources, two bench sources and the fuzz arm. No new test target defines
+`FIXPP_TEST_HOOKS` (fixpp#511). A cell that needs private access goes into an existing hooked
+target.
 
 ## Implementation phases (for `/speckit-tasks`)
 
@@ -229,7 +255,17 @@ apart from new test sources, two bench sources and the fuzz arm.
    (SC-006). The D-5 call passes `hdr.fault_ref_msg_type`, with its duplicate-35 cell. The D-5
    persistence case `092 disposer (D-5)` is added to both #423 tables in
    `tests/session/test_persistent_seqnum_hydrate.cpp`, each shown RED in a scratch copy (quickstart
-   §1 "D-5 persistence").
+   §1 "D-5 persistence"). The D-5 and D-4 knob-off counter arms go into
+   `test_validation_compat_toggles.cpp`, and each touched existing target gets the `092` label by
+   `APPEND` (quickstart §1).
+2b. **Inbound seqnum_max bound** (FR-019, R-14):
+   - RED cells first: the unit cells, then the SequenceReset-to-max cells per store kind and per
+     path, plus the seeded knob-off and pre-Active arms (quickstart §1 "Inbound seqnum_max bound").
+   - Then the bound in `check_inbound`, Guard 4's overflow branch, `consume_rejected_seqnum_`'s
+     overflow branch, and the `seqnum_manager.hpp` and `seqnum_manager.cpp` comments.
+   - Re-run `grep -n "check_inbound(" src/session/session.cpp` at the implementation head, and
+     classify every member (R-14).
+   - Three mechanism-deletion proofs (quickstart §2).
 3. **Reject Text and 372 bound** (R-5): `build_reject_with_text`, with `build_reject` delegating
    and its output byte-identical (existing goldens unchanged); the dictionary-derived 372 bound and
    its recomputing test.
@@ -244,7 +280,7 @@ apart from new test sources, two bench sources and the fuzz arm.
    the reject-loop bound cell.
 7. **SC-007 scripted peer** (with resend replay) and the C-5 disclosed-outcome cells (L-1, L-2).
 8. **Fuzz arm** (R-2), with a planted disagreement proving the trap.
-9. **Docs** (R-13): B&L (the B-092-* rows, C-5 L-1, L-2, L-4, L-6, the #423 row 4 revision, and a
+9. **Docs** (R-13): B&L (the B-092-* rows, C-5 L-1, L-2, L-4, L-6, L-7, the #423 row 4 revision, and a
    note that its row 1 describes an "Ignore" fixpp does not do, citing `L-004-4` and fixpp#514);
    brain pages (the session page's "garbled" passage rewritten, not appended); code comments with ruling-naming header comments where a decision is superseded
    (parent CLAUDE.md); feature-catalogue CA rows.
@@ -252,7 +288,14 @@ apart from new test sources, two bench sources and the fuzz arm.
 
 ## Post-design Constitution re-check
 
-Re-run after the Gate A round 2 artifacts: **PASS**. The post-round-3 refresh and Gate A loop 2 edits are text-only (no design change), so this re-check was not re-run for them.
+Re-run after the Gate A round 2 artifacts: **PASS**. The post-round-3 refresh and the loop-2
+round-1 edits were text-only. Loop 2 round 2 adds a design change, FR-019, so the check was re-run
+for it: **PASS**.
+- FR-019 adds no allocation, no coroutine frame and no concurrency. It is one compare inside the
+  existing mutex-held `check_inbound`, plus two error branches.
+- It is a public C++ behaviour change (contract C-4), and a C-ABI effect classified under R-8 inside
+  the same 1.10 declaration.
+- Its tests use only existing hooked targets (fixpp#511).
 - **No allocation and no new concurrency** are added. The clean path gains one inline compare.
 - **C-ABI 1.10** is a declared BREAKING pre-release change (`[const §X.7]`), and the Appendix A
   controls are tracked in the Constitution Check.
@@ -278,6 +321,7 @@ pre-release procedure, owner-ruled.
 - Round 2 applied 2026-09-27: Codex P1=5 P2=2 P3=1; Opus post-judging P1=2 P2=1 P3=1; rewrite addresses root causes A, B, C and R2-008; owner rulings O-1 (framing disregard → #514, 092 keeps L-004-4) and O-2 (resource case → #515, late sites fail-closed). Reviews: research/reviews/codex_092-garbled-frame-reject_gate_a_2_review.md, research/reviews/opus_092-garbled-frame-reject_gate_a_2_adversarial_review.md.
 - Round 3 exhausted 2026-09-27: Codex P1=0 P2=3 P3=3; Opus post-judging P1=0 P2=2 P3=4. Owner chose "re-run /clarify then /plan": spec.md Clarifications "Session 2026-09-27 (after Gate A round 3)" answered R3-001..R3-005; this plan refresh applies them plus R3-006. Reviews: research/reviews/codex_092-garbled-frame-reject_gate_a_3_review.md, research/reviews/opus_092-garbled-frame-reject_gate_a_3_adversarial_review.md. Next: a fresh /gate-a loop.
 - Loop 2, round 1 applied 2026-09-27: Codex P1=0 P2=1 P3=2; Opus post-judging P1=0 P2=2 P3=3; text edits only (L2R1-001 SC restatement, L2-NEW-A knob-off next_inbound assertion, P3 wording). Reviews: research/reviews/codex_092-garbled-frame-reject_gate_a_loop2_review.md, research/reviews/opus_092-garbled-frame-reject_gate_a_loop2_adversarial_review.md.
+- Loop 2, round 2 applied 2026-09-27: Codex P1=0 P2=2 P3=0; Opus post-judging P1=0 P2=1 P3=1 (L2R2-002 downgraded, then restored to P2 by owner ruling "fold into 092"); rewrite moves the knob-off counter arms to session_validation_compat_toggles (APPEND label 092) and adds the inbound seqnum_max bound (FR-019). Reviews: research/reviews/codex_092-garbled-frame-reject_gate_a_loop2_2_review.md, research/reviews/opus_092-garbled-frame-reject_gate_a_loop2_2_adversarial_review.md.
 
 ### Round 1 — how each root cause was addressed
 
@@ -411,3 +455,40 @@ the reason is recorded here:
 - **G092-R2-008** (preserve the overflow-vs-format distinction in `field_fault`): not taken. The
   claim is narrowed instead and the differing C codes are pinned by a cell; the validator has no C
   caller.
+
+### Loop 2, round 2 — how each finding was addressed
+
+- **G092-L2R2-001 (knob-off counter arms without an ODR-safe home).** Opus's minimal edit was
+  applied and widened.
+  - The D-5 and D-4 knob-off arms move to `test_validation_compat_toggles.cpp`
+    (`session_validation_compat_toggles`, already hooked).
+  - `unparseable_frame_disposition_test.cpp` stays hook-free.
+  - Every existing target that gains a 092 cell gets `set_property(TEST <target> APPEND PROPERTY
+    LABELS 092)`. That covers `session_validation_compat_toggles`, `session_persistent_seqnum_hydrate`
+    (whose D-5 persistence cases `-L 092` would otherwise skip), `store_fail_reconcile` and
+    `session_store_tests`.
+  - The #511 rule is stated in quickstart §1 and in the Structure Decision.
+- **G092-L2R2-002 (inbound seqnum_max wrap).** Folded in by owner ruling. The design is Codex's
+  counter-proposal, checked against source (FR-019, R-14, C-3 I-7, C-4, C-5 L-7, E-7, SC-010):
+  - one bound check in `check_inbound`, before the mutation, returning `store_seqnum_overflow`;
+  - `consume_rejected_seqnum_` tells the overflow apart from "not consumed" and takes the
+    Disconnected transition itself;
+  - Guard 4 tests the overflow before its Heartbeat, PossDup and knob-off branches.
+
+  Opus's disclosure edits are not applied, because the fix replaces them. No new issue is filed.
+
+### Loop 2, round 2 — disagreements
+
+- **Opus's persistent-store row** said the store refuses the advance, and the session disconnects
+  with no Reject. That is wrong in source. The SequenceReset jump is never persisted (`MessageStore`
+  has no setter), so the store's `seqnum_max` check cannot fire, and a persistent session wraps too
+  (R-14). This strengthens the ruling. It changes which cells are RED today: both store kinds are.
+- **The brief lists `set_next_inbound` among the paths to bound.** It gets no check: it stores a
+  `seqnum_t` without arithmetic and cannot wrap, and seqnum_max is a representable NextNumIn. The
+  bound fires at the next advance (R-14).
+- **The disposition** is the silent Disconnected transition, not a Logout or
+  `close(close_mode::terminal)`. It follows the existing overflow precedent in both directions
+  (R-14).
+- **The knob-off arm** cannot reach seqnum_max through a SequenceReset, because the knob-off Reset
+  arm does not apply NewSeqNo. It seeds the counter instead (SC-010).
+

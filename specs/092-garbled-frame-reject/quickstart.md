@@ -26,7 +26,25 @@ owner's approval first (`[const §XVII.7]` resource gate).
 
 Select tests by label, never `-R` (`[const §VII.8]`). The new cells live in
 `tests/session/unparseable_frame_disposition_test.cpp`, registered beside
-`session_validate_gate_inbound` with a `092` label (`ctest -L 092`).
+`session_validate_gate_inbound` with a `092` label (`ctest -L 092`). That target stays hook-free
+(fixpp#511): no cell in it reads the counter.
+
+**Cells that must read the inbound counter go into existing targets that already define
+`FIXPP_TEST_HOOKS`.** Never add the macro to a new target (fixpp#511): it creates another
+macro-divergent definition of the public `Session` class. These cells are:
+- the D-5 and D-4 knob-off counter arms below;
+- the FR-019 memory-store and FileStore cells;
+- the D-5 persistence cases.
+
+Each existing target that gains a 092 cell gets the label with
+`set_property(TEST <target> APPEND PROPERTY LABELS 092)`. Never use `set_tests_properties(... LABELS
+...)`, which overwrites the target's existing labels. Without the label, `ctest -L 092` silently skips
+the cell. Find a file's target with `grep -n "<file>" tests/session/CMakeLists.txt`. The targets named
+below are:
+- `session_validation_compat_toggles`, for `test_validation_compat_toggles.cpp`;
+- `session_persistent_seqnum_hydrate`, for `test_persistent_seqnum_hydrate.cpp`;
+- `store_fail_reconcile`, for `test_store_fail_reconcile.cpp`;
+- `session_store_tests`, for `seqnum_manager_test.cpp`.
 
 **Every Reject cell asserts the exact 373 and 371 and the RefSeqNum.**
 
@@ -38,10 +56,11 @@ Expected after the change:
   second is delivered with no ResendRequest (SC-003). Repeated for Reject(3) and Logout(5) as the
   faulty frame (the no-reject-loop supersession), and with `validate_sequence_numbers` off (FR-011).
   With the knob off, delivery alone cannot witness the advance: a too-high frame is delivered
-  without advance and without a ResendRequest (Guard 4's knob-off S4 path). So the knob-off arm also
-  asserts the inbound counter directly through `SeqnumManager::next_inbound_unsafe()` (as
-  `tests/session/test_validation_compat_toggles.cpp` reads it): N+1 after the faulty frame and N+2
-  after the conformant one. It goes RED in a scratch copy when the disposer skips
+  without advance and without a ResendRequest (Guard 4's knob-off S4 path). So the knob-off arm is a
+  cell in `tests/session/test_validation_compat_toggles.cpp` (target
+  `session_validation_compat_toggles`, already hooked). It reads
+  `seqnum_mgr_test_access().next_inbound_unsafe()` as that file's knob-off cells do: N+1 after the
+  faulty frame and N+2 after the conformant one. It goes RED in a scratch copy when the disposer skips
   `consume_rejected_seqnum_`.
 - **D-5 persistence** (FR-013, #423 precedent): a `092 disposer (D-5)` case, a faulty application
   frame at seq 2 (field 3 is 35, a malformed tag after 34), is added to both
@@ -59,7 +78,8 @@ Expected after the change:
     needs no new case: it is `emit_session_reject_`'s unchanged body.
 - **D-4 no-advance witness**: the same pair with a faulty SequenceReset at N. The next message draws
   a ResendRequest. With `validate_sequence_numbers` off, the cell pins the inherited outcome: the
-  counter stays at N, asserted directly as `next_inbound_unsafe() == N`, and later frames are
+  counter stays at N, asserted directly as `next_inbound_unsafe() == N` in the same
+  `test_validation_compat_toggles.cpp` cell group, and later frames are
   delivered without advancing (research R-4).
 - **D-6**: faulty frames at too-low and too-high 34, each with and without PossDupFlag=Y. Each gets a
   Reject, no advance, no ResendRequest and no too-low Logout.
@@ -113,6 +133,44 @@ Expected after the change:
   - **L-2**: a faulty GapFill during AwaitingResend. The disconnect sequence is pinned.
   - **L-4**: a malformed 93/89 pair draws 373=5.
   - **L-6**: covered by the late-site cells above.
+- **Inbound seqnum_max bound** (FR-019, SC-010, C-3 I-7, C-5 L-7; research R-14):
+  - **Unit**, in `seqnum_manager_test.cpp` (`session_store_tests`): `set_next_inbound(seqnum_max)`
+    succeeds. Then `check_inbound(seqnum_max)` returns `store_seqnum_overflow`, and
+    `next_inbound_unsafe()` stays `seqnum_max`.
+  - **Session**, once per store kind:
+    - a non-persistent memory store, in `test_validation_compat_toggles.cpp`;
+    - a FileStore, in `test_store_fail_reconcile.cpp`, whose fixture already drives a Session over a
+      `FileStoreFactory`.
+
+    Each cell sends a SequenceReset (Reset mode, 36=4294967295). It then asserts that the session is
+    Active and `next_inbound_unsafe() == 4294967295`. That precondition keeps a disconnect from any
+    other cause from satisfying the cell. It then sends one frame at 34=4294967295 and asserts:
+    - `fsm_state::Disconnected`;
+    - `next_inbound_unsafe()` still 4294967295, never 0;
+    - no outbound frame after it, so no Reject;
+    - no `fromApp`/`fromAdmin`;
+    - on the FileStore, a durable inbound counter the frame did not move.
+
+    The frame is, in turn:
+    - an application message;
+    - a Heartbeat;
+    - a PossDupFlag=Y admin frame with a valid OrigSendingTime(122);
+    - a #423 Reject site: a PossDupFlag=Y application frame with no OrigSendingTime(122), which
+      Arm C Rejects through `consume_rejected_seqnum_`. It needs no dictionary, and the session
+      survives it today;
+    - a faulty application frame (D-5).
+  - **Knob-off arm** (memory store): with `validate_sequence_numbers` off, the Reset-mode
+    SequenceReset is not applied. So this arm seeds NextNumIn with
+    `seqnum_mgr_test_access().set_counters_for_test(4294967295, peek_outbound())`, passing the current
+    outbound value because the call sets both counters. It then sends an application message at
+    4294967295. The assertions are the same.
+  - **Pre-Active arm** (memory store, `test_validation_compat_toggles.cpp`): after `open()` and
+    before the Logon, seed NextNumIn the same way. Then send a Logon at 34=4294967295, as acceptor,
+    and as the initiator's Logon reply where the fixture drives one. Assert Disconnected and
+    `next_inbound_unsafe()` still 4294967295. Today the counter wraps and the session establishes.
+  - **RED baseline.** The Guard 4 and #423 cells are RED on today's tree: NextNumIn wraps to 0 and
+    the session stays Active, on both store kinds. The pre-Active arm is RED on today's tree too. The
+    D-5 cell is RED in a scratch copy of the 092 tree with the bound deleted.
 - **C-ABI** (FR-017, SC-004, SC-009):
   - the `tests/capi` malformed-tag Logon refusal on every observer, both roles;
   - `version_test.cpp` at 1.10.
@@ -128,6 +186,13 @@ Expected after the change:
 - **Mechanism deletion** (SC-006): in a scratch copy, delete the inline fault branch in one state arm
   and confirm that arm's cells go RED. Repeat with the late-site close (C-6) also deleted, so a
   refusal cell kept green by a late-site close is exposed.
+- **Inbound bound deletion** (FR-019, research R-14), each in a scratch copy:
+  - delete the bound in `check_inbound`: every FR-019 cell goes RED, the pre-Active arm included;
+  - delete Guard 4's overflow branch: the Heartbeat, PossDup and knob-off cells go RED. The plain
+    application cell stays green, because the too-low fatal arm catches it, so it is not that
+    branch's witness;
+  - revert `consume_rejected_seqnum_`'s overflow branch: the #423 and D-5 cells go RED, because a
+    Reject is sent and the session stays Active.
 - **Fuzz**: `fuzz_session_recovery_admin_parse` with the equivalence arm (it also compares
   `msg_type_is_third` and `fault_ref_msg_type` with `entries()`), for the Article VII §7 time
   (≥ 10 min). Report the skipped-resource-status count. Plant a disagreement once to prove the trap

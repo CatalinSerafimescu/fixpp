@@ -4,7 +4,7 @@
 
 **Created**: 2026-09-27
 
-**Status**: Draft (post-round-3 clarify/plan refresh; Gate A loop 2, round 1 applied 2026-09-27)
+**Status**: Draft (post-round-3 clarify/plan refresh; Gate A loop 2, rounds 1 and 2 applied 2026-09-27)
 
 **Input**: User description: "B18 / fixpp#507 — the session must never act on an inbound frame that
 passes framing but fails the parse; its disposition follows the owner ruling of 2026-09-27 (issue
@@ -171,6 +171,14 @@ fix-rs, venue specs, and a Fable consult. The ruling:
   frame). Lifecycle callbacks the close fires (`onLogout`) and callbacks already fired earlier at that
   site (e.g. `toAdmin` for a confirming Logout) are out of scope (R3-005).
 
+### Session 2026-09-27 (Gate A loop 2, round 2)
+
+- Q: The inbound NextNumIn can wrap to 0 at seqnum_max on a non-persistent store. `check_inbound` and
+  `set_next_inbound` have no bound, so a SequenceReset to 4294967295 followed by a message at that
+  number wraps it. This already happens today at Guard 4 and at #423's Reject sites, and D-5 inherits
+  it. Keep it out of 092? → A: **Fold into 092**: 092 enforces the inbound bound (invariant I-8 on
+  the inbound side). (FR-019; research R-14.)
+
 ## User Scenarios & Testing *(mandatory)*
 
 The "user" is an operator running a fixpp session against a counterparty whose encoder produces a
@@ -333,6 +341,10 @@ the missing number, and the session stays connected.
   session-fatal (`L-004-4`, FR-008). Its disregard is fixpp#514.
 - **A well-formed frame too large for the parse arena** (a resource failure): the session closes
   (FR-016). The proper disposition is fixpp#515.
+- **NextNumIn at seqnum_max** (4294967295, reachable with a SequenceReset to that value): an
+  in-sequence message at that number cannot be consumed. Whether it is accepted, Rejected under
+  #423, or Rejected under D-5, the session ends silently (Disconnected) with no Reject, no advance and
+  no wrap, on any store (FR-019).
 
 ## Requirements *(mandatory)*
 
@@ -458,6 +470,27 @@ the missing number, and the session stays connected.
   The affected declarations are derived by 091's population recipe (research R-8).
 - **FR-018**: In Active, a frame answered with a Reject under FR-003 MUST refresh inbound liveness,
   as any received message does. A disregarded frame MUST NOT.
+- **FR-019**: NextNumIn MUST never wrap past seqnum_max (the `seqnum_t` bound; invariant I-8, which
+  the outbound counter already enforces). An inbound message whose MsgSeqNum equals NextNumIn =
+  seqnum_max cannot be consumed, because no next value exists. Every path that would consume it MUST
+  end the session with the silent transition to Disconnected, which is the disposition the outbound
+  overflow and a failed inbound persist already take. It sends no Reject and no Logout, does not
+  advance, and does not deliver the message. The paths are:
+  - Guard 4's in-sequence accept, whatever the MsgType, PossDupFlag(43) or the
+    `validate_sequence_numbers` setting;
+  - every #423 Reject site and D-5, which consume through the same advance. FR-013's ordering holds:
+    the advance fails, so no Reject follows it;
+  - the pre-Active Logon arms. They already end the session on every `check_inbound` error except
+    a too-high Logon with the next-expected knob on, so the new error ends it with no edit.
+
+  At NextNumIn = seqnum_max this requirement takes precedence over FR-003 and FR-004. No Reject is
+  sent, because the advance FR-013 orders first has failed.
+
+  A SequenceReset MAY set NextNumIn to seqnum_max, because the value is representable. The bound
+  fires at the next in-sequence advance. This holds with a persistent and a non-persistent store.
+  FIX-SL 2020 §4.1 defines no maximum. It says each message received increments NextNumIn by 1, and
+  that a reset to 1 begins a new FIX session. A wrap to 0 or 1 is neither, so the session ends
+  (research R-14).
 
 ### Key Entities
 
@@ -470,6 +503,8 @@ the missing number, and the session stays connected.
   - *Reject* (FR-003 to FR-005);
   - *Logon refusal* (FR-009);
   - *fail-closed close*, for a late parse failure (FR-016).
+- **Inbound sequence bound**: seqnum_max, the largest NextNumIn. A message at that number ends the
+  session instead of wrapping it (FR-019).
 
 ## Success Criteria *(mandatory)*
 
@@ -480,7 +515,8 @@ the missing number, and the session stays connected.
   371 of FR-007. The probe at MsgSeqNum 500 draws a ResendRequest (the reset was not applied). Today
   all four apply the reset.
 - **SC-002**: In LogonReceived and in Active, a frame that fails the parse, whose third field is
-  MsgType(35) and whose MsgSeqNum was read and equals the expected number, produces exactly one
+  MsgType(35) and whose MsgSeqNum was read and equals the expected number (below seqnum_max; at
+  seqnum_max, FR-019 and SC-010 apply), produces exactly one
   Reject and no other outbound message for every MsgType other than Logon(A) (contract C-2 D-4,
   D-5), including Reject(3), Logout(5), SequenceReset(4) and one application type. The application
   callback is never invoked for it. Each cell asserts the exact 373 and 371. A faulty Logon is
@@ -519,6 +555,20 @@ the missing number, and the session stays connected.
   site's cell goes RED when that site's close is deleted.
 - **SC-009**: The C-ABI version test pins 1.10, is RED against 1.9, and turns RED again under a
   mutant back to 9.
+- **SC-010**: A SequenceReset (Reset mode, NewSeqNo(36)=4294967295), then a frame at MsgSeqNum
+  4294967295, ends the session, on a non-persistent memory store and on a file store. Each cell
+  asserts:
+  - after the SequenceReset, the session is still Active and NextNumIn is 4294967295;
+  - after the frame, the session is Disconnected and NextNumIn is still 4294967295, never 0;
+  - no Reject and no other outbound message follows the frame, and it is not delivered.
+
+  The frame at the maximum is, in turn: an application message, a Heartbeat, and a PossDupFlag=Y
+  admin frame (Guard 4); a frame a #423 site Rejects; and a faulty application frame (D-5). Each runs
+  on each store kind and goes RED against the unbounded code. With `validate_sequence_numbers` off,
+  the Reset-mode SequenceReset is not applied, so that arm seeds the counter instead. A pre-Active
+  arm seeds NextNumIn at seqnum_max before the Logon, then sends a Logon at 34=4294967295. It asserts
+  Disconnected and NextNumIn still 4294967295; today the session establishes. Each FR-019 mechanism
+  has a deletion proof (research R-14).
 
 ## Assumptions
 
@@ -552,3 +602,5 @@ the missing number, and the session stays connected.
   - the disposition of a resource failure of a well-formed frame beyond fail-closed (fixpp#515,
     owner ruling O-2);
   - fuzz-harness coverage of library code (#508).
+- In scope by the owner ruling of 2026-09-27 (Gate A loop 2, round 2): the inbound seqnum_max bound
+  (FR-019). It predates 092: Guard 4 and the #423 Reject sites wrap NextNumIn today, on any store.

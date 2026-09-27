@@ -165,3 +165,22 @@ tolerant in what they yield, and they now report.
   are unchanged.
 - **Every pin that enumerates or bounds the error set moves with them.** The population and its
   derivation are in research R-7.
+
+## E-7 — `SeqnumManager` inbound bound (public class, behaviour only; FR-019)
+
+No member, type or signature changes. `SeqnumManager::check_inbound`'s in-sequence branch gains one
+state rule:
+
+| `next_inbound_` before | `seq` | Result | `next_inbound_` after |
+|---|---|---|---|
+| < seqnum_max | = `next_inbound_` | ok (unchanged) | +1 (unchanged) |
+| = seqnum_max | = seqnum_max | `store_seqnum_overflow` (new; today: ok) | seqnum_max (today: 0) |
+| any | ≠ `next_inbound_` | too-low / too-high (unchanged) | unchanged |
+
+- `store_seqnum_overflow` is the existing error `assign_outbound` returns at the outbound bound. No
+  `core::error` value is added.
+- `set_next_inbound`, `hydrate` and `reset_to_one` store a `seqnum_t` without arithmetic, so none
+  can wrap. seqnum_max is a valid stored NextNumIn (research R-14).
+- `Session::consume_rejected_seqnum_` keeps its signature. On `store_seqnum_overflow` it now takes
+  the Disconnected transition and returns the error, where every `check_inbound` error used to mean
+  "not consumed" (success). Its other outcomes are unchanged.

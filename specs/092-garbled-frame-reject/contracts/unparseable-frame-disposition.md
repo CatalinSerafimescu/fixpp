@@ -70,6 +70,9 @@ In every `on_inbound_frame` path:
   runs before the Reject, as at the 041 validate gate, and a failed persist disconnects with no
   Reject (FR-013). Both are pinned by the `092 disposer (D-5)` case in #423's two persistence
   tables (quickstart §1 "D-5 persistence").
+- **D-5 at the expected number = seqnum_max** does not advance and does not Reject. The advance
+  fails with `store_seqnum_overflow`, and `consume_rejected_seqnum_` takes the silent Disconnected
+  transition (FR-019, I-7). The same holds at every #423 Reject site.
 - **D-4 during AwaitingResend** leaves the gap open. The disclosed outcome is in C-5 L-2.
 - **Liveness.** In Active, D-4, D-5 and D-6 refresh the inbound-liveness timestamp that any received
   message refreshes today. These frames are received and are not garbled (SL2020's heartbeat-timer
@@ -122,6 +125,13 @@ answers one peer frame. The bound cell is quickstart §1 "reject-loop bound".
 - **I-6** The C-2 disposition is identical with inbound validation on and off, with
   `validate_sequence_numbers` on and off, on FIX.4.2, FIX.4.4 and FIXT.1.1, and as acceptor and
   initiator (FR-011).
+- **I-7** NextNumIn never wraps (FR-019; the inbound side of `seqnum_manager.hpp`'s I-8).
+  `SeqnumManager::check_inbound` refuses to advance from seqnum_max with `store_seqnum_overflow` and
+  leaves the counter unchanged. Every caller ends the session on that error with the silent
+  Disconnected transition, before any Reject, delivery or drop. This holds for Guard 4 (every
+  MsgType, PossDupFlag and `validate_sequence_numbers` value), for `consume_rejected_seqnum_` (every
+  #423 site and D-5) and for the pre-Active Logon arms, with a persistent and a non-persistent store.
+  The caller population and its derivation are in research R-14.
 
 ## C-4 — Public surface deltas
 
@@ -140,11 +150,15 @@ answers one peer frame. The bound cell is quickstart §1 "reject-loop bound".
   `reject_reason_map` maps them to 0 and 5.
 - `dictionary_driven_validator::validate` returns them where it used to end its walk silently (E-5).
 - No `SessionEvent` alternative is added: disregarded frames are not logged (research R-4).
+- `SeqnumManager::check_inbound` (public `include/fixpp/session/seqnum_manager.hpp`) returns
+  `store_seqnum_overflow` when asked to advance from seqnum_max, where it used to wrap to 0 (FR-019).
+  That is the error `assign_outbound` already returns. It is source-compatible, and its header comment
+  names 092/FR-019. `set_next_inbound` is unchanged.
 
 **C-ABI 1.10, BREAKING (`[const §X.7]`; owner ruling 2026-09-27, FR-017):**
 - No symbol, signature or error code is added.
 - What changes is which inbound Logons are accepted, plus D-3's disconnect of an established
-  session, plus C-6's close on a late parse failure at a dispatch site. Each is observed through the calls FR-020 of 091 named: `fixpp_session_is_established`,
+  session, plus C-6's close on a late parse failure at a dispatch site, plus FR-019's close at NextNumIn = seqnum_max (research R-14). Each is observed through the calls FR-020 of 091 named: `fixpp_session_is_established`,
   `fixpp_session_close`, `fixpp_session_send`, `fixpp_session_register_callback` and
   `fixpp_session_register_send_callback`.
 - The population is re-derived with 091's recipe (research R-8). The carriers and the procedure are
@@ -171,6 +185,11 @@ answers one peer frame. The bound cell is quickstart §1 "reject-loop bound".
   parse arena, silently consumed today, now ends the session. The cell pins it per late site,
   including whether a reconnect's NextNumIn includes the closed-on frame (resend requested, or the
   number consumed).
+- **L-7: a session whose NextNumIn reaches seqnum_max ends at the next in-sequence message**
+  (FR-019). It used to wrap NextNumIn to 0 and continue. The session now goes silently to
+  Disconnected, with no Reject and no Logout. Where a reconnect resumes depends on the store, because
+  the SequenceReset jump is not persisted (research R-14). 092 does not change that. The SC-010
+  cells pin the close on both store kinds.
 
 (L-3 and L-5 were deleted in Gate A round 2, and the numbers are not reused.)
 

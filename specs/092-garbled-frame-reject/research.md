@@ -370,6 +370,7 @@ the recipe's step 6 (handshake observers) gives `fixpp_session_is_established`,
 | a late parse failure (contract C-6) through the validate gate | unreachable from C: `git grep -n validate_inbound -- src/capi` shows no C setter for inbound validation |
 | a late parse failure at a dispatch site with a registered callback: a well-formed frame that exhausts the arena, silently consumed today, now ends the session (fail-closed, contract C-5 L-6) | a BREAKING candidate where it ends an established session (`is_established` true → false, `send` OK → `FIXPP_ERR_SESSION_INVALID_STATE`); the recipe classifies it |
 | FR-012's validator errors | unreachable from C (no `src/capi` caller of the validator, R-7), so no C effect |
+| an in-sequence inbound message at NextNumIn = seqnum_max ends the session (silent Disconnected) where NextNumIn used to wrap and the session continued (FR-019, R-14) | a BREAKING candidate where it ends an established session (`is_established` true → false, `send` OK → `FIXPP_ERR_SESSION_INVALID_STATE`); the recipe classifies it, and the `version.h` history names it |
 
 **What 1.10 touches.** Found from 091's bump (`git show --stat 932dd1cd`) and `[const §X.7]`. The
 procedure is plan.md "Phase 0b":
@@ -430,6 +431,9 @@ emit. `bench/baselines/session/` holds several session baselines (list them with
 - **Local.** A local paired run follows `[const §VIII.2]`: a clean merge-base worktree with only
   the bench commit cherry-picked onto it, and the candidate, built on one machine, run A-B-A-B,
   compared min-per-tree. Both SHAs and the bench commit's patch-id are recorded. The budget is +5%.
+- FR-019 adds one more compare, in `SeqnumManager::check_inbound`'s in-sequence branch, which every
+  in-sequence inbound message takes (R-14). The `on_inbound_frame` bench covers it; the scan bench
+  does not.
 - The clean path adds one inline compare per frame and trades nothing else. The B13 lesson is to
   measure, not assume.
 
@@ -441,6 +445,7 @@ inventory:
 grep -rln scan_frame_header tests
 git grep -ln -i "no Reject\|NoReject\|Skipped\b" -- tests/session tests/capi
 git grep -ln "VERSION_MINOR" -- tests
+git grep -ln "check_inbound\|set_next_inbound" -- tests    # FR-019: any cell that advances NextNumIn at seqnum_max
 ```
 Classify each hit as "still holds, gains an assertion", "flips (RED first)", "renamed" or "mention
 only". Snapshot at the plan head:
@@ -528,3 +533,151 @@ Rewrite each site that describes a framed but unparseable frame. Known members a
 - `brain/components/inbound-message-path.md`, `wire.md`, `errors.md` and `c-api.md`: their decision
   sections gain the ruling, the rejected alternatives (ignore-by-default; 99; changing the iterator's
   yield), and the 1.10 declaration.
+
+## R-14 — The inbound seqnum_max bound (FR-019; owner ruling, Gate A loop 2, round 2)
+
+**Finding.** `SeqnumManager::check_inbound`'s in-sequence branch increments `next_inbound_` with no
+bound. Only `assign_outbound` tests `seqnum_max`. Re-derive both with
+`grep -n "seqnum_max\|++next_inbound_" src/session/seqnum_manager.cpp`. The header's "I-8: seqnum_max
+overflow is session-fatal; no wrap" is therefore enforced for the outbound counter only.
+`parse_seqnum` accepts 4294967295. `apply_inbound_sequence_reset` calls `set_next_inbound` for any
+NewSeqNo(36) above the expected number. So a SequenceReset to 4294967295, then any in-sequence
+message at 4294967295, wraps NextNumIn to 0 today. No 092 frame is needed.
+
+**The wrap happens on a persistent store too.** The Opus loop-2 round-2 review assumed a persistent
+store stops it: it read the store's `seqnum_max` check (`MemoryStore::next_seqnum`,
+`FileStore::next_seqnum`) as firing first. It cannot fire here:
+- `MessageStore` has no method that sets a counter. Re-derive with
+  `grep -n "virtual.*awaitable" include/fixpp/session/message_store.hpp`: store, retrieve,
+  next_seqnum, reset.
+- So the SequenceReset jump is never persisted. `session.cpp`'s validate-on GapFill persist comment
+  says so ("set_next_inbound, NOT +1 … is NOT persisted (INV-H1/D-5)").
+- The durable counter stays at the value before the reset. `persist_inbound_advance_`'s increment
+  after the wrap is an ordinary +1, and the session stays Active.
+
+The store-kind row does not change the outcome today. Both store kinds get cells.
+
+**Decision: one bound check, in `SeqnumManager::check_inbound`.**
+- In the in-sequence branch, before `++next_inbound_`: if `next_inbound_ == seqnum_max`, return
+  `core::error::store_seqnum_overflow` and leave the counter unchanged. This mirrors
+  `assign_outbound`, which returns the same error for the same condition, and names it the same way
+  (`[2e §6.7]`, I-8). Codex's counter-proposal is adopted: detect before mutating.
+- **`set_next_inbound` gets no check, and it cannot wrap.** Its argument is a `seqnum_t` (32 bits,
+  `include/fixpp/session/seqnum.hpp`), `parse_seqnum` caps at the same width, and it stores the value
+  without arithmetic. seqnum_max is a representable NextNumIn, just as the outbound counter can hold
+  seqnum_max. The bound fires at the next in-sequence advance. The other writers of `next_inbound_`
+  also store values, not sums: `hydrate` (from the store), `reset_to_one` and `set_next_inbound`.
+  Re-derive with `grep -n "next_inbound_ =\|++next_inbound_" src/session/seqnum_manager.cpp`. The
+  only increment is the one this check guards.
+- **SequenceReset and Logon never reach the advance through a Reject.** `consume_rejected_seqnum_`
+  returns early for `A` and `4`. A GapFill in sequence does reach Guard 4's `check_inbound`, which
+  holds the check.
+
+**Disposition.** It is the silent transition to Disconnected, `record_state_transition_(fsm_state::Disconnected)`,
+with no Reject and no Logout. The precedents:
+- the outbound I-8 callers of `assign_outbound` (for example the initiator Logon in `Session::emit_initiator_logon_`,
+  "Seqnum overflow — same disposition as build_logon failure");
+- `persist_inbound_advance_`, when the store refuses the advance, including its own `seqnum_max`
+  check.
+
+A Logout was considered and not taken. FIX-SL 2020 defines no maximum sequence number. §4.1 says
+each message received "consumes the next inbound sequence number, incrementing NextNumIn by 1", and
+that resetting both numbers to 1 "shall constitute the beginning of a new FIX session". A wrap to 0
+(not a valid MsgSeqNum) or to 1 (an unannounced new session) is neither. The session cannot
+continue, so it ends. §4.6 says that termination by means other than the Logout exchange "should
+be considered an abnormal condition and dealt with as an error". A NextNumIn that cannot advance is
+such an error condition. The silent transition is the existing overflow disposition in both
+directions, so 092 adds no new one.
+
+**Callers: every `check_inbound` call must dispose of the new error.** Population:
+`grep -n "check_inbound(" src/session/session.cpp`. Read each call's error branch. The members at
+the plan head are below. This is a snapshot of the command, not an authority. Each needs one of two
+dispositions:
+- **`consume_rejected_seqnum_`** discards every `check_inbound` error as "not consumed", so its
+  caller would go on to emit the Reject. It gains one branch: on `store_seqnum_overflow` it performs
+  the Disconnected transition itself and returns the error. Its callers need no edit: each
+  `co_return`s a failed result before its Reject, as it does for a failed persist today (re-derive
+  with `grep -n "consume_rejected_seqnum_(" src/session/session.cpp` and read each `!c` branch). That
+  covers every #423 Reject site and D-5, and keeps FR-013's ordering.
+- **Guard 4 in LogonReceived/Active** routes a failed `check_inbound` by the frame, not by the error:
+  - a Heartbeat is dropped silently;
+  - a PossDupFlag=Y admin frame is ignored and an application frame redelivered (the two arms);
+  - with `validate_sequence_numbers` off, the frame is delivered without advance;
+  - only then comes the too-low fatal arm.
+
+  Each of those would keep a session alive whose next number does not exist. So an overflow test
+  comes first in that error branch and takes the Disconnected transition.
+- **The acceptor Logon arm (NotConnected) and the initiator Logon-reply arm (LogonSent)** tolerate
+  only `session_seqnum_too_high` with the next-expected knob on. Every other error, the overflow
+  included, is already fatal. They need no edit, and they need a reading at the implementation head
+  to confirm it.
+
+A member the command adds at the implementation head is classified the same way: either it already
+ends the session on any error, or it gains the overflow branch.
+
+**Why not a check per call site.** The bound is one compare in the one place the counter is
+incremented. The call-site edits only make sure the error is not misread. Without them, Guard 4
+would drop or deliver the frame at seqnum_max, and `consume_rejected_seqnum_` would Reject it and
+keep the session open.
+
+**Public surface.** `SeqnumManager` is declared in the public `include/fixpp/session/seqnum_manager.hpp`.
+- `check_inbound` gains a returnable error, which is source-compatible (contract C-4).
+- Its header comment gains the overflow line and names 092/FR-019, per the parent rule on
+  superseding a decision.
+- The stale sentence in `seqnum_manager.cpp` that counts the callers is rewritten as the
+  re-derivation command above, without a count.
+- The C-ABI effect is classified in R-8's table.
+- The behaviour is disclosed as contract C-5 L-7.
+
+**Cost.** One compare on every in-sequence inbound message, measured by the `on_inbound_frame`
+bench (R-9).
+
+**Tests.** Each is RED first. For a D-5 cell, the RED baseline is a scratch copy of the 092 tree
+with the bound deleted, because D-5 does not exist on today's tree. The Guard 4 and #423-site cells
+are also RED on today's tree.
+- **Unit** (`tests/session/seqnum_manager_test.cpp`, target `session_store_tests`; it needs no hook,
+  because `set_next_inbound` is public): `set_next_inbound(seqnum_max)`, then `check_inbound(seqnum_max)`.
+  It returns `store_seqnum_overflow` and `next_inbound_unsafe()` stays `seqnum_max`. A second cell
+  asserts that `set_next_inbound(seqnum_max)` itself succeeds.
+- **Session, per store kind** (quickstart §1 "Inbound seqnum_max bound"):
+  - a non-persistent memory store, in `session_validation_compat_toggles`;
+  - a FileStore, in `store_fail_reconcile`, whose fixture already drives a Session over a
+    `FileStoreFactory`.
+
+  Both are existing targets that already define `FIXPP_TEST_HOOKS`, because each cell reads the
+  counter through `seqnum_mgr_test_access()`. There is no new hooked target (fixpp#511). Each cell
+  sends a SequenceReset (Reset mode, 36=4294967295). It then asserts Active and NextNumIn ==
+  4294967295, so that a disconnect from any other cause cannot satisfy the cell. Then it sends the
+  frame at 4294967295 and asserts:
+  - Disconnected;
+  - NextNumIn still 4294967295;
+  - no outbound frame after it, so no Reject;
+  - no receive callback;
+  - on the FileStore, a durable inbound counter the frame did not move.
+
+  The frame at the maximum is, in turn:
+  - an application message;
+  - a Heartbeat;
+  - a PossDupFlag=Y admin frame with a valid OrigSendingTime(122);
+  - a #423 Reject site: a PossDupFlag=Y application frame with no OrigSendingTime(122), which the
+    PossDup Stage-1 Arm C Rejects through `consume_rejected_seqnum_`. It needs no dictionary, so it
+    runs in both fixtures, and today the session survives it, so Disconnected discriminates. The
+    SendingTime site is not used, because it disconnects without the fix;
+  - a faulty application frame (D-5).
+
+  A `validate_sequence_numbers`-off arm seeds NextNumIn with `set_counters_for_test`, because with
+  the knob off the Reset-mode SequenceReset is not applied. The seed passes the current
+  `peek_outbound()` as the outbound value, because `set_counters_for_test` sets both counters.
+- **Pre-Active** (memory store, `session_validation_compat_toggles`): after `open()` and before the
+  Logon, seed NextNumIn at seqnum_max with `set_counters_for_test(seqnum_max, peek_outbound())`.
+  Then send a Logon at 34=4294967295, as acceptor, and as the initiator's Logon reply where the
+  fixture drives one. Assert Disconnected and NextNumIn still seqnum_max. Today the counter wraps
+  and the session establishes, so the cell is RED on today's tree. It witnesses the "no edit needed"
+  reading of the two pre-Active arms.
+- **Deletion proofs**, each in a scratch copy:
+  - delete the bound in `check_inbound`: every cell goes RED, the pre-Active cell included;
+  - delete Guard 4's overflow branch: the Heartbeat, PossDup and knob-off cells go RED. The plain
+    application cell stays green, because the too-low fatal arm catches it, so it is not the witness
+    for that branch;
+  - revert `consume_rejected_seqnum_`'s branch: the #423 and D-5 cells go RED (a Reject is sent and
+    the session stays Active).
