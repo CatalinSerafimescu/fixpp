@@ -139,6 +139,12 @@ the population snapshots, and the label manifest (plan phase 0, quickstart §0).
   `/speckit-verify` runs). Use a scratch program or a throwaway test, not a committed one. Record
   the figure per preset with the SHA in the evidence file §*Arena ceiling*. The per-lane cap is
   fixpp#515's.
+  - Record which presets and lanes have a null arena upstream (`fixpp::detail::arena_upstream()` in
+    `include/fixpp/core/pmr_arena_upstream.hpp`; MSVC debug does not), because T038's guard skips
+    the others.
+  - Also check whether the offset-table cap (`wire_offset_table_full`) gives a well-formed frame
+    that fails the parse on every platform, including MSVC debug. Record the result; T038 uses it if
+    so.
 - [ ] T007 Via `phase-implementer`, create `specs/092-garbled-frame-reject/expected-ctest-092.txt`,
   one ctest name per line, sorted:
   `capi_logon_malformed_tag`, `capi_pure_tests`, `error_017_completeness`,
@@ -319,6 +325,9 @@ C-2 row, and the rows are one function, so the mechanism lands here with one anc
   and every effect T020 classified that has no carrying declaration. Update every in-repo consumer
   from `git grep -ln "VERSION_MINOR\|0x010900\|1_9_0\|(9U << 8U)" -- . ':!specs'`, each hit
   classified in the evidence file. T022 GREEN.
+  - **SC-009 mutant:** after the bump, in a scratch copy, set MINOR back to 9 and show
+    `version_test` RED; revert and show GREEN. Record it in the evidence file. T022's pre-bump RED
+    is a different proof.
 - [ ] T024 Via `phase-implementer`, add a **BREAKING (C-ABI 1.10; 092)** clause to each affected
   declaration in `include/fix/c_api/session.h` (T020's set), and rewrite
   `fixpp_session_register_callback`'s 1.9 sentence ("dropped as a parse error, silently … no Reject
@@ -393,8 +402,10 @@ Active changes nothing but the Reject rows' NextNumIn accounting, and draws a Re
 **Independent Test**: T076 (T005) plus the per-handler I-1 witnesses below; a conformant Heartbeat at
 500 after the faulty SequenceReset draws a ResendRequest.
 
-The anchors landed in 2d, so the cells below are GREEN on arrival. Each is proven able to fail by
-T065's mechanism-deletion run; that is the RED form for this phase.
+The anchors landed in 2d, so the cells below would be GREEN on arrival. **RED first anyway**
+(`[const §VII.3–4]`; plan Constitution Check VII): before committing, each cell-writing task runs its
+new cells in a scratch copy with T026 reverted, shows them RED for their stated reason, and quotes
+that RED in the commit message. T065's per-arm deletion is the finer SC-006 proof on top of it.
 
 - [ ] T027 [US1] Via `phase-implementer`, the I-1 witnesses in
   `tests/session/unparseable_frame_disposition_test.cpp`, each in Active at the expected N:
@@ -504,6 +515,13 @@ Reject (45=N) and is not delivered; the second is delivered with no ResendReques
     frame (the peer's resend is requested, or the number was consumed), pinning today's per-site
     outcome (R3-004, C-5 L-6).
   RED today: the frame is consumed, or the session continues.
+  - The above-ceiling trigger needs a null arena upstream. On MSVC debug `arena_upstream()` returns
+    `new_delete_resource()`, the arena spills and the frame parses. Guard each cell at runtime on the
+    same condition the library uses, `fixpp::detail::arena_upstream() ==
+    std::pmr::null_memory_resource()` (`include/fixpp/core/pmr_arena_upstream.hpp`), with
+    `GTEST_SKIP()` and a message naming the reason; never a hand-written platform check. If T006
+    found an offset-table-cap trigger (`wire_offset_table_full`) that fails the parse on every
+    platform, use it instead and drop the guard.
 - [ ] T039 [US2] Via `phase-implementer`, implement the late-site close (E-3, C-6) in
   `src/session/session.cpp`.
   - `parse_and_dispatch_` gains a private way to say "the parse failed and the receive callback did
@@ -909,8 +927,8 @@ it in 092.
 
 ### Within each story
 
-The anchors in 2d are written first and shown RED; the story cells then land GREEN and get their
-RED from T065's mechanism deletion. A mechanism a story introduces itself (US2's late-site close;
+The anchors in 2d are written first and shown RED. Each later story cell is shown RED in a scratch
+copy with T026 reverted before it is committed, and T065's per-arm deletion adds the SC-006 proof. A mechanism a story introduces itself (US2's late-site close;
 Phase 7's bound; Phase 8's validator check) follows RED → implement → GREEN → mutant.
 
 ---

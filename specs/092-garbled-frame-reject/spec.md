@@ -505,9 +505,10 @@ the missing number, and the session stays connected.
   - *fail-closed close*, for a late parse failure (FR-016).
 - **Inbound sequence bound**: seqnum_max, the largest NextNumIn. The next message that would consume
   NextNumIn at that number (Guard 4, a #423 site, D-5, a pre-Active Logon) ends the session instead
-  of wrapping it (FR-019). A message that does not consume it does not end the session: a Reset-mode
-  SequenceReset, D-4, D-6, the disregard rows, and a faulty frame whose `fault_ref_msg_type` is `A`
-  or `4`.
+  of wrapping it (FR-019). A message that does not consume it does not end the session through the
+  bound: a Reset-mode SequenceReset, D-4, D-6 and the disregard rows. At a #423 Reject site, a
+  Logon or SequenceReset does not consume either, because `consume_rejected_seqnum_` returns before
+  `check_inbound` for `A` and `4`.
 
 ## Success Criteria *(mandatory)*
 
