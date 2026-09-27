@@ -178,10 +178,15 @@ set_tests_properties(wire_dict_tests PROPERTIES LABELS "075;083;wire;091")
 # 3; it would otherwise have been a CI red on the PR). The cost is not 083's:
 # 081's Fix50Family/FixtHeaderValidateTest is 120.0 s of that 147.2 s, and 083's
 # three added files account for well under 30 s.
-# 600 keeps ~4x headroom over the measured tsan figure — enough for a CI runner
-# slower than this host — while still bounding a non-termination to minutes
-# rather than the job timeout, which is the whole point of having the property.
-set_tests_properties(wire_dict_tests PROPERTIES TIMEOUT 600)
+#
+# TSan is not the slowest preset for this bucket: Tier 2's windows-msvc-asan
+# runs it slower still, so that is the preset to size against. To re-derive,
+# read the wire_dict_tests wall time from that leg's ctest output in the
+# latest Tier 2 run. Keep this value equal to the ctest `--timeout` wedge
+# guard in .github/workflows/tier2.yml, and below the timeout-minutes of every
+# job that runs this bucket, so a non-termination is still bounded short of
+# the job timeout — which is the whole point of having the property.
+set_tests_properties(wire_dict_tests PROPERTIES TIMEOUT 1800)
 
 # ── Standalone: 075 T007 QuickFIX enum-golden manifest gate ─────────────────
 # Isolation-sensitive per [const §VII.8] (a data-driven exact-hash gate) —
