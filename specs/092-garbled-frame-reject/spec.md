@@ -486,8 +486,8 @@ the missing number, and the session stays connected.
 - **FR-018**: 092 adds no writer of the inbound-liveness timestamp. No faulty-frame disposition,
   Rejected (D-4, D-5, D-6) or disregarded, refreshes inbound liveness. The refresh stays where it is
   today: the single Active-path site after Guard 4 and after the Active arm's early returns (re-derive
-  with `grep -n "last_inbound_steady_ =" src/session/session.cpp`, then read every `co_return`
-  between Guard 4 and that site). So in Active a TestRequest is sent at the interval whatever faulty
+  with `grep -n "last_inbound_steady_ =" src/session/session.cpp`; the other hits are seeds at open()
+  and at the Logon exchange; then read every `co_return` between Guard 4 and that site). So in Active a TestRequest is sent at the interval whatever faulty
   traffic arrived, and the grace window is answered only by a well-formed Heartbeat (the pending
   TestRequest id is cleared only there). This follows QuickFIX/C++ and QuickFIX/J, which do not
   refresh on a frame Rejected for a structural fault, and TC2020 §4.5.13 k, which allows such a frame

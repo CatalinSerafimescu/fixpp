@@ -77,8 +77,8 @@ In every `on_inbound_frame` path:
 - **Liveness.** No row refreshes the inbound-liveness timestamp (FR-018): not the Reject rows D-4,
   D-5 and D-6, and not the disregard rows. 092 adds no writer. The existing refresh stays the single
   Active-path site after Guard 4 and after the Active arm's early returns (re-derive with
-  `grep -n "last_inbound_steady_ =" src/session/session.cpp`, then read every `co_return` between
-  Guard 4 and it). In Active a TestRequest is therefore sent at the interval whatever faulty traffic
+  `grep -n "last_inbound_steady_ =" src/session/session.cpp`, whose other hits are seeds at open()
+  and at the Logon exchange, then read every `co_return` between Guard 4 and it). In Active a TestRequest is therefore sent at the interval whatever faulty traffic
   arrived, and only a well-formed Heartbeat answers it.
 
 **Reject contents (D-4, D-5, D-6):**

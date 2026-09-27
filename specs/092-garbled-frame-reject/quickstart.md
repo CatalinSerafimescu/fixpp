@@ -107,11 +107,12 @@ Expected after the change:
   decided on `fault_ref_msg_type` (D), never the last-wins 4: NextNumIn advances, the Reject carries
   372=D, and N+1 is then delivered with no ResendRequest.
 - **MaxMessageSize** (C-1 step 1b): an oversized faulty frame in Active ends in Disconnected.
-- **Liveness** (FR-018): in Active, with only faulty traffic (a D-4, a D-5, a D-6 or a D-7 frame) for
-  a heartbeat interval, a TestRequest is sent at the interval, and the session is still Active until
-  then. A well-formed Heartbeat reply clears it; without one the grace window disconnects. RED: the
-  D-5 cell today (a faulty application frame passes Guard 4 and refreshes); for the others, a disposer
-  that refreshes (the forced-hit mutant).
+- **Liveness** (FR-018): in Active, exactly one faulty frame (a D-4, a D-5, a single too-high D-6, or
+  a D-7) within a heartbeat interval, with the fault after 49, 52 and 56: a TestRequest is sent at the
+  interval, and the session is still Active until then. A well-formed Heartbeat reply clears it;
+  without one the grace window disconnects. RED with T026 reverted (T011 present): the D-5
+  application cell (it refreshes) and the D-7 cell (Guard 4's `seq == 0` disconnects it). For the
+  others, and for D-7's liveness half, the proof is a disposer that refreshes (the forced-hit mutant).
 - **372 bound** (R-5): a faulty frame with an over-long MsgType draws a Reject without 372, and the
   number is not silently consumed.
 - **Reject-loop bound** (contract C-2): a scripted peer answers each fixpp Reject with a malformed

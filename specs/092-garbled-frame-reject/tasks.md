@@ -186,7 +186,9 @@ the population snapshots, and the label manifest (plan phase 0, quickstart §0).
   - The C-2 pre-Active refusal source:
     `grep -n "No MsgType discrimination\|out-of-scope admin" src/session/session.cpp`.
   - Via `phase-implementer` (after T007 exists): every member these commands add whose edit lands in a ctest entry missing from
-    `expected-ctest-092.txt` extends the manifest (and gets its APPEND label), recorded here.
+    `expected-ctest-092.txt` extends the manifest (and gets its APPEND label), recorded here. Then
+    re-state T007's positive control: the gate reports exactly the not-yet-registered new entries
+    missing.
   - `FrameHeader` size pins:
     `git grep -n "sizeof(FrameHeader)\|sizeof(fixpp::session::detail::FrameHeader)\|FrameHeader) ==" -- src tests bench`.
 
@@ -419,11 +421,13 @@ The anchors landed in 2d, so the cells below would be GREEN on arrival. **RED fi
 (`[const §VII.3–4]`; plan Constitution Check VII): before committing, each cell-writing task runs its
 new cells in a scratch copy with T026 reverted, shows them RED for their stated reason, and quotes
 that RED in the commit message. T065's per-arm deletion is the finer SC-006 proof on top of it.
-**Expected green with T026 reverted, each with its own proof:** T031's D-4, D-6 and D-7 cells (the
-forced-hit mutant); T032 (pins an inherited outcome); T034's MaxMessageSize cell (a control: the size guard runs
-before the state switch); T051's well-formed Reset-mode control (a control by design; the faulty-frame controls depend on
-T026 and are not expected green without it). Mark each as a pin or
-control in its test comment.
+**Baseline for every "RED/green with T026 reverted" claim:** T026 reverted with T011 present (the
+stop-first scan), and T039 reverted too if it has landed. **Expected green on that baseline, each with
+its own proof:** T031's D-4, single-frame D-6 and faulty-Reject(3) D-5 cells (the forced-hit mutant);
+T032 (pins an inherited outcome); T034's MaxMessageSize cell (a control: the size guard runs before
+the state switch); T051's well-formed Reset-mode control and its faulty D-4 control (a Reset to the
+current NextNumIn is a no-op; controls by design; the D-6 and D-7 controls depend on T026). Mark each
+as a pin or control in its test comment.
 
 - [ ] T027 [US1] Via `phase-implementer`, the I-1 witnesses in
   `tests/session/unparseable_frame_disposition_test.cpp`, each in Active at the expected N:
@@ -460,16 +464,22 @@ control in its test comment.
     number of malformed frames the peer sent, and fixpp originates none in reply to a well-formed
     Reject.
 - [ ] T031 [US1] Via `phase-implementer`, the liveness cells (FR-018) in
-  `tests/session/unparseable_frame_disposition_test.cpp`. In Active, send only faulty frames of one
-  row for a full heartbeat interval: one cell each for D-4, D-5 (a faulty application frame and a
-  faulty Reject(3)), D-6 and D-7. Each asserts the session is still Active up to the interval, and
-  then that a TestRequest **is** sent at it. One cell then answers with a well-formed Heartbeat and
-  asserts the session stays Active; one sends nothing more and asserts the grace-window disconnect.
-  - **RED:** the D-5 application cell is RED with T026 reverted (the faulty frame passes Guard 4 and
-    refreshes today, so no TestRequest is sent). The faulty-Reject(3) cell and the D-4, D-6 and D-7
-    cells are green with T026 reverted. Their proof is the forced-hit mutant in a scratch copy: a
-    disposer that writes `last_inbound_steady_` in each row turns each cell RED. Record it in the
-    evidence file.
+  `tests/session/unparseable_frame_disposition_test.cpp`. In Active, within one heartbeat interval,
+  send **exactly one** faulty frame of one row and nothing else: one cell each for D-4, D-5 (a faulty
+  application frame, and a faulty Reject(3)), D-6 (one too-high frame; a second one while
+  AwaitingResend, or a too-low one, disconnects through Arm B and is T029's, not a liveness cell) and
+  D-7. In every cell the fault sits **after** 34, 35, 49, 52 and 56, so Guards 2 and 3 cannot decide
+  the cell (for D-7 the fault sits before 34 but after 35, 49, 52 and 56). Each asserts the session is
+  still Active up to the interval, and then that a TestRequest **is** sent at it. One cell then
+  answers with a well-formed Heartbeat and asserts the session stays Active; one sends nothing more
+  and asserts the grace-window disconnect.
+  - **RED on the baseline (T026 reverted, T011 present):** the D-5 application cell (the frame passes
+    Guard 4 and refreshes, so no TestRequest is sent); the D-7 cell (34 is empty, so Guard 4's
+    `seq == 0` check disconnects it before the interval).
+  - **Green on the baseline:** the D-4 cell, the single-frame D-6 cell and the faulty-Reject(3) D-5 cell
+    (each returns before the Active refresh). Their liveness proof, and the D-7 cell's, is the forced-hit
+    mutant in a scratch copy: a disposer that writes `last_inbound_steady_` in each row turns each cell
+    RED. Record it in the evidence file.
 - [ ] T032 [US1] Via `phase-implementer`, the D-4 knob-off arm in
   `tests/session/test_validation_compat_toggles.cpp` (target `session_validation_compat_toggles`,
   already hooked; label from T007): with `validate_sequence_numbers` off, a faulty **Reset-mode** SequenceReset at N
@@ -868,7 +878,10 @@ it in 092.
   tests` is empty, and `OverCapacityFrameClosesSession` covers carry overflow only). In
   `tests/session/engine_readpump_test.cpp` (target `engine_readpump_test`, already hooked; ctest
   `engine_readpump`), add cells that feed an **established** session a frame with a bad CheckSum, one
-  with a wrong BodyLength and one with a bad BeginString, and assert the session closes (`L-004-4`).
+  whose BodyLength is **too small** (so `10=` is misaligned), and one with a malformed BeginString
+  prefix (a first byte other than `8`, or no `=`: `wire_framing_resync`), and assert the session
+  closes (`L-004-4`). Not a well-formed wrong version (it passes the Framer and Guard 2 closes it
+  whatever the pump does) and not a too-large BodyLength (the Framer waits for more bytes).
   These are pins, green today; their proof is a mutant in a scratch copy (a read pump that continues
   after a Framer error) that turns each RED. Add `engine_readpump` to `expected-ctest-092.txt` with an
   APPEND label. Record the mutant in the evidence file.
