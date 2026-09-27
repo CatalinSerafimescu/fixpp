@@ -7,7 +7,7 @@
 #   ci/prune-compiler-cache.sh fixpp-sccache windows-msvc-debug \
 #       '^sccache-windows-msvc-debug-' sccache-windows-msvc-debug-14.44.35207
 #   DRY_RUN=1 ci/prune-compiler-cache.sh fixpp-ccache linux-clang-libc++ \
-#       '^ccache-linux-clang-libcxx-clang([0-9]+|unknown)-[0-9a-f]{8}$' ''
+#       '^ccache-linux-clang-libcxx-clang([0-9]+|unknown)-[0-9a-f]{8}(-f[0-9a-f]{8})?$' ''
 #
 # Callers normally reach this through a thin wrapper that knows how to build the
 # regex from a preset — ci/prune-sccache.sh and ci/prune-ccache.sh. Both exist so
@@ -36,7 +36,7 @@
 # non-sequitur, and it is recorded because it is an easy one to re-derive:
 # differing grammars prevent this script from requiring a particular SHAPE, not
 # from requiring a terminal `$`. Each caller states its own end — sccache's
-# toolset is dotted-numeric (`[0-9.]+$`), ccache's is `clangNN-<sha8>` — and
+# toolset is dotted-numeric (`[0-9.]+$`), ccache's is `clangNN-<sha8>-f<sha8>` — and
 # neither needs this file to know which.
 #
 # The trade is stated rather than hidden: end-anchoring converts possible

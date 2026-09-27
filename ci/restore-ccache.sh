@@ -100,12 +100,18 @@ case "$precalls" in
 esac
 
 if ! ccache_resolve_key "$PRESET" "$IMAGE_REF"; then
-  note "ccache-cache MISS ($PRESET, compiler unidentified) → building with an empty cache"
+  # Exit 0 all the same: a cache that is down must never redden a lane whose
+  # build passes. The warning is the loudness here; the gate that keeps a bad
+  # flag-surface input off main is the real-tree arm in ci/test-ccache-scripts.sh.
+  if [ "${CCACHE_CACHE_FLAGS_FAILED-0}" = 1 ]; then
+    echo "::warning::ccache-cache: the compile-flag surface of '$PRESET' could not be extracted (ci/ccache-flag-surface.py, reason above), so this lane runs uncached and seed publishes nothing until it is fixed."
+  fi
+  note "ccache-cache MISS ($PRESET, compiler unidentified or flag surface unreadable) → building with an empty cache"
   emit false
   exit 0
 fi
 TAG="$CCACHE_CACHE_TAG"
-echo "ccache-cache: compiler $CCACHE_CACHE_COMPILER ($CCACHE_CACHE_TOOLSET) folded into the tag"
+echo "ccache-cache: compiler $CCACHE_CACHE_COMPILER ($CCACHE_CACHE_TOOLSET) and compile-flag surface f$CCACHE_CACHE_FLAGS folded into the tag"
 
 # The HIT path below does `rm -rf "$CCACHE_DIR"`. Everything protecting that
 # call lives OUTSIDE this script — the workflow happens to set

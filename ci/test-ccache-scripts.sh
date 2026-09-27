@@ -14,8 +14,8 @@
 #
 # Shims `oras`, `ccache`, `gh`, `curl` and the compiler on a temp PATH, builds a
 # throwaway CMakePresets.json, and drives the REAL scripts —
-# ci/{ccache-cache-key,restore-ccache,seed-ccache,ccache-stats,wheel-ccache-ident,assert-wheel-image,install-ccache}.sh — through
-# every disposition each one can reach.
+# ci/{ccache-cache-key,restore-ccache,seed-ccache,ccache-stats,wheel-ccache-ident,assert-wheel-image,install-ccache}.sh
+# and ci/ccache-flag-surface.py — through every disposition each one can reach.
 #
 # ── WHY EVERY CASE ASSERTS TWO THINGS ────────────────────────────────────────
 #
@@ -112,6 +112,28 @@ cat > "$sandbox/CMakePresets.json" <<'JSON'
   ]
 }
 JSON
+
+# The compile-flag surface both minters fold into the tag (#482) is read from
+# the cwd, so the sandbox carries a COPY of the real one. A copy, not a toy
+# fixture: the #482 arms below mutate it and must see the tree's real flag
+# mechanisms. The file list comes from the tree's own extractor
+# (`--list-inputs`), never from a list kept here, so a file the surface starts
+# reading is copied, and mutated by the arms, without an edit to this harness.
+# It is the TREE's extractor, not $CI_DIR's, so an older or mutated ci/ can be
+# run against the same copy. The per-lane preset file and Conan profiles are
+# not in the list: the sandbox keeps its own synthetic CMakePresets.json.
+FLAG_INPUTS="$( cd "$repo_root" && python3 ci/ccache-flag-surface.py --list-inputs )" \
+  || fail "flag-surface/inputs: ci/ccache-flag-surface.py --list-inputs failed on the real tree (see its message above)"
+[ -n "$FLAG_INPUTS" ] || fail "flag-surface/inputs: ci/ccache-flag-surface.py --list-inputs listed nothing"
+copy_flag_surface() {  # $1 = destination root
+  local f
+  mkdir -p "$1/conan/profiles"
+  while IFS= read -r f; do
+    mkdir -p "$1/$(dirname "$f")"
+    cp "$repo_root/$f" "$1/$f"
+  done <<< "$FLAG_INPUTS"
+}
+copy_flag_surface "$sandbox"
 
 expected_tag() {
   (
@@ -359,7 +381,10 @@ ok "the plain preset's regex does not match a sanitizer preset's tag"
 # (`[0-9a-z]+-[0-9a-f]+`) also accepted a non-numeric non-`unknown` major and a
 # digest of any length — near-misses no producer here mints, but this regex is
 # the sole classifier on an irreversible DELETE.
-for bad in "ccache-fake-libcxx-clang22-a" "ccache-fake-libcxx-clangwat-deadbeef" "ccache-fake-libcxx-clang22-deadbeef00"; do
+for bad in "ccache-fake-libcxx-clang22-a" "ccache-fake-libcxx-clangwat-deadbeef" "ccache-fake-libcxx-clang22-deadbeef00" \
+  "ccache-fake-libcxx-clang22-deadbeef-f0123456" "ccache-fake-libcxx-clang22-deadbeef-f012345678" \
+  "ccache-fake-libcxx-clang22-deadbeef-f0123ABCD" "ccache-fake-libcxx-clang22-deadbeef-01234567" \
+  "ccache-fake-libcxx-clang22-deadbeef-f01234567-f01234567"; do
   if printf '%s' "$bad" | grep -qE -- "$TAG_RE"; then
     fail "prune/tag-regex-near-miss: '$bad' matches '$TAG_RE' — the pruner's classifier is wider than the grammar the minter can produce"
   fi
@@ -367,7 +392,7 @@ done
 ok "the pruner's regex rejects every near-miss tag no producer here mints"
 
 # The minter's 'unknown major' fallback must still classify as its own.
-UNKNOWN_MAJOR_TAG="ccache-fake-libcxx-clangunknown-15dc124f"
+UNKNOWN_MAJOR_TAG="ccache-fake-libcxx-clangunknown-15dc124f-f0a1b2c3d"
 printf '%s' "$UNKNOWN_MAJOR_TAG" | grep -qE -- "$TAG_RE" \
   || fail "prune/tag-regex-unknown-major: '$UNKNOWN_MAJOR_TAG' does not match '$TAG_RE' — the tightened regex must still accept the minter's 'unknown major' fallback"
 ok "the pruner's regex still accepts the minter's 'unknown major' fallback tag"
@@ -378,7 +403,7 @@ ok "the pruner's regex still accepts the minter's 'unknown major' fallback tag"
 # matcher must stay pure string work.
 GCC_TAG="$(expected_tag 'fake-gcc-release')" || fail "gcc/mint: no tag for a gcc preset with a g++ banner"
 case "$GCC_TAG" in
-  'ccache-fake-gcc-release-gcc13-'????????) ok "a gcc preset mints gcc<major> from the real Ubuntu banner shape" ;;
+  'ccache-fake-gcc-release-gcc13-'????????-f????????) ok "a gcc preset mints gcc<major> from the real Ubuntu banner shape" ;;
   *) fail "gcc/mint: tag '$GCC_TAG' is not ccache-<preset>-gcc13-<digest8>" ;;
 esac
 GCC_RE="$( cd "$sandbox" && PATH="$shim_dir:$PATH" . "$CI_DIR/ccache-cache-key.sh" && ccache_tag_regex 'fake-gcc-release' >/dev/null 2>&1 && printf '%s' "$CCACHE_TAG_RE" )"
@@ -389,7 +414,8 @@ ok "the gcc regex matches a tag the key script actually minted"
 
 # Disjoint in BOTH directions:
 # widening either branch to accept the other family's literal must fail here.
-CLANG_AS_GCC_TAG="ccache-fake-gcc-release-clang22-$(printf '%s' "$GCC_TAG" | sed 's/.*-//')"
+CLANG_AS_GCC_TAG="$(printf '%s' "$GCC_TAG" | sed 's/-gcc13-/-clang22-/')"
+[ "$CLANG_AS_GCC_TAG" != "$GCC_TAG" ] || fail "gcc/disjoint: could not build the clang-family variant of '$GCC_TAG'"
 if printf '%s' "$CLANG_AS_GCC_TAG" | grep -qE -- "$GCC_RE"; then
   fail "gcc/disjoint: the gcc regex '$GCC_RE' accepts a clang-family tag '$CLANG_AS_GCC_TAG'"
 fi
@@ -405,7 +431,7 @@ ok "the clang and gcc regexes each reject the other family's tag"
 if printf '%s' "ccache-fake-gcc-release-clangunknown-7a345d7a" | grep -qE -- "$GCC_RE"; then
   fail "gcc/retired-label: the gcc regex accepts the pre-#464 'clangunknown' tag"
 fi
-printf '%s' "ccache-fake-gcc-release-gccunknown-7a345d7a" | grep -qE -- "$GCC_RE" \
+printf '%s' "ccache-fake-gcc-release-gccunknown-7a345d7a-f0a1b2c3d" | grep -qE -- "$GCC_RE" \
   || fail "gcc/unknown-major: the gcc regex rejects its own 'unknown major' fallback"
 ok "the gcc regex rejects the retired clangunknown label and accepts gccunknown"
 
@@ -436,7 +462,7 @@ ok "a banner contradicting the preset name's family refuses to mint (both direct
 for row in fake-gcc-v13 fake-gcc-tgt13 fake-gcc-bare fake-gcc-cxx; do
   T="$(expected_tag "$row")" || fail "gcc/mint-token: no tag for '$row' with a real gcc-family banner"
   case "$T" in
-    "ccache-$row-gcc13-"????????) ;;
+    "ccache-$row-gcc13-"????????-f????????) ;;
     *) fail "gcc/mint-token: '$row' minted '$T', not ccache-$row-gcc13-<digest8>" ;;
   esac
 done
@@ -454,17 +480,17 @@ ok "a banner whose first token is not a gcc executable name refuses to mint, eve
 # only, never a fallback to the banner's last field (C2) ────────────────────
 BUILDSUFFIX_TAG="$(expected_tag fake-gcc-buildsuffix)" || fail "gcc/major: no tag for a distro build-suffix banner"
 case "$BUILDSUFFIX_TAG" in
-  'ccache-fake-gcc-buildsuffix-gcc13-'????????) ;;
+  'ccache-fake-gcc-buildsuffix-gcc13-'????????-f????????) ;;
   *) fail "gcc/major: distro build-suffix banner minted '$BUILDSUFFIX_TAG', expected gcc13 (a last-field parse reads the suffix's own dotted number, gcc2)" ;;
 esac
 SNAPSHOT_TAG="$(expected_tag fake-gcc-snapshot)" || fail "gcc/major: no tag for a gcc snapshot banner"
 case "$SNAPSHOT_TAG" in
-  'ccache-fake-gcc-snapshot-gcc15-'????????) ;;
+  'ccache-fake-gcc-snapshot-gcc15-'????????-f????????) ;;
   *) fail "gcc/major: snapshot banner minted '$SNAPSHOT_TAG', expected gcc15" ;;
 esac
 BADVER_TAG="$(expected_tag fake-gcc-badver)" || fail "gcc/major: no tag for a malformed-version banner"
 case "$BADVER_TAG" in
-  'ccache-fake-gcc-badver-gccunknown-'????????) ;;
+  'ccache-fake-gcc-badver-gccunknown-'????????-f????????) ;;
   *) fail "gcc/major: malformed version 'g++ (Vendor) 13.not-a-version' minted '$BADVER_TAG', expected gccunknown (uncertainty must degrade to unknown, never a wrong number)" ;;
 esac
 ok "the gcc major comes from the field after the first ') ', dotted-numeric only — a build suffix, a snapshot date and a malformed version each parse correctly (C2)"
@@ -506,20 +532,21 @@ esac
 # ── CONTAINER LANES (#259) — the SAME producer/matcher bridge, second grammar ─
 #
 # A container lane's compiler lives inside a pinned image and cannot be probed
-# on the host, so `ccache_container_cache_key` mints `ccache-<lane>-<digest8>`
-# with no `<family><major>` component. That is a SECOND grammar, and the pruner
-# must classify it exactly — every assertion below is derived from the real
-# script, nothing about either grammar is restated here.
+# on the host, so `ccache_container_cache_key` mints
+# `ccache-<lane>-<digest8>-f<flags8>` with no `<family><major>` component. That
+# is a SECOND grammar, and the pruner must classify it exactly — every assertion
+# below is derived from the real script, nothing about either grammar is
+# restated here.
 KEYSH="$CI_DIR/ccache-cache-key.sh"
 PINNED_REF='quay.io/pypa/manylinux_2_28_x86_64@sha256:012f4a50472412f18bb2b450c1cce7158434cfae4ae878591c2748a13a30c2be'
-EXPECTED_CONTAINER_TAG='ccache-wheel-manylinux228-012f4a50'
 
-CTAG="$( . "$KEYSH" && ccache_container_cache_key 'wheel-manylinux228' "$PINNED_REF" >/dev/null 2>&1 && printf '%s' "$CCACHE_CACHE_TAG" )"
+CTAG="$( cd "$sandbox" && . "$KEYSH" && ccache_container_cache_key 'wheel-manylinux228' "$PINNED_REF" >/dev/null 2>&1 && printf '%s' "$CCACHE_CACHE_TAG" )"
 [ -n "$CTAG" ] || fail "container/mint: ccache_container_cache_key produced no tag for a well-formed pinned reference"
-case "$CTAG" in
-  "$EXPECTED_CONTAINER_TAG") ok "container tag is lane + the pinned image digest's first 8 hex" ;;
-  *) fail "container/mint: tag '$CTAG' is not the documented grammar" ;;
-esac
+# The image half is literal; the flag half is 8 hex from the surface (#482).
+printf '%s' "$CTAG" | grep -qE '^ccache-wheel-manylinux228-012f4a50-f[0-9a-f]{8}$' \
+  || fail "container/mint: tag '$CTAG' is not the documented grammar"
+EXPECTED_CONTAINER_TAG="$CTAG"
+ok "container tag is lane + the pinned image digest's first 8 hex + the flag-surface digest"
 
 CTAG_RE="$( . "$KEYSH" && ccache_tag_regex 'wheel-manylinux228' >/dev/null 2>&1 && printf '%s' "$CCACHE_TAG_RE" )"
 [ -n "$CTAG_RE" ] || fail "container/regex: ccache_tag_regex produced nothing for the container lane"
@@ -543,7 +570,12 @@ for bad in \
   "ccache-wheel-manylinux228-012f4a5" \
   "ccache-wheel-manylinux228-012f4a500" \
   "ccache-wheel-manylinux228-012F4A50" \
-  "ccache-wheel-manylinux228-clang22-012f4a50"; do
+  "ccache-wheel-manylinux228-clang22-012f4a50" \
+  "ccache-wheel-manylinux228-012f4a50-f0123456" \
+  "ccache-wheel-manylinux228-012f4a50-f012345678" \
+  "ccache-wheel-manylinux228-012f4a50-f0123ABCD" \
+  "ccache-wheel-manylinux228-012f4a50-01234567" \
+  "ccache-wheel-manylinux228-012f4a50-f01234567-f01234567"; do
   if printf '%s' "$bad" | grep -qE -- "$CTAG_RE"; then
     fail "container/near-miss: '$bad' matches '$CTAG_RE' — the classifier is wider than the grammar the container minter can produce"
   fi
@@ -567,7 +599,9 @@ for badref in \
   'quay.io/pypa/manylinux_2_28_x86_64@sha256:012f4a50' \
   '012f4a50472412f18bb2b450c1cce7158434cfae4ae878591c2748a13a30c2be' \
   'quay.io/pypa/manylinux_2_28_x86_64@sha256:ZZZf4a50472412f18bb2b450c1cce7158434cfae4ae878591c2748a13a30c2be'; do
-  if ( . "$KEYSH" && ccache_container_cache_key 'wheel-manylinux228' "$badref" ) >/dev/null 2>&1; then
+  # From the sandbox, so the flag surface is readable and cannot be the reason
+  # a bad reference is refused.
+  if ( cd "$sandbox" && . "$KEYSH" && ccache_container_cache_key 'wheel-manylinux228' "$badref" ) >/dev/null 2>&1; then
     fail "container/pin: '$badref' was ACCEPTED — a reference that is not digest-pinned keys a moving toolchain to a stable tag, which reads as a healthy cache forever"
   fi
 done
@@ -576,7 +610,7 @@ ok "the container minter refuses every reference that is not digest-pinned"
 # The dispatcher both sides use. If restore and seed could reach different
 # minters, the tag would differ between publish and pull — a permanent MISS,
 # indistinguishable from 'ccache did not help'.
-DTAG_C="$( . "$KEYSH" && ccache_resolve_key 'wheel-manylinux228' "$PINNED_REF" >/dev/null 2>&1 && printf '%s' "$CCACHE_CACHE_TAG" )"
+DTAG_C="$( cd "$sandbox" && . "$KEYSH" && ccache_resolve_key 'wheel-manylinux228' "$PINNED_REF" >/dev/null 2>&1 && printf '%s' "$CCACHE_CACHE_TAG" )"
 [ "$DTAG_C" = "$CTAG" ] \
   || fail "container/dispatch: ccache_resolve_key with an image ref produced '$DTAG_C', not the container minter's '$CTAG'"
 # ⚠️ PATH is set on its OWN LINE inside the subshell, exactly as `expected_tag`
@@ -657,9 +691,265 @@ ok "the wheel lane name agrees with the container-lane enumeration"
 # The ref in the tracked file must be one the minter accepts. If pyproject ever
 # reverts to a floating alias, this fails HERE rather than in a CI job that then
 # keys a cache to a toolchain it cannot identify.
-( . "$KEYSH" && ccache_container_cache_key "$IDENT_LANE" "$IDENT_REF" ) >/dev/null 2>&1 \
+( cd "$sandbox" && . "$KEYSH" && ccache_container_cache_key "$IDENT_LANE" "$IDENT_REF" ) >/dev/null 2>&1 \
   || fail "the pinned image reference in pyproject.toml ('$IDENT_REF') is not one ccache_container_cache_key accepts"
 ok "the image reference pinned in pyproject.toml is digest-pinned and mintable"
+
+# ═════ #482 — the compile-flag surface in the tag ════════════════════════════
+echo "── ccache-flag-surface (#482) ──"
+#
+# A flag edit must ROTATE the tag (else the restore HITs, every entry misses
+# and the 70 % floor fails the lane); a comment or layout edit must KEEP it
+# (else every such edit re-seeds every lane). Each arm below mutates a COPY of
+# the real surface once and compares digests. Every mutation is checked to
+# have changed its file, so a pattern that stopped matching cannot pass as a
+# KEEP. Failures are collected rather than fatal one by one, so a mutant run of
+# the scripts shows every arm it turns RED.  # claim-ok: states what the collect-don't-exit design lets a run show, no outcome recorded
+FS_BASE="$sandbox/fs-base"
+copy_flag_surface "$FS_BASE"
+cp "$repo_root/CMakePresets.json" "$FS_BASE/"
+cp "$repo_root/conan/profiles/linux-clang-libc++" "$FS_BASE/conan/profiles/"
+FS_HOST='linux-clang-libc++'
+
+flag_digest() {  # $1 = root, $2 = host|wheel, $3 = preset or lane
+  ( cd "$1" && . "$KEYSH" && ccache_flag_digest "$2" "$3" >/dev/null 2>&1 && printf '%s' "$CCACHE_CACHE_FLAGS" )
+}
+flag_surface() {  # $1 = root, $2 = host|wheel, $3 = preset or lane
+  ( cd "$1" && python3 "$CI_DIR/ccache-flag-surface.py" "$2" "$3" 2>/dev/null )
+}
+
+ARM_FAILS=""
+flag_arm() {  # $1 = rotate|keep, $2 = label, $3 = kind, $4 = file, $5 = old (exactly once), $6 = new
+  local t="$sandbox/fs-arm" base mut
+  rm -rf "$t"; cp -r "$FS_BASE" "$t"
+  python3 - "$t/$4" "$5" "$6" <<'PY' || fail "flag-arm '$2': the pattern is not in $4 exactly once — the arm would test nothing"
+import sys
+p, old, new = sys.argv[1:]
+s = open(p, encoding="utf-8").read()
+if s.count(old) != 1:
+    sys.exit(1)
+open(p, "w", encoding="utf-8").write(s.replace(old, new))
+PY
+  cmp -s "$FS_BASE/$4" "$t/$4" && fail "flag-arm '$2': the mutation left $4 unchanged"
+  # `|| true`: under set -e a failed extract would end the harness here with
+  # no message; the empty-digest check below names it instead.
+  base="$(flag_digest "$FS_BASE" "$3" "$FS_HOST_OR_LANE")" || true
+  mut="$(flag_digest "$t" "$3" "$FS_HOST_OR_LANE")" || true
+  if [ -z "$base" ] || [ -z "$mut" ]; then
+    ARM_FAILS="$ARM_FAILS
+  $1/$2: no digest (base='$base' mutated='$mut')"
+    return 0
+  fi
+  case "$1" in
+    rotate) [ "$base" != "$mut" ] || ARM_FAILS="$ARM_FAILS
+  rotate/$2: a flag edit KEPT the digest ($base)" ;;
+    keep)   [ "$base" = "$mut" ]  || ARM_FAILS="$ARM_FAILS
+  keep/$2: a non-flag edit ROTATED the digest ($base -> $mut)" ;;
+  esac
+}
+host_arm()  { FS_HOST_OR_LANE="$FS_HOST"; flag_arm "$1" "$2" host "$3" "$4" "$5"; }
+wheel_arm() { FS_HOST_OR_LANE="$IDENT_LANE"; flag_arm "$1" "$2" wheel "$3" "$4" "$5"; }
+
+NL=$'\n'
+# ── ROTATE: one arm per mechanism by which this tree moves a compile flag ──
+wheel_arm rotate '#439-gate-condition' cmake/Helpers.cmake \
+  'if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND FIXPP_WERROR)' \
+  'if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")'
+host_arm rotate 'common-flags-list' cmake/Helpers.cmake \
+  "      -Wpedantic${NL}" "      -Wpedantic${NL}      -Wshadow${NL}"
+host_arm rotate 'werror-walk-early-return' cmake/Helpers.cmake \
+  "  if(NOT FIXPP_WERROR)${NL}    return()" "  if(NOT FIXPP_WERROR OR FIXPP_NEVER)${NL}    return()"
+host_arm rotate 'werror-walk-deferred-call' CMakeLists.txt \
+  'cmake_language(DEFER CALL fixpp_apply_werror_to_all_targets)' ''
+host_arm rotate 'sanitizer-flag' cmake/Sanitizers.cmake \
+  'add_compile_options(-fsanitize=thread)' 'add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)'
+host_arm rotate 'else-branch-earlier-head' cmake/Coverage.cmake \
+  'if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")' 'if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")'
+host_arm rotate 'cxx-standard' CMakeLists.txt \
+  'set(CMAKE_CXX_STANDARD 23)' 'set(CMAKE_CXX_STANDARD 26)'
+wheel_arm rotate 'option-default' cmake/Helpers.cmake \
+  'option(FIXPP_WERROR "Treat compile warnings as errors" OFF)' 'option(FIXPP_WERROR "Treat compile warnings as errors" ON)'
+# An option no kept line reads (it gates only an add_subdirectory()), so the
+# variable closure never reaches it; only the option() rule keeps it.
+host_arm rotate 'option-default-outside-closure' cmake/ProjectOptions.cmake \
+  'option(FIXPP_BUILD_FUZZ    "Build libFuzzer harnesses (Clang only)"   OFF)' \
+  'option(FIXPP_BUILD_FUZZ    "Build libFuzzer harnesses (Clang only)"   ON)'
+host_arm rotate 'inherited-preset-cache-variable' CMakePresets.json \
+  '"FIXPP_WERROR": "ON"' '"FIXPP_WERROR": "OFF"'
+host_arm rotate 'conan-profile-cxxflags' "conan/profiles/$FS_HOST" \
+  "CXXFLAGS=-stdlib=libc++${NL}" "CXXFLAGS=-stdlib=libc++ -O1${NL}"
+wheel_arm rotate 'pyproject-cmake-define' bindings/python/pyproject.toml \
+  'CMAKE_CXX_SCAN_FOR_MODULES = "OFF"' 'CMAKE_CXX_SCAN_FOR_MODULES = "ON"'
+# A default set in the root and handed to a PUBLIC definition in a
+# subdirectory: needs both the subdirectory parse and the variable closure.
+host_arm rotate 'log-min-level-default' CMakeLists.txt \
+  'set(FIXPP_LOG_MIN_LEVEL 2 CACHE' 'set(FIXPP_LOG_MIN_LEVEL 3 CACHE'
+wheel_arm rotate 'log-min-level-default-wheel' CMakeLists.txt \
+  'set(FIXPP_LOG_MIN_LEVEL 2 CACHE' 'set(FIXPP_LOG_MIN_LEVEL 3 CACHE'
+host_arm rotate 'subdir-public-def' src/log/CMakeLists.txt \
+  'target_compile_definitions(fixpp_log PUBLIC FIXPP_LOG_MIN_LEVEL=${FIXPP_LOG_MIN_LEVEL})' \
+  'target_compile_definitions(fixpp_log PUBLIC FIXPP_LOG_MIN_LEVEL=${FIXPP_LOG_MIN_LEVEL} FIXPP_X=1)'
+# A variable read only as a bare name by an if() head that gates flags.
+wheel_arm rotate 'if-head-bare-name' bindings/python/CMakeLists.txt \
+  'set(FIXPP_PYTHON_SANITIZER "none" CACHE' 'set(FIXPP_PYTHON_SANITIZER "asan" CACHE'
+wheel_arm rotate 'cibw-conan-cxxflags' bindings/python/cibw-before-all.sh \
+  "  --build=missing" "  -c tools.build:cxxflags='[\"-O0\"]' \\${NL}  --build=missing"
+wheel_arm rotate 'cibw-environment' .github/workflows/tier1.yml \
+  'CCACHE_COMPRESSLEVEL=5"' 'CCACHE_COMPRESSLEVEL=5 CXXFLAGS=-O0"'
+
+# ── KEEP: comments, layout and non-flag code ──
+host_arm keep 'comment-inside-argument-list' cmake/Helpers.cmake \
+  '# phase-3 stubs generate lots of these' '# reworded, still a comment'
+host_arm keep 'bracket-comment' cmake/Helpers.cmake \
+  'function(fixpp_apply_common_flags target)' "#[[ a bracket${NL}comment ]]${NL}function(fixpp_apply_common_flags target)"
+wheel_arm keep '#439-block-comment' cmake/Helpers.cmake \
+  '# ⚠️ THE GATE ON FIXPP_WERROR IS A CACHE DECISION' '# THE GATE ON FIXPP_WERROR IS A CACHE DECISION'
+host_arm keep 'reflowed-flag-command' cmake/Sanitizers.cmake \
+  'add_compile_options(-fsanitize=thread)' "add_compile_options(${NL}      -fsanitize=thread${NL}    )"
+host_arm keep 'whitespace-in-condition' cmake/Sanitizers.cmake \
+  'if(FIXPP_ENABLE_UBSAN)' "if(  FIXPP_ENABLE_UBSAN )${NL}"
+wheel_arm keep 'option-docstring' cmake/Helpers.cmake \
+  'option(FIXPP_WERROR "Treat compile warnings as errors" OFF)' 'option(FIXPP_WERROR "Promote warnings to errors" OFF)'
+host_arm keep 'non-flag-function-body' cmake/Helpers.cmake \
+  '    TIMEOUT 300' '    TIMEOUT 600'
+host_arm keep 'unrelated-root-install-rule' CMakeLists.txt \
+  'include(CMakePackageConfigHelpers)' "include(CMakePackageConfigHelpers)${NL}install(FILES LICENSE DESTINATION share/doc/x)"
+host_arm keep 'preset-json-layout' CMakePresets.json \
+  '"FIXPP_WERROR": "ON"' '"FIXPP_WERROR"  :   "ON"'
+host_arm keep 'conan-profile-comment' "conan/profiles/$FS_HOST" \
+  '[settings]' "# a note${NL}[settings]"
+wheel_arm keep 'pyproject-comment' bindings/python/pyproject.toml \
+  '# PKG-4: drive the existing bindings target.' '# PKG-4: reworded.'
+host_arm keep 'subdir-comment' src/log/CMakeLists.txt \
+  '# Default set in the top-level CMakeLists (build-type-conditional).' '# The default lives in the root CMakeLists.'
+host_arm keep 'subdir-add-source' src/log/CMakeLists.txt \
+  "  syslog_sink.cpp${NL})" "  syslog_sink.cpp${NL}  extra_sink.cpp${NL})"
+host_arm keep 'cache-docstring' CMakeLists.txt \
+  'set(FIXPP_LOG_MIN_LEVEL 2 CACHE STRING "Compile-time minimum log level (0=trace .. 5=fatal)")' \
+  'set(FIXPP_LOG_MIN_LEVEL 2 CACHE STRING "Minimum log level compiled in")'
+host_arm keep 'utf8-bom' cmake/Sanitizers.cmake \
+  '# cmake/Sanitizers.cmake' $'\xef\xbb\xbf# cmake/Sanitizers.cmake'
+wheel_arm keep 'cibw-comment' bindings/python/cibw-before-all.sh \
+  '# before any wheel build.' '# before the first wheel build.'
+wheel_arm keep 'tier1-outside-cibw-environment' .github/workflows/tier1.yml \
+  'mkdir -p /tmp/wheel-conan2' 'mkdir -p /tmp/wheel-conan2 /tmp/unrelated'
+
+if [ -n "$ARM_FAILS" ]; then
+  fail "flag-surface arms went RED:$ARM_FAILS"
+fi
+ok "every flag mechanism ROTATES the digest; comments, layout and non-flag code KEEP it"
+
+# ── NON-EMPTY: the extract really contains the flags the arms reason about ──
+# A parser that silently dropped everything would print a constant, and every
+# KEEP arm above would pass on it.
+HOST_SURFACE="$(flag_surface "$FS_BASE" host "$FS_HOST")" || true
+WHEEL_SURFACE="$(flag_surface "$FS_BASE" wheel "$IDENT_LANE")" || true
+for want in '-Wno-attributes=clang::lifetimebound' '-fsanitize=address' 'set CMAKE_CXX_STANDARD 23' '-stdlib=libc++' '"FIXPP_WERROR": "ON"' \
+    'src/log/CMakeLists.txt: target_compile_definitions fixpp_log PUBLIC FIXPP_LOG_MIN_LEVEL=${FIXPP_LOG_MIN_LEVEL}' \
+    'set FIXPP_LOG_MIN_LEVEL 2 CACHE STRING'; do
+  grep -qF -- "$want" <<< "$HOST_SURFACE" \
+    || fail "flag-surface/non-empty: the host extract of the real tree lacks '$want'"
+done
+for want in '-Wno-attributes=clang::lifetimebound' 'CMAKE_CXX_SCAN_FOR_MODULES' 'option FIXPP_WERROR OFF' \
+    'cibw-before-all: -s compiler=gcc -s compiler.version=14 -s compiler.cppstd=23' \
+    'cibw-environment "CONAN_HOME=/host-conan2'; do
+  grep -qF -- "$want" <<< "$WHEEL_SURFACE" \
+    || fail "flag-surface/non-empty: the wheel extract of the real tree lacks '$want'"
+done
+ok "the extract of the real tree carries the flags, options and preset values the arms mutate"
+
+# ── FAIL CLOSED: an unreadable surface is no key, never a constant key ──
+t="$sandbox/fs-broken"; rm -rf "$t"; cp -r "$FS_BASE" "$t"
+printf 'add_compile_options(-Wall\n' >> "$t/cmake/Sanitizers.cmake"
+[ -z "$(flag_digest "$t" host "$FS_HOST")" ] \
+  || fail "flag-surface/fail-closed: an unbalanced '(' still produced a digest"
+rm -f "$t/CMakeLists.txt"; cp "$FS_BASE/cmake/Sanitizers.cmake" "$t/cmake/"
+[ -z "$(flag_digest "$t" host "$FS_HOST")" ] \
+  || fail "flag-surface/fail-closed: a missing root CMakeLists.txt still produced a digest"
+if ( cd "$t" && . "$KEYSH" && ccache_container_cache_key 'wheel-manylinux228' "$PINNED_REF" ) >/dev/null 2>&1; then
+  fail "flag-surface/fail-closed: the container minter produced a tag without a readable flag surface"
+fi
+# A byte that is not UTF-8 is a named failure, not a traceback.
+t="$sandbox/fs-broken"; rm -rf "$t"; cp -r "$FS_BASE" "$t"
+printf '# caf\xe9\n' >> "$t/src/log/CMakeLists.txt"
+[ -z "$(flag_digest "$t" host "$FS_HOST")" ] \
+  || fail "flag-surface/fail-closed: a non-UTF-8 byte in a subdirectory CMakeLists.txt still produced a digest"
+err="$( cd "$t" && python3 "$CI_DIR/ccache-flag-surface.py" host "$FS_HOST" 2>&1 >/dev/null )" || true
+case "$err" in
+  *Traceback*|'') fail "flag-surface/fail-closed: a non-UTF-8 byte gave no named error: '$err'" ;;
+  *'src/log/CMakeLists.txt: not UTF-8'*) ;;
+  *) fail "flag-surface/fail-closed: a non-UTF-8 byte gave '$err', not a message naming the file" ;;
+esac
+# An add_subdirectory() whose path is a variable cannot be followed.
+t="$sandbox/fs-broken"; rm -rf "$t"; cp -r "$FS_BASE" "$t"
+printf 'add_subdirectory(${SOMEWHERE})\n' >> "$t/src/log/CMakeLists.txt"
+[ -z "$(flag_digest "$t" host "$FS_HOST")" ] \
+  || fail "flag-surface/fail-closed: an add_subdirectory() with a variable path still produced a digest"
+# A second CIBW_ENVIRONMENT in the wheel_build step (YAML keeps only the last).
+t="$sandbox/fs-broken"; rm -rf "$t"; cp -r "$FS_BASE" "$t"
+python3 - "$t/.github/workflows/tier1.yml" <<'PY' || fail "flag-surface/fail-closed: could not seed the duplicate CIBW_ENVIRONMENT"
+import sys
+p = sys.argv[1]
+s = open(p, encoding="utf-8").read()
+key = '          CIBW_ENVIRONMENT: "CONAN_HOME='
+if s.count(key) != 1:
+    sys.exit(1)
+open(p, "w", encoding="utf-8").write(s.replace(key, '          CIBW_ENVIRONMENT: "X=1"\n' + key))
+PY
+[ -z "$(flag_digest "$t" wheel "$IDENT_LANE")" ] \
+  || fail "flag-surface/fail-closed: a duplicate CIBW_ENVIRONMENT key still produced a wheel digest"
+ok "an unparsable, undecodable, unfollowable or ambiguous surface yields no digest and no tag"
+
+# ── THE REAL TREE EXTRACTS, for every floored lane ──────────────────────────
+# Restore and seed exit 0 when the surface cannot be extracted (a cache that is
+# down must not redden a green lane), so on the lane itself such a failure is
+# only a warning and an uncached run, every run, until someone reads it. THIS is
+# the arm that stops an input the extractor cannot read from reaching main: it
+# runs the extractor under test over the real tree for every lane that passes a
+# hit floor. The lane set comes from ci/assert-ccache-floor-callers.py, the walk
+# that checks those call sites, not from a list kept here.
+FLOORED="$( python3 "$repo_root/ci/assert-ccache-floor-callers.py" --list-floored-lanes "$repo_root/.github/workflows" )" \
+  || fail "flag-surface/real-tree-extracts: ci/assert-ccache-floor-callers.py --list-floored-lanes failed"
+real_lanes=0
+while IFS= read -r lane; do
+  case "$lane" in
+    '${{ steps.wheel_ident.outputs.lane }}') lane="$IDENT_LANE" ;;
+    *'${{'*) fail "flag-surface/real-tree-extracts: no resolution for the floored lane '$lane'" ;;
+  esac
+  if ( . "$KEYSH" && ccache_lane_is_container "$lane" ); then kind=wheel; else kind=host; fi
+  if ! err="$( cd "$repo_root" && python3 "$CI_DIR/ccache-flag-surface.py" "$kind" "$lane" 2>&1 >/dev/null )"; then
+    printf '%s\n' "$err" | sed 's/^/  | /'
+    fail "flag-surface/real-tree-extracts: ci/ccache-flag-surface.py cannot extract the real tree's surface for the floored lane '$lane' ($kind) — on CI that lane would run uncached on every run"
+  fi
+  real_lanes=$((real_lanes + 1))
+done <<< "$FLOORED"
+[ "$real_lanes" -gt 0 ] || fail "flag-surface/real-tree-extracts: no floored lane was checked"
+ok "the real tree's flag surface extracts for every floored lane"
+
+# ── THE TAG CARRIES THE DIGEST, and restore/seed/pruner agree on the new form ──
+# The rotate arms above are only worth anything if the TAG is what rotates.
+SB_HOST_FLAGS="$(flag_digest "$sandbox" host 'fake-libc++')"
+[ -n "$SB_HOST_FLAGS" ] || fail "flag-surface/tag: no digest for the sandbox host preset"
+case "$TAG" in
+  *"-f$SB_HOST_FLAGS") ;;
+  *) fail "flag-surface/tag: the host tag '$TAG' does not end in the flag digest '-f$SB_HOST_FLAGS'" ;;
+esac
+SB_WHEEL_FLAGS="$(flag_digest "$sandbox" wheel 'wheel-manylinux228')"
+case "$CTAG" in
+  *"-f$SB_WHEEL_FLAGS") ;;
+  *) fail "flag-surface/tag: the container tag '$CTAG' does not end in the flag digest '-f$SB_WHEEL_FLAGS'" ;;
+esac
+ok "both minters end the tag in the flag-surface digest"
+
+# The previous producer's form (no suffix) must still classify, so each lane's
+# first seed after #482 reaps its own old tag instead of orphaning it.  # claim-ok: condition the legacy arm checks, not a history claim
+LEGACY_HOST_TAG="${TAG%-f*}"
+[ "$LEGACY_HOST_TAG" != "$TAG" ] || fail "flag-surface/legacy: could not derive the suffix-less host tag"
+printf '%s' "$LEGACY_HOST_TAG" | grep -qE -- "$TAG_RE" \
+  || fail "flag-surface/legacy: the host regex '$TAG_RE' no longer matches the pre-#482 tag '$LEGACY_HOST_TAG' — those tags would be orphaned"
+printf '%s' "${CTAG%-f*}" | grep -qE -- "$CTAG_RE" \
+  || fail "flag-surface/legacy: the container regex '$CTAG_RE' no longer matches the pre-#482 tag '${CTAG%-f*}'"
+ok "the pruner still classifies each lane's pre-#482 tag, so its first seed reaps it"
 
 # ── C++20 module scanning must stay OFF for the wheel build (#259) ───────────
 #
@@ -1023,7 +1313,21 @@ rm -rf "$CDIR"
 CCACHE_DIR="$CDIR" run "$CI_DIR/restore-ccache.sh" fake-gone-compiler
 want_status 0 "restore/no-compiler"; want_hit false "restore/no-compiler"
 want_out 'compiler unidentified' "restore/no-compiler"
+want_no_out 'compile-flag surface of' "restore/no-compiler"
 ok "unidentifiable compiler — MISS, never fatal"
+
+# An unextractable flag surface: still exit 0 and a MISS (a cache that is down
+# must not redden the lane), but LOUD on the lane, and only for this cause.
+cp "$sandbox/cmake/Sanitizers.cmake" "$sandbox/Sanitizers.cmake.keep"
+printf 'add_compile_options(-Wall\n' >> "$sandbox/cmake/Sanitizers.cmake"
+rm -rf "$CDIR"
+CCACHE_DIR="$CDIR" run "$CI_DIR/restore-ccache.sh" fake-libc++
+mv "$sandbox/Sanitizers.cmake.keep" "$sandbox/cmake/Sanitizers.cmake"
+want_status 0 "restore/flag-surface-unreadable"; want_hit false "restore/flag-surface-unreadable"
+want_out '^::warning::ccache-cache: the compile-flag surface of .fake-libc++. could not be extracted' "restore/flag-surface-unreadable"
+want_out 'ccache-flag-surface: cmake/Sanitizers.cmake' "restore/flag-surface-unreadable"
+want_no_out 'ccache-cache HIT' "restore/flag-surface-unreadable"
+ok "unextractable flag surface — MISS, exit 0, and a ::warning:: naming the cause"
 
 # The rm -rf guard. `/tmp` is one component below the root: refused.
 CCACHE_DIR="/tmp" run "$CI_DIR/restore-ccache.sh" fake-libc++
@@ -1091,6 +1395,29 @@ want_out "ccache-cache SEEDED \`$EXPECTED_CONTAINER_TAG\`" "seed/container-tag"
 grep -q "ccache-wheel-manylinux228.tar" "$PUSH_RECORD" || fail "seed/container-tag: nothing was pushed for the container lane"
 ok "container seed addresses the literal pinned-image tag, not an empty or host-probed key"
 
+# ── #482 — the LIVE wheel lane end to end: restore, seed and pruner agree ────
+# The lane and image come from ci/wheel-ccache-ident.sh, as in tier1.yml. The
+# oras shim refuses any reference but the expected one, so a restore or seed
+# that computed a different tag fails here.
+WTAG="$( cd "$sandbox" && . "$KEYSH" && ccache_resolve_key "$IDENT_LANE" "$IDENT_REF" >/dev/null 2>&1 && printf '%s' "$CCACHE_CACHE_TAG" )"
+printf '%s' "$WTAG" | grep -qE -- "-f[0-9a-f]{8}\$" \
+  || fail "wheel/agreement: the live wheel tag '$WTAG' carries no flag-surface digest"
+rm -rf "$CDIR"
+FAKE_EXPECTED_REF="$IMAGE:$WTAG" FAKE_ORAS_PULL_MODE=ok FAKE_PRESET="$IDENT_LANE" CCACHE_DIR="$CDIR" \
+  run "$CI_DIR/restore-ccache.sh" "$IDENT_LANE" "$IDENT_REF"
+want_status 0 "wheel/agreement-restore"; want_hit true "wheel/agreement-restore"
+rm -rf "$CDIR"; mkdir -p "$CDIR/aa"; printf 'x\n' > "$CDIR/aa/entry"
+: > "$PUSH_RECORD"
+FAKE_EXPECTED_REF="$IMAGE:$WTAG" FAKE_KEEP_TAG="$WTAG" \
+FAKE_PUSH_RECORD="$PUSH_RECORD" CCACHE_DIR="$CDIR" CCACHE_MAXSIZE="2G" \
+  run "$CI_DIR/seed-ccache.sh" "$IDENT_LANE" "$IDENT_REF"
+want_status 0 "wheel/agreement-seed"
+want_out "ccache-cache SEEDED \`$WTAG\`" "wheel/agreement-seed"
+WTAG_RE="$( . "$KEYSH" && ccache_tag_regex "$IDENT_LANE" >/dev/null 2>&1 && printf '%s' "$CCACHE_TAG_RE" )"
+printf '%s' "$WTAG" | grep -qE -- "$WTAG_RE" \
+  || fail "wheel/agreement: the pruner's regex '$WTAG_RE' does not match the live wheel tag '$WTAG'"
+ok "restore, seed and the pruner agree on the live wheel lane's flag-bearing tag"
+
 # ── 3a/F4 — THE SIZING DATUM FAILING MUST NOT ABORT THE PUBLISH ──────────────
 #
 # The reviewer's prescription (return nonzero on a `du` failure) was rejected:
@@ -1142,7 +1469,7 @@ ok "prune refused — SEEDED still reported, backlog surfaced into the summary"
 # nothing in production carries a test hook for this.
 BROKEN_CI="$sandbox/ci-broken-prune"
 mkdir -p "$BROKEN_CI"
-for f in "$CI_DIR"/*.sh; do ln -sf "$f" "$BROKEN_CI/$(basename "$f")"; done
+for f in "$CI_DIR"/*.sh "$CI_DIR"/*.py; do ln -sf "$f" "$BROKEN_CI/$(basename "$f")"; done
 rm -f "$BROKEN_CI/prune-ccache.sh"
 printf '#!/usr/bin/env bash\nexit 3\n' > "$BROKEN_CI/prune-ccache.sh"
 chmod +x "$BROKEN_CI/prune-ccache.sh"
@@ -1198,6 +1525,16 @@ want_out 'would delete version 4' "prune/anchors"
 want_no_out 'would delete version 2' "prune/anchors"
 want_no_out 'would delete version 1' "prune/anchors"
 ok "prune keeps the sibling sanitizer lane's live cache (both-ends anchoring)"
+
+# #482: this lane's pre-#482 tag (no flag suffix) is dead once the new tag is
+# seeded, and the prune that follows that seed must say so, not skip it.
+FAKE_VERSIONS_JSON="$(printf '[{"id":1,"metadata":{"container":{"tags":["%s"]}}},{"id":5,"metadata":{"container":{"tags":["%s"]}}},{"id":6,"metadata":{"container":{"tags":["%s"]}}}]' "$TAG" "${TAG%-f*}" "${ASAN_TAG%-f*}")" DRY_RUN=1 \
+  run "$CI_DIR/prune-ccache.sh" 'fake-libc++' "$TAG"
+want_status 0 "prune/legacy"
+want_out 'would delete version 5' "prune/legacy"
+want_no_out 'would delete version 6' "prune/legacy"
+want_no_out 'would delete version 1' "prune/legacy"
+ok "prune reaps this lane's pre-#482 tag and still spares the sibling lane's"
 
 # The keep-tag guard: pruning around a tag that is not present means the caller
 # computed a different key than the one published, so every "dead" version in
@@ -1792,6 +2129,22 @@ want_status 1 "floor-callers/mutant-floor-removed"
 want_out 'passes NO hit floor' "floor-callers/mutant-floor-removed"
 ok "MUTANT floor-removed — the #299 defect itself is detected (disposition present, floor absent)"
 
+# --list-floored-lanes (the real-tree arm's lane source) refuses rather than
+# print an empty or partial set. The sandbox now holds only the floorless copy.
+STATUS=0; OUT="$(python3 "$FLOORCHK" --list-floored-lanes "$WFSAND" 2>&1)" || STATUS=$?
+want_status 2 "floor-callers/list-none-floored"
+want_out 'no call site passes a floor' "floor-callers/list-none-floored"
+mutate_wf tier3-libcxx.yml '
+import sys,pathlib
+p=pathlib.Path(sys.argv[1]); s=p.read_text(encoding="utf-8")
+old="      matrix:\n        preset:\n"
+assert s.count(old) == 1, "anchor missing"
+p.write_text(s.replace(old,"      matrix:\n        include: []\n        preset:\n",1),encoding="utf-8")'
+STATUS=0; OUT="$(python3 "$FLOORCHK" --list-floored-lanes "$WFSAND" 2>&1)" || STATUS=$?
+want_status 2 "floor-callers/list-unexpandable-matrix"
+want_out 'cannot expand the floored lane' "floor-callers/list-unexpandable-matrix"
+ok "--list-floored-lanes refuses an empty set and a matrix it cannot expand"
+
 # Direction 2 — THE DEFECT WEARING A FIX'S CLOTHING: a floor added to a lane
 # whose argument 2 is an EMPTY literal. It looks enforced in the diff and can
 # never evaluate, because the fatal branch is gated on restore == 'true'.
@@ -1944,4 +2297,4 @@ want_out 'ZERO ci/ccache-stats.sh call sites' "floor-callers/empty-scan"
 ok "an empty scan is an INSTRUMENT FAILURE (exit 2), not a clean result"
 
 echo
-echo "PASS: $pass assertions over ci/{ccache-cache-key,restore-ccache,seed-ccache,ccache-stats,wheel-ccache-ident,assert-wheel-image,install-ccache,trim-ccache-to-run}.sh — scripts: $CI_DIR"
+echo "PASS: $pass assertions over ci/{ccache-cache-key,restore-ccache,seed-ccache,ccache-stats,wheel-ccache-ident,assert-wheel-image,install-ccache,trim-ccache-to-run}.sh + ccache-flag-surface.py — scripts: $CI_DIR"

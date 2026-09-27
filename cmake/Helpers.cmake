@@ -85,20 +85,25 @@ endfunction()
 # assert a 70% FATAL floor: python-wheel-build (tier1.yml) and all four
 # linux-clang-libc++* legs (tier3-libcxx.yml). The libc++ legs are clang, so
 # this flag never reaches them. python-wheel-build is GNU and never sets
-# FIXPP_WERROR, and its cache identity is the manylinux image digest + py-api,
-# which does NOT cover the flag surface -- so it cannot rotate its own key and
-# would take the full miss. Ungated, that lane breaches its floor with
-# certainty; gated, its command lines are byte-identical.
+# FIXPP_WERROR. When this gate was written, that lane's cache identity did not
+# cover the flag surface, so ungated it would have breached its floor on a HIT.
+#
+# ⚠️ AMENDED BY #482 (flag surface added to the ccache tag): every ccache tag,  # claim-ok: supersede pointer naming the decision that amends this gate
+# the wheel lane's included, now carries a digest of the compile-flag surface
+# (ci/ccache-flag-surface.py), and this block's condition is part of it.
+# Deleting the gate now ROTATES the tags: the restore MISSes, the floor exempts
+# the MISS, and the cost is one cold build, not a breach and not GHCR tag
+# surgery. The CMake half of the surface is shared by every ccache lane, so
+# that cold build lands on every lane at once, not only on the GNU one.
 #
 # ⚠️ THE CONDITION, so this does not rot into a rule nobody can re-check: the
-# gate is worth keeping only while some floored lane is GNU and does not set
-# FIXPP_WERROR. Re-derive with
+# gate keeps the command lines of some floored lane byte-identical only while
+# that lane is GNU and does not set FIXPP_WERROR. Re-derive with
 #   grep -rn "ccache-stats.sh" .github/workflows/   # which callers pass a floor
 # and check that lane's compiler and FIXPP_WERROR. If no floored lane is GNU any
 # more, DELETE the gate -- an unconditional suppression is the better mechanism.
-# If a GCC lane without -Werror ever wants clean output, delete the gate and
-# re-seed that lane's cache the way #437/#453 did (drop the stale GHCR tags so
-# the restore MISSes, which the floor exempts).
+# Deleting it while such a lane exists is also safe since #482; the price is  # claim-ok: condition (the flag digest is in the tag), not history
+# the one cold build above.
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND FIXPP_WERROR)
   include(CheckCXXSourceCompiles)
   set(CMAKE_REQUIRED_FLAGS "-Werror -Wno-attributes=clang::lifetimebound")

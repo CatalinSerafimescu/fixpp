@@ -837,7 +837,7 @@ jobs:
       # of the later objects described above never reaching GHCR.
       #
       # ⚠️ THE REF GUARD IS LOAD-BEARING. The ccache tag is coarse and ROLLING
-      # (ci/ccache-cache-key.sh), so every branch computes the SAME tag; a
+      # (ci/ccache-cache-key.sh): a branch moving no flag (#482) gets the SAME tag; a
       # dispatch from a feature branch would overwrite what main reads next.
       # `changed != '0'` skips republishing a store no compile wrote to
       # (ccache's `local_storage_write`, not `misses` — see ci/ccache-stats.sh).
@@ -1660,7 +1660,7 @@ jobs:
       # of the later objects described above never reaching GHCR.
       #
       # ⚠️ THE REF GUARD IS LOAD-BEARING. The ccache tag is coarse and ROLLING
-      # (ci/ccache-cache-key.sh), so every branch computes the SAME tag; a
+      # (ci/ccache-cache-key.sh): a branch moving no flag (#482) gets the SAME tag; a
       # dispatch from a feature branch would overwrite what main reads next.
       # `changed != '0'` skips republishing a store no compile wrote to
       # (ccache's `local_storage_write`, not `misses` — see ci/ccache-stats.sh).
@@ -2111,7 +2111,7 @@ jobs:
       #
       # Ref-restricted to main so no branch can publish into the namespace main
       # consumes — load-bearing here because the tag is COARSE and ROLLING:
-      # every branch computes the identical tag whatever it changed.
+      # every branch moving no compile flag (#482) computes the identical tag.
       - name: Save ccache to GHCR (push:main / dispatch on main, cache changed)
         if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')) && steps.ccache_stats.outputs.changed != '0'
         continue-on-error: true

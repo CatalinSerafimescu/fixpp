@@ -11,8 +11,8 @@
 # scheduled this work stated the wrong one ("the key is content-derived, so a PR
 # computes main's tag"). That describes the CONAN tag. This tag is deliberately
 # COARSE AND ROLLING (see ci/ccache-cache-key.sh) so a PR leg can pull what main
-# published — which means EVERY branch computes the SAME tag no matter what it
-# changed. The gate is therefore MORE load-bearing here than on the Conan step,
+# published — which means EVERY branch computes the SAME tag unless it moves a
+# compile flag (#482 folds the flag surface into the tag). The gate is therefore MORE load-bearing here than on the Conan step,
 # not less: without it a dispatch from any branch overwrites, at the identical
 # tag, the artifact main reads next.
 #
@@ -56,7 +56,7 @@ note() { echo "$1"; [ -n "${GITHUB_STEP_SUMMARY:-}" ] && echo "$1" >> "$GITHUB_S
 : "${CCACHE_DIR:?CCACHE_DIR must be set (the workflow sets it job-wide)}"
 
 if ! ccache_resolve_key "$PRESET" "$IMAGE_REF"; then
-  note "ccache-cache: no identifiable compiler for \`$PRESET\` — nothing published, so the next run will be cold."
+  note "ccache-cache: no identifiable compiler or readable flag surface for \`$PRESET\` — nothing published, so the next run will be cold."
   exit 0
 fi
 TAG="$CCACHE_CACHE_TAG"
@@ -125,6 +125,7 @@ note "ccache-cache archive \`$TAG\` — ${archive_size:-?} archive, ${disk_size:
     --annotation "fixpp.preset=$PRESET" \
     --annotation "fixpp.compiler=$CCACHE_CACHE_COMPILER" \
     --annotation "fixpp.compiler.id=$CCACHE_CACHE_TOOLSET" \
+    --annotation "fixpp.flags=$CCACHE_CACHE_FLAGS" \
     "ccache-$PRESET.tar:application/x-tar" ) || {
   # The caller sets continue-on-error, so this exit is INVISIBLE in the step's
   # status. Shout into the summary instead — a silently unseeded cache makes the
