@@ -356,7 +356,7 @@ C-2 row, and the rows are one function, so the mechanism lands here with one anc
 
 ### 2d — The disposition mechanism (C-1, C-2; R-3; E-2), anchor cells first
 
-- [ ] T025 Via `phase-implementer`, write one RED **anchor** cell per C-2 row in
+- [X] T025 Via `phase-implementer`, write one RED **anchor** cell per C-2 row in
   `tests/session/unparseable_frame_disposition_test.cpp`. Each uses an input the pre-feature code
   mishandles (SC-006), and each Reject cell asserts 45, 372, 373 and 371 exactly:
   - D-1: acceptor in NotConnected, a Logon with a malformed **tag** → Disconnected, no outbound.
