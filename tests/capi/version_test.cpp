@@ -28,10 +28,10 @@ TEST(CapiVersion, CApiVersionMatchesPatchMacro) {
 // downgrade stays coherent: a reset would place the version below the
 // introducing_minor of already-published codes. Every later C-ABI change bumps
 // MINOR ([const §X.7]); what each minor changed is recorded in version.h.
-TEST(CapiVersion, CApiVersionIsExactly_1_9_0) {
+TEST(CapiVersion, CApiVersionIsExactly_1_10_0) {
     fixpp_version_t v = fixpp_version();
     EXPECT_EQ(v.major, uint16_t{1});
-    EXPECT_EQ(v.minor, uint16_t{9});
+    EXPECT_EQ(v.minor, uint16_t{10});
     EXPECT_EQ(v.patch, uint16_t{0});
 }
 
@@ -44,7 +44,7 @@ TEST(CapiVersion, CompositeMacroValue) {
     // Exact numeric value of the version CApiVersionIsExactly_* pins
     // The `| 0U` spells out the PATCH term of the (MAJOR<<16)|(MINOR<<8)|PATCH encoding.
     // cppcheck-suppress badBitmaskCheck
-    EXPECT_EQ(static_cast<uint32_t>(FIXPP_C_ABI_VERSION), uint32_t{(1U << 16U) | (9U << 8U) | 0U});
+    EXPECT_EQ(static_cast<uint32_t>(FIXPP_C_ABI_VERSION), uint32_t{(1U << 16U) | (10U << 8U) | 0U});
 }
 
 // ── Library version accessors ─────────────────────────────────────────────────

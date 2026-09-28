@@ -336,7 +336,7 @@ C-2 row, and the rows are one function, so the mechanism lands here with one anc
     with labels `"capi;092"` in `tests/capi/CMakeLists.txt`, and add
     `:CapiLogonMalformedTag.*` to `capi_send_recv_positive`'s negative filter.
   - Run: RED on the unchanged session (the Logon establishes). Commit with the RED output.
-- [ ] T022 [P] Via `phase-implementer`, set `tests/capi/version_test.cpp`'s exact-version cell and
+- [X] T022 [P] Via `phase-implementer`, set `tests/capi/version_test.cpp`'s exact-version cell and
   `CompositeMacroValue` to 1.10. Run: RED against MINOR 9 (`[const §VII.3]`). Commit with the RED
   output.
 - [ ] T023 Via `phase-implementer`, bump `FIXPP_C_ABI_VERSION_MINOR` 9 → 10 in
