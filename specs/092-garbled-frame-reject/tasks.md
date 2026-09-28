@@ -806,7 +806,7 @@ it in 092.
   after tag 8. Today it returns `wire_unexpected_tag` (RefTagID 8). A second cell does the same for
   a Length+Data mismatch. Deletion proof in a scratch copy: remove the pre-scan and both cells go
   RED. Record it in the evidence file.
-- [ ] T062b **Added 2026-09-28 (T062a follow-up).** T062a's pre-scan catches every failed-build view
+- [X] T062b **Added 2026-09-28 (T062a follow-up).** T062a's pre-scan catches every failed-build view
   first, so E-5's in-walk checks lost their witnesses. The top-of-iteration check has none, and
   the after-loop check keeps only S4. Via `phase-implementer`, add validator cells on the path the
   in-walk checks still guard: a **successful** build under hooks that pair a Length/Data (so a
