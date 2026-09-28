@@ -244,7 +244,7 @@ C-2 row, and the rows are one function, so the mechanism lands here with one anc
     differential compares them there). `msg_seq_num` and `msg_type` stay last-wins.
   - Before changing the struct's size, check T008's size-pin population and update any pin.
   - T009 GREEN.
-- [ ] T012 Via `phase-implementer`, update the old-behaviour tests T008's R-10 population lists,
+- [X] T012 Via `phase-implementer`, update the old-behaviour tests T008's R-10 population lists,
   each classified in the evidence file:
   - `tests/session/scan_frame_header_overflow_test.cpp`: the `ForgedTag*` / `Token*` cells gain a
     fault-kind assertion; `NonDigitToken_Rejected_NotDispatched`'s "conforming pair" half moves to
