@@ -257,9 +257,6 @@ public:
         // Length+Data carry: set when the just-yielded field was a Length
         // tag, so the next (Data) field is read by fixed length.
         std::uint16_t prev_data_tag_ = 0;
-        // The Length tag that armed the carry (prev_data_tag_ holds the Data
-        // tag). Read only while the carry is armed, so it is never cleared.
-        std::uint16_t prev_length_tag_ = 0;
         std::uint32_t prev_data_len_ = 0;
         dict_hooks hooks_{};
     };
@@ -575,7 +572,8 @@ void MessageView<Mode>::field_iterator::advance() noexcept {
     // non-adjacent later field inheriting a stale count (W-P2-1b).
     std::uint16_t const carry_tag = prev_data_tag_;
     std::uint32_t const carry_len = prev_data_len_;
-    std::uint16_t const carry_length_tag = prev_length_tag_;
+    // While the carry is armed, cur_ still holds the Length field that armed it.
+    std::uint16_t const carry_length_tag = cur_.tag;
     prev_data_tag_ = 0;
     prev_data_len_ = 0;
 
@@ -619,7 +617,6 @@ void MessageView<Mode>::field_iterator::advance() noexcept {
 
     if (std::uint16_t dt = hooks_.data_tag_for_length(static_cast<std::uint16_t>(tag)); dt != 0) {
         prev_data_tag_ = dt;
-        prev_length_tag_ = static_cast<std::uint16_t>(tag);
         prev_data_len_ = parse_bounded_u32(cur_.value);
     }
 }
