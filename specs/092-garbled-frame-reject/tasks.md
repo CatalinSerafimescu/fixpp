@@ -800,6 +800,10 @@ it in 092.
 - [X] T063 In a scratch copy: delete the top-of-iteration check (T1 cell RED), then the after-loop
   check (T2/T3 cells RED), then one iterator fault write per row (its E-4 cell RED). Record each in
   the evidence file.
+  **Corrected at implementation (2026-09-28):** deleting the after-loop check turns the S1–S4
+  validator cells RED, not T2/T3. T2 and T3 yield their faulted field, so the top-of-iteration check
+  catches them. The "both checks" arm and the T2/T3 write deletions are those cells' witnesses.
+  Evidence file §Phase 8.
 
 ---
 
