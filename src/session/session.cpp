@@ -2300,8 +2300,81 @@ std::optional<Session::RejectDecision> Session::validate_inbound_(
     return {};
 }
 
+// ── 092-garbled-frame-reject (fixpp#507): dispose_unparseable_ ──────────────
+//
+// Contract C-2, rows evaluated top to bottom, for a frame whose header scan
+// recorded a fault. Reads only the fault record and the positional header
+// identification (C-3 I-1).
+//   D-1/D-2 (NotConnected, LogonSent): the Logon refusal, as when interpret_logon
+//     refuses: Disconnected, nothing sent.
+//   D-9 (LogoutSent): disregarded; not the Logout reply, so the logout timeout runs.
+//   D-8 (field 3 is not 35) and D-7 (34 not read): disregarded.
+//   D-3 (a Logon): silent Disconnected; no Reject, no Logout.
+//   D-4 (a SequenceReset): Reject, no advance; NewSeqNo(36) never read.
+//   D-5/D-6 (any other type): consume_rejected_seqnum_ (fixpp#423's rule: it advances
+//     and persists only at the expected number, and a failed persist returns before
+//     the Reject), then the Reject. No ResendRequest, no too-low Logout, and
+//     PossDupFlag(43) is not read.
+// The Reject: 45 = the first 34 read; 372 = field 3's value when it is no longer
+// than kMaxShippedMsgTypeLength, else omitted; 373 = 0 without 371 for a malformed
+// tag, 373 = 5 with 371 = the Length tag for a Length/Data mismatch; 58 = the fixed
+// Text for the fault kind.
+// No row writes last_inbound_steady_: a faulty frame never refreshes inbound
+// liveness (092 FR-018).
+// [092 contract C-2; data-model E-1/E-2; research R-3/R-5]
+asio::awaitable<fixpp::core::expected_t<void>> Session::dispose_unparseable_(
+    FrameHeader const& hdr, fsm_state state) noexcept {
+    switch (state) {
+        case fsm_state::NotConnected:  // D-1
+        case fsm_state::LogonSent:     // D-2
+            record_state_transition_(fsm_state::Disconnected);
+            co_return fixpp::core::expected_t<void>{};
+        case fsm_state::LogonReceived:
+        case fsm_state::Active:
+            break;
+        case fsm_state::LogoutSent:    // D-9
+        case fsm_state::Disconnected:  // the Disconnected arm drains without a scan
+            co_return fixpp::core::expected_t<void>{};
+    }
+
+    if (!hdr.msg_type_is_third) {  // D-8
+        co_return fixpp::core::expected_t<void>{};
+    }
+    const seqnum_t ref_seq = parse_seqnum(hdr.fault_ref_seq_num);
+    if (ref_seq == 0) {  // D-7: no 34 read before the fault
+        co_return fixpp::core::expected_t<void>{};
+    }
+    if (hdr.fault_ref_msg_type == "A") {  // D-3
+        record_state_transition_(fsm_state::Disconnected);
+        co_return fixpp::core::expected_t<void>{};
+    }
+    if (hdr.fault_ref_msg_type != "4") {  // D-5 at the expected number; D-6 otherwise
+        if (auto c = co_await consume_rejected_seqnum_(ref_seq, hdr.fault_ref_msg_type); !c) {
+            co_return c;
+        }
+    }
+
+    // D-4, D-5, D-6: the Reject.
+    const std::string_view ref_msg_type =
+        hdr.fault_ref_msg_type.size() <= fixpp::session::detail::kMaxShippedMsgTypeLength
+            ? hdr.fault_ref_msg_type
+            : std::string_view{};
+    if (hdr.fault == fixpp::wire::field_fault::length_data_mismatch) {
+        co_return co_await emit_session_reject_(
+            ref_seq, ref_msg_type, /*reason=*/5, hdr.fault_length_tag,
+            fixpp::session::detail::kRejectTextLengthDataMismatch);
+    }
+    co_return co_await emit_session_reject_(ref_seq, ref_msg_type, /*reason=*/0, /*ref_tag_id=*/0,
+                                            fixpp::session::detail::kRejectTextMalformedTag);
+}
+
 // T024/T025 (US1, Phase 3) + T032/T034/T035 (US2, Phase 4) +
 // T056 (US5, Phase 7): Inbound FSM dispatch.
+//
+// 092-garbled-frame-reject (fixpp#507, contract C-1): in every state arm, right after
+// the header scan and before step (1), a frame whose scan recorded a fault goes to
+// dispose_unparseable_ and the arm returns. The check is an inline compare, so a
+// fault-free frame pays no coroutine frame for it.
 //
 // Guard precedence per data-model.md matrix preamble (T056 adds steps 1/3/5):
 //   (1) parse/type recognised → else session Reject; no-loop-guard exempts
@@ -2351,6 +2424,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
     }
     switch (fsm_state_) {
         case fsm_state::NotConnected: {
+            // 092 (data-model E-2, research R-3): the arm's one header scan, hoisted
+            // here and reused by the validate gate, the post-interpret_logon block and
+            // the 1137 Reject. A frame the scan could not read is refused (C-2 D-1).
+            auto hdr = scan_frame_header(frame, session_hooks(inbound_tv_));
+            if (hdr.fault != fixpp::wire::field_fault::none) {
+                co_return co_await dispose_unparseable_(hdr, fsm_state::NotConnected);
+            }
+
             // ── 041-validation-gate-wiring T014: validate-first gate ──────────────
             // Run BEFORE interpret_logon so a dict-invalid Logon produces a Reject
             // instead of a silent Disconnect (C-2 rows a/c-i/validate-first ordering).
@@ -2363,11 +2444,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // Arena: kInboundParseArena (16384) matches the dispatch arena so the gate
             // never under-parses relative to dispatch. [simplify-triage FIX-1/FIX-2]
             if (cfg_.validate_inbound_messages && validator_) {
-                auto vg_hdr = scan_frame_header(frame, session_hooks(inbound_tv_));
-                if (vg_hdr.msg_type != "3" && vg_hdr.msg_type != "5") {
-                    if (auto rej = validate_inbound_(frame, vg_hdr)) {
-                        co_return co_await emit_session_reject_(parse_seqnum(vg_hdr.msg_seq_num),
-                                                                vg_hdr.msg_type, rej->reason,
+                if (hdr.msg_type != "3" && hdr.msg_type != "5") {
+                    if (auto rej = validate_inbound_(frame, hdr)) {
+                        co_return co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num),
+                                                                hdr.msg_type, rej->reason,
                                                                 rej->ref_tag_id);
                     }
                 }
@@ -2396,7 +2476,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 co_return fixpp::core::expected_t<void>{};
             }
 
-            // Valid Logon: scan header for seqnum + 013 T027 ResetSeqNumFlag(141).
+            // Valid Logon: read seqnum + 013 T027 ResetSeqNumFlag(141) from the arm's
+            // header scan (hoisted to the top of the arm by 092).
             // The Logon must carry seq=1 on initial session (seqnum_mgr_ starts at 1).
             // peer_sent_reset declared at case scope so the acceptor-reply block below
             // can read it when deciding whether to mirror 141=Y in our reply Logon.
@@ -2416,7 +2497,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // [029 INV-H1 fix; triage root-cause #1/#2; contracts C3.1]
             bool logon_inbound_advanced = false;
             {
-                auto hdr = scan_frame_header(frame, session_hooks(inbound_tv_));
                 peer_789_raw = hdr.next_expected_msg_seq_num;
                 peer_789_present = hdr.next_expected_present;
                 // 070-fix44-closeout S-030 (FR-007): capture the peer's advertised
@@ -2752,8 +2832,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
                             : SendingTimeStamp{};
                     const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
-                    const seqnum_t rj_ref = parse_seqnum(
-                        scan_frame_header(frame, session_hooks(inbound_tv_)).msg_seq_num);
+                    const seqnum_t rj_ref = parse_seqnum(hdr.msg_seq_num);
                     std::array<std::byte, 512> rj_buf{};
                     auto rj_r = fixpp::session::build_reject(
                         std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
@@ -3000,12 +3079,23 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // (5) message-type-for-state
 
             auto hdr = scan_frame_header(frame, session_hooks(inbound_tv_));
+            // 092 (contract C-1 step 3): a frame the scan could not read goes to C-2
+            // rows D-8 … D-6 and nothing below runs. The MaxMessageSize(383) guard
+            // above the state switch has already run (C-1 step 1b).
+            if (hdr.fault != fixpp::wire::field_fault::none) {
+                co_return co_await dispose_unparseable_(hdr, fsm_state_);
+            }
 
             // ── 041-validation-gate-wiring T014: dictionary-driven validate gate ─
             // Runs after scan_frame_header (hdr.msg_type available for 3/5 exemption)
             // and BEFORE check_inbound. Erratum fixpp#423: an in-sequence rejected message
             // consumes its MsgSeqNum; 041 C-3's "seqnum NOT advanced" holds only out of
-            // sequence. No-reject-loop: 35=3 and 35=5 exempt (FR-004). [041 T014; data-model E-4]
+            // sequence. #423's row 4 ("garbled (unparseable) → no Reject, no advance") is
+            // superseded by 092 contract C-2 (fixpp#507; research R-13; the owner
+            // ruling of 2026-09-27 revising row 4). claim-ok: the date names the ruling
+            // A frame the scan cannot read never reaches this gate.
+            // No-reject-loop: 35=3 and 35=5 exempt (FR-004), for a well-formed frame
+            // only; a faulty Reject or Logout is Rejected under C-2. [041 T014; E-4]
             // Arena: kInboundParseArena (16384) matches the dispatch arena. [FIX-1/FIX-2]
             if (cfg_.validate_inbound_messages && validator_) {
                 if (hdr.msg_type != "3" && hdr.msg_type != "5") {
@@ -4036,6 +4126,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             //   all other inbound → (drained) — silently accepted, no FSM change
             //     (seqnum NOT advanced, no fromAdmin/fromApp dispatch)
             auto hdr = scan_frame_header(frame, session_hooks(inbound_tv_));
+            // 092 (contract C-2 D-9): a frame the scan could not read is disregarded,
+            // even one carrying 35=5, so it is never taken as the Logout reply.
+            if (hdr.fault != fixpp::wire::field_fault::none) {
+                co_return co_await dispose_unparseable_(hdr, fsm_state::LogoutSent);
+            }
             if (hdr.msg_type == "5") {  // Logout(35=5) confirms our Logout
                 record_state_transition_(fsm_state::Disconnected);
                 logout_confirmed_ = true;  // signal run_logout_phase1 coroutine
@@ -4069,12 +4164,20 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // The hdr is reused for the SendingTime/seqnum guards below.
             // [041-validation-gate-wiring T014; data-model guard-precedence C-2]
             auto hdr = scan_frame_header(frame, session_hooks(inbound_tv_));
+            // 092 (contract C-2 D-2): a reply the scan could not read is refused.
+            if (hdr.fault != fixpp::wire::field_fault::none) {
+                co_return co_await dispose_unparseable_(hdr, fsm_state::LogonSent);
+            }
 
             // ── 041-validation-gate-wiring T014: validate-first gate ──────────────
             // Run BEFORE interpret_logon: a dict-invalid Logon-ack produces a Reject
             // rather than a silent Disconnect (C-2 validate-first ordering, FR-003).
             // No-reject-loop: 35=3 and 35=5 exempt. C-3: seqnum NOT advanced (fixpp#423
             // consumes only in LogonReceived/Active; establishment arms are its Logon row).
+            // A frame the scan cannot read never reaches this gate: #423's row 4 is
+            // superseded by 092 contract C-2 (fixpp#507; research R-13; the owner
+            // ruling of 2026-09-27 revising row 4). claim-ok: the date names the ruling
+            // C-2 refuses such a frame above (D-2).
             // Arena: kInboundParseArena (16384) matches the dispatch arena. [FIX-1/FIX-2]
             // [041 T014; data-model E-4; contracts/validation-gate.md C-2/C-3]
             if (cfg_.validate_inbound_messages && validator_) {

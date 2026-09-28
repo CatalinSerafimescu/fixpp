@@ -376,7 +376,7 @@ C-2 row, and the rows are one function, so the mechanism lands here with one anc
     unchanged (a conformant message at N is then delivered with no ResendRequest).
   Also the two `coverage_adversarial_test.cpp` cells T012 renamed. Run: RED. Commit with the RED
   output.
-- [ ] T026 Via `phase-implementer`, implement the disposition in `src/session/session.cpp` and
+- [X] T026 Via `phase-implementer`, implement the disposition in `src/session/session.cpp` and
   `include/fixpp/session/session.hpp` (private declarations only).
   - Hoist the NotConnected arm's scan to the top of the arm and reuse it in the validate gate and
     the post-`interpret_logon` block, so the arm scans once per frame (E-2, R-3).

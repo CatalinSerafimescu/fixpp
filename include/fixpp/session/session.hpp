@@ -921,6 +921,16 @@ private:
         seqnum_t ref_seq, std::string_view ref_msg_type, int reason, int ref_tag_id = 0,
         std::string_view text = {}) noexcept;
 
+    // dispose_unparseable_ — 092-garbled-frame-reject (fixpp#507) contract C-2: the
+    // disposition of a frame the header scan could not read (hdr.fault is set). Each
+    // on_inbound_frame state arm calls it only on that branch, right after its scan
+    // and before any guard, then returns. It reads only hdr.fault,
+    // hdr.fault_length_tag, hdr.msg_type_is_third, hdr.fault_ref_seq_num and
+    // hdr.fault_ref_msg_type (contract C-3 I-1). `state` is the arm's FSM state.
+    // [092 contract C-1 step 3, C-2; data-model E-2; research R-3]
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> dispose_unparseable_(
+        fixpp::session::detail::FrameHeader const& hdr, fsm_state state) noexcept;
+
     // validate_inbound_ — synchronous dedup helper (041 simplify-triage FIX-1/FIX-2 +
     // per-message coroutine-frame alloc fix):
     // Parse `frame` with a kInboundParseArena (16384) stack arena, run
