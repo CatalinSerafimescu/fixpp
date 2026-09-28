@@ -1019,8 +1019,9 @@ std::string const kPossDupFields = std::string{"43=Y\x01"} + "122=20231231-23:59
 // range covers the initiator's stored Logon (outbound 1), so a handler that ran would
 // answer it; "exactly one outbound frame, the Reject" is the no-reply witness for the
 // TestRequest (no Heartbeat), the ResendRequest (nothing resent) and the Logout (no
-// Logout reply), and the state check is the no-disconnect witness. These cells are
-// also the Active rows of the SC-002/SC-003 matrix for 35=1, 2, 5, 0 and 4.
+// Logout reply), and the state check is the no-disconnect witness. An I1_* cell that
+// runs run_expected_n_cell also serves as the Active row of the SC-002/SC-003 matrix
+// for its MsgType.
 
 TEST(UnparseableFrameDisposition, I1_Active_TestRequest_MalformedTag) {
     run_expected_n_cell(At::active, "1", kTestRequestFields, kTagShape);
@@ -1063,9 +1064,9 @@ TEST(UnparseableFrameDisposition, I1_Active_SequenceResetGapFill_LengthDataMisma
 //
 // The faulty frame at the expected N must draw a Reject as its only outbound frame,
 // and the conformant Heartbeat at N+1 is then delivered with no ResendRequest, except
-// after a SequenceReset (D-4), where it is a gap. In Active, the rows for 35=0, 1, 2,
-// 4 and 5 are the I1_* cells; the cells below add 35=3 and one application type.
-// LogonReceived has a cell per row (StateCell parks the acceptor's Logon reply).
+// after a SequenceReset (D-4), where it is a gap. An Active row whose MsgType has an
+// I1_* cell is covered by that cell; list the cells with --gtest_list_tests. In
+// LogonReceived, StateCell parks the acceptor's Logon reply.
 
 TEST(UnparseableFrameDisposition, Matrix_Active_Reject) {
     run_expected_n_cell(At::active, "3", kRejectFields, kTagShape);
@@ -1151,7 +1152,8 @@ TEST(UnparseableFrameDisposition, WrongCompIdBeforeFault_RejectOnly) {
 }
 
 // Two malformed fields: the first one decides 373 and 371. Both orders run, so a
-// last-fault-wins record fails one of them.
+// last-fault-wins record fails one of them. To check it, make scan_frame_header skip a
+// malformed tag and keep scanning in a scratch copy: MalformedTagFirst must fail.
 TEST(UnparseableFrameDisposition, TwoMalformedFields_LengthDataFirst) {
     Shape const both{.garble = kMalformedCount + kMalformedTag,
                      .reason = "5",
@@ -1175,6 +1177,8 @@ TEST(UnparseableFrameDisposition, TwoMalformedFields_MalformedTagFirst) {
 // rounds. Each fixpp Reject must answer exactly one peer frame, so the counts match.
 // The peer then sends a well-formed Reject, which must draw nothing: that last step is
 // a control (the no-reject-loop exemption for a well-formed frame, unchanged by 092).
+// To check the control, force the Active arm's fault test to true in a scratch copy:
+// the well-formed Reject then draws a Reject and this step must fail.
 TEST(UnparseableFrameDisposition, RejectLoop_EachFixppRejectAnswersOnePeerFrame) {
     constexpr int kPeerRounds = 3;
     StateCell c{At::active};
@@ -1190,17 +1194,16 @@ TEST(UnparseableFrameDisposition, RejectLoop_EachFixppRejectAnswersOnePeerFrame)
     c.fix.feed(*c.sess, make_raw_frame("0", peer_seq, kMalformedTag));
     ++malformed_sent;
     for (int round = 0;; ++round) {
+        std::string const seq_text = std::to_string(peer_seq);
+        std::string const row = "round " + std::to_string(round);
+        // The first fixpp Reject answers the faulty Heartbeat (372=0), each later one a
+        // malformed Reject (372=3).
+        expect_only_reject(c.fix, want_reject(seq_text, round == 0 ? "0" : "3", kTagShape), row);
         auto const rejects = c.fix.sent_of_type("3");
-        EXPECT_EQ(c.fix.transport.sent_frames().size(), rejects.size())
-            << "round " << round << ": fixpp must send only Rejects";
-        EXPECT_EQ(rejects.size(), 1U)
-            << "round " << round << ": one fixpp Reject per malformed peer frame";
         if (rejects.empty()) {
             break;
         }
         fixpp_rejects += static_cast<int>(rejects.size());
-        EXPECT_EQ(extract_tag(rejects.front(), 45), std::to_string(peer_seq))
-            << "round " << round << ": the Reject answers the peer frame just sent";
         last_reject_seq = extract_tag(rejects.front(), 34);
         if (round == kPeerRounds) {
             break;
