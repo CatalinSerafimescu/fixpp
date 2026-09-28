@@ -498,3 +498,87 @@ TEST(ValidatorFieldFault, FailedBuild_OrdinaryDict_CapWithNoFaultFallsThrough) {
     EXPECT_EQ(r.error(), error::wire_unexpected_tag);
     EXPECT_EQ(ref, 8U);
 }
+
+// ── A malformed field inside a counted value (T062b) ────────────────────────
+//
+// The pre-scan above answers every failed-build view, so the checks inside
+// the validator's walk are reached only by a view whose build succeeded. The
+// view is built under the pair dictionary's hooks, where Data tag 5002 is
+// counted and its value swallows a malformed field. The validator's dictionary
+// declares 5001 and 5002 without pairing them, so its walk splits the counted
+// value at its first SOH and meets the malformed field.
+
+namespace {
+
+// kPairXml with CustomLen(5001) declared INT and CustomData(5002) declared
+// STRING, so the dictionary declares no Length and Data pair for them.
+constexpr std::string_view kUnpairedXml =
+    R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+    R"(<fields>)"
+    R"(<field number='8' name='BeginString' type='STRING'/>)"
+    R"(<field number='9' name='BodyLength' type='INT'/>)"
+    R"(<field number='10' name='CheckSum' type='STRING'/>)"
+    R"(<field number='35' name='MsgType' type='STRING'/>)"
+    R"(<field number='49' name='SenderCompID' type='STRING'/>)"
+    R"(<field number='5001' name='CustomLen' type='INT'/>)"
+    R"(<field number='5002' name='CustomData' type='STRING'/>)"
+    R"(</fields>)"
+    R"(<messages>)"
+    R"(<message name='TestMsg' msgtype='T' msgcat='app'>)"
+    R"(<field name='BeginString' required='N'/>)"
+    R"(<field name='BodyLength' required='N'/>)"
+    R"(<field name='MsgType' required='N'/>)"
+    R"(<field name='CheckSum' required='N'/>)"
+    R"(<field name='SenderCompID' required='N'/>)"
+    R"(<field name='CustomLen' required='N'/>)"
+    R"(<field name='CustomData' required='N'/>)"
+    R"(</message>)"
+    R"(</messages></fix>)";
+
+void expect_swallowed_field_rejected(std::string_view body) {
+    std::pmr::monotonic_buffer_resource mr;
+    auto paired = load_pair_dict(&mr);
+    ASSERT_EQ(paired.length_pair_data_tag(5001), 5002U) << "precondition: the view pairs 5001";
+    auto unpaired = fixpp::dict::XmlLoader{}.load_from_string(kUnpairedXml, &mr).as_table_view();
+    ASSERT_EQ(unpaired.length_pair_data_tag(5001), 0U)
+        << "precondition: the validator does not pair 5001";
+    auto buf = make_frame(body);
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    MessageView<access_mode::Index> const mv{*fv, &mr, dict_hooks::for_table_view(paired)};
+    ASSERT_TRUE(mv.offsets().build_status().has_value()) << "precondition: the build succeeds";
+    ASSERT_EQ(mv.msg_type(), "T");
+
+    dictionary_driven_validator const v{unpaired};
+    std::uint16_t ref = kRefSentinel;
+    auto const r = v.validate(mv, &mr, &ref);
+    ASSERT_FALSE(r.has_value()) << "a walk that met a malformed tag reported conformant";
+    EXPECT_EQ(r.error(), error::wire_invalid_tag_number);
+    EXPECT_EQ(ref, kRefSentinel)
+        << "a malformed tag has no tag to report: RefTagID stays untouched";
+}
+
+}  // namespace
+
+// Each counted value is "a" followed by SOH and the malformed field; the count
+// covers exactly that, so the view's build finds SOH right after it.
+
+// T1: the validator's walk yields the empty tag as tag 0 and continues.
+TEST(ValidatorFieldFault, SwallowedField_T1_EmptyTag) {
+    expect_swallowed_field_rejected("35=T|5001=4|5002=a|=x|49=S|");
+}
+
+// S1: the validator's walk stops at the non-digit tag byte.
+TEST(ValidatorFieldFault, SwallowedField_S1_NonDigitTagByte) {
+    expect_swallowed_field_rejected("35=T|5001=6|5002=a|4x=1|49=S|");
+}
+
+// S2: the validator's walk stops at the tag above 0xFFFF.
+TEST(ValidatorFieldFault, SwallowedField_S2_TagAbove0xFFFF) {
+    expect_swallowed_field_rejected("35=T|5001=9|5002=a|65536=1|49=S|");
+}
+
+// S3: the validator's walk stops at a field with no '=' before SOH.
+TEST(ValidatorFieldFault, SwallowedField_S3_NoEqualsBeforeSoh) {
+    expect_swallowed_field_rejected("35=T|5001=4|5002=a|49|49=S|");
+}
