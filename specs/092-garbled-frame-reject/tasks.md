@@ -88,7 +88,7 @@ the bundle when these tasks were generated; the tasks that carry them are named 
 **Purpose**: the measurements that cannot be taken after the first production edit, the RED anchor,
 the population snapshots, and the label manifest (plan phase 0, quickstart §0).
 
-- [ ] T001 Pre-flight in the library root.
+- [X] T001 Pre-flight in the library root.
   - `git rev-parse --abbrev-ref HEAD` prints `092-garbled-frame-reject`, and `git status --short`
     is empty.
   - Run `git fetch --all --prune` and record `git merge-base HEAD origin/main`.
@@ -111,7 +111,7 @@ the population snapshots, and the label manifest (plan phase 0, quickstart §0).
   - Add both to `bench/ci-suite.txt` in the file's existing row format, with a tier-3 comparand
     (R-9). A bench missing from that list has no execution gate.
   - The bench sources compile against the merge-base API: no new symbol.
-- [ ] T003 Record the bench commit's `git patch-id --stable` in the evidence file §*Bench*.
+- [X] T003 Record the bench commit's `git patch-id --stable` in the evidence file §*Bench*.
 - [ ] T004 Run the paired baseline (R-9, quickstart §0.1).
   - **Base:** a detached worktree at `/mnt/wsl/fixppbuild/092-base-wt` at the merge-base from T001,
     with only T002's commit cherry-picked. `git -C <wt> diff --stat <merge-base> -- src include`
