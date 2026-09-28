@@ -91,6 +91,11 @@
 // nothing, and the next valid message draws a ResendRequest. The section comment above
 // run_disregard_cell states what each cell asserts.
 //
+// D9_* (tasks.md T048; spec FR-015; contract C-2 D-9): in LogoutSent a faulty Logout is
+// not taken as the Logout reply and a faulty non-Logout draws nothing; the logout
+// timeout ends the session. The section comment above run_d9_cell states which cell is
+// a pin.
+//
 // Anchors: specs/092-garbled-frame-reject/spec.md SC-001, FR-007;
 //          contracts/unparseable-frame-disposition.md C-2 (D-4) and its Reject contents;
 //          fixpp#507 (the T076 table and reproducer).
@@ -2889,6 +2894,80 @@ TEST(UnparseableFrameDisposition, D8_Active_Field3Malformed_Disregarded) {
 }
 TEST(UnparseableFrameDisposition, D8_LogonReceived_Field3Malformed_Disregarded) {
     run_disregard_cell(At::logon_received, kD8Field3Malformed, "D-8 field 3 malformed");
+}
+
+// ── D9_* (tasks.md T048; spec FR-015; contract C-2 D-9) ──────────────────────
+//
+// In LogoutSent (an Active initiator's close(graceful) awaiting the peer's Logout), a
+// faulty frame at N = 2 is disregarded: it draws nothing, reaches neither fromAdmin nor
+// fromApp, the state stays LogoutSent and close() keeps waiting. The mock-clock logout
+// timeout then ends the session. The budgets follow Anchor_D9: the logout timeout is
+// below the heartbeat interval, and each pump's budget is half that timeout, so the
+// real-time close_grace timer (armed for the same duration) cannot complete the close
+// within it; only the mock-clock advance can.
+//
+// The faulty TestRequest cell is a pin: the pre-092 LogoutSent arm drained every frame
+// that is not a Logout, so reverting the disposer cannot fail it. To check that it can
+// fail, move `case fsm_state::LogoutSent:` in dispose_unparseable_ to the LogonReceived /
+// Active group in a scratch copy: the TestRequest at N then draws a Reject and the cell
+// must fail on "draws nothing".
+
+void run_d9_cell(std::vector<std::byte> const& faulty, std::string_view row) {
+    DispositionFixture fix;
+    auto const app = std::make_shared<CountingApplication>();
+    fix.engine.application = app;
+    auto cfg = fix.make_cfg(/*validate=*/true);
+    cfg.logout_disconnect_timeout_ms = 20000;
+    auto const timeout = std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms};
+    Session sess{fix.engine, cfg};
+    fix.open_to_active(sess);
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+
+    auto close_fut = asio::co_spawn(fix.ioc, sess.close(close_mode::graceful), asio::use_future);
+    if (!fixpp::test_support::pump_until(
+            fix.ioc, [&sess] { return sess.state() == fsm_state::LogoutSent; }, timeout / 2)) {
+        fixpp::test_support::cancel_and_drain_or_report(fix.ioc, *fix.clock, "D9/stage");
+        ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss << row << "/stage";
+        return;
+    }
+
+    int const admin_before = app->from_admin;
+    int const app_before = app->from_app;
+    fix.feed(sess, faulty);
+    EXPECT_EQ(sess.state(), fsm_state::LogoutSent)
+        << row << ": the faulty frame must not be taken as the Logout reply";
+    EXPECT_NE(close_fut.wait_for(std::chrono::seconds{0}), std::future_status::ready)
+        << row << ": close(graceful) must still await the reply or the logout timeout";
+    EXPECT_TRUE(fix.transport.sent_frames().empty())
+        << row << ": the faulty frame must draw nothing; sent:" << sent_types(fix);
+    EXPECT_EQ(app->from_admin, admin_before) << row << ": the faulty frame reached fromAdmin";
+    EXPECT_EQ(app->from_app, app_before) << row << ": the faulty frame reached fromApp";
+
+    fix.clock->advance(timeout + std::chrono::milliseconds{1});
+    if (!fixpp::test_support::pump_until_ready(fix.ioc, close_fut, timeout / 2)) {
+        fixpp::test_support::cancel_and_drain_or_report(fix.ioc, *fix.clock, "D9/close");
+        ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss << row << "/close";
+        return;
+    }
+    (void)close_fut.get();
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected)
+        << row << ": the logout timeout must end the session";
+}
+
+TEST(UnparseableFrameDisposition, D9_FaultyLogout_MalformedTag_NotTakenAsReply) {
+    run_d9_cell(make_raw_frame("5", 2, kLogoutFields + kMalformedTag),
+                "D-9 faulty Logout (373=0 shape)");
+}
+TEST(UnparseableFrameDisposition, D9_FaultyLogout_LengthDataMismatch_NotTakenAsReply) {
+    run_d9_cell(make_raw_frame("5", 2, kLogoutFields + kMalformedCount),
+                "D-9 faulty Logout (373=5 shape)");
+}
+// Pin (see the section comment).
+TEST(UnparseableFrameDisposition, D9_FaultyTestRequest_DrawsNothing_Pin) {
+    run_d9_cell(make_raw_frame("1", 2, kTestRequestFields + kMalformedTag),
+                "D-9 faulty TestRequest");
 }
 }  // namespace
 }  // namespace fixpp::session::test

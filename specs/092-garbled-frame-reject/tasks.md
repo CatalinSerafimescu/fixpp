@@ -644,7 +644,7 @@ N+1: the first draws nothing; the second draws a ResendRequest; the session stay
 - [X] T047 [US4] Via `phase-implementer`, the D-8 cells in the same file, in Active and in
   LogonReceived: the mixed defect `8|9|49=…|35=D|34=N|9x9=1|…|10`, and a frame whose field 3 is the
   malformed field. Same assertions as T046.
-- [ ] T048 [US4] Via `phase-implementer`, the D-9 cells in the same file: in LogoutSent a faulty
+- [X] T048 [US4] Via `phase-implementer`, the D-9 cells in the same file: in LogoutSent a faulty
   Logout is not taken as the Logout reply and the logout timeout ends the session (FR-015); a faulty
   non-Logout draws nothing.
 - [ ] T049 [US4] Via `phase-implementer`, the disclosed-outcome cells (C-5) in the same file:
