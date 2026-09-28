@@ -797,7 +797,7 @@ it in 092.
   `wire_invalid_tag_number`, `*ref_tag_out` untouched; `length_data_mismatch` → write
   `it.fault_length_tag()` to `*ref_tag_out` and return `wire_length_data_mismatch`. Steps 2 onward do
   not run after a fault. T057 GREEN.
-- [ ] T062a **Added 2026-09-28 (owner ruling, FR-012 on a failed-build view).** Via `phase-implementer`:
+- [X] T062a **Added 2026-09-28 (owner ruling, FR-012 on a failed-build view).** Via `phase-implementer`:
   when the `MessageView` passed to `dictionary_driven_validator::validate` has a failed build, `validate`
   first walks the field iterator to its fault and returns FR-012's code (`wire_invalid_tag_number`
   with RefTagID untouched, or `wire_length_data_mismatch` with RefTagID = the Length tag), before

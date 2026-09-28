@@ -151,6 +151,31 @@ public:
         MessageView<access_mode::Index> const& msg, std::pmr::memory_resource* scratch_mr,
         std::uint16_t* ref_tag_out) const noexcept override {
         std::string_view const msg_type = msg.msg_type();
+        // fixpp#426 (design §3): walk with THIS validator's own dict_hooks,
+        // not `msg`'s — `msg` may be dict-free even when `dict_` is not (or
+        // vice versa), and the field walk must split Length+Data pairs by
+        // the SAME dictionary every other Step below reads through.
+        auto const hooks = dict_hooks::for_table_view(dict_);
+        using iter_t = MessageView<access_mode::Index>::field_iterator;
+
+        // 092 T062a (FR-012, owner ruling on a failed-build view): a failed
+        // build leaves msg_type() empty, so Step 1 would reject the first field
+        // as an unexpected tag before its walk met the fault. When the build
+        // failed, walk to the end or the first fault and report the fault the
+        // same way E-5 does. A build that failed for another reason (out of
+        // memory, the offset-table cap) leaves a walk with no fault, and then
+        // validate falls through unchanged. A successful build costs only the
+        // build_status() branch.
+        if (!msg.offsets().build_status().has_value()) {
+            iter_t scan{msg.bytes(), 0, hooks};
+            iter_t const scan_end{msg.bytes(), msg.bytes().size(), hooks};
+            while (!(scan == scan_end) && scan.fault() == field_fault::none) {
+                ++scan;
+            }
+            if (scan.fault() != field_fault::none) {
+                return field_fault_error(scan, ref_tag_out);
+            }
+        }
 
         // ── Step 0: header-order check ([2b §6.5.1], W-002) ─────────────
         // FIX standard-header order: 8(BeginString), 9(BodyLength), 35(MsgType)
@@ -184,12 +209,6 @@ public:
         // `contains()` is false for every tag — identical to field_valid_for
         // returning false for every tag.
         auto const valid_tags = dict_.valid_tags_for(msg_type);
-        // fixpp#426 (design §3): walk with THIS validator's own dict_hooks,
-        // not `msg`'s — `msg` may be dict-free even when `dict_` is not (or
-        // vice versa), and the field walk must split Length+Data pairs by
-        // the SAME dictionary every other Step below reads through.
-        auto const hooks = dict_hooks::for_table_view(dict_);
-        using iter_t = MessageView<access_mode::Index>::field_iterator;
         // 092 (data-model E-5, FR-012): the iterator is hoisted out of the `for`
         // init so its fault record is readable after the loop. The fault is
         // checked at the top of each iteration — before the field checks, so an
