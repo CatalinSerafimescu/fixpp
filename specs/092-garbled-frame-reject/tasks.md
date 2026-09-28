@@ -283,7 +283,7 @@ C-2 row, and the rows are one function, so the mechanism lands here with one anc
     non-numeric Length value; a Length as the last field before the trailer; an unrelated tag after
     a Length; the standard static pairs under `dict_hooks::none()`; a duplicate 34 and a duplicate
     35; a fault-free frame whose field 3 is not 35.
-- [ ] T014 In a scratch copy, plant one disagreement **per mutation family** and show that family's
+- [X] T014 In a scratch copy, plant one disagreement **per mutation family** and show that family's
   corpus cells RED (quickstart §2 "Differential"): non-digit, overflow, empty tag, no `=`, non-SOH,
   end-equals-size, the `fault_ref_seq_num` first-34 selection, the `fault_ref_msg_type` third-field
   selection. Revert each; record the eight mutants and their RED cells in the evidence file.
