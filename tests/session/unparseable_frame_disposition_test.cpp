@@ -25,6 +25,13 @@
 // Every observation after open_to_active is non-fatal (EXPECT_*), so the probe runs
 // and every clause reports in each cell.
 //
+// ReplayGuard_* (tasks.md T015; research R-12): the resend store walk classifies a
+// stored frame by the header scan's MsgType. The scan stops at its first fault, so
+// a stored admin frame with a fault before its 35 scans with no MsgType; such a
+// slot is gap-filled, never rebuilt and resent as application data
+// [FIX-SL §4.8.3]. The store is a custom MessageStore, which may hold bytes fixpp
+// did not write.
+//
 // Anchors: specs/092-garbled-frame-reject/spec.md SC-001, FR-007;
 //          contracts/unparseable-frame-disposition.md C-2 (D-4) and its Reject contents;
 //          fixpp#507 (the T076 table and reproducer).
@@ -40,6 +47,10 @@
 #include <cstdio>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/session/message_store.hpp>
+#include <fixpp/session/message_store_factory.hpp>
+#include <fixpp/session/retrieve_visitor.hpp>
+#include <fixpp/session/seqnum.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
@@ -47,6 +58,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "support/extract_tag.hpp"
@@ -277,6 +289,148 @@ TEST(UnparseableFrameDisposition, Issue507Reproducer_ProbeControl) {
     bool const resend = probe_draws_resend(fix, sess);
     EXPECT_TRUE(resend) << "control probe(34=500): resend=" << (resend ? 1 : 0)
                         << " (0 means the probe cannot report a ResendRequest)";
+}
+
+// ── ReplayGuard_* (T015; research R-12) ──────────────────────────────────────
+
+// A MessageStore that keeps outbound frames and serves them to the resend walk.
+// add_outbound() plants bytes at a sequence number without Session::send.
+class ReplayStore final : public MessageStore {
+public:
+    struct Record {
+        seqnum_t seq;
+        std::vector<std::byte> frame;
+    };
+
+    ReplayStore() noexcept : MessageStore(flush_thunk_for<ReplayStore>()) {}
+
+    void add_outbound(seqnum_t seq, std::vector<std::byte> frame) {
+        records_.push_back({.seq = seq, .frame = std::move(frame)});
+        if (seq + 1U > next_out_) {
+            next_out_ = seq + 1U;
+        }
+    }
+
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store(
+        seqnum_t seq, std::span<const std::byte> frame, direction_t dir) noexcept override {
+        if (dir == direction_t::outbound) {
+            add_outbound(seq, std::vector<std::byte>(frame.begin(), frame.end()));
+        }
+        co_return fixpp::core::expected_t<void>{};
+    }
+
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> retrieve(
+        seqnum_t from, seqnum_t to, direction_t dir, retrieve_visitor& visitor) noexcept override {
+        if (dir == direction_t::outbound) {
+            for (auto& rec : records_) {
+                if (rec.seq >= from && rec.seq <= to) {
+                    auto r =
+                        co_await visitor.on_frame(rec.seq, std::span<const std::byte>(rec.frame));
+                    if (!r || *r == visit_result::stop) {
+                        break;
+                    }
+                }
+            }
+        }
+        co_return fixpp::core::expected_t<void>{};
+    }
+
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<seqnum_t>> next_seqnum(
+        direction_t dir, bool increment) noexcept override {
+        auto& c = (dir == direction_t::outbound) ? next_out_ : next_in_;
+        seqnum_t const curr = c;
+        if (increment) {
+            ++c;
+        }
+        co_return curr;
+    }
+
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override {
+        next_in_ = next_out_ = seqnum_min;
+        co_return fixpp::core::expected_t<void>{};
+    }
+
+private:
+    std::vector<Record> records_;
+    seqnum_t next_out_ = seqnum_min;
+    seqnum_t next_in_ = seqnum_min;
+};
+
+class ReplayStoreFactory final : public MessageStoreFactory {
+public:
+    ReplayStore* last_store = nullptr;  // non-owning; the Session owns the store
+
+    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<MessageStore>> make(
+        std::string_view, std::string_view, std::pmr::memory_resource*, std::size_t,
+        asio::any_io_executor) noexcept override {
+        auto store = std::make_unique<ReplayStore>();
+        last_store = store.get();
+        return store;
+    }
+};
+
+std::vector<std::byte> bytes_of(std::string_view s) {
+    std::vector<std::byte> out;
+    out.reserve(s.size());
+    for (char const c : s) {
+        out.push_back(static_cast<std::byte>(c));
+    }
+    return out;
+}
+
+std::string printable(std::span<const std::byte> frame) {
+    std::string out;
+    for (std::byte const b : frame) {
+        char const c = static_cast<char>(b);
+        out += (c == '\x01') ? '|' : c;
+    }
+    return out;
+}
+
+// A stored Heartbeat whose field 2 is a non-digit tag: a fault before its 35, of a
+// shape the replay builder drops rather than refuses (so without the guard the rest
+// of the frame would be rebuilt and resent). The peer's ResendRequest covers exactly
+// that slot, which must be gap-filled (SequenceReset-GapFill), not resent.
+TEST(UnparseableFrameDisposition, ReplayGuard_StoredAdminFrameFaultInField2_GapFilledNotResent) {
+    DispositionFixture fix;
+    auto const factory = std::make_shared<ReplayStoreFactory>();
+    auto cfg = fix.make_cfg(/*validate=*/false);
+    cfg.store_factory = factory;
+    Session sess{fix.engine, cfg};
+    fix.open_to_active(sess);
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    ASSERT_NE(factory->last_store, nullptr);
+
+    constexpr seqnum_t kSlot = 2;
+    factory->last_store->add_outbound(kSlot, bytes_of("8=FIX.4.2\x01"
+                                                      "4X=V\x01"
+                                                      "35=0\x01"
+                                                      "34=2\x01"
+                                                      "49=ISLD\x01"
+                                                      "52=20240101-00:00:00.000\x01"
+                                                      "56=TW\x01"));
+
+    fix.feed(sess, make_raw_frame("2", 2,
+                                  "7=2\x01"
+                                  "16=2\x01"));
+
+    std::size_t gap_fills = 0;
+    std::size_t at_slot = 0;
+    for (auto const& f : fix.transport.sent_frames()) {
+        if (extract_tag(f, 34) != "2") {
+            continue;
+        }
+        ++at_slot;
+        bool const gap_fill = extract_tag(f, 35) == "4" && extract_tag(f, 123) == "Y";
+        EXPECT_TRUE(gap_fill) << "slot 2 must be answered only by a GapFill; sent " << printable(f);
+        if (gap_fill) {
+            ++gap_fills;
+            EXPECT_EQ(extract_tag(f, 36), "3") << "GapFill NewSeqNo(36)";
+        }
+    }
+    EXPECT_EQ(gap_fills, 1U) << "one GapFill at 34=2; frames at 34=2: " << at_slot;
 }
 
 }  // namespace
