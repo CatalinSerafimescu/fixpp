@@ -516,7 +516,7 @@ accounted under #423's rows; a late parse failure closes the session.
 **Independent Test**: a faulty NewOrderSingle at N, then a conformant one at N+1: the first draws a
 Reject (45=N) and is not delivered; the second is delivered with no ResendRequest.
 
-- [ ] T034 [US2] Via `phase-implementer`, the application cells in
+- [X] T034 [US2] Via `phase-implementer`, the application cells in
   `tests/session/unparseable_frame_disposition_test.cpp` (both shapes each):
   - at N: `fromApp` not invoked, Reject 45=N, NextNumIn N+1;
   - above N: Reject, NextNumIn stays N, not delivered (FR-005);

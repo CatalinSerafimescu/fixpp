@@ -53,6 +53,11 @@
 // contract C-3 I-6): the disposition does not depend on inbound validation, the profile,
 // the role or whether an Application is registered.
 //
+// App_*, I2_*, Dup34_*, Dup35_*, AwaitingResend_*, MaxMessageSize_*, RefMsgTypeBound_*
+// (tasks.md T034; spec FR-005, FR-013; contract C-3 I-2, I-3): a faulty application
+// message is rejected, never delivered, and accounted as C-2's D-5/D-6 say. The section
+// comment above App_AtN_MalformedTag states each cell.
+//
 // ReplayGuard_* (tasks.md T015; research R-12): the resend store walk classifies a
 // stored frame by the header scan's MsgType. The scan stops at its first fault, so
 // a stored admin frame with a fault before its 35 scans with no MsgType; such a
@@ -713,12 +718,24 @@ TEST(UnparseableFrameDisposition, Anchor_D6_Active_FaultyAppNotExpected_RejectNo
 // add_outbound() plants bytes at a sequence number without Session::send.
 // park_outbound(seq) holds the store of outbound frame `seq` until release_parked(),
 // which completes it successfully.
+// `events` logs, in completion order, every durable inbound advance (with the
+// counter after it) and every store() call (its direction, and an outbound frame's
+// 35 and 45), so a cell can read what was persisted and in which order.
 class ReplayStore final : public MessageStore {
 public:
     struct Record {
         seqnum_t seq;
         std::vector<std::byte> frame;
     };
+
+    enum class EventKind : std::uint8_t { inbound_advance, inbound_store, outbound_store };
+    struct Event {
+        EventKind kind;
+        seqnum_t seq;          // inbound_advance: the counter after it; else store()'s seq
+        std::string msg_type;  // outbound_store: the frame's 35
+        std::string ref_seq;   // outbound_store: the frame's 45
+    };
+    std::vector<Event> events;
 
     ReplayStore() noexcept : MessageStore(flush_thunk_for<ReplayStore>()) {}
 
@@ -750,6 +767,12 @@ public:
         }
         if (dir == direction_t::outbound) {
             add_outbound(seq, std::vector<std::byte>(frame.begin(), frame.end()));
+            events.push_back({.kind = EventKind::outbound_store,
+                              .seq = seq,
+                              .msg_type = extract_tag(frame, 35),
+                              .ref_seq = extract_tag(frame, 45)});
+        } else {
+            events.push_back({.kind = EventKind::inbound_store, .seq = seq});
         }
         co_return fixpp::core::expected_t<void>{};
     }
@@ -776,6 +799,9 @@ public:
         seqnum_t const curr = c;
         if (increment) {
             ++c;
+            if (dir == direction_t::inbound) {
+                events.push_back({.kind = EventKind::inbound_advance, .seq = c});
+            }
         }
         co_return curr;
     }
@@ -1777,6 +1803,235 @@ INSTANTIATE_TEST_SUITE_P(UnparseableFrameDisposition, RowByValidation,
                              return std::string{row_label(info.param.row)} +
                                     (info.param.validate ? "_ValOn" : "_ValOff");
                          });
+
+// ── App_*, I2_*, Dup*_*, AwaitingResend_*, MaxMessageSize_*, RefMsgTypeBound_*
+// (tasks.md T034; spec FR-005, FR-013; contract C-2 D-5, D-6 and the Reject
+// contents, C-1 step 1b, C-3 I-2, I-3; data-model E-1; research R-5) ─────────────
+//
+// A faulty application message, in Active, in both fault shapes.
+//   App_AtN_*: at the expected N=2, fromApp is not invoked, the Reject carries 45=2,
+//     and NextNumIn advances (the conformant Heartbeat at 3 is in sequence).
+//   App_AboveN_*: above N, the Reject's 45 is the frame's 34 and the Reject is its one
+//     outbound frame (no ResendRequest, no disconnect), it is not delivered, and
+//     NextNumIn stays N.
+//   I2_*: ReplayStore's event log shows what was persisted: at N, one durable
+//     inbound advance and then the Reject stored with 45=N; above N, no advance and
+//     the Reject; in neither case an inbound frame stored.
+//   Dup34_*: the Reject is addressed from the first 34 (fault_ref_seq_num), so a
+//     faulty frame whose first 34 is 99 and whose later 34 is the expected 2 is D-6
+//     (45=99, no advance). Field 3 is 35, as C-2's D-6 row requires. The fault-free
+//     Dup34_FaultFree_LastWins_Pin keeps today's last-wins sequencing (I-3): it pins an
+//     inherited outcome; to check it can fail, make scan_frame_header's msg_seq_num
+//     first-wins in a scratch copy.
+//   Dup35_*: the disposition reads field 3's 35 (fault_ref_msg_type, D), never the
+//     last-wins 4: NextNumIn advances (consume_rejected_seqnum_ excludes 4) and 372=D.
+//   AwaitingResend_*: a too-high Heartbeat at 3 opens a gap from 2; the faulty frame at
+//     2 fills it, so the gap closes, and a Heartbeat at 5 then draws a fresh
+//     ResendRequest from 3 (none is sent while a gap is still open).
+//   MaxMessageSize_*_Control: an oversized faulty frame in Active is disconnected with
+//     nothing sent, because the negotiated MaxMessageSize(383) guard runs before the
+//     state switch (C-1 step 1b). A control: to check it can fail, delete that guard in
+//     a scratch copy and the cell must fail.
+//   RefMsgTypeBound_*: a faulty frame at N whose MsgType is far longer than any shipped
+//     MsgType draws a Reject without 372, and NextNumIn advances only together with that
+//     Reject. The length below is spelled out, not derived from the session's bound.
+//     To check it can fail, pass the unbounded 372 in dispose_unparseable_ in a scratch
+//     copy: the Reject no longer fits its buffer, and the cell must fail on the Reject.
+
+TEST(UnparseableFrameDisposition, App_AtN_MalformedTag) {
+    run_expected_n_cell(At::active, "D", kOrderFields, kTagShape);
+}
+TEST(UnparseableFrameDisposition, App_AtN_LengthDataMismatch) {
+    run_expected_n_cell(At::active, "D", kOrderFields, kCountShape);
+}
+TEST(UnparseableFrameDisposition, App_AboveN_MalformedTag) {
+    run_not_expected_cell(At::active, "D", 5, kOrderFields, kTagShape, "at N+3");
+}
+TEST(UnparseableFrameDisposition, App_AboveN_LengthDataMismatch) {
+    run_not_expected_cell(At::active, "D", 5, kOrderFields, kCountShape, "at N+3");
+}
+
+// The store events the faulty NewOrderSingle at `seq` drew (expected N=2).
+void run_i2_cell(std::uint32_t seq, Shape const& shape) {
+    StateCell c{At::active};
+    c.enter();
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    ReplayStore* const store = c.factory->last_store;
+    ASSERT_NE(store, nullptr);
+    std::size_t const before = store->events.size();
+    std::string const seq_text = std::to_string(seq);
+    std::string const row = "I-2 35=D at " + seq_text + " (373=" + std::string{shape.reason} + ")";
+    feed_faulty(c, make_raw_frame("D", seq, kOrderFields + shape.garble),
+                want_reject(seq_text, "D", shape), row);
+
+    std::vector<ReplayStore::Event> const drawn(
+        store->events.begin() + static_cast<std::ptrdiff_t>(before), store->events.end());
+    std::string log;
+    for (auto const& e : drawn) {
+        log += e.kind == ReplayStore::EventKind::inbound_advance
+                   ? " advance->" + std::to_string(e.seq)
+                   : (e.kind == ReplayStore::EventKind::inbound_store
+                          ? " store(inbound)"
+                          : " store(35=" + e.msg_type + ",45=" + e.ref_seq + ")");
+    }
+    std::size_t const want_events = (seq == 2) ? 2U : 1U;
+    ASSERT_EQ(drawn.size(), want_events) << row << ": store events:" << log;
+    std::size_t i = 0;
+    if (seq == 2) {
+        EXPECT_EQ(drawn[i].kind, ReplayStore::EventKind::inbound_advance)
+            << row << ": the advance must be persisted first; store events:" << log;
+        EXPECT_EQ(drawn[i].seq, 3U) << row << ": the durable inbound counter after it";
+        ++i;
+    }
+    EXPECT_EQ(drawn[i].kind, ReplayStore::EventKind::outbound_store)
+        << row << ": then the Reject is stored; store events:" << log;
+    EXPECT_EQ(drawn[i].msg_type, "3") << row << ": the stored frame is the Reject";
+    EXPECT_EQ(drawn[i].ref_seq, seq_text) << row << ": the stored Reject's 45";
+}
+
+TEST(UnparseableFrameDisposition, I2_AtN_MalformedTag) { run_i2_cell(2, kTagShape); }
+TEST(UnparseableFrameDisposition, I2_AtN_LengthDataMismatch) { run_i2_cell(2, kCountShape); }
+TEST(UnparseableFrameDisposition, I2_AboveN_MalformedTag) { run_i2_cell(5, kTagShape); }
+TEST(UnparseableFrameDisposition, I2_AboveN_LengthDataMismatch) { run_i2_cell(5, kCountShape); }
+
+// 35=D, then 34=99, the header, 34=2 (the expected number) and the fault.
+void run_dup34_cell(Shape const& shape) {
+    StateCell c{At::active};
+    c.enter();
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    std::string const row = "Dup34 (373=" + std::string{shape.reason} + ")";
+    feed_faulty(c,
+                wrap_body(std::string{"35=D\x01"} + "34=99\x01" + kHeader + "34=2\x01" +
+                          kOrderFields + shape.garble),
+                want_reject("99", "D", shape), row);
+    expect_heartbeat_in_sequence(c.fix, *c.sess, *c.app, 2, row + " (NextNumIn unchanged)");
+}
+
+TEST(UnparseableFrameDisposition, Dup34_FirstRead_D6_MalformedTag) { run_dup34_cell(kTagShape); }
+TEST(UnparseableFrameDisposition, Dup34_FirstRead_D6_LengthDataMismatch) {
+    run_dup34_cell(kCountShape);
+}
+
+// Inbound validation is off: the validation dictionary requires NewOrderSingle fields
+// this frame does not carry, and the pin is about sequencing, not validation.
+TEST(UnparseableFrameDisposition, Dup34_FaultFree_LastWins_Pin) {
+    StateCell c{At::active, /*validate=*/false};
+    c.enter();
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    for (std::uint32_t seq = 2; seq <= 4; ++seq) {
+        expect_heartbeat_in_sequence(c.fix, *c.sess, *c.app, seq, "Dup34 pin (setup)");
+    }
+    int const app_before = c.app->from_app;
+    c.fix.feed(*c.sess, wrap_body(std::string{"35=D\x01"} + "34=1\x01" + kHeader + "34=5\x01" +
+                                  kOrderFields));
+    EXPECT_TRUE(c.fix.transport.sent_frames().empty())
+        << "Dup34 pin: the fault-free 34=1|...|34=5 at expected 5 must draw nothing; Logouts="
+        << c.fix.sent_of_type("5").size() << " Rejects=" << c.fix.sent_of_type("3").size();
+    EXPECT_EQ(c.app->from_app, app_before + 1) << "Dup34 pin: it must be delivered to fromApp";
+    EXPECT_EQ(c.sess->state(), fsm_state::Active) << "Dup34 pin: state after it";
+    expect_heartbeat_in_sequence(c.fix, *c.sess, *c.app, 6, "Dup34 pin (NextNumIn advanced)");
+}
+
+// 35=D, 34=2 (the expected number), the header, then a second 35=4 and the fault.
+void run_dup35_cell(Shape const& shape) {
+    StateCell c{At::active};
+    c.enter();
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    std::string const row = "Dup35 (373=" + std::string{shape.reason} + ")";
+    feed_faulty(
+        c, wrap_body(std::string{"35=D\x01"} + "34=2\x01" + kHeader + "35=4\x01" + shape.garble),
+        want_reject("2", "D", shape), row);
+    expect_heartbeat_in_sequence(c.fix, *c.sess, *c.app, 3, row + " (NextNumIn advanced)");
+}
+
+TEST(UnparseableFrameDisposition, Dup35_FaultRefMsgType_D5_MalformedTag) {
+    run_dup35_cell(kTagShape);
+}
+TEST(UnparseableFrameDisposition, Dup35_FaultRefMsgType_D5_LengthDataMismatch) {
+    run_dup35_cell(kCountShape);
+}
+
+void run_awaiting_resend_cell(Shape const& shape) {
+    StateCell c{At::active};
+    c.enter();
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    std::string const row = "AwaitingResend (373=" + std::string{shape.reason} + ")";
+    expect_heartbeat_gap(c, 3, "2", row + " (the gap opens)");
+    feed_faulty(c, make_raw_frame("D", 2, kOrderFields + shape.garble),
+                want_reject("2", "D", shape), row + " (the faulty frame fills it)");
+    expect_heartbeat_gap(c, 5, "3", row + " (a fresh gap, so the first one closed)");
+}
+
+TEST(UnparseableFrameDisposition, AwaitingResend_FaultyFillClosesGap_MalformedTag) {
+    run_awaiting_resend_cell(kTagShape);
+}
+TEST(UnparseableFrameDisposition, AwaitingResend_FaultyFillClosesGap_LengthDataMismatch) {
+    run_awaiting_resend_cell(kCountShape);
+}
+
+void run_max_message_size_control(Shape const& shape) {
+    DispositionFixture fix;
+    auto app = std::make_shared<CountingApplication>();
+    fix.engine.application = app;
+    auto cfg = fix.make_cfg(/*validate=*/true);
+    cfg.advertised_max_message_size = 256;
+    Session sess{fix.engine, cfg};
+    fix.open_to_active(sess);
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    std::string const row = "MaxMessageSize (373=" + std::string{shape.reason} + ")";
+    auto const oversized = make_raw_frame(
+        "D", 2, kOrderFields + "58=" + std::string(300, 'x') + "\x01" + shape.garble);
+    ASSERT_GT(oversized.size(), 256U) << row << ": the frame must exceed the advertised size";
+    fix.feed(sess, oversized);
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected) << row << ": the oversized frame ends it";
+    EXPECT_TRUE(fix.transport.sent_frames().empty())
+        << row << ": nothing is sent; Rejects=" << fix.sent_of_type("3").size();
+    EXPECT_EQ(app->from_app, 0) << row << ": the oversized frame never reaches fromApp";
+}
+
+TEST(UnparseableFrameDisposition,
+     MaxMessageSize_OversizedFaulty_Disconnected_Control_MalformedTag) {
+    run_max_message_size_control(kTagShape);
+}
+TEST(UnparseableFrameDisposition,
+     MaxMessageSize_OversizedFaulty_Disconnected_Control_LengthDataMismatch) {
+    run_max_message_size_control(kCountShape);
+}
+
+void run_ref_msg_type_bound_cell(Shape const& shape) {
+    StateCell c{At::active};
+    c.enter();
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    std::string const row = "RefMsgTypeBound (373=" + std::string{shape.reason} + ")";
+    std::string const long_type(600, 'Z');
+    feed_faulty(c, make_raw_frame(long_type, 2, kOrderFields + shape.garble),
+                want_reject("2", "", shape), row);
+    for (auto const& r : c.fix.sent_of_type("3")) {
+        EXPECT_FALSE(has_field(r, "372=")) << row << ": the Reject must carry no RefMsgType(372)";
+    }
+    expect_heartbeat_in_sequence(c.fix, *c.sess, *c.app, 3, row + " (NextNumIn advanced)");
+}
+
+TEST(UnparseableFrameDisposition, RefMsgTypeBound_LongMsgType_RejectWithout372_MalformedTag) {
+    run_ref_msg_type_bound_cell(kTagShape);
+}
+TEST(UnparseableFrameDisposition, RefMsgTypeBound_LongMsgType_RejectWithout372_LengthDataMismatch) {
+    run_ref_msg_type_bound_cell(kCountShape);
+}
 
 }  // namespace
 }  // namespace fixpp::session::test
