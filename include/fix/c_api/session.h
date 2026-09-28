@@ -276,12 +276,12 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_close(fixpp_session_t* session);
  *   - on an established session, a faulty Logon whose third field is
  *     MsgType(35) and whose MsgSeqNum(34) was read before the fault ends the
  *     session, with no Reject and no Logout;
- *   - on an established session, a frame with a malformed tag before its
- *     MsgSeqNum(34), or with a malformed tag and a third field that is not
- *     MsgType(35), which was accepted and advanced the expected inbound
- *     sequence number, is disregarded without advancing it; if the peer
- *     resends the same bytes, the session ends at the peer's next new message
- *     that is not a Heartbeat;
+ *   - on an established session, a faulty frame whose fault comes before its
+ *     MsgSeqNum(34), or whose third field is not MsgType(35), and which was
+ *     accepted and advanced the expected inbound sequence number, is
+ *     disregarded without advancing it; if the peer resends the same bytes,
+ *     the session ends at the peer's next new message that is not a
+ *     Heartbeat;
  *   - on an established session in a resend recovery, a faulty SequenceReset,
  *     GapFill or Reset mode, whose third field is MsgType(35) and whose
  *     MsgSeqNum(34) was read before the fault, is Rejected and not applied, so
@@ -369,12 +369,12 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_acceptor_bound_endpoint(fixpp_sessi
  *   - on an established session, a faulty Logon whose third field is
  *     MsgType(35) and whose MsgSeqNum(34) was read before the fault ends the
  *     session, with no Reject and no Logout;
- *   - on an established session, a frame with a malformed tag before its
- *     MsgSeqNum(34), or with a malformed tag and a third field that is not
- *     MsgType(35), which was accepted and advanced the expected inbound
- *     sequence number, is disregarded without advancing it; if the peer
- *     resends the same bytes, the session ends at the peer's next new message
- *     that is not a Heartbeat;
+ *   - on an established session, a faulty frame whose fault comes before its
+ *     MsgSeqNum(34), or whose third field is not MsgType(35), and which was
+ *     accepted and advanced the expected inbound sequence number, is
+ *     disregarded without advancing it; if the peer resends the same bytes,
+ *     the session ends at the peer's next new message that is not a
+ *     Heartbeat;
  *   - on an established session in a resend recovery, a faulty SequenceReset,
  *     GapFill or Reset mode, whose third field is MsgType(35) and whose
  *     MsgSeqNum(34) was read before the fault, is Rejected and not applied, so
@@ -443,12 +443,12 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_send(fixpp_session_t* session,
  *   - on an established session, a faulty Logon whose third field is
  *     MsgType(35) and whose MsgSeqNum(34) was read before the fault ends the
  *     session, with no Reject and no Logout;
- *   - on an established session, a frame with a malformed tag before its
- *     MsgSeqNum(34), or with a malformed tag and a third field that is not
- *     MsgType(35), which was accepted and advanced the expected inbound
- *     sequence number, is disregarded without advancing it; if the peer
- *     resends the same bytes, the session ends at the peer's next new message
- *     that is not a Heartbeat;
+ *   - on an established session, a faulty frame whose fault comes before its
+ *     MsgSeqNum(34), or whose third field is not MsgType(35), and which was
+ *     accepted and advanced the expected inbound sequence number, is
+ *     disregarded without advancing it; if the peer resends the same bytes,
+ *     the session ends at the peer's next new message that is not a
+ *     Heartbeat;
  *   - on an established session in a resend recovery, a faulty SequenceReset,
  *     GapFill or Reset mode, whose third field is MsgType(35) and whose
  *     MsgSeqNum(34) was read before the fault, is Rejected and not applied, so
@@ -509,12 +509,12 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_register_callback(
  *   - on an established session, a faulty Logon whose third field is
  *     MsgType(35) and whose MsgSeqNum(34) was read before the fault ends the
  *     session, with no Reject and no Logout;
- *   - on an established session, a frame with a malformed tag before its
- *     MsgSeqNum(34), or with a malformed tag and a third field that is not
- *     MsgType(35), which was accepted and advanced the expected inbound
- *     sequence number, is disregarded without advancing it; if the peer
- *     resends the same bytes, the session ends at the peer's next new message
- *     that is not a Heartbeat;
+ *   - on an established session, a faulty frame whose fault comes before its
+ *     MsgSeqNum(34), or whose third field is not MsgType(35), and which was
+ *     accepted and advanced the expected inbound sequence number, is
+ *     disregarded without advancing it; if the peer resends the same bytes,
+ *     the session ends at the peer's next new message that is not a
+ *     Heartbeat;
  *   - on an established session in a resend recovery, a faulty SequenceReset,
  *     GapFill or Reset mode, whose third field is MsgType(35) and whose
  *     MsgSeqNum(34) was read before the fault, is Rejected and not applied, so
