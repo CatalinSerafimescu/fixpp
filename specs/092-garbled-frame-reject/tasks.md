@@ -124,7 +124,7 @@ the population snapshots, and the label manifest (plan phase 0, quickstart §0).
     Report min-per-tree per case, both SHAs and T003's patch-id, in the evidence file §*Bench
     baseline*. It cannot be reconstructed after the edit.
   - Keep the base worktree for T069.
-- [ ] T005 Via `phase-implementer`, add #507's reproducer (the table the issue body calls T076;
+- [X] T005 Via `phase-implementer`, add #507's reproducer (the table the issue body calls T076;
   `gh issue view 507 --repo CatalinSerafimescu/fixpp`) as a real test, `Issue507Reproducer_*` cells in the new
   `tests/session/unparseable_frame_disposition_test.cpp`, with the new target registered by
   `add_threading_test(session_unparseable_frame_disposition unparseable_frame_disposition_test.cpp)`

@@ -2176,6 +2176,19 @@ add_threading_test(session_validate_gate_inbound
 set_tests_properties(session_validate_gate_inbound PROPERTIES
   LABELS "041;t012;t014;validation-gate;inbound;foundational")
 
+# ── 092-garbled-frame-reject — the disposition of a framed-but-unparseable frame
+# (contract C-2 .. C-6; fixpp#507's reproducer is the Issue507Reproducer_* cells).
+# Standalone, not a grouped bucket ([const §VII.8]): its cells drive Session
+# coroutines on an io_context with timers (the logout timeout, the liveness
+# interval, the resend loop, a scripted peer), which is not the pure,
+# single-threaded, stateless class §VII.8 groups. session_validate_gate_inbound
+# above is standalone for the same reason. Hook-free: no cell reads a private
+# counter (fixpp#511); NextNumIn is witnessed by the next conformant frame.
+add_threading_test(session_unparseable_frame_disposition
+  unparseable_frame_disposition_test.cpp)
+set_tests_properties(session_unparseable_frame_disposition PROPERTIES
+  LABELS "092;session")
+
 # ── fixpp#215 item 1 — one as_table_view() walk per opened session ───────────
 # W1: open() with no config-supplied snapshot walks the Dictionary exactly ONCE
 #     (was 2: inbound_tv_ + the strict validator, independently).
