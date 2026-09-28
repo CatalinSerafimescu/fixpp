@@ -322,7 +322,7 @@ C-2 row, and the rows are one function, so the mechanism lands here with one anc
     `git grep -h "define FIXPP_C_ABI_VERSION_MINOR" $(git for-each-ref --format='%(refname)' refs/heads refs/remotes) -- include/fix/c_api/version.h | sort | uniq -c`
     shows no 10. Positive control: `origin/main` shows 9.
   Re-run the second check right before T023's commit.
-- [ ] T020 Re-run 091's C-ABI population recipe (`specs/091-data-field-bytes/research.md` R-11,
+- [X] T020 Re-run 091's C-ABI population recipe (`specs/091-data-field-bytes/research.md` R-11,
   steps 1–6) at the implementation head with 092's change as input. Classify every candidate effect
   in R-8's table (D-1/D-2 refusal; D-3 disconnect; D-7 reversal; the LogoutSent confirmation; the
   application Reject; the late-site close at a dispatch site; the FR-019 close; FR-012). Record the
