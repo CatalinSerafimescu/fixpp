@@ -347,7 +347,7 @@ C-2 row, and the rows are one function, so the mechanism lands here with one anc
   - **SC-009 mutant:** after the bump, in a scratch copy, set MINOR back to 9 and show
     `version_test` RED; revert and show GREEN. Record it in the evidence file. T022's pre-bump RED
     is a different proof.
-- [ ] T024 Via `phase-implementer`, add a **BREAKING (C-ABI 1.10; 092)** clause to each affected
+- [X] T024 Via `phase-implementer`, add a **BREAKING (C-ABI 1.10; 092)** clause to each affected
   declaration in `include/fix/c_api/session.h` (T020's set), and rewrite
   `fixpp_session_register_callback`'s 1.9 sentence ("dropped as a parse error, silently … no Reject
   is sent") within the scope research R-8's table row states. Where `include/fix/c_api/error.h` lists the core errors `WIRE_INVALID_FRAME` coalesces,
