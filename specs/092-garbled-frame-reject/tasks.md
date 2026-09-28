@@ -532,7 +532,7 @@ Reject (45=N) and is not delivered; the second is delivered with no ResendReques
     512-byte buffer without the bound draws a Reject **without** 372, and NextNumIn advances only
     with that Reject sent. Mutant in a scratch copy: the disposer passes the unbounded 372 → the
     cell RED (the number consumed, no Reject). Record it in the evidence file.
-- [ ] T035 [US2] Via `phase-implementer`, the D-5 persistence cases (FR-013, R3-003) in
+- [X] T035 [US2] Via `phase-implementer`, the D-5 persistence cases (FR-013, R3-003) in
   `tests/session/test_persistent_seqnum_hydrate.cpp` (target `session_persistent_seqnum_hydrate`,
   already hooked; label from T007). Add a `092 disposer (D-5)` case, labelled by `Case::site` like
   its siblings, to both tables: a faulty application frame at seq 2 (field 3 is 35, a malformed tag
