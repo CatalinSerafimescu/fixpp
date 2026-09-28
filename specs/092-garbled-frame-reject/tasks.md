@@ -907,13 +907,13 @@ it in 092.
 - [ ] T073 Run clang-tidy, clang-format, cppcheck and IWYU (`[const §IX.4]`) on every changed file
   under `src/` and `include/`. Never format `specs/` or `include/fix/c_api/*.h`. Any finding on a
   changed line is fixed by `phase-implementer`.
-- [ ] T074 Run `python3 /home/catalin/Work/Programming/Antreprenoriat/.claude/scripts/check-comment-claims.py
+- [X] T074 Run `python3 /home/catalin/Work/Programming/Antreprenoriat/.claude/scripts/check-comment-claims.py
   --root <tree> --base origin/main`, with `<tree>` the absolute path of the worktree that owns this
   branch. Read every hit in comments this feature authored (the `version.h` history, the BREAKING
   clauses, the `admin_messages.hpp` supersession, the `seqnum_manager.hpp`/`.cpp` comments, the
   `session.cpp` comments) and the strings the script cannot see. A claim that records a result is
   deleted, not replaced.
-- [ ] T075 Run `python3 tools/check_line_citations.py --shift-audit origin/main..HEAD`. For a hit on
+- [X] T075 Run `python3 tools/check_line_citations.py --shift-audit origin/main..HEAD`. For a hit on
   the checker's own fixture strings, apply the `# citation-ok` pragma.
 
 ### Close-out checks
