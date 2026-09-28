@@ -161,6 +161,7 @@ add_executable(session_pure_tests
   test_quiesce_on_exit_residual.cpp                                     # gate-b/r1 P1-3 (Art. VII §8)
   test_enum_validation_logon.cpp                                        # T030 (075)
   wait_until_clamp_test.cpp                                             # gate-b/r2 P1-1 (Art. VII §8)
+  scan_frame_header_fault_test.cpp                                      # 092 T009/T013 (E-1)
   $<TARGET_OBJECTS:session_test_support>
 )
 target_link_libraries(session_pure_tests PRIVATE
