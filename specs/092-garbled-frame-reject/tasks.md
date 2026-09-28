@@ -935,7 +935,7 @@ it in 092.
   These are pins, green today; their proof is a mutant in a scratch copy (a read pump that continues
   after a Framer error) that turns each RED. Add `engine_readpump` to `expected-ctest-092.txt` with an
   APPEND label. Record the mutant in the evidence file.
-- [ ] T077 Via the `checklist-auditor`, re-disposition any checklist item whose subject changed
+- [X] T077 Via the `checklist-auditor`, re-disposition any checklist item whose subject changed
   during implementation (a deviation recorded in the evidence file). Derive the population by a
   complement grep over `specs/092-garbled-frame-reject/checklists/*.md` for every FR, C-2 row and
   invariant id the evidence file records a deviation against.
