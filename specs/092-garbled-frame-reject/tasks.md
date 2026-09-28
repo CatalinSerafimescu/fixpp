@@ -98,7 +98,7 @@ the population snapshots, and the label manifest (plan phase 0, quickstart §0).
   - Create `.specify/decisions/092-garbled-frame-reject-evidence.md` with an `## Owner build
     rulings` section, and ask the owner for build approval (per phase, or blanket). Record the
     answer there.
-- [ ] T002 Via `phase-implementer`, land the two benches in a **bench-only commit** (R-9). No file
+- [X] T002 Via `phase-implementer`, land the two benches in a **bench-only commit** (R-9). No file
   outside `bench/` changes in it.
   - `bench/session/scan_frame_header_bench.cpp`: clean frames (a Heartbeat, a NewOrderSingle, and
     a frame carrying a standard Length+Data pair), each under the session's dictionary hooks and
