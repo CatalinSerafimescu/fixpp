@@ -873,6 +873,9 @@ it in 092.
   - `error.hpp`: the "No reject loop (I-5)" slots;
   - `admin_messages.cpp`: the file header and the `build_reject` notes;
   - `session_fsm.hpp` ("no reject-of-reject").
+  - `session.cpp`: the banner above `parse_and_dispatch_` ("extracted from 5 inbound + 1 outbound
+    sites"). It is a count claim on the function T039 changed: delete the count and keep the
+    re-derivation recipe (C-6's population command).
 
 ### Static analysis, claims and citations
 
