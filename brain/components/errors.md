@@ -12,11 +12,16 @@ refs:
   - .specify/api-contract.md
   - .specify/2m-pybind.md
   - .specify/447-458-452-capi-refusals.md
+  - specs/092-garbled-frame-reject/spec.md
+  - specs/092-garbled-frame-reject/data-model.md
+  - spec/behaviors-and-limitations.md
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/2k-log-otel.md
   - research/G19-fix-fpml-iso20022/decisions/2i-capi.md
   - research/G19-fix-fpml-iso20022/decisions/2m-pybind.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/090-capi-refusals-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/092-garbled-frame-reject-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/092-garbled-frame-reject-evidence.md
 codegraph_entry: [error, expected_t, error_message, translate, translate_for_consumer, fixpp_strerror]
 constitution: ["§X.4"]
 ---
@@ -106,6 +111,36 @@ appending a variant that shifts either end fails the build.
 ⭐ **That is the pattern worth copying.** A comment saying *"this set is frozen"* is a claim nobody
 re-checks; a `static_assert` is the same claim, checked on every build. **Re-derive which ranges are
 frozen:** `grep -n static_assert include/fixpp/core/error.hpp`.
+
+## Rules 2 and 4 applied: the validator's field faults (092, fixpp#507)
+
+092 FR-012 made `dictionary_driven_validator::validate` reject a malformed tag or a Length+Data
+mismatch instead of ending its walk silently. It needed new C++ variants. How they were added
+is the rules above, applied:
+
+- **Appended, not slotted in.** The new variants form their own block at the next contiguous slots
+  after the enum's previous last value, although they are wire errors and the older wire slots sit
+  elsewhere. Nothing was renumbered (rule 2), and the frozen range's `static_assert` endpoints did
+  not move. The boundary tests are written in terms of the new enumerator, not a
+  literal. Read `error.hpp` for the values.
+- **Coalesced in the C ABI, not mirrored.** `translate` maps both to the existing
+  `FIXPP_ERR_WIRE_INVALID_FRAME` (rule 4). So no C code was added, no `include/fix/c_api/*.h` changed
+  for them (so the freeze pin does not move; re-derive with `tools/check_capi_freeze.sh`), and the C
+  ABI version did not move **for this change**. The validator is not reachable
+  from C in any case.
+- **Mapped to FIX codes in `reject_reason_map`**, to the same SessionRejectReason values the session
+  sends for the same fault kinds.
+- Rejected: **373 = 99 ("Other")** for a field fault. 99 is not valid on FIX.4.2. The session's
+  decision and its other rejected alternatives are on
+  [`inbound-message-path`](./inbound-message-path.md).
+
+⚠️ **Do not confuse this with C-ABI 1.10.** 092 did bump the C ABI, BREAKING. The bump is for the
+session's disposition of such frames, not for these error codes; see [`c-api`](./c-api.md). The
+seqnum_max close (FR-019) reuses the existing `store_seqnum_overflow`, which `assign_outbound`
+already returned for the outbound side.
+
+Re-derive the error-enumerating oracles with 092 research R-7's commands. Every oracle that
+enumerates the error set moves with the enum.
 
 ## What this page deliberately does NOT contain
 

@@ -870,13 +870,13 @@ it in 092.
 
 ### Docs (FR-014, R-13) — orchestrator-authored markdown, `phase-implementer` for code comments
 
-- [ ] T070 [P] `spec/behaviors-and-limitations.md`: the B-092-* rows for the shipped behaviour (the
+- [X] T070 [P] `spec/behaviors-and-limitations.md`: the B-092-* rows for the shipped behaviour (the
   C-2 dispositions, the Reject contents, the validator errors, C-ABI 1.10 BREAKING under
   `[const §X.7]`); the disclosures C-5 L-1, L-2, L-4, L-6 and L-7 as rows, each naming its cell; the
   #423 row 4 revision; and a note that #423 row 1 describes an "Ignore" fixpp does not do, citing
   `L-004-4` and fixpp#514. Run `/home/catalin/Work/Programming/Antreprenoriat/.claude/scripts/check_bl_delta.py` and record
   the delta in the evidence file.
-- [ ] T071 [P] Using T008's R-13 population for `brain/`: `brain/components/session.md`: rewrite (not append to) the passage that calls #507's
+- [X] T071 [P] Using T008's R-13 population for `brain/`: `brain/components/session.md`: rewrite (not append to) the passage that calls #507's
   frames "garbled … contrary to §4.5.2". `brain/components/inbound-message-path.md`, `wire.md`,
   `errors.md` and `c-api.md`: their decision sections gain the ruling, the rejected alternatives
   (ignore-by-default; 373=99; changing the iterator's yield; a per-site late Reject table), the

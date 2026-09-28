@@ -7,10 +7,18 @@ refs:
   - include/fixpp/wire/reject_reason_map.hpp
   - include/fixpp/wire/offset_table.hpp
   - include/fixpp/wire/errors.hpp
+  - include/fixpp/wire/validator.hpp
+  - include/fixpp/wire/tag_scan.hpp
   - .specify/2b-wire.md
+  - specs/092-garbled-frame-reject/spec.md
+  - specs/092-garbled-frame-reject/research.md
+  - specs/092-garbled-frame-reject/data-model.md
+  - spec/behaviors-and-limitations.md
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/2b-wire.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/091-data-field-bytes-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/092-garbled-frame-reject-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/092-garbled-frame-reject-evidence.md
 codegraph_entry: [Framer, OffsetTable, MessageView, dictionary_driven_validator, wire_error_to_session_reject_reason]
 constitution: ["§VIII.5"]
 ---
@@ -305,6 +313,33 @@ alone leaves `Dictionary::length_pair_data_tag(0)` and `field_ref` still reporti
 failure status, so `find()` reports that tag absent. 090 found it while making clone and reify
 refuse a failed re-parse (see [`dictionary.md`](./dictionary.md)). That refusal cannot see this case,
 because the build did not fail. Check the live B&L file before treating the row as open.
+
+## A field walk that meets a fault reports it; it does not just stop (092, fixpp#507)
+
+Before 092, `field_iterator` ended silently at a field it could not read, and
+`dictionary_driven_validator::validate` then returned conformant with every later field unchecked.
+That is a fail-open in a public API. The session could not reach it, because its own header scan
+now decides first (see [`inbound-message-path`](./inbound-message-path.md) for the session ruling,
+which revises #423's row 4). 092 FR-012 fixes the validator anyway: the owner kept it in scope.
+
+- **The iterator reports; it does not change what it yields.** `fault()` and `fault_length_tag()`
+  expose the first fault the walk met (`fixpp::wire::field_fault`, shared with the session's scan).
+  Rejected: **changing the yield**. It would add C-ABI effects through `scan_slice_for_tag`, and a
+  slice can legitimately end where a whole frame cannot (research R-7). Rejected too: disclosing
+  it as a limitation, or splitting it into its own issue (owner rulings).
+- **The validator rejects on the fault.** It checks at the top of each iteration and once after the
+  loop; `field_fault_error` in `validator.hpp` chooses the error. When the view's `OffsetTable` build
+  failed, it first walks to the fault, because a failed build leaves `msg_type()` empty and Step 1
+  would otherwise answer "unexpected tag 8". The owner's ruling on that case was "FIX, do not
+  amend" (T062a). Read `validate` for the order. The mapping to 373 is in the seam below and in
+  [`errors`](./errors.md).
+- **The scan and the full parse must agree on what a fault is** (contract C-3 I-4). The session's
+  `scan_frame_header` and `OffsetTable::build` share the fault set, and resource failures are
+  excluded from it. A planted disagreement in each direction proves the oracle (research R-2).
+
+Behaviour: B&L `B-092-8`. The session side, and the C-ABI 1.10 declaration it forced, are on
+[`inbound-message-path`](./inbound-message-path.md) and [`c-api`](./c-api.md). The FR-019 inbound
+seqnum bound is a session matter, recorded there too.
 
 ## The seam into the session layer
 

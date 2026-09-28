@@ -6,10 +6,18 @@ status: stable
 refs:
   - src/session/engine.cpp
   - include/fixpp/session/session.hpp
+  - src/session/session.cpp
+  - src/session/scan_frame_header.hpp
   - specs/015-runtime-engine/research.md
+  - specs/092-garbled-frame-reject/spec.md
+  - specs/092-garbled-frame-reject/research.md
+  - specs/092-garbled-frame-reject/contracts/unparseable-frame-disposition.md
+  - spec/behaviors-and-limitations.md
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/015-runtime-engine-gatea.md
-codegraph_entry: [run_read_pump, Framer, on_inbound_frame, Session]
+  - research/G19-fix-fpml-iso20022/decisions/speckit/092-garbled-frame-reject-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/092-garbled-frame-reject-evidence.md
+codegraph_entry: [run_read_pump, Framer, on_inbound_frame, Session, scan_frame_header, dispose_unparseable_]
 constitution: ["§VIII.5", "§XI.2"]
 ---
 
@@ -71,3 +79,72 @@ sequence-number check (041's validate gate, SendingTime accuracy, 021's PossDup 
 MsgSeqNum unconsumed. The peer's next message then looked like a gap, and the session stalled. An
 in-sequence rejected message now consumes its number (FIX-SL 2020 §4.5.4). The decision and the
 rejected "QuickFIX parity" alternative are on [`session`](./session.md); the behaviour is B-423-1.
+
+## A frame that passes the Framer but not the parse (092, fixpp#507)
+
+**The defect.** The session drove its state machine from a header scan that silently skipped a
+malformed tag and silently stopped at a malformed Length count. Every consumer of the full parse
+read a failure as "nothing to do". So a SequenceReset was applied, a TestRequest answered and a
+Logout honoured from a frame that never parsed, and an application message was consumed and lost
+with neither side told (#507, found by 091's T076).
+
+**The ruling** (owner, 2026-09-27, on #507; it revises #423's ruling table, row 4):
+- "Garbled" means only FIX-SL 2020 §4.5.2's four framing criteria. A frame that passes framing and
+  fails the parse is a TagValue encoding violation, and §9.4 routes it to a Reject.
+- That Reject follows #423's seqnum rows: it advances NextNumIn only at the expected number, and a
+  Logon or SequenceReset never advances through it.
+- A frame whose MsgSeqNum(34) was not read before the fault is disregarded (TC2020 17g). So is one
+  whose third field is not MsgType(35), in LogonReceived/Active (§4.5.2 criterion 3).
+- Before Active the frame is refused like any non-Logon, and in LogoutSent it is disregarded.
+- No field of a faulty frame is ever acted on, and no parse failure ever reads as "no reject".
+
+**Where the decision is taken.** It is one inline check in each state arm of `on_inbound_frame`,
+right after `scan_frame_header` and ahead of every guard. The disposition itself is
+`dispose_unparseable_`. The scan now stops at the **first** fault and records it; the fault-free
+path is unchanged. Read contract C-1/C-2 for the order and the rows, and B&L `B-092-*` for what
+ships. ⚠️ The invariant worth keeping is **decide before any handler reads a field**. The row
+table is not reproduced here; read the contract.
+
+**A late parse failure closes the session** (owner ruling O-2). A parse that runs after the check,
+on a frame the scan found fault-free, can still fail for a resource reason. At every such inbound
+site the session closes terminally, through `close_on_late_parse_failure_`. There is no Reject and
+the callback is not invoked. Effects already taken at the site stand; moving the decision ahead
+of them is fixpp#515.
+
+**NextNumIn never wraps** (FR-019). `SeqnumManager::check_inbound` refuses to advance from
+`seqnum_max` with `store_seqnum_overflow`, and every consuming caller then ends the session
+silently. Before 092 it wrapped to 0 and the session continued. This is the inbound twin of the
+outbound invariant on [`session`](./session.md) (`B-005-4`); the caller population is research R-14.
+
+**C-ABI 1.10, BREAKING** (`[const §X.7]`). It changes which inbound Logons are accepted and which
+inbound frames end an established session. No symbol or code changes. The carriers are on
+[`c-api`](./c-api.md).
+
+### What was rejected, and why
+
+- **Ignore by default** (disregard every framed-but-unparseable frame). A deterministically
+  malformed frame is resent identically on every ResendRequest, and fixpp has no resend-loop guard.
+  That is the stall B-423-1 measured live against QuickFIX-cpp. The disregard rows that remain
+  (D-7, D-8) carry exactly that cost, disclosed as `L-092-1`.
+- **373 = 99 ("Other").** 99 is not a valid SessionRejectReason on FIX.4.2 (plan.md, the Gate A
+  round 1 fixes; check the 373 enum in `dictionaries/FIX42.xml`). The fault kinds map to defined codes, 0 for a malformed tag and 5 for a
+  Length+Data mismatch (research R-6). Gate A round 2 deleted the residual late-site Reject that once
+  carried a fallback code (research R-6).
+- **Changing what `field_iterator` yields.** It would add C-ABI effects through `scan_slice_for_tag`,
+  and a slice can legitimately end where a whole frame cannot (research R-7). The iterator reports
+  its fault instead; see [`wire`](./wire.md).
+- **A per-site Reject table for late parse failures.** O-2 ruled that a resource failure of a
+  well-formed frame is not a peer encoding error. Within 092 every late site does one thing: it
+  closes (contract C-6).
+- **Keying the Reject on "a 35 was seen"**, or making the whole scan first-wins. The first would
+  Reject and advance a frame whose MsgType is not third, against ruling row 1. The second changed
+  fault-free frames: a duplicate 34 went from delivered to too-low (research R-1). The scan records
+  the first 34 and the positional 35 in fault-only members instead.
+- **C-ABI witnesses beyond the Logon refusal.** The T020 ruling relies on the C++ session cells for
+  the other BREAKING effects (D-3, the late-site close, the seqnum_max close, L-1, L-2 and
+  liveness), because the C observers read the session state through the thin `src/capi` layer. This
+  follows 091's 1.9 precedent. Disclosed as `L-092-12`; the owner may override it.
+
+⚠️ **Frozen records that now say the wrong thing**, flagged here and not edited: #423's ruling
+table, row 4 ("garbled … no Reject, no advance"). Row 1's "Ignore … Unchanged" also describes a
+disregard fixpp never did (`L-004-4`; fixpp#514).
