@@ -122,3 +122,9 @@ bin/bench_memory_store                      gb-json:session/bench_memory_store_W
 bin/fsm_bench                               gb-json:session/fsm_baseline.json                no
 bin/seqnum_bench                            gb-json:session/seqnum_baseline.json             no
 bin/bench_compid_authorize                  none:no-gb-baseline-recorded                     no
+# 092-garbled-frame-reject (research R-9): the inbound header scan (pure, no I/O)
+# and the clean Active on_inbound_frame path (one local io_context on a mock
+# clock, no socket, no disk write; each case checks it reached its path before
+# timing). Tier 2 stays `no`: `paired` is irreversible (Article VIII §2a).
+bin/scan_frame_header_bench                 none:no-gb-baseline-recorded                     no
+bin/on_inbound_frame_bench                  none:no-gb-baseline-recorded                     no
