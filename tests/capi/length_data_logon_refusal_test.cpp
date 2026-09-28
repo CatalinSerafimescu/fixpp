@@ -98,11 +98,12 @@ constexpr std::chrono::milliseconds kBoundPortBudget = kFirstFrameDeadline;
 static_assert(kSettleBudget + kDrainBudget < kHeartBtInt,
               "the observation window must end before a heartbeat-driven path can fire");
 
-// The initiator cells' bounds. No timer moves a session out of LogonSent (the
-// liveness loop is spawned on the transition to Active; confirm with
-// `grep -n run_liveness_loop src/session/session.cpp`), so the settle bound
-// only limits how long a reply that is never processed is waited for: it cannot
-// settle the barrier itself.
+// The initiator cells' bounds. The settle bound must stay below any mechanism
+// that can move a session out of LogonSent without the peer's reply, or a reply
+// that is never processed could settle the barrier. To re-derive it, run an
+// InitiatorCell that skips the reply write through
+// expect_refused_on_every_observer: it must fail on the settle assertion with
+// the session still in LogonSent.
 constexpr std::chrono::milliseconds kPeerAcceptBudget = kFirstFrameDeadline;
 constexpr std::chrono::milliseconds kPeerReadBudget = kFirstFrameDeadline;
 constexpr std::chrono::milliseconds kInitiatorSettleBudget = kFirstFrameDeadline;
