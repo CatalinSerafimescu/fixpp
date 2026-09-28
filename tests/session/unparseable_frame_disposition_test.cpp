@@ -29,6 +29,11 @@
 // the pre-092 session mishandles (SC-006). Each Reject cell asserts 45, 372, 373, 371
 // (or its absence) and 58 exactly.
 //
+// I1_* (tasks.md T027; contract C-3 I-1; spec FR-010): a faulty TestRequest,
+// ResendRequest, Logout, Heartbeat or GapFill in Active, in both fault shapes, draws
+// only the Reject: no handler acts on it. The section comment above StateCell states
+// how each cell is held and witnessed.
+//
 // ReplayGuard_* (tasks.md T015; research R-12): the resend store walk classifies a
 // stored frame by the header scan's MsgType. The scan stops at its first fault, so
 // a stored admin frame with a fault before its 35 scans with no MsgType; such a
@@ -44,6 +49,10 @@
 
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
+#include <asio/redirect_error.hpp>
+#include <asio/steady_timer.hpp>
+#include <asio/this_coro.hpp>
+#include <asio/use_awaitable.hpp>
 #include <asio/use_future.hpp>
 #include <chrono>
 #include <cstddef>
@@ -639,6 +648,8 @@ TEST(UnparseableFrameDisposition, Anchor_D6_Active_FaultyAppNotExpected_RejectNo
 
 // A MessageStore that keeps outbound frames and serves them to the resend walk.
 // add_outbound() plants bytes at a sequence number without Session::send.
+// park_outbound(seq) holds the store of outbound frame `seq` until release_parked(),
+// which completes it successfully.
 class ReplayStore final : public MessageStore {
 public:
     struct Record {
@@ -655,8 +666,25 @@ public:
         }
     }
 
+    void park_outbound(seqnum_t seq) { park_seq_ = seq; }
+    [[nodiscard]] bool parked() const noexcept { return parked_ != nullptr; }
+    void release_parked() {
+        if (parked_ != nullptr) {
+            parked_->cancel();
+        }
+    }
+
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store(
         seqnum_t seq, std::span<const std::byte> frame, direction_t dir) noexcept override {
+        if (dir == direction_t::outbound && seq == park_seq_) {
+            park_seq_ = 0;
+            asio::steady_timer gate{co_await asio::this_coro::executor,
+                                    asio::steady_timer::time_point::max()};
+            parked_ = &gate;
+            asio::error_code ec;
+            co_await gate.async_wait(asio::redirect_error(asio::use_awaitable, ec));
+            parked_ = nullptr;
+        }
         if (dir == direction_t::outbound) {
             add_outbound(seq, std::vector<std::byte>(frame.begin(), frame.end()));
         }
@@ -696,6 +724,8 @@ public:
 
 private:
     std::vector<Record> records_;
+    seqnum_t park_seq_ = 0;
+    asio::steady_timer* parked_ = nullptr;
     seqnum_t next_out_ = seqnum_min;
     seqnum_t next_in_ = seqnum_min;
 };
@@ -775,6 +805,246 @@ TEST(UnparseableFrameDisposition, ReplayGuard_StoredAdminFrameFaultInField2_GapF
         }
     }
     EXPECT_EQ(gap_fills, 1U) << "one GapFill at 34=2; frames at 34=2: " << at_slot;
+}
+
+// ── Phase 3 (US1): I1_*, Matrix_*, D6Edge_* and RejectLoop_* ────────────────
+//
+// Each cell holds the session in Active (initiator) or in LogonReceived (acceptor),
+// feeds one faulty frame, and then witnesses NextNumIn with the next conformant frame.
+// Expected N is 2 in both states: the peer's Logon consumed 1.
+//
+// LogonReceived is left inside the on_inbound_frame call that entered it, and the
+// Engine awaits each on_inbound_frame, so in production no later frame reaches that
+// arm. StateCell reaches it by parking the store of the acceptor's Logon reply
+// (outbound seq 1) and feeding the faulty frame while the reply is parked; the Reject
+// is therefore transmitted ahead of the reply. feed_faulty asserts the state before
+// and after the faulty frame, so a cell that did not run in LogonReceived fails.
+
+enum class At : std::uint8_t { active, logon_received };
+
+// The two fault shapes, each appended after the frame's own fields, so every field a
+// handler would act on precedes the fault.
+struct Shape {
+    std::string garble;
+    std::string_view reason;   // 373
+    std::string_view ref_tag;  // 371; empty = absent
+    std::string_view text;     // 58
+};
+
+Shape const kTagShape{
+    .garble = kMalformedTag, .reason = "0", .ref_tag = {}, .text = kTextMalformedTag};
+Shape const kCountShape{
+    .garble = kMalformedCount, .reason = "5", .ref_tag = "90", .text = kTextLengthDataMismatch};
+
+WantReject want_reject(std::string_view ref_seq, std::string_view ref_msg_type,
+                       Shape const& shape) {
+    return {.ref_seq = ref_seq,
+            .ref_msg_type = ref_msg_type,
+            .reason = shape.reason,
+            .ref_tag = shape.ref_tag,
+            .text = shape.text};
+}
+
+struct StateCell {
+    DispositionFixture fix;
+    std::shared_ptr<CountingApplication> app = std::make_shared<CountingApplication>();
+    std::shared_ptr<ReplayStoreFactory> factory = std::make_shared<ReplayStoreFactory>();
+    std::vector<std::byte> logon_frame = make_raw_frame("A", 1,
+                                                        "98=0\x01"
+                                                        "108=30\x01");
+    std::unique_ptr<Session> sess;
+    std::future<fixpp::core::expected_t<void>> logon;  // the acceptor's parked Logon exchange
+    fsm_state held;
+
+    explicit StateCell(At at)
+        : held(at == At::active ? fsm_state::Active : fsm_state::LogonReceived) {
+        fix.engine.application = app;
+        auto cfg = fix.make_cfg(/*validate=*/true);
+        if (at == At::logon_received) {
+            cfg.role = session_role::acceptor;
+        }
+        cfg.store_factory = factory;
+        sess = std::make_unique<Session>(fix.engine, cfg);
+    }
+
+    StateCell(StateCell const&) = delete;
+    StateCell& operator=(StateCell const&) = delete;
+
+    // A cell that stops early still completes the parked exchange, so no suspended
+    // frame outlives the session it references.
+    ~StateCell() {
+        if (logon.valid() && factory->last_store != nullptr) {
+            factory->last_store->release_parked();
+            (void)fixpp::test_support::pump_until_ready(fix.ioc, logon, 2s);
+        }
+    }
+
+    void enter() {
+        if (held == fsm_state::Active) {
+            fix.open_to_active(*sess);
+            return;
+        }
+        fix.open_only(*sess);
+        if (::testing::Test::HasFatalFailure()) {
+            return;
+        }
+        ASSERT_NE(factory->last_store, nullptr);
+        factory->last_store->park_outbound(1);
+        logon = asio::co_spawn(fix.ioc, sess->on_inbound_frame(logon_frame), asio::use_future);
+        ASSERT_TRUE(fixpp::test_support::pump_until(
+            fix.ioc, [this] { return factory->last_store->parked(); }, 200ms))
+            << "StateCell: the acceptor's Logon reply never reached the store";
+        ASSERT_EQ(sess->state(), fsm_state::LogonReceived);
+    }
+
+    // LogonReceived: releases the parked reply, which completes the Logon exchange.
+    void settle() {
+        if (held == fsm_state::Active) {
+            return;
+        }
+        factory->last_store->release_parked();
+        ASSERT_TRUE(fixpp::test_support::pump_until_ready(fix.ioc, logon, 200ms))
+            << "StateCell: the Logon exchange did not complete after the release";
+        auto const r = logon.get();
+        ASSERT_TRUE(r.has_value()) << "StateCell: the Logon exchange failed";
+        ASSERT_EQ(sess->state(), fsm_state::Active);
+    }
+};
+
+std::string_view state_name(fsm_state s) {
+    return s == fsm_state::Active ? "Active" : "LogonReceived";
+}
+
+// Feeds a faulty frame: exactly one outbound frame, the Reject `want`; neither
+// fromAdmin nor fromApp invoked; the state unchanged.
+void feed_faulty(StateCell& c, std::vector<std::byte> const& faulty, WantReject const& want,
+                 std::string_view row) {
+    EXPECT_EQ(c.sess->state(), c.held) << row << ": state before the faulty frame";
+    int const admin_before = c.app->from_admin;
+    int const app_before = c.app->from_app;
+    c.fix.feed(*c.sess, faulty);
+    expect_only_reject(c.fix, want, row);
+    EXPECT_EQ(c.app->from_admin, admin_before) << row << ": the faulty frame reached fromAdmin";
+    EXPECT_EQ(c.app->from_app, app_before) << row << ": the faulty frame reached fromApp";
+    EXPECT_EQ(c.sess->state(), c.held) << row << ": state after the faulty frame";
+}
+
+// A conformant Heartbeat at `seq` above NextNumIn: its only outbound frame must be a
+// ResendRequest whose BeginSeqNo(7) is `begin`, and the session must stay Active.
+void expect_heartbeat_gap(StateCell& c, std::uint32_t seq, std::string_view begin,
+                          std::string_view row) {
+    c.fix.feed(*c.sess, make_raw_frame("0", seq));
+    auto const resends = c.fix.sent_of_type("2");
+    EXPECT_EQ(c.fix.transport.sent_frames().size(), 1U)
+        << row << ": the Heartbeat at " << seq
+        << " must draw only a ResendRequest; Logouts=" << c.fix.sent_of_type("5").size();
+    EXPECT_EQ(resends.size(), 1U) << row << ": the Heartbeat at " << seq << " must be a gap";
+    if (!resends.empty()) {
+        EXPECT_EQ(extract_tag(resends.front(), 7), begin) << row << ": ResendRequest BeginSeqNo(7)";
+    }
+    EXPECT_EQ(c.sess->state(), fsm_state::Active) << row << ": state after the Heartbeat";
+}
+
+// SC-002 and SC-003 at the expected N=2: the faulty frame of `type` carrying `fields`
+// then the shape's fault draws one Reject; then a conformant Heartbeat at 3 is
+// delivered with no ResendRequest (D-5 advanced), or, for a SequenceReset (D-4), is a
+// gap from 2. With NewSeqNo(36)=500 applied the Heartbeat at 3 would be too low
+// instead (FR-010).
+void run_expected_n_cell(At at, std::string_view type, std::string const& fields,
+                         Shape const& shape) {
+    StateCell c{at};
+    c.enter();
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    std::string const row = std::string{state_name(c.held)} + " 35=" + std::string{type} +
+                            " at N (373=" + std::string{shape.reason} + ")";
+    feed_faulty(c, make_raw_frame(type, 2, fields + shape.garble), want_reject("2", type, shape),
+                row);
+    c.settle();
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    if (type == "4") {
+        expect_heartbeat_gap(c, 3, "2", row + " (NextNumIn unchanged)");
+    } else {
+        expect_heartbeat_in_sequence(c.fix, *c.sess, *c.app, 3, row + " (NextNumIn advanced)");
+    }
+}
+
+// A faulty frame of `type` at `seq` != N=2 (D-6): the Reject, then a conformant
+// Heartbeat at 2 is delivered with no ResendRequest (NextNumIn unchanged).
+void run_not_expected_cell(At at, std::string_view type, std::uint32_t seq,
+                           std::string const& fields, Shape const& shape, std::string_view what) {
+    StateCell c{at};
+    c.enter();
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    std::string const seq_text = std::to_string(seq);
+    std::string const row =
+        std::string{state_name(c.held)} + " 35=" + std::string{type} + " " + std::string{what};
+    feed_faulty(c, make_raw_frame(type, seq, fields + shape.garble),
+                want_reject(seq_text, type, shape), row);
+    c.settle();
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    expect_heartbeat_in_sequence(c.fix, *c.sess, *c.app, 2, row + " (NextNumIn unchanged)");
+}
+
+std::string const kTestRequestFields = "112=PING\x01";
+std::string const kResendRequestFields = std::string{"7=1\x01"} + "16=0\x01";
+std::string const kLogoutFields = "58=bye\x01";
+std::string const kGapFillFields = std::string{"123=Y\x01"} + "36=500\x01";
+std::string const kRejectFields = std::string{"45=1\x01"} + "373=0\x01";
+std::string const kOrderFields = "11=ORD1\x01";
+std::string const kPossDupFields = std::string{"43=Y\x01"} + "122=20231231-23:59:59.000\x01";
+
+// ── I1_* (tasks.md T027; contract C-3 I-1): no handler acts on a faulty frame ──
+//
+// Active, both shapes. Each handler's own fields precede the fault. The ResendRequest's
+// range covers the initiator's stored Logon (outbound 1), so a handler that ran would
+// answer it; "exactly one outbound frame, the Reject" is the no-reply witness for the
+// TestRequest (no Heartbeat), the ResendRequest (nothing resent) and the Logout (no
+// Logout reply), and the state check is the no-disconnect witness. These cells are
+// also the Active rows of the SC-002/SC-003 matrix for 35=1, 2, 5, 0 and 4.
+
+TEST(UnparseableFrameDisposition, I1_Active_TestRequest_MalformedTag) {
+    run_expected_n_cell(At::active, "1", kTestRequestFields, kTagShape);
+}
+TEST(UnparseableFrameDisposition, I1_Active_TestRequest_LengthDataMismatch) {
+    run_expected_n_cell(At::active, "1", kTestRequestFields, kCountShape);
+}
+TEST(UnparseableFrameDisposition, I1_Active_ResendRequestAtN_MalformedTag) {
+    run_expected_n_cell(At::active, "2", kResendRequestFields, kTagShape);
+}
+TEST(UnparseableFrameDisposition, I1_Active_ResendRequestAtN_LengthDataMismatch) {
+    run_expected_n_cell(At::active, "2", kResendRequestFields, kCountShape);
+}
+TEST(UnparseableFrameDisposition, I1_Active_ResendRequestAboveN_MalformedTag) {
+    run_not_expected_cell(At::active, "2", 5, kResendRequestFields, kTagShape, "at N+3");
+}
+TEST(UnparseableFrameDisposition, I1_Active_ResendRequestAboveN_LengthDataMismatch) {
+    run_not_expected_cell(At::active, "2", 5, kResendRequestFields, kCountShape, "at N+3");
+}
+TEST(UnparseableFrameDisposition, I1_Active_Logout_MalformedTag) {
+    run_expected_n_cell(At::active, "5", kLogoutFields, kTagShape);
+}
+TEST(UnparseableFrameDisposition, I1_Active_Logout_LengthDataMismatch) {
+    run_expected_n_cell(At::active, "5", kLogoutFields, kCountShape);
+}
+TEST(UnparseableFrameDisposition, I1_Active_Heartbeat_MalformedTag) {
+    run_expected_n_cell(At::active, "0", {}, kTagShape);
+}
+TEST(UnparseableFrameDisposition, I1_Active_Heartbeat_LengthDataMismatch) {
+    run_expected_n_cell(At::active, "0", {}, kCountShape);
+}
+TEST(UnparseableFrameDisposition, I1_Active_SequenceResetGapFill_MalformedTag) {
+    run_expected_n_cell(At::active, "4", kGapFillFields, kTagShape);
+}
+TEST(UnparseableFrameDisposition, I1_Active_SequenceResetGapFill_LengthDataMismatch) {
+    run_expected_n_cell(At::active, "4", kGapFillFields, kCountShape);
 }
 
 }  // namespace

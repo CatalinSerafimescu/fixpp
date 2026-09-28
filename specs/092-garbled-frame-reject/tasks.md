@@ -434,7 +434,7 @@ the state switch); T051's well-formed Reset-mode control and its faulty D-4 cont
 current NextNumIn is a no-op; controls by design; the D-6 and D-7 controls depend on T026). Mark each
 as a pin or control in its test comment.
 
-- [ ] T027 [US1] Via `phase-implementer`, the I-1 witnesses in
+- [X] T027 [US1] Via `phase-implementer`, the I-1 witnesses in
   `tests/session/unparseable_frame_disposition_test.cpp`, each in Active at the expected N:
   - a faulty TestRequest: a Reject, **no Heartbeat** in reply, NextNumIn advances (D-5);
   - a faulty ResendRequest: a Reject, **nothing resent**; with 34 = N it advances, with 34 ≠ N it
