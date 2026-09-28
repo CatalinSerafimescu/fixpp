@@ -834,7 +834,7 @@ it in 092.
 
 ### Mechanism deletion (SC-006)
 
-- [ ] T065 In a scratch copy, delete the inline fault branch in **one state arm at a time** (four
+- [X] T065 In a scratch copy, delete the inline fault branch in **one state arm at a time** (four
   arms) and show that arm's cells RED: the anchors of T025 and the story cells of T027–T034,
   T043–T048. Then repeat each deletion with the late-site close (T039) **also** deleted, so a refusal
   cell kept green by a late-site close is exposed. Also delete D-5's `consume_rejected_seqnum_` call
