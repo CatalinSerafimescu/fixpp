@@ -545,7 +545,7 @@ Reject (45=N) and is not delivered; the second is delivered with no ResendReques
   disposer that skips `consume_rejected_seqnum_` → `RejectedInSequence_AdvanceIsPersisted` RED; one
   that emits the Reject before it → `RejectedInSequence_PersistFailure_Fatal` RED; one that discards
   its error → `RejectedInSequence_PersistFailure_Fatal` RED. Record each in the evidence file.
-- [ ] T037 [US2] Via `phase-implementer`, the D-5 knob-off counter arm in
+- [X] T037 [US2] Via `phase-implementer`, the D-5 knob-off counter arm in
   `tests/session/test_validation_compat_toggles.cpp` (target `session_validation_compat_toggles`):
   with `validate_sequence_numbers` off, a faulty application message at N, then a conformant one at
   N+1; `seqnum_mgr_test_access().next_inbound_unsafe()` reads N+1 after the first and N+2 after the

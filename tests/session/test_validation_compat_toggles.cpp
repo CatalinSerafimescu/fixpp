@@ -1303,6 +1303,65 @@ TEST(ValidationCompatToggles, SeqReset_KnobOff_FaultyResetMode_Reject_LengthData
          .text = "Garbled field: Length does not match its Data field"});
 }
 
+// ── 092-garbled-frame-reject T037 — the D-5 knob-off counter arm ─────────────
+//
+// With validate_sequence_numbers off, delivery alone cannot witness an advance: a
+// too-high frame is delivered without advancing and without a ResendRequest. So this
+// arm reads the counter. A faulty frame at the expected 2 (field 3 is 35, a malformed
+// tag after 34) is D-5: consume_rejected_seqnum_ advances NextNumIn to 3, then the
+// Reject (asserted in full). A conformant NewOrderSingle at 3 is then in sequence:
+// delivered to fromApp and the counter reads 4. One cell each for an application
+// frame, a Reject(3) and a Logout(5) as the faulty frame; the faulty Logout draws no
+// Logout reply and does not end the session. To check the arm can fail, skip
+// consume_rejected_seqnum_ in dispose_unparseable_ in a scratch copy.
+// Anchors: specs/092-garbled-frame-reject contract C-2 (D-5), C-3 I-6; spec FR-004,
+//          FR-011; quickstart §1 "D-5 advance witness".
+void run_d5_knob_off_counter_092(std::string_view msg_type, std::string_view fields) {
+    auto app = std::make_shared<CountingApp028>();
+    auto fix = make_acceptor_seqval_off(app);
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
+    const auto& smgr = fix->session->seqnum_mgr_test_access();
+    ASSERT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{2})
+        << "Precondition: next_inbound must be 2 before test";
+    fix->clear_capture();
+    const int from_app_before = app->from_app_count;
+    const int from_admin_before = app->from_admin_count;
+
+    fix->feed(
+        make_fix_frame("FIX.4.4", msg_type, 2, "CLI", "SRV", std::string(fields) + "9x9=1\x01"));
+    EXPECT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{3})
+        << "D-5 knob off: the faulty frame at 2 must consume 2";
+    expect_knob_off_reject_092(
+        fix->capture.frames, "2", msg_type,
+        {.reason = "0", .ref_tag = {}, .text = "Garbled field: malformed tag"});
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "D-5 knob off: session must stay Active after the faulty frame";
+    EXPECT_EQ(app->from_app_count, from_app_before) << "the faulty frame never reaches fromApp";
+    EXPECT_EQ(app->from_admin_count, from_admin_before)
+        << "the faulty frame never reaches fromAdmin";
+
+    fix->clear_capture();
+    fix->feed(make_fix_frame("FIX.4.4", "D", 3, "CLI", "SRV"));
+    EXPECT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{4})
+        << "D-5 knob off: the conformant frame at 3 must be in sequence and advance";
+    EXPECT_EQ(app->from_app_count, from_app_before + 1)
+        << "D-5 knob off: the conformant frame at 3 must be delivered to fromApp";
+    EXPECT_TRUE(fix->capture.frames.empty()) << "the conformant frame at 3 must draw nothing";
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
+}
+
+TEST(ValidationCompatToggles, D5_KnobOff_FaultyApplication_CounterAdvances) {
+    run_d5_knob_off_counter_092("D", field(11, "ORD1"));
+}
+
+TEST(ValidationCompatToggles, D5_KnobOff_FaultyReject_CounterAdvances) {
+    run_d5_knob_off_counter_092("3", field(45, "1") + field(373, "0"));
+}
+
+TEST(ValidationCompatToggles, D5_KnobOff_FaultyLogout_CounterAdvances) {
+    run_d5_knob_off_counter_092("5", field(58, "bye"));
+}
+
 // ── T012 (US3) — Default/combination/no-op witnesses ────────────────────────
 //
 // Anchors: spec.md FR-007/FR-008/FR-009, SC-003/SC-005; data-model.md
