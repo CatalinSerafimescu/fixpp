@@ -904,7 +904,7 @@ it in 092.
 
 ### Static analysis, claims and citations
 
-- [ ] T073 Run clang-tidy, clang-format, cppcheck and IWYU (`[const §IX.4]`) on every changed file
+- [X] T073 Run clang-tidy, clang-format, cppcheck and IWYU (`[const §IX.4]`) on every changed file
   under `src/` and `include/`. Never format `specs/` or `include/fix/c_api/*.h`. Any finding on a
   changed line is fixed by `phase-implementer`.
 - [X] T074 Run `python3 /home/catalin/Work/Programming/Antreprenoriat/.claude/scripts/check-comment-claims.py
