@@ -881,7 +881,7 @@ it in 092.
   `errors.md` and `c-api.md`: their decision sections gain the ruling, the rejected alternatives
   (ignore-by-default; 373=99; changing the iterator's yield; a per-site late Reject table), the
   1.10 declaration and the FR-019 bound. Each page's document list gains 092's bundle.
-- [ ] T072 Via `phase-implementer`, every remaining code-comment site in T008's R-13 population,
+- [X] T072 Via `phase-implementer`, every remaining code-comment site in T008's R-13 population,
   including the #423 ruling references not already rewritten in T026. Header comments name the
   superseding ruling. **Amended at Phase 3 (2026-09-28):** R-13's grep does not reach `tests/`,
   so this task also covers `tests/session/session_reject_test.cpp`'s file-header scenario 2

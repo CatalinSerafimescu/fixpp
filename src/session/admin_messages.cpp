@@ -19,6 +19,10 @@
 //
 // Anchors: data-model.md E5; contracts/admin_messages.hpp; spec FR-002..007;
 // [FIX-SL §4.2]–§4.6.
+//
+// The no-reject-loop guard (I-5) named above and at build_reject:
+// Superseded by 092 contract C-2 (fixpp#507): the no-reject-loop rule holds for a
+// well-formed frame only; a Reject or Logout the header scan cannot read is Rejected.
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -732,7 +736,8 @@ namespace {
 //   RefMsgType(372)          — the offending message's MsgType (empty → omit)
 //   SessionRejectReason(373) — the reject reason code
 // Header fields: 8/9/35/49/56/34/52 + trailer 10= per [FIX-SL §4.5.4].
-// The no-reject-loop guard (I-5) is at the DISPATCH SITE (Session FSM), not here.
+// The no-reject-loop guard (I-5) is at the DISPATCH SITE (Session FSM), not here,
+// and it covers a well-formed frame only (see the file header).
 // This builder is dumb: it emits whatever is passed.
 //
 // 092-garbled-frame-reject (research R-5): the body is build_reject_with_text's,

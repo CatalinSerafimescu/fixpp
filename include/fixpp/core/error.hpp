@@ -292,7 +292,9 @@ enum class error : std::uint8_t {
     session_msg_type_invalid_for_state = 72,  // FR-007, [FIX-SL §4.5.4] — message type not
                                               //   legal in the current FSM state (e.g. Heartbeat
                                               //   before Active). Surfaced as a session Reject
-                                              //   with RefMsgType. No reject loop (I-5).
+                                              //   with RefMsgType. No reject loop (I-5)
+                                              //   for a well-formed frame; a faulty frame
+                                              //   is dispositioned by 092 contract C-2.
                                               //   → FIXPP_ERR_SESSION_REJECT
     session_logout_timeout = 73,              // FR-005 (005 admin path) + 013 FR-008
                                               //   (FSM-driven graceful Logout timeout) —

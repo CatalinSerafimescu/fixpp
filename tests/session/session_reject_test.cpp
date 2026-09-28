@@ -13,13 +13,15 @@
 //       - RefMsgType(372) carrying the ref_msg_type argument
 //       - SessionRejectReason(373) carrying the reason argument
 //
-//  2. No-reject-loop (I-5): feeding a malformed Reject(35=3) to an Active
+//  2. No-reject-loop (I-5): feeding a well-formed Reject(35=3) to an Active
 //     session does NOT cause the session to emit another Reject. The transport
 //     must not emit any frame in response to an inbound Reject.
+//     2b. A Reject the header scan cannot read IS Rejected
+//     (MalformedInboundRejectIsRejected; 092 contract C-2 D-5).
 //
-//  3. No-reject-loop on Logout(35=5): feeding a malformed Logout to an Active
-//     session while in LogoutSent state still emits a Logout-confirm only once
-//     (the session handles the Logout gracefully, never a Reject-of-Logout).
+//  3. No-reject-loop on Logout(35=5): feeding a Logout that is well-formed on the
+//     wire but carries a wrong CompID to an Active session never draws a
+//     Reject-of-Logout.
 //
 //  4. message-type-for-state (session_msg_type_invalid_for_state, slot 72):
 //     an app-message type (e.g. 35=D, NewOrderSingle) received in
@@ -29,6 +31,10 @@
 //
 // Anchors: data-model.md §I-5, error slot 72; [FIX-SL §4.5.4];
 // spec FR-007; SC-006; tasks.md T050/T054/T056.
+//
+// Scenarios 2 and 3's no-reject-loop rule:
+// Superseded by 092 contract C-2 (fixpp#507): the no-reject-loop rule holds for a
+// well-formed frame only; a Reject or Logout the header scan cannot read is Rejected.
 #include <gtest/gtest.h>
 
 #include <array>
@@ -491,8 +497,9 @@ TEST(SessionReject, RejectTextConstantsAreFixed) {
 
 // ── Test 2: No-reject-loop on inbound Reject (I-5) ───────────────────────────
 //
-// A malformed Reject(35=3) arriving in Active state must NOT cause the session
-// to emit another Reject. The transport sent-count must not increase.
+// A well-formed Reject(35=3) arriving in Active state must NOT cause the session
+// to emit another Reject. The transport sent-count must not increase. A Reject the
+// header scan cannot read is Rejected instead: see MalformedInboundRejectIsRejected.
 TEST(SessionReject, NoRejectLoopOnInboundReject) {
     RejectFixture f;
     auto cfg = f.make_cfg("FIX.4.2");
@@ -561,9 +568,10 @@ TEST(SessionReject, MalformedInboundRejectIsRejected) {
 
 // ── Test 3: No-reject-loop on inbound malformed Logout ───────────────────────
 //
-// A malformed Logout(35=5) (CompID mismatch) arriving in Active state triggers
-// a Disconnected state transition per the matrix (refused), but must NEVER
-// generate a Reject frame (I-5).
+// A Logout(35=5) that is well-formed on the wire but carries a wrong CompID,
+// arriving in Active state, triggers a Disconnected state transition per the
+// matrix (refused), but must NEVER generate a Reject frame (I-5). "Malformed" in
+// this test's name means that CompID mismatch, not a header-scan fault.
 TEST(SessionReject, NoRejectOnMalformedLogout) {
     RejectFixture f;
     auto cfg = f.make_cfg("FIX.4.2");
@@ -575,8 +583,8 @@ TEST(SessionReject, NoRejectOnMalformedLogout) {
     // level) goes through the basic flow: CompID check → Disconnected.
     // The guard (CompID mismatch) fires before the Reject path — so the
     // malformed-Logout-triggers-Disconnect test is the right one here.
-    // The no-reject-loop invariant says: a session-level Reject is never
-    // itself rejected. Here we verify the transport never emits a Reject
+    // The no-reject-loop invariant says: a well-formed session-level Reject is
+    // never itself rejected. Here we verify the transport never emits a Reject
     // frame (35=3) in response to an inbound Logout (35=5).
 
     const std::size_t before = f.transport.sent_count();
@@ -604,8 +612,8 @@ TEST(SessionReject, NoRejectOnMalformedLogout) {
 //
 // Per data-model.md matrix "Active row / invalid MsgType / type-invalid-for-state":
 //   → session Reject(SessionRejectReason)
-// The no-reject-loop guard ensures Reject(35=3) and Logout(35=5) are NOT
-// themselves rejected.
+// The no-reject-loop guard ensures a well-formed Reject(35=3) or Logout(35=5) is
+// NOT itself rejected.
 TEST(SessionReject, AppMessageInActiveTriggersReject) {
     RejectFixture f;
     auto cfg = f.make_cfg("FIX.4.2");

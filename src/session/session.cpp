@@ -281,13 +281,11 @@ void Session::emit_event(SessionEvent ev) noexcept {
 
 // ── parse_and_dispatch_ ───────────────────────────────────────────────────────
 //
-// Shared parse-and-callback ritual extracted from 5 inbound + 1 outbound sites:
-//   - fire_to_admin_           (toAdmin; 8192-byte arena — admin frames are small)
-//   - fromAdmin SequenceReset  (16384-byte arena — inbound frames may be larger)
-//   - fromAdmin Logout         (16384-byte arena)
-//   - fromAdmin generic        (16384-byte arena)
-//   - fromApp                  (16384-byte arena — app payloads can be large)
-//   - toApp in send_impl       (16384-byte arena)
+// Shared parse-and-callback ritual for the receive callbacks (fromAdmin/fromApp) over
+// inbound frames and the send callbacks (toAdmin/toApp) over frames fixpp built. Each
+// call site passes its arena size. Re-derive the call sites with contract C-6's command,
+// `grep -n "parse_and_dispatch_(\|validate_inbound_(" src/session/session.cpp`, and read
+// each call's byte provenance (received from the peer, or built by fixpp).
 //
 // Arena sizing: two named constants document the intentional difference.
 //   kAdminParseArena  = 8192: admin messages (Heartbeat/Logon/TestRequest/…) have a
@@ -2409,8 +2407,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::dispose_unparseable_(
 // fault-free frame pays no coroutine frame for it.
 //
 // Guard precedence per data-model.md matrix preamble (T056 adds steps 1/3/5):
-//   (1) parse/type recognised → else session Reject; no-loop-guard exempts
-//       Reject(35=3) and Logout(35=5) from triggering a Reject.
+//   (1) parse/type recognised → else session Reject; for a well-formed frame the
+//       no-loop-guard exempts Reject(35=3) and Logout(35=5) from triggering a Reject.
+//       A faulty frame never reaches step (1): the check above disposes of it under
+//       092 contract C-2 whatever its MsgType, so a faulty Reject or Logout can be
+//       Rejected.
 //   (2) CompID/BeginString gate (post-logon states)
 //   (3) SendingTime(52) MaxLatency vs effective clock (Q3):
 //       established session → Reject(reason=10, refTag=52) → Logout → Disconnect
@@ -2471,6 +2472,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // (built at open() when validate_inbound_messages && dictionary).
             // No-reject-loop: skip validate for 35=3 (Reject) and 35=5 (Logout) —
             // these are drained silently on this arm anyway (FR-004 no-loop guard).
+            // Only a well-formed frame reaches here: a faulty one is refused above
+            // (092 contract C-2 D-1).
             // Seqnum is NOT advanced on validate failure (validate fires before
             // check_inbound — C-3 invariant). [041 T014; data-model E-4; SC-005]
             // Arena: kInboundParseArena (16384) matches the dispatch arena so the gate
@@ -3173,6 +3176,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // ── Guard (3): SendingTime MaxLatency (Q3, T055/T056) ─────────────
             // Check |inbound_sending_time − effective_now| ≤ MaxLatency (D-8: 120 s).
             // No-reject-loop guard: Reject(35=3) and Logout(35=5) are exempt per I-5.
+            // Only a well-formed frame reaches this guard; a faulty one was disposed
+            // of above under 092 contract C-2.
             // Established session: Reject(reason=10, refTag=52) → Logout → Disconnect.
             // FR-007: missing SendingTime (empty) → Reject-Logout-Disconnect.
             // FR-008: malformed SendingTime (parse failure) → Reject-Logout-Disconnect.
@@ -3872,7 +3877,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 co_return fixpp::core::expected_t<void>{};
             }
 
-            // I-5: inbound Reject(35=3) is logged and accepted; never re-rejected.
+            // I-5: a well-formed inbound Reject(35=3) is logged and accepted; never
+            // re-rejected. A faulty Reject never reaches here: 092 contract C-2
+            // disposes of it above, and can Reject it.
             if (hdr.msg_type == "3") {  // Reject (35=3)
                 // Active row: session-level log, no Reject-of-a-Reject (I-5).
                 // 029 T010 — PERSIST: check_inbound advanced next_inbound for the
@@ -4061,7 +4068,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // dispatched via the in-seq path). Any other MsgType in Active →
                 // session-level Reject(35=3) with SessionRejectReason and RefMsgType.
                 // Session stays Active. No-reject-loop: guard (type == "3" || type
-                // == "5") exempted above.
+                // == "5") exempted above, for a well-formed frame (a faulty one is
+                // disposed of under 092 contract C-2 before any guard).
                 //
                 // 010 F4 / W3.3-final fix (codex + QuickFIX-cpp + QuickFIX/J survey
                 // 2026-05-23): "A" (dup-Logon) IS NOT in is_session_admin — per 005

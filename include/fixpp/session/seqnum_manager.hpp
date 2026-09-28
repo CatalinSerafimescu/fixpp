@@ -30,7 +30,9 @@
 //
 // Invariants enforced:
 //   I-2: counters advance by exactly +1; zero drift over a long run.
-//   I-4: too-high is session-fatal; no ResendRequest; caller emits Logout+disconnect.
+//   I-4: check_inbound only classifies a too-high MsgSeqNum; the caller's
+//        disposition depends on its state. Re-derive the callers with
+//        `grep -n "check_inbound(" src/session/session.cpp`.
 //   I-8: seqnum_max overflow is session-fatal; no wrap. Both counters: the inbound
 //        side is 092 FR-019 (contract C-3 I-7).
 //
@@ -81,8 +83,7 @@ public:
     //
     // The disposition is per result (092 FR-019). Too-low and too-high keep their
     // context-dependent handling at the caller. store_seqnum_overflow requires FR-019's
-    // silent transition to Disconnected: no Reject, no Logout, no delivery. I-4: no
-    // ResendRequest is emitted by 005; the recovery feature is deferred.
+    // silent transition to Disconnected: no Reject, no Logout, no delivery.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> check_inbound(
         seqnum_t seq) noexcept;
 

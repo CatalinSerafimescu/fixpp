@@ -17,6 +17,10 @@
 // (tests/session/fsm_transition_matrix_test.cpp — Phase 8 / T058) asserts
 // total coverage.
 //
+// inbound_reject's "no reject-of-reject" below:
+// Superseded by 092 contract C-2 (fixpp#507): the no-reject-loop rule holds for a
+// well-formed frame only; a Reject or Logout the header scan cannot read is Rejected.
+//
 // No asio::awaitable in this header. No std::mutex. ([const §XV.9] grep gate:
 // this header is safe to include from awaitable coroutine contexts.)
 #pragma once
@@ -54,7 +58,8 @@ enum class fsm_state : std::uint8_t {
 //   inbound_logon_refused   — Logon received but refused (BeginString/CompID/not-1st)
 //   inbound_heartbeat       — Heartbeat(35=0) received in Active
 //   inbound_test_request    — TestRequest(35=1) received → echo Heartbeat
-//   inbound_reject          — Reject(35=3) received (log, no reject-of-reject)
+//   inbound_reject          — Reject(35=3) received (log, no reject-of-reject;
+//                             a well-formed Reject only, see the header)
 //   inbound_logout          — Logout(35=5) received
 //   inbound_out_of_scope_admin — ResendRequest/SequenceReset: defined bounded
 //                                reject (session_admin_not_supported, FR-017)
