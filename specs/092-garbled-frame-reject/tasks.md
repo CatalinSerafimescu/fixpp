@@ -855,7 +855,18 @@ it in 092.
   1.10 declaration and the FR-019 bound. Each page's document list gains 092's bundle.
 - [ ] T072 Via `phase-implementer`, every remaining code-comment site in T008's R-13 population,
   including the #423 ruling references not already rewritten in T026. Header comments name the
-  superseding ruling.
+  superseding ruling. **Amended at Phase 3 (2026-09-28):** R-13's grep does not reach `tests/`,
+  so this task also covers `tests/session/session_reject_test.cpp`'s file-header scenario 2
+  ("feeding a malformed Reject does not cause another Reject"). That statement is now false for a
+  faulty frame (see `SessionReject.MalformedInboundRejectIsRejected`). Re-run R-13 at HEAD over
+  `include src tests` too, and treat each added hit as a planned edit. Leads from Phase 3 (a lead
+  is not a population):
+  - `session.cpp`: the guard-precedence block above `on_inbound_frame`, the `parse error — skip`
+    comments in `parse_and_dispatch_`, and the no-reject-loop comments at the Active-arm guard and
+    the inbound-Reject handler;
+  - `error.hpp`: the "No reject loop (I-5)" slots;
+  - `admin_messages.cpp`: the file header and the `build_reject` notes;
+  - `session_fsm.hpp` ("no reject-of-reject").
 
 ### Static analysis, claims and citations
 
