@@ -46,6 +46,9 @@
 // a malformed Reject draws one fixpp Reject per malformed frame, and none for a
 // well-formed Reject.
 //
+// Liveness_* (tasks.md T031; spec FR-018): one faulty frame inside the first heartbeat
+// interval does not refresh inbound liveness, so a TestRequest is still sent at it.
+//
 // ReplayGuard_* (tasks.md T015; research R-12): the resend store walk classifies a
 // stored frame by the header scan's MsgType. The scan stops at its first fault, so
 // a stored admin frame with a fault before its 35 scans with no MsgType; such a
@@ -1224,6 +1227,131 @@ TEST(UnparseableFrameDisposition, RejectLoop_EachFixppRejectAnswersOnePeerFrame)
         << "control: a well-formed Reject must draw nothing; Rejects="
         << c.fix.sent_of_type("3").size();
     EXPECT_EQ(c.sess->state(), fsm_state::Active) << "state after the well-formed Reject";
+}
+
+// ── Liveness_* (tasks.md T031; spec FR-018; contract C-2 "Liveness") ──────────
+//
+// In Active, exactly one faulty frame of one row arrives inside the first heartbeat
+// interval, after the clock has moved past the Logon (which seeds inbound liveness), so
+// a refresh by the faulty frame would move the deadline. Every field a guard reads (34,
+// 35, 49, 52, 56) precedes the fault, except in the D-7 cell, whose fault precedes 34.
+// Each cell asserts the session is Active one millisecond before the interval and that
+// a TestRequest(35=1) is sent at it: the interval runs from the Logon, not from the
+// faulty frame. The D-6 cell then answers with a well-formed Heartbeat echoing the
+// TestReqID(112) and stays Active past the grace window; the others send nothing more
+// and are disconnected exactly at the grace window.
+//
+// A cell labelled a pin sends a frame that returns before the Active arm's liveness
+// refresh on the pre-092 session as well, so reverting the disposer cannot fail it. To
+// check that such a cell (or the D-7 cell) can fail, make dispose_unparseable_ write
+// last_inbound_steady_ in a scratch copy and run the cell: it must fail at the
+// TestRequest-at-the-interval check.
+//
+// Time is the mock clock's. After each advance, drain_ready runs every handler the
+// advance made ready; no wall-clock window decides a cell.
+
+// Runs every ready handler until none is left. No wall-clock bound: the mock clock's
+// wake-ups are posted handlers, so after an advance they are all ready.
+void drain_ready(asio::io_context& ioc) {
+    ioc.restart();
+    while (ioc.poll() > 0) {
+        ioc.restart();
+    }
+    ioc.restart();
+}
+
+enum class Ending : std::uint8_t { answered, silent };
+
+// `next_in` is NextNumIn after the faulty frame (the answering Heartbeat's 34).
+void run_liveness_cell(std::vector<std::byte> const& faulty, std::uint32_t next_in, Ending ending,
+                       std::string_view row) {
+    DispositionFixture fix;
+    auto const app = std::make_shared<CountingApplication>();
+    fix.engine.application = app;
+    auto const cfg = fix.make_cfg(/*validate=*/true);
+    ASSERT_TRUE(cfg.heartbeat_interval.has_value());
+    auto const interval =
+        std::chrono::duration_cast<std::chrono::milliseconds>(*cfg.heartbeat_interval);
+    auto const fault_at = interval / 3;
+    Session sess{fix.engine, cfg};
+    fix.open_to_active(sess);
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    drain_ready(fix.ioc);
+
+    fix.clock->advance(fault_at);
+    drain_ready(fix.ioc);
+    fix.feed(sess, faulty);
+    EXPECT_EQ(sess.state(), fsm_state::Active)
+        << row << ": the faulty frame must not end the session";
+    fix.transport.reset();
+
+    fix.clock->advance(interval - fault_at - 1ms);
+    drain_ready(fix.ioc);
+    EXPECT_EQ(sess.state(), fsm_state::Active)
+        << row << ": state one millisecond before the interval";
+    EXPECT_TRUE(fix.sent_of_type("1").empty())
+        << row << ": no TestRequest may be sent before the interval";
+
+    fix.clock->advance(1ms);
+    drain_ready(fix.ioc);
+    auto const test_requests = fix.sent_of_type("1");
+    EXPECT_EQ(test_requests.size(), 1U)
+        << row << ": a TestRequest must be sent at the interval counted from the Logon; none means "
+        << "the faulty frame refreshed inbound liveness";
+    EXPECT_EQ(sess.state(), fsm_state::Active) << row << ": state at the interval";
+    if (test_requests.empty()) {
+        return;
+    }
+
+    if (ending == Ending::answered) {
+        std::string const id = extract_tag(test_requests.front(), 112);
+        fix.feed(sess, make_raw_frame("0", next_in, "112=" + id + "\x01"));
+        fix.clock->advance(interval + 1ms);
+        drain_ready(fix.ioc);
+        EXPECT_EQ(sess.state(), fsm_state::Active)
+            << row << ": the Heartbeat echoing 112=" << id
+            << " answers the TestRequest, so the grace window must not disconnect";
+        return;
+    }
+    fix.clock->advance(interval - 1ms);
+    drain_ready(fix.ioc);
+    EXPECT_EQ(sess.state(), fsm_state::Active)
+        << row << ": state one millisecond before the grace window ends";
+    fix.clock->advance(2ms);
+    drain_ready(fix.ioc);
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected)
+        << row << ": the unanswered TestRequest must end the session at the grace window";
+}
+
+// Pin (see the section comment).
+TEST(UnparseableFrameDisposition, Liveness_D4_SequenceReset_TestRequestAtInterval) {
+    run_liveness_cell(
+        make_raw_frame("4", 2, std::string{"123=N\x01"} + "36=500\x01" + kMalformedTag), 2,
+        Ending::silent, "D-4");
+}
+
+TEST(UnparseableFrameDisposition, Liveness_D5_Application_TestRequestAtInterval) {
+    run_liveness_cell(make_raw_frame("D", 2, kOrderFields + kMalformedTag), 3, Ending::silent,
+                      "D-5 (application)");
+}
+
+// Pin (see the section comment).
+TEST(UnparseableFrameDisposition, Liveness_D5_Reject_TestRequestAtInterval) {
+    run_liveness_cell(make_raw_frame("3", 2, kRejectFields + kMalformedTag), 3, Ending::silent,
+                      "D-5 (Reject)");
+}
+
+// Pin (see the section comment). The one answered cell.
+TEST(UnparseableFrameDisposition, Liveness_D6_TooHigh_TestRequestAnswered) {
+    run_liveness_cell(make_raw_frame("D", 7, kOrderFields + kMalformedTag), 2, Ending::answered,
+                      "D-6");
+}
+
+TEST(UnparseableFrameDisposition, Liveness_D7_FaultBefore34_TestRequestAtInterval) {
+    run_liveness_cell(wrap_body(std::string{"35=D\x01"} + kHeader + kMalformedTag + "34=2\x01"), 2,
+                      Ending::silent, "D-7");
 }
 
 }  // namespace

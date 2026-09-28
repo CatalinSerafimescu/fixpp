@@ -468,7 +468,7 @@ as a pin or control in its test comment.
     peer answers each fixpp Reject with a malformed Reject; the number of fixpp Rejects equals the
     number of malformed frames the peer sent, and fixpp originates none in reply to a well-formed
     Reject.
-- [ ] T031 [US1] Via `phase-implementer`, the liveness cells (FR-018) in
+- [X] T031 [US1] Via `phase-implementer`, the liveness cells (FR-018) in
   `tests/session/unparseable_frame_disposition_test.cpp`. In Active, within one heartbeat interval,
   send **exactly one** faulty frame of one row and nothing else: one cell each for D-4, D-5 (a faulty
   application frame, and a faulty Reject(3)), D-6 (one too-high frame; a second one while
