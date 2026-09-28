@@ -339,7 +339,7 @@ C-2 row, and the rows are one function, so the mechanism lands here with one anc
 - [X] T022 [P] Via `phase-implementer`, set `tests/capi/version_test.cpp`'s exact-version cell and
   `CompositeMacroValue` to 1.10. Run: RED against MINOR 9 (`[const §VII.3]`). Commit with the RED
   output.
-- [ ] T023 Via `phase-implementer`, bump `FIXPP_C_ABI_VERSION_MINOR` 9 → 10 in
+- [X] T023 Via `phase-implementer`, bump `FIXPP_C_ABI_VERSION_MINOR` 9 → 10 in
   `include/fix/c_api/version.h`, with a 1.10 history comment naming 092/fixpp#507, every observer,
   and every effect T020 classified that has no carrying declaration. Update every in-repo consumer
   from `git grep -ln "VERSION_MINOR\|0x010900\|1_9_0\|(9U << 8U)" -- . ':!specs'`, each hit
