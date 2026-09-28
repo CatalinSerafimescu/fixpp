@@ -96,6 +96,11 @@
 // timeout ends the session. The section comment above run_d9_cell states which cell is
 // a pin.
 //
+// Disclosed_* (tasks.md T049; contract C-5 L-1, L-2, L-4): the disclosed outcomes of a
+// replayed frame whose fault precedes 34, of a faulty GapFill during AwaitingResend,
+// and of a malformed SignatureLength(93)/Signature(89) pair. The section comment above
+// any_state_name states how the scripted-peer runs are pinned.
+//
 // Anchors: specs/092-garbled-frame-reject/spec.md SC-001, FR-007;
 //          contracts/unparseable-frame-disposition.md C-2 (D-4) and its Reject contents;
 //          fixpp#507 (the T076 table and reproducer).
@@ -2968,6 +2973,183 @@ TEST(UnparseableFrameDisposition, D9_FaultyLogout_LengthDataMismatch_NotTakenAsR
 TEST(UnparseableFrameDisposition, D9_FaultyTestRequest_DrawsNothing_Pin) {
     run_d9_cell(make_raw_frame("1", 2, kTestRequestFields + kMalformedTag),
                 "D-9 faulty TestRequest");
+}
+
+// ── Disclosed_* (tasks.md T049; contract C-5 L-1, L-2, L-4) ──────────────────
+//
+// Disclosed_L1_* and Disclosed_L2_* drive an Active initiator over a FileStore
+// (LateCell) with a scripted peer (ScriptedPeer: it stores what it sends and answers
+// each ResendRequest by replaying its stored bytes with PossDupFlag(43)=Y and
+// OrigSendingTime(122) inserted after 34). Each fed frame is rendered as one step: the
+// frame's 35, 34 and 43, every frame fixpp sent in reply (a ResendRequest with 7 and
+// 16, a Reject with 45, 372, 373, 371 and 58), and the state after it. The whole trace is
+// compared with the expected trace spelled out in the cell, so a change to any step,
+// or to the step at which the run ends, fails the cell. The run is bounded by an
+// iteration cap derived from the script, as in the ScriptedPeer_* cell. After the run
+// the store is reopened and its durable NextNumIn read (LateCell::durable_next_inbound):
+// the number a reconnect resumes from, and so where the peer's next replay begins.
+
+std::string_view any_state_name(fsm_state s) {
+    switch (s) {
+        case fsm_state::NotConnected:
+            return "NotConnected";
+        case fsm_state::LogonSent:
+            return "LogonSent";
+        case fsm_state::LogonReceived:
+            return "LogonReceived";
+        case fsm_state::Active:
+            return "Active";
+        case fsm_state::LogoutSent:
+            return "LogoutSent";
+        case fsm_state::Disconnected:
+            return "Disconnected";
+    }
+    return "?";
+}
+
+// One step: `fed`, what fixpp sent in reply, and the state after it.
+std::string render_step(std::vector<std::byte> const& fed, DispositionFixture const& fix,
+                        Session const& sess) {
+    std::string out = "35=" + extract_tag(fed, 35) + " 34=" + extract_tag(fed, 34);
+    if (extract_tag(fed, 43) == "Y") {
+        out += " 43=Y";
+    }
+    out += " ->";
+    for (auto const& f : fix.transport.sent_frames()) {
+        std::string const type = extract_tag(f, 35);
+        out += " [35=" + type;
+        if (type == "2") {
+            out += " 7=" + extract_tag(f, 7) + " 16=" + extract_tag(f, 16);
+        } else if (type == "3") {
+            out += " 45=" + extract_tag(f, 45) + " 372=" + extract_tag(f, 372) +
+                   " 373=" + extract_tag(f, 373) +
+                   (has_field(f, "371=") ? " 371=" + extract_tag(f, 371) : std::string{}) +
+                   " 58=" + extract_tag(f, 58);
+        }
+        out += "]";
+    }
+    return out + " " + std::string{any_state_name(sess.state())};
+}
+
+// Feeds the script through `peer` until the queue drains with the script exhausted,
+// the session leaves Active, or the cap is reached; returns the rendered steps.
+std::vector<std::string> run_scripted(LateCell& c, ScriptedPeer& peer,
+                                      std::vector<std::vector<std::byte>> const& script) {
+    std::size_t const cap = script.size() * (1 + 1 + script.size());
+    std::vector<std::string> steps;
+    std::size_t next = 0;
+    while (steps.size() < cap && c.sess->state() == fsm_state::Active) {
+        if (peer.wire.empty()) {
+            if (next == script.size()) {
+                break;
+            }
+            peer.sent(script[next]);
+            peer.wire.push_back(script[next++]);
+        }
+        auto const frame = peer.wire.front();
+        peer.wire.pop_front();
+        c.fix.feed(*c.sess, frame);
+        steps.push_back(render_step(frame, c.fix, *c.sess));
+        for (auto const& out : c.fix.transport.sent_frames()) {
+            peer.on_fixpp_frame(out, frame);
+        }
+    }
+    return steps;
+}
+
+std::string joined(std::vector<std::string> const& steps) {
+    std::string out;
+    for (auto const& s : steps) {
+        out += "\n  " + s;
+    }
+    return out;
+}
+
+// L-1: the peer sends a NewOrderSingle at N = 2 whose malformed tag precedes 34 (D-7),
+// then a NewOrderSingle at 3, a Heartbeat at 4 and NewOrderSingles at 5 and 6. The
+// replay of the faulty frame carries the same fault before 34, so it is disregarded
+// again. The expected trace pins the loop contract C-5 L-1 discloses: the gap draws a
+// ResendRequest, the replay is disregarded, AwaitingResend draws no second
+// ResendRequest for the PossDup resend or the too-high Heartbeat, and the next new
+// message that is neither a Heartbeat nor a PossDup ends the session. The durable
+// NextNumIn after the run must be 2, so a reconnect asks for the faulty frame again and
+// the loop resumes.
+TEST(UnparseableFrameDisposition, Disclosed_L1_ReplayedFaultBefore34_ResendLoop) {
+    LateCell c{{.validate = false}};
+    c.fix.open_to_active(*c.sess);
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    std::vector<std::vector<std::byte>> script;
+    script.push_back(
+        wrap_body(std::string{"35=D\x01"} + kMalformedTag + "34=2\x01" + kHeader + "11=ORD2\x01"));
+    script.push_back(make_raw_frame("D", 3, "11=ORD3\x01"));
+    script.push_back(make_raw_frame("0", 4));
+    script.push_back(make_raw_frame("D", 5, "11=ORD5\x01"));
+    script.push_back(make_raw_frame("D", 6, "11=ORD6\x01"));
+
+    ScriptedPeer peer;
+    auto const steps = run_scripted(c, peer, script);
+    std::vector<std::string> const want{
+        "35=D 34=2 -> Active",      "35=D 34=3 -> [35=2 7=2 16=0] Active",
+        "35=D 34=2 43=Y -> Active", "35=D 34=3 43=Y -> Active",
+        "35=0 34=4 -> Active",      "35=D 34=5 -> Disconnected",
+    };
+    EXPECT_EQ(steps, want) << "L-1 trace:" << joined(steps);
+    EXPECT_EQ(c.app->from_app, 0) << "L-1: no application message may be delivered";
+    EXPECT_EQ(c.durable_next_inbound(), 2U)
+        << "L-1: durable NextNumIn after the run (a reconnect resumes from it)";
+}
+
+// L-2: the peer's NewOrderSingle at N = 2 is lost; its store answers slot 2 with a
+// SequenceReset-GapFill (NewSeqNo 3) carrying a malformed tag after 36, and slot 3 with
+// the NewOrderSingle it sent. The peer sends the NewOrderSingle at 3 (a gap: fixpp
+// enters AwaitingResend and sends a ResendRequest), then a NewOrderSingle at 4 and one
+// at 5. The expected trace follows contract C-5 L-2's sequence: the faulty GapFill is
+// Rejected and not applied (D-4); the PossDup resend of 3 draws nothing (no second
+// ResendRequest while AwaitingResend); the next new message ends the session. The
+// durable NextNumIn after the run must be 2, so a reconnect asks for slot 2 again and
+// the peer answers it with the same GapFill.
+TEST(UnparseableFrameDisposition, Disclosed_L2_FaultyGapFillDuringAwaitingResend_Disconnects) {
+    LateCell c{{.validate = false}};
+    c.fix.open_to_active(*c.sess);
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    ScriptedPeer peer;
+    peer.sent(make_raw_frame("4", 2, std::string{"123=Y\x01"} + "36=3\x01" + kMalformedTag));
+    std::vector<std::vector<std::byte>> script;
+    script.push_back(make_raw_frame("D", 3, "11=ORD3\x01"));
+    script.push_back(make_raw_frame("D", 4, "11=ORD4\x01"));
+    script.push_back(make_raw_frame("D", 5, "11=ORD5\x01"));
+
+    auto const steps = run_scripted(c, peer, script);
+    std::vector<std::string> const want{
+        "35=D 34=3 -> [35=2 7=2 16=0] Active",
+        "35=4 34=2 43=Y -> [35=3 45=2 372=4 373=0 58=Garbled field: malformed tag] Active",
+        "35=D 34=3 43=Y -> Active",
+        "35=D 34=4 -> Disconnected",
+    };
+    EXPECT_EQ(steps, want) << "L-2 trace:" << joined(steps);
+    EXPECT_EQ(c.app->from_app, 0) << "L-2: no application message may be delivered";
+    EXPECT_EQ(c.durable_next_inbound(), 2U)
+        << "L-2: durable NextNumIn after the run (a reconnect resumes from it)";
+}
+
+// L-4: TC2020 Scenario 17d is not followed. A malformed SignatureLength(93)/Signature(89)
+// pair (the count is not followed by SOH) on a NewOrderSingle at N draws 373=5 with
+// 371=93, not 17d's 373=8; the Reject is its only outbound frame and NextNumIn advances
+// (D-5).
+Shape const kSignatureShape{.garble = std::string{"93=2\x01"} + "89=xyz\x01",
+                            .reason = "5",
+                            .ref_tag = "93",
+                            .text = kTextLengthDataMismatch};
+
+TEST(UnparseableFrameDisposition, Disclosed_L4_Active_MalformedSignaturePair_Reason5) {
+    run_expected_n_cell(At::active, "D", kOrderFields, kSignatureShape);
+}
+TEST(UnparseableFrameDisposition, Disclosed_L4_LogonReceived_MalformedSignaturePair_Reason5) {
+    run_expected_n_cell(At::logon_received, "D", kOrderFields, kSignatureShape);
 }
 }  // namespace
 }  // namespace fixpp::session::test

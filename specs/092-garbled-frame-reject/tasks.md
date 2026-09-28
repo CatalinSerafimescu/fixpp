@@ -647,7 +647,7 @@ N+1: the first draws nothing; the second draws a ResendRequest; the session stay
 - [X] T048 [US4] Via `phase-implementer`, the D-9 cells in the same file: in LogoutSent a faulty
   Logout is not taken as the Logout reply and the logout timeout ends the session (FR-015); a faulty
   non-Logout draws nothing.
-- [ ] T049 [US4] Via `phase-implementer`, the disclosed-outcome cells (C-5) in the same file:
+- [X] T049 [US4] Via `phase-implementer`, the disclosed-outcome cells (C-5) in the same file:
   - **L-1:** a replaying peer and a deterministically malformed frame faulty before 34; pin the
     observed resend loop (bounded by the cell's own iteration cap, asserting the loop shape, not a
     count in a comment).
