@@ -160,6 +160,16 @@ struct logon_interpret_result {
     std::string_view ref_msg_type, int session_reject_reason, std::string_view begin_string,
     std::string_view sending_time) noexcept;
 
+// Build an outbound session-level Reject carrying Text(58) (092-garbled-frame-reject,
+// research R-5). Same parameters and field rules as build_reject, plus `text`: emitted
+// as 58, after 373, when non-empty; an empty text emits no 58, so the output is then
+// byte-identical to build_reject's (build_reject delegates here with an empty text).
+[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_reject_with_text(
+    std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
+    std::string_view target_comp_id, seqnum_t ref_seq_num, int ref_tag_id,
+    std::string_view ref_msg_type, int session_reject_reason, std::string_view begin_string,
+    std::string_view sending_time, std::string_view text) noexcept;
+
 // ── ResendRequest (35=2) ─────────────────────────────────────────────────────
 // FR-009, [FIX-SL §4.3.2]. 013 recovery sub-protocol.
 //

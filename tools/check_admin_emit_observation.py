@@ -89,6 +89,9 @@ DEFAULT_TARGET = ROOT / "src" / "session" / "session.cpp"
 #   builder token → (required hook token, description for error message)
 ADMIN_BUILDERS: dict[str, tuple[str, str]] = {
     "build_reject(": ("fire_to_admin_(", "fire_to_admin_"),
+    # 092-garbled-frame-reject R-5: the Text-carrying Reject builder. Its name does
+    # not contain "build_reject(", so it needs its own key.
+    "build_reject_with_text(": ("fire_to_admin_(", "fire_to_admin_"),
     "build_logout(": ("fire_to_admin_(", "fire_to_admin_"),
 }
 APP_BUILDERS: dict[str, tuple[str, str]] = {

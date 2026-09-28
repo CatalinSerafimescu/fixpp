@@ -909,13 +909,17 @@ private:
         seqnum_t ref_seq, std::string_view ref_msg_type) noexcept;
 
     // 041-validation-gate-wiring T010 — overload that carries a mapped
-    // SessionRejectReason(373) and an optional RefTagID(371) through to
-    // build_reject (admin_messages.cpp's `build_reject`, UNCHANGED). validate() returns a
+    // SessionRejectReason(373) and an optional RefTagID(371) through to the
+    // Reject builder. validate() returns a
     // wire_* error; the caller maps it via wire_error_to_session_reject_reason()
     // and passes the result here. ref_tag_id == 0 → 371 omitted.
-    // [041 T010; data-model E-4; RC-C]
+    // 092-garbled-frame-reject (research R-5): builds via build_reject_with_text and
+    // carries `text` as Text(58); an empty text (the default) omits 58, so the frame
+    // is byte-identical to build_reject's.
+    // [041 T010; data-model E-4; RC-C; 092 R-5]
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> emit_session_reject_(
-        seqnum_t ref_seq, std::string_view ref_msg_type, int reason, int ref_tag_id = 0) noexcept;
+        seqnum_t ref_seq, std::string_view ref_msg_type, int reason, int ref_tag_id = 0,
+        std::string_view text = {}) noexcept;
 
     // validate_inbound_ — synchronous dedup helper (041 simplify-triage FIX-1/FIX-2 +
     // per-message coroutine-frame alloc fix):

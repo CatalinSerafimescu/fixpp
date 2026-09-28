@@ -734,6 +734,11 @@ namespace {
 // Header fields: 8/9/35/49/56/34/52 + trailer 10= per [FIX-SL §4.5.4].
 // The no-reject-loop guard (I-5) is at the DISPATCH SITE (Session FSM), not here.
 // This builder is dumb: it emits whatever is passed.
+//
+// 092-garbled-frame-reject (research R-5): the body moved to build_reject_with_text,
+// which adds Text(58) after 373 when its `text` is non-empty. build_reject delegates
+// with an empty text, so its output bytes are unchanged (pinned by the interop-golden
+// cells in tests/session/session_reject_test.cpp).
 
 // NOLINTBEGIN(bugprone-easily-swappable-parameters) — FIX-protocol-fixed arg order (sender / target
 // before the Ref* group; begin_string / sending_time last).
@@ -742,6 +747,16 @@ namespace {
     std::string_view target_comp_id, seqnum_t ref_seq_num, int ref_tag_id,
     std::string_view ref_msg_type, int session_reject_reason, std::string_view begin_string,
     std::string_view sending_time) noexcept {
+    return build_reject_with_text(out, seq, sender_comp_id, target_comp_id, ref_seq_num, ref_tag_id,
+                                  ref_msg_type, session_reject_reason, begin_string, sending_time,
+                                  /*text=*/{});
+}
+
+[[nodiscard]] fixpp::core::expected_t<std::span<std::byte>> build_reject_with_text(
+    std::span<std::byte> out, seqnum_t seq, std::string_view sender_comp_id,
+    std::string_view target_comp_id, seqnum_t ref_seq_num, int ref_tag_id,
+    std::string_view ref_msg_type, int session_reject_reason, std::string_view begin_string,
+    std::string_view sending_time, std::string_view text) noexcept {
     // NOLINTEND(bugprone-easily-swappable-parameters)
     // FR-002/FR-003/RC#4: begin_string + sending_time threaded through from caller.
     fixpp::wire::Writer w(out, ::fixpp::detail::arena_upstream());
@@ -831,6 +846,13 @@ namespace {
             return std::unexpected(fixpp::core::error::wire_field_value_truncated);
         }
         if (auto r = w.append_raw(373, sv_to_bytes(sv)); !r) {
+            return std::unexpected(r.error());
+        }
+    }
+
+    // 58=Text (optional — only emit when non-empty). 092 R-5.
+    if (!text.empty()) {
+        if (auto r = w.append_raw(58, sv_to_bytes(text)); !r) {
             return std::unexpected(r.error());
         }
     }

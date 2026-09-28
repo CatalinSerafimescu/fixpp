@@ -2163,7 +2163,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
 //
 // 041-validation-gate-wiring T010 — overload that threads the mapped
 // SessionRejectReason (373) and an optional offending RefTagID (371) through
-// to the already-capable build_reject (admin_messages.cpp, UNCHANGED).
+// to the Reject builder. 092-garbled-frame-reject (research R-5): it builds via
+// build_reject_with_text and carries `text` as Text(58); an empty text (the
+// default every pre-092 caller takes) omits 58, byte-identical to build_reject.
 //
 // validate() returns a wire_* error slot; the caller maps it via
 // wire_error_to_session_reject_reason() (T011) and passes the resulting reason
@@ -2176,16 +2178,17 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
 // Identical Disconnected-on-failure handling to the zero-arg overload.
 // [041-validation-gate-wiring T010; data-model E-4; RC-C; FR-004]
 asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
-    seqnum_t ref_seq, std::string_view ref_msg_type, int reason, int ref_tag_id) noexcept {
+    seqnum_t ref_seq, std::string_view ref_msg_type, int reason, int ref_tag_id,
+    std::string_view text) noexcept {
     std::array<std::byte, 512> rj_buf{};
     const auto rj_st52 = effective_clock_
                              ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
                              : SendingTimeStamp{};
     const seqnum_t rj_seq = seqnum_mgr_.peek_outbound();
-    auto rj_r =
-        fixpp::session::build_reject(std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq,
-                                     cfg_.sender_comp_id, cfg_.target_comp_id, ref_seq, ref_tag_id,
-                                     ref_msg_type, reason, cfg_.begin_string, rj_st52.value);
+    auto rj_r = fixpp::session::build_reject_with_text(
+        std::span<std::byte>{rj_buf.data(), rj_buf.size()}, rj_seq, cfg_.sender_comp_id,
+        cfg_.target_comp_id, ref_seq, ref_tag_id, ref_msg_type, reason, cfg_.begin_string,
+        rj_st52.value, text);
     if (rj_r) {
         auto assign_r = co_await seqnum_mgr_.assign_outbound();
         if (!assign_r) {

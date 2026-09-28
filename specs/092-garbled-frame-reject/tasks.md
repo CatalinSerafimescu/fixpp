@@ -305,7 +305,7 @@ C-2 row, and the rows are one function, so the mechanism lands here with one anc
   - `build_reject`'s output is byte-identical to today's for the existing goldens (run the existing
     golden cells unchanged).
   - An empty 372 is omitted.
-- [ ] T017 Via `phase-implementer`, add `build_reject_with_text(…, std::string_view text)` to
+- [X] T017 Via `phase-implementer`, add `build_reject_with_text(…, std::string_view text)` to
   `include/fixpp/session/admin_messages.hpp` and `src/session/admin_messages.cpp`. `build_reject`
   stays a **single declaration**, unchanged in signature, and delegates with an empty text.
   `emit_session_reject_` gains the matching `text` parameter (private). T016 GREEN.
