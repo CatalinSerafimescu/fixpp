@@ -1,5 +1,6 @@
 capi_logon_malformed_tag
 capi_pure_tests
+engine_readpump
 error_017_completeness
 error_019_completeness
 error_020_completeness

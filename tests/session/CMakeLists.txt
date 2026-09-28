@@ -1232,6 +1232,9 @@ set_tests_properties(engine_readpump PROPERTIES
   ENVIRONMENT
     "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "015;us2;live_tls;readpump")
+# 092-garbled-frame-reject: label 092 (expected-ctest-092.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST engine_readpump APPEND PROPERTY LABELS 092)
 
 # ── 015-runtime-engine Phase 4 (US2) — T016(a) ──────────────────────────────
 # TDD RED-first per [const §VII.3]; turns GREEN when T016(b)-(e) impl lands.
