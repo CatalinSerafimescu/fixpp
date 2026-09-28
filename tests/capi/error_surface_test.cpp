@@ -23,7 +23,13 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <fixpp/dict/field_type.hpp>
+#include <fixpp/dict/table_view.hpp>
+#include <fixpp/wire/dict_hooks.hpp>
+#include <fixpp/wire/parser.hpp>
+#include <fixpp/wire/validator.hpp>
 #include <fstream>
+#include <memory_resource>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -33,6 +39,7 @@
 // Under test — these don't exist yet (RED phase).
 #include "fix/c_api/error.h"
 #include "fixpp/core/error.hpp"
+#include "support/frame_view_factory.hpp"
 
 // Engine-internal translate() + translate_for_consumer() under test.
 // These are declared in the fixpp_capi detail namespace (not exported).
@@ -382,6 +389,61 @@ TEST(CapiError, WireAmbiguousArms) {
     EXPECT_EQ(translate(error::wire_tag_out_of_range), FIXPP_ERR_WIRE_LIMIT_EXCEEDED);
     // 39 wire_header_out_of_order → WIRE_CONFORMANCE (protocol validation)
     EXPECT_EQ(translate(error::wire_header_out_of_order), FIXPP_ERR_WIRE_CONFORMANCE);
+}
+
+// 092-garbled-frame-reject (data-model E-6): the validator's two field-fault
+// errors coalesce onto the code wire_invalid_field_format already maps to; no
+// C code is added.
+TEST(CapiError, Wire092ValidatorFieldFaultArms) {
+    EXPECT_EQ(translate(error::wire_invalid_tag_number), FIXPP_ERR_WIRE_INVALID_FRAME);
+    EXPECT_EQ(translate(error::wire_length_data_mismatch), FIXPP_ERR_WIRE_INVALID_FRAME);
+}
+
+// 092 (data-model E-6): the C mapping of a tag above 0xFFFF depends on
+// the layer that reports it. OffsetTable::build reports wire_tag_out_of_range
+// (a capacity bound → WIRE_LIMIT_EXCEEDED); the validator's field walk over the
+// same bytes reports wire_invalid_tag_number (→ WIRE_INVALID_FRAME).
+TEST(CapiError, OverFfffTagMapsByReportingLayer) {
+    constexpr std::string_view kBody =
+        "35=T\x01"
+        "65536=1\x01"
+        "49=S\x01";
+    std::string full =
+        "8=FIX.4.4\x01"
+        "9=" +
+        std::to_string(kBody.size()) + "\x01";
+    full += kBody;
+    full += "10=000\x01";
+    std::vector<std::byte> buf(full.size());
+    std::memcpy(buf.data(), full.data(), full.size());
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+
+    std::pmr::monotonic_buffer_resource mr;
+    fixpp::wire::MessageView<fixpp::wire::access_mode::Index> const mv{
+        *fv, &mr, fixpp::wire::dict_hooks::none()};
+
+    // OffsetTable::build half.
+    auto const status = mv.offsets().build_status();
+    ASSERT_FALSE(status.has_value());
+    EXPECT_EQ(status.error(), error::wire_tag_out_of_range);
+    EXPECT_EQ(translate(status.error()), FIXPP_ERR_WIRE_LIMIT_EXCEEDED);
+
+    // Validator half. A failed build leaves msg_type() empty, so the walk
+    // passes a field only when the dictionary names it a FIXT framing tag;
+    // every field in front of the over-0xFFFF tag is one.
+    fixpp::dict::table_view_builder b;
+    b.add_fixt_framing_tag(8, fixpp::dict::field_type::String);
+    b.add_fixt_framing_tag(9, fixpp::dict::field_type::Length);
+    b.add_fixt_framing_tag(10, fixpp::dict::field_type::String);
+    b.add_fixt_framing_tag(35, fixpp::dict::field_type::String);
+    b.add_fixt_framing_tag(49, fixpp::dict::field_type::String);
+    fixpp::wire::dictionary_driven_validator const v{std::move(b).build()};
+    std::uint16_t ref = 0xBEEF;
+    auto const r = v.validate(mv, &mr, &ref);
+    ASSERT_FALSE(r.has_value()) << "the validator reported conformant over an over-0xFFFF tag";
+    EXPECT_EQ(r.error(), error::wire_invalid_tag_number);
+    EXPECT_EQ(translate(r.error()), FIXPP_ERR_WIRE_INVALID_FRAME);
 }
 
 // ---------------------------------------------------------------------------

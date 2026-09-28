@@ -153,6 +153,19 @@ set_tests_properties(error_020_completeness PROPERTIES
 # last LABELS setter for this entry, so the existing labels survive.
 set_property(TEST error_020_completeness APPEND PROPERTY LABELS 092)
 
+# ── 092-garbled-frame-reject T060 — error completeness gate ─────────────────
+# The 092 block is exactly {wire_invalid_tag_number, wire_length_data_mismatch}
+# at {132, 133} (data-model E-6). Links fixpp_core only.
+add_executable(error_092_completeness test_092_error_completeness.cpp)
+target_link_libraries(error_092_completeness PRIVATE
+  fixpp_core
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME error_092_completeness COMMAND error_092_completeness)
+set_tests_properties(error_092_completeness PROPERTIES
+  LABELS "092;foundational;error_slots")
+
 # ── 060-int128-decimal-compare T003 — differential-oracle harness ──────────
 # Deterministic (seed=42) boundary-biased corpus asserting the production
 # decimal_traits<pod_decimal>::compare agrees with a FROZEN verbatim copy of

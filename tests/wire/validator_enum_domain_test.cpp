@@ -476,3 +476,15 @@ TEST(ValidatorEnumDomain, GroupMissingDelimiterRejectsReason1RefTagIsDelimiter) 
         << "FR-006: Step-3 group-structure RefTagID must name the missing delimiter "
            "(PartyID/448), not the count tag (NoPartyIDs/453)";
 }
+
+// 092-garbled-frame-reject (data-model E-6, research R-7): the validator's two
+// field-fault errors map to their own SessionRejectReason values — reason 0
+// (invalid tag number) and reason 5 (value is incorrect) — not to the default
+// arm's 3.
+TEST(ValidatorEnumDomain, RejectReasonMap092InvalidTagNumberIsReason0) {
+    EXPECT_EQ(wire_error_to_session_reject_reason(error::wire_invalid_tag_number), 0);
+}
+
+TEST(ValidatorEnumDomain, RejectReasonMap092LengthDataMismatchIsReason5) {
+    EXPECT_EQ(wire_error_to_session_reject_reason(error::wire_length_data_mismatch), 5);
+}
