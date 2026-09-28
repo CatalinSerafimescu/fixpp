@@ -612,7 +612,7 @@ profile, observable through the C ABI.
 **Independent Test**: a Logon with a malformed **tag**, as acceptor and as initiator: the session
 ends Disconnected with no Reject and no Logon reply.
 
-- [ ] T043 [US3] Via `phase-implementer`, the D-1/D-2 matrix in
+- [X] T043 [US3] Via `phase-implementer`, the D-1/D-2 matrix in
   `tests/session/unparseable_frame_disposition_test.cpp`: a Logon with a malformed tag, as acceptor
   and as initiator (reply Logon), on FIX.4.2, FIX.4.4 and FIXT.1.1 (SC-004). Plus a faulty
   non-Logon in NotConnected and in LogonSent, and a D-8-shaped frame (field 3 not 35) in both: each

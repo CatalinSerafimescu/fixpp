@@ -77,6 +77,11 @@
 // too high; the resend converges and every later message is delivered. The section
 // comment above ClOrdIdApplication states the script and the QuickFIX sources.
 //
+// LogonRefusal/*, PreActive_* (tasks.md T043; spec SC-004; contract C-2 D-1, D-2): before
+// Active, a malformed-tag Logon, a faulty Heartbeat and a Logon whose field 3 is not 35
+// are refused, in both roles; the Logon on every profile. The section comment above
+// expect_pre_active_refusal states which cells are pins.
+//
 // Anchors: specs/092-garbled-frame-reject/spec.md SC-001, FR-007;
 //          contracts/unparseable-frame-disposition.md C-2 (D-4) and its Reject contents;
 //          fixpp#507 (the T076 table and reproducer).
@@ -1574,7 +1579,8 @@ struct ProfileCell {
         (void)fut.get();
     }
 
-    void enter() {
+    // open() alone: an acceptor is then in NotConnected, an initiator in LogonSent.
+    void open_only() {
         auto fut = asio::co_spawn(fix.ioc, sess->open(), asio::use_future);
         if (!fixpp::test_support::pump_until_ready(fix.ioc, fut, "ProfileCell::open")) {
             fixpp::test_support::cancel_and_drain_or_report(fix.ioc, *fix.clock,
@@ -1584,11 +1590,23 @@ struct ProfileCell {
         }
         drain_ready(fix.ioc);
         ASSERT_TRUE(fut.get().has_value()) << "open() failed on " << begin_string;
-        std::string logon_fields = std::string{"98=0\x01"} + "108=30\x01";
+    }
+
+    // The fields of the peer's Logon after the header.
+    [[nodiscard]] std::string logon_fields() const {
+        std::string fields = std::string{"98=0\x01"} + "108=30\x01";
         if (begin_string == "FIXT.1.1") {
-            logon_fields += "1137=6\x01";
+            fields += "1137=6\x01";
         }
-        feed(frame("A", 1, logon_fields));
+        return fields;
+    }
+
+    void enter() {
+        open_only();
+        if (::testing::Test::HasFatalFailure()) {
+            return;
+        }
+        feed(frame("A", 1, logon_fields()));
         ASSERT_EQ(sess->state(), fsm_state::Active) << "the peer's Logon on " << begin_string;
     }
 
@@ -2596,6 +2614,109 @@ TEST(UnparseableFrameDisposition, ScriptedPeer_MalformedTooHigh_ResendConverges_
     std::vector<std::string> const want{"ORD2", "ORD4", "ORD5", "ORD6", "ORD7"};
     EXPECT_EQ(app->delivered, want)
         << "every well-formed message is delivered once, in order, and the malformed one never";
+}
+
+// ── LogonRefusal/*, PreActive_* (tasks.md T043; spec SC-004; contract C-2 D-1, D-2) ──
+//
+// Before Active, a frame the header scan could not read is refused: the session ends
+// Disconnected, sends nothing (no Logon reply, no Reject) and delivers nothing. D-1 and
+// D-2 are a state transition, not a close, so is_open() is not asserted.
+//   LogonRefusal/*: a Logon whose malformed tag follows every field interpret_logon
+//     reads (98, 108 and, on FIXT.1.1, 1137), as acceptor (NotConnected) and as
+//     initiator (the reply, LogonSent), on FIX.4.2, FIX.4.4 and FIXT.1.1, with inbound
+//     validation on and off.
+//   PreActive_FaultyHeartbeat_*_Pin: a faulty Heartbeat. A pin: both pre-Active arms
+//     refused every frame that is not a valid Logon before 092 (C-2's "today's
+//     handling, kept"; re-derive with contract C-2's grep for "No MsgType
+//     discrimination" and "out-of-scope admin"), so reverting the disposer cannot fail
+//     it. To check that it can fail, drop the D-1/D-2 record_state_transition_ in
+//     dispose_unparseable_ in a scratch copy: the cell must fail on the state.
+//   PreActive_D8Logon_*: a full Logon whose field 3 is SenderCompID(49), not 35, with
+//     the malformed tag last (the pre-Active disregard of such a frame is fixpp#514).
+
+// The refusal: Disconnected, nothing sent, nothing delivered.
+void expect_pre_active_refusal(ProfileCell const& c, int delivered_before, std::string_view row) {
+    std::string types;
+    for (auto const& f : c.fix.transport.sent_frames()) {
+        types += " 35=" + extract_tag(f, 35);
+    }
+    EXPECT_EQ(c.sess->state(), fsm_state::Disconnected) << row << ": the frame must be refused";
+    EXPECT_TRUE(c.fix.transport.sent_frames().empty())
+        << row << ": a refusal sends nothing; sent:" << types;
+    EXPECT_EQ(c.app_deliveries(), delivered_before) << row << ": the frame reached the Application";
+}
+
+// Opens a session awaiting the Logon (acceptor) or its reply (initiator) and feeds `bytes`.
+void run_pre_active_cell(ProfileCell& c, session_role role, std::vector<std::byte> const& bytes,
+                         std::string_view row) {
+    c.open_only();
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    fsm_state const awaiting =
+        role == session_role::acceptor ? fsm_state::NotConnected : fsm_state::LogonSent;
+    ASSERT_EQ(c.sess->state(), awaiting) << row << ": state before the frame";
+    int const delivered = c.app_deliveries();
+    c.feed(bytes);
+    expect_pre_active_refusal(c, delivered, row);
+}
+
+class LogonRefusal : public ::testing::TestWithParam<MatrixParam> {};
+
+TEST_P(LogonRefusal, MalformedTagLogon_Refused) {
+    auto const& p = GetParam();
+    ProfileCell c{p.profile, p.role, p.validate, /*with_app=*/true};
+    run_pre_active_cell(c, p.role, c.frame("A", 1, c.logon_fields() + kMalformedTag),
+                        "malformed-tag Logon");
+}
+
+std::vector<MatrixParam> logon_refusal_params() {
+    std::vector<MatrixParam> out;
+    for (bool const validate : {true, false}) {
+        for (Profile const profile : {Profile::fix42, Profile::fix44, Profile::fixt11}) {
+            for (session_role const role : {session_role::acceptor, session_role::initiator}) {
+                out.push_back({validate, profile, role, /*with_app=*/true});
+            }
+        }
+    }
+    return out;
+}
+
+INSTANTIATE_TEST_SUITE_P(UnparseableFrameDisposition, LogonRefusal,
+                         ::testing::ValuesIn(logon_refusal_params()),
+                         [](::testing::TestParamInfo<MatrixParam> const& info) {
+                             auto const& p = info.param;
+                             return std::string{p.validate ? "ValOn" : "ValOff"} + "_" +
+                                    std::string{profile_label(p.profile)} + "_" +
+                                    (p.role == session_role::acceptor ? "Acceptor" : "Initiator");
+                         });
+
+void run_pre_active_heartbeat_pin(session_role role, std::string_view row) {
+    ProfileCell c{Profile::fix42, role, /*validate=*/false, /*with_app=*/true};
+    run_pre_active_cell(c, role, c.frame("0", 1, kMalformedTag), row);
+}
+
+TEST(UnparseableFrameDisposition, PreActive_FaultyHeartbeat_NotConnected_Refused_Pin) {
+    run_pre_active_heartbeat_pin(session_role::acceptor, "NotConnected faulty Heartbeat");
+}
+TEST(UnparseableFrameDisposition, PreActive_FaultyHeartbeat_LogonSent_Refused_Pin) {
+    run_pre_active_heartbeat_pin(session_role::initiator, "LogonSent faulty Heartbeat");
+}
+
+void run_pre_active_d8_logon(session_role role, std::string_view row) {
+    ProfileCell c{Profile::fix42, role, /*validate=*/false, /*with_app=*/true};
+    run_pre_active_cell(c, role,
+                        wrap_body(std::string{"49=TW\x01"} + "35=A\x01" + "34=1\x01" +
+                                  "52=20240101-00:00:00.000\x01" + "56=ISLD\x01" +
+                                  c.logon_fields() + kMalformedTag),
+                        row);
+}
+
+TEST(UnparseableFrameDisposition, PreActive_D8Logon_NotConnected_Refused) {
+    run_pre_active_d8_logon(session_role::acceptor, "NotConnected D-8 Logon");
+}
+TEST(UnparseableFrameDisposition, PreActive_D8Logon_LogonSent_Refused) {
+    run_pre_active_d8_logon(session_role::initiator, "LogonSent D-8 Logon");
 }
 }  // namespace
 }  // namespace fixpp::session::test
