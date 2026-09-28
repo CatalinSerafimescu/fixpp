@@ -806,6 +806,15 @@ it in 092.
   after tag 8. Today it returns `wire_unexpected_tag` (RefTagID 8). A second cell does the same for
   a Length+Data mismatch. Deletion proof in a scratch copy: remove the pre-scan and both cells go
   RED. Record it in the evidence file.
+- [ ] T062b **Added 2026-09-28 (T062a follow-up).** T062a's pre-scan catches every failed-build view
+  first, so E-5's in-walk checks lost their witnesses. The top-of-iteration check has none, and
+  the after-loop check keeps only S4. Via `phase-implementer`, add validator cells on the path the
+  in-walk checks still guard: a **successful** build under hooks that pair a Length/Data (so a
+  counted value swallows a malformed field), validated by a dictionary that does not pair them.
+  One cell each for T1 (`=x` inside the counted value), S1, S2 and S3 where constructible; say
+  why for any that is not. Then re-run T063's deletion table at HEAD, with predictions written
+  first. It must show a witness for the top-of-iteration check, the after-loop check, and each
+  iterator fault write. That table supersedes the Phase 8 one.
 - [X] T063 In a scratch copy: delete the top-of-iteration check (T1 cell RED), then the after-loop
   check (T2/T3 cells RED), then one iterator fault write per row (its E-4 cell RED). Record each in
   the evidence file.
