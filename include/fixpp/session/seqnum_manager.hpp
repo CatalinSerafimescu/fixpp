@@ -74,10 +74,12 @@ public:
     // ── Inbound check ────────────────────────────────────────────────────────
     //
     // check_inbound(seq): compare seq against next-expected inbound counter.
+    // It only classifies (I-4): the caller's disposition depends on its state and
+    // configuration. Find the callers with the recipe under I-4 above.
     //   in-seq  → advance counter, return ok.
-    //   too-low  → return unexpected{session_seqnum_too_low=69}              (session-fatal).
-    //   too-high → return unexpected{session_seqnum_too_high=120}            (session-fatal;
-    //              014 FR-016 / E-4; slot 70 deleted per 013 T006a; FR-009 wired in session.cpp).
+    //   too-low  → return unexpected{session_seqnum_too_low=69}, counter unchanged.
+    //   too-high → return unexpected{session_seqnum_too_high=120}, counter unchanged
+    //              (014 FR-016 / E-4; slot 70 deleted per 013 T006a).
     //   in-seq at seqnum_max → return unexpected{store_seqnum_overflow=60}, counter unchanged
     //              (092 FR-019 / contract C-3 I-7: no next value exists, so it cannot be consumed).
     //
