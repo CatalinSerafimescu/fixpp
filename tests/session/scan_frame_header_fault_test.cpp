@@ -20,21 +20,31 @@
 // hooks (one declaring a dictionary-only Length+Data pair) and under
 // dict_hooks::none().
 //
-// Anchors: data-model.md E-0/E-1; research.md R-1; contracts/unparseable-frame-disposition.md
-//          C-3 I-3.
+// ScanFrameHeaderDifferential.* (tasks.md T013): the differential corpus of contract
+// C-3 I-4 (research.md R-2 §1). The scan's fault record is compared with
+// OffsetTable::build, the full parse's encoding oracle, on seeds and on every
+// planted mutation of them. One TEST per mutation family, so a disagreement
+// planted in one family's check (T014) is attributed to that family's cells.
+//
+// Anchors: data-model.md E-0/E-1; research.md R-1, R-2; contracts/unparseable-frame-disposition.md
+//          C-3 I-3, I-4.
 
 #include <gtest/gtest.h>
 
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/core/error.hpp>
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/table_view.hpp>
 #include <fixpp/dict/xml_loader.hpp>
 #include <fixpp/wire/dict_hooks.hpp>
+#include <fixpp/wire/framer.hpp>  // frame_view_slice_access
+#include <fixpp/wire/offset_table.hpp>
 #include <fixpp/wire/parser.hpp>  // dict_hooks::for_table_view
 #include <fixpp/wire/tag_scan.hpp>
 #include <functional>
 #include <memory_resource>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -381,6 +391,483 @@ TEST(ScanFrameHeaderFault, CleanFrame_Duplicate35_KeepsLastWins) {
         EXPECT_TRUE(h.msg_type_is_third);
         EXPECT_EQ(h.fault_ref_msg_type, "0");
     });
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Differential corpus (T013; contract C-3 I-4; research R-2 §1).
+//
+// A frame is a list of fields joined by SOH. A mutation replaces one field; the
+// case's expectation is derived from the fields as planted -- the planted field's
+// index and byte offset, and the fields before it -- never from either reader.
+// The oracle is OffsetTable::build and its entries(), never find(34): the overlay
+// can leave an occurrence unindexed while the build still succeeds.
+//
+// Tag mutations run at every field position. Count mutations run at every Length
+// field of a pair; they fault only under hooks that declare the pair
+// (dict_hooks::data_tag_for_length), and are clean on both sides otherwise.
+// ═════════════════════════════════════════════════════════════════════════════
+
+namespace {
+
+using Fields = std::vector<std::string>;
+
+struct Seed {
+    char const* name;
+    Fields fields;
+};
+
+// The admin seeds are the MsgTypes `is_admin_type` in Session::replay_outbound_range_
+// (src/session/session.cpp) classifies as admin; re-derive with
+// `grep -n "const auto is_admin_type" -A3 src/session/session.cpp`. NewOrderSingle
+// is the application type; the last two carry a standard pair (SecureDataLen /
+// SecureData, whose value holds a SOH) and the dictionary-only pair.
+std::vector<Seed> const& seeds() {
+    static std::vector<Seed> const all = {
+        {"Heartbeat",
+         {"8=FIX.4.4", "9=0", "35=0", "34=2", "49=SND", "52=20240101-00:00:00.000", "56=TGT",
+          "112=TR", "10=000"}},
+        {"TestRequest",
+         {"8=FIX.4.4", "9=0", "35=1", "34=3", "49=SND", "52=20240101-00:00:00.000", "56=TGT",
+          "112=TR", "10=000"}},
+        {"ResendRequest",
+         {"8=FIX.4.4", "9=0", "35=2", "34=4", "49=SND", "52=20240101-00:00:00.000", "56=TGT", "7=1",
+          "16=0", "10=000"}},
+        {"Reject",
+         {"8=FIX.4.4", "9=0", "35=3", "34=5", "49=SND", "52=20240101-00:00:00.000", "56=TGT",
+          "45=2", "373=0", "58=why", "10=000"}},
+        {"SequenceReset",
+         {"8=FIX.4.4", "9=0", "35=4", "34=6", "49=SND", "43=Y", "52=20240101-00:00:00.000",
+          "122=20240101-00:00:00.000", "56=TGT", "123=Y", "36=9", "10=000"}},
+        {"Logout",
+         {"8=FIX.4.4", "9=0", "35=5", "34=7", "49=SND", "52=20240101-00:00:00.000", "56=TGT",
+          "58=bye", "10=000"}},
+        {"Logon",
+         {"8=FIX.4.4", "9=0", "35=A", "34=1", "49=SND", "52=20240101-00:00:00.000", "56=TGT",
+          "98=0", "108=30", "141=Y", "383=4096", "464=N", "789=1", "10=000"}},
+        {"NewOrderSingle",
+         {"8=FIX.4.4", "9=0", "35=D", "34=8", "49=SND", "52=20240101-00:00:00.000", "56=TGT",
+          "11=ORD", "55=IBM", "54=1", "10=000"}},
+        {"StandardPair",
+         {"8=FIX.4.4", "9=0", "35=D", "34=9", "49=SND", "52=20240101-00:00:00.000", "56=TGT",
+          "90=5",
+          "91=ab\x01"
+          "cd",
+          "11=ORD", "10=000"}},
+        {"DictionaryOnlyPair",
+         {"8=FIX.4.4", "9=0", "35=T", "34=10", "49=SND", "52=20240101-00:00:00.000", "56=TGT",
+          "5001=4", "5002=wxyz", "11=ORD", "10=000"}},
+    };
+    return all;
+}
+
+std::string join(Fields const& fields, bool trailing_soh = true) {
+    std::string out;
+    for (std::size_t k = 0; k < fields.size(); ++k) {
+        out += fields[k];
+        if (k + 1 < fields.size() || trailing_soh) {
+            out += kSoh;
+        }
+    }
+    return out;
+}
+
+std::uint32_t offset_of_index(Fields const& fields, std::size_t index) {
+    std::size_t off = 0;
+    for (std::size_t k = 0; k < index; ++k) {
+        off += fields[k].size() + 1;
+    }
+    return static_cast<std::uint32_t>(off);
+}
+
+// A well-formed field's tag digits and value.
+std::string tag_part(std::string const& field) { return field.substr(0, field.find('=')); }
+std::string value_part(std::string const& field) { return field.substr(field.find('=') + 1); }
+std::uint16_t tag_of(std::string const& field) {
+    return static_cast<std::uint16_t>(std::stoul(tag_part(field)));
+}
+
+// The FrameHeader member each scanned tag fills, or nullopt for a tag it ignores.
+std::optional<std::string_view> member_for(FrameHeader const& h, std::uint16_t tag) {
+    switch (tag) {
+        case 7:
+            return h.begin_seqno;
+        case 8:
+            return h.begin_string;
+        case 16:
+            return h.end_seqno;
+        case 34:
+            return h.msg_seq_num;
+        case 35:
+            return h.msg_type;
+        case 36:
+            return h.new_seqno;
+        case 43:
+            return h.poss_dup_flag;
+        case 49:
+            return h.sender_comp_id;
+        case 52:
+            return h.sending_time;
+        case 56:
+            return h.target_comp_id;
+        case 112:
+            return h.test_req_id;
+        case 122:
+            return h.orig_sending_time;
+        case 123:
+            return h.gap_fill_flag;
+        case 141:
+            return h.reset_seqnum_flag;
+        case 383:
+            return h.max_message_size;
+        case 464:
+            return h.test_message_indicator;
+        case 789:
+            return h.next_expected_msg_seq_num;
+        default:
+            return std::nullopt;
+    }
+}
+
+// Every tag the scan records, so "after the fault" can be checked for tags the
+// seed never carried as well.
+constexpr std::uint16_t kScannedTags[] = {7,  8,   16,  34,  35,  36,  43,  49, 52,
+                                          56, 112, 122, 123, 141, 383, 464, 789};
+
+// The oracle's side of one frame.
+struct Oracle {
+    std::pmr::monotonic_buffer_resource arena;
+    std::optional<fixpp::wire::OffsetTable> table;
+
+    Oracle(std::vector<std::byte> const& bytes, dict_hooks const& hooks) {
+        auto const fv = fixpp::wire::frame_view_slice_access::make(bytes.data(), bytes.size(), {});
+        table.emplace(fv, &arena, hooks);
+    }
+};
+
+std::string_view entry_value(std::vector<std::byte> const& bytes,
+                             fixpp::wire::OffsetTable::entry const& e) {
+    return {reinterpret_cast<char const*>(bytes.data()) + e.offset, e.length};
+}
+
+// A fault-free frame: both sides clean, and the fault references and the
+// last-wins members agree with entries().
+void expect_clean_and_agree(std::string const& wire, dict_hooks const& hooks) {
+    Scanned const s = scan(wire, hooks);
+    Oracle const o(s.bytes, hooks);
+    EXPECT_EQ(s.h.fault, field_fault::none) << "the scan faulted at offset " << s.h.fault_offset;
+    auto const status = o.table->build_status();
+    EXPECT_TRUE(status.has_value()) << "OffsetTable::build failed with error "
+                                    << (status ? 0 : static_cast<int>(status.error()));
+    if (s.h.fault != field_fault::none || !status.has_value()) {
+        return;
+    }
+    auto const entries = o.table->entries();
+    std::string_view first_34;
+    std::string_view last_34;
+    std::string_view last_35;
+    bool seen_34 = false;
+    for (auto const& e : entries) {
+        if (e.tag == 34) {
+            if (!seen_34) {
+                first_34 = entry_value(s.bytes, e);
+                seen_34 = true;
+            }
+            last_34 = entry_value(s.bytes, e);
+        }
+        if (e.tag == 35) {
+            last_35 = entry_value(s.bytes, e);
+        }
+    }
+    bool const third_is_35 = entries.size() > 2 && entries[2].tag == 35;
+    EXPECT_EQ(s.h.fault_ref_seq_num, first_34) << "fault_ref_seq_num vs the first 34 in entries()";
+    EXPECT_EQ(s.h.msg_type_is_third, third_is_35)
+        << "msg_type_is_third vs \"the third entries() element has tag 35\"";
+    EXPECT_EQ(s.h.fault_ref_msg_type,
+              third_is_35 ? entry_value(s.bytes, entries[2]) : std::string_view{})
+        << "fault_ref_msg_type vs the third entries() element";
+    EXPECT_EQ(s.h.msg_seq_num, last_34) << "C-3 I-3: msg_seq_num stays last-wins";
+    EXPECT_EQ(s.h.msg_type, last_35) << "C-3 I-3: msg_type stays last-wins";
+}
+
+// Before any mutation: the seed must be clean on both sides under these hooks.
+// Reports whether the check added a failure to the running test.
+bool seed_is_clean(Seed const& seed, dict_hooks const& hooks) {
+    SCOPED_TRACE(std::string{"seed "} + seed.name + " (unmutated)");
+    auto const* result = ::testing::UnitTest::GetInstance()->current_test_info()->result();
+    int const parts_before = result->total_part_count();
+    expect_clean_and_agree(join(seed.fields), hooks);
+    return result->total_part_count() == parts_before;
+}
+
+struct Planted {
+    Fields fields;             // the mutated frame's fields
+    std::size_t index;         // the faulting field
+    field_fault kind;          // what the scan must record
+    std::uint16_t length_tag;  // for length_data_mismatch, else 0
+    fixpp::core::error error;  // what OffsetTable::build must fail with
+    bool trailing_soh = true;  // false: the buffer ends inside the last field
+};
+
+// A planted fault: both sides fail, at the planted field, of the planted kind, and
+// the scan's members are exactly those of the fields before it.
+void expect_planted_fault(Planted const& p, dict_hooks const& hooks) {
+    std::string const wire = join(p.fields, p.trailing_soh);
+    Scanned const s = scan(wire, hooks);
+    Oracle const o(s.bytes, hooks);
+
+    EXPECT_EQ(s.h.fault, p.kind);
+    EXPECT_EQ(s.h.fault_offset, offset_of_index(p.fields, p.index));
+    EXPECT_EQ(s.h.fault_length_tag, p.length_tag);
+    auto const status = o.table->build_status();
+    ASSERT_FALSE(status.has_value()) << "OffsetTable::build accepted the planted fault";
+    EXPECT_EQ(status.error(), p.error);
+
+    for (std::uint16_t const tag : kScannedTags) {
+        std::string_view expected;  // last-wins among the fields before the fault
+        for (std::size_t k = 0; k < p.index; ++k) {
+            if (tag_of(p.fields[k]) == tag) {
+                expected = std::string_view{p.fields[k]}.substr(p.fields[k].find('=') + 1);
+            }
+        }
+        EXPECT_EQ(member_for(s.h, tag).value_or("?"), expected) << "member for tag " << tag;
+    }
+    std::string_view first_34;
+    for (std::size_t k = 0; k < p.index; ++k) {
+        if (tag_of(p.fields[k]) == 34) {
+            first_34 = std::string_view{p.fields[k]}.substr(p.fields[k].find('=') + 1);
+            break;
+        }
+    }
+    bool const third_is_35 = p.index > 2 && tag_of(p.fields[2]) == 35;
+    EXPECT_EQ(s.h.fault_ref_seq_num, first_34);
+    EXPECT_EQ(s.h.msg_type_is_third, third_is_35);
+    EXPECT_EQ(s.h.fault_ref_msg_type,
+              third_is_35 ? std::string_view{p.fields[2]}.substr(p.fields[2].find('=') + 1)
+                          : std::string_view{});
+}
+
+// Runs `make(seed, k)` for every field k of every seed, under both hook sets, after
+// checking the seed is clean under those hooks.
+void for_each_tag_site(std::function<Planted(Fields const&, std::size_t)> const& make) {
+    for_each_hooks([&](dict_hooks const& hooks) {
+        for (Seed const& seed : seeds()) {
+            if (!seed_is_clean(seed, hooks)) {
+                ADD_FAILURE() << "seed " << seed.name << " is not clean; its mutations are skipped";
+                continue;
+            }
+            for (std::size_t k = 0; k < seed.fields.size(); ++k) {
+                SCOPED_TRACE(std::string{"seed "} + seed.name + ", field " + std::to_string(k) +
+                             " (" + seed.fields[k] + ")");
+                expect_planted_fault(make(seed.fields, k), hooks);
+            }
+        }
+    });
+}
+
+// Runs a count mutation at every Length field of every seed. `count_for(data_value,
+// fields, len_index)` returns the planted count. The planted fault is expected only
+// when these hooks pair the Length with the field after it.
+void for_each_count_site(
+    std::function<std::uint32_t(Fields const&, std::size_t)> const& count_for) {
+    for_each_hooks([&](dict_hooks const& hooks) {
+        std::size_t sites = 0;
+        for (Seed const& seed : seeds()) {
+            if (!seed_is_clean(seed, hooks)) {
+                ADD_FAILURE() << "seed " << seed.name << " is not clean; its mutations are skipped";
+                continue;
+            }
+            for (std::size_t k = 0; k + 1 < seed.fields.size(); ++k) {
+                std::uint16_t const len_tag = tag_of(seed.fields[k]);
+                std::uint16_t const data_tag = tag_of(seed.fields[k + 1]);
+                bool const declared = dict_hooks::for_table_view(pair_dict_table_view())
+                                          .data_tag_for_length(len_tag) == data_tag;
+                if (!declared) {
+                    continue;  // not a Length+Data pair in any hook set this corpus uses
+                }
+                ++sites;
+                SCOPED_TRACE(std::string{"seed "} + seed.name + ", Length field " +
+                             std::to_string(k) + " (" + seed.fields[k] + ")");
+                Fields mutated = seed.fields;
+                mutated[k] = tag_part(seed.fields[k]) + "=" + std::to_string(count_for(mutated, k));
+                if (hooks.data_tag_for_length(len_tag) == data_tag) {
+                    expect_planted_fault({.fields = mutated,
+                                          .index = k + 1,
+                                          .kind = field_fault::length_data_mismatch,
+                                          .length_tag = len_tag,
+                                          .error = fixpp::core::error::wire_invalid_field_format},
+                                         hooks);
+                } else {
+                    SCOPED_TRACE("these hooks do not pair it: the count is an ordinary value");
+                    expect_clean_and_agree(join(mutated), hooks);
+                }
+            }
+        }
+        EXPECT_GT(sites, 0U) << "no Length field was mutated";
+    });
+}
+
+// The byte length of the Data value after Length field `k`.
+std::uint32_t data_length(Fields const& fields, std::size_t k) {
+    return static_cast<std::uint32_t>(value_part(fields[k + 1]).size());
+}
+
+// A count that makes the Data value after Length field `k` end exactly at the end
+// of the buffer. The count's own digits move where the value starts, so iterate
+// to a fixed point.
+std::uint32_t count_to_frame_end(Fields fields, std::size_t k) {
+    std::uint32_t count = 0;
+    for (int round = 0; round < 8; ++round) {
+        fields[k] = tag_part(fields[k]) + "=" + std::to_string(count);
+        std::string const wire = join(fields);
+        std::size_t const vstart =
+            offset_of_index(fields, k + 1) + tag_part(fields[k + 1]).size() + 1;
+        auto const want = static_cast<std::uint32_t>(wire.size() - vstart);
+        if (want == count) {
+            return count;
+        }
+        count = want;
+    }
+    ADD_FAILURE() << "no fixed point for the frame-end count";
+    return count;
+}
+
+}  // namespace
+
+// ── The seeds and the accepted controls: fault-free, both sides agree ────────
+
+TEST(ScanFrameHeaderDifferential, Seeds_CleanAndAgreeWithEntries) {
+    for_each_hooks([](dict_hooks const& hooks) {
+        for (Seed const& seed : seeds()) {
+            SCOPED_TRACE(std::string{"seed "} + seed.name);
+            expect_clean_and_agree(join(seed.fields), hooks);
+        }
+    });
+}
+
+TEST(ScanFrameHeaderDifferential, AcceptedControls_CleanOnBothSides) {
+    ASSERT_EQ(dict_hooks::none().data_tag_for_length(95), 96U)
+        << "precondition: RawDataLength/RawData is a standard pair under dict_hooks::none()";
+    std::vector<std::pair<char const*, Fields>> const controls = {
+        {"leading-zero tag", {"8=FIX.4.4", "9=0", "35=D", "034=2", "049=SND", "011=ORD", "10=000"}},
+        {"empty ordinary value", {"8=FIX.4.4", "9=0", "35=D", "34=2", "58=", "10=000"}},
+        {"non-numeric Length value, empty Data",
+         {"8=FIX.4.4", "9=0", "35=D", "34=2", "90=abc", "91=", "10=000"}},
+        {"non-numeric Length value, no Data",
+         {"8=FIX.4.4", "9=0", "35=D", "34=2", "90=abc", "58=x", "10=000"}},
+        {"Length last before the trailer", {"8=FIX.4.4", "9=0", "35=D", "34=2", "90=5", "10=000"}},
+        {"unrelated tag after a Length",
+         {"8=FIX.4.4", "9=0", "35=D", "34=2", "90=5", "58=x", "91=ab", "10=000"}},
+        {"standard pair RawDataLength/RawData",
+         {"8=FIX.4.4", "9=0", "35=D", "34=2", "95=3",
+          "96=a\x01"
+          "b",
+          "10=000"}},
+        {"duplicate 34 and 35",
+         {"8=FIX.4.4", "9=0", "35=D", "34=2", "49=SND", "34=9", "35=8", "10=000"}},
+        {"field 3 is not 35", {"8=FIX.4.4", "9=0", "49=SND", "35=D", "34=2", "10=000"}},
+    };
+    for_each_hooks([&](dict_hooks const& hooks) {
+        for (auto const& [name, fields] : controls) {
+            SCOPED_TRACE(std::string{"control: "} + name);
+            expect_clean_and_agree(join(fields), hooks);
+        }
+    });
+}
+
+// ── Tag mutation families, at every field position ───────────────────────────
+
+TEST(ScanFrameHeaderDifferential, NonDigitTag_EveryPosition) {
+    for_each_tag_site([](Fields const& seed, std::size_t k) {
+        Fields f = seed;
+        std::string const tag = tag_part(seed[k]);
+        f[k] = tag.substr(0, 1) + "x" + tag.substr(1) + "=" + value_part(seed[k]);
+        return Planted{.fields = f,
+                       .index = k,
+                       .kind = field_fault::malformed_tag,
+                       .length_tag = 0,
+                       .error = fixpp::core::error::wire_invalid_field_format};
+    });
+}
+
+TEST(ScanFrameHeaderDifferential, TagAbove0xFFFF_EveryPosition) {
+    for_each_tag_site([](Fields const& seed, std::size_t k) {
+        Fields f = seed;
+        f[k] = "65536=" + value_part(seed[k]);
+        return Planted{.fields = f,
+                       .index = k,
+                       .kind = field_fault::malformed_tag,
+                       .length_tag = 0,
+                       .error = fixpp::core::error::wire_tag_out_of_range};
+    });
+}
+
+TEST(ScanFrameHeaderDifferential, EmptyTag_EveryPosition) {
+    for_each_tag_site([](Fields const& seed, std::size_t k) {
+        Fields f = seed;
+        f[k] = "=" + value_part(seed[k]);
+        return Planted{.fields = f,
+                       .index = k,
+                       .kind = field_fault::malformed_tag,
+                       .length_tag = 0,
+                       .error = fixpp::core::error::wire_invalid_field_format};
+    });
+}
+
+// The field keeps only its tag digits, so SOH comes before any '='.
+TEST(ScanFrameHeaderDifferential, NoEqualsBeforeSoh_EveryPosition) {
+    for_each_tag_site([](Fields const& seed, std::size_t k) {
+        Fields f = seed;
+        f[k] = tag_part(seed[k]);
+        return Planted{.fields = f,
+                       .index = k,
+                       .kind = field_fault::malformed_tag,
+                       .length_tag = 0,
+                       .error = fixpp::core::error::wire_invalid_field_format};
+    });
+}
+
+// The last field keeps only its tag digits and the buffer ends there, so the end
+// comes before any '='.
+TEST(ScanFrameHeaderDifferential, NoEqualsBeforeEndOfBuffer_LastField) {
+    for_each_hooks([](dict_hooks const& hooks) {
+        for (Seed const& seed : seeds()) {
+            if (!seed_is_clean(seed, hooks)) {
+                ADD_FAILURE() << "seed " << seed.name << " is not clean; its mutations are skipped";
+                continue;
+            }
+            SCOPED_TRACE(std::string{"seed "} + seed.name);
+            Fields f = seed.fields;
+            std::size_t const last = f.size() - 1;
+            f[last] = tag_part(seed.fields[last]);
+            expect_planted_fault({.fields = f,
+                                  .index = last,
+                                  .kind = field_fault::malformed_tag,
+                                  .length_tag = 0,
+                                  .error = fixpp::core::error::wire_invalid_field_format,
+                                  .trailing_soh = false},
+                                 hooks);
+        }
+    });
+}
+
+// ── Count mutation families, at every Length field ───────────────────────────
+
+// One byte short: the byte the count lands on is the value's last byte, not SOH.
+TEST(ScanFrameHeaderDifferential, ShortCount_EveryLengthField) {
+    for_each_count_site([](Fields const& f, std::size_t k) { return data_length(f, k) - 1U; });
+}
+
+// One byte long: the byte the count lands on is the next field's first byte.
+TEST(ScanFrameHeaderDifferential, LongCount_EveryLengthField) {
+    for_each_count_site([](Fields const& f, std::size_t k) { return data_length(f, k) + 1U; });
+}
+
+TEST(ScanFrameHeaderDifferential, CountPastTheFrame_EveryLengthField) {
+    for_each_count_site([](Fields const&, std::size_t) { return std::uint32_t{999999}; });
+}
+
+TEST(ScanFrameHeaderDifferential, CountEndingExactlyAtTheFrameEnd_EveryLengthField) {
+    for_each_count_site([](Fields const& f, std::size_t k) { return count_to_frame_end(f, k); });
 }
 
 }  // namespace fixpp::session::test
