@@ -924,7 +924,7 @@ it in 092.
   registered). Then `ctest --test-dir build/linux-clang-debug -L '^092$' --output-on-failure`, all
   GREEN, and the full session suite plus `pytest bindings/python/tests/`, passing except the tests
   R-7 and R-10 list as intentionally updated.
-- [ ] T083 Via `phase-implementer`, FR-008's witness (no test pins it today: `grep -rln "L-004-4"
+- [X] T083 Via `phase-implementer`, FR-008's witness (no test pins it today: `grep -rln "L-004-4"
   tests` is empty, and `OverCapacityFrameClosesSession` covers carry overflow only). In
   `tests/session/engine_readpump_test.cpp` (target `engine_readpump_test`, already hooked; ctest
   `engine_readpump`), add cells that feed an **established** session a frame with a bad CheckSum, one
