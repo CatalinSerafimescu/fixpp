@@ -444,7 +444,7 @@ as a pin or control in its test comment.
   - a faulty SequenceReset in GapFill mode: a Reject, NewSeqNo not applied (FR-010).
   Each runs in both shapes (a malformed tag → 373=0 with no 371; a malformed Length+Data pair after
   34 → 373=5 with 371 = the Length tag).
-- [ ] T028 [US1] Via `phase-implementer`, the SC-002 matrix in
+- [X] T028 [US1] Via `phase-implementer`, the SC-002 matrix in
   `tests/session/unparseable_frame_disposition_test.cpp`: in LogonReceived and in Active, a faulty
   frame with field 3 = 35 and 34 = the expected number draws **exactly one Reject and no other
   outbound message** for Reject(3), Logout(5), SequenceReset(4), Heartbeat(0), TestRequest(1),

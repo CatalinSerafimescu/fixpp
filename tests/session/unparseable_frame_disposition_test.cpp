@@ -34,6 +34,10 @@
 // only the Reject: no handler acts on it. The section comment above StateCell states
 // how each cell is held and witnessed.
 //
+// Matrix_* (tasks.md T028; spec SC-002, SC-003): at the expected N, in Active and in
+// LogonReceived, one faulty frame per MsgType row draws exactly one Reject, and the
+// next conformant frame shows whether NextNumIn advanced.
+//
 // ReplayGuard_* (tasks.md T015; research R-12): the resend store walk classifies a
 // stored frame by the header scan's MsgType. The scan stops at its first fault, so
 // a stored admin frame with a fault before its 35 scans with no MsgType; such a
@@ -1045,6 +1049,42 @@ TEST(UnparseableFrameDisposition, I1_Active_SequenceResetGapFill_MalformedTag) {
 }
 TEST(UnparseableFrameDisposition, I1_Active_SequenceResetGapFill_LengthDataMismatch) {
     run_expected_n_cell(At::active, "4", kGapFillFields, kCountShape);
+}
+
+// ── Matrix_* (tasks.md T028; spec SC-002, SC-003; contract C-2 D-4, D-5) ─────
+//
+// The faulty frame at the expected N must draw a Reject as its only outbound frame,
+// and the conformant Heartbeat at N+1 is then delivered with no ResendRequest, except
+// after a SequenceReset (D-4), where it is a gap. In Active, the rows for 35=0, 1, 2,
+// 4 and 5 are the I1_* cells; the cells below add 35=3 and one application type.
+// LogonReceived has a cell per row (StateCell parks the acceptor's Logon reply).
+
+TEST(UnparseableFrameDisposition, Matrix_Active_Reject) {
+    run_expected_n_cell(At::active, "3", kRejectFields, kTagShape);
+}
+TEST(UnparseableFrameDisposition, Matrix_Active_NewOrderSingle) {
+    run_expected_n_cell(At::active, "D", kOrderFields, kTagShape);
+}
+TEST(UnparseableFrameDisposition, Matrix_LogonReceived_Reject) {
+    run_expected_n_cell(At::logon_received, "3", kRejectFields, kTagShape);
+}
+TEST(UnparseableFrameDisposition, Matrix_LogonReceived_Logout) {
+    run_expected_n_cell(At::logon_received, "5", kLogoutFields, kTagShape);
+}
+TEST(UnparseableFrameDisposition, Matrix_LogonReceived_SequenceReset) {
+    run_expected_n_cell(At::logon_received, "4", kGapFillFields, kTagShape);
+}
+TEST(UnparseableFrameDisposition, Matrix_LogonReceived_Heartbeat) {
+    run_expected_n_cell(At::logon_received, "0", {}, kTagShape);
+}
+TEST(UnparseableFrameDisposition, Matrix_LogonReceived_TestRequest) {
+    run_expected_n_cell(At::logon_received, "1", kTestRequestFields, kTagShape);
+}
+TEST(UnparseableFrameDisposition, Matrix_LogonReceived_ResendRequest) {
+    run_expected_n_cell(At::logon_received, "2", kResendRequestFields, kTagShape);
+}
+TEST(UnparseableFrameDisposition, Matrix_LogonReceived_NewOrderSingle) {
+    run_expected_n_cell(At::logon_received, "D", kOrderFields, kTagShape);
 }
 
 }  // namespace
