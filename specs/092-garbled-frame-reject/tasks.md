@@ -763,7 +763,7 @@ it in 092.
   - T1: an empty tag returns `wire_invalid_tag_number`, **not** `wire_unexpected_tag`;
   - clean controls: well-formed messages whose view uses the validator's own hooks, one with a
     standard Length+Data pair and one with a dictionary-only pair; the result is unchanged.
-- [ ] T058 Via `phase-implementer`, the new errors (E-6) in `include/fixpp/core/error.hpp`:
+- [X] T058 Via `phase-implementer`, the new errors (E-6) in `include/fixpp/core/error.hpp`:
   `wire_invalid_tag_number = 132` and `wire_length_data_mismatch = 133`, appended at the next
   contiguous slots after `app_payload_malformed = 131` with explicit values (`[const §X.4]`), each
   with an `error_message` entry.
