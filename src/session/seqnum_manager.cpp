@@ -46,6 +46,12 @@ namespace fixpp::session {
 //     slot 70 session_seqnum_gap_unrecoverable, per 013 T006a) were replaced by this
 //     dedicated slot. 013 Phase 3 T026: session.cpp intercepts too-high BEFORE
 //     check_inbound and routes via reconnect_fsm_.enter_awaiting_resend() per FR-009.
+//   store_seqnum_overflow (60)   — seq == next_inbound_ == seqnum_max: in sequence, but no
+//     next value exists (092 FR-019 / contract C-3 I-7, the inbound side of I-8). Detected
+//     before mutating, as assign_outbound does; the counter is NOT advanced.
+//
+// Callers: re-derive them with `grep -n "check_inbound(" src/session/session.cpp` and read
+// each call's error branch; 092 research R-14 gives the disposition each must take.
 //
 // The mutex serialises both inbound and outbound counter operations (D-7).
 // Under the per-session-strand discipline the fast-path CAS always succeeds;
@@ -77,9 +83,16 @@ asio::awaitable<fixpp::core::expected_t<void>> SeqnumManager::check_inbound(seqn
         // is still session-fatal. Slot 70 session_seqnum_gap_unrecoverable
         // deleted per 013 T006a; slot 74 session_test_request_unanswered
         // was the stand-in — replaced here by the semantically-correct slot.
-        // Zero behavioural change: all 3 callers (session.cpp) discard the
-        // returned code and disconnect (I-8; contracts/error_slots.hpp).
+        // For the callers and their dispositions, see the recipe in this
+        // function's header comment.
         co_return std::unexpected(error::session_seqnum_too_high);
+    }
+
+    // In-sequence at seqnum_max: no next value exists (092 FR-019). Refuse
+    // before mutating, leaving the counter unchanged; reuse [2e §6.7]
+    // store_seqnum_overflow, as assign_outbound does for I-8.
+    if (next_inbound_ == seqnum_max) {
+        co_return std::unexpected(error::store_seqnum_overflow);
     }
 
     // In-sequence: advance exactly by 1 (I-2 zero drift).

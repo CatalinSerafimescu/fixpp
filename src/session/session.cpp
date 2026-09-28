@@ -787,12 +787,20 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::persist_inbound_advance_
 // unconsumed. Logon and SequenceReset are excluded, as both QuickFIX engines'
 // generateReject exclude them. Erratum fixpp#423 (owner ruling 2026-09-14) supersedes
 // 041 contract C-3's and 021 FR-004's "does not advance".
+// 092 FR-019: at NextNumIn = seqnum_max the in-sequence message cannot be consumed, so
+// this takes the silent transition to Disconnected and returns the error. A caller must
+// return a failed result before its Reject (FR-013's ordering); re-derive the callers with
+// `grep -n "consume_rejected_seqnum_(" src/session/session.cpp` and read each failed branch.
 asio::awaitable<fixpp::core::expected_t<void>> Session::consume_rejected_seqnum_(
     seqnum_t seq, std::string_view msg_type) noexcept {
     if (msg_type == "A" || msg_type == "4") {
         co_return fixpp::core::expected_t<void>{};
     }
-    if (!co_await seqnum_mgr_.check_inbound(seq)) {
+    if (auto chk = co_await seqnum_mgr_.check_inbound(seq); !chk) {
+        if (chk.error() == fixpp::core::error::store_seqnum_overflow) {
+            record_state_transition_(fsm_state::Disconnected);
+            co_return std::unexpected(chk.error());
+        }
         co_return fixpp::core::expected_t<void>{};
     }
     close_filled_resend_gap_();
@@ -3590,6 +3598,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // in-seq → advance; too-high-while-awaiting → advance (it's a fill).
                 auto chk = co_await seqnum_mgr_.check_inbound(seq);
                 if (!chk) {
+                    // 092 FR-019: an in-sequence message at NextNumIn = seqnum_max cannot be
+                    // consumed. Tested first: the Heartbeat, PossDup and knob-off arms below
+                    // would each keep the session at a NextNumIn that cannot advance. Silent
+                    // Disconnected, and the error is returned, matching the disposition of an
+                    // assign_outbound overflow.
+                    if (chk.error() == fixpp::core::error::store_seqnum_overflow) {
+                        record_state_transition_(fsm_state::Disconnected);
+                        co_return std::unexpected(chk.error());
+                    }
                     if (hdr.msg_type == "0") {
                         // Too-low Heartbeat: silently ignore (preserve Active, no echo).
                         co_return fixpp::core::expected_t<void>{};

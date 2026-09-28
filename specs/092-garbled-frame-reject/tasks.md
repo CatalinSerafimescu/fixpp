@@ -701,7 +701,7 @@ round 2). The D-5 cell needs Phase 2d.
   the same assertions, plus the durable counter, read (L2R3-005) by reopening a `FileStore` over the
   fixture's `dir_` after the session closes and calling `next_seqnum(inbound, false)`: the frame did
   not move it.
-- [ ] T053 Via `phase-implementer`, implement the bound.
+- [X] T053 Via `phase-implementer`, implement the bound.
   - `src/session/seqnum_manager.cpp`: in `check_inbound`'s in-sequence branch, before
     `++next_inbound_`, return `core::error::store_seqnum_overflow` when `next_inbound_ ==
     seqnum_max`, leaving the counter unchanged. Rewrite the sentence that counts the callers as the
