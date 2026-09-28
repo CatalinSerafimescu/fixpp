@@ -1663,6 +1663,8 @@ TEST_P(ValidatorLive, MissingRequiredField_RejectedOnlyWhenValidating) {
     if (p.validate) {
         EXPECT_EQ(rejects.size(), 1U) << "validation on: the missing ClOrdID(11) must be Rejected";
         if (!rejects.empty()) {
+            EXPECT_EQ(extract_tag(rejects.front(), 45), "2") << "Reject RefSeqNum(45)";
+            EXPECT_EQ(extract_tag(rejects.front(), 372), "D") << "Reject RefMsgType(372)";
             EXPECT_EQ(extract_tag(rejects.front(), 373), "1") << "Reject SessionRejectReason(373)";
             EXPECT_EQ(extract_tag(rejects.front(), 371), "11") << "Reject RefTagID(371)";
         }
