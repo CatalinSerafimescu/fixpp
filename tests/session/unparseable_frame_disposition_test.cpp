@@ -82,6 +82,10 @@
 // are refused, in both roles; the Logon on every profile. The section comment above
 // expect_pre_active_refusal states which cells are pins.
 //
+// D3_* (tasks.md T044; spec SC-004; contract C-2 D-3): a faulty Logon in Active and in
+// LogonReceived, in both fault shapes, ends in a silent Disconnected. The section comment
+// above sent_types states what the LogonReceived cells assert.
+//
 // Anchors: specs/092-garbled-frame-reject/spec.md SC-001, FR-007;
 //          contracts/unparseable-frame-disposition.md C-2 (D-4) and its Reject contents;
 //          fixpp#507 (the T076 table and reproducer).
@@ -2717,6 +2721,74 @@ TEST(UnparseableFrameDisposition, PreActive_D8Logon_NotConnected_Refused) {
 }
 TEST(UnparseableFrameDisposition, PreActive_D8Logon_LogonSent_Refused) {
     run_pre_active_d8_logon(session_role::initiator, "LogonSent D-8 Logon");
+}
+
+// ── D3_* (tasks.md T044; spec SC-004; contract C-2 D-3) ──────────────────────
+//
+// A faulty Logon at the expected N=2 (field 3 is 35, 34 read before the fault), in both
+// fault shapes, in Active and in LogonReceived: the session ends Disconnected, and
+// sends no Reject(35=3) and no Logout(35=5). D-3 is a state transition, not a close,
+// so is_open() is not asserted. LogonReceived is reached through StateCell's parked
+// Logon reply (the Engine awaits each on_inbound_frame, so in production no frame
+// reaches that arm while the exchange is in flight). The released reply resumes the
+// acceptor's Logon path in the NotConnected arm, which transitions to Active whatever
+// state it resumes into, so the LogonReceived cells assert the disposer's outcome
+// captured before the release, and across the release only that no Reject or Logout
+// is sent.
+
+std::string sent_types(DispositionFixture const& fix) {
+    std::string types;
+    for (auto const& f : fix.transport.sent_frames()) {
+        types += " 35=" + extract_tag(f, 35);
+    }
+    return types;
+}
+
+void run_d3_cell(At at, Shape const& shape) {
+    StateCell c{at};
+    c.enter();
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    std::string const row =
+        "D-3 " + std::string{state_name(c.held)} + " (373=" + std::string{shape.reason} + " shape)";
+    EXPECT_EQ(c.sess->state(), c.held) << row << ": state before the faulty Logon";
+    int const admin_before = c.app->from_admin;
+    int const app_before = c.app->from_app;
+
+    c.fix.feed(*c.sess, make_raw_frame("A", 2, kLogonFields + shape.garble));
+    EXPECT_EQ(c.sess->state(), fsm_state::Disconnected) << row << ": the faulty Logon ends it";
+    EXPECT_TRUE(c.fix.transport.sent_frames().empty())
+        << row << ": silent; sent:" << sent_types(c.fix);
+    EXPECT_EQ(c.app->from_admin, admin_before) << row << ": the faulty Logon reached fromAdmin";
+    EXPECT_EQ(c.app->from_app, app_before) << row << ": the faulty Logon reached fromApp";
+
+    if (c.held != fsm_state::LogonReceived) {
+        return;
+    }
+    c.fix.transport.reset();
+    c.factory->last_store->release_parked();
+    bool const done = fixpp::test_support::pump_until_ready(c.fix.ioc, c.logon, 200ms);
+    EXPECT_TRUE(done) << row << ": the parked Logon exchange did not complete after the release";
+    if (done) {
+        (void)c.logon.get();
+    }
+    EXPECT_TRUE(c.fix.sent_of_type("3").empty() && c.fix.sent_of_type("5").empty())
+        << row << ": the released exchange sends no Reject or Logout; sent:" << sent_types(c.fix);
+}
+
+TEST(UnparseableFrameDisposition, D3_Active_FaultyLogon_MalformedTag_SilentDisconnect) {
+    run_d3_cell(At::active, kTagShape);
+}
+TEST(UnparseableFrameDisposition, D3_Active_FaultyLogon_LengthDataMismatch_SilentDisconnect) {
+    run_d3_cell(At::active, kCountShape);
+}
+TEST(UnparseableFrameDisposition, D3_LogonReceived_FaultyLogon_MalformedTag_SilentDisconnect) {
+    run_d3_cell(At::logon_received, kTagShape);
+}
+TEST(UnparseableFrameDisposition,
+     D3_LogonReceived_FaultyLogon_LengthDataMismatch_SilentDisconnect) {
+    run_d3_cell(At::logon_received, kCountShape);
 }
 }  // namespace
 }  // namespace fixpp::session::test

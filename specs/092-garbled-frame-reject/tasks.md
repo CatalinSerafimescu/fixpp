@@ -617,7 +617,7 @@ ends Disconnected with no Reject and no Logon reply.
   and as initiator (reply Logon), on FIX.4.2, FIX.4.4 and FIXT.1.1 (SC-004). Plus a faulty
   non-Logon in NotConnected and in LogonSent, and a D-8-shaped frame (field 3 not 35) in both: each
   refused, the session ends (the pre-Active disregard is fixpp#514).
-- [ ] T044 [US3] Via `phase-implementer`, the D-3 cells in
+- [X] T044 [US3] Via `phase-implementer`, the D-3 cells in
   `tests/session/unparseable_frame_disposition_test.cpp`: a faulty Logon (field 3 = 35, 34 read) in
   Active and in LogonReceived ends in a silent Disconnected, with no Reject and no Logout.
 - [ ] T045 [US3] Run T021's `capi_logon_malformed_tag` and `capi_logon_malformed_count`: both GREEN
