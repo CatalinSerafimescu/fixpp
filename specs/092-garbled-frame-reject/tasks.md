@@ -797,7 +797,7 @@ it in 092.
   `wire_invalid_tag_number`, `*ref_tag_out` untouched; `length_data_mismatch` → write
   `it.fault_length_tag()` to `*ref_tag_out` and return `wire_length_data_mismatch`. Steps 2 onward do
   not run after a fault. T057 GREEN.
-- [ ] T063 In a scratch copy: delete the top-of-iteration check (T1 cell RED), then the after-loop
+- [X] T063 In a scratch copy: delete the top-of-iteration check (T1 cell RED), then the after-loop
   check (T2/T3 cells RED), then one iterator fault write per row (its E-4 cell RED). Record each in
   the evidence file.
 
