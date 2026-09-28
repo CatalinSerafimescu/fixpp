@@ -663,11 +663,11 @@ N+1: the first draws nothing; the second draws a ResendRequest; the session stay
 **Purpose**: NextNumIn never wraps. Not a user story: the owner folded it into 092 (Gate A loop 2,
 round 2). The D-5 cell needs Phase 2d.
 
-- [ ] T050 [P] Via `phase-implementer`, the unit cells in `tests/session/seqnum_manager_test.cpp`
+- [X] T050 [P] Via `phase-implementer`, the unit cells in `tests/session/seqnum_manager_test.cpp`
   (target `session_store_tests`, label from T007): `set_next_inbound(seqnum_max)` succeeds; then
   `check_inbound(seqnum_max)` returns `store_seqnum_overflow` and `next_inbound_unsafe()` stays
   `seqnum_max`. RED today (it wraps to 0).
-- [ ] T051 [P] Via `phase-implementer`, the memory-store session cells in
+- [X] T051 [P] Via `phase-implementer`, the memory-store session cells in
   `tests/session/test_validation_compat_toggles.cpp` (target `session_validation_compat_toggles`).
   Each sends a SequenceReset (Reset mode, 36=4294967295), asserts Active and
   `next_inbound_unsafe() == 4294967295` (so no other disconnect cause can satisfy the cell), then
@@ -695,7 +695,7 @@ round 2). The D-5 cell needs Phase 2d.
     so it is not a control.)
   RED today for the Guard 4, #423 and pre-Active cells (the counter wraps and the session stays
   Active or establishes). The D-5 cell's RED is T054's.
-- [ ] T052 [P] Via `phase-implementer`, the FileStore cells in
+- [X] T052 [P] Via `phase-implementer`, the FileStore cells in
   `tests/session/test_store_fail_reconcile.cpp` (target `store_fail_reconcile`, already hooked; label
   from T007), whose fixture drives a Session over a `FileStoreFactory`: the five frames of T051 with
   the same assertions, plus the durable counter, read (L2R3-005) by reopening a `FileStore` over the

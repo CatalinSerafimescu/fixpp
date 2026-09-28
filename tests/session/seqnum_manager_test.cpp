@@ -223,6 +223,42 @@ TEST_F(SeqnumManagerTest, OutboundOverflowAtSeqnumMax) {
 #endif
 }
 
+// ── 092-garbled-frame-reject FR-019: seqnum_max inbound bound, NO wrap ──────
+//
+// NextNumIn may hold seqnum_max (a SequenceReset may set it; the value is
+// representable), but an in-sequence message at seqnum_max cannot be consumed:
+// check_inbound refuses with store_seqnum_overflow and leaves the counter where it
+// was. To check the second cell can fail, delete the seqnum_max test in
+// check_inbound's in-sequence branch in a scratch copy: the counter wraps to 0.
+// Anchors: specs/092-garbled-frame-reject spec FR-019; contract C-3 I-7; research R-14.
+
+TEST_F(SeqnumManagerTest, InboundSetNextInboundToSeqnumMaxSucceeds) {
+    SeqnumManager mgr;
+
+    auto r = run_sync(ioc, mgr.set_next_inbound(seqnum_max));
+    ASSERT_TRUE(r.has_value()) << "FR-019: seqnum_max is a representable NextNumIn";
+    EXPECT_EQ(mgr.next_inbound_unsafe(), seqnum_max);
+
+    ASSERT_TRUE(run_sync(ioc, mgr.drain()).has_value());
+}
+
+TEST_F(SeqnumManagerTest, InboundOverflowAtSeqnumMax) {
+    SeqnumManager mgr;
+    ASSERT_TRUE(run_sync(ioc, mgr.set_next_inbound(seqnum_max)).has_value());
+    ASSERT_EQ(mgr.next_inbound_unsafe(), seqnum_max);
+
+    // EXPECT, not ASSERT: the drain below must run on the failing path too.
+    auto r = run_sync(ioc, mgr.check_inbound(seqnum_max));
+    EXPECT_FALSE(r.has_value())
+        << "FR-019: an in-sequence message at seqnum_max cannot be consumed";
+    EXPECT_EQ(r.has_value() ? fixpp::core::error{} : r.error(),
+              fixpp::core::error::store_seqnum_overflow)
+        << "FR-019 / C-3 I-7: the inbound bound reuses store_seqnum_overflow, as I-8 does";
+    EXPECT_EQ(mgr.next_inbound_unsafe(), seqnum_max) << "FR-019: NextNumIn must not wrap";
+
+    ASSERT_TRUE(run_sync(ioc, mgr.drain()).has_value());
+}
+
 // ── T6: Too-low error does not advance counter; next in-seq succeeds ─────────
 
 TEST_F(SeqnumManagerTest, TooLowDoesNotCorruptCounterSubsequentInSeqOk) {
