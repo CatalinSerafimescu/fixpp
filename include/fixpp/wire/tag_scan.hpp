@@ -13,6 +13,17 @@
 
 namespace fixpp::wire {
 
+// 092 (specs/092-garbled-frame-reject/data-model.md E-0): the first field a
+// reader could not read. One vocabulary for the session's header scan and the
+// Parser's field iterator, both of which already include this header.
+//   malformed_tag         a non-digit tag byte, a tag above 0xFFFF, an empty
+//                         tag, or no '=' before SOH or the end of the buffer;
+//   length_data_mismatch  a Data value counted by the Length field right before
+//                         it runs past the buffer, reaches its end exactly, or
+//                         is not followed by SOH.
+// Resource failures (an entry cap, an allocation failure) are not faults.
+enum class field_fault : std::uint8_t { none = 0, malformed_tag = 1, length_data_mismatch = 2 };
+
 // Appends decimal digit `c` ('0'..'9') to `tag`, bounding to the 16-bit FIX
 // tag space (0xFFFF). Returns false (without advancing the accumulator past the
 // in-progress value) if appending `c` would make `tag` exceed 0xFFFF — detected
