@@ -309,7 +309,7 @@ C-2 row, and the rows are one function, so the mechanism lands here with one anc
   `include/fixpp/session/admin_messages.hpp` and `src/session/admin_messages.cpp`. `build_reject`
   stays a **single declaration**, unchanged in signature, and delegates with an empty text.
   `emit_session_reject_` gains the matching `text` parameter (private). T016 GREEN.
-- [ ] T018 Via `phase-implementer`, the 372 bound (R-5). Add a named constant for the longest MsgType
+- [X] T018 Via `phase-implementer`, the 372 bound (R-5). Add a named constant for the longest MsgType
   any shipped dictionary defines (no literal count in a comment), and a unit test that recomputes it
   from `dictionaries/*.xml` so it cannot drift, in `tests/session/session_reject_test.cpp`. Add the two fixed
   Text constants, one per fault kind, carrying no offset and no peer bytes.

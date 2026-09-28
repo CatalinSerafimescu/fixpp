@@ -84,6 +84,20 @@ struct FrameHeader {
     std::string_view fault_ref_msg_type;
 };
 
+// 092 research R-5: the RefMsgType(372) bound for the Reject a faulty frame draws.
+// The disposition passes `fault_ref_msg_type` as 372 only when it is no longer than
+// this; otherwise it passes an empty 372, which build_reject_with_text omits. The
+// value is the length of the longest MsgType a shipped dictionary defines. Re-derive
+// it with the recompute cell in tests/session/session_reject_test.cpp, which reads
+// every dictionaries/*.xml.
+inline constexpr std::size_t kMaxShippedMsgTypeLength = 2;
+
+// 092 research R-5: the fixed Text(58) of that Reject, one per field_fault kind.
+// Compile-time constants: they carry no offset and no peer bytes.
+inline constexpr std::string_view kRejectTextMalformedTag = "Garbled field: malformed tag";
+inline constexpr std::string_view kRejectTextLengthDataMismatch =
+    "Garbled field: Length does not match its Data field";
+
 // fixpp#426: a Data value counted by its Length is read as one value, so a
 // `<SOH>34=` inside EncodedText is not a MsgSeqNum. `hooks` supplies the pairs
 // (the session's dictionary, or the standard table alone).

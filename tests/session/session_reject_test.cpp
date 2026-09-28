@@ -38,6 +38,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
@@ -46,13 +47,16 @@
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <fstream>
 #include <future>
 #include <memory>
 #include <span>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "session/scan_frame_header.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -394,6 +398,95 @@ TEST(SessionReject, BuildRejectWithTextEmptyRefMsgTypeOmits372) {
     EXPECT_EQ(as_string(*r),
               soh_frame("8=FIX.4.2|9=84|35=3|34=2|49=ISLD|52=20240101-00:00:00.000|56=TW|45=1|"
                         "371=95|373=5|58=garbled field|10=090|"));
+}
+
+// ── 092 T018: the 372 bound and the fixed Text constants (research R-5) ──────
+
+#ifndef FIXPP_DICT_DATA_DIR
+#error "FIXPP_DICT_DATA_DIR must be set by CMake target_compile_definitions"
+#endif
+
+namespace {
+
+// Every `msgtype=` attribute value in a QuickFIX dictionary, in either quote
+// style (the shipped files use single quotes).
+std::vector<std::string> msgtype_attributes(const std::string& xml) {
+    std::vector<std::string> out;
+    constexpr std::string_view kAttr = "msgtype=";
+    std::size_t pos = 0;
+    while ((pos = xml.find(kAttr, pos)) != std::string::npos) {
+        pos += kAttr.size();
+        if (pos >= xml.size() || (xml[pos] != '\'' && xml[pos] != '"')) {
+            continue;
+        }
+        const char quote = xml[pos];
+        const std::size_t end = xml.find(quote, pos + 1);
+        if (end == std::string::npos) {
+            break;
+        }
+        out.emplace_back(xml.substr(pos + 1, end - pos - 1));
+        pos = end + 1;
+    }
+    return out;
+}
+
+}  // namespace
+
+// kMaxShippedMsgTypeLength equals the longest MsgType any dictionaries/*.xml
+// defines, recomputed from the files so the constant cannot drift. Each file
+// must yield at least one MsgType and FIX44.xml must be visited, so a scan that
+// reads nothing fails instead of reporting a bound of zero.
+TEST(SessionReject, MaxShippedMsgTypeLengthMatchesDictionaries) {
+    namespace fs = std::filesystem;
+    const fs::path dir{FIXPP_DICT_DATA_DIR};
+    ASSERT_TRUE(fs::is_directory(dir)) << dir;
+
+    std::size_t longest = 0;
+    std::string longest_where;
+    bool saw_fix44 = false;
+    for (const auto& entry : fs::directory_iterator(dir)) {
+        if (!entry.is_regular_file() || entry.path().extension() != ".xml") {
+            continue;
+        }
+        if (entry.path().filename() == "FIX44.xml") {
+            saw_fix44 = true;
+        }
+        std::ifstream in(entry.path(), std::ios::binary);
+        ASSERT_TRUE(in) << entry.path();
+        std::ostringstream ss;
+        ss << in.rdbuf();
+        const auto types = msgtype_attributes(ss.str());
+        EXPECT_FALSE(types.empty()) << entry.path() << ": no msgtype attribute read";
+        for (const auto& t : types) {
+            if (t.size() > longest) {
+                longest = t.size();
+                longest_where = entry.path().filename().string() + " msgtype=" + t;
+            }
+        }
+    }
+    ASSERT_TRUE(saw_fix44) << "FIX44.xml not found under " << dir;
+    EXPECT_EQ(fixpp::session::detail::kMaxShippedMsgTypeLength, longest)
+        << "longest shipped MsgType: " << longest_where;
+}
+
+// The two fixed Text(58) values, spelled out here so a change to either is made
+// twice, deliberately. They are printable ASCII with no digit (nothing that could
+// read as an offset or a count) and no '=' or SOH (nothing that could break the
+// field), and the two fault kinds are told apart.
+TEST(SessionReject, RejectTextConstantsAreFixed) {
+    using fixpp::session::detail::kRejectTextLengthDataMismatch;
+    using fixpp::session::detail::kRejectTextMalformedTag;
+    EXPECT_EQ(kRejectTextMalformedTag, "Garbled field: malformed tag");
+    EXPECT_EQ(kRejectTextLengthDataMismatch, "Garbled field: Length does not match its Data field");
+    EXPECT_NE(kRejectTextMalformedTag, kRejectTextLengthDataMismatch);
+    for (std::string_view text : {kRejectTextMalformedTag, kRejectTextLengthDataMismatch}) {
+        ASSERT_FALSE(text.empty());
+        for (char c : text) {
+            EXPECT_TRUE(c >= 0x20 && c <= 0x7E) << text;
+            EXPECT_FALSE(c >= '0' && c <= '9') << text;
+            EXPECT_NE(c, '=') << text;
+        }
+    }
 }
 
 // ── Test 2: No-reject-loop on inbound Reject (I-5) ───────────────────────────
