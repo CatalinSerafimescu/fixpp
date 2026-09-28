@@ -50,8 +50,8 @@ using fixpp::session::detail::scan_frame_header;
 using fixpp::wire::dict_hooks;
 using fixpp::wire::field_fault;
 
-// A dictionary declaring one Length+Data pair outside the standard table
-// (5001 -> 5002), so the dictionary hooks differ from dict_hooks::none().
+// A dictionary declaring a Length+Data pair outside the standard table
+// (CustomLen, then CustomData), so its hooks differ from dict_hooks::none().
 constexpr std::string_view kPairDictXml = R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
                                           R"(<fields>)"
                                           R"(<field number='8' name='BeginString' type='STRING'/>)"
