@@ -65,6 +65,13 @@
 // [FIX-SL §4.8.3]. The store is a custom MessageStore, which may hold bytes fixpp
 // did not write.
 //
+// LateSite_* (tasks.md T038; contract C-6; spec FR-016, SC-008): one cell per late
+// inbound parse site, each with a frame the header scan finds fault-free but the parse
+// cannot index. The session closes terminally, sends no Reject and does not invoke the
+// parse target's receive callback; the durable NextNumIn a reconnect resumes from is
+// pinned per site (contract C-5 L-6). The section comment above LateKnobs states each
+// cell.
+//
 // Anchors: specs/092-garbled-frame-reject/spec.md SC-001, FR-007;
 //          contracts/unparseable-frame-disposition.md C-2 (D-4) and its Reject contents;
 //          fixpp#507 (the T076 table and reproducer).
@@ -83,6 +90,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
 #include <fixpp/dict/dictionary.hpp>
@@ -90,6 +98,8 @@
 #include <fixpp/dict/version_registry.hpp>
 #include <fixpp/dict/xml_loader.hpp>
 #include <fixpp/session/application.hpp>
+#include <fixpp/session/file_store.hpp>
+#include <fixpp/session/file_store_factory.hpp>
 #include <fixpp/session/message_store.hpp>
 #include <fixpp/session/message_store_factory.hpp>
 #include <fixpp/session/retrieve_visitor.hpp>
@@ -97,6 +107,7 @@
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <fixpp/wire/offset_table.hpp>
 #include <future>
 #include <memory>
 #include <memory_resource>
@@ -109,6 +120,7 @@
 #include "support/extract_tag.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/temp_dir.hpp"
 #include "support/transport_double.hpp"
 #include "support/validation_test_dictionary.hpp"
 
@@ -2033,5 +2045,341 @@ TEST(UnparseableFrameDisposition, RefMsgTypeBound_LongMsgType_RejectWithout372_L
     run_ref_msg_type_bound_cell(kCountShape);
 }
 
+// ── LateSite_* (tasks.md T038; contract C-6; spec FR-016, SC-008) ────────────
+//
+// One cell per late inbound parse site: a parse_and_dispatch_ or validate_inbound_
+// call over bytes received from the peer. Re-derive the population with contract C-6's
+// command, `grep -n "parse_and_dispatch_(\|validate_inbound_(" src/session/session.cpp`,
+// and classify each call by the provenance of the bytes it parses.
+//
+// The trigger is a real frame the header scan finds fault-free, carrying more fields
+// than fixpp::wire::default_max_offset_entries. Parser<Index>::parse fails on it on every
+// lane: the parse arena is exhausted where its upstream is null, and the offset-table
+// cap is exceeded where it is not. So no cell needs a platform guard, and none asserts
+// which error the parse returned. The filler is distinct user-defined tags.
+//
+// Each cell asserts the C-6 disposition: a terminal close (is_open() false: the
+// Disconnected transitions that are not a close leave it true), no Reject(35=3), and
+// the parse target's receive callback not invoked. onLogout from the close and a
+// callback fired earlier at the site are not counted, and no cell asserts that an
+// effect taken before the site's parse is absent (contract C-6).
+//
+// The store is a FileStore over a temporary directory. After the verdict is captured,
+// the session is closed if it is still open and destroyed, which releases the store's
+// lock; the store is then reopened and next_seqnum(inbound, false) read. That durable
+// NextNumIn is what a reconnect over the same store resumes from, and it pins whether
+// the closed-on frame was consumed (contract C-5 L-6).
+//
+// Every observation is non-fatal (EXPECT_*), so each clause reports in each cell.
+
+// More fields than the offset table admits, so the parse fails on every lane.
+constexpr std::size_t kLateFillerFields = fixpp::wire::default_max_offset_entries + 100;
+// Few enough fields for the parse to succeed on every lane; the controls need that.
+constexpr std::size_t kControlFillerFields = 100;
+constexpr int kFirstFillerTag = 5000;
+
+// `count` fields with distinct user-defined tags.
+std::string filler(std::size_t count) {
+    std::string out;
+    for (std::size_t i = 0; i < count; ++i) {
+        out += std::to_string(kFirstFillerTag + static_cast<int>(i)) + "=v\x01";
+    }
+    return out;
+}
+
+std::string const kLogonFields = std::string{"98=0\x01"} + "108=30\x01";
+std::string const kNewOrderFields =
+    std::string{"11=ORD1\x01"} + "54=1\x01" + "60=20240101-00:00:00.000\x01";
+
+// The session configuration a late-site cell varies.
+struct LateKnobs {
+    bool validate = false;  // validate_inbound_messages
+    bool acceptor = false;
+    bool redeliver_poss_dup = false;
+    bool validate_sequence_numbers = true;
+};
+
+// A session over a FileStore in its own temporary directory, with a counting
+// Application.
+struct LateCell {
+    DispositionFixture fix;
+    std::shared_ptr<CountingApplication> app = std::make_shared<CountingApplication>();
+    std::filesystem::path dir = fixpp::test_support::unique_temp_dir("late_site");
+    std::unique_ptr<Session> sess;
+
+    explicit LateCell(LateKnobs knobs) {
+        fix.engine.application = app;
+        auto cfg = fix.make_cfg(knobs.validate);
+        if (knobs.acceptor) {
+            cfg.role = session_role::acceptor;
+        }
+        cfg.redeliver_poss_dup = knobs.redeliver_poss_dup;
+        cfg.validate_sequence_numbers = knobs.validate_sequence_numbers;
+        cfg.store_factory = std::make_shared<FileStoreFactory>(file_cfg());
+        sess = std::make_unique<Session>(fix.engine, cfg);
+    }
+
+    LateCell(LateCell const&) = delete;
+    LateCell& operator=(LateCell const&) = delete;
+    LateCell(LateCell&&) = delete;
+    LateCell& operator=(LateCell&&) = delete;
+
+    ~LateCell() {
+        release();
+        (void)fixpp::test_support::try_remove_temp_dir(dir);
+    }
+
+    [[nodiscard]] FileStore::Config file_cfg() {
+        FileStore::Config fcfg;
+        fcfg.directory = dir;
+        fcfg.sender_comp_id = "ISLD";
+        fcfg.target_comp_id = "TW";
+        fcfg.file_io_executor = fix.ioc.get_executor();
+        return fcfg;
+    }
+
+    // Closes the session if it is still open, then destroys it, which releases the
+    // store. Run only after the cell's verdict is captured: the close writes is_open().
+    void release() {
+        if (!sess) {
+            return;
+        }
+        if (sess->is_open()) {
+            auto fut = asio::co_spawn(fix.ioc, sess->close(close_mode::terminal), asio::use_future);
+            if (!fixpp::test_support::run_window_then_ready(fix.ioc, fut, 200ms)) {
+                fixpp::test_support::cancel_and_drain_or_report(fix.ioc, *fix.clock,
+                                                                "LateCell::release");
+                ADD_FAILURE() << fixpp::test_support::kWindowMiss << "LateCell::release";
+            } else {
+                (void)fut.get();
+            }
+        }
+        sess.reset();
+    }
+
+    // Releases the session, reopens the store and reads its durable NextNumIn.
+    // Returns 0 when the store cannot be reopened or read (reported as a failure).
+    [[nodiscard]] seqnum_t durable_next_inbound() {
+        release();
+        FileStoreFactory factory{file_cfg()};
+        auto minted =
+            factory.make("ISLD", "TW", nullptr, std::size_t{1} << 30U, fix.ioc.get_executor());
+        if (!minted.has_value()) {
+            ADD_FAILURE() << "LateCell: the FileStore could not be reopened";
+            return 0;
+        }
+        MessageStore& store = **minted;
+        auto fut = asio::co_spawn(
+            fix.ioc,
+            [&store]() -> asio::awaitable<fixpp::core::expected_t<seqnum_t>> {
+                co_return co_await store.next_seqnum(direction_t::inbound, false);
+            },
+            asio::use_future);
+        if (!fixpp::test_support::run_window_then_ready(fix.ioc, fut, 200ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(fix.ioc, *fix.clock,
+                                                            "LateCell::durable_next_inbound");
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "LateCell::durable_next_inbound";
+            return 0;
+        }
+        auto const r = fut.get();
+        if (!r.has_value()) {
+            ADD_FAILURE() << "LateCell: next_seqnum(inbound, false) failed on the reopened store";
+            return 0;
+        }
+        return *r;
+    }
+};
+
+// The receive callback the frame's parse would reach.
+enum class Target : std::uint8_t { from_admin, from_app };
+
+// Feeds `frame` and asserts the C-6 disposition, then the durable NextNumIn after the
+// close.
+void expect_late_close(LateCell& c, std::vector<std::byte> const& frame, Target target,
+                       seqnum_t durable_after, std::string_view row) {
+    int const admin_before = c.app->from_admin;
+    int const app_before = c.app->from_app;
+    c.fix.feed(*c.sess, frame);
+
+    // The verdict, captured before release() closes a session left open.
+    bool const open_after = c.sess->is_open();
+    fsm_state const state_after = c.sess->state();
+    std::size_t const rejects = c.fix.sent_of_type("3").size();
+    int const admin_calls = c.app->from_admin - admin_before;
+    int const app_calls = c.app->from_app - app_before;
+
+    EXPECT_FALSE(open_after) << row << ": the late parse failure must close the session";
+    EXPECT_EQ(static_cast<int>(state_after), static_cast<int>(fsm_state::Disconnected))
+        << row << ": state after the frame";
+    EXPECT_EQ(rejects, 0U) << row << ": a late parse failure sends no Reject(35=3)";
+    if (target == Target::from_admin) {
+        EXPECT_EQ(admin_calls, 0) << row << ": fromAdmin must not be invoked for the frame";
+    } else {
+        EXPECT_EQ(app_calls, 0) << row << ": fromApp must not be invoked for the frame";
+    }
+
+    EXPECT_EQ(c.durable_next_inbound(), durable_after)
+        << row << ": durable NextNumIn after the close (what a reconnect resumes from)";
+}
+
+// The validate gate of the NotConnected arm: an acceptor's first Logon. The gate runs
+// before check_inbound.
+TEST(UnparseableFrameDisposition, LateSite_NotConnected_ValidateGate_Logon_Closes) {
+    LateCell c{{.validate = true, .acceptor = true}};
+    c.fix.open_only(*c.sess);
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    ASSERT_EQ(c.sess->state(), fsm_state::NotConnected);
+    expect_late_close(c, make_raw_frame("A", 1, kLogonFields + filler(kLateFillerFields)),
+                      Target::from_admin, 1, "NotConnected validate gate");
+}
+
+// The validate gate of the LogonSent arm: the initiator's Logon reply. The gate runs
+// before check_inbound.
+TEST(UnparseableFrameDisposition, LateSite_LogonSent_ValidateGate_LogonReply_Closes) {
+    LateCell c{{.validate = true}};
+    c.fix.open_only(*c.sess);
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    ASSERT_EQ(c.sess->state(), fsm_state::LogonSent);
+    expect_late_close(c, make_raw_frame("A", 1, kLogonFields + filler(kLateFillerFields)),
+                      Target::from_admin, 1, "LogonSent validate gate");
+}
+
+// The validate gate of the LogonReceived/Active arm, on an application message at the
+// expected number. The gate runs before check_inbound.
+TEST(UnparseableFrameDisposition, LateSite_Active_ValidateGate_NewOrderSingle_Closes) {
+    LateCell c{{.validate = true}};
+    c.fix.open_to_active(*c.sess);
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    expect_late_close(c, make_raw_frame("D", 2, kNewOrderFields + filler(kLateFillerFields)),
+                      Target::from_app, 2, "Active validate gate");
+}
+
+// fromAdmin on a Reset-mode SequenceReset, which is handled before the seqnum check.
+// Its NewSeqNo jump is not persisted.
+TEST(UnparseableFrameDisposition, LateSite_Active_SequenceResetResetMode_FromAdmin_Closes) {
+    LateCell c{{}};
+    c.fix.open_to_active(*c.sess);
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    expect_late_close(c, make_raw_frame("4", 2, "36=500\x01" + filler(kLateFillerFields)),
+                      Target::from_admin, 2, "SequenceReset (Reset mode) fromAdmin");
+}
+
+// fromApp redelivering a too-low PossDup application message (redeliver_poss_dup).
+// A too-low message does not advance NextNumIn.
+TEST(UnparseableFrameDisposition, LateSite_Active_TooLowPossDupRedeliver_FromApp_Closes) {
+    LateCell c{{.redeliver_poss_dup = true}};
+    c.fix.open_to_active(*c.sess);
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    expect_late_close(
+        c, make_raw_frame("D", 1, kPossDupFields + kNewOrderFields + filler(kLateFillerFields)),
+        Target::from_app, 2, "too-low PossDup redeliver fromApp");
+}
+
+// fromApp delivering an out-of-sequence message with validate_sequence_numbers off.
+// The out-of-sequence message does not advance NextNumIn.
+TEST(UnparseableFrameDisposition, LateSite_Active_SeqCheckOff_OutOfSequence_FromApp_Closes) {
+    LateCell c{{.validate_sequence_numbers = false}};
+    c.fix.open_to_active(*c.sess);
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    expect_late_close(c, make_raw_frame("D", 10, kNewOrderFields + filler(kLateFillerFields)),
+                      Target::from_app, 2, "out-of-sequence fromApp (sequence check off)");
+}
+
+// fromAdmin on an in-sequence GapFill with validate_sequence_numbers off. The seqnum
+// check advanced the counter in memory before the parse; its persist follows the
+// dispatch.
+TEST(UnparseableFrameDisposition, LateSite_Active_SeqCheckOff_GapFill_FromAdmin_Closes) {
+    LateCell c{{.validate_sequence_numbers = false}};
+    c.fix.open_to_active(*c.sess);
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    expect_late_close(c, make_raw_frame("4", 2, kGapFillFields + filler(kLateFillerFields)),
+                      Target::from_admin, 2, "GapFill fromAdmin (sequence check off)");
+}
+
+// fromAdmin on an in-sequence Logout. The confirming Logout is sent before the parse
+// and is not counted. The Logout's persist follows the dispatch.
+TEST(UnparseableFrameDisposition, LateSite_Active_Logout_FromAdmin_Closes) {
+    LateCell c{{}};
+    c.fix.open_to_active(*c.sess);
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    expect_late_close(c, make_raw_frame("5", 2, filler(kLateFillerFields)), Target::from_admin, 2,
+                      "Logout fromAdmin");
+}
+
+// fromAdmin on an in-sequence Heartbeat in Active. Its persist follows the dispatch.
+TEST(UnparseableFrameDisposition, LateSite_Active_Heartbeat_FromAdmin_Closes) {
+    LateCell c{{}};
+    c.fix.open_to_active(*c.sess);
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    expect_late_close(c, make_raw_frame("0", 2, filler(kLateFillerFields)), Target::from_admin, 2,
+                      "Heartbeat fromAdmin");
+}
+
+// fromApp on an in-sequence application message in Active. Its persist follows the
+// dispatch.
+TEST(UnparseableFrameDisposition, LateSite_Active_NewOrderSingle_FromApp_Closes) {
+    LateCell c{{}};
+    c.fix.open_to_active(*c.sess);
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    expect_late_close(c, make_raw_frame("D", 2, kNewOrderFields + filler(kLateFillerFields)),
+                      Target::from_app, 2, "NewOrderSingle fromApp");
+}
+
+// Controls for the LateSite_* cells: the same filler with a field count below every
+// parse ceiling parses. At a dispatch site the message is delivered and consumed, and
+// the durable read reports the advance. At the Active validate gate the validator runs
+// over the parsed frame and rejects the first filler tag, which the dictionary does not
+// define for the message. So a LateSite_* frame differs from a parseable one only in
+// its field count, and the durable read can report an advance.
+TEST(UnparseableFrameDisposition, LateSite_Control_BelowCeiling_FromApp_DeliveredAndConsumed) {
+    LateCell c{{}};
+    c.fix.open_to_active(*c.sess);
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    int const app_before = c.app->from_app;
+    c.fix.feed(*c.sess, make_raw_frame("D", 2, kNewOrderFields + filler(kControlFillerFields)));
+    EXPECT_TRUE(c.sess->is_open()) << "control: the session stays open";
+    EXPECT_EQ(c.sess->state(), fsm_state::Active) << "control: state after the frame";
+    EXPECT_EQ(c.app->from_app, app_before + 1) << "control: fromApp is invoked";
+    EXPECT_TRUE(c.fix.transport.sent_frames().empty()) << "control: nothing is sent";
+    EXPECT_EQ(c.durable_next_inbound(), 3U) << "control: the message is consumed durably";
+}
+
+TEST(UnparseableFrameDisposition, LateSite_Control_BelowCeiling_ValidateGate_ParsedAndValidated) {
+    LateCell c{{.validate = true}};
+    c.fix.open_to_active(*c.sess);
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    int const app_before = c.app->from_app;
+    c.fix.feed(*c.sess, make_raw_frame("D", 2, kNewOrderFields + filler(kControlFillerFields)));
+    expect_only_reject(
+        c.fix, {.ref_seq = "2", .ref_msg_type = "D", .reason = "2", .ref_tag = "5000", .text = ""},
+        "control: the validator's Reject of the first filler tag");
+    EXPECT_TRUE(c.sess->is_open()) << "control: the session stays open";
+    EXPECT_EQ(c.sess->state(), fsm_state::Active) << "control: state after the frame";
+    EXPECT_EQ(c.app->from_app, app_before) << "control: a rejected message is not delivered";
+}
 }  // namespace
 }  // namespace fixpp::session::test

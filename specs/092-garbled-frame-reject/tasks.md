@@ -552,7 +552,7 @@ Reject (45=N) and is not delivered; the second is delivered with no ResendReques
   second (delivery alone cannot witness the advance with the knob off). The same arm for a faulty
   Reject(3) and a faulty Logout(5). Show it RED in a scratch copy when the disposer skips
   `consume_rejected_seqnum_`.
-- [ ] T038 [US2] Via `phase-implementer`, write one RED cell per late inbound site in T008's C-6
+- [X] T038 [US2] Via `phase-implementer`, write one RED cell per late inbound site in T008's C-6
   population, in `tests/session/unparseable_frame_disposition_test.cpp` (hook-free), each with a
   **real well-formed frame above T006's measured ceiling** (no test hook) and a persistent store that
   survives the close (a `FileStore` over a temporary directory):
