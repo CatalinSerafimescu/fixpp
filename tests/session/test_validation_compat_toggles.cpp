@@ -49,6 +49,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/reify_test_frame.hpp"
 
 using namespace std::chrono_literals;
 
@@ -1407,24 +1408,6 @@ std::shared_ptr<MemoryStoreFactory> memory_store_factory_092() {
     return std::make_shared<MemoryStoreFactory>(mcfg);
 }
 
-// A frame around a raw body (the caller supplies 35 and everything after it), for the
-// D-7 control, whose fault must precede 34.
-std::vector<std::byte> wrap_body_092(std::string_view body) {
-    std::string msg = "8=FIX.4.4\x01";
-    msg += "9=" + std::to_string(body.size()) + "\x01";
-    msg += body;
-    unsigned int cs = 0;
-    for (unsigned char c : msg) cs += c;
-    cs &= 0xFFU;
-    char csbuf[5];
-    snprintf(csbuf, sizeof(csbuf), "%03u", cs);
-    msg += "10=" + std::string(csbuf) + "\x01";
-    std::vector<std::byte> frame;
-    frame.reserve(msg.size());
-    for (char c : msg) frame.push_back(static_cast<std::byte>(c));
-    return frame;
-}
-
 // An acceptor, Active, whose NextNumIn a Reset-mode SequenceReset has set to seqnum_max.
 std::unique_ptr<Fixture> make_acceptor_at_max_092(std::shared_ptr<CountingApp028> app) {
     auto fix = make_acceptor(memory_store_factory_092(), 1, std::move(app));
@@ -1590,9 +1573,12 @@ TEST(ValidationCompatToggles, SeqnumMax_Control_D6FaultyAtOtherNumber_StaysActiv
 }
 
 TEST(ValidationCompatToggles, SeqnumMax_Control_D7FaultBefore34_StaysActive) {
+    // A frame around a raw body (35 and everything after it), since the fault must precede 34.
     run_bound_control_092(
-        wrap_body_092(std::string{"35=D\x01"} + "9x9=1\x01" + "34=4294967295\x01" +
-                      field(49, "CLI") + field(52, "20240101-00:00:00.000") + field(56, "SRV")),
+        fixpp::test_support::assemble_frame(
+            "8=FIX.4.4\x01", std::string{"35=D\x01"} + "9x9=1\x01" + "34=4294967295\x01" +
+                                 field(49, "CLI") + field(52, "20240101-00:00:00.000") +
+                                 field(56, "SRV")),
         0, "D-7 fault before 34");
 }
 

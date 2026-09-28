@@ -118,7 +118,6 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <deque>
 #include <filesystem>
 #include <fixpp/core/engine_config.hpp>
@@ -152,6 +151,7 @@
 #include "support/extract_tag.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/reify_test_frame.hpp"
 #include "support/temp_dir.hpp"
 #include "support/transport_double.hpp"
 #include "support/validation_test_dictionary.hpp"
@@ -167,24 +167,7 @@ using fixpp::test_support::extract_tag;
 // BodyLength(9) and CheckSum(10), so the frame passes the Framer whatever the body holds.
 std::vector<std::byte> wrap_body(std::string const& body,
                                  std::string_view begin_string = "FIX.4.2") {
-    std::string full = "8=" + std::string(begin_string) + "\x01";
-    full += "9=" + std::to_string(body.size()) + "\x01";
-    full += body;
-    unsigned int cs = 0;
-    for (unsigned char c : full) {
-        cs += c;
-    }
-    cs &= 0xFFU;
-    char csbuf[5];
-    std::snprintf(csbuf, sizeof(csbuf), "%03u", cs);
-    full += "10=" + std::string(csbuf) + "\x01";
-
-    std::vector<std::byte> frame;
-    frame.reserve(full.size());
-    for (char c : full) {
-        frame.push_back(static_cast<std::byte>(c));
-    }
-    return frame;
+    return fixpp::test_support::assemble_frame("8=" + std::string(begin_string) + "\x01", body);
 }
 
 // A SOH-delimited FIX frame whose field 3 is 35, then 34 and the peer's header fields.
@@ -1044,8 +1027,22 @@ struct StateCell {
     }
 };
 
-std::string_view state_name(fsm_state s) {
-    return s == fsm_state::Active ? "Active" : "LogonReceived";
+std::string_view any_state_name(fsm_state s) {
+    switch (s) {
+        case fsm_state::NotConnected:
+            return "NotConnected";
+        case fsm_state::LogonSent:
+            return "LogonSent";
+        case fsm_state::LogonReceived:
+            return "LogonReceived";
+        case fsm_state::Active:
+            return "Active";
+        case fsm_state::LogoutSent:
+            return "LogoutSent";
+        case fsm_state::Disconnected:
+            return "Disconnected";
+    }
+    return "?";
 }
 
 // Feeds a faulty frame: exactly one outbound frame, the Reject `want`; neither
@@ -1090,7 +1087,7 @@ void run_expected_n_cell(At at, std::string_view type, std::string const& fields
     if (::testing::Test::HasFatalFailure()) {
         return;
     }
-    std::string const row = std::string{state_name(c.held)} + " 35=" + std::string{type} +
+    std::string const row = std::string{any_state_name(c.held)} + " 35=" + std::string{type} +
                             " at N (373=" + std::string{shape.reason} + ")";
     feed_faulty(c, make_raw_frame(type, 2, fields + shape.garble), want_reject("2", type, shape),
                 row);
@@ -1116,7 +1113,7 @@ void run_not_expected_cell(At at, std::string_view type, std::uint32_t seq,
     }
     std::string const seq_text = std::to_string(seq);
     std::string const row =
-        std::string{state_name(c.held)} + " 35=" + std::string{type} + " " + std::string{what};
+        std::string{any_state_name(c.held)} + " 35=" + std::string{type} + " " + std::string{what};
     feed_faulty(c, make_raw_frame(type, seq, fields + shape.garble),
                 want_reject(seq_text, type, shape), row);
     c.settle();
@@ -2765,8 +2762,8 @@ void run_d3_cell(At at, Shape const& shape) {
     if (::testing::Test::HasFatalFailure()) {
         return;
     }
-    std::string const row =
-        "D-3 " + std::string{state_name(c.held)} + " (373=" + std::string{shape.reason} + " shape)";
+    std::string const row = "D-3 " + std::string{any_state_name(c.held)} +
+                            " (373=" + std::string{shape.reason} + " shape)";
     EXPECT_EQ(c.sess->state(), c.held) << row << ": state before the faulty Logon";
     int const admin_before = c.app->from_admin;
     int const app_before = c.app->from_app;
@@ -2824,7 +2821,7 @@ void run_disregard_cell(At at, std::string const& body, std::string_view what) {
     if (::testing::Test::HasFatalFailure()) {
         return;
     }
-    std::string const row = std::string{what} + " in " + std::string{state_name(c.held)};
+    std::string const row = std::string{what} + " in " + std::string{any_state_name(c.held)};
     EXPECT_EQ(c.sess->state(), c.held) << row << ": state before the faulty frame";
     int const admin_before = c.app->from_admin;
     int const app_before = c.app->from_app;
@@ -2988,24 +2985,6 @@ TEST(UnparseableFrameDisposition, D9_FaultyTestRequest_DrawsNothing_Pin) {
 // iteration cap derived from the script, as in the ScriptedPeer_* cell. After the run
 // the store is reopened and its durable NextNumIn read (LateCell::durable_next_inbound):
 // the number a reconnect resumes from, and so where the peer's next replay begins.
-
-std::string_view any_state_name(fsm_state s) {
-    switch (s) {
-        case fsm_state::NotConnected:
-            return "NotConnected";
-        case fsm_state::LogonSent:
-            return "LogonSent";
-        case fsm_state::LogonReceived:
-            return "LogonReceived";
-        case fsm_state::Active:
-            return "Active";
-        case fsm_state::LogoutSent:
-            return "LogoutSent";
-        case fsm_state::Disconnected:
-            return "Disconnected";
-    }
-    return "?";
-}
 
 // One step: `fed`, what fixpp sent in reply, and the state after it.
 std::string render_step(std::vector<std::byte> const& fed, DispositionFixture const& fix,
