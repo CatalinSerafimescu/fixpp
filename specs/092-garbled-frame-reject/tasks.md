@@ -316,7 +316,7 @@ C-2 row, and the rows are one function, so the mechanism lands here with one anc
 
 ### 2c — C-ABI 1.10 BREAKING (FR-017, R-8, plan phase 0b), witnesses and pin first
 
-- [ ] T019 Preconditions, recorded in the evidence file §*C-ABI 1.10*:
+- [X] T019 Preconditions, recorded in the evidence file §*C-ABI 1.10*:
   - `gh release list --repo CatalinSerafimescu/fixpp --exclude-drafts` is empty;
   - after `git fetch --all --prune`,
     `git grep -h "define FIXPP_C_ABI_VERSION_MINOR" $(git for-each-ref --format='%(refname)' refs/heads refs/remotes) -- include/fix/c_api/version.h | sort | uniq -c`
