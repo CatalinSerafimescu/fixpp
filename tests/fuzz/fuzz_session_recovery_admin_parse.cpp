@@ -60,6 +60,7 @@
 #include <fixpp/wire/tag_scan.hpp>
 #include <memory>
 #include <memory_resource>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -84,6 +85,30 @@ using fixpp::wire::dict_hooks;
 using fixpp::wire::field_fault;
 using fixpp::wire::frame_view_slice_access;
 using fixpp::wire::OffsetTable;
+
+// The tag of the field that starts at `at`, read here without any library helper so
+// a mutation of a shared tag reader cannot move both sides: one or more ASCII
+// digits whose value is at most 0xFFFF, then '='. Leading zeros are allowed.
+// nullopt when the field does not start with such a tag.
+std::optional<std::uint32_t> well_formed_tag_at(std::span<const std::byte> buf, std::size_t at) {
+    std::uint32_t value = 0;
+    std::size_t i = at;
+    while (i < buf.size()) {
+        auto const c = static_cast<unsigned char>(buf[i]);
+        if (c < '0' || c > '9') {
+            break;
+        }
+        value = value * 10U + (c - '0');
+        if (value > 0xFFFFU) {
+            return std::nullopt;
+        }
+        ++i;
+    }
+    if (i == at || i >= buf.size() || buf[i] != std::byte{'='}) {
+        return std::nullopt;
+    }
+    return value;
+}
 
 // A view the scan returned names exactly the bytes of `e`: same address, same length.
 // Comparing addresses, not contents, keeps two fields with equal values apart.
@@ -162,8 +187,9 @@ void check_scan_agrees_with_build(std::span<const std::byte> buf, dict_hooks con
     }
 
     // The site, as the oracle sees it: every field before the scan's fault builds
-    // cleanly, and a length_data_mismatch sits right after a field the build itself
-    // treats as a Length under these hooks.
+    // cleanly. At the fault, a malformed_tag has no well-formed tag, and a
+    // length_data_mismatch has a well-formed tag equal to the Data tag of the field
+    // before it, which the build itself treats as a Length under these hooks.
     if (h.fault_offset > buf.size()) {
         __builtin_trap();
     }
@@ -177,12 +203,20 @@ void check_scan_agrees_with_build(std::span<const std::byte> buf, dict_hooks con
     if (!prefix_status.has_value()) {
         __builtin_trap();  // the build fails before the scan's first fault
     }
-    if (h.fault == field_fault::length_data_mismatch) {
-        auto const pe = prefix.entries();
-        if (pe.empty() || pe.back().tag != h.fault_length_tag ||
-            hooks.data_tag_for_length(pe.back().tag) == 0) {
-            __builtin_trap();
+    auto const tag_at_fault = well_formed_tag_at(buf, h.fault_offset);
+    if (h.fault == field_fault::malformed_tag) {
+        if (tag_at_fault.has_value()) {
+            __builtin_trap();  // the scan calls a well-formed tag malformed
         }
+        return;
+    }
+    auto const pe = prefix.entries();
+    if (pe.empty() || pe.back().tag != h.fault_length_tag) {
+        __builtin_trap();
+    }
+    std::uint16_t const data_tag = hooks.data_tag_for_length(pe.back().tag);
+    if (data_tag == 0 || !tag_at_fault.has_value() || *tag_at_fault != data_tag) {
+        __builtin_trap();  // not a counted site
     }
 }
 
