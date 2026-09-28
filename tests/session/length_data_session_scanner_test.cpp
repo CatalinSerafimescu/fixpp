@@ -113,6 +113,8 @@ TEST(LengthDataSessionScanner, ScanFrameHeaderStopsAtAnOverrunningLength) {
         "34=99\x01");
     auto const h = detail::scan_frame_header(std::span<const std::byte>{frame});
     EXPECT_EQ(h.msg_seq_num, "5");
+    EXPECT_EQ(h.fault, fixpp::wire::field_fault::length_data_mismatch);
+    EXPECT_EQ(h.fault_length_tag, 354U) << "092 E-1: the Length that armed the count";
 }
 
 TEST(LengthDataSessionScanner, ScanFirstFrameIdsIgnoresSenderCompIdInsideRawData) {
@@ -197,6 +199,8 @@ TEST(LengthDataSessionScanner, ScanFrameHeaderStopsAtACountEndingOnANonSohByte) 
         "Z34=99\x01");
     auto const h = detail::scan_frame_header(std::span<const std::byte>{frame});
     EXPECT_EQ(h.msg_seq_num, "5");
+    EXPECT_EQ(h.fault, fixpp::wire::field_fault::length_data_mismatch);
+    EXPECT_EQ(h.fault_length_tag, 354U) << "092 E-1: the Length that armed the count";
 }
 
 // Every field interpret_logon validates precedes the count, so the count is the only
