@@ -91,6 +91,8 @@ bool is_valid_wire_error(fixpp::core::error e) noexcept {
         case error::wire_required_field_missing:    // reason 1
         case error::wire_field_value_out_of_range:  // reason 5
         case error::wire_field_value_truncated:     // reason 6
+        case error::wire_invalid_tag_number:        // reason 0
+        case error::wire_length_data_mismatch:      // reason 5
             return true;
         default:
             return false;
@@ -197,7 +199,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     auto validate_result = validator.validate(mv, &scratch_mr, nullptr);
 
     if (!validate_result) {
-        // Invariant: every rejection must be one of the five wire_* slots.
+        // Invariant: every rejection must be a wire_* slot is_valid_wire_error allows.
         // A raw decimal_* slot here means the T009a remap is broken.
         if (!is_valid_wire_error(validate_result.error())) {
             __builtin_trap();
