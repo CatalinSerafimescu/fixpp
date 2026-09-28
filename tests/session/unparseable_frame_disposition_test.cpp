@@ -86,6 +86,11 @@
 // LogonReceived, in both fault shapes, ends in a silent Disconnected. The section comment
 // above sent_types states what the LogonReceived cells assert.
 //
+// D7_*, D8_* (tasks.md T046, T047; spec SC-005; contract C-2 D-7, D-8): in Active and in
+// LogonReceived, a faulty frame whose 34 was not read or whose field 3 is not 35 draws
+// nothing, and the next valid message draws a ResendRequest. The section comment above
+// run_disregard_cell states what each cell asserts.
+//
 // Anchors: specs/092-garbled-frame-reject/spec.md SC-001, FR-007;
 //          contracts/unparseable-frame-disposition.md C-2 (D-4) and its Reject contents;
 //          fixpp#507 (the T076 table and reproducer).
@@ -2789,6 +2794,101 @@ TEST(UnparseableFrameDisposition, D3_LogonReceived_FaultyLogon_MalformedTag_Sile
 TEST(UnparseableFrameDisposition,
      D3_LogonReceived_FaultyLogon_LengthDataMismatch_SilentDisconnect) {
     run_d3_cell(At::logon_received, kCountShape);
+}
+
+// ── D7_*, D8_* (tasks.md T046, T047; spec SC-005; contract C-2 D-7, D-8) ─────
+//
+// In Active and in LogonReceived, a faulty NewOrderSingle whose 34 was not read before
+// the fault (D-7), or whose field 3 is not 35 (D-8), is disregarded: it draws nothing,
+// reaches neither fromAdmin nor fromApp, and leaves the session open in its state. The
+// next conformant message, a Heartbeat at N+1 = 3, must then be a gap whose
+// ResendRequest begins at N = 2: NextNumIn unchanged. Every frame whose 34 is read
+// carries 34=2, the expected number, so a disposer that routed it to D-5 would advance
+// NextNumIn and the Heartbeat at 3 would draw no ResendRequest; one that routed it to
+// D-6 would send a Reject. In LogonReceived the disregard is checked before
+// StateCell::settle() releases the parked Logon reply.
+
+void run_disregard_cell(At at, std::string const& body, std::string_view what) {
+    StateCell c{at};
+    c.enter();
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    std::string const row = std::string{what} + " in " + std::string{state_name(c.held)};
+    EXPECT_EQ(c.sess->state(), c.held) << row << ": state before the faulty frame";
+    int const admin_before = c.app->from_admin;
+    int const app_before = c.app->from_app;
+
+    c.fix.feed(*c.sess, wrap_body(body));
+    EXPECT_TRUE(c.fix.transport.sent_frames().empty())
+        << row << ": the faulty frame must draw nothing; sent:" << sent_types(c.fix);
+    EXPECT_EQ(c.app->from_admin, admin_before) << row << ": the faulty frame reached fromAdmin";
+    EXPECT_EQ(c.app->from_app, app_before) << row << ": the faulty frame reached fromApp";
+    EXPECT_EQ(c.sess->state(), c.held) << row << ": state after the faulty frame";
+    EXPECT_TRUE(c.sess->is_open()) << row << ": the faulty frame must not close the session";
+
+    c.settle();
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    expect_heartbeat_gap(c, 3, "2", row + " (NextNumIn unchanged)");
+}
+
+// D-7 frames: field 3 is 35 and the fault precedes any positive 34.
+std::string const kD7LengthDataBefore34 =
+    std::string{"35=D\x01"} + kMalformedCount + "34=2\x01" + kHeader + kOrderFields;
+std::string const kD7TagBefore34 =
+    std::string{"35=D\x01"} + kMalformedTag + "34=2\x01" + kHeader + kOrderFields;
+std::string const kD7NonNumeric34 =
+    std::string{"35=D\x01"} + "34=abc\x01" + kHeader + kOrderFields + kMalformedTag;
+std::string const kD7Zero34 =
+    std::string{"35=D\x01"} + "34=0\x01" + kHeader + kOrderFields + kMalformedTag;
+
+TEST(UnparseableFrameDisposition, D7_Active_LengthDataBefore34_Disregarded) {
+    run_disregard_cell(At::active, kD7LengthDataBefore34, "D-7 Length+Data before 34");
+}
+TEST(UnparseableFrameDisposition, D7_LogonReceived_LengthDataBefore34_Disregarded) {
+    run_disregard_cell(At::logon_received, kD7LengthDataBefore34, "D-7 Length+Data before 34");
+}
+TEST(UnparseableFrameDisposition, D7_Active_MalformedTagBefore34_Disregarded) {
+    run_disregard_cell(At::active, kD7TagBefore34, "D-7 malformed tag before 34");
+}
+TEST(UnparseableFrameDisposition, D7_LogonReceived_MalformedTagBefore34_Disregarded) {
+    run_disregard_cell(At::logon_received, kD7TagBefore34, "D-7 malformed tag before 34");
+}
+TEST(UnparseableFrameDisposition, D7_Active_NonNumeric34BeforeFault_Disregarded) {
+    run_disregard_cell(At::active, kD7NonNumeric34, "D-7 34=abc before the fault");
+}
+TEST(UnparseableFrameDisposition, D7_LogonReceived_NonNumeric34BeforeFault_Disregarded) {
+    run_disregard_cell(At::logon_received, kD7NonNumeric34, "D-7 34=abc before the fault");
+}
+TEST(UnparseableFrameDisposition, D7_Active_Zero34BeforeFault_Disregarded) {
+    run_disregard_cell(At::active, kD7Zero34, "D-7 34=0 before the fault");
+}
+TEST(UnparseableFrameDisposition, D7_LogonReceived_Zero34BeforeFault_Disregarded) {
+    run_disregard_cell(At::logon_received, kD7Zero34, "D-7 34=0 before the fault");
+}
+
+// D-8 frames: field 3 is not 35. The mixed defect reads 35=D and 34=2 before the fault
+// with field 3 = SenderCompID(49); in the other frame field 3 is itself the malformed
+// field, so the fault comes first.
+std::string const kD8MixedDefect = std::string{"49=TW\x01"} + "35=D\x01" + "34=2\x01" +
+                                   kMalformedTag + "52=20240101-00:00:00.000\x01" + "56=ISLD\x01" +
+                                   kOrderFields;
+std::string const kD8Field3Malformed =
+    kMalformedTag + "35=D\x01" + "34=2\x01" + kHeader + kOrderFields;
+
+TEST(UnparseableFrameDisposition, D8_Active_MixedDefect_Disregarded) {
+    run_disregard_cell(At::active, kD8MixedDefect, "D-8 mixed defect (field 3 is 49)");
+}
+TEST(UnparseableFrameDisposition, D8_LogonReceived_MixedDefect_Disregarded) {
+    run_disregard_cell(At::logon_received, kD8MixedDefect, "D-8 mixed defect (field 3 is 49)");
+}
+TEST(UnparseableFrameDisposition, D8_Active_Field3Malformed_Disregarded) {
+    run_disregard_cell(At::active, kD8Field3Malformed, "D-8 field 3 malformed");
+}
+TEST(UnparseableFrameDisposition, D8_LogonReceived_Field3Malformed_Disregarded) {
+    run_disregard_cell(At::logon_received, kD8Field3Malformed, "D-8 field 3 malformed");
 }
 }  // namespace
 }  // namespace fixpp::session::test

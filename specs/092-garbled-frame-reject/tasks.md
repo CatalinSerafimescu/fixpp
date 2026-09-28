@@ -636,12 +636,12 @@ read draws nothing; the next valid message exposes the gap. LogoutSent disregard
 **Independent Test**: a frame whose malformed field precedes MsgSeqNum, then a conformant message at
 N+1: the first draws nothing; the second draws a ResendRequest; the session stays connected.
 
-- [ ] T046 [US4] Via `phase-implementer`, the D-7 cells in
+- [X] T046 [US4] Via `phase-implementer`, the D-7 cells in
   `tests/session/unparseable_frame_disposition_test.cpp`, in Active and in LogonReceived: a malformed
   Length+Data pair before 34 (e.g. SecureDataLen(90)/SecureData(91)); a malformed tag before 34;
   `34=abc` and `34=0` before the fault. Each: no outbound, NextNumIn unchanged, still connected, and
   the next valid message at N+1 draws a ResendRequest (SC-005).
-- [ ] T047 [US4] Via `phase-implementer`, the D-8 cells in the same file, in Active and in
+- [X] T047 [US4] Via `phase-implementer`, the D-8 cells in the same file, in Active and in
   LogonReceived: the mixed defect `8|9|49=…|35=D|34=N|9x9=1|…|10`, and a frame whose field 3 is the
   malformed field. Same assertions as T046.
 - [ ] T048 [US4] Via `phase-implementer`, the D-9 cells in the same file: in LogoutSent a faulty
