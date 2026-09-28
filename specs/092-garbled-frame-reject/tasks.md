@@ -585,7 +585,7 @@ Reject (45=N) and is not delivered; the second is delivered with no ResendReques
   - Correct `parse_and_dispatch_`'s "skip, not fatal" and `validate_inbound_`'s "validation passes"
     comments (R-13).
   - T038 GREEN.
-- [ ] T040 [US2] For each T038 cell, delete that site's close in a scratch copy and show the cell RED
+- [X] T040 [US2] For each T038 cell, delete that site's close in a scratch copy and show the cell RED
   (SC-008). Record each site and its RED in the evidence file.
 - [ ] T041 [US2] Via `phase-implementer`, the SC-007 scripted peer in
   `tests/session/unparseable_frame_disposition_test.cpp` (quickstart §2 "Scripted peer"). The
