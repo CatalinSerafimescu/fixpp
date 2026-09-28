@@ -745,7 +745,7 @@ it in 092.
   buffer, each asserting `fault()`, `fault_length_tag()` and that the **yielded sequence equals the
   pre-092 sequence**, under the standard, dictionary-only and `none()` hooks. S0 with nothing earlier
   asserts `none`.
-- [ ] T056 Via `phase-implementer`, implement E-4 in `include/fixpp/wire/parser.hpp`:
+- [X] T056 Via `phase-implementer`, implement E-4 in `include/fixpp/wire/parser.hpp`:
   `MessageView<Mode>::field_iterator` gains `[[nodiscard]] field_fault fault() const noexcept`
   ("sticky: the first fault any advance() observed") and
   `[[nodiscard]] std::uint16_t fault_length_tag() const noexcept` ("the Length tag when fault() ==

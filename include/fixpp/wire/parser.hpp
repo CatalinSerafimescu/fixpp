@@ -239,6 +239,14 @@ public:
 
     private:
         void advance() noexcept;
+        // Keeps the first fault (E-4 "sticky"); `length_tag` is recorded only
+        // with a length_data_mismatch, and only when it is that first fault.
+        void record_fault(field_fault kind, std::uint16_t length_tag) noexcept {
+            if (fault_ == field_fault::none) {
+                fault_ = kind;
+                fault_length_tag_ = length_tag;
+            }
+        }
         std::span<const std::byte> buf_;
         std::size_t pos_ = 0;
         std::size_t next_ = 0;
@@ -249,6 +257,9 @@ public:
         // Length+Data carry: set when the just-yielded field was a Length
         // tag, so the next (Data) field is read by fixed length.
         std::uint16_t prev_data_tag_ = 0;
+        // The Length tag that armed the carry (prev_data_tag_ holds the Data
+        // tag). Read only while the carry is armed, so it is never cleared.
+        std::uint16_t prev_length_tag_ = 0;
         std::uint32_t prev_data_len_ = 0;
         dict_hooks hooks_{};
     };
@@ -517,6 +528,12 @@ private:
 // table alone) so a Data field carrying embedded SOH is delimited by its
 // Length field, including a dictionary's own custom pairs when `hooks_` was
 // built `for_table_view()` (fixpp#426, design §3).
+//
+// 092 (data-model E-4): every stop and every tolerance below that
+// `OffsetTable::build` would reject writes the fault record; none of them
+// changes what is yielded. To re-derive the rows, read each `done_ = true`,
+// each early `return` and the empty-tag fall-through below, and match each to
+// an encoding-failure writer in `OffsetTable::build`.
 template <access_mode Mode>
 void MessageView<Mode>::field_iterator::advance() noexcept {
     constexpr std::byte SOH{0x01};
@@ -531,18 +548,24 @@ void MessageView<Mode>::field_iterator::advance() noexcept {
     while (i < buf_.size() && buf_[i] != EQ && buf_[i] != SOH) {
         auto c = static_cast<unsigned char>(buf_[i]);
         if (c < '0' || c > '9') {
+            record_fault(field_fault::malformed_tag, 0);  // E-4 S1
             done_ = true;
             return;
         }
         if (!fixpp::wire::accumulate_tag_digit(tag, c)) {
+            record_fault(field_fault::malformed_tag, 0);  // E-4 S2
             done_ = true;
             return;
         }
         ++i;
     }
     if (i >= buf_.size() || buf_[i] != EQ) {
+        record_fault(field_fault::malformed_tag, 0);  // E-4 S3
         done_ = true;
         return;
+    }
+    if (i == pos_) {
+        record_fault(field_fault::malformed_tag, 0);  // E-4 T1: yielded as tag 0
     }
     ++i;  // over '='
     std::size_t vstart = i;
@@ -552,6 +575,7 @@ void MessageView<Mode>::field_iterator::advance() noexcept {
     // non-adjacent later field inheriting a stale count (W-P2-1b).
     std::uint16_t const carry_tag = prev_data_tag_;
     std::uint32_t const carry_len = prev_data_len_;
+    std::uint16_t const carry_length_tag = prev_length_tag_;
     prev_data_tag_ = 0;
     prev_data_len_ = 0;
 
@@ -565,6 +589,7 @@ void MessageView<Mode>::field_iterator::advance() noexcept {
         if (carry_len > avail) {
             // Declared length exceeds the frame: best-effort clamp to the end
             // (subtraction bound => no size_t wrap on any width, W-P2-1a).
+            record_fault(field_fault::length_data_mismatch, carry_length_tag);  // E-4 T2
             cur_ = field{static_cast<std::uint16_t>(tag), buf_.subspan(vstart, avail)};
             next_ = buf_.size();
             return;
@@ -573,8 +598,13 @@ void MessageView<Mode>::field_iterator::advance() noexcept {
         if (end < buf_.size() && buf_[end] != SOH) {
             // Non-SOH boundary: the declared length did not land on a field
             // boundary. No error channel in Iter mode → stop (W-P2-1a).
+            record_fault(field_fault::length_data_mismatch, carry_length_tag);  // E-4 S4
             done_ = true;
             return;
+        }
+        if (end == buf_.size()) {
+            // Nothing terminates the counted value; yielded as is.
+            record_fault(field_fault::length_data_mismatch, carry_length_tag);  // E-4 T3
         }
         cur_ = field{static_cast<std::uint16_t>(tag), buf_.subspan(vstart, carry_len)};
         next_ = (end < buf_.size()) ? end + 1 : end;  // step over verified SOH
@@ -589,6 +619,7 @@ void MessageView<Mode>::field_iterator::advance() noexcept {
 
     if (std::uint16_t dt = hooks_.data_tag_for_length(static_cast<std::uint16_t>(tag)); dt != 0) {
         prev_data_tag_ = dt;
+        prev_length_tag_ = static_cast<std::uint16_t>(tag);
         prev_data_len_ = parse_bounded_u32(cur_.value);
     }
 }
