@@ -876,6 +876,9 @@ it in 092.
   - `session.cpp`: the banner above `parse_and_dispatch_` ("extracted from 5 inbound + 1 outbound
     sites"). It is a count claim on the function T039 changed: delete the count and keep the
     re-derivation recipe (C-6's population command).
+  - `include/fixpp/session/seqnum_manager.hpp` file header: "I-4: too-high is session-fatal; no
+    ResendRequest; caller emits Logout+disconnect" and "I-4: no ResendRequest is emitted by 005; the
+    recovery feature is deferred" are dated. T053 rewrote only the "Caller is responsible…" sentence.
 
 ### Static analysis, claims and citations
 
