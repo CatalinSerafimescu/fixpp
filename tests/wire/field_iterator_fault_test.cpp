@@ -428,3 +428,73 @@ TEST(ValidatorFieldFault, CleanStandardPairIsConformant) { expect_clean("35=T|95
 TEST(ValidatorFieldFault, CleanDictionaryOnlyPairIsConformant) {
     expect_clean("35=T|5001=3|5002=a|c|49=S|");
 }
+
+// ── A failed build under an ordinary dictionary (T062a) ─────────────────────
+//
+// The cells above validate a failed-build view with a dictionary that names
+// every field in front of the fault a FIXT framing tag, so the field walk
+// reaches the fault. These cells use an ordinary FIX.4.4 dictionary, which
+// names none of them one: a failed build leaves msg_type() empty, so the walk
+// would reject tag 8 as an unexpected tag before it met the fault. FR-012
+// still requires the fault's own code.
+
+namespace {
+
+// A view constructed directly under `none()`, whose build must fail.
+void expect_failed_build_rejected(std::string_view body, error expected,
+                                  std::uint16_t expected_ref) {
+    std::pmr::monotonic_buffer_resource mr;
+    auto tv = load_pair_dict(&mr);
+    ASSERT_FALSE(tv.is_fixt_framing_tag(8)) << "precondition: an ordinary dictionary";
+    auto buf = make_frame(body);
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    MessageView<access_mode::Index> const mv{*fv, &mr, dict_hooks::none()};
+    ASSERT_FALSE(mv.offsets().build_status().has_value()) << "precondition: the build fails";
+    ASSERT_TRUE(mv.msg_type().empty()) << "precondition: a failed build has no MsgType";
+
+    dictionary_driven_validator const v{tv};
+    std::uint16_t ref = kRefSentinel;
+    auto const r = v.validate(mv, &mr, &ref);
+    ASSERT_FALSE(r.has_value()) << "a failed-build view reported conformant";
+    EXPECT_EQ(r.error(), expected);
+    EXPECT_EQ(ref, expected_ref);
+}
+
+}  // namespace
+
+TEST(ValidatorFieldFault, FailedBuild_OrdinaryDict_MalformedTag) {
+    expect_failed_build_rejected("35=T|4x=1|49=S|", error::wire_invalid_tag_number, kRefSentinel);
+}
+
+// `none()` pairs the standard RawDataLength(95) with RawData(96), so the build
+// fails on the mismatch too.
+TEST(ValidatorFieldFault, FailedBuild_OrdinaryDict_LengthDataMismatch) {
+    expect_failed_build_rejected("35=T|95=3|96=abcd|49=S|", error::wire_length_data_mismatch, 95);
+}
+
+// A build that failed for a reason other than an encoding fault (here the
+// offset-table cap) leaves a walk with no fault, so validate behaves as it did
+// before the fault pre-scan: the empty MsgType makes tag 8 an unexpected tag.
+TEST(ValidatorFieldFault, FailedBuild_OrdinaryDict_CapWithNoFaultFallsThrough) {
+    std::string body = "35=T|";
+    for (std::size_t i = 0; i < fixpp::wire::default_max_offset_entries; ++i) {
+        body += "49=S|";
+    }
+    std::pmr::monotonic_buffer_resource mr;
+    auto tv = load_pair_dict(&mr);
+    ASSERT_FALSE(tv.is_fixt_framing_tag(8)) << "precondition: an ordinary dictionary";
+    auto buf = make_frame(body);
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    MessageView<access_mode::Index> const mv{*fv, &mr, dict_hooks::none()};
+    ASSERT_FALSE(mv.offsets().build_status().has_value()) << "precondition: the build fails";
+    EXPECT_EQ(mv.offsets().build_status().error(), error::wire_offset_table_full);
+
+    dictionary_driven_validator const v{tv};
+    std::uint16_t ref = kRefSentinel;
+    auto const r = v.validate(mv, &mr, &ref);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), error::wire_unexpected_tag);
+    EXPECT_EQ(ref, 8U);
+}
