@@ -521,7 +521,7 @@ Reject (45=N) and is not delivered; the second is delivered with no ResendReques
   - at N: `fromApp` not invoked, Reject 45=N, NextNumIn N+1;
   - above N: Reject, NextNumIn stays N, not delivered (FR-005);
   - I-2: the faulty frame is never persisted as received without a Reject;
-  - the duplicate cells (I-3, E-1): `34=99|35=D|34=2|9x9=1` at expected 2 is D-6 with 45=99; a
+  - the duplicate cells (I-3, E-1): `35=D|34=99|…|34=2|…|9x9=1` at expected 2 is D-6 with 45=99 (corrected 2026-09-28: the earlier literal put 34 in field 3, which is D-8); a
     fault-free `34=1|…|34=5` NewOrderSingle at expected 5 is delivered as today; a faulty
     `…|35=D|34=N|35=4|9x9=1|…` at N is D-5 decided on `fault_ref_msg_type` (D): NextNumIn advances,
     372=D, and N+1 is delivered with no ResendRequest (R3-001);

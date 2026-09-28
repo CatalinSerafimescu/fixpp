@@ -280,8 +280,13 @@ population:
 ```
 git grep -n "error_message(static_cast<error>(\|kEnumTable.size\|csv.size()" -- tests
 git grep -ln "error_completeness\|expected_error_map" -- tests tools
-git grep -n "case error::wire_" -- src/capi/error.cpp include/fixpp/wire/reject_reason_map.hpp
+git grep -n "case error::wire_" -- src/capi/error.cpp include/fixpp/wire/reject_reason_map.hpp tests
 ```
+
+*Widened at implementation (2026-09-28, T077):* the third command now covers `tests/`. The
+narrower form missed `tests/fuzz/fuzz_wire_validator.cpp`'s `is_valid_wire_error` allowlist (a
+`switch` of `case error::wire_…` labels), which was fixed in `ae787a3a`.
+
 At the plan head it yields:
 - `include/fixpp/core/error.hpp`: the enumerators and `error_message`'s switch;
 - `src/capi/error.cpp`: `translate`'s total switch;

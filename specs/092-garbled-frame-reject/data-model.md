@@ -132,6 +132,10 @@ tolerant in what they yield, and they now report.
 
 ## E-5 — `dictionary_driven_validator::validate` fault handling (public behaviour, FR-012)
 
+- **Pre-scan (added at implementation, T062a, owner ruling 2026-09-28):** when the view's build
+  failed, `validate` first walks a field iterator (with its own dictionary's hooks) to the first
+  fault and returns that fault's error, before Step 0/1. A failed build with no fault on the walk
+  falls through unchanged. A successful build pays one `build_status()` branch.
 - `validate` hoists its Step 1 iterator out of the `for` init, so the fault is readable after the
   loop.
 - At the **top of each iteration**, before it examines the yielded field, and once more **after the

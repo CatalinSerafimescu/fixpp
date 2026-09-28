@@ -101,7 +101,7 @@ Expected after the change:
   share Active's cells.
 - **AwaitingResend**: a faulty in-sequence application message that fills the gap closes it (D-5
   through `consume_rejected_seqnum_`). The faulty GapFill case is C-5 L-2 below.
-- **Duplicates** (I-3, E-1): `34=99|35=D|34=2|9x9=1` at expected 2 is D-6 (the Reject is addressed
+- **Duplicates** (I-3, E-1): `35=D|34=99|…|34=2|…|9x9=1` (34 read before a later 34; field 3 is 35) at expected 2 is D-6 (the Reject is addressed
   from `fault_ref_seq_num`, 99). A fault-free NewOrderSingle `34=1|…|34=5` at expected 5 is
   delivered, as today (last-wins kept). A faulty `…|35=D|34=N|35=4|9x9=1|…` at expected N is D-5,
   decided on `fault_ref_msg_type` (D), never the last-wins 4: NextNumIn advances, the Reject carries
