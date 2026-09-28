@@ -287,7 +287,7 @@ C-2 row, and the rows are one function, so the mechanism lands here with one anc
   corpus cells RED (quickstart §2 "Differential"): non-digit, overflow, empty tag, no `=`, non-SOH,
   end-equals-size, the `fault_ref_seq_num` first-34 selection, the `fault_ref_msg_type` third-field
   selection. Revert each; record the eight mutants and their RED cells in the evidence file.
-- [ ] T015 Via `phase-implementer`, the replay guard (R-12). In `src/session/session.cpp`'s stored-frame
+- [X] T015 Via `phase-implementer`, the replay guard (R-12). In `src/session/session.cpp`'s stored-frame
   replay classification (`app_present` in the resend store walk), a stored frame whose scan read no
   35 (`msg_type` empty) is not `app_present`, so it is gap-filled. Write the cell first in
   `tests/session/unparseable_frame_disposition_test.cpp`: an **admin** frame with a fault in field 2,
