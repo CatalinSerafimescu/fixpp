@@ -154,7 +154,7 @@ the population snapshots, and the label manifest (plan phase 0, quickstart §0).
   - Also check whether the offset-table cap (`wire_offset_table_full`) gives a well-formed frame
     that fails the parse on every platform, including MSVC debug. Record the result; T038 uses it if
     so.
-- [ ] T007 Via `phase-implementer`, create `specs/092-garbled-frame-reject/expected-ctest-092.txt`,
+- [X] T007 Via `phase-implementer`, create `specs/092-garbled-frame-reject/expected-ctest-092.txt`,
   one ctest name per line, sorted:
   `capi_logon_malformed_tag`, `capi_pure_tests`, `error_017_completeness`,
   `error_019_completeness`, `error_020_completeness`, `error_092_completeness`,

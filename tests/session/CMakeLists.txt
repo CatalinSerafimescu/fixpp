@@ -197,6 +197,9 @@ set_tests_properties(session_pure_tests PROPERTIES
 # `ctest -L 075` / `-L session` selectable — mirrors tests/wire/CMakeLists.txt's
 # wire_dict_tests precedent).
 set_tests_properties(session_pure_tests PROPERTIES LABELS "075;session")
+# 092-garbled-frame-reject: label 092 (expected-ctest-092.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST session_pure_tests APPEND PROPERTY LABELS 092)
 
 # ── Grouped bucket: session_store_tests (6 .cpp → 1 binary) ────────────────
 # Store-family witnesses that neither construct an asio::thread_pool nor carry
@@ -226,6 +229,9 @@ target_compile_definitions(session_store_tests PRIVATE
 add_test(NAME session_store_tests COMMAND session_store_tests)
 set_tests_properties(session_store_tests PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp")
+# 092-garbled-frame-reject: label 092 (expected-ctest-092.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST session_store_tests APPEND PROPERTY LABELS 092)
 
 
 
@@ -455,6 +461,9 @@ fixpp_add_store_test(store_fail_reconcile SOURCES
   EXTRA_LIBS fixpp_mock_clock
 )
 target_compile_definitions(store_fail_reconcile PRIVATE FIXPP_TEST_HOOKS)
+# 092-garbled-frame-reject: label 092 (expected-ctest-092.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST store_fail_reconcile APPEND PROPERTY LABELS 092)
 
 # T005a: FR-004 breadth witness (classified by durability, not error code) —
 # a minimal in-memory persistent-store double armed to return each of the
@@ -717,6 +726,9 @@ target_include_directories(session_scan_frame_header_overflow PRIVATE
 )
 set_tests_properties(session_scan_frame_header_overflow PROPERTIES
   LABELS "040;us1;scan_frame_header;overflow")
+# 092-garbled-frame-reject: label 092 (expected-ctest-092.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST session_scan_frame_header_overflow APPEND PROPERTY LABELS 092)
 
 # fixpp#426: the dictionary-free session scanners (scan_frame_header,
 # scan_first_frame_ids, interpret_logon, the tag-554 maskers) must treat a
@@ -727,6 +739,9 @@ target_include_directories(session_length_data_scanner PRIVATE
 )
 set_tests_properties(session_length_data_scanner PROPERTIES
   LABELS "426;length-data;scanner;091")
+# 092-garbled-frame-reject: label 092 (expected-ctest-092.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST session_length_data_scanner APPEND PROPERTY LABELS 092)
 # §VIII.5 zero-alloc gate for those scanners: re-runs ONLY the NoHeap cell under the
 # mallocnesia LD_PRELOAD via check_alloc.py (mirrors credential_store_redaction_mallocnesia).
 # registered on every FIXPP_MALLOCNESIA_SUPPORTED configuration since
@@ -1950,6 +1965,9 @@ add_test(NAME session_validation_compat_toggles
 set_tests_properties(session_validation_compat_toggles PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "028;s040;s041;validation-compat-toggles;setup")
+# 092-garbled-frame-reject: label 092 (expected-ctest-092.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST session_validation_compat_toggles APPEND PROPERTY LABELS 092)
 # T012 NoHeap_RelaxedDeliverPath: mallocnesia LD_PRELOAD wired so global-heap
 # escapes from the S4 deliver-without-advance path are intercepted by the
 # alloc_guard_{start,end,count} hooks. This APPEND avoids overwriting TSAN_OPTIONS
@@ -2004,6 +2022,9 @@ add_test(NAME session_persistent_seqnum_hydrate
 set_tests_properties(session_persistent_seqnum_hydrate PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "029;s042;persistent-seqnum-hydrate;setup")
+# 092-garbled-frame-reject: label 092 (expected-ctest-092.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST session_persistent_seqnum_hydrate APPEND PROPERTY LABELS 092)
 # T012 NoHeap_HydrateAndPersistPaths: wire mallocnesia LD_PRELOAD so the
 # alloc_guard_count() weak symbol is replaced by the live interceptor.
 # Pattern mirrors session_validation_compat_toggles (028) and
