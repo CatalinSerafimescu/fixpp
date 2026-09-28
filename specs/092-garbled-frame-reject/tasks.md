@@ -829,7 +829,7 @@ it in 092.
 
 ### Simplify (before any measurement)
 
-- [ ] T064 Run `/simplify` over the branch diff (`[const §XVI.7]`); fixes go through
+- [X] T064 Run `/simplify` over the branch diff (`[const §XVI.7]`); fixes go through
   `phase-implementer`. Every later check runs on the post-simplify head.
 
 ### Mechanism deletion (SC-006)
