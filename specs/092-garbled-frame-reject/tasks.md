@@ -855,7 +855,7 @@ it in 092.
   whole-buffer iterator walk under the same hooks as the `OffsetTable` build, asserting both
   directions: an encoding failure implies `fault() != none`; a successful build implies
   `fault() == none`.
-- [ ] T068 Build under `linux-clang-asan` with `FIXPP_BUILD_FUZZ=ON`. Plant one disagreement per arm
+- [X] T068 Build under `linux-clang-asan` with `FIXPP_BUILD_FUZZ=ON`. Plant one disagreement per arm
   (and per direction for T067) in a scratch copy and show each trap fires. Then run each target
   ≥ 600 s. Record the commands, the corpus, the skipped-resource-status count, and the result in the
   evidence file, and name both targets to `/speckit-verify` (T078) so they are not marked N/A. State
