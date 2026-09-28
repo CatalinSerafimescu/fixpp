@@ -262,7 +262,7 @@ C-2 row, and the rows are one function, so the mechanism lands here with one anc
     becomes 2 after the ack. Evidence file §*Populations*.
   - Any other hit is classified as "still holds, gains an assertion", "flips (RED first)",
     "renamed" or "mention only".
-- [ ] T013 Via `phase-implementer`, write the differential corpus (C-3 I-4, R-2 §1) in
+- [X] T013 Via `phase-implementer`, write the differential corpus (C-3 I-4, R-2 §1) in
   `tests/session/scan_frame_header_fault_test.cpp`.
   - **Seeds:** a well-formed frame for every admin MsgType the session handles and one application
     type, one carrying a standard Length+Data pair and one a dictionary-only pair. Assert each seed
