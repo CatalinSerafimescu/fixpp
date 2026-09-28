@@ -2457,8 +2457,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
     switch (fsm_state_) {
         case fsm_state::NotConnected: {
             // 092 (data-model E-2, research R-3): the arm's one header scan, hoisted
-            // here and reused by the validate gate, the post-interpret_logon block and
-            // the 1137 Reject. A frame the scan could not read is refused (C-2 D-1).
+            // here; later code in this arm reads `hdr` rather than scanning again.
+            // A frame the scan could not read is refused (C-2 D-1).
             auto hdr = scan_frame_header(frame, session_hooks(inbound_tv_));
             if (hdr.fault != fixpp::wire::field_fault::none) {
                 co_return co_await dispose_unparseable_(hdr, fsm_state::NotConnected);

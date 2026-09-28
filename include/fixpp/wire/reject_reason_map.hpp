@@ -53,8 +53,8 @@ namespace fixpp::wire {
 /// Map a core::error wire_* slot from dictionary_driven_validator::validate()
 /// to the corresponding FIX SessionRejectReason(373) integer value.
 ///
-/// Returns the SessionRejectReason int (0/1/2/5/6/14), or 3 (other/invalid tag)
-/// for any error outside the validator-emitted wire_* slots mapped here.
+/// Returns the SessionRejectReason each case below names, or 3 (other/invalid
+/// tag) for any error outside the validator-emitted wire_* slots mapped here.
 ///
 /// [[nodiscard]]: callers always use the result.
 [[nodiscard]] constexpr int wire_error_to_session_reject_reason(fixpp::core::error e) noexcept {
