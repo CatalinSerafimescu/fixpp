@@ -596,7 +596,7 @@ Reject (45=N) and is not delivered; the second is delivered with no ResendReques
   - answers each ResendRequest by replaying its stored bytes verbatim with PossDupFlag(43)=Y and
     OrigSendingTime(122) added.
   Assert that the resend converges and every later message is delivered (no B-423-1 stall).
-- [ ] T042 [US2] File the SC-007 live-QuickFIX interop cell as a follow-up issue placed in B17
+- [X] T042 [US2] File the SC-007 live-QuickFIX interop cell as a follow-up issue placed in B17
   (spec Assumptions), with the owner's approval before filing; record its number in the evidence
   file and in the parent's `phases/phase-4/issue-batches.md` B17 heading.
 
