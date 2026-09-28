@@ -5663,11 +5663,18 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::replay_outbound_range_(
             co_return std::unexpected(fixpp::core::error::dispatch_aborted);
         }
 
-        const bool app_present =
-            rr && cv.captured &&
-            !is_admin_type(scan_frame_header(std::span<const std::byte>{cv.buf.data(), cv.len},
-                                             session_hooks(inbound_tv_))
-                               .msg_type);
+        // 092 R-12: the header scan stops at its first fault, so a stored frame with a
+        // fault before its 35 scans with no MsgType. Such a frame is not an
+        // application message (it may be admin), so it joins the GapFill run below
+        // rather than being rebuilt and resent [FIX-SL §4.8.3].
+        bool app_present = false;
+        if (rr && cv.captured) {
+            const std::string_view stored_msg_type =
+                scan_frame_header(std::span<const std::byte>{cv.buf.data(), cv.len},
+                                  session_hooks(inbound_tv_))
+                    .msg_type;
+            app_present = !stored_msg_type.empty() && !is_admin_type(stored_msg_type);
+        }
         if (app_present) {
             // #420: stamped per replayed message — SendingTime(52) is the time
             // this frame is sent, not the time the resend answer started.
