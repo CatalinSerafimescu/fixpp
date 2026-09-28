@@ -226,7 +226,7 @@ C-2 row, and the rows are one function, so the mechanism lands here with one anc
     fault-free duplicate 35 scans the last `msg_type`, as today, with `fault == none`.
   Run under the session hooks and under `dict_hooks::none()`. RED: it does not compile (no member),
   which is the expected RED for a new member; commit it as such.
-- [ ] T010 Via `phase-implementer`, add `enum class field_fault : std::uint8_t { none = 0,
+- [X] T010 Via `phase-implementer`, add `enum class field_fault : std::uint8_t { none = 0,
   malformed_tag = 1, length_data_mismatch = 2 }` to `include/fixpp/wire/tag_scan.hpp` in namespace
   `fixpp::wire` (E-0). No include is added to either reader.
 - [ ] T011 Via `phase-implementer`, implement E-1 in `src/session/scan_frame_header.hpp`.
