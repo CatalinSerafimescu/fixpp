@@ -207,7 +207,7 @@ C-2 row, and the rows are one function, so the mechanism lands here with one anc
 
 ### 2a — The scan fault record (E-0, E-1; R-1, R-2), tests first
 
-- [ ] T009 [P] Via `phase-implementer`, write the RED cells for the scan fault record in the new
+- [X] T009 [P] Via `phase-implementer`, write the RED cells for the scan fault record in the new
   `tests/session/scan_frame_header_fault_test.cpp`, added to the `session_pure_tests` bucket in
   `tests/session/CMakeLists.txt` (pure: no thread pool; the bucket is already hooked, so #511 is not engaged). One cell per fault kind and site
   in data-model E-1:
