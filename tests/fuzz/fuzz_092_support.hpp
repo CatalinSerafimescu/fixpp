@@ -5,7 +5,8 @@
 //   - fuzz_session_recovery_admin_parse.cpp (research.md R-2 §2): the header scan
 //     against OffsetTable::build;
 //   - fuzz_wire_validator.cpp (research.md R-7 "Fuzz"): the field iterator's fault
-//     record against OffsetTable::build.
+//     record against OffsetTable::build, and (T062a) validate() on a view whose
+//     build failed (failed_build_prescan_counter below).
 //
 // Both arms compare a reader against OffsetTable::build under a dictionary that
 // declares a dictionary-only Length+Data pair, and both skip ONLY the inputs whose
@@ -90,6 +91,54 @@ inline arm_counter& counter(char const* arm_name) {
                     std::fprintf(f, "%s skipped=%llu cases=%llu\n", c.arm_name,
                                  static_cast<unsigned long long>(c.skipped),
                                  static_cast<unsigned long long>(c.cases));
+                    std::fclose(f);
+                }
+            }
+        });
+        return true;
+    }();
+    (void)registered;
+    return c;
+}
+
+// Per-process counters of fuzz_wire_validator's failed-build arm (tasks.md T062a:
+// the validator's pre-scan of a view whose build failed). Every failed-build view
+// is checked, none is skipped; the buckets show which of the pre-scan's two exits
+// the run reached. `fell_through` counts views whose walk under the validator's
+// hooks recorded no fault; `resource_status` is the subset of those whose build
+// status is a resource failure.
+struct prescan_counter {
+    std::uint64_t entered = 0;
+    std::uint64_t faulted_malformed_tag = 0;
+    std::uint64_t faulted_length_data = 0;
+    std::uint64_t fell_through = 0;
+    std::uint64_t resource_status = 0;
+};
+
+// Reported at exit like counter() above, under its own arm name.
+inline prescan_counter& failed_build_prescan_counter() {
+    static prescan_counter c{};
+    static bool const registered = [] {
+        std::atexit([] {
+            std::fprintf(stderr,
+                         "[092 fuzz arm T062a validate pre-scan on a failed build] entered %llu, "
+                         "faulted malformed_tag %llu, faulted length_data_mismatch %llu, "
+                         "fell through %llu (resource status %llu)\n",
+                         static_cast<unsigned long long>(c.entered),
+                         static_cast<unsigned long long>(c.faulted_malformed_tag),
+                         static_cast<unsigned long long>(c.faulted_length_data),
+                         static_cast<unsigned long long>(c.fell_through),
+                         static_cast<unsigned long long>(c.resource_status));
+            if (char const* path = std::getenv("FIXPP_FUZZ_092_COUNT_FILE")) {
+                if (std::FILE* f = std::fopen(path, "a")) {
+                    std::fprintf(f,
+                                 "T062a entered=%llu malformed_tag=%llu length_data=%llu "
+                                 "fell_through=%llu resource=%llu\n",
+                                 static_cast<unsigned long long>(c.entered),
+                                 static_cast<unsigned long long>(c.faulted_malformed_tag),
+                                 static_cast<unsigned long long>(c.faulted_length_data),
+                                 static_cast<unsigned long long>(c.fell_through),
+                                 static_cast<unsigned long long>(c.resource_status));
                     std::fclose(f);
                 }
             }
