@@ -739,7 +739,7 @@ round 2). The D-5 cell needs Phase 2d.
 an encoding fault. Not a user story: the session cannot reach it (2d decides first); the owner kept
 it in 092.
 
-- [ ] T055 [P] Via `phase-implementer`, the iterator cells (RED) in a new
+- [X] T055 [P] Via `phase-implementer`, the iterator cells (RED) in a new
   `tests/wire/field_iterator_fault_test.cpp`, added to the `wire_dict_tests` bucket in
   `tests/wire/CMakeLists.txt` (label from T007). One cell per E-4 row S1–S4 and T1–T3 over a bare
   buffer, each asserting `fault()`, `fault_length_tag()` and that the **yielded sequence equals the

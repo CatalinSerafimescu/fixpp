@@ -229,6 +229,14 @@ public:
             return pos_ == o.pos_;
         }
 
+        // 092 (specs/092-garbled-frame-reject/data-model.md E-4): the fault
+        // record. Read-only; what the iterator yields does not depend on it.
+        // Sticky: it holds the first fault any advance() met; a later fault
+        // does not replace it.
+        [[nodiscard]] field_fault fault() const noexcept { return fault_; }
+        // The Length tag when fault() == length_data_mismatch; else 0.
+        [[nodiscard]] std::uint16_t fault_length_tag() const noexcept { return fault_length_tag_; }
+
     private:
         void advance() noexcept;
         std::span<const std::byte> buf_;
@@ -236,6 +244,8 @@ public:
         std::size_t next_ = 0;
         field cur_{};
         bool done_ = false;
+        field_fault fault_ = field_fault::none;
+        std::uint16_t fault_length_tag_ = 0;
         // Length+Data carry: set when the just-yielded field was a Length
         // tag, so the next (Data) field is read by fixed length.
         std::uint16_t prev_data_tag_ = 0;

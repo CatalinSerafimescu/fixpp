@@ -131,7 +131,8 @@ add_executable(wire_dict_tests
   consume_group_nested_delim_test.cpp                                 # T010 (083)
   typed_read_split_agreement_test.cpp                                 # T011 (083)
   length_data_pairs_drift_test.cpp                                    # fixpp#426 (D-1)
-  dict_hooks_custom_pair_test.cpp)                                    # fixpp#426 (D-2)
+  dict_hooks_custom_pair_test.cpp                                     # fixpp#426 (D-2)
+  field_iterator_fault_test.cpp)                                      # 092 T055/T057 (FR-012)
 target_link_libraries(wire_dict_tests PRIVATE
   fixpp_wire
   fixpp_dictionary
