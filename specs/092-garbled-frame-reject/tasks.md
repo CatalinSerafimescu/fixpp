@@ -431,8 +431,9 @@ stop-first scan), and T039 reverted too if it has landed. **Expected green on th
 its own proof:** T031's D-4, single-frame D-6 and faulty-Reject(3) D-5 cells (the forced-hit mutant);
 T032 (pins an inherited outcome); T034's MaxMessageSize cell (a control: the size guard runs before
 the state switch); T051's well-formed Reset-mode control and its faulty D-4 control (a Reset to the
-current NextNumIn is a no-op; controls by design; the D-6 and D-7 controls depend on T026). Mark each
-as a pin or control in its test comment.
+current NextNumIn is a no-op; controls by design; the D-6 and D-7 controls depend on T026); T033's
+`ValidatorLive` cells (controls on fault-free frames: they prove the validation axis is live;
+added 2026-09-28). Mark each as a pin or control in its test comment.
 
 - [X] T027 [US1] Via `phase-implementer`, the I-1 witnesses in
   `tests/session/unparseable_frame_disposition_test.cpp`, each in Active at the expected N:
@@ -490,6 +491,11 @@ as a pin or control in its test comment.
   already hooked; label from T007): with `validate_sequence_numbers` off, a faulty **Reset-mode** SequenceReset at N
   leaves `seqnum_mgr_test_access().next_inbound_unsafe() == N`, and later frames are delivered
   without advancing (the inherited outcome, research R-4).
+- [ ] T032a [US1] **Added 2026-09-28 (Phase 3 review, I-6/FR-011's `validate_sequence_numbers` axis).**
+  Via `phase-implementer`, in the same file and target: with `validate_sequence_numbers` off, the
+  same faulty Reset-mode SequenceReset at N draws exactly one Reject (45=N, 372=4, and 373/371/58
+  by fault kind). T032 pins only the counter, so no cell asserted the knob-off Reject. It is RED on
+  the T026-reverted baseline (no Reject is sent there).
 - [X] T033 [US1] Via `phase-implementer`, the FR-011 / I-6 matrix for the admin rows in
   `tests/session/unparseable_frame_disposition_test.cpp`: T005's SequenceReset cell and the D-5
   TestRequest cell, repeated with inbound validation on and off, on FIX.4.2, FIX.4.4 and FIXT.1.1,
