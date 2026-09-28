@@ -327,7 +327,7 @@ C-2 row, and the rows are one function, so the mechanism lands here with one anc
   in R-8's table (D-1/D-2 refusal; D-3 disconnect; D-7 reversal; the LogoutSent confirmation; the
   application Reject; the late-site close at a dispatch site; the FR-019 close; FR-012). Record the
   classification and the observer set in the evidence file.
-- [ ] T021 [P] Via `phase-implementer`, write the C-ABI witnesses (RED) in
+- [X] T021 [P] Via `phase-implementer`, write the C-ABI witnesses (RED) in
   `tests/capi/length_data_logon_refusal_test.cpp` (target `capi_send_recv_test`, already hooked;
   #511): a `CapiLogonMalformedTag` suite mirroring `CapiLogonMalformedCount`, for a Logon carrying
   `9x9=1`, on every observer T020 names, as acceptor and as initiator, plus a well-formed-tag control
