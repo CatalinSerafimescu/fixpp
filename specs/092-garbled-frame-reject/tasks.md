@@ -844,14 +844,14 @@ it in 092.
 
 ### Fuzz (`[const §VII.7]`)
 
-- [ ] T066 Via `phase-implementer`, the R-2 arm in `tests/fuzz/fuzz_session_recovery_admin_parse.cpp`:
+- [X] T066 Via `phase-implementer`, the R-2 arm in `tests/fuzz/fuzz_session_recovery_admin_parse.cpp`:
   on each input, call `scan_frame_header` and `OffsetTable::build` directly, under both hook sets,
   with a dictionary that declares a dictionary-only pair. `__builtin_trap` on any encoding
   disagreement, and for a fault-free input on a `fault_ref_seq_num`, `msg_type_is_third` or
   `fault_ref_msg_type` disagreement with `entries()`. Skip **only** inputs whose status is
   `wire_offset_table_full` or `out_of_memory`, and count them. Add seeds for both fault shapes and
   both header-position cases to its corpus directory.
-- [ ] T067 Via `phase-implementer`, the R-7 arm in `tests/fuzz/fuzz_wire_validator.cpp`: a
+- [X] T067 Via `phase-implementer`, the R-7 arm in `tests/fuzz/fuzz_wire_validator.cpp`: a
   whole-buffer iterator walk under the same hooks as the `OffsetTable` build, asserting both
   directions: an encoding failure implies `fault() != none`; a successful build implies
   `fault() == none`.

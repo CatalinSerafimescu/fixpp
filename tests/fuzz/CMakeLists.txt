@@ -209,6 +209,9 @@ add_executable(fuzz_session_recovery_admin_parse
 target_link_libraries(fuzz_session_recovery_admin_parse PRIVATE
   fixpp_session
   fixpp_mock_clock
+  # 092 T066: the R-2 arm builds OffsetTable directly and loads a pair dictionary.
+  fixpp_wire
+  fixpp_dictionary
   fixpp_core
   # support/pump_until_ready.hpp includes <gtest/gtest.h> unconditionally. This TU
   # uses only `run_window_then_ready`, which is gtest-FREE -- see the rationale at
@@ -221,6 +224,7 @@ target_link_options(fuzz_session_recovery_admin_parse PRIVATE
   -fsanitize=fuzzer,address,undefined)
 target_include_directories(fuzz_session_recovery_admin_parse PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"   # 092 T066: "session/scan_frame_header.hpp" (internal)
 )
 set_target_properties(fuzz_session_recovery_admin_parse PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")

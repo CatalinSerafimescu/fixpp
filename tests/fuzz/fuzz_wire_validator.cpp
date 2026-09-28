@@ -25,14 +25,26 @@
 // Campaign note (T026 / 041): A full ≥10-min Tier-1 ASan+UBSan campaign is
 // the CI responsibility. The in-PR campaign used -max_total_time=60 under
 // -fsanitize=fuzzer,address,undefined; zero crashes/violations found.
+//
+// 092-garbled-frame-reject (specs/092-garbled-frame-reject/tasks.md T067; research.md
+// R-7 "Fuzz"; data-model.md E-4): before the frame factory runs, every input is also
+// walked whole by MessageView<Index>::field_iterator and built by OffsetTable::build
+// under the same hooks: the validation dictionary's, a dictionary declaring a
+// dictionary-only Length+Data pair, and dict_hooks::none(). Both directions trap:
+// an encoding failure of the build with fault() == none, and a successful build
+// with fault() != none. Only a resource-failure build status is skipped, and those
+// are counted (fuzz_092_support.hpp).
 
 #include <array>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/core/error.hpp>
+#include <fixpp/wire/dict_hooks.hpp>
 #include <fixpp/wire/framer.hpp>
+#include <fixpp/wire/offset_table.hpp>
 #include <fixpp/wire/parser.hpp>
+#include <fixpp/wire/tag_scan.hpp>
 #include <fixpp/wire/validator.hpp>
 #include <memory_resource>
 #include <span>
@@ -47,6 +59,8 @@
 // Richer FIX 4.2 validation dictionary (Logon/Heartbeat/NewOrderSingle,
 // typed fields incl. INT + FLOAT — exercises all check_field_type arms).
 #include "support/validation_test_dictionary.hpp"
+// 092: the dictionary-only pair fixture and the skip counter.
+#include "fuzz_092_support.hpp"
 
 namespace {
 
@@ -83,6 +97,47 @@ bool is_valid_wire_error(fixpp::core::error e) noexcept {
     }
 }
 
+// 092 R-7: one (input, hooks) comparison of the iterator's fault record with
+// OffsetTable::build.
+void check_iterator_fault_agrees_with_build(std::span<const std::byte> buf,
+                                            fixpp::wire::dict_hooks const& hooks) {
+    using iter_t = fixpp::wire::MessageView<fixpp::wire::access_mode::Index>::field_iterator;
+    auto& counts = fixpp::fuzz092::counter("R-7 field_iterator vs OffsetTable::build");
+    ++counts.cases;
+    std::pmr::monotonic_buffer_resource arena;  // heap upstream: no artificial out_of_memory
+    auto const fv = fixpp::wire::frame_view_slice_access::make(buf.data(), buf.size(), {});
+    fixpp::wire::OffsetTable const table(fv, &arena, hooks);
+    auto const status = table.build_status();
+    if (fixpp::fuzz092::is_resource_failure(status)) {
+        ++counts.skipped;
+        return;
+    }
+    iter_t it{buf, 0, hooks};
+    iter_t const end{buf, buf.size(), hooks};
+    while (!(it == end)) {
+        ++it;
+    }
+    bool const faulted = it.fault() != fixpp::wire::field_fault::none;
+    if (!status.has_value() && !faulted) {
+        __builtin_trap();  // an encoding failure the iterator did not report
+    }
+    if (status.has_value() && faulted) {
+        __builtin_trap();  // a spurious fault on a frame the build accepts
+    }
+}
+
+void check_iterator_fault_agrees_with_build(std::span<const std::byte> buf) {
+    static fixpp::dict::table_view const validation_tv =
+        fixpp::test_support::make_validation_test_dictionary()->as_table_view();
+    static fixpp::wire::dict_hooks const validation_hooks =
+        fixpp::wire::dict_hooks::for_table_view(validation_tv);
+    static fixpp::wire::dict_hooks const pair_hooks =
+        fixpp::wire::dict_hooks::for_table_view(fixpp::fuzz092::pair_dict_table_view());
+    check_iterator_fault_agrees_with_build(buf, validation_hooks);
+    check_iterator_fault_agrees_with_build(buf, pair_hooks);
+    check_iterator_fault_agrees_with_build(buf, fixpp::wire::dict_hooks::none());
+}
+
 }  // namespace
 
 extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
@@ -99,6 +154,10 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     // a wire_* error and we skip both parse and validate (still exercises the
     // factory's error paths).
     auto buf = std::span<const std::byte>{reinterpret_cast<const std::byte*>(data), size};
+
+    // 092 R-7 arm, on the raw input: it does not depend on the frame factory.
+    check_iterator_fault_agrees_with_build(buf);
+
     auto fv_or_err = fixpp::wire::test::make_frame_view(buf);
 
     if (!fv_or_err) {

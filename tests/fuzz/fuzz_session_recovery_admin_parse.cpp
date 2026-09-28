@@ -29,6 +29,15 @@
 // Anchors: spec.md §US1 / FR-009..FR-016; [const §VII.7]; plan.md §T021/T026;
 //   [const §IX.4]; contracts/reconnect_fsm.hpp; 027 contracts C6 (invalid 789).
 //
+// 092-garbled-frame-reject (specs/092-garbled-frame-reject/tasks.md T066; research.md
+// R-2 §2; contract C-3 I-4): before the Session runs, the payload is also handed
+// straight to scan_frame_header and to OffsetTable::build, under the hooks of a
+// dictionary that declares a dictionary-only Length+Data pair and under
+// dict_hooks::none(). Any disagreement on what an encoding fault is traps; so does,
+// for a fault-free payload, a fault_ref_seq_num / msg_type_is_third /
+// fault_ref_msg_type that is not the one entries() names. Only a resource-failure
+// build status is skipped, and those are counted (fuzz_092_support.hpp).
+//
 // Build: cmake --preset linux-clang-asan -DFIXPP_BUILD_FUZZ=ON
 //   then: build/linux-clang-asan/bin/fuzz_session_recovery_admin_parse
 //         -max_len=512 -runs=10000
@@ -44,8 +53,15 @@
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <fixpp/wire/dict_hooks.hpp>
+#include <fixpp/wire/framer.hpp>  // frame_view_slice_access
+#include <fixpp/wire/offset_table.hpp>
+#include <fixpp/wire/parser.hpp>  // dict_hooks::for_table_view
+#include <fixpp/wire/tag_scan.hpp>
 #include <memory>
+#include <memory_resource>
 #include <span>
+#include <string_view>
 
 // These headers are relative because fuzz binaries have
 //   target_include_directories(...PRIVATE "${CMAKE_SOURCE_DIR}/tests").
@@ -53,7 +69,131 @@
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
 
+// 092: the internal header is reached through ${CMAKE_SOURCE_DIR}/src.
+#include "fuzz_092_support.hpp"
+#include "session/scan_frame_header.hpp"
+
 using namespace std::chrono_literals;
+
+namespace {
+
+using fixpp::core::error;
+using fixpp::session::detail::FrameHeader;
+using fixpp::session::detail::scan_frame_header;
+using fixpp::wire::dict_hooks;
+using fixpp::wire::field_fault;
+using fixpp::wire::frame_view_slice_access;
+using fixpp::wire::OffsetTable;
+
+// A view the scan returned names exactly the bytes of `e`: same address, same length.
+// Comparing addresses, not contents, keeps two fields with equal values apart.
+bool names_entry(std::string_view v, std::span<const std::byte> buf, OffsetTable::entry const& e) {
+    return v.data() == reinterpret_cast<char const*>(buf.data()) + e.offset && v.size() == e.length;
+}
+
+// Fault-free payload: the header identification must be the one entries() gives
+// (research R-2: the oracle is entries(), not find()).
+void check_references_against_entries(FrameHeader const& h, std::span<const std::byte> buf,
+                                      OffsetTable const& table) {
+    auto const entries = table.entries();
+    OffsetTable::entry const* first_34 = nullptr;
+    for (auto const& e : entries) {
+        if (e.tag == 34) {
+            first_34 = &e;
+            break;
+        }
+    }
+    if (first_34 != nullptr) {
+        if (!names_entry(h.fault_ref_seq_num, buf, *first_34)) {
+            __builtin_trap();
+        }
+    } else if (h.fault_ref_seq_num.data() != nullptr) {
+        __builtin_trap();
+    }
+
+    bool const third_is_35 = entries.size() > 2 && entries[2].tag == 35;
+    if (h.msg_type_is_third != third_is_35) {
+        __builtin_trap();
+    }
+    if (third_is_35) {
+        if (!names_entry(h.fault_ref_msg_type, buf, entries[2])) {
+            __builtin_trap();
+        }
+    } else if (h.fault_ref_msg_type.data() != nullptr) {
+        __builtin_trap();
+    }
+}
+
+// One (payload, hooks) comparison of the scan with OffsetTable::build.
+void check_scan_agrees_with_build(std::span<const std::byte> buf, dict_hooks const& hooks) {
+    auto& counts = fixpp::fuzz092::counter("R-2 scan_frame_header vs OffsetTable::build");
+    ++counts.cases;
+    std::pmr::monotonic_buffer_resource arena;  // heap upstream: no artificial out_of_memory
+    auto const fv = frame_view_slice_access::make(buf.data(), buf.size(), {});
+    OffsetTable const table(fv, &arena, hooks);
+    auto const status = table.build_status();
+    if (fixpp::fuzz092::is_resource_failure(status)) {
+        ++counts.skipped;
+        return;
+    }
+    FrameHeader const h = scan_frame_header(buf, hooks);
+
+    if (h.fault == field_fault::none) {
+        if (!status.has_value()) {
+            __builtin_trap();  // the build found an encoding fault the scan did not
+        }
+        check_references_against_entries(h, buf, table);
+        return;
+    }
+    if (status.has_value()) {
+        __builtin_trap();  // the scan faulted on a payload the build accepts
+    }
+    // The status class of the fault kind (data-model E-0).
+    error const e = status.error();
+    if (h.fault == field_fault::malformed_tag) {
+        if (e != error::wire_invalid_field_format && e != error::wire_tag_out_of_range) {
+            __builtin_trap();
+        }
+        if (h.fault_length_tag != 0) {
+            __builtin_trap();
+        }
+    } else if (e != error::wire_invalid_field_format) {  // length_data_mismatch
+        __builtin_trap();
+    }
+
+    // The site, as the oracle sees it: every field before the scan's fault builds
+    // cleanly, and a length_data_mismatch sits right after a field the build itself
+    // treats as a Length under these hooks.
+    if (h.fault_offset > buf.size()) {
+        __builtin_trap();
+    }
+    auto const pfv = frame_view_slice_access::make(buf.data(), h.fault_offset, {});
+    OffsetTable const prefix(pfv, &arena, hooks);
+    auto const prefix_status = prefix.build_status();
+    if (fixpp::fuzz092::is_resource_failure(prefix_status)) {
+        ++counts.skipped;
+        return;
+    }
+    if (!prefix_status.has_value()) {
+        __builtin_trap();  // the build fails before the scan's first fault
+    }
+    if (h.fault == field_fault::length_data_mismatch) {
+        auto const pe = prefix.entries();
+        if (pe.empty() || pe.back().tag != h.fault_length_tag ||
+            hooks.data_tag_for_length(pe.back().tag) == 0) {
+            __builtin_trap();
+        }
+    }
+}
+
+void check_scan_agrees_with_build(std::span<const std::byte> buf) {
+    static dict_hooks const pair_hooks =
+        dict_hooks::for_table_view(fixpp::fuzz092::pair_dict_table_view());
+    check_scan_agrees_with_build(buf, pair_hooks);
+    check_scan_agrees_with_build(buf, dict_hooks::none());
+}
+
+}  // namespace
 
 // ── Per-invocation harness state ──────────────────────────────────────────────
 //
@@ -73,6 +213,11 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
     const std::uint8_t preamble = data[0];
     const std::uint8_t* payload = data + 1;
     const std::size_t payload_len = size - 1;
+
+    // 092 R-2 arm, on the bytes the Session is fed (the preamble byte excluded),
+    // before any session code runs.
+    check_scan_agrees_with_build(
+        std::span<const std::byte>(reinterpret_cast<const std::byte*>(payload), payload_len));
 
     asio::io_context ioc;
     auto utc = std::chrono::system_clock::time_point{} + std::chrono::seconds{1704067200};
