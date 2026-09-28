@@ -49,6 +49,10 @@
 // Liveness_* (tasks.md T031; spec FR-018): one faulty frame inside the first heartbeat
 // interval does not refresh inbound liveness, so a TestRequest is still sent at it.
 //
+// ProfileRoleMatrix/*, ValidatorLive/*, RowByValidation/* (tasks.md T033; spec FR-011;
+// contract C-3 I-6): the disposition does not depend on inbound validation, the profile,
+// the role or whether an Application is registered.
+//
 // ReplayGuard_* (tasks.md T015; research R-12): the resend store walk classifies a
 // stored frame by the header scan's MsgType. The scan stops at its first fault, so
 // a stored admin frame with a fault before its 35 scans with no MsgType; such a
@@ -62,6 +66,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
 #include <asio/redirect_error.hpp>
@@ -75,6 +80,10 @@
 #include <cstdio>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/version_profile.hpp>
+#include <fixpp/dict/version_registry.hpp>
+#include <fixpp/dict/xml_loader.hpp>
 #include <fixpp/session/application.hpp>
 #include <fixpp/session/message_store.hpp>
 #include <fixpp/session/message_store_factory.hpp>
@@ -85,6 +94,7 @@
 #include <fixpp/session/session_fsm.hpp>
 #include <future>
 #include <memory>
+#include <memory_resource>
 #include <span>
 #include <string>
 #include <string_view>
@@ -106,8 +116,9 @@ using fixpp::test_support::extract_tag;
 
 // Wraps `body` (every field after BodyLength) in 8, 9 and 10, with a correct
 // BodyLength(9) and CheckSum(10), so the frame passes the Framer whatever the body holds.
-std::vector<std::byte> wrap_body(std::string const& body) {
-    std::string full = "8=FIX.4.2\x01";
+std::vector<std::byte> wrap_body(std::string const& body,
+                                 std::string_view begin_string = "FIX.4.2") {
+    std::string full = "8=" + std::string(begin_string) + "\x01";
     full += "9=" + std::to_string(body.size()) + "\x01";
     full += body;
     unsigned int cs = 0;
@@ -129,7 +140,8 @@ std::vector<std::byte> wrap_body(std::string const& body) {
 
 // A SOH-delimited FIX frame whose field 3 is 35, then 34 and the peer's header fields.
 std::vector<std::byte> make_raw_frame(std::string_view msg_type, std::uint32_t seq,
-                                      std::string const& extra_body = {}) {
+                                      std::string const& extra_body = {},
+                                      std::string_view begin_string = "FIX.4.2") {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
@@ -137,7 +149,7 @@ std::vector<std::byte> make_raw_frame(std::string_view msg_type, std::uint32_t s
     body += "52=20240101-00:00:00.000\x01";
     body += "56=ISLD\x01";
     body += extra_body;
-    return wrap_body(body);
+    return wrap_body(body, begin_string);
 }
 
 bool has_field(std::span<const std::byte> frame, std::string_view tag_eq) {
@@ -433,9 +445,9 @@ std::string const kHeader =
     "56=ISLD\x01";
 
 // D-1: an acceptor awaiting the Logon refuses a Logon with a malformed tag.
-TEST(UnparseableFrameDisposition, Anchor_D1_NotConnected_MalformedTagLogon_Refused) {
+void anchor_d1(bool validate) {
     DispositionFixture fix;
-    auto cfg = fix.make_cfg(/*validate=*/true);
+    auto cfg = fix.make_cfg(validate);
     cfg.role = session_role::acceptor;
     Session sess{fix.engine, cfg};
     fix.open_only(sess);
@@ -453,10 +465,14 @@ TEST(UnparseableFrameDisposition, Anchor_D1_NotConnected_MalformedTagLogon_Refus
         << "D-1: a refusal draws nothing; Logons sent=" << fix.sent_of_type("A").size();
 }
 
+TEST(UnparseableFrameDisposition, Anchor_D1_NotConnected_MalformedTagLogon_Refused) {
+    anchor_d1(/*validate=*/true);
+}
+
 // D-2: an initiator awaiting the Logon reply refuses a reply with a malformed tag.
-TEST(UnparseableFrameDisposition, Anchor_D2_LogonSent_MalformedTagReply_Refused) {
+void anchor_d2(bool validate) {
     DispositionFixture fix;
-    Session sess{fix.engine, fix.make_cfg(/*validate=*/true)};
+    Session sess{fix.engine, fix.make_cfg(validate)};
     fix.open_only(sess);
     if (::testing::Test::HasFatalFailure()) {
         return;
@@ -471,15 +487,19 @@ TEST(UnparseableFrameDisposition, Anchor_D2_LogonSent_MalformedTagReply_Refused)
     EXPECT_TRUE(fix.transport.sent_frames().empty()) << "D-2: a refusal draws nothing";
 }
 
+TEST(UnparseableFrameDisposition, Anchor_D2_LogonSent_MalformedTagReply_Refused) {
+    anchor_d2(/*validate=*/true);
+}
+
 // D-9: in LogoutSent, a faulty Logout is not taken as the reply; the logout timeout
 // ends the session. The fault follows 35, so the frame does carry 35=5.
 // The logout timeout is below the heartbeat interval, so the clock advance cannot
 // start the liveness exchange, and the close pump's budget is half that timeout, so
 // the real-time close_grace timer (armed for the same duration) cannot complete the
 // close within it: only the mock-clock logout timeout can.
-TEST(UnparseableFrameDisposition, Anchor_D9_LogoutSent_FaultyLogout_NotTakenAsReply) {
+void anchor_d9(bool validate) {
     DispositionFixture fix;
-    auto cfg = fix.make_cfg(/*validate=*/true);
+    auto cfg = fix.make_cfg(validate);
     cfg.logout_disconnect_timeout_ms = 20000;
     auto const timeout = std::chrono::milliseconds{cfg.logout_disconnect_timeout_ms};
     Session sess{fix.engine, cfg};
@@ -513,21 +533,25 @@ TEST(UnparseableFrameDisposition, Anchor_D9_LogoutSent_FaultyLogout_NotTakenAsRe
     EXPECT_EQ(sess.state(), fsm_state::Disconnected) << "D-9: the logout timeout ends the session";
 }
 
+TEST(UnparseableFrameDisposition, Anchor_D9_LogoutSent_FaultyLogout_NotTakenAsReply) {
+    anchor_d9(/*validate=*/true);
+}
+
 // Active, with a counting Application: the fixture for rows D-8 … D-6.
 struct ActiveCell {
     DispositionFixture fix;
     std::shared_ptr<CountingApplication> app = std::make_shared<CountingApplication>();
     std::unique_ptr<Session> sess;
 
-    ActiveCell() {
+    explicit ActiveCell(bool validate = true) {
         fix.engine.application = app;
-        sess = std::make_unique<Session>(fix.engine, fix.make_cfg(/*validate=*/true));
+        sess = std::make_unique<Session>(fix.engine, fix.make_cfg(validate));
     }
 };
 
 // D-8: field 3 is not 35 → disregarded: nothing sent, NextNumIn unchanged, Active.
-TEST(UnparseableFrameDisposition, Anchor_D8_Active_Field3Not35_Disregarded) {
-    ActiveCell c;
+void anchor_d8(bool validate) {
+    ActiveCell c{validate};
     c.fix.open_to_active(*c.sess);
     if (::testing::Test::HasFatalFailure()) {
         return;
@@ -542,9 +566,13 @@ TEST(UnparseableFrameDisposition, Anchor_D8_Active_Field3Not35_Disregarded) {
     expect_heartbeat_in_sequence(c.fix, *c.sess, *c.app, 2, "D-8 (NextNumIn unchanged)");
 }
 
+TEST(UnparseableFrameDisposition, Anchor_D8_Active_Field3Not35_Disregarded) {
+    anchor_d8(/*validate=*/true);
+}
+
 // D-7: field 3 is 35 but the fault precedes 34 → disregarded, as D-8.
-TEST(UnparseableFrameDisposition, Anchor_D7_Active_FaultBefore34_Disregarded) {
-    ActiveCell c;
+void anchor_d7(bool validate) {
+    ActiveCell c{validate};
     c.fix.open_to_active(*c.sess);
     if (::testing::Test::HasFatalFailure()) {
         return;
@@ -558,10 +586,14 @@ TEST(UnparseableFrameDisposition, Anchor_D7_Active_FaultBefore34_Disregarded) {
     expect_heartbeat_in_sequence(c.fix, *c.sess, *c.app, 2, "D-7 (NextNumIn unchanged)");
 }
 
+TEST(UnparseableFrameDisposition, Anchor_D7_Active_FaultBefore34_Disregarded) {
+    anchor_d7(/*validate=*/true);
+}
+
 // D-3: a faulty Logon in Active (field 3 is 35, 34 read) → silent Disconnected:
 // no Reject, no Logout.
-TEST(UnparseableFrameDisposition, Anchor_D3_Active_FaultyLogon_SilentDisconnect) {
-    ActiveCell c;
+void anchor_d3(bool validate) {
+    ActiveCell c{validate};
     c.fix.open_to_active(*c.sess);
     if (::testing::Test::HasFatalFailure()) {
         return;
@@ -578,10 +610,14 @@ TEST(UnparseableFrameDisposition, Anchor_D3_Active_FaultyLogon_SilentDisconnect)
     EXPECT_EQ(c.app->from_app, 0) << "D-3: the faulty Logon never reaches fromApp";
 }
 
+TEST(UnparseableFrameDisposition, Anchor_D3_Active_FaultyLogon_SilentDisconnect) {
+    anchor_d3(/*validate=*/true);
+}
+
 // D-4: a faulty SequenceReset (Reset mode, NewSeqNo=500) at N=2 → Reject, no advance,
 // NewSeqNo not applied: a Heartbeat at N+1 is a gap whose ResendRequest begins at 2.
-TEST(UnparseableFrameDisposition, Anchor_D4_Active_FaultySequenceReset_RejectNoAdvance) {
-    ActiveCell c;
+void anchor_d4(bool validate) {
+    ActiveCell c{validate};
     c.fix.open_to_active(*c.sess);
     if (::testing::Test::HasFatalFailure()) {
         return;
@@ -610,11 +646,15 @@ TEST(UnparseableFrameDisposition, Anchor_D4_Active_FaultySequenceReset_RejectNoA
     }
 }
 
+TEST(UnparseableFrameDisposition, Anchor_D4_Active_FaultySequenceReset_RejectNoAdvance) {
+    anchor_d4(/*validate=*/true);
+}
+
 // D-5: a faulty NewOrderSingle at the expected N=2 → NextNumIn consumed, then Reject;
 // fromApp not invoked; a Heartbeat at N+1 is in sequence. The fault is a
 // SecureDataLen(90) count not followed by SOH (length_data_mismatch).
-TEST(UnparseableFrameDisposition, Anchor_D5_Active_FaultyAppAtExpected_ConsumeThenReject) {
-    ActiveCell c;
+void anchor_d5(bool validate) {
+    ActiveCell c{validate};
     c.fix.open_to_active(*c.sess);
     if (::testing::Test::HasFatalFailure()) {
         return;
@@ -636,10 +676,14 @@ TEST(UnparseableFrameDisposition, Anchor_D5_Active_FaultyAppAtExpected_ConsumeTh
     expect_heartbeat_in_sequence(c.fix, *c.sess, *c.app, 3, "D-5 (NextNumIn advanced)");
 }
 
+TEST(UnparseableFrameDisposition, Anchor_D5_Active_FaultyAppAtExpected_ConsumeThenReject) {
+    anchor_d5(/*validate=*/true);
+}
+
 // D-6: a faulty NewOrderSingle at N+5 → Reject(45=N+5); no ResendRequest; NextNumIn
 // unchanged, so a Heartbeat at N=2 is in sequence.
-TEST(UnparseableFrameDisposition, Anchor_D6_Active_FaultyAppNotExpected_RejectNoAdvance) {
-    ActiveCell c;
+void anchor_d6(bool validate) {
+    ActiveCell c{validate};
     c.fix.open_to_active(*c.sess);
     if (::testing::Test::HasFatalFailure()) {
         return;
@@ -657,6 +701,10 @@ TEST(UnparseableFrameDisposition, Anchor_D6_Active_FaultyAppNotExpected_RejectNo
     EXPECT_EQ(c.sess->state(), fsm_state::Active) << "D-6: state after the Reject";
 
     expect_heartbeat_in_sequence(c.fix, *c.sess, *c.app, 2, "D-6 (NextNumIn unchanged)");
+}
+
+TEST(UnparseableFrameDisposition, Anchor_D6_Active_FaultyAppNotExpected_RejectNoAdvance) {
+    anchor_d6(/*validate=*/true);
 }
 
 // ── ReplayGuard_* (T015; research R-12) ──────────────────────────────────────
@@ -871,10 +919,10 @@ struct StateCell {
     std::future<fixpp::core::expected_t<void>> logon;  // the acceptor's parked Logon exchange
     fsm_state held;
 
-    explicit StateCell(At at)
+    explicit StateCell(At at, bool validate = true)
         : held(at == At::active ? fsm_state::Active : fsm_state::LogonReceived) {
         fix.engine.application = app;
-        auto cfg = fix.make_cfg(/*validate=*/true);
+        auto cfg = fix.make_cfg(validate);
         if (at == At::logon_received) {
             cfg.role = session_role::acceptor;
         }
@@ -966,8 +1014,8 @@ void expect_heartbeat_gap(StateCell& c, std::uint32_t seq, std::string_view begi
 // gap from 2. With NewSeqNo(36)=500 applied the Heartbeat at 3 would be too low
 // instead (FR-010).
 void run_expected_n_cell(At at, std::string_view type, std::string const& fields,
-                         Shape const& shape) {
-    StateCell c{at};
+                         Shape const& shape, bool validate = true) {
+    StateCell c{at, validate};
     c.enter();
     if (::testing::Test::HasFatalFailure()) {
         return;
@@ -1353,6 +1401,380 @@ TEST(UnparseableFrameDisposition, Liveness_D7_FaultBefore34_TestRequestAtInterva
     run_liveness_cell(wrap_body(std::string{"35=D\x01"} + kHeader + kMalformedTag + "34=2\x01"), 2,
                       Ending::silent, "D-7");
 }
+
+// ── I-6 matrix (tasks.md T033; spec FR-011; contract C-3 I-6) ────────────────
+//
+// ProfileRoleMatrix: T005's SequenceReset cell (Reset mode, NewSeqNo=500, a malformed
+// tag) and the D-5 TestRequest cell, each repeated with inbound validation on and off,
+// on FIX.4.2, FIX.4.4 and FIXT.1.1, as acceptor and as initiator, with and without an
+// Application. Every cell asserts the same disposition. NextNumIn is witnessed by a
+// later gap's ResendRequest BeginSeqNo(7), which needs no Application.
+// RowByValidation: one cell per C-2 row, with inbound validation on and off.
+// ValidatorLive: the control that the validation axis is not vacuous: per profile, a
+// fault-free NewOrderSingle missing ClOrdID(11) draws the validation Reject only when
+// validation is on.
+
+enum class Profile : std::uint8_t { fix42, fix44, fixt11 };
+
+std::string_view begin_string_of(Profile p) {
+    switch (p) {
+        case Profile::fix42:
+            return "FIX.4.2";
+        case Profile::fix44:
+            return "FIX.4.4";
+        case Profile::fixt11:
+            return "FIXT.1.1";
+    }
+    return {};
+}
+
+std::string_view profile_label(Profile p) {
+    switch (p) {
+        case Profile::fix42:
+            return "FIX42";
+        case Profile::fix44:
+            return "FIX44";
+        case Profile::fixt11:
+            return "FIXT11";
+    }
+    return {};
+}
+
+void replace_once(std::string& s, std::string_view from, std::string const& to) {
+    auto const pos = s.find(from);
+    if (pos == std::string::npos) {
+        ADD_FAILURE() << "make_profile_dictionary: text not found: " << from;
+        return;
+    }
+    s.replace(pos, from.size(), to);
+}
+
+// The validation test dictionary for the profile. FIX.4.4 and FIXT.1.1 load it as FIX
+// 4.4 (for FIXT.1.1 that is the session-layer dictionary, and the registry's one
+// application version), with DefaultApplVerID(1137) declared on the Logon, so a
+// validating FIXT session accepts the Logon that carries it.
+std::shared_ptr<const fixpp::dict::Dictionary> make_profile_dictionary(Profile p) {
+    std::string xml{fixpp::test_support::kValidationTestFix42Xml};
+    if (p != Profile::fix42) {
+        replace_once(xml, R"(<fix major="4" minor="2">)", R"(<fix major="4" minor="4">)");
+        replace_once(xml, R"(<field number="108" name="HeartBtInt"    required="Y"/>)",
+                     R"(<field number="108" name="HeartBtInt"    required="Y"/>)"
+                     R"(<field number="1137" name="DefaultApplVerID" required="N"/>)");
+        replace_once(xml, R"(<field number="112" name="TestReqID"    type="STRING"/>)",
+                     R"(<field number="112" name="TestReqID"    type="STRING"/>)"
+                     R"(<field number="1137" name="DefaultApplVerID" type="STRING"/>)");
+    }
+    constexpr std::size_t kBufSize = 128U * 1024U;
+    auto buf = std::make_unique<std::array<std::byte, kBufSize>>();
+    auto* mr = new std::pmr::monotonic_buffer_resource{buf->data(), buf->size()};
+    fixpp::dict::Dictionary d = fixpp::dict::XmlLoader{}.load_from_string(xml, mr);
+    auto* raw_dict = new fixpp::dict::Dictionary{std::move(d)};
+    auto* raw_buf = buf.release();
+    return std::shared_ptr<const fixpp::dict::Dictionary>{
+        raw_dict, [mr, raw_buf](const fixpp::dict::Dictionary* d2) {
+            delete d2;
+            delete mr;
+            delete raw_buf;
+        }};
+}
+
+// A session on `profile`, driven to Active at NextNumIn 2 by the peer's Logon at 1. Its
+// feeds wait for the frame's own completion and then run whatever it left ready, so no
+// fixed wall-clock window is spent per frame.
+struct ProfileCell {
+    DispositionFixture fix;
+    std::shared_ptr<CountingApplication> app;
+    std::shared_ptr<const fixpp::dict::Dictionary> dict;
+    std::unique_ptr<fixpp::dict::version_registry> registry;
+    std::string begin_string;
+    std::unique_ptr<Session> sess;
+
+    ProfileCell(Profile profile, session_role role, bool validate, bool with_app)
+        : dict(make_profile_dictionary(profile)), begin_string(begin_string_of(profile)) {
+        if (with_app) {
+            app = std::make_shared<CountingApplication>();
+            fix.engine.application = app;
+        }
+        auto cfg = fix.make_cfg(validate);
+        cfg.role = role;
+        cfg.begin_string = begin_string;
+        cfg.dictionary = dict;
+        if (profile == Profile::fixt11) {
+            cfg.default_appl_ver_id = fixpp::dict::application_version::v44;
+            registry = std::make_unique<fixpp::dict::version_registry>(
+                std::vector<std::shared_ptr<const fixpp::dict::Dictionary>>{dict});
+        }
+        sess = std::make_unique<Session>(fix.engine, cfg, registry.get());
+    }
+
+    ProfileCell(ProfileCell const&) = delete;
+    ProfileCell& operator=(ProfileCell const&) = delete;
+
+    [[nodiscard]] std::vector<std::byte> frame(std::string_view type, std::uint32_t seq,
+                                               std::string const& fields = {}) const {
+        return make_raw_frame(type, seq, fields, begin_string);
+    }
+
+    void feed(std::span<const std::byte> bytes) {
+        fix.transport.reset();
+        auto fut = asio::co_spawn(fix.ioc, sess->on_inbound_frame(bytes), asio::use_future);
+        if (!fixpp::test_support::pump_until_ready(fix.ioc, fut, "ProfileCell::feed")) {
+            fixpp::test_support::cancel_and_drain_or_report(fix.ioc, *fix.clock,
+                                                            "ProfileCell::feed");
+            ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss << "ProfileCell::feed";
+            return;
+        }
+        drain_ready(fix.ioc);
+        (void)fut.get();
+    }
+
+    void enter() {
+        auto fut = asio::co_spawn(fix.ioc, sess->open(), asio::use_future);
+        if (!fixpp::test_support::pump_until_ready(fix.ioc, fut, "ProfileCell::open")) {
+            fixpp::test_support::cancel_and_drain_or_report(fix.ioc, *fix.clock,
+                                                            "ProfileCell::open");
+            ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss << "ProfileCell::open";
+            return;
+        }
+        drain_ready(fix.ioc);
+        ASSERT_TRUE(fut.get().has_value()) << "open() failed on " << begin_string;
+        std::string logon_fields = std::string{"98=0\x01"} + "108=30\x01";
+        if (begin_string == "FIXT.1.1") {
+            logon_fields += "1137=6\x01";
+        }
+        feed(frame("A", 1, logon_fields));
+        ASSERT_EQ(sess->state(), fsm_state::Active) << "the peer's Logon on " << begin_string;
+    }
+
+    [[nodiscard]] int app_deliveries() const {
+        return app == nullptr ? 0 : app->from_admin + app->from_app;
+    }
+};
+
+// The only outbound frame is a ResendRequest whose BeginSeqNo(7) is `begin`.
+void expect_only_resend_from(ProfileCell const& c, std::string_view begin, std::string_view row) {
+    EXPECT_EQ(c.fix.transport.sent_frames().size(), 1U)
+        << row << ": expected only a ResendRequest; Logouts=" << c.fix.sent_of_type("5").size();
+    auto const resends = c.fix.sent_of_type("2");
+    EXPECT_EQ(resends.size(), 1U) << row << ": expected one ResendRequest(35=2)";
+    if (!resends.empty()) {
+        EXPECT_EQ(extract_tag(resends.front(), 7), begin) << row << ": ResendRequest BeginSeqNo(7)";
+    }
+    EXPECT_EQ(c.sess->state(), fsm_state::Active) << row << ": state after the gap";
+}
+
+struct MatrixParam {
+    bool validate;
+    Profile profile;
+    session_role role;
+    bool with_app;
+};
+
+std::vector<MatrixParam> matrix_params() {
+    std::vector<MatrixParam> out;
+    for (bool const validate : {true, false}) {
+        for (Profile const profile : {Profile::fix42, Profile::fix44, Profile::fixt11}) {
+            for (session_role const role : {session_role::acceptor, session_role::initiator}) {
+                for (bool const with_app : {true, false}) {
+                    out.push_back({validate, profile, role, with_app});
+                }
+            }
+        }
+    }
+    return out;
+}
+
+std::string matrix_name(::testing::TestParamInfo<MatrixParam> const& info) {
+    auto const& p = info.param;
+    return std::string{p.validate ? "ValOn" : "ValOff"} + "_" +
+           std::string{profile_label(p.profile)} + "_" +
+           (p.role == session_role::acceptor ? "Acceptor" : "Initiator") + "_" +
+           (p.with_app ? "App" : "NoApp");
+}
+
+class ProfileRoleMatrix : public ::testing::TestWithParam<MatrixParam> {};
+
+// T005's cell: the faulty Reset-mode SequenceReset at N=2 draws only the Reject, and
+// NewSeqNo(36)=500 is not applied: a conformant Heartbeat at 500 is a gap from 2.
+TEST_P(ProfileRoleMatrix, SequenceReset_RejectNoAdvance) {
+    auto const& p = GetParam();
+    ProfileCell c{p.profile, p.role, p.validate, p.with_app};
+    c.enter();
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    int const delivered = c.app_deliveries();
+    c.feed(c.frame("4", 2, std::string{"123=Z\x01"} + "36=500\x01" + kMalformedTag));
+    expect_only_reject(c.fix, want_reject("2", "4", kTagShape), "SequenceReset");
+    EXPECT_EQ(c.app_deliveries(), delivered) << "the faulty SequenceReset reached the Application";
+    EXPECT_EQ(c.sess->state(), fsm_state::Active) << "state after the SequenceReset";
+
+    c.feed(c.frame("0", 500));
+    expect_only_resend_from(c, "2", "Heartbeat at 500 (NewSeqNo not applied)");
+}
+
+// The D-5 TestRequest cell: the faulty TestRequest at N=2 draws only the Reject (no
+// Heartbeat) and consumes 2: a Heartbeat at 3 draws nothing, and one at 10 is a gap
+// from 4.
+TEST_P(ProfileRoleMatrix, TestRequest_RejectAdvance) {
+    auto const& p = GetParam();
+    ProfileCell c{p.profile, p.role, p.validate, p.with_app};
+    c.enter();
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    int const delivered = c.app_deliveries();
+    c.feed(c.frame("1", 2, kTestRequestFields + kMalformedTag));
+    expect_only_reject(c.fix, want_reject("2", "1", kTagShape), "TestRequest");
+    EXPECT_EQ(c.app_deliveries(), delivered) << "the faulty TestRequest reached the Application";
+    EXPECT_EQ(c.sess->state(), fsm_state::Active) << "state after the TestRequest";
+
+    c.feed(c.frame("0", 3));
+    EXPECT_TRUE(c.fix.transport.sent_frames().empty())
+        << "the Heartbeat at 3 must draw nothing; ResendRequests="
+        << c.fix.sent_of_type("2").size();
+    EXPECT_EQ(c.sess->state(), fsm_state::Active) << "state after the Heartbeat at 3";
+
+    c.feed(c.frame("0", 10));
+    expect_only_resend_from(c, "4", "Heartbeat at 10 (NextNumIn 4)");
+}
+
+INSTANTIATE_TEST_SUITE_P(UnparseableFrameDisposition, ProfileRoleMatrix,
+                         ::testing::ValuesIn(matrix_params()), matrix_name);
+
+// Control for the validation axis: with validation on, a fault-free NewOrderSingle
+// missing ClOrdID(11) draws the validation Reject; with it off, it is delivered.
+struct ValidatorParam {
+    Profile profile;
+    bool validate;
+};
+
+class ValidatorLive : public ::testing::TestWithParam<ValidatorParam> {};
+
+TEST_P(ValidatorLive, MissingRequiredField_RejectedOnlyWhenValidating) {
+    auto const& p = GetParam();
+    ProfileCell c{p.profile, session_role::initiator, p.validate, /*with_app=*/true};
+    c.enter();
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    c.feed(c.frame("D", 2, std::string{"54=1\x01"} + "60=20240101-00:00:00\x01"));
+    auto const rejects = c.fix.sent_of_type("3");
+    if (p.validate) {
+        EXPECT_EQ(rejects.size(), 1U) << "validation on: the missing ClOrdID(11) must be Rejected";
+        if (!rejects.empty()) {
+            EXPECT_EQ(extract_tag(rejects.front(), 373), "1") << "Reject SessionRejectReason(373)";
+            EXPECT_EQ(extract_tag(rejects.front(), 371), "11") << "Reject RefTagID(371)";
+        }
+        EXPECT_EQ(c.app->from_app, 0) << "validation on: the invalid frame reached fromApp";
+    } else {
+        EXPECT_TRUE(rejects.empty()) << "validation off: the frame must not be Rejected";
+        EXPECT_EQ(c.app->from_app, 1) << "validation off: the frame must be delivered";
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(UnparseableFrameDisposition, ValidatorLive,
+                         ::testing::Values(ValidatorParam{Profile::fix42, true},
+                                           ValidatorParam{Profile::fix42, false},
+                                           ValidatorParam{Profile::fix44, true},
+                                           ValidatorParam{Profile::fix44, false},
+                                           ValidatorParam{Profile::fixt11, true},
+                                           ValidatorParam{Profile::fixt11, false}),
+                         [](::testing::TestParamInfo<ValidatorParam> const& info) {
+                             return std::string{profile_label(info.param.profile)} +
+                                    (info.param.validate ? "_ValOn" : "_ValOff");
+                         });
+
+// One cell per C-2 row, with inbound validation on and off: the fault branch sits in
+// front of the validate gate (C-1 step 3), so the knob cannot change the row.
+enum class Row : std::uint8_t { d1, d2, d9, d8, d7, d3, d4, d5_test_request, d5_application, d6 };
+
+struct RowParam {
+    Row row;
+    bool validate;
+};
+
+std::string_view row_label(Row r) {
+    switch (r) {
+        case Row::d1:
+            return "D1";
+        case Row::d2:
+            return "D2";
+        case Row::d9:
+            return "D9";
+        case Row::d8:
+            return "D8";
+        case Row::d7:
+            return "D7";
+        case Row::d3:
+            return "D3";
+        case Row::d4:
+            return "D4";
+        case Row::d5_test_request:
+            return "D5_TestRequest";
+        case Row::d5_application:
+            return "D5_Application";
+        case Row::d6:
+            return "D6";
+    }
+    return {};
+}
+
+std::vector<RowParam> row_params() {
+    std::vector<RowParam> out;
+    for (Row const row : {Row::d1, Row::d2, Row::d9, Row::d8, Row::d7, Row::d3, Row::d4,
+                          Row::d5_test_request, Row::d5_application, Row::d6}) {
+        for (bool const validate : {true, false}) {
+            out.push_back({row, validate});
+        }
+    }
+    return out;
+}
+
+class RowByValidation : public ::testing::TestWithParam<RowParam> {};
+
+TEST_P(RowByValidation, Disposition) {
+    auto const& p = GetParam();
+    switch (p.row) {
+        case Row::d1:
+            anchor_d1(p.validate);
+            break;
+        case Row::d2:
+            anchor_d2(p.validate);
+            break;
+        case Row::d9:
+            anchor_d9(p.validate);
+            break;
+        case Row::d8:
+            anchor_d8(p.validate);
+            break;
+        case Row::d7:
+            anchor_d7(p.validate);
+            break;
+        case Row::d3:
+            anchor_d3(p.validate);
+            break;
+        case Row::d4:
+            anchor_d4(p.validate);
+            break;
+        case Row::d5_test_request:
+            run_expected_n_cell(At::active, "1", kTestRequestFields, kTagShape, p.validate);
+            break;
+        case Row::d5_application:
+            anchor_d5(p.validate);
+            break;
+        case Row::d6:
+            anchor_d6(p.validate);
+            break;
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(UnparseableFrameDisposition, RowByValidation,
+                         ::testing::ValuesIn(row_params()),
+                         [](::testing::TestParamInfo<RowParam> const& info) {
+                             return std::string{row_label(info.param.row)} +
+                                    (info.param.validate ? "_ValOn" : "_ValOff");
+                         });
 
 }  // namespace
 }  // namespace fixpp::session::test

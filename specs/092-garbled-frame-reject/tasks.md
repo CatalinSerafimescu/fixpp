@@ -490,7 +490,7 @@ as a pin or control in its test comment.
   already hooked; label from T007): with `validate_sequence_numbers` off, a faulty **Reset-mode** SequenceReset at N
   leaves `seqnum_mgr_test_access().next_inbound_unsafe() == N`, and later frames are delivered
   without advancing (the inherited outcome, research R-4).
-- [ ] T033 [US1] Via `phase-implementer`, the FR-011 / I-6 matrix for the admin rows in
+- [X] T033 [US1] Via `phase-implementer`, the FR-011 / I-6 matrix for the admin rows in
   `tests/session/unparseable_frame_disposition_test.cpp`: T005's SequenceReset cell and the D-5
   TestRequest cell, repeated with inbound validation on and off, on FIX.4.2, FIX.4.4 and FIXT.1.1,
   as acceptor and initiator, and with and without an Application registered. The disposition is
