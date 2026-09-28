@@ -722,7 +722,7 @@ round 2). The D-5 cell needs Phase 2d.
     Logon-reply arm end the session on the new error with no edit. Classify every member of T008's
     `check_inbound(` population the same way, in the evidence file.
   - T050, T051 and T052 GREEN.
-- [ ] T054 The three deletion proofs (quickstart §2 "Inbound bound deletion"), each in a scratch copy:
+- [X] T054 The three deletion proofs (quickstart §2 "Inbound bound deletion"), each in a scratch copy:
   - delete the bound in `check_inbound`: every **consuming** FR-019 cell goes RED, the pre-Active
     arm included (the non-consuming controls stay green by design);
   - delete Guard 4's overflow branch: the Heartbeat, PossDup and knob-off cells go RED (the plain
