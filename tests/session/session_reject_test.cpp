@@ -264,6 +264,138 @@ TEST(SessionReject, BuildRejectShape) {
     EXPECT_EQ(extract_field(frame, 373), "3") << "SessionRejectReason(373) must carry reason=3";
 }
 
+// ── 092 T016: build_reject_with_text (research R-5, contract C-4) ─────────────
+//
+// Every cell compares the WHOLE frame against a literal spelled out here, never
+// against the builder's own output and never field-by-field (a position-
+// independent field lookup would pass a reordered frame). The literal is
+// written with '|' for SOH; `soh_frame` converts it. The 9= and 10= values in
+// each literal were computed outside the builder; re-derive them by summing the
+// frame's bytes before 10= (mod 256) and counting the bytes from 35= to 10=.
+//
+// The four golden literals are the fixpp-emitted Reject lines of the interop
+// transcripts under tests/interop/happy/golden/ (the PD-QFj-*-malformed-dup-
+// rejected and HP-QFj-*-reject-invalid-admin cells), copied verbatim. They pin
+// `build_reject`'s bytes to what fixpp put on the wire before 092, and pin the
+// empty-text form of `build_reject_with_text` to the same bytes.
+
+namespace {
+
+std::string soh_frame(std::string_view pipes) {
+    std::string s(pipes);
+    for (char& c : s) {
+        if (c == '|') {
+            c = '\x01';
+        }
+    }
+    return s;
+}
+
+std::string as_string(std::span<const std::byte> frame) {
+    return {reinterpret_cast<const char*>(frame.data()), frame.size()};
+}
+
+struct RejectGolden {
+    const char* name;
+    std::string_view sender;
+    std::string_view target;
+    std::string_view sending_time;
+    seqnum_t ref_seq_num;
+    int ref_tag_id;
+    std::string_view ref_msg_type;
+    int reason;
+    std::string_view expected;  // '|' = SOH
+};
+
+constexpr RejectGolden kRejectGoldens[] = {
+    {"HP-QFj-init-fix44-reject-invalid-admin", "FIXPP_INIT", "CPTY_ACC", "20260914-21:04:18.114",
+     seqnum_t{2}, 55, "1", 2,
+     "8=FIX.4.4|9=85|35=3|34=2|49=FIXPP_INIT|52=20260914-21:04:18.114|56=CPTY_ACC|45=2|371=55|"
+     "372=1|373=2|10=143|"},
+    {"HP-QFj-acc-fix44-reject-invalid-admin", "FIXPP_ACC", "CPTY_INIT", "20260914-21:04:26.643",
+     seqnum_t{2}, 55, "1", 2,
+     "8=FIX.4.4|9=85|35=3|34=2|49=FIXPP_ACC|52=20260914-21:04:26.643|56=CPTY_INIT|45=2|371=55|"
+     "372=1|373=2|10=149|"},
+    {"PD-QFj-init-fix44-malformed-dup-rejected", "FIXPP_INIT", "CPTY_ACC", "20260611-05:53:19.317",
+     seqnum_t{1}, 122, "D", 1,
+     "8=FIX.4.4|9=86|35=3|34=2|49=FIXPP_INIT|52=20260611-05:53:19.317|56=CPTY_ACC|45=1|371=122|"
+     "372=D|373=1|10=210|"},
+    {"PD-QFj-acc-fix44-malformed-dup-rejected", "FIXPP_ACC", "CPTY_INIT", "20260611-05:53:31.452",
+     seqnum_t{1}, 122, "D", 1,
+     "8=FIX.4.4|9=86|35=3|34=2|49=FIXPP_ACC|52=20260611-05:53:31.452|56=CPTY_INIT|45=1|371=122|"
+     "372=D|373=1|10=204|"},
+};
+
+}  // namespace
+
+// build_reject's output is byte-identical to the interop goldens.
+TEST(SessionReject, BuildRejectMatchesInteropGoldens) {
+    for (const auto& g : kRejectGoldens) {
+        std::array<std::byte, 512> buf{};
+        auto r = fixpp::session::build_reject(std::span<std::byte>{buf}, /*seq=*/2, g.sender,
+                                              g.target, g.ref_seq_num, g.ref_tag_id, g.ref_msg_type,
+                                              g.reason, "FIX.4.4", g.sending_time);
+        ASSERT_TRUE(r.has_value()) << g.name;
+        EXPECT_EQ(as_string(*r), soh_frame(g.expected)) << g.name;
+    }
+}
+
+// An empty text emits no 58: the empty-text form is byte-identical to the goldens.
+TEST(SessionReject, BuildRejectWithTextEmptyTextMatchesInteropGoldens) {
+    for (const auto& g : kRejectGoldens) {
+        std::array<std::byte, 512> buf{};
+        auto r = fixpp::session::build_reject_with_text(
+            std::span<std::byte>{buf}, /*seq=*/2, g.sender, g.target, g.ref_seq_num, g.ref_tag_id,
+            g.ref_msg_type, g.reason, "FIX.4.4", g.sending_time, /*text=*/"");
+        ASSERT_TRUE(r.has_value()) << g.name;
+        const std::string got = as_string(*r);
+        EXPECT_EQ(got, soh_frame(g.expected)) << g.name;
+        EXPECT_EQ(got.find("\x01"
+                           "58="),
+                  std::string::npos)
+            << g.name << ": an empty text must emit no 58";
+    }
+}
+
+// A non-empty text is emitted as 58, after 373 and before the trailer.
+TEST(SessionReject, BuildRejectWithTextEmitsText) {
+    std::array<std::byte, 512> buf{};
+    auto r = fixpp::session::build_reject_with_text(
+        std::span<std::byte>{buf}, /*seq=*/2, "ISLD", "TW", /*ref_seq_num=*/seqnum_t{1},
+        /*ref_tag_id=*/95, /*ref_msg_type=*/"D", /*reason=*/5, "FIX.4.2", "20240101-00:00:00.000",
+        /*text=*/"garbled field");
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(as_string(*r),
+              soh_frame("8=FIX.4.2|9=90|35=3|34=2|49=ISLD|52=20240101-00:00:00.000|56=TW|45=1|"
+                        "371=95|372=D|373=5|58=garbled field|10=117|"));
+}
+
+// A non-empty text with 371 omitted (ref_tag_id 0) and 373=0.
+TEST(SessionReject, BuildRejectWithTextEmitsTextWithout371) {
+    std::array<std::byte, 512> buf{};
+    auto r = fixpp::session::build_reject_with_text(
+        std::span<std::byte>{buf}, /*seq=*/2, "ISLD", "TW", /*ref_seq_num=*/seqnum_t{1},
+        /*ref_tag_id=*/0, /*ref_msg_type=*/"D", /*reason=*/0, "FIX.4.2", "20240101-00:00:00.000",
+        /*text=*/"garbled field");
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(as_string(*r),
+              soh_frame("8=FIX.4.2|9=83|35=3|34=2|49=ISLD|52=20240101-00:00:00.000|56=TW|45=1|"
+                        "372=D|373=0|58=garbled field|10=043|"));
+}
+
+// An empty 372 is omitted; the text is still emitted.
+TEST(SessionReject, BuildRejectWithTextEmptyRefMsgTypeOmits372) {
+    std::array<std::byte, 512> buf{};
+    auto r = fixpp::session::build_reject_with_text(
+        std::span<std::byte>{buf}, /*seq=*/2, "ISLD", "TW", /*ref_seq_num=*/seqnum_t{1},
+        /*ref_tag_id=*/95, /*ref_msg_type=*/"", /*reason=*/5, "FIX.4.2", "20240101-00:00:00.000",
+        /*text=*/"garbled field");
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(as_string(*r),
+              soh_frame("8=FIX.4.2|9=84|35=3|34=2|49=ISLD|52=20240101-00:00:00.000|56=TW|45=1|"
+                        "371=95|373=5|58=garbled field|10=090|"));
+}
+
 // ── Test 2: No-reject-loop on inbound Reject (I-5) ───────────────────────────
 //
 // A malformed Reject(35=3) arriving in Active state must NOT cause the session

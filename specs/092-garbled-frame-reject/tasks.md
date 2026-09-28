@@ -297,7 +297,7 @@ C-2 row, and the rows are one function, so the mechanism lands here with one anc
 
 ### 2b — The Text-carrying Reject builder (R-5, C-4), tests first
 
-- [ ] T016 [P] Via `phase-implementer`, write the RED cells for `build_reject_with_text` in
+- [X] T016 [P] Via `phase-implementer`, write the RED cells for `build_reject_with_text` in
   `tests/session/session_reject_test.cpp` (bucket `session_pure_tests`, label from T007), beside its
   existing `build_reject` field-shape cells.
   - A non-empty text is emitted as 58.
