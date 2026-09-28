@@ -142,7 +142,7 @@ the population snapshots, and the label manifest (plan phase 0, quickstart §0).
     = the Length tag), and the probe at 500 draws a ResendRequest (SC-001).
   - Run it: RED today, with every cell showing `probe(34=500): resend=0` (the reset applied). Commit
     with the RED output quoted.
-- [ ] T006 Measure the parse-arena ceiling (R-4, quickstart §0.3): the smallest field count at which
+- [X] T006 Measure the parse-arena ceiling (R-4, quickstart §0.3): the smallest field count at which
   a well-formed NewOrderSingle fails `Parser<Index>::parse` in `kInboundParseArena`, on each Linux
   preset the late-site cells (T038) run on (`linux-clang-debug`, and every sanitizer preset
   `/speckit-verify` runs). Use a scratch program or a throwaway test, not a committed one. Record
@@ -170,7 +170,7 @@ the population snapshots, and the label manifest (plan phase 0, quickstart §0).
   - The gate: `ctest --test-dir build/linux-clang-debug -N -L '^092$' | sed -n 's/.*Test *#[0-9]*: //p' | sort`
     equals the manifest. Positive control: before T021 and T060, the gate reports exactly those two
     names missing.
-- [ ] T008 Re-derive every command-given population at the implementation head, and record each
+- [X] T008 Re-derive every command-given population at the implementation head, and record each
   output and its classification in the evidence file §*Populations*. Each later task that consumes
   one names this section.
   - R-10 old-behaviour tests: the four `grep`/`git grep` commands of research R-10.
