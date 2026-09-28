@@ -2248,16 +2248,20 @@ TEST(UnparseableFrameDisposition, LateSite_LogonSent_ValidateGate_LogonReply_Clo
                       Target::from_admin, 1, "LogonSent validate gate");
 }
 
-// The validate gate of the LogonReceived/Active arm, on an application message at the
-// expected number. The gate runs before check_inbound.
-TEST(UnparseableFrameDisposition, LateSite_Active_ValidateGate_NewOrderSingle_Closes) {
+// The validate gate of the LogonReceived/Active arm, on a GapFill at the expected
+// number. The gate runs before check_inbound. The cell must reach no late site but the
+// gate, or a missing gate close goes unnoticed: a frame whose path past the
+// gate has a parse_and_dispatch_ call (an application message, a Heartbeat) is closed
+// there instead. To re-check the GapFill, read the GapFill branch of the
+// LogonReceived/Active arm with validate_sequence_numbers on for such a call.
+TEST(UnparseableFrameDisposition, LateSite_Active_ValidateGate_GapFill_Closes) {
     LateCell c{{.validate = true}};
     c.fix.open_to_active(*c.sess);
     if (::testing::Test::HasFatalFailure()) {
         return;
     }
-    expect_late_close(c, make_raw_frame("D", 2, kNewOrderFields + filler(kLateFillerFields)),
-                      Target::from_app, 2, "Active validate gate");
+    expect_late_close(c, make_raw_frame("4", 2, kGapFillFields + filler(kLateFillerFields)),
+                      Target::from_admin, 2, "Active validate gate");
 }
 
 // fromAdmin on a Reset-mode SequenceReset, which is handled before the seqnum check.
