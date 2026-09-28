@@ -754,7 +754,7 @@ it in 092.
   iterator yields does not change** (`scan_slice_for_tag` in `src/capi/message_read.cpp` walks group
   slices with it). Derive S0–S4/T1–T3 by reading every `done_ = true` and early `return` in
   `advance()` at the implementation head. T055 GREEN.
-- [ ] T057 Via `phase-implementer`, the validator cells (RED) in
+- [X] T057 Via `phase-implementer`, the validator cells (RED) in
   `tests/wire/field_iterator_fault_test.cpp`:
   - malformed tag: construct `MessageView<Index>` directly, assert its failed `build_status()`, then
     `validate` returns `wire_invalid_tag_number` and `*ref_tag_out` is untouched;

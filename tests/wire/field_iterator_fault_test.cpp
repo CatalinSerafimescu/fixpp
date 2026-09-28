@@ -11,20 +11,34 @@
 // expected sequence is spelled out by hand: E-4 requires the yield to stay
 // what it was before 092, so it must not be derived from the iterator under
 // test. To re-derive a row's yield, walk advance() by hand over the buffer.
+//
+// Validator cells: `dictionary_driven_validator::validate` over a view whose
+// field walk meets each fault kind, reached through the public API — a view
+// constructed directly over a malformed tag, and a view built under hooks that
+// differ from the validator's for a Length/Data mismatch — plus clean controls
+// whose view uses the validator's own hooks.
 
 #include <gtest/gtest.h>
 
 #include <cstddef>
 #include <cstdint>
+#include <fixpp/core/error.hpp>
+#include <fixpp/dict/dictionary.hpp>
+#include <fixpp/dict/field_type.hpp>
 #include <fixpp/dict/table_view.hpp>
+#include <fixpp/dict/xml_loader.hpp>
 #include <fixpp/wire/dict_hooks.hpp>
 #include <fixpp/wire/parser.hpp>
 #include <fixpp/wire/tag_scan.hpp>
+#include <fixpp/wire/validator.hpp>
+#include <memory_resource>
 #include <span>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
+
+#include "support/frame_view_factory.hpp"
 
 namespace {
 
@@ -241,4 +255,176 @@ TEST(FieldIteratorFault, FirstFaultIsKeptAcrossALaterFault) {
     // T1 first, then an S4 stop: the malformed tag stays the fault, and no
     // Length tag is recorded for the later mismatch.
     expect_all_hooks("=x|95=3|96=abcd|", {{0, "x", kTag}, {95, "3", kTag}}, kTag, 0);
+}
+
+// ── Validator cells (data-model E-5) ────────────────────────────────────────
+//
+// `validate` must not report "conformant" for a walk that met an encoding
+// fault. Each reject cell asserts the returned error and `*ref_tag_out`,
+// seeded with a sentinel no fixture carries, so "untouched" cannot pass on a
+// write of 0.
+
+namespace {
+
+using fixpp::core::error;
+using fixpp::dict::field_type;
+using fixpp::wire::dictionary_driven_validator;
+
+constexpr std::uint16_t kRefSentinel = 0xBEEF;
+
+// A whole frame around `body` ('|' for SOH). The checksum value is not
+// checked by the frame_view factory.
+std::vector<std::byte> make_frame(std::string_view body) {
+    std::string full = "8=FIX.4.4|9=" + std::to_string(body.size()) + "|";
+    full += body;
+    full += "10=000|";
+    return bytes_of(full);
+}
+
+// A failed build leaves msg_type() empty, so the validator's field walk passes
+// a field only when the dictionary names it a FIXT framing tag. Every field in
+// front of the fault in the malformed-tag fixtures is one, so the walk reaches
+// the fault.
+table_view make_framing_dict() {
+    table_view_builder b;
+    b.add_fixt_framing_tag(8, field_type::String);
+    b.add_fixt_framing_tag(9, field_type::Length);
+    b.add_fixt_framing_tag(10, field_type::String);
+    b.add_fixt_framing_tag(35, field_type::String);
+    b.add_fixt_framing_tag(49, field_type::String);
+    return std::move(b).build();
+}
+
+// A malformed tag fails `OffsetTable::build` whatever the hooks, so the view is
+// constructed directly and its failed build asserted first.
+void expect_malformed_tag_rejected(std::string_view body, error build_error) {
+    std::pmr::monotonic_buffer_resource mr;
+    auto buf = make_frame(body);
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    MessageView<access_mode::Index> const mv{*fv, &mr, dict_hooks::none()};
+    ASSERT_FALSE(mv.offsets().build_status().has_value()) << "precondition: the build fails";
+    EXPECT_EQ(mv.offsets().build_status().error(), build_error);
+
+    dictionary_driven_validator const v{make_framing_dict()};
+    std::uint16_t ref = kRefSentinel;
+    auto const r = v.validate(mv, &mr, &ref);
+    ASSERT_FALSE(r.has_value()) << "a walk that met a malformed tag reported conformant";
+    EXPECT_EQ(r.error(), error::wire_invalid_tag_number);
+    EXPECT_EQ(ref, kRefSentinel)
+        << "a malformed tag has no tag to report: RefTagID stays untouched";
+}
+
+constexpr std::string_view kPairXml = R"(<fix type='FIX' major='4' minor='4' servicepack='0'>)"
+                                      R"(<fields>)"
+                                      R"(<field number='8' name='BeginString' type='STRING'/>)"
+                                      R"(<field number='9' name='BodyLength' type='INT'/>)"
+                                      R"(<field number='10' name='CheckSum' type='STRING'/>)"
+                                      R"(<field number='35' name='MsgType' type='STRING'/>)"
+                                      R"(<field number='49' name='SenderCompID' type='STRING'/>)"
+                                      R"(<field number='95' name='RawDataLength' type='LENGTH'/>)"
+                                      R"(<field number='96' name='RawData' type='DATA'/>)"
+                                      R"(<field number='5001' name='CustomLen' type='LENGTH'/>)"
+                                      R"(<field number='5002' name='CustomData' type='DATA'/>)"
+                                      R"(</fields>)"
+                                      R"(<messages>)"
+                                      R"(<message name='TestMsg' msgtype='T' msgcat='app'>)"
+                                      R"(<field name='BeginString' required='N'/>)"
+                                      R"(<field name='BodyLength' required='N'/>)"
+                                      R"(<field name='MsgType' required='N'/>)"
+                                      R"(<field name='CheckSum' required='N'/>)"
+                                      R"(<field name='SenderCompID' required='N'/>)"
+                                      R"(<field name='RawDataLength' required='N'/>)"
+                                      R"(<field name='RawData' required='N'/>)"
+                                      R"(<field name='CustomLen' required='N'/>)"
+                                      R"(<field name='CustomData' required='N'/>)"
+                                      R"(</message>)"
+                                      R"(</messages></fix>)";
+
+table_view load_pair_dict(std::pmr::memory_resource* mr) {
+    return fixpp::dict::XmlLoader{}.load_from_string(kPairXml, mr).as_table_view();
+}
+
+// The view splits by `none()`, which does not know the dictionary-only pair, so
+// it builds; the validator walks by its own dictionary, which counts the Data
+// value and meets the mismatch.
+void expect_length_data_rejected(std::string_view body) {
+    std::pmr::monotonic_buffer_resource mr;
+    auto tv = load_pair_dict(&mr);
+    ASSERT_EQ(tv.length_pair_data_tag(5001), 5002U) << "precondition: the custom pair registered";
+    auto buf = make_frame(body);
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    MessageView<access_mode::Index> const mv{*fv, &mr, dict_hooks::none()};
+    ASSERT_TRUE(mv.offsets().build_status().has_value()) << "precondition: the build succeeds";
+
+    dictionary_driven_validator const v{tv};
+    std::uint16_t ref = kRefSentinel;
+    auto const r = v.validate(mv, &mr, &ref);
+    ASSERT_FALSE(r.has_value()) << "a walk that met a Length/Data mismatch reported conformant";
+    EXPECT_EQ(r.error(), error::wire_length_data_mismatch);
+    EXPECT_EQ(ref, 5001U) << "RefTagID must be the Length tag";
+}
+
+// Well-formed: the view uses the validator's own hooks.
+void expect_clean(std::string_view body) {
+    std::pmr::monotonic_buffer_resource mr;
+    auto tv = load_pair_dict(&mr);
+    ASSERT_EQ(tv.length_pair_data_tag(5001), 5002U) << "precondition: the custom pair registered";
+    auto buf = make_frame(body);
+    auto fv = fixpp::wire::test::make_frame_view(buf);
+    ASSERT_TRUE(fv.has_value());
+    MessageView<access_mode::Index> const mv{*fv, &mr, dict_hooks::for_table_view(tv)};
+    ASSERT_TRUE(mv.offsets().build_status().has_value()) << "precondition: the build succeeds";
+
+    dictionary_driven_validator const v{tv};
+    std::uint16_t ref = kRefSentinel;
+    auto const r = v.validate(mv, &mr, &ref);
+    EXPECT_TRUE(r.has_value()) << "a well-formed message was rejected";
+    EXPECT_EQ(ref, kRefSentinel);
+}
+
+}  // namespace
+
+// ── Malformed tag: E-4 S1–S3 stop the walk ──────────────────────────────────
+
+TEST(ValidatorFieldFault, MalformedTag_S1_NonDigitTagByte) {
+    expect_malformed_tag_rejected("35=T|4x=1|49=S|", error::wire_invalid_field_format);
+}
+
+TEST(ValidatorFieldFault, MalformedTag_S2_TagAbove0xFFFF) {
+    expect_malformed_tag_rejected("35=T|65536=1|49=S|", error::wire_tag_out_of_range);
+}
+
+TEST(ValidatorFieldFault, MalformedTag_S3_NoEqualsBeforeSoh) {
+    expect_malformed_tag_rejected("35=T|49|49=S|", error::wire_invalid_field_format);
+}
+
+// T1: the empty tag is yielded as tag 0. The fault check runs before the field
+// checks, so it is not reported as an unexpected tag.
+TEST(ValidatorFieldFault, MalformedTag_T1_EmptyTagIsNotUnexpectedTag) {
+    expect_malformed_tag_rejected("35=T|=x|49=S|", error::wire_invalid_field_format);
+}
+
+// ── Length/Data: built under none(), validated under the dictionary's pair ──
+
+TEST(ValidatorFieldFault, LengthData_S4_CountNotFollowedBySoh) {
+    expect_length_data_rejected("35=T|5001=3|5002=abcd|49=S|");
+}
+
+TEST(ValidatorFieldFault, LengthData_T2_CountPastTheEnd) {
+    expect_length_data_rejected("35=T|5001=99|5002=ab|49=S|");
+}
+
+TEST(ValidatorFieldFault, LengthData_T3_CountReachingTheEndExactly) {
+    // The count covers "ab|49=S|10=000|", the rest of the frame.
+    expect_length_data_rejected("35=T|5001=15|5002=ab|49=S|");
+}
+
+// ── Clean controls ──────────────────────────────────────────────────────────
+
+TEST(ValidatorFieldFault, CleanStandardPairIsConformant) { expect_clean("35=T|95=3|96=a|c|49=S|"); }
+
+TEST(ValidatorFieldFault, CleanDictionaryOnlyPairIsConformant) {
+    expect_clean("35=T|5001=3|5002=a|c|49=S|");
 }
