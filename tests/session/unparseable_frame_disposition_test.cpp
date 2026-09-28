@@ -72,6 +72,11 @@
 // pinned per site (contract C-5 L-6). The section comment above LateKnobs states each
 // cell.
 //
+// ScriptedPeer_* (tasks.md T041; spec SC-007): a scripted peer that handles fixpp's
+// Rejects and ResendRequests as QuickFIX does sends a malformed application message
+// too high; the resend converges and every later message is delivered. The section
+// comment above ClOrdIdApplication states the script and the QuickFIX sources.
+//
 // Anchors: specs/092-garbled-frame-reject/spec.md SC-001, FR-007;
 //          contracts/unparseable-frame-disposition.md C-2 (D-4) and its Reject contents;
 //          fixpp#507 (the T076 table and reproducer).
@@ -90,6 +95,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <deque>
 #include <filesystem>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
@@ -109,6 +115,8 @@
 #include <fixpp/session/session_fsm.hpp>
 #include <fixpp/wire/offset_table.hpp>
 #include <future>
+#include <limits>
+#include <map>
 #include <memory>
 #include <memory_resource>
 #include <span>
@@ -2384,6 +2392,210 @@ TEST(UnparseableFrameDisposition, LateSite_Control_BelowCeiling_ValidateGate_Par
     EXPECT_TRUE(c.sess->is_open()) << "control: the session stays open";
     EXPECT_EQ(c.sess->state(), fsm_state::Active) << "control: state after the frame";
     EXPECT_EQ(c.app->from_app, app_before) << "control: a rejected message is not delivered";
+}
+
+// ── ScriptedPeer_* (tasks.md T041; spec SC-007; quickstart §2 "Scripted peer") ──
+//
+// An in-process peer drives an Active fixpp initiator (NextNumIn 2 after the peer's
+// Logon). The peer's store holds a well-formed NewOrderSingle at 2 that never reaches
+// fixpp, then the raw malformed NewOrderSingle at 3 (a malformed tag after every field
+// a handler reads), so the malformed frame arrives too high and a gap forms. Each
+// later scripted message is a well-formed NewOrderSingle at the next number, sent only
+// once everything already queued has been fed. The ClOrdID(11) of each is ORD<34>.
+//
+// The peer handles each frame fixpp sends as QuickFIX does:
+//   - a Reject(35=3): QuickFIX/J quickfix/Session.java Session.nextReject and
+//     QuickFIX C++ src/C++/Session.cpp Session::nextReject run verify(reject, false,
+//     true), which checks too-low but not too-high, then advance the peer's expected
+//     number: QuickFIX/J only when the Reject carries it, QuickFIX C++ whenever verify
+//     passes. The two agree when the Reject is in sequence, so the peer asserts that
+//     every frame fixpp sends is in sequence.
+//   - a ResendRequest(35=2): QuickFIX/J Session.resendMessages and QuickFIX C++
+//     Session::generateRetransmits / Session::resend resend each stored application
+//     message with PossDupFlag(43)=Y and OrigSendingTime(122) set to its SendingTime.
+//     The peer replays its stored bytes verbatim with those two fields inserted after
+//     MsgSeqNum(34), so both precede the fault. SendingTime(52) is left as stored: the
+//     mock clock does not move, and 122 must not exceed 52. QuickFIX/J gap-fills a
+//     stored message it cannot parse; the peer replays the malformed bytes instead, so
+//     fixpp meets them again at the expected number.
+//
+// The run converges when the queue drains with the script exhausted. The loop is
+// bounded by an iteration cap derived from the script: a converging run feeds each
+// scripted frame once plus at most one replay of the whole store per scripted frame,
+// so a run that reaches the cap is still being asked to resend.
+//
+// Every observation is non-fatal, so each clause reports.
+
+// Records the ClOrdID(11) of every fromApp delivery, in order.
+class ClOrdIdApplication final : public Application {
+public:
+    std::vector<std::string> delivered;
+    int from_admin = 0;
+
+    fixpp::core::expected_t<void> fromAdmin(
+        const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
+        const SessionId& /*id*/) override {
+        ++from_admin;
+        return {};
+    }
+    fixpp::core::expected_t<void> fromApp(
+        const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg,
+        const SessionId& /*id*/) override {
+        auto const fv = msg.get(11);
+        delivered.emplace_back(fv ? std::string{fv->as_string()} : std::string{"<no 11>"});
+        return {};
+    }
+};
+
+std::string as_text(std::span<const std::byte> frame) {
+    return {reinterpret_cast<const char*>(frame.data()), frame.size()};
+}
+
+// The stored frame with PossDupFlag(43)=Y and OrigSendingTime(122) = its
+// SendingTime(52) inserted after MsgSeqNum(34), re-wrapped so BodyLength(9) and
+// CheckSum(10) match.
+std::vector<std::byte> with_poss_dup(std::vector<std::byte> const& stored) {
+    std::string const wire = as_text(stored);
+    std::string const soh{"\x01"};
+    auto const body_begin = wire.find(soh, wire.find(soh + "9=") + 1) + 1;
+    auto const body_end = wire.rfind(soh + "10=") + 1;
+    std::string body = wire.substr(body_begin, body_end - body_begin);
+    auto const after_34 = body.find(soh, body.find("34=")) + 1;
+    body.insert(after_34, "43=Y" + soh + "122=" + extract_tag(stored, 52) + soh);
+    return wrap_body(body);
+}
+
+struct ScriptedPeer {
+    std::map<std::uint32_t, std::vector<std::byte>> store;  // the peer's sent frames
+    std::deque<std::vector<std::byte>> wire;                // queued for fixpp, in order
+    std::uint32_t expected_from_fixpp = 2;                  // after fixpp's Logon at 1
+    std::vector<std::string> out_of_sequence;               // fixpp frames not at it
+
+    struct RejectSeen {
+        std::string ref_seq;   // 45
+        bool drawn_by_replay;  // the frame fed before it carried 43=Y
+        std::vector<std::byte> frame;
+    };
+    std::vector<RejectSeen> rejects;
+    std::vector<std::pair<std::string, std::string>> resend_requests;  // 7, 16
+
+    // Stores a frame the peer sends, whether or not it reaches fixpp.
+    void sent(std::vector<std::byte> const& frame) {
+        store[static_cast<std::uint32_t>(std::stoul(extract_tag(frame, 34)))] = frame;
+    }
+
+    // One frame fixpp sent, in reply to `fed`.
+    void on_fixpp_frame(std::vector<std::byte> const& frame, std::vector<std::byte> const& fed) {
+        std::string const type = extract_tag(frame, 35);
+        std::string const seq_text = extract_tag(frame, 34);
+        if (seq_text != std::to_string(expected_from_fixpp)) {
+            out_of_sequence.push_back("35=" + type + " 34=" + seq_text + " (expected " +
+                                      std::to_string(expected_from_fixpp) + ")");
+        } else {
+            ++expected_from_fixpp;
+        }
+        if (type == "3") {
+            rejects.push_back({.ref_seq = extract_tag(frame, 45),
+                               .drawn_by_replay = extract_tag(fed, 43) == "Y",
+                               .frame = frame});
+        } else if (type == "2") {
+            std::string const begin = extract_tag(frame, 7);
+            std::string const end = extract_tag(frame, 16);
+            resend_requests.emplace_back(begin, end);
+            auto const from = static_cast<std::uint32_t>(std::stoul(begin));
+            auto const to = end == "0" ? std::numeric_limits<std::uint32_t>::max()
+                                       : static_cast<std::uint32_t>(std::stoul(end));
+            for (auto it = store.lower_bound(from); it != store.end() && it->first <= to; ++it) {
+                wire.push_back(with_poss_dup(it->second));
+            }
+        }
+    }
+};
+
+TEST(UnparseableFrameDisposition, ScriptedPeer_MalformedTooHigh_ResendConverges_NoStall) {
+    DispositionFixture fix;
+    auto const app = std::make_shared<ClOrdIdApplication>();
+    fix.engine.application = app;
+    Session sess{fix.engine, fix.make_cfg(/*validate=*/false)};
+    fix.open_to_active(sess);
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+
+    auto const order = [](std::uint32_t seq, std::string const& garble = {}) {
+        return make_raw_frame("D", seq, "11=ORD" + std::to_string(seq) + "\x01" + garble);
+    };
+    ScriptedPeer peer;
+    peer.sent(order(2));  // lost in transit: stored, never fed to fixpp
+    std::vector<std::vector<std::byte>> script;
+    script.push_back(order(3, kMalformedTag));
+    for (std::uint32_t seq = 4; seq <= 7; ++seq) {
+        script.push_back(order(seq));
+    }
+
+    // The store never holds more than the lost frame and the scripted ones.
+    std::size_t const cap = script.size() * (1 + 1 + script.size());
+    std::size_t next = 0;
+    std::size_t fed = 0;
+    while (fed < cap && sess.state() == fsm_state::Active) {
+        if (peer.wire.empty()) {
+            if (next == script.size()) {
+                break;
+            }
+            peer.sent(script[next]);
+            peer.wire.push_back(script[next++]);
+        }
+        auto const frame = peer.wire.front();
+        peer.wire.pop_front();
+        fix.feed(sess, frame);
+        ++fed;
+        for (auto const& out : fix.transport.sent_frames()) {
+            peer.on_fixpp_frame(out, frame);
+        }
+    }
+
+    bool const drained = peer.wire.empty() && next == script.size();
+    EXPECT_TRUE(drained) << "the scripted run must drain before the iteration cap (" << cap
+                         << "); fed " << fed << ", queued " << peer.wire.size()
+                         << ", scripted left " << (script.size() - next) << ", ResendRequests "
+                         << peer.resend_requests.size();
+    EXPECT_EQ(sess.state(), fsm_state::Active) << "state after the scripted run";
+
+    std::string oos;
+    for (auto const& o : peer.out_of_sequence) {
+        oos += " [" + o + "]";
+    }
+    EXPECT_TRUE(peer.out_of_sequence.empty())
+        << "every frame fixpp sends must carry the peer's expected number; out of sequence:" << oos;
+
+    std::string resends;
+    for (auto const& [b, e] : peer.resend_requests) {
+        resends += " [7=" + b + " 16=" + e + "]";
+    }
+    EXPECT_EQ(peer.resend_requests.size(), 1U)
+        << "one ResendRequest closes the gap; a second means the replay was refused again:"
+        << resends;
+    if (!peer.resend_requests.empty()) {
+        EXPECT_EQ(peer.resend_requests.front().first, "2") << "ResendRequest BeginSeqNo(7)";
+    }
+
+    EXPECT_EQ(peer.rejects.size(), 2U)
+        << "one Reject for the raw malformed frame and one for its PossDup replay";
+    if (peer.rejects.size() == 2U) {
+        EXPECT_FALSE(peer.rejects[0].drawn_by_replay) << "the first Reject answers the raw frame";
+        EXPECT_TRUE(peer.rejects[1].drawn_by_replay) << "the second Reject answers the replay";
+    }
+    for (auto const& r : peer.rejects) {
+        EXPECT_EQ(r.ref_seq, "3") << "Reject RefSeqNum(45)";
+        EXPECT_EQ(extract_tag(r.frame, 372), "D") << "Reject RefMsgType(372)";
+        EXPECT_EQ(extract_tag(r.frame, 373), "0") << "Reject SessionRejectReason(373)";
+        EXPECT_FALSE(has_field(r.frame, "371=")) << "Reject must carry no RefTagID(371)";
+        EXPECT_EQ(extract_tag(r.frame, 58), kTextMalformedTag) << "Reject Text(58)";
+    }
+
+    std::vector<std::string> const want{"ORD2", "ORD4", "ORD5", "ORD6", "ORD7"};
+    EXPECT_EQ(app->delivered, want)
+        << "every well-formed message is delivered once, in order, and the malformed one never";
 }
 }  // namespace
 }  // namespace fixpp::session::test

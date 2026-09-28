@@ -587,7 +587,7 @@ Reject (45=N) and is not delivered; the second is delivered with no ResendReques
   - T038 GREEN.
 - [X] T040 [US2] For each T038 cell, delete that site's close in a scratch copy and show the cell RED
   (SC-008). Record each site and its RED in the evidence file.
-- [ ] T041 [US2] Via `phase-implementer`, the SC-007 scripted peer in
+- [X] T041 [US2] Via `phase-implementer`, the SC-007 scripted peer in
   `tests/session/unparseable_frame_disposition_test.cpp` (quickstart §2 "Scripted peer"). The
   in-process peer:
   - sends one raw malformed application frame at a too-high MsgSeqNum, so a gap forms;
