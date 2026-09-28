@@ -452,7 +452,7 @@ as a pin or control in its test comment.
   Active-only block). And the SC-003 pairs: each non-Logon, non-SequenceReset faulty frame followed
   by a conformant message at N+1 delivers it with no ResendRequest; the SequenceReset pair draws a
   ResendRequest.
-- [ ] T029 [US1] Via `phase-implementer`, the D-6 edge cells in
+- [X] T029 [US1] Via `phase-implementer`, the D-6 edge cells in
   `tests/session/unparseable_frame_disposition_test.cpp`, in Active and in LogonReceived: faulty frames at too-low and too-high 34,
   each with and without PossDupFlag(43)=Y. Each draws a Reject, no advance, no ResendRequest and no
   too-low Logout. A faulty frame carrying a wrong CompID before the fault draws a Reject only, no

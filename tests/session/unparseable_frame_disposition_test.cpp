@@ -38,6 +38,10 @@
 // LogonReceived, one faulty frame per MsgType row draws exactly one Reject, and the
 // next conformant frame shows whether NextNumIn advanced.
 //
+// D6Edge_*, WrongCompIdBeforeFault_*, TwoMalformedFields_* (tasks.md T029; spec
+// clarification Q2): the D-6 edges, an identity field read before the fault, and a
+// frame whose first fault decides the reason.
+//
 // ReplayGuard_* (tasks.md T015; research R-12): the resend store walk classifies a
 // stored frame by the header scan's MsgType. The scan stops at its first fault, so
 // a stored admin frame with a fault before its 35 scans with no MsgType; such a
@@ -1085,6 +1089,78 @@ TEST(UnparseableFrameDisposition, Matrix_LogonReceived_ResendRequest) {
 }
 TEST(UnparseableFrameDisposition, Matrix_LogonReceived_NewOrderSingle) {
     run_expected_n_cell(At::logon_received, "D", kOrderFields, kTagShape);
+}
+
+// ── D6Edge_*, WrongCompId*, TwoMalformedFields_* (tasks.md T029; contract C-2
+// D-5, D-6; spec clarification Q2) ──────────────────────────────────────────────
+//
+// D-6: a faulty NewOrderSingle below (34=1) or above (34=5) N=2, with and without
+// PossDupFlag(43)=Y and an OrigSendingTime(122), both before the fault. The Reject is
+// its only outbound frame (no ResendRequest, no too-low Logout), the state is
+// unchanged, and the conformant Heartbeat at 2 is then in sequence (no advance).
+
+TEST(UnparseableFrameDisposition, D6Edge_Active_TooLow) {
+    run_not_expected_cell(At::active, "D", 1, kOrderFields, kTagShape, "at N-1");
+}
+TEST(UnparseableFrameDisposition, D6Edge_Active_TooLow_PossDup) {
+    run_not_expected_cell(At::active, "D", 1, kPossDupFields + kOrderFields, kTagShape,
+                          "at N-1, 43=Y");
+}
+TEST(UnparseableFrameDisposition, D6Edge_Active_TooHigh) {
+    run_not_expected_cell(At::active, "D", 5, kOrderFields, kTagShape, "at N+3");
+}
+TEST(UnparseableFrameDisposition, D6Edge_Active_TooHigh_PossDup) {
+    run_not_expected_cell(At::active, "D", 5, kPossDupFields + kOrderFields, kTagShape,
+                          "at N+3, 43=Y");
+}
+TEST(UnparseableFrameDisposition, D6Edge_LogonReceived_TooLow) {
+    run_not_expected_cell(At::logon_received, "D", 1, kOrderFields, kTagShape, "at N-1");
+}
+TEST(UnparseableFrameDisposition, D6Edge_LogonReceived_TooLow_PossDup) {
+    run_not_expected_cell(At::logon_received, "D", 1, kPossDupFields + kOrderFields, kTagShape,
+                          "at N-1, 43=Y");
+}
+TEST(UnparseableFrameDisposition, D6Edge_LogonReceived_TooHigh) {
+    run_not_expected_cell(At::logon_received, "D", 5, kOrderFields, kTagShape, "at N+3");
+}
+TEST(UnparseableFrameDisposition, D6Edge_LogonReceived_TooHigh_PossDup) {
+    run_not_expected_cell(At::logon_received, "D", 5, kPossDupFields + kOrderFields, kTagShape,
+                          "at N+3, 43=Y");
+}
+
+// Clarification Q2: a SenderCompID(49) the session does not expect, read before the
+// fault, is not acted on. The frame is at N=2, so it is D-5: the Reject, no Logout and
+// no disconnect, then the conformant Heartbeat at 3 is in sequence.
+TEST(UnparseableFrameDisposition, WrongCompIdBeforeFault_RejectOnly) {
+    StateCell c{At::active};
+    c.enter();
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    feed_faulty(
+        c,
+        wrap_body(std::string{"35=D\x01"} + "34=2\x01" + "49=WRONG\x01" +
+                  "52=20240101-00:00:00.000\x01" + "56=ISLD\x01" + kOrderFields + kMalformedTag),
+        want_reject("2", "D", kTagShape), "wrong 49 before the fault");
+    expect_heartbeat_in_sequence(c.fix, *c.sess, *c.app, 3,
+                                 "wrong 49 before the fault (NextNumIn advanced)");
+}
+
+// Two malformed fields: the first one decides 373 and 371. Both orders run, so a
+// last-fault-wins record fails one of them.
+TEST(UnparseableFrameDisposition, TwoMalformedFields_LengthDataFirst) {
+    Shape const both{.garble = kMalformedCount + kMalformedTag,
+                     .reason = "5",
+                     .ref_tag = "90",
+                     .text = kTextLengthDataMismatch};
+    run_expected_n_cell(At::active, "D", kOrderFields, both);
+}
+TEST(UnparseableFrameDisposition, TwoMalformedFields_MalformedTagFirst) {
+    Shape const both{.garble = kMalformedTag + kMalformedCount,
+                     .reason = "0",
+                     .ref_tag = {},
+                     .text = kTextMalformedTag};
+    run_expected_n_cell(At::active, "D", kOrderFields, both);
 }
 
 }  // namespace
