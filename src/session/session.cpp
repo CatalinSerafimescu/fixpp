@@ -295,10 +295,15 @@ void Session::emit_event(SessionEvent ev) noexcept {
 //   kInboundParseArena = 16384: inbound/app frames may carry arbitrary payload; 16 KiB
 //     provides headroom for larger messages without heap fallback.
 //
-// On parse failure (Framer or Parser): returns expected_t<void>{} — skip callback,
-// not fatal.  This matches every call site's existing disposition.
+// On parse failure (Framer or Parser): returns dispatch_outcome::parse_failed and
+// the callback does not run. Every late inbound site (a call over bytes received
+// from the peer) treats it as terminal through close_on_late_parse_failure_; the
+// sites that parse a frame fixpp built ignore it. Superseded decision: a parse
+// failure used to return success, "skip, not fatal", read by every caller as a
+// delivered frame; 092-garbled-frame-reject contract C-6 (owner ruling O-2)
+// replaced it. Re-derive the late sites with contract C-6's command.
 // [const §VIII.5] (stack-only — no heap between parse and callback)
-// [019-app-callbacks T011/T013/T014/T016]
+// [019-app-callbacks T011/T013/T014/T016; 092 data-model E-3, contract C-6]
 
 namespace {
 constexpr std::size_t kAdminParseArena = 8192;     // admin frames: bounded small
@@ -306,7 +311,7 @@ constexpr std::size_t kInboundParseArena = 16384;  // inbound/app: larger payloa
 }  // namespace
 
 template <class CB>
-[[nodiscard]] fixpp::core::expected_t<void> Session::parse_and_dispatch_(
+[[nodiscard]] fixpp::core::expected_t<Session::dispatch_outcome> Session::parse_and_dispatch_(
     std::span<const std::byte> frame, std::size_t arena_bytes, CB&& cb) noexcept {
     // Stack parse arena ([const §VIII.5] — no heap).
     // arena_bytes is caller-supplied so the size choice is explicit at each site.
@@ -323,7 +328,7 @@ template <class CB>
     fixpp::wire::Framer pd_framer;
     std::array<fixpp::wire::frame_view, 1> pd_out{};
     auto feed_r = pd_framer.feed(frame, carry, std::span<fixpp::wire::frame_view>{pd_out});
-    if (!feed_r || feed_r->empty()) return fixpp::core::expected_t<void>{};  // parse error — skip
+    if (!feed_r || feed_r->empty()) return dispatch_outcome::parse_failed;
 
     // 066-dict-backed-inbound-parse T006: dict-backed parse — inbound_tv_ is
     // GUARANTEED (see hpp comment above the member + Session::open()): both
@@ -335,13 +340,27 @@ template <class CB>
     fixpp::wire::Parser<fixpp::wire::access_mode::Index> pd_parser{
         fixpp::wire::detail::owned_route_key{}, inbound_tv_};
     auto mv_r = pd_parser.parse((*feed_r)[0], &pa_mr);
-    if (!mv_r) return fixpp::core::expected_t<void>{};  // parse error — skip
+    if (!mv_r) return dispatch_outcome::parse_failed;
 
     const SessionId sid = SessionId::from_config(cfg_);
     callback_dispatch_scope cs{*this};
     auto result = invoke_callback_safe([&]() { return std::forward<CB>(cb)(*mv_r, sid); });
     (void)cs;
-    return result;
+    if (!result) return std::unexpected(result.error());
+    return dispatch_outcome::dispatched;
+}
+
+// ── 092-garbled-frame-reject: close_on_late_parse_failure_ ───────────────────
+//
+// Contract C-6: the one action at every late inbound parse site whose parse
+// failed. Terminal close; no Reject, no Logout; the caller returns this result
+// without invoking the receive callback. Returns success, as the session's other
+// Disconnected paths do: the close is the outcome, and run_read_pump's own later
+// close is idempotent.
+// [092 data-model E-3; contract C-6; research R-4; spec FR-016]
+asio::awaitable<fixpp::core::expected_t<void>> Session::close_on_late_parse_failure_() noexcept {
+    (void)co_await close(close_mode::terminal);
+    co_return fixpp::core::expected_t<void>{};
 }
 
 // ── 019 T014 — fire_to_admin_ ─────────────────────────────────────────────────
@@ -2216,19 +2235,23 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
 // Active and LogonSent arms). Each block built the same kInboundParseArena
 // stack arena, re-framed, parsed, ran validator_->validate, and emitted a Reject.
 // Now collapsed here; emit_session_reject_ is inlined at each call site so the
-// PASS path (returns nullopt) is coroutine-frame-free and alloc-free.
+// PASS path (returns validate_outcome::pass) is coroutine-frame-free and alloc-free.
 //
-// Returns nullopt when validation passes (or is inapplicable: framer/parse fail).
-// Returns optional{RejectDecision} when a violation is found; caller emits:
+// Returns validate_outcome::pass when validation passes.
+// Returns validate_outcome::reject when a violation is found; caller emits:
 //   co_return co_await emit_session_reject_(
-//       parse_seqnum(hdr.msg_seq_num), hdr.msg_type, rej->reason, rej->ref_tag_id);
+//       parse_seqnum(hdr.msg_seq_num), hdr.msg_type, v.reject.reason, v.reject.ref_tag_id);
+// Returns validate_outcome::parse_failed when the re-frame or the parse fails; the
+// caller closes the session through close_on_late_parse_failure_ (092 contract C-6).
+// Superseded decision: that case used to return nullopt, read by every caller as
+// "validation passes"; 092-garbled-frame-reject (owner ruling O-2) replaced it.
 //
 // SYNCHRONOUS — no co_await anywhere. All arenas are stack-local.
 // PRECONDITIONS (callers guard):
 //   • cfg_.validate_inbound_messages && validator_ must hold
 //   • hdr.msg_type != "3" && hdr.msg_type != "5" (FR-004 no-reject-loop)
 // [041 T014; data-model E-4; SC-005; simplify-triage FIX-1/FIX-2; const §VIII.5]
-std::optional<Session::RejectDecision> Session::validate_inbound_(
+Session::InboundValidation Session::validate_inbound_(
     std::span<const std::byte> frame,
     fixpp::session::detail::FrameHeader const& /*hdr*/) const noexcept {
     std::array<std::byte, kInboundParseArena> vg_buf{};
@@ -2242,7 +2265,7 @@ std::optional<Session::RejectDecision> Session::validate_inbound_(
     std::array<fixpp::wire::frame_view, 1> vg_out{};
     auto vg_feed = vg_framer.feed(frame, vg_carry, std::span<fixpp::wire::frame_view>{vg_out});
     if (!vg_feed || vg_feed->empty()) {
-        return std::nullopt;
+        return {.outcome = validate_outcome::parse_failed};
     }
     // fixpp#426 (design §3, item 10): dict-backed over the same table_view
     // the validator holds a copy of, so the OffsetTable this parse builds
@@ -2259,15 +2282,16 @@ std::optional<Session::RejectDecision> Session::validate_inbound_(
                                                       ::fixpp::detail::arena_upstream()};
     auto vg_mv_r = vg_parser.parse((*vg_feed)[0], &vg_mr);
     if (!vg_mv_r) {
-        return std::nullopt;
+        return {.outcome = validate_outcome::parse_failed};
     }
     std::uint16_t vg_ref_tag = 0;
     auto val_r = validator_->validate(*vg_mv_r, &vg_scratch_mr, &vg_ref_tag);
     if (!val_r) {
         const int vg_reason = fixpp::wire::wire_error_to_session_reject_reason(val_r.error());
-        return RejectDecision{.reason = vg_reason, .ref_tag_id = vg_ref_tag};
+        return {.outcome = validate_outcome::reject,
+                .reject = RejectDecision{.reason = vg_reason, .ref_tag_id = vg_ref_tag}};
     }
-    return std::nullopt;
+    return {.outcome = validate_outcome::pass};
 }
 
 // ── 013 T036 US2 — Logon-time CompID authorization helpers ───────────────────
@@ -2445,10 +2469,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // never under-parses relative to dispatch. [simplify-triage FIX-1/FIX-2]
             if (cfg_.validate_inbound_messages && validator_) {
                 if (hdr.msg_type != "3" && hdr.msg_type != "5") {
-                    if (auto rej = validate_inbound_(frame, hdr)) {
+                    auto const v = validate_inbound_(frame, hdr);
+                    // 092 contract C-6: a late parse failure closes the session.
+                    if (v.outcome == validate_outcome::parse_failed) {
+                        co_return co_await close_on_late_parse_failure_();
+                    }
+                    if (v.outcome == validate_outcome::reject) {
                         co_return co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num),
-                                                                hdr.msg_type, rej->reason,
-                                                                rej->ref_tag_id);
+                                                                hdr.msg_type, v.reject.reason,
+                                                                v.reject.ref_tag_id);
                     }
                 }
             }
@@ -3099,13 +3128,19 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // Arena: kInboundParseArena (16384) matches the dispatch arena. [FIX-1/FIX-2]
             if (cfg_.validate_inbound_messages && validator_) {
                 if (hdr.msg_type != "3" && hdr.msg_type != "5") {
-                    if (auto rej = validate_inbound_(frame, hdr)) {
+                    auto const v = validate_inbound_(frame, hdr);
+                    // 092 contract C-6: a late parse failure closes the session; the
+                    // number is not consumed.
+                    if (v.outcome == validate_outcome::parse_failed) {
+                        co_return co_await close_on_late_parse_failure_();
+                    }
+                    if (v.outcome == validate_outcome::reject) {
                         const seqnum_t rej_seq = parse_seqnum(hdr.msg_seq_num);
                         if (auto c = co_await consume_rejected_seqnum_(rej_seq, hdr.msg_type); !c) {
                             co_return c;
                         }
-                        co_return co_await emit_session_reject_(rej_seq, hdr.msg_type, rej->reason,
-                                                                rej->ref_tag_id);
+                        co_return co_await emit_session_reject_(
+                            rej_seq, hdr.msg_type, v.reject.reason, v.reject.ref_tag_id);
                     }
                 }
             }
@@ -3243,6 +3278,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         parse_and_dispatch_(frame, kInboundParseArena, [&](auto& mv, auto& sid) {
                             return engine_.application->fromAdmin(mv, sid);
                         });
+                    // 092 contract C-6: a late parse failure closes the session.
+                    if (cb_r && *cb_r == dispatch_outcome::parse_failed) {
+                        co_return co_await close_on_late_parse_failure_();
+                    }
                     if (!cb_r && cb_r.error() == fixpp::core::error::app_callback_threw) {
                         (void)co_await close(close_mode::terminal);
                         co_return std::unexpected(cb_r.error());
@@ -3578,6 +3617,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                 frame, kInboundParseArena, [&](auto& mv, auto& sid) {
                                     return engine_.application->fromApp(mv, sid);
                                 });
+                            // 092 contract C-6: a late parse failure closes the session.
+                            if (cb_r && *cb_r == dispatch_outcome::parse_failed) {
+                                co_return co_await close_on_late_parse_failure_();
+                            }
                             if (!cb_r) {
                                 if (cb_r.error() == fixpp::core::error::app_callback_threw) {
                                     (void)co_await close(close_mode::terminal);
@@ -3607,6 +3650,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                     return admin ? engine_.application->fromAdmin(mv, sid)
                                                  : engine_.application->fromApp(mv, sid);
                                 });
+                            // 092 contract C-6: a late parse failure closes the session.
+                            if (cb_r && *cb_r == dispatch_outcome::parse_failed) {
+                                co_return co_await close_on_late_parse_failure_();
+                            }
                             if (!cb_r && cb_r.error() == fixpp::core::error::app_callback_threw) {
                                 (void)co_await close(close_mode::terminal);
                                 co_return std::unexpected(cb_r.error());
@@ -3644,6 +3691,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             frame, kInboundParseArena, [&](auto& mv, auto& sid) {
                                 return engine_.application->fromAdmin(mv, sid);
                             });
+                        // 092 contract C-6: a late parse failure closes the session.
+                        if (cb_r && *cb_r == dispatch_outcome::parse_failed) {
+                            co_return co_await close_on_late_parse_failure_();
+                        }
                         if (!cb_r && cb_r.error() == fixpp::core::error::app_callback_threw) {
                             (void)co_await close(close_mode::terminal);
                             co_return std::unexpected(cb_r.error());
@@ -3741,6 +3792,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         parse_and_dispatch_(frame, kInboundParseArena, [&](auto& mv, auto& sid) {
                             return engine_.application->fromAdmin(mv, sid);
                         });
+                    // 092 contract C-6: a late parse failure closes the session.
+                    if (cb_r && *cb_r == dispatch_outcome::parse_failed) {
+                        co_return co_await close_on_late_parse_failure_();
+                    }
                     if (!cb_r && cb_r.error() == fixpp::core::error::app_callback_threw) {
                         // throw from fromAdmin on Logout path: terminal close.
                         // onLogout will still fire in record_state_transition_ below.
@@ -3840,6 +3895,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         parse_and_dispatch_(frame, kInboundParseArena, [&](auto& mv, auto& sid) {
                             return engine_.application->fromAdmin(mv, sid);
                         });
+                    // 092 contract C-6: a late parse failure closes the session.
+                    if (cb_r && *cb_r == dispatch_outcome::parse_failed) {
+                        co_return co_await close_on_late_parse_failure_();
+                    }
                     if (!cb_r) {
                         if (cb_r.error() == fixpp::core::error::app_callback_threw) {
                             (void)co_await close(close_mode::terminal);
@@ -4040,6 +4099,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     auto cb_r = parse_and_dispatch_(
                         frame, kInboundParseArena,
                         [&](auto& mv, auto& sid) { return engine_.application->fromApp(mv, sid); });
+                    // 092 contract C-6: a late parse failure closes the session.
+                    if (cb_r && *cb_r == dispatch_outcome::parse_failed) {
+                        co_return co_await close_on_late_parse_failure_();
+                    }
                     if (!cb_r) {
                         if (cb_r.error() == fixpp::core::error::app_callback_threw) {
                             (void)co_await close(close_mode::terminal);
@@ -4101,8 +4164,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             }
                         }
                     }
-                    // If parse fails (cb_r == ok from parse_and_dispatch_):
-                    // frame accepted for seqnum; session stays Active.
                 }
             }
 
@@ -4182,10 +4243,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // [041 T014; data-model E-4; contracts/validation-gate.md C-2/C-3]
             if (cfg_.validate_inbound_messages && validator_) {
                 if (hdr.msg_type != "3" && hdr.msg_type != "5") {
-                    if (auto rej = validate_inbound_(frame, hdr)) {
+                    auto const v = validate_inbound_(frame, hdr);
+                    // 092 contract C-6: a late parse failure closes the session.
+                    if (v.outcome == validate_outcome::parse_failed) {
+                        co_return co_await close_on_late_parse_failure_();
+                    }
+                    if (v.outcome == validate_outcome::reject) {
                         co_return co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num),
-                                                                hdr.msg_type, rej->reason,
-                                                                rej->ref_tag_id);
+                                                                hdr.msg_type, v.reject.reason,
+                                                                v.reject.ref_tag_id);
                     }
                 }
             }

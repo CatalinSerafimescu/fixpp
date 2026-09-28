@@ -572,7 +572,7 @@ Reject (45=N) and is not delivered; the second is delivered with no ResendReques
     `GTEST_SKIP()` and a message naming the reason; never a hand-written platform check. If T006
     found an offset-table-cap trigger (`wire_offset_table_full`) that fails the parse on every
     platform, use it instead and drop the guard.
-- [ ] T039 [US2] Via `phase-implementer`, implement the late-site close (E-3, C-6) in
+- [X] T039 [US2] Via `phase-implementer`, implement the late-site close (E-3, C-6) in
   `src/session/session.cpp`.
   - `parse_and_dispatch_` gains a private way to say "the parse failed and the receive callback did
     not run" (a private result enum, or a private sentinel `core::error` that never leaves the
