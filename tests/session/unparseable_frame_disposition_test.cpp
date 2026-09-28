@@ -425,9 +425,9 @@ struct WantReject {
     std::string_view text;          // 58
 };
 
-constexpr std::string_view kTextMalformedTag = "Garbled field: malformed tag";
+constexpr std::string_view kTextMalformedTag = "Malformed field: invalid tag";
 constexpr std::string_view kTextLengthDataMismatch =
-    "Garbled field: Length does not match its Data field";
+    "Malformed field: Length does not match its Data field";
 
 // The faulty frame drew exactly one frame, a Reject carrying `want`.
 void expect_only_reject(DispositionFixture const& fix, WantReject const& want,
@@ -3106,7 +3106,7 @@ TEST(UnparseableFrameDisposition, Disclosed_L2_FaultyGapFillDuringAwaitingResend
     auto const steps = run_scripted(c, peer, script);
     std::vector<std::string> const want{
         "35=D 34=3 -> [35=2 7=2 16=0] Active",
-        "35=4 34=2 43=Y -> [35=3 45=2 372=4 373=0 58=Garbled field: malformed tag] Active",
+        "35=4 34=2 43=Y -> [35=3 45=2 372=4 373=0 58=Malformed field: invalid tag] Active",
         "35=D 34=3 43=Y -> Active",
         "35=D 34=4 -> Disconnected",
     };

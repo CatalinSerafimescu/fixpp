@@ -3384,7 +3384,7 @@ Terms, as the owner ruling of 2026-09-27 on fixpp#507 defines them. **Garbled** 
   - RefSeqNum(45) = the first MsgSeqNum(34) read before the fault, never a later 34.
   - RefMsgType(372) = the third field's MsgType, never a later 35. It is omitted when it is longer than the longest MsgType any shipped dictionary defines (`kMaxShippedMsgTypeLength`, re-derived from `dictionaries/*.xml` by the recompute cell in `tests/session/session_reject_test.cpp`), so a peer-controlled 372 cannot overflow the Reject's buffer and leave the number consumed with no Reject.
   - SessionRejectReason(373) = 0 (Invalid tag number) for a malformed tag, with RefTagID(371) omitted; 373 = 5 (Value is incorrect) for a Length+Data mismatch, with 371 = the Length tag.
-  - Text(58) = a fixed string per fault kind, carrying no offset and no peer bytes: `Garbled field: malformed tag` (`kRejectTextMalformedTag`) or `Garbled field: Length does not match its Data field` (`kRejectTextLengthDataMismatch`).
+  - Text(58) = a fixed string per fault kind, carrying no offset and no peer bytes: `Malformed field: invalid tag` (`kRejectTextMalformedTag`) or `Malformed field: Length does not match its Data field` (`kRejectTextLengthDataMismatch`).
   - The Reject is built by `build_reject_with_text`; `build_reject` keeps its signature and output bytes.
 
   *(092 FR-005, contract C-2 "Reject contents", research R-5/R-6; `src/session/scan_frame_header.hpp`, `include/fixpp/session/admin_messages.hpp`; witnesses the `Anchor_D4_*`/`D5_*`/`D6_*` cells, which assert every Reject field, `RefMsgTypeBound_LongMsgType_RejectWithout372_*`, `TwoMalformedFields_*`.)*

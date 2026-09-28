@@ -373,11 +373,13 @@ TEST(SessionReject, BuildRejectWithTextEmitsText) {
     auto r = fixpp::session::build_reject_with_text(
         std::span<std::byte>{buf}, /*seq=*/2, "ISLD", "TW", /*ref_seq_num=*/seqnum_t{1},
         /*ref_tag_id=*/95, /*ref_msg_type=*/"D", /*reason=*/5, "FIX.4.2", "20240101-00:00:00.000",
-        /*text=*/"garbled field");
+        /*text=*/"Malformed field: Length does not match its Data field");
     ASSERT_TRUE(r.has_value());
-    EXPECT_EQ(as_string(*r),
-              soh_frame("8=FIX.4.2|9=90|35=3|34=2|49=ISLD|52=20240101-00:00:00.000|56=TW|45=1|"
-                        "371=95|372=D|373=5|58=garbled field|10=117|"));
+    EXPECT_EQ(
+        as_string(*r),
+        soh_frame(
+            "8=FIX.4.2|9=130|35=3|34=2|49=ISLD|52=20240101-00:00:00.000|56=TW|45=1|"
+            "371=95|372=D|373=5|58=Malformed field: Length does not match its Data field|10=185|"));
 }
 
 // A non-empty text with 371 omitted (ref_tag_id 0) and 373=0.
@@ -386,11 +388,11 @@ TEST(SessionReject, BuildRejectWithTextEmitsTextWithout371) {
     auto r = fixpp::session::build_reject_with_text(
         std::span<std::byte>{buf}, /*seq=*/2, "ISLD", "TW", /*ref_seq_num=*/seqnum_t{1},
         /*ref_tag_id=*/0, /*ref_msg_type=*/"D", /*reason=*/0, "FIX.4.2", "20240101-00:00:00.000",
-        /*text=*/"garbled field");
+        /*text=*/"Malformed field: invalid tag");
     ASSERT_TRUE(r.has_value());
     EXPECT_EQ(as_string(*r),
-              soh_frame("8=FIX.4.2|9=83|35=3|34=2|49=ISLD|52=20240101-00:00:00.000|56=TW|45=1|"
-                        "372=D|373=0|58=garbled field|10=043|"));
+              soh_frame("8=FIX.4.2|9=98|35=3|34=2|49=ISLD|52=20240101-00:00:00.000|56=TW|45=1|"
+                        "372=D|373=0|58=Malformed field: invalid tag|10=148|"));
 }
 
 // An empty 372 is omitted; the text is still emitted.
@@ -399,11 +401,12 @@ TEST(SessionReject, BuildRejectWithTextEmptyRefMsgTypeOmits372) {
     auto r = fixpp::session::build_reject_with_text(
         std::span<std::byte>{buf}, /*seq=*/2, "ISLD", "TW", /*ref_seq_num=*/seqnum_t{1},
         /*ref_tag_id=*/95, /*ref_msg_type=*/"", /*reason=*/5, "FIX.4.2", "20240101-00:00:00.000",
-        /*text=*/"garbled field");
+        /*text=*/"Malformed field: Length does not match its Data field");
     ASSERT_TRUE(r.has_value());
-    EXPECT_EQ(as_string(*r),
-              soh_frame("8=FIX.4.2|9=84|35=3|34=2|49=ISLD|52=20240101-00:00:00.000|56=TW|45=1|"
-                        "371=95|373=5|58=garbled field|10=090|"));
+    EXPECT_EQ(
+        as_string(*r),
+        soh_frame("8=FIX.4.2|9=124|35=3|34=2|49=ISLD|52=20240101-00:00:00.000|56=TW|45=1|"
+                  "371=95|373=5|58=Malformed field: Length does not match its Data field|10=158|"));
 }
 
 // ── 092 T018: the 372 bound and the fixed Text constants (research R-5) ──────
@@ -482,8 +485,9 @@ TEST(SessionReject, MaxShippedMsgTypeLengthMatchesDictionaries) {
 TEST(SessionReject, RejectTextConstantsAreFixed) {
     using fixpp::session::detail::kRejectTextLengthDataMismatch;
     using fixpp::session::detail::kRejectTextMalformedTag;
-    EXPECT_EQ(kRejectTextMalformedTag, "Garbled field: malformed tag");
-    EXPECT_EQ(kRejectTextLengthDataMismatch, "Garbled field: Length does not match its Data field");
+    EXPECT_EQ(kRejectTextMalformedTag, "Malformed field: invalid tag");
+    EXPECT_EQ(kRejectTextLengthDataMismatch,
+              "Malformed field: Length does not match its Data field");
     EXPECT_NE(kRejectTextMalformedTag, kRejectTextLengthDataMismatch);
     for (std::string_view text : {kRejectTextMalformedTag, kRejectTextLengthDataMismatch}) {
         ASSERT_FALSE(text.empty());
@@ -562,7 +566,7 @@ TEST(SessionReject, MalformedInboundRejectIsRejected) {
     EXPECT_EQ(field("372"), "3") << "Reject RefMsgType(372)";
     EXPECT_EQ(field("373"), "0") << "Reject SessionRejectReason(373)";
     EXPECT_EQ(field("371"), "<absent>") << "Reject must carry no RefTagID(371)";
-    EXPECT_EQ(field("58"), "Garbled field: malformed tag") << "Reject Text(58)";
+    EXPECT_EQ(field("58"), "Malformed field: invalid tag") << "Reject Text(58)";
     EXPECT_EQ(sess.state(), fsm_state::Active) << "the malformed Reject must not disconnect";
 }
 

@@ -1295,7 +1295,7 @@ void run_seqreset_knob_off_reject_092(std::string_view garble, const KnobOffReje
 
 TEST(ValidationCompatToggles, SeqReset_KnobOff_FaultyResetMode_Reject_MalformedTag) {
     run_seqreset_knob_off_reject_092(
-        "9x9=1\x01", {.reason = "0", .ref_tag = {}, .text = "Garbled field: malformed tag"});
+        "9x9=1\x01", {.reason = "0", .ref_tag = {}, .text = "Malformed field: invalid tag"});
 }
 
 TEST(ValidationCompatToggles, SeqReset_KnobOff_FaultyResetMode_Reject_LengthDataMismatch) {
@@ -1304,7 +1304,7 @@ TEST(ValidationCompatToggles, SeqReset_KnobOff_FaultyResetMode_Reject_LengthData
         "91=xyz\x01",
         {.reason = "5",
          .ref_tag = "90",
-         .text = "Garbled field: Length does not match its Data field"});
+         .text = "Malformed field: Length does not match its Data field"});
 }
 
 // ── 092-garbled-frame-reject T037 — the D-5 knob-off counter arm ─────────────
@@ -1337,7 +1337,7 @@ void run_d5_knob_off_counter_092(std::string_view msg_type, std::string_view fie
         << "D-5 knob off: the faulty frame at 2 must consume 2";
     expect_knob_off_reject_092(
         fix->capture.frames, "2", msg_type,
-        {.reason = "0", .ref_tag = {}, .text = "Garbled field: malformed tag"});
+        {.reason = "0", .ref_tag = {}, .text = "Malformed field: invalid tag"});
     EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
         << "D-5 knob off: session must stay Active after the faulty frame";
     EXPECT_EQ(app->from_app_count, from_app_before) << "the faulty frame never reaches fromApp";

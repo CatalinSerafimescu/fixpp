@@ -94,9 +94,9 @@ inline constexpr std::size_t kMaxShippedMsgTypeLength = 2;
 
 // 092 research R-5: the fixed Text(58) of that Reject, one per field_fault kind.
 // Compile-time constants: they carry no offset and no peer bytes.
-inline constexpr std::string_view kRejectTextMalformedTag = "Garbled field: malformed tag";
+inline constexpr std::string_view kRejectTextMalformedTag = "Malformed field: invalid tag";
 inline constexpr std::string_view kRejectTextLengthDataMismatch =
-    "Garbled field: Length does not match its Data field";
+    "Malformed field: Length does not match its Data field";
 
 // fixpp#426: a Data value counted by its Length is read as one value, so a
 // `<SOH>34=` inside EncodedText is not a MsgSeqNum. `hooks` supplies the pairs

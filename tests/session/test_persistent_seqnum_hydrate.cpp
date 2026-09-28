@@ -1303,7 +1303,7 @@ TEST(PersistentSeqnumHydrate, RejectedInSequence_AdvanceIsPersisted) {
          .reject = DisposerReject092{.ref_seq = "2",
                                      .ref_msg_type = "D",
                                      .reason = "0",
-                                     .text = "Garbled field: malformed tag"}},
+                                     .text = "Malformed field: invalid tag"}},
     };
     for (const Case& c : cases) {
         SCOPED_TRACE(c.site);
