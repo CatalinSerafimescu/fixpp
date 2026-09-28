@@ -801,7 +801,7 @@ it in 092.
   when the `MessageView` passed to `dictionary_driven_validator::validate` has a failed build, `validate`
   first walks the field iterator to its fault and returns FR-012's code (`wire_invalid_tag_number`
   with RefTagID untouched, or `wire_length_data_mismatch` with RefTagID = the Length tag), before
-  Step 1. The fault-free path adds one branch. RED first: a cell with an **ordinary** dictionary
+  Step 0. The fault-free path adds one branch. RED first: a cell with an **ordinary** dictionary
   (not a framing-tag builder) and a directly constructed failed-build view with a malformed tag
   after tag 8. Today it returns `wire_unexpected_tag` (RefTagID 8). A second cell does the same for
   a Length+Data mismatch. Deletion proof in a scratch copy: remove the pre-scan and both cells go
@@ -829,6 +829,8 @@ it in 092.
 
 ### Simplify (before any measurement)
 
+  **Superseded at HEAD** by T062b's re-run: after T062a's pre-scan, the after-loop check's
+  witnesses are S4 plus T062b's swallowed-field cells.
 - [X] T064 Run `/simplify` over the branch diff (`[const §XVI.7]`); fixes go through
   `phase-implementer`. Every later check runs on the post-simplify head.
 

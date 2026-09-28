@@ -39,8 +39,9 @@ record and header identification of data-model.md E-1.
     (contract C-2).
 - **The Reject's 34 comes from the fault record, not from `msg_seq_num` (Gate A round 2, root
   cause C).** `OffsetTable` keeps the first occurrence of a tag (its overlay insert skips a
-  duplicate), and the Reject must not be addressed from a later 34, or `34=99|35=D|34=2|9x9=1` could
-  be advanced at 2. But a faulty frame has no parse, so there is no "parser's 34" to agree with; the
+  duplicate), and the Reject must not be addressed from a later 34, or `35=D|34=99|…|34=2|…|9x9=1` could
+  be advanced at 2 (literal corrected at implementation, T034: the earlier `34=99|35=D|…` form
+  puts 34 in field 3, which is D-8). But a faulty frame has no parse, so there is no "parser's 34" to agree with; the
   need exists only on faulty frames. So the first 34 is recorded in `fault_ref_seq_num`, read only
   when `fault != none`, and every clean frame is scanned exactly as today.
 - **"34 read" is `parse_seqnum(fault_ref_seq_num) > 0`.** `34=abc` is non-empty but `parse_seqnum` returns 0
@@ -287,7 +288,7 @@ git grep -n "case error::wire_" -- src/capi/error.cpp include/fixpp/wire/reject_
 narrower form missed `tests/fuzz/fuzz_wire_validator.cpp`'s `is_valid_wire_error` allowlist (a
 `switch` of `case error::wire_…` labels), which was fixed in `ae787a3a`.
 
-At the plan head it yields:
+At the plan head, before that widening, it yields:
 - `include/fixpp/core/error.hpp`: the enumerators and `error_message`'s switch;
 - `src/capi/error.cpp`: `translate`'s total switch;
 - `include/fixpp/wire/reject_reason_map.hpp`: two cases;
@@ -319,8 +320,9 @@ CLAUDE.md: a comment may record a procedure, not a result).
 - **Validator.**
   - One per fault kind, reached through the public API. The malformed-tag cells construct
     `MessageView<Index>` directly and assert its failed `build_status()` before validating (a
-    malformed tag fails `OffsetTable::build` whatever the hooks, so differing hooks cannot reach
-    it). The Length/Data cells build under one hook set and validate under a differing set. Each
+    malformed tag fails `OffsetTable::build` under the view's own hooks. *At implementation, T062b:*
+    differing hooks do reach it when the view's hooks pair a Length/Data whose counted value
+    swallows the malformed field, so the build succeeds and the validator's walk meets it). The Length/Data cells build under one hook set and validate under a differing set. Each
     asserts the returned error and `*ref_tag_out`.
   - A T1 cell asserting `wire_invalid_tag_number`, not `wire_unexpected_tag`.
   - Clean controls over well-formed messages whose view uses the validator's own hooks, one
@@ -523,8 +525,11 @@ names the scan only in a comment.
 
 Derive the sites:
 ```
-git grep -n -i "no Reject\|parse error\|reject-loop\|no-reject-loop\|reject-of-reject\|garbled" -- include src docs brain spec
+git grep -n -i "no Reject\|parse error\|reject-loop\|no-reject-loop\|reject-of-reject\|garbled" -- include src tests docs brain spec
 ```
+*Widened at implementation (2026-09-28, T072):* the pathspec now includes `tests`. The narrower
+form missed test-file headers such as `session_reject_test.cpp`'s no-reject-loop scenario.
+
 Rewrite each site that describes a framed but unparseable frame. Known members at the plan head:
 - `include/fix/c_api/session.h`: `fixpp_session_register_callback`'s 1.9 sentence (R-8).
 - `include/fixpp/session/admin_messages.hpp`: the no-reject-loop sentence, scoped to well-formed frames, with

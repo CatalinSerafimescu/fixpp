@@ -153,6 +153,10 @@ answers one peer frame. The bound cell is quickstart §1 "reject-loop bound".
 - `core::error::wire_invalid_tag_number = 132` and `wire_length_data_mismatch = 133` are new (E-6).
   `reject_reason_map` maps them to 0 and 5.
 - `dictionary_driven_validator::validate` returns them where it used to end its walk silently (E-5).
+  *Added at implementation (T062a, owner ruling 2026-09-28):* for a view whose build failed,
+  `validate` pre-scans for the fault before Step 0. It returns 132 or 133 where it used to return
+  `wire_unexpected_tag` (RefTagID 8), or `wire_header_out_of_order`, from Step 0/1. FR-012's text
+  is unchanged.
 - No `SessionEvent` alternative is added: disregarded frames are not logged (research R-4).
 - `SeqnumManager::check_inbound` (public `include/fixpp/session/seqnum_manager.hpp`) returns
   `store_seqnum_overflow` when asked to advance from seqnum_max, where it used to wrap to 0 (FR-019).
