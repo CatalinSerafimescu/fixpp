@@ -541,7 +541,7 @@ Reject (45=N) and is not delivered; the second is delivered with no ResendReques
     Reject is sent, and `FaultStore::durable_inbound` is 3.
   - `PersistentSeqnumHydrate.RejectedInSequence_PersistFailure_Fatal`: `fsm_state::Disconnected`,
     `FaultStore::durable_inbound` stays 2, and `fix->capture.frames` does not grow (no Reject).
-- [ ] T036 [US2] Mutants for T035, each in a scratch copy (quickstart §1 "D-5 persistence"): a
+- [X] T036 [US2] Mutants for T035, each in a scratch copy (quickstart §1 "D-5 persistence"): a
   disposer that skips `consume_rejected_seqnum_` → `RejectedInSequence_AdvanceIsPersisted` RED; one
   that emits the Reject before it → `RejectedInSequence_PersistFailure_Fatal` RED; one that discards
   its error → `RejectedInSequence_PersistFailure_Fatal` RED. Record each in the evidence file.
