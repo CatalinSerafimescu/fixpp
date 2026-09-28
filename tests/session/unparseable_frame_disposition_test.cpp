@@ -334,8 +334,9 @@ void run_issue507_cell(std::string const& garbled, bool validate, ExpectedReject
 
     bool const resend = probe_draws_resend(fix, sess);
     EXPECT_TRUE(resend) << "probe(34=500): resend=" << (resend ? 1 : 0)
-                        << " (0 means NewSeqNo(36)=500 of the unparseable SequenceReset was "
-                           "applied)";
+                        << " (0 means no ResendRequest was drawn: either NewSeqNo(36)=500 of "
+                           "the unparseable SequenceReset was applied, or the session is no "
+                           "longer Active)";
 }
 
 std::string const kMalformedCount = std::string{"90=2\x01"} + "91=xyz\x01";
