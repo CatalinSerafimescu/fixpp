@@ -1237,6 +1237,72 @@ TEST(ValidationCompatToggles, SeqReset_KnobOff_FaultyResetMode_NoAdvance) {
         << "D-4 knob off: session must stay Active after the later frames";
 }
 
+// ── 092-garbled-frame-reject T032a — the D-4 knob-off Reject ─────────────────
+//
+// With validate_sequence_numbers off, the faulty Reset-mode SequenceReset at the
+// expected 2 draws exactly one outbound frame, a Reject: 45=2, 372=4, and 373, 371
+// and 58 by fault kind (a malformed tag: 373=0, no 371; a SecureDataLen(90) count not
+// followed by SOH: 373=5, 371=90). The Text strings are spelled out here, not taken
+// from the session's constants, so a change to the emitted Text fails the check.
+// T032 pins the counter on the same input; this pins the Reject.
+// Anchors: specs/092-garbled-frame-reject contract C-2 (D-4) and its Reject contents,
+//          C-3 I-6; spec FR-007, FR-011.
+struct KnobOffReject092 {
+    std::string_view reason;   // 373
+    std::string_view ref_tag;  // 371; empty = absent
+    std::string_view text;     // 58
+};
+
+void expect_knob_off_reject_092(const std::vector<std::vector<std::byte>>& frames,
+                                std::string_view ref_seq, std::string_view ref_msg_type,
+                                const KnobOffReject092& want) {
+    EXPECT_EQ(frames.size(), 1U) << "exactly one outbound frame (the Reject)";
+    EXPECT_EQ(count_frames_with_msgtype(frames, "3"), 1) << "exactly one Reject(35=3)";
+    for (const auto& r : frames) {
+        if (extract_tag(r, 35) != "3") continue;
+        EXPECT_EQ(extract_tag(r, 45), ref_seq) << "Reject RefSeqNum(45)";
+        EXPECT_EQ(extract_tag(r, 372), ref_msg_type) << "Reject RefMsgType(372)";
+        EXPECT_EQ(extract_tag(r, 373), want.reason) << "Reject SessionRejectReason(373)";
+        const std::string wire(reinterpret_cast<const char*>(r.data()), r.size());
+        if (want.ref_tag.empty()) {
+            EXPECT_EQ(wire.find("\x01"
+                                "371="),
+                      std::string::npos)
+                << "Reject must carry no RefTagID(371)";
+        } else {
+            EXPECT_EQ(extract_tag(r, 371), want.ref_tag) << "Reject RefTagID(371)";
+        }
+        EXPECT_EQ(extract_tag(r, 58), want.text) << "Reject Text(58)";
+    }
+}
+
+void run_seqreset_knob_off_reject_092(std::string_view garble, const KnobOffReject092& want) {
+    auto app = std::make_shared<CountingApp028>();
+    auto fix = make_acceptor_seqval_off(app);
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
+    fix->clear_capture();
+
+    fix->feed(make_fix_frame("FIX.4.4", "4", 2, "CLI", "SRV",
+                             field(123, "N") + field(36, "500") + std::string(garble)));
+    expect_knob_off_reject_092(fix->capture.frames, "2", "4", want);
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "D-4 knob off: session must stay Active after the faulty SequenceReset";
+}
+
+TEST(ValidationCompatToggles, SeqReset_KnobOff_FaultyResetMode_Reject_MalformedTag) {
+    run_seqreset_knob_off_reject_092(
+        "9x9=1\x01", {.reason = "0", .ref_tag = {}, .text = "Garbled field: malformed tag"});
+}
+
+TEST(ValidationCompatToggles, SeqReset_KnobOff_FaultyResetMode_Reject_LengthDataMismatch) {
+    run_seqreset_knob_off_reject_092(
+        "90=2\x01"
+        "91=xyz\x01",
+        {.reason = "5",
+         .ref_tag = "90",
+         .text = "Garbled field: Length does not match its Data field"});
+}
+
 // ── T012 (US3) — Default/combination/no-op witnesses ────────────────────────
 //
 // Anchors: spec.md FR-007/FR-008/FR-009, SC-003/SC-005; data-model.md

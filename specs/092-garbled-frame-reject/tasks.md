@@ -491,7 +491,7 @@ added 2026-09-28). Mark each as a pin or control in its test comment.
   already hooked; label from T007): with `validate_sequence_numbers` off, a faulty **Reset-mode** SequenceReset at N
   leaves `seqnum_mgr_test_access().next_inbound_unsafe() == N`, and later frames are delivered
   without advancing (the inherited outcome, research R-4).
-- [ ] T032a [US1] **Added 2026-09-28 (Phase 3 review, I-6/FR-011's `validate_sequence_numbers` axis).**
+- [X] T032a [US1] **Added 2026-09-28 (Phase 3 review, I-6/FR-011's `validate_sequence_numbers` axis).**
   Via `phase-implementer`, in the same file and target: with `validate_sequence_numbers` off, the
   same faulty Reset-mode SequenceReset at N draws exactly one Reject (45=N, 372=4, and 373/371/58
   by fault kind). T032 pins only the counter, so no cell asserted the knob-off Reject. It is RED on
