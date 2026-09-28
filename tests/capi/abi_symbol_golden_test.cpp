@@ -19,19 +19,17 @@
 //     symbol list.
 //
 //   - ErrorEnumUnchanged: a THIN assertion, not a duplicate of the exact-set
-//     completeness gate. tests/core/test_017/019/020_error_completeness.cpp
-//     already assert (per feature) the exact enumerator SET each feature
-//     introduced, with test_020's ExactSetEquality pinning the CURRENT
-//     highest-known boundary: slot 131 (app_payload_malformed) carries a
-//     message, slot 132 is "unknown error" (nothing added beyond 020's
-//     boundary). Since 062 introduces no error enumerator, the correct
-//     062-scoped check is simply: that boundary is STILL exactly where
-//     test_020 left it — i.e. 062 did not push it forward. If a future
-//     feature legitimately extends the enum, it will add its OWN
+//     completeness gates. tests/core/test_0NN_error_completeness.cpp assert
+//     (per feature) the exact enumerator SET each feature introduced; the
+//     newest of them pins the highest-known boundary: its block's last
+//     enumerator carries a message and the slot after it is "unknown error".
+//     Since 062 introduces no error enumerator, the correct 062-scoped check
+//     is simply: that boundary is STILL exactly where the newest completeness
+//     gate puts it — i.e. 062 did not push it forward. A feature that
+//     legitimately extends the enum adds its OWN
 //     test_0NN_error_completeness.cpp (per the established per-feature
-//     pattern) and this test's slot-132 boundary assertion is expected to
-//     move in lockstep — that is the intended coupling, not a maintenance
-//     trap: this test is 062's evidence that IT did not move the boundary.
+//     pattern) and moves this test's boundary assertion in lockstep — that is
+//     the intended coupling, not a maintenance trap.
 
 #include <gtest/gtest.h>
 
@@ -145,12 +143,15 @@ TEST(AbiSymbolGolden, CabiSymbolSetUnchanged) {
 TEST(AbiSymbolGolden, ErrorEnumUnchanged) {
     using fixpp::core::error;
 
-    // The 020 boundary (see file header): slot 131 is the last message-
-    // bearing enumerator, slot 132 is "unknown error". 062 must not have
-    // pushed this boundary forward.
+    // The boundary (see file header): the newest block's last enumerator
+    // (092's wire_length_data_mismatch) is the last message-bearing one, and
+    // the slot after it is "unknown error". 062 must not have pushed this
+    // boundary forward.
     EXPECT_EQ(static_cast<std::uint8_t>(error::app_payload_malformed), 131U)
         << "the pre-062 error-enum boundary (app_payload_malformed) must stay at slot 131";
-    EXPECT_EQ(fixpp::core::error_message(static_cast<error>(132U)),
+    EXPECT_EQ(fixpp::core::error_message(static_cast<error>(
+                  static_cast<std::uint8_t>(error::wire_length_data_mismatch) + 1U)),
               std::string_view{"unknown error"})
-        << "slot 132 must remain unknown — 062 introduces no error enumerator (FR-007)";
+        << "the slot after wire_length_data_mismatch must remain unknown — 062 "
+           "introduces no error enumerator (FR-007)";
 }

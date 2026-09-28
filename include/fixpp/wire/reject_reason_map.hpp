@@ -30,10 +30,16 @@
 //   wire_field_value_truncated(41) →  6  (Float/decimal precision-loss ONLY;
 //                                         fired only on decimal_precision_loss
 //                                         remap, NOT a generic bad-format)
+//   wire_invalid_tag_number(132)   →  0  (invalid tag number — the field walk
+//                                         met a malformed tag; 092 FR-012)
+//   wire_length_data_mismatch(133) →  5  (value is incorrect — a Data value
+//                                         its Length field miscounts; 092
+//                                         FR-012)
 //
-// Default arm: returns 3 (other, invalid tag) for any slot outside the 5
-// validator-emitted slots. Post-T009a validate() emits ONLY wire_* slots, so
-// this arm is structurally unreachable in production — fail-closed, not UB.
+// Default arm: returns 3 (other, invalid tag) for any slot outside the
+// validator-emitted slots listed above. Post-T009a validate() emits ONLY wire_*
+// slots, so this arm is structurally unreachable in production — fail-closed,
+// not UB.
 //
 // Header-only, no new transitive includes (plain <cstdint>).
 // [const §XV.9]: no std::mutex or std::shared_mutex.
@@ -47,8 +53,8 @@ namespace fixpp::wire {
 /// Map a core::error wire_* slot from dictionary_driven_validator::validate()
 /// to the corresponding FIX SessionRejectReason(373) integer value.
 ///
-/// Returns the SessionRejectReason int (1/2/5/6/14), or 3 (other/invalid tag)
-/// for any error outside the five validator-emitted wire_* slots.
+/// Returns the SessionRejectReason int (0/1/2/5/6/14), or 3 (other/invalid tag)
+/// for any error outside the validator-emitted wire_* slots mapped here.
 ///
 /// [[nodiscard]]: callers always use the result.
 [[nodiscard]] constexpr int wire_error_to_session_reject_reason(fixpp::core::error e) noexcept {
@@ -74,9 +80,17 @@ namespace fixpp::wire {
         case error::wire_header_out_of_order:
             // Reason 14: tag out of required order.
             return 14;
+        case error::wire_invalid_tag_number:
+            // Reason 0: invalid tag number — the validator's field walk met a
+            // malformed tag (092 FR-012). No RefTagID is reported.
+            return 0;
+        case error::wire_length_data_mismatch:
+            // Reason 5: value is incorrect — a Data value its Length field
+            // miscounts (092 FR-012). RefTagID is the Length tag.
+            return 5;
         default:
             // Fail-closed catch-all: maps any non-wire_* error to reason 3 (other).
-            // Post-T009a: validate() emits ONLY the 5 wire_* slots above on the
+            // Post-T009a: validate() emits ONLY the wire_* slots above on the
             // in-contract (non-throwing) path, so this arm is dead in normal operation.
             // It is live only if a non-wire_* error ever escaped validate() (e.g. via
             // the trap_throw outer branch if decimal_t::parse ever throws — currently

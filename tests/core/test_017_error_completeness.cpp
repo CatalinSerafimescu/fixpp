@@ -74,17 +74,19 @@ TEST(Error017Completeness, ExactSetEquality) {
     // enum value, and a message-less addition is indistinguishable at runtime —
     // verified by bite-test). The message-table boundary below is the closest
     // honest proxy: a properly-added variant MUST carry an error_message entry
-    // (T006 contract + ErrorMessageNonEmpty), so a message at slot 132 (post-020)
-    // signals an out-of-block addition.
-    // NOTE: Slots 129–130 were added by 019-app-callbacks (app_do_not_send=129,
-    // app_callback_threw=130); slot 131 was added by 020-g2-business-messages
-    // (app_payload_malformed=131) — the boundary moved 128→130→131. The 019/020
-    // error-completeness tests (tests/core/test_0{19,20}_error_completeness.cpp)
-    // pin those slots exactly. [const §X.4] append-only review + abidiff gate govern.
-    EXPECT_EQ(fixpp::core::error_message(static_cast<error>(132U)),
+    // (T006 contract + ErrorMessageNonEmpty), so a message at the slot after the
+    // newest block's last enumerator signals an out-of-block addition.
+    // NOTE: later features append their own blocks after 017's, each pinned
+    // exactly by its own tests/core/test_0NN_error_completeness.cpp; this
+    // boundary follows the newest block's last enumerator (092's
+    // wire_length_data_mismatch). [const §X.4] append-only review + abidiff gate
+    // govern.
+    EXPECT_EQ(fixpp::core::error_message(static_cast<error>(
+                  static_cast<std::uint8_t>(error::wire_length_data_mismatch) + 1U)),
               std::string_view{"unknown error"})
-        << "slot 132 carries a message — a message-bearing enumerator was added "
-           "beyond the 020 boundary (slot 131) (see [const §X.4] append-only review)";
+        << "the slot after wire_length_data_mismatch carries a message — a "
+           "message-bearing enumerator was added beyond the 092 block (see "
+           "[const §X.4] append-only review)";
 }
 
 // ── Slot values ─────────────────────────────────────────────────────────────

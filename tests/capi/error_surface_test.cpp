@@ -3,7 +3,7 @@
 // TDD: written RED before error.h / error.cpp exist.
 //
 // Tests (all derived from census-ground-truth.md + data-model.md E-3):
-//   1. CapiError/CorrectnesOracle     — all 116 enumerators match expected_error_map.csv
+//   1. CapiError/CorrectnesOracle     — every enumerator matches expected_error_map.csv
 //   2. CapiError/ExplicitUnknownOverrides — override groups asserted explicitly
 //   3. CapiError/StrerrorNonNull      — fixpp_strerror is non-null for all published codes
 //   4. CapiError/StrerrorUnknownSentinel — out-of-range → "unknown error"
@@ -64,7 +64,7 @@ namespace {
 #endif
 
 // Build the name→enumerator lookup at compile time via a hand-written
-// table mirroring the 116 arms.  This avoids run-time reflection and keeps
+// table mirroring translate()'s arms.  This avoids run-time reflection and keeps
 // the test self-contained when the CSV path is absent (build-path portability).
 //
 // The table is the mutation-self-check pivot: if translate() returns the wrong
@@ -195,10 +195,12 @@ constexpr std::array kEnumTable{
     EnumEntry{.name="app_do_not_send",                    .value=error::app_do_not_send},
     EnumEntry{.name="app_callback_threw",                 .value=error::app_callback_threw},
     EnumEntry{.name="app_payload_malformed",              .value=error::app_payload_malformed},
+    EnumEntry{.name="wire_invalid_tag_number",            .value=error::wire_invalid_tag_number},
+    EnumEntry{.name="wire_length_data_mismatch",          .value=error::wire_length_data_mismatch},
 };
 // clang-format on
 
-static_assert(kEnumTable.size() == 116U, "E-3-test: enumerator table must have exactly 116 rows");
+static_assert(kEnumTable.size() == 118U, "E-3-test: enumerator table must have exactly 118 rows");
 
 // Build a name→code lookup from the CSV oracle.
 // Format: lines starting with '#' are comments; data lines are "name,FIXPP_ERR_SYMBOL".
@@ -284,13 +286,13 @@ fixpp_error_t symbol_to_code(const std::string& sym) {
 }  // namespace
 
 // ---------------------------------------------------------------------------
-// 1. Correctness oracle: all 116 enumerators match expected_error_map.csv
+// 1. Correctness oracle: every enumerator matches expected_error_map.csv
 // ---------------------------------------------------------------------------
 
 TEST(CapiError, CorrectnessOracle) {
     auto csv = load_csv();
     ASSERT_FALSE(csv.empty()) << "CSV not loaded from " FIXPP_CAPI_DATA_DIR;
-    ASSERT_EQ(csv.size(), 116U) << "CSV must have exactly 116 data rows";
+    ASSERT_EQ(csv.size(), 118U) << "CSV must have exactly 118 data rows";
 
     for (const auto& entry : kEnumTable) {
         auto it = csv.find(std::string(entry.name));

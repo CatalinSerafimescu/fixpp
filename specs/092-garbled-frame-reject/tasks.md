@@ -767,7 +767,7 @@ it in 092.
   `wire_invalid_tag_number = 132` and `wire_length_data_mismatch = 133`, appended at the next
   contiguous slots after `app_payload_malformed = 131` with explicit values (`[const §X.4]`), each
   with an `error_message` entry.
-- [ ] T059 Via `phase-implementer`, move every pin in T008's R-7 population with them:
+- [X] T059 Via `phase-implementer`, move every pin in T008's R-7 population with them:
   - `src/capi/error.cpp` `translate`: both → `FIXPP_ERR_WIRE_INVALID_FRAME`;
   - `include/fixpp/wire/reject_reason_map.hpp`: 132 → 0, 133 → 5;
   - `tests/capi/error_surface_test.cpp`: `kEnumTable` rows, its size pin, the CSV row-count
@@ -781,7 +781,7 @@ it in 092.
   - `include/fix/c_api/error.h`, only if `grep -n "WIRE_INVALID_FRAME" include/fix/c_api/error.h`
     shows it lists the core errors that code coalesces; then re-pin `tools/capi_freeze.sha256`.
   - Any other member the commands add, classified in the evidence file.
-- [ ] T060 Via `phase-implementer`, add `tests/core/test_092_error_completeness.cpp`, modelled on
+- [X] T060 Via `phase-implementer`, add `tests/core/test_092_error_completeness.cpp`, modelled on
   `test_020_error_completeness.cpp`: the 092 block is exactly `{wire_invalid_tag_number,
   wire_length_data_mismatch}` at `{132, 133}`. Register `error_092_completeness` in
   `tests/core/CMakeLists.txt` with label `092`. Add a `reject_reason_map` cell per new enumerator and

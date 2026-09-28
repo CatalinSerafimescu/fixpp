@@ -2,7 +2,7 @@
 # Correctness oracle: one row per fixpp::core::error enumerator.
 # Format: <enumerator_name>,<FIXPP_ERR_SYMBOL>
 # Derived from census-ground-truth.md (the orchestrator-independent oracle).
-# All 116 enumerators, ordered by slot.
+# One row per enumerator, ordered by slot.
 #
 # Override groups (session_*/log_*/otel_*/app_*/out_of_memory → UNKNOWN):
 # Each asserted EXPLICITLY in error_surface_test.cpp (E-3-test).
@@ -122,3 +122,5 @@ otel_provider_init_failed,FIXPP_ERR_UNKNOWN
 app_do_not_send,FIXPP_ERR_APP_DO_NOT_SEND
 app_callback_threw,FIXPP_ERR_APP_CALLBACK_THREW
 app_payload_malformed,FIXPP_ERR_APP_PAYLOAD_MALFORMED
+wire_invalid_tag_number,FIXPP_ERR_WIRE_INVALID_FRAME
+wire_length_data_mismatch,FIXPP_ERR_WIRE_INVALID_FRAME
