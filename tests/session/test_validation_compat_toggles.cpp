@@ -1192,6 +1192,51 @@ TEST(ValidationCompatToggles, SeqReset_Default_NewSeqNoApplied) {
     }
 }
 
+// ── 092-garbled-frame-reject T032 — the D-4 knob-off arm ─────────────────────
+//
+// With validate_sequence_numbers off, a SequenceReset in Reset mode (GapFillFlag(123)
+// != Y) whose header scan finds a fault after 34 leaves NextNumIn where it was: the
+// frame is not consumed and NewSeqNo(36) is not applied. Later frames above NextNumIn
+// are then delivered without advancing, as the knob-off too-high path delivers them.
+// This pins the outcome the knob-off Reset-mode path already had before 092 (research
+// R-4; quickstart §1 "D-4 no-advance witness"). The check that it can fail is a mutant
+// in a scratch copy: a D-4 row in dispose_unparseable_ that advances NextNumIn, or that
+// applies NewSeqNo, when the knob is off turns it RED.
+// Anchors: specs/092-garbled-frame-reject contract C-2 (D-4), C-3 I-6; spec FR-011.
+TEST(ValidationCompatToggles, SeqReset_KnobOff_FaultyResetMode_NoAdvance) {
+    auto app = std::make_shared<CountingApp028>();
+    auto fix = make_acceptor_seqval_off(app);
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
+
+    const auto& smgr = fix->session->seqnum_mgr_test_access();
+    ASSERT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{2})
+        << "Precondition: next_inbound must be 2 before test";
+
+    // A Reset-mode SequenceReset at the expected 2, NewSeqNo=500, with a malformed
+    // tag after 34, 35, 49, 52, 56, 123 and 36.
+    fix->feed(make_fix_frame("FIX.4.4", "4", 2, "CLI", "SRV",
+                             field(123, "N") + field(36, "500") + "9x9=1\x01"));
+    EXPECT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{2})
+        << "D-4 knob off: the faulty SequenceReset must neither consume 2 nor apply NewSeqNo(500)";
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "D-4 knob off: session must stay Active after the faulty SequenceReset";
+
+    const int from_app_before = app->from_app_count;
+    fix->feed(make_fix_frame("FIX.4.4", "D", 3, "CLI", "SRV"));
+    EXPECT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{2})
+        << "D-4 knob off: the frame at 3 must be delivered without advancing";
+    EXPECT_EQ(app->from_app_count, from_app_before + 1)
+        << "D-4 knob off: the frame at 3 must be delivered to fromApp";
+
+    fix->feed(make_fix_frame("FIX.4.4", "D", 500, "CLI", "SRV"));
+    EXPECT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{2})
+        << "D-4 knob off: the frame at 500 must be delivered without advancing";
+    EXPECT_EQ(app->from_app_count, from_app_before + 2)
+        << "D-4 knob off: the frame at 500 must be delivered to fromApp";
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "D-4 knob off: session must stay Active after the later frames";
+}
+
 // ── T012 (US3) — Default/combination/no-op witnesses ────────────────────────
 //
 // Anchors: spec.md FR-007/FR-008/FR-009, SC-003/SC-005; data-model.md

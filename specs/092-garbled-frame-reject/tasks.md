@@ -485,7 +485,7 @@ as a pin or control in its test comment.
     (each returns before the Active refresh). Their liveness proof, and the D-7 cell's, is the forced-hit
     mutant in a scratch copy: a disposer that writes `last_inbound_steady_` in each row turns each cell
     RED. Record it in the evidence file.
-- [ ] T032 [US1] Via `phase-implementer`, the D-4 knob-off arm in
+- [X] T032 [US1] Via `phase-implementer`, the D-4 knob-off arm in
   `tests/session/test_validation_compat_toggles.cpp` (target `session_validation_compat_toggles`,
   already hooked; label from T007): with `validate_sequence_numbers` off, a faulty **Reset-mode** SequenceReset at N
   leaves `seqnum_mgr_test_access().next_inbound_unsafe() == N`, and later frames are delivered
