@@ -3068,12 +3068,12 @@ std::string joined(std::vector<std::string> const& steps) {
 // L-1: the peer sends a NewOrderSingle at N = 2 whose malformed tag precedes 34 (D-7),
 // then a NewOrderSingle at 3, a Heartbeat at 4 and NewOrderSingles at 5 and 6. The
 // replay of the faulty frame carries the same fault before 34, so it is disregarded
-// again. The expected trace pins the loop contract C-5 L-1 discloses: the gap draws a
-// ResendRequest, the replay is disregarded, AwaitingResend draws no second
-// ResendRequest for the PossDup resend or the too-high Heartbeat, and the next new
-// message that is neither a Heartbeat nor a PossDup ends the session. The durable
-// NextNumIn after the run must be 2, so a reconnect asks for the faulty frame again and
-// the loop resumes.
+// again. Contract C-5 L-1 describes the first steps of the trace: the gap draws a
+// ResendRequest and the replay is disregarded. The rest of the trace pins what the
+// session does next in this scenario: AwaitingResend draws no second ResendRequest for
+// the PossDup resend or the too-high Heartbeat, and the next new message that is
+// neither a Heartbeat nor a PossDup ends the session. The durable NextNumIn after the
+// run must be 2: a reconnect resumes from 2, the number of the faulty frame.
 TEST(UnparseableFrameDisposition, Disclosed_L1_ReplayedFaultBefore34_ResendLoop) {
     LateCell c{{.validate = false}};
     c.fix.open_to_active(*c.sess);
