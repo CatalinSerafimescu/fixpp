@@ -2165,7 +2165,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
 // SessionRejectReason (373) and an optional offending RefTagID (371) through
 // to the Reject builder. 092-garbled-frame-reject (research R-5): it builds via
 // build_reject_with_text and carries `text` as Text(58); an empty text (the
-// default every pre-092 caller takes) omits 58, byte-identical to build_reject.
+// default) omits 58, byte-identical to build_reject.
 //
 // validate() returns a wire_* error slot; the caller maps it via
 // wire_error_to_session_reject_reason() (T011) and passes the resulting reason

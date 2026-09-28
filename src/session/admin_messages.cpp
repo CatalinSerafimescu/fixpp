@@ -735,10 +735,10 @@ namespace {
 // The no-reject-loop guard (I-5) is at the DISPATCH SITE (Session FSM), not here.
 // This builder is dumb: it emits whatever is passed.
 //
-// 092-garbled-frame-reject (research R-5): the body moved to build_reject_with_text,
+// 092-garbled-frame-reject (research R-5): the body is build_reject_with_text's,
 // which adds Text(58) after 373 when its `text` is non-empty. build_reject delegates
-// with an empty text, so its output bytes are unchanged (pinned by the interop-golden
-// cells in tests/session/session_reject_test.cpp).
+// with an empty text, so its output is build_reject_with_text's with no 58 (pinned
+// by the interop-golden cells in tests/session/session_reject_test.cpp).
 
 // NOLINTBEGIN(bugprone-easily-swappable-parameters) — FIX-protocol-fixed arg order (sender / target
 // before the Ref* group; begin_string / sending_time last).

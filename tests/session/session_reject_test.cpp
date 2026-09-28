@@ -273,15 +273,15 @@ TEST(SessionReject, BuildRejectShape) {
 // Every cell compares the WHOLE frame against a literal spelled out here, never
 // against the builder's own output and never field-by-field (a position-
 // independent field lookup would pass a reordered frame). The literal is
-// written with '|' for SOH; `soh_frame` converts it. The 9= and 10= values in
-// each literal were computed outside the builder; re-derive them by summing the
-// frame's bytes before 10= (mod 256) and counting the bytes from 35= to 10=.
+// written with '|' for SOH; `soh_frame` converts it. Each literal's 9= and 10=
+// must be self-consistent: re-derive 10= by summing the frame's bytes before 10=
+// (mod 256) and 9= by counting the bytes from 35= up to 10=.
 //
-// The four golden literals are the fixpp-emitted Reject lines of the interop
-// transcripts under tests/interop/happy/golden/ (the PD-QFj-*-malformed-dup-
-// rejected and HP-QFj-*-reject-invalid-admin cells), copied verbatim. They pin
-// `build_reject`'s bytes to what fixpp put on the wire before 092, and pin the
-// empty-text form of `build_reject_with_text` to the same bytes.
+// Each golden literal must equal the fixpp-emitted ('> ') Reject line of the
+// interop transcript it names, with SOH for each \x01; re-derive with
+// `grep -n '35=3' tests/interop/happy/golden/<name>.fix`. They pin `build_reject`
+// and the empty-text form of `build_reject_with_text` to the bytes fixpp emits on
+// the wire.
 
 namespace {
 
