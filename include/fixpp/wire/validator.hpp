@@ -57,6 +57,19 @@ inline void set_ref_tag(std::uint16_t* out, std::uint16_t tag) noexcept {
     }
 }
 
+// 092 (data-model E-5, FR-012): the error for a field walk whose iterator
+// reports a fault (never `none` here). A malformed tag has no tag to report, so
+// RefTagID stays untouched; a Length/Data mismatch reports the Length tag.
+template <class FieldIterator>
+[[nodiscard]] core::expected_t<void> field_fault_error(FieldIterator const& it,
+                                                       std::uint16_t* ref_tag_out) noexcept {
+    if (it.fault() == field_fault::length_data_mismatch) {
+        set_ref_tag(ref_tag_out, it.fault_length_tag());
+        return core::expected_t<void>{std::unexpect, core::error::wire_length_data_mismatch};
+    }
+    return core::expected_t<void>{std::unexpect, core::error::wire_invalid_tag_number};
+}
+
 // [2b §4.6] runtime-virtual validation plugin. EXACTLY 5 pure-virtual.
 class Validator {
 public:
@@ -177,8 +190,18 @@ public:
         // the SAME dictionary every other Step below reads through.
         auto const hooks = dict_hooks::for_table_view(dict_);
         using iter_t = MessageView<access_mode::Index>::field_iterator;
-        for (iter_t it{msg.bytes(), 0, hooks}, end{msg.bytes(), msg.bytes().size(), hooks};
-             !(it == end); ++it) {
+        // 092 (data-model E-5, FR-012): the iterator is hoisted out of the `for`
+        // init so its fault record is readable after the loop. The fault is
+        // checked at the top of each iteration — before the field checks, so an
+        // empty tag yielded as tag 0 is not reported as an unexpected tag — and
+        // once after the loop, for a walk that stopped on its fault. Steps 2
+        // onward do not run after a fault.
+        iter_t it{msg.bytes(), 0, hooks};
+        iter_t const end{msg.bytes(), msg.bytes().size(), hooks};
+        for (; !(it == end); ++it) {
+            if (it.fault() != field_fault::none) {
+                return field_fault_error(it, ref_tag_out);
+            }
             auto const& fld = *it;
 
             // (a) Unexpected tag check. 081 Concern A (research.md D-1):
@@ -206,6 +229,9 @@ public:
                 set_ref_tag(ref_tag_out, fld.tag);
                 return check;
             }
+        }
+        if (it.fault() != field_fault::none) {
+            return field_fault_error(it, ref_tag_out);
         }
 
         // ── Step 2: required-fields scan ─────────────────────────────────

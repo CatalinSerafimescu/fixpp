@@ -786,11 +786,11 @@ it in 092.
   wire_length_data_mismatch}` at `{132, 133}`. Register `error_092_completeness` in
   `tests/core/CMakeLists.txt` with label `092`. Add a `reject_reason_map` cell per new enumerator and
   a `translate` cell per new enumerator in the existing sources that pin them.
-- [ ] T061 Via `phase-implementer`, the over-0xFFFF mapping cell (E-6, R2-008) in
+- [X] T061 Via `phase-implementer`, the over-0xFFFF mapping cell (E-6, R2-008) in
   `tests/capi/error_surface_test.cpp`: `translate` gives `FIXPP_ERR_WIRE_LIMIT_EXCEEDED` for
   `OffsetTable::build`'s `wire_tag_out_of_range` and `FIXPP_ERR_WIRE_INVALID_FRAME` for the
   validator's `wire_invalid_tag_number` on the same bytes.
-- [ ] T062 Via `phase-implementer`, implement E-5 in the validator
+- [X] T062 Via `phase-implementer`, implement E-5 in the validator
   (`include/fixpp/wire/validator.hpp` and its source): hoist the Step 1 iterator out of the `for`
   init; check `it.fault()` at the **top of each iteration** (before the field checks, so T1's tag 0
   cannot surface as 373=2) and once **after the loop**; `malformed_tag` → return
