@@ -229,7 +229,7 @@ C-2 row, and the rows are one function, so the mechanism lands here with one anc
 - [X] T010 Via `phase-implementer`, add `enum class field_fault : std::uint8_t { none = 0,
   malformed_tag = 1, length_data_mismatch = 2 }` to `include/fixpp/wire/tag_scan.hpp` in namespace
   `fixpp::wire` (E-0). No include is added to either reader.
-- [ ] T011 Via `phase-implementer`, implement E-1 in `src/session/scan_frame_header.hpp`.
+- [X] T011 Via `phase-implementer`, implement E-1 in `src/session/scan_frame_header.hpp`.
   - Append the six members of E-1 to `FrameHeader`: `fault` (`fixpp::wire::field_fault`),
     `fault_length_tag` (`std::uint16_t`, "the tag of the field immediately before the faulting Data
     field … else 0"), `fault_offset` (`std::uint32_t`, instrument only: never emitted, never
