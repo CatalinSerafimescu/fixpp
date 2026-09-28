@@ -42,6 +42,10 @@
 // clarification Q2): the D-6 edges, an identity field read before the fault, and a
 // frame whose first fault decides the reason.
 //
+// RejectLoop_* (tasks.md T030; spec FR-003): a peer that answers each fixpp Reject with
+// a malformed Reject draws one fixpp Reject per malformed frame, and none for a
+// well-formed Reject.
+//
 // ReplayGuard_* (tasks.md T015; research R-12): the resend store walk classifies a
 // stored frame by the header scan's MsgType. The scan stops at its first fault, so
 // a stored admin frame with a fault before its 35 scans with no MsgType; such a
@@ -1161,6 +1165,62 @@ TEST(UnparseableFrameDisposition, TwoMalformedFields_MalformedTagFirst) {
                      .ref_tag = {},
                      .text = kTextMalformedTag};
     run_expected_n_cell(At::active, "D", kOrderFields, both);
+}
+
+// ── RejectLoop_* (tasks.md T030; spec FR-003; contract C-2 "A loop is bounded") ──
+//
+// A scripted peer that garbles every Reject it sends and rejects fixpp's Rejects: it
+// opens with a faulty Heartbeat, then answers each fixpp Reject with a malformed Reject
+// (45 = that Reject's MsgSeqNum) at the next in-sequence number, for kPeerRounds
+// rounds. Each fixpp Reject must answer exactly one peer frame, so the counts match.
+// The peer then sends a well-formed Reject, which must draw nothing: that last step is
+// a control (the no-reject-loop exemption for a well-formed frame, unchanged by 092).
+TEST(UnparseableFrameDisposition, RejectLoop_EachFixppRejectAnswersOnePeerFrame) {
+    constexpr int kPeerRounds = 3;
+    StateCell c{At::active};
+    c.enter();
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+
+    std::uint32_t peer_seq = 2;
+    int malformed_sent = 0;
+    int fixpp_rejects = 0;
+    std::string last_reject_seq;
+    c.fix.feed(*c.sess, make_raw_frame("0", peer_seq, kMalformedTag));
+    ++malformed_sent;
+    for (int round = 0;; ++round) {
+        auto const rejects = c.fix.sent_of_type("3");
+        EXPECT_EQ(c.fix.transport.sent_frames().size(), rejects.size())
+            << "round " << round << ": fixpp must send only Rejects";
+        EXPECT_EQ(rejects.size(), 1U)
+            << "round " << round << ": one fixpp Reject per malformed peer frame";
+        if (rejects.empty()) {
+            break;
+        }
+        fixpp_rejects += static_cast<int>(rejects.size());
+        EXPECT_EQ(extract_tag(rejects.front(), 45), std::to_string(peer_seq))
+            << "round " << round << ": the Reject answers the peer frame just sent";
+        last_reject_seq = extract_tag(rejects.front(), 34);
+        if (round == kPeerRounds) {
+            break;
+        }
+        ++peer_seq;
+        c.fix.feed(*c.sess,
+                   make_raw_frame("3", peer_seq,
+                                  "45=" + last_reject_seq + "\x01" + "373=0\x01" + kMalformedTag));
+        ++malformed_sent;
+    }
+    EXPECT_EQ(fixpp_rejects, malformed_sent)
+        << "each fixpp Reject must answer one malformed peer frame";
+
+    ++peer_seq;
+    c.fix.feed(*c.sess,
+               make_raw_frame("3", peer_seq, "45=" + last_reject_seq + "\x01" + "373=0\x01"));
+    EXPECT_TRUE(c.fix.transport.sent_frames().empty())
+        << "control: a well-formed Reject must draw nothing; Rejects="
+        << c.fix.sent_of_type("3").size();
+    EXPECT_EQ(c.sess->state(), fsm_state::Active) << "state after the well-formed Reject";
 }
 
 }  // namespace

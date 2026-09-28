@@ -517,6 +517,48 @@ TEST(SessionReject, NoRejectLoopOnInboundReject) {
         << "Active row: inbound Reject → session-level log, stay Active (I-5)";
 }
 
+// ── Test 2b: a malformed Reject IS rejected (092 FR-003, contract C-2) ───────
+//
+// The no-reject-loop exemption above holds for a well-formed Reject. A Reject whose
+// header scan finds a fault (here a malformed tag after 34) at the expected MsgSeqNum
+// draws one Reject (D-5): 45=2, 372=3, 373=0, no 371, and the fixed Text, spelled out
+// here rather than taken from the session's constants.
+TEST(SessionReject, MalformedInboundRejectIsRejected) {
+    RejectFixture f;
+    auto cfg = f.make_cfg("FIX.4.2");
+    Session sess(f.engine, cfg);
+    f.open_to_active(sess);
+
+    const std::size_t before = f.transport.sent_count();
+    auto reject_frame = make_raw_frame("FIX.4.2", "3", 2, "TW", "ISLD",
+                                       "45=1\x01"
+                                       "373=2\x01"
+                                       "9x9=1\x01");
+    f.feed(sess, reject_frame);
+
+    ASSERT_EQ(f.transport.sent_count(), before + 1)
+        << "a malformed inbound Reject must draw exactly one outbound frame, the Reject";
+    auto const out = f.transport.sent(before);
+    std::string const wire(reinterpret_cast<const char*>(out.data()), out.size());
+    // The value of `tag` in `wire`, matched only at a field start (after SOH).
+    auto const field = [&wire](std::string_view tag) -> std::string {
+        std::string const needle = "\x01" + std::string{tag} + "=";
+        auto pos = wire.find(needle);
+        if (pos == std::string::npos) {
+            return "<absent>";
+        }
+        pos += needle.size();
+        return wire.substr(pos, wire.find('\x01', pos) - pos);
+    };
+    EXPECT_EQ(field("35"), "3") << "the reply must be a Reject(35=3)";
+    EXPECT_EQ(field("45"), "2") << "Reject RefSeqNum(45)";
+    EXPECT_EQ(field("372"), "3") << "Reject RefMsgType(372)";
+    EXPECT_EQ(field("373"), "0") << "Reject SessionRejectReason(373)";
+    EXPECT_EQ(field("371"), "<absent>") << "Reject must carry no RefTagID(371)";
+    EXPECT_EQ(field("58"), "Garbled field: malformed tag") << "Reject Text(58)";
+    EXPECT_EQ(sess.state(), fsm_state::Active) << "the malformed Reject must not disconnect";
+}
+
 // ── Test 3: No-reject-loop on inbound malformed Logout ───────────────────────
 //
 // A malformed Logout(35=5) (CompID mismatch) arriving in Active state triggers

@@ -15,6 +15,11 @@
 // Anchors: data-model.md E5; contracts/admin_messages.hpp; spec FR-002..007.
 // [FIX-SL §4.2]–§4.6.
 //
+// 092-garbled-frame-reject (fixpp#507, contract C-2) scopes the no-reject-loop rule
+// stated at build_reject to a well-formed frame: a Reject or Logout the header scan
+// cannot read is Rejected. It follows the owner ruling
+// of 2026-09-27. claim-ok: the date names the ruling
+//
 // No asio::awaitable in this header. No std::mutex. ([const §XV.9]: safe.)
 #pragma once
 
@@ -149,7 +154,9 @@ struct logon_interpret_result {
 // ── Reject (35=3) ────────────────────────────────────────────────────────────
 // FR-007, [FIX-SL §4.5.4]. S-007.
 // RefSeqNum(45)/RefTagID(371)/RefMsgType(372)/SessionRejectReason(373).
-// No reject-loop: a malformed Reject/Logout is never itself rejected (I-5).
+// No reject-loop (I-5): a well-formed Reject/Logout that fails validation or
+// SendingTime is never itself rejected. A Reject/Logout whose header scan found a
+// fault is Rejected like any other faulty frame (092 contract C-2).
 
 // Build an outbound session-level Reject.
 // begin_string: negotiated FIX version string for tag 8 (FR-002/RC#4).

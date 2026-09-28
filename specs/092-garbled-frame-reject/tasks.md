@@ -457,7 +457,7 @@ as a pin or control in its test comment.
   each with and without PossDupFlag(43)=Y. Each draws a Reject, no advance, no ResendRequest and no
   too-low Logout. A faulty frame carrying a wrong CompID before the fault draws a Reject only, no
   disconnect (clarification Q2). A frame with two malformed fields reports the first one's reason.
-- [ ] T030 [US1] Via `phase-implementer`, the no-reject-loop supersession (FR-003, FR-014, C-2).
+- [X] T030 [US1] Via `phase-implementer`, the no-reject-loop supersession (FR-003, FR-014, C-2).
   - Rewrite `include/fixpp/session/admin_messages.hpp`'s sentence "a malformed Reject/Logout is
     never itself rejected (I-5)" to the scoped rule (it holds for a well-formed frame that fails
     validation or SendingTime; a faulty frame is Rejected), with a header comment naming the
