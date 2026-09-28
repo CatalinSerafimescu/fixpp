@@ -863,7 +863,7 @@ it in 092.
 
 ### Performance (`[const §VIII.2]`)
 
-- [ ] T069 Re-run T004's paired A-B-A-B against the post-simplify candidate head, same base worktree,
+- [X] T069 Re-run T004's paired A-B-A-B against the post-simplify candidate head, same base worktree,
   same procedure. Budget +5 % per case, min-per-tree. Over budget → the owner, with the per-leg
   figures; never relax it. Record in the evidence file §*Bench result*, then
   `git worktree remove --force /mnt/wsl/fixppbuild/092-base-wt`.
