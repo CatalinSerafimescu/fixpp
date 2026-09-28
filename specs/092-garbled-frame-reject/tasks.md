@@ -112,7 +112,7 @@ the population snapshots, and the label manifest (plan phase 0, quickstart §0).
     (R-9). A bench missing from that list has no execution gate.
   - The bench sources compile against the merge-base API: no new symbol.
 - [X] T003 Record the bench commit's `git patch-id --stable` in the evidence file §*Bench*.
-- [ ] T004 Run the paired baseline (R-9, quickstart §0.1).
+- [X] T004 Run the paired baseline (R-9, quickstart §0.1).
   - **Base:** a detached worktree at `/mnt/wsl/fixppbuild/092-base-wt` at the merge-base from T001,
     with only T002's commit cherry-picked. `git -C <wt> diff --stat <merge-base> -- src include`
     prints nothing.
@@ -254,7 +254,12 @@ C-2 row, and the rows are one function, so the mechanism lands here with one anc
   - `tests/session/coverage_adversarial_test.cpp`: rename `InboundFrameMalformedTagCharSkipped` and
     `InboundFrameTagWithoutEqualsSkipped` for the fault-record branch and give each an assertion
     that can go RED (`X35=…` in field 3 → D-8 disregard; the no-`=` field → D-7 or D-8 by its
-    position). Their RED comes with T025.
+    position). Their RED comes with T025. **Amended at T008 (2026-09-28):** both cells only call
+    `open()` before feeding. The default role is initiator, so the frame arrives in LogonSent and
+    hits row D-2, which already disconnects today. That assertion could not go RED. Each cell first
+    drives the session to Active with the Logon-ack the same fixture already uses (the Category C
+    cell's `35=A`/`34=1` frame). Then the D-8/D-7 assertion is reachable. The frame's MsgSeqNum
+    becomes 2 after the ack. Evidence file §*Populations*.
   - Any other hit is classified as "still holds, gains an assertion", "flips (RED first)",
     "renamed" or "mention only".
 - [ ] T013 Via `phase-implementer`, write the differential corpus (C-3 I-4, R-2 §1) in
