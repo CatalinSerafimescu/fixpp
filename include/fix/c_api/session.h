@@ -282,8 +282,10 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_close(fixpp_session_t* session);
  *     sequence number, is disregarded without advancing it; if the peer
  *     resends the same bytes, the session ends at the peer's next new message
  *     that is not a Heartbeat;
- *   - during a resend recovery, a faulty SequenceReset-GapFill at the expected
- *     sequence number is Rejected and not applied, and the session ends at the
+ *   - on an established session in a resend recovery, a faulty SequenceReset,
+ *     GapFill or Reset mode, whose third field is MsgType(35) and whose
+ *     MsgSeqNum(34) was read before the fault, is Rejected and not applied, so
+ *     the gap it would have closed stays open, and the session ends at the
  *     peer's next new message that is not a Heartbeat;
  *   - with a heartbeat interval set, a faulty frame does not count as inbound
  *     traffic, so a peer whose frames over the heartbeat interval and the
@@ -373,8 +375,10 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_acceptor_bound_endpoint(fixpp_sessi
  *     sequence number, is disregarded without advancing it; if the peer
  *     resends the same bytes, the session ends at the peer's next new message
  *     that is not a Heartbeat;
- *   - during a resend recovery, a faulty SequenceReset-GapFill at the expected
- *     sequence number is Rejected and not applied, and the session ends at the
+ *   - on an established session in a resend recovery, a faulty SequenceReset,
+ *     GapFill or Reset mode, whose third field is MsgType(35) and whose
+ *     MsgSeqNum(34) was read before the fault, is Rejected and not applied, so
+ *     the gap it would have closed stays open, and the session ends at the
  *     peer's next new message that is not a Heartbeat;
  *   - with a heartbeat interval set, a faulty frame does not count as inbound
  *     traffic, so a peer whose frames over the heartbeat interval and the
@@ -416,10 +420,11 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_send(fixpp_session_t* session,
  * inside a component or group is now a dictionary pair. An inbound message
  * carrying a malformed pair of that kind, which was delivered to `cb` before,
  * is now dropped: `cb` is not invoked. The session answers it with a session
- * Reject when its third field is MsgType(35) and its MsgSeqNum(34) was read
- * before the pair (092 contract C-2, rows D-5/D-6), and otherwise disregards
- * it (rows D-7/D-8/D-9); a pair mismatch before MsgSeqNum(34) is row D-7,
- * disregarded, not Rejected. The 1.10 clause below states the conditions.
+ * Reject when the session is established and has not sent a Logout, the
+ * message's third field is MsgType(35) and its MsgSeqNum(34) was read before
+ * the pair (092 contract C-2, rows D-5/D-6); otherwise it disregards it (rows
+ * D-7/D-8/D-9). A pair mismatch before MsgSeqNum(34) is row D-7, disregarded,
+ * not Rejected. The 1.10 clause below states the conditions.
  * Also (091 FR-020), a Logon carrying a Length immediately followed
  * by its paired Data whose counted extent reaches or passes the end of the
  * whole framed message, or whose following byte is not SOH (standard pairs
@@ -444,8 +449,10 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_send(fixpp_session_t* session,
  *     sequence number, is disregarded without advancing it; if the peer
  *     resends the same bytes, the session ends at the peer's next new message
  *     that is not a Heartbeat;
- *   - during a resend recovery, a faulty SequenceReset-GapFill at the expected
- *     sequence number is Rejected and not applied, and the session ends at the
+ *   - on an established session in a resend recovery, a faulty SequenceReset,
+ *     GapFill or Reset mode, whose third field is MsgType(35) and whose
+ *     MsgSeqNum(34) was read before the fault, is Rejected and not applied, so
+ *     the gap it would have closed stays open, and the session ends at the
  *     peer's next new message that is not a Heartbeat;
  *   - with a heartbeat interval set, a faulty frame does not count as inbound
  *     traffic, so a peer whose frames over the heartbeat interval and the
@@ -508,8 +515,10 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_register_callback(
  *     sequence number, is disregarded without advancing it; if the peer
  *     resends the same bytes, the session ends at the peer's next new message
  *     that is not a Heartbeat;
- *   - during a resend recovery, a faulty SequenceReset-GapFill at the expected
- *     sequence number is Rejected and not applied, and the session ends at the
+ *   - on an established session in a resend recovery, a faulty SequenceReset,
+ *     GapFill or Reset mode, whose third field is MsgType(35) and whose
+ *     MsgSeqNum(34) was read before the fault, is Rejected and not applied, so
+ *     the gap it would have closed stays open, and the session ends at the
  *     peer's next new message that is not a Heartbeat;
  *   - with a heartbeat interval set, a faulty frame does not count as inbound
  *     traffic, so a peer whose frames over the heartbeat interval and the
