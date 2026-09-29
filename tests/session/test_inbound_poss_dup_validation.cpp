@@ -525,7 +525,8 @@ TEST_F(PossDupValidationTest, AtExpected_OutOfRangeOrigSendingTime_ArmC) {
     ASSERT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(),
               static_cast<fixpp::session::seqnum_t>(2));
 
-    // The SendingTime of the fuzz seed seed_509_sendingtime_year_4048.
+    // 122 carries the out-of-range timestamp from the fuzz seed
+    // seed_509_sendingtime_year_4048 (there it is the SendingTime).
     auto frame = make_frame("D", /*seq=*/2, "TW", "ISLD",
                             "43=Y\x01"
                             "122=40480202-00:00:00.000\x01");

@@ -370,22 +370,19 @@ constexpr split_ns split_floored(std::int64_t ns) noexcept {
     // grammar, far inside std::int64_t, so the subtraction cannot overflow.
     if (static_cast<std::uint64_t>(epoch_sec - (kMin.sec + 1)) >=
         static_cast<std::uint64_t>(kMax.sec - kMin.sec - 1)) {
-        if (epoch_sec > kMax.sec || (epoch_sec == kMax.sec && ns_sub > kMax.sub)) {
-            return std::unexpected(error::wire_invalid_field_format);
-        }
-        if (epoch_sec < kMin.sec || (epoch_sec == kMin.sec && ns_sub < kMin.sub)) {
+        const std::pair at{epoch_sec, ns_sub};
+        if (at > std::pair{kMax.sec, kMax.sub} || at < std::pair{kMin.sec, kMin.sub}) {
             return std::unexpected(error::wire_invalid_field_format);
         }
     }
 
     // Compose as nanoseconds. utc_time_point is pinned to nanoseconds, so no
     // duration cast is needed (avoids truncation on libc++ where
-    // system_clock::duration is microseconds). A negative second with a fraction
-    // is composed from the next second up: that second's nanosecond product can
-    // lie below min() when the sum does not.
-    const std::int64_t ns_count = (epoch_sec < 0 && ns_sub > 0)
-                                      ? ((epoch_sec + 1) * kNsPerSec) + (ns_sub - kNsPerSec)
-                                      : (epoch_sec * kNsPerSec) + ns_sub;
+    // system_clock::duration is microseconds). The range check above makes the
+    // exact result representable, so modular unsigned arithmetic yields it.
+    const auto ns_count = static_cast<std::int64_t>(
+        (static_cast<std::uint64_t>(epoch_sec) * static_cast<std::uint64_t>(kNsPerSec)) +
+        static_cast<std::uint64_t>(ns_sub));
     return utc_time_point{std::chrono::nanoseconds{ns_count}};
 }
 

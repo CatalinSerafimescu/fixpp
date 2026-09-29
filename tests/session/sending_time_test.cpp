@@ -260,7 +260,7 @@ std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag_wa
 //
 // ── FILE-SPECIFIC ADDENDA (everything above is verbatim from the siblings) ───
 //
-// `open_to_active` and `feed` take the `Session&` from their caller, so their drains
+// Every fixture helper takes the `Session&` from its caller, so its drains
 // also run while the caller's `sess` is alive -- the same "scope that still owns that
 // storage" rule, reached through a parameter rather than a block-local. The same holds
 // for the frame each one spans into, stated as the CONDITION rather than as a list of
@@ -293,8 +293,8 @@ std::string extract_field(std::span<const std::byte> frame, std::uint32_t tag_wa
 //
 // What follows, per site rather than per file: a waiter can exist only where the session
 // has REACHED Active. That is the case at `feed`, and conditionally at
-// `open_to_active/logon` when the drain itself performs the transition. At
-// `open_to_active/open` and at every TEST-body site the session is at LogonSent or
+// `open_to_active/logon` when the drain itself performs the transition. At every
+// `open()` site, in a fixture helper or a TEST body, the session is at LogonSent or
 // NotConnected and the loop was never spawned, so `cancel_sleeps()` there is exactly the
 // harmless superset -- kept for uniformity, not because it releases anything. Do not
 // read "the clause holds in this file" as "the cancel is load-bearing at this site".
@@ -407,6 +407,20 @@ struct SendingTimeFixture {
         }
         ASSERT_TRUE(fut2.get().has_value()) << "Logon-ack failed";
         ASSERT_EQ(sess.state(), fsm_state::Active);
+    }
+
+    // Open `sess` as an acceptor; true once it waits in NotConnected.
+    bool open_acceptor(Session& sess, const char* name) {
+        auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
+        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+            fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, name);
+            ADD_FAILURE() << fixpp::test_support::kWindowMiss << name;
+            return false;
+        }
+        const bool opened = fut.get().has_value();
+        EXPECT_TRUE(opened) << name << ": open() failed";
+        EXPECT_EQ(sess.state(), fsm_state::NotConnected) << name;
+        return opened && sess.state() == fsm_state::NotConnected;
     }
 
     void feed(Session& sess, std::span<const std::byte> frame) {
@@ -696,6 +710,32 @@ TEST(SendingTimeIntegration, MissingSendingTimeInLogonReceivedRejects) {
                                                 "MissingSendingTimeInLogonReceivedRejects");
 }
 
+// LogonSent's Logon-path disposition: Logout only, no standalone Reject, then
+// Disconnected. Returns the Logout's Text(58).
+std::string expect_logon_ack_logout_only(const TransportDouble& transport, std::size_t before,
+                                         const Session& sess, const char* context) {
+    bool found_reject = false;
+    bool found_logout = false;
+    std::string logout_text;
+    for (std::size_t i = before; i < transport.sent_count(); ++i) {
+        auto mt = extract_field(transport.sent(i), 35);
+        if (mt == "3") {
+            found_reject = true;
+        }
+        if (mt == "5") {
+            found_logout = true;
+            logout_text = extract_field(transport.sent(i), 58);
+        }
+    }
+    EXPECT_FALSE(found_reject) << context
+                               << ": D-3 LogonSent-special: "
+                                  "NO standalone Reject(35=3) before establishment";
+    EXPECT_TRUE(found_logout) << context
+                              << ": must emit Logout(35=5) as logout-with-error response";
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected) << context << ": session must be Disconnected";
+    return logout_text;
+}
+
 // ── T017 [US3] — FR-009: missing/malformed SendingTime on inbound Logon (LogonSent) ──
 //
 // D-3 LogonSent-special path: NO standalone Reject before establishment.
@@ -790,33 +830,10 @@ TEST(SendingTimeIntegration, MalformedSendingTimeOnLogonEmitsLogoutOnly) {
     f.feed(sess, malformed_logon);
 
     // Must NOT emit Reject(35=3). MUST emit Logout(35=5). Session → Disconnected.
-    bool found_reject = false;
-    bool found_logout = false;
-    bool found_logout_text = false;
-    for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
-        auto mt = extract_field(f.transport.sent(i), 35);
-        if (mt == "3") {
-            found_reject = true;
-        }
-        if (mt == "5") {
-            found_logout = true;
-            auto text = extract_field(f.transport.sent(i), 58);
-            if (!text.empty()) {
-                found_logout_text = true;
-            }
-        }
-    }
-
-    EXPECT_FALSE(found_reject)
-        << "MalformedSendingTimeOnLogonEmitsLogoutOnly: D-3 LogonSent-special: "
-           "NO standalone Reject(35=3) before establishment";
-    EXPECT_TRUE(found_logout)
-        << "MalformedSendingTimeOnLogonEmitsLogoutOnly: must emit Logout(35=5) "
-           "as logout-with-error response";
-    EXPECT_TRUE(found_logout_text)
+    EXPECT_FALSE(expect_logon_ack_logout_only(f.transport, before, sess,
+                                              "MalformedSendingTimeOnLogonEmitsLogoutOnly")
+                     .empty())
         << "MalformedSendingTimeOnLogonEmitsLogoutOnly: Logout must carry Text(58) error";
-    EXPECT_EQ(sess.state(), fsm_state::Disconnected)
-        << "MalformedSendingTimeOnLogonEmitsLogoutOnly: session must be Disconnected";
 }
 
 // ── fixpp#509: a SendingTime outside the utc_time_point range ────────────────
@@ -833,22 +850,30 @@ constexpr std::string_view kYear4048 = "40480202-00:00:00.000";
 // from this clock is a whole pre-epoch second.
 std::chrono::seconds year4048_wrapped_to_seconds() {
     using namespace std::chrono;
-    constexpr std::int64_t kNsPerSec = 1'000'000'000;
     const auto day = sys_days{year{4048} / February / 2};
     const auto sec = duration_cast<seconds>(day.time_since_epoch()).count();
-    const auto wrapped = static_cast<std::int64_t>(static_cast<std::uint64_t>(sec) *
-                                                   static_cast<std::uint64_t>(kNsPerSec));
-    std::int64_t floor_sec = wrapped / kNsPerSec;
-    if (wrapped % kNsPerSec < 0) {
-        --floor_sec;
-    }
-    return seconds{floor_sec};
+    const auto wrapped =
+        static_cast<std::int64_t>(static_cast<std::uint64_t>(sec) * 1'000'000'000ULL);
+    return floor<seconds>(nanoseconds{wrapped});
 }
 
-// Acceptor: the 038 guard's disposition, Reject(371=52, 373=10) then Disconnected,
-// with no Logon reply.
-void expect_acceptor_logon_refused(SendingTimeFixture& f, const Session& sess, std::size_t before,
-                                   const char* context) {
+// An acceptor on `f` is fed a Logon carrying kYear4048 and must take the 038
+// guard's disposition: Reject(371=52, 373=10) then Disconnected, with no Logon
+// reply.
+void expect_year4048_acceptor_logon_refused(SendingTimeFixture& f, const char* name) {
+    auto cfg = f.make_cfg("FIX.4.2");
+    cfg.role = fixpp::session::session_role::acceptor;
+    Session sess(f.engine, cfg);
+    if (!f.open_acceptor(sess, name)) {
+        return;
+    }
+
+    const std::size_t before = f.transport.sent_count();
+    auto peer_logon = make_frame_with_sending_time("FIX.4.2", "A", 1, "TW", "ISLD", kYear4048,
+                                                   "98=0\x01"
+                                                   "108=30\x01");
+    f.feed(sess, peer_logon);
+
     bool found_reject = false;
     bool found_logon = false;
     for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
@@ -861,64 +886,22 @@ void expect_acceptor_logon_refused(SendingTimeFixture& f, const Session& sess, s
             found_logon = true;
         }
     }
-    EXPECT_TRUE(found_reject) << context << ": must emit Reject(35=3, 371=52, 373=10)";
-    EXPECT_FALSE(found_logon) << context << ": must not answer with a Logon";
-    EXPECT_EQ(sess.state(), fsm_state::Disconnected) << context;
+    EXPECT_TRUE(found_reject) << name << ": must emit Reject(35=3, 371=52, 373=10)";
+    EXPECT_FALSE(found_logon) << name << ": must not answer with a Logon";
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected) << name;
 }
 
 TEST(SendingTimeIntegration, Year4048SendingTimeOnAcceptorLogonIsRefused) {
     SendingTimeFixture f;
-    auto cfg = f.make_cfg("FIX.4.2");
-    cfg.role = fixpp::session::session_role::acceptor;
-    Session sess(f.engine, cfg);
-
-    auto fut_open = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
-    if (!fixpp::test_support::run_window_then_ready(f.ioc, fut_open, 200ms)) {
-        fixpp::test_support::cancel_and_drain_or_report(
-            f.ioc, *f.clock, "Year4048SendingTimeOnAcceptorLogonIsRefused/open");
-        ADD_FAILURE() << fixpp::test_support::kWindowMiss
-                      << "Year4048SendingTimeOnAcceptorLogonIsRefused/open";
-        return;
-    }
-    ASSERT_TRUE(fut_open.get().has_value()) << "open() failed";
-    ASSERT_EQ(sess.state(), fsm_state::NotConnected);
-
-    const std::size_t before = f.transport.sent_count();
-    auto peer_logon = make_frame_with_sending_time("FIX.4.2", "A", 1, "TW", "ISLD", kYear4048,
-                                                   "98=0\x01"
-                                                   "108=30\x01");
-    f.feed(sess, peer_logon);
-
-    expect_acceptor_logon_refused(f, sess, before, "Year4048SendingTimeOnAcceptorLogonIsRefused");
+    expect_year4048_acceptor_logon_refused(f, "Year4048SendingTimeOnAcceptorLogonIsRefused");
 }
 
 // The clock stands where a wrapped parse would put kYear4048, so only a refused
 // parse keeps the Logon out.
 TEST(SendingTimeIntegration, Year4048SendingTimeOnAcceptorLogonIsRefusedAtTheWrappedTime) {
     SendingTimeFixture f(year4048_wrapped_to_seconds());
-    auto cfg = f.make_cfg("FIX.4.2");
-    cfg.role = fixpp::session::session_role::acceptor;
-    Session sess(f.engine, cfg);
-
-    auto fut_open = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
-    if (!fixpp::test_support::run_window_then_ready(f.ioc, fut_open, 200ms)) {
-        fixpp::test_support::cancel_and_drain_or_report(
-            f.ioc, *f.clock, "Year4048SendingTimeOnAcceptorLogonIsRefusedAtTheWrappedTime/open");
-        ADD_FAILURE() << fixpp::test_support::kWindowMiss
-                      << "Year4048SendingTimeOnAcceptorLogonIsRefusedAtTheWrappedTime/open";
-        return;
-    }
-    ASSERT_TRUE(fut_open.get().has_value()) << "open() failed";
-    ASSERT_EQ(sess.state(), fsm_state::NotConnected);
-
-    const std::size_t before = f.transport.sent_count();
-    auto peer_logon = make_frame_with_sending_time("FIX.4.2", "A", 1, "TW", "ISLD", kYear4048,
-                                                   "98=0\x01"
-                                                   "108=30\x01");
-    f.feed(sess, peer_logon);
-
-    expect_acceptor_logon_refused(f, sess, before,
-                                  "Year4048SendingTimeOnAcceptorLogonIsRefusedAtTheWrappedTime");
+    expect_year4048_acceptor_logon_refused(
+        f, "Year4048SendingTimeOnAcceptorLogonIsRefusedAtTheWrappedTime");
 }
 
 // Initiator: the Logon-ack guard names the fault it saw in Text(58).
@@ -944,23 +927,9 @@ TEST(SendingTimeIntegration, Year4048SendingTimeOnLogonAckIsMalformed) {
                                                   "108=30\x01");
     f.feed(sess, logon_ack);
 
-    bool found_reject = false;
-    std::string logout_text;
-    bool found_logout = false;
-    for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
-        auto mt = extract_field(f.transport.sent(i), 35);
-        if (mt == "3") {
-            found_reject = true;
-        }
-        if (mt == "5") {
-            found_logout = true;
-            logout_text = extract_field(f.transport.sent(i), 58);
-        }
-    }
-    EXPECT_FALSE(found_reject) << "Logon-ack path emits no standalone Reject";
-    EXPECT_TRUE(found_logout) << "Logon-ack path must emit Logout(35=5)";
-    EXPECT_EQ(logout_text, "SendingTime(52) malformed");
-    EXPECT_EQ(sess.state(), fsm_state::Disconnected);
+    EXPECT_EQ(expect_logon_ack_logout_only(f.transport, before, sess,
+                                           "Year4048SendingTimeOnLogonAckIsMalformed"),
+              "SendingTime(52) malformed");
 }
 
 // Established session: Guard (3)'s Reject(371=52, 373=10), Logout, Disconnected.

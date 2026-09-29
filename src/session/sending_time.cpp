@@ -14,6 +14,7 @@
 //
 // Anchors: data-model.md E8; research D-3/D-5/D-8; contracts/sending_time.hpp;
 // spec FR-011/FR-013; [FIX-SL §4.2.3].
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <expected>
@@ -55,9 +56,10 @@ static_assert(std::numeric_limits<fixpp::core::utc_time_point::rep>::digits <=
     const auto in_ns = inbound_sending_time.time_since_epoch().count();
     const auto now_ns = effective_now.time_since_epoch().count();
     // Larger minus smaller, in modular unsigned arithmetic, is the exact distance.
+    const auto hi_ns = std::max(in_ns, now_ns);
+    const auto lo_ns = std::min(in_ns, now_ns);
     const std::uint64_t delta_ns =
-        in_ns >= now_ns ? static_cast<std::uint64_t>(in_ns) - static_cast<std::uint64_t>(now_ns)
-                        : static_cast<std::uint64_t>(now_ns) - static_cast<std::uint64_t>(in_ns);
+        static_cast<std::uint64_t>(hi_ns) - static_cast<std::uint64_t>(lo_ns);
     // A max_latency whose nanosecond count does not fit is wider than any distance.
     constexpr std::uint64_t kNsPerSec = 1'000'000'000;
     constexpr std::uint64_t kMaxU64 = std::numeric_limits<std::uint64_t>::max();
