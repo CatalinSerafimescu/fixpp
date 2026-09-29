@@ -2439,6 +2439,20 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::dispose_unparseable_(
 // NOLINTNEXTLINE(readability-function-size,hicpp-function-size)
 asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
     std::span<const std::byte> frame) noexcept {
+    // fixpp#518: true when a Logon arm must stop after a resume, because the session
+    // left the state the arm expects while the arm was suspended. The writer that
+    // matters is close(), which an application can post from a callback the arm fires
+    // (Engine::lookup() already returns the session) or from another thread, and which
+    // owns the teardown once it begins. The arm then returns success: the frame was
+    // handled and the session is closed, as in the Disconnected row. It writes no
+    // state, sends no frame and spawns no liveness loop. `closing` is the signal
+    // because close() sets it before it can yield the strand, while a graceful
+    // close() leaves the FSM in the arm's state until its phase 1 writes. The FSM term
+    // covers `closed_drained` too: close() writes Disconnected before it gets there.
+    // `never_opened` is not a close.
+    static constexpr auto logon_arm_superseded = [](Session const& s, fsm_state expected) noexcept {
+        return s.state_ == lifecycle::closing || s.fsm_state_ != expected;
+    };
     // 070-fix44-closeout S-030: negotiated MaxMessageSize(383) enforcement. Once
     // established (Active), an inbound frame exceeding the size WE advertised is a
     // negotiated-contract violation → disconnect (distinct from the absolute
@@ -2928,12 +2942,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // reply build AND emit. Build/emit failure → Disconnected. [009 spec.md FR-005; 005
             // data-model.md's `NotConnected` row "reply Logon, agreed HeartBtInt"]
             //
-            // fixpp#518: a close() posted from another thread can run while the hydrate
-            // or the counter check above yields; a graceful one is still under way (its
-            // store flush) when the arm resumes. It owns the teardown: no LogonReceived,
-            // no reply. Same disposition as the guard after the reply emit below.
-            if (state_ == lifecycle::closing || state_ == lifecycle::closed_drained ||
-                fsm_state_ != fsm_state::NotConnected) {
+            // fixpp#518: a close() may have run while hydrate or the counter check yielded.
+            if (logon_arm_superseded(*this, fsm_state::NotConnected)) {
                 co_return fixpp::core::expected_t<void>{};
             }
             record_state_transition_(fsm_state::LogonReceived);
@@ -3003,12 +3013,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         .by_peer_request = peer_sent_reset});
                 }
 
-                // fixpp#518: a close() posted from another thread can run while the
-                // 141=Y reset or persist above yields. It owns the teardown: no reply
-                // built or sent after it began. After the reset event, which reports a
-                // reset that did happen.
-                if (state_ == lifecycle::closing || state_ == lifecycle::closed_drained ||
-                    fsm_state_ != fsm_state::LogonReceived) {
+                // fixpp#518: a close() may have run while the 141=Y reset or persist yielded.
+                if (logon_arm_superseded(*this, fsm_state::LogonReceived)) {
                     co_return fixpp::core::expected_t<void>{};
                 }
 
@@ -3072,18 +3078,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     record_state_transition_(fsm_state::Disconnected);
                     co_return std::unexpected(emit_r.error());
                 }
-                // fixpp#518: an application can post close() from the reply's toAdmin
-                // (Engine::lookup() already returns this session), and it runs while the
-                // write above is suspended. That close() owns the teardown, so the arm
-                // stops here: no 789 honour frames, no Active, no onLogon, no persist,
-                // and no liveness loop spawned after close() joined the loop count.
-                // The signal is the lifecycle state, which close() leaves `open` before
-                // it can yield the strand; the FSM alone misses a graceful close(), whose
-                // phase 1 leaves LogonReceived in place until its Logout is written.
-                // Success, not an error: the frame was handled and the session is closed
-                // (the Disconnected row's disposition).
-                if (state_ == lifecycle::closing || state_ == lifecycle::closed_drained ||
-                    fsm_state_ != fsm_state::LogonReceived) {
+                // fixpp#518: a close() may have run during the reply write.
+                if (logon_arm_superseded(*this, fsm_state::LogonReceived)) {
                     co_return fixpp::core::expected_t<void>{};
                 }
             }
@@ -3100,11 +3096,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 if (!*h789) co_return fixpp::core::expected_t<void>{};
             }
 
-            // fixpp#518 extends RC#B's gate: Active also requires that no close() began
-            // while the 789 honour above was suspended (its GapFill fires toAdmin before
-            // its write). Same disposition as after the reply emit.
-            if (state_ == lifecycle::closing || state_ == lifecycle::closed_drained ||
-                fsm_state_ != fsm_state::LogonReceived) {
+            // fixpp#518: a close() may have run during the 789 honour's writes.
+            if (logon_arm_superseded(*this, fsm_state::LogonReceived)) {
                 co_return fixpp::core::expected_t<void>{};
             }
 
@@ -4646,12 +4639,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // Unknown wire value → leave Unknown (cannot map to application_version).
             }
 
-            // fixpp#518: a close() posted from another thread can run while the 141=Y
-            // reset or persists above yield. It owns the teardown: no 789 honour frame
-            // (Logout, GapFill, replay) built after it began. Same disposition as the
-            // guard before Active below.
-            if (state_ == lifecycle::closing || state_ == lifecycle::closed_drained ||
-                fsm_state_ != fsm_state::LogonSent) {
+            // fixpp#518: a close() may have run while the 141=Y reset or persists yielded.
+            if (logon_arm_superseded(*this, fsm_state::LogonSent)) {
                 co_return fixpp::core::expected_t<void>{};
             }
 
@@ -4672,14 +4661,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 if (!*h789) co_return fixpp::core::expected_t<void>{};
             }
 
-            // fixpp#518: the session is published before its read pump starts, so an
-            // application can post close() from a toAdmin this arm fires (the 789
-            // honour's GapFill) and it runs while the arm is suspended. That close()
-            // owns the teardown: no Active, no onLogon, no persist, no liveness loop.
-            // Success, as on the acceptor arm: the frame was handled. This arm is reached
-            // from run_read_pump, where an error would stop the pump and close() again.
-            if (state_ == lifecycle::closing || state_ == lifecycle::closed_drained ||
-                fsm_state_ != fsm_state::LogonSent) {
+            // fixpp#518: a close() may have run during the 789 honour's writes.
+            if (logon_arm_superseded(*this, fsm_state::LogonSent)) {
                 co_return fixpp::core::expected_t<void>{};
             }
 
