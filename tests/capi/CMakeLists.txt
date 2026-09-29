@@ -179,16 +179,17 @@ target_compile_definitions(capi_send_recv_test PRIVATE FIXPP_TEST_HOOKS)
 #
 # capi_send_recv_positive — all tests EXCEPT the ASan UAF witness and the
 #   logon-refusal cells (091 FR-020's CapiLogonMalformedCount.*, which run only in
-#   capi_logon_malformed_count, and 092's CapiLogonMalformedTag.*, which run only
-#   in capi_logon_malformed_tag): must PASS normally, including under ASan
-#   (no WILL_FAIL).
+#   capi_logon_malformed_count, 092's CapiLogonMalformedTag.*, which run only
+#   in capi_logon_malformed_tag, and 092's CapiEstablishedMalformedFrame.*, which
+#   run only in capi_established_malformed_frame): must PASS normally, including
+#   under ASan (no WILL_FAIL).
 # capi_send_recv_uaf_negative — ONLY the ASan witness: WILL_FAIL under ASan
 #   (the process aborts on the deliberate stack-use-after-return); the test is
 #   #if-guarded in the source, so without ASan it does not exist and the
 #   negative entry exits 0 (no WILL_FAIL needed outside ASan).
 add_test(NAME capi_send_recv_positive
     COMMAND capi_send_recv_test
-        --gtest_filter=-CapiSendRecv.InboundHandleUseAfterReturnCaughtUnderAsan:CapiLogonMalformedCount.*:CapiLogonMalformedTag.*)
+        --gtest_filter=-CapiSendRecv.InboundHandleUseAfterReturnCaughtUnderAsan:CapiLogonMalformedCount.*:CapiLogonMalformedTag.*:CapiEstablishedMalformedFrame.*)
 add_test(NAME capi_send_recv_uaf_negative
     COMMAND capi_send_recv_test
         --gtest_filter=CapiSendRecv.InboundHandleUseAfterReturnCaughtUnderAsan)
@@ -198,6 +199,9 @@ set_tests_properties(capi_logon_malformed_count PROPERTIES LABELS "capi;091")
 add_test(NAME capi_logon_malformed_tag
     COMMAND capi_send_recv_test --gtest_filter=CapiLogonMalformedTag.*)
 set_tests_properties(capi_logon_malformed_tag PROPERTIES LABELS "capi;092")
+add_test(NAME capi_established_malformed_frame
+    COMMAND capi_send_recv_test --gtest_filter=CapiEstablishedMalformedFrame.*)
+set_tests_properties(capi_established_malformed_frame PROPERTIES LABELS "capi;092")
 if(FIXPP_ENABLE_ASAN)
     set_tests_properties(capi_send_recv_uaf_negative PROPERTIES WILL_FAIL TRUE)
 endif()
