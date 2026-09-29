@@ -542,9 +542,10 @@ TEST_F(PossDupValidationTest, AtExpected_OutOfRangeOrigSendingTime_ArmC) {
 }
 
 // A 52 outside that range is unparseable too. Guard 3 exempts Reject(35=3) and
-// Logout(35=5), so on those MsgTypes it reaches Stage-1 next to a parseable 122 and
-// takes the fall-through for an unparseable 52 (L-509-1): never a comparison against
-// a wrapped 52. Pins L-509-1's fall-through; flips if L-509-1 is resolved.
+// Logout(35=5), so on those MsgTypes, when the message reaches Stage-1, an
+// unparseable 52 next to a parseable 122 takes the fall-through (L-509-1): never a
+// comparison against a wrapped 52. Pins L-509-1's fall-through; flips if L-509-1 is
+// resolved.
 
 TEST_F(PossDupValidationTest, AdminPossDup_OutOfRangeSendingTime_FallsThrough) {
     auto cfg = make_cfg();
