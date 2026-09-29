@@ -982,7 +982,7 @@ it in 092.
   091's rule for the 1.10 note and any session-recovery row whose behaviour 092 changes; add or
   update the matching `spec/coverage-index.md` entries, naming this feature's witnesses (T005, the
   T025 anchors, the T035 persistence cases, T045, T051/T052).
-- [ ] T082 **Feature-completeness audit (the FINAL task).** Assert against the merged tree:
+- [X] T082 **Feature-completeness audit (the FINAL task).** Assert against the merged tree:
   - (i) every `tasks.md` row is `[X]` or carries an explicit waiver rationale;
   - (ii) every FR-001…FR-019 and SC-001…SC-010 maps to a landed test AND a landed implementation;
   - (iii) every feature-owned OFFICIAL catalogue row is `done`, with a matching `coverage-index.md`
