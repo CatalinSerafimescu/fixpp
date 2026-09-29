@@ -607,7 +607,7 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogonLogout) {
 // suspended owns the teardown: the arm must not write a state over close()'s
 // Disconnected, fire onLogon, emit another admin frame, or spawn a liveness loop that
 // close() has already joined past. No store is parked: each cell runs over a real
-// loopback socket, and the stores below yield only where a MemoryStore does.
+// loopback socket, and no store operation waits on the test.
 namespace {
 
 namespace sess = fixpp::session;
