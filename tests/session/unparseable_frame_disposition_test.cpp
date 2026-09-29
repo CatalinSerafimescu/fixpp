@@ -101,6 +101,12 @@
 // and of a malformed SignatureLength(93)/Signature(89) pair. The section comment above
 // any_state_name states how the scripted-peer runs are pinned.
 //
+// GuardPrecedence_*, OffExpectedSequenceReset_*, ToAdmin_* (tasks.md T082; spec FR-002,
+// FR-010, FR-013): a faulty frame is disposed of before the BeginString, TargetCompID and
+// SendingTime guards; a faulty SequenceReset above or below the expected number never
+// applies NewSeqNo; and the 092 Reject is passed to toAdmin. The section comment
+// above each group states its cells.
+//
 // Anchors: specs/092-garbled-frame-reject/spec.md SC-001, FR-007;
 //          contracts/unparseable-frame-disposition.md C-2 (D-4) and its Reject contents;
 //          fixpp#507 (the T076 table and reproducer).
@@ -3170,6 +3176,184 @@ TEST(UnparseableFrameDisposition, Disclosed_L4_Active_MalformedSignaturePair_Rea
 }
 TEST(UnparseableFrameDisposition, Disclosed_L4_LogonReceived_MalformedSignaturePair_Reason5) {
     run_expected_n_cell(At::logon_received, "D", kOrderFields, kSignatureShape);
+}
+
+// ── GuardPrecedence_* (tasks.md T082; spec FR-002, edge case "Wrong CompID or
+// BeginString"; clarification A-3) ───────────────────────────────────────────────
+//
+// In Active, a faulty NewOrderSingle at N=2 whose header, before the fault, carries a
+// value a well-formed-frame guard acts on: a BeginString(8) other than the session's,
+// a TargetCompID(56) other than its SenderCompID, or a SendingTime(52) outside the
+// accuracy threshold of the fixture clock. The fault branch runs first, so the frame
+// draws exactly the D-5 Reject and the conformant Heartbeat at 3 is in sequence. Each
+// cell also feeds the same frame without the fault to a fresh session, which must meet
+// the guard: that control shows the chosen value does trip the guard.
+// Inbound validation is off in these cells, so the validate gate, which sits between the
+// fault branch and the guards when validation is on, does not act on the frame whatever
+// the branch's position. The frames go to on_inbound_frame directly, so the
+// Framer is not exercised here; the engine's first-frame routing read of 8/49/56 is
+// out of FR-001's scope.
+// To check a cell, move the fault branch of the LogonReceived/Active arm of
+// Session::on_inbound_frame to after the guard concerned in a scratch copy: the cell
+// must fail.
+
+enum class GuardAction : std::uint8_t { silent_disconnect, sending_time_reject_logout };
+
+// The header of a NewOrderSingle at 34=2, then its order fields, then `tail`.
+std::vector<std::byte> guard_frame(std::string_view begin_string, std::string_view target,
+                                   std::string_view sending_time, std::string const& tail) {
+    return wrap_body(std::string{"35=D\x01"} + "34=2\x01" + "49=TW\x01" +
+                         "52=" + std::string{sending_time} + "\x01" + "56=" + std::string{target} +
+                         "\x01" + kOrderFields + tail,
+                     begin_string);
+}
+
+void run_guard_precedence_cell(std::string_view begin_string, std::string_view target,
+                               std::string_view sending_time, GuardAction control,
+                               std::string_view what) {
+    std::string const row = std::string{what} + " before the fault";
+    {
+        StateCell c{At::active, /*validate=*/false};
+        c.enter();
+        if (::testing::Test::HasFatalFailure()) {
+            return;
+        }
+        feed_faulty(c, guard_frame(begin_string, target, sending_time, kMalformedTag),
+                    want_reject("2", "D", kTagShape), row);
+        expect_heartbeat_in_sequence(c.fix, *c.sess, *c.app, 3, row + " (NextNumIn advanced)");
+    }
+
+    std::string const ctl = std::string{what} + " control (no fault)";
+    StateCell k{At::active, /*validate=*/false};
+    k.enter();
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    k.fix.feed(*k.sess, guard_frame(begin_string, target, sending_time, {}));
+    EXPECT_EQ(k.sess->state(), fsm_state::Disconnected)
+        << ctl << ": the guard must end the session";
+    EXPECT_EQ(k.app->from_app, 0) << ctl << ": the frame must not reach fromApp";
+    std::string types;
+    for (auto const& f : k.fix.transport.sent_frames()) {
+        types += " 35=" + extract_tag(f, 35);
+    }
+    if (control == GuardAction::silent_disconnect) {
+        EXPECT_TRUE(k.fix.transport.sent_frames().empty()) << ctl << ": sent:" << types;
+        return;
+    }
+    EXPECT_EQ(types, " 35=3 35=5") << ctl << ": expected the SendingTime Reject, then a Logout";
+    auto const rejects = k.fix.sent_of_type("3");
+    if (!rejects.empty()) {
+        EXPECT_EQ(extract_tag(rejects.front(), 373), "10") << ctl << ": Reject 373";
+        EXPECT_EQ(extract_tag(rejects.front(), 371), "52") << ctl << ": Reject 371";
+    }
+}
+
+TEST(UnparseableFrameDisposition, GuardPrecedence_WrongBeginString_D5RejectOnly) {
+    run_guard_precedence_cell("FIX.4.4", "ISLD", "20240101-00:00:00.000",
+                              GuardAction::silent_disconnect, "8=FIX.4.4");
+}
+TEST(UnparseableFrameDisposition, GuardPrecedence_WrongTargetCompId_D5RejectOnly) {
+    run_guard_precedence_cell("FIX.4.2", "WRONG", "20240101-00:00:00.000",
+                              GuardAction::silent_disconnect, "56=WRONG");
+}
+TEST(UnparseableFrameDisposition, GuardPrecedence_SendingTimeOutsideThreshold_D5RejectOnly) {
+    run_guard_precedence_cell("FIX.4.2", "ISLD", "20200101-00:00:00.000",
+                              GuardAction::sending_time_reject_logout, "52=20200101");
+}
+
+// ── OffExpectedSequenceReset_* (tasks.md T082; spec FR-010; contract C-2 D-4) ───
+//
+// A faulty SequenceReset, in Reset mode and in GapFill mode, both with NewSeqNo(36)=500
+// before the fault, at a MsgSeqNum above (34=5) and below (34=1, no PossDupFlag) the
+// expected N=2. C-2 row D-4 is keyed on the MsgType alone: the Reject (45 = the 34
+// sent, 372=4) is the only outbound frame, and a conformant Heartbeat at 2 is then
+// delivered in sequence, so NewSeqNo was not applied and NextNumIn did not move.
+// To check a cell, make dispose_unparseable_ apply NewSeqNo for a faulty SequenceReset
+// in a scratch copy: the cell must fail.
+
+// Test-fixture constants: a bad_alloc while building one before main aborts the
+// test binary, which fails the run loudly.
+// NOLINTBEGIN(bugprone-throwing-static-initialization,cert-err58-cpp)
+std::string const kResetModeFields = std::string{"123=N\x01"} + "36=500\x01";
+// NOLINTEND(bugprone-throwing-static-initialization,cert-err58-cpp)
+
+TEST(UnparseableFrameDisposition, OffExpectedSequenceReset_ResetMode_AboveN) {
+    run_not_expected_cell(At::active, "4", 5, kResetModeFields, kTagShape, "Reset mode at N+3");
+}
+TEST(UnparseableFrameDisposition, OffExpectedSequenceReset_ResetMode_BelowN) {
+    run_not_expected_cell(At::active, "4", 1, kResetModeFields, kTagShape, "Reset mode at N-1");
+}
+TEST(UnparseableFrameDisposition, OffExpectedSequenceReset_GapFill_AboveN) {
+    run_not_expected_cell(At::active, "4", 5, kGapFillFields, kTagShape, "GapFill at N+3");
+}
+TEST(UnparseableFrameDisposition, OffExpectedSequenceReset_GapFill_BelowN) {
+    run_not_expected_cell(At::active, "4", 1, kGapFillFields, kTagShape, "GapFill at N-1");
+}
+
+// ── ToAdmin_* (tasks.md T082; spec FR-013) ───────────────────────────────────
+//
+// The 092 Reject is passed to toAdmin like any other outbound session Reject: a D-5
+// faulty NewOrderSingle in Active draws exactly one toAdmin call, for a Reject(35=3)
+// carrying the 092 Text(58), and it is the Reject that is sent (same MsgSeqNum(34)).
+// Calls made while establishing the session are excluded by a snapshot.
+// To check the cell, skip fire_to_admin_ for a Reject with a Text(58) in
+// Session::emit_session_reject_ in a scratch copy: the cell must fail.
+
+// Records the MsgType(35), MsgSeqNum(34) and Text(58) of every toAdmin call.
+class ToAdminRecordingApplication final : public Application {
+public:
+    struct Seen {
+        std::string msg_type;
+        std::string seq;
+        std::string text;
+    };
+    std::vector<Seen> to_admin;
+    int from_app = 0;
+
+    void toAdmin(const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg,
+                 const SessionId& /*id*/) override {
+        auto const text = msg.get(58);
+        to_admin.push_back({.msg_type = std::string{msg.msg_type()},
+                            .seq = std::to_string(msg.msg_seq_num()),
+                            .text = text ? std::string{text->as_string()} : std::string{}});
+    }
+    fixpp::core::expected_t<void> fromApp(
+        const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
+        const SessionId& /*id*/) override {
+        ++from_app;
+        return {};
+    }
+};
+
+TEST(UnparseableFrameDisposition, ToAdmin_D5Reject_ObservedOnce) {
+    DispositionFixture fix;
+    auto const app = std::make_shared<ToAdminRecordingApplication>();
+    fix.engine.application = app;
+    Session sess{fix.engine, fix.make_cfg(/*validate=*/true)};
+    fix.open_to_active(sess);
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    std::size_t const before = app->to_admin.size();
+
+    fix.feed(sess, make_raw_frame("D", 2, kOrderFields + kMalformedCount));
+    expect_only_reject(fix, want_reject("2", "D", kCountShape), "FR-013 D-5");
+    EXPECT_EQ(app->from_app, 0) << "FR-013 D-5: the faulty frame never reaches fromApp";
+    EXPECT_EQ(app->to_admin.size(), before + 1U)
+        << "FR-013 D-5: the Reject must be observed by exactly one toAdmin call";
+    if (app->to_admin.size() <= before) {
+        return;
+    }
+    auto const& seen = app->to_admin.back();
+    EXPECT_EQ(seen.msg_type, "3") << "FR-013 D-5: toAdmin MsgType(35)";
+    EXPECT_EQ(seen.text, "Malformed field: Length does not match its Data field")
+        << "FR-013 D-5: toAdmin Text(58)";
+    auto const rejects = fix.sent_of_type("3");
+    if (!rejects.empty()) {
+        EXPECT_EQ(seen.seq, extract_tag(rejects.front(), 34))
+            << "FR-013 D-5: toAdmin saw a different MsgSeqNum(34) than the Reject sent";
+    }
 }
 }  // namespace
 }  // namespace fixpp::session::test
