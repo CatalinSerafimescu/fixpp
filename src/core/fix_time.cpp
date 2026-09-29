@@ -364,11 +364,18 @@ constexpr split_ns split_floored(std::int64_t ns) noexcept {
     // check itself cannot overflow.
     constexpr split_ns kMax = split_floored(utc_time_point::max().time_since_epoch().count());
     constexpr split_ns kMin = split_floored(utc_time_point::min().time_since_epoch().count());
-    if (epoch_sec > kMax.sec || (epoch_sec == kMax.sec && ns_sub > kMax.sub)) {
-        return std::unexpected(error::wire_invalid_field_format);
-    }
-    if (epoch_sec < kMin.sec || (epoch_sec == kMin.sec && ns_sub < kMin.sub)) {
-        return std::unexpected(error::wire_invalid_field_format);
+    // Fast path: one unsigned compare admits every second strictly inside the
+    // range, which holds any fraction. Only the two boundary seconds and those
+    // outside reach the exact check. epoch_sec is bounded by the four-digit-year
+    // grammar, far inside std::int64_t, so the subtraction cannot overflow.
+    if (static_cast<std::uint64_t>(epoch_sec - (kMin.sec + 1)) >=
+        static_cast<std::uint64_t>(kMax.sec - kMin.sec - 1)) {
+        if (epoch_sec > kMax.sec || (epoch_sec == kMax.sec && ns_sub > kMax.sub)) {
+            return std::unexpected(error::wire_invalid_field_format);
+        }
+        if (epoch_sec < kMin.sec || (epoch_sec == kMin.sec && ns_sub < kMin.sub)) {
+            return std::unexpected(error::wire_invalid_field_format);
+        }
     }
 
     // Compose as nanoseconds. utc_time_point is pinned to nanoseconds, so no
