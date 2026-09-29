@@ -796,7 +796,7 @@ TEST(EngineReadPumpTest, SessionTerminalCloseDeliversCloseNotifyToPeer_Fixes348)
 // fixpp#514; until then these cells pin the close.
 //
 // Each cell feeds one frame the Framer rejects, after the peer has read the
-// acceptor's Logon reply:
+// acceptor's Logon reply and the acceptor reports Active:
 //   - a bad CheckSum (wire_checksum_mismatch);
 //   - a BodyLength too small, so `10=` is not where BodyLength puts it
 //     (wire_invalid_body_length);
@@ -825,6 +825,13 @@ TEST(EngineReadPumpTest, SessionTerminalCloseDeliversCloseNotifyToPeer_Fixes348)
 namespace {
 
 constexpr auto kFaultCloseBudget = 4s;
+// Bound on the client's wait for the acceptor to report Active. It shares
+// kFaultCloseBudget with connect, handshake and the close itself, so it is a fraction
+// of it; heartbeat_interval (build_harness) is far above both.
+constexpr auto kActiveWaitBudget = kFaultCloseBudget / 4;
+static_assert(kActiveWaitBudget * 2 < kFaultCloseBudget,
+              "the Active wait must leave most of kFaultCloseBudget to the close");
+constexpr auto kActivePollStep = 1ms;
 // Carry capacity for the standalone Framer probe; any size above one Heartbeat works.
 constexpr std::size_t kFramerProbeCarry = 64U * 1024U;
 
@@ -837,8 +844,9 @@ struct FaultyFrameClient {
     std::optional<fixpp::core::expected_t<std::size_t>> terminal_read;
 };
 
-// Logs on, reads until the acceptor's Logon reply, sends `faulty`, then reads until
-// the connection ends. It never closes its own side.
+// Logs on, reads until the acceptor's Logon reply, waits for the acceptor to leave
+// LogonReceived, sends `faulty`, then reads until the connection ends. It never
+// closes its own side.
 asio::awaitable<void> run_client_faulty_frame(fixpp::transport::test::LoopbackTlsFixture& fixture,
                                               uint16_t acceptor_port,
                                               fixpp::session::Engine& engine,
@@ -875,7 +883,22 @@ asio::awaitable<void> run_client_faulty_frame(fixpp::transport::test::LoopbackTl
         }
         fc.saw_logon_reply = true;
         fc.acc = engine.lookup(acc_id);
-        if (fc.acc) fc.state_before_fault = fc.acc->state();
+        // The peer's read of the reply and the acceptor's resumption after its reply
+        // write are separate completions on this io_context, and either may run first;
+        // the acceptor enters Active only on the latter. Yield until it leaves
+        // LogonReceived, bounded, so the faulty frame meets an established session. A
+        // session still in LogonReceived at the bound is recorded as such and fails the
+        // precondition check.
+        if (fc.acc) {
+            asio::steady_timer poll{co_await asio::this_coro::executor};
+            auto const active_by = std::chrono::steady_clock::now() + kActiveWaitBudget;
+            while (fc.acc->state() == fsm_state::LogonReceived &&
+                   std::chrono::steady_clock::now() < active_by) {
+                poll.expires_after(kActivePollStep);
+                co_await poll.async_wait(asio::use_awaitable);
+            }
+            fc.state_before_fault = fc.acc->state();
+        }
 
         auto f_r = co_await fc.transport->async_write(std::span<const std::byte>{faulty});
         if (!f_r.has_value()) co_return;
