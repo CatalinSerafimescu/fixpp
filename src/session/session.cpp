@@ -3012,18 +3012,18 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         if (!p_r) co_return std::unexpected(p_r.error());
                     }
                 }
+                // fixpp#518: a close() may have run while the inbound restore or persist
+                // yielded.
+                if (logon_arm_superseded(*this, fsm_state::LogonReceived)) {
+                    co_return fixpp::core::expected_t<void>{};
+                }
+
                 // FR-018: emit the reset event once, after post-reset state is consistent,
                 // when any reset happened (knob-driven OR received-141). by_peer_request
                 // reflects whether the peer requested it via 141=Y.
                 if (cfg_.reset_on_logon || peer_sent_reset) {
                     emit_event(fixpp::session::session_event_sequence_numbers_reset{
                         .by_peer_request = peer_sent_reset});
-                }
-
-                // fixpp#518: a close() may have run while the inbound restore or persist
-                // yielded.
-                if (logon_arm_superseded(*this, fsm_state::LogonReceived)) {
-                    co_return fixpp::core::expected_t<void>{};
                 }
 
                 // RC#A (gate-b/r1-green): peek via manager (not bare field).
@@ -4530,6 +4530,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         auto po_r = co_await persist_outbound_advance_();
                         if (!po_r) co_return std::unexpected(po_r.error());
                     }
+                    // fixpp#518: a close() may have run while the outbound restore or
+                    // persist yielded.
+                    if (logon_arm_superseded(*this, fsm_state::LogonSent)) {
+                        co_return fixpp::core::expected_t<void>{};
+                    }
                     // 032 T010(d): FR-018 mode mapping — use the latch alone (C4 gate).
                     // by_peer_request=false iff fixpp sent 141=Y (own_logon_sent_reset_flag).
                     // C4 (latch alone) and C1 (latch && reset_before_send) are DISTINCT:
@@ -4655,12 +4660,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     negotiated_appl_version_ = *resolved;
                 }
                 // Unknown wire value → leave Unknown (cannot map to application_version).
-            }
-
-            // fixpp#518: a close() may have run while the outbound restore or persist
-            // yielded.
-            if (logon_arm_superseded(*this, fsm_state::LogonSent)) {
-                co_return fixpp::core::expected_t<void>{};
             }
 
             // 027 T015/T021 — initiator 789 honor (BEFORE Active transition).

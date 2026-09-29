@@ -62,6 +62,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <variant>
 #include <vector>
 
 #include "support/minimal_dictionary.hpp"
@@ -829,6 +830,8 @@ struct LogonCloseOutcome {
     // Physical order is write order only while the ring has not wrapped; the capture
     // checks it.
     std::vector<sess::fsm_state> ring;
+    // A session_event_sequence_numbers_reset is in the event ring at settle.
+    bool reset_event = false;
     std::size_t inflight_sleeps_after_settle = 0;
     bool stop_completed = false;
     std::size_t inflight_sleeps_after_stop = 0;
@@ -985,6 +988,9 @@ struct CaseRig {
             out.ring.assign(ring.begin(), ring.end());
             EXPECT_LT(out.ring.size(), 16U)
                 << "the state ring wrapped, so its physical order is not write order";
+            out.reset_event = std::ranges::any_of(app->held->recent_events(), [](auto const& ev) {
+                return std::holds_alternative<sess::session_event_sequence_numbers_reset>(ev);
+            });
         }
 
         if (c.cancel_sleeps_before_stop) {
@@ -1318,6 +1324,7 @@ TEST(LogonCloseDuringSuspension, AcceptorCloseDuringPeerResetPersistBuildsNoRepl
     ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
     expect_close_owns_teardown(o);
     expect_only_close_logout_after_close(o);
+    EXPECT_FALSE(o.reset_event) << "the arm emitted its reset event after close() began";
 }
 
 // Initiator control: no close. Asserts the initiator reaches Active with no
@@ -1386,6 +1393,7 @@ TEST(LogonCloseDuringSuspension, InitiatorCloseDuringOutboundRestoreBuildsNoHono
     ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
     expect_close_owns_teardown(o);
     expect_no_admin_after_close(o);
+    EXPECT_FALSE(o.reset_event) << "the arm emitted its reset event after close() began";
 }
 
 // Initiator: the peer's Logon-ack carries 141=Y and reset_on_disconnect is set.
