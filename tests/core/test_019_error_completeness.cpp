@@ -54,16 +54,21 @@ TEST(Error019Completeness, ExactSetEquality) {
         << "the 2 named 019 enumerators must occupy exactly slots 129-130 "
            "(no alias, none outside the block)";
 
-    // Message-table boundary: slot 131 is now 020-g2-business-messages'
-    // app_payload_malformed (the next append-only enumerator after the 019
-    // [129,130] block). The forward "unknown" boundary therefore moves to slot
-    // 132. The 020 exact-SET completeness of slot 131 is owned by the 020
-    // completeness gate (test_020_*); here we only assert the 019 block did not
-    // grow and that nothing exists beyond 020's 131. [const §X.4] append-only.
-    EXPECT_EQ(fixpp::core::error_message(static_cast<error>(132U)),
+    // Message-table boundary: later features append their own blocks after the
+    // 019 [129,130] block, each pinned exactly by its own completeness gate
+    // (test_0NN_*). The forward "unknown" boundary is the slot after the newest
+    // block's last enumerator (092's wire_length_data_mismatch); here we only
+    // assert the 019 block did not grow and that nothing exists beyond that
+    // boundary. [const §X.4] append-only.
+    // The cast names the slot one past the last enumerator on purpose: the
+    // assertion is that the slot has no message.
+    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
+    EXPECT_EQ(fixpp::core::error_message(static_cast<error>(
+                  static_cast<std::uint8_t>(error::wire_length_data_mismatch) + 1U)),
               std::string_view{"unknown error"})
-        << "slot 132 carries a message — a message-bearing enumerator was added "
-           "beyond the 020 boundary (slot 131); see [const §X.4] append-only review";
+        << "the slot after wire_length_data_mismatch carries a message — a "
+           "message-bearing enumerator was added beyond the 092 block; see "
+           "[const §X.4] append-only review";
 }
 
 // ── Slot values ─────────────────────────────────────────────────────────────

@@ -292,7 +292,9 @@ enum class error : std::uint8_t {
     session_msg_type_invalid_for_state = 72,  // FR-007, [FIX-SL §4.5.4] — message type not
                                               //   legal in the current FSM state (e.g. Heartbeat
                                               //   before Active). Surfaced as a session Reject
-                                              //   with RefMsgType. No reject loop (I-5).
+                                              //   with RefMsgType. No reject loop (I-5)
+                                              //   for a well-formed frame; a faulty frame
+                                              //   is dispositioned by 092 contract C-2.
                                               //   → FIXPP_ERR_SESSION_REJECT
     session_logout_timeout = 73,              // FR-005 (005 admin path) + 013 FR-008
                                               //   (FSM-driven graceful Logout timeout) —
@@ -783,6 +785,28 @@ enum class error : std::uint8_t {
                                   //   (8/9/34/49/52/56/10). No transmit, no
                                   //   seqnum consumption (INV-8).
                                   //   → C-ABI reserved (future mapping)
+    // ── 092-garbled-frame-reject (slots 132–133) ──────────────────────────
+    //    specs/092-garbled-frame-reject/data-model.md E-6. Append-only at the
+    //    next contiguous slots after 020's 131 per [const §X.4]; the exact-SET
+    //    completeness of the block is asserted by
+    //    tests/core/test_092_error_completeness.cpp. Returned only by
+    //    dictionary_driven_validator::validate (E-5, FR-012); OffsetTable::build's
+    //    codes are unchanged.
+    wire_invalid_tag_number = 132,    // FR-012 — the validator's field walk met a
+                                      //   malformed tag: a non-digit tag byte, a
+                                      //   tag above 0xFFFF, an empty tag, or no
+                                      //   '=' before SOH or the end. RefTagID is
+                                      //   not reported.
+                                      //   → SessionRejectReason 0;
+                                      //   → C-ABI FIXPP_ERR_WIRE_INVALID_FRAME
+    wire_length_data_mismatch = 133,  // FR-012 — the validator's field walk met a
+                                      //   Data value, counted by the Length field
+                                      //   right before it, that runs past the
+                                      //   buffer, reaches its end exactly, or is
+                                      //   not followed by SOH. RefTagID is the
+                                      //   Length tag.
+                                      //   → SessionRejectReason 5;
+                                      //   → C-ABI FIXPP_ERR_WIRE_INVALID_FRAME
 };
 
 // ── 035-filestore-io-offload: FR-021 store_* error-set freeze guard ──────────
@@ -1039,6 +1063,11 @@ using expected_t = std::expected<T, error>;
         // ── 020-g2-business-messages (slot 131) ───────────────────────────
         case error::app_payload_malformed:
             return "app: malformed opaque payload (rejected pre-seqnum)";
+        // ── 092-garbled-frame-reject (slots 132–133) ──────────────────────
+        case error::wire_invalid_tag_number:
+            return "wire: invalid tag number";
+        case error::wire_length_data_mismatch:
+            return "wire: Length/Data mismatch";
     }
     return "unknown error";
 }

@@ -59,3 +59,16 @@ add_bench_with_test_include(bench_heartbeat_cadence bench_heartbeat_cadence.cpp)
 # CompIdAuthorizationPolicy::authorize() latency: ≤ 5 µs p99 per SC-003 /
 # [const §VIII.2]. Does NOT need test-include headers (no Session; pure policy API).
 add_store_bench(bench_compid_authorize bench_compid_authorize.cpp)
+
+# 092-garbled-frame-reject (research R-9) — the inbound header scan and the clean
+# Active `on_inbound_frame` path, landed before any production edit so the
+# same sources build at the merge-base for the paired comparison
+# ([const §VIII.2]). Both use the real FIX44 dictionary (tests/support), so both
+# need FIXPP_DICT_DATA_DIR; the scan bench also includes the internal
+# src/session/scan_frame_header.hpp through the ${CMAKE_SOURCE_DIR} include root.
+add_bench_with_test_include(scan_frame_header_bench scan_frame_header_bench.cpp)
+add_bench_with_test_include(on_inbound_frame_bench  on_inbound_frame_bench.cpp)
+foreach(_092_bench scan_frame_header_bench on_inbound_frame_bench)
+  target_compile_definitions(${_092_bench} PRIVATE
+    "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
+endforeach()

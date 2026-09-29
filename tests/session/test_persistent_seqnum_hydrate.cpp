@@ -1268,11 +1268,27 @@ TEST(PersistentSeqnumHydrate, InboundPersistFailure_Fatal_LowerBound_FirstWrite)
 // and the two Rejects after Guard (4) that returned before the common persist (a
 // fromAdmin veto; an application message with no Application registered).
 // Pre-#423 (RED): durable_inbound stays 2 in every case.
+//
+// 092-garbled-frame-reject (fixpp#507) adds the "092 disposer (D-5)" case to this table
+// and the next (contract C-2 D-5; spec FR-013; quickstart §1 "D-5 persistence"): a faulty
+// application frame at seq 2 (field 3 is 35, a malformed tag after 34), with an Application
+// registered so that no post-Guard-(4) Reject can supply the Reject or the advance.
+// dispose_unparseable_ persists the advance through consume_rejected_seqnum_ before
+// its Reject. Its Reject is asserted in full; the Text is spelled out here, not taken
+// from the session's constants.
+struct DisposerReject092 {
+    std::string_view ref_seq;       // 45
+    std::string_view ref_msg_type;  // 372
+    std::string_view reason;        // 373; 371 must be absent
+    std::string_view text;          // 58
+};
+
 TEST(PersistentSeqnumHydrate, RejectedInSequence_AdvanceIsPersisted) {
     struct Case {
         const char* site;
         std::shared_ptr<fixpp::session::Application> app;
         std::vector<std::byte> frame;
+        std::optional<DisposerReject092> reject;  // set: the one frame sent, in full
     };
     const std::vector<Case> cases = {
         {"021 Arm C (122 missing)", nullptr,
@@ -1281,6 +1297,13 @@ TEST(PersistentSeqnumHydrate, RejectedInSequence_AdvanceIsPersisted) {
          make_fix_frame("FIX.4.4", "0", 2, "CLI", "SRV")},
         {"after Guard (4): no Application", nullptr,
          make_fix_frame("FIX.4.4", "D", 2, "CLI", "SRV")},
+        {.site = "092 disposer (D-5)",
+         .app = std::make_shared<CountingApp029>(),
+         .frame = make_fix_frame("FIX.4.4", "D", 2, "CLI", "SRV", "9x9=1\x01"),
+         .reject = DisposerReject092{.ref_seq = "2",
+                                     .ref_msg_type = "D",
+                                     .reason = "0",
+                                     .text = "Malformed field: invalid tag"}},
     };
     for (const Case& c : cases) {
         SCOPED_TRACE(c.site);
@@ -1299,6 +1322,20 @@ TEST(PersistentSeqnumHydrate, RejectedInSequence_AdvanceIsPersisted) {
         EXPECT_GT(fix->capture.frames.size(), before) << "a Reject was sent";
         EXPECT_EQ(store->durable_inbound, fixpp::session::seqnum_t{3})
             << "fixpp#423: the consumed seqnum must reach the store";
+        if (c.reject && fix->capture.frames.size() > before) {
+            EXPECT_EQ(fix->capture.frames.size(), before + 1) << "exactly one frame sent";
+            const auto& r = fix->capture.frames.back();
+            EXPECT_EQ(extract_tag(r, 35), "3") << "the frame sent is a Reject";
+            EXPECT_EQ(extract_tag(r, 45), c.reject->ref_seq) << "Reject RefSeqNum(45)";
+            EXPECT_EQ(extract_tag(r, 372), c.reject->ref_msg_type) << "Reject RefMsgType(372)";
+            EXPECT_EQ(extract_tag(r, 373), c.reject->reason) << "Reject SessionRejectReason(373)";
+            const std::string wire(reinterpret_cast<const char*>(r.data()), r.size());
+            EXPECT_EQ(wire.find("\x01"
+                                "371="),
+                      std::string::npos)
+                << "Reject must carry no RefTagID(371)";
+            EXPECT_EQ(extract_tag(r, 58), c.reject->text) << "Reject Text(58)";
+        }
     }
 }
 
@@ -1343,6 +1380,9 @@ TEST(PersistentSeqnumHydrate, RejectedInSequence_PersistFailure_Fatal) {
          [](Fixture& f) { f.eng.application = std::make_shared<VetoHeartbeatApp>(); },
          make_fix_frame("FIX.4.4", "0", 2, "CLI", "SRV")},
         {"after Guard (4): no Application", {}, make_fix_frame("FIX.4.4", "D", 2, "CLI", "SRV")},
+        {.site = "092 disposer (D-5)",
+         .tweak = [](Fixture& f) { f.eng.application = std::make_shared<CountingApp029>(); },
+         .frame = make_fix_frame("FIX.4.4", "D", 2, "CLI", "SRV", "9x9=1\x01")},
     };
     for (const Case& c : cases) {
         SCOPED_TRACE(c.site);

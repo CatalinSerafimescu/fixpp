@@ -236,6 +236,16 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_open(fixpp_engine_t* engine,
  * (fixpp_engine_create), where it returned FIXPP_ERR_OK: that session never
  * established, so it is not the established-then-reaped case above.
  *
+ * BREAKING (C-ABI 1.10; 092, fixpp#507): a Logon carrying a malformed tag (a
+ * non-digit tag byte, an empty tag, a tag above 65535, or a field with no '='
+ * before its SOH), which was accepted, is now refused, on either role. Once a
+ * session whose Logon was refused that way has drained, close returns
+ * FIXPP_ERR_THREAD_SESSION_LIFECYCLE, translated for the consumer's ABI minor
+ * (fixpp_engine_create), where it returned FIXPP_ERR_OK: that session never
+ * established. For a session that established and that another 1.10 effect
+ * then ends (see fixpp_session_is_established), close returns FIXPP_ERR_OK,
+ * as for any session that was established at least once.
+ *
  * Reentrancy: single-thread — non-callback / non-session-strand caller only; no
  * concurrent close on the same handle (the thunk posts onto the session domain
  * and BLOCKS, so a callback/strand caller deadlocks — FR-013a).
@@ -254,6 +264,43 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_close(fixpp_session_t* session);
  * pairs included), which was accepted, is now refused, on either role. For a
  * session whose Logon was refused that way, *out_established stays false where
  * it became true.
+ *
+ * BREAKING (C-ABI 1.10; 092, fixpp#507): the session disposes of an inbound
+ * frame whose header scan meets a malformed tag (a non-digit tag byte, an
+ * empty tag, a tag above 65535, or a field with no '=' before its SOH) or a
+ * Length+Data mismatch before any handler reads it; "faulty" below means such
+ * a frame. Each effect below keeps a session from establishing, or ends it,
+ * where it established or continued:
+ *   - a Logon carrying a malformed tag, which was accepted, is refused, on
+ *     either role;
+ *   - on an established session, a faulty Logon whose third field is
+ *     MsgType(35) and whose MsgSeqNum(34) was read before the fault ends the
+ *     session, with no Reject and no Logout;
+ *   - on an established session, a faulty frame whose fault comes before its
+ *     MsgSeqNum(34), or whose third field is not MsgType(35), and which was
+ *     accepted and advanced the expected inbound sequence number, is
+ *     disregarded without advancing it; if the peer resends the same bytes,
+ *     the session ends at the peer's next new message that is not a
+ *     Heartbeat;
+ *   - on an established session in a resend recovery, a faulty SequenceReset,
+ *     GapFill or Reset mode, whose third field is MsgType(35) and whose
+ *     MsgSeqNum(34) was read before the fault, is Rejected and not applied, so
+ *     the gap it would have closed stays open, and the session ends at the
+ *     peer's next new message that is not a Heartbeat;
+ *   - with a heartbeat interval set, a faulty frame does not count as inbound
+ *     traffic, so a peer whose frames over the heartbeat interval and the
+ *     TestRequest grace window are all faulty ends the session;
+ *   - on an established session, a frame the header scan finds fault-free but
+ *     the session cannot parse for dispatch (one that exhausts the per-message
+ *     parse arena, for example), which was dropped while the session
+ *     continued, ends the session;
+ *   - an inbound message that would advance the expected inbound sequence
+ *     number past its maximum (4294967295), where that number wrapped to 0 and
+ *     the session continued, ends the session with no Reject and no Logout
+ *     (092 FR-019).
+ * For a session whose Logon is refused that way, *out_established stays false
+ * where it became true; for a session any other of these effects ends, it
+ * turns false where it stayed true.
  *
  * Reentrancy: thread-safe. O(1) lock-free (atomic reader snapshot).
  */
@@ -311,6 +358,44 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_acceptor_bound_endpoint(fixpp_sessi
  * on that session is refused at the engine's Active check, before it reaches
  * that path.
  *
+ * BREAKING (C-ABI 1.10; 092, fixpp#507): the session disposes of an inbound
+ * frame whose header scan meets a malformed tag (a non-digit tag byte, an
+ * empty tag, a tag above 65535, or a field with no '=' before its SOH) or a
+ * Length+Data mismatch before any handler reads it; "faulty" below means such
+ * a frame. Each effect below keeps a session from establishing, or ends it,
+ * where it established or continued:
+ *   - a Logon carrying a malformed tag, which was accepted, is refused, on
+ *     either role;
+ *   - on an established session, a faulty Logon whose third field is
+ *     MsgType(35) and whose MsgSeqNum(34) was read before the fault ends the
+ *     session, with no Reject and no Logout;
+ *   - on an established session, a faulty frame whose fault comes before its
+ *     MsgSeqNum(34), or whose third field is not MsgType(35), and which was
+ *     accepted and advanced the expected inbound sequence number, is
+ *     disregarded without advancing it; if the peer resends the same bytes,
+ *     the session ends at the peer's next new message that is not a
+ *     Heartbeat;
+ *   - on an established session in a resend recovery, a faulty SequenceReset,
+ *     GapFill or Reset mode, whose third field is MsgType(35) and whose
+ *     MsgSeqNum(34) was read before the fault, is Rejected and not applied, so
+ *     the gap it would have closed stays open, and the session ends at the
+ *     peer's next new message that is not a Heartbeat;
+ *   - with a heartbeat interval set, a faulty frame does not count as inbound
+ *     traffic, so a peer whose frames over the heartbeat interval and the
+ *     TestRequest grace window are all faulty ends the session;
+ *   - on an established session, a frame the header scan finds fault-free but
+ *     the session cannot parse for dispatch (one that exhausts the per-message
+ *     parse arena, for example), which was dropped while the session
+ *     continued, ends the session;
+ *   - an inbound message that would advance the expected inbound sequence
+ *     number past its maximum (4294967295), where that number wrapped to 0 and
+ *     the session continued, ends the session with no Reject and no Logout
+ *     (092 FR-019).
+ * A send on a session one of these effects refused or ended, issued after
+ * that effect, which returned FIXPP_ERR_OK, now returns
+ * FIXPP_ERR_SESSION_INVALID_STATE, translated for the consumer's ABI minor
+ * (fixpp_engine_create).
+ *
  * Reentrancy: thread-safe — callable from any consumer thread (the any-thread
  * Engine::send contract) EXCEPT from inside the receive callback, where the
  * blocking wrapper deadlocks (FR-013a; recorded Gate-A deviation from
@@ -334,13 +419,55 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_send(fixpp_session_t* session,
  * BREAKING (C-ABI 1.9): a Length+Data pair a loaded dictionary declares only
  * inside a component or group is now a dictionary pair. An inbound message
  * carrying a malformed pair of that kind, which was delivered to `cb` before,
- * is now dropped as a parse error, silently: `cb` is not invoked and no Reject
- * is sent. Also (091 FR-020), a Logon carrying a Length immediately followed
+ * is now dropped: `cb` is not invoked. The session answers it with a session
+ * Reject when the session is established and has not sent a Logout, the
+ * message's third field is MsgType(35) and its MsgSeqNum(34) was read before
+ * the pair (092 contract C-2, rows D-5/D-6); otherwise it disregards it (rows
+ * D-7/D-8/D-9). A pair mismatch before MsgSeqNum(34) is row D-7, disregarded,
+ * not Rejected. The 1.10 clause below states the conditions.
+ * Also (091 FR-020), a Logon carrying a Length immediately followed
  * by its paired Data whose counted extent reaches or passes the end of the
  * whole framed message, or whose following byte is not SOH (standard pairs
  * included), which was accepted, is now refused, on either role; inbound
  * application messages on that session, delivered to `cb` before, are never
  * delivered.
+ *
+ * BREAKING (C-ABI 1.10; 092, fixpp#507): the session disposes of an inbound
+ * frame whose header scan meets a malformed tag (a non-digit tag byte, an
+ * empty tag, a tag above 65535, or a field with no '=' before its SOH) or a
+ * Length+Data mismatch before any handler reads it; "faulty" below means such
+ * a frame. Each effect below keeps a session from establishing, or ends it,
+ * where it established or continued:
+ *   - a Logon carrying a malformed tag, which was accepted, is refused, on
+ *     either role;
+ *   - on an established session, a faulty Logon whose third field is
+ *     MsgType(35) and whose MsgSeqNum(34) was read before the fault ends the
+ *     session, with no Reject and no Logout;
+ *   - on an established session, a faulty frame whose fault comes before its
+ *     MsgSeqNum(34), or whose third field is not MsgType(35), and which was
+ *     accepted and advanced the expected inbound sequence number, is
+ *     disregarded without advancing it; if the peer resends the same bytes,
+ *     the session ends at the peer's next new message that is not a
+ *     Heartbeat;
+ *   - on an established session in a resend recovery, a faulty SequenceReset,
+ *     GapFill or Reset mode, whose third field is MsgType(35) and whose
+ *     MsgSeqNum(34) was read before the fault, is Rejected and not applied, so
+ *     the gap it would have closed stays open, and the session ends at the
+ *     peer's next new message that is not a Heartbeat;
+ *   - with a heartbeat interval set, a faulty frame does not count as inbound
+ *     traffic, so a peer whose frames over the heartbeat interval and the
+ *     TestRequest grace window are all faulty ends the session;
+ *   - on an established session, a frame the header scan finds fault-free but
+ *     the session cannot parse for dispatch (one that exhausts the per-message
+ *     parse arena, for example), which was dropped while the session
+ *     continued, ends the session;
+ *   - an inbound message that would advance the expected inbound sequence
+ *     number past its maximum (4294967295), where that number wrapped to 0 and
+ *     the session continued, ends the session with no Reject and no Logout
+ *     (092 FR-019).
+ * On a session one of these effects refused or ended, `cb` is not invoked for
+ * any inbound application message after that effect; under 092 FR-019 it is
+ * not invoked for the message that ends the session either.
  *
  * Reentrancy: single-thread. THUNK: construction-time.
  */
@@ -370,6 +497,43 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_register_callback(
  * of the whole framed message, or whose following byte is not SOH (standard
  * pairs included), which was accepted, is now refused, on either role; on that
  * session `cb`, invoked before for each send, is never invoked.
+ *
+ * BREAKING (C-ABI 1.10; 092, fixpp#507): the session disposes of an inbound
+ * frame whose header scan meets a malformed tag (a non-digit tag byte, an
+ * empty tag, a tag above 65535, or a field with no '=' before its SOH) or a
+ * Length+Data mismatch before any handler reads it; "faulty" below means such
+ * a frame. Each effect below keeps a session from establishing, or ends it,
+ * where it established or continued:
+ *   - a Logon carrying a malformed tag, which was accepted, is refused, on
+ *     either role;
+ *   - on an established session, a faulty Logon whose third field is
+ *     MsgType(35) and whose MsgSeqNum(34) was read before the fault ends the
+ *     session, with no Reject and no Logout;
+ *   - on an established session, a faulty frame whose fault comes before its
+ *     MsgSeqNum(34), or whose third field is not MsgType(35), and which was
+ *     accepted and advanced the expected inbound sequence number, is
+ *     disregarded without advancing it; if the peer resends the same bytes,
+ *     the session ends at the peer's next new message that is not a
+ *     Heartbeat;
+ *   - on an established session in a resend recovery, a faulty SequenceReset,
+ *     GapFill or Reset mode, whose third field is MsgType(35) and whose
+ *     MsgSeqNum(34) was read before the fault, is Rejected and not applied, so
+ *     the gap it would have closed stays open, and the session ends at the
+ *     peer's next new message that is not a Heartbeat;
+ *   - with a heartbeat interval set, a faulty frame does not count as inbound
+ *     traffic, so a peer whose frames over the heartbeat interval and the
+ *     TestRequest grace window are all faulty ends the session;
+ *   - on an established session, a frame the header scan finds fault-free but
+ *     the session cannot parse for dispatch (one that exhausts the per-message
+ *     parse arena, for example), which was dropped while the session
+ *     continued, ends the session;
+ *   - an inbound message that would advance the expected inbound sequence
+ *     number past its maximum (4294967295), where that number wrapped to 0 and
+ *     the session continued, ends the session with no Reject and no Logout
+ *     (092 FR-019).
+ * On a session one of these effects refused or ended, `cb` is not invoked for
+ * a send issued after that effect: fixpp_session_send refuses that send at the
+ * engine's Active check, before it reaches the toApp path.
  *
  * Reentrancy: single-thread. THUNK: construction-time. The installed callback
  * runs on the session strand (see fixpp_send_cb typedef; [contracts/toapp-callback.md]).

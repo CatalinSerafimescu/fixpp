@@ -2,8 +2,9 @@
 """tools/check_admin_emit_observation.py — SC-002 static enumeration gate.
 
 For every engine-originated administrative emit site in session.cpp:
-  - build_reject( + build_logout( callers → must have fire_to_admin_( before
-    their next store_then_emit( in the same emit block.
+  - build_reject( + build_reject_with_text( + build_logout( callers → must
+    have fire_to_admin_( before their next store_then_emit( in the same emit
+    block.
   - build_business_message_reject( callers → must have ->toApp( (via
     parse_and_dispatch_) before their next store_then_emit(.
 
@@ -82,13 +83,17 @@ DEFAULT_TARGET = ROOT / "src" / "session" / "session.cpp"
 # We check that the hook appears between the builder line and the next
 # store_then_emit( line.
 #
-# build_reject( and build_logout( → must have fire_to_admin_( in the interval.
+# build_reject(, build_reject_with_text( and build_logout( → must have
+# fire_to_admin_( in the interval.
 # build_business_message_reject( → must have ->toApp( in the interval.
 #
 # The mapping is:
 #   builder token → (required hook token, description for error message)
 ADMIN_BUILDERS: dict[str, tuple[str, str]] = {
     "build_reject(": ("fire_to_admin_(", "fire_to_admin_"),
+    # 092-garbled-frame-reject R-5: the Text-carrying Reject builder. Its name does
+    # not contain "build_reject(", so it needs its own key.
+    "build_reject_with_text(": ("fire_to_admin_(", "fire_to_admin_"),
     "build_logout(": ("fire_to_admin_(", "fire_to_admin_"),
 }
 APP_BUILDERS: dict[str, tuple[str, str]] = {

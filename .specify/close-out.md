@@ -95,7 +95,7 @@ Pick one and write it down; otherwise it comes back as a Gate B finding.
 | 12 | Controlling plan / decision-doc progress log | a controlling plan governs this work | manual |
 | 13 | Phase-2 design-doc **shipped-status pointer** | this feature realizes a Phase-2 design doc | manual |
 | 14 | Project memory state note | the close changes cross-session status | manual |
-| 15 | **Anti-pattern library** entry → `.claude/agents/phase-implementer.md` | Gate B Post-loop §4 produced candidates **and** the user approved them | manual |
+| 15 | **Anti-pattern library** entry → BOTH `.claude/agents/phase-implementer.md` (parent repo) AND `brain/failure-classes.md` (as a form of the matching class, plus a `brain/log.md` line) | Gate B Post-loop §4 produced candidates **and** the user approved them | manual |
 
 **Row 11 is the one that produced issue #334.** A gate decides something, the code changes, and the
 signed-off document that recorded the old design is never amended — so it re-seeds the wrong model into
@@ -135,7 +135,7 @@ CONDITIONAL — state the trigger's status, not just N/A
 12. controlling plan log .............. trigger: <fired|not fired> — <disposition>
 13. Phase-2 shipped pointer ........... trigger: <fired|not fired> — <disposition>
 14. memory state note ................. trigger: <fired|not fired> — <disposition>
-15. anti-pattern entry ................ trigger: <fired|not fired> — <disposition>
+15. anti-pattern entry ................ trigger: <fired|not fired> — <disposition: phase-implementer.md AND failure-classes.md class <n> + log.md>
 ```
 
 A filled instance per PR is the point. *"Consistent"* without one means the same rows with no evidence

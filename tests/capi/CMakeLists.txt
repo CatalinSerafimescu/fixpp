@@ -116,6 +116,9 @@ add_test(NAME capi_pure_tests COMMAND capi_pure_tests)
 # label. Labelled `capi` (the bucket-wide selector) + `083` (feature-scoped),
 # matching the convention the sibling capi buckets already use.
 set_tests_properties(capi_pure_tests PROPERTIES LABELS "capi;083;abi;091")
+# 092-garbled-frame-reject: label 092 (expected-ctest-092.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST capi_pure_tests APPEND PROPERTY LABELS 092)
 
 # T004 (US1, SC-004) — 051 error-block foundational oracle (translate re-point +
 # strerror + per-code-minor downgrade).  T022 (US5) appends live end-to-end arms
@@ -174,23 +177,31 @@ target_compile_definitions(capi_send_recv_test PRIVATE FIXPP_TEST_HOOKS)
 # A binary-wide WILL_FAIL would invert a real ASan failure in the positive tests
 # into a pass, silently masking CA-006/007 ASan coverage.
 #
-# capi_send_recv_positive — all tests EXCEPT the ASan UAF witness and the 091
-#   FR-020 logon-refusal cells (CapiLogonMalformedCount.*, which run only in
-#   capi_logon_malformed_count): must PASS normally, including under ASan
-#   (no WILL_FAIL).
+# capi_send_recv_positive — all tests EXCEPT the ASan UAF witness and the
+#   logon-refusal cells (091 FR-020's CapiLogonMalformedCount.*, which run only in
+#   capi_logon_malformed_count, 092's CapiLogonMalformedTag.*, which run only
+#   in capi_logon_malformed_tag, and 092's CapiEstablishedMalformedFrame.*, which
+#   run only in capi_established_malformed_frame): must PASS normally, including
+#   under ASan (no WILL_FAIL).
 # capi_send_recv_uaf_negative — ONLY the ASan witness: WILL_FAIL under ASan
 #   (the process aborts on the deliberate stack-use-after-return); the test is
 #   #if-guarded in the source, so without ASan it does not exist and the
 #   negative entry exits 0 (no WILL_FAIL needed outside ASan).
 add_test(NAME capi_send_recv_positive
     COMMAND capi_send_recv_test
-        --gtest_filter=-CapiSendRecv.InboundHandleUseAfterReturnCaughtUnderAsan:CapiLogonMalformedCount.*)
+        --gtest_filter=-CapiSendRecv.InboundHandleUseAfterReturnCaughtUnderAsan:CapiLogonMalformedCount.*:CapiLogonMalformedTag.*:CapiEstablishedMalformedFrame.*)
 add_test(NAME capi_send_recv_uaf_negative
     COMMAND capi_send_recv_test
         --gtest_filter=CapiSendRecv.InboundHandleUseAfterReturnCaughtUnderAsan)
 add_test(NAME capi_logon_malformed_count
     COMMAND capi_send_recv_test --gtest_filter=CapiLogonMalformedCount.*)
 set_tests_properties(capi_logon_malformed_count PROPERTIES LABELS "capi;091")
+add_test(NAME capi_logon_malformed_tag
+    COMMAND capi_send_recv_test --gtest_filter=CapiLogonMalformedTag.*)
+set_tests_properties(capi_logon_malformed_tag PROPERTIES LABELS "capi;092")
+add_test(NAME capi_established_malformed_frame
+    COMMAND capi_send_recv_test --gtest_filter=CapiEstablishedMalformedFrame.*)
+set_tests_properties(capi_established_malformed_frame PROPERTIES LABELS "capi;092")
 if(FIXPP_ENABLE_ASAN)
     set_tests_properties(capi_send_recv_uaf_negative PROPERTIES WILL_FAIL TRUE)
 endif()

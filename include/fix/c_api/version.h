@@ -99,8 +99,43 @@
  *  with no dictionary, and on a dictionary session only where that dictionary
  *  declares a group on a tag that is a pair half.
  *  No error code is added. */
+
+/*  1.10 (BREAKING, [const §X.7]; 092, fixpp#507): the session disposes of an
+ *  inbound frame whose header scan meets a malformed tag (a non-digit tag
+ *  byte, an empty tag, a tag above 65535, or a field with no '=' before its
+ *  SOH) or a Length+Data mismatch before any handler reads the frame, and the
+ *  expected inbound sequence number no longer wraps (FR-019): an inbound
+ *  message that would advance it past its maximum (4294967295), where it
+ *  wrapped to 0 and the session continued, ends the session with no Reject
+ *  and no Logout. The observers are every call whose result depends on the
+ *  session being logged on: fixpp_session_is_established,
+ *  fixpp_session_close, fixpp_session_send, fixpp_session_register_callback
+ *  and fixpp_session_register_send_callback. The effects that have a
+ *  carrying declaration, FR-019's included, are noted on those declarations
+ *  in session.h. The effects with no carrying declaration are recorded here:
+ *    - on an established session, a frame with a Length+Data mismatch that
+ *      ended the session is disregarded, with no Reject and no advance of the
+ *      expected inbound sequence number, when the mismatch comes before
+ *      MsgSeqNum(34) or the frame's third field is not MsgType(35);
+ *    - once fixpp has sent a Logout, a faulty frame is not taken as the
+ *      peer's Logout reply; fixpp_session_close returns the same code, at
+ *      the latest when the logout timeout runs out;
+ *    - on an established session that has not sent a Logout, a faulty frame
+ *      whose third field is MsgType(35) and whose MsgSeqNum(34) was read
+ *      before the fault, which ended the session at the CompID or BeginString
+ *      check, the SendingTime check, the Logout handler or the too-low
+ *      sequence check, draws a session Reject and the session stays up;
+ *    - outside a resend recovery, on an established session that has not
+ *      sent a Logout, a faulty SequenceReset whose third field is MsgType(35)
+ *      and whose MsgSeqNum(34) was read before the fault is Rejected and its
+ *      NewSeqNo(36) is not applied;
+ *    - on an established session that has not sent a Logout, a faulty
+ *      application message whose third field is MsgType(35) and whose
+ *      MsgSeqNum(34) was read before the fault draws a session Reject on the
+ *      wire; the receive callback is not invoked for it either way.
+ *  No error code is added. */
 #define FIXPP_C_ABI_VERSION_MAJOR 1
-#define FIXPP_C_ABI_VERSION_MINOR 9 /* 1.9: component/group-only Length+Data pairs (fixpp#418) */
+#define FIXPP_C_ABI_VERSION_MINOR 10 /* 1.10: unparseable inbound frames (fixpp#507) */
 #define FIXPP_C_ABI_VERSION_PATCH 0
 
 /** Composite: (MAJOR<<16)|(MINOR<<8)|PATCH — single-integer compatibility check. */

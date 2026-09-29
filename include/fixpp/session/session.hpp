@@ -887,16 +887,38 @@ private:
     // Called directly on the session strand ([research D3; FR-008/010]).
     [[nodiscard]] bool fire_to_admin_(std::span<const std::byte> frame) noexcept;
 
+    // parse_and_dispatch_'s value: whether the callback ran. Private; it never
+    // leaves the session. [092 data-model E-3]
+    enum class dispatch_outcome : std::uint8_t {
+        dispatched,    // the callback ran and returned normally
+        parse_failed,  // the re-frame or the parse failed; the callback did not run
+    };
+
     // parse_and_dispatch_ — dedup helper: build a stack parse arena, re-frame +
     // parse `frame` into a MessageView<Index>, build the SessionId, open a
     // callback_dispatch_scope, and return invoke_callback_safe(cb(view, sid)).
-    // On parse failure (Framer or Parser): returns expected_t<void>{} (skip callback,
-    // not fatal — same disposition as every call site today).
+    // On parse failure (Framer or Parser): returns dispatch_outcome::parse_failed and
+    // the callback does not run. A call over bytes received from the peer (a late
+    // inbound site) closes the session on it through close_on_late_parse_failure_; a
+    // call over a frame fixpp built ignores it. Superseded decision: a parse failure
+    // used to return success ("skip, not fatal"); 092-garbled-frame-reject contract
+    // C-6 (owner ruling O-2) replaced it.
     // `arena_bytes` is explicit so each call site documents its sizing choice.
-    // [const §VIII.5] (stack-only, no heap); [019-app-callbacks T014/T011/T013/T016]
+    // [const §VIII.5] (stack-only, no heap); [019-app-callbacks T014/T011/T013/T016;
+    // 092 data-model E-3, contract C-6]
     template <class CB>
-    [[nodiscard]] fixpp::core::expected_t<void> parse_and_dispatch_(
+    [[nodiscard]] fixpp::core::expected_t<dispatch_outcome> parse_and_dispatch_(
         std::span<const std::byte> frame, std::size_t arena_bytes, CB&& cb) noexcept;
+
+    // close_on_late_parse_failure_ — 092-garbled-frame-reject contract C-6: the one
+    // action every late inbound parse site takes when its parse fails (a
+    // parse_and_dispatch_ parse_failed outcome, or a validate_inbound_ parse_failed
+    // outcome). Closes the session terminally and sends nothing; the caller returns
+    // its result without invoking the receive callback. It does not undo what ran
+    // at the call site before the parse.
+    // [092 data-model E-3; contract C-6; research R-4; spec FR-016]
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
+    close_on_late_parse_failure_() noexcept;
 
     // emit_session_reject_ — dedup helper: build + emit a session Reject(35=3) with
     // RefTagID=0, SessionRejectReason=3, and Disconnected-on-failure error handling
@@ -909,36 +931,60 @@ private:
         seqnum_t ref_seq, std::string_view ref_msg_type) noexcept;
 
     // 041-validation-gate-wiring T010 — overload that carries a mapped
-    // SessionRejectReason(373) and an optional RefTagID(371) through to
-    // build_reject (admin_messages.cpp's `build_reject`, UNCHANGED). validate() returns a
+    // SessionRejectReason(373) and an optional RefTagID(371) through to the
+    // Reject builder. validate() returns a
     // wire_* error; the caller maps it via wire_error_to_session_reject_reason()
     // and passes the result here. ref_tag_id == 0 → 371 omitted.
-    // [041 T010; data-model E-4; RC-C]
+    // 092-garbled-frame-reject (research R-5): builds via build_reject_with_text and
+    // carries `text` as Text(58); an empty text (the default) omits 58, so the frame
+    // is byte-identical to build_reject's.
+    // [041 T010; data-model E-4; RC-C; 092 R-5]
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> emit_session_reject_(
-        seqnum_t ref_seq, std::string_view ref_msg_type, int reason, int ref_tag_id = 0) noexcept;
+        seqnum_t ref_seq, std::string_view ref_msg_type, int reason, int ref_tag_id = 0,
+        std::string_view text = {}) noexcept;
+
+    // dispose_unparseable_ — 092-garbled-frame-reject (fixpp#507) contract C-2: the
+    // disposition of a frame the header scan could not read (hdr.fault is set). Each
+    // on_inbound_frame state arm calls it only on that branch, right after its scan
+    // and before any guard, then returns. It reads only hdr.fault,
+    // hdr.fault_length_tag, hdr.msg_type_is_third, hdr.fault_ref_seq_num and
+    // hdr.fault_ref_msg_type (contract C-3 I-1). `state` is the arm's FSM state.
+    // [092 contract C-1 step 3, C-2; data-model E-2; research R-3]
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> dispose_unparseable_(
+        fixpp::session::detail::FrameHeader const& hdr, fsm_state state) noexcept;
 
     // validate_inbound_ — synchronous dedup helper (041 simplify-triage FIX-1/FIX-2 +
     // per-message coroutine-frame alloc fix):
     // Parse `frame` with a kInboundParseArena (16384) stack arena, run
     // validator_->validate(), and return the rejection decision WITHOUT emitting.
     //
-    // Returns std::nullopt when validation passes (or the gate is not applicable:
-    // framer fails, parse fails — continue as today) — caller continues normally.
-    // Returns std::optional{RejectDecision} when a violation is found; caller must
-    // co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num), hdr.msg_type,
-    //                               rej->reason, rej->ref_tag_id) inline.
+    // Returns validate_outcome::pass when validation passes — caller continues
+    // normally.
+    // Returns validate_outcome::reject, with the RejectDecision, when a violation is
+    // found; caller must co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num),
+    //   hdr.msg_type, v.reject.reason, v.reject.ref_tag_id) inline.
+    // Returns validate_outcome::parse_failed when the re-frame or the parse fails;
+    // the caller closes the session through close_on_late_parse_failure_. Superseded
+    // decision: that case used to return nullopt, read as "validation passes";
+    // 092-garbled-frame-reject contract C-6 (owner ruling O-2) replaced it.
     //
     // SYNCHRONOUS — no co_await, no sub-coroutine frame allocated on the pass path.
     // PRECONDITION: cfg_.validate_inbound_messages && validator_ must hold
     // (callers guard this — do NOT call without the guard).
     // PRECONDITION: hdr.msg_type != "3" && hdr.msg_type != "5" (3/5 exemption
     // must be checked by the caller before calling).
-    // [041 T014; data-model E-4; SC-005 zero-cost default-path; const §VIII.5]
+    // [041 T014; data-model E-4; SC-005 zero-cost default-path; const §VIII.5;
+    // 092 data-model E-3]
     struct RejectDecision {
         int reason = 0;
         int ref_tag_id = 0;
     };
-    [[nodiscard]] std::optional<RejectDecision> validate_inbound_(
+    enum class validate_outcome : std::uint8_t { pass, reject, parse_failed };
+    struct InboundValidation {
+        validate_outcome outcome = validate_outcome::pass;
+        RejectDecision reject{};  // meaningful only when outcome == reject
+    };
+    [[nodiscard]] InboundValidation validate_inbound_(
         std::span<const std::byte> frame,
         fixpp::session::detail::FrameHeader const& hdr) const noexcept;
 

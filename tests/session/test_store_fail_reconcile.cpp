@@ -50,9 +50,11 @@
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
+#include <fixpp/session/application.hpp>
 #include <fixpp/session/direction.hpp>
 #include <fixpp/session/file_store.hpp>
 #include <fixpp/session/file_store_factory.hpp>
+#include <fixpp/session/seqnum.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
@@ -523,6 +525,150 @@ TEST_F(StoreFailReconcileTest, VariantC_BilateralStrictDefault_RegressionGuardNo
     // Teardown; call alone (not its result) drains the detached liveness loop.
     (void)asio::co_spawn(sx_, sess->close(fixpp::session::close_mode::terminal), asio::use_future)
         .get();
+}
+
+// ── 092-garbled-frame-reject T052 — the inbound seqnum_max bound on a FileStore ───
+//
+// The same five consuming frames as test_validation_compat_toggles.cpp's SeqnumMax_*
+// cells, over this fixture's FileStore-backed initiator. A Reset-mode SequenceReset sets
+// NextNumIn to seqnum_max (4294967295); the cell asserts Active and NextNumIn ==
+// 4294967295 so that a disconnect from another cause cannot satisfy it, then sends a frame at
+// 4294967295 that would consume NextNumIn and asserts: Disconnected; NextNumIn still
+// 4294967295; no outbound frame after it (no Reject); no fromApp or fromAdmin; and a
+// durable inbound counter the frame did not move. MessageStore has no set-to-value
+// operation, so the SequenceReset jump is never persisted (research R-14): the durable
+// counter holds what the peer's Logon at 1 persisted, the Logon's successor. Session
+// exposes no store accessor, so the durable counter is read by reopening a FileStore over
+// dir_ after the session is closed and destroyed, and calling next_seqnum(inbound, false).
+// To check the cells can fail, delete the bound in SeqnumManager::check_inbound in a
+// scratch copy (quickstart §2 "Inbound bound deletion").
+// Anchors: specs/092-garbled-frame-reject spec FR-019, SC-010; contract C-3 I-7, C-5 L-7;
+//          research R-14.
+
+class CountingApp092 final : public fixpp::session::Application {
+public:
+    int from_app_count{0};
+    int from_admin_count{0};
+
+    fixpp::core::expected_t<void> fromApp(
+        const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
+        const fixpp::session::SessionId& /*id*/) override {
+        ++from_app_count;
+        return {};
+    }
+
+    fixpp::core::expected_t<void> fromAdmin(
+        const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
+        const fixpp::session::SessionId& /*id*/) override {
+        ++from_admin_count;
+        return {};
+    }
+};
+
+constexpr fixpp::session::seqnum_t kSeqMax092 = fixpp::session::seqnum_max;
+
+class StoreFailReconcileSeqnumMax092 : public StoreFailReconcileTest {
+protected:
+    void run_cell(const std::vector<std::byte>& frame, std::string_view what) {
+        std::vector<std::vector<std::byte>> wire;
+        auto app = std::make_shared<CountingApp092>();
+        engine_.application = app;
+        auto cfg =
+            make_initiator_cfg(reset_seqnum_policy::bilateral_lenient,
+                               /*reset_on_logon=*/false, std::make_shared<MockReconnectFactory>());
+        cfg.transport_send = [&](std::span<const std::byte> f) {
+            wire.emplace_back(f.begin(), f.end());
+        };
+
+        auto sess = std::make_unique<Session>(engine_, cfg);
+        auto open_r = asio::co_spawn(sx_, sess->open(), asio::use_future).get();
+        ASSERT_TRUE(open_r.has_value()) << what << ": open() must succeed";
+
+        auto feed = [&](const std::vector<std::byte>& f) {
+            return asio::co_spawn(sx_, sess->on_inbound_frame(std::span<const std::byte>(f)),
+                                  asio::use_future)
+                .get();
+        };
+        ASSERT_TRUE(feed(make_logon("FIX.4.2", 1, "ACCEPTR", "INITR")).has_value());
+        ASSERT_EQ(sess->state(), fsm_state::Active) << what << ": precondition: Active";
+        (void)feed(make_fix_frame("FIX.4.2", "4", 2, "ACCEPTR", "INITR",
+                                  field(36, std::to_string(kSeqMax092))));
+        ASSERT_EQ(sess->state(), fsm_state::Active)
+            << what << ": precondition: Active after the Reset-mode SequenceReset";
+        ASSERT_EQ(sess->seqnum_mgr_test_access().next_inbound_unsafe(), kSeqMax092)
+            << what << ": precondition: NextNumIn == 4294967295";
+        wire.clear();
+        const int from_app_before = app->from_app_count;
+        const int from_admin_before = app->from_admin_count;
+
+        // The result is not asserted: the plain application frame's too-low fallback arm
+        // also disconnects, and returns ok.
+        (void)feed(frame);
+        EXPECT_EQ(sess->state(), fsm_state::Disconnected)
+            << what << ": FR-019: the message at NextNumIn = seqnum_max must end the session";
+        EXPECT_EQ(sess->seqnum_mgr_test_access().next_inbound_unsafe(), kSeqMax092)
+            << what << ": FR-019: NextNumIn must stay 4294967295, never wrap";
+        EXPECT_TRUE(wire.empty()) << what << ": FR-019: the disconnect is silent (no Reject)";
+        EXPECT_EQ(app->from_app_count, from_app_before) << what << ": no fromApp";
+        EXPECT_EQ(app->from_admin_count, from_admin_before) << what << ": no fromAdmin";
+
+        (void)asio::co_spawn(sx_, sess->close(fixpp::session::close_mode::terminal),
+                             asio::use_future)
+            .get();
+        sess.reset();
+
+        FileStore::Config fcfg;
+        fcfg.directory = dir_;
+        fcfg.sender_comp_id = "INITR";
+        fcfg.target_comp_id = "ACCEPTR";
+        fcfg.max_frame_bytes = 4096;
+        fcfg.file_io_executor = sx_;
+        FileStoreFactory reopen{fcfg};
+        auto durable =
+            asio::co_spawn(
+                sx_,
+                [&]() -> asio::awaitable<fixpp::core::expected_t<fixpp::session::seqnum_t>> {
+                    auto minted = reopen.make("INITR", "ACCEPTR", nullptr, 1ULL << 30, sx_);
+                    if (!minted) {
+                        co_return std::unexpected(minted.error());
+                    }
+                    co_return co_await (*minted)->next_seqnum(fixpp::session::direction_t::inbound,
+                                                              false);
+                },
+                asio::use_future)
+                .get();
+        ASSERT_TRUE(durable.has_value()) << what << ": reopening the FileStore must succeed";
+        EXPECT_EQ(*durable, fixpp::session::seqnum_t{2})
+            << what << ": the frame at 4294967295 must not move the durable inbound counter";
+    }
+};
+
+TEST_F(StoreFailReconcileSeqnumMax092, Application_Disconnects) {
+    run_cell(make_fix_frame("FIX.4.2", "D", kSeqMax092, "ACCEPTR", "INITR", field(11, "O1")),
+             "application");
+}
+
+TEST_F(StoreFailReconcileSeqnumMax092, Heartbeat_Disconnects) {
+    run_cell(make_fix_frame("FIX.4.2", "0", kSeqMax092, "ACCEPTR", "INITR"), "Heartbeat");
+}
+
+// A Reject(35=3), not a Heartbeat: Guard 4's error branch tests the Heartbeat first.
+TEST_F(StoreFailReconcileSeqnumMax092, PossDupAdmin_Disconnects) {
+    run_cell(make_fix_frame("FIX.4.2", "3", kSeqMax092, "ACCEPTR", "INITR",
+                            field(43, "Y") + field(122, "20240101-00:00:00.000") + field(45, "1")),
+             "PossDupFlag=Y admin");
+}
+
+TEST_F(StoreFailReconcileSeqnumMax092, Issue423PossDupAppNo122_Disconnects) {
+    run_cell(make_fix_frame("FIX.4.2", "D", kSeqMax092, "ACCEPTR", "INITR",
+                            field(43, "Y") + field(11, "O1")),
+             "#423 Reject site (43=Y, no 122)");
+}
+
+TEST_F(StoreFailReconcileSeqnumMax092, D5FaultyApplication_Disconnects) {
+    run_cell(make_fix_frame("FIX.4.2", "D", kSeqMax092, "ACCEPTR", "INITR",
+                            field(11, "O1") + "9x9=1\x01"),
+             "D-5 faulty application");
 }
 
 }  // namespace

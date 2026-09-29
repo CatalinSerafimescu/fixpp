@@ -7,7 +7,7 @@
 // extern "C" boundary.
 //
 // translate() is a TOTAL switch with NO default — -Wswitch enforces that every
-// one of the 116 fixpp::core::error enumerators is mapped (totality). Totality
+// fixpp::core::error enumerator is mapped (totality). Totality
 // is NOT correctness: the per-arm coalescing is the audited E-3 decision,
 // verified by the enumerating correctness-oracle test against the checked-in
 // expected_error_map.csv (mutation-tested). The override groups
@@ -25,8 +25,8 @@ namespace fixpp_capi::detail {
 using fixpp::core::error;
 
 // translate — coalesce a fixpp::core::error onto its published fixpp_error_t.
-// Total switch, no default (see file header). 116 arms per data-model E-3 /
-// expected_error_map.csv.
+// Total switch, no default (see file header). One arm per enumerator, per
+// data-model E-3 / expected_error_map.csv.
 fixpp_error_t translate(error e) noexcept {
     switch (e) {
         // ── cross-cutting: out_of_memory (slot 1) — OVERRIDE ───────────────
@@ -59,13 +59,17 @@ fixpp_error_t translate(error e) noexcept {
         case error::dict_reify_oom:
             return FIXPP_ERR_DICT_OOM;
 
-        // ── wire (slots 30-42) — [2b §6.7]: framing→INVALID_FRAME,
+        // ── wire (slots 30-42, 132-133) — [2b §6.7]: framing→INVALID_FRAME,
         //    capacity→LIMIT_EXCEEDED, conformance→CONFORMANCE,
         //    truncation→DECIMAL_PRECISION_LOSS ─────────────────────────────────
         case error::wire_invalid_body_length:
         case error::wire_checksum_mismatch:
         case error::wire_framing_resync:
         case error::wire_invalid_field_format:
+        // 092 (data-model E-6): the validator's field faults coalesce onto the
+        // Index build's malformed-field code; no C code is added.
+        case error::wire_invalid_tag_number:
+        case error::wire_length_data_mismatch:
             return FIXPP_ERR_WIRE_INVALID_FRAME;
         case error::wire_frame_too_large:
         case error::wire_offset_table_full:
@@ -227,7 +231,7 @@ fixpp_error_t translate(error e) noexcept {
         case error::app_payload_malformed:
             return FIXPP_ERR_APP_PAYLOAD_MALFORMED;  // 1404 (ordinal 131)
     }
-    // No default above → -Wswitch proves all 116 enumerators are handled.
+    // No default above → -Wswitch proves every enumerator is handled.
     // Reached only for an out-of-range value cast into `error` (not a real
     // enumerator); fail safe to UNKNOWN.
     return FIXPP_ERR_UNKNOWN;

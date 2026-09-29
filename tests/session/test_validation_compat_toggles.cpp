@@ -30,6 +30,7 @@
 #include <fixpp/core/error.hpp>
 #include <fixpp/session/application.hpp>
 #include <fixpp/session/compid_authorization_policy.hpp>
+#include <fixpp/session/memory_store_factory.hpp>
 #include <fixpp/session/message_store.hpp>
 #include <fixpp/session/message_store_factory.hpp>
 #include <fixpp/session/retrieve_visitor.hpp>
@@ -48,6 +49,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/reify_test_frame.hpp"
 
 using namespace std::chrono_literals;
 
@@ -159,6 +161,7 @@ struct OutboundCapture {
 // ── Minimal no-op MessageStore double ────────────────────────────────────────
 
 using fixpp::session::direction_t;
+using fixpp::session::MemoryStoreFactory;
 using fixpp::session::MessageStore;
 using fixpp::session::MessageStoreFactory;
 using fixpp::session::retrieve_visitor;
@@ -666,7 +669,8 @@ TEST(ValidationCompatToggles, CompID_KnobOff_LogonTimeMismatchStillRefused) {
 // Logon at seq=1 was accepted and advanced the counter).
 
 std::unique_ptr<Fixture> make_acceptor_seqval_off(
-    std::shared_ptr<fixpp::session::Application> app = nullptr) {
+    std::shared_ptr<fixpp::session::Application> app = nullptr,
+    std::shared_ptr<MessageStoreFactory> store_factory = std::make_shared<NullStoreFactory>()) {
     auto fix = std::make_unique<Fixture>();
     fix->cfg.role = fixpp::session::session_role::acceptor;
     fix->cfg.sender_comp_id = "SRV";
@@ -676,7 +680,7 @@ std::unique_ptr<Fixture> make_acceptor_seqval_off(
     fix->cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
     fix->cfg.heartbeat_interval = std::chrono::seconds{30};
     fix->cfg.executor_override = fix->ioc.get_executor();
-    fix->cfg.store_factory = std::make_shared<NullStoreFactory>();
+    fix->cfg.store_factory = std::move(store_factory);
     fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
     fix->cfg.validate_sequence_numbers = false;  // knob off
     fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
@@ -1190,6 +1194,392 @@ TEST(ValidationCompatToggles, SeqReset_Default_NewSeqNoApplied) {
         EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
             << "SC-008/C2.7: session must remain Active after exact-match gapfill 35=4 at default";
     }
+}
+
+// ── 092-garbled-frame-reject T032 — the D-4 knob-off arm ─────────────────────
+//
+// With validate_sequence_numbers off, a SequenceReset in Reset mode (GapFillFlag(123)
+// != Y) whose header scan finds a fault after 34 leaves NextNumIn where it was: the
+// frame is not consumed and NewSeqNo(36) is not applied. Later frames above NextNumIn
+// are then delivered without advancing, as the knob-off too-high path delivers them.
+// This pins the outcome the knob-off Reset-mode path already had before 092 (research
+// R-4; quickstart §1 "D-4 no-advance witness"). The check that it can fail is a mutant
+// in a scratch copy: a D-4 row in dispose_unparseable_ that advances NextNumIn, or that
+// applies NewSeqNo, when the knob is off turns it RED.
+// Anchors: specs/092-garbled-frame-reject contract C-2 (D-4), C-3 I-6; spec FR-011.
+TEST(ValidationCompatToggles, SeqReset_KnobOff_FaultyResetMode_NoAdvance) {
+    auto app = std::make_shared<CountingApp028>();
+    auto fix = make_acceptor_seqval_off(app);
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
+
+    const auto& smgr = fix->session->seqnum_mgr_test_access();
+    ASSERT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{2})
+        << "Precondition: next_inbound must be 2 before test";
+
+    // A Reset-mode SequenceReset at the expected 2, NewSeqNo=500, with a malformed
+    // tag after 34, 35, 49, 52, 56, 123 and 36.
+    fix->feed(make_fix_frame("FIX.4.4", "4", 2, "CLI", "SRV",
+                             field(123, "N") + field(36, "500") + "9x9=1\x01"));
+    EXPECT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{2})
+        << "D-4 knob off: the faulty SequenceReset must neither consume 2 nor apply NewSeqNo(500)";
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "D-4 knob off: session must stay Active after the faulty SequenceReset";
+
+    const int from_app_before = app->from_app_count;
+    fix->feed(make_fix_frame("FIX.4.4", "D", 3, "CLI", "SRV"));
+    EXPECT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{2})
+        << "D-4 knob off: the frame at 3 must be delivered without advancing";
+    EXPECT_EQ(app->from_app_count, from_app_before + 1)
+        << "D-4 knob off: the frame at 3 must be delivered to fromApp";
+
+    fix->feed(make_fix_frame("FIX.4.4", "D", 500, "CLI", "SRV"));
+    EXPECT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{2})
+        << "D-4 knob off: the frame at 500 must be delivered without advancing";
+    EXPECT_EQ(app->from_app_count, from_app_before + 2)
+        << "D-4 knob off: the frame at 500 must be delivered to fromApp";
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "D-4 knob off: session must stay Active after the later frames";
+}
+
+// ── 092-garbled-frame-reject T032a — the D-4 knob-off Reject ─────────────────
+//
+// With validate_sequence_numbers off, the faulty Reset-mode SequenceReset at the
+// expected 2 draws exactly one outbound frame, a Reject: 45=2, 372=4, and 373, 371
+// and 58 by fault kind (a malformed tag: 373=0, no 371; a SecureDataLen(90) count not
+// followed by SOH: 373=5, 371=90). The Text strings are spelled out here, not taken
+// from the session's constants, so a change to the emitted Text fails the check.
+// T032 pins the counter on the same input; this pins the Reject.
+// Anchors: specs/092-garbled-frame-reject contract C-2 (D-4) and its Reject contents,
+//          C-3 I-6; spec FR-007, FR-011.
+struct KnobOffReject092 {
+    std::string_view reason;   // 373
+    std::string_view ref_tag;  // 371; empty = absent
+    std::string_view text;     // 58
+};
+
+void expect_knob_off_reject_092(const std::vector<std::vector<std::byte>>& frames,
+                                std::string_view ref_seq, std::string_view ref_msg_type,
+                                const KnobOffReject092& want) {
+    EXPECT_EQ(frames.size(), 1U) << "exactly one outbound frame (the Reject)";
+    EXPECT_EQ(count_frames_with_msgtype(frames, "3"), 1) << "exactly one Reject(35=3)";
+    for (const auto& r : frames) {
+        if (extract_tag(r, 35) != "3") continue;
+        EXPECT_EQ(extract_tag(r, 45), ref_seq) << "Reject RefSeqNum(45)";
+        EXPECT_EQ(extract_tag(r, 372), ref_msg_type) << "Reject RefMsgType(372)";
+        EXPECT_EQ(extract_tag(r, 373), want.reason) << "Reject SessionRejectReason(373)";
+        const std::string wire(reinterpret_cast<const char*>(r.data()), r.size());
+        if (want.ref_tag.empty()) {
+            EXPECT_EQ(wire.find("\x01"
+                                "371="),
+                      std::string::npos)
+                << "Reject must carry no RefTagID(371)";
+        } else {
+            EXPECT_EQ(extract_tag(r, 371), want.ref_tag) << "Reject RefTagID(371)";
+        }
+        EXPECT_EQ(extract_tag(r, 58), want.text) << "Reject Text(58)";
+    }
+}
+
+void run_seqreset_knob_off_reject_092(std::string_view garble, const KnobOffReject092& want) {
+    auto app = std::make_shared<CountingApp028>();
+    auto fix = make_acceptor_seqval_off(app);
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
+    fix->clear_capture();
+
+    fix->feed(make_fix_frame("FIX.4.4", "4", 2, "CLI", "SRV",
+                             field(123, "N") + field(36, "500") + std::string(garble)));
+    expect_knob_off_reject_092(fix->capture.frames, "2", "4", want);
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "D-4 knob off: session must stay Active after the faulty SequenceReset";
+}
+
+TEST(ValidationCompatToggles, SeqReset_KnobOff_FaultyResetMode_Reject_MalformedTag) {
+    run_seqreset_knob_off_reject_092(
+        "9x9=1\x01", {.reason = "0", .ref_tag = {}, .text = "Malformed field: invalid tag"});
+}
+
+TEST(ValidationCompatToggles, SeqReset_KnobOff_FaultyResetMode_Reject_LengthDataMismatch) {
+    run_seqreset_knob_off_reject_092(
+        "90=2\x01"
+        "91=xyz\x01",
+        {.reason = "5",
+         .ref_tag = "90",
+         .text = "Malformed field: Length does not match its Data field"});
+}
+
+// ── 092-garbled-frame-reject T037 — the D-5 knob-off counter arm ─────────────
+//
+// With validate_sequence_numbers off, delivery alone cannot witness an advance: a
+// too-high frame is delivered without advancing and without a ResendRequest. So this
+// arm reads the counter. A faulty frame at the expected 2 (field 3 is 35, a malformed
+// tag after 34) is D-5: consume_rejected_seqnum_ advances NextNumIn to 3, then the
+// Reject (asserted in full). A conformant NewOrderSingle at 3 is then in sequence:
+// delivered to fromApp and the counter reads 4. One cell each for an application
+// frame, a Reject(3) and a Logout(5) as the faulty frame; the faulty Logout draws no
+// Logout reply and does not end the session. To check the arm can fail, skip
+// consume_rejected_seqnum_ in dispose_unparseable_ in a scratch copy.
+// Anchors: specs/092-garbled-frame-reject contract C-2 (D-5), C-3 I-6; spec FR-004,
+//          FR-011; quickstart §1 "D-5 advance witness".
+void run_d5_knob_off_counter_092(std::string_view msg_type, std::string_view fields) {
+    auto app = std::make_shared<CountingApp028>();
+    auto fix = make_acceptor_seqval_off(app);
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
+    const auto& smgr = fix->session->seqnum_mgr_test_access();
+    ASSERT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{2})
+        << "Precondition: next_inbound must be 2 before test";
+    fix->clear_capture();
+    const int from_app_before = app->from_app_count;
+    const int from_admin_before = app->from_admin_count;
+
+    fix->feed(
+        make_fix_frame("FIX.4.4", msg_type, 2, "CLI", "SRV", std::string(fields) + "9x9=1\x01"));
+    EXPECT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{3})
+        << "D-5 knob off: the faulty frame at 2 must consume 2";
+    expect_knob_off_reject_092(
+        fix->capture.frames, "2", msg_type,
+        {.reason = "0", .ref_tag = {}, .text = "Malformed field: invalid tag"});
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << "D-5 knob off: session must stay Active after the faulty frame";
+    EXPECT_EQ(app->from_app_count, from_app_before) << "the faulty frame never reaches fromApp";
+    EXPECT_EQ(app->from_admin_count, from_admin_before)
+        << "the faulty frame never reaches fromAdmin";
+
+    fix->clear_capture();
+    fix->feed(make_fix_frame("FIX.4.4", "D", 3, "CLI", "SRV"));
+    EXPECT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{4})
+        << "D-5 knob off: the conformant frame at 3 must be in sequence and advance";
+    EXPECT_EQ(app->from_app_count, from_app_before + 1)
+        << "D-5 knob off: the conformant frame at 3 must be delivered to fromApp";
+    EXPECT_TRUE(fix->capture.frames.empty()) << "the conformant frame at 3 must draw nothing";
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
+}
+
+TEST(ValidationCompatToggles, D5_KnobOff_FaultyApplication_CounterAdvances) {
+    run_d5_knob_off_counter_092("D", field(11, "ORD1"));
+}
+
+TEST(ValidationCompatToggles, D5_KnobOff_FaultyReject_CounterAdvances) {
+    run_d5_knob_off_counter_092("3", field(45, "1") + field(373, "0"));
+}
+
+TEST(ValidationCompatToggles, D5_KnobOff_FaultyLogout_CounterAdvances) {
+    run_d5_knob_off_counter_092("5", field(58, "bye"));
+}
+
+// ── 092-garbled-frame-reject T051 — the inbound seqnum_max bound (FR-019) ────
+//
+// A Reset-mode SequenceReset may set NextNumIn to seqnum_max (4294967295); the next
+// message that would consume it ends the session instead: silent Disconnected, NextNumIn
+// still 4294967295 (never 0), no outbound frame (no Reject, no Logout), no fromApp or
+// fromAdmin. Each consuming cell first asserts Active and NextNumIn == 4294967295, so a
+// disconnect from any other cause cannot satisfy it. The frame at the maximum is, in turn,
+// an application message, a Heartbeat, a PossDupFlag=Y admin frame with a valid
+// OrigSendingTime(122), a #423 Reject site (a PossDupFlag=Y application frame with no 122,
+// which the PossDup Stage-1 Arm C Rejects through consume_rejected_seqnum_) and a faulty
+// application frame (D-5). Every cell runs over a MemoryStoreFactory, which is
+// non-persistent: the NullStoreFactory the other cells here use keeps the base class's
+// yields_persistent_store() (true), so its Logon would hydrate NextNumIn back from the
+// store. The knob-off arm seeds NextNumIn with set_counters_for_test,
+// because with the knob off a Reset-mode SequenceReset is not applied. The pre-Active arms
+// seed the same way after open() and send the Logon at the maximum.
+//
+// The controls do not consume NextNumIn and must leave the session Active at 4294967295:
+// a Reset-mode SequenceReset with NewSeqNo = 4294967295, a faulty Reset-mode SequenceReset
+// at 4294967295 (D-4, Rejected), a faulty frame at another number (D-6, Rejected) and a
+// faulty frame whose fault precedes 34 (D-7, disregarded).
+//
+// To check the cells can fail, apply each deletion of quickstart §2 "Inbound bound
+// deletion" in a scratch copy: the bound in SeqnumManager::check_inbound, the overflow test
+// in Guard 4's check_inbound error branch, and consume_rejected_seqnum_'s overflow branch.
+// tasks.md T054 names the cells each deletion must fail.
+// Anchors: specs/092-garbled-frame-reject spec FR-019, SC-010; contract C-3 I-7, C-5 L-7;
+//          research R-14.
+
+constexpr fixpp::session::seqnum_t kSeqMax092 = fixpp::session::seqnum_max;
+
+// A MemoryStoreFactory sized so the store mints within the engine's per-session store
+// budget (MemoryStore::Config's defaults pre-size a bounded slab above it).
+std::shared_ptr<MemoryStoreFactory> memory_store_factory_092() {
+    fixpp::session::MemoryStore::Config mcfg;
+    mcfg.policy = fixpp::session::capacity_policy::bounded;
+    mcfg.inbound_capacity = 64;
+    mcfg.outbound_capacity = 64;
+    mcfg.max_frame_bytes = 4096;
+    return std::make_shared<MemoryStoreFactory>(mcfg);
+}
+
+// An acceptor, Active, whose NextNumIn a Reset-mode SequenceReset has set to seqnum_max.
+std::unique_ptr<Fixture> make_acceptor_at_max_092(std::shared_ptr<CountingApp028> app) {
+    auto fix = make_acceptor(memory_store_factory_092(), 1, std::move(app));
+    fix->feed(make_seq_reset_frame("FIX.4.4", 2, kSeqMax092, "CLI", "SRV", false));
+    return fix;
+}
+
+// The consuming-frame assertions, shared by every consuming cell.
+void expect_bound_disconnect_092(Fixture& fix, const CountingApp028& app, int from_app_before,
+                                 int from_admin_before, std::string_view what) {
+    EXPECT_EQ(fix.session->state(), fixpp::session::fsm_state::Disconnected)
+        << what << ": FR-019: the message at NextNumIn = seqnum_max must end the session";
+    EXPECT_EQ(fix.session->seqnum_mgr_test_access().next_inbound_unsafe(), kSeqMax092)
+        << what << ": FR-019: NextNumIn must stay 4294967295, never wrap";
+    EXPECT_TRUE(fix.capture.frames.empty())
+        << what << ": FR-019: the disconnect is silent (no Reject, no Logout)";
+    EXPECT_EQ(app.from_app_count, from_app_before) << what << ": no fromApp";
+    EXPECT_EQ(app.from_admin_count, from_admin_before) << what << ": no fromAdmin";
+}
+
+void run_bound_consuming_092(const std::vector<std::byte>& frame, std::string_view what) {
+    auto app = std::make_shared<CountingApp028>();
+    auto fix = make_acceptor_at_max_092(app);
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << what << ": precondition: Active after the Reset-mode SequenceReset";
+    ASSERT_EQ(fix->session->seqnum_mgr_test_access().next_inbound_unsafe(), kSeqMax092)
+        << what << ": precondition: NextNumIn == 4294967295";
+    fix->clear_capture();
+    const int from_app_before = app->from_app_count;
+    const int from_admin_before = app->from_admin_count;
+
+    fix->feed(frame);
+    expect_bound_disconnect_092(*fix, *app, from_app_before, from_admin_before, what);
+}
+
+TEST(ValidationCompatToggles, SeqnumMax_Application_Disconnects) {
+    run_bound_consuming_092(
+        make_fix_frame("FIX.4.4", "D", kSeqMax092, "CLI", "SRV", field(11, "O1")), "application");
+}
+
+TEST(ValidationCompatToggles, SeqnumMax_Heartbeat_Disconnects) {
+    run_bound_consuming_092(make_fix_frame("FIX.4.4", "0", kSeqMax092, "CLI", "SRV"), "Heartbeat");
+}
+
+// A Reject(35=3), not a Heartbeat: Guard 4's error branch tests the Heartbeat first, so
+// a PossDupFlag=Y Heartbeat would never reach the PossDup admin arm.
+TEST(ValidationCompatToggles, SeqnumMax_PossDupAdmin_Disconnects) {
+    run_bound_consuming_092(
+        make_fix_frame("FIX.4.4", "3", kSeqMax092, "CLI", "SRV",
+                       field(43, "Y") + field(122, "20240101-00:00:00.000") + field(45, "1")),
+        "PossDupFlag=Y admin");
+}
+
+TEST(ValidationCompatToggles, SeqnumMax_Issue423PossDupAppNo122_Disconnects) {
+    run_bound_consuming_092(
+        make_fix_frame("FIX.4.4", "D", kSeqMax092, "CLI", "SRV", field(43, "Y") + field(11, "O1")),
+        "#423 Reject site (43=Y, no 122)");
+}
+
+TEST(ValidationCompatToggles, SeqnumMax_D5FaultyApplication_Disconnects) {
+    run_bound_consuming_092(
+        make_fix_frame("FIX.4.4", "D", kSeqMax092, "CLI", "SRV", field(11, "O1") + "9x9=1\x01"),
+        "D-5 faulty application");
+}
+
+TEST(ValidationCompatToggles, SeqnumMax_KnobOff_Application_Disconnects) {
+    auto app = std::make_shared<CountingApp028>();
+    auto fix = make_acceptor_seqval_off(app, memory_store_factory_092());
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
+    auto& smgr = fix->session->seqnum_mgr_test_access();
+    smgr.set_counters_for_test(kSeqMax092, smgr.peek_outbound());
+    ASSERT_EQ(smgr.next_inbound_unsafe(), kSeqMax092) << "precondition: NextNumIn == 4294967295";
+    fix->clear_capture();
+    const int from_app_before = app->from_app_count;
+    const int from_admin_before = app->from_admin_count;
+
+    fix->feed(make_fix_frame("FIX.4.4", "D", kSeqMax092, "CLI", "SRV", field(11, "O1")));
+    expect_bound_disconnect_092(*fix, *app, from_app_before, from_admin_before,
+                                "knob-off application");
+}
+
+// Pre-Active: the acceptor's inbound Logon at NextNumIn = seqnum_max.
+TEST(ValidationCompatToggles, SeqnumMax_PreActive_AcceptorLogon_Disconnects) {
+    auto fix = std::make_unique<Fixture>();
+    fix->cfg.role = fixpp::session::session_role::acceptor;
+    fix->cfg.sender_comp_id = "SRV";
+    fix->cfg.target_comp_id = "CLI";
+    fix->cfg.begin_string = "FIX.4.4";
+    fix->cfg.security_profile = fixpp::test_support::make_minimal_security_profile();
+    fix->cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+    fix->cfg.heartbeat_interval = std::chrono::seconds{30};
+    fix->cfg.executor_override = fix->ioc.get_executor();
+    fix->cfg.store_factory = memory_store_factory_092();
+    fix->cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
+    fix->cfg.transport_send = [&fix = *fix](std::span<const std::byte> data) { fix.capture(data); };
+    fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
+    auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
+    ASSERT_TRUE(fixpp::test_support::run_window_then_ready(fix->ioc, open_fut, 1s))
+        << fixpp::test_support::kWindowMiss << "SeqnumMax_PreActive_AcceptorLogon_Disconnects";
+    (void)open_fut.get();
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::NotConnected);
+
+    auto& smgr = fix->session->seqnum_mgr_test_access();
+    smgr.set_counters_for_test(kSeqMax092, smgr.peek_outbound());
+    fix->feed(make_logon("FIX.4.4", kSeqMax092, "CLI", "SRV"));
+
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+        << "FR-019: the acceptor's Logon at NextNumIn = seqnum_max must end the session";
+    EXPECT_EQ(smgr.next_inbound_unsafe(), kSeqMax092) << "FR-019: NextNumIn must not wrap";
+}
+
+// Pre-Active: the initiator's Logon reply at NextNumIn = seqnum_max.
+TEST(ValidationCompatToggles, SeqnumMax_PreActive_InitiatorLogonReply_Disconnects) {
+    auto fix = make_initiator(memory_store_factory_092());
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::LogonSent);
+    auto& smgr = fix->session->seqnum_mgr_test_access();
+    smgr.set_counters_for_test(kSeqMax092, smgr.peek_outbound());
+    fix->feed(make_logon("FIX.4.4", kSeqMax092, "SRV", "CLI"));
+
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
+        << "FR-019: the initiator's Logon reply at NextNumIn = seqnum_max must end the session";
+    EXPECT_EQ(smgr.next_inbound_unsafe(), kSeqMax092) << "FR-019: NextNumIn must not wrap";
+}
+
+// Controls: a frame here does not consume NextNumIn, so it does not end the session through
+// the bound.
+void run_bound_control_092(const std::vector<std::byte>& frame, int want_rejects,
+                           std::string_view what) {
+    auto app = std::make_shared<CountingApp028>();
+    auto fix = make_acceptor_at_max_092(app);
+    ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << what << ": precondition: Active after the Reset-mode SequenceReset";
+    ASSERT_EQ(fix->session->seqnum_mgr_test_access().next_inbound_unsafe(), kSeqMax092)
+        << what << ": precondition: NextNumIn == 4294967295";
+    fix->clear_capture();
+
+    fix->feed(frame);
+    EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
+        << what << ": control: a frame that does not consume NextNumIn keeps the session";
+    EXPECT_EQ(fix->session->seqnum_mgr_test_access().next_inbound_unsafe(), kSeqMax092)
+        << what << ": control: NextNumIn unchanged";
+    EXPECT_EQ(fix->capture.frames.size(), static_cast<std::size_t>(want_rejects))
+        << what << ": control: outbound frame count";
+    EXPECT_EQ(count_frames_with_msgtype(fix->capture.frames, "3"), want_rejects)
+        << what << ": control: Reject count";
+}
+
+TEST(ValidationCompatToggles, SeqnumMax_Control_ResetModeSeqResetToMax_StaysActive) {
+    run_bound_control_092(make_seq_reset_frame("FIX.4.4", kSeqMax092, kSeqMax092, "CLI", "SRV"), 0,
+                          "Reset-mode SequenceReset, NewSeqNo = 4294967295");
+}
+
+TEST(ValidationCompatToggles, SeqnumMax_Control_D4FaultyResetModeAtMax_StaysActive) {
+    run_bound_control_092(make_fix_frame("FIX.4.4", "4", kSeqMax092, "CLI", "SRV",
+                                         field(123, "N") + field(36, "4294967295") + "9x9=1\x01"),
+                          1, "D-4 faulty Reset-mode SequenceReset at 4294967295");
+}
+
+TEST(ValidationCompatToggles, SeqnumMax_Control_D6FaultyAtOtherNumber_StaysActive) {
+    run_bound_control_092(
+        make_fix_frame("FIX.4.4", "D", kSeqMax092 - 1, "CLI", "SRV", field(11, "O1") + "9x9=1\x01"),
+        1, "D-6 faulty application at 4294967294");
+}
+
+TEST(ValidationCompatToggles, SeqnumMax_Control_D7FaultBefore34_StaysActive) {
+    // A frame around a raw body (35 and everything after it), since the fault must precede 34.
+    run_bound_control_092(
+        fixpp::test_support::assemble_frame(
+            "8=FIX.4.4\x01", std::string{"35=D\x01"} + "9x9=1\x01" + "34=4294967295\x01" +
+                                 field(49, "CLI") + field(52, "20240101-00:00:00.000") +
+                                 field(56, "SRV")),
+        0, "D-7 fault before 34");
 }
 
 // ── T012 (US3) — Default/combination/no-op witnesses ────────────────────────

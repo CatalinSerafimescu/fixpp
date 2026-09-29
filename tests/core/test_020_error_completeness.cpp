@@ -33,14 +33,20 @@ TEST(Error020Completeness, ExactSetEquality) {
     // Slot 130 is the pre-020 boundary (019's app_callback_threw).
     EXPECT_EQ(static_cast<std::uint8_t>(error::app_callback_threw), 130U);
 
-    // Message-table boundary: slot 131 carries the 020 message; slot 132 is the
-    // forward "unknown" boundary (no enumerator added beyond 020).
+    // Message-table boundary: slot 131 carries the 020 message. The forward
+    // "unknown" boundary is the slot after the newest block's last enumerator
+    // (092's wire_length_data_mismatch; its own gate is test_092_*).
     EXPECT_NE(fixpp::core::error_message(error::app_payload_malformed),
               std::string_view{"unknown error"})
         << "slot 131 (app_payload_malformed) must carry a real message";
-    EXPECT_EQ(fixpp::core::error_message(static_cast<error>(132U)),
+    // The cast names the slot one past the last enumerator on purpose: the
+    // assertion is that the slot has no message.
+    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
+    EXPECT_EQ(fixpp::core::error_message(static_cast<error>(
+                  static_cast<std::uint8_t>(error::wire_length_data_mismatch) + 1U)),
               std::string_view{"unknown error"})
-        << "slot 132 must be unknown — nothing added beyond the 020 boundary";
+        << "the slot after wire_length_data_mismatch must be unknown — nothing "
+           "added beyond the 092 block";
 }
 
 // ── Message non-empty + to_string parity ──────────────────────────────────────

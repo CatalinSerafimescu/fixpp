@@ -19,6 +19,8 @@
 //       too-high → return session_seqnum_too_high (120, 014 FR-016 / E-4;
 //                  replaces slot-74 stand-in session_test_request_unanswered;
 //                  slot 70 session_seqnum_gap_unrecoverable deleted per 013 T006a)
+//       in-seq at seqnum_max → return store_seqnum_overflow, counter unchanged
+//                  (092 FR-019: NextNumIn never wraps)
 //   - Outbound: next_outbound() — read next counter without advancing
 //               advance_outbound() — advance and return the ASSIGNED seq
 //       Overflow at seqnum_max → return store_seqnum_overflow (I-8 — reuse [2e §6.7])
@@ -28,8 +30,11 @@
 //
 // Invariants enforced:
 //   I-2: counters advance by exactly +1; zero drift over a long run.
-//   I-4: too-high is session-fatal; no ResendRequest; caller emits Logout+disconnect.
-//   I-8: seqnum_max overflow is session-fatal; no wrap.
+//   I-4: check_inbound only classifies a too-high MsgSeqNum; the caller's
+//        disposition depends on its state. Re-derive the callers with
+//        `grep -n "check_inbound(" src/session/session.cpp`.
+//   I-8: seqnum_max overflow is session-fatal; no wrap. Both counters: the inbound
+//        side is 092 FR-019 (contract C-3 I-7).
 //
 // No std::mutex used here (grep gate [const §XV.9]).
 // No asio::awaitable in this header (no coroutine in the public interface).
@@ -69,14 +74,18 @@ public:
     // ── Inbound check ────────────────────────────────────────────────────────
     //
     // check_inbound(seq): compare seq against next-expected inbound counter.
+    // It only classifies (I-4): the caller's disposition depends on its state and
+    // configuration. Find the callers with the recipe under I-4 above.
     //   in-seq  → advance counter, return ok.
-    //   too-low  → return unexpected{session_seqnum_too_low=69}              (session-fatal).
-    //   too-high → return unexpected{session_seqnum_too_high=120}            (session-fatal;
-    //              014 FR-016 / E-4; slot 70 deleted per 013 T006a; FR-009 wired in session.cpp).
+    //   too-low  → return unexpected{session_seqnum_too_low=69}, counter unchanged.
+    //   too-high → return unexpected{session_seqnum_too_high=120}, counter unchanged
+    //              (014 FR-016 / E-4; slot 70 deleted per 013 T006a).
+    //   in-seq at seqnum_max → return unexpected{store_seqnum_overflow=60}, counter unchanged
+    //              (092 FR-019 / contract C-3 I-7: no next value exists, so it cannot be consumed).
     //
-    // Caller is responsible for the session-fatal disposition (emitting
-    // Logout-with-text + disconnect) on any unexpected return. I-4: no
-    // ResendRequest is emitted by 005; the recovery feature is deferred.
+    // The disposition is per result (092 FR-019). Too-low and too-high keep their
+    // context-dependent handling at the caller. store_seqnum_overflow requires FR-019's
+    // silent transition to Disconnected: no Reject, no Logout, no delivery.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> check_inbound(
         seqnum_t seq) noexcept;
 

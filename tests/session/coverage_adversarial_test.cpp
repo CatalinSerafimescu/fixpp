@@ -10,8 +10,11 @@
 // Covers:
 //   A. Builder buffer-too-small: build_logon / build_logout / build_heartbeat /
 //      build_test_request / build_reject with undersized `out` spans.
-//   B. Malformed-field parser fallback in interpret_logon and
-//      Session::on_inbound_frame: non-digit tag char + tag-without-equals.
+//   B. Malformed fields: interpret_logon's skip of a non-digit tag char and a
+//      tag without '=' (B-1); and, in Session::on_inbound_frame, the same two
+//      shapes as field 3 of a frame arriving in Active, which the header scan
+//      records as a fault (092 data-model E-1) and contract C-2 row D-8
+//      disregards (B-2).
 //   C. Logon-ack with msg_seq_num=0 → Disconnected (Guard (4)'s LogonSent-row seq==0 check).
 //   D. cancel_sleeps() mid-Logout-graceful-sleep → system_error catch
 //      absorbing the operation_aborted exception (run_logout_phase1's wake-early catch).
@@ -232,38 +235,91 @@ protected:
         }
         return fut.get();
     }
+
+    // Category B-2: reaches Active with the Category C Logon-ack, feeds `faulty_body`
+    // (whose field 3 is the fault and which carries MsgSeqNum 2 after it), then a
+    // conformant Heartbeat at MsgSeqNum 2. Contract C-2 row D-8: the faulty frame
+    // draws nothing and leaves the session Active with NextNumIn unmoved, so the
+    // Heartbeat is in sequence and draws nothing either.
+    void expect_field3_fault_disregarded(std::string const& faulty_body) {
+        auto cfg = make_cfg();
+        TransportDouble td;
+        cfg.transport_send = [&td](std::span<const std::byte> frame) {
+            td.capture_outbound(frame);
+        };
+        Session s(engine, cfg);
+        ASSERT_TRUE(open_session(s).has_value()) << "setup: open()";
+        std::string const ack =
+            "35=A\x01"
+            "34=1\x01"
+            "49=ISLD\x01"
+            "52=20240101-00:00:00.000\x01"
+            "56=TW\x01"
+            "98=0\x01"
+            "108=30\x01";
+        ASSERT_TRUE(feed(s, wrap_frame(ack)).has_value()) << "setup: the Logon-ack";
+        ASSERT_EQ(s.state(), fsm_state::Active) << "setup: the Logon-ack must reach Active";
+        td.reset();
+
+        (void)feed(s, wrap_frame(faulty_body));
+        EXPECT_EQ(s.state(), fsm_state::Active) << "D-8: the faulty frame must not disconnect";
+        EXPECT_TRUE(td.sent_frames().empty())
+            << "D-8: the faulty frame must draw nothing (no Reject); sent:"
+            << printable_all(td.sent_frames());
+
+        td.reset();
+        std::string const heartbeat =
+            "35=0\x01"
+            "34=2\x01"
+            "49=ISLD\x01"
+            "52=20240101-00:00:00.000\x01"
+            "56=TW\x01";
+        (void)feed(s, wrap_frame(heartbeat));
+        EXPECT_EQ(s.state(), fsm_state::Active)
+            << "D-8: NextNumIn must still be 2, so the Heartbeat at 2 is in sequence";
+        EXPECT_TRUE(td.sent_frames().empty())
+            << "D-8: the in-sequence Heartbeat must draw nothing; sent:"
+            << printable_all(td.sent_frames());
+    }
+
+private:
+    static std::string printable_all(std::vector<std::vector<std::byte>> const& frames) {
+        std::string out;
+        for (auto const& f : frames) {
+            out += "\n  ";
+            for (std::byte const b : f) {
+                char const c = static_cast<char>(b);
+                out += (c == '\x01') ? '|' : c;
+            }
+        }
+        return out;
+    }
 };
 
-// ── Category B-2: session.cpp inbound parser skip-malformed-field ─────────────
-// Exercises scan_frame_header's tag_ok=false branch + skip-to-SOH path.
+// ── Category B-2: a malformed field 3 in Active is disregarded (092 D-8) ─────
+// specs/092-garbled-frame-reject contract C-2 row D-8. Each cell reaches Active
+// first, so the frame meets D-8 and not the LogonSent refusal (D-2), which
+// disconnects whatever the frame holds. The peer's CompIDs are the session's
+// counterparty's (49=ISLD, 56=TW), so no identity check is what fails.
 
-TEST_F(AdversarialSessionTest, InboundFrameMalformedTagCharSkipped) {
-    Session s(engine, make_cfg());
-    ASSERT_TRUE(open_session(s).has_value());
-
-    // Inbound frame with a garbage field (non-digit tag) before the real fields.
-    std::string body =
-        "X35=garbage\x01"
-        "35=0\x01"  // Heartbeat
+TEST_F(AdversarialSessionTest, InboundFrameMalformedTagInField3IsDisregarded) {
+    expect_field3_fault_disregarded(
+        "X35=garbage\x01"  // field 3: a non-digit tag byte
+        "35=0\x01"         // Heartbeat
         "34=2\x01"
-        "49=TW\x01"
+        "49=ISLD\x01"
         "52=20240101-00:00:00.000\x01"
-        "56=ISLD\x01";
-    (void)feed(s, wrap_frame(body));
+        "56=TW\x01");
 }
 
-TEST_F(AdversarialSessionTest, InboundFrameTagWithoutEqualsSkipped) {
-    Session s(engine, make_cfg());
-    ASSERT_TRUE(open_session(s).has_value());
-
-    std::string body =
-        "999\x01"  // tag without '='
+TEST_F(AdversarialSessionTest, InboundFrameTagWithoutEqualsInField3IsDisregarded) {
+    expect_field3_fault_disregarded(
+        "999\x01"  // field 3: a tag without '='
         "35=0\x01"
         "34=2\x01"
-        "49=TW\x01"
+        "49=ISLD\x01"
         "52=20240101-00:00:00.000\x01"
-        "56=ISLD\x01";
-    (void)feed(s, wrap_frame(body));
+        "56=TW\x01");
 }
 
 // ── Category C: Logon-ack with msg_seq_num=0 → Disconnected ───────────────────

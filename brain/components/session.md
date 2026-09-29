@@ -22,6 +22,7 @@ refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/037-resend-reply-possdup-tags-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/042-fixt-version-serviceability-guard-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/090-capi-refusals-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/092-garbled-frame-reject-gatea.md
 codegraph_entry: [Session, fsm_state, SeqnumManager, Engine, on_inbound_frame]
 constitution: ["§XI.4", "§XV.4"]
 ---
@@ -157,10 +158,20 @@ agent correctly treated this as a shortlist and re-derived, which is the intende
   capability-partitioned subset ships. Do not read the size of this family as completeness.
 - **`L-005-5` — `OnBehalfOfCompID(115)` / `DeliverToCompID(128)` third-party addressing is not
   implemented.**
-- **fixpp#507 (batch B18), an open follow-up, not a B&L row:** the session acts on the header fields of
-  a garbled inbound frame (a malformed Length count, or a garbled tag) instead of disregarding it, contrary
-  to FIX Session §4.5.2. Found by 091's T076 and filed out of #418's scope; 091 fixed the Logon case only
-  (FR-020). Check the issue's state before treating it as open.
+- **A framed but unparseable inbound frame (fixpp#507, feature 092).** ⚠️ **"Garbled" is the wrong word
+  for these frames, and this bullet used to use it.** The owner ruling of 2026-09-27 reserves "garbled" for
+  the four FIX-SL 2020 §4.5.2 framing criteria. A frame that passes the Framer and then has a malformed tag
+  or a Length+Data mismatch is a TagValue encoding violation, which §9.4 routes to a Reject. It is not a
+  §4.5.2 case. The old bullet's defect, the session acting on header fields it scanned from such a frame,
+  is the one 091's T076 found. 091 fixed only the Logon case (FR-020), and 092 ships the rest: a disposition
+  by state, decided before any handler reads the frame. The behaviour and its limitations are the live B&L
+  file's `B-092-*` / `L-092-*` rows, and the decision and its rejected alternatives are on
+  [`inbound-message-path`](./inbound-message-path.md). **Still open, and not 092's:**
+  - a true §4.5.2 failure detected by the Framer still ends the session (`L-004-4`), and its disregard is
+    fixpp#514;
+  - a late parse failure closes the session, and effects taken before the close stand; that is fixpp#515.
+
+  Read the code, not this bullet: `dispose_unparseable_` in `src/session/session.cpp`.
 
 ⚠️ **A limitation is open only if it is in the LIVE B&L file.** Resolved rows move to
 `spec/behaviors-and-limitations-closed.md`, so a repo-wide `grep L-0NN-` reports closed ones as open.

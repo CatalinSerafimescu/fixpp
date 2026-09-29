@@ -86,13 +86,14 @@ function(add_threading_test name)
   # Hang backstop: these async/threading tests `co_spawn(...use_future)` then
   # block on `fut.get()`. A lost-wake or missed cross-thread completion makes
   # get() block forever and (under serial `ctest --output-on-failure`) wedges
-  # the whole suite to CI's 6 h ceiling. The slowest legit run in this group is
-  # `session_test_request_id_cross_session_race`, MEASURED at ~6.9 s under asan and
-  # ~7.3 s under tsan since #317 raised its sample to SC-003's 10^4 (it was
-  # sub-second before that). 120 s therefore leaves ~16x measured headroom while
-  # still failing a true deadlock fast and letting ctest report which test hung +
-  # continue. Re-measure before adding a slower member rather than assuming the
-  # margin is still "pure".
+  # the whole suite to CI's 6 h ceiling. The 120 s default fails a true deadlock
+  # fast and lets ctest report which test hung and continue. It holds only while
+  # it stays well above the slowest member's legit run time on the slowest
+  # sanitizer lane; a member that needs more sets its own TIMEOUT after this
+  # call rather than raising the shared default. To re-derive, time the members
+  # on each sanitizer lane, e.g.
+  #   ctest --test-dir build/<preset> -R '<member names>' --output-on-failure
+  # and read the per-test times it prints.
   set_tests_properties(${name} PROPERTIES TIMEOUT 120)
 endfunction()
 
@@ -161,6 +162,7 @@ add_executable(session_pure_tests
   test_quiesce_on_exit_residual.cpp                                     # gate-b/r1 P1-3 (Art. VII §8)
   test_enum_validation_logon.cpp                                        # T030 (075)
   wait_until_clamp_test.cpp                                             # gate-b/r2 P1-1 (Art. VII §8)
+  scan_frame_header_fault_test.cpp                                      # 092 T009/T013 (E-1)
   $<TARGET_OBJECTS:session_test_support>
 )
 target_link_libraries(session_pure_tests PRIVATE
@@ -197,6 +199,9 @@ set_tests_properties(session_pure_tests PROPERTIES
 # `ctest -L 075` / `-L session` selectable — mirrors tests/wire/CMakeLists.txt's
 # wire_dict_tests precedent).
 set_tests_properties(session_pure_tests PROPERTIES LABELS "075;session")
+# 092-garbled-frame-reject: label 092 (expected-ctest-092.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST session_pure_tests APPEND PROPERTY LABELS 092)
 
 # ── Grouped bucket: session_store_tests (6 .cpp → 1 binary) ────────────────
 # Store-family witnesses that neither construct an asio::thread_pool nor carry
@@ -226,6 +231,9 @@ target_compile_definitions(session_store_tests PRIVATE
 add_test(NAME session_store_tests COMMAND session_store_tests)
 set_tests_properties(session_store_tests PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp")
+# 092-garbled-frame-reject: label 092 (expected-ctest-092.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST session_store_tests APPEND PROPERTY LABELS 092)
 
 
 
@@ -455,6 +463,9 @@ fixpp_add_store_test(store_fail_reconcile SOURCES
   EXTRA_LIBS fixpp_mock_clock
 )
 target_compile_definitions(store_fail_reconcile PRIVATE FIXPP_TEST_HOOKS)
+# 092-garbled-frame-reject: label 092 (expected-ctest-092.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST store_fail_reconcile APPEND PROPERTY LABELS 092)
 
 # T005a: FR-004 breadth witness (classified by durability, not error code) —
 # a minimal in-memory persistent-store double armed to return each of the
@@ -672,8 +683,9 @@ set_tests_properties(session_admin_emit_toadmin_coverage PROPERTIES
   LABELS "036;us1;us2;us3;bmr;toadmin_coverage;toapp")
 
 # SC-002 static enumeration gate (T041) — gate-b/r1 FQ-1.
-# Parses src/session/session.cpp and asserts every build_reject( / build_logout(
-# site has fire_to_admin_( between the builder and its store_then_emit(, and
+# Parses src/session/session.cpp and asserts every build_reject( /
+# build_reject_with_text( / build_logout( site has fire_to_admin_( between the
+# builder and its store_then_emit(, and
 # every build_business_message_reject( site has ->toApp( in the same interval.
 # Exits 1 (prints offending line) if any admin emit site is unwired — catches a
 # FUTURE unwired site even when the dynamic scenario cells pass.
@@ -717,6 +729,9 @@ target_include_directories(session_scan_frame_header_overflow PRIVATE
 )
 set_tests_properties(session_scan_frame_header_overflow PROPERTIES
   LABELS "040;us1;scan_frame_header;overflow")
+# 092-garbled-frame-reject: label 092 (expected-ctest-092.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST session_scan_frame_header_overflow APPEND PROPERTY LABELS 092)
 
 # fixpp#426: the dictionary-free session scanners (scan_frame_header,
 # scan_first_frame_ids, interpret_logon, the tag-554 maskers) must treat a
@@ -727,6 +742,9 @@ target_include_directories(session_length_data_scanner PRIVATE
 )
 set_tests_properties(session_length_data_scanner PROPERTIES
   LABELS "426;length-data;scanner;091")
+# 092-garbled-frame-reject: label 092 (expected-ctest-092.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST session_length_data_scanner APPEND PROPERTY LABELS 092)
 # §VIII.5 zero-alloc gate for those scanners: re-runs ONLY the NoHeap cell under the
 # mallocnesia LD_PRELOAD via check_alloc.py (mirrors credential_store_redaction_mallocnesia).
 # registered on every FIXPP_MALLOCNESIA_SUPPORTED configuration since
@@ -1217,6 +1235,9 @@ set_tests_properties(engine_readpump PROPERTIES
   ENVIRONMENT
     "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "015;us2;live_tls;readpump")
+# 092-garbled-frame-reject: label 092 (expected-ctest-092.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST engine_readpump APPEND PROPERTY LABELS 092)
 
 # ── 015-runtime-engine Phase 4 (US2) — T016(a) ──────────────────────────────
 # TDD RED-first per [const §VII.3]; turns GREEN when T016(b)-(e) impl lands.
@@ -1950,6 +1971,9 @@ add_test(NAME session_validation_compat_toggles
 set_tests_properties(session_validation_compat_toggles PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "028;s040;s041;validation-compat-toggles;setup")
+# 092-garbled-frame-reject: label 092 (expected-ctest-092.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST session_validation_compat_toggles APPEND PROPERTY LABELS 092)
 # T012 NoHeap_RelaxedDeliverPath: mallocnesia LD_PRELOAD wired so global-heap
 # escapes from the S4 deliver-without-advance path are intercepted by the
 # alloc_guard_{start,end,count} hooks. This APPEND avoids overwriting TSAN_OPTIONS
@@ -2004,6 +2028,9 @@ add_test(NAME session_persistent_seqnum_hydrate
 set_tests_properties(session_persistent_seqnum_hydrate PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "029;s042;persistent-seqnum-hydrate;setup")
+# 092-garbled-frame-reject: label 092 (expected-ctest-092.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST session_persistent_seqnum_hydrate APPEND PROPERTY LABELS 092)
 # T012 NoHeap_HydrateAndPersistPaths: wire mallocnesia LD_PRELOAD so the
 # alloc_guard_count() weak symbol is replaced by the live interceptor.
 # Pattern mirrors session_validation_compat_toggles (028) and
@@ -2175,6 +2202,27 @@ add_threading_test(session_validate_gate_inbound
   test_validate_gate_inbound.cpp)
 set_tests_properties(session_validate_gate_inbound PROPERTIES
   LABELS "041;t012;t014;validation-gate;inbound;foundational")
+
+# ── 092-garbled-frame-reject — the disposition of a framed-but-unparseable frame
+# (contract C-2 .. C-6; fixpp#507's reproducer is the Issue507Reproducer_* cells).
+# Standalone, not a grouped bucket ([const §VII.8]): its cells drive Session
+# coroutines on an io_context with timers (the logout timeout, the liveness
+# interval, the resend loop, a scripted peer), which is not the pure,
+# single-threaded, stateless class §VII.8 groups. session_validate_gate_inbound
+# above is standalone for the same reason. Hook-free: no cell reads a private
+# counter (fixpp#511); NextNumIn is witnessed by the next conformant frame.
+# TIMEOUT is explicit rather than add_threading_test's default: that default is
+# sized for the helper's slowest member, and its comment asks for a re-measure
+# before a slower member joins; this entry is that slower member. Re-derive:
+# time `ctest --test-dir build/<preset> -R '^session_unparseable_frame_disposition$'`
+# on every sanitizer lane /speckit-verify runs and on MSVC, and keep TIMEOUT at
+# roughly 4x the slowest. The CI-only msvc-asan lane is not measurable locally;
+# if this entry times out there, size TIMEOUT from that job's own timing.
+add_threading_test(session_unparseable_frame_disposition
+  unparseable_frame_disposition_test.cpp)
+set_tests_properties(session_unparseable_frame_disposition PROPERTIES
+  LABELS "092;session"
+  TIMEOUT 300)
 
 # ── fixpp#215 item 1 — one as_table_view() walk per opened session ───────────
 # W1: open() with no config-supplied snapshot walks the Dictionary exactly ONCE

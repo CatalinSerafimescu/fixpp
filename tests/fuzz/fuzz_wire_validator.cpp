@@ -25,14 +25,37 @@
 // Campaign note (T026 / 041): A full ≥10-min Tier-1 ASan+UBSan campaign is
 // the CI responsibility. The in-PR campaign used -max_total_time=60 under
 // -fsanitize=fuzzer,address,undefined; zero crashes/violations found.
+//
+// 092-garbled-frame-reject (specs/092-garbled-frame-reject/tasks.md T067; research.md
+// R-7 "Fuzz"; data-model.md E-4): before the frame factory runs, every input is also
+// walked whole by MessageView<Index>::field_iterator and built by OffsetTable::build
+// under the same hooks: the validation dictionary's, a dictionary declaring a
+// dictionary-only Length+Data pair, and dict_hooks::none(). Both directions trap:
+// an encoding failure of the build with fault() == none, and a successful build
+// with fault() != none. Only a resource-failure build status is skipped, and those
+// are counted (fuzz_092_support.hpp).
+//
+// 092 T062a ([const §VII.7]; validator.hpp's pre-scan of a failed-build view): a
+// parse() failure never reaches validate(), so for every input the frame factory
+// accepts, a MessageView<Index> is also constructed directly under each of the
+// three hook sets, and every view whose build failed is handed to validate(). A
+// walk of that view under the validator's own hooks decides the expected answer:
+// a malformed_tag fault must give wire_invalid_tag_number with RefTagID untouched,
+// a length_data_mismatch fault must give wire_length_data_mismatch with RefTagID
+// set to fault_length_tag(), and no fault (the build failed on a resource status,
+// or on a fault the validator's hooks do not see) must give neither of those two
+// codes. A faulted walk that validate() reports conformant traps as well.
 
 #include <array>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/core/error.hpp>
+#include <fixpp/wire/dict_hooks.hpp>
 #include <fixpp/wire/framer.hpp>
+#include <fixpp/wire/offset_table.hpp>
 #include <fixpp/wire/parser.hpp>
+#include <fixpp/wire/tag_scan.hpp>
 #include <fixpp/wire/validator.hpp>
 #include <memory_resource>
 #include <span>
@@ -47,6 +70,8 @@
 // Richer FIX 4.2 validation dictionary (Logon/Heartbeat/NewOrderSingle,
 // typed fields incl. INT + FLOAT — exercises all check_field_type arms).
 #include "support/validation_test_dictionary.hpp"
+// 092: the dictionary-only pair fixture and the skip counter.
+#include "fuzz_092_support.hpp"
 
 namespace {
 
@@ -55,14 +80,18 @@ namespace {
 // The dictionary shared_ptr may be released after as_table_view() returns
 // because table_view owns its data by value (std::vector / unordered_map).
 //
-// Lambda-init static: thread-safe under C++11 (§6.7 of the standard); the
-// fuzzer runs single-threaded per worker, and the static is read-only after
-// the first call.
+// Function-local statics: thread-safe under C++11 (§6.7 of the standard); the
+// fuzzer runs single-threaded per worker, and the statics are read-only after
+// the first call. The validator holds a copy of this table, so hooks built from
+// it (the T062a arm) split fields exactly as the validator's own walk does.
+fixpp::dict::table_view const& validation_table_view() {
+    static fixpp::dict::table_view const tv =
+        fixpp::test_support::make_validation_test_dictionary()->as_table_view();
+    return tv;
+}
+
 fixpp::wire::dictionary_driven_validator const& get_validator() {
-    static const fixpp::wire::dictionary_driven_validator validator = [] {
-        auto dict = fixpp::test_support::make_validation_test_dictionary();
-        return fixpp::wire::dictionary_driven_validator{dict->as_table_view()};
-    }();
+    static const fixpp::wire::dictionary_driven_validator validator{validation_table_view()};
     return validator;
 }
 
@@ -77,10 +106,122 @@ bool is_valid_wire_error(fixpp::core::error e) noexcept {
         case error::wire_required_field_missing:    // reason 1
         case error::wire_field_value_out_of_range:  // reason 5
         case error::wire_field_value_truncated:     // reason 6
+        case error::wire_invalid_tag_number:        // reason 0
+        case error::wire_length_data_mismatch:      // reason 5
             return true;
         default:
             return false;
     }
+}
+
+// 092 R-7: one (input, hooks) comparison of the iterator's fault record with
+// OffsetTable::build.
+void check_iterator_fault_agrees_with_build(std::span<const std::byte> buf,
+                                            fixpp::wire::dict_hooks const& hooks) {
+    using iter_t = fixpp::wire::MessageView<fixpp::wire::access_mode::Index>::field_iterator;
+    auto& counts = fixpp::fuzz092::counter("R-7 field_iterator vs OffsetTable::build");
+    ++counts.cases;
+    std::pmr::monotonic_buffer_resource arena;  // heap upstream: no artificial out_of_memory
+    auto const fv = fixpp::wire::frame_view_slice_access::make(buf.data(), buf.size(), {});
+    fixpp::wire::OffsetTable const table(fv, &arena, hooks);
+    auto const status = table.build_status();
+    if (fixpp::fuzz092::is_resource_failure(status)) {
+        ++counts.skipped;
+        return;
+    }
+    iter_t it{buf, 0, hooks};
+    iter_t const end{buf, buf.size(), hooks};
+    while (!(it == end)) {
+        ++it;
+    }
+    bool const faulted = it.fault() != fixpp::wire::field_fault::none;
+    if (!status.has_value() && !faulted) {
+        __builtin_trap();  // an encoding failure the iterator did not report
+    }
+    if (status.has_value() && faulted) {
+        __builtin_trap();  // a spurious fault on a frame the build accepts
+    }
+}
+
+void check_iterator_fault_agrees_with_build(std::span<const std::byte> buf) {
+    static fixpp::dict::table_view const validation_tv =
+        fixpp::test_support::make_validation_test_dictionary()->as_table_view();
+    static fixpp::wire::dict_hooks const validation_hooks =
+        fixpp::wire::dict_hooks::for_table_view(validation_tv);
+    static fixpp::wire::dict_hooks const pair_hooks =
+        fixpp::wire::dict_hooks::for_table_view(fixpp::fuzz092::pair_dict_table_view());
+    check_iterator_fault_agrees_with_build(buf, validation_hooks);
+    check_iterator_fault_agrees_with_build(buf, pair_hooks);
+    check_iterator_fault_agrees_with_build(buf, fixpp::wire::dict_hooks::none());
+}
+
+// 092 T062a: validate() on a view whose build failed, under each build hook set.
+void check_failed_build_prescan(fixpp::wire::frame_view const& fv,
+                                fixpp::wire::dict_hooks const& build_hooks) {
+    using fixpp::core::error;
+    using fixpp::wire::access_mode;
+    using fixpp::wire::field_fault;
+    using iter_t = fixpp::wire::MessageView<access_mode::Index>::field_iterator;
+    std::pmr::monotonic_buffer_resource arena;  // heap upstream: no artificial out_of_memory
+    fixpp::wire::MessageView<access_mode::Index> const mv{fv, &arena, build_hooks};
+    auto const status = mv.offsets().build_status();
+    if (status.has_value()) {
+        return;
+    }
+    auto& counts = fixpp::fuzz092::failed_build_prescan_counter();
+    ++counts.entered;
+
+    // The walk validate() runs: the view's bytes, under hooks of the validator's table.
+    static fixpp::wire::dict_hooks const validator_hooks =
+        fixpp::wire::dict_hooks::for_table_view(validation_table_view());
+    iter_t it{mv.bytes(), 0, validator_hooks};
+    iter_t const end{mv.bytes(), mv.bytes().size(), validator_hooks};
+    while (!(it == end) && it.fault() == field_fault::none) {
+        ++it;
+    }
+
+    constexpr std::uint16_t kRefSentinel = 0xBEEF;
+    std::uint16_t ref = kRefSentinel;
+    auto const r = get_validator().validate(mv, &arena, &ref);
+
+    switch (it.fault()) {
+        case field_fault::malformed_tag:
+            ++counts.faulted_malformed_tag;
+            if (r.has_value() || r.error() != error::wire_invalid_tag_number ||
+                ref != kRefSentinel) {
+                __builtin_trap();
+            }
+            break;
+        case field_fault::length_data_mismatch:
+            ++counts.faulted_length_data;
+            if (r.has_value() || r.error() != error::wire_length_data_mismatch ||
+                ref != it.fault_length_tag()) {
+                __builtin_trap();
+            }
+            break;
+        case field_fault::none:
+            ++counts.fell_through;
+            if (fixpp::fuzz092::is_resource_failure(status)) {
+                ++counts.resource_status;
+            }
+            if (!r.has_value() && (r.error() == error::wire_invalid_tag_number ||
+                                   r.error() == error::wire_length_data_mismatch)) {
+                __builtin_trap();
+            }
+            break;
+        default:
+            __builtin_trap();  // a fault kind this arm does not know
+    }
+}
+
+void check_failed_build_prescan(fixpp::wire::frame_view const& fv) {
+    static fixpp::wire::dict_hooks const validation_hooks =
+        fixpp::wire::dict_hooks::for_table_view(validation_table_view());
+    static fixpp::wire::dict_hooks const pair_hooks =
+        fixpp::wire::dict_hooks::for_table_view(fixpp::fuzz092::pair_dict_table_view());
+    check_failed_build_prescan(fv, validation_hooks);
+    check_failed_build_prescan(fv, pair_hooks);
+    check_failed_build_prescan(fv, fixpp::wire::dict_hooks::none());
 }
 
 }  // namespace
@@ -99,6 +240,10 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     // a wire_* error and we skip both parse and validate (still exercises the
     // factory's error paths).
     auto buf = std::span<const std::byte>{reinterpret_cast<const std::byte*>(data), size};
+
+    // 092 R-7 arm, on the raw input: it does not depend on the frame factory.
+    check_iterator_fault_agrees_with_build(buf);
+
     auto fv_or_err = fixpp::wire::test::make_frame_view(buf);
 
     if (!fv_or_err) {
@@ -106,6 +251,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     }
 
     frame_view const& fv = *fv_or_err;
+
+    // 092 T062a arm: before parse(), which returns no view when the build fails.
+    check_failed_build_prescan(fv);
 
     // Per-input parse arena (stack-backed; null_memory_resource as upstream
     // so any overflow hard-fails rather than falling back to the heap).
@@ -138,7 +286,7 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     auto validate_result = validator.validate(mv, &scratch_mr, nullptr);
 
     if (!validate_result) {
-        // Invariant: every rejection must be one of the five wire_* slots.
+        // Invariant: every rejection must be a wire_* slot is_valid_wire_error allows.
         // A raw decimal_* slot here means the T009a remap is broken.
         if (!is_valid_wire_error(validate_result.error())) {
             __builtin_trap();

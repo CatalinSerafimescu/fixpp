@@ -492,6 +492,38 @@ parse). The fix (`06eada45`) makes the member Index-only
 `if constexpr`. **Procedure:** a member added to a class template is an effect on EVERY
 instantiation. Assess, and bench, each mode's row, not only the mode the change targets.
 
+⚠️ **A C-ABI EFFECT WITNESSED ONLY THROUGH THE C++ API IS UNWITNESSED.** The same class, in the
+completeness audit. A spec clause or a `CA-*` catalogue row declares an effect **at the C-ABI**; a
+C++ test witnesses the same effect on `Session`/`Engine` directly, and the audit records the row as
+witnessed. But a C++ test never runs the C thunk, the handle layer or the callback marshalling, which
+are exactly what the C-ABI clause adds. The audit asked *"does a test exist for this row/ID?"* and
+filed the answer as a verdict on a claim with two surfaces, only one of which the test touched. The
+usual defence, *"the effect happens Session-side, before the thunk, so the C++ cell covers it"*, is
+the scoped assessment read as a clearance: it argues about where the effect is decided, not about
+whether the C path delivers it.
+
+- **Instance (091 FR-020; PR #510, Gate B round 1, RC-1).** FR-020 declared a refused
+  malformed-count Logon on the C-ABI observers; only C++ cells witnessed it. A task note had called a
+  C-ABI Logon uninjectable, which a raw-TCP peer disproved. Fixed by `CapiLogonMalformedCount.*` in
+  `tests/capi/length_data_logon_refusal_test.cpp`.
+- **Instance (092 CA-007; PR #519, Gate B GB-519-03).** CA-007's claim column stated the new
+  established-session dispositions at `fixpp_session_register_callback`; its only C-ABI witnesses
+  were the Logon-refusal cells. The completeness audit passed because it checked that CA-007 had been
+  rewritten, not what its test column exercised. Fixed by `CapiEstablishedMalformedFrame.*` in the
+  same file; the clauses still without a C-ABI witness are disclosed as `L-092-12`.
+- **Procedure:**
+  - Witness a C-ABI clause with a `tests/capi/` cell driven through the C entry points, and give it a
+    **positive control**: a well-formed message afterwards reaches `cb`, so "nothing arrived"
+    cannot pass for "refused".
+  - At the completeness audit, read each rewritten row's **claim column against its test column,
+    clause by clause**, and name the surface each test runs on. The 092 verify record's
+    *Completeness* section §(iii) carries the recipe.
+  - Disclose any clause left without a witness on its own surface as an `L-*` row, and point the
+    row's test column at it.
+- **Not class 12.** Class 12's label is true at every site and only too coarse. Here the audit's
+  verdict was false for the C-ABI clause, so the cure is to ask the question per clause (this class),
+  not to split a label.
+
 **Sibling.** Where class 9 is a justification that lost its SUBJECT, this is a justification that
 kept its subject and lost its SCOPE. Both are recorded on the same site pair (`#384`, `#389`) because
 083 produced one of each, in the same function, from the same one-line delimiter change.

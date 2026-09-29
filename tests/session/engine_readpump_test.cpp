@@ -27,6 +27,11 @@
 //      trivially on the stub (no pump = no keepalive either).  Documented
 //      GREEN-target; the load-bearing RED witness is case 1.
 //
+//   6-8. FramerFailureClosesEstablishedSession_* (092 FR-008, L-004-4): a frame
+//      the Framer rejects (bad CheckSum, too-small BodyLength, malformed
+//      BeginString prefix) ends an established session. See the section above
+//      the cells.
+//
 // Anti-hang: every coroutine carries a self-deadline steady_timer.
 //            All ioc.run_for() calls are explicitly bounded.
 //
@@ -50,6 +55,7 @@
 #include <asio/write.hpp>
 #include <chrono>
 #include <cstddef>
+#include <cstdio>
 #include <cstdlib>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/fix_time.hpp>
@@ -66,11 +72,13 @@
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <fixpp/wire/framer.hpp>
 #include <future>
 #include <memory>
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "engine_loopback_harness.hpp"
@@ -780,4 +788,247 @@ TEST(EngineReadPumpTest, SessionTerminalCloseDeliversCloseNotifyToPeer_Fixes348)
         return;
     }
     stop_fut.get();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cases 6-8 — 092 FR-008 (contract C-1 step 1; L-004-4): a §4.5.2 framing
+// failure the Framer detects ends an ESTABLISHED session. Its disregard is
+// fixpp#514; until then these cells pin the close.
+//
+// Each cell feeds one frame the Framer rejects, after the peer has read the
+// acceptor's Logon reply and the acceptor reports Active:
+//   - a bad CheckSum (wire_checksum_mismatch);
+//   - a BodyLength too small, so `10=` is not where BodyLength puts it
+//     (wire_invalid_body_length);
+//   - a BeginString prefix whose first byte is not `8` (wire_framing_resync).
+// A well-formed wrong BeginString is not a cell: it passes the Framer and Guard 2
+// closes the session whatever the pump does. A too-large BodyLength is not a cell
+// either: the Framer waits for more bytes.
+//
+// Each cell first feeds its bytes to a standalone Framer and checks the exact
+// error, so a cell cannot pass on a different Framer arm than the one it names.
+//
+// Observations, all taken before Engine::stop():
+//   - the session state (Disconnected);
+//   - whether the peer's read ended, i.e. the acceptor closed the connection;
+//   - NextNumIn, which the faulty frame must not advance.
+// The client never closes its side, so the only other closer in the wait is the
+// liveness loop at heartbeat_interval (build_harness), far above kFaultCloseBudget.
+// A budget that reached it would let a pump that ignores the Framer error pass.
+//
+// Mutant (run in a scratch copy): in src/session/engine.cpp's run_read_pump, make
+// the read loop's `if (!feed_r.has_value())` branch `break;` instead of stopping
+// the pump, so the pump reads on after a Framer error. Each of these cells must
+// then fail with a clean test failure (exit 1, not an abort).
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+constexpr auto kFaultCloseBudget = 4s;
+// Bound on the client's wait for the acceptor to report Active. It shares
+// kFaultCloseBudget with connect, handshake and the close itself, so it is a fraction
+// of it; heartbeat_interval (build_harness) is far above both.
+constexpr auto kActiveWaitBudget = kFaultCloseBudget / 4;
+static_assert(kActiveWaitBudget * 2 < kFaultCloseBudget,
+              "the Active wait must leave most of kFaultCloseBudget to the close");
+constexpr auto kActivePollStep = 1ms;
+// Carry capacity for the standalone Framer probe; any size above one Heartbeat works.
+constexpr std::size_t kFramerProbeCarry = 64U * 1024U;
+
+struct FaultyFrameClient {
+    std::unique_ptr<fixpp::transport::Transport> transport;
+    std::shared_ptr<fixpp::session::Session> acc;  // leased once the Logon reply is read
+    std::optional<fsm_state> state_before_fault;
+    bool saw_logon_reply = false;
+    bool sent_fault = false;
+    std::optional<fixpp::core::expected_t<std::size_t>> terminal_read;
+};
+
+// Logs on, reads until the acceptor's Logon reply, waits for the acceptor to leave
+// LogonReceived, sends `faulty`, then reads until the connection ends. It never
+// closes its own side.
+asio::awaitable<void> run_client_faulty_frame(fixpp::transport::test::LoopbackTlsFixture& fixture,
+                                              uint16_t acceptor_port,
+                                              fixpp::session::Engine& engine,
+                                              fixpp::session::SessionId acc_id,
+                                              std::vector<std::byte> faulty,
+                                              FaultyFrameClient& fc) {
+    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+    try {
+        auto* tls = dynamic_cast<fixpp::transport::TlsTransport*>(fc.transport.get());
+        if (!tls) co_return;
+
+        fixpp::transport::Endpoint ep{"127.0.0.1", acceptor_port};
+        auto conn_r = co_await fc.transport->async_connect(ep);
+        if (!conn_r.has_value()) co_return;
+        auto hs_r = co_await tls->async_handshake(fixture.ssl_cfg());
+        if (!hs_r.has_value()) co_return;
+
+        auto logon = make_logon_frame("FIX.4.2", "INITIATOR", "ACCEPTOR");
+        auto w_r = co_await fc.transport->async_write(std::span<const std::byte>{logon});
+        if (!w_r.has_value()) co_return;
+
+        std::array<std::byte, 512> buf{};
+        std::string received;
+        constexpr std::string_view kLogonReply =
+            "\x01"
+            "35=A\x01";
+        while (!received.contains(kLogonReply)) {
+            auto r = co_await fc.transport->async_read_some(std::span<std::byte>{buf});
+            if (!r.has_value()) {
+                fc.terminal_read = r;
+                co_return;
+            }
+            received.append(reinterpret_cast<const char*>(buf.data()), *r);
+        }
+        fc.saw_logon_reply = true;
+        fc.acc = engine.lookup(acc_id);
+        // The peer's read of the reply and the acceptor's resumption after its reply
+        // write are separate completions on this io_context, and either may run first;
+        // the acceptor enters Active only on the latter. Yield until it leaves
+        // LogonReceived, bounded, so the faulty frame meets an established session. A
+        // session still in LogonReceived at the bound is recorded as such and fails the
+        // precondition check.
+        if (fc.acc) {
+            asio::steady_timer poll{co_await asio::this_coro::executor};
+            auto const active_by = std::chrono::steady_clock::now() + kActiveWaitBudget;
+            while (fc.acc->state() == fsm_state::LogonReceived &&
+                   std::chrono::steady_clock::now() < active_by) {
+                poll.expires_after(kActivePollStep);
+                co_await poll.async_wait(asio::use_awaitable);
+            }
+            fc.state_before_fault = fc.acc->state();
+        }
+
+        auto f_r = co_await fc.transport->async_write(std::span<const std::byte>{faulty});
+        if (!f_r.has_value()) co_return;
+        fc.sent_fault = true;
+
+        for (;;) {
+            auto r = co_await fc.transport->async_read_some(std::span<std::byte>{buf});
+            if (!r.has_value()) {
+                fc.terminal_read = r;
+                co_return;
+            }
+        }
+    } catch (...) {
+    }
+}
+
+// The error a fresh Framer returns for `bytes`, or nullopt if it frames them.
+std::optional<fixpp::core::error> framer_error_for(std::vector<std::byte> const& bytes) {
+    fixpp::wire::pmr_carry_buffer carry{kFramerProbeCarry, std::pmr::new_delete_resource()};
+    std::array<fixpp::wire::frame_view, 1> out{};
+    fixpp::wire::Framer framer;
+    auto r = framer.feed(std::span<const std::byte>{bytes}, carry,
+                         std::span<fixpp::wire::frame_view>{out});
+    if (r.has_value()) return std::nullopt;
+    return r.error();
+}
+
+// A conformant Heartbeat at MsgSeqNum 2 as text, for the cells to corrupt.
+std::string heartbeat_text() {
+    auto const hb = make_heartbeat_frame("FIX.4.2", 2, "INITIATOR", "ACCEPTOR");
+    return std::string{reinterpret_cast<const char*>(hb.data()), hb.size()};
+}
+
+std::vector<std::byte> to_bytes(std::string const& s) {
+    std::vector<std::byte> out;
+    out.reserve(s.size());
+    for (char c : s) out.push_back(static_cast<std::byte>(c));
+    return out;
+}
+
+void run_framer_failure_cell(std::vector<std::byte> const& faulty, fixpp::core::error expected,
+                             const char* label) {
+    // The bytes must trip the Framer arm the cell names.
+    EXPECT_EQ(framer_error_for(faulty), std::optional<fixpp::core::error>{expected})
+        << label << ": the frame does not trip the Framer arm this cell names";
+
+    asio::io_context ioc;
+    auto h = build_harness(ioc);
+    if (!h) {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
+
+    ASSERT_TRUE(h->engine->start().has_value()) << "engine.start() failed";
+    ioc.run_for(50ms);
+    ioc.restart();
+
+    uint16_t const port = h->engine->acceptor_bound_endpoint(h->acc_id).port;
+    FaultyFrameClient fc;
+    fc.transport = h->fixture->make_client(ioc.get_executor());
+    if (port != 0U) {
+        asio::co_spawn(
+            ioc, run_client_faulty_frame(*h->fixture, port, *h->engine, h->acc_id, faulty, fc),
+            asio::detached);
+        auto const deadline = std::chrono::steady_clock::now() + kFaultCloseBudget;
+        while (!fc.terminal_read.has_value() && std::chrono::steady_clock::now() < deadline) {
+            ioc.run_for(20ms);
+            ioc.restart();
+        }
+    }
+
+    // Snapshots, taken before stop() and before any fatal assertion.
+    bool const peer_read_ended = fc.terminal_read.has_value();
+    std::optional<fsm_state> const state_after =
+        fc.acc ? std::optional<fsm_state>{fc.acc->state()} : std::nullopt;
+    std::optional<int> const next_inbound =
+        fc.acc ? std::optional<int>{static_cast<int>(
+                     fc.acc->seqnum_mgr_test_access().next_inbound_unsafe())}
+               : std::nullopt;
+    fc.acc.reset();  // release the lease before the engine is destroyed
+
+    auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
+    if (!fixpp::test_support::run_to_exhaustion_or_report(ioc, stop_fut, label)) {
+        return;
+    }
+    stop_fut.get();
+
+    ASSERT_NE(port, 0U) << label << ": acceptor listener did not bind";
+    ASSERT_TRUE(fc.saw_logon_reply) << label << ": the client never read the Logon reply";
+    ASSERT_TRUE(fc.sent_fault) << label << ": the faulty frame was never written";
+    EXPECT_EQ(fc.state_before_fault, std::optional<fsm_state>{fsm_state::Active})
+        << label << ": the session must be established when the faulty frame is sent";
+    EXPECT_EQ(state_after, std::optional<fsm_state>{fsm_state::Disconnected})
+        << label << ": FR-008 / L-004-4: a Framer failure must end an established session";
+    EXPECT_TRUE(peer_read_ended)
+        << label << ": the acceptor must close the connection after the Framer failure";
+    EXPECT_EQ(next_inbound, std::optional<int>{2})
+        << label << ": the faulty frame must not advance NextNumIn past the Logon's";
+}
+
+}  // namespace
+
+TEST(EngineReadPumpTest, FramerFailureClosesEstablishedSession_BadCheckSum) {
+    std::string s = heartbeat_text();
+    // The last field is `10=NNN<SOH>`; NNN + 1 (mod 256) is a CheckSum that does not match.
+    auto const digits_at = s.size() - 4;
+    auto const cs = static_cast<unsigned>(std::stoi(s.substr(digits_at, 3)));
+    std::array<char, 4> wrong{};
+    std::snprintf(wrong.data(), wrong.size(), "%03u", (cs + 1U) % 256U);
+    s.replace(digits_at, 3, wrong.data(), 3);
+    run_framer_failure_cell(to_bytes(s), fixpp::core::error::wire_checksum_mismatch,
+                            "FramerFailureClosesEstablishedSession_BadCheckSum");
+}
+
+TEST(EngineReadPumpTest, FramerFailureClosesEstablishedSession_BodyLengthTooSmall) {
+    std::string s = heartbeat_text();
+    // Rewrite 9=<n> as 9=<n - 5>: the Framer then looks for `10=` five bytes early.
+    auto const len_at = s.find(
+                            "\x01"
+                            "9=") +
+                        3;
+    auto const len_end = s.find('\x01', len_at);
+    int const body_len = std::stoi(s.substr(len_at, len_end - len_at));
+    s.replace(len_at, len_end - len_at, std::to_string(body_len - 5));
+    run_framer_failure_cell(to_bytes(s), fixpp::core::error::wire_invalid_body_length,
+                            "FramerFailureClosesEstablishedSession_BodyLengthTooSmall");
+}
+
+TEST(EngineReadPumpTest, FramerFailureClosesEstablishedSession_MalformedBeginStringPrefix) {
+    std::string s = heartbeat_text();
+    s[0] = 'X';  // `X=FIX.4.2`: the first byte is not `8`
+    run_framer_failure_cell(to_bytes(s), fixpp::core::error::wire_framing_resync,
+                            "FramerFailureClosesEstablishedSession_MalformedBeginStringPrefix");
 }

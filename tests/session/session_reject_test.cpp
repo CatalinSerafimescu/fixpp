@@ -13,13 +13,15 @@
 //       - RefMsgType(372) carrying the ref_msg_type argument
 //       - SessionRejectReason(373) carrying the reason argument
 //
-//  2. No-reject-loop (I-5): feeding a malformed Reject(35=3) to an Active
+//  2. No-reject-loop (I-5): feeding a well-formed Reject(35=3) to an Active
 //     session does NOT cause the session to emit another Reject. The transport
 //     must not emit any frame in response to an inbound Reject.
+//     2b. A Reject the header scan cannot read IS Rejected
+//     (MalformedInboundRejectIsRejected; 092 contract C-2 D-5).
 //
-//  3. No-reject-loop on Logout(35=5): feeding a malformed Logout to an Active
-//     session while in LogoutSent state still emits a Logout-confirm only once
-//     (the session handles the Logout gracefully, never a Reject-of-Logout).
+//  3. No-reject-loop on Logout(35=5): feeding a Logout that is well-formed on the
+//     wire but carries a wrong CompID to an Active session never draws a
+//     Reject-of-Logout.
 //
 //  4. message-type-for-state (session_msg_type_invalid_for_state, slot 72):
 //     an app-message type (e.g. 35=D, NewOrderSingle) received in
@@ -29,6 +31,10 @@
 //
 // Anchors: data-model.md §I-5, error slot 72; [FIX-SL §4.5.4];
 // spec FR-007; SC-006; tasks.md T050/T054/T056.
+//
+// Scenarios 2 and 3's no-reject-loop rule:
+// Superseded by 092 contract C-2 (fixpp#507): the no-reject-loop rule holds for a
+// well-formed frame only; a Reject or Logout the header scan cannot read is Rejected.
 #include <gtest/gtest.h>
 
 #include <array>
@@ -38,6 +44,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/test/mock_clock.hpp>
@@ -46,13 +53,16 @@
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_fsm.hpp>
+#include <fstream>
 #include <future>
 #include <memory>
 #include <span>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "session/scan_frame_header.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -264,10 +274,303 @@ TEST(SessionReject, BuildRejectShape) {
     EXPECT_EQ(extract_field(frame, 373), "3") << "SessionRejectReason(373) must carry reason=3";
 }
 
+// ── 092 T016: build_reject_with_text (research R-5, contract C-4) ─────────────
+//
+// Every cell compares the WHOLE frame against a literal spelled out here, never
+// against the builder's own output and never field-by-field (a position-
+// independent field lookup would pass a reordered frame). The literal is
+// written with '|' for SOH; `soh_frame` converts it. Each literal's 9= and 10=
+// must be self-consistent: re-derive 10= by summing the frame's bytes before 10=
+// (mod 256) and 9= by counting the bytes from 35= up to 10=.
+//
+// Each golden literal must equal the fixpp-emitted ('> ') Reject line of the
+// interop transcript it names, with SOH for each \x01; re-derive with
+// `grep -n '35=3' tests/interop/happy/golden/<name>.fix`. They pin `build_reject`
+// and the empty-text form of `build_reject_with_text` to the bytes fixpp emits on
+// the wire.
+
+namespace {
+
+std::string soh_frame(std::string_view pipes) {
+    std::string s(pipes);
+    for (char& c : s) {
+        if (c == '|') {
+            c = '\x01';
+        }
+    }
+    return s;
+}
+
+std::string as_string(std::span<const std::byte> frame) {
+    return {reinterpret_cast<const char*>(frame.data()), frame.size()};
+}
+
+struct RejectGolden {
+    const char* name;
+    std::string_view sender;
+    std::string_view target;
+    std::string_view sending_time;
+    seqnum_t ref_seq_num;
+    int ref_tag_id;
+    std::string_view ref_msg_type;
+    int reason;
+    std::string_view expected;  // '|' = SOH
+};
+
+constexpr RejectGolden kRejectGoldens[] = {
+    {.name = "HP-QFj-init-fix44-reject-invalid-admin",
+     .sender = "FIXPP_INIT",
+     .target = "CPTY_ACC",
+     .sending_time = "20260914-21:04:18.114",
+     .ref_seq_num = seqnum_t{2},
+     .ref_tag_id = 55,
+     .ref_msg_type = "1",
+     .reason = 2,
+     .expected =
+         "8=FIX.4.4|9=85|35=3|34=2|49=FIXPP_INIT|52=20260914-21:04:18.114|56=CPTY_ACC|45=2|371=55|"
+         "372=1|373=2|10=143|"},
+    {.name = "HP-QFj-acc-fix44-reject-invalid-admin",
+     .sender = "FIXPP_ACC",
+     .target = "CPTY_INIT",
+     .sending_time = "20260914-21:04:26.643",
+     .ref_seq_num = seqnum_t{2},
+     .ref_tag_id = 55,
+     .ref_msg_type = "1",
+     .reason = 2,
+     .expected =
+         "8=FIX.4.4|9=85|35=3|34=2|49=FIXPP_ACC|52=20260914-21:04:26.643|56=CPTY_INIT|45=2|371=55|"
+         "372=1|373=2|10=149|"},
+    {.name = "PD-QFj-init-fix44-malformed-dup-rejected",
+     .sender = "FIXPP_INIT",
+     .target = "CPTY_ACC",
+     .sending_time = "20260611-05:53:19.317",
+     .ref_seq_num = seqnum_t{1},
+     .ref_tag_id = 122,
+     .ref_msg_type = "D",
+     .reason = 1,
+     .expected =
+         "8=FIX.4.4|9=86|35=3|34=2|49=FIXPP_INIT|52=20260611-05:53:19.317|56=CPTY_ACC|45=1|371=122|"
+         "372=D|373=1|10=210|"},
+    {.name = "PD-QFj-acc-fix44-malformed-dup-rejected",
+     .sender = "FIXPP_ACC",
+     .target = "CPTY_INIT",
+     .sending_time = "20260611-05:53:31.452",
+     .ref_seq_num = seqnum_t{1},
+     .ref_tag_id = 122,
+     .ref_msg_type = "D",
+     .reason = 1,
+     .expected =
+         "8=FIX.4.4|9=86|35=3|34=2|49=FIXPP_ACC|52=20260611-05:53:31.452|56=CPTY_INIT|45=1|371=122|"
+         "372=D|373=1|10=204|"},
+};
+
+}  // namespace
+
+// build_reject's output is byte-identical to the interop goldens.
+TEST(SessionReject, BuildRejectMatchesInteropGoldens) {
+    for (const auto& g : kRejectGoldens) {
+        std::array<std::byte, 512> buf{};
+        auto r = fixpp::session::build_reject(std::span<std::byte>{buf}, /*seq=*/2, g.sender,
+                                              g.target, g.ref_seq_num, g.ref_tag_id, g.ref_msg_type,
+                                              g.reason, "FIX.4.4", g.sending_time);
+        ASSERT_TRUE(r.has_value()) << g.name;
+        EXPECT_EQ(as_string(*r), soh_frame(g.expected)) << g.name;
+    }
+}
+
+// An empty text emits no 58: the empty-text form is byte-identical to the goldens.
+TEST(SessionReject, BuildRejectWithTextEmptyTextMatchesInteropGoldens) {
+    for (const auto& g : kRejectGoldens) {
+        std::array<std::byte, 512> buf{};
+        auto r = fixpp::session::build_reject_with_text(
+            std::span<std::byte>{buf}, /*seq=*/2, g.sender, g.target, g.ref_seq_num, g.ref_tag_id,
+            g.ref_msg_type, g.reason, "FIX.4.4", g.sending_time, /*text=*/"");
+        ASSERT_TRUE(r.has_value()) << g.name;
+        const std::string got = as_string(*r);
+        EXPECT_EQ(got, soh_frame(g.expected)) << g.name;
+        EXPECT_EQ(got.find("\x01"
+                           "58="),
+                  std::string::npos)
+            << g.name << ": an empty text must emit no 58";
+    }
+}
+
+// A non-empty text is emitted as 58, after 373 and before the trailer.
+TEST(SessionReject, BuildRejectWithTextEmitsText) {
+    std::array<std::byte, 512> buf{};
+    auto r = fixpp::session::build_reject_with_text(
+        std::span<std::byte>{buf}, /*seq=*/2, "ISLD", "TW", /*ref_seq_num=*/seqnum_t{1},
+        /*ref_tag_id=*/95, /*ref_msg_type=*/"D", /*session_reject_reason=*/5, "FIX.4.2",
+        "20240101-00:00:00.000",
+        /*text=*/"Malformed field: Length does not match its Data field");
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(
+        as_string(*r),
+        soh_frame(
+            "8=FIX.4.2|9=130|35=3|34=2|49=ISLD|52=20240101-00:00:00.000|56=TW|45=1|"
+            "371=95|372=D|373=5|58=Malformed field: Length does not match its Data field|10=185|"));
+}
+
+// A non-empty text with 371 omitted (ref_tag_id 0) and 373=0.
+TEST(SessionReject, BuildRejectWithTextEmitsTextWithout371) {
+    std::array<std::byte, 512> buf{};
+    auto r = fixpp::session::build_reject_with_text(
+        std::span<std::byte>{buf}, /*seq=*/2, "ISLD", "TW", /*ref_seq_num=*/seqnum_t{1},
+        /*ref_tag_id=*/0, /*ref_msg_type=*/"D", /*session_reject_reason=*/0, "FIX.4.2",
+        "20240101-00:00:00.000",
+        /*text=*/"Malformed field: invalid tag");
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(as_string(*r),
+              soh_frame("8=FIX.4.2|9=98|35=3|34=2|49=ISLD|52=20240101-00:00:00.000|56=TW|45=1|"
+                        "372=D|373=0|58=Malformed field: invalid tag|10=148|"));
+}
+
+// An empty 372 is omitted; the text is still emitted.
+TEST(SessionReject, BuildRejectWithTextEmptyRefMsgTypeOmits372) {
+    std::array<std::byte, 512> buf{};
+    auto r = fixpp::session::build_reject_with_text(
+        std::span<std::byte>{buf}, /*seq=*/2, "ISLD", "TW", /*ref_seq_num=*/seqnum_t{1},
+        /*ref_tag_id=*/95, /*ref_msg_type=*/"", /*session_reject_reason=*/5, "FIX.4.2",
+        "20240101-00:00:00.000",
+        /*text=*/"Malformed field: Length does not match its Data field");
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(
+        as_string(*r),
+        soh_frame("8=FIX.4.2|9=124|35=3|34=2|49=ISLD|52=20240101-00:00:00.000|56=TW|45=1|"
+                  "371=95|373=5|58=Malformed field: Length does not match its Data field|10=158|"));
+}
+
+// A buffer that holds the frame exactly without 58 has no room for 58: the
+// build fails closed with the Writer's truncation error. The buffer is sized
+// from the empty-text build, so the only difference between the control and the
+// failing call is the text. The Writer reserves six BodyLength digits while
+// appending and needs the 7-byte 10= trailer only at commit, so the room left
+// before 58 is at most 7 bytes; "58=" + a text of 4 or more bytes + SOH cannot
+// fit, and the failure lands on the 58 append, not on commit.
+TEST(SessionReject, BuildRejectWithTextFailsClosedWhenTextDoesNotFit) {
+    constexpr std::string_view kText = "Malformed field: invalid tag";
+    ASSERT_GE(kText.size(), 4U);
+
+    auto build = [&](std::span<std::byte> out, std::string_view text) {
+        return fixpp::session::build_reject_with_text(
+            out, /*seq=*/2, "ISLD", "TW", /*ref_seq_num=*/seqnum_t{1}, /*ref_tag_id=*/95,
+            /*ref_msg_type=*/"D", /*session_reject_reason=*/5, "FIX.4.2", "20240101-00:00:00.000",
+            text);
+    };
+
+    std::array<std::byte, 512> big{};
+    auto sized = build(std::span<std::byte>{big}, /*text=*/"");
+    ASSERT_TRUE(sized.has_value());
+    const std::string expected = as_string(*sized);
+
+    // Control: a buffer of exactly that size builds the empty-text frame.
+    std::vector<std::byte> exact(expected.size());
+    auto ok = build(std::span<std::byte>{exact}, /*text=*/"");
+    ASSERT_TRUE(ok.has_value());
+    EXPECT_EQ(as_string(*ok), expected);
+
+    // The same buffer size with a non-empty text must fail closed.
+    std::vector<std::byte> tight(expected.size());
+    auto r = build(std::span<std::byte>{tight}, kText);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), fixpp::core::error::wire_field_value_truncated);
+}
+
+// ── 092 T018: the 372 bound and the fixed Text constants (research R-5) ──────
+
+#ifndef FIXPP_DICT_DATA_DIR
+#error "FIXPP_DICT_DATA_DIR must be set by CMake target_compile_definitions"
+#endif
+
+namespace {
+
+// Every `msgtype=` attribute value in a QuickFIX dictionary, in either quote
+// style (the shipped files use single quotes).
+std::vector<std::string> msgtype_attributes(const std::string& xml) {
+    std::vector<std::string> out;
+    constexpr std::string_view kAttr = "msgtype=";
+    std::size_t pos = 0;
+    while ((pos = xml.find(kAttr, pos)) != std::string::npos) {
+        pos += kAttr.size();
+        if (pos >= xml.size() || (xml[pos] != '\'' && xml[pos] != '"')) {
+            continue;
+        }
+        const char quote = xml[pos];
+        const std::size_t end = xml.find(quote, pos + 1);
+        if (end == std::string::npos) {
+            break;
+        }
+        out.emplace_back(xml.substr(pos + 1, end - pos - 1));
+        pos = end + 1;
+    }
+    return out;
+}
+
+}  // namespace
+
+// kMaxShippedMsgTypeLength equals the longest MsgType any dictionaries/*.xml
+// defines, recomputed from the files so the constant cannot drift. Each file
+// must yield at least one MsgType and FIX44.xml must be visited, so a scan that
+// reads nothing fails instead of reporting a bound of zero.
+TEST(SessionReject, MaxShippedMsgTypeLengthMatchesDictionaries) {
+    namespace fs = std::filesystem;
+    const fs::path dir{FIXPP_DICT_DATA_DIR};
+    ASSERT_TRUE(fs::is_directory(dir)) << dir;
+
+    std::size_t longest = 0;
+    std::string longest_where;
+    bool saw_fix44 = false;
+    for (const auto& entry : fs::directory_iterator(dir)) {
+        if (!entry.is_regular_file() || entry.path().extension() != ".xml") {
+            continue;
+        }
+        if (entry.path().filename() == "FIX44.xml") {
+            saw_fix44 = true;
+        }
+        std::ifstream in(entry.path(), std::ios::binary);
+        ASSERT_TRUE(in) << entry.path();
+        std::ostringstream ss;
+        ss << in.rdbuf();
+        const auto types = msgtype_attributes(ss.str());
+        EXPECT_FALSE(types.empty()) << entry.path() << ": no msgtype attribute read";
+        for (const auto& t : types) {
+            if (t.size() > longest) {
+                longest = t.size();
+                longest_where = entry.path().filename().string() + " msgtype=" + t;
+            }
+        }
+    }
+    ASSERT_TRUE(saw_fix44) << "FIX44.xml not found under " << dir;
+    EXPECT_EQ(fixpp::session::detail::kMaxShippedMsgTypeLength, longest)
+        << "longest shipped MsgType: " << longest_where;
+}
+
+// The two fixed Text(58) values, spelled out here so a change to either is made
+// twice, deliberately. They are printable ASCII with no digit (nothing that could
+// read as an offset or a count) and no '=' or SOH (nothing that could break the
+// field), and the two fault kinds are told apart.
+TEST(SessionReject, RejectTextConstantsAreFixed) {
+    using fixpp::session::detail::kRejectTextLengthDataMismatch;
+    using fixpp::session::detail::kRejectTextMalformedTag;
+    EXPECT_EQ(kRejectTextMalformedTag, "Malformed field: invalid tag");
+    EXPECT_EQ(kRejectTextLengthDataMismatch,
+              "Malformed field: Length does not match its Data field");
+    EXPECT_NE(kRejectTextMalformedTag, kRejectTextLengthDataMismatch);
+    for (std::string_view text : {kRejectTextMalformedTag, kRejectTextLengthDataMismatch}) {
+        ASSERT_FALSE(text.empty());
+        for (char c : text) {
+            EXPECT_TRUE(c >= 0x20 && c <= 0x7E) << text;
+            EXPECT_FALSE(c >= '0' && c <= '9') << text;
+            EXPECT_NE(c, '=') << text;
+        }
+    }
+}
+
 // ── Test 2: No-reject-loop on inbound Reject (I-5) ───────────────────────────
 //
-// A malformed Reject(35=3) arriving in Active state must NOT cause the session
-// to emit another Reject. The transport sent-count must not increase.
+// A well-formed Reject(35=3) arriving in Active state must NOT cause the session
+// to emit another Reject. The transport sent-count must not increase. A Reject the
+// header scan cannot read is Rejected instead: see MalformedInboundRejectIsRejected.
 TEST(SessionReject, NoRejectLoopOnInboundReject) {
     RejectFixture f;
     auto cfg = f.make_cfg("FIX.4.2");
@@ -292,11 +595,54 @@ TEST(SessionReject, NoRejectLoopOnInboundReject) {
         << "Active row: inbound Reject → session-level log, stay Active (I-5)";
 }
 
+// ── Test 2b: a malformed Reject IS rejected (092 FR-003, contract C-2) ───────
+//
+// The no-reject-loop exemption above holds for a well-formed Reject. A Reject whose
+// header scan finds a fault (here a malformed tag after 34) at the expected MsgSeqNum
+// draws one Reject (D-5): 45=2, 372=3, 373=0, no 371, and the fixed Text, spelled out
+// here rather than taken from the session's constants.
+TEST(SessionReject, MalformedInboundRejectIsRejected) {
+    RejectFixture f;
+    auto cfg = f.make_cfg("FIX.4.2");
+    Session sess(f.engine, cfg);
+    f.open_to_active(sess);
+
+    const std::size_t before = f.transport.sent_count();
+    auto reject_frame = make_raw_frame("FIX.4.2", "3", 2, "TW", "ISLD",
+                                       "45=1\x01"
+                                       "373=2\x01"
+                                       "9x9=1\x01");
+    f.feed(sess, reject_frame);
+
+    ASSERT_EQ(f.transport.sent_count(), before + 1)
+        << "a malformed inbound Reject must draw exactly one outbound frame, the Reject";
+    auto const out = f.transport.sent(before);
+    std::string const wire(reinterpret_cast<const char*>(out.data()), out.size());
+    // The value of `tag` in `wire`, matched only at a field start (after SOH).
+    auto const field = [&wire](std::string_view tag) -> std::string {
+        std::string const needle = "\x01" + std::string{tag} + "=";
+        auto pos = wire.find(needle);
+        if (pos == std::string::npos) {
+            return "<absent>";
+        }
+        pos += needle.size();
+        return wire.substr(pos, wire.find('\x01', pos) - pos);
+    };
+    EXPECT_EQ(field("35"), "3") << "the reply must be a Reject(35=3)";
+    EXPECT_EQ(field("45"), "2") << "Reject RefSeqNum(45)";
+    EXPECT_EQ(field("372"), "3") << "Reject RefMsgType(372)";
+    EXPECT_EQ(field("373"), "0") << "Reject SessionRejectReason(373)";
+    EXPECT_EQ(field("371"), "<absent>") << "Reject must carry no RefTagID(371)";
+    EXPECT_EQ(field("58"), "Malformed field: invalid tag") << "Reject Text(58)";
+    EXPECT_EQ(sess.state(), fsm_state::Active) << "the malformed Reject must not disconnect";
+}
+
 // ── Test 3: No-reject-loop on inbound malformed Logout ───────────────────────
 //
-// A malformed Logout(35=5) (CompID mismatch) arriving in Active state triggers
-// a Disconnected state transition per the matrix (refused), but must NEVER
-// generate a Reject frame (I-5).
+// A Logout(35=5) that is well-formed on the wire but carries a wrong CompID,
+// arriving in Active state, triggers a Disconnected state transition per the
+// matrix (refused), but must NEVER generate a Reject frame (I-5). "Malformed" in
+// this test's name means that CompID mismatch, not a header-scan fault.
 TEST(SessionReject, NoRejectOnMalformedLogout) {
     RejectFixture f;
     auto cfg = f.make_cfg("FIX.4.2");
@@ -308,8 +654,8 @@ TEST(SessionReject, NoRejectOnMalformedLogout) {
     // level) goes through the basic flow: CompID check → Disconnected.
     // The guard (CompID mismatch) fires before the Reject path — so the
     // malformed-Logout-triggers-Disconnect test is the right one here.
-    // The no-reject-loop invariant says: a session-level Reject is never
-    // itself rejected. Here we verify the transport never emits a Reject
+    // The no-reject-loop invariant says: a well-formed session-level Reject is
+    // never itself rejected. Here we verify the transport never emits a Reject
     // frame (35=3) in response to an inbound Logout (35=5).
 
     const std::size_t before = f.transport.sent_count();
@@ -337,8 +683,8 @@ TEST(SessionReject, NoRejectOnMalformedLogout) {
 //
 // Per data-model.md matrix "Active row / invalid MsgType / type-invalid-for-state":
 //   → session Reject(SessionRejectReason)
-// The no-reject-loop guard ensures Reject(35=3) and Logout(35=5) are NOT
-// themselves rejected.
+// The no-reject-loop guard ensures a well-formed Reject(35=3) or Logout(35=5) is
+// NOT itself rejected.
 TEST(SessionReject, AppMessageInActiveTriggersReject) {
     RejectFixture f;
     auto cfg = f.make_cfg("FIX.4.2");

@@ -119,6 +119,9 @@ target_link_libraries(error_017_completeness PRIVATE
   GTest::gtest_main
 )
 add_test(NAME error_017_completeness COMMAND error_017_completeness)
+# 092-garbled-frame-reject: label 092 (expected-ctest-092.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST error_017_completeness APPEND PROPERTY LABELS 092)
 
 # ── 019-app-callbacks T004 — error completeness gate ────────────────────────
 # Asserts exactly 2 new enumerators at slots 129–130 with exact-SET equality
@@ -133,6 +136,9 @@ target_link_libraries(error_019_completeness PRIVATE
 add_test(NAME error_019_completeness COMMAND error_019_completeness)
 set_tests_properties(error_019_completeness PROPERTIES
   LABELS "019;foundational;error_slots")
+# 092-garbled-frame-reject: label 092 (expected-ctest-092.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST error_019_completeness APPEND PROPERTY LABELS 092)
 
 add_executable(error_020_completeness test_020_error_completeness.cpp)
 target_link_libraries(error_020_completeness PRIVATE
@@ -143,6 +149,22 @@ target_link_libraries(error_020_completeness PRIVATE
 add_test(NAME error_020_completeness COMMAND error_020_completeness)
 set_tests_properties(error_020_completeness PROPERTIES
   LABELS "020;foundational;error_slots")
+# 092-garbled-frame-reject: label 092 (expected-ctest-092.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST error_020_completeness APPEND PROPERTY LABELS 092)
+
+# ── 092-garbled-frame-reject T060 — error completeness gate ─────────────────
+# The 092 block is exactly {wire_invalid_tag_number, wire_length_data_mismatch}
+# at {132, 133} (data-model E-6). Links fixpp_core only.
+add_executable(error_092_completeness test_092_error_completeness.cpp)
+target_link_libraries(error_092_completeness PRIVATE
+  fixpp_core
+  GTest::gtest
+  GTest::gtest_main
+)
+add_test(NAME error_092_completeness COMMAND error_092_completeness)
+set_tests_properties(error_092_completeness PROPERTIES
+  LABELS "092;foundational;error_slots")
 
 # ── 060-int128-decimal-compare T003 — differential-oracle harness ──────────
 # Deterministic (seed=42) boundary-biased corpus asserting the production

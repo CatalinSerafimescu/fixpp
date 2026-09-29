@@ -77,6 +77,8 @@ TEST(ScanFrameHeaderOverflow, ForgedTag49_NotSurfacedAsSenderCompId) {
     auto result = scan_frame_header(std::span<const std::byte>(f));
     EXPECT_NE(result.sender_comp_id, "FORGE49")
         << "Forged tag 429496729649 must NOT alias SenderCompID(49) (FR-003/SC-001)";
+    EXPECT_EQ(result.fault, fixpp::wire::field_fault::malformed_tag)
+        << "092 E-1: a tag above 0xFFFF is a malformed_tag fault";
 
     // Conforming pair: real 49= must populate sender_comp_id.
     std::string conforming;
@@ -101,6 +103,8 @@ TEST(ScanFrameHeaderOverflow, ForgedTag52_NotSurfacedAsSendingTime) {
     auto result = scan_frame_header(std::span<const std::byte>(f));
     EXPECT_NE(result.sending_time, "FORGETIME")
         << "Forged tag 429496729652 must NOT alias SendingTime(52) (SC-002/FR-003)";
+    EXPECT_EQ(result.fault, fixpp::wire::field_fault::malformed_tag)
+        << "092 E-1: a tag above 0xFFFF is a malformed_tag fault";
 
     // Conforming pair: real 52= must populate sending_time.
     std::string conforming;
@@ -121,6 +125,8 @@ TEST(ScanFrameHeaderOverflow, ForgedTag34_NotSurfacedAsMsgSeqNum) {
     auto result = scan_frame_header(std::span<const std::byte>(f));
     EXPECT_NE(result.msg_seq_num, "42")
         << "Forged tag 429496729634 must NOT alias MsgSeqNum(34) (FR-004/SC-001)";
+    EXPECT_EQ(result.fault, fixpp::wire::field_fault::malformed_tag)
+        << "092 E-1: a tag above 0xFFFF is a malformed_tag fault";
 
     // Conforming pair: real 34=42 must populate msg_seq_num.
     std::string conforming;
@@ -147,6 +153,8 @@ TEST(ScanFrameHeaderOverflow, Token4294967330_StillRejected) {
     EXPECT_NE(result.sending_time, "SENTINEL30");
     EXPECT_NE(result.msg_seq_num, "SENTINEL30");
     EXPECT_NE(result.target_comp_id, "SENTINEL30");
+    EXPECT_EQ(result.fault, fixpp::wire::field_fault::malformed_tag)
+        << "092 E-1: a tag above 0xFFFF is a malformed_tag fault";
 }
 
 // ── T005-W5: conforming frame with ordinary tags parses correctly ──────────────
@@ -179,7 +187,8 @@ TEST(ScanFrameHeaderOverflow, ConformingFrame_AllFieldsCorrect) {
 //
 // Discriminating construction (per [[feedback_witness_asserts_named_postcondition_not_proxy]]):
 // Token "4@" — '@' = 0x40 = 64, so c-'0' = 64-48 = 16.
-//   - Correct code: '@' < '0' || '@' > '9' → tag_ok=false → field skipped.
+//   - Correct code: '@' < '0' || '@' > '9' → malformed_tag; the scan stops at the
+//     field (092 E-1 superseded the skip).
 //   - Fold regression (digit check removed): accumulate_tag_digit sees 4→40+16=56
 //     (no overflow: 4 < (65535-16)/10=6551) → tag=56 → "NODIGIT" surfaces as target_comp_id.
 // The assertion FAILS under the fold (target_comp_id == "NODIGIT"), PASSES with the fix.

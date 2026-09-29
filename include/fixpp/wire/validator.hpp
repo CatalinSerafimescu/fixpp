@@ -57,6 +57,19 @@ inline void set_ref_tag(std::uint16_t* out, std::uint16_t tag) noexcept {
     }
 }
 
+// 092 (data-model E-5, FR-012): the error for a field walk whose iterator
+// reports a fault (never `none` here). A malformed tag has no tag to report, so
+// RefTagID stays untouched; a Length/Data mismatch reports the Length tag.
+template <class FieldIterator>
+[[nodiscard]] core::expected_t<void> field_fault_error(FieldIterator const& it,
+                                                       std::uint16_t* ref_tag_out) noexcept {
+    if (it.fault() == field_fault::length_data_mismatch) {
+        set_ref_tag(ref_tag_out, it.fault_length_tag());
+        return core::expected_t<void>{std::unexpect, core::error::wire_length_data_mismatch};
+    }
+    return core::expected_t<void>{std::unexpect, core::error::wire_invalid_tag_number};
+}
+
 // [2b §4.6] runtime-virtual validation plugin. EXACTLY 5 pure-virtual.
 class Validator {
 public:
@@ -138,6 +151,31 @@ public:
         MessageView<access_mode::Index> const& msg, std::pmr::memory_resource* scratch_mr,
         std::uint16_t* ref_tag_out) const noexcept override {
         std::string_view const msg_type = msg.msg_type();
+        // fixpp#426 (design §3): walk with THIS validator's own dict_hooks,
+        // not `msg`'s — `msg` may be dict-free even when `dict_` is not (or
+        // vice versa), and the field walk must split Length+Data pairs by
+        // the SAME dictionary every other Step below reads through.
+        auto const hooks = dict_hooks::for_table_view(dict_);
+        using iter_t = MessageView<access_mode::Index>::field_iterator;
+
+        // 092 T062a (FR-012, owner ruling on a failed-build view): a failed
+        // build leaves msg_type() empty, so Step 1 would reject the first field
+        // as an unexpected tag before its walk met the fault. When the build
+        // failed, walk to the end or the first fault and report the fault the
+        // same way E-5 does. A build that failed for another reason (out of
+        // memory, the offset-table cap) leaves a walk with no fault, and then
+        // validate falls through unchanged. A successful build costs only the
+        // build_status() branch.
+        if (!msg.offsets().build_status().has_value()) {
+            iter_t scan{msg.bytes(), 0, hooks};
+            iter_t const scan_end{msg.bytes(), msg.bytes().size(), hooks};
+            while (!(scan == scan_end) && scan.fault() == field_fault::none) {
+                ++scan;
+            }
+            if (scan.fault() != field_fault::none) {
+                return field_fault_error(scan, ref_tag_out);
+            }
+        }
 
         // ── Step 0: header-order check ([2b §6.5.1], W-002) ─────────────
         // FIX standard-header order: 8(BeginString), 9(BodyLength), 35(MsgType)
@@ -171,14 +209,18 @@ public:
         // `contains()` is false for every tag — identical to field_valid_for
         // returning false for every tag.
         auto const valid_tags = dict_.valid_tags_for(msg_type);
-        // fixpp#426 (design §3): walk with THIS validator's own dict_hooks,
-        // not `msg`'s — `msg` may be dict-free even when `dict_` is not (or
-        // vice versa), and the field walk must split Length+Data pairs by
-        // the SAME dictionary every other Step below reads through.
-        auto const hooks = dict_hooks::for_table_view(dict_);
-        using iter_t = MessageView<access_mode::Index>::field_iterator;
-        for (iter_t it{msg.bytes(), 0, hooks}, end{msg.bytes(), msg.bytes().size(), hooks};
-             !(it == end); ++it) {
+        // 092 (data-model E-5, FR-012): the iterator is hoisted out of the `for`
+        // init so its fault record is readable after the loop. The fault is
+        // checked at the top of each iteration — before the field checks, so an
+        // empty tag yielded as tag 0 is not reported as an unexpected tag — and
+        // once after the loop, for a walk that stopped on its fault. Steps 2
+        // onward do not run after a fault.
+        iter_t it{msg.bytes(), 0, hooks};
+        iter_t const end{msg.bytes(), msg.bytes().size(), hooks};
+        for (; !(it == end); ++it) {
+            if (it.fault() != field_fault::none) {
+                return field_fault_error(it, ref_tag_out);
+            }
             auto const& fld = *it;
 
             // (a) Unexpected tag check. 081 Concern A (research.md D-1):
@@ -206,6 +248,9 @@ public:
                 set_ref_tag(ref_tag_out, fld.tag);
                 return check;
             }
+        }
+        if (it.fault() != field_fault::none) {
+            return field_fault_error(it, ref_tag_out);
         }
 
         // ── Step 2: required-fields scan ─────────────────────────────────

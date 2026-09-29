@@ -6,6 +6,14 @@ status: stable
 
 # Log
 
+- **2026-09-29 — 092 Gate B (PR #519), a C-ABI claim witnessed only in C++.** `failure-classes.md`
+  class 10 gains an owner-approved form: *a C-ABI effect witnessed only through the C++ API is
+  unwitnessed*. A C++ test skips the C thunk, the handle layer and the callback marshalling, and a
+  completeness audit that checks a test EXISTS for a row cannot see that. Instances: 091 FR-020
+  (PR #510, Gate B round-1 RC-1) and 092 CA-007 (PR #519, GB-519-03). Filed under class 10, not 12:
+  the audit's verdict was false for one clause, not a true label that was too coarse. The same form is
+  an entry in the implementer's anti-pattern library (`phase-implementer.md`, parent repo).
+  `.specify/close-out.md` §2 row 15 now sends an approved anti-pattern to both places.
 - **2026-09-27 — 091 (PR #510), test access to private `Session` state.** `components/session.md` gains
   a section on how a test may read private `Session` state. It is not an unconditional friend in the
   public header, and not `FIXPP_TEST_HOOKS` on a new target. The test goes in an already-hooked target,

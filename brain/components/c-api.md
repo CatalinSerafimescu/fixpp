@@ -7,6 +7,7 @@ refs:
   - include/fix/c_api.h
   - include/fix/c_api/version.h
   - include/fix/c_api/handles.h
+  - include/fix/c_api/session.h
   - src/capi/fixpp_capi.map
   - src/capi/message_write.cpp
   - src/capi/config.cpp
@@ -18,6 +19,9 @@ refs:
   - specs/090-capi-refusals/quickstart.md
   - specs/090-capi-refusals/spec.md
   - specs/090-capi-refusals/tasks.md
+  - specs/092-garbled-frame-reject/spec.md
+  - specs/092-garbled-frame-reject/research.md
+  - specs/092-garbled-frame-reject/plan.md
   - spec/behaviors-and-limitations.md
   - tools/check_layers.py
   - .github/workflows/abi-golden.yml
@@ -27,6 +31,8 @@ refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/090-capi-refusals-implement-log.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/090-capi-refusals-verify.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/091-data-field-bytes-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/092-garbled-frame-reject-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/092-garbled-frame-reject-evidence.md
 codegraph_entry: [fixpp_engine_t, fixpp_session_t, fixpp_msg_t, fixpp_strerror]
 constitution: ["§V.1", "§IV.2", "§X.1", "§X.4"]
 ---
@@ -195,6 +201,50 @@ The widenings (a failure turned into a success) are ADDITIVE and carry no marker
 them with the BREAKING effects. No symbol, signature or error code changed. Re-derive the population
 by re-running R-11's recipe at the head you are reading, and read `grep -n '1\.9' include/fix/c_api/*.h`
 for what each header now declares.
+
+## C-ABI 1.10: unparseable inbound frames and the inbound seqnum bound (092, fixpp#507)
+
+**Why a bump at all.** Research R-8's round-0 position was "no bump": the receive callback was
+already not invoked for such a frame. The owner overruled it at Gate A round 1. A Logon with a
+malformed tag, accepted before, is now refused through the same path as 091 FR-020's malformed
+count, and that is observable through the session-state calls. So 1.10 is declared BREAKING under
+`[const §X.7]`, following 1.9's precedent.
+
+The ruling behind it (revising #423's row 4) and the session-side alternatives are on
+[`inbound-message-path`](./inbound-message-path.md). What follows is the half the headers do not
+state.
+
+- **The population was derived, not listed.** T020 ran 091's R-11 recipe with 092 as its input.
+  Where R-8's own table disagreed with the recipe, the recipe won, because it was read against
+  code. It found effects R-8 had missed and one it had backwards. A malformed **tag** before 34 was
+  advanced and skipped before 092, not disconnected. Under 092 it is disregarded without an advance,
+  and a peer that replays the same bytes ends the session (`L-092-1`). That is BREAKING, not
+  additive. A mismatch after the header in a frame whose third field is not 35 was ruled the same
+  way after T024.
+- **The boundary, as a condition.** An effect is BREAKING when a frame **was accepted and advanced**
+  (or a session established or continued) and now ends the session or is refused. Where the frame
+  used to disconnect, the change is a widening, recorded in `version.h`'s 1.10 history with no
+  marker.
+- **Carriers.** `fixpp_session_close` carries only the Logon refusal: for every other effect it
+  returns OK either way, through the ever-established latch. `fixpp_session_is_established`,
+  `fixpp_session_send` and the two callback registrations carry the rest. That includes a faulty
+  SequenceReset during resend recovery, the liveness change, the late-site close and FR-019's
+  seqnum_max close.
+- **The 1.9 sentence on `fixpp_session_register_callback`** ("dropped as a parse error, silently …
+  no Reject") was rewritten inside the 1.10 clause, not deleted. The 1.9 delivered-then-dropped
+  record stays; only the outcome changes, to a Reject or a disregard, by row.
+- **No error code.** The validator's two new C++ errors coalesce to an existing C code; see
+  [`errors`](./errors.md). `error.h` has no list of coalesced errors to update.
+- **FR-019, the inbound seqnum bound, rides on 1.10.** An inbound message that would advance
+  NextNumIn past its maximum used to wrap it to 0; now the session ends. It is declared on the same
+  observers.
+
+**Rejected: C witnesses for every effect.** The BREAKING effects without C cells rely on the C++
+session cells, because the C observers read the FSM through the thin `src/capi` layer. Which
+effects have C cells is stated in `L-092-12`. 091 declared 1.9 the same way.
+
+Re-derive: `grep -n '1\.10' include/fix/c_api/*.h`, and re-run R-11's recipe at the head you are
+reading.
 
 ## ⚠️ What the ABI gate actually checks — and what it does not
 
