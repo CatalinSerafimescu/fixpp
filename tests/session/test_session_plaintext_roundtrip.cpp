@@ -609,15 +609,15 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogonLogout) {
 
 // ── fixpp#518: a close() that runs while a Logon arm is suspended ─────────────
 //
-// Each cell lets close(mode) land while a Logon arm is suspended, from one of two
-// places: a toAdmin the arm fires, where the application reaches the session through
-// the public Engine::lookup(), or a store hook standing in for another thread. It is
-// posted with asio::post, not co_spawn: the vendored co_spawn DISPATCHES, so on the
-// session strand it would run close() inline inside the callback instead of queueing
-// it behind the arm's next suspension. Each cell then checks what it names among the
-// outcomes the rig records: the state ring, onLogon, the admin frames passed to
-// toAdmin, the clock's parked sleeps, and the store's counter writes and final
-// counters. No store is parked: each cell runs over a real loopback socket, and no
+// Each cell lets close(mode) land while a Logon arm is suspended. The close is posted
+// from a callback the arm fires (toAdmin or onLogon), where the application reaches the
+// session through the public Engine::lookup(), or from a store hook standing in for
+// another thread. It is posted with asio::post, not co_spawn: the vendored co_spawn
+// DISPATCHES, so on the session strand it would run close() inline inside the callback
+// instead of queueing it behind the arm's next suspension. Each cell then checks what
+// it names among the outcomes the rig records: the state ring, the event ring, onLogon,
+// the admin frames passed to toAdmin, the clock's parked sleeps, and the store's counter
+// writes and final counters. No store is parked: each cell runs over a real loopback socket, and no
 // store operation waits on the test.
 namespace {
 
@@ -631,12 +631,16 @@ struct CloseDuringLogonApp final : sess::Application {
         std::optional<sess::fsm_state> state_at_close_return;
         int on_logon = 0;
         std::vector<std::string> to_admin_after_close_started;
+        // The clock's parked sleeps when close()'s own Logout reached toAdmin.
+        std::optional<std::size_t> inflight_at_close_logout;
     };
 
     sess::Engine* engine = nullptr;
     sess::SessionId id;
     std::optional<sess::close_mode> mode;  // nullopt = control, no close
     std::string arm_on;                    // toAdmin MsgType that posts the close; "" = none
+    bool close_on_logon = false;           // onLogon posts the close
+    fixpp::core::system_clock_source* clock = nullptr;
     std::shared_ptr<sess::Session> held;
     bool armed = false;
     Observed seen;
@@ -662,13 +666,21 @@ struct CloseDuringLogonApp final : sess::Application {
 
     void toAdmin(const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg,
                  const sess::SessionId& /*sid*/) override {
-        if (seen.close_started) seen.to_admin_after_close_started.emplace_back(msg.msg_type());
+        if (seen.close_started) {
+            seen.to_admin_after_close_started.emplace_back(msg.msg_type());
+            if (msg.msg_type() == "5" && !seen.inflight_at_close_logout && clock) {
+                seen.inflight_at_close_logout = clock->inflight_count();
+            }
+        }
         if (!held) held = engine->lookup(id);  // the control cell reads the state through it
         if (armed || arm_on.empty() || msg.msg_type() != arm_on) return;
         post_close();
     }
 
-    void onLogon(const sess::SessionId& /*sid*/) override { ++seen.on_logon; }
+    void onLogon(const sess::SessionId& /*sid*/) override {
+        ++seen.on_logon;
+        if (close_on_logon && !armed) post_close();
+    }
 };
 
 // The counter writes a HookedStore completed, and the MemoryStore behind it, which
@@ -819,6 +831,7 @@ struct LogonCloseCase {
     bool close_from_reset = false;
     bool close_from_inbound_persist = false;
     bool close_from_outbound_persist = false;
+    bool close_from_on_logon = false;
     bool cancel_sleeps_before_stop = true;
 };
 
@@ -960,6 +973,8 @@ struct CaseRig {
         app->id = sess::SessionId::from_config(cfg);
         app->mode = c.mode;
         app->arm_on = c.arm_on;
+        app->close_on_logon = c.close_from_on_logon;
+        app->clock = clock.get();
         return engine.register_session(std::move(cfg)).has_value();
     }
 
@@ -1153,6 +1168,31 @@ void expect_store_ends_at_teardown_reset(LogonCloseOutcome const& o) {
         << "store writes: " << store_writes(o);
 }
 
+// close(graceful) posted from onLogon, which the arm fires when it writes Active. The
+// arm's inbound persist after that yields while close()'s store flush keeps the FSM at
+// Active, and close()'s phase-1 Logout follows the flush. Asserts the arm completed its
+// persist and started no liveness loop: no sleep is parked when that Logout reaches
+// toAdmin.
+void expect_close_from_on_logon_starts_no_liveness(LogonCloseOutcome const& o) {
+    EXPECT_TRUE(o.seen.close_started) << "the posted close never ran";
+    EXPECT_EQ(o.seen.on_logon, 1);
+    EXPECT_EQ(o.seen.close_ok, std::optional{true});
+    EXPECT_EQ(o.state_after_settle, std::optional{sess::fsm_state::Disconnected})
+        << "ring=" << joined(o.ring);
+    EXPECT_FALSE(written_after_disconnected(o.ring))
+        << "a state written after close()'s Disconnected; ring=" << joined(o.ring);
+    expect_only_close_logout_after_close(o);
+    ASSERT_TRUE(o.seen.inflight_at_close_logout.has_value())
+        << "close()'s Logout never reached toAdmin";
+    EXPECT_EQ(*o.seen.inflight_at_close_logout, 0U)
+        << "a liveness sleep was parked when close()'s Logout reached toAdmin";
+    EXPECT_EQ(o.inflight_sleeps_after_settle, 0U)
+        << "a liveness sleep is parked after close() returned";
+    EXPECT_EQ(o.store_next_inbound, std::optional{sess::seqnum_min + 1})
+        << "store writes: " << store_writes(o);
+    EXPECT_TRUE(o.stop_completed);
+}
+
 }  // namespace
 
 // Control: no close. Asserts the session reaches Active with no Disconnected in the
@@ -1327,6 +1367,18 @@ TEST(LogonCloseDuringSuspension, AcceptorCloseDuringPeerResetPersistBuildsNoRepl
     EXPECT_FALSE(o.reset_event) << "the arm emitted its reset event after close() began";
 }
 
+// The acceptor's store is persistent, so the arm persists the Logon's inbound advance
+// after it writes Active. close(graceful) is posted from onLogon.
+TEST(LogonCloseDuringSuspension, AcceptorCloseFromOnLogonStartsNoLiveness) {
+    auto o = run_acceptor_case({.mode = sess::close_mode::graceful,
+                                .arm_on = "",
+                                .store_outbound_next = 1,
+                                .close_from_on_logon = true});
+    ASSERT_TRUE(o.bound);
+    ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
+    expect_close_from_on_logon_starts_no_liveness(o);
+}
+
 // Initiator control: no close. Asserts the initiator reaches Active with no
 // Disconnected in the ring and one onLogon.
 TEST(LogonCloseDuringSuspension, InitiatorControlNoCloseReachesActive) {
@@ -1425,6 +1477,18 @@ TEST(LogonCloseDuringSuspension, InitiatorCloseDuringHonourGapFill) {
     ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
     expect_close_owns_teardown(o);
     expect_no_admin_after_close(o);
+}
+
+// Initiator: its store is persistent, so the arm persists the Logon-ack's inbound
+// advance after it writes Active. close(graceful) is posted from onLogon.
+TEST(LogonCloseDuringSuspension, InitiatorCloseFromOnLogonStartsNoLiveness) {
+    auto o = run_initiator_case({.mode = sess::close_mode::graceful,
+                                 .arm_on = "",
+                                 .store_outbound_next = 1,
+                                 .close_from_on_logon = true});
+    ASSERT_TRUE(o.bound);
+    ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
+    expect_close_from_on_logon_starts_no_liveness(o);
 }
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop  // -Wdeprecated-declarations (insecure_plain_tcp, 043 T020)

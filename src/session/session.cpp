@@ -3139,6 +3139,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 if (!p_r) co_return std::unexpected(p_r.error());
             }
 
+            // fixpp#518: a close() may have run while the persist yielded, including one
+            // posted from onLogon.
+            if (logon_arm_superseded(*this, fsm_state::Active)) {
+                co_return fixpp::core::expected_t<void>{};
+            }
+
             // Spawn liveness loop (same as initiator's LogonSent→Active path).
             {
                 auto ex = co_await asio::this_coro::executor;
@@ -4705,6 +4711,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             if (logon_inbound_advanced_init && !peer_ack_sent_reset_flag) {
                 auto p_r = co_await persist_inbound_advance_();
                 if (!p_r) co_return std::unexpected(p_r.error());
+            }
+
+            // fixpp#518: a close() may have run while the persist yielded, including one
+            // posted from onLogon.
+            if (logon_arm_superseded(*this, fsm_state::Active)) {
+                co_return fixpp::core::expected_t<void>{};
             }
 
             // T041 (US3): seed last_inbound_steady_ from this Logon-ack.
