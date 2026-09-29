@@ -6,6 +6,11 @@ status: stable
 
 # Log
 
+- **2026-09-29 — fixpp#518, PR #522 Gate B round 1.** `components/session.md`'s invariant row lists
+  the guarded suspensions, which now include the post-hydrate refusals, the `reset_on_logon` reset and
+  the steps inside a 141=Y reset. The rejected list gains a guard after every `co_await` (no window
+  where the await cannot yield) and completing an interrupted 141=Y reset (its persist overtook
+  `close()`'s teardown reset), and the closing note becomes a rule.
 - **2026-09-29 — fixpp#518, a Logon arm that resumes after `close()` began.** `components/session.md`
   gains the invariant row (B-518-1/L-518-1) and the rejected central chokepoints
   (`record_state_transition_`, `store_then_emit`). The per-suspension guard shipped instead.

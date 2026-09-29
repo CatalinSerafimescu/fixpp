@@ -3444,22 +3444,34 @@ L-092-3 and L-092-5 are not used: the L-092 numbers follow contract C-5's, and C
 
 ### Behaviors
 
-- **B-518-1 — once `close()` has begun, a suspended Logon arm returns without acting further. This holds for both close modes.** The Logon arms of `Session::on_inbound_frame` suspend at several points:
-  - the acceptor's store hydrate before `LogonReceived`;
-  - a peer-requested reset (ResetSeqNumFlag(141)=Y) before the reply is built;
+- **B-518-1 — once `close()` has begun, a Logon arm that resumes from a guarded suspension returns without acting further. This holds for both close modes.** The guarded suspensions in the Logon arms of `Session::on_inbound_frame`:
+  - on the acceptor, before `LogonReceived`: the store hydrate, and the `reset_on_logon` reset;
+  - a peer-requested reset (ResetSeqNumFlag(141)=Y): the store reset, the inbound restore and its persist, and on the initiator the outbound restore and its persist;
   - the reply Logon's store and write;
   - the NextExpectedMsgSeqNum(789) handling (GapFill, or the too-high Logout) on either role.
 
-  `close()` can run during any of these suspensions. It can be posted from the application's `toAdmin` through `Engine::lookup`, or come from another thread. When the arm resumes after `close()` began, it builds no further frame. It also does not write `Active`, does not fire `onLogon`, and does not start the liveness loop.
+  `close()` can run during any of these suspensions. It can be posted from the application's `toAdmin` through `Engine::lookup`, or come from another thread. The store or write operation under way when `close()` began completes; nothing after it in the arm runs. The effects the witnesses assert, each after `close()` began:
+  - no admin frame from the arm reaches `toAdmin`, the hook every engine-built frame passes before it is written; a graceful close's own Logout still does *(`expect_no_admin_after_close`, `expect_only_close_logout_after_close`)*;
+  - `onLogon` does not fire;
+  - the arm writes no `LogonReceived` when `close()` began before it, and nothing over `close()`'s `Disconnected`, so no `Active` *(the state ring)*;
+  - no liveness sleep is parked after `close()` returned;
+  - the arm persists no sequence counter; with `reset_on_disconnect`, the store ends at `close()`'s teardown reset *(the test store's write log and its counters read after `stop()`)*.
 
   Before fixpp#518:
   - a terminal close was overwritten by `Active`;
   - `onLogon` fired after close began, in both modes;
-  - a reply, a GapFill or a Logout was built after close began;
+  - a reply, a GapFill or a Logout was built after close began, and a close during hydrate could still let the arm refuse the Logon with a Logout;
+  - a 141=Y reset's inbound persist could land after `close()`'s teardown reset, so a store with `reset_on_disconnect` ended at next-inbound 2;
   - the liveness loop started after close had already joined it, so nothing cancelled it. Under ASan, an engine teardown with that loop still parked is a heap-use-after-free.
 
   **Not a `[const §X.7]` BREAKING change**, by owner ruling: the old outcomes were the defect. *(`Session::on_inbound_frame`, the `logon_arm_superseded` predicate; witnesses `tests/session/test_session_plaintext_roundtrip.cpp` `LogonCloseDuringSuspension.*`; owner rulings https://github.com/CatalinSerafimescu/fixpp/issues/518#issuecomment-5894703690.)*
 
 ### Limitations
 
-- **L-518-1 — B-518-1 is witnessed over plain TCP with an in-memory test store.** A TLS transport and `FileStore` have different suspension points, and neither is measured. The guard covers each suspension in the Logon arms whatever the transport or store. The graceful Logout phase (`LogoutSent`) and the initiator's `LogonSent` writes are not guarded. By code reading they happen before the session is published to `Engine::lookup`, or they are transient states that `close()` overwrites. **Status: disclosed.**
+- **L-518-1 — B-518-1 is witnessed over plain TCP with an in-memory test store.** A TLS transport and `FileStore` have different suspension points, and neither is measured.
+  - **Awaits without a guard.** The reply's `assign_outbound` and the initiator's `check_inbound` are not followed by a guard: an uncontended `async_mutex::async_lock` grants inline (its fast path in `include/fixpp/core/sync/async_mutex.hpp`), so they do not yield there. A change that makes that grant post, or that lets another holder contend for the seqnum mutex during a Logon, opens those windows. Re-derive: in each Logon arm, read every `co_await` between one `logon_arm_superseded` check and the next frame, callback, state write or counter write.
+  - **A 141=Y reset that `close()` interrupts stops before its restore.** The consumed reset Logon's advance is then lost: the session and the store expect seq 1 next. With no teardown reset configured, a peer that next logs on at seq 2 without 141=Y is too high, which is fatal unless the NextExpectedMsgSeqNum(789) tolerance is on. The ordering against `close()`'s teardown reset is witnessed with the in-memory test store only; `FileStore` does its I/O off the strand, and its ordering is not measured.
+  - **Frames that arrive with the Logon.** After a guarded arm returns, the engine still delivers the frames that came in the same read, and the arm for the FSM's current state handles them. That arm cannot write `Active`: re-derive with `grep -n "record_state_transition_(fsm_state::Active)" src/session/session.cpp`, where each hit is preceded by a `logon_arm_superseded` check. In `LogonReceived` the frame goes through the arm shared with `Active`, which can answer it (a Reject, for example) and passes a SequenceReset-Reset to `fromAdmin`.
+  - The graceful Logout phase (`LogoutSent`) and the initiator's `LogonSent` writes are not guarded. By code reading they happen before the session is published to `Engine::lookup`, or they are transient states that `close()` overwrites.
+
+  **Status: disclosed.**
