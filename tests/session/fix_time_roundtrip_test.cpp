@@ -684,5 +684,74 @@ TEST(FixTimeParse, Nanos27_RoundTrip) {
         << "nanos roundtrip not lossless; [I-NST-2 / FR-005]";
 }
 
+// ── fixpp#509: a timestamp outside the utc_time_point range is refused ───────
+//
+// utc_time_point counts int64 nanoseconds, so the grammar's year range reaches
+// far past both ends of it. A value outside the range must be refused, not
+// wrapped into a representable time. Each boundary literal below is the first
+// or last representable nanosecond, spelled out independently of the parser;
+// re-derive with python3: divmod(2**63 - 1, 10**9) and divmod(-2**63, 10**9)
+// (floored), then format the seconds part as a UTC calendar time.
+
+void expect_refused(std::string_view s) {
+    SCOPED_TRACE(s);
+    auto r = fix_string_to_utc_time(std::span<const char>(s.data(), s.size()));
+    ASSERT_FALSE(r.has_value()) << "must be refused, not wrapped into a representable time";
+    EXPECT_EQ(r.error(), error::wire_invalid_field_format);
+}
+
+void expect_parses_to(std::string_view s, utc_time_point::rep count) {
+    SCOPED_TRACE(s);
+    auto r = fix_string_to_utc_time(std::span<const char>(s.data(), s.size()));
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r->time_since_epoch().count(), count);
+}
+
+TEST(FixTimeRange, LastRepresentableNanosecondParsesToMax) {
+    expect_parses_to("22620411-23:47:16.854775807",
+                     utc_time_point::max().time_since_epoch().count());
+}
+
+TEST(FixTimeRange, OneNanosecondPastMaxIsRefused) { expect_refused("22620411-23:47:16.854775808"); }
+
+TEST(FixTimeRange, WholeSecondPastMaxIsRefused) {
+    expect_refused("22620411-23:47:17");
+    expect_refused("22620411-23:47:17.000000000");
+}
+
+TEST(FixTimeRange, FirstRepresentableNanosecondParsesToMin) {
+    expect_parses_to("16770921-00:12:43.145224192",
+                     utc_time_point::min().time_since_epoch().count());
+}
+
+TEST(FixTimeRange, OneNanosecondBeforeMinIsRefused) {
+    expect_refused("16770921-00:12:43.145224191");
+}
+
+TEST(FixTimeRange, WholeSecondBelowMinIsRefused) {
+    // Same second as min(), but a zero fraction lies before it.
+    expect_refused("16770921-00:12:43");
+}
+
+// The second that holds min(): a fraction past min()'s must compose without an
+// intermediate below the range (the seconds part alone is below it).
+TEST(FixTimeRange, SubSecondInMinSecondComposesExactly) {
+    expect_parses_to("16770921-00:12:43.500000000", -9'223'372'036'500'000'000LL);
+}
+
+TEST(FixTimeRange, FirstWholeSecondAfterMinParses) {
+    expect_parses_to("16770921-00:12:44", -9'223'372'036'000'000'000LL);
+}
+
+// The lowest and highest years the grammar can spell.
+TEST(FixTimeRange, GrammarExtremesAreRefused) {
+    for (std::string_view s : {"00000101-00:00:00", "99991231-23:59:59.999999999"}) {
+        expect_refused(s);
+    }
+}
+
+// The SendingTime of the fuzz seed seed_509_sendingtime_year_4048.
+TEST(FixTimeRange, Year4048IsRefused) { expect_refused("40480202-00:00:00.000"); }
+
 }  // namespace
 }  // namespace fixpp::core::test

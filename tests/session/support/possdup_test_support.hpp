@@ -46,16 +46,17 @@ namespace fixpp::session::test {
 
 // Build a minimal FIX 4.2 frame. extra_fields is inserted after the standard
 // header fields (35/34/49/52/56) and before the checksum; it must be a valid
-// SOH-terminated field string. 52 is a fixed timestamp so PossDup tests can
-// construct 122 values relative to it (greater/equal).
+// SOH-terminated field string. 52 defaults to a fixed timestamp so PossDup tests
+// can construct 122 values relative to it (greater/equal).
 inline std::vector<std::byte> make_frame(std::string_view msg_type, std::uint32_t seq,
                                          std::string_view sender, std::string_view target,
-                                         std::string extra_fields = {}) {
+                                         std::string extra_fields = {},
+                                         std::string_view sending_time = "20240101-00:00:00.000") {
     std::string body;
     body += "35=" + std::string(msg_type) + "\x01";
     body += "34=" + std::to_string(seq) + "\x01";
     body += "49=" + std::string(sender) + "\x01";
-    body += "52=20240101-00:00:00.000\x01";
+    body += "52=" + std::string(sending_time) + "\x01";
     body += "56=" + std::string(target) + "\x01";
     if (!extra_fields.empty()) {
         body += extra_fields;

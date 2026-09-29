@@ -47,7 +47,8 @@ namespace fixpp::session {
 
 // Check that |inbound_sending_time - effective_now| <= max_latency.
 // Returns ok if within range; returns session_sending_time_accuracy if
-// the divergence exceeds max_latency.
+// the divergence exceeds max_latency. Exact for any two utc_time_points and
+// any max_latency; a negative max_latency admits nothing (fixpp#509).
 // The CALLER is responsible for the Q3 downstream action (Reject → Logout →
 // disconnect, or Logon-path → logout-with-error) — this function only
 // evaluates the time condition. noexcept; no heap.

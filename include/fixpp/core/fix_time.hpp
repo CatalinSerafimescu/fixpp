@@ -84,6 +84,10 @@ enum class fix_time_precision : std::uint8_t {
 // error::wire_invalid_field_format — reuses the pre-existing wire-domain
 // parse-error slot; no new error slot needed for the grammar error path).
 //
+// A grammatical timestamp outside the range utc_time_point can represent
+// (utc_time_point::min() .. utc_time_point::max(), to the nanosecond) is also
+// refused with error::wire_invalid_field_format, never wrapped (fixpp#509).
+//
 // Round-trip guarantee: fix_string_to_utc_time(utc_time_to_fix_string(tp, P, buf))
 // == time_point_cast<duration_for(P)>(tp) — lossless at emitted precision.
 [[nodiscard]] expected_t<utc_time_point> fix_string_to_utc_time(std::span<const char> s) noexcept;

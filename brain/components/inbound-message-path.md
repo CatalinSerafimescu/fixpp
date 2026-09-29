@@ -8,6 +8,8 @@ refs:
   - include/fixpp/session/session.hpp
   - src/session/session.cpp
   - src/session/scan_frame_header.hpp
+  - src/core/fix_time.cpp
+  - src/session/sending_time.cpp
   - specs/015-runtime-engine/research.md
   - specs/092-garbled-frame-reject/spec.md
   - specs/092-garbled-frame-reject/research.md
@@ -148,3 +150,31 @@ inbound frames end an established session. No symbol or code changes. The carrie
 ⚠️ **Frozen records that now say the wrong thing**, flagged here and not edited: #423's ruling
 table, row 4 ("garbled … no Reject, no advance"). Row 1's "Ignore … Unchanged" also describes a
 disregard fixpp never did (`L-004-4`; fixpp#514).
+
+## A timestamp the time type cannot hold (fixpp#509)
+
+A peer's `SendingTime(52)`, and its `OrigSendingTime(122)` on a PossDup message, are parsed by
+`core::fix_string_to_utc_time`. The grammar's four-digit year reaches past both ends of
+`utc_time_point`'s signed 64-bit nanosecond count. Before #509 such a year overflowed the composition,
+the parse succeeded, and `check_sending_time`'s subtraction overflowed a second time. Both are UB on
+input a peer controls (`[const §XII]`).
+
+**Decision:** refuse at the parse, and make the accuracy check exact for any two representable time
+points. The parse returns the grammar's existing error. Every caller already dispositions an unparseable
+timestamp, so no caller changed; B-509-2 lists what each site now does. The accuracy check still needs
+its own fix after the parse fix: a representable time far from the clock can overflow the difference.
+
+### What was rejected, and why
+
+- **Patching the callers** (a range test at each `fix_string_to_utc_time` site). Five sites, and any
+  new caller would repeat the hole. The parse is the one place the wrong value is created.
+- **Year literals for the bound.** A comment or constant naming the edge years is a result, and it
+  goes stale if the rep or period of `utc_time_point` changes. The bound is derived from `min()` and
+  `max()`.
+- **`__builtin_mul_overflow` / `__builtin_add_overflow`.** The MSVC lane has no such builtin.
+- **A cold out-of-line edge path.** It measured the same as the inline shape within noise in a paired
+  run, and it added compiler-specific attributes. The owner kept the simpler shape and waived
+  `[const §VIII.2]` for the cost of about 1 ns per parse (fixpp#509 owner rulings, 2026-09-29).
+- **Adding a Reject for an out-of-range `52` on a PossDup Reject(35=3) or Logout(35=5).** That site
+  already falls through for an unparseable `52`, so fixing it is a change to that rule, not part of
+  #509. It is disclosed as `L-509-1`.

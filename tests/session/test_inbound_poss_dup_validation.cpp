@@ -4,7 +4,7 @@
 //
 // 021-inbound-possdup-origsendingtime T007 — Stage-1 Arm-C/D/E validation tests.
 //
-// Seven test cases:
+// Cases from feature 021 (the full set is the TEST_F blocks below):
 //   1. ArmC_MissingOrigSendingTime     — 43=Y, missing 122 → Reject 371=122/373=1, Active
 //   2. ArmD_OrigSendingTimeAfter52     — 43=Y, 122 > 52 strict → Reject 373=10 + Logout + Disc.
 //   3. Boundary_122Equals52Accepted    — 122 == 52 → not Arm D; session survives (INV-4)
@@ -507,6 +507,73 @@ TEST_F(PossDupValidationTest, AtExpected_Valid_ProcessedOnce_Advances) {
     // No Reject and no Logout (valid possdup at-expected is not an error).
     EXPECT_FALSE(any_reject()) << "FQ-2: valid at-expected possdup must NOT emit a Reject";
     EXPECT_FALSE(any_logout()) << "FQ-2: valid at-expected possdup must NOT emit a Logout";
+}
+
+// ── fixpp#509: an OrigSendingTime outside the utc_time_point range ───────────
+//
+// A 122 whose year is past the int64-nanosecond range is unparseable, so it takes
+// the malformed-122 disposition (Arm C), never a comparison against 52 made with
+// a wrapped time.
+
+TEST_F(PossDupValidationTest, AtExpected_OutOfRangeOrigSendingTime_ArmC) {
+    auto app = std::make_shared<CountingApplication>();
+    engine.application = app;
+
+    auto cfg = make_cfg();
+    Session sess(engine, cfg);
+    drive_to_active(sess);
+    ASSERT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(),
+              static_cast<fixpp::session::seqnum_t>(2));
+
+    // 122 carries the out-of-range timestamp from the fuzz seed
+    // seed_509_sendingtime_year_4048 (there it is the SendingTime).
+    auto frame = make_frame("D", /*seq=*/2, "TW", "ISLD",
+                            "43=Y\x01"
+                            "122=40480202-00:00:00.000\x01");
+    feed(sess, frame);
+
+    ASSERT_TRUE(any_reject()) << "out-of-range 122 must emit Reject(35=3)";
+    auto rj = find_last_reject();
+    EXPECT_EQ(rj.ref_tag_id, "122");
+    EXPECT_EQ(rj.reason, "1");
+    EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active) << "Arm C survives";
+    EXPECT_FALSE(any_logout());
+    EXPECT_EQ(app->from_app_calls, 0) << "a rejected possdup must not reach fromApp";
+}
+
+// A 52 outside that range is unparseable too. Guard 3 exempts Reject(35=3) and
+// Logout(35=5), so on those MsgTypes, when the message reaches Stage-1, an
+// unparseable 52 next to a parseable 122 takes the fall-through (L-509-1): never a
+// comparison against a wrapped 52. Pins L-509-1's fall-through; flips if L-509-1 is
+// resolved.
+
+TEST_F(PossDupValidationTest, AdminPossDup_OutOfRangeSendingTime_FallsThrough) {
+    auto cfg = make_cfg();
+    Session sess(engine, cfg);
+    drive_to_active(sess);
+
+    // Boundary_122Equals52Accepted with only 52 changed, to the fuzz seed
+    // seed_509_sendingtime_year_4048's SendingTime. seq=1 (too-low).
+    auto frame = make_frame("3", /*seq=*/1, "TW", "ISLD",
+                            "43=Y\x01"
+                            "122=20240101-00:00:00.000\x01"
+                            "45=1\x01"
+                            "373=0\x01",
+                            /*sending_time=*/"40480202-00:00:00.000");
+    feed(sess, frame);
+
+    // Outbound MsgTypes in order, so a failure shows which arm fired.
+    std::string sent;
+    for (const auto& f : captured_frames) {
+        sent += std::string(extract_field(f, 35).value_or("?")) + ' ';
+    }
+    const auto rj = find_last_reject();
+    EXPECT_FALSE(any_reject()) << "L-509-1: an unparseable 52 is not compared against 122; "
+                               << "last Reject 371=" << rj.ref_tag_id << " 373=" << rj.reason
+                               << "; sent: " << sent;
+    EXPECT_FALSE(any_logout()) << "L-509-1: no Logout; sent: " << sent;
+    EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active)
+        << "L-509-1: the session stays Active; sent: " << sent;
 }
 
 }  // namespace

@@ -6,6 +6,9 @@ status: stable
 
 # Log
 
+- **2026-09-29 — fixpp#509 (B20), an out-of-range UTCTimestamp.** `components/inbound-message-path.md`
+  gains the decision (refuse at the parse, exact accuracy check) and what was rejected: patching the
+  callers, year literals, compiler builtins, and a cold edge path (the owner waived `[const §VIII.2]`).
 - **2026-09-29 — 092 Gate B (PR #519), a C-ABI claim witnessed only in C++.** `failure-classes.md`
   class 10 gains an owner-approved form: *a C-ABI effect witnessed only through the C++ API is
   unwitnessed*. A C++ test skips the C thunk, the handle layer and the callback marshalling, and a
