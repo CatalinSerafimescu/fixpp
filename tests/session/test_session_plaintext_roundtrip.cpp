@@ -660,13 +660,14 @@ struct CloseDuringLogonApp final : sess::Application {
 };
 
 // A MemoryStore that reports itself persistent, so the session hydrates from it and
-// persists into it. Its outbound counter can start past 1, and it can run a hook on
-// the session's first inbound hydrate read. The hook stands in for a close() posted
-// from another thread.
+// persists into it. Its outbound counter can start past 1, it can run a hook on the
+// session's first inbound hydrate read, and it has a graceful-close flush. The hook
+// stands in for a close() posted from another thread.
 class HookedStore final : public sess::MessageStore {
 public:
     HookedStore(sess::seqnum_t outbound_next, std::function<void()> on_hydrate)
-        : inner_(sess::MemoryStore::Config{.policy = sess::capacity_policy::unbounded}),
+        : sess::MessageStore(flush_thunk_for<HookedStore>()),
+          inner_(sess::MemoryStore::Config{.policy = sess::capacity_policy::unbounded}),
           on_hydrate_(std::move(on_hydrate)) {
         asio::io_context seed_ioc;
         asio::co_spawn(
@@ -705,6 +706,16 @@ public:
     }
     asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override {
         return inner_.reset();
+    }
+
+    // close(graceful) awaits this before it writes Disconnected. It yields the strand
+    // a few times, as FileStore's flush does, so the session's other work can run
+    // while close() is already under way.
+    asio::awaitable<fixpp::core::expected_t<void>> flush_for_session_close() {
+        for (int i = 0; i < 4; ++i) {
+            co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
+        }
+        co_return fixpp::core::expected_t<void>{};
     }
 
 private:
@@ -1108,12 +1119,11 @@ TEST(LogonCloseDuringSuspension, AcceptorCloseDuringHonourGapFill) {
         << "admin frames after close() began: " << types_text(o.to_admin_after_close_started);
 }
 
-// A close lands during the acceptor's hydrate reads, before any callback fires. When
-// close() has drained the SeqnumManager by the time the arm resumes, the arm's next
-// counter operation fails and the arm fails closed: no LogonReceived over close()'s
-// Disconnected, and no reply built.
-TEST(LogonCloseDuringSuspension, AcceptorCloseDuringHydrateFailsClosed) {
-    auto o = run_acceptor_case({.mode = sess::close_mode::terminal,
+// A close(graceful) lands during the acceptor's hydrate reads, before any callback
+// fires, and stays under way while the store flushes. The arm must not write
+// LogonReceived, nor build and send its reply, after close() began.
+TEST(LogonCloseDuringSuspension, AcceptorCloseDuringHydrate) {
+    auto o = run_acceptor_case({.mode = sess::close_mode::graceful,
                                 .arm_on = "",
                                 .store_outbound_next = 1,
                                 .close_from_hydrate = true});

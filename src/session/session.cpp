@@ -2927,6 +2927,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // fix] RC#B (gate-b/r1-green): gate the LogonReceived→Active transition on successful
             // reply build AND emit. Build/emit failure → Disconnected. [009 spec.md FR-005; 005
             // data-model.md's `NotConnected` row "reply Logon, agreed HeartBtInt"]
+            //
+            // fixpp#518: a close() posted from another thread can run while the hydrate
+            // or the counter check above yields; a graceful one is still under way (its
+            // store flush) when the arm resumes. It owns the teardown: no LogonReceived,
+            // no reply. Same disposition as the guard after the reply emit below.
+            if (state_ == lifecycle::closing || state_ == lifecycle::closed_drained ||
+                fsm_state_ != fsm_state::NotConnected) {
+                co_return fixpp::core::expected_t<void>{};
+            }
             record_state_transition_(fsm_state::LogonReceived);
 
             // Emit the acceptor reply Logon using the same admin-builder path
@@ -3060,11 +3069,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // stops here: no 789 honour frames, no Active, no onLogon, no persist,
                 // and no liveness loop spawned after close() joined the loop count.
                 // The signal is the lifecycle state, which close() leaves `open` before
-                // its first await; the FSM alone misses a graceful close(), whose phase 1
-                // leaves LogonReceived in place until its Logout is written. Success, not
-                // an error: the frame was handled and the session is closed (the
-                // Disconnected row's disposition); an error would only make the read
-                // pump call close() again.
+                // it can yield the strand; the FSM alone misses a graceful close(), whose
+                // phase 1 leaves LogonReceived in place until its Logout is written.
+                // Success, not an error: the frame was handled and the session is closed
+                // (the Disconnected row's disposition).
                 if (state_ == lifecycle::closing || state_ == lifecycle::closed_drained ||
                     fsm_state_ != fsm_state::LogonReceived) {
                     co_return fixpp::core::expected_t<void>{};
@@ -4650,7 +4658,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // application can post close() from a toAdmin this arm fires (the 789
             // honour's GapFill) and it runs while the arm is suspended. That close()
             // owns the teardown: no Active, no onLogon, no persist, no liveness loop.
-            // Success, as on the acceptor arm: the frame was handled.
+            // Success, as on the acceptor arm: the frame was handled. This arm is reached
+            // from run_read_pump, where an error would stop the pump and close() again.
             if (state_ == lifecycle::closing || state_ == lifecycle::closed_drained ||
                 fsm_state_ != fsm_state::LogonSent) {
                 co_return fixpp::core::expected_t<void>{};
