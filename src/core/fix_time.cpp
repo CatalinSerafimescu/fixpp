@@ -129,6 +129,42 @@ constexpr split_ns split_floored(std::int64_t ns) noexcept {
     return split_ns{.sec = sec, .sub = sub};
 }
 
+constexpr split_ns kMaxSplit = split_floored(utc_time_point::max().time_since_epoch().count());
+constexpr split_ns kMinSplit = split_floored(utc_time_point::min().time_since_epoch().count());
+
+// True for a second strictly inside the utc_time_point range, which holds any
+// fraction: one unsigned compare. epoch_sec is bounded by the four-digit-year
+// grammar, far inside std::int64_t, so the subtraction cannot overflow.
+constexpr bool strictly_inside_range(std::int64_t epoch_sec) noexcept {
+    return static_cast<std::uint64_t>(epoch_sec - (kMinSplit.sec + 1)) <
+           static_cast<std::uint64_t>(kMaxSplit.sec - kMinSplit.sec - 1);
+}
+
+// The parse's slow path: a boundary second or one outside the range. Refuses
+// what utc_time_point cannot hold, comparing (second, sub-second) against the
+// range ends split the same way, so the check itself cannot overflow. Kept out
+// of line and marked cold so the common path pays only the gate's branch.
+#if defined(__GNUC__) || defined(__clang__)
+[[gnu::cold, gnu::noinline]]
+#elif defined(_MSC_VER)
+__declspec(noinline)
+#endif
+expected_t<utc_time_point> compose_at_range_edge(std::int64_t epoch_sec,
+                                                 std::int64_t ns_sub) noexcept {
+    if (epoch_sec > kMaxSplit.sec || (epoch_sec == kMaxSplit.sec && ns_sub > kMaxSplit.sub)) {
+        return std::unexpected(error::wire_invalid_field_format);
+    }
+    if (epoch_sec < kMinSplit.sec || (epoch_sec == kMinSplit.sec && ns_sub < kMinSplit.sub)) {
+        return std::unexpected(error::wire_invalid_field_format);
+    }
+    // A negative second with a fraction is composed from the next second up:
+    // that second's nanosecond product can lie below min() when the sum does not.
+    const std::int64_t ns_count = (epoch_sec < 0 && ns_sub > 0)
+                                      ? ((epoch_sec + 1) * kNsPerSec) + (ns_sub - kNsPerSec)
+                                      : (epoch_sec * kNsPerSec) + ns_sub;
+    return utc_time_point{std::chrono::nanoseconds{ns_count}};
+}
+
 }  // namespace
 
 // ── Format ───────────────────────────────────────────────────────────────────
@@ -353,40 +389,22 @@ constexpr split_ns split_floored(std::int64_t ns) noexcept {
         ns_sub = frac * scale[fraction_width];
     }
 
-    // Build the epoch second offset.
+    // Build the epoch nanosecond offset.
     const std::int32_t epoch_days = date_to_days(year, month, day);
     const std::int64_t epoch_sec =
         (static_cast<std::int64_t>(epoch_days) * 86400LL) + (hh_i * 3600LL) + (mm_i * 60LL) + ss_i;
 
     // fixpp#509: the grammar's years reach past both ends of utc_time_point's
-    // nanosecond count. Refuse a timestamp that count cannot hold, comparing
-    // (second, sub-second) against the range ends split the same way, so the
-    // check itself cannot overflow.
-    constexpr split_ns kMax = split_floored(utc_time_point::max().time_since_epoch().count());
-    constexpr split_ns kMin = split_floored(utc_time_point::min().time_since_epoch().count());
-    // Fast path: one unsigned compare admits every second strictly inside the
-    // range, which holds any fraction. Only the two boundary seconds and those
-    // outside reach the exact check. epoch_sec is bounded by the four-digit-year
-    // grammar, far inside std::int64_t, so the subtraction cannot overflow.
-    if (static_cast<std::uint64_t>(epoch_sec - (kMin.sec + 1)) >=
-        static_cast<std::uint64_t>(kMax.sec - kMin.sec - 1)) {
-        if (epoch_sec > kMax.sec || (epoch_sec == kMax.sec && ns_sub > kMax.sub)) {
-            return std::unexpected(error::wire_invalid_field_format);
-        }
-        if (epoch_sec < kMin.sec || (epoch_sec == kMin.sec && ns_sub < kMin.sub)) {
-            return std::unexpected(error::wire_invalid_field_format);
-        }
+    // nanosecond count. Inside the range, the composition below cannot overflow.
+    if (!strictly_inside_range(epoch_sec)) [[unlikely]] {
+        return compose_at_range_edge(epoch_sec, ns_sub);
     }
 
     // Compose as nanoseconds. utc_time_point is pinned to nanoseconds, so no
     // duration cast is needed (avoids truncation on libc++ where
-    // system_clock::duration is microseconds). A negative second with a fraction
-    // is composed from the next second up: that second's nanosecond product can
-    // lie below min() when the sum does not.
-    const std::int64_t ns_count = (epoch_sec < 0 && ns_sub > 0)
-                                      ? ((epoch_sec + 1) * kNsPerSec) + (ns_sub - kNsPerSec)
-                                      : (epoch_sec * kNsPerSec) + ns_sub;
-    return utc_time_point{std::chrono::nanoseconds{ns_count}};
+    // system_clock::duration is microseconds).
+    const auto ns_total = std::chrono::nanoseconds{(epoch_sec * 1'000'000'000LL) + ns_sub};
+    return utc_time_point{ns_total};
 }
 
 }  // namespace fixpp::core
