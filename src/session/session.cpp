@@ -2608,6 +2608,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         co_return std::unexpected(h_r.error());
                     }
                 }
+                // fixpp#518: a close() may have run while hydrate yielded.
+                if (logon_arm_superseded(*this, fsm_state::NotConnected)) {
+                    co_return fixpp::core::expected_t<void>{};
+                }
 
                 // 070-fix44-closeout S-029: TestMessageIndicator(464) posture-mismatch
                 // refusal on the acceptor's inbound Logon. Opt-in — cfg_.posture unset
@@ -2702,6 +2706,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         record_state_transition_(fsm_state::Disconnected);
                         co_return std::unexpected(rst_r.error());
                     }
+                }
+                // fixpp#518: a close() may have run while the reset_on_logon reset yielded.
+                if (logon_arm_superseded(*this, fsm_state::NotConnected)) {
+                    co_return fixpp::core::expected_t<void>{};
                 }
 
                 auto chk = co_await seqnum_mgr_.check_inbound(seq);
@@ -2940,11 +2948,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // fix] RC#B (gate-b/r1-green): gate the LogonReceived→Active transition on successful
             // reply build AND emit. Build/emit failure → Disconnected. [009 spec.md FR-005; 005
             // data-model.md's `NotConnected` row "reply Logon, agreed HeartBtInt"]
-            //
-            // fixpp#518: a close() may have run while hydrate or the counter check yielded.
-            if (logon_arm_superseded(*this, fsm_state::NotConnected)) {
-                co_return fixpp::core::expected_t<void>{};
-            }
             record_state_transition_(fsm_state::LogonReceived);
 
             // Emit the acceptor reply Logon using the same admin-builder path
@@ -2984,6 +2987,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         record_state_transition_(fsm_state::Disconnected);
                         co_return std::unexpected(rst_r.error());
                     }
+                    // fixpp#518: a close() may have run while the 141=Y reset yielded. Its
+                    // teardown reset can land before the inbound persist below.
+                    if (logon_arm_superseded(*this, fsm_state::LogonReceived)) {
+                        co_return fixpp::core::expected_t<void>{};
+                    }
                     // 030 T011 (FR-001/005/007): the consumed seq-1 reset Logon is a
                     // surviving net-advance (check_inbound advanced 1->2 before this reset
                     // rewound it). Restore next-expected-inbound to seqnum_min+1 (=2) in the
@@ -3012,7 +3020,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         .by_peer_request = peer_sent_reset});
                 }
 
-                // fixpp#518: a close() may have run while the 141=Y reset or persist yielded.
+                // fixpp#518: a close() may have run while the inbound restore or persist
+                // yielded.
                 if (logon_arm_superseded(*this, fsm_state::LogonReceived)) {
                     co_return fixpp::core::expected_t<void>{};
                 }
@@ -4474,6 +4483,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         record_state_transition_(fsm_state::Disconnected);
                         co_return std::unexpected(rst_r.error());
                     }
+                    // fixpp#518: a close() may have run while the 141=Y reset yielded. Its
+                    // teardown reset can land before the persists below.
+                    if (logon_arm_superseded(*this, fsm_state::LogonSent)) {
+                        co_return fixpp::core::expected_t<void>{};
+                    }
                     // 030 T016 (FR-001/005/007/009): the consumed seq-1 reset-ack Logon is a
                     // surviving net-advance (check_inbound advanced 1->2 before this reset
                     // rewound it) — identical clobber to the acceptor arm. Restore
@@ -4491,6 +4505,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         // store 1->2 (no-op if non-persistent, INV-H4).
                         auto p_r = co_await persist_inbound_advance_();
                         if (!p_r) co_return std::unexpected(p_r.error());
+                    }
+                    // fixpp#518: a close() may have run while the inbound restore or persist
+                    // yielded.
+                    if (logon_arm_superseded(*this, fsm_state::LogonSent)) {
+                        co_return fixpp::core::expected_t<void>{};
                     }
                     // 032 T010(c): outbound restore — symmetric twin of the 030 inbound restore.
                     // Guarded on BOTH: latch (fixpp sent 141=Y) AND reset_before_send (fixpp's
@@ -4638,7 +4657,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // Unknown wire value → leave Unknown (cannot map to application_version).
             }
 
-            // fixpp#518: a close() may have run while the 141=Y reset or persists yielded.
+            // fixpp#518: a close() may have run while the outbound restore or persist
+            // yielded.
             if (logon_arm_superseded(*this, fsm_state::LogonSent)) {
                 co_return fixpp::core::expected_t<void>{};
             }

@@ -613,10 +613,11 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogonLogout) {
 // the public Engine::lookup(), or a store hook standing in for another thread. It is
 // posted with asio::post, not co_spawn: the vendored co_spawn DISPATCHES, so on the
 // session strand it would run close() inline inside the callback instead of queueing
-// it behind the arm's next suspension. Each cell then checks, after close() began:
-// the state ring, onLogon, the admin frames passed to toAdmin, and the clock's parked
-// sleeps. No store is parked: each cell runs over a real loopback socket, and no store
-// operation waits on the test.
+// it behind the arm's next suspension. Each cell then checks what it names among the
+// outcomes the rig records: the state ring, onLogon, the admin frames passed to
+// toAdmin, the clock's parked sleeps, and the store's counter writes and final
+// counters. No store is parked: each cell runs over a real loopback socket, and no
+// store operation waits on the test.
 namespace {
 
 namespace sess = fixpp::session;
@@ -669,24 +670,49 @@ struct CloseDuringLogonApp final : sess::Application {
     void onLogon(const sess::SessionId& /*sid*/) override { ++seen.on_logon; }
 };
 
+// The counter writes a HookedStore completed, and the MemoryStore behind it, which
+// outlives the session so a cell can read the final counters after stop().
+struct StoreLog {
+    struct Write {
+        std::string op;  // "reset", "in+1" or "out+1"
+        bool after_close_began = false;
+    };
+    std::function<bool()> close_began;
+    std::vector<Write> writes;  // in completion order
+    int stores_made = 0;
+    std::shared_ptr<sess::MemoryStore> inner;
+
+    void record(std::string op) {
+        writes.push_back({std::move(op), close_began && close_began()});
+    }
+};
+
 // A MemoryStore that reports itself persistent, so the session hydrates from it and
-// persists into it. Its outbound counter can start past 1, it can run a hook on the
-// session's first inbound hydrate read or on its first reset(), and it has a
+// persists into it. Its outbound counter can start past 1, it can run a one-shot hook
+// at named store operations, it logs its counter writes into a StoreLog, and it has a
 // graceful-close flush. A hook stands in for a close() posted from another thread.
 class HookedStore final : public sess::MessageStore {
 public:
-    HookedStore(sess::seqnum_t outbound_next, std::function<void()> on_hydrate,
-                std::function<void()> on_reset)
+    struct Hooks {
+        std::function<void()> on_hydrate;  // first inbound read
+        std::function<void()> on_reset;    // first reset()
+        std::function<void()> on_inbound_persist;   // first next_seqnum(inbound, true)
+        std::function<void()> on_outbound_persist;  // first next_seqnum(outbound, true)
+    };
+
+    HookedStore(sess::seqnum_t outbound_next, Hooks hooks, std::shared_ptr<StoreLog> log)
         : sess::MessageStore(flush_thunk_for<HookedStore>()),
-          inner_(sess::MemoryStore::Config{.policy = sess::capacity_policy::unbounded}),
-          on_hydrate_(std::move(on_hydrate)),
-          on_reset_(std::move(on_reset)) {
+          inner_(std::make_shared<sess::MemoryStore>(
+              sess::MemoryStore::Config{.policy = sess::capacity_policy::unbounded})),
+          hooks_(std::move(hooks)),
+          log_(std::move(log)) {
+        log_->inner = inner_;
         asio::io_context seed_ioc;
         asio::co_spawn(
             seed_ioc,
             [this, outbound_next]() -> asio::awaitable<void> {
                 for (sess::seqnum_t s = 1; s < outbound_next; ++s) {
-                    (void)co_await inner_.next_seqnum(sess::direction_t::outbound, true);
+                    (void)co_await inner_->next_seqnum(sess::direction_t::outbound, true);
                 }
             },
             asio::detached);
@@ -696,33 +722,31 @@ public:
     asio::awaitable<fixpp::core::expected_t<void>> store(sess::seqnum_t seq,
                                                          std::span<const std::byte> frame,
                                                          sess::direction_t dir) noexcept override {
-        return inner_.store(seq, frame, dir);
+        return inner_->store(seq, frame, dir);
     }
     asio::awaitable<fixpp::core::expected_t<void>> retrieve(
         sess::seqnum_t begin, sess::seqnum_t end, sess::direction_t dir,
         sess::retrieve_visitor& visitor) noexcept override {
-        return inner_.retrieve(begin, end, dir, visitor);
+        return inner_->retrieve(begin, end, dir, visitor);
     }
     asio::awaitable<fixpp::core::expected_t<sess::seqnum_t>> next_seqnum(
         sess::direction_t dir, bool increment) noexcept override {
-        if (on_hydrate_ && dir == sess::direction_t::inbound && !increment) {
-            auto hook = std::move(on_hydrate_);
-            on_hydrate_ = nullptr;
-            hook();
+        if (hooks_.on_hydrate && dir == sess::direction_t::inbound && !increment) {
+            fire(hooks_.on_hydrate);
             // Answered without yielding, as a store holding the counter in memory may:
             // nothing has been stored inbound yet. The close the hook posted then runs at
             // the next read's leading post.
             return ready(sess::seqnum_min);
         }
-        return inner_.next_seqnum(dir, increment);
+        if (!increment) return inner_->next_seqnum(dir, false);
+        // The close a hook posts runs at the increment's leading post.
+        fire(dir == sess::direction_t::inbound ? hooks_.on_inbound_persist
+                                               : hooks_.on_outbound_persist);
+        return logged_increment(dir);
     }
     asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override {
-        if (on_reset_) {
-            auto hook = std::move(on_reset_);
-            on_reset_ = nullptr;
-            hook();  // the close it posts runs at the reset's leading post
-        }
-        return inner_.reset();
+        fire(hooks_.on_reset);  // the close it posts runs at the reset's leading post
+        return logged_reset();
     }
 
     // close(graceful) awaits this before it writes Disconnected. It yields the strand
@@ -739,26 +763,45 @@ private:
     static asio::awaitable<fixpp::core::expected_t<sess::seqnum_t>> ready(sess::seqnum_t v) {
         co_return v;
     }
+    static void fire(std::function<void()>& hook) {
+        if (!hook) return;
+        auto h = std::move(hook);
+        hook = nullptr;
+        h();
+    }
+    // Logged when the write completes, not when it is issued: the MemoryStore applies
+    // it only after its leading post and its mutex.
+    asio::awaitable<fixpp::core::expected_t<sess::seqnum_t>> logged_increment(
+        sess::direction_t dir) {
+        auto r = co_await inner_->next_seqnum(dir, true);
+        log_->record(dir == sess::direction_t::inbound ? "in+1" : "out+1");
+        co_return r;
+    }
+    asio::awaitable<fixpp::core::expected_t<void>> logged_reset() {
+        auto r = co_await inner_->reset();
+        log_->record("reset");
+        co_return r;
+    }
 
-    sess::MemoryStore inner_;
-    std::function<void()> on_hydrate_;
-    std::function<void()> on_reset_;
+    std::shared_ptr<sess::MemoryStore> inner_;
+    Hooks hooks_;
+    std::shared_ptr<StoreLog> log_;
 };
 
 class HookedStoreFactory final : public sess::MessageStoreFactory {
 public:
     sess::seqnum_t outbound_next = 1;
-    std::function<void()> on_hydrate;
-    std::function<void()> on_reset;
+    HookedStore::Hooks hooks;  // moved into the first store made
+    std::shared_ptr<StoreLog> log = std::make_shared<StoreLog>();
 
     [[nodiscard]] bool yields_persistent_store() const noexcept override { return true; }
     [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<sess::MessageStore>> make(
         std::string_view /*sender*/, std::string_view /*target*/, std::pmr::memory_resource* /*mr*/,
         std::size_t /*max_store_memory_bytes*/,
         asio::any_io_executor /*file_io_executor*/) noexcept override {
+        ++log->stores_made;
         return fixpp::core::expected_t<std::unique_ptr<sess::MessageStore>>{
-            std::make_unique<HookedStore>(outbound_next, std::move(on_hydrate),
-                                          std::move(on_reset))};
+            std::make_unique<HookedStore>(outbound_next, std::move(hooks), log)};
     }
 };
 
@@ -767,9 +810,14 @@ struct LogonCloseCase {
     std::string arm_on = "A";
     std::string peer_logon_extra;  // fields appended to the peer's Logon, SOH-terminated
     bool enable_789 = false;
+    std::optional<sess::session_posture> posture;
+    bool reset_on_logon = false;
+    bool reset_on_disconnect = false;
     sess::seqnum_t store_outbound_next = 0;  // 0 = no store_factory
     bool close_from_hydrate = false;
     bool close_from_reset = false;
+    bool close_from_inbound_persist = false;
+    bool close_from_outbound_persist = false;
     bool cancel_sleeps_before_stop = true;
 };
 
@@ -784,6 +832,10 @@ struct LogonCloseOutcome {
     std::size_t inflight_sleeps_after_settle = 0;
     bool stop_completed = false;
     std::size_t inflight_sleeps_after_stop = 0;
+    // Set when the case has a store: its log, and its counters read after stop().
+    std::shared_ptr<StoreLog> store_log;
+    std::optional<sess::seqnum_t> store_next_inbound;
+    std::optional<sess::seqnum_t> store_next_outbound;
 };
 
 // Space-separated; an FSM state prints as its enum value.
@@ -855,6 +907,7 @@ struct CaseRig {
         std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
     std::shared_ptr<CloseDuringLogonApp> app = std::make_shared<CloseDuringLogonApp>();
     sess::Engine engine{ioc.get_executor(), engine_config()};
+    std::shared_ptr<StoreLog> store_log;  // set by register_case when the case has a store
 
     fixpp::core::EngineConfig engine_config() {
         fixpp::core::EngineConfig cfg;
@@ -882,11 +935,22 @@ struct CaseRig {
         cfg.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", port};
         cfg.transport_send = [](std::span<const std::byte>) {};
         cfg.enable_next_expected_msg_seq_num = c.enable_789;
+        cfg.posture = c.posture;
+        cfg.reset_on_logon = c.reset_on_logon;
+        cfg.reset_on_disconnect = c.reset_on_disconnect;
         if (c.store_outbound_next != 0) {
             auto factory = std::make_shared<HookedStoreFactory>();
             factory->outbound_next = c.store_outbound_next;
-            if (c.close_from_hydrate) factory->on_hydrate = [a = app] { a->post_close(); };
-            if (c.close_from_reset) factory->on_reset = [a = app] { a->post_close(); };
+            factory->log->close_began = [a = app] { return a->seen.close_started; };
+            if (c.close_from_hydrate) factory->hooks.on_hydrate = [a = app] { a->post_close(); };
+            if (c.close_from_reset) factory->hooks.on_reset = [a = app] { a->post_close(); };
+            if (c.close_from_inbound_persist) {
+                factory->hooks.on_inbound_persist = [a = app] { a->post_close(); };
+            }
+            if (c.close_from_outbound_persist) {
+                factory->hooks.on_outbound_persist = [a = app] { a->post_close(); };
+            }
+            store_log = factory->log;
             cfg.store_factory = std::move(factory);
         }
         app->engine = &engine;
@@ -944,6 +1008,23 @@ struct CaseRig {
         stop_fut.get();
         out.stop_completed = true;
         out.inflight_sleeps_after_stop = clock->inflight_count();
+
+        out.store_log = store_log;
+        if (store_log && store_log->inner) {
+            asio::io_context read_ioc;
+            asio::co_spawn(
+                read_ioc,
+                [&]() -> asio::awaitable<void> {
+                    auto in = co_await store_log->inner->next_seqnum(sess::direction_t::inbound,
+                                                                     false);
+                    auto ob = co_await store_log->inner->next_seqnum(sess::direction_t::outbound,
+                                                                     false);
+                    if (in) out.store_next_inbound = *in;
+                    if (ob) out.store_next_outbound = *ob;
+                },
+                asio::detached);
+            read_ioc.run();
+        }
     }
 };
 
@@ -1026,6 +1107,44 @@ void expect_no_admin_after_close(LogonCloseOutcome const& o) {
 void expect_only_close_logout_after_close(LogonCloseOutcome const& o) {
     EXPECT_EQ(o.seen.to_admin_after_close_started, std::vector<std::string>{"5"})
         << "admin frames after close() began: " << joined(o.seen.to_admin_after_close_started);
+}
+
+// The store's counter writes in completion order; `*` marks one completed after close()
+// began.
+std::string store_writes(LogonCloseOutcome const& o) {
+    std::string s;
+    if (!o.store_log) return s;
+    for (auto const& w : o.store_log->writes) {
+        s += w.op;
+        s += w.after_close_began ? "* " : " ";
+    }
+    return s;
+}
+
+// No `op` write completed after close() began.
+void expect_no_store_write_after_close(LogonCloseOutcome const& o, std::string const& op) {
+    ASSERT_TRUE(o.store_log);
+    const bool found =
+        std::any_of(o.store_log->writes.begin(), o.store_log->writes.end(),
+                    [&](StoreLog::Write const& w) { return w.op == op && w.after_close_began; });
+    EXPECT_FALSE(found) << op << " completed after close() began; store writes: "
+                        << store_writes(o);
+}
+
+// close() with reset_on_disconnect resets the store at teardown. The store must end at
+// that reset's post-state, whatever the arm wrote around it: the arm's own peer reset
+// is one reset() and close()'s teardown reset the other, so a single reset() means the
+// teardown reset never ran and the counters prove nothing.
+void expect_store_ends_at_teardown_reset(LogonCloseOutcome const& o) {
+    ASSERT_TRUE(o.store_log);
+    EXPECT_EQ(o.store_log->stores_made, 1);
+    const auto resets = std::count_if(o.store_log->writes.begin(), o.store_log->writes.end(),
+                                      [](StoreLog::Write const& w) { return w.op == "reset"; });
+    EXPECT_EQ(resets, 2) << "store writes: " << store_writes(o);
+    EXPECT_EQ(o.store_next_inbound, std::optional{sess::seqnum_min})
+        << "store writes: " << store_writes(o);
+    EXPECT_EQ(o.store_next_outbound, std::optional{sess::seqnum_min})
+        << "store writes: " << store_writes(o);
 }
 
 }  // namespace
@@ -1119,15 +1238,82 @@ TEST(LogonCloseDuringSuspension, AcceptorCloseDuringHydrate) {
     expect_no_admin_after_close(o);
 }
 
+// The acceptor's posture is production and the peer's Logon carries
+// TestMessageIndicator(464)=Y, so the arm would refuse it with a Logout right after
+// hydrate. close(graceful) is posted from the store's first hydrate read; the store's
+// flush keeps it under way while the arm resumes. Asserts no refusal reaches toAdmin.
+TEST(LogonCloseDuringSuspension, AcceptorCloseDuringHydrateBuildsNoRefusal) {
+    auto o = run_acceptor_case({.mode = sess::close_mode::graceful,
+                                .arm_on = "",
+                                .peer_logon_extra = "464=Y\x01",
+                                .posture = sess::session_posture::production,
+                                .store_outbound_next = 1,
+                                .close_from_hydrate = true});
+    ASSERT_TRUE(o.bound);
+    ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
+    expect_close_owns_teardown(o);
+    expect_no_admin_after_close(o);
+}
+
+// reset_on_logon is set, so the acceptor resets its store before it checks the Logon's
+// sequence number. close(graceful) is posted from that reset(); the store's flush keeps
+// it under way while the arm resumes. Asserts no LogonReceived in the ring.
+TEST(LogonCloseDuringSuspension, AcceptorCloseDuringKnobResetNeverReceivesLogon) {
+    auto o = run_acceptor_case({.mode = sess::close_mode::graceful,
+                                .arm_on = "",
+                                .reset_on_logon = true,
+                                .store_outbound_next = 1,
+                                .close_from_reset = true});
+    ASSERT_TRUE(o.bound);
+    ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
+    expect_close_owns_teardown(o);
+    EXPECT_EQ(std::count(o.ring.begin(), o.ring.end(), sess::fsm_state::LogonReceived), 0)
+        << "ring=" << joined(o.ring);
+    expect_no_admin_after_close(o);
+}
+
+// The peer's Logon carries ResetSeqNumFlag(141)=Y and reset_on_disconnect is set.
+// close(terminal) is posted from the arm's peer reset(), so close()'s teardown reset
+// and the arm's counter writes after its reset share the store. Asserts the store ends
+// at the teardown reset's post-state.
+TEST(LogonCloseDuringSuspension, AcceptorCloseDuringPeerResetStoreEndsAtTeardownReset) {
+    auto o = run_acceptor_case({.mode = sess::close_mode::terminal,
+                                .arm_on = "",
+                                .peer_logon_extra = "141=Y\x01",
+                                .reset_on_disconnect = true,
+                                .store_outbound_next = 1,
+                                .close_from_reset = true});
+    ASSERT_TRUE(o.bound);
+    ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
+    expect_close_owns_teardown(o);
+    expect_store_ends_at_teardown_reset(o);
+}
+
 // The peer's Logon carries ResetSeqNumFlag(141)=Y, so the acceptor resets its store
-// after writing LogonReceived. close(graceful) is posted from that reset(); the store's
-// flush keeps it under way while the arm resumes.
+// after writing LogonReceived, then restores and persists its inbound counter.
+// close(graceful) is posted from that reset(); the store's flush keeps it under way
+// while the arm resumes. Asserts no inbound persist after close() began.
 TEST(LogonCloseDuringSuspension, AcceptorCloseDuringPeerResetBuildsNoReply) {
     auto o = run_acceptor_case({.mode = sess::close_mode::graceful,
                                 .arm_on = "",
                                 .peer_logon_extra = "141=Y\x01",
                                 .store_outbound_next = 1,
                                 .close_from_reset = true});
+    ASSERT_TRUE(o.bound);
+    ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
+    expect_close_owns_teardown(o);
+    expect_only_close_logout_after_close(o);
+    expect_no_store_write_after_close(o, "in+1");
+}
+
+// Same peer Logon; close(graceful) is posted from the inbound persist that follows the
+// 141=Y reset, so the arm resumes after its last counter write, before the reply.
+TEST(LogonCloseDuringSuspension, AcceptorCloseDuringPeerResetPersistBuildsNoReply) {
+    auto o = run_acceptor_case({.mode = sess::close_mode::graceful,
+                                .arm_on = "",
+                                .peer_logon_extra = "141=Y\x01",
+                                .store_outbound_next = 1,
+                                .close_from_inbound_persist = true});
     ASSERT_TRUE(o.bound);
     ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
     expect_close_owns_teardown(o);
@@ -1147,8 +1333,10 @@ TEST(LogonCloseDuringSuspension, InitiatorControlNoCloseReachesActive) {
 }
 
 // Initiator: the peer's Logon-ack carries 141=Y and a 789 above the initiator's next
-// outbound, so the initiator resets its store and then answers the 789 with a Logout.
-// close(graceful) is posted from that reset(); the store's flush keeps it under way.
+// outbound, so the initiator resets its store, restores and persists its inbound
+// counter, and then answers the 789 with a Logout. close(graceful) is posted from that
+// reset(); the store's flush keeps it under way. Asserts no inbound persist after
+// close() began.
 TEST(LogonCloseDuringSuspension, InitiatorCloseDuringPeerResetBuildsNoHonourFrame) {
     auto o = run_initiator_case({.mode = sess::close_mode::graceful,
                                  .arm_on = "",
@@ -1161,6 +1349,60 @@ TEST(LogonCloseDuringSuspension, InitiatorCloseDuringPeerResetBuildsNoHonourFram
     ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
     expect_close_owns_teardown(o);
     expect_no_admin_after_close(o);
+    expect_no_store_write_after_close(o, "in+1");
+}
+
+// Initiator: reset_on_logon is set, so the initiator's own Logon carries 141=Y at
+// seq 1, and the peer's Logon-ack carries 141=Y. After its reset the initiator
+// restores and persists its inbound counter, then its outbound one. close(graceful) is
+// posted from the inbound persist. Asserts no outbound persist after close() began.
+TEST(LogonCloseDuringSuspension, InitiatorCloseDuringInboundRestoreSkipsOutboundRestore) {
+    auto o = run_initiator_case({.mode = sess::close_mode::graceful,
+                                 .arm_on = "",
+                                 .peer_logon_extra = "141=Y\x01",
+                                 .reset_on_logon = true,
+                                 .store_outbound_next = 1,
+                                 .close_from_inbound_persist = true});
+    ASSERT_TRUE(o.bound);
+    ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
+    expect_close_owns_teardown(o);
+    expect_no_admin_after_close(o);
+    expect_no_store_write_after_close(o, "out+1");
+}
+
+// Same, and the peer's Logon-ack also carries a 789 above the initiator's next
+// outbound, which the 789 honour answers with a Logout. close(graceful) is posted from
+// the outbound persist, so the arm resumes after its last counter write.
+TEST(LogonCloseDuringSuspension, InitiatorCloseDuringOutboundRestoreBuildsNoHonourFrame) {
+    auto o = run_initiator_case({.mode = sess::close_mode::graceful,
+                                 .arm_on = "",
+                                 .peer_logon_extra = "141=Y\x01"
+                                                     "789=5\x01",
+                                 .enable_789 = true,
+                                 .reset_on_logon = true,
+                                 .store_outbound_next = 1,
+                                 .close_from_outbound_persist = true});
+    ASSERT_TRUE(o.bound);
+    ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
+    expect_close_owns_teardown(o);
+    expect_no_admin_after_close(o);
+}
+
+// Initiator: the peer's Logon-ack carries 141=Y and reset_on_disconnect is set.
+// close(terminal) is posted from the arm's peer reset(), so close()'s teardown reset
+// and the arm's counter writes after its reset share the store. Asserts the store ends
+// at the teardown reset's post-state.
+TEST(LogonCloseDuringSuspension, InitiatorCloseDuringPeerResetStoreEndsAtTeardownReset) {
+    auto o = run_initiator_case({.mode = sess::close_mode::terminal,
+                                 .arm_on = "",
+                                 .peer_logon_extra = "141=Y\x01",
+                                 .reset_on_disconnect = true,
+                                 .store_outbound_next = 1,
+                                 .close_from_reset = true});
+    ASSERT_TRUE(o.bound);
+    ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
+    expect_close_owns_teardown(o);
+    expect_store_ends_at_teardown_reset(o);
 }
 
 // Initiator: the peer's Logon-ack carries 789=1, below the initiator's next outbound,
