@@ -4,7 +4,7 @@
 //
 // 021-inbound-possdup-origsendingtime T007 — Stage-1 Arm-C/D/E validation tests.
 //
-// Seven test cases:
+// Cases from feature 021 (the full set is the TEST_F blocks below):
 //   1. ArmC_MissingOrigSendingTime     — 43=Y, missing 122 → Reject 371=122/373=1, Active
 //   2. ArmD_OrigSendingTimeAfter52     — 43=Y, 122 > 52 strict → Reject 373=10 + Logout + Disc.
 //   3. Boundary_122Equals52Accepted    — 122 == 52 → not Arm D; session survives (INV-4)
