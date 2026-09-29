@@ -2210,10 +2210,18 @@ set_tests_properties(session_validate_gate_inbound PROPERTIES
 # single-threaded, stateless class §VII.8 groups. session_validate_gate_inbound
 # above is standalone for the same reason. Hook-free: no cell reads a private
 # counter (fixpp#511); NextNumIn is witnessed by the next conformant frame.
+# TIMEOUT is explicit rather than add_threading_test's default: that default is
+# sized for the helper's slowest member, and its comment asks for a re-measure
+# before a slower member joins; this entry is that slower member. Re-derive:
+# time `ctest --test-dir build/<preset> -R '^session_unparseable_frame_disposition$'`
+# on every sanitizer lane /speckit-verify runs and on MSVC, and keep TIMEOUT at
+# roughly 4x the slowest. The CI-only msvc-asan lane is not measurable locally;
+# if this entry times out there, size TIMEOUT from that job's own timing.
 add_threading_test(session_unparseable_frame_disposition
   unparseable_frame_disposition_test.cpp)
 set_tests_properties(session_unparseable_frame_disposition PROPERTIES
-  LABELS "092;session")
+  LABELS "092;session"
+  TIMEOUT 300)
 
 # ── fixpp#215 item 1 — one as_table_view() walk per opened session ───────────
 # W1: open() with no config-supplied snapshot walks the Dictionary exactly ONCE
