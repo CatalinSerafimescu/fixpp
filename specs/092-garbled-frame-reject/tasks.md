@@ -953,11 +953,11 @@ it in 092.
     catches).
   - The fuzz targets named in T068.
   - ⚠️ The §7 full build needs an owner ASK, even as gate evidence.
-- [ ] T079 **`CLAUDE-history.md` entry** (Article XIX), via `phase-implementer`: a newest-first 092
+- [X] T079 **`CLAUDE-history.md` entry** (Article XIX), via `phase-implementer`: a newest-first 092
   entry naming the feature, the PR, `Closes #507`, the owner ruling (revised #423 row 4), C-ABI 1.10
   BREAKING, FR-012's validator errors, FR-019's inbound bound, and the follow-ups fixpp#514, fixpp#515
   and T042's issue. Update `CLAUDE.md`'s "Last merged FEATURE" pointer only at merge.
-- [ ] T080 **PR description.** The body carries:
+- [X] T080 **PR description.** The body carries:
   - the `[const §X.7]` **C-ABI 1.10 BREAKING** declaration: T020's population and classification,
     pointing at the B&L delta;
   - the public C++ deltas (contract C-4): `build_reject_with_text`, `field_fault`, the iterator
