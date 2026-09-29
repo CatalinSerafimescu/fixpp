@@ -15,6 +15,7 @@
 #include <expected>
 #include <fixpp/core/error.hpp>
 #include <fixpp/core/fix_time.hpp>
+#include <limits>
 #include <span>
 #include <utility>
 
@@ -101,6 +102,31 @@ constexpr std::int32_t date_to_days(std::int32_t y, std::uint8_t m, std::uint8_t
     std::uint32_t doy = (((153 * (m > 2 ? m - 3 : m + 9)) + 2) / 5) + d - 1;
     std::uint32_t doe = (yoe * 365) + (yoe / 4) - (yoe / 100) + doy;
     return (era * 146097) + static_cast<std::int32_t>(doe) - 719468;
+}
+
+// ── Range helpers ────────────────────────────────────────────────────────────
+
+// The parse composes utc_time_point's count in std::int64_t.
+static_assert(std::numeric_limits<utc_time_point::rep>::digits ==
+              std::numeric_limits<std::int64_t>::digits);
+
+constexpr std::int64_t kNsPerSec = 1'000'000'000;
+
+// A nanosecond count split, floored, into whole seconds and a sub-second
+// remainder in [0, kNsPerSec).
+struct split_ns {
+    std::int64_t sec;
+    std::int64_t sub;
+};
+
+constexpr split_ns split_floored(std::int64_t ns) noexcept {
+    std::int64_t sec = ns / kNsPerSec;
+    std::int64_t sub = ns % kNsPerSec;
+    if (sub < 0) {
+        --sec;
+        sub += kNsPerSec;
+    }
+    return split_ns{.sec = sec, .sub = sub};
 }
 
 }  // namespace
@@ -327,16 +353,33 @@ constexpr std::int32_t date_to_days(std::int32_t y, std::uint8_t m, std::uint8_t
         ns_sub = frac * scale[fraction_width];
     }
 
-    // Build the epoch nanosecond offset.
+    // Build the epoch second offset.
     const std::int32_t epoch_days = date_to_days(year, month, day);
     const std::int64_t epoch_sec =
         (static_cast<std::int64_t>(epoch_days) * 86400LL) + (hh_i * 3600LL) + (mm_i * 60LL) + ss_i;
 
+    // fixpp#509: the grammar's years reach past both ends of utc_time_point's
+    // nanosecond count. Refuse a timestamp that count cannot hold, comparing
+    // (second, sub-second) against the range ends split the same way, so the
+    // check itself cannot overflow.
+    constexpr split_ns kMax = split_floored(utc_time_point::max().time_since_epoch().count());
+    constexpr split_ns kMin = split_floored(utc_time_point::min().time_since_epoch().count());
+    if (epoch_sec > kMax.sec || (epoch_sec == kMax.sec && ns_sub > kMax.sub)) {
+        return std::unexpected(error::wire_invalid_field_format);
+    }
+    if (epoch_sec < kMin.sec || (epoch_sec == kMin.sec && ns_sub < kMin.sub)) {
+        return std::unexpected(error::wire_invalid_field_format);
+    }
+
     // Compose as nanoseconds. utc_time_point is pinned to nanoseconds, so no
     // duration cast is needed (avoids truncation on libc++ where
-    // system_clock::duration is microseconds).
-    const auto ns_total = std::chrono::nanoseconds{(epoch_sec * 1'000'000'000LL) + ns_sub};
-    return utc_time_point{ns_total};
+    // system_clock::duration is microseconds). A negative second with a fraction
+    // is composed from the next second up: that second's nanosecond product can
+    // lie below min() when the sum does not.
+    const std::int64_t ns_count = (epoch_sec < 0 && ns_sub > 0)
+                                      ? ((epoch_sec + 1) * kNsPerSec) + (ns_sub - kNsPerSec)
+                                      : (epoch_sec * kNsPerSec) + ns_sub;
+    return utc_time_point{std::chrono::nanoseconds{ns_count}};
 }
 
 }  // namespace fixpp::core

@@ -119,6 +119,64 @@ TEST(SendingTimeCheck, FarFutureSendingTime) {
     EXPECT_EQ(r.error(), fixpp::core::error::session_sending_time_accuracy);
 }
 
+// ── fixpp#509: any two representable time points, any max_latency ───────────
+//
+// The distance between two utc_time_points can exceed what a signed nanosecond
+// count holds, and so can a max_latency in nanoseconds. The check must still
+// answer |inbound - now| <= max_latency exactly.
+
+// The widest pair: the true distance is far past 120 s, in either order.
+TEST(SendingTimeCheck, MaxVersusMinIsABreach) {
+    const auto hi = utc_time_point::max();
+    const auto lo = utc_time_point::min();
+    EXPECT_FALSE(fixpp::session::check_sending_time(hi, lo, std::chrono::seconds{120}).has_value());
+    EXPECT_FALSE(fixpp::session::check_sending_time(lo, hi, std::chrono::seconds{120}).has_value());
+}
+
+TEST(SendingTimeCheck, NearTheRangeEndsTheBoundaryIsExact) {
+    using std::chrono::nanoseconds;
+    using std::chrono::seconds;
+    const auto hi = utc_time_point::max();
+    const auto lo = utc_time_point::min();
+    EXPECT_TRUE(
+        fixpp::session::check_sending_time(hi, hi - seconds{120}, seconds{120}).has_value());
+    EXPECT_FALSE(
+        fixpp::session::check_sending_time(hi, hi - seconds{120} - nanoseconds{1}, seconds{120})
+            .has_value());
+    EXPECT_TRUE(
+        fixpp::session::check_sending_time(lo, lo + seconds{120}, seconds{120}).has_value());
+    EXPECT_FALSE(
+        fixpp::session::check_sending_time(lo + seconds{120} + nanoseconds{1}, lo, seconds{120})
+            .has_value());
+}
+
+// A max_latency too large for a signed nanosecond count is still compared exactly.
+// |max - min| is 2^64 - 1 ns, i.e. 18446744073.709551615 s.
+TEST(SendingTimeCheck, HugeMaxLatencyIsComparedExactly) {
+    using std::chrono::seconds;
+    const auto hi = utc_time_point::max();
+    const auto lo = utc_time_point::min();
+    const utc_time_point epoch{};
+    EXPECT_TRUE(fixpp::session::check_sending_time(hi, epoch, seconds{10'000'000'000}).has_value())
+        << "|max - epoch| is below 10^10 s";
+    EXPECT_FALSE(fixpp::session::check_sending_time(hi, lo, seconds{10'000'000'000}).has_value());
+    EXPECT_FALSE(fixpp::session::check_sending_time(hi, lo, seconds{18'446'744'073}).has_value())
+        << "2^64 - 1 ns is more than 18446744073 s";
+    EXPECT_TRUE(fixpp::session::check_sending_time(hi, lo, seconds{18'446'744'074}).has_value())
+        << "2^64 - 1 ns is less than 18446744074 s";
+    EXPECT_TRUE(fixpp::session::check_sending_time(hi, lo, seconds::max()).has_value());
+    EXPECT_TRUE(fixpp::session::check_sending_time(epoch, epoch, seconds::max()).has_value());
+}
+
+// A negative max_latency admits nothing, not even an exact match.
+TEST(SendingTimeCheck, NegativeMaxLatencyIsAlwaysABreach) {
+    const utc_time_point epoch{};
+    EXPECT_FALSE(
+        fixpp::session::check_sending_time(epoch, epoch, std::chrono::seconds{-1}).has_value());
+    EXPECT_FALSE(
+        fixpp::session::check_sending_time(epoch, epoch, std::chrono::seconds::min()).has_value());
+}
+
 // ── Frame builders for integration tests ─────────────────────────────────────
 
 // Build a FIX frame with an explicit SendingTime value.
@@ -291,9 +349,11 @@ struct SendingTimeFixture {
     // epoch seconds from unix = 1704067200
     static constexpr std::int64_t kNowSec = 1704067200;
 
-    SendingTimeFixture() {
+    SendingTimeFixture() : SendingTimeFixture(std::chrono::seconds{kNowSec}) {}
+
+    explicit SendingTimeFixture(std::chrono::seconds now_since_epoch) {
         using namespace std::chrono;
-        auto utc = system_clock::time_point{} + seconds{kNowSec};
+        auto utc = system_clock::time_point{} + now_since_epoch;
         auto stp = fixpp::core::steady_time_point{} + seconds{0};
         clock = std::make_shared<fixpp::core::mock_clock>(utc, stp, ioc.get_executor());
         engine.clock = clock;
@@ -757,6 +817,166 @@ TEST(SendingTimeIntegration, MalformedSendingTimeOnLogonEmitsLogoutOnly) {
         << "MalformedSendingTimeOnLogonEmitsLogoutOnly: Logout must carry Text(58) error";
     EXPECT_EQ(sess.state(), fsm_state::Disconnected)
         << "MalformedSendingTimeOnLogonEmitsLogoutOnly: session must be Disconnected";
+}
+
+// ── fixpp#509: a SendingTime outside the utc_time_point range ────────────────
+//
+// kYear4048 is the SendingTime of the fuzz seed seed_509_sendingtime_year_4048.
+// Its parse must fail, so each state takes its existing unparseable-SendingTime
+// disposition, never one computed from a wrapped time.
+
+constexpr std::string_view kYear4048 = "40480202-00:00:00.000";
+
+// The time a wrapping int64 nanosecond count gives kYear4048, floored to a whole
+// second: computed with std::chrono's calendar and modular unsigned arithmetic,
+// independently of the parser. Floored so the SendingTime the session stamps
+// from this clock is a whole pre-epoch second.
+std::chrono::seconds year4048_wrapped_to_seconds() {
+    using namespace std::chrono;
+    constexpr std::int64_t kNsPerSec = 1'000'000'000;
+    const auto day = sys_days{year{4048} / February / 2};
+    const auto sec = duration_cast<seconds>(day.time_since_epoch()).count();
+    const auto wrapped = static_cast<std::int64_t>(static_cast<std::uint64_t>(sec) *
+                                                   static_cast<std::uint64_t>(kNsPerSec));
+    std::int64_t floor_sec = wrapped / kNsPerSec;
+    if (wrapped % kNsPerSec < 0) {
+        --floor_sec;
+    }
+    return seconds{floor_sec};
+}
+
+// Acceptor: the 038 guard's disposition, Reject(371=52, 373=10) then Disconnected,
+// with no Logon reply.
+void expect_acceptor_logon_refused(SendingTimeFixture& f, const Session& sess, std::size_t before,
+                                   const char* context) {
+    bool found_reject = false;
+    bool found_logon = false;
+    for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
+        auto mt = extract_field(f.transport.sent(i), 35);
+        if (mt == "3" && extract_field(f.transport.sent(i), 371) == "52" &&
+            extract_field(f.transport.sent(i), 373) == "10") {
+            found_reject = true;
+        }
+        if (mt == "A") {
+            found_logon = true;
+        }
+    }
+    EXPECT_TRUE(found_reject) << context << ": must emit Reject(35=3, 371=52, 373=10)";
+    EXPECT_FALSE(found_logon) << context << ": must not answer with a Logon";
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected) << context;
+}
+
+TEST(SendingTimeIntegration, Year4048SendingTimeOnAcceptorLogonIsRefused) {
+    SendingTimeFixture f;
+    auto cfg = f.make_cfg("FIX.4.2");
+    cfg.role = fixpp::session::session_role::acceptor;
+    Session sess(f.engine, cfg);
+
+    auto fut_open = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
+    if (!fixpp::test_support::run_window_then_ready(f.ioc, fut_open, 200ms)) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            f.ioc, *f.clock, "Year4048SendingTimeOnAcceptorLogonIsRefused/open");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "Year4048SendingTimeOnAcceptorLogonIsRefused/open";
+        return;
+    }
+    ASSERT_TRUE(fut_open.get().has_value()) << "open() failed";
+    ASSERT_EQ(sess.state(), fsm_state::NotConnected);
+
+    const std::size_t before = f.transport.sent_count();
+    auto peer_logon = make_frame_with_sending_time("FIX.4.2", "A", 1, "TW", "ISLD", kYear4048,
+                                                   "98=0\x01"
+                                                   "108=30\x01");
+    f.feed(sess, peer_logon);
+
+    expect_acceptor_logon_refused(f, sess, before, "Year4048SendingTimeOnAcceptorLogonIsRefused");
+}
+
+// The clock stands where a wrapped parse would put kYear4048, so only a refused
+// parse keeps the Logon out.
+TEST(SendingTimeIntegration, Year4048SendingTimeOnAcceptorLogonIsRefusedAtTheWrappedTime) {
+    SendingTimeFixture f(year4048_wrapped_to_seconds());
+    auto cfg = f.make_cfg("FIX.4.2");
+    cfg.role = fixpp::session::session_role::acceptor;
+    Session sess(f.engine, cfg);
+
+    auto fut_open = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
+    if (!fixpp::test_support::run_window_then_ready(f.ioc, fut_open, 200ms)) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            f.ioc, *f.clock, "Year4048SendingTimeOnAcceptorLogonIsRefusedAtTheWrappedTime/open");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "Year4048SendingTimeOnAcceptorLogonIsRefusedAtTheWrappedTime/open";
+        return;
+    }
+    ASSERT_TRUE(fut_open.get().has_value()) << "open() failed";
+    ASSERT_EQ(sess.state(), fsm_state::NotConnected);
+
+    const std::size_t before = f.transport.sent_count();
+    auto peer_logon = make_frame_with_sending_time("FIX.4.2", "A", 1, "TW", "ISLD", kYear4048,
+                                                   "98=0\x01"
+                                                   "108=30\x01");
+    f.feed(sess, peer_logon);
+
+    expect_acceptor_logon_refused(f, sess, before,
+                                  "Year4048SendingTimeOnAcceptorLogonIsRefusedAtTheWrappedTime");
+}
+
+// Initiator: the Logon-ack guard names the fault it saw in Text(58).
+TEST(SendingTimeIntegration, Year4048SendingTimeOnLogonAckIsMalformed) {
+    SendingTimeFixture f;
+    auto cfg = f.make_cfg("FIX.4.2");
+    Session sess(f.engine, cfg);
+
+    auto fut = asio::co_spawn(f.ioc, sess.open(), asio::use_future);
+    if (!fixpp::test_support::run_window_then_ready(f.ioc, fut, 200ms)) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            f.ioc, *f.clock, "Year4048SendingTimeOnLogonAckIsMalformed/open");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "Year4048SendingTimeOnLogonAckIsMalformed/open";
+        return;
+    }
+    ASSERT_TRUE(fut.get().has_value()) << "open() failed";
+    ASSERT_EQ(sess.state(), fsm_state::LogonSent);
+
+    const std::size_t before = f.transport.sent_count();
+    auto logon_ack = make_frame_with_sending_time("FIX.4.2", "A", 1, "TW", "ISLD", kYear4048,
+                                                  "98=0\x01"
+                                                  "108=30\x01");
+    f.feed(sess, logon_ack);
+
+    bool found_reject = false;
+    std::string logout_text;
+    bool found_logout = false;
+    for (std::size_t i = before; i < f.transport.sent_count(); ++i) {
+        auto mt = extract_field(f.transport.sent(i), 35);
+        if (mt == "3") {
+            found_reject = true;
+        }
+        if (mt == "5") {
+            found_logout = true;
+            logout_text = extract_field(f.transport.sent(i), 58);
+        }
+    }
+    EXPECT_FALSE(found_reject) << "Logon-ack path emits no standalone Reject";
+    EXPECT_TRUE(found_logout) << "Logon-ack path must emit Logout(35=5)";
+    EXPECT_EQ(logout_text, "SendingTime(52) malformed");
+    EXPECT_EQ(sess.state(), fsm_state::Disconnected);
+}
+
+// Established session: Guard (3)'s Reject(371=52, 373=10), Logout, Disconnected.
+TEST(SendingTimeIntegration, Year4048SendingTimeInActiveRejects) {
+    SendingTimeFixture f;
+    auto cfg = f.make_cfg("FIX.4.2");
+    Session sess(f.engine, cfg);
+    f.open_to_active(sess);
+    ASSERT_EQ(sess.state(), fsm_state::Active);
+
+    const std::size_t before = f.transport.sent_count();
+    auto frame = make_frame_with_sending_time("FIX.4.2", "0", 2, "TW", "ISLD", kYear4048);
+    f.feed(sess, frame);
+
+    assert_reject_then_logout_then_disconnected(f.transport, before, sess,
+                                                "Year4048SendingTimeInActiveRejects");
 }
 
 }  // namespace

@@ -509,5 +509,36 @@ TEST_F(PossDupValidationTest, AtExpected_Valid_ProcessedOnce_Advances) {
     EXPECT_FALSE(any_logout()) << "FQ-2: valid at-expected possdup must NOT emit a Logout";
 }
 
+// ── fixpp#509: an OrigSendingTime outside the utc_time_point range ───────────
+//
+// A 122 whose year is past the int64-nanosecond range is unparseable, so it takes
+// the malformed-122 disposition (Arm C), never a comparison against 52 made with
+// a wrapped time.
+
+TEST_F(PossDupValidationTest, AtExpected_OutOfRangeOrigSendingTime_ArmC) {
+    auto app = std::make_shared<CountingApplication>();
+    engine.application = app;
+
+    auto cfg = make_cfg();
+    Session sess(engine, cfg);
+    drive_to_active(sess);
+    ASSERT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(),
+              static_cast<fixpp::session::seqnum_t>(2));
+
+    // The SendingTime of the fuzz seed seed_509_sendingtime_year_4048.
+    auto frame = make_frame("D", /*seq=*/2, "TW", "ISLD",
+                            "43=Y\x01"
+                            "122=40480202-00:00:00.000\x01");
+    feed(sess, frame);
+
+    ASSERT_TRUE(any_reject()) << "out-of-range 122 must emit Reject(35=3)";
+    auto rj = find_last_reject();
+    EXPECT_EQ(rj.ref_tag_id, "122");
+    EXPECT_EQ(rj.reason, "1");
+    EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active) << "Arm C survives";
+    EXPECT_FALSE(any_logout());
+    EXPECT_EQ(app->from_app_calls, 0) << "a rejected possdup must not reach fromApp";
+}
+
 }  // namespace
 }  // namespace fixpp::session::test

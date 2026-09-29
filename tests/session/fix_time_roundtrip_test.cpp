@@ -684,5 +684,79 @@ TEST(FixTimeParse, Nanos27_RoundTrip) {
         << "nanos roundtrip not lossless; [I-NST-2 / FR-005]";
 }
 
+// ── fixpp#509: a timestamp outside the utc_time_point range is refused ───────
+//
+// utc_time_point counts int64 nanoseconds, so the grammar's year range reaches
+// far past both ends of it. A value outside the range must be refused, not
+// wrapped into a representable time. Each boundary literal below is the first
+// or last representable nanosecond, spelled out independently of the parser;
+// re-derive with python3: divmod(2**63 - 1, 10**9) and divmod(-2**63, 10**9)
+// (floored), then format the seconds part as a UTC calendar time.
+
+expected_t<utc_time_point> parse(std::string_view s) {
+    return fix_string_to_utc_time(std::span<const char>(s.data(), s.size()));
+}
+
+TEST(FixTimeRange, LastRepresentableNanosecondParsesToMax) {
+    auto r = parse("22620411-23:47:16.854775807");
+    ASSERT_TRUE(r.has_value()) << "the last representable nanosecond must parse";
+    EXPECT_EQ(*r, utc_time_point::max());
+}
+
+TEST(FixTimeRange, OneNanosecondPastMaxIsRefused) {
+    auto r = parse("22620411-23:47:16.854775808");
+    ASSERT_FALSE(r.has_value()) << "one ns past utc_time_point::max() must be refused";
+    EXPECT_EQ(r.error(), error::wire_invalid_field_format);
+}
+
+TEST(FixTimeRange, WholeSecondPastMaxIsRefused) {
+    EXPECT_FALSE(parse("22620411-23:47:17").has_value());
+    EXPECT_FALSE(parse("22620411-23:47:17.000000000").has_value());
+}
+
+TEST(FixTimeRange, FirstRepresentableNanosecondParsesToMin) {
+    auto r = parse("16770921-00:12:43.145224192");
+    ASSERT_TRUE(r.has_value()) << "the first representable nanosecond must parse";
+    EXPECT_EQ(*r, utc_time_point::min());
+}
+
+TEST(FixTimeRange, OneNanosecondBeforeMinIsRefused) {
+    auto r = parse("16770921-00:12:43.145224191");
+    ASSERT_FALSE(r.has_value()) << "one ns before utc_time_point::min() must be refused";
+    EXPECT_EQ(r.error(), error::wire_invalid_field_format);
+}
+
+TEST(FixTimeRange, WholeSecondBelowMinIsRefused) {
+    // Same second as min(), but a zero fraction lies before it.
+    EXPECT_FALSE(parse("16770921-00:12:43").has_value());
+}
+
+// The second that holds min(): a fraction past min()'s must compose without an
+// intermediate below the range (the seconds part alone is below it).
+TEST(FixTimeRange, SubSecondInMinSecondComposesExactly) {
+    auto r = parse("16770921-00:12:43.500000000");
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r->time_since_epoch().count(), -9'223'372'036'500'000'000LL);
+}
+
+TEST(FixTimeRange, FirstWholeSecondAfterMinParses) {
+    auto r = parse("16770921-00:12:44");
+    ASSERT_TRUE(r.has_value());
+    EXPECT_EQ(r->time_since_epoch().count(), -9'223'372'036'000'000'000LL);
+}
+
+TEST(FixTimeRange, GrammarExtremesAreRefused) {
+    EXPECT_FALSE(parse("00000101-00:00:00").has_value()) << "lowest year the grammar can spell";
+    EXPECT_FALSE(parse("99991231-23:59:59.999999999").has_value())
+        << "highest year the grammar can spell";
+}
+
+// The SendingTime of the fuzz seed seed_509_sendingtime_year_4048.
+TEST(FixTimeRange, Year4048IsRefused) {
+    auto r = parse("40480202-00:00:00.000");
+    ASSERT_FALSE(r.has_value()) << "must be refused, not wrapped to a time in the past";
+    EXPECT_EQ(r.error(), error::wire_invalid_field_format);
+}
+
 }  // namespace
 }  // namespace fixpp::core::test
