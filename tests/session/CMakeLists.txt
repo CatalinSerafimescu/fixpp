@@ -86,13 +86,14 @@ function(add_threading_test name)
   # Hang backstop: these async/threading tests `co_spawn(...use_future)` then
   # block on `fut.get()`. A lost-wake or missed cross-thread completion makes
   # get() block forever and (under serial `ctest --output-on-failure`) wedges
-  # the whole suite to CI's 6 h ceiling. The slowest legit run in this group is
-  # `session_test_request_id_cross_session_race`, MEASURED at ~6.9 s under asan and
-  # ~7.3 s under tsan since #317 raised its sample to SC-003's 10^4 (it was
-  # sub-second before that). 120 s therefore leaves ~16x measured headroom while
-  # still failing a true deadlock fast and letting ctest report which test hung +
-  # continue. Re-measure before adding a slower member rather than assuming the
-  # margin is still "pure".
+  # the whole suite to CI's 6 h ceiling. The 120 s default fails a true deadlock
+  # fast and lets ctest report which test hung and continue. It holds only while
+  # it stays well above the slowest member's legit run time on the slowest
+  # sanitizer lane; a member that needs more sets its own TIMEOUT after this
+  # call rather than raising the shared default. To re-derive, time the members
+  # on each sanitizer lane, e.g.
+  #   ctest --test-dir build/<preset> -R '<member names>' --output-on-failure
+  # and read the per-test times it prints.
   set_tests_properties(${name} PROPERTIES TIMEOUT 120)
 endfunction()
 

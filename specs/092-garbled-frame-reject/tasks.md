@@ -920,7 +920,7 @@ it in 092.
 
 ### Close-out checks
 
-- [ ] T076 Via `phase-implementer` for the TIMEOUT edit: measure `session_unparseable_frame_disposition`'s wall time on every sanitizer lane
+- [X] T076 Via `phase-implementer` for the TIMEOUT edit: measure `session_unparseable_frame_disposition`'s wall time on every sanitizer lane
   `/speckit-verify` runs and on MSVC, and set its TIMEOUT from the slowest with headroom (the
   inherited 120 s is a threading-test default; `wire_dict_tests` needed 1800 s on msvc-asan). Then run T007's label gate; it must pass (the labelled set equals the manifest, every entry
   registered). Then `ctest --test-dir build/linux-clang-debug -L '^092$' --output-on-failure`, all
