@@ -941,7 +941,7 @@ it in 092.
   during implementation (a deviation recorded in the evidence file). Derive the population by a
   complement grep over `specs/092-garbled-frame-reject/checklists/*.md` for every FR, C-2 row and
   invariant id the evidence file records a deviation against.
-- [ ] T078 Run `/speckit-verify` (mandatory after `/speckit-implement`, Article XVII §8). It produces
+- [X] T078 Run `/speckit-verify` (mandatory after `/speckit-implement`, Article XVII §8). It produces
   `.specify/decisions/092-garbled-frame-reject-verify.md`, which cites the evidence file.
   - Its full preset matrix (ASan, UBSan, TSan, …) and the MSVC leg.
   - Coverage on `linux-clang-coverage`, `.profraw` purged first: every changed line in every file of
