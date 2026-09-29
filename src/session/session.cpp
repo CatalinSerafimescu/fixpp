@@ -2444,9 +2444,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
     // matters is close(), which an application can post from a callback the arm fires
     // (Engine::lookup() already returns the session) or from another thread, and which
     // owns the teardown once it begins. The arm then returns success: the frame was
-    // handled and the session is closed, as in the Disconnected row. It writes no
-    // state, sends no frame and spawns no liveness loop. `closing` is the signal
-    // because close() sets it before it can yield the strand, while a graceful
+    // handled and the session is closed, as in the Disconnected row. `closing` is the
+    // signal because close() sets it before it can yield the strand, while a graceful
     // close() leaves the FSM in the arm's state until its phase 1 writes. The FSM term
     // covers `closed_drained` too: close() writes Disconnected before it gets there.
     // `never_opened` is not a close.

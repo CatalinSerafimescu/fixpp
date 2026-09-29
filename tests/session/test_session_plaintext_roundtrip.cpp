@@ -778,7 +778,9 @@ struct LogonCloseOutcome {
     bool settled = false;
     CloseDuringLogonApp::Observed seen;
     std::optional<sess::fsm_state> state_after_settle;
-    std::vector<sess::fsm_state> ring;  // < 16 writes: physical order == write order
+    // Physical order is write order only while the ring has not wrapped; the capture
+    // checks it.
+    std::vector<sess::fsm_state> ring;
     std::size_t inflight_sleeps_after_settle = 0;
     bool stop_completed = false;
     std::size_t inflight_sleeps_after_stop = 0;
@@ -917,6 +919,8 @@ struct CaseRig {
             out.state_after_settle = app->held->state();
             auto ring = app->held->fsm_visit_history();
             out.ring.assign(ring.begin(), ring.end());
+            EXPECT_LT(out.ring.size(), 16U)
+                << "the state ring wrapped, so its physical order is not write order";
         }
 
         if (c.cancel_sleeps_before_stop) {
