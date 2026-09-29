@@ -140,10 +140,10 @@ inbound frames end an established session. No symbol or code changes. The carrie
   Reject and advance a frame whose MsgType is not third, against ruling row 1. The second changed
   fault-free frames: a duplicate 34 went from delivered to too-low (research R-1). The scan records
   the first 34 and the positional 35 in fault-only members instead.
-- **C-ABI witnesses beyond the Logon refusal.** The T020 ruling relies on the C++ session cells for
-  the other BREAKING effects (D-3, the late-site close, the seqnum_max close, L-1, L-2 and
-  liveness), because the C observers read the session state through the thin `src/capi` layer. This
-  follows 091's 1.9 precedent. Disclosed as `L-092-12`; the owner may override it.
+- **C-ABI witnesses for every BREAKING effect.** The T020 ruling relies on the C++ session cells for
+  the effects without C-ABI cells, because the C observers read the session state through the thin
+  `src/capi` layer. This follows 091's 1.9 precedent. Which effects have C-ABI cells is stated in
+  `L-092-12`.
 
 ⚠️ **Frozen records that now say the wrong thing**, flagged here and not edited: #423's ruling
 table, row 4 ("garbled … no Reject, no advance"). Row 1's "Ignore … Unchanged" also describes a

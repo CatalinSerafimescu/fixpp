@@ -239,10 +239,9 @@ state.
   NextNumIn past its maximum used to wrap it to 0; now the session ends. It is declared on the same
   observers.
 
-**Rejected: C witnesses for every effect.** Only the Logon refusal has C cells
-(`CapiLogonMalformedTag.*`, on both roles and every observer). The other BREAKING effects rely on
-the C++ session cells, because the C observers read the FSM through the thin `src/capi` layer.
-091 declared 1.9 the same way. This is disclosed (`L-092-12`) and open to an owner override.
+**Rejected: C witnesses for every effect.** The BREAKING effects without C cells rely on the C++
+session cells, because the C observers read the FSM through the thin `src/capi` layer. Which
+effects have C cells is stated in `L-092-12`. 091 declared 1.9 the same way.
 
 Re-derive: `grep -n '1\.10' include/fix/c_api/*.h`, and re-run R-11's recipe at the head you are
 reading.

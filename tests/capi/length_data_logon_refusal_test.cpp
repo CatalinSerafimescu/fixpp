@@ -67,6 +67,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <ostream>
 #include <span>
 #include <string>
 #include <string_view>
@@ -250,6 +251,10 @@ struct Delivery {
     std::string cl_ord_id;
     bool operator==(Delivery const&) const = default;
 };
+
+void PrintTo(Delivery const& d, std::ostream* os) {
+    *os << "{34=" << d.seq_num << ", 11=" << d.cl_ord_id << "}";
+}
 
 struct Counts {
     std::atomic<int> received{0};
