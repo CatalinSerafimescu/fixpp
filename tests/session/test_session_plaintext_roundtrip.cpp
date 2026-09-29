@@ -38,7 +38,13 @@
 #include <fixpp/core/fix_time.hpp>
 #include <fixpp/core/system_clock_source.hpp>
 #include <fixpp/session/application.hpp>
+#include <fixpp/session/direction.hpp>
 #include <fixpp/session/engine.hpp>
+#include <fixpp/session/memory_store.hpp>
+#include <fixpp/session/message_store.hpp>
+#include <fixpp/session/message_store_factory.hpp>
+#include <fixpp/session/retrieve_visitor.hpp>
+#include <fixpp/session/seqnum.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_event.hpp>
@@ -47,10 +53,14 @@
 #include <fixpp/transport/endpoint.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
+#include <functional>
 #include <future>
+#include <memory>
+#include <memory_resource>
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "support/minimal_dictionary.hpp"
@@ -58,7 +68,7 @@
 
 // ── #289: bounded pumps ──────────────────────────────────────────────
 //
-// Both census sites in this file (the two `/stop` windows) use `run_window_then_ready` plus a
+// The round-trip tests' two `/stop` windows use `run_window_then_ready` plus a
 // miss-branch drain (tests/support/pump_until_ready.hpp). The window is PRESERVED: the hazard #289
 // names is the UNCONDITIONAL `get()`, not the fixed window.
 //
@@ -587,35 +597,38 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogonLogout) {
            "(possibly the session disconnected for another reason before Logout).";
 }
 
-// ── #518 probe: a close() the application posts while the acceptor's reply Logon
-// is in flight ────────────────────────────────────────────────────────────────
+// ── fixpp#518: a close() that runs while a Logon arm is suspended ─────────────
 //
-// toAdmin fires synchronously just before the acceptor's reply Logon is stored and
-// written. The application looks the session up through the public Engine::lookup()
-// and posts Session::close(mode) onto its executor. asio::post, not co_spawn: the
-// vendored co_spawn DISPATCHES, so on the session strand it would run close() inline
-// inside toAdmin instead of queueing it behind the reply. No store is parked: the
-// session runs the engine's default store over a real loopback socket.
+// The application reaches the session through the public Engine::lookup() from a
+// toAdmin that fires inside a Logon arm, and posts Session::close(mode) onto the
+// session's executor. asio::post, not co_spawn: the vendored co_spawn DISPATCHES, so
+// on the session strand it would run close() inline inside toAdmin instead of
+// queueing it behind the arm's next suspension. A close() that ran while the arm was
+// suspended owns the teardown: the arm must not write a state over close()'s
+// Disconnected, fire onLogon, emit another admin frame, or spawn a liveness loop that
+// close() has already joined past. No store is parked: each cell runs over a real
+// loopback socket, and the stores below yield only where a MemoryStore does.
 namespace {
 
-struct ReplyCloseProbe final : fixpp::session::Application {
-    fixpp::session::Engine* engine = nullptr;
-    fixpp::session::SessionId id;
-    std::optional<fixpp::session::close_mode> mode;  // nullopt = control arm, no close
-    std::shared_ptr<fixpp::session::Session> held;
+namespace sess = fixpp::session;
+
+struct CloseDuringLogonApp final : sess::Application {
+    sess::Engine* engine = nullptr;
+    sess::SessionId id;
+    std::optional<sess::close_mode> mode;  // nullopt = control, no close
+    std::string arm_on;                    // toAdmin MsgType that posts the close; "" = none
+    std::shared_ptr<sess::Session> held;
     bool armed = false;
     bool lookup_non_null = false;
     bool close_started = false;
     bool close_returned = false;
     bool close_ok = false;
-    std::optional<fixpp::session::fsm_state> state_at_close_return;
+    std::optional<sess::fsm_state> state_at_close_return;
     int on_logon = 0;
-    int on_logon_after_close_started = 0;
+    std::vector<std::string> to_admin_after_close_started;
 
-    void toAdmin(const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
-                 const fixpp::session::SessionId& /*sid*/) override {
-        // The acceptor's first admin emit is its reply Logon.
-        if (armed) return;
+    // Look the session up and post close(mode) onto its executor.
+    void post_close() {
         armed = true;
         held = engine->lookup(id);
         lookup_non_null = held != nullptr;
@@ -635,63 +648,308 @@ struct ReplyCloseProbe final : fixpp::session::Application {
         });
     }
 
-    void onLogon(const fixpp::session::SessionId& /*sid*/) override {
-        ++on_logon;
-        if (close_started) ++on_logon_after_close_started;
+    void toAdmin(const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg,
+                 const sess::SessionId& /*sid*/) override {
+        if (close_started) to_admin_after_close_started.emplace_back(msg.msg_type());
+        if (!held) held = engine->lookup(id);  // the control cell reads the state through it
+        if (armed || arm_on.empty() || msg.msg_type() != arm_on) return;
+        post_close();
+    }
+
+    void onLogon(const sess::SessionId& /*sid*/) override { ++on_logon; }
+};
+
+// A MemoryStore that reports itself persistent, so the session hydrates from it and
+// persists into it. Its outbound counter can start past 1, and it can run a hook on
+// the session's first inbound hydrate read. The hook stands in for a close() posted
+// from another thread.
+class HookedStore final : public sess::MessageStore {
+public:
+    HookedStore(sess::seqnum_t outbound_next, std::function<void()> on_hydrate)
+        : inner_(sess::MemoryStore::Config{.policy = sess::capacity_policy::unbounded}),
+          on_hydrate_(std::move(on_hydrate)) {
+        asio::io_context seed_ioc;
+        asio::co_spawn(
+            seed_ioc,
+            [this, outbound_next]() -> asio::awaitable<void> {
+                for (sess::seqnum_t s = 1; s < outbound_next; ++s) {
+                    (void)co_await inner_.next_seqnum(sess::direction_t::outbound, true);
+                }
+            },
+            asio::detached);
+        seed_ioc.run();
+    }
+
+    asio::awaitable<fixpp::core::expected_t<void>> store(sess::seqnum_t seq,
+                                                         std::span<const std::byte> frame,
+                                                         sess::direction_t dir) noexcept override {
+        return inner_.store(seq, frame, dir);
+    }
+    asio::awaitable<fixpp::core::expected_t<void>> retrieve(
+        sess::seqnum_t begin, sess::seqnum_t end, sess::direction_t dir,
+        sess::retrieve_visitor& visitor) noexcept override {
+        return inner_.retrieve(begin, end, dir, visitor);
+    }
+    asio::awaitable<fixpp::core::expected_t<sess::seqnum_t>> next_seqnum(
+        sess::direction_t dir, bool increment) noexcept override {
+        if (on_hydrate_ && dir == sess::direction_t::inbound && !increment) {
+            auto hook = std::move(on_hydrate_);
+            on_hydrate_ = nullptr;
+            hook();
+            // Answered without yielding, as a store holding the counter in memory may:
+            // nothing has been stored inbound yet. The close the hook posted then runs at
+            // the next read's leading post.
+            return ready(sess::seqnum_min);
+        }
+        return inner_.next_seqnum(dir, increment);
+    }
+    asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override {
+        return inner_.reset();
+    }
+
+private:
+    static asio::awaitable<fixpp::core::expected_t<sess::seqnum_t>> ready(sess::seqnum_t v) {
+        co_return v;
+    }
+
+    sess::MemoryStore inner_;
+    std::function<void()> on_hydrate_;
+};
+
+class HookedStoreFactory final : public sess::MessageStoreFactory {
+public:
+    sess::seqnum_t outbound_next = 1;
+    std::function<void()> on_hydrate;
+
+    [[nodiscard]] bool yields_persistent_store() const noexcept override { return true; }
+    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<sess::MessageStore>> make(
+        std::string_view /*sender*/, std::string_view /*target*/, std::pmr::memory_resource* /*mr*/,
+        std::size_t /*max_store_memory_bytes*/,
+        asio::any_io_executor /*file_io_executor*/) noexcept override {
+        return fixpp::core::expected_t<std::unique_ptr<sess::MessageStore>>{
+            std::make_unique<HookedStore>(outbound_next, std::move(on_hydrate))};
     }
 };
 
-struct ReplyCloseOutcome {
+struct LogonCloseCase {
+    std::optional<sess::close_mode> mode;
+    std::string arm_on = "A";
+    std::string peer_logon_extra;  // fields appended to the peer's Logon, SOH-terminated
+    bool enable_789 = false;
+    sess::seqnum_t store_outbound_next = 0;  // 0 = no store_factory
+    bool close_from_hydrate = false;
+    bool cancel_sleeps_before_stop = true;
+};
+
+struct LogonCloseOutcome {
     bool bound = false;
     bool settled = false;
     bool lookup_non_null = false;
     bool close_started = false;
     bool close_returned = false;
     bool close_ok = false;
-    std::optional<fixpp::session::fsm_state> state_at_close_return;
-    std::optional<fixpp::session::fsm_state> state_after_settle;
-    std::vector<fixpp::session::fsm_state> ring;  // < 16 writes: physical order == write order
+    std::optional<sess::fsm_state> state_at_close_return;
+    std::optional<sess::fsm_state> state_after_settle;
+    std::vector<sess::fsm_state> ring;  // < 16 writes: physical order == write order
     int on_logon = 0;
-    int on_logon_after_close_started = 0;
+    std::vector<std::string> to_admin_after_close_started;
     std::size_t inflight_sleeps_after_settle = 0;
+    bool stop_completed = false;
+    std::size_t inflight_sleeps_after_stop = 0;
 };
 
-std::string ring_text(std::vector<fixpp::session::fsm_state> const& ring) {
+std::string ring_text(std::vector<sess::fsm_state> const& ring) {
     std::string s;
     for (auto st : ring) s += std::to_string(static_cast<int>(st)) + " ";
     return s;
 }
 
-ReplyCloseOutcome run_reply_close_probe(std::optional<fixpp::session::close_mode> mode) {
-    ReplyCloseOutcome out;
+std::string types_text(std::vector<std::string> const& types) {
+    std::string s;
+    for (auto const& t : types) s += t + " ";
+    return s;
+}
+
+// True iff a state other than Disconnected is written after a Disconnected.
+bool written_after_disconnected(std::vector<sess::fsm_state> const& ring) {
+    bool seen_disc = false;
+    for (auto st : ring) {
+        if (st == sess::fsm_state::Disconnected) {
+            seen_disc = true;
+        } else if (seen_disc) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// A Logon from `sender` with `extra` fields appended after HeartBtInt(108).
+std::vector<std::byte> make_logon_frame_with(std::string_view sender, std::string_view target,
+                                             std::string_view extra) {
+    std::string body;
+    body +=
+        "35=A\x01"
+        "34=1\x01";
+    body += "49=" + std::string(sender) + "\x01";
+    body += "52=" + utc_now_fix_timestamp() + "\x01";
+    body += "56=" + std::string(target) + "\x01";
+    body +=
+        "98=0\x01"
+        "108=30\x01";
+    body += extra;
+    return make_fix_frame("FIX.4.2", body);
+}
+
+// Raw peer initiator: connect, send `logon`, hold the socket open.
+asio::awaitable<void> run_raw_logon_initiator(asio::io_context& ioc, uint16_t port,
+                                              std::vector<std::byte> logon) {
+    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+    try {
+        asio::ip::tcp::socket sock{ioc};
+        asio::error_code ec;
+        co_await sock.async_connect({asio::ip::make_address("127.0.0.1"), port},
+                                    asio::redirect_error(asio::use_awaitable, ec));
+        if (ec) co_return;
+        co_await asio::async_write(sock, asio::buffer(logon.data(), logon.size()),
+                                   asio::redirect_error(asio::use_awaitable, ec));
+        asio::steady_timer t{ioc};
+        t.expires_after(kInitiatorHold);
+        co_await t.async_wait(asio::redirect_error(asio::use_awaitable, ec));
+        sock.close(ec);
+    } catch (...) {
+    }
+}
+
+// Raw peer acceptor: accept one connection, read the initiator's Logon up to the end
+// of its CheckSum field, answer with `reply`, hold the socket open.
+asio::awaitable<void> run_raw_logon_acceptor(asio::io_context& ioc, asio::ip::tcp::acceptor& acc,
+                                             std::vector<std::byte> reply) {
+    co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+    try {
+        asio::ip::tcp::socket sock{ioc};
+        asio::error_code ec;
+        co_await acc.async_accept(sock, asio::redirect_error(asio::use_awaitable, ec));
+        if (ec) co_return;
+        std::string got;
+        std::array<char, 1024> buf{};
+        const auto complete = [&got] {
+            const auto cs = got.find(
+                "\x01"
+                "10=");
+            return cs != std::string::npos && got.find('\x01', cs + 1) != std::string::npos;
+        };
+        while (!complete()) {
+            const std::size_t n = co_await sock.async_read_some(
+                asio::buffer(buf), asio::redirect_error(asio::use_awaitable, ec));
+            if (ec) co_return;
+            got.append(buf.data(), n);
+        }
+        co_await asio::async_write(sock, asio::buffer(reply.data(), reply.size()),
+                                   asio::redirect_error(asio::use_awaitable, ec));
+        asio::steady_timer t{ioc};
+        t.expires_after(kInitiatorHold);
+        co_await t.async_wait(asio::redirect_error(asio::use_awaitable, ec));
+        sock.close(ec);
+    } catch (...) {
+    }
+}
+
+sess::SessionConfig make_case_config(sess::session_role role, std::string sender,
+                                     std::string target, asio::any_io_executor ex, uint16_t port,
+                                     LogonCloseCase const& c) {
+    sess::SessionConfig cfg;
+    cfg.sender_comp_id = std::move(sender);
+    cfg.target_comp_id = std::move(target);
+    cfg.begin_string = "FIX.4.2";
+    cfg.role = role;
+    cfg.executor_override = std::move(ex);
+    cfg.security_profile = sess::SecurityProfile{sess::SecurityProfile::kind::insecure_plain_tcp};
+    cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
+    cfg.reset_seqnum_policy_field = sess::reset_seqnum_policy::bilateral_lenient;
+    cfg.heartbeat_interval = std::chrono::seconds{30};
+    cfg.logout_disconnect_timeout_ms = 500;
+    cfg.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", port};
+    cfg.transport_send = [](std::span<const std::byte>) {};
+    cfg.enable_next_expected_msg_seq_num = c.enable_789;
+    return cfg;
+}
+
+// Settle, capture, then stop the engine. Settled: the close (if any) returned, or the
+// control session reached Active; the extra window lets anything queued behind it run.
+void settle_capture_and_stop(asio::io_context& ioc, sess::Engine& engine,
+                             fixpp::core::system_clock_source& clock, CloseDuringLogonApp& app,
+                             LogonCloseCase const& c, LogonCloseOutcome& out) {
+    out.settled = fixpp::test_support::pump_until(
+        ioc,
+        [&] {
+            if (!app.held) return false;
+            if (c.mode) return app.close_returned;
+            return app.held->state() == sess::fsm_state::Active;
+        },
+        kStateBudget, fixpp::test_support::kPumpSlice, "LogonCloseDuringSuspension/settle");
+    ioc.run_for(50ms);
+    ioc.restart();
+
+    out.lookup_non_null = app.lookup_non_null;
+    out.close_started = app.close_started;
+    out.close_returned = app.close_returned;
+    out.close_ok = app.close_ok;
+    out.state_at_close_return = app.state_at_close_return;
+    out.on_logon = app.on_logon;
+    out.to_admin_after_close_started = app.to_admin_after_close_started;
+    out.inflight_sleeps_after_settle = clock.inflight_count();
+    if (app.held) {
+        out.state_after_settle = app.held->state();
+        auto ring = app.held->fsm_visit_history();
+        out.ring.assign(ring.begin(), ring.end());
+    }
+
+    if (c.cancel_sleeps_before_stop) {
+        // Wake any sleeper so a loop parked past close() cannot outlive the Session
+        // that stop() frees; the no-cancel cell leaves that to stop() alone.
+        clock.cancel_sleeps();
+        ioc.run_for(100ms);
+        ioc.restart();
+    }
+    app.held.reset();
+    auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
+    if (!fixpp::test_support::run_window_then_ready(ioc, stop_fut, kStopWindow,
+                                                    "LogonCloseDuringSuspension/stop")) {
+        fixpp::test_support::cancel_and_drain_or_report(ioc, clock,
+                                                        "LogonCloseDuringSuspension/stop");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "LogonCloseDuringSuspension/stop";
+        return;
+    }
+    stop_fut.get();
+    out.stop_completed = true;
+    out.inflight_sleeps_after_stop = clock.inflight_count();
+}
+
+// Plain-TCP Engine acceptor; a raw peer sends a Logon carrying `c.peer_logon_extra`.
+LogonCloseOutcome run_acceptor_case(LogonCloseCase const& c) {
+    LogonCloseOutcome out;
     asio::io_context ioc;
     auto clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
-    auto app = std::make_shared<ReplyCloseProbe>();
+    auto app = std::make_shared<CloseDuringLogonApp>();
     fixpp::core::EngineConfig eng_cfg;
     eng_cfg.executor = ioc.get_executor();
     eng_cfg.clock = clock;
     eng_cfg.application = app;
-    fixpp::session::Engine engine{ioc.get_executor(), std::move(eng_cfg)};
+    sess::Engine engine{ioc.get_executor(), std::move(eng_cfg)};
 
-    fixpp::session::SessionConfig acc_cfg;
-    acc_cfg.sender_comp_id = "PLAIN-ACCEPTOR";
-    acc_cfg.target_comp_id = "PLAIN-INITIATOR";
-    acc_cfg.begin_string = "FIX.4.2";
-    acc_cfg.role = fixpp::session::session_role::acceptor;
-    acc_cfg.executor_override = ioc.get_executor();
-    acc_cfg.security_profile =
-        fixpp::session::SecurityProfile{fixpp::session::SecurityProfile::kind::insecure_plain_tcp};
-    acc_cfg.dictionary = fixpp::test_support::make_minimal_dictionary();
-    acc_cfg.reset_seqnum_policy_field = fixpp::session::reset_seqnum_policy::bilateral_lenient;
-    acc_cfg.heartbeat_interval = std::chrono::seconds{30};
-    acc_cfg.logout_disconnect_timeout_ms = 500;
-    acc_cfg.reconnect_endpoint = fixpp::transport::Endpoint{"127.0.0.1", 0};
-    acc_cfg.transport_send = [](std::span<const std::byte>) {};
-
+    auto cfg = make_case_config(sess::session_role::acceptor, "PLAIN-ACCEPTOR", "PLAIN-INITIATOR",
+                                ioc.get_executor(), 0, c);
+    if (c.store_outbound_next != 0) {
+        auto factory = std::make_shared<HookedStoreFactory>();
+        factory->outbound_next = c.store_outbound_next;
+        if (c.close_from_hydrate) factory->on_hydrate = [app] { app->post_close(); };
+        cfg.store_factory = std::move(factory);
+    }
     app->engine = &engine;
-    app->id = fixpp::session::SessionId::from_config(acc_cfg);
-    app->mode = mode;
-    if (!engine.register_session(std::move(acc_cfg)).has_value()) return out;
+    app->id = sess::SessionId::from_config(cfg);
+    app->mode = c.mode;
+    app->arm_on = c.arm_on;
+    if (!engine.register_session(std::move(cfg)).has_value()) return out;
     if (!engine.start().has_value()) return out;
 
     uint16_t port = 0;
@@ -701,119 +959,186 @@ ReplyCloseOutcome run_reply_close_probe(std::optional<fixpp::session::close_mode
             port = engine.acceptor_bound_endpoint(app->id).port;
             return port != 0;
         },
-        kStateBudget, fixpp::test_support::kPumpSlice, "ReplyCloseProbe/bind");
+        kStateBudget, fixpp::test_support::kPumpSlice, "LogonCloseDuringSuspension/bind");
     out.bound = port != 0;
     if (out.bound) {
-        asio::co_spawn(ioc, run_plain_initiator(ioc, port, "PLAIN-INITIATOR", "PLAIN-ACCEPTOR"),
-                       asio::detached);
-        // Settled: the close (if any) returned, and the Logon exchange left
-        // LogonReceived — so the reply arm has run to its end.
-        out.settled = fixpp::test_support::pump_until(
+        asio::co_spawn(
             ioc,
-            [&] {
-                if (!app->held) return false;
-                if (app->mode && !app->close_returned) return false;
-                return app->held->state() != fixpp::session::fsm_state::LogonReceived &&
-                       app->held->state() != fixpp::session::fsm_state::NotConnected;
-            },
-            kStateBudget, fixpp::test_support::kPumpSlice, "ReplyCloseProbe/settle");
-        // A few more slices so anything queued behind the settle runs.
-        ioc.run_for(50ms);
-        ioc.restart();
+            run_raw_logon_initiator(
+                ioc, port,
+                make_logon_frame_with("PLAIN-INITIATOR", "PLAIN-ACCEPTOR", c.peer_logon_extra)),
+            asio::detached);
     }
-
-    out.lookup_non_null = app->lookup_non_null;
-    out.close_started = app->close_started;
-    out.close_returned = app->close_returned;
-    out.close_ok = app->close_ok;
-    out.state_at_close_return = app->state_at_close_return;
-    out.on_logon = app->on_logon;
-    out.on_logon_after_close_started = app->on_logon_after_close_started;
-    out.inflight_sleeps_after_settle = clock->inflight_count();
-    if (app->held) {
-        out.state_after_settle = app->held->state();
-        auto ring = app->held->fsm_visit_history();
-        out.ring.assign(ring.begin(), ring.end());
-    }
-
-    // Wake any sleeper (an orphaned liveness loop would otherwise outlive the
-    // Session that stop() frees), then release the lease and stop.
-    clock->cancel_sleeps();
-    ioc.run_for(100ms);
-    ioc.restart();
-    app->held.reset();
-    auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
-    if (!fixpp::test_support::run_window_then_ready(ioc, stop_fut, kStopWindow,
-                                                    "ReplyCloseProbe/stop")) {
-        fixpp::test_support::cancel_and_drain_or_report(ioc, *clock, "ReplyCloseProbe/stop");
-        ADD_FAILURE() << fixpp::test_support::kWindowMiss << "ReplyCloseProbe/stop";
-        return out;
-    }
-    stop_fut.get();
+    settle_capture_and_stop(ioc, engine, *clock, *app, c, out);
     return out;
 }
 
-// True iff an Active write follows a Disconnected write in the ring.
-bool active_after_disconnected(std::vector<fixpp::session::fsm_state> const& ring) {
-    bool seen_disc = false;
-    for (auto st : ring) {
-        if (st == fixpp::session::fsm_state::Disconnected) seen_disc = true;
-        if (seen_disc && st == fixpp::session::fsm_state::Active) return true;
-    }
-    return false;
+// Plain-TCP Engine initiator; a raw peer answers its Logon with a Logon-ack carrying
+// `c.peer_logon_extra`.
+LogonCloseOutcome run_initiator_case(LogonCloseCase const& c) {
+    LogonCloseOutcome out;
+    asio::io_context ioc;
+    auto clock = std::make_shared<fixpp::core::system_clock_source>(ioc.get_executor());
+    auto app = std::make_shared<CloseDuringLogonApp>();
+    fixpp::core::EngineConfig eng_cfg;
+    eng_cfg.executor = ioc.get_executor();
+    eng_cfg.clock = clock;
+    eng_cfg.application = app;
+    sess::Engine engine{ioc.get_executor(), std::move(eng_cfg)};
+
+    asio::ip::tcp::acceptor peer{ioc, {asio::ip::make_address("127.0.0.1"), 0}};
+    const uint16_t port = peer.local_endpoint().port();
+    out.bound = port != 0;
+
+    auto cfg = make_case_config(sess::session_role::initiator, "PLAIN-INITIATOR", "PLAIN-ACCEPTOR",
+                                ioc.get_executor(), port, c);
+    app->engine = &engine;
+    app->id = sess::SessionId::from_config(cfg);
+    app->mode = c.mode;
+    app->arm_on = c.arm_on;
+    if (!engine.register_session(std::move(cfg)).has_value()) return out;
+    asio::co_spawn(ioc,
+                   run_raw_logon_acceptor(ioc, peer,
+                                          make_logon_frame_with("PLAIN-ACCEPTOR", "PLAIN-INITIATOR",
+                                                                c.peer_logon_extra)),
+                   asio::detached);
+    if (!engine.start().has_value()) return out;
+    settle_capture_and_stop(ioc, engine, *clock, *app, c, out);
+    return out;
+}
+
+// What every cell with a close asserts: close() owns the teardown. The session ends
+// Disconnected, nothing is written over close()'s Disconnected, onLogon never fires
+// (close() began before the session was Active), and no liveness sleep is left
+// parked after close() returned.
+void expect_close_owns_teardown(LogonCloseOutcome const& o) {
+    EXPECT_TRUE(o.lookup_non_null) << "Engine::lookup() must return the session in toAdmin";
+    EXPECT_TRUE(o.close_started) << "the posted close never ran";
+    EXPECT_TRUE(o.close_returned);
+    EXPECT_TRUE(o.close_ok);
+    EXPECT_EQ(o.state_at_close_return, std::optional{sess::fsm_state::Disconnected})
+        << "state when close() returned; ring=" << ring_text(o.ring);
+    EXPECT_EQ(o.state_after_settle, std::optional{sess::fsm_state::Disconnected})
+        << "ring=" << ring_text(o.ring);
+    EXPECT_FALSE(written_after_disconnected(o.ring))
+        << "a state written after close()'s Disconnected; ring=" << ring_text(o.ring);
+    EXPECT_EQ(o.on_logon, 0) << "onLogon fired although close() began before Active";
+    EXPECT_EQ(o.inflight_sleeps_after_settle, 0U)
+        << "a liveness sleep is parked after close() returned";
+    EXPECT_TRUE(o.stop_completed);
 }
 
 }  // namespace
 
-// Control arm: no close. The Logon exchange reaches Active with no Disconnected
-// before it, and onLogon fires once — so the ring witness below can tell the arms apart.
-TEST(ReplyLogonCloseProbe518, ControlNoCloseReachesActive) {
-    auto o = run_reply_close_probe(std::nullopt);
+// Control: no close. The Logon exchange reaches Active with no Disconnected before
+// it, and onLogon fires once — so the ring witness can tell the cells apart.
+TEST(LogonCloseDuringSuspension, ControlNoCloseReachesActive) {
+    auto o = run_acceptor_case({.mode = std::nullopt});
     ASSERT_TRUE(o.bound);
     ASSERT_TRUE(o.settled) << "ring=" << ring_text(o.ring);
-    EXPECT_TRUE(o.lookup_non_null) << "the session must be lookup-addressable in toAdmin";
-    EXPECT_EQ(o.state_after_settle, std::optional{fixpp::session::fsm_state::Active});
-    EXPECT_FALSE(active_after_disconnected(o.ring)) << "ring=" << ring_text(o.ring);
+    EXPECT_EQ(o.state_after_settle, std::optional{sess::fsm_state::Active});
+    EXPECT_FALSE(written_after_disconnected(o.ring)) << "ring=" << ring_text(o.ring);
     EXPECT_EQ(o.on_logon, 1);
+    EXPECT_TRUE(o.stop_completed);
 }
 
-// #518: a close(terminal) posted from toAdmin runs while the reply Logon is in
-// flight and writes Disconnected; the reply arm must not overwrite it with Active.
-TEST(ReplyLogonCloseProbe518, TerminalCloseDuringReplyIsNotOverwrittenByActive) {
-    auto o = run_reply_close_probe(fixpp::session::close_mode::terminal);
+// A close(terminal) posted from the reply Logon's toAdmin runs during the reply's
+// write. The acceptor arm must not write Active over it.
+TEST(LogonCloseDuringSuspension, AcceptorTerminalCloseDuringReply) {
+    auto o = run_acceptor_case({.mode = sess::close_mode::terminal});
     ASSERT_TRUE(o.bound);
     ASSERT_TRUE(o.settled) << "ring=" << ring_text(o.ring);
-    ASSERT_TRUE(o.lookup_non_null) << "Engine::lookup() must return the session in toAdmin";
-    ASSERT_TRUE(o.close_started) << "the posted close never ran";
-    EXPECT_TRUE(o.close_returned);
-    EXPECT_TRUE(o.close_ok);
-    EXPECT_FALSE(active_after_disconnected(o.ring))
-        << "Active written after close's Disconnected; ring=" << ring_text(o.ring);
-    EXPECT_EQ(o.state_at_close_return, std::optional{fixpp::session::fsm_state::Disconnected})
-        << "state when close() returned";
-    EXPECT_EQ(o.state_after_settle, std::optional{fixpp::session::fsm_state::Disconnected});
-    EXPECT_EQ(o.on_logon_after_close_started, 0) << "onLogon fired after close() began";
-    EXPECT_EQ(o.inflight_sleeps_after_settle, 0U)
-        << "a liveness loop is parked after close() completed (spawned past its join)";
+    expect_close_owns_teardown(o);
+    EXPECT_TRUE(o.to_admin_after_close_started.empty())
+        << "admin frames after close() began: " << types_text(o.to_admin_after_close_started);
 }
 
-// Same, with close(graceful) — the mode fixpp_session_close() (C ABI) uses.
-TEST(ReplyLogonCloseProbe518, GracefulCloseDuringReplyIsNotOverwrittenByActive) {
-    auto o = run_reply_close_probe(fixpp::session::close_mode::graceful);
+// Same, and stop() runs without the test first waking the clock's sleepers: stop()
+// alone must leave nothing running.
+TEST(LogonCloseDuringSuspension, AcceptorTerminalCloseDuringReplyThenStopWithoutCancel) {
+    auto o =
+        run_acceptor_case({.mode = sess::close_mode::terminal, .cancel_sleeps_before_stop = false});
     ASSERT_TRUE(o.bound);
     ASSERT_TRUE(o.settled) << "ring=" << ring_text(o.ring);
-    ASSERT_TRUE(o.lookup_non_null);
-    ASSERT_TRUE(o.close_started) << "the posted close never ran";
-    EXPECT_TRUE(o.close_returned);
-    EXPECT_FALSE(active_after_disconnected(o.ring))
-        << "Active written after close's Disconnected; ring=" << ring_text(o.ring);
-    EXPECT_EQ(o.state_after_settle, std::optional{fixpp::session::fsm_state::Disconnected})
+    expect_close_owns_teardown(o);
+    EXPECT_EQ(o.inflight_sleeps_after_stop, 0U) << "a sleep is still parked after stop()";
+}
+
+// close(graceful), the mode fixpp_session_close() (C ABI) uses. Phase 1's Logout waits
+// on the write gate the reply holds. The arm then sees that close() has begun and
+// stops, so the session never reaches Active: no onLogon, and the only admin frame
+// after close() began is close()'s own Logout.
+TEST(LogonCloseDuringSuspension, AcceptorGracefulCloseDuringReplyNeverReachesActive) {
+    auto o = run_acceptor_case({.mode = sess::close_mode::graceful});
+    ASSERT_TRUE(o.bound);
+    ASSERT_TRUE(o.settled) << "ring=" << ring_text(o.ring);
+    expect_close_owns_teardown(o);
+    EXPECT_EQ(std::count(o.ring.begin(), o.ring.end(), sess::fsm_state::Active), 0)
         << "ring=" << ring_text(o.ring);
-    EXPECT_EQ(o.inflight_sleeps_after_settle, 0U)
-        << "a liveness loop is parked after close() completed";
-    // Informational: where onLogon fired relative to the close.
-    std::printf("[graceful] ring=%s on_logon=%d after_close_started=%d\n",
-                ring_text(o.ring).c_str(), o.on_logon, o.on_logon_after_close_started);
+    EXPECT_EQ(o.to_admin_after_close_started, std::vector<std::string>{"5"})
+        << "admin frames after close() began: " << types_text(o.to_admin_after_close_started);
+}
+
+// The peer's Logon carries NextExpectedMsgSeqNum(789) above the acceptor's next
+// outbound, so honouring it after the reply would build a Logout. A close that ran
+// during the reply's write owns the teardown: no Logout is built after it.
+TEST(LogonCloseDuringSuspension, AcceptorCloseDuringReplyBuildsNoHonourLogout) {
+    auto o = run_acceptor_case(
+        {.mode = sess::close_mode::terminal, .peer_logon_extra = "789=5\x01", .enable_789 = true});
+    ASSERT_TRUE(o.bound);
+    ASSERT_TRUE(o.settled) << "ring=" << ring_text(o.ring);
+    expect_close_owns_teardown(o);
+    EXPECT_TRUE(o.to_admin_after_close_started.empty())
+        << "admin frames after close() began: " << types_text(o.to_admin_after_close_started);
+}
+
+// The acceptor's store starts its outbound counter past 1 and the peer's 789 is below
+// it, so after the reply the acceptor gap-fills. A close posted from the GapFill's
+// toAdmin runs during the GapFill's write; the arm must not write Active over it.
+TEST(LogonCloseDuringSuspension, AcceptorCloseDuringHonourGapFill) {
+    auto o = run_acceptor_case({.mode = sess::close_mode::terminal,
+                                .arm_on = "4",
+                                .peer_logon_extra = "789=2\x01",
+                                .enable_789 = true,
+                                .store_outbound_next = 4});
+    ASSERT_TRUE(o.bound);
+    ASSERT_TRUE(o.settled) << "ring=" << ring_text(o.ring);
+    expect_close_owns_teardown(o);
+    EXPECT_TRUE(o.to_admin_after_close_started.empty())
+        << "admin frames after close() began: " << types_text(o.to_admin_after_close_started);
+}
+
+// A close lands during the acceptor's hydrate reads, before any callback fires. When
+// close() has drained the SeqnumManager by the time the arm resumes, the arm's next
+// counter operation fails and the arm fails closed: no LogonReceived over close()'s
+// Disconnected, and no reply built.
+TEST(LogonCloseDuringSuspension, AcceptorCloseDuringHydrateFailsClosed) {
+    auto o = run_acceptor_case({.mode = sess::close_mode::terminal,
+                                .arm_on = "",
+                                .store_outbound_next = 1,
+                                .close_from_hydrate = true});
+    ASSERT_TRUE(o.bound);
+    ASSERT_TRUE(o.settled) << "ring=" << ring_text(o.ring);
+    expect_close_owns_teardown(o);
+    EXPECT_EQ(std::count(o.ring.begin(), o.ring.end(), sess::fsm_state::LogonReceived), 0)
+        << "ring=" << ring_text(o.ring);
+    EXPECT_TRUE(o.to_admin_after_close_started.empty())
+        << "admin frames after close() began: " << types_text(o.to_admin_after_close_started);
+}
+
+// Initiator: the peer's Logon-ack carries 789=1, below the initiator's next outbound,
+// so the initiator gap-fills before going Active. A close posted from the GapFill's
+// toAdmin runs during its write; the arm must not write Active over it.
+TEST(LogonCloseDuringSuspension, InitiatorCloseDuringHonourGapFill) {
+    auto o = run_initiator_case({.mode = sess::close_mode::terminal,
+                                 .arm_on = "4",
+                                 .peer_logon_extra = "789=1\x01",
+                                 .enable_789 = true});
+    ASSERT_TRUE(o.bound);
+    ASSERT_TRUE(o.settled) << "ring=" << ring_text(o.ring);
+    expect_close_owns_teardown(o);
+    EXPECT_TRUE(o.to_admin_after_close_started.empty())
+        << "admin frames after close() began: " << types_text(o.to_admin_after_close_started);
 }
 #if defined(__clang__) || defined(__GNUC__)
 #pragma GCC diagnostic pop  // -Wdeprecated-declarations (insecure_plain_tcp, 043 T020)

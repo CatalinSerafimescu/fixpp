@@ -3054,6 +3054,21 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     record_state_transition_(fsm_state::Disconnected);
                     co_return std::unexpected(emit_r.error());
                 }
+                // fixpp#518: an application can post close() from the reply's toAdmin
+                // (Engine::lookup() already returns this session), and it runs while the
+                // write above is suspended. That close() owns the teardown, so the arm
+                // stops here: no 789 honour frames, no Active, no onLogon, no persist,
+                // and no liveness loop spawned after close() joined the loop count.
+                // The signal is the lifecycle state, which close() leaves `open` before
+                // its first await; the FSM alone misses a graceful close(), whose phase 1
+                // leaves LogonReceived in place until its Logout is written. Success, not
+                // an error: the frame was handled and the session is closed (the
+                // Disconnected row's disposition); an error would only make the read
+                // pump call close() again.
+                if (state_ == lifecycle::closing || state_ == lifecycle::closed_drained ||
+                    fsm_state_ != fsm_state::LogonReceived) {
+                    co_return fixpp::core::expected_t<void>{};
+                }
             }
 
             // 027 T014/T021 — acceptor 789 honor (RC#4 ordering: AFTER reply store_then_emit).
@@ -3066,6 +3081,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                                                n_pre_outbound);
                 if (!h789) co_return std::unexpected(h789.error());
                 if (!*h789) co_return fixpp::core::expected_t<void>{};
+            }
+
+            // fixpp#518 extends RC#B's gate: Active also requires that no close() began
+            // while the 789 honour above was suspended (its GapFill fires toAdmin before
+            // its write). Same disposition as after the reply emit.
+            if (state_ == lifecycle::closing || state_ == lifecycle::closed_drained ||
+                fsm_state_ != fsm_state::LogonReceived) {
+                co_return fixpp::core::expected_t<void>{};
             }
 
             // Reply Logon successfully emitted: transition to Active.
@@ -4621,6 +4644,16 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                                                seqnum_mgr_.peek_outbound());
                 if (!h789) co_return std::unexpected(h789.error());
                 if (!*h789) co_return fixpp::core::expected_t<void>{};
+            }
+
+            // fixpp#518: the session is published before its read pump starts, so an
+            // application can post close() from a toAdmin this arm fires (the 789
+            // honour's GapFill) and it runs while the arm is suspended. That close()
+            // owns the teardown: no Active, no onLogon, no persist, no liveness loop.
+            // Success, as on the acceptor arm: the frame was handled.
+            if (state_ == lifecycle::closing || state_ == lifecycle::closed_drained ||
+                fsm_state_ != fsm_state::LogonSent) {
+                co_return fixpp::core::expected_t<void>{};
             }
 
             // Valid Logon-ack + in-seq → Active (initiator handshake complete).
