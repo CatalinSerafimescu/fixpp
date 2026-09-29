@@ -981,9 +981,9 @@ TEST(EngineReadPumpTest, FramerFailureClosesEstablishedSession_BadCheckSum) {
     std::string s = heartbeat_text();
     // The last field is `10=NNN<SOH>`; NNN + 1 (mod 256) is a CheckSum that does not match.
     auto const digits_at = s.size() - 4;
-    int const cs = std::stoi(s.substr(digits_at, 3));
+    auto const cs = static_cast<unsigned>(std::stoi(s.substr(digits_at, 3)));
     std::array<char, 4> wrong{};
-    std::snprintf(wrong.data(), wrong.size(), "%03d", (cs + 1) % 256);
+    std::snprintf(wrong.data(), wrong.size(), "%03u", (cs + 1U) % 256U);
     s.replace(digits_at, 3, wrong.data(), 3);
     run_framer_failure_cell(to_bytes(s), fixpp::core::error::wire_checksum_mismatch,
                             "FramerFailureClosesEstablishedSession_BadCheckSum");
