@@ -977,7 +977,7 @@ it in 092.
 
 ### Mandatory close-out tasks (Gate-B preconditions, Article XVII §8)
 
-- [ ] T081 [P] **Catalogue close-out.** Flip every feature-owned OFFICIAL row in
+- [X] T081 [P] **Catalogue close-out.** Flip every feature-owned OFFICIAL row in
   `spec/feature-catalogue.md` to `done` with this PR as evidence, including the CA rows matched by
   091's rule for the 1.10 note and any session-recovery row whose behaviour 092 changes; add or
   update the matching `spec/coverage-index.md` entries, naming this feature's witnesses (T005, the
