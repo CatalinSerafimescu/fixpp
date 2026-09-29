@@ -495,4 +495,3 @@ the reason is recorded here:
   (R-14).
 - **The knob-off arm** cannot reach seqnum_max through a SequenceReset, because the knob-off Reset
   arm does not apply NewSeqNo. It seeds the counter instead (SC-010).
-
