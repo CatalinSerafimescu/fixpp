@@ -3434,7 +3434,7 @@ L-092-3 and L-092-5 are not used: the L-092 numbers follow contract C-5's, and C
 
   *(`Session::on_inbound_frame`'s five `fix_string_to_utc_time` call sites in `src/session/session.cpp`; witnesses `tests/session/sending_time_test.cpp` `SendingTimeIntegration.Year4048*`, `tests/session/test_inbound_poss_dup_validation.cpp` `PossDupValidationTest.AtExpected_OutOfRangeOrigSendingTime_ArmC`.)*
 - **B-509-3 — `session::check_sending_time` is exact for any two representable time points.** The distance between the inbound time and the effective clock is computed as an unsigned magnitude, so it cannot overflow. That covers a representable peer time far from the clock, which after B-509-1 is the remaining input that could. A negative `max_latency` is still a breach for every input. A `max_latency` whose nanosecond count does not fit in 64 bits bounds nothing. *(`src/session/sending_time.cpp`; witnesses `tests/session/sending_time_test.cpp` `SendingTimeCheck.*`.)*
-- **B-509-4 — the range check costs about 1 ns per parse.** `BM_Session_FixStringToUtcTime` measured about +7–8% (min per tree) in a paired A-B-A-B run against the pre-#509 base. That is over the `[const §VIII.2]` +5% budget and inside the 80 ns ceiling. **The owner waived §VIII.2 for this change** (fixpp#509, owner rulings 2026-09-29).
+- **B-509-4 — the range check costs about 1 ns per parse.** `BM_Session_FixStringToUtcTime` measured +8.1% (min per tree) for the shipped shape in a paired A-B-A-B run against the pre-#509 base, and +7.3% to +8.2% across the three shapes measured the same way. That is over the `[const §VIII.2]` +5% budget and inside the 80 ns ceiling. **The owner waived §VIII.2 for this change** (fixpp#509, owner rulings 2026-09-29).
 
 ### Limitations
 
