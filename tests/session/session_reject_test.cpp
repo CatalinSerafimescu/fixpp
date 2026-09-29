@@ -440,6 +440,42 @@ TEST(SessionReject, BuildRejectWithTextEmptyRefMsgTypeOmits372) {
                   "371=95|373=5|58=Malformed field: Length does not match its Data field|10=158|"));
 }
 
+// A buffer that holds the frame exactly without 58 has no room for 58: the
+// build fails closed with the Writer's truncation error. The buffer is sized
+// from the empty-text build, so the only difference between the control and the
+// failing call is the text. The Writer reserves six BodyLength digits while
+// appending and needs the 7-byte 10= trailer only at commit, so the room left
+// before 58 is at most 7 bytes; "58=" + a text of 4 or more bytes + SOH cannot
+// fit, and the failure lands on the 58 append, not on commit.
+TEST(SessionReject, BuildRejectWithTextFailsClosedWhenTextDoesNotFit) {
+    constexpr std::string_view kText = "Malformed field: invalid tag";
+    ASSERT_GE(kText.size(), 4U);
+
+    auto build = [&](std::span<std::byte> out, std::string_view text) {
+        return fixpp::session::build_reject_with_text(
+            out, /*seq=*/2, "ISLD", "TW", /*ref_seq_num=*/seqnum_t{1}, /*ref_tag_id=*/95,
+            /*ref_msg_type=*/"D", /*session_reject_reason=*/5, "FIX.4.2", "20240101-00:00:00.000",
+            text);
+    };
+
+    std::array<std::byte, 512> big{};
+    auto sized = build(std::span<std::byte>{big}, /*text=*/"");
+    ASSERT_TRUE(sized.has_value());
+    const std::string expected = as_string(*sized);
+
+    // Control: a buffer of exactly that size builds the empty-text frame.
+    std::vector<std::byte> exact(expected.size());
+    auto ok = build(std::span<std::byte>{exact}, /*text=*/"");
+    ASSERT_TRUE(ok.has_value());
+    EXPECT_EQ(as_string(*ok), expected);
+
+    // The same buffer size with a non-empty text must fail closed.
+    std::vector<std::byte> tight(expected.size());
+    auto r = build(std::span<std::byte>{tight}, kText);
+    ASSERT_FALSE(r.has_value());
+    EXPECT_EQ(r.error(), fixpp::core::error::wire_field_value_truncated);
+}
+
 // ── 092 T018: the 372 bound and the fixed Text constants (research R-5) ──────
 
 #ifndef FIXPP_DICT_DATA_DIR
