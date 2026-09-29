@@ -160,8 +160,8 @@ answers one peer frame. The bound cell is quickstart §1 "reject-loop bound".
 - `fixpp::wire::field_fault_error(it, ref_tag_out)` is a new function template in
   `include/fixpp/wire/validator.hpp`: header-only and source-compatible, with no exported symbol.
   It maps a field iterator's fault to the E-6 error, writing the Length tag to `*ref_tag_out` for
-  a Length/Data mismatch and leaving it untouched for a malformed tag. Its callers are inside
-  `dictionary_driven_validator::validate`; re-derive them with `git grep -n field_fault_error`.
+  a Length/Data mismatch and leaving it untouched for a malformed tag. It is meant for
+  `dictionary_driven_validator::validate`; re-derive its callers with `git grep -n field_fault_error`.
 - No `SessionEvent` alternative is added: disregarded frames are not logged (research R-4).
 - `SeqnumManager::check_inbound` (public `include/fixpp/session/seqnum_manager.hpp`) returns
   `store_seqnum_overflow` when asked to advance from seqnum_max, where it used to wrap to 0 (FR-019).
