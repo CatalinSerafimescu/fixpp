@@ -149,6 +149,9 @@ TEST(AbiSymbolGolden, ErrorEnumUnchanged) {
     // boundary forward.
     EXPECT_EQ(static_cast<std::uint8_t>(error::app_payload_malformed), 131U)
         << "the pre-062 error-enum boundary (app_payload_malformed) must stay at slot 131";
+    // The cast names the slot one past the last enumerator on purpose: the
+    // assertion is that the slot has no message.
+    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
     EXPECT_EQ(fixpp::core::error_message(static_cast<error>(
                   static_cast<std::uint8_t>(error::wire_length_data_mismatch) + 1U)),
               std::string_view{"unknown error"})

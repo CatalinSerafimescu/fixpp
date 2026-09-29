@@ -39,6 +39,9 @@ TEST(Error020Completeness, ExactSetEquality) {
     EXPECT_NE(fixpp::core::error_message(error::app_payload_malformed),
               std::string_view{"unknown error"})
         << "slot 131 (app_payload_malformed) must carry a real message";
+    // The cast names the slot one past the last enumerator on purpose: the
+    // assertion is that the slot has no message.
+    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
     EXPECT_EQ(fixpp::core::error_message(static_cast<error>(
                   static_cast<std::uint8_t>(error::wire_length_data_mismatch) + 1U)),
               std::string_view{"unknown error"})

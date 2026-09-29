@@ -64,6 +64,11 @@ std::vector<std::byte> bytes_of(std::string_view s) {
 // One expected yield: the field, and the fault the iterator reports while it
 // sits on that field.
 struct yielded {
+    // A constructor rather than an aggregate: the expectation lists spell each
+    // entry positionally as {tag, value, fault_at_yield}.
+    yielded(std::uint16_t tag_in, std::string value_in, field_fault fault_in)
+        : tag{tag_in}, value{std::move(value_in)}, fault_at_yield{fault_in} {}
+
     std::uint16_t tag;
     std::string value;  // '|' for SOH, as in the fixtures
     field_fault fault_at_yield;

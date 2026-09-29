@@ -423,39 +423,37 @@ struct Seed {
 // SecureData, whose value holds a SOH) and the dictionary-only pair.
 std::vector<Seed> const& seeds() {
     static std::vector<Seed> const all = {
-        {"Heartbeat",
-         {"8=FIX.4.4", "9=0", "35=0", "34=2", "49=SND", "52=20240101-00:00:00.000", "56=TGT",
-          "112=TR", "10=000"}},
-        {"TestRequest",
-         {"8=FIX.4.4", "9=0", "35=1", "34=3", "49=SND", "52=20240101-00:00:00.000", "56=TGT",
-          "112=TR", "10=000"}},
-        {"ResendRequest",
-         {"8=FIX.4.4", "9=0", "35=2", "34=4", "49=SND", "52=20240101-00:00:00.000", "56=TGT", "7=1",
-          "16=0", "10=000"}},
-        {"Reject",
-         {"8=FIX.4.4", "9=0", "35=3", "34=5", "49=SND", "52=20240101-00:00:00.000", "56=TGT",
-          "45=2", "373=0", "58=why", "10=000"}},
-        {"SequenceReset",
-         {"8=FIX.4.4", "9=0", "35=4", "34=6", "49=SND", "43=Y", "52=20240101-00:00:00.000",
-          "122=20240101-00:00:00.000", "56=TGT", "123=Y", "36=9", "10=000"}},
-        {"Logout",
-         {"8=FIX.4.4", "9=0", "35=5", "34=7", "49=SND", "52=20240101-00:00:00.000", "56=TGT",
-          "58=bye", "10=000"}},
-        {"Logon",
-         {"8=FIX.4.4", "9=0", "35=A", "34=1", "49=SND", "52=20240101-00:00:00.000", "56=TGT",
-          "98=0", "108=30", "141=Y", "383=4096", "464=N", "789=1", "10=000"}},
-        {"NewOrderSingle",
-         {"8=FIX.4.4", "9=0", "35=D", "34=8", "49=SND", "52=20240101-00:00:00.000", "56=TGT",
-          "11=ORD", "55=IBM", "54=1", "10=000"}},
-        {"StandardPair",
-         {"8=FIX.4.4", "9=0", "35=D", "34=9", "49=SND", "52=20240101-00:00:00.000", "56=TGT",
-          "90=5",
-          "91=ab\x01"
-          "cd",
-          "11=ORD", "10=000"}},
-        {"DictionaryOnlyPair",
-         {"8=FIX.4.4", "9=0", "35=T", "34=10", "49=SND", "52=20240101-00:00:00.000", "56=TGT",
-          "5001=4", "5002=wxyz", "11=ORD", "10=000"}},
+        {.name = "Heartbeat",
+         .fields = {"8=FIX.4.4", "9=0", "35=0", "34=2", "49=SND", "52=20240101-00:00:00.000",
+                    "56=TGT", "112=TR", "10=000"}},
+        {.name = "TestRequest",
+         .fields = {"8=FIX.4.4", "9=0", "35=1", "34=3", "49=SND", "52=20240101-00:00:00.000",
+                    "56=TGT", "112=TR", "10=000"}},
+        {.name = "ResendRequest",
+         .fields = {"8=FIX.4.4", "9=0", "35=2", "34=4", "49=SND", "52=20240101-00:00:00.000",
+                    "56=TGT", "7=1", "16=0", "10=000"}},
+        {.name = "Reject",
+         .fields = {"8=FIX.4.4", "9=0", "35=3", "34=5", "49=SND", "52=20240101-00:00:00.000",
+                    "56=TGT", "45=2", "373=0", "58=why", "10=000"}},
+        {.name = "SequenceReset",
+         .fields = {"8=FIX.4.4", "9=0", "35=4", "34=6", "49=SND", "43=Y",
+                    "52=20240101-00:00:00.000", "122=20240101-00:00:00.000", "56=TGT", "123=Y",
+                    "36=9", "10=000"}},
+        {.name = "Logout",
+         .fields = {"8=FIX.4.4", "9=0", "35=5", "34=7", "49=SND", "52=20240101-00:00:00.000",
+                    "56=TGT", "58=bye", "10=000"}},
+        {.name = "Logon",
+         .fields = {"8=FIX.4.4", "9=0", "35=A", "34=1", "49=SND", "52=20240101-00:00:00.000",
+                    "56=TGT", "98=0", "108=30", "141=Y", "383=4096", "464=N", "789=1", "10=000"}},
+        {.name = "NewOrderSingle",
+         .fields = {"8=FIX.4.4", "9=0", "35=D", "34=8", "49=SND", "52=20240101-00:00:00.000",
+                    "56=TGT", "11=ORD", "55=IBM", "54=1", "10=000"}},
+        {.name = "StandardPair",
+         .fields = {"8=FIX.4.4", "9=0", "35=D", "34=9", "49=SND", "52=20240101-00:00:00.000",
+                    "56=TGT", "90=5", "91=ab\001cd", "11=ORD", "10=000"}},
+        {.name = "DictionaryOnlyPair",
+         .fields = {"8=FIX.4.4", "9=0", "35=T", "34=10", "49=SND", "52=20240101-00:00:00.000",
+                    "56=TGT", "5001=4", "5002=wxyz", "11=ORD", "10=000"}},
     };
     return all;
 }
@@ -535,13 +533,14 @@ constexpr std::uint16_t kScannedTags[] = {7,  8,   16,  34,  35,  36,  43,  49, 
 
 // The oracle's side of one frame.
 struct Oracle {
+    // Declaration order is construction order: `table` borrows `arena` and `frame`.
     std::pmr::monotonic_buffer_resource arena;
-    std::optional<fixpp::wire::OffsetTable> table;
+    fixpp::wire::frame_view frame;
+    fixpp::wire::OffsetTable table;
 
-    Oracle(std::vector<std::byte> const& bytes, dict_hooks const& hooks) {
-        auto const fv = fixpp::wire::frame_view_slice_access::make(bytes.data(), bytes.size(), {});
-        table.emplace(fv, &arena, hooks);
-    }
+    Oracle(std::vector<std::byte> const& bytes, dict_hooks const& hooks)
+        : frame(fixpp::wire::frame_view_slice_access::make(bytes.data(), bytes.size(), {})),
+          table(frame, &arena, hooks) {}
 };
 
 std::string_view entry_value(std::vector<std::byte> const& bytes,
@@ -555,13 +554,13 @@ void expect_clean_and_agree(std::string const& wire, dict_hooks const& hooks) {
     Scanned const s = scan(wire, hooks);
     Oracle const o(s.bytes, hooks);
     EXPECT_EQ(s.h.fault, field_fault::none) << "the scan faulted at offset " << s.h.fault_offset;
-    auto const status = o.table->build_status();
+    auto const status = o.table.build_status();
     EXPECT_TRUE(status.has_value()) << "OffsetTable::build failed with error "
                                     << (status ? 0 : static_cast<int>(status.error()));
     if (s.h.fault != field_fault::none || !status.has_value()) {
         return;
     }
-    auto const entries = o.table->entries();
+    auto const entries = o.table.entries();
     std::string_view first_34;
     std::string_view last_34;
     std::string_view last_35;
@@ -618,7 +617,7 @@ void expect_planted_fault(Planted const& p, dict_hooks const& hooks) {
     EXPECT_EQ(s.h.fault, p.kind);
     EXPECT_EQ(s.h.fault_offset, offset_of_index(p.fields, p.index));
     EXPECT_EQ(s.h.fault_length_tag, p.length_tag);
-    auto const status = o.table->build_status();
+    auto const status = o.table.build_status();
     ASSERT_FALSE(status.has_value()) << "OffsetTable::build accepted the planted fault";
     EXPECT_EQ(status.error(), p.error);
 
@@ -758,10 +757,7 @@ TEST(ScanFrameHeaderDifferential, AcceptedControls_CleanOnBothSides) {
         {"unrelated tag after a Length",
          {"8=FIX.4.4", "9=0", "35=D", "34=2", "90=5", "58=x", "91=ab", "10=000"}},
         {"standard pair RawDataLength/RawData",
-         {"8=FIX.4.4", "9=0", "35=D", "34=2", "95=3",
-          "96=a\x01"
-          "b",
-          "10=000"}},
+         {"8=FIX.4.4", "9=0", "35=D", "34=2", "95=3", "96=a\001b", "10=000"}},
         {"duplicate 34 and 35",
          {"8=FIX.4.4", "9=0", "35=D", "34=2", "49=SND", "34=9", "35=8", "10=000"}},
         {"field 3 is not 35", {"8=FIX.4.4", "9=0", "49=SND", "35=D", "34=2", "10=000"}},

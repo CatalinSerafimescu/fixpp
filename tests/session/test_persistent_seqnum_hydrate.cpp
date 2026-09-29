@@ -1288,7 +1288,7 @@ TEST(PersistentSeqnumHydrate, RejectedInSequence_AdvanceIsPersisted) {
         const char* site;
         std::shared_ptr<fixpp::session::Application> app;
         std::vector<std::byte> frame;
-        std::optional<DisposerReject092> reject{};  // set: the one frame sent, in full
+        std::optional<DisposerReject092> reject;  // set: the one frame sent, in full
     };
     const std::vector<Case> cases = {
         {"021 Arm C (122 missing)", nullptr,
@@ -1380,9 +1380,9 @@ TEST(PersistentSeqnumHydrate, RejectedInSequence_PersistFailure_Fatal) {
          [](Fixture& f) { f.eng.application = std::make_shared<VetoHeartbeatApp>(); },
          make_fix_frame("FIX.4.4", "0", 2, "CLI", "SRV")},
         {"after Guard (4): no Application", {}, make_fix_frame("FIX.4.4", "D", 2, "CLI", "SRV")},
-        {"092 disposer (D-5)",
-         [](Fixture& f) { f.eng.application = std::make_shared<CountingApp029>(); },
-         make_fix_frame("FIX.4.4", "D", 2, "CLI", "SRV", "9x9=1\x01")},
+        {.site = "092 disposer (D-5)",
+         .tweak = [](Fixture& f) { f.eng.application = std::make_shared<CountingApp029>(); },
+         .frame = make_fix_frame("FIX.4.4", "D", 2, "CLI", "SRV", "9x9=1\x01")},
     };
     for (const Case& c : cases) {
         SCOPED_TRACE(c.site);

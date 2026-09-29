@@ -60,6 +60,9 @@ TEST(Error019Completeness, ExactSetEquality) {
     // block's last enumerator (092's wire_length_data_mismatch); here we only
     // assert the 019 block did not grow and that nothing exists beyond that
     // boundary. [const §X.4] append-only.
+    // The cast names the slot one past the last enumerator on purpose: the
+    // assertion is that the slot has no message.
+    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
     EXPECT_EQ(fixpp::core::error_message(static_cast<error>(
                   static_cast<std::uint8_t>(error::wire_length_data_mismatch) + 1U)),
               std::string_view{"unknown error"})

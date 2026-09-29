@@ -318,22 +318,50 @@ struct RejectGolden {
 };
 
 constexpr RejectGolden kRejectGoldens[] = {
-    {"HP-QFj-init-fix44-reject-invalid-admin", "FIXPP_INIT", "CPTY_ACC", "20260914-21:04:18.114",
-     seqnum_t{2}, 55, "1", 2,
-     "8=FIX.4.4|9=85|35=3|34=2|49=FIXPP_INIT|52=20260914-21:04:18.114|56=CPTY_ACC|45=2|371=55|"
-     "372=1|373=2|10=143|"},
-    {"HP-QFj-acc-fix44-reject-invalid-admin", "FIXPP_ACC", "CPTY_INIT", "20260914-21:04:26.643",
-     seqnum_t{2}, 55, "1", 2,
-     "8=FIX.4.4|9=85|35=3|34=2|49=FIXPP_ACC|52=20260914-21:04:26.643|56=CPTY_INIT|45=2|371=55|"
-     "372=1|373=2|10=149|"},
-    {"PD-QFj-init-fix44-malformed-dup-rejected", "FIXPP_INIT", "CPTY_ACC", "20260611-05:53:19.317",
-     seqnum_t{1}, 122, "D", 1,
-     "8=FIX.4.4|9=86|35=3|34=2|49=FIXPP_INIT|52=20260611-05:53:19.317|56=CPTY_ACC|45=1|371=122|"
-     "372=D|373=1|10=210|"},
-    {"PD-QFj-acc-fix44-malformed-dup-rejected", "FIXPP_ACC", "CPTY_INIT", "20260611-05:53:31.452",
-     seqnum_t{1}, 122, "D", 1,
-     "8=FIX.4.4|9=86|35=3|34=2|49=FIXPP_ACC|52=20260611-05:53:31.452|56=CPTY_INIT|45=1|371=122|"
-     "372=D|373=1|10=204|"},
+    {.name = "HP-QFj-init-fix44-reject-invalid-admin",
+     .sender = "FIXPP_INIT",
+     .target = "CPTY_ACC",
+     .sending_time = "20260914-21:04:18.114",
+     .ref_seq_num = seqnum_t{2},
+     .ref_tag_id = 55,
+     .ref_msg_type = "1",
+     .reason = 2,
+     .expected =
+         "8=FIX.4.4|9=85|35=3|34=2|49=FIXPP_INIT|52=20260914-21:04:18.114|56=CPTY_ACC|45=2|371=55|"
+         "372=1|373=2|10=143|"},
+    {.name = "HP-QFj-acc-fix44-reject-invalid-admin",
+     .sender = "FIXPP_ACC",
+     .target = "CPTY_INIT",
+     .sending_time = "20260914-21:04:26.643",
+     .ref_seq_num = seqnum_t{2},
+     .ref_tag_id = 55,
+     .ref_msg_type = "1",
+     .reason = 2,
+     .expected =
+         "8=FIX.4.4|9=85|35=3|34=2|49=FIXPP_ACC|52=20260914-21:04:26.643|56=CPTY_INIT|45=2|371=55|"
+         "372=1|373=2|10=149|"},
+    {.name = "PD-QFj-init-fix44-malformed-dup-rejected",
+     .sender = "FIXPP_INIT",
+     .target = "CPTY_ACC",
+     .sending_time = "20260611-05:53:19.317",
+     .ref_seq_num = seqnum_t{1},
+     .ref_tag_id = 122,
+     .ref_msg_type = "D",
+     .reason = 1,
+     .expected =
+         "8=FIX.4.4|9=86|35=3|34=2|49=FIXPP_INIT|52=20260611-05:53:19.317|56=CPTY_ACC|45=1|371=122|"
+         "372=D|373=1|10=210|"},
+    {.name = "PD-QFj-acc-fix44-malformed-dup-rejected",
+     .sender = "FIXPP_ACC",
+     .target = "CPTY_INIT",
+     .sending_time = "20260611-05:53:31.452",
+     .ref_seq_num = seqnum_t{1},
+     .ref_tag_id = 122,
+     .ref_msg_type = "D",
+     .reason = 1,
+     .expected =
+         "8=FIX.4.4|9=86|35=3|34=2|49=FIXPP_ACC|52=20260611-05:53:31.452|56=CPTY_INIT|45=1|371=122|"
+         "372=D|373=1|10=204|"},
 };
 
 }  // namespace
@@ -372,7 +400,8 @@ TEST(SessionReject, BuildRejectWithTextEmitsText) {
     std::array<std::byte, 512> buf{};
     auto r = fixpp::session::build_reject_with_text(
         std::span<std::byte>{buf}, /*seq=*/2, "ISLD", "TW", /*ref_seq_num=*/seqnum_t{1},
-        /*ref_tag_id=*/95, /*ref_msg_type=*/"D", /*reason=*/5, "FIX.4.2", "20240101-00:00:00.000",
+        /*ref_tag_id=*/95, /*ref_msg_type=*/"D", /*session_reject_reason=*/5, "FIX.4.2",
+        "20240101-00:00:00.000",
         /*text=*/"Malformed field: Length does not match its Data field");
     ASSERT_TRUE(r.has_value());
     EXPECT_EQ(
@@ -387,7 +416,8 @@ TEST(SessionReject, BuildRejectWithTextEmitsTextWithout371) {
     std::array<std::byte, 512> buf{};
     auto r = fixpp::session::build_reject_with_text(
         std::span<std::byte>{buf}, /*seq=*/2, "ISLD", "TW", /*ref_seq_num=*/seqnum_t{1},
-        /*ref_tag_id=*/0, /*ref_msg_type=*/"D", /*reason=*/0, "FIX.4.2", "20240101-00:00:00.000",
+        /*ref_tag_id=*/0, /*ref_msg_type=*/"D", /*session_reject_reason=*/0, "FIX.4.2",
+        "20240101-00:00:00.000",
         /*text=*/"Malformed field: invalid tag");
     ASSERT_TRUE(r.has_value());
     EXPECT_EQ(as_string(*r),
@@ -400,7 +430,8 @@ TEST(SessionReject, BuildRejectWithTextEmptyRefMsgTypeOmits372) {
     std::array<std::byte, 512> buf{};
     auto r = fixpp::session::build_reject_with_text(
         std::span<std::byte>{buf}, /*seq=*/2, "ISLD", "TW", /*ref_seq_num=*/seqnum_t{1},
-        /*ref_tag_id=*/95, /*ref_msg_type=*/"", /*reason=*/5, "FIX.4.2", "20240101-00:00:00.000",
+        /*ref_tag_id=*/95, /*ref_msg_type=*/"", /*session_reject_reason=*/5, "FIX.4.2",
+        "20240101-00:00:00.000",
         /*text=*/"Malformed field: Length does not match its Data field");
     ASSERT_TRUE(r.has_value());
     EXPECT_EQ(

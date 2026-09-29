@@ -218,6 +218,8 @@ void BM_Session_OnInboundFrame_InSequence(benchmark::State& state) {
     std::size_t fed = 0;
     bool all_ok = true;
 
+    // `_` is the google-benchmark loop idiom: the loop runs for the iteration, not the value.
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
     for (auto _ : state) {
         if (idx == batch.size()) {
             state.PauseTiming();

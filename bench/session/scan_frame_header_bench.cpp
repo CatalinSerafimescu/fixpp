@@ -105,11 +105,12 @@ struct Case {
 Case make_case(frame_kind k) {
     switch (k) {
         case frame_kind::heartbeat:
-            return {make_frame("0", 2, {}), "0", "2"};
+            return {.frame = make_frame("0", 2, {}), .msg_type = "0", .seq = "2"};
         case frame_kind::nos:
-            return {make_frame("D", 2, nos_body()), "D", "2"};
+            return {.frame = make_frame("D", 2, nos_body()), .msg_type = "D", .seq = "2"};
         case frame_kind::nos_length_data:
-            return {make_frame("D", 2, nos_length_data_body()), "D", "2"};
+            return {
+                .frame = make_frame("D", 2, nos_length_data_body()), .msg_type = "D", .seq = "2"};
     }
     return {};
 }
@@ -135,6 +136,8 @@ void run_scan(benchmark::State& state, dict_hooks const& hooks) {
         return;
     }
 
+    // `_` is the google-benchmark loop idiom: the loop runs for the iteration, not the value.
+    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
     for (auto _ : state) {
         auto const* data = frame.data();
         benchmark::DoNotOptimize(data);

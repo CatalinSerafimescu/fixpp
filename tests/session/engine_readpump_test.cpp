@@ -865,7 +865,7 @@ asio::awaitable<void> run_client_faulty_frame(fixpp::transport::test::LoopbackTl
         constexpr std::string_view kLogonReply =
             "\x01"
             "35=A\x01";
-        while (received.find(kLogonReply) == std::string::npos) {
+        while (!received.contains(kLogonReply)) {
             auto r = co_await fc.transport->async_read_some(std::span<std::byte>{buf});
             if (!r.has_value()) {
                 fc.terminal_read = r;

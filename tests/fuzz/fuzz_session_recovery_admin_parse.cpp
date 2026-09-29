@@ -98,7 +98,7 @@ std::optional<std::uint32_t> well_formed_tag_at(std::span<const std::byte> buf, 
         if (c < '0' || c > '9') {
             break;
         }
-        value = value * 10U + (c - '0');
+        value = (value * 10U) + (c - '0');
         if (value > 0xFFFFU) {
             return std::nullopt;
         }

@@ -107,6 +107,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <asio/co_spawn.hpp>
 #include <asio/io_context.hpp>
@@ -186,7 +187,7 @@ std::vector<std::byte> make_raw_frame(std::string_view msg_type, std::uint32_t s
 
 bool has_field(std::span<const std::byte> frame, std::string_view tag_eq) {
     std::string const wire(reinterpret_cast<const char*>(frame.data()), frame.size());
-    return wire.find("\x01" + std::string(tag_eq)) != std::string::npos;
+    return wire.contains("\x01" + std::string(tag_eq));
 }
 
 struct DispositionFixture {
@@ -339,8 +340,12 @@ void run_issue507_cell(std::string const& garbled, bool validate, ExpectedReject
                            "longer Active)";
 }
 
+// Test-fixture constants: a bad_alloc while building one before main aborts the
+// test binary, which fails the run loudly.
+// NOLINTBEGIN(bugprone-throwing-static-initialization,cert-err58-cpp)
 std::string const kMalformedCount = std::string{"90=2\x01"} + "91=xyz\x01";
 std::string const kMalformedTag = "9x9=1\x01";
+// NOLINTEND(bugprone-throwing-static-initialization,cert-err58-cpp)
 
 TEST(UnparseableFrameDisposition, Issue507Reproducer_MalformedCount_ValidationOn) {
     run_issue507_cell(kMalformedCount, /*validate=*/true, {.reason = "5", .ref_tag = "90"});
@@ -472,10 +477,14 @@ void expect_heartbeat_in_sequence(DispositionFixture& fix, Session& sess,
     EXPECT_EQ(sess.state(), fsm_state::Active) << row << ": state after the Heartbeat at " << seq;
 }
 
+// Test-fixture constants: a bad_alloc while building one before main aborts the
+// test binary, which fails the run loudly.
+// NOLINTBEGIN(bugprone-throwing-static-initialization,cert-err58-cpp)
 std::string const kHeader =
     "49=TW\x01"
     "52=20240101-00:00:00.000\x01"
     "56=ISLD\x01";
+// NOLINTEND(bugprone-throwing-static-initialization,cert-err58-cpp)
 
 // D-1: an acceptor awaiting the Logon refuses a Logon with a malformed tag.
 void anchor_d1(bool validate) {
@@ -769,9 +778,7 @@ public:
 
     void add_outbound(seqnum_t seq, std::vector<std::byte> frame) {
         records_.push_back({.seq = seq, .frame = std::move(frame)});
-        if (seq + 1U > next_out_) {
-            next_out_ = seq + 1U;
-        }
+        next_out_ = std::max(next_out_, seq + 1U);
     }
 
     void park_outbound(seqnum_t seq) { park_seq_ = seq; }
@@ -948,10 +955,14 @@ struct Shape {
     std::string_view text;     // 58
 };
 
+// Test-fixture constants: a bad_alloc while building one before main aborts the
+// test binary, which fails the run loudly.
+// NOLINTBEGIN(bugprone-throwing-static-initialization,cert-err58-cpp)
 Shape const kTagShape{
     .garble = kMalformedTag, .reason = "0", .ref_tag = {}, .text = kTextMalformedTag};
 Shape const kCountShape{
     .garble = kMalformedCount, .reason = "5", .ref_tag = "90", .text = kTextLengthDataMismatch};
+// NOLINTEND(bugprone-throwing-static-initialization,cert-err58-cpp)
 
 WantReject want_reject(std::string_view ref_seq, std::string_view ref_msg_type,
                        Shape const& shape) {
@@ -1124,6 +1135,9 @@ void run_not_expected_cell(At at, std::string_view type, std::uint32_t seq,
     expect_heartbeat_in_sequence(c.fix, *c.sess, *c.app, 2, row + " (NextNumIn unchanged)");
 }
 
+// Test-fixture constants: a bad_alloc while building one before main aborts the
+// test binary, which fails the run loudly.
+// NOLINTBEGIN(bugprone-throwing-static-initialization,cert-err58-cpp)
 std::string const kTestRequestFields = "112=PING\x01";
 std::string const kResendRequestFields = std::string{"7=1\x01"} + "16=0\x01";
 std::string const kLogoutFields = "58=bye\x01";
@@ -1131,6 +1145,7 @@ std::string const kGapFillFields = std::string{"123=Y\x01"} + "36=500\x01";
 std::string const kRejectFields = std::string{"45=1\x01"} + "373=0\x01";
 std::string const kOrderFields = "11=ORD1\x01";
 std::string const kPossDupFields = std::string{"43=Y\x01"} + "122=20231231-23:59:59.000\x01";
+// NOLINTEND(bugprone-throwing-static-initialization,cert-err58-cpp)
 
 // ── I1_* (tasks.md T027; contract C-3 I-1): no handler acts on a faulty frame ──
 //
@@ -1328,9 +1343,9 @@ TEST(UnparseableFrameDisposition, RejectLoop_EachFixppRejectAnswersOnePeerFrame)
             break;
         }
         ++peer_seq;
-        c.fix.feed(*c.sess,
-                   make_raw_frame("3", peer_seq,
-                                  "45=" + last_reject_seq + "\x01" + "373=0\x01" + kMalformedTag));
+        std::string body = "45=";
+        body.append(last_reject_seq).append("\x01").append("373=0\x01").append(kMalformedTag);
+        c.fix.feed(*c.sess, make_raw_frame("3", peer_seq, body));
         ++malformed_sent;
     }
     EXPECT_EQ(fixpp_rejects, malformed_sent)
@@ -1385,7 +1400,9 @@ void run_liveness_cell(std::vector<std::byte> const& faulty, std::uint32_t next_
     auto const app = std::make_shared<CountingApplication>();
     fix.engine.application = app;
     auto const cfg = fix.make_cfg(/*validate=*/true);
-    ASSERT_TRUE(cfg.heartbeat_interval.has_value());
+    if (!cfg.heartbeat_interval.has_value()) {
+        FAIL() << "precondition: the config carries a heartbeat interval";
+    }
     auto const interval =
         std::chrono::duration_cast<std::chrono::milliseconds>(*cfg.heartbeat_interval);
     auto const fault_at = interval / 3;
@@ -1533,17 +1550,20 @@ std::shared_ptr<const fixpp::dict::Dictionary> make_profile_dictionary(Profile p
                      R"(<field number="1137" name="DefaultApplVerID" type="STRING"/>)");
     }
     constexpr std::size_t kBufSize = 128U * 1024U;
-    auto buf = std::make_unique<std::array<std::byte, kBufSize>>();
-    auto* mr = new std::pmr::monotonic_buffer_resource{buf->data(), buf->size()};
-    fixpp::dict::Dictionary d = fixpp::dict::XmlLoader{}.load_from_string(xml, mr);
-    auto* raw_dict = new fixpp::dict::Dictionary{std::move(d)};
-    auto* raw_buf = buf.release();
-    return std::shared_ptr<const fixpp::dict::Dictionary>{
-        raw_dict, [mr, raw_buf](const fixpp::dict::Dictionary* d2) {
-            delete d2;
-            delete mr;
-            delete raw_buf;
-        }};
+    // Members are destroyed in reverse order: the dictionary before the resource it
+    // allocated from, the resource before the buffer it carves.
+    struct Owned {
+        std::unique_ptr<std::array<std::byte, kBufSize>> buf;
+        std::unique_ptr<std::pmr::monotonic_buffer_resource> mr;
+        std::unique_ptr<const fixpp::dict::Dictionary> dict;
+    };
+    auto owned = std::make_shared<Owned>();
+    owned->buf = std::make_unique<std::array<std::byte, kBufSize>>();
+    owned->mr = std::make_unique<std::pmr::monotonic_buffer_resource>(owned->buf->data(),
+                                                                      owned->buf->size());
+    owned->dict = std::make_unique<const fixpp::dict::Dictionary>(
+        fixpp::dict::XmlLoader{}.load_from_string(xml, owned->mr.get()));
+    return std::shared_ptr<const fixpp::dict::Dictionary>{owned, owned->dict.get()};
 }
 
 // A session on `profile`, driven to Active at NextNumIn 2 by the peer's Logon at 1. Its
@@ -1657,7 +1677,10 @@ std::vector<MatrixParam> matrix_params() {
         for (Profile const profile : {Profile::fix42, Profile::fix44, Profile::fixt11}) {
             for (session_role const role : {session_role::acceptor, session_role::initiator}) {
                 for (bool const with_app : {true, false}) {
-                    out.push_back({validate, profile, role, with_app});
+                    out.push_back({.validate = validate,
+                                   .profile = profile,
+                                   .role = role,
+                                   .with_app = with_app});
                 }
             }
         }
@@ -1808,7 +1831,7 @@ std::vector<RowParam> row_params() {
     for (Row const row : {Row::d1, Row::d2, Row::d9, Row::d8, Row::d7, Row::d3, Row::d4,
                           Row::d5_test_request, Row::d5_application, Row::d6}) {
         for (bool const validate : {true, false}) {
-            out.push_back({row, validate});
+            out.push_back({.row = row, .validate = validate});
         }
     }
     return out;
@@ -2130,9 +2153,13 @@ std::string filler(std::size_t count) {
     return out;
 }
 
+// Test-fixture constants: a bad_alloc while building one before main aborts the
+// test binary, which fails the run loudly.
+// NOLINTBEGIN(bugprone-throwing-static-initialization,cert-err58-cpp)
 std::string const kLogonFields = std::string{"98=0\x01"} + "108=30\x01";
 std::string const kNewOrderFields =
     std::string{"11=ORD1\x01"} + "54=1\x01" + "60=20240101-00:00:00.000\x01";
+// NOLINTEND(bugprone-throwing-static-initialization,cert-err58-cpp)
 
 // The session configuration a late-site cell varies.
 struct LateKnobs {
@@ -2520,9 +2547,9 @@ struct ScriptedPeer {
     }
 
     // One frame fixpp sent, in reply to `fed`.
-    void on_fixpp_frame(std::vector<std::byte> const& frame, std::vector<std::byte> const& fed) {
-        std::string const type = extract_tag(frame, 35);
-        std::string const seq_text = extract_tag(frame, 34);
+    void on_fixpp_frame(std::vector<std::byte> const& reply, std::vector<std::byte> const& fed) {
+        std::string const type = extract_tag(reply, 35);
+        std::string const seq_text = extract_tag(reply, 34);
         if (seq_text != std::to_string(expected_from_fixpp)) {
             out_of_sequence.push_back("35=" + type + " 34=" + seq_text + " (expected " +
                                       std::to_string(expected_from_fixpp) + ")");
@@ -2530,12 +2557,12 @@ struct ScriptedPeer {
             ++expected_from_fixpp;
         }
         if (type == "3") {
-            rejects.push_back({.ref_seq = extract_tag(frame, 45),
+            rejects.push_back({.ref_seq = extract_tag(reply, 45),
                                .drawn_by_replay = extract_tag(fed, 43) == "Y",
-                               .frame = frame});
+                               .frame = reply});
         } else if (type == "2") {
-            std::string const begin = extract_tag(frame, 7);
-            std::string const end = extract_tag(frame, 16);
+            std::string const begin = extract_tag(reply, 7);
+            std::string const end = extract_tag(reply, 16);
             resend_requests.emplace_back(begin, end);
             auto const from = static_cast<std::uint32_t>(std::stoul(begin));
             auto const to = end == "0" ? std::numeric_limits<std::uint32_t>::max()
@@ -2605,7 +2632,7 @@ TEST(UnparseableFrameDisposition, ScriptedPeer_MalformedTooHigh_ResendConverges_
 
     std::string resends;
     for (auto const& [b, e] : peer.resend_requests) {
-        resends += " [7=" + b + " 16=" + e + "]";
+        resends.append(" [7=").append(b).append(" 16=").append(e).append("]");
     }
     EXPECT_EQ(peer.resend_requests.size(), 1U)
         << "one ResendRequest closes the gap; a second means the replay was refused again:"
@@ -2692,7 +2719,8 @@ std::vector<MatrixParam> logon_refusal_params() {
     for (bool const validate : {true, false}) {
         for (Profile const profile : {Profile::fix42, Profile::fix44, Profile::fixt11}) {
             for (session_role const role : {session_role::acceptor, session_role::initiator}) {
-                out.push_back({validate, profile, role, /*with_app=*/true});
+                out.push_back(
+                    {.validate = validate, .profile = profile, .role = role, .with_app = true});
             }
         }
     }
@@ -2843,6 +2871,9 @@ void run_disregard_cell(At at, std::string const& body, std::string_view what) {
 }
 
 // D-7 frames: field 3 is 35 and the fault precedes any positive 34.
+// Test-fixture constants: a bad_alloc while building one before main aborts the
+// test binary, which fails the run loudly.
+// NOLINTBEGIN(bugprone-throwing-static-initialization,cert-err58-cpp)
 std::string const kD7LengthDataBefore34 =
     std::string{"35=D\x01"} + kMalformedCount + "34=2\x01" + kHeader + kOrderFields;
 std::string const kD7TagBefore34 =
@@ -2851,6 +2882,7 @@ std::string const kD7NonNumeric34 =
     std::string{"35=D\x01"} + "34=abc\x01" + kHeader + kOrderFields + kMalformedTag;
 std::string const kD7Zero34 =
     std::string{"35=D\x01"} + "34=0\x01" + kHeader + kOrderFields + kMalformedTag;
+// NOLINTEND(bugprone-throwing-static-initialization,cert-err58-cpp)
 
 TEST(UnparseableFrameDisposition, D7_Active_LengthDataBefore34_Disregarded) {
     run_disregard_cell(At::active, kD7LengthDataBefore34, "D-7 Length+Data before 34");
@@ -2880,11 +2912,15 @@ TEST(UnparseableFrameDisposition, D7_LogonReceived_Zero34BeforeFault_Disregarded
 // D-8 frames: field 3 is not 35. The mixed defect reads 35=D and 34=2 before the fault
 // with field 3 = SenderCompID(49); in the other frame field 3 is itself the malformed
 // field, so the fault comes first.
+// Test-fixture constants: a bad_alloc while building one before main aborts the
+// test binary, which fails the run loudly.
+// NOLINTBEGIN(bugprone-throwing-static-initialization,cert-err58-cpp)
 std::string const kD8MixedDefect = std::string{"49=TW\x01"} + "35=D\x01" + "34=2\x01" +
                                    kMalformedTag + "52=20240101-00:00:00.000\x01" + "56=ISLD\x01" +
                                    kOrderFields;
 std::string const kD8Field3Malformed =
     kMalformedTag + "35=D\x01" + "34=2\x01" + kHeader + kOrderFields;
+// NOLINTEND(bugprone-throwing-static-initialization,cert-err58-cpp)
 
 TEST(UnparseableFrameDisposition, D8_Active_MixedDefect_Disregarded) {
     run_disregard_cell(At::active, kD8MixedDefect, "D-8 mixed defect (field 3 is 49)");
@@ -3120,10 +3156,14 @@ TEST(UnparseableFrameDisposition, Disclosed_L2_FaultyGapFillDuringAwaitingResend
 // pair (the count is not followed by SOH) on a NewOrderSingle at N draws 373=5 with
 // 371=93, not 17d's 373=8; the Reject is its only outbound frame and NextNumIn advances
 // (D-5).
+// Test-fixture constants: a bad_alloc while building one before main aborts the
+// test binary, which fails the run loudly.
+// NOLINTBEGIN(bugprone-throwing-static-initialization,cert-err58-cpp)
 Shape const kSignatureShape{.garble = std::string{"93=2\x01"} + "89=xyz\x01",
                             .reason = "5",
                             .ref_tag = "93",
                             .text = kTextLengthDataMismatch};
+// NOLINTEND(bugprone-throwing-static-initialization,cert-err58-cpp)
 
 TEST(UnparseableFrameDisposition, Disclosed_L4_Active_MalformedSignaturePair_Reason5) {
     run_expected_n_cell(At::active, "D", kOrderFields, kSignatureShape);

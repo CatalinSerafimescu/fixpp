@@ -21,12 +21,13 @@
 #pragma once
 
 #include <cstdint>
-#include <cstdio>
 #include <cstdlib>
 #include <fixpp/core/error.hpp>
 #include <fixpp/dict/dictionary.hpp>
 #include <fixpp/dict/table_view.hpp>
 #include <fixpp/dict/xml_loader.hpp>
+#include <fstream>
+#include <iostream>
 #include <memory_resource>
 #include <string_view>
 
@@ -83,15 +84,13 @@ inline arm_counter& counter(char const* arm_name) {
     static arm_counter c{.arm_name = arm_name};
     static bool const registered = [] {
         std::atexit([] {
-            std::fprintf(stderr, "[092 fuzz arm %s] skipped %llu of %llu cases (resource status)\n",
-                         c.arm_name, static_cast<unsigned long long>(c.skipped),
-                         static_cast<unsigned long long>(c.cases));
-            if (char const* path = std::getenv("FIXPP_FUZZ_092_COUNT_FILE")) {
-                if (std::FILE* f = std::fopen(path, "a")) {
-                    std::fprintf(f, "%s skipped=%llu cases=%llu\n", c.arm_name,
-                                 static_cast<unsigned long long>(c.skipped),
-                                 static_cast<unsigned long long>(c.cases));
-                    std::fclose(f);
+            std::cerr << "[092 fuzz arm " << c.arm_name << "] skipped " << c.skipped << " of "
+                      << c.cases << " cases (resource status)\n";
+            // getenv races only a concurrent setenv; nothing in the fuzz process sets one.
+            if (char const* path = std::getenv(  // NOLINT(concurrency-mt-unsafe)
+                    "FIXPP_FUZZ_092_COUNT_FILE")) {
+                if (std::ofstream f{path, std::ios::app}; f) {
+                    f << c.arm_name << " skipped=" << c.skipped << " cases=" << c.cases << '\n';
                 }
             }
         });
@@ -120,26 +119,20 @@ inline prescan_counter& failed_build_prescan_counter() {
     static prescan_counter c{};
     static bool const registered = [] {
         std::atexit([] {
-            std::fprintf(stderr,
-                         "[092 fuzz arm T062a validate pre-scan on a failed build] entered %llu, "
-                         "faulted malformed_tag %llu, faulted length_data_mismatch %llu, "
-                         "fell through %llu (resource status %llu)\n",
-                         static_cast<unsigned long long>(c.entered),
-                         static_cast<unsigned long long>(c.faulted_malformed_tag),
-                         static_cast<unsigned long long>(c.faulted_length_data),
-                         static_cast<unsigned long long>(c.fell_through),
-                         static_cast<unsigned long long>(c.resource_status));
-            if (char const* path = std::getenv("FIXPP_FUZZ_092_COUNT_FILE")) {
-                if (std::FILE* f = std::fopen(path, "a")) {
-                    std::fprintf(f,
-                                 "T062a entered=%llu malformed_tag=%llu length_data=%llu "
-                                 "fell_through=%llu resource=%llu\n",
-                                 static_cast<unsigned long long>(c.entered),
-                                 static_cast<unsigned long long>(c.faulted_malformed_tag),
-                                 static_cast<unsigned long long>(c.faulted_length_data),
-                                 static_cast<unsigned long long>(c.fell_through),
-                                 static_cast<unsigned long long>(c.resource_status));
-                    std::fclose(f);
+            std::cerr << "[092 fuzz arm T062a validate pre-scan on a failed build] entered "
+                      << c.entered << ", faulted malformed_tag " << c.faulted_malformed_tag
+                      << ", faulted length_data_mismatch " << c.faulted_length_data
+                      << ", fell through " << c.fell_through << " (resource status "
+                      << c.resource_status << ")\n";
+            // getenv races only a concurrent setenv; nothing in the fuzz process sets one.
+            if (char const* path = std::getenv(  // NOLINT(concurrency-mt-unsafe)
+                    "FIXPP_FUZZ_092_COUNT_FILE")) {
+                if (std::ofstream f{path, std::ios::app}; f) {
+                    f << "T062a entered=" << c.entered
+                      << " malformed_tag=" << c.faulted_malformed_tag
+                      << " length_data=" << c.faulted_length_data
+                      << " fell_through=" << c.fell_through << " resource=" << c.resource_status
+                      << '\n';
                 }
             }
         });

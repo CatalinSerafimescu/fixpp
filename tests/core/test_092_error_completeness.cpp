@@ -40,6 +40,9 @@ TEST(Error092Completeness, ExactSetEquality) {
               std::string_view{"unknown error"});
     EXPECT_NE(fixpp::core::error_message(error::wire_length_data_mismatch),
               std::string_view{"unknown error"});
+    // The cast names the slot one past the last enumerator on purpose: the
+    // assertion is that the slot has no message.
+    // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange)
     EXPECT_EQ(fixpp::core::error_message(static_cast<error>(134U)),
               std::string_view{"unknown error"})
         << "slot 134 must be unknown — nothing added beyond the 092 block";

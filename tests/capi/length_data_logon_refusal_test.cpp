@@ -419,8 +419,8 @@ struct InitiatorCell {
             }
             inbound.append(chunk.data(), n);
         }
-        if (inbound.find(std::string_view{"\x01"
-                                          "35=A\x01"}) == std::string::npos) {
+        if (!inbound.contains(std::string_view{"\x01"
+                                               "35=A\x01"})) {
             ADD_FAILURE() << "the initiator's first frame is not a Logon";
             return;
         }
