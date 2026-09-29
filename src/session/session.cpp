@@ -3003,6 +3003,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         .by_peer_request = peer_sent_reset});
                 }
 
+                // fixpp#518: a close() posted from another thread can run while the
+                // 141=Y reset or persist above yields. It owns the teardown: no reply
+                // built or sent after it began. After the reset event, which reports a
+                // reset that did happen.
+                if (state_ == lifecycle::closing || state_ == lifecycle::closed_drained ||
+                    fsm_state_ != fsm_state::LogonReceived) {
+                    co_return fixpp::core::expected_t<void>{};
+                }
+
                 // RC#A (gate-b/r1-green): peek via manager (not bare field).
                 // RC#B: gate the advance on build success; gate Active on emit success.
                 // RC#C-2 (gate-b/r2): bilateral_lenient also mirrors 141=Y in reply —
@@ -4635,6 +4644,15 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     negotiated_appl_version_ = *resolved;
                 }
                 // Unknown wire value → leave Unknown (cannot map to application_version).
+            }
+
+            // fixpp#518: a close() posted from another thread can run while the 141=Y
+            // reset or persists above yield. It owns the teardown: no 789 honour frame
+            // (Logout, GapFill, replay) built after it began. Same disposition as the
+            // guard before Active below.
+            if (state_ == lifecycle::closing || state_ == lifecycle::closed_drained ||
+                fsm_state_ != fsm_state::LogonSent) {
+                co_return fixpp::core::expected_t<void>{};
             }
 
             // 027 T015/T021 — initiator 789 honor (BEFORE Active transition).

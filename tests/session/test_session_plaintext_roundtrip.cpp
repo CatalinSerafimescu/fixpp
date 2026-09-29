@@ -661,14 +661,16 @@ struct CloseDuringLogonApp final : sess::Application {
 
 // A MemoryStore that reports itself persistent, so the session hydrates from it and
 // persists into it. Its outbound counter can start past 1, it can run a hook on the
-// session's first inbound hydrate read, and it has a graceful-close flush. The hook
-// stands in for a close() posted from another thread.
+// session's first inbound hydrate read or on its first reset(), and it has a
+// graceful-close flush. A hook stands in for a close() posted from another thread.
 class HookedStore final : public sess::MessageStore {
 public:
-    HookedStore(sess::seqnum_t outbound_next, std::function<void()> on_hydrate)
+    HookedStore(sess::seqnum_t outbound_next, std::function<void()> on_hydrate,
+                std::function<void()> on_reset)
         : sess::MessageStore(flush_thunk_for<HookedStore>()),
           inner_(sess::MemoryStore::Config{.policy = sess::capacity_policy::unbounded}),
-          on_hydrate_(std::move(on_hydrate)) {
+          on_hydrate_(std::move(on_hydrate)),
+          on_reset_(std::move(on_reset)) {
         asio::io_context seed_ioc;
         asio::co_spawn(
             seed_ioc,
@@ -705,6 +707,11 @@ public:
         return inner_.next_seqnum(dir, increment);
     }
     asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override {
+        if (on_reset_) {
+            auto hook = std::move(on_reset_);
+            on_reset_ = nullptr;
+            hook();  // the close it posts runs at the reset's leading post
+        }
         return inner_.reset();
     }
 
@@ -712,7 +719,7 @@ public:
     // a few times, as FileStore's flush does, so the session's other work can run
     // while close() is already under way.
     asio::awaitable<fixpp::core::expected_t<void>> flush_for_session_close() {
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < 8; ++i) {
             co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
         }
         co_return fixpp::core::expected_t<void>{};
@@ -725,12 +732,14 @@ private:
 
     sess::MemoryStore inner_;
     std::function<void()> on_hydrate_;
+    std::function<void()> on_reset_;
 };
 
 class HookedStoreFactory final : public sess::MessageStoreFactory {
 public:
     sess::seqnum_t outbound_next = 1;
     std::function<void()> on_hydrate;
+    std::function<void()> on_reset;
 
     [[nodiscard]] bool yields_persistent_store() const noexcept override { return true; }
     [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<sess::MessageStore>> make(
@@ -738,7 +747,8 @@ public:
         std::size_t /*max_store_memory_bytes*/,
         asio::any_io_executor /*file_io_executor*/) noexcept override {
         return fixpp::core::expected_t<std::unique_ptr<sess::MessageStore>>{
-            std::make_unique<HookedStore>(outbound_next, std::move(on_hydrate))};
+            std::make_unique<HookedStore>(outbound_next, std::move(on_hydrate),
+                                          std::move(on_reset))};
     }
 };
 
@@ -749,6 +759,7 @@ struct LogonCloseCase {
     bool enable_789 = false;
     sess::seqnum_t store_outbound_next = 0;  // 0 = no store_factory
     bool close_from_hydrate = false;
+    bool close_from_reset = false;
     bool cancel_sleeps_before_stop = true;
 };
 
@@ -885,6 +896,16 @@ sess::SessionConfig make_case_config(sess::session_role role, std::string sender
     return cfg;
 }
 
+void attach_hooked_store(sess::SessionConfig& cfg, LogonCloseCase const& c,
+                         std::shared_ptr<CloseDuringLogonApp> const& app) {
+    if (c.store_outbound_next == 0) return;
+    auto factory = std::make_shared<HookedStoreFactory>();
+    factory->outbound_next = c.store_outbound_next;
+    if (c.close_from_hydrate) factory->on_hydrate = [app] { app->post_close(); };
+    if (c.close_from_reset) factory->on_reset = [app] { app->post_close(); };
+    cfg.store_factory = std::move(factory);
+}
+
 // Settle, capture, then stop the engine. Settled: the close (if any) returned, or the
 // control session reached Active; the extra window lets anything queued behind it run.
 void settle_capture_and_stop(asio::io_context& ioc, sess::Engine& engine,
@@ -950,12 +971,7 @@ LogonCloseOutcome run_acceptor_case(LogonCloseCase const& c) {
 
     auto cfg = make_case_config(sess::session_role::acceptor, "PLAIN-ACCEPTOR", "PLAIN-INITIATOR",
                                 ioc.get_executor(), 0, c);
-    if (c.store_outbound_next != 0) {
-        auto factory = std::make_shared<HookedStoreFactory>();
-        factory->outbound_next = c.store_outbound_next;
-        if (c.close_from_hydrate) factory->on_hydrate = [app] { app->post_close(); };
-        cfg.store_factory = std::move(factory);
-    }
+    attach_hooked_store(cfg, c, app);
     app->engine = &engine;
     app->id = sess::SessionId::from_config(cfg);
     app->mode = c.mode;
@@ -1003,6 +1019,7 @@ LogonCloseOutcome run_initiator_case(LogonCloseCase const& c) {
 
     auto cfg = make_case_config(sess::session_role::initiator, "PLAIN-INITIATOR", "PLAIN-ACCEPTOR",
                                 ioc.get_executor(), port, c);
+    attach_hooked_store(cfg, c, app);
     app->engine = &engine;
     app->id = sess::SessionId::from_config(cfg);
     app->mode = c.mode;
@@ -1132,6 +1149,42 @@ TEST(LogonCloseDuringSuspension, AcceptorCloseDuringHydrate) {
     expect_close_owns_teardown(o);
     EXPECT_EQ(std::count(o.ring.begin(), o.ring.end(), sess::fsm_state::LogonReceived), 0)
         << "ring=" << ring_text(o.ring);
+    EXPECT_TRUE(o.to_admin_after_close_started.empty())
+        << "admin frames after close() began: " << types_text(o.to_admin_after_close_started);
+}
+
+// The peer's Logon carries ResetSeqNumFlag(141)=Y, so the acceptor resets its store
+// after writing LogonReceived. A close(graceful) lands at that reset and stays under
+// way while the store flushes. The arm must not build or send its reply after close()
+// began; the only admin frame after it is close()'s own Logout.
+TEST(LogonCloseDuringSuspension, AcceptorCloseDuringPeerResetBuildsNoReply) {
+    auto o = run_acceptor_case({.mode = sess::close_mode::graceful,
+                                .arm_on = "",
+                                .peer_logon_extra = "141=Y\x01",
+                                .store_outbound_next = 1,
+                                .close_from_reset = true});
+    ASSERT_TRUE(o.bound);
+    ASSERT_TRUE(o.settled) << "ring=" << ring_text(o.ring);
+    expect_close_owns_teardown(o);
+    EXPECT_EQ(o.to_admin_after_close_started, std::vector<std::string>{"5"})
+        << "admin frames after close() began: " << types_text(o.to_admin_after_close_started);
+}
+
+// Initiator: the peer's Logon-ack carries 141=Y and a 789 above the initiator's next
+// outbound, so the initiator resets its store and then answers the 789 with a Logout.
+// A close(graceful) lands at that reset and stays under way while the store flushes;
+// no 789-handling frame may be built after close() began.
+TEST(LogonCloseDuringSuspension, InitiatorCloseDuringPeerResetBuildsNoHonourFrame) {
+    auto o = run_initiator_case({.mode = sess::close_mode::graceful,
+                                 .arm_on = "",
+                                 .peer_logon_extra = "141=Y\x01"
+                                                     "789=5\x01",
+                                 .enable_789 = true,
+                                 .store_outbound_next = 1,
+                                 .close_from_reset = true});
+    ASSERT_TRUE(o.bound);
+    ASSERT_TRUE(o.settled) << "ring=" << ring_text(o.ring);
+    expect_close_owns_teardown(o);
     EXPECT_TRUE(o.to_admin_after_close_started.empty())
         << "admin frames after close() began: " << types_text(o.to_admin_after_close_started);
 }
