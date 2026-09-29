@@ -901,8 +901,10 @@ struct CaseRig {
         out.settled = fixpp::test_support::pump_until(
             ioc,
             [&] {
-                if (!app->held) return false;
                 if (c.mode) return app->seen.close_ok.has_value();
+                // The control initiator fires no toAdmin after it is published.
+                if (!app->held) app->held = engine.lookup(app->id);
+                if (!app->held) return false;
                 return app->held->state() == sess::fsm_state::Active;
             },
             kStateBudget, fixpp::test_support::kPumpSlice, "LogonCloseDuringSuspension/settle");
@@ -1126,6 +1128,18 @@ TEST(LogonCloseDuringSuspension, AcceptorCloseDuringPeerResetBuildsNoReply) {
     ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
     expect_close_owns_teardown(o);
     expect_only_close_logout_after_close(o);
+}
+
+// Initiator control: no close. Asserts the initiator reaches Active with no
+// Disconnected in the ring and one onLogon.
+TEST(LogonCloseDuringSuspension, InitiatorControlNoCloseReachesActive) {
+    auto o = run_initiator_case({.mode = std::nullopt});
+    ASSERT_TRUE(o.bound);
+    ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
+    EXPECT_EQ(o.state_after_settle, std::optional{sess::fsm_state::Active});
+    EXPECT_FALSE(written_after_disconnected(o.ring)) << "ring=" << joined(o.ring);
+    EXPECT_EQ(o.seen.on_logon, 1);
+    EXPECT_TRUE(o.stop_completed);
 }
 
 // Initiator: the peer's Logon-ack carries 141=Y and a 789 above the initiator's next
