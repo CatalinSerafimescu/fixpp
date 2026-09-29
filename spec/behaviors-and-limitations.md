@@ -3439,3 +3439,27 @@ L-092-3 and L-092-5 are not used: the L-092 numbers follow contract C-5's, and C
 ### Limitations
 
 - **L-509-1 — on a PossDup Reject(35=3) or Logout(35=5), an unparseable `SendingTime(52)` next to a parseable `OrigSendingTime(122)` is accepted without the `122 > 52` check.** This fall-through predates #509 and is commented at the Arm D site in `Session::on_inbound_frame`. After B-509-1 it also covers an out-of-range `52`. *(Witness `tests/session/test_inbound_poss_dup_validation.cpp` `PossDupValidationTest.AdminPossDup_OutOfRangeSendingTime_FallsThrough`.)* **Status: pre-existing, disclosed.**
+
+## fixpp#518 — a Logon exchange that `close()` interrupts stops where it is (2026-09-29)
+
+### Behaviors
+
+- **B-518-1 — once `close()` has begun, a suspended Logon arm returns without acting further. This holds for both close modes.** The Logon arms of `Session::on_inbound_frame` suspend at several points:
+  - the acceptor's store hydrate before `LogonReceived`;
+  - a peer-requested reset (ResetSeqNumFlag(141)=Y) before the reply is built;
+  - the reply Logon's store and write;
+  - the NextExpectedMsgSeqNum(789) handling (GapFill, or the too-high Logout) on either role.
+
+  `close()` can run during any of these suspensions. It can be posted from the application's `toAdmin` through `Engine::lookup`, or come from another thread. When the arm resumes after `close()` began, it builds no further frame. It also does not write `Active`, does not fire `onLogon`, and does not start the liveness loop.
+
+  Before fixpp#518:
+  - a terminal close was overwritten by `Active`;
+  - `onLogon` fired after close began, in both modes;
+  - a reply, a GapFill or a Logout was built after close began;
+  - the liveness loop started after close had already joined it, so nothing cancelled it. Under ASan, an engine teardown with that loop still parked is a heap-use-after-free.
+
+  **Not a `[const §X.7]` BREAKING change**, by owner ruling: the old outcomes were the defect. *(`Session::on_inbound_frame`, the `logon_arm_superseded` predicate; witnesses `tests/session/test_session_plaintext_roundtrip.cpp` `LogonCloseDuringSuspension.*`; owner rulings https://github.com/CatalinSerafimescu/fixpp/issues/518#issuecomment-5894703690.)*
+
+### Limitations
+
+- **L-518-1 — B-518-1 is witnessed over plain TCP with an in-memory test store.** A TLS transport and `FileStore` have different suspension points, and neither is measured. The guard covers each suspension in the Logon arms whatever the transport or store. The graceful Logout phase (`LogoutSent`) and the initiator's `LogonSent` writes are not guarded. By code reading they happen before the session is published to `Engine::lookup`, or they are transient states that `close()` overwrites. **Status: disclosed.**

@@ -88,6 +88,7 @@ The authority is therefore split three ways, and knowing the split is most of th
 | **A refused first Logon transitions to `Disconnected`, not back to `NotConnected`** | the two states are not interchangeable: `Disconnected` records that an attempt happened and failed | `B-009-2` |
 | **The live inbound path accepts out-of-order header/body fields, including `MsgType` not first** | real counterparties emit them; strictness here buys conformance-theatre and loses interop | `B-005-7` |
 | **`open()` refuses a configured string that an admin builder would copy verbatim, if it holds a byte `< 0x20` or `'='`** — CompIDs, BeginString, each `supported_msg_types[].msg_type`, and the credentials | those values reach the wire through `append_raw` unvalidated, so one SOH injects a field. Every admin builder emits CompIDs and BeginString; `build_logon` adds RefMsgType and the credentials when they are configured. ⭐ **ONE predicate, `fixpp::session::contains_forbidden_config_byte`** (`config_byte_floor.hpp`), also called by the C-ABI setters before any `Session` exists. ⚠️ **It is a POLICY floor, not FIX grammar**: fixpp's scanner splits at the *first* `'='`, so `'='` is legal in a value as fixpp parses it. Do not cite it as the grammar | `B-452-1`; residual `L-452-2` |
+| **A Logon arm that resumes after `close()` began stops where it is** — no further frame, no Active, no `onLogon`, no liveness loop | a Logon arm suspends (hydrate, a peer-requested reset, the reply write, the NextExpectedMsgSeqNum(789) handling), and `close()` can run in that window: posted from the application's `toAdmin` via `Engine::lookup`, or from another thread. A graceful close leaves the FSM in `LogonReceived` while its Logout waits on the write gate the reply holds, so the check is "close began" (`state_ == lifecycle::closing`), not only "the FSM moved". Before fixpp#518 the arm overwrote close's `Disconnected` with `Active`, fired `onLogon` after close began, and spawned a liveness loop that nothing cancels | `B-518-1`; `L-518-1` |
 
 ## What was rejected — the half the code cannot tell you
 
@@ -147,6 +148,11 @@ The authority is therefore split three ways, and knowing the split is most of th
   - ⚠️ **041's `contracts/validation-gate.md` C-3 and `spec.md` (Clarifications, FR-003, edge cases),
     and 021's `spec.md` FR-004, still say "does not advance". They are point-in-time records, left
     as-is. See B-423-1.**
+- **Guarding a Logon arm against a concurrent `close()` in one central place** (fixpp#518).
+  - **Refusing the Active write inside `record_state_transition_`** was rejected. Refusing the write does not stop the arm: it would still build and emit frames, fire `toAdmin` and spawn liveness. It would also need an error return across every caller.
+  - **Failing `store_then_emit` once closing** was rejected. `close()`'s own graceful Logout goes through that function. It also does not cover the hydrate and reset suspensions, which come before any emit.
+  - **What shipped instead:** each suspension point in the Logon arms re-checks one predicate (`logon_arm_superseded` in `Session::on_inbound_frame`).
+  - ⚠️ **A new `co_await` added to a Logon arm needs the same check.**
 
 ## ⚠️ Limitations an integrator must know before trusting this family
 

@@ -6,6 +6,9 @@ status: stable
 
 # Log
 
+- **2026-09-29 — fixpp#518, a Logon arm that resumes after `close()` began.** `components/session.md`
+  gains the invariant row (B-518-1/L-518-1) and the rejected central chokepoints
+  (`record_state_transition_`, `store_then_emit`). The per-suspension guard shipped instead.
 - **2026-09-29 — fixpp#509 (B20), an out-of-range UTCTimestamp.** `components/inbound-message-path.md`
   gains the decision (refuse at the parse, exact accuracy check) and what was rejected: patching the
   callers, year literals, compiler builtins, and a cold edge path (the owner waived `[const §VIII.2]`).
