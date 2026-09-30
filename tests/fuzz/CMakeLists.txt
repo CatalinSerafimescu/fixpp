@@ -150,7 +150,6 @@ set_target_properties(fuzz_file_cert_source PROPERTIES
 # SC-011 / FR-033 / [const §VII.7] voluntary / [const §IX.2].
 # Drives random interleavings of store/retrieve/reset/next_seqnum against
 # both MemoryStore and FileStore. Runs under ASan + UBSan.
-# TSan build: build separately with linux-clang-tsan preset + FIXPP_BUILD_FUZZ.
 add_executable(fuzz_message_store fuzz_message_store.cpp)
 target_link_libraries(fuzz_message_store PRIVATE
   fixpp_session

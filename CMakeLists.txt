@@ -442,14 +442,23 @@ if(FIXPP_BUILD_FUZZ)
   # definitions, so a sanitizer executable links, but one with no sanitizer
   # runtime (a unit test, the codegen host tool) does not. That is why a fuzz
   # build with no sanitizer is refused here rather than failing at link time.
-  if(NOT (FIXPP_ENABLE_ASAN OR FIXPP_ENABLE_UBSAN OR FIXPP_ENABLE_TSAN))
+  # TSan is refused separately, first: every harness hard-codes
+  # -fsanitize=fuzzer,address, and clang refuses address together with thread.
+  if(FIXPP_ENABLE_TSAN)
     message(FATAL_ERROR
-      "FIXPP_BUILD_FUZZ=ON needs one of FIXPP_ENABLE_ASAN / FIXPP_ENABLE_UBSAN / "
-      "FIXPP_ENABLE_TSAN (#508). The src/ libraries are then compiled with "
+      "FIXPP_BUILD_FUZZ=ON cannot be combined with FIXPP_ENABLE_TSAN (#508): every fuzz "
+      "harness is compiled with -fsanitize=fuzzer,address (tests/fuzz/, tests/config/fuzz/), "
+      "and clang refuses -fsanitize=address together with -fsanitize=thread. Use "
+      "FIXPP_ENABLE_ASAN or FIXPP_ENABLE_UBSAN, or configure with -DFIXPP_BUILD_FUZZ=OFF.")
+  endif()
+  if(NOT (FIXPP_ENABLE_ASAN OR FIXPP_ENABLE_UBSAN))
+    message(FATAL_ERROR
+      "FIXPP_BUILD_FUZZ=ON needs one of FIXPP_ENABLE_ASAN / FIXPP_ENABLE_UBSAN "
+      "(#508). The src/ libraries are then compiled with "
       "-fsanitize=fuzzer-no-link, whose objects reference the __sanitizer_cov_* hooks; "
       "libFuzzer and the sanitizer runtimes define them, but a non-fuzz executable with no "
-      "sanitizer runtime (a unit test, the codegen host tool) fails to link. Enable a "
-      "sanitizer, or configure with -DFIXPP_BUILD_FUZZ=OFF.")
+      "sanitizer runtime (a unit test, the codegen host tool) fails to link. Enable one "
+      "of them, or configure with -DFIXPP_BUILD_FUZZ=OFF.")
   endif()
   cmake_language(DEFER CALL fixpp_instrument_libraries_for_fuzzing)
 
