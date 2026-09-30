@@ -30,7 +30,9 @@ step 19 points here.
 | 6 | `phases/phase-4.md` — **status dashboard ONLY** | manual | Terse Track Log cells + the Module Status row. **No decision narrative here** — that goes in the per-feature sub-file |
 | 7 | `phases/phase-4/<module>/README.md` — feature progress + exit criteria | manual | |
 | 8 | `<feature>-verify.md` / lifecycle doc — final **User sign-off** line | manual | |
-| 9 | **Issues** — review and close what this PR closes | manual | ⚠️ Verify with `closingIssuesReferences`, **not** the PR body. A commit message saying a PR does *not* close an issue is what **closed** it — the linker ignores negation. Grep the whole commit range |
+| 9 | **Issues** — review and close what this PR closes | manual | ⚠️ Verify with `closingIssuesReferences`, **not** the PR body. A commit message saying a PR does *not* close an issue is what **closed** it — the linker ignores negation. Grep the whole commit range. ⚠️ And read each issue's **state** after the merge: a `closingIssuesReferences` entry does not guarantee the auto-close fired. Close a missed one by hand, with a pointer to the merge commit |
+| 16 | **Workspace reset** — return the tree the PR was built in to `main` (owner rule, 2026-09-30) | manual | First `git fetch origin`. **Main checkout** (the submodule path): `git switch main && git merge --ff-only origin/main`. **`fixpp-parallel`** (or any other worktree): `git checkout --detach origin/main`. **Never** leave a merged branch checked out. Guard: switch only the tree whose `worktree list` entry shows **this PR's** branch, and only with `git status --porcelain` empty. Then `codegraph sync` in that tree, from inside it |
+| 17 | **Purge the merged branch** — local and remote | manual | Only after row 16: a checked-out branch cannot be deleted. A squash merge leaves the branch outside `git branch --merged`, so prove it another way. `gh pr view <N> --json state,headRefOid` must say `MERGED`, with `headRefOid` equal to `git rev-parse origin/<branch>`, and to the local tip if one exists. Then `git push origin --delete <branch>`, `git branch -D <branch>`, `git fetch --prune origin`. Leave any branch that fails the proof, and name it in the disposition |
 
 **Row 3 is now two things, and the first one is not here.**
 
@@ -127,7 +129,9 @@ ALWAYS
 6.  phase-4.md dashboard ............... DONE | N/A
 7.  module README ...................... DONE | N/A
 8.  verify/lifecycle sign-off .......... DONE | N/A
-9.  issues closed ...................... DONE (<#s>, via closingIssuesReferences) | N/A
+9.  issues closed ...................... DONE (<#s>, via closingIssuesReferences; state read back) | N/A
+16. workspace reset .................... DONE (<tree> -> main @ <sha> | detached @ <sha>; codegraph synced)
+17. merged branch purged ............... DONE (<branch>: remote + local; tip == PR headRefOid) | N/A — <reason>
 
 CONDITIONAL — state the trigger's status, not just N/A
 10. coverage-index .................... trigger: <fired|not fired> — <disposition>
