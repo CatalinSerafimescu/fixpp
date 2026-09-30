@@ -431,6 +431,25 @@ if(FIXPP_BUILD_TESTS)
 endif()
 
 if(FIXPP_BUILD_FUZZ)
+  # #508: the src/ libraries the fuzzers link are compiled with
+  # -fsanitize=fuzzer-no-link, so libFuzzer gets coverage feedback from library
+  # code and not only from the harness TU. Deferred so the walk sees every
+  # target; see fixpp_instrument_libraries_for_fuzzing() in cmake/Helpers.cmake.
+  #
+  # ⚠️ Those objects then need a sanitizer runtime in EVERY executable linking
+  # them (unit tests, the codegen host tool), which is why a fuzz build with no
+  # sanitizer is refused here rather than failing at link time.
+  if(NOT (FIXPP_ENABLE_ASAN OR FIXPP_ENABLE_UBSAN OR FIXPP_ENABLE_TSAN))
+    message(FATAL_ERROR
+      "FIXPP_BUILD_FUZZ=ON needs one of FIXPP_ENABLE_ASAN / FIXPP_ENABLE_UBSAN / "
+      "FIXPP_ENABLE_TSAN (#508). The src/ libraries are then compiled with "
+      "-fsanitize=fuzzer-no-link, whose objects reference the __sanitizer_cov_* hooks; "
+      "libFuzzer and the sanitizer runtimes define them, but a non-fuzz executable with no "
+      "sanitizer runtime (a unit test, the codegen host tool) fails to link. Enable a "
+      "sanitizer, or configure with -DFIXPP_BUILD_FUZZ=OFF.")
+  endif()
+  cmake_language(DEFER CALL fixpp_instrument_libraries_for_fuzzing)
+
   add_subdirectory(tests/fuzz)
   add_subdirectory(tests/config/fuzz)  # T037 — 044-toml-session-config fuzzer
 endif()

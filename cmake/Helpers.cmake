@@ -187,6 +187,78 @@ function(fixpp_apply_werror_to_all_targets)
   message(STATUS "fixpp: FIXPP_WERROR applied to ${_applied} target(s); exempt: ${_exempt}")
 endfunction()
 
+# ── #508: the library code a fuzzer links must feed it coverage ──────────────
+#
+#   fixpp_instrument_libraries_for_fuzzing()   — call DEFERRED from the
+#                                                top-level CMakeLists.txt, inside
+#                                                its `if(FIXPP_BUILD_FUZZ)` block
+#
+# A harness's own `-fsanitize=fuzzer` instruments ITS TU only. The library TUs it
+# links were compiled with the preset's sanitizer flags alone, so libFuzzer got
+# no edge feedback from the code under test and could not tell that an input
+# reached new library code. This adds `-fsanitize=fuzzer-no-link` (coverage
+# instrumentation, no libFuzzer main) to every library target defined under
+# src/.
+#
+# ⚠️ THE POPULATION IS BY LOCATION: a STATIC/SHARED/MODULE/OBJECT library whose
+# SOURCE_DIR is src/ or below. Enumerated from the buildsystem, as in
+# fixpp_apply_werror_to_all_targets() above and for the same reason — a
+# hand-written list misses the next library. This leaves out the generated
+# fixpp_builders_*/fixpp_validators_* libraries (declared from cmake/Codegen.cmake
+# at the source root) and every tests/ and tools/ target. A library that moves
+# out of src/ silently drops out; re-derive the population from the STATUS line
+# this prints.
+#
+# ⚠️ CALL IT DEFERRED, for the reason fixpp_apply_werror_to_all_targets() gives:
+# BUILDSYSTEM_TARGETS holds only the targets defined so far.
+#
+# ⚠️ THE INSTRUMENTED OBJECTS NEED A SANITIZER RUNTIME IN EVERY EXECUTABLE THAT
+# LINKS THEM, not only in the fuzzers. They reference the
+# `__sanitizer_cov_*` hooks; libFuzzer defines them, and the ASan/UBSan/TSan
+# runtimes carry fallback definitions, so a sanitizer executable links. An
+# executable with no sanitizer runtime (a unit test, the codegen host tool) does
+# not. The top-level `if(FIXPP_BUILD_FUZZ)` block refuses that configuration.
+#
+# ⚠️ AN EMPTY ENUMERATION IS AN INSTRUMENT FAILURE: the fuzzers would be
+# coverage-blind again with nothing saying so. The per-harness `fuzz_libcov_*`
+# ctests (registered by fixpp_add_fuzz_replay() below) check the effect on the
+# linked binaries; this check guards the walk itself.
+function(fixpp_instrument_libraries_for_fuzzing)
+  set(_src_root "${CMAKE_SOURCE_DIR}/src")
+  set(_dirs "${CMAKE_SOURCE_DIR}")
+  set(_instrumented "")
+  while(_dirs)
+    list(POP_FRONT _dirs _dir)
+    get_property(_subdirs DIRECTORY "${_dir}" PROPERTY SUBDIRECTORIES)
+    list(APPEND _dirs ${_subdirs})
+    get_property(_targets DIRECTORY "${_dir}" PROPERTY BUILDSYSTEM_TARGETS)
+    foreach(_tgt IN LISTS _targets)
+      get_target_property(_type ${_tgt} TYPE)
+      if(NOT _type MATCHES "^(STATIC_LIBRARY|SHARED_LIBRARY|MODULE_LIBRARY|OBJECT_LIBRARY)$")
+        continue()
+      endif()
+      get_target_property(_tgt_dir ${_tgt} SOURCE_DIR)
+      # Path-component prefix, so a sibling such as `srcgen/` is not admitted.
+      cmake_path(IS_PREFIX _src_root "${_tgt_dir}" NORMALIZE _under_src)
+      if(NOT _under_src)
+        continue()
+      endif()
+      target_compile_options(${_tgt} PRIVATE -fsanitize=fuzzer-no-link)
+      list(APPEND _instrumented "${_tgt}")
+    endforeach()
+  endwhile()
+
+  if(NOT _instrumented)
+    message(FATAL_ERROR
+      "FIXPP_BUILD_FUZZ=ON but no library target under ${_src_root} was enumerated, so the "
+      "fuzzers would get no coverage feedback from library code. The target walk is broken, "
+      "not the tree (#508).")
+  endif()
+  list(LENGTH _instrumented _count)
+  message(STATUS "fixpp: -fsanitize=fuzzer-no-link applied to ${_count} src/ library "
+                 "target(s): ${_instrumented}")
+endfunction()
+
 # ── Fuzz corpus replay registration (#213) ───────────────────────────────────
 #
 #   fixpp_add_fuzz_replay(<test-name> <fuzz-target> <input-dir>)
@@ -246,6 +318,30 @@ function(fixpp_add_fuzz_replay test_name fuzz_target input_dir)
     WORKING_DIRECTORY "${_artifacts}"
     ENVIRONMENT "UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1"
     FAIL_REGULAR_EXPRESSION "runtime error:")
+
+  # #508: every replayed harness also gets ONE check that its binary carries
+  # coverage counters from library code, so a lost or broken
+  # fixpp_instrument_libraries_for_fuzzing() fails a ctest. Keyed on
+  # the replay registry below so a harness replayed twice is checked once, and
+  # the population is exactly the replayed harnesses, with no second list.
+  # The condition and its failure arms are in cmake/run_fuzz_libcov_check.cmake.
+  get_property(_already_replayed GLOBAL PROPERTY FIXPP_FUZZ_TARGETS_WITH_REPLAY)
+  if(NOT "${fuzz_target}" IN_LIST _already_replayed)
+    set(_libcov_test "fuzz_libcov_${fuzz_target}")
+    # The object list is `|`-joined: a `;` inside an add_test argument does not
+    # survive into the script as one value.
+    add_test(NAME ${_libcov_test}
+             COMMAND "${CMAKE_COMMAND}"
+                     "-DFIXPP_FUZZ_BIN=$<TARGET_FILE:${fuzz_target}>"
+                     "-DFIXPP_HARNESS_OBJECTS=$<JOIN:$<TARGET_OBJECTS:${fuzz_target}>,|>"
+                     "-DFIXPP_READELF=${CMAKE_READELF}"
+                     "-DFIXPP_WORK_DIR=${CMAKE_BINARY_DIR}/fuzz-libcov/${fuzz_target}"
+                     -P "${CMAKE_SOURCE_DIR}/cmake/run_fuzz_libcov_check.cmake")
+    set_tests_properties(${_libcov_test} PROPERTIES
+      LABELS "fuzz"
+      TIMEOUT 300
+      ENVIRONMENT "UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1")
+  endif()
 
   # #408: record that this target now has SOMETHING replaying it. This is the
   # only place that knows it, and recording it here is what lets the
