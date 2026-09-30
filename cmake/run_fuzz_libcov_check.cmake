@@ -2,8 +2,10 @@
 #
 # Registered once per replayed harness by fixpp_add_fuzz_replay() in
 # cmake/Helpers.cmake. It checks that a fuzz binary carries coverage counters
-# from code OUTSIDE its own harness objects, i.e. that the library TUs it links
-# were built with -fsanitize=fuzzer-no-link (fixpp_instrument_libraries_for_fuzzing()).
+# from code OUTSIDE its own harness objects. Attributing that excess to the src/
+# libraries rests on two premises: under FIXPP_BUILD_FUZZ only the src/ library
+# targets get -fsanitize=fuzzer-no-link (fixpp_instrument_libraries_for_fuzzing()),
+# and an unfixed binary's total equals its harness sum (L-508-1).
 #
 # THE CONDITION: the binary's inline 8-bit counters must EXCEED the counters its
 # harness objects contribute. Both are read statically, as the summed size of
