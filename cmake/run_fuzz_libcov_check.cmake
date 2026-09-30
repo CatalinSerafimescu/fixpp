@@ -61,8 +61,8 @@ function(_sancov_cntrs_size file role out_var)
   list(LENGTH _rows _n_rows)
   if(_n_names EQUAL 0)
     message(FATAL_ERROR
-      "${role} '${file}' has no __sancov_cntrs section, so it carries no -fsanitize=fuzzer "
-      "coverage counters and its count cannot be measured.")
+      "${role} '${file}' has no __sancov_cntrs section, so its inline 8-bit counters cannot "
+      "be measured.")
   endif()
   if(NOT _n_names EQUAL _n_rows)
     message(FATAL_ERROR
@@ -87,8 +87,8 @@ _sancov_cntrs_size("${FIXPP_FUZZ_BIN}" "fuzz binary" _total_counters)
 if(NOT _total_counters GREATER _harness_counters)
   message(FATAL_ERROR
     "'${FIXPP_FUZZ_BIN}' carries ${_total_counters} inline 8-bit counters, not more than the "
-    "${_harness_counters} its own harness objects contribute: no library code it links is "
-    "coverage-instrumented, so libFuzzer is blind to it (#508). Check that "
+    "${_harness_counters} its own harness objects contribute, so coverage feedback from the "
+    "library code it links could not be established (#508). Check that "
     "fixpp_instrument_libraries_for_fuzzing() ran and that the linked libraries live under src/.")
 endif()
 message(STATUS
