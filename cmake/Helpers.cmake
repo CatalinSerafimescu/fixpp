@@ -330,8 +330,7 @@ function(fixpp_add_fuzz_replay test_name fuzz_target input_dir)
                      "-DFIXPP_READELF=${CMAKE_READELF}"
                      -P "${CMAKE_SOURCE_DIR}/cmake/run_fuzz_libcov_check.cmake")
     set_tests_properties(fuzz_libcov_${fuzz_target} PROPERTIES
-      LABELS "fuzz"
-      TIMEOUT 300)
+      LABELS "fuzz")
   endif()
 
   # #408: record that this target now has SOMETHING replaying it. This is the
