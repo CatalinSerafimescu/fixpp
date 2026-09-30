@@ -10,7 +10,9 @@ status: stable
   the post-`Active` persist to the guarded suspensions and `onLogon` to the places a close is posted
   from. The rejected list gains a check straight after `onLogon` (it would skip the consumed Logon's
   persist) and a check after the 141=Y reset event (the event and, on the initiator, the CompID
-  authorization and FIXT version record ran after `close()` began).
+  authorization and FIXT version record ran after `close()` began). Inside a 141=Y reset unit the
+  stop is now keyed on `teardown_reset_done_`: the rejected list records both unconditional forms,
+  the `reset_on_disconnect` key and an atomic store unit, and the rule line changes to match.
 - **2026-09-29 — fixpp#518, PR #522 Gate B round 1.** `components/session.md`'s invariant row lists
   the guarded suspensions, which now include the post-hydrate refusals, the `reset_on_logon` reset and
   the steps inside a 141=Y reset. The rejected list gains a guard after every `co_await` (no window
