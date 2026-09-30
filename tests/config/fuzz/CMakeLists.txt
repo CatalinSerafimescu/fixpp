@@ -2,6 +2,8 @@
 # T037 — libFuzzer harness for load_toml_config().
 # 044-toml-session-config — [const §VII.7] MUST (parser-touching), Gate-B blocker.
 # Built only when FIXPP_BUILD_FUZZ=ON (Clang + libFuzzer).
+# Its -fsanitize=fuzzer covers this TU only; the src/ libraries it links get
+# coverage from fixpp_instrument_libraries_for_fuzzing() in cmake/Helpers.cmake (#508).
 #
 # Smoke command (≤30s, Gate-B gate: ≥10 min):
 #   ./build/linux-clang-asan/bin/fuzz_toml_loader \

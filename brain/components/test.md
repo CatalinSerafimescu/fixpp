@@ -19,6 +19,8 @@ refs:
   - tests/interop/cell_results_schema_check_test.py
   - tests/interop/support/witness_comparator.cpp
   - tests/interop/conversation/conversation_script.yaml
+  - cmake/Helpers.cmake
+  - cmake/run_fuzz_libcov_check.cmake
 codegraph_entry: [mock_transport, Clock, system_clock_source]
 constitution: ["§VII", "§VII.4", "§VIII.5"]
 ---
@@ -613,6 +615,45 @@ tolerate every typed error and so grade **only** on a sanitizer finding (`fuzz_f
 green. Also note `-runs=0` executes libFuzzer's implicit **empty** input, so a RED arm that fires on
 any input proves the binary ran, *not* that your seeds were delivered — gate the mutant on
 `size > 0` if that is the claim you need.
+
+## Fuzz coverage feedback (#508): a harness's `-fsanitize=fuzzer` covers its own TU only
+
+Until #508 every campaign was coverage-blind to the library. Each harness compiled only its own TU
+with `-fsanitize=fuzzer`, so libFuzzer's `cov:` counted the harness plus the header code inlined into
+it. An input that reached new library code looked like any other input. The campaigns still ran under
+ASan/UBSan, so they caught memory errors on whatever paths they happened to reach, but the search
+could not steer. `fixpp_instrument_libraries_for_fuzzing()` (`cmake/Helpers.cmake`) now adds
+`-fsanitize=fuzzer-no-link` to every library target under `src/` whenever `FIXPP_BUILD_FUZZ=ON`.
+
+**What was rejected, and why:**
+- **A separate fuzz preset or build tree.** `/speckit-verify`'s fuzz step runs
+  `build/linux-clang-asan/bin/<target>`, so the binaries people actually fuzz with would have stayed
+  blind.
+- **A fuzz-instrumented copy of each library.** The asan lane is the disk-tightest leg, and a copy
+  would double its library build.
+- **A directory-scoped `add_compile_options`.** It would also instrument `tests/` and `tools/`, and
+  its scope would be decided by where a line sits in the file. The target walk makes the rule the
+  target's location instead.
+
+**The population is chosen by location** (`src/`), and it is enumerated from the buildsystem the same
+way #417's `-Werror` walk is. That leaves out the generated builder and validator libraries; a fuzzer
+that starts linking one gets no feedback from it (L-508-1). The cost is B-508-1: in a fuzz build, *every* executable that links these libraries runs
+instrumented code, and B-508-2 follows from that. Without a sanitizer runtime to supply the
+`__sanitizer_cov_*` hooks, a non-fuzz executable does not link, so a fuzz build with no sanitizer is
+refused at configure.
+
+⚠️ **Blind mutation does reach shallow library branches, so "a grown unit reached it" does not tell
+the arms apart unless the branch is deep.** In #508's paired campaigns, the pre-fix binaries grew units
+reaching `detect_length_pairs`' strict-walk `mark_pair` and `Session::dispose_unparseable_`. Neither
+starting corpus reached either one. Only a branch behind several input-dependent comparisons separated
+the two arms. The figures are in the #508 verify record. When you judge a fuzz change, choose the
+witness branch by running the UNFIXED binary first.
+
+⚠️ **`fuzz_libcov_*` checks the effect on the binary, not the membership** (L-508-1). It proves that
+some linked object outside the harness's own objects carries coverage counters. In a
+`FIXPP_BUILD_FUZZ` build only the `src/` library targets get `-fsanitize=fuzzer-no-link`, and an
+unfixed binary's total equals its harness sum, so the excess is attributed to them. Re-read the
+configure line for the set.
 
 ## The committed interop evidence (089) — a digest-bound artifact, and the two ways it read green
 

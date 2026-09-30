@@ -1,6 +1,8 @@
 # tests/fuzz/CMakeLists.txt — libFuzzer harnesses.
 # Built only when FIXPP_BUILD_FUZZ=ON.
 # Clang-only: uses -fsanitize=fuzzer,address which GCC does not support.
+# A harness's -fsanitize=fuzzer covers its own TU only; the src/ libraries it
+# links get coverage from fixpp_instrument_libraries_for_fuzzing() in cmake/Helpers.cmake (#508).
 
 # Seam #7 of 001-core-decimal — decimal parse fuzzer.
 add_executable(fuzz_decimal_parse fuzz_decimal_parse.cpp)
@@ -148,7 +150,6 @@ set_target_properties(fuzz_file_cert_source PROPERTIES
 # SC-011 / FR-033 / [const §VII.7] voluntary / [const §IX.2].
 # Drives random interleavings of store/retrieve/reset/next_seqnum against
 # both MemoryStore and FileStore. Runs under ASan + UBSan.
-# TSan build: build separately with linux-clang-tsan preset + FIXPP_BUILD_FUZZ.
 add_executable(fuzz_message_store fuzz_message_store.cpp)
 target_link_libraries(fuzz_message_store PRIVATE
   fixpp_session
