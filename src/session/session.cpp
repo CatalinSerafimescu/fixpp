@@ -2439,6 +2439,19 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::dispose_unparseable_(
 // NOLINTNEXTLINE(readability-function-size,hicpp-function-size)
 asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
     std::span<const std::byte> frame) noexcept {
+    // fixpp#518: true when a Logon arm must stop after a resume, because the session
+    // left the state the arm expects while the arm was suspended. The writer that
+    // matters is close(), which an application can post from a callback the arm fires
+    // (Engine::lookup() already returns the session) or from another thread, and which
+    // owns the teardown once it begins. The arm then returns success, as in the
+    // Disconnected row. `closing` is the signal because close() sets it before it can
+    // yield the strand, while a graceful close() leaves the FSM in the arm's state until
+    // its phase 1 writes. The FSM term covers `closed_drained` too: close() writes
+    // Disconnected before it gets there.
+    // `never_opened` is not a close.
+    static constexpr auto logon_arm_superseded = [](Session const& s, fsm_state expected) noexcept {
+        return s.state_ == lifecycle::closing || s.fsm_state_ != expected;
+    };
     // 070-fix44-closeout S-030: negotiated MaxMessageSize(383) enforcement. Once
     // established (Active), an inbound frame exceeding the size WE advertised is a
     // negotiated-contract violation → disconnect (distinct from the absolute
@@ -2595,6 +2608,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         co_return std::unexpected(h_r.error());
                     }
                 }
+                // fixpp#518: a close() may have run while hydrate yielded.
+                if (logon_arm_superseded(*this, fsm_state::NotConnected)) {
+                    co_return fixpp::core::expected_t<void>{};
+                }
 
                 // 070-fix44-closeout S-029: TestMessageIndicator(464) posture-mismatch
                 // refusal on the acceptor's inbound Logon. Opt-in — cfg_.posture unset
@@ -2689,6 +2706,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         record_state_transition_(fsm_state::Disconnected);
                         co_return std::unexpected(rst_r.error());
                     }
+                }
+                // fixpp#518: a close() may have run while the reset_on_logon reset yielded.
+                if (logon_arm_superseded(*this, fsm_state::NotConnected)) {
+                    co_return fixpp::core::expected_t<void>{};
                 }
 
                 auto chk = co_await seqnum_mgr_.check_inbound(seq);
@@ -2966,6 +2987,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         record_state_transition_(fsm_state::Disconnected);
                         co_return std::unexpected(rst_r.error());
                     }
+                    // fixpp#518: a close() may have run while the 141=Y reset yielded. The
+                    // unit stops here only once close()'s teardown reset has been issued, so
+                    // the restore below cannot land after it. Otherwise the unit completes,
+                    // keeping the consumed Logon's advance, and the check after it stops
+                    // the arm.
+                    if (teardown_reset_done_) {
+                        co_return fixpp::core::expected_t<void>{};
+                    }
                     // 030 T011 (FR-001/005/007): the consumed seq-1 reset Logon is a
                     // surviving net-advance (check_inbound advanced 1->2 before this reset
                     // rewound it). Restore next-expected-inbound to seqnum_min+1 (=2) in the
@@ -2986,6 +3015,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         if (!p_r) co_return std::unexpected(p_r.error());
                     }
                 }
+                // fixpp#518: a close() may have run while the inbound restore or persist
+                // yielded.
+                if (logon_arm_superseded(*this, fsm_state::LogonReceived)) {
+                    co_return fixpp::core::expected_t<void>{};
+                }
+
                 // FR-018: emit the reset event once, after post-reset state is consistent,
                 // when any reset happened (knob-driven OR received-141). by_peer_request
                 // reflects whether the peer requested it via 141=Y.
@@ -3054,6 +3089,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     record_state_transition_(fsm_state::Disconnected);
                     co_return std::unexpected(emit_r.error());
                 }
+                // fixpp#518: a close() may have run during the reply write.
+                if (logon_arm_superseded(*this, fsm_state::LogonReceived)) {
+                    co_return fixpp::core::expected_t<void>{};
+                }
             }
 
             // 027 T014/T021 — acceptor 789 honor (RC#4 ordering: AFTER reply store_then_emit).
@@ -3066,6 +3105,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                                                n_pre_outbound);
                 if (!h789) co_return std::unexpected(h789.error());
                 if (!*h789) co_return fixpp::core::expected_t<void>{};
+            }
+
+            // fixpp#518: a close() may have run during the 789 honour's writes.
+            if (logon_arm_superseded(*this, fsm_state::LogonReceived)) {
+                co_return fixpp::core::expected_t<void>{};
             }
 
             // Reply Logon successfully emitted: transition to Active.
@@ -3096,6 +3140,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             if (logon_inbound_advanced && !peer_sent_reset && !cfg_.reset_on_logon) {
                 auto p_r = co_await persist_inbound_advance_();
                 if (!p_r) co_return std::unexpected(p_r.error());
+            }
+
+            // fixpp#518: a close() may have run while the persist yielded, including one
+            // posted from onLogon.
+            if (logon_arm_superseded(*this, fsm_state::Active)) {
+                co_return fixpp::core::expected_t<void>{};
             }
 
             // Spawn liveness loop (same as initiator's LogonSent→Active path).
@@ -4442,6 +4492,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         record_state_transition_(fsm_state::Disconnected);
                         co_return std::unexpected(rst_r.error());
                     }
+                    // fixpp#518: a close() may have run while the 141=Y reset yielded. The
+                    // unit stops here only once close()'s teardown reset has been issued, so
+                    // the restores below cannot land after it. Otherwise the unit completes,
+                    // keeping the consumed Logon's advance, and the check after it stops
+                    // the arm.
+                    if (teardown_reset_done_) {
+                        co_return fixpp::core::expected_t<void>{};
+                    }
                     // 030 T016 (FR-001/005/007/009): the consumed seq-1 reset-ack Logon is a
                     // surviving net-advance (check_inbound advanced 1->2 before this reset
                     // rewound it) — identical clobber to the acceptor arm. Restore
@@ -4459,6 +4517,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         // store 1->2 (no-op if non-persistent, INV-H4).
                         auto p_r = co_await persist_inbound_advance_();
                         if (!p_r) co_return std::unexpected(p_r.error());
+                    }
+                    // fixpp#518: a close() may have run while the inbound restore or persist
+                    // yielded. The outbound restore is skipped only once close()'s teardown
+                    // reset has been issued, so it cannot land after it. Otherwise it
+                    // completes, and the check after it stops the arm.
+                    if (teardown_reset_done_) {
+                        co_return fixpp::core::expected_t<void>{};
                     }
                     // 032 T010(c): outbound restore — symmetric twin of the 030 inbound restore.
                     // Guarded on BOTH: latch (fixpp sent 141=Y) AND reset_before_send (fixpp's
@@ -4478,6 +4543,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         // store 1->2 (no-op if non-persistent, INV-H4).
                         auto po_r = co_await persist_outbound_advance_();
                         if (!po_r) co_return std::unexpected(po_r.error());
+                    }
+                    // fixpp#518: a close() may have run while the outbound restore or
+                    // persist yielded.
+                    if (logon_arm_superseded(*this, fsm_state::LogonSent)) {
+                        co_return fixpp::core::expected_t<void>{};
                     }
                     // 032 T010(d): FR-018 mode mapping — use the latch alone (C4 gate).
                     // by_peer_request=false iff fixpp sent 141=Y (own_logon_sent_reset_flag).
@@ -4623,6 +4693,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 if (!*h789) co_return fixpp::core::expected_t<void>{};
             }
 
+            // fixpp#518: a close() may have run during the 789 honour's writes.
+            if (logon_arm_superseded(*this, fsm_state::LogonSent)) {
+                co_return fixpp::core::expected_t<void>{};
+            }
+
             // Valid Logon-ack + in-seq → Active (initiator handshake complete).
             record_state_transition_(fsm_state::Active);
             // 019 T016: if onLogon threw, terminal-close the session.
@@ -4644,6 +4719,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             if (logon_inbound_advanced_init && !peer_ack_sent_reset_flag) {
                 auto p_r = co_await persist_inbound_advance_();
                 if (!p_r) co_return std::unexpected(p_r.error());
+            }
+
+            // fixpp#518: a close() may have run while the persist yielded, including one
+            // posted from onLogon.
+            if (logon_arm_superseded(*this, fsm_state::Active)) {
+                co_return fixpp::core::expected_t<void>{};
             }
 
             // T041 (US3): seed last_inbound_steady_ from this Logon-ack.
