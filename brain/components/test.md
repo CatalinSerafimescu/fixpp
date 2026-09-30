@@ -636,8 +636,8 @@ could not steer. `fixpp_instrument_libraries_for_fuzzing()` (`cmake/Helpers.cmak
   target's location instead.
 
 **The population is chosen by location** (`src/`), and it is enumerated from the buildsystem the same
-way #417's `-Werror` walk is. That leaves out the generated builder and validator libraries, which no
-fuzzer links. The cost is B-508-1: in a fuzz build, *every* executable that links these libraries runs
+way #417's `-Werror` walk is. That leaves out the generated builder and validator libraries; a fuzzer
+that starts linking one gets no feedback from it (L-508-1). The cost is B-508-1: in a fuzz build, *every* executable that links these libraries runs
 instrumented code, and B-508-2 follows from that. Without a sanitizer runtime to supply the
 `__sanitizer_cov_*` hooks, a non-fuzz executable does not link, so a fuzz build with no sanitizer is
 refused at configure.
@@ -649,8 +649,10 @@ starting corpus reached either one. Only a branch behind several input-dependent
 the two arms. The figures are in the #508 verify record. When you judge a fuzz change, choose the
 witness branch by running the UNFIXED binary first.
 
-⚠️ **`fuzz_libcov_*` checks the effect on the binary, not the membership** (L-508-1). A binary carries
-more counters than its harness object only if some linked `src/` code is instrumented. Re-read the
+⚠️ **`fuzz_libcov_*` checks the effect on the binary, not the membership** (L-508-1). It proves that
+some linked object outside the harness's own objects carries coverage counters. In a
+`FIXPP_BUILD_FUZZ` build only the `src/` library targets get `-fsanitize=fuzzer-no-link`, and an
+unfixed binary's total equals its harness sum, so the excess is attributed to them. Re-read the
 configure line for the set.
 
 ## The committed interop evidence (089) — a digest-bound artifact, and the two ways it read green
