@@ -127,6 +127,31 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND FIXPP_WERROR)
     $<$<COMPILE_LANG_AND_ID:CXX,GNU>:-Wno-attributes=clang::lifetimebound>)
 endif()
 
+# ── Buildsystem target walk ──────────────────────────────────────────────────
+#
+#   fixpp_collect_buildsystem_targets(<out-var> <type-regex>)
+#
+# Sets <out-var> to every target defined so far whose TYPE matches <type-regex>,
+# walking each directory's BUILDSYSTEM_TARGETS recursively from the source root.
+# Callers apply their own filter and action, and must run DEFERRED (see #417).
+function(fixpp_collect_buildsystem_targets out_var type_regex)
+  set(_dirs "${CMAKE_SOURCE_DIR}")
+  set(_found "")
+  while(_dirs)
+    list(POP_FRONT _dirs _dir)
+    get_property(_subdirs DIRECTORY "${_dir}" PROPERTY SUBDIRECTORIES)
+    list(APPEND _dirs ${_subdirs})
+    get_property(_targets DIRECTORY "${_dir}" PROPERTY BUILDSYSTEM_TARGETS)
+    foreach(_tgt IN LISTS _targets)
+      get_target_property(_type ${_tgt} TYPE)
+      if(_type MATCHES "${type_regex}")
+        list(APPEND _found "${_tgt}")
+      endif()
+    endforeach()
+  endwhile()
+  set(${out_var} "${_found}" PARENT_SCOPE)
+endfunction()
+
 # ── #417: FIXPP_WERROR reaches every first-party compiled target ─────────────
 #
 #   fixpp_apply_werror_to_all_targets()   — call DEFERRED from the top-level
@@ -156,28 +181,19 @@ function(fixpp_apply_werror_to_all_targets)
     return()
   endif()
 
-  set(_dirs "${CMAKE_SOURCE_DIR}")
+  fixpp_collect_buildsystem_targets(_targets
+    "^(EXECUTABLE|STATIC_LIBRARY|SHARED_LIBRARY|MODULE_LIBRARY|OBJECT_LIBRARY)$")
   set(_applied 0)
   set(_exempt "")
-  while(_dirs)
-    list(POP_FRONT _dirs _dir)
-    get_property(_subdirs DIRECTORY "${_dir}" PROPERTY SUBDIRECTORIES)
-    list(APPEND _dirs ${_subdirs})
-    get_property(_targets DIRECTORY "${_dir}" PROPERTY BUILDSYSTEM_TARGETS)
-    foreach(_tgt IN LISTS _targets)
-      get_target_property(_type ${_tgt} TYPE)
-      if(NOT _type MATCHES "^(EXECUTABLE|STATIC_LIBRARY|SHARED_LIBRARY|MODULE_LIBRARY|OBJECT_LIBRARY)$")
-        continue()
-      endif()
-      get_target_property(_reason ${_tgt} FIXPP_WERROR_EXEMPT)
-      if(_reason)
-        list(APPEND _exempt "${_tgt}")
-        continue()
-      endif()
-      fixpp_maybe_werror(${_tgt})
-      math(EXPR _applied "${_applied} + 1")
-    endforeach()
-  endwhile()
+  foreach(_tgt IN LISTS _targets)
+    get_target_property(_reason ${_tgt} FIXPP_WERROR_EXEMPT)
+    if(_reason)
+      list(APPEND _exempt "${_tgt}")
+      continue()
+    endif()
+    fixpp_maybe_werror(${_tgt})
+    math(EXPR _applied "${_applied} + 1")
+  endforeach()
 
   if(_applied EQUAL 0)
     message(FATAL_ERROR
@@ -212,41 +228,24 @@ endfunction()
 # ⚠️ CALL IT DEFERRED, for the reason fixpp_apply_werror_to_all_targets() gives:
 # BUILDSYSTEM_TARGETS holds only the targets defined so far.
 #
-# ⚠️ THE INSTRUMENTED OBJECTS NEED A SANITIZER RUNTIME IN EVERY EXECUTABLE THAT
-# LINKS THEM, not only in the fuzzers. They reference the
-# `__sanitizer_cov_*` hooks; libFuzzer defines them, and the ASan/UBSan/TSan
-# runtimes carry fallback definitions, so a sanitizer executable links. An
-# executable with no sanitizer runtime (a unit test, the codegen host tool) does
-# not. The top-level `if(FIXPP_BUILD_FUZZ)` block refuses that configuration.
-#
-# ⚠️ AN EMPTY ENUMERATION IS AN INSTRUMENT FAILURE: the fuzzers would be
-# coverage-blind again with nothing saying so. The per-harness `fuzz_libcov_*`
-# ctests (registered by fixpp_add_fuzz_replay() below) check the effect on the
-# linked binaries; this check guards the walk itself.
+# Why a fuzz build needs a sanitizer: the comment above the refusal in the
+# top-level CMakeLists.txt. The per-harness `fuzz_libcov_*` ctests (registered
+# by fixpp_add_fuzz_replay() below) check the effect on the linked binaries.
 function(fixpp_instrument_libraries_for_fuzzing)
   set(_src_root "${CMAKE_SOURCE_DIR}/src")
-  set(_dirs "${CMAKE_SOURCE_DIR}")
+  fixpp_collect_buildsystem_targets(_targets
+    "^(STATIC_LIBRARY|SHARED_LIBRARY|MODULE_LIBRARY|OBJECT_LIBRARY)$")
   set(_instrumented "")
-  while(_dirs)
-    list(POP_FRONT _dirs _dir)
-    get_property(_subdirs DIRECTORY "${_dir}" PROPERTY SUBDIRECTORIES)
-    list(APPEND _dirs ${_subdirs})
-    get_property(_targets DIRECTORY "${_dir}" PROPERTY BUILDSYSTEM_TARGETS)
-    foreach(_tgt IN LISTS _targets)
-      get_target_property(_type ${_tgt} TYPE)
-      if(NOT _type MATCHES "^(STATIC_LIBRARY|SHARED_LIBRARY|MODULE_LIBRARY|OBJECT_LIBRARY)$")
-        continue()
-      endif()
-      get_target_property(_tgt_dir ${_tgt} SOURCE_DIR)
-      # Path-component prefix, so a sibling such as `srcgen/` is not admitted.
-      cmake_path(IS_PREFIX _src_root "${_tgt_dir}" NORMALIZE _under_src)
-      if(NOT _under_src)
-        continue()
-      endif()
-      target_compile_options(${_tgt} PRIVATE -fsanitize=fuzzer-no-link)
-      list(APPEND _instrumented "${_tgt}")
-    endforeach()
-  endwhile()
+  foreach(_tgt IN LISTS _targets)
+    get_target_property(_tgt_dir ${_tgt} SOURCE_DIR)
+    # Path-component prefix, so a sibling such as `srcgen/` is not admitted.
+    cmake_path(IS_PREFIX _src_root "${_tgt_dir}" NORMALIZE _under_src)
+    if(NOT _under_src)
+      continue()
+    endif()
+    target_compile_options(${_tgt} PRIVATE -fsanitize=fuzzer-no-link)
+    list(APPEND _instrumented "${_tgt}")
+  endforeach()
 
   if(NOT _instrumented)
     message(FATAL_ERROR
@@ -319,28 +318,20 @@ function(fixpp_add_fuzz_replay test_name fuzz_target input_dir)
     ENVIRONMENT "UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1"
     FAIL_REGULAR_EXPRESSION "runtime error:")
 
-  # #508: every replayed harness also gets ONE check that its binary carries
-  # coverage counters from library code, so a lost or broken
-  # fixpp_instrument_libraries_for_fuzzing() fails a ctest. Keyed on
-  # the replay registry below so a harness replayed twice is checked once, and
-  # the population is exactly the replayed harnesses, with no second list.
-  # The condition and its failure arms are in cmake/run_fuzz_libcov_check.cmake.
+  # #508: one library-coverage check per replayed harness (checked once even if
+  # replayed twice); cmake/run_fuzz_libcov_check.cmake. The object list is
+  # `|`-joined because a `;` inside an add_test argument splits the value.
   get_property(_already_replayed GLOBAL PROPERTY FIXPP_FUZZ_TARGETS_WITH_REPLAY)
   if(NOT "${fuzz_target}" IN_LIST _already_replayed)
-    set(_libcov_test "fuzz_libcov_${fuzz_target}")
-    # The object list is `|`-joined: a `;` inside an add_test argument does not
-    # survive into the script as one value.
-    add_test(NAME ${_libcov_test}
+    add_test(NAME fuzz_libcov_${fuzz_target}
              COMMAND "${CMAKE_COMMAND}"
                      "-DFIXPP_FUZZ_BIN=$<TARGET_FILE:${fuzz_target}>"
                      "-DFIXPP_HARNESS_OBJECTS=$<JOIN:$<TARGET_OBJECTS:${fuzz_target}>,|>"
                      "-DFIXPP_READELF=${CMAKE_READELF}"
-                     "-DFIXPP_WORK_DIR=${CMAKE_BINARY_DIR}/fuzz-libcov/${fuzz_target}"
                      -P "${CMAKE_SOURCE_DIR}/cmake/run_fuzz_libcov_check.cmake")
-    set_tests_properties(${_libcov_test} PROPERTIES
+    set_tests_properties(fuzz_libcov_${fuzz_target} PROPERTIES
       LABELS "fuzz"
-      TIMEOUT 300
-      ENVIRONMENT "UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1")
+      TIMEOUT 300)
   endif()
 
   # #408: record that this target now has SOMETHING replaying it. This is the

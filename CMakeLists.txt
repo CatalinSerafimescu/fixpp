@@ -437,8 +437,11 @@ if(FIXPP_BUILD_FUZZ)
   # target; see fixpp_instrument_libraries_for_fuzzing() in cmake/Helpers.cmake.
   #
   # ⚠️ Those objects then need a sanitizer runtime in EVERY executable linking
-  # them (unit tests, the codegen host tool), which is why a fuzz build with no
-  # sanitizer is refused here rather than failing at link time.
+  # them, not only in the fuzzers. They reference the `__sanitizer_cov_*` hooks;
+  # libFuzzer defines them and the ASan/UBSan/TSan runtimes carry fallback
+  # definitions, so a sanitizer executable links, but one with no sanitizer
+  # runtime (a unit test, the codegen host tool) does not. That is why a fuzz
+  # build with no sanitizer is refused here rather than failing at link time.
   if(NOT (FIXPP_ENABLE_ASAN OR FIXPP_ENABLE_UBSAN OR FIXPP_ENABLE_TSAN))
     message(FATAL_ERROR
       "FIXPP_BUILD_FUZZ=ON needs one of FIXPP_ENABLE_ASAN / FIXPP_ENABLE_UBSAN / "
