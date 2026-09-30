@@ -621,8 +621,7 @@ TEST(PlaintextRoundtripTest, PlainAcceptorAndInitiatorCompleteLogonLogout) {
 // instead of queueing it behind the arm's next suspension. Each cell then checks what
 // it names among the outcomes the rig records: the state ring, the event ring, onLogon,
 // the admin frames passed to toAdmin, the clock's parked sleeps, and the store's counter
-// writes and final counters. No store is parked: each cell runs over a real loopback socket, and no
-// store operation waits on the test.
+// writes and final counters.
 namespace {
 
 namespace sess = fixpp::session;
@@ -703,9 +702,7 @@ struct StoreLog {
     // A held operation waited out its bound without such a reset().
     bool hold_timed_out = false;
 
-    void record(std::string op) {
-        writes.push_back({std::move(op), close_began && close_began()});
-    }
+    void record(std::string op) { writes.push_back({std::move(op), close_began && close_began()}); }
 };
 
 // A MemoryStore that reports itself persistent, so the session hydrates from it and
@@ -715,8 +712,8 @@ struct StoreLog {
 class HookedStore final : public sess::MessageStore {
 public:
     struct Hooks {
-        std::function<void()> on_hydrate;  // first inbound read
-        std::function<void()> on_reset;    // first reset()
+        std::function<void()> on_hydrate;           // first inbound read
+        std::function<void()> on_reset;             // first reset()
         std::function<void()> on_inbound_persist;   // first next_seqnum(inbound, true)
         std::function<void()> on_outbound_persist;  // first next_seqnum(outbound, true)
         // The operation whose hook fires completes, then does not return to the session
@@ -814,8 +811,8 @@ private:
     }
     // Logged when the write completes, not when it is issued: the MemoryStore applies
     // it only after its leading post and its mutex.
-    asio::awaitable<fixpp::core::expected_t<sess::seqnum_t>> logged_increment(
-        sess::direction_t dir, bool hold) {
+    asio::awaitable<fixpp::core::expected_t<sess::seqnum_t>> logged_increment(sess::direction_t dir,
+                                                                              bool hold) {
         auto r = co_await inner_->next_seqnum(dir, true);
         log_->record(dir == sess::direction_t::inbound ? "in+1" : "out+1");
         if (hold) co_await hold_until_close_reset();
@@ -1070,10 +1067,10 @@ struct CaseRig {
             asio::co_spawn(
                 read_ioc,
                 [&]() -> asio::awaitable<void> {
-                    auto in = co_await store_log->inner->next_seqnum(sess::direction_t::inbound,
-                                                                     false);
-                    auto ob = co_await store_log->inner->next_seqnum(sess::direction_t::outbound,
-                                                                     false);
+                    auto in =
+                        co_await store_log->inner->next_seqnum(sess::direction_t::inbound, false);
+                    auto ob =
+                        co_await store_log->inner->next_seqnum(sess::direction_t::outbound, false);
                     if (in) out.store_next_inbound = *in;
                     if (ob) out.store_next_outbound = *ob;
                 },
