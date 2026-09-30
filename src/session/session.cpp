@@ -2987,9 +2987,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         record_state_transition_(fsm_state::Disconnected);
                         co_return std::unexpected(rst_r.error());
                     }
-                    // fixpp#518: a close() may have run while the 141=Y reset yielded. Its
-                    // teardown reset can land before the inbound persist below.
-                    if (logon_arm_superseded(*this, fsm_state::LogonReceived)) {
+                    // fixpp#518: a close() may have run while the 141=Y reset yielded. The
+                    // unit stops here only once close()'s teardown reset has been issued, so
+                    // the restore below cannot land after it. Otherwise the unit completes,
+                    // keeping the consumed Logon's advance, and the check after it stops
+                    // the arm.
+                    if (teardown_reset_done_) {
                         co_return fixpp::core::expected_t<void>{};
                     }
                     // 030 T011 (FR-001/005/007): the consumed seq-1 reset Logon is a
@@ -4489,9 +4492,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         record_state_transition_(fsm_state::Disconnected);
                         co_return std::unexpected(rst_r.error());
                     }
-                    // fixpp#518: a close() may have run while the 141=Y reset yielded. Its
-                    // teardown reset can land before the persists below.
-                    if (logon_arm_superseded(*this, fsm_state::LogonSent)) {
+                    // fixpp#518: a close() may have run while the 141=Y reset yielded. The
+                    // unit stops here only once close()'s teardown reset has been issued, so
+                    // the restores below cannot land after it. Otherwise the unit completes,
+                    // keeping the consumed Logon's advance, and the check after it stops
+                    // the arm.
+                    if (teardown_reset_done_) {
                         co_return fixpp::core::expected_t<void>{};
                     }
                     // 030 T016 (FR-001/005/007/009): the consumed seq-1 reset-ack Logon is a
@@ -4513,8 +4519,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         if (!p_r) co_return std::unexpected(p_r.error());
                     }
                     // fixpp#518: a close() may have run while the inbound restore or persist
-                    // yielded.
-                    if (logon_arm_superseded(*this, fsm_state::LogonSent)) {
+                    // yielded. The outbound restore is skipped only once close()'s teardown
+                    // reset has been issued, so it cannot land after it. Otherwise it
+                    // completes, and the check after it stops the arm.
+                    if (teardown_reset_done_) {
                         co_return fixpp::core::expected_t<void>{};
                     }
                     // 032 T010(c): outbound restore — symmetric twin of the 030 inbound restore.

@@ -123,6 +123,10 @@ constexpr auto kStopWindow = 2s;
 // would miss a state it can no longer observe.
 constexpr auto kInitiatorHold = kStateBudget + 1s;
 
+// Bound on a HookedStore hold. Below `kStateBudget`, so a hold that times out still
+// lets the cell settle and report `hold_timed_out` instead of a settle miss.
+constexpr auto kHoldBound = 1s;
+
 // Current wall-clock UTC as a FIX UTCTimestamp "YYYYMMDD-HH:MM:SS.mmm".
 // Required by the 038 acceptor first-Logon SendingTime(52) MaxLatency guard.
 std::string utc_now_fix_timestamp() {
@@ -694,6 +698,10 @@ struct StoreLog {
     std::vector<Write> writes;  // in completion order
     int stores_made = 0;
     std::shared_ptr<sess::MemoryStore> inner;
+    // reset() calls issued while close_began() was true.
+    int resets_issued_after_close_began = 0;
+    // A held operation waited out its bound without such a reset().
+    bool hold_timed_out = false;
 
     void record(std::string op) {
         writes.push_back({std::move(op), close_began && close_began()});
@@ -711,6 +719,11 @@ public:
         std::function<void()> on_reset;    // first reset()
         std::function<void()> on_inbound_persist;   // first next_seqnum(inbound, true)
         std::function<void()> on_outbound_persist;  // first next_seqnum(outbound, true)
+        // The operation whose hook fires completes, then does not return to the session
+        // until a reset() has been issued after close() began, so the session resumes
+        // with close()'s teardown reset already issued. Bounded by kHoldBound; past it
+        // the log's hold_timed_out is set and the operation returns.
+        bool hold_until_close_reset = false;
     };
 
     HookedStore(sess::seqnum_t outbound_next, Hooks hooks, std::shared_ptr<StoreLog> log)
@@ -753,13 +766,15 @@ public:
         }
         if (!increment) return inner_->next_seqnum(dir, false);
         // The close a hook posts runs at the increment's leading post.
-        fire(dir == sess::direction_t::inbound ? hooks_.on_inbound_persist
-                                               : hooks_.on_outbound_persist);
-        return logged_increment(dir);
+        const bool hooked = fire(dir == sess::direction_t::inbound ? hooks_.on_inbound_persist
+                                                                   : hooks_.on_outbound_persist);
+        return logged_increment(dir, hooked && hooks_.hold_until_close_reset);
     }
     asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override {
-        fire(hooks_.on_reset);  // the close it posts runs at the reset's leading post
-        return logged_reset();
+        if (log_->close_began && log_->close_began()) ++log_->resets_issued_after_close_began;
+        // The close the hook posts runs at the reset's leading post.
+        const bool hooked = fire(hooks_.on_reset);
+        return logged_reset(hooked && hooks_.hold_until_close_reset);
     }
 
     // close(graceful) awaits this before it writes Disconnected. It yields the strand
@@ -776,23 +791,40 @@ private:
     static asio::awaitable<fixpp::core::expected_t<sess::seqnum_t>> ready(sess::seqnum_t v) {
         co_return v;
     }
-    static void fire(std::function<void()>& hook) {
-        if (!hook) return;
+    // True when a hook was set and has now run.
+    static bool fire(std::function<void()>& hook) {
+        if (!hook) return false;
         auto h = std::move(hook);
         hook = nullptr;
         h();
+        return true;
+    }
+    // Yields the strand until a reset() is issued after close() began, or the bound
+    // passes.
+    asio::awaitable<void> hold_until_close_reset() {
+        auto ex = co_await asio::this_coro::executor;
+        const auto deadline = std::chrono::steady_clock::now() + kHoldBound;
+        while (log_->resets_issued_after_close_began == 0) {
+            if (std::chrono::steady_clock::now() >= deadline) {
+                log_->hold_timed_out = true;
+                co_return;
+            }
+            co_await asio::post(ex, asio::use_awaitable);
+        }
     }
     // Logged when the write completes, not when it is issued: the MemoryStore applies
     // it only after its leading post and its mutex.
     asio::awaitable<fixpp::core::expected_t<sess::seqnum_t>> logged_increment(
-        sess::direction_t dir) {
+        sess::direction_t dir, bool hold) {
         auto r = co_await inner_->next_seqnum(dir, true);
         log_->record(dir == sess::direction_t::inbound ? "in+1" : "out+1");
+        if (hold) co_await hold_until_close_reset();
         co_return r;
     }
-    asio::awaitable<fixpp::core::expected_t<void>> logged_reset() {
+    asio::awaitable<fixpp::core::expected_t<void>> logged_reset(bool hold) {
         auto r = co_await inner_->reset();
         log_->record("reset");
+        if (hold) co_await hold_until_close_reset();
         co_return r;
     }
 
@@ -832,6 +864,7 @@ struct LogonCloseCase {
     bool close_from_inbound_persist = false;
     bool close_from_outbound_persist = false;
     bool close_from_on_logon = false;
+    bool hold_until_close_reset = false;  // see HookedStore::Hooks
     bool cancel_sleeps_before_stop = true;
 };
 
@@ -966,6 +999,7 @@ struct CaseRig {
             if (c.close_from_outbound_persist) {
                 factory->hooks.on_outbound_persist = [a = app] { a->post_close(); };
             }
+            factory->hooks.hold_until_close_reset = c.hold_until_close_reset;
             store_log = factory->log;
             cfg.store_factory = std::move(factory);
         }
@@ -1142,26 +1176,17 @@ std::string store_writes(LogonCloseOutcome const& o) {
     return s;
 }
 
-// No `op` write completed after close() began.
-void expect_no_store_write_after_close(LogonCloseOutcome const& o, std::string const& op) {
-    ASSERT_TRUE(o.store_log);
-    const bool found =
-        std::any_of(o.store_log->writes.begin(), o.store_log->writes.end(),
-                    [&](StoreLog::Write const& w) { return w.op == op && w.after_close_began; });
-    EXPECT_FALSE(found) << op << " completed after close() began; store writes: "
-                        << store_writes(o);
-}
-
 // close() with reset_on_disconnect resets the store at teardown. The store must end at
-// that reset's post-state, whatever the arm wrote around it: the arm's own peer reset
-// is one reset() and close()'s teardown reset the other, so a single reset() means the
-// teardown reset never ran and the counters prove nothing.
+// that reset's post-state, whatever the arm wrote around it. In the cells that use this,
+// the arm issues its own resets before close() runs, so a reset() issued after close()
+// began is the teardown's; without one the counters prove nothing.
 void expect_store_ends_at_teardown_reset(LogonCloseOutcome const& o) {
     ASSERT_TRUE(o.store_log);
     EXPECT_EQ(o.store_log->stores_made, 1);
-    const auto resets = std::count_if(o.store_log->writes.begin(), o.store_log->writes.end(),
-                                      [](StoreLog::Write const& w) { return w.op == "reset"; });
-    EXPECT_EQ(resets, 2) << "store writes: " << store_writes(o);
+    EXPECT_FALSE(o.store_log->hold_timed_out)
+        << "no reset() was issued after close() began within the hold's bound";
+    EXPECT_GE(o.store_log->resets_issued_after_close_began, 1)
+        << "store writes: " << store_writes(o);
     EXPECT_EQ(o.store_next_inbound, std::optional{sess::seqnum_min})
         << "store writes: " << store_writes(o);
     EXPECT_EQ(o.store_next_outbound, std::optional{sess::seqnum_min})
@@ -1338,7 +1363,8 @@ TEST(LogonCloseDuringSuspension, AcceptorCloseDuringPeerResetStoreEndsAtTeardown
 // The peer's Logon carries ResetSeqNumFlag(141)=Y, so the acceptor resets its store
 // after writing LogonReceived, then restores and persists its inbound counter.
 // close(graceful) is posted from that reset(); the store's flush keeps it under way
-// while the arm resumes. Asserts no inbound persist after close() began.
+// while the arm resumes, and no teardown reset is configured. Asserts the unit
+// completes, keeping the consumed Logon's advance, and no reply follows it.
 TEST(LogonCloseDuringSuspension, AcceptorCloseDuringPeerResetBuildsNoReply) {
     auto o = run_acceptor_case({.mode = sess::close_mode::graceful,
                                 .arm_on = "",
@@ -1349,7 +1375,8 @@ TEST(LogonCloseDuringSuspension, AcceptorCloseDuringPeerResetBuildsNoReply) {
     ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
     expect_close_owns_teardown(o);
     expect_only_close_logout_after_close(o);
-    expect_no_store_write_after_close(o, "in+1");
+    EXPECT_EQ(o.store_next_inbound, std::optional{sess::seqnum_min + 1})
+        << "store writes: " << store_writes(o);
 }
 
 // Same peer Logon; close(graceful) is posted from the inbound persist that follows the
@@ -1394,8 +1421,9 @@ TEST(LogonCloseDuringSuspension, InitiatorControlNoCloseReachesActive) {
 // Initiator: the peer's Logon-ack carries 141=Y and a 789 above the initiator's next
 // outbound, so the initiator resets its store, restores and persists its inbound
 // counter, and then answers the 789 with a Logout. close(graceful) is posted from that
-// reset(); the store's flush keeps it under way. Asserts no inbound persist after
-// close() began.
+// reset(); the store's flush keeps it under way, and no teardown reset is configured.
+// Asserts the unit completes, keeping the consumed Logon-ack's advance, and no 789
+// Logout follows it.
 TEST(LogonCloseDuringSuspension, InitiatorCloseDuringPeerResetBuildsNoHonourFrame) {
     auto o = run_initiator_case({.mode = sess::close_mode::graceful,
                                  .arm_on = "",
@@ -1408,14 +1436,16 @@ TEST(LogonCloseDuringSuspension, InitiatorCloseDuringPeerResetBuildsNoHonourFram
     ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
     expect_close_owns_teardown(o);
     expect_no_admin_after_close(o);
-    expect_no_store_write_after_close(o, "in+1");
+    EXPECT_EQ(o.store_next_inbound, std::optional{sess::seqnum_min + 1})
+        << "store writes: " << store_writes(o);
 }
 
 // Initiator: reset_on_logon is set, so the initiator's own Logon carries 141=Y at
 // seq 1, and the peer's Logon-ack carries 141=Y. After its reset the initiator
 // restores and persists its inbound counter, then its outbound one. close(graceful) is
-// posted from the inbound persist. Asserts no outbound persist after close() began.
-TEST(LogonCloseDuringSuspension, InitiatorCloseDuringInboundRestoreSkipsOutboundRestore) {
+// posted from the inbound persist, and no teardown reset is configured. Asserts the
+// outbound restore completes too.
+TEST(LogonCloseDuringSuspension, InitiatorCloseDuringInboundRestoreCompletesOutboundRestore) {
     auto o = run_initiator_case({.mode = sess::close_mode::graceful,
                                  .arm_on = "",
                                  .peer_logon_extra = "141=Y\x01",
@@ -1426,7 +1456,10 @@ TEST(LogonCloseDuringSuspension, InitiatorCloseDuringInboundRestoreSkipsOutbound
     ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
     expect_close_owns_teardown(o);
     expect_no_admin_after_close(o);
-    expect_no_store_write_after_close(o, "out+1");
+    EXPECT_EQ(o.store_next_inbound, std::optional{sess::seqnum_min + 1})
+        << "store writes: " << store_writes(o);
+    EXPECT_EQ(o.store_next_outbound, std::optional{sess::seqnum_min + 1})
+        << "store writes: " << store_writes(o);
 }
 
 // Same, and the peer's Logon-ack also carries a 789 above the initiator's next
@@ -1459,6 +1492,25 @@ TEST(LogonCloseDuringSuspension, InitiatorCloseDuringPeerResetStoreEndsAtTeardow
                                  .reset_on_disconnect = true,
                                  .store_outbound_next = 1,
                                  .close_from_reset = true});
+    ASSERT_TRUE(o.bound);
+    ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
+    expect_close_owns_teardown(o);
+    expect_store_ends_at_teardown_reset(o);
+}
+
+// Initiator: reset_on_logon and reset_on_disconnect are set, and the peer's Logon-ack
+// carries 141=Y. close(terminal) is posted from the inbound persist after the arm's
+// reset, and the store holds that persist's return until close()'s teardown reset has
+// been issued. Asserts the store ends at the teardown reset's post-state.
+TEST(LogonCloseDuringSuspension, InitiatorCloseDuringInboundRestoreStoreEndsAtTeardownReset) {
+    auto o = run_initiator_case({.mode = sess::close_mode::terminal,
+                                 .arm_on = "",
+                                 .peer_logon_extra = "141=Y\x01",
+                                 .reset_on_logon = true,
+                                 .reset_on_disconnect = true,
+                                 .store_outbound_next = 1,
+                                 .close_from_inbound_persist = true,
+                                 .hold_until_close_reset = true});
     ASSERT_TRUE(o.bound);
     ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
     expect_close_owns_teardown(o);
