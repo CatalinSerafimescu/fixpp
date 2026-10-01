@@ -23,6 +23,7 @@ refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/042-fixt-version-serviceability-guard-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/090-capi-refusals-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/092-garbled-frame-reject-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/511-test-hooks-odr-gatea.md
 codegraph_entry: [Session, fsm_state, SeqnumManager, Engine, on_inbound_frame]
 constitution: ["§XI.4", "§XV.4"]
 ---
