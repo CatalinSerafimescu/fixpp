@@ -19,8 +19,7 @@
 // asserts the post-092 outcome: the SequenceReset draws one Reject (45=2, 372=4 and
 // the 373 and 371 above) and NewSeqNo is never applied, so the probe at 500 is a gap and
 // draws a ResendRequest(35=2). The probe's ResendRequest is the witness that
-// NextNumIn did not move to 500; this target reads no private counter (no
-// FIXPP_TEST_HOOKS, fixpp#511).
+// NextNumIn did not move to 500; this target reads no private counter.
 //
 // Every observation after open_to_active is non-fatal (EXPECT_*), so the probe runs
 // and every clause reports in each cell.

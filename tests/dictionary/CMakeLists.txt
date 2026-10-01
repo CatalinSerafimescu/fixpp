@@ -75,17 +75,8 @@ target_compile_definitions(dictionary_pure_tests PRIVATE
   "FIXPP_ORCHESTRA_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries/orchestra\""
   # Gate B r2 (fixpp#216 P1-A downgraded): loader_disposition_test.cpp calls the
   # FR-023 test seam `detail::set_force_incomplete_group_context_for_testing`,
-  # whose declaration in dictionary_internal.hpp is now FIXPP_TEST_HOOKS-gated —
-  # the same house pattern as tests/capi/CMakeLists.txt's use of this macro
-  # (capi_send_recv_test, capi_error_live_test) for src/capi/capi_internal.hpp's
-  # gated declarations. ODR-safe for the whole bucket: the only other
-  # FIXPP_TEST_HOOKS block transitively reachable from these 20 TUs is
-  # wire/offset_table.hpp's `friend struct ..._for_testing` pair (via
-  # group_view.hpp, included by defect_a_group_context_test.cpp and
-  # support/context_group_member_fn.hpp) — friend declarations only, no gated
-  # data members, so OffsetTable's layout matches the non-hooks
-  # fixpp_dictionary/fixpp_wire archives (same reasoning as
-  # tests/capi/CMakeLists.txt's capi_send_recv_test layout-match comment, same pattern as capi_error_live_test).
+  # whose namespace-scope declaration in dictionary_internal.hpp is
+  # FIXPP_TEST_HOOKS-gated.
   FIXPP_TEST_HOOKS)
 add_test(NAME dictionary_pure_tests COMMAND dictionary_pure_tests)
 # 083 joins this bucket with loader_disposition_test (T035/T042, the FR-006 /

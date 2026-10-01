@@ -532,19 +532,13 @@ private:
     };
     mutable std::pmr::vector<nested_cache_row> nested_cache_;
 
-    // 073 T001 / gate-b/r1 FQ-2: TEST-ONLY nested_cache_ introspection seam,
-    // forward-declared here for friendship only. Unlike frame_view_access /
-    // frame_view_slice_access (framer.hpp's friend declarations), which are PRODUCTION
-    // seams the parser/wire layer mints views through at runtime and so
-    // cannot be gated, this friend is test-only (the definition itself says
-    // "Never called from production code",
-    // tests/support/wire_test_hooks.hpp's own note) — it follows the repo's
-    // FIXPP_TEST_HOOKS test-only-gating convention instead (see
-    // session/file_store.hpp, session/seqnum_manager.hpp, session/session.hpp,
-    // core/system_clock_source.hpp; [const §XV.9]). The DEFINITION lives in
+    // 073 T001: TEST-ONLY nested_cache_ introspection seam, forward-declared
+    // here for friendship only. The DEFINITION lives in
     // tests/support/wire_test_hooks.hpp (never installed), so no test-only
-    // accessor code ships in this public header, and the friendship itself is
-    // now only granted to FIXPP_TEST_HOOKS builds. Resolves the sub-table
+    // accessor code ships in this public header. The friend is unconditional
+    // (fixpp#511): gating it behind a test macro would make a test TU's
+    // OffsetTable a different class from the library's, an ODR violation
+    // (ill-formed, no diagnostic required). Resolves the sub-table
     // ALREADY built for a (slice_data, bundle, nested_no_tag) key without triggering
     // a build — used by the wire-level primitive witness to pin research.md
     // §D2 mode (a)/(b)/(c) by introspecting the real sub-table rather than a
@@ -562,9 +556,7 @@ private:
     // asserted directly through the public API by
     // `TypedReadSplitAgreement.MaterializingADivergentGroupDoesNotMoveAnotherGroupsSlices`,
     // with no friend and no hook.
-#ifdef FIXPP_TEST_HOOKS
     friend struct nested_cache_access_for_testing;
-#endif  // FIXPP_TEST_HOOKS
 };
 
 }  // namespace fixpp::wire

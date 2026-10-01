@@ -82,6 +82,7 @@
 #include <tuple>
 
 #include "hp_support.hpp"
+#include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::interop::Counterparty;
@@ -148,7 +149,8 @@ TEST_P(NanosSendingTimeInitiator, LogonAcceptedWithNanos52) {
     // SendingTimePrecision_Nanos_Emits27Char52 + the parent golden's domain).
     auto s = fx.engine().lookup(id);
     ASSERT_NE(s, nullptr) << "session not found after drive_to_active";
-    EXPECT_GE(s->seqnum_mgr_test_access().peek_outbound(), fixpp::session::seqnum_t{2})
+    EXPECT_GE(fixpp::session::session_test_access::seqnum_mgr(*s).peek_outbound(),
+              fixpp::session::seqnum_t{2})
         << "outbound seqnum should be >= 2 after Active (Logon at 34=1 was sent "
            "with nanos 52=; next outbound advanced past 1)";
 
@@ -237,7 +239,8 @@ TEST_P(NanosSendingTimeAcceptor, AcceptsNanos52WithoutReject) {
     ASSERT_NE(s, nullptr) << "session not found after drive_to_active";
 
     // ── In-process witness (b): outbound seqnum >= 2 (reply Logon was sent) ───
-    EXPECT_GE(s->seqnum_mgr_test_access().peek_outbound(), fixpp::session::seqnum_t{2})
+    EXPECT_GE(fixpp::session::session_test_access::seqnum_mgr(*s).peek_outbound(),
+              fixpp::session::seqnum_t{2})
         << "outbound seqnum did not advance past the acceptor reply Logon";
 
     // ── In-process witness (c): inbound seqnum == 2 (no ResendRequest issued) ─
@@ -247,7 +250,8 @@ TEST_P(NanosSendingTimeAcceptor, AcceptsNanos52WithoutReject) {
     // parsed nanos instant was within the 120 s threshold (FR-007/SC-004/New-4).
     // check_sending_time operates on the parsed utc_time_point, so it handles
     // nanos correctly without any new boundary logic (FR-007 unchanged).
-    EXPECT_EQ(s->seqnum_mgr_test_access().next_inbound_unsafe(), fixpp::session::seqnum_t{2})
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*s).next_inbound_unsafe(),
+              fixpp::session::seqnum_t{2})
         << "next_inbound should be 2 after accepting peer Logon at 34=1 with nanos 52= "
            "(no ResendRequest was issued; MaxLatency correctly computed; "
            "C7.2/SC-004/FR-007/New-4 check)";

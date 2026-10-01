@@ -1527,8 +1527,8 @@ TEST(BodyBuilderDataField, C1_11_TwoCallsAppendTwoPairs) {
 // Same gate as NoGlobalHeap_CountingNew, over construction with a dict_hooks
 // argument, field_data, a group entry's set_data, and a commit that runs the
 // INV-6 pair walk. The hooks value is built before the window. This binary links
-// no dictionary and does not define FIXPP_TEST_HOOKS, so none() is the only
-// bundle it can build; the builder copies whichever bundle it is given by value.
+// no dictionary and does not use the test-only raw-constructor seam, so none() is
+// the bundle it builds; the builder copies whichever bundle it is given by value.
 TEST(BodyBuilderDataField, NoGlobalHeap_FieldDataSetDataCommit) {
 #if FIXPP_SANITIZER_REPLACES_NEW
     GTEST_SKIP() << "global operator new replacement is incompatible with ASan "

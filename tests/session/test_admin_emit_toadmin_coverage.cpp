@@ -57,6 +57,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_test_access.hpp"
 
 // ── #289: bounded pumps ──────────────────────────────────────────────────────
 //
@@ -1686,7 +1687,8 @@ TEST_F(AdminEmitBMRCoverageTest, BMR_ToApp_Observed) {
     const auto frames_before = captured_frames.size();
     // Capture in-memory outbound seqnum before provocation: assign_outbound() on the
     // non-veto path must consume exactly one outbound seqnum.
-    const seqnum_t outbound_seq_before = sess.seqnum_mgr_test_access().peek_outbound();
+    const seqnum_t outbound_seq_before =
+        fixpp::session::session_test_access::seqnum_mgr(sess).peek_outbound();
 
     // Feed app-type frame (35=D) at seq=2. fromApp rejects → BMR(35=j) emitted.
     auto app_frame = build_app_frame(2, kTarget, kSender);
@@ -1713,7 +1715,8 @@ TEST_F(AdminEmitBMRCoverageTest, BMR_ToApp_Observed) {
 
     // Non-veto path: outbound seqnum must have been consumed (assign_outbound called).
     // Lock this so T028's "seqnum unchanged" assertion is discriminating (not vacuous).
-    const seqnum_t outbound_seq_after = sess.seqnum_mgr_test_access().peek_outbound();
+    const seqnum_t outbound_seq_after =
+        fixpp::session::session_test_access::seqnum_mgr(sess).peek_outbound();
     EXPECT_EQ(outbound_seq_after, outbound_seq_before + 1)
         << "Non-veto path: assign_outbound must advance the outbound seqnum by 1 "
         << "(before=" << outbound_seq_before << " after=" << outbound_seq_after << ")";
@@ -1759,7 +1762,8 @@ TEST_F(AdminEmitBMRCoverageTest, BMR_VetoSuppressed_PersistStillFires) {
     // called — peek_outbound() must stay the same after the provocation.
     // This is discriminating: T027 proves that on the non-veto path peek_outbound()
     // DOES advance by 1; so "unchanged here" is a real test, not a vacuous pass.
-    const seqnum_t outbound_seq_before = sess.seqnum_mgr_test_access().peek_outbound();
+    const seqnum_t outbound_seq_before =
+        fixpp::session::session_test_access::seqnum_mgr(sess).peek_outbound();
 
     // Feed app-type frame (35=D) at seq=2. fromApp rejects → toApp vetoes BMR.
     auto app_frame = build_app_frame(2, kTarget, kSender);
@@ -1778,7 +1782,8 @@ TEST_F(AdminEmitBMRCoverageTest, BMR_VetoSuppressed_PersistStillFires) {
 
     // No outbound seqnum consumed on veto path (C2: assign_outbound skipped on suppressed).
     // Discriminating: T027 proves peek_outbound advances by 1 on non-veto; here it must NOT.
-    const seqnum_t outbound_seq_after = sess.seqnum_mgr_test_access().peek_outbound();
+    const seqnum_t outbound_seq_after =
+        fixpp::session::session_test_access::seqnum_mgr(sess).peek_outbound();
     EXPECT_EQ(outbound_seq_after, outbound_seq_before)
         << "Veto: outbound seqnum must NOT be consumed (assign_outbound skipped) "
         << "(before=" << outbound_seq_before << " after=" << outbound_seq_after << ")";

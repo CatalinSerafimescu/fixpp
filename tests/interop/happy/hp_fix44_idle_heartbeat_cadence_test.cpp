@@ -64,6 +64,7 @@
 
 #include "hp_support.hpp"
 #include "support/scenario_descriptor.hpp"
+#include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::interop::admin_profile_excluded_tags;
@@ -253,7 +254,8 @@ TEST_P(HappyIdleHeartbeatCadence, BothDirectionsAtNegotiatedCadence) {
     // engine also sent an initial Heartbeat).  We record the current value and
     // expect it to advance by ≥3 over the ~5s window (each unsolicited Heartbeat
     // increments the outbound counter — US2-1 witness).
-    const auto seqnum_after_logon = s->seqnum_mgr_test_access().peek_outbound();
+    const auto seqnum_after_logon =
+        fixpp::session::session_test_access::seqnum_mgr(*s).peek_outbound();
     EXPECT_GT(seqnum_after_logon, fixpp::session::seqnum_t{0})
         << "outbound seqnum is zero after logon";
 
@@ -278,7 +280,8 @@ TEST_P(HappyIdleHeartbeatCadence, BothDirectionsAtNegotiatedCadence) {
     // TestRequest, see the gate note below) increments the outbound seqnum by 1.
     // Advancing by ≥3 over the window confirms fixpp emitted a steady outbound
     // cadence (US2-2 liveness).
-    const auto seqnum_after_window = s->seqnum_mgr_test_access().peek_outbound();
+    const auto seqnum_after_window =
+        fixpp::session::session_test_access::seqnum_mgr(*s).peek_outbound();
     const auto delta = static_cast<fixpp::session::seqnum_t>(seqnum_after_window) -
                        static_cast<fixpp::session::seqnum_t>(seqnum_after_logon);
     EXPECT_GE(delta, fixpp::session::seqnum_t{3})

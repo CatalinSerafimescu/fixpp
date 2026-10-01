@@ -118,6 +118,7 @@
 // must not be read here.
 
 // src/ path for asio_listener.hpp (internal header needed for the TLS client fixture)
+#include "support/session_test_access.hpp"
 #include "transport/loopback_tls_fixture.hpp"
 
 using namespace std::chrono_literals;
@@ -587,7 +588,10 @@ TEST(EngineAcceptorTest, CoalescedFirstFrameSurplusDelivered) {
     auto s = engine.lookup(acc_id);
     bool established = (s != nullptr) && (s->state() == fixpp::session::fsm_state::Active ||
                                           s->state() == fixpp::session::fsm_state::LogonReceived);
-    int next_inbound = s ? static_cast<int>(s->seqnum_mgr_test_access().next_inbound_unsafe()) : -1;
+    int next_inbound =
+        s ? static_cast<int>(
+                fixpp::session::session_test_access::seqnum_mgr(*s).next_inbound_unsafe())
+          : -1;
 
     auto stop_fut = asio::co_spawn(ioc, engine.stop(), asio::use_future);
     if (!fixpp::test_support::run_to_exhaustion_or_report(

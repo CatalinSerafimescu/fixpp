@@ -22,7 +22,7 @@
 //
 // These are STANDALONE characterization cells (no counterparty / live transport):
 // they drive crafted frames through Session::on_inbound_frame() and observe the
-// outbound `transport_send_` capture + seqnum_mgr_test_access() (FIXPP_TEST_HOOKS),
+// outbound `transport_send_` capture + session_test_access::seqnum_mgr,
 // reusing the proven ParityAcceptorFixture (parity_support.hpp).
 //
 // [const §XV.9]: tests-only. spec_ref [FIX-SL §4.5 / §4.8 / FIX-TC 2b/2t/15].

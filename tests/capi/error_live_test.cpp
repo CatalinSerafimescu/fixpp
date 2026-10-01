@@ -10,7 +10,7 @@
 //   (a) malformed app frame (embedded session tag 34= at a field boundary) →
 //       assert FIXPP_ERR_UNKNOWN (app_payload_malformed→UNKNOWN per L-050-4) AND
 //       peer receive-callback count UNCHANGED (the "no transmit" leg).
-//   (b) outbound seqnum pre-seeded to seqnum_max (FIXPP_TEST_HOOKS seam) →
+//   (b) outbound seqnum pre-seeded to seqnum_max (test-only access seam) →
 //       assert FIXPP_ERR_STORE_RUNTIME AND peer callback count UNCHANGED.
 //
 // Q4 (finding #5): live exported-call downgrade witness:
@@ -23,9 +23,10 @@
 //          contracts/send-and-receive.md; error_block_test.cpp oracle;
 //          L-050-4 (session/app block deferred → app_payload_malformed stays UNKNOWN).
 //
-// NOTE: FIXPP_TEST_HOOKS is required here for seqnum_mgr_test_access() seam (Q3b).
-// The Q4 downgrade test does NOT need TEST_HOOKS; it is included here for proximity
-// to the send-path negative witnesses (all are "live send-path" witnesses).
+// NOTE: Q3b seeds the counter through session_test_access::seqnum_mgr and
+// seqnum_manager_test_access::set_counters (tests/support/). The Q4 downgrade test
+// sits here for proximity to the send-path negative witnesses (all are "live
+// send-path" witnesses).
 
 #include <gtest/gtest.h>
 
@@ -41,9 +42,11 @@
 #include "capi_loopback_support.hpp"
 #include "fix/c_api/engine.h"
 #include "fix/c_api/session.h"
-#include "fixpp/session/seqnum.hpp"          // seqnum_max
-#include "fixpp/session/seqnum_manager.hpp"  // set_counters_for_test (FIXPP_TEST_HOOKS)
-#include "fixpp/session/session.hpp"         // Session::seqnum_mgr_test_access()
+#include "fixpp/session/seqnum.hpp"  // seqnum_max
+#include "fixpp/session/seqnum_manager.hpp"
+#include "fixpp/session/session.hpp"
+#include "support/seqnum_manager_test_access.hpp"
+#include "support/session_test_access.hpp"
 #include "support/wait_until.hpp"
 
 using namespace std::chrono_literals;
@@ -130,8 +133,8 @@ TEST(CapiErrorLive, MalformedPayloadReturnsUnknownNoTransmit) {
 
 // ── Q3(b): seqnum_max overflow → FIXPP_ERR_STORE_RUNTIME + no transmit ──────
 //
-// Seeds the session's outbound counter to seqnum_max via the FIXPP_TEST_HOOKS seam
-// (set_counters_for_test). The next send triggers store_seqnum_overflow (60) →
+// Seeds the session's outbound counter to seqnum_max via the test-only
+// seqnum_manager_test_access::set_counters. The next send triggers store_seqnum_overflow (60) →
 // FIXPP_ERR_STORE_RUNTIME. The peer callback must NOT fire (no transmit).
 TEST(CapiErrorLive, SeqnumOverflowReturnsStoreRuntimeNoTransmit) {
     fixpp_engine_t* B = nullptr;
@@ -162,7 +165,7 @@ TEST(CapiErrorLive, SeqnumOverflowReturnsStoreRuntimeNoTransmit) {
     ASSERT_EQ(fixpp_engine_start(A), FIXPP_ERR_OK);
     ASSERT_TRUE(wait_for_established(ini_h)) << "initiator never established";
 
-    // Seed the outbound seqnum to seqnum_max via the FIXPP_TEST_HOOKS seam.
+    // Seed the outbound seqnum to seqnum_max via the test-only access seam.
     // This must be done on the session strand to be race-free. Post a blocking
     // co_spawn onto the session's executor to perform the seed, then wait.
     {
@@ -183,9 +186,10 @@ TEST(CapiErrorLive, SeqnumOverflowReturnsStoreRuntimeNoTransmit) {
         // destroyed across the caller thread and the worker, causing a TSan race at
         // any_executor.hpp:475.
         auto seed_fn = [sess]() -> asio::awaitable<void> {
-            auto& mgr = sess->seqnum_mgr_test_access();
+            auto& mgr = fixpp::session::session_test_access::seqnum_mgr(*sess);
             const fixpp::session::seqnum_t cur_inbound = mgr.next_inbound_unsafe();
-            mgr.set_counters_for_test(cur_inbound, fixpp::session::seqnum_max);
+            fixpp::session::seqnum_manager_test_access::set_counters(mgr, cur_inbound,
+                                                                     fixpp::session::seqnum_max);
             co_return;
         };
         const asio::any_io_executor& seed_exec = sess->executor().underlying();

@@ -68,6 +68,7 @@
 #include <variant>
 
 #include "hp_support.hpp"
+#include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::interop::Counterparty;
@@ -158,7 +159,8 @@ TEST_P(ReceivedResetAcceptor, Received141AdvancesInboundToTwoNoResend) {
     }
 
     // ── In-process witness (c): outbound advanced past the reply Logon ───────────
-    EXPECT_GT(s->seqnum_mgr_test_access().peek_outbound(), fixpp::session::seqnum_t{1})
+    EXPECT_GT(fixpp::session::session_test_access::seqnum_mgr(*s).peek_outbound(),
+              fixpp::session::seqnum_t{1})
         << "outbound seqnum did not advance past the reply Logon";
 
     // ── In-process witness (b): inbound seqnum == 2 — the 030 correction (SC-001) ─
@@ -167,7 +169,8 @@ TEST_P(ReceivedResetAcceptor, Received141AdvancesInboundToTwoNoResend) {
     // Pre-030 this read 1 → the peer's next message at 34=2 read too-high → a spurious
     // ResendRequest. next_inbound==2 in-process witnesses that no such ResendRequest
     // was issued (the live golden confirms the wire stream end-to-end).
-    EXPECT_EQ(s->seqnum_mgr_test_access().next_inbound_unsafe(), fixpp::session::seqnum_t{2})
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*s).next_inbound_unsafe(),
+              fixpp::session::seqnum_t{2})
         << "next_inbound must be 2 after the received-141 Logon (030 FR-001/SC-001): the "
            "consumed seq-1 reset Logon advances next-expected-inbound to 2. If 1, the 030 "
            "fix regressed and a spurious ResendRequest would be emitted for the peer's 34=2.";
@@ -187,8 +190,9 @@ TEST_P(ReceivedResetAcceptor, Received141AdvancesInboundToTwoNoResend) {
     const bool got_seq2 = fx.run_until(
         [&] {
             auto s2 = fx.engine().lookup(id);
-            return s2 && s2->seqnum_mgr_test_access().next_inbound_unsafe() ==
-                             fixpp::session::seqnum_t{3};
+            return s2 &&
+                   fixpp::session::session_test_access::seqnum_mgr(*s2).next_inbound_unsafe() ==
+                       fixpp::session::seqnum_t{3};
         },
         std::chrono::milliseconds{5000});
     EXPECT_TRUE(got_seq2)

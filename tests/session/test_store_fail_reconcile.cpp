@@ -73,6 +73,7 @@
 #include "support/extract_tag.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
 
@@ -279,7 +280,8 @@ TEST_F(StoreFailReconcileTest, VariantA_PlainPersistent_CleanResumeAtK) {
     ASSERT_TRUE(logon_r.has_value()) << "peer Logon-ack must be accepted";
     ASSERT_EQ(sess->state(), fsm_state::Active);
 
-    const auto inbound_before = sess->seqnum_mgr_test_access().next_inbound_unsafe();
+    const auto inbound_before =
+        fixpp::session::session_test_access::seqnum_mgr(*sess).next_inbound_unsafe();
 
     auto payload_pre = make_app_payload("ORD-PRE");
     auto pre_r =
@@ -287,7 +289,7 @@ TEST_F(StoreFailReconcileTest, VariantA_PlainPersistent_CleanResumeAtK) {
             .get();
     ASSERT_TRUE(pre_r.has_value()) << "the baseline (pre-failure) send must succeed";
 
-    const std::uint32_t k = sess->seqnum_mgr_test_access().peek_outbound();
+    const std::uint32_t k = fixpp::session::session_test_access::seqnum_mgr(*sess).peek_outbound();
 
     fixpp::session::arm_force_store_pwrite_fail_once();
     auto payload_k = make_app_payload("ORD-K");
@@ -306,10 +308,11 @@ TEST_F(StoreFailReconcileTest, VariantA_PlainPersistent_CleanResumeAtK) {
     // k+1 (assign_outbound already advanced the manager past k before the
     // failed store call; without the reconcile this would read k+1). This is
     // the single discriminating assertion for the reconcile itself.
-    EXPECT_EQ(sess->seqnum_mgr_test_access().peek_outbound(), k)
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*sess).peek_outbound(), k)
         << "the reconcile must reseed the wire counter down to the durable value k=" << k
         << " at disconnect time, before any reconnect";
-    EXPECT_EQ(sess->seqnum_mgr_test_access().next_inbound_unsafe(), inbound_before)
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*sess).next_inbound_unsafe(),
+              inbound_before)
         << "the reconcile is outbound-only; inbound sequencing must be unaffected";
 
     // In-process reconnect: drive_reconnect() over the mock transport is the
@@ -332,7 +335,8 @@ TEST_F(StoreFailReconcileTest, VariantA_PlainPersistent_CleanResumeAtK) {
     EXPECT_TRUE(extract_tag(recon_bytes, 141).empty())
         << "plain persistent session (no reset knob) must NOT carry 141=Y on reconnect";
 
-    EXPECT_EQ(sess->seqnum_mgr_test_access().next_inbound_unsafe(), inbound_before)
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*sess).next_inbound_unsafe(),
+              inbound_before)
         << "post-reconnect inbound sequencing must remain unaffected (reconcile is "
            "outbound-only; no reset ran on this variant)";
 
@@ -364,7 +368,8 @@ TEST_F(StoreFailReconcileTest, VariantB_ResetOnLogon_ReconnectLogonAtOneWellForm
     ASSERT_TRUE(logon_r.has_value()) << "peer Logon-ack must be accepted";
     ASSERT_EQ(sess->state(), fsm_state::Active);
 
-    const auto inbound_before = sess->seqnum_mgr_test_access().next_inbound_unsafe();
+    const auto inbound_before =
+        fixpp::session::session_test_access::seqnum_mgr(*sess).next_inbound_unsafe();
 
     auto payload_pre = make_app_payload("ORD-PRE");
     auto pre_r =
@@ -372,7 +377,7 @@ TEST_F(StoreFailReconcileTest, VariantB_ResetOnLogon_ReconnectLogonAtOneWellForm
             .get();
     ASSERT_TRUE(pre_r.has_value()) << "the baseline (pre-failure) send must succeed";
 
-    const std::uint32_t k = sess->seqnum_mgr_test_access().peek_outbound();
+    const std::uint32_t k = fixpp::session::session_test_access::seqnum_mgr(*sess).peek_outbound();
 
     fixpp::session::arm_force_store_pwrite_fail_once();
     auto payload_k = make_app_payload("ORD-K");
@@ -386,11 +391,12 @@ TEST_F(StoreFailReconcileTest, VariantB_ResetOnLogon_ReconnectLogonAtOneWellForm
     ASSERT_EQ(sess->state(), fsm_state::Disconnected)
         << "a persistent retain failure must transition to Disconnected";
 
-    EXPECT_EQ(sess->seqnum_mgr_test_access().peek_outbound(), k)
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*sess).peek_outbound(), k)
         << "the reconcile must reseed the wire counter down to k=" << k
         << " at disconnect time, regardless of the reset_on_logon knob (the durable "
            "reset only runs later, at the next Logon emission)";
-    EXPECT_EQ(sess->seqnum_mgr_test_access().next_inbound_unsafe(), inbound_before)
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*sess).next_inbound_unsafe(),
+              inbound_before)
         << "the reconcile is outbound-only; inbound sequencing must be unaffected at "
            "disconnect time (the durable reset has not run yet)";
 
@@ -416,7 +422,7 @@ TEST_F(StoreFailReconcileTest, VariantB_ResetOnLogon_ReconnectLogonAtOneWellForm
 
     // reset_seqnums_to_one_durable resets BOTH counters — inbound is now 1,
     // NOT inbound_before (unlike Variant A/C, where no reset runs).
-    EXPECT_EQ(sess->seqnum_mgr_test_access().next_inbound_unsafe(), 1U)
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*sess).next_inbound_unsafe(), 1U)
         << "reset_on_logon's durable reset overrides BOTH counters to {1,1}; "
            "inbound sequencing after reconnect must be 1, not the pre-reset value";
 
@@ -458,7 +464,8 @@ TEST_F(StoreFailReconcileTest, VariantC_BilateralStrictDefault_RegressionGuardNo
     ASSERT_TRUE(logon_r.has_value()) << "peer Logon-ack (with 141=Y) must be accepted";
     ASSERT_EQ(sess->state(), fsm_state::Active);
 
-    const auto inbound_before = sess->seqnum_mgr_test_access().next_inbound_unsafe();
+    const auto inbound_before =
+        fixpp::session::session_test_access::seqnum_mgr(*sess).next_inbound_unsafe();
 
     auto payload_pre = make_app_payload("ORD-PRE");
     auto pre_r =
@@ -466,7 +473,7 @@ TEST_F(StoreFailReconcileTest, VariantC_BilateralStrictDefault_RegressionGuardNo
             .get();
     ASSERT_TRUE(pre_r.has_value()) << "the baseline (pre-failure) send must succeed";
 
-    const std::uint32_t k = sess->seqnum_mgr_test_access().peek_outbound();
+    const std::uint32_t k = fixpp::session::session_test_access::seqnum_mgr(*sess).peek_outbound();
     ASSERT_GT(k, 1U) << "the failing message k must be non-1 for this variant to exercise "
                         "the L-029-3 cold-open shape";
 
@@ -482,10 +489,11 @@ TEST_F(StoreFailReconcileTest, VariantC_BilateralStrictDefault_RegressionGuardNo
     ASSERT_EQ(sess->state(), fsm_state::Disconnected)
         << "a persistent retain failure must transition to Disconnected";
 
-    EXPECT_EQ(sess->seqnum_mgr_test_access().peek_outbound(), k)
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*sess).peek_outbound(), k)
         << "the reconcile must reseed the wire counter down to k=" << k
         << " at disconnect time (bilateral_strict has no durable reset on this path)";
-    EXPECT_EQ(sess->seqnum_mgr_test_access().next_inbound_unsafe(), inbound_before)
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*sess).next_inbound_unsafe(),
+              inbound_before)
         << "the reconcile is outbound-only; inbound sequencing must be unaffected";
 
     auto reconnect_r = asio::co_spawn(sx_, sess->drive_reconnect(), asio::use_future).get();
@@ -518,7 +526,8 @@ TEST_F(StoreFailReconcileTest, VariantC_BilateralStrictDefault_RegressionGuardNo
            "34=k (k>1) this IS the pre-existing L-029-3 malformed Logon, not a 059 "
            "regression";
 
-    EXPECT_EQ(sess->seqnum_mgr_test_access().next_inbound_unsafe(), inbound_before)
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*sess).next_inbound_unsafe(),
+              inbound_before)
         << "post-reconnect inbound sequencing must remain unaffected (no reset "
            "runs under bilateral_strict without a reset knob)";
 
@@ -595,7 +604,8 @@ protected:
                                   field(36, std::to_string(kSeqMax092))));
         ASSERT_EQ(sess->state(), fsm_state::Active)
             << what << ": precondition: Active after the Reset-mode SequenceReset";
-        ASSERT_EQ(sess->seqnum_mgr_test_access().next_inbound_unsafe(), kSeqMax092)
+        ASSERT_EQ(fixpp::session::session_test_access::seqnum_mgr(*sess).next_inbound_unsafe(),
+                  kSeqMax092)
             << what << ": precondition: NextNumIn == 4294967295";
         wire.clear();
         const int from_app_before = app->from_app_count;
@@ -606,7 +616,8 @@ protected:
         (void)feed(frame);
         EXPECT_EQ(sess->state(), fsm_state::Disconnected)
             << what << ": FR-019: the message at NextNumIn = seqnum_max must end the session";
-        EXPECT_EQ(sess->seqnum_mgr_test_access().next_inbound_unsafe(), kSeqMax092)
+        EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*sess).next_inbound_unsafe(),
+                  kSeqMax092)
             << what << ": FR-019: NextNumIn must stay 4294967295, never wrap";
         EXPECT_TRUE(wire.empty()) << what << ": FR-019: the disconnect is silent (no Reject)";
         EXPECT_EQ(app->from_app_count, from_app_before) << what << ": no fromApp";

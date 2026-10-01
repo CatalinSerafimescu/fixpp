@@ -89,10 +89,6 @@ function(fixpp_add_interop_test)
         "${CMAKE_SOURCE_DIR}/src"      # concrete transport/listener headers (tests-only)
         "${CMAKE_SOURCE_DIR}/tests"    # support/minimal_dictionary.hpp, loopback fixtures
     )
-    # FIXPP_TEST_HOOKS exposes Session::seqnum_mgr_test_access() so cells can
-    # assert sequence-number deltas (FR-007) — the same per-target test macro
-    # tests/session/ uses. Test-only ([const §XV.9]).
-    target_compile_definitions(${IT_NAME} PRIVATE FIXPP_TEST_HOOKS)
     if(IT_TLS)
         # Static-link ORDER matters: libfixpp_tls.a references OpenSSL symbols
         # (certificate.cpp: EVP_*/X509_*/ASN1_*/BIO_*) and must precede libcrypto

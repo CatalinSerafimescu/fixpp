@@ -153,6 +153,7 @@
 // Internal transport header: needed for V-10's socket executor inspection.
 // The engine_session_strand_test CMakeLists adds "${CMAKE_SOURCE_DIR}/src" to
 // the include path for this purpose (mirrors tests/perf/test_socket_option_defaults).
+#include "support/engine_test_access.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/wait_until.hpp"
 #include "transport/asio_tls_transport.hpp"
@@ -1340,7 +1341,7 @@ TEST(EngineSessionStrand, V12_StopBeforeAwaitedPublish) {
 
 // ── V-12b: StopBeforePublish_WithLiveTransport (gate-b/r1 #3) ────────────────
 //
-// Strengthened V-12 witness using the FIXPP_TEST_HOOKS pre-publish seam.
+// Strengthened V-12 witness using the test-only pre-publish seam.
 // Drives stop() while a live transport exists but publish_entry has NOT yet run
 // (the seam pauses the accept loop between step 7 and step 7a).
 //
@@ -1419,31 +1420,32 @@ TEST(EngineSessionStrand, V12b_StopBeforePublish_WithLiveTransport) {
         FAIL() << "V-12b: initiator register_session failed";
     }
 
-    // Install the pre-publish seam hook via the public setter (FIXPP_TEST_HOOKS).
+    // Install the pre-publish seam hook via engine_test_access (tests/support/).
     // The hook runs on the session strand (coroutine context of run_accept_loop).
     // It: (1) signals seam_reached, (2) polls seam_release in short increments
     //     (yielding the session strand each time via a timer), (3) returns so the
     //     accept loop can call publish_entry and observe stopped_=true.
-    engine->set_pre_publish_hook([&seam_reached, &seam_release]() -> asio::awaitable<void> {
-        // Signal the test: transport is attached, pre-publish seam reached.
-        seam_reached.store(true, std::memory_order_release);
+    fixpp::session::engine_test_access::set_pre_publish_hook(
+        *engine, [&seam_reached, &seam_release]() -> asio::awaitable<void> {
+            // Signal the test: transport is attached, pre-publish seam reached.
+            seam_reached.store(true, std::memory_order_release);
 
-        // Build a short-lived timer on the current (session-strand) executor.
-        auto exec = co_await asio::this_coro::executor;
-        asio::steady_timer t{exec};
+            // Build a short-lived timer on the current (session-strand) executor.
+            auto exec = co_await asio::this_coro::executor;
+            asio::steady_timer t{exec};
 
-        // Poll seam_release in short increments to yield the session strand.
-        // Total budget: 5s (stop() will cancel us before then via session_cancel).
-        while (!seam_release.load(std::memory_order_acquire)) {
-            t.expires_after(std::chrono::milliseconds{5});
-            try {
-                co_await t.async_wait(asio::use_awaitable);
-            } catch (...) {
-                break;  // cancelled (stop() emits total) → let publish_entry observe stopped_
+            // Poll seam_release in short increments to yield the session strand.
+            // Total budget: 5s (stop() will cancel us before then via session_cancel).
+            while (!seam_release.load(std::memory_order_acquire)) {
+                t.expires_after(std::chrono::milliseconds{5});
+                try {
+                    co_await t.async_wait(asio::use_awaitable);
+                } catch (...) {
+                    break;  // cancelled (stop() emits total) → let publish_entry observe stopped_
+                }
             }
-        }
-        co_return;
-    });
+            co_return;
+        });
 
     ASSERT_TRUE(engine->start().has_value()) << "engine.start() failed";
 
@@ -2553,8 +2555,8 @@ TEST(EngineSessionStrand, V16_PostDrainLateSendFastFails_WithoutPosting) {
 
     std::atomic<bool> post_drain_reached{false};
     std::atomic<bool> post_drain_release{false};
-    engine->set_post_send_drain_hook(
-        [&post_drain_reached, &post_drain_release]() -> asio::awaitable<void> {
+    fixpp::session::engine_test_access::set_post_send_drain_hook(
+        *engine, [&post_drain_reached, &post_drain_release]() -> asio::awaitable<void> {
             post_drain_reached.store(true, std::memory_order_release);
 
             auto exec = co_await asio::this_coro::executor;

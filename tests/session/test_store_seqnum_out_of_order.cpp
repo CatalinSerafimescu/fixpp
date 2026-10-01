@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "_fixtures_/test_double_fsm.hpp"
+#include "support/memory_store_test_access.hpp"
 
 namespace {
 
@@ -254,9 +255,8 @@ TEST(StoreSeqnumOutOfOrder, ConcurrentOutOfOrderAndValidStore) {
 // next_seqnum(outbound, true) must return store_seqnum_overflow WITHOUT
 // advancing the counter.
 //
-// Determinism: uses FIXPP_TEST_HOOKS to force the counter to seqnum_max
-// without running 4 billion stores. The hook is only compiled in for this
-// target (see CMakeLists.txt target_compile_definitions).
+// Determinism: memory_store_test_access::set_counter (tests/support/) forces the
+// counter to seqnum_max without running 4 billion stores.
 
 TEST(StoreSeqnumOutOfOrder, NextSeqnumAtMaxReturnsOverflow) {
     asio::thread_pool pool{1};
@@ -268,7 +268,7 @@ TEST(StoreSeqnumOutOfOrder, NextSeqnumAtMaxReturnsOverflow) {
     auto store = MemoryStore{cfg};
 
     // Force counter to seqnum_max via test hook.
-    store.test_set_counter(direction_t::outbound, seqnum_max);
+    fixpp::session::memory_store_test_access::set_counter(store, direction_t::outbound, seqnum_max);
 
     run_on_pool(pool, [&store]() -> asio::awaitable<void> {
         // next_seqnum(_, true) at seqnum_max → overflow, counter unchanged.

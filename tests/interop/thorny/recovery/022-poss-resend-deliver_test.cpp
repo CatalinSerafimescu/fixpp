@@ -51,6 +51,7 @@
 
 #include "happy/hp_support.hpp"
 #include "support/scenario_descriptor.hpp"
+#include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::interop::Counterparty;
@@ -192,7 +193,8 @@ TEST_P(PossResendDeliver, PossResendMessageDeliveredToFromApp_SessionSurvives) {
     ASSERT_NE(s, nullptr) << "session not established";
 
     // ── Snapshot inbound seqnum after Logon ───────────────────────────────────
-    const auto inbound_at_logon = s->seqnum_mgr_test_access().next_inbound_unsafe();
+    const auto inbound_at_logon =
+        fixpp::session::session_test_access::seqnum_mgr(*s).next_inbound_unsafe();
 
     // ── fromApp delivery window ───────────────────────────────────────────────
     // The parent harness configures the QF counterparty to send a business
@@ -228,7 +230,8 @@ TEST_P(PossResendDeliver, PossResendMessageDeliveredToFromApp_SessionSurvives) {
         << "fromApp was called but tag 97 (PossResend) was not present in the "
            "delivered MessageView; the full frame including tag 97 must be "
            "delivered to fromApp (C4.1/SC-001)";
-    const auto inbound_after = s2->seqnum_mgr_test_access().next_inbound_unsafe();
+    const auto inbound_after =
+        fixpp::session::session_test_access::seqnum_mgr(*s2).next_inbound_unsafe();
     EXPECT_GT(inbound_after, inbound_at_logon)
         << "inbound seqnum did not advance after receiving the 97=Y message; "
            "an in-sequence PossResend must advance the expected inbound seqnum "

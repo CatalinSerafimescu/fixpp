@@ -349,6 +349,7 @@ TEST(Masker_SameLength_FieldAnchored_unit, I_FrameHasGenuine554_Detector) {
 // Must be at file scope for the LD_PRELOAD override to bind. (T011 alloc gate;
 // mirrors the NoHeap pattern in test_next_expected_msgseqnum.cpp.)
 #include "support/alloc_guard_markers.hpp"
+#include "support/session_test_access.hpp"
 
 namespace fixpp_redaction_session {
 
@@ -1198,8 +1199,8 @@ TEST(CredentialStoreRedaction, T007_OversizedCredential_OpenRejects_Acceptor) {
 // rejects oversized credentials. So `build_logon`-produced frames can never trip it.
 //
 // To earn the branch's BRDA we feed a HAND-CRAFTED >256-byte 35=A frame carrying a
-// genuine \x01554= directly into store_then_emit via the FIXPP_TEST_HOOKS accessor
-// store_then_emit_test_access() — exercising the REAL branch against the REAL 256
+// genuine \x01554= directly into store_then_emit via the test-only
+// session_test_access::store_then_emit — exercising the REAL branch against the REAL 256
 // bound with zero production surface. (An earlier design used a
 // FIXPP_TEST_LOGON_MASK_BOUND compile override; that constant lives in
 // store_then_emit, compiled into libfixpp_session WITHOUT the test define, so it
@@ -1215,8 +1216,7 @@ TEST(CredentialStoreRedaction, T007_OversizedCredential_OpenRejects_Acceptor) {
 // here to avoid over-investing in dead-branch coverage. T010 proves (a)+(b) only.
 //
 // Anchors: contracts/store-redaction.md C2 step-2 / I-07; research R3; session.hpp
-//          store_then_emit_test_access; plan ## Gate A (mechanism deviation note).
-#ifdef FIXPP_TEST_HOOKS
+//          tests/support/session_test_access.hpp; plan ## Gate A (mechanism deviation note).
 TEST(CredentialStoreRedaction, T010_OverBound_SmallBoundSeam_SkipStoreButTransmit) {
     constexpr std::string_view kSentinel = "overbound-T010-sentinel";
 
@@ -1276,12 +1276,13 @@ TEST(CredentialStoreRedaction, T010_OverBound_SmallBoundSeam_SkipStoreButTransmi
     // and the "absent" assertion would pass spuriously (not discriminate skip_store).
     constexpr fixpp::session::seqnum_t kInjSeq = 2;
     wire_out.clear();  // capture only the injected frame's transmit
-    auto inj_r = asio::co_spawn(
-                     sx,
-                     initiator.store_then_emit_test_access(
-                         kInjSeq, std::span<const std::byte>{over_bytes.data(), over_bytes.size()}),
-                     asio::use_future)
-                     .get();
+    auto inj_r =
+        asio::co_spawn(sx,
+                       fixpp::session::session_test_access::store_then_emit(
+                           initiator, kInjSeq,
+                           std::span<const std::byte>{over_bytes.data(), over_bytes.size()}),
+                       asio::use_future)
+            .get();
     ASSERT_TRUE(inj_r.has_value())
         << "store_then_emit must return ok on the skip-store-but-transmit path (I-07)";
 
@@ -1317,7 +1318,6 @@ TEST(CredentialStoreRedaction, T010_OverBound_SmallBoundSeam_SkipStoreButTransmi
     }
     pool.join();  // drain+join workers before executor-holding locals destruct (teardown-race fix)
 }
-#endif  // FIXPP_TEST_HOOKS
 
 // ── T011 — alloc gate: the masking step adds zero heap allocation ─────────────
 //

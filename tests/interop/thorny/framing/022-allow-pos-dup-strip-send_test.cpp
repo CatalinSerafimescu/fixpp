@@ -59,6 +59,7 @@
 
 #include "happy/hp_support.hpp"
 #include "support/scenario_descriptor.hpp"
+#include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::interop::Counterparty;
@@ -167,7 +168,8 @@ TEST_P(AllowPosDupStripSend, StripDefaultSends43Free_CounterpartyAccepts) {
     ASSERT_NE(s, nullptr) << "session not established";
 
     // ── Snapshot outbound seqnum before the send ───────────────────────────────
-    const auto seqnum_before = s->seqnum_mgr_test_access().next_outbound_unsafe();
+    const auto seqnum_before =
+        fixpp::session::session_test_access::seqnum_mgr(*s).next_outbound_unsafe();
 
     // ── Build a payload that contains caller-supplied 43=Y and 122 ────────────
     // The 022 send-path strip must excise these before framing. The payload is a
@@ -236,7 +238,8 @@ TEST_P(AllowPosDupStripSend, StripDefaultSends43Free_CounterpartyAccepts) {
            "counterparty must accept the stripped (43/122-free) frame (C5/SC-005)";
 
     // ── In-process witness (c): outbound seqnum advanced by one ───────────────
-    const auto seqnum_after = s->seqnum_mgr_test_access().next_outbound_unsafe();
+    const auto seqnum_after =
+        fixpp::session::session_test_access::seqnum_mgr(*s).next_outbound_unsafe();
     EXPECT_EQ(seqnum_after, seqnum_before + 1U)
         << "outbound seqnum did not advance by one after the send; "
            "expected="

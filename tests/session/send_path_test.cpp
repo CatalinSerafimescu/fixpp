@@ -54,6 +54,8 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/seqnum_manager_test_access.hpp"
+#include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::session::test_support::extract_field;
@@ -810,7 +812,7 @@ TEST_F(SendPathTest, Send_ThrowFromStore_SessionReachesDisconnected) {
 // is still seqnum_min (no outbound was registered through the manager) — the
 // counter diverges from the wire seqnums. This is the F3 bug.
 //
-// Requires FIXPP_TEST_HOOKS for seqnum_mgr_test_access().
+// Reads the counter through session_test_access::seqnum_mgr.
 // [Drift F3; spec.md FR-001(a); data-model.md §E1 Session::send]
 TEST_F(SendPathTest, Send_TwoSends_SeqnumManagerCounterMatchesFrameSeqnums) {
     std::vector<std::string> call_log;
@@ -827,7 +829,8 @@ TEST_F(SendPathTest, Send_TwoSends_SeqnumManagerCounterMatchesFrameSeqnums) {
     drive_to_active(sess, "FIX.4.4");
 
     // Record the manager's outbound counter before any sends.
-    const seqnum_t mgr_before = sess.seqnum_mgr_test_access().next_outbound_unsafe();
+    const seqnum_t mgr_before =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_outbound_unsafe();
 
     // First send.
     auto payload = make_min_app_payload();
@@ -860,7 +863,8 @@ TEST_F(SendPathTest, Send_TwoSends_SeqnumManagerCounterMatchesFrameSeqnums) {
     // F3: SeqnumManager's outbound counter must have advanced by 2 (two assigns).
     // Currently (bug): the counter does NOT advance because assign_outbound() is
     // never called; the counter stays at mgr_before.
-    const seqnum_t mgr_after = sess.seqnum_mgr_test_access().next_outbound_unsafe();
+    const seqnum_t mgr_after =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_outbound_unsafe();
     EXPECT_EQ(mgr_after, mgr_before + seqnum_t{2})
         << "SeqnumManager outbound counter must advance by 2 after two sends; "
         << "before=" << mgr_before << " after=" << mgr_after << " (expected "
@@ -1085,7 +1089,8 @@ TEST_F(SendPathTest, Send_TransportThrowsAfterStore_ReturnsDefinedError_StateDis
 //
 // Anchors: 005 data-model.md E3 ("session-fatal, no wrap, surfaced via
 // store_seqnum_overflow"); 009 spec.md FR-001; [gate-b/r2-red: RC#G F-10].
-// Requires FIXPP_TEST_HOOKS for seqnum_mgr_test_access() and set_counters_for_test().
+// Seeds the counter through session_test_access::seqnum_mgr and
+// seqnum_manager_test_access::set_counters.
 TEST_F(SendPathTest, AdminEmit_HeartbeatReply_SeqnumOverflow_DoesNotEmit_ReachesDisconnected) {
     std::vector<std::vector<std::byte>> transport_frames;
 
@@ -1103,9 +1108,9 @@ TEST_F(SendPathTest, AdminEmit_HeartbeatReply_SeqnumOverflow_DoesNotEmit_Reaches
 
     // Seed outbound counter to seqnum_max so the next assign_outbound() overflows.
     // Preserve the current inbound counter (we need the peer seq to be in-sequence).
-    auto& mgr = sess.seqnum_mgr_test_access();
+    auto& mgr = fixpp::session::session_test_access::seqnum_mgr(sess);
     const seqnum_t next_inbound = mgr.next_inbound_unsafe();
-    mgr.set_counters_for_test(next_inbound, seqnum_max);
+    fixpp::session::seqnum_manager_test_access::set_counters(mgr, next_inbound, seqnum_max);
 
     // Feed an inbound TestRequest (35=1). The session should try to emit a
     // Heartbeat reply, fail on assign_outbound() (seqnum_max → overflow),
@@ -1201,8 +1206,9 @@ TEST_F(SendPathTest, Send_SeqnumOverflow_ReturnsError_ReachesDisconnected_NoTran
 
     // Seed the outbound counter to seqnum_max so the next assign_outbound()
     // overflows (preserve the current inbound counter — unused here).
-    auto& mgr = sess.seqnum_mgr_test_access();
-    mgr.set_counters_for_test(mgr.next_inbound_unsafe(), seqnum_max);
+    auto& mgr = fixpp::session::session_test_access::seqnum_mgr(sess);
+    fixpp::session::seqnum_manager_test_access::set_counters(mgr, mgr.next_inbound_unsafe(),
+                                                             seqnum_max);
 
     auto payload = make_min_app_payload();
     auto fut =

@@ -21,8 +21,8 @@
 //
 // T016 (SC-005, FR-002, FR-009):
 //   Structural proof that the default path constructs NO validator.  After open()
-//   with validate_inbound_messages==false, FIXPP_TEST_HOOKS exposes
-//   has_validator_for_test() (session.hpp) which checks validator_==nullptr.
+//   with validate_inbound_messages==false, session_test_access::has_validator
+//   (tests/support/session_test_access.hpp) checks validator_==nullptr.
 //   The flag is the ONLY variable vs the T012 strict-mode fixture (dictionary is
 //   still set), so a null validator is attributable to the flag, not a missing dict.
 //
@@ -63,6 +63,7 @@
 
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_test_access.hpp"
 #include "support/transport_double.hpp"
 #include "support/validation_test_dictionary.hpp"
 
@@ -224,9 +225,9 @@ struct ValidateDefaultOffFixture {
 // ── T016 — SC-005 structural proof ───────────────────────────────────────────
 //
 // After open() with validate_inbound_messages==false (dictionary IS set),
-// has_validator_for_test() returns false — the validator was NOT constructed.
-// This is the named postcondition of SC-005 ("no validator construction or
-// invocation") asserted directly via the FIXPP_TEST_HOOKS accessor, not a proxy.
+// session_test_access::has_validator returns false — the validator was NOT
+// constructed. This is the named postcondition of SC-005 ("no validator construction
+// or invocation") asserted directly via the test-only accessor, not a proxy.
 //
 // Discrimination: open() with validate_inbound_messages==true (see T012 fixture)
 // DOES set validator_!=null.  The flag is the controlling variable; keeping the
@@ -249,9 +250,9 @@ TEST(ValidateGateDefaultOff, T016_ValidatorNotConstructed_SC005) {
     ASSERT_TRUE(fut.get().has_value()) << "open() must succeed";
 
     // Direct structural assertion: no validator constructed.
-    // [SC-005; FR-002; 041 T016; open()'s validate_inbound_messages guard; session.hpp
-    // FIXPP_TEST_HOOKS]
-    EXPECT_FALSE(sess.has_validator_for_test())
+    // [SC-005; FR-002; 041 T016; open()'s validate_inbound_messages guard;
+    // tests/support/session_test_access.hpp]
+    EXPECT_FALSE(fixpp::session::session_test_access::has_validator(sess))
         << "T016/SC-005: validator_ must be null when validate_inbound_messages==false "
            "(flag gates construction in open(); dict IS set in this config, "
            "so null is caused by the flag, not a missing dict)";

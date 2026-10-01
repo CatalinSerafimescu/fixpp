@@ -48,6 +48,8 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/seqnum_manager_test_access.hpp"
+#include "support/session_test_access.hpp"
 #include "support/store_double.hpp"
 #include "support/transport_double.hpp"
 
@@ -354,9 +356,9 @@ TEST(TCSendingTime, Fix44_1d_InvalidLogonBadSendingTime_SeqnumOverflow_SurfacesE
 
     const std::size_t before = f.transport.sent_count();
 
-    auto& mgr = sess.seqnum_mgr_test_access();
+    auto& mgr = fixpp::session::session_test_access::seqnum_mgr(sess);
     const seqnum_t next_inbound = mgr.next_inbound_unsafe();
-    mgr.set_counters_for_test(next_inbound, seqnum_max);
+    fixpp::session::seqnum_manager_test_access::set_counters(mgr, next_inbound, seqnum_max);
 
     auto stale_logon = make_frame_with_sending_time("FIX.4.4", "A", next_inbound, "TW", "ISLD",
                                                     "20231231-23:55:00.000",
@@ -481,7 +483,8 @@ TEST(TCSendingTime, Fix44_2o_SendingTimeValueOutOfRange) {
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Disconnected);
     // fixpp#423: the stale Heartbeat was the expected seq=2, so it is consumed
     // (FIX-SL 2020 §4.5.4) and a reconnect does not ResendRequest it.
-    EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(), seqnum_t{3})
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe(),
+              seqnum_t{3})
         << "2o fix44: the rejected in-sequence message must consume its seqnum";
 }
 
@@ -494,9 +497,9 @@ TEST(TCSendingTime, Fix44_2o_SendingTimeValueOutOfRange_SeqnumOverflow_SurfacesE
 
     const std::size_t before = f.transport.sent_count();
 
-    auto& mgr = sess.seqnum_mgr_test_access();
+    auto& mgr = fixpp::session::session_test_access::seqnum_mgr(sess);
     const seqnum_t next_inbound = mgr.next_inbound_unsafe();
-    mgr.set_counters_for_test(next_inbound, seqnum_max);
+    fixpp::session::seqnum_manager_test_access::set_counters(mgr, next_inbound, seqnum_max);
 
     auto stale_hb = make_frame_with_sending_time("FIX.4.4", "0", next_inbound, "TW", "ISLD",
                                                  "20231231-23:55:00.000");

@@ -77,6 +77,7 @@
 #include <tuple>
 
 #include "hp_support.hpp"
+#include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::interop::Counterparty;
@@ -141,7 +142,8 @@ TEST_P(ResetOnLogonInitiator, LogonAcceptedAndResyncs) {
     // "session merely exists".
     auto s = fx.engine().lookup(id);
     ASSERT_NE(s, nullptr) << "session not established";
-    EXPECT_GE(s->seqnum_mgr_test_access().peek_outbound(), fixpp::session::seqnum_t{2})
+    EXPECT_GE(fixpp::session::session_test_access::seqnum_mgr(*s).peek_outbound(),
+              fixpp::session::seqnum_t{2})
         << "outbound seqnum should be >= 2 after Active (Logon at 34=1 was sent and "
            "consumed seqnum 1; the reset ran and next outbound advanced past 1)";
 
@@ -232,7 +234,8 @@ TEST_P(ResetOnLogonAcceptor, AdmitsFresh34eq1AndResyncsFrom1) {
 
     // ── In-process witness (b): outbound seqnum advanced past Logon ──────────
     // The acceptor's reply Logon was sent (at least one outbound frame emitted).
-    EXPECT_GT(s->seqnum_mgr_test_access().peek_outbound(), fixpp::session::seqnum_t{1})
+    EXPECT_GT(fixpp::session::session_test_access::seqnum_mgr(*s).peek_outbound(),
+              fixpp::session::seqnum_t{1})
         << "outbound seqnum did not advance past the reply Logon";
 
     // ── In-process witness (c): inbound seqnum == 2 (no ResendRequest issued) ─
@@ -240,7 +243,8 @@ TEST_P(ResetOnLogonAcceptor, AdmitsFresh34eq1AndResyncsFrom1) {
     // inbound is 2. If fixpp had issued a ResendRequest, the dialogue would
     // differ (more frames, different seqnum). This witness proves no ResendRequest
     // was issued for seqnums below the reset point (C6.2 / C2.5).
-    EXPECT_EQ(s->seqnum_mgr_test_access().next_inbound_unsafe(), fixpp::session::seqnum_t{2})
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*s).next_inbound_unsafe(),
+              fixpp::session::seqnum_t{2})
         << "next_inbound should be 2 after accepting peer Logon at 34=1 "
         << "(a ResendRequest would advance it differently — C2.5/C6.2 check)";
 

@@ -775,8 +775,8 @@ TEST(WitnessComparator, ReopeningOnSamePathTruncatesRunNMinus1sStaleReadback) {
 // turns GREEN (pass) under this mutant. Kept as a permanent, LABELLED
 // expected-priced-survivor witness proving the hazard by contrast with the
 // test above -- production never reaches this mode (Stream's single-arg
-// constructor never opens append; append_mode_for_test() is gated behind
-// FIXPP_TEST_HOOKS and reachable only from test code).
+// constructor never opens append; append_mode_for_test() is reachable only
+// from test code).
 TEST(WitnessComparator, AppendModeAcrossTwoRunsWronglyPassesOnRunNMinus1sStaleReadback) {
     std::string const dir = unique_test_dir();
     std::string const receiver_path = dir + "wc_r4_append_receiver.jsonl";

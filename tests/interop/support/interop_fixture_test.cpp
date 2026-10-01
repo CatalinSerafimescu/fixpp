@@ -27,6 +27,8 @@
 #include <memory>
 #include <stdexcept>
 
+#include "support/engine_test_access.hpp"
+
 using namespace std::chrono_literals;
 
 TEST(InteropEngineFixtureRunUntil, RevivesContextStoppedAtEntry) {
@@ -287,9 +289,8 @@ TEST(InteropEngineFixtureTeardown, MissPathRetainsTheEngineOwnedClock) {
 // ── #292 — a throwing stop() is REPORTED, and retains the Engine-owned clock ─
 //
 // Withdraws two round-1 waivers that both rested on "no test seam exists to make
-// Engine::stop() throw". One does: every interop target compiles with
-// FIXPP_TEST_HOOKS (tests/interop/CMakeLists.txt's per-target compile-definitions call), Engine
-// exposes set_post_send_drain_hook() (its definition in engine.hpp), and stop() co_awaits it
+// Engine::stop() throw". One does: engine_test_access::set_post_send_drain_hook()
+// (tests/support/engine_test_access.hpp) installs a hook, and stop() co_awaits it
 // (`Engine::stop()`'s `test_hook_post_send_drain_` await) BEFORE step 4 (session close) and step 5
 // (registry clear). A throwing hook therefore aborts teardown midway — exactly the state to test.
 //
@@ -339,10 +340,11 @@ TEST(InteropEngineFixtureTeardown, ThrowingStopIsReportedAndRetainsTheEngineOwne
             fixpp::interop::InteropEngineFixture fx{std::move(cfg)};
             fx.observe_io_context_destruction(&ioc_destructions);
             fx.start();
-            fx.engine().set_post_send_drain_hook([]() -> asio::awaitable<void> {
-                throw std::runtime_error("post-send-drain hook throws (gate-b/r2 P1-1)");
-                co_return;
-            });
+            fixpp::session::engine_test_access::set_post_send_drain_hook(
+                fx.engine(), []() -> asio::awaitable<void> {
+                    throw std::runtime_error("post-send-drain hook throws (gate-b/r2 P1-1)");
+                    co_return;
+                });
             clock.reset();
         }()),
         "Engine::stop() did not finish");
@@ -412,11 +414,12 @@ TEST(InteropEngineFixtureTeardown, ExactlyOneTeardownBodyRunsAndItsFailureIsNotM
             [&hook_entries] {
                 fixpp::interop::InteropEngineFixture fx;
                 fx.start();
-                fx.engine().set_post_send_drain_hook([&hook_entries]() -> asio::awaitable<void> {
-                    hook_entries.fetch_add(1, std::memory_order_relaxed);
-                    throw std::runtime_error("post-send-drain hook throws (gate-b/r3 P1-2)");
-                    co_return;
-                });
+                fixpp::session::engine_test_access::set_post_send_drain_hook(
+                    fx.engine(), [&hook_entries]() -> asio::awaitable<void> {
+                        hook_entries.fetch_add(1, std::memory_order_relaxed);
+                        throw std::runtime_error("post-send-drain hook throws (gate-b/r3 P1-2)");
+                        co_return;
+                    });
 
                 // Spawn operation #1 and drive it far enough to reach the throwing
                 // hook, so its future is ready-with-exception rather than pending.

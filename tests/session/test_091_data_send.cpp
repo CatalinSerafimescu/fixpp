@@ -21,7 +21,7 @@
 //
 // Each witness pins the complete wire tag order of the transmitted frame as
 // the production parser reads it, and the outbound MsgSeqNum consumed by the
-// send (seqnum_mgr_test_access, FIXPP_TEST_HOOKS).
+// send (session_test_access::seqnum_mgr).
 //
 // Build: cmake --build build/linux-clang-debug --target session_091_data_send
 // Run:   ctest --test-dir build/linux-clang-debug -R session_091_data_send -V
@@ -68,6 +68,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::session::test_support::extract_field;
@@ -271,10 +272,13 @@ protected:
         Session sess(engine, make_cfg(std::move(dict)));
         drive_to_active(sess);
         if (HasFatalFailure()) return {};
-        seqnum_t const before = sess.seqnum_mgr_test_access().peek_outbound();
+        seqnum_t const before =
+            fixpp::session::session_test_access::seqnum_mgr(sess).peek_outbound();
         auto const r = send_payload(sess, payload, label);
         EXPECT_TRUE(r.has_value()) << label << ": a well-formed counted pair must not be refused";
-        EXPECT_EQ(sess.seqnum_mgr_test_access().peek_outbound(), before + 1U) << label;
+        EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).peek_outbound(),
+                  before + 1U)
+            << label;
         if (captured_frames.size() != 1U) {
             ADD_FAILURE() << label << ": expected one transmitted frame, got "
                           << captured_frames.size();

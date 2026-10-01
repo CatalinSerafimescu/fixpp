@@ -57,6 +57,7 @@
 #include "support/minimal_security_profile.hpp"
 #include "support/possdup_test_support.hpp"  // extract_field
 #include "support/pump_until_ready.hpp"
+#include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::session::test_support::extract_field;
@@ -768,7 +769,7 @@ TEST_P(MalformedField131Test, W6_MalformedField_Returns131_NoSeqnum_NoTransmit_N
     Session sess(engine, cfg);
     drive_to_active(sess);
 
-    const auto seq_before = sess.seqnum_mgr_test_access().peek_outbound();
+    const auto seq_before = fixpp::session::session_test_access::seqnum_mgr(sess).peek_outbound();
     const std::size_t frames_before = captured_frames.size();
 
     auto payload = std::vector<std::byte>(tc.payload_len);
@@ -797,7 +798,7 @@ TEST_P(MalformedField131Test, W6_MalformedField_Returns131_NoSeqnum_NoTransmit_N
             << "W6 [" << tc.name << "]: error must be app_payload_malformed=131; [C2.4]";
     }
 
-    EXPECT_EQ(sess.seqnum_mgr_test_access().peek_outbound(), seq_before)
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).peek_outbound(), seq_before)
         << "W6: a malformed-field send must NOT consume an outbound seqnum (NoSeqnum) "
            "[131 returns before assign_outbound]";
 

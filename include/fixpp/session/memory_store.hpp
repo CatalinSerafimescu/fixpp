@@ -522,20 +522,12 @@ private:
         }
     }
 
-#ifdef FIXPP_TEST_HOOKS
-public:
-    // Test-only: force a seqnum counter to a specific value.
-    // PRECONDITION: called single-threaded (no concurrent store/retrieve calls).
-    void test_set_counter(direction_t dir, seqnum_t value) noexcept {
-        if (dir == direction_t::inbound) {
-            next_inbound_ = value;
-        } else {
-            next_outbound_ = value;
-        }
-    }
-
-private:
-#endif  // FIXPP_TEST_HOOKS
+    // fixpp#511: test-only access to private state goes through ONE named friend,
+    // defined once in tests/support/memory_store_test_access.hpp (never
+    // installed). Unconditional on purpose: a member gated behind a test macro
+    // would make a test TU's MemoryStore a different class from the library's,
+    // an ODR violation (ill-formed, no diagnostic required).
+    friend struct memory_store_test_access;
 
     // ── State ────────────────────────────────────────────────────────────────
 

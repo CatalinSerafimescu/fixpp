@@ -25,13 +25,13 @@
 //   Cell 2a (live_peer_id_ nullopt — accepted handoff):
 //     attach_accepted_transport called with a NON-EMPTY sentinel handshake_result
 //     (sentinel CN="SENTINEL-MUST-NOT-STICK") on an insecure_plain_tcp session →
-//     live_peer_id_has_value_for_test() == false. The D-10 #3 guard must suppress
-//     assignment. Single-mutation discriminating: drop the guard → sentinel sticks
-//     → live_peer_id_has_value_for_test()==true → FAIL (RED). [D-10; attach_accepted_transport's
+//     session_test_access::live_peer_id_has_value() == false. The D-10 #3 guard must
+//     suppress assignment. Single-mutation discriminating: drop the guard → sentinel
+//     sticks → live_peer_id_has_value()==true → FAIL (RED). [D-10; attach_accepted_transport's
 //     guard]
 //
 //   Cell 2b (TLS positive control: sentinel DOES stick on one_way_ca):
-//     Same sentinel on a one_way_ca session → live_peer_id_has_value_for_test()==true.
+//     Same sentinel on a one_way_ca session → live_peer_id_has_value()==true.
 //     Proves the assignment path is real; the plaintext guard suppresses it.
 //
 //   Cell 3 (check_comp_id preserved):
@@ -56,8 +56,8 @@
 //          session_event.hpp (session_event_peer_identity_bound /
 //          session_event_compid_authorization_failed).
 
-// FIXPP_TEST_HOOKS is defined via CMakeLists.txt compile definition — exposes
-// live_peer_id_has_value_for_test() in session.hpp.
+// session_test_access::live_peer_id_has_value (tests/support/session_test_access.hpp)
+// reads the private live_peer_id_.
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -99,6 +99,7 @@
 #include <fixpp/session/security_profile.hpp>
 
 #include "support/pump_until_ready.hpp"
+#include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
 
@@ -386,7 +387,7 @@ TEST(PlaintextAuthzTest, AuthorizeCalledOnMtlsPositiveControl) {
 //
 // Single-mutation discriminating:
 //   Mutation: drop `if (k != insecure_plain_tcp)` in attach_accepted_transport
-//             → sentinel sticks → live_peer_id_has_value_for_test()==true → FAIL (RED).
+//             → sentinel sticks → live_peer_id_has_value()==true → FAIL (RED).
 
 TEST(PlaintextAuthzTest, LivePeerIdNulloptOnAcceptedHandoff) {
     asio::io_context ioc;
@@ -406,7 +407,7 @@ TEST(PlaintextAuthzTest, LivePeerIdNulloptOnAcceptedHandoff) {
     ASSERT_TRUE(open_fut.get().has_value()) << "open() failed";
 
     // Pre-check: live_peer_id_ must already be nullopt before attach.
-    ASSERT_FALSE(sess.live_peer_id_has_value_for_test())
+    ASSERT_FALSE(fixpp::session::session_test_access::live_peer_id_has_value(sess))
         << "live_peer_id_ should be nullopt before attach_accepted_transport";
 
     // Pass a SENTINEL (non-empty CN) to attach_accepted_transport.
@@ -416,7 +417,7 @@ TEST(PlaintextAuthzTest, LivePeerIdNulloptOnAcceptedHandoff) {
     sess.attach_accepted_transport(std::move(raw_transport), std::move(sentinel_hr));
 
     // D-10 MUST: live_peer_id_ must stay nullopt — guard must have suppressed assignment.
-    EXPECT_FALSE(sess.live_peer_id_has_value_for_test())
+    EXPECT_FALSE(fixpp::session::session_test_access::live_peer_id_has_value(sess))
         << "Cell 2a (D-10 MUST): attach_accepted_transport on insecure_plain_tcp must "
            "leave live_peer_id_ == nullopt even when called with a non-empty sentinel "
            "handshake_result. Guard in attach_accepted_transport must suppress the assignment. "
@@ -436,7 +437,7 @@ TEST(PlaintextAuthzTest, LivePeerIdNulloptOnAcceptedHandoff) {
 
 // ── Cell 2b — TLS positive control: sentinel DOES stick on one_way_ca ────────
 //
-// Same sentinel on a one_way_ca session → live_peer_id_has_value_for_test()==true.
+// Same sentinel on a one_way_ca session → live_peer_id_has_value()==true.
 // Proves the assignment path is real; the plaintext guard is what suppresses it.
 // one_way_ca skips mTLS authorize() (is_mtls=false) but DOES accept the peer_id.
 
@@ -463,7 +464,7 @@ TEST(PlaintextAuthzTest, LivePeerIdSetOnTlsPositiveControl) {
     sess.attach_accepted_transport(std::move(raw_transport), std::move(sentinel_hr));
 
     // Positive control: sentinel must have been assigned.
-    EXPECT_TRUE(sess.live_peer_id_has_value_for_test())
+    EXPECT_TRUE(fixpp::session::session_test_access::live_peer_id_has_value(sess))
         << "Cell 2b (positive control): attach_accepted_transport on one_way_ca must "
            "store the sentinel in live_peer_id_ (has_value()==true). "
            "This validates that the assignment path is real; the plaintext guard "

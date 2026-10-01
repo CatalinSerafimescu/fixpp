@@ -107,9 +107,10 @@ public:
     }
 
 private:
-#ifdef FIXPP_TEST_HOOKS
+    // Test-only raw-constructor seam, defined in tests/support/dict_hooks_test_access.hpp
+    // (never installed). Unconditional (fixpp#511): a gated friend would make a test
+    // TU's dict_hooks a different class from the library's, an ODR violation.
     friend struct dict_hooks_test_access;
-#endif
 
     constexpr dict_hooks(void const* opaque_dict, classify_fn_t classify,
                          group_member_fn_t group_member, group_delim_fn_t group_delim,

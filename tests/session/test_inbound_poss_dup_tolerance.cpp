@@ -27,6 +27,7 @@
 #include <gtest/gtest.h>
 
 #include "support/possdup_test_support.hpp"
+#include "support/session_test_access.hpp"
 
 namespace fixpp::session::test {
 namespace {
@@ -56,7 +57,8 @@ TEST_F(PossDupToleranceTest, ArmA_Admin_Ignored) {
         << "Arm A admin-ignore: session must stay Active";
 
     // Expected inbound seqnum must remain at 2 (INV-1: no advance).
-    const auto next_inbound = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    const auto next_inbound =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe();
     EXPECT_EQ(next_inbound, static_cast<fixpp::session::seqnum_t>(2))
         << "INV-1: expected inbound seqnum must not advance on Arm A admin-ignore";
 
@@ -95,7 +97,7 @@ TEST_F(PossDupToleranceTest, ArmA_App_Dropped) {
         << "Arm A app-drop: session must stay Active";
 
     // Expected inbound seqnum must remain at 2 (INV-1).
-    EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(),
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe(),
               static_cast<fixpp::session::seqnum_t>(2))
         << "INV-1: expected inbound seqnum must not advance on Arm A app-drop";
 }
@@ -126,7 +128,7 @@ TEST_F(PossDupToleranceTest, ArmA_App_Redelivered) {
         << "Arm A app-redeliver: session must stay Active";
 
     // Expected inbound seqnum must remain at 2 (INV-1: no advance even on redeliver).
-    EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(),
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe(),
               static_cast<fixpp::session::seqnum_t>(2))
         << "INV-1: expected inbound seqnum must not advance on Arm A app-redeliver";
 }
@@ -156,7 +158,7 @@ TEST_F(PossDupToleranceTest, ArmA_Admin_Idempotent) {
         << "Idempotent replay: session must remain Active after two possdup admin frames";
 
     // Seqnum unchanged.
-    EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(),
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe(),
               static_cast<fixpp::session::seqnum_t>(2))
         << "INV-1: no seqnum advance from idempotent possdup admin replay";
 
@@ -220,7 +222,7 @@ TEST_F(PossDupToleranceTest, ArmA_Admin_NoSideEffects) {
     EXPECT_EQ(sess.state(), fixpp::session::fsm_state::Active);
 
     // Seqnum unchanged: the tolerated too-low possdup must not advance expected inbound.
-    EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(),
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe(),
               static_cast<fixpp::session::seqnum_t>(2))
         << "INV-1: expected inbound seqnum must not advance on Arm A admin-ignore";
 }

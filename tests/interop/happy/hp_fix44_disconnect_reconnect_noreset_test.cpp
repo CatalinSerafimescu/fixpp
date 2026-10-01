@@ -27,6 +27,7 @@
 #include <string>
 
 #include "hp_support.hpp"
+#include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::interop::Counterparty;
@@ -77,7 +78,8 @@ TEST_P(HappyDisconnectReconnectNoReset, ReconnectPreservesSequenceContinuity) {
 
     auto s = fx.engine().lookup(id);
     ASSERT_NE(s, nullptr) << "session not established";
-    EXPECT_GT(s->seqnum_mgr_test_access().peek_outbound(), fixpp::session::seqnum_t{1})
+    EXPECT_GT(fixpp::session::session_test_access::seqnum_mgr(*s).peek_outbound(),
+              fixpp::session::seqnum_t{1})
         << "outbound seqnum did not advance past the Logon";
 
     // The parent gate asserts the abrupt disconnect, reconnect Logon with

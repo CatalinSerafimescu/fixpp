@@ -45,6 +45,7 @@
 #include <vector>
 
 #include "hp_support.hpp"
+#include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::dict::application_version;
@@ -178,7 +179,8 @@ TEST_P(HappyFixtLogonHbLogout, LogonHeartbeatLogout) {
     // ── Seqnum delta (FR-007): outbound advanced past the Logon ──────────────
     auto s = fx.engine().lookup(id);
     ASSERT_NE(s, nullptr) << "session not established";
-    EXPECT_GT(s->seqnum_mgr_test_access().peek_outbound(), fixpp::session::seqnum_t{1})
+    EXPECT_GT(fixpp::session::session_test_access::seqnum_mgr(*s).peek_outbound(),
+              fixpp::session::seqnum_t{1})
         << "outbound seqnum did not advance past the Logon";
 
     // ── SC-006: the negotiated application version equals the configured one ──

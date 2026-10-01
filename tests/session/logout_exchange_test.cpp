@@ -70,6 +70,8 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/seqnum_manager_test_access.hpp"
+#include "support/session_test_access.hpp"
 #include "support/transport_double.hpp"
 
 using namespace std::chrono_literals;
@@ -1029,9 +1031,9 @@ TEST_F(LogoutExchangeTest, ActiveInboundLogout_SeqnumOverflow_SurfacesError) {
 
     const std::size_t frames_before = td.sent_count();
 
-    auto& mgr = sess.seqnum_mgr_test_access();
+    auto& mgr = fixpp::session::session_test_access::seqnum_mgr(sess);
     const seqnum_t next_inbound = mgr.next_inbound_unsafe();
-    mgr.set_counters_for_test(next_inbound, seqnum_max);
+    fixpp::session::seqnum_manager_test_access::set_counters(mgr, next_inbound, seqnum_max);
 
     auto peer_logout = make_logout_frame("FIX.4.2", next_inbound, "TW", "ISLD");
     auto inbound_r = feed_inbound(sess, peer_logout);

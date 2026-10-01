@@ -324,23 +324,12 @@ public:
     // Never null post-construction (validate_engine_config rejects null clocks).
     [[nodiscard]] const std::shared_ptr<fixpp::core::Clock>& clock() const noexcept;
 
-#ifdef FIXPP_TEST_HOOKS
-    // gate-b/r1 #3 (V-12 seam): public setter for the pre-publish hook.
-    // Set before calling start(); invoked by run_accept_loop on the session strand
-    // between step 7 (attach_accepted_transport) and step 7a (publish_entry).
-    // Production builds (FIXPP_TEST_HOOKS not defined) carry zero overhead.
-    // [contracts C-6/V-12; gate-b/r1 #3]
-    void set_pre_publish_hook(std::function<asio::awaitable<void>()> hook) {
-        test_hook_pre_publish_ = std::move(hook);
-    }
-
-    // gate-b/r3 P1 witness seam: invoked by stop() on the control strand after
-    // the send_counter_ drain has observed zero and before the registry clear.
-    // Lets a test start a late Engine::send() in the post-drain window.
-    void set_post_send_drain_hook(std::function<asio::awaitable<void>()> hook) {
-        test_hook_post_send_drain_ = std::move(hook);
-    }
-#endif  // FIXPP_TEST_HOOKS
+    // fixpp#511: the test-only hook setters live in ONE named friend, defined once
+    // in tests/support/engine_test_access.hpp (never installed). Unconditional on
+    // purpose: a member gated behind a test macro would make a test TU's Engine a
+    // different class from the library's, an ODR violation (ill-formed, no
+    // diagnostic required).
+    friend struct engine_test_access;
 
 private:
     // Injected executor; all loops co_spawn on this.
@@ -474,17 +463,17 @@ private:
 
     // gate-b/r1 #3 (V-12 seam): awaitable hook invoked by run_accept_loop on the
     // session strand BETWEEN step 7 (attach_accepted_transport) and step 7a
-    // (publish_entry co_spawn).  The hook is always compiled in (so engine.cpp,
-    // which does not get FIXPP_TEST_HOOKS, can always check it) but is always null
-    // in production (no production code path calls set_pre_publish_hook, which is
-    // guarded by FIXPP_TEST_HOOKS).  Overhead = one null function<> check per
-    // accepted connection: zero in practice. [contracts C-6/V-12; gate-b/r1 #3]
+    // (publish_entry co_spawn).  The hook is always null in production: only
+    // engine_test_access::set_pre_publish_hook (tests/support/engine_test_access.hpp,
+    // never installed) assigns it.  Overhead = one null function<> check per
+    // accepted connection. [contracts C-6/V-12]
     std::function<asio::awaitable<void>()> test_hook_pre_publish_;  // null unless test sets it
 
     // gate-b/r3 P1 (post-drain seam): awaitable hook invoked by stop() on the
     // control strand AFTER the send_counter_ drain has observed zero and BEFORE
-    // step-4 session close / step-5 registry clear. Always compiled in; null in
-    // production because only FIXPP_TEST_HOOKS builds can install it.
+    // step-4 session close / step-5 registry clear. Null in production: only
+    // engine_test_access::set_post_send_drain_hook (tests/support/engine_test_access.hpp,
+    // never installed) assigns it.
     std::function<asio::awaitable<void>()> test_hook_post_send_drain_;
 
 #ifndef NDEBUG

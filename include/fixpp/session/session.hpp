@@ -500,55 +500,12 @@ public:
         }
     }
 
-#ifdef FIXPP_TEST_HOOKS
-    // TEST-ONLY accessor: expose SeqnumManager for drain-contract tests
-    // (009 T021 FR-011 — CloseWithHolderDoesNotTerminate). Allows tests to
-    // directly acquire the internal async_mutex to manufacture a genuine holder
-    // that is in-flight when close() calls seqnum_mgr_.drain(). NOT for
-    // production use. Gated by FIXPP_TEST_HOOKS ([const §XV.9]).
-    [[nodiscard]] SeqnumManager& seqnum_mgr_test_access() noexcept { return seqnum_mgr_; }
-
-    // TEST-ONLY accessor: drive store_then_emit directly with a caller-supplied
-    // frame (034 T010 fault-injection). The over-bound branch in store_then_emit
-    // (frame.size() > kMaxMaskableLogonBytes) is production-unreachable because
-    // build_logon caps its output at kMaxMaskableLogonBytes; this accessor lets a
-    // test feed a hand-crafted >kMaxMaskableLogonBytes 35=A frame to exercise the
-    // fail-closed skip-store-but-transmit branch against the REAL bound, earning
-    // its BRDA with zero production surface. NOT for production use. [§XV.9; T010]
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store_then_emit_test_access(
-        seqnum_t stamped_seq, std::span<const std::byte> frame) noexcept {
-        return store_then_emit(stamped_seq, frame);
-    }
-
-    // TEST-ONLY accessor: returns true iff the validator was constructed at open()
-    // (i.e. validate_inbound_messages==true && dictionary!=null). Used by T016
-    // (041-validation-gate-wiring SC-005) to prove that the default (flag=false)
-    // path leaves validator_==null — no validator constructed or invocable.
-    // A plain bool accessor; adds no include edge → [const §XV.9]-safe.
-    // NOT for production use. [041 T016; SC-005; FR-002]
-    [[nodiscard]] bool has_validator_for_test() const noexcept { return validator_ != nullptr; }
-
-    // TEST-ONLY accessor: returns true iff the session reached lifecycle::closed_drained
-    // (the terminal drained state). Used by the issue #151 capi reaped-close tests
-    // (tests/capi/send_recv_test.cpp) to wait DETERMINISTICALLY for a peer-disconnected
-    // acceptor to finish draining before re-closing it — `is_established`/onLogout fires
-    // on the Active→!Active edge, BEFORE state_ reaches closed_drained, so a fixed sleep
-    // can race the `closing` window. A plain bool accessor; adds no include edge → safe
-    // ([const §XV.9]). NOT for production use.
-    [[nodiscard]] bool is_drained_for_test() const noexcept {
-        return state_ == lifecycle::closed_drained;
-    }
-
-    // TEST-ONLY accessor: returns true iff live_peer_id_ has a value.
-    // Used by 043 T008 to directly assert that install_reconnected_transport and
-    // attach_accepted_transport leave live_peer_id_ == nullopt on insecure_plain_tcp
-    // (D-10 MUST — fail-closed-by-construction). A plain bool avoids any new include
-    // edge ([const §XV.9]-safe; peer_identity is already transitively pulled in via
-    // the private member `live_peer_id_`). NOT for production use. [043 T008; D-10]
-    [[nodiscard]] bool live_peer_id_has_value_for_test() const noexcept {
-        return live_peer_id_.has_value();
-    }
-#endif
+    // fixpp#511: test-only access to private state goes through ONE named friend,
+    // defined once in tests/support/session_test_access.hpp (never installed). The
+    // friend is unconditional on purpose: a member gated behind a test macro would
+    // make a test TU's Session a different class from the library's, an ODR
+    // violation (ill-formed, no diagnostic required).
+    friend struct session_test_access;
 
     // 015 T011 — Engine-internal acceptor attach primitive.
     // Called by the engine's run_accept_loop STRICTLY-BEFORE the first
@@ -1198,13 +1155,13 @@ private:
     // open()-time credential-length guard adds config-time defense for both roles).
     // NOT a public SessionConfig/ctor/template param (Art. X / non-template class).
     //
-    // The dead over-bound branch earns its BRDA via store_then_emit_test_access()
-    // (FIXPP_TEST_HOOKS, below): a test feeds a hand-crafted >256-byte 35=A frame
-    // directly into store_then_emit, exercising the real branch against this real
-    // bound. (An earlier design proposed a FIXPP_TEST_LOGON_MASK_BOUND compile
-    // override; that could not reach this constant — store_then_emit is compiled
-    // into libfixpp_session WITHOUT the test define — so frame-injection through
-    // the FIXPP_TEST_HOOKS accessor is the working seam for the same BRDA outcome.)
+    // The dead over-bound branch earns its BRDA via session_test_access::store_then_emit
+    // (tests/support/session_test_access.hpp): a test feeds a hand-crafted >256-byte
+    // 35=A frame directly into store_then_emit, exercising the real branch against
+    // this real bound. (An earlier design proposed a FIXPP_TEST_LOGON_MASK_BOUND
+    // compile override; that could not reach this constant — store_then_emit is
+    // compiled into libfixpp_session WITHOUT the test define — so frame-injection
+    // through the test-access friend is the working seam for the same BRDA outcome.)
     // [034 data-model.md E1 / research R3 / contracts/store-redaction.md C2; plan ## Gate A]
     static constexpr std::size_t kMaxMaskableLogonBytes = 256;
 

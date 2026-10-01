@@ -76,6 +76,7 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_test_access.hpp"
 #include "transport/loopback_tls_fixture.hpp"
 
 using namespace std::chrono_literals;
@@ -391,10 +392,8 @@ TEST(EngineConnectTest, InitiatorConnectThenLogon) {
     int next_inbound = 0;
     if (ini_session != nullptr) {
         state = ini_session->state();
-#ifdef FIXPP_TEST_HOOKS
-        next_inbound =
-            static_cast<int>(ini_session->seqnum_mgr_test_access().next_inbound_unsafe());
-#endif
+        next_inbound = static_cast<int>(
+            fixpp::session::session_test_access::seqnum_mgr(*ini_session).next_inbound_unsafe());
     }
 
     // ── Stop the engine ───────────────────────────────────────────────────────

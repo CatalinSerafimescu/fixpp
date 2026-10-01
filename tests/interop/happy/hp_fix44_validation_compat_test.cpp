@@ -86,6 +86,7 @@
 #include <tuple>
 
 #include "hp_support.hpp"
+#include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::interop::Counterparty;
@@ -214,7 +215,8 @@ TEST_P(ValidationCompat_CompID, AcceptsWithKnobOff) {
     ASSERT_NE(s, nullptr) << "session not established";
 
     // Snapshot inbound seqnum after Logon.
-    const auto inbound_at_logon = s->seqnum_mgr_test_access().next_inbound_unsafe();
+    const auto inbound_at_logon =
+        fixpp::session::session_test_access::seqnum_mgr(*s).next_inbound_unsafe();
 
     // ── Wait for at least 1 fromApp or fromAdmin delivery ────────────────────
     // The counterparty sends at least one message after Active (business message
@@ -253,12 +255,14 @@ TEST_P(ValidationCompat_CompID, AcceptsWithKnobOff) {
 
     // (c) Inbound seqnum advanced — confirms the delivered frame was processed
     //     (not silently dropped). Exact-match-only advance property (I-VCT-4).
-    EXPECT_GT(s2->seqnum_mgr_test_access().next_inbound_unsafe(), inbound_at_logon)
+    EXPECT_GT(fixpp::session::session_test_access::seqnum_mgr(*s2).next_inbound_unsafe(),
+              inbound_at_logon)
         << "ValidationCompat_CompID B1(c): inbound seqnum did not advance after"
            " fromApp delivery; steady-state in-sequence frames must advance the counter";
 
     // (d) Outbound seqnum advanced past Logon (seq 1) — messages were exchanged.
-    EXPECT_GT(s2->seqnum_mgr_test_access().peek_outbound(), fixpp::session::seqnum_t{1})
+    EXPECT_GT(fixpp::session::session_test_access::seqnum_mgr(*s2).peek_outbound(),
+              fixpp::session::seqnum_t{1})
         << "ValidationCompat_CompID B1(d): outbound seqnum did not advance past"
            " the Logon; session must exchange messages with the counterparty";
 
@@ -362,11 +366,13 @@ TEST_P(ValidationCompat_Seqnum, ToleratesOutOfOrderWithKnobOff) {
     ASSERT_NE(s, nullptr) << "session not established";
 
     // Snapshot inbound seqnum after Logon.
-    const auto inbound_at_logon = s->seqnum_mgr_test_access().next_inbound_unsafe();
+    const auto inbound_at_logon =
+        fixpp::session::session_test_access::seqnum_mgr(*s).next_inbound_unsafe();
 
     // Snapshot outbound seqnum after Logon (before any steady-state exchange).
     // Used in (e) to assert no unexpected outbound ResendRequest was sent.
-    const auto outbound_at_logon = s->seqnum_mgr_test_access().peek_outbound();
+    const auto outbound_at_logon =
+        fixpp::session::session_test_access::seqnum_mgr(*s).peek_outbound();
 
     // ── Wait for at least 1 fromApp or fromAdmin delivery ─────────────────────
     // The counterparty sends at least one message after the session is Active
@@ -402,12 +408,14 @@ TEST_P(ValidationCompat_Seqnum, ToleratesOutOfOrderWithKnobOff) {
     //     advance the counter (exact-match-only advance property, I-VCT-4).
     //     An out-of-order frame with the knob off does NOT advance; an in-sequence
     //     one does. With a normal cooperative counterparty the frames are in-sequence.
-    EXPECT_GT(s2->seqnum_mgr_test_access().next_inbound_unsafe(), inbound_at_logon)
+    EXPECT_GT(fixpp::session::session_test_access::seqnum_mgr(*s2).next_inbound_unsafe(),
+              inbound_at_logon)
         << "ValidationCompat_Seqnum B1(c): inbound seqnum did not advance after"
            " delivery; in-sequence frames must advance the counter (I-VCT-4)";
 
     // (d) Outbound seqnum advanced past Logon — messages exchanged.
-    EXPECT_GT(s2->seqnum_mgr_test_access().peek_outbound(), fixpp::session::seqnum_t{1})
+    EXPECT_GT(fixpp::session::session_test_access::seqnum_mgr(*s2).peek_outbound(),
+              fixpp::session::seqnum_t{1})
         << "ValidationCompat_Seqnum B1(d): outbound seqnum did not advance past"
            " the Logon; session must exchange messages with the counterparty";
 

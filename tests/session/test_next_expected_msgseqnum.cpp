@@ -64,6 +64,8 @@ using namespace std::chrono_literals;
 // Must be at file scope for the LD_PRELOAD override to bind.
 #include "support/alloc_guard_markers.hpp"
 #include "support/extract_tag.hpp"
+#include "support/seqnum_manager_test_access.hpp"
+#include "support/session_test_access.hpp"
 
 namespace {
 
@@ -280,7 +282,8 @@ public:
 
     // 029 T007: This test-double store is NOT a persistent durable store; declare
     // non-persistent so ensure_hydrated_() does not read it at session open.
-    // The tests that use ShortStore seed outbound counters via set_counters_for_test
+    // The tests that use ShortStore seed outbound counters via
+    // seqnum_manager_test_access::set_counters
     // after open() — a hydrate read would overwrite those values.
     [[nodiscard]] bool yields_persistent_store() const noexcept override { return false; }
 
@@ -654,7 +657,7 @@ TEST(Emit, AcceptorReply_AdvertisesNextInboundNoPlusOne) {
 //
 // Anchors: data-model.md I-NEX-2/3/11, contracts C4, RC#4 ordering.
 //
-// Setup: FIXPP_TEST_HOOKS (set_counters_for_test) seeds next_outbound to
+// Setup: seqnum_manager_test_access::set_counters seeds next_outbound to
 // create a meaningful resend gap. The acceptor's reply Logon is sent at the
 // seeded seq; after assign_outbound N = seeded + 1. The 789 honor runs AFTER
 // the reply Logon is emitted (RC#4 ordering).
@@ -702,7 +705,8 @@ TEST(Honor, Acceptor_XltN_ResendsExactRange_AfterReply_NoResendRequest) {
     //   reply Logon is emitted at seq=6, peek_outbound becomes 7 (=N).
     //   ShortStore has OrderD frames at seqs 1..5 (our_last=5, eff_end=5).
     //   X=3 < N=7 → resend [3, eff_end=5].
-    fix->session->seqnum_mgr_test_access().set_counters_for_test(1, 6);
+    fixpp::session::seqnum_manager_test_access::set_counters(
+        fixpp::session::session_test_access::seqnum_mgr(*fix->session), 1, 6);
 
     // Feed peer Logon at seq=1 with 789=3.
     fix->feed(make_logon_with_789("FIX.4.4", 1, "CLI", "SRV", 3));
@@ -774,7 +778,8 @@ TEST(Honor, Initiator_XltN_ResendsExactRange_NoResendRequest) {
 
     // Seed outbound=5 so that at the 789 honor point:
     //   N = peek_outbound() = 5, X = 2 < 5 → resend [2, eff_end=4].
-    fix->session->seqnum_mgr_test_access().set_counters_for_test(1, 5);
+    fixpp::session::seqnum_manager_test_access::set_counters(
+        fixpp::session::session_test_access::seqnum_mgr(*fix->session), 1, 5);
 
     fix->clear_capture();
 
@@ -843,7 +848,8 @@ TEST(Honor, XeqN_NoResend) {
 
         // Seed outbound=3: at honor time N=3.
         // Peer sends 789=3 → X=3 == N=3 → no resend.
-        fix2->session->seqnum_mgr_test_access().set_counters_for_test(1, 3);
+        fixpp::session::seqnum_manager_test_access::set_counters(
+            fixpp::session::session_test_access::seqnum_mgr(*fix2->session), 1, 3);
         fix2->clear_capture();
 
         fix2->feed(make_logon_with_789("FIX.4.4", 1, "SRV", "CLI", 3));
@@ -895,7 +901,8 @@ TEST(Honor, Acceptor_XeqNpre_NoResend_Establishes) {
 
     // Seed outbound=4: the reply Logon goes at seq=4 (N_pre=4) → peek_outbound=5 (N_post).
     // Peer's initial Logon advertises 789 = N_pre = 4 (the in-sync value, no +1).
-    fix->session->seqnum_mgr_test_access().set_counters_for_test(1, 4);
+    fixpp::session::seqnum_manager_test_access::set_counters(
+        fixpp::session::session_test_access::seqnum_mgr(*fix->session), 1, 4);
     fix->feed(make_logon_with_789("FIX.4.4", 1, "CLI", "SRV", 4));
 
     ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
@@ -953,7 +960,8 @@ TEST(Honor, Acceptor_XeqNprePlus1_TooHigh_Logout) {
     (void)open_fut.get();
 
     // Seed outbound=4 (N_pre=4, N_post=5). Peer advertises 789=5 (== N_pre+1) → too-high.
-    fix->session->seqnum_mgr_test_access().set_counters_for_test(1, 4);
+    fixpp::session::seqnum_manager_test_access::set_counters(
+        fixpp::session::session_test_access::seqnum_mgr(*fix->session), 1, 4);
     fix->feed(make_logon_with_789("FIX.4.4", 1, "CLI", "SRV", 5));
 
     EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
@@ -1006,7 +1014,8 @@ TEST(WalkExtraction, TwoValueEnd_ExplicitEndBeyondStore_789Caller) {
     // Seed outbound=8: reply Logon at seq=8 → peek_outbound=9 at honor time (N=9).
     // Store through 2 (our_last=2). X=5 > our_last=2 → begin > eff_end → early GapFill.
     // GapFill NewSeqNo = peek_outbound() = 9 (NOT our_last+1=3).
-    fix->session->seqnum_mgr_test_access().set_counters_for_test(1, 8);
+    fixpp::session::seqnum_manager_test_access::set_counters(
+        fixpp::session::session_test_access::seqnum_mgr(*fix->session), 1, 8);
 
     fix->feed(make_logon_with_789("FIX.4.4", 1, "CLI", "SRV", 5));
 
@@ -1056,7 +1065,8 @@ TEST(WalkExtraction, TwoValueEnd_EndSeqNo0_EmptyStore_789Caller) {
 
     // Seed outbound=5: reply Logon at seq=5 → peek_outbound=6 at honor (N=6).
     // Empty store → our_last=0 → early GapFill, NewSeqNo=peek_outbound()=6.
-    fix->session->seqnum_mgr_test_access().set_counters_for_test(1, 5);
+    fixpp::session::seqnum_manager_test_access::set_counters(
+        fixpp::session::session_test_access::seqnum_mgr(*fix->session), 1, 5);
 
     fix->feed(make_logon_with_789("FIX.4.4", 1, "CLI", "SRV", 1));
 
@@ -1114,8 +1124,9 @@ TEST(BehindSide, KnobOn_AdmitsPeerResend_NoFatalDisconnect_Acceptor) {
 
     // Seed inbound counter to X=2 (simulates: we have seen seq 1, expect 2 next).
     // next_outbound=1 (reply Logon will go at seq=1).
-    fix->session->seqnum_mgr_test_access().set_counters_for_test(/*next_inbound=*/2,
-                                                                 /*next_outbound=*/1);
+    fixpp::session::seqnum_manager_test_access::set_counters(
+        fixpp::session::session_test_access::seqnum_mgr(*fix->session), /*next_inbound=*/2,
+        /*next_outbound=*/1);
     fix->clear_capture();
 
     // Feed peer Logon at seq=X_logon=5 (too-high from our next_inbound_=2).
@@ -1134,7 +1145,8 @@ TEST(BehindSide, KnobOn_AdmitsPeerResend_NoFatalDisconnect_Acceptor) {
 
     // Snapshot next_inbound_ before the peer's resend: should be X=2 still
     // (formulation A: left at X, not advanced for the held too-high Logon).
-    const seqnum_t x_pre_resend = fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t x_pre_resend =
+        fixpp::session::session_test_access::seqnum_mgr(*fix->session).next_inbound_unsafe();
     EXPECT_EQ(x_pre_resend, 2U)
         << "BehindSide acceptor: next_inbound_ must be X=2 (not advanced for held Logon)";
 
@@ -1148,7 +1160,7 @@ TEST(BehindSide, KnobOn_AdmitsPeerResend_NoFatalDisconnect_Acceptor) {
 
     // Final counter check: next_inbound_ == peer_N = 7 (NOT X_logon+1=6).
     const seqnum_t final_next_inbound =
-        fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
+        fixpp::session::session_test_access::seqnum_mgr(*fix->session).next_inbound_unsafe();
     EXPECT_EQ(final_next_inbound, 7U)
         << "BehindSide acceptor: final next_inbound_ must be peer_N=7 (NOT X_logon+1=6). "
            "Counter was: "
@@ -1191,8 +1203,9 @@ TEST(BehindSide, KnobOn_AdmitsPeerResend_NoFatalDisconnect_Initiator) {
 
     // Seed inbound counter to X=3 (simulates: peer sent 1,2 but we missed them).
     // next_outbound=2 (our Logon went at seq=1).
-    fix->session->seqnum_mgr_test_access().set_counters_for_test(/*next_inbound=*/3,
-                                                                 /*next_outbound=*/2);
+    fixpp::session::seqnum_manager_test_access::set_counters(
+        fixpp::session::session_test_access::seqnum_mgr(*fix->session), /*next_inbound=*/3,
+        /*next_outbound=*/2);
     fix->clear_capture();
 
     // Feed peer Logon-ack at seq=X_logon=6 (too-high, we expect 3).
@@ -1210,7 +1223,8 @@ TEST(BehindSide, KnobOn_AdmitsPeerResend_NoFatalDisconnect_Initiator) {
     }
 
     // next_inbound_ must be X=3 (not advanced for the held Logon).
-    const seqnum_t x_pre_resend = fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t x_pre_resend =
+        fixpp::session::session_test_access::seqnum_mgr(*fix->session).next_inbound_unsafe();
     EXPECT_EQ(x_pre_resend, 3U)
         << "BehindSide initiator: next_inbound_ must be X=3 (formulation A, no advance)";
 
@@ -1222,7 +1236,7 @@ TEST(BehindSide, KnobOn_AdmitsPeerResend_NoFatalDisconnect_Initiator) {
 
     // Final counter: next_inbound_ == peer_N = 8 (NOT X_logon+1=7).
     const seqnum_t final_next_inbound =
-        fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
+        fixpp::session::session_test_access::seqnum_mgr(*fix->session).next_inbound_unsafe();
     EXPECT_EQ(final_next_inbound, 8U)
         << "BehindSide initiator: final next_inbound_ must be peer_N=8 (NOT X_logon+1=7). "
            "Got: "
@@ -1266,8 +1280,9 @@ TEST(BehindSide, Bidirectional_BothGaps_RecoverNoDoubleRecovery) {
     // Peer's Logon will carry 789=3 (peer expects OUR seq 3 = ahead-side gap).
     // Peer's Logon MsgSeqNum=6 (too-high = behind-side gap).
     // peer_N=8 (peer has sent through 7).
-    fix->session->seqnum_mgr_test_access().set_counters_for_test(/*next_inbound=*/2,
-                                                                 /*next_outbound=*/5);
+    fixpp::session::seqnum_manager_test_access::set_counters(
+        fixpp::session::session_test_access::seqnum_mgr(*fix->session), /*next_inbound=*/2,
+        /*next_outbound=*/5);
     fix->clear_capture();
 
     // Feed peer Logon at seq=6 carrying 789=3 (BOTH gaps).
@@ -1294,7 +1309,8 @@ TEST(BehindSide, Bidirectional_BothGaps_RecoverNoDoubleRecovery) {
     EXPECT_TRUE(found4) << "Bidirectional: expected PossDup resend at seq=4";
 
     // Behind-side: next_inbound_ left at X=2 (not advanced for held Logon at seq=6).
-    const seqnum_t x_pre = fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t x_pre =
+        fixpp::session::session_test_access::seqnum_mgr(*fix->session).next_inbound_unsafe();
     EXPECT_EQ(x_pre, 2U) << "Bidirectional: next_inbound_ must be X=2 after behind-side tolerance";
 
     // Now simulate the peer's in-sequence resend [2,3,4,5,6,7] (peer_N=8).
@@ -1304,7 +1320,8 @@ TEST(BehindSide, Bidirectional_BothGaps_RecoverNoDoubleRecovery) {
     }
 
     // final next_inbound_ == peer_N = 8.
-    const seqnum_t final_ni = fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t final_ni =
+        fixpp::session::session_test_access::seqnum_mgr(*fix->session).next_inbound_unsafe();
     EXPECT_EQ(final_ni, 8U) << "Bidirectional: final next_inbound_ must be peer_N=8. Got: "
                             << final_ni;
 
@@ -1345,8 +1362,9 @@ TEST(BehindSide, LostResend_SelfHealsViaActiveArm) {
     (void)open_fut.get();
 
     // Seed: next_inbound_=2, next_outbound_=1. Peer Logon arrives at seq=5 (too-high).
-    fix->session->seqnum_mgr_test_access().set_counters_for_test(/*next_inbound=*/2,
-                                                                 /*next_outbound=*/1);
+    fixpp::session::seqnum_manager_test_access::set_counters(
+        fixpp::session::session_test_access::seqnum_mgr(*fix->session), /*next_inbound=*/2,
+        /*next_outbound=*/1);
     fix->clear_capture();
 
     // Feed too-high peer Logon: with T016, session reaches Active, next_inbound_=2.
@@ -1411,7 +1429,8 @@ TEST(Suppression, KnobOn_NoAtLogonResendRequest_KnobOff_FatalOnTooHigh) {
         (void)open_fut.get();
 
         // next_inbound_=2; peer Logon arrives at seq=4 (too-high).
-        fix->session->seqnum_mgr_test_access().set_counters_for_test(2, 1);
+        fixpp::session::seqnum_manager_test_access::set_counters(
+            fixpp::session::session_test_access::seqnum_mgr(*fix->session), 2, 1);
         fix->clear_capture();
 
         fix->feed(make_logon("FIX.4.4", 4, "CLI", "SRV"));
@@ -1453,7 +1472,8 @@ TEST(Suppression, KnobOn_NoAtLogonResendRequest_KnobOff_FatalOnTooHigh) {
         (void)open_fut2.get();
 
         // next_inbound_=2; peer Logon at seq=4 (too-high).
-        fix2->session->seqnum_mgr_test_access().set_counters_for_test(2, 1);
+        fixpp::session::seqnum_manager_test_access::set_counters(
+            fixpp::session::session_test_access::seqnum_mgr(*fix2->session), 2, 1);
         fix2->clear_capture();
 
         fix2->feed(make_logon("FIX.4.4", 4, "CLI", "SRV"));
@@ -1486,8 +1506,9 @@ TEST(Reset, InitiatorResetLogon_Advertises1) {
     fix->session = std::make_unique<fixpp::session::Session>(fix->eng, fix->cfg);
 
     // Seed inbound/outbound to > 1 so the reset effect is observable.
-    fix->session->seqnum_mgr_test_access().set_counters_for_test(/*next_inbound=*/5,
-                                                                 /*next_outbound=*/4);
+    fixpp::session::seqnum_manager_test_access::set_counters(
+        fixpp::session::session_test_access::seqnum_mgr(*fix->session), /*next_inbound=*/5,
+        /*next_outbound=*/4);
 
     // open() emits the initiator Logon (with reset_on_logon: reset fires BEFORE build).
     auto open_fut = asio::co_spawn(fix->ioc, fix->session->open(), asio::use_future);
@@ -1741,8 +1762,9 @@ TEST(DefaultOff, ByteIdenticalLogon_InboundIgnored) {
         (void)open_fut.get();
 
         // Seed outbound=5 so N=5 at the decision point (if knob were on, X=2<N=5 → resend).
-        fix->session->seqnum_mgr_test_access().set_counters_for_test(/*next_inbound=*/1,
-                                                                     /*next_outbound=*/5);
+        fixpp::session::seqnum_manager_test_access::set_counters(
+            fixpp::session::session_test_access::seqnum_mgr(*fix->session), /*next_inbound=*/1,
+            /*next_outbound=*/5);
         fix->clear_capture();
 
         // Feed inbound Logon with 789=2 (knob off ⇒ must be ignored).
@@ -1826,7 +1848,8 @@ TEST(Honor, XgtN_LogoutTextThenDisconnect) {
 
         // Seed outbound=4: reply Logon at seq=4 → peek_outbound=5=N.
         // X=7 > N=5 → must emit Logout then Disconnected.
-        fix->session->seqnum_mgr_test_access().set_counters_for_test(1, 4);
+        fixpp::session::seqnum_manager_test_access::set_counters(
+            fixpp::session::session_test_access::seqnum_mgr(*fix->session), 1, 4);
 
         fix->feed(make_logon_with_789("FIX.4.4", 1, "CLI", "SRV", 7));
 
@@ -1882,7 +1905,8 @@ TEST(Honor, XgtN_LogoutTextThenDisconnect) {
         ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::LogonSent);
 
         // Seed outbound=3: N=3 at honor time. X=10 > N=3.
-        fix->session->seqnum_mgr_test_access().set_counters_for_test(1, 3);
+        fixpp::session::seqnum_manager_test_access::set_counters(
+            fixpp::session::session_test_access::seqnum_mgr(*fix->session), 1, 3);
         fix->clear_capture();
 
         fix->feed(make_logon_with_789("FIX.4.4", 1, "SRV", "CLI", 10));
@@ -1962,7 +1986,8 @@ TEST(Honor, Invalid789_LogoutThenDisconnect) {
             // Seed outbound=6 so N=7 after reply Logon.
             // If invalid-789 fell through to X<N branch (D-10 guard missing), the
             // parse→0 would clamp begin to 1 and replay [1, N-1=6] — PossDup flood.
-            fix->session->seqnum_mgr_test_access().set_counters_for_test(1, 6);
+            fixpp::session::seqnum_manager_test_access::set_counters(
+                fixpp::session::session_test_access::seqnum_mgr(*fix->session), 1, 6);
 
             fix->feed(make_logon_with_raw_789("FIX.4.4", 1, "CLI", "SRV", raw789));
 
@@ -2018,7 +2043,8 @@ TEST(Honor, Invalid789_LogoutThenDisconnect) {
             ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::LogonSent);
 
             // Seed outbound=5 so N=5 at honor time. Store has [1..4].
-            fix->session->seqnum_mgr_test_access().set_counters_for_test(1, 5);
+            fixpp::session::seqnum_manager_test_access::set_counters(
+                fixpp::session::session_test_access::seqnum_mgr(*fix->session), 1, 5);
             fix->clear_capture();
 
             fix->feed(make_logon_with_raw_789("FIX.4.4", 1, "SRV", "CLI", raw789));
@@ -2104,7 +2130,8 @@ TEST(Honor, Integrity_FiresToAdmin_XgtN) {
         (void)open_fut.get();
 
         // outbound=4 → reply Logon seq=4 → peek_outbound=5=N. X=9 > N=5.
-        fix->session->seqnum_mgr_test_access().set_counters_for_test(1, 4);
+        fixpp::session::seqnum_manager_test_access::set_counters(
+            fixpp::session::session_test_access::seqnum_mgr(*fix->session), 1, 4);
 
         // toAdmin call #1: acceptor reply Logon. toAdmin call #2: the 789-Logout.
         fix->feed(make_logon_with_789("FIX.4.4", 1, "CLI", "SRV", 9));
@@ -2144,7 +2171,8 @@ TEST(Honor, Integrity_FiresToAdmin_XgtN) {
         ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::LogonSent);
 
         // toAdmin call #1: outbound Logon (emitted by open()). N=3 at honor. X=7 > N=3.
-        fix->session->seqnum_mgr_test_access().set_counters_for_test(1, 3);
+        fixpp::session::seqnum_manager_test_access::set_counters(
+            fixpp::session::session_test_access::seqnum_mgr(*fix->session), 1, 3);
         fix->clear_capture();
 
         fix->feed(make_logon_with_789("FIX.4.4", 1, "SRV", "CLI", 7));
@@ -2185,7 +2213,8 @@ TEST(Honor, Integrity_FiresToAdmin_Invalid789) {
             << fixpp::test_support::kWindowMiss << "Honor.Integrity_FiresToAdmin_Invalid789";
         (void)open_fut.get();
 
-        fix->session->seqnum_mgr_test_access().set_counters_for_test(1, 4);
+        fixpp::session::seqnum_manager_test_access::set_counters(
+            fixpp::session::session_test_access::seqnum_mgr(*fix->session), 1, 4);
 
         fix->feed(make_logon_with_raw_789("FIX.4.4", 1, "CLI", "SRV", "GARBAGE"));
 
@@ -2222,7 +2251,8 @@ TEST(Honor, Integrity_FiresToAdmin_Invalid789) {
         (void)open_fut.get();
         ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::LogonSent);
 
-        fix->session->seqnum_mgr_test_access().set_counters_for_test(1, 3);
+        fixpp::session::seqnum_manager_test_access::set_counters(
+            fixpp::session::session_test_access::seqnum_mgr(*fix->session), 1, 3);
         fix->clear_capture();
 
         fix->feed(make_logon_with_raw_789("FIX.4.4", 1, "SRV", "CLI", "GARBAGE"));
@@ -2273,7 +2303,8 @@ TEST(Honor, Integrity_ToAdminThrow_SurfacesAppCallbackThrew) {
         (void)open_fut.get();
 
         // outbound=4 → reply Logon seq=4 → N=5. X=9 > N=5 → 789-Logout → toAdmin(2) throws.
-        fix->session->seqnum_mgr_test_access().set_counters_for_test(1, 4);
+        fixpp::session::seqnum_manager_test_access::set_counters(
+            fixpp::session::session_test_access::seqnum_mgr(*fix->session), 1, 4);
 
         auto fut = asio::co_spawn(
             fix->ioc, fix->session->on_inbound_frame(std::span<const std::byte>(logon_frame)),
@@ -2326,7 +2357,8 @@ TEST(Honor, Integrity_ToAdminThrow_SurfacesAppCallbackThrew) {
         ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::LogonSent);
 
         // call #1 = outbound Logon (fired during open()). N=3. X=7 > N=3 → 789-Logout → throw.
-        fix->session->seqnum_mgr_test_access().set_counters_for_test(1, 3);
+        fixpp::session::seqnum_manager_test_access::set_counters(
+            fixpp::session::session_test_access::seqnum_mgr(*fix->session), 1, 3);
         fix->clear_capture();
 
         auto fut = asio::co_spawn(

@@ -57,6 +57,8 @@ using namespace std::chrono_literals;
 // Must be at file scope for the LD_PRELOAD override to bind.
 #include "support/alloc_guard_markers.hpp"
 #include "support/extract_tag.hpp"
+#include "support/seqnum_manager_test_access.hpp"
+#include "support/session_test_access.hpp"
 
 namespace {
 
@@ -825,7 +827,7 @@ TEST(ValidationCompatToggles, Seq_KnobOff_ExactMatchOnlyAdvance) {
     ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
 
     // Pre-condition: counter is at 2 after the Logon exchange.
-    const auto& smgr = fix->session->seqnum_mgr_test_access();
+    const auto& smgr = fixpp::session::session_test_access::seqnum_mgr(*fix->session);
     ASSERT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{2})
         << "Precondition: next_inbound must be 2 before test";
 
@@ -1043,7 +1045,7 @@ TEST(ValidationCompatToggles, SeqReset_KnobOff_ResetMode_NewSeqNoNotApplied) {
     auto fix = make_acceptor_seqval_off(app);
     ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
 
-    const auto& smgr = fix->session->seqnum_mgr_test_access();
+    const auto& smgr = fixpp::session::session_test_access::seqnum_mgr(*fix->session);
     // Pre-condition: counter is 2 after Logon.
     ASSERT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{2})
         << "Precondition: next_inbound must be 2 before test";
@@ -1082,7 +1084,7 @@ TEST(ValidationCompatToggles, SeqReset_KnobOff_GapfillOutOfOrder_NewSeqNoNotAppl
     auto fix = make_acceptor_seqval_off(app);
     ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
 
-    const auto& smgr = fix->session->seqnum_mgr_test_access();
+    const auto& smgr = fixpp::session::session_test_access::seqnum_mgr(*fix->session);
     ASSERT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{2})
         << "Precondition: next_inbound must be 2 before test";
 
@@ -1121,7 +1123,7 @@ TEST(ValidationCompatToggles, SeqReset_KnobOff_GapfillExactMatch_AdvancesByOne_N
     auto fix = make_acceptor_seqval_off(app);
     ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
 
-    const auto& smgr = fix->session->seqnum_mgr_test_access();
+    const auto& smgr = fixpp::session::session_test_access::seqnum_mgr(*fix->session);
     // Pre-condition: counter is 2.
     ASSERT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{2})
         << "Precondition: next_inbound must be 2 before test";
@@ -1161,7 +1163,7 @@ TEST(ValidationCompatToggles, SeqReset_Default_NewSeqNoApplied) {
         auto fix = make_acceptor(std::make_shared<NullStoreFactory>(), 1, app);
         ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
 
-        const auto& smgr = fix->session->seqnum_mgr_test_access();
+        const auto& smgr = fixpp::session::session_test_access::seqnum_mgr(*fix->session);
         ASSERT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{2})
             << "Precondition: next_inbound must be 2";
 
@@ -1181,7 +1183,7 @@ TEST(ValidationCompatToggles, SeqReset_Default_NewSeqNoApplied) {
         auto fix = make_acceptor(std::make_shared<NullStoreFactory>(), 1, app);
         ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
 
-        const auto& smgr = fix->session->seqnum_mgr_test_access();
+        const auto& smgr = fixpp::session::session_test_access::seqnum_mgr(*fix->session);
         ASSERT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{2})
             << "Precondition: next_inbound must be 2";
 
@@ -1212,7 +1214,7 @@ TEST(ValidationCompatToggles, SeqReset_KnobOff_FaultyResetMode_NoAdvance) {
     auto fix = make_acceptor_seqval_off(app);
     ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
 
-    const auto& smgr = fix->session->seqnum_mgr_test_access();
+    const auto& smgr = fixpp::session::session_test_access::seqnum_mgr(*fix->session);
     ASSERT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{2})
         << "Precondition: next_inbound must be 2 before test";
 
@@ -1324,7 +1326,7 @@ void run_d5_knob_off_counter_092(std::string_view msg_type, std::string_view fie
     auto app = std::make_shared<CountingApp028>();
     auto fix = make_acceptor_seqval_off(app);
     ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
-    const auto& smgr = fix->session->seqnum_mgr_test_access();
+    const auto& smgr = fixpp::session::session_test_access::seqnum_mgr(*fix->session);
     ASSERT_EQ(smgr.next_inbound_unsafe(), fixpp::session::seqnum_t{2})
         << "Precondition: next_inbound must be 2 before test";
     fix->clear_capture();
@@ -1379,7 +1381,7 @@ TEST(ValidationCompatToggles, D5_KnobOff_FaultyLogout_CounterAdvances) {
 // application frame (D-5). Every cell runs over a MemoryStoreFactory, which is
 // non-persistent: the NullStoreFactory the other cells here use keeps the base class's
 // yields_persistent_store() (true), so its Logon would hydrate NextNumIn back from the
-// store. The knob-off arm seeds NextNumIn with set_counters_for_test,
+// store. The knob-off arm seeds NextNumIn with seqnum_manager_test_access::set_counters,
 // because with the knob off a Reset-mode SequenceReset is not applied. The pre-Active arms
 // seed the same way after open() and send the Logon at the maximum.
 //
@@ -1420,7 +1422,8 @@ void expect_bound_disconnect_092(Fixture& fix, const CountingApp028& app, int fr
                                  int from_admin_before, std::string_view what) {
     EXPECT_EQ(fix.session->state(), fixpp::session::fsm_state::Disconnected)
         << what << ": FR-019: the message at NextNumIn = seqnum_max must end the session";
-    EXPECT_EQ(fix.session->seqnum_mgr_test_access().next_inbound_unsafe(), kSeqMax092)
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*fix.session).next_inbound_unsafe(),
+              kSeqMax092)
         << what << ": FR-019: NextNumIn must stay 4294967295, never wrap";
     EXPECT_TRUE(fix.capture.frames.empty())
         << what << ": FR-019: the disconnect is silent (no Reject, no Logout)";
@@ -1433,7 +1436,8 @@ void run_bound_consuming_092(const std::vector<std::byte>& frame, std::string_vi
     auto fix = make_acceptor_at_max_092(app);
     ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
         << what << ": precondition: Active after the Reset-mode SequenceReset";
-    ASSERT_EQ(fix->session->seqnum_mgr_test_access().next_inbound_unsafe(), kSeqMax092)
+    ASSERT_EQ(fixpp::session::session_test_access::seqnum_mgr(*fix->session).next_inbound_unsafe(),
+              kSeqMax092)
         << what << ": precondition: NextNumIn == 4294967295";
     fix->clear_capture();
     const int from_app_before = app->from_app_count;
@@ -1477,8 +1481,9 @@ TEST(ValidationCompatToggles, SeqnumMax_KnobOff_Application_Disconnects) {
     auto app = std::make_shared<CountingApp028>();
     auto fix = make_acceptor_seqval_off(app, memory_store_factory_092());
     ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active);
-    auto& smgr = fix->session->seqnum_mgr_test_access();
-    smgr.set_counters_for_test(kSeqMax092, smgr.peek_outbound());
+    auto& smgr = fixpp::session::session_test_access::seqnum_mgr(*fix->session);
+    fixpp::session::seqnum_manager_test_access::set_counters(smgr, kSeqMax092,
+                                                             smgr.peek_outbound());
     ASSERT_EQ(smgr.next_inbound_unsafe(), kSeqMax092) << "precondition: NextNumIn == 4294967295";
     fix->clear_capture();
     const int from_app_before = app->from_app_count;
@@ -1510,8 +1515,9 @@ TEST(ValidationCompatToggles, SeqnumMax_PreActive_AcceptorLogon_Disconnects) {
     (void)open_fut.get();
     ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::NotConnected);
 
-    auto& smgr = fix->session->seqnum_mgr_test_access();
-    smgr.set_counters_for_test(kSeqMax092, smgr.peek_outbound());
+    auto& smgr = fixpp::session::session_test_access::seqnum_mgr(*fix->session);
+    fixpp::session::seqnum_manager_test_access::set_counters(smgr, kSeqMax092,
+                                                             smgr.peek_outbound());
     fix->feed(make_logon("FIX.4.4", kSeqMax092, "CLI", "SRV"));
 
     EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
@@ -1523,8 +1529,9 @@ TEST(ValidationCompatToggles, SeqnumMax_PreActive_AcceptorLogon_Disconnects) {
 TEST(ValidationCompatToggles, SeqnumMax_PreActive_InitiatorLogonReply_Disconnects) {
     auto fix = make_initiator(memory_store_factory_092());
     ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::LogonSent);
-    auto& smgr = fix->session->seqnum_mgr_test_access();
-    smgr.set_counters_for_test(kSeqMax092, smgr.peek_outbound());
+    auto& smgr = fixpp::session::session_test_access::seqnum_mgr(*fix->session);
+    fixpp::session::seqnum_manager_test_access::set_counters(smgr, kSeqMax092,
+                                                             smgr.peek_outbound());
     fix->feed(make_logon("FIX.4.4", kSeqMax092, "SRV", "CLI"));
 
     EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
@@ -1540,14 +1547,16 @@ void run_bound_control_092(const std::vector<std::byte>& frame, int want_rejects
     auto fix = make_acceptor_at_max_092(app);
     ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
         << what << ": precondition: Active after the Reset-mode SequenceReset";
-    ASSERT_EQ(fix->session->seqnum_mgr_test_access().next_inbound_unsafe(), kSeqMax092)
+    ASSERT_EQ(fixpp::session::session_test_access::seqnum_mgr(*fix->session).next_inbound_unsafe(),
+              kSeqMax092)
         << what << ": precondition: NextNumIn == 4294967295";
     fix->clear_capture();
 
     fix->feed(frame);
     EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
         << what << ": control: a frame that does not consume NextNumIn keeps the session";
-    EXPECT_EQ(fix->session->seqnum_mgr_test_access().next_inbound_unsafe(), kSeqMax092)
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*fix->session).next_inbound_unsafe(),
+              kSeqMax092)
         << what << ": control: NextNumIn unchanged";
     EXPECT_EQ(fix->capture.frames.size(), static_cast<std::size_t>(want_rejects))
         << what << ": control: outbound frame count";

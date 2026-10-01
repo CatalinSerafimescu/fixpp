@@ -62,6 +62,7 @@ using namespace std::chrono_literals;
 // Must be at file scope for the LD_PRELOAD override to bind.
 #include "support/alloc_guard_markers.hpp"
 #include "support/extract_tag.hpp"
+#include "support/session_test_access.hpp"
 
 namespace {
 
@@ -618,7 +619,8 @@ TEST(PersistentSeqnumHydrate, Hydrate_OneShot_FiresOnce_BothRoles_NotOnReconnect
             << " call_count=" << store->call_count;
 
         // The manager MUST reflect the hydrated outbound value.
-        const seqnum_t next_out = fix->session->seqnum_mgr_test_access().next_outbound_unsafe();
+        const seqnum_t next_out =
+            fixpp::session::session_test_access::seqnum_mgr(*fix->session).next_outbound_unsafe();
         // After emitting Logon at seqnum 42, next_outbound advances to 43.
         EXPECT_EQ(next_out, 43U)
             << "Initiator: after emitting Logon(34=42), next_outbound must be 43; got " << next_out;
@@ -638,7 +640,9 @@ TEST(PersistentSeqnumHydrate, Hydrate_OneShot_FiresOnce_BothRoles_NotOnReconnect
         EXPECT_EQ(store->call_count, count_before)
             << "Initiator: a second open() (reconnect simulation) must NOT re-hydrate;"
             << " call_count changed from " << count_before << " to " << store->call_count;
-        EXPECT_EQ(fix->session->seqnum_mgr_test_access().next_outbound_unsafe(), next_out)
+        EXPECT_EQ(
+            fixpp::session::session_test_access::seqnum_mgr(*fix->session).next_outbound_unsafe(),
+            next_out)
             << "Initiator: next_outbound must not regress on a simulated reconnect";
     }
 
@@ -661,7 +665,8 @@ TEST(PersistentSeqnumHydrate, Hydrate_OneShot_FiresOnce_BothRoles_NotOnReconnect
 
         // The acceptor reply Logon samples next_outbound BEFORE advancing.
         // After hydrating to 37 and emitting the reply Logon at seq=37, next_outbound==38.
-        const seqnum_t next_out = fix->session->seqnum_mgr_test_access().next_outbound_unsafe();
+        const seqnum_t next_out =
+            fixpp::session::session_test_access::seqnum_mgr(*fix->session).next_outbound_unsafe();
         EXPECT_EQ(next_out, 38U)
             << "Acceptor: after emitting reply Logon(34=37), next_outbound must be 38; got "
             << next_out;
@@ -760,8 +765,10 @@ TEST(PersistentSeqnumHydrate, HydrateReadFailure_Fatal_NoPartialSeed_FirstReadFa
 
     // Manager must be completely unmodified — next_inbound==1, next_outbound==1.
     // (C2.3: "no partial seed" — mutate only after BOTH reads succeed.)
-    const seqnum_t ni = fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
-    const seqnum_t no = fix->session->seqnum_mgr_test_access().next_outbound_unsafe();
+    const seqnum_t ni =
+        fixpp::session::session_test_access::seqnum_mgr(*fix->session).next_inbound_unsafe();
+    const seqnum_t no =
+        fixpp::session::session_test_access::seqnum_mgr(*fix->session).next_outbound_unsafe();
     EXPECT_EQ(ni, 1U)
         << "W14(a): next_inbound must remain at construction default 1 after first-read failure;"
         << " got " << ni;
@@ -807,8 +814,10 @@ TEST(PersistentSeqnumHydrate, HydrateReadFailure_Fatal_NoPartialSeed_SecondReadF
     // Manager must be completely unmodified — C2.3 "no partial seed".
     // Even though the inbound read succeeded, hydrate() is not called until BOTH reads
     // succeed; the manager stays at construction defaults.
-    const seqnum_t ni = fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
-    const seqnum_t no = fix->session->seqnum_mgr_test_access().next_outbound_unsafe();
+    const seqnum_t ni =
+        fixpp::session::session_test_access::seqnum_mgr(*fix->session).next_inbound_unsafe();
+    const seqnum_t no =
+        fixpp::session::session_test_access::seqnum_mgr(*fix->session).next_outbound_unsafe();
     EXPECT_EQ(ni, 1U)
         << "W14(b): next_inbound must remain at construction default 1 after second-read failure;"
         << " got " << ni;
@@ -905,7 +914,7 @@ public:
         ++to_admin_call_count;
         if (session_ptr != nullptr && to_admin_call_count == 1) {
             next_inbound_at_first_to_admin =
-                session_ptr->seqnum_mgr_test_access().next_inbound_unsafe();
+                fixpp::session::session_test_access::seqnum_mgr(*session_ptr).next_inbound_unsafe();
         }
     }
 };
@@ -1018,7 +1027,7 @@ TEST(PersistentSeqnumHydrate, Inbound_DurableTrack_AdminInclusive_Resumes6) {
     fix1->feed(make_fix_frame("FIX.4.4", "D", 5, "CLI", "SRV"));   // app seq=5
 
     // Assert: 5 messages accepted (Logon + 4) → manager.next_inbound==6.
-    ASSERT_EQ(fix1->session->seqnum_mgr_test_access().next_inbound_unsafe(),
+    ASSERT_EQ(fixpp::session::session_test_access::seqnum_mgr(*fix1->session).next_inbound_unsafe(),
               fixpp::session::seqnum_t{6})
         << "W2: after 5 accepted messages, manager.next_inbound must be 6";
 
@@ -1079,7 +1088,7 @@ TEST(PersistentSeqnumHydrate, Inbound_DurableTrack_AdminInclusive_Resumes6) {
            "pre-T011 RED: no inbound seed, check_inbound(6) too-high → not Active";
 
     // The resumed inbound advanced past 6 (Logon seq=6 consumed): durable tracks it.
-    EXPECT_EQ(fix2->session->seqnum_mgr_test_access().next_inbound_unsafe(),
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*fix2->session).next_inbound_unsafe(),
               fixpp::session::seqnum_t{7})
         << "W2: after the resumed Logon(6) is accepted in-seq, next_inbound advances to 7";
 }
@@ -1671,7 +1680,7 @@ TEST(PersistentSeqnumHydrate, PostGapFill_LowerBound_RecoveryPrecondition) {
     fix1->feed(make_seq_reset_gapfill("FIX.4.4", /*seq=*/3, /*new_seqno=*/10, "CLI", "SRV"));
 
     const seqnum_t manager_after_gapfill =
-        fix1->session->seqnum_mgr_test_access().next_inbound_unsafe();
+        fixpp::session::session_test_access::seqnum_mgr(*fix1->session).next_inbound_unsafe();
     // Post-T010: manager jumped to 10 (via apply_inbound_sequence_reset).
     // The GapFill frame itself at seq=3 advanced check_inbound (3→4), then jump to 10.
 
@@ -1821,7 +1830,8 @@ TEST(PersistentSeqnumHydrate, Acceptor_ResetLogon_InboundSeedWithheld_NoTooLowFa
         // After the reset-Logon and reply, manager.next_inbound is 2: the 141=Y received
         // reset runs AFTER check_inbound, then 030 restores the consumed seq-1 reset Logon's
         // advance — the advance SURVIVES the reset (QuickFIX reset-then-increment parity).
-        const seqnum_t ni = fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
+        const seqnum_t ni =
+            fixpp::session::session_test_access::seqnum_mgr(*fix->session).next_inbound_unsafe();
         EXPECT_EQ(ni, fixpp::session::seqnum_t{2})
             << "W9b: after 141=Y reset-Logon, next_inbound must be 2 (030 restores the "
                "consumed seq-1 reset Logon's advance; it survives the reset over hydrate)";
@@ -1841,7 +1851,8 @@ TEST(PersistentSeqnumHydrate, Acceptor_ResetLogon_InboundSeedWithheld_NoTooLowFa
     {
         FaultStore* store = factory->last_store;
         ASSERT_NE(store, nullptr) << "W9b-ext: store must have been minted";
-        const seqnum_t manager_ni = fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
+        const seqnum_t manager_ni =
+            fixpp::session::session_test_access::seqnum_mgr(*fix->session).next_inbound_unsafe();
         EXPECT_LE(store->durable_inbound, manager_ni)
             << "W9b-ext (INV-H1): store.durable_inbound must be <= manager.next_inbound "
                "after received-141=Y reset. 029 over-persist bug: store=2 > manager=1. "
@@ -2070,11 +2081,13 @@ TEST(PersistentSeqnumHydrate, NonPersistent_NoOp_MemoryAndNull) {
             << store->call_count << " (expected 0). A missed override causes call_count==2.";
 
         // (c) Manager counters: next_inbound==1 (not seeded 99), next_outbound==2 (after Logon).
-        const seqnum_t ni = fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
+        const seqnum_t ni =
+            fixpp::session::session_test_access::seqnum_mgr(*fix->session).next_inbound_unsafe();
         EXPECT_EQ(ni, seqnum_t{1})
             << "W7 (INV-H4): next_inbound must start at 1 (not seeded 99, no hydrate)";
         // next_outbound is 2 after emitting Logon at seq=1 (normal advance).
-        const seqnum_t no = fix->session->seqnum_mgr_test_access().next_outbound_unsafe();
+        const seqnum_t no =
+            fixpp::session::session_test_access::seqnum_mgr(*fix->session).next_outbound_unsafe();
         EXPECT_EQ(no, seqnum_t{2})
             << "W7 (INV-H4): next_outbound must be 2 after emitting Logon(34=1)";
     }
@@ -2096,9 +2109,11 @@ TEST(PersistentSeqnumHydrate, NonPersistent_NoOp_MemoryAndNull) {
                "store_is_persistent_==false, no read, no hydrate";
 
         // Manager counters.
-        const seqnum_t ni = fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
+        const seqnum_t ni =
+            fixpp::session::session_test_access::seqnum_mgr(*fix->session).next_inbound_unsafe();
         EXPECT_EQ(ni, seqnum_t{1}) << "W7 (arm2 null): next_inbound must be 1 (no store)";
-        const seqnum_t no = fix->session->seqnum_mgr_test_access().next_outbound_unsafe();
+        const seqnum_t no =
+            fixpp::session::session_test_access::seqnum_mgr(*fix->session).next_outbound_unsafe();
         EXPECT_EQ(no, seqnum_t{2}) << "W7 (arm2 null): next_outbound must be 2 after Logon";
     }
 }
@@ -2249,7 +2264,8 @@ TEST(PersistentSeqnumHydrate, NoHeap_HydrateAndPersistPaths) {
     // We drive seqs 2, 3, ..., 2+kWarmup-1 during warm-up.
     constexpr int kWarmup = 8;
     for (int i = 0; i < kWarmup; ++i) {
-        const seqnum_t seq = fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
+        const seqnum_t seq =
+            fixpp::session::session_test_access::seqnum_mgr(*fix->session).next_inbound_unsafe();
         fix->feed(make_heartbeat_frame("FIX.4.4", static_cast<std::uint32_t>(seq), "CLI", "SRV"));
         ASSERT_EQ(fix->session->state(), fixpp::session::fsm_state::Active)
             << "NoHeap warm-up: session must stay Active at i=" << i;
@@ -2260,7 +2276,8 @@ TEST(PersistentSeqnumHydrate, NoHeap_HydrateAndPersistPaths) {
     const int write_count_before = store->write_count;
 
     // Build the measured heartbeat frame OUTSIDE the guard window.
-    const seqnum_t measured_seq = fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t measured_seq =
+        fixpp::session::session_test_access::seqnum_mgr(*fix->session).next_inbound_unsafe();
     const auto measured_frame =
         make_heartbeat_frame("FIX.4.4", static_cast<std::uint32_t>(measured_seq), "CLI", "SRV");
 
@@ -2361,7 +2378,8 @@ TEST(PersistentSeqnumHydrate, INV_H1_Initiator_PeerAck141_NoOverPersist) {
     // Post-reset + 030 restore: both store and manager must equal 2.
     // 029 over-persist bug: store=2 (unconditional persist), manager=1 → INV-H1 violated.
     // 030: the consumed seq-37 reset-ack Logon survives → store=2 == manager=2 (equality). ✓
-    const seqnum_t manager_ni = fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t manager_ni =
+        fixpp::session::session_test_access::seqnum_mgr(*fix->session).next_inbound_unsafe();
     EXPECT_EQ(store->durable_inbound, fixpp::session::seqnum_t{2})
         << "INV_H1_Initiator_PeerAck141 (INV-H1 / 030 FR-005/009): store.durable_inbound must "
            "be 2 after 141=Y reset + 030 restore-to-2 of the consumed seq-37 reset-ack Logon. "
@@ -2410,7 +2428,8 @@ TEST(PersistentSeqnumHydrate, ResetOnLogon_Initiator_PeerAck141_OutboundStaysTwo
     auto fix = make_initiator(factory, /*enable_789=*/false, /*reset_on_logon=*/true);
 
     // Precondition: reset_on_logon emitted Logon(141=Y) at 34=1 → outbound advanced to 2.
-    ASSERT_EQ(fix->session->seqnum_mgr_test_access().peek_outbound(), fixpp::session::seqnum_t{2})
+    ASSERT_EQ(fixpp::session::session_test_access::seqnum_mgr(*fix->session).peek_outbound(),
+              fixpp::session::seqnum_t{2})
         << "precondition: a reset_on_logon initiator emits its Logon at 34=1, so the next "
            "outbound is 2 (matches the merged ResetOnLogon_Initiator_ResetsAndEmits141 unit)";
 
@@ -2424,13 +2443,14 @@ TEST(PersistentSeqnumHydrate, ResetOnLogon_Initiator_PeerAck141_OutboundStaysTwo
     // 1, so the next send is 2. main rebases it to 1, so the next outbound frame would
     // duplicate 34=1 (QuickFIX-cpp + QuickFIX-J both reject). The 030 inbound restore at
     // session.cpp's `logon_inbound_advanced_init` guard has no outbound twin.
-    EXPECT_EQ(fix->session->seqnum_mgr_test_access().peek_outbound(), fixpp::session::seqnum_t{2})
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*fix->session).peek_outbound(),
+              fixpp::session::seqnum_t{2})
         << "L-024-2: reset_on_logon initiator must keep outbound==2 after the peer's 141=Y "
            "echo; main rebases to 1 → next send duplicates 34=1. peek_outbound="
-        << fix->session->seqnum_mgr_test_access().peek_outbound();
+        << fixpp::session::session_test_access::seqnum_mgr(*fix->session).peek_outbound();
 
     // The inbound IS correctly restored by 030 — proves we reached the right arm.
-    EXPECT_EQ(fix->session->seqnum_mgr_test_access().next_inbound_unsafe(),
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*fix->session).next_inbound_unsafe(),
               fixpp::session::seqnum_t{2})
         << "030 restored inbound to 2 on this arm; only the outbound twin is missing (L-024-2)";
 
@@ -2560,7 +2580,8 @@ TEST(PersistentSeqnumHydrate, INV_H1_Acceptor_789BehindSide_NoOverPersist) {
     // Pre-fix RED: persist fires → next_inbound_=3, durable_inbound=3 > manager=2.
     //   INV-H1 violated. EXPECT_LT(durable, manager) FAILS (3 > 2). ✓ RED.
     // Post-fix GREEN: persist skipped → durable_inbound=1 < manager=2. INV-H1 holds. ✓
-    const seqnum_t manager_ni = manual_fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t manager_ni =
+        fixpp::session::session_test_access::seqnum_mgr(*manual_fix->session).next_inbound_unsafe();
     EXPECT_EQ(manager_ni, fixpp::session::seqnum_t{2})
         << "INV_H1_Acceptor_789BehindSide: manager.next_inbound must stay 2 "
            "(check_inbound failed, behind-side tolerance did not advance). "
@@ -2636,7 +2657,8 @@ TEST(PersistentSeqnumHydrate, INV_H1_Initiator_789BehindSide_NoOverPersist) {
     // Pre-fix RED: persist fires → durable_inbound=3 > manager=2. INV-H1 violated.
     //   EXPECT_LT(durable, manager) FAILS. ✓ RED.
     // Post-fix GREEN: durable_inbound=1 < manager=2. INV-H1 holds. ✓
-    const seqnum_t manager_ni = fix->session->seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t manager_ni =
+        fixpp::session::session_test_access::seqnum_mgr(*fix->session).next_inbound_unsafe();
     EXPECT_EQ(manager_ni, fixpp::session::seqnum_t{2})
         << "INV_H1_Initiator_789BehindSide: manager.next_inbound must stay 2 "
            "(check_inbound failed, behind-side tolerance). Got "
@@ -2766,7 +2788,8 @@ TEST(PersistentSeqnumHydrate, W8_HydratedInitiator_ResetOnLogout_PeerSpontaneous
     // C1: outbound NOT restored to 2 (latch=false → restore gate skipped).
     // After the reset, outbound rewinds to 1. No restore means it stays 1.
     // A reconstruction gate would restore to 2 — the RC1 wrong behavior.
-    EXPECT_EQ(manual_fix->session->seqnum_mgr_test_access().next_outbound_unsafe(),
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*manual_fix->session)
+                  .next_outbound_unsafe(),
               fixpp::session::seqnum_t{1})
         << "T004 W8: hydrated {37,1} initiator — latch=false → outbound MUST stay 1 "
            "after peer-spontaneous 141=Y (no restore). RC1 reconstruction would "
@@ -2859,7 +2882,8 @@ TEST(PersistentSeqnumHydrate, T014_W6_OutboundPersistSuccess_InvH1) {
         << "T014 W6: session must reach Active after peer 141=Y ack";
 
     // INV-H1 (outbound): store.durable_outbound == manager.next_outbound after restore.
-    const seqnum_t manager_no = fix->session->seqnum_mgr_test_access().next_outbound_unsafe();
+    const seqnum_t manager_no =
+        fixpp::session::session_test_access::seqnum_mgr(*fix->session).next_outbound_unsafe();
 
     // Manager must be 2 (set_next_outbound(seqnum_min+1) = set_next_outbound(2)).
     EXPECT_EQ(manager_no, fixpp::session::seqnum_t{2})

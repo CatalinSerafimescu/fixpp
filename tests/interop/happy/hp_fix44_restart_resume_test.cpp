@@ -66,6 +66,7 @@
 #include <string>
 
 #include "hp_support.hpp"
+#include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::interop::Counterparty;
@@ -169,7 +170,7 @@ TEST_P(RestartResume_Initiator, BothCountersResumeFromStore) {
     auto s = fx.engine().lookup(id);
     ASSERT_NE(s, nullptr) << "session not established";
 
-    auto& mgr = s->seqnum_mgr_test_access();
+    auto& mgr = fixpp::session::session_test_access::seqnum_mgr(*s);
 
     // Witness (b): outbound seqnum resumed from the persisted store — > 1.
     // The pre-restart session advanced the fixpp outbound counter; the hydrate-
@@ -267,7 +268,7 @@ TEST_P(RestartResume_Acceptor, BothCountersResumeFromStore) {
     auto s = fx.engine().lookup(id);
     ASSERT_NE(s, nullptr) << "session not established";
 
-    auto& mgr = s->seqnum_mgr_test_access();
+    auto& mgr = fixpp::session::session_test_access::seqnum_mgr(*s);
 
     // Witness (b): outbound seqnum resumed from the persisted store — > 1.
     EXPECT_GE(mgr.peek_outbound(), kMinResumedSeqnum)
@@ -374,7 +375,7 @@ TEST_P(StandbyRehydrate_Initiator, RehydratesOnReconnect) {
     auto s = fx.engine().lookup(id);
     ASSERT_NE(s, nullptr) << "session not established";
 
-    auto& mgr = s->seqnum_mgr_test_access();
+    auto& mgr = fixpp::session::session_test_access::seqnum_mgr(*s);
 
     // Witness (b): outbound seqnum resumed from the primary-advanced store — > 1.
     // The refresh_on_logon re-hydrate (force=true) reloaded the store's outbound

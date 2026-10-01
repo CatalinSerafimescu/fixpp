@@ -8,15 +8,15 @@
 // A stub-dictionary test (a hand-rolled uint16 token, a counting/null-member
 // fixture, a deliberately half-threaded probe such as
 // `context_group_delim_fn.hpp`'s own note) needs the raw constructor — this
-// is that seam, gated behind `FIXPP_TEST_HOOKS`, mirroring the
-// `nested_cache_access_for_testing` precedent in wire_test_hooks.hpp. Never
-// installed; never reachable from production code.
+// is that seam, mirroring the `nested_cache_access_for_testing` precedent in
+// wire_test_hooks.hpp. Never installed; never reachable from production code.
+// The friend declaration in dict_hooks.hpp is unconditional (fixpp#511), so
+// this struct is too: it needs no test macro.
 
 #include <fixpp/wire/dict_hooks.hpp>
 
 namespace fixpp::wire {
 
-#ifdef FIXPP_TEST_HOOKS
 struct dict_hooks_test_access {
     [[nodiscard]] static constexpr dict_hooks make(
         void const* opaque_dict, dict_hooks::classify_fn_t classify,
@@ -25,6 +25,5 @@ struct dict_hooks_test_access {
         return dict_hooks{opaque_dict, classify, group_member, group_delim, length_pair};
     }
 };
-#endif  // FIXPP_TEST_HOOKS
 
 }  // namespace fixpp::wire
