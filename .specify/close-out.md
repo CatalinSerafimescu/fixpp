@@ -98,6 +98,7 @@ Pick one and write it down; otherwise it comes back as a Gate B finding.
 | 13 | Phase-2 design-doc **shipped-status pointer** | this feature realizes a Phase-2 design doc | manual |
 | 14 | Project memory state note | the close changes cross-session status | manual |
 | 15 | **Anti-pattern library** entry → BOTH `.claude/agents/phase-implementer.md` (parent repo) AND `brain/failure-classes.md` (as a form of the matching class, plus a `brain/log.md` line) | Gate B Post-loop §4 produced candidates **and** the user approved them | manual |
+| 18 | **Release the MSVC sandbox lock** (owner rule, 2026-10-01): `rm /mnt/c/temp/fixpp/.sandbox-lock`, only after `cat` shows **this** session and **this** PR/issue on its `session:` and `for:` lines. A lock naming anyone else stays, and goes in the disposition. Procedure Step 0 in the parent's `research/G19-fix-fpml-iso20022/msvc-local-build-procedure.md` | this PR's work took the lock (any local MSVC build for it) | manual |
 
 **Row 11 is the one that produced issue #334.** A gate decides something, the code changes, and the
 signed-off document that recorded the old design is never amended — so it re-seeds the wrong model into
@@ -140,6 +141,7 @@ CONDITIONAL — state the trigger's status, not just N/A
 13. Phase-2 shipped pointer ........... trigger: <fired|not fired> — <disposition>
 14. memory state note ................. trigger: <fired|not fired> — <disposition>
 15. anti-pattern entry ................ trigger: <fired|not fired> — <disposition: phase-implementer.md AND failure-classes.md class <n> + log.md>
+18. MSVC sandbox lock released ........ trigger: <fired|not fired> — <disposition: lock removed (was session/for: …) | held by someone else: …>
 ```
 
 A filled instance per PR is the point. *"Consistent"* without one means the same rows with no evidence
