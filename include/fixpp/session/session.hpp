@@ -501,7 +501,7 @@ public:
     }
 
     // fixpp#511: test-only access to private state goes through ONE named friend,
-    // defined once in tests/support/session_test_access.hpp (never installed). The
+    // defined in tests/support/session_test_access.hpp (never installed). The
     // friend is unconditional on purpose: a member gated behind a test macro would
     // make a test TU's Session a different class from the library's, an ODR
     // violation (ill-formed, no diagnostic required).

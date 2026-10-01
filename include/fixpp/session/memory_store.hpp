@@ -523,7 +523,7 @@ private:
     }
 
     // fixpp#511: test-only access to private state goes through ONE named friend,
-    // defined once in tests/support/memory_store_test_access.hpp (never
+    // defined in tests/support/memory_store_test_access.hpp (never
     // installed). Unconditional on purpose: a member gated behind a test macro
     // would make a test TU's MemoryStore a different class from the library's,
     // an ODR violation (ill-formed, no diagnostic required).

@@ -157,7 +157,7 @@ public:
     }
 
     // fixpp#511: test-only access to private state goes through ONE named friend,
-    // defined once in tests/support/seqnum_manager_test_access.hpp (never
+    // defined in tests/support/seqnum_manager_test_access.hpp (never
     // installed). Unconditional on purpose: a member gated behind a test macro
     // would make a test TU's SeqnumManager a different class from the library's,
     // an ODR violation (ill-formed, no diagnostic required).

@@ -195,8 +195,8 @@ agent correctly treated this as a shortlist and re-derived, which is the intende
 ## Test access to private `Session` state — read before giving a test one
 
 `Session` lives in a PUBLIC header (`include/fixpp/session/session.hpp`). Since fixpp#511 (B21) there is
-one way for a test to reach its private state: the unconditional friend `session_test_access`. It is
-defined ONCE, in `tests/support/session_test_access.hpp`. `SeqnumManager`, `MemoryStore` and `Engine`
+one way for a test to reach its private state: the unconditional friend `session_test_access`. Define it
+only in `tests/support/session_test_access.hpp`. `SeqnumManager`, `MemoryStore` and `Engine`
 follow the same pattern, each with its own `*_test_access` header there. Verify against `session.hpp`.
 
 - **Adding an accessor:** add a static function to the existing struct in `tests/support/`. Do not touch

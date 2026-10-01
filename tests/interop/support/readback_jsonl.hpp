@@ -346,8 +346,8 @@ public:
 
     // TEST-ONLY (089 T047). Opens in APPEND mode instead of the mandated
     // TRUNCATE (R-4: "a stale record surviving a re-run is worse than a
-    // missing one" — a load-bearing decision, not a formatting choice). No
-    // production call site may reach this: it exists so a test can drive the
+    // missing one" — a load-bearing decision, not a formatting choice). Tests
+    // only: an emitter must never call this. It exists so a test can drive the
     // real write_line()/sent()/readback()/hello()/terminal() code path with
     // the open mode a defect would flip, to prove why TRUNCATE matters,
     // rather than hand-writing an appended fixture file. Unconditional

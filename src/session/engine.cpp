@@ -896,8 +896,8 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         session->attach_accepted_transport(std::move(transport), std::move(hr));
 
         // gate-b/r1 #3 (V-12 seam): test hook between step 7 (transport attached)
-        // and step 7a (publish_entry).  Always null in production: only the
-        // test-only engine_test_access::set_pre_publish_hook assigns it.
+        // and step 7a (publish_entry).  Null unless a test installs one through engine_test_access
+        // (tests/support/, never installed); production code must not assign it.
         // Overhead = one null function<> check per accepted connection.
         // The hook co_awaits on the session strand — stop() may run concurrently on
         // the control strand during the pause, setting stopped_=true, which
