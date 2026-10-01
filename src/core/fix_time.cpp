@@ -119,7 +119,11 @@ struct split_ns {
     std::int64_t sub;
 };
 
-constexpr split_ns split_floored(std::int64_t ns) noexcept {
+// consteval, not constexpr: it exists to constant-initialise the range ends
+// below, and consteval makes compile-time-only evaluation a guarantee. Left
+// constexpr, a body evaluated only at compile time still gets a coverage
+// mapping, so source-based coverage reports it as unexecuted.
+consteval split_ns split_floored(std::int64_t ns) noexcept {
     std::int64_t sec = ns / kNsPerSec;
     std::int64_t sub = ns % kNsPerSec;
     if (sub < 0) {

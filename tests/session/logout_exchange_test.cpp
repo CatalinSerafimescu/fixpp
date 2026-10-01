@@ -1502,9 +1502,26 @@ TEST(SessionGracefulCloseFlushesFileStore, OffloadProbe_ForcedSpuriousHit_Report
         const auto before = read_offload_counts();
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
 
+        // The pin below needs open() to have REACHED the blocked offload before
+        // the snapshot is taken. A fixed-length pump only assumed that, and a
+        // slow lane could take the snapshot first and read "no offload
+        // entered". So pump until the entry seam has fired. This wait only
+        // converts a wedge into a failure, so it takes the default budget --
+        // the one the labelled kSiteOpen pump gives open() to complete, which
+        // includes reaching this offload.
+        constexpr const char* kSiteEntry = "OffloadProbe_ForcedSpuriousHit/offload-entry";
+        ASSERT_TRUE(fixpp::test_support::pump_until(
+            ioc, [before] { return read_offload_counts().entries > before.entries; }, kSiteEntry))
+            << kPumpBudgetMiss << kSiteEntry
+            << " -- open() never entered the blocking FileStore offload, so the state this "
+               "arm pins was never produced";
+
         // Short explicit budget (F1.4 hazard): the offload is deliberately
         // blocked, so `fut` never becomes ready and a default kPumpBudget
         // would burn 10s to observe an outcome this budget already settles.
+        // Bounded above by blocking_offload_probe's safety valve, whose clock
+        // starts at the entry waited for above: once the valve lets the
+        // callable return, open() can complete and this window would read ready.
         constexpr auto kShortBudget = std::chrono::milliseconds{300};
         const bool ready = pump_until_ready(ioc, fut, kShortBudget, kSite);
         ASSERT_FALSE(ready) << "the offload is deliberately blocked inside the probe; "
