@@ -12,10 +12,10 @@
 //   (Reject-ok, Logout-fail)   — first assign succeeds, second fails → Disconnected
 //   (Reject-fail, Logout-fail) — same as Reject-fail (first fails; Logout never attempted)
 //
-// Injection mechanism: SeqnumManager::set_counters_for_test() (FIXPP_TEST_HOOKS)
-// sets next_outbound_ to seqnum_max, causing the next assign_outbound() to
-// return store_seqnum_overflow. Setting next_outbound_ = seqnum_max-1 allows
-// exactly one more assign before overflow.
+// Injection mechanism: seqnum_manager_test_access::set_counters()
+// (tests/support/seqnum_manager_test_access.hpp) sets next_outbound_ to seqnum_max, causing the
+// next assign_outbound() to return store_seqnum_overflow. Setting next_outbound_ = seqnum_max-1
+// allows exactly one more assign before overflow.
 //
 // Site 1 (Q3 SendingTime validation fail in Active/LogonReceived):
 //   Step 1: assign_outbound for Reject. If fail → Disconnected (Logout skipped).
@@ -25,14 +25,8 @@
 //   Step 1: assign_outbound for confirming Logout. If fail → Disconnected.
 //   (Only one step here; "Reject-ok/Logout-fail" maps to Logout-ok vs Logout-fail.)
 //
-// NOTE: FIXPP_TEST_HOOKS must be defined for the test target (see CMakeLists.txt).
-//
 // Anchors: spec.md FR-008 / SC-005; data-model.md §E1 Active row;
 //          session.cpp Q3 path + inbound-Logout path; RC#G mixed-path.
-
-#ifndef FIXPP_TEST_HOOKS
-#error "admin_emit_mixed_path_test.cpp requires FIXPP_TEST_HOOKS"
-#endif
 
 #include <gtest/gtest.h>
 
@@ -63,6 +57,8 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/seqnum_manager_test_access.hpp"
+#include "support/session_test_access.hpp"
 
 // ── #289: bounded pumps ──────────────────────────────────────────────────────
 //
@@ -273,8 +269,9 @@ protected:
             val = seqnum_max - 1;
         }
         // Keep next_inbound at its current value; only change next_outbound.
-        seqnum_t cur_in = s.seqnum_mgr_test_access().next_inbound_unsafe();
-        s.seqnum_mgr_test_access().set_counters_for_test(cur_in, val);
+        seqnum_t cur_in = fixpp::session::session_test_access::seqnum_mgr(s).next_inbound_unsafe();
+        fixpp::session::seqnum_manager_test_access::set_counters(
+            fixpp::session::session_test_access::seqnum_mgr(s), cur_in, val);
     }
 };
 

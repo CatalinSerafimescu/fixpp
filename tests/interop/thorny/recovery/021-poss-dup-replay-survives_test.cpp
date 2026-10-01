@@ -41,6 +41,7 @@
 
 #include "happy/hp_support.hpp"
 #include "support/scenario_descriptor.hpp"
+#include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::interop::Counterparty;
@@ -181,7 +182,8 @@ TEST_P(PossDupReplaySurvives, ReplayedPossDupFrameDoesNotDisconnect) {
     // ── Snapshot inbound seqnum before the replay window ─────────────────────
     // After the replay, the inbound seqnum must NOT have advanced (Arm A: replayed
     // too-low dup is tolerated without seqnum advance — FR-001 / INV-1).
-    const auto inbound_before_replay = s->seqnum_mgr_test_access().next_inbound_unsafe();
+    const auto inbound_before_replay =
+        fixpp::session::session_test_access::seqnum_mgr(*s).next_inbound_unsafe();
 
     // ── Replay window: wait for parent to drive ResendRequest→replay ──────────
     // The parent harness withholds one outbound frame, then sends a ResendRequest
@@ -209,7 +211,8 @@ TEST_P(PossDupReplaySurvives, ReplayedPossDupFrameDoesNotDisconnect) {
     // seqnum may have advanced. The gate here is that fixpp stayed Active — the
     // inbound seqnum invariant is validated more precisely by the unit tests in
     // tests/session/test_inbound_poss_dup_tolerance.cpp (T004).
-    const auto inbound_after = s->seqnum_mgr_test_access().next_inbound_unsafe();
+    const auto inbound_after =
+        fixpp::session::session_test_access::seqnum_mgr(*s).next_inbound_unsafe();
     (void)inbound_before_replay;  // used via golden + unit tests; live state may include additional
                                   // frames
     EXPECT_GE(inbound_after, inbound_before_replay)

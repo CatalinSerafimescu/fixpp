@@ -118,7 +118,8 @@ public:
     // Acquires mutex_; on drain/cancel → std::unexpected(session_already_closed).
     // Sets next_inbound_ = next_inbound; next_outbound_ = next_outbound.
     // No validation — caller supplies store-recovered values ≥ 1.
-    // Production-only (NOT test-gated); distinct from set_counters_for_test.
+    // Production path; distinct from the test-only
+    // seqnum_manager_test_access::set_counters, which takes no lock.
     // C1.2: idempotent at the value level; one-shot guard lives in the caller
     // (ensure_hydrated_), not here.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> hydrate(
@@ -155,21 +156,12 @@ public:
         return mutex_.cancel_and_drain();
     }
 
-#ifdef FIXPP_TEST_HOOKS
-    // Test-only: directly seed counter values (used by overflow tests).
-    // NOT for production use. Gated by FIXPP_TEST_HOOKS ([const §XV.9]).
-    // Usage: seqnum_overflow test seeds next_outbound_ = seqnum_max
-    //   to avoid ~4 billion assign_outbound() calls.
-    void set_counters_for_test(seqnum_t next_inbound, seqnum_t next_outbound) noexcept {
-        next_inbound_ = next_inbound;
-        next_outbound_ = next_outbound;
-    }
-
-    // Test-only: expose the internal async_mutex for drain-lifecycle tests.
-    // Used by T021 (test_seqnum_drain_on_close.cpp) to acquire the mutex directly
-    // and manufacture a genuine holder-during-drain scenario (FR-011 / SC-004).
-    [[nodiscard]] fixpp::sync::async_mutex& mutex_test_access() noexcept { return mutex_; }
-#endif
+    // fixpp#511: test-only access to private state goes through ONE named friend,
+    // defined in tests/support/seqnum_manager_test_access.hpp (never
+    // installed). Unconditional on purpose: a member gated behind a test macro
+    // would make a test TU's SeqnumManager a different class from the library's,
+    // an ODR violation (ill-formed, no diagnostic required).
+    friend struct seqnum_manager_test_access;
 
 private:
     seqnum_t next_inbound_ = seqnum_min;   // next expected inbound (starts at 1)

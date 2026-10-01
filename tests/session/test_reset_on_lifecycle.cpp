@@ -61,6 +61,8 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/seqnum_manager_test_access.hpp"
+#include "support/session_test_access.hpp"
 #include "support/store_double.hpp"
 
 // ── #289: bounded pumps ──────────────────────────────────────────────────────
@@ -397,7 +399,7 @@ protected:
 
 // ── Witness (1): ResetOnLogon_Initiator_ResetsAndEmits141 ─────────────────────
 //
-// Seed seqnums non-1 via set_counters_for_test(), reset_on_logon=true, open() as
+// Seed seqnums non-1 via seqnum_manager_test_access::set_counters, reset_on_logon=true, open() as
 // initiator → captured outbound Logon must have MsgSeqNum=1 AND 141=Y; persisted
 // counters == 1 after reset.
 //
@@ -411,8 +413,8 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogon_Initiator_ResetsAndEmits141) {
     Session sess(engine, cfg);
 
     // Seed non-1 counters: next_outbound=5, next_inbound=3.
-    // FIXPP_TEST_HOOKS required (compiled in by CMakeLists.txt for this target).
-    sess.seqnum_mgr_test_access().set_counters_for_test(
+    fixpp::session::seqnum_manager_test_access::set_counters(
+        fixpp::session::session_test_access::seqnum_mgr(sess),
         /*next_inbound=*/static_cast<seqnum_t>(3),
         /*next_outbound=*/static_cast<seqnum_t>(5));
 
@@ -448,7 +450,8 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogon_Initiator_ResetsAndEmits141) {
 
     // C2.1: persisted counters must be 1 after the durable reset.
     // Assert via SeqnumManager live state (post-reset peek_outbound should be 1).
-    const seqnum_t post_outbound = sess.seqnum_mgr_test_access().peek_outbound();
+    const seqnum_t post_outbound =
+        fixpp::session::session_test_access::seqnum_mgr(sess).peek_outbound();
     // After emitting the Logon, peek_outbound advances to 2 (or stays at the
     // seeded value+1 if not reset). The reset places it at 1 before the Logon
     // is emitted, so after the Logon the next outbound is 2.
@@ -568,7 +571,8 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogon_SuppressesPreResetGap) {
     Session sess(engine, cfg);
 
     // Seed next_inbound=5: simulates a prior session that left gaps 1-4.
-    sess.seqnum_mgr_test_access().set_counters_for_test(
+    fixpp::session::seqnum_manager_test_access::set_counters(
+        fixpp::session::session_test_access::seqnum_mgr(sess),
         /*next_inbound=*/static_cast<seqnum_t>(5),
         /*next_outbound=*/static_cast<seqnum_t>(1));  // outbound fresh
 
@@ -693,7 +697,8 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogon_Acceptor_AdmitsFresh34eq1_LocalExpecte
     Session sess(engine, cfg);
 
     // Seed local next_inbound=5 (acceptor's expected inbound seqnum).
-    sess.seqnum_mgr_test_access().set_counters_for_test(
+    fixpp::session::seqnum_manager_test_access::set_counters(
+        fixpp::session::session_test_access::seqnum_mgr(sess),
         /*next_inbound=*/static_cast<seqnum_t>(5),
         /*next_outbound=*/static_cast<seqnum_t>(3));
 
@@ -720,7 +725,8 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogon_Acceptor_AdmitsFresh34eq1_LocalExpecte
 
     // SC-001: seqnums must be {1,1} after the acceptor reset.
     // After reset, next_inbound reset to 1, Logon seq=1 consumed → next_inbound=2.
-    const seqnum_t next_in = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t next_in =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe();
     EXPECT_EQ(next_in, static_cast<seqnum_t>(2))
         << "ResetOnLogon_Acceptor_AdmitsFresh34eq1_LocalExpectedGt1 RED (SC-001): "
            "next_inbound must be 2 after reset (1) + Logon consumed (1); "
@@ -788,7 +794,8 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogon_BothRoles_Resets) {
         Session sess(engine, cfg);
 
         // Seed non-1 outbound.
-        sess.seqnum_mgr_test_access().set_counters_for_test(
+        fixpp::session::seqnum_manager_test_access::set_counters(
+            fixpp::session::session_test_access::seqnum_mgr(sess),
             /*next_inbound=*/static_cast<seqnum_t>(1),
             /*next_outbound=*/static_cast<seqnum_t>(7));
 
@@ -821,7 +828,8 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogon_BothRoles_Resets) {
         Session sess(engine, cfg);
 
         // Seed non-1 inbound.
-        sess.seqnum_mgr_test_access().set_counters_for_test(
+        fixpp::session::seqnum_manager_test_access::set_counters(
+            fixpp::session::session_test_access::seqnum_mgr(sess),
             /*next_inbound=*/static_cast<seqnum_t>(8),
             /*next_outbound=*/static_cast<seqnum_t>(1));
 
@@ -921,7 +929,8 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogout_LocalInitiated_Resets) {
 
     // Seed non-1 seqnums AFTER reaching Active so "==1 after teardown" is meaningful.
     // The Logon exchange is done; we can safely advance the live counters.
-    sess.seqnum_mgr_test_access().set_counters_for_test(
+    fixpp::session::seqnum_manager_test_access::set_counters(
+        fixpp::session::session_test_access::seqnum_mgr(sess),
         /*next_inbound=*/static_cast<seqnum_t>(7),
         /*next_outbound=*/static_cast<seqnum_t>(5));
 
@@ -942,8 +951,10 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogout_LocalInitiated_Resets) {
 
     // C3.1: live manager counters must be reset to 1.
     // After reset, peek_outbound()==1 (not yet used), next_inbound()==1.
-    const seqnum_t out_after = sess.seqnum_mgr_test_access().peek_outbound();
-    const seqnum_t in_after = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t out_after =
+        fixpp::session::session_test_access::seqnum_mgr(sess).peek_outbound();
+    const seqnum_t in_after =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe();
     EXPECT_EQ(out_after, static_cast<seqnum_t>(1))
         << "ResetOnLogout_LocalInitiated_Resets RED (C3.1): "
            "peek_outbound must be 1 after teardown reset; got "
@@ -978,7 +989,8 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogout_PeerInitiated_Resets) {
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     // Seed non-1 seqnums AFTER reaching Active.
-    sess.seqnum_mgr_test_access().set_counters_for_test(
+    fixpp::session::seqnum_manager_test_access::set_counters(
+        fixpp::session::session_test_access::seqnum_mgr(sess),
         /*next_inbound=*/static_cast<seqnum_t>(8),
         /*next_outbound=*/static_cast<seqnum_t>(4));
 
@@ -1014,8 +1026,10 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogout_PeerInitiated_Resets) {
            "got count=="
         << factory->store->reset_call_count();
 
-    const seqnum_t out_after = sess.seqnum_mgr_test_access().peek_outbound();
-    const seqnum_t in_after = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t out_after =
+        fixpp::session::session_test_access::seqnum_mgr(sess).peek_outbound();
+    const seqnum_t in_after =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe();
     EXPECT_EQ(out_after, static_cast<seqnum_t>(1))
         << "ResetOnLogout_PeerInitiated_Resets (C3.1): "
            "peek_outbound must be 1 after peer-Logout teardown reset; got "
@@ -1046,7 +1060,8 @@ TEST_F(ResetOnLifecycleTest, ResetOnDisconnect_AbnormalDrop_Resets) {
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     // Seed non-1 seqnums AFTER reaching Active so "==1 after" is meaningful.
-    sess.seqnum_mgr_test_access().set_counters_for_test(
+    fixpp::session::seqnum_manager_test_access::set_counters(
+        fixpp::session::session_test_access::seqnum_mgr(sess),
         /*next_inbound=*/static_cast<seqnum_t>(9),
         /*next_outbound=*/static_cast<seqnum_t>(6));
 
@@ -1065,8 +1080,10 @@ TEST_F(ResetOnLifecycleTest, ResetOnDisconnect_AbnormalDrop_Resets) {
            "when reset_on_disconnect=true; got count=="
         << factory->store->reset_call_count() << " (teardown trigger not yet wired — T014 pending)";
 
-    const seqnum_t out_after = sess.seqnum_mgr_test_access().peek_outbound();
-    const seqnum_t in_after = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t out_after =
+        fixpp::session::session_test_access::seqnum_mgr(sess).peek_outbound();
+    const seqnum_t in_after =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe();
     EXPECT_EQ(out_after, static_cast<seqnum_t>(1))
         << "ResetOnDisconnect_AbnormalDrop_Resets RED (C4.1): "
            "peek_outbound must be 1 after reset_on_disconnect teardown reset; "
@@ -1099,14 +1116,16 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogout_Off_Preserves) {
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     // Seed non-1 inbound AFTER reaching Active; we expect it PRESERVED after teardown.
-    sess.seqnum_mgr_test_access().set_counters_for_test(
+    fixpp::session::seqnum_manager_test_access::set_counters(
+        fixpp::session::session_test_access::seqnum_mgr(sess),
         /*next_inbound=*/static_cast<seqnum_t>(5),
         /*next_outbound=*/static_cast<seqnum_t>(3));
 
     // C3.2: snapshot inbound counter before teardown.
     // (outbound is consumed by possible Logout emits, so we track next_inbound
     //  to verify preservation of the non-reset path.)
-    const seqnum_t in_before = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t in_before =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe();
 
     // Graceful close — knob is off, so no reset must fire.
     graceful_close_sync(sess);
@@ -1121,7 +1140,8 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogout_Off_Preserves) {
         << factory->store->reset_call_count();
 
     // C3.2: next_inbound preserved (not reset to 1).
-    const seqnum_t in_after = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t in_after =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe();
     EXPECT_EQ(in_after, in_before)
         << "ResetOnLogout_Off_Preserves (C3.2): "
            "next_inbound must be preserved (unchanged) after Logout when reset_on_logout=false; "
@@ -1149,11 +1169,13 @@ TEST_F(ResetOnLifecycleTest, ResetOnDisconnect_Off_Preserves) {
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     // Seed non-1 inbound AFTER reaching Active; expect it PRESERVED after teardown.
-    sess.seqnum_mgr_test_access().set_counters_for_test(
+    fixpp::session::seqnum_manager_test_access::set_counters(
+        fixpp::session::session_test_access::seqnum_mgr(sess),
         /*next_inbound=*/static_cast<seqnum_t>(6),
         /*next_outbound=*/static_cast<seqnum_t>(4));
 
-    const seqnum_t in_before = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t in_before =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe();
 
     // Terminal close (abnormal drop): knob is off.
     terminal_close_sync(sess);
@@ -1168,7 +1190,8 @@ TEST_F(ResetOnLifecycleTest, ResetOnDisconnect_Off_Preserves) {
         << factory->store->reset_call_count();
 
     // C4.3: next_inbound preserved.
-    const seqnum_t in_after = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t in_after =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe();
     EXPECT_EQ(in_after, in_before)
         << "ResetOnDisconnect_Off_Preserves (C4.3): "
            "next_inbound must be preserved (unchanged) after abnormal close "
@@ -1201,7 +1224,8 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogoutAndDisconnect_DoubleTrigger_OneStoreRe
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     // Seed non-1 seqnums AFTER reaching Active.
-    sess.seqnum_mgr_test_access().set_counters_for_test(
+    fixpp::session::seqnum_manager_test_access::set_counters(
+        fixpp::session::session_test_access::seqnum_mgr(sess),
         /*next_inbound=*/static_cast<seqnum_t>(4),
         /*next_outbound=*/static_cast<seqnum_t>(2));
 
@@ -1250,8 +1274,9 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogout_BothRoles_Resets) {
         ASSERT_EQ(sess.state(), fsm_state::Active) << "BothRoles initiator: must reach Active";
 
         // Seed non-1 AFTER reaching Active.
-        sess.seqnum_mgr_test_access().set_counters_for_test(static_cast<seqnum_t>(6),
-                                                            static_cast<seqnum_t>(3));
+        fixpp::session::seqnum_manager_test_access::set_counters(
+            fixpp::session::session_test_access::seqnum_mgr(sess), static_cast<seqnum_t>(6),
+            static_cast<seqnum_t>(3));
 
         graceful_close_sync(sess);
 
@@ -1281,8 +1306,9 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogout_BothRoles_Resets) {
         ASSERT_EQ(sess.state(), fsm_state::Active) << "BothRoles acceptor: must reach Active";
 
         // Seed non-1 inbound AFTER reaching Active.
-        sess.seqnum_mgr_test_access().set_counters_for_test(static_cast<seqnum_t>(7),
-                                                            static_cast<seqnum_t>(2));
+        fixpp::session::seqnum_manager_test_access::set_counters(
+            fixpp::session::session_test_access::seqnum_mgr(sess), static_cast<seqnum_t>(7),
+            static_cast<seqnum_t>(2));
 
         // Feed peer Logout at seq=7 (matching seeded next_inbound).
         // Sets logout_seen_=true, emits confirming Logout, fsm_state→Disconnected.
@@ -1334,8 +1360,9 @@ TEST_F(ResetOnLifecycleTest, ResetOnDisconnect_BothRoles_Resets) {
         ASSERT_EQ(sess.state(), fsm_state::Active) << "BothRoles initiator: must reach Active";
 
         // Seed non-1 AFTER reaching Active.
-        sess.seqnum_mgr_test_access().set_counters_for_test(static_cast<seqnum_t>(5),
-                                                            static_cast<seqnum_t>(3));
+        fixpp::session::seqnum_manager_test_access::set_counters(
+            fixpp::session::session_test_access::seqnum_mgr(sess), static_cast<seqnum_t>(5),
+            static_cast<seqnum_t>(3));
 
         terminal_close_sync(sess);
 
@@ -1365,8 +1392,9 @@ TEST_F(ResetOnLifecycleTest, ResetOnDisconnect_BothRoles_Resets) {
         ASSERT_EQ(sess.state(), fsm_state::Active) << "BothRoles acceptor: must reach Active";
 
         // Seed non-1 AFTER reaching Active.
-        sess.seqnum_mgr_test_access().set_counters_for_test(static_cast<seqnum_t>(8),
-                                                            static_cast<seqnum_t>(5));
+        fixpp::session::seqnum_manager_test_access::set_counters(
+            fixpp::session::session_test_access::seqnum_mgr(sess), static_cast<seqnum_t>(8),
+            static_cast<seqnum_t>(5));
 
         terminal_close_sync(sess);
 
@@ -1413,8 +1441,10 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogout_NextInitiatorLogon_Emits141) {
 
     // Seqnums are already {1,1} (fresh session, seqnum_min = 1).
     // Explicit confirmation:
-    ASSERT_EQ(sess.seqnum_mgr_test_access().peek_outbound(), static_cast<seqnum_t>(1));
-    ASSERT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(), static_cast<seqnum_t>(1));
+    ASSERT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).peek_outbound(),
+              static_cast<seqnum_t>(1));
+    ASSERT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe(),
+              static_cast<seqnum_t>(1));
 
     auto r = open_sync(sess);
     ASSERT_TRUE(r.has_value()) << "open() failed";
@@ -1445,8 +1475,10 @@ TEST_F(ResetOnLifecycleTest, ResetOnDisconnect_NextInitiatorLogon_Emits141) {
     Session sess(engine, cfg);
 
     // Seqnums are {1,1} (fresh session).
-    ASSERT_EQ(sess.seqnum_mgr_test_access().peek_outbound(), static_cast<seqnum_t>(1));
-    ASSERT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(), static_cast<seqnum_t>(1));
+    ASSERT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).peek_outbound(),
+              static_cast<seqnum_t>(1));
+    ASSERT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe(),
+              static_cast<seqnum_t>(1));
 
     auto r = open_sync(sess);
     ASSERT_TRUE(r.has_value()) << "open() failed";
@@ -1615,9 +1647,11 @@ TEST_F(ResetOnLifecycleTest, ResetKnobs_NoHeapOnResetPath) {
             << factory->store->reset_call_count();
 
         // Seqnums reset to {1,1} after teardown.
-        EXPECT_EQ(sess_b.seqnum_mgr_test_access().peek_outbound(), static_cast<seqnum_t>(1))
+        EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess_b).peek_outbound(),
+                  static_cast<seqnum_t>(1))
             << "ResetKnobs_NoHeapOnResetPath [window B]: peek_outbound must be 1 after teardown";
-        EXPECT_EQ(sess_b.seqnum_mgr_test_access().next_inbound_unsafe(), static_cast<seqnum_t>(1))
+        EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess_b).next_inbound_unsafe(),
+                  static_cast<seqnum_t>(1))
             << "ResetKnobs_NoHeapOnResetPath [window B]: next_inbound must be 1 after teardown";
     }
 }
@@ -1663,7 +1697,8 @@ TEST_F(ResetOnLifecycleTest, ResetOnLogon_Off_Received141_NextInboundIsTwo) {
     ASSERT_TRUE(r2.has_value()) << "Logon(141=Y) feed must succeed";
     ASSERT_EQ(sess.state(), fsm_state::Active) << "session must reach Active";
 
-    const seqnum_t next_in = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t next_in =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe();
     EXPECT_EQ(next_in, static_cast<seqnum_t>(2))
         << "T004 (FR-001/005) RED: next_inbound must be 2 after acceptor received-141 "
            "(consumed seq-1 reset Logon); got "
@@ -1715,7 +1750,8 @@ TEST_F(ResetOnLifecycleTest, Received141_PeerNextMsgSeq2_HarmCheck) {
            "(fix not yet applied → seq-2 looks too-high → gap detected)";
 
     // T005b: next_inbound advanced to 3 (consumed the seq-2 Heartbeat).
-    const seqnum_t next_in = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t next_in =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe();
     EXPECT_EQ(next_in, static_cast<seqnum_t>(3))
         << "T005 (FR-002) RED: next_inbound must be 3 after consuming seq-2 Heartbeat; "
            "got "
@@ -1759,7 +1795,8 @@ TEST_F(ResetOnLifecycleTest, Received141_AcceptorDiscriminatingTriple) {
     ASSERT_NE(reply_frame, nullptr) << "T006: acceptor must emit a reply Logon (35=A)";
 
     // (a) next_inbound_unsafe() == 2.
-    const seqnum_t next_in = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t next_in =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe();
     EXPECT_EQ(next_in, static_cast<seqnum_t>(2))
         << "T006 (a) (FR-001/005) RED: next_inbound must be 2 after received-141; "
            "got "
@@ -1803,7 +1840,8 @@ TEST_F(ResetOnLifecycleTest, Received141_PersistentStore_InvH1_StoreEqualsManage
     ASSERT_EQ(sess.state(), fsm_state::Active) << "session must reach Active";
 
     const seqnum_t store_in = factory->store->current_next_inbound();
-    const seqnum_t mgr_in = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t mgr_in =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe();
 
     // Assert the store value directly (not via the manager as proxy).
     EXPECT_EQ(store_in, static_cast<seqnum_t>(2U))
@@ -1923,7 +1961,8 @@ TEST_F(ResetOnLifecycleTest, Received141_GuardSkipsWhenNoConsumedReset) {
 
     // Guard skipped: next_inbound must still be 1 (NOT set to 2 by the restore).
     // A hypothetical unguarded restore would force it to seqnum_min+1 = 2.
-    const seqnum_t next_in = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t next_in =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe();
     EXPECT_EQ(next_in, static_cast<seqnum_t>(1))
         << "T009 (guard on logon_inbound_advanced): next_inbound must remain 1 "
            "when behind-side tolerated (not consumed in-sequence); got "
@@ -1961,10 +2000,11 @@ TEST_F(ResetOnLifecycleTest, Initiator_Received141Ack_NextInboundTwo_NoResend) {
     ASSERT_EQ(sess.state(), fsm_state::Active) << "session must reach Active";
 
     // FR-001/009: next_inbound must be 2 (consumed seq-1 reset-ack Logon).
-    EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(), static_cast<seqnum_t>(2))
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe(),
+              static_cast<seqnum_t>(2))
         << "T012 (FR-009/001) RED: initiator next_inbound must be 2 after received-141 "
            "Logon-ack; got "
-        << sess.seqnum_mgr_test_access().next_inbound_unsafe()
+        << fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe()
         << " (initiator arm fix not yet applied → reset clobbers the advance)";
 
     // FR-002: peer's next message at seq=2 accepted in-sequence, no ResendRequest.
@@ -1983,7 +2023,8 @@ TEST_F(ResetOnLifecycleTest, Initiator_Received141Ack_NextInboundTwo_NoResend) {
     EXPECT_FALSE(any_resend_request())
         << "T012 (FR-002) RED: spurious ResendRequest(35=2) for peer seq=2 after initiator "
            "received-141 reset (indicates next_inbound was 1 not 2)";
-    EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(), static_cast<seqnum_t>(3))
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe(),
+              static_cast<seqnum_t>(3))
         << "T012 (FR-002): next_inbound must be 3 after consuming seq-2 Heartbeat";
 }
 
@@ -2007,7 +2048,8 @@ TEST_F(ResetOnLifecycleTest, Initiator_Received141Ack_PersistentStore_StoreEqual
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     const seqnum_t store_in = factory->store->current_next_inbound();
-    const seqnum_t mgr_in = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t mgr_in =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe();
     EXPECT_EQ(store_in, static_cast<seqnum_t>(2U))
         << "T013 (FR-005/009) RED: initiator store.current_next_inbound() must be 2 "
            "after received-141 persist-to-2; got "
@@ -2097,7 +2139,8 @@ TEST_F(ResetOnLifecycleTest, Initiator_Received141Ack_GuardSkipsWhenNoConsumedRe
         << "T016g: behind-side tolerated Logon-ack(34=5,141=Y) must reach Active (027-on)";
 
     // Guard skipped: next_inbound is reset to 1 and NOT restored to 2 (nothing consumed).
-    const seqnum_t next_in = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t next_in =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe();
     EXPECT_EQ(next_in, static_cast<seqnum_t>(1))
         << "T016g (guard on logon_inbound_advanced_init): next_inbound must remain 1 when "
            "behind-side tolerated (not consumed in-sequence); got "

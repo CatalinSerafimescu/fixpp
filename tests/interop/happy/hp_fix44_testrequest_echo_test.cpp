@@ -41,6 +41,7 @@
 
 #include "hp_support.hpp"
 #include "support/scenario_descriptor.hpp"
+#include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::interop::Counterparty;
@@ -203,7 +204,8 @@ TEST_P(HappyTestRequestEcho, BidirectionalTestRequestEcho) {
 
     // ── In-process seqnum witness (US1-1 / New-4) ─────────────────────────
     // Outbound seqnum > 1 confirms at least the Logon was sent.
-    EXPECT_GT(s->seqnum_mgr_test_access().peek_outbound(), fixpp::session::seqnum_t{1})
+    EXPECT_GT(fixpp::session::session_test_access::seqnum_mgr(*s).peek_outbound(),
+              fixpp::session::seqnum_t{1})
         << "outbound seqnum did not advance past the Logon";
 
     // ── Inbound-silence window: hold session live for up to 4 s ──────────
@@ -213,12 +215,14 @@ TEST_P(HappyTestRequestEcho, BidirectionalTestRequestEcho) {
     // OR the window expires — whichever comes first.  With a live peer this
     // observes the TestRequest emission; without one the window expires and
     // the cell skips on the golden assertion below.
-    const auto seqnum_after_logon = s->seqnum_mgr_test_access().peek_outbound();
+    const auto seqnum_after_logon =
+        fixpp::session::session_test_access::seqnum_mgr(*s).peek_outbound();
     fx.run_until(
         [&] {
             auto ss = fx.engine().lookup(id);
             return ss != nullptr &&
-                   ss->seqnum_mgr_test_access().peek_outbound() > seqnum_after_logon;
+                   fixpp::session::session_test_access::seqnum_mgr(*ss).peek_outbound() >
+                       seqnum_after_logon;
         },
         4s);
 

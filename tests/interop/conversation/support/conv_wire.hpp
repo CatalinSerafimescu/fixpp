@@ -256,7 +256,7 @@ inline std::string fix_type_for_tag(int tag) {
     return it == kTypes.end() ? std::string() : it->second;
 }
 
-// ── the FIXPP_TEST_HOOKS hand-built-frame route ─────────────────────────────
+// ── the test-only hand-built-frame route ────────────────────────────────────
 //
 // `fixpp::wire::body_builder::field()` accepts only printable ASCII
 // (`is_clean_field_value`, `0x20-0x7E` — src/wire/body_builder.cpp), so it
@@ -269,8 +269,8 @@ inline std::string fix_type_for_tag(int tag) {
 // § *Assumptions*, the B-05 bullet). This builds the FULL FRAME (header, body,
 // trailer) directly via `fixpp::wire::Writer` — which performs no such
 // content check, only wire mechanics — for a caller to hand to the session's
-// `FIXPP_TEST_HOOKS` seam (`Session::seqnum_mgr_test_access().assign_outbound()`
-// + `store_then_emit_test_access()`), the same seam A-REJECT's malformed
+// test-only seam (`session_test_access::seqnum_mgr(s).assign_outbound()`
+// + `session_test_access::store_then_emit`), the same seam A-REJECT's malformed
 // TestRequest already uses. Flat fields only (no repeating-group support) —
 // every currently-scripted use of this route (A-REJECT, B-05) needs only that.
 //
@@ -279,7 +279,7 @@ inline std::string fix_type_for_tag(int tag) {
 // of the PEER's live decode (C-11's actual subject), never evidence that
 // fixpp can itself emit binary `DATA` content — this route never exercises
 // `body_builder::field_data()`. `toApp` is also NOT invoked on
-// this path (`store_then_emit_test_access` bypasses the normal
+// this path (`session_test_access::store_then_emit` bypasses the normal
 // `Engine::send()`/`fire_to_admin_` flow entirely), so a caller using this
 // route for a BUSINESS message must write its own `sent` record — never
 // derived from this function's OUTPUT (C-8), always from the same intent

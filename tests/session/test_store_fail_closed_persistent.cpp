@@ -54,6 +54,7 @@
 #include "support/extract_tag.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
+#include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
 
@@ -250,7 +251,7 @@ TEST_F(StoreFailClosedPersistentTest,
     ASSERT_TRUE(pre_r.has_value()) << "the baseline (pre-failure) send must succeed";
 
     // k = the seq about to be assigned to the FAILING send.
-    const std::uint32_t k = sess->seqnum_mgr_test_access().peek_outbound();
+    const std::uint32_t k = fixpp::session::session_test_access::seqnum_mgr(*sess).peek_outbound();
 
     // Step 2: arm the seam, then send message k — the store's pwrite is
     // forced to fail once.

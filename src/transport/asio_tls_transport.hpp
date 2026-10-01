@@ -266,10 +266,10 @@ public:
     //
     // ⚠️ THAT LAST SENTENCE IS WHY close_fault_hook_ (#360) HAS NO SETTER.
     // A setter would have to be either always public — a production method that
-    // exists only for a test — or `#ifdef FIXPP_TEST_HOOKS`-gated, which is what
-    // `Engine` and `file_store` do and which is FORMALLY AN ODR VIOLATION: the
-    // ODR requires the class definition to be the same TOKEN SEQUENCE in every
-    // TU, and identical layout does not discharge that. The library is compiled
+    // exists only for a test — or `#ifdef FIXPP_TEST_HOOKS`-gated, which is
+    // FORMALLY AN ODR VIOLATION: the ODR requires the class definition to be
+    // the same TOKEN SEQUENCE in every TU, and identical layout does not
+    // discharge that. The library is compiled
     // without the macro, so a gated setter really would give the test TU and
     // fixpp_transport.a two different definitions of this class, linked into one
     // program. This friend is already unconditional, so routing through it

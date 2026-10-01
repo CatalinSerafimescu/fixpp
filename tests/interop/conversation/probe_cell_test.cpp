@@ -38,6 +38,7 @@
 #include "happy/hp_support.hpp"
 #include "support/counterparty_probe.hpp"
 #include "support/readback_jsonl.hpp"
+#include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
 namespace hp = fixpp::interop::hp;
@@ -219,7 +220,7 @@ TEST(Probe, Cell) {
     auto sess = fx.engine().lookup(id);
     ASSERT_NE(sess, nullptr);
 
-    bool const has_validator = sess->has_validator_for_test();
+    bool const has_validator = fixpp::session::session_test_access::has_validator(*sess);
     stream.hello(run_id, cell_id, config, actual_digest, arm, has_validator,
                  prod.dictionary_digest);
     app->mark_hello_written();

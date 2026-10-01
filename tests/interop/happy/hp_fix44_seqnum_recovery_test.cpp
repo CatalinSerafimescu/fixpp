@@ -70,6 +70,7 @@
 
 #include "hp_support.hpp"
 #include "support/scenario_descriptor.hpp"
+#include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::interop::Counterparty;
@@ -253,11 +254,13 @@ TEST_P(HappySeqnumRecoveryInbound, GapInductionResendRequestAndReturn) {
     static constexpr auto kPostRecoveryOutbound = fixpp::session::seqnum_t{3};
 
     // ── In-process witness (b), part 1: the Logon was sent ─────────────────
-    EXPECT_GT(s->seqnum_mgr_test_access().peek_outbound(), fixpp::session::seqnum_t{1})
+    EXPECT_GT(fixpp::session::session_test_access::seqnum_mgr(*s).peek_outbound(),
+              fixpp::session::seqnum_t{1})
         << "outbound seqnum did not advance past the Logon";
 
     // Diagnostics only — deliberately NOT an input to any assertion (see above).
-    const auto inbound_before_recovery = s->seqnum_mgr_test_access().next_inbound_unsafe();
+    const auto inbound_before_recovery =
+        fixpp::session::session_test_access::seqnum_mgr(*s).next_inbound_unsafe();
 
     // ── Recovery window: 25 s budget (total self-deadline is 30 s; 5 s for logon) ─
     // The parent withholds a QFJ→fixpp frame so the next received MsgSeqNum exceeds
@@ -281,7 +284,8 @@ TEST_P(HappySeqnumRecoveryInbound, GapInductionResendRequestAndReturn) {
         [&] {
             auto ss = fx.engine().lookup(id);
             return ss != nullptr &&
-                   ss->seqnum_mgr_test_access().next_inbound_unsafe() >= kPostRecoveryInbound;
+                   fixpp::session::session_test_access::seqnum_mgr(*ss).next_inbound_unsafe() >=
+                       kPostRecoveryInbound;
         },
         25s);
 
@@ -300,7 +304,8 @@ TEST_P(HappySeqnumRecoveryInbound, GapInductionResendRequestAndReturn) {
     // is unchanged, so both goldens still match and `>= 4` still passes. The
     // scenario is closed, so the correct value is a single number and anything
     // else is wrong in one direction or the other.
-    EXPECT_EQ(s->seqnum_mgr_test_access().next_inbound_unsafe(), kPostRecoveryInbound)
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*s).next_inbound_unsafe(),
+              kPostRecoveryInbound)
         << "inbound expected seqnum is not " << kPostRecoveryInbound
         << " after the recovery window (NewSeqNo(36) may have been received but not "
         << "applied; US3-2/US3-4). Pre-window reading was " << inbound_before_recovery
@@ -312,7 +317,8 @@ TEST_P(HappySeqnumRecoveryInbound, GapInductionResendRequestAndReturn) {
     // for the same reason as (c): a double increment overshoots to 4, the wire is
     // unchanged, and a floor would pass it while the next outbound frame carries a
     // seqnum the peer will gap on.
-    EXPECT_EQ(s->seqnum_mgr_test_access().peek_outbound(), kPostRecoveryOutbound)
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*s).peek_outbound(),
+              kPostRecoveryOutbound)
         << "outbound seqnum is not " << kPostRecoveryOutbound
         << "; the ResendRequest may not have been sent, or the counter over-advanced";
 
@@ -379,7 +385,8 @@ TEST_P(HappySeqnumRecovery, ResynchronizesWithoutFatalDisconnect) {
 
     auto s = fx.engine().lookup(id);
     ASSERT_NE(s, nullptr) << "session not established";
-    EXPECT_GT(s->seqnum_mgr_test_access().peek_outbound(), fixpp::session::seqnum_t{1})
+    EXPECT_GT(fixpp::session::session_test_access::seqnum_mgr(*s).peek_outbound(),
+              fixpp::session::seqnum_t{1})
         << "outbound seqnum did not advance past the Logon";
 
     // This cell runs with NO induction: nothing injects a gap, so the window

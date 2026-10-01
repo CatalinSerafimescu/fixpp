@@ -37,6 +37,7 @@
 #include <memory>
 
 #include "support/pump_until_ready.hpp"
+#include "support/seqnum_manager_test_access.hpp"
 
 namespace fixpp::session::test {
 
@@ -191,20 +192,12 @@ TEST_F(SeqnumManagerTest, OutboundOverflowAtSeqnumMax) {
     //
     // BUT seqnum_max == UINT32_MAX which is ~4 billion calls — too slow.
     // The SeqnumManager exposes next_outbound_unsafe() for inspection; we
-    // need a way to set the counter to seqnum_max for testing.
-    //
-    // Design decision: SeqnumManager provides a test-only constructor that
-    // accepts initial counter values. This is gated by FIXPP_TEST_HOOKS
-    // (same pattern as store_seqnum_out_of_order uses FIXPP_TEST_HOOKS).
-    // If FIXPP_TEST_HOOKS is not defined this test validates what is possible.
-    //
-    // For T027/T036: SeqnumManager provides set_counters_for_test() behind
-    // FIXPP_TEST_HOOKS. This test uses it.
+    // need a way to set the counter to seqnum_max for testing: the test-only
+    // seqnum_manager_test_access::set_counters (tests/support/) seeds it.
 
-#ifdef FIXPP_TEST_HOOKS
     SeqnumManager mgr;
     // Set next_outbound_ to seqnum_max (the last valid value to assign).
-    mgr.set_counters_for_test(seqnum_min, seqnum_max);
+    fixpp::session::seqnum_manager_test_access::set_counters(mgr, seqnum_min, seqnum_max);
 
     // assign_outbound() with next_outbound_==seqnum_max: this WOULD return
     // seqnum_max. But then incrementing would overflow. Per I-8: at seqnum_max,
@@ -218,9 +211,6 @@ TEST_F(SeqnumManagerTest, OutboundOverflowAtSeqnumMax) {
     EXPECT_EQ(mgr.next_outbound_unsafe(), seqnum_max) << "Counter must not wrap past seqnum_max";
 
     ASSERT_TRUE(run_sync(ioc, mgr.drain()).has_value());
-#else
-    GTEST_SKIP() << "FIXPP_TEST_HOOKS not defined; overflow test requires test counter seeding";
-#endif
 }
 
 // ── 092-garbled-frame-reject FR-019: seqnum_max inbound bound, NO wrap ──────

@@ -5541,7 +5541,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::store_then_emit(
             // and build_logon already fails-closed (wire_frame_too_large) above
             // it; the T007 open()-time credential-length guard adds config-time
             // defense for both roles. This branch is reachable ONLY via the
-            // store_then_emit_test_access() FIXPP_TEST_HOOKS seam (T010 earns its
+            // test-only session_test_access::store_then_emit seam (T010 earns its
             // BRDA by injecting a hand-crafted >256-byte 35=A frame; see plan.md
             // ## Gate A deviation #1). [C2 step-2 / R3 / I-07;
             // [[feedback_symmetric_api_claim_unreachable_arm]]]

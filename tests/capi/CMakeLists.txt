@@ -103,6 +103,7 @@ target_compile_definitions(capi_pure_tests PRIVATE
   FIXPP_DICT_DATA_DIR="${CMAKE_SOURCE_DIR}/dictionaries"
   FIXPP_ORCHESTRA_DATA_DIR="${CMAKE_SOURCE_DIR}/dictionaries/orchestra"
   FIXPP_CAPI_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+  # Declares the namespace-scope seams in capi_internal.hpp and dictionary_internal.hpp.
   FIXPP_TEST_HOOKS
   "FIXPP_CAPI_LIB=\"$<TARGET_FILE:fixpp_capi>\""
   "FIXPP_CAPI_GOLDEN=\"${CMAKE_SOURCE_DIR}/tests/abi/golden/fixpp_capi_symbols.txt\""
@@ -164,13 +165,11 @@ target_link_libraries(capi_send_recv_test PRIVATE
   GTest::gtest_main
 )
 target_include_directories(capi_send_recv_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
-# Issue #151: the reaped-close tests use the FIXPP_TEST_HOOKS Session accessor
-# is_drained_for_test() to wait DETERMINISTICALLY for the acceptor to reach
-# closed_drained (avoiding a sleep that races the `closing` window) and the
-# set_session_ever_established seam (capi_internal.hpp gated decl). ODR-safe: both
-# FIXPP_TEST_HOOKS blocks are methods/decls only — no gated data members — so the
-# struct layouts match the non-hooks library (same pattern as capi_error_live_test).
-# 091 FR-020: length_data_logon_refusal_test.cpp reads the same accessor (issue #511).
+# Issue #151: the reaped-close tests wait DETERMINISTICALLY for the acceptor to reach
+# closed_drained through session_test_access::is_drained (tests/support/), avoiding a
+# sleep that races the `closing` window; 091 FR-020's length_data_logon_refusal_test.cpp
+# reads the same accessor. FIXPP_TEST_HOOKS declares the namespace-scope
+# set_session_ever_established seam (capi_internal.hpp).
 target_compile_definitions(capi_send_recv_test PRIVATE FIXPP_TEST_HOOKS)
 # Split into separate ctest entries so WILL_FAIL is scoped ONLY to the deliberate
 # ASan UAF witness (T029), not to the positive round-trip tests (CA-006/007).
@@ -221,7 +220,8 @@ add_test(NAME capi_recv_alloc_guard COMMAND capi_recv_alloc_guard_test)
 
 # gate-b/r1 (Q3+Q4): live send-path negative witnesses + live downgrade witness.
 # Q3(a) malformed payload → FIXPP_ERR_UNKNOWN + no transmit.
-# Q3(b) seqnum_max overflow → FIXPP_ERR_STORE_RUNTIME + no transmit (needs FIXPP_TEST_HOOKS).
+# Q3(b) seqnum_max overflow → FIXPP_ERR_STORE_RUNTIME + no transmit (seeded through
+#       tests/support/session_test_access.hpp + seqnum_manager_test_access.hpp).
 # Q4 live consumer_minor downgrade through fixpp_engine_start public thunk.
 add_executable(capi_error_live_test error_live_test.cpp)
 target_link_libraries(capi_error_live_test PRIVATE
@@ -230,7 +230,6 @@ target_link_libraries(capi_error_live_test PRIVATE
   GTest::gtest_main
 )
 target_include_directories(capi_error_live_test PRIVATE ${FIXPP_CAPI_FEATURE_B_INCLUDES})
-target_compile_definitions(capi_error_live_test PRIVATE FIXPP_TEST_HOOKS)
 add_test(NAME capi_error_live COMMAND capi_error_live_test)
 set_tests_properties(capi_error_live PROPERTIES LABELS "capi;050")
 

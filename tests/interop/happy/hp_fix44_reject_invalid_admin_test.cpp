@@ -59,6 +59,7 @@
 
 #include "hp_support.hpp"
 #include "support/scenario_descriptor.hpp"
+#include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::interop::Counterparty;
@@ -227,7 +228,8 @@ TEST_P(HappyRejectInvalidAdmin, RejectInvalidAdminSurvives) {
 
     // ── In-process witness (b): seqnum snapshot after logon ────────────────
     // Confirms at least Logon(34=1) was sent; the Reject will push it further.
-    const auto seqnum_after_logon = s->seqnum_mgr_test_access().peek_outbound();
+    const auto seqnum_after_logon =
+        fixpp::session::session_test_access::seqnum_mgr(*s).peek_outbound();
     EXPECT_GT(seqnum_after_logon, fixpp::session::seqnum_t{1})
         << "outbound seqnum did not advance past the Logon";
 
@@ -244,7 +246,8 @@ TEST_P(HappyRejectInvalidAdmin, RejectInvalidAdminSurvives) {
         [&] {
             auto ss = fx.engine().lookup(id);
             return ss != nullptr &&
-                   ss->seqnum_mgr_test_access().peek_outbound() > seqnum_after_logon;
+                   fixpp::session::session_test_access::seqnum_mgr(*ss).peek_outbound() >
+                       seqnum_after_logon;
         },
         4s);
 
@@ -260,7 +263,8 @@ TEST_P(HappyRejectInvalidAdmin, RejectInvalidAdminSurvives) {
     {
         auto ss = fx.engine().lookup(id);
         ASSERT_NE(ss, nullptr);
-        EXPECT_GT(ss->seqnum_mgr_test_access().peek_outbound(), seqnum_after_logon)
+        EXPECT_GT(fixpp::session::session_test_access::seqnum_mgr(*ss).peek_outbound(),
+                  seqnum_after_logon)
             << "outbound seqnum did not advance past the post-logon snapshot; "
                "expected Reject(35=3) + heartbeats to push it forward";
     }

@@ -74,6 +74,7 @@
 #include <tuple>
 
 #include "hp_support.hpp"
+#include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::interop::Counterparty;
@@ -160,7 +161,8 @@ TEST_P(NextExpectedInitiator, ProactiveResendNoResendRequest) {
     // Witness (b): outbound seqnum advanced past the Logon (Logon was sent at seq 1).
     auto s = fx.engine().lookup(id);
     ASSERT_NE(s, nullptr) << "session not established";
-    EXPECT_GT(s->seqnum_mgr_test_access().peek_outbound(), fixpp::session::seqnum_t{1})
+    EXPECT_GT(fixpp::session::session_test_access::seqnum_mgr(*s).peek_outbound(),
+              fixpp::session::seqnum_t{1})
         << "outbound seqnum did not advance past the Logon";
 
     // Graceful stop: Logout + disconnect within the watchdog.
@@ -230,7 +232,8 @@ TEST_P(NextExpectedAcceptor, ProactiveResendNoResendRequest) {
     // Witness (b): outbound seqnum advanced past the acceptor reply Logon (seq 1).
     auto s = fx.engine().lookup(id);
     ASSERT_NE(s, nullptr) << "session not established";
-    EXPECT_GT(s->seqnum_mgr_test_access().peek_outbound(), fixpp::session::seqnum_t{1})
+    EXPECT_GT(fixpp::session::session_test_access::seqnum_mgr(*s).peek_outbound(),
+              fixpp::session::seqnum_t{1})
         << "outbound seqnum did not advance past the acceptor reply Logon";
 
     const auto elapsed = fx.stop_within(kStopWatchdog);
@@ -304,7 +307,8 @@ TEST_P(NextExpectedBidirectional, BothGapsRecoverNoResendRequest) {
     // Check: outbound seqnum advanced past the Logon.
     auto s = fx.engine().lookup(id);
     ASSERT_NE(s, nullptr) << "session not established";
-    EXPECT_GT(s->seqnum_mgr_test_access().peek_outbound(), fixpp::session::seqnum_t{1})
+    EXPECT_GT(fixpp::session::session_test_access::seqnum_mgr(*s).peek_outbound(),
+              fixpp::session::seqnum_t{1})
         << "outbound seqnum did not advance past the Logon in the bidirectional cell";
 
     const auto elapsed = fx.stop_within(kStopWatchdog);

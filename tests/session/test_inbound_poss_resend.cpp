@@ -24,6 +24,7 @@
 #include <gtest/gtest.h>
 
 #include "support/possdup_test_support.hpp"
+#include "support/session_test_access.hpp"
 
 namespace fixpp::session::test {
 namespace {
@@ -91,7 +92,8 @@ TEST_F(InboundPossResendTest, DeliverInSeq_97Y) {
     drive_to_active(sess);
 
     // After Logon(seq=1), next_expected = 2.
-    const auto expected_before = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    const auto expected_before =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe();
     ASSERT_EQ(expected_before, static_cast<fixpp::session::seqnum_t>(2));
 
     // In-sequence app message (35=D, seq=2) with 97=Y, no 43=Y.
@@ -111,7 +113,8 @@ TEST_F(InboundPossResendTest, DeliverInSeq_97Y) {
         << "C4.1/FR-001: tag 97 must be present in the MessageView delivered to fromApp";
 
     // Seqnum advanced N→N+1 (2→3).
-    const auto expected_after = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    const auto expected_after =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe();
     EXPECT_EQ(expected_after, static_cast<fixpp::session::seqnum_t>(3))
         << "C4.1/FR-001: expected inbound seqnum must advance 2→3 after in-seq 97=Y "
         << "(was " << expected_before << ", got " << expected_after << ")";
@@ -141,7 +144,8 @@ TEST_F(InboundPossResendTest, NoApp_ByteIdentity) {
             make_poss_resend_frame("D", /*seq=*/2, "TW", "ISLD", /*poss_resend=*/false);
         feed(sessA, frame_no97);
 
-        const auto seqnum_after_A = sessA.seqnum_mgr_test_access().next_inbound_unsafe();
+        const auto seqnum_after_A =
+            fixpp::session::session_test_access::seqnum_mgr(sessA).next_inbound_unsafe();
         const std::size_t new_frames_A = captured_frames.size() - frames_before;
         const auto state_A = sessA.state();
 
@@ -159,7 +163,8 @@ TEST_F(InboundPossResendTest, NoApp_ByteIdentity) {
             make_poss_resend_frame("D", /*seq=*/2, "TW", "ISLD", /*poss_resend=*/true);
         feed(sessB, frame_with97);
 
-        const auto seqnum_after_B = sessB.seqnum_mgr_test_access().next_inbound_unsafe();
+        const auto seqnum_after_B =
+            fixpp::session::session_test_access::seqnum_mgr(sessB).next_inbound_unsafe();
         const std::size_t new_frames_B = captured_frames.size() - frames_before_B;
         const auto state_B = sessB.state();
 
@@ -199,7 +204,8 @@ TEST_F(InboundPossResendTest, Combo_43Y_97Y) {
         feed(sessA, frame_43only);
 
         const auto state_A = sessA.state();
-        const auto seqnum_A = sessA.seqnum_mgr_test_access().next_inbound_unsafe();
+        const auto seqnum_A =
+            fixpp::session::session_test_access::seqnum_mgr(sessA).next_inbound_unsafe();
         const std::size_t new_frames_A = captured_frames.size() - frames_before;
 
         captured_frames.clear();
@@ -221,7 +227,8 @@ TEST_F(InboundPossResendTest, Combo_43Y_97Y) {
         feed(sessB, frame_43_97);
 
         const auto state_B = sessB.state();
-        const auto seqnum_B = sessB.seqnum_mgr_test_access().next_inbound_unsafe();
+        const auto seqnum_B =
+            fixpp::session::session_test_access::seqnum_mgr(sessB).next_inbound_unsafe();
         const std::size_t new_frames_B = captured_frames.size() - frames_before_B;
 
         // 97 must not change the Arm A disposition vs 43-only.
@@ -266,7 +273,8 @@ TEST_F(InboundPossResendTest, PossResend_No122_NoReject) {
         << "the 122-required rule keys on 43=Y only";
 
     // Seqnum advanced (message was processed normally).
-    const auto expected_after = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    const auto expected_after =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe();
     EXPECT_EQ(expected_after, static_cast<fixpp::session::seqnum_t>(3))
         << "C4.2/FR-003: seqnum must advance (in-seq 97=Y without 43 processed normally)";
 }
@@ -329,7 +337,8 @@ TEST_F(InboundPossResendTest, Edge_Admin_97Ignored) {
         << "Edge: admin message with 97=Y must leave session Active";
 
     // Seqnum advances (admin message at expected seqnum is accepted and advances).
-    const auto expected_after = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    const auto expected_after =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe();
     EXPECT_EQ(expected_after, static_cast<fixpp::session::seqnum_t>(3))
         << "Edge: seqnum must advance after in-seq admin message with 97=Y";
 

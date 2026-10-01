@@ -20,7 +20,8 @@
 //   W1 and W2 use the drive_reconnect() path (the real "2nd-logon" vehicle):
 //     1. Build initiator with FaultStore {seeded_in, seeded_out}, call open()
 //        → cold one-shot hydrate fires, hydrated_=true, manager set from store.
-//     2. set_counters_for_test to lower/raise the live counters (diverge from store).
+//     2. seqnum_manager_test_access::set_counters to lower/raise the live counters
+//        (diverge from store).
 //     3. Call session->drive_reconnect() with a mock transport factory that
 //        completes connect+handshake synchronously; this triggers
 //        install_reconnected_transport → LogonSent → emit_initiator_logon_()
@@ -108,6 +109,8 @@
 // Rationale and the teardown-shape rule live at the primitive, not duplicated here
 // (#324).
 #include "support/extract_tag.hpp"
+#include "support/seqnum_manager_test_access.hpp"
+#include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
 
@@ -566,7 +569,7 @@ TEST(RefreshOnLogon, SkeletonBuilds) {
 //   - Initiator with refresh_on_logon=true, bilateral_lenient.
 //   - Cold open: hydrated_=false → ensure_hydrated_ fires → manager = {50, 60};
 //     outbound Logon at seq=60 advances manager.outbound to 61.
-//   - set_counters_for_test(40, 42): manager diverges to {40, 42}.
+//   - seqnum_manager_test_access::set_counters(m, 40, 42): manager diverges to {40, 42}.
 //     (Simulates the standby case: store reflects the primary's higher seqnums;
 //      the standby's in-memory manager is behind after its local processing.)
 //   - drive_reconnect(): mock transport connect+handshake succeed →
@@ -598,7 +601,7 @@ TEST(RefreshOnLogon, W1_StoreAboveLive_RED) {
     // Manager after cold open: hydrated to {50, 60}; then Logon at seq=60
     // advances outbound to 61. Confirm the cold hydrate was applied.
     {
-        auto& mgr = fix.session->seqnum_mgr_test_access();
+        const auto& mgr = fixpp::session::session_test_access::seqnum_mgr(*fix.session);
         ASSERT_EQ(mgr.next_inbound_unsafe(), static_cast<seqnum_t>(50))
             << "W1 precondition: cold hydrate must set next_inbound=50";
         // After Logon emission at seq=60, outbound advanced to 61.
@@ -609,15 +612,16 @@ TEST(RefreshOnLogon, W1_StoreAboveLive_RED) {
     // Simulate standby divergence: lower the live manager to {40, 42}.
     // This represents the standby's in-memory state after processing fewer
     // frames than the primary's store reflects.
-    fix.session->seqnum_mgr_test_access().set_counters_for_test(
-        /*next_inbound=*/40, /*next_outbound=*/42);
+    fixpp::session::seqnum_manager_test_access::set_counters(
+        fixpp::session::session_test_access::seqnum_mgr(*fix.session), /*next_inbound=*/40,
+        /*next_outbound=*/42);
 
     {
-        auto& mgr = fix.session->seqnum_mgr_test_access();
+        const auto& mgr = fixpp::session::session_test_access::seqnum_mgr(*fix.session);
         ASSERT_EQ(mgr.next_inbound_unsafe(), static_cast<seqnum_t>(40))
-            << "W1 setup: set_counters_for_test must lower inbound to 40";
+            << "W1 setup: seqnum_manager_test_access::set_counters must lower inbound to 40";
         ASSERT_EQ(mgr.peek_outbound(), static_cast<seqnum_t>(42))
-            << "W1 setup: set_counters_for_test must lower outbound to 42";
+            << "W1 setup: seqnum_manager_test_access::set_counters must lower outbound to 42";
     }
 
     // Drive the 2nd logon via drive_reconnect().
@@ -666,22 +670,23 @@ TEST(RefreshOnLogon, W1_StoreAboveLive_RED) {
     // W1 inbound post-condition: next_inbound must equal the store's seeded value (50).
     // RED: hydrated_ latch fires, manager stays at {40,42}, next_inbound=40 != 50.
     // GREEN: re-hydrated from store, next_inbound=50.
-    EXPECT_EQ(fix.session->seqnum_mgr_test_access().next_inbound_unsafe(),
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*fix.session).next_inbound_unsafe(),
               static_cast<seqnum_t>(50))
         << "W1 RED: after 2nd logon with refresh_on_logon=true + bilateral_lenient, "
            "next_inbound must equal the store's seeded value (50). "
            "WITHOUT T004, hydrated_ latch prevents re-hydration → stays at live value 40. "
            "Actual next_inbound="
-        << fix.session->seqnum_mgr_test_access().next_inbound_unsafe();
+        << fixpp::session::session_test_access::seqnum_mgr(*fix.session).next_inbound_unsafe();
 
     // W1 outbound post-condition: after re-hydrate to out=60, the 2nd Logon emits at 60 →
     // peek_outbound()==61. Without re-hydrate: out=42 → Logon at 42 → peek_outbound()==43.
     // RED: 43 != 61. GREEN: 61 == 61.
-    EXPECT_EQ(fix.session->seqnum_mgr_test_access().peek_outbound(), static_cast<seqnum_t>(61))
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*fix.session).peek_outbound(),
+              static_cast<seqnum_t>(61))
         << "W1 RED: after re-hydrate to out=60 + 2nd Logon emit, peek_outbound must be 61. "
            "WITHOUT T004: latch fires → out stays 42 → 2nd Logon at 42 → peek_outbound=43. "
            "Actual peek_outbound="
-        << fix.session->seqnum_mgr_test_access().peek_outbound();
+        << fixpp::session::session_test_access::seqnum_mgr(*fix.session).peek_outbound();
 }
 
 // ── Phase 1 (T011) — W2 RED: StoreWinsDown — store-wins DOWN ─────────────────
@@ -714,7 +719,7 @@ TEST(RefreshOnLogon, W2_StoreWinsDown_RED) {
         << "W2 precondition: cold open must issue exactly 2 store reads";
 
     {
-        auto& mgr = fix.session->seqnum_mgr_test_access();
+        const auto& mgr = fixpp::session::session_test_access::seqnum_mgr(*fix.session);
         ASSERT_EQ(mgr.next_inbound_unsafe(), static_cast<seqnum_t>(5))
             << "W2 precondition: cold hydrate must set next_inbound=5";
     }
@@ -722,13 +727,14 @@ TEST(RefreshOnLogon, W2_StoreWinsDown_RED) {
     // Simulate live counter divergence ABOVE the store: {40, 42}.
     // This represents a standby that processed additional frames in RAM (above
     // what is in the store), and needs to revert to the store-authoritative value.
-    fix.session->seqnum_mgr_test_access().set_counters_for_test(
-        /*next_inbound=*/40, /*next_outbound=*/42);
+    fixpp::session::seqnum_manager_test_access::set_counters(
+        fixpp::session::session_test_access::seqnum_mgr(*fix.session), /*next_inbound=*/40,
+        /*next_outbound=*/42);
 
     {
-        auto& mgr = fix.session->seqnum_mgr_test_access();
+        const auto& mgr = fixpp::session::session_test_access::seqnum_mgr(*fix.session);
         ASSERT_EQ(mgr.next_inbound_unsafe(), static_cast<seqnum_t>(40))
-            << "W2 setup: set_counters_for_test must raise inbound to 40";
+            << "W2 setup: seqnum_manager_test_access::set_counters must raise inbound to 40";
     }
 
     // Drive the 2nd logon via drive_reconnect() with the mock transport.
@@ -771,24 +777,26 @@ TEST(RefreshOnLogon, W2_StoreWinsDown_RED) {
     // The store-wins-DOWN semantic (INV-RoL-4) requires unconditional overwrite.
     // RED: hydrated_ latch fires → manager stays at 40 → 40 != 5.
     // GREEN: re-hydrated → manager = 5 (store-wins DOWN).
-    EXPECT_EQ(fix.session->seqnum_mgr_test_access().next_inbound_unsafe(), static_cast<seqnum_t>(5))
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*fix.session).next_inbound_unsafe(),
+              static_cast<seqnum_t>(5))
         << "W2 RED: after 2nd logon with refresh_on_logon=true + bilateral_lenient, "
            "next_inbound must equal the store's LOWER seeded value (5). "
            "An advance-only implementation would also fail here — store-wins must "
            "lower the counter unconditionally (INV-RoL-4). "
            "WITHOUT T004: hydrated_ latch → stays at live value 40. "
            "Actual next_inbound="
-        << fix.session->seqnum_mgr_test_access().next_inbound_unsafe();
+        << fixpp::session::session_test_access::seqnum_mgr(*fix.session).next_inbound_unsafe();
 
     // W2 outbound post-condition: after re-hydrate to out=6, the 2nd Logon emits at 6 →
     // peek_outbound()==7. Without re-hydrate: out=42 → 2nd Logon at 42 → peek_outbound()==43.
     // RED: 43 != 7. GREEN: 7 == 7.
-    EXPECT_EQ(fix.session->seqnum_mgr_test_access().peek_outbound(), static_cast<seqnum_t>(7))
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*fix.session).peek_outbound(),
+              static_cast<seqnum_t>(7))
         << "W2 RED: after re-hydrate to out=6 (store-wins DOWN) + 2nd Logon emit, "
            "peek_outbound must be 7. WITHOUT T004: latch fires → out stays 42 → "
            "2nd Logon at 42 → peek_outbound=43. "
            "Actual peek_outbound="
-        << fix.session->seqnum_mgr_test_access().peek_outbound();
+        << fixpp::session::session_test_access::seqnum_mgr(*fix.session).peek_outbound();
 }
 
 // ── Phase 4 (T020) — W3: KnobOff_NoReread — default-off byte-identity ───────
@@ -823,7 +831,7 @@ TEST(RefreshOnLogon, W3_KnobOff_NoReread) {
 
     // Confirm cold hydrate applied: manager={50,60}, then Logon at 60 → outbound=61.
     {
-        auto& mgr = fix.session->seqnum_mgr_test_access();
+        const auto& mgr = fixpp::session::session_test_access::seqnum_mgr(*fix.session);
         ASSERT_EQ(mgr.next_inbound_unsafe(), static_cast<seqnum_t>(50))
             << "W3 precondition: cold hydrate must set next_inbound=50";
         ASSERT_EQ(mgr.peek_outbound(), static_cast<seqnum_t>(61))
@@ -831,8 +839,9 @@ TEST(RefreshOnLogon, W3_KnobOff_NoReread) {
     }
 
     // Diverge: lower live counters to {40, 42} (simulates the standby case).
-    fix.session->seqnum_mgr_test_access().set_counters_for_test(
-        /*next_inbound=*/40, /*next_outbound=*/42);
+    fixpp::session::seqnum_manager_test_access::set_counters(
+        fixpp::session::session_test_access::seqnum_mgr(*fix.session), /*next_inbound=*/40,
+        /*next_outbound=*/42);
 
     const int call_count_before = store->call_count;  // snapshot N = 2
 
@@ -868,18 +877,19 @@ TEST(RefreshOnLogon, W3_KnobOff_NoReread) {
         << ". A non-zero delta means the knob-off guard is broken (INV-RoL-1).";
 
     // (b) Inbound counter retained at live value (40), NOT overwritten from store (50).
-    EXPECT_EQ(fix.session->seqnum_mgr_test_access().next_inbound_unsafe(),
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*fix.session).next_inbound_unsafe(),
               static_cast<seqnum_t>(40))
         << "W3: knob-off must NOT re-hydrate; next_inbound must stay at live value 40, "
            "not the store's 50. Actual="
-        << fix.session->seqnum_mgr_test_access().next_inbound_unsafe();
+        << fixpp::session::session_test_access::seqnum_mgr(*fix.session).next_inbound_unsafe();
 
     // (c) Outbound counter: live=42 → 2nd Logon emits at 42 → peek_outbound=43.
     // A re-hydrate from store (out=60) would give peek=61; getting 43 confirms no re-read.
-    EXPECT_EQ(fix.session->seqnum_mgr_test_access().peek_outbound(), static_cast<seqnum_t>(43))
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*fix.session).peek_outbound(),
+              static_cast<seqnum_t>(43))
         << "W3: knob-off must NOT re-hydrate; peek_outbound must be 43 (42+1 after 2nd Logon), "
            "not 61 (60+1 from store). Actual="
-        << fix.session->seqnum_mgr_test_access().peek_outbound();
+        << fixpp::session::session_test_access::seqnum_mgr(*fix.session).peek_outbound();
 }
 
 // ── Phase 4 (T021) — W4: NonPersistentStore_NoReread — INV-RoL-2 ────────────
@@ -924,7 +934,7 @@ TEST(RefreshOnLogon, W4_NonPersistentStore_NoReread) {
 
     // Manager at construction-time defaults (seqnum_min=1): no hydration ran.
     {
-        auto& mgr = fix.session->seqnum_mgr_test_access();
+        const auto& mgr = fixpp::session::session_test_access::seqnum_mgr(*fix.session);
         ASSERT_EQ(mgr.next_inbound_unsafe(), static_cast<seqnum_t>(1))
             << "W4 precondition: with non-persistent store, no hydration ran; "
                "next_inbound must stay at seqnum_min=1";
@@ -970,14 +980,16 @@ TEST(RefreshOnLogon, W4_NonPersistentStore_NoReread) {
     // (b) The manager was never seeded from the store; counters reflect only the
     // post-2nd-Logon advance (outbound: 2 → Logon at 2 → peek=3).
     // next_inbound stays at 1 (seqnum_min, no hydration on either path).
-    EXPECT_EQ(fix.session->seqnum_mgr_test_access().next_inbound_unsafe(), static_cast<seqnum_t>(1))
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*fix.session).next_inbound_unsafe(),
+              static_cast<seqnum_t>(1))
         << "W4: no hydration ran (non-persistent); next_inbound must stay at 1. Actual="
-        << fix.session->seqnum_mgr_test_access().next_inbound_unsafe();
+        << fixpp::session::session_test_access::seqnum_mgr(*fix.session).next_inbound_unsafe();
 
-    EXPECT_EQ(fix.session->seqnum_mgr_test_access().peek_outbound(), static_cast<seqnum_t>(3))
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*fix.session).peek_outbound(),
+              static_cast<seqnum_t>(3))
         << "W4: 2nd Logon emits at seq=2 (no re-hydrate, outbound stayed at 2) → peek=3. "
            "Actual peek_outbound="
-        << fix.session->seqnum_mgr_test_access().peek_outbound();
+        << fixpp::session::session_test_access::seqnum_mgr(*fix.session).peek_outbound();
 }
 
 // ── Phase 4 (T030) — W5a: BilateralStrict_KnobOn_SuppressRehydrate ───────────
@@ -1021,8 +1033,10 @@ TEST(RefreshOnLogon, W5a_BilateralStrict_KnobOn_SuppressRehydrate) {
 
     // Snapshot the live counters after cold open:
     // next_inbound=37 (seeded, no inbound yet); peek_outbound=43 (42+1 after Logon emission).
-    const seqnum_t in_before = fix_on.session->seqnum_mgr_test_access().next_inbound_unsafe();
-    const seqnum_t out_before = fix_on.session->seqnum_mgr_test_access().peek_outbound();
+    const seqnum_t in_before =
+        fixpp::session::session_test_access::seqnum_mgr(*fix_on.session).next_inbound_unsafe();
+    const seqnum_t out_before =
+        fixpp::session::session_test_access::seqnum_mgr(*fix_on.session).peek_outbound();
 
     const int call_count_before = store_on->call_count;  // = 2 after cold open
 
@@ -1066,7 +1080,8 @@ TEST(RefreshOnLogon, W5a_BilateralStrict_KnobOn_SuppressRehydrate) {
     auto& fix_off = *result_off.fix;
 
     // Bring the knob-off session to the same live counter state as knob-on after cold open.
-    fix_off.session->seqnum_mgr_test_access().set_counters_for_test(
+    fixpp::session::seqnum_manager_test_access::set_counters(
+        fixpp::session::session_test_access::seqnum_mgr(*fix_off.session),
         /*next_inbound=*/in_before, /*next_outbound=*/out_before);
 
     auto reconnect_fut_off =
@@ -1305,7 +1320,8 @@ TEST(RefreshOnLogon, W6_Acceptor_KnobOn_PeerResetLogon_InboundSeedWithheld) {
     // consumed seq-1 reset Logon's advance → 2 (the withheld store value 37 still did NOT
     // apply — if next_inbound==37 the withhold failed; if ==1 the 030 restore did not run).
     if (fix.session->state() == fixpp::session::fsm_state::Active) {
-        const seqnum_t ni = fix.session->seqnum_mgr_test_access().next_inbound_unsafe();
+        const seqnum_t ni =
+            fixpp::session::session_test_access::seqnum_mgr(*fix.session).next_inbound_unsafe();
         EXPECT_EQ(ni, fixpp::session::seqnum_t{2})
             << "W6(c): next_inbound must be 2 after 141=Y reset + 030 restore (consumed seq-1 "
                "reset Logon survives; store value 37 withheld; 030 FR-001). Actual next_inbound="
@@ -1363,8 +1379,10 @@ TEST(RefreshOnLogon, W7_KnobOn_StoreReadFailure_Disconnected) {
 
     // Snapshot the manager counters AFTER cold open (before 2nd logon attempt).
     // The 3rd read MUST NOT change these (no partial overwrite).
-    const seqnum_t snap_inbound = fix.session->seqnum_mgr_test_access().next_inbound_unsafe();
-    const seqnum_t snap_outbound = fix.session->seqnum_mgr_test_access().peek_outbound();
+    const seqnum_t snap_inbound =
+        fixpp::session::session_test_access::seqnum_mgr(*fix.session).next_inbound_unsafe();
+    const seqnum_t snap_outbound =
+        fixpp::session::session_test_access::seqnum_mgr(*fix.session).peek_outbound();
 
     // Confirm cold-open snapshot matches expected values:
     //   next_inbound = 37 (seeded, not yet advanced — no inbound frames received)
@@ -1407,8 +1425,10 @@ TEST(RefreshOnLogon, W7_KnobOn_StoreReadFailure_Disconnected) {
     // "No partial seed" (C2.5): a failed re-read must not partially overwrite the manager.
     // The key: a failed INBOUND read (call 3) must not have already modified the manager
     // before discovering the error. ensure_hydrated_ reads both before applying either.
-    const seqnum_t post_inbound = fix.session->seqnum_mgr_test_access().next_inbound_unsafe();
-    const seqnum_t post_outbound = fix.session->seqnum_mgr_test_access().peek_outbound();
+    const seqnum_t post_inbound =
+        fixpp::session::session_test_access::seqnum_mgr(*fix.session).next_inbound_unsafe();
+    const seqnum_t post_outbound =
+        fixpp::session::session_test_access::seqnum_mgr(*fix.session).peek_outbound();
 
     EXPECT_EQ(post_inbound, snap_inbound)
         << "W7(c): next_inbound must be unchanged from cold-open snapshot after "
@@ -1465,11 +1485,11 @@ TEST(RefreshOnLogon, W8_NoHeap_RehydratePath) {
     // iterations are steady-state zero-alloc.
     constexpr int kWarmup = 8;
     for (int i = 0; i < kWarmup; ++i) {
-        auto warm_fut = asio::co_spawn(
-            fix.ioc,
-            fix.session->seqnum_mgr_test_access().hydrate(static_cast<fixpp::session::seqnum_t>(5),
-                                                          static_cast<fixpp::session::seqnum_t>(7)),
-            asio::use_future);
+        auto warm_fut = asio::co_spawn(fix.ioc,
+                                       fixpp::session::session_test_access::seqnum_mgr(*fix.session)
+                                           .hydrate(static_cast<fixpp::session::seqnum_t>(5),
+                                                    static_cast<fixpp::session::seqnum_t>(7)),
+                                       asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(fix.ioc, warm_fut, 500ms,
                                                         "W8_NoHeap/hydrate_warm")) {
             fixpp::test_support::drain_or_report(fix.ioc, "W8_NoHeap/hydrate_warm");
@@ -1482,11 +1502,11 @@ TEST(RefreshOnLogon, W8_NoHeap_RehydratePath) {
     // ── Guarded window: one SeqnumManager::hydrate() invocation ───────────────
     if (alloc_guard_start) alloc_guard_start();
 
-    auto measured_fut = asio::co_spawn(
-        fix.ioc,
-        fix.session->seqnum_mgr_test_access().hydrate(static_cast<fixpp::session::seqnum_t>(5),
-                                                      static_cast<fixpp::session::seqnum_t>(7)),
-        asio::use_future);
+    auto measured_fut = asio::co_spawn(fix.ioc,
+                                       fixpp::session::session_test_access::seqnum_mgr(*fix.session)
+                                           .hydrate(static_cast<fixpp::session::seqnum_t>(5),
+                                                    static_cast<fixpp::session::seqnum_t>(7)),
+                                       asio::use_future);
     if (!fixpp::test_support::run_window_then_ready(fix.ioc, measured_fut, 500ms,
                                                     "W8_NoHeap/hydrate_measured")) {
         fixpp::test_support::drain_or_report(fix.ioc, "W8_NoHeap/hydrate_measured");
@@ -1500,7 +1520,7 @@ TEST(RefreshOnLogon, W8_NoHeap_RehydratePath) {
     // ── End of guarded window ─────────────────────────────────────────────────
 
     // Functional post-condition: hydrate set counters correctly.
-    EXPECT_EQ(fix.session->seqnum_mgr_test_access().next_inbound_unsafe(),
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(*fix.session).next_inbound_unsafe(),
               static_cast<fixpp::session::seqnum_t>(5))
         << "W8: hydrate() must apply the inbound counter inside the guarded window";
 

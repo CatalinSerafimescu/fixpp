@@ -23,6 +23,7 @@
 #include <gtest/gtest.h>
 
 #include "support/possdup_test_support.hpp"
+#include "support/session_test_access.hpp"
 
 namespace fixpp::session::test {
 namespace {
@@ -88,7 +89,7 @@ TEST_F(PossDupValidationTest, ArmC_MissingOrigSendingTime) {
     EXPECT_FALSE(any_logout()) << "Arm C: must NOT emit a Logout";
 
     // Expected inbound seqnum must NOT advance (contracts C1: verify-returns-false, QFJ:1843).
-    EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(),
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe(),
               static_cast<fixpp::session::seqnum_t>(2))
         << "Arm C: expected inbound seqnum must not advance";
 }
@@ -210,7 +211,8 @@ TEST_F(PossDupValidationTest, AtExpected_ArmC_ConsumesSeqnum) {
     drive_to_active(sess);
 
     // After Logon(seq=1), next_expected = 2. Feed seq=2 with 43=Y, no 122.
-    const auto expected_before = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    const auto expected_before =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe();
     ASSERT_EQ(expected_before, static_cast<fixpp::session::seqnum_t>(2));
 
     auto frame = make_frame("D", /*seq=*/2, "TW", "ISLD", "43=Y\x01");
@@ -227,7 +229,8 @@ TEST_F(PossDupValidationTest, AtExpected_ArmC_ConsumesSeqnum) {
     EXPECT_EQ(rj.reason, "1") << "AS4: Reject must carry 373=1";
 
     // CRITICAL: the rejected message consumes its seqnum (fixpp#423).
-    const auto expected_after = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    const auto expected_after =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe();
     EXPECT_EQ(expected_after, expected_before + 1U)
         << "AS4: expected inbound seqnum must advance by one when Arm C fires at-expected "
         << "(was " << expected_before << ", got " << expected_after << ")";
@@ -241,7 +244,7 @@ TEST_F(PossDupValidationTest, AtExpected_UnparseableOrigSendingTime_ConsumesSeqn
     auto cfg = make_cfg();
     Session sess(engine, cfg);
     drive_to_active(sess);
-    ASSERT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(),
+    ASSERT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe(),
               static_cast<fixpp::session::seqnum_t>(2));
 
     auto frame = make_frame("D", /*seq=*/2, "TW", "ISLD",
@@ -254,7 +257,7 @@ TEST_F(PossDupValidationTest, AtExpected_UnparseableOrigSendingTime_ConsumesSeqn
     auto rj = find_last_reject();
     EXPECT_EQ(rj.ref_tag_id, "122") << "RC#1: Reject must carry 371=122";
     EXPECT_EQ(rj.reason, "1") << "RC#1: Reject must carry 373=1";
-    EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(),
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe(),
               static_cast<fixpp::session::seqnum_t>(3))
         << "RC#1: the at-expected rejected message must consume its seqnum (fixpp#423)";
 }
@@ -290,7 +293,7 @@ TEST_F(PossDupValidationTest, AtExpected_ArmD) {
 
     // fixpp#423: consumed even though the session disconnects (Test Cases 2020 case 2f),
     // so a reconnect does not ResendRequest the rejected message.
-    EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(),
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe(),
               static_cast<fixpp::session::seqnum_t>(3))
         << "AS5: the at-expected rejected message must consume its seqnum (fixpp#423)";
 }
@@ -347,7 +350,8 @@ TEST_F(PossDupValidationTest, ArmC_MalformedOrigSendingTime) {
     Session sess(engine, cfg);
     drive_to_active(sess);
 
-    const auto expected_before = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    const auto expected_before =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe();
     ASSERT_EQ(expected_before, static_cast<fixpp::session::seqnum_t>(2));
 
     // 43=Y, 122 present but malformed — Arm C must fire (not fall-through-as-valid).
@@ -375,7 +379,8 @@ TEST_F(PossDupValidationTest, ArmC_MalformedOrigSendingTime) {
     EXPECT_FALSE(any_logout()) << "RC#1: malformed 122 Arm C must NOT emit Logout";
 
     // Seqnum must NOT advance.
-    const auto expected_after = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    const auto expected_after =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe();
     EXPECT_EQ(expected_after, expected_before)
         << "RC#1: seqnum must NOT advance when Arm C fires (was " << expected_before << ", got "
         << expected_after << ")";
@@ -481,7 +486,8 @@ TEST_F(PossDupValidationTest, AtExpected_Valid_ProcessedOnce_Advances) {
 
     // After Logon(seq=1), next_expected = 2. Feed seq=2 (at-expected) with
     // 43=Y and 122==52 (valid: not missing, not strictly after 52 → Stage-1 passes).
-    const auto expected_before = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    const auto expected_before =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe();
     ASSERT_EQ(expected_before, static_cast<fixpp::session::seqnum_t>(2));
 
     // 122 == 52 == "20240101-00:00:00.000" (make_frame's fixed timestamp).
@@ -499,7 +505,8 @@ TEST_F(PossDupValidationTest, AtExpected_Valid_ProcessedOnce_Advances) {
         << "FQ-2: valid at-expected possdup must deliver to fromApp exactly once";
 
     // Expected inbound seqnum must advance N→N+1 (this is NOT a too-low frame).
-    const auto expected_after = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    const auto expected_after =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe();
     EXPECT_EQ(expected_after, static_cast<fixpp::session::seqnum_t>(3))
         << "FQ-2: expected inbound seqnum must advance 2→3 after valid at-expected possdup "
         << "(was " << expected_before << ", got " << expected_after << ")";
@@ -522,7 +529,7 @@ TEST_F(PossDupValidationTest, AtExpected_OutOfRangeOrigSendingTime_ArmC) {
     auto cfg = make_cfg();
     Session sess(engine, cfg);
     drive_to_active(sess);
-    ASSERT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(),
+    ASSERT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe(),
               static_cast<fixpp::session::seqnum_t>(2));
 
     // 122 carries the out-of-range timestamp from the fuzz seed

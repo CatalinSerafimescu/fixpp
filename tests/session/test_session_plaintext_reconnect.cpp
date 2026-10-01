@@ -63,6 +63,7 @@
 
 #include "support/minimal_dictionary.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_test_access.hpp"
 
 // ── #289: bounded pumps ──────────────────────────────────────────────
 //
@@ -193,7 +194,7 @@ TEST(PlaintextReconnectTest, PlaintextReconnectSkipsHandshakeAndLeavesPeerIdNull
 
     // (c) D-10 #2 MUST: a plaintext reconnect installs an empty handshake_result{},
     //     so live_peer_id_ stays nullopt — no fake peer identity.
-    EXPECT_FALSE(sess.live_peer_id_has_value_for_test())
+    EXPECT_FALSE(fixpp::session::session_test_access::live_peer_id_has_value(sess))
         << "insecure_plain_tcp reconnect must leave live_peer_id_ == nullopt "
            "(D-10 #2; install_reconnected_transport's guard)";
 }

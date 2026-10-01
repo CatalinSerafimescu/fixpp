@@ -48,6 +48,8 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/seqnum_manager_test_access.hpp"
+#include "support/session_test_access.hpp"
 
 // ── #289: bounded pumps ──────────────────────────────────────────────────────
 //
@@ -548,7 +550,8 @@ TEST_F(ResetSeqnumPolicyMatrixTest, Unilateral_Acceptor_ReplyDoesNotContain141Y)
 //
 // The existing cells never assert seqnum counter values. They pass with fresh
 // sessions (counters already at 1) where the missing reset is a no-op.
-// These cells pre-advance next_outbound_ to 10 via set_counters_for_test so
+// These cells pre-advance next_outbound_ to 10 via
+// seqnum_manager_test_access::set_counters so
 // that the reset is non-trivial (without reset, reply Logon gets seq=10; with
 // reset it gets seq=1) and then assert the FR-mandated post-reset counter values.
 //
@@ -560,13 +563,11 @@ TEST_F(ResetSeqnumPolicyMatrixTest, Unilateral_Acceptor_ReplyDoesNotContain141Y)
 //     next_inbound_  = 1 (reset rewinds; peer's next post-reset message is seq=1)
 //     next_outbound_ = 1 (reset rewinds; Logon was pre-reset, next send is seq=1)
 //
-// Requires FIXPP_TEST_HOOKS (seqnum_mgr_test_access() on Session).
+// Reads the counters through session_test_access::seqnum_mgr (tests/support/).
 //
 // Anchors: spec.md FR-017:150; data-model.md §E-4;
 //   [[feedback_simplify_pass_catches_9th_burn]] (false-pass via fresh-session).
 // ─────────────────────────────────────────────────────────────────────────────
-
-#ifdef FIXPP_TEST_HOOKS
 
 TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Acceptor_CountersResetToOne) {
     clear_capture();
@@ -577,7 +578,8 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Acceptor_CountersResetToOne)
 
     // Pre-advance outbound counter to 10 so the reset is non-trivial.
     // Keep inbound at 1 (peer will send Logon seq=1; check_inbound(1) must pass).
-    sess.seqnum_mgr_test_access().set_counters_for_test(1, 10);
+    fixpp::session::seqnum_manager_test_access::set_counters(
+        fixpp::session::session_test_access::seqnum_mgr(sess), 1, 10);
 
     auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
     ASSERT_TRUE(feed(sess, logon_with_reset).has_value());
@@ -589,10 +591,12 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Acceptor_CountersResetToOne)
     // advance, so next-expected-INBOUND is 2 (QuickFIX reset-then-increment parity).
     // next_inbound_ = 2 (consumed the seq-1 reset Logon — 030 FR-001)
     // next_outbound_ = 2 (reply Logon consumed seq=1; next to send is seq=2)
-    EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(), fixpp::session::seqnum_t{2})
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe(),
+              fixpp::session::seqnum_t{2})
         << "bilateral_strict acceptor: next_inbound_ must be 2 after received-141=Y reset "
         << "(consumed seq-1 reset Logon; 030 FR-001).";
-    EXPECT_EQ(sess.seqnum_mgr_test_access().next_outbound_unsafe(), fixpp::session::seqnum_t{2})
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).next_outbound_unsafe(),
+              fixpp::session::seqnum_t{2})
         << "bilateral_strict acceptor: next_outbound_ must be 2 after successful 141=Y reset "
         << "(reply Logon consumed seq=1).";
 }
@@ -605,17 +609,20 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralLenient_Acceptor_CountersResetToOne
     ASSERT_TRUE(run_open(sess).has_value());
 
     // Pre-advance outbound counter to 10 so the reset is non-trivial.
-    sess.seqnum_mgr_test_access().set_counters_for_test(1, 10);
+    fixpp::session::seqnum_manager_test_access::set_counters(
+        fixpp::session::session_test_access::seqnum_mgr(sess), 1, 10);
 
     auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
     ASSERT_TRUE(feed(sess, logon_with_reset).has_value());
 
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
 
-    EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(), fixpp::session::seqnum_t{2})
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe(),
+              fixpp::session::seqnum_t{2})
         << "bilateral_lenient acceptor: next_inbound_ must be 2 after received-141=Y reset "
         << "(consumed seq-1 reset Logon; 030 FR-001).";
-    EXPECT_EQ(sess.seqnum_mgr_test_access().next_outbound_unsafe(), fixpp::session::seqnum_t{2})
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).next_outbound_unsafe(),
+              fixpp::session::seqnum_t{2})
         << "bilateral_lenient acceptor: next_outbound_ must be 2 after successful 141=Y reset.";
 }
 
@@ -626,7 +633,8 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Initiator_CountersResetToOne
                         fixpp::session::reset_seqnum_policy::bilateral_strict);
     fixpp::session::Session sess(engine, cfg);
     // Set counters before open() so the outbound Logon uses seq=10 (non-trivial).
-    sess.seqnum_mgr_test_access().set_counters_for_test(1, 10);
+    fixpp::session::seqnum_manager_test_access::set_counters(
+        fixpp::session::session_test_access::seqnum_mgr(sess), 1, 10);
 
     ASSERT_TRUE(run_open(sess).has_value());
     // open() consumed seq=10 → next_outbound_=11.
@@ -645,10 +653,12 @@ TEST_F(ResetSeqnumPolicyMatrixTest, BilateralStrict_Initiator_CountersResetToOne
     //   next_outbound_ = 1 (reset; initiator's next send is seq=1)
     // (Initiator's Logon was seq=10, pre-reset. After reset outbound restarts at 1;
     //  inbound nets 2 because the consumed reset-ack Logon survives the reset.)
-    EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(), fixpp::session::seqnum_t{2})
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe(),
+              fixpp::session::seqnum_t{2})
         << "bilateral_strict initiator: next_inbound_ must be 2 after 141=Y mutual reset "
         << "(consumed seq-1 reset-ack Logon; 030 FR-009).";
-    EXPECT_EQ(sess.seqnum_mgr_test_access().next_outbound_unsafe(), fixpp::session::seqnum_t{1})
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).next_outbound_unsafe(),
+              fixpp::session::seqnum_t{1})
         << "bilateral_strict initiator: next_outbound_ must be 1 after 141=Y mutual reset "
         << "(Logon was pre-reset; post-reset next outbound is seq=1).";
 
@@ -685,21 +695,22 @@ TEST_F(ResetSeqnumPolicyMatrixTest, Unilateral_Acceptor_CountersResetToOne) {
     ASSERT_TRUE(run_open(sess).has_value());
 
     // Pre-advance outbound counter to 10 so the reset is non-trivial.
-    sess.seqnum_mgr_test_access().set_counters_for_test(1, 10);
+    fixpp::session::seqnum_manager_test_access::set_counters(
+        fixpp::session::session_test_access::seqnum_mgr(sess), 1, 10);
 
     auto logon_with_reset = make_logon("FIX.4.2", 1, "TW", "ISLD", 30, /*reset=*/true);
     ASSERT_TRUE(feed(sess, logon_with_reset).has_value());
 
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::Active);
 
-    EXPECT_EQ(sess.seqnum_mgr_test_access().next_inbound_unsafe(), fixpp::session::seqnum_t{2})
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe(),
+              fixpp::session::seqnum_t{2})
         << "unilateral acceptor: next_inbound_ must be 2 after received-141=Y reset "
         << "(consumed seq-1 reset Logon; 030 FR-001).";
-    EXPECT_EQ(sess.seqnum_mgr_test_access().next_outbound_unsafe(), fixpp::session::seqnum_t{2})
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).next_outbound_unsafe(),
+              fixpp::session::seqnum_t{2})
         << "unilateral acceptor: next_outbound_ must be 2 after successful 141=Y reset.";
 }
-
-#endif  // FIXPP_TEST_HOOKS
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Cell 6: unilateral × initiator (modelled via acceptor accepting without echo)
@@ -802,7 +813,6 @@ TEST_F(ResetSeqnumPolicyMatrixTest,
 //
 // Anchors: 032 contracts C1/C4, FR-005, SC-004, W3.
 // ─────────────────────────────────────────────────────────────────────────────
-#ifdef FIXPP_TEST_HOOKS
 TEST_F(ResetSeqnumPolicyMatrixTest,
        PeerSpontaneous_Initiator_NonReset_Logon_AtNGt1_OutboundUnchanged) {
     clear_capture();
@@ -815,14 +825,17 @@ TEST_F(ResetSeqnumPolicyMatrixTest,
     // Pre-seed outbound to 10 before open() so the Logon goes at seq=10.
     // Inbound stays at 1 (peer will send Logon-ack seq=1).
     // seqnums_at_one = (outbound==1 && inbound==1) = false → latch=false.
-    sess.seqnum_mgr_test_access().set_counters_for_test(/*inbound=*/1, /*outbound=*/10);
+    fixpp::session::seqnum_manager_test_access::set_counters(
+        fixpp::session::session_test_access::seqnum_mgr(sess), /*next_inbound=*/1,
+        /*next_outbound=*/10);
 
     ASSERT_TRUE(run_open(sess).has_value());
     // open() consumed seq=10 → next_outbound_=11.
     ASSERT_EQ(sess.state(), fixpp::session::fsm_state::LogonSent);
 
     // Capture baseline outbound after open().
-    const auto baseline_outbound = sess.seqnum_mgr_test_access().next_outbound_unsafe();
+    const auto baseline_outbound =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_outbound_unsafe();
     ASSERT_EQ(baseline_outbound, fixpp::session::seqnum_t{11})
         << "T011 precondition: open() at seq=10 → next_outbound==11";
 
@@ -840,7 +853,8 @@ TEST_F(ResetSeqnumPolicyMatrixTest,
     // The reset itself sets outbound to 1; no restore means it stays 1.
     // W3: outbound must be UNCHANGED from the post-reset baseline (1),
     // i.e. the peer-spontaneous path must NOT advance outbound to 2.
-    const auto post_outbound = sess.seqnum_mgr_test_access().next_outbound_unsafe();
+    const auto post_outbound =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_outbound_unsafe();
     EXPECT_EQ(post_outbound, fixpp::session::seqnum_t{1})
         << "T011 W3: peer-spontaneous 141=Y at N>1 (latch=false) — outbound must "
            "rewind to 1 (reset) and NOT be restored to 2. "
@@ -861,7 +875,6 @@ TEST_F(ResetSeqnumPolicyMatrixTest,
     EXPECT_TRUE(found) << "T011 W3: sequence_numbers_reset event must be emitted on the "
                           "peer_ack_sent_reset_flag arm.";
 }
-#endif  // FIXPP_TEST_HOOKS
 
 // ─────────────────────────────────────────────────────────────────────────────
 // T012 W7 (US2): fresh, no reset knob, lenient — peer spontaneous 141=Y at seq=1
@@ -921,12 +934,10 @@ TEST_F(ResetSeqnumPolicyMatrixTest,
         << "T012 W7: sequence_numbers_reset event must be emitted when peer sends 141=Y.";
 
     // The definitive W7 assertion: outbound must be 1 (no restore), not 2.
-    // Without #ifdef FIXPP_TEST_HOOKS we assert indirectly via the event label;
-    // under FIXPP_TEST_HOOKS we also check the counter directly.
-#ifdef FIXPP_TEST_HOOKS
-    EXPECT_EQ(sess.seqnum_mgr_test_access().next_outbound_unsafe(), fixpp::session::seqnum_t{1})
+    // The event label above is the indirect check; this reads the counter directly.
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).next_outbound_unsafe(),
+              fixpp::session::seqnum_t{1})
         << "T012 W7 counter assertion: fresh no-knob peer-spontaneous-at-seq-1 "
            "(latch=false) — outbound MUST stay 1 after the reset; restore_before_send "
            "alone would wrongly set it to 2. [032 contract C1, FR-005, W7]";
-#endif  // FIXPP_TEST_HOOKS
 }

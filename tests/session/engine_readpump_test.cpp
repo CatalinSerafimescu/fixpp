@@ -36,7 +36,7 @@
 //            All ioc.run_for() calls are explicitly bounded.
 //
 // Observability:
-//   SeqnumManager::next_inbound_unsafe() (exposed via FIXPP_TEST_HOOKS).
+//   SeqnumManager::next_inbound_unsafe() (via session_test_access::seqnum_mgr).
 //   Session::state() for terminal-state cases.
 //
 // Drive path: acceptor loopback (US1 wired: accept→handshake→resolve→attach→
@@ -128,6 +128,7 @@
 // config into the engine, so the accessor is the only live spelling; non-nullness
 // rests on that assignment, not on the accessor's "never null post-construction"
 // comment, which is #289's standing known-false one.
+#include "support/session_test_access.hpp"
 #include "transport/loopback_tls_fixture.hpp"
 
 using namespace std::chrono_literals;
@@ -419,7 +420,8 @@ TEST(EngineReadPumpTest, InOrderExactlyOnce) {
     // After Logon (seq=1) is delivered, next_inbound advances 1→2.
     // After each of the N=2 Heartbeats (seq=2,3), it should advance to 4.
     // With the stub, the pump never feeds those frames, so it stays at 2.
-    const auto next_inbound = static_cast<int>(acc->seqnum_mgr_test_access().next_inbound_unsafe());
+    const auto next_inbound = static_cast<int>(
+        fixpp::session::session_test_access::seqnum_mgr(*acc).next_inbound_unsafe());
     constexpr int expected = 2 + N;  // 4
 
     auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
@@ -504,7 +506,8 @@ TEST(EngineReadPumpTest, OverCapacityFrameClosesSession) {
     }
 
     auto st = acc->state();
-    const auto next_inbound = static_cast<int>(acc->seqnum_mgr_test_access().next_inbound_unsafe());
+    const auto next_inbound = static_cast<int>(
+        fixpp::session::session_test_access::seqnum_mgr(*acc).next_inbound_unsafe());
 
     auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);
     if (!fixpp::test_support::run_to_exhaustion_or_report(
@@ -974,9 +977,10 @@ void run_framer_failure_cell(std::vector<std::byte> const& faulty, fixpp::core::
     std::optional<fsm_state> const state_after =
         fc.acc ? std::optional<fsm_state>{fc.acc->state()} : std::nullopt;
     std::optional<int> const next_inbound =
-        fc.acc ? std::optional<int>{static_cast<int>(
-                     fc.acc->seqnum_mgr_test_access().next_inbound_unsafe())}
-               : std::nullopt;
+        fc.acc
+            ? std::optional<int>{static_cast<int>(
+                  fixpp::session::session_test_access::seqnum_mgr(*fc.acc).next_inbound_unsafe())}
+            : std::nullopt;
     fc.acc.reset();  // release the lease before the engine is destroyed
 
     auto stop_fut = asio::co_spawn(ioc, h->engine->stop(), asio::use_future);

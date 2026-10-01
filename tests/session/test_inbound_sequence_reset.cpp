@@ -18,7 +18,7 @@
 // is processed REGARDLESS of its own MsgSeqNum (FIX-SL §4.8.6).
 //
 // Production-shape: drives bytes through Session::on_inbound_frame() and reads
-// next-expected-inbound via seqnum_mgr_test_access() (FIXPP_TEST_HOOKS).
+// next-expected-inbound via session_test_access::seqnum_mgr.
 
 #include <gtest/gtest.h>
 
@@ -46,6 +46,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_test_access.hpp"
 
 // ── #289: bounded pumps ──────────────────────────────────────────────────────
 //
@@ -204,7 +205,7 @@ protected:
     }
 
     std::uint32_t next_inbound(fixpp::session::Session& s) {
-        return s.seqnum_mgr_test_access().next_inbound_unsafe();
+        return fixpp::session::session_test_access::seqnum_mgr(s).next_inbound_unsafe();
     }
 };
 

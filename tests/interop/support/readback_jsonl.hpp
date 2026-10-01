@@ -344,17 +344,16 @@ class Stream {
 public:
     explicit Stream(std::string const& path) : out_(path, std::ios::binary | std::ios::trunc) {}
 
-#ifdef FIXPP_TEST_HOOKS
     // TEST-ONLY (089 T047). Opens in APPEND mode instead of the mandated
     // TRUNCATE (R-4: "a stale record surviving a re-run is worse than a
-    // missing one" — a load-bearing decision, not a formatting choice). No
-    // production call site may reach this: it exists so a test can drive the
+    // missing one" — a load-bearing decision, not a formatting choice). Tests
+    // only: an emitter must never call this. It exists so a test can drive the
     // real write_line()/sent()/readback()/hello()/terminal() code path with
     // the open mode a defect would flip, to prove why TRUNCATE matters,
-    // rather than hand-writing an appended fixture file. Gated behind
-    // FIXPP_TEST_HOOKS (set per-target by fixpp_add_interop_test) so the
-    // single-arg constructor above — the one emit_fixpp_fixture.cpp compiles
-    // with a bare `g++`, no test macros — stays byte-identical.
+    // rather than hand-writing an appended fixture file. Unconditional
+    // (fixpp#511): a member gated behind a test macro would make Stream differ
+    // between TUs that define the macro and TUs that do not, an ODR violation
+    // once both link into one program.
     // Returns a prvalue constructed directly in the return statement (C++17
     // guaranteed copy elision, [class.copy.elision]) -- Stream holds a
     // std::mutex, so it is neither copyable nor movable, and a named local
@@ -362,7 +361,6 @@ public:
     static Stream append_mode_for_test(std::string const& path) {
         return Stream(path, std::ios::app);
     }
-#endif
 
     [[nodiscard]] bool ok() const { return static_cast<bool>(out_); }
 
@@ -538,11 +536,9 @@ private:
         out_.flush();
     }
 
-#ifdef FIXPP_TEST_HOOKS
     // Reachable only via append_mode_for_test() above.
     Stream(std::string const& path, std::ios::openmode extra_mode)
         : out_(path, std::ios::binary | extra_mode) {}
-#endif
 
     std::ofstream out_;
     std::mutex mutex_;

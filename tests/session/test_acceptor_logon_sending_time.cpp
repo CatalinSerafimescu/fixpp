@@ -28,10 +28,6 @@
 // [[feedback_admin_emit_bypasses_fire_to_admin]]: fire_to_admin_ on Reject
 // [[feedback_witness_asserts_named_postcondition_not_proxy]]: direct post-cond asserts
 
-#ifndef FIXPP_TEST_HOOKS
-#error "test_acceptor_logon_sending_time.cpp requires FIXPP_TEST_HOOKS"
-#endif
-
 #include <gtest/gtest.h>
 
 #include <asio/co_spawn.hpp>
@@ -64,6 +60,8 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/seqnum_manager_test_access.hpp"
+#include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::session::Application;
@@ -536,8 +534,10 @@ TEST_F(AcceptorLogonSendingTimeTest, Cell7_AssignOutboundFails_Disconnected) {
 
     // Inject overflow: next assign_outbound returns store_seqnum_overflow.
     {
-        seqnum_t cur_in = sess.seqnum_mgr_test_access().next_inbound_unsafe();
-        sess.seqnum_mgr_test_access().set_counters_for_test(cur_in, seqnum_max);
+        seqnum_t cur_in =
+            fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe();
+        fixpp::session::seqnum_manager_test_access::set_counters(
+            fixpp::session::session_test_access::seqnum_mgr(sess), cur_in, seqnum_max);
     }
     captured_frames_.clear();
 
@@ -561,7 +561,8 @@ TEST_F(AcceptorLogonSendingTimeTest, Cell7_AssignOutboundFails_Disconnected) {
     // guard, check_inbound advances inbound (to seqnum_min+1) before the reply assign
     // fails. Asserting inbound unchanged makes the cell discriminate the guard's arm.
     // [[feedback_witness_asserts_named_postcondition_not_proxy]]
-    const seqnum_t mem_in = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t mem_in =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe();
     EXPECT_EQ(mem_in, seqnum_min)
         << "Cell7: inbound must NOT be advanced (52 guard precedes check_inbound); got " << mem_in;
 }
@@ -643,7 +644,8 @@ TEST_F(AcceptorLogonSendingTimeTest, Cell9_PersistentStore_InboundNotAdvanced) {
 
     // In-memory inbound must equal the seeded value (ensure_hydrated_ seeded it,
     // guard fired before check_inbound could advance it).
-    const seqnum_t mem_in = sess.seqnum_mgr_test_access().next_inbound_unsafe();
+    const seqnum_t mem_in =
+        fixpp::session::session_test_access::seqnum_mgr(sess).next_inbound_unsafe();
     EXPECT_EQ(mem_in, kSeedIn) << "Cell9: in-memory next_inbound must be seeded D=" << kSeedIn
                                << " (NOT seqnum_min=" << seqnum_min << ")";
 }

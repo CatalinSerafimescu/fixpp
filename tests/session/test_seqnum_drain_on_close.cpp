@@ -13,14 +13,16 @@
 //    Session::close() + drain() prevents this (GREEN surviving harness).
 //
 //    RED sub-test (EXPECT_DEATH):
-//      Directly acquire the SeqnumManager's mutex via mutex_test_access().async_lock().
+//      Directly acquire the SeqnumManager's mutex via
+//      seqnum_manager_test_access::mutex(mgr).async_lock().
 //      Park the holder coroutine with asio::post (H's resume is queued but NOT run).
 //      Destruct the SeqnumManager WITHOUT running H's resume.
 //      → async_mutex destructor: state_ == locked_no_waiters (not not_locked) → terminate.
 //      EXPECT_DEATH captures this in a subprocess.
 //
 //    GREEN surviving harness (post-T022):
-//      Co_spawn H on ioc: acquires lock via mutex_test_access().async_lock() → parks.
+//      Co_spawn H on ioc: acquires lock via seqnum_manager_test_access::mutex(mgr)
+//      .async_lock() → parks.
 //      Co_spawn close(terminal): drain() waits for H → ioc runs H's resume → guard
 //      destructs → unlock() → active_holders=0 → drain completes → close finishes.
 //      session.reset() → async_mutex destructor: state_==not_locked → NO terminate.
@@ -50,9 +52,8 @@
 //   include/fixpp/session/seqnum_manager.hpp (drain() method)
 //   [const §XI.3] async_mutex teardown contract
 //
-// FIXPP_TEST_HOOKS: required for seqnum_mgr_test_access() on Session and
-//   mutex_test_access() on SeqnumManager. The CMakeLists.txt for this target
-//   compiles with -DFIXPP_TEST_HOOKS.
+// Private access: session_test_access::seqnum_mgr and seqnum_manager_test_access::mutex
+//   (tests/support/).
 
 #include <gtest/gtest.h>
 
@@ -84,6 +85,8 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/seqnum_manager_test_access.hpp"
+#include "support/session_test_access.hpp"
 
 // ── #289: bounded pumps ──────────────────────────────────────────────────────
 //
@@ -201,10 +204,10 @@ struct MinimalSession {
 
 // ── Test 1a: HolderAtDestructionTerminates (FR-011 SC-004 AC1, RED witness) ──
 //
-// Directly acquire the SeqnumManager's mutex via mutex_test_access().async_lock().
-// Park the holder with asio::post — H's resume is queued but NOT run (run_one
-// drives H to acquire+park and stops there). Destruct the SeqnumManager BEFORE
-// H's resume fires. async_mutex destructor: state_ == locked_no_waiters →
+// Directly acquire the SeqnumManager's mutex via
+// seqnum_manager_test_access::mutex(mgr).async_lock(). Park the holder with asio::post — H's resume
+// is queued but NOT run (run_one drives H to acquire+park and stops there). Destruct the
+// SeqnumManager BEFORE H's resume fires. async_mutex destructor: state_ == locked_no_waiters →
 // terminate, caught by EXPECT_DEATH in a subprocess.
 //
 // **Why NDEBUG is excluded:** the async_mutex destructor's terminate invariant is
@@ -279,7 +282,8 @@ TEST(SeqnumDrainOnClose, HolderAtDestructionTerminates) {
             asio::co_spawn(
                 death_ioc,
                 [&mgr]() -> asio::awaitable<void> {
-                    auto guard_r = co_await mgr.mutex_test_access().async_lock();
+                    auto guard_r = co_await fixpp::session::seqnum_manager_test_access::mutex(mgr)
+                                       .async_lock();
                     if (!guard_r.has_value()) co_return;  // already drained
                     // Park: post the resume back to the ioc, then suspend.
                     // The guard lives in this frame until this coroutine resumes.
@@ -330,7 +334,8 @@ TEST(SeqnumDrainOnClose, CloseWithHolderDoesNotTerminate) {
     asio::co_spawn(
         ioc,
         [&]() -> asio::awaitable<void> {
-            auto& mtx = session->seqnum_mgr_test_access().mutex_test_access();
+            auto& mtx = fixpp::session::seqnum_manager_test_access::mutex(
+                fixpp::session::session_test_access::seqnum_mgr(*session));
             auto guard_r = co_await mtx.async_lock();
             if (!guard_r.has_value()) co_return;  // drain already in progress
             holder_acquired.store(true, std::memory_order_release);
@@ -435,8 +440,9 @@ TEST(SeqnumDrainOnClose, DrainCalledByClose) {
 
     // Pre-drain: check_inbound(seq=2) must succeed (seq=1 consumed by Logon-ack).
     {
-        auto fut = asio::co_spawn(ioc, session.seqnum_mgr_test_access().check_inbound(2),
-                                  asio::use_future);
+        auto fut = asio::co_spawn(
+            ioc, fixpp::session::session_test_access::seqnum_mgr(session).check_inbound(2),
+            asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 50ms, "DrainCalledByClose/1")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *ctx.clock,
                                                             "DrainCalledByClose/1");
@@ -469,8 +475,9 @@ TEST(SeqnumDrainOnClose, DrainCalledByClose) {
     // If this assertion fails (check_inbound returns ok), drain() was NOT called
     // by close() — that is the RED (pre-T022) behaviour.
     {
-        auto fut = asio::co_spawn(ioc, session.seqnum_mgr_test_access().check_inbound(3),
-                                  asio::use_future);
+        auto fut = asio::co_spawn(
+            ioc, fixpp::session::session_test_access::seqnum_mgr(session).check_inbound(3),
+            asio::use_future);
         if (!fixpp::test_support::run_window_then_ready(ioc, fut, 50ms, "DrainCalledByClose/3")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *ctx.clock,
                                                             "DrainCalledByClose/3");

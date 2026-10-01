@@ -181,8 +181,6 @@ target_include_directories(session_pure_tests PRIVATE
   "${CMAKE_SOURCE_DIR}/src"   # session_invariant_counter_witness: "transport/asio_listener.hpp"
 )
 target_compile_definitions(session_pure_tests PRIVATE
-  FIXPP_TEST_HOOKS   # send_path / seqnum_drain_on_close / admin_emit_mixed_path /
-                     # inbound_sequence_reset / reset_seqnum_policy_matrix accessors
   FIXPP_TEST_BINARY_DIR="${CMAKE_BINARY_DIR}"   # session_layering nm/grep probe
   FIXPP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"   # session_layering nm/grep probe
   FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"  # invariant_counter_witness
@@ -224,9 +222,6 @@ target_link_libraries(session_store_tests PRIVATE
 )
 target_include_directories(session_store_tests PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
-)
-target_compile_definitions(session_store_tests PRIVATE
-  FIXPP_TEST_HOOKS   # send_toapp_store_collision / session_seqnum_manager accessors
 )
 add_test(NAME session_store_tests COMMAND session_store_tests)
 set_tests_properties(session_store_tests PROPERTIES
@@ -393,15 +388,14 @@ fixpp_add_store_test(store_pmr_poison_retrieve SOURCES
 # 034-credential-store-redaction — masker unit (Phase 2) + disk-byte / no-op /
 # fault-injection witnesses (Phases 3-6). Uses Session + FileStore fixtures, so
 # it mirrors the flush-test registration (FSM double + mock clock + support dir).
-# FIXPP_TEST_HOOKS exposes store_then_emit_test_access() for the T010 over-bound
-# fault-injection cell (frame-injection seam; methods-only, no Session layout change).
+# The T010 over-bound fault-injection cell drives store_then_emit through
+# tests/support/session_test_access.hpp (frame-injection seam).
 fixpp_add_store_test(credential_store_redaction SOURCES
   test_credential_store_redaction.cpp
   _fixtures_/test_double_fsm.cpp
   EXTRA_LIBS fixpp_mock_clock
   EXTRA_INCLUDE_DIRS "${CMAKE_SOURCE_DIR}/tests/support"
 )
-target_compile_definitions(credential_store_redaction PRIVATE FIXPP_TEST_HOOKS)
 
 # T011 alloc gate — dual-gate per [[feedback_tracking_pmr_resource_false_pass]]:
 # the NoHeap.StorePath_NoNewAllocation cell runs in the base target (weak no-op
@@ -429,15 +423,16 @@ fixpp_add_store_test(store_shutdown_ordering SOURCES
 fixpp_add_store_test(store_seqnum_out_of_order SOURCES
   test_store_seqnum_out_of_order.cpp
 )
-# FIXPP_TEST_HOOKS enables test_set_counter() for the overflow test (B3).
-target_compile_definitions(store_seqnum_out_of_order PRIVATE FIXPP_TEST_HOOKS)
+# The overflow test (B3) seeds the counter through
+# tests/support/memory_store_test_access.hpp.
 
 # ── 059-outbound-store-fail-closed (S-P1-1/S-P2-1) — T005/T005a US1 RED ─────
 # T005: the W1 flagship cascade witness. Session + real FileStore over
 # thread_pool{2} (mirrors test_credential_store_redaction.cpp) — the store
 # path is strand-confined + async_mutex-guarded, a single-threaded harness
-# would mask races. FIXPP_TEST_HOOKS exposes the T003/T004 pwrite
-# fault-injection seam + seqnum_mgr_test_access().
+# would mask races. FIXPP_TEST_HOOKS declares the namespace-scope T003/T004
+# pwrite fault-injection seam (file_store.hpp); counters are read through
+# tests/support/session_test_access.hpp.
 fixpp_add_store_test(store_fail_closed_persistent SOURCES
   test_store_fail_closed_persistent.cpp
   EXTRA_LIBS fixpp_mock_clock
@@ -456,8 +451,9 @@ fixpp_add_store_test(store_fail_open_volatile SOURCES
 # HONEST policy variants (plain / reset_on_logon / bilateral_strict default)
 # driven via an in-process Session::drive_reconnect() over a mock_transport
 # (the reconcile only mutates the in-memory counter; a fresh-Session restart
-# would bypass it). FIXPP_TEST_HOOKS exposes the T003/T004 pwrite
-# fault-injection seam + seqnum_mgr_test_access().
+# would bypass it). FIXPP_TEST_HOOKS declares the namespace-scope T003/T004
+# pwrite fault-injection seam (file_store.hpp); counters are read through
+# tests/support/session_test_access.hpp.
 fixpp_add_store_test(store_fail_reconcile SOURCES
   test_store_fail_reconcile.cpp
   EXTRA_LIBS fixpp_mock_clock
@@ -488,9 +484,9 @@ set_property(TEST store_fail_reconcile APPEND PROPERTY LABELS 092)
 # gate-b/r2 FQ-1 (P1): a toApp veto carrying a store-block error VALUE (on a
 # persistent store) must stay Active — the disconnect is decided by
 # provenance (did send_impl reach the commit region?), not by re-classifying
-# the returned value. Uses seqnum_mgr_test_access() to assert no seqnum
-# consumption, so FIXPP_TEST_HOOKS is required. No FileStore needed (a
-# minimal always-succeeding persistent store double).
+# the returned value. Uses session_test_access::seqnum_mgr to assert no seqnum
+# consumption. No FileStore needed (a minimal always-succeeding persistent
+# store double).
 
 # ── T044–T045 US4 (Phase 6) QuickFIX compat seam registrations ───────────────
 
@@ -589,7 +585,7 @@ target_compile_definitions(store_file_concurrent_tsan PRIVATE FIXPP_TEST_HOOKS)
 # session_durable_before_transmit: seam #10, store-before-write ordering (T029).
 
 # Seam #3: SeqnumManager increment/overflow/fatal checks (T027).
-# FIXPP_TEST_HOOKS enables set_counters_for_test() for the overflow test.
+# The overflow test seeds counters through seqnum_manager_test_access::set_counters.
 # (068: session_seqnum_manager moved into the session_store_tests bucket above.)
 
 # Seam #4: Too-high gap fatal disposition (T028).
@@ -608,6 +604,8 @@ target_compile_definitions(store_file_concurrent_tsan PRIVATE FIXPP_TEST_HOOKS)
 # seam #11: Two-phase cancellation — child cancellation_state; close idempotent;
 #           close(terminal) skips phase 1.
 add_threading_test(session_logout_exchange logout_exchange_test.cpp)
+# FIXPP_TEST_HOOKS declares the namespace-scope install_store_offload_probe /
+# install_store_offload_exit_probe seams (file_store.hpp).
 target_compile_definitions(session_logout_exchange PRIVATE FIXPP_TEST_HOOKS)
 
 # ── #289(c) — checked-in RED/GREEN witness for quiesce_on_exit's residual-work
@@ -632,8 +630,8 @@ target_compile_definitions(session_logout_exchange PRIVATE FIXPP_TEST_HOOKS)
 # ── 009-session-fsm-finalize T006 — Session::send path test (US1 FR-001) ────
 # TDD red: T006 authors RED (compile + fail); T007 + T008 turn GREEN.
 # Uses session_test_support OBJECT library (T005 frame_field_extract helper).
-# F3 (Round-A drift): FIXPP_TEST_HOOKS enables seqnum_mgr_test_access() on Session
-# so tests can verify SeqnumManager counter consistency after send().
+# F3 (Round-A drift): session_test_access::seqnum_mgr lets tests verify
+# SeqnumManager counter consistency after send().
 
 # ── 009-session-fsm-finalize Phase 6 (US4) — T019/T021 ──────────────────────
 
@@ -651,8 +649,8 @@ add_threading_test(session_test_request_id_cross_session_race
 # Tests: CloseWithHolderDoesNotTerminate + NeverOpenedDestructionSafe +
 #        OpenThenCloseTerminalIdempotent + DrainCalledByClose.
 # RED before T022 (close() does not call drain); GREEN after T022.
-# FIXPP_TEST_HOOKS: exposes seqnum_mgr_test_access() on Session and
-# mutex_test_access() on SeqnumManager (needed for holder-during-drain scenario).
+# session_test_access::seqnum_mgr and seqnum_manager_test_access::mutex reach the
+# SeqnumManager's mutex for the holder-during-drain scenario.
 
 # ── 010-session-cfg-lifetime Phase 5 (US3) — T016/T017/T018/T019/T020 ────────
 
@@ -666,19 +664,16 @@ add_threading_test(session_test_request_id_cross_session_race
 
 # T019 — admin emit mixed-path permutations (FR-008 / SC-005 / RC#G).
 # Exercises gated-emit success/failure combinations at Site 1 (Q3 path) and
-# Site 2 (Active×Logout confirming emit). Requires FIXPP_TEST_HOOKS for
-# SeqnumManager::set_counters_for_test() overflow injection.
+# Site 2 (Active×Logout confirming emit). Overflow is injected through
+# seqnum_manager_test_access::set_counters.
 
 # ── 036-admin-emit-toadmin-coverage T004/T013 (Invocation 1) ────────────────
 # Vertical-slice proof: wire fire_to_admin_ at emit_session_reject_ (T015) and
-# Guard-3 Logout (T023). FIXPP_TEST_HOOKS needed for US3 BMR cells (T027/T028):
-# seqnum_mgr_test_access().peek_outbound() witnesses no outbound seqnum consumed on veto.
+# Guard-3 Logout (T023). US3 BMR cells (T027/T028):
+# session_test_access::seqnum_mgr(s).peek_outbound() witnesses no outbound seqnum consumed on veto.
 # Cells: EmitSessionReject_FromAdminVeto (T004) + Logout_Guard3LogonAckSendingTime (T013).
 # Anchors: spec.md FR-001/FR-002; plan.md ARM-1; Session's fromAdmin-veto emit_session_reject_ path and Guard (3) SendingTime check.
 add_threading_test(session_admin_emit_toadmin_coverage test_admin_emit_toadmin_coverage.cpp)
-# FIXPP_TEST_HOOKS exposes seqnum_mgr_test_access() for the T027/T028 BMR outbound-seqnum
-# discriminating witness (INV-COV-5 parity; C2: assign_outbound only on !suppressed).
-target_compile_definitions(session_admin_emit_toadmin_coverage PRIVATE FIXPP_TEST_HOOKS)
 set_tests_properties(session_admin_emit_toadmin_coverage PROPERTIES
   LABELS "036;us1;us2;us3;bmr;toadmin_coverage;toapp")
 
@@ -701,14 +696,13 @@ set_tests_properties(session_admin_emit_observation_gate PROPERTIES
 # 14 cells: stale-past/future, malformed, absent, empty 52; toAdmin-throw;
 # assign_outbound-fail; build-fail-closed; persistent-inbound-seeded; ordering
 # (52 wins vs 1137/creds/check_inbound); conforming; persistent-reconnect seq.
-# FIXPP_TEST_HOOKS exposes seqnum_mgr_test_access() for cell 7 (overflow inject).
+# Cell 7 injects overflow through tests/support/seqnum_manager_test_access.hpp.
 # Anchors: spec.md FR-002/FR-003/FR-004; contracts/acceptor-logon-sendingtime.md C-1;
 #          quickstart.md §Group-1; tasks.md T001-T008.
 add_threading_test(session_acceptor_logon_sending_time
   test_acceptor_logon_sending_time.cpp
   $<TARGET_OBJECTS:session_test_support>
 )
-target_compile_definitions(session_acceptor_logon_sending_time PRIVATE FIXPP_TEST_HOOKS)
 set_tests_properties(session_acceptor_logon_sending_time PROPERTIES
   LABELS "038;s019;acceptor-logon-sendingtime")
 
@@ -832,13 +826,13 @@ set_tests_properties(session_fsm_via_mock_transport PROPERTIES
 # T015 — seam recovery-admin-span-gapfill: all-admin ResendRequest → SequenceReset-GapFill.
 
 # S-023: inbound SequenceReset(35=4) NewSeqNo(36) application (GapFill + Reset
-# arms). FIXPP_TEST_HOOKS exposes seqnum_mgr_test_access() to read next-inbound.
+# arms). Reads next-inbound through session_test_access::seqnum_mgr.
 
 # T016 — seam recovery-store-horizon: pre-horizon GapFill + PossDupFlag replay.
 
 # T017 — seam reset-seqnum-policy-matrix: 3 modes × 2 roles (6 cells).
-# FIXPP_TEST_HOOKS: exposes seqnum_mgr_test_access() on Session for RC#C-1
-# counter assertions (gate-b/r2: verify both counters reset to 1 after 141=Y).
+# RC#C-1 counter assertions read through session_test_access::seqnum_mgr
+# (verify both counters reset to 1 after 141=Y).
 
 # T018 — seam heartbeat-cadence-8cell: 4 axes × 2 executor modes.
 
@@ -1132,9 +1126,6 @@ target_include_directories(engine_acceptor_test PRIVATE
 )
 target_compile_definitions(engine_acceptor_test PRIVATE
   FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
-  # exposes seqnum_mgr_test_access().next_inbound_unsafe() for the coalesced
-  # first-frame surplus witness (F-015-002).
-  FIXPP_TEST_HOOKS
 )
 add_test(NAME engine_acceptor COMMAND engine_acceptor_test)
 set_tests_properties(engine_acceptor PROPERTIES
@@ -1208,7 +1199,7 @@ set_tests_properties(engine_firstframe PROPERTIES
 #
 # T014 — read-pump delivers subsequent frames exactly-once in order (SC-003 /
 #         US2 AC1/AC2; FR-004/012; C2). Observability via next_inbound_unsafe()
-#         (FIXPP_TEST_HOOKS) and Session::state().
+#         (session_test_access::seqnum_mgr) and Session::state().
 add_executable(engine_readpump_test
   engine_readpump_test.cpp
 )
@@ -1228,7 +1219,6 @@ target_include_directories(engine_readpump_test PRIVATE
 )
 target_compile_definitions(engine_readpump_test PRIVATE
   FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
-  FIXPP_TEST_HOOKS
 )
 add_test(NAME engine_readpump COMMAND engine_readpump_test)
 set_tests_properties(engine_readpump PROPERTIES
@@ -1246,7 +1236,7 @@ set_property(TEST engine_readpump APPEND PROPERTY LABELS 092)
 # T016(a) — initiator connect-then-Logon: server receives initiator Logon on
 #            the wire; session reaches Active; read-pump advances next_inbound.
 #            (FR-003 / C2i / E-1a / SC-010)
-# Observability via next_inbound_unsafe() (FIXPP_TEST_HOOKS) + Session::state().
+# Observability via next_inbound_unsafe() (session_test_access::seqnum_mgr) + Session::state().
 add_executable(engine_connect_test
   engine_connect_test.cpp
 )
@@ -1266,7 +1256,6 @@ target_include_directories(engine_connect_test PRIVATE
 )
 target_compile_definitions(engine_connect_test PRIVATE
   FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
-  FIXPP_TEST_HOOKS
 )
 add_test(NAME engine_connect COMMAND engine_connect_test)
 set_tests_properties(engine_connect PROPERTIES
@@ -1299,7 +1288,6 @@ target_include_directories(engine_lifecycle_test PRIVATE
 )
 target_compile_definitions(engine_lifecycle_test PRIVATE
   FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
-  FIXPP_TEST_HOOKS
 )
 add_test(NAME engine_lifecycle COMMAND engine_lifecycle_test)
 set_tests_properties(engine_lifecycle PROPERTIES
@@ -1714,7 +1702,7 @@ set_tests_properties(business_messages_roundtrip PROPERTIES
 # ── 021-inbound-possdup-origsendingtime T004/T005 — Arm A/B tolerance tests ───
 # Stage-2 too-low possdup disposition (Arm A tolerate / Arm B fatal).
 # data-model.md §1 Stage 2; contracts/session-possdup.md C1/C3; research.md D1/D2/D3.
-# FIXPP_TEST_HOOKS: exposes seqnum_mgr_test_access().next_inbound_unsafe() for INV-1.
+# INV-1 reads session_test_access::seqnum_mgr(s).next_inbound_unsafe().
 add_executable(session_inbound_poss_dup_tolerance
   test_inbound_poss_dup_tolerance.cpp
   $<TARGET_OBJECTS:session_test_support>  # extract_field (support/possdup_test_support.hpp)
@@ -1728,7 +1716,6 @@ target_link_libraries(session_inbound_poss_dup_tolerance PRIVATE
 target_include_directories(session_inbound_poss_dup_tolerance PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
 )
-target_compile_definitions(session_inbound_poss_dup_tolerance PRIVATE FIXPP_TEST_HOOKS)
 add_test(NAME session_inbound_poss_dup_tolerance
   COMMAND session_inbound_poss_dup_tolerance)
 set_tests_properties(session_inbound_poss_dup_tolerance PROPERTIES
@@ -1736,7 +1723,7 @@ set_tests_properties(session_inbound_poss_dup_tolerance PROPERTIES
   LABELS "021;us1;possdup;tolerance;inv1;inv2;inv5")
 
 # 021 T007 Stage-1 PossDup validation tests (Arms C/D/E + at-expected + engine-parity pin).
-# FIXPP_TEST_HOOKS: exposes seqnum_mgr_test_access().next_inbound_unsafe() for AS4 no-advance.
+# AS4 no-advance reads session_test_access::seqnum_mgr(s).next_inbound_unsafe().
 add_executable(session_inbound_poss_dup_validation
   test_inbound_poss_dup_validation.cpp
   $<TARGET_OBJECTS:session_test_support>  # extract_field (support/possdup_test_support.hpp)
@@ -1750,7 +1737,6 @@ target_link_libraries(session_inbound_poss_dup_validation PRIVATE
 target_include_directories(session_inbound_poss_dup_validation PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
 )
-target_compile_definitions(session_inbound_poss_dup_validation PRIVATE FIXPP_TEST_HOOKS)
 add_test(NAME session_inbound_poss_dup_validation
   COMMAND session_inbound_poss_dup_validation)
 set_tests_properties(session_inbound_poss_dup_validation PROPERTIES
@@ -1773,7 +1759,6 @@ target_link_libraries(session_inbound_poss_resend PRIVATE
 target_include_directories(session_inbound_poss_resend PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
 )
-target_compile_definitions(session_inbound_poss_resend PRIVATE FIXPP_TEST_HOOKS)
 add_test(NAME session_inbound_poss_resend
   COMMAND session_inbound_poss_resend)
 set_tests_properties(session_inbound_poss_resend PROPERTIES
@@ -1796,7 +1781,6 @@ target_link_libraries(session_send_allow_pos_dup_strip PRIVATE
 target_include_directories(session_send_allow_pos_dup_strip PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
 )
-target_compile_definitions(session_send_allow_pos_dup_strip PRIVATE FIXPP_TEST_HOOKS)
 add_test(NAME session_send_allow_pos_dup_strip
   COMMAND session_send_allow_pos_dup_strip)
 set_tests_properties(session_send_allow_pos_dup_strip PROPERTIES
@@ -1808,8 +1792,8 @@ set_tests_properties(session_send_allow_pos_dup_strip PROPERTIES
 # primitive at open()/inbound-Logon/close(). Witnesses: initiator+acceptor
 # ResetOnLogon (141 OR-of-three, reset-before-check_inbound), teardown
 # (graceful/peer-Logout/abnormal-drop), single-fire guard, durable disposition
-# split, both-roles. FIXPP_TEST_HOOKS required (set_counters_for_test seed-non-1
-# seam). contracts/reset-knobs.md §C1–C5; quickstart.md.
+# split, both-roles. Seeds non-1 counters through
+# seqnum_manager_test_access::set_counters. contracts/reset-knobs.md §C1–C5; quickstart.md.
 add_executable(session_reset_on_lifecycle
   test_reset_on_lifecycle.cpp
   $<TARGET_OBJECTS:session_test_support>
@@ -1823,7 +1807,6 @@ target_link_libraries(session_reset_on_lifecycle PRIVATE
 target_include_directories(session_reset_on_lifecycle PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
 )
-target_compile_definitions(session_reset_on_lifecycle PRIVATE FIXPP_TEST_HOOKS)
 add_test(NAME session_reset_on_lifecycle
   COMMAND session_reset_on_lifecycle)
 set_tests_properties(session_reset_on_lifecycle PROPERTIES
@@ -1854,7 +1837,6 @@ target_include_directories(engine_session_strand_test PRIVATE
   "${CMAKE_SOURCE_DIR}/src"  # for "transport/asio_tls_transport.hpp" (V-10 socket-executor check)
 )
 target_compile_definitions(engine_session_strand_test PRIVATE
-  FIXPP_TEST_HOOKS
   FIXPP_TLS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/tls/fixtures"
 )
 add_test(NAME engine_session_strand COMMAND engine_session_strand_test)
@@ -1881,7 +1863,6 @@ target_link_libraries(session_sending_time_precision PRIVATE
 target_include_directories(session_sending_time_precision PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
 )
-target_compile_definitions(session_sending_time_precision PRIVATE FIXPP_TEST_HOOKS)
 add_test(NAME session_sending_time_precision
   COMMAND session_sending_time_precision)
 set_tests_properties(session_sending_time_precision PROPERTIES
@@ -1923,7 +1904,6 @@ target_include_directories(session_next_expected_msgseqnum PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
 )
 target_compile_definitions(session_next_expected_msgseqnum PRIVATE
-  FIXPP_TEST_HOOKS
   FIXPP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 add_test(NAME session_next_expected_msgseqnum
@@ -1965,7 +1945,6 @@ target_link_libraries(session_validation_compat_toggles PRIVATE
 target_include_directories(session_validation_compat_toggles PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
 )
-target_compile_definitions(session_validation_compat_toggles PRIVATE FIXPP_TEST_HOOKS)
 add_test(NAME session_validation_compat_toggles
   COMMAND session_validation_compat_toggles)
 set_tests_properties(session_validation_compat_toggles PROPERTIES
@@ -2022,7 +2001,6 @@ target_link_libraries(session_persistent_seqnum_hydrate PRIVATE
 target_include_directories(session_persistent_seqnum_hydrate PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
 )
-target_compile_definitions(session_persistent_seqnum_hydrate PRIVATE FIXPP_TEST_HOOKS)
 add_test(NAME session_persistent_seqnum_hydrate
   COMMAND session_persistent_seqnum_hydrate)
 set_tests_properties(session_persistent_seqnum_hydrate PROPERTIES
@@ -2077,7 +2055,6 @@ target_link_libraries(session_refresh_on_logon PRIVATE
 target_include_directories(session_refresh_on_logon PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
 )
-target_compile_definitions(session_refresh_on_logon PRIVATE FIXPP_TEST_HOOKS)
 add_test(NAME session_refresh_on_logon
   COMMAND session_refresh_on_logon)
 set_tests_properties(session_refresh_on_logon PROPERTIES
@@ -2280,12 +2257,11 @@ set_tests_properties(session_validate_gate_logon_arm PROPERTIES
 # ── 041-validation-gate-wiring T015+T016 — US2 lenient-by-default (default-off)
 # T015 (C-2 default branch, FR-002, SC-001): violation inputs with flag=false →
 #   accepted and dispatched (no Reject). Positive dispatch proof: seq-advance.
-# T016 (SC-005, FR-002): structural proof via FIXPP_TEST_HOOKS
-#   has_validator_for_test() → false after open() with flag=false (dict set) —
+# T016 (SC-005, FR-002): structural proof via
+#   session_test_access::has_validator → false after open() with flag=false (dict set) —
 #   the direct named postcondition: no validator constructed.
 add_threading_test(session_validate_gate_default_off
   test_validate_gate_default_off.cpp)
-target_compile_definitions(session_validate_gate_default_off PRIVATE FIXPP_TEST_HOOKS)
 set_tests_properties(session_validate_gate_default_off PROPERTIES
   LABELS "041;t015;t016;us2;validation-gate;default-off;session")
 
@@ -2345,8 +2321,7 @@ set_tests_properties(session_plaintext_roundtrip PROPERTIES
 # ── 043-plaintext-tcp-transport T008 — SC-004 authorization-inert witness ────
 # T008: on insecure_plain_tcp — authorize() not called, live_peer_id_==nullopt,
 # check_comp_id still rejects mismatched CompIDs, FR-009 EncryptMethod!=0 rejected.
-# Uses FIXPP_TEST_HOOKS for session-internal test accessors (authorize_call_count,
-# live_peer_id_has_value, cfg_for_test).
+# Reads live_peer_id_ through session_test_access::live_peer_id_has_value.
 # CTest filter: ctest -R 'session_plaintext_authz'
 add_executable(session_plaintext_authz_test
   test_session_plaintext_authz.cpp
@@ -2364,9 +2339,6 @@ target_link_libraries(session_plaintext_authz_test PRIVATE
 target_include_directories(session_plaintext_authz_test PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
   "${CMAKE_SOURCE_DIR}/src"
-)
-target_compile_definitions(session_plaintext_authz_test PRIVATE
-  FIXPP_TEST_HOOKS
 )
 add_test(NAME session_plaintext_authz COMMAND session_plaintext_authz_test)
 set_tests_properties(session_plaintext_authz PROPERTIES
@@ -2393,9 +2365,6 @@ target_link_libraries(session_plaintext_reconnect_test PRIVATE
 target_include_directories(session_plaintext_reconnect_test PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
   "${CMAKE_SOURCE_DIR}/src"
-)
-target_compile_definitions(session_plaintext_reconnect_test PRIVATE
-  FIXPP_TEST_HOOKS
 )
 add_test(NAME session_plaintext_reconnect COMMAND session_plaintext_reconnect_test)
 set_tests_properties(session_plaintext_reconnect PROPERTIES
@@ -2732,8 +2701,8 @@ if(TARGET fixpp_codegen_generate)
 
   # ── 091-data-field-bytes T039 [US1] — Length+Data pairs through
   # Session::send_impl (quickstart §5, research R-9). Its own executable under
-  # [const §VII.8]: it needs FIXPP_TEST_HOOKS, fixpp_mock_clock and
-  # fixpp::builders::v44 together in one binary.
+  # [const §VII.8]: it needs fixpp_mock_clock and fixpp::builders::v44
+  # together in one binary.
   add_executable(session_091_data_send
     test_091_data_send.cpp
     $<TARGET_OBJECTS:session_test_support>  # extract_field
@@ -2753,7 +2722,6 @@ if(TARGET fixpp_codegen_generate)
     "${CMAKE_CURRENT_SOURCE_DIR}"
   )
   target_compile_definitions(session_091_data_send PRIVATE
-    FIXPP_TEST_HOOKS  # Session::seqnum_mgr_test_access
     "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""  # load_fix44 (re-parse)
   )
   add_test(NAME session_091_data_send COMMAND session_091_data_send)

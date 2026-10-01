@@ -72,6 +72,7 @@
 
 #include "hp_support.hpp"
 #include "support/scenario_descriptor.hpp"
+#include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::interop::Counterparty;
@@ -239,7 +240,8 @@ TEST_P(HappyRecoveryOutboundAnswer, FixppAnswersResendRequestAndPeerResyncs) {
     // seqnum and are transmit-only, never advancing peek_outbound()). We witness that fixpp
     // RECEIVED+processed QFJ's ResendRequest (inbound advances); the REPLAY itself
     // (35=D carrying 43=Y) is proven ON THE WIRE by the golden below.
-    const auto inbound_after_logon = s->seqnum_mgr_test_access().next_inbound_unsafe();
+    const auto inbound_after_logon =
+        fixpp::session::session_test_access::seqnum_mgr(*s).next_inbound_unsafe();
 
     // ── Non-degenerate app-replay induction (US3-3) ────────────────────────
     // fixpp sends ONE NewOrderSingle so its outbound store holds a real
@@ -285,7 +287,8 @@ TEST_P(HappyRecoveryOutboundAnswer, FixppAnswersResendRequestAndPeerResyncs) {
         [&] {
             auto ss = fx.engine().lookup(id);
             return ss != nullptr &&
-                   ss->seqnum_mgr_test_access().next_inbound_unsafe() > inbound_after_logon;
+                   fixpp::session::session_test_access::seqnum_mgr(*ss).next_inbound_unsafe() >
+                       inbound_after_logon;
         },
         23s);
 
@@ -315,7 +318,8 @@ TEST_P(HappyRecoveryOutboundAnswer, FixppAnswersResendRequestAndPeerResyncs) {
     // asserted on the wire by the golden below (replay frames are transmit-only and
     // do NOT advance the outbound counter — src/session/session.cpp's `build_replay_frame` — so
     // peek_outbound() is structurally unobservable here).
-    EXPECT_GT(s->seqnum_mgr_test_access().next_inbound_unsafe(), inbound_after_logon)
+    EXPECT_GT(fixpp::session::session_test_access::seqnum_mgr(*s).next_inbound_unsafe(),
+              inbound_after_logon)
         << "inbound seqnum did not advance; fixpp did not receive QFJ's ResendRequest "
         << "(US3-3 resend-answer path not triggered)";
 

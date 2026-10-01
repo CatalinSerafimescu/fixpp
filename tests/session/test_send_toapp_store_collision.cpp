@@ -61,6 +61,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_test_access.hpp"
 
 // ── #289: bounded pumps ──────────────────────────────────────────────────────
 //
@@ -295,7 +296,8 @@ TEST_F(SendToAppStoreCollisionTest,
     ASSERT_EQ(sess.state(), fsm_state::Active);
 
     const std::size_t frames_before = wire.size();
-    const seqnum_t outbound_before = sess.seqnum_mgr_test_access().peek_outbound();
+    const seqnum_t outbound_before =
+        fixpp::session::session_test_access::seqnum_mgr(sess).peek_outbound();
 
     auto payload = make_app_payload("ORD1");
     auto send_fut =
@@ -319,7 +321,8 @@ TEST_F(SendToAppStoreCollisionTest,
     EXPECT_EQ(wire.size(), frames_before) << "a toApp-vetoed send must NOT cross wire";
 
     // No seqnum consumption — assign_outbound() runs AFTER the toApp check.
-    EXPECT_EQ(sess.seqnum_mgr_test_access().peek_outbound(), outbound_before)
+    EXPECT_EQ(fixpp::session::session_test_access::seqnum_mgr(sess).peek_outbound(),
+              outbound_before)
         << "a toApp-vetoed send must NOT consume an outbound seqnum";
 
     // The load-bearing assertion (gate-b/r2 FQ-1 P1): the session must stay

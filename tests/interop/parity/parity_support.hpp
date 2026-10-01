@@ -6,8 +6,8 @@
 // reference-unit-test-parity GAP-closure witnesses (US3, FR-016/FR-017). These
 // witnesses are STANDALONE — no counterparty, no live transport. They drive
 // crafted admin frames through Session::on_inbound_frame() and observe fixpp's
-// behavior via the sync transport_send_ capture + seqnum_mgr_test_access()
-// (FIXPP_TEST_HOOKS), mirroring tests/session/test_inbound_sequence_reset.cpp +
+// behavior via the sync transport_send_ capture + session_test_access::seqnum_mgr,
+// mirroring tests/session/test_inbound_sequence_reset.cpp +
 // test_recovery_admin_span_gapfill.cpp (the proven recovery harness).
 //
 // [const §XV.9]: tests/-only.
@@ -39,6 +39,7 @@
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_test_access.hpp"
 
 namespace fixpp::interop::parity {
 
@@ -207,7 +208,7 @@ protected:
     }
 
     std::uint32_t next_inbound(fixpp::session::Session& s) {
-        return s.seqnum_mgr_test_access().next_inbound_unsafe();
+        return fixpp::session::session_test_access::seqnum_mgr(s).next_inbound_unsafe();
     }
 };
 

@@ -63,11 +63,8 @@ add_wire_test(wire_pure_tests
   nested_group_extent_test.cpp                                        # T019/T020/T022 (063)
   nested_group_slices_failloud_test.cpp                               # T001 (073)
 )
-# nested_group_slices_failloud_test.cpp (T001) needs FIXPP_TEST_HOOKS to reach
-# the nested_cache_access_for_testing friend seam (gate-b/r1 FQ-2 — the friend
-# is now gated behind FIXPP_TEST_HOOKS, matching the session-layer test-only
-# convention rather than shipping ungated in the installed public header).
-target_compile_definitions(wire_pure_tests PRIVATE FIXPP_TEST_HOOKS)
+# nested_group_slices_failloud_test.cpp (T001) reaches the
+# offset_table_test_access friend seam through tests/support/wire_test_hooks.hpp.
 # 079 T006/T007/T010/T011: validator_type_check_test.cpp needs the real
 # vendored dictionaries (FIX44/FIX50SP2/FIX42) for the required-presence-
 # scope real-frame accept/reject regressions (fixpp#201).
@@ -142,13 +139,8 @@ target_include_directories(wire_dict_tests PRIVATE
   "${CMAKE_SOURCE_DIR}/tests")
 target_compile_definitions(wire_dict_tests PRIVATE
   "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\"")
-# 389: FIXPP_TEST_HOOKS used to be dropped here — W-10's only consumer (the
-# gated group_slices_reserve_bound() friend seam) was deleted along with the
-# function it read. fixpp#426 reintroduces a consumer:
-# typed_read_split_agreement_test.cpp's half-threaded dict_hooks probes need
-# `dict_hooks_test_access::make`, which is itself FIXPP_TEST_HOOKS-gated
-# (dict_hooks.hpp's `friend struct dict_hooks_test_access`).
-target_compile_definitions(wire_dict_tests PRIVATE FIXPP_TEST_HOOKS)
+# fixpp#426: typed_read_split_agreement_test.cpp's half-threaded dict_hooks
+# probes build their bundles through tests/support/dict_hooks_test_access.hpp.
 add_test(NAME wire_dict_tests COMMAND wire_dict_tests)
 # 075 (tasks.md Test-binary discipline note): sets LABELS on the buckets it
 # joins/adds. wire_dict_tests is a grouped add_test binary — one label set

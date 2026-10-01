@@ -24,8 +24,8 @@
 // (setNextSenderMsgSeqNum + a throwaway stimulus Heartbeat after replying to
 // A-TESTREQ). A-REJECT is the one admin exchange fixpp must actively
 // originate: a TestRequest carrying an out-of-context Symbol(55), sent via
-// the sanctioned FIXPP_TEST_HOOKS seam (Session::seqnum_mgr_test_access() +
-// store_then_emit_test_access()) because Engine::send() is scoped to
+// the sanctioned test-only seam (session_test_access::seqnum_mgr +
+// session_test_access::store_then_emit) because Engine::send() is scoped to
 // APPLICATION messages (it runs toApp + the durable outbound-store path) and
 // fixpp exposes no public "send an arbitrary/malformed admin message" API --
 // see the implementation report for why this seam, not a production
@@ -100,6 +100,7 @@
 #include "support/counterparty_probe.hpp"
 #include "support/intent_file.hpp"
 #include "support/readback_jsonl.hpp"
+#include "support/session_test_access.hpp"
 #include "support/ubsan_plant.hpp"
 #include "support/witness_comparator.hpp"
 
@@ -734,7 +735,7 @@ TEST(Conversation, Cell) {
     auto sess = fx.engine().lookup(id);
     ASSERT_NE(sess, nullptr);
 
-    bool const has_validator = sess->has_validator_for_test();
+    bool const has_validator = fixpp::session::session_test_access::has_validator(*sess);
     stream.hello(run_id, cell_id, config, actual_digest, arm, has_validator,
                  prod.dictionary_digest);
     // Flushes any admin-arrival disposition ConvApp buffered while
@@ -761,21 +762,25 @@ TEST(Conversation, Cell) {
     // ResendRequest=3) before A-REJECT claims the next slot. ────────────────
     bool const gapfill_advanced = fx.run_until(
         [&] {
-            return sess->seqnum_mgr_test_access().peek_outbound() >= fixpp::session::seqnum_t{3};
+            return fixpp::session::session_test_access::seqnum_mgr(*sess).peek_outbound() >=
+                   fixpp::session::seqnum_t{3};
         },
         3s);
     EXPECT_TRUE(gapfill_advanced)
         << "A-GAPFILL: fixpp's automatic ResendRequest was not observed (outbound seq stalled at "
-        << static_cast<std::uint32_t>(sess->seqnum_mgr_test_access().peek_outbound()) << ")";
+        << static_cast<std::uint32_t>(
+               fixpp::session::session_test_access::seqnum_mgr(*sess).peek_outbound())
+        << ")";
 
     // ── A-REJECT: fixpp deliberately sends a malformed TestRequest via the
-    // FIXPP_TEST_HOOKS seam (see file header for why Engine::send() does not
+    // test-only session_test_access seam (see file header for why Engine::send() does not
     // apply here). ─────────────────────────────────────────────────────────
     {
         auto send_fut = asio::co_spawn(
             fx.ioc().get_executor(),
             [&]() -> asio::awaitable<fixpp::core::expected_t<void>> {
-                auto seq_r = co_await sess->seqnum_mgr_test_access().assign_outbound();
+                auto seq_r = co_await fixpp::session::session_test_access::seqnum_mgr(*sess)
+                                 .assign_outbound();
                 if (!seq_r.has_value()) co_return std::unexpected(seq_r.error());
                 std::array<std::byte, 512> buf{};
                 std::vector<intent::FieldEntry> const reject_fields = {
@@ -785,7 +790,8 @@ TEST(Conversation, Cell) {
                     conv::build_frame_via_writer(buf, "1", *seq_r, sender_id, target_id,
                                                  begin_string, now_utc_ms(), reject_fields);
                 if (!frame_r.has_value()) co_return std::unexpected(frame_r.error());
-                co_return co_await sess->store_then_emit_test_access(*seq_r, *frame_r);
+                co_return co_await fixpp::session::session_test_access::store_then_emit(
+                    *sess, *seq_r, *frame_r);
             },  // ⛔ NO trailing `()` — pass the CALLABLE, never its invocation.
                 // `co_spawn(ex, lambda(), token)` invokes the lambda immediately and
                 // hands co_spawn only the awaitable; the closure itself is a temporary
@@ -799,7 +805,7 @@ TEST(Conversation, Cell) {
         ASSERT_EQ(send_fut.wait_for(0ms), std::future_status::ready)
             << "A-REJECT: sending the malformed TestRequest did not complete within 3s";
         auto const r = send_fut.get();
-        EXPECT_TRUE(r.has_value()) << "A-REJECT: store_then_emit_test_access failed";
+        EXPECT_TRUE(r.has_value()) << "A-REJECT: session_test_access::store_then_emit failed";
     }
     // Let the peer's Reject arrive; the session must survive it (measured:
     // both QuickFIX-cpp and QuickFIX-J reply Reject(35=3) rather than
@@ -886,10 +892,10 @@ TEST(Conversation, Cell) {
     // needs a counterparty republish -- a separate follow-up
     // (specs/091-data-field-bytes/spec.md § Assumptions, the B-05 bullet).
     // So this ONE step is still sent as a hand-built frame through the
-    // FIXPP_TEST_HOOKS seam A-REJECT already uses (user decision 2026-09-11;
+    // test-only seam A-REJECT already uses (user decision;
     // spec.md § Conversation census → the B-05 bullet). Its `sent` record
     // still comes from the intent file, never from the hand-built frame
-    // (C-8) -- and since `store_then_emit_test_access` bypasses the normal
+    // (C-8) -- and since `session_test_access::store_then_emit` bypasses the normal
     // Engine::send()/toApp flow entirely, that record is written HERE
     // directly rather than via ConvApp::arm_pending_sent/toApp. ⚠️ What this
     // route does NOT exercise: fixpp's own builder — see
@@ -906,7 +912,8 @@ TEST(Conversation, Cell) {
         auto send_fut = asio::co_spawn(
             fx.ioc().get_executor(),
             [&]() -> asio::awaitable<fixpp::core::expected_t<void>> {
-                auto seq_r = co_await sess->seqnum_mgr_test_access().assign_outbound();
+                auto seq_r = co_await fixpp::session::session_test_access::seqnum_mgr(*sess)
+                                 .assign_outbound();
                 if (!seq_r.has_value()) co_return std::unexpected(seq_r.error());
                 assigned_seq = *seq_r;
                 std::array<std::byte, 512> buf{};
@@ -914,7 +921,8 @@ TEST(Conversation, Cell) {
                     conv::build_frame_via_writer(buf, decl.msg_type, *seq_r, sender_id, target_id,
                                                  begin_string, now_utc_ms(), decl.fields);
                 if (!frame_r.has_value()) co_return std::unexpected(frame_r.error());
-                co_return co_await sess->store_then_emit_test_access(*seq_r, *frame_r);
+                co_return co_await fixpp::session::session_test_access::store_then_emit(
+                    *sess, *seq_r, *frame_r);
             },  // ⛔ NO trailing `()` — see the A-REJECT site above for why.
             asio::use_future);
         fx.run_until([&] { return send_fut.wait_for(0ms) == std::future_status::ready; }, 3s);
@@ -924,7 +932,7 @@ TEST(Conversation, Cell) {
         }
         auto const r = send_fut.get();
         if (!r.has_value()) {
-            ADD_FAILURE() << "B-05: store_then_emit_test_access failed; error="
+            ADD_FAILURE() << "B-05: session_test_access::store_then_emit failed; error="
                           << static_cast<int>(r.error());
             return false;
         }

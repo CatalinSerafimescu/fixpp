@@ -1,11 +1,6 @@
 #pragma once
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
-#ifndef FIXPP_TEST_HOOKS
-#error \
-    "capi_drain_support.hpp reads Session::is_drained_for_test, which exists only under FIXPP_TEST_HOOKS; include it only from a target that defines the macro (issue #511)"
-#endif
-
 #include <asio/co_spawn.hpp>
 #include <asio/use_future.hpp>
 #include <chrono>
@@ -17,6 +12,7 @@
 #include "fix/c_api/engine.h"
 #include "fixpp/session/session.hpp"
 #include "fixpp/session/session_config.hpp"
+#include "support/session_test_access.hpp"
 
 namespace fixpp::capi_test {
 
@@ -46,7 +42,7 @@ inline bool wait_for_acceptor_drained(
                     sess->executor().underlying(),
                     [weak]() -> asio::awaitable<bool> {
                         if (auto s = weak.lock()) {
-                            co_return s->is_drained_for_test();
+                            co_return fixpp::session::session_test_access::is_drained(*s);
                         }
                         co_return false;
                     },
