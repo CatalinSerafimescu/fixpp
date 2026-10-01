@@ -826,7 +826,8 @@ TEST_F(ResetSeqnumPolicyMatrixTest,
     // Inbound stays at 1 (peer will send Logon-ack seq=1).
     // seqnums_at_one = (outbound==1 && inbound==1) = false → latch=false.
     fixpp::session::seqnum_manager_test_access::set_counters(
-        fixpp::session::session_test_access::seqnum_mgr(sess), /*inbound=*/1, /*outbound=*/10);
+        fixpp::session::session_test_access::seqnum_mgr(sess), /*next_inbound=*/1,
+        /*next_outbound=*/10);
 
     ASSERT_TRUE(run_open(sess).has_value());
     // open() consumed seq=10 → next_outbound_=11.

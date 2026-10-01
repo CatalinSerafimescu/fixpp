@@ -601,7 +601,7 @@ TEST(RefreshOnLogon, W1_StoreAboveLive_RED) {
     // Manager after cold open: hydrated to {50, 60}; then Logon at seq=60
     // advances outbound to 61. Confirm the cold hydrate was applied.
     {
-        auto& mgr = fixpp::session::session_test_access::seqnum_mgr(*fix.session);
+        const auto& mgr = fixpp::session::session_test_access::seqnum_mgr(*fix.session);
         ASSERT_EQ(mgr.next_inbound_unsafe(), static_cast<seqnum_t>(50))
             << "W1 precondition: cold hydrate must set next_inbound=50";
         // After Logon emission at seq=60, outbound advanced to 61.
@@ -617,7 +617,7 @@ TEST(RefreshOnLogon, W1_StoreAboveLive_RED) {
         /*next_outbound=*/42);
 
     {
-        auto& mgr = fixpp::session::session_test_access::seqnum_mgr(*fix.session);
+        const auto& mgr = fixpp::session::session_test_access::seqnum_mgr(*fix.session);
         ASSERT_EQ(mgr.next_inbound_unsafe(), static_cast<seqnum_t>(40))
             << "W1 setup: seqnum_manager_test_access::set_counters must lower inbound to 40";
         ASSERT_EQ(mgr.peek_outbound(), static_cast<seqnum_t>(42))
@@ -719,7 +719,7 @@ TEST(RefreshOnLogon, W2_StoreWinsDown_RED) {
         << "W2 precondition: cold open must issue exactly 2 store reads";
 
     {
-        auto& mgr = fixpp::session::session_test_access::seqnum_mgr(*fix.session);
+        const auto& mgr = fixpp::session::session_test_access::seqnum_mgr(*fix.session);
         ASSERT_EQ(mgr.next_inbound_unsafe(), static_cast<seqnum_t>(5))
             << "W2 precondition: cold hydrate must set next_inbound=5";
     }
@@ -732,7 +732,7 @@ TEST(RefreshOnLogon, W2_StoreWinsDown_RED) {
         /*next_outbound=*/42);
 
     {
-        auto& mgr = fixpp::session::session_test_access::seqnum_mgr(*fix.session);
+        const auto& mgr = fixpp::session::session_test_access::seqnum_mgr(*fix.session);
         ASSERT_EQ(mgr.next_inbound_unsafe(), static_cast<seqnum_t>(40))
             << "W2 setup: seqnum_manager_test_access::set_counters must raise inbound to 40";
     }
@@ -831,7 +831,7 @@ TEST(RefreshOnLogon, W3_KnobOff_NoReread) {
 
     // Confirm cold hydrate applied: manager={50,60}, then Logon at 60 → outbound=61.
     {
-        auto& mgr = fixpp::session::session_test_access::seqnum_mgr(*fix.session);
+        const auto& mgr = fixpp::session::session_test_access::seqnum_mgr(*fix.session);
         ASSERT_EQ(mgr.next_inbound_unsafe(), static_cast<seqnum_t>(50))
             << "W3 precondition: cold hydrate must set next_inbound=50";
         ASSERT_EQ(mgr.peek_outbound(), static_cast<seqnum_t>(61))
@@ -934,7 +934,7 @@ TEST(RefreshOnLogon, W4_NonPersistentStore_NoReread) {
 
     // Manager at construction-time defaults (seqnum_min=1): no hydration ran.
     {
-        auto& mgr = fixpp::session::session_test_access::seqnum_mgr(*fix.session);
+        const auto& mgr = fixpp::session::session_test_access::seqnum_mgr(*fix.session);
         ASSERT_EQ(mgr.next_inbound_unsafe(), static_cast<seqnum_t>(1))
             << "W4 precondition: with non-persistent store, no hydration ran; "
                "next_inbound must stay at seqnum_min=1";
