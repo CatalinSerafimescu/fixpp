@@ -556,7 +556,7 @@ private:
     // asserted directly through the public API by
     // `TypedReadSplitAgreement.MaterializingADivergentGroupDoesNotMoveAnotherGroupsSlices`,
     // with no friend and no hook.
-    friend struct nested_cache_access_for_testing;
+    friend struct offset_table_test_access;
 };
 
 }  // namespace fixpp::wire

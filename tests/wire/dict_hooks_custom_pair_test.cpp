@@ -873,9 +873,9 @@ TEST(NestedGroupSlicesHooksKey, WarmCacheHonoursTheCallersDictionaryNotTheFirstC
         // represent: it returns whichever row comes first, for BOTH queries.
         // An instrument blind to the distinction its subject exists to make is
         // worth no more than no instrument at all.
-        auto const* sub_a = fixpp::wire::nested_cache_access_for_testing::resolve(
+        auto const* sub_a = fixpp::wire::offset_table_test_access::resolve(
             root, outer[0].data, dict_hooks::for_table_view(tv_no_pair), 6001);
-        auto const* sub_b = fixpp::wire::nested_cache_access_for_testing::resolve(
+        auto const* sub_b = fixpp::wire::offset_table_test_access::resolve(
             root, outer[0].data, dict_hooks::for_table_view(tv_with_pair), 6001);
         ASSERT_NE(sub_a, nullptr) << "arm A's row must be resolvable by its own bundle";
         ASSERT_NE(sub_b, nullptr) << "arm B's row must be resolvable by its own bundle";

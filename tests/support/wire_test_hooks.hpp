@@ -38,7 +38,7 @@ namespace fixpp::wire {
 // trigger a build: the caller must already have invoked
 // `nested_group_slices(slice_data, ..., nested_no_tag, ...)` once so the row
 // exists. Never called from production code.
-struct nested_cache_access_for_testing {
+struct offset_table_test_access {
     // fixpp#426 (Gate B r11 T-1): `hooks` is REQUIRED and has NO default. The
     // cache key is `(slice_data, hooks.opaque_dict(), nested_no_tag)`, and this
     // seam used to compare only the first and last — so with two bundles over

@@ -64,7 +64,7 @@ add_wire_test(wire_pure_tests
   nested_group_slices_failloud_test.cpp                               # T001 (073)
 )
 # nested_group_slices_failloud_test.cpp (T001) reaches the
-# nested_cache_access_for_testing friend seam through tests/support/wire_test_hooks.hpp.
+# offset_table_test_access friend seam through tests/support/wire_test_hooks.hpp.
 # 079 T006/T007/T010/T011: validator_type_check_test.cpp needs the real
 # vendored dictionaries (FIX44/FIX50SP2/FIX42) for the required-presence-
 # scope real-frame accept/reject regressions (fixpp#201).

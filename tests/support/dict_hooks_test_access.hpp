@@ -8,7 +8,7 @@
 // A stub-dictionary test (a hand-rolled uint16 token, a counting/null-member
 // fixture, a deliberately half-threaded probe such as
 // `context_group_delim_fn.hpp`'s own note) needs the raw constructor — this
-// is that seam, mirroring the `nested_cache_access_for_testing` precedent in
+// is that seam, mirroring the `offset_table_test_access` precedent in
 // wire_test_hooks.hpp. Never installed; never reachable from production code.
 // The friend declaration in dict_hooks.hpp is unconditional (fixpp#511), so
 // this struct is too: it needs no test macro.
