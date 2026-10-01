@@ -3,13 +3,14 @@
 // tests/support/session_test_access.hpp — TEST-ONLY access to Session internals.
 //
 // fixpp#511: `Session` declares `friend struct session_test_access;`
-// unconditionally. Define this struct only in this header; a second definition
-// of the same name in another TU of the program reintroduces the ODR defect.
+// unconditionally. Define this struct only in this header; a differing
+// definition of this struct elsewhere in the program is an ODR violation
+// (ill-formed, no diagnostic required).
 // A test that needs private state includes this header. Add new accessors HERE,
 // never as members of `Session` gated behind a test macro: the library is
 // compiled without it, so a TU that defined the macro would see a different
-// `Session`. Never installed; never reachable from production code. Needs no
-// test macro.
+// `Session`. Never installed; production targets must not include this
+// header. Needs no test macro.
 
 #include <cstddef>
 #include <fixpp/session/session.hpp>

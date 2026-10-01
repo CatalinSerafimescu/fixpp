@@ -207,8 +207,9 @@ follow the same pattern, each with its own `*_test_access` header there. Verify 
   #511.
   - A gated NAMESPACE-scope declaration of a function the library defines unconditionally is fine. The
     seams in `file_store.hpp` and `src/capi/capi_internal.hpp` are examples.
-- **Wrong: a second definition of a `*_test_access` struct**, e.g. a TU-local one. Two TUs of one test
-  program would then disagree about the struct, which is the same defect, moved into the test.
+- **Wrong: a second, *differing* definition of a `*_test_access` struct**, e.g. a TU-local one. Two
+  TUs of one test program would then disagree about the struct, which is the same defect, moved into
+  the test.
 - **Still first:** look for a public observable before reaching for private state.
 
 **Decision history:**

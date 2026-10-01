@@ -352,8 +352,8 @@ public:
     // the open mode a defect would flip, to prove why TRUNCATE matters,
     // rather than hand-writing an appended fixture file. Unconditional
     // (fixpp#511): a member gated behind a test macro would make Stream differ
-    // between TUs that define the macro and TUs that do not (interop_support
-    // does not), an ODR violation once both link into one program.
+    // between TUs that define the macro and TUs that do not, an ODR violation
+    // once both link into one program.
     // Returns a prvalue constructed directly in the return statement (C++17
     // guaranteed copy elision, [class.copy.elision]) -- Stream holds a
     // std::mutex, so it is neither copyable nor movable, and a named local

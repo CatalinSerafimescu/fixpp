@@ -9,7 +9,8 @@
 // fixture, a deliberately half-threaded probe such as
 // `context_group_delim_fn.hpp`'s own note) needs the raw constructor — this
 // is that seam, mirroring the `offset_table_test_access` precedent in
-// wire_test_hooks.hpp. Never installed; never reachable from production code.
+// wire_test_hooks.hpp. Never installed; production targets must not include
+// this header.
 // The friend declaration in dict_hooks.hpp is unconditional (fixpp#511), so
 // this struct is too: it needs no test macro.
 

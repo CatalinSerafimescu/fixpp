@@ -3,12 +3,13 @@
 // tests/support/engine_test_access.hpp — TEST-ONLY Engine hook setters.
 //
 // fixpp#511: `Engine` declares `friend struct engine_test_access;`
-// unconditionally. Define this struct only in this header; a second definition
-// of the same name in another TU of the program reintroduces the ODR defect.
+// unconditionally. Define this struct only in this header; a differing
+// definition of this struct elsewhere in the program is an ODR violation
+// (ill-formed, no diagnostic required).
 // Add new setters here, never as members of `Engine` gated behind a test macro,
 // which would make a test TU's class differ from the library's. The hooks
 // themselves are plain members that stay null unless a test installs one.
-// Never installed; never reachable from production code.
+// Never installed; production targets must not include this header.
 
 #include <fixpp/session/engine.hpp>
 #include <functional>

@@ -37,7 +37,7 @@ namespace fixpp::wire {
 // OR the row's build itself failed — research.md §D2 mode (a)). Does NOT
 // trigger a build: the caller must already have invoked
 // `nested_group_slices(slice_data, ..., nested_no_tag, ...)` once so the row
-// exists. Never called from production code.
+// exists. Production code must not call it.
 struct offset_table_test_access {
     // fixpp#426 (Gate B r11 T-1): `hooks` is REQUIRED and has NO default. The
     // cache key is `(slice_data, hooks.opaque_dict(), nested_no_tag)`, and this

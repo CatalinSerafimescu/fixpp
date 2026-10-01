@@ -3,11 +3,12 @@
 // tests/support/seqnum_manager_test_access.hpp — TEST-ONLY access to SeqnumManager.
 //
 // fixpp#511: `SeqnumManager` declares `friend struct seqnum_manager_test_access;`
-// unconditionally. Define this struct only in this header; a second definition
-// of the same name in another TU of the program reintroduces the ODR defect.
+// unconditionally. Define this struct only in this header; a differing
+// definition of this struct elsewhere in the program is an ODR violation
+// (ill-formed, no diagnostic required).
 // Add new accessors here, never as members of `SeqnumManager` gated behind a
 // test macro, which would make a test TU's class differ from the library's.
-// Never installed; never reachable from production code.
+// Never installed; production targets must not include this header.
 
 #include <fixpp/session/seqnum_manager.hpp>
 
