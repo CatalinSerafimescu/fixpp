@@ -6,6 +6,12 @@ status: stable
 
 # Log
 
+- **2026-10-01 — fixpp#511 (B21), test access to private state of a public class.**
+  `components/session.md`'s section is replaced. The owner's Gate A ruling makes the unconditional
+  named friend the one way in: one `*_test_access` struct per class, defined once in `tests/support/`.
+  It supersedes the 2026-09-27 entry's "not a friend; reuse a hooked target". A gated class member stays
+  wrong; a gated namespace-scope declaration stays fine. Rejected: public getters, hooked library twins,
+  and the explicit-instantiation loophole. Record: parent repo `decisions/speckit/511-test-hooks-odr-gatea.md`.
 - **2026-09-30 — fixpp#518, PR #522 Gate B round 2.** `components/session.md`'s invariant row adds
   the post-`Active` persist to the guarded suspensions and `onLogon` to the places a close is posted
   from. The rejected list gains a check straight after `onLogon` (it would skip the consumed Logon's

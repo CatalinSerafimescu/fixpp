@@ -193,32 +193,31 @@ agent correctly treated this as a shortlist and re-derived, which is the intende
 
 ## Test access to private `Session` state — read before giving a test one
 
-`Session` lives in a PUBLIC header (`include/fixpp/session/session.hpp`). There is one accepted way for
-a test to read its private state, and three tempting ones that are each defects.
+`Session` lives in a PUBLIC header (`include/fixpp/session/session.hpp`). Since fixpp#511 (B21) there is
+one way for a test to reach its private state: the unconditional friend `session_test_access`. It is
+defined ONCE, in `tests/support/session_test_access.hpp`. `SeqnumManager`, `MemoryStore` and `Engine`
+follow the same pattern, each with its own `*_test_access` header there. Verify against `session.hpp`.
 
-- **Wrong: `FIXPP_TEST_HOOKS` on a new test target.** The macro adds inline members inside `Session`,
-  but the linked library is compiled without it. Two definitions of one class in one program is an ODR
-  violation: ill-formed, no diagnostic required. The pattern already exists on `main` and is tracked as
-  fixpp#511. Do not extend it to another target.
-- **Wrong: an unconditional `friend struct …_test_access;` in `session.hpp`.** Any consumer can
-  define that struct and read every private member, so it is a public-API change that needs a Gate A
-  ruling. The transports' friend (`src/transport/asio_{plain,tls}_transport.hpp`) is safe only because
-  those headers are private, and that does not carry over to `include/fixpp/`.
-- **Wrong: a widely included test helper that newly includes `session.hpp`.** Every hooked target
-  that includes the helper then gains a new divergent-definition edge.
-- **Right, in this order:**
-  1. Look for a public observable.
-  2. If the state is genuinely private (`closed_drained` is: only `Session::close` writes it, and no
-     public signal implies it), put the test in a target that already defines the macro and already
-     reaches the same gated headers, e.g. `capi_send_recv_test`. Prove it with a census of the
-     macro-gated headers the new TU reaches, diffed against the existing TU, with a seeded arm.
-  3. Keep the accessor-using helper in a narrow header that `#error`s without the macro
-     (`tests/capi/capi_drain_support.hpp`).
+- **Adding an accessor:** add a static function to the existing struct in `tests/support/`. Do not touch
+  the class.
+- **Wrong: anything inside the class gated on `FIXPP_TEST_HOOKS`.** That covers members, friends and
+  access specifiers. The libraries are compiled without the macro, so every hooked test program would
+  hold two definitions of the class: an ODR violation, ill-formed with no diagnostic required. That was
+  #511.
+  - A gated NAMESPACE-scope declaration of a function the library defines unconditionally is fine. The
+    seams in `file_store.hpp` and `src/capi/capi_internal.hpp` are examples.
+- **Wrong: a second definition of a `*_test_access` struct**, e.g. a TU-local one. Two TUs of one test
+  program would then disagree about the struct, which is the same defect, moved into the test.
+- **Still first:** look for a public observable before reaching for private state.
 
-**Why this page says so:** PR #510 (091) Gate B rounds 2 and 3 each moved the defect instead of removing
-it: first the macro on a new target, then the public friend plus the helper edge. Round 3's triage
-ended the loop by first asking whether private access was needed at all. The records are in the parent
-repo, `decisions/speckit/091-data-field-bytes-gateb.md`.
+**Decision history:**
+- Before #511, this page listed the public-header friend as "Wrong: needs a Gate A ruling". It also told
+  tests to reuse an already-hooked target, because PR #510 (091) Gate B rounds 2 and 3 had each moved the
+  defect instead of removing it (parent repo, `decisions/speckit/091-data-field-bytes-gateb.md`).
+- The owner then ruled for the named friend, on 2026-10-01. Before that, any consumer could already
+  `#define FIXPP_TEST_HOOKS` for the same access, with UB. Rejected: public seqnum getters, hooked library
+  twins, and the explicit-instantiation access loophole. Record: parent repo,
+  `decisions/speckit/511-test-hooks-odr-gatea.md`.
 
 ## Runtime flows
 
