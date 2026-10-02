@@ -207,6 +207,11 @@ follow the same pattern, each with its own `*_test_access` header there. Verify 
   #511.
   - A gated NAMESPACE-scope declaration of a function the library defines unconditionally is fine. The
     seams in `file_store.hpp` and `src/capi/capi_internal.hpp` are examples.
+  - **CI rejects it** (fixpp#530): `ci/odr-hooks-census.py` runs on Tier 1's `linux-clang-release`
+    leg, and `ci/test-odr-hooks-census.sh` pins its rules in `ci-script-pins`. It does not fail a gated
+    statement in a function body outside a class (`L-530-1`). Rejected homes: a ctest, which would run
+    on every leg including MSVC's `cl` flags; a `ci-script-pins` step, since that job has no configured
+    tree; and `co-spawn-closure-audit`, which is not in `tier1-required`.
 - **Wrong: a second, *differing* definition of a `*_test_access` struct**, e.g. a TU-local one. Two
   TUs of one test program would then disagree about the struct: an ODR violation inside the test
   program.

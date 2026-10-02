@@ -6,6 +6,10 @@ status: stable
 
 # Log
 
+- **2026-10-02 — fixpp#530 (B25), a CI gate for #511.** `components/session.md`'s test-access section
+  names where the ODR census runs (`ci/odr-hooks-census.py`, Tier 1 `linux-clang-release`) and the
+  homes rejected for it. A definition present under only one macro state is no longer reported. What it
+  does not check is `L-530-1`.
 - **2026-10-02 — fixpp#526 + #531 (B24), fixed-window test waits.** `components/test.md` gains a
   subsection under *Bounded pumps*. The "window is preserved" reasons are scoped to the sites where
   they were measured; at 092's `DispositionFixture`, a window was measured to be unnecessary and was
