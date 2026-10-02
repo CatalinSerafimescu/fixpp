@@ -229,6 +229,9 @@ TEST_F(ReconnectCancelMidHandshakeTest, TotalCancelMidHandshakeReleasesTransport
         }
     });
 
+    // Default budget, not one derived from the handshake latency: the competing completion (a lost
+    // cancellation lets the handshake succeed) is told apart by the result checks below, not by
+    // time. To re-check, isolate the handshake from the caller's cancellation and assert RED.
     ASSERT_TRUE(
         fixpp::test_support::pump_until_ready(ioc, fut, "ReconnectCancelMidHandshake/total"))
         << fixpp::test_support::kPumpBudgetMiss << "ReconnectCancelMidHandshake/total" << ". "
@@ -284,6 +287,7 @@ TEST_F(ReconnectCancelMidHandshakeTest, RepeatedCancelsLeaveNoLeaksAcrossNAttemp
             }
         });
 
+        // Default budget: see TotalCancelMidHandshakeReleasesTransport.
         ASSERT_TRUE(
             fixpp::test_support::pump_until_ready(ioc, fut, "ReconnectCancelMidHandshake/repeated"))
             << fixpp::test_support::kPumpBudgetMiss << "ReconnectCancelMidHandshake/repeated"
