@@ -27,6 +27,13 @@ Public and additive, in `include/fixpp/wire/framer.hpp`. Contract C-1 has the ru
 - New private state: `bool searching_`, true while a garbled region is open across feeds. The carry
   holds at most the four trailing bytes that are a proper prefix of `8=FIX`. There is no
   "previous byte was SOH" state, because the post-garble start rule is `8=FIX` anywhere (C-1).
+- Test access and counted work (FR-053, quickstart §2): `friend struct framer_test_access;`,
+  unconditional and never gated on `FIXPP_TEST_HOOKS`, defined once in
+  `tests/support/framer_test_access.hpp`. It reads private counters of the bytes the Framer reads, sums
+  and moves. The counters are always compiled, so they enter `sizeof(Framer)` (the size pins are
+  re-derived by tasks.md T012's command). With the flag off they change no `feed` result, error kind
+  or carry state. Their shape (members, types, increment sites) is fixed at implementation (tasks.md
+  T017); their cost is in the paired `framer_bench` run.
 - With the flag on, and only then:
   - `frame_len > max_frame_bytes` is tested as soon as `body_off` is known, before the CheckSum
     (FR-013, OD-4);

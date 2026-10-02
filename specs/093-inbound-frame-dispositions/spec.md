@@ -444,8 +444,8 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
   - The session has no production log site today, and `SessionConfig::logger_override` is never read.
     FR-003 adds the first site (`FIXPP_SLOG` with the session's `trace_context`), resolving the logger
     at `open()` (research R-2; plan.md OD-5).
-- **FR-004**: A frame whose third field is not MsgType(35) MUST be disregarded in every state and in both
-  validation modes, whether or not it is otherwise faulty. B-005-7 narrows to fields other than the first
+- **FR-004**: A frame whose third field is not MsgType(35) MUST be disregarded in every state except
+  Disconnected (which ignores every frame, contract C-2) and in both validation modes, whether or not it is otherwise faulty. B-005-7 narrows to fields other than the first
   three, and its pinned cell is rewritten to assert the disregard. Research R-1 confirmed this
   (Clarifications).
 - **FR-005**: 092's pre-Active refusal of a faulty frame whose third field is not 35 (contract C-2, the
@@ -536,8 +536,10 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
 - **FR-013**: A frame larger than L MUST be refused at framing in every state, the acceptor's first
   frame included, before its CheckSum is read, so an over-L frame is never mistaken for a garbled one.
   The check-order change applies only to Framers with resync on (plan.md OD-4).
-  - The session closes terminally with an event and a log, and no guard or handler reads any field of
-    the frame.
+  - No guard or handler reads any field of the frame.
+  - Once a Session exists (contract C-4 phase (b), and Active), the session closes terminally with an
+    event and a log. On the acceptor's first frame (phase (a)) no Session exists yet, so the transport
+    is closed with no event and no log (contract L-6).
   - This replaces today's Active-only advertised-MaxMessageSize check, which only writes Disconnected.
   - It also reverses 070's pre-establishment exemption (`test_070_max_message_size_test`); see plan.md
     OD-3, open to Gate A review.
@@ -561,8 +563,9 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
   faulty MUST refresh inbound liveness. The refresh happens once, right after the fault check and the
   35-not-third check, and before the validate gate and every early return. It replaces the single writer
   at the end of the arm. That covers the validate and PossDup Rejects, the CompID and SendingTime guards,
-  the Reset-mode SequenceReset, too-high, too-low (with or without PossDup), GapFill, inbound Reject(35=3)
-  and inbound Logout(35=5). A refresh in LogonReceived is harmless: the liveness loop runs only in Active,
+  the Reset-mode SequenceReset, too-high, too-low (with or without PossDup), GapFill, the knob-off path
+  (`validate_sequence_numbers = false`, where 028 delivers a frame without advancing NextNumIn), inbound
+  Reject(35=3) and inbound Logout(35=5). A refresh in LogonReceived is harmless: the liveness loop runs only in Active,
   and both roles seed the value on entering Active.
 - **FR-021**: Faulty and garbled frames MUST NOT refresh liveness (092 FR-018; this spec's Disregard).
 
@@ -702,8 +705,11 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
 
 ### Measurable Outcomes
 
+**The base.** "RED on the base" below means RED on the merge base that tasks.md T002 records after
+the rebase onto `origin/main` (`00c1f720` at spec time). Every RED claim is run on that base.
+
 - **SC-001**: Each of TC 2020 Scenario 2 rows d, m and t and Scenario 3 rows b, c and e has a cell
-  asserting disregard-and-continue. Each is RED on `00c1f720` and GREEN on the branch.
+  asserting disregard-and-continue. Each is RED on the base and GREEN on the branch.
 - **SC-002**: Resync cells show the following. Each has a mutant that turns it RED (quickstart §2).
   - A well-formed frame lying wholly after a garbled region is never lost. That includes leading junk
     that does not end in SOH (`XYZ8=FIX…`) and a truncated frame followed by a good one, at every split
@@ -723,8 +729,8 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
   C and Python.
   - **Initiator, after its Logon**, and **acceptor after a matching first frame that leaves it
     pre-Active**: a peer that then sends only garbled bytes is disconnected **at** the timeout, not
-    before. On `00c1f720` the cell is RED because the close is immediate.
-  - **Same phase, silent peer**: disconnected at the timeout. On `00c1f720` it is never disconnected
+    before. On the base the cell is RED because the close is immediate.
+  - **Same phase, silent peer**: disconnected at the timeout. On the base it is never disconnected
     (RED, bounded by the test's deadline).
   - **Same phase, a peer that keeps the socket readable across T**, through a transport double whose
     read completes at initiation so the read arm wins every race: no frame is delivered after T, and
@@ -733,27 +739,31 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
     Active.
   - **Acceptor before any matching frame**: a peer that sends only garbled bytes is closed at the
     first-frame byte budget or at `min(5 s, T)`, whichever comes first. Bytes under the budget, sent
-    slowly, are not closed before `min(5 s, T)`. On `00c1f720` that cell is RED because the close
+    slowly, are not closed before `min(5 s, T)`. On the base that cell is RED because the close
     comes at the first garbled byte.
   - **Acceptor on TLS with T below the handshake bound**: a stalled handshake closes at the handshake
     bound; a handshake that completes after T closes the transport without a first-frame read.
 - **SC-004**: On every CI lane, MSVC debug included, a frame of L bytes at the densest field layout
   parses, and a frame of L+1 bytes is refused at framing before any guard acts. The dense-L cell is RED
-  on `00c1f720`.
+  on the base.
 - **SC-005**: For each FR-020 class that leaves the session up, a cell shows that no TestRequest is sent
-  within the interval. Each is RED on `00c1f720`. The classes are:
+  within the interval. Each is RED on the base. The classes are:
   - one too-high frame (a second one may be fatal, fixpp#537);
   - Reset-mode SequenceReset;
   - GapFill;
   - the validate and PossDup Rejects;
   - too-low Heartbeat and too-low PossDup;
-  - the knob-off path;
+  - the knob-off path (`validate_sequence_numbers = false`: a frame delivered without advancing
+    NextNumIn, 028's deliver-without-advance);
   - Reject(35=3).
 
-  Logout and a fatal too-low end the session, so they have no such cell.
-- **SC-006**: Per role, the #523 cell and the #524 cell without a teardown reset are RED on `00c1f720`
+  Logout and a fatal too-low end the session, so they have no such cell. So do the CompID guard (a
+  mismatch, when `check_comp_id` holds, writes Disconnected) and the SendingTime guard (Reject, then
+  Logout, then disconnect): FR-020 refreshes on them, but no interval follows in which a TestRequest
+  could be sent.
+- **SC-006**: Per role, the #523 cell and the #524 cell without a teardown reset are RED on the base
   and GREEN on the branch. Two cells stay green throughout as regression guards: the #524 cell with a
-  teardown reset (its 1/1 outcome holds on `00c1f720`), and the LogoutSent confirmation cell.
+  teardown reset (its 1/1 outcome holds on the base), and the LogoutSent confirmation cell.
   - A non-overriding store cell shows that `close()`'s wait gives FR-041's outcomes. Deleting the wait
     turns it RED.
   - `Engine::stop()` cells begin during the unit, for `MemoryStore`, `FileStore` and a default-body
@@ -765,8 +775,8 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
 - **SC-007**: The per-session memory added by FR-010 and FR-012, the carry plus B(L), is measured and
   stated in the B&L row as a formula in L, with worked totals at 64 KiB and 256 KiB. Steady-state inbound
   throughput is unchanged within `[const §VIII.2]`'s budget.
-- **SC-008 (fixpp#540)**: #540's reproduction (FR-015) is run on `00c1f720` before the catch lands, and
-  its output is recorded. If it terminates, the no-terminate cell is RED on `00c1f720` and GREEN on the
+- **SC-008 (fixpp#540)**: #540's reproduction (FR-015) is run on the base before the catch lands, and
+  its output is recorded. If it terminates, the no-terminate cell is RED on the base and GREEN on the
   branch, and the PR settles #540. If it does not, #540 is closed as not a bug with that output, and the
   cell is kept as a regression guard.
 
