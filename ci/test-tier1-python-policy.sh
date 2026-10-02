@@ -1824,8 +1824,9 @@ echo "PASS: derive-script table + call site + per-leg FIXPP_INSTALL_PYTHON + PY_
 # not collide). Re-run the harness against the merged number rather than
 # re-deriving from either branch's local total — the failure mode this guards is
 # one side's edit silently replacing the other's, which reads as a passing count.
-MUTANTS_DECLARED=94  # M107 (the ci-script-pins call-site pin for ci/test-odr-hooks-census.sh,
-                     # fixpp#530) + M108 (the #530 ODR census step guard pin) +
+MUTANTS_DECLARED=95  # M107 (the ci-script-pins call-site pin for ci/test-odr-hooks-census.sh,
+                     # fixpp#530) + M108 (the #530 ODR census step guard pin) + M109 (the #530
+                     # ODR census sentinel's existence pin) +
                      # M106 (the #448 gate-step guard pin) + M105 (the ci-script-pins call-site pin for
                      # ci/test-check-alloc.sh, fixpp#448) + M104 (the ci-script-pins call-site pin for
                      # ci/test-mallocnesia-population.sh, fixpp#448) + M103 (the ci-script-pins call-site pin for
@@ -2446,6 +2447,18 @@ for block in t.split("      - name:"):
     out.append(block)
 assert n == 1, "expected to mutate 1 guarded step, mutated " + str(n)
 open(dst, "w").write("      - name:".join(out))
+'
+
+  # M109 (fixpp#530): the ODR census sentinel step renamed, so the existence check has a
+  # mutant of its own. What it pins is the NAME; its body and if: are not pinned.
+  mutate_workflow M109 "the #530 ODR census sentinel step is renamed" "#530 ODR census outcome sentinel step is gone" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "      - name: \"Assert the ODR census actually ran (#530)\"\n"
+new = "      - name: \"Assert the ODR census outcome (#530)\"\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
 '
 
   # ── #271: the wheel identity steps' VALUE drift (M70-M72) ───────────────────
