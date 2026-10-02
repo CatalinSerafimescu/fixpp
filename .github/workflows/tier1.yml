@@ -2651,9 +2651,8 @@ jobs:
       # instead, on synthetic trees, each by a cell asserting its own line of output;
       # a mutant must redden the cell it names for that cell's own reason.
       # Buildless; needs a C++ compiler (the runner's `c++`) and refuses without
-      # one. Cost condition: the
-      # mutants each re-run every cell; re-derive with
-      # `time bash ci/test-odr-hooks-census.sh`.
+      # one. Cost condition: every cell runs once, and each mutant runs the one
+      # cell it names; re-derive with `time bash ci/test-odr-hooks-census.sh`.
       - name: "Regression pin — ODR census verdicts and refusals (#530)"
         run: bash ci/test-odr-hooks-census.sh
 

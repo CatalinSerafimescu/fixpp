@@ -16,9 +16,15 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# ODR_CENSUS_UNDER_TEST is set only by the mutant section below, to run every cell against a
-# broken copy.
+# ODR_CENSUS_UNDER_TEST is set by the mutant section below, to run a cell against a broken copy
+# (ODR_CELL names the cell); set by hand, it runs every cell against another census.
 CENSUS="${ODR_CENSUS_UNDER_TEST:-$HERE/odr-hooks-census.py}"
+# ODR_CELL selects one cell, for a mutant's run only. Inherited by a run with no census under
+# test, it would skip every other cell of a run that still reports success, so it is refused.
+if [ -n "${ODR_CELL:-}" ] && [ -z "${ODR_CENSUS_UNDER_TEST:-}" ]; then
+  echo "FAIL: ODR_CELL=$ODR_CELL is set without ODR_CENSUS_UNDER_TEST; it would skip every other cell"
+  exit 1
+fi
 CXX="${CXX:-c++}"
 command -v "$CXX" >/dev/null 2>&1 || { echo "FAIL: no C++ compiler '$CXX' on PATH"; exit 1; }
 CXX="$(command -v "$CXX")"
@@ -96,6 +102,9 @@ EOF
 # of its nested classes' names, so a substring cannot tell them apart.
 check() {
   local name="$1" want_rc="$2" tree="$3" out rc w; shift 3
+  # ODR_CELL is set only by mutant() below. A mutant's evidence is the FAIL line of the one cell
+  # it names, so every other cell is skipped, and counted neither way.
+  [ -n "${ODR_CELL:-}" ] && [ "${name%% *}" != "$ODR_CELL" ] && return
   out="$(python3 "$CENSUS" --build-dir "$tree/build" -j 2 2>&1)"; rc=$?
   if [ "$rc" != "$want_rc" ]; then
     echo "FAIL  $name: exit $rc, wanted $want_rc"; echo "$out" | sed 's/^/      /' | head -12
@@ -528,13 +537,20 @@ check "T22 a response file other than a module map is refused (its flags are unr
 
 # ── mutants ──────────────────────────────────────────────────────────────────────────────────
 # A cell that cannot fail when the rule it names is broken measures its own setup. Each mutant
-# is a copy of the census with one rule broken; the whole suite runs against it, and the cell
-# that names that rule must fail FOR ITS OWN REASON: its FAIL line must END with <reason>, the
+# is a copy of the census with one rule broken; the cell that names that rule runs against it
+# (ODR_CELL), and must fail FOR ITS OWN REASON: its FAIL line must END with <reason>, the
 # text that cell prints when only its rule is broken (a substring would accept a missing
 # `fx::Outer::Inner` line for a cell whose reason is a missing `fx::Outer` line). A cell reddened by something else (a
 # refusal turning its exit code into 2) does not count. A mutant whose anchor text is no
 # longer in the census exactly once fails too, so a refactor cannot retire a mutant silently.
 if [ -z "${ODR_CENSUS_UNDER_TEST:-}" ]; then
+  out="$(ODR_CELL=T0 bash "${BASH_SOURCE[0]}" 2>&1)"; rc=$?
+  if [ "$rc" = 1 ] && printf '%s\n' "$out" | grep -qF "ODR_CELL=T0 is set without ODR_CENSUS_UNDER_TEST"; then
+    echo "ok    an ODR_CELL inherited by a run with no census under test is refused"; pass=$((pass+1))
+  else
+    echo "FAIL  an ODR_CELL inherited by a run with no census under test: exit $rc"
+    printf '%s\n' "$out" | sed 's/^/      /' | head -6; fail=$((fail+1))
+  fi
   # mutant <cell> <reason> <description> <python: old> <python: new>
   mutant() {
     local cell="$1" reason="$2" what="$3" m="$TMP/mutant.py" out line l own=""
@@ -549,7 +565,7 @@ PY
     then
       echo "FAIL  mutant '$what': its anchor is not in the census exactly once"; fail=$((fail+1)); return
     fi
-    out="$(ODR_CENSUS_UNDER_TEST="$m" bash "${BASH_SOURCE[0]}" 2>&1)"
+    out="$(ODR_CENSUS_UNDER_TEST="$m" ODR_CELL="$cell" bash "${BASH_SOURCE[0]}" 2>&1)"
     line="$(printf '%s\n' "$out" | grep "^FAIL  $cell ")"
     while IFS= read -r l; do
       [[ "$l" == *": $reason" ]] && own=1
