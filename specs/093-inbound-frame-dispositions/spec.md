@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-02
 
-**Status**: Draft (clarified 2026-10-02)
+**Status**: Gate A converged 2026-10-03 (round 3)
 
 **Input**: User description: "B22: fixpp #514, #515, #516, #523, #524, as one bundle and one PR, building
 on 092-garbled-frame-reject." The full input is the `/speckit-specify` invocation of 2026-10-02, which
@@ -208,7 +208,8 @@ The design choices that follow from them are orchestrator decisions in plan.md.
 - Q: Does `Engine::stop()` stop a Logon arm after a shielded reset unit? → A: **Not without a flag.**
   `logon_arm_superseded` cannot see `stop()`, which calls `close()` only after its join, and the
   shield's fresh cancellation state does not replay stop's emission. A session-side engine-stop flag
-  closes that (FR-041, contract C-6, plan.md OD-15).
+  closes that, in strand order: after `Engine::stop()`'s step 1 has run on the session's strand (FR-041,
+  contract C-6, plan.md OD-15).
 - Q: Does the establishment deadline use `SessionConfig::clock_override`? → A: **No.** Phase (a) begins
   before a Session exists, so the deadline runs on the engine's clock (FR-006, contract C-4).
 
@@ -517,13 +518,19 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
   every build lane. That includes a frame of L bytes at the densest legal field layout.
   - A lazy read inside an application callback (repeating-group slices, nested tables, unknown-field
     lists, C-ABI cursors) draws on a stated headroom, `kCallbackReadHeadroom`, in the same buffer.
-  - Exhausting the headroom MUST NOT end the session. The failed read reports what its declaration
-    allows, per API (contract C-3 I-5): an empty span from `group_slices()`, `FIXPP_ERR_TYPE_MISMATCH`
-    from `fixpp_msg_get_group`, `FIXPP_ERR_WIRE_LIMIT_EXCEEDED` from the nested getter, and an empty
-    view from `unknown_fields()` (FR-015). These are today's reports except the last, and B&L discloses
-    the two that cannot be told from an absent result (contract L-5).
-  - The C cursor shells' allocation has no catch today. 093 does not change it; it is disclosed
-    (contract L-17) and filed separately.
+  - Exhausting the headroom in a read that reports a status (the table in contract C-3 I-5) MUST NOT
+    end the session. The failed read reports what its declaration allows, per API: an empty span from
+    `group_slices()`, `FIXPP_ERR_TYPE_MISMATCH` from `fixpp_msg_get_group`,
+    `FIXPP_ERR_WIRE_LIMIT_EXCEEDED` from the nested getter, and an empty view from `unknown_fields()`
+    (FR-015). These are today's reports except the last, and B&L discloses the two that cannot be told
+    from an absent result (contract L-5).
+  - These reports hold on the lanes where the parse buffer's spill witness is null. On MSVC debug the
+    witness forwards to the heap and records, so a read past the headroom succeeds from the heap and
+    the spill is recorded instead (research R-3).
+  - The C cursor shells' allocation (`fixpp_msg_get_group`, `fixpp_group_get_nested_group`) is the
+    exception. It has no catch, so an exhaustion there ends the session, or the process terminates, as
+    it does today (contract L-17, fixpp#541: unconfirmed, pre-existing on main, batch B28, not fixed by
+    093; plan.md OD-19).
 - **FR-012**: Parse capacity MUST be allocated once per session, not per frame. Stack use per parse MUST
   NOT grow (`[const §VIII.5]`).
 - **FR-013**: A frame larger than L MUST be refused at framing in every state, the acceptor's first
@@ -590,8 +597,12 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
   - then issue one `reset_to(in, out)` with the true targets, on persistent and volatile stores alike;
   - then restore the pump's cancellation state and run the existing superseded check, which also tests a
     session-side engine-stop flag that `Engine::stop()` sets before it emits cancellation (contract
-    C-6). So once `Engine::stop()` begins, the arm emits no event, calls no `toAdmin` or `onLogon`,
-    writes nothing, and does not reach Active.
+    C-6). So after `Engine::stop()`'s step 1 has run on the session's strand, the arm emits no event,
+    calls no `toAdmin` or `onLogon`, writes nothing, and does not reach Active. Effects the arm ran on
+    that strand before stop's step-1 handler are ordered before it, and `stop()`'s normal sequence
+    handles that session as one that reached Active just before step 1 reached its strand. This holds
+    on the condition contract C-6 states: every suspension in a Logon arm is followed by the
+    predicate before the next effect.
 
   `close()` MUST wait for an in-flight unit before it issues its teardown reset, with a timeout (owner
   ruling). It waits only when it is about to issue one, and the wait is event-driven, not a poll. The
@@ -747,7 +758,8 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
     turns it RED.
   - `Engine::stop()` cells begin during the unit, for `MemoryStore`, `FileStore` and a default-body
     store, with and without a teardown reset. Each shows FR-041's table, and per role shows no
-    `toAdmin`, no reset event, no `onLogon` and no Active transition after stop began. Deleting the
+    `toAdmin`, no reset event, no `onLogon` and no Active transition after `Engine::stop()`'s step 1
+    has run on the session's strand. Deleting the
     shield turns the default-body and `FileStore` cells RED. Dropping the engine-stop flag from the
     superseded check turns the per-role effect assertions RED.
 - **SC-007**: The per-session memory added by FR-010 and FR-012, the carry plus B(L), is measured and
@@ -782,6 +794,7 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
 - The admin and outbound parse sites' stack arenas are not derived from what they parse, so a dense
   outbound body can skip its send callback (contract C-3 I-6, L-14). To file.
 - The C cursor shells that the two group getters allocate from the parse arena have no catch (contract
-  L-17). Unconfirmed, found by code reading at Gate A round 2. To file with a reproduce-first item.
+  L-17). Unconfirmed, found by code reading at Gate A round 2. Filed as fixpp#541 (batch B28), with a
+  reproduce-first item; not in 093's scope (plan.md OD-19).
 - `fixpp_msg_get_group` reports an exhausted `group_slices()` as `FIXPP_ERR_TYPE_MISMATCH` (contract
   L-5). Changing that report changes a C-ABI result, so it is left as it is and disclosed.

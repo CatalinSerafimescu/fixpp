@@ -71,6 +71,14 @@ Engine seam and private, `Session`.
     written into a comment.
   - `kContainerSlack` covers MSVC-debug container proxies. A per-lane cell measures the peak with
     `pmr_allocation_tracking_resource` and asserts peak ≤ B(L).
+  - **`kCallbackReadHeadroom`'s sizing condition.** Each parse reserves its entries up front (below),
+    where the base grows them inside its stack parse arena (the `monotonic_buffer_resource` in
+    `parse_and_dispatch_`, `src/session/session.cpp` at the merge base). So at a small L a sparse frame
+    can leave callbacks less room than the base leaves. The condition: for every frame the base
+    delivers, B(L) minus that frame's up-front reserve and its parse leaves at least the room the
+    base's stack arena leaves after the same parse. Check it at implementation on the derived
+    constants, at L = 64 KiB (the C-ABI population, FR-010) and at the OD-2 floor. Where it fails,
+    contract L-17 says so rather than claiming the C-ABI exhaustion is not worsened.
 - `OffsetTable::Config::max_offset_entries = N(L)` for every inbound parse. Each parse reserves
   `min(N(L), frame.size()/3 + 1)` entries, which never exceeds what B(L) budgets.
 - Per-session cost: the carry plus B(L). Research R-3 has the worked totals.
@@ -235,8 +243,12 @@ Private `Session` state, set through the engine seam.
   `co_spawn` that already runs on the session strand sets the flag through
   `session_engine_access::note_engine_stop_()` before the `emit`. A null session has nothing to set.
 - `logon_arm_superseded` returns true when `state_ == closing`, when this flag is set, or when the FSM
-  has left the arm's state. Every site of the predicate therefore stops a Logon arm once `Engine::stop()`
-  has begun (C-6). Re-derive the sites with `grep -n logon_arm_superseded src/session/session.cpp`.
+  has left the arm's state. Every site of the predicate therefore stops a Logon arm after
+  `Engine::stop()`'s step 1 has run on the session's strand (C-6). The flag is written and read on one
+  strand, so a non-atomic `bool` is correct, and the ordering is strand order, not real time. It holds
+  on the condition that every suspension in a Logon arm is followed by the predicate before the next
+  effect. Re-derive the sites with `grep -n logon_arm_superseded src/session/session.cpp`, against the
+  arm's `co_await` sites.
 - E-4's placement condition applies: a `Session` reused for a second connection would need the flag
   reset when the transport is installed.
 - **Why a null session is safe to skip** (a condition, read at `00c1f720`). Both role loops publish

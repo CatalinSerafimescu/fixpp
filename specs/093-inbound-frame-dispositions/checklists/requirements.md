@@ -2,7 +2,7 @@
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning
 **Created**: 2026-10-02
-**Reconciled**: 2026-10-02, after Gate A round 2's rewrite
+**Reconciled**: 2026-10-03, after Gate A round 3's close-out edit
 **Feature**: [spec.md](../spec.md)
 
 ## Content Quality
@@ -49,4 +49,6 @@
   (contract C-4 phase (a)), and #534, which FR-006 does not wait for (it closes only its own expiry's
   transport).
 - Gate A rounds 1 and 2 added code-fact clarifications, not owner rulings (spec.md Clarifications), and
-  orchestrator decisions OD-1 to OD-18 (plan.md).
+  orchestrator decisions OD-1 to OD-18 (plan.md). Round 3's close-out narrowed FR-011, FR-041, SC-006
+  and contract C-1, C-3, C-6 to their stated conditions, and added OD-19 (fixpp#541 out of scope). No
+  checklist item changed state.
