@@ -112,9 +112,11 @@ code is authoritative.
   Rejects it with 373=14. Which rule ships?
   → A: **Disregard it in both validation modes and in every state** (option 1). B-005-7 narrows to
   fields other than the first three. The owner added: *"check official specs and QuickFIX first"*.
-  Research R-1 must confirm the ruling against the FIX primary documents and the QuickFIX C++, J and Go
-  sources before `/speckit-plan` closes. If they disagree, the question goes back to the owner, and it is
-  not settled by Gate A.
+  **Confirmed 2026-10-02 by Research R-1** (`research.md`). SL2020 §4.5.2 ("must disregard"), TC2020
+  2t and FIX 4.4 Vol 2 all say garbled, and none ties 373=14 to the first three fields. All four QuickFIX
+  engines ignore the frame once logged on. Before Logon, QuickFIX/C++ and QuickFIX/Go disconnect, while
+  J and n do not unless the frame is a Logon. No spec text requires that disconnect, so FR-004 and FR-005
+  keep the disregard, bounded by FR-006. That divergence is recorded for Gate A.
 
 ---
 
@@ -290,8 +292,8 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
   log each encountered garbled message".
 - **FR-004**: A frame whose third field is not MsgType(35) MUST be disregarded in every state and in both
   validation modes, whether or not it is otherwise faulty. B-005-7 narrows to fields other than the first
-  three, and its pinned cell is rewritten to assert the disregard. This is subject to Research R-1's
-  confirmation (Clarifications).
+  three, and its pinned cell is rewritten to assert the disregard. Research R-1 confirmed this
+  (Clarifications).
 - **FR-005**: 092's pre-Active refusal of a faulty frame whose third field is not 35 (contract C-2, the
   D-1 and D-2 rows for that shape) MUST become a disregard, now that FR-006 bounds establishment. Every
   other 092 faulty-frame disposition is unchanged.
