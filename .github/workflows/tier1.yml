@@ -1000,9 +1000,7 @@ jobs:
           echo "preset=${{ matrix.preset }} odr_hooks_census=${got:-<unset>}"
           if [ "${{ matrix.preset }}" = "linux-clang-release" ]; then
             if [ "$got" != "success" ]; then
-              echo "::error::the ODR census did not run to success on linux-clang-release"
-              echo "::error::(outcome=$got). If it was SKIPPED, the \`if:\` predicate no"
-              echo "::error::longer matches this preset; check its spelling."
+              echo "::error::the ODR census did not run to success on linux-clang-release (outcome=$got)."
               exit 1
             fi
           elif [ "$got" != "skipped" ]; then
