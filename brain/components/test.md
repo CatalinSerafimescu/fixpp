@@ -104,6 +104,41 @@ because `run_one_until` tests `now < abs_time` *before* dispatching, leaving a h
 ready at the instant the window closed merely QUEUED. The grace is not a CI tolerance and must not be
 grown into one.
 
+### When a window is not needed, it can fail a correct test (#526, #531 — B24)
+
+The two reasons above were measured at the sites #301 migrated. They are not properties of every
+window, so re-measure them before preserving a window at a new fixture. 092's `DispositionFixture`
+did not need its windows:
+
+- **A fixed window can fail a correct test.** `run_window_then_ready` stops after the window plus
+  one slice. On a slow runner (`windows-msvc-asan`, with a FileStore-backed `open()`) the operation
+  had not finished in time and the cell failed. A plain `run_for(W)` followed by an `ASSERT` fails
+  the same way (#531). Widening the window or the grace is not the fix; see the paragraph above.
+- **Whether a detached task needs the window is a measurement.** At that fixture's logon site, the
+  liveness loop's first resumption runs *before* the awaited future becomes ready, so stopping at
+  readiness strands nothing. How to measure: replace each pump with a full window that counts the
+  handlers dispatched after readiness, and seed one post to prove the probe can count. The tools are
+  in the parent repo, `decisions/speckit/526-531-fixed-window-pumps-tools/`.
+  The result carries over to a slower runner only while the context is single-threaded and nothing
+  the operations start waits on wall-clock time.
+- **Where no window is needed:** call `pump_until_ready` with a site label, then `drain_ready()`
+  before reading results. A handler posted after readiness then still runs before a negative
+  assertion such as "sends no Reject". On a context with outstanding work a window always runs to its
+  end, so this is also much faster.
+- **A miss in a setup helper must be fatal when its callers stop on `HasFatalFailure()`.** With a
+  nonfatal report, the cell went on against a session that never reached Active. Every later wait
+  then spent its whole budget.
+- **Declare the `io_context` after everything its frames reference (#531).** A fatal assertion returns
+  while a frame is still suspended, and the frame is destroyed with the context. A context declared
+  last is destroyed first, while those objects are alive. A hang then reports cleanly instead of as a
+  heap-use-after-free.
+
+Rejected, on the record:
+- **Widening the window or the grace.** No static value is safe.
+- **A local "MSVC ASan" build on the debug Conan toolchain** (dependencies uninstrumented,
+  `_DISABLE_*_ANNOTATION` defined to link). The base test hung there too, so that build is evidence
+  neither way.
+
 ### The SECOND shape: `ioc.run()` with no window at all (#289 batch 17)
 
 `run_window_then_ready` is not the whole story, and a reader who finds only it will reach for the
