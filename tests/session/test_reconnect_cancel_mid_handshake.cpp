@@ -46,7 +46,6 @@
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport.hpp>
 #include <fixpp/transport/transport_factory.hpp>
-#include <future>
 #include <memory>
 #include <memory_resource>
 #include <span>
