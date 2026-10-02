@@ -970,9 +970,10 @@ jobs:
       # program two definitions of the class (ODR, no diagnostic required; #511).
       # ci/odr-hooks-census.py preprocesses every header without and with the
       # macro and fails on a definition that differs. It exits 2 on any
-      # preprocessing error, an empty root, or a positive control that shows the
-      # macro had no effect, so it cannot pass by failing. Its rules are pinned
-      # buildless in ci-script-pins (ci/test-odr-hooks-census.sh).
+      # preprocessing error, an empty root, a positive control that shows the
+      # macro had no effect, and, in a header that changes with the macro, a head
+      # of this tree it cannot read, so it cannot pass by failing. Its rules are pinned buildless in ci-script-pins
+      # (ci/test-odr-hooks-census.sh).
       #
       # WHY HERE: it needs this tree's compile_commands.json and the generated
       # headers, i.e. a Conan install, a configure and the codegen, which the

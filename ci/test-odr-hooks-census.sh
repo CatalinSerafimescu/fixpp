@@ -189,7 +189,7 @@ check "T9 a gated member of a NESTED class reports it and its enclosing class" 1
   "^include/fx/widget.hpp: fx::Outer::Inner" "^include/fx/widget.hpp: fx::Outer"
 
 # A brace inside a raw string literal that spans lines is text, not scope: read line by line,
-# the `}` would close Widget before the gated member, which would then be namespace scope.
+# the `}` would close Widget before the gated member.
 t="$(mk t23)"; sed -i 's/^    int a;$/    int a;\n    static constexpr const char* text = R"x(\n}\n)x";\n#ifdef FIXPP_TEST_HOOKS\n    int seeded;\n#endif/' "$t/include/fx/widget.hpp"
 check "T23 a raw string spanning lines does not end the class early" 1 "$t" "^include/fx/widget.hpp: fx::Widget"
 
@@ -484,6 +484,302 @@ __extension__ struct Ext {
 }  // namespace fx
 EOF
 
+# ── a brace inside a class head is an expression, not the body ──────────────────────────────
+# A `{` met while a `(` or `[` of the head is open, or a template `<` of the head, or where a
+# requires-expression's body goes, belongs to the head. Read as a scope, it would close a fake
+# definition early and leave the real body outside any type definition.
+fixture "T46a a lambda inside an open paren of a class head (alignas)" include/fx/h_paren_lambda.hpp -std=c++20 \
+  "^include/fx/h_paren_lambda.hpp: fx::PL" <<'EOF'
+namespace fx {
+struct alignas(sizeof(decltype([] {})) * 8) PL {
+    int a;
+#ifdef FIXPP_TEST_HOOKS
+    int seeded;
+#endif
+};
+}  // namespace fx
+EOF
+fixture "T46b a lambda inside a base clause's template argument" include/fx/h_base_lambda.hpp -std=c++20 \
+  "^include/fx/h_base_lambda.hpp: fx::BL" <<'EOF'
+namespace fx {
+template <class> struct LB {};
+struct BL : LB<decltype([] {})> {
+    int a;
+#ifdef FIXPP_TEST_HOOKS
+    int seeded;
+#endif
+};
+}  // namespace fx
+EOF
+fixture "T47 a braced default argument in a template head" include/fx/h_tmpl_brace.hpp -std=c++17 \
+  "^include/fx/h_tmpl_brace.hpp: fx::TB" <<'EOF'
+namespace fx {
+template <int N = int{3}>
+struct TB {
+    int a = N;
+#ifdef FIXPP_TEST_HOOKS
+    int seeded = 0;
+#endif
+};
+}  // namespace fx
+EOF
+fixture "T48 a braced template argument in a base clause, no paren open" include/fx/h_base_brace.hpp -std=c++20 \
+  "^include/fx/h_base_brace.hpp: fx::BB" <<'EOF'
+namespace fx {
+struct NP { int v; };
+template <NP> struct NB {};
+struct BB : NB<NP{1}> {
+    int a;
+#ifdef FIXPP_TEST_HOOKS
+    int seeded;
+#endif
+};
+}  // namespace fx
+EOF
+fixture "T49 a requires-expression before the class key" include/fx/h_requires.hpp -std=c++20 \
+  "^include/fx/h_requires.hpp: fx::RQ" <<'EOF'
+namespace fx {
+template <class T>
+requires requires {
+    typename T::base;
+#ifdef FIXPP_TEST_HOOKS
+    typename T::hook;
+#endif
+}
+struct RQ {
+    int a;
+};
+}  // namespace fx
+EOF
+fixture "T62 a braced template argument in a class name's specialization arguments" include/fx/h_spec_brace.hpp \
+  -std=c++20 "^include/fx/h_spec_brace.hpp: fx::NS<NP{1}>" <<'EOF'
+namespace fx {
+struct NP { int v; };
+template <NP> struct NS;
+template <>
+struct NS<NP{1}> {
+    int a;
+#ifdef FIXPP_TEST_HOOKS
+    int seeded;
+#endif
+};
+}  // namespace fx
+EOF
+fixture "T64 a member class template of a constrained class template, defined out of class" \
+  include/fx/h_two_heads.hpp -std=c++20 "^include/fx/h_two_heads.hpp: fx::CT<T>::In" <<'EOF'
+namespace fx {
+template <class T>
+requires (sizeof(T) > 0)
+struct CT {
+    template <bool B> struct In;
+};
+template <class T>
+requires (sizeof(T) > 0)
+template <bool B>
+struct CT<T>::In {
+    int a;
+#ifdef FIXPP_TEST_HOOKS
+    int seeded;
+#endif
+};
+}  // namespace fx
+EOF
+fixture "T65 a nested requirement is not read as a class head" include/fx/h_nested_req.hpp -std=c++20 \
+  "^include/fx/h_nested_req.hpp: fx::NY" <<'EOF'
+namespace fx {
+template <class T>
+concept NC = requires {
+    requires !requires { typename T::absent; };
+};
+struct NY {
+    int a;
+#ifdef FIXPP_TEST_HOOKS
+    int seeded;
+#endif
+};
+}  // namespace fx
+EOF
+# Controls: the head rules must not swallow a function body and then misread the next head.
+fixture "T50 a struct after a function with a trailing requires-clause" include/fx/h_trailing.hpp -std=c++20 \
+  "^include/fx/h_trailing.hpp: fx::TY" <<'EOF'
+namespace fx {
+template <class T>
+void tr() requires (sizeof(T) > 0) {}
+struct TY {
+    int a;
+#ifdef FIXPP_TEST_HOOKS
+    int seeded;
+#endif
+};
+}  // namespace fx
+EOF
+fixture "T51 a struct after an operator< definition" include/fx/h_oplt.hpp -std=c++17 \
+  "^include/fx/h_oplt.hpp: fx::OY" <<'EOF'
+namespace fx {
+struct OA {};
+inline bool operator<(OA, OA) { return false; }
+struct OY {
+    int a;
+#ifdef FIXPP_TEST_HOOKS
+    int seeded;
+#endif
+};
+}  // namespace fx
+EOF
+
+# ── a class head the rules cannot read is refused (2), never read as clean ──────────────────
+# A `<` after a name opens a template argument list. After a name that is not a template it is
+# a comparison, and the census cannot tell the two apart; the list it counted then does not
+# close, and that is refused. Each refusal has a parenthesised twin that must be read (1).
+# fresh <name> <rel> <std> <want-rc> <want>... — fixture() with any wanted exit code
+fresh() {
+  local name="$1" rel="$2" std="$3" rc="$4" t; shift 4
+  t="$(mk "fx${name%% *}")"; put "$t/$rel"
+  wellformed "$name" "$std" "$t/$rel" && check "$name" "$rc" "$t" "$@"
+}
+fresh "T56 a comparison in a template head is refused" include/fx/h_tmpl_lt.hpp -std=c++17 2 \
+  "ERROR include/fx/h_tmpl_lt.hpp: a template argument list in a class head does not close" <<'EOF'
+namespace fx {
+constexpr int M = 2;
+template <int N = M < 3>
+struct TL {
+    int a = N;
+#ifdef FIXPP_TEST_HOOKS
+    int seeded = 0;
+#endif
+};
+}  // namespace fx
+EOF
+fixture "T57 the same comparison in parentheses is read" include/fx/h_tmpl_lt_paren.hpp -std=c++17 \
+  "^include/fx/h_tmpl_lt_paren.hpp: fx::TP" <<'EOF'
+namespace fx {
+constexpr int M = 2;
+template <int N = (M < 3)>
+struct TP {
+    int a = N;
+#ifdef FIXPP_TEST_HOOKS
+    int seeded = 0;
+#endif
+};
+}  // namespace fx
+EOF
+fresh "T58 a comparison in a base clause's template argument is refused" include/fx/h_base_lt.hpp -std=c++17 2 \
+  "ERROR include/fx/h_base_lt.hpp: a template argument list in a class head does not close" <<'EOF'
+namespace fx {
+constexpr int M = 2;
+template <bool> struct LT {};
+struct BT : LT<M < 3> {
+    int a;
+#ifdef FIXPP_TEST_HOOKS
+    int seeded;
+#endif
+};
+}  // namespace fx
+EOF
+fixture "T59 the same base-clause comparison in parentheses is read" include/fx/h_base_lt_paren.hpp -std=c++17 \
+  "^include/fx/h_base_lt_paren.hpp: fx::BP" <<'EOF'
+namespace fx {
+constexpr int M = 2;
+template <bool> struct LT {};
+struct BP : LT<(M < 3)> {
+    int a;
+#ifdef FIXPP_TEST_HOOKS
+    int seeded;
+#endif
+};
+}  // namespace fx
+EOF
+# ...and what the census does read inside a template list: a `<` after a literal is a
+# comparison, and a lambda's `->` is not a `>`.
+fixture "T68 a comparison after a literal in a template head is read" include/fx/h_tmpl_lit.hpp -std=c++17 \
+  "^include/fx/h_tmpl_lit.hpp: fx::LC" <<'EOF'
+namespace fx {
+template <bool B = 1 < 2>
+struct LC {
+    int a = B;
+#ifdef FIXPP_TEST_HOOKS
+    int seeded = 0;
+#endif
+};
+}  // namespace fx
+EOF
+fixture "T69 a lambda with a trailing return type in a template head is read" include/fx/h_tmpl_arrow.hpp \
+  -std=c++20 "^include/fx/h_tmpl_arrow.hpp: fx::LA" <<'EOF'
+namespace fx {
+template <auto F = []() -> int { return 1; }>
+struct LA {
+    int a = F();
+#ifdef FIXPP_TEST_HOOKS
+    int seeded = 0;
+#endif
+};
+}  // namespace fx
+EOF
+# A requires-clause holding a token outside the clause's grammar. The census reads each kind of
+# primary the grammar allows a requires-clause (a parenthesised expression, a requires-
+# expression, an id-expression, a literal), so this fixture is ill-formed ON PURPOSE, and
+# illformed() checks that it is: the cell pins the default branch, which is a refusal.
+# illformed <name> <std> <file> — <file> must FAIL to compile in both states
+illformed() {
+  local name="$1" std="$2" f="$3" d
+  [ -n "${ODR_CENSUS_UNDER_TEST:-}" ] && return 0
+  for d in "" "-DFIXPP_TEST_HOOKS"; do
+    if "$CXX" "$std" -fsyntax-only -x c++ $d "$f" >/dev/null 2>&1; then
+      echo "FAIL  $name: its fixture compiles${d:+ with $d}, so it does not pin the default branch"
+      fail=$((fail+1)); return 1
+    fi
+  done
+}
+t="$(mk t60)"; put "$t/include/fx/h_req_bad.hpp" <<'EOF'
+namespace fx {
+template <class T> concept RC = true;
+template <class T>
+requires !RC<T>
+struct RB {
+    int a;
+#ifdef FIXPP_TEST_HOOKS
+    int seeded;
+#endif
+};
+}  // namespace fx
+EOF
+illformed "T60 a requires-clause the census cannot read is refused" -std=c++20 "$t/include/fx/h_req_bad.hpp" \
+  && check "T60 a requires-clause the census cannot read is refused" 2 "$t" \
+    "ERROR include/fx/h_req_bad.hpp: a brace in a class head the census cannot read"
+
+# ── a refusal is for the tree's own headers only ─────────────────────────────────────────────
+# A third-party header cannot depend on the macro, so a head the rules cannot read there must
+# not fail the scan (a dependency bump would turn it red). Here a header outside the source
+# dir, reached through -isystem, holds T56's refused shape, and the header that includes it
+# changes with the macro, so it is parsed in both states.
+t="$(mk t67)"; ext="$TMP/t67ext"
+put "$ext/ext_lt.hpp" <<'EOF'
+#pragma once
+namespace ext {
+constexpr int M = 2;
+template <int N = M < 3>
+struct EL { int a = N; };
+}  // namespace ext
+EOF
+put "$t/include/fx/uses_ext.hpp" <<'EOF'
+#pragma once
+#include <ext_lt.hpp>
+#ifdef FIXPP_TEST_HOOKS
+void seeded_ns_decl() noexcept;
+#endif
+EOF
+db "$t" "$(cmd "$t" src/a.cpp "-isystem $ext"), $(cmd "$t" tests/t.cpp '-DFIXPP_TEST_HOOKS')"
+if [ -n "${ODR_CENSUS_UNDER_TEST:-}" ] \
+    || { "$CXX" -std=c++17 -isystem "$ext" -fsyntax-only -x c++ "$t/include/fx/uses_ext.hpp" \
+         && "$CXX" -std=c++17 -isystem "$ext" -DFIXPP_TEST_HOOKS -fsyntax-only -x c++ \
+              "$t/include/fx/uses_ext.hpp"; }; then
+  check "T67 a head the rules cannot read in a THIRD-PARTY header is not refused" 0 "$t" \
+    "$NODIV" "+ void seeded_ns_decl() noexcept;"
+else
+  echo "FAIL  T67 a head the rules cannot read in a THIRD-PARTY header: its fixture does not compile"
+  fail=$((fail+1))
+fi
+
 # ── how the macro reaches the database: every spelling is stripped from the base flags ───────
 # If one leaked into the shared define set, both runs would define the macro and every header
 # would compare equal. The positive control then refuses (2), so a 1 here proves the strip.
@@ -588,13 +884,13 @@ PY
   }
   X01="exit 0, wanted 1"
   mutant T5 "$X01" "the old rule: a head holding '=' or '(' is not a class" \
-    '    """-> ('"'"'namespace'"'"'|'"'"'type'"'"'|'"'"'other'"'"', name) for the tokens before a `{`."""' \
-    '    """-> ('"'"'namespace'"'"'|'"'"'type'"'"'|'"'"'other'"'"', name) for the tokens before a `{`."""
+    '    """-> (kind, name) for the tokens before a `{`: read_head()'"'"'s, or ('"'"'expr'"'"', '"'"'paren'"'"')."""' \
+    '    """-> (kind, name) for the tokens before a `{`: read_head()'"'"'s, or ('"'"'expr'"'"', '"'"'paren'"'"')."""
     if "=" in h or "(" in h:
         return "other", ""'
   mutant T6 "$X01" "the old rule, again: alignas(...) hides the class" \
-    '    """-> ('"'"'namespace'"'"'|'"'"'type'"'"'|'"'"'other'"'"', name) for the tokens before a `{`."""' \
-    '    """-> ('"'"'namespace'"'"'|'"'"'type'"'"'|'"'"'other'"'"', name) for the tokens before a `{`."""
+    '    """-> (kind, name) for the tokens before a `{`: read_head()'"'"'s, or ('"'"'expr'"'"', '"'"'paren'"'"')."""' \
+    '    """-> (kind, name) for the tokens before a `{`: read_head()'"'"'s, or ('"'"'expr'"'"', '"'"'paren'"'"')."""
     if "(" in h:
         return "other", ""'
   mutant T7 "$X01" "an enumeration is not a type definition" \
@@ -619,7 +915,7 @@ PY
     "a nested definition is not part of its enclosing class" \
     '        for acc in toks_by_frame:' \
     '        for acc in toks_by_frame[-1:]:'
-  mutant T23 "$X01" "a raw string literal cannot span lines" \
+  mutant T23 "exit 2, wanted 1" "a raw string literal cannot span lines" \
     '(?:u8|u|U|L)?R"([^(\s]*)\((?:.|\n)*?\)\1"' \
     '(?:u8|u|U|L)?R"([^(\s]*)\(.*?\)\1"'
   mutant T25 "$X01" "a .h header is not scanned" \
@@ -665,9 +961,102 @@ PY
     '    cxx_entries = sorted((e for e in db if e.get("file", "").endswith(CXX_EXT)),
                          key=lambda e: e["file"])' \
     '    cxx_entries = [e for e in db if e.get("file", "").endswith(CXX_EXT)]'
+  # A brace in a class head: each rule broken alone. T46b sits inside both an open paren and a
+  # base clause's open template list, so it is the end-to-end cell, with no mutant of its own.
+  mutant T46a "exit 2, wanted 1" "a brace inside an open paren of a class head opens a scope" \
+    '    if kind != "other" and paren_open(h):' \
+    '    if False:'
+  mutant T47 "$X01" "a brace inside a template head opens a scope" \
+    '            i = skip_angle(h, i + 1)
+            if i is None:
+                return "expr", "angle"' \
+    '            i = skip_angle(h, i + 1)
+            if i is None:
+                return "other", ""'
+  mutant T62 "$X01" "a brace inside a class name's template arguments opens a scope" \
+    '            if j is None:
+                return "expr", "angle"
+            name += h[i:j]' \
+    '            if j is None:
+                return "other", ""
+            name += h[i:j]'
+  # A type body read early is refused by what follows its `}`; this mutant is what shows it.
+  mutant T48 "exit 2, wanted 1" "a brace inside a base clause's template argument opens a scope" \
+    '    if i < len(h) and angle_depth(h, i + 1)[1]:' \
+    '    if False:'
+  mutant T49 "$X01" "a requires-expression's body before the class key opens a scope" \
+    '            if why:
+                return "expr", why
+            templated = False' \
+    '            if why == "angle":
+                return "expr", why
+            if why:
+                return "other", ""
+            templated = False'
+  mutant T50 "$X01" "every brace in a head holding requires is an expression" \
+    '    kind, name = read_head(h)
+' \
+    '    kind, name = read_head(h)
+    if "requires" in h:
+        return "expr", "requires"
+'
+  mutant T51 "exit 2, wanted 1" "template lists are counted in every head" \
+    '    kind, name = read_head(h)
+' \
+    '    kind, name = read_head(h)
+    if kind == "other" and angle_depth(h, 0)[1]:
+        return "expr", "angle"
+'
+  mutant T56 "exit 0, wanted 2" "a template list still open where its head ends is not refused" \
+    '        if classify_head(head) == ("expr", "angle"):' \
+    '        if False:'
+  mutant T58 "exit 0, wanted 2" "a base clause's template list still open where its head ends is not refused" \
+    '        if classify_head(head) == ("expr", "angle"):' \
+    '        if False:'
+  mutant T57 "exit 2, wanted 1" "a parenthesised group inside a template list is not skipped" \
+    '        if t in OPEN:
+            j = skip_group(h, i)
+            if j is None:
+                return len(h), depth
+            i = j
+            continue' \
+    '        if False:
+            pass'
+  mutant T59 "exit 2, wanted 1" "a parenthesised group inside a base clause's template list is not skipped" \
+    '        if t in OPEN:
+            j = skip_group(h, i)
+            if j is None:
+                return len(h), depth
+            i = j
+            continue' \
+    '        if False:
+            pass'
+  mutant T68 "exit 2, wanted 1" "every < in a template list opens a nested one" \
+    '        if t == "<" and i > 0 and IDENT.match(h[i - 1]):' \
+    '        if t == "<":'
+  mutant T69 "$X01" "a lambda's -> closes a template list" \
+    '        if t == "-" and i + 1 < len(h) and h[i + 1] == ">":' \
+    '        if False:'
+  mutant T60 "exit 0, wanted 2" "a requires-clause the census cannot read is read as other" \
+    '            if why == "unread":
+                return "refuse", NO_READ' \
+    '            if why == "unread":
+                return "other", ""'
+  mutant T64 "$X01" "one requires-clause ends the template heads" \
+    '            templated = False  # one clause per template head' \
+    '            break  # one clause per template head'
+  mutant T65 "exit 2, wanted 1" "a head that starts with requires is read as a requires-clause" \
+    '(h[i] == "template" or templated and h[i] == "requires")' \
+    '(h[i] == "template" or h[i] == "requires")'
+  mutant T67 "exit 2, wanted 0" "a head the rules cannot read is refused in a third-party header too" \
+    '    return os.path.realpath(origin).startswith(CTX["src"])' \
+    '    return True'
   mutant T15 "exit 0, wanted 2" "a preprocessing error does not fail the run" \
-    '    if refusals or errors:' \
-    '    if refusals:'
+    '    if refusals or errors or unread:' \
+    '    if refusals or unread:'
+  mutant T56 "exit 0, wanted 2" "a head the rules cannot read does not fail the run" \
+    '    if refusals or errors or unread:' \
+    '    if refusals or errors:'
   mutant T18 "exit 0, wanted 2" "an empty root is not refused" \
     '        if n == 0:' \
     '        if False:'

@@ -13,10 +13,13 @@ METHOD. For every file under `include/`, `src/` and `tests/` whose suffix is in 
 a one-line TU that includes the file, once without the macro and once with it, and parses
 every class/struct/union/enum DEFINITION out of both outputs. A definition is recognised by
 its head: before the class key it may carry only an access label, the specifiers in
-DECL_SPECIFIERS, `extern` with or without a linkage string, attributes, `using A =` and a
-template head. A record after any other token is read as outside any type definition. A
-definition is identified by its enclosing scopes plus its name (specialization arguments
-included). The verdict:
+DECL_SPECIFIERS, `extern` with or without a linkage string, attributes, `using A =` and
+template heads, each optionally followed by a requires-clause. A record after any other token
+is read as outside any type definition. A `{` inside such a head is an expression, not the
+body, when an open `(` or `[` of the head holds it, or an open template list of the template
+head, the class name or the base clause, or when it opens a requires-expression of the
+requires-clause; a `<` opens a template list only after a name. A definition is identified by
+its enclosing scopes plus its name (specialization arguments included). The verdict:
 
   * DIVERGENCE (exit 1): a definition present in BOTH outputs whose tokens differ, head
     included, so a gated `final` or base clause counts as well as a gated member. A gated
@@ -46,7 +49,13 @@ FAILS CLOSED (exit 2), and still prints whatever it found, when:
     header holding one gated member is run through the same compiler and flags. If the macro
     did not take effect (a base flag already defines it, a forced include undefines it) every
     header would compare equal and the scan would be clean by construction; the probe is what
-    tells those apart.
+    tells those apart;
+  * in a header that changes with the macro, a head under the source dir the rules above
+    cannot read: a template list of a class head still open where the head ends (a `<` after
+    a name that is not a template, such as `template <int N = M < 3>`, is counted as a list;
+    parenthesise the comparison), a requires-clause token outside the clause's grammar, or a
+    type body followed by a token no declarator starts with (a brace in the head was read as
+    the body). A third-party header cannot depend on the macro, so its heads are not refused.
 
 Self-test, buildless, with the arms each refusal and verdict needs: `ci/test-odr-hooks-census.sh`.
 """
@@ -199,38 +208,157 @@ DECL_SPECIFIERS = ("typedef", "__extension__", "static", "constexpr", "constinit
                    "volatile", "inline", "thread_local", "mutable")
 
 
-def skip_group(h, i, open_, close):
-    """h[i] == open_; return the index after its balanced close (or len(h))."""
-    depth, parens = 0, 0
-    while i < len(h):
-        if open_ == "<" and h[i] in "()":
-            parens += 1 if h[i] == "(" else -1
-        elif parens:
-            pass
-        elif h[i] == open_:
+OPEN = ("(", "[", "{")
+CLOSE = (")", "]", "}")
+IDENT = re.compile(r"[A-Za-z_]\w*$")
+LITERAL = re.compile(r"""\d|(?:u8|u|U|L)?R?["']""")
+# What may follow the `}` of a type definition: its `;`, or a declarator, which starts with a
+# name (a cv-qualifier and an attribute keyword are names too), `*`, `&`, `(` or `[`.
+AFTER_BODY = (";", "*", "&", "(", "[")
+NO_LIST = "a template argument list in a class head does not close"
+NO_READ = "a brace in a class head the census cannot read"
+
+
+def skip_group(h, i):
+    """h[i] is `(`, `[` or `{`: the index after its balanced close (the three nest in one
+    another), or None when it is still open at the end of h."""
+    depth = 0
+    for j in range(i, len(h)):
+        if h[j] in OPEN:
             depth += 1
-        elif h[i] == close:
+        elif h[j] in CLOSE:
             depth -= 1
             if depth == 0:
-                return i + 1
+                return j + 1
+    return None
+
+
+def angle_depth(h, i, depth=0, stop=False):
+    """-> (index, depth) after reading h[i:] for template argument lists, starting at <depth>:
+    with <stop>, it stops after the `>` that brings depth to 0, else it reads to the end of h.
+    A `(`, `[` or `{` group is skipped whole, `->` is an arrow, and a `<` opens a list only
+    after a name; after anything else it is a comparison."""
+    while i < len(h):
+        t = h[i]
+        if t in OPEN:
+            j = skip_group(h, i)
+            if j is None:
+                return len(h), depth
+            i = j
+            continue
+        if t == "-" and i + 1 < len(h) and h[i + 1] == ">":
+            i += 2
+            continue
+        if t == "<" and i > 0 and IDENT.match(h[i - 1]):
+            depth += 1
+        elif t == ">" and depth:
+            depth -= 1
+            if depth == 0 and stop:
+                return i + 1, 0
         i += 1
-    return i
+    return i, depth
+
+
+def skip_angle(h, i):
+    """h[i] == `<` opening a template parameter or argument list: the index after its `>`, or
+    None when it is still open at the end of h."""
+    j, depth = angle_depth(h, i + 1, 1, stop=True)
+    return None if depth else j
 
 
 def skip_attrs(h, i):
     while i < len(h):
         if h[i] == "[" and i + 1 < len(h) and h[i + 1] == "[":
-            i = skip_group(h, i, "[", "]")
+            j = skip_group(h, i)
         elif h[i] in ("alignas", "__attribute__", "__declspec", "_Alignas") and i + 1 < len(h) \
                 and h[i + 1] == "(":
-            i = skip_group(h, i + 1, "(", ")")
+            j = skip_group(h, i + 1)
         else:
             return i
+        if j is None:
+            return len(h)
+        i = j
     return i
 
 
+def skip_requires(h, i):
+    """h[i] == `requires`, a requires-clause before the class key: its primaries, each a
+    parenthesised expression, a requires-expression, an id-expression or a literal, joined by
+    `&&` and `||`. -> (index of the first token after the clause, None), or (None, why) when
+    the head ends inside it: why is 'requires' where a requires-expression's body opens,
+    'angle' inside a template argument list of the clause, and 'unread' where the clause's
+    grammar has no such token."""
+    n = len(h)
+    i += 1
+    while True:
+        if i >= n:
+            return None, "unread"
+        if h[i] == "(":
+            i = skip_group(h, i)
+        elif h[i] == "requires":
+            i += 1
+            if i < n and h[i] == "(":
+                i = skip_group(h, i)
+            if i is not None and i >= n:
+                return None, "requires"
+            i = skip_group(h, i) if i is not None and h[i] == "{" else None
+        elif h[i] == "::" or IDENT.match(h[i]):
+            if h[i] == "::":
+                i += 1
+            while i < n and IDENT.match(h[i]):
+                i += 1
+                if i < n and h[i] == "<":
+                    i = skip_angle(h, i)
+                    if i is None:
+                        return None, "angle"
+                if i < n and h[i] == "::":
+                    i += 1
+                    if i < n and h[i] == "template":
+                        i += 1
+                else:
+                    break
+        elif LITERAL.match(h[i]):
+            i += 1
+        else:
+            return None, "unread"
+        if i is None:
+            return None, "unread"
+        if i + 1 < n and h[i] == h[i + 1] and h[i] in ("&", "|"):
+            i += 2
+            continue
+        return (i, None) if i < n else (None, "unread")
+
+
 def classify_head(h):
-    """-> ('namespace'|'type'|'other', name) for the tokens before a `{`."""
+    """-> (kind, name) for the tokens before a `{`: read_head()'s, or ('expr', 'paren')."""
+    kind, name = read_head(h)
+    # A `{` while a `(` or `[` is open is an expression when the head reads as anything but
+    # `other`: no declaration scope opens inside either. In an `other` head (a lambda passed
+    # to a call) the `{` stays a scope, so a class defined in that lambda is still keyed. A `)`
+    # or `]` with none open (a for-statement's tail, after its `;` reset the head) is ignored.
+    if kind != "other" and paren_open(h):
+        return "expr", "paren"
+    return kind, name
+
+
+def paren_open(h):
+    opened = {"(": 0, "[": 0}
+    for t in h:
+        if t in opened:
+            opened[t] += 1
+        elif t in (")", "]"):
+            k = "(" if t == ")" else "["
+            opened[k] = max(0, opened[k] - 1)
+    return bool(opened["("] or opened["["])
+
+
+def read_head(h):
+    """-> (kind, name) for the tokens before a `{`, by the class-head grammar.
+
+    kind is 'namespace'; 'type', name being the type's name ("<anon>" for an unnamed one);
+    'other'; 'expr' when the `{` opens an expression inside the head rather than a scope (name
+    says what holds it: 'angle' or 'requires'); or 'refuse' when the head reads as a class head
+    up to a token the rules below give no place (name is the reason)."""
     i = 0
     # The tokens a definition head may carry before its class key: an access label, the
     # declaration specifiers of `static struct X {...} x;` and its kin, attributes, a linkage
@@ -256,14 +384,28 @@ def classify_head(h):
             break
     if i < len(h) and h[i] == "namespace":
         return "namespace", "".join(t for t in h[skip_attrs(h, i + 1):] if t != "inline")
-    while i < len(h) and h[i] == "template":
-        i = skip_group(h, i + 1, "<", ">") if i + 1 < len(h) and h[i + 1] == "<" else i + 1
-    if i < len(h) and h[i] == "requires":
-        depth = 0
-        while i < len(h) and not (depth == 0 and h[i] in CLASS_KEYS + ("enum",)):
-            depth += h[i] == "("
-            depth -= h[i] == ")"
-            i += 1
+    # From here on, a `{` inside an open template list of a template head, of the class name or
+    # of the base clause is an expression (`template <int N = int{3}>`, `struct X : B<P{1}>`).
+    # Template heads come first, each optionally followed by a requires-clause: the out-of-class
+    # definition of a member template of a constrained class template carries two. A head that
+    # STARTS with `requires` is a nested requirement inside a requires-expression, not a class
+    # head, so a requires-clause is read only after a template head.
+    templated = False
+    while i < len(h) and (h[i] == "template" or templated and h[i] == "requires"):
+        if h[i] == "requires":
+            i, why = skip_requires(h, i)
+            if why == "unread":
+                return "refuse", NO_READ
+            if why:
+                return "expr", why
+            templated = False  # one clause per template head
+        elif i + 1 < len(h) and h[i + 1] == "<":
+            i = skip_angle(h, i + 1)
+            if i is None:
+                return "expr", "angle"
+            templated = True
+        else:
+            i += 1  # `template` without a list: an explicit instantiation
     i = skip_attrs(h, i)
     if i >= len(h) or h[i] not in CLASS_KEYS + ("enum",):
         return "other", ""
@@ -275,12 +417,13 @@ def classify_head(h):
     name = []
     while i < len(h):
         t = h[i]
-        if t == "::" or (re.match(r"[A-Za-z_]\w*$", t) and t != "final"
-                         and (not name or name[-1] == "::")):
+        if t == "::" or (IDENT.match(t) and t != "final" and (not name or name[-1] == "::")):
             name.append(t)
             i += 1
         elif t == "<" and name:
-            j = skip_group(h, i, "<", ">")
+            j = skip_angle(h, i)
+            if j is None:
+                return "expr", "angle"
             name += h[i:j]
             i = j
         else:
@@ -289,12 +432,16 @@ def classify_head(h):
         i += 1
     if i < len(h) and h[i] != ":":
         return "other", ""  # e.g. `struct X* f()`, `struct X x =`: not a definition head
+    if i < len(h) and angle_depth(h, i + 1)[1]:
+        return "expr", "angle"  # inside a base clause's template argument list
     return "type", " ".join(name).replace(" :: ", "::").replace(" ", "") or "<anon>"
 
 
-def parse(text):
-    """-> (lines, origins, defs, line_type) — defs: key -> (first_line, last_line, origin,
-    token_text); line_type[i]: key of the innermost type definition open at line i, or None."""
+def parse(text, own=lambda origin: False):
+    """-> (lines, origins, defs, line_type, unread) — defs: key -> (first_line, last_line,
+    origin, token_text); line_type[i]: key of the innermost type definition open at line i, or
+    None; unread: (origin, reason, text) for each head, in an origin `own` accepts, that the
+    rules could not read."""
     lines, origins = [], []
     cur = "?"
     for ln in text.split("\n"):
@@ -305,26 +452,51 @@ def parse(text):
         if ln.strip() and not ln.lstrip().startswith("#"):
             lines.append(ln)
             origins.append(cur)
-    stack, head, head_line, defs, ordinal, line_type = [], [], 0, {}, {}, []
+    stack, head, head_line, defs, ordinal, line_type, unread = [], [], 0, {}, {}, [], []
     toks_by_frame = []
+    expr = 0  # depth of the expression-brace group being read into the head, 0 outside one
     # Tokenised as ONE text, so a raw string literal spanning lines is one token.
     body = "\n".join(lines)
     starts = [0]
     for ln in lines:
         starts.append(starts[-1] + len(ln) + 1)
+    toks = [(m.group(0), m.start()) for m in TOK.finditer(body)]
 
     def reach(li):
         while len(line_type) <= li:
             line_type.append(next((f[1] for f in reversed(stack) if f[0] == "type"), None))
 
-    for m in TOK.finditer(body):
-        li = bisect.bisect_right(starts, m.start()) - 1
+    def refuse(origin, why, text):
+        if own(origin):
+            unread.append((origin, why, text[:100]))
+
+    def head_ends():
+        # A head ends at `;`, at a scope's `}` and at the end of the text. A template list
+        # still open there was a comparison counted as a list, and a `{` read as inside it may
+        # have been a class body.
+        if classify_head(head) == ("expr", "angle"):
+            refuse(origins[head_line], NO_LIST, " ".join(head))
+
+    for n, (t, pos) in enumerate(toks):
+        li = bisect.bisect_right(starts, pos) - 1
         reach(li)
-        t = m.group(0)
         for acc in toks_by_frame:
             acc.append(t)
+        if expr:
+            head.append(t)
+            expr += (t == "{") - (t == "}")
+            continue
         if t == "{":
             kind, name = classify_head(head)
+            if kind == "expr":
+                if not head:
+                    head_line = li
+                head.append(t)
+                expr = 1
+                continue
+            if kind == "refuse":
+                refuse(origins[head_line], name, " ".join(head))
+                kind = "other"
             path = "::".join(f[2] for f in stack if f[2])
             if kind == "type":
                 k = f"{path}::{name}" if path else name
@@ -340,20 +512,27 @@ def parse(text):
                 stack.append(("other", None, "{" + " ".join(head)[:60] + "}", li, None, None))
             head = []
         elif t == "}":
+            head_ends()
             if stack:
                 f = stack.pop()
                 if f[0] == "type":
                     toks_by_frame.pop()
                     defs[f[1]] = (f[3], li, f[4], " ".join(f[5]))
+                    nxt = toks[n + 1][0] if n + 1 < len(toks) else ""
+                    if nxt not in AFTER_BODY and not IDENT.match(nxt):
+                        refuse(f[4], f"a type body is followed by `{nxt}`: a brace in its head "
+                               "was read as the body", " ".join(f[5]))
             head = []
         elif t == ";":
+            head_ends()
             head = []
         else:
             if not head:
                 head_line = li
             head.append(t)
+    head_ends()
     reach(len(lines) - 1)
-    return lines, origins, defs, line_type
+    return lines, origins, defs, line_type, unread
 
 
 # ── one header ─────────────────────────────────────────────────────────────────────────────
@@ -380,10 +559,11 @@ def census(header):
         lines = (e0 if rc0 else e1).splitlines()
         err = ([ln for ln in lines if "error" in ln] or lines)[:2]
         return {"header": header, "status": "ERROR", "why": f"fails {which} {MACRO}", "err": err}
-    la, oa, da, ta = parse(a)
-    lb, ob, db, tb = parse(b)
+    la, oa, da, ta, ua = parse(a, own)
+    lb, ob, db, tb, ub = parse(b, own)
     if la == lb:
         return {"header": header, "status": "SAME"}
+    unread = sorted(set(ua) | set(ub))
     div, one = {}, {}
     for k in sorted(set(da) | set(db)):
         if k in da and k in db:
@@ -406,11 +586,18 @@ def census(header):
             for i in range(lo, hi):
                 if lt[i] is None:
                     other.append((lo_[i], sign, ls[i].strip()[:110]))
-    return {"header": header, "status": "DIFF", "div": div, "one": one, "other": other}
+    return {"header": header, "status": "DIFF", "div": div, "one": one, "other": other,
+            "unread": unread}
 
 
-def init(cxx, flags):
-    CTX["cxx"], CTX["flags"] = cxx, flags
+def own(origin):
+    """Whether <origin> lies under the source dir. Only there is a head the rules cannot read
+    refused: a third-party header cannot depend on the macro."""
+    return os.path.realpath(origin).startswith(CTX["src"])
+
+
+def init(cxx, flags, src):
+    CTX["cxx"], CTX["flags"], CTX["src"] = cxx, flags, os.path.realpath(src) + os.sep
 
 
 def main():
@@ -450,7 +637,7 @@ def main():
         if n == 0:
             refusals.append(f"{root}/ contributes no header under {src}")
 
-    init(cxx, flags)
+    init(cxx, flags, src)
     with tempfile.TemporaryDirectory() as td:
         probe = os.path.join(td, "fixpp_odr_census_probe.hpp")
         with open(probe, "w") as f:
@@ -463,13 +650,17 @@ def main():
                         + (f" ({r['why']}: {' | '.join(r['err'])})" if r["status"] == "ERROR"
                            else ""))
 
-    with ProcessPoolExecutor(max(1, o.jobs), initializer=init, initargs=(cxx, flags)) as ex:
+    with ProcessPoolExecutor(max(1, o.jobs), initializer=init, initargs=(cxx, flags, src)) as ex:
         results = list(ex.map(census, headers))
 
     rel = lambda p: os.path.relpath(p, src) if p.startswith(src) else p  # noqa: E731
     errors = [r for r in results if r["status"] == "ERROR"]
     for r in errors:
         print(f"ERROR {rel(r['header'])}: {r['why']}: {' | '.join(r['err'])}")
+    unread = sorted({(rel(o), why, text) for r in results if r["status"] == "DIFF"
+                     for o, why, text in r["unread"]})
+    for origin, why, text in unread:
+        print(f"ERROR {origin}: {why}" + (f": {text}" if text else ""))
     div, one, other = {}, {}, {}
     for r in results:
         if r["status"] != "DIFF":
@@ -501,7 +692,7 @@ def main():
             print(f"      {sign} {text}")
     for x in refusals:
         print(f"REFUSED: {x}")
-    if refusals or errors:
+    if refusals or errors or unread:
         return 2
     return 1 if div else 0
 
