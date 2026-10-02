@@ -14,6 +14,9 @@ status: stable
   after everything its coroutine frames reference. Rejected: widening the window or grace, and a
   hybrid local MSVC ASan build as evidence.
   Record: parent repo `decisions/speckit/526-531-fixed-window-pumps-verify.md`.
+  After the merge, `failure-classes.md` gained the owner-approved **class 18**: a failure report made
+  on the failure path, in a test destructor, must not throw, because a destructor is `noexcept`.
+  Record: parent repo `decisions/speckit/pr532-526-531-fixed-window-pumps-gateb.md`.
 
 - **2026-10-01 — fixpp#511 (B21), test access to private state of a public class.**
   `components/session.md`'s section is replaced. The owner's Gate A ruling makes the unconditional

@@ -758,6 +758,35 @@ shares the stand-in without being the thing passes the check.
 **Sibling.** Class 13 is an instrument keyed on an identifier that misses a *copy*. This is a gate
 keyed on an identifier that admits an *alias*. Same key, opposite direction.
 
+---
+
+### 18. A failure report on the failure path can itself fail, and take the run down with it
+
+Code that runs only when something has already gone wrong is the least exercised code in the tree.
+When the report is made from a context that cannot propagate an exception, a report that throws does
+not add a second failure to the first. It replaces both with `std::terminate`, and that loses the
+first diagnosis as well. In a test, the usual case is a destructor: it is implicitly `noexcept`.
+`ADD_FAILURE()` throws under `--gtest_throw_on_failure`, and so can any handler a teardown pump or
+drain dispatches.
+
+- **Trigger:** you are adding a report, pump, drain or other call that can dispatch handlers inside a
+  destructor, a `noexcept` function or a cleanup path. Also: a review prescribes one there.
+- **Procedure:**
+  - Put the release and the pump in an inner `try` that records only *that* it threw.
+  - Then run the fallback release and the drain.
+  - Then make **one** report, after the drain, with all of this inside an outer `catch (...)`.
+  - Label the report by the path that actually ran. A pump throw that the drain then recovered is not
+    a drain failure.
+  - House shape: `~InteropEngineFixture`.
+  - Grade it with three arms, one per catch and one control:
+    - a run under `--gtest_throw_on_failure` must abort on the cell's own failure, not in the destructor;
+    - a throwing handler posted before the pump must be reported, not terminate;
+    - a known UAF positive control proves the arms can see a teardown fault.
+- **Instance (fixpp#526, PR #532, Gate B rounds 2–4).** Round 2 added a bare report to a test
+  destructor. Round 3 made it throw-safe but labelled the caught-pump-throw path as a drain failure.
+  Round 4 caught that. Both defects were triage prescriptions applied verbatim. That is class 2's
+  shape: the replacement was itself a claim.
+
 ## How to query the instances
 
 The corpus is private and machine-local. From the parent repo:
