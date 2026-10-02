@@ -1021,16 +1021,29 @@ struct StateCell {
     StateCell(StateCell const&) = delete;
     StateCell& operator=(StateCell const&) = delete;
 
-    // A cell that stops early still completes the parked exchange, so no suspended
-    // frame outlives the session it references.
+    // Nothing may escape a destructor: a dispatched handler can throw, and so can
+    // ADD_FAILURE() under --gtest_throw_on_failure. A throw from the pump falls through
+    // to the drain and the report; the outer catch takes the report's own throw.
     ~StateCell() {
         if (logon.valid() && factory->last_store != nullptr) {
-            factory->last_store->release_parked();
-            if (!fixpp::test_support::pump_until_ready(fix.ioc, logon)) {
-                factory->last_store->release_parked();
-                fixpp::test_support::cancel_and_drain_or_report(fix.ioc, *fix.clock,
-                                                                "StateCell::~StateCell");
-                ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss << "StateCell::~StateCell";
+            try {
+                bool ready = false;
+                bool threw = false;
+                try {
+                    factory->last_store->release_parked();
+                    ready = fixpp::test_support::pump_until_ready(fix.ioc, logon);
+                } catch (...) {
+                    threw = true;
+                }
+                if (!ready) {
+                    factory->last_store->release_parked();
+                    fixpp::test_support::cancel_and_drain_or_report(fix.ioc, *fix.clock,
+                                                                    "StateCell::~StateCell");
+                    ADD_FAILURE() << (threw ? fixpp::test_support::kDrainThrew
+                                            : fixpp::test_support::kPumpBudgetMiss)
+                                  << "StateCell::~StateCell";
+                }
+            } catch (...) {
             }
         }
     }
