@@ -411,7 +411,7 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
 
 - Entering `Disconnected` without closing the transport, on paths other than the establishment timeout:
   a refused Logon, an unanswered TestRequest, and today's MaxMessageSize breach before FR-013. The plan
-  re-derives this. Only FR-006's expiry closes the transport here.
-- `test_request_threshold` is computed and never read (`run_liveness_loop`).
+  re-derives this. Only FR-006's expiry closes the transport here. Filed as fixpp#534 (batch B27).
+- `test_request_threshold` is computed and never read (`run_liveness_loop`). Filed as fixpp#535 (batch B27).
 - A resend-loop guard for a garbled frame retransmitted identically (§4.5.2's recommendation).
 - The size limit of the acceptor's bounded first-frame read.
