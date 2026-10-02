@@ -1022,8 +1022,7 @@ struct StateCell {
     StateCell& operator=(StateCell const&) = delete;
 
     // Nothing may escape a destructor: a dispatched handler can throw, and so can
-    // ADD_FAILURE() under --gtest_throw_on_failure. A throw from the pump falls through
-    // to the drain and the report; the outer catch takes the report's own throw.
+    // ADD_FAILURE() under --gtest_throw_on_failure.
     ~StateCell() {
         if (logon.valid() && factory->last_store != nullptr) {
             try {
@@ -1039,8 +1038,7 @@ struct StateCell {
                     factory->last_store->release_parked();
                     fixpp::test_support::cancel_and_drain_or_report(fix.ioc, *fix.clock,
                                                                     "StateCell::~StateCell");
-                    ADD_FAILURE() << (threw ? fixpp::test_support::kDrainThrew
-                                            : fixpp::test_support::kPumpBudgetMiss)
+                    ADD_FAILURE() << (threw ? "Site: " : fixpp::test_support::kPumpBudgetMiss)
                                   << "StateCell::~StateCell";
                 }
             } catch (...) {
