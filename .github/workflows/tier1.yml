@@ -963,6 +963,53 @@ jobs:
             exit 1
           fi
 
+      # ── #530: no type definition may change with FIXPP_TEST_HOOKS ────────────
+      #
+      # The libraries are compiled without the macro and some test targets define
+      # it, so a class member, friend or base gated on it gives each such test
+      # program two definitions of the class (ODR, no diagnostic required; #511).
+      # ci/odr-hooks-census.py preprocesses every header without and with the
+      # macro and fails on a definition that differs. It exits 2 on any
+      # preprocessing error, an empty root, or a positive control that shows the
+      # macro had no effect, so it cannot pass by failing. Its rules are pinned
+      # buildless in ci-script-pins (ci/test-odr-hooks-census.sh).
+      #
+      # WHY HERE: it needs this tree's compile_commands.json and the generated
+      # headers, i.e. a Conan install, a configure and the codegen, which the
+      # buildless ci-script-pins job does not have. It needs no compiled object,
+      # so any one leg that has built will do. One leg sees one preset's macros: a
+      # definition that changes with FIXPP_TEST_HOOKS only together with a
+      # preset-specific macro (NDEBUG, a sanitizer's) is seen only where that
+      # macro holds as it does here. It reads the build tree and writes only
+      # temp files. Cost condition: two preprocessor runs per
+      # header, in parallel across the runner's cores; re-derive with
+      # `time python3 ci/odr-hooks-census.py --build-dir build/<preset>`.
+      - name: "ODR census — no definition changes with FIXPP_TEST_HOOKS (#530)"
+        id: odr_hooks_census
+        if: matrix.preset == 'linux-clang-release'
+        run: python3 ci/odr-hooks-census.py --build-dir build/${{ matrix.preset }}
+
+      # The census step is guarded by a string, so this reads its OUTCOME, for the
+      # reason the #448 sentinel above gives. Deliberately unguarded.
+      - name: "Assert the ODR census actually ran (#530)"
+        if: always()
+        run: |
+          set -euo pipefail
+          got="${{ steps.odr_hooks_census.outcome }}"
+          echo "preset=${{ matrix.preset }} odr_hooks_census=${got:-<unset>}"
+          if [ "${{ matrix.preset }}" = "linux-clang-release" ]; then
+            if [ "$got" != "success" ]; then
+              echo "::error::the ODR census did not run to success on linux-clang-release"
+              echo "::error::(outcome=$got). If it was SKIPPED, the \`if:\` predicate no"
+              echo "::error::longer matches this preset; check its spelling."
+              exit 1
+            fi
+          elif [ "$got" != "skipped" ]; then
+            echo "::error::the ODR census ran on ${{ matrix.preset }}; it is wired to"
+            echo "::error::linux-clang-release only (outcome=$got)."
+            exit 1
+          fi
+
       # ── #254 / R2-P2-1 — the same vacuity gate, for the install witness ──────
       #
       # `fixpp::python::install-absent-witness` is the SEMANTIC half of the
@@ -2599,6 +2646,16 @@ jobs:
       # needs no configured tree.
       - name: "Regression pin — check_alloc refusals (#448)"
         run: bash ci/test-check-alloc.sh
+
+      # fixpp#530: the ODR census itself runs on the linux-clang-release leg, which
+      # is behind both gate labels. Its verdicts and refusals are pinned here
+      # instead, on synthetic trees, each by a cell asserting its own line of output
+      # and by a mutant proving that cell can fail. Buildless; needs a C++
+      # compiler (the runner's `c++`) and refuses without one. Cost condition: the
+      # mutants each re-run every cell; re-derive with
+      # `time bash ci/test-odr-hooks-census.sh`.
+      - name: "Regression pin — ODR census verdicts and refusals (#530)"
+        run: bash ci/test-odr-hooks-census.sh
 
       # #289 batch 18: a fixed `run_for` staging a MOCK-CLOCK advance is a
       # wall-clock hope, and a starved runner turns it into a LOST advance --
