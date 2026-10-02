@@ -593,8 +593,8 @@ a default body of `reset()` and then one `next_seqnum(dir, true)` for each targe
     On the base, total cancellation throws at the arm's next `co_await`, and no callback runs.
     `Engine::stop()`'s step 1 already `co_spawn`s its emit onto each session strand. It now also sets a
     Session-side engine-stop flag inside that lambda, before the emit, through `session_engine_access`,
-    with `entry.session` read on the control strand first. The predicate tests the flag, so step 7's
-    check stops the arm before any of those effects.
+    with `entry.session` read on the control strand first. The predicate tests the flag, so once stop's
+    step 1 has run on the session's strand, step 7's check stops the arm before any of those effects.
   - **The `co_spawn` alternative, re-judged.** It spawns the store await on the session strand with a
     token bound to an empty cancellation slot. The pending cancellation then throws at the arm's next
     `co_await`, which is the behaviour stop needs. But the reset event is emitted synchronously between
@@ -646,8 +646,9 @@ Read at `00c1f720` on 2026-10-02. Line numbers are not cited; re-derive from the
   returns `FIXPP_ERR_TYPE_MISMATCH`, so exhaustion is misreported.
 - **The C cursor shells.** Both group getters allocate their `fixpp_group` shell with
   `polymorphic_allocator<fixpp_group>(arena).new_object<fixpp_group>()` from the parse arena, with no
-  catch, so exhaustion lets a `bad_alloc` escape the C function. This is pre-existing, unconfirmed and
-  outside 093 (contract L-17). To file with a reproduce-first item.
+  catch, so exhaustion lets a `bad_alloc` escape the C function, and the session ends or the process
+  terminates. This is pre-existing on main, unconfirmed and outside 093 (contract L-17; plan.md
+  OD-19). Filed as fixpp#541 (batch B28), with a reproduce-first item.
 - **Why no numeric headroom can make exhaustion impossible** (Codex G93-A-02's option 2). Each C
   cursor shell is allocated per call, so a callback that calls a group getter repeatedly allocates
   without bound. A stated headroom bounds how much a callback gets, not how much it asks for.

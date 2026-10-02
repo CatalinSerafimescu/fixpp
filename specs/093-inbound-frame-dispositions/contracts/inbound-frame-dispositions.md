@@ -92,8 +92,24 @@ digit cap):
 - W-2's rescan of a pending candidate's header on each feed contributes the two caps;
 - W-3 contributes a constant, because each byte is summed at most once.
 
-The BeginString cap depends on the configured `begin_string`, so the bound does too. Quickstart §1 has
-the adversarial cells, and §2 has the mutants and the counted-work instrument.
+The BeginString cap depends on the configured `begin_string`, so the bound does too. The configured
+length is bounded on every path where the pump runs over peer bytes, by three things 093 leaves as
+they are (the Logon buffer size, the first-frame budget, and `SessionId` equality), and not by L:
+- **Initiator.** The pump starts only after the Logon is sent. `build_logon` writes it into a buffer
+  of `Session::kMaxMaskableLogonBytes`, and a BeginString too long to fit fails the build, so the role
+  loop returns before the pump.
+- **Acceptor.** A connection reaches a Session only if its first frame carries the configured
+  BeginString (`SessionId`'s defaulted equality over all three fields), and that frame must fit in the
+  first-frame read's `kFirstFrameMaxBytes`, which also bounds that read's total input. After `open()`
+  the reply Logon is built into a buffer of the same Logon size; a build that fails leaves the session
+  Disconnected while the pump still runs, with the configured length already bounded by the
+  first-frame budget.
+
+Re-derive both values from `include/fixpp/session/session.hpp` and `run_accept_loop` in
+`src/session/engine.cpp`, and the equality from `include/fixpp/session/engine.hpp`. If a change lets a
+session reach the pump with a configured BeginString not bounded by one of them, this bound no longer
+holds and the cap needs its own ceiling. Quickstart §1 has the adversarial cells, and §2 has the
+mutants and the counted-work instrument.
 
 **Every other Framer caller** (reify, the re-framing parse helpers, fuzz, benches, tests) keeps
 `resync_on_garble = false` and is unchanged byte for byte. That includes the order of the
@@ -134,7 +150,13 @@ with the flag on (plan.md OD-4).
 - **I-4.** 092's late-parse close (`close_on_late_parse_failure_`) stays as a defence. Its reachability
   is shown only by a cell that shrinks the buffer through `session_test_access`.
 - **I-5.** Lazy reads inside a callback draw on `kCallbackReadHeadroom`, in the same span. Exhausting
-  it never ends the session. What the failed read reports depends on the API's declaration, and 093
+  it in a read that reports a status (every row below except the C cursor shells) never ends the
+  session. The C cursor shells are the exception: an exhaustion there ends the session, or the
+  process terminates, as it does today (L-17, fixpp#541). The reports below hold on the lanes where
+  the spill witness (I-2) is null; on MSVC debug it forwards to the heap and records, so a read past
+  the headroom succeeds and the spill is recorded instead. `kCallbackReadHeadroom` must meet the sizing
+  condition data-model E-2 states, checked at implementation; L-17 records any frame for which it
+  fails. What the failed read reports depends on the API's declaration, and 093
   changes only the `unknown_fields()` row. Re-derive the rows from the declarations in
   `include/fixpp/wire/offset_table.hpp` and `include/fixpp/wire/parser.hpp`, and from the group getters
   in `src/capi/message_read.cpp`.
@@ -144,7 +166,7 @@ with the flag on (plan.md OD-4).
   | `OffsetTable::group_slices()`, and the typed `group<>()` over it | an empty span, indistinguishable from an absent group. The public wrapper discards the internal status | unchanged |
   | `OffsetTable::nested_group_slices()`, and `fixpp_group_get_nested_group` | `alloc_failed`, which the C getter returns as `FIXPP_ERR_WIRE_LIMIT_EXCEEDED` | unchanged |
   | `fixpp_msg_get_group` | it calls the degrading `group_slices()`, so exhaustion is reported as `FIXPP_ERR_TYPE_MISMATCH`, a misreport | unchanged; disclosed (L-5) |
-  | the C cursor shells that `fixpp_msg_get_group` and `fixpp_group_get_nested_group` allocate from the parse arena | the allocation has no catch, so a `bad_alloc` escapes the C function | unchanged; disclosed (L-17) and to be filed |
+  | the C cursor shells that `fixpp_msg_get_group` and `fixpp_group_get_nested_group` allocate from the parse arena | the allocation has no catch, so a `bad_alloc` escapes the C function | unchanged; disclosed (L-17), fixpp#541 (unconfirmed; reproduce first) |
   | `MessageView::unknown_fields()` | **today:** it is `noexcept` and pushes into a pmr vector over the parse resource, whose upstream is null on every lane except MSVC debug, so a `bad_alloc` reaches `std::terminate` (fixpp#540, unconfirmed). **093:** an internal catch, a body-only change that keeps `noexcept`. It clears the partial list, marks the list built so later calls return the same empty view, and returns an empty view | changed (FR-015) |
 
   An empty `unknown_fields()` view after exhaustion cannot be told from a frame with no unknown
@@ -250,17 +272,26 @@ This runs on every store, volatile ones included (OD-9).
 - A cancellation emitted before or during steps 2 to 5 is not observed by the unit, which runs to
   completion.
 - After the restore the pump's state is fresh, so an emission made during the unit is not replayed.
-  Without more, the arm would then run its post-unit effects after `Engine::stop()` began: the reset
-  event, `toAdmin`, the reply write, the Active transition and `onLogon`. On the initiator, unless it
-  honours a NextExpectedMsgSeqNum(789), nothing between the unit and Active writes to the socket, so
-  stop's transport close does not prevent it (research R-9).
-- **The engine-stop flag closes that window** (plan.md OD-15). `Engine::stop()`'s step 1 reads each
+  Without more, the arm would then run its post-unit effects after `Engine::stop()`'s step 1 has run
+  on the session's strand: the reset event, `toAdmin`, the reply write, the Active transition and
+  `onLogon`. On the initiator, unless it honours a NextExpectedMsgSeqNum(789), nothing between the
+  unit and Active writes to the socket, so stop's transport close does not prevent it (research R-9).
+- **The engine-stop flag orders the arm after stop's step 1 on the session's strand** (plan.md OD-15).
+  Once stop's step-1 handler has run on a session's strand, every later predicate check on that
+  strand sees the flag. Effects the arm runs on that strand before the handler are ordered before it,
+  as for a session that reached Active just before step 1 reached its strand, and `stop()`'s normal
+  sequence (the emit, step 2's transport close, the join, then `close()`) handles that session. The
+  guarantee is strand-ordered, not real-time: no flag read by the arm without mutual exclusion against
+  `stop()` can give more (OD-15). It holds on the condition that every suspension in a Logon arm is
+  followed by the predicate before the next effect (#518's discipline); re-derive it by reading the
+  arm's `co_await` sites against `grep -n logon_arm_superseded src/session/session.cpp`.
+  `Engine::stop()`'s step 1 reads each
   entry's `session` on the control strand, where step 1 runs. Inside the `co_spawn` it already posts
   to the session strand, and before the `emit`, it sets the Session's `engine_stop_requested_` through
   `session_engine_access`. A null session has nothing to set, on the condition data-model E-13 states:
   both role loops publish `entry.session` before any frame is delivered, and a publish refused because
   stop began delivers nothing. `logon_arm_superseded` tests
-  `state_ == closing`, the new flag, and the FSM state. So the check in step 7 stops the arm before any
+  `state_ == closing`, the new flag, and the FSM state. So once the flag is set, the check in step 7 stops the arm before any
   event, callback, write or Active transition, and every other site of the predicate stops it too.
   Re-derive the sites with `grep -n logon_arm_superseded src/session/session.cpp`. The flag is only read
   inside the predicate, so it adds no return path between steps 2 and 5, and the restore still always
@@ -317,7 +348,7 @@ why", and "Golden / freeze".
 
 | # | Change | C++ declaration | C declarations | Python | TOML | B&L | Kind and why | Golden / freeze | Cell |
 |---|---|---|---|---|---|---|---|---|---|
-| 1 | A Framer-detected garbled frame is disregarded, not session-ending. That includes two shapes that were framed before and are now garbled at framing (C-1 W-2): a BeginString value longer than the BeginString cap, which was handled as a mismatch, and a BodyLength digit run longer than the digit cap, which was accepted | `Framer::Config::resync_on_garble`, `Framer::Config::max_begin_string_bytes`, `garble_summary`, `last_garbles()` (added) | BREAKING on the five observers | through C | — | B row; `L-004-4` closed | BREAKING: a session that ended stays established | none | TC 2d/2m/3b/3c/3e; Q-4 (digit cap); Q-10; Q-37 |
+| 1 | A Framer-detected garbled frame is disregarded, not session-ending. That includes two shapes that were framed before and are now garbled at framing (C-1 W-2): a BeginString value longer than the BeginString cap, which was handled as a mismatch, and a BodyLength digit run longer than the digit cap, which was accepted | `Framer::Config::resync_on_garble`, `Framer::Config::max_begin_string_bytes`, `garble_summary`, `last_garbles()`, `kBodyLengthDigitCap` (added; Q-4 is its witness) | BREAKING on the five observers | through C | — | B row; `L-004-4` closed | BREAKING: a session that ended stays established | none | TC 2d/2m/3b/3c/3e; Q-4 (digit cap); Q-10; Q-37 |
 | 2 | A 35-not-third frame is disregarded in every state and both validation modes | — | BREAKING on the five observers. Amend the 1.10 text beginning "a Logon carrying a malformed tag" at all five sites: `close`'s paragraph and the bullet lists on `is_established`, `fixpp_session_send`, `register_callback` and `fixpp_session_register_send_callback`. Such a Logon is now disregarded when its third field is not MsgType(35). The 1.10 bullet beginning "on an established session, a faulty frame whose fault comes before its MsgSeqNum(34)" stays true, so it is not amended: such a frame is still disregarded without advancing, now by C-2 step 1, and the gap handling behind its "session ends" consequence is unchanged | through C | — | B-005-7 narrowed | BREAKING: a frame that was processed, or a Logon that was refused, is now disregarded | none | TC 2t; D-8 cells; Q-37 |
 | 3 | A frame over L closes in every state, the acceptor's first frame included. A frame of at most L is admitted however the stream is segmented, where today the 64 KiB carry refuses some frames near it by segmentation (research R-3) | — | BREAKING on the five observers | through C | — | B row; 070 exemption reversed | BREAKING | none | over-L cells; Q-37 |
 | 4 | A late parse failure is unreachable for an admitted frame | — | BREAKING on the five observers. Amend the 1.10 bullet beginning "on an established session, a frame the header scan finds fault-free but the session cannot parse for dispatch" on `is_established`, `fixpp_session_send`, `register_callback` and `fixpp_session_register_send_callback` | through C | — | `L-092-6` updated | BREAKING (a documented effect no longer occurs for an admitted frame) | none | dense-L; FR-014 defence; Q-37 |
@@ -333,7 +364,7 @@ why", and "Golden / freeze".
 | 14 | Engine access seam | `friend struct session_engine_access;` in `session.hpp`, defined under `src/session/`, never installed. It carries `inbound_limit()`, `has_reached_active()`, the summary intake, the engine-stop flag's setter and the carry and parse spans | — | — | — | — | additive. The Session's underscore hooks stay private | none | build |
 | 15 | Arena requirements | `SessionConfig::framer_carry_arena` must hold L + one read + `kContainerSlack`. The Session's arena must hold B(L) per `Session`, and the engine builds one `Session` per connection. Both are allocated at `open()`, and a failure is an `open()` error, not a `std::terminate`. The carry's path needs no public change: `open()` allocates the block inside a `try`, builds a `monotonic_buffer_resource` over it whose upstream is the spill witness, and builds `pmr_carry_buffer` over that resource, so the `noexcept` constructor's reserve is served from the block (E-2) | — | — | — | B row (cost formula) | behaviour, C++ only | none | `open()` with a bounded arena |
 | 16 | #523: a closing session's NotConnected and LogonSent arms act on nothing | — | — | — | — | B row | **Not BREAKING**, following B-518-1's owner ruling ("the old outcomes were the defect"), of which #523 and #524 are the follow-ups | none | #523 cells |
-| 17 | #524: the reset unit is one store operation, shielded, and stopped by the engine-stop flag after `Engine::stop()` begins | — | — | — | — | `L-518-1` updated | **Not BREAKING**, on the same ruling | none | #524 cells |
+| 17 | #524: the reset unit is one store operation, shielded, and stopped by the engine-stop flag after `Engine::stop()`'s step 1 has run on the session's strand | — | — | — | — | `L-518-1` updated | **Not BREAKING**, on the same ruling | none | #524 cells |
 | 18 | `MessageView::unknown_fields()` returns an empty view on arena exhaustion instead of reaching `std::terminate` (fixpp#540) | `MessageView::unknown_fields()` (body only; still `noexcept`) | — (the C ABI does not expose it) | — | — | L-5 | behaviour, C++ only | none | Q-32 |
 
 **Version.** One MINOR bump. Its `version.h` history block lists rows 1 to 6 as BREAKING and rows 7
@@ -353,8 +384,9 @@ delta carry the same BREAKING list.
 - **L-3.** A custom store that does not override `reset_to` has no crash atomicity.
 - **L-4.** `close()`'s wait can expire. For a default-body store whose unit is still running, the
   teardown reset can then interleave with it, and the (1, 1) row is not guaranteed.
-- **L-5.** A callback-time lazy read beyond the headroom fails that read, never the session. Its report
-  is per API (C-3 I-5): `group_slices()` gives an empty span, indistinguishable from an absent group;
+- **L-5.** A callback-time lazy read beyond the headroom that reports a status fails that read, never
+  the session; the C cursor shells are the exception (L-17). On MSVC debug the spill witness forwards,
+  so the read succeeds and the spill is recorded. Its report is per API (C-3 I-5): `group_slices()` gives an empty span, indistinguishable from an absent group;
   `fixpp_msg_get_group` reports `FIXPP_ERR_TYPE_MISMATCH`; the nested getter reports
   `FIXPP_ERR_WIRE_LIMIT_EXCEEDED`; `unknown_fields()` gives an empty view, indistinguishable from a
   frame with no unknown fields.
@@ -386,5 +418,10 @@ delta carry the same BREAKING list.
   liveness loop, or the carry ends it. No supported profile has such a BeginString.
 - **L-17.** The C cursor shells that `fixpp_msg_get_group` and `fixpp_group_get_nested_group` allocate
   from the parse arena have no catch, so exhausting the headroom there lets a `bad_alloc` escape the C
-  function. This is pre-existing, found by code reading at Gate A round 2, unconfirmed, and to be filed
-  with a reproduce-first acceptance item, as fixpp#540 was.
+  function. Neither function is `noexcept`. Where the unwind reaches the callback guard, the session
+  ends with `app_callback_threw`; where the C caller's frame cannot be unwound, the process
+  terminates. Either way the session ends or the process terminates. This is pre-existing on main,
+  found by code reading at Gate A round 2, and filed as fixpp#541 (unconfirmed; reproduce first;
+  batch B28). 093 does not fix it (plan.md OD-19). If data-model E-2's `kCallbackReadHeadroom`
+  condition fails at implementation, this row also records that 093's up-front reserve leaves less
+  callback room than the base for the frames where it fails.

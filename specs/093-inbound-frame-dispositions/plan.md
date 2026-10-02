@@ -35,8 +35,9 @@ This bundle makes five changes to fixpp's inbound path, on one shared review sur
 
    The carry and the parse buffer are allocated once at `open()`. All of these are sized for the
    densest legal layout, 3 bytes per field. A frame over L is refused at framing, before its CheckSum,
-   with a close. A lazy read inside a callback that exhausts the headroom fails that read, never the
-   session, and `unknown_fields()` gains the catch that #540 asks for, after its reproduction.
+   with a close. A lazy read inside a callback that exhausts the headroom and reports a status fails that
+   read, never the session, where the spill witness is null (the C cursor shells are the exception,
+   L-17, fixpp#541), and `unknown_fields()` gains the catch that #540 asks for, after its reproduction.
 3. **#516: liveness refreshes on every frame that is neither garbled nor faulty.** It happens at one
    point, right after the fault checks.
 4. **#523: a closing session's NotConnected and LogonSent arms act on nothing.**
@@ -46,7 +47,8 @@ This bundle makes five changes to fixpp's inbound path, on one shared review sur
      does.
    - It sets the manager first, with no yield.
    - A session-side engine-stop flag, which `Engine::stop()` sets before it emits, stops the arm after
-     the unit, so no callback, event, write or Active transition follows a stop.
+     the unit, so no callback, event, write or Active transition follows `Engine::stop()`'s step 1 on
+     the session's strand.
    - A `close()` that is about to issue a teardown reset waits, event-driven and bounded, for an
      in-flight unit.
 
@@ -102,7 +104,7 @@ R-2's recipe). #540's reproduction is run first and decides SC-008's branch.
 | X §4 append-only enums | `core::error` | No new error code: criterion 3 reuses `wire_header_out_of_order`, and `reset_to` reuses `session_invalid_argument`. `SessionEvent` alternatives are appended |
 | X §7 ABI | C-ABI changes versioned | **MINOR bump; BREAKING on each affected declaration**: every BREAKING row is marked on the five observers `version.h`'s 1.10 entry names, and in `version.h` only where none carries it. The 1.10 sentences 093 falsifies are amended in place (FR-051, contract C-7). `gh release list --exclude-drafts` must be empty at implementation. The C++ additions are source-compatible; `MessageStore`'s vtable changes, which needs a rebuild |
 | XI concurrency | strand discipline, cancellation | The deadline race uses `await_deadline`, whose re-arm handles a clock-wide sweep (#536). The reset unit shields itself, and restores the pump's state explicitly, because asio's cancellation state is per awaitable thread (research R-9). `close()`'s wait is event-driven, with no poll. No new detached coroutine |
-| XII security | fail closed | An oversize frame closes before its CheckSum is read. Garbled bytes are never acted on. A disregard before Active is bounded by the timeout, which is a loop-head check, so a peer that keeps the socket readable cannot outrun it. Both header scans are capped over encoded bytes, so zero padding cannot amplify the rescan |
+| XII security | fail closed | An oversize frame closes before its CheckSum is read. Garbled bytes are never acted on. A disregard before Active is bounded by the timeout, which is a loop-head check, so a peer that keeps the socket readable cannot outrun it. Both header scans are capped over encoded bytes, so zero padding cannot amplify the rescan. The BeginString cap takes the configured length, which is bounded per role on every path where the pump runs over peer bytes, not by L: on the initiator by the Logon buffer (`Session::kMaxMaskableLogonBytes`), on the acceptor by the first-frame budget (`kFirstFrameMaxBytes`) with `SessionId` equality (contract C-1, The bound; OD-16) |
 | XIV §2 | at most 5 pure virtuals per pluggable interface | `MessageStore` keeps 4; `reset_to` is non-pure |
 | XIII §2–3 logging | async logger; `trace_context` in every record | The first session log site uses `FIXPP_SLOG` with the session's `trace_context`, and its format strings are registered in `src/log/format_registry.cpp`. Garble records are rate-bounded to one per `max(HeartBtInt, 1 s)`, so a HeartBtInt of 0 still bounds them, and the logger's default `drop_newest` policy keeps a full queue from blocking the strand (OD-5) |
 | XV banned patterns | — | No `thread_local` buffer (the owner rejected a per-thread arena). No RTTI dispatch for `reset_to` |
@@ -220,13 +222,19 @@ made at `/speckit-plan`. Reviewers may challenge any of them, and the owner may 
   - `Engine::stop()`'s step 1 sets it through `session_engine_access`, on the session strand, inside the
     `co_spawn` it already uses for its emit and before the emit. `entry.session` is read on the control
     strand first, and a null session has nothing to set.
-  - `logon_arm_superseded` tests it, so the check right after the restore stops the arm before any
-    event, callback, write or Active transition, on both roles.
+  - `logon_arm_superseded` tests it, so once the flag is set, the check right after the restore stops
+    the arm before any event, callback, write or Active transition, on both roles.
   - The flag is read only inside the predicate, so the claim that no return path skips the restore is
     unchanged. Re-derive the predicate's sites with `grep -n logon_arm_superseded src/session/session.cpp`
     before relying on that.
   - Alternative: call `close()` from `stop()`'s step 1. That reorders `stop()`'s teardown, which its
     join and registry steps depend on, so it was not chosen.
+  - The guarantee is strand-ordered: the arm stops after stop's step 1 has run on the session's strand
+    (contract C-6). Alternative (Codex G93-A-02, round 3): an atomic latch set on the control strand
+    right after `stopped_` and read with acquire in the predicate. It was not chosen, because it has the
+    same check-then-act gap (the arm reads it false, the control strand sets it, the arm runs its
+    effects); closing that gap needs mutual exclusion between `stop()` and the arm, which is what
+    running step 1 on the session strand already gives.
 - **OD-16: the BeginString cap is `max(longest supported identifier, configured begin_string length)`**
   (added at Gate A round 2, G93-O2-02; contract C-1 W-2). A fixed cap would garble every frame of a
   session configured with a longer BeginString, which works today, and leave it to time out with no
@@ -234,6 +242,12 @@ made at `/speckit-plan`. Reviewers may challenge any of them, and the owner may 
   and the C setter. That is a new C++, C and TOML refusal and a new BREAKING row, so it was not chosen.
   The search prefix `8=FIX` stays, and a configured BeginString not beginning with `FIX` is disclosed
   (L-16).
+  - The cap's term is bounded on a condition (added at Gate A round 3, G93-A-03; contract C-1, The
+    bound): on every path where the pump runs over peer bytes, the configured BeginString is bounded
+    per role. On the initiator it fits the Logon buffer (`Session::kMaxMaskableLogonBytes`); on the
+    acceptor it fits the first-frame budget (`kFirstFrameMaxBytes`), with `SessionId` equality. So it is bounded by those, not by L. No clamp is
+    applied: clamping the term would garble the first frame of an acceptor whose BeginString exceeds
+    the clamp but fits the first-frame budget, closing it before any Session exists.
 - **OD-17: the BodyLength digit run is capped in resync mode** (added at Gate A round 2, G93-A-06;
   contract C-1 W-2). A value cap alone leaves a zero-padded run rescanned on every feed. A run over the
   cap is a garble, not a close. The cap is derived by research R-2's recipe so that it admits legitimate
@@ -246,10 +260,20 @@ made at `/speckit-plan`. Reviewers may challenge any of them, and the owner may 
     view, after #540's reproduction runs on the base (FR-015).
   - The other reports stay as they are and are disclosed (L-5, L-17). Changing `fixpp_msg_get_group`'s
     misreport, or catching the C cursor shells' allocation, changes C-ABI results. Neither has been
-    through Gate A, and the shells' defect is unconfirmed, so it is filed separately.
+    through Gate A, and the shells' defect is unconfirmed, so it is filed separately (since filed as
+    fixpp#541, batch B28; OD-19).
   - Alternatives: new result-bearing `try_*` lazy APIs (Codex G93-A-02 option 1), a public surface with
     its own versioning, for a failure 093 does not cause; or a headroom large enough to make exhaustion
     impossible (option 2), which no number can be, because the C cursor shells allocate per call.
+- **OD-19: fixpp#541 (the C cursor shells' uncaught allocation) is not in 093's scope** (added at Gate
+  A close-out, round 3, G93-A-01). The defect is pre-existing on main: the shells allocate from the
+  base's parse arena with the same missing catch. It is disclosed (contract L-17; FR-011), unconfirmed,
+  and filed in batch B28 with a reproduce-first item. 093 does not make it more reachable for the C-ABI
+  population on data-model E-2's `kCallbackReadHeadroom` condition. Alternative (Codex G93-A-01,
+  round 3; an owner option): catch both shells and return `FIXPP_ERR_WIRE_LIMIT_EXCEEDED` with the
+  outputs nulled, reproduce first, with a Q-33 shell arm per getter. It changes a C-ABI result that
+  Gate A has not reviewed, so it was not taken. Spec.md's Issues line keeps #540 and does not list
+  #541.
 
 ## What changes for whom
 
@@ -385,14 +409,16 @@ The order follows dependencies. Each phase writes its cells RED first, then the 
   that measurable, not assumed. FR-052's Active scope is witnessed by Q-19.
 - **XI**: `close()`'s wait is bounded and event-driven, so it cannot add a hang. The unit's shield means
   `Engine::stop()` can wait on a store operation, which is disclosed as L-12 and is no worse than
-  `close()`'s unbounded teardown reset. The engine-stop flag keeps the shield from letting a stopped
-  arm run its callbacks. The deadline race runs only before the first Active, and expiry does not
+  `close()`'s unbounded teardown reset. The engine-stop flag keeps the shield from letting an arm run
+  its callbacks after `Engine::stop()`'s step 1 has run on the session's strand. The deadline race runs only before the first Active, and expiry does not
   depend on its completion order.
 - **X §7**: C-7's matrix places BREAKING per declaration, names the amended 1.10 bullets, and records why
   #523 and #524 are not BREAKING.
 - **XII**: in resync mode the reorder means no over-L frame takes the disregard path. The Framer's work
   per byte is bounded (C-1 W-1 to W-4, with both header caps over encoded bytes), so a hostile peer
-  cannot amplify CPU through resync or through zero padding.
+  cannot amplify CPU through resync or through zero padding. The BeginString cap's term holds on C-1's
+  condition: the configured BeginString is bounded by the Logon buffer and the first-frame budget,
+  not by L.
 
 Re-check result: **PASS.**
 
@@ -582,7 +608,8 @@ decision (OD-14). It is listed for the owner's awareness, not for a ruling.
     nothing (E-13 has the re-derivation).
   - OD-14's inverted rationale is replaced, not stacked on.
   - Q-26 and SC-006 assert, per role, no `toAdmin`, reset event, `onLogon` or Active after stop began,
-    with a mutant that drops the flag.
+    with a mutant that drops the flag. (Narrowed at round 3, G93-A-02: after `Engine::stop()`'s step 1
+    has run on the session's strand.)
 - **RC-4, the observer set** (G93-A-03). C-7 now defines the five observers from `version.h`'s 1.10
   entry, and rows 1 to 6 mark BREAKING on all five. FR-051's witness, plan X §7 and the "what changes for
   whom" row say the same. Codex's request for C-ABI witness cells is applied as Q-37, one trigger per
@@ -647,7 +674,7 @@ Each item below is one Opus marked Disagree, in whole or in part. Codex's fix wa
   `FIXPP_ERR_TYPE_MISMATCH`. Both C cursor shells are allocated with `new_object` from the parse arena,
   with no catch. C-3 I-5 records each true report. Changing either changes a C-ABI result that Gate A
   has not reviewed, so both are disclosed (L-5, L-17), and the shells' defect is a lead to file,
-  unconfirmed, as #540 was.
+  unconfirmed, as #540 was (since filed as fixpp#541, B28; OD-19).
 - **G93-A-05's carry path over "exactly that block" would terminate on MSVC debug.** MSVC's debug STL
   allocates a container proxy from the allocator when the vector is constructed, so a block of exactly
   L + the read size spills, and a null upstream terminates inside the `noexcept` constructor. The block
@@ -668,4 +695,17 @@ cover lazy reads inside callbacks (OD-18). For the owner's awareness:
   becomes a garble, and C-7 row 1 marks that BREAKING. The cap's recipe is meant to make the case
   unreachable for real counterparties.
 - A new lead, to be filed as an unconfirmed issue with a reproduce-first item: the C cursor shells'
-  uncaught allocation (L-17).
+  uncaught allocation (L-17). Since filed as fixpp#541 (B28; OD-19).
+
+- Round 3 (final) reviewed 2026-10-03: Codex P1=2 P2=1 P3=2; Opus post-judging P1=0 P2=0 P3=6 — CONVERGED. Close-out applied the round-3 P3 narrowings (A-01..A-05, O3-01). Reviews: research/reviews/codex_093-inbound-frame-dispositions_gate_a_3_review.md, research/reviews/opus_093-inbound-frame-dispositions_gate_a_3_adversarial_review.md.
+
+### Round 3 — Codex/Opus severity disagreement
+
+Codex held G93-A-01 and G93-A-02 at P1 and G93-A-03 at P2. Opus downgraded each to a wording
+over-claim: a normative sentence stated a property stronger than the mechanism delivers, or than the
+code bounds, and left out the condition that makes it true. The close-out narrowing removes the
+contested MUST under either reading (A-01: status-bearing reads only, the C cursor shells excepted as
+L-17 / fixpp#541; A-02: ordered after `Engine::stop()`'s step 1 on the session's strand; A-03: the
+configured BeginString bounded by the Logon buffer and the first-frame budget). So no Fable consult was
+run (orchestrator decision, per `.claude/CLAUDE.md` "Fable consult": only when running code or a
+measurement cannot settle the question).
