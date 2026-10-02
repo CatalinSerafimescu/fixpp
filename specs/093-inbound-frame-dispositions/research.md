@@ -135,8 +135,9 @@ The sections below were written at `/speckit-plan`, 2026-10-02, from three read-
     candidate is at most L bytes, and the carry is L plus one read, so each compaction moves at most L
     bytes per read's worth of appended bytes, whatever the segmentation. Compacting on every
     non-empty feed would move up to L bytes per one-byte read;
-  - in resync mode, at every candidate including a boundary, cap the BeginString scan at the longest
-    supported identifier and read BodyLength digit by digit against L;
+  - in resync mode, at every candidate including a boundary, cap the BeginString scan at the
+    BeginString cap and the BodyLength digit run at `kBodyLengthDigitCap`, both over encoded bytes, and
+    read BodyLength digit by digit against L (revised at Gate A round 2, G93-A-06, G93-O2-02);
   - sum a CheckSum only over a structurally complete candidate, which is then consumed whole.
 - **State:** one `searching_` flag, plus at most four held bytes that are a proper prefix of `8=FIX`.
 - **Reporting:** one `garble_summary{regions, first_kind, discarded}` per call, read with
@@ -150,7 +151,41 @@ The sections below were written at `/speckit-plan`, 2026-10-02, from three read-
 - `read_first_frame_bounded` runs its Framer as `{max = L, resync on}` and returns `{offset, len,
   summary}`. After `open()`, the engine hands the summary to the Session once.
 
+**The two header caps (added at Gate A round 2).**
+- **Why the BodyLength cap counts digits, not the value.** A value cap alone leaves
+  `8=FIX.4.4␁9=000…`, fed one byte per read, rescanned through every zero on every feed: Θ(k) per byte,
+  up to the carry. The current scan shape locates the BodyLength terminator from the start and then
+  parses every digit (`src/wire/framer.cpp`), so without a cursor each feed repeats it. FIX `int`
+  permits leading zeros, so the cap must leave room for legitimate padding.
+- **Recipe for `kBodyLengthDigitCap`, run at implementation.** The cap is the larger of:
+  1. the decimal width of the largest L (262144), with an allowance for zero padding;
+  2. the longest BodyLength digit run, leading zeros included, in the repo's FIX-TC fixtures and interop
+     goldens. Search for a `9=` that follows each SOH spelling the fixtures use (the C escape `\x01`,
+     `^A`, `|`, and a literal 0x01 byte), because a bare `9=[0-9]+` also matches tags such as 49 and
+     109, and a `[^0-9]9=` filter misses the `\x019=` spelling. Seed one padded run in a scratch copy
+     and show the search finds it before its maximum is believed.
+
+  The chosen value must also meet the ceiling in contract C-1 W-2, so that the cap's term stays small
+  next to the bound's other terms: a large cap would reopen the one-byte-read rescan while the bound
+  stayed technically true. If the search finds a run above the ceiling, stop and record it here rather
+  than raising the ceiling.
+
+  Record the chosen value, the date, the search's output, the allowance's reason, and that the value
+  meets both the floor and the ceiling, here. Never write it into a comment.
+- **Why the BeginString cap takes the configured length.** A fixed cap at the longest supported
+  identifier garbles every inbound frame of a session configured with a longer BeginString, which today
+  works: the C setter checks only non-empty and forbidden bytes, TOML copies the string, and `open()`
+  checks only the FIXT.1.1 combinations. Taking `max(longest supported, cfg.begin_string.size())`
+  keeps that session framing its own frames with no new refusal (plan.md OD-16).
+- **What the search prefix still assumes.** After a garble the search looks for `8=FIX`. A configured
+  BeginString that does not begin with `FIX` gets no resync after a garble (contract L-16).
+
 **Alternatives rejected.**
+- **A persisted BodyLength scan cursor across feeds** (Codex, G93-A-06). It breaks C-1's rule that the
+  Framer keeps one flag and nothing else besides the carry.
+- **Refusing a configured BeginString longer than the cap** at `register_session`, `open()` and the C
+  setter (Opus G93-O2-02's first shape). It adds a C++, C and TOML refusal, and the C one would be a new
+  BREAKING row. The `max(...)` form needs no refusal.
 - **Resync in the pump.** It cannot recover frames the Framer has already discarded, and it would
   duplicate the scan in two callers.
 - **Stepping one byte per `feed`.** `consume_front` is a front erase, so stepping byte by byte is
@@ -192,7 +227,7 @@ The sections below were written at `/speckit-plan`, 2026-10-02, from three read-
 - Nothing else is allocated during the parse.
 - The validator and the header scan allocate nothing per field.
 - Lazy reads inside a callback allocate on demand: `group_index_`, group slices, nested tables,
-  `unk_items_` and C-ABI cursors.
+  `unk_items_` and C-ABI cursors. Their failure on exhaustion is per API, and R-10 has the facts.
 
 **Densest field.** `1=<SOH>` is 3 bytes. An empty value is accepted by `build` and by the scan's
 `length_data_carry::read_value`, so Nmax(L) = ⌊L/3⌋.
@@ -222,7 +257,15 @@ The sections below were written at `/speckit-plan`, 2026-10-02, from three read-
 - `parse_and_dispatch_` and `validate_inbound_` build a fresh `monotonic_buffer_resource` over that span
   on each call, which is how they reset today. `validate_inbound_` is `const`, so the span is `mutable`.
 - Each parse passes `reserve = min(N(L), frame.size()/3 + 1)` as a **call argument**, not a `Config`
-  field.
+  field. `OffsetTable::build` is private and `Parser::parse` builds the table through `MessageView`'s
+  constructors, so the argument is threaded through a new `Parser::parse` overload, a private tagged
+  `MessageView` constructor and a new `OffsetTable` constructor overload (data-model E-3; revised at
+  Gate A round 2, G93-A-05).
+- The carry's `pmr_carry_buffer` constructor is `noexcept` and reserves its capacity. `open()` therefore
+  allocates the block itself, inside a `try`, and builds the carry over a `monotonic_buffer_resource`
+  covering that block, so the constructor's reserve cannot fail. The block includes `kContainerSlack`,
+  because MSVC's debug STL allocates a container proxy from the allocator at construction (data-model
+  E-2).
 - The session's `OffsetTable::Config::max_offset_entries = N(L)`.
 - Admin and outbound parses stay on their stack arrays, and 093 does not change them. Their size is
   **not** derived from what they parse (G93-O-11). Derived, Gate A round 1: `Session::send` builds the
@@ -308,29 +351,49 @@ per connection, in two phases.
 - **Phase (b), a Session that has not yet reached Active.** It covers the acceptor after the first
   frame's delivery, against the same deadline, and the initiator from the moment `drive_reconnect`
   returns.
-  - Each pump read races `async_read_some || await_deadline(clock, abs_deadline)` on
-    `engine_cfg.clock`. That is what `effective_clock_` resolves to, so mock-clock cells drive it.
+  - **Expiry is a check at each loop head** (revised at Gate A round 2, G93-A-01). Before each read and
+    before each frame's delivery, in both drains, the pump tests `steady_now() >= abs_deadline` on
+    `engine_cfg.clock`. A read that blocks races `async_read_some || await_deadline(clock,
+    abs_deadline)` only so that it wakes.
+  - Why: `await_deadline` (`src/session/read_first_frame_bounded.hpp`) sleeps to the absolute instant,
+    and nothing orders its completion against a read that is also ready. A peer that keeps the socket
+    readable past T could otherwise win the race on every iteration, which would make the owner-ruled
+    bound depend on asio's completion order. Phase (a) is bounded regardless, because the first-frame
+    byte budget bounds its iterations.
+  - The deadline runs on `engine_cfg.clock` and ignores `SessionConfig::clock_override`. `Session::open()`
+    resolves `effective_clock_` to the override when one is set, so the two can differ. Mock-clock cells
+    drive `engine_cfg.clock`. `close()`'s wait runs on `effective_clock_`, which is a separate bound.
+  - On TLS, the handshake bound is fixed per listener (`lcfg.accepted_transport_config
+    .tls_handshake_timeout` in `src/session/engine.cpp`) and runs before the first-frame read. 093 does
+    not shorten it, so phase (a) lasts at most `max(T, that bound)`. When no time remains after the
+    handshake, the accept loop closes without a read. `read_first_frame_bounded` takes a relative
+    deadline, and its conversion to an absolute time is left alone, because 088's B6 re-arm mutant is
+    pinned on that line.
   - On expiry: `note_establishment_timeout_()` (event + log), then `stop_pump()`, which calls
     `close(terminal)`.
 - After Active, the plain read.
 - The race covers waits for peer bytes only. The local suspensions inside `on_inbound_frame` are not
-  raced (G93-A-01, the part Opus judged).
+  raced (G93-A-01, the part Opus judged). The condition: a peer cannot hold them open. Before Active the
+  outbound volume is the Logon reply plus at most a refusal, far below a socket send buffer. A store
+  operation that never completes hangs the session in any state, as it does today.
 
 **Alternatives rejected.**
 - **A detached session timer.** It would need a join counter, and a timer that calls `close()` while
   counted in `liveness_counter_` deadlocks `close()`'s join loop.
 - **Arming on every reconnect attempt.** There is no per-attempt Logon to arm for.
 - **One connection-scoped watchdog spanning TLS, hydration, the store and the Logon write** (Codex,
-  G93-A-01). Those suspensions are local and bounded by the store and the transport, so a watchdog
-  over them would test the store and the TLS stack, not establishment.
+  G93-A-01, rounds 1 and 2). A peer cannot hold those suspensions open, so a watchdog over them would
+  test the store and the TLS stack, not establishment. A store that never completes hangs every state,
+  not only establishment.
 - **Uncharging discarded bytes from the first-frame budget** (Codex, G93-A-02). It contradicts the
   Assumption that the bounded first read is unchanged. Phase (a)'s stricter bounds already satisfy
   the ruling's "bounded by the timeout".
 
-**Cost.** One parallel group per read, before the first Active only. FR-052's zero-allocation scope
-starts at the first Active. The existing read-path allocation guard measures `async_read_some` +
-`feed` directly and never runs the pump, so a quickstart cell drives the real pump past Active under a
-counting resource (G93-A-06).
+**Cost.** One parallel group per blocked read, before the first Active only. FR-052's zero-allocation
+scope starts at the first Active. Whether the group allocates is not assumed: asio draws its state from
+a per-thread recycling allocator (`asio::detail::recycling_allocator` with the parallel-group tag, in
+the Conan-cached asio's `experimental/impl/parallel_group.hpp`), which can serve a block without
+calling `operator new`. The verify record measures it (L-13).
 
 ## R-5: Liveness refresh placement (#516; FR-020, FR-021)
 
@@ -397,7 +460,8 @@ contract C-6).**
    flag and signal completion.
 5. Restore `enable_total_cancellation()`. No return path precedes it.
 6. The existing dispositions on the captured results, whose early returns now follow the restore.
-7. Run the existing superseded check.
+7. Run the existing superseded check, which also tests the engine-stop flag (R-9, added at Gate A
+   round 2).
 
 `close()` waits only when it is about to issue its teardown reset and a unit is in flight. The wait
 is event-driven: the unit's completion signal raced against `await_deadline` on `effective_clock_`,
@@ -515,15 +579,75 @@ a default body of `reset()` and then one `next_seqnum(dir, true)` for each targe
     and 5). No throw point lies between the manager set and the store operation, and no return path
     skips the restore. The cost is L-12: `Engine::stop()`'s join
     waits for an in-flight unit's store operation.
+  - **What the shield swallows, and the flag that replaces it** (added at Gate A round 2, G93-A-04).
+    After the restore the state is fresh, so stop's emission is not replayed. `logon_arm_superseded`
+    tests only `state_ == closing` and the FSM state, and `Engine::stop()` calls `close()` only after
+    its join, so the predicate cannot see stop. Read at `00c1f720`:
+    - the acceptor, after the unit, emits the reset event, assigns the outbound number, fires
+      `toAdmin` and writes the reply, and then reaches Active and `onLogon`, unless stop's step 2 has
+      already closed the socket and the write fails;
+    - the initiator, after the unit, emits the reset event and reaches Active and `onLogon`. Unless it
+      honours a NextExpectedMsgSeqNum(789), nothing in between writes, so it does so whatever step 2's
+      timing.
+
+    On the base, total cancellation throws at the arm's next `co_await`, and no callback runs.
+    `Engine::stop()`'s step 1 already `co_spawn`s its emit onto each session strand. It now also sets a
+    Session-side engine-stop flag inside that lambda, before the emit, through `session_engine_access`,
+    with `entry.session` read on the control strand first. The predicate tests the flag, so step 7's
+    check stops the arm before any of those effects.
+  - **The `co_spawn` alternative, re-judged.** It spawns the store await on the session strand with a
+    token bound to an empty cancellation slot. The pending cancellation then throws at the arm's next
+    `co_await`, which is the behaviour stop needs. But the reset event is emitted synchronously between
+    the unit and that next suspension, so the alternative still needs the flag, and it allocates a
+    frame per unit besides. The in-place shield plus the flag is chosen (plan.md OD-14, OD-15).
   - **Cells** (quickstart §1): `Engine::stop()` during the unit for `MemoryStore`, `FileStore` and a
     default-body `HookedStore`, with and without a teardown reset. A mutant that drops the shield is
     RED on the default-body and `FileStore` cells.
-- **The pre-Active deadline race allocates** (asio `parallel_group` shared state per operation).
+- **The pre-Active deadline race may allocate** (revised at Gate A round 2, G93-O2-01).
   - It runs only until the first Active, and FR-052's zero-allocation scope starts there. The read-path
     allocation guard cannot see the pump, because it measures `async_read_some` + `feed` directly.
-  - **Measure:** a counting resource around the pump's pre-Active reads. Record the count in the
-    verify evidence. The constitution row states the scope, not the count.
-  - **Cell:** the real pump driven past Active under the counting resource asserts zero allocations
-    per Active read. A mutant that never disarms the race is RED (G93-A-06).
+  - **No pmr counter can see it.** asio's parallel-group state goes through
+    `asio::detail::recycling_allocator` with the parallel-group tag, and its arms' frames through the
+    awaitable-frame recycler. Neither draws on a `std::pmr` resource, so a pmr counting resource reads 0
+    with or without the race. The round-1 design's instrument was blind.
+  - **Measure:** a global `operator new` counter around the pump's pre-Active reads, shown first to
+    count a known allocation (the replacement `operator new` must be linked, or the counter stays at
+    0). Record the count in the verify evidence. A lead, not measured: the recycling cache may serve
+    each read's block from the previous read's, so the count after warm-up may be 0 even with the race.
+  - **Cells.** The disarm is witnessed by behaviour: a session with no application reaches Active
+    before T, idles past T, and stays Active (quickstart Q-36), which a never-disarm mutant turns RED.
+    Q-19 drives the real pump past Active under the global counter and asserts zero per Active read
+    after a warm-up read, as a regression witness only.
   - The shape is the one `read_first_frame_bounded` already ships (088's `operator||` join, which
     replaced a timer handler that outlived its frame).
+
+## R-10: Lazy reads at headroom exhaustion, and fixpp#540 (FR-011, FR-015; added at Gate A round 2)
+
+Read at `00c1f720` on 2026-10-02. Line numbers are not cited; re-derive from the named declarations.
+
+- **`MessageView::unknown_fields()`** (`include/fixpp/wire/parser.hpp`) is `noexcept`. On its first
+  call it marks the list built and then `push_back`s each unknown tag into `unk_items_`, a pmr vector
+  over the view's parse resource. Over the inbound parse arena that resource's upstream is
+  `arena_upstream()`, which is `null_memory_resource` on every lane except MSVC debug
+  (`include/fixpp/core/pmr_arena_upstream.hpp`). Exhaustion therefore throws `bad_alloc` out of a
+  `noexcept` function, which is `std::terminate`. That is filed as fixpp#540, unconfirmed. `src/` never
+  calls `unknown_fields()`, and the C ABI does not expose it, so only a C++ application calling it in a
+  callback reaches it. 093 widens what can reach it, because frames of up to N(L) fields now parse and
+  are delivered.
+- **The catch (FR-015).** Inside the body, keeping `noexcept`: on `bad_alloc`, clear `unk_items_`, keep
+  the built flag set so later calls return the same empty view, and return an empty view. An empty view
+  after exhaustion cannot be told from a frame with no unknown fields (contract L-5).
+- **`OffsetTable::group_slices()`** (`include/fixpp/wire/offset_table.hpp`) is a one-line wrapper over
+  the internal status-bearing `group_slices_status()`, and drops the status, so exhaustion gives an
+  empty span.
+- **`nested_group_slices()`** carries `alloc_failed`, which `fixpp_group_get_nested_group`
+  (`src/capi/message_read.cpp`) returns as `FIXPP_ERR_WIRE_LIMIT_EXCEEDED`.
+- **`fixpp_msg_get_group`** calls the degrading `group_slices()`. An empty span on a tag that is present
+  returns `FIXPP_ERR_TYPE_MISMATCH`, so exhaustion is misreported.
+- **The C cursor shells.** Both group getters allocate their `fixpp_group` shell with
+  `polymorphic_allocator<fixpp_group>(arena).new_object<fixpp_group>()` from the parse arena, with no
+  catch, so exhaustion lets a `bad_alloc` escape the C function. This is pre-existing, unconfirmed and
+  outside 093 (contract L-17). To file with a reproduce-first item.
+- **Why no numeric headroom can make exhaustion impossible** (Codex G93-A-02's option 2). Each C
+  cursor shell is allocated per call, so a callback that calls a group getter repeatedly allocates
+  without bound. A stated headroom bounds how much a callback gets, not how much it asks for.

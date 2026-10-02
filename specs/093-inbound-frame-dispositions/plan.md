@@ -5,7 +5,8 @@
 **Input**: Feature specification from `specs/093-inbound-frame-dispositions/spec.md` (clarified
 2026-10-02, with the plan-research owner rulings recorded there).
 
-**Issues**: fixpp#514, #515, #516, #523, #524 (batch B22). **Depends on**: fixpp#530 (B25) merging first.
+**Issues**: fixpp#514, #515, #516, #523, #524, and #540 (unconfirmed, reproduce first; spec FR-015,
+SC-008) (batch B22). **Depends on**: fixpp#530 (B25) merging first.
 
 ## Summary
 
@@ -21,8 +22,9 @@ This bundle makes five changes to fixpp's inbound path, on one shared review sur
      is readable through a new C-ABI getter.
    - A new establishment timeout (`logon_timeout_ms`, 10 s, zero refused, with C-ABI, Python and TOML
      surfaces) bounds the pre-Active waits this creates, in two phases (contract C-4). Before the
-     acceptor has a Session, the first-frame read's stricter bounds apply. After that, the pump races
-     the deadline and closes the transport on expiry.
+     acceptor has a Session, the first-frame read's stricter bounds apply. After that, the pump tests
+     the deadline at every loop head, races it only to wake a blocked read, and closes the transport on
+     expiry.
 2. **#515: every admitted frame parses.** One inbound limit L comes from the config: the advertised
    383, between 4 KiB and 256 KiB, else 64 KiB. It is checked at `register_session` and at `open()`.
    It sizes:
@@ -33,7 +35,8 @@ This bundle makes five changes to fixpp's inbound path, on one shared review sur
 
    The carry and the parse buffer are allocated once at `open()`. All of these are sized for the
    densest legal layout, 3 bytes per field. A frame over L is refused at framing, before its CheckSum,
-   with a close.
+   with a close. A lazy read inside a callback that exhausts the headroom fails that read, never the
+   session, and `unknown_fields()` gains the catch that #540 asks for, after its reproduction.
 3. **#516: liveness refreshes on every frame that is neither garbled nor faulty.** It happens at one
    point, right after the fault checks.
 4. **#523: a closing session's NotConnected and LogonSent arms act on nothing.**
@@ -42,6 +45,8 @@ This bundle makes five changes to fixpp's inbound path, on one shared review sur
    - The unit shields itself from cancellation, because `Engine::stop()` reaches it before `close()`
      does.
    - It sets the manager first, with no yield.
+   - A session-side engine-stop flag, which `Engine::stop()` sets before it emits, stops the arm after
+     the unit, so no callback, event, write or Active transition follows a stop.
    - A `close()` that is about to issue a teardown reset waits, event-driven and bounded, for an
      in-flight unit.
 
@@ -76,9 +81,10 @@ It is expected to improve slightly, since each frame drops one or two 16 KiB sta
 
 **Scale/Scope**: about 10 source files and about 15 test files. Research R-8 lists the cells that flip.
 
-**Unknowns**: none open after Gate A round 1. R-9's two items are settled by design and witnessed by
-cells. Three design values are measured at implementation, not chosen here: `kAlignPad`,
-`kCallbackReadHeadroom` and `kContainerSlack` (data-model E-2).
+**Unknowns**: none open after Gate A round 2. R-9's items are settled by design and witnessed by
+cells. Four design values are measured or derived at implementation, not chosen here: `kAlignPad`,
+`kCallbackReadHeadroom` and `kContainerSlack` (data-model E-2), and `kBodyLengthDigitCap` (research
+R-2's recipe). #540's reproduction is run first and decides SC-008's branch.
 
 ## Constitution Check
 
@@ -86,19 +92,19 @@ cells. Three design values are measured at implementation, not chosen here: `kAl
 
 | Article | Requirement | Status |
 |---|---|---|
-| VII §3–4 TDD | failing test first | Planned. Every quickstart §1 cell is RED-first on the base, except the named regression guards. The RED evidence for SC-004 is the ceiling measured in quickstart §0 |
+| VII §3–4 TDD | failing test first | Planned. Every quickstart §1 cell is RED-first on the base, or RED on its named mutant, which the cell's row names together with the instrument that observes the effect. Regression guards say so. The RED evidence for SC-004 is the ceiling measured in quickstart §0, and #540's reproduction runs before its catch |
 | VII §5 conformance | the FIX-TC corpus | TC 2d/2m/2t/3b/3c/3e move from diverging to conforming, with cells. TC 2i is unchanged (FR-008), and its Logout gap belongs to #534 |
 | VII §7 fuzz | parser-touching code needs a fuzz harness | `fuzz_wire_framer` gains a `resync_on_garble = true` arm asserting termination and contract C-1's counted-work bound per input. `fuzz_transport_read_path` covers the pump |
 | VII §8 test grouping | new isolation-safe tests go into a grouped bucket, selected by a label | Planned (a `093` label). The timer and coroutine cells stay standalone |
 | VIII §2 perf | paired merge-base A-B-A-B within +5 % | A manual paired run of `on_inbound_frame_bench`, with validation off and on, base path padded (quickstart §0, §3) |
-| VIII §5 zero-alloc | no heap between parse and callback | Held for the parse: the buffer is allocated once at `open()`, and the resync scans in place. A spill witness proves there is no hidden heap use on any lane. **Not zero before the first Active.** The establishment deadline race (asio parallel group) allocates its shared state per pre-Active read. That is outside the parse-to-callback window, and FR-052 is scoped to start at the first Active. The pre-Active count is measured (research R-9) and disclosed (L-13). The Active scope is witnessed by Q-19, which drives the real pump past Active, and its never-disarm mutant |
+| VIII §5 zero-alloc | no heap between parse and callback | Held for the parse: the buffer is allocated once at `open()`, and the resync scans in place. A spill witness proves there is no hidden heap use on any lane. **Not asserted before the first Active.** The establishment deadline race (asio parallel group) may allocate. That is outside the parse-to-callback window, and FR-052 is scoped to start at the first Active. The pre-Active count is measured with a global `operator new` counter (research R-9) and disclosed (L-13). The disarm at the first Active is witnessed by behaviour (Q-36), and Q-19 is a regression witness over the real pump |
 | IX sanitizers / coverage | per-line coverage assessment | The `/speckit-verify` matrix. The resync, deadline and reset_to branches are covered by the cells |
 | X §4 append-only enums | `core::error` | No new error code: criterion 3 reuses `wire_header_out_of_order`, and `reset_to` reuses `session_invalid_argument`. `SessionEvent` alternatives are appended |
-| X §7 ABI | C-ABI changes versioned | **MINOR bump; BREAKING on each affected declaration**, and in `version.h` only where none carries it. The 1.10 sentences 093 falsifies are amended in place (FR-051, contract C-7). `gh release list --exclude-drafts` must be empty at implementation. The C++ additions are source-compatible; `MessageStore`'s vtable changes, which needs a rebuild |
+| X §7 ABI | C-ABI changes versioned | **MINOR bump; BREAKING on each affected declaration**: every BREAKING row is marked on the five observers `version.h`'s 1.10 entry names, and in `version.h` only where none carries it. The 1.10 sentences 093 falsifies are amended in place (FR-051, contract C-7). `gh release list --exclude-drafts` must be empty at implementation. The C++ additions are source-compatible; `MessageStore`'s vtable changes, which needs a rebuild |
 | XI concurrency | strand discipline, cancellation | The deadline race uses `await_deadline`, whose re-arm handles a clock-wide sweep (#536). The reset unit shields itself, and restores the pump's state explicitly, because asio's cancellation state is per awaitable thread (research R-9). `close()`'s wait is event-driven, with no poll. No new detached coroutine |
-| XII security | fail closed | An oversize frame closes before its CheckSum is read. Garbled bytes are never acted on. A disregard before Active is bounded by the timeout, so a hostile peer cannot hold a connection open indefinitely |
+| XII security | fail closed | An oversize frame closes before its CheckSum is read. Garbled bytes are never acted on. A disregard before Active is bounded by the timeout, which is a loop-head check, so a peer that keeps the socket readable cannot outrun it. Both header scans are capped over encoded bytes, so zero padding cannot amplify the rescan |
 | XIV §2 | at most 5 pure virtuals per pluggable interface | `MessageStore` keeps 4; `reset_to` is non-pure |
-| XIII §2–3 logging | async logger; `trace_context` in every record | The first session log site uses `FIXPP_SLOG` with the session's `trace_context`, and its format strings are registered in `src/log/format_registry.cpp`. Garble records are rate-bounded, so one peer cannot flood the bounded queue (OD-5) |
+| XIII §2–3 logging | async logger; `trace_context` in every record | The first session log site uses `FIXPP_SLOG` with the session's `trace_context`, and its format strings are registered in `src/log/format_registry.cpp`. Garble records are rate-bounded to one per `max(HeartBtInt, 1 s)`, so a HeartBtInt of 0 still bounds them, and the logger's default `drop_newest` policy keeps a full queue from blocking the strand (OD-5) |
 | XV banned patterns | — | No `thread_local` buffer (the owner rejected a per-thread arena). No RTTI dispatch for `reset_to` |
 | XVI §3–4 | `/clarify`, `/analyze` mandatory | `/clarify` is done (2026-10-02). `/analyze` follows `/speckit-tasks` |
 | XVI §6 | the orchestrator does not implement | Implementation goes to `phase-implementer`. Mutation proofs happen in a scratch copy |
@@ -121,7 +127,9 @@ made at `/speckit-plan`. Reviewers may challenge any of them, and the owner may 
     a teardown reset the manager is already set, so no wait is needed.
   - **How.** Event-driven: the unit's completion signal raced against `await_deadline` on
     `effective_clock_`, which re-arms on a clock-wide sweep. The pre-Gate-A post-poll would spin the
-    strand for the whole bound (G93-O-07).
+    strand for the whole bound (G93-O-07). This runs on the Session's clock, while the establishment
+    deadline runs on the engine's (C-4). They differ when `clock_override` is set, and the two bounds
+    are independent (revised at Gate A round 2, G93-A-10).
   - **On expiry.** `close()` records `session_event_close_reset_wait_expired` and proceeds. An overriding
     store with a FIFO writer lock still lands (1, 1). A default-body store may not (L-4).
 - **OD-2: `register_session` and `open()` refuse an advertised MaxMessageSize below 4096** (rationale
@@ -146,12 +154,20 @@ made at `/speckit-plan`. Reviewers may challenge any of them, and the owner may 
   - It is `FIXPP_SLOG` with the session's `trace_context` (`[const §XIII.3]`), through the logger
     resolved at `open()` (`logger_override`, else the engine's). The format strings are registered in
     `src/log/format_registry.cpp`.
-  - Garble records are rate-bounded to one per heartbeat interval, carrying the suppressed count
-    (G93-O-08). §4.5.2 says "should log each", and the counter stays exact.
+  - Garble records are rate-bounded to one per `max(HeartBtInt, 1 s)`, carrying the suppressed count
+    (G93-O-08; the 1 s floor added at Gate A round 2, G93-A-07, because a HeartBtInt of 0 is legal).
+    §4.5.2 says "should log each", and the counter stays exact.
   - Pre-Session closes are not logged, because no out-of-session log site exists in `src/` (L-6).
 - **OD-6: the establishment deadline lives in the pump**, not in a detached Session timer (research
   R-4), with the acceptor's first-frame read as its phase (a). It closes a pre-Active connection already
   refused into Disconnected, which belongs to #534.
+  - **Expiry is a loop-head check** (revised at Gate A round 2, G93-A-01). The pump tests the deadline
+    before each read and before each frame's delivery, and races it only to wake a blocked read, so
+    asio's completion order cannot decide expiry.
+  - On TLS, phase (a) lasts at most `max(T, the handshake bound)`; the handshake bound is not shortened.
+    When no time remains after the handshake, the accept loop closes without a read. The alternative,
+    clamping the handshake bound to the remaining time, changes a listener-wide setting per connection
+    and was not chosen.
 - **OD-7: garbled frames are counted, evented and logged even after `close()` began** (revised at Gate
   A round 1, G93-O-05). They are a transport observation, so FR-030 carves them out. That covers the
   arm's own 35-not-third disregard, which therefore runs before FR-030's guard (contract C-2 steps 1
@@ -166,13 +182,16 @@ made at `/speckit-plan`. Reviewers may challenge any of them, and the owner may 
 - **OD-9: `reset_to` gets the true targets on volatile stores too.** This may fix #538, which is
   unconfirmed, as a side effect, so #538's reproduction runs on this branch and on its base.
 - **OD-10: the parse reserve is a per-call argument**, a public C++ addition, not an `OffsetTable::Config`
-  field (research R-3).
+  field (research R-3). Revised at Gate A round 2 (G93-A-05): `OffsetTable::build` is private, so the
+  reserve goes through a new `Parser::parse` overload, a private tagged `MessageView` constructor and a
+  new public `OffsetTable` constructor overload (data-model E-3, C-7 row 12).
 - **OD-11: the Framer's resync shape** (added at Gate A round 1; contract C-1).
   - After a garble, the next start is `8=FIX` anywhere.
   - A structurally complete frame with a wrong CheckSum value is consumed through its own end.
   - In resync mode the header scans are bounded at every candidate, a boundary included. A
-    BeginString value longer than the longest supported identifier is therefore a garble, which is
-    FR-008's carve-out.
+    BeginString value longer than the BeginString cap is therefore a garble, which is FR-008's
+    carve-out, and so is a BodyLength digit run longer than the digit cap (OD-16, OD-17; revised at
+    Gate A round 2).
   - The carry compacts only when the incoming bytes would not fit, so a carry-only feed never
     compacts, and the cost does not depend on segmentation.
   - The first-frame Framer is `{max = L, resync on}`.
@@ -184,20 +203,62 @@ made at `/speckit-plan`. Reviewers may challenge any of them, and the owner may 
   round 1, G93-O-04). An allocation failure becomes an `open()` error instead of a `std::terminate`
   inside `pmr_carry_buffer`'s `noexcept` constructor. The operator-visible arena requirements are in
   C-7 row 15.
+  - **The path, named at Gate A round 2** (G93-A-05). `open()` allocates one block inside a `try`,
+    builds a `monotonic_buffer_resource` over it with the spill witness as upstream, and builds the
+    `pmr_carry_buffer` over that resource, so the constructor's reserve cannot fail and no public
+    declaration changes. The block includes `kContainerSlack` for MSVC debug's container proxy
+    (data-model E-2).
 - **OD-14: the reset unit's cancellation shield is a disable on the awaitable thread with an explicit
   restore**, not a helper coroutine with its own disable (added at Gate A round 1; contract C-6;
   research R-9). The cost is L-12: `Engine::stop()` waits for the unit's store operation.
-  - Alternative: `co_spawn` the store await on the session strand, completing through a token bound to
-    an empty cancellation slot. That allocates a frame and leaves the pending cancellation to throw at
-    the arm's next await, so it was not chosen.
+  - Alternative (rationale replaced at Gate A round 2, G93-A-04): `co_spawn` the store await on the
+    session strand, completing through a token bound to an empty cancellation slot. Its pending
+    cancellation would throw at the arm's next `co_await`, which is what `Engine::stop()` needs. It was
+    still not chosen: the reset event is emitted synchronously between the unit and that next
+    suspension, so it needs OD-15's flag anyway, and it allocates a frame per unit besides.
+- **OD-15: an engine-stop flag on the Session** (added at Gate A round 2, G93-A-04; data-model E-13).
+  - `Engine::stop()`'s step 1 sets it through `session_engine_access`, on the session strand, inside the
+    `co_spawn` it already uses for its emit and before the emit. `entry.session` is read on the control
+    strand first, and a null session has nothing to set.
+  - `logon_arm_superseded` tests it, so the check right after the restore stops the arm before any
+    event, callback, write or Active transition, on both roles.
+  - The flag is read only inside the predicate, so the claim that no return path skips the restore is
+    unchanged. Re-derive the predicate's sites with `grep -n logon_arm_superseded src/session/session.cpp`
+    before relying on that.
+  - Alternative: call `close()` from `stop()`'s step 1. That reorders `stop()`'s teardown, which its
+    join and registry steps depend on, so it was not chosen.
+- **OD-16: the BeginString cap is `max(longest supported identifier, configured begin_string length)`**
+  (added at Gate A round 2, G93-O2-02; contract C-1 W-2). A fixed cap would garble every frame of a
+  session configured with a longer BeginString, which works today, and leave it to time out with no
+  refusal at configuration. Alternative: refuse such a configuration at `register_session`, `open()`
+  and the C setter. That is a new C++, C and TOML refusal and a new BREAKING row, so it was not chosen.
+  The search prefix `8=FIX` stays, and a configured BeginString not beginning with `FIX` is disclosed
+  (L-16).
+- **OD-17: the BodyLength digit run is capped in resync mode** (added at Gate A round 2, G93-A-06;
+  contract C-1 W-2). A value cap alone leaves a zero-padded run rescanned on every feed. A run over the
+  cap is a garble, not a close. The cap is derived by research R-2's recipe so that it admits legitimate
+  padding. A frame padded beyond the cap, accepted today, becomes a garble: a BREAKING change listed in
+  C-7 row 1. Alternative: a persisted scan cursor, which breaks C-1's single-flag state rule.
+- **OD-18: lazy reads report exhaustion as their declarations allow** (added at Gate A round 2,
+  G93-A-02; contract C-3 I-5). R-2's owner ruling covers admission and the dense parse, not lazy reads
+  inside callbacks, so this is an orchestrator choice.
+  - 093 changes only `unknown_fields()`: an internal catch that keeps `noexcept` and returns an empty
+    view, after #540's reproduction runs on the base (FR-015).
+  - The other reports stay as they are and are disclosed (L-5, L-17). Changing `fixpp_msg_get_group`'s
+    misreport, or catching the C cursor shells' allocation, changes C-ABI results. Neither has been
+    through Gate A, and the shells' defect is unconfirmed, so it is filed separately.
+  - Alternatives: new result-bearing `try_*` lazy APIs (Codex G93-A-02 option 1), a public surface with
+    its own versioning, for a failure 093 does not cause; or a headroom large enough to make exhaustion
+    impossible (option 2), which no number can be, because the C cursor shells allocate per call.
 
 ## What changes for whom
 
 | Who | What changes | Declared where |
 |---|---|---|
-| The FIX counterparty | A garbled frame (a bad CheckSum or BodyLength, leading junk, 35 not third) is ignored instead of ending the session, and the next frame's gap is recovered by ResendRequest. A frame over our L ends the session in every state, the pre-Logon exemption and the acceptor's first frame included. A pre-Active connection closes at the logon timeout, or earlier at the acceptor's first-frame bounds. No TestRequest is sent while its recovery traffic is flowing | B&L delta; contract C-1, C-2, C-4, C-5 |
-| A C-ABI or Python consumer | The session-observable changes in C-7 rows 1 to 6, each marked BREAKING on the declarations C-7 names, plus a timeout setter and a garbled-frame counter | C-ABI MINOR; per-declaration BREAKING blocks; `version.h` history |
-| A C++ consumer of `Framer` | A new opt-in config and a summary accessor. With the flag off, nothing changes, the check order included | contract C-1, C-7 |
+| The FIX counterparty | A garbled frame (a bad CheckSum or BodyLength, leading junk, 35 not third) is ignored instead of ending the session, and the next frame's gap is recovered by ResendRequest. A BodyLength zero-padded beyond the digit cap is now a garble. A frame over our L ends the session in every state, the pre-Logon exemption and the acceptor's first frame included. A pre-Active connection closes at the logon timeout, or earlier at the acceptor's first-frame bounds. No TestRequest is sent while its recovery traffic is flowing | B&L delta; contract C-1, C-2, C-4, C-5 |
+| A C-ABI or Python consumer | The session-observable changes in C-7 rows 1 to 6, each marked BREAKING on the five observers, plus a timeout setter and a garbled-frame counter | C-ABI MINOR; per-declaration BREAKING blocks; `version.h` history |
+| A C++ consumer of `Framer` | Two new config members (`resync_on_garble`, `max_begin_string_bytes`) and a summary accessor. With resync off, nothing changes, the check order included | contract C-1, C-7 |
+| A C++ consumer of `Parser` or `MessageView` | A new `Parser::parse` overload and `OffsetTable` constructor overload carrying a reserve. `unknown_fields()` returns an empty view on arena exhaustion instead of terminating | contract C-3 I-5, C-7 rows 12 and 18 |
 | A C++ `MessageStore` implementer | A new non-pure `reset_to`, taking targets in {1, 2}. No change is needed. Override it for crash atomicity, and for the (1, 1) outcome after an expired `close()` wait | `message_store.hpp` header comment; B&L L-3, L-4 |
 | A C++ consumer of `SessionEvent` | Three new alternatives. A `std::visit` without a default arm must handle them | contract C-7 |
 | An operator | Per-session memory is the carry plus B(L); the B&L row gives the formula and two worked totals. `framer_carry_arena` must hold L plus one read, and the session arena must hold B(L) per `Session`. A shortfall is an `open()` error. `logon_timeout_ms` is configurable; zero is refused. `Engine::stop()` waits for an in-flight 141=Y store operation (L-12) | B&L; SC-007; C-7 row 15 |
@@ -211,11 +272,11 @@ made at `/speckit-plan`. Reviewers may challenge any of them, and the owner may 
 specs/093-inbound-frame-dispositions/
 ├── spec.md
 ├── plan.md               # this file
-├── research.md           # R-1 (35-not-third), R-2 … R-9
-├── data-model.md         # E-1 … E-12
+├── research.md           # R-1 (35-not-third), R-2 … R-10
+├── data-model.md         # E-1 … E-13
 ├── contracts/
 │   └── inbound-frame-dispositions.md   # C-1 … C-8
-├── quickstart.md         # cells Q-1 … Q-31; §4 traceability
+├── quickstart.md         # cells Q-1 … Q-37; §4 traceability
 └── checklists/
     └── requirements.md
 ```
@@ -223,21 +284,21 @@ specs/093-inbound-frame-dispositions/
 ### Source code: the files expected to change (re-derive at implementation)
 
 ```text
-include/fixpp/wire/framer.hpp          # Config::resync_on_garble, garble_summary, last_garbles()
-src/wire/framer.cpp                    # resync scan, searching_ flag, W-1..W-4, frame_len check before CheckSum (resync mode)
-include/fixpp/wire/offset_table.hpp    # per-call reserve argument (E-3)
+include/fixpp/wire/framer.hpp          # Config::resync_on_garble, Config::max_begin_string_bytes, kBodyLengthDigitCap, garble_summary, last_garbles()
+src/wire/framer.cpp                    # resync scan, searching_ flag, W-1..W-4 with both header caps, frame_len check before CheckSum (resync mode)
+include/fixpp/wire/offset_table.hpp    # constructor overload carrying the reserve (E-3)
 src/wire/offset_table.cpp
-include/fixpp/wire/parser.hpp          # reserve pass-through
-include/fixpp/session/session.hpp      # L, carry, parse span, counter, garbled_frame_count(), reached_active_, reset_unit_in_flight_, friend session_engine_access
+include/fixpp/wire/parser.hpp          # Parser::parse reserve overload, private tagged MessageView ctor; unknown_fields() catch (FR-015)
+include/fixpp/session/session.hpp      # L, carry block + resource + carry, parse span, counter, garbled_frame_count(), reached_active_, reset_unit_in_flight_, engine_stop_requested_, friend session_engine_access
 src/session/session_engine_access.hpp  # the engine seam (not installed)
-src/session/session.cpp                # open() validation + allocation; C-2 steps 1, 2, 4; liveness writer; reset unit + shield; close() wait; logger resolution
+src/session/session.cpp                # open() validation + allocation; C-2 steps 1, 2, 4; liveness writer; reset unit + shield; superseded predicate + stop flag; close() wait; logger resolution
 include/fixpp/session/session_config.hpp  # logon_timeout_ms
 include/fixpp/session/session_event.hpp   # three alternatives
 include/fixpp/session/message_store.hpp   # reset_to (non-pure, {1,2}); header count comments become conditions
 include/fixpp/session/memory_store.hpp    # reset_to override
 include/fixpp/session/file_store.hpp
 src/session/file_store.cpp                # reset_to override (temp + rename with target counters)
-src/session/engine.cpp                    # register_session gate; pump: borrowed carry, L-sized Framer, summaries, deadline race; first-frame summary hand-off
+src/session/engine.cpp                    # register_session gate; pump: borrowed carry, L-sized Framer, summaries, loop-head deadline test + race; first-frame summary hand-off and non-positive remainder; stop() step 1 sets the stop flag
 src/session/read_first_frame_bounded.hpp  # {max = L, resync} Framer, {offset, len, summary}, bounded by the deadline
 src/log/format_registry.cpp               # the garble and timeout format strings
 src/config/toml_config_loader.cpp, src/config/scalar_mappers.cpp   # logon_timeout_ms
@@ -262,7 +323,8 @@ The order follows dependencies. Each phase writes its cells RED first, then the 
 - **P1: Framer** (C-1):
   - the opt-in resync;
   - the `searching_` flag and held prefix;
-  - W-1 to W-4;
+  - W-1 to W-4, with the BeginString cap and the BodyLength digit cap (the cap derived first by
+    research R-2's recipe);
   - `last_garbles()`;
   - the resync-mode `frame_len` reorder;
   - the counted-work seam;
@@ -272,8 +334,10 @@ The order follows dependencies. Each phase writes its cells RED first, then the 
   Every other caller is unchanged with the flag off, and Q-7 guards that.
 - **P2: L and parse capacity** (C-3, FR-010 to FR-014):
   - `inbound_limit_for`, with the `register_session` and `open()` validation;
-  - the carry and the per-session buffer allocated at `open()`, with the spill witness, and the
-    per-call reserve;
+  - the carry (block, resource, carry) and the per-session buffer allocated at `open()`, with the
+    spill witness, and the per-call reserve through the named overloads;
+  - #540: its reproduction on base, recorded first, then `unknown_fields()`'s catch and the lazy-read
+    cells (Q-32, Q-33);
   - `max_offset_entries` from L;
   - the 10 late sites moved to the buffer;
   - the dense-L and boundary cells on every lane;
@@ -284,8 +348,9 @@ The order follows dependencies. Each phase writes its cells RED first, then the 
   - the borrowed carry, the L-sized Framer, and the summaries into the Session;
   - logger resolution, the counter, the event and the rate-bounded log;
   - the first-frame read's `{max = L, resync}` Framer and its summary hand-off;
-  - the two-phase establishment deadline;
-  - the TC, resync, timeout and Active-allocation cells.
+  - the two-phase establishment deadline: the loop-head test in both drains, the race that only wakes
+    a blocked read, and the accept loop's non-positive remainder;
+  - the TC, resync, timeout, disarm and Active-allocation cells.
   - `FramerFailureClosesEstablishedSession_*` flips.
 - **P4: arms** (C-2, C-5): step 1, the 35-not-third disregard, in every arm; step 4, the liveness move;
   the B-005-7, W1 and D-8 cells flip; the SC-005 cells.
@@ -293,6 +358,8 @@ The order follows dependencies. Each phase writes its cells RED first, then the 
 - **P6: #524** (C-6):
   - `reset_to` with its precondition, and both overrides with crash-injection cells;
   - the unit's shield and manager-first rewrite;
+  - the engine-stop flag, set in `Engine::stop()`'s step 1 and tested by `logon_arm_superseded`, with its
+    sites re-derived after the change;
   - `reset_unit_in_flight_`, the completion signal and `close()`'s event-driven wait;
   - `HookedStore` forwarding;
   - the #524 cells: with and without a teardown reset, overriding and default-body stores,
@@ -318,11 +385,14 @@ The order follows dependencies. Each phase writes its cells RED first, then the 
   that measurable, not assumed. FR-052's Active scope is witnessed by Q-19.
 - **XI**: `close()`'s wait is bounded and event-driven, so it cannot add a hang. The unit's shield means
   `Engine::stop()` can wait on a store operation, which is disclosed as L-12 and is no worse than
-  `close()`'s unbounded teardown reset. The deadline race runs only before the first Active.
+  `close()`'s unbounded teardown reset. The engine-stop flag keeps the shield from letting a stopped
+  arm run its callbacks. The deadline race runs only before the first Active, and expiry does not
+  depend on its completion order.
 - **X §7**: C-7's matrix places BREAKING per declaration, names the amended 1.10 bullets, and records why
   #523 and #524 are not BREAKING.
 - **XII**: in resync mode the reorder means no over-L frame takes the disregard path. The Framer's work
-  per byte is bounded (C-1 W-1 to W-4), so a hostile peer cannot amplify CPU through resync.
+  per byte is bounded (C-1 W-1 to W-4, with both header caps over encoded bytes), so a hostile peer
+  cannot amplify CPU through resync or through zero padding.
 
 Re-check result: **PASS.**
 
@@ -481,3 +551,121 @@ not changed:
 
 The new trade-off L-12 (`Engine::stop()` waits for a shielded store operation) is an orchestrator
 decision (OD-14). It is listed for the owner's awareness, not for a ruling.
+
+- Round 2 applied 2026-10-02: Codex P1=3 P2=6 P3=2; Opus post-judging P1=0 P2=6 P3=7; rewrite addresses root causes RC-1 (deadline expiry as a checked invariant), RC-2 (failure and allocation claims from the declarations), RC-3 (the shield and `Engine::stop()`), RC-4 (the C column from the 1.10 observer set), RC-5 (bounded work over encoded bytes), RC-6 (each witness's instrument). Reviews: research/reviews/codex_093-inbound-frame-dispositions_gate_a_2_review.md, research/reviews/opus_093-inbound-frame-dispositions_gate_a_2_adversarial_review.md.
+
+### Round 2 — how each root cause was addressed
+
+- **RC-1, the deadline as a checked invariant** (G93-A-01 bullets 1 and 3).
+  - Contract C-4 now states expiry as a test of `steady_now() >= deadline` before each read and before
+    each frame's delivery, in both drains. The race only wakes a blocked read (FR-006, OD-6, E-6,
+    research R-4).
+  - Phase (a) on TLS is bounded by `max(T, the handshake bound)`. A non-positive remainder after the
+    handshake closes without a read, guarded in the accept loop, so `read_first_frame_bounded`'s
+    relative-to-absolute line, where 088's B6 mutant lives, is untouched.
+  - Cells: Q-16 gains the readable-across-T cell through a transport double whose read completes at
+    initiation, so the loop-head mutant is RED whatever order asio uses. Q-17 gains the TLS pair.
+- **RC-2, claims from the declarations** (G93-A-02, G93-A-05).
+  - FR-011 and C-3 I-5 now give each lazy read's true report, read from `offset_table.hpp`,
+    `parser.hpp` and `src/capi/message_read.cpp` (research R-10, OD-18).
+  - `unknown_fields()` gains an internal catch (FR-015, C-7 row 18), after fixpp#540's reproduction runs
+    on the base (SC-008, Q-32). Q-33 pins every API's report through the session.
+  - E-3 and C-7 row 12 name the reserve's real path: a `Parser::parse` overload, a private tagged
+    `MessageView` constructor and a public `OffsetTable` constructor overload. E-2, OD-13 and C-7 row 15
+    name the carry's path: a Session-allocated block, a monotonic resource over it, then the carry.
+- **RC-3, the shield and `Engine::stop()`** (G93-A-04).
+  - The engine-stop flag (OD-15, E-13) is set in `stop()`'s step 1 and tested by
+    `logon_arm_superseded`. C-6 records why the restore's fresh state needed it, and that the flag adds
+    no return path between the shield and the restore.
+  - Skipping a null `entry.session` is safe on a stated condition, verified at `00c1f720`: both role
+    loops publish before any frame is delivered, and a publish refused because stop began delivers
+    nothing (E-13 has the re-derivation).
+  - OD-14's inverted rationale is replaced, not stacked on.
+  - Q-26 and SC-006 assert, per role, no `toAdmin`, reset event, `onLogon` or Active after stop began,
+    with a mutant that drops the flag.
+- **RC-4, the observer set** (G93-A-03). C-7 now defines the five observers from `version.h`'s 1.10
+  entry, and rows 1 to 6 mark BREAKING on all five. FR-051's witness, plan X §7 and the "what changes for
+  whom" row say the same. Codex's request for C-ABI witness cells is applied as Q-37, one trigger per
+  row asserting all five observers through C, so no BREAKING row is witnessed only through C++. Row 3
+  now also names the C-observable half of its change: a frame of at most L is admitted however the
+  stream is segmented.
+- **RC-5, encoded bytes** (G93-A-06). C-1 W-2 caps the BodyLength digit run (`kBodyLengthDigitCap`,
+  derived by research R-2's recipe, with a floor that admits padding and a ceiling that keeps its term
+  small, OD-17). C-1 states the amortised bound with both caps, and FR-002's
+  wording now matches it. Q-4 gains the zero-run shape and the cap and cap-plus-one pair. The
+  newly-garbled padded frame is in C-7 row 1.
+- **RC-6, each witness's instrument** (G93-O2-01, G93-A-09).
+  - The disarm has a behavioural cell, Q-36: no application, Active before T, idle past T, still
+    Active.
+  - Q-19 becomes a regression witness over a global `operator new` counter that must first count a
+    known allocation. L-13, FR-052, C-4 and research R-9 now state the pre-Active allocation as a
+    condition to measure, and say why a pmr counter cannot see it.
+  - Quickstart's opening rule and the VII §3 row now read "RED on base, or RED on its named mutant". Each
+    "—" cell names its mutant and its instrument.
+- **The P3s.**
+  - G93-A-07: the log rate is `max(HeartBtInt, 1 s)`, with the logger's default drop policy stated (FR-003,
+    E-12, OD-5, L-11), and a Q-5 cell at HeartBtInt = 0.
+  - G93-A-08: Q-34 (first-frame summary hand-off), Q-35 (the 10 s default), Q-30 (the setter's null
+    and zero refusals) and Q-33 (lazy reads) are new or extended, and quickstart §4 cites them.
+  - G93-A-10: C-4, FR-006 and research R-4 say the deadline ignores `clock_override`. The false
+    equivalence is deleted, and Q-18 gains an override cell.
+  - G93-A-11: `checklists/requirements.md` is refreshed.
+  - G93-O2-02: the BeginString cap takes the configured length (OD-16, C-1 W-2), and Q-10 gains the
+    configured-long session. L-16 discloses the `8=FIX` search prefix.
+  - G93-A-05's two declaration names are under RC-2 above.
+
+### Round 2 — disagreements
+
+Each item below is one Opus marked Disagree, in whole or in part. Codex's fix was not applied.
+
+- **G93-A-01 bullet 2 (local suspensions), and its connection-scoped watchdog.** A store that never
+  completes hangs the session in every state today, Active included, so it is not
+  establishment-specific. Before Active the outbound volume is the Logon reply plus at most a refusal,
+  far below a socket send buffer, so a peer that stops reading cannot hold the write open. The four
+  stalled-cell tests were not added. Only C-4's sentence "the stores and the transport bound them" was
+  replaced by its condition.
+- **G93-A-02's option 1 (result-bearing `try_*` lazy APIs) and option 2 (a headroom that makes
+  exhaustion impossible).** Option 1 adds a public surface, with its own versioning, for a failure 093
+  does not cause. Option 2 is not achievable, because the C cursor shells allocate per call. OD-18
+  records the choice.
+- **G93-A-05's fix shapes (an `expected` factory, or a throwing `pmr_carry_buffer` constructor).** Both
+  change a public declaration. The Session-allocated block needs none (OD-13).
+- **G93-A-06's persisted scan cursor.** It breaks C-1's single-flag state rule. The digit cap was chosen
+  instead (OD-17).
+- **G93-A-08, FR-053.** It is a process rule that B25's census enforces mechanically. Round 1 recorded
+  this disagreement, and nothing has changed.
+- **G93-A-08, FR-050 and FR-051.** Their witnesses are named mechanical gates: the golden, the freeze
+  hashes, the history block and the B&L delta. That is the right shape for a documentation and version
+  requirement.
+- **G93-A-09, as worded.** Q-19 never claimed RED on base. The defect was the header rule and the VII §3
+  row, which are corrected under RC-6.
+
+### Round 2 — departures from the Opus fix shapes (code-verified)
+
+- **RC-2's "nested and C cursors: `alloc_failed`" is true only of the nested getter.**
+  `fixpp_msg_get_group` calls the degrading `group_slices()` and reports exhaustion as
+  `FIXPP_ERR_TYPE_MISMATCH`. Both C cursor shells are allocated with `new_object` from the parse arena,
+  with no catch. C-3 I-5 records each true report. Changing either changes a C-ABI result that Gate A
+  has not reviewed, so both are disclosed (L-5, L-17), and the shells' defect is a lead to file,
+  unconfirmed, as #540 was.
+- **G93-A-05's carry path over "exactly that block" would terminate on MSVC debug.** MSVC's debug STL
+  allocates a container proxy from the allocator when the vector is constructed, so a block of exactly
+  L + the read size spills, and a null upstream terminates inside the `noexcept` constructor. The block
+  includes `kContainerSlack`, the resource's upstream is the spill witness, and Q-14 runs on the MSVC
+  sandbox.
+- **RC-1's "after each delivered frame" became "before each frame's delivery".** That is stricter: no
+  frame is delivered once the deadline has passed, and the overrun is at most the frame already in
+  delivery.
+- **G93-O2-02 took the `max(...)` form, not the refusal.** That avoids a new C++, C and TOML refusal and
+  a new BREAKING row (OD-16).
+
+### Round 2 — items for the owner
+
+None blocking. Every ruling in spec.md `## Clarifications` is implementable as written, and none was
+reinterpreted: RC-1 makes the "bounded by the timeout" ruling deterministic, and R-2's ruling does not
+cover lazy reads inside callbacks (OD-18). For the owner's awareness:
+- OD-17 makes a BodyLength zero-padded beyond the digit cap a garble. A frame accepted today then
+  becomes a garble, and C-7 row 1 marks that BREAKING. The cap's recipe is meant to make the case
+  unreachable for real counterparties.
+- A new lead, to be filed as an unconfirmed issue with a reproduce-first item: the C cursor shells'
+  uncaught allocation (L-17).
