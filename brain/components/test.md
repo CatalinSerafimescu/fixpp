@@ -114,14 +114,12 @@ did not need its windows:
   one slice. On a slow runner (`windows-msvc-asan`, with a FileStore-backed `open()`) the operation
   had not finished in time and the cell failed. A plain `run_for(W)` followed by an `ASSERT` fails
   the same way (#531). Widening the window or the grace is not the fix; see the paragraph above.
-- **Whether a detached task needs the window is a measurement.** At that fixture's sites, no
-  handler is dispatched after the awaited future becomes ready, including at the logon site that
-  starts the liveness loop, so stopping at readiness strands nothing. How to measure: replace each
-  pump with a full window that counts the handlers dispatched after readiness, and seed one post to
-  prove the probe can count. The tools are in the parent repo,
-  `decisions/speckit/526-531-fixed-window-pumps-tools/`.
-  The result carries over to a slower runner only while the context is single-threaded and nothing
-  the operations start waits on wall-clock time.
+- **Whether a detached task needs the window is a measurement.** How to measure: replace each pump
+  with a full window that counts the handlers dispatched after readiness, and seed one post to prove
+  the probe can count. B24's tools and its reading at that fixture are in the parent repo:
+  `decisions/speckit/526-531-fixed-window-pumps-tools/` and
+  `decisions/speckit/526-531-fixed-window-pumps-verify.md`. Re-run it before relying on that reading
+  at a fixture that has changed since.
 - **Where no window is needed:** call `pump_until_ready` with a site label, then `drain_ready()`
   before reading results. A handler posted after readiness then still runs before a negative
   assertion such as "sends no Reject". On a context with outstanding work a window always runs to its

@@ -206,13 +206,10 @@ void drain_ready(asio::io_context& ioc) {
 }
 
 // The fixture's waits pump until the future is ready, then drain_ready() runs whatever
-// is still ready; no wall-clock window decides a cell (#526). That is sound while nothing
-// these operations start waits on wall-clock time or on another thread: the clock is the
-// mock clock, the store's file_io_executor is this io_context, and only the test's thread
-// runs or posts to this io_context. Under those conditions a handler becomes ready only
-// when another handler runs, so a window could dispatch nothing that drain_ready() has
-// not. To re-check, swap each pump for a full window that counts handlers dispatched
-// after readiness (decisions/speckit/526-531-fixed-window-pumps-tools/ in the parent repo).
+// is still ready, instead of running a fixed wall-clock window (#526). Whether a window
+// would have dispatched a handler that this shape skips is a measurement, not a derivation: to
+// re-check, swap each pump for a full window that counts handlers dispatched after
+// readiness (decisions/speckit/526-531-fixed-window-pumps-tools/ in the parent repo).
 struct DispositionFixture {
     asio::io_context ioc;
     std::shared_ptr<fixpp::core::mock_clock> clock;
