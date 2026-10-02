@@ -19,7 +19,11 @@ is read as outside any type definition. A `{` inside such a head is an expressio
 body, when an open `(` or `[` of the head holds it, or an open template list of the template
 head, the class name or the base clause, or when it opens a requires-expression of the
 requires-clause; a `<` opens a template list only after a name. A definition is identified by
-its enclosing scopes plus its name (specialization arguments included). The verdict:
+its enclosing scopes plus its name (specialization arguments included). An unnamed class,
+struct or union is named by the first declarator after its body (`typedef struct {...} T;`)
+or by its alias (`using T = struct {...};`), as `<anon:T>`; one with neither, and every
+unnamed enumeration, is `<anon>` and paired with the other state by encounter order. The
+verdict:
 
   * DIVERGENCE (exit 1): a definition present in BOTH outputs whose tokens differ, head
     included, so a gated `final` or base clause counts as well as a gated member. A gated
@@ -55,7 +59,10 @@ FAILS CLOSED (exit 2), and still prints whatever it found, when:
     a name that is not a template, such as `template <int N = M < 3>`, is counted as a list;
     parenthesise the comparison), a requires-clause token outside the clause's grammar, or a
     type body followed by a token no declarator starts with (a brace in the head was read as
-    the body). A third-party header cannot depend on the macro, so its heads are not refused.
+    the body). A third-party header cannot depend on the macro, so its heads are not refused;
+  * in such a header, definitions paired by encounter order whose number differs between the
+    states, in one scope outside every type definition, when either state holds two or more:
+    which pairs with which is unknown.
 
 Self-test, buildless, with the arms each refusal and verdict needs: `ci/test-odr-hooks-census.sh`.
 """
@@ -355,11 +362,12 @@ def paren_open(h):
 def read_head(h):
     """-> (kind, name) for the tokens before a `{`, by the class-head grammar.
 
-    kind is 'namespace'; 'type', name being the type's name ("<anon>" for an unnamed one);
+    kind is 'namespace'; 'type', name being the type's name ("" for an unnamed class, struct or
+    union, "<anon>" for an unnamed enumeration, "<anon:A>" for an unnamed one in `using A =`);
     'other'; 'expr' when the `{` opens an expression inside the head rather than a scope (name
     says what holds it: 'angle' or 'requires'); or 'refuse' when the head reads as a class head
     up to a token the rules below give no place (name is the reason)."""
-    i = 0
+    i, alias = 0, None
     # The tokens a definition head may carry before its class key: an access label, the
     # declaration specifiers of `static struct X {...} x;` and its kin, attributes, a linkage
     # string, and `using A =`. Any other leading token makes the head `other`, so a record
@@ -379,6 +387,7 @@ def read_head(h):
         elif h[i] == "extern":
             i += 1  # extern without a linkage string
         elif h[i] == "using" and i + 2 < len(h) and h[i + 2] == "=":
+            alias = h[i + 1]
             i += 3  # `using A = struct Z {...};`
         else:
             break
@@ -434,14 +443,41 @@ def read_head(h):
         return "other", ""  # e.g. `struct X* f()`, `struct X x =`: not a definition head
     if i < len(h) and angle_depth(h, i + 1)[1]:
         return "expr", "angle"  # inside a base clause's template argument list
-    return "type", " ".join(name).replace(" :: ", "::").replace(" ", "") or "<anon>"
+    if name:
+        return "type", " ".join(name).replace(" :: ", "::").replace(" ", "")
+    return "type", "<anon>" if is_enum else f"<anon:{alias}>" if alias else ""
+
+
+def declarator_name(toks, n):
+    """toks[n] is the `{` of an unnamed class, struct or union: the first declarator-id after
+    its `}` (`typedef struct {...} Name;`, `static struct {...} v;`), or None when none
+    follows (an anonymous union)."""
+    depth = 0
+    for j in range(n, len(toks)):
+        depth += (toks[j][0] == "{") - (toks[j][0] == "}")
+        if depth == 0:
+            break
+    else:
+        return None
+    h = [t for t, _ in toks[j + 1:j + 65]]
+    i = 0
+    while i < len(h):
+        k = skip_attrs(h, i)
+        if k != i:
+            i = k
+        elif h[i] in ("*", "&", "(", "const", "volatile", "__restrict", "__restrict__"):
+            i += 1
+        else:
+            return h[i] if IDENT.match(h[i]) else None
+    return None
 
 
 def parse(text, own=lambda origin: False):
     """-> (lines, origins, defs, line_type, unread) — defs: key -> (first_line, last_line,
-    origin, token_text); line_type[i]: key of the innermost type definition open at line i, or
-    None; unread: (origin, reason, text) for each head, in an origin `own` accepts, that the
-    rules could not read."""
+    origin, token_text, scope_key, nested), where scope_key is the key before its `#<ordinal>`
+    and nested says the definition lies inside another type definition; line_type[i]: key of
+    the innermost type definition open at line i, or None; unread: (origin, reason, text) for
+    each head, in an origin `own` accepts, that the rules could not read."""
     lines, origins = [], []
     cur = "?"
     for ln in text.split("\n"):
@@ -499,12 +535,15 @@ def parse(text, own=lambda origin: False):
                 kind = "other"
             path = "::".join(f[2] for f in stack if f[2])
             if kind == "type":
+                if name == "":
+                    d = declarator_name(toks, n)
+                    name = f"<anon:{d}>" if d else "<anon>"
                 k = f"{path}::{name}" if path else name
                 ordinal[k] = ordinal.get(k, 0) + 1
                 key = k if ordinal[k] == 1 else f"{k}#{ordinal[k]}"
                 toks_by_frame.append(list(head) + ["{"])
                 stack.append(("type", key, name, head_line, origins[head_line],
-                              toks_by_frame[-1]))
+                              toks_by_frame[-1], k, any(f[0] == "type" for f in stack)))
             elif kind == "namespace":
                 label = "" if name is None else name or "<anon-ns>"
                 stack.append(("namespace", None, label, li, None, None))
@@ -517,7 +556,7 @@ def parse(text, own=lambda origin: False):
                 f = stack.pop()
                 if f[0] == "type":
                     toks_by_frame.pop()
-                    defs[f[1]] = (f[3], li, f[4], " ".join(f[5]))
+                    defs[f[1]] = (f[3], li, f[4], " ".join(f[5]), f[6], f[7])
                     nxt = toks[n + 1][0] if n + 1 < len(toks) else ""
                     if nxt not in AFTER_BODY and not IDENT.match(nxt):
                         refuse(f[4], f"a type body is followed by `{nxt}`: a brace in its head "
@@ -564,6 +603,21 @@ def census(header):
     if la == lb:
         return {"header": header, "status": "SAME"}
     unread = sorted(set(ua) | set(ub))
+    # A definition keyed by encounter order (an unnamed enumeration or anonymous union, or a
+    # second definition under one key) is paired with the one at the same place in the other
+    # state. When the states hold a different number under one key and either holds two or
+    # more, which pairs with which is unknown. Inside another type definition the enclosing one
+    # is compared whole, so only a scope outside every type definition is checked.
+    per_key = {}
+    for side, d in ((0, da), (1, db)):
+        for v in d.values():
+            if not v[5]:
+                per_key.setdefault(v[4], [0, 0, []])[side] += 1
+                per_key[v[4]][2].append(v[2])
+    for k, (na, nb, where) in sorted(per_key.items()):
+        if na != nb and max(na, nb) >= 2 and any(own(o) for o in where):
+            unread.append((next(o for o in where if own(o)), f"definitions of {k} cannot be "
+                           f"paired between the states ({na} without {MACRO}, {nb} with)", ""))
     div, one = {}, {}
     for k in sorted(set(da) | set(db)):
         if k in da and k in db:

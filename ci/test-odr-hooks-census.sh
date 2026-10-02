@@ -747,6 +747,92 @@ illformed "T60 a requires-clause the census cannot read is refused" -std=c++20 "
   && check "T60 a requires-clause the census cannot read is refused" 2 "$t" \
     "ERROR include/fx/h_req_bad.hpp: a brace in a class head the census cannot read"
 
+# ── an unnamed type is identified by the name it is declared with ────────────────────────────
+# Paired by encounter order, a macro-only unnamed type earlier in the scope would shift the
+# pairing of every later one.
+fresh "T52 a typedef'd unnamed struct after a macro-only one is paired by its typedef name" \
+  include/h_anon.hpp -std=c++17 1 "^include/h_anon.hpp: <anon:Second>" <<'EOF'
+#ifdef FIXPP_TEST_HOOKS
+typedef struct { int a; } First;
+#endif
+typedef struct {
+    int a;
+#ifdef FIXPP_TEST_HOOKS
+    int gated;
+#endif
+} Second;
+EOF
+fresh "T53 a macro-only typedef'd unnamed struct is one definition, not a divergence" \
+  include/h_anon_only.hpp -std=c++17 0 "$NODIV" \
+  "^include/h_anon_only.hpp: <anon:OnlyHooked> (only with FIXPP_TEST_HOOKS)" <<'EOF'
+#ifdef FIXPP_TEST_HOOKS
+typedef struct { int a; } OnlyHooked;
+#endif
+EOF
+fresh "T63 an unnamed struct in an alias declaration after a macro-only one is paired by its alias" \
+  include/h_anon_alias.hpp -std=c++17 1 "^include/h_anon_alias.hpp: <anon:Second>" <<'EOF'
+#ifdef FIXPP_TEST_HOOKS
+using First = struct { int a; };
+#endif
+using Second = struct {
+    int a;
+#ifdef FIXPP_TEST_HOOKS
+    int gated;
+#endif
+};
+EOF
+# An unnamed enumeration has no such name, so it is paired by encounter order. That pairing is
+# refused when it is ambiguous: two or more in one scope, and a different number in each state.
+fresh "T54 unnamed enumerations whose number changes with the macro are refused" \
+  include/fx/h_anon_enum.hpp -std=c++17 2 \
+  "ERROR include/fx/h_anon_enum.hpp: definitions of fx::<anon> cannot be paired between the states (1 without FIXPP_TEST_HOOKS, 2 with)" <<'EOF'
+namespace fx {
+#ifdef FIXPP_TEST_HOOKS
+enum { kA };
+#endif
+enum {
+    kB,
+#ifdef FIXPP_TEST_HOOKS
+    kC,
+#endif
+};
+}  // namespace fx
+EOF
+fresh "T55 one macro-only unnamed enumeration is one definition, not a divergence" \
+  include/fx/h_anon_enum_one.hpp -std=c++17 0 "$NODIV" \
+  "^include/fx/h_anon_enum_one.hpp: fx::<anon> (only with FIXPP_TEST_HOOKS)" <<'EOF'
+namespace fx {
+#ifdef FIXPP_TEST_HOOKS
+enum { kOnly };
+#endif
+}  // namespace fx
+EOF
+fixture "T61 unnamed enumerations as many in both states are paired in order, and compared" \
+  include/fx/h_anon_enum_two.hpp -std=c++17 "^include/fx/h_anon_enum_two.hpp: fx::<anon>#2" <<'EOF'
+namespace fx {
+enum { kA };
+enum {
+    kB,
+#ifdef FIXPP_TEST_HOOKS
+    kC,
+#endif
+};
+}  // namespace fx
+EOF
+# Inside a type definition the enclosing definition is compared whole, so the pairing of the
+# unnamed types in it is not refused: the enclosing one is the DIVERGENCE.
+fixture "T66 unnamed enumerations inside a class are reported through the class" \
+  include/fx/h_anon_nested.hpp -std=c++17 "^include/fx/h_anon_nested.hpp: fx::WithEnums" <<'EOF'
+namespace fx {
+struct WithEnums {
+#ifdef FIXPP_TEST_HOOKS
+    enum { kA };
+#endif
+    enum { kB };
+};
+}  // namespace fx
+EOF
+
 # ── a refusal is for the tree's own headers only ─────────────────────────────────────────────
 # A third-party header cannot depend on the macro, so a head the rules cannot read there must
 # not fail the scan (a dependency bump would turn it red). Here a header outside the source
@@ -1051,6 +1137,22 @@ PY
   mutant T67 "exit 2, wanted 0" "a head the rules cannot read is refused in a third-party header too" \
     '    return os.path.realpath(origin).startswith(CTX["src"])' \
     '    return True'
+  # The identity of an unnamed type.
+  mutant T52 "exit 2, wanted 1" "an unnamed struct is keyed by encounter order, not by its declarator" \
+    '                    name = f"<anon:{d}>" if d else "<anon>"' \
+    '                    name = "<anon>"'
+  mutant T63 "exit 2, wanted 1" "an unnamed struct in an alias declaration is keyed by encounter order" \
+    '    return "type", "<anon>" if is_enum else f"<anon:{alias}>" if alias else ""' \
+    '    return "type", "<anon>" if is_enum else ""'
+  mutant T54 "exit 1, wanted 2" "an ambiguous pairing by encounter order is not refused" \
+    '        if na != nb and max(na, nb) >= 2 and any(own(o) for o in where):' \
+    '        if False:'
+  mutant T55 "exit 2, wanted 0" "one unnamed definition in one state is refused" \
+    'if na != nb and max(na, nb) >= 2' 'if na != nb and max(na, nb) >= 1'
+  mutant T61 "exit 2, wanted 1" "a pairing by encounter order is refused when both states hold as many" \
+    'if na != nb and max(na, nb) >= 2' 'if max(na, nb) >= 2'
+  mutant T66 "exit 2, wanted 1" "the pairing inside a type definition is refused too" \
+    '            if not v[5]:' '            if True:'
   mutant T15 "exit 0, wanted 2" "a preprocessing error does not fail the run" \
     '    if refusals or errors or unread:' \
     '    if refusals or unread:'
