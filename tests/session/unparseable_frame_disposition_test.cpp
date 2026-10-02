@@ -195,6 +195,21 @@ bool has_field(std::span<const std::byte> frame, std::string_view tag_eq) {
     return wire.contains("\x01" + std::string(tag_eq));
 }
 
+// Runs every ready handler until none is left. No wall-clock bound: the mock clock's
+// wake-ups are posted handlers, so after an advance they are all ready.
+void drain_ready(asio::io_context& ioc) {
+    ioc.restart();
+    while (ioc.poll() > 0) {
+        ioc.restart();
+    }
+    ioc.restart();
+}
+
+// The fixture's waits pump until the future is ready, then drain_ready() runs whatever
+// is still ready, instead of running a fixed wall-clock window (#526). Whether a window
+// would have dispatched a handler that this shape skips is a measurement, not a derivation: to
+// re-check, swap each pump for a full window that counts handlers dispatched after
+// readiness (decisions/speckit/526-531-fixed-window-pumps-tools/ in the parent repo).
 struct DispositionFixture {
     asio::io_context ioc;
     std::shared_ptr<fixpp::core::mock_clock> clock;
@@ -231,12 +246,12 @@ struct DispositionFixture {
     void open_only(Session& sess) {
         transport.reset();
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+        if (!fixpp::test_support::pump_until_ready(ioc, fut, "DispositionFixture::open_only")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
                                                             "DispositionFixture::open_only");
-            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "DispositionFixture::open_only";
-            return;
+            FAIL() << fixpp::test_support::kPumpBudgetMiss << "DispositionFixture::open_only";
         }
+        drain_ready(ioc);
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
     }
 
@@ -244,13 +259,14 @@ struct DispositionFixture {
     void open_to_active(Session& sess) {
         transport.reset();
         auto fut = asio::co_spawn(ioc, sess.open(), asio::use_future);
-        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+        if (!fixpp::test_support::pump_until_ready(ioc, fut,
+                                                   "DispositionFixture::open_to_active/open")) {
             fixpp::test_support::cancel_and_drain_or_report(
                 ioc, *clock, "DispositionFixture::open_to_active/open");
-            ADD_FAILURE() << fixpp::test_support::kWindowMiss
-                          << "DispositionFixture::open_to_active/open";
-            return;
+            FAIL() << fixpp::test_support::kPumpBudgetMiss
+                   << "DispositionFixture::open_to_active/open";
         }
+        drain_ready(ioc);
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
 
         auto logon = make_raw_frame("A", 1,
@@ -258,13 +274,14 @@ struct DispositionFixture {
                                     "108=30\x01");
         transport.reset();
         auto fut2 = asio::co_spawn(ioc, sess.on_inbound_frame(logon), asio::use_future);
-        if (!fixpp::test_support::run_window_then_ready(ioc, fut2, 200ms)) {
+        if (!fixpp::test_support::pump_until_ready(ioc, fut2,
+                                                   "DispositionFixture::open_to_active/logon")) {
             fixpp::test_support::cancel_and_drain_or_report(
                 ioc, *clock, "DispositionFixture::open_to_active/logon");
-            ADD_FAILURE() << fixpp::test_support::kWindowMiss
-                          << "DispositionFixture::open_to_active/logon";
-            return;
+            FAIL() << fixpp::test_support::kPumpBudgetMiss
+                   << "DispositionFixture::open_to_active/logon";
         }
+        drain_ready(ioc);
         ASSERT_TRUE(fut2.get().has_value());
         ASSERT_EQ(sess.state(), fsm_state::Active);
     }
@@ -273,12 +290,13 @@ struct DispositionFixture {
     void feed(Session& sess, std::span<const std::byte> frame) {
         transport.reset();
         auto fut = asio::co_spawn(ioc, sess.on_inbound_frame(frame), asio::use_future);
-        if (!fixpp::test_support::run_window_then_ready(ioc, fut, 200ms)) {
+        if (!fixpp::test_support::pump_until_ready(ioc, fut, "DispositionFixture::feed")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
                                                             "DispositionFixture::feed");
-            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "DispositionFixture::feed";
+            ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss << "DispositionFixture::feed";
             return;
         }
+        drain_ready(ioc);
         (void)fut.get();
     }
 
@@ -1003,12 +1021,28 @@ struct StateCell {
     StateCell(StateCell const&) = delete;
     StateCell& operator=(StateCell const&) = delete;
 
-    // A cell that stops early still completes the parked exchange, so no suspended
-    // frame outlives the session it references.
+    // Nothing may escape a destructor: a dispatched handler can throw, and so can
+    // ADD_FAILURE() under --gtest_throw_on_failure.
     ~StateCell() {
         if (logon.valid() && factory->last_store != nullptr) {
-            factory->last_store->release_parked();
-            (void)fixpp::test_support::pump_until_ready(fix.ioc, logon, 2s);
+            try {
+                bool ready = false;
+                bool threw = false;
+                try {
+                    factory->last_store->release_parked();
+                    ready = fixpp::test_support::pump_until_ready(fix.ioc, logon);
+                } catch (...) {
+                    threw = true;
+                }
+                if (!ready) {
+                    factory->last_store->release_parked();
+                    fixpp::test_support::cancel_and_drain_or_report(fix.ioc, *fix.clock,
+                                                                    "StateCell::~StateCell");
+                    ADD_FAILURE() << (threw ? "Site: " : fixpp::test_support::kPumpBudgetMiss)
+                                  << "StateCell::~StateCell";
+                }
+            } catch (...) {
+            }
         }
     }
 
@@ -1024,9 +1058,9 @@ struct StateCell {
         ASSERT_NE(factory->last_store, nullptr);
         factory->last_store->park_outbound(1);
         logon = asio::co_spawn(fix.ioc, sess->on_inbound_frame(logon_frame), asio::use_future);
-        ASSERT_TRUE(fixpp::test_support::pump_until(
-            fix.ioc, [this] { return factory->last_store->parked(); }, 200ms))
-            << "StateCell: the acceptor's Logon reply never reached the store";
+        ASSERT_TRUE(fixpp::test_support::pump_until(fix.ioc, [this] {
+            return factory->last_store->parked();
+        })) << "StateCell: the acceptor's Logon reply never reached the store";
         ASSERT_EQ(sess->state(), fsm_state::LogonReceived);
     }
 
@@ -1036,7 +1070,7 @@ struct StateCell {
             return;
         }
         factory->last_store->release_parked();
-        ASSERT_TRUE(fixpp::test_support::pump_until_ready(fix.ioc, logon, 200ms))
+        ASSERT_TRUE(fixpp::test_support::pump_until_ready(fix.ioc, logon))
             << "StateCell: the Logon exchange did not complete after the release";
         auto const r = logon.get();
         ASSERT_TRUE(r.has_value()) << "StateCell: the Logon exchange failed";
@@ -1385,16 +1419,6 @@ TEST(UnparseableFrameDisposition, RejectLoop_EachFixppRejectAnswersOnePeerFrame)
 //
 // Time is the mock clock's. After each advance, drain_ready runs every handler the
 // advance made ready; no wall-clock window decides a cell.
-
-// Runs every ready handler until none is left. No wall-clock bound: the mock clock's
-// wake-ups are posted handlers, so after an advance they are all ready.
-void drain_ready(asio::io_context& ioc) {
-    ioc.restart();
-    while (ioc.poll() > 0) {
-        ioc.restart();
-    }
-    ioc.restart();
-}
 
 enum class Ending : std::uint8_t { answered, silent };
 
@@ -2221,11 +2245,12 @@ struct LateCell {
         }
         if (sess->is_open()) {
             auto fut = asio::co_spawn(fix.ioc, sess->close(close_mode::terminal), asio::use_future);
-            if (!fixpp::test_support::run_window_then_ready(fix.ioc, fut, 200ms)) {
+            if (!fixpp::test_support::pump_until_ready(fix.ioc, fut, "LateCell::release")) {
                 fixpp::test_support::cancel_and_drain_or_report(fix.ioc, *fix.clock,
                                                                 "LateCell::release");
-                ADD_FAILURE() << fixpp::test_support::kWindowMiss << "LateCell::release";
+                ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss << "LateCell::release";
             } else {
+                drain_ready(fix.ioc);
                 (void)fut.get();
             }
         }
@@ -2250,12 +2275,15 @@ struct LateCell {
                 co_return co_await store.next_seqnum(direction_t::inbound, false);
             },
             asio::use_future);
-        if (!fixpp::test_support::run_window_then_ready(fix.ioc, fut, 200ms)) {
+        if (!fixpp::test_support::pump_until_ready(fix.ioc, fut,
+                                                   "LateCell::durable_next_inbound")) {
             fixpp::test_support::cancel_and_drain_or_report(fix.ioc, *fix.clock,
                                                             "LateCell::durable_next_inbound");
-            ADD_FAILURE() << fixpp::test_support::kWindowMiss << "LateCell::durable_next_inbound";
+            ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss
+                          << "LateCell::durable_next_inbound";
             return 0;
         }
+        drain_ready(fix.ioc);
         auto const r = fut.get();
         if (!r.has_value()) {
             ADD_FAILURE() << "LateCell: next_seqnum(inbound, false) failed on the reopened store";
@@ -2814,7 +2842,7 @@ void run_d3_cell(At at, Shape const& shape) {
     }
     c.fix.transport.reset();
     c.factory->last_store->release_parked();
-    bool const done = fixpp::test_support::pump_until_ready(c.fix.ioc, c.logon, 200ms);
+    bool const done = fixpp::test_support::pump_until_ready(c.fix.ioc, c.logon);
     EXPECT_TRUE(done) << row << ": the parked Logon exchange did not complete after the release";
     if (done) {
         (void)c.logon.get();
