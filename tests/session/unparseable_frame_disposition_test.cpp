@@ -209,7 +209,7 @@ void drain_ready(asio::io_context& ioc) {
 // is still ready; no wall-clock window decides a cell (#526). That is sound while
 // nothing these operations start completes on wall-clock time: the clock is the mock
 // clock and the store's file_io_executor is this io_context, so every handler a window
-// would have run is ready by the time drain_ready() returns. To re-check, swap each pump
+// would have run has run by the time drain_ready() returns. To re-check, swap each pump
 // for a full window that counts handlers dispatched after readiness
 // (decisions/speckit/526-531-fixed-window-pumps-tools/ in the parent repo).
 struct DispositionFixture {
