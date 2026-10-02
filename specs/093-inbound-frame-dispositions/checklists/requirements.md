@@ -36,8 +36,6 @@
 
 ## Notes
 
-- `/speckit-clarify` is mandatory (session/wire feature, `[const §XVI.3]`). Open questions to put to it:
-  - the establishment timeout's default value, and whether zero is refused;
-  - the acceptor's clock start;
-  - the garbled-frame event's shape and whether it reaches the C ABI;
-  - whether the out-of-scope "Disconnected does not close the transport" finding blocks FR-006.
+- `/speckit-clarify` ran on 2026-10-02 and asked 4 questions: pre-Logon disregard, the timeout's default
+  and zero, the C-ABI counter, and the 256 KiB cap. All are integrated into spec.md. Deferred to the
+  plan: the acceptor's clock start against the first-frame deadline, and whether #534 blocks FR-006.
