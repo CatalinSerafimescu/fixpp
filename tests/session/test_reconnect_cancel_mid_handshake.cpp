@@ -52,6 +52,8 @@
 #include <span>
 #include <vector>
 
+#include "support/pump_until_ready.hpp"
+
 using namespace std::chrono_literals;
 
 namespace {
@@ -184,8 +186,6 @@ private:
 // ─────────────────────────────────────────────────────────────────────────────
 class ReconnectCancelMidHandshakeTest : public ::testing::Test {
 protected:
-    asio::io_context ioc;
-
     static fixpp::transport::ReconnectPolicy make_policy(std::uint32_t max_attempts) {
         fixpp::transport::ReconnectPolicy policy;
         policy.max_attempts = max_attempts;
@@ -213,6 +213,10 @@ TEST_F(ReconnectCancelMidHandshakeTest, TotalCancelMidHandshakeReleasesTransport
 
     asio::cancellation_signal cancel_sig;
 
+    // The io_context is declared last so that a frame still suspended at an early return is
+    // destroyed while the factory, FSM and cancellation signal it references are alive (#531).
+    asio::io_context ioc;
+
     auto fut = asio::co_spawn(ioc, fsm.drive_reconnect_attempt(),
                               asio::bind_cancellation_slot(cancel_sig.slot(), asio::use_future));
 
@@ -225,10 +229,9 @@ TEST_F(ReconnectCancelMidHandshakeTest, TotalCancelMidHandshakeReleasesTransport
         }
     });
 
-    ioc.run_for(1s);
-    ioc.restart();
-
-    ASSERT_EQ(fut.wait_for(std::chrono::seconds{0}), std::future_status::ready)
+    ASSERT_TRUE(
+        fixpp::test_support::pump_until_ready(ioc, fut, "ReconnectCancelMidHandshake/total"))
+        << fixpp::test_support::kPumpBudgetMiss << "ReconnectCancelMidHandshake/total" << ". "
         << "drive_reconnect_attempt did not complete after total-cancel. "
         << "HANG: the coroutine was not reset to enable_total_cancellation() — "
         << "total-cancel is silently filtered (co_spawn default is terminal-only).";
@@ -239,6 +242,13 @@ TEST_F(ReconnectCancelMidHandshakeTest, TotalCancelMidHandshakeReleasesTransport
     EXPECT_FALSE(result.has_value())
         << "Expected error (cancelled) after total-cancel mid-handshake; got success. "
         << "RED: stub returns success without reaching async_handshake.";
+    if (!result.has_value()) {
+        EXPECT_EQ(result.error(), fixpp::core::error::transport_connect_cancelled)
+            << "Expected transport_connect_cancelled; got "
+            << fixpp::core::to_string(result.error())
+            << ". Any other error means the attempt ended by some path other than the "
+               "cancellation.";
+    }
 
     // No orphaned transport: RAII must have released it.
     EXPECT_EQ(factory->live_transport_count.load(), 0)
@@ -260,6 +270,8 @@ TEST_F(ReconnectCancelMidHandshakeTest, RepeatedCancelsLeaveNoLeaksAcrossNAttemp
 
         asio::cancellation_signal cancel_sig;
 
+        asio::io_context ioc;
+
         auto fut =
             asio::co_spawn(ioc, fsm.drive_reconnect_attempt(),
                            asio::bind_cancellation_slot(cancel_sig.slot(), asio::use_future));
@@ -272,16 +284,22 @@ TEST_F(ReconnectCancelMidHandshakeTest, RepeatedCancelsLeaveNoLeaksAcrossNAttemp
             }
         });
 
-        ioc.run_for(500ms);
-        ioc.restart();
-
-        ASSERT_EQ(fut.wait_for(std::chrono::seconds{0}), std::future_status::ready)
-            << "Attempt " << i << ": drive_reconnect_attempt did not complete. "
+        ASSERT_TRUE(
+            fixpp::test_support::pump_until_ready(ioc, fut, "ReconnectCancelMidHandshake/repeated"))
+            << fixpp::test_support::kPumpBudgetMiss << "ReconnectCancelMidHandshake/repeated"
+            << ". " << "Attempt " << i << ": drive_reconnect_attempt did not complete. "
             << "HANG: enable_total_cancellation() not set in coroutine.";
 
         auto result = fut.get();
         EXPECT_FALSE(result.has_value())
             << "Attempt " << i << ": expected cancel error, got success.";
+        if (!result.has_value()) {
+            EXPECT_EQ(result.error(), fixpp::core::error::transport_connect_cancelled)
+                << "Attempt " << i << ": expected transport_connect_cancelled; got "
+                << fixpp::core::to_string(result.error())
+                << ". Any other error means the attempt ended by some path other than the "
+                   "cancellation.";
+        }
 
         EXPECT_EQ(factory->live_transport_count.load(), 0)
             << "Attempt " << i << ": orphaned transport after cancel. "
