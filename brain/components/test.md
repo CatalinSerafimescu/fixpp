@@ -121,9 +121,8 @@ did not need its windows:
   `decisions/speckit/526-531-fixed-window-pumps-verify.md`. Re-run it before relying on that reading
   at a fixture that has changed since.
 - **Where no window is needed:** call `pump_until_ready` with a site label, then `drain_ready()`
-  before reading results. A handler posted after readiness then still runs before a negative
-  assertion such as "sends no Reject". On a context with outstanding work a window always runs to its
-  end, so this is also much faster.
+  before reading results. On a context with outstanding work a window always runs to its end, so
+  this is much faster.
 - **A miss in a setup helper must be fatal when its callers stop on `HasFatalFailure()`.** With a
   nonfatal report, the cell went on against a session that never reached Active. Every later wait
   then spent its whole budget.
