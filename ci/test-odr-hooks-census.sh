@@ -157,6 +157,11 @@ t="$(mk t9)"; awk '/struct Inner/{f=1} f&&/int a;/{print; print "#ifdef FIXPP_TE
 check "T9 a gated member of a NESTED class reports it and its enclosing class" 1 "$t" \
   "^include/fx/widget.hpp: fx::Outer::Inner" "^include/fx/widget.hpp: fx::Outer"
 
+# A brace inside a raw string literal that spans lines is text, not scope: read line by line,
+# the `}` would close Widget before the gated member, which would then be namespace scope.
+t="$(mk t23)"; sed -i 's/^    int a;$/    int a;\n    static constexpr const char* text = R"x(\n}\n)x";\n#ifdef FIXPP_TEST_HOOKS\n    int seeded;\n#endif/' "$t/include/fx/widget.hpp"
+check "T23 a raw string spanning lines does not end the class early" 1 "$t" "^include/fx/widget.hpp: fx::Widget"
+
 # ── what is NOT a divergence ─────────────────────────────────────────────────────────────────
 t="$(mk t10)"; sed -i 's/^enum class/#ifdef FIXPP_TEST_HOOKS\nvoid seeded_ns_decl() noexcept;\n#endif\nenum class/' "$t/include/fx/widget.hpp"
 check "T10 a gated NAMESPACE-scope declaration passes, and is listed" 0 "$t" \
@@ -284,11 +289,14 @@ PY
             div[k] = ((db if k in db else da)[k][2], [])
             side = "with" if k in db else "without"'
   mutant T8 "only the BODY is compared, not the head" \
-    '                    toks_by_frame.append(list(head) + ["{"])' \
-    '                    toks_by_frame.append(["{"])'
+    '                toks_by_frame.append(list(head) + ["{"])' \
+    '                toks_by_frame.append(["{"])'
   mutant T9 "a nested definition is not part of its enclosing class" \
-    '            for acc in toks_by_frame:' \
-    '            for acc in toks_by_frame[-1:]:'
+    '        for acc in toks_by_frame:' \
+    '        for acc in toks_by_frame[-1:]:'
+  mutant T23 "a raw string literal cannot span lines" \
+    '(?:u8|u|U|L)?R"([^(\s]*)\((?:.|\n)*?\)\1"' \
+    '(?:u8|u|U|L)?R"([^(\s]*)\(.*?\)\1"'
   mutant T15 "a preprocessing error does not fail the run" \
     '    if refusals or errors:' \
     '    if refusals:'

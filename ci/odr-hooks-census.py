@@ -43,6 +43,7 @@ FAILS CLOSED (exit 2), and still prints whatever it found, when:
 Self-test, buildless, with the arms each refusal and verdict needs: `ci/test-odr-hooks-census.sh`.
 """
 import argparse
+import bisect
 import difflib
 import json
 import os
@@ -122,8 +123,6 @@ def parse_entry(e):
                 opts.append((a, nxt))
             continue
         kind = next((k for k in INCLUDE_KINDS if a.startswith(k) and len(a) > len(k)), None)
-        if kind == "-I" and a.startswith(("-isystem", "-iquote", "-idirafter")):
-            kind = next(k for k in INCLUDE_KINDS[::-1] if a.startswith(k) and k != "-I")
         if kind:
             incs.append((kind, os.path.normpath(os.path.join(d, a[len(kind):]))))
         elif a.startswith("-D"):
@@ -287,41 +286,52 @@ def parse(text):
             origins.append(cur)
     stack, head, head_line, defs, ordinal, line_type = [], [], 0, {}, {}, []
     toks_by_frame = []
-    for li, ln in enumerate(lines):
-        line_type.append(next((f[1] for f in reversed(stack) if f[0] == "type"), None))
-        for m in TOK.finditer(ln):
-            t = m.group(0)
-            for acc in toks_by_frame:
-                acc.append(t)
-            if t == "{":
-                kind, name = classify_head(head)
-                path = "::".join(f[2] for f in stack if f[2])
-                if kind == "type":
-                    k = f"{path}::{name}" if path else name
-                    ordinal[k] = ordinal.get(k, 0) + 1
-                    key = k if ordinal[k] == 1 else f"{k}#{ordinal[k]}"
-                    toks_by_frame.append(list(head) + ["{"])
-                    stack.append(("type", key, name, head_line, origins[head_line],
-                                  toks_by_frame[-1]))
-                elif kind == "namespace":
-                    label = "" if name is None else name or "<anon-ns>"
-                    stack.append(("namespace", None, label, li, None, None))
-                else:
-                    stack.append(("other", None, "{" + " ".join(head)[:60] + "}", li, None, None))
-                head = []
-            elif t == "}":
-                if stack:
-                    f = stack.pop()
-                    if f[0] == "type":
-                        toks_by_frame.pop()
-                        defs[f[1]] = (f[3], li, f[4], " ".join(f[5]))
-                head = []
-            elif t == ";":
-                head = []
+    # Tokenised as ONE text, so a raw string literal spanning lines is one token.
+    body = "\n".join(lines)
+    starts = [0]
+    for ln in lines:
+        starts.append(starts[-1] + len(ln) + 1)
+
+    def reach(li):
+        while len(line_type) <= li:
+            line_type.append(next((f[1] for f in reversed(stack) if f[0] == "type"), None))
+
+    for m in TOK.finditer(body):
+        li = bisect.bisect_right(starts, m.start()) - 1
+        reach(li)
+        t = m.group(0)
+        for acc in toks_by_frame:
+            acc.append(t)
+        if t == "{":
+            kind, name = classify_head(head)
+            path = "::".join(f[2] for f in stack if f[2])
+            if kind == "type":
+                k = f"{path}::{name}" if path else name
+                ordinal[k] = ordinal.get(k, 0) + 1
+                key = k if ordinal[k] == 1 else f"{k}#{ordinal[k]}"
+                toks_by_frame.append(list(head) + ["{"])
+                stack.append(("type", key, name, head_line, origins[head_line],
+                              toks_by_frame[-1]))
+            elif kind == "namespace":
+                label = "" if name is None else name or "<anon-ns>"
+                stack.append(("namespace", None, label, li, None, None))
             else:
-                if not head:
-                    head_line = li
-                head.append(t)
+                stack.append(("other", None, "{" + " ".join(head)[:60] + "}", li, None, None))
+            head = []
+        elif t == "}":
+            if stack:
+                f = stack.pop()
+                if f[0] == "type":
+                    toks_by_frame.pop()
+                    defs[f[1]] = (f[3], li, f[4], " ".join(f[5]))
+            head = []
+        elif t == ";":
+            head = []
+        else:
+            if not head:
+                head_line = li
+            head.append(t)
+    reach(len(lines) - 1)
     return lines, origins, defs, line_type
 
 
