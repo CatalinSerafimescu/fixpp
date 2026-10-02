@@ -333,6 +333,13 @@ mallocnesia_sentinel = any(
 odr_census_guard = [s.get("if") for s in linux_job["steps"] if s.get("id") == "odr_hooks_census"]
 odr_census_sentinel = any(
     "ODR census actually ran" in (s.get("name") or "") for s in linux_job["steps"])
+# ...and what the sentinel DOES: its whole step object (a body of `true` keeps the name), and the
+# census step's key set (`continue-on-error: true` keeps its guard and turns a red census green).
+odr_census_sentinel_steps = [
+    json.loads(json.dumps(s, default=str))
+    for s in linux_job["steps"] if "ODR census actually ran" in (s.get("name") or "")]
+odr_census_step_keys = [
+    sorted(str(k) for k in s.keys()) for s in linux_job["steps"] if s.get("id") == "odr_hooks_census"]
 linux_job_env = {str(k): str(v) for k, v in (linux_job.get("env") or {}).items()}
 linux_has_defaults = "defaults" in linux_job
 
@@ -540,6 +547,8 @@ out = {
     "mallocnesia_sentinel": mallocnesia_sentinel,
     "odr_census_guard": odr_census_guard,
     "odr_census_sentinel": odr_census_sentinel,
+    "odr_census_sentinel_steps": odr_census_sentinel_steps,
+    "odr_census_step_keys": odr_census_step_keys,
     "linux_job_env": linux_job_env,
     "linux_has_defaults": linux_has_defaults,
     "linux_job_keys": linux_job_keys,
@@ -1047,6 +1056,38 @@ $got"
     || fail "$case_id: the #530 ODR census step (id odr_hooks_census) has if: $g, expected exactly one step guarded by '$want_guard'. A typo here SKIPS the census on every leg while the job stays green."
   [ "$(echo "$json" | jq -r '.odr_census_sentinel')" = "true" ] \
     || fail "$case_id: the #530 ODR census outcome sentinel step is gone. Without it a mistyped preset skips the census and nothing reads its outcome."
+  # What the census step and its sentinel DO. The sentinel's body is pinned whole and spelled out
+  # here, not read from the workflow, so a body that still holds every comparison next to a new
+  # clause that defeats one (`!= "success" ] && [ "$got" != "skipped"`) differs from it.
+  g="$(echo "$json" | jq -c '.odr_census_step_keys')"
+  [ "$g" = '[["id","if","name","run"]]' ] \
+    || fail "$case_id: the #530 ODR census step (id odr_hooks_census) has keys $g, expected exactly one step with [\"id\",\"if\",\"name\",\"run\"]. A key such as continue-on-error turns a red census into a green step."
+  g="$(echo "$json" | jq -c '[.odr_census_sentinel_steps[] | keys]')"
+  [ "$g" = '[["if","name","run"]]' ] \
+    || fail "$case_id: the #530 ODR census sentinel has keys $g, expected exactly one step with [\"if\",\"name\",\"run\"]."
+  g="$(echo "$json" | jq -r '.odr_census_sentinel_steps[0].if')"
+  [ "$g" = "always()" ] \
+    || fail "$case_id: the #530 ODR census sentinel has if: '$g', expected 'always()'."
+  local want_sentinel_run
+  want_sentinel_run="$(cat <<'SENTINEL'
+set -euo pipefail
+got="${{ steps.odr_hooks_census.outcome }}"
+echo "preset=${{ matrix.preset }} odr_hooks_census=${got:-<unset>}"
+if [ "${{ matrix.preset }}" = "linux-clang-release" ]; then
+  if [ "$got" != "success" ]; then
+    echo "::error::the ODR census did not run to success on linux-clang-release (outcome=$got)."
+    exit 1
+  fi
+elif [ "$got" != "skipped" ]; then
+  echo "::error::the ODR census ran on ${{ matrix.preset }}; it is wired to"
+  echo "::error::linux-clang-release only (outcome=$got)."
+  exit 1
+fi
+SENTINEL
+)"
+  g="$(echo "$json" | jq -r '.odr_census_sentinel_steps[0].run')"
+  [ "$g" = "$want_sentinel_run" ] \
+    || fail "$case_id: the #530 ODR census sentinel's run: body differs from the pinned text. It is what fails the release leg when the census did not succeed and any other leg when it ran; change both together, deliberately."
 
   got="$(echo "$json" | jq -r '.linux_step_count')"
   # 37 -> 40 (fixpp#448): two allocation-gate steps + the unguarded outcome sentinel
@@ -1824,9 +1865,11 @@ echo "PASS: derive-script table + call site + per-leg FIXPP_INSTALL_PYTHON + PY_
 # not collide). Re-run the harness against the merged number rather than
 # re-deriving from either branch's local total — the failure mode this guards is
 # one side's edit silently replacing the other's, which reads as a passing count.
-MUTANTS_DECLARED=95  # M107 (the ci-script-pins call-site pin for ci/test-odr-hooks-census.sh,
+MUTANTS_DECLARED=100  # M107 (the ci-script-pins call-site pin for ci/test-odr-hooks-census.sh,
                      # fixpp#530) + M108 (the #530 ODR census step guard pin) + M109 (the #530
-                     # ODR census sentinel's existence pin) +
+                     # ODR census sentinel's existence pin) + M110 M111 (the #530 sentinel's
+                     # pinned body) + M112 (the #530 census step's key set) + M113 M114 (the
+                     # #530 sentinel's if: and key set) +
                      # M106 (the #448 gate-step guard pin) + M105 (the ci-script-pins call-site pin for
                      # ci/test-check-alloc.sh, fixpp#448) + M104 (the ci-script-pins call-site pin for
                      # ci/test-mallocnesia-population.sh, fixpp#448) + M103 (the ci-script-pins call-site pin for
@@ -2450,13 +2493,76 @@ open(dst, "w").write("      - name:".join(out))
 '
 
   # M109 (fixpp#530): the ODR census sentinel step renamed, so the existence check has a
-  # mutant of its own. What it pins is the NAME; its body and if: are not pinned.
+  # mutant of its own. What it pins is the NAME; M110 to M114 break the rest of the step.
   mutate_workflow M109 "the #530 ODR census sentinel step is renamed" "#530 ODR census outcome sentinel step is gone" '
 import sys
 src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
 old = "      - name: \"Assert the ODR census actually ran (#530)\"\n"
 new = "      - name: \"Assert the ODR census outcome (#530)\"\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M110 (fixpp#530): the ODR census sentinel keeps its name and its if:, and its body becomes
+  # `true`, so it reads no outcome at all.
+  mutate_workflow M110 "the #530 ODR census sentinel body replaced by true" "#530 ODR census sentinel.s run: body differs" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+lines = open(src).read().split("\n")
+head = "      - name: \"Assert the ODR census actually ran (#530)\""
+i = lines.index(head)
+assert lines[i + 1] == "        if: always()" and lines[i + 2] == "        run: |", lines[i:i + 3]
+j = i + 3
+while j < len(lines) and lines[j].startswith("          "):
+    j += 1
+open(dst, "w").write("\n".join(lines[:i + 2] + ["        run: \"true\""] + lines[j:]))
+'
+
+  # M111 (fixpp#530): the release branch keeps its comparison and gains a clause that accepts a
+  # SKIPPED census, the outcome a mistyped guard produces.
+  mutate_workflow M111 "the #530 ODR census sentinel accepts a skipped census on the release leg" "#530 ODR census sentinel.s run: body differs" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = ("            if [ \"$got\" != \"success\" ]; then\n"
+       "              echo \"::error::the ODR census did not run to success")
+new = ("            if [ \"$got\" != \"success\" ] && [ \"$got\" != \"skipped\" ]; then\n"
+       "              echo \"::error::the ODR census did not run to success")
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M113 (fixpp#530): the sentinel's if: narrowed, so it no longer runs after a failed step.
+  mutate_workflow M113 "the #530 ODR census sentinel if: narrowed to success()" "#530 ODR census sentinel has if:" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "      - name: \"Assert the ODR census actually ran (#530)\"\n        if: always()\n"
+new = "      - name: \"Assert the ODR census actually ran (#530)\"\n        if: success()\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M114 (fixpp#530): continue-on-error on the sentinel, so its own failure leaves the job green.
+  mutate_workflow M114 "continue-on-error added to the #530 ODR census sentinel" "#530 ODR census sentinel has keys" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "      - name: \"Assert the ODR census actually ran (#530)\"\n        if: always()\n"
+new = old + "        continue-on-error: true\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M112 (fixpp#530): continue-on-error on the census step. Its guard is unchanged, and a red
+  # census becomes a green step whose outcome still reads success to nothing.
+  mutate_workflow M112 "continue-on-error added to the #530 ODR census step" "#530 ODR census step \\(id odr_hooks_census\\) has keys" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        id: odr_hooks_census\n"
+new = "        id: odr_hooks_census\n        continue-on-error: true\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
 '
