@@ -251,9 +251,7 @@ struct DispositionFixture {
         if (!fixpp::test_support::pump_until_ready(ioc, fut, "DispositionFixture::open_only")) {
             fixpp::test_support::cancel_and_drain_or_report(ioc, *clock,
                                                             "DispositionFixture::open_only");
-            ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss
-                          << "DispositionFixture::open_only";
-            return;
+            FAIL() << fixpp::test_support::kPumpBudgetMiss << "DispositionFixture::open_only";
         }
         drain_ready(ioc);
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
@@ -267,9 +265,8 @@ struct DispositionFixture {
                                                    "DispositionFixture::open_to_active/open")) {
             fixpp::test_support::cancel_and_drain_or_report(
                 ioc, *clock, "DispositionFixture::open_to_active/open");
-            ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss
-                          << "DispositionFixture::open_to_active/open";
-            return;
+            FAIL() << fixpp::test_support::kPumpBudgetMiss
+                   << "DispositionFixture::open_to_active/open";
         }
         drain_ready(ioc);
         ASSERT_TRUE(fut.get().has_value()) << "open() failed";
@@ -283,9 +280,8 @@ struct DispositionFixture {
                                                    "DispositionFixture::open_to_active/logon")) {
             fixpp::test_support::cancel_and_drain_or_report(
                 ioc, *clock, "DispositionFixture::open_to_active/logon");
-            ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss
-                          << "DispositionFixture::open_to_active/logon";
-            return;
+            FAIL() << fixpp::test_support::kPumpBudgetMiss
+                   << "DispositionFixture::open_to_active/logon";
         }
         drain_ready(ioc);
         ASSERT_TRUE(fut2.get().has_value());
