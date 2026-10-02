@@ -229,6 +229,39 @@ EOF
 check "T24 a gated statement in a namespace-scope inline function is listed, not failed (L-530-1)" 0 "$t" \
   "$NODIV" "$NOONE" "+ n += 1;"
 
+# L-530-1(b), pinned the same way: every other macro is held in ONE state, defined if any entry
+# defines it. A member gated on the macro and on another macro's ABSENCE therefore never shows,
+# though the TUs of the entry that lacks that macro do see it change.
+t="$(mk t44)"; cat >> "$t/tests/fixture.hpp" <<'EOF'
+namespace fxt {
+struct seam_dependent {
+    int a;
+#if defined(FIXPP_TEST_HOOKS) && !defined(FIXPP_ASYNC_MUTEX_TEST_SEAM)
+    int gated;
+#endif
+};
+}  // namespace fxt
+EOF
+db "$t" "$(cmd "$t" src/a.cpp ''), $(cmd "$t" tests/t.cpp '-DFIXPP_ASYNC_MUTEX_TEST_SEAM')"
+check "T44 a macro some entries lack is held DEFINED, so its absent state is not seen (L-530-1)" 0 "$t" \
+  "positive control: ok" "$NODIV"
+
+# ...and a define the entries give different values is held at the first entry's value in PATH
+# order, not database order: here the database lists tests/t.cpp (=1) before src/a.cpp (=2).
+t="$(mk t45)"; cat >> "$t/tests/fixture.hpp" <<'EOF'
+namespace fxt {
+struct level_dependent {
+    int a;
+#if defined(FIXPP_TEST_HOOKS) && FX_LEVEL == 1
+    int gated;
+#endif
+};
+}  // namespace fxt
+EOF
+db "$t" "$(cmd "$t" tests/t.cpp '-DFX_LEVEL=1'), $(cmd "$t" src/a.cpp '-DFX_LEVEL=2')"
+check "T45 a multi-valued define is held at its first value in path order (L-530-1)" 0 "$t" \
+  "positive control: ok" "$NODIV"
+
 # ── the population: every suffix in HEADER_EXT is scanned ───────────────────────────────────
 fixture "T25 a gated member of a class in a .h header is a DIVERGENCE" include/fx/capi.h -std=c++17 \
   "^include/fx/capi.h: fx_capi" <<'EOF'
@@ -609,6 +642,13 @@ PY
   mutant T42 "$X01" "attributes are not skipped between the specifiers" \
     '        if j != i:' \
     '        if False:'
+  mutant T44 "exit 1, wanted 0" "the database's defines are not applied" \
+    '                defs.append(flag)' \
+    '                pass'
+  mutant T45 "exit 1, wanted 0" "the entries are read in database order, not path order" \
+    '    cxx_entries = sorted((e for e in db if e.get("file", "").endswith(CXX_EXT)),
+                         key=lambda e: e["file"])' \
+    '    cxx_entries = [e for e in db if e.get("file", "").endswith(CXX_EXT)]'
   mutant T15 "exit 0, wanted 2" "a preprocessing error does not fail the run" \
     '    if refusals or errors:' \
     '    if refusals:'

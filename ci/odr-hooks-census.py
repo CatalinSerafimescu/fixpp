@@ -28,11 +28,14 @@ included). The verdict:
 
 FLAGS come from the build tree's own `compile_commands.json`; nothing is re-rooted. Every C++
 entry contributes: the include directories are the union across entries, the defines are the
-union across entries (first value per name, entries in file order), and the remaining options
-are the ones EVERY entry carries. Warning options are dropped, and so is every spelling of
-`FIXPP_TEST_HOOKS` (`-D`, `-D x`, `-Dx=v`, `-U`): the macro is appended for the second run
-only. Other macros are therefore held at the union's value in both runs; a type whose
-definition depends on the macro only together with a macro outside that union is not seen.
+union across entries, and the remaining options are the ones EVERY entry carries. Warning
+options are dropped, and so is every spelling of `FIXPP_TEST_HOOKS` (`-D`, `-D x`, `-Dx=v`,
+`-U`): the macro is appended for the second run only. Every other macro is therefore seen in
+ONE state, in both runs: defined if any entry defines it, else undefined, and a define the
+entries give different values is held at the value of the first entry in path order (cells
+T44, T45). A type whose definition depends on the macro together with another macro's OTHER
+state is not seen, whether that state holds on another preset or on another target of this
+database.
 
 FAILS CLOSED (exit 2), and still prints whatever it found, when:
   * any header fails to preprocess in either state;

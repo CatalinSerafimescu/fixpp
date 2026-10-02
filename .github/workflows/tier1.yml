@@ -977,10 +977,11 @@ jobs:
       # WHY HERE: it needs this tree's compile_commands.json and the generated
       # headers, i.e. a Conan install, a configure and the codegen, which the
       # buildless ci-script-pins job does not have. It needs no compiled object,
-      # so any one leg that has built will do. One leg sees one preset's macros: a
-      # definition that changes with FIXPP_TEST_HOOKS only together with a
-      # preset-specific macro (NDEBUG, a sanitizer's) is seen only where that
-      # macro holds as it does here. It reads the build tree and writes only
+      # so any one leg that has built will do. Every other macro is held in one
+      # state: defined if any target of this preset defines it, else undefined. A
+      # definition that changes with FIXPP_TEST_HOOKS only together with another
+      # macro's other state, on another preset or on another target of this one,
+      # is not seen (L-530-1(b)). It reads the build tree and writes only
       # temp files. Cost condition: two preprocessor runs per
       # header, in parallel across the runner's cores; re-derive with
       # `time python3 ci/odr-hooks-census.py --build-dir build/<preset>`.
