@@ -81,8 +81,14 @@ Private, the engine pump.
   - Initiator: the time `drive_reconnect` returns + `logon_timeout`.
 - While `!session.has_reached_active()`, each read races the deadline through `await_deadline` on
   `engine_cfg.clock`. After the first Active, reads are plain.
-- `bool Session::has_reached_active() const noexcept` is private and reached through the engine's
-  existing access. `onLogon_fired_` already latches this edge.
+- `bool Session::has_reached_active() const noexcept` reads a **dedicated** latch, `reached_active_`. It
+  is set unconditionally in `record_state_transition_` on the first entry to Active, before its
+  `engine_.application == nullptr` early return.
+  - `onLogon_fired_` cannot serve: it latches only when an application is attached, so a session with
+    none would never disarm the deadline and would be closed while Active.
+  - Today each `Session` serves one connection: `run_connect_loop` and the accept loop each construct a
+    Session per connection. If a Session is ever reused for a second connection, the latch must reset
+    when the transport is installed. Re-derive this at implementation.
 
 ## E-7: `SessionConfig::logon_timeout_ms`
 
@@ -117,8 +123,10 @@ Private, `Session`.
 - `bool reset_unit_in_flight_` is set across the unit's single `reset_to` await and cleared after it,
   error paths included.
 - `close()` waits on it before its teardown reset, polling the way it already waits for the liveness
-  counter, bounded by `logout_disconnect_timeout_ms`. On expiry it proceeds and records E-5's
+  counter. The bound and expiry are plan.md OD-1. On expiry it proceeds and records E-5's
   `session_event_close_reset_wait_expired`.
+- It is cleared on every exit path of the unit, including an `operation_aborted` from total cancellation
+  (research R-9).
 
 ## State and disposition changes
 

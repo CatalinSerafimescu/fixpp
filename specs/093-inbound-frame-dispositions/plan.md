@@ -74,7 +74,7 @@ It is expected to improve slightly, since each frame drops one or two 16 KiB sta
 | VII §7 fuzz | parser-touching code needs a fuzz harness | `fuzz_wire_framer` gains a `resync_on_garble = true` arm asserting termination and at most one garble per feed. `fuzz_transport_read_path` covers the pump |
 | VII §8 test grouping | new isolation-safe tests go into a grouped bucket, selected by a label | Planned (a `093` label). The timer and coroutine cells stay standalone |
 | VIII §2 perf | paired merge-base A-B-A-B within +5 % | A manual paired run of `on_inbound_frame_bench`, with validation off and on, base path padded (quickstart §0, §3) |
-| VIII §5 zero-alloc | no heap between parse and callback | Held. The parse buffer is allocated once at `open()`, and the resync scans in place. A spill witness proves there is no hidden heap use on any lane |
+| VIII §5 zero-alloc | no heap between parse and callback | Held for the parse: the buffer is allocated once at `open()`, and the resync scans in place. A spill witness proves there is no hidden heap use on any lane. **Not zero before Active.** The establishment deadline race (asio parallel group) allocates its shared state per pre-Active read. That is outside the parse-to-callback window and outside FR-052's steady state, which is Active, and the existing read-path alloc guard cannot see it. It is counted by a measurement (research R-9) and stated here with its scope. B15/#497's hot-path rule is checked against it at Gate A |
 | IX sanitizers / coverage | per-line coverage assessment | The `/speckit-verify` matrix. The resync, deadline and reset_to branches are covered by the cells |
 | X §4 append-only enums | `core::error` | No new error code. `SessionEvent` alternatives are appended |
 | X §7 ABI | C-ABI changes versioned | **MINOR bump + BREAKING declaration** (FR-051, contract C-7). `gh release list --exclude-drafts` must be empty at implementation. The C++ additions are source-compatible; `MessageStore`'s vtable changes, which needs a rebuild |
@@ -88,6 +88,39 @@ It is expected to improve slightly, since each frame drops one or two 16 KiB sta
 | XVII §7 | a local build gate before the PR | Planned. Ask before each build, one preset at a time, under the 16 GiB cap |
 
 **Result: PASS**, with the §X.7 BREAKING declaration as a sanctioned pre-release change.
+
+## Orchestrator decisions (open to Gate A review: NOT owner rulings)
+
+The owner's rulings are in spec.md Clarifications. Each item below is a design choice the orchestrator
+made at `/speckit-plan`. Reviewers may challenge any of them, and the owner may overrule.
+
+- **OD-1: the bound on `close()`'s wait for an in-flight reset unit is `logon_timeout_ms`.** The owner
+  ruled "with timeout" and left the value open.
+  - `logout_disconnect_timeout_ms` was the first candidate, and was rejected: nothing validates it, and
+    TOML accepts 0, which would expire the wait at once.
+  - `logon_timeout_ms` is never 0, and the unit is part of Logon processing.
+  - On expiry `close()` proceeds and records `session_event_close_reset_wait_expired` (L-4).
+- **OD-2: `open()` refuses an advertised MaxMessageSize below 4096**, the acceptor's first-frame byte
+  budget. This is a new BREAKING refusal for C++ callers. Alternative: no floor, accepting that an L
+  below a Logon's size makes the session unusable.
+- **OD-3: FR-013 reverses 070's pre-establishment exemption** for frames over L. Under R-2 such a frame
+  cannot be parsed, but the peer has not seen our 383 before the Logon exchange. Alternative: keep the
+  exemption for frames over L but within 64 KiB, at the cost of a second, larger buffer before Active.
+- **OD-4: the Framer checks `frame_len > max_frame_bytes` before the CheckSum, for every caller**, so
+  that an over-L frame is never disregarded as garbled. This changes which error an over-max frame with
+  a bad CheckSum reports, everywhere.
+- **OD-5: the first production log site**, with `logger_override` resolution at `open()`. FR-003's
+  "log" needs it, and nothing logs from `src/` today.
+- **OD-6: the establishment deadline lives in the pump**, not in a detached Session timer (research
+  R-4). It closes a pre-Active connection already refused into Disconnected, which belongs to #534.
+- **OD-7: garbled frames are counted and logged even after `close()` began.** They are a transport
+  observation, so FR-030 does not suppress them.
+- **OD-8: acceptor first-frame garbles are replayed into the Session after `open()`.** A connection that
+  never yields a Session is not counted (L-6).
+- **OD-9: `reset_to` gets the true targets on volatile stores too.** This may fix #538, which is
+  unconfirmed, as a side effect, so #538's reproduction runs on this branch and on its base.
+- **OD-10: the parse reserve is a per-call argument**, a public C++ addition, not an `OffsetTable::Config`
+  field (research R-3).
 
 ## What changes for whom
 

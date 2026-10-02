@@ -96,9 +96,13 @@ that either follows an SOH, or is the first byte after the last complete frame.
 This runs on every store, volatile ones included.
 
 **`close()`:**
-- Before issuing its teardown reset, `close()` waits while `reset_unit_in_flight_`, bounded by
-  `logout_disconnect_timeout_ms`. On expiry it records `session_event_close_reset_wait_expired` and
-  proceeds.
+- Before issuing its teardown reset, `close()` waits while `reset_unit_in_flight_`, bounded per plan.md
+  OD-1. On expiry it records `session_event_close_reset_wait_expired` and proceeds.
+- **Open (research R-9): a terminal `close()` emits total cancellation before this wait.** If that
+  cancellation reaches an in-flight default-body `reset_to` between its `reset()` and its advances, the
+  "any point of the unit" row below fails for a terminal close on a non-overriding store. The atomic
+  overrides are unaffected: they hold the store mutex across the whole unit. R-9 settles it before
+  P6.
 - `teardown_reset_done_` keeps only its role as the single-fire latch.
 
 **Outcomes, for every store and both roles, when `close()` begins at any point of the unit:**

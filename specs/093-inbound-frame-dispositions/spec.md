@@ -155,9 +155,8 @@ code is authoritative.
   sequence does when `close()` begins. How are custom stores made safe? → A: **`close()` waits for an
   in-flight reset unit before it issues its own teardown reset, and that wait has a timeout** (owner:
   "1, but with timeout"). The virtual keeps its default body. `MemoryStore` and `FileStore` still override
-  it atomically (FR-040, FR-041). The bound is `logout_disconnect_timeout_ms`, the existing bound on how
-  long `close()` may take (research R-6). On expiry `close()` proceeds and records an event, and the
-  residual is a B&L row.
+  it atomically (FR-040, FR-041). The ruling does not name the timeout's value or what happens on expiry.
+  Those are orchestrator decision OD-1 in plan.md, open to Gate A review.
 - Q: Where does the parse index live, given that the worst case is roughly 6 × L per session? → A: **Per
   session, allocated once at `open()`, as R-2 ruled.** The cost is stated as a formula in B&L, and an
   operator lowers it by advertising a smaller MaxMessageSize (FR-012, SC-007).
@@ -402,8 +401,8 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
     fails because of how the stream was segmented.
   - The parse index capacity and the offset-table entry cap are derived from L at the densest legal field
     layout, 3 bytes per field. An empty value is legal.
-  - `open()` MUST refuse an advertised MaxMessageSize above 256 KiB, or below 4096 (the acceptor's
-    first-frame byte budget), with the invalid-session-config error.
+  - `open()` MUST refuse an advertised MaxMessageSize above 256 KiB (owner ruling), or below 4096,
+    with the invalid-session-config error. The 4096 floor is plan.md OD-2, open to Gate A review.
   - Only C++ can set 383. C, Python and TOML sessions always get L = 64 KiB.
 - **FR-011**: Every admitted frame MUST parse at every inbound parse site without a resource failure, on
   every build lane. That includes a frame of L bytes at the densest legal field layout. A lazy read inside
@@ -417,9 +416,8 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
   - The session closes terminally with an event and a log, and no guard or handler reads any field of
     the frame.
   - This replaces today's Active-only advertised-MaxMessageSize check, which only writes Disconnected.
-  - It also reverses 070's pre-establishment exemption (`test_070_max_message_size_test`). Under R-2 a
-    frame over L cannot be parsed in any state, and L ≥ 4096 keeps every Logon the acceptor's first read
-    admits.
+  - It also reverses 070's pre-establishment exemption (`test_070_max_message_size_test`); see plan.md
+    OD-3, open to Gate A review.
 - **FR-014**: 092's late-parse-failure close (092 FR-016) MUST remain as a defence. It MUST be
   unreachable for an admitted frame, and a test that deletes the capacity derivation MUST turn it RED.
 
@@ -459,9 +457,8 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
   - then issue one `reset_to(in, out)` with the true targets, on persistent and volatile stores alike;
   - then run the existing superseded check.
 
-  `close()` MUST wait for an in-flight unit before it issues its teardown reset. The wait is bounded by
-  `logout_disconnect_timeout_ms`. On expiry it proceeds and records an event (owner ruling, plan
-  research).
+  `close()` MUST wait for an in-flight unit before it issues its teardown reset, with a timeout (owner
+  ruling). The bound and the expiry behaviour are plan.md OD-1.
   - Result: no teardown reset configured gives next-inbound 2, or 2/2 on the initiator; one configured
     gives 1/1, for every store.
   - The in-unit `teardown_reset_done_` stops become dead and are removed. The flag remains as `close()`'s
