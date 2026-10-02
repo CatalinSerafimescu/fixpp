@@ -301,8 +301,7 @@ The sections below were written at `/speckit-plan`, 2026-10-02, from three read-
 4. Run the existing superseded check.
 
 `close()` waits for the flag to clear before its teardown reset. It polls the way it already waits for
-the liveness counter, bounded by `logout_disconnect_timeout_ms`. On expiry it proceeds and records an
-event.
+the liveness counter, bounded per plan.md OD-1. On expiry it proceeds and records an event.
 - FIFO store order then gives 1/1 when a teardown reset is configured, and the unit's values when one is
   not, for every store.
 - The in-unit `teardown_reset_done_` stops become dead and go. The flag remains as `close()`'s latch.
@@ -372,3 +371,27 @@ a default body of `reset()` and then the advances.
   1. In a scratch copy, add a temporary `std::abort()` on a fault-free `!msg_type_is_third` in every arm.
   2. Run the whole suite unfiltered, including the loopback, C-ABI and Python round-trips.
   3. Collect every failure.
+
+## R-9: Open items that Gate A reviews and P6 or P3 settles by measurement
+
+- **Total cancellation and the reset unit.**
+  - `close(terminal)` cancels the clock's sleeps and emits total on `root_cancel_` before its teardown
+    reset block (`src/session/session.cpp`, `close()`).
+  - Whether that cancellation reaches the Logon arm's in-flight `co_await store_->reset_to(...)` depends
+    on whether the pump and arm coroutine is bound to `root_cancel_`'s slot, and on whether the store's
+    awaits are cancellable.
+  - For `MemoryStore` and `FileStore` the override holds the store mutex across the unit, and FileStore
+    already catches `operation_aborted` in its offload region, so their outcome is old-or-new.
+  - For a default-body store a cancellation between `reset()` and the advances leaves the intermediate
+    state.
+  - **Measure:** a terminal close posted from the `on_reset` hook of a non-overriding `HookedStore`.
+    If the state is intermediate, either the default body suppresses cancellation (`this_coro::
+    reset_cancellation_state(disable)`) for the unit, or C-6 narrows that row to graceful closes and
+    L-4 says so.
+- **The pre-Active deadline race allocates** (asio `parallel_group` shared state per operation).
+  - It runs only until the first Active, outside FR-052's steady-state scope, and the read-path
+    allocation guard cannot see it, because it measures `async_read_some` + `feed` directly.
+  - **Measure:** a counting resource around the pump's pre-Active reads. Record the count, and state it
+    in the Constitution row.
+  - The shape is the one `read_first_frame_bounded` already ships (088's `operator||` join, which
+    replaced a timer handler that outlived its frame).
