@@ -130,9 +130,9 @@ did not need its windows:
   nonfatal report, the cell went on against a session that never reached Active. Every later wait
   then spent its whole budget.
 - **Declare the `io_context` after everything its frames reference (#531).** A fatal assertion returns
-  while a frame is still suspended, and the frame is destroyed with the context. A context declared
-  last is destroyed first, while those objects are alive. A hang then reports cleanly instead of as a
-  heap-use-after-free.
+  while a frame is still suspended, and the frame is destroyed with the context. Locals are destroyed in
+  reverse order of declaration, so a context declared after those objects is destroyed before them,
+  while they are still alive. A hang then reports cleanly instead of as a heap-use-after-free.
 
 Rejected, on the record:
 - **Widening the window or the grace.** No static value is safe.

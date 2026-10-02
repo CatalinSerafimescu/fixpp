@@ -10,8 +10,9 @@ status: stable
   subsection under *Bounded pumps*. The "window is preserved" reasons are scoped to the sites where
   they were measured; at 092's `DispositionFixture`, a window was measured to be unnecessary and was
   what failed on the slow lane. It records the measurement recipe, the `pump_until_ready` +
-  `drain_ready()` shape, why setup-helper misses are fatal, and the rule to declare the `io_context` last.
-  Rejected: widening the window or grace, and a hybrid local MSVC ASan build as evidence.
+  `drain_ready()` shape, why setup-helper misses are fatal, and the rule to declare the `io_context`
+  after everything its coroutine frames reference. Rejected: widening the window or grace, and a
+  hybrid local MSVC ASan build as evidence.
   Record: parent repo `decisions/speckit/526-531-fixed-window-pumps-verify.md`.
 
 - **2026-10-01 — fixpp#511 (B21), test access to private state of a public class.**

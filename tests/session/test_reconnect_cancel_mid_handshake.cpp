@@ -212,8 +212,9 @@ TEST_F(ReconnectCancelMidHandshakeTest, TotalCancelMidHandshakeReleasesTransport
 
     asio::cancellation_signal cancel_sig;
 
-    // The io_context is declared last so that a frame still suspended at an early return is
-    // destroyed while the factory, FSM and cancellation signal it references are alive (#531).
+    // The io_context is declared after the factory, FSM and cancellation signal that the frame
+    // references, so it is destroyed before them: a frame still suspended at an early return is
+    // destroyed while they are alive (#531).
     asio::io_context ioc;
 
     auto fut = asio::co_spawn(ioc, fsm.drive_reconnect_attempt(),
