@@ -1029,7 +1029,12 @@ struct StateCell {
     ~StateCell() {
         if (logon.valid() && factory->last_store != nullptr) {
             factory->last_store->release_parked();
-            (void)fixpp::test_support::pump_until_ready(fix.ioc, logon);
+            if (!fixpp::test_support::pump_until_ready(fix.ioc, logon)) {
+                factory->last_store->release_parked();
+                fixpp::test_support::cancel_and_drain_or_report(fix.ioc, *fix.clock,
+                                                                "StateCell::~StateCell");
+                ADD_FAILURE() << fixpp::test_support::kPumpBudgetMiss << "StateCell::~StateCell";
+            }
         }
     }
 
