@@ -191,6 +191,22 @@ struct split { int plain; };
 EOF
 check "T12 #ifdef/#else definitions of ONE class are a DIVERGENCE" 1 "$t" "tests/fixture.hpp: fxt::split"
 
+# L-530-1(a), pinned as the documented behaviour: a gated statement in a function body outside
+# any class is listed, and does NOT fail. If that ever changes, this cell and the row change too.
+t="$(mk t24)"; cat >> "$t/tests/fixture.hpp" <<'EOF'
+namespace fxt {
+inline int counter() {
+    int n = 0;
+#ifdef FIXPP_TEST_HOOKS
+    n += 1;
+#endif
+    return n;
+}
+}  // namespace fxt
+EOF
+check "T24 a gated statement in a namespace-scope inline function is listed, not failed (L-530-1)" 0 "$t" \
+  "$NODIV" "$NOONE" "+ n += 1;"
+
 # ── how the macro reaches the database: every spelling is stripped from the base flags ───────
 # If one leaked into the shared define set, both runs would define the macro and every header
 # would compare equal. The positive control then refuses (2), so a 1 here proves the strip.
