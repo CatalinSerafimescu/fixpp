@@ -118,6 +118,28 @@ check() {
 NODIV="(ODR): 0"
 NOONE="(one definition, not a divergence): 0"
 
+# wellformed <name> <std> <file> — compile <file> in both macro states. The census only
+# preprocesses, so a fixture no compiler accepts would pin a shape no real header can have.
+# The fixtures are the same bytes in every mutant run, so only the top-level run compiles.
+wellformed() {
+  local name="$1" std="$2" f="$3" d
+  [ -n "${ODR_CENSUS_UNDER_TEST:-}" ] && return 0
+  for d in "" "-DFIXPP_TEST_HOOKS"; do
+    if ! "$CXX" "$std" -fsyntax-only -x c++ $d "$f" >"$TMP/wellformed.err" 2>&1; then
+      echo "FAIL  $name: its fixture does not compile${d:+ with $d}"
+      sed 's/^/      /' "$TMP/wellformed.err" | head -6; fail=$((fail+1)); return 1
+    fi
+  done
+}
+
+# fixture <name> <rel> <std> <want>... — a clean tree plus <rel> (read from stdin), compiled
+# in both states, then required to be a DIVERGENCE naming each <want>.
+fixture() {
+  local name="$1" rel="$2" std="$3" t; shift 3
+  t="$(mk "fx${name%% *}")"; put "$t/$rel"
+  wellformed "$name" "$std" "$t/$rel" && check "$name" 1 "$t" "$@"
+}
+
 # ── GREEN controls: without these every RED below could be an always-RED checker ─────────────
 check "T0 a clean tree passes, with the positive control run" 0 "$(mk t0)" \
   "positive control: ok" "$NODIV" "$NOONE" "include/=1 src/=1 tests/=1"
@@ -207,6 +229,219 @@ EOF
 check "T24 a gated statement in a namespace-scope inline function is listed, not failed (L-530-1)" 0 "$t" \
   "$NODIV" "$NOONE" "+ n += 1;"
 
+# ── the population: every suffix in HEADER_EXT is scanned ───────────────────────────────────
+fixture "T25 a gated member of a class in a .h header is a DIVERGENCE" include/fx/capi.h -std=c++17 \
+  "^include/fx/capi.h: fx_capi" <<'EOF'
+#pragma once
+struct fx_capi {
+    int a;
+#ifdef FIXPP_TEST_HOOKS
+    int seeded;
+#endif
+};
+EOF
+fixture "T26 a gated member of a class in an .inl fragment is a DIVERGENCE" include/fx/frag.inl -std=c++17 \
+  "^include/fx/frag.inl: fx::Frag" <<'EOF'
+#pragma once
+namespace fx {
+struct Frag {
+    int a;
+#ifdef FIXPP_TEST_HOOKS
+    int seeded;
+#endif
+};
+}  // namespace fx
+EOF
+fixture "T27 a gated member of a class in an .ipp fragment is a DIVERGENCE" src/frag.ipp -std=c++17 \
+  "^src/frag.ipp: fx::Frag" <<'EOF'
+#pragma once
+namespace fx {
+struct Frag {
+    int a;
+#ifdef FIXPP_TEST_HOOKS
+    int seeded;
+#endif
+};
+}  // namespace fx
+EOF
+
+# ── heads whose class key follows other tokens ───────────────────────────────────────────────
+# One rule per cell. A cell's record sits at namespace scope unless its rule needs an
+# enclosing class; then it names the nested class by its whole line, because the enclosing
+# class diverges whether or not the nested head is recognised.
+fixture "T28 a final class" include/fx/h_final.hpp -std=c++17 "^include/fx/h_final.hpp: fx::Sealed" <<'EOF'
+namespace fx {
+class Sealed final {
+    int a = 0;
+#ifdef FIXPP_TEST_HOOKS
+    int seeded = 0;
+#endif
+};
+}  // namespace fx
+EOF
+fixture "T29 a class right after an access label" include/fx/h_access.hpp -std=c++17 \
+  "^include/fx/h_access.hpp: fx::Holder::In" <<'EOF'
+namespace fx {
+struct Holder {
+private:
+    struct In {
+        int a = 0;
+#ifdef FIXPP_TEST_HOOKS
+        int seeded = 0;
+#endif
+    };
+};
+}  // namespace fx
+EOF
+fixture "T30 a typedef struct" include/fx/h_typedef.hpp -std=c++17 "^include/fx/h_typedef.hpp: fx::td_tag" <<'EOF'
+namespace fx {
+typedef struct td_tag {
+    int a = 0;
+#ifdef FIXPP_TEST_HOOKS
+    int seeded = 0;
+#endif
+} td_t;
+}  // namespace fx
+EOF
+fixture "T31 a static struct" include/fx/h_static.hpp -std=c++17 "^include/fx/h_static.hpp: fx::St" <<'EOF'
+namespace fx {
+static struct St {
+    int a = 0;
+#ifdef FIXPP_TEST_HOOKS
+    int seeded = 0;
+#endif
+} st;
+}  // namespace fx
+EOF
+fixture "T32 a constexpr struct" include/fx/h_constexpr.hpp -std=c++17 "^include/fx/h_constexpr.hpp: fx::Ce" <<'EOF'
+namespace fx {
+constexpr struct Ce {
+    int a = 0;
+#ifdef FIXPP_TEST_HOOKS
+    int seeded = 0;
+#endif
+} ce{};
+}  // namespace fx
+EOF
+fixture "T33 a constinit struct" include/fx/h_constinit.hpp -std=c++20 "^include/fx/h_constinit.hpp: fx::Ci" <<'EOF'
+namespace fx {
+constinit struct Ci {
+    int a = 0;
+#ifdef FIXPP_TEST_HOOKS
+    int seeded = 0;
+#endif
+} ci{};
+}  // namespace fx
+EOF
+fixture "T34 a const struct" include/fx/h_const.hpp -std=c++17 "^include/fx/h_const.hpp: fx::Co" <<'EOF'
+namespace fx {
+const struct Co {
+    int a = 0;
+#ifdef FIXPP_TEST_HOOKS
+    int seeded = 0;
+#endif
+} co{};
+}  // namespace fx
+EOF
+fixture "T35 a volatile struct" include/fx/h_volatile.hpp -std=c++17 "^include/fx/h_volatile.hpp: fx::Vo" <<'EOF'
+namespace fx {
+volatile struct Vo {
+    int a;
+#ifdef FIXPP_TEST_HOOKS
+    int seeded;
+#endif
+} vo;
+}  // namespace fx
+EOF
+fixture "T36 an inline constexpr struct (a function object)" include/fx/h_inline.hpp -std=c++17 \
+  "^include/fx/h_inline.hpp: fx::fn_t" <<'EOF'
+namespace fx {
+inline constexpr struct fn_t {
+    int a = 0;
+#ifdef FIXPP_TEST_HOOKS
+    int seeded = 0;
+#endif
+} fn{};
+}  // namespace fx
+EOF
+fixture "T37 a thread_local struct" include/fx/h_thread_local.hpp -std=c++17 \
+  "^include/fx/h_thread_local.hpp: fx::Tl" <<'EOF'
+namespace fx {
+thread_local struct Tl {
+    int a = 0;
+#ifdef FIXPP_TEST_HOOKS
+    int seeded = 0;
+#endif
+} tl;
+}  // namespace fx
+EOF
+fixture "T38 a mutable struct member" include/fx/h_mutable.hpp -std=c++17 \
+  "^include/fx/h_mutable.hpp: fx::MHolder::Mu" <<'EOF'
+namespace fx {
+struct MHolder {
+    mutable struct Mu {
+        int a = 0;
+#ifdef FIXPP_TEST_HOOKS
+        int seeded = 0;
+#endif
+    } mu;
+};
+}  // namespace fx
+EOF
+fixture "T39 an extern struct" include/fx/h_extern.hpp -std=c++17 "^include/fx/h_extern.hpp: fx::Ex" <<'EOF'
+namespace fx {
+extern struct Ex {
+    int a;
+#ifdef FIXPP_TEST_HOOKS
+    int seeded;
+#endif
+} ex;
+}  // namespace fx
+EOF
+fixture "T40 an extern \"C\" struct (a linkage string before one declaration)" include/fx/h_extern_c.hpp \
+  -std=c++17 "^include/fx/h_extern_c.hpp: fx::Lk" <<'EOF'
+namespace fx {
+extern "C" struct Lk {
+    int a;
+#ifdef FIXPP_TEST_HOOKS
+    int seeded;
+#endif
+} lk;
+}  // namespace fx
+EOF
+fixture "T41 a struct defined in an alias declaration" include/fx/h_using.hpp -std=c++17 \
+  "^include/fx/h_using.hpp: fx::Z" <<'EOF'
+namespace fx {
+using AliasZ = struct Z {
+    int a;
+#ifdef FIXPP_TEST_HOOKS
+    int seeded;
+#endif
+};
+}  // namespace fx
+EOF
+fixture "T42 attributes before the specifiers" include/fx/h_attr.hpp -std=c++17 "^include/fx/h_attr.hpp: fx::At" <<'EOF'
+namespace fx {
+[[maybe_unused]] static struct At {
+    int a = 0;
+#ifdef FIXPP_TEST_HOOKS
+    int seeded = 0;
+#endif
+} at;
+}  // namespace fx
+EOF
+fixture "T43 an __extension__ struct" include/fx/h_extension.hpp -std=c++17 \
+  "^include/fx/h_extension.hpp: fx::Ext" <<'EOF'
+namespace fx {
+__extension__ struct Ext {
+    int a;
+#ifdef FIXPP_TEST_HOOKS
+    int seeded;
+#endif
+};
+}  // namespace fx
+EOF
+
 # ── how the macro reaches the database: every spelling is stripped from the base flags ───────
 # If one leaked into the shared define set, both runs would define the macro and every header
 # would compare equal. The positive control then refuses (2), so a 1 here proves the strip.
@@ -258,20 +493,23 @@ t="$(mk t22)"; db "$t" "$(cmd "$t" src/a.cpp '@flags.rsp')"
 check "T22 a response file other than a module map is refused (its flags are unreadable)" 2 "$t" \
   "response file @flags.rsp"
 
-# ── mutants: each cell above must be able to fail ──────────────────────────────────────────────
+# ── mutants ──────────────────────────────────────────────────────────────────────────────────
 # A cell that cannot fail when the rule it names is broken measures its own setup. Each mutant
 # is a copy of the census with one rule broken; the whole suite runs against it, and the cell
-# that names that rule must be among the failures. A mutant whose anchor text is no longer in
-# the census fails too, so a refactor cannot retire a mutant silently.
+# that names that rule must fail FOR ITS OWN REASON: its FAIL line must END with <reason>, the
+# text that cell prints when only its rule is broken (a substring would accept a missing
+# `fx::Outer::Inner` line for a cell whose reason is a missing `fx::Outer` line). A cell reddened by something else (a
+# refusal turning its exit code into 2) does not count. A mutant whose anchor text is no
+# longer in the census exactly once fails too, so a refactor cannot retire a mutant silently.
 if [ -z "${ODR_CENSUS_UNDER_TEST:-}" ]; then
-  # mutant <cell> <description> <python: old> <python: new>
+  # mutant <cell> <reason> <description> <python: old> <python: new>
   mutant() {
-    local cell="$1" what="$2" m="$TMP/mutant.py" out
-    if ! python3 - "$HERE/odr-hooks-census.py" "$m" "$3" "$4" <<'PY'
+    local cell="$1" reason="$2" what="$3" m="$TMP/mutant.py" out line l own=""
+    if ! python3 - "$HERE/odr-hooks-census.py" "$m" "$4" "$5" <<'PY'
 import sys
 src, dst, old, new = sys.argv[1:]
 s = open(src).read()
-if s.count(old) != 1:
+if s.count(old) != 1 or old == new:
     sys.exit(1)
 open(dst, "w").write(s.replace(old, new))
 PY
@@ -279,47 +517,105 @@ PY
       echo "FAIL  mutant '$what': its anchor is not in the census exactly once"; fail=$((fail+1)); return
     fi
     out="$(ODR_CENSUS_UNDER_TEST="$m" bash "${BASH_SOURCE[0]}" 2>&1)"
-    if printf '%s\n' "$out" | grep -q "^FAIL  $cell "; then
+    line="$(printf '%s\n' "$out" | grep "^FAIL  $cell ")"
+    while IFS= read -r l; do
+      [[ "$l" == *": $reason" ]] && own=1
+    done <<<"$line"
+    if [ -z "$line" ]; then
+      echo "FAIL  mutant '$what' left $cell green"; fail=$((fail+1))
+    elif [ -n "$own" ]; then
       echo "ok    mutant '$what' reddens $cell"; pass=$((pass+1))
     else
-      echo "FAIL  mutant '$what' left $cell green"; fail=$((fail+1))
+      echo "FAIL  mutant '$what' reddens $cell, but not for its own reason ($reason):"
+      printf '%s\n' "$line" | sed 's/^/      /'; fail=$((fail+1))
     fi
   }
-  mutant T5 "the old rule: a head holding '=' or '(' is not a class" \
+  # mutant_spec <cell> <reason> <token> — <token> dropped from DECL_SPECIFIERS
+  DS="$(python3 -c 'import re, sys; print(re.search(r"DECL_SPECIFIERS = \([^)]*\)", open(sys.argv[1]).read()).group(0), end="")' "$HERE/odr-hooks-census.py")"
+  mutant_spec() {
+    local new
+    new="$(python3 -c 'import re, sys; t, k = sys.argv[1:]; print(re.sub(r"\"%s\",\s*|,\s*\"%s\"(?=\))" % (k, k), "", t, count=1), end="")' "$DS" "$3")"
+    mutant "$1" "$2" "'$3' is not skipped before the class key" "$DS" "$new"
+  }
+  X01="exit 0, wanted 1"
+  mutant T5 "$X01" "the old rule: a head holding '=' or '(' is not a class" \
     '    """-> ('"'"'namespace'"'"'|'"'"'type'"'"'|'"'"'other'"'"', name) for the tokens before a `{`."""' \
     '    """-> ('"'"'namespace'"'"'|'"'"'type'"'"'|'"'"'other'"'"', name) for the tokens before a `{`."""
     if "=" in h or "(" in h:
         return "other", ""'
-  mutant T6 "the old rule, again: alignas(...) hides the class" \
+  mutant T6 "$X01" "the old rule, again: alignas(...) hides the class" \
     '    """-> ('"'"'namespace'"'"'|'"'"'type'"'"'|'"'"'other'"'"', name) for the tokens before a `{`."""' \
     '    """-> ('"'"'namespace'"'"'|'"'"'type'"'"'|'"'"'other'"'"', name) for the tokens before a `{`."""
     if "(" in h:
         return "other", ""'
-  mutant T13 "a spelling of the macro is not stripped from the base flags" \
+  mutant T7 "$X01" "an enumeration is not a type definition" \
+    '    if i >= len(h) or h[i] not in CLASS_KEYS + ("enum",):' \
+    '    if i >= len(h) or h[i] not in CLASS_KEYS:'
+  mutant T13 "exit 2, wanted 1" "a spelling of the macro is not stripped from the base flags" \
     '    return name_and_value.split("=", 1)[0] == MACRO' \
     '    return name_and_value == MACRO'
-  mutant T11 "a definition in ONE state only is reported as a divergence" \
+  mutant T10 "exit 1, wanted 0" "a difference outside any type definition fails the run" \
+    '    return 1 if div else 0' \
+    '    return 1 if div or other else 0'
+  mutant T11 "exit 1, wanted 0" "a definition in ONE state only is reported as a divergence" \
     '        else:
             side = "with" if k in db else "without"' \
     '        else:
             div[k] = ((db if k in db else da)[k][2], [])
             side = "with" if k in db else "without"'
-  mutant T8 "only the BODY is compared, not the head" \
+  mutant T8 "$X01" "only the BODY is compared, not the head" \
     '                toks_by_frame.append(list(head) + ["{"])' \
     '                toks_by_frame.append(["{"])'
-  mutant T9 "a nested definition is not part of its enclosing class" \
+  mutant T9 "exit 1 as wanted, but no line containing: ^include/fx/widget.hpp: fx::Outer" \
+    "a nested definition is not part of its enclosing class" \
     '        for acc in toks_by_frame:' \
     '        for acc in toks_by_frame[-1:]:'
-  mutant T23 "a raw string literal cannot span lines" \
+  mutant T23 "$X01" "a raw string literal cannot span lines" \
     '(?:u8|u|U|L)?R"([^(\s]*)\((?:.|\n)*?\)\1"' \
     '(?:u8|u|U|L)?R"([^(\s]*)\(.*?\)\1"'
-  mutant T15 "a preprocessing error does not fail the run" \
+  mutant T25 "$X01" "a .h header is not scanned" \
+    'HEADER_EXT = (".hpp", ".h", ".inl", ".ipp")' 'HEADER_EXT = (".hpp", ".inl", ".ipp")'
+  mutant T26 "$X01" "an .inl fragment is not scanned" \
+    'HEADER_EXT = (".hpp", ".h", ".inl", ".ipp")' 'HEADER_EXT = (".hpp", ".h", ".ipp")'
+  mutant T27 "$X01" "an .ipp fragment is not scanned" \
+    'HEADER_EXT = (".hpp", ".h", ".inl", ".ipp")' 'HEADER_EXT = (".hpp", ".h", ".inl")'
+  mutant T28 "$X01" "'final' after the class name is not skipped" \
+    '    if i < len(h) and h[i] == "final":
+        i += 1
+' ''
+  mutant T29 "exit 1 as wanted, but no line containing: ^include/fx/h_access.hpp: fx::Holder::In" \
+    "an access label is not skipped before the class key" \
+    '        elif h[i] in ACCESS and i + 1 < len(h) and h[i + 1] == ":":' \
+    '        elif False:'
+  mutant_spec T30 "$X01" typedef
+  mutant_spec T31 "$X01" static
+  mutant_spec T32 "$X01" constexpr
+  mutant_spec T33 "$X01" constinit
+  mutant_spec T34 "$X01" const
+  mutant_spec T35 "$X01" volatile
+  mutant_spec T36 "$X01" inline
+  mutant_spec T37 "$X01" thread_local
+  mutant_spec T38 "exit 1 as wanted, but no line containing: ^include/fx/h_mutable.hpp: fx::MHolder::Mu" mutable
+  mutant_spec T43 "$X01" __extension__
+  mutant T39 "$X01" "'extern' without a linkage string is not skipped" \
+    '            i += 1  # extern without a linkage string' \
+    '            break'
+  mutant T40 "$X01" "a linkage string before one declaration is read as a linkage block" \
+    '            if i + 2 == len(h):' \
+    '            if True:'
+  mutant T41 "$X01" "'using A =' is not skipped" \
+    '        elif h[i] == "using" and i + 2 < len(h) and h[i + 2] == "=":' \
+    '        elif False:'
+  mutant T42 "$X01" "attributes are not skipped between the specifiers" \
+    '        if j != i:' \
+    '        if False:'
+  mutant T15 "exit 0, wanted 2" "a preprocessing error does not fail the run" \
     '    if refusals or errors:' \
     '    if refusals:'
-  mutant T18 "an empty root is not refused" \
+  mutant T18 "exit 0, wanted 2" "an empty root is not refused" \
     '        if n == 0:' \
     '        if False:'
-  mutant T21 "the positive control is not checked" \
+  mutant T21 "exit 0, wanted 2" "the positive control is not checked" \
     '    if r["status"] != "DIFF" or list(r["div"]) != [PROBE_KEY]:' \
     '    if False:'
 fi

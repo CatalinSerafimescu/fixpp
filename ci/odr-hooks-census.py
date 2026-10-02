@@ -8,10 +8,15 @@ class member, friend or base gated on the macro therefore gives every such test 
 definitions of one class: ill-formed, no diagnostic required (#511). No compiler or linker
 reports it, so this preprocesses instead.
 
-METHOD. For every header under `include/`, `src/` and `tests/` (`*.hpp`, `*.h`) it preprocesses
-a one-line TU that includes the header, once without the macro and once with it, and parses
-every class/struct/union/enum DEFINITION out of both outputs. A definition is identified by
-its enclosing scopes plus its name (specialization arguments included). The verdict:
+METHOD. For every file under `include/`, `src/` and `tests/` whose suffix is in HEADER_EXT
+(headers, and the `.inl`/`.ipp` definition fragments a TU includes directly) it preprocesses
+a one-line TU that includes the file, once without the macro and once with it, and parses
+every class/struct/union/enum DEFINITION out of both outputs. A definition is recognised by
+its head: before the class key it may carry only an access label, the specifiers in
+DECL_SPECIFIERS, `extern` with or without a linkage string, attributes, `using A =` and a
+template head. A record after any other token is read as outside any type definition. A
+definition is identified by its enclosing scopes plus its name (specialization arguments
+included). The verdict:
 
   * DIVERGENCE (exit 1): a definition present in BOTH outputs whose tokens differ, head
     included, so a gated `final` or base clause counts as well as a gated member. A gated
@@ -56,7 +61,7 @@ from concurrent.futures import ProcessPoolExecutor
 
 MACRO = "FIXPP_TEST_HOOKS"
 ROOTS = ("include", "src", "tests")
-HEADER_EXT = (".hpp", ".h")
+HEADER_EXT = (".hpp", ".h", ".inl", ".ipp")
 CXX_EXT = (".cpp", ".cc", ".cxx", ".c++", ".C")
 LAUNCHERS = {"ccache", "sccache", "distcc", "icecc"}
 
@@ -187,6 +192,8 @@ TOK = re.compile(r'(?:u8|u|U|L)?R"([^(\s]*)\((?:.|\n)*?\)\1"|(?:u8|u|U|L)?"(?:\\
 MARKER = re.compile(r'#\s*\d+\s+"([^"]*)"')
 CLASS_KEYS = ("class", "struct", "union")
 ACCESS = ("public", "private", "protected")
+DECL_SPECIFIERS = ("typedef", "__extension__", "static", "constexpr", "constinit", "const",
+                   "volatile", "inline", "thread_local", "mutable")
 
 
 def skip_group(h, i, open_, close):
@@ -222,17 +229,28 @@ def skip_attrs(h, i):
 def classify_head(h):
     """-> ('namespace'|'type'|'other', name) for the tokens before a `{`."""
     i = 0
+    # The tokens a definition head may carry before its class key: an access label, the
+    # declaration specifiers of `static struct X {...} x;` and its kin, attributes, a linkage
+    # string, and `using A =`. Any other leading token makes the head `other`, so a record
+    # defined after one is read as outside any type definition (L-530-1).
     while i < len(h):
-        if h[i] in ACCESS and i + 1 < len(h) and h[i + 1] == ":":
+        j = skip_attrs(h, i)
+        if j != i:
+            i = j  # attributes interleaved with the specifiers
+        elif h[i] in ACCESS and i + 1 < len(h) and h[i + 1] == ":":
             i += 2
-        elif h[i] in ("typedef", "__extension__", "export"):
+        elif h[i] in DECL_SPECIFIERS:
             i += 1
+        elif h[i] == "extern" and i + 1 < len(h) and h[i + 1] in ('"C"', '"C++"'):
+            if i + 2 == len(h):
+                return "namespace", None  # a linkage block names no scope
+            i += 2  # `extern "C" struct X {...} x;`: a linkage string before one declaration
+        elif h[i] == "extern":
+            i += 1  # extern without a linkage string
+        elif h[i] == "using" and i + 2 < len(h) and h[i + 2] == "=":
+            i += 3  # `using A = struct Z {...};`
         else:
             break
-    if i < len(h) and h[i] == "extern" and i + 1 < len(h) and h[i + 1] in ('"C"', '"C++"'):
-        return "namespace", None  # a linkage block names no scope
-    if i < len(h) and h[i] == "inline" and i + 1 < len(h) and h[i + 1] == "namespace":
-        i += 1
     if i < len(h) and h[i] == "namespace":
         return "namespace", "".join(t for t in h[skip_attrs(h, i + 1):] if t != "inline")
     while i < len(h) and h[i] == "template":

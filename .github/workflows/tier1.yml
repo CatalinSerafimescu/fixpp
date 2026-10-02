@@ -2649,9 +2649,10 @@ jobs:
 
       # fixpp#530: the ODR census itself runs on the linux-clang-release leg, which
       # is behind both gate labels. Its verdicts and refusals are pinned here
-      # instead, on synthetic trees, each by a cell asserting its own line of output
-      # and by a mutant proving that cell can fail. Buildless; needs a C++
-      # compiler (the runner's `c++`) and refuses without one. Cost condition: the
+      # instead, on synthetic trees, each by a cell asserting its own line of output;
+      # a mutant must redden the cell it names for that cell's own reason.
+      # Buildless; needs a C++ compiler (the runner's `c++`) and refuses without
+      # one. Cost condition: the
       # mutants each re-run every cell; re-derive with
       # `time bash ci/test-odr-hooks-census.sh`.
       - name: "Regression pin — ODR census verdicts and refusals (#530)"
