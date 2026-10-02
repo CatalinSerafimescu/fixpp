@@ -4,7 +4,7 @@
 
 **Created**: 2026-10-02
 
-**Status**: Draft (specify; clarify pending)
+**Status**: Draft (clarified 2026-10-02)
 
 **Input**: User description: "B22: fixpp #514, #515, #516, #523, #524, as one bundle and one PR, building
 on 092-garbled-frame-reject." The full input is the `/speckit-specify` invocation of 2026-10-02, which
@@ -118,6 +118,22 @@ code is authoritative.
   J and n do not unless the frame is a Logon. No spec text requires that disconnect, so FR-004 and FR-005
   keep the disregard, bounded by FR-006. That divergence is recorded for Gate A.
 
+### Session 2026-10-02 (clarify)
+
+- Q: Before Logon completes, should a garbled frame be disregarded (keep waiting, bounded by the new
+  logon timeout) or end the connection? → A: **Disregard it, bounded by the timeout**, in every pre-Active
+  state and on the acceptor's first-frame read, whatever its MsgType (FR-001, FR-005).
+- Q: What default should the new logon timeout have, and may an operator set it to zero to disable it?
+  → A: **10 s default; zero is refused** at the C-ABI setter, at the TOML loader and at `open()` (FR-006,
+  FR-007).
+- Q: How should C and Python applications see that a garbled frame was disregarded? → A: **Also through
+  a C-ABI counter getter**, `fixpp_session_garbled_frame_count`, which Python picks up automatically, in
+  addition to the C++ session event and the log (FR-003, FR-007).
+- Q: Should the advertised MaxMessageSize that sizes each session's buffers have an upper bound? → A:
+  **`open()` refuses a value above 256 KiB** (the Framer's existing default frame ceiling) with the
+  invalid-session-config error. One limit then governs framing, the buffers and the 383 fixpp advertises
+  (FR-010).
+
 ---
 
 ## User Scenarios & Testing *(mandatory)*
@@ -133,7 +149,8 @@ processes the next good frame. The gap the next frame reveals triggers today's R
 
 **Independent Test**: feed a good frame, a garbled frame and a good frame to an Active session in one
 write. The session stays Active, NextNumIn reflects only the good frames, a ResendRequest covers the
-garbled frame's number, and one garbled-frame event is recorded. On today's tree the same cell sees the
+garbled frame's number, one garbled-frame event is recorded, and the garbled-frame counter reads 1
+(also through the C ABI). On today's tree the same cell sees the
 session closed.
 
 **Acceptance Scenarios**:
@@ -175,8 +192,9 @@ at the configured timeout and not before. The cell is set from C++, the C ABI an
    **Then** the transport is closed.
 3. **Given** a session that reaches Active before the timeout, **Then** the timer has no further effect.
 4. **Given** a C or Python application, **When** it sets the timeout through
-   `fixpp_session_config_set_logon_timeout_ms`, **Then** the session honours it, and an invalid value is
-   refused at the setter.
+   `fixpp_session_config_set_logon_timeout_ms`, **Then** the session honours it, and zero is refused at
+   the setter.
+5. **Given** no timeout setting, **Then** the default of 10 s applies.
 
 ---
 
@@ -202,6 +220,8 @@ closes, and no guard or handler acts on it. On today's tree, the dense frame of 
    closes.
 3. **Given** any lane, **Then** the boundary is the same. It is a derived constant, not the allocator's
    growth pattern.
+4. **Given** an advertised MaxMessageSize above 256 KiB, **When** the session is opened, **Then** `open()`
+   refuses it with the invalid-session-config error.
 
 ---
 
@@ -287,9 +307,10 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
   searched from after the garbled frame's first byte. A frame start is `8=` at the start of the remainder
   or immediately after an SOH. Bytes before it are discarded. A well-formed, complete frame buffered after
   the garbled region MUST NOT be lost. Each resync step MUST advance by at least one byte.
-- **FR-003**: Each disregarded garbled frame MUST be logged and recorded as a session event that carries
-  the criterion that failed. That makes it observable to tests and operators, following §4.5.2's "should
-  log each encountered garbled message".
+- **FR-003**: Each disregarded garbled frame MUST be logged, recorded as a session event that carries
+  the criterion that failed, and counted in a per-session garbled-frame counter. That makes it observable
+  to tests and operators, following §4.5.2's "should log each encountered garbled message". The counter
+  is readable from C++ and through the C ABI (FR-007).
 - **FR-004**: A frame whose third field is not MsgType(35) MUST be disregarded in every state and in both
   validation modes, whether or not it is otherwise faulty. B-005-7 narrows to fields other than the first
   three, and its pinned cell is rewritten to assert the disregard. Research R-1 confirmed this
@@ -297,14 +318,16 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
 - **FR-005**: 092's pre-Active refusal of a faulty frame whose third field is not 35 (contract C-2, the
   D-1 and D-2 rows for that shape) MUST become a disregard, now that FR-006 bounds establishment. Every
   other 092 faulty-frame disposition is unchanged.
-- **FR-006**: `SessionConfig` MUST carry an establishment timeout (R-4) with a default value. It is armed
+- **FR-006**: `SessionConfig` MUST carry an establishment timeout (R-4) with a 10 s default. A zero value
+  MUST be refused by `open()` with the invalid-session-config error. It is armed
   when the transport connects and cancelled when the session reaches Active. On expiry the transport MUST
   be closed, the session MUST end in Disconnected, and an event MUST be recorded. It applies to both
   roles.
-- **FR-007**: The C ABI MUST expose `fixpp_session_config_set_logon_timeout_ms`. It follows the existing
-  setter pattern, refuses a null handle and an invalid value, and is added to the symbol golden. Python
-  MUST expose it through the existing automatic binding. The TOML loader MUST accept the matching key,
-  following `logout_disconnect_timeout_ms`.
+- **FR-007**: The C ABI MUST expose `fixpp_session_config_set_logon_timeout_ms` and
+  `fixpp_session_garbled_frame_count`. Both follow the existing patterns. The setter refuses a null handle
+  and zero, the getter refuses a null handle, and both are added to the symbol golden. Python MUST expose
+  both through the existing automatic binding. The TOML loader MUST accept the timeout key, following
+  `logout_disconnect_timeout_ms`, and MUST refuse zero.
 - **FR-008**: A well-framed frame whose BeginString value does not match the session's MUST keep today's
   handling (TC 2020 2i). It is not a garbled frame.
 
@@ -312,6 +335,7 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
 
 - **FR-010**: The session MUST have one inbound limit L: the advertised MaxMessageSize when it is
   configured, otherwise 64 KiB. The read pump's buffer and the parse capacity MUST both be derived from L.
+  `open()` MUST refuse an advertised MaxMessageSize above 256 KiB with the invalid-session-config error.
 - **FR-011**: Every admitted frame MUST parse at every inbound parse site without a resource failure, on
   every build lane. That includes a frame of L bytes at the densest legal field layout.
 - **FR-012**: Parse capacity MUST be allocated once per session, not per frame. Stack use per parse MUST
@@ -359,10 +383,13 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
   - add L rows for the residuals: the BodyLength stall bound, the custom-store residual, and the
     resend-loop guard;
   - update `L-092-6` and `L-518-1` where this feature changes what they state.
-- **FR-051**: C-ABI version: one MINOR bump that carries the new setter and declares the behaviour changes
-  BREAKING (`[const §X.7]`, following 091 and 092): a garbled frame no longer ends the session, a
-  35-not-third frame is no longer processed, a frame over L now closes in every state, and liveness
-  refreshes on more frames.
+- **FR-051**: C-ABI version: one MINOR bump that carries the new setter and getter, and declares the behaviour changes
+  BREAKING (`[const §X.7]`, following 091 and 092):
+  - a garbled frame no longer ends the session;
+  - a 35-not-third frame is no longer processed;
+  - a frame over L now closes in every state;
+  - an advertised MaxMessageSize above 256 KiB is refused at `open()`;
+  - liveness refreshes on more frames.
 - **FR-052**: No new heap allocation on the per-frame inbound path. The resync search runs over the
   existing buffer in place. This is the B15 (#497) hot-path check, made explicit at Gate A.
 - **FR-053**: Test access to private state MUST go through `tests/support/*_test_access` (B21). Nothing
@@ -372,6 +399,7 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
 
 - **Garbled-frame event**: one per disregarded frame. It carries the failed criterion and the byte count
   discarded.
+- **Garbled-frame counter**: per session, monotonic, readable from C++, C and Python.
 - **Inbound limit L**: one per session, derived at open. It sizes the read buffer and the parse capacity.
 - **Establishment timeout**: a per-session duration, configurable from C++, C, Python and TOML.
 - **Store reset unit**: the new `MessageStore` operation, which takes the next inbound and next outbound
@@ -400,9 +428,6 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
 
 ## Assumptions
 
-- The establishment timeout's default is 10 seconds, which is QuickFIX's LogonTimeout default. A zero
-  value is refused, because an unbounded establishment is the hazard this timeout exists to close. Gate
-  A may revise both.
 - The acceptor's existing first-frame deadline and byte budget stay as they are. The establishment
   timeout covers the rest of establishment.
 - The densest legal field layout is one-digit tags with one-byte values, four bytes per field. That
