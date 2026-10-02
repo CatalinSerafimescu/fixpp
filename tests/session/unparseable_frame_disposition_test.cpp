@@ -206,10 +206,12 @@ void drain_ready(asio::io_context& ioc) {
 }
 
 // The fixture's waits pump until the future is ready, then drain_ready() runs whatever
-// is still ready; no wall-clock window decides a cell (#526). That is sound while
-// nothing these operations start completes on wall-clock time: the clock is the mock
-// clock and the store's file_io_executor is this io_context, so every handler a window
-// would have run has run by the time drain_ready() returns. To re-check, swap each pump
+// is still ready; no wall-clock window decides a cell (#526). That is sound while nothing
+// these operations start waits on wall-clock time or on another thread: the clock is the
+// mock clock, the store's file_io_executor is this io_context, and
+// no other thread runs or posts to this io_context. claim-ok: a premise of the condition
+// Under those conditions a handler becomes ready only when another handler runs, so a
+// window could dispatch nothing that drain_ready() has not. To re-check, swap each pump
 // for a full window that counts handlers dispatched after readiness
 // (decisions/speckit/526-531-fixed-window-pumps-tools/ in the parent repo).
 struct DispositionFixture {
