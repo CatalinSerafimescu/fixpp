@@ -98,7 +98,7 @@ R-2's recipe). #540's reproduction is run first and decides SC-008's branch.
 | VII §5 conformance | the FIX-TC corpus | TC 2d/2m/2t/3b/3c/3e move from diverging to conforming, with cells. TC 2i is unchanged (FR-008), and its Logout gap belongs to #534 |
 | VII §7 fuzz | parser-touching code needs a fuzz harness | `fuzz_wire_framer` gains a `resync_on_garble = true` arm asserting termination and contract C-1's counted-work bound per input. `fuzz_transport_read_path` covers the pump |
 | VII §8 test grouping | new isolation-safe tests go into a grouped bucket, selected by a label | Planned (a `093` label). The timer and coroutine cells stay standalone |
-| VIII §2 perf | paired merge-base A-B-A-B within +5 % | A manual paired run of `on_inbound_frame_bench`, with validation off and on, base path padded (quickstart §0, §3) |
+| VIII §2 perf | paired merge-base A-B-A-B within +5 % | A manual paired run of `on_inbound_frame_bench`, with validation off and on, base path padded (quickstart §0, §3). `on_inbound_frame_bench` bypasses the Framer, so `framer_bench` is paired too: base `BM_Framer_Feed_NoCarry` against the same row on the branch (the strict path and the always-compiled counters), and base `BM_Framer_Feed_NoCarry` against the branch's resync-config row (64 KiB limit, resync on, the BeginString cap set as the pump sets it, the same ~80-byte frame), which is the production path's delta. The resync row cannot exist on the base, so it is added after the Framer change (tasks.md T018a), and the second pairing compares two rows by name |
 | VIII §5 zero-alloc | no heap between parse and callback | Held for the parse: the buffer is allocated once at `open()`, and the resync scans in place. A spill witness proves there is no hidden heap use on any lane. **Not asserted before the first Active.** The establishment deadline race (asio parallel group) may allocate. That is outside the parse-to-callback window, and FR-052 is scoped to start at the first Active. The pre-Active count is measured with a global `operator new` counter (research R-9) and disclosed (L-13). The disarm at the first Active is witnessed by behaviour (Q-36), and Q-19 is a regression witness over the real pump |
 | IX sanitizers / coverage | per-line coverage assessment | The `/speckit-verify` matrix. The resync, deadline and reset_to branches are covered by the cells |
 | X §4 append-only enums | `core::error` | No new error code: criterion 3 reuses `wire_header_out_of_order`, and `reset_to` reuses `session_invalid_argument`. `SessionEvent` alternatives are appended |
@@ -357,25 +357,35 @@ The order follows dependencies. Each phase writes its cells RED first, then the 
 
   Every other caller is unchanged with the flag off, and Q-7 guards that.
 - **P2: L and parse capacity** (C-3, FR-010 to FR-014):
-  - `inbound_limit_for`, with the `register_session` and `open()` validation;
-  - the carry (block, resource, carry) and the per-session buffer allocated at `open()`, with the
-    spill witness, and the per-call reserve through the named overloads;
+  - `inbound_limit_for`, computed and stored at `open()`, with no refusal yet;
+  - the per-session buffer allocated at `open()`, with the spill witness, and the per-call reserve
+    through the named overloads;
   - #540: its reproduction on base, recorded first, then `unknown_fields()`'s catch and the lazy-read
     cells (Q-32, Q-33);
   - `max_offset_entries` from L;
   - the 10 late sites moved to the buffer;
   - the dense-L and boundary cells on every lane;
   - FR-014's defence cell, and the re-based `LateSite_*`.
-  - `test_066` and `test_070` are updated.
+  - `test_066` is updated.
 - **P3: pump** (C-1, C-4):
   - `session_engine_access`;
-  - the borrowed carry, the L-sized Framer, and the summaries into the Session;
+  - the resync-mode Framer and the summaries into the Session (the pump keeps its local carry and
+    today's limit until the FR-013 group);
   - logger resolution, the counter, the event and the rate-bounded log;
   - the first-frame read's `{max = L, resync}` Framer and its summary hand-off;
   - the two-phase establishment deadline: the loop-head test in both drains, the race that only wakes
     a blocked read, and the accept loop's non-positive remainder;
   - the TC, resync, timeout, disarm and Active-allocation cells.
   - `FramerFailureClosesEstablishedSession_*` flips.
+- **The FR-013 group** (C-1 close rows, C-2, E-2; with US3, after P2's buffer, in one commit group):
+  - the `register_session` and `open()` refusal of an advertised 383 outside [4096, 262144];
+  - the carry (block, resource, carry) allocated at `open()` and sized for L, borrowed by the pump;
+  - both Framers' limit set to L, and the Active-only 383 check deleted;
+  - their cells (Q-12, Q-13's 383 half, Q-14's carry half, Q-6), and `test_070` re-based.
+
+  These change what a session accepts, so they are held out of P2 and P3: the foundational phase then
+  stays behaviour-neutral on the wire, as its checkpoint claims (the analysis finding C2/F1). tasks.md
+  T022a, T024 and T055a carry them.
 - **P4: arms** (C-2, C-5): step 1, the 35-not-third disregard, in every arm; step 4, the liveness move;
   the B-005-7, W1 and D-8 cells flip; the SC-005 cells.
 - **P5: #523** (C-2 step 2). It lands before P6, because FR-041 depends on it on the initiator.

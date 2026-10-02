@@ -41,10 +41,10 @@ it RED. §4 maps every FR and SC to its contract clause and its cells.
 | Q-11 | Dense frame of exactly L bytes, per lane including MSVC debug: parsed and delivered, peak ≤ B(L), no spill | C-3 I-1, I-2 | parse fails (the arena or the entry cap) |
 | Q-12 | A frame of L split across reads at every boundary near the carry edge | C-1, C-3 | carry overflow between 61442 and 65536 B today |
 | Q-13 | Advertised 383 below 4096 or above 262144, and `logon_timeout_ms == 0`: each refused at `register_session` and at `open()`; L follows 383 when set | FR-006, FR-010 | accepted today |
-| Q-14 | `open()` with a bounded carry arena or session arena too small for L: an `open()` error, not `std::terminate`. Run on Linux and on the MSVC sandbox, where the carry's container proxy draws on the block (E-2) | E-2, C-7 row 15 | the carry half terminates today when the carry arena is under 64 KiB; the session-arena half is accepted today, because no B(L) is allocated |
+| Q-14 | `open()` with a bounded carry arena or session arena too small for L: an `open()` error, not `std::terminate`. Run on Linux and on the MSVC sandbox, where the carry's container proxy draws on the block (E-2) | E-2, C-7 row 15 | the carry half: `open()` succeeds today, because the carry is built in the pump, not at `open()` (driving the pump then terminates when the carry arena cannot serve the carry); the session-arena half is accepted today, because no B(L) is allocated |
 | Q-15 | Defence: shrink the buffer through `session_test_access`, so the late close fires (092 C-6 disposition) | C-3 I-4 | — (proves the defence is reachable; mutant: delete the late close; observed by the session's state and the close event) |
 | Q-16 | Establishment timeout, phase (b), per role. The initiator after its Logon, and the acceptor after a matching first frame that leaves it pre-Active (a refused Logon, a non-Logon frame): garbage-only closes **at** T, not before; a silent peer closes at T; the event is recorded. **Readable across T:** through a transport double whose read completes at initiation, so the read arm wins every race, a peer streaming garbage (and, separately, valid non-Logon frames) past T has no frame delivered after T and is closed at the first loop head after T. The double's stream is finite and ends in EOF, so the mutant fails an assertion rather than spinning. Set from C++, C, Python and TOML | C-4 | immediate close (garbage), or never (silent, and the readable-across-T valid-frame stream) |
-| Q-17 | Establishment timeout, phase (a): a garbage-only acceptor peer closes at the byte budget or at `min(5 s, T)`, whichever comes first; with T < 5 s the first-frame read ends at T; bytes under the budget, sent slowly, are not closed before then; no event. On TLS with T below the handshake bound: a stalled handshake closes at the handshake bound; a handshake that completes after T closes the transport with no first-frame read issued (the transport double's read count is 0) | C-4 | close at the first garbled byte. The TLS pair: — (regression guard for the stalled handshake; mutant for the late handshake: issue the read with a non-positive remainder, observed by the read count) |
+| Q-17 | Establishment timeout, phase (a): a garbage-only acceptor peer closes at the byte budget or at `min(5 s, T)`, whichever comes first; with T < 5 s the first-frame read ends at T; bytes under the budget, sent slowly, are not closed before then; no event. On TLS with T below the handshake bound: a stalled handshake closes at the handshake bound; a handshake that completes after T (no establishment time left when it ends) closes the transport without reading: the peer sends a valid Logon right after the handshake and observes no Logon reply and the close within the bound (before the 5 s first-frame deadline would elapse from the handshake). Observed at the peer, on real TLS; no production seam | C-4 | close at the first garbled byte. The TLS pair: — (regression guard for the stalled handshake; mutant for the late handshake: delete the post-handshake remaining-time check, so the read is issued on its 5 s bound; observed by the peer receiving a Logon reply) |
 | Q-18 | Deadline clock. A clock-wide `cancel_sleeps()` from another session during phase (b) does not end the wait early. With `clock_override` set to a second mock clock, advancing only the override does not expire the deadline, and advancing `engine_cfg.clock` does | C-4 | — (mutants: drop the re-arm; measure the deadline on `effective_clock_`. Observed by the session's state and the transport's open flag at the mock-clock instant) |
 | Q-19 | Active-read allocations, a regression witness: the real pump driven past Active under a global `operator new` counter, which is first shown to count a known allocation; zero per Active read after a warm-up read | C-4, FR-052 | — (regression guard. Not claimed to catch a never-disarmed race: asio's recycling allocator can serve its state without `operator new`. Q-36 is the disarm's RED witness) |
 | Q-20 | Liveness, one cell per SC-005 class: no TestRequest within the interval of that frame | C-5 | a TestRequest is sent |
@@ -100,7 +100,8 @@ it RED. §4 maps every FR and SC to its contract clause and its cells.
   - delete the loop-head deadline test, keeping only the race → Q-16 (readable across T). The transport
     double completes its read at initiation, so the read arm wins every race and the mutant is RED
     whatever order asio uses;
-  - issue the first-frame read with a non-positive remainder → Q-17 (the late TLS handshake);
+  - delete the post-handshake remaining-time check → Q-17 (the late TLS handshake: the peer receives a
+    Logon reply);
   - measure the deadline on `effective_clock_` → Q-18;
   - drop the deadline's re-arm → Q-18;
   - delete the 1 s floor of the log rate → Q-5 (HeartBtInt = 0);
@@ -113,7 +114,9 @@ it RED. §4 maps every FR and SC to its contract clause and its cells.
 - **Behavioural witnesses for the deadline** (Q-16, Q-36). Each mutant-only deadline cell observes the
   session's state and the transport's open flag at a mock-clock instant, never an allocation count.
 - `HookedStore` forwards `reset_to` and fires its hooks there. Show it with a cell that fails when the
-  forwarding is removed.
+  forwarding is removed. That is its forward mode (Q-23, Q-24). Its default-body mode calls the base
+  `MessageStore::reset_to`, so the default body runs over its own `reset()` and `next_seqnum()`: Q-25
+  and Q-26 use that mode, and the delete-the-shield mutant is run against it.
 
 ## 3. Regression and cost
 
