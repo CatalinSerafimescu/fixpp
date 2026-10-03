@@ -62,6 +62,7 @@ add_wire_test(wire_pure_tests
   nested_group_slices_cache_test.cpp                                  # /speckit-verify cov (062)
   nested_group_extent_test.cpp                                        # T019/T020/T022 (063)
   nested_group_slices_failloud_test.cpp                               # T001 (073)
+  framer_resync_test.cpp                                              # T015 (093)
 )
 # nested_group_slices_failloud_test.cpp (T001) reaches the
 # offset_table_test_access friend seam through tests/support/wire_test_hooks.hpp.
