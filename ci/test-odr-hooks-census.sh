@@ -17,7 +17,8 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ODR_CENSUS_UNDER_TEST is set by the mutant section below, to run a cell against a broken copy
-# (ODR_CELL names the cell); set by hand, it runs every cell against another census.
+# (ODR_CELL names the cell); set by hand, it reports cell lines only and never exits 0, so no
+# CI env block can turn this step green.
 CENSUS="${ODR_CENSUS_UNDER_TEST:-$HERE/odr-hooks-census.py}"
 # ODR_CELL selects one cell, for a mutant's run only. Inherited by a run with no census under
 # test, it would skip every other cell of a run that still reports success, so it is refused.
@@ -145,6 +146,7 @@ wellformed() {
 # in both states, then required to be a DIVERGENCE naming each <want>.
 fixture() {
   local name="$1" rel="$2" std="$3" t; shift 3
+  [ -n "${ODR_CELL:-}" ] && [ "${name%% *}" != "$ODR_CELL" ] && return 0
   t="$(mk "fx${name%% *}")"; put "$t/$rel"
   wellformed "$name" "$std" "$t/$rel" && check "$name" 1 "$t" "$@"
 }
@@ -634,6 +636,7 @@ EOF
 # fresh <name> <rel> <std> <want-rc> <want>... — fixture() with any wanted exit code
 fresh() {
   local name="$1" rel="$2" std="$3" rc="$4" t; shift 4
+  [ -n "${ODR_CELL:-}" ] && [ "${name%% *}" != "$ODR_CELL" ] && return 0
   t="$(mk "fx${name%% *}")"; put "$t/$rel"
   wellformed "$name" "$std" "$t/$rel" && check "$name" "$rc" "$t" "$@"
 }
@@ -781,8 +784,8 @@ using Second = struct {
 #endif
 };
 EOF
-# An unnamed enumeration has no such name, so it is paired by encounter order. That pairing is
-# refused when it is ambiguous: two or more in one scope, and a different number in each state.
+# An unnamed enumeration with no declarator is keyed by encounter order, and two or more
+# definitions under one key in one scope are refused in either state.
 fresh "T54 unnamed enumerations whose number changes with the macro are refused" \
   include/fx/h_anon_enum.hpp -std=c++17 2 \
   "ERROR include/fx/h_anon_enum.hpp: definitions of fx::<anon> cannot be paired between the states (1 without FIXPP_TEST_HOOKS, 2 with)" <<'EOF'
@@ -807,8 +810,9 @@ enum { kOnly };
 #endif
 }  // namespace fx
 EOF
-fixture "T61 unnamed enumerations as many in both states are paired in order, and compared" \
-  include/fx/h_anon_enum_two.hpp -std=c++17 "^include/fx/h_anon_enum_two.hpp: fx::<anon>#2" <<'EOF'
+fresh "T61 unnamed enumerations as many in both states are refused, not paired in order" \
+  include/fx/h_anon_enum_two.hpp -std=c++17 2 \
+  "ERROR include/fx/h_anon_enum_two.hpp: definitions of fx::<anon> cannot be paired between the states (2 without FIXPP_TEST_HOOKS, 2 with)" <<'EOF'
 namespace fx {
 enum { kA };
 enum {
@@ -817,6 +821,42 @@ enum {
     kC,
 #endif
 };
+}  // namespace fx
+EOF
+fresh "T70 a typedef'd unnamed enumeration is paired by its typedef name" \
+  include/h_anon_enum_td.hpp -std=c++17 1 "^include/h_anon_enum_td.hpp: <anon:Second>" <<'EOF'
+#ifdef FIXPP_TEST_HOOKS
+typedef enum { A } First;
+#endif
+typedef enum {
+#ifndef FIXPP_TEST_HOOKS
+    A
+#else
+    B
+#endif
+} Second;
+#ifndef FIXPP_TEST_HOOKS
+typedef enum { B } Third;
+#endif
+EOF
+fresh "T71 two definitions under one key in one scope are refused even when their bodies match in order" \
+  include/fx/h_local_shift.hpp -std=c++17 2 \
+  "::L cannot be paired between the states (2 without FIXPP_TEST_HOOKS, 2 with)" <<'EOF'
+namespace fx {
+#ifdef FIXPP_TEST_HOOKS
+inline int a_function_name_long_enough_to_exceed_the_sixty_char_label_1() { struct L { int a; }; return sizeof(L); }
+#endif
+inline int a_function_name_long_enough_to_exceed_the_sixty_char_label_2() {
+#ifndef FIXPP_TEST_HOOKS
+    struct L { int a; };
+#else
+    struct L { int b; };
+#endif
+    return sizeof(L);
+}
+#ifndef FIXPP_TEST_HOOKS
+inline int a_function_name_long_enough_to_exceed_the_sixty_char_label_3() { struct L { int b; }; return sizeof(L); }
+#endif
 }  // namespace fx
 EOF
 # Inside a type definition the enclosing definition is compared whole, so the pairing of the
@@ -932,6 +972,13 @@ if [ -z "${ODR_CENSUS_UNDER_TEST:-}" ]; then
   else
     echo "FAIL  an ODR_CELL inherited by a run with no census under test: exit $rc"
     printf '%s\n' "$out" | sed 's/^/      /' | head -6; fail=$((fail+1))
+  fi
+  out="$(ODR_CENSUS_UNDER_TEST="$HERE/odr-hooks-census.py" ODR_CELL=T0 bash "${BASH_SOURCE[0]}" 2>&1)"; rc=$?
+  if [ "$rc" != 0 ] && printf '%s\n' "$out" | grep -qF "NOT A VERDICT: a run with ODR_CENSUS_UNDER_TEST set"; then
+    echo "ok    a run with a census under test never exits 0"; pass=$((pass+1))
+  else
+    echo "FAIL  a run with a census under test (ODR_CELL=T0): exit $rc"
+    printf '%s\n' "$out" | sed 's/^/      /' | tail -4; fail=$((fail+1))
   fi
   # mutant <cell> <reason> <description> <python: old> <python: new>
   mutant() {
@@ -1142,15 +1189,20 @@ PY
     '                    name = f"<anon:{d}>" if d else "<anon>"' \
     '                    name = "<anon>"'
   mutant T63 "exit 2, wanted 1" "an unnamed struct in an alias declaration is keyed by encounter order" \
-    '    return "type", "<anon>" if is_enum else f"<anon:{alias}>" if alias else ""' \
-    '    return "type", "<anon>" if is_enum else ""'
+    '    return "type", f"<anon:{alias}>" if alias else ""' \
+    '    return "type", ""'
+  mutant T70 "exit 2, wanted 1" "an unnamed enumeration is keyed by encounter order, not by its declarator" \
+    '    return "type", f"<anon:{alias}>" if alias else ""' \
+    '    return "type", "<anon>" if is_enum else f"<anon:{alias}>" if alias else ""'
   mutant T54 "exit 1, wanted 2" "an ambiguous pairing by encounter order is not refused" \
-    '        if na != nb and max(na, nb) >= 2 and any(own(o) for o in where):' \
+    '        if max(na, nb) >= 2 and any(own(o) for o in where):' \
     '        if False:'
   mutant T55 "exit 2, wanted 0" "one unnamed definition in one state is refused" \
-    'if na != nb and max(na, nb) >= 2' 'if na != nb and max(na, nb) >= 1'
-  mutant T61 "exit 2, wanted 1" "a pairing by encounter order is refused when both states hold as many" \
-    'if na != nb and max(na, nb) >= 2' 'if max(na, nb) >= 2'
+    'if max(na, nb) >= 2' 'if max(na, nb) >= 1'
+  mutant T71 "exit 0, wanted 2" "definitions under one key are paired in order when both states hold as many" \
+    'if max(na, nb) >= 2 and' 'if na != nb and max(na, nb) >= 2 and'
+  mutant T61 "exit 1, wanted 2" "definitions under one key are paired in order when both states hold as many" \
+    'if max(na, nb) >= 2 and' 'if na != nb and max(na, nb) >= 2 and'
   mutant T66 "exit 2, wanted 1" "the pairing inside a type definition is refused too" \
     '            if not v[5]:' '            if True:'
   mutant T15 "exit 0, wanted 2" "a preprocessing error does not fail the run" \
@@ -1169,4 +1221,8 @@ fi
 
 echo
 echo "test-odr-hooks-census: $pass passed, $fail failed (CXX=$CXX)"
+if [ -n "${ODR_CENSUS_UNDER_TEST:-}" ]; then
+  echo "NOT A VERDICT: a run with ODR_CENSUS_UNDER_TEST set reports cell lines for mutant(); it never exits 0"
+  exit 3
+fi
 [ "$fail" = 0 ] && [ "$pass" -gt 0 ]

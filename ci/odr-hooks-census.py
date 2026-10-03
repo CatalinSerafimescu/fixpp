@@ -20,10 +20,9 @@ body, when an open `(` or `[` of the head holds it, or an open template list of 
 head, the class name or the base clause, or when it opens a requires-expression of the
 requires-clause; a `<` opens a template list only after a name. A definition is identified by
 its enclosing scopes plus its name (specialization arguments included). An unnamed class,
-struct or union is named by the first declarator after its body (`typedef struct {...} T;`)
-or by its alias (`using T = struct {...};`), as `<anon:T>`; one with neither, and every
-unnamed enumeration, is `<anon>` and paired with the other state by encounter order. The
-verdict:
+struct, union or enumeration is named by the first declarator after its body (`typedef struct
+{...} T;`) or by its alias (`using T = struct {...};`), as `<anon:T>`; one with neither is
+`<anon>` and paired with the other state by encounter order. The verdict:
 
   * DIVERGENCE (exit 1): a definition present in BOTH outputs whose tokens differ, head
     included, so a gated `final` or base clause counts as well as a gated member. A gated
@@ -60,9 +59,12 @@ FAILS CLOSED (exit 2), and still prints whatever it found, when:
     parenthesise the comparison), a requires-clause token outside the clause's grammar, or a
     type body followed by a token no declarator starts with (a brace in the head was read as
     the body). A third-party header cannot depend on the macro, so its heads are not refused;
-  * in such a header, definitions paired by encounter order whose number differs between the
-    states, in one scope outside every type definition, when either state holds two or more:
-    which pairs with which is unknown.
+  * in such a header, two or more definitions under one key in one scope outside every type
+    definition, in either state, with at least one under the source dir. This is checked
+    anywhere in the header's preprocessed output, including own headers it includes, because
+    the pairing would be by encounter order and what identifies the definitions can lie
+    outside their bodies, in a declarator or in an enclosing function's label. Give each one a
+    distinct name.
 
 Self-test, buildless, with the arms each refusal and verdict needs: `ci/test-odr-hooks-census.sh`.
 """
@@ -362,8 +364,8 @@ def paren_open(h):
 def read_head(h):
     """-> (kind, name) for the tokens before a `{`, by the class-head grammar.
 
-    kind is 'namespace'; 'type', name being the type's name ("" for an unnamed class, struct or
-    union, "<anon>" for an unnamed enumeration, "<anon:A>" for an unnamed one in `using A =`);
+    kind is 'namespace'; 'type', name being the type's name ("" for an unnamed class, struct,
+    union or enumeration, "<anon:A>" for an unnamed one in `using A =`);
     'other'; 'expr' when the `{` opens an expression inside the head rather than a scope (name
     says what holds it: 'angle' or 'requires'); or 'refuse' when the head reads as a class head
     up to a token the rules below give no place (name is the reason)."""
@@ -445,7 +447,7 @@ def read_head(h):
         return "expr", "angle"  # inside a base clause's template argument list
     if name:
         return "type", " ".join(name).replace(" :: ", "::").replace(" ", "")
-    return "type", "<anon>" if is_enum else f"<anon:{alias}>" if alias else ""
+    return "type", f"<anon:{alias}>" if alias else ""
 
 
 def declarator_name(toks, n):
@@ -603,11 +605,9 @@ def census(header):
     if la == lb:
         return {"header": header, "status": "SAME"}
     unread = sorted(set(ua) | set(ub))
-    # A definition keyed by encounter order (an unnamed enumeration or anonymous union, or a
-    # second definition under one key) is paired with the one at the same place in the other
-    # state. When the states hold a different number under one key and either holds two or
-    # more, which pairs with which is unknown. Inside another type definition the enclosing one
-    # is compared whole, so only a scope outside every type definition is checked.
+    # Two or more definitions under one key in one scope outside every type definition cannot
+    # be paired reliably: encounter order may be shifted by a definition whose identity lives
+    # in a following declarator or in an enclosing function label.
     per_key = {}
     for side, d in ((0, da), (1, db)):
         for v in d.values():
@@ -615,7 +615,7 @@ def census(header):
                 per_key.setdefault(v[4], [0, 0, []])[side] += 1
                 per_key[v[4]][2].append(v[2])
     for k, (na, nb, where) in sorted(per_key.items()):
-        if na != nb and max(na, nb) >= 2 and any(own(o) for o in where):
+        if max(na, nb) >= 2 and any(own(o) for o in where):
             unread.append((next(o for o in where if own(o)), f"definitions of {k} cannot be "
                            f"paired between the states ({na} without {MACRO}, {nb} with)", ""))
     div, one = {}, {}
