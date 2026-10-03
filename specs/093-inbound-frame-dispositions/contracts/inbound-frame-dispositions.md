@@ -38,17 +38,23 @@ the framing fields that give the frame's length.
 **Resync rule.**
 - **Frame start.** At a frame boundary (the first byte the Framer has received, or the first byte
   after a complete frame), framing is as today: `8=` followed by any BeginString value. After a
-  garble, the next frame start is the next occurrence of `8=FIX`, whatever byte precedes it, searched
-  from the byte after the garble's first byte. `FIX` is the prefix every supported profile
+  garble, the next frame start is the next occurrence of `8=FIX`, whatever byte precedes it,
+  searched from the byte after the garble's first byte, or, for a structurally complete frame whose
+  CheckSum value is wrong, from the byte after its own end (Extent, below). The byte after such a
+  garble is therefore a search position, not a frame boundary, and the bytes the search passes over
+  belong to that garble's region. `FIX` is the prefix every supported profile
   identifier shares. The Framer reads those three BeginString bytes during a search, and no others.
 - **Extent.** A garble runs from its candidate start to the next frame start, or through its own end
   for a structurally complete frame whose CheckSum value is wrong. A well-formed frame lying wholly
   after a garble is never lost. A frame lying inside the extent of such a wrong-CheckSum frame is part
-  of that garble.
+  of that garble. Each failed candidate, and each run of leading junk at a frame boundary, is one
+  region: a candidate the search finds right after another region opens its own region when it fails,
+  so two adjacent garbles count two.
 - **State across feeds.** The Framer keeps one flag, `searching`, and nothing else besides the carry.
   When a feed ends during a search, the region stays open, the next feed continues it, and it is not
   counted again. The carry retains only the trailing bytes that are a proper prefix of `8=FIX`, at most
-  four. The outcome therefore does not depend on how the stream is segmented.
+  four. The frames produced and the regions counted therefore do not depend on how the stream is
+  segmented. The per-call summaries do, and so do the events built from them (FR-002, FR-003).
 - **Ordering.** A call that has produced a frame stops before resolving a later garble and leaves it
   for the next call. Garbles reported by a call therefore precede every frame the same call produces.
 - **Reporting.** Each call resets and then fills one `garble_summary` (E-1): the number of garbled
@@ -72,8 +78,8 @@ the framing fields that give the frame's length.
   - **The digit cap** bounds the BodyLength digit run, leading zeros included. It is a named constant,
     `kBodyLengthDigitCap`. Its conditions: a floor, at least the decimal width of the largest L plus an
     allowance for the zero padding a counterparty legitimately sends (FIX `int` permits leading zeros);
-    and a ceiling, a small multiple of that decimal width, so that the cap's term in the bound below
-    stays a small constant. Research R-2 records the multiple and why. The
+    and a ceiling, three times the decimal width of the largest L (262144), so that the cap's term in
+    the bound below stays a small constant. This is the one place the ceiling is stated. The
     allowance is derived at implementation by research R-2's recipe and recorded there, never in a
     comment. A longer run is a garble of kind `wire_invalid_body_length`, not a close, because its
     bytes are not over L. Within the cap, the value is read digit by digit and refused as over L as
@@ -91,6 +97,11 @@ digit cap):
 - W-1 contributes L ÷ R;
 - W-2's rescan of a pending candidate's header on each feed contributes the two caps;
 - W-3 contributes a constant, because each byte is summed at most once.
+
+The counted-work instrument charges one unit per byte read, summed or moved. The constant is derived
+from W-1 to W-3 at implementation and recorded with its derivation in research R-2. It is the value
+Q-4's cells and `fuzz_wire_framer`'s resync arm assert against, and quickstart §2's work-bound
+mutants (compaction, the caps, the nested sums) must exceed it.
 
 The BeginString cap depends on the configured `begin_string`, so the bound does too. The configured
 length is bounded on every path where the pump runs over peer bytes, by three things 093 leaves as
@@ -134,7 +145,12 @@ with the flag on (plan.md OD-4).
 - Before Active, step 1 is a disregard, where 092's D-1 and D-2 were refusals. C-4 bounds the wait it
   creates.
 - Disconnected stays "ignore every frame", which is both 092's and today's rule. A frame there is not
-  scanned, so a criterion-3 garble in Disconnected is not counted.
+  scanned, so a criterion-3 garble in Disconnected is not counted. A Framer garble there is counted,
+  evented and logged: the pump runs while the transport is open, whatever the FSM state, and accounts
+  every feed's summary (C-1, E-4). That difference is by design: only the arm reads field 3.
+- Step 1 also takes 092's D-9 frames (LogoutSent) whose third field is not 35. They stay disregarded,
+  as D-9 says, and are now counted, evented and logged as garbles. D-3 to D-7 need field 3 to be 35,
+  so step 1 never takes them, and they stand unchanged.
 
 ## C-3: Parse capacity (FR-010 to FR-015)
 
@@ -201,6 +217,12 @@ These loop heads are the pump's (phase (b)). Phase (a)'s first-frame read keeps 
 which is unchanged. A tie there cannot outrun the bound, because its byte budget, which counts
 discarded bytes, caps the number of iterations.
 
+**Which first-frame bound fires first.** The read feeds the Framer before it tests the budget (088's
+frame-first order), so a BodyLength over L is refused in the feed that carries its digits, before
+the budget fills. A frame that is too long for the budget is refused by the budget or by the read's
+`max_bytes + 1` carry. Each closes the raw transport silently (L-6), so the order changes only when
+the close happens.
+
 | Role and phase | Clock starts | What bounds it | On expiry or over-budget | Observable |
 |---|---|---|---|---|
 | **(a) acceptor, pre-Session**: from accept until a first frame whose CompIDs match the entry | accept | the TLS handshake bound, unchanged and not shortened; then the first-frame read, bounded by `min(5 s, deadline − now)` and by its unchanged 4096-byte budget, which also counts discarded bytes. When `deadline − now` is not positive after the handshake, the accept loop closes the transport without issuing the read. The relative-to-absolute conversion inside `read_first_frame_bounded` is unchanged | the raw transport is closed. No Session exists, so there is no `close()`, no SessionEvent and no log | the peer's connection closes; nothing is recorded (L-6) |
@@ -223,6 +245,12 @@ discarded bytes, caps the number of iterations.
   A store operation that never completes hangs the session in any state, as it does today.
 - **Sleep cancellation.** The race uses `await_deadline`, which re-arms when a clock-wide
   `cancel_sleeps()` wakes it early.
+- **`Engine::stop()` during phase (b), with no reset unit in flight.** Nothing is shielded. Stop's
+  step 1 cancels the pump, which is bound to the session's slot, and its step 2 closes the transport,
+  so the pump's read ends and the pump closes the session as it does today on a failed read. The
+  deadline adds nothing to that path: `session_event_establishment_timeout` is recorded only if a
+  loop-head test saw the deadline pass before stop, so a cell must not assert either outcome for a
+  stop that coincides with T.
 - **After Active.** The deadline has no effect after the first Active, which the dedicated
   `reached_active_` latch records (E-6). A session with no application attached is therefore not
   closed while Active (quickstart Q-36). Phase (b) also covers a session already refused into
@@ -320,6 +348,16 @@ This runs on every store, volatile ones included (OD-9).
 | no | (in, out) of the unit: in = 2 when the Logon advanced; out = 2 on the initiator's own reset | every store |
 | yes | (1, 1) | every store while the wait does not expire. After expiry: an overriding store whose `reset_to` holds a FIFO writer lock across the operation, because the teardown reset then queues behind it. A default-body store after expiry is not covered (L-4) |
 
+**"Any point of the unit" reduces to one interleaving point, on three conditions.** `close()` and
+stop's step-1 handler run on the session strand, so they can begin inside the unit only where the
+unit suspends. The conditions: step 2's and step 5's `reset_cancellation_state` complete without
+suspending (re-derive in asio's `impl/awaitable.hpp`); step 3 grants inline (L-518-1's condition,
+above); and steps 5 to 7 hold no other `co_await` (re-derive with `grep -n
+"logon_arm_superseded\|co_await" src/session/session.cpp`). Then the one point is step 4's store
+await, which is where the cells hold the store (quickstart Q-23, Q-26). A `close()` or stop that
+begins before step 2 meets the arm's earlier `logon_arm_superseded` check, on the #518 condition
+above, so the unit is not entered and the table above does not apply.
+
 `MemoryStore` meets the FIFO condition (a leading post, then its mutex). For `FileStore` the condition
 is its writer `async_mutex`, and a quickstart cell measures it rather than assuming it.
 
@@ -343,22 +381,27 @@ stay up, changes the result of each. So every BREAKING row below (rows 1 to 6) i
 unless the row writes a result-based reason for leaving one out. Re-derive the set from the 1.10
 entry, not from this paragraph.
 
+**Rows 1, 3, 5 and 6 amend no 1.10 sentence.** None describes their old outcomes: the garble close,
+the carry refusal near 64 KiB, the pre-Active connection left open, and the TestRequest sent while
+the peer's well-formed frames took an early return that did not refresh liveness. The 1.10 bullet on a heartbeat interval speaks of faulty frames only and stays true
+(FR-021). Re-derive with the grep above and with the 1.10 entry in `version.h`.
+
 **Rows.** The column headings are abbreviated: "C declarations (BREAKING / amended 1.10)", "Kind and
 why", and "Golden / freeze".
 
 | # | Change | C++ declaration | C declarations | Python | TOML | B&L | Kind and why | Golden / freeze | Cell |
 |---|---|---|---|---|---|---|---|---|---|
-| 1 | A Framer-detected garbled frame is disregarded, not session-ending. That includes two shapes that were framed before and are now garbled at framing (C-1 W-2): a BeginString value longer than the BeginString cap, which was handled as a mismatch, and a BodyLength digit run longer than the digit cap, which was accepted | `Framer::Config::resync_on_garble`, `Framer::Config::max_begin_string_bytes`, `garble_summary`, `last_garbles()`, `kBodyLengthDigitCap` (added; Q-4 is its witness); `friend struct framer_test_access;` and the private counted-work counters (added, unconditional, always compiled; they change `sizeof(Framer)` and nothing a strict caller observes, data-model E-1) | BREAKING on the five observers | through C | — | B row; `L-004-4` closed | BREAKING: a session that ended stays established | none | TC 2d/2m/3b/3c/3e; Q-4 (digit cap); Q-10; Q-37 |
-| 2 | A 35-not-third frame is disregarded in every state and both validation modes | — | BREAKING on the five observers. Amend the 1.10 text beginning "a Logon carrying a malformed tag" at all five sites: `close`'s paragraph and the bullet lists on `is_established`, `fixpp_session_send`, `register_callback` and `fixpp_session_register_send_callback`. Such a Logon is now disregarded when its third field is not MsgType(35). The 1.10 bullet beginning "on an established session, a faulty frame whose fault comes before its MsgSeqNum(34)" stays true, so it is not amended: such a frame is still disregarded without advancing, now by C-2 step 1, and the gap handling behind its "session ends" consequence is unchanged | through C | — | B-005-7 narrowed | BREAKING: a frame that was processed, or a Logon that was refused, is now disregarded | none | TC 2t; D-8 cells; Q-37 |
+| 1 | A Framer-detected garbled frame is disregarded, not session-ending. That includes two shapes that were framed before and are now garbled at framing (C-1 W-2): a BeginString value longer than the BeginString cap, which was handled as a mismatch, and a BodyLength digit run longer than the digit cap, which was accepted | `Framer::Config::resync_on_garble`, `Framer::Config::max_begin_string_bytes`, `garble_summary`, `last_garbles()`, `kBodyLengthDigitCap` (added; Q-4 is its witness); `friend struct framer_test_access;` and the private counted-work counters (added, unconditional, always compiled; they change `sizeof(Framer)`, so the change is source-compatible but not layout-neutral, and nothing a strict caller observes, data-model E-1) | BREAKING on the five observers | through C | — | B row; `L-004-4` closed | BREAKING: a session that ended stays established | none | TC 2d/2m/3b/3c/3e; Q-4 (digit cap); Q-10; Q-37 |
+| 2 | A 35-not-third frame is disregarded in every state and both validation modes | — | BREAKING on the five observers. Amend the 1.10 text beginning "a Logon carrying a malformed tag" at all five sites: `close`'s paragraph and the bullet lists on `is_established`, `fixpp_session_send`, `register_callback` and `fixpp_session_register_send_callback`. Such a Logon is now disregarded when its third field is not MsgType(35). The 1.10 bullet beginning "on an established session, a faulty frame whose fault comes before its MsgSeqNum(34)" stays true, so it is not amended: such a frame is still disregarded without advancing, one whose third field is not MsgType(35) now by C-2 step 1 and one whose third field is 35 by 092's D-7 at step 3, as before, and the gap handling behind its "session ends" consequence is unchanged | through C | — | B-005-7 narrowed | BREAKING: a frame that was processed, or a Logon that was refused, is now disregarded | none | TC 2t; D-8 cells; Q-37 |
 | 3 | A frame over L closes in every state, the acceptor's first frame included. A frame of at most L is admitted however the stream is segmented, where today the 64 KiB carry refuses some frames near it by segmentation (research R-3) | — | BREAKING on the five observers | through C | — | B row; 070 exemption reversed | BREAKING | none | over-L cells; Q-37 |
 | 4 | A late parse failure is unreachable for an admitted frame | — | BREAKING on the five observers. Amend the 1.10 bullet beginning "on an established session, a frame the header scan finds fault-free but the session cannot parse for dispatch" on `is_established`, `fixpp_session_send`, `register_callback` and `fixpp_session_register_send_callback` | through C | — | `L-092-6` updated | BREAKING (a documented effect no longer occurs for an admitted frame) | none | dense-L; FR-014 defence; Q-37 |
 | 5 | A pre-Active connection closes at the establishment deadline (C-4 phase b), including one refused into Disconnected | `SessionConfig::logon_timeout_ms` (added) | BREAKING on the five observers (a slow peer's session no longer establishes) | through C | — | B row | BREAKING | none | timeout cells; Q-37 |
 | 6 | Liveness refreshes on more frames, so a TestRequest that used to be sent is not | — | BREAKING on the five observers (a session that ended on an unanswered TestRequest stays up) | through C | — | B row | BREAKING | none | SC-005 cells; Q-37 |
 | 7 | Establishment timeout setter | — | `fixpp_session_config_set_logon_timeout_ms` (added; refuses null and zero; reentrancy "single-thread") | automatic | — | — | MINOR | golden + `session.h` freeze hash | setter cells, C and Python |
 | 8 | Garbled-frame counter | `Session::garbled_frame_count()` (added) | `fixpp_session_garbled_frame_count` (added; refuses null handle and null `out`; 0 before the session exists; reentrancy "thread-safe") | `%apply` OUTPUT typemap; a GIL-table row | — | — | MINOR | golden + freeze hash | getter cells, C and Python, both wheel lanes |
-| 9 | TOML key | — | — | — | `logon_timeout_ms`, a bare integer of milliseconds. A non-integer, a value ≤ 0 or one above `UINT32_MAX` is refused with a diagnostic (`logout_disconnect_timeout_ms`'s mapper is the shape, except that it accepts 0) | — | — | additive | none | TOML cells |
+| 9 | TOML key | — | — | — | `logon_timeout_ms`, a bare integer of milliseconds. Each refusal is a `LoadDiagnostic` on the key: a non-integer with `reason_class::malformed_value` (present but wrong type, as `src/config/logger_resolver.cpp`'s integer keys refuse one), and a value ≤ 0 or one above `UINT32_MAX` with `reason_class::out_of_range`. `logout_disconnect_timeout_ms`'s mapper is the shape only for the integer read: it accepts 0, and it ignores a non-integer without a diagnostic | — | additive | none | TOML cells |
 | 10 | Config refusals: zero timeout; advertised 383 outside [4096, 262144] | `Engine::register_session` and `Session::open()` | — (C cannot set 383; C's zero is refused at the setter) | — | — | B row | C++ only; not C-ABI | none | `register_session` and `open()` cells |
-| 11 | `SessionEvent` alternatives | `session_event_garbled_frame`, `session_event_establishment_timeout`, `session_event_close_reset_wait_expired` (appended) | — | — | — | — | additive (the variant's type changes) | none | event cells |
+| 11 | `SessionEvent` alternatives | `session_event_garbled_frame`, `session_event_establishment_timeout`, `session_event_close_reset_wait_expired` (appended) | — | — | — | — | C++ source change, not C-ABI: a `std::visit` over `SessionEvent` with no default arm stops compiling until it handles the three. 092 declined an alternative for that reason; 093's three carry the events FR-003, FR-006 and FR-041 require, as #424 appended one for its own. Declared in the B&L delta and the PR description's C++ deltas; T012 re-derives the in-repo visits | none | event cells |
 | 12 | Parse reserve argument | a public `Parser::parse(frame, mr, OffsetTable::Config, std::size_t reserve_entries)` overload; a public `OffsetTable` constructor overload taking the same reserve, which passes it to the private `build`; a private tagged `MessageView` constructor between them (`Parser` is already its friend). Existing overloads are unchanged | — | — | — | — | additive | none | dense-L |
 | 13 | Store reset unit | `MessageStore::reset_to` (non-pure virtual; precondition `{1, 2}`) | — | — | — | L-3, L-4 | additive. The vtable changes, so a rebuild is needed (C++ only) | none | C-6 cells |
 | 14 | Engine access seam | `friend struct session_engine_access;` in `session.hpp`, defined under `src/session/`, never installed. It carries `inbound_limit()`, `has_reached_active()`, the summary intake, the engine-stop flag's setter and the carry and parse spans | — | — | — | — | additive. The Session's underscore hooks stay private | none | build |
@@ -367,8 +410,11 @@ why", and "Golden / freeze".
 | 17 | #524: the reset unit is one store operation, shielded, and stopped by the engine-stop flag after `Engine::stop()`'s step 1 has run on the session's strand | — | — | — | — | `L-518-1` updated | **Not BREAKING**, on the same ruling | none | #524 cells |
 | 18 | `MessageView::unknown_fields()` returns an empty view on arena exhaustion instead of reaching `std::terminate` (fixpp#540) | `MessageView::unknown_fields()` (body only; still `noexcept`) | — (the C ABI does not expose it) | — | — | L-5 | behaviour, C++ only | none | Q-32 |
 
-**Version.** One MINOR bump. Its `version.h` history block lists rows 1 to 6 as BREAKING and rows 7
-and 8 as additions. Re-derive the current MINOR from `include/fix/c_api/version.h`.
+**Version.** One MINOR bump. Its `version.h` history entry is headed BREAKING, as 1.10's is, names
+rows 1 to 6 in one summary line each with a pointer to their declarations, and lists rows 7 and 8 as
+additions. By the placement rule it details an effect only where no declaration carries it; rows 1 to
+6 are each carried by the five observers, so the entry details none of them. Re-derive the current
+MINOR from `include/fix/c_api/version.h`.
 `gh release list --exclude-drafts` must be empty at implementation. The PR description and the B&L
 delta carry the same BREAKING list.
 
@@ -394,9 +440,13 @@ delta carry the same BREAKING list.
   counted, and its close is silent (no event, no log): no out-of-session log site exists in `src/`. A
   connection that yields a Session hands its first-frame garbles to it as one summary.
 - **L-7.** There is no resend-loop guard for a garbled frame retransmitted identically (§4.5.2's
-  recommendation; as in L-092-1).
+  recommendation; as in L-092-1). Its outcome is the one L-092-1 records for a disregarded faulty
+  frame, because the session sees the same missing number either way: bounded within one session by
+  that trace, and repeated across reconnects.
 - **L-8.** A complete, well-formed frame embedded in a garbled region's data, if the resync search
-  finds it, is framed and delivered like any other frame. The session's guards then apply to it.
+  finds it, is framed and delivered like any other frame. The session's guards then apply to it. For
+  example, an embedded copy of an earlier message has a MsgSeqNum below NextNumIn; unless it is a
+  Heartbeat or carries PossDupFlag(43)=Y, the too-low guard ends the session.
 - **L-9.** The 16-slot event ring can evict older events under a garble flood. The counter is the
   durable signal.
 - **L-10.** Only C++ can set 383. C, Python and TOML sessions use L = 64 KiB.
