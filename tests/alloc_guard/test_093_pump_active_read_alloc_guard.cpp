@@ -4,12 +4,12 @@
 //
 // 093-inbound-frame-dispositions T044 (quickstart Q-19; FR-052; contract C-4; plan OD-22):
 // after the session first reaches Active the read pump reads without the establishment
-// deadline's race, so an Active read makes no NEW global operator new call: every measured
-// Active read makes the same number of calls, and that number is at most
+// deadline's race, so an Active read makes no NEW global operator new call: every Active
+// read the cell drives makes the same number of calls, and that number is at most
 // kBaseActiveReadAllocs, the count the merge-base's pump makes with this cell's rig.
 //
 // The real pump is driven past Active over loopback TCP (tests/session/plain_engine_rig.hpp),
-// a warm-up Heartbeat is processed, then each measured Heartbeat is written by the peer
+// a warm-up Heartbeat is processed, then each later Heartbeat is written by the peer
 // synchronously, before the counter is armed, and the io_context is run one handler at a
 // time until the session's NextNumIn shows the frame was processed. So the armed window
 // holds the pump's read completion, its feed, the frame's delivery and the next read's

@@ -241,13 +241,13 @@ endif()
 
 # 093-inbound-frame-dispositions T044 (quickstart Q-19; FR-052; plan OD-22): an Active
 # read of the real session read pump makes no NEW global operator new call, against a
-# count measured on the merge-base's pump. Standalone ([const §VII.8]): its TU replaces
+# constant taken from the merge-base's pump (its recipe is in the cell). Standalone ([const §VII.8]): its TU replaces
 # global operator new for the whole binary, and its cells run an Engine over loopback TCP
 # on a mock clock. No *_mallocnesia twin: its window wraps io_context::run_one_for(), the
 # class the "DELIBERATELY NOT GATED" note above keeps out of the LD_PRELOAD gate.
-# Linux only: the count it compares against was measured on Linux, where asio's reactor
-# and executor queries are the ones the cell's constant names; another platform's
-# completion path can make a different number of calls.
+# Linux only: the constant is the Linux one, where asio's reactor and executor queries
+# are the ones the cell's constant names; another platform's completion path can make a
+# different number of calls.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   add_executable(test_093_pump_active_read_alloc_guard test_093_pump_active_read_alloc_guard.cpp)
   target_link_libraries(test_093_pump_active_read_alloc_guard PRIVATE
