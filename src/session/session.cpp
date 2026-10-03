@@ -231,6 +231,13 @@ void Session::record_state_transition_(fsm_state new_state) noexcept {
     }
     fsm_state_ = new_state;
 
+    // 093 (data-model E-6): the establishment deadline's disarm. Set here, before the
+    // no-application return below, so a session with no application attached stops
+    // testing the deadline once Active too.
+    if (new_state == fsm_state::Active) {
+        reached_active_ = true;
+    }
+
     // ── 019 T016: lifecycle callbacks pinned to the Active↔!Active edge ───────
     // Fired here so ALL converging paths (graceful close / terminal close /
     // callback-threw) share one guard, satisfying INV-7 exactly-once semantics.
@@ -327,6 +334,19 @@ void Session::note_garbles_(fixpp::wire::garble_summary const& g) noexcept {
                fixpp::log::ArgValue::from_u64(g.discarded),
                fixpp::log::ArgValue::from_u64(unnamed));
     garbles_unlogged_ = 0;
+}
+
+// ── 093-inbound-frame-dispositions — the establishment timeout (contract C-4;
+// data-model E-5, E-12) ─────────────────────────────────────────────────────
+// The event, then one FIXPP_SLOG record carrying T, through the logger open() resolved
+// and with the session's trace_context; its format string is registered in
+// src/log/format_registry.cpp. No rate bound: the pump closes the connection right
+// after, so it is written at most once per connection.
+void Session::note_establishment_timeout_() noexcept {
+    emit_event(session_event_establishment_timeout{});
+    FIXPP_SLOG(logger_.get(), warn, get_trace_context(), fixpp::log::cat::session,
+               "session not established within logon_timeout_ms={}",
+               fixpp::log::ArgValue::from_u64(cfg_.logon_timeout_ms));
 }
 
 // ── parse_and_dispatch_ ───────────────────────────────────────────────────────
@@ -1271,6 +1291,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         if (cred_len >= Session::kMaxMaskableLogonBytes) {
             co_return std::unexpected(error::invalid_session_config);
         }
+    }
+
+    // 093-inbound-frame-dispositions (data-model E-7): a zero establishment timeout is
+    // refused, as Engine::register_session refuses it.
+    if (cfg_.logon_timeout_ms == 0) {
+        co_return std::unexpected(error::invalid_session_config);
     }
 
     // 093-inbound-frame-dispositions (data-model E-2): the session's inbound limit L.

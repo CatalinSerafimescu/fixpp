@@ -712,6 +712,22 @@ private:
     // max(HeartBtInt, 1 s). Session strand only.
     void note_garbles_(fixpp::wire::garble_summary const& g) noexcept;
 
+    // 093 (data-model E-6): true once the session has first entered Active. Set by
+    // record_state_transition_ on that entry, whether or not an application is attached
+    // (onLogon_fired_ latches only with one), and never cleared. The read pump stops
+    // testing the establishment deadline once it is set. Written and read on the
+    // session strand.
+    // Placement condition: as garbled_frames_ above; a Session reused for a second
+    // connection would need this reset when the transport is installed.
+    bool reached_active_ = false;
+
+    // note_establishment_timeout_ — 093 (data-model E-5, E-12; contract C-4): the
+    // establishment deadline passed before the first Active. Emits
+    // session_event_establishment_timeout and writes one log record carrying
+    // logon_timeout_ms. Reached from the read pump through session_engine_access, just
+    // before it closes the session. Session strand only.
+    void note_establishment_timeout_() noexcept;
+
     // ── FR-004 / D-2 — FSM transition ring-buffer (capacity 16) ──────────────
     // Stores the last ≤16 fsm_state values recorded via record_state_transition_.
     // Written exclusively via record_state_transition_; ring wraps at index 16.

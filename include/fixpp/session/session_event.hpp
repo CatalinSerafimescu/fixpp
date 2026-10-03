@@ -141,6 +141,12 @@ struct session_event_garbled_frame {
     std::uint32_t discarded_bytes;
 };
 
+// 093-inbound-frame-dispositions (data-model E-5; contract C-4) — emitted when the
+// session had not reached Active by its establishment deadline
+// (SessionConfig::logon_timeout_ms), just before the connection is closed. At most once
+// per connection.
+struct session_event_establishment_timeout {};
+
 // SessionEvent — NEW 013-introduced public variant union. 5 initial
 // alternatives; future features APPEND alternatives append-only (consumer-side
 // std::visit fall-throughs are responsible for tolerating future variants).
@@ -149,6 +155,6 @@ using SessionEvent =
     std::variant<session_event_peer_identity_bound, session_event_compid_authorization_failed,
                  session_event_tls_validation_failed, session_event_credentials_rotated,
                  session_event_sequence_numbers_reset, session_event_resend_slot_gap_filled,
-                 session_event_garbled_frame>;
+                 session_event_garbled_frame, session_event_establishment_timeout>;
 
 }  // namespace fixpp::session

@@ -81,6 +81,10 @@ static const std::unordered_map<std::uint32_t, std::string_view>& get_registry()
                            "suppressed_since_last={}")),
              .fmt = "inbound garbled frame disregarded: kind={} discarded_bytes={} "
                     "suppressed_since_last={}"},
+            // 093 (data-model E-12): Session::note_establishment_timeout_.
+            {.id = static_cast<std::uint32_t>(
+                 crc32_str("session not established within logon_timeout_ms={}")),
+             .fmt = "session not established within logon_timeout_ms={}"},
         };
 
         std::unordered_map<std::uint32_t, std::string_view> m;

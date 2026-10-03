@@ -29,6 +29,16 @@ struct session_engine_access {
     static void note_garbles(Session& s, fixpp::wire::garble_summary const& g) noexcept {
         s.note_garbles_(g);
     }
+
+    // Whether the session has first reached Active (data-model E-6): the read pump tests
+    // the establishment deadline only while this is false. Session strand.
+    [[nodiscard]] static bool has_reached_active(Session const& s) noexcept {
+        return s.reached_active_;
+    }
+
+    // The establishment deadline passed before the first Active (contract C-4): the
+    // event and the log record. The pump then closes the session. Session strand.
+    static void note_establishment_timeout(Session& s) noexcept { s.note_establishment_timeout_(); }
 };
 
 }  // namespace fixpp::session

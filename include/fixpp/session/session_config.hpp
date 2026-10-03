@@ -325,6 +325,16 @@ struct SessionConfig {
     // SessionConfig-build time per [arch §5.3] construction-time carve-out.
     std::uint32_t logout_disconnect_timeout_ms{2000};
 
+    // 093-inbound-frame-dispositions (FR-006; contract C-4; data-model E-7): the
+    // establishment timeout T, in milliseconds. One absolute deadline per connection, on
+    // EngineConfig::clock (SessionConfig::clock_override does not move it), from accept on
+    // the acceptor and from the return of drive_reconnect() on the initiator, until the
+    // session first reaches Active. On expiry the connection is closed, with
+    // session_event_establishment_timeout and a log record once a Session exists.
+    // Zero is refused with invalid_session_config by Engine::register_session and by
+    // Session::open().
+    std::uint32_t logon_timeout_ms{10000};
+
     // FR-023 / Clarifications Q3=A — operator-supplied allow-list of
     // {principal → {compid_set}} bindings. Default-constructed = empty
     // allow-list = default-deny (rejects ALL Logons). Operator MUST enumerate
