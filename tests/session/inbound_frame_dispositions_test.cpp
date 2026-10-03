@@ -590,8 +590,12 @@ TEST(InboundFrameDispositionsQ5, LogRecordsAreRateBoundedToOnePerHeartBtInt) {
     PumpCell c;
     bool ok = c.up && c.rig.to_active();
     ok = ok && garble_then_heartbeat(c, 2);
+    // KIND A (ci/mock-clock-staging-sweep.sh): a time stamp; the next garble reads it
+    // synchronously (note_garbles_'s steady_now, the Heartbeat's SendingTime). No waiter.
     c.rig.clock->advance(30s - 1ms);
     ok = ok && garble_then_heartbeat(c, 3);
+    // KIND A (ci/mock-clock-staging-sweep.sh): a time stamp; the next garble reads it
+    // synchronously (note_garbles_'s steady_now, the Heartbeat's SendingTime). No waiter.
     c.rig.clock->advance(1ms);
     ok = ok && garble_then_heartbeat(c, 4);
     auto const o = c.observe();
@@ -614,11 +618,17 @@ TEST(InboundFrameDispositionsQ5, HeartBtIntZeroStillBoundsTheLogToOneRecordPerSe
     bool ok = c.up && c.rig.to_active();
     std::uint32_t seq = 2;
     ok = ok && garble_then_heartbeat(c, seq++);  // t = 0: logged
+    // KIND A (ci/mock-clock-staging-sweep.sh): a time stamp; the next garble reads it
+    // synchronously (note_garbles_'s steady_now, the Heartbeat's SendingTime). No waiter.
     c.rig.clock->advance(999ms);
     ok = ok && garble_then_heartbeat(c, seq++);  // t = 0.999 s: suppressed
+    // KIND A (ci/mock-clock-staging-sweep.sh): a time stamp; the next garble reads it
+    // synchronously (note_garbles_'s steady_now, the Heartbeat's SendingTime). No waiter.
     c.rig.clock->advance(1ms);
     ok = ok && garble_then_heartbeat(c, seq++);  // t = 1 s: logged, 1 suppressed
     for (int i = 0; i < 10; ++i) {               // t = 1.1 s … 2.0 s
+        // KIND A (ci/mock-clock-staging-sweep.sh): a time stamp; the next garble reads it
+        // synchronously (note_garbles_'s steady_now, the Heartbeat's SendingTime). No waiter.
         c.rig.clock->advance(100ms);
         ok = ok && garble_then_heartbeat(c, seq++);
     }
