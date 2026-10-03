@@ -458,9 +458,10 @@ TEST(InboundFrameDispositionsTc, TC003_3e_CheckSumNotSohTerminated_DisregardedAn
 // ── Q-5 (T028): accounting across feeds, ordering, the log rate, the ring ────
 //
 // Every cell runs through the real pump on the mock engine clock. "A feed" is one
-// Framer::feed call in the pump; a write the peer completes before the next write is
-// issued, with the io_context drained between them (Rig::deliver), is read by its own
-// feed. Base RED: the session closes at the first garbled byte.
+// Framer::feed call in the pump. A cell that needs two writes read by two feeds waits
+// for an effect only the first feed can cause before it issues the second write; a
+// settle window is not such a barrier. Base RED: the session closes at the first
+// garbled byte.
 
 // A garbled region of the resync kind that discards exactly its own bytes: it holds no
 // "8=FIX" and does not end in a proper prefix of it.
@@ -502,7 +503,11 @@ TEST(InboundFrameDispositionsQ5, RegionSplitAcrossReadsCountsOnceAndTheContinuin
     PumpCell c;
     bool const active = c.up && c.rig.to_active();
     std::string const first = std::string(40, 'Q');
-    bool const d1 = active && c.rig.deliver(first);
+    // The barrier: the region is counted only once a feed has read the first write.
+    bool const d1 = active && c.rig.deliver(first) && c.rig.run_until([&] {
+        auto const s = c.rig.session();
+        return s && garbled_count(*s) == 1U;
+    });
     bool const d2 = d1 && c.rig.deliver(std::string(25, 'Q') + "\x01" + c.rig.heartbeat(2));
     bool const processed = d2 && c.rig.run_until([&] {
         auto const s = c.rig.session();
@@ -520,18 +525,21 @@ TEST(InboundFrameDispositionsQ5, RegionSplitAcrossReadsCountsOnceAndTheContinuin
                       "split region");
 }
 
-// Application that records the session's garble count at each fromAdmin call.
+// Application that records, at each fromAdmin call, the session's garble count and
+// whether its event ring already holds a garble event.
 class CountAtFromAdmin final : public Application {
 public:
     fixpp::session::Engine* engine = nullptr;
     SessionId id;
     std::vector<std::uint64_t> counts;
+    std::vector<bool> evented;
 
     fixpp::core::expected_t<void> fromAdmin(
         const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& /*msg*/,
         const SessionId& /*id*/) override {
         auto const s = engine ? engine->lookup(id) : nullptr;
         counts.push_back(s ? garbled_count(*s) : ~std::uint64_t{0});
+        evented.push_back(s && !observe_garbles(*s).events.empty());
         return {};
     }
 };
@@ -550,12 +558,15 @@ TEST(InboundFrameDispositionsQ5, GarblesBeforeAFrameInOneFeedAreCountedBeforeTha
     bool const d = active && c.rig.deliver(junk() + c.rig.heartbeat(2));
     bool const processed = d && c.rig.run_until([&] { return app->counts.size() == before + 1U; });
     auto const counts = app->counts;
+    auto const evented = app->evented;
     c.rig.stop();
 
     ASSERT_TRUE(active && d) << "setup";
     ASSERT_TRUE(processed) << "the Heartbeat must reach fromAdmin";
     EXPECT_EQ(counts.back(), 1U)
         << "the garble ahead of the Heartbeat is counted before its fromAdmin";
+    EXPECT_TRUE(evented.back())
+        << "the garble ahead of the Heartbeat is evented before its fromAdmin";
 }
 
 // One garble (leading junk) followed by the next good Heartbeat, as one write.

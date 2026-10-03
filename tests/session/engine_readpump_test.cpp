@@ -1097,8 +1097,8 @@ struct ResyncCell {
     [[nodiscard]] bool wait_next_in(std::uint32_t n) {
         return rig.run_until([&] { return next_in() == n; });
     }
-    // Writes `part`, waits for the write and lets the pump read it before returning,
-    // so the next write is read by a later feed.
+    // Writes `part`, waits for the write, then gives the pump a short settle to read it.
+    // The settle is not a barrier: the next write may still coalesce into the same read.
     [[nodiscard]] bool write_part(std::string part) {
         rig.peer.send(std::move(part));
         if (!rig.run_until([&] { return rig.peer.all_written(); })) return false;
@@ -1147,7 +1147,9 @@ TEST(EngineReadPumpResync, Q2_TruncatedFrameThenAGoodFrame) {
 
 // Q-2, segmentation independence: each shape above, split into two writes at every byte
 // boundary, on one session. Each split is one more garbled region and one more good
-// frame, whatever the split point.
+// frame, whatever the split point, and whether or not the two writes coalesce into one
+// read, so the cell holds either way. The deterministic per-boundary splits of the
+// Framer itself are its own cells (tests/wire/framer_resync_test.cpp).
 void run_every_split(std::function<std::string(pr::Rig const&, std::uint32_t)> const& shape,
                      const char* name) {
     ResyncCell c;

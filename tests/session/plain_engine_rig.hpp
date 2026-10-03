@@ -257,14 +257,18 @@ public:
     // Acceptor only: connects the peer to the session's listener.
     [[nodiscard]] bool connect_peer() {
         auto const port = engine->acceptor_bound_endpoint(id).port;
-        bool done = false;
-        std::error_code result;
+        // Shared, so a handler still queued after a missed wait writes into live state.
+        struct Outcome {
+            bool done = false;
+            std::error_code ec;
+        };
+        auto const out = std::make_shared<Outcome>();
         peer.sock.async_connect(asio::ip::tcp::endpoint{asio::ip::make_address("127.0.0.1"), port},
-                                [&](std::error_code const& ec) {
-                                    result = ec;
-                                    done = true;
+                                [out](std::error_code const& ec) {
+                                    out->ec = ec;
+                                    out->done = true;
                                 });
-        if (!run_until([&] { return done; }) || result) return false;
+        if (!run_until([&] { return out->done; }) || out->ec) return false;
         peer.start_reading();
         return true;
     }
@@ -331,7 +335,9 @@ public:
         return run_until([this] { return state() == fixpp::session::fsm_state::Active; });
     }
 
-    // Writes `bytes` and runs until the peer's write completed and nothing is ready.
+    // Writes `bytes`, runs until the peer's write completed, then settles for a short
+    // window. The window is not a barrier: a cell that needs the bytes processed waits
+    // for their effect.
     [[nodiscard]] bool deliver(std::string bytes) {
         peer.send(std::move(bytes));
         if (!run_until([this] { return peer.all_written(); })) return false;
