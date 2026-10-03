@@ -576,6 +576,13 @@ a default body of `reset()` and then one `next_seqnum(dir, true)` for each targe
   2. Run the whole suite unfiltered, including the loopback, C-ABI and Python round-trips.
   3. Collect every failure.
 
+  **Run (T009, at `35a9627e`; the evidence file, `## Census`, holds the method and every hit).** No
+  non-canonical builder exists among the cases that ran. Two pins that no grep above finds:
+  `test_validate_gate_default_off.cpp` `T015_HeaderOutOfOrder_Accepted` (35-not-third with validation off), and
+  `read_first_frame_bounded_test.cpp` `CovFramerErrorPropagates` (a garble at the first-frame read). Both join
+  T032. The gtest cases that skip in the local environment, mostly interop cells that need a live
+  counterparty, were not observed; the evidence file lists them.
+
 ## R-9: Items Gate A round 1 settled, and what P3 and P6 measure
 
 - **Total cancellation and the reset unit.** Settled by design (contract C-6); cells measure it.

@@ -135,11 +135,11 @@ reproduction, the population snapshots, the test-builder census and its fixes, a
   - Positive controls: the grep's output must include `origin/main`'s own MINOR, so a grep that
     matched nothing cannot read as "no branch claims it"; and `gh release list` must exit 0, so an
     auth failure cannot read as "no release".
-- [ ] T004 Via `phase-implementer`, a **bench-only commit**: add a validation-on variant of
+- [X] T004 Via `phase-implementer`, a **bench-only commit**: add a validation-on variant of
   `BM_Session_OnInboundFrame_InSequence` (`validate_inbound_messages = true`) to
   `bench/session/on_inbound_frame_bench.cpp`. No file outside `bench/` changes, and the source
   compiles against the merge-base API. Record its `git patch-id --stable` in the evidence file.
-- [ ] T005 The paired timing baseline, **before the first production edit** (quickstart §0.1,
+- [X] T005 The paired timing baseline, **before the first production edit** (quickstart §0.1,
   `[const §VIII.2]`).
   - Base: a detached worktree at the T002 merge-base under `/mnt/wsl/fixppbuild`, its path padded to
     the branch tree's path length, with only T004's commit cherry-picked. `git -C <wt> diff --stat
@@ -159,7 +159,7 @@ reproduction, the population snapshots, the test-builder census and its fixes, a
   `research/G19-fix-fpml-iso20022/msvc-local-build-procedure.md` Step 0, before the first rsync. If
   another owner holds it, stop and ask the owner. Record the acquisition in the evidence file. The
   lock is held until T123.
-- [ ] T007 Via `phase-implementer`, measure the parse ceilings on base, per lane (quickstart §0.2; RED
+- [X] T007 Via `phase-implementer`, measure the parse ceilings on base, per lane (quickstart §0.2; RED
   evidence for SC-004). In a scratch program or throwaway test (never committed), in a scratch copy
   made with `git archive HEAD | tar -x -C <scratch>` (Execution rules), using
   `tests/support/pmr_allocation_tracking_resource.hpp`:
@@ -170,7 +170,7 @@ reproduction, the population snapshots, the test-builder census and its fixes, a
   - which lanes have a null arena upstream (`fixpp::detail::arena_upstream()` in
     `include/fixpp/core/pmr_arena_upstream.hpp`).
   Record each figure with the SHA in `research.md` R-3 and under `## Ceilings`, never in a comment.
-- [ ] T008 Via `phase-implementer`, reproduce fixpp#540 on base (quickstart §0.4, Q-32's first half,
+- [X] T008 Via `phase-implementer`, reproduce fixpp#540 on base (quickstart §0.4, Q-32's first half,
   FR-015, SC-008), in a scratch test that is not committed, in a scratch copy made with `git archive
   HEAD | tar -x -C <scratch>`: a `Parser` over a small `std::pmr::monotonic_buffer_resource`
   whose upstream is set explicitly to `std::pmr::null_memory_resource()`, sized so the parse succeeds
@@ -179,7 +179,7 @@ reproduction, the population snapshots, the test-builder census and its fixes, a
   Record the output under `## #540` and the branch it decides: **terminates** → Q-32 is RED on base
   and the PR settles #540; **does not terminate** → #540 is closed as not a bug with that output (an
   owner-approved comment), and Q-32 becomes a regression guard.
-- [ ] T009 Via `phase-implementer`, the census of non-canonical test builders (quickstart §0.3,
+- [X] T009 Via `phase-implementer`, the census of non-canonical test builders (quickstart §0.3,
   research R-8), in a scratch copy only (`git archive HEAD | tar -x -C <scratch>`). Add a temporary `std::abort()` on a fault-free `!msg_type_is_third` in every arm of
   `Session::on_inbound_frame` (`src/session/session.cpp`). Positive control first: one seeded frame
   whose third field is not 35 aborts. Then run the whole suite unfiltered, including the loopback,
@@ -192,11 +192,11 @@ reproduction, the population snapshots, the test-builder census and its fixes, a
     is the old close: T032 rewrites it RED first) or **keeps its intent with another trigger** (e.g. an
     elapsed-band witness in `tests/session/engine_firstframe_test.cpp` that used junk to force a close:
     T010 gives it a trigger that still closes after US1, such as a CompID mismatch or an over-L frame).
-- [ ] T010 Via `phase-implementer`, fix each test builder T009 found so it emits 8, 9, 35 first, and give
+- [X] T010 Via `phase-implementer`, fix each test builder T009 found so it emits 8, 9, 35 first, and give
   each T009 second-arm hit classified "keeps its intent" a trigger that still closes after US1. Tests
   only, no production change; each changed test stays GREEN on base. Re-run both T009 arms until they
   report only the "flips" hits, with each positive control re-shown on that run.
-- [ ] T011 Via `phase-implementer`, create `specs/093-inbound-frame-dispositions/expected-ctest-093.txt`,
+- [X] T011 Via `phase-implementer`, create `specs/093-inbound-frame-dispositions/expected-ctest-093.txt`,
   one ctest name per line, sorted: every existing entry T012's populations say 093 edits, plus the
   entries this file registers (`session_inbound_frame_dispositions` T021,
   `session_engine_establishment_timeout` T041, `capi_inbound_frame_dispositions` T090,
@@ -206,7 +206,7 @@ reproduction, the population snapshots, the test-builder census and its fixes, a
   The gate: `ctest --test-dir build/linux-clang-debug -N -L '^093$' | sed -n 's/.*Test *#[0-9]*: //p' | sort`
   equals the manifest. Positive control: before the registering tasks land, the gate reports exactly
   those names missing.
-- [ ] T012 Re-derive every population at the implementation head and record each output and its
+- [X] T012 Re-derive every population at the implementation head and record each output and its
   classification under `## Populations`. Each later task that consumes one names this section.
   - `Framer::feed` callers: `git grep -n -E "\bFramer\b|\.feed\(" -- src tests bench tools`.
   - Old-behaviour pins (research R-8):
@@ -501,7 +501,14 @@ reflects only the good frames, a ResendRequest covers the gap, one `session_even
     `validate_inbound_messages = true`;
   - `tests/session/unparseable_frame_disposition_test.cpp` `PreActive_D8Logon_*_Refused` and the D-8
     cells → disregard (FR-005; D-8 unreachable);
-  - `tests/session/coverage_adversarial_test.cpp`'s 35-position cells.
+  - `tests/session/coverage_adversarial_test.cpp`'s 35-position cells;
+  - `tests/session/test_validate_gate_default_off.cpp` `T015_HeaderOutOfOrder_Accepted` (W_Off1, found by
+    T009 arm 1): pins "accepted and dispatched with validation off", so it flips to disregard (FR-004
+    applies in both validation modes);
+  - `tests/session/read_first_frame_bounded_test.cpp` `ReadFirstFrameBounded.CovFramerErrorPropagates`
+    (found by T009 arm 2): its garble no longer reaches the feed-error arm. `wire_frame_too_large` still
+    does, so move the cell onto an over-limit input to keep that arm covered (`[const §IX.1]`). Do not
+    delete it.
 
 ### Implementation for User Story 1
 
