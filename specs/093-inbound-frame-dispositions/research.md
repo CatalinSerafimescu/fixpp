@@ -631,6 +631,13 @@ a default body of `reset()` and then one `next_seqnum(dir, true)` for each targe
   T032. The gtest cases that skip in the local environment, mostly interop cells that need a live
   counterparty, were not observed; the evidence file lists them.
 
+  **Second run (Phase 3, 2026-10-03; the evidence file, `## Census`, "Phase 3 census"): frames faulty at
+  or before field 3.** T009 seeded only fault-free frames, and C-2 step 1 takes faulty ones too. This
+  run found 11 hits, every one mapped to a C-2 statement, and none needing a production change. Three
+  are new to T032: `Anchor_D8_Active_Field3Not35_Disregarded` and `RowByValidation.Disposition/D8_ValOn` /
+  `D8_ValOff`. They stay disregarded and are now counted. There was no LogoutSent hit, because the D-9 cells
+  put their fault after 35.
+
 ## R-9: Items Gate A round 1 settled, and what P3 and P6 measure
 
 - **Total cancellation and the reset unit.** Settled by design (contract C-6); cells measure it.

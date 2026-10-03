@@ -517,7 +517,12 @@ reflects only the good frames, a ResendRequest covers the gap, one `session_even
   - `tests/session/read_first_frame_bounded_test.cpp` `ReadFirstFrameBounded.CovFramerErrorPropagates`
     (found by T009 arm 2): its garble no longer reaches the feed-error arm. `wire_frame_too_large` still
     does, so move the cell onto an over-limit input to keep that arm covered (`[const §IX.1]`). Do not
-    delete it.
+    delete it;
+  - `tests/session/unparseable_frame_disposition_test.cpp`
+    `UnparseableFrameDisposition.Anchor_D8_Active_Field3Not35_Disregarded` and
+    `UnparseableFrameDisposition/RowByValidation.Disposition/D8_ValOn` / `D8_ValOff` (found by the Phase 3
+    census of frames faulty at or before field 3): through `anchor_d8`, their disregard outcome stands, and
+    each now also asserts `garbled_frame_count() == 1` (C-2 step 1 takes them).
 
 ### Implementation for User Story 1
 
