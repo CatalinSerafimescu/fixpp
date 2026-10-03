@@ -1178,6 +1178,7 @@ target_link_libraries(engine_firstframe_test PRIVATE
   fixpp_session
   fixpp_transport
   fixpp_tls
+  fixpp_mock_clock   # 093: plain_engine_rig.hpp drives a plaintext Engine on a mock clock
   "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
   "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
   "${FIXPP_TRANSPORT_ZLIB_LIB}"
@@ -1219,6 +1220,7 @@ target_link_libraries(engine_readpump_test PRIVATE
   fixpp_session
   fixpp_transport
   fixpp_tls
+  fixpp_mock_clock   # 093: plain_engine_rig.hpp drives a plaintext Engine on a mock clock
   "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
   "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
   "${FIXPP_TRANSPORT_ZLIB_LIB}"

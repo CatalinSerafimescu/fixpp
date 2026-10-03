@@ -8,7 +8,8 @@
 // Contract C-2: given a session with validate_inbound_messages==true, in an
 // inbound-processing state (Active for most cells, NotConnected for Logon cell):
 //
-//  W1: header-out-of-order message       → Reject(35=3, 373=14)
+//  W1: MsgType(35) not the third field   → disregarded as garbled, no Reject
+//      (093-inbound-frame-dispositions FR-004 superseded this row's Reject(373=14))
 //  W2: undefined-tag message             → Reject(35=3, 373=2)
 //  W3: required-field-missing message    → Reject(35=3, 373=1)
 //  W4: type-nonconformant (Int field with non-numeric value) → Reject(35=3, 373=5)
@@ -283,14 +284,17 @@ struct ValidateGateFixture {
     }
 };
 
-// ── W1: header-out-of-order → reason=14 ──────────────────────────────────────
+// ── W1: MsgType(35) not the third field → disregarded, no Reject ────────────
 //
-// Feed a message where tag 35 (MsgType) appears AFTER another non-framing tag
-// (e.g. 49= appears before 35=). The validator's Step 0 checks that the first
-// non-framing entry in the offset table is tag 35 — anything else → wire_header_out_of_order.
+// 093-inbound-frame-dispositions (FR-004; contract C-2 step 1) superseded this
+// cell's Reject(373=14) pin. A frame whose third field is not 35 is garbled (FIX-SL
+// §4.5.2 criterion 3, FIX-TC 2020 2t) in both validation modes: the session's arm
+// disregards it before the validate gate runs, so the validator's Step 0 is no longer
+// reached from the session. NextNumIn is not incremented: a conformant Heartbeat at
+// the next number afterwards is too high and draws a ResendRequest.
 //
 // Build a frame manually where the body has 49= before 35= (swapping the field order).
-TEST(ValidateGateInbound, HeaderOutOfOrder_Reason14) {
+TEST(ValidateGateInbound, HeaderOutOfOrder_DisregardedUnderValidation) {
     ValidateGateFixture fix;
     auto cfg = fix.make_cfg_with_validation();
     Session sess{fix.engine, cfg};
@@ -322,8 +326,14 @@ TEST(ValidateGateInbound, HeaderOutOfOrder_Reason14) {
 
     fix.feed(sess, frame);
 
-    EXPECT_TRUE(fix.has_reject_with_reason(14))
-        << "W1: header-out-of-order must produce Reject(373=14)";
+    EXPECT_FALSE(fix.has_any_reject()) << "W1: the out-of-order frame draws no Reject";
+    EXPECT_EQ(sess.state(), fsm_state::Active) << "W1: the session stays Active";
+    EXPECT_EQ(sess.garbled_frame_count(), 1U) << "W1: it is counted as one garbled frame";
+
+    fix.feed(sess, make_heartbeat_frame(3));
+    EXPECT_TRUE(fix.has_msg_type("2"))
+        << "W1: NextNumIn was not incremented, so Heartbeat(34=3) is a gap (ResendRequest)";
+    EXPECT_FALSE(fix.has_any_reject()) << "W1: the conformant Heartbeat draws no Reject";
 }
 
 // ── W2: undefined tag for msg type → reason=2 ────────────────────────────────

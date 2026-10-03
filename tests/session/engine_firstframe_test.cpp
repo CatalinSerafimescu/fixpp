@@ -62,6 +62,9 @@
 #include <cstddef>
 #include <fixpp/core/engine_config.hpp>
 #include <fixpp/session/engine.hpp>
+#include <fixpp/session/seqnum_manager.hpp>
+#include <fixpp/session/session_event.hpp>
+#include <fixpp/session/session_fsm.hpp>
 #include <fixpp/transport/endpoint.hpp>
 #include <fixpp/transport/tls_transport.hpp>
 #include <fixpp/transport/transport.hpp>
@@ -69,10 +72,13 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include "engine_loopback_harness.hpp"
+#include "plain_engine_rig.hpp"
 #include "support/pump_until_ready.hpp"
+#include "support/session_test_access.hpp"
 
 using namespace std::chrono_literals;
 using fixpp::test_support::EngineLoopbackHarness;
@@ -689,4 +695,158 @@ TEST(EngineFirstFrameTest, PostHandshakeRejectionDoesNotStopTheAcceptLoop) {
         << "ms — expected an immediate byte-budget rejection (proving the accept "
         << "loop re-spun AND Step 3 is live again), not a deadline-backstop close "
         << "or a stall.";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 093-inbound-frame-dispositions — the acceptor's first-frame read (contract C-1,
+// data-model E-4, plan OD-8). Its Framer resyncs, so garbled bytes before the first
+// frame are disregarded rather than closing the connection; their summary is handed to
+// the Session once, after open(), as one count and one session_event_garbled_frame. The
+// engine slices the first frame and the surplus at the first frame's offset in the read.
+//
+// These cells drive a plaintext acceptor on a mock engine clock (plain_engine_rig.hpp):
+// the first-frame read's 5 s deadline is on that clock and never advances here, so a
+// cell ends on its own observations, and none can skip for a missing TLS fixture. Every
+// observation is taken before Engine::stop() and none is fatal until it has returned.
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+namespace pr = fixpp::test_support::plain_rig;
+
+struct FirstFrameObservation {
+    bool active = false;
+    bool read_ended = false;
+    std::uint64_t count = 0;
+    std::vector<fixpp::session::session_event_garbled_frame> events;
+    std::uint32_t next_in = 0;
+};
+
+FirstFrameObservation observe_first_frame(pr::Rig& rig) {
+    FirstFrameObservation o;
+    o.read_ended = rig.peer.read_ended;
+    if (auto const s = rig.session()) {
+        o.active = s->state() == fixpp::session::fsm_state::Active;
+        o.count = s->garbled_frame_count();
+        for (auto const& ev : s->recent_events()) {
+            if (auto const* g = std::get_if<fixpp::session::session_event_garbled_frame>(&ev)) {
+                o.events.push_back(*g);
+            }
+        }
+        o.next_in = static_cast<std::uint32_t>(
+            fixpp::session::session_test_access::seqnum_mgr(*s).next_inbound_unsafe());
+    }
+    return o;
+}
+
+// A wrong-CheckSum Heartbeat: structurally complete, so it is one garbled region
+// through its own end, and the byte after it is a search position.
+std::string wrong_checksum_heartbeat(pr::Rig const& rig, std::uint32_t seq) {
+    std::string f = rig.heartbeat(seq);
+    auto const at = f.rfind("10=") + 3;
+    f.replace(at, 3, f.substr(at, 3) == "000" ? "001" : "000");
+    return f;
+}
+
+}  // namespace
+
+// Q-8 on the first-frame read: leading garbage before a matching Logon is disregarded,
+// the session is established, and the garble is counted once (T029).
+TEST(EngineFirstFrameResync, Q8_GarbleBeforeTheLogonIsDisregardedAndTheSessionEstablished) {
+    pr::Rig rig;
+    bool const up = rig.start(rig.cfg()) && rig.connect_peer();
+    std::string const junk = "NOT-A-FIX-FRAME\x01";
+    bool const d = up && rig.deliver(junk + rig.logon());
+    bool const active =
+        d && rig.run_until([&] { return rig.state() == fixpp::session::fsm_state::Active; });
+    auto const o = observe_first_frame(rig);
+    rig.stop();
+
+    ASSERT_TRUE(up && d) << "setup";
+    EXPECT_TRUE(active) << "the Logon after the garbage establishes the session";
+    EXPECT_FALSE(o.read_ended) << "the garbage does not close the connection";
+    EXPECT_EQ(o.count, 1U);
+    ASSERT_EQ(o.events.size(), 1U);
+    EXPECT_EQ(o.events[0].first_kind, fixpp::core::error::wire_framing_resync);
+    EXPECT_EQ(o.events[0].discarded_bytes, junk.size());
+}
+
+// Q-34 (T030): k = 3 garbled regions before a matching Logon, written across three
+// reads so the first-frame read sums three feeds' summaries. After open() the counter
+// reads k and exactly one session_event_garbled_frame carries all of them. The Logon is
+// coalesced with Heartbeat(34=2): the engine slices at the Logon's offset, so the
+// Heartbeat reaches the pump as surplus and is processed (NextNumIn 3), byte for byte.
+TEST(EngineFirstFrameResync, Q34_KRegionsBeforeTheLogonAreHandedOverAsOneSummary) {
+    pr::Rig rig;
+    bool const up = rig.start(rig.cfg()) && rig.connect_peer();
+    std::string a;
+    std::string b;
+    std::string tail;
+    bool ok = up;
+    if (ok) {
+        a = wrong_checksum_heartbeat(rig, 7);
+        b = wrong_checksum_heartbeat(rig, 8);
+        ok = rig.deliver(a) && rig.deliver(b);
+    }
+    std::string const third = ok ? wrong_checksum_heartbeat(rig, 9) : std::string{};
+    bool const d = ok && rig.deliver(third + rig.logon() + rig.heartbeat(2));
+    bool const processed = d && rig.run_until([&] {
+        auto const s = rig.session();
+        return s && s->state() == fixpp::session::fsm_state::Active &&
+               fixpp::session::session_test_access::seqnum_mgr(*s).next_inbound_unsafe() == 3U;
+    });
+    auto const o = observe_first_frame(rig);
+    rig.stop();
+
+    ASSERT_TRUE(up && ok && d) << "setup";
+    EXPECT_TRUE(processed) << "the Logon establishes and the coalesced Heartbeat is processed";
+    EXPECT_EQ(o.count, 3U) << "k garbled regions";
+    ASSERT_EQ(o.events.size(), 1U) << "one summary, handed over once (OD-8)";
+    EXPECT_EQ(o.events[0].frames, 3U);
+    EXPECT_EQ(o.events[0].first_kind, fixpp::core::error::wire_checksum_mismatch);
+    EXPECT_EQ(o.events[0].discarded_bytes, a.size() + b.size() + third.size());
+    EXPECT_EQ(o.next_in, 3U) << "the surplus after the Logon reached the pump whole";
+}
+
+// Q-10 on the first-frame read (T031): a BeginString mismatch within the cap is framed,
+// resolves to no registered session, and the transport is closed as today (regression
+// guard); a BeginString longer than the cap is a garble, so the matching Logon after
+// it establishes the session with the garble counted.
+TEST(EngineFirstFrameResync, Q10_WithinCapMismatchClosesTheTransportAsToday) {
+    pr::Rig rig;
+    bool const up = rig.start(rig.cfg()) && rig.connect_peer();
+    bool const d =
+        up && rig.deliver(pr::message("FIX.4.4", "A", 1, "TW", "ISLD", rig.sending_time(),
+                                      "98=0\x01"
+                                      "108=30\x01"));
+    bool const closed = d && rig.run_until([&] { return rig.peer.read_ended; });
+    bool const no_session = rig.session() == nullptr;
+    rig.stop();
+
+    ASSERT_TRUE(up && d) << "setup";
+    EXPECT_TRUE(closed) << "the connection is closed";
+    EXPECT_TRUE(no_session) << "no Session is built for an unregistered BeginString";
+}
+
+TEST(EngineFirstFrameResync, Q10_LongerThanTheCapIsAGarbleAndTheLogonAfterItEstablishes) {
+    pr::Rig rig;
+    bool const up = rig.start(rig.cfg()) && rig.connect_peer();
+    std::string const long_bs = "FIX.4.2.TOO-LONG";
+    std::string const garbled = up ? pr::message(long_bs, "A", 1, "TW", "ISLD", rig.sending_time(),
+                                                 "98=0\x01"
+                                                 "108=30\x01")
+                                   : std::string{};
+    bool const d = up && rig.deliver(garbled + rig.logon());
+    bool const active =
+        d && rig.run_until([&] { return rig.state() == fixpp::session::fsm_state::Active; });
+    auto const o = observe_first_frame(rig);
+    rig.stop();
+
+    ASSERT_TRUE(up && d) << "setup";
+    ASSERT_GT(long_bs.size(), fixpp::wire::Framer::Config{}.max_begin_string_bytes);
+    EXPECT_TRUE(active) << "the matching Logon after the garble establishes the session";
+    EXPECT_EQ(o.count, 1U);
+    ASSERT_EQ(o.events.size(), 1U);
+    EXPECT_EQ(o.events[0].first_kind, fixpp::core::error::wire_framing_resync);
+    EXPECT_EQ(o.events[0].discarded_bytes, garbled.size());
 }

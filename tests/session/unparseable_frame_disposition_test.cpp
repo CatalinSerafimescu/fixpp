@@ -615,6 +615,9 @@ struct ActiveCell {
 };
 
 // D-8: field 3 is not 35 → disregarded: nothing sent, NextNumIn unchanged, Active.
+// 093-inbound-frame-dispositions (contract C-2 step 1) takes this shape before the
+// fault branch, so D-8 is no longer reached; the outcome is the same disregard, and the
+// frame is now counted as one garbled frame.
 void anchor_d8(bool validate) {
     ActiveCell c{validate};
     c.fix.open_to_active(*c.sess);
@@ -627,6 +630,8 @@ void anchor_d8(bool validate) {
     EXPECT_EQ(c.sess->state(), fsm_state::Active) << "D-8: the faulty frame must not disconnect";
     EXPECT_TRUE(c.fix.transport.sent_frames().empty()) << "D-8: the faulty frame draws nothing";
     EXPECT_EQ(c.app->from_app, 0) << "D-8: the faulty frame never reaches fromApp";
+    EXPECT_EQ(c.sess->garbled_frame_count(), 1U)
+        << "093 C-2 step 1: a frame whose field 3 is not 35 is one garbled frame";
 
     expect_heartbeat_in_sequence(c.fix, *c.sess, *c.app, 2, "D-8 (NextNumIn unchanged)");
 }
@@ -2709,7 +2714,10 @@ TEST(UnparseableFrameDisposition, ScriptedPeer_MalformedTooHigh_ResendConverges_
 //     it. To check that it can fail, drop the D-1/D-2 record_state_transition_ in
 //     dispose_unparseable_ in a scratch copy: the cell must fail on the state.
 //   PreActive_D8Logon_*: a full Logon whose field 3 is SenderCompID(49), not 35, with
-//     the malformed tag last (the pre-Active disregard of such a frame is fixpp#514).
+//     the malformed tag last. 093-inbound-frame-dispositions (FR-005; contract C-2
+//     step 1, fixpp#514) superseded this pair's refusal pin: the frame is disregarded
+//     before the fault branch, so the session keeps waiting in its state, sends
+//     nothing, and counts one garbled frame.
 
 // The refusal: Disconnected, nothing sent, nothing delivered.
 void expect_pre_active_refusal(ProfileCell const& c, int delivered_before, std::string_view row) {
@@ -2783,17 +2791,27 @@ TEST(UnparseableFrameDisposition, PreActive_FaultyHeartbeat_LogonSent_Refused_Pi
 
 void run_pre_active_d8_logon(session_role role, std::string_view row) {
     ProfileCell c{Profile::fix42, role, /*validate=*/false, /*with_app=*/true};
-    run_pre_active_cell(c, role,
-                        wrap_body(std::string{"49=TW\x01"} + "35=A\x01" + "34=1\x01" +
-                                  "52=20240101-00:00:00.000\x01" + "56=ISLD\x01" +
-                                  c.logon_fields() + kMalformedTag),
-                        row);
+    c.open_only();
+    if (::testing::Test::HasFatalFailure()) {
+        return;
+    }
+    fsm_state const awaiting =
+        role == session_role::acceptor ? fsm_state::NotConnected : fsm_state::LogonSent;
+    ASSERT_EQ(c.sess->state(), awaiting) << row << ": state before the frame";
+    int const delivered = c.app_deliveries();
+    c.feed(wrap_body(std::string{"49=TW\x01"} + "35=A\x01" + "34=1\x01" +
+                     "52=20240101-00:00:00.000\x01" + "56=ISLD\x01" + c.logon_fields() +
+                     kMalformedTag));
+    EXPECT_EQ(c.sess->state(), awaiting) << row << ": disregarded, so the session keeps waiting";
+    EXPECT_TRUE(c.fix.transport.sent_frames().empty()) << row << ": a disregard sends nothing";
+    EXPECT_EQ(c.app_deliveries(), delivered) << row << ": the frame reached the Application";
+    EXPECT_EQ(c.sess->garbled_frame_count(), 1U) << row << ": counted as one garbled frame";
 }
 
-TEST(UnparseableFrameDisposition, PreActive_D8Logon_NotConnected_Refused) {
+TEST(UnparseableFrameDisposition, PreActive_D8Logon_NotConnected_Disregarded) {
     run_pre_active_d8_logon(session_role::acceptor, "NotConnected D-8 Logon");
 }
-TEST(UnparseableFrameDisposition, PreActive_D8Logon_LogonSent_Refused) {
+TEST(UnparseableFrameDisposition, PreActive_D8Logon_LogonSent_Disregarded) {
     run_pre_active_d8_logon(session_role::initiator, "LogonSent D-8 Logon");
 }
 
@@ -2877,7 +2895,8 @@ TEST(UnparseableFrameDisposition,
 // D-6 would send a Reject. In LogonReceived the disregard is checked before
 // StateCell::settle() releases the parked Logon reply.
 
-void run_disregard_cell(At at, std::string const& body, std::string_view what) {
+void run_disregard_cell(At at, std::string const& body, std::string_view what,
+                        std::uint64_t want_garbles) {
     StateCell c{at};
     c.enter();
     if (::testing::Test::HasFatalFailure()) {
@@ -2895,6 +2914,10 @@ void run_disregard_cell(At at, std::string const& body, std::string_view what) {
     EXPECT_EQ(c.app->from_app, app_before) << row << ": the faulty frame reached fromApp";
     EXPECT_EQ(c.sess->state(), c.held) << row << ": state after the faulty frame";
     EXPECT_TRUE(c.sess->is_open()) << row << ": the faulty frame must not close the session";
+    EXPECT_EQ(c.sess->garbled_frame_count(), want_garbles)
+        << row
+        << ": a frame whose field 3 is not 35 is one garbled frame (093 C-2 step 1); "
+           "a faulty frame whose field 3 is 35 is not";
 
     c.settle();
     if (::testing::Test::HasFatalFailure()) {
@@ -2918,28 +2941,28 @@ std::string const kD7Zero34 =
 // NOLINTEND(bugprone-throwing-static-initialization,cert-err58-cpp)
 
 TEST(UnparseableFrameDisposition, D7_Active_LengthDataBefore34_Disregarded) {
-    run_disregard_cell(At::active, kD7LengthDataBefore34, "D-7 Length+Data before 34");
+    run_disregard_cell(At::active, kD7LengthDataBefore34, "D-7 Length+Data before 34", 0U);
 }
 TEST(UnparseableFrameDisposition, D7_LogonReceived_LengthDataBefore34_Disregarded) {
-    run_disregard_cell(At::logon_received, kD7LengthDataBefore34, "D-7 Length+Data before 34");
+    run_disregard_cell(At::logon_received, kD7LengthDataBefore34, "D-7 Length+Data before 34", 0U);
 }
 TEST(UnparseableFrameDisposition, D7_Active_MalformedTagBefore34_Disregarded) {
-    run_disregard_cell(At::active, kD7TagBefore34, "D-7 malformed tag before 34");
+    run_disregard_cell(At::active, kD7TagBefore34, "D-7 malformed tag before 34", 0U);
 }
 TEST(UnparseableFrameDisposition, D7_LogonReceived_MalformedTagBefore34_Disregarded) {
-    run_disregard_cell(At::logon_received, kD7TagBefore34, "D-7 malformed tag before 34");
+    run_disregard_cell(At::logon_received, kD7TagBefore34, "D-7 malformed tag before 34", 0U);
 }
 TEST(UnparseableFrameDisposition, D7_Active_NonNumeric34BeforeFault_Disregarded) {
-    run_disregard_cell(At::active, kD7NonNumeric34, "D-7 34=abc before the fault");
+    run_disregard_cell(At::active, kD7NonNumeric34, "D-7 34=abc before the fault", 0U);
 }
 TEST(UnparseableFrameDisposition, D7_LogonReceived_NonNumeric34BeforeFault_Disregarded) {
-    run_disregard_cell(At::logon_received, kD7NonNumeric34, "D-7 34=abc before the fault");
+    run_disregard_cell(At::logon_received, kD7NonNumeric34, "D-7 34=abc before the fault", 0U);
 }
 TEST(UnparseableFrameDisposition, D7_Active_Zero34BeforeFault_Disregarded) {
-    run_disregard_cell(At::active, kD7Zero34, "D-7 34=0 before the fault");
+    run_disregard_cell(At::active, kD7Zero34, "D-7 34=0 before the fault", 0U);
 }
 TEST(UnparseableFrameDisposition, D7_LogonReceived_Zero34BeforeFault_Disregarded) {
-    run_disregard_cell(At::logon_received, kD7Zero34, "D-7 34=0 before the fault");
+    run_disregard_cell(At::logon_received, kD7Zero34, "D-7 34=0 before the fault", 0U);
 }
 
 // D-8 frames: field 3 is not 35. The mixed defect reads 35=D and 34=2 before the fault
@@ -2956,16 +2979,34 @@ std::string const kD8Field3Malformed =
 // NOLINTEND(bugprone-throwing-static-initialization,cert-err58-cpp)
 
 TEST(UnparseableFrameDisposition, D8_Active_MixedDefect_Disregarded) {
-    run_disregard_cell(At::active, kD8MixedDefect, "D-8 mixed defect (field 3 is 49)");
+    run_disregard_cell(At::active, kD8MixedDefect, "D-8 mixed defect (field 3 is 49)", 1U);
 }
 TEST(UnparseableFrameDisposition, D8_LogonReceived_MixedDefect_Disregarded) {
-    run_disregard_cell(At::logon_received, kD8MixedDefect, "D-8 mixed defect (field 3 is 49)");
+    run_disregard_cell(At::logon_received, kD8MixedDefect, "D-8 mixed defect (field 3 is 49)", 1U);
 }
 TEST(UnparseableFrameDisposition, D8_Active_Field3Malformed_Disregarded) {
-    run_disregard_cell(At::active, kD8Field3Malformed, "D-8 field 3 malformed");
+    run_disregard_cell(At::active, kD8Field3Malformed, "D-8 field 3 malformed", 1U);
 }
 TEST(UnparseableFrameDisposition, D8_LogonReceived_Field3Malformed_Disregarded) {
-    run_disregard_cell(At::logon_received, kD8Field3Malformed, "D-8 field 3 malformed");
+    run_disregard_cell(At::logon_received, kD8Field3Malformed, "D-8 field 3 malformed", 1U);
+}
+
+// 093-inbound-frame-dispositions (FR-004; contract C-2 step 1): a FAULT-FREE frame whose
+// field 3 is not 35 is disregarded the same way and counted as one garbled frame, in
+// Active and in LogonReceived (the arm StateCell parks; the read pump cannot deliver a
+// frame while the session is in it). Before 093 it was processed.
+// Test-fixture constant: a bad_alloc while building it before main aborts the test
+// binary, which fails the run loudly.
+// NOLINTBEGIN(bugprone-throwing-static-initialization,cert-err58-cpp)
+std::string const kStep1FaultFree = std::string{"49=TW\x01"} + "35=D\x01" + "34=2\x01" +
+                                    "52=20240101-00:00:00.000\x01" + "56=ISLD\x01" + kOrderFields;
+// NOLINTEND(bugprone-throwing-static-initialization,cert-err58-cpp)
+
+TEST(UnparseableFrameDisposition, Step1_Active_FaultFreeField3Not35_DisregardedAndCounted) {
+    run_disregard_cell(At::active, kStep1FaultFree, "fault-free field 3 is 49", 1U);
+}
+TEST(UnparseableFrameDisposition, Step1_LogonReceived_FaultFreeField3Not35_DisregardedAndCounted) {
+    run_disregard_cell(At::logon_received, kStep1FaultFree, "fault-free field 3 is 49", 1U);
 }
 
 // ── D9_* (tasks.md T048; spec FR-015; contract C-2 D-9) ──────────────────────
