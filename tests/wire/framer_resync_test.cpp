@@ -420,20 +420,28 @@ TEST(FramerResync, Q4_SmallFramesBehindAFailedLargeCandidateAreDrainedOnePerFeed
 }
 
 TEST(FramerResync, Q4_StaggeredNestedCandidatesSharingOneChecksumField) {
-    // Candidates at 18-byte steps, each announcing a BodyLength that ends at the same
-    // "10=", followed by filler and that one CheckSum field (wrong for the outermost).
+    // Candidates about 18 bytes apart, each announcing a BodyLength that ends at the
+    // same "10=", followed by filler and that one CheckSum field. The CheckSum must
+    // be wrong for every candidate, not only the outermost, or a nested one would be
+    // a frame that ends the shape early: a candidate's sum is the total minus the sum
+    // of the bytes before it, so the bytes before each candidate are kept from summing
+    // to one residue (a filler byte is inserted where they would), and the field
+    // encodes the total minus that residue.
     constexpr std::size_t kCandidates = 2500;
     constexpr std::size_t kChecksumAt = 60000;
+    constexpr unsigned kAvoidedPrefixSum = 1;
     std::string stream;
     for (std::size_t i = 0; i < kCandidates; ++i) {
+        if (checksum_of(stream) == kAvoidedPrefixSum) {
+            stream += 'A';
+        }
         std::size_t const body_off = stream.size() + candidate_header(10000).size();
         stream += candidate_header(kChecksumAt - body_off);
     }
-    ASSERT_EQ(stream.size(), kCandidates * candidate_header(10000).size());
     stream += std::string(kChecksumAt - 1U - stream.size(), 'A');
     stream += soh;
-    unsigned const outer_sum = checksum_of(stream);
-    stream += "10=" + three_digits((outer_sum + 1U) % 256U) + soh;
+    unsigned const total = checksum_of(stream);
+    stream += "10=" + three_digits((total + 256U - kAvoidedPrefixSum) % 256U) + soh;
     std::size_t const garbage = stream.size();
     std::string const last = heartbeat(1);
     stream += last;
