@@ -255,7 +255,7 @@ resync on. US3's FR-013 group refuses a 383 outside [4096, 262144] (T022a), allo
 
 ### 2a: Derived constants (before the Framer code that uses them)
 
-- [ ] T013 Derive `kBodyLengthDigitCap` by research R-2's recipe. Search the repo's FIX-TC fixtures and
+- [X] T013 Derive `kBodyLengthDigitCap` by research R-2's recipe. Search the repo's FIX-TC fixtures and
   interop goldens for the longest BodyLength digit run, leading zeros included, after each SOH
   spelling the fixtures use (the C escape `\x01`, `^A`, `|`, and a literal 0x01 byte). Positive
   control first: `phase-implementer` seeds one padded run in a scratch copy (`git archive HEAD | tar -x
@@ -264,7 +264,7 @@ resync on. US3's FR-013 group refuses a 383 outside [4096, 262144] (T022a), allo
   and ceiling; if the search finds a run above the ceiling, stop and record it rather than raising the
   ceiling. Record the value, the date, the search output, the allowance's reason, and that both bounds
   hold, in `research.md` R-2.
-- [ ] T014 Via `phase-implementer`, measure `kContainerSlack` on the MSVC debug sandbox (T006's lock):
+- [X] T014 Via `phase-implementer`, measure `kContainerSlack` on the MSVC debug sandbox (T006's lock):
   the bytes MSVC's debug STL draws from a `pmr_carry_buffer`'s and a pmr vector's allocator at
   construction (`include/fixpp/core/pmr_arena_upstream.hpp` explains the proxy), using
   `tests/support/pmr_allocation_tracking_resource.hpp` in a scratch test, in a scratch copy made with
@@ -273,7 +273,7 @@ resync on. US3's FR-013 group refuses a 383 outside [4096, 262144] (T022a), allo
 
 ### 2b: Framer resync (C-1; E-1), tests first
 
-- [ ] T015 [P] Via `phase-implementer`, write the Framer RED cells in the new
+- [X] T015 [P] Via `phase-implementer`, write the Framer RED cells in the new
   `tests/wire/framer_resync_test.cpp`, added to the `wire_pure_tests` bucket in
   `tests/wire/CMakeLists.txt` (APPEND label `093`). Every shape is fed whole, at every split point, and
   one byte per read, with `Config{.max_frame_bytes = L, .resync_on_garble = true}` at L = 65536 and at
@@ -301,11 +301,20 @@ resync on. US3's FR-013 group refuses a 383 outside [4096, 262144] (T022a), allo
     kind `wire_framing_resync`; a configured-long cap frames a frame carrying that BeginString; a
     BeginString not beginning with `FIX` after a garble finds no next start (L-16 pin).
   RED: it does not compile (no `resync_on_garble`, `garble_summary`, `last_garbles()`). Commit as such.
-- [ ] T016 [P] Via `phase-implementer`, Q-7 regression guards in `tests/wire/framer_error_path_test.cpp`
+  - **As landed (2026-10-03; `4084623b`, `61245b10`, `8e3f519e`), additions to the list above:**
+    - a Q-4 shape, "nested candidates resolved one per byte" (research R-2 names it; without it the
+      compact-on-every-non-empty-feed mutant survives every listed shape);
+    - a per-outcome work cell (`Q4_EveryOutcomeKindChargesItsWork`);
+    - a precondition cell for the K = 6 cap condition;
+    - the OD-20 cell.
+    Large shapes are fed in 4096-byte reads plus one-byte reads, not whole and at every split: a whole
+    feed of an L-sized stream overflows the L + R carry by design.
+
+- [X] T016 [P] Via `phase-implementer`, Q-7 regression guards in `tests/wire/framer_error_path_test.cpp`
   (bucket `wire_pure_tests`): with `resync_on_garble = false`, an over-max frame with a bad CheckSum
   still reports `wire_checksum_mismatch`, and `8=` with no SOH stays partial until the carry fills.
   Green on base by design; mutant in T019.
-- [ ] T017 Via `phase-implementer`, the counted-work seam (quickstart §2): `friend struct
+- [X] T017 Via `phase-implementer`, the counted-work seam (quickstart §2): `friend struct
   framer_test_access;` in `include/fixpp/wire/framer.hpp`, unconditional, with a header comment naming
   fixpp#511/B21, and `tests/support/framer_test_access.hpp` reading the counts of bytes the Framer
   reads, sums and moves. **Before writing**, the implementer reports the counters' shape (members,
@@ -317,7 +326,7 @@ resync on. US3's FR-013 group refuses a 383 outside [4096, 262144] (T022a), allo
   member of T012's size-pin population, each classified in the evidence file, and build every target
   that holds a `Framer` by value (`-k 0`) before committing. Data-model E-1 and contract C-7 row 1 name
   the friend and the counters.
-- [ ] T017a Derive the counted-work bound's constant (contract C-1 "The bound") from W-1 to W-3, over
+- [X] T017a Derive the counted-work bound's constant (contract C-1 "The bound") from W-1 to W-3, over
   the counters T017 fixed: one unit per byte read, summed or moved; W-1's compaction term per L ÷ R,
   W-2's per-feed header rescan under the two caps, W-3's single sum per byte. Record the value and its
   derivation, step by step from each W clause, with the date and the head, in `research.md` R-2 and
@@ -326,7 +335,7 @@ resync on. US3's FR-013 group refuses a 383 outside [4096, 262144] (T022a), allo
   orchestrator's; the code half goes to `phase-implementer`: a named test constant in
   `tests/support/framer_test_access.hpp`, which T015 and T020 read, with the recipe in its comment
   and the value nowhere else but `research.md` (Execution rules).
-- [ ] T018 Via `phase-implementer`, implement C-1 in `include/fixpp/wire/framer.hpp` and
+- [X] T018 Via `phase-implementer`, implement C-1 in `include/fixpp/wire/framer.hpp` and
   `src/wire/framer.cpp` (E-1):
   - `bool resync_on_garble = false;` and `std::size_t max_begin_string_bytes` (default: the length of
     the longest supported profile identifier, derived from the profile list in code, not a literal),
@@ -351,14 +360,14 @@ resync on. US3's FR-013 group refuses a 383 outside [4096, 262144] (T022a), allo
     known, before the CheckSum (OD-4). With the flag off, `feed` is unchanged byte for byte, the check
     order included.
   T015 and T016 GREEN, against T017a's recorded constant.
-- [ ] T018a Via `phase-implementer`, a bench-only commit after T018: a candidate-only row
+- [X] T018a Via `phase-implementer`, a bench-only commit after T018: a candidate-only row
   `BM_Framer_Feed_NoCarry_Resync` in `bench/wire/framer_bench.cpp`, the same ~80-byte frame and carry
   as `BM_Framer_Feed_NoCarry`, over a `Framer` built with `Config{.max_frame_bytes = 65536,
   .resync_on_garble = true}` and `max_begin_string_bytes` set as the pump sets it (OD-16, for the
   frame's FIX.4.4). It is the only bench row on the pump's resync-mode Framer path. It cannot be added
   in T004 (the `Config` members do not exist on the base), so T112 compares it by name against the
   base's `BM_Framer_Feed_NoCarry`.
-- [ ] T019 The Framer mutants (quickstart §2), each in a scratch copy, RED on the named cell:
+- [X] T019 The Framer mutants (quickstart §2), each in a scratch copy, RED on the named cell:
   SOH-anchored start rule → Q-2 (`XYZ8=FIX…`, truncation); compact on every feed → Q-4 (small frames);
   compact on every non-empty feed → Q-4 (one-byte reads); sum a wrong-CheckSum frame's nested candidates
   → Q-4 (shared `10=`), Q-3; uncap the BeginString scan → Q-4 (both no-SOH shapes), Q-10; cap the
@@ -367,7 +376,7 @@ resync on. US3's FR-013 group refuses a 383 outside [4096, 262144] (T022a), allo
   CheckSum in resync mode → Q-6; the reorder with resync off → Q-7. Before trusting Q-4's
   zero-violation result, show the counted-work instrument reports a value over the bound on one of
   these mutants. Record each under `## Mutants`.
-- [ ] T020 Via `phase-implementer`, the fuzz arm in `tests/fuzz/fuzz_wire_framer.cpp`
+- [X] T020 Via `phase-implementer`, the fuzz arm in `tests/fuzz/fuzz_wire_framer.cpp`
   (`[const §VII.7]`): a `resync_on_garble = true` arm that feeds each input whole and one byte per
   read, `__builtin_trap`s on non-termination (a feed that neither consumes, produces nor needs more)
   and on C-1's counted-work bound exceeded (through `framer_test_access`). Add one seed per Q-4 shape
@@ -379,7 +388,7 @@ resync on. US3's FR-013 group refuses a 383 outside [4096, 262144] (T022a), allo
 The 383 refusal (T022a), the carry allocated at `open()` (T024) and their cells (T055a) land in Phase
 5's FR-013 group: each changes what a session accepts, and this phase changes nothing on the wire.
 
-- [ ] T021 [P] Via `phase-implementer`, create `tests/session/inbound_frame_dispositions_test.cpp`,
+- [X] T021 [P] Via `phase-implementer`, create `tests/session/inbound_frame_dispositions_test.cpp`,
   registered with `add_threading_test(session_inbound_frame_dispositions inbound_frame_dispositions_test.cpp)`
   in `tests/session/CMakeLists.txt`, labels `"093;session"`, no `FIXPP_TEST_HOOKS`; the CMakeLists
   comment says why it is standalone (timers, coroutines, mock clock; `[const §VII.8]`). Later tasks
@@ -387,16 +396,16 @@ The 383 refusal (T022a), the carry allocated at `open()` (T024) and their cells 
   - Q-13 (the L half): L follows an advertised 383 inside [4096, 262144] when set, and is 65536 when
     unset, read through a new `session_test_access` accessor. RED: does not compile on the base (no
     accessor, no stored L). Commit as such; the refusal half is T055a's.
-- [ ] T022 Via `phase-implementer`, `std::uint32_t inbound_limit_for(SessionConfig const&) noexcept`
+- [X] T022 Via `phase-implementer`, `std::uint32_t inbound_limit_for(SessionConfig const&) noexcept`
   (E-2): one free function in a private `src/session/` header, returning the advertised 383 if set,
   else 65536. `open()` stores `std::uint32_t inbound_limit_`. No value is refused here: the refusal is
   T022a's, in the FR-013 group. T021's Q-13 L cell GREEN.
-- [ ] T023 Via `phase-implementer`, the engine seam (E-11, OD-12): `friend struct session_engine_access;`
+- [X] T023 Via `phase-implementer`, the engine seam (E-11, OD-12): `friend struct session_engine_access;`
   in `include/fixpp/session/session.hpp`, defined in `src/session/session_engine_access.hpp`, never
   installed (T012's install population) and not gated on `FIXPP_TEST_HOOKS`. It starts with
   `inbound_limit()`; T024 adds the borrowed carry, and later tasks add the hooks their stories need.
   No underscore-suffixed engine hook joins the installed `Session` surface.
-- [ ] T025 `ctest -L '^093$'` and the full `wire` and `session` suites on `linux-clang-debug`,
+- [X] T025 `ctest -L '^093$'` and the full `wire` and `session` suites on `linux-clang-debug`,
   unfiltered. Every existing cell is GREEN: this phase changes nothing on the wire. (Q-14's MSVC leg
   runs in T069, after T024.)
 

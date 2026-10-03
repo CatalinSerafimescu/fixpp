@@ -324,6 +324,15 @@ comment.
   covering that block, so the constructor's reserve cannot fail. The block includes `kContainerSlack`,
   because MSVC's debug STL allocates a container proxy from the allocator at construction (data-model
   E-2).
+  - **Measured (T014, 2026-10-03, MSVC debug sandbox: `_ITERATOR_DEBUG_LEVEL=2`, `_MSC_VER` 1944, toolset
+    14.44.35207).** Each pmr container draws one 16-byte, 8-aligned `_Container_proxy` at construction.
+    The carry block's smallest no-spill slack is exactly 16 bytes at L + R = 4096, 69632 and 266240.
+    **`kContainerSlack` = 16 bytes per container.** Recipe: a tracking resource over `new_delete` logs
+    each construction request; separately, find the smallest s for which a monotonic resource over
+    exactly capacity + s does not spill. The method and output are in the evidence file, `## Constants`.
+  - **Consequence for B(L) (Phase 5):** B(L)'s slack term must count every pmr container one parse
+    constructs, at 16 bytes each plus up to 7 bytes of padding after a 1-aligned request, not one proxy.
+    The B(L) task derives that count from the parse path at its head.
 - The session's `OffsetTable::Config::max_offset_entries = N(L)`.
 - Admin and outbound parses stay on their stack arrays, and 093 does not change them. Their size is
   **not** derived from what they parse (G93-O-11). Derived, Gate A round 1: `Session::send` builds the
