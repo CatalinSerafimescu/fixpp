@@ -873,6 +873,25 @@ struct WithEnums {
 }  // namespace fx
 EOF
 
+# L-530-1(g), pinned the way T24 pins (a): a definition's compared tokens end at its closing
+# brace, so a GNU attribute between that brace and the `;` is outside it, though the compiler
+# applies it to the type.
+fresh "T72 a gated GNU attribute after a type's closing brace is listed, not failed (L-530-1)" \
+  include/fx/h_post_attr.hpp -std=c++17 0 "$NODIV" "$NOONE" "+ __attribute__((packed))" <<'EOF'
+namespace fx {
+struct P {
+    char c;
+    int i;
+}
+#ifdef FIXPP_TEST_HOOKS
+__attribute__((packed))
+#endif
+;
+#ifdef FIXPP_TEST_HOOKS
+static_assert(sizeof(P) == 5, "the gated attribute changes the layout");
+#endif
+}  // namespace fx
+EOF
 # ── a refusal is for the tree's own headers only ─────────────────────────────────────────────
 # A third-party header cannot depend on the macro, so a head the rules cannot read there must
 # not fail the scan (a dependency bump would turn it red). Here a header outside the source

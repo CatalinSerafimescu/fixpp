@@ -26,7 +26,9 @@ struct, union or enumeration is named by the first declarator after its body (`t
 
   * DIVERGENCE (exit 1): a definition present in BOTH outputs whose tokens differ, head
     included, so a gated `final` or base clause counts as well as a gated member. A gated
-    member of a nested class reports the nested class AND every enclosing class.
+    member of a nested class reports the nested class AND every enclosing class. The tokens
+    end at the closing brace: a GNU attribute between it and the `;` is outside the
+    definition (L-530-1(g), cell T72).
   * not a divergence: a definition present in only ONE output (a whole struct that exists
     only under the macro has a single definition), and every difference outside a type
     definition, e.g. a gated namespace-scope declaration of a function the library defines

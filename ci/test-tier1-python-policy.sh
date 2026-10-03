@@ -340,6 +340,8 @@ odr_census_sentinel_steps = [
     for s in linux_job["steps"] if "ODR census actually ran" in (s.get("name") or "")]
 odr_census_step_keys = [
     sorted(str(k) for k in s.keys()) for s in linux_job["steps"] if s.get("id") == "odr_hooks_census"]
+# ...and its command: `run: "true"` keeps the name, id, guard and key set, and reads `success`.
+odr_census_step_runs = [s.get("run") for s in linux_job["steps"] if s.get("id") == "odr_hooks_census"]
 linux_job_env = {str(k): str(v) for k, v in (linux_job.get("env") or {}).items()}
 linux_has_defaults = "defaults" in linux_job
 
@@ -549,6 +551,7 @@ out = {
     "odr_census_sentinel": odr_census_sentinel,
     "odr_census_sentinel_steps": odr_census_sentinel_steps,
     "odr_census_step_keys": odr_census_step_keys,
+    "odr_census_step_runs": odr_census_step_runs,
     "linux_job_env": linux_job_env,
     "linux_has_defaults": linux_has_defaults,
     "linux_job_keys": linux_job_keys,
@@ -1062,6 +1065,9 @@ $got"
   g="$(echo "$json" | jq -c '.odr_census_step_keys')"
   [ "$g" = '[["id","if","name","run"]]' ] \
     || fail "$case_id: the #530 ODR census step (id odr_hooks_census) has keys $g, expected exactly one step with [\"id\",\"if\",\"name\",\"run\"]. A key such as continue-on-error turns a red census into a green step."
+  g="$(echo "$json" | jq -c '.odr_census_step_runs')"
+  [ "$g" = '["python3 ci/odr-hooks-census.py --build-dir build/${{ matrix.preset }}"]' ] \
+    || fail "$case_id: the #530 ODR census step (id odr_hooks_census) runs $g, expected exactly one step running the pinned census command. A command that does not run the census, such as true, succeeds, and the sentinel reads only that outcome."
   g="$(echo "$json" | jq -c '[.odr_census_sentinel_steps[] | keys]')"
   [ "$g" = '[["if","name","run"]]' ] \
     || fail "$case_id: the #530 ODR census sentinel has keys $g, expected exactly one step with [\"if\",\"name\",\"run\"]."
@@ -1865,8 +1871,8 @@ echo "PASS: derive-script table + call site + per-leg FIXPP_INSTALL_PYTHON + PY_
 # not collide). Re-run the harness against the merged number rather than
 # re-deriving from either branch's local total — the failure mode this guards is
 # one side's edit silently replacing the other's, which reads as a passing count.
-MUTANTS_DECLARED=100  # M107 (the ci-script-pins call-site pin for ci/test-odr-hooks-census.sh,
-                     # fixpp#530) + M108 (the #530 ODR census step guard pin) + M109 (the #530
+MUTANTS_DECLARED=101  # M107 (the ci-script-pins call-site pin for ci/test-odr-hooks-census.sh,
+                     # fixpp#530) + M115 (the #530 census step's run: command) + M108 (the #530 ODR census step guard pin) + M109 (the #530
                      # ODR census sentinel's existence pin) + M110 M111 (the #530 sentinel's
                      # pinned body) + M112 (the #530 census step's key set) + M113 M114 (the
                      # #530 sentinel's if: and key set) +
@@ -2563,6 +2569,18 @@ src, dst = sys.argv[1], sys.argv[2]
 t = open(src).read()
 old = "        id: odr_hooks_census\n"
 new = "        id: odr_hooks_census\n        continue-on-error: true\n"
+assert t.count(old) == 1, t.count(old)
+open(dst, "w").write(t.replace(old, new))
+'
+
+  # M115 (fixpp#530): the census step keeps its name, id, guard and key set, and runs `true`, so
+  # it succeeds without scanning and the sentinel reads that success.
+  mutate_workflow M115 "the #530 ODR census step run: replaced by true" "#530 ODR census step \\(id odr_hooks_census\\) runs" '
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+t = open(src).read()
+old = "        run: python3 ci/odr-hooks-census.py --build-dir build/${{ matrix.preset }}\n"
+new = "        run: \"true\"\n"
 assert t.count(old) == 1, t.count(old)
 open(dst, "w").write(t.replace(old, new))
 '
