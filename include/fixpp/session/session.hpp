@@ -507,6 +507,14 @@ public:
     // violation (ill-formed, no diagnostic required).
     friend struct session_test_access;
 
+    // 093-inbound-frame-dispositions (data-model E-11, plan OD-12): the engine's one
+    // named seam into a Session's private state, for run_read_pump and the accept
+    // loop. Defined in src/session/session_engine_access.hpp, which is never
+    // installed. Production code, not test access, and unconditional for the same
+    // ODR reason as the friend above. Engine hooks go there, never into this
+    // class's public surface.
+    friend struct session_engine_access;
+
     // 015 T011 — Engine-internal acceptor attach primitive.
     // Called by the engine's run_accept_loop STRICTLY-BEFORE the first
     // on_inbound_frame (happens-before invariant Gate A New-1 / E-4).
