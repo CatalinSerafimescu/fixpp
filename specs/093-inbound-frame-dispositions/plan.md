@@ -294,6 +294,18 @@ made at `/speckit-plan`. Reviewers may challenge any of them, and the owner may 
   continuation summary (`regions == 0`) emits no record and adds nothing. Alternative: count only the
   regions of suppressed summaries. Rejected: a logged k > 1 summary would then break the reconciliation
   between the log and the counter.
+- **OD-22: Q-19 is a differential against the base, not a zero** (added at implementation, T044,
+  2026-10-03). Measured at `7c08a017` before any Phase 4 production code: an Active read already makes 5
+  global `operator new` calls. All of them come from asio's type-erased executor queries
+  (`any_executor_base::query_fn_non_void … prefer_only<blocking::possibly_t>`), on the strand's recv
+  completion and on the read's re-initiation. The base pump has the same shape. FR-052 says no **new**
+  heap allocation, so Q-19 asserts:
+  - the counter's positive control;
+  - the same count on every measured Active read, with no per-read growth;
+  - that count ≤ the base's, measured on the merge-base with the same rig.
+  A mutant adding one `operator new` on the Active read path must go RED. Alternatives: assert zero only
+  over a sub-window (rejected: no clean seam), or drop the count (rejected: it loses the regression
+  guard). The base's per-read allocations are pre-existing, outside 093, and filed as a follow-up.
 
 ## What changes for whom
 
