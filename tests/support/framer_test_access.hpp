@@ -29,6 +29,14 @@ struct framer_test_access {
         return {.read = f.work_read_, .summed = f.work_summed_, .moved = f.work_moved_};
     }
 
+    // Sets the counters back to `w`, so that a probe feed whose work is not part of
+    // what a bound measures (the fuzz arm's fixpoint probe) is not charged.
+    static void restore_work(Framer& f, work_counts const& w) noexcept {
+        f.work_read_ = w.read;
+        f.work_summed_ = w.summed;
+        f.work_moved_ = w.moved;
+    }
+
     [[nodiscard]] static std::uint64_t total_work(Framer const& f) noexcept {
         return f.work_read_ + f.work_summed_ + f.work_moved_;
     }
