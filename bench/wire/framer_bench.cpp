@@ -14,6 +14,7 @@
 
 #include <benchmark/benchmark.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -22,6 +23,7 @@
 #include <memory_resource>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -89,5 +91,39 @@ static void BM_Framer_Feed_NoCarry(benchmark::State& state) {
     state.SetItemsProcessed(state.iterations());
 }
 BENCHMARK(BM_Framer_Feed_NoCarry);
+
+// ── BM_Framer_Feed_NoCarry_Resync ─────────────────────────────────────────────
+// 093-inbound-frame-dispositions (tasks.md T018a): the same frame and carry as
+// BM_Framer_Feed_NoCarry, over a Framer configured as the session's read pump
+// configures it: resync on, the 64 KiB default inbound limit, and the BeginString
+// cap at the larger of the default and the configured BeginString's length (plan
+// OD-16; FIX.4.4 here, the frame's). It is the only bench row on the pump's
+// resync-mode Framer path. It cannot exist on the base, so it is compared by name
+// against the base's BM_Framer_Feed_NoCarry.
+static void BM_Framer_Feed_NoCarry_Resync(benchmark::State& state) {
+    using fixpp::wire::frame_view;
+    using fixpp::wire::Framer;
+    using fixpp::wire::pmr_carry_buffer;
+
+    std::array<std::byte, 512 * 1024> carry_arena_buf{};
+    std::pmr::monotonic_buffer_resource carry_arena{carry_arena_buf.data(), carry_arena_buf.size(),
+                                                    std::pmr::null_memory_resource()};
+    pmr_carry_buffer carry{fixpp::wire::default_max_frame_bytes, &carry_arena};
+
+    std::array<frame_view, 4> out_views{};
+
+    Framer::Config cfg{.max_frame_bytes = 65536, .resync_on_garble = true};
+    cfg.max_begin_string_bytes =
+        std::max(cfg.max_begin_string_bytes, std::string_view{"FIX.4.4"}.size());
+    Framer framer{cfg};
+    for (auto _ : state) {
+        carry.clear();
+        auto r = framer.feed(std::span<const std::byte>{kFrameBytes.data(), kFrameBytes.size()},
+                             carry, std::span<frame_view>{out_views.data(), out_views.size()});
+        benchmark::DoNotOptimize(r);
+    }
+    state.SetItemsProcessed(state.iterations());
+}
+BENCHMARK(BM_Framer_Feed_NoCarry_Resync);
 
 BENCHMARK_MAIN();
