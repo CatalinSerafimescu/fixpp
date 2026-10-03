@@ -146,7 +146,8 @@ The sections below were written at `/speckit-plan`, 2026-10-02, from three read-
   only.** An over-L frame with a bad checksum then closes (FR-013) rather than being disregarded. Strict
   callers keep today's order.
 - The pump calls `note_garbles_(summary)` through `session_engine_access`. It is synchronous and
-  `noexcept`. It adds to the counter, emits one `session_event_garbled_frame` per non-empty summary,
+  `noexcept`. It adds to the counter, emits one `session_event_garbled_frame` per summary with
+  `regions > 0` (a summary that only continues a region emits none, data-model E-4),
   and logs rate-bounded through the logger resolved at `open()` (data-model E-12).
 - `read_first_frame_bounded` runs its Framer as `{max = L, resync on}` and returns `{offset, len,
   summary}`. After `open()`, the engine hands the summary to the Session once.
@@ -179,6 +180,14 @@ The sections below were written at `/speckit-plan`, 2026-10-02, from three read-
   keeps that session framing its own frames with no new refusal (plan.md OD-16).
 - **What the search prefix still assumes.** After a garble the search looks for `8=FIX`. A configured
   BeginString that does not begin with `FIX` gets no resync after a garble (contract L-16).
+
+**The counted-work bound's constant (contract C-1 "The bound"; tasks.md T017a).** Derived at
+implementation, once T017 has fixed the counters' shape, from W-1 to W-3: one unit per byte read,
+summed or moved; W-1's compaction contributes per L ÷ R, W-2's per-feed header rescan the two caps, and
+W-3 a constant, since each byte is summed at most once. Record here the value, its derivation step by
+step from each W clause, the date and the head. Q-4's cells and `fuzz_wire_framer`'s resync arm assert
+against it, and quickstart §2's work-bound mutants must exceed it. Never write the value into a
+comment.
 
 **Alternatives rejected.**
 - **A persisted BodyLength scan cursor across feeds** (Codex, G93-A-06). It breaks C-1's rule that the
@@ -416,7 +425,7 @@ calling `operator new`. The verify record measures it (L-13).
     cleared only by an inbound Heartbeat, and the grace deadline uses the `inbound_deadline` computed
     before the sleep.
 - **Tests.** `run_liveness_cell` in `tests/session/unparseable_frame_disposition_test.cpp`, on the mock
-  clock, gets inverted twins. The FR-018 cells stay green and become real witnesses: reverting the
+  clock, gets inverted twins. The 092 FR-018 cells stay green and become real witnesses: reverting the
   disposer would now refresh. `heartbeat_testrequest_test.cpp` is a second home.
   - Grep found no cell pinning "too-high does not refresh". So the move is followed by an unfiltered run
     of the whole session suite.
@@ -527,7 +536,8 @@ a default body of `reset()` and then one `next_seqnum(dir, true)` for each targe
     "thread-safe" on the getter.
 - **Version:** MINOR +1 (re-derive the current value from `include/fix/c_api/version.h`). No error code
   is added. BREAKING is placed per declaration, as `[const §X.7]` requires and as 092's 1.10 clauses do.
-  `version.h` carries it only where no declaration does, and the 1.10 sentences 093 falsifies are
+  `version.h`'s history entry, headed BREAKING with a one-line pointer per row, details an effect only
+  where no declaration carries it, and the 1.10 sentences 093 falsifies are
   amended in place (contract C-7, G93-A-07). #523 and #524 are not BREAKING, following B-518-1's owner
   ruling.
 - **Python:**

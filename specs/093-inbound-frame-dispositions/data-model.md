@@ -145,11 +145,14 @@ Private `Session` state, with a public reader.
 
 ## E-5: New `SessionEvent` alternatives
 
-Public and additive, in `include/fixpp/session/session_event.hpp`. All are appended to the variant;
-the precedent is #424's `session_event_resend_slot_gap_filled`.
+Public, in `include/fixpp/session/session_event.hpp`: a C++ source change, not C-ABI (contract C-7
+row 11). All are appended to the variant, so a `std::visit` over `SessionEvent` with no default arm
+stops compiling until it handles the three; the precedent is #424's
+`session_event_resend_slot_gap_filled`.
 
 - `session_event_garbled_frame { core::error first_kind; std::uint32_t frames; std::uint32_t
-  discarded_bytes; }`. There is one per non-empty summary. `first_kind` is one of E-1's four kinds.
+  discarded_bytes; }`. There is one per summary with `regions > 0` (E-4: a summary that only
+  continues a region emits none). `first_kind` is one of E-1's four kinds.
   `discarded_bytes` saturates at `UINT32_MAX`.
 - `session_event_establishment_timeout { }`
 - `session_event_close_reset_wait_expired { }` (FR-041's bounded wait)
@@ -209,7 +212,8 @@ Public and additive.
   `FIXPP_ERR_INVALID_HANDLE`.
 - **Read path.** A scoped `engine_->lookup(id)`, which reads the atomic reader snapshot, then a
   relaxed load of the counter through the returned `shared_ptr<Session>`, released before return, as
-  the other C session ops do. The `shared_ptr` keeps the Session alive for the read even if
+  `fixpp_session_close` does (`src/capi/session.cpp`). `fixpp_session_is_established` is the pattern
+  for the refusals only: it reads the handle's slot and takes no lookup. The `shared_ptr` keeps the Session alive for the read even if
   `Engine::stop()`'s `registry_.clear()` runs at the same time, which is what backs the
   "thread-safe" token.
 - **Lifecycle points.** `lookup` returns null until the entry's role loop publishes its Session

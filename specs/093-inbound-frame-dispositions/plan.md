@@ -17,7 +17,8 @@ This bundle makes five changes to fixpp's inbound path, on one shared review sur
    pump and the acceptor's first-frame read turn on.
    - A frame that fails framing is skipped, and framing resumes at the next `8=FIX`, independent of how
      reads are segmented. The Framer's work per byte is bounded.
-   - A frame whose third field is not 35 is disregarded in every state and both validation modes.
+   - A frame whose third field is not 35 is disregarded in every state except Disconnected (which
+     ignores every frame), in both validation modes.
    - Every disregard is counted exactly, and evented and logged in rate-bounded summaries. The count
      is readable through a new C-ABI getter.
    - A new establishment timeout (`logon_timeout_ms`, 10 s, zero refused, with C-ABI, Python and TOML
@@ -102,7 +103,7 @@ R-2's recipe). #540's reproduction is run first and decides SC-008's branch.
 | VIII §5 zero-alloc | no heap between parse and callback | Held for the parse: the buffer is allocated once at `open()`, and the resync scans in place. A spill witness proves there is no hidden heap use on any lane. **Not asserted before the first Active.** The establishment deadline race (asio parallel group) may allocate. That is outside the parse-to-callback window, and FR-052 is scoped to start at the first Active. The pre-Active count is measured with a global `operator new` counter (research R-9) and disclosed (L-13). The disarm at the first Active is witnessed by behaviour (Q-36), and Q-19 is a regression witness over the real pump |
 | IX sanitizers / coverage | per-line coverage assessment | The `/speckit-verify` matrix. The resync, deadline and reset_to branches are covered by the cells |
 | X §4 append-only enums | `core::error` | No new error code: criterion 3 reuses `wire_header_out_of_order`, and `reset_to` reuses `session_invalid_argument`. `SessionEvent` alternatives are appended |
-| X §7 ABI | C-ABI changes versioned | **MINOR bump; BREAKING on each affected declaration**: every BREAKING row is marked on the five observers `version.h`'s 1.10 entry names, and in `version.h` only where none carries it. The 1.10 sentences 093 falsifies are amended in place (FR-051, contract C-7). `gh release list --exclude-drafts` must be empty at implementation. The C++ additions are source-compatible; `MessageStore`'s vtable changes, which needs a rebuild |
+| X §7 ABI | C-ABI changes versioned | **MINOR bump; BREAKING on each affected declaration**: every BREAKING row is marked on the five observers `version.h`'s 1.10 entry names; `version.h`'s history entry is headed BREAKING with a one-line pointer per row, and details an effect only where no declaration carries it. The 1.10 sentences 093 falsifies are amended in place (FR-051, contract C-7). `gh release list --exclude-drafts` must be empty at implementation. The C++ additions are source-compatible; `MessageStore`'s vtable changes, which needs a rebuild |
 | XI concurrency | strand discipline, cancellation | The deadline race uses `await_deadline`, whose re-arm handles a clock-wide sweep (#536). The reset unit shields itself, and restores the pump's state explicitly, because asio's cancellation state is per awaitable thread (research R-9). `close()`'s wait is event-driven, with no poll. No new detached coroutine |
 | XII security | fail closed | An oversize frame closes before its CheckSum is read. Garbled bytes are never acted on. A disregard before Active is bounded by the timeout, which is a loop-head check, so a peer that keeps the socket readable cannot outrun it. Both header scans are capped over encoded bytes, so zero padding cannot amplify the rescan. The BeginString cap takes the configured length, which is bounded per role on every path where the pump runs over peer bytes, not by L: on the initiator by the Logon buffer (`Session::kMaxMaskableLogonBytes`), on the acceptor by the first-frame budget (`kFirstFrameMaxBytes`) with `SessionId` equality (contract C-1, The bound; OD-16) |
 | XIV §2 | at most 5 pure virtuals per pluggable interface | `MessageStore` keeps 4; `reset_to` is non-pure |
@@ -304,6 +305,9 @@ specs/093-inbound-frame-dispositions/
 │   └── inbound-frame-dispositions.md   # C-1 … C-8
 ├── quickstart.md         # cells Q-1 … Q-37; §4 traceability
 └── checklists/
+    ├── abi.md
+    ├── nfr.md
+    ├── protocol.md
     └── requirements.md
 ```
 
