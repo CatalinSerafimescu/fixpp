@@ -2222,6 +2222,15 @@ set_tests_properties(session_unparseable_frame_disposition PROPERTIES
 # last LABELS setter for this entry, so the existing labels survive.
 set_property(TEST session_unparseable_frame_disposition APPEND PROPERTY LABELS 093)
 
+# ── 093-inbound-frame-dispositions — session-level cells (quickstart.md §1) ───
+# Standalone, not a grouped bucket ([const §VII.8]): its cells open Sessions and
+# drive their coroutines on an io_context with a mock clock, and later cells add
+# timers (the establishment deadline, the liveness interval, the log rate), which is
+# not the pure, single-threaded, stateless class §VII.8 groups. No FIXPP_TEST_HOOKS:
+# private state is read through session_test_access (fixpp#511).
+add_threading_test(session_inbound_frame_dispositions inbound_frame_dispositions_test.cpp)
+set_tests_properties(session_inbound_frame_dispositions PROPERTIES LABELS "093;session")
+
 # ── fixpp#215 item 1 — one as_table_view() walk per opened session ───────────
 # W1: open() with no config-supplied snapshot walks the Dictionary exactly ONCE
 #     (was 2: inbound_tv_ + the strict validator, independently).
