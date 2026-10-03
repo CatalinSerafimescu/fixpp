@@ -610,6 +610,32 @@ TEST(FramerResync, Q6_OverLBodyLengthAtACandidateTheSearchFoundIsTooLarge) {
     }
 }
 
+TEST(FramerResync, OD20_AFrameBeforeAnOverLCandidateIsDeliveredBeforeTheRefusal) {
+    // Plan OD-20: a call that produced a frame stops at the next candidate whatever
+    // its outcome, so the frame ahead of an over-L BodyLength in the same read is
+    // delivered, and the next call returns wire_frame_too_large.
+    for (std::size_t const limit : {kLargeL, kSmallL}) {
+        SCOPED_TRACE(limit);
+        std::string const g1 = heartbeat(1);
+        std::string const stream = g1 + candidate_header(limit + 1U) + "35=0" + soh;
+        pmr_allocation_tracking_resource tracker{std::pmr::new_delete_resource()};
+        Framer framer{Framer::Config{.max_frame_bytes = limit, .resync_on_garble = true}};
+        pmr_carry_buffer carry{limit + kReadSize, &tracker};
+        std::vector<frame_view> out(4);
+
+        auto first = framer.feed(std::as_bytes(std::span<const char>{stream.data(), stream.size()}),
+                                 carry, out);
+        ASSERT_TRUE(first.has_value()) << "the produced frame is not discarded by the refusal";
+        ASSERT_EQ(first->size(), 1U);
+        auto const bytes = (*first)[0].bytes();
+        EXPECT_EQ(std::string(reinterpret_cast<char const*>(bytes.data()), bytes.size()), g1);
+
+        auto second = framer.feed({}, carry, out);
+        ASSERT_FALSE(second.has_value());
+        EXPECT_EQ(second.error(), error::wire_frame_too_large);
+    }
+}
+
 // ── Q-10 (Framer half): the BeginString cap ─────────────────────────────────
 
 TEST(FramerResync, Q10_BeginStringLongerThanTheCapWithNoSohIsAGarble) {
