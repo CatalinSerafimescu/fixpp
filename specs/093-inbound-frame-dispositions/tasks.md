@@ -428,7 +428,7 @@ reflects only the good frames, a ResendRequest covers the gap, one `session_even
 
 ### Tests for User Story 1 (write first; RED on base unless marked)
 
-- [ ] T026 [P] [US1] Via `phase-implementer`, Q-1 in `tests/session/inbound_frame_dispositions_test.cpp`:
+- [X] T026 [P] [US1] Via `phase-implementer`, Q-1 in `tests/session/inbound_frame_dispositions_test.cpp`:
   TC 2020 2d, 2m, 2t, 3b, 3c and 3e in Active. Each: disregard and continue; NextNumIn kept (where a
   numbered frame is lost, the next good frame draws a ResendRequest for it; 2d and 3c lose none, per
   quickstart Q-1); `Session::garbled_frame_count()` reads 1; one `session_event_garbled_frame` with
@@ -448,7 +448,7 @@ reflects only the good frames, a ResendRequest covers the gap, one `session_even
     QuickFIX-oracle scenarios and cannot drive these (they need the pump and the resync Framer), so
     its `CMakeLists.txt` header gains a pointer naming this file and the TC rows it witnesses. T125
     names the cells in the catalogue rows.
-- [ ] T027 [US1] Via `phase-implementer`, Q-2/Q-3 through the pump in
+- [X] T027 [US1] Via `phase-implementer`, Q-2/Q-3 through the pump in
   `tests/session/engine_readpump_test.cpp` (shared with T032, T055 and T055a, so not [P]): good ‖
   garbage ‖ good in one write with `XYZ8=FIX…`
   garbage; a truncated frame then a good frame; each split at every byte boundary; a garbage-only
@@ -462,7 +462,7 @@ reflects only the good frames, a ResendRequest covers the gap, one `session_even
     the limit and carry in force at the head it runs on (read from the named constants or the seam,
     never a literal), so it is GREEN at T038 against the local carry. T055a re-asserts it against L
     and the carry allocated at `open()`.
-- [ ] T028 [US1] Via `phase-implementer`, Q-5 in `tests/session/inbound_frame_dispositions_test.cpp`,
+- [X] T028 [US1] Via `phase-implementer`, Q-5 in `tests/session/inbound_frame_dispositions_test.cpp`,
   on the mock clock: a region split across reads counts once; a summary with `regions == 0` emits no
   event; garbles before a frame in one feed are evented before that frame's effects; at most one log
   record per `max(HeartBtInt, 1 s)` carrying the suppressed count, including a session with
@@ -471,7 +471,7 @@ reflects only the good frames, a ResendRequest covers the gap, one `session_even
   exact. RED: the session closes. Base RED method as T026's: compile-RED on the base (the counter,
   the event, the summary), and the behavioural RED (the close) by a base-compilable scratch variant,
   run as T026's is.
-- [ ] T029 [US1] Via `phase-implementer`, Q-8: garbled and 35-not-third frames disregarded before
+- [X] T029 [US1] Via `phase-implementer`, Q-8: garbled and 35-not-third frames disregarded before
   Active, in NotConnected, LogonSent, LogonReceived and LogoutSent
   (`tests/session/inbound_frame_dispositions_test.cpp`), and on the acceptor's first-frame read
   (`tests/session/engine_firstframe_test.cpp`, APPEND label `093`). In LogoutSent a garble is not taken
@@ -486,20 +486,20 @@ reflects only the good frames, a ResendRequest covers the gap, one `session_even
     evented and logged as one garble of kind `wire_header_out_of_order`. RED: compile-RED on the base
     (the counter and the event), and the base-compilable scratch variant shows the disregard with no
     count, run as T026's is.
-- [ ] T030 [US1] Via `phase-implementer`, Q-34 in `tests/session/engine_firstframe_test.cpp` (shared
+- [X] T030 [US1] Via `phase-implementer`, Q-34 in `tests/session/engine_firstframe_test.cpp` (shared
   with T029 and T031): k garbled regions before a matching Logon on the acceptor's first-frame read;
   after `open()` the counter reads k and exactly one `session_event_garbled_frame` is recorded. RED:
   the connection closes at the first garbled byte. Base RED method as T026's: compile-RED on the base
   (the counter and the event), and the behavioural RED (the close at the first garbled byte) by a
   base-compilable scratch variant, run as T026's is.
-- [ ] T031 [US1] Via `phase-implementer`, Q-10 through the session in
+- [X] T031 [US1] Via `phase-implementer`, Q-10 through the session in
   `tests/session/inbound_frame_dispositions_test.cpp` and `tests/session/engine_firstframe_test.cpp`:
   a BeginString mismatch within the cap keeps today's handling (Disconnected with no Logout in Active,
   refusal before Active, transport close on the acceptor's first frame), as regression guards; a value
   longer than the cap is a garble, disregarded and counted (RED: handled as a mismatch); a session
   configured with a BeginString longer than the longest supported identifier frames and processes its
   own frames (regression guard; T039's mutant).
-- [ ] T032 [US1] Via `phase-implementer`, flip the old-behaviour pins in T012's population, each
+- [X] T032 [US1] Via `phase-implementer`, flip the old-behaviour pins in T012's population, each
   rewritten RED-first, classified in the evidence file:
   - `tests/session/engine_readpump_test.cpp` `FramerFailureClosesEstablishedSession_*` → assert
     disregard and continue (L-004-4 closes). `OverCapacityFrameClosesSession` stays;
@@ -526,11 +526,11 @@ reflects only the good frames, a ResendRequest covers the gap, one `session_even
 
 ### Implementation for User Story 1
 
-- [ ] T033 [US1] Via `phase-implementer`, append `session_event_garbled_frame { core::error first_kind;
+- [X] T033 [US1] Via `phase-implementer`, append `session_event_garbled_frame { core::error first_kind;
   std::uint32_t frames; std::uint32_t discarded_bytes; }` to `include/fixpp/session/session_event.hpp`
   (`discarded_bytes` saturates at `UINT32_MAX`; `first_kind` is one of E-1's three Framer kinds or
   `wire_header_out_of_order`). Check T012's `std::visit` population.
-- [ ] T034 [US1] Via `phase-implementer`, the accounting (E-4, E-12) in
+- [X] T034 [US1] Via `phase-implementer`, the accounting (E-4, E-12) in
   `include/fixpp/session/session.hpp` and `src/session/session.cpp`:
   - `std::atomic<std::uint64_t> garbled_frames_`, incremented with relaxed ordering on the strand;
     public `std::uint64_t garbled_frame_count() const noexcept`;
@@ -543,35 +543,50 @@ reflects only the good frames, a ResendRequest covers the gap, one `session_even
     `drop_newest` policy never blocks the strand.
   Record in E-4's comment the placement condition and its re-derivation recipe (one `Session` per
   entry per `Engine::start()`), not a count.
-- [ ] T035 [US1] Via `phase-implementer`, the pump (`run_read_pump`, `src/session/engine.cpp`): its
+- [X] T035 [US1] Via `phase-implementer`, the pump (`run_read_pump`, `src/session/engine.cpp`): its
   Framer runs `resync_on_garble = true` with `max_begin_string_bytes = max(default,
   cfg.begin_string.size())` (OD-16); after every feed whose summary is non-empty it calls
   `note_garbles_`, in the read loop's drain and in the `initial_bytes` drain; `wire_frame_too_large`
   still closes. The `stop_pump()` on a Framer garble is gone; the header comment names 093 superseding
   L-004-4's wontfix.
-- [ ] T036 [US1] Via `phase-implementer`, the first-frame read (`src/session/read_first_frame_bounded.hpp`,
+- [X] T036 [US1] Via `phase-implementer`, the first-frame read (`src/session/read_first_frame_bounded.hpp`,
   `run_accept_loop` in `src/session/engine.cpp`): its Framer runs resync on with the same BeginString
   cap; it returns `{offset, len, garble_summary}`; the engine slices the first frame and the surplus at
   `offset`; after `open()` the accept loop calls `note_garbles_` once through the seam (OD-8). The byte
   budget still counts discarded bytes. The relative-to-absolute deadline line is not touched (088's B6
   mutant is pinned there).
-- [ ] T037 [US1] Via `phase-implementer`, C-2 step 1 in every arm except Disconnected
+- [X] T037 [US1] Via `phase-implementer`, C-2 step 1 in every arm except Disconnected
   (`src/session/session.cpp`): when the scan's `msg_type_is_third == false`, faulty or not, call
   `note_garbles_({1, core::error::wire_header_out_of_order, frame.size()})` and return success, with no
   Reject, no NextNumIn change and no liveness refresh. It runs before 092's fault branch, so D-8 and
   D-1/D-2 for that shape become unreachable; header comment naming 093 superseding them. The
   validator's Step 0 stays for direct `validate` callers.
-- [ ] T038 [US1] T026–T032 GREEN, then the full `session`, `wire` and `interop` suites unfiltered on
+- [X] T038 [US1] T026–T032 GREEN, then the full `session`, `wire` and `interop` suites unfiltered on
   `linux-clang-debug`.
-- [ ] T039 [US1] US1 mutants, each in a scratch copy: the pump passes `resync_on_garble = false` → Q-1,
+- [X] T039 [US1] US1 mutants, each in a scratch copy: the pump passes `resync_on_garble = false` → Q-1,
   Q-2 RED; delete the 35-not-third check → Q-1 (2t), Q-8 RED; delete the 1 s floor of the log rate →
   Q-5 (HeartBtInt = 0) RED; cap the BeginString at the longest identifier ignoring the configured
   length → T031's configured-long cell RED. Record under `## Mutants`.
-- [ ] T040 [US1] `codegraph sync`; update T011's manifest for any entry this phase touched.
+- [X] T040 [US1] `codegraph sync`; update T011's manifest for any entry this phase touched.
 
 **Checkpoint**: US1 complete in C++. Its C-ABI counter (FR-007) and the C arm of Q-1 close in Phase 8.
 
 ---
+
+**Phase 3 as landed (2026-10-03; `6a79a7af` tests RED, `ed16ca08` production, `bb0a477f`, `263e8f8c`):**
+- New private header `src/session/read_pump.hpp` holds `kReadPumpCarryCapacity` (moved out of
+  `engine.cpp`) and `inbound_framer_config(cfg)`, the one config both inbound Framers use.
+  `read_first_frame_bounded` takes a `Framer::Config` (default: resync on) and returns
+  `first_frame_read{offset, len, garbles}`.
+- `dispose_unparseable_`'s D-8 branch is deleted (step 1 makes it unreachable); its header comment
+  names 093.
+- **T029: no Framer-garble cell for LogonReceived.** In that state the pump is suspended inside
+  `on_inbound_frame`, so no feed reaches the Framer. LogonReceived's step-1 cells are the `Step1_*` and
+  D-8 cells in `unparseable_frame_disposition_test.cpp`.
+- New harness `tests/session/plain_engine_rig.hpp`: a plaintext Engine on a mock clock with a raw TCP peer.
+- Three cells that passed on the base were strengthened until they were RED there: `Q8Pump.LogoutSent_*`,
+  W1 and W_Off1.
+- OD-21 is pinned by `LogRecordsReconcileWithTheCounterRegionByRegion`.
 
 ## Phase 4: User Story 2: establishment cannot hang (Priority: P1)
 
@@ -628,6 +643,9 @@ at the first-frame bounds. The C, Python and TOML arms close in Phase 8 (T090, T
     witness: T053's mutant (delete the post-handshake remaining-time check, so the first-frame read is
     issued on its 5 s bound) turns it RED, because that server reads the Logon and replies. Show the
     mutant's Logon reply before believing the GREEN.
+  - **Carried from Phase 3 (T036):** no Phase 3 cell shows that the first-frame budget counts the
+    bytes a garble discards. This task's Q-17 cells must show it.
+
 - [ ] T044 [P] [US2] Via `phase-implementer`, Q-19 in a new standalone target
   `tests/alloc_guard/test_093_pump_active_read_alloc_guard.cpp` (it replaces global `operator new`,
   `[const §VII.8]`), executable `test_093_pump_active_read_alloc_guard`, registered in
@@ -730,6 +748,9 @@ delivered, and a frame of L+1 is refused at framing with no guard or handler act
   - Base RED method as T026's: `inbound_frame_dispositions_test.cpp` does not compile on the base, so
     its cells are compile-RED there, and each behavioural RED above (the refusal absent, `open()`
     succeeding) is shown by a base-compilable scratch variant, run as T026's is.
+  - **Carried from Phase 3:** the L-1 pins read `detail::kReadPumpCarryCapacity`
+    (`src/session/read_pump.hpp`). When the carry moves to `open()`, switch them to the seam.
+
 - [ ] T055 [US3] Via `phase-implementer`, Q-6 through the pump and the FR-013 reversal:
   - in `tests/session/inbound_frame_dispositions_test.cpp` and `tests/session/engine_readpump_test.cpp`:
     a frame of L+1, one of L+1 with a bad CheckSum, and an over-L BodyLength at a resync candidate each
@@ -852,6 +873,9 @@ delivered, and a frame of L+1 is refused at framing with no guard or handler act
   the borrowed carry; `run_read_pump` (`src/session/engine.cpp`) borrows it in place of its local
   carry. Update any size pin from T012. T055a's Q-12 and Q-14 (carry half) GREEN, with T064 in the same
   commit group (the Framer limit becomes L there).
+  - **Carried from Phase 3:** the L-1 pins read `detail::kReadPumpCarryCapacity`
+    (`src/session/read_pump.hpp`). When the carry moves to `open()`, switch them to the seam.
+
 - [ ] T022a [US3] Via `phase-implementer`, the FR-013 group's second part: `Engine::register_session`
   (`src/session/engine.cpp`) and `Session::open()` (`src/session/session.cpp`) refuse an advertised 383
   under 4096 or over 262144 with `invalid_session_config`. Both bounds move here together: they are one
