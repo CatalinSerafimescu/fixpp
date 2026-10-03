@@ -188,6 +188,30 @@ The sections below were written at `/speckit-plan`, 2026-10-02, from three read-
     UINT32_MAX) and pads with zeros instead of compacting. This repo's writer backpatches and emits no
     padding.
   - Floor: 10 ≥ 6 holds. Ceiling: 10 ≤ 18 (3 × 6, contract C-1 W-2) holds.
+- **Recorded (T017a, 2026-10-03, over the counters T017/T018 fix): the counted-work bound's constant
+  K = 6.** One unit per byte read, summed or moved, counted only on the resync path. Symbols: N bytes
+  received; L = `max_frame_bytes`; R = carry capacity − L (one read); Cbs = `max_begin_string_bytes`;
+  Cd = `kBodyLengthDigitCap`; F_r = feeds with bytes (≤ N).
+  1. Appends: each received byte enters the carry at most once. ≤ N.
+  2. W-1 compactions move ≤ L each: after a drain, the pending bytes are one partial candidate (≤ L,
+     refused as over L once `body_off` is known), a partial header, or ≤ 4 held bytes. Between two
+     compactions more than R bytes arrive, and a read straddles at most two windows, so there are
+     ≤ 2N/R + 1 compactions. ≤ 2NL/R + N.
+  3. W-3 sums: summed candidates are disjoint; one re-sum is possible when a producing call stops at a
+     wrong-CheckSum candidate it already summed (out > 1). ≤ 2N.
+  4. Search reads: no position is scanned by two passes, except the ≤ 4 held bytes, which the next read
+     rescans; a byte is a pattern byte for at most one `8`. ≤ 2N + 8·F_r ≤ 10N.
+  5. W-2 candidate parses each read ≤ Cbs + Cd + 14 bytes. Parses: one per frame (≤ N/15, the shortest
+     frame), one per garble (≤ N/5 + frames + 1), and one terminal parse per call (calls ≤ F_r + frames
+     + F_r). Total ≤ 2.4N, so ≤ 2.4N·(Cbs + Cd + 14).
+
+  Sum: W ≤ N·(47.6 + 2L/R + 2.4·(Cbs + Cd)). **Fold, precondition Cbs ≥ the Config default (8), so
+  Cbs + Cd ≥ 18:** 47.6 ≤ 2.65·(Cbs + Cd), so W ≤ 5.05·N·(1 + L/R + Cbs + Cd), and K = 6. Every Framer
+  the session builds meets the precondition (OD-16 takes the larger of the default and the configured
+  length). Without it the constant term does not fold and K would be 48, which would let quickstart §2's
+  mutants (sized at ~8–9e7 against ~1.4e7 at K = 6, for L = 65536, R = 4096) pass under the bound.
+  The test helper therefore fails a cell whose cap is below the default. Asserted after every feed, in
+  integer form: W·R ≤ K·N·(R + L + R·(Cbs + Cd)).
 - **Why the BeginString cap takes the configured length.** A fixed cap at the longest supported
   identifier garbles every inbound frame of a session configured with a longer BeginString, which today
   works: the C setter checks only non-empty and forbidden bytes, TOML copies the string, and `open()`
