@@ -285,6 +285,15 @@ made at `/speckit-plan`. Reviewers may challenge any of them, and the owner may 
   output span has length 1. A T015 cell witnesses it: a good frame then an over-L BodyLength in one feed.
   Alternative: discard the call's frames on over-L, as strict mode does. Rejected: it drops a well-formed
   frame that arrived before the fault, which C-1's Extent rule forbids for garbles.
+- **OD-21: E-12's suppressed count is in garbled regions, the unit of `garbled_frame_count()`** (added
+  at implementation, T028, 2026-10-03). A record's suppressed count is the regions counted since the
+  previous record that no record named: every region of each rate-suppressed summary, plus the
+  triggering summary's own other k − 1 regions. Its record names only the first, by `first_kind`, while
+  its `discarded` bytes cover all k. The count resets at each emitted record. Invariant, pinned by T028:
+  Σ over emitted records of (1 + suppressed) equals `garbled_frame_count()` at the last record. A
+  continuation summary (`regions == 0`) emits no record and adds nothing. Alternative: count only the
+  regions of suppressed summaries. Rejected: a logged k > 1 summary would then break the reconciliation
+  between the log and the counter.
 
 ## What changes for whom
 
