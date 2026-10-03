@@ -21,7 +21,8 @@ Public and additive, in `include/fixpp/wire/framer.hpp`. Contract C-1 has the ru
   - `regions` is the number of garbled regions the call opened. A region continued from an earlier
     call is not counted again.
   - `first_kind` is the first opened region's kind: `wire_framing_resync`, `wire_invalid_body_length`
-    or `wire_checksum_mismatch`.
+    or `wire_checksum_mismatch`. With `regions == 0` it is `core::error{}` (slot 0, never a failure
+    kind) and is not read, because E-4 emits no event for such a summary.
   - `discarded` is every byte the call dropped, including those of a continued region.
 - `garble_summary last_garbles() const noexcept;` returns the summary, which every `feed` resets.
 - New private state: `bool searching_`, true while a garbled region is open across feeds. The carry
@@ -52,6 +53,9 @@ Engine seam and private, `Session`.
   the advertised 383 if set, else 65536. `register_session` and `open()` refuse a value under 4096 or
   over 262144 (OD-2). The accept loop runs only for a registered entry, so it never sees one.
 - `std::uint32_t inbound_limit_` is set in `open()` from that function.
+- **The read size R** is the size of the pump's per-read buffer, `read_buf` in `run_read_pump`
+  (`src/session/engine.cpp`); re-derive it there. FR-002's R, the plan's "L + 4 KiB", this entity's
+  "the read size" and research R-3's worked totals all mean that one value.
 - The carry is allocated in `open()` with capacity L plus the pump's read size, and needs no public
   change to `pmr_carry_buffer`:
   1. inside a `try`, allocate one block of L + the read size + `kContainerSlack` from
@@ -103,7 +107,10 @@ Public and additive. `OffsetTable::build` is private, and `Parser::parse` builds
   overload is public.
 
 The reserve is a per-call hint. The table does not store it, and clones and reifies do not copy it.
-Every existing overload is unchanged and reserves nothing, which is today's behaviour.
+Every existing overload is unchanged and reserves nothing, which is today's behaviour. A reserve above
+`cfg.max_offset_entries` reserves at most that many entries, since the table never holds more. A
+reserve the resource cannot serve fails like any allocation in `build`: `build` catches the
+`bad_alloc` and reports `out_of_memory` (`src/wire/offset_table.cpp`).
 
 ## E-4: Garbled-frame accounting
 
@@ -124,7 +131,17 @@ Private `Session` state, with a public reader.
   it after every feed whose summary is non-empty. The accept loop calls it once, after `open()`, with
   the first-frame read's summary. C-2 step 1 calls it with `{1, wire_header_out_of_order,
   frame.size()}`.
-- `std::uint64_t garbled_frame_count() const noexcept` is a public C++ accessor on `Session`.
+  - **The first-frame summary** sums the summaries of every feed the read made (regions and
+    discarded added, the first kind kept). The read stops at its first frame, whose end is a frame
+    boundary, and the bytes after it reach the pump as `initial_bytes`, so the pump's Framer starts
+    at a frame boundary, not searching (C-1 Ordering). No region straddles the first frame's surplus
+    and the pump's first feed, so no garble is counted twice or missed across the hand-over.
+  - **A region a later feed continues** (`regions == 0`, `discarded > 0`) adds nothing to the counter,
+    emits no event and logs nothing. It is counted once, when it opens, and the event for that feed
+    carries only the bytes that feed discarded. Its later bytes are not observed, by design.
+- `std::uint64_t garbled_frame_count() const noexcept` is a public C++ accessor on `Session`: a relaxed
+  load. Any thread may call it, its successive reads never decrease, and it orders no other session
+  state, so a caller that needs the count to reflect a given frame must synchronise by other means.
 
 ## E-5: New `SessionEvent` alternatives
 
@@ -165,6 +182,8 @@ Private, the engine pump and the accept loop.
     that by behaviour.
   - E-4's placement condition applies here too: a `Session` reused for a second connection would need
     the latch reset when the transport is installed.
+  - It is a plain `bool`, written in `record_state_transition_` and read by the pump through the
+    seam, both on the session strand (the pump is co_awaited inline on it, research R-2).
 
 ## E-7: `SessionConfig::logon_timeout_ms`
 
@@ -174,13 +193,31 @@ Public and additive.
   TOML loader and by the C setter.
 - The C ABI setter is `fixpp_session_config_set_logon_timeout_ms(fixpp_session_config_t*, uint32_t ms)`.
 - The TOML key is `logon_timeout_ms`, a bare integer of milliseconds, as `logout_disconnect_timeout_ms`
-  is. Its mapper requires an integer with 0 < v ≤ `UINT32_MAX`. It refuses a non-integer as a type
-  mismatch, and refuses zero, a negative value or an out-of-range value as out of range.
+  is. Its mapper requires an integer with 0 < v ≤ `UINT32_MAX`. Each refusal is a `LoadDiagnostic` on
+  the key (`include/fixpp/config/load_diagnostic.hpp`): a non-integer with
+  `reason_class::malformed_value` (present but wrong type, as `src/config/logger_resolver.cpp`'s
+  integer keys refuse one; there is no type-mismatch class), and zero, a negative value or a value
+  above `UINT32_MAX` with `reason_class::out_of_range`. `logout_disconnect_timeout_ms`'s mapper is not
+  the shape for the non-integer case: it ignores one without a diagnostic.
 
 ## E-8: C-ABI garbled-frame getter
 
 - `fixpp_error_t fixpp_session_garbled_frame_count(const fixpp_session_t*, uint64_t* out)`.
-- A null handle or a null `out` is refused. Before the session exists it writes 0. It is thread-safe.
+- **Refusals**, in `fixpp_session_is_established`'s order (`src/capi/session.cpp`): a null `out`
+  returns `FIXPP_ERR_NULL_HANDLE` before anything else is read; then `*out` is written 0, and
+  `check_session` refuses a null handle with `FIXPP_ERR_NULL_HANDLE` and a destroyed one with
+  `FIXPP_ERR_INVALID_HANDLE`.
+- **Read path.** A scoped `engine_->lookup(id)`, which reads the atomic reader snapshot, then a
+  relaxed load of the counter through the returned `shared_ptr<Session>`, released before return, as
+  the other C session ops do. The `shared_ptr` keeps the Session alive for the read even if
+  `Engine::stop()`'s `registry_.clear()` runs at the same time, which is what backs the
+  "thread-safe" token.
+- **Lifecycle points.** `lookup` returns null until the entry's role loop publishes its Session
+  (E-13): before `fixpp_engine_start`, and after it until that publish. The getter then writes 0 and
+  returns `FIXPP_ERR_OK`. Once published, the count is monotonic, and `lookup` keeps returning the
+  Session after its connection ends. The C ABI reaches `Engine::stop()` only through
+  `fixpp_engine_destroy`; after that returns, `check_session` refuses the handle with
+  `FIXPP_ERR_INVALID_HANDLE`.
 - Python exposes it through `%apply` OUTPUT, with a GIL-table row.
 
 ## E-9: `MessageStore::reset_to`
@@ -201,7 +238,8 @@ Public, additive and non-pure.
 Private, `Session`.
 
 - `bool reset_unit_in_flight_` is set across the unit's single `reset_to` await and cleared after it,
-  error paths included.
+  error paths included. It is a plain `bool` because the unit and `close()` both run on the session
+  strand, which `teardown_reset_done_`'s existing use already relies on.
 - A completion signal, which the unit raises when it clears the flag. One shape is an
   `asio::steady_timer` armed at `time_point::max()` and cancelled by the unit. The implementation picks
   the shape, but it must not poll.
@@ -233,12 +271,20 @@ Private, `Session`; the session's first production log site (OD-5).
 - `FIXPP_SLOG` with the session's `trace_context`, through the logger resolved once at `open()`:
   `cfg_.logger_override`, else the engine's. It may be null, which `FIXPP_SLOG` tolerates.
 - Every format string is registered in `src/log/format_registry.cpp`.
-- Rate bound: at most one record per `max(HeartBtInt, 1 s)`, where HeartBtInt is the value the
-  session's Logon advertises. A HeartBtInt of 0 is legal and disables liveness, and the 1 s floor still
-  bounds the rate. A record carries the kind and bytes of the garble that triggered it, and the number
+- Rate bound: at most one record per `max(HeartBtInt, 1 s)`, where HeartBtInt is the session's
+  configured `heartbeat_interval` with the default its liveness loop applies when unset: the value
+  its Logon advertises (re-derive in `run_liveness_loop`, `src/session/session.cpp`). It is known from
+  `open()`, so the same bound applies in every phase, before the Logon exchange and to the
+  first-frame summary handed over after `open()` included. A HeartBtInt of 0 is legal and disables
+  liveness, and the 1 s floor still bounds the rate. A record carries the kind and bytes of the garble that triggered it, and the number
   of garbles counted since the previous record but not logged.
 - If the logger's bounded queue is full, its default `drop_newest` policy drops the record without
   blocking the strand. The counter (E-4) stays exact.
+- **The establishment-timeout and over-L close records** (FR-006, FR-013) take the same path: the
+  same logger, `FIXPP_SLOG` with the session's `trace_context`, and format strings registered beside
+  the garble's. The timeout record carries T; the over-L record carries the failure kind and L. Each
+  fires at most once per connection, because each ends it with `close(terminal)`, so neither is
+  rate-bounded.
 
 ## E-13: The engine-stop flag
 

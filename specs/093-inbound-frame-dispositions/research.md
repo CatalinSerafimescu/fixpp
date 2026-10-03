@@ -165,7 +165,7 @@ The sections below were written at `/speckit-plan`, 2026-10-02, from three read-
      109, and a `[^0-9]9=` filter misses the `\x019=` spelling. Seed one padded run in a scratch copy
      and show the search finds it before its maximum is believed.
 
-  The chosen value must also meet the ceiling in contract C-1 W-2, so that the cap's term stays small
+  The chosen value must also meet the ceiling that contract C-1 W-2 states, so that the cap's term stays small
   next to the bound's other terms: a large cap would reopen the one-byte-read rescan while the bound
   stayed technically true. If the search finds a run above the ceiling, stop and record it here rather
   than raising the ceiling.

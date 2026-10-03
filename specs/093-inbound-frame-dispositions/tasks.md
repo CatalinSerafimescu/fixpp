@@ -132,6 +132,9 @@ reproduction, the population snapshots, the test-builder census and its fixes, a
     `git grep -h "define FIXPP_C_ABI_VERSION_MINOR" $(git for-each-ref --format='%(refname)' refs/heads refs/remotes) -- include/fix/c_api/version.h | sort | uniq -c`.
     The MINOR this feature will take is the `origin/main` value plus one, and no other branch may
     already claim it. T095 re-runs both checks.
+  - Positive controls: the grep's output must include `origin/main`'s own MINOR, so a grep that
+    matched nothing cannot read as "no branch claims it"; and `gh release list` must exit 0, so an
+    auth failure cannot read as "no release".
 - [ ] T004 Via `phase-implementer`, a **bench-only commit**: add a validation-on variant of
   `BM_Session_OnInboundFrame_InSequence` (`validate_inbound_messages = true`) to
   `bench/session/on_inbound_frame_bench.cpp`. No file outside `bench/` changes, and the source
@@ -401,9 +404,10 @@ reflects only the good frames, a ResendRequest covers the gap, one `session_even
 ### Tests for User Story 1 (write first; RED on base unless marked)
 
 - [ ] T026 [P] [US1] Via `phase-implementer`, Q-1 in `tests/session/inbound_frame_dispositions_test.cpp`:
-  TC 2020 2d, 2m, 2t, 3b, 3c and 3e in Active. Each: disregard and continue; NextNumIn kept (the next
-  good frame draws a ResendRequest for the gap); `Session::garbled_frame_count()` reads 1; one
-  `session_event_garbled_frame` with the expected `first_kind` (3e reports
+  TC 2020 2d, 2m, 2t, 3b, 3c and 3e in Active. Each: disregard and continue; NextNumIn kept (where a
+  numbered frame is lost, the next good frame draws a ResendRequest for it; 2d and 3c lose none, per
+  quickstart Q-1); `Session::garbled_frame_count()` reads 1; one `session_event_garbled_frame` with
+  the row's `first_kind` from quickstart Q-1 (3e's CheckSum-not-last shape reports
   `wire_invalid_body_length`, the L-2 pin) and bytes; one log record with that kind, captured through a
   test sink set as `SessionConfig::logger_override`. RED: the session closes (2d/2m/3b/3c/3e) or the
   frame is processed (2t).
@@ -832,7 +836,8 @@ delivered, and a frame of L+1 is refused at framing with no guard or handler act
 - [ ] T069 [US3] On the MSVC debug sandbox (T006's lock): Q-11 (dense L, peak ≤ B(L)), Q-14 (both
   halves: the carry half must hold where the container proxy draws on T024's block) and the spill
   witness, which on MSVC debug forwards and records; at the design point it
-  records nothing. Record under `## MSVC`.
+  records nothing. Before believing "records nothing", show it records a spill on this lane with
+  T070's shrink. Record under `## MSVC`.
 - [ ] T070 [US3] US3 instruments and mutants, each in a scratch copy: the spill witness records a spill
   when a frame denser than B(L)'s design point is fed through the test-access shrink; restore the
   16 KiB arena and the default entry cap → Q-11 RED; delete the capacity derivation (B(L) back to a
@@ -940,7 +945,8 @@ durable counters at FR-041's table (#524).
   meets the table (mutant in T088); Q-27, the
   `close()` wait expiring records `session_event_close_reset_wait_expired` and `close()` completes,
   and for `FileStore` (1, 1) still holds after expiry (the FIFO writer-lock condition measured, not
-  assumed).
+  assumed); and Q-27's re-arm arm, a clock-wide `cancel_sleeps()` from another session during the
+  wait records no expiry event before `effective_clock_` reaches the bound.
 - [ ] T082 [US5] Via `phase-implementer`, after T074a, Q-26 in a new
   `tests/session/engine_reset_unit_stop_test.cpp`, executable `engine_reset_unit_stop_test`, registered
   standalone beside `engine_lifecycle_test` in `tests/session/CMakeLists.txt` as ctest
@@ -961,7 +967,9 @@ durable counters at FR-041's table (#524).
   reset_to(seqnum_t next_in, seqnum_t next_out) noexcept;`", non-pure; precondition `next_in, next_out
   ∈ {1, 2}`, else `session_invalid_argument` with no effect; default body `co_await reset()`, then
   `next_seqnum(dir, true)` once per target that is 2, first error returned. The header's pure-virtual
-  count comments become conditions (`[const §XIV.2]`, re-derivable). Overrides: `MemoryStore`
+  count comments become conditions (`[const §XIV.2]`, re-derivable), and `reset_to`'s doc comment
+  states that the vtable changes, so C++ code built against the previous header must be rebuilt
+  (C-7 row 13), and when an implementer should override it (plan.md "What changes for whom"). Overrides: `MemoryStore`
   (`include/fixpp/session/memory_store.hpp`), one critical section clearing and setting both counters,
   keeping `++generation_`; `FileStore` (`include/fixpp/session/file_store.hpp`,
   `src/session/file_store.cpp`), the counters committed by the rename (parametrise `initialise_fresh`
@@ -997,6 +1005,7 @@ durable counters at FR-041's table (#524).
   cell and the `FileStore` cell (SC-006 names those two); drop the engine-stop flag from
   `logon_arm_superseded` → Q-26 per-role effect assertions RED; make `reset_to`'s override non-atomic
   (reset, then advance) → Q-29 RED; accept any target → Q-28 RED; expire without recording → Q-27 RED;
+  make `close()`'s wait a one-shot sleep without `await_deadline`'s re-arm → Q-27's re-arm arm RED;
   remove `HookedStore`'s forwarding in forward mode → its cell RED. Record under `## Mutants`.
 - [ ] T089 [US5] fixpp#538's reproduction (OD-9), on this head and on the T005 base worktree. Record both
   outputs. No closing keyword names #538 whatever the result; report it to the owner.
@@ -1067,13 +1076,16 @@ and every C-7 row 1–6 C witness.
     and `bindings/python/tests/wheel/_gil_staging.py` if those lists cover the new wrapper; the setter
     comes through the existing `%include`;
   - TOML: `logon_timeout_ms` in `kRecognized` (`src/config/toml_config_loader.cpp`) and a mapper in
-    `src/config/scalar_mappers.cpp`: an integer with 0 < v ≤ `UINT32_MAX`; a non-integer refused as a
-    type mismatch; zero, negative or out of range refused as out of range.
-    `logout_disconnect_timeout_ms`'s mapper accepts zero, so its range check is not copied.
+    `src/config/scalar_mappers.cpp`: an integer with 0 < v ≤ `UINT32_MAX`; a non-integer refused with
+    `reason_class::malformed_value`; zero, negative or out of range refused with
+    `reason_class::out_of_range` (data-model E-7). `logout_disconnect_timeout_ms`'s mapper accepts
+    zero and ignores a non-integer without a diagnostic, so neither its range check nor its type
+    handling is copied.
   T092 and T093 GREEN.
 - [ ] T099 Via `phase-implementer`, the version (C-7 "Version"): `FIXPP_C_ABI_VERSION_MINOR` +1 in
-  `include/fix/c_api/version.h`, with a history block naming 093 that lists C-7 rows 1–6 as BREAKING
-  and rows 7–8 as additions, carrying BREAKING only where no declaration does. Update every in-repo
+  `include/fix/c_api/version.h`, with a history entry naming 093 as contract C-7 "Version" states it:
+  headed BREAKING, rows 1–6 in one summary line each pointing to their declarations, rows 7–8 as
+  additions, and an effect detailed only where no declaration carries it. Update every in-repo
   consumer of the old value: `git grep -ln "VERSION_MINOR" -- . ':!specs'` plus the encoded forms of the
   old value that the recipe in `specs/092-garbled-frame-reject/tasks.md` (its version-bump task) greps for, each hit classified in the evidence file. T094 GREEN.
   Mutant in a scratch copy: MINOR back to the old value → `version_test` RED.
@@ -1122,13 +1134,16 @@ surfaces exist and are witnessed.
 
 - [ ] T105 [P] `spec/behaviors-and-limitations.md` (FR-050; FR-050's list is a lead, not the
   population). First grep the live file and classify every hit:
-  `grep -nE "L-004-4|B-005-7|B-004-1|B-041-1|L-092-6|L-518-1|#51[456]\b|#52[34]\b|#540|373=14|kInboundParseArena|Until #514 ships|session-fatal" spec/behaviors-and-limitations.md`.
+  `grep -nE "L-004-4|B-005-7|B-004-1|B-041-1|L-092-6|L-518-1|B-092-2|B-092-9|L-092-1\b|D-8|D-1/D-2|#51[456]\b|#52[34]\b|#540|373=14|kInboundParseArena|Until #514 ships|session-fatal" spec/behaviors-and-limitations.md`.
   Then:
   - move `L-004-4` to `spec/behaviors-and-limitations-closed.md`;
   - narrow `B-005-7` to fields other than the first three, and correct its "QF emits 373=14" (R-1);
   - correct `B-004-1`, `B-041-1`'s 373=14 for this shape, and 092's §4.5.2 note "Until #514 ships…";
   - add B rows for FR-001…FR-041 and for C-7 rows 1–6 BREAKING (`[const §X.7]`), with the 383 and
-    zero-timeout refusals as C++ only;
+    zero-timeout refusals as C++ only; FR-040's row states the rebuild requirement (C-7 row 13), and
+    the `SessionEvent` row states C-7 row 11's C++ source change;
+  - update the 092 rows the grep finds stating D-8's disregard or the pre-Active refusal of a faulty
+    frame whose third field is not 35 (FR-050);
   - add one L row per contract C-8 L-1…L-17 (L-17 names fixpp#541, unconfirmed, B28; it also records
     T061's `kCallbackReadHeadroom` condition result where it failed; L-13 cites T051's measurement);
   - add the B row for the per-session cost: the carry plus B(L) as the formula, with the 64 KiB and
@@ -1178,8 +1193,9 @@ surfaces exist and are witnessed.
   Budget +5 % per case, min-per-tree (`[const §VIII.2]`, SC-007). Over budget → the owner with the per-leg figures; never
   relax it. Record under `## Bench baseline`, then `git worktree remove --force` the base worktree.
 - [ ] T113 The MSVC sandbox (T006's lock): rsync the post-simplify head; on MSVC debug and msvc-asan run
-  the `093` label, the dense-L, spill and getter-typemap cells (quickstart §3), and the Python wheel
-  getter. Calibrate each new standalone target's TIMEOUT from the slowest lane with headroom. Record
+  the `093` label, the dense-L, spill and getter-typemap cells (quickstart §3), the Python wheel
+  getter, and Q-33's MSVC-debug arm (each lazy read past the headroom succeeds and the spill is
+  recorded). Calibrate each new standalone target's TIMEOUT from the slowest lane with headroom. Record
   under `## MSVC`.
 
 ### Static analysis, claims, citations, pins
@@ -1198,11 +1214,16 @@ surfaces exist and are witnessed.
   the job's steps with a YAML parser and run each `run:` block as Actions would), including B25's ODR
   census step (FR-053: no class member gated on `FIXPP_TEST_HOOKS`; `framer_test_access` and every new
   accessor unconditional). Every step must run and pass; read `.steps[]`-equivalent output, not a
-  summary.
+  summary. Before trusting the census's pass, show it can fail: via `phase-implementer`, in a scratch copy, gate one member of
+  a 093-touched class on `FIXPP_TEST_HOOKS` and show the step reports it, or re-run the census's own
+  self-test if B25 ships one.
 - [ ] T118 T011's label gate passes (the labelled set equals the manifest, every entry registered);
   `ctest --test-dir build/linux-clang-debug -L '^093$' --output-on-failure` all GREEN; the whole ctest
   suite unfiltered on `linux-clang-debug`, `-asan`, `-ubsan`, `-tsan` and `-release`, one preset at a
   time under the 16 GiB cap, passing except the tests T012's populations list as intentionally updated.
+  On `-tsan`, confirm by name that `engine_reset_unit_stop` (T082) and `capi_inbound_frame_dispositions`
+  (T090's cross-thread getter cell) ran: their cross-strand and cross-thread interleavings are what
+  the TSan lane is for.
 - [ ] T119 Via the `checklist-auditor`, re-disposition any checklist item whose subject changed during
   implementation: derive the population by a complement grep over
   `specs/093-inbound-frame-dispositions/checklists/*.md` for every FR, C-row, OD and invariant id the
@@ -1233,7 +1254,10 @@ surfaces exist and are witnessed.
   their MSVC legs. Record the release.
 - [ ] T124 Draft the PR description (it is opened in T125a, after the last commit):
   - the `[const §X.7]` BREAKING declaration (C-7 rows 1–6), matching the B&L delta, and why #523/#524 are
-    not BREAKING (B-518-1's ruling);
+    not BREAKING (B-518-1's ruling). Before opening, compare the three carriers row by row: for each
+    of C-7 rows 1–6, the body's BREAKING list, the B&L delta (`git diff origin/main --
+    spec/behaviors-and-limitations.md`) and `version.h`'s 093 history entry each name it. Record the
+    three-column table in the evidence file; a row missing from any carrier stops the opening;
   - the public C++ deltas (C-7 rows 7–15 and 18);
   - the bench (T112), fuzz (T111) and #540 (T008) results;
   - `local build: green on linux-clang-debug @ <git-sha>` with the SHA T120 verified (`[const §XVII.7]`);

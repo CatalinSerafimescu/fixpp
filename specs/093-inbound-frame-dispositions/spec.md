@@ -375,6 +375,10 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
 - **A garbled frame retransmitted identically on every ResendRequest.** SL2020 §4.5.2 recommends
   recognising this loop. fixpp has no resend-loop guard (as in `L-092-1`), so this is disclosed and not
   fixed here.
+- **A garbled frame during a resend recovery** (Active, a ResendRequest outstanding). It is disregarded
+  as in any state, even when it was one of the resent frames. Its number then stays missing, and the
+  frames after it meet today's gap handling while the request is outstanding, which 093 does not
+  change. When the peer resends it garbled every time, this is the loop above (contract L-7).
 - **A garbled frame during LogoutSent.** It is disregarded and not taken as the Logout reply. The logout
   timeout runs as usual.
 - **The acceptor's first-frame read.** Garbled bytes before the first Logon are disregarded within the
@@ -382,7 +386,9 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
   first read's own size limit is unchanged. Its Framer is capped at L, so a first frame over L is
   refused as anywhere else.
 - **A dense frame at L on MSVC debug**, where the arena falls back to the heap today. The bound must hold
-  without that fallback.
+  without that fallback: the parse of a frame of at most L fits B(L), and the spill witness records
+  nothing for it (quickstart Q-11). Only a lazy read in a callback past `kCallbackReadHeadroom` may
+  spill there, and the spill is recorded (FR-011).
 - **A custom `MessageStore` subclass** that does not override the new operation. The unit's shield and
   `close()`'s wait give it FR-041's outcomes, unless the wait expires. A crash in the middle of its
   default body, or an expired wait, can leave the intermediate state (disclosed in B&L).
@@ -414,11 +420,13 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
 - **FR-002**: After a garbled frame, framing MUST resume at the next frame start (contract C-1).
   - At a frame boundary (the first byte received, or the first byte after a complete frame), a frame
     starts at `8=` as today. After a garble, the next frame start is the next `8=FIX`, whatever byte
-    precedes it, searched from after the garbled frame's first byte.
+    precedes it, searched from after the garbled frame's first byte, or from after its own end for a
+    wrong-CheckSum frame consumed whole (contract C-1).
   - A structurally complete frame whose CheckSum value is wrong is one garbled frame through its own
     end.
-  - The rule MUST NOT depend on how the stream is segmented into reads. A garbled region that spans
-    several reads counts as **one** garbled frame.
+  - The frames delivered and the garbled-frame counter MUST NOT depend on how the stream is segmented
+    into reads. A garbled region that spans several reads counts as **one** garbled frame. The events
+    and log records do depend on the segmentation, because FR-003 emits one event per feed.
   - Bytes before the frame start are discarded. A well-formed, complete frame lying wholly after a
     garbled region MUST NOT be lost. A frame lying inside a wrong-CheckSum frame's extent is part of
     that garble.
@@ -467,8 +475,8 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
     the handshake bound. On expiry or over-budget the raw transport MUST be closed. No event can be
     recorded, because no Session exists (contract L-6).
   - **Phase (b), a Session that has not yet reached Active.** On the acceptor this is from the first
-    frame's delivery, against the same deadline. On the initiator it starts when the transport is
-    installed and the Logon sent. On expiry an event MUST be recorded and `close(terminal)` MUST be
+    frame's delivery, against the same deadline. On the initiator it starts when `drive_reconnect`
+    returns, which is after it has installed the transport and sent the Logon (contract C-4). On expiry an event MUST be recorded and `close(terminal)` MUST be
     called, which closes the transport and ends in Disconnected.
   - Phase (b) also ends a pre-Active connection the session has already refused into Disconnected,
     whose transport stays open today (fixpp#534's pre-Active half).
@@ -542,7 +550,7 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
     is closed with no event and no log (contract L-6).
   - This replaces today's Active-only advertised-MaxMessageSize check, which only writes Disconnected.
   - It also reverses 070's pre-establishment exemption (`test_070_max_message_size_test`); see plan.md
-    OD-3, open to Gate A review.
+    OD-3, which stood through Gate A's convergence (plan.md `## Gate A`).
 - **FR-014**: 092's late-parse-failure close (092 FR-016) MUST remain as a defence. It MUST be
   unreachable for an admitted frame, and a test that deletes the capacity derivation MUST turn it RED.
 - **FR-015 (fixpp#540)**: `MessageView::unknown_fields()` MUST NOT reach `std::terminate` when its arena
@@ -611,7 +619,8 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
   ruling). It waits only when it is about to issue one, and the wait is event-driven, not a poll. The
   bound and the expiry behaviour are plan.md OD-1.
   - Result when `close()` or `Engine::stop()` begins at any point of the unit: with no teardown reset
-    configured, next-inbound 2, or 2/2 on the initiator, for every store. With one configured, 1/1 for
+    configured, the unit's targets (in, out), for every store: in = 2 when the Logon advanced, and
+    out = 2 only on the initiator's own reset (contract C-6, research R-6). With one configured, 1/1 for
     every store while the wait does not expire. After expiry, 1/1 still holds for an overriding store
     with a FIFO writer lock, but not for a default-body store (disclosed).
   - `Engine::stop()` waits for an in-flight unit's store operation, which is not cancellable
@@ -647,7 +656,11 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
     - a frame inside a wrong-CheckSum frame's extent;
     - no resync for a configured BeginString that does not begin with `FIX`;
     - the C cursor shells' uncaught allocation;
-  - add a B row for the per-session cost: the formula, and the 64 KiB and 256 KiB worked totals;
+  - add a B row for the per-session cost: the formula, the 64 KiB and 256 KiB worked totals, and the
+    admission bound (one carry plus B(L) per registered session with a live or establishing
+    connection, research R-3);
+  - update the 092 rows that state D-8's disregard or the pre-Active refusal of a faulty frame whose
+    third field is not 35 (`B-092-2`, `B-092-9`, `L-092-1` are leads; FR-005 makes D-8 unreachable);
   - update `L-092-6` and `L-518-1` where this feature changes what they state. That includes
     L-518-1's "Frames that arrive with the Logon" bullet. Its LogonReceived half becomes by design,
     because FR-030 leaves LogonReceived unchanged on purpose: a graceful close from LogonReceived runs
@@ -669,7 +682,8 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
   - liveness refreshes on more frames.
 
   Not BREAKING:
-  - the 383 refusals, which are reachable from C++ only and so are not C-ABI;
+  - the 383 refusals, which are reachable from C++ only and so are not C-ABI. They are a C++ behaviour
+    change, declared in the B&L delta and among the PR description's C++ deltas (contract C-7 row 10);
   - #523 and #524, following B-518-1's owner ruling that the old outcomes were the defect. These two
     issues are that ruling's follow-ups.
 - **FR-052**: No new heap allocation on the per-frame inbound path once the session has first reached
@@ -721,6 +735,7 @@ the rebase onto `origin/main` (`00c1f720` at spec time). Every RED claim is run 
     - small frames behind a failed large candidate;
     - nested candidates sharing one `10=`;
     - `8=FIX` repeated with no SOH;
+    - a boundary `8=` with no SOH;
     - a `9=` followed by a run of zeros with no SOH;
     - each of these fed one byte per read as well as in full reads.
   - A valid frame whose BodyLength is zero-padded to exactly the digit cap is framed and delivered, and
@@ -738,7 +753,9 @@ the rebase onto `origin/main` (`00c1f720` at spec time). Every RED claim is run 
   - **Same phase, a session with no application** that reaches Active before T and idles past it stays
     Active.
   - **Acceptor before any matching frame**: a peer that sends only garbled bytes is closed at the
-    first-frame byte budget or at `min(5 s, T)`, whichever comes first. Bytes under the budget, sent
+    first-frame byte budget or at `min(5 s, T)`, whichever comes first. On TLS the 5 s runs from the
+    end of the handshake and T from accept (contract C-4 phase (a)); the cells below that name
+    `min(5 s, T)` run on plain TCP, where the two coincide. Bytes under the budget, sent
     slowly, are not closed before `min(5 s, T)`. On the base that cell is RED because the close
     comes at the first garbled byte.
   - **Acceptor on TLS with T below the handshake bound**: a stalled handshake closes at the handshake
@@ -786,15 +803,19 @@ the rebase onto `origin/main` (`00c1f720` at spec time). Every RED claim is run 
   counting discarded bytes. The establishment timeout shortens the deadline when less time remains, and
   covers the rest of establishment.
 - The densest legal field layout is a one-digit tag with an empty value, `1=<SOH>`: three bytes per field
-  (research R-3). That sets the worst-case field count for L. Making an empty value a scan fault is a
-  separate decision, outside 093.
+  (research R-3). That sets the worst-case field count for L. It holds while the header scan and
+  `OffsetTable::build` accept an empty value (re-derive as research R-3 does). Making an empty value a
+  scan fault is a separate decision, outside 093; it would leave B(L) an over-estimate, which is safe,
+  and change only which dense frames the Q-11 cells can build.
 - LFIXT (§5.4.12) is not a supported profile, so its "terminate on garbled" rule does not apply.
 
 ## Out of scope (follow-ups to file)
 
 - Entering `Disconnected` without closing the transport, on paths other than the establishment timeout:
   a refused Logon, an unanswered TestRequest, and today's MaxMessageSize breach before FR-013. The plan
-  re-derives this. Only FR-006's expiry closes the transport here. Filed as fixpp#534 (batch B27).
+  re-derives this. Only FR-006's expiry closes the transport here: a pre-Active refused Logon's
+  transport closes at T, not at the refusal, and closing it at the refusal is #534's. Filed as
+  fixpp#534 (batch B27).
 - `test_request_threshold` is computed and never read (`run_liveness_loop`). Filed as fixpp#535 (batch B27).
 - A resend-loop guard for a garbled frame retransmitted identically (§4.5.2's recommendation).
 - The size limit of the acceptor's bounded first-frame read.
