@@ -180,8 +180,13 @@ struct run_opts {
             res.bound_held) {
             res.bound_held = false;
             std::ostringstream msg;
-            msg << "work " << framer_test_access::total_work(framer) << " over the bound after "
-                << res.received << " received bytes, call " << res.calls.size();
+            if (!framer_test_access::work_bound_precondition_holds(framer)) {
+                msg << "the bound's precondition fails: BeginString cap below the default";
+            } else {
+                msg << "work " << framer_test_access::total_work(framer)
+                    << " over the bound after " << res.received << " received bytes, call "
+                    << res.calls.size();
+            }
             res.bound_violation = msg.str();
         }
         if (!r) {
@@ -514,6 +519,57 @@ TEST(FramerResync, Q4_BodyLengthZeroPaddedToTheDigitCapIsFramedAndOneMoreIsAGarb
     EXPECT_EQ(garbled.regions, 1U);
     EXPECT_EQ(garbled.discarded, over_cap.size());
     EXPECT_EQ(garbled.kinds, (std::vector<error>{error::wire_invalid_body_length}));
+}
+
+TEST(FramerResync, Q4_TheBoundRefusesAFramerBelowItsPrecondition) {
+    // K holds only for a BeginString cap no smaller than the default; a Framer with a
+    // smaller one is reported out of bound even before any work.
+    Framer::Config cfg{.max_frame_bytes = kLargeL, .resync_on_garble = true};
+    cfg.max_begin_string_bytes = Framer::Config{}.max_begin_string_bytes - 1U;
+    Framer const small_cap{cfg};
+    EXPECT_FALSE(framer_test_access::work_bound_precondition_holds(small_cap));
+    EXPECT_FALSE(framer_test_access::within_work_bound(small_cap, 1000, kLargeL, kReadSize));
+
+    Framer const default_cap{Framer::Config{.max_frame_bytes = kLargeL, .resync_on_garble = true}};
+    EXPECT_TRUE(framer_test_access::within_work_bound(default_cap, 1000, kLargeL, kReadSize));
+}
+
+TEST(FramerResync, Q4_EveryOutcomeKindChargesItsWork) {
+    // One call per outcome, each into a fresh Framer, fed whole so that nothing is
+    // appended to the carry: the reads (and the sum, for a frame) the outcome needed
+    // must be counted, whichever return the call took.
+    auto feed_once = [](std::string_view stream) {
+        pmr_allocation_tracking_resource tracker{std::pmr::new_delete_resource()};
+        Framer framer{Framer::Config{.max_frame_bytes = kSmallL, .resync_on_garble = true}};
+        pmr_carry_buffer carry{kSmallL + kReadSize, &tracker};
+        std::vector<frame_view> out(1);
+        (void)framer.feed(std::as_bytes(std::span<const char>{stream.data(), stream.size()}),
+                          carry, out);
+        return framer_test_access::work(framer);
+    };
+
+    // A frame: every header byte through the BodyLength SOH, then the body's last
+    // byte and the seven trailer bytes are read; everything before "10=" is summed.
+    std::string const frame = heartbeat(1);
+    std::size_t const body_off = frame.find("35=");
+    std::size_t const checksum_off = frame.size() - 7U;
+    auto const framed = feed_once(frame);
+    EXPECT_EQ(framed.read, body_off + 8U);
+    EXPECT_EQ(framed.summed, checksum_off);
+
+    auto const garbled = feed_once("X");  // leading junk, then a search over nothing
+    EXPECT_EQ(garbled.read, 1U);
+
+    // Over L: refused at the BodyLength digit that exceeds it, the last one here.
+    std::string const over = candidate_header(kSmallL + 1U);
+    auto const refused = feed_once(over);
+    EXPECT_EQ(refused.read, over.size() - 1U);
+    EXPECT_EQ(refused.summed, 0U);
+
+    std::string const partial = std::string("8=FIX.4.4") + soh + "9=12";
+    auto const waiting = feed_once(partial);
+    EXPECT_EQ(waiting.read, partial.size());
+    EXPECT_EQ(waiting.moved, partial.size()) << "the partial candidate is copied into the carry";
 }
 
 // ── Q-5 (Framer half): accounting across feeds ──────────────────────────────
