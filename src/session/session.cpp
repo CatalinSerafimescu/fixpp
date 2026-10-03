@@ -69,6 +69,7 @@
 #include <fixpp/dict/version_profile.hpp>
 #include <fixpp/dict/version_registry.hpp>
 
+#include "inbound_limit.hpp"       // 093 E-2: inbound_limit_for
 #include "msgtype_classifier.hpp"  // 019 T006: is_admin_msgtype (session-internal)
 #include "scan_frame_header.hpp"   // 040 US1: FrameHeader + scan_frame_header (moved from anon ns)
 // 019 T011: Application callback dispatch (inbound). Include here (session.cpp
@@ -1222,6 +1223,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
             co_return std::unexpected(error::invalid_session_config);
         }
     }
+
+    // 093-inbound-frame-dispositions (data-model E-2): the session's inbound limit L.
+    // Computed from the config alone, before the first observable mutation below.
+    inbound_limit_ = inbound_limit_for(cfg_);
 
     // ── Executor binding — the single executor_not_serialised enforcement
     // point (slot 48 / FR-009 / I-06): make_session_executor wraps

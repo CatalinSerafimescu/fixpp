@@ -659,6 +659,11 @@ private:
     // parsed from its inbound Logon. Observability only (no outbound guard here).
     std::optional<std::uint32_t> peer_advertised_max_message_size_;
 
+    // 093-inbound-frame-dispositions (data-model E-2): the session's one inbound
+    // limit L, set by open() from inbound_limit_for(cfg_) (src/session/inbound_limit.hpp).
+    // 0 until open() runs.
+    std::uint32_t inbound_limit_ = 0;
+
     // ── FR-004 / D-2 — FSM transition ring-buffer (capacity 16) ──────────────
     // Stores the last ≤16 fsm_state values recorded via record_state_transition_.
     // Written exclusively via record_state_transition_; ring wraps at index 16.

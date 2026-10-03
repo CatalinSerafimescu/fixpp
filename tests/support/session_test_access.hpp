@@ -13,6 +13,7 @@
 // header. Needs no test macro.
 
 #include <cstddef>
+#include <cstdint>
 #include <fixpp/session/session.hpp>
 #include <span>
 
@@ -52,6 +53,11 @@ struct session_test_access {
     // attach paths leave it empty on insecure_plain_tcp (D-10).
     [[nodiscard]] static bool live_peer_id_has_value(Session const& s) noexcept {
         return s.live_peer_id_.has_value();
+    }
+
+    // The inbound limit L open() stored (093, data-model E-2). Q-13 reads it.
+    [[nodiscard]] static std::uint32_t inbound_limit(Session const& s) noexcept {
+        return s.inbound_limit_;
     }
 };
 
