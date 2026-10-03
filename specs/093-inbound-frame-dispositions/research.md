@@ -247,6 +247,16 @@ comment.
   "MSVC debug never fails" is false.
 - The arena runs out first on 2× growth, at roughly 512 fields in 16 KiB. That figure is derived, not
   measured. MSVC's 1.5× growth fails at a different count.
+- **Measured (T007, at `b0683bce`, whose `src`/`include` equal merge-base `91be8661`; a densest-layout
+  frame, `1=<SOH>` fields).** The method and raw output are in the evidence file, `## Ceilings`.
+  - Every Linux preset T007 measured (debug, asan, ubsan, tsan, coverage, release) has a **null** arena
+    upstream. F=512 parses. F=513 fails with `out_of_memory`, and the refused upstream request is
+    recorded. The entry cap (`default_max_offset_entries`) fails at F=4097 with
+    `wire_offset_table_full`.
+  - MSVC debug (sandbox) has a `new_delete` upstream. It spills to the heap from F=317, and the cap at
+    F=4097 is its only ceiling.
+  - `linux-clang-libc++` is **unmeasured**: there is no local tree, and its Conan closure is not cached.
+    Tier 3 builds it in CI.
 
 **Decision.**
 - One function, `inbound_limit_for(cfg)`, computes L: the advertised 383 if set, else 64 KiB. It is
