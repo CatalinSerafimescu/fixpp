@@ -90,9 +90,10 @@ struct frame_opts {
 }
 
 [[nodiscard]] std::string heartbeat(unsigned seq) {
-    return make_frame("35=0\x01"
-                      "34=" +
-                      std::to_string(seq) + "\x01");
+    return make_frame(
+        "35=0\x01"
+        "34=" +
+        std::to_string(seq) + "\x01");
 }
 
 // A well-formed frame of exactly `len` bytes (BeginString FIX.4.4), padding a 58 field.
@@ -183,9 +184,8 @@ struct run_opts {
             if (!framer_test_access::work_bound_precondition_holds(framer)) {
                 msg << "the bound's precondition fails: BeginString cap below the default";
             } else {
-                msg << "work " << framer_test_access::total_work(framer)
-                    << " over the bound after " << res.received << " received bytes, call "
-                    << res.calls.size();
+                msg << "work " << framer_test_access::total_work(framer) << " over the bound after "
+                    << res.received << " received bytes, call " << res.calls.size();
             }
             res.bound_violation = msg.str();
         }
@@ -224,8 +224,8 @@ struct run_opts {
         res.bound_violation += "; at the end, work " +
                                std::to_string(framer_test_access::total_work(framer)) +
                                " against a bound of " +
-                               std::to_string(framer_test_access::work_bound(
-                                   framer, res.received, o.limit, kReadSize));
+                               std::to_string(framer_test_access::work_bound(framer, res.received,
+                                                                             o.limit, kReadSize));
     }
     res.pending_after = framer.pending_bytes();
     res.carry_allocations_during_feeds = tracker.allocate_calls() - allocations_at_construction;
@@ -265,8 +265,9 @@ void expect_same_outcome(run_result const& r, run_result const& ref, std::string
 // for larger streams, reads of the pump's size and one byte per read. Each segmentation
 // must reproduce the first run's outcome. Returns that first run.
 run_result run_every_segmentation(std::string_view stream, run_opts const& o = {}) {
-    run_result const ref = stream.size() <= kReadSize ? run(stream, whole(stream.size()), o)
-                                                      : run(stream, reads_of(stream.size(), kReadSize), o);
+    run_result const ref = stream.size() <= kReadSize
+                               ? run(stream, whole(stream.size()), o)
+                               : run(stream, reads_of(stream.size(), kReadSize), o);
     expect_run_invariants(ref, "first run");
     if (stream.size() <= kReadSize) {
         for (std::size_t k = 1; k < stream.size(); ++k) {
@@ -347,14 +348,15 @@ TEST(FramerResync, Q3_WrongChecksumFrameIsOneGarbleThroughItsOwnEnd) {
     for (std::size_t const limit : {kLargeL, kSmallL}) {
         SCOPED_TRACE(limit);
         std::string const inner = heartbeat(1);
-        std::string const outer =
-            make_frame("35=0\x01"
-                       "58=" +
-                           inner + soh,
-                       {.bad_checksum = true});
+        std::string const outer = make_frame(
+            "35=0\x01"
+            "58=" +
+                inner + soh,
+            {.bad_checksum = true});
         std::string const g2 = heartbeat(2);
         run_result const r = run_every_segmentation(outer + g2, {.limit = limit});
-        EXPECT_EQ(r.frames, (std::vector<std::string>{g2})) << "the inner frame is part of the garble (L-15)";
+        EXPECT_EQ(r.frames, (std::vector<std::string>{g2}))
+            << "the inner frame is part of the garble (L-15)";
         EXPECT_EQ(r.regions, 1U);
         EXPECT_EQ(r.discarded, outer.size());
         EXPECT_EQ(r.kinds, (std::vector<error>{error::wire_checksum_mismatch}));
@@ -550,16 +552,16 @@ TEST(FramerResync, Q4_TheBoundRefusesAFramerBelowItsPrecondition) {
 }
 
 TEST(FramerResync, Q4_EveryOutcomeKindChargesItsWork) {
-    // One call per outcome, each into a fresh Framer, fed whole so that nothing is
-    // appended to the carry: the reads (and the sum, for a frame) the outcome needed
-    // must be counted, whichever return the call took.
+    // One call per outcome, each into a fresh Framer and fed whole: the reads each
+    // outcome needed, and a frame's sum, must reach the counters whichever return
+    // the call exits through.
     auto feed_once = [](std::string_view stream) {
         pmr_allocation_tracking_resource tracker{std::pmr::new_delete_resource()};
         Framer framer{Framer::Config{.max_frame_bytes = kSmallL, .resync_on_garble = true}};
         pmr_carry_buffer carry{kSmallL + kReadSize, &tracker};
         std::vector<frame_view> out(1);
-        (void)framer.feed(std::as_bytes(std::span<const char>{stream.data(), stream.size()}),
-                          carry, out);
+        (void)framer.feed(std::as_bytes(std::span<const char>{stream.data(), stream.size()}), carry,
+                          out);
         return framer_test_access::work(framer);
     };
 

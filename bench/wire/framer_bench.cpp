@@ -94,8 +94,8 @@ BENCHMARK(BM_Framer_Feed_NoCarry);
 
 // ── BM_Framer_Feed_NoCarry_Resync ─────────────────────────────────────────────
 // 093-inbound-frame-dispositions (tasks.md T018a): the same frame and carry as
-// BM_Framer_Feed_NoCarry, over a Framer configured as the session's read pump
-// configures it: resync on, the 64 KiB default inbound limit, and the BeginString
+// BM_Framer_Feed_NoCarry, over a Framer configured as contract C-1 has the session's
+// read pump configure it: resync on, the 64 KiB default inbound limit, and the BeginString
 // cap at the larger of the default and the configured BeginString's length (plan
 // OD-16; FIX.4.4 here, the frame's). It is the only bench row on the pump's
 // resync-mode Framer path. It cannot exist on the base, so it is compared by name

@@ -45,10 +45,10 @@ struct framer_test_access {
     // Framer whose carry holds L plus R bytes has done at most
     //     K * N * (1 + L/R + max_begin_string_bytes + Framer::kBodyLengthDigitCap)
     // units of counted work.
-    // Precondition: max_begin_string_bytes is no smaller than the Config default
-    // (every Framer the session builds). within_work_bound() reports a Framer that
-    // breaks it as out of bound, so a cell or fuzz input using one fails rather than
-    // skipping the check.
+    // Precondition: max_begin_string_bytes is no smaller than the Config default, as
+    // plan OD-16's session cap, max(default, configured length), is.
+    // within_work_bound() reports a Framer that breaks it as out of bound, so a cell
+    // or fuzz input using one fails rather than skipping the check.
     // Recipe (tasks.md T017a): charge one unit per byte read, summed or moved, and
     // bound each term from the clause that limits it: the appends; W-1's compactions
     // (each moves at most L bytes, and more than a read's worth of bytes is appended
@@ -68,11 +68,9 @@ struct framer_test_access {
     [[nodiscard]] static std::uint64_t work_bound(Framer const& f, std::uint64_t received,
                                                   std::uint64_t limit,
                                                   std::uint64_t read_size) noexcept {
-        std::uint64_t const caps =
-            static_cast<std::uint64_t>(f.cfg_.max_begin_string_bytes) +
-            static_cast<std::uint64_t>(Framer::kBodyLengthDigitCap);
-        return kWorkBoundConstant * received * (read_size + limit + (read_size * caps)) /
-               read_size;
+        std::uint64_t const caps = static_cast<std::uint64_t>(f.cfg_.max_begin_string_bytes) +
+                                   static_cast<std::uint64_t>(Framer::kBodyLengthDigitCap);
+        return kWorkBoundConstant * received * (read_size + limit + (read_size * caps)) / read_size;
     }
 
     // True while the counted work is within the bound for `received` bytes, at limit
@@ -84,9 +82,8 @@ struct framer_test_access {
         if (!work_bound_precondition_holds(f)) {
             return false;
         }
-        std::uint64_t const caps =
-            static_cast<std::uint64_t>(f.cfg_.max_begin_string_bytes) +
-            static_cast<std::uint64_t>(Framer::kBodyLengthDigitCap);
+        std::uint64_t const caps = static_cast<std::uint64_t>(f.cfg_.max_begin_string_bytes) +
+                                   static_cast<std::uint64_t>(Framer::kBodyLengthDigitCap);
         std::uint64_t const per_byte_times_r = read_size + limit + (read_size * caps);
         return total_work(f) * read_size <= kWorkBoundConstant * received * per_byte_times_r;
     }
