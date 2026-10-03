@@ -61,6 +61,8 @@
 #include <chrono>
 #include <cstddef>
 #include <fixpp/core/engine_config.hpp>
+#include <fixpp/core/fix_time.hpp>
+#include <fixpp/session/compid_authorization_policy.hpp>
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/seqnum_manager.hpp>
 #include <fixpp/session/session_event.hpp>
@@ -72,6 +74,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <system_error>
 #include <variant>
 #include <vector>
 
@@ -849,4 +852,431 @@ TEST(EngineFirstFrameResync, Q10_LongerThanTheCapIsAGarbleAndTheLogonAfterItEsta
     ASSERT_EQ(o.events.size(), 1U);
     EXPECT_EQ(o.events[0].first_kind, fixpp::core::error::wire_framing_resync);
     EXPECT_EQ(o.events[0].discarded_bytes, garbled.size());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 093-inbound-frame-dispositions — phase (a) of the establishment deadline (contract
+// C-4, data-model E-6; quickstart Q-17). From accept until a first frame whose CompIDs
+// match, the acceptor has no Session. Its first-frame read is bounded by
+// min(5 s, deadline - now) and by its 4096-byte budget, which counts the bytes the
+// resync discards. Expiry and over-budget close the raw transport; no Session exists,
+// so nothing is recorded (contract L-6), which these cells observe as lookup() null.
+//
+// The plaintext cells run an insecure_plain_tcp acceptor on the rig's mock engine
+// clock: run_accept_loop skips the TLS handshake for that profile, so no handshake
+// bound competes with T. Mock-clock advances here must fire nothing until the step to
+// the bound under test (KIND C), and that step moves a stored anchor (KIND D).
+// ─────────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+// Bytes a resync Framer discards whole: no "8=" anywhere, so it holds none of them.
+std::string discardable(std::size_t n) { return std::string(n, 'X'); }
+
+struct PhaseAObservation {
+    bool read_ended = false;
+    bool has_session = false;
+};
+
+PhaseAObservation observe_phase_a(pr::Rig& rig) {
+    return {.read_ended = rig.peer.read_ended, .has_session = rig.session() != nullptr};
+}
+
+}  // namespace
+
+// T below 5 s: the first-frame read ends at T. Garbage under the budget, written in
+// four parts over the first 1.5 s, is not closed before then.
+TEST(EngineFirstFramePhaseA, Q17_TBelowFiveSeconds_SlowGarbageUnderTheBudgetEndsAtT) {
+    pr::Rig rig;
+    auto cfg = rig.cfg();
+    cfg.logon_timeout_ms = 2000;
+    bool const up = rig.start(std::move(cfg)) && rig.connect_peer();
+    bool ok = up;
+    std::vector<PhaseAObservation> during;
+    for (int part = 0; ok && part < 4; ++part) {
+        if (part > 0) {
+            // KIND C (ci/mock-clock-staging-sweep.sh): nothing may fire before T; that
+            // is the oracle.
+            rig.clock->advance(std::chrono::milliseconds{500});
+        }
+        ok = rig.deliver(discardable(1000));
+        during.push_back(observe_phase_a(rig));
+    }
+    PhaseAObservation before;
+    bool closed = false;
+    PhaseAObservation after;
+    if (ok) {
+        // KIND C (ci/mock-clock-staging-sweep.sh): T - 1 ms; nothing may fire.
+        rig.clock->advance(std::chrono::milliseconds{499});
+        rig.settle();
+        before = observe_phase_a(rig);
+        // KIND D (ci/mock-clock-staging-sweep.sh): the read's deadline is a stored anchor
+        // predating the advance.
+        rig.clock->advance(std::chrono::milliseconds{1});
+        closed = rig.run_until([&] { return rig.peer.read_ended; });
+        after = observe_phase_a(rig);
+    }
+    rig.stop();
+
+    ASSERT_TRUE(up) << "setup";
+    EXPECT_TRUE(ok) << "a part could not be written: the connection closed before T";
+    for (std::size_t i = 0; i < during.size(); ++i) {
+        EXPECT_FALSE(during[i].read_ended) << "closed after part " << i << ", before T";
+    }
+    EXPECT_FALSE(before.read_ended) << "closed at T - 1 ms";
+    EXPECT_TRUE(closed) << "the first-frame read did not end at T";
+    EXPECT_FALSE(after.has_session) << "no Session exists, so nothing is recorded (L-6)";
+}
+
+// T above 5 s: a garbage-only peer meets the first-frame read's own 5 s bound first.
+TEST(EngineFirstFramePhaseA, Q17_TAboveFiveSeconds_GarbageOnlyPeerClosedAtFiveSeconds) {
+    pr::Rig rig;
+    auto cfg = rig.cfg();
+    cfg.logon_timeout_ms = 8000;
+    bool const up = rig.start(std::move(cfg)) && rig.connect_peer();
+    bool const d = up && rig.deliver(discardable(100));
+    PhaseAObservation before;
+    bool closed = false;
+    PhaseAObservation after;
+    if (d) {
+        // KIND C (ci/mock-clock-staging-sweep.sh): 5 s - 1 ms; nothing may fire.
+        rig.clock->advance(std::chrono::milliseconds{4999});
+        rig.settle();
+        before = observe_phase_a(rig);
+        // KIND D (ci/mock-clock-staging-sweep.sh): a stored anchor predating the advance.
+        rig.clock->advance(std::chrono::milliseconds{1});
+        closed = rig.run_until([&] { return rig.peer.read_ended; });
+        after = observe_phase_a(rig);
+    }
+    rig.stop();
+
+    ASSERT_TRUE(up && d) << "setup";
+    EXPECT_FALSE(before.read_ended) << "closed before 5 s";
+    EXPECT_TRUE(closed) << "the first-frame read did not end at 5 s";
+    EXPECT_FALSE(after.has_session);
+}
+
+// The budget counts the bytes the resync discards (carried from Phase 3, T036). With no
+// clock advance, 4096 discarded bytes leave the read open and 4097 close it: every byte
+// was discarded, so only a budget that counts discarded bytes can reach 4097.
+TEST(EngineFirstFramePhaseA, Q17_DiscardedBytesCountAgainstTheBudget) {
+    PhaseAObservation at_budget;
+    bool at_budget_ok = false;
+    {
+        pr::Rig rig;
+        at_budget_ok = rig.start(rig.cfg()) && rig.connect_peer() && rig.deliver(discardable(4096));
+        at_budget = observe_phase_a(rig);
+        rig.stop();
+    }
+    bool over_ok = false;
+    bool over_closed = false;
+    PhaseAObservation over;
+    {
+        pr::Rig rig;
+        over_ok = rig.start(rig.cfg()) && rig.connect_peer() && rig.deliver(discardable(4097));
+        over_closed = over_ok && rig.run_until([&] { return rig.peer.read_ended; });
+        over = observe_phase_a(rig);
+        rig.stop();
+    }
+
+    ASSERT_TRUE(at_budget_ok && over_ok) << "setup";
+    EXPECT_FALSE(at_budget.read_ended) << "4096 discarded bytes do not exceed the budget";
+    EXPECT_TRUE(over_closed) << "4097 discarded bytes exceed the budget";
+    EXPECT_FALSE(over.has_session);
+}
+
+// ── Q-17 on TLS: T below the 1500 ms handshake bound ────────────────────────
+
+namespace {
+
+// A raw-TCP peer that never speaks TLS. `elapsed` runs from before the connect to the
+// acceptor's close, so it is not less than the server's handshake bound.
+struct RawTcpProbe {
+    std::atomic<bool> done{false};
+    bool closed = false;
+    std::chrono::milliseconds elapsed{0};
+};
+
+asio::awaitable<void> probe_raw_tcp(asio::io_context& ioc, uint16_t port,
+                                    std::chrono::milliseconds self_deadline_after,
+                                    RawTcpProbe& out) {
+    // Shared-owned and captured by value in the timer handler, as in
+    // probe_closed_within_window() above.
+    auto s = std::make_shared<asio::ip::tcp::socket>(ioc);
+    auto timed_out = std::make_shared<bool>(false);
+    asio::steady_timer self_deadline(ioc);
+    auto const t0 = std::chrono::steady_clock::now();
+    bool connected = false;
+    try {
+        co_await s->async_connect(
+            asio::ip::tcp::endpoint{asio::ip::make_address("127.0.0.1"), port},
+            asio::use_awaitable);
+        connected = true;
+        self_deadline.expires_after(self_deadline_after);
+        self_deadline.async_wait([s, timed_out](const std::error_code& ec) {
+            if (!ec) {
+                *timed_out = true;
+                s->close();
+            }
+        });
+        std::array<char, 64> buf{};
+        co_await s->async_read_some(asio::buffer(buf), asio::use_awaitable);
+        self_deadline.cancel();
+    } catch (const std::system_error&) {
+        self_deadline.cancel();
+        if (connected && !*timed_out) {
+            out.closed = true;
+            out.elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - t0);
+        }
+    } catch (...) {
+        self_deadline.cancel();
+    }
+    out.done.store(true, std::memory_order_release);
+}
+
+// A real mTLS client that waits `delay` after its TCP connect before it handshakes,
+// then writes `logon` at once and reads. `elapsed` runs from the end of its handshake
+// to the acceptor's close; `logon_reply` is set if a Logon(35=A) arrives first.
+struct LateHandshakeProbe {
+    std::atomic<bool> done{false};
+    bool handshaken = false;
+    bool closed = false;
+    bool logon_reply = false;
+    std::chrono::milliseconds elapsed{0};
+};
+
+asio::awaitable<void> probe_late_handshake(asio::io_context& ioc,
+                                           fixpp::transport::test::LoopbackTlsFixture& fixture,
+                                           uint16_t port, std::chrono::milliseconds delay,
+                                           std::string logon,
+                                           std::chrono::milliseconds self_deadline_after,
+                                           LateHandshakeProbe& out) {
+    try {
+        std::shared_ptr<fixpp::transport::Transport> client =
+            fixture.make_client(ioc.get_executor());
+        auto* tls = dynamic_cast<fixpp::transport::TlsTransport*>(client.get());
+        if (tls != nullptr &&
+            (co_await client->async_connect(fixpp::transport::Endpoint{"127.0.0.1", port}))
+                .has_value()) {
+            asio::steady_timer wait(ioc);
+            wait.expires_after(delay);
+            co_await wait.async_wait(asio::use_awaitable);
+            if ((co_await tls->async_handshake(fixture.ssl_cfg())).has_value()) {
+                out.handshaken = true;
+                auto const t0 = std::chrono::steady_clock::now();
+                std::vector<std::byte> bytes = pr::to_bytes(logon);
+                (void)co_await client->async_write(std::span<const std::byte>{bytes});
+
+                // Shared-owned and captured by value, as in probe_post_handshake().
+                auto self_timed_out = std::make_shared<bool>(false);
+                asio::steady_timer self_deadline(ioc);
+                self_deadline.expires_after(self_deadline_after);
+                self_deadline.async_wait([client, self_timed_out](const std::error_code& ec) {
+                    if (!ec) {
+                        *self_timed_out = true;
+                        (void)client->cancel();
+                    }
+                });
+                std::string received;
+                for (;;) {
+                    std::array<std::byte, 512> buf{};
+                    auto r = co_await client->async_read_some(std::span<std::byte>{buf});
+                    if (!r.has_value()) {
+                        if (!*self_timed_out) {
+                            out.closed = true;
+                            out.elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::steady_clock::now() - t0);
+                        }
+                        break;
+                    }
+                    for (std::size_t i = 0; i < *r; ++i) {
+                        received.push_back(static_cast<char>(buf[i]));
+                    }
+                    if (!pr::frames_of_type(received, "A").empty()) {
+                        out.logon_reply = true;
+                        break;
+                    }
+                }
+                self_deadline.cancel();
+            }
+        }
+        (void)client->close();
+    } catch (...) {
+    }
+    out.done.store(true, std::memory_order_release);
+}
+
+// Puts the fixture client's certificate (CN fixpp-leaf-rsa2048) on the acceptor's
+// CompID allow-list for INITIATOR, so its Logon is admitted and answered; the
+// default-constructed policy denies every Logon (engine_acceptor_test.cpp,
+// OnListIdentityAdmitsToEstablished, is the precedent).
+void admit_the_fixture_client(fixpp::session::SessionConfig& c) {
+    fixpp::session::CompIdAuthorizationPolicy authz;
+    authz.add_binding("fixpp-leaf-rsa2048", "INITIATOR");
+    c.compid_authorization_policy = authz;
+}
+
+// A Logon from the harness's initiator identity to its acceptor, stamped now.
+std::string harness_logon() {
+    std::array<char, 32> buf{};
+    auto const now =
+        std::chrono::time_point_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now());
+    auto const st = fixpp::core::utc_time_to_fix_string(
+        now, fixpp::core::fix_time_precision::millis, std::span<char>{buf});
+    std::string const sending_time = st ? std::string{st->data(), st->size()} : std::string{};
+    return pr::message("FIX.4.2", "A", 1, "INITIATOR", "ACCEPTOR", sending_time,
+                       "98=0\x01"
+                       "108=30\x01");
+}
+
+}  // namespace
+
+// T = 300 ms, below the 1500 ms handshake bound: a stalled handshake (a raw-TCP peer
+// that never speaks TLS) is closed at the handshake bound, not at T. Regression guard:
+// 093 does not shorten the handshake bound (contract C-4: phase (a) lasts at most
+// max(T, the handshake bound) on TLS). A close near 300 ms fails the lower bound.
+TEST(EngineFirstFramePhaseATls, Q17_TBelowTheHandshakeBound_StalledHandshakeClosesAtTheBound) {
+    asio::io_context ioc;
+    fixpp::core::EngineConfig eng_cfg;
+    eng_cfg.executor = ioc.get_executor();
+    auto harness = EngineLoopbackHarness::build(
+        ioc.get_executor(), std::move(eng_cfg), /*register_sessions=*/true,
+        [](fixpp::session::SessionConfig& c) { c.logon_timeout_ms = 300; });
+    if (!harness) {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
+    ASSERT_TRUE(harness->engine().start().has_value()) << "engine.start() failed";
+    fixpp::test_support::engine_stop_guard stop_guard{*harness, ioc};  // #323
+    ioc.run_for(std::chrono::milliseconds{50});
+    ioc.restart();
+    uint16_t port = harness->server_endpoint().port;
+    if (port == 0) {
+        GTEST_SKIP() << "acceptor listener did not bind";
+    }
+
+    RawTcpProbe probe;
+    asio::co_spawn(ioc, probe_raw_tcp(ioc, port, /*self_deadline_after=*/6s, probe),
+                   asio::detached);
+    EXPECT_TRUE(fixpp::test_support::pump_until(
+        ioc, [&] { return probe.done.load(std::memory_order_acquire); }, 8s, 50ms))
+        << "probe did not report within cap";
+    bool const closed = probe.closed;
+    auto const ms = probe.elapsed.count();
+
+    auto stop_fut = asio::co_spawn(ioc, harness->engine().stop(), asio::use_future);
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_fut,
+            "EngineFirstFramePhaseATls::Q17_TBelowTheHandshakeBound_StalledHandshake")) {
+        return;
+    }
+    stop_fut.get();
+
+    ASSERT_TRUE(closed) << "the stalled handshake was never closed";
+    // The server's handshake timer starts after this probe's connect began, and timers
+    // fire late, never early, so the bound itself cannot measure below 1500 ms; 1400
+    // leaves rounding room and still fails a close at T (300 ms).
+    EXPECT_GE(ms, 1400) << "closed after " << ms << " ms: before the handshake bound";
+    // Excludes the first-frame read's 5 s bound and a close that never came.
+    EXPECT_LT(ms, 4500) << "closed after " << ms << " ms: well after the handshake bound";
+}
+
+// T = 150 ms; the peer handshakes 600 ms after its connect, inside the 1500 ms handshake
+// bound, so no establishment time remains when the handshake ends. The accept loop
+// closes the transport without reading: the peer's Logon, written at once, draws no
+// Logon reply, and the close comes well before a first-frame read issued on its 5 s
+// bound would have ended (contract C-4, data-model E-6).
+TEST(EngineFirstFramePhaseATls, Q17_HandshakeEndingAfterT_ClosesWithoutReadingTheLogon) {
+    asio::io_context ioc;
+    fixpp::core::EngineConfig eng_cfg;
+    eng_cfg.executor = ioc.get_executor();
+    auto harness = EngineLoopbackHarness::build(ioc.get_executor(), std::move(eng_cfg),
+                                                /*register_sessions=*/true,
+                                                [](fixpp::session::SessionConfig& c) {
+                                                    c.logon_timeout_ms = 150;
+                                                    admit_the_fixture_client(c);
+                                                });
+    if (!harness) {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
+    ASSERT_TRUE(harness->engine().start().has_value()) << "engine.start() failed";
+    fixpp::test_support::engine_stop_guard stop_guard{*harness, ioc};  // #323
+    ioc.run_for(std::chrono::milliseconds{50});
+    ioc.restart();
+    uint16_t port = harness->server_endpoint().port;
+    if (port == 0) {
+        GTEST_SKIP() << "acceptor listener did not bind";
+    }
+
+    LateHandshakeProbe probe;
+    asio::co_spawn(ioc,
+                   probe_late_handshake(ioc, harness->transport_fixture(), port,
+                                        /*delay=*/600ms, harness_logon(),
+                                        /*self_deadline_after=*/8s, probe),
+                   asio::detached);
+    EXPECT_TRUE(fixpp::test_support::pump_until(
+        ioc, [&] { return probe.done.load(std::memory_order_acquire); }, 10s, 50ms))
+        << "probe did not report within cap";
+    bool const handshaken = probe.handshaken;
+    bool const closed = probe.closed;
+    bool const reply = probe.logon_reply;
+    auto const ms = probe.elapsed.count();
+
+    auto stop_fut = asio::co_spawn(ioc, harness->engine().stop(), asio::use_future);
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_fut, "EngineFirstFramePhaseATls::Q17_HandshakeEndingAfterT")) {
+        return;
+    }
+    stop_fut.get();
+
+    ASSERT_TRUE(handshaken) << "the late handshake did not complete inside its bound";
+    EXPECT_FALSE(reply) << "the acceptor read the Logon and replied after T";
+    EXPECT_TRUE(closed) << "the connection was not closed";
+    EXPECT_LT(ms, 2500) << "closed " << ms << " ms after the handshake";
+}
+
+// The positive control for the cell above: the same peer, the same late handshake and
+// Logon, with T at its 10 s default. The acceptor reads the Logon and replies, so the
+// probe can see a reply when one is sent.
+TEST(EngineFirstFramePhaseATls, Q17_HandshakeEndingBeforeT_TheLogonIsReadAndAnswered) {
+    asio::io_context ioc;
+    fixpp::core::EngineConfig eng_cfg;
+    eng_cfg.executor = ioc.get_executor();
+    auto harness =
+        EngineLoopbackHarness::build(ioc.get_executor(), std::move(eng_cfg),
+                                     /*register_sessions=*/true, admit_the_fixture_client);
+    if (!harness) {
+        GTEST_SKIP() << "FIXPP_TLS_FIXTURE_DIR not set";
+    }
+    ASSERT_TRUE(harness->engine().start().has_value()) << "engine.start() failed";
+    fixpp::test_support::engine_stop_guard stop_guard{*harness, ioc};  // #323
+    ioc.run_for(std::chrono::milliseconds{50});
+    ioc.restart();
+    uint16_t port = harness->server_endpoint().port;
+    if (port == 0) {
+        GTEST_SKIP() << "acceptor listener did not bind";
+    }
+
+    LateHandshakeProbe probe;
+    asio::co_spawn(ioc,
+                   probe_late_handshake(ioc, harness->transport_fixture(), port,
+                                        /*delay=*/600ms, harness_logon(),
+                                        /*self_deadline_after=*/8s, probe),
+                   asio::detached);
+    EXPECT_TRUE(fixpp::test_support::pump_until(
+        ioc, [&] { return probe.done.load(std::memory_order_acquire); }, 10s, 50ms))
+        << "probe did not report within cap";
+    bool const handshaken = probe.handshaken;
+    bool const reply = probe.logon_reply;
+
+    auto stop_fut = asio::co_spawn(ioc, harness->engine().stop(), asio::use_future);
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_fut, "EngineFirstFramePhaseATls::Q17_HandshakeEndingBeforeT")) {
+        return;
+    }
+    stop_fut.get();
+
+    ASSERT_TRUE(handshaken);
+    EXPECT_TRUE(reply) << "no Logon reply: the probe cannot see one, so the cell above "
+                          "proves nothing";
 }

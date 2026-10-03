@@ -2233,6 +2233,13 @@ set_property(TEST session_unparseable_frame_disposition APPEND PROPERTY LABELS 0
 add_threading_test(session_inbound_frame_dispositions inbound_frame_dispositions_test.cpp)
 set_tests_properties(session_inbound_frame_dispositions PROPERTIES LABELS "093;session")
 
+# ── 093-inbound-frame-dispositions — the establishment deadline (User Story 2) ──
+# Standalone, not a grouped bucket ([const §VII.8]): its cells run an Engine whose read
+# pump races the establishment deadline on a mock clock, over loopback TCP or a scripted
+# transport double, which is the timer and coroutine class §VII.8 keeps out of a bucket.
+add_threading_test(session_engine_establishment_timeout engine_establishment_timeout_test.cpp)
+set_tests_properties(session_engine_establishment_timeout PROPERTIES LABELS "093;session")
+
 # ── fixpp#215 item 1 — one as_table_view() walk per opened session ───────────
 # W1: open() with no config-supplied snapshot walks the Dictionary exactly ONCE
 #     (was 2: inbound_tv_ + the strict validator, independently).

@@ -10,6 +10,9 @@
 // unset. Read after open() through session_test_access (fixpp#511). The refusal of a
 // value outside that range is a separate cell.
 //
+// Q-13 (timeout half; data-model E-7): logon_timeout_ms == 0 is refused by
+// Engine::register_session and by Session::open().
+//
 // Q-1 (T026; contract C-1, C-2 step 1; FR-001, FR-003, FR-004): the FIX-TC 2020 rows
 // 2d, 2m, 2t, 3b, 3c and 3e, each written to an Active session through the real read
 // pump between two good frames. The garbled bytes are disregarded and the session
@@ -34,6 +37,7 @@
 #include <fixpp/log/logger.hpp>
 #include <fixpp/log/record.hpp>
 #include <fixpp/log/sink.hpp>
+#include <fixpp/session/engine.hpp>
 #include <fixpp/session/seqnum_manager.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
@@ -118,6 +122,66 @@ TEST_F(InboundFrameDispositions, Q13_InboundLimitFollowsAnAdvertisedMaxMessageSi
         ASSERT_TRUE(open_sync(sess).has_value());
         EXPECT_EQ(session_test_access::inbound_limit(sess), advertised);
     }
+}
+
+// ── Q-13, the timeout half (T042; data-model E-7) ───────────────────────────
+//
+// logon_timeout_ms == 0 is refused with invalid_session_config by
+// Engine::register_session and by Session::open(); 1, the smallest legal value, is
+// accepted by both, so the refusal is keyed on zero and not on the field.
+
+TEST_F(InboundFrameDispositions, Q13_LogonTimeoutZeroIsRefusedByRegisterSessionAndOneIsAccepted) {
+    fixpp::core::EngineConfig ec;
+    ec.executor = ioc.get_executor();
+    ec.clock = clock;
+    fixpp::session::Engine eng{ioc.get_executor(), std::move(ec)};
+
+    auto zero = make_acceptor_cfg(std::nullopt);
+    zero.logon_timeout_ms = 0;
+    auto const refused = eng.register_session(zero);
+    auto one = make_acceptor_cfg(std::nullopt);
+    one.logon_timeout_ms = 1;
+    auto const accepted = eng.register_session(one);
+
+    auto stop_fut = asio::co_spawn(ioc, eng.stop(), asio::use_future);
+    if (!fixpp::test_support::run_to_exhaustion_or_report(
+            ioc, stop_fut, "InboundFrameDispositions::Q13_LogonTimeoutZero register")) {
+        return;
+    }
+    stop_fut.get();
+
+    ASSERT_FALSE(refused.has_value()) << "register_session accepted logon_timeout_ms == 0";
+    EXPECT_EQ(refused.error(), fixpp::core::error::invalid_session_config);
+    EXPECT_TRUE(accepted.has_value()) << "register_session refused logon_timeout_ms == 1";
+}
+
+TEST_F(InboundFrameDispositions, Q13_LogonTimeoutZeroIsRefusedByOpenAndOneIsAccepted) {
+    auto zero = make_acceptor_cfg(std::nullopt);
+    zero.logon_timeout_ms = 0;
+    Session refused(engine, zero);
+    auto const r = open_sync(refused);
+    ASSERT_FALSE(r.has_value()) << "open() accepted logon_timeout_ms == 0";
+    EXPECT_EQ(r.error(), fixpp::core::error::invalid_session_config);
+    EXPECT_FALSE(refused.is_open()) << "a refused open() left the session open";
+    auto close_fut = asio::co_spawn(ioc, refused.close(close_mode::terminal), asio::use_future);
+    if (!fixpp::test_support::run_window_then_ready(
+            ioc, close_fut, std::chrono::milliseconds{200},
+            "InboundFrameDispositions::Q13_LogonTimeoutZero close")) {
+        fixpp::test_support::cancel_and_drain_or_report(
+            ioc, *clock, "InboundFrameDispositions::Q13_LogonTimeoutZero close");
+        ADD_FAILURE() << fixpp::test_support::kWindowMiss
+                      << "InboundFrameDispositions::Q13_LogonTimeoutZero close";
+        return;
+    }
+    auto const c = close_fut.get();
+    ASSERT_FALSE(c.has_value());
+    EXPECT_EQ(c.error(), fixpp::core::error::session_already_closed)
+        << "a refused open() is a never-opened session";
+
+    auto one = make_acceptor_cfg(std::nullopt);
+    one.logon_timeout_ms = 1;
+    Session accepted(engine, one);
+    EXPECT_TRUE(open_sync(accepted).has_value()) << "open() refused logon_timeout_ms == 1";
 }
 
 // ── Garble observation, shared by the pump cells below ──────────────────────

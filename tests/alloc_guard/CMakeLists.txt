@@ -239,6 +239,34 @@ if(TEST dict066_grouped_read_alloc_guard_mallocnesia)
   set_property(TEST dict066_grouped_read_alloc_guard_mallocnesia APPEND PROPERTY LABELS 093)
 endif()
 
+# 093-inbound-frame-dispositions T044 (quickstart Q-19; FR-052; plan OD-22): an Active
+# read of the real session read pump makes no NEW global operator new call, against a
+# count measured on the merge-base's pump. Standalone ([const §VII.8]): its TU replaces
+# global operator new for the whole binary, and its cells run an Engine over loopback TCP
+# on a mock clock. No *_mallocnesia twin: its window wraps io_context::run_one_for(), the
+# class the "DELIBERATELY NOT GATED" note above keeps out of the LD_PRELOAD gate.
+# Linux only: the count it compares against was measured on Linux, where asio's reactor
+# and executor queries are the ones the cell's constant names; another platform's
+# completion path can make a different number of calls.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  add_executable(test_093_pump_active_read_alloc_guard test_093_pump_active_read_alloc_guard.cpp)
+  target_link_libraries(test_093_pump_active_read_alloc_guard PRIVATE
+    fixpp_session
+    fixpp_mock_clock
+    GTest::gtest
+    GTest::gtest_main
+  )
+  target_include_directories(test_093_pump_active_read_alloc_guard PRIVATE
+    "${CMAKE_SOURCE_DIR}/tests"
+  )
+  set_target_properties(test_093_pump_active_read_alloc_guard PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+  )
+  add_test(NAME alloc_guard_093_pump_active_read COMMAND test_093_pump_active_read_alloc_guard)
+  set_tests_properties(alloc_guard_093_pump_active_read PROPERTIES
+    LABELS "093;alloc_guard")
+endif()
+
 # fixpp#495 (`.specify/495-493-486-dict-reify-copy.md` §10 T-14): owned-route
 # dict::reify draws every allocation from the caller's mr. Dual gate: the TU-local
 # operator-new counter (the plain test) plus mallocnesia. The owned cell is the
