@@ -120,6 +120,9 @@ set_tests_properties(capi_pure_tests PROPERTIES LABELS "capi;083;abi;091")
 # 092-garbled-frame-reject: label 092 (expected-ctest-092.txt). APPEND, after the
 # last LABELS setter for this entry, so the existing labels survive.
 set_property(TEST capi_pure_tests APPEND PROPERTY LABELS 092)
+# 093-inbound-frame-dispositions: label 093 (expected-ctest-093.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST capi_pure_tests APPEND PROPERTY LABELS 093)
 
 # T004 (US1, SC-004) — 051 error-block foundational oracle (translate re-point +
 # strerror + per-code-minor downgrade).  T022 (US5) appends live end-to-end arms

@@ -200,6 +200,9 @@ set_tests_properties(session_pure_tests PROPERTIES LABELS "075;session")
 # 092-garbled-frame-reject: label 092 (expected-ctest-092.txt). APPEND, after the
 # last LABELS setter for this entry, so the existing labels survive.
 set_property(TEST session_pure_tests APPEND PROPERTY LABELS 092)
+# 093-inbound-frame-dispositions: label 093 (expected-ctest-093.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST session_pure_tests APPEND PROPERTY LABELS 093)
 
 # ── Grouped bucket: session_store_tests (6 .cpp → 1 binary) ────────────────
 # Store-family witnesses that neither construct an asio::thread_pool nor carry
@@ -266,12 +269,18 @@ fixpp_add_store_test(store_memory_round_trip SOURCES
   test_memory_store_round_trip.cpp
   _fixtures_/test_double_fsm.cpp
 )
+# 093-inbound-frame-dispositions: label 093 (expected-ctest-093.txt). APPEND, so it
+# composes with any LABELS setter placed above it.
+set_property(TEST store_memory_round_trip APPEND PROPERTY LABELS 093)
 
 # T014 — seam 2: FileStore crash survival (SC-002 / [2e §D.4])
 fixpp_add_store_test(store_file_crash_survival SOURCES
   test_file_store_crash_survival.cpp
   _fixtures_/test_double_fsm.cpp
 )
+# 093-inbound-frame-dispositions: label 093 (expected-ctest-093.txt). APPEND, so it
+# composes with any LABELS setter placed above it.
+set_property(TEST store_file_crash_survival APPEND PROPERTY LABELS 093)
 
 # T014 (split) — seam 2 CompID-validation sub-cases ([2e §D.4] Gap 1 close)
 fixpp_add_store_test(store_file_compid_validation SOURCES
@@ -1192,6 +1201,9 @@ set_tests_properties(engine_firstframe PROPERTIES
   ENVIRONMENT
     "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "015;us1;live_tls;firstframe;window")
+# 093-inbound-frame-dispositions: label 093 (expected-ctest-093.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST engine_firstframe APPEND PROPERTY LABELS 093)
 
 # ── 015-runtime-engine Phase 4 (US2) — T014 ────────────────────────────────
 # TDD RED-first per [const §VII.3]; turns GREEN when T015 (real read-pump) lands.
@@ -1228,6 +1240,9 @@ set_tests_properties(engine_readpump PROPERTIES
 # 092-garbled-frame-reject: label 092 (expected-ctest-092.txt). APPEND, after the
 # last LABELS setter for this entry, so the existing labels survive.
 set_property(TEST engine_readpump APPEND PROPERTY LABELS 092)
+# 093-inbound-frame-dispositions: label 093 (expected-ctest-093.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST engine_readpump APPEND PROPERTY LABELS 093)
 
 # ── 015-runtime-engine Phase 4 (US2) — T016(a) ──────────────────────────────
 # TDD RED-first per [const §VII.3]; turns GREEN when T016(b)-(e) impl lands.
@@ -2179,6 +2194,9 @@ add_threading_test(session_validate_gate_inbound
   test_validate_gate_inbound.cpp)
 set_tests_properties(session_validate_gate_inbound PROPERTIES
   LABELS "041;t012;t014;validation-gate;inbound;foundational")
+# 093-inbound-frame-dispositions: label 093 (expected-ctest-093.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST session_validate_gate_inbound APPEND PROPERTY LABELS 093)
 
 # ── 092-garbled-frame-reject — the disposition of a framed-but-unparseable frame
 # (contract C-2 .. C-6; fixpp#507's reproducer is the Issue507Reproducer_* cells).
@@ -2200,6 +2218,9 @@ add_threading_test(session_unparseable_frame_disposition
 set_tests_properties(session_unparseable_frame_disposition PROPERTIES
   LABELS "092;session"
   TIMEOUT 300)
+# 093-inbound-frame-dispositions: label 093 (expected-ctest-093.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST session_unparseable_frame_disposition APPEND PROPERTY LABELS 093)
 
 # ── fixpp#215 item 1 — one as_table_view() walk per opened session ───────────
 # W1: open() with no config-supplied snapshot walks the Dictionary exactly ONCE
@@ -2264,6 +2285,9 @@ add_threading_test(session_validate_gate_default_off
   test_validate_gate_default_off.cpp)
 set_tests_properties(session_validate_gate_default_off PROPERTIES
   LABELS "041;t015;t016;us2;validation-gate;default-off;session")
+# 093-inbound-frame-dispositions: label 093 (expected-ctest-093.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST session_validate_gate_default_off APPEND PROPERTY LABELS 093)
 
 # ── 041-validation-gate-wiring T017 — Engine clock-config gate (US3) ─────────
 # SC-004 / FR-007 / FR-008 / C-4 / data-model E-5:
@@ -2317,6 +2341,9 @@ set_tests_properties(session_plaintext_roundtrip PROPERTIES
   ENVIRONMENT
     "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "043;t007;us1;plaintext;roundtrip;live_plain")
+# 093-inbound-frame-dispositions: label 093 (expected-ctest-093.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST session_plaintext_roundtrip APPEND PROPERTY LABELS 093)
 
 # ── 043-plaintext-tcp-transport T008 — SC-004 authorization-inert witness ────
 # T008: on insecure_plain_tcp — authorize() not called, live_peer_id_==nullopt,
@@ -3118,6 +3145,9 @@ add_test(NAME test_066_arena_fit COMMAND test_066_arena_fit)
 set_tests_properties(test_066_arena_fit PROPERTIES
   ENVIRONMENT "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "066;us3")
+# 093-inbound-frame-dispositions: label 093 (expected-ctest-093.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST test_066_arena_fit APPEND PROPERTY LABELS 093)
 
 # ── 082-structural-group-detection T021 [US1] RED pin ───────────────────────
 # (written BEFORE T023 per the RED-first ordering rule): ungated (validate_
@@ -3212,6 +3242,9 @@ target_compile_definitions(session_read_first_frame_bounded PRIVATE FIXPP_ALLOW_
 set_tests_properties(session_read_first_frame_bounded PROPERTIES
   LABELS "088;us1;us2;first_frame;budget;lifetime;session_read_first_frame_bounded"
   TIMEOUT 120)
+# 093-inbound-frame-dispositions: label 093 (expected-ctest-093.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST session_read_first_frame_bounded APPEND PROPERTY LABELS 093)
 
 # ── 088 Phase 4 (US2) — T023/T024/T025: T6 (SC-018/FR-018) ───────────────────
 # Real-TLS witness for FR-018: Engine::stop()'s cancellation_type::total must
@@ -3239,6 +3272,9 @@ add_test(NAME session_first_frame_total_cancel_tls COMMAND session_first_frame_t
 set_tests_properties(session_first_frame_total_cancel_tls PROPERTIES
   LABELS "088;us2;live_tls;first_frame;cancellation"
   TIMEOUT 60)
+# 093-inbound-frame-dispositions: label 093 (expected-ctest-093.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST session_first_frame_total_cancel_tls APPEND PROPERTY LABELS 093)
 
 # ── 088 Phase 4 (US2) — T022: T2b (SC-015 accept-slot leg) ───────────────────
 # Engine::stop()'s promptness + accept-slot reclaim at engine scope, driven

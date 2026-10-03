@@ -165,6 +165,13 @@ fixpp_add_mallocnesia_test(
   TARGET test_validate_gate_alloc_guard
   LABELS "041;alloc_guard;validation-gate;t014"
   DEPENDS "alloc_guard_validate_gate")
+# 093-inbound-frame-dispositions: label 093 (expected-ctest-093.txt). APPEND, after the
+# last LABELS setter for these entries, so the existing labels survive.
+set_property(TEST alloc_guard_validate_gate APPEND PROPERTY LABELS 093)
+# The twin exists only where fixpp_add_mallocnesia_test registers it.
+if(TEST alloc_guard_validate_gate_mallocnesia)
+  set_property(TEST alloc_guard_validate_gate_mallocnesia APPEND PROPERTY LABELS 093)
+endif()
 
 # ── item 13 (2026-06-19): mallocnesia gate entries for the alloc-guard binaries
 # that previously had NO LD_PRELOAD entry. The marker fix (weak UNDEFINED symbols,
@@ -224,6 +231,13 @@ fixpp_add_mallocnesia_test(
   NAME dict066_grouped_read_alloc_guard_mallocnesia
   TARGET test_dict066_grouped_read_alloc_guard
   LABELS "066;us3;alloc_guard")
+# 093-inbound-frame-dispositions: label 093 (expected-ctest-093.txt). APPEND, after the
+# last LABELS setter for these entries, so the existing labels survive.
+set_property(TEST dict066_grouped_read_alloc_guard APPEND PROPERTY LABELS 093)
+# The twin exists only where fixpp_add_mallocnesia_test registers it.
+if(TEST dict066_grouped_read_alloc_guard_mallocnesia)
+  set_property(TEST dict066_grouped_read_alloc_guard_mallocnesia APPEND PROPERTY LABELS 093)
+endif()
 
 # fixpp#495 (`.specify/495-493-486-dict-reify-copy.md` §10 T-14): owned-route
 # dict::reify draws every allocation from the caller's mr. Dual gate: the TU-local

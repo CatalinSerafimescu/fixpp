@@ -304,6 +304,9 @@ fixpp_add_interop_test(
         parity/fix_tc_coverage_gaps_test.cpp
     EXTRA_LIBS fixpp_mock_clock
 )
+# 093-inbound-frame-dispositions: label 093 (expected-ctest-093.txt). APPEND, after the
+# last LABELS setter for this entry, so the existing labels survive.
+set_property(TEST interop_parity_us3_tests APPEND PROPERTY LABELS 093)
 
 # ── 024 live ResetOnLogon interop cells — T016 (initiator) + T017 (acceptor) ──
 # Both cells value-parameterized over counterparty × role in one file.
