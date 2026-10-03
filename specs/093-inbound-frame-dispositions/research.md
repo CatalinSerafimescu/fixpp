@@ -173,6 +173,21 @@ The sections below were written at `/speckit-plan`, 2026-10-02, from three read-
 
   Record the chosen value, the date, the search's output, the allowance's reason, and that the value
   meets both the floor and the ceiling, here. Never write it into a comment.
+- **Recorded (T013, 2026-10-03, head `2af21f25`): `kBodyLengthDigitCap` = 10.**
+  - Search: a scratch script over every tracked file under `tests`, `bench`, `bindings`, `tools` and
+    `specs` (6198 files, 253 hits). It took the longest `9=<digits>` run after each SOH spelling: `\x01` 3,
+    `|` 3, literal 0x01 5, U+2401 3, a literal starting `"9=` 6; `\001`, `^A`, `\u0001` and `<SOH>` 0.
+    **Maximum 6.** The 6-digit runs are writer placeholder `9=000000` strings
+    (`tests/wire/writer_error_path_test.cpp`) and the 200000-byte over-limit bodies
+    (`read_first_frame_bounded_test.cpp`, `engine_firstframe_test.cpp`).
+  - Positive control: in a `git archive HEAD | tar -x` scratch copy, one padded run per spelling was
+    seeded (9 spellings, run lengths 13 to 21), and each spelling reported its seed as its maximum. The
+    scratch copy was then deleted.
+  - Value: max(6, width(262144) = 6 + allowance 4) = 10. The allowance's reason: a counterparty writer
+    that reserves a fixed-width BodyLength sized for a 32-bit length (10 digits, the width of
+    UINT32_MAX) and pads with zeros instead of compacting. This repo's writer backpatches and emits no
+    padding.
+  - Floor: 10 ≥ 6 holds. Ceiling: 10 ≤ 18 (3 × 6, contract C-1 W-2) holds.
 - **Why the BeginString cap takes the configured length.** A fixed cap at the longest supported
   identifier garbles every inbound frame of a session configured with a longer BeginString, which today
   works: the C setter checks only non-empty and forbidden bytes, TOML copies the string, and `open()`

@@ -277,6 +277,14 @@ made at `/speckit-plan`. Reviewers may challenge any of them, and the owner may 
   outputs nulled, reproduce first, with a Q-33 shell arm per getter. It changes a C-ABI result that
   Gate A has not reviewed, so it was not taken. Spec.md's Issues line keeps #540 and does not list
   #541.
+- **OD-20: in resync mode, C-1's ordering rule covers `wire_frame_too_large` as well as a garble**
+  (added at implementation, T018, 2026-10-03). A call that has produced a frame stops at any non-frame
+  outcome at the next candidate and leaves it for the next call. The frame, which precedes the over-L
+  bytes in stream order, is delivered, and the next call returns `wire_frame_too_large`, which closes.
+  Strict mode keeps today's behaviour: an error discards the call's frames. Moot for the pump, whose
+  output span has length 1. A T015 cell witnesses it: a good frame then an over-L BodyLength in one feed.
+  Alternative: discard the call's frames on over-L, as strict mode does. Rejected: it drops a well-formed
+  frame that arrived before the fault, which C-1's Extent rule forbids for garbles.
 
 ## What changes for whom
 
