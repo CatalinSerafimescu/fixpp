@@ -103,7 +103,7 @@ production edit starts before T002.
 **Purpose**: the measurements that cannot be taken after the first production edit, the #540
 reproduction, the population snapshots, the test-builder census and its fixes, and the label manifest.
 
-- [ ] T001 Pre-flight in the tree that owns the branch.
+- [X] T001 Pre-flight in the tree that owns the branch.
   - `git -C research/G19-fix-fpml-iso20022/library worktree list`, and confirm which tree holds
     `093-inbound-frame-dispositions`. Every later path, `projectPath` and `codegraph` command uses that
     tree. `codegraph status --json` there shows a nonzero `fileCount` for that tree's path.
@@ -115,7 +115,7 @@ reproduction, the population snapshots, the test-builder census and its fixes, a
     build rulings`, `## Base`, `## Populations`, `## Bench baseline`, `## Ceilings`, `## #540`,
     `## Census`, `## Constants`, `## Mutants`, `## Measurements`, `## Fuzz`, `## MSVC`. Ask the owner
     for build approval (per phase or blanket) and record the answer.
-- [ ] T002 Rebase onto `origin/main` after fixpp PR #539 (B25, #530) merges.
+- [X] T002 Rebase onto `origin/main` after fixpp PR #539 (B25, #530) merges.
   - `gh pr view 539 --repo CatalinSerafimescu/fixpp --json state,mergeCommit`. While it is OPEN, stop
     here; nothing below T002 runs.
   - `git fetch --all --prune`, then `git rebase origin/main`. The branch carries only `specs/`
@@ -126,7 +126,7 @@ reproduction, the population snapshots, the test-builder census and its fixes, a
   - Record `git merge-base HEAD origin/main` under `## Base`. It is the base for every RED claim.
   - `git diff --stat origin/main...HEAD -- src include tools cmake tests bench bindings` is empty.
   - `codegraph sync` in the owning tree.
-- [ ] T003 C-ABI preconditions, recorded in the evidence file:
+- [X] T003 C-ABI preconditions, recorded in the evidence file:
   - `gh release list --repo CatalinSerafimescu/fixpp --exclude-drafts` is empty (`[const §X.7]`);
   - the current `FIXPP_C_ABI_VERSION_MINOR` on `origin/main`, and on every branch:
     `git grep -h "define FIXPP_C_ABI_VERSION_MINOR" $(git for-each-ref --format='%(refname)' refs/heads refs/remotes) -- include/fix/c_api/version.h | sort | uniq -c`.
@@ -155,7 +155,7 @@ reproduction, the population snapshots, the test-builder census and its fixes, a
     of T112's Framer pairings: against the same row (the strict path) and against T018a's resync-config
     row (the production path). `on_inbound_frame_bench` bypasses the Framer, so no other bench row covers
     the pump's resync-mode Framer. Keep the base worktree for T089, T102 and T112.
-- [ ] T006 Take the MSVC sandbox lock: `/mnt/c/temp/fixpp/.sandbox-lock`, per
+- [X] T006 Take the MSVC sandbox lock: `/mnt/c/temp/fixpp/.sandbox-lock`, per
   `research/G19-fix-fpml-iso20022/msvc-local-build-procedure.md` Step 0, before the first rsync. If
   another owner holds it, stop and ask the owner. Record the acquisition in the evidence file. The
   lock is held until T123.
