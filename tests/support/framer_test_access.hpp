@@ -55,6 +55,18 @@ struct framer_test_access {
         return f.cfg_.max_begin_string_bytes >= Framer::Config{}.max_begin_string_bytes;
     }
 
+    // The bound's value in work units for `received` bytes (rounded down), for
+    // reporting a margin; within_work_bound() is the check.
+    [[nodiscard]] static std::uint64_t work_bound(Framer const& f, std::uint64_t received,
+                                                  std::uint64_t limit,
+                                                  std::uint64_t read_size) noexcept {
+        std::uint64_t const caps =
+            static_cast<std::uint64_t>(f.cfg_.max_begin_string_bytes) +
+            static_cast<std::uint64_t>(Framer::kBodyLengthDigitCap);
+        return kWorkBoundConstant * received * (read_size + limit + (read_size * caps)) /
+               read_size;
+    }
+
     // True while the counted work is within the bound for `received` bytes, at limit
     // L and read size R (the carry's capacity minus L), and false whenever the
     // precondition fails. Integer form: multiplied through by R.

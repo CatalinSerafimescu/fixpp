@@ -220,6 +220,13 @@ struct run_opts {
             break;
         }
     }
+    if (!res.bound_held) {
+        res.bound_violation += "; at the end, work " +
+                               std::to_string(framer_test_access::total_work(framer)) +
+                               " against a bound of " +
+                               std::to_string(framer_test_access::work_bound(
+                                   framer, res.received, o.limit, kReadSize));
+    }
     res.pending_after = framer.pending_bytes();
     res.carry_allocations_during_feeds = tracker.allocate_calls() - allocations_at_construction;
     return res;
