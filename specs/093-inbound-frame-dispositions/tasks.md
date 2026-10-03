@@ -66,9 +66,9 @@ production edit starts before T002.
   old-behaviour pins) is re-run at the implementation head (T012). A listed member is a lead; a member
   the command adds is a planned edit.
 - **Comments record a procedure, never a result.** No counts, offsets, line numbers, sizes or pasted
-  output in a comment. The measured constants (`kBodyLengthDigitCap`, `kAlignPad`,
-  `kCallbackReadHeadroom`, `kContainerSlack`) carry their recipe in a comment and their value only in
-  code and in `research.md`. Where a comment supersedes a decision, name the new one in a header
+  output in a comment. The measured or derived constants (`kBodyLengthDigitCap`, `kAlignPad`,
+  `kCallbackReadHeadroom`, `kContainerSlack`, and the counted-work bound's constant, T017a) carry their
+  recipe in a comment and their value only in code and in `research.md`. Where a comment supersedes a decision, name the new one in a header
   comment ("093 …").
 - **Evidence file.** `.specify/decisions/093-inbound-frame-dispositions-evidence.md` holds owner build
   rulings, populations, baselines, reproductions, mutants, measurements and fuzz results.
@@ -291,6 +291,10 @@ resync on. US3's FR-013 group refuses a 383 outside [4096, 262144] (T022a), allo
     during any resync feed;
   - Q-5 (Framer half): a region split across feeds is counted once (`regions`), a continued region adds
     to `discarded` with `regions == 0`, garbles reported by a call precede every frame it produces;
+    each failed candidate is its own region, so two adjacent garbles (two failed candidates back to
+    back, the second found by the first's search) count two; and after a wrong-CheckSum frame the next
+    byte is a search position, not a frame boundary, so wrong-CheckSum ‖ junk ‖ good counts one region
+    and frames the good frame (C-1 Frame start, Extent);
   - Q-6 (Framer half): a frame of L+1 bytes, one of L+1 bytes with a bad CheckSum, and an over-L
     BodyLength at a candidate the resync search found each return `wire_frame_too_large`;
   - Q-10 (Framer half): a BeginString longer than `max_begin_string_bytes` with no SOH is a garble of
@@ -313,6 +317,15 @@ resync on. US3's FR-013 group refuses a 383 outside [4096, 262144] (T022a), allo
   member of T012's size-pin population, each classified in the evidence file, and build every target
   that holds a `Framer` by value (`-k 0`) before committing. Data-model E-1 and contract C-7 row 1 name
   the friend and the counters.
+- [ ] T017a Derive the counted-work bound's constant (contract C-1 "The bound") from W-1 to W-3, over
+  the counters T017 fixed: one unit per byte read, summed or moved; W-1's compaction term per L ÷ R,
+  W-2's per-feed header rescan under the two caps, W-3's single sum per byte. Record the value and its
+  derivation, step by step from each W clause, with the date and the head, in `research.md` R-2 and
+  under `## Constants`. It is the value T015's Q-4 cells and T020's fuzz arm assert against, so T015
+  cannot go GREEN (T018) before it is recorded. The derivation and the R-2 record are the
+  orchestrator's; the code half goes to `phase-implementer`: a named test constant in
+  `tests/support/framer_test_access.hpp`, which T015 and T020 read, with the recipe in its comment
+  and the value nowhere else but `research.md` (Execution rules).
 - [ ] T018 Via `phase-implementer`, implement C-1 in `include/fixpp/wire/framer.hpp` and
   `src/wire/framer.cpp` (E-1):
   - `bool resync_on_garble = false;` and `std::size_t max_begin_string_bytes` (default: the length of
@@ -324,9 +337,12 @@ resync on. US3's FR-013 group refuses a 383 outside [4096, 262144] (T022a), allo
   - private `bool searching_`; the carry holds at most the trailing bytes that are a proper prefix of
     `8=FIX`;
   - the start rule (at a frame boundary `8=` as today; after a garble the next `8=FIX` anywhere,
-    searched from the byte after the garble's first byte), the extent rule (a structurally complete
-    frame with a wrong CheckSum value consumed through its own end), and the ordering rule (a call that
-    produced a frame stops before resolving a later garble);
+    searched from the byte after the garble's first byte, or, after a wrong-CheckSum frame, from the
+    byte after its own end, which is a search position and not a frame boundary, so junk after it
+    joins its region), the extent rule (a structurally complete frame with a wrong CheckSum value
+    consumed through its own end; each failed candidate is its own region, so two adjacent garbles
+    count two), and the ordering rule (a call that produced a frame stops before resolving a later
+    garble);
   - W-1 (compact only when the incoming bytes would not fit after what the carry holds), W-2 (both
     caps over encoded bytes at every candidate; the BodyLength read digit by digit and refused as over
     L as soon as it exceeds L), W-3 (sum only a structurally complete candidate, then consume it
@@ -334,7 +350,7 @@ resync on. US3's FR-013 group refuses a 383 outside [4096, 262144] (T022a), allo
   - with the flag on and only then, `frame_len > max_frame_bytes` tested as soon as `body_off` is
     known, before the CheckSum (OD-4). With the flag off, `feed` is unchanged byte for byte, the check
     order included.
-  T015 and T016 GREEN.
+  T015 and T016 GREEN, against T017a's recorded constant.
 - [ ] T018a Via `phase-implementer`, a bench-only commit after T018: a candidate-only row
   `BM_Framer_Feed_NoCarry_Resync` in `bench/wire/framer_bench.cpp`, the same ~80-byte frame and carry
   as `BM_Framer_Feed_NoCarry`, over a `Framer` built with `Config{.max_frame_bytes = 65536,
@@ -453,7 +469,14 @@ reflects only the good frames, a ResendRequest covers the gap, one `session_even
   as the Logout reply and the logout timeout ends the session. Each cell ends by its own bounded
   deadline, since the establishment timeout lands in US2. RED: close or refusal. Plus C-2's
   Disconnected rule as a regression guard: in Disconnected a 35-not-third frame is not scanned, not
-  counted and not evented (mutant: run step 1 in Disconnected too; observed by the counter).
+  counted and not evented (mutant: run step 1 in Disconnected too; observed by the counter). Two more
+  arms, from C-2's notes:
+  - **a Framer garble in Disconnected** (the transport still open, so the pump still runs) is
+    counted, evented and logged. RED: the pump closes on the garble;
+  - **D-9 (LogoutSent)**: a frame whose third field is not 35 stays disregarded, and is now counted,
+    evented and logged as one garble of kind `wire_header_out_of_order`. RED: compile-RED on the base
+    (the counter and the event), and the base-compilable scratch variant shows the disregard with no
+    count, run as T026's is.
 - [ ] T030 [US1] Via `phase-implementer`, Q-34 in `tests/session/engine_firstframe_test.cpp` (shared
   with T029 and T031): k garbled regions before a matching Logon on the acceptor's first-frame read;
   after `open()` the counter reads k and exactly one `session_event_garbled_frame` is recorded. RED:
@@ -562,7 +585,12 @@ at the first-frame bounds. The C, Python and TOML arms close in Phase 8 (T090, T
   not exist.
 - [ ] T043 [US2] Via `phase-implementer`, Q-17 (phase a) in
   `tests/session/engine_firstframe_test.cpp` and `tests/session/first_frame_total_cancel_tls_test.cpp`
-  (ctests `engine_firstframe` and `session_first_frame_total_cancel_tls`, APPEND label `093` on each):
+  (ctests `engine_firstframe` and `session_first_frame_total_cancel_tls`, APPEND label `093` on each).
+  The `min(5 s, T)` and byte-budget cells (the first bullet) run on a **plaintext acceptor**: an entry
+  whose `security_profile` is `insecure_plain_tcp`, for which the accept loop in
+  `run_accept_loop` (`src/session/engine.cpp`) skips the TLS handshake, so no handshake bound competes
+  with T. Re-derive that skip at this head before relying on it. Only the TLS pair (the second and third
+  bullets) runs on TLS:
   - a garbage-only acceptor peer closes at the first-frame byte budget or at `min(5 s, T)`,
     whichever comes first; with T < 5 s the first-frame read ends at T; bytes under the budget sent
     slowly are not closed before then; no event is recorded (L-6). RED: close at the first garbled
@@ -609,7 +637,7 @@ at the first-frame bounds. The C, Python and TOML arms close in Phase 8 (T090, T
   `has_reached_active()` and `note_establishment_timeout_()` (the event plus a log record whose format
   string is registered in `src/log/format_registry.cpp`) to `src/session/session_engine_access.hpp`.
   The record is a `FIXPP_SLOG` with the session's `trace_context` (`[const §XIII.3]`), through the
-  logger T034 resolves at `open()`. It needs no rate bound: expiry closes the connection, so it fires
+  logger T034 resolves at `open()`, and carries T (data-model E-12). It needs no rate bound: expiry closes the connection, so it fires
   at most once per connection.
 - [ ] T048 [US2] Via `phase-implementer`, the phase (b) deadline in `run_read_pump`
   (`src/session/engine.cpp`): `run_read_pump(..., std::optional<steady_time_point> establish_deadline)`;
@@ -721,15 +749,30 @@ delivered, and a frame of L+1 is refused at framing with no guard or handler act
   `tests/wire/offset_table_test.cpp` (bucket `wire_pure_tests`): the new `Parser::parse(frame, mr,
   OffsetTable::Config, std::size_t reserve_entries)` and `OffsetTable` constructor overloads reserve
   up front (a tracking resource sees one entries allocation), a clone and a reify do not copy the
-  reserve, and every existing overload reserves nothing. RED: does not compile.
+  reserve, and every existing overload reserves nothing. Two more cells for data-model E-3: a reserve
+  above `cfg.max_offset_entries` reserves at most that many entries (the tracking resource sees the
+  clamped size); and a reserve the resource cannot serve makes the parse report `out_of_memory`, with
+  no exception escaping. Size that cell's bounded resource (over a null upstream) so everything the
+  parse draws before the reserve fits and the reserve does not, as T008 sizes its resource; on MSVC
+  debug the container proxy draws from the same resource at construction (`kContainerSlack`'s reason),
+  so a resource too small for it fails outside `build`'s catch and measures the proxy, not the
+  reserve. Show with the tracking resource that the failed request is the reserve's. RED: does not compile.
 - [ ] T060 [US3] Via `phase-implementer`, Q-33 C++ arms in
   `tests/session/inbound_frame_dispositions_test.cpp`: lazy reads at headroom exhaustion inside a
   callback over a dense frame: `group_slices()` gives an empty span and `unknown_fields()` an empty
-  view; the session stays Active and processes the next frame. Guarded at runtime on the library's own
-  condition, `fixpp::detail::arena_upstream() == std::pmr::null_memory_resource()`, with `GTEST_SKIP()`
-  naming the reason. No C cursor shell arm (L-17, fixpp#541). The C arms are T091's. RED: the
-  `unknown_fields()` arm terminates if T008 confirmed #540; the other arms are regression guards
-  pinning today's reports.
+  view; the session stays Active and processes the next frame. The assertions branch at runtime on the
+  library's own condition, `fixpp::detail::arena_upstream() == std::pmr::null_memory_resource()`, and
+  no arm is skipped:
+  - **null-upstream lanes**: the reports above;
+  - **the forwarding lane** (MSVC debug, where the spill witness forwards and records): each lazy read
+    succeeds (a non-empty span and view for the frame's group and unknown fields), the spill witness
+    records the spill (read as T054's no-spill assertion reads it), and the session stays Active and
+    processes the next frame (quickstart Q-33, FR-011). T069 and T113 run this branch. On the base it
+    is a regression guard for the reads (they already succeed on MSVC debug) and compile-RED for the
+    spill assertion (no witness exists); its mutant, the witness forwarding without recording, is
+    run in T113.
+  No C cursor shell arm (L-17, fixpp#541). The C arms are T091's. RED: the `unknown_fields()` arm
+  terminates if T008 confirmed #540; the other arms are regression guards pinning today's reports.
   - **Base RED method for the `unknown_fields()` arm.** It runs under `EXPECT_EXIT(...,
     ExitedWithCode(0), ...)`, so a terminate on the base is a recorded failure of that arm, not a
     crashed binary that hides the other arms. On the base the callback parses in the 16 KiB stack
@@ -752,7 +795,9 @@ delivered, and a frame of L+1 is refused at framing with no guard or handler act
   `Parser::parse(frame, mr, OffsetTable::Config cfg, std::size_t reserve_entries)`; a private,
   tag-dispatched `MessageView` constructor carrying the reserve; a public `OffsetTable` constructor
   overload `(frame, mr, cfg, hooks, reserve_entries)` passing it to the private `build`. The table does
-  not store it; clones and reifies do not copy it. T059 GREEN.
+  not store it; clones and reifies do not copy it. `build` clamps the reserve to
+  `cfg.max_offset_entries`, and a reserve the resource cannot serve takes `build`'s existing
+  `bad_alloc` catch to `out_of_memory` (data-model E-3). T059 GREEN.
 - [ ] T063 [US3] Via `phase-implementer`, the per-session parse buffer (E-2) in
   `include/fixpp/session/session.hpp` and `src/session/session.cpp`:
   - "With N(L) = ⌊L/3⌋ + 1": "B(L) = 12·N(L) + 4·`overlay_cap_for`(N(L)) + `kAlignPad` +
@@ -800,7 +845,7 @@ delivered, and a frame of L+1 is refused at framing with no guard or handler act
   - once a Session exists, a `wire_frame_too_large` closes with `close(terminal)`, the event the
     terminal close records and a log record (no `SessionEvent` alternative beyond E-5's). The record is
     a `FIXPP_SLOG` with the session's `trace_context` (`[const §XIII.3]`), its format string registered
-    in `src/log/format_registry.cpp`. It needs no rate bound: the close is terminal, so it fires at most
+    in `src/log/format_registry.cpp`, and carries the failure kind and L (data-model E-12). It needs no rate bound: the close is terminal, so it fires at most
     once per connection. On the acceptor's first frame no Session exists: the transport closes with no
     event and no log (FR-013, L-6);
   - the Active-only advertised-MaxMessageSize check above the state switch is deleted (C-2); header
@@ -836,8 +881,9 @@ delivered, and a frame of L+1 is refused at framing with no guard or handler act
 - [ ] T069 [US3] On the MSVC debug sandbox (T006's lock): Q-11 (dense L, peak ≤ B(L)), Q-14 (both
   halves: the carry half must hold where the container proxy draws on T024's block) and the spill
   witness, which on MSVC debug forwards and records; at the design point it
-  records nothing. Before believing "records nothing", show it records a spill on this lane with
-  T070's shrink. Record under `## MSVC`.
+  records nothing. Before believing "records nothing", show it records a spill on this lane: feed a
+  frame denser than B(L)'s design point through T057's `session_test_access` shrink accessor. Also run
+  T060's forwarding-lane branch of Q-33 (T091's C branch runs in T113). Record under `## MSVC`.
 - [ ] T070 [US3] US3 instruments and mutants, each in a scratch copy: the spill witness records a spill
   when a frame denser than B(L)'s design point is fed through the test-access shrink; restore the
   16 KiB arena and the default entry cap → Q-11 RED; delete the capacity derivation (B(L) back to a
@@ -986,6 +1032,14 @@ durable counters at FR-041's table (#524).
   restore; then `logon_arm_superseded`. True targets on volatile stores too (OD-9). The in-unit
   `teardown_reset_done_` stops are removed, the flag kept as `close()`'s latch, with a header comment
   naming 093 superseding #518's in-unit stops.
+  - **C-6's three conditions for "any point of the unit".** Re-derive each at this head and record
+    the command, its output and the verdict under `## Populations`: (1) step 2's and step 5's
+    `reset_cancellation_state` complete without suspending (read asio's `impl/awaitable.hpp` in the
+    Conan-resolved asio the build uses); (2) step 3's lock grants inline on its uncontended fast path
+    (L-518-1's condition; read the `async_lock` the manager setters take); (3) steps 5 to 7 contain no
+    other `co_await` (`grep -n "logon_arm_superseded\|co_await" src/session/session.cpp`, read against
+    the unit's span). A condition that fails stops the task: C-6's one-interleaving-point argument, and
+    the cells that hold the store at step 4 (Q-23, Q-26), no longer cover the unit.
 - [ ] T086 [US5] Via `phase-implementer`, the engine-stop flag (E-13, OD-15): `bool
   engine_stop_requested_` on the Session, written and read on its strand; `note_engine_stop_()` on
   `src/session/session_engine_access.hpp`; `Engine::stop()`'s step 1 (`src/session/engine.cpp`) reads
@@ -1044,7 +1098,11 @@ and every C-7 row 1–6 C witness.
 - [ ] T091 Via `phase-implementer`, Q-33's C arms in `tests/capi/inbound_frame_dispositions_capi_test.cpp`:
   inside a C callback over a dense frame at headroom exhaustion, `fixpp_group_get_nested_group` returns
   `FIXPP_ERR_WIRE_LIMIT_EXCEEDED` and `fixpp_msg_get_group` returns `FIXPP_ERR_TYPE_MISMATCH`; the
-  session stays Active. Same runtime guard as T060. Regression guards pinning today's reports (L-5).
+  session stays Active. These are the null-upstream lanes' assertions; the cell branches on T060's
+  runtime condition and skips no arm. On the forwarding lane (MSVC debug) both calls return
+  `FIXPP_ERR_OK`, the spill witness records the spill (read as T054's no-spill assertion reads it),
+  and the session stays Active (quickstart Q-33). T113 runs that branch. Regression guards pinning
+  today's reports (L-5).
 - [ ] T092 [P] Via `phase-implementer`, Python RED in the new
   `bindings/python/tests/test_093_inbound_frame_dispositions.py`: the setter (zero raises the typed
   exception), the getter returning an int, and Q-16's Python arm; both wheel lanes (LP64 and Windows
@@ -1064,10 +1122,13 @@ and every C-7 row 1–6 C witness.
   following `fixpp_session_config_set_heartbeat_seconds`: "`fixpp_session_config_set_logon_timeout_ms(fixpp_session_config_t*,
   uint32_t ms)`"; null handle → `FIXPP_ERR_NULL_HANDLE`, zero → `FIXPP_ERR_CAPI_CONFIG_INVALID`;
   reentrancy token "single-thread".
-- [ ] T097 Via `phase-implementer`, the getter in `include/fix/c_api/session.h` and `src/capi/session.cpp`,
-  following `fixpp_session_is_established`: "`fixpp_error_t fixpp_session_garbled_frame_count(const
-  fixpp_session_t*, uint64_t* out)`"; the out-parameter checked for null, then `check_session`; reads
-  through `engine_->lookup(id)` and writes 0 before the session exists; reentrancy token "thread-safe".
+- [ ] T097 Via `phase-implementer`, the getter in `include/fix/c_api/session.h` and `src/capi/session.cpp`:
+  "`fixpp_error_t fixpp_session_garbled_frame_count(const fixpp_session_t*, uint64_t* out)`". Its
+  refusal order follows `fixpp_session_is_established` (the out-parameter checked for null, `*out`
+  written 0, then `check_session`); its read follows `fixpp_session_close`'s scoped
+  `engine_->lookup(id)` lease, released before return (`fixpp_session_is_established` reads the
+  handle's slot and takes no lookup, so it is not the pattern for the read). A null lookup leaves 0
+  written; reentrancy token "thread-safe".
   T090 GREEN.
 - [ ] T098 Via `phase-implementer`, Python and TOML:
   - `bindings/python/fixpp.i`: a `%apply … *OUTPUT { uint64_t* … }` for the getter's out-parameter,
@@ -1116,8 +1177,10 @@ and every C-7 row 1–6 C witness.
   whether the callbacks registered with `fixpp_session_register_callback` and
   `fixpp_session_register_send_callback` fire, and the result of `fixpp_session_close`. Written to
   compile against the merge-base API where it can (row 5 uses the default T if the setter is the only
-  new symbol it needs), built in a debug configuration of the T005 base worktree (owner ask) to show
-  each row RED for its stated reason, then GREEN here.
+  new symbol it needs), built in a debug configuration in a scratch copy of the base
+  (`git -C <T005 base worktree> archive HEAD | tar -x -C <scratch>`, a fresh `mktemp -d` path; owner
+  ask), never in the T005 worktree itself, whose release build T112 reuses, to show each row RED for
+  its stated reason, then GREEN here.
 - [ ] T103 Run every C-ABI and Python cell: T090–T094 and T102 GREEN; `pytest bindings/python/tests/` on
   both `-py` lanes; `capi_*` ctest unfiltered.
 - [ ] T104 Confirm the arms this phase closes for US1 (Q-1 C arm) and US2 (Q-16 C, Python, TOML arms)
@@ -1134,7 +1197,7 @@ surfaces exist and are witnessed.
 
 - [ ] T105 [P] `spec/behaviors-and-limitations.md` (FR-050; FR-050's list is a lead, not the
   population). First grep the live file and classify every hit:
-  `grep -nE "L-004-4|B-005-7|B-004-1|B-041-1|L-092-6|L-518-1|B-092-2|B-092-9|L-092-1\b|D-8|D-1/D-2|#51[456]\b|#52[34]\b|#540|373=14|kInboundParseArena|Until #514 ships|session-fatal" spec/behaviors-and-limitations.md`.
+  `grep -nE "L-004-4|B-005-7|B-004-1|B-041-1|L-092-6|L-518-1|B-092-2|B-092-9|L-092-1\b|D-8|D-9|D-1/D-2|#51[456]\b|#52[34]\b|#540|373=14|kInboundParseArena|Until #514 ships|session-fatal" spec/behaviors-and-limitations.md`.
   Then:
   - move `L-004-4` to `spec/behaviors-and-limitations-closed.md`;
   - narrow `B-005-7` to fields other than the first three, and correct its "QF emits 373=14" (R-1);
@@ -1143,11 +1206,14 @@ surfaces exist and are witnessed.
     zero-timeout refusals as C++ only; FR-040's row states the rebuild requirement (C-7 row 13), and
     the `SessionEvent` row states C-7 row 11's C++ source change;
   - update the 092 rows the grep finds stating D-8's disregard or the pre-Active refusal of a faulty
-    frame whose third field is not 35 (FR-050);
+    frame whose third field is not 35, and the D-9 (LogoutSent) row, whose frames whose third field is
+    not 35 stay disregarded and are now counted, evented and logged (C-2; FR-050);
   - add one L row per contract C-8 L-1…L-17 (L-17 names fixpp#541, unconfirmed, B28; it also records
     T061's `kCallbackReadHeadroom` condition result where it failed; L-13 cites T051's measurement);
   - add the B row for the per-session cost: the carry plus B(L) as the formula, with the 64 KiB and
-    256 KiB totals re-derived from the measured constants (SC-007);
+    256 KiB totals re-derived from the measured constants (SC-007), and the admission bound: at most
+    one carry plus B(L) per registered session with a live or establishing connection (FR-050,
+    research R-3);
   - update `L-092-6` and `L-518-1`, including the "Frames that arrive with the Logon" bullet, whose
     LogonReceived half becomes by design (FR-050).
   Run `python3 /home/catalin/Work/Programming/Antreprenoriat/.claude/scripts/check_bl_delta.py` and
@@ -1177,7 +1243,8 @@ surfaces exist and are witnessed.
 ### Mutation, fuzz, bench, MSVC
 
 - [ ] T110 Re-run quickstart §2's whole mutant list at the post-simplify head, each in a scratch copy
-  (T019, T029, T039, T053, T070, T074, T078, T088, T099), with a clean-revert `git diff` each. A mutant whose
+  (T019, T029, T039, T053, T070, T074, T078, T088, T099; T113's witness mutant on the sandbox), with a
+  clean-revert `git diff` each. A mutant whose
   cell stays green is a finding, not a pass. Consolidated table under `## Mutants`.
 - [ ] T111 Fuzz (`[const §VII.7]`): build `linux-clang-asan` with `FIXPP_BUILD_FUZZ=ON`; run
   `fuzz_wire_framer` (T020's resync arm, counted-work bound asserted per input) and
@@ -1194,8 +1261,11 @@ surfaces exist and are witnessed.
   relax it. Record under `## Bench baseline`, then `git worktree remove --force` the base worktree.
 - [ ] T113 The MSVC sandbox (T006's lock): rsync the post-simplify head; on MSVC debug and msvc-asan run
   the `093` label, the dense-L, spill and getter-typemap cells (quickstart §3), the Python wheel
-  getter, and Q-33's MSVC-debug arm (each lazy read past the headroom succeeds and the spill is
-  recorded). Calibrate each new standalone target's TIMEOUT from the slowest lane with headroom. Record
+  getter, and Q-33's forwarding-lane branch on MSVC debug (T060's C++ and T091's C cells: each lazy
+  read past the headroom succeeds, the spill is recorded, the session stays Active; on a lane where
+  `arena_upstream()` is null the same cells take their null-upstream branch). Mutant, in a scratch
+  copy rsynced to the sandbox: the spill witness forwards without recording → the forwarding-lane
+  branch's spill assertion RED on MSVC debug. Record it under `## Mutants` too. Calibrate each new standalone target's TIMEOUT from the slowest lane with headroom. Record
   under `## MSVC`.
 
 ### Static analysis, claims, citations, pins
@@ -1289,7 +1359,9 @@ surfaces exist and are witnessed.
   result covers only the commits that existed when it ran). Commit the `tasks.md` ticks through T125
   first, so the head the gates ran on is the head that is pushed. Then push and open the PR with T124's body, and
   check `closingIssuesReferences`. T126 writes only the verify record, through the decisions symlink
-  into the parent repo, so it adds no library commit.
+  into the parent repo, so it adds no library commit. **Recorded deviation:** this task deliberately
+  sits between the two mandatory close-out tasks T125 and T126. T126 stays the FINAL task, so Gate B
+  pre-flight 4d (which reads T126's `## Completeness`) is unaffected.
 - [ ] T126 **Feature-completeness audit (the FINAL task).** Assert against the final branch head:
   - (i) every `tasks.md` row through T125 is `[X]` or carries an explicit waiver rationale (committed
     before T125a's push); T125a's and T126's own completion is evidenced in the verify record, and their
@@ -1312,7 +1384,7 @@ surfaces exist and are witnessed.
   and T005 precedes every production edit. T006 → T007 (MSVC leg). T008 and T009 need only T002;
   T009 → T010. T011 needs T002; T012 needs T010, and may extend T011.
 - **Foundational (Phase 2):** needs Setup. T013 → T018. T014 (needs T006) → T024 (Phase 5) and T063.
-  T015 ‖ T016 → T017 → T018 → T018a and T019; T020 after T018. T021 → T022 → T023 → T025. 2b and 2c
+  T015 ‖ T016 → T017 → T017a → T018 → T018a and T019; T020 after T018. T021 → T022 → T023 → T025. 2b and 2c
   touch different files and may run side by side. **Blocks every story.**
 - **US1 (Phase 3):** Foundational. Tests T026–T032 before T033–T037; T035 and T036 need T034; T037 needs
   T034.
@@ -1421,14 +1493,14 @@ behaviour exists. One PR carries all of it.
 |---|---|---|
 | FR-001 | T015, T026, T027, T029, T032 | T018, T035, T036 |
 | FR-002 | T015, T019, T020, T027, T028 | T018 |
-| FR-003 | T026, T028, T030, T076, T090 | T033, T034, T035, T036, T037, T097 |
+| FR-003 | T026, T028, T029, T030, T076, T090 | T033, T034, T035, T036, T037, T097 |
 | FR-004 | T026, T029, T032 | T010, T037 |
 | FR-005 | T029, T032 | T037 |
 | FR-006 | T041, T042, T043, T045 | T046, T047, T048, T049 |
 | FR-007 | T090, T092, T093 | T096, T097, T098, T101 |
 | FR-008 | T015, T031 | T018, T035, T036 |
 | FR-010 | T021, T055a, T054, T055 | T022, T022a, T024, T063, T064 |
-| FR-011 | T054, T060, T091 | T061, T063 |
+| FR-011 | T054, T060, T091, T069 and T113 (forwarding lane) | T061, T063 |
 | FR-012 | T054, T066 (arena mirrors re-based), T068 | T063 |
 | FR-013 | T015, T016, T055, T055a | T018, T024, T022a, T064 |
 | FR-014 | T057, T070 | T063 |
@@ -1459,19 +1531,23 @@ behaviour exists. One PR carries all of it.
 | C-1 configuration (both Framers resync on, max = L) | T035, T036, T024, T064 |
 | C-1 outcome table and close rows | T015, T018, T055, T055a, T064 |
 | C-1 resync rule (start, extent, state across feeds, ordering, reporting) | T015, T018, T027, T028 |
-| C-1 W-1, W-2 (both caps), W-3, W-4; the bound and its condition | T013, T015, T017, T018, T018a (cost), T019, T020 |
+| C-1 Extent: each failed candidate is its own region (two adjacent garbles count two) | T015 (Q-5), T018 |
+| C-1 Frame start: after a wrong-CheckSum frame the next byte is a search position (wrong-CheckSum ‖ junk ‖ good counts one) | T015 (Q-5), T018 |
+| C-1 W-1, W-2 (both caps), W-3, W-4; the bound and its condition | T013, T015, T017, T017a (the constant), T018, T018a (cost), T019, T020 |
 | C-1 every other Framer caller unchanged | T016, T017 |
 | C-2 step 1 (35-not-third, every state but Disconnected) | T026, T029, T032, T037 |
 | C-2 step 2 (closing, NotConnected/LogonSent) | T075, T076, T077 |
 | C-2 step 3 (092's rows except D-8) | T032, T037 |
 | C-2 step 4 (refresh, then the existing arm) | T071, T073 |
 | C-2 Disconnected ignores every frame | T029, T110 (its mutant) |
+| C-2 Disconnected: a Framer garble is counted, evented and logged | T029, T035 |
+| C-2 step 1 takes D-9 (LogoutSent, third field not 35: counted, evented, logged) | T029, T037, T105 |
 | C-2 Active-only 383 check deleted | T055, T064 |
 | C-3 I-1 (every admitted frame parses) | T054, T063 |
 | C-3 I-2 (fresh resource over B(L), spill witness) | T054, T063, T069, T070 |
 | C-3 I-3 (no nested inbound parse) | T063 |
 | C-3 I-4 (late close stays as defence) | T057, T070 |
-| C-3 I-5 (lazy reads at exhaustion) | T058, T060, T061, T065, T091 |
+| C-3 I-5 (lazy reads at exhaustion) | T058, T060, T061, T065, T091, T113 (forwarding lane) |
 | C-3 I-6 (admin/outbound arenas unchanged) | T063, T121 |
 | C-4 phase (a) | T043, T049 |
 | C-4 phase (b), loop-head check, race, clock, re-arm, disarm, zero refusal | T041, T042, T045, T046, T047, T048 |
@@ -1479,6 +1555,7 @@ behaviour exists. One PR carries all of it.
 | C-5 one per-frame writer; garbled and faulty never write | T071, T072, T073 |
 | C-6 store operation | T079, T084 |
 | C-6 the unit (steps 1–7) and the shield | T074a, T080, T082, T085, T088 |
+| C-6 "any point of the unit": its three conditions | T085 (re-derived under `## Populations`) |
 | C-6 engine-stop flag | T082, T086 |
 | C-6 `close()`'s wait and the outcome table | T080, T081, T087 |
 
@@ -1499,7 +1576,7 @@ behaviour exists. One PR carries all of it.
 | Q-11 | T054, T069, T070 | Q-30 | T090 |
 | Q-12 | T055a, T024 | Q-31 | T093 |
 | Q-13 | T021 (L), T055a and T022a (383 refusal), T042 (timeout) | Q-32 | T008, T058, T070 |
-| Q-14 | T055a and T024 (carry), T056 (session arena), T069 (MSVC, both halves) | Q-33 | T060, T091, T070 |
+| Q-14 | T055a and T024 (carry), T056 (session arena), T069 (MSVC, both halves) | Q-33 | T060, T091, T070, T069 and T113 (forwarding lane) |
 | Q-15 | T057, T070 | Q-34 | T030 |
 | Q-16 | T041, T053, T090 (C, band), T092 (Python, band), T093 (TOML) | Q-35 | T041 |
 | Q-17 | T043 (late handshake: peer-side observable), T053 | Q-36 | T045, T053 |
@@ -1519,7 +1596,7 @@ bench), T111, T112, T113, T114–T118.
 | 2 | T037, T100, T102 | 11 | T033, T047, T087 |
 | 3 | T024, T064, T100, T102 | 12 | T059, T062 |
 | 4 | T063, T100, T102 | 13 | T079, T084 |
-| 5 | T046–T049, T100, T102 | 14 | T023 |
+| 5 | T046–T049, T100, T102 | 14 | T023, T024, T034, T047, T086 |
 | 6 | T073, T100, T102 | 15 | T024, T063, T105 |
 | 7 | T096, T101 | 16 | T077, T124 |
 | 8 | T034, T097, T098, T101 | 17 | T085–T087, T124 |

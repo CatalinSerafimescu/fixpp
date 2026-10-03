@@ -660,7 +660,9 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
     admission bound (one carry plus B(L) per registered session with a live or establishing
     connection, research R-3);
   - update the 092 rows that state D-8's disregard or the pre-Active refusal of a faulty frame whose
-    third field is not 35 (`B-092-2`, `B-092-9`, `L-092-1` are leads; FR-005 makes D-8 unreachable);
+    third field is not 35 (`B-092-2`, `B-092-9`, `L-092-1` are leads; FR-005 makes D-8 unreachable),
+    and the row stating D-9 (LogoutSent): its frames whose third field is not 35 stay disregarded and
+    are now counted, evented and logged (contract C-2);
   - update `L-092-6` and `L-518-1` where this feature changes what they state. That includes
     L-518-1's "Frames that arrive with the Logon" bullet. Its LogonReceived half becomes by design,
     because FR-030 leaves LogonReceived unchanged on purpose: a graceful close from LogonReceived runs
@@ -668,8 +670,9 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
     #523 then closes with no B&L bullet still calling it open.
 - **FR-051**: C-ABI version: one MINOR bump that carries the new setter and getter, and declares the
   behaviour changes BREAKING (`[const §X.7]`, following 091 and 092). BREAKING is marked in the doc
-  block of each C declaration through which a change is observed, and in `version.h` only where no
-  declaration carries it. The 1.10 sentences 093 falsifies are amended in place. Contract C-7's matrix
+  block of each C declaration through which a change is observed. `version.h`'s history entry is
+  headed BREAKING with a one-line pointer per change, and details an effect only where no declaration
+  carries it. The 1.10 sentences 093 falsifies are amended in place. Contract C-7's matrix
   names each declaration and each amended bullet. The BREAKING changes:
   - a garbled frame no longer ends the session, and two shapes that were framed are now garbled: a
     BeginString over its cap and a BodyLength digit run over its cap;
@@ -804,7 +807,8 @@ the rebase onto `origin/main` (`00c1f720` at spec time). Every RED claim is run 
   covers the rest of establishment.
 - The densest legal field layout is a one-digit tag with an empty value, `1=<SOH>`: three bytes per field
   (research R-3). That sets the worst-case field count for L. It holds while the header scan and
-  `OffsetTable::build` accept an empty value (re-derive as research R-3 does). Making an empty value a
+  `OffsetTable::build` accept an empty value: re-derived at implementation by tasks.md T007's
+  dense-frame measurement, which parses frames at that layout on the base. Making an empty value a
   scan fault is a separate decision, outside 093; it would leave B(L) an over-estimate, which is safe,
   and change only which dense frames the Q-11 cells can build.
 - LFIXT (§5.4.12) is not a supported profile, so its "terminate on garbled" rule does not apply.

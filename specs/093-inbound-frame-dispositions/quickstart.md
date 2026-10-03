@@ -1,7 +1,8 @@
 # Quickstart: validating 093-inbound-frame-dispositions
 
 This file is a validation guide, not an implementation. Every behaviour cell is written first and shown
-either RED on the base (`00c1f720`, or the branch's merge base at implementation), or RED on its named
+either RED on the base (the merge base tasks.md T002 records after the rebase onto `origin/main`;
+`00c1f720` at spec time), or RED on its named
 mutant. A cell of the second kind shows "—" in its RED column, with the mutant and the instrument that
 observes the effect. A regression guard is green on the base by design and names the mutant that turns
 it RED. §4 maps every FR and SC to its contract clause and its cells.
@@ -10,7 +11,14 @@ it RED. §4 maps every FR and SC to its contract clause and its cells.
 
 1. **Take the timing baseline before the first edit.** Run a paired base-vs-branch bench of
    `bin/on_inbound_frame_bench`, once with `validate_inbound_messages` false and once with it true
-   (`[const §VIII.2]`).
+   (`[const §VIII.2]`), and of `bin/framer_bench`'s `BM_Framer_Feed_NoCarry` (default `Config`).
+   `on_inbound_frame_bench` bypasses the Framer, so the base's `BM_Framer_Feed_NoCarry` is the
+   reference for two `framer_bench` pairings at the final head (§3):
+   - against the candidate's default row, `BM_Framer_Feed_NoCarry` (the strict path and the
+     always-compiled counted-work counters);
+   - against the candidate's `BM_Framer_Feed_NoCarry_Resync` (tasks.md T018a; resync on, the pump's
+     limit and BeginString cap), compared across row names because that row cannot exist on the
+     base. This is the delta the pump's production path pays.
    - The base worktree path is padded to the branch path's length, because an embedded source-dir literal
      shifts the code layout.
    - The bench is not paired in CI (`bench/ci-suite.txt`), so this is the gate.
@@ -32,10 +40,10 @@ it RED. §4 maps every FR and SC to its contract clause and its cells.
 | Q-2 | Resync recovery: good ‖ garbage ‖ good in one write, with garbage that does **not** end in SOH (`XYZ8=FIX…`); a truncated frame followed by a good frame; each split at every byte boundary (segmentation independence); a garbage-only buffer is consumed in finite steps | C-1 | the session closes |
 | Q-3 | Resync extent: a wrong-CheckSum frame with a well-formed frame inside its extent is one garble, through its own end; a well-formed frame embedded after a malformed candidate is delivered (L-8) | C-1, L-8, L-15 | the session closes |
 | Q-4 | Bounded work, using the counted-work instrument (§2), under the bound C-1 states. Each shape is fed in 4096-byte reads and again one byte per read: `8=␁` triples behind a failed large candidate; about L bytes of small valid frames behind a failed large candidate, drained one per feed; staggered nested candidates whose BodyLengths share one `10=`; `8=FIX` repeated with no SOH; a boundary `8=` with no SOH; `8=FIX.4.4␁9=` followed by a run of zeros with no SOH. The digit cap's pair: a valid frame whose BodyLength is zero-padded to exactly `kBodyLengthDigitCap` digits is framed and delivered, and one padded to the cap plus one is a garble of kind `wire_invalid_body_length`, each fed whole and one byte per read | C-1 W-1 to W-4 | the cap-plus-one frame is accepted today (that pair only). The rest: — (new bound; each mutant in §2 is RED, observed by the counted-work instrument) |
-| Q-5 | Garble accounting across feeds: a region split across reads counts once; a summary with `regions == 0` emits no event; garbles before a frame in one feed precede it; logging is at most one record per `max(HeartBtInt, 1 s)`, with the suppressed count, including a session with HeartBtInt = 0 under a sustained garbage stream | C-1, FR-003, E-12 | the session closes |
+| Q-5 | Garble accounting across feeds: a region split across reads counts once; a summary with `regions == 0` emits no event; garbles before a frame in one feed precede it; each failed candidate is its own region, so two adjacent garbles count two; after a wrong-CheckSum frame the next byte is a search position, not a frame boundary, so wrong-CheckSum ‖ junk ‖ good counts one region and the good frame is framed (C-1 Frame start, Extent); logging is at most one record per `max(HeartBtInt, 1 s)`, with the suppressed count, including a session with HeartBtInt = 0 under a sustained garbage stream | C-1, FR-003, E-12 | the session closes |
 | Q-6 | Over-L: a frame of L+1 bytes, one of L+1 bytes with a bad CheckSum, and an over-L BodyLength at a candidate the resync search found all close, with no guard or handler reached; the acceptor's first frame over L is refused | C-1, FR-013 | the bad-CheckSum variant would be disregarded without the reorder (mutant) |
 | Q-7 | Strict callers are unchanged: with `resync_on_garble = false`, an over-max frame with a bad CheckSum still reports `wire_checksum_mismatch`, and `8=` with no SOH is still partial | C-1, OD-4 | — (regression guard; mutant: apply the reorder with resync off; observed by the returned error kind) |
-| Q-8 | Before Active, garbled and 35-not-third frames are disregarded (acceptor first frame, NotConnected, LogonSent, LogonReceived, LogoutSent) | C-2 | close, or refusal |
+| Q-8 | Before Active, garbled and 35-not-third frames are disregarded (acceptor first frame, NotConnected, LogonSent, LogonReceived, LogoutSent). In LogoutSent a frame whose third field is not 35 (092's D-9) is also counted, evented and logged. In Disconnected a Framer garble is counted, evented and logged (the pump still runs), while a 35-not-third frame is not scanned and not counted (regression guard; mutant in §2) | C-2 | close, or refusal; for D-9, the count and event (compile-RED on the base, where the frame is disregarded uncounted) |
 | Q-9 | A 35-not-third frame after `close()` began, in NotConnected or LogonSent, is counted and evented, with no other effect | C-2 steps 1–2, FR-030 | it is processed |
 | Q-10 | BeginString mismatch, each side of the W-2 cap. A value within the cap keeps today's handling: Disconnected with no Logout in Active, refusal before Active, transport close on the acceptor's first frame. A longer value is a garble, disregarded and counted. A session configured with a BeginString longer than the longest supported identifier frames and processes its own frames | FR-008, C-1 W-2 | the longer value is handled as a mismatch (that side only). The shorter side and the configured-long session are regression guards: a cap that ignores the configured length turns the last RED |
 | Q-11 | Dense frame of exactly L bytes, per lane including MSVC debug: parsed and delivered, peak ≤ B(L), no spill | C-3 I-1, I-2 | parse fails (the arena or the entry cap) |
@@ -48,7 +56,7 @@ it RED. §4 maps every FR and SC to its contract clause and its cells.
 | Q-18 | Deadline clock. A clock-wide `cancel_sleeps()` from another session during phase (b) does not end the wait early. With `clock_override` set to a second mock clock, advancing only the override does not expire the deadline, and advancing `engine_cfg.clock` does | C-4 | — (mutants: drop the re-arm; measure the deadline on `effective_clock_`. Observed by the session's state and the transport's open flag at the mock-clock instant) |
 | Q-19 | Active-read allocations, a regression witness: the real pump driven past Active under a global `operator new` counter, which is first shown to count a known allocation; zero per Active read after a warm-up read | C-4, FR-052 | — (regression guard. Not claimed to catch a never-disarmed race: asio's recycling allocator can serve its state without `operator new`. Q-36 is the disarm's RED witness) |
 | Q-20 | Liveness, one cell per SC-005 class: no TestRequest within the interval of that frame. The interval is HeartBtInt measured from the last refresh: the liveness loop sends its TestRequest once `last_inbound_steady_ + HeartBtInt` is reached, and `test_request_threshold` is not read (fixpp#535; re-derive in `run_liveness_loop`). Each cell sends the class frame at t1, after the last refreshing frame at t0, and asserts on the mock clock that no TestRequest is sent before t1 + HeartBtInt, where the base sends one at t0 + HeartBtInt | C-5 | a TestRequest is sent |
-| Q-21 | Liveness, garbled and faulty frames do not refresh (FR-018 twins) | C-5 | — (regression guard; mutant: refresh them; observed by the TestRequest in the outbound frames) |
+| Q-21 | Liveness, garbled and faulty frames do not refresh (092 FR-018 twins) | C-5 | — (regression guard; mutant: refresh them; observed by the TestRequest in the outbound frames) |
 | Q-22 | #523, per role: Logon ‖ dictionary-invalid frame, graceful close during the hydrate or the peer-reset yield; no toAdmin, Reject or state write after close began; the LogoutSent confirmation cell stays green | C-2 step 2 | the Reject reaches toAdmin |
 | Q-23 | #524 without a teardown reset, per role: close drains inside the unit, and the durable state equals the unit's targets; the peer's next Logon at 34=2 without 141=Y is accepted (789 off) | C-6 | NextNumIn is stranded at 1 |
 | Q-24 | #524 with a teardown reset, per role: final state (1, 1) | C-6 | — (green on base; regression guard; observed by the durable store counters) |
@@ -60,7 +68,7 @@ it RED. §4 maps every FR and SC to its contract clause and its cells.
 | Q-30 | C-ABI setter and getter. The setter refuses a null handle and zero. The getter refuses a null handle and a null `out`, writes 0 before the session exists, and the count after a garble. Python on both wheel lanes | C-7 rows 7–8 | the symbols do not exist |
 | Q-31 | TOML: `logon_timeout_ms` accepted as a bare integer; zero, negative, above `UINT32_MAX` and a non-integer each refused with a diagnostic | C-7 row 9 | the key is unrecognised |
 | Q-32 | fixpp#540. **First, the reproduction:** a `Parser` over a small `monotonic_buffer_resource` whose upstream is set explicitly to `null_memory_resource`, sized so the parse succeeds and the unknown-field list does not fit; `unknown_fields()` under `EXPECT_DEATH`, run on the base and its output recorded. **The cell:** under `EXPECT_EXIT(..., ExitedWithCode(0), ...)`, so a terminate on the base is a recorded failure and does not abort the suite, the same call returns an empty view and a second call returns the same empty view | C-3 I-5, FR-015 | it terminates, if the reproduction confirms #540. If the reproduction does not terminate, #540 is closed as not a bug and this cell is a regression guard (mutant: remove the catch) |
-| Q-33 | Lazy reads at headroom exhaustion inside a callback, per API, through the session over a dense frame: `group_slices()` gives an empty span; `fixpp_group_get_nested_group` returns `FIXPP_ERR_WIRE_LIMIT_EXCEEDED`; `fixpp_msg_get_group` returns `FIXPP_ERR_TYPE_MISMATCH`; `unknown_fields()` gives an empty view; the session stays Active and processes the next frame. These reports hold where the spill witness is null, so these assertions run only on those lanes (on MSVC debug the witness forwards to the heap, and research R-3's "nothing spilled" rule stands for the parse). On MSVC debug the same callback runs with that lane's assertions instead: each read succeeds, the spill witness records the spill, and the session stays Active (FR-011). It has no C cursor shell exhaustion arm: that is L-17, fixpp#541, outside 093 | C-3 I-5, L-5 | the `unknown_fields()` arm terminates, if Q-32's reproduction confirms #540; otherwise it is a regression guard. The other arms: — (regression guards pinning today's reports; observed by each call's result and the session's state) |
+| Q-33 | Lazy reads at headroom exhaustion inside a callback, per API, through the session over a dense frame: `group_slices()` gives an empty span; `fixpp_group_get_nested_group` returns `FIXPP_ERR_WIRE_LIMIT_EXCEEDED`; `fixpp_msg_get_group` returns `FIXPP_ERR_TYPE_MISMATCH`; `unknown_fields()` gives an empty view; the session stays Active and processes the next frame. These reports hold where the spill witness is null, so these assertions run only on those lanes (on MSVC debug the witness forwards to the heap, and research R-3's "nothing spilled" rule stands for the parse). On MSVC debug the same callback runs with that lane's assertions instead: each read succeeds, the spill witness records the spill, and the session stays Active (FR-011). It has no C cursor shell exhaustion arm: that is L-17, fixpp#541, outside 093 | C-3 I-5, L-5 | the `unknown_fields()` arm terminates, if Q-32's reproduction confirms #540; otherwise it is a regression guard. The other arms: — (regression guards pinning today's reports; observed by each call's result and the session's state). The MSVC-debug branch: the reads are a regression guard, and the spill assertion is compile-RED on the base (no witness); mutant in §2 |
 | Q-34 | First-frame summary hand-off: k garbled regions before a matching Logon on the acceptor's first-frame read; after `open()` the counter reads k and exactly one `session_event_garbled_frame` is recorded | FR-003, E-4 | the connection closes at the first garbled byte |
 | Q-35 | Default timeout: a `SessionConfig` with no timeout set reads 10000, and a silent peer in phase (b) is closed at 10 s on the mock clock | FR-006, E-7 | the field does not exist |
 | Q-37 | C-ABI witnesses for C-7 rows 1 to 6, driven through the C ABI. For each row's trigger, assert afterwards, through C: `fixpp_session_is_established`; the result of `fixpp_session_send`; whether the callbacks registered with `fixpp_session_register_callback` and `fixpp_session_register_send_callback` fire; and the result of `fixpp_session_close`. The triggers: row 1, a garbled frame in Active; row 2, a 35-not-third frame in Active and a 35-not-third Logon; row 3, a frame of 64 KiB split at the carry edge; row 4, a dense frame of 64 KiB; row 5, a pre-Active peer past T; row 6, liveness-only traffic past HeartBtInt with the TestRequest unanswered | C-7 rows 1–6 | row 1, 3, 4 and 6 triggers end the session today, and the branch keeps it up; row 2's frame reaches the receive callback today and its Logon is refused, and the branch disregards both; row 5's session stays up today, and the branch ends it |
@@ -88,6 +96,7 @@ it RED. §4 maps every FR and SC to its contract clause and its cells.
   - apply the reorder with resync off → Q-7;
   - restore the 16 KiB arena and the default entry cap → Q-11;
   - delete the 35-not-third check → Q-1 (2t), Q-8;
+  - run step 1 in Disconnected too → Q-8 (the Disconnected regression guard; observed by the counter);
   - put the FR-030 guard before step 1 → Q-9;
   - restore the old liveness writer → Q-20;
   - delete the FR-030 guard → Q-22;
@@ -106,7 +115,9 @@ it RED. §4 maps every FR and SC to its contract clause and its cells.
   - drop the deadline's re-arm → Q-18;
   - make `close()`'s wait a one-shot sleep without `await_deadline`'s re-arm → Q-27 (re-arm arm);
   - delete the 1 s floor of the log rate → Q-5 (HeartBtInt = 0);
-  - remove `unknown_fields()`'s catch → Q-32, Q-33.
+  - remove `unknown_fields()`'s catch → Q-32, Q-33;
+  - make the spill witness forward without recording → Q-33's MSVC-debug branch (the spill
+    assertion; run on the MSVC sandbox, tasks.md T113).
 - The spill witness must be shown to record a spill. Feed a frame denser than B(L)'s design point
   through the test-access shrink.
 - **Global allocation counter** (Q-19, and the pre-Active measurement of L-13). It counts only when a
@@ -132,7 +143,10 @@ it RED. §4 maps every FR and SC to its contract clause and its cells.
 - Every `ci-script-pins` step, driven from tier1.yml's YAML.
 - `check-comment-claims.py --base origin/main`, the line-citation shift audit, `check_brain.py gate`,
   and the external sweep.
-- Bench: the paired run from §0 again on the final head, within `[const §VIII.2]`'s +5 % budget.
+- Bench: the paired run from §0 again on the final head, within `[const §VIII.2]`'s +5 % budget per
+  case: `on_inbound_frame_bench` with validation off and on, and both `framer_bench` pairings against
+  the base's `BM_Framer_Feed_NoCarry` (the candidate's `BM_Framer_Feed_NoCarry`, and the candidate's
+  `BM_Framer_Feed_NoCarry_Resync`).
 - The fuzz arms: `fuzz_wire_framer` with `resync_on_garble = true` (no crash, no unbounded loop, and the
   counted-work bound of Q-4 asserted per input), and `fuzz_transport_read_path`.
 
@@ -142,7 +156,7 @@ it RED. §4 maps every FR and SC to its contract clause and its cells.
 |---|---|---|
 | FR-001 | C-1 | Q-1, Q-2, Q-8 |
 | FR-002 | C-1 (start rule, extent, W-1 to W-4, the bound) | Q-2, Q-3, Q-4, Q-5 |
-| FR-003 | C-1 reporting, C-2 step 1, E-4, E-12 | Q-1 (event, log), Q-5, Q-9, Q-30, Q-34 |
+| FR-003 | C-1 reporting, C-2 step 1, E-4, E-12 | Q-1 (event, log), Q-5, Q-8 (D-9, Disconnected), Q-9, Q-30, Q-34 |
 | FR-004 | C-2 step 1 | Q-1 (2t), Q-8 |
 | FR-005 | C-2 step 1, D-8 unreachable | Q-8 |
 | FR-006 | C-4 | Q-13, Q-16, Q-17, Q-18, Q-35, Q-36 |
