@@ -6,6 +6,22 @@ status: stable
 
 # Log
 
+- **2026-10-03 — fixpp#530 (B25), PR #539 Gate B, two owner-approved forms.** `failure-classes.md`
+  class 13 gains *where the items have no identifier, encounter order becomes the key, and it shifts*:
+  a differential census that pairs unnamed items by position matches different definitions and
+  reports clean, so key by an identity that cannot shift and refuse a key holding two or more
+  definitions. Instance: `ci/odr-hooks-census.py` (Gate B rounds 2–3: anonymous records, unnamed
+  enumerations, local classes in inline functions). Filed under class 13, not 17: the key is a
+  position a definition takes by moving, not a name it shares. Class 1 gains *a pin on a CI gate
+  step's guard, keys and sentinel is satisfied by a step that does nothing*: pin the exact `run:`
+  string and give the pin a mutant that replaces it with `true`. Instance: M115 in
+  `ci/test-tier1-python-policy.sh` (Gate B round 4). Filed under class 1, with class 17 and class 6
+  as siblings: the pin is an instrument that could not go RED under a no-op step.
+- **2026-10-02 — fixpp#530 (B25), a CI gate for #511.** `components/session.md`'s test-access section
+  names where the ODR census runs (`ci/odr-hooks-census.py`, Tier 1 `linux-clang-release`) and the
+  homes rejected for it. A definition present under only one macro state is no longer reported. What it
+  does not check is `L-530-1`. At Gate B the owner ruled enums and `.inl`/`.ipp` fragments in scope, and
+  the page states the scope.
 - **2026-10-02 — fixpp#526 + #531 (B24), fixed-window test waits.** `components/test.md` gains a
   subsection under *Bounded pumps*. The "window is preserved" reasons are scoped to the sites where
   they were measured; at 092's `DispositionFixture`, a window was measured to be unnecessary and was

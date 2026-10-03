@@ -290,3 +290,12 @@ All in `tests/session/test_fixt_logon_establishment.cpp`.
   **L-067-2 — a `Data` field (Length+Data coupled) carrying any byte outside `0x20–0x7E` cannot be emitted through the generated builder: `body_builder`'s string path admits only printable ASCII (`is_printable`, `src/wire/body_builder.cpp`), so the coupled Length+Data member accepts ASCII text only — no control bytes and no non-ASCII content (`0x80–0xFF`) either.** 067 models a Length+Data pair (e.g. `EncodedTextLen(354)`/`EncodedText(355)`, `RawDataLength(95)`/`RawData(96)`) as ONE coupled `std::optional<string_view>` in `<Msg>Args` with the Length auto-derived at emit time (FR-007a), routed through `body_builder`'s string path — which rejects any value containing a byte outside `0x20–0x7E` before a byte reaches `out`. ASCII-only Data IS supported; anything else — binary content, and non-ASCII text such as `EncodedText(355)` under `MessageEncoding(347)`, the field's whole purpose — is cut for v1.0. ⚠️ **Not pinned for `Data` fields:** `tests/session/test_067_builder_failclosed.cpp`'s SOH case is on `ClOrdID(11)`, a `STRING` field, and its only `Data` case is ASCII, so no test fails if the guard's range moves for a `Data` member; the rewrite is part of fixpp #418 (`body_builder` exposes no arbitrary-bytes API). **Fix (deferred follow-up):** a `body_builder` arbitrary-bytes emit path for coupled Length+Data — a v1.x demand-driven follow-on. *(067 FR-007a / spec Out-of-Scope "Binary Data-field content"; `tests/session/test_067_builder_failclosed.cpp`; 067 close-out; decided 2026-07-10; PR #185.)*
 
   </details>
+
+<!-- L-511-1 — closed: RESOLVED by fixpp#530 (a CI gate runs the ODR census) -->
+- **L-511-1 — nothing in CI rejected a NEW class member or friend gated on `FIXPP_TEST_HOOKS` — RESOLVED by fixpp#530.** Fixed: see `B-530-1` in the live file (`spec/behaviors-and-limitations.md`, `## fixpp#530`). What that gate does not check is `L-530-1` there.
+
+  <details><summary>Original row as it stood before resolution (fixpp#511)</summary>
+
+  **L-511-1 — nothing in CI rejects a NEW class member or friend gated on `FIXPP_TEST_HOOKS`.** #511's acceptance was measured once, by preprocessing every header under `include/`, `src/` and `tests/` with and without the macro and classifying each difference by its enclosing scope. The instrument and its result are in the verify record (parent repo, `decisions/speckit/511-test-hooks-odr-verify.md`), not in a ctest. **Status: disclosed.**
+
+  </details>

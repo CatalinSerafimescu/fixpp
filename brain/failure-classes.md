@@ -250,6 +250,24 @@ prints `0` for a whole syntax.
   searching, join each line wrap with its comment leader (`//`, `#`, `*`, `>`) into a single space,
   then match `word[\s-]+word`. Prove the search finds the known site on the unfixed tree first.
 
+- ⚠️ **A PIN ON A CI GATE STEP'S GUARD, KEYS AND SENTINEL IS SATISFIED BY A STEP THAT DOES NOTHING.**
+  A workflow pin that checks the step's name, its `id`, its `if:` guard, its key set and the body of
+  the sentinel that reads its outcome looks complete, because it covers everything that decides
+  *whether* the step runs and *how* its result is read. It does not cover *what the step runs*.
+  Replace the step's `run:` with `true` and every pinned field is unchanged: the step succeeds having
+  scanned nothing, the sentinel reads that success, and the gate is green over no measurement.
+  - **Trigger:** you are pinning a CI step that is itself a gate (a census, a lint, a scan), or
+    reviewing such a pin, and the pinned fields are all identity and wiring.
+  - **Procedure:** pin the step's exact `run:` string as well, and give the pin a mutant that
+    replaces the command with `true` and must go RED. A mutant that edits the guard or the keys
+    does not exercise this: it is the arm that changes what the pin already watches.
+  - **Instance (fixpp#530, PR #539, Gate B round 4).** The ODR census step in `tier1.yml` was pinned
+    on its name, id, guard and keys, and the pin stayed green with `run: "true"`. The pin in
+    `ci/test-tier1-python-policy.sh` now compares the exact `run:` string, and its mutant M115
+    replaces the census command with `true` and must be refused.
+  - **Sibling.** Class 17: the no-op step is an alias that shares every proxy the pin compares. Class 6:
+    a `continue-on-error` step and a skipped one are the same green without a measurement.
+
 **The same class, in a benchmark: a timing row that never runs the code it is cited for.**
 - A flat paired delta reads as "no cost". It is only evidence if the timed loop reaches the changed path.
 - The 090 case (PR #494, Gate B): the existing reify row passed a view with no MsgType, so `reify()` returned before the factory it was cited for.
@@ -627,6 +645,32 @@ name it was watching really is gone.
   do not rewrite them into a fresh claim (class 2).
 - **Scanning heuristic:** grep for `copied rather than shared`, `duplicates`, `same pattern as`,
   `mirrors`. Each is a census entry nobody registered.
+
+⚠️ **WHERE THE ITEMS HAVE NO IDENTIFIER, ENCOUNTER ORDER BECOMES THE KEY, AND IT SHIFTS.** The same
+class in a differential census. Two snapshots of one corpus (before and after a macro, a commit, a
+flag) each hold N unnamed items, and the instrument pairs them by position: first with first, second
+with second. Insert, drop or reorder one item in one snapshot and every later pair matches two
+*different* definitions. Those can compare equal, so the divergence the census exists to find is
+reported clean; or they differ for a reason that has nothing to do with the change. Nothing in the
+output tells a shifted pairing from a true one.
+
+- **Trigger:** a comparison between two states whose items are matched by ordinal, or by a key that
+  several items in one scope can share: anonymous records, unnamed enumerations, local classes in
+  inline functions whose heads begin the same way.
+- **Procedure:**
+  - Key each item by an identity that cannot shift: a declared name, the typedef or first declarator
+    that names an unnamed type, the qualified enclosing scope.
+  - Where a key still holds two or more definitions, **refuse** (fail closed) and name the key. Do not
+    pair them. A pairing among same-key items is encounter order again, under a different name.
+  - Seed each colliding shape as an arm: two items under one key, with the divergence in the second,
+    and require the refusal.
+- **Instance (fixpp#530, PR #539, Gate B rounds 2–3).** `ci/odr-hooks-census.py` paired anonymous
+  records by encounter order. Naming them by their declarator or alias covered the named ones, and
+  review then found the same pairing in unnamed enumerations, then in local classes of inline functions that share a
+  head prefix. The census's docstring states which keys it now refuses and the case it still pairs
+  by order; read the scope there, not here.
+- **Not class 17.** Class 17 is a key that ADMITS an alias. Here the key is the position, and a
+  different definition takes it by moving, not by sharing a name.
 
 **Sibling.** Class 8 is the same seam from the other side: *consolidating* N copies dissolves the
 population an audit asserts over. This is *creating* one, invisibly. Both say the population is a
