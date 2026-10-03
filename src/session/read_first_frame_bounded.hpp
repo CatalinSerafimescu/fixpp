@@ -197,9 +197,20 @@ inline asio::awaitable<void> await_deadline(fixpp::core::Clock& clock,
     }
 }
 
+// 093-inbound-frame-dispositions (data-model E-4, E-6): what a successful
+// read_first_frame_bounded returns. The first frame is buf[offset, offset + len);
+// the bytes after it in buf are surplus for the read pump. `garbles` sums the garble
+// summaries of every feed the read made: regions and discarded bytes added, the first
+// opened region's kind kept.
+struct first_frame_read {
+    std::size_t offset = 0;
+    std::size_t len = 0;
+    fixpp::wire::garble_summary garbles{};
+};
+
 // ── Bounded first-frame read (FR-014 / E-2 / C1 steps 2-3) ──────────────────
 // Reads raw bytes from an accepted (not-yet-TLS-handshaken, post-handshake) TCP
-// transport into `buf` with a deadline. Returns the number of bytes read on
+// transport into `buf` with a deadline. Returns the first frame's place in buf on
 // success, or an error on timeout / over-budget / read-fail.
 //
 // Used AFTER async_handshake succeeds — we read TLS application-data bytes.
@@ -211,10 +222,19 @@ inline asio::awaitable<void> await_deadline(fixpp::core::Clock& clock,
 // deadline fire or read error. "Complete frame" == Framer::feed returns at
 // least one frame_view.
 //
+// 093-inbound-frame-dispositions (contract C-1): `framer_cfg` is the session's
+// inbound Framer config (detail::inbound_framer_config), so the Framer resyncs:
+// garbled bytes ahead of the first frame are disregarded, summed into the result's
+// `garbles`, and not returned as an error. The budget still counts them, since buf
+// holds every byte read. The default is resync with the Framer's default caps, for
+// callers without a SessionConfig.
+//
 // [FR-014; E-2; data-model "Bounded first-frame read"]
-[[nodiscard]] inline asio::awaitable<fixpp::core::expected_t<std::size_t>> read_first_frame_bounded(
-    fixpp::transport::Transport& transport, std::vector<std::byte>& buf, fixpp::core::Clock& clock,
-    std::chrono::milliseconds deadline, std::size_t max_bytes) {
+[[nodiscard]] inline asio::awaitable<fixpp::core::expected_t<first_frame_read>>
+read_first_frame_bounded(fixpp::transport::Transport& transport, std::vector<std::byte>& buf,
+                         fixpp::core::Clock& clock, std::chrono::milliseconds deadline,
+                         std::size_t max_bytes,
+                         fixpp::wire::Framer::Config framer_cfg = {.resync_on_garble = true}) {
     using fixpp::core::error;
 
     using namespace asio::experimental::awaitable_operators;
@@ -249,7 +269,8 @@ inline asio::awaitable<void> await_deadline(fixpp::core::Clock& clock,
     // byte before any parse, making the frame-vs-budget decision unreachable).
     fixpp::wire::pmr_carry_buffer carry{max_bytes + 1, std::pmr::new_delete_resource()};
     std::array<fixpp::wire::frame_view, 1> out_frames{};
-    fixpp::wire::Framer framer;
+    fixpp::wire::Framer framer{framer_cfg};
+    fixpp::wire::garble_summary garbles{};
 
     std::array<std::byte, 4096> read_buf{};
     for (;;) {
@@ -298,6 +319,12 @@ inline asio::awaitable<void> await_deadline(fixpp::core::Clock& clock,
         // must not preempt a frame that already completed within budget (S3/S4).
         auto feed_r = framer.feed(std::span<const std::byte>{read_buf.data(), n}, carry,
                                   std::span<fixpp::wire::frame_view>{out_frames});
+        auto const g = framer.last_garbles();
+        if (garbles.regions == 0U && g.regions != 0U) {
+            garbles.first_kind = g.first_kind;
+        }
+        garbles.regions += g.regions;
+        garbles.discarded += g.discarded;
         if (!feed_r.has_value()) {
             // Propagated verbatim, including a framer-sourced wire_frame_too_large.
             // (088 /simplify: the previous form special-cased that enum and then
@@ -308,12 +335,16 @@ inline asio::awaitable<void> await_deadline(fixpp::core::Clock& clock,
             co_return std::unexpected(feed_r.error());
         }
         if (!feed_r->empty()) {
-            // First complete frame available. Return its EXACT length so the caller
-            // delivers ONLY the first frame (buf[0..len)) to on_inbound_frame and
-            // carries any surplus (buf[len..], a coalesced next frame) into the
-            // read-pump (F-015-002). buf accumulates raw bytes in arrival order, so
-            // buf[0..len) is byte-for-byte the first frame the framer emitted.
-            co_return (*feed_r)[0].bytes().size();
+            // First complete frame available. Return its EXACT place so the caller
+            // delivers ONLY the first frame (buf[offset, offset + len)) to
+            // on_inbound_frame and carries any surplus (the bytes after it, a coalesced
+            // next frame) into the read-pump (F-015-002). buf accumulates raw bytes in
+            // arrival order, and after a feed that produced a frame the Framer's
+            // pending bytes are exactly the bytes after that frame, so the frame ends
+            // pending_bytes() before the end of buf.
+            std::size_t const len = (*feed_r)[0].bytes().size();
+            std::size_t const end = buf.size() - framer.pending_bytes();
+            co_return first_frame_read{.offset = end - len, .len = len, .garbles = garbles};
         }
 
         // Single budget decision point (FR-007), strict `>` (exceeds, not

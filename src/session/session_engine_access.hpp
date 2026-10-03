@@ -23,6 +23,12 @@ struct session_engine_access {
     [[nodiscard]] static std::uint32_t inbound_limit(Session const& s) noexcept {
         return s.inbound_limit_;
     }
+
+    // Accounts one summary of disregarded inbound bytes (data-model E-4): the read
+    // pump's after a feed, the first-frame read's once after open(). Session strand.
+    static void note_garbles(Session& s, fixpp::wire::garble_summary const& g) noexcept {
+        s.note_garbles_(g);
+    }
 };
 
 }  // namespace fixpp::session

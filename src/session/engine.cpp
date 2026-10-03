@@ -69,6 +69,10 @@
 // 088 T008: read_first_frame_bounded (moved from anon ns to enable direct
 // unit testing).
 #include "read_first_frame_bounded.hpp"
+// 093-inbound-frame-dispositions: the inbound Framers' shared settings, and the
+// engine's seam into Session (data-model E-11).
+#include "read_pump.hpp"
+#include "session_engine_access.hpp"
 
 namespace fixpp::session {
 
@@ -378,9 +382,18 @@ using fixpp::session::detail::read_first_frame_bounded;
 // parses them with a session-lifetime Framer + pmr_carry_buffer, and delivers
 // each complete frame to session.on_inbound_frame.
 //
+// 093-inbound-frame-dispositions (contract C-1) supersedes L-004-4's wontfix: the
+// Framer runs in resync mode (detail::inbound_framer_config), so a garbled region is
+// disregarded and framing resumes at the next "8=FIX", instead of the session closing.
+// After every feed whose summary opened a region, the pump hands the summary to the
+// Session (session_engine_access::note_garbles), in the initial_bytes drain and the
+// read loop's drain alike, before it delivers any frame that feed produced; a feed's
+// garbles precede its frames (C-1 Ordering). The feed that fails is accounted too.
+//
 // Termination:
 //   EOF / read-error   → close session terminal, stop pump.
-//   wire_frame_too_large → close session terminal, stop pump (FR-012).
+//   wire_frame_too_large → close session terminal, stop pump (FR-012). In resync
+//                           mode it is the only error a feed returns.
 //   on_inbound_frame error → close session terminal, stop pump (FR-012).
 //   total-cancel (stop()) → async_read_some returns transport_read_cancelled
 //                           → error arm fires, close is a no-op on already-
@@ -389,11 +402,9 @@ using fixpp::session::detail::read_first_frame_bounded;
 // Natural backpressure: no inbound queue; each on_inbound_frame call must
 // complete before the next read_some is issued (SC-003 / US2 AC1).
 //
-// Capacity constant: must be < the 128 KiB over-size frame the T014 case sends
-// (kOversizeBody = 128 KiB) so wire_frame_too_large fires in the framer, AND
-// large enough to hold any valid FIX admin frame. 64 KiB is the right value.
+// The carry's capacity is detail::kReadPumpCarryCapacity (read_pump.hpp).
 // [tasks.md T015; FR-004/012; C2; [[feedback_asio_cospawn_total_cancellation_default]]]
-constexpr std::size_t kReadPumpCarryCapacity = 64U * 1024U;  // 64 KiB
+using fixpp::session::detail::kReadPumpCarryCapacity;
 
 asio::awaitable<void> run_read_pump(fixpp::transport::Transport& transport,
                                     fixpp::session::Session& session,
@@ -418,7 +429,14 @@ asio::awaitable<void> run_read_pump(fixpp::transport::Transport& transport,
     // natural backpressure (no inbound queue, SC-003 / US2 AC1).
     std::array<fixpp::wire::frame_view, 1> out{};
 
-    fixpp::wire::Framer framer;
+    fixpp::wire::Framer framer{fixpp::session::detail::inbound_framer_config(cfg)};
+
+    // Hands the last feed's garble summary to the Session, when it opened a region.
+    auto note_garbles = [&]() noexcept {
+        if (auto const g = framer.last_garbles(); g.regions != 0U) {
+            fixpp::session::session_engine_access::note_garbles(session, g);
+        }
+    };
 
     // Helper: close the session terminally on error/EOF, then stop the pump.
     // close(terminal) transitions FSM → Disconnected and fires root cancellation.
@@ -438,6 +456,7 @@ asio::awaitable<void> run_read_pump(fixpp::transport::Transport& transport,
         std::span<const std::byte> incoming = initial_bytes;
         for (;;) {
             auto feed_r = framer.feed(incoming, carry, std::span<fixpp::wire::frame_view>{out});
+            note_garbles();
             if (!feed_r.has_value()) {
                 co_await stop_pump();
                 co_return;
@@ -477,10 +496,11 @@ asio::awaitable<void> run_read_pump(fixpp::transport::Transport& transport,
         std::span<const std::byte> incoming{read_buf.data(), *read_r};
         for (;;) {
             auto feed_r = framer.feed(incoming, carry, std::span<fixpp::wire::frame_view>{out});
+            note_garbles();
 
             if (!feed_r.has_value()) {
-                // wire_frame_too_large or other framing error.
-                // Per FR-012: no silent truncation; close and stop. [T015]
+                // wire_frame_too_large: per FR-012, no silent truncation; close and
+                // stop. [T015]
                 co_await stop_pump();
                 co_return;
             }
@@ -803,7 +823,7 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         // to max_bytes + 1 bytes in frame_buf (the C1 clamp; research.md D-1a)
         // before the budget would reject, because the frame-found return
         // always wins over the budget check (research.md D-1). The coalesced
-        // surplus beyond the first frame (frame_buf[first_frame_len..), see
+        // surplus beyond the first frame (the bytes after it in frame_buf, see
         // below) is not itself budget-checked here — it is handed to the
         // read-pump (F-015-002).
         constexpr std::size_t kFirstFrameMaxBytes = 4096;
@@ -816,7 +836,11 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
 
         std::vector<std::byte> frame_buf;
         frame_buf.reserve(512);
+        std::size_t first_frame_offset = 0;
         std::size_t first_frame_len = 0;
+        // 093 (data-model E-4, plan OD-8): the garbles the first-frame read disregarded,
+        // handed to the Session once, after open().
+        fixpp::wire::garble_summary first_frame_garbles{};
         {
             // engine_cfg.clock (#377): the deadline runs on the engine's Clock
             // rather than a private asio::steady_timer, so it is the same seam
@@ -828,21 +852,30 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
             // for its whole body while stop() joins outstanding_counter_ to zero
             // (step 3) before anything the engine owns is torn down — the same
             // ordering the accept loop already relies on for listeners_.
+            //
+            // 093 (contract C-1): the read's Framer is the session's inbound config, so
+            // it resyncs past garbled bytes with the same BeginString cap as the pump.
             auto read_r = co_await read_first_frame_bounded(
-                *transport, frame_buf, *engine_cfg.clock, kFirstFrameDeadline, kFirstFrameMaxBytes);
+                *transport, frame_buf, *engine_cfg.clock, kFirstFrameDeadline, kFirstFrameMaxBytes,
+                fixpp::session::detail::inbound_framer_config(entry.config));
             if (!read_r.has_value()) {
                 // Rejecting a pre-session connection: nothing consumes a close error.
                 (void)transport->close();
                 continue;  // timeout / over-budget / read-error → reclaim
             }
-            first_frame_len = *read_r;
+            first_frame_offset = read_r->offset;
+            first_frame_len = read_r->len;
+            first_frame_garbles = read_r->garbles;
         }
-        // The first complete frame is frame_buf[0..first_frame_len); any bytes
-        // beyond it are surplus (a coalesced next frame) that must reach the
-        // read-pump rather than being delivered as part of the Logon (F-015-002).
-        std::span<const std::byte> first_frame{frame_buf.data(), first_frame_len};
-        std::span<const std::byte> surplus{frame_buf.data() + first_frame_len,
-                                           frame_buf.size() - first_frame_len};
+        // The first complete frame is frame_buf[offset, offset + len): disregarded
+        // garbled bytes may precede it (093). Any bytes beyond it are surplus (a
+        // coalesced next frame) that must reach the read-pump rather than being
+        // delivered as part of the Logon (F-015-002).
+        std::span<const std::byte> first_frame{frame_buf.data() + first_frame_offset,
+                                               first_frame_len};
+        std::span<const std::byte> surplus{
+            frame_buf.data() + first_frame_offset + first_frame_len,
+            frame_buf.size() - (first_frame_offset + first_frame_len)};
 
         // Step 4: parse CompIDs for reversed-CompID registry resolution.
         auto ids = scan_first_frame_ids(first_frame);
@@ -885,6 +918,9 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
             }
         }
         Session* session = local_session.get();
+        // 093 (plan OD-8): the first-frame read's garbles, once, as one summary, before
+        // the first frame is delivered, so they precede its effects.
+        fixpp::session::session_engine_access::note_garbles(*session, first_frame_garbles);
 
         // Step 7: attach the live transport (T011).
         // Happens-before invariant (Gate A New-1 / E-4): live_peer_id_ is set

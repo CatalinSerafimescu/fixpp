@@ -84,6 +84,9 @@ namespace fixpp::wire {
 // risking a [const §XV.9] violation. Full definition in session.cpp via
 // #include <fixpp/wire/validator.hpp>.
 class dictionary_driven_validator;
+// 093-inbound-frame-dispositions: note_garbles_ takes the Framer's summary by
+// reference, so session.hpp needs only the name; session.cpp includes framer.hpp.
+struct garble_summary;
 }  // namespace fixpp::wire
 
 namespace fixpp::session::detail {
@@ -295,6 +298,15 @@ public:
     // behavior; there is no hard outbound guard here (see spec Assumptions).
     [[nodiscard]] std::optional<std::uint32_t> peer_max_message_size() const noexcept {
         return peer_advertised_max_message_size_;
+    }
+
+    // 093-inbound-frame-dispositions (data-model E-4; FR-003): the number of garbled
+    // inbound regions this session has disregarded, Framer garbles and frames whose
+    // third field is not MsgType(35) alike. Monotonic. A relaxed load, so any thread
+    // may call it. It is not ordered with the rest of the session's state: a caller
+    // that needs the value to reflect a given frame synchronises by other means.
+    [[nodiscard]] std::uint64_t garbled_frame_count() const noexcept {
+        return garbled_frames_.load(std::memory_order_relaxed);
     }
 
     // FR-004 / D-2 — set of recent FSM transitions (capacity ≤16).
@@ -671,6 +683,34 @@ private:
     // limit L, set by open() from inbound_limit_for(cfg_) (src/session/inbound_limit.hpp).
     // 0 until open() runs.
     std::uint32_t inbound_limit_ = 0;
+
+    // 093 (data-model E-4): the count garbled_frame_count() reads. Written only by
+    // note_garbles_, on the session strand, with relaxed ordering.
+    // Placement condition: the count is monotonic per SessionId for the engine's life
+    // only while the engine builds one Session per SessionEntry per Engine::start().
+    // Re-derive before relying on it: read what follows the run_read_pump call in
+    // run_accept_loop and in run_connect_loop (src/session/engine.cpp), and the
+    // lifecycle note above `class Engine` (include/fixpp/session/engine.hpp). If a
+    // Session ever serves a second connection, this placement must be re-derived.
+    std::atomic<std::uint64_t> garbled_frames_{0};
+
+    // 093 (data-model E-12): the logger, resolved once at open() from
+    // cfg_.logger_override, else the engine's; null when neither is set. And the
+    // garble log's rate state: whether a garble record has been written, the earliest
+    // time of the next one on effective_clock_, and the regions of rate-suppressed
+    // summaries since the last record (plan OD-21).
+    std::shared_ptr<fixpp::log::Logger> logger_;
+    bool garble_logged_ = false;
+    fixpp::core::steady_time_point garble_log_next_{};
+    std::uint64_t garbles_unlogged_ = 0;
+
+    // note_garbles_ — 093 (data-model E-4, E-12): accounts one summary of disregarded
+    // inbound bytes. Reached from the engine through session_engine_access (the read
+    // pump after a feed, the accept loop once after open()) and from contract C-2 step
+    // 1. Adds `regions` to the count; when regions > 0 it emits one
+    // session_event_garbled_frame and writes a garble log record, at most one per
+    // max(HeartBtInt, 1 s). Session strand only.
+    void note_garbles_(fixpp::wire::garble_summary const& g) noexcept;
 
     // ── FR-004 / D-2 — FSM transition ring-buffer (capacity 16) ──────────────
     // Stores the last ≤16 fsm_state values recorded via record_state_transition_.

@@ -41,6 +41,8 @@
 #include <fixpp/core/session_executor.hpp>
 #include <fixpp/core/session_local.hpp>
 #include <fixpp/core/trace_context.hpp>
+#include <fixpp/log/level.hpp>               // 093 E-12: log::cat::session
+#include <fixpp/log/logger.hpp>              // 093 E-12: FIXPP_SLOG, the garble record
 #include <fixpp/session/admin_messages.hpp>  // 005 US1: interpret_logon / T046: build_logout
 #include <fixpp/session/config_byte_floor.hpp>  // 090-capi-refusals (fixpp#452): contains_forbidden_config_byte (D-5b/FR-013)
 #include <fixpp/session/direction.hpp>  // 005 US4: direction_t (store outbound)
@@ -57,6 +59,7 @@
 #include <fixpp/session/session_event.hpp>  // 013 T036: SessionEvent variants
 #include <fixpp/session/session_fsm.hpp>    // 005 US1: fsm_state enum (T023–T025)
 #include <fixpp/transport/transport_factory.hpp>  // cfg_.transport_factory_override deref (reconnect_fsm.hpp now fwd-decls it per [const §XV.9])
+#include <fixpp/wire/framer.hpp>             // 093 E-1: garble_summary (note_garbles_)
 #include <fixpp/wire/length_data_carry.hpp>  // fixpp#426: counted Data values
 #include <fixpp/wire/tag_scan.hpp>  // fixpp#421: accumulate_tag_digit (send + replay scanners)
 #include <fixpp/wire/writer.hpp>    // 013 FR-010: replay-frame re-serialization
@@ -278,6 +281,52 @@ void Session::emit_event(SessionEvent ev) noexcept {
     if (events_count_ < kSessionEventRingCapacity) {
         ++events_count_;
     }
+}
+
+// ── 093-inbound-frame-dispositions — garbled-frame accounting (data-model E-4,
+// E-12) ─────────────────────────────────────────────────────────────────────
+// A summary with regions == 0 only continued a region an earlier summary opened and
+// counted, so it adds nothing, emits nothing and logs nothing.
+// The log record is the session's first production log site (plan OD-5): FIXPP_SLOG
+// with the session's trace_context, its format string registered in
+// src/log/format_registry.cpp. At most one record per max(HeartBtInt, 1 s) on
+// effective_clock_. A record names the first region of the summary that triggered it
+// (its kind) and that summary's discarded bytes, and carries the number of regions
+// counted since the previous record that no record named: every region of each
+// rate-suppressed summary, plus the triggering summary's other regions (plan OD-21).
+// So the sum over records of (1 + that number) equals garbled_frame_count() when the
+// last record is written. HeartBtInt is the configured heartbeat_interval with the
+// default run_liveness_loop applies when it is unset (re-derive it there); a
+// HeartBtInt of 0 is legal, and the 1 s floor still bounds the rate. The logger's
+// overflow policy decides what a full queue does; its default, drop_newest, drops the
+// record without blocking the strand, and the count stays exact.
+void Session::note_garbles_(fixpp::wire::garble_summary const& g) noexcept {
+    if (g.regions == 0U) {
+        return;
+    }
+    garbled_frames_.fetch_add(g.regions, std::memory_order_relaxed);
+    auto const bytes = static_cast<std::uint32_t>(
+        std::min<std::size_t>(g.discarded, std::numeric_limits<std::uint32_t>::max()));
+    emit_event(session_event_garbled_frame{
+        .first_kind = g.first_kind, .frames = g.regions, .discarded_bytes = bytes});
+
+    auto const now =
+        effective_clock_ ? effective_clock_->steady_now() : fixpp::core::steady_time_point{};
+    if (garble_logged_ && now < garble_log_next_) {
+        garbles_unlogged_ += g.regions;
+        return;
+    }
+    auto const heartbt = cfg_.heartbeat_interval.value_or(std::chrono::seconds{30});
+    garble_log_next_ = now + std::max(heartbt, std::chrono::seconds{1});
+    garble_logged_ = true;
+    std::uint64_t const unnamed = garbles_unlogged_ + (g.regions - 1U);
+    FIXPP_SLOG(logger_.get(), warn, get_trace_context(), fixpp::log::cat::session,
+               "inbound garbled frame disregarded: kind={} discarded_bytes={} "
+               "suppressed_since_last={}",
+               fixpp::log::ArgValue::from_u64(static_cast<std::uint64_t>(g.first_kind)),
+               fixpp::log::ArgValue::from_u64(g.discarded),
+               fixpp::log::ArgValue::from_u64(unnamed));
+    garbles_unlogged_ = 0;
 }
 
 // ── parse_and_dispatch_ ───────────────────────────────────────────────────────
@@ -1266,6 +1315,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
     // validate_engine_config() at Engine::open — independent of per-session
     // overrides; Session::open only resolves.
     effective_clock_ = cfg_.clock_override ? cfg_.clock_override : engine_.clock;
+
+    // 093 (data-model E-12): the logger, resolved once here; may be null.
+    logger_ = cfg_.logger_override ? cfg_.logger_override : engine_.logger;
 
     // (3) T045: populate the session_local<trace_context> slot from
     // SessionConfig::initial_trace_context (FR-014). Stored in-domain at
@@ -2335,15 +2387,32 @@ Session::InboundValidation Session::validate_inbound_(
     return {};
 }
 
+namespace {
+
+// 093-inbound-frame-dispositions (contract C-2 step 1): the summary for one frame
+// whose third field is not MsgType(35): one region of kind wire_header_out_of_order
+// covering the whole frame.
+fixpp::wire::garble_summary header_out_of_order_garble(std::span<const std::byte> frame) noexcept {
+    return {.regions = 1U,
+            .first_kind = fixpp::core::error::wire_header_out_of_order,
+            .discarded = frame.size()};
+}
+
+}  // namespace
+
 // ── 092-garbled-frame-reject (fixpp#507): dispose_unparseable_ ──────────────
 //
 // Contract C-2, rows evaluated top to bottom, for a frame whose header scan
 // recorded a fault. Reads only the fault record and the positional header
 // identification (C-3 I-1).
+// 093-inbound-frame-dispositions (contract C-2 step 1) supersedes 092's D-8: every
+// arm that scans disregards a frame whose third field is not 35, faulty or not,
+// before calling this disposer, so D-8, and D-1/D-2 for that shape, are unreachable
+// here and this disposer only sees a faulty frame whose field 3 is 35.
 //   D-1/D-2 (NotConnected, LogonSent): the Logon refusal, as when interpret_logon
 //     refuses: Disconnected, nothing sent.
 //   D-9 (LogoutSent): disregarded; not the Logout reply, so the logout timeout runs.
-//   D-8 (field 3 is not 35) and D-7 (34 not read): disregarded.
+//   D-7 (34 not read): disregarded.
 //   D-3 (a Logon): silent Disconnected; no Reject, no Logout.
 //   D-4 (a SequenceReset): Reject, no advance; NewSeqNo(36) never read.
 //   D-5/D-6 (any other type): consume_rejected_seqnum_ (fixpp#423's rule: it advances
@@ -2372,9 +2441,6 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::dispose_unparseable_(
             co_return fixpp::core::expected_t<void>{};
     }
 
-    if (!hdr.msg_type_is_third) {  // D-8
-        co_return fixpp::core::expected_t<void>{};
-    }
     const seqnum_t ref_seq = parse_seqnum(hdr.fault_ref_seq_num);
     if (ref_seq == 0) {  // D-7: no 34 read before the fault
         co_return fixpp::core::expected_t<void>{};
@@ -2479,6 +2545,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // here; later code in this arm reads `hdr` rather than scanning again.
             // A frame the scan could not read is refused (C-2 D-1).
             auto hdr = scan_frame_header(frame, session_hooks(inbound_tv_));
+            // 093 (contract C-2 step 1): a frame whose third field is not MsgType(35),
+            // faulty or not, is disregarded as garbled: counted, evented and logged, with
+            // no Reject, NextNumIn kept and no liveness refresh. It runs before 092's
+            // fault branch, superseding 092's D-8, and D-1/D-2 for this shape.
+            if (!hdr.msg_type_is_third) {
+                note_garbles_(header_out_of_order_garble(frame));
+                co_return fixpp::core::expected_t<void>{};
+            }
             if (hdr.fault != fixpp::wire::field_fault::none) {
                 co_return co_await dispose_unparseable_(hdr, fsm_state::NotConnected);
             }
@@ -3174,8 +3248,16 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // (5) message-type-for-state
 
             auto hdr = scan_frame_header(frame, session_hooks(inbound_tv_));
+            // 093 (contract C-2 step 1): a frame whose third field is not MsgType(35),
+            // faulty or not, is disregarded as garbled: counted, evented and logged, with
+            // no Reject, NextNumIn kept and no liveness refresh. It runs before 092's
+            // fault branch, superseding 092's D-8, and D-1/D-2 for this shape.
+            if (!hdr.msg_type_is_third) {
+                note_garbles_(header_out_of_order_garble(frame));
+                co_return fixpp::core::expected_t<void>{};
+            }
             // 092 (contract C-1 step 3): a frame the scan could not read goes to C-2
-            // rows D-8 … D-6 and nothing below runs. The MaxMessageSize(383) guard
+            // rows D-7 … D-6 and nothing below runs. The MaxMessageSize(383) guard
             // above the state switch has already run (C-1 step 1b).
             if (hdr.fault != fixpp::wire::field_fault::none) {
                 co_return co_await dispose_unparseable_(hdr, fsm_state_);
@@ -4267,6 +4349,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             //   all other inbound → (drained) — silently accepted, no FSM change
             //     (seqnum NOT advanced, no fromAdmin/fromApp dispatch)
             auto hdr = scan_frame_header(frame, session_hooks(inbound_tv_));
+            // 093 (contract C-2 step 1): a frame whose third field is not MsgType(35),
+            // faulty or not, is disregarded as garbled: counted, evented and logged, with
+            // no Reject, NextNumIn kept and no liveness refresh. It runs before 092's
+            // fault branch, superseding 092's D-8, and D-1/D-2 for this shape.
+            if (!hdr.msg_type_is_third) {
+                note_garbles_(header_out_of_order_garble(frame));
+                co_return fixpp::core::expected_t<void>{};
+            }
             // 092 (contract C-2 D-9): a frame the scan could not read is disregarded,
             // even one carrying 35=5, so it is never taken as the Logout reply.
             if (hdr.fault != fixpp::wire::field_fault::none) {
@@ -4305,6 +4395,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // The hdr is reused for the SendingTime/seqnum guards below.
             // [041-validation-gate-wiring T014; data-model guard-precedence C-2]
             auto hdr = scan_frame_header(frame, session_hooks(inbound_tv_));
+            // 093 (contract C-2 step 1): a frame whose third field is not MsgType(35),
+            // faulty or not, is disregarded as garbled: counted, evented and logged, with
+            // no Reject, NextNumIn kept and no liveness refresh. It runs before 092's
+            // fault branch, superseding 092's D-8, and D-1/D-2 for this shape.
+            if (!hdr.msg_type_is_third) {
+                note_garbles_(header_out_of_order_garble(frame));
+                co_return fixpp::core::expected_t<void>{};
+            }
             // 092 (contract C-2 D-2): a reply the scan could not read is refused.
             if (hdr.fault != fixpp::wire::field_fault::none) {
                 co_return co_await dispose_unparseable_(hdr, fsm_state::LogonSent);

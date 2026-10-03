@@ -75,6 +75,12 @@ static const std::unordered_map<std::uint32_t, std::string_view>& get_registry()
             {.id = static_cast<std::uint32_t>(crc32_str("drop test {}")), .fmt = "drop test {}"},
             {.id = static_cast<std::uint32_t>(crc32_str("record {}")), .fmt = "record {}"},
             {.id = static_cast<std::uint32_t>(crc32_str("msg {}")), .fmt = "msg {}"},
+            // 093-inbound-frame-dispositions (data-model E-12): Session::note_garbles_.
+            {.id = static_cast<std::uint32_t>(
+                 crc32_str("inbound garbled frame disregarded: kind={} discarded_bytes={} "
+                           "suppressed_since_last={}")),
+             .fmt = "inbound garbled frame disregarded: kind={} discarded_bytes={} "
+                    "suppressed_since_last={}"},
         };
 
         std::unordered_map<std::uint32_t, std::string_view> m;
