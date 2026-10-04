@@ -1346,12 +1346,16 @@ TEST(LogonCloseDuringSuspension, AcceptorCloseDuringPeerResetBuildsNoReply) {
 
 // Same peer Logon; close(graceful) is posted from the inbound persist that follows the
 // 141=Y reset, so the arm resumes after its last counter write, before the reply.
+// 093 (tasks.md T083): the persist is part of the unit's store operation only in a
+// default-body store (MessageStore::reset_to's default body), so the store runs in that
+// mode.
 TEST(LogonCloseDuringSuspension, AcceptorCloseDuringPeerResetPersistBuildsNoReply) {
     auto o = run_acceptor_case({.mode = sess::close_mode::graceful,
                                 .arm_on = "",
                                 .peer_logon_extra = "141=Y\x01",
                                 .store_outbound_next = 1,
-                                .close_from_inbound_persist = true});
+                                .close_from_inbound_persist = true,
+                                .store_mode = fixpp::test_support::reset_to_mode::default_body});
     ASSERT_TRUE(o.bound);
     ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
     expect_close_owns_teardown(o);
@@ -1453,14 +1457,17 @@ TEST(LogonCloseDuringSuspension, InitiatorCloseDuringPeerResetActsOnNoCoalescedF
 // seq 1, and the peer's Logon-ack carries 141=Y. After its reset the initiator
 // restores and persists its inbound counter, then its outbound one. close(graceful) is
 // posted from the inbound persist, and no teardown reset is configured. Asserts the
-// outbound restore completes too.
+// outbound restore completes too. 093 (tasks.md T083): the restores are the unit's
+// store operation's own writes only in a default-body store, so the store runs in that
+// mode.
 TEST(LogonCloseDuringSuspension, InitiatorCloseDuringInboundRestoreCompletesOutboundRestore) {
     auto o = run_initiator_case({.mode = sess::close_mode::graceful,
                                  .arm_on = "",
                                  .peer_logon_extra = "141=Y\x01",
                                  .reset_on_logon = true,
                                  .store_outbound_next = 1,
-                                 .close_from_inbound_persist = true});
+                                 .close_from_inbound_persist = true,
+                                 .store_mode = fixpp::test_support::reset_to_mode::default_body});
     ASSERT_TRUE(o.bound);
     ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
     expect_close_owns_teardown(o);
@@ -1473,7 +1480,8 @@ TEST(LogonCloseDuringSuspension, InitiatorCloseDuringInboundRestoreCompletesOutb
 
 // Same, and the peer's Logon-ack also carries a 789 above the initiator's next
 // outbound, which the 789 honour answers with a Logout. close(graceful) is posted from
-// the outbound persist, so the arm resumes after its last counter write.
+// the outbound persist, so the arm resumes after its last counter write. 093 (tasks.md
+// T083): a default-body store, as above.
 TEST(LogonCloseDuringSuspension, InitiatorCloseDuringOutboundRestoreBuildsNoHonourFrame) {
     auto o = run_initiator_case({.mode = sess::close_mode::graceful,
                                  .arm_on = "",
@@ -1482,7 +1490,8 @@ TEST(LogonCloseDuringSuspension, InitiatorCloseDuringOutboundRestoreBuildsNoHono
                                  .enable_789 = true,
                                  .reset_on_logon = true,
                                  .store_outbound_next = 1,
-                                 .close_from_outbound_persist = true});
+                                 .close_from_outbound_persist = true,
+                                 .store_mode = fixpp::test_support::reset_to_mode::default_body});
     ASSERT_TRUE(o.bound);
     ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
     expect_close_owns_teardown(o);
@@ -1511,6 +1520,10 @@ TEST(LogonCloseDuringSuspension, InitiatorCloseDuringPeerResetStoreEndsAtTeardow
 // carries 141=Y. close(terminal) is posted from the inbound persist after the arm's
 // reset, and the store holds that persist's return until close()'s teardown reset has
 // been issued. Asserts the store ends at the teardown reset's post-state.
+// 093 (tasks.md T083; contract C-6): a default-body store, as above. close() now waits
+// for the unit's store operation before its teardown reset, so that reset is never
+// issued inside the unit: the hold waits out its bound, the unit completes (both
+// restores), and the teardown reset then leaves (1, 1).
 TEST(LogonCloseDuringSuspension, InitiatorCloseDuringInboundRestoreStoreEndsAtTeardownReset) {
     auto o = run_initiator_case({.mode = sess::close_mode::terminal,
                                  .arm_on = "",
@@ -1519,11 +1532,20 @@ TEST(LogonCloseDuringSuspension, InitiatorCloseDuringInboundRestoreStoreEndsAtTe
                                  .reset_on_disconnect = true,
                                  .store_outbound_next = 1,
                                  .close_from_inbound_persist = true,
-                                 .hold_until_close_reset = true});
+                                 .hold_until_close_reset = true,
+                                 .store_mode = fixpp::test_support::reset_to_mode::default_body});
     ASSERT_TRUE(o.bound);
     ASSERT_TRUE(o.settled) << "ring=" << joined(o.ring);
     expect_close_owns_teardown(o);
-    expect_store_ends_at_teardown_reset(o);
+    ASSERT_TRUE(o.store_log);
+    EXPECT_TRUE(o.store_log->hold_timed_out)
+        << "close() issued its teardown reset while the unit's persist was held";
+    EXPECT_GE(o.store_log->resets_issued_after_close_began, 1)
+        << "no teardown reset; store writes: " << store_writes(o);
+    EXPECT_EQ(o.store_next_inbound, std::optional{sess::seqnum_min})
+        << "store writes: " << store_writes(o);
+    EXPECT_EQ(o.store_next_outbound, std::optional{sess::seqnum_min})
+        << "store writes: " << store_writes(o);
 }
 
 // Initiator: the peer's Logon-ack carries 789=1, below the initiator's next outbound,
