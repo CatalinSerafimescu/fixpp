@@ -34,6 +34,13 @@
 
 namespace fixpp::test_support {
 
+// How a HookedStore answers MessageStore::reset_to (093 tasks.md T084):
+//   forward      — forwards to the inner MemoryStore's reset_to (one operation), firing
+//                  the on_reset hook and the hold there, as reset() does;
+//   default_body — runs MessageStore's default body, so reset_to is this store's own
+//                  reset() and next_seqnum(dir, true), each with its hooks.
+enum class reset_to_mode { forward, default_body };
+
 // Bound on a HookedStore hold. A cell that settles on a held operation needs a settle
 // budget above it, so a hold that times out lets the cell settle and report
 // `hold_timed_out` instead of a settle miss.
@@ -43,7 +50,7 @@ inline constexpr auto kHoldBound = std::chrono::seconds{1};
 // outlives the session so a cell can read the final counters after stop().
 struct StoreLog {
     struct Write {
-        std::string op;  // "reset", "in+1" or "out+1"
+        std::string op;  // "reset", "in+1", "out+1" or "reset_to <in> <out>"
         bool after_close_began = false;
     };
     std::function<bool()> close_began;
@@ -84,8 +91,10 @@ public:
         std::function<bool()> flush_until;
     };
 
-    HookedStore(fixpp::session::seqnum_t outbound_next, Hooks hooks, std::shared_ptr<StoreLog> log)
+    HookedStore(fixpp::session::seqnum_t outbound_next, Hooks hooks, std::shared_ptr<StoreLog> log,
+                reset_to_mode mode = reset_to_mode::forward)
         : fixpp::session::MessageStore(flush_thunk_for<HookedStore>()),
+          mode_(mode),
           inner_(std::make_shared<fixpp::session::MemoryStore>(fixpp::session::MemoryStore::Config{
               .policy = fixpp::session::capacity_policy::unbounded})),
           hooks_(std::move(hooks)),
@@ -135,6 +144,15 @@ public:
         // The close the hook posts runs at the reset's leading post.
         const bool hooked = fire(hooks_.on_reset);
         return logged_reset(hooked && hooks_.hold_until_close_reset);
+    }
+    asio::awaitable<fixpp::core::expected_t<void>> reset_to(
+        fixpp::session::seqnum_t next_in, fixpp::session::seqnum_t next_out) noexcept override {
+        if (mode_ == reset_to_mode::default_body) {
+            return fixpp::session::MessageStore::reset_to(next_in, next_out);
+        }
+        // The close the hook posts runs at the inner reset_to's leading post.
+        const bool hooked = fire(hooks_.on_reset);
+        return logged_reset_to(next_in, next_out, hooked && hooks_.hold_until_close_reset);
     }
 
     // close(graceful) awaits this before it writes Disconnected. It yields the strand
@@ -196,6 +214,14 @@ private:
         if (hold) co_await hold_until_close_reset();
         co_return r;
     }
+    asio::awaitable<fixpp::core::expected_t<void>> logged_reset_to(fixpp::session::seqnum_t next_in,
+                                                                   fixpp::session::seqnum_t next_out,
+                                                                   bool hold) {
+        auto r = co_await inner_->reset_to(next_in, next_out);
+        log_->record("reset_to " + std::to_string(next_in) + " " + std::to_string(next_out));
+        if (hold) co_await hold_until_close_reset();
+        co_return r;
+    }
     asio::awaitable<fixpp::core::expected_t<void>> logged_reset(bool hold) {
         auto r = co_await inner_->reset();
         log_->record("reset");
@@ -203,6 +229,7 @@ private:
         co_return r;
     }
 
+    reset_to_mode mode_;
     std::shared_ptr<fixpp::session::MemoryStore> inner_;
     Hooks hooks_;
     std::shared_ptr<StoreLog> log_;
@@ -212,6 +239,7 @@ class HookedStoreFactory final : public fixpp::session::MessageStoreFactory {
 public:
     fixpp::session::seqnum_t outbound_next = 1;
     HookedStore::Hooks hooks;  // moved into the first store made
+    reset_to_mode mode = reset_to_mode::forward;
     std::shared_ptr<StoreLog> log = std::make_shared<StoreLog>();
 
     [[nodiscard]] bool yields_persistent_store() const noexcept override { return true; }
@@ -221,7 +249,7 @@ public:
         asio::any_io_executor /*file_io_executor*/) noexcept override {
         ++log->stores_made;
         return fixpp::core::expected_t<std::unique_ptr<fixpp::session::MessageStore>>{
-            std::make_unique<HookedStore>(outbound_next, std::move(hooks), log)};
+            std::make_unique<HookedStore>(outbound_next, std::move(hooks), log, mode)};
     }
 };
 

@@ -137,6 +137,20 @@ static std::atomic<int> g_flush_datasync_count{0};
 // declaration in file_store.hpp gated by FIXPP_TEST_HOOKS.
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 static std::atomic<bool> g_force_store_pwrite_fail_once{false};
+// 093 (tasks.md T079, Q-29) reset-atomicity fault seams. Compiled unconditionally (like
+// g_catch_fired); declarations in file_store.hpp gated by FIXPP_TEST_HOOKS.
+//   g_force_reset_fail_before_rename: the next reset's offloaded sequence fails after
+//     its temp log is written and closed, before the rename. Consumed once.
+//   g_fail_counter_write_after_reset_commit: 0 off; 1 armed; 2 armed and a reset's
+//     rename has committed. At 2, the next next_seqnum() counter-record write fails
+//     and the state returns to 0.
+//   g_reset_atomicity_fault_count: how many times either fault fired.
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::atomic<bool> g_force_reset_fail_before_rename{false};
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::atomic<int> g_fail_counter_write_after_reset_commit{0};
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::atomic<int> g_reset_atomicity_fault_count{0};
 // T004 probe counter — incremented each time g_force_store_pwrite_fail_once
 // actually fires (i.e. the injected failure took effect), so a test can
 // confirm the seam fired for the right reason rather than trust a bare RED.
@@ -396,6 +410,21 @@ void arm_force_store_pwrite_fail_once() noexcept {
 // FIXPP_TEST_HOOKS.
 int read_and_reset_store_pwrite_fail_count() noexcept {
     return g_store_pwrite_fail_count.exchange(0, std::memory_order_acq_rel);
+}
+
+// 093 (tasks.md T079): the reset-atomicity fault seams (see their globals above).
+// Compiled unconditionally; declarations in file_store.hpp gated by FIXPP_TEST_HOOKS.
+void arm_force_reset_fail_before_rename_once() noexcept {
+    g_force_reset_fail_before_rename.store(true, std::memory_order_relaxed);
+}
+void arm_fail_counter_write_after_reset_commit() noexcept {
+    g_fail_counter_write_after_reset_commit.store(1, std::memory_order_relaxed);
+}
+void disarm_fail_counter_write_after_reset_commit() noexcept {
+    g_fail_counter_write_after_reset_commit.store(0, std::memory_order_relaxed);
+}
+int read_and_reset_reset_atomicity_fault_count() noexcept {
+    return g_reset_atomicity_fault_count.exchange(0, std::memory_order_acq_rel);
 }
 
 // ── Record kinds ──────────────────────────────────────────────────────────────
@@ -1070,20 +1099,23 @@ struct FileStoreImpl {
 
     // ── Fresh file initialisation ──────────────────────────────────────────
 
-    bool initialise_fresh() noexcept {
+    // 093 (data-model E-9): the initial counter record carries the given counters, so a
+    // reset_to's temp log holds its targets and the rename commits them with the reset.
+    bool initialise_fresh(seqnum_t initial_inbound = seqnum_min,
+                          seqnum_t initial_outbound = seqnum_min) noexcept {
         // Write sentinel at offset 0
         if (!write_sentinel(0)) return false;
         const std::int64_t sentinel_disk_size =
             static_cast<std::int64_t>(record_disk_size(kSentinelPayloadSize));
 
         // Write initial counter record
-        if (!write_counter(sentinel_disk_size, seqnum_min, seqnum_min)) return false;
+        if (!write_counter(sentinel_disk_size, initial_inbound, initial_outbound)) return false;
         if (!file.datasync()) return false;
 
         write_pos =
             sentinel_disk_size + static_cast<std::int64_t>(record_disk_size(kCounterPayloadSize));
-        next_inbound = seqnum_min;
-        next_outbound = seqnum_min;
+        next_inbound = initial_inbound;
+        next_outbound = initial_outbound;
         return true;
     }
 };
@@ -1534,6 +1566,13 @@ asio::awaitable<fixpp::core::expected_t<seqnum_t>> FileStore::next_seqnum(direct
                     if (probe_fn) {
                         probe_fn(std::this_thread::get_id());
                     }
+                    // 093 (tasks.md T079): the counter-write-after-reset-commit seam.
+                    int committed = 2;
+                    if (g_fail_counter_write_after_reset_commit.compare_exchange_strong(
+                            committed, 0, std::memory_order_relaxed)) {
+                        g_reset_atomicity_fault_count.fetch_add(1, std::memory_order_relaxed);
+                        return false;
+                    }
                     // pwrite counter header.
                     if (!raw_pwrite_all(raw_fd, &counter_hdr, kHeaderSize,
                                         static_cast<off_t>(counter_off))) {
@@ -1619,7 +1658,15 @@ bool posix_rename_over_open(const std::wstring& from, const std::wstring& to) no
 
 // ── FileStore::reset() ────────────────────────────────────────────────────────
 
-asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
+namespace {
+
+// 093-inbound-frame-dispositions (data-model E-9): FileStore::reset()'s body, with the
+// counters the fresh log starts at as parameters. reset() passes (1, 1); reset_to passes
+// its targets. The rename is the single commit point for the cleared log and both
+// counters, so a crash or a fault at any step leaves the old log or the new one.
+asio::awaitable<fixpp::core::expected_t<void>> reset_store_to(FileStoreImpl& impl,
+                                                              seqnum_t next_in,
+                                                              seqnum_t next_out) noexcept {
     // Capture the session executor for the leading pump-break post below (035: no
     // offload rebind hop remains — nested co_spawn resumes on this executor).
     const auto session_ex = co_await asio::this_coro::executor;
@@ -1627,12 +1674,12 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
     // T041/US3: leading post to break recursive pump() chain.
     co_await asio::post(session_ex, asio::use_awaitable);
 
-    if (!impl_->open_ok) {
+    if (!impl.open_ok) {
         co_return std::unexpected(fixpp::core::error::store_io_failure);
     }
 
     // T041/US3: acquire writer mutex (FR-015 / I-01).
-    auto guard_result = co_await impl_->mutex_.async_lock();
+    auto guard_result = co_await impl.mutex_.async_lock();
     if (!guard_result) {
         co_return std::unexpected(fixpp::core::error::store_cancelled);
     }
@@ -1654,8 +1701,8 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
     // copies of the needed POD/string values — no impl_ reference. (data-model §3)
 
     // ── Region 1: STRAND — capture values for the lambda (mutex held) ─────────
-    const std::string path = impl_->log_path_;
-    const std::uint32_t hash = impl_->expected_hash;
+    const std::string path = impl.log_path_;
+    const std::uint32_t hash = impl.expected_hash;
     const auto probe_fn = g_store_offload_probe.load(std::memory_order_relaxed);
 
     // ── Region 2: POOL — entire atomic-rename sequence in the offloaded lambda ──
@@ -1687,8 +1734,8 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
     bool reset_ok = false;
     try {
         reset_ok = co_await offload_to(
-            impl_->cfg.file_io_executor,
-            [path, hash, probe_fn, result_file, rename_done]() -> bool {
+            impl.cfg.file_io_executor,
+            [path, hash, probe_fn, result_file, rename_done, next_in, next_out]() -> bool {
                 if (probe_fn) {
                     probe_fn(std::this_thread::get_id());
                 }
@@ -1709,10 +1756,10 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
                     tmp_impl.expected_hash = hash;
                     tmp_impl.file = std::move(tmp_file);
                     tmp_impl.write_pos = 0;
-                    tmp_impl.next_inbound = seqnum_min;
-                    tmp_impl.next_outbound = seqnum_min;
+                    tmp_impl.next_inbound = next_in;
+                    tmp_impl.next_outbound = next_out;
 
-                    if (!tmp_impl.initialise_fresh()) {
+                    if (!tmp_impl.initialise_fresh(next_in, next_out)) {
                         // Move file back so it closes properly, then unlink tmp.
                         tmp_file = std::move(tmp_impl.file);
                         ::unlink(tmp_path.c_str());
@@ -1724,6 +1771,13 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
 
                 // Close tmp file before rename (required on some POSIX implementations)
                 tmp_file = OsFile{};  // destructs: close()
+
+                // 093 (tasks.md T079): the fault-before-rename seam.
+                if (g_force_reset_fail_before_rename.exchange(false, std::memory_order_relaxed)) {
+                    g_reset_atomicity_fault_count.fetch_add(1, std::memory_order_relaxed);
+                    ::unlink(tmp_path.c_str());
+                    return false;
+                }
 
                 // Atomic rename: tmp → live log (POSIX rename is atomic per POSIX.1-2008)
                 if (::rename(tmp_path.c_str(), path.c_str()) != 0) {
@@ -1752,6 +1806,13 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
                 // so Region 3 / catch can distinguish post-rename failure (old fd stale)
                 // from pre-rename failure (old fd valid). [gate-b/r1 A.1/A.2]
                 *rename_done = true;
+                // 093 (tasks.md T079): a reset's rename has committed; an armed
+                // counter-write-after-reset-commit seam now fires at the next write.
+                {
+                    int armed = 1;
+                    (void)g_fail_counter_write_after_reset_commit.compare_exchange_strong(
+                        armed, 2, std::memory_order_relaxed);
+                }
 
                 // Re-open the live log (replaced by rename; advisory lock must be re-taken).
                 // If this fails: post-rename failure → caller will poison the store (A.1).
@@ -1791,9 +1852,9 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
                     tmp_impl.expected_hash = hash;
                     tmp_impl.file = std::move(tmp_file);
                     tmp_impl.write_pos = 0;
-                    tmp_impl.next_inbound = seqnum_min;
-                    tmp_impl.next_outbound = seqnum_min;
-                    if (!tmp_impl.initialise_fresh()) {
+                    tmp_impl.next_inbound = next_in;
+                    tmp_impl.next_outbound = next_out;
+                    if (!tmp_impl.initialise_fresh(next_in, next_out)) {
                         tmp_file = std::move(tmp_impl.file);
                         DeleteFileW(wide_tmp.c_str());
                         return false;
@@ -1801,6 +1862,12 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
                     tmp_file = std::move(tmp_impl.file);
                 }
                 tmp_file = OsFile{};  // close tmp
+                // 093 (tasks.md T079): the fault-before-rename seam.
+                if (g_force_reset_fail_before_rename.exchange(false, std::memory_order_relaxed)) {
+                    g_reset_atomicity_fault_count.fetch_add(1, std::memory_order_relaxed);
+                    DeleteFileW(wide_tmp.c_str());
+                    return false;
+                }
                 // POSIX-semantics rename (I-15 / RC#1): atomically replaces the
                 // live log even though FileStore's live handle is still open on
                 // the strand. MoveFileEx(REPLACE_EXISTING) cannot do this — see
@@ -1812,6 +1879,13 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
                 }
                 // Rename succeeded — mark before reopen. [gate-b/r1 A.1/A.2]
                 *rename_done = true;
+                // 093 (tasks.md T079): a reset's rename has committed; an armed
+                // counter-write-after-reset-commit seam now fires at the next write.
+                {
+                    int armed = 1;
+                    (void)g_fail_counter_write_after_reset_commit.compare_exchange_strong(
+                        armed, 2, std::memory_order_relaxed);
+                }
                 // gate-b/r1 A.1 fault-injection: same forced post-rename reopen
                 // failure seam as the POSIX branch above (the cancellation/poison
                 // witnesses install this hook and must fire on Windows too).
@@ -1857,14 +1931,14 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
         g_catch_fired.fetch_add(1, std::memory_order_relaxed);
         if (result_file->valid()) {
             // Lambda completed durably; commit the result exactly as Region 3 would.
-            impl_->file = std::move(*result_file);
-            ++impl_->generation_;
-            impl_->inbound_index.clear();
-            impl_->outbound_index.clear();
-            impl_->write_pos = static_cast<std::int64_t>(record_disk_size(kSentinelPayloadSize) +
+            impl.file = std::move(*result_file);
+            ++impl.generation_;
+            impl.inbound_index.clear();
+            impl.outbound_index.clear();
+            impl.write_pos = static_cast<std::int64_t>(record_disk_size(kSentinelPayloadSize) +
                                                          record_disk_size(kCounterPayloadSize));
-            impl_->next_inbound = seqnum_min;
-            impl_->next_outbound = seqnum_min;
+            impl.next_inbound = next_in;
+            impl.next_outbound = next_out;
             co_return fixpp::core::expected_t<void>{};  // durable success (C3)
         }
         // Lambda did not produce a valid file; fall through to Region 3.
@@ -1873,10 +1947,10 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
 
     // ── Region 3: STRAND — apply mutations on success (mutex still held) ──────
     //
-    // On pre-rename failure (!rename_done): impl_->file unchanged — live log is
+    // On pre-rename failure (!rename_done): impl.file unchanged — live log is
     //   still source of truth.
     // On post-rename failure (*rename_done && !reset_ok): the live pathname now names
-    //   the fresh reset log but impl_->file is the stale (now-unlinked) previous inode.
+    //   the fresh reset log but impl.file is the stale (now-unlinked) previous inode.
     //   Subsequent stores on that inode would vanish on restart → POISON the store so
     //   all further ops (store/next_seqnum/retrieve/reset) fail-closed until restart.
     //   [gate-b/r1 A.1] [L-035-2] (behaviors-and-limitations.md updated)
@@ -1891,31 +1965,51 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
             // poison-check open_ok and return store_io_failure immediately.
             // The only recovery is to restart the process and let the factory re-open
             // the now-fresh live log. [gate-b/r1 A.1] [L-035-2]
-            impl_->file = OsFile{};  // close/release the stale (unlinked) fd
-            impl_->open_ok = false;  // fail-closed: all further ops return store_io_failure
+            impl.file = OsFile{};  // close/release the stale (unlinked) fd
+            impl.open_ok = false;  // fail-closed: all further ops return store_io_failure
         }
         co_return std::unexpected(fixpp::core::error::store_io_failure);
     }
-    impl_->file = std::move(*result_file);
+    impl.file = std::move(*result_file);
     // T015: bump epoch — any in-progress retrieve() walk sees g0 != generation_
     // on the next per-frame re-check and returns store_io_failure (clean-fail).
     // Mutated on the strand (here, mutex held); no atomic needed (Decision 3).
-    ++impl_->generation_;
+    ++impl.generation_;
 
     // Reset in-memory state (both directions, both counters).
     // write_pos must reflect the on-disk tail after initialise_fresh(): the new
     // file already contains a sentinel record + an initial counter record written
     // by initialise_fresh() inside tmp_impl. Setting write_pos = 0 would cause
     // the next store() to overwrite the sentinel at byte 0 — RC#2 fix.
-    impl_->inbound_index.clear();
-    impl_->outbound_index.clear();
-    impl_->write_pos = static_cast<std::int64_t>(record_disk_size(kSentinelPayloadSize) +
+    impl.inbound_index.clear();
+    impl.outbound_index.clear();
+    impl.write_pos = static_cast<std::int64_t>(record_disk_size(kSentinelPayloadSize) +
                                                  record_disk_size(kCounterPayloadSize));
-    impl_->next_inbound = seqnum_min;
-    impl_->next_outbound = seqnum_min;
+    impl.next_inbound = next_in;
+    impl.next_outbound = next_out;
 
     // guard releases mutex here.
     co_return fixpp::core::expected_t<void>{};
+}
+
+}  // namespace
+
+asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
+    co_return co_await reset_store_to(*impl_, seqnum_min, seqnum_min);
+}
+
+// ── FileStore::reset_to() ─────────────────────────────────────────────────────
+//
+// 093-inbound-frame-dispositions (data-model E-9): one operation under the writer
+// mutex, committed by the reset's rename (reset_store_to above). Targets outside
+// {1, 2} are refused before anything is touched.
+asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset_to(seqnum_t next_in,
+                                                                   seqnum_t next_out) noexcept {
+    auto const target_ok = [](seqnum_t v) { return v == seqnum_min || v == seqnum_min + 1; };
+    if (!target_ok(next_in) || !target_ok(next_out)) {
+        co_return std::unexpected(fixpp::core::error::session_invalid_argument);
+    }
+    co_return co_await reset_store_to(*impl_, next_in, next_out);
 }
 
 // ── FileStore::flush_for_session_close() ─────────────────────────────────────

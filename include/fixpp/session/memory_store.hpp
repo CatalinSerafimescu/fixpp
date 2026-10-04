@@ -464,6 +464,35 @@ public:
         co_return fixpp::core::expected_t<void>{};
     }
 
+    // ── reset_to() ──────────────────────────────────────────────────────────
+    // 093-inbound-frame-dispositions (data-model E-9): reset() and the two target
+    // counters in one critical section, so no reader sees an intermediate state.
+    // Targets outside {1, 2} are refused before anything is touched.
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> reset_to(
+        seqnum_t next_in, seqnum_t next_out) noexcept override {
+        auto const target_ok = [](seqnum_t v) { return v == seqnum_min || v == seqnum_min + 1; };
+        if (!target_ok(next_in) || !target_ok(next_out)) {
+            co_return std::unexpected(fixpp::core::error::session_invalid_argument);
+        }
+        co_await asio::post(co_await asio::this_coro::executor, asio::use_awaitable);
+        auto guard_result = co_await mutex_.async_lock();
+        if (!guard_result) {
+            co_return std::unexpected(fixpp::core::error::store_cancelled);
+        }
+        auto guard = std::move(*guard_result);
+
+        inbound_entries_.clear();
+        outbound_entries_.clear();
+        if (cfg_.policy == capacity_policy::unbounded) {
+            unbounded_slab_.clear();
+        }
+        next_inbound_ = next_in;
+        next_outbound_ = next_out;
+        // S-P2-2: bump the reset epoch (mutex held), as reset() does.
+        ++generation_;
+        co_return fixpp::core::expected_t<void>{};
+    }
+
 private:
     // ── Internal types ───────────────────────────────────────────────────────
 
