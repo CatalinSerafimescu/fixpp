@@ -1589,7 +1589,7 @@ TEST(UnparseableFrameDisposition, Liveness_FramerGarble_TestRequestAtInterval) {
 // In Active, one well-formed frame of one class arrives at t1, a third of the heartbeat
 // interval after the Logon at t0 (the Logon seeds inbound liveness). Each class leaves
 // the session up through an early return of the LogonReceived/Active arm. Each cell
-// first asserts the frame took its class's path (the outbound frames it drew, NextNumIn
+// first asserts the frame ran its class's path (the outbound frames it drew, NextNumIn
 // and fromApp after it), then, on the mock clock: no TestRequest(35=1) at t0 + HeartBtInt,
 // none one millisecond before t1 + HeartBtInt, and exactly one at t1 + HeartBtInt. The
 // last check shows the liveness loop still runs, so the earlier ones cannot pass on a
