@@ -109,6 +109,9 @@
 namespace fixpp::session {
 
 namespace {
+// The HeartBtInt a session runs when heartbeat_interval is unset (D-8).
+constexpr std::chrono::seconds kDefaultHeartBtInt{30};
+
 // 093 (data-model E-2): one block from a memory resource, max_align_t-aligned, freed
 // at scope exit unless release()d. Its allocation is noexcept: a bad_alloc leaves it
 // empty, which open() reports as its error.
@@ -362,8 +365,8 @@ void Session::emit_event(SessionEvent ev) noexcept {
 // counted since the previous record that no record named: every region of each
 // rate-suppressed summary, plus the triggering summary's other regions (plan OD-21).
 // So the sum over records of (1 + that number) equals garbled_frame_count() when the
-// last record is written. HeartBtInt is the configured heartbeat_interval with the
-// default run_liveness_loop applies when it is unset (re-derive it there); a
+// last record is written. HeartBtInt is the configured heartbeat_interval, or
+// kDefaultHeartBtInt when it is unset, as run_liveness_loop resolves it; a
 // HeartBtInt of 0 is legal, and the 1 s floor still bounds the rate. The logger's
 // overflow policy decides what a full queue does; its default, drop_newest, drops the
 // record without blocking the strand, and the count stays exact.
@@ -383,7 +386,7 @@ void Session::note_garbles_(fixpp::wire::garble_summary const& g) noexcept {
         garbles_unlogged_ += g.regions;
         return;
     }
-    auto const heartbt = cfg_.heartbeat_interval.value_or(std::chrono::seconds{30});
+    auto const heartbt = cfg_.heartbeat_interval.value_or(kDefaultHeartBtInt);
     garble_log_next_ = now + std::max(heartbt, std::chrono::seconds{1});
     garble_logged_ = true;
     std::uint64_t const unnamed = garbles_unlogged_ + (g.regions - 1U);
@@ -5645,7 +5648,7 @@ asio::awaitable<void> Session::run_liveness_loop() noexcept {
     } live_dec_guard{live_ctr};
 
     // Resolve HeartBtInt from config (D-8 default: 30s; 0 = disabled).
-    std::chrono::seconds heartbt_int{30};
+    std::chrono::seconds heartbt_int = kDefaultHeartBtInt;
     if (cfg_.heartbeat_interval.has_value()) {
         heartbt_int = *cfg_.heartbeat_interval;
     }

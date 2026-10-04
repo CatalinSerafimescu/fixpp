@@ -930,6 +930,8 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
         // (read_first_frame_bounded's two `max_bytes + 1` computations both wrap at SIZE_MAX
         // otherwise).
         static_assert(kFirstFrameMaxBytes >= 1 && kFirstFrameMaxBytes < SIZE_MAX);
+        // The floor of an advertised MaxMessageSize(383) is this budget (plan OD-2).
+        static_assert(kFirstFrameMaxBytes == kMinAdvertisedMaxMessageSize);
         constexpr auto kFirstFrameDeadline = std::chrono::milliseconds{5000};
 
         std::vector<std::byte> frame_buf;
