@@ -78,6 +78,7 @@
 #include "read_first_frame_bounded.hpp"
 // 093-inbound-frame-dispositions: the inbound Framers' shared settings, and the
 // engine's seam into Session (data-model E-11).
+#include "inbound_limit.hpp"  // 093 E-2: L, before a Session exists
 #include "read_pump.hpp"
 #include "session_engine_access.hpp"
 
@@ -228,6 +229,12 @@ expected_t<void> Engine::register_session(SessionConfig cfg) {
     // 093-inbound-frame-dispositions (data-model E-7): a zero establishment timeout is
     // refused before any registry mutation, as Session::open() refuses it.
     if (cfg.logon_timeout_ms == 0) return std::unexpected(error::invalid_session_config);
+
+    // 093 (FR-010, plan OD-2): an advertised MaxMessageSize(383) outside its range is
+    // refused before any registry mutation, as Session::open() refuses it.
+    if (!fixpp::session::advertised_max_message_size_in_range(cfg)) {
+        return std::unexpected(error::invalid_session_config);
+    }
 
     SessionId id = SessionId::from_config(cfg);  // derive key BEFORE move
     if (registry_.contains(id)) return std::unexpected(error::session_invalid_argument);
@@ -426,9 +433,12 @@ using fixpp::session::detail::read_first_frame_bounded;
 // Natural backpressure: no inbound queue; each on_inbound_frame call must
 // complete before the next read_some is issued (SC-003 / US2 AC1).
 //
-// The carry's capacity is detail::kReadPumpCarryCapacity (read_pump.hpp).
+// 093 (data-model E-2, plan OD-13; FR-013) supersedes the pump-local carry and the
+// Framer-default limit: the pump borrows the carry Session::open() allocated (L plus
+// one read; session_engine_access::carry), and its Framer runs at the session's limit
+// L. A frame over L is refused at framing in every state; the session logs it
+// (note_frame_too_large) and the pump closes it terminally.
 // [tasks.md T015; FR-004/012; C2; [[feedback_asio_cospawn_total_cancellation_default]]]
-using fixpp::session::detail::kReadPumpCarryCapacity;
 
 asio::awaitable<void> run_read_pump(
     fixpp::transport::Transport& transport, fixpp::session::Session& session,
@@ -442,21 +452,20 @@ asio::awaitable<void> run_read_pump(
     // inline. [[feedback_asio_cospawn_total_cancellation_default]] / [const §XI.2]
     co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
 
-    // Session-lifetime carry buffer. One allocation from the configured arena
-    // (or new_delete if none supplied). Never reallocated; overflow → wire_frame_too_large.
-    std::pmr::memory_resource* arena =
-        cfg.framer_carry_arena ? cfg.framer_carry_arena : std::pmr::new_delete_resource();
-    fixpp::wire::pmr_carry_buffer carry{kReadPumpCarryCapacity, arena};
+    // The carry open() allocated (093, data-model E-2): never reallocated; a frame over
+    // L is refused by the Framer before it can outgrow it.
+    fixpp::wire::pmr_carry_buffer& carry = session_engine_access::carry(session);
 
     // Per-read scratch buffer — unrelated to the carry; plain stack array.
-    // Size matches the default max_read_window_bytes on Transport::Config.
-    std::array<std::byte, 4096> read_buf{};
+    // Its size is the pump's read size R, which the carry holds one of beyond L.
+    std::array<std::byte, fixpp::session::detail::kReadPumpReadSize> read_buf{};
 
     // Per-call output slot. We process one frame at a time to maintain
     // natural backpressure (no inbound queue, SC-003 / US2 AC1).
     std::array<fixpp::wire::frame_view, 1> out{};
 
-    fixpp::wire::Framer framer{fixpp::session::detail::inbound_framer_config(cfg)};
+    fixpp::wire::Framer framer{fixpp::session::detail::inbound_framer_config(
+        cfg, session_engine_access::inbound_limit(session))};
 
     // Hands the last feed's garble summary to the Session, when it opened a region.
     auto note_garbles = [&]() noexcept {
@@ -472,6 +481,13 @@ asio::awaitable<void> run_read_pump(
     // [data-model §E-5; FR-012; session.hpp close(terminal)]
     auto stop_pump = [&]() -> asio::awaitable<void> {
         (void)co_await session.close(fixpp::session::close_mode::terminal);
+    };
+
+    // A feed error (093, FR-013): in resync mode the only one is wire_frame_too_large, a
+    // frame over L. The session logs it, then the pump closes it.
+    auto frame_too_large = [&]() -> asio::awaitable<void> {
+        session_engine_access::note_frame_too_large(session);
+        co_await stop_pump();
     };
 
     // 093 (C-4): the establishment deadline applies until the first Active.
@@ -498,7 +514,7 @@ asio::awaitable<void> run_read_pump(
             auto feed_r = framer.feed(incoming, carry, std::span<fixpp::wire::frame_view>{out});
             note_garbles();
             if (!feed_r.has_value()) {
-                co_await stop_pump();
+                co_await frame_too_large();
                 co_return;
             }
             std::size_t const produced = feed_r->size();
@@ -559,9 +575,9 @@ asio::awaitable<void> run_read_pump(
             note_garbles();
 
             if (!feed_r.has_value()) {
-                // wire_frame_too_large: per FR-012, no silent truncation; close and
-                // stop. [T015]
-                co_await stop_pump();
+                // wire_frame_too_large: per FR-012, no silent truncation; log, close and
+                // stop. [T015; 093 FR-013]
+                co_await frame_too_large();
                 co_return;
             }
 
@@ -936,14 +952,16 @@ asio::awaitable<void> run_accept_loop(fixpp::core::EngineConfig const& engine_cf
             // ordering the accept loop already relies on for listeners_.
             //
             // 093 (contract C-1): the read's Framer is the session's inbound config, so
-            // it resyncs past garbled bytes with the same BeginString cap as the pump.
+            // it resyncs past garbled bytes with the same BeginString cap as the pump,
+            // and refuses a first frame over the registered session's limit L (FR-013).
             //
             // 093 (contract C-4, phase a): its relative deadline is the smaller of
             // kFirstFrameDeadline and the establishment time left.
             auto read_r = co_await read_first_frame_bounded(
                 *transport, frame_buf, *engine_cfg.clock,
                 std::min(kFirstFrameDeadline, establish_left), kFirstFrameMaxBytes,
-                fixpp::session::detail::inbound_framer_config(entry.config));
+                fixpp::session::detail::inbound_framer_config(
+                    entry.config, fixpp::session::inbound_limit_for(entry.config)));
             if (!read_r.has_value()) {
                 // Rejecting a pre-session connection: nothing consumes a close error.
                 (void)transport->close();

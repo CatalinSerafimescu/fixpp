@@ -72,7 +72,7 @@
 #include <fixpp/dict/version_profile.hpp>
 #include <fixpp/dict/version_registry.hpp>
 
-#include "inbound_limit.hpp"       // 093 E-2: inbound_limit_for
+#include "inbound_limit.hpp"       // 093 E-2: L, the carry and the parse buffer
 #include "msgtype_classifier.hpp"  // 019 T006: is_admin_msgtype (session-internal)
 #include "scan_frame_header.hpp"   // 040 US1: FrameHeader + scan_frame_header (moved from anon ns)
 // 019 T011: Application callback dispatch (inbound). Include here (session.cpp
@@ -95,6 +95,7 @@
 #include <limits>
 #include <memory>
 #include <memory_resource>
+#include <new>
 #include <optional>
 #include <span>
 #include <string>
@@ -106,6 +107,37 @@
 namespace fixpp::session {
 
 namespace {
+// 093 (data-model E-2): one block from a memory resource, max_align_t-aligned, freed
+// at scope exit unless release()d. Its allocation is noexcept: a bad_alloc leaves it
+// empty, which open() reports as its error.
+class owned_block {
+public:
+    owned_block(std::pmr::memory_resource* mr, std::size_t bytes) noexcept : mr_{mr} {
+        try {
+            data_ = static_cast<std::byte*>(mr->allocate(bytes, alignof(std::max_align_t)));
+            size_ = bytes;
+        } catch (std::bad_alloc const&) {
+            data_ = nullptr;
+        }
+    }
+    owned_block(owned_block const&) = delete;
+    owned_block& operator=(owned_block const&) = delete;
+    owned_block(owned_block&&) = delete;
+    owned_block& operator=(owned_block&&) = delete;
+    ~owned_block() {
+        if (data_ != nullptr) mr_->deallocate(data_, size_, alignof(std::max_align_t));
+    }
+    explicit operator bool() const noexcept { return data_ != nullptr; }
+    [[nodiscard]] std::span<std::byte> release() noexcept {
+        return {std::exchange(data_, nullptr), size_};
+    }
+
+private:
+    std::pmr::memory_resource* mr_;
+    std::byte* data_ = nullptr;
+    std::size_t size_ = 0;
+};
+
 // [2d §4.5] never-null resolution chain: SessionConfig::session_arena ?:
 // EngineConfig::default_session_resource ?: std::pmr::get_default_resource().
 std::pmr::memory_resource* resolve_session_arena(const fixpp::core::EngineConfig& engine,
@@ -190,6 +222,32 @@ Session::~Session() {
     if (effective_clock_) {
         effective_clock_->forget_session(this);
     }
+    // 093 (data-model E-2): the carry, its resource and its block, in reverse order of
+    // construction, then the parse buffer. Both blocks are open()'s, absent before it.
+    carry_.reset();
+    carry_resource_.reset();
+    if (!carry_block_.empty()) {
+        carry_arena_->deallocate(carry_block_.data(), carry_block_.size(),
+                                 alignof(std::max_align_t));
+    }
+    if (!inbound_parse_block_.empty()) {
+        session_arena_->deallocate(inbound_parse_block_.data(), inbound_parse_block_.size(),
+                                   alignof(std::max_align_t));
+    }
+}
+
+// 093 (contract C-3 I-2): the spill witness counts, then forwards.
+void* Session::spill_witness::do_allocate(std::size_t bytes, std::size_t alignment) {
+    spills_.fetch_add(1U, std::memory_order_relaxed);
+    return ::fixpp::detail::arena_upstream()->allocate(bytes, alignment);
+}
+
+void Session::spill_witness::do_deallocate(void* p, std::size_t bytes, std::size_t alignment) {
+    ::fixpp::detail::arena_upstream()->deallocate(p, bytes, alignment);
+}
+
+bool Session::spill_witness::do_is_equal(std::pmr::memory_resource const& other) const noexcept {
+    return this == &other;
 }
 
 std::pmr::memory_resource* Session::session_arena() const noexcept {
@@ -349,6 +407,19 @@ void Session::note_establishment_timeout_() noexcept {
                fixpp::log::ArgValue::from_u64(cfg_.logon_timeout_ms));
 }
 
+// ── 093-inbound-frame-dispositions — a frame over L (FR-013; data-model E-12) ──
+// One FIXPP_SLOG record carrying the failure kind and L, through the logger open()
+// resolved and with the session's trace_context; its format string is registered in
+// src/log/format_registry.cpp. No rate bound: the pump closes the session right after,
+// so it is written at most once per connection.
+void Session::note_frame_too_large_() noexcept {
+    FIXPP_SLOG(logger_.get(), warn, get_trace_context(), fixpp::log::cat::session,
+               "inbound frame over the limit closed the session: kind={} limit={}",
+               fixpp::log::ArgValue::from_u64(
+                   static_cast<std::uint64_t>(fixpp::core::error::wire_frame_too_large)),
+               fixpp::log::ArgValue::from_u64(inbound_limit_));
+}
+
 // ── parse_and_dispatch_ ───────────────────────────────────────────────────────
 //
 // Shared parse-and-callback ritual for the receive callbacks (fromAdmin/fromApp) over
@@ -357,11 +428,14 @@ void Session::note_establishment_timeout_() noexcept {
 // `grep -n "parse_and_dispatch_(\|validate_inbound_(" src/session/session.cpp`, and read
 // each call's byte provenance (received from the peer, or built by fixpp).
 //
-// Arena sizing: two named constants document the intentional difference.
-//   kAdminParseArena  = 8192: admin messages (Heartbeat/Logon/TestRequest/…) have a
-//     bounded small field-set; 8 KiB is always sufficient.
-//   kInboundParseArena = 16384: inbound/app frames may carry arbitrary payload; 16 KiB
-//     provides headroom for larger messages without heap fallback.
+// Arena sizing for the stack overload: two named constants document the intentional
+// difference.
+//   kAdminParseArena: admin messages fixpp builds (Heartbeat/Logon/TestRequest/…).
+//   kSendParseArena: the outbound application frames fixpp builds (toApp).
+// 093-inbound-frame-dispositions (data-model E-2, contract C-3) supersedes the
+// 16 KiB inbound stack arena: every late inbound site calls the inbound_parse_t
+// overload, which parses over the session's parse buffer B(L). The admin and outbound
+// sites keep their stack arenas (C-3 I-6).
 //
 // On parse failure (Framer or Parser): returns dispatch_outcome::parse_failed and
 // the callback does not run. Every late inbound site (a call over bytes received
@@ -374,8 +448,8 @@ void Session::note_establishment_timeout_() noexcept {
 // [019-app-callbacks T011/T013/T014/T016; 092 data-model E-3, contract C-6]
 
 namespace {
-constexpr std::size_t kAdminParseArena = 8192;     // admin frames: bounded small
-constexpr std::size_t kInboundParseArena = 16384;  // inbound/app: larger payloads
+constexpr std::size_t kAdminParseArena = 8192;  // admin frames: bounded small
+constexpr std::size_t kSendParseArena = 16384;  // outbound app frames: larger payloads
 }  // namespace
 
 template <class CB>
@@ -383,10 +457,10 @@ template <class CB>
     std::span<const std::byte> frame, std::size_t arena_bytes, CB&& cb) noexcept {
     // Stack parse arena ([const §VIII.5] — no heap).
     // arena_bytes is caller-supplied so the size choice is explicit at each site.
-    std::array<std::byte, kInboundParseArena> pa_buf_storage{};
+    std::array<std::byte, kSendParseArena> pa_buf_storage{};
     // We always allocate the max stack size but hand the requested slice to the MBR.
     // Both constants fit; static_assert guards this.
-    static_assert(kAdminParseArena <= kInboundParseArena);
+    static_assert(kAdminParseArena <= kSendParseArena);
     std::pmr::monotonic_buffer_resource pa_mr{pa_buf_storage.data(), arena_bytes,
                                               ::fixpp::detail::arena_upstream()};
     std::array<std::byte, 512> carry_store{};
@@ -408,6 +482,45 @@ template <class CB>
     fixpp::wire::Parser<fixpp::wire::access_mode::Index> pd_parser{
         fixpp::wire::detail::owned_route_key{}, inbound_tv_};
     auto mv_r = pd_parser.parse((*feed_r)[0], &pa_mr);
+    if (!mv_r) return dispatch_outcome::parse_failed;
+
+    const SessionId sid = SessionId::from_config(cfg_);
+    callback_dispatch_scope cs{*this};
+    auto result = invoke_callback_safe([&]() { return std::forward<CB>(cb)(*mv_r, sid); });
+    (void)cs;
+    if (!result) return std::unexpected(result.error());
+    return dispatch_outcome::dispatched;
+}
+
+// 093-inbound-frame-dispositions (data-model E-2, contract C-3 I-1..I-3): the late
+// inbound sites' overload. The parse runs over a fresh monotonic_buffer_resource on the
+// session's parse buffer, upstream the spill witness, so a draw past the buffer is
+// recorded (and refused where the witness's upstream is null). The entry cap is N(L),
+// and the entries are reserved up front for the most fields the frame can hold, which
+// B(L) budgets. One buffer serves every inbound parse because none nests inside
+// another: callbacks are synchronous, and callback_dispatch_scope asserts it.
+template <class CB>
+[[nodiscard]] fixpp::core::expected_t<Session::dispatch_outcome> Session::parse_and_dispatch_(
+    std::span<const std::byte> frame, inbound_parse_t /*tag*/, CB&& cb) noexcept {
+    std::pmr::monotonic_buffer_resource pa_mr{inbound_parse_buf_.data(), inbound_parse_buf_.size(),
+                                              &parse_spill_witness_};
+    std::array<std::byte, 512> carry_store{};
+    std::pmr::monotonic_buffer_resource carry_mr{carry_store.data(), carry_store.size(),
+                                                 ::fixpp::detail::arena_upstream()};
+    fixpp::wire::pmr_carry_buffer carry{carry_store.size(), &carry_mr};
+    fixpp::wire::Framer pd_framer;
+    std::array<fixpp::wire::frame_view, 1> pd_out{};
+    auto feed_r = pd_framer.feed(frame, carry, std::span<fixpp::wire::frame_view>{pd_out});
+    if (!feed_r || feed_r->empty()) return dispatch_outcome::parse_failed;
+
+    assert(inbound_tv_ != nullptr);
+    // fixpp#495: the OWNED route, as in the stack overload above.
+    fixpp::wire::Parser<fixpp::wire::access_mode::Index> pd_parser{
+        fixpp::wire::detail::owned_route_key{}, inbound_tv_};
+    auto mv_r =
+        pd_parser.parse((*feed_r)[0], &pa_mr,
+                        fixpp::wire::OffsetTable::Config{.max_offset_entries = inbound_entry_cap_},
+                        std::min(inbound_entry_cap_, frame.size() / 3U + 1U));
     if (!mv_r) return dispatch_outcome::parse_failed;
 
     const SessionId sid = SessionId::from_config(cfg_);
@@ -1299,9 +1412,27 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         co_return std::unexpected(error::invalid_session_config);
     }
 
+    // 093-inbound-frame-dispositions (FR-010, plan OD-2): an advertised MaxMessageSize(383)
+    // outside its range is refused, as Engine::register_session refuses it.
+    if (!advertised_max_message_size_in_range(cfg_)) {
+        co_return std::unexpected(error::invalid_session_config);
+    }
+
     // 093-inbound-frame-dispositions (data-model E-2): the session's inbound limit L.
     // Computed from the config alone, before the first observable mutation below.
     inbound_limit_ = inbound_limit_for(cfg_);
+
+    // 093 (data-model E-2, plan OD-13): the carry block, from framer_carry_arena (else
+    // new_delete), and the parse buffer B(L), from the session arena, each allocated
+    // once here, before the first observable mutation below. A bad_alloc is an open()
+    // error. Each block frees itself unless the commit before `state_ = open` takes it.
+    std::pmr::memory_resource* const carry_arena =
+        cfg_.framer_carry_arena ? cfg_.framer_carry_arena : std::pmr::new_delete_resource();
+    owned_block carry_block{carry_arena, detail::inbound_carry_block_bytes(inbound_limit_)};
+    owned_block parse_block{session_arena_, detail::inbound_parse_buffer_bytes(inbound_limit_)};
+    if (!carry_block || !parse_block) {
+        co_return std::unexpected(error::out_of_memory);
+    }
 
     // ── Executor binding — the single executor_not_serialised enforcement
     // point (slot 48 / FR-009 / I-06): make_session_executor wraps
@@ -1430,6 +1561,18 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::open() noexcept {
         // In practice this branch is unreachable in production (open() would
         // have returned invalid_session_config above).
     }
+
+    // 093 (data-model E-2): commit the blocks allocated above. Nothing below can fail:
+    // the monotonic resource covers exactly the carry block, and the carry's noexcept
+    // constructor reserves L plus one read, which the block serves (its container
+    // proxy, where the STL draws one, is the block's kContainerSlack).
+    carry_arena_ = carry_arena;
+    carry_block_ = carry_block.release();
+    carry_resource_.emplace(carry_block_.data(), carry_block_.size(), &parse_spill_witness_);
+    carry_.emplace(std::size_t{inbound_limit_} + detail::kReadPumpReadSize, &*carry_resource_);
+    inbound_parse_block_ = parse_block.release();
+    inbound_parse_buf_ = inbound_parse_block_;
+    inbound_entry_cap_ = detail::inbound_entry_cap_for(inbound_limit_);
 
     state_ = lifecycle::open;
 
@@ -2321,8 +2464,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
 //    validate_inbound_ (synchronous, no sub-coroutine frame)
 //
 // Extracted from the three verbatim validate-gate blocks (the NotConnected,
-// Active and LogonSent arms). Each block built the same kInboundParseArena
-// stack arena, re-framed, parsed, ran validator_->validate, and emitted a Reject.
+// Active and LogonSent arms). Each block built the same stack parse arena, re-framed,
+// parsed, ran validator_->validate, and emitted a Reject. 093 (data-model E-2) moved the
+// parse onto the session's parse buffer B(L), the one the dispatch sites use.
 // Now collapsed here; emit_session_reject_ is inlined at each call site so the
 // PASS path (returns validate_outcome::pass) is coroutine-frame-free and alloc-free.
 //
@@ -2343,9 +2487,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
 Session::InboundValidation Session::validate_inbound_(
     std::span<const std::byte> frame,
     fixpp::session::detail::FrameHeader const& /*hdr*/) const noexcept {
-    std::array<std::byte, kInboundParseArena> vg_buf{};
-    std::pmr::monotonic_buffer_resource vg_mr{vg_buf.data(), vg_buf.size(),
-                                              ::fixpp::detail::arena_upstream()};
+    // 093 (data-model E-2): over the session's parse buffer B(L), upstream the spill
+    // witness, as the inbound dispatch sites parse.
+    std::pmr::monotonic_buffer_resource vg_mr{inbound_parse_buf_.data(), inbound_parse_buf_.size(),
+                                              &parse_spill_witness_};
     std::array<std::byte, 512> vg_carry_store{};
     std::pmr::monotonic_buffer_resource vg_carry_mr{vg_carry_store.data(), vg_carry_store.size(),
                                                     ::fixpp::detail::arena_upstream()};
@@ -2369,7 +2514,10 @@ Session::InboundValidation Session::validate_inbound_(
     std::array<std::byte, 512> vg_scratch_buf{};
     std::pmr::monotonic_buffer_resource vg_scratch_mr{vg_scratch_buf.data(), vg_scratch_buf.size(),
                                                       ::fixpp::detail::arena_upstream()};
-    auto vg_mv_r = vg_parser.parse((*vg_feed)[0], &vg_mr);
+    auto vg_mv_r =
+        vg_parser.parse((*vg_feed)[0], &vg_mr,
+                        fixpp::wire::OffsetTable::Config{.max_offset_entries = inbound_entry_cap_},
+                        std::min(inbound_entry_cap_, frame.size() / 3U + 1U));
     if (!vg_mv_r) {
         return {.outcome = validate_outcome::parse_failed};
     }
@@ -2549,22 +2697,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
     static constexpr auto logon_arm_superseded = [](Session const& s, fsm_state expected) noexcept {
         return s.state_ == lifecycle::closing || s.fsm_state_ != expected;
     };
-    // 070-fix44-closeout S-030: negotiated MaxMessageSize(383) enforcement. Once
-    // established (Active), an inbound frame exceeding the size WE advertised is a
-    // negotiated-contract violation → disconnect (distinct from the absolute
-    // max_frame_bytes framer backstop, which stays in force and rejects larger
-    // frames upstream). Fires only post-establishment: the Logon that establishes
-    // the session arrives pre-Active, so it is never size-checked here (the peer
-    // has not yet seen our 383). Because the framer backstop guarantees
-    // frame.size() ≤ max_frame_bytes for every frame that reaches us,
-    // frame.size() > N is equivalent to frame.size() > min(N, max_frame_bytes) for
-    // all reachable frames. Opt-in: advertised_max unset ⇒ inert (FR-012).
-    // [FR-004/FR-005/FR-006; data-model D-F; contract C-4b]
-    if (fsm_state_ == fsm_state::Active && cfg_.advertised_max_message_size.has_value() &&
-        frame.size() > *cfg_.advertised_max_message_size) {
-        record_state_transition_(fsm_state::Disconnected);
-        co_return fixpp::core::expected_t<void>{};
-    }
+    // 093-inbound-frame-dispositions (FR-013, contract C-2) supersedes 070's S-030
+    // check here, which disconnected an Active session whose inbound frame exceeded
+    // the advertised MaxMessageSize(383) and exempted every frame before Active. The
+    // Framer now refuses a frame over L (the advertised 383 when set) in every state,
+    // below this function, and the read pump closes the session terminally.
     switch (fsm_state_) {
         case fsm_state::NotConnected: {
             // 092 (data-model E-2, research R-3): the arm's one header scan, hoisted
@@ -2594,8 +2731,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // (092 contract C-2 D-1).
             // Seqnum is NOT advanced on validate failure (validate fires before
             // check_inbound — C-3 invariant). [041 T014; data-model E-4; SC-005]
-            // Arena: kInboundParseArena (16384) matches the dispatch arena so the gate
-            // never under-parses relative to dispatch. [simplify-triage FIX-1/FIX-2]
+            // Buffer: the gate parses over the session's parse buffer B(L), as dispatch
+            // does, so it never under-parses relative to dispatch (093, data-model E-2).
+            // [simplify-triage FIX-1/FIX-2]
             if (cfg_.validate_inbound_messages && validator_) {
                 if (hdr.msg_type != "3" && hdr.msg_type != "5") {
                     auto const v = validate_inbound_(frame, hdr);
@@ -3299,7 +3437,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // A frame the scan cannot read never reaches this gate.
             // No-reject-loop: 35=3 and 35=5 exempt (FR-004), for a well-formed frame
             // only; a faulty Reject or Logout is Rejected under C-2. [041 T014; E-4]
-            // Arena: kInboundParseArena (16384) matches the dispatch arena. [FIX-1/FIX-2]
+            // Buffer: the session's parse buffer B(L), as dispatch (093). [FIX-1/FIX-2]
             if (cfg_.validate_inbound_messages && validator_) {
                 if (hdr.msg_type != "3" && hdr.msg_type != "5") {
                     auto const v = validate_inbound_(frame, hdr);
@@ -3449,9 +3587,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // session Reject(35=3) per FR-005/D4.
                 // [019-app-callbacks T016; FR-004; research D3/D4]
                 if (engine_.application != nullptr) {
-                    // kInboundParseArena: inbound frames may carry arbitrary payload.
+                    // The session's parse buffer B(L): any admitted frame parses (093).
                     auto cb_r =
-                        parse_and_dispatch_(frame, kInboundParseArena, [&](auto& mv, auto& sid) {
+                        parse_and_dispatch_(frame, inbound_parse_buffer, [&](auto& mv, auto& sid) {
                             return engine_.application->fromAdmin(mv, sid);
                         });
                     // 092 contract C-6: a late parse failure closes the session.
@@ -3799,7 +3937,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             // at the 019 T011 in-sequence fromApp dispatch. No seqnum advance
                             // (INV-1).
                             auto cb_r = parse_and_dispatch_(
-                                frame, kInboundParseArena, [&](auto& mv, auto& sid) {
+                                frame, inbound_parse_buffer, [&](auto& mv, auto& sid) {
                                     return engine_.application->fromApp(mv, sid);
                                 });
                             // 092 contract C-6: a late parse failure closes the session.
@@ -3831,7 +3969,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         if (engine_.application != nullptr) {
                             const bool admin = detail::is_admin_msgtype(hdr.msg_type);
                             auto cb_r = parse_and_dispatch_(
-                                frame, kInboundParseArena, [&](auto& mv, auto& sid) {
+                                frame, inbound_parse_buffer, [&](auto& mv, auto& sid) {
                                     return admin ? engine_.application->fromAdmin(mv, sid)
                                                  : engine_.application->fromApp(mv, sid);
                                 });
@@ -3873,7 +4011,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 if (!cfg_.validate_sequence_numbers) {
                     if (engine_.application != nullptr) {
                         auto cb_r = parse_and_dispatch_(
-                            frame, kInboundParseArena, [&](auto& mv, auto& sid) {
+                            frame, inbound_parse_buffer, [&](auto& mv, auto& sid) {
                                 return engine_.application->fromAdmin(mv, sid);
                             });
                         // 092 contract C-6: a late parse failure closes the session.
@@ -3969,12 +4107,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // A fromAdmin reject here emits session Reject(35=3) per FR-005/D4
                 // but the session still disconnects (Logout has been confirmed).
                 if (engine_.application != nullptr) {
-                    // kInboundParseArena: inbound frames may carry arbitrary payload.
+                    // The session's parse buffer B(L): any admitted frame parses (093).
                     // T019 note: parse_and_dispatch_ drops callback_dispatch_scope
                     // before returning, so onLogout in record_state_transition_ below
                     // can acquire its own scope.
                     auto cb_r =
-                        parse_and_dispatch_(frame, kInboundParseArena, [&](auto& mv, auto& sid) {
+                        parse_and_dispatch_(frame, inbound_parse_buffer, [&](auto& mv, auto& sid) {
                             return engine_.application->fromAdmin(mv, sid);
                         });
                     // 092 contract C-6: a late parse failure closes the session.
@@ -4074,12 +4212,12 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // Reject are dispatched here.
                 // [research D3/D4; FR-004; INV-6]
                 if (engine_.application != nullptr && detail::is_admin_msgtype(hdr.msg_type)) {
-                    // kInboundParseArena: inbound frames may carry arbitrary payload.
+                    // The session's parse buffer B(L): any admitted frame parses (093).
                     // T019 note: parse_and_dispatch_ drops callback_dispatch_scope
                     // before returning, so onLogout in record_state_transition_ below
                     // can acquire its own scope.
                     auto cb_r =
-                        parse_and_dispatch_(frame, kInboundParseArena, [&](auto& mv, auto& sid) {
+                        parse_and_dispatch_(frame, inbound_parse_buffer, [&](auto& mv, auto& sid) {
                             return engine_.application->fromAdmin(mv, sid);
                         });
                     // 092 contract C-6: a late parse failure closes the session.
@@ -4279,13 +4417,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 // lets app messages fall through only if Application is registered).
                 // Admin messages are dispatched via fromAdmin at the top of the
                 // Active block and return early; they never reach here.
-                // FR-003; research D3/D4/D8; [const §VIII.5] (stack parse arena).
+                // FR-003; research D3/D4/D8; [const §VIII.5] (no heap: the parse buffer
+                // open() allocated, 093).
                 if (engine_.application != nullptr) {
-                    // kInboundParseArena: app frames may carry arbitrary payload.
+                    // The session's parse buffer B(L): any admitted frame parses (093).
                     // T019 note: parse_and_dispatch_ drops callback_dispatch_scope
                     // before returning. (FR-003; research D3/D4/D8; [const §VIII.5])
                     auto cb_r = parse_and_dispatch_(
-                        frame, kInboundParseArena,
+                        frame, inbound_parse_buffer,
                         [&](auto& mv, auto& sid) { return engine_.application->fromApp(mv, sid); });
                     // 092 contract C-6: a late parse failure closes the session.
                     if (cb_r && *cb_r == dispatch_outcome::parse_failed) {
@@ -4324,7 +4463,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             bool suppressed = false;
                             if (engine_.application != nullptr) {
                                 auto cb_r = parse_and_dispatch_(
-                                    *bmr_r, kInboundParseArena, [&](auto& mv, auto& sid) {
+                                    *bmr_r, kSendParseArena, [&](auto& mv, auto& sid) {
                                         return engine_.application->toApp(mv, sid);
                                     });
                                 if (!cb_r) {
@@ -4443,7 +4582,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             // superseded by 092 contract C-2 (fixpp#507; research R-13; the owner
             // ruling of 2026-09-27 revising row 4). claim-ok: the date names the ruling
             // C-2 refuses such a frame above (D-2).
-            // Arena: kInboundParseArena (16384) matches the dispatch arena. [FIX-1/FIX-2]
+            // Buffer: the session's parse buffer B(L), as dispatch (093). [FIX-1/FIX-2]
             // [041 T014; data-model E-4; contracts/validation-gate.md C-2/C-3]
             if (cfg_.validate_inbound_messages && validator_) {
                 if (hdr.msg_type != "3" && hdr.msg_type != "5") {
@@ -5354,7 +5493,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::send_impl(
     // [research D6; spec.md US2 AC1/AC2; FR-006/007; data-model.md INV-5]
     if (engine_.application != nullptr) {
         std::span<const std::byte> built_frame{buf.data(), pos};
-        auto cb_r = parse_and_dispatch_(built_frame, kInboundParseArena, [&](auto& mv, auto& sid) {
+        auto cb_r = parse_and_dispatch_(built_frame, kSendParseArena, [&](auto& mv, auto& sid) {
             return engine_.application->toApp(mv, sid);
         });
         if (!cb_r) {

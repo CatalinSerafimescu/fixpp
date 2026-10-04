@@ -39,6 +39,16 @@ struct session_engine_access {
     // The establishment deadline passed before the first Active (contract C-4): the
     // event and the log record. The pump then closes the session. Session strand.
     static void note_establishment_timeout(Session& s) noexcept { s.note_establishment_timeout_(); }
+
+    // The carry open() allocated (data-model E-2, plan OD-13): L plus one read. The read
+    // pump borrows it for the connection. Session strand.
+    [[nodiscard]] static fixpp::wire::pmr_carry_buffer& carry(Session& s) noexcept {
+        return *s.carry_;
+    }
+
+    // A frame over L was refused at framing (FR-013): the log record. The pump then
+    // closes the session terminally. Session strand.
+    static void note_frame_too_large(Session& s) noexcept { s.note_frame_too_large_(); }
 };
 
 }  // namespace fixpp::session

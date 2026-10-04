@@ -154,6 +154,16 @@ public:
                 std::pmr::memory_resource* mr [[clang::lifetimebound]], Config cfg,
                 dict_hooks hooks) noexcept;
 
+    // 093-inbound-frame-dispositions (data-model E-3): as above, and the entries are
+    // reserved once, up front, for `reserve_entries` fields (at most
+    // cfg.max_offset_entries) instead of growing. A per-call hint: the table does not
+    // store it, so a clone or reify that re-parses from config() reserves nothing. A
+    // reserve the resource cannot serve degrades like any other allocation failure in
+    // the build (build_status() = out_of_memory).
+    OffsetTable(frame_view const& frame [[clang::lifetimebound]],
+                std::pmr::memory_resource* mr [[clang::lifetimebound]], Config cfg,
+                dict_hooks hooks, std::size_t reserve_entries) noexcept;
+
     // Non-RED build status (ok, or the wire_* cap/format error hit).
     [[nodiscard]] core::expected_t<void> build_status() const noexcept { return status_; }
 
@@ -349,7 +359,9 @@ public:
 
 private:
     [[nodiscard]] static std::size_t overlay_cap_for(std::size_t n) noexcept;
-    void build(frame_view const& frame) noexcept;  // shared build impl (both ctors)
+    // Shared build impl (every ctor); `reserve_entries` is 0 except through the
+    // reserving ctor (093, data-model E-3).
+    void build(frame_view const& frame, std::size_t reserve_entries = 0) noexcept;
     void check_alive() const noexcept;
 
     // 062 T005: dict-aware sub-view-over-slice builder. Placement-constructs

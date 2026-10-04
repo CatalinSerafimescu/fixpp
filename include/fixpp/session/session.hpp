@@ -58,6 +58,7 @@
 #include <fixpp/session/session_config.hpp>  // FR-001 / D-1 — by-value cfg_ member requires complete type (W-5 lifetime fix, 010)
 #include <fixpp/session/session_event.hpp>  // 013 T013a — SessionEvent + kSessionEventRingCapacity
 #include <fixpp/session/session_fsm.hpp>    // 005-session-establishment-fsm — fsm_state enum
+#include <fixpp/wire/framer.hpp>            // 093 E-2: pmr_carry_buffer, the carry open() allocates
 
 namespace fixpp::core {
 struct EngineConfig;
@@ -84,9 +85,6 @@ namespace fixpp::wire {
 // risking a [const §XV.9] violation. Full definition in session.cpp via
 // #include <fixpp/wire/validator.hpp>.
 class dictionary_driven_validator;
-// 093-inbound-frame-dispositions: note_garbles_ takes the Framer's summary by
-// reference, so session.hpp needs only the name; session.cpp includes framer.hpp.
-struct garble_summary;
 }  // namespace fixpp::wire
 
 namespace fixpp::session::detail {
@@ -684,6 +682,46 @@ private:
     // 0 until open() runs.
     std::uint32_t inbound_limit_ = 0;
 
+    // 093 (contract C-3 I-2): the spill witness, the upstream of the parse buffer's and
+    // the carry's monotonic resources. It counts every request that reaches it (every
+    // allocation past the buffer or the carry block), then forwards it to
+    // fixpp::detail::arena_upstream(): null on every lane except MSVC's debug STL, where
+    // the request is served from the heap. mutable: validate_inbound_ is const.
+    class spill_witness final : public std::pmr::memory_resource {
+    public:
+        [[nodiscard]] std::uint64_t spills() const noexcept {
+            return spills_.load(std::memory_order_relaxed);
+        }
+
+    private:
+        void* do_allocate(std::size_t bytes, std::size_t alignment) override;
+        void do_deallocate(void* p, std::size_t bytes, std::size_t alignment) override;
+        [[nodiscard]] bool do_is_equal(
+            std::pmr::memory_resource const& other) const noexcept override;
+        std::atomic<std::uint64_t> spills_{0};
+    };
+    mutable spill_witness parse_spill_witness_;
+
+    // 093 (data-model E-2): the per-session parse buffer B(L), allocated once by open()
+    // from session_arena_ (inbound_parse_block_) and released at destruction. Every
+    // inbound parse builds a fresh monotonic_buffer_resource over inbound_parse_buf_,
+    // upstream parse_spill_witness_, with inbound_entry_cap_ = N(L) as its entry cap.
+    // The span is the whole block except under session_test_access's shrink.
+    std::span<std::byte> inbound_parse_block_;
+    std::span<std::byte> inbound_parse_buf_;
+    std::size_t inbound_entry_cap_ = 0;
+
+    // 093 (data-model E-2, plan OD-13): the read pump's carry, allocated once by open()
+    // and borrowed by run_read_pump through session_engine_access. One block from
+    // cfg_.framer_carry_arena (carry_arena_), a monotonic resource over exactly that
+    // block (upstream parse_spill_witness_), and the carry over that resource, whose
+    // noexcept constructor's reserve the block serves. ~Session releases them in
+    // reverse order. 093 supersedes the pump-local carry of 015 T015.
+    std::pmr::memory_resource* carry_arena_ = nullptr;
+    std::span<std::byte> carry_block_;
+    std::optional<std::pmr::monotonic_buffer_resource> carry_resource_;
+    std::optional<fixpp::wire::pmr_carry_buffer> carry_;
+
     // 093 (data-model E-4): the count garbled_frame_count() reads. Written only by
     // note_garbles_, on the session strand, with relaxed ordering.
     // Placement condition: the count is monotonic per SessionId for the engine's life
@@ -711,6 +749,12 @@ private:
     // session_event_garbled_frame and writes a garble log record, at most one per
     // max(HeartBtInt, 1 s). Session strand only.
     void note_garbles_(fixpp::wire::garble_summary const& g) noexcept;
+
+    // 093-inbound-frame-dispositions (FR-013, data-model E-12): a frame over L was
+    // refused at framing once this Session exists. Writes one FIXPP_SLOG record with
+    // the failure kind and L; the read pump then closes the session terminally.
+    // Reached through session_engine_access.
+    void note_frame_too_large_() noexcept;
 
     // 093 (data-model E-6): true once the session has first entered Active. Set by
     // record_state_transition_ on that entry, whether or not an application is attached
@@ -936,6 +980,19 @@ private:
     [[nodiscard]] fixpp::core::expected_t<dispatch_outcome> parse_and_dispatch_(
         std::span<const std::byte> frame, std::size_t arena_bytes, CB&& cb) noexcept;
 
+    // 093-inbound-frame-dispositions (data-model E-2, contract C-3): the overload every
+    // late inbound site calls. It parses over the session's parse buffer B(L) instead
+    // of a stack arena, under the entry cap N(L), reserving the frame's entries up
+    // front; the admin and outbound sites keep the overload above (C-3 I-6). The tag
+    // keeps the two overloads apart at each call site.
+    struct inbound_parse_t {
+        explicit inbound_parse_t() = default;
+    };
+    static constexpr inbound_parse_t inbound_parse_buffer{};
+    template <class CB>
+    [[nodiscard]] fixpp::core::expected_t<dispatch_outcome> parse_and_dispatch_(
+        std::span<const std::byte> frame, inbound_parse_t /*tag*/, CB&& cb) noexcept;
+
     // close_on_late_parse_failure_ — 092-garbled-frame-reject contract C-6: the one
     // action every late inbound parse site takes when its parse fails (a
     // parse_and_dispatch_ parse_failed outcome, or a validate_inbound_ parse_failed
@@ -981,7 +1038,7 @@ private:
 
     // validate_inbound_ — synchronous dedup helper (041 simplify-triage FIX-1/FIX-2 +
     // per-message coroutine-frame alloc fix):
-    // Parse `frame` with a kInboundParseArena (16384) stack arena, run
+    // Parse `frame` over the session's parse buffer B(L) (093, data-model E-2), run
     // validator_->validate(), and return the rejection decision WITHOUT emitting.
     //
     // Returns validate_outcome::pass when validation passes — caller continues

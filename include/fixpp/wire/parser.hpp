@@ -39,6 +39,7 @@
 #include <fixpp/dict/table_view.hpp>
 #include <memory>
 #include <memory_resource>
+#include <new>
 #include <span>
 #include <string_view>
 #include <type_traits>
@@ -159,6 +160,28 @@ public:
         table_.set_group_context(group_context{.msg_type = msg_type()});
     }
 
+private:
+    // 093-inbound-frame-dispositions (data-model E-3): the reserving construction,
+    // reached only through Parser::parse's reserve overload (Parser is a friend). The
+    // tag keeps it apart from every public constructor.
+    struct reserve_tag {
+        explicit reserve_tag() = default;
+    };
+    MessageView(reserve_tag /*tag*/, frame_view const& frame, std::pmr::memory_resource* mr,
+                OffsetTable::Config cfg, dict_hooks hooks, std::size_t reserve_entries) noexcept
+        requires(Mode == access_mode::Index)
+        : View{frame.bytes().data(), frame.bytes().size(),
+               frame.token()},  // [2b §6.4] thread real pool token
+          table_{frame, mr, cfg, hooks, reserve_entries},
+          mr_{mr},
+          hooks_{hooks},
+          unk_items_{mr} {
+        // The same root group_context seed as the public dict-aware ctors (Gate B
+        // PR#176 r1 root cause #1).
+        table_.set_group_context(group_context{.msg_type = msg_type()});
+    }
+
+public:
     MessageView(frame_view const& frame, std::pmr::memory_resource* mr) noexcept
         requires(Mode == access_mode::Index)
         : View{frame.bytes().data(), frame.bytes().size(),
@@ -370,19 +393,29 @@ public:
             constexpr std::uint16_t kBeginString = 8;
             constexpr std::uint16_t kBodyLength = 9;
             constexpr std::uint16_t kCheckSum = 10;
-            for (auto const& e : table_.entries()) {
-                if (e.tag == kBeginString || e.tag == kBodyLength || e.tag == kCheckSum) {
-                    continue;  // framing — never unknown
+            // 093-inbound-frame-dispositions (FR-015, fixpp#540): the list grows in the
+            // view's parse resource, whose upstream may refuse (null_memory_resource). A
+            // bad_alloc here used to leave this noexcept function: std::terminate. On
+            // exhaustion the partial list is cleared and the built flag stays set, so this
+            // call and every later one return the same empty view, which cannot be told
+            // from a frame with no unknown fields (contract L-5).
+            try {
+                for (auto const& e : table_.entries()) {
+                    if (e.tag == kBeginString || e.tag == kBodyLength || e.tag == kCheckSum) {
+                        continue;  // framing — never unknown
+                    }
+                    // hooks_.classify_fn() is nullptr for dict-free views (all
+                    // non-framing = unknown); otherwise classify via the bound
+                    // fn + opaque dict.
+                    bool const known = (hooks_.classify_fn() != nullptr) &&
+                                       hooks_.classify_fn()(hooks_.opaque_dict(), mtype, e.tag);
+                    if (!known) {
+                        unk_items_.push_back(unknown_fields_view::kv{
+                            .tag = e.tag, .data = raw.data() + e.offset, .len = e.length});
+                    }
                 }
-                // hooks_.classify_fn() is nullptr for dict-free views (all
-                // non-framing = unknown); otherwise classify via the bound
-                // fn + opaque dict.
-                bool const known = (hooks_.classify_fn() != nullptr) &&
-                                   hooks_.classify_fn()(hooks_.opaque_dict(), mtype, e.tag);
-                if (!known) {
-                    unk_items_.push_back(unknown_fields_view::kv{
-                        .tag = e.tag, .data = raw.data() + e.offset, .len = e.length});
-                }
+            } catch (std::bad_alloc const&) {
+                unk_items_.clear();
             }
             return unknown_fields_view{
                 std::span<unknown_fields_view::kv const>{unk_items_.data(), unk_items_.size()},
@@ -858,6 +891,26 @@ public:
         // dictionary-backed parse — the missed construction site T057 warns
         // about, one API surface over.
         MessageView<Mode> mv{frame, mr, cfg, hooks_};
+        mv.dict_owner_ = owner_;  // fixpp#495: nullptr unless built on the owned route
+        if (auto s = mv.offsets().build_status(); !s) {
+            return core::expected_t<MessageView<Mode>>{std::unexpect, s.error()};
+        }
+        return mv;
+    }
+
+// 093-inbound-frame-dispositions (data-model E-3): as above, and the offset table's
+// entries are reserved once, up front, for `reserve_entries` fields (at most
+// cfg.max_offset_entries). A per-call hint the table does not store: a clone or reify of
+// the view re-parses from config() and reserves nothing. A reserve the resource cannot
+// serve is reported as out_of_memory.
+[[nodiscard]] core::expected_t<MessageView<Mode>> parse(frame_view const& frame
+                                                        [[clang::lifetimebound]],
+                                                        std::pmr::memory_resource* mr,
+                                                        OffsetTable::Config cfg,
+                                                        std::size_t reserve_entries) noexcept
+    [[clang::lifetimebound]] requires(Mode == access_mode::Index) {
+        MessageView<Mode> mv{
+            typename MessageView<Mode>::reserve_tag{}, frame, mr, cfg, hooks_, reserve_entries};
         mv.dict_owner_ = owner_;  // fixpp#495: nullptr unless built on the owned route
         if (auto s = mv.offsets().build_status(); !s) {
             return core::expected_t<MessageView<Mode>>{std::unexpect, s.error()};
