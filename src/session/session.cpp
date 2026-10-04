@@ -3427,6 +3427,18 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 co_return co_await dispose_unparseable_(hdr, fsm_state_);
             }
 
+            // 093 (contract C-2 step 4, C-5; spec FR-020): the one per-frame inbound
+            // liveness writer. Every frame past the two checks above is neither garbled
+            // nor faulty and proves the peer is alive, so it refreshes before the validate
+            // gate and every early return below. It supersedes the Active-only writer
+            // that sat at the end of this arm. A refresh in LogonReceived is harmless: the
+            // liveness loop runs only in Active, and both roles seed the value on
+            // entering it. The null check matches open()'s seed: a session may run
+            // without a clock.
+            if (effective_clock_) {
+                last_inbound_steady_ = effective_clock_->steady_now();
+            }
+
             // ── 041-validation-gate-wiring T014: dictionary-driven validate gate ─
             // Runs after scan_frame_header (hdr.msg_type available for 3/5 exemption)
             // and BEFORE check_inbound. Erratum fixpp#423: an in-sequence rejected message
@@ -4194,15 +4206,10 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 co_return fixpp::core::expected_t<void>{};
             }
 
-            // T041 (US3): in the Active state, update liveness state and handle
-            // liveness-specific message types (Heartbeat / TestRequest).
+            // T041 (US3): in the Active state, handle liveness-specific message types
+            // (Heartbeat / TestRequest). Inbound liveness was refreshed at the top of
+            // this arm (093).
             if (fsm_state_ == fsm_state::Active) {
-                // Update last_inbound_steady_ — used by run_liveness_loop to
-                // detect inbound silence windows.
-                if (effective_clock_) {
-                    last_inbound_steady_ = effective_clock_->steady_now();
-                }
-
                 // ── 019 T011: fromAdmin dispatch for admin-typed messages ────
                 // Called here (top of Active-only handling) for ALL admin MsgTypes
                 // that reach this point after FSM + seqnum validation.

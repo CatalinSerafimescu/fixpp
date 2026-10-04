@@ -1121,10 +1121,10 @@ private:
 
     // ── 005 US3 liveness state (T041) ────────────────────────────────────────
     // last_inbound_steady_ — the effective_clock.steady_now() at which the most
-    // recent inbound frame was processed in Active state. Used by the liveness
-    // timer loop to compute the inbound-silence elapsed time. Initialised to
-    // the epoch; updated on every inbound frame in Active. Single-writer on the
-    // per-session strand.
+    // recent inbound frame that was neither garbled nor faulty reached the
+    // LogonReceived/Active arm (093 contract C-5). Used by the liveness timer loop
+    // to compute the inbound-silence elapsed time. Seeded at open() and on entering
+    // Active. Single-writer on the per-session strand.
     fixpp::core::steady_time_point last_inbound_steady_;
 
     // pending_test_req_id_ — the TestReqID of the most recently emitted
