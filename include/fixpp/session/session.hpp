@@ -594,8 +594,10 @@ private:
     // Logout+disconnect disposition (session.cpp's 070-fix44-closeout S-029 posture-mismatch call
     // site). Called from both the acceptor inbound-Logon and the initiator inbound-Logon-ack paths.
     // [FR-002; D-F]
+    // arm: the calling Logon arm's expected state (093 plan OD-26), passed to the
+    // Logout's store_then_emit and to the Disconnected write after it.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> refuse_logon_with_logout_(
-        std::string_view reason_text) noexcept;
+        std::string_view reason_text, fsm_state arm) noexcept;
 
     const fixpp::core::EngineConfig& engine_;
     SessionConfig cfg_;  // FR-001 / D-1 — by-value copy (W-5 lifetime fix, 010); caller may drop or
@@ -920,10 +922,13 @@ private:
     //   delivering callback at every check_inbound-success site (C3).
     // persist_outbound_advance_(): site-keyed durable outbound +1, mirroring
     //   persist_inbound_advance_() for the 032 outbound restore path (C3 / FR-007).
+    // 093 plan OD-26: `arm` is a Logon arm caller's expected state, for the Disconnected
+    // write that follows a failed store operation (disconnect_unless_superseded_).
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> ensure_hydrated_(
-        bool apply_inbound_seed, bool force = false) noexcept;
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
-    persist_inbound_advance_() noexcept;
+        bool apply_inbound_seed, bool force = false,
+        std::optional<fsm_state> arm = std::nullopt) noexcept;
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> persist_inbound_advance_(
+        std::optional<fsm_state> arm = std::nullopt) noexcept;
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
     persist_outbound_advance_() noexcept;
     // consume_rejected_seqnum_(): fixpp#423 — an in-sequence message answered by a
@@ -1022,9 +1027,11 @@ private:
     // carries `text` as Text(58); an empty text (the default) omits 58, so the frame
     // is byte-identical to build_reject's.
     // [041 T010; data-model E-4; RC-C; 092 R-5]
+    // arm: a Logon arm caller's expected state (093 plan OD-26), passed to
+    // store_then_emit and to the Disconnected write after a failed emit.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> emit_session_reject_(
         seqnum_t ref_seq, std::string_view ref_msg_type, int reason, int ref_tag_id = 0,
-        std::string_view text = {}) noexcept;
+        std::string_view text = {}, std::optional<fsm_state> arm = std::nullopt) noexcept;
 
     // dispose_unparseable_ — 092-garbled-frame-reject (fixpp#507) contract C-2: the
     // disposition of a frame the header scan could not read (hdr.fault is set). Each
@@ -1347,6 +1354,12 @@ private:
     // its phase 1 writes. The FSM term covers `closed_drained` too: close() writes
     // Disconnected before it gets there. `never_opened` is not a close.
     [[nodiscard]] bool logon_arm_superseded_(fsm_state expected) const noexcept;
+
+    // 093 plan OD-26: the Disconnected write that follows a store suspension on a Logon
+    // arm (an error path, or a refusal's fail-closed write). With `arm` set and
+    // logon_arm_superseded_(*arm) true, close() or Engine::stop() owns the teardown and
+    // nothing is written; otherwise it records Disconnected.
+    void disconnect_unless_superseded_(std::optional<fsm_state> arm) noexcept;
 
     // apply_inbound_sequence_reset: apply an inbound SequenceReset(35=4)
     // NewSeqNo(36) to the expected-inbound counter (S-023; FIX-SL §4.8 /

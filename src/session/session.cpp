@@ -890,8 +890,8 @@ static std::optional<std::uint32_t> parse_u32_opt(std::string_view sv) noexcept 
 // when false (reset-Logon path), withhold the inbound seed so the reset arm owns
 // the post-state and check_inbound(1) is in-sequence (RC-1, C2.4, INV-H5).
 // [029 tasks T011; contracts C2.4/C2.6; data-model INV-H5; research RC-1/D-6]
-asio::awaitable<fixpp::core::expected_t<void>> Session::ensure_hydrated_(bool apply_inbound_seed,
-                                                                         bool force) noexcept {
+asio::awaitable<fixpp::core::expected_t<void>> Session::ensure_hydrated_(
+    bool apply_inbound_seed, bool force, std::optional<fsm_state> arm) noexcept {
     // One-shot: already hydrated this session lifetime.
     // force=true (025 refresh_on_logon) bypasses the latch to re-read on each reconnect.
     if (hydrated_ && !force) {
@@ -916,13 +916,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::ensure_hydrated_(bool ap
     auto in_r = co_await store_->next_seqnum(direction_t::inbound, false);
     if (!in_r) {
         hydrating_ = false;
-        record_state_transition_(fsm_state::Disconnected);
+        disconnect_unless_superseded_(arm);
         co_return std::unexpected(in_r.error());
     }
     auto out_r = co_await store_->next_seqnum(direction_t::outbound, false);
     if (!out_r) {
         hydrating_ = false;
-        record_state_transition_(fsm_state::Disconnected);
+        disconnect_unless_superseded_(arm);
         co_return std::unexpected(out_r.error());
     }
 
@@ -935,7 +935,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::ensure_hydrated_(bool ap
     auto hydrate_r = co_await seqnum_mgr_.hydrate(seed_inbound, /*next_outbound=*/*out_r);
     if (!hydrate_r) {
         hydrating_ = false;
-        record_state_transition_(fsm_state::Disconnected);
+        disconnect_unless_superseded_(arm);
         co_return std::unexpected(hydrate_r.error());
     }
 
@@ -950,13 +950,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::ensure_hydrated_(bool ap
 // Skips when store_is_persistent_==false (INV-H4 / C3.5).
 // Failure → Disconnected (D-3 / C3.3 / SC-006).
 // [029 tasks T010; contracts C3.0/C3.3/C3.5; data-model INV-H1/H2]
-asio::awaitable<fixpp::core::expected_t<void>> Session::persist_inbound_advance_() noexcept {
+asio::awaitable<fixpp::core::expected_t<void>> Session::persist_inbound_advance_(
+    std::optional<fsm_state> arm) noexcept {
     if (!store_is_persistent_) {
         co_return fixpp::core::expected_t<void>{};
     }
     auto r = co_await store_->next_seqnum(direction_t::inbound, /*increment=*/true);
     if (!r) {
-        record_state_transition_(fsm_state::Disconnected);
+        disconnect_unless_superseded_(arm);
         co_return std::unexpected(fixpp::core::error::store_io_failure);
     }
     co_return fixpp::core::expected_t<void>{};
@@ -1020,6 +1021,14 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::persist_outbound_advance
 // fixpp#518 and 093 (data-model E-13; contract C-6): see session.hpp.
 bool Session::logon_arm_superseded_(fsm_state expected) const noexcept {
     return state_ == lifecycle::closing || engine_stop_requested_ || fsm_state_ != expected;
+}
+
+// 093 plan OD-26: see session.hpp.
+void Session::disconnect_unless_superseded_(std::optional<fsm_state> arm) noexcept {
+    if (arm && logon_arm_superseded_(*arm)) {
+        return;
+    }
+    record_state_transition_(fsm_state::Disconnected);
 }
 
 // 093-inbound-frame-dispositions (data-model E-10; contract C-6, its steps 3 and 4) — the
@@ -2387,7 +2396,7 @@ public:
 // at session.cpp (SendingTime-accuracy path). Defined after the file-local
 // stamp_sending_time helper so it is in scope. [FR-002; data-model D-F]
 asio::awaitable<fixpp::core::expected_t<void>> Session::refuse_logon_with_logout_(
-    std::string_view reason_text) noexcept {
+    std::string_view reason_text, fsm_state arm) noexcept {
     std::array<std::byte, 256> lo_buf{};
     const seqnum_t lo_seq = seqnum_mgr_.peek_outbound();
     // gate-b/r2 FQ-5: guard the clock deref — a clock-less direct-Session posture
@@ -2410,10 +2419,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::refuse_logon_with_logout
             record_state_transition_(fsm_state::Disconnected);
             co_return std::unexpected(assign_r.error());
         }
-        auto emit_r = co_await store_then_emit(lo_seq, *lo_result);
+        auto emit_r = co_await store_then_emit(lo_seq, *lo_result, arm);
         (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
     }
-    record_state_transition_(fsm_state::Disconnected);
+    // 093 plan OD-26: the Logout's store and write are suspensions.
+    disconnect_unless_superseded_(arm);
     co_return fixpp::core::expected_t<void>{};
 }
 
@@ -2489,7 +2499,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
 // [041-validation-gate-wiring T010; data-model E-4; RC-C; FR-004]
 asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
     seqnum_t ref_seq, std::string_view ref_msg_type, int reason, int ref_tag_id,
-    std::string_view text) noexcept {
+    std::string_view text, std::optional<fsm_state> arm) noexcept {
     std::array<std::byte, 512> rj_buf{};
     const auto rj_st52 = effective_clock_
                              ? stamp_sending_time(*effective_clock_, cfg_.sending_time_precision)
@@ -2510,9 +2520,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::emit_session_reject_(
             record_state_transition_(fsm_state::Disconnected);
             co_return std::unexpected(fixpp::core::error::app_callback_threw);
         }
-        auto emit_r = co_await store_then_emit(rj_seq, *rj_r);
+        auto emit_r = co_await store_then_emit(rj_seq, *rj_r, arm);
         if (!emit_r) {
-            record_state_transition_(fsm_state::Disconnected);
+            disconnect_unless_superseded_(arm);
             co_return std::unexpected(emit_r.error());
         }
     }
@@ -2797,7 +2807,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     if (v.outcome == validate_outcome::reject) {
                         co_return co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num),
                                                                 hdr.msg_type, v.reject.reason,
-                                                                v.reject.ref_tag_id);
+                                                                v.reject.ref_tag_id, /*text=*/{},
+                                                                fsm_state::NotConnected);
                     }
                 }
             }
@@ -2898,9 +2909,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                         cfg_.reset_seqnum_policy_field !=
                             fixpp::session::reset_seqnum_policy::bilateral_strict;
                     auto h_r = co_await ensure_hydrated_(/*apply_inbound_seed=*/!withhold_inbound,
-                                                         /*force=*/refresh_active);
+                                                         /*force=*/refresh_active,
+                                                         fsm_state::NotConnected);
                     if (!h_r) {
-                        // ensure_hydrated_ already transitioned to Disconnected (C2.3).
+                        // ensure_hydrated_ already transitioned to Disconnected (C2.3),
+                        // unless the arm was superseded during the read (093 OD-26).
                         co_return std::unexpected(h_r.error());
                     }
                 }
@@ -2923,7 +2936,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 if (cfg_.posture.has_value() &&
                     should_refuse_posture(*cfg_.posture, hdr.test_message_indicator)) {
                     co_return co_await refuse_logon_with_logout_(
-                        "TestMessageIndicator posture mismatch");
+                        "TestMessageIndicator posture mismatch", fsm_state::NotConnected);
                 }
 
                 // ── 038 T006: US1 — AcceptorLogon SendingTime(52) MaxLatency guard ──
@@ -2986,11 +2999,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                                 record_state_transition_(fsm_state::Disconnected);
                                 co_return std::unexpected(fixpp::core::error::app_callback_threw);
                             }
-                            auto emit_r = co_await store_then_emit(rj_seq, *rj_r);
+                            auto emit_r = co_await store_then_emit(rj_seq, *rj_r,
+                                                                   fsm_state::NotConnected);
                             (void)emit_r;  // I-07: store-side errors logged-then-proceed
                         }
-                        // Fail-closed: Disconnected whether rj_r succeeded or not.
-                        record_state_transition_(fsm_state::Disconnected);
+                        // Fail-closed: Disconnected whether rj_r succeeded or not
+                        // (093 plan OD-26: unless the arm was superseded meanwhile).
+                        disconnect_unless_superseded_(fsm_state::NotConnected);
                         co_return fixpp::core::expected_t<void>{};
                     }
                 }
@@ -2999,7 +3014,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // Knob-driven → fatal: a store failure blocks Active (C2.6).
                     auto rst_r = co_await reset_seqnums_to_one_durable(reset_disposition::fatal);
                     if (!rst_r) {
-                        record_state_transition_(fsm_state::Disconnected);
+                        disconnect_unless_superseded_(fsm_state::NotConnected);  // 093 OD-26
                         co_return std::unexpected(rst_r.error());
                     }
                 }
@@ -3207,10 +3222,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             record_state_transition_(fsm_state::Disconnected);
                             co_return std::unexpected(fixpp::core::error::app_callback_threw);
                         }
-                        auto emit_r = co_await store_then_emit(rj_seq, *rj_r);
+                        auto emit_r =
+                            co_await store_then_emit(rj_seq, *rj_r, fsm_state::NotConnected);
                         (void)emit_r;  // I-07: store-side errors logged-then-proceed
                     }
-                    record_state_transition_(fsm_state::Disconnected);
+                    disconnect_unless_superseded_(fsm_state::NotConnected);  // 093 OD-26
                     co_return fixpp::core::expected_t<void>{};
                 }
             }
@@ -3291,12 +3307,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // Step 6: the existing dispositions. A manager error is fatal; a store
                     // error is fatal when the store is persistent (030 T010, FR-010) and
                     // logged otherwise (024 I-07).
+                    // Plan OD-26: each write follows the unit's store operation.
                     if (!unit.manager) {
-                        record_state_transition_(fsm_state::Disconnected);
+                        disconnect_unless_superseded_(fsm_state::LogonReceived);
                         co_return std::unexpected(unit.manager.error());
                     }
                     if (!unit.store && store_is_persistent_) {
-                        record_state_transition_(fsm_state::Disconnected);
+                        disconnect_unless_superseded_(fsm_state::LogonReceived);
                         co_return std::unexpected(unit.store.error());
                     }
                 }
@@ -3374,8 +3391,9 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 auto emit_r =
                     co_await store_then_emit(reply_seq, *reply_logon, fsm_state::LogonReceived);
                 if (!emit_r) {
-                    // Emit failed (transport error). RC#B: Disconnected, not Active.
-                    record_state_transition_(fsm_state::Disconnected);
+                    // Emit failed (transport error). RC#B: Disconnected, not Active
+                    // (093 plan OD-26: unless the arm was superseded during the emit).
+                    disconnect_unless_superseded_(fsm_state::LogonReceived);
                     co_return std::unexpected(emit_r.error());
                 }
                 // fixpp#518: a close() may have run during the reply write.
@@ -3429,7 +3447,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             //   All three false → normal in-seq Logon: persist fires → store==manager. ✓
             // [029 INV-H1; triage root-cause #1/#2; contracts C3.1; data-model §Persist matrix]
             if (logon_inbound_advanced && !peer_sent_reset && !cfg_.reset_on_logon) {
-                auto p_r = co_await persist_inbound_advance_();
+                auto p_r = co_await persist_inbound_advance_(fsm_state::Active);  // 093 OD-26
                 if (!p_r) co_return std::unexpected(p_r.error());
             }
 
@@ -4656,7 +4674,8 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     if (v.outcome == validate_outcome::reject) {
                         co_return co_await emit_session_reject_(parse_seqnum(hdr.msg_seq_num),
                                                                 hdr.msg_type, v.reject.reason,
-                                                                v.reject.ref_tag_id);
+                                                                v.reject.ref_tag_id, /*text=*/{},
+                                                                fsm_state::LogonSent);
                     }
                 }
             }
@@ -4680,7 +4699,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             if (cfg_.posture.has_value() &&
                 should_refuse_posture(*cfg_.posture, hdr.test_message_indicator)) {
                 co_return co_await refuse_logon_with_logout_(
-                    "TestMessageIndicator posture mismatch");
+                    "TestMessageIndicator posture mismatch", fsm_state::LogonSent);
             }
             // 070-fix44-closeout S-030 (FR-007): capture the peer's advertised
             // MaxMessageSize(383) from its inbound Logon-ack (observability only).
@@ -4736,10 +4755,11 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                             record_state_transition_(fsm_state::Disconnected);
                             co_return std::unexpected(fixpp::core::error::app_callback_threw);
                         }
-                        auto emit_r = co_await store_then_emit(lo_seq, *lo_result);
+                        auto emit_r =
+                            co_await store_then_emit(lo_seq, *lo_result, fsm_state::LogonSent);
                         (void)emit_r;  // store-side errors: logged-then-proceed (I-07)
                     }
-                    record_state_transition_(fsm_state::Disconnected);
+                    disconnect_unless_superseded_(fsm_state::LogonSent);  // 093 OD-26
                     co_return fixpp::core::expected_t<void>{};
                 }
             }
@@ -4831,12 +4851,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                     // Step 6: the existing dispositions. A manager error is fatal; a store
                     // error is fatal when the store is persistent (030 T015, FR-010) and
                     // logged otherwise (024 I-07).
+                    // Plan OD-26: each write follows the unit's store operation.
                     if (!unit.manager) {
-                        record_state_transition_(fsm_state::Disconnected);
+                        disconnect_unless_superseded_(fsm_state::LogonSent);
                         co_return std::unexpected(unit.manager.error());
                     }
                     if (!unit.store && store_is_persistent_) {
-                        record_state_transition_(fsm_state::Disconnected);
+                        disconnect_unless_superseded_(fsm_state::LogonSent);
                         co_return std::unexpected(unit.store.error());
                     }
                     // Step 7 (093 contract C-6) and fixpp#518: a close() may have begun,
@@ -5015,7 +5036,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
             //   Both false → normal in-seq Logon-ack: persist fires → store==manager. ✓
             // [029 INV-H1; triage root-cause #1/#2; contracts C3.1]
             if (logon_inbound_advanced_init && !peer_ack_sent_reset_flag) {
-                auto p_r = co_await persist_inbound_advance_();
+                auto p_r = co_await persist_inbound_advance_(fsm_state::Active);  // 093 OD-26
                 if (!p_r) co_return std::unexpected(p_r.error());
             }
 
