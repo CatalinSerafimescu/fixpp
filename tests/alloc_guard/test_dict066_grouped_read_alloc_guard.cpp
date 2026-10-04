@@ -68,7 +68,6 @@
 
 #include <gtest/gtest.h>
 
-#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstddef>
@@ -183,9 +182,9 @@ bool parse_and_read(fixpp::dict::table_view const& tv, std::vector<std::byte> co
 
     auto run = [&](Parser<access_mode::Index>& parser) {
         std::size_t const cap = fixpp::session::detail::parse_capacity::entry_cap_for(kLimit);
-        auto mv_r = parser.parse(out[0], &pa_mr,
-                                 fixpp::wire::OffsetTable::Config{.max_offset_entries = cap},
-                                 std::min(cap, raw.size() / 3U + 1U));
+        auto mv_r = parser.parse(
+            out[0], &pa_mr, fixpp::wire::OffsetTable::Config{.max_offset_entries = cap},
+            fixpp::session::detail::parse_capacity::reserve_for(cap, raw.size()));
         if (!mv_r.has_value()) return false;
         read(*mv_r);
         return true;

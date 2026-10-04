@@ -50,7 +50,6 @@
 
 #include <gtest/gtest.h>
 
-#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstddef>
@@ -201,7 +200,8 @@ fixpp::wire::OffsetTable::Config parse_config() {
     return {.max_offset_entries = fixpp::session::detail::parse_capacity::entry_cap_for(kLimit)};
 }
 std::size_t parse_reserve(std::size_t frame_size) {
-    return std::min(fixpp::session::detail::parse_capacity::entry_cap_for(kLimit), frame_size / 3U + 1U);
+    return fixpp::session::detail::parse_capacity::reserve_for(
+        fixpp::session::detail::parse_capacity::entry_cap_for(kLimit), frame_size);
 }
 
 // Arena sizes matching validate_inbound_() in session.cpp.

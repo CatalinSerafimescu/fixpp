@@ -7,6 +7,7 @@
 // the session's configuration headers. Private: not installed (no install() rule names
 // src/).
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <fixpp/wire/offset_table.hpp>
@@ -58,6 +59,13 @@ struct parse_capacity {
     // a field ("1=<SOH>"), plus one. It is the entry cap of every inbound parse.
     [[nodiscard]] static constexpr std::size_t entry_cap_for(std::uint32_t limit) noexcept {
         return std::size_t{limit} / 3U + 1U;
+    }
+
+    // The entries one parse reserves up front: the same densest-layout count over the
+    // frame's own bytes, at most the parse's entry cap.
+    [[nodiscard]] static constexpr std::size_t reserve_for(std::size_t entry_cap,
+                                                           std::size_t frame_bytes) noexcept {
+        return std::min(entry_cap, frame_bytes / 3U + 1U);
     }
 
     // The overlay slots a table of n entries assigns.

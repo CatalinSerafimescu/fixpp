@@ -525,7 +525,7 @@ template <class CB>
     auto mv_r =
         pd_parser.parse((*feed_r)[0], &pa_mr,
                         fixpp::wire::OffsetTable::Config{.max_offset_entries = inbound_entry_cap_},
-                        std::min(inbound_entry_cap_, frame.size() / 3U + 1U));
+                        detail::parse_capacity::reserve_for(inbound_entry_cap_, frame.size()));
     if (!mv_r) return dispatch_outcome::parse_failed;
 
     const SessionId sid = SessionId::from_config(cfg_);
@@ -2592,7 +2592,7 @@ Session::InboundValidation Session::validate_inbound_(
     auto vg_mv_r =
         vg_parser.parse((*vg_feed)[0], &vg_mr,
                         fixpp::wire::OffsetTable::Config{.max_offset_entries = inbound_entry_cap_},
-                        std::min(inbound_entry_cap_, frame.size() / 3U + 1U));
+                        detail::parse_capacity::reserve_for(inbound_entry_cap_, frame.size()));
     if (!vg_mv_r) {
         return {.outcome = validate_outcome::parse_failed};
     }
