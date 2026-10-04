@@ -980,28 +980,38 @@ delivered, and a frame of L+1 is refused at framing with no guard or handler act
 **Independent Test**: per early-return class, a peer silent apart from that class for longer than
 HeartBtInt draws no TestRequest.
 
-- [ ] T071 [US4] Via `phase-implementer`, Q-20 on the mock clock with `run_liveness_cell` in
+- [X] T071 [US4] Via `phase-implementer`, Q-20 on the mock clock with `run_liveness_cell` in
   `tests/session/unparseable_frame_disposition_test.cpp` (second home
   `tests/session/heartbeat_testrequest_test.cpp`, APPEND label `093`), one cell per SC-005 class: one
   too-high frame (exactly one: a second non-PossDup, non-Heartbeat too-high frame is fatal, fixpp#537, reproduced in B28); a Reset-mode SequenceReset; a GapFill; the
   validate and PossDup Rejects (#423 sites); a too-low Heartbeat and a too-low PossDup frame; the
   knob-off path; an inbound Reject(35=3). No TestRequest within the interval of that frame. RED: a
   TestRequest is sent.
-- [ ] T072 [US4] Via `phase-implementer`, Q-21 in the same file: garbled frames (C-1 and C-2 step 1)
+- [X] T072 [US4] Via `phase-implementer`, Q-21 in the same file: garbled frames (C-1 and C-2 step 1)
   and faulty frames do not refresh. Regression guards (mutant in T074). Rewrite that file's liveness
   pin comment as a condition (R-8).
-- [ ] T073 [US4] Via `phase-implementer`, in the LogonReceived/Active arm of `src/session/session.cpp`:
+- [X] T073 [US4] Via `phase-implementer`, in the LogonReceived/Active arm of `src/session/session.cpp`:
   one unconditional `last_inbound_steady_ = effective_clock_->steady_now()` after the fault check and
   the 35-not-third check, before the validate gate and every early return; delete the old writer at
   the end of the arm. The seeds at `open()` and at entering Active stay. Re-run T012's writer grep and
   record it. T071 GREEN, T072 green.
-- [ ] T074 [US4] The full session suite unfiltered (R-5: no cell is known to pin "too-high does not
+- [X] T074 [US4] The full session suite unfiltered (R-5: no cell is known to pin "too-high does not
   refresh"). Mutants in a scratch copy: restore the old writer → Q-20 RED; refresh garbled or faulty
   frames → Q-21 RED. Record under `## Mutants`.
 
 **Checkpoint**: US4 complete. Q-37 row 6 closes in Phase 8.
 
 ---
+
+**Phase 6 as landed (2026-10-04; `365f41b9` tests RED, `cbd635a8` production, `4e2853fd` T074a, `29e35896`):**
+- Q-20 has ten `Refresh_*` cells, all in `unparseable_frame_disposition_test.cpp`; the second home was not
+  needed. `grep consume_rejected_seqnum_(` also lists PossDup Arm D and the SendingTime Reject, but both end
+  the session, so neither gets a cell.
+- Q-21's Framer-garble cell runs through the real read pump (`plain_engine_rig.hpp`), because
+  `DispositionFixture` feeds below the Framer.
+- T073's single writer keeps the `if (effective_clock_)` null guard every other writer has: a Session
+  may run without a clock. "Unconditional" means not gated on the FSM state.
+- T074a moved `HookedStore` to `tests/support/hooked_store.hpp`; the moved block is token-identical.
 
 ## Phase 7: User Story 5: a closing session acts on nothing more (Priority: P3)
 
@@ -1013,7 +1023,7 @@ durable counters at FR-041's table (#524).
 
 ### Shared test store (before T075)
 
-- [ ] T074a [US5] Via `phase-implementer`, tests only, GREEN on the base: move `HookedStore` out of
+- [X] T074a [US5] Via `phase-implementer`, tests only, GREEN on the base: move `HookedStore` out of
   `tests/session/test_session_plaintext_roundtrip.cpp`, where it is `final` and file-local, into
   `tests/support/hooked_store.hpp`, so T082's separate executable can use it. The move carries what
   the class needs (`StoreLog`, `kHoldBound`, `HookedStoreFactory`); `flush_thunk_for` is the library's.
