@@ -1384,7 +1384,7 @@ surfaces exist and are witnessed.
 
 ### `/simplify` (P9, before any final measurement)
 
-- [ ] T108a **Merge `origin/main` into the branch before `/simplify`** (owner, 2026-10-04: three PRs are expected
+- [X] T108a **Merge `origin/main` into the branch before `/simplify`** (owner, 2026-10-04: three PRs are expected
   to merge to `main` before 093's code is complete). Use a **merge, not a rebase**: the evidence file, this file
   and plan.md cite this branch's commit SHAs, including the RED quotes, and a rebase would orphan every one of
   them. The PR is squashed at merge anyway.
