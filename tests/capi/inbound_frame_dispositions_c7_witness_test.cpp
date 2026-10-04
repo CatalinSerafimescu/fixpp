@@ -80,11 +80,6 @@ void expect_kept_up(Observed const& o) {
     EXPECT_EQ(o.close_rc, FIXPP_ERR_OK) << "fixpp_session_close";
 }
 
-bool establish(CInitiator& c, RawAcceptor& peer, std::uint32_t heartbeat_s) {
-    return c.start() && peer.accept() && peer.read_logon() &&
-           peer.write(logon_reply(heartbeat_s)) && c.wait_established();
-}
-
 // ── Row 1: a Framer-detected garbled frame in Active is disregarded ──────────
 
 TEST(CapiC7Witness, Row1_AGarbledFrameInActiveIsDisregarded) {
@@ -154,7 +149,7 @@ TEST(CapiC7Witness, Row2_A35NotThirdLogonIsDisregarded) {
 // read: the session holds most of the frame and must take the rest and the order in
 // one feed.
 TEST(CapiC7Witness, Row3_AFrameOfLSplitAtTheCarryEdgeIsAdmitted) {
-    constexpr std::size_t kL = 65536;
+    constexpr std::size_t kL = kDefaultLimit;
     constexpr std::size_t kTail = 16;
     RawAcceptor peer;
     CInitiator c{peer.port(), kHeartBtIntSeconds};
@@ -176,7 +171,7 @@ TEST(CapiC7Witness, Row3_AFrameOfLSplitAtTheCarryEdgeIsAdmitted) {
 // NewOrderSingle field, so each is an unknown field): the densest layout. It is
 // written alone, so the carry holds nothing past it.
 TEST(CapiC7Witness, Row4_ADenseFrameOfLIsDelivered) {
-    constexpr std::size_t kL = 65536;
+    constexpr std::size_t kL = kDefaultLimit;
     RawAcceptor peer;
     CInitiator c{peer.port(), kHeartBtIntSeconds};
     ASSERT_TRUE(establish(c, peer, kHeartBtIntSeconds)) << "setup";
@@ -197,8 +192,7 @@ TEST(CapiC7Witness, Row4_ADenseFrameOfLIsDelivered) {
 // setter is new, so this file does not use it). The connection is closed at T, so the
 // late answer never establishes the session.
 TEST(CapiC7Witness, Row5_ASlowPeerIsClosedAtTheDeadline) {
-    constexpr std::chrono::milliseconds kDefaultT{10000};  // SessionConfig's default T
-    constexpr std::chrono::milliseconds kLate = kDefaultT + 2000ms;
+    constexpr std::chrono::milliseconds kLate = kDefaultLogonTimeout + 2000ms;
     RawAcceptor peer;
     CInitiator c{peer.port(), kHeartBtIntSeconds};
     auto const t0 = std::chrono::steady_clock::now();
@@ -458,8 +452,7 @@ TEST(CapiC7Witness, Row3_AnOverLimitBodyLengthBeforeActiveEndsTheConnection) {
 // HeartBtInt(108), which the session refuses, leaving it in Disconnected with its
 // transport open. The connection is closed at T, the default timeout.
 TEST(CapiC7Witness, Row5_AnAcceptorWhoseLogonWasRefusedIsClosedAtTheDeadline) {
-    constexpr std::chrono::milliseconds kDefaultT{10000};  // SessionConfig's default T
-    constexpr std::chrono::milliseconds kLate = kDefaultT + 2000ms;
+    constexpr std::chrono::milliseconds kLate = kDefaultLogonTimeout + 2000ms;
     RawAcceptor peer;
     CInitiator a{0, kHeartBtIntSeconds, {}, record_receive, nullptr, FIXPP_ROLE_ACCEPTOR};
     ASSERT_TRUE(a.start()) << "setup";

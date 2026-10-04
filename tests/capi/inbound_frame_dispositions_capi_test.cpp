@@ -71,12 +71,6 @@ std::shared_ptr<fixpp::session::Session> lookup(CInitiator& c) {
     return e->state_->engine_->lookup(c.id);
 }
 
-// Starts `c`, accepts its connection, reads its Logon and answers it.
-bool establish(CInitiator& c, RawAcceptor& peer, std::uint32_t heartbeat_s) {
-    return c.start() && peer.accept() && peer.read_logon() &&
-           peer.write(logon_reply(heartbeat_s)) && c.wait_established();
-}
-
 // ── Q-30: the setter ────────────────────────────────────────────────────────
 
 TEST(CapiInboundFrameDispositionsQ30, SetLogonTimeoutRefusesANullHandleAndZero) {
@@ -210,8 +204,7 @@ TEST(CapiInboundFrameDispositionsQ30, TheCountIsReadFromAnotherThreadWhileTheSes
 
 TEST(CapiInboundFrameDispositionsQ16, ATimeoutSetThroughTheSetterIsHonouredAtT) {
     constexpr std::chrono::milliseconds kT{500};
-    constexpr std::chrono::milliseconds kDefault{10000};  // SessionConfig's default T
-    constexpr std::chrono::milliseconds kUpper = kDefault / 2;
+    constexpr std::chrono::milliseconds kUpper = kDefaultLogonTimeout / 2;
 
     RawAcceptor peer;
     CInitiator c{peer.port(), 30, [&](fixpp_session_config_t* sc) {
@@ -298,7 +291,7 @@ TEST(CapiInboundFrameDispositionsL18, ControlWithoutTheFailingArenaConnects) {
 // ── Q-33's C arms ───────────────────────────────────────────────────────────
 
 constexpr std::size_t kInstances = 2000;
-constexpr std::size_t kL = 65536;
+constexpr std::size_t kL = kDefaultLimit;
 
 std::string order_head(std::uint32_t seq, std::string_view cl_ord_id) {
     return "35=D\x01" + peer_header(seq) + order_fields(cl_ord_id);

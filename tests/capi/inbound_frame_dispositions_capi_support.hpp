@@ -62,6 +62,14 @@ inline constexpr char const* kPeerCompId = "ACC-93";
 // its own from a competing timeout.
 inline constexpr std::chrono::milliseconds kStepBudget{5000};
 
+// The session's inbound limit L when no MaxMessageSize(383) is advertised: the default
+// of spec FR-010.
+inline constexpr std::size_t kDefaultLimit = 65536;
+
+// The establishment timeout T a session runs when none is set: the default of spec
+// FR-006 on SessionConfig.
+inline constexpr std::chrono::milliseconds kDefaultLogonTimeout{10000};
+
 // ── Frames ──────────────────────────────────────────────────────────────────
 
 // SendingTime(52) from the real clock: the C-ABI engine runs a real-time clock and
@@ -544,5 +552,11 @@ struct CInitiator {
         return fixpp_session_close(session);
     }
 };
+
+// Starts `c`, accepts its connection, reads its Logon and answers it.
+inline bool establish(CInitiator& c, RawAcceptor& peer, std::uint32_t heartbeat_s) {
+    return c.start() && peer.accept() && peer.read_logon() &&
+           peer.write(logon_reply(heartbeat_s)) && c.wait_established();
+}
 
 }  // namespace fixpp::capi_test::ifd
