@@ -1276,6 +1276,10 @@ and every C-7 row 1–6 C witness.
   (`git -C <T005 base worktree> archive HEAD | tar -x -C <scratch>`, a fresh `mktemp -d` path; owner
   ask), never in the T005 worktree itself, whose release build T112 reuses, to show each row RED for
   its stated reason, then GREEN here.
+  - **Carried from Phase 7:** T089's #538 run reconfigured the T005 base worktree's release tree. Before trusting
+    any paired timing, re-`cmp` the base and candidate bench `.text` sections, as T005 did, and rebuild the base if they
+    differ for any reason other than the change under test.
+
 - [ ] T103 Run every C-ABI and Python cell: T090–T094 and T102 GREEN; `pytest bindings/python/tests/` on
   both `-py` lanes; `capi_*` ctest unfiltered.
 - [ ] T104 Confirm the arms this phase closes for US1 (Q-1 C arm) and US2 (Q-16 C, Python, TOML arms)
@@ -1369,6 +1373,10 @@ surfaces exist and are witnessed.
     row names because the resync row cannot exist on the base. This is the delta the pump pays.
   Budget +5 % per case, min-per-tree (`[const §VIII.2]`, SC-007). Over budget → the owner with the per-leg figures; never
   relax it. Record under `## Bench baseline`, then `git worktree remove --force` the base worktree.
+  - **Carried from Phase 7:** T089's #538 run reconfigured the T005 base worktree's release tree. Before trusting
+    any paired timing, re-`cmp` the base and candidate bench `.text` sections, as T005 did, and rebuild the base if they
+    differ for any reason other than the change under test.
+
 - [ ] T113 The MSVC sandbox (T006's lock): rsync the post-simplify head; on MSVC debug and msvc-asan run
   the `093` label, the dense-L, spill and getter-typemap cells (quickstart §3), the Python wheel
   getter, and Q-33's forwarding-lane branch on MSVC debug (T060's C++ and T091's C cells: each lazy
