@@ -385,11 +385,11 @@ comment.
   - Stack (T068, base → head): `validate_inbound_` 18,424 → 2,168 B; each of the 7 inbound
     `parse_and_dispatch_` instantiations 17,960 → 1,656 B. The 3 stack-overload instantiations went
     17,960 → 18,024 B (+64 = `sizeof(Framer)` 24 → 88, from Phase 2).
-  - `src/session/parse_capacity.hpp` carries a copy of the private `OffsetTable::overlay_cap_for`.
-    `Q11.TheBufferBudgetsTheOverlayTheTableAssigns` pins it by **equality** with the overlay block the
-    table actually allocates, at L = 4096, 65536 and 262144, and the "one doubling short" mutant is RED
-    on it. The orchestrator accepted this pin in place of a friend declaration: an equality check
-    against the authority catches drift in both directions.
+  - `src/session/parse_capacity.hpp` reaches the private `OffsetTable::overlay_cap_for` through an
+    unconditional production friend, `friend struct ::fixpp::session::detail::parse_capacity;`
+    (`eb64fd61`), so B(L)'s overlay term calls the original and no copy of the rule exists. An earlier
+    copy pinned by equality was replaced. `Q11.TheBufferBudgetsTheOverlayTheTableAssigns` still checks
+    the budget against the block the table actually allocates.
 - **Admission bound.** The acceptor's loop serves one registry entry and builds a Session only after a
   first frame whose CompIDs match. The reservation is therefore at most one carry plus B(L) per
   registered session with a live or establishing connection, which is an operator-sized quantity
