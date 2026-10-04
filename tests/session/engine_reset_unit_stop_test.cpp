@@ -528,8 +528,7 @@ void expect_close_cell(Od25Outcome const& o) {
 
 // The seeded outbound store for the replay cells: next-out 4, Heartbeats at 1 and 3 and
 // the application frame `slot2` at 2. The peer's 789=2 asks for [2, 4) and the reply
-// Logon is 4. Every slot below 4 is stored: MemoryStore's retrieve reads a slot by its
-// position in the store (fixpp#538).
+// Logon is 4. Every slot below 4 is stored, in order, as seeded_store() requires.
 Od25Case replay_case(plain_rig::Rig const& rig, std::string slot2_extra, bool close) {
     Od25Case c;
     c.logon_extra = "789=2\x01";

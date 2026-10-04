@@ -1224,8 +1224,9 @@ private:
     // 093-inbound-frame-dispositions (data-model E-10; contract C-6) — the 141=Y reset
     // unit. run_reset_unit_ is its steps 3 and 4: the manager set (reset_to_one, then
     // both counters to the targets), stopping at the first error without returning
-    // from the arm, then, only if that succeeded, the store's one reset_to. The arm
-    // brackets it with the cancellation shield and restore (steps 2 and 5).
+    // from the arm, then, only if that succeeded, the store's one reset_to. Plan OD-25
+    // (superseding OD-14's in-place shield): the reset_to runs on an empty cancellation
+    // slot, and the arm restores its own state after the unit (step 5).
     struct reset_unit_result {
         fixpp::core::expected_t<void> manager;
         fixpp::core::expected_t<void> store;
@@ -1328,8 +1329,24 @@ private:
     //   explicitly since next_outbound_seq_ is removed (RC#A gate-b/r1-green unification).
     // Returns ok on success; propagates store errors per I-07; propagates transport
     //   throws as dispatch_aborted (RC#B gate-b/r1-green transport error surface).
+    // arm: a Logon arm's expected state (093 plan OD-25). When set and
+    //   logon_arm_superseded_(*arm) holds after the store, the frame is not transmitted
+    //   and the call returns success; the caller's own predicate check follows.
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> store_then_emit(
-        seqnum_t stamped_seq, std::span<const std::byte> frame) noexcept;
+        seqnum_t stamped_seq, std::span<const std::byte> frame,
+        std::optional<fsm_state> arm = std::nullopt) noexcept;
+
+    // fixpp#518, 093 (data-model E-13; contract C-6): true when a Logon arm must stop
+    // after a resume, because the session left the state the arm expects while the arm
+    // was suspended, or Engine::stop()'s step 1 has run on this strand. The writer that
+    // matters is close(), which an application can post from a callback the arm fires
+    // (Engine::lookup() already returns the session) or from another thread, and which
+    // owns the teardown once it begins. The arm then returns success, as in the
+    // Disconnected row. `closing` is the signal because close() sets it before it can
+    // yield the strand, while a graceful close() leaves the FSM in the arm's state until
+    // its phase 1 writes. The FSM term covers `closed_drained` too: close() writes
+    // Disconnected before it gets there. `never_opened` is not a close.
+    [[nodiscard]] bool logon_arm_superseded_(fsm_state expected) const noexcept;
 
     // apply_inbound_sequence_reset: apply an inbound SequenceReset(35=4)
     // NewSeqNo(36) to the expected-inbound counter (S-023; FIX-SL §4.8 /
@@ -1415,7 +1432,9 @@ private:
     // beyond-store request. The EndSeqNo=0 => through-current resolution is
     // conveyed via end_is_through_current (NOT re-derived inside the helper).
     //
-    // Returns expected_t<void>{}  on success (resend complete, remain in Active).
+    // Returns replay_outcome::completed on success (resend complete, remain in Active).
+    // Returns replay_outcome::superseded when `arm` is set and logon_arm_superseded_(*arm)
+    //   held before one of the walk's effects (093 plan OD-25): the walk stopped there.
     // Returns std::unexpected(app_callback_threw) when a GapFill toAdmin threw.
     // Returns std::unexpected(dispatch_aborted) on transport write error.
     //   In BOTH unexpected cases the CALLER owns record_state_transition_(Disconnected).
@@ -1423,12 +1442,13 @@ private:
     //
     // Callers:
     //   (1) ResendRequest handler (Active): begin=rr_begin, requested_end=rr_end
-    //       (raw parsed EndSeqNo), end_is_through_current=(rr_end==0).
+    //       (raw parsed EndSeqNo), end_is_through_current=(rr_end==0); no arm.
     //   (2) 789 honor path (T014/T015, US1): begin=X, requested_end=N-1,
-    //       end_is_through_current=true.
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> replay_outbound_range_(
+    //       end_is_through_current=true; the Logon arm's expected state.
+    enum class replay_outcome : std::uint8_t { completed, superseded };
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<replay_outcome>> replay_outbound_range_(
         fixpp::session::seqnum_t begin, fixpp::session::seqnum_t requested_end,
-        bool end_is_through_current) noexcept;
+        bool end_is_through_current, std::optional<fsm_state> arm = std::nullopt) noexcept;
 
     // 027 — honor_peer_next_expected_: shared body for the 789-honor dispatch.
     // Extracted from the acceptor (NotConnected) and initiator (LogonSent)
@@ -1443,21 +1463,26 @@ private:
     //                reply Logon consumes a seq); initiator passes current peek_outbound()
     //                (byte-identical). The three comparisons use this; the resend RANGE
     //                still reads the live peek_outbound() (INV-NEX-RANGE).
+    //   arm        — the calling Logon arm's expected state (093 plan OD-25).
     //
     // Outcomes (D-10 ordering preserved: invalid-X FIRST, then X>N, then X<N):
-    //   true   (continue)    — X==N (in sync), or X<N resend succeeded; caller continues.
-    //   false  (terminated)  — X==0 invalid OR X>N violation: helper emitted Logout,
+    //   in_sync_continue     — X==N (in sync), or X<N resend succeeded; caller continues.
+    //   ended_disconnected   — X==0 invalid OR X>N violation: helper emitted Logout,
     //                          called record_state_transition_(Disconnected), caller MUST
     //                          co_return expected_t<void>{} (terminal, already handled).
+    //   superseded           — logon_arm_superseded_(arm) held after a suspension, before
+    //                          the helper's next effect: it stopped there and wrote no
+    //                          state; caller MUST co_return expected_t<void>{}.
     //   unexpected(err)      — X<N resend failed; helper called
     //                          record_state_transition_(Disconnected); caller MUST
     //                          co_return std::unexpected(err).
     //
     // The presence guard (cfg_.enable_next_expected_msg_seq_num && present_789)
     // remains at each call site so the knob-off / tag-absent no-op stays visible.
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<bool>> honor_peer_next_expected_(
-        std::string_view raw_789, bool present_789,
-        fixpp::session::seqnum_t next_outbound_ref) noexcept;
+    enum class logon_789_outcome : std::uint8_t { in_sync_continue, ended_disconnected, superseded };
+    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<logon_789_outcome>>
+    honor_peer_next_expected_(std::string_view raw_789, bool present_789,
+                              fixpp::session::seqnum_t next_outbound_ref, fsm_state arm) noexcept;
 };
 
 }  // namespace fixpp::session

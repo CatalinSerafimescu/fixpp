@@ -347,8 +347,8 @@ TEST(SeamRaceCancelDuringResume, MutexFreeAfterRace) {
 // grant, a total emission does not cancel the caller's next await; a terminal one
 // still does. 093's 141=Y reset unit (Session::run_reset_unit_) runs its store
 // operation on an empty cancellation slot because of this: a filter the unit set
-// before its first seqnum lock would not survive that lock. If the total arm here
-// goes RED, re-check OD-25's ruling against the new behaviour.
+// before its first seqnum lock would not survive that lock. A change to async_lock()
+// that fails the total arm here changes the premise of that ruling: re-check it.
 // ─────────────────────────────────────────────────────────────────────────────
 
 TEST(SeamRaceCancelDuringResume, Od25_GrantLeavesTheCallersFilterTerminalOnly) {
