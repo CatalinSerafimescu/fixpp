@@ -610,6 +610,8 @@ target_compile_definitions(session_logout_exchange PRIVATE FIXPP_TEST_HOOKS)
 
 # fixpp#536 (B28) — reproduction: one session's close vs another session's liveness on a shared clock.
 add_threading_test(session_536_shared_clock_liveness test_536_shared_clock_liveness.cpp)
+# fixpp#537 (B28) — reproduction: a second non-PossDup too-high frame while awaiting a replay.
+add_threading_test(session_537_second_too_high test_537_second_too_high.cpp)
 
 # ── #289(c) — checked-in RED/GREEN witness for quiesce_on_exit's residual-work
 # diagnostic branch (tests/support/pump_until_ready.hpp). Proves ONLY the
