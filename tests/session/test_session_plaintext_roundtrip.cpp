@@ -1920,10 +1920,15 @@ TEST(LogonCloseDuringSuspension, Q27_TheWaitExpiresIsRecordedAndFileStoreStillEn
         q27_start(r, s, run);
         if (!::testing::Test::HasFatalFailure()) {
             EXPECT_FALSE(has_wait_expired_event(s)) << "expired before the clock moved";
+            // KIND D (ci/mock-clock-staging-sweep.sh): close()'s wait deadline is a stored
+            // anchor, taken when q27_start's drain left close() parked on it, so it predates
+            // the advance; nothing must fire at the bound minus 1 ms.
             r.clock->advance(std::chrono::milliseconds{kQ27Bound - 1});
             drain_ready_q27(r.ioc);
             EXPECT_FALSE(has_wait_expired_event(s)) << "expired one millisecond before the bound";
             EXPECT_NE(run.close.wait_for(0s), std::future_status::ready);
+            // KIND D (ci/mock-clock-staging-sweep.sh): the same stored anchor, so a late arm
+            // fires at once.
             r.clock->advance(std::chrono::milliseconds{1});
             drain_ready_q27(r.ioc);
             EXPECT_TRUE(has_wait_expired_event(s))
@@ -1954,9 +1959,14 @@ TEST(LogonCloseDuringSuspension, Q27_AClockWideSweepDuringTheWaitDoesNotEndIt) {
                 << "a clock-wide sweep ended close()'s wait as an expiry";
             EXPECT_NE(run.close.wait_for(0s), std::future_status::ready)
                 << "a clock-wide sweep ended close()'s wait";
+            // KIND D (ci/mock-clock-staging-sweep.sh): the re-armed wait sleeps to the stored
+            // anchor taken before the sweep, so it predates the advance; nothing must fire
+            // at the bound minus 1 ms.
             r.clock->advance(std::chrono::milliseconds{kQ27Bound - 1});
             drain_ready_q27(r.ioc);
             EXPECT_FALSE(has_wait_expired_event(s)) << "expired before the bound after the sweep";
+            // KIND D (ci/mock-clock-staging-sweep.sh): the same stored anchor, so a late arm
+            // fires at once.
             r.clock->advance(std::chrono::milliseconds{1});
             drain_ready_q27(r.ioc);
             EXPECT_TRUE(has_wait_expired_event(s)) << "the re-armed wait expires at the bound";

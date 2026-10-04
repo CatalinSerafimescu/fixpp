@@ -377,7 +377,12 @@ TEST(SeamRaceCancelDuringResume, Od25_GrantLeavesTheCallersFilterTerminalOnly) {
         }
         ASSERT_TRUE(granted) << "the uncontended lock was not granted";
         sig.emit(type);
-        ioc.run_for(std::chrono::seconds{5});
+        // Run until the coroutine completes, bounded as the grant loop above is; the
+        // readiness assertion below names the future before get().
+        for (int i = 0;
+             i < 500 && fut.wait_for(std::chrono::seconds{0}) != std::future_status::ready; ++i) {
+            (void)ioc.run_one_for(std::chrono::milliseconds{10});
+        }
         ASSERT_EQ(fut.wait_for(std::chrono::seconds{0}), std::future_status::ready);
         fut.get();
         ASSERT_TRUE(wait_ec.has_value());

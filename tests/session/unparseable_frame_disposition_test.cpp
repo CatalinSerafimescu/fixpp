@@ -1555,6 +1555,9 @@ TEST(UnparseableFrameDisposition, Liveness_FramerGarble_TestRequestAtInterval) {
     ASSERT_TRUE(rig.start(cfg));
     ASSERT_TRUE(rig.to_active());
 
+    // KIND A (ci/mock-clock-staging-sweep.sh): a time stamp; the garbled Heartbeat's
+    // SendingTime(52), built just below by rig.heartbeat() from the clock's now(), reads
+    // it. The liveness sleeper's deadline is an interval after the Logon, past this step.
     rig.clock->advance(garble_at);
     std::string garbled = rig.heartbeat(2);
     auto const cs = garbled.rfind("10=");
