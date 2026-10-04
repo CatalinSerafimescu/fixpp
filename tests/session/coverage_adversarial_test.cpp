@@ -14,7 +14,8 @@
 //      tag without '=' (B-1); and, in Session::on_inbound_frame, the same two
 //      shapes as field 3 of a frame arriving in Active, which the header scan
 //      records as a fault (092 data-model E-1) and contract C-2 row D-8
-//      disregards (B-2).
+//      disregarded (B-2). 093-inbound-frame-dispositions (contract C-2 step 1)
+//      supersedes row D-8 for this shape; see the B-2 section.
 //   C. Logon-ack with msg_seq_num=0 → Disconnected (Guard (4)'s LogonSent-row seq==0 check).
 //   D. cancel_sleeps() mid-Logout-graceful-sleep → system_error catch
 //      absorbing the operation_aborted exception (run_logout_phase1's wake-early catch).
@@ -238,9 +239,10 @@ protected:
 
     // Category B-2: reaches Active with the Category C Logon-ack, feeds `faulty_body`
     // (whose field 3 is the fault and which carries MsgSeqNum 2 after it), then a
-    // conformant Heartbeat at MsgSeqNum 2. Contract C-2 row D-8: the faulty frame
-    // draws nothing and leaves the session Active with NextNumIn unmoved, so the
-    // Heartbeat is in sequence and draws nothing either.
+    // conformant Heartbeat at MsgSeqNum 2. The faulty frame, disregarded by 093's
+    // contract C-2 step 1 (092's row D-8 before it), draws nothing and leaves the
+    // session Active with NextNumIn unmoved, so the Heartbeat is in sequence and draws
+    // nothing either.
     void expect_field3_fault_disregarded(std::string const& faulty_body) {
         auto cfg = make_cfg();
         TransportDouble td;

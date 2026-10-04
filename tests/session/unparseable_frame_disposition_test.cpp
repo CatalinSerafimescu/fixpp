@@ -3143,7 +3143,10 @@ TEST(UnparseableFrameDisposition,
 //
 // In Active and in LogonReceived, a faulty NewOrderSingle whose 34 was not read before
 // the fault (D-7), or whose field 3 is not 35 (D-8), is disregarded: it draws nothing,
-// reaches neither fromAdmin nor fromApp, and leaves the session open in its state. The
+// reaches neither fromAdmin nor fromApp, and leaves the session open in its state.
+// 093-inbound-frame-dispositions (contract C-2 step 1) supersedes D-8: a frame whose
+// field 3 is not 35 is disregarded before the fault branch and counted as a garbled
+// frame; each cell passes run_disregard_cell the garble count its frame draws. The
 // next conformant message, a Heartbeat at N+1 = 3, must then be a gap whose
 // ResendRequest begins at N = 2: NextNumIn unchanged. Every frame whose 34 is read
 // carries 34=2, the expected number, so a disposer that routed it to D-5 would advance
