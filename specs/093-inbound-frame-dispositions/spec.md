@@ -579,8 +579,8 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
 
 **#523: a closing session**
 
-- **FR-030**: Once `close()` has begun, the NotConnected and LogonSent arms MUST return success without
-  effect: no callback, no counter advance, no event, no Reject, no state write and no outbound frame.
+- **FR-030**: Once `close()` has begun, or `Engine::stop()`'s step 1 has run on the session's strand
+  (plan.md OD-28), the NotConnected and LogonSent arms MUST return success without effect: no callback, no counter advance, no event, no Reject, no state write and no outbound frame.
   Returning an error would make the pump call `close()` again for no gain.
   - The LogonReceived, Active and LogoutSent arms are unchanged, so phase 1's Logout confirmation path
     still works.

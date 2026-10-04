@@ -402,6 +402,16 @@ made at `/speckit-plan`. Reviewers may challenge any of them, and the owner may 
     equivalent (seconds versus milliseconds). The table's old note became false with T098.
   - For T105: C-8 L-1's "closes when the carry overflows" must be re-derived, because OD-23 makes carry
     overflow unreachable in the pump.
+- **OD-28: C-2 step 2 tests the arm's superseded predicate, not `closing` alone** (added at implementation,
+  2026-10-04, from a docs-review question traced by the implementer; RED `26cdf96f`, GREEN `e8afcde4`).
+  - **Why.** Step 2 tested only `state_ == lifecycle::closing`. The pump delivers one feed's frames in a
+    loop, so if an earlier frame's arm suspends (the hydrate read, for example) and `Engine::stop()`'s step 1
+    lands meanwhile, the next coalesced frame meets an arm that is not closing. It then ran effects before the
+    arm's first later predicate check, which FR-041 forbids. On LogonSent with 141=Y that included the whole
+    reset unit. The trace (in the evidence file) lists the effects in each arm's window.
+  - **What.** Step 2 in both arms is the arm's own `logon_arm_superseded_(state)`: `closing`, or the
+    engine-stop flag, or a moved FSM state (false at the arm's entry). Step 1's garble accounting still runs
+    first. FR-030 and contract C-2's row 2 were amended accordingly.
 ## What changes for whom
 
 | Who | What changes | Declared where |

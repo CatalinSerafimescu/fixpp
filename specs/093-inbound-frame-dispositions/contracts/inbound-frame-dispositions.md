@@ -137,7 +137,7 @@ with the flag on (plan.md OD-4).
 | Step | Condition | Disposition | States |
 |---|---|---|---|
 | 1 | the scan's `msg_type_is_third == false`, faulty or not | **disregard as garbled**: counted, evented and logged as one garble of kind `wire_header_out_of_order` (FR-003). Then return success: no Reject, NextNumIn kept, no liveness refresh | every state except Disconnected |
-| 2 | `closing` and state ∈ {NotConnected, LogonSent} | return success with no effect (FR-030) | NotConnected, LogonSent |
+| 2 | the arm's superseded predicate (`closing`, or `Engine::stop()`'s engine-stop flag, or a moved FSM state) and state ∈ {NotConnected, LogonSent} (plan OD-28) | return success with no effect (FR-030, FR-041) | NotConnected, LogonSent |
 | 3 | the scan found a fault | 092's C-2 rows, except D-8, which step 1 makes unreachable | as in 092 |
 | 4 | otherwise | LogonReceived and Active: refresh inbound liveness (FR-020), then the existing guards and handlers. NotConnected, LogonSent and LogoutSent: the existing arm | each arm |
 
