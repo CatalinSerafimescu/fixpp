@@ -225,6 +225,64 @@ TEST(CapiInboundFrameDispositionsQ16, ATimeoutSetThroughTheSetterIsHonouredAtT) 
     EXPECT_FALSE(est);
 }
 
+// ── C-8 L-18: an open() allocation failure, seen through C ──────────────────
+//
+// Session::open() runs in the engine's role loop, which returns on its error, so an
+// allocation failure there (plan OD-23: core::error::out_of_memory) reaches C only as a
+// session that is never published: the initiator never connects, the getter reads 0,
+// and fixpp_session_close takes its never-published branch,
+// FIXPP_ERR_THREAD_SESSION_LIFECYCLE. The failure is forced by giving the carry block a
+// null memory resource through the opaque config (the C ABI has no arena setter). The
+// control is the same session without it, which connects.
+// The bound on each wait: the control connects and publishes within it; the failing
+// session, whose role loop has returned, does neither however long the wait.
+constexpr std::chrono::milliseconds kL18Budget{2000};
+
+bool connects_with_carry_arena(std::pmr::memory_resource* carry_arena, bool& published,
+                               std::uint64_t& count, fixpp_error_t& close_rc) {
+    RawAcceptor peer;
+    CInitiator c{peer.port(), 30, [&](fixpp_session_config_t* sc) {
+                     reinterpret_cast<fixpp_session_config*>(sc)->cfg.framer_carry_arena =
+                         carry_arena;
+                 }};
+    bool const started = c.start();
+    EXPECT_TRUE(started);
+    bool const connected = started && peer.accept(kL18Budget);
+    auto const until = std::chrono::steady_clock::now() + kL18Budget;
+    published = false;
+    while (!published && std::chrono::steady_clock::now() < until) {
+        published = lookup(c) != nullptr;
+        if (!published) std::this_thread::sleep_for(std::chrono::milliseconds{2});
+    }
+    count = 77;
+    EXPECT_EQ(fixpp_session_garbled_frame_count(c.session, &count), FIXPP_ERR_OK);
+    peer.disconnect();
+    close_rc = connected ? c.drain_then_close() : fixpp_session_close(c.session);
+    return connected;
+}
+
+TEST(CapiInboundFrameDispositionsL18, AnOpenAllocationFailureIsASessionNeverPublished) {
+    bool published = true;
+    std::uint64_t count = 77;
+    fixpp_error_t close_rc = FIXPP_ERR_OK;
+    bool const connected =
+        connects_with_carry_arena(std::pmr::null_memory_resource(), published, count, close_rc);
+    EXPECT_FALSE(connected) << "the initiator connected although its open() failed";
+    EXPECT_FALSE(published) << "the engine published a session whose open() failed";
+    EXPECT_EQ(count, 0U);
+    EXPECT_EQ(close_rc, FIXPP_ERR_THREAD_SESSION_LIFECYCLE);
+}
+
+TEST(CapiInboundFrameDispositionsL18, ControlWithoutTheFailingArenaConnects) {
+    bool published = false;
+    std::uint64_t count = 77;
+    fixpp_error_t close_rc = FIXPP_ERR_OK;
+    bool const connected = connects_with_carry_arena(nullptr, published, count, close_rc);
+    EXPECT_TRUE(connected);
+    EXPECT_TRUE(published);
+    EXPECT_EQ(count, 0U);
+}
+
 // ── Q-33's C arms ───────────────────────────────────────────────────────────
 
 constexpr std::size_t kInstances = 2000;
