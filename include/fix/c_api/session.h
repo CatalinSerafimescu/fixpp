@@ -195,7 +195,7 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_config_set_tcp_endpoint(
  * (C-ABI 1.11; 093, fixpp#514).
  *
  * Writes SessionConfig::logon_timeout_ms: how long, in milliseconds, a
- * connection may take to log on. The deadline is measured from the accept on an
+ * connection may take to log on. The deadline runs from the accept on an
  * acceptor, and from the end of the connect, with the Logon sent, on an
  * initiator. A connection not logged on by then is closed, including one whose
  * Logon was refused. The default is 10000.
@@ -293,8 +293,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_open(fixpp_engine_t* engine,
  *     closed, including one whose Logon was refused, where it stayed open; a
  *     peer that answers the Logon later than that no longer establishes;
  *   - every frame that passes the fault and third-field checks counts as
- *     inbound traffic for the heartbeat interval, where some that took an
- *     early return did not (one above or below the expected MsgSeqNum(34), a
+ *     inbound traffic for the heartbeat interval, where some that returned
+ *     early did not (one above or below the expected MsgSeqNum(34), a
  *     SequenceReset, a Reject, among others); the TestRequest such traffic
  *     drew is not sent, and a session that ended when it went unanswered
  *     stays up.
@@ -390,8 +390,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_close(fixpp_session_t* session);
  *     closed, including one whose Logon was refused, where it stayed open; a
  *     peer that answers the Logon later than that no longer establishes;
  *   - every frame that passes the fault and third-field checks counts as
- *     inbound traffic for the heartbeat interval, where some that took an
- *     early return did not (one above or below the expected MsgSeqNum(34), a
+ *     inbound traffic for the heartbeat interval, where some that returned
+ *     early did not (one above or below the expected MsgSeqNum(34), a
  *     SequenceReset, a Reject, among others); the TestRequest such traffic
  *     drew is not sent, and a session that ended when it went unanswered
  *     stays up.
@@ -548,8 +548,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_garbled_frame_count(const fixpp_ses
  *     closed, including one whose Logon was refused, where it stayed open; a
  *     peer that answers the Logon later than that no longer establishes;
  *   - every frame that passes the fault and third-field checks counts as
- *     inbound traffic for the heartbeat interval, where some that took an
- *     early return did not (one above or below the expected MsgSeqNum(34), a
+ *     inbound traffic for the heartbeat interval, where some that returned
+ *     early did not (one above or below the expected MsgSeqNum(34), a
  *     SequenceReset, a Reject, among others); the TestRequest such traffic
  *     drew is not sent, and a session that ended when it went unanswered
  *     stays up.
@@ -660,8 +660,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_send(fixpp_session_t* session,
  *     closed, including one whose Logon was refused, where it stayed open; a
  *     peer that answers the Logon later than that no longer establishes;
  *   - every frame that passes the fault and third-field checks counts as
- *     inbound traffic for the heartbeat interval, where some that took an
- *     early return did not (one above or below the expected MsgSeqNum(34), a
+ *     inbound traffic for the heartbeat interval, where some that returned
+ *     early did not (one above or below the expected MsgSeqNum(34), a
  *     SequenceReset, a Reject, among others); the TestRequest such traffic
  *     drew is not sent, and a session that ended when it went unanswered
  *     stays up.
@@ -765,8 +765,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_register_callback(
  *     closed, including one whose Logon was refused, where it stayed open; a
  *     peer that answers the Logon later than that no longer establishes;
  *   - every frame that passes the fault and third-field checks counts as
- *     inbound traffic for the heartbeat interval, where some that took an
- *     early return did not (one above or below the expected MsgSeqNum(34), a
+ *     inbound traffic for the heartbeat interval, where some that returned
+ *     early did not (one above or below the expected MsgSeqNum(34), a
  *     SequenceReset, a Reject, among others); the TestRequest such traffic
  *     drew is not sent, and a session that ended when it went unanswered
  *     stays up.

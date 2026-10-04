@@ -19,10 +19,9 @@
 // time from a stamp taken before fixpp_engine_start, which precedes the deadline's
 // start. The lower bound is T. The upper bound is half the default timeout, derived
 // from the competing timeout rather than from expected latency: a setter that is
-// ignored closes at the default, outside the band. That a setter-ignored build fails
-// the upper bound is also what shows no other close source fires inside the band on a
-// pre-Active initiator; re-derive it by making the setter store nothing and running
-// the cell (tasks.md T090).
+// ignored closes at the default, outside the band. To check the band against other
+// close sources on a pre-Active initiator, make the setter store nothing and run the
+// cell: it must fail the upper bound (tasks.md T090).
 //
 // Q-33's C arms. The frames are FIX 4.4 NewOrderSingles of exactly L = 65536 bytes:
 // a NoPartyIDs(453) group, then "2=<SOH>" fields (tag 2 is not a NewOrderSingle field,

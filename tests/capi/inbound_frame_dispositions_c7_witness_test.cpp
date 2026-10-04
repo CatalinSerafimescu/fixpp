@@ -16,8 +16,9 @@
 //     drains.
 //
 // This file and the support header name no symbol 093 adds, so they compile against
-// the merge-base tree, where each row is RED for its stated reason (tasks.md T102).
-// Row 5 therefore uses the default establishment timeout: the setter is new.
+// the merge-base tree: to run the rows there, copy both into a copy of that tree and
+// register this file alone (tasks.md T102). Row 5 therefore uses the default
+// establishment timeout: the setter is new.
 //
 // Which observers discriminate depends on the trigger's state. fixpp_session_close
 // returns FIXPP_ERR_OK for any session that was established once, so for a trigger

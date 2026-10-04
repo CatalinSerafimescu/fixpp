@@ -6,9 +6,8 @@
 //
 // Shared by inbound_frame_dispositions_capi_test.cpp (T090, T091) and
 // inbound_frame_dispositions_c7_witness_test.cpp (T102). It names no symbol 093 adds,
-// so it and the witness compile against the merge-base tree, where the witness shows
-// each C-7 row RED (tasks.md T102). Keep it that way: a 093 symbol here breaks the
-// base run.
+// so it and the witness compile against the merge-base tree, where tasks.md T102 runs
+// the witness. Keep it that way: a 093 symbol here breaks that run.
 //
 // The engine side is driven through the public C ABI only: the dictionary comes from
 // fixpp_dict_load_from_xml and the endpoint from fixpp_session_config_set_tcp_endpoint.
