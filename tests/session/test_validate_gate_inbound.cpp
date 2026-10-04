@@ -569,7 +569,7 @@ TEST(ValidateGateInbound, RejectNotConsumed_OutOfSequenceLogonSequenceReset) {
 //
 // RED on kAdminParseArena gate: arena exhausts at ~257 fields → parse() returns
 //   unexpected → validation SKIPPED → no Reject.
-// GREEN on the session's parse buffer: parse succeeds → validate fires → Reject(373=2)
+// On the session's parse buffer: parse succeeds → validate fires → Reject(373=2)
 //   for the first undefined tag; then conformant NOS at seq=2 dispatched, no Reject.
 //
 // RED-discrimination confirmation (required by brief):

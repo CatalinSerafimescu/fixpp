@@ -1285,7 +1285,7 @@ TEST(EngineFirstFramePhaseATls, Q17_HandshakeEndingBeforeT_TheLogonIsReadAndAnsw
 // 093-inbound-frame-dispositions — Q-6 on the acceptor's first frame (contract C-1,
 // FR-013, L-6). The first-frame read's Framer runs at the registered session's limit
 // L, so a first frame over L is refused there: the transport closes, and no Session
-// exists, so nothing is recorded (observed as lookup() null and no Logon reply). The
+// exists, so nothing is recorded (a cell reads that as lookup() null and no Logon reply). The
 // cells run at a configured 383 of 4096, the one L at which "over L" is not also "over
 // the 4096-byte budget": the budget admits a frame of exactly budget + 1 bytes when it
 // is complete (the frame-found return wins). On the rig's mock engine clock, which no

@@ -176,8 +176,7 @@ private:
           mr_{mr},
           hooks_{hooks},
           unk_items_{mr} {
-        // The same root group_context seed as the public dict-aware ctors (Gate B
-        // PR#176 r1 root cause #1).
+        // The same root group_context seed as the public dict-aware ctors.
         table_.set_group_context(group_context{.msg_type = msg_type()});
     }
 

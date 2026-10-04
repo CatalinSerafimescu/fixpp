@@ -144,7 +144,7 @@ using fixpp::wire::pmr_carry_buffer;
 // session's inbound parse_and_dispatch_ overload parses over a per-session parse
 // buffer B(L), allocated once at open(), with the entry cap N(L) and an up-front
 // reserve. The buffer here is B(L) at the default L, from the session's own formula
-// (src/session/parse_capacity.hpp), allocated before main, so before any measured
+// (src/session/parse_capacity.hpp), allocated before main, so outside every counted
 // window, as open() allocates it before any frame. Its upstream is arena_upstream(),
 // where the session's spill witness forwards.
 constexpr std::uint32_t kLimit = fixpp::session::kDefaultInboundLimit;

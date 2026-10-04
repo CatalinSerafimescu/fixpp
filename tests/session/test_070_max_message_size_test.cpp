@@ -14,7 +14,7 @@
 // session's inbound limit L is enforced by the Framer, in every state, below
 // on_inbound_frame, where these cells feed. A frame of exactly L is delivered through
 // the pump (engine_readpump_test.cpp, InboundAtLimitAccepted), a frame over L closes
-// in every state (inbound_frame_dispositions_test.cpp, the Q-6 cells), and 070's
+// in every state (inbound_frame_dispositions_test.cpp, Q-6), and 070's
 // pre-establishment exemption is reversed.
 #include <gtest/gtest.h>
 

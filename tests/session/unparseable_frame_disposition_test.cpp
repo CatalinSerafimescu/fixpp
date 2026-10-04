@@ -2093,7 +2093,7 @@ TEST(UnparseableFrameDisposition, AwaitingResend_FaultyFillClosesGap_LengthDataM
 // 093-inbound-frame-dispositions (FR-013) moved the MaxMessageSize_OversizedFaulty_*
 // controls: 070's session-level 383 check they fed below the Framer is deleted, and a
 // frame over the session's limit is refused at framing. The faulty over-limit shapes
-// are inbound_frame_dispositions_test.cpp's Q-6 cells, through the read pump.
+// are inbound_frame_dispositions_test.cpp's Q-6 set, through the read pump.
 
 void run_ref_msg_type_bound_cell(Shape const& shape) {
     StateCell c{At::active};

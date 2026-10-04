@@ -270,7 +270,7 @@ TEST(WireUnknownFieldsQ32, ExhaustedArenaReturnsTheSameEmptyViewAndTheProcessLiv
     ASSERT_EQ(p.upstream.allocate_calls(), 0U) << "the parse itself fits in the block";
 
     // Exit codes: 0 = both calls returned the same empty view; 1 = the first call
-    // returned a non-empty view (the list fitted, so the cell measured nothing);
+    // returned a non-empty view (the list fitted, so nothing was exhausted);
     // 2 = the second call differs from the first.
     EXPECT_EXIT(
         {
