@@ -588,18 +588,9 @@ TEST(ValidateGateInbound, ManyFieldsBypassArena_Rejected_NotBypassed) {
     // (11,54,60) + 280 undefined (9000-9279) = 290.  Needs cap-512 (next power of 2
     // above 256 that fits 290).
     //
-    // The count must land in the window (admin-arena capacity, inbound-arena
-    // capacity): high enough to EXHAUST the 8 KiB kAdminParseArena (so the RED
-    // mutation in the header comment fails), low enough to FIT the inbound parse.
-    // Before 093 that upper bound was a 16 KiB stack arena, and the window was
-    // allocator-dependent: the arena was 2x kAdminParseArena, but MSVC's std::pmr
-    // grows vectors 1.5x (vs
-    // libstdc++/libc++ 2x), so a monotonic_buffer_resource retains more, shifting
-    // the inbound ceiling down.  MEASURED (windows-msvc-release sweep): the gate
-    // rejects up to 315 total fields and bypasses at >=320 on MSVC, vs >480 on
-    // libstdc++; the libstdc++ admin-arena floor is ~257.  290 (vs the original
-    // libstdc++-only 410) sits in the overlap with margin on both bounds: above
-    // the 257-field libstdc++ admin floor, below the 315-field MSVC inbound ceiling.
+    // The count must land in the window: high enough to EXHAUST the 8 KiB
+    // kAdminParseArena (so the RED mutation in the header comment fails), and within
+    // parse_capacity::entry_cap_for(L) so the inbound parse fits.
     std::string body;
     body += "11=ORD001\x01";
     body += "54=1\x01";
