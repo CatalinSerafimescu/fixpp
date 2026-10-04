@@ -37,7 +37,6 @@
 #include <fixpp/log/level.hpp>
 #include <fixpp/log/logger.hpp>
 #include <fixpp/log/record.hpp>
-#include <fixpp/log/sink.hpp>
 #include <fixpp/session/memory_store.hpp>
 #include <fixpp/session/memory_store_factory.hpp>
 #include <fixpp/session/message_store.hpp>
@@ -49,7 +48,6 @@
 #include <fstream>
 #include <memory>
 #include <memory_resource>
-#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
@@ -59,6 +57,7 @@
 #include <vector>
 
 #include "plain_engine_rig.hpp"
+#include "support/log_capture.hpp"
 #include "support/session_test_access.hpp"
 #include "support/transport_double.hpp"
 
@@ -222,32 +221,8 @@ TEST(EstablishmentTimeoutQ16, AcceptorAfterNonLogonFrame_SilentPeer_ClosedAtTNot
 // to the record fails this cell.
 constexpr char kTimeoutRecordFormat[] = "session not established within logon_timeout_ms={}";
 
-class CaptureSink final : public fixpp::log::Sink {
-public:
-    [[nodiscard]] fixpp::core::expected_t<void> open() override { return {}; }
-    void emit(fixpp::log::Record const& rec) noexcept override {
-        std::scoped_lock lk{mu_};
-        records_.push_back(rec);
-    }
-    void flush(std::chrono::milliseconds /*deadline*/) noexcept override {}
-    void close() noexcept override {}
-    [[nodiscard]] std::vector<fixpp::log::Record> records() const {
-        std::scoped_lock lk{mu_};
-        return records_;
-    }
-
-private:
-    mutable std::mutex mu_;
-    std::vector<fixpp::log::Record> records_;
-};
-
 TEST(EstablishmentTimeoutQ16, TheTimeoutIsLoggedOnceWithTAndTheSessionTraceContext) {
-    auto owned = std::make_unique<CaptureSink>();
-    CaptureSink* const sink = owned.get();
-    std::pmr::vector<std::unique_ptr<fixpp::log::Sink>> sinks(std::pmr::get_default_resource());
-    sinks.push_back(std::move(owned));
-    auto const logger =
-        std::make_shared<fixpp::log::Logger>(fixpp::log::LoggerConfig{}, std::move(sinks));
+    fixpp::test_support::LogCapture log;
     fixpp::otel::trace_context tc{};
     tc.trace_id.fill(std::byte{0x6B});
     tc.span_id.fill(std::byte{0x2D});
@@ -256,7 +231,7 @@ TEST(EstablishmentTimeoutQ16, TheTimeoutIsLoggedOnceWithTAndTheSessionTraceConte
     pr::Rig rig;
     auto cfg = rig.cfg(session_role::initiator);
     set_logon_timeout(cfg, kT);
-    cfg.logger_override = logger;
+    cfg.logger_override = log.logger;
     cfg.initial_trace_context = tc;
     bool const up = rig.start(std::move(cfg)) &&
                     rig.run_until([&] { return rig.state() == fsm_state::LogonSent; });
@@ -268,11 +243,7 @@ TEST(EstablishmentTimeoutQ16, TheTimeoutIsLoggedOnceWithTAndTheSessionTraceConte
         closed = rig.run_until([&] { return rig.peer.read_ended; });
     }
     rig.stop();
-    (void)logger->shutdown();
-    std::vector<fixpp::log::Record> records;
-    for (auto const& r : sink->records()) {
-        if (r.format_id == FIXPP_FORMAT_ID(kTimeoutRecordFormat)) records.push_back(r);
-    }
+    auto const records = log.records_of(FIXPP_FORMAT_ID(kTimeoutRecordFormat));
 
     ASSERT_TRUE(up);
     EXPECT_TRUE(closed);

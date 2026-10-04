@@ -39,7 +39,6 @@
 #include <fixpp/log/level.hpp>
 #include <fixpp/log/logger.hpp>
 #include <fixpp/log/record.hpp>
-#include <fixpp/log/sink.hpp>
 #include <fixpp/session/engine.hpp>
 #include <fixpp/session/seqnum_manager.hpp>
 #include <fixpp/session/session.hpp>
@@ -52,7 +51,6 @@
 #include <functional>
 #include <memory>
 #include <memory_resource>
-#include <mutex>
 #include <new>
 #include <optional>
 #include <string>
@@ -66,6 +64,7 @@
 #include "support/fix44_dictionary.hpp"
 #include "support/frame_view_factory.hpp"
 #include "support/hooked_store.hpp"
+#include "support/log_capture.hpp"
 #include "support/minimal_dictionary.hpp"
 #include "support/minimal_security_profile.hpp"
 #include "support/pump_until_ready.hpp"
@@ -266,49 +265,12 @@ constexpr char kGarbleRecordFormat[] =
 
 namespace plain_rig = fixpp::test_support::plain_rig;
 
-class CaptureSink final : public fixpp::log::Sink {
-public:
-    [[nodiscard]] fixpp::core::expected_t<void> open() override { return {}; }
-    void emit(fixpp::log::Record const& rec) noexcept override {
-        std::scoped_lock lk{mu_};
-        records_.push_back(rec);
-    }
-    void flush(std::chrono::milliseconds /*deadline*/) noexcept override {}
-    void close() noexcept override {}
-    [[nodiscard]] std::vector<fixpp::log::Record> records() const {
-        std::scoped_lock lk{mu_};
-        return records_;
-    }
+using fixpp::test_support::LogCapture;
 
-private:
-    mutable std::mutex mu_;
-    std::vector<fixpp::log::Record> records_;
-};
-
-// A Logger over one CaptureSink, for SessionConfig::logger_override.
-struct LogCapture {
-    CaptureSink* sink = nullptr;  // owned by `logger`
-    std::shared_ptr<fixpp::log::Logger> logger;
-
-    LogCapture() {
-        auto owned = std::make_unique<CaptureSink>();
-        sink = owned.get();
-        std::pmr::vector<std::unique_ptr<fixpp::log::Sink>> sinks(std::pmr::get_default_resource());
-        sinks.push_back(std::move(owned));
-        logger = std::make_shared<fixpp::log::Logger>(fixpp::log::LoggerConfig{}, std::move(sinks));
-    }
-
-    // The garble records the session wrote. The logger drains on its own thread, so
-    // this shuts it down first: every record enqueued before the call is then counted.
-    [[nodiscard]] std::vector<fixpp::log::Record> garble_records() {
-        (void)logger->shutdown();
-        std::vector<fixpp::log::Record> out;
-        for (auto const& r : sink->records()) {
-            if (r.format_id == FIXPP_FORMAT_ID(kGarbleRecordFormat)) out.push_back(r);
-        }
-        return out;
-    }
-};
+// The garble records the session wrote.
+std::vector<fixpp::log::Record> garble_records(LogCapture& log) {
+    return log.records_of(FIXPP_FORMAT_ID(kGarbleRecordFormat));
+}
 
 // A trace context no session would carry by default, so a record that carries it was
 // written with the session's own.
@@ -458,7 +420,7 @@ void run_q1(Q1Row const& row) {
     bool const peer_read_ended = rig.peer.read_ended;
     auto const resends = plain_rig::frames_of_type(rig.peer.received, "2");
     rig.stop();
-    auto const records = log.garble_records();
+    auto const records = garble_records(log);
 
     ASSERT_TRUE(up) << row.name << ": the session did not reach Active";
     ASSERT_TRUE(delivered) << row.name << ": the peer's write did not complete";
@@ -653,7 +615,7 @@ TEST(InboundFrameDispositionsQ5, RegionSplitAcrossReadsCountsOnceAndTheContinuin
     auto const o = c.observe();
     auto const st = c.rig.state();
     c.rig.stop();
-    auto const records = c.log.garble_records();
+    auto const records = garble_records(c.log);
 
     ASSERT_TRUE(active && d1 && d2) << "setup";
     EXPECT_TRUE(processed) << "the good frame after the split region must be processed";
@@ -748,7 +710,7 @@ TEST(InboundFrameDispositionsQ5, LogRecordsAreRateBoundedToOnePerHeartBtInt) {
     ok = ok && garble_then_heartbeat(c, 4);
     auto const o = c.observe();
     c.rig.stop();
-    auto const records = c.log.garble_records();
+    auto const records = garble_records(c.log);
 
     ASSERT_TRUE(ok) << "setup: each garble must be followed by its processed Heartbeat";
     EXPECT_EQ(o.count, 3U) << "every garble is counted";
@@ -782,7 +744,7 @@ TEST(InboundFrameDispositionsQ5, HeartBtIntZeroStillBoundsTheLogToOneRecordPerSe
     }
     auto const o = c.observe();
     c.rig.stop();
-    auto const records = c.log.garble_records();
+    auto const records = garble_records(c.log);
 
     ASSERT_TRUE(ok) << "setup: each garble must be followed by its processed Heartbeat";
     EXPECT_EQ(o.count, 13U) << "every garble is counted";
@@ -823,7 +785,7 @@ TEST(InboundFrameDispositionsQ5, LogRecordsReconcileWithTheCounterRegionByRegion
     ok = ok && garble_then_heartbeat(c, 5);  // logged
     auto const o = c.observe();
     c.rig.stop();
-    auto const records = c.log.garble_records();
+    auto const records = garble_records(c.log);
 
     ASSERT_TRUE(ok) << "setup: each garble must be followed by its processed Heartbeat";
     EXPECT_EQ(after_first, 3U) << "the first write opens three regions";
@@ -962,7 +924,7 @@ struct DirectFixture {
 void expect_step1_garble(DirectFixture& f, Session const& s, std::string const& frame,
                          std::string_view row) {
     auto const o = observe_garbles(s);
-    expect_one_garble(o, f.log.garble_records(),
+    expect_one_garble(o, garble_records(f.log),
                       {fixpp::core::error::wire_header_out_of_order, frame.size()}, row);
 }
 
@@ -1029,7 +991,7 @@ TEST(InboundFrameDispositionsQ8, LogoutSent_MsgTypeNotThird_CountedAndNotTakenAs
         << "the logout timeout must end the close";
     (void)close_fut.get();
     EXPECT_EQ(s.state(), fsm_state::Disconnected);
-    expect_one_garble(o, f.log.garble_records(),
+    expect_one_garble(o, garble_records(f.log),
                       {fixpp::core::error::wire_header_out_of_order, bad.size()}, "LogoutSent");
 }
 
@@ -1046,7 +1008,7 @@ TEST(InboundFrameDispositionsQ8, Disconnected_MsgTypeNotThird_IsNotScannedOrCoun
     auto const o = observe_garbles(s);
     EXPECT_EQ(o.count, 0U) << "Disconnected does not scan, so it does not count";
     EXPECT_TRUE(o.events.empty());
-    EXPECT_TRUE(f.log.garble_records().empty());
+    EXPECT_TRUE(garble_records(f.log).empty());
     EXPECT_EQ(s.state(), fsm_state::Disconnected);
 }
 
@@ -1300,7 +1262,7 @@ TEST(InboundFrameDispositionsQ8Pump, Disconnected_FramerGarbleIsCountedWhileTheP
     auto const o = c.observe();
     bool const read_ended = c.rig.peer.read_ended;
     c.rig.stop();
-    auto const records = c.log.garble_records();
+    auto const records = garble_records(c.log);
 
     ASSERT_TRUE(connected && d1 && refused && d2) << "setup";
     EXPECT_FALSE(read_ended) << "a garble does not close the transport";
@@ -1358,7 +1320,7 @@ TEST(InboundFrameDispositionsQ10, LongerThanTheCapInActive_IsAGarbleDisregardedA
     auto const o = c.observe();
     auto const st = c.rig.state();
     c.rig.stop();
-    auto const records = c.log.garble_records();
+    auto const records = garble_records(c.log);
 
     ASSERT_TRUE(active && d) << "setup";
     ASSERT_GT(long_bs.size(), fixpp::wire::Framer::Config{}.max_begin_string_bytes)
@@ -1756,12 +1718,7 @@ std::string over_l_bytes(plain_rig::Rig const& rig, OverL k, std::uint32_t seq) 
 }
 
 std::vector<fixpp::log::Record> over_limit_records(LogCapture& log) {
-    (void)log.logger->shutdown();
-    std::vector<fixpp::log::Record> out;
-    for (auto const& r : log.sink->records()) {
-        if (r.format_id == FIXPP_FORMAT_ID(kOverLimitRecordFormat)) out.push_back(r);
-    }
-    return out;
+    return log.records_of(FIXPP_FORMAT_ID(kOverLimitRecordFormat));
 }
 
 enum class Q6State : std::uint8_t { active, not_connected, logon_sent, disconnected };
