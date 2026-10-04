@@ -1017,7 +1017,7 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::persist_outbound_advance
     co_return fixpp::core::expected_t<void>{};
 }
 
-// 093-inbound-frame-dispositions (data-model E-10; contract C-6 steps 3 and 4) — the
+// 093-inbound-frame-dispositions (data-model E-10; contract C-6, its steps 3 and 4) — the
 // 141=Y reset unit's body. The caller holds the cancellation shield. Each manager
 // setter takes the seqnum mutex, which grants inline on its uncontended fast path
 // (L-518-1's condition), so nothing here suspends before the store's reset_to. The

@@ -1049,13 +1049,14 @@ TEST(InboundFrameDispositionsQ8, Disconnected_MsgTypeNotThird_IsNotScannedOrCoun
     EXPECT_EQ(s.state(), fsm_state::Disconnected);
 }
 
-// ── Q-9 (tasks.md T076; contract C-2 steps 1 and 2; spec FR-030) ──────────────
+// ── Q-9 (tasks.md T076; contract C-2, its steps 1 and 2; spec FR-030) ─────────
 //
 // close(graceful) from NotConnected or LogonSent yields only in its store flush, so the
 // session's store is a HookedStore whose flush holds until the cell releases it. While
 // close() is under way, a Heartbeat whose third field is not 35 reaches the arm: step 1
 // counts, events and logs it as a garble (not an arm effect, so a closing session still
-// accounts it), and nothing else happens: no frame is sent and the state is unchanged.
+// accounts it), and the frame has no further effect: no frame is sent and the state
+// is unchanged.
 // Then the flush is released and close() ends the session.
 void run_q9(session_role role, fsm_state expected, std::string_view row) {
     DirectFixture f;

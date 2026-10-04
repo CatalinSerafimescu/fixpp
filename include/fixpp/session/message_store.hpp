@@ -146,7 +146,8 @@ public:
     // that is 2, and returns the first error, at which it stops. It is not atomic: a
     // crash between those steps can leave the intermediate state. Override it to make
     // the operation one step under the store's writer lock, so no reader and no
-    // restart sees an intermediate state (MemoryStore and FileStore do). An override
+    // restart sees an intermediate state (re-derive which stores do with
+    // `git grep -n "reset_to(" -- include src`). An override
     // that holds a FIFO writer lock across the whole operation also keeps the (1, 1)
     // outcome when Session::close()'s bounded wait for the unit expires, because the
     // teardown reset queues behind it.
