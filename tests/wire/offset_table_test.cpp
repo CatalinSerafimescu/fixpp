@@ -1189,8 +1189,8 @@ TEST(WireOffsetTableReserve, AReserveAboveTheEntryCapIsClampedToTheCap) {
 // out_of_memory; nothing escapes. The resource is a monotonic buffer over a null
 // upstream, large enough for whatever the parse draws before the reserve (nothing on
 // most lanes; MSVC debug's container proxies, drawn at construction outside build's
-// catch) and too small for the reserve. The log shows the refused request is the
-// reserve's.
+// catch) and too small for the reserve. The log shows the one refused request is the
+// reserve's; on MSVC debug the view's later container proxies are still served.
 TEST(WireOffsetTableReserve, AReserveTheResourceCannotServeReportsOutOfMemory) {
     auto buf = reserve::frame_with(10);
     auto fv = fixpp::wire::test::make_frame_view(buf);
@@ -1206,12 +1206,12 @@ TEST(WireOffsetTableReserve, AReserveTheResourceCannotServeReportsOutOfMemory) {
     auto mv = parser.parse(*fv, &log, OffsetTable::Config{}, kReserve);
     ASSERT_FALSE(mv.has_value());
     EXPECT_EQ(mv.error(), error::out_of_memory);
-    ASSERT_FALSE(log.log.empty());
-    EXPECT_FALSE(log.log.back().served) << "the last request was refused";
-    EXPECT_EQ(log.log.back().bytes, kReserve * reserve::kEntry) << "and it is the reserve";
-    for (std::size_t i = 0; i + 1 < log.log.size(); ++i) {
-        EXPECT_TRUE(log.log[i].served) << "every request before the reserve was served: " << i;
+    std::vector<std::size_t> refused;
+    for (auto const& r : log.log) {
+        if (!r.served) refused.push_back(r.bytes);
     }
+    EXPECT_EQ(refused, std::vector<std::size_t>{kReserve * reserve::kEntry})
+        << "exactly one request was refused, and it is the reserve";
 }
 
 }  // namespace

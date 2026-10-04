@@ -212,17 +212,24 @@ std::vector<std::byte> frame_with_unknown_fields() {
 }
 
 // A parse over a monotonic buffer of `size` bytes whose upstream is a tracking resource
-// over null_memory_resource. Members are declared in construction order.
+// over `final_upstream`: null_memory_resource for the cell, new_delete for the sizing
+// sweep. The sweep forwards because MSVC's debug STL draws container proxies from the
+// resource in the view's noexcept constructor, outside the parse's own catch, so a block
+// too small for them would terminate the sweep rather than fail the parse. Members are
+// declared in construction order.
 struct BoundedParse {
     std::vector<std::byte> block;
-    fixpp::test_support::pmr_allocation_tracking_resource upstream{
-        std::pmr::null_memory_resource()};
+    fixpp::test_support::pmr_allocation_tracking_resource upstream;
     std::pmr::monotonic_buffer_resource mr;
     Parser<access_mode::Index> parser{};  // dict-free: every non-framing tag is unknown
     fixpp::core::expected_t<fixpp::wire::MessageView<access_mode::Index>> mv;
 
-    BoundedParse(fixpp::wire::frame_view const& fv, std::size_t size)
-        : block(size), mr{block.data(), block.size(), &upstream}, mv{parser.parse(fv, &mr)} {}
+    BoundedParse(fixpp::wire::frame_view const& fv, std::size_t size,
+                 std::pmr::memory_resource* final_upstream = std::pmr::null_memory_resource())
+        : block(size),
+          upstream{final_upstream},
+          mr{block.data(), block.size(), &upstream},
+          mv{parser.parse(fv, &mr)} {}
 
     BoundedParse(BoundedParse const&) = delete;
     BoundedParse& operator=(BoundedParse const&) = delete;
@@ -231,11 +238,11 @@ struct BoundedParse {
     ~BoundedParse() = default;
 };
 
-// The smallest block, in steps of 8, over which the parse succeeds with no upstream
-// request; 0 if none up to the sweep's end.
+// The smallest block, in steps of 8, over which the parse makes no upstream request;
+// 0 if none up to the sweep's end.
 std::size_t smallest_parse_only_block(fixpp::wire::frame_view const& fv) {
     for (std::size_t size = 16; size <= 65536; size += 8) {
-        BoundedParse p{fv, size};
+        BoundedParse p{fv, size, std::pmr::new_delete_resource()};
         if (p.mv.has_value() && p.upstream.allocate_calls() == 0U) return size;
     }
     return 0;
