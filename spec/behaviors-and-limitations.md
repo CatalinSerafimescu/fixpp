@@ -1281,8 +1281,10 @@ row; see `feature-catalogue.md`.)*
   in its Logon ack. fixpp's `peer_ack_sent_reset_flag` arm reset-rewinds both counters to 1; 030
   restored the inbound twin but outbound regressed 2→1 → the next frame duplicated `34=1` →
   QFcpp/QFJ reject "MsgSeqNum too low" (L-024-2, live-found). The arm now restores outbound to 2
-  (`set_next_outbound(seqnum_min+1)` + `persist_outbound_advance_`, manager-first/store-second,
-  fatal-when-persistent — the outbound twin of B-030-1) gated on BOTH a latched emit-time fact
+  (since 093, as the outbound target of the 141=Y reset unit's one `MessageStore::reset_to`,
+  `B-093-11`; before 093, `set_next_outbound(seqnum_min+1)` and then a separate outbound persist,
+  manager-first/store-second; fatal-when-persistent either way — the outbound twin of B-030-1)
+  gated on BOTH a latched emit-time fact
   (`own_logon_sent_reset_flag_` = fixpp actually emitted `141=Y`, which carries the inbound-at-1
   conjunct) AND `reset_before_send` (fixpp's Logon went at post-reset seq 1). The reset-event
   `by_peer_request` now keys on the latch ALONE — correcting the prior `bilateral_strict`-only
