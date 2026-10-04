@@ -18,6 +18,11 @@
 #include <algorithm>
 #include <asio/any_io_executor.hpp>
 #include <asio/awaitable.hpp>
+#include <asio/cancellation_state.hpp>
+#include <asio/redirect_error.hpp>
+#include <asio/steady_timer.hpp>
+#include <asio/this_coro.hpp>
+#include <asio/use_awaitable.hpp>
 #include <cassert>
 #include <cstddef>
 #include <deque>
@@ -31,6 +36,7 @@
 #include <memory>
 #include <memory_resource>
 #include <span>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -133,12 +139,35 @@ private:
 // index; a cell uses it to move a mock clock while the read is in flight. The
 // stream is shared, so the cell keeps observing it after the engine has taken the
 // transport.
+//
+// With `hold_open` set, an exhausted script does not end in EOF: the read waits until
+// push() adds a chunk or close() is called, and a wait ended any other way (the
+// reader cancelled it) is counted in `reads_cancelled` and completes with
+// transport_read_cancelled. `reads_initiated` counts every async_read_some call, so a
+// cell can tell one read held across an event from a read cancelled and issued again.
 struct ScriptedStream {
     std::vector<Frame> chunks;                 // served one per read, in order
     std::function<void(std::size_t)> on_read;  // the chunk's index, before it is served
     std::size_t reads_served = 0;              // chunks served so far
     std::vector<Frame> written;                // every async_write, in order
     bool closed = false;                       // close() was called
+    bool hold_open = false;                    // wait at the end of the script, not EOF
+    std::size_t reads_initiated = 0;           // async_read_some calls
+    std::size_t reads_cancelled = 0;           // waits the reader cancelled
+    asio::steady_timer* waiting = nullptr;     // the wait of a read now waiting, if any
+    bool woken = false;                        // push() or close() ended that wait
+
+    // Appends a chunk and wakes a waiting read to serve it.
+    void push(Frame chunk) {
+        chunks.push_back(std::move(chunk));
+        wake();
+    }
+    void wake() {
+        if (waiting != nullptr) {
+            woken = true;
+            waiting->cancel();
+        }
+    }
 };
 
 class ScriptedReadTransport final : public fixpp::transport::Transport {
@@ -153,6 +182,24 @@ public:
 
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<std::size_t>> async_read_some(
         std::span<std::byte> buf) override {
+        // As the shipped transports do, accept total cancellation (co_spawn's entry
+        // state is terminal-only).
+        co_await asio::this_coro::reset_cancellation_state(asio::enable_total_cancellation());
+        ++stream_->reads_initiated;
+        while (!stream_->closed && stream_->reads_served == stream_->chunks.size() &&
+               stream_->hold_open) {
+            asio::steady_timer wait{co_await asio::this_coro::executor,
+                                    asio::steady_timer::time_point::max()};
+            stream_->waiting = &wait;
+            stream_->woken = false;
+            std::error_code ec;
+            co_await wait.async_wait(asio::redirect_error(asio::use_awaitable, ec));
+            stream_->waiting = nullptr;
+            if (!stream_->woken) {
+                ++stream_->reads_cancelled;
+                co_return std::unexpected(fixpp::core::error::transport_read_cancelled);
+            }
+        }
         if (stream_->closed) {
             co_return std::unexpected(fixpp::core::error::transport_already_closed);
         }
@@ -180,6 +227,7 @@ public:
 
     [[nodiscard]] fixpp::core::expected_t<void> close() noexcept override {
         stream_->closed = true;
+        stream_->wake();
         return {};
     }
 

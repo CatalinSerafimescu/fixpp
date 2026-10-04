@@ -24,6 +24,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <asio/any_io_executor.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -35,6 +36,10 @@
 #include <fixpp/log/logger.hpp>
 #include <fixpp/log/record.hpp>
 #include <fixpp/log/sink.hpp>
+#include <fixpp/session/memory_store.hpp>
+#include <fixpp/session/memory_store_factory.hpp>
+#include <fixpp/session/message_store.hpp>
+#include <fixpp/session/message_store_factory.hpp>
 #include <fixpp/session/session.hpp>
 #include <fixpp/session/session_config.hpp>
 #include <fixpp/session/session_event.hpp>
@@ -380,6 +385,118 @@ TEST(EstablishmentTimeoutQ16, ReadableAcrossT_NoFrameIsDeliveredOnceTheDeadlineH
     EXPECT_EQ(r.garbled, 2U) << "only the frames served before T were delivered";
 }
 
+// ── Q-16: the initial_bytes drain tests the deadline before each delivery ────
+//
+// The acceptor's first-frame read returns the first frame and the frames coalesced
+// after it; those reach the pump as initial_bytes, and the pump drains them before its
+// first read. The store factory below advances the engine clock while open() mints the
+// store, which runs after the first-frame read and before the pump, so with an advance
+// past T the drain starts after T. Every frame is one whose third field is not
+// MsgType(35): in NotConnected it is disregarded on delivery and counted (contract C-2
+// step 1), so the count is the number of frames delivered. The accept loop delivers the
+// first frame itself, before the pump; the drain delivers the rest.
+
+// A MemoryStoreFactory (unbounded, so it reserves no slab against the engine's store
+// memory cap) that advances the engine's mock clock by `by` each time it mints.
+class ClockAdvancingStoreFactory final : public fixpp::session::MessageStoreFactory {
+public:
+    ClockAdvancingStoreFactory(std::shared_ptr<fixpp::core::mock_clock> clock,
+                               std::chrono::nanoseconds by)
+        : clock_{std::move(clock)}, by_{by} {}
+
+    [[nodiscard]] bool yields_persistent_store() const noexcept override { return false; }
+
+    [[nodiscard]] fixpp::core::expected_t<std::unique_ptr<fixpp::session::MessageStore>> make(
+        std::string_view sender, std::string_view target, std::pmr::memory_resource* mr,
+        std::size_t max_store_memory_bytes,
+        asio::any_io_executor file_io_executor) noexcept override {
+        // KIND A (ci/mock-clock-staging-sweep.sh): a time stamp; what consumes it is the
+        // pump's synchronous loop-head read of steady_now(), not a waiter.
+        clock_->advance(by_);
+        return inner_.make(sender, target, mr, max_store_memory_bytes, std::move(file_io_executor));
+    }
+
+private:
+    std::shared_ptr<fixpp::core::mock_clock> clock_;
+    std::chrono::nanoseconds by_;
+    fixpp::session::MemoryStoreFactory inner_{unbounded()};
+
+    static fixpp::session::MemoryStore::Config unbounded() noexcept {
+        fixpp::session::MemoryStore::Config c;
+        c.policy = fixpp::session::capacity_policy::unbounded;
+        return c;
+    }
+};
+
+// A frame from the peer whose third field is MsgSeqNum(34), not MsgType(35).
+std::string misordered(std::uint32_t seq) {
+    std::string const body = "34=" + std::to_string(seq) +
+                             "\x01"
+                             "35=0\x01"
+                             "49=TW\x01"
+                             "52=20240101-00:00:00.000\x01"
+                             "56=ISLD\x01";
+    return pr::frame("FIX.4.2", body);
+}
+
+struct DrainRun {
+    bool up = false;
+    bool settled = false;
+    std::uint64_t delivered = 0;
+    std::size_t timeouts = 0;
+    bool read_ended = false;
+};
+
+// Three frames in one write, so the first-frame read takes the first and hands the other
+// two to the pump as initial_bytes; open() advances the clock by `advance_in_open`.
+DrainRun run_initial_drain(std::chrono::nanoseconds advance_in_open, bool expect_timeout) {
+    DrainRun out;
+    pr::Rig rig;
+    auto cfg = rig.cfg();
+    set_logon_timeout(cfg, 2000ms);
+    cfg.store_factory = std::make_shared<ClockAdvancingStoreFactory>(rig.clock, advance_in_open);
+    out.up = rig.start(std::move(cfg)) && rig.connect_peer();
+    if (out.up) {
+        rig.peer.send(misordered(1) + misordered(2) + misordered(3));
+        out.settled = rig.run_until([&] {
+            auto const s = rig.session();
+            if (!s) return false;
+            return expect_timeout ? (rig.peer.read_ended && timeout_events(*s) == 1U)
+                                  : s->garbled_frame_count() == 3U;
+        });
+        rig.settle();
+        if (auto const s = rig.session()) {
+            out.delivered = s->garbled_frame_count();
+            out.timeouts = timeout_events(*s);
+        }
+        out.read_ended = rig.peer.read_ended;
+    }
+    rig.stop();
+    return out;
+}
+
+TEST(EstablishmentTimeoutQ16,
+     InitialBytesDrain_NoCoalescedFrameIsDeliveredOnceTheDeadlineHasPassed) {
+    auto const r = run_initial_drain(3000ms, /*expect_timeout=*/true);
+    ASSERT_TRUE(r.up);
+    EXPECT_TRUE(r.settled) << "not closed by the deadline";
+    EXPECT_EQ(r.delivered, 1U) << "only the first frame, which the accept loop delivers; the "
+                                  "coalesced frames the drain holds are not delivered after T";
+    EXPECT_EQ(r.timeouts, 1U);
+    EXPECT_TRUE(r.read_ended);
+}
+
+// The control: with no time passing in open(), the drain delivers both coalesced frames,
+// so the cell above sees the frames reach the drain when they may be delivered.
+TEST(EstablishmentTimeoutQ16, InitialBytesDrain_CoalescedFramesAreDeliveredBeforeT) {
+    auto const r = run_initial_drain(0ms, /*expect_timeout=*/false);
+    ASSERT_TRUE(r.up);
+    EXPECT_TRUE(r.settled);
+    EXPECT_EQ(r.delivered, 3U) << "the first frame and the two coalesced after it";
+    EXPECT_EQ(r.timeouts, 0U);
+    EXPECT_FALSE(r.read_ended);
+}
+
 // ── Q-35: the default T ─────────────────────────────────────────────────────
 
 TEST(EstablishmentTimeoutQ35, DefaultIsTenSecondsAndASilentPeerIsClosedAtTenSeconds) {
@@ -482,6 +599,47 @@ TEST(EstablishmentTimeoutQ18, TheDeadlineIgnoresTheClockOverride) {
     EXPECT_EQ(after_override.timeouts, 0U);
     EXPECT_EQ(after_override.state, fsm_state::LogonSent);
     EXPECT_TRUE(closed) << "the engine clock's time did not expire the deadline";
+}
+
+// A clock-wide sweep during phase (b) neither cancels the pump's blocked read nor makes
+// it issue another (the deadline race re-arms in place, contract C-4 Sleep cancellation).
+// A cancelled read can lose bytes already taken off the socket, which "the wait does not
+// end early" cannot see. On the scripted double, whose read waits once its script is
+// exhausted and counts every initiation and every cancelled wait.
+TEST(EstablishmentTimeoutQ18, AClockWideSweepNeitherCancelsNorReissuesTheBlockedRead) {
+    pr::Rig rig;
+    auto stream = std::make_shared<fixpp::session::test::ScriptedStream>();
+    stream->hold_open = true;
+    auto cfg = rig.cfg(session_role::initiator);
+    set_logon_timeout(cfg, 5000ms);
+    cfg.transport_factory_override =
+        std::make_shared<fixpp::session::test::ScriptedReadTransportFactory>(stream);
+    bool const up = rig.start(std::move(cfg)) && rig.run_until([&] {
+        return rig.state() == fsm_state::LogonSent && stream->waiting != nullptr;
+    });
+    std::size_t initiated_before = 0;
+    std::size_t initiated_after = 0;
+    std::size_t cancelled_after = 0;
+    bool waiting_after = false;
+    bool active = false;
+    if (up) {
+        initiated_before = stream->reads_initiated;
+        rig.clock->cancel_sleeps();
+        rig.settle();
+        initiated_after = stream->reads_initiated;
+        cancelled_after = stream->reads_cancelled;
+        waiting_after = stream->waiting != nullptr;
+        stream->push(pr::to_bytes(rig.logon()));
+        active = rig.run_until([&] { return rig.state() == fsm_state::Active; });
+    }
+    rig.stop();
+
+    ASSERT_TRUE(up) << "the initiator's pump did not block on a read in LogonSent";
+    EXPECT_EQ(initiated_before, 1U);
+    EXPECT_EQ(cancelled_after, 0U) << "the sweep cancelled the blocked read";
+    EXPECT_EQ(initiated_after, 1U) << "the sweep made the pump issue another read";
+    EXPECT_TRUE(waiting_after) << "the read is still blocked after the sweep";
+    EXPECT_TRUE(active) << "the peer's Logon after the sweep was not delivered";
 }
 
 // ── Q-36: disarmed at the first Active, with no application attached ────────
