@@ -1325,9 +1325,10 @@ TEST(LogonCloseDuringSuspension, AcceptorCloseDuringPeerResetStoreEndsAtTeardown
     expect_store_ends_at_teardown_reset(o);
 }
 
-// The peer's Logon carries ResetSeqNumFlag(141)=Y, so the acceptor resets its store
-// after writing LogonReceived, then restores and persists its inbound counter.
-// close(graceful) is posted from that reset(); the store's flush keeps it under way
+// The peer's Logon carries ResetSeqNumFlag(141)=Y, so after writing LogonReceived the
+// acceptor runs its 141=Y reset unit (093 contract C-6, superseding 030 T010/T011's
+// reset, then restore, then persist). close(graceful) is posted from the unit's store
+// operation (the forward reset_to's on_reset hook); the store's flush keeps it under way
 // while the arm resumes, and no teardown reset is configured. Asserts the unit
 // completes, keeping the consumed Logon's advance, and no reply follows it.
 TEST(LogonCloseDuringSuspension, AcceptorCloseDuringPeerResetBuildsNoReply) {
