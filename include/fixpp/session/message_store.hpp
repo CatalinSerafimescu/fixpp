@@ -37,6 +37,16 @@ namespace fixpp::session {
 
 class retrieve_visitor;  // forward-decl; full type in retrieve_visitor.hpp
 
+namespace detail {
+// reset_to's precondition (093-inbound-frame-dispositions, data-model E-9): next_in and
+// next_out are each 1 or 2.
+[[nodiscard]] inline constexpr bool reset_to_targets_valid(seqnum_t next_in,
+                                                           seqnum_t next_out) noexcept {
+    auto const ok = [](seqnum_t v) { return v == seqnum_min || v == seqnum_min + 1; };
+    return ok(next_in) && ok(next_out);
+}
+}  // namespace detail
+
 class MessageStore {
 public:
     // ── A1 hook scaffolding (engine-internal; FR-028 / I-17) ────────────
@@ -156,8 +166,7 @@ public:
     // header without it must be rebuilt. A subclass needs no source change.
     [[nodiscard]] virtual asio::awaitable<fixpp::core::expected_t<void>> reset_to(
         seqnum_t next_in, seqnum_t next_out) noexcept {
-        auto const target_ok = [](seqnum_t v) { return v == seqnum_min || v == seqnum_min + 1; };
-        if (!target_ok(next_in) || !target_ok(next_out)) {
+        if (!detail::reset_to_targets_valid(next_in, next_out)) {
             co_return std::unexpected(fixpp::core::error::session_invalid_argument);
         }
         if (auto r = co_await reset(); !r) {

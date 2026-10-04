@@ -2005,8 +2005,7 @@ asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset() noexcept {
 // {1, 2} are refused before anything is touched.
 asio::awaitable<fixpp::core::expected_t<void>> FileStore::reset_to(seqnum_t next_in,
                                                                    seqnum_t next_out) noexcept {
-    auto const target_ok = [](seqnum_t v) { return v == seqnum_min || v == seqnum_min + 1; };
-    if (!target_ok(next_in) || !target_ok(next_out)) {
+    if (!detail::reset_to_targets_valid(next_in, next_out)) {
         co_return std::unexpected(fixpp::core::error::session_invalid_argument);
     }
     co_return co_await reset_store_to(*impl_, next_in, next_out);
