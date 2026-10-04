@@ -790,6 +790,12 @@ delivered, and a frame of L+1 is refused at framing with no guard or handler act
       accessor. Its "no enforcement" claim becomes false (the Framer enforces L), so the cell and its
       comment are rewritten, not kept;
     - `BuildLogonEmits383` and `PeerAdvertised383Captured` are unchanged.
+  - **Orchestrator ruling (Phase 5, 2026-10-04):** the two direct-feed controls
+    `UnparseableFrameDisposition.MaxMessageSize_OversizedFaulty_Disconnected_Control_{MalformedTag,LengthDataMismatch}`
+    are deleted. A direct feed bypasses the Framer, and T064 deletes the session-level check they observed.
+    Their two fault shapes join the pump's Q-6 set: an Active over-L frame carrying a malformed tag or a
+    Length/Data mismatch closes at framing, with no Reject, no callback and no `SessionEvent` (OD-24).
+
 - [ ] T056 [US3] Via `phase-implementer`, Q-14 (session-arena half) in
   `tests/session/inbound_frame_dispositions_test.cpp`: `open()` with a session arena too small for
   B(L) returns an `open()` error. RED: accepted today, because no B(L) is allocated.
