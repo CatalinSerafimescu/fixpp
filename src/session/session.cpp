@@ -2775,11 +2775,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 note_garbles_(header_out_of_order_garble(frame));
                 co_return fixpp::core::expected_t<void>{};
             }
-            // 093 (contract C-2 step 2; spec FR-030; fixpp#523): once close() has begun,
-            // this arm acts on nothing more. Garbled-frame accounting above is a
-            // transport observation, not an arm effect, so it still runs (plan OD-7).
-            if (state_ == lifecycle::closing && (fsm_state_ == fsm_state::NotConnected ||
-                                                 fsm_state_ == fsm_state::LogonSent)) {
+            // 093 (contract C-2 step 2; spec FR-030, FR-041; fixpp#523): once close() has
+            // begun, or Engine::stop()'s step 1 has set the engine-stop flag on this strand
+            // (data-model E-13), this arm acts on nothing more. The check is the arm's own
+            // predicate, so a frame delivered after stop's step 1 meets it before any
+            // effect. Garbled-frame accounting above is a transport observation, not an
+            // arm effect, so it still runs (plan OD-7).
+            if (logon_arm_superseded_(fsm_state::NotConnected)) {
                 co_return fixpp::core::expected_t<void>{};
             }
             if (hdr.fault != fixpp::wire::field_fault::none) {
@@ -4644,11 +4646,13 @@ asio::awaitable<fixpp::core::expected_t<void>> Session::on_inbound_frame(
                 note_garbles_(header_out_of_order_garble(frame));
                 co_return fixpp::core::expected_t<void>{};
             }
-            // 093 (contract C-2 step 2; spec FR-030; fixpp#523): once close() has begun,
-            // this arm acts on nothing more. Garbled-frame accounting above is a
-            // transport observation, not an arm effect, so it still runs (plan OD-7).
-            if (state_ == lifecycle::closing && (fsm_state_ == fsm_state::NotConnected ||
-                                                 fsm_state_ == fsm_state::LogonSent)) {
+            // 093 (contract C-2 step 2; spec FR-030, FR-041; fixpp#523): once close() has
+            // begun, or Engine::stop()'s step 1 has set the engine-stop flag on this strand
+            // (data-model E-13), this arm acts on nothing more. The check is the arm's own
+            // predicate, so a frame delivered after stop's step 1 meets it before any
+            // effect. Garbled-frame accounting above is a transport observation, not an
+            // arm effect, so it still runs (plan OD-7).
+            if (logon_arm_superseded_(fsm_state::LogonSent)) {
                 co_return fixpp::core::expected_t<void>{};
             }
             // 092 (contract C-2 D-2): a reply the scan could not read is refused.

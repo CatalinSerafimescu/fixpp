@@ -1110,18 +1110,19 @@ TEST(InboundFrameDispositionsQ9, LogonSent_MsgTypeNotThirdAfterCloseBeganIsOnlyC
 //
 // Engine::stop()'s step 1 sets the engine-stop flag on the session's strand before any
 // close() runs. A frame that reaches the NotConnected or LogonSent arm after it has no
-// arm effect, as after close() began: step 2 tests the flag, as logon_arm_superseded_
-// does. Each cell sets the flag through session_engine_access, then feeds a frame whose
-// arm, were step 2 to test `closing` alone, runs an effect before the arm's first
-// logon_arm_superseded_ check:
+// arm effect, as after close() began: C-2's second step checks the arm's
+// logon_arm_superseded_, which reads the flag. Each cell sets the flag through
+// session_engine_access, then feeds a frame whose arm, were that step to test `closing`
+// alone, runs an effect before the arm's first later logon_arm_superseded_ check:
 //   - NotConnected, a first frame that is not a Logon: the refusal writes Disconnected;
 //   - NotConnected, a Logon carrying MaxMessageSize(383): the arm records the peer's 383;
 //   - LogonSent, a reply whose SendingTime(52) is stale: the Logout's MsgSeqNum is
 //     assigned, then toAdmin and the store write run (store_then_emit's own check
 //     stops only the transmit);
 //   - LogonSent, a well-formed reply: check_inbound advances NextNumIn.
-// To check that a cell can fail, drop the flag from step 2's condition in
-// Session::on_inbound_frame in a scratch copy: every cell must fail.
+// To check that a cell can fail, in a scratch copy replace that step's
+// logon_arm_superseded_ call with `state_ == lifecycle::closing` in both arms of
+// Session::on_inbound_frame: every cell must fail.
 void note_engine_stop(Session& s) { fixpp::session::session_engine_access::note_engine_stop(s); }
 
 TEST(InboundFrameDispositionsQ9Stop, NotConnected_NonLogonAfterStopStep1_NoStateWrite) {
