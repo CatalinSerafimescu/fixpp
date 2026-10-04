@@ -545,8 +545,8 @@ inside a 141=Y reset unit, the durable counters are still right (#524).
   frame included, before its CheckSum is read, so an over-L frame is never mistaken for a garbled one.
   The check-order change applies only to Framers with resync on (plan.md OD-4).
   - No guard or handler reads any field of the frame.
-  - Once a Session exists (contract C-4 phase (b), and Active), the session closes terminally with an
-    event and a log. On the acceptor's first frame (phase (a)) no Session exists yet, so the transport
+  - Once a Session exists (contract C-4 phase (b), and Active), the session closes terminally with a
+    log record, and no `SessionEvent` (plan.md OD-24). On the acceptor's first frame (phase (a)) no Session exists yet, so the transport
     is closed with no event and no log (contract L-6).
   - This replaces today's Active-only advertised-MaxMessageSize check, which only writes Disconnected.
   - It also reverses 070's pre-establishment exemption (`test_070_max_message_size_test`); see plan.md

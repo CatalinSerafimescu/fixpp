@@ -6,6 +6,24 @@ status: stable
 
 # Log
 
+- **2026-10-04 — 093-inbound-frame-dispositions (B22: fixpp#514, #515, #516, #523, #524, #540).**
+  `components/inbound-message-path.md` gains the owner's rulings R-1, R-2 and R-4 and the pump-side
+  orchestrator decisions with what each rejected (the deadline in the pump and decided at a loop head,
+  one limit L, the carry and parse buffer at `open()`, 070's exemption reversed, the first log site),
+  three new invariant rows, and flags in place on the 092 passages 093 supersedes (D-8, the pre-Active
+  refusal of a third field that is not 35, the late-parse close, `L-004-4`). `components/wire.md`
+  gains the Framer's opt-in resync and the parse reserve, with research R-2's and R-3's rejected
+  alternatives and the `unknown_fields()` catch (#540). `components/session.md` narrows the
+  out-of-order-fields invariant, adds the liveness (R-1) and closing-session (#523) rows, rewrites the
+  #518 row for the reset unit, and records the #524 decisions; OD-14's in-place shield is recorded as
+  wrong and replaced (OD-25, OD-26), and #538 as reproduced and not fixed. The #518 entry "stop
+  mid-unit once `teardown_reset_done_` is set" is flagged superseded. `components/message-store-quiescence.md`
+  records that the reset unit's store operation is still awaited but no longer cancellable, so
+  `Engine::stop()`'s join waits for it. `components/c-api.md` gains C-ABI 1.11 and flags the amended
+  1.9/1.10 sentences. `components/session-liveness-and-reconnect.md` gains the liveness-refresh and
+  establishment-deadline rows. Spec drift reported, not edited: contract C-8 L-1's carry overflow (B&L
+  `L-093-1` re-derives it), FR-013's "event and log" for an over-L close (OD-24), and tasks.md's Phase 5
+  note on the overlay copy. Records: parent repo `decisions/speckit/093-inbound-frame-dispositions-*`.
 - **2026-10-03 — fixpp#530 (B25), PR #539 Gate B, two owner-approved forms.** `failure-classes.md`
   class 13 gains *where the items have no identifier, encounter order becomes the key, and it shifts*:
   a differential census that pairs unnamed items by position matches different definitions and

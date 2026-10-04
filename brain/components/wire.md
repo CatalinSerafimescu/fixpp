@@ -4,6 +4,9 @@ title: wire — the largest catalogue family, and what it deliberately does NOT 
 description: 116 catalogue rows, one design doc. The scope boundary is the most useful thing on this page.
 status: stable
 refs:
+  - include/fixpp/wire/framer.hpp
+  - src/wire/framer.cpp
+  - include/fixpp/wire/parser.hpp
   - include/fixpp/wire/reject_reason_map.hpp
   - include/fixpp/wire/offset_table.hpp
   - include/fixpp/wire/errors.hpp
@@ -13,13 +16,19 @@ refs:
   - specs/092-garbled-frame-reject/spec.md
   - specs/092-garbled-frame-reject/research.md
   - specs/092-garbled-frame-reject/data-model.md
+  - specs/093-inbound-frame-dispositions/spec.md
+  - specs/093-inbound-frame-dispositions/research.md
+  - specs/093-inbound-frame-dispositions/plan.md
+  - specs/093-inbound-frame-dispositions/contracts/inbound-frame-dispositions.md
   - spec/behaviors-and-limitations.md
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/2b-wire.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/091-data-field-bytes-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/092-garbled-frame-reject-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/092-garbled-frame-reject-evidence.md
-codegraph_entry: [Framer, OffsetTable, MessageView, dictionary_driven_validator, wire_error_to_session_reject_reason]
+  - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-evidence.md
+codegraph_entry: [Framer, garble_summary, OffsetTable, MessageView, dictionary_driven_validator, wire_error_to_session_reject_reason]
 constitution: ["§VIII.5"]
 ---
 
@@ -340,6 +349,67 @@ which revises #423's row 4). 092 FR-012 fixes the validator anyway: the owner ke
 Behaviour: B&L `B-092-8`. The session side, and the C-ABI 1.10 declaration it forced, are on
 [`inbound-message-path`](./inbound-message-path.md) and [`c-api`](./c-api.md). The FR-019 inbound
 seqnum bound is a session matter, recorded there too.
+
+## The Framer resyncs past a garble, but only when asked (093, fixpp#514)
+
+`Framer::Config::resync_on_garble` (default `false`) turns a framing error, other than a frame over
+`max_frame_bytes`, into a garbled region that the same `feed` call skips. Framing resumes at the next
+`8=FIX`, and the call reports what it skipped through `last_garbles()` (`garble_summary`). Only the
+session's two inbound Framers turn it on; every other caller is byte-for-byte unchanged, including
+the order of the frame-length check, which in resync mode moves ahead of the CheckSum so an over-L
+frame is never taken for a garble (plan OD-4). The session-side decisions are on
+[`inbound-message-path`](./inbound-message-path.md). Contract C-1 holds the rules; research R-2 holds
+the derivations (the digit cap's search, the work bound's constant). Read them, not this page.
+
+**What it decided, and what each rejected** (research R-2, plan OD-11, OD-16, OD-17, OD-20):
+- **Resync lives in the Framer, opt-in.** Rejected: resync in the pump (it cannot recover bytes the
+  Framer already discarded, and it duplicates the scan); making it the default (reify, the re-framing
+  parse helpers and fuzz want strict framing).
+- **After a garble, the next frame start is `8=FIX` anywhere.** Rejected: `8=` after an SOH only (it
+  loses the good frame after junk that does not end in SOH, `XYZ8=FIX…`, and after a truncated
+  frame); `␁8=` as an extra start (every supported profile begins with `FIX`, so it recovers nothing
+  more, and needs a "previous byte" state); `8=` anywhere (it matches tag suffixes such as `38=`).
+  The cost of `FIX` is `L-093-16`, guarded by a `static_assert` over the supported profiles.
+- **A structurally complete frame with a wrong CheckSum is one garble through its own end**, as
+  QuickFIX/C++ drops it. Rejected: a running prefix sum, which would keep nested candidates eligible
+  but costs a second carry per session (`L-093-15` is the price).
+- **Bounded work, with no state beyond one `searching` flag and at most four held bytes.** The carry
+  compacts only when the incoming bytes would not fit; the BeginString and the BodyLength digit run
+  are capped on their encoded length; a CheckSum is summed only over a structurally complete
+  candidate. Rejected: stepping one byte per `feed` (`consume_front` is a front erase, so quadratic);
+  one garble per `feed` with the caller re-feeding (about L²/6 bytes moved behind a failed large
+  candidate); compacting on every non-empty feed (L bytes per one-byte read); and a persisted
+  BodyLength scan cursor (it breaks the single-flag state rule).
+- **The BeginString cap is `max(longest supported identifier, configured begin_string length)`**
+  (OD-16). Rejected: refusing a longer configured BeginString at `register_session`, `open()` and the C
+  setter, which would be a new C++, C and TOML refusal and a BREAKING row. No clamp either: it would
+  garble an acceptor's first frame that fits the first-frame budget.
+- **The BodyLength digit run is capped** (OD-17); a value cap alone leaves a zero-padded run rescanned
+  on every feed. A run over the cap is a garble, not a close, because its bytes are not over L.
+- **A call that produced a frame stops at the next non-frame outcome, `wire_frame_too_large`
+  included** (OD-20), so a good frame ahead of an over-L one in the same feed is delivered. Rejected:
+  discarding the call's frames, as strict mode does.
+- **The event carries the failure kind, not the §4.5.2 criterion**: the Framer cannot tell criterion 2
+  from 4 (`L-093-2`).
+
+## Every admitted frame parses: a reserve argument, and `unknown_fields()` that cannot terminate (093, fixpp#515, #540)
+
+The session now parses every inbound frame over its per-session buffer B(L) under the entry cap N(L)
+(see [`inbound-message-path`](./inbound-message-path.md)). Two wire-level decisions came with it:
+- **The reserve is a per-call argument** (plan OD-10): a `Parser::parse` overload and an
+  `OffsetTable` constructor overload carry it, through a private tagged `MessageView` constructor,
+  because `OffsetTable::build` is private. Rejected: a reserve in `OffsetTable::Config`, a
+  public-header type that clones and reifies copy into a `frame_len + 4096` arena.
+- **B(L)'s overlay term calls the table's own `overlay_cap_for`**, through an unconditional friend
+  (`detail::parse_capacity`), so no copy of the rule exists. An earlier copy pinned by equality was
+  replaced (research R-3). ⚠️ tasks.md's "Phase 5 as landed" note still describes the copy; it is a
+  point-in-time record.
+- **`MessageView::unknown_fields()` catches its own `bad_alloc`** and returns an empty view, keeping
+  `noexcept` (FR-015; #540 reproduced on the base first). Rejected (plan OD-18): new result-bearing
+  `try_*` lazy APIs (a public surface with its own versioning, for a failure 093 does not cause), and a
+  headroom large enough to make exhaustion impossible, which no number can be, since the C cursor
+  shells allocate per call. The other lazy reads keep their reports (`L-093-5`), and the C cursor
+  shells' missing catch is fixpp#541, outside 093 (`L-093-17`, OD-19).
 
 ## The seam into the session layer
 

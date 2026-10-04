@@ -447,11 +447,14 @@ delta carry the same BREAKING list.
 
 ## C-8: Disclosed limitations (B&L L-rows)
 
-- **L-1.** BodyLength too large but ≤ L: the Framer waits for the counted bytes. It resumes when the
-  count can be checked, or closes when the carry overflows. Before Active, the establishment deadline
-  bounds the wait. In Active, the TestRequest reply is trapped behind the stall, so the liveness loop
-  takes the FSM to Disconnected. The transport stays open until the peer closes it or the carry
-  overflows (fixpp#534).
+- **L-1.** BodyLength too large but ≤ L: the Framer waits for the counted bytes, swallowing any frame the
+  peer sends meanwhile. When the count can be checked, the candidate is a garble and framing resumes inside
+  it, so the swallowed frames are delivered late. Before Active, the establishment deadline bounds the
+  wait. In Active with HeartBtInt > 0, the TestRequest reply is trapped behind the stall, so the liveness
+  loop takes the FSM to Disconnected, and the transport stays open until the peer closes it, a later
+  over-L BodyLength closes it, or `close()` / `Engine::stop()` runs (fixpp#534). With HeartBtInt = 0 only
+  the bytes arriving, the peer, or `close()` / `Engine::stop()` end it. A carry overflow cannot end it:
+  it is unreachable in the pump (OD-23; re-derived at T105 as B&L `L-093-1`).
 - **L-2.** The event carries the failure kind, not the §4.5.2 criterion. TC 3e's "not last" reports as
   BodyLength.
 - **L-3.** A custom store that does not override `reset_to` has no crash atomicity.

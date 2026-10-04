@@ -8,8 +8,14 @@ refs:
   - include/fixpp/session/session_fsm.hpp
   - include/fixpp/session/seqnum_manager.hpp
   - include/fixpp/session/config_byte_floor.hpp
+  - include/fixpp/session/message_store.hpp
+  - src/session/session.cpp
   - .specify/447-458-452-capi-refusals.md
   - specs/005-session-establishment-fsm/spec.md
+  - specs/093-inbound-frame-dispositions/spec.md
+  - specs/093-inbound-frame-dispositions/plan.md
+  - specs/093-inbound-frame-dispositions/research.md
+  - specs/093-inbound-frame-dispositions/contracts/inbound-frame-dispositions.md
   - spec/behaviors-and-limitations.md
 refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/005-session-establishment-fsm-gatea.md
@@ -23,6 +29,8 @@ refs_external:
   - research/G19-fix-fpml-iso20022/decisions/speckit/042-fixt-version-serviceability-guard-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/090-capi-refusals-gatea.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/092-garbled-frame-reject-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-gatea.md
+  - research/G19-fix-fpml-iso20022/decisions/speckit/093-inbound-frame-dispositions-evidence.md
   - research/G19-fix-fpml-iso20022/decisions/speckit/511-test-hooks-odr-gatea.md
 codegraph_entry: [Session, fsm_state, SeqnumManager, Engine, on_inbound_frame]
 constitution: ["§XI.4", "§XV.4"]
@@ -87,9 +95,11 @@ The authority is therefore split three ways, and knowing the split is most of th
 | **`seqnum_t` overflow is session-fatal and requires operator intervention** | it **never silently wraps**; a wrap would silently corrupt the resend contract | `B-005-4` |
 | **Acceptor sessions stay in `NotConnected` at `open()` and emit no Logon; only initiators do** | the asymmetry is deliberate — an acceptor has no peer to greet yet | `B-009-1`; pairs with the lazy-connect invariant in [`initiator-connect-path`](./initiator-connect-path.md) |
 | **A refused first Logon transitions to `Disconnected`, not back to `NotConnected`** | the two states are not interchangeable: `Disconnected` records that an attempt happened and failed | `B-009-2` |
-| **The live inbound path accepts out-of-order header/body fields, including `MsgType` not first** | real counterparties emit them; strictness here buys conformance-theatre and loses interop | `B-005-7` |
+| **The live inbound path accepts header/body fields after the first three in any order** | real counterparties emit them; strictness here buys conformance-theatre and loses interop. ⚠️ *Narrowed by 093 (fixpp#514):* the row used to include "MsgType not first". A frame whose third field is not MsgType(35) is garbled under FIX-SL 2020 §4.5.2 criterion 3 and is disregarded in every state but Disconnected, in both validation modes, before any other check in the arm (contract C-2 step 1) | `B-005-7`, `B-093-3` |
+| **Every inbound frame that is neither garbled nor faulty refreshes inbound liveness, at one point** | the owner's ruling R-1 on #516: any such frame proves the peer is alive. One writer, right after the fault and third-field checks and before every early return, so no early return can skip it; a refresh in `LogonReceived` is harmless because both roles seed the value on entering `Active` | `B-093-9`; garbled and faulty frames still do not refresh (`B-092-5`) |
+| **Once `close()` has begun, a frame in `NotConnected` or `LogonSent` is acted on no further** (fixpp#523) | those arms run no Logout exchange, so nothing in them needs a frame after close began. `LogonReceived` is deliberately left alone: a graceful close from there runs phase 1's Logout exchange, which must process inbound frames | `B-093-10`, `L-518-1` |
 | **`open()` refuses a configured string that an admin builder would copy verbatim, if it holds a byte `< 0x20` or `'='`** — CompIDs, BeginString, each `supported_msg_types[].msg_type`, and the credentials | those values reach the wire through `append_raw` unvalidated, so one SOH injects a field. Every admin builder emits CompIDs and BeginString; `build_logon` adds RefMsgType and the credentials when they are configured. ⭐ **ONE predicate, `fixpp::session::contains_forbidden_config_byte`** (`config_byte_floor.hpp`), also called by the C-ABI setters before any `Session` exists. ⚠️ **It is a POLICY floor, not FIX grammar**: fixpp's scanner splits at the *first* `'='`, so `'='` is legal in a value as fixpp parses it. Do not cite it as the grammar | `B-452-1`; residual `L-452-2` |
-| **A Logon arm that resumes after `close()` began stops where it is** — no further frame, no Active, no `onLogon`, no liveness loop, and inside an interrupted 141=Y reset no counter write once `close()`'s teardown reset has been issued (otherwise the unit completes, keeping the consumed Logon's advance) | a Logon arm suspends, and `close()` can run in that window. The guarded suspensions: on the acceptor the hydrate and the `reset_on_logon` reset; in a peer-requested (141=Y) reset the store reset and each restore's persist; the reply write; the NextExpectedMsgSeqNum(789) handling; after `Active`, the persist of the Logon's inbound advance. `close()` can be posted from the application's `toAdmin` or `onLogon` via `Engine::lookup`, or from another thread. A graceful close leaves the FSM in `LogonReceived` while its Logout waits on the write gate the reply holds, so the check is "close began" (`state_ == lifecycle::closing`), not only "the FSM moved". Before fixpp#518 the arm overwrote close's `Disconnected` with `Active`, fired `onLogon` after close began, and spawned a liveness loop that nothing cancels | `B-518-1`; `L-518-1` |
+| **A Logon arm that resumes after `close()` began, or after `Engine::stop()`'s step 1 ran on its strand, stops where it is** — no further frame, no Active, no `onLogon`, no liveness loop. A 141=Y reset unit always completes, and `close()` waits for it before its teardown reset (*since 093, fixpp#524; before, the unit stopped mid-way once that reset had been issued*) | a Logon arm suspends, and `close()` can run in that window. The guarded suspensions: on the acceptor the hydrate and the `reset_on_logon` reset; in a peer-requested (141=Y) reset the store reset and each restore's persist; the reply write; the NextExpectedMsgSeqNum(789) handling; after `Active`, the persist of the Logon's inbound advance. `close()` can be posted from the application's `toAdmin` or `onLogon` via `Engine::lookup`, or from another thread. A graceful close leaves the FSM in `LogonReceived` while its Logout waits on the write gate the reply holds, so the check is "close began" (`state_ == lifecycle::closing`), not only "the FSM moved". Before fixpp#518 the arm overwrote close's `Disconnected` with `Active`, fired `onLogon` after close began, and spawned a liveness loop that nothing cancels | `B-518-1`; `L-518-1`; `B-093-11` |
 
 ## What was rejected — the half the code cannot tell you
 
@@ -158,11 +168,28 @@ The authority is therefore split three ways, and knowing the split is most of th
     - *Always completing the unit* (PR #522, Gate B round 1). Measured on the unguarded source, with `reset_on_disconnect` and a terminal close posted from the arm's peer reset: the arm's inbound persist landed after `close()`'s teardown reset, so the store ended at next-inbound 2 instead of 1, on both roles.
     - *Always stopping mid-unit* (PR #522, Gate B round 2). With no teardown reset configured nothing repairs the store, which is left expecting seq 1 after the consumed reset Logon, so a peer that next logs on at seq 2 without 141=Y is too high — fatal with the NextExpectedMsgSeqNum(789) tolerance off.
     - *Keying the stop on `cfg_.reset_on_disconnect`* misses `reset_on_logout` (a graceful phase 1 sets `logout_seen_`) and stops needlessly when a teardown reset is configured but not yet issued.
-    - *One atomic durable unit* (a store reset-to-values) needs a new `MessageStore` operation, outside the owner's rulings for #518.
-    - **What shipped (owner-approved, PR #522 Gate B round 2):** the unit stops mid-way only once `teardown_reset_done_` is set. `close()` sets it just before it awaits the teardown reset and never clears it; no Logon arm runs on a `Session` after its `close()` (L-518-1). Premise: the store applies operations in issue order (L-518-1).
+    - *One atomic durable unit* (a store reset-to-values) needs a new `MessageStore` operation, outside the owner's rulings for #518. *(093 shipped exactly this for #524, under the owner's ruling R-3; see the #524 bullet below.)*
+    - **What shipped (owner-approved, PR #522 Gate B round 2):** the unit stops mid-way only once `teardown_reset_done_` is set. `close()` sets it just before it awaits the teardown reset and never clears it; no Logon arm runs on a `Session` after its `close()` (L-518-1). Premise: the store applies operations in issue order (L-518-1). ⚠️ **Superseded by 093 (fixpp#524):** the in-unit stops are removed; the unit is one store operation that always completes, and `close()` waits for it. `teardown_reset_done_` survives only as `close()`'s single-fire latch.
   - **A check straight after `onLogon`, before the post-`Active` persist,** was rejected (PR #522, Gate B round 2). By then the peer's Logon has been consumed, answered and made `Active`, so skipping its persist leaves the store one behind the peer, and a peer that next logs on at the following sequence number is too high. The check follows the persist instead, before the liveness loop is spawned.
   - **A check after the 141=Y reset event** was rejected (PR #522, Gate B round 2). On the initiator it let the reset event, the CompID authorization and the FIXT version record run after `close()` began; the acceptor's reset event had the same order. The check follows the last restore, before the event.
-  - ⚠️ **Rule: a `co_await` in a Logon arm that can yield is followed by the check before the next frame, callback or state write. Inside a 141=Y reset unit, a counter write that completes the consumed Logon's accounting is skipped only once `teardown_reset_done_` is set.**
+  - ⚠️ **Rule: a `co_await` in a Logon arm that can yield is followed by the check before the next frame, callback or state write**, including the suspensions inside the coroutines the arm awaits (093 plan OD-25, OD-26: the 789 helpers, `store_then_emit` before its transmit, and every `Disconnected` write after a store suspension, through `disconnect_unless_superseded_`). *(The rule's second sentence, on `teardown_reset_done_` inside a 141=Y reset unit, is superseded by 093: the unit no longer stops mid-way.)*
+- **The 141=Y reset unit, made one store operation** (fixpp#524, 093; owner ruling R-3: a new `MessageStore` virtual with a default body, overridden atomically by `MemoryStore` and `FileStore`; owner ruling "`close()` waits, with a timeout").
+  - **`reset_to(next_in, next_out)` takes targets in {1, 2} only** (research R-6, G93-A-16): `next_seqnum` advances by one, so a general target would need an O(n) loop in the default body.
+  - **The manager is set first, inline, then the store's one `reset_to`.** That closes the drain residual (L-518-1) on the uncontended-grant condition. The true targets go to volatile stores too (OD-9); that was expected to fix #538 as a side effect, and measured not to (T089): #538 reproduces on the base and at 093's head, and stays open in B28.
+  - **The store operation runs on its own awaitable thread, bound to an empty cancellation slot** (OD-25, OD-26). OD-14's in-place `reset_cancellation_state(disable)` shield was **wrong, and was replaced**: `async_mutex::async_lock()` resets the awaitable thread's state to terminal-only after every acquisition (and enables total cancellation during a contended wait), so after the manager set's first lock the disable had already been replaced, and a deleting mutant stayed GREEN on every cell. The separate thread is what keeps `Engine::stop()`'s total emission out (mutant "run it inline" is RED); the empty slot extends that to every emission kind (mutant "drop the binding" survives, priced). Rejected: an `async_mutex` mode that respects the caller's policy (asio exposes no filter getter, user and default-body stores would not get it, and it changes a core primitive); spawning the whole unit (`co_spawn`'s entry dispatch would make the manager set's no-suspension property depend on the launch path); disclosing the cancellation window instead.
+  - **An engine-stop flag on the Session** (OD-15), set by `Engine::stop()`'s step 1 on the session's strand before it emits, and read only inside `logon_arm_superseded_`. Rejected: calling `close()` from stop's step 1 (it reorders the teardown that the join and the registry steps depend on); an atomic latch set on the control strand and read with acquire (same check-then-act gap; only running on the session strand gives the mutual exclusion). The guarantee is strand-ordered, not real-time.
+  - **Every suspension-then-effect window in the Logon arms is checked** (OD-26), found by re-deriving the predicate sites transitively. Rejected: disclosing the error-path `Disconnected` writes as an L-row; the guarantee is a MUST and one helper covers them.
+  - **`close()`'s wait is bounded by `logon_timeout_ms`, event-driven** (OD-1). Rejected: `logout_disconnect_timeout_ms` (nothing validates it and TOML accepts 0, which would expire the wait at once); a `co_await asio::post` poll loop, which spins the strand for the whole bound. After expiry a default-body store may miss (1, 1) (`L-093-4`).
+  - Not BREAKING, under B-518-1's owner ruling (#523 and #524 are its follow-ups).
+  - ⚠️ **Passages in 093's own bundle that still describe the replaced shield**, flagged here and not
+    edited (each is a point-in-time record; the code follows the C-6 erratum and plan OD-25/OD-26):
+    contract C-6's unit steps 2 and 5 and its "What the shield means" paragraph (the erratum at the top
+    of C-6 says to read "the shield" as "the empty-slot store operation"; step 2's disable is removed,
+    step 5's restore stays); research R-9's "Decision" and "The `co_spawn` alternative, re-judged"
+    bullets, which chose the in-place shield and rejected the empty-slot `co_spawn` that shipped (R-9's
+    erratum says so); plan OD-14, marked SUPERSEDED there; and spec FR-042's "With the shield". Do not
+    put the disable back to match them: a deleting mutant stayed GREEN on every cell, because
+    `async_lock()` replaces it.
 
 ## ⚠️ Limitations an integrator must know before trusting this family
 
@@ -182,10 +209,11 @@ agent correctly treated this as a shortlist and re-derived, which is the intende
   is the one 091's T076 found. 091 fixed only the Logon case (FR-020), and 092 ships the rest: a disposition
   by state, decided before any handler reads the frame. The behaviour and its limitations are the live B&L
   file's `B-092-*` / `L-092-*` rows, and the decision and its rejected alternatives are on
-  [`inbound-message-path`](./inbound-message-path.md). **Still open, and not 092's:**
-  - a true §4.5.2 failure detected by the Framer still ends the session (`L-004-4`), and its disregard is
-    fixpp#514;
-  - a late parse failure closes the session, and effects taken before the close stand; that is fixpp#515.
+  [`inbound-message-path`](./inbound-message-path.md). **Not 092's, and since settled by 093:**
+  - a true §4.5.2 failure detected by the Framer ended the session (`L-004-4`); since 093 (fixpp#514) it
+    is disregarded and counted (`B-093-1`), and `L-004-4` is in the closed B&L file;
+  - a late parse failure closed the session, and effects taken before the close stand; since 093
+    (fixpp#515) no admitted frame reaches it, and the close is a defence (`L-092-6`).
 
   Read the code, not this bullet: `dispose_unparseable_` in `src/session/session.cpp`.
 

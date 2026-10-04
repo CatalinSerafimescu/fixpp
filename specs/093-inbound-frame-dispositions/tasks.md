@@ -964,7 +964,7 @@ delivered, and a frame of L+1 is refused at framing with no guard or handler act
 `0051b7b6`, `ef0d5ba8`, `500a3c8d`):**
 - The constants and the measurements are in research R-3 (plan OD-23, OD-24).
 - `src/session/parse_capacity.hpp` holds N(L) and B(L). It is split from `inbound_limit.hpp`, so the
-  dict066 alloc guard does not pull asio. Its `overlay_cap_for` copy is pinned by equality (R-3).
+  dict066 alloc guard does not pull asio. It calls `OffsetTable::overlay_cap_for` through a production friend (`eb64fd61`, research R-3); the earlier copy is gone.
 - `kInboundParseArena` is renamed `kSendParseArena`; the two outbound toApp sites keep it.
 - Q-11 shows the peak through the spill witness plus a buffer-size assertion; Q-15's positive control is
   what makes Q-11's "nothing spilled" able to report a spill.
@@ -1330,7 +1330,7 @@ surfaces exist and are witnessed.
 
 ### Docs (P8): orchestrator markdown; `phase-implementer` for code comments
 
-- [ ] T105 [P] `spec/behaviors-and-limitations.md` (FR-050; FR-050's list is a lead, not the
+- [X] T105 [P] `spec/behaviors-and-limitations.md` (FR-050; FR-050's list is a lead, not the
   population). First grep the live file and classify every hit:
   `grep -nE "L-004-4|B-005-7|B-004-1|B-041-1|L-092-6|L-518-1|B-092-2|B-092-9|L-092-1\b|D-8|D-9|D-1/D-2|#51[456]\b|#52[34]\b|#540|373=14|kInboundParseArena|Until #514 ships|session-fatal" spec/behaviors-and-limitations.md`.
   Then:
@@ -1366,11 +1366,11 @@ surfaces exist and are witnessed.
 
   - **Carried from Phase 8:** add a B&L row for C-8 L-19 (the C-7 clauses witnessed through C++ only).
 
-- [ ] T106 [P] `spec/coverage-index.md`: rewrite the §4.5.2 row's sentence that says byte-level framing
+- [X] T106 [P] `spec/coverage-index.md`: rewrite the §4.5.2 row's sentence that says byte-level framing
   failures stay session-fatal (L-004-4, `FramerFailureClosesEstablishedSession_*`), naming 093's
   witnesses; re-derive any other stale row with
   `grep -nE "L-004-4|FramerFailureClosesEstablishedSession|B-005-7|373=14" spec/coverage-index.md`.
-- [ ] T107 [P] `brain/`: `brain/components/session.md`, `inbound-message-path.md`, `wire.md` and
+- [X] T107 [P] `brain/`: `brain/components/session.md`, `inbound-message-path.md`, `wire.md` and
   `message-store-quiescence.md` gain the rulings R-1…R-4, the orchestrator decisions and their rejected
   alternatives (research R-2, R-3, R-4, R-6, R-9), and 093's bundle in each page's document list;
   superseded documents are flagged in place. `brain/log.md` gets an entry. Re-derive any other page
