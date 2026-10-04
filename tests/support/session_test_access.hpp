@@ -96,6 +96,10 @@ struct session_test_access {
     [[nodiscard]] static bool engine_stop_requested(Session const& s) noexcept {
         return s.engine_stop_requested_;
     }
+
+    // The session's store, or null before open() (093 plan OD-25: a cell issues a
+    // competing store operation on it).
+    [[nodiscard]] static MessageStore* store(Session& s) noexcept { return s.store_.get(); }
 };
 
 }  // namespace fixpp::session

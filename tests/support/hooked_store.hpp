@@ -17,6 +17,7 @@
 #include <asio/use_awaitable.hpp>
 #include <chrono>
 #include <cstddef>
+#include <fixpp/core/sync/async_mutex.hpp>
 #include <fixpp/session/direction.hpp>
 #include <fixpp/session/memory_store.hpp>
 #include <fixpp/session/message_store.hpp>
@@ -38,8 +39,12 @@ namespace fixpp::test_support {
 //   forward      — forwards to the inner MemoryStore's reset_to (one operation), firing
 //                  the on_reset hook and the hold there, as reset() does;
 //   default_body — runs MessageStore's default body, so reset_to is this store's own
-//                  reset() and next_seqnum(dir, true), each with its hooks.
-enum class reset_to_mode { forward, default_body };
+//                  reset() and next_seqnum(dir, true), each with its hooks;
+//   contended    — fires on_reset, then waits on Hooks::reset_to_lock, an async_mutex the
+//                  cell holds, as a store whose writer lock another holder has; once
+//                  granted it forwards with the lock held, and releases it on return
+//                  (093 plan OD-25's witness).
+enum class reset_to_mode { forward, default_body, contended };
 
 // Bound on a HookedStore hold. A cell that settles on a held operation needs a settle
 // budget above it, so a hold that times out lets the cell settle and report
@@ -88,6 +93,13 @@ public:
         // When set, the operation whose hook fires holds until this returns true, in
         // place of hold_until_close_reset's condition. Same bound.
         std::function<bool()> release_when;
+        // Called on every outbound next_seqnum(_, false) and every outbound store(); when
+        // one returns true, that operation completes and then holds, as
+        // hold_until_close_reset does (release_when, else a reset after close() began).
+        std::function<bool()> on_outbound_read;
+        std::function<bool()> on_outbound_store;
+        // reset_to_mode::contended's lock; the cell holds it while the unit waits.
+        fixpp::sync::async_mutex* reset_to_lock = nullptr;
         // When set, close(graceful)'s flush yields the strand until this returns true,
         // in place of its fixed post sequence. Bounded by kHoldBound; past it the log's
         // flush_hold_timed_out is set and the flush returns.
@@ -124,6 +136,10 @@ public:
     asio::awaitable<fixpp::core::expected_t<void>> store(
         fixpp::session::seqnum_t seq, std::span<const std::byte> frame,
         fixpp::session::direction_t dir) noexcept override {
+        if (dir == fixpp::session::direction_t::outbound && hooks_.on_outbound_store &&
+            hooks_.on_outbound_store()) {
+            return held_store(seq, frame, dir);
+        }
         return inner_->store(seq, frame, dir);
     }
     asio::awaitable<fixpp::core::expected_t<void>> retrieve(
@@ -140,6 +156,10 @@ public:
             // nothing has been stored inbound yet. The close the hook posted then runs at
             // the next read's leading post.
             return ready(fixpp::session::seqnum_min);
+        }
+        if (!increment && dir == fixpp::session::direction_t::outbound &&
+            hooks_.on_outbound_read && hooks_.on_outbound_read()) {
+            return held_read(dir);
         }
         if (!increment) return inner_->next_seqnum(dir, false);
         // The close a hook posts runs at the increment's leading post.
@@ -158,6 +178,10 @@ public:
         fixpp::session::seqnum_t next_in, fixpp::session::seqnum_t next_out) noexcept override {
         if (mode_ == reset_to_mode::default_body) {
             return fixpp::session::MessageStore::reset_to(next_in, next_out);
+        }
+        if (mode_ == reset_to_mode::contended) {
+            (void)fire(hooks_.on_reset);
+            return contended_reset_to(next_in, next_out);
         }
         // The close the hook posts runs at the inner reset_to's leading post.
         const bool hooked = fire(hooks_.on_reset);
@@ -236,6 +260,33 @@ private:
         auto r = co_await inner_->reset_to(next_in, next_out);
         log_->record("reset_to " + std::to_string(next_in) + " " + std::to_string(next_out));
         if (hold) co_await hold_until_close_reset();
+        co_return r;
+    }
+    // reset_to_mode::contended: waits for the cell's lock (async_lock enables total
+    // cancellation while it waits), then forwards with it held.
+    asio::awaitable<fixpp::core::expected_t<void>> contended_reset_to(
+        fixpp::session::seqnum_t next_in, fixpp::session::seqnum_t next_out) {
+        if (hooks_.reset_to_lock != nullptr) {
+            auto granted = co_await hooks_.reset_to_lock->async_lock();
+            if (!granted) {
+                co_return std::unexpected(fixpp::core::error::store_cancelled);
+            }
+        }
+        auto r = co_await inner_->reset_to(next_in, next_out);
+        log_->record("reset_to " + std::to_string(next_in) + " " + std::to_string(next_out));
+        co_return r;
+    }
+    asio::awaitable<fixpp::core::expected_t<fixpp::session::seqnum_t>> held_read(
+        fixpp::session::direction_t dir) {
+        auto r = co_await inner_->next_seqnum(dir, false);
+        co_await hold_until_close_reset();
+        co_return r;
+    }
+    asio::awaitable<fixpp::core::expected_t<void>> held_store(fixpp::session::seqnum_t seq,
+                                                              std::span<const std::byte> frame,
+                                                              fixpp::session::direction_t dir) {
+        auto r = co_await inner_->store(seq, frame, dir);
+        co_await hold_until_close_reset();
         co_return r;
     }
     asio::awaitable<fixpp::core::expected_t<void>> logged_reset(bool hold) {

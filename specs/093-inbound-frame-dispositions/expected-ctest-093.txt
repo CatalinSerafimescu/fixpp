@@ -21,5 +21,6 @@ session_validate_gate_default_off
 session_validate_gate_inbound
 store_file_crash_survival
 store_memory_round_trip
+sync_race_cancel_during_resume
 test_066_arena_fit
 wire_pure_tests
