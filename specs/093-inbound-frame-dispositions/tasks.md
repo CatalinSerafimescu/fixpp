@@ -1315,6 +1315,10 @@ surfaces exist and are witnessed.
 
 ### Static analysis, claims, citations, pins
 
+  - **Carried from Phase 4:** `alloc_guard_093_pump_active_read` (T044) is registered only on Linux
+    (`if(CMAKE_SYSTEM_NAME STREQUAL "Linux")`; its base count is a Linux measurement). On MSVC, T011's
+    manifest gate must expect it absent, and must not report it missing.
+
 - [ ] T114 Run clang-tidy, clang-format, cppcheck and IWYU (`[const §IX.4]`) on every changed file under
   `src/` and `include/`, `tools/` included where changed. Never format `specs/` or
   `include/fix/c_api/*.h`. Findings on changed lines go to `phase-implementer`.
