@@ -62,6 +62,7 @@
 
 #include "plain_engine_rig.hpp"
 #include "session/parse_capacity.hpp"  // 093 E-2: N(L) and the overlay term
+#include "session/session_engine_access.hpp"  // 093 E-13: the engine-stop flag (Q-9 stop)
 #include "support/fix44_dictionary.hpp"
 #include "support/frame_view_factory.hpp"
 #include "support/hooked_store.hpp"
@@ -1103,6 +1104,75 @@ TEST(InboundFrameDispositionsQ9, NotConnected_MsgTypeNotThirdAfterCloseBeganIsOn
 
 TEST(InboundFrameDispositionsQ9, LogonSent_MsgTypeNotThirdAfterCloseBeganIsOnlyCounted) {
     run_q9(session_role::initiator, fsm_state::LogonSent, "LogonSent");
+}
+
+// ── Q-9, Engine::stop() (contract C-2 step 2; data-model E-13; spec FR-030, FR-041) ──
+//
+// Engine::stop()'s step 1 sets the engine-stop flag on the session's strand before any
+// close() runs. A frame that reaches the NotConnected or LogonSent arm after it has no
+// arm effect, as after close() began: step 2 tests the flag, as logon_arm_superseded_
+// does. Each cell sets the flag through session_engine_access, then feeds a frame whose
+// arm, were step 2 to test `closing` alone, runs an effect before the arm's first
+// logon_arm_superseded_ check:
+//   - NotConnected, a first frame that is not a Logon: the refusal writes Disconnected;
+//   - NotConnected, a Logon carrying MaxMessageSize(383): the arm records the peer's 383;
+//   - LogonSent, a reply whose SendingTime(52) is stale: the Logout's MsgSeqNum is
+//     assigned, then toAdmin and the store write run (store_then_emit's own check
+//     stops only the transmit);
+//   - LogonSent, a well-formed reply: check_inbound advances NextNumIn.
+// To check that a cell can fail, drop the flag from step 2's condition in
+// Session::on_inbound_frame in a scratch copy: every cell must fail.
+void note_engine_stop(Session& s) { fixpp::session::session_engine_access::note_engine_stop(s); }
+
+TEST(InboundFrameDispositionsQ9Stop, NotConnected_NonLogonAfterStopStep1_NoStateWrite) {
+    DirectFixture f;
+    Session s{f.engine, f.cfg(session_role::acceptor)};
+    ASSERT_TRUE(f.open(s));
+    ASSERT_EQ(s.state(), fsm_state::NotConnected);
+    note_engine_stop(s);
+    ASSERT_TRUE(f.feed(s, direct_msg("0", 1)));
+    EXPECT_EQ(s.state(), fsm_state::NotConnected) << "the refusal must not write Disconnected";
+    EXPECT_TRUE(f.sent.empty()) << "the frame must draw nothing";
+}
+
+TEST(InboundFrameDispositionsQ9Stop, NotConnected_LogonAfterStopStep1_PeerMaxMessageSizeNotRecorded) {
+    DirectFixture f;
+    Session s{f.engine, f.cfg(session_role::acceptor)};
+    ASSERT_TRUE(f.open(s));
+    ASSERT_EQ(s.state(), fsm_state::NotConnected);
+    note_engine_stop(s);
+    ASSERT_TRUE(f.feed(s, direct_msg("A", 1, std::string{kLogonFields} + "383=8192\x01")));
+    EXPECT_FALSE(s.peer_max_message_size().has_value()) << "the arm must not record the peer's 383";
+    EXPECT_EQ(s.state(), fsm_state::NotConnected);
+    EXPECT_TRUE(f.sent.empty()) << "the frame must draw nothing";
+}
+
+TEST(InboundFrameDispositionsQ9Stop, LogonSent_StaleReplyAfterStopStep1_NoLogout) {
+    DirectFixture f;
+    Session s{f.engine, f.cfg(session_role::initiator)};
+    ASSERT_TRUE(f.open(s));
+    ASSERT_EQ(s.state(), fsm_state::LogonSent);
+    auto const next_out = session_test_access::seqnum_mgr(s).peek_outbound();
+    note_engine_stop(s);
+    ASSERT_TRUE(f.feed(s, plain_rig::message("FIX.4.2", "A", 1, "TW", "ISLD",
+                                             "20200101-00:00:00.000", kLogonFields)));
+    EXPECT_EQ(session_test_access::seqnum_mgr(s).peek_outbound(), next_out)
+        << "the arm must not assign the Logout a MsgSeqNum";
+    EXPECT_TRUE(f.sent.empty()) << "the arm must send no Logout";
+    EXPECT_EQ(s.state(), fsm_state::LogonSent) << "the arm must not write Disconnected";
+}
+
+TEST(InboundFrameDispositionsQ9Stop, LogonSent_ReplyAfterStopStep1_NextNumInNotAdvanced) {
+    DirectFixture f;
+    Session s{f.engine, f.cfg(session_role::initiator)};
+    ASSERT_TRUE(f.open(s));
+    ASSERT_EQ(s.state(), fsm_state::LogonSent);
+    ASSERT_EQ(next_inbound(s), 1U);
+    note_engine_stop(s);
+    ASSERT_TRUE(f.feed(s, direct_msg("A", 1, kLogonFields)));
+    EXPECT_EQ(next_inbound(s), 1U) << "check_inbound must not advance NextNumIn";
+    EXPECT_EQ(s.state(), fsm_state::LogonSent) << "the reply must not establish the session";
+    EXPECT_TRUE(f.sent.empty()) << "the frame must draw nothing";
 }
 
 // ── Q-8 through the pump: Framer garbles before Active, and in Disconnected ──
