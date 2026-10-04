@@ -280,8 +280,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_open(fixpp_engine_t* engine,
  *     session; the two over-cap shapes were framed before;
  *   - a frame whose third field is not MsgType(35) is disregarded and counted
  *     in every state but Disconnected, where it was processed; a Logon of
- *     that shape is disregarded where it was accepted or, carrying a
- *     malformed tag, refused;
+ *     that shape is disregarded where it was accepted or refused (for a
+ *     malformed tag or a malformed Length+Data count, among others);
  *   - a frame of at most the inbound limit (64 KiB through the C ABI) is
  *     admitted however the stream is split into reads, where some near that
  *     size ended the session; a frame over the limit ends the connection, in
@@ -377,8 +377,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_close(fixpp_session_t* session);
  *     session; the two over-cap shapes were framed before;
  *   - a frame whose third field is not MsgType(35) is disregarded and counted
  *     in every state but Disconnected, where it was processed; a Logon of
- *     that shape is disregarded where it was accepted or, carrying a
- *     malformed tag, refused;
+ *     that shape is disregarded where it was accepted or refused (for a
+ *     malformed tag or a malformed Length+Data count, among others);
  *   - a frame of at most the inbound limit (64 KiB through the C ABI) is
  *     admitted however the stream is split into reads, where some near that
  *     size ended the session; a frame over the limit ends the connection, in
@@ -535,8 +535,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_garbled_frame_count(const fixpp_ses
  *     session; the two over-cap shapes were framed before;
  *   - a frame whose third field is not MsgType(35) is disregarded and counted
  *     in every state but Disconnected, where it was processed; a Logon of
- *     that shape is disregarded where it was accepted or, carrying a
- *     malformed tag, refused;
+ *     that shape is disregarded where it was accepted or refused (for a
+ *     malformed tag or a malformed Length+Data count, among others);
  *   - a frame of at most the inbound limit (64 KiB through the C ABI) is
  *     admitted however the stream is split into reads, where some near that
  *     size ended the session; a frame over the limit ends the connection, in
@@ -647,8 +647,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_send(fixpp_session_t* session,
  *     session; the two over-cap shapes were framed before;
  *   - a frame whose third field is not MsgType(35) is disregarded and counted
  *     in every state but Disconnected, where it was processed; a Logon of
- *     that shape is disregarded where it was accepted or, carrying a
- *     malformed tag, refused;
+ *     that shape is disregarded where it was accepted or refused (for a
+ *     malformed tag or a malformed Length+Data count, among others);
  *   - a frame of at most the inbound limit (64 KiB through the C ABI) is
  *     admitted however the stream is split into reads, where some near that
  *     size ended the session; a frame over the limit ends the connection, in
@@ -752,8 +752,8 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_register_callback(
  *     session; the two over-cap shapes were framed before;
  *   - a frame whose third field is not MsgType(35) is disregarded and counted
  *     in every state but Disconnected, where it was processed; a Logon of
- *     that shape is disregarded where it was accepted or, carrying a
- *     malformed tag, refused;
+ *     that shape is disregarded where it was accepted or refused (for a
+ *     malformed tag or a malformed Length+Data count, among others);
  *   - a frame of at most the inbound limit (64 KiB through the C ABI) is
  *     admitted however the stream is split into reads, where some near that
  *     size ended the session; a frame over the limit ends the connection, in
