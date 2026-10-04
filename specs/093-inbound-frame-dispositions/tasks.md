@@ -1346,6 +1346,10 @@ surfaces exist and are witnessed.
     Re-derive each from the code before rewriting the row. **#538 stays open:** it is a B28 issue that 093
     does not fix (plan OD-9's result).
 
+  - **Carried from Phase 8 (OD-27):** add a B&L row for C-8 L-18 (open()'s OOM has no C carrier). Re-derive
+    L-1's "closes when the carry overflows": OD-23 makes carry overflow unreachable in the pump, so L-1 must state
+    what actually ends a stalled too-large-but-≤-L BodyLength.
+
 - [ ] T106 [P] `spec/coverage-index.md`: rewrite the §4.5.2 row's sentence that says byte-level framing
   failures stay session-fatal (L-004-4, `FramerFailureClosesEstablishedSession_*`), naming 093's
   witnesses; re-derive any other stale row with

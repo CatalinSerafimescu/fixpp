@@ -423,6 +423,7 @@ why", and "Golden / freeze".
 | 4 | A late parse failure is unreachable for an admitted frame | — | BREAKING on the five observers. Amend the 1.10 bullet beginning "on an established session, a frame the header scan finds fault-free but the session cannot parse for dispatch" on `is_established`, `fixpp_session_send`, `register_callback` and `fixpp_session_register_send_callback` | through C | — | `L-092-6` updated | BREAKING (a documented effect no longer occurs for an admitted frame) | none | dense-L; FR-014 defence; Q-37 |
 | 5 | A pre-Active connection closes at the establishment deadline (C-4 phase b), including one refused into Disconnected | `SessionConfig::logon_timeout_ms` (added) | BREAKING on the five observers (a slow peer's session no longer establishes) | through C | — | B row | BREAKING | none | timeout cells; Q-37 |
 | 6 | Liveness refreshes on more frames, so a TestRequest that used to be sent is not | — | BREAKING on the five observers (a session that ended on an unanswered TestRequest stays up) | through C | — | B row | BREAKING | none | SC-005 cells; Q-37 |
+> C-7 rows 7 and 8 also extend the Python import-surface golden (`bindings/python/tests/wheel/test_import_surface.py`, `EXPECTED_PUBLIC_SURFACE`) with `session_config_set_logon_timeout_ms` and `session_garbled_frame_count` (added at implementation, Phase 8, plan OD-27).
 | 7 | Establishment timeout setter | — | `fixpp_session_config_set_logon_timeout_ms` (added; refuses null and zero; reentrancy "single-thread") | automatic | — | — | MINOR | golden + `session.h` freeze hash | setter cells, C and Python |
 | 8 | Garbled-frame counter | `Session::garbled_frame_count()` (added) | `fixpp_session_garbled_frame_count` (added; refuses null handle and null `out`; 0 before the session exists; reentrancy "thread-safe") | `%apply` OUTPUT typemap; a GIL-table row | — | — | MINOR | golden + freeze hash | getter cells, C and Python, both wheel lanes |
 | 9 | TOML key | — | — | — | `logon_timeout_ms`, a bare integer of milliseconds. Each refusal is a `LoadDiagnostic` on the key: a non-integer with `reason_class::malformed_value` (present but wrong type, as `src/config/logger_resolver.cpp`'s integer keys refuse one), and a value ≤ 0 or one above `UINT32_MAX` with `reason_class::out_of_range`. `logout_disconnect_timeout_ms`'s mapper is the shape only for the integer read: it accepts 0, and it ignores a non-integer without a diagnostic | — | additive | none | TOML cells |
@@ -502,3 +503,8 @@ delta carry the same BREAKING list.
   batch B28). 093 does not fix it (plan.md OD-19). If data-model E-2's `kCallbackReadHeadroom`
   condition fails at implementation, this row also records that 093's up-front reserve leaves less
   callback room than the base for the frames where it fails.
+- **L-18.** Through the C ABI, an `open()` allocation failure (the carry block or B(L);
+  `core::error::out_of_memory`, plan OD-23) is visible only as a session that is never published:
+  `fixpp_session_close` returns `FIXPP_ERR_THREAD_SESSION_LIFECYCLE`. The error code is not carried,
+  because `Session::open()` runs in the engine's role loops, which return on error, not on
+  `fixpp_session_open`'s path (plan OD-27).

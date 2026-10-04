@@ -389,6 +389,19 @@ made at `/speckit-plan`. Reviewers may challenge any of them, and the owner may 
       the evidence file showing that every such write in the arms goes through it.
   - Alternative: disclose the error-path writes as an L-row. Rejected: the guarantee is a MUST and one
     helper covers them.
+- **OD-27: Phase 8 surface decisions** (added at implementation, 2026-10-04).
+  - The Python import-surface golden (`EXPECTED_PUBLIC_SURFACE`) gains the two new wrappers. C-7 did not
+    name that golden; C-7 now carries a note.
+  - The Q-30 Python cells get a wheel twin under `bindings/python/tests/wheel/`, with its README Membership
+    row (`ci/assert-wheel-test-parity.py`), because the wheel lanes run only that directory. The
+    label-triggered Windows wheel lane is applied at PR time.
+  - `open()`'s `out_of_memory` has no C carrier. `Session::open()` runs in the engine's role loops, not
+    on `fixpp_session_open`'s path. Disclosed as L-18, not carried: a carrier would be a C-ABI change
+    outside C-7.
+  - QuickFIX parity: `LogonTimeout` moves out of `Disposition::Gap`, because `logon_timeout_ms` is its
+    equivalent (seconds versus milliseconds). The table's old note became false with T098.
+  - For T105: C-8 L-1's "closes when the carry overflows" must be re-derived, because OD-23 makes carry
+    overflow unreachable in the pump.
 ## What changes for whom
 
 | Who | What changes | Declared where |
