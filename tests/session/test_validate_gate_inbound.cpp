@@ -537,8 +537,12 @@ TEST(ValidateGateInbound, RejectNotConsumed_OutOfSequenceLogonSequenceReset) {
 //
 // Regression witness for the FIX-1 bypass (simplify-triage round):
 // The validate gate used kAdminParseArena (8192 bytes) while the dispatch path
-// uses kInboundParseArena (16384 bytes). The OffsetTable parser allocates PMR-backed
+// used a 16384-byte stack arena. The OffsetTable parser allocates PMR-backed
 // pmr::vector<entry> (12 bytes/entry) from the arena with geometric reallocation.
+// 093-inbound-frame-dispositions (data-model E-2) supersedes both stack arenas: the
+// gate and dispatch parse over the session's parse buffer B(L), with the entries
+// reserved up front. The arithmetic below is FIX-1's record of the 8 KiB failure, which
+// the RED mutation at the end of this block reproduces.
 //
 // Arena exhaustion mechanics (sizeof(entry)==12; 2× growth from initial cap=1):
 //   Cumulative monotonic usage before the cap-256→512 step:
@@ -558,20 +562,20 @@ TEST(ValidateGateInbound, RejectNotConsumed_OutOfSequenceLogonSequenceReset) {
 // Threshold-independent discrimination (part b):
 //   After the validate-Reject (which consumed seq=2, W7-proven), feed a conformant
 //   Heartbeat at the next seqnum=3.  A conformant message must be dispatched without
-//   Reject, proving: (1) the 16 KiB arena is sufficient for the validate path even
+//   Reject, proving: (1) the parse buffer is sufficient for the validate path even
 //   on conformant messages, (2) the Reject was triggered by the undefined tags, not
 //   by some universal large-message policy.  This assertion passes regardless of
 //   the exact PMR exhaustion threshold.
 //
 // RED on kAdminParseArena gate: arena exhausts at ~257 fields → parse() returns
 //   unexpected → validation SKIPPED → no Reject.
-// GREEN on kInboundParseArena gate: parse succeeds → validate fires → Reject(373=2)
+// GREEN on the session's parse buffer: parse succeeds → validate fires → Reject(373=2)
 //   for the first undefined tag; then conformant NOS at seq=2 dispatched, no Reject.
 //
 // RED-discrimination confirmation (required by brief):
-//   To confirm RED: temporarily set the gate arena to kAdminParseArena (8192) in
-//   validate_inbound_() and rebuild → W8 FAILS (no Reject).
-//   Restore kInboundParseArena → GREEN.
+//   To confirm RED: temporarily give validate_inbound_() a kAdminParseArena (8192)
+//   stack arena in place of the parse buffer and rebuild → W8 FAILS (no Reject).
+//   Restore the parse buffer → GREEN.
 TEST(ValidateGateInbound, ManyFieldsBypassArena_Rejected_NotBypassed) {
     ValidateGateFixture fix;
     auto cfg = fix.make_cfg_with_validation();
@@ -586,9 +590,10 @@ TEST(ValidateGateInbound, ManyFieldsBypassArena_Rejected_NotBypassed) {
     //
     // The count must land in the window (admin-arena capacity, inbound-arena
     // capacity): high enough to EXHAUST the 8 KiB kAdminParseArena (so the RED
-    // mutation in the header comment fails), low enough to FIT the 16 KiB
-    // kInboundParseArena.  That window is allocator-dependent: kInboundParseArena
-    // is 2x kAdminParseArena, but MSVC's std::pmr grows vectors 1.5x (vs
+    // mutation in the header comment fails), low enough to FIT the inbound parse.
+    // Before 093 that upper bound was a 16 KiB stack arena, and the window was
+    // allocator-dependent: the arena was 2x kAdminParseArena, but MSVC's std::pmr
+    // grows vectors 1.5x (vs
     // libstdc++/libc++ 2x), so a monotonic_buffer_resource retains more, shifting
     // the inbound ceiling down.  MEASURED (windows-msvc-release sweep): the gate
     // rejects up to 315 total fields and bypasses at >=320 on MSVC, vs >480 on
@@ -608,7 +613,7 @@ TEST(ValidateGateInbound, ManyFieldsBypassArena_Rejected_NotBypassed) {
 
     // On kAdminParseArena gate: arena exhausts at ~257 fields → parse() returns
     //   unexpected → validation SKIPPED → no Reject  [RED].
-    // On kInboundParseArena gate: parse succeeds → validate fires →
+    // On the session's parse buffer: parse succeeds → validate fires →
     //   first undefined tag (9000) detected → Reject(373=2)  [GREEN].
     EXPECT_TRUE(fix.has_reject_with_reason(2))
         << "W8a: high-field-count frame with undefined tags must be Rejected (373=2), "
@@ -619,7 +624,7 @@ TEST(ValidateGateInbound, ManyFieldsBypassArena_Rejected_NotBypassed) {
     // The in-sequence validate-Reject consumed seq=2 (fixpp#423 / W7).  Feed a
     // conformant Heartbeat(35=0) at the next seq=3 to prove: (i) the session remains
     // Active, (ii) the conformant message is dispatched without a Reject, and (iii)
-    // the shared kInboundParseArena is sufficient for conformant messages.  A Heartbeat
+    // the shared parse buffer is sufficient for conformant messages.  A Heartbeat
     // is used (not NOS) because it is an admin message that routes through fromAdmin —
     // no Application is registered in this fixture, so a NOS would produce a Reject
     // (reason=3) for a different reason (no fromApp handler), masking the arena result.

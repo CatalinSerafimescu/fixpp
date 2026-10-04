@@ -3143,8 +3143,9 @@ set_tests_properties(test_066_admin_no_group PROPERTIES
   LABELS "066;us3")
 
 # ── 066-dict-backed-inbound-parse T014 — arena-fit witnesses ────────────────
-# (SC-004/FR-009). App-path fit within kInboundParseArena=16384, admin-path
-# fit within kAdminParseArena=8192, a near-cap/headroom probe, and a
+# (SC-004/FR-009). App-path fit within the session's parse buffer (093 re-based
+# it from the 16 KiB inbound stack arena), admin-path fit within
+# kAdminParseArena=8192, a near-cap/headroom probe, and a
 # pathological deeply-nested (>kMaxGroupDepth=16) message failing closed
 # (err_group_too_large, never over-read/corrupt).
 add_executable(test_066_arena_fit

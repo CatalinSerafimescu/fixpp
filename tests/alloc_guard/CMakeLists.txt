@@ -130,6 +130,7 @@ target_link_libraries(test_validate_gate_alloc_guard PRIVATE
 )
 target_include_directories(test_validate_gate_alloc_guard PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"  # 093: session/parse_capacity.hpp, the B(L) formula
 )
 set_target_properties(test_validate_gate_alloc_guard PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
@@ -213,6 +214,7 @@ target_link_libraries(test_dict066_grouped_read_alloc_guard PRIVATE
 )
 target_include_directories(test_dict066_grouped_read_alloc_guard PRIVATE
   "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"  # 093: session/parse_capacity.hpp, the B(L) formula
 )
 target_compile_definitions(test_dict066_grouped_read_alloc_guard PRIVATE
   "FIXPP_DICT_DATA_DIR=\"${CMAKE_SOURCE_DIR}/dictionaries\""

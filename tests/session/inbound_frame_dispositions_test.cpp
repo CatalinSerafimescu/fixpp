@@ -1528,7 +1528,13 @@ constexpr char kOverLimitRecordFormat[] =
     "inbound frame over the limit closed the session: kind={} limit={}";
 constexpr std::uint32_t kQ6Limit = 4096;
 
-enum class OverL : std::uint8_t { frame, bad_checksum, body_length_at_candidate };
+enum class OverL : std::uint8_t {
+    frame,
+    bad_checksum,
+    body_length_at_candidate,
+    malformed_tag,         // a scan fault the session would Reject, were it parsed
+    length_data_mismatch,  // likewise
+};
 
 std::string_view over_l_name(OverL k) {
     switch (k) {
@@ -1538,6 +1544,10 @@ std::string_view over_l_name(OverL k) {
             return "a frame of L+1 with a bad CheckSum";
         case OverL::body_length_at_candidate:
             return "an over-L BodyLength at a resync candidate";
+        case OverL::malformed_tag:
+            return "a frame of L+1 carrying a malformed tag";
+        case OverL::length_data_mismatch:
+            return "a frame of L+1 carrying a Length/Data mismatch";
     }
     return "?";
 }
@@ -1556,6 +1566,13 @@ std::string over_l_bytes(plain_rig::Rig const& rig, OverL k, std::uint32_t seq) 
         case OverL::body_length_at_candidate:
             return junk() + "8=" + rig.begin_string + "\x01" +
                    "9=" + std::to_string(kQ6Limit + 1U) + "\x01" + "35=0\x01";
+        case OverL::malformed_tag:
+            return rig.msg_of_size("D", seq, "9x9=1\x01", kQ6Limit + 1U, "58", false);
+        case OverL::length_data_mismatch:
+            return rig.msg_of_size("D", seq,
+                                   "90=2\x01"
+                                   "91=xyz\x01",
+                                   kQ6Limit + 1U, "58", false);
     }
     return {};
 }
@@ -1708,6 +1725,17 @@ TEST(InboundFrameDispositionsQ6, Disconnected_FrameOfLPlusOneWithABadCheckSumClo
 }
 TEST(InboundFrameDispositionsQ6, Disconnected_OverLBodyLengthAtAResyncCandidateCloses) {
     run_q6(Q6State::disconnected, OverL::body_length_at_candidate);
+}
+
+// The two scan-fault shapes 092 Rejects in Active, carried by a frame over L: the frame
+// is refused at framing, so no Reject is sent and no callback runs. These replace
+// unparseable_frame_disposition_test.cpp's MaxMessageSize_OversizedFaulty_* controls,
+// which fed the frame below the Framer to 070's deleted session-level check.
+TEST(InboundFrameDispositionsQ6, Active_FrameOfLPlusOneCarryingAMalformedTagCloses) {
+    run_q6(Q6State::active, OverL::malformed_tag);
+}
+TEST(InboundFrameDispositionsQ6, Active_FrameOfLPlusOneCarryingALengthDataMismatchCloses) {
+    run_q6(Q6State::active, OverL::length_data_mismatch);
 }
 
 // Control: a frame of exactly L, in Active with the same 383, is delivered.

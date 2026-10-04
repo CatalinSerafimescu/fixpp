@@ -52,7 +52,7 @@
 // contract C-3 I-6): the disposition does not depend on inbound validation, the profile,
 // the role or whether an Application is registered.
 //
-// App_*, I2_*, Dup34_*, Dup35_*, AwaitingResend_*, MaxMessageSize_*, RefMsgTypeBound_*
+// App_*, I2_*, Dup34_*, Dup35_*, AwaitingResend_*, RefMsgTypeBound_*
 // (tasks.md T034; spec FR-005, FR-013; contract C-3 I-2, I-3): a faulty application
 // message is rejected, never delivered, and accounted as C-2's D-5/D-6 say. The section
 // comment above App_AtN_MalformedTag states each cell.
@@ -1919,7 +1919,7 @@ INSTANTIATE_TEST_SUITE_P(UnparseableFrameDisposition, RowByValidation,
                                     (info.param.validate ? "_ValOn" : "_ValOff");
                          });
 
-// ── App_*, I2_*, Dup*_*, AwaitingResend_*, MaxMessageSize_*, RefMsgTypeBound_*
+// ── App_*, I2_*, Dup*_*, AwaitingResend_*, RefMsgTypeBound_*
 // (tasks.md T034; spec FR-005, FR-013; contract C-2 D-5, D-6 and the Reject
 // contents, C-1 step 1b, C-3 I-2, I-3; data-model E-1; research R-5) ─────────────
 //
@@ -1943,10 +1943,6 @@ INSTANTIATE_TEST_SUITE_P(UnparseableFrameDisposition, RowByValidation,
 //   AwaitingResend_*: a too-high Heartbeat at 3 opens a gap from 2; the faulty frame at
 //     2 fills it, so the gap closes, and a Heartbeat at 5 then draws a fresh
 //     ResendRequest from 3 (none is sent while a gap is still open).
-//   MaxMessageSize_*_Control: an oversized faulty frame in Active is disconnected with
-//     nothing sent, because the negotiated MaxMessageSize(383) guard runs before the
-//     state switch (C-1 step 1b). A control: to check it can fail, delete that guard in
-//     a scratch copy and the cell must fail.
 //   RefMsgTypeBound_*: a faulty frame at N whose MsgType is far longer than any shipped
 //     MsgType draws a Reject without 372, and NextNumIn advances only together with that
 //     Reject. The length below is spelled out, not derived from the session's bound.
@@ -2094,36 +2090,10 @@ TEST(UnparseableFrameDisposition, AwaitingResend_FaultyFillClosesGap_LengthDataM
     run_awaiting_resend_cell(kCountShape);
 }
 
-void run_max_message_size_control(Shape const& shape) {
-    DispositionFixture fix;
-    auto app = std::make_shared<CountingApplication>();
-    fix.engine.application = app;
-    auto cfg = fix.make_cfg(/*validate=*/true);
-    cfg.advertised_max_message_size = 256;
-    Session sess{fix.engine, cfg};
-    fix.open_to_active(sess);
-    if (::testing::Test::HasFatalFailure()) {
-        return;
-    }
-    std::string const row = "MaxMessageSize (373=" + std::string{shape.reason} + ")";
-    auto const oversized = make_raw_frame(
-        "D", 2, kOrderFields + "58=" + std::string(300, 'x') + "\x01" + shape.garble);
-    ASSERT_GT(oversized.size(), 256U) << row << ": the frame must exceed the advertised size";
-    fix.feed(sess, oversized);
-    EXPECT_EQ(sess.state(), fsm_state::Disconnected) << row << ": the oversized frame ends it";
-    EXPECT_TRUE(fix.transport.sent_frames().empty())
-        << row << ": nothing is sent; Rejects=" << fix.sent_of_type("3").size();
-    EXPECT_EQ(app->from_app, 0) << row << ": the oversized frame never reaches fromApp";
-}
-
-TEST(UnparseableFrameDisposition,
-     MaxMessageSize_OversizedFaulty_Disconnected_Control_MalformedTag) {
-    run_max_message_size_control(kTagShape);
-}
-TEST(UnparseableFrameDisposition,
-     MaxMessageSize_OversizedFaulty_Disconnected_Control_LengthDataMismatch) {
-    run_max_message_size_control(kCountShape);
-}
+// 093-inbound-frame-dispositions (FR-013) moved the MaxMessageSize_OversizedFaulty_*
+// controls: 070's session-level 383 check they fed below the Framer is deleted, and a
+// frame over the session's limit is refused at framing. The faulty over-limit shapes
+// are inbound_frame_dispositions_test.cpp's Q-6 cells, through the read pump.
 
 void run_ref_msg_type_bound_cell(Shape const& shape) {
     StateCell c{At::active};

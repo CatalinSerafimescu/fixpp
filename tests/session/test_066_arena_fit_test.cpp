@@ -3,17 +3,17 @@
 //
 // 066-dict-backed-inbound-parse T014 — arena-fit witnesses (SC-004/FR-009).
 //
-// FR-009: dict-backed nested reads build sub-`OffsetTable`s from the stack
-// arena — a NEW cost on both `parse_and_dispatch_` arenas
-// (its kAdminParseArena/kInboundParseArena constants). This file witnesses:
+// FR-009: dict-backed nested reads build sub-`OffsetTable`s from the parse
+// arena — a NEW cost on both kinds of `parse_and_dispatch_` arena. 093-inbound-frame-
+// dispositions (data-model E-2) superseded the 16 KiB inbound stack arena: inbound
+// frames parse over the session's parse buffer B(L); kAdminParseArena stays for the
+// admin frames fixpp builds (contract C-3 I-6). This file witnesses:
 //
 //   1. AppMessageFitsInboundParseArena  — a representative group-bearing APP
-//      message parses+reads within `kInboundParseArena=16384`, via REAL
-//      Session dispatch (no heap fallback: `fixpp::detail::arena_upstream()`
-//      is `null_memory_resource()` on this toolchain — pmr_arena_upstream.hpp
-//      — so an overflow would surface as a parse failure, not a silent heap
-//      spill; dispatch SUCCEEDING is itself the "fits, no heap fallback"
-//      witness).
+//      message parses+reads within the session's parse buffer, via REAL Session
+//      dispatch, with nothing spilled past it (the spill witness; on the lanes
+//      where its upstream is null an overflow would also surface as a parse
+//      failure, so dispatch SUCCEEDING is itself the "fits" witness).
 //   2. AdminGroupMessageFitsAdminArena  — a group-bearing ADMIN message
 //      (Logon `NoMsgTypes(384)`, dictionaries/FIX44.xml's NoMsgTypes group — a REAL
 //      dict-registered admin group) parses+reads within the tighter
@@ -23,9 +23,8 @@
 //      construction directly (stack array + `monotonic_buffer_resource` +
 //      `Parser<Index>{tv}`) rather than going through `Session`.
 //   3. NearCapHeadroomProbe             — a large-but-realistic group-bearing
-//      message (many `NoLegs` instances) fits `kInboundParseArena=16384`
-//      with comfortable headroom, empirically sized (not a byte-exact
-//      boundary search — see the test body comment).
+//      message (many `NoLegs` instances) is dispatched through a real Session
+//      and its group read, with nothing spilled past the parse buffer.
 //   4. PathologicalDeepNestingFailsClosed — a 17-level nested repeating-group
 //      chain (one level beyond `kMaxGroupDepth=16`,
 //      offset_table.hpp's kMaxGroupDepth constant) fails CLOSED:
@@ -40,8 +39,8 @@
 //      produce).
 //
 // Anchors: tasks.md T014; spec.md FR-009/SC-004; contracts/inbound-parse.md
-// C5/C6; parse_and_dispatch_ (the
-// construction mirrored by probes 2-4); src/wire/offset_table.cpp
+// C5/C6; parse_and_dispatch_ (the stack-arena
+// construction mirrored by probes 2 and 4); src/wire/offset_table.cpp
 // (consume_group_extent, group()).
 
 #include <gtest/gtest.h>
@@ -65,6 +64,7 @@
 #include "support/fix44_dictionary.hpp"
 #include "support/fix44_group_frame_bodies.hpp"
 #include "support/group_dispatch_fixture.hpp"
+#include "support/session_test_access.hpp"
 
 using fixpp::session::test066::GroupDispatchFixture;
 
@@ -78,9 +78,11 @@ using fixpp::wire::MessageView;
 using fixpp::wire::Parser;
 using fixpp::wire::pmr_carry_buffer;
 
-// Mirrors parse_and_dispatch_'s kAdminParseArena/kInboundParseArena constants exactly.
+// Mirrors parse_and_dispatch_'s kAdminParseArena: the admin frames fixpp builds.
 constexpr std::size_t kAdminParseArena = 8192;
-constexpr std::size_t kInboundParseArena = 16384;
+// The deep-nesting probe's arena: large enough for the chain, which is about depth,
+// not size. Not a production constant.
+constexpr std::size_t kProbeArena = 16384;
 
 // Mirrors test_066_group_membership_red_test.cpp's slice_has_tag helper.
 bool slice_has_tag(fixpp::wire::group_slice const& s, std::uint16_t tag) {
@@ -94,10 +96,10 @@ bool slice_has_tag(fixpp::wire::group_slice const& s, std::uint16_t tag) {
 }
 
 // Mirrors Session::parse_and_dispatch_'s stack-arena construction
-// (mirrored in MirroredParse below) so probes 2-4 measure the exact production shape
+// (mirrored in MirroredParse below) so probes 2 and 4 use the production shape
 // without needing access to the private method / a full Session.
 struct MirroredParse {
-    std::array<std::byte, kInboundParseArena> pa_buf{};
+    std::array<std::byte, kProbeArena> pa_buf{};
     std::pmr::monotonic_buffer_resource pa_mr;
     std::array<std::byte, 512> carry_store{};
     std::pmr::monotonic_buffer_resource carry_mr;
@@ -112,7 +114,7 @@ struct MirroredParse {
 
 }  // namespace
 
-// ── 1. App-path fit: real Session dispatch, kInboundParseArena=16384 ────────
+// ── 1. App-path fit: real Session dispatch, the session's parse buffer ─────
 TEST(ArenaFit, AppMessageFitsInboundParseArena) {
     GroupDispatchFixture f;
     auto cfg = f.make_cfg();
@@ -130,18 +132,16 @@ TEST(ArenaFit, AppMessageFitsInboundParseArena) {
 
     auto suffix = fixpp_test_support::execution_report_two_legs_trailing_suffix();
     auto frame = fixpp_test_support::make_execution_report_frame(suffix, /*seq=*/2, "TW", "ISLD");
-    ASSERT_LT(frame.size(), kInboundParseArena)
-        << "representative message must be well within the raw byte budget";
 
     f.feed(sess, frame);
 
     ASSERT_EQ(f.app->from_app_calls, 1)
         << "a representative group-bearing app message must dispatch successfully "
-           "within kInboundParseArena=16384 (no heap fallback: arena_upstream() is "
-           "null_memory_resource() on this toolchain, so overflow would surface as "
-           "a parse failure, not a silent success)";
+           "within the session's parse buffer";
     EXPECT_EQ(count, 2U);
     EXPECT_TRUE(leg0_has_symbol);
+    EXPECT_EQ(session_test_access::parse_spills(sess), 0U)
+        << "the parse and the group read stay within the parse buffer";
 }
 
 // ── 2. Admin-path fit: mirrored construction, kAdminParseArena=8192 ─────────
@@ -185,14 +185,10 @@ TEST(ArenaFit, AdminGroupMessageFitsAdminArena) {
 }
 
 // ── 3. Near-cap / headroom probe ────────────────────────────────────────────
-// A large-but-realistic group-bearing ExecutionReport (many NoLegs
-// instances). Empirically sized to a comfortably large instance count (NOT a
-// byte-exact boundary search — the arena holds the OffsetTable's own PMR
-// structures (entries_/group_index_ + per-group slice arrays/overlay_/
-// nested_cache_), not raw frame
-// bytes, so "near-cap" is field-count-driven, not byte-count-driven); this
-// probe demonstrates real headroom for realistic message sizes, not the
-// precise failure boundary.
+// A large-but-realistic group-bearing ExecutionReport (many NoLegs instances),
+// dispatched through a real Session: the group read inside fromApp sees every leg,
+// and nothing spills past the session's parse buffer. 093 re-based this probe from a
+// mirror of the 16 KiB inbound stack arena that the parse buffer replaced.
 TEST(ArenaFit, NearCapHeadroomProbe) {
     constexpr int kLegs = 75;
     std::string suffix;
@@ -212,29 +208,23 @@ TEST(ArenaFit, NearCapHeadroomProbe) {
         suffix += "687=100\x01";
     }
 
+    GroupDispatchFixture f;
+    auto cfg = f.make_cfg();
+    Session sess(f.engine_cfg, cfg);
+    f.open_to_active(sess);
+    std::size_t count = 0;
+    f.app->on_from_app = [&](const fixpp::wire::MessageView<fixpp::wire::access_mode::Index>& msg) {
+        count = msg.offsets().group_slices(555).size();
+    };
+
     auto frame = fixpp_test_support::make_execution_report_frame(suffix, /*seq=*/2, "TW", "ISLD");
-    ASSERT_LT(frame.size(), kInboundParseArena)
-        << "the raw frame itself must stay under the arena's nominal byte budget "
-           "(sanity — the arena governs parsed metadata, not raw bytes)";
+    f.feed(sess, frame);
 
-    auto dict = fixpp::test_support::make_fix44_dictionary();
-    auto tv = dict->as_table_view();
-
-    MirroredParse mp{kInboundParseArena};
-    std::array<frame_view, 1> out{};
-    auto feed_r = mp.framer.feed(std::span<const std::byte>{frame}, mp.carry, std::span{out});
-    ASSERT_TRUE(feed_r.has_value());
-    ASSERT_FALSE(feed_r->empty());
-
-    Parser<access_mode::Index> parser{tv};
-    auto mv_r = parser.parse(out[0], &mp.pa_mr);
-    ASSERT_TRUE(mv_r.has_value())
-        << kLegs
-        << "-leg ExecutionReport must parse within kInboundParseArena=16384 "
-           "with headroom (no heap fallback)";
-
-    auto slices = mv_r->offsets().group_slices(555);
-    EXPECT_EQ(slices.size(), static_cast<std::size_t>(kLegs));
+    ASSERT_EQ(f.app->from_app_calls, 1)
+        << kLegs << "-leg ExecutionReport must dispatch within the session's parse buffer";
+    EXPECT_EQ(count, static_cast<std::size_t>(kLegs));
+    EXPECT_EQ(session_test_access::parse_spills(sess), 0U)
+        << "the parse and the group read stay within the parse buffer";
 }
 
 // ── 4. Pathological deeply-nested message fails CLOSED ──────────────────────
@@ -288,7 +278,7 @@ TEST(ArenaFit, PathologicalDeepNestingFailsClosed) {
     // (a) n=16 (T_0..T_15): recursion never reaches depth 16 -> succeeds.
     {
         ChainFixture cf{16};
-        MirroredParse mp{kInboundParseArena};
+        MirroredParse mp{kProbeArena};
         std::array<frame_view, 1> out{};
         auto feed_r =
             mp.framer.feed(std::span<const std::byte>{cf.frame_bytes}, mp.carry, std::span{out});
@@ -308,7 +298,7 @@ TEST(ArenaFit, PathologicalDeepNestingFailsClosed) {
     // (b) n=17 (T_0..T_16): recursion into T_16 runs at depth=16 -> overflow.
     {
         ChainFixture cf{17};
-        MirroredParse mp{kInboundParseArena};
+        MirroredParse mp{kProbeArena};
         std::array<frame_view, 1> out{};
         auto feed_r =
             mp.framer.feed(std::span<const std::byte>{cf.frame_bytes}, mp.carry, std::span{out});
