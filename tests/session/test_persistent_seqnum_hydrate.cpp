@@ -2804,9 +2804,8 @@ TEST(PersistentSeqnumHydrate, W8_HydratedInitiator_ResetOnLogout_PeerSpontaneous
 // Stimulus: reset_on_logon=true initiator {in=1, out=1} — latch=true, Logon at seq=1
 //           → n_pre_outbound==2 == seqnum_min+1 → restore gate fires.
 //
-// W5 seed: fail_on_nth_outbound_write=1 (first outbound write = persist_outbound_advance_
-//          fails) → reset_seqnums_to_one_durable already succeeded (store.reset() ran)
-//          → persist_outbound_advance_ fails → fatal → Disconnected.
+// W5 seed: fail_on_nth_outbound_write=1 → the reset unit's reset_to runs reset(), then
+//          its next_seqnum(outbound, true) fails → fatal → Disconnected.
 // W6 seed: no failure; the arm calls:
 //   1. reset_seqnums_to_one_durable() → store.reset() → durable_outbound=1
 //   2. set_next_outbound(2) → manager=2
@@ -2822,9 +2821,11 @@ TEST(PersistentSeqnumHydrate, W8_HydratedInitiator_ResetOnLogout_PeerSpontaneous
 // emit_initiator_logon_ emits at seq=1 → n_pre_outbound=2 → restore_before_send=true).
 // [032 contract C1/C3, FR-007, INV-H1]
 TEST(PersistentSeqnumHydrate, T014_W5_OutboundPersistFail_Fatal) {
-    // W5: fail_on_nth_outbound_write=1 → first outbound write fails → Disconnected.
-    // The FaultStore initial durable_outbound=1 (not the sentinel — the sentinel applies
-    // to the discriminating check, not the initial value).
+    // W5: fail_on_nth_outbound_write=1 → every outbound write fails → Disconnected.
+    // FaultStore does not override reset_to, so the 141=Y reset unit's reset_to runs
+    // MessageStore's default body (093 data-model E-9): reset(), then
+    // next_seqnum(outbound, true) for the outbound target 2, and that write fails. On a
+    // persistent store the unit takes the store error as fatal.
     // Seed {in=1, out=1} so Logon emits at seq=1 (latch=true, restore_before_send=true).
     auto factory = std::make_shared<FaultStoreFactory>(
         /*seeded_inbound=*/1, /*seeded_outbound=*/1,
@@ -2841,10 +2842,11 @@ TEST(PersistentSeqnumHydrate, T014_W5_OutboundPersistFail_Fatal) {
     // Feed peer Logon-ack with 141=Y at seq=1 (in-seq → restore gate fires).
     fix->feed(make_logon_reset("FIX.4.4", 1, "SRV", "CLI"));
 
-    // W5: outbound persist failure → fatal-when-persistent → Disconnected.
+    // W5: the reset unit's outbound write failure → fatal-when-persistent → Disconnected.
     EXPECT_EQ(fix->session->state(), fixpp::session::fsm_state::Disconnected)
-        << "T014 W5: persist_outbound_advance_() failure on a persistent store must be "
-           "fatal → Disconnected. [032 contract C3, FR-007, 030 fatal-when-persistent]";
+        << "T014 W5: a failed outbound write in the reset unit's reset_to on a persistent "
+           "store must be fatal → Disconnected. [032 contract C3, FR-007, 030 "
+           "fatal-when-persistent]";
 }
 
 TEST(PersistentSeqnumHydrate, T014_W6_OutboundPersistSuccess_InvH1) {

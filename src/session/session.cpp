@@ -1004,23 +1004,6 @@ void Session::close_filled_resend_gap_() noexcept {
     }
 }
 
-// 032 T009 — durable outbound advance (C3 / FR-007).
-// Mirrors persist_inbound_advance_() for the 032 initiator outbound-restore path.
-// Skips when store_is_persistent_==false (INV-H4 / C3.5).
-// Failure → Disconnected (D-3 / C3.3 / fatal-when-persistent, 030 disposition).
-// [032 tasks T009; contracts C3/FR-007; data-model INV-H1]
-asio::awaitable<fixpp::core::expected_t<void>> Session::persist_outbound_advance_() noexcept {
-    if (!store_is_persistent_) {
-        co_return fixpp::core::expected_t<void>{};
-    }
-    auto r = co_await store_->next_seqnum(direction_t::outbound, /*increment=*/true);
-    if (!r) {
-        record_state_transition_(fsm_state::Disconnected);
-        co_return std::unexpected(fixpp::core::error::store_io_failure);
-    }
-    co_return fixpp::core::expected_t<void>{};
-}
-
 // fixpp#518 and 093 (data-model E-13; contract C-6): see session.hpp.
 bool Session::logon_arm_superseded_(fsm_state expected) const noexcept {
     return state_ == lifecycle::closing || engine_stop_requested_ || fsm_state_ != expected;

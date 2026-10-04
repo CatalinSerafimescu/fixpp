@@ -920,8 +920,6 @@ private:
     //   the pre-025 byte-identical cold-open behaviour.
     // persist_inbound_advance_(): site-keyed durable inbound +1, invoked after each
     //   delivering callback at every check_inbound-success site (C3).
-    // persist_outbound_advance_(): site-keyed durable outbound +1, mirroring
-    //   persist_inbound_advance_() for the 032 outbound restore path (C3 / FR-007).
     // 093 plan OD-26: `arm` is a Logon arm caller's expected state, for the Disconnected
     // write that follows a failed store operation (disconnect_unless_superseded_).
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> ensure_hydrated_(
@@ -929,8 +927,6 @@ private:
         std::optional<fsm_state> arm = std::nullopt) noexcept;
     [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>> persist_inbound_advance_(
         std::optional<fsm_state> arm = std::nullopt) noexcept;
-    [[nodiscard]] asio::awaitable<fixpp::core::expected_t<void>>
-    persist_outbound_advance_() noexcept;
     // consume_rejected_seqnum_(): fixpp#423 — an in-sequence message answered by a
     //   Reject before the seqnum gate consumes its MsgSeqNum (advance + persist).
     // close_filled_resend_gap_(): exit AwaitingResend once next_inbound passes the gap end.
