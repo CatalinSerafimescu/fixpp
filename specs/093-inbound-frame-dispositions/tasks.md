@@ -1399,9 +1399,20 @@ surfaces exist and are witnessed.
     touches a population T012 recorded (Framer callers, late parse sites, `MessageStore` subclasses,
     `SessionEvent` visits, the C-ABI MINOR), re-derive that population and extend the affected cells.
   - If a merged PR claims the C-ABI MINOR 11, stop: T003/T095's MINOR is taken, so re-plan the bump.
-- [ ] T109 Run `/simplify` over the branch diff (`[const §XVI.7]`); fixes go through
+- [X] T109 Run `/simplify` over the branch diff (`[const §XVI.7]`); fixes go through
   `phase-implementer`. Every later check runs on the post-simplify head. Re-check T105–T108's claims
   against the post-simplify code.
+  - **As landed:** review and triage are in the parent repo, at
+    `research/reviews/opus_093_simplify_{review,triage}.md`. The applied findings, one commit each, run
+    `86eefe7d`..`f0440b3e`.
+  - **Deferred, reasons in the triage:** P-3 (fold the reset-unit call site), P-4 (merge the pump
+    drains) and P-5's `reset_counters_to_` half.
+  - **Skipped:** T-3 (the two probes differ in semantics) and T-7's test_070 line (dropping it renames
+    an evidence-cited cell).
+  - **T105–T108 re-check:**
+    - B-032-1, S-017 and coverage-index re-pointed off the deleted `persist_outbound_advance_` (`52a49c32`).
+    - `check_bl_citations.py gate` 0 dangling.
+    - `check_line_citations.py --shift-audit e5ff36dc..HEAD` rc 0.
 
 ### Mutation, fuzz, bench, MSVC
 
