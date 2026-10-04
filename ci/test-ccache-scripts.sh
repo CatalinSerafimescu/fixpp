@@ -122,6 +122,11 @@ JSON
 # It is the TREE's extractor, not $CI_DIR's, so an older or mutated ci/ can be
 # run against the same copy. The per-lane preset file and Conan profiles are
 # not in the list: the sandbox keeps its own synthetic CMakePresets.json.
+# The #513 write scan reads every TRACKED CMake file, which is more than the
+# list, so in the sandbox it sees only the copied ones: a write to a pruning
+# variable in a tracked file outside the list is not something an arm here can
+# exercise. Compare `--list-inputs` with `git ls-files '*CMakeLists.txt'
+# '*.cmake'` to see which files that is.
 FLAG_INPUTS="$( cd "$repo_root" && python3 ci/ccache-flag-surface.py --list-inputs )" \
   || fail "flag-surface/inputs: ci/ccache-flag-surface.py --list-inputs failed on the real tree (see its message above)"
 [ -n "$FLAG_INPUTS" ] || fail "flag-surface/inputs: ci/ccache-flag-surface.py --list-inputs listed nothing"
@@ -710,6 +715,11 @@ copy_flag_surface "$FS_BASE"
 cp "$repo_root/CMakePresets.json" "$FS_BASE/"
 cp "$repo_root/conan/profiles/linux-clang-libc++" "$FS_BASE/conan/profiles/"
 FS_HOST='linux-clang-libc++'
+# The #513 prune reads "tracked" CMake files from `git ls-files` and prunes
+# nothing outside a git work tree, so the copy is indexed (no commit needed).
+# `cp -r` of it below carries .git, and a mutated file stays tracked.
+git -C "$FS_BASE" init -q
+git -C "$FS_BASE" add -A
 
 flag_digest() {  # $1 = root, $2 = host|wheel, $3 = preset or lane
   ( cd "$1" && . "$KEYSH" && ccache_flag_digest "$2" "$3" >/dev/null 2>&1 && printf '%s' "$CCACHE_CACHE_FLAGS" )
@@ -720,8 +730,10 @@ flag_surface() {  # $1 = root, $2 = host|wheel, $3 = preset or lane
 
 ARM_FAILS=""
 flag_arm() {  # $1 = rotate|keep, $2 = label, $3 = kind, $4 = file, $5 = old (exactly once), $6 = new
-  local t="$sandbox/fs-arm" base mut
-  rm -rf "$t"; cp -r "$FS_BASE" "$t"
+  # The base is $FS_ARM_BASE when set (a variant carrying an arm's precondition,
+  # so the arm measures its own edit and not the precondition's rotation).
+  local t="$sandbox/fs-arm" base mut fs_base="${FS_ARM_BASE:-$FS_BASE}"
+  rm -rf "$t"; cp -r "$fs_base" "$t"
   python3 - "$t/$4" "$5" "$6" <<'PY' || fail "flag-arm '$2': the pattern is not in $4 exactly once — the arm would test nothing"
 import sys
 p, old, new = sys.argv[1:]
@@ -730,10 +742,10 @@ if s.count(old) != 1:
     sys.exit(1)
 open(p, "w", encoding="utf-8").write(s.replace(old, new))
 PY
-  cmp -s "$FS_BASE/$4" "$t/$4" && fail "flag-arm '$2': the mutation left $4 unchanged"
+  cmp -s "$fs_base/$4" "$t/$4" && fail "flag-arm '$2': the mutation left $4 unchanged"
   # `|| true`: under set -e a failed extract would end the harness here with
   # no message; the empty-digest check below names it instead.
-  base="$(flag_digest "$FS_BASE" "$3" "$FS_HOST_OR_LANE")" || true
+  base="$(flag_digest "$fs_base" "$3" "$FS_HOST_OR_LANE")" || true
   mut="$(flag_digest "$t" "$3" "$FS_HOST_OR_LANE")" || true
   if [ -z "$base" ] || [ -z "$mut" ]; then
     ARM_FAILS="$ARM_FAILS
@@ -744,7 +756,7 @@ PY
     rotate) [ "$base" != "$mut" ] || ARM_FAILS="$ARM_FAILS
   rotate/$2: a flag edit KEPT the digest ($base)" ;;
     keep)   [ "$base" = "$mut" ]  || ARM_FAILS="$ARM_FAILS
-  keep/$2: a non-flag edit ROTATED the digest ($base -> $mut)" ;;
+  keep/$2: an edit that must not reach this lane's surface ROTATED the digest ($base -> $mut)" ;;
   esac
 }
 host_arm()  { FS_HOST_OR_LANE="$FS_HOST"; flag_arm "$1" "$2" host "$3" "$4" "$5"; }
@@ -833,6 +845,54 @@ wheel_arm keep 'cibw-comment' bindings/python/cibw-before-all.sh \
   '# before any wheel build.' '# before the first wheel build.'
 wheel_arm keep 'tier1-outside-cibw-environment' .github/workflows/tier1.yml \
   'mkdir -p /tmp/wheel-conan2' 'mkdir -p /tmp/wheel-conan2 /tmp/unrelated'
+
+# ── #513: subtrees a lane provably does not configure are pruned ──
+# fs_variant <name> <file> <old (exactly once)> <new>: a copy of FS_BASE with
+# one precondition edit, still indexed, for FS_ARM_BASE.
+fs_variant() {
+  local v="$sandbox/fs-$1"
+  rm -rf "$v"; cp -r "$FS_BASE" "$v"
+  python3 - "$v/$2" "$3" "$4" <<'PY' || fail "fs-variant '$1': the pattern is not in $2 exactly once"
+import sys
+p, old, new = sys.argv[1:]
+s = open(p, encoding="utf-8").read()
+if s.count(old) != 1:
+    sys.exit(1)
+open(p, "w", encoding="utf-8").write(s.replace(old, new))
+PY
+  cmp -s "$FS_BASE/$2" "$v/$2" && fail "fs-variant '$1': the precondition left $2 unchanged"
+  printf '%s' "$v"
+}
+TESTS_FLAG_OLD="PRIVATE${NL}  FIXPP_DECIMAL_FORCE_PORTABLE_MUL${NL})"
+TESTS_FLAG_NEW="PRIVATE${NL}  FIXPP_DECIMAL_FORCE_PORTABLE_MUL${NL}  FIXPP_X=1${NL})"
+BENCH_FLAG_OLD="target_compile_definitions(validator_bench PRIVATE${NL}"
+BENCH_FLAG_NEW="target_compile_definitions(validator_bench PRIVATE${NL}  FIXPP_X=1${NL}"
+# 1. KEEP: the wheel builds no tests (pyproject FIXPP_BUILD_TESTS=OFF), so a
+#    flag edit under tests/ keeps its digest. The same edit ROTATES the host
+#    lane, which builds them, so it is a flag edit and the KEEP is not vacuous.
+wheel_arm keep '#513-inactive-tests-subtree' tests/core/CMakeLists.txt "$TESTS_FLAG_OLD" "$TESTS_FLAG_NEW"
+host_arm rotate '#513-active-tests-subtree' tests/core/CMakeLists.txt "$TESTS_FLAG_OLD" "$TESTS_FLAG_NEW"
+# 2. ROTATE after enable: with FIXPP_BUILD_BENCH=ON in the preset, a flag edit
+#    INSIDE bench/ rotates the host digest; with the preset unchanged (the
+#    option defaults OFF) the same edit keeps it. Only the edit in the newly
+#    enabled subtree is measured: the flip itself is already hashed.
+host_arm keep '#513-bench-off' bench/wire/CMakeLists.txt "$BENCH_FLAG_OLD" "$BENCH_FLAG_NEW"
+FS_ARM_BASE="$(fs_variant bench-on CMakePresets.json \
+  '"CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/linux-clang-libc++/conan_toolchain.cmake",' \
+  '"CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/linux-clang-libc++/conan_toolchain.cmake", "FIXPP_BUILD_BENCH": "ON",')"
+host_arm rotate '#513-bench-enabled-by-preset' bench/wire/CMakeLists.txt "$BENCH_FLAG_OLD" "$BENCH_FLAG_NEW"
+# 3. INCLUDE unknown: a write to FIXPP_BUILD_TESTS in a SUBDIRECTORY file (a),
+#    or a mention of it in the wheel's cibuildwheel config-settings (b), makes
+#    its value unknown, so the wheel lane's tests/ subtree counts again.
+FS_ARM_BASE="$(fs_variant tests-written src/core/CMakeLists.txt \
+  "if(FIXPP_BUILD_TESTS OR FIXPP_BUILD_BENCH OR FIXPP_BUILD_FUZZ)" \
+  "set(FIXPP_BUILD_TESTS ON CACHE BOOL \"\" FORCE)${NL}if(FIXPP_BUILD_TESTS OR FIXPP_BUILD_BENCH OR FIXPP_BUILD_FUZZ)")"
+wheel_arm rotate '#513-tests-written-in-subdirectory' tests/core/CMakeLists.txt "$TESTS_FLAG_OLD" "$TESTS_FLAG_NEW"
+FS_ARM_BASE="$(fs_variant tests-config-setting bindings/python/pyproject.toml \
+  '[tool.cibuildwheel.config-settings]' \
+  "[tool.cibuildwheel.config-settings]${NL}\"cmake.define.FIXPP_BUILD_TESTS\" = \"ON\"")"
+wheel_arm rotate '#513-tests-in-cibw-config-settings' tests/core/CMakeLists.txt "$TESTS_FLAG_OLD" "$TESTS_FLAG_NEW"
+unset FS_ARM_BASE
 
 if [ -n "$ARM_FAILS" ]; then
   fail "flag-surface arms went RED:$ARM_FAILS"
