@@ -80,7 +80,9 @@
  *  component/group-only pair or of a standard pair such as
  *  RawDataLength(95) and RawData(96) (so shipped dictionaries are affected
  *  too): a Logon of that shape that was accepted is now refused, on either
- *  role. The observers are every call whose result depends on the session
+ *  role. Amended in C-ABI 1.11 (093): such a Logon whose third field is not
+ *  MsgType(35) is disregarded before interpret_logon reads it (contract C-2
+ *  step 1), and is not refused. The observers are every call whose result depends on the session
  *  having logged on; each also carries its own note in session.h:
  *  fixpp_session_is_established stays false; fixpp_session_close, once the
  *  refused session has drained, returns FIXPP_ERR_THREAD_SESSION_LIFECYCLE,

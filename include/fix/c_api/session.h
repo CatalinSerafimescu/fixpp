@@ -250,7 +250,10 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_open(fixpp_engine_t* engine,
  * BREAKING (C-ABI 1.9; 091 FR-020): a Logon carrying a Length immediately
  * followed by its paired Data whose counted extent reaches or passes the end
  * of the whole framed message, or whose following byte is not SOH (standard
- * pairs included), which was accepted, is now refused, on either role. Once a
+ * pairs included), which was accepted, is now refused, on either role.
+ * Amended in C-ABI 1.11 (093): such a Logon whose third field is not
+ * MsgType(35) is disregarded before interpret_logon reads it, and is not
+ * refused. Once a
  * session whose Logon was refused that way has drained, close returns
  * FIXPP_ERR_THREAD_SESSION_LIFECYCLE, translated for the consumer's ABI minor
  * (fixpp_engine_create), where it returned FIXPP_ERR_OK: that session never
@@ -321,7 +324,10 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_close(fixpp_session_t* session);
  * BREAKING (C-ABI 1.9; 091 FR-020): a Logon carrying a Length immediately
  * followed by its paired Data whose counted extent reaches or passes the end
  * of the whole framed message, or whose following byte is not SOH (standard
- * pairs included), which was accepted, is now refused, on either role. For a
+ * pairs included), which was accepted, is now refused, on either role.
+ * Amended in C-ABI 1.11 (093): such a Logon whose third field is not
+ * MsgType(35) is disregarded before interpret_logon reads it, and is not
+ * refused. For a
  * session whose Logon was refused that way, *out_established stays false where
  * it became true.
  *
@@ -473,7 +479,9 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_garbled_frame_count(const fixpp_ses
  * carrying a Length immediately followed by its paired Data whose counted
  * extent reaches or passes the end of the whole framed message, or whose
  * following byte is not SOH (standard pairs included), which was accepted, is
- * now refused, on either role; a send on that session, issued after that
+ * now refused, on either role (amended in C-ABI 1.11, 093: such a Logon whose
+ * third field is not MsgType(35) is disregarded before interpret_logon reads
+ * it, and is not refused); a send on that session, issued after that
  * Logon, which returned FIXPP_ERR_OK, now returns
  * FIXPP_ERR_SESSION_INVALID_STATE, translated for the consumer's ABI minor
  * (fixpp_engine_create). For a send either change refuses, the
@@ -591,7 +599,9 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_send(fixpp_session_t* session,
  * Also (091 FR-020), a Logon carrying a Length immediately followed
  * by its paired Data whose counted extent reaches or passes the end of the
  * whole framed message, or whose following byte is not SOH (standard pairs
- * included), which was accepted, is now refused, on either role; inbound
+ * included), which was accepted, is now refused, on either role (amended in
+ * C-ABI 1.11, 093: such a Logon whose third field is not MsgType(35) is
+ * disregarded before interpret_logon reads it, and is not refused); inbound
  * application messages on that session, delivered to `cb` before, are never
  * delivered.
  *
@@ -697,8 +707,11 @@ FIXPP_API_EXPORT fixpp_error_t fixpp_session_register_callback(
  * not invoked. Also (091 FR-020), a Logon carrying a Length immediately
  * followed by its paired Data whose counted extent reaches or passes the end
  * of the whole framed message, or whose following byte is not SOH (standard
- * pairs included), which was accepted, is now refused, on either role; on that
- * session `cb`, invoked before for each send, is never invoked.
+ * pairs included), which was accepted, is now refused, on either role
+ * (amended in C-ABI 1.11, 093: such a Logon whose third field is not
+ * MsgType(35) is disregarded before interpret_logon reads it, and is not
+ * refused); on that session `cb`, invoked before for each send, is never
+ * invoked.
  *
  * BREAKING (C-ABI 1.10; 092, fixpp#507): the session disposes of an inbound
  * frame whose header scan meets a malformed tag (a non-digit tag byte, an
