@@ -1284,6 +1284,36 @@ set_tests_properties(engine_connect PROPERTIES
     "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
   LABELS "015;us2;live_tls;connect")
 
+# CTest filter: ctest -R 'engine_reset_unit_stop'
+#
+# 093-inbound-frame-dispositions (tasks.md T082, quickstart Q-26): Engine::stop() during
+# a 141=Y reset unit, per role, store and teardown setting. Standalone, not a grouped
+# bucket ([const §VII.8]): each cell runs an Engine with timers and coroutines on a
+# mock clock over loopback TCP (plain_engine_rig.hpp).
+add_executable(engine_reset_unit_stop_test
+  engine_reset_unit_stop_test.cpp
+)
+target_link_libraries(engine_reset_unit_stop_test PRIVATE
+  fixpp_session
+  fixpp_transport
+  fixpp_tls
+  fixpp_mock_clock   # plain_engine_rig.hpp drives a plaintext Engine on a mock clock
+  "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"
+  "${FIXPP_TRANSPORT_OPENSSL_CRYPTO_LIB}"
+  "${FIXPP_TRANSPORT_ZLIB_LIB}"
+  GTest::gtest
+  GTest::gtest_main
+)
+target_include_directories(engine_reset_unit_stop_test PRIVATE
+  "${CMAKE_SOURCE_DIR}/tests"
+  "${CMAKE_SOURCE_DIR}/src"
+)
+add_test(NAME engine_reset_unit_stop COMMAND engine_reset_unit_stop_test)
+set_tests_properties(engine_reset_unit_stop PROPERTIES
+  ENVIRONMENT
+    "TSAN_OPTIONS=halt_on_error=1 suppressions=${CMAKE_SOURCE_DIR}/tools/tsan/asio.supp"
+  LABELS "093;session")
+
 # CTest filter: ctest -R 'engine_lifecycle'
 #
 # T017 [US3] — programmatic multi-session lifecycle: register initiator+acceptor,
@@ -2352,6 +2382,7 @@ add_executable(session_plaintext_roundtrip_test
 )
 target_link_libraries(session_plaintext_roundtrip_test PRIVATE
   fixpp_session
+  fixpp_mock_clock   # 093 Q-27: close()'s bounded wait on a mock clock
   fixpp_transport
   fixpp_tls
   "${FIXPP_TRANSPORT_OPENSSL_SSL_LIB}"

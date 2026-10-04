@@ -85,6 +85,17 @@ struct session_test_access {
     static void lower_inbound_entry_cap(Session& s, std::size_t n) noexcept {
         s.inbound_entry_cap_ = n;
     }
+
+    // Whether a 141=Y reset unit's store operation is in flight (093, data-model E-10).
+    [[nodiscard]] static bool reset_unit_in_flight(Session const& s) noexcept {
+        return s.reset_unit_in_flight_;
+    }
+
+    // Whether Engine::stop()'s step 1 has run on the session's strand (093, data-model
+    // E-13).
+    [[nodiscard]] static bool engine_stop_requested(Session const& s) noexcept {
+        return s.engine_stop_requested_;
+    }
 };
 
 }  // namespace fixpp::session

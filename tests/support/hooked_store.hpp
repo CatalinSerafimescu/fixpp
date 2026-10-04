@@ -85,6 +85,9 @@ public:
         // with close()'s teardown reset already issued. Bounded by kHoldBound; past it
         // the log's hold_timed_out is set and the operation returns.
         bool hold_until_close_reset = false;
+        // When set, the operation whose hook fires holds until this returns true, in
+        // place of hold_until_close_reset's condition. Same bound.
+        std::function<bool()> release_when;
         // When set, close(graceful)'s flush yields the strand until this returns true,
         // in place of its fixed post sequence. Bounded by kHoldBound; past it the log's
         // flush_hold_timed_out is set and the flush returns.
@@ -95,10 +98,16 @@ public:
                 reset_to_mode mode = reset_to_mode::forward)
         : fixpp::session::MessageStore(flush_thunk_for<HookedStore>()),
           mode_(mode),
-          inner_(std::make_shared<fixpp::session::MemoryStore>(fixpp::session::MemoryStore::Config{
-              .policy = fixpp::session::capacity_policy::unbounded})),
           hooks_(std::move(hooks)),
           log_(std::move(log)) {
+        // A log that already holds a store (a cell's second connection) keeps it, and
+        // its counters: the store is not seeded again.
+        if (log_->inner) {
+            inner_ = log_->inner;
+            return;
+        }
+        inner_ = std::make_shared<fixpp::session::MemoryStore>(fixpp::session::MemoryStore::Config{
+            .policy = fixpp::session::capacity_policy::unbounded});
         log_->inner = inner_;
         asio::io_context seed_ioc;
         asio::co_spawn(
@@ -137,13 +146,13 @@ public:
         const bool hooked = fire(dir == fixpp::session::direction_t::inbound
                                      ? hooks_.on_inbound_persist
                                      : hooks_.on_outbound_persist);
-        return logged_increment(dir, hooked && hooks_.hold_until_close_reset);
+        return logged_increment(dir, hooked && holds());
     }
     asio::awaitable<fixpp::core::expected_t<void>> reset() noexcept override {
         if (log_->close_began && log_->close_began()) ++log_->resets_issued_after_close_began;
         // The close the hook posts runs at the reset's leading post.
         const bool hooked = fire(hooks_.on_reset);
-        return logged_reset(hooked && hooks_.hold_until_close_reset);
+        return logged_reset(hooked && holds());
     }
     asio::awaitable<fixpp::core::expected_t<void>> reset_to(
         fixpp::session::seqnum_t next_in, fixpp::session::seqnum_t next_out) noexcept override {
@@ -152,7 +161,7 @@ public:
         }
         // The close the hook posts runs at the inner reset_to's leading post.
         const bool hooked = fire(hooks_.on_reset);
-        return logged_reset_to(next_in, next_out, hooked && hooks_.hold_until_close_reset);
+        return logged_reset_to(next_in, next_out, hooked && holds());
     }
 
     // close(graceful) awaits this before it writes Disconnected. It yields the strand
@@ -192,12 +201,19 @@ private:
         h();
         return true;
     }
-    // Yields the strand until a reset() is issued after close() began, or the bound
-    // passes.
+    [[nodiscard]] bool holds() const {
+        return hooks_.hold_until_close_reset || static_cast<bool>(hooks_.release_when);
+    }
+    // Yields the strand until release_when() returns true, or without it until a
+    // reset() is issued after close() began, or the bound passes.
     asio::awaitable<void> hold_until_close_reset() {
         auto ex = co_await asio::this_coro::executor;
         const auto deadline = std::chrono::steady_clock::now() + kHoldBound;
-        while (log_->resets_issued_after_close_began == 0) {
+        auto released = [this] {
+            return hooks_.release_when ? hooks_.release_when()
+                                       : log_->resets_issued_after_close_began != 0;
+        };
+        while (!released()) {
             if (std::chrono::steady_clock::now() >= deadline) {
                 log_->hold_timed_out = true;
                 co_return;
